@@ -16,53 +16,14 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig, QgsSettings  # noqa: E402
-from qgis.PyQt.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
-from qgis.PyQt.QtWidgets import QMainWindow  # noqa: E402
 
-from satellite_observation.core.esri import EsriClient, EsriError  # noqa: E402
+from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.qgis_io import settings  # noqa: E402
 from satellite_observation.qgis_io.network import qgis_transport  # noqa: E402
 from satellite_observation.qgis_io.tasks import run_task  # noqa: E402
+from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 
 HERE = os.path.dirname(__file__)
-
-
-class FakeIface:
-    def __init__(self):
-        self.window = QMainWindow()
-        self.menus: list = []
-        self.docks: list = []
-
-    def mainWindow(self):  # noqa: N802
-        return self.window
-
-    def addToolBar(self, name):  # noqa: N802
-        return self.window.addToolBar(name)
-
-    def addDockWidget(self, area, dock):  # noqa: N802
-        self.window.addDockWidget(area, dock)
-        self.docks.append(dock)
-
-    def removeDockWidget(self, dock):  # noqa: N802
-        self.window.removeDockWidget(dock)
-        self.docks.remove(dock)
-
-    def addPluginToMenu(self, menu, action):  # noqa: N802
-        self.menus.append((menu, action.text()))
-
-    def removePluginMenu(self, menu, action):  # noqa: N802
-        self.menus.remove((menu, action.text()))
-
-
-def wait_for(condition, ms=5000):
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.timeout.connect(lambda: condition() and loop.quit())
-    timer.start(20)
-    QTimer.singleShot(ms, loop.quit)
-    loop.exec()
-    timer.stop()
-    return condition()
 
 
 @pytest.fixture(autouse=True)

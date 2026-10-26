@@ -1,5 +1,4 @@
 """The settings file: ported from the viewer's tests of each entry's reader, and JSONC."""
-import json
 import os
 
 import pytest

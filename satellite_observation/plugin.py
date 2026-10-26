@@ -15,6 +15,7 @@ except ImportError:  # Qt5
 
 from .qgis_io.context import PluginContext
 from .ui.docks import StubDock
+from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.settings_dialog import SettingsDialog
 
 HERE = os.path.dirname(__file__)
@@ -45,6 +46,11 @@ class PluginApi:
         """Reads the settings file again."""
         self._plugin.context.reload()
 
+    @property
+    def imaging_plan(self) -> "ImagingPlanDock":
+        """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""
+        return self._plugin.docks["SatObsImagingPlan"]
+
 
 class SatelliteObservationPlugin:
     def __init__(self, iface):
@@ -62,13 +68,16 @@ class SatelliteObservationPlugin:
         icon = QIcon(os.path.join(HERE, "resources", "icon.svg"))
 
         specs = [
-            ("SatObsImagingPlan", tr("撮像計画"), tr("段階 2〜4"), Qt.DockWidgetArea.RightDockWidgetArea),
+            ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSatellitePass", tr("衛星パス"), tr("段階 5"), Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsObservations", tr("観測記録"), tr("段階 6〜7"), Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsTaxonomy", tr("分類体系の編集"), tr("段階 7"), Qt.DockWidgetArea.LeftDockWidgetArea),
         ]
         for name, title, stage, area in specs:
-            dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
+            if stage is None:
+                dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            else:
+                dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
             dock.hide()
             self.iface.addDockWidget(area, dock)
             self.docks[name] = dock
@@ -93,6 +102,8 @@ class SatelliteObservationPlugin:
             self.iface.removePluginMenu(MENU, action)
         self.actions = []
         for dock in self.docks.values():
+            if hasattr(dock, "close_down"):
+                dock.close_down()
             self.iface.removeDockWidget(dock)
             dock.deleteLater()
         self.docks = {}

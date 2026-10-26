@@ -57,11 +57,14 @@ class FunctionTask(QgsTask):
             return False
 
     def finished(self, ok: bool) -> None:
-        if ok:
-            if self._done:
-                self._done(self.result)
-        elif self._failed:
-            self._failed(self.error or ("取消" if self.isCanceled() else "失敗"))
+        try:
+            if ok:
+                if self._done:
+                    self._done(self.result)
+            elif self._failed:
+                self._failed(self.error or ("取消" if self.isCanceled() else "失敗"))
+        except Exception:  # noqa: BLE001 (a failing callback is logged, never taken down with QGIS)
+            QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Critical)
 
 
 #: Running tasks are kept here so Python does not collect them early.

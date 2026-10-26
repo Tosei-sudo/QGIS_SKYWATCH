@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional, Sequence
 import numpy as np
 
 from .orbit import (
-    DEG, POLAR_RADIUS, R, Frame, Orbit, azimuth_of, cross, dot, ecef_of, frame_of, ground_range,
+    DEG, POLAR_RADIUS, R, Orbit, azimuth_of, dot, ecef_of, frame_of, ground_range,
     lon_lat_of, norm, off_nadir_for, sub, sun_elevation, track_angles, unit, up_of,
 )
 from .satellites import GroundStation, SatelliteSpec, side_for
