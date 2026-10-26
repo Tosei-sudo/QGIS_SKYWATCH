@@ -176,3 +176,77 @@ def sensor_mode_of(attributes: dict[str, Any], catalog: SensorCatalogConfig) -> 
         return attributes.get(name) if name else None
 
     return mode_from(get, 0.001 if catalog.swath_unit == "m" else 1, catalog.sar_pattern)
+
+
+def _key(text: Optional[str]) -> str:
+    return (text or "").strip().lower()
+
+
+def with_modes(sats: list, modes: list[SensorMode]) -> list:
+    """
+    The satellites listed once per imaging mode of their sensor (its
+    `sensor`, else its series, else its name), the mode's values in place of
+    their own. A satellite with a `mode` already takes that mode's values.
+    Of the entries of one satellite, one is `primary` (the mode marked so, or
+    the first); a satellite with one entry has none.
+    """
+    from dataclasses import replace
+
+    from .satellites import platform_key
+
+    by_sensor: dict[str, list[SensorMode]] = {}
+    for m in modes:
+        by_sensor.setdefault(_key(m.sensor), []).append(m)
+
+    def apply(sat, m: SensorMode):
+        swath = m.swath if m.swath is not None else sat.swath
+        changes = dict(
+            sensor=sat.sensor if sat.sensor is not None else m.sensor,
+            sar=m.sar if m.sar is not None else sat.sar,
+            maxOffNadir=m.maxOffNadir if m.maxOffNadir is not None else sat.maxOffNadir,
+            minOffNadir=m.minOffNadir if m.minOffNadir is not None else sat.minOffNadir,
+            swath=swath,
+            length=m.length if m.length is not None else (m.swath if m.swath is not None else sat.length),
+            lookSide=m.lookSide if m.lookSide is not None else sat.lookSide,
+            scenesPerPass=max(1, math.floor(m.scenesPerPass + 0.5)) if m.scenesPerPass is not None else sat.scenesPerPass,
+            minInterval=m.minInterval if m.minInterval is not None else sat.minInterval,
+            maxPerDay=math.floor(m.maxPerDay + 0.5) if m.maxPerDay is not None else sat.maxPerDay,
+            leadTime=m.leadTime if m.leadTime is not None else sat.leadTime,
+        )
+        if m.mode:
+            changes["mode"] = m.mode
+        if m.resolution is not None:
+            changes["resolution"] = m.resolution
+        if m.primary:
+            changes["primary"] = True
+        return replace(sat, **changes)
+
+    out = []
+    for sat in sats:
+        found = next((by_sensor[_key(k)] for k in (sat.sensor, sat.series, sat.name) if by_sensor.get(_key(k))), None)
+        if not found:
+            out.append(sat)
+        elif sat.mode:
+            same = next((m for m in found if _key(m.mode) == _key(sat.mode)), None)
+            out.append(apply(sat, same) if same else replace(sat))
+        else:
+            out.extend(apply(sat, m) for m in found)
+    groups: dict[str, list] = {}
+    for sat in out:
+        groups.setdefault(platform_key(sat), []).append(sat)
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        usual = next((s for s in items if s.primary), items[0])
+        for s in items:
+            s.primary = s is usual
+    return out
+
+
+def sample_sensor_modes() -> list[SensorMode]:
+    """The made-up modes of the sample SAR satellite: stripmap (usual), spotlight, ScanSAR."""
+    return [
+        SensorMode("サンプルSAR衛星", "ストリップマップ", minOffNadir=20, maxOffNadir=45, swath=50, length=50, resolution=5, primary=True),
+        SensorMode("サンプルSAR衛星", "スポットライト", minOffNadir=15, maxOffNadir=35, swath=10, length=10, resolution=1),
+        SensorMode("サンプルSAR衛星", "スキャンSAR", minOffNadir=20, maxOffNadir=45, swath=250, length=250, resolution=20),
+    ]
