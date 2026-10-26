@@ -1,0 +1,18 @@
+[general]
+name=衛星撮像計画・観測記録
+qgisMinimumVersion=3.34
+qgisMaximumVersion=3.99
+description=Satellite imaging plans and image observation records (衛星撮像計画・観測記録)
+about=衛星カタログの TLE と諸元から対象の撮像機会と組み合わせを計算する「撮像計画」と、画像ごとにモノの位置・種別・活動を記録して画像をまたいで追う「観測記録」。Web 画像ビューアと同じ設定ファイル（config.json）と ArcGIS フィーチャーサービスを共用。
+version=0.1.0
+author=tsudo
+email=tosei.sudo@gmail.com
+supportsQt6=True
+tracker=https://github.com/Tosei-sudo/QGIS_SKYWATCH/issues
+repository=https://github.com/Tosei-sudo/QGIS_SKYWATCH
+tags=satellite,imaging plan,TLE,SGP4,observation,ArcGIS
+category=Plugins
+icon=resources/icon.svg
+experimental=True
+deprecated=False
+hasProcessingProvider=no
