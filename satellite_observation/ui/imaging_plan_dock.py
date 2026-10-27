@@ -627,6 +627,14 @@ class ImagingPlanDock(PluginDock):
         self.show_targets()
         self.status.setText(self.tr("地点 {lat}, {lon} を対象に設定。「計算」で撮像機会を検索").format(lat=js_round(lat, 5), lon=js_round(lon, 5)))
 
+    def plan_at(self, lon: float, lat: float) -> None:
+        """Opens the dock with a point (WGS84) as the target and plans it (the map's right-click menu)."""
+        self.show()
+        self.raise_()
+        self.list_targets()
+        self.set_point(lon, lat)
+        self.run()
+
     def _relabel(self) -> None:
         """Names the targets of the last plan again by the chosen attribute, when the form still asks for the same targets."""
         plan = self.plan

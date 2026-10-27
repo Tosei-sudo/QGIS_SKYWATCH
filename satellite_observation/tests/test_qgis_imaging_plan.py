@@ -193,3 +193,36 @@ def test_the_selection_and_cancelling(plugin):
     dock.cancel()
     assert dock.status.text() == "計算の取消"
     assert dock.run_button.isEnabled()
+
+
+def test_plans_a_point_from_the_maps_right_click_menu(plugin):
+    from qgis.core import QgsCoordinateReferenceSystem, QgsRectangle
+    from qgis.gui import QgsMapMouseEvent
+    from qgis.PyQt.QtCore import QEvent, QPoint, Qt
+    from qgis.PyQt.QtWidgets import QMenu
+
+    p, iface, tmp = plugin
+    settings.set_config_source("")
+    p.context.reload()
+    canvas = iface.canvas
+    canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
+    canvas.setExtent(QgsRectangle(15540000, 4250000, 15560000, 4270000))
+    canvas.refresh()
+    dock = p.api.imaging_plan
+    start_at(dock, EPOCH, 7)
+    event = QgsMapMouseEvent(canvas, QEvent.Type.MouseButtonPress, QPoint(400, 300), Qt.MouseButton.RightButton)
+    clicked = event.mapPoint()
+    menu = QMenu()
+    canvas.contextMenuAboutToShow.emit(menu, event)
+    [action] = [a for a in menu.actions() if a.text() == "ここを撮像計画"]
+    action.trigger()
+    assert not dock.isHidden()
+    assert dock.target.currentData() == "click"
+    assert wait_for(lambda: dock.plan is not None and dock.plan_task is None, 30000), dock.status.text()
+    assert "最短は" in dock.status.text() or "機会なし" in dock.status.text()
+    [target] = dock.plan["targets"]
+    from satellite_observation.qgis_io.geometry import to_wgs84
+
+    expected = to_wgs84(canvas.mapSettings().destinationCrs()).transform(clicked)
+    assert abs(target.center[0] - expected.x()) < 1e-6 and abs(target.center[1] - expected.y()) < 1e-6
+    assert 139 < target.center[0] < 141 and 35 < target.center[1] < 36

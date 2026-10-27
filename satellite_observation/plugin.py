@@ -14,6 +14,7 @@ except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
 from .qgis_io.context import PluginContext
+from .qgis_io.geometry import to_wgs84
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.settings_dialog import SettingsDialog
@@ -92,12 +93,29 @@ class SatelliteObservationPlugin:
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)
         self.actions.append(settings)
+        # 「ここを撮像計画」 in the map's right-click menu.
+        self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self.context.reload()
+
+    def _canvas_menu(self, menu, event) -> None:
+        canvas = self.iface.mapCanvas()
+        point = event.mapPoint()
+        action = menu.addAction(tr("ここを撮像計画"))
+
+        def plan() -> None:
+            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
+            self.docks["SatObsImagingPlan"].plan_at(p.x(), p.y())
+
+        action.triggered.connect(plan)
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
     def unload(self) -> None:
+        try:
+            self.iface.mapCanvas().contextMenuAboutToShow.disconnect(self._canvas_menu)
+        except (TypeError, RuntimeError):
+            pass
         for action in self.actions:
             self.iface.removePluginMenu(MENU, action)
         self.actions = []
