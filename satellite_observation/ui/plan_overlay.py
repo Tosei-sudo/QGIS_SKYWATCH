@@ -14,7 +14,7 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QFont, QFontMetricsF, QPainterPath, QPen
 
 from ..core.plan.output import split_antimeridian
-from ..qgis_io.geometry import WGS84, from_wgs84, line_of, polygon_of
+from ..qgis_io.geometry import WGS84, from_wgs84, line_of, multipolygon_of, polygon_of
 
 STYLES = {
     # kind: (stroke, width, dash, fill)
@@ -24,6 +24,8 @@ STYLES = {
     "reach": ("#0ea5e9", 1, Qt.PenStyle.DotLine, None),
     "scene": ("#2563eb", 2, None, QColor(37, 99, 235, 64)),
     "step": ("#7c3aed", 1, Qt.PenStyle.DashLine, QColor(124, 58, 237, 31)),
+    # A moving target: the circle its guessed place may be off by, at the moment of the pass.
+    "circle": ("#f97316", 2, Qt.PenStyle.DashLine, QColor(249, 115, 22, 31)),
 }
 
 
@@ -42,6 +44,8 @@ class LabelItem(QgsMapCanvasItem):
         self._offset_y = offset_y
         #: Beside the point (to its right) rather than centred on it.
         self._beside = beside
+        # Above the rubber bands, so a number on a scene is not under its fill.
+        self.setZValue(2000)
         self.updatePosition()
 
     def updatePosition(self) -> None:  # noqa: N802 (Qt's name)
@@ -74,6 +78,9 @@ class PlanOverlay:
         self._bands: dict[str, QgsRubberBand] = {}
         self._items: list = []
         self._extent: dict[str, QgsRectangle] = {}
+        #: Rubber bands each with its own colour (the revisit map's cells, the saved plan's shots).
+        self._painted: list[QgsRubberBand] = []
+        self._painted_items: list = []
 
     def _band(self, kind: str) -> QgsRubberBand:
         band = self._bands.get(kind)
@@ -98,6 +105,8 @@ class PlanOverlay:
         self._extent.setdefault(kind, QgsRectangle(box)).combineExtentWith(box)
 
     def clear(self, kinds: Optional[Sequence[str]] = None) -> None:
+        if kinds is None:
+            self.unpaint()
         for kind, band in self._bands.items():
             if kinds is None or kind in kinds:
                 band.reset(_geometry_type(kind))
@@ -107,7 +116,42 @@ class PlanOverlay:
                 self.canvas.scene().removeItem(item)
             self._items = []
 
+    def paint(self, polygons: Sequence[tuple], z: float = 900) -> None:
+        """
+        Polygons each in its own colour: (rings, colour, width, label) with
+        rings in WGS84 and the label (or '') at the middle of the first ring.
+        Replaces what was painted before.
+        """
+        self.unpaint()
+        for rings, color, width, label in polygons:
+            band = QgsRubberBand(self.canvas, QgsWkbTypes.GeometryType.PolygonGeometry)
+            c = QColor(color)
+            band.setStrokeColor(c)
+            fill = QColor(c)
+            fill.setAlpha(80)
+            band.setFillColor(fill)
+            band.setWidth(int(width))
+            band.setZValue(z)
+            geometry = polygon_of(rings[:1]) if len(rings) == 1 else multipolygon_of(rings)
+            band.addGeometry(geometry, WGS84)
+            self._painted.append(band)
+            box = geometry.boundingBox()
+            self._extent.setdefault("painted", QgsRectangle(box)).combineExtentWith(box)
+            if label:
+                c = polygon_of(rings[:1]).pointOnSurface().asPoint()
+                p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(c)
+                self._painted_items.append(LabelItem(self.canvas, p, label, "#111111", False))
+
+    def unpaint(self) -> None:
+        for band in self._painted:
+            self.canvas.scene().removeItem(band)
+        for item in self._painted_items:
+            self.canvas.scene().removeItem(item)
+        self._painted, self._painted_items = [], []
+        self._extent.pop("painted", None)
+
     def remove(self) -> None:
+        self.unpaint()
         self.clear()
         for band in self._bands.values():
             self.canvas.scene().removeItem(band)
@@ -140,9 +184,15 @@ class PlanOverlay:
         p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(QgsPointXY(lon, lat))
         self._items.append(LabelItem(self.canvas, p, text, color, bold, offset_y, beside))
 
-    def chosen(self, shapes, label: str, steps: Sequence[tuple] = ()) -> None:
-        """A pass (`shapes` of core.plan.scene.pass_shapes) and the satellite's name; `steps`: (number, scenes) of the other passes."""
-        self.clear(["track", "reach", "scene", "step", "label"])
+    def chosen(self, shapes, label: str, steps: Sequence[tuple] = (), circle: Optional[Sequence[tuple]] = None) -> None:
+        """
+        A pass (`shapes` of core.plan.scene.pass_shapes) and the satellite's
+        name; `steps`: (number, scenes) of the other passes; `circle`: a
+        moving target's circle (closed ring) at the moment of the pass.
+        """
+        self.clear(["track", "reach", "scene", "step", "label", "circle"])
+        if circle:
+            self._add("circle", polygon_of([circle]))
         self._extent.pop("satellite", None)
         for part in split_antimeridian(shapes.track):
             self._add("track", line_of(part))

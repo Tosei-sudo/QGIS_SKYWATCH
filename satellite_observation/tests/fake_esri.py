@@ -68,6 +68,21 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     return True
 
 
+def _box(geometry: dict[str, Any]) -> tuple[float, float, float, float]:
+    """The bounding box of an Esri point, envelope or polygon."""
+    if "rings" in geometry:
+        points = [p for ring in geometry["rings"] for p in ring]
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        return min(xs), min(ys), max(xs), max(ys)
+    if "xmin" in geometry:
+        return geometry["xmin"], geometry["ymin"], geometry["xmax"], geometry["ymax"]
+    return geometry["x"], geometry["y"], geometry["x"], geometry["y"]
+
+
+def _overlaps(a, b) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
 class FakeEsri:
     """Feature layers by URL; call it as a transport."""
 
@@ -104,6 +119,8 @@ class FakeEsri:
             return self._apply(layer, form)
         if op == "deleteFeatures":
             ids = {int(i) for i in form.get("objectIds", "").split(",") if i}
+            if form.get("where"):
+                ids |= {r["attributes"][layer.oid] for r in layer.rows if _matches(form["where"], r["attributes"])}
             results = [{"objectId": i, "success": any(r["attributes"][layer.oid] == i for r in layer.rows)} for i in ids]
             layer.rows = [r for r in layer.rows if r["attributes"][layer.oid] not in ids]
             return {"deleteResults": results}
@@ -122,6 +139,9 @@ class FakeEsri:
             if len(ids) > layer.max_record_count:
                 return {"error": {"code": 400, "message": "Too many ids"}}
             found = [r for r in found if r["attributes"][layer.oid] in ids]
+        if form.get("geometry"):
+            area = _box(json.loads(form["geometry"]))
+            found = [r for r in found if r["geometry"] and _overlaps(area, _box(r["geometry"]))]
         if form.get("returnIdsOnly") == "true":
             return {"objectIdFieldName": layer.oid, "objectIds": [r["attributes"][layer.oid] for r in found]}
         offset = int(form.get("resultOffset", 0))

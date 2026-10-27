@@ -113,3 +113,24 @@ def two_point_setting() -> bool:
 
 def set_two_point(on: bool) -> None:
     _set("observations/two_point", "1" if on else "0")
+
+def plan_reminders() -> list:
+    """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
+    try:
+        value = json.loads(_get("plan_reminders", "[]"))
+    except ValueError:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def set_plan_reminders(reminders: list) -> None:
+    _set("plan_reminders", json.dumps(reminders, ensure_ascii=False))
+
+
+def plan_cloud() -> bool:
+    """Whether the imaging plan asks for cloud forecasts (the person turned them on)."""
+    return _get("plan_cloud") == "1"
+
+
+def set_plan_cloud(on: bool) -> None:
+    _set("plan_cloud", "1" if on else "0")

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from qgis.core import (
-    QgsFeature, QgsField, QgsFields, QgsVectorLayer, QgsVectorLayerTemporalProperties,
+    QgsFeature, QgsField, QgsFields, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsVectorLayerTemporalProperties,
 )
 from qgis.PyQt.QtCore import QDateTime, QMetaType, QTimeZone, QVariant
 
@@ -26,9 +26,14 @@ def qdatetime(ms: float) -> QDateTime:
     return QDateTime.fromMSecsSinceEpoch(int(ms), QTimeZone.utc())
 
 
-def memory_layer(plan: PlanLayer, name: str) -> QgsVectorLayer:
-    """A memory layer (WGS84 multipolygons) of a plan's features, its `time` field driving the temporal controller."""
-    layer = QgsVectorLayer("MultiPolygon?crs=EPSG:4326", name, "memory")
+def memory_layer(plan: PlanLayer, name: str, geometry: str = "MultiPolygon") -> QgsVectorLayer:
+    """
+    A memory layer (WGS84) of a plan's features, its `time` field (when it
+    has one) driving the temporal controller. `geometry`: `MultiPolygon`
+    (each feature a list of rings) or `MultiLineString` (a list of lines).
+    """
+    lines = geometry == "MultiLineString"
+    layer = QgsVectorLayer(f"{geometry}?crs=EPSG:4326", name, "memory")
     fields = QgsFields()
     for f in plan.fields:
         qf = make_field(f.name, f.kind)
@@ -42,7 +47,8 @@ def memory_layer(plan: PlanLayer, name: str) -> QgsVectorLayer:
     features = []
     for rings, attributes in plan.features:
         feature = QgsFeature(layer.fields())
-        feature.setGeometry(multipolygon_of(rings))
+        feature.setGeometry(QgsGeometry.fromMultiPolylineXY([[QgsPointXY(x, y) for x, y in part] for part in rings]) if lines
+                            else multipolygon_of(rings))
         values = []
         for f in plan.fields:
             v = attributes.get(f.name)
@@ -51,6 +57,8 @@ def memory_layer(plan: PlanLayer, name: str) -> QgsVectorLayer:
         features.append(feature)
     provider.addFeatures(features)
     layer.updateExtents()
+    if not any(f.name == "time" for f in plan.fields):
+        return layer
     temporal = layer.temporalProperties()
     temporal.setIsActive(True)
     temporal.setMode(QgsVectorLayerTemporalProperties.TemporalMode.ModeFeatureDateTimeInstantFromField)

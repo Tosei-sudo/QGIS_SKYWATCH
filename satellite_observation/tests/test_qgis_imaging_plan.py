@@ -269,7 +269,10 @@ def test_priorities_and_points_in_one_scene(plugin):
     dock.list_targets()
     # Only attributes holding numbers are offered; "rank" is not guessed (no priority in its name).
     assert [dock.priority.itemData(i) for i in range(dock.priority.count())] == ["", "rank"]
+    dock.more.setCollapsed(False)
     assert dock.priority.isVisibleTo(dock)
+    # Hidden again by collapsing 「詳細条件」, the priority still applies.
+    dock.more.setCollapsed(True)
     dock.priority.setCurrentIndex(1)
     dock.priority_order.setCurrentIndex(dock.priority_order.findData("large"))
     targets = dock.targets()

@@ -9,7 +9,7 @@ import time
 from typing import Optional, Sequence
 
 from qgis.PyQt.QtCore import Qt, pyqtSignal
-from qgis.PyQt.QtGui import QBrush, QColor
+from qgis.PyQt.QtGui import QBrush, QColor, QIcon, QPixmap
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -122,6 +122,21 @@ class SatelliteTree(QWidget):
 
     def items(self) -> list[Listed]:
         return self.choice.listed
+
+    def set_markers(self, colors: dict) -> None:
+        """A colour swatch before each satellite whose key is in `colors` (the satellite pass dock's colours)."""
+        self._busy = True
+        for item, node in self._items:
+            if isinstance(node, Group):
+                continue
+            color = colors.get(node.key)
+            if color:
+                pixmap = QPixmap(12, 12)
+                pixmap.fill(QColor(color))
+                item.setIcon(0, QIcon(pixmap))
+            else:
+                item.setIcon(0, QIcon())
+        self._busy = False
 
     # --- Drawing ----------------------------------------------------------------------------
 
