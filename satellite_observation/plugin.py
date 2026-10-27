@@ -309,6 +309,7 @@ class SatelliteObservationPlugin:
             self.toolbar.deleteLater()
             self.toolbar = None
         if self.startup_layers is not None:
+            self.startup_layers.close()
             self.startup_layers.deleteLater()
             self.startup_layers = None
         if self.context is not None:

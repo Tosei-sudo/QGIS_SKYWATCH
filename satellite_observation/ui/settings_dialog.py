@@ -53,7 +53,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow(self.tr("設定ファイル"), row)
         form.addRow(self.tr("記録者"), self.recorder)
-        self.startup_layers = QCheckBox(self.tr("起動時、空のプロジェクトに設定ファイルのレイヤー（layers）を追加"))
+        self.startup_layers = QCheckBox(self.tr("起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加"))
         self.startup_layers.setChecked(settings.startup_layers_on())
         form.addRow("", self.startup_layers)
 

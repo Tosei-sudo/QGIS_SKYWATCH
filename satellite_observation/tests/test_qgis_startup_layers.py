@@ -62,6 +62,23 @@ def test_added_to_an_empty_project_the_first_at_the_bottom(config):
     plugin.unload()
 
 
+def test_added_to_each_new_project(config):
+    plugin, iface = start()
+    assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)
+    # 「新規プロジェクト」: QGIS clears the project, then says so.
+    QgsProject.instance().clear()
+    iface.newProjectCreated.emit()
+    assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)
+    assert names() == ["stations.geojson", "ortho.tif"]
+    # Turned off: a new project stays empty.
+    settings.set_startup_layers_on(False)
+    QgsProject.instance().clear()
+    iface.newProjectCreated.emit()
+    wait_for(lambda: False, 500)
+    assert QgsProject.instance().mapLayers() == {}
+    plugin.unload()
+
+
 def test_not_added_to_a_project_with_layers_nor_when_turned_off(config):
     QgsProject.instance().addMapLayer(QgsVectorLayer("Point?crs=EPSG:4326", "mine", "memory"))
     plugin, iface = start()
