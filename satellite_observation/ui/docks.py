@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import QTimer, Qt
+from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ..qgis_io.context import PluginContext
@@ -57,6 +58,20 @@ class PluginDock(QDockWidget):
         self.body = QVBoxLayout(body)
         self.body.addWidget(ConfigBar(context, open_settings))
         self.setWidget(body)
+        self.topLevelChanged.connect(lambda _: QTimer.singleShot(0, self.keep_on_screen))
+
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().showEvent(event)
+        QTimer.singleShot(0, self.keep_on_screen)
+
+    def keep_on_screen(self) -> None:
+        """Docks a floating dock again when its title bar is off every screen (as after a screen is unplugged)."""
+        if not self.isFloating():
+            return
+        frame = self.frameGeometry()
+        title = frame.adjusted(0, 0, 0, -max(0, frame.height() - 30))
+        if not any(s.availableGeometry().intersects(title) for s in QGuiApplication.screens()):
+            self.setFloating(False)
 
 
 class StubDock(PluginDock):
