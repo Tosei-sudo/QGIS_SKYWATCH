@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 衛星パス: a ground track and its reach over the map -->
+  <rect x="2" y="5" width="28" height="22" rx="2" fill="#e0f2fe" stroke="#0369a1" stroke-width="1.5"/>
+  <path d="M2 21 C9 21 9 11 16 11 S23 21 30 21" fill="none" stroke="#fdba74" stroke-width="7" stroke-opacity="0.7"/>
+  <path d="M2 21 C9 21 9 11 16 11 S23 21 30 21" fill="none" stroke="#ea580c" stroke-width="2"/>
+  <circle cx="16" cy="11" r="3.5" fill="#ea580c" stroke="#fff" stroke-width="1.5"/>
+</svg>

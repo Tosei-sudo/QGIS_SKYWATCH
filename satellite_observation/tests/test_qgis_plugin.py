@@ -154,3 +154,27 @@ def test_a_settings_file_shipped_in_the_plugin_folder(tmp_path, monkeypatch):
     os.remove(tmp_path / "config.jsonc")
     context.reload()
     assert context.source == "" and not context.bundled
+
+
+def test_each_feature_has_its_own_icon():
+    from qgis.PyQt.QtCore import QBuffer, QByteArray
+
+    from satellite_observation import classFactory
+
+    settings.set_config_source("")
+    iface = FakeIface()
+    plugin = classFactory(iface)
+    plugin.initGui()
+
+    def png(action) -> bytes:
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+        action.icon().pixmap(24, 24).save(buffer, "PNG")
+        return bytes(data)
+
+    drawn = [png(a) for a in plugin.actions]
+    assert all(not a.icon().isNull() for a in plugin.actions)
+    # No two menu entries look the same.
+    assert len(set(drawn)) == len(plugin.actions) == 7
+    plugin.unload()

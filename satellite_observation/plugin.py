@@ -112,7 +112,13 @@ class SatelliteObservationPlugin:
         self.context = PluginContext(self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
         self.toolbar.setObjectName("SatelliteObservationToolbar")
-        icon = QIcon(os.path.join(HERE, "resources", "icon.svg"))
+
+        def icon(name: str) -> QIcon:
+            return QIcon(os.path.join(HERE, "resources", f"{name}.svg"))
+
+        #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
+        icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
+                 "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy"}
 
         specs = [
             ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
@@ -139,17 +145,18 @@ class SatelliteObservationPlugin:
             self.docks[name] = dock
             action = dock.toggleViewAction()
             action.setText(title)
-            action.setIcon(icon)
+            action.setIcon(icon(icons[name]))
             self.iface.addPluginToMenu(MENU, action)
             self.toolbar.addAction(action)
             self.actions.append(action)
 
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
-        moving = QAction(icon, tr("移動目標撮像計画…"), self.iface.mainWindow())
+        moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
         self.iface.addPluginToMenu(MENU, moving)
+        self.toolbar.addAction(moving)
         self.actions.append(moving)
-        settings = QAction(icon, tr("設定…"), self.iface.mainWindow())
+        settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)
         self.actions.append(settings)

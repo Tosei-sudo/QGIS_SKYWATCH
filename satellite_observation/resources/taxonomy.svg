@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 分類体系の編集: a tree of classes -->
+  <path d="M8 9v16M8 16h9M8 25h9" fill="none" stroke="#0f766e" stroke-width="2"/>
+  <rect x="3" y="3" width="11" height="7" rx="1.5" fill="#14b8a6"/>
+  <rect x="17" y="12.5" width="12" height="7" rx="1.5" fill="#5eead4" stroke="#0f766e" stroke-width="1.2"/>
+  <rect x="17" y="21.5" width="12" height="7" rx="1.5" fill="#5eead4" stroke="#0f766e" stroke-width="1.2"/>
+</svg>
