@@ -7,7 +7,7 @@ from typing import Optional
 from qgis.core import QgsMapLayerType, QgsProject
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
-from qgis.PyQt.QtWidgets import QDockWidget
+from qgis.PyQt.QtWidgets import QDockWidget, QToolButton
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
@@ -18,6 +18,7 @@ from .core.obs.api import ObservationApi
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
+from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
@@ -148,6 +149,7 @@ class SatelliteObservationPlugin:
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
+        self.base_maps: Optional[BaseMapSwitch] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -207,6 +209,15 @@ class SatelliteObservationPlugin:
         self.iface.addPluginToMenu(MENU, moving)
         self.toolbar.addAction(moving)
         self.actions.append(moving)
+        # 「背景地図」: the toolbar button opens the list; in the menu, a submenu.
+        base_maps = QAction(icon("base_map"), tr("背景地図"), self.iface.mainWindow())
+        self.base_maps = BaseMapSwitch(self.iface, self.context, base_maps, self.iface.mainWindow())
+        self.iface.addPluginToMenu(MENU, base_maps)
+        self.toolbar.addAction(base_maps)
+        button = self.toolbar.widgetForAction(base_maps)
+        if isinstance(button, QToolButton):
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.actions.append(base_maps)
         home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
         home.triggered.connect(lambda: self.place_docks())
         self.iface.addPluginToMenu(MENU, home)
@@ -313,6 +324,9 @@ class SatelliteObservationPlugin:
                 pass
             self.iface.removeCustomActionForLayerType(self.similar_action)
             self.similar_action = None
+        if self.base_maps is not None:
+            self.base_maps.close()
+            self.base_maps = None
         for action in self.actions:
             self.iface.removePluginMenu(MENU, action)
         self.actions = []

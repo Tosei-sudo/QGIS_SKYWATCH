@@ -6,6 +6,7 @@ from qgis.PyQt.QtWidgets import QMainWindow
 
 class FakeIface(QObject):
     currentLayerChanged = pyqtSignal(object)
+    newProjectCreated = pyqtSignal()
 
     def __init__(self):
         super().__init__()
