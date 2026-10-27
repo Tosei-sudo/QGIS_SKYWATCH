@@ -6,7 +6,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）。numpy は QGIS 付属のもの
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
 
-> 開発中。現在は段階 5 まで（骨組み、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
+> 開発中。現在は段階 8 まで（骨組み、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス、観測記録: 記録・継続・同一候補・2 点・確認範囲・モノの流れ・分類体系の編集・報告書・CSV とレイヤー・Python API）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
 
 ## 撮像計画
 
@@ -41,6 +41,42 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 日付変更線で線と面を分割。「レイヤーとして追加」で地上軌跡と撮像可能範囲をメモリレイヤーに
 
 `sgp4` の入れ方（任意）: QGIS の Python コンソールで `import pip; pip.main(["install", "sgp4"])`、または OSGeo4W シェルで `python -m pip install sgp4`。閉域では wheel ファイルを持ち込んで `pip install sgp4-2.*.whl`。
+
+## 観測記録
+
+「観測記録」ドックで、画像ごとに「いつ・どこに・何（モノ）が・何をしていたか（活動）」を記録する。画像はプロジェクトのラスターレイヤー（画像 ID はレイヤーの `satobs/imageId`、なければファイル名。撮像日時はレイヤーの時刻 → GDAL メタデータ → NITF → ファイル名 → TIFF の日時の順、分からなければドックで入力）。キーはドックにフォーカスがあるときだけ効く。
+
+- ◀ ▶（PageUp・PageDown）で撮像日時の順に画像をたどる。「この画像のみ」で他のラスターを隠す。＋ でファイルなしの画像（ID・名称・撮像日時）を追加
+- 「クリック記録」（R）で地図をクリックし、モノ・種別（階層のボタンでたどる）・活動（1〜9）・確度・備考を入れて Enter。「2 点」（L）は前端 → 後端のクリックで中心・長さ・向き
+- 前後の画像のモノは白抜きの印。クリックか「継続」「不在」、「すべて継続」で一括。新しい記録には近くの「同一候補」（Alt+1〜5）
+- 「確認範囲」（A）は対角の 2 点（または表示範囲・画像の範囲）と対象の種別。範囲内で記録のないモノは「確認範囲内 n 件を不在」で一括
+- 印はドラッグで場所を直せる。削除は削除日時を入れて残し、「詳細」の「削除済みも表示」から復元
+- 「モノ」タブで流れ（帯グラフ・表・地図の軌跡）、名前・種別の変更・統合。「分類」タブで分類体系
+- 「詳細」から報告書（HTML 保存・印刷・PDF 保存。地図はキャンバスのレイヤーに記録の印を重ねて描画）、再読み込み、CSV 保存、レイヤー化（記録のポイント・確認範囲のポリゴン・流れのライン。時系列コントローラー対応）
+- 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、常にあるローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
+
+## 分類体系の編集
+
+「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。
+
+## Python API
+
+Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
+
+```python
+api = plugin.api
+api.observation_images()                                   # 画像の一覧（撮像日時順）
+api.observe_image("d2.tif")                                # 記録する画像
+rec = api.add_observation(139.7, 35.6, object="あおば", kind="船舶 > 護衛艦", activity="停泊")
+api.update_observation(rec["id"], note="直した")
+api.observed_things(kind="船舶")                            # モノと流れ
+api.observations(start="2026-10-01", end="2026-10-31")     # 記録（時刻は ISO 文字列）
+api.observation_candidates(139.7, 35.6, kind="船舶")        # 同一候補
+api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
+api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
+```
+
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。
 
 ## 導入
 

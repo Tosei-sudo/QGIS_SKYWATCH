@@ -96,6 +96,24 @@ def local_gpkg_path() -> str:
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
 
 
+class SettingsPrefs:
+    """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
+
+    def get(self, key: str) -> Optional[str]:
+        v = _get("observations/" + key)
+        return v or None
+
+    def set(self, key: str, value: str) -> None:
+        _set("observations/" + key, value)
+
+
+def two_point_setting() -> bool:
+    return _get("observations/two_point") == "1"
+
+
+def set_two_point(on: bool) -> None:
+    _set("observations/two_point", "1" if on else "0")
+
 def plan_reminders() -> list:
     """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
     try:

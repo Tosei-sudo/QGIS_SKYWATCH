@@ -13,14 +13,17 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
+from .core.obs.api import ObservationApi
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
+from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
+from .ui.taxonomy_dock import TaxonomyDock
 
 HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
@@ -51,6 +54,11 @@ class PluginApi:
         self._plugin.context.reload()
 
     @property
+    def observation_dock(self) -> "ObservationDock":
+        """The observations dock (its `book`, `save_csv(path)`, `to_layers()`, `set_observer(name)`…)."""
+        return self._plugin.docks["SatObsObservations"]
+
+    @property
     def imaging_plan(self) -> "ImagingPlanDock":
         """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""
         return self._plugin.docks["SatObsImagingPlan"]
@@ -68,6 +76,26 @@ class PluginApi:
     def saved_plans(self) -> "SavedPlansDock":
         """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
         return self._plugin.docks["SatObsSavedPlans"]
+
+
+def _observation_function(name: str):
+    """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
+    def call(self, *args, **kwargs):
+        return getattr(self._plugin.docks["SatObsObservations"].api(), name)(*args, **kwargs)
+
+    call.__name__ = name
+    call.__doc__ = getattr(ObservationApi, name).__doc__
+    return call
+
+
+#: As the viewer's scripts have them (viewer.observations → api.observations, viewer.addObservation → api.add_observation…).
+OBSERVATION_FUNCTIONS = [
+    "observations", "observed_things", "observation_images", "observe_image", "add_observation", "update_observation",
+    "rename_observed_thing", "delete_observations", "observation_candidates", "confidences", "checked_areas", "add_checked_area",
+    "delete_checked_areas", "observation_report",
+]
+for _name in OBSERVATION_FUNCTIONS:
+    setattr(PluginApi, _name, _observation_function(_name))
 
 
 class SatelliteObservationPlugin:
@@ -90,14 +118,18 @@ class SatelliteObservationPlugin:
             ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSavedPlans", tr("保存した撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSatellitePass", tr("衛星パス"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsObservations", tr("観測記録"), tr("段階 6〜7"), Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsTaxonomy", tr("分類体系の編集"), tr("段階 7"), Qt.DockWidgetArea.LeftDockWidgetArea),
+            ("SatObsObservations", tr("観測記録"), None, Qt.DockWidgetArea.RightDockWidgetArea),
+            ("SatObsTaxonomy", tr("分類体系の編集"), None, Qt.DockWidgetArea.LeftDockWidgetArea),
         ]
         for name, title, stage, area in specs:
             if name == "SatObsImagingPlan":
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsObservations":
+                dock = ObservationDock(self.iface, self.context, self.open_settings, self.iface.mainWindow(), edit_taxonomy=self.edit_taxonomy)
             elif name == "SatObsSatellitePass":
                 dock = SatellitePassDock(self.iface, self.context, self.open_settings, self.docks["SatObsImagingPlan"], self.iface.mainWindow())
+            elif name == "SatObsTaxonomy":
+                dock = TaxonomyDock(self.iface, self.context, self.open_settings, self.docks["SatObsObservations"], self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
@@ -135,6 +167,16 @@ class SatelliteObservationPlugin:
             self.docks["SatObsImagingPlan"].plan_at(p.x(), p.y())
 
         action.triggered.connect(plan)
+
+    def edit_taxonomy(self, path=None) -> None:
+        """Opens the classification editor (at a class)."""
+        dock = self.docks.get("SatObsTaxonomy")
+        if dock is None:
+            return
+        dock.show()
+        dock.raise_()
+        if hasattr(dock, "select"):
+            dock.select(path)
 
     def open_moving_targets(self, layer=None) -> MovingTargetDialog:
         """Opens 「移動目標撮像計画」 (once; kept while the plugin is loaded)."""

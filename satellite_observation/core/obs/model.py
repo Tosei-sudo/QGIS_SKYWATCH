@@ -8,6 +8,8 @@ This module holds the record, the vocabulary (活動・確度・分類) and the
 """
 from __future__ import annotations
 
+import json
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -252,3 +254,94 @@ def new_observation_id() -> str:
 def new_object_id() -> str:
     """A new thing id: short, to be read and typed (`OBJ-K3F9Q2TX`)."""
     return "OBJ-" + uuid.uuid4().hex[-8:].upper()
+
+
+#: The viewer's names of the record's values (for JSON shared with the viewer and its scripts).
+_JSON_NAMES = {
+    "id": "id", "image_id": "imageId", "image_name": "imageName", "image_time": "imageTime", "object_id": "objectId",
+    "object_name": "objectName", "kind": "kind", "activity": "activity", "present": "present", "note": "note",
+    "lon": "lon", "lat": "lat", "length": "length", "heading": "heading", "confidence": "confidence",
+    "recorded_by": "recordedBy", "updated_by": "updatedBy", "created_at": "createdAt", "updated_at": "updatedAt",
+    "deleted_at": "deletedAt",
+}
+
+
+def observation_json(o: Observation) -> dict[str, Any]:
+    """A record as the viewer writes it (camelCase)."""
+    return {name: getattr(o, attr) for attr, name in _JSON_NAMES.items()}
+
+
+def observation_from_json(value: Any) -> Optional[Observation]:
+    """A record written as the viewer writes it; None when it is not one."""
+    if not is_record(value):
+        return None
+    v = {attr: value.get(name) for attr, name in _JSON_NAMES.items()}
+    if not isinstance(v["id"], str) or not isinstance(v["object_id"], str) or not is_number(v["lon"]) or not is_number(v["lat"]):
+        return None
+    created = int(v["created_at"]) if is_number(v["created_at"]) else 0
+
+    def text(key: str) -> str:
+        return v[key] if isinstance(v[key], str) else ""
+
+    def number(key: str) -> Optional[float]:
+        return float(v[key]) if is_number(v[key]) else None
+
+    return Observation(
+        id=v["id"], image_id=text("image_id"), image_name=text("image_name"),
+        image_time=int(v["image_time"]) if is_number(v["image_time"]) else None,
+        object_id=v["object_id"], object_name=text("object_name"), kind=text("kind"), activity=text("activity"),
+        present=v["present"] is not False, note=text("note"), lon=float(v["lon"]), lat=float(v["lat"]),
+        created_at=created, updated_at=int(v["updated_at"]) if is_number(v["updated_at"]) else created,
+        deleted_at=int(v["deleted_at"]) if is_number(v["deleted_at"]) else None,
+        length=number("length"), heading=number("heading"), confidence=text("confidence"),
+        recorded_by=text("recorded_by"), updated_by=text("updated_by"),
+    )
+
+
+@dataclass
+class ListedImage:
+    """An image recorded on without its file: one outside the catalog, or not opened here (id, name, time, footprint typed)."""
+    id: str
+    name: str
+    time: Optional[int] = None
+    #: [west, south, east, north] (WGS 84), when known.
+    box: Optional[list[float]] = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "time": self.time, "box": self.box}
+
+
+def recorded_images(records: list[Observation]) -> list[ListedImage]:
+    """The images the records name, newest first: for picking one of them again."""
+    by_id: dict[str, ListedImage] = {}
+    for o in records:
+        if o.deleted_at is not None:
+            continue
+        known = by_id.get(o.image_id)
+        if known is None:
+            by_id[o.image_id] = ListedImage(o.image_id, o.image_name or o.image_id, o.image_time, None)
+        elif known.time is None and o.image_time is not None:
+            known.time = o.image_time
+    return sorted(by_id.values(), key=lambda i: (-(i.time if i.time is not None else -math.inf), i.id))
+
+
+def parse_listed_images(text: Optional[str]) -> list[ListedImage]:
+    """Listed images read back (bad entries left out, one per id)."""
+    try:
+        value = json.loads(text if text is not None else "[]")
+    except ValueError:
+        return []
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    out: list[ListedImage] = []
+    for v in value:
+        if not is_record(v):
+            continue
+        id_, name, t, box = v.get("id"), v.get("name"), v.get("time"), v.get("box")
+        if not isinstance(id_, str) or not id_.strip() or id_ in seen:
+            continue
+        seen.add(id_)
+        ok_box = list(box) if isinstance(box, list) and len(box) == 4 and all(is_number(n) for n in box) else None
+        out.append(ListedImage(id_, name if isinstance(name, str) and name.strip() else id_, t if is_number(t) else None, ok_box))
+    return out
