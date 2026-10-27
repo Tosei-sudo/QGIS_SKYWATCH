@@ -27,6 +27,7 @@ from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
+from .ui.startup import StartupLayers
 from .ui.taxonomy_dock import TaxonomyDock
 
 HERE = os.path.dirname(__file__)
@@ -142,6 +143,7 @@ class SatelliteObservationPlugin:
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
+        self.startup_layers: Optional[StartupLayers] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -199,6 +201,12 @@ class SatelliteObservationPlugin:
         self.iface.addPluginToMenu(MENU, moving)
         self.toolbar.addAction(moving)
         self.actions.append(moving)
+        # The settings file's `layers`: added to an empty project at start, or from the menu.
+        self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
+        add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
+        add_layers.triggered.connect(lambda: self.startup_layers.add())
+        self.iface.addPluginToMenu(MENU, add_layers)
+        self.actions.append(add_layers)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)
@@ -300,6 +308,9 @@ class SatelliteObservationPlugin:
         if self.toolbar is not None:
             self.toolbar.deleteLater()
             self.toolbar = None
+        if self.startup_layers is not None:
+            self.startup_layers.deleteLater()
+            self.startup_layers = None
         if self.context is not None:
             self.context.close()
             self.context.deleteLater()

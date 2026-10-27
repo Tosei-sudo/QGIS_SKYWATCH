@@ -4,6 +4,7 @@ from __future__ import annotations
 from qgis.gui import QgsAuthConfigSelect
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -52,6 +53,9 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow(self.tr("設定ファイル"), row)
         form.addRow(self.tr("記録者"), self.recorder)
+        self.startup_layers = QCheckBox(self.tr("起動時、空のプロジェクトに設定ファイルのレイヤー（layers）を追加"))
+        self.startup_layers.setChecked(settings.startup_layers_on())
+        form.addRow("", self.startup_layers)
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -127,6 +131,7 @@ class SettingsDialog(QDialog):
     def accept(self) -> None:
         self._keep_auth()
         settings.set_recorder(self.recorder.text())
+        settings.set_startup_layers_on(self.startup_layers.isChecked())
         if self.source.text().strip() != settings.config_source():
             settings.set_config_source(self.source.text())
             self.context.reload()

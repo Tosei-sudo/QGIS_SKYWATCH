@@ -202,3 +202,12 @@ def plan_cloud() -> bool:
 
 def set_plan_cloud(on: bool) -> None:
     _set("plan_cloud", "1" if on else "0")
+
+
+def startup_layers_on() -> bool:
+    """Whether the settings file's `layers` are added to an empty project when QGIS starts (on unless turned off)."""
+    return _get("startup_layers", "1") != "0"
+
+
+def set_startup_layers_on(on: bool) -> None:
+    _set("startup_layers", "1" if on else "0")
