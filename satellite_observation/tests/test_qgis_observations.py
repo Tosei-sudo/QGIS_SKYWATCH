@@ -71,7 +71,7 @@ def plugin(tmp_path):
     iface.canvas.setDestinationCrs(layers[0].crs())
     iface.canvas.setLayers(layers)
     iface.canvas.setExtent(layers[0].extent())
-    dock = p.api.observations
+    dock = p.api.observation_dock
     dock.show()
     yield p, iface, dock, layers, tmp_path
     p.unload()
@@ -318,3 +318,96 @@ def test_opens_a_catalog_image_signed_in_by_an_authcfg(tmp_path):
     assert (info.id, info.name, info.time, info.origin) == ("CAT-9", "c.tif", ms(5), "layer")
     url = image_layer("https://example.com/c.tif", "遠隔", authcfg="abc1234")
     assert url.source().startswith("/vsicurl/https://example.com/c.tif")
+
+
+def test_edits_the_classification_as_a_tree(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    editor = p.docks["SatObsTaxonomy"]
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("A")
+    dock.kind_input.setText("船舶 > 支援船")
+    dock.submit()
+    dock.edit_taxonomy(["船舶", "支援船"])
+    assert editor.isVisible() and editor.selected == "船舶 > 支援船"
+    assert editor.tree.currentItem().text(0) == "支援船" and editor.form.isVisible()
+    assert editor.form.title() == "船舶 > 支援船（種別）" and editor.levels_note.text() == "階層: 大分類 › 種別 › 級 › 船名"
+    # Renamed where it stands: the record follows.
+    editor.tree.currentItem().setText(0, "補助艦")
+    assert dock.book.living()[0].kind == "船舶 > 補助艦" and editor.selected == "船舶 > 補助艦"
+    # A class added below (＋ / Insert), by typing its name in a new row.
+    editor.start_add("船舶 > 補助艦")
+    adding = editor.tree.currentItem()
+    adding.setText(0, "〇〇級")
+    assert editor.selected == "船舶 > 補助艦 > 〇〇級" and editor._item_of("船舶 > 補助艦 > 〇〇級") is not None
+    # Dragged onto another class: moved below it, the records too.
+    editor._dropped("船舶 > 補助艦", "航空機", "inside")
+    assert dock.book.living()[0].kind == "航空機 > 補助艦"
+    # Reordered among its siblings with Alt+↑.
+    editor.select(["車両"])
+    editor.reorder(-1)
+    tops = [editor.tree.topLevelItem(i).text(0) for i in range(editor.tree.topLevelItemCount())]
+    assert tops.index("車両") < tops.index("航空機")
+    # Specifications: what a class above says shows until this class says otherwise.
+    editor.select(["航空機"])
+    editor._spec_inputs["全長"].setText("40")
+    editor.apply()
+    editor.select(["航空機", "補助艦"])
+    assert editor._spec_inputs["全長"].placeholderText() == "40 m（航空機）"
+    editor.members_input.setPlainText("一号\n二号")
+    editor.apply()
+    assert dock.book.taxonomy()[[t.path for t in dock.book.taxonomy()].index(["航空機", "補助艦"])].members == ["一号", "二号"]
+    # A photo from a file, kept in the local GeoPackage.
+    from qgis.PyQt.QtGui import QColor, QImage
+
+    png = tmp_path / "p.png"
+    image = QImage(8, 8, QImage.Format.Format_RGB32)
+    image.fill(QColor("red"))
+    image.save(str(png))
+    editor.add_photo_files([str(png)])
+    [ref] = [t for t in dock.book.taxonomy() if t.path == ["航空機", "補助艦"]][0].photos
+    assert ref.startswith("local:") and editor._pixmap(ref) is not None and editor.photo_layout.count() == 1
+    # Search: the matching classes and those above them.
+    editor.query.setText("二号")
+    assert editor.tree.topLevelItemCount() == 1 and editor.tree.topLevelItem(0).child(0).text(0) == "補助艦"
+    editor.query.clear()
+    # Deleted in two presses: the records keep the class above.
+    editor.select(["航空機", "補助艦"])
+    editor._delete_key()
+    assert editor._item_of("航空機 > 補助艦") is not None and "もう一度で" in editor.status.text()
+    editor._delete_key()
+    assert editor._item_of("航空機 > 補助艦") is None and dock.book.living()[0].kind == "航空機"
+    # 「諸元の項目」: one added and saved.
+    editor.fields_box.setChecked(True)
+    editor._add_field()
+    editor.save_fields()
+    assert dock.book.spec_fields[-1].name == "項目12" and dock.status.text() == "諸元の項目 12 件を設定"
+
+
+def test_gives_scripts_the_observations_through_plugin_api(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    api = p.api
+    a = api.add_observation(139.7, 35.6, object="A", kind="船舶")
+    assert a["imageName"] == "d1.tif" and [m.label for m in dock.scene().marks] == ["A"]
+    assert api.observe_image("d2.tif") and dock.book.current.name == "d2.tif"
+    area = api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62])
+    assert area["imageId"] == "d2.tif"
+    out = tmp_path / "r.html"
+    report = api.observation_report(title="週報", save=str(out))
+    assert report["things"] == 1 and 'src="data:image/jpeg;base64,' in out.read_text(encoding="utf-8")
+    assert api.observation_report.__doc__.startswith("The report")
+
+
+def test_gives_scripts_an_esri_store_waiting_for_its_tasks(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    layer = fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    dock.store_select.setCurrentIndex(0)
+    a = p.api.add_observation(139.7, 35.6, object="共有A")
+    assert len(layer.rows) == 1 and a["objectName"] == "共有A"
+    assert p.api.delete_observations(a["id"]) == 1 and p.api.observations() == []

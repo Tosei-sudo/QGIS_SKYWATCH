@@ -198,3 +198,39 @@ def test_makes_layers_of_the_records_areas_and_flows(book):
     assert points.features[0][1]["kind_2"] == "漁船" and points.features[0][1]["present"] == "あり"
     assert (areas.geometry, areas.features[0][0][0]) == ("polygon", (139.69, 35.59))
     assert (lines.title, lines.end_field, lines.features[0][1]["images"]) == ("観測の流れ", "last", 2)
+
+
+def test_gives_scripts_the_records_things_and_areas(book):
+    from satellite_observation.core.obs.api import ObservationApi
+
+    api = ObservationApi(lambda: book, lambda _d, work: work(book))
+    a = api.add_observation(139.7, 35.6, object="あおば", kind="船舶 > 護衛艦", activity="停泊", confidence="推定", length=150, heading=-90)
+    assert (a["objectName"], a["confidence"], a["heading"], a["recordedBy"]) == ("あおば", "推定", 270, "田中")
+    assert a["imageTime"] == "2026-10-01T01:00:00.000Z" and a["deletedAt"] is None
+    with pytest.raises(ValueError, match="確度「たぶん」なし"):
+        api.add_observation(139.7, 35.6, confidence="たぶん")
+    with pytest.raises(LookupError):
+        api.add_observation(139.7, 35.6, image="nope")
+    with pytest.raises(ValueError, match="-180〜180"):
+        api.add_observation(200, 35.6)
+    assert [i["id"] for i in api.observation_images()] == ["d1", "d3", "dx"] and api.observation_images()[0]["current"]
+    assert api.observe_image("d3")
+    [c] = api.observation_candidates(139.7, 35.6003, kind="船舶 > 護衛艦", length=152)
+    assert c["name"] == "あおば" and c["distance"] == 33 and c["record"]["id"] == a["id"]
+    b = api.update_observation(a["id"], note="直した", heading=10)
+    assert b["note"] == "直した" and b["heading"] == 10
+    with pytest.raises(ValueError, match="変更できない項目: objectName"):
+        api.update_observation(a["id"], objectName="x")
+    assert api.rename_observed_thing(a["objectId"], "第一")
+    [thing] = api.observed_things(kind="船舶")
+    assert thing["name"] == "第一" and thing["steps"][0]["activity"] == "停泊" and api.observed_things(kind="航空機") == []
+    assert [o["id"] for o in api.observations(object="第一", start="2026-09-30", end=datetime(2026, 10, 2))] == [a["id"]]
+    area = api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
+    assert area["polygon"]["coordinates"][0][0] == [139.69, 35.59] and area["imageId"] == "d3"
+    with pytest.raises(TypeError):
+        api.add_checked_area(polygon=[[0, 0], [1, 1]])
+    assert api.delete_checked_areas(area["id"]) == 1 and api.checked_areas() == [] and len(api.checked_areas(deleted=True)) == 1
+    report = api.observation_report(title="週報", map=False)
+    assert report["things"] == 1 and "<title>週報</title>" in report["html"]
+    assert api.delete_observations([a["id"]]) == 1 and api.observations() == []
+    assert api.confidences()[0] == {"label": "確定", "color": "#15803d", "note": "識別済み"}

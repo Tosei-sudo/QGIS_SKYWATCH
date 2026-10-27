@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
-from qgis.PyQt.QtCore import QDateTime, QStringListModel, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -30,6 +30,7 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QShortcut
 
+from ..core.obs.api import ObservationApi
 from ..core.obs.areas import CheckedArea, area_label, box_ring
 from ..core.obs.book import FormValues, ObservationBook, ObservedImage
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
@@ -654,6 +655,64 @@ class ObservationDock(PluginDock):
             self._next()
 
         run_task(description, lambda task: work(book), lambda r: finish(r), lambda m: finish(message=m))
+
+    def run_now(self, description: str, work: Callable[[ObservationBook], Any]) -> Any:
+        """
+        Runs what changes the book and waits for it (for scripts): at once for
+        the local store, else in a task while QGIS keeps answering.
+        """
+        book, s = self.book, self.store_set
+        if book is None or s is None:
+            raise RuntimeError("観測記録は使用不可")
+        if not s.remote:
+            try:
+                return work(book)
+            finally:
+                self.render()
+        got: dict[str, Any] = {}
+        loop = QEventLoop()
+
+        def done(result) -> None:
+            got["result"] = result
+            loop.quit()
+
+        def failed(message: str) -> None:
+            got["error"] = message
+            loop.quit()
+
+        run_task(description, lambda task: work(book), done, failed)
+        if not got:
+            loop.exec()
+        self.render()
+        if "error" in got:
+            raise RuntimeError(f"{description}の失敗: {got['error']}")
+        return got.get("result")
+
+    def report_html(self, options) -> str:
+        """The report with its map drawn (waits for the map; for scripts)."""
+        from .obs_report_dialog import ReportMap
+
+        book = self.book
+        selection = book.report_selection(options)
+        url: dict[str, Optional[str]] = {}
+        if options.map and (selection.records or selection.areas):
+            loop = QEventLoop()
+            kinds = list(dict.fromkeys([*book.vocabulary.kinds, *(t.path[0] for t in book.taxonomy())]))
+
+            def done(data_url, _image) -> None:
+                url["map"] = data_url
+                loop.quit()
+
+            # Kept until drawn (its job goes with it).
+            drawer = ReportMap(self.canvas, selection.records, selection.areas if options.areas else [], kinds, done, self._say)
+            drawer.start()
+            if not url:
+                loop.exec()
+        return book.report(options, url.get("map"))
+
+    def api(self) -> ObservationApi:
+        """The observations for scripts (plugin.api)."""
+        return ObservationApi(lambda: self.book, self.run_now, self.report_html)
 
     def reload(self) -> None:
         """Reads the records again from the store."""
