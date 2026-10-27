@@ -6,7 +6,25 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）。numpy は QGIS 付属のもの
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
 
-> 開発中。現在は段階 8 まで（骨組み、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス、観測記録: 記録・継続・同一候補・2 点・確認範囲・モノの流れ・分類体系の編集・報告書・CSV とレイヤー・Python API）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
+> 開発中。現在は改訂前の段階 8 までと画像カタログ（骨組み、画像カタログ: 検索・一覧・フットプリント・開く・類似画像の検索・新着画像の通知、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス、観測記録: 記録・継続・同一候補・2 点・確認範囲・モノの流れ・分類体系の編集・報告書・CSV とレイヤー・Python API）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
+
+## 画像カタログ
+
+「画像カタログ」ドックで `imageCatalogs` の画像を検索する。範囲（既定は表示範囲。「範囲を描く」で地図に多角形を描いて「描いた範囲」も。クリックで頂点、ダブルクリックか右クリックで確定、Esc で取消）、撮像日、「詳細条件」で登録日・システム登録日・センサー・角度の上限・方位角・SQL。
+
+- 一覧は新しい順で、見出しのクリックで並べ替え（空の値は常に最後）。地図に全件のフットプリント（青）と選んだもの（橙、画像 ID 付き）。「地図で選択」を押すとフットプリントのクリックで選べる（Ctrl・Shift で追加）
+- 「開く」かダブルクリックでラスターレイヤーに。URL は `/vsicurl/`、ローカルパスは `pathMappings` に従う（`url` があればそれ、なければそのままのパス、だめなら初回にフォルダを選び記憶。「フォルダの対応を消去」で忘れる）。開けないときは理由を表示。「パスをコピー」で場所をクリップボードへ
+- 開いたレイヤーはカタログの属性をカスタムプロパティとメタデータに持つ（`satobs/imageId` は観測記録と計画の追跡が使う）
+- 「レイヤーとして追加」で一覧をフットプリントのメモリレイヤーに（撮像日時で時系列コントローラーが効く）
+- 「類似画像の検索」（一覧のボタン、またはカタログから開いたレイヤーの右クリック「類似画像の検索…」）で、同じセンサー・角度 ±5°・方位角 ±20° の画像を重なりの大きい順に。比較元は赤い破線。許容差は記憶。「通常の検索に復帰」で戻る
+
+## 通知
+
+「この条件で監視…」（画像カタログ）か地図の右クリック「この地点の新着画像を監視…」で監視を作る。範囲は表示範囲・描いた範囲・選択中の地物・地点・指定なし。地点は既存の監視に足すこともできる。
+
+- QGIS の起動時と `watchInterval` 分ごと（既定 10 分）に確認。初回は今ある画像を覚えるだけで、以降に増えた画像を「通知」ドックに新しい順で出す。ツールバーの「通知」に未読数
+- 「開く」「移動」「既読」「すべて既読」「削除」。「監視条件」タブで有効・無効、名前の変更、削除、最終確認と失敗の理由
+- 撮像計画の「予定・通知」もここに「撮像計画」として出る
 
 ## 撮像計画
 
@@ -76,7 +94,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）。
 
 ## 導入
 
@@ -103,9 +121,10 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | --- | --- |
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
-| 観測記録・確認範囲・分類体系・写真（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
+| 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
+| `pathMappings` で選んだフォルダ、類似画像の許容差 | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

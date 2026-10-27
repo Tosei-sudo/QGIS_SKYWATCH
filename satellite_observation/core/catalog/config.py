@@ -1,7 +1,7 @@
 """
 Image catalogs (`imageCatalogs`): Esri layers whose features are images, as
-the viewer reads them (catalog.ts). Used to follow up imaging plans and to
-name images in observations.
+the viewer reads them (catalog.ts `catalogOf`). The search, the similar
+images and the watches build on this.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .util import is_name, is_number, is_record, is_url, layer_url
+from ..util import is_name, is_number, is_record, is_url, layer_url
 
 ROLE_LABELS = {"id": "画像ID", "acquired": "撮像日時", "registered": "登録日時", "systemRegistered": "システム登録日時", "sensor": "センサー", "angle": "角度", "azimuth": "方位角"}
 ANGLE_KINDS = ("offNadir", "incidence", "elevation")
@@ -31,6 +31,30 @@ class CatalogConfig:
     orbit_height: float = 600
     token: Optional[str] = None
     authcfg: Optional[str] = None
+
+    def label_of(self, role: str) -> str:
+        """The heading of a role: the settings file's `labels`, else the viewer's default."""
+        return self.labels.get(role) or ROLE_LABELS[role]
+
+    def to_json(self) -> dict[str, Any]:
+        """The catalog as a watch keeps it, without its token (the settings file's token is used when checking)."""
+        return {
+            "label": self.label, "url": self.url, "fields": dict(self.fields), "labels": dict(self.labels),
+            "columns": [dict(c) for c in self.columns], "where": self.where, "maxResults": self.max_results,
+            "angleKind": self.angle_kind, "orbitHeight": self.orbit_height,
+        }
+
+    @staticmethod
+    def from_json(value: dict[str, Any]) -> "CatalogConfig":
+        fields = dict(value.get("fields") or {})
+        fields["source"] = list(fields.get("source") or [])
+        return CatalogConfig(
+            label=str(value.get("label") or ""), url=str(value.get("url") or ""), fields=fields,
+            labels=dict(value.get("labels") or {}), columns=[dict(c) for c in value.get("columns") or []],
+            where=value.get("where") or None, max_results=int(value.get("maxResults") or 500),
+            angle_kind=value.get("angleKind") if value.get("angleKind") in ANGLE_KINDS else "offNadir",
+            orbit_height=float(value.get("orbitHeight") or 600),
+        )
 
 
 def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogConfig]:
@@ -98,3 +122,15 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         angle_kind=angle_kind if angle_kind in ANGLE_KINDS else "offNadir",
         orbit_height=height if is_number(height) and height > 0 else 600,
     )
+
+
+#: How often new images are checked for, in minutes (`watchInterval`).
+DEFAULT_WATCH_INTERVAL = 10
+
+
+def watch_interval_of(value: Any, problems: list[str]) -> int | float:
+    """`watchInterval`: 1 to 1440 minutes."""
+    if is_number(value) and 1 <= value <= 24 * 60:
+        return value
+    problems.append("watchInterval は新着画像を確認する間隔（1〜1440 分）で指定")
+    return DEFAULT_WATCH_INTERVAL

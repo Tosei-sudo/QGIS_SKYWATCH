@@ -17,20 +17,21 @@ from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
+    QFileDialog,
     QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from ..core.catalog import CatalogConfig
+from ..core.catalog.paths import PathError
+from ..core.catalog.search import record_of
 from ..core.esri import quote
 from ..core.plan.output import js_round, local_text
 from ..core.plan.store import (
     STATUS_COLORS, STATUSES, PlanStoreConfig, SavedPlan, SavedShot, ShotCheck, delete_plan, list_plans, load_shots,
     progress_text, track_shots, update_shots,
 )
-from ..core.util import ms_of
-from ..qgis_io import settings
+from ..qgis_io.catalog_io import Cancelled, open_record
 from ..qgis_io.geometry import from_wgs84
-from ..qgis_io.obs_images import image_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
 from .plan_overlay import PlanOverlay
@@ -437,24 +438,23 @@ class SavedPlansDock(PluginDock):
             if not features:
                 self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), self.tr("{id} が画像カタログになし").format(id=shot.imageId))
                 return then(None) if then else None
-            a = features[0].get("attributes") or {}
-            source = next((str(a[n]) for n in catalog.fields.get("source") or [] if a.get(n)), "")
-            if not source:
-                self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), self.tr("{id} に画像の場所なし").format(id=shot.imageId))
-                return then(None) if then else None
-            # A sign-in is the authentication configuration chosen for the image's server: only its id goes in the layer's source.
-            acquired = catalog.fields.get("acquired")
-            when = ms_of(a.get(acquired)) if acquired else None
-            layer = image_layer(source, shot.imageId, image_id=shot.imageId, time=when, authcfg=settings.auth_for(source))
-            if layer.isValid():
+            # Opened as in 「画像カタログ」: a COG with the authentication chosen for its server, a local path through pathMappings.
+            record = record_of(features[0], catalog.fields)
+            try:
+                layer = open_record(record, catalog, self.context.config.path_mappings, self._choose_folder)
                 QgsProject.instance().addMapLayer(layer)
-            else:
-                self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), self.tr("{id} の画像を開けず").format(id=shot.imageId))
+            except Cancelled:
+                layer = None
+            except PathError as error:
+                self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), str(error))
                 layer = None
             if then:
                 then(layer)
 
         self._start(self.tr("画像の検索"), work, done, lambda m: self.status.setText(self.tr("画像の読み込みに失敗: {m}").format(m=m)))
+
+    def _choose_folder(self, mapping):
+        return QFileDialog.getExistingDirectory(self, self.tr("「{label}」（{prefix}）のフォルダの選択").format(label=mapping.label, prefix=mapping.prefix)) or None
 
     # --- Showing and hiding ---------------------------------------------------------------------
 

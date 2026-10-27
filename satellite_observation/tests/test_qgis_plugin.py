@@ -40,8 +40,8 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
-    assert [d.windowTitle() for d in iface.docks] == ["撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集"]
-    assert [t for _, t in iface.menus] == ["撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "移動目標撮像計画…", "設定…"]
+    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知"]
+    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "移動目標撮像計画…", "設定…"]
     assert plugin.api.problems == []
     assert plugin.api.config.satellite_catalogs[0].label == "衛星カタログ"
     roles = [s.role for s in plugin.context.services()]
@@ -176,5 +176,5 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 7
+    assert len(set(drawn)) == len(plugin.actions) == 9
     plugin.unload()

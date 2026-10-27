@@ -222,7 +222,7 @@ def test_save_a_plan_and_follow_it_up(plugin, monkeypatch):
     # The image opens with only the server's authentication configuration in its source (no token), with its id and time.
     opened = []
     settings.set_auth_map({"https://example.com/": "img0001"})
-    monkeypatch.setattr("satellite_observation.ui.saved_plans_dock.image_layer",
+    monkeypatch.setattr("satellite_observation.qgis_io.catalog_io.image_layer",
                         lambda source, name, **kw: opened.append((source, name, kw)) or QgsRasterLayer("", name))
     saved.shot_table.selectRow(next(i for i, s in enumerate(saved.shots) if s.status == "撮像済み"))
     got = []

@@ -269,6 +269,15 @@ class GeoPackage:
             self._touch(spec)
             return cursor.rowcount
 
+    def update(self, spec: TableSpec, values: dict[str, Any], where: str, args: Sequence[Any] = ()) -> int:
+        """Sets columns of the rows matching `where`; how many."""
+        self.ensure(spec)
+        sets = ", ".join(f'"{n}" = ?' for n in values)
+        with self._lock:
+            cursor = self._db.execute(f'UPDATE "{spec.name}" SET {sets} WHERE {where}', (*values.values(), *args))
+            self._touch(spec)
+            return cursor.rowcount
+
     def _touch(self, spec: TableSpec) -> None:
         """Updates the table's extent and change time in gpkg_contents."""
         if spec.geometry:

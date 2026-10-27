@@ -15,8 +15,12 @@ class FakeIface(QObject):
         self.window.setCentralWidget(self.canvas)
         self.bar = QgsMessageBar(self.window)
         self.menus: list = []
+        self._menu_actions: list = []
         self.docks: list = []
         self.layer = None
+        #: Custom layer actions: (action, layer type) and the layers each was put on.
+        self.layer_actions: list = []
+        self.layer_action_layers: dict = {}
         self.window.show()
 
     def mainWindow(self):  # noqa: N802
@@ -48,9 +52,23 @@ class FakeIface(QObject):
 
     def addPluginToMenu(self, menu, action):  # noqa: N802
         self.menus.append((menu, action.text()))
+        self._menu_actions.append(action)
 
     def removePluginMenu(self, menu, action):  # noqa: N802
-        self.menus.remove((menu, action.text()))
+        # By the action, as QGIS does (its text may have changed, as 「通知（n）」 does).
+        i = self._menu_actions.index(action)
+        del self.menus[i], self._menu_actions[i]
+
+    def addCustomActionForLayerType(self, action, menu, layer_type, all_layers):  # noqa: N802
+        self.layer_actions.append((action, layer_type))
+
+    def addCustomActionForLayer(self, action, layer):  # noqa: N802
+        self.layer_action_layers.setdefault(id(action), []).append(layer)
+
+    def removeCustomActionForLayerType(self, action):  # noqa: N802
+        self.layer_actions = [(a, t) for a, t in self.layer_actions if a is not action]
+        self.layer_action_layers.pop(id(action), None)
+        return True
 
 
 def wait_for(condition, ms=5000):
