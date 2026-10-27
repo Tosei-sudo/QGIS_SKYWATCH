@@ -84,11 +84,25 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」
 3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る
 
+### 設定ファイルを同梱して配る
+
+画像ビューアの `config.json`（`public/config.json` など）をそのまま zip に入れて配れる。
+
+```
+python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
+```
+
+- zip の中では `satellite_observation/config.json`（`.jsonc` ならそのまま）になる。`satellite_observation/` に `config.json` を置いて `--config` なしで作っても同じ（この場所は git の対象外）
+- 受け取った人が「設定…」で設定ファイルを指定していなければ、同梱のものを読む。指定していればそちらが優先。欄を空にすると同梱のものに戻る。ドック上部の表示は「同梱の設定ファイル読み込み済み」
+- 作るときに設定ファイルを読んで確かめ、読めない・問題があるときは zip を作らない。`token` が書いてあれば注意を出す（zip を受け取った人全員に渡るため。サインインが要るサービスは各自の QGIS の認証設定を使う方がよい）
+- プラグインを入れ直すと同梱の設定ファイルも新しい zip のものに置き換わる。各自の指定（`QgsSettings`）は残る
+
 ## 設定
 
 | 項目 | 保存先 |
 | --- | --- |
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
+| 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。

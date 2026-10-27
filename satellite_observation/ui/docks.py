@@ -37,6 +37,8 @@ class ConfigBar(QWidget):
             text = self.tr("設定ファイルなし")
         elif c.problems:
             text = self.tr("設定ファイルの問題 {n} 件").format(n=len(c.problems))
+        elif getattr(c, "bundled", False):
+            text = self.tr("同梱の設定ファイル読み込み済み")
         else:
             text = self.tr("設定ファイル読み込み済み")
         self.label.setText(text)

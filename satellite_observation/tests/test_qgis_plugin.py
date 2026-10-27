@@ -124,3 +124,33 @@ def test_requests_go_through_qgis_in_a_task_with_the_services_authcfg(server, tm
     assert authorization and authorization.startswith("Basic ")
     # The second service has no authcfg.
     assert Handler.seen[1][2] is None
+
+
+def test_a_settings_file_shipped_in_the_plugin_folder(tmp_path, monkeypatch):
+    """The viewer's config.json shipped in the plugin's folder is read when none is chosen; a chosen one wins."""
+    import shutil
+
+    from satellite_observation.qgis_io.context import PluginContext
+    from satellite_observation.ui.docks import ConfigBar
+
+    shutil.copy(os.path.join(HERE, "data", "viewer-config.jsonc"), tmp_path / "config.jsonc")
+    monkeypatch.setattr(settings, "PLUGIN_DIR", str(tmp_path))
+    settings.set_config_source("")
+    context = PluginContext()
+    context.reload()
+    assert context.source == str(tmp_path / "config.jsonc") and context.bundled
+    assert context.problems == [] and context.config.satellite_catalogs[0].label == "衛星カタログ"
+    bar = ConfigBar(context, lambda: None)
+    assert bar.label.text() == "同梱の設定ファイル読み込み済み"
+    # A file chosen in the settings dialog wins over the shipped one.
+    chosen = tmp_path / "mine.json"
+    chosen.write_text("{}", encoding="utf-8")
+    settings.set_config_source(str(chosen))
+    context.reload()
+    assert context.source == str(chosen) and not context.bundled
+    assert bar.label.text() == "設定ファイル読み込み済み"
+    # Without either: the defaults.
+    settings.set_config_source("")
+    os.remove(tmp_path / "config.jsonc")
+    context.reload()
+    assert context.source == "" and not context.bundled

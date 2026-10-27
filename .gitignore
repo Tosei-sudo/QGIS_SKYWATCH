@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 dist/
 node_modules/
+satellite_observation/config.json
+satellite_observation/config.jsonc
