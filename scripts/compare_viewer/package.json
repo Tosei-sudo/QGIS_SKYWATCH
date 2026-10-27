@@ -1,0 +1,10 @@
+{
+  "name": "compare-viewer",
+  "private": true,
+  "type": "module",
+  "description": "Runs the viewer's planAccess / coverPlan (browser-image-enhancement usecase/image-viewer) on the cases of compare.py.",
+  "dependencies": {
+    "esbuild": "^0.25.0",
+    "satellite.js": "7.1.0"
+  }
+}

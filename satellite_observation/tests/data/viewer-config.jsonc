@@ -1,0 +1,271 @@
+// The example of the viewer README (usecase/image-viewer/README.md at 8a8563d), with the "]," missing after detectionOutputs added.
+{
+  // 背景地図の一覧（「背景なし」の後に、この順で並びます）。書くとこの一覧で置き換わります
+  "baseMaps": [
+    {
+      "id": "gsi-std",              // ?base= に入るキー
+      "label": "地理院 標準",        // 切り替えに出る名前
+      "url": "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", // XYZ タイル（http(s) か相対パス）
+      "attributions": "<a href=\"https://maps.gsi.go.jp/development/ichiran.html\">地理院タイル</a>", // 出典（HTML）
+      "maxZoom": 18
+    },
+    // ベクタータイル。種類（type）は URL から判断します（書いて指定もできます）
+    { "id": "appliance-osm", "label": "OSM（Data Appliance）",
+      "url": "https://appliance.example.com/arcgis/rest/services/OpenStreetMap/VectorTileServer" }, // ArcGIS VectorTileServer（type: "esri"）。サーバーの既定スタイルで描きます
+    { "id": "secure", "label": "社内地図", "url": "https://gis.example.com/server/rest/services/Base/VectorTileServer",
+      "token": "…", "style": "https://gis.example.com/styles/dark/root.json" },          // token・別スタイル（style）は任意
+    { "id": "style", "label": "地理院 ベクトル",
+      "url": "https://gsi-cyberjapan.github.io/optimal_bvmap/style/std.json" },     // Mapbox / MapLibre のスタイル JSON（type: "style"）
+    { "id": "pbf", "label": "ベクタータイル", "url": "https://example.com/tiles/{z}/{x}/{y}.pbf",
+      "maxZoom": 14 }                                                                  // .pbf・.mvt のタイル（type: "mvt"）。組み込みの淡い配色で描きます
+  ],
+  // ?base= がないときに出す背景地図の id（"" で背景なし）
+  "defaultBaseMap": "",
+  // 未登録の座標系の定義を取る URL。{authority}（epsg など小文字）と {code}（6677 など）を置き換え、
+  // OGC WKT か proj4 文字列を返すものにします。"" にすると取得しません
+  "projectionLookup": "https://spatialreference.org/ref/{authority}/{code}/ogcwkt/",
+  // 起動時に登録する座標系（ネットワークなしで使えます）
+  "projections": {
+    "EPSG:6677": "+proj=tmerc +lat_0=36 +lon_0=139.833333333333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs"
+  },
+  // 起動時に読み込むレイヤー。上に書いたものが下（一覧の下）になります
+  "layers": [
+    { "type": "cog", "url": "https://example.com/ortho.tif" },                       // COG
+    { "type": "file", "url": "./data/stations.geojson" },                            // GeoJSON・Shapefile の .zip・画像・GeoTIFF
+    { "type": "wms", "url": "https://example.com/wms", "layer": "roads" },           // WMS（layer はレイヤー名）
+    { "type": "wmts", "url": "https://example.com/wmts", "layer": "photo",
+      "matrixSet": "GoogleMapsCompatible", "format": "image/jpeg" },                 // WMTS（matrixSet・format は任意）
+    { "type": "wfs", "url": "https://example.com/wfs", "layer": "test:stations" },   // WFS
+    { "type": "esri", "url": "https://example.com/arcgis/rest/services/X/FeatureServer", "layer": "0" }, // Esri（layer はレイヤー ID）
+    { "type": "esri", "url": "https://example.com/arcgis/rest/services/Base/MapServer", "layer": "map" }, // マップサービスの地図画像
+    { "type": "esri", "url": "https://example.com/arcgis/rest/services/Scenes/ImageServer", "layer": "image",
+      "settings": { "where": "CloudCover <= 0.2", "sortField": "AcquisitionDate" } }, // イメージサービス（settings は表示ルール。serviceRules と同じ書き方）
+    { "type": "ogc-features", "url": "https://example.com/ogcapi", "layer": "roads",
+      "filter": "width > 5", "bbox": [139.6, 35.6, 139.9, 35.8] },                 // OGC API – Features（filter・bbox は任意。bbox は 西・南・東・北 の度）
+    { "type": "ogc-tiles", "url": "https://example.com/ogcapi", "layer": "*", "format": "image/png" }, // OGC API – Tiles（layer はコレクション ID、* はデータセット全体。format は application/vnd.mapbox-vector-tile・image/png・image/jpeg）
+    { "type": "wcs", "url": "https://example.com/ows", "layer": "dem", "bbox": [139.6, 35.6, 139.9, 35.8] }, // WCS 2.0 の画素値（layer は CoverageId。bbox がなければ全体）
+    { "type": "ogc-coverage", "url": "https://example.com/ogcapi", "layer": "dem" }, // OGC API – Coverages の画素値
+    { "type": "xyz", "url": "https://example.com/tiles/{z}/{x}/{y}.png#name=航空写真&zmax=18" } // XYZ タイル（{-y}・{q} も可。#name= は一覧の名前、zmin・zmax はズーム範囲）
+  ],
+  // ファイル名ごとの既定値（補正とバンド割り当て）。上から順に見て、最初に合ったものを使います
+  "imageRules": [
+    { "label": "Landsat 8/9", "match": "^LC0[89]_.*\\.tif$",                       // ファイル名の正規表現（大文字小文字は区別しない）
+      "preset": "satellite", "enhance": { "contrast": 0.1 }, "bands": [4, 3, 2] },  // プリセット＋値の上書き、バンド 4・3・2 を RGB に
+    { "label": "フォールスカラー", "match": "_MS\\.tif$", "bands": ["NIR", "Red", "Green"] }, // バンド名（GDAL の DESCRIPTION）でも指定可
+    { "label": "黒い縁あり", "match": "_warp\\.tif$", "noData": [0] },                // すべてのバンドが 0 の画素を透明に
+    { "label": "パンクロ", "match": "_PAN\\.tif$", "caseSensitive": true,
+      "enhance": { "autoStretch": { "lowPercent": 1, "highPercent": 1 }, "gamma": 1.2 } }
+  ],
+  // 画像カタログ（Esri フィーチャーサービスのレイヤー）。属性名を役割ごとに対応付けます
+  "imageCatalogs": [
+    { "label": "衛星画像カタログ",
+      "url": "https://example.com/arcgis/rest/services/Catalog/FeatureServer/0",   // レイヤーの URL
+      "token": "",                                                                   // 任意
+      "fields": {
+        "id": "IMG_ID", "acquired": "ACQ_TIME", "registered": "REG_TIME",           // 画像ID・撮像日時・登録日時
+        "systemRegistered": "SYS_TIME",                                             // システム登録日時
+        "sensor": "SENSOR_NAME", "angle": "OFF_NADIR", "azimuth": "SAT_AZIMUTH",    // センサー・角度・方位角（北からの角度）
+        "source": ["COG_URL", "FILE_PATH"]                                          // 画像の場所（値のある最初の属性を使う）
+      },
+      "labels": { "angle": "オフナディア角" },                                      // 見出しの名前（任意）
+      "columns": [{ "field": "CLOUD", "label": "雲量" }],                           // 一覧に足す列（任意）
+      "where": "STATUS = 'PUBLISHED'",                                              // いつも付ける条件（任意）
+      "maxResults": 500,                                                             // 一度に一覧に出す最大件数（既定 500）
+      "angleKind": "offNadir", "orbitHeight": 600 }                                 // angle の種類（offNadir / incidence / elevation）と衛星高度 km（簡易オルソの仰角に使う）
+  ],
+  // 新着画像の監視（「この条件で監視…」）を開いている間に確認する間隔（分、既定 10）
+  "watchInterval": 10,
+  // カタログのローカルパスの先頭が何を指すか（長く合うものを優先。大文字小文字・\ と / は区別しない）
+  "pathMappings": [
+    { "prefix": "\\\\nas\\img", "label": "画像NAS" },                              // 初回にこのフォルダを選んで許可（Chrome・Edge）
+    { "prefix": "Z:\\cog", "url": "https://nas-web/cog/" }                         // 同じフォルダを HTTP で公開しているなら URL に置き換えて COG として開く
+  ],
+  // AI のモデル（ONNX）。url（物体検出）か encoder と decoder（クリックで抽出）を書きます。書くと同梱のサンプル（YOLO11s-OBB・YOLOX-Tiny・MobileSAM）に置き換わります
+  "aiModels": [
+    { "label": "車両・船（YOLOv8-OBB）", "url": "./models/yolov8s-obb.onnx" },   // Ultralytics のモデルは書くのはこれだけでよい
+    { "label": "建物（自前）", "url": "https://models.example.com/buildings.onnx",
+      "task": "segment",                     // detect（矩形）・obb（回転矩形）・segment（輪郭）。省略時はモデルのメタデータ、なければ detect
+      "inputSize": 1024,                     // 入力の大きさ（640 か [幅, 高さ]。省略時はメタデータ、なければ 640）
+      "classes": ["building"],               // クラス名（省略時はメタデータ、なければ class 0, class 1…）
+      "mean": [0, 0, 0], "std": [255, 255, 255], // 正規化 (値 − mean) ÷ std（0〜255 の R・G・B。既定は YOLO の 0〜1）
+      "format": "auto",                      // 出力の形: auto・yolov8・yolov5・end2end・yolox・detectron2（YOLOX・Detectron2 は 0〜255 の B・G・R が既定。channels: "rgb" か "bgr" で変更可）
+      "score": 0.3, "iou": 0.45 },           // 既定のスコアのしきい値と重なりの判定
+    { "label": "航空機・船・車両（Faster R-CNN）", "url": "./models/model_final.onnx", "classes": ["plane", "heli", "ship", "train", "car"] }, // Detectron2 の ONNX は出力の形で見分け、入力の大きさもモデルから読むので、クラス名だけ書けばよい。上限なしで書き出したら "maxDetections": 0
+    { "label": "汎用（YOLOX-Tiny）", "url": "./models/yolox_tiny.onnx", "format": "yolox", "inputSize": 416, "classes": "coco" }, // 同梱のサンプル。classes: "coco" で COCO の 80 クラス
+    { "label": "MobileSAM", "encoder": "./models/mobile_sam_encoder.onnx", "decoder": "./models/mobile_sam_decoder.onnx" } // 入力 1024、SAM の正規化（inputSize・mean・std で変更可）
+  ],
+  // AI の結果の転記先（Esri フィーチャーレイヤー）。属性名を役割ごとに対応付けます（書いた役割だけ書き込みます）
+  "detectionOutputs": [
+    { "label": "検出結果DB",
+      "url": "https://example.com/arcgis/rest/services/Detections/FeatureServer/0", // ポリゴンかポイントのレイヤー。追加（と更新）できること
+      "token": "",                                                                   // 任意
+      "fields": {
+        "imageId": "IMAGE_ID", "fileName": "FILE_NAME", "imageTime": "ACQ_TIME",      // 画像ID・ファイル名・撮像日時
+        "detectedAt": "DETECTED_AT", "sentAt": "REGISTERED_AT",                       // 検出日時・転記日時
+        "class": "CLASS", "classId": "CLASS_ID", "score": "CONFIDENCE", "model": "MODEL", // クラス・クラス番号・確信度・モデル
+        "status": "STATUS",                                                            // AI・修正・手動
+        "lon": "LON", "lat": "LAT",                                                    // 中心（輪郭の内側の点、WGS 84）
+        "area": "AREA_M2", "length": "LENGTH_M", "width": "WIDTH_M", "angle": "HEADING", // 面積（m²）、矩形なら長辺・短辺（m）と長辺の向き（真北から 0〜180°）
+        "note": "REMARKS"                                                              // 備考（結果のレイヤーで入力）
+      },
+      "statusValues": { "ai": 1, "corrected": 2, "manual": 3 },                       // 状態に書く値（既定は "AI"・"修正"・"手動"）
+      "constants": { "SOURCE": "image-viewer" } }                                     // どの地物にも書く固定値（任意）
+  ],
+  // Esri イメージサービス・マップサービスの名前付き表示ルール。match（URL の正規表現）に合うサービスで選べます
+  "serviceRules": [
+    { "label": "雲なし・新しい順", "match": "Scenes/ImageServer", "default": true,        // default: 開いたときに使う
+      "where": "CloudCover <= 0.1", "sortField": "AcquisitionDate", "ascending": false },  // 条件・並び順（ascending: true で小さい順）
+    { "label": "WV3 トゥルーカラー", "match": "Scenes/ImageServer",
+      "where": "Sensor = 'WV3'", "rasterFunction": "Natural Color", "bandIds": [3, 2, 1] }, // ラスター関数・バンド（0 から）
+    { "label": "2024 年の平均", "match": "ImageServer",
+      "where": "AcquisitionDate >= DATE '2024-01-01'", "operation": "MT_MEAN",
+      "renderingRule": { "rasterFunction": "Stretch", "rasterFunctionArguments": { "StretchType": 6 } } },
+    { "label": "道路と建物（高層のみ）", "match": "Base/MapServer",
+      "layers": [0, 1], "layerDefs": { "1": "HEIGHT > 30" } }                             // マップサービス: 描くレイヤーと条件
+  ],
+  // 起動時から標高データに使う ArcGIS の標高サービス（イメージサービス・標高タイルサービス）。URL だけでも可
+  "elevationServices": [
+    { "url": "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer" },
+    { "url": "https://example.com/arcgis/rest/services/DEM/ImageServer", "token": "…" }          // トークンが必要なとき
+  ],
+  // 座標入力欄の地名・住所検索。上から順に並べて表示します。[] で地名検索をしません（既定は国土地理院）
+  "geocoders": [
+    { "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" },
+    { "type": "nominatim", "label": "OSM", "url": "https://nominatim.openstreetmap.org" },
+    { "type": "arcgis", "label": "ArcGIS", "url": "https://example.com/arcgis/rest/services/Locator/GeocodeServer", "token": "" },
+    { "type": "features", "label": "施設", "url": "https://example.com/arcgis/rest/services/Places/FeatureServer/0", "field": "NAME" }, // 名前の属性を LIKE で検索
+    { "type": "csv", "label": "地名表", "url": "./places.csv", "field": "名称" }       // 名前・緯度（lat）・経度（lon）の列がある CSV。閉じたネットワーク向け
+  ],
+  // STAC 検索のカタログ（STAC API のルートか静的カタログの URL）。省略すると Earth Search、[] で STAC 検索を出しません
+  "stacCatalogs": [
+    { "label": "Earth Search", "url": "https://earth-search.aws.element84.com/v1", "collections": ["sentinel-2-l2a", "landsat-c2-l2"] },
+    { "label": "Planetary Computer", "url": "https://planetarycomputer.microsoft.com/api/stac/v1",
+      "collections": ["sentinel-2-l2a"], "sign": "planetary-computer" },                 // アセットの URL を Planetary Computer の SAS トークンで署名して開く
+    { "label": "社内 STAC", "url": "https://stac.example.com/api",
+      "token": "…",                                                                    // Authorization: Bearer …（このサーバーへの要求にだけ付けます）
+      "headers": { "X-Api-Key": "…" },                                                 // 任意のヘッダー（同じく、このサーバーにだけ）
+      "cloudFilter": "filter" }                                                        // 雲量を CQL2 の filter で問い合わせる（既定は query 拡張）
+  ],
+  // 撮像計画の衛星カタログ（Esri のレイヤーかテーブル）。属性名を役割ごとに対応付けます
+  "satelliteCatalogs": [
+    { "label": "衛星カタログ",
+      "url": "https://example.com/arcgis/rest/services/Satellites/FeatureServer/0", // レイヤー（テーブル）の URL
+      "token": "",                                                                    // 任意
+      "fields": {
+        "name": "SAT_NAME", "id": "NORAD_ID",                                        // 衛星名・ID（任意）
+        "tle1": "TLE_LINE1", "tle2": "TLE_LINE2",                                    // TLE の 1・2 行目（1 つの属性に入っているなら "tle": "TLE"）
+        "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR",              // 振れる角度（度）
+        "swath": "SWATH", "length": "SCENE_LENGTH",                                   // 観測幅・シーン長（length がなければ観測幅と同じ）
+        "lookSide": "LOOK_SIDE",                                                      // right・left・both（R・L・右・左も可）
+        "kind": "SENSOR_TYPE",                                                        // sarPattern に合えば SAR（夜間も撮像）
+        "scenesPerPass": "SCENES_PER_PASS",                                           // 1 パスでパス方向に連続して撮れるシーン数（任意。既定 1）
+        "minInterval": "MIN_INTERVAL_MIN",                                            // 1 回撮ってから次に撮れるまでの分（任意。既定 0 = 制約なし）
+        "maxPerDay": "MAX_PER_DAY",                                                   // 24 時間に撮れる回数（任意。既定 0 = 制約なし）
+        "series": "SERIES",                                                           // シリーズ（SkySat・ICEYE など。任意。なければ名前の末尾の番号を除いたもの）
+        "leadTime": "ORDER_LEAD_HOURS"                                                // 何時間先の撮像からオーダーできるか（任意。既定 0 = 制約なし）
+      },
+      "swathUnit": "km",                                                              // swath・length の単位（km か m。既定 km）
+      "defaults": { "maxOffNadir": 30, "minOffNadir": 0, "swath": 10, "minInterval": 0 }, // 属性が空のときの値（任意。scenesPerPass・maxPerDay も可）
+      "sarPattern": "SAR|レーダ",                                                     // kind の値で SAR を見分ける正規表現（任意）
+      "where": "STATUS = 'ACTIVE'" }                                                  // いつも付ける条件（任意）
+  ],
+  // センサーの撮像モード（任意）。衛星カタログの fields.sensor の値（なければシリーズ、衛星名）でセンサーを引き、衛星をモードの数だけ並べます
+  "sensorCatalogs": [
+    { "label": "SAR センサー",
+      "url": "https://example.com/arcgis/rest/services/Satellites/FeatureServer/1",    // 1 レコード = 1 センサー × 1 モードのテーブル
+      "fields": {
+        "sensor": "SENSOR", "mode": "MODE",                                           // センサー名（必須）・モード名
+        "minOffNadir": "MIN_OFF_NADIR", "maxOffNadir": "MAX_OFF_NADIR",              // モードで振れる角度（度）
+        "swath": "SWATH", "length": "SCENE_LENGTH", "scenesPerPass": "SCENES_PER_PASS", // 観測幅・シーン長・連続シーン数
+        "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT"                         // 分解能（m）・いつものモード（1・true・はい）
+      },                                                                              // kind・lookSide・minInterval・maxPerDay・leadTime も可
+      "swathUnit": "km" },
+    { "label": "config に書くセンサー",
+      "sensors": [
+        { "sensor": "ICEYE", "kind": "SAR", "lookSide": "both",                        // センサーに書いた値は全モード共通
+          "modes": [
+            { "mode": "ストリップマップ", "minOffNadir": 15, "maxOffNadir": 30, "swath": 30, "length": 50, "resolution": 3, "primary": true },
+            { "mode": "スポットライト", "minOffNadir": 15, "maxOffNadir": 30, "swath": 5, "length": 5, "resolution": 1 },
+            { "mode": "スキャンSAR", "minOffNadir": 21, "maxOffNadir": 29, "swath": 100, "length": 100, "resolution": 15 }
+          ] }
+      ] }
+  ],
+  // 撮像計画の雲量予報（Open-Meteo 形式の API。既定は Open-Meteo）。false で「雲量予報」の選択肢を出しません
+  "cloudForecast": { "url": "https://api.open-meteo.com/v1/forecast", "label": "Open-Meteo" },
+  // 地上局（撮像のあと衛星が最初に上を通る時刻を「受信見込み」に出します）。minElevation は受信できる最低仰角（度。既定 5）
+  "groundStations": [
+    { "name": "勝浦", "lon": 140.3, "lat": 35.15, "minElevation": 5 }
+  ],
+  // 撮像計画の保存先（編集できるポリゴンのフィーチャーレイヤー）。1 撮像 1 地物で、撮れたかを imageCatalogs で追跡します
+  "planStores": [
+    { "label": "撮像計画", "url": "https://example.com/arcgis/rest/services/ImagingPlans/FeatureServer/0",
+      "token": "",                                                                    // 任意
+      "fields": { "status": "STATUS" },                                               // 属性名（任意。既定は下の説明）
+      "catalog": "衛星画像",                                                          // 追跡に使う imageCatalogs の label（任意。既定は先頭）
+      "matchMinutes": 30,                                                             // 撮像時刻から何分以内の画像をその撮像とみなすか（既定 30）
+      "missAfterDays": 3 }                                                            // 何日たっても画像がなければ「未撮像」にするか（既定 3）
+  ],
+  // 観測記録の保存先（編集できるポイントのフィーチャーレイヤー）。書かなければブラウザ内に保存します
+  "observationStores": [
+    { "label": "観測記録", "url": "https://example.com/arcgis/rest/services/Observations/FeatureServer/0",
+      "token": "",                                                                    // 任意
+      "fields": { "activity": "ACT" },                                                // 属性名（任意。既定は下の説明）
+      "where": "PROJECT = 'A'",                                                       // この条件の記録だけ読む（任意）
+      "softDelete": true,                                                             // 削除は DELETED_AT を入れて残す（既定 true。false で地物を消す）
+      "activities": ["入港", "出港", "停泊", "荷役"],                                  // この保存先の活動の候補（任意。kinds・taxonomy・confidences も同様）
+      "areas": "https://example.com/arcgis/rest/services/Observations/FeatureServer/2",  // 確認範囲を共有するポリゴンレイヤー（任意。{ url, fields, softDelete } でも可）
+      "taxonomyTable": "https://example.com/arcgis/rest/services/Observations/FeatureServer/1" } // 分類体系を共有するテーブル（任意。PATH・LEVELS・NAME_LABEL・MEMBERS・SPECS・PHOTOS・SORT_ORDER）
+  ],
+  // 観測記録の活動の候補と種別の分類体系（枝ごとに階層数・階層名が自由。既定は 船舶・航空機・車両・建物・構造物・その他）
+  "observationVocabulary": {
+    "activities": ["停泊", "航行", "駐機"],
+    "confidences": [                                                                  // 確度の段階（確かなものから順。文字列だけでも可。既定は 確定・推定・不明）
+      { "label": "確定", "color": "#15803d", "note": "艦名・機番まで識別" },
+      { "label": "ほぼ確実", "color": "#65a30d" }, { "label": "可能性大", "color": "#d97706" },
+      { "label": "可能性あり", "color": "#ea580c" }, { "label": "不明", "color": "#6b7280" }
+    ],
+    "matchRadius": 3000,                                                              // 同一候補を探す距離（m、既定 2000）
+    "taxonomy": [
+      { "name": "船舶", "levels": ["大分類", "種別", "級"], "nameLabel": "艦名",      // levels: 大分類からの各階層の名前、nameLabel: 個体（実名）の呼び方
+        "specs": { "開発国": "日本" },                                                  // 諸元（下位の分類にも当てはまる）
+        "children": [{ "name": "支援船", "children": [{ "name": "〇〇級", "members": ["△△", "□□"],  // members: 既知の個体
+          "specs": { "全長": "167", "英名": "Oo class" }, "photos": ["https://example.com/oo.jpg"] }] }] },
+      { "name": "航空機", "levels": ["大分類", "種別", "型式", "派生型"], "nameLabel": "機番",
+        "children": [{ "name": "戦闘機", "children": [{ "name": "F-15", "children": ["F-15J"] }] }] },
+      "車両"                                                                          // 名前だけでも可
+    ],
+    "specFields": ["別名", "英名", { "name": "全長", "type": "number", "unit": "m" }, { "name": "資料", "type": "url" }] // 諸元の項目（既定は別名・英名・開発国・運用国・全長・全幅・全高・排水量・就役・識別の特徴・資料）
+  },
+  // ArcGIS Online / Enterprise へのサインイン（ヘッダーの「サインイン」）。clientId はポータルに登録したアプリのもの
+  "arcgisPortals": [
+    { "label": "ArcGIS Online", "url": "https://www.arcgis.com", "clientId": "AbCdEf123456" },
+    { "label": "社内ポータル", "url": "https://gis.example.com/portal", "clientId": "XyZ987" }
+  ],
+  // URL の先頭ごとに、要求へ付けるヘッダー・クエリ（COG・タイル・サービスの要求）
+  "authRules": [
+    { "prefix": "https://bucket.s3.ap-northeast-1.amazonaws.com/cogs/", "headers": { "x-api-key": "…" } },
+    { "prefix": "https://tiles.example.com/", "query": { "key": "…" } }
+  ],
+  // 「移動体（AIS・ADS-B）」に並べるフィード。type は websocket・sse・poll・esri-stream
+  "movingFeeds": [
+    { "label": "AIS（WebSocket）", "type": "websocket", "url": "wss://ais.example.com/stream", "kind": "ship" }, // kind: ship・aircraft（省略時は属性名から判断）
+    { "label": "ADS-B（定期取得）", "type": "poll", "url": "https://adsb.example.com/aircraft.json", "interval": 5, // interval: 取得の間隔（秒。既定 10、最短 2）
+      "fields": { "id": "hex", "name": "flight", "course": "track" } },        // 役割ごとの属性名（任意。書かない役割は名前から自動）
+    { "label": "船舶（SSE）", "type": "sse", "url": "./ais/events" },
+    { "label": "Stream Service", "type": "esri-stream", "url": "https://example.com/arcgis/rest/services/Ships/StreamServer" } // 説明（?f=json）の WebSocket に接続
+  ],
+  // 「サーバ処理」で選べる処理サービス（ArcGIS の GPServer・GP タスク、OGC API – Processes）。URL だけでも可
+  "gpServices": [
+    { "label": "解析ツール", "url": "https://example.com/arcgis/rest/services/Tools/GPServer", "token": "" }, // token は任意
+    { "label": "OGC 処理", "url": "https://example.com/ogcapi/processes" }
+  ],
+  // 「新規レイヤー」のテンプレート（標準のものの後に「組織の設定」として並ぶ）
+  "layerTemplates": [
+    { "name": "巡回記録", "description": "巡回の経路と結果", "title": "巡回", "geometryType": "LineString", // geometryType: Point・LineString・Polygon・Multi…・null（作図ごとに選択）
+      "fields": [
+        { "name": "team", "type": "string", "alias": "班", "required": true },  // type: string・integer・double・date
+        { "name": "result", "type": "integer", "codes": "1=異常なし, 2=要確認", "defaultValue": "1" }, // codes は配列でも可
+        { "name": "patrolled", "type": "date", "alias": "実施日" }
+      ] }
+  ]
+}
