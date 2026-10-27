@@ -182,3 +182,19 @@ class TestImageTime:
         assert image_time("x.tif", {"TIFFTAG_DATETIME": "2020:01:01 00:00:00"})[1] == "tiff"
         assert image_time("x.tif", {"ACQUISITION_DATE": "2024-05-01T10:00:00Z", "NITF_IDATIM": "20200101000000"}) == (1714557600000, "metadata")
         assert image_time("x.tif", {}) is None
+
+
+def test_makes_layers_of_the_records_areas_and_flows(book):
+    from satellite_observation.core.obs.output import observation_layers
+
+    assert observation_layers([], []) == []
+    a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶 > 漁船"))
+    book.step(1)
+    book.carry(a.object_id, True)
+    book.add_area(box_ring([139.69, 35.59, 139.72, 35.62]))
+    points, areas, lines = observation_layers(book.records, book.areas)
+    assert (points.title, points.geometry, len(points.features)) == ("観測記録", "point", 2)
+    assert [f.name for f in points.fields][4:6] == ["kind_1", "kind_2"]
+    assert points.features[0][1]["kind_2"] == "漁船" and points.features[0][1]["present"] == "あり"
+    assert (areas.geometry, areas.features[0][0][0]) == ("polygon", (139.69, 35.59))
+    assert (lines.title, lines.end_field, lines.features[0][1]["images"]) == ("観測の流れ", "last", 2)
