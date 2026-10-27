@@ -391,6 +391,9 @@ class NoticesDock(PluginDock):
         self.refresh()
 
     def close_down(self) -> None:
+        # Tasks left running (a request waiting on the network) stop with the dock.
+        for task in list(self._tasks):
+            task.cancel()
         self.timer.stop()
         # A check still waiting to start (the plugin unloaded right after showing the dock) finds the store closed.
         self._closed = True

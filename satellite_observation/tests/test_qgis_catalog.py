@@ -291,3 +291,19 @@ def test_a_point_watch_and_the_plan_reminders(plugin, monkeypatch):
     item = notices.notices.topLevelItem(0)
     assert item.text(1) == "撮像計画" and item.text(2).startswith("10/23 10:00 OPT-1")
     assert p.notices_action.text() == "通知（1）"
+
+
+def test_closing_the_docks_cancels_their_tasks(plugin):
+    p, iface, folder, fake, images = plugin
+    for dock in (p.api.image_catalog, p.api.notices):
+        ended = []
+
+        def work(task):
+            while not task.isCanceled():
+                time.sleep(0.01)
+            task.check()
+
+        dock._start("止まらない作業", work, lambda r: ended.append("done"), lambda m: ended.append(m))
+        dock.close_down()
+        assert wait_for(lambda: ended, 5000)
+        assert ended == ["取消"]

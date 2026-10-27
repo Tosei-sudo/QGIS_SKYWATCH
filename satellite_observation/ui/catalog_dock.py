@@ -582,6 +582,9 @@ class CatalogDock(PluginDock):
         self.watch_requested(catalog, info.types, self.conditions(), self.drawn)
 
     def close_down(self) -> None:
+        # Tasks left running (a request waiting on the network) stop with the dock.
+        for task in list(self._tasks):
+            task.cancel()
         self.buttons["pick"].setChecked(False)
         self.draw_button.setChecked(False)
         self.draw_tool.remove()
