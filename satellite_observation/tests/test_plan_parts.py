@@ -153,3 +153,30 @@ def test_catalogs_from_esri():
     modes, problems = load_sensor_modes(EsriClient(fake), catalogs, lambda u, t: t)
     assert [(m.sensor, m.mode) for m in modes] == [("ISS", "Spot"), ("B", "Wide")]
     assert len(problems) == 1 and problems[0].startswith("壊れた表 の読み込みに失敗")
+
+
+def test_timeline_rows_and_layout():
+    from satellite_observation.core.plan.modes import SensorMode
+    from satellite_observation.core.plan.timeline import HEAD, ROW, bar_at, layout, timeline_rows
+    from satellite_observation.tests.test_plan import _pair
+
+    a, b, options = _pair()
+    modes = [SensorMode("ISS", "スポット", swath=5, primary=True), SensorMode("ISS", "ストリップ", swath=30)]
+    sats = [*with_modes([iss(minInterval=10)], modes), iss(name="ISS-2", id="2", tle2=LINE2.replace("325.0288", "145.0288"))]
+    ops = plan_access(sats, [a, b], options).opportunities
+    plans = cover_plan(ops, [a, b], sats)
+    steps = [s for p in plans for s in p.steps]
+    # A satellite's modes share one row (the viewer's sensor-modes test).
+    rows = timeline_rows(steps, sats)
+    assert len(rows) == len({s.satellite if s.satellite == 2 else 0 for s in steps})
+    assert all(r.ops == sorted(r.ops, key=lambda o: o.time) for r in rows)
+    lay = layout(steps, sats, options.start, options.end, 800, steps[0])
+    assert lay.height == HEAD + len(rows) * ROW + 4
+    assert [d for d in lay.days if d[1]] and all(120 <= d[0] <= 792 for d in lay.days)
+    assert len(lay.bars) == len(steps) and sum(b.chosen for b in lay.bars) == 1
+    # The busy time after each shot of the satellite with an interval.
+    assert len(lay.busy) == sum(1 for s in steps if sats[s.satellite].minInterval > 0)
+    bar = lay.bars[0]
+    assert bar_at(lay, bar.x + 1, bar.y + ROW / 2) is bar.op
+    assert bar_at(lay, bar.x, bar.y - 5) is None
+    assert layout([], sats, 0, 1, 800) is None

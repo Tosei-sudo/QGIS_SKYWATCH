@@ -3,7 +3,6 @@ The imaging plan dock in QGIS (the viewer's imaging-plan.spec.ts, as far as
 stage 2 goes): a satellite catalog from a fake Esri layer, targets from a
 layer, the selection or a clicked point, the list, the map, CSV and a layer.
 """
-import os
 
 import pytest
 
@@ -226,3 +225,144 @@ def test_plans_a_point_from_the_maps_right_click_menu(plugin):
     expected = to_wgs84(canvas.mapSettings().destinationCrs()).transform(clicked)
     assert abs(target.center[0] - expected.x()) < 1e-6 and abs(target.center[1] - expected.y()) < 1e-6
     assert 139 < target.center[0] < 141 and 35 < target.center[1] < 36
+
+
+def _pass_points():
+    """Points along an ISS pass a minute apart (as the viewer's tests) and one 4 km beside the first."""
+    from satellite_observation.core.plan.scene import sub_satellite_point
+    from satellite_observation.tests.test_plan import BELOW, T, east, iss
+
+    return T, [("a", *BELOW), ("b", *sub_satellite_point(iss(), T + 50000)), ("near", *east(BELOW, 4))]
+
+
+def _iss_only(plugin, tmp, gap=10, swath=10):
+    p, iface, _ = plugin
+    config = tmp / "iss.json"
+    config.write_text("{}", encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.reload()
+    dock = p.api.imaging_plan
+    dock.tree.check_all(False)
+    dock.paste_gap.setValue(gap)
+    dock.paste_swath.setValue(swath)
+    dock.paste_max.setValue(45)
+    dock.tle.setPlainText(f"ISS\n{LINE1}\n{LINE2}")
+    dock.tree.check_only(["ISS"])
+    assert [s.name for s in dock.tree.checked()] == ["ISS"]
+    return dock
+
+
+def test_priorities_and_points_in_one_scene(plugin):
+    p, iface, tmp = plugin
+    T, points = _pass_points()
+    layer = QgsVectorLayer("Point?crs=EPSG:4326&field=name:string&field=rank:integer&field=note:string", "地点", "memory")
+    features = []
+    for (name, lon, lat), rank in zip(points, [2, 1, 2]):
+        f = QgsFeature(layer.fields())
+        f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(lon, lat)))
+        f.setAttributes([name, rank, "x"])
+        features.append(f)
+    layer.dataProvider().addFeatures(features)
+    QgsProject.instance().addMapLayer(layer)
+    dock = _iss_only(plugin, tmp)
+    dock.show()
+    dock.list_targets()
+    # Only attributes holding numbers are offered; "rank" is not guessed (no priority in its name).
+    assert [dock.priority.itemData(i) for i in range(dock.priority.count())] == ["", "rank"]
+    assert dock.priority.isVisibleTo(dock)
+    dock.priority.setCurrentIndex(1)
+    dock.priority_order.setCurrentIndex(dock.priority_order.findData("large"))
+    targets = dock.targets()
+    assert [(t.label, t.priority, t.priority_text) for t in targets] == [("a", 2, "2"), ("b", 1, "1"), ("near", 2, "2")]
+    start_at(dock, T - 60000, 3)
+    dock.daylight.setCurrentIndex(dock.daylight.findData("none"))
+    plan(dock)
+    dock.view.setCurrentIndex(dock.view.findData("cover"))
+    assert "優先度の高い対象から撮像を割り当て" in dock.status.text()
+    assert "優先度" in [c.label for c in dock.model.columns]
+    # The more important first: "a" and "near" (4 km apart) share one scene of the pass; "b", a minute on, waits for the interval.
+    plans = dock.cover_plans()
+    a_step, b_step, near_step = (pl.steps[0] for pl in plans)
+    assert a_step.shot == near_step.shot and near_step.shotTargets == 2
+    assert b_step.time - a_step.time >= 10 * 60000 and plans[1].blocked > 0
+    assert "全 2 シーン（うち 1 シーンで 2 地点をまとめて撮像）" in dock.status.text()
+    # Without sharing, each point its own scene.
+    dock.share.setChecked(False)
+    assert "全 3 シーン" in dock.status.text()
+
+
+def test_moving_the_chosen_scenes_on_the_map(plugin):
+    from qgis.core import QgsCoordinateReferenceSystem
+    from qgis.gui import QgsMapMouseEvent
+    from qgis.PyQt.QtCore import QEvent, QPoint, Qt
+
+    from satellite_observation.qgis_io.geometry import from_wgs84
+
+    p, iface, tmp = plugin
+    T, points = _pass_points()
+    dock = _iss_only(plugin, tmp, gap=0, swath=10)
+    dock.show()
+    start_at(dock, T - 30 * 60000, 1)
+    dock.daylight.setCurrentIndex(dock.daylight.findData("none"))
+    dock.set_point(points[0][1], points[0][2])
+    plan(dock)
+    op = dock.chosen
+    assert abs(op.time - T) < 60000 and op.coverage == 1 and op.offNadir < 1
+    canvas = iface.canvas
+    canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
+    dock.zoom_to_chosen()
+    canvas.refresh()
+    dock.move_button.setChecked(True)
+    assert canvas.mapTool() is dock.drag_tool
+    ring = dock._scenes[0]
+    cx, cy = sum(x for x, _ in ring[:-1]) / (len(ring) - 1), sum(y for _, y in ring[:-1]) / (len(ring) - 1)
+    to_map = from_wgs84(canvas.mapSettings().destinationCrs())
+
+    def pixel(lon, lat):
+        q = canvas.getCoordinateTransform().transform(to_map.transform(QgsPointXY(lon, lat)))
+        return QPoint(int(q.x()), int(q.y()))
+
+    def mouse(kind, at):
+        return QgsMapMouseEvent(canvas, kind, at, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton)
+
+    start = pixel(cx, cy)
+    # 30 km east: off the point, the angle grows.
+    end = pixel(cx + 30 / (111.32 * 0.8), cy)
+    dock.drag_tool.canvasPressEvent(mouse(QEvent.Type.MouseButtonPress, start))
+    dock.drag_tool.canvasMoveEvent(mouse(QEvent.Type.MouseMove, end))
+    dock.drag_tool.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, end))
+    assert op.adjusted and op.offNadir > 2 and op.coverage == 0
+    assert dock.status.text().startswith("撮像範囲を移動: オフナディア角") and dock.status.text().endswith("対象外")
+    assert dock.model.data(dock.model.index(0, 0)).endswith("✎")
+    # The CSV and the layer follow the moved scene.
+    assert "✎" not in dock.csv_text()
+    assert dock.csv_text().splitlines()[1].split(",")[9] == js_round_text(op.offNadir)
+    dock.move_button.setChecked(False)
+    assert canvas.mapTool() is not dock.drag_tool
+
+
+def js_round_text(v):
+    from satellite_observation.core.plan.output import js_round
+
+    return js_round(v, 2)
+
+
+def test_the_timeline(plugin):
+    p, iface, tmp = plugin
+    settings.set_config_source("")
+    p.context.reload()
+    dock = p.api.imaging_plan
+    dock.show()
+    dock.set_point(139.7, 35.68)
+    start_at(dock, EPOCH, 7)
+    plan(dock)
+    dock.timeline_box.setChecked(True)
+    assert dock.timeline.isVisible()
+    # The sample SAR satellite's modes share its row.
+    assert dock.timeline.rows() == len({dock.plan["sats"][o.satellite].name for o in dock.shown})
+    last = dock.shown[-1]
+    dock.timeline.picked.emit(last)
+    assert dock.chosen is last
+    assert dock.table.currentIndex().row() == len(dock.shown) - 1
+    dock.timeline_box.setChecked(False)
+    assert not dock.timeline.isVisible()

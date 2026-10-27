@@ -73,7 +73,7 @@ class PlanOptions:
     stations: list = field(default_factory=list)
 
 
-@dataclass
+@dataclass(eq=False)
 class Opportunity:
     """One chance to take a picture (as the viewer's Opportunity)."""
     satellite: int

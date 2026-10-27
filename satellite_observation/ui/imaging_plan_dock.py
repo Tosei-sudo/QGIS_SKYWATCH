@@ -13,6 +13,7 @@ can be cancelled); the catalogs are read in tasks too.
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import replace
 from datetime import datetime
@@ -40,22 +41,34 @@ from ..core.plan.cover import cover_plan
 from ..core.plan.modes import sample_sensor_modes, with_modes
 from ..core.plan.output import (
     NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts,
-    percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
+    natural_key, percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
 )
 from ..core.plan.satellites import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites, satellite_label, satellites_from_text
 from ..core.plan.scene import pass_shapes
-from ..core.plan.targets import MAX_TARGETS, name_of, target_of
+from ..core.plan.scene import shift_scene, track_place
+from ..core.plan.targets import MAX_TARGETS, name_of, priority_of, target_of
 from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
+from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
+from .plan_timeline import PlanTimeline
 from .satellite_tree import SatelliteTree
 
 #: The most opportunities listed as rows (the CSV and the layer take them all).
 MAX_ROWS = 2000
 OLD_COLOR = QColor("#b45309")
 DAYS = (1, 3, 7, 14, 30)
+
+
+def _plain(value):
+    """An attribute value as Python (a NULL QVariant as None)."""
+    if value is None:
+        return None
+    if hasattr(value, "isNull") and value.isNull():
+        return None
+    return value
 
 
 def _now_ms() -> float:
@@ -138,6 +151,8 @@ class ImagingPlanDock(PluginDock):
         self.chosen: Optional[Opportunity] = None
         self.sort = ("time", False)
         self._previous_tool = None
+        self._scenes: list = []
+        self._drag: Optional[tuple] = None
         self._build()
         context.configChanged.connect(self._config_changed)
         project = QgsProject.instance()
@@ -226,12 +241,22 @@ class ImagingPlanDock(PluginDock):
         options.addRow(self.tr("向き"), self.side)
         self.each = QCheckBox(self.tr("地物ごとに計算"))
         self.each.setChecked(True)
-        self.each.toggled.connect(self.show_targets)
+        self.each.toggled.connect(self._target_changed)
         options.addRow(self.each)
         self.name_field = QComboBox()
         self.name_field.setToolTip(self.tr("一覧・CSV・レイヤーで対象の名前に使う属性。自動は name・名称 などを探し、なければ ID"))
         self.name_field.currentIndexChanged.connect(self._relabel)
         options.addRow(self.tr("名前の属性"), self.name_field)
+        self.priority = QComboBox()
+        self.priority.setToolTip(self.tr("組み合わせで、優先度の高い地物から衛星の撮像を割り当て（撮像間隔・1 日の上限で競合するときは高い方を優先）"))
+        self.priority_label = QLabel(self.tr("優先度の属性"))
+        self.priority_label.setToolTip(self.priority.toolTip())
+        options.addRow(self.priority_label, self.priority)
+        self.priority_order = QComboBox()
+        self.priority_order.addItem(self.tr("小さいほど優先（1 が最優先）"), "small")
+        self.priority_order.addItem(self.tr("大きいほど優先"), "large")
+        self.priority_order_label = QLabel(self.tr("優先する値"))
+        options.addRow(self.priority_order_label, self.priority_order)
         more_layout.addLayout(options)
         self.tle = QPlainTextEdit()
         self.tle.setPlaceholderText("ISS (ZARYA)\n1 25544U 98067A   …\n2 25544  51.6416 …")
@@ -312,7 +337,10 @@ class ImagingPlanDock(PluginDock):
         self.share.toggled.connect(self.show_view)
         self.first = QCheckBox(self.tr("衛星・対象ごとに最初の機会のみ"))
         self.first.toggled.connect(self.render)
-        for w in (self.view, self.goal, self.share, self.first):
+        self.timeline_box = QCheckBox(self.tr("タイムライン"))
+        self.timeline_box.setToolTip(self.tr("衛星ごとの撮像を時間軸に並べて表示（薄い帯は撮像間隔で次を撮れない時間）"))
+        self.timeline_box.toggled.connect(self.draw_timeline)
+        for w in (self.view, self.goal, self.share, self.first, self.timeline_box):
             view.addWidget(w)
         view.addStretch(1)
         self.view_bar = QWidget()
@@ -320,6 +348,10 @@ class ImagingPlanDock(PluginDock):
         view.setContentsMargins(0, 0, 0, 0)
         self.view_bar.hide()
         bottom_layout.addWidget(self.view_bar)
+        self.timeline = PlanTimeline()
+        self.timeline.hide()
+        self.timeline.picked.connect(self.choose)
+        bottom_layout.addWidget(self.timeline)
 
         self.model = OpportunityModel(self)
         self.table = QTableView()
@@ -344,7 +376,11 @@ class ImagingPlanDock(PluginDock):
         self.layer_button.clicked.connect(self.add_layer)
         self.zoom_button = QPushButton(self.tr("範囲へ移動"))
         self.zoom_button.clicked.connect(self.zoom_to_chosen)
-        for b in (self.csv_button, self.layer_button, self.zoom_button):
+        self.move_button = QPushButton(self.tr("撮像範囲を移動"))
+        self.move_button.setCheckable(True)
+        self.move_button.setToolTip(self.tr("選んだ回の撮像範囲（青）を地図上でドラッグして移動。衛星が向けられる範囲内で、角度と被覆を再計算"))
+        self.move_button.toggled.connect(self._move_toggled)
+        for b in (self.csv_button, self.layer_button, self.move_button, self.zoom_button):
             actions.addWidget(b)
         bottom_layout.addLayout(actions)
         self._update_buttons()
@@ -358,6 +394,8 @@ class ImagingPlanDock(PluginDock):
         self.map_tool = QgsMapToolEmitPoint(self.canvas)
         self.map_tool.canvasClicked.connect(self._map_clicked)
         self.map_tool.deactivated.connect(lambda: self.pick.setChecked(False))
+        self.drag_tool = PlanDragTool(self.canvas, lambda: self._scenes, self.drag_begin, self.drag_move, self.drag_end)
+        self.drag_tool.deactivated.connect(lambda: self.move_button.setChecked(False))
 
     @staticmethod
     def _angle(placeholder: str) -> QDoubleSpinBox:
@@ -550,7 +588,31 @@ class ImagingPlanDock(PluginDock):
             self.name_field.addItem(layer.attributeDisplayName(i), n)
         self.name_field.setCurrentIndex(max(0, self.name_field.findData(before)))
         self.name_field.blockSignals(False)
+        self._list_priority_fields(layer)
         self.show_targets()
+
+    def _list_priority_fields(self, layer: Optional[QgsVectorLayer]) -> None:
+        """The attributes that hold numbers, offered as the priority when features are planned one by one."""
+        before = self.priority.currentData()
+        features = self._features(MAX_TARGETS) if layer is not None else []
+        numeric: list[str] = []
+        if features:
+            names = layer.fields().names()
+            for i, name in enumerate(names):
+                if any(priority_of(_plain(f.attributes()[i])) is not None for f in features):
+                    numeric.append(name)
+        self.priority.clear()
+        self.priority.addItem(self.tr("なし"), "")
+        for name in sorted(numeric, key=natural_key):
+            self.priority.addItem(layer.attributeDisplayName(layer.fields().indexOf(name)), name)
+        index = self.priority.findData(before) if before else -1
+        if index < 0:
+            guess = next((n for n in numeric if re.search(r"priority|優先", n, re.IGNORECASE)), "")
+            index = self.priority.findData(guess)
+        self.priority.setCurrentIndex(max(0, index))
+        shown = self.each.isChecked() and len(features) > 1 and bool(numeric)
+        for w in (self.priority, self.priority_label, self.priority_order, self.priority_order_label):
+            w.setVisible(shown)
 
     def targets(self) -> list[PlanTarget] | str:
         """The targets the form asks for (in WGS84), or the reason there are none (as the viewer)."""
@@ -583,12 +645,17 @@ class ImagingPlanDock(PluginDock):
             label = name_of(attributes(features[0]), features[0].id(), 0, field) if len(features) == 1 else name
             t = target_of(shapes, label)
             return [t] if t else self.tr("対象に図形なし")
+        priority = self.priority.currentData() if self.priority.isVisibleTo(self) else ""
+        sign = 1 if self.priority_order.currentData() == "large" else -1
         out = []
         for i, f in enumerate(features):
             shape = shape_of(f.geometry(), transform)
             t = target_of([shape], name_of(attributes(f), f.id(), i, field)) if shape else None
-            if t:
-                out.append(t)
+            if not t:
+                continue
+            value = _plain(f[priority]) if priority else None
+            v = priority_of(value)
+            out.append(t if v is None else replace(t, priority=sign * v, priority_text=str(value)))
         return out or self.tr("対象に図形なし")
 
     def show_targets(self) -> None:
@@ -604,8 +671,62 @@ class ImagingPlanDock(PluginDock):
         if self.chosen is not None and self.plan:
             self.draw_pass(self.chosen)
 
+    # --- Moving the chosen scenes ------------------------------------------------------
+
+    def _move_toggled(self, on: bool) -> None:
+        if on:
+            if self.pick.isChecked():
+                self.pick.setChecked(False)
+            self._previous_tool = self.canvas.mapTool()
+            self.canvas.setMapTool(self.drag_tool)
+        elif self.canvas.mapTool() is self.drag_tool:
+            self.canvas.unsetMapTool(self.drag_tool)
+            if self._previous_tool is not None:
+                self.canvas.setMapTool(self._previous_tool)
+
+    def drag_begin(self, lon: float, lat: float) -> bool:
+        """Starts moving the chosen pass's scenes from a place on them."""
+        op, plan = self.chosen, self.plan
+        if op is None or not plan:
+            return False
+        start = track_place(plan["sats"][op.satellite], op.time, (lon, lat))
+        if start is None:
+            return False
+        self._drag = (op, replace(op), start)
+        return True
+
+    def drag_move(self, lon: float, lat: float) -> None:
+        if self._drag is None or not self.plan:
+            return
+        op, origin, start = self._drag
+        plan = self.plan
+        sat = plan["sats"][op.satellite]
+        at = track_place(sat, op.time, (lon, lat))
+        if at is None:
+            return
+        o = plan["options"]
+        moved = shift_scene(origin, sat, plan["targets"][op.target], at[0] - start[0], at[1] - start[1],
+                            o.maxOffNadir, o.minIncidence, o.maxIncidence, o.side)
+        # The opportunity itself changes, so the list, the CSV and the layer follow.
+        for name, value in vars(moved).items():
+            setattr(op, name, value)
+        self.draw_pass(op)
+
+    def drag_end(self) -> None:
+        drag, self._drag = self._drag, None
+        if drag is None or not self.plan:
+            return
+        op = drag[0]
+        self.render()
+        cover = self.tr("被覆 {p}").format(p=percent(op.coverage)) if op.cells is not None else (self.tr("対象を含む") if op.coverage else self.tr("対象外"))
+        self.status.setText(self.tr("撮像範囲を移動: オフナディア角 {a}°・入射角 {i}°・{cover}").format(
+            a=js_round(op.offNadir), i=js_round(op.incidence), cover=cover))
+        self.chosenChanged.emit()
+
     def _pick_toggled(self, on: bool) -> None:
         if on:
+            if self.move_button.isChecked():
+                self.move_button.setChecked(False)
             self._previous_tool = self.canvas.mapTool()
             self.canvas.setMapTool(self.map_tool)
         elif self.canvas.mapTool() is self.map_tool:
@@ -807,6 +928,9 @@ class ImagingPlanDock(PluginDock):
         ]
         if many:
             cols.append(Column("target", tr("対象"), lambda op: targets[op.target].label))
+        if many and any(t.priority is not None for t in targets):
+            cols.append(Column("priority", tr("優先度"), lambda op: targets[op.target].priority_text or "",
+                               lambda op: tr("対象の優先度（属性の値）。並べ替えると優先度の高い順")))
         cols += [
             Column("offNadir", tr("オフナディア角"), lambda op: f"{js_round(op.offNadir)}°",
                    lambda op: tr("入射角 {i}°・距離 {d} km").format(i=js_round(op.incidence), d=js_round(op.range, 0))),
@@ -848,6 +972,23 @@ class ImagingPlanDock(PluginDock):
         self.table.horizontalHeader().setSortIndicator(index, Qt.SortOrder.DescendingOrder if descending else Qt.SortOrder.AscendingOrder)
         self._select_chosen()
         self._update_buttons()
+        self.draw_timeline()
+
+    def draw_timeline(self) -> None:
+        """Draws the timeline of the listed shots (when it is asked for)."""
+        plan = self.plan
+        on = self.timeline_box.isChecked() and bool(plan) and bool(self.shown)
+        self.timeline.setVisible(on)
+        if not on:
+            return
+        many = len(plan["targets"]) > 1
+
+        def title(op: Opportunity) -> str:
+            target = f" → {plan['targets'][op.target].label}" if many else ""
+            return self.tr("{time} {name}{target}・オフナディア角 {angle}°").format(
+                time=local_text(op.time), name=plan["sats"][op.satellite].name, target=target, angle=js_round(op.offNadir))
+
+        self.timeline.set(self.shown, plan["sats"], plan["options"].start, plan["options"].end, self.chosen, title)
 
     def _sort_by(self, section: int) -> None:
         columns = self.model.columns
@@ -865,11 +1006,10 @@ class ImagingPlanDock(PluginDock):
     def _select_chosen(self) -> None:
         if self.chosen is None:
             return
-        try:
-            row = self.model.ops.index(self.chosen)
-        except ValueError:
-            return
-        self.table.selectRow(row)
+        row = next((i for i, op in enumerate(self.model.ops) if op is self.chosen), -1)
+        if row >= 0:
+            self.table.selectRow(row)
+            self.table.scrollTo(self.model.index(row, 0))
 
     def choose(self, op: Opportunity) -> None:
         """Chooses an opportunity: its row, and its pass on the map."""
@@ -877,12 +1017,15 @@ class ImagingPlanDock(PluginDock):
         self._select_chosen()
         self.draw_pass(op)
         self._update_buttons()
+        if self.timeline.isVisible():
+            self.timeline.choose(op)
         self.chosenChanged.emit()
 
     def draw_pass(self, op: Opportunity) -> None:
         plan = self.plan
         sat = plan["sats"][op.satellite]
         shapes = pass_shapes(sat, plan["targets"][op.target], op)
+        self._scenes = shapes.scenes if shapes else []
         if shapes is None:
             return
         steps = []
@@ -917,6 +1060,9 @@ class ImagingPlanDock(PluginDock):
         self.csv_button.setEnabled(any_)
         self.layer_button.setEnabled(any_)
         self.zoom_button.setEnabled(self.chosen is not None)
+        self.move_button.setEnabled(self.chosen is not None)
+        if self.chosen is None and self.move_button.isChecked():
+            self.move_button.setChecked(False)
 
     # --- Output ---------------------------------------------------------------------------
 
@@ -965,14 +1111,16 @@ class ImagingPlanDock(PluginDock):
                 self.load_catalog()
         else:
             self.overlay.clear()
-            if self.pick.isChecked():
-                self.pick.setChecked(False)
+            for button in (self.pick, self.move_button):
+                if button.isChecked():
+                    button.setChecked(False)
 
     def close_down(self) -> None:
         """Called when the plugin unloads."""
         self.cancel()
-        if self.pick.isChecked():
-            self.pick.setChecked(False)
+        for button in (self.pick, self.move_button):
+            if button.isChecked():
+                button.setChecked(False)
         self.overlay.remove()
         project = QgsProject.instance()
         for signal in (project.layersAdded, project.layersRemoved):
