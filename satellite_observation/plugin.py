@@ -32,6 +32,12 @@ from .ui.taxonomy_dock import TaxonomyDock
 
 HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
+#: Where the docks start: each group docked on one side, as tabs (the first in front).
+DOCK_GROUPS = [
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
+]
 
 
 def badged(icon: QIcon, n: int) -> QIcon:
@@ -159,15 +165,16 @@ class SatelliteObservationPlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices"}
 
         specs = [
-            ("SatObsImageCatalog", tr("画像カタログ"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsSavedPlans", tr("保存した撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsSatellitePass", tr("衛星パス"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsObservations", tr("観測記録"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsTaxonomy", tr("分類体系の編集"), None, Qt.DockWidgetArea.LeftDockWidgetArea),
-            ("SatObsNotices", tr("通知"), None, Qt.DockWidgetArea.RightDockWidgetArea),
+            ("SatObsImageCatalog", tr("画像カタログ"), None),
+            ("SatObsImagingPlan", tr("撮像計画"), None),
+            ("SatObsSavedPlans", tr("保存した撮像計画"), None),
+            ("SatObsSatellitePass", tr("衛星パス"), None),
+            ("SatObsObservations", tr("観測記録"), None),
+            ("SatObsTaxonomy", tr("分類体系の編集"), None),
+            ("SatObsNotices", tr("通知"), None),
         ]
-        for name, title, stage, area in specs:
+        area = {name: a for a, names in DOCK_GROUPS for name in names}
+        for name, title, stage in specs:
             if name == "SatObsImagingPlan":
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsObservations":
@@ -185,7 +192,7 @@ class SatelliteObservationPlugin:
             else:
                 dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
             dock.hide()
-            self.iface.addDockWidget(area, dock)
+            self.iface.addDockWidget(area[name], dock)
             self.docks[name] = dock
             action = dock.toggleViewAction()
             action.setText(title)
@@ -194,6 +201,7 @@ class SatelliteObservationPlugin:
             self.toolbar.addAction(action)
             self.actions.append(action)
 
+        self.place_docks()
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
         self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
@@ -207,6 +215,10 @@ class SatelliteObservationPlugin:
         add_layers.triggered.connect(lambda: self.startup_layers.add())
         self.iface.addPluginToMenu(MENU, add_layers)
         self.actions.append(add_layers)
+        home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
+        home.triggered.connect(lambda: self.place_docks())
+        self.iface.addPluginToMenu(MENU, home)
+        self.actions.append(home)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)
@@ -214,6 +226,23 @@ class SatelliteObservationPlugin:
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self.context.reload()
+
+    def place_docks(self) -> None:
+        """
+        Docks every dock where it starts (DOCK_GROUPS): each group on its side
+        as tabs, none floating. Open ones stay open, the group's first open one in front.
+        """
+        window = self.iface.mainWindow()
+        for area, names in DOCK_GROUPS:
+            docks = [self.docks[n] for n in names if n in self.docks]
+            shown = [d for d in docks if d.isVisible()]
+            for dock in docks:
+                dock.setFloating(False)
+                window.addDockWidget(area, dock)
+            for dock in docks[1:]:
+                window.tabifyDockWidget(docks[0], dock)
+            if shown:
+                shown[0].raise_()
 
     def _canvas_menu(self, menu, event) -> None:
         canvas = self.iface.mapCanvas()
