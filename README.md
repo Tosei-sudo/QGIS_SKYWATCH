@@ -83,6 +83,13 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。
 
+## 座標・地名へ移動
+
+- ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
+- 設定ファイルに `geocoders` があれば地名・住所も入れられ、打つ途中で見つかった場所が欄の下に並ぶ（↑↓と Enter かクリックで移動）。種類はビューアと同じ `gsi`・`nominatim`・`arcgis`・`features`（Esri の地名レイヤー）・`csv`（名前・緯度・経度の列がある CSV。設定ファイルからの相対パス可）。`geocoders` がなければ地名は検索せず、入力が外へ送られることはない
+- カーソル位置の WGS 84 座標をステータスバーの右に表示。表記（10進・度分秒・MGRS・UTM）は地図の右クリックの「ステータスバーの表示」か、表示の右クリックで切り替え
+- 地図の右クリック「緯度経度・MGRS・UTM のコピー」で、その地点の座標をコピー
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -100,7 +107,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）。
 
 ## 導入
 
@@ -128,9 +135,9 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
-| `pathMappings` で選んだフォルダ、類似画像の許容差 | `QgsSettings` |
+| `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記 | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`geocoders` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 
@@ -160,3 +167,5 @@ python3 compare.py /path/to/browser-image-enhancement/usecase/image-viewer/src
 ```
 
 ビューアの `imaging-plan.ts`（移動目標・衛星パスも）を esbuild で束ねて Node で動かし、同じ衛星・対象・条件でプラグインの計算と突き合わせる（時刻 ±1 秒、角度 ±0.05°、被覆 ±1%、組み合わせは同じパス）。ネットワークは `npm install` のときだけ使う。
+
+座標の表記は `python3 coords.py /path/to/browser-image-enhancement/packages/coordinate-notation/src/index.ts` で、ビューアの `coordinate-notation`（mgrs も）と読み取り・書き出しを突き合わせる。

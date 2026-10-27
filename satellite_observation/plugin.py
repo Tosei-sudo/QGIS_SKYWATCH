@@ -19,6 +19,7 @@ from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.catalog_dock import CatalogDock
+from .ui.coordinate_box import CoordinateBox
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
@@ -116,6 +117,11 @@ class PluginApi:
         """The notices dock (its `store()`, `check()`, `watch_conditions()`, `watch_point()`, `open_notices()`)."""
         return self._plugin.docks["SatObsNotices"]
 
+    @property
+    def coordinates(self) -> "CoordinateBox":
+        """The jump field and the cursor position (its `jump(text)`, `search`, `go_to_place()`, `set_notation()`)."""
+        return self._plugin.coordinates
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -148,9 +154,12 @@ class SatelliteObservationPlugin:
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
+        self.coordinates: Optional[CoordinateBox] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
+        # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
+        self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
         self.toolbar.setObjectName("SatelliteObservationToolbar")
 
@@ -329,6 +338,10 @@ class SatelliteObservationPlugin:
         if self.toolbar is not None:
             self.toolbar.deleteLater()
             self.toolbar = None
+        if self.coordinates is not None:
+            self.coordinates.close()
+            self.coordinates.deleteLater()
+            self.coordinates = None
         if self.context is not None:
             self.context.close()
             self.context.deleteLater()

@@ -1,7 +1,7 @@
 """A stand-in for QGIS's interface (just what the plugin uses), for qgis.testing tests."""
 from qgis.gui import QgsMapCanvas, QgsMessageBar
 from qgis.PyQt.QtCore import QEventLoop, QObject, QTimer, pyqtSignal
-from qgis.PyQt.QtWidgets import QMainWindow
+from qgis.PyQt.QtWidgets import QMainWindow, QStatusBar
 
 
 class FakeIface(QObject):
@@ -14,6 +14,8 @@ class FakeIface(QObject):
         self.canvas.resize(800, 600)
         self.window.setCentralWidget(self.canvas)
         self.bar = QgsMessageBar(self.window)
+        self.status = FakeStatusBar()
+        self.window.setStatusBar(self.status)
         self.menus: list = []
         self._menu_actions: list = []
         self.docks: list = []
@@ -31,6 +33,9 @@ class FakeIface(QObject):
 
     def messageBar(self):  # noqa: N802
         return self.bar
+
+    def statusBarIface(self):  # noqa: N802
+        return self.status
 
     def activeLayer(self):  # noqa: N802
         return self.layer
@@ -69,6 +74,13 @@ class FakeIface(QObject):
         self.layer_actions = [(a, t) for a, t in self.layer_actions if a is not action]
         self.layer_action_layers.pop(id(action), None)
         return True
+
+
+class FakeStatusBar(QStatusBar):
+    """QgsStatusBar's calls the plugin makes (addPermanentWidget with an anchor, showMessage)."""
+
+    def addPermanentWidget(self, widget, stretch=0, anchor=None):  # noqa: N802
+        super().addPermanentWidget(widget, stretch)
 
 
 def wait_for(condition, ms=5000):
