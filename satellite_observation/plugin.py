@@ -20,6 +20,7 @@ from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.catalog_dock import CatalogDock
 from .ui.docks import StubDock
+from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.notices_dock import NoticesDock
@@ -34,7 +35,7 @@ MENU = "衛星撮像計画・観測記録"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
 ]
 
@@ -116,6 +117,11 @@ class PluginApi:
         """The notices dock (its `store()`, `check()`, `watch_conditions()`, `watch_point()`, `open_notices()`)."""
         return self._plugin.docks["SatObsNotices"]
 
+    @property
+    def image_enhance(self) -> "EnhanceDock":
+        """The image correction dock (its `enhance(layer, correction, bands)`, `pipeline()`, `set_pipeline()`, `apply()`)."""
+        return self._plugin.docks["SatObsEnhance"]
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -160,7 +166,7 @@ class SatelliteObservationPlugin:
         #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
-                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices"}
+                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -170,6 +176,7 @@ class SatelliteObservationPlugin:
             ("SatObsObservations", tr("観測記録"), None),
             ("SatObsTaxonomy", tr("分類体系の編集"), None),
             ("SatObsNotices", tr("通知"), None),
+            ("SatObsEnhance", tr("画像補正"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -185,6 +192,8 @@ class SatelliteObservationPlugin:
                 dock = CatalogDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsNotices":
                 dock = NoticesDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsEnhance":
+                dock = EnhanceDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
