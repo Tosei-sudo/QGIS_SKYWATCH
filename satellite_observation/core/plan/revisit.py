@@ -109,3 +109,35 @@ def hours_text(hours: Optional[float]) -> str:
     d = math.floor(hours / 24)
     h = math.floor(hours - d * 24 + 0.5)
     return f"{d} 日 {h} 時間" if h else f"{d} 日"
+
+
+def _round(v: float, digits: int) -> float:
+    p = 10 ** digits
+    return math.floor(v * p + 0.5) / p
+
+
+def revisit_csv(cells: Sequence[RevisitCell], stats: Sequence[RevisitStats]) -> str:
+    """The revisit map's cells as CSV (with a BOM, for spreadsheets)."""
+    from .output import js_number
+
+    def hours(h: Optional[float]) -> str:
+        return "" if h is None else js_number(_round(h, 1))
+
+    rows = [["セル", "経度", "緯度", "回数", "平均間隔（時間）", "最長の待ち（時間）"]]
+    for i, (cell, s) in enumerate(zip(cells, stats)):
+        rows.append([str(i + 1), js_number(_round(cell.center[0], 6)), js_number(_round(cell.center[1], 6)), str(s.count), hours(s.meanGap), hours(s.maxGap)])
+    return "﻿" + "\r\n".join(",".join(r) for r in rows) + "\r\n"
+
+
+def revisit_layer(cells: Sequence[RevisitCell], stats: Sequence[RevisitStats]):
+    """The revisit map's cells as a layer's fields and features."""
+    from .output import LayerField, PlanLayer
+
+    def hours(h: Optional[float]) -> Optional[float]:
+        return None if h is None else _round(h, 1)
+
+    fields = [LayerField("cell", "integer", "セル"), LayerField("count", "integer", "回数"),
+              LayerField("mean_gap_h", "double", "平均間隔（時間）"), LayerField("max_gap_h", "double", "最長の待ち（時間）")]
+    features = [([[list(p) for p in cell.ring]], {"cell": i + 1, "count": s.count, "mean_gap_h": hours(s.meanGap), "max_gap_h": hours(s.maxGap)})
+                for i, (cell, s) in enumerate(zip(cells, stats))]
+    return PlanLayer("再訪間隔", fields, features)

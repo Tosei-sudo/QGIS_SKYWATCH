@@ -94,3 +94,25 @@ def profile_folder() -> str:
 def local_gpkg_path() -> str:
     """The local GeoPackage of observations, checked areas and the classification."""
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
+
+
+def plan_reminders() -> list:
+    """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
+    try:
+        value = json.loads(_get("plan_reminders", "[]"))
+    except ValueError:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def set_plan_reminders(reminders: list) -> None:
+    _set("plan_reminders", json.dumps(reminders, ensure_ascii=False))
+
+
+def plan_cloud() -> bool:
+    """Whether the imaging plan asks for cloud forecasts (the person turned them on)."""
+    return _get("plan_cloud") == "1"
+
+
+def set_plan_cloud(on: bool) -> None:
+    _set("plan_cloud", "1" if on else "0")

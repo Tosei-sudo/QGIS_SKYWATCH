@@ -27,7 +27,7 @@ def qdatetime(ms: float) -> QDateTime:
 
 
 def memory_layer(plan: PlanLayer, name: str) -> QgsVectorLayer:
-    """A memory layer (WGS84 multipolygons) of a plan's features, its `time` field driving the temporal controller."""
+    """A memory layer (WGS84 multipolygons) of a plan's features, its `time` field (when it has one) driving the temporal controller."""
     layer = QgsVectorLayer("MultiPolygon?crs=EPSG:4326", name, "memory")
     fields = QgsFields()
     for f in plan.fields:
@@ -51,6 +51,8 @@ def memory_layer(plan: PlanLayer, name: str) -> QgsVectorLayer:
         features.append(feature)
     provider.addFeatures(features)
     layer.updateExtents()
+    if not any(f.name == "time" for f in plan.fields):
+        return layer
     temporal = layer.temporalProperties()
     temporal.setIsActive(True)
     temporal.setMode(QgsVectorLayerTemporalProperties.TemporalMode.ModeFeatureDateTimeInstantFromField)

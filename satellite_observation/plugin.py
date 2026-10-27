@@ -17,6 +17,7 @@ from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
+from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 
 HERE = os.path.dirname(__file__)
@@ -52,6 +53,11 @@ class PluginApi:
         """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""
         return self._plugin.docks["SatObsImagingPlan"]
 
+    @property
+    def saved_plans(self) -> "SavedPlansDock":
+        """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
+        return self._plugin.docks["SatObsSavedPlans"]
+
 
 class SatelliteObservationPlugin:
     def __init__(self, iface):
@@ -70,13 +76,16 @@ class SatelliteObservationPlugin:
 
         specs = [
             ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
+            ("SatObsSavedPlans", tr("保存した撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSatellitePass", tr("衛星パス"), tr("段階 5"), Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsObservations", tr("観測記録"), tr("段階 6〜7"), Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsTaxonomy", tr("分類体系の編集"), tr("段階 7"), Qt.DockWidgetArea.LeftDockWidgetArea),
         ]
         for name, title, stage, area in specs:
-            if stage is None:
+            if name == "SatObsImagingPlan":
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsSavedPlans":
+                dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
                 dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
             dock.hide()
@@ -89,6 +98,7 @@ class SatelliteObservationPlugin:
             self.toolbar.addAction(action)
             self.actions.append(action)
 
+        self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
         settings = QAction(icon, tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)

@@ -270,6 +270,14 @@ def sort_value(key: str, op: Opportunity, sats: Sequence[SatelliteSpec], targets
         return op.shot or 0
     if key == "uncertainty":
         return targets[op.target].uncertainty or 0
+    if key == "second":
+        return op.pair.b.time if op.pair else 0
+    if key == "angle":
+        return op.pair.convergence if op.pair else 0
+    if key == "baseline":
+        return op.pair.baseline if op.pair else 0
+    if key == "days":
+        return op.pair.days if op.pair else 0
     return op.time
 
 

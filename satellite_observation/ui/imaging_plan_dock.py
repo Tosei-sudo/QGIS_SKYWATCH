@@ -19,14 +19,14 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Callable, Optional
 
-from qgis.core import QgsFeatureRequest, QgsMapLayer, QgsPointXY, QgsProject, QgsVectorLayer
+from qgis.core import Qgis, QgsFeatureRequest, QgsMapLayer, QgsMessageLog, QgsPointXY, QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsCollapsibleGroupBox, QgsMapToolEmitPoint
-from qgis.PyQt.QtCore import QAbstractTableModel, QDateTime, QModelIndex, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QAbstractTableModel, QDateTime, QModelIndex, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.PyQt.QtGui import QBrush, QColor, QKeySequence
+from qgis.PyQt.QtGui import QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
-    QFrame, QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableView,
+    QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableView,
     QVBoxLayout, QWidget,
 )
 
@@ -43,10 +43,19 @@ from ..core.plan.output import (
     NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts,
     natural_key, percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
 )
+from ..core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs
+from ..core.plan.remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
+from ..core.plan.revisit import (
+    box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_csv, revisit_layer, revisit_stats,
+)
 from ..core.plan.satellites import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites, satellite_label, satellites_from_text
 from ..core.plan.scene import pass_shapes
 from ..core.plan.scene import shift_scene, track_place
+from ..core.plan.store import add_shots, new_plan_id, shot_features
 from ..core.plan.targets import MAX_TARGETS, name_of, priority_of, target_of
+from ..core.plan.weather import apply_clouds, fetch_clouds, places_for
+from ..qgis_io import settings
+from ..qgis_io.network import get_bytes
 from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
@@ -60,6 +69,8 @@ from .satellite_tree import SatelliteTree
 MAX_ROWS = 2000
 OLD_COLOR = QColor("#b45309")
 DAYS = (1, 3, 7, 14, 30)
+#: How often the reminders are checked, ms.
+REMIND_EVERY = 20000
 
 
 def _plain(value):
@@ -153,6 +164,15 @@ class ImagingPlanDock(PluginDock):
         self._previous_tool = None
         self._scenes: list = []
         self._drag: Optional[tuple] = None
+        self.cloud_task = None
+        self.revisit_task = None
+        self.store_task = None
+        #: The pairs of the last plan in a pair view, for the conditions they were found with.
+        self._pairs: Optional[tuple] = None
+        #: The revisit map of the last plan: grid size, cells, their stats, the chosen cell.
+        self.revisit: Optional[dict] = None
+        #: Opens the 「保存した計画」 dock (set by the plugin).
+        self.open_saved: Optional[Callable[[], None]] = None
         self._build()
         context.configChanged.connect(self._config_changed)
         project = QgsProject.instance()
@@ -162,6 +182,11 @@ class ImagingPlanDock(PluginDock):
         self._watched: Optional[QgsVectorLayer] = None
         self.visibilityChanged.connect(self._visibility)
         self._config_changed()
+        # Reminders are checked while QGIS runs, whether the dock is open or not.
+        self.remind_timer = QTimer(self)
+        self.remind_timer.setInterval(REMIND_EVERY)
+        self.remind_timer.timeout.connect(self.fire_reminders)
+        self.remind_timer.start()
 
     # --- The form ---------------------------------------------------------------------------
 
@@ -206,6 +231,9 @@ class ImagingPlanDock(PluginDock):
         more = QgsCollapsibleGroupBox(self.tr("詳細条件"))
         more.setCollapsed(True)
         self.more = more
+        # Expanding shows every row again: those that do not apply are hidden once more.
+        more.collapsedStateChanged.connect(lambda collapsed: collapsed or self._hide_rows())
+        self._priority_shown = False
         more_layout = QVBoxLayout(more)
         self.tree = SatelliteTree()
         more_layout.addWidget(self.tree)
@@ -239,6 +267,27 @@ class ImagingPlanDock(PluginDock):
         self.side.addItem(self.tr("右のみ"), "right")
         self.side.addItem(self.tr("左のみ"), "left")
         options.addRow(self.tr("向き"), self.side)
+        self.cloud = QCheckBox()
+        self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。対象の位置を予報サービスへ送信"))
+        self.cloud.setChecked(settings.plan_cloud())
+        self.cloud.toggled.connect(self._cloud_toggled)
+        self.max_cloud = QSpinBox()
+        self.max_cloud.setRange(-1, 100)
+        self.max_cloud.setSpecialValueText(self.tr("制限なし"))
+        self.max_cloud.setValue(-1)
+        self.max_cloud.setSuffix("%")
+        self.max_cloud.setToolTip(self.tr("雲量予報がこの値を超える光学衛星の機会を除外（予報のない機会は残す）"))
+        self.max_cloud.valueChanged.connect(self._max_cloud_changed)
+        cloud_row = QHBoxLayout()
+        cloud_row.setContentsMargins(0, 0, 0, 0)
+        cloud_row.addWidget(self.cloud)
+        cloud_row.addWidget(QLabel(self.tr("雲量（以下）")))
+        cloud_row.addWidget(self.max_cloud)
+        cloud_row.addStretch(1)
+        self.cloud_row = QWidget()
+        self.cloud_row.setLayout(cloud_row)
+        self.cloud_label = QLabel(self.tr("天候"))
+        options.addRow(self.cloud_label, self.cloud_row)
         self.each = QCheckBox(self.tr("地物ごとに計算"))
         self.each.setChecked(True)
         self.each.toggled.connect(self._target_changed)
@@ -323,6 +372,9 @@ class ImagingPlanDock(PluginDock):
         self.view = QComboBox()
         self.view.addItem(self.tr("すべての機会"), "all")
         self.view.addItem(self.tr("組み合わせ（全域を最短で）"), "cover")
+        self.view.addItem(self.tr("ステレオペア"), "stereo")
+        self.view.addItem(self.tr("干渉ペア（同じ軌道・SAR）"), "repeat")
+        self.view.addItem(self.tr("再訪間隔マップ"), "revisit")
         self.view.currentIndexChanged.connect(self.show_view)
         self.goal = QSpinBox()
         self.goal.setRange(10, 100)
@@ -348,6 +400,7 @@ class ImagingPlanDock(PluginDock):
         view.setContentsMargins(0, 0, 0, 0)
         self.view_bar.hide()
         bottom_layout.addWidget(self.view_bar)
+        bottom_layout.addWidget(self._pair_options())
         self.timeline = PlanTimeline()
         self.timeline.hide()
         self.timeline.picked.connect(self.choose)
@@ -366,6 +419,18 @@ class ImagingPlanDock(PluginDock):
         self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row_chosen(current.row()))
         self.table.doubleClicked.connect(lambda _: self.zoom_to_chosen())
         bottom_layout.addWidget(self.table, 1)
+        self.revisit_model = QStandardItemModel(self)
+        self.revisit_table = QTableView()
+        self.revisit_table.setModel(self.revisit_model)
+        self.revisit_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.revisit_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.revisit_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.revisit_table.verticalHeader().hide()
+        self.revisit_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.revisit_table.selectionModel().currentRowChanged.connect(lambda current, _: self._cell_chosen(current.row()))
+        self.revisit_table.doubleClicked.connect(lambda _: self.zoom_to_cell())
+        self.revisit_table.hide()
+        bottom_layout.addWidget(self.revisit_table, 1)
 
         actions = QHBoxLayout()
         self.csv_button = QPushButton(self.tr("CSV 保存"))
@@ -383,6 +448,9 @@ class ImagingPlanDock(PluginDock):
         for b in (self.csv_button, self.layer_button, self.move_button, self.zoom_button):
             actions.addWidget(b)
         bottom_layout.addLayout(actions)
+        bottom_layout.addLayout(self._later_actions())
+        bottom_layout.addWidget(self.remind_row)
+        bottom_layout.addWidget(self.save_row)
         self._update_buttons()
 
         # Shortcuts while the dock has the focus only.
@@ -431,6 +499,18 @@ class ImagingPlanDock(PluginDock):
         self.catalog_index = 0
         self.catalog_sats = []
         self._loaded = False
+        forecast = config.cloud_forecast
+        self._hide_rows()
+        if forecast is not None:
+            self.cloud.setText(self.tr("雲量予報（{label}）").format(label=forecast.label))
+        self.store_choice.clear()
+        for store in config.plan_stores:
+            self.store_choice.addItem(store.label)
+        self.store_choice.setVisible(len(config.plan_stores) > 1)
+        for button in (self.store_button, self.saved_button):
+            button.setVisible(bool(config.plan_stores))
+        if not config.plan_stores and self.store_button.isChecked():
+            self.store_button.setChecked(False)
         if not config.satellite_catalogs:
             # Without a catalog, two fixed sample satellites stand in (the SAR one with three made-up modes, unless the settings have sensors).
             self.catalog_sats = with_modes(sample_satellites(), [] if config.sensor_catalogs else sample_sensor_modes())
@@ -610,9 +690,18 @@ class ImagingPlanDock(PluginDock):
             guess = next((n for n in numeric if re.search(r"priority|優先", n, re.IGNORECASE)), "")
             index = self.priority.findData(guess)
         self.priority.setCurrentIndex(max(0, index))
-        shown = self.each.isChecked() and len(features) > 1 and bool(numeric)
+        self._priority_shown = self.each.isChecked() and len(features) > 1 and bool(numeric)
+        self._hide_rows()
+
+    def _hide_rows(self) -> None:
+        """Shows the rows of 「詳細条件」 that apply: the priority with features to rank, the forecast with a forecast service."""
+        if self.more.isCollapsed():
+            return
         for w in (self.priority, self.priority_label, self.priority_order, self.priority_order_label):
-            w.setVisible(shown)
+            w.setVisible(self._priority_shown)
+        forecast = self.context.config.cloud_forecast is not None
+        self.cloud_row.setVisible(forecast)
+        self.cloud_label.setVisible(forecast)
 
     def targets(self) -> list[PlanTarget] | str:
         """The targets the form asks for (in WGS84), or the reason there are none (as the viewer)."""
@@ -645,7 +734,7 @@ class ImagingPlanDock(PluginDock):
             label = name_of(attributes(features[0]), features[0].id(), 0, field) if len(features) == 1 else name
             t = target_of(shapes, label)
             return [t] if t else self.tr("対象に図形なし")
-        priority = self.priority.currentData() if self.priority.isVisibleTo(self) else ""
+        priority = self.priority.currentData() if self._priority_shown else ""
         sign = 1 if self.priority_order.currentData() == "large" else -1
         out = []
         for i, f in enumerate(features):
@@ -855,11 +944,19 @@ class ImagingPlanDock(PluginDock):
     def show_plan(self, plan: dict, view: str) -> None:
         self.plan = plan
         self.cover = None
+        self._pairs = None
+        self.revisit = None
+        if self.revisit_task is not None:
+            self.revisit_task.cancel()
+            self.revisit_task = None
+        self.overlay.unpaint()
         self.view_bar.setVisible(bool(plan["result"].opportunities))
         self.view.blockSignals(True)
         self.view.setCurrentIndex(max(0, self.view.findData(view)))
         self.view.blockSignals(False)
         self.show_view()
+        if self.cloud.isChecked() and self.context.config.cloud_forecast is not None:
+            self.load_clouds()
 
     def combining(self) -> bool:
         return self.view.currentData() == "cover"
@@ -868,9 +965,10 @@ class ImagingPlanDock(PluginDock):
         plan = self.plan
         goal = min(1.0, max(0.1, self.goal.value() / 100))
         share = self.share.isChecked()
-        if self.cover is None or self.cover[0] != goal or self.cover[1] != share:
-            self.cover = (goal, share, cover_plan(plan["result"].opportunities, plan["targets"], plan["sats"], goal, 0.02, share))
-        return self.cover[2]
+        top = self.max_cloud_value()
+        if self.cover is None or self.cover[:3] != (goal, share, top):
+            self.cover = (goal, share, top, cover_plan(self.candidates(), plan["targets"], plan["sats"], goal, 0.02, share))
+        return self.cover[3]
 
     def show_view(self) -> None:
         """Lists the last plan in the chosen view, with what it found in the status line."""
@@ -878,10 +976,24 @@ class ImagingPlanDock(PluginDock):
         if not plan:
             return
         combining = self.combining()
+        pairing = self.pairing()
+        revisit = self.view.currentData() == "revisit"
         self.goal.setVisible(combining)
         self.share.setVisible(combining and sum(1 for t in plan["targets"] if not t.cells) >= 2)
-        self.first.setVisible(not combining)
+        self.first.setVisible(not combining and not pairing and not revisit)
+        self.timeline_box.setVisible(not revisit)
+        self.stereo_bar.setVisible(pairing == "stereo")
+        self.repeat_bar.setVisible(pairing == "repeat")
+        self.revisit_bar.setVisible(revisit)
+        self.table.setVisible(not revisit)
+        self.revisit_table.setVisible(revisit)
         self.chosen = None
+        if revisit:
+            self.overlay.clear(["track", "reach", "scene", "step", "label"])
+            self.show_targets()
+            self.show_revisit()
+            return
+        self.overlay.unpaint()
         if not any(c.key == self.sort[0] for c in self.columns()):
             self.sort = ("time", False)
         self.render()
@@ -889,6 +1001,17 @@ class ImagingPlanDock(PluginDock):
         problems = describe_problems(result.problems, result.tooSoon)
         if not result.opportunities:
             self.status.setText(self.tr(NO_OPPORTUNITY) + problems)
+        elif pairing:
+            pairs = self.pairs()
+            what = self.tr("ステレオペア") if pairing == "stereo" else self.tr("干渉ペア")
+            if pairs:
+                first = pairs[0].b if pairing == "stereo" else pairs[0].a
+                self.status.setText(self.tr("{what} {n} 組。最初の 2 回目は {time}。行を選ぶと 1 回目（青）と 2 回目（番号 2）の撮像範囲を地図に表示").format(
+                    what=what, n=f"{len(pairs):,}", time=local_text(first.time)) + problems)
+            else:
+                hint = (self.tr("交会角・日数の条件の緩和、またはオフナディア角の上限の引き上げが必要") if pairing == "stereo"
+                        else self.tr("SAR 衛星を選び、期間を回帰日数より長くするか、入射角の差の条件の緩和が必要"))
+                self.status.setText(self.tr("条件に合う{what}なし。{hint}").format(what=what, hint=hint) + problems)
         elif not combining:
             self.status.setText(summary_all(result.opportunities, sats, problems))
         else:
@@ -937,9 +1060,16 @@ class ImagingPlanDock(PluginDock):
             Column("side", tr("方向"), side_text, lambda op: tr("衛星の進行方向に対して対象が右か左か、北行（昇交）か南行（降交）か")),
             Column("sun", tr("太陽高度"), lambda op: f"{js_round(op.sunElevation, 0)}°"),
         ]
+        if any(op.cloud is not None for op in plan["result"].opportunities):
+            label = self.context.config.cloud_forecast.label if self.context.config.cloud_forecast else ""
+            cols.append(Column("cloud", tr("雲量"), lambda op: "—" if op.cloud is None else f"{js_round(op.cloud, 0)}%",
+                               lambda op: (tr("SAR は雲を通して撮像") if sats[op.satellite].sar else tr("予報の範囲外（16 日先まで）")) if op.cloud is None
+                               else tr("{label} の雲量予報").format(label=label)))
         if options.stations:
             cols.append(Column("downlink", tr("受信見込み"), lambda op: local_text(op.downlink[0]) if op.downlink else tr("1 日以内なし"), downlink_title))
-        if self.combining():
+        if self.pairing():
+            cols += self.pair_columns()
+        elif self.combining():
             cols += [
                 Column("gain", tr("追加"), lambda op: f"+{percent(op.gain or 0)}", lambda op: tr("この回で新たに撮像できる対象の割合")),
                 Column("cumulative", tr("累計"), lambda op: percent(op.cumulative or 0), lambda op: tr("この回までに撮像できた対象の割合")),
@@ -955,8 +1085,13 @@ class ImagingPlanDock(PluginDock):
 
     def sorted(self) -> list[Opportunity]:
         plan = self.plan
-        ops = [s for p in self.cover_plans() for s in p.steps] if self.combining() else list(plan["result"].opportunities)
-        if not self.combining() and self.first.isChecked():
+        if self.pairing():
+            ops = [replace(pair.a, pair=pair) for pair in self.pairs()]
+        elif self.combining():
+            ops = [s for p in self.cover_plans() for s in p.steps]
+        else:
+            ops = self.candidates()
+        if not self.combining() and not self.pairing() and self.first.isChecked():
             ops = first_only(ops)
         key, descending = self.sort
         return sorted_ops(ops, key, descending, plan["sats"], plan["targets"])
@@ -1029,7 +1164,11 @@ class ImagingPlanDock(PluginDock):
         if shapes is None:
             return
         steps = []
-        if self.combining():
+        if op.pair is not None:
+            # The pair's second shot, numbered 2.
+            second = pass_shapes(plan["sats"][op.pair.b.satellite], plan["targets"][op.pair.b.target], op.pair.b)
+            steps.append((2, second.scenes if second else []))
+        elif self.combining():
             for i, step in enumerate(self.cover_plans()[op.target].steps):
                 if step.time == op.time and step.satellite == op.satellite:
                     continue
@@ -1044,7 +1183,11 @@ class ImagingPlanDock(PluginDock):
         if op is None or not self.plan:
             return
         # A combination shows the target and all its passes; one pass, also where the satellite is.
-        box = self.overlay.extent(["scene", "step"] if self.combining() else ["scene", "satellite"])
+        if self.combining():
+            box = self.overlay.extent(["scene", "step"])
+        else:
+            # A pair shows its second shot too.
+            box = self.overlay.extent(["scene", "satellite", "step"])
         if box is None:
             return
         t = self.plan["targets"][op.target]
@@ -1057,17 +1200,485 @@ class ImagingPlanDock(PluginDock):
 
     def _update_buttons(self) -> None:
         any_ = bool(self.shown)
-        self.csv_button.setEnabled(any_)
-        self.layer_button.setEnabled(any_)
+        cells = self.revisit_shown()
+        self.csv_button.setEnabled(any_ or cells)
+        self.layer_button.setEnabled(any_ or cells)
+        for button in (self.remind_button, self.store_button):
+            button.setEnabled(any_)
+            if not any_ and button.isChecked():
+                button.setChecked(False)
         self.zoom_button.setEnabled(self.chosen is not None)
         self.move_button.setEnabled(self.chosen is not None)
         if self.chosen is None and self.move_button.isChecked():
             self.move_button.setChecked(False)
 
+    # --- Pairs, the revisit map and the later actions (their widgets) --------------------------
+
+    def _pair_options(self) -> QWidget:
+        """The conditions of the pair views and the revisit map's grid, under the view choice."""
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        def spin(low: float, high: float, value: float, decimals: int = 0, suffix: str = "") -> QDoubleSpinBox:
+            box = QDoubleSpinBox()
+            box.setRange(low, high)
+            box.setDecimals(decimals)
+            box.setValue(value)
+            box.setSuffix(suffix)
+            box.valueChanged.connect(self.show_view)
+            return box
+
+        def part(tooltip: str, *widgets) -> QWidget:
+            w = QWidget()
+            layout = QHBoxLayout(w)
+            layout.setContentsMargins(0, 0, 0, 0)
+            for x in widgets:
+                layout.addWidget(QLabel(x) if isinstance(x, str) else x)
+            w.setToolTip(tooltip)
+            row.addWidget(w)
+            w.hide()
+            return w
+
+        self.stereo_min = spin(1, 90, 15)
+        self.stereo_max = spin(1, 90, 45, suffix="°")
+        self.stereo_days = spin(0.01, 60, 7, 2)
+        self.stereo_series = QCheckBox(self.tr("同じシリーズ"))
+        self.stereo_series.setChecked(True)
+        self.stereo_series.toggled.connect(self.show_view)
+        self.stereo_bar = part(self.tr("2 回の撮像の視線のなす角（交会角）。15〜45° が DSM・建物の高さに好適"),
+                               self.tr("交会角"), self.stereo_min, "〜", self.stereo_max, "・", self.stereo_days, self.tr("日以内"), self.stereo_series)
+        self.repeat_incidence = spin(0.01, 10, 1, 2, "°")
+        self.repeat_baseline = spin(0, 1e6, 0, 0, " m")
+        self.repeat_baseline.setSpecialValueText(self.tr("制限なし"))
+        self.repeat_series = QCheckBox(self.tr("同じシリーズ"))
+        self.repeat_series.setToolTip(self.tr("同じシリーズの衛星（同じ軌道のコンステレーション）同士もペア化"))
+        self.repeat_series.toggled.connect(self.show_view)
+        self.repeat_bar = part(self.tr("同じ衛星（シリーズ）が同じ軌道（北行・南行、向き、入射角、方位）で戻ってきた 2 回"),
+                               self.tr("入射角の差"), self.repeat_incidence, self.tr("以内・基線"), self.repeat_baseline, self.tr("以下"), self.repeat_series)
+        self.revisit_grid = QSpinBox()
+        self.revisit_grid.setRange(2, 30)
+        self.revisit_grid.setValue(10)
+        self.revisit_grid.setPrefix(self.tr("格子 "))
+        self.revisit_grid.setSuffix(" ×")
+        self.revisit_grid.valueChanged.connect(self.show_view)
+        self.revisit_bar = part(self.tr("対象を囲む範囲をこの数 × この数のセルに分け、セルごとに撮像機会の間隔を算出"), self.revisit_grid)
+        row.addStretch(1)
+        return bar
+
+    def _later_actions(self) -> QHBoxLayout:
+        """「予定・通知…」, 「保存・追跡…」 and 「保存した計画…」, and the rows they open."""
+        actions = QHBoxLayout()
+        self.remind_button = QPushButton(self.tr("予定・通知…"))
+        self.remind_button.setCheckable(True)
+        self.remind_button.setToolTip(self.tr("撮像前の通知・予定表（.ics）への保存"))
+        self.store_button = QPushButton(self.tr("保存・追跡…"))
+        self.store_button.setCheckable(True)
+        self.store_button.setToolTip(self.tr("計画をフィーチャーサービスに保存し、撮れたかを追跡"))
+        self.saved_button = QPushButton(self.tr("保存した計画…"))
+        self.saved_button.setToolTip(self.tr("保存した計画の一覧と撮像の成否"))
+        self.saved_button.clicked.connect(lambda: self.open_saved and self.open_saved())
+        for b in (self.remind_button, self.store_button, self.saved_button):
+            actions.addWidget(b)
+        actions.addStretch(1)
+
+        self.remind_row = QWidget()
+        remind = QHBoxLayout(self.remind_row)
+        remind.setContentsMargins(0, 0, 0, 0)
+        self.remind_minutes = QSpinBox()
+        self.remind_minutes.setRange(0, 1440)
+        self.remind_minutes.setValue(30)
+        self.remind_minutes.setPrefix(self.tr("撮像の "))
+        self.remind_minutes.setSuffix(self.tr(" 分前"))
+        notify = QPushButton(self.tr("通知を設定"))
+        notify.setToolTip(self.tr("一覧の撮像の前に、QGIS のメッセージバーで通知（QGIS の起動中のみ）"))
+        notify.clicked.connect(self.set_reminders)
+        ics = QPushButton(self.tr("予定表 (.ics)"))
+        ics.setToolTip(self.tr("一覧の撮像を予定表（iCalendar .ics）で保存。Outlook などに取り込み可能（設定した分前のアラーム付き）"))
+        ics.clicked.connect(lambda: self.save_ics())
+        clear = QPushButton(self.tr("通知をすべて解除"))
+        clear.clicked.connect(self.clear_reminders)
+        self.remind_count = QLabel()
+        for w in (self.remind_minutes, notify, ics, clear, self.remind_count):
+            remind.addWidget(w)
+        remind.addStretch(1)
+        self.remind_row.hide()
+        self.remind_button.toggled.connect(lambda on: (self.remind_row.setVisible(on), self.count_reminders()))
+
+        self.save_row = QWidget()
+        save = QHBoxLayout(self.save_row)
+        save.setContentsMargins(0, 0, 0, 0)
+        self.store_choice = QComboBox()
+        self.store_choice.setToolTip(self.tr("保存先"))
+        self.plan_name = QLineEdit()
+        self.plan_name.setPlaceholderText(self.tr("計画の名前"))
+        save_button = QPushButton(self.tr("保存"))
+        save_button.setToolTip(self.tr("一覧の撮像を保存先に保存。撮像時刻の後に画像カタログで撮れたかを確認可能"))
+        save_button.clicked.connect(lambda: self.save_to_store())
+        for w in (self.store_choice, self.plan_name, save_button):
+            save.addWidget(w)
+        save.setStretch(1, 1)
+        self.save_row.hide()
+        self.store_button.toggled.connect(self._store_toggled)
+        return actions
+
+    def _store_toggled(self, on: bool) -> None:
+        self.save_row.setVisible(on)
+        if on and not self.plan_name.text() and self.plan:
+            self.plan_name.setText(self.tr("撮像計画 {day}").format(day=local_text(self.plan["options"].start)[:10]))
+
+    # --- Cloud forecasts --------------------------------------------------------------------
+
+    def _cloud_toggled(self, on: bool) -> None:
+        settings.set_plan_cloud(on)
+        if not self.plan:
+            return
+        if on:
+            self.load_clouds()
+        else:
+            for op in self.plan["result"].opportunities:
+                op.cloud = None
+            self.cover = None
+            self._pairs = None
+            self.show_view()
+
+    def _max_cloud_changed(self) -> None:
+        self.cover = None
+        self._pairs = None
+        self.show_view()
+
+    def max_cloud_value(self) -> Optional[float]:
+        """The largest cloud cover asked for (percent), or None for any."""
+        v = self.max_cloud.value()
+        return None if v < 0 else float(v)
+
+    def candidates(self) -> list[Opportunity]:
+        """The last plan's opportunities that pass the cloud cover asked for (those without a forecast stay)."""
+        ops = self.plan["result"].opportunities if self.plan else []
+        top = self.max_cloud_value()
+        return list(ops) if top is None else [op for op in ops if op.cloud is None or op.cloud <= top]
+
+    def load_clouds(self) -> None:
+        """Asks the forecast service for the cloud cover of the last plan's optical shots (in a task), and lists them with it."""
+        plan = self.plan
+        config = self.context.config.cloud_forecast
+        if not plan or not config or self.cloud_task is not None:
+            return
+        places = places_for(plan["result"].opportunities, plan["sats"], plan["targets"], _now_ms())
+        before = self.status.text()
+        if not places:
+            self.status.setText(before + self.tr("（雲量予報は 16 日先までの光学衛星の機会のみ）"))
+            return
+        self.status.setText(self.tr("{label} に雲量予報を問い合わせ中…").format(label=config.label))
+        authcfg = settings.auth_for(config.url)
+
+        def work(task):
+            return fetch_clouds(config, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
+
+        def done(forecasts):
+            self.cloud_task = None
+            if self.plan is not plan:
+                return
+            n = apply_clouds(plan["result"].opportunities, plan["sats"], plan["targets"], forecasts)
+            self.cover = None
+            self._pairs = None
+            self.show_view()
+            if self.view.currentData() != "revisit":
+                self.status.setText(before + self.tr("（雲量予報 {n} 回分: {label}）").format(n=n, label=config.label))
+
+        def failed(message):
+            self.cloud_task = None
+            self.status.setText(before + self.tr("（雲量予報の取得に失敗: {m}）").format(m=message))
+
+        self.cloud_task = run_task(self.tr("雲量予報の取得"), work, done, failed)
+
+    # --- Pairs ---------------------------------------------------------------------------------
+
+    def pairing(self) -> Optional[str]:
+        """The pair view shown: `stereo` or `repeat`; None in the other views."""
+        v = self.view.currentData()
+        return v if v in ("stereo", "repeat") else None
+
+    def pairs(self) -> list:
+        """The pairs of the last plan for the conditions in the form (found again when they change)."""
+        plan, kind = self.plan, self.pairing()
+        if not plan or not kind:
+            return []
+        if kind == "stereo":
+            options = StereoOptions(self.stereo_min.value(), self.stereo_max.value(), self.stereo_days.value(), self.stereo_series.isChecked())
+        else:
+            baseline = self.repeat_baseline.value()
+            options = RepeatOptions(self.repeat_incidence.value(), 2, baseline if baseline > 0 else None, self.repeat_series.isChecked())
+        key = (kind, options, self.max_cloud_value())
+        if self._pairs is None or self._pairs[0] != key:
+            find = stereo_pairs if kind == "stereo" else repeat_pairs
+            self._pairs = (key, find(self.candidates(), plan["sats"], plan["targets"], options))
+        return self._pairs[1]
+
+    def pair_columns(self) -> list[Column]:
+        """The columns of a pair view: the second shot, how the two looks relate, and the days between."""
+        sats, tr = self.plan["sats"], self.tr
+        cols = [Column("second", tr("2 回目"), lambda op: f"{local_text(op.pair.b.time)} {satellite_label(sats[op.pair.b.satellite])}",
+                       lambda op: tr("オフナディア角 {a}°・入射角 {i}°・{side}").format(a=js_round(op.pair.b.offNadir), i=js_round(op.pair.b.incidence), side=side_text(op.pair.b)))]
+        if self.pairing() == "stereo":
+            cols.append(Column("angle", tr("交会角"), lambda op: f"{js_round(op.pair.convergence)}°",
+                               lambda op: tr("B/H {bh}（2 回の視線のなす角。大きいほど高さの精度が向上、大きすぎると対応づけが困難）").format(bh=js_round(op.pair.bh, 2))))
+        else:
+            cols.append(Column("baseline", tr("垂直基線"), lambda op: f"{math.floor(op.pair.baseline + 0.5):,} m",
+                               lambda op: tr("入射角の差 {d}°（基線が短いほど干渉しやすく、長いほど地形の高さに敏感）").format(d=js_round(abs(op.pair.b.incidence - op.incidence), 2))))
+        cols.append(Column("days", tr("間隔"), lambda op: hours_text(op.pair.days * 24), lambda op: tr("1 回目から 2 回目までの時間")))
+        return cols
+
+    # --- The revisit map -----------------------------------------------------------------------
+
+    def show_revisit(self) -> None:
+        """The revisit map of the last plan: planned again over a grid of cells around the targets (in a task), then listed and drawn."""
+        plan = self.plan
+        size = self.revisit_grid.value()
+        self.shown = []
+        self.timeline.hide()
+        self._update_buttons()
+        if self.revisit is not None and self.revisit["size"] == size:
+            self._revisit_ready()
+            return
+        self.revisit = None
+        self.revisit_model.clear()
+        self.overlay.unpaint()
+        if self.revisit_task is not None:
+            self.revisit_task.cancel()
+        cells = grid_cells(box_of(plan["targets"]), size)
+        sats = plan["sats"]
+        options = replace(plan["options"], stations=[])
+        what = self.tr("再訪間隔を {n} セルで計算中…").format(n=len(cells))
+        self.status.setText(what)
+
+        def work(task):
+            def progress(done: float) -> None:
+                task.check()
+                task.progress(done * 100)
+
+            return plan_access(sats, cell_targets(cells), options, progress)
+
+        def done(result: PlanResult):
+            if self.revisit_task is not task:
+                return
+            self.revisit_task = None
+            if self.plan is not plan or self.view.currentData() != "revisit":
+                return
+            self.revisit = {"size": size, "cells": cells, "chosen": None,
+                            "stats": revisit_stats(result.opportunities, len(cells), options.start, options.end)}
+            self._revisit_ready()
+
+        def failed(message: str):
+            if self.revisit_task is not task:
+                return
+            self.revisit_task = None
+            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算失敗: {m}").format(m=message))
+
+        task = run_task(what, work, done, failed)
+        self.revisit_task = task
+
+    def _revisit_ready(self) -> None:
+        revisit, plan = self.revisit, self.plan
+        stats = revisit["stats"]
+        self.render_revisit()
+        self.draw_revisit()
+        seen = [s for s in stats if s.count > 0]
+        days = (plan["options"].end - plan["options"].start) / 86400000
+        if seen:
+            per_day = sum(s.count for s in stats) / len(stats) / days
+            self.status.setText(self.tr("{n} セルのうち {seen} セルで撮像機会あり。最長の待ちは {worst}、平均で {per} 回/日（緑ほど早く撮像、赤ほど長い待ち）。行の選択でセルを表示").format(
+                n=len(stats), seen=len(seen), worst=hours_text(max(s.maxGap for s in stats)), per=js_round(per_day, 2)))
+        else:
+            self.status.setText(self.tr("この期間、範囲内のどのセルにも撮像機会なし。期間の延長か条件の見直しが必要"))
+        self._update_buttons()
+
+    def render_revisit(self) -> None:
+        """Lists the revisit map's cells, longest wait first."""
+        revisit = self.revisit
+        stats, cells = revisit["stats"], revisit["cells"]
+        self.revisit_model.clear()
+        self.revisit_model.setHorizontalHeaderLabels([self.tr("セル"), self.tr("回数"), self.tr("平均間隔"), self.tr("最長の待ち")])
+        order = sorted(range(len(stats)), key=lambda i: (-stats[i].maxGap, i))
+        for i in order[:MAX_ROWS]:
+            s = stats[i]
+            items = [QStandardItem(text) for text in (str(i + 1), str(s.count), hours_text(s.meanGap), hours_text(s.maxGap))]
+            for item in items:
+                item.setData(i, Qt.ItemDataRole.UserRole)
+                item.setToolTip(self.tr("中心 {lat}, {lon}").format(lat=js_round(cells[i].center[1], 4), lon=js_round(cells[i].center[0], 4)))
+            self.revisit_model.appendRow(items)
+
+    def draw_revisit(self) -> None:
+        """Draws the revisit map's cells, coloured by their longest wait."""
+        revisit = self.revisit
+        if revisit is None:
+            return
+        stats = revisit["stats"]
+        seen = [s.maxGap for s in stats if s.count > 0]
+        shortest, longest = (min(seen), max(seen)) if seen else (0, 0)
+        # Every cell named only on a small grid (the viewer names up to 12 × 12; on the canvas the texts would overlap).
+        many = len(revisit["cells"]) > 36
+        polygons = []
+        for i, (cell, s) in enumerate(zip(revisit["cells"], stats)):
+            chosen = revisit["chosen"] == i
+            label = "" if many and not chosen else (hours_text(s.maxGap) if s.count else self.tr("なし"))
+            polygons.append(([cell.ring], QColor(*revisit_color(s, shortest, longest)).name(), 3 if chosen else 1, label))
+        self.overlay.paint(polygons)
+        self.canvas.refresh()
+
+    def _cell_chosen(self, row: int) -> None:
+        if self.revisit is None or row < 0:
+            return
+        index = self.revisit_model.index(row, 0)
+        self.revisit["chosen"] = self.revisit_model.data(index, Qt.ItemDataRole.UserRole)
+        self.draw_revisit()
+
+    def zoom_to_cell(self) -> None:
+        """Centres the map on the chosen cell."""
+        revisit = self.revisit
+        if revisit is None or revisit["chosen"] is None:
+            return
+        x0, y0 = revisit["cells"][revisit["chosen"]].ring[0]
+        x1, y1 = revisit["cells"][revisit["chosen"]].ring[2]
+        box = QgsRectangle(x0, y0, x1, y1)
+        crs = self.canvas.mapSettings().destinationCrs()
+        self.canvas.setCenter(from_wgs84(crs).transform(box.center()))
+        self.canvas.refresh()
+
+    # --- Reminders and the calendar ----------------------------------------------------------
+
+    def _rings_of(self, op: Opportunity) -> list:
+        plan = self.plan
+        shapes = pass_shapes(plan["sats"][op.satellite], plan["targets"][op.target], op)
+        return [[list(p) for p in ring] for ring in shapes.scenes] if shapes else []
+
+    def reminders(self) -> list:
+        return [r for r in (reminder_of(v) for v in settings.plan_reminders()) if r is not None]
+
+    def count_reminders(self) -> None:
+        n = sum(1 for r in self.reminders() if r.time > _now_ms())
+        self.remind_count.setText(self.tr("通知予定 {n} 件").format(n=n) if n else "")
+
+    def set_reminders(self) -> int:
+        """Sets reminders before the listed shots."""
+        plan = self.plan
+        if not plan or not self.shown:
+            return 0
+        fresh = new_reminders(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), self._rings_of, _now_ms())
+        settings.set_plan_reminders([r.to_json() for r in merge_reminders(self.reminders(), fresh)])
+        self.count_reminders()
+        bar = self.iface.messageBar()
+        if fresh:
+            bar.pushInfo(self.tr("撮像計画"), self.tr("撮像 {n} 件の {m} 分前に通知（QGIS の起動中のみ）").format(n=len(fresh), m=self.remind_minutes.value()))
+        else:
+            bar.pushInfo(self.tr("撮像計画"), self.tr("今後の撮像がないため、通知の設定なし"))
+        return len(fresh)
+
+    def clear_reminders(self) -> None:
+        settings.set_plan_reminders([])
+        self.count_reminders()
+        self.iface.messageBar().pushInfo(self.tr("撮像計画"), self.tr("撮像の通知をすべて解除"))
+
+    def fire_reminders(self, now: Optional[float] = None) -> int:
+        """Shows the reminders that are due in the message bar and the log; returns how many."""
+        now = _now_ms() if now is None else now
+        kept = self.reminders()
+        due, rest = due_reminders(kept, now)
+        if len(rest) == len(kept):
+            return 0
+        settings.set_plan_reminders([r.to_json() for r in rest])
+        for r in due:
+            text = reminder_text(r, now)
+            QgsMessageLog.logMessage(text, self.tr("撮像計画"), Qgis.MessageLevel.Info)
+            self._notice(text, r.rings)
+        if self.remind_row.isVisible():
+            self.count_reminders()
+        return len(due)
+
+    def _notice(self, text: str, rings: list) -> None:
+        """A notice in the message bar, with 「移動」 to the shot's scenes."""
+        bar = self.iface.messageBar()
+        widget = bar.createMessage(self.tr("撮像の通知"), text)
+        if rings:
+            go = QPushButton(self.tr("移動"))
+
+            def zoom() -> None:
+                box = QgsRectangle()
+                box.setNull()
+                for ring in rings:
+                    for x, y in ring:
+                        box.combineExtentWith(x, y)
+                crs = self.canvas.mapSettings().destinationCrs()
+                self.canvas.setExtent(from_wgs84(crs).transformBoundingBox(box.buffered(max(box.width(), box.height()) * 0.5 + 0.01)))
+                self.canvas.refresh()
+
+            go.clicked.connect(zoom)
+            widget.layout().addWidget(go)
+        bar.pushWidget(widget, Qgis.MessageLevel.Info, 0)
+
+    def default_ics_name(self) -> str:
+        return self.default_file_name()[:-4] + ".ics"
+
+    def save_ics(self, path: Optional[str] = None) -> None:
+        """Saves the listed shots as an iCalendar file."""
+        plan = self.plan
+        if not plan or not self.shown:
+            return
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, self.tr("予定表 (.ics)"), self.default_ics_name(), self.tr("iCalendar (*.ics)"))
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(plan_ics(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), _now_ms()))
+        self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像の予定を予定表（.ics）で保存"))
+
+    # --- Saving to a plan store -------------------------------------------------------------
+
+    def save_to_store(self, then: Optional[Callable[[Optional[str]], None]] = None) -> None:
+        """Saves the listed shots to the chosen plan layer (in a task); `then` hears the plan's id (None when nothing was saved)."""
+        plan = self.plan
+        stores = self.context.config.plan_stores
+        index = max(0, self.store_choice.currentIndex())
+        if not plan or not self.shown or not stores or self.store_task is not None:
+            return
+        store = stores[min(index, len(stores) - 1)]
+        name = self.plan_name.text().strip() or self.tr("撮像計画 {day}").format(day=local_text(plan["options"].start)[:10])
+        plan_id = new_plan_id()
+        features = shot_features(self.shown, plan["sats"], plan["targets"], self._rings_of, plan_id, name, store.fields, _now_ms())
+        client = self.context.esri()
+        token = self.context.token_for(store.url, store.token)
+        self.status.setText(self.tr("{label} に {n} 回の撮像を保存中…").format(label=store.label, n=len(features)))
+
+        def work(task):
+            return add_shots(client, store, token, features, task.isCanceled)
+
+        def done(result):
+            self.store_task = None
+            saved, failed_ = result
+            more = self.tr("。保存失敗 {n} 回: {why}").format(n=len(failed_), why=failed_[0]) if failed_ else ""
+            self.status.setText(self.tr("「{name}」を {label} に保存（{n} 回{more}）。「保存した計画…」で撮像の成否を確認可能").format(
+                name=name, label=store.label, n=saved, more=more))
+            self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像計画「{name}」を保存").format(name=name))
+            if then:
+                then(plan_id if saved else None)
+
+        def failed(message):
+            self.store_task = None
+            self.status.setText(self.tr("保存失敗: {m}").format(m=message))
+            if then:
+                then(None)
+
+        self.store_task = run_task(self.tr("撮像計画の保存"), work, done, failed)
+
     # --- Output ---------------------------------------------------------------------------
+
+    def revisit_shown(self) -> bool:
+        return self.revisit is not None and self.view.currentData() == "revisit"
 
     def csv_text(self) -> str:
         plan = self.plan
+        if self.revisit_shown():
+            return revisit_csv(self.revisit["cells"], self.revisit["stats"])
         return plan_csv(self.shown, plan["sats"], plan["targets"], plan["options"].stations)
 
     def default_file_name(self) -> str:
@@ -1076,10 +1687,12 @@ class ImagingPlanDock(PluginDock):
         def day(ms: float) -> str:
             return datetime.fromtimestamp(ms / 1000).strftime("%Y%m%d")
 
+        if self.revisit_shown():
+            return "revisit.csv"
         return f"imaging-plan_{day(options.start)}-{day(options.end)}.csv"
 
     def save_csv(self, path: Optional[str] = None) -> None:
-        if not self.plan or not self.shown:
+        if not self.plan or not (self.shown or self.revisit_shown()):
             return
         if not path:
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), self.default_file_name(), self.tr("CSV (*.csv)"))
@@ -1087,7 +1700,10 @@ class ImagingPlanDock(PluginDock):
             return
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(self.csv_text())
-        self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像機会 {n} 件を CSV で保存").format(n=len(self.shown)))
+        if self.revisit_shown():
+            self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("再訪間隔 {n} セルを CSV で保存").format(n=len(self.revisit["cells"])))
+        else:
+            self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像機会 {n} 件を CSV で保存").format(n=len(self.shown)))
 
     def layer_name(self) -> str:
         options = self.plan["options"]
@@ -1095,6 +1711,13 @@ class ImagingPlanDock(PluginDock):
         return self.tr("撮像計画 {start} から {days} 日（{n} 回）").format(start=local_text(options.start), days=days, n=len(self.shown))
 
     def add_layer(self) -> Optional[QgsVectorLayer]:
+        if self.plan and self.revisit_shown():
+            options = self.plan["options"]
+            days = math.floor((options.end - options.start) / 86400000 + 0.5)
+            layer = memory_layer(revisit_layer(self.revisit["cells"], self.revisit["stats"]),
+                                 self.tr("再訪間隔 {start} から {days} 日").format(start=local_text(options.start), days=days))
+            QgsProject.instance().addMapLayer(layer)
+            return layer
         if not self.plan or not self.shown:
             return None
         plan = self.plan
@@ -1117,7 +1740,12 @@ class ImagingPlanDock(PluginDock):
 
     def close_down(self) -> None:
         """Called when the plugin unloads."""
+        self.remind_timer.stop()
         self.cancel()
+        for task in (self.revisit_task, self.cloud_task):
+            if task is not None:
+                task.cancel()
+        self.revisit_task = self.cloud_task = None
         for button in (self.pick, self.move_button):
             if button.isChecked():
                 button.setChecked(False)

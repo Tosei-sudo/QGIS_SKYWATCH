@@ -13,7 +13,9 @@ const entry = join(dir, 'entry.ts');
 writeFileSync(
   entry,
   `export { planAccess, coverPlan, satellitesFromText, shiftScene, passShapes } from ${JSON.stringify(resolve(src, 'imaging-plan.ts'))};
-   export { withModes } from ${JSON.stringify(resolve(src, 'sensor-modes.ts'))};`,
+   export { withModes } from ${JSON.stringify(resolve(src, 'sensor-modes.ts'))};
+   export { stereoPairs, repeatPairs } from ${JSON.stringify(resolve(src, 'imaging-plan-pairs.ts'))};
+   export { boxOf, gridCells, cellTargets, revisitStats } from ${JSON.stringify(resolve(src, 'imaging-plan-revisit.ts'))};`,
 );
 const bundle = join(dir, 'bundle.mjs');
 await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', outfile: bundle, nodePaths: [join(here, 'node_modules')], logLevel: 'error' });
@@ -23,8 +25,10 @@ const cases = JSON.parse(readFileSync(casesPath, 'utf8'));
 const out = {};
 for (const c of cases) {
   const sats = c.satellites.map((s) => ({ ...viewer.satellitesFromText(s.tle, { maxOffNadir: 30, minOffNadir: 0, swath: 10 })[0], ...s.spec }));
+  const cells = c.revisit ? viewer.gridCells(viewer.boxOf(c.targets), c.revisit.size) : null;
+  const targets = cells ? viewer.cellTargets(cells) : c.targets;
   const t0 = performance.now();
-  const result = viewer.planAccess(sats, c.targets, c.options);
+  const result = viewer.planAccess(sats, targets, c.options);
   const ms = performance.now() - t0;
   const plain = (op) => ({
     satellite: op.satellite, target: op.target, time: op.time, offNadir: op.offNadir, incidence: op.incidence, elevation: op.elevation,
@@ -38,6 +42,10 @@ for (const c of cases) {
     const plans = viewer.coverPlan(result.opportunities, c.targets, sats, c.cover.goal, c.cover.minGain, c.cover.share);
     entryOut.cover = plans.map((p) => ({ target: p.target, coverage: p.coverage, done: p.done, blocked: p.blocked, steps: p.steps.map(plain) }));
   }
+  const pairOut = (p) => ({ a: p.a.time, b: p.b.time, sa: p.a.satellite, sb: p.b.satellite, target: p.a.target, convergence: p.convergence, bh: p.bh, days: p.days, baseline: p.baseline });
+  if (c.pairs?.stereo) entryOut.stereo = viewer.stereoPairs(result.opportunities, sats, targets, c.pairs.stereo).map(pairOut);
+  if (c.pairs?.repeat) entryOut.repeat = viewer.repeatPairs(result.opportunities, sats, targets, c.pairs.repeat).map(pairOut);
+  if (cells) entryOut.revisit = viewer.revisitStats(result.opportunities, cells.length, c.options.start, c.options.end);
   out[c.name] = entryOut;
 }
 writeFileSync(outPath, JSON.stringify(out));
