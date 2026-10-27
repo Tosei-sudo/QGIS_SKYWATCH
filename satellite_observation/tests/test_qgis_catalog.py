@@ -150,6 +150,37 @@ def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(
     assert settings.path_folder("\\\\nas\\images") is None
 
 
+def test_the_extent_by_default_and_an_area_drawn_on_the_map(plugin, monkeypatch):
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    assert dock.area_box.currentData() == "extent"
+    dock.show()
+    # 「描いた範囲」 without one starts drawing.
+    dock._area_chosen(dock.area_box.findData("drawn"))
+    assert dock.draw_button.isChecked() and iface.canvas.mapTool() is dock.draw_tool
+    # Corners clicked (map units are degrees here), then closed: only C lies inside.
+    from qgis.core import QgsPointXY
+
+    dock.draw_tool.points = [QgsPointXY(139.71, 35.61), QgsPointXY(139.74, 35.61), QgsPointXY(139.74, 35.64)]
+    dock.draw_tool.finish()
+    assert dock.area_box.currentData() == "drawn" and not dock.draw_button.isChecked()
+    assert dock.drawn[0] == dock.drawn[-1] and len(dock.drawn) == 4
+    assert dock.overlay.area.numberOfVertices() > 0
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    form = next(f for u, f in fake.asked if u.endswith("/query") and "returnCountOnly" not in f)
+    assert form["geometryType"] == "esriGeometryPolygon" and json.loads(form["geometry"])["rings"][0][0] == [139.71, 35.61]
+    # The watch dialog offers the area drawn first.
+    from satellite_observation.ui.watch_dialog import WatchDialog
+
+    dialog = WatchDialog(p.api.config.image_catalogs[0], EMPTY_SEARCH, iface.canvas, None, None, dock.drawn)
+    assert dialog.area.currentData() == "drawn" and dialog.areas()[0]["kind"] == "polygon"
+    # Forgotten: back to the extent.
+    dock.set_drawn(None)
+    assert dock.area_box.currentData() == "extent" and dock.overlay.area.numberOfVertices() == 0
+
+
 def test_the_list_as_a_layer_with_its_time(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
