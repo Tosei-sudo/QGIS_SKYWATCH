@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 画像カタログ: stacked satellite images, a magnifier over them -->
+  <rect x="8" y="3" width="20" height="15" rx="1.5" fill="#fce7f3" stroke="#be185d" stroke-width="1.5"/>
+  <rect x="3" y="8" width="20" height="15" rx="1.5" fill="#fff" stroke="#be185d" stroke-width="2"/>
+  <path d="M5 21l5-6 4 4 3-3 4 5z" fill="#db2777"/>
+  <circle cx="17.5" cy="12.5" r="1.8" fill="#f9a8d4"/>
+  <circle cx="22" cy="23" r="5" fill="#fff" fill-opacity="0.85" stroke="#1f2937" stroke-width="2"/>
+  <line x1="25.6" y1="26.6" x2="29.5" y2="30.5" stroke="#1f2937" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

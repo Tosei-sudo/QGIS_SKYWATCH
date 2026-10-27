@@ -178,6 +178,8 @@ class ImagingPlanDock(PluginDock):
         self.moving: Optional[dict] = None
         #: Opens the 「保存した計画」 dock (set by the plugin).
         self.open_saved: Optional[Callable[[], None]] = None
+        #: Told each reminder shown (reminder, text, now): the 通知 dock keeps it as a notice.
+        self.on_reminder: Optional[Callable] = None
         self._build()
         context.configChanged.connect(self._config_changed)
         project = QgsProject.instance()
@@ -1686,6 +1688,8 @@ class ImagingPlanDock(PluginDock):
             text = reminder_text(r, now)
             QgsMessageLog.logMessage(text, self.tr("撮像計画"), Qgis.MessageLevel.Info)
             self._notice(text, r.rings)
+            if self.on_reminder is not None:
+                self.on_reminder(r, text, now)
         if self.remind_row.isVisible():
             self.count_reminders()
         return len(due)

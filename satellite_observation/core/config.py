@@ -15,6 +15,8 @@ from typing import Any, Optional
 
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .catalog import CatalogConfig, catalog_of
+from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
+from .catalog.paths import PathMapping, path_mappings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
@@ -24,13 +26,16 @@ from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_for
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
-    "imageCatalogs", "observationStores", "observationVocabulary", "arcgisPortals",
+    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals",
 )
 
 
 @dataclass
 class PluginConfig:
     image_catalogs: list[CatalogConfig] = field(default_factory=list)
+    #: Minutes between checks for new images.
+    watch_interval: float = DEFAULT_WATCH_INTERVAL
+    path_mappings: list[PathMapping] = field(default_factory=list)
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
     sensor_catalogs: list[SensorCatalogConfig] = field(default_factory=list)
     #: None hides the choice.
@@ -138,6 +143,10 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         return [c for c in (read(v, problems, i) for i, v in enumerate(value[key])) if c is not None]
 
     config.image_catalogs = listed("imageCatalogs", catalog_of)
+    if "watchInterval" in value:
+        config.watch_interval = watch_interval_of(value["watchInterval"], problems)
+    if "pathMappings" in value:
+        config.path_mappings = path_mappings_of(value["pathMappings"], problems)
     config.satellite_catalogs = listed("satelliteCatalogs", satellite_catalog_of)
     config.sensor_catalogs = listed("sensorCatalogs", sensor_catalog_of)
     if "cloudForecast" in value:
