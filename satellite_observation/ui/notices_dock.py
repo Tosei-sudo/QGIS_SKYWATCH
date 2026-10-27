@@ -46,6 +46,7 @@ class NoticesDock(PluginDock):
         self.canvas = iface.mapCanvas()
         self._store: Optional[WatchStore] = None
         self._checking = False
+        self._closed = False
         #: Told the number of unread notices whenever it may have changed (the plugin puts it on the toolbar button).
         self.unread_changed: Optional[Callable[[int], None]] = None
         #: Opens an image of a notice with the image catalog dock's folder dialog (set by the plugin).
@@ -133,7 +134,7 @@ class NoticesDock(PluginDock):
 
     def check(self, force: bool = False) -> None:
         """Checks the watches due (every enabled one when `force`) in a task."""
-        if self._checking or self.context.loading:
+        if self._checking or self.context.loading or self._closed:
             return
         try:
             store = self.store()
@@ -375,3 +376,5 @@ class NoticesDock(PluginDock):
 
     def close_down(self) -> None:
         self.timer.stop()
+        # A check still waiting to start (the plugin unloaded right after showing the dock) finds the store closed.
+        self._closed = True

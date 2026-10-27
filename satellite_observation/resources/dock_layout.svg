@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- ドックを初期位置に戻す: a window with a panel on each side, tabs on top -->
+  <rect x="2" y="5" width="28" height="22" rx="2" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <rect x="3" y="10" width="8" height="16" fill="#94a3b8"/>
+  <rect x="21" y="10" width="8" height="16" fill="#94a3b8"/>
+  <rect x="3" y="7" width="4" height="3" fill="#475569"/>
+  <rect x="21" y="7" width="4" height="3" fill="#475569"/>
+  <rect x="25" y="7.5" width="4" height="2.5" fill="#cbd5e1"/>
+</svg>

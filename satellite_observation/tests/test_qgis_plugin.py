@@ -41,7 +41,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     plugin = classFactory(iface)
     plugin.initGui()
     assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知"]
-    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "移動目標撮像計画…", "設定…"]
+    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "移動目標撮像計画…", "ドックを初期位置に戻す", "設定…"]
     assert plugin.api.problems == []
     assert plugin.api.config.satellite_catalogs[0].label == "衛星カタログ"
     roles = [s.role for s in plugin.context.services()]
@@ -55,6 +55,44 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     assert dialog.problems.count() == 0
     plugin.unload()
     assert iface.docks == [] and iface.menus == []
+
+
+def test_the_docks_start_in_three_groups_of_tabs_and_come_back_on_screen():
+    from qgis.PyQt.QtCore import QPoint, Qt
+
+    from satellite_observation import classFactory
+
+    iface = FakeIface()
+    plugin = classFactory(iface)
+    plugin.initGui()
+    d, w = plugin.docks, iface.window
+    right, left = Qt.DockWidgetArea.RightDockWidgetArea, Qt.DockWidgetArea.LeftDockWidgetArea
+
+    # Hidden docks keep their place: shown, each group is one set of tabs.
+    for dock in d.values():
+        dock.show()
+
+    def tabs(name):
+        return sorted(x.objectName() for x in [d[name], *w.tabifiedDockWidgets(d[name])])
+
+    assert tabs("SatObsImagingPlan") == ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]
+    assert tabs("SatObsImageCatalog") == ["SatObsImageCatalog", "SatObsNotices"]
+    assert tabs("SatObsObservations") == ["SatObsObservations", "SatObsTaxonomy"]
+    assert [w.dockWidgetArea(d[n]) for n in ("SatObsImagingPlan", "SatObsImageCatalog", "SatObsObservations")] == [right, left, right]
+    # A floating dock off every screen is docked again when shown.
+    d["SatObsSatellitePass"].setFloating(True)
+    d["SatObsSatellitePass"].move(QPoint(-20000, -20000))
+    d["SatObsSatellitePass"].hide()
+    d["SatObsSatellitePass"].show()
+    assert wait_for(lambda: not d["SatObsSatellitePass"].isFloating())
+    # Moved away: back where it started, still open.
+    w.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, d["SatObsNotices"])
+    d["SatObsObservations"].setFloating(True)
+    [home] = [a for a in plugin.actions if a.text() == "ドックを初期位置に戻す"]
+    home.trigger()
+    assert w.dockWidgetArea(d["SatObsNotices"]) == left and tabs("SatObsImageCatalog") == ["SatObsImageCatalog", "SatObsNotices"]
+    assert not d["SatObsObservations"].isFloating() and d["SatObsNotices"].isVisible()
+    plugin.unload()
 
 
 def test_a_broken_settings_file_says_why(tmp_path):
@@ -176,5 +214,5 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 9
+    assert len(set(drawn)) == len(plugin.actions) == 10
     plugin.unload()
