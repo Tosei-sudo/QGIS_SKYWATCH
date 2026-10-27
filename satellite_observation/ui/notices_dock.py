@@ -46,6 +46,8 @@ class NoticesDock(PluginDock):
         self.canvas = iface.mapCanvas()
         self._store: Optional[WatchStore] = None
         self._checking = False
+        #: A check asked for while one runs (None: none; else whether forced), run when that one ends.
+        self._again: Optional[bool] = None
         self._closed = False
         #: Told the number of unread notices whenever it may have changed (the plugin puts it on the toolbar button).
         self.unread_changed: Optional[Callable[[int], None]] = None
@@ -133,8 +135,15 @@ class NoticesDock(PluginDock):
     # --- Checking ---------------------------------------------------------------------------------
 
     def check(self, force: bool = False) -> None:
-        """Checks the watches due (every enabled one when `force`) in a task."""
-        if self._checking or self.context.loading or self._closed:
+        """
+        Checks the watches due (every enabled one when `force`) in a task. Asked
+        while a check runs, it runs once that one ends (a watch added or the
+        catalog changed meanwhile is not left until the next round).
+        """
+        if self._checking:
+            self._again = bool(self._again) or force
+            return
+        if self.context.loading or self._closed:
             return
         try:
             store = self.store()
@@ -157,13 +166,20 @@ class NoticesDock(PluginDock):
             if added:
                 self.iface.messageBar().pushInfo(TITLE, self.tr("新着画像 {n} 件").format(n=added))
             self.status.setText(self.tr("確認済み（{t}）").format(t=time_text(_now())))
+            self._check_again()
 
         def failed(message: str) -> None:
             self._checking = False
             self.refresh()
             self.status.setText(self.tr("新着画像の確認に失敗: {m}").format(m=message))
+            self._check_again()
 
         self._start(self.tr("新着画像の確認"), work, done, failed)
+
+    def _check_again(self) -> None:
+        again, self._again = self._again, None
+        if again is not None:
+            self.check(force=again)
 
     # --- Lists ------------------------------------------------------------------------------------
 

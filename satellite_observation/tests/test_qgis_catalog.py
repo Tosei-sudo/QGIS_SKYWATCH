@@ -224,6 +224,38 @@ def test_watches_notify_new_images_only(plugin):
     assert notices.store().watches() == [] and notices.store().notices() == []
 
 
+def test_a_check_asked_for_while_one_runs_is_not_lost(plugin, monkeypatch):
+    """The cause of the old flakiness: 「確認」 asked for while a check was ending was dropped."""
+    import threading
+
+    from satellite_observation.ui import notices_dock
+
+    p, iface, folder, fake, images = plugin
+    notices = p.api.notices
+    watch = notices.add_watch(p.api.config.image_catalogs[0], TYPES, EMPTY_SEARCH.with_(sensor="S1"), [], "S1 の新着")
+    assert wait_for(lambda: notices.store().watch(watch.id).last_checked is not None and not notices._checking)
+    # A check that has asked the catalog and not yet ended …
+    asked = threading.Event()
+    release = threading.Event()
+    real = notices_dock.check_due
+
+    def held(*args, **kwargs):
+        added = real(*args, **kwargs)
+        asked.set()
+        release.wait(10)
+        return added
+
+    monkeypatch.setattr(notices_dock, "check_due", held)
+    notices.check(force=True)
+    assert wait_for(asked.is_set)
+    # … when a new image comes and 「確認」 is asked for again.
+    images.add({"IMG_ID": "D", "ACQ": time.time() * 1000 - DAY, "SENSOR": "S1", "PATH": None}, ring(139, 35, 140, 36))
+    notices.check(force=True)
+    release.set()
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
+    assert notices.notices.topLevelItem(0).text(2) == "D"
+
+
 def test_a_point_watch_and_the_plan_reminders(plugin, monkeypatch):
     p, iface, folder, fake, images = plugin
     notices = p.api.notices
