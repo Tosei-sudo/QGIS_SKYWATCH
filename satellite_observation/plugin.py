@@ -4,8 +4,9 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.PyQt.QtCore import QCoreApplication, Qt
-from qgis.PyQt.QtGui import QIcon
+from qgis.core import QgsMapLayerType, QgsProject
+from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
+from qgis.PyQt.QtGui import QColor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget
 
 try:  # Qt6
@@ -14,11 +15,14 @@ except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
 from .core.obs.api import ObservationApi
+from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
+from .ui.catalog_dock import CatalogDock
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
+from .ui.notices_dock import NoticesDock
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.saved_plans_dock import SavedPlansDock
@@ -27,6 +31,25 @@ from .ui.taxonomy_dock import TaxonomyDock
 
 HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
+
+
+def badged(icon: QIcon, n: int) -> QIcon:
+    """The icon with the number of unread notices in a red circle (the icon as it is for none)."""
+    if n <= 0:
+        return icon
+    pixmap = icon.pixmap(64, 64)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QColor("#ffffff"))
+    painter.setBrush(QColor("#dc2626"))
+    painter.drawEllipse(QRectF(26, 0, 38, 38))
+    font = painter.font()
+    font.setBold(True)
+    font.setPixelSize(26 if n < 10 else 20)
+    painter.setFont(font)
+    painter.drawText(QRectF(26, 0, 38, 38), int(Qt.AlignmentFlag.AlignCenter), str(n) if n < 100 else "99+")
+    painter.end()
+    return QIcon(pixmap)
 
 
 def tr(text: str) -> str:
@@ -77,6 +100,16 @@ class PluginApi:
         """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
         return self._plugin.docks["SatObsSavedPlans"]
 
+    @property
+    def image_catalog(self) -> "CatalogDock":
+        """The image catalog dock (its `search()`, `records`, `choose()`, `open_records()`, `find_similar()`, `add_layer()`)."""
+        return self._plugin.docks["SatObsImageCatalog"]
+
+    @property
+    def notices(self) -> "NoticesDock":
+        """The notices dock (its `store()`, `check()`, `watch_conditions()`, `watch_point()`, `open_notices()`)."""
+        return self._plugin.docks["SatObsNotices"]
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -107,6 +140,8 @@ class SatelliteObservationPlugin:
         self.toolbar = None
         self.moving_targets: Optional[MovingTargetDialog] = None
         self.api = PluginApi(self)
+        self.similar_action: Optional[QAction] = None
+        self.notices_action: Optional[QAction] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -118,14 +153,17 @@ class SatelliteObservationPlugin:
 
         #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
-                 "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy"}
+                 "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
+                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices"}
 
         specs = [
+            ("SatObsImageCatalog", tr("画像カタログ"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSavedPlans", tr("保存した撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSatellitePass", tr("衛星パス"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsObservations", tr("観測記録"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsTaxonomy", tr("分類体系の編集"), None, Qt.DockWidgetArea.LeftDockWidgetArea),
+            ("SatObsNotices", tr("通知"), None, Qt.DockWidgetArea.RightDockWidgetArea),
         ]
         for name, title, stage, area in specs:
             if name == "SatObsImagingPlan":
@@ -136,6 +174,10 @@ class SatelliteObservationPlugin:
                 dock = SatellitePassDock(self.iface, self.context, self.open_settings, self.docks["SatObsImagingPlan"], self.iface.mainWindow())
             elif name == "SatObsTaxonomy":
                 dock = TaxonomyDock(self.iface, self.context, self.open_settings, self.docks["SatObsObservations"], self.iface.mainWindow())
+            elif name == "SatObsImageCatalog":
+                dock = CatalogDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsNotices":
+                dock = NoticesDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
@@ -151,6 +193,7 @@ class SatelliteObservationPlugin:
             self.actions.append(action)
 
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
+        self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
         self.iface.addPluginToMenu(MENU, moving)
@@ -174,6 +217,40 @@ class SatelliteObservationPlugin:
             self.docks["SatObsImagingPlan"].plan_at(p.x(), p.y())
 
         action.triggered.connect(plan)
+        watch = menu.addAction(tr("この地点の新着画像を監視…"))
+
+        def watch_here() -> None:
+            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
+            self.docks["SatObsNotices"].watch_point(p.x(), p.y())
+
+        watch.triggered.connect(watch_here)
+
+    def _wire_catalog(self) -> None:
+        """The image catalog with the notices, the imaging plan's reminders and the layers' right-click menu."""
+        catalog, notices = self.docks["SatObsImageCatalog"], self.docks["SatObsNotices"]
+        catalog.watch_requested = notices.watch_conditions
+        notices.choose_folder = catalog.choose_folder
+        self.notices_action = notices.toggleViewAction()
+
+        bell = self.notices_action.icon()
+
+        def unread(n: int) -> None:
+            self.notices_action.setText(tr("通知") + (f"（{n}）" if n else ""))
+            self.notices_action.setIcon(badged(bell, n))
+
+        notices.unread_changed = unread
+        self.docks["SatObsImagingPlan"].on_reminder = notices.add_plan_notice
+        # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
+        self.similar_action = QAction(QIcon(os.path.join(HERE, "resources", "catalog.svg")), tr("類似画像の検索…"), self.iface.mainWindow())
+        self.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))
+        self.iface.addCustomActionForLayerType(self.similar_action, "", QgsMapLayerType.RasterLayer, False)
+        QgsProject.instance().layersAdded.connect(self._layers_added)
+        self._layers_added(QgsProject.instance().mapLayers().values())
+
+    def _layers_added(self, layers) -> None:
+        for layer in layers:
+            if layer.customProperty(FEATURE):
+                self.iface.addCustomActionForLayer(self.similar_action, layer)
 
     def edit_taxonomy(self, path=None) -> None:
         """Opens the classification editor (at a class)."""
@@ -200,6 +277,13 @@ class SatelliteObservationPlugin:
             self.iface.mapCanvas().contextMenuAboutToShow.disconnect(self._canvas_menu)
         except (TypeError, RuntimeError):
             pass
+        if getattr(self, "similar_action", None) is not None:
+            try:
+                QgsProject.instance().layersAdded.disconnect(self._layers_added)
+            except (TypeError, RuntimeError):
+                pass
+            self.iface.removeCustomActionForLayerType(self.similar_action)
+            self.similar_action = None
         for action in self.actions:
             self.iface.removePluginMenu(MENU, action)
         self.actions = []

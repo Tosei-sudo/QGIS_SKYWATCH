@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 通知: a bell with a new-image badge -->
+  <path d="M16 4a8 8 0 0 0-8 8v6l-3 4.5h22L24 18v-6a8 8 0 0 0-8-8z" fill="#facc15" stroke="#a16207" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M12.5 25a3.5 3.5 0 0 0 7 0" fill="none" stroke="#a16207" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="24.5" cy="7.5" r="5" fill="#dc2626" stroke="#fff" stroke-width="1.5"/>
+  <path d="M22.5 7.5h4M24.5 5.5v4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

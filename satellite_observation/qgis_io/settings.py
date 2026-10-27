@@ -151,6 +151,50 @@ def set_plan_reminders(reminders: list) -> None:
     _set("plan_reminders", json.dumps(reminders, ensure_ascii=False))
 
 
+def path_folders() -> dict[str, str]:
+    """The folders chosen on this computer for `pathMappings` prefixes (by core.catalog.paths.folder_key)."""
+    try:
+        value = json.loads(_get("catalog/path_folders", "{}"))
+    except ValueError:
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str) and v} if isinstance(value, dict) else {}
+
+
+def path_folder(prefix: str) -> Optional[str]:
+    from ..core.catalog.paths import folder_key
+
+    return path_folders().get(folder_key(prefix))
+
+
+def set_path_folder(prefix: str, folder: Optional[str]) -> None:
+    from ..core.catalog.paths import folder_key
+
+    folders = path_folders()
+    if folder:
+        folders[folder_key(prefix)] = folder
+    else:
+        folders.pop(folder_key(prefix), None)
+    _set("catalog/path_folders", json.dumps(folders, ensure_ascii=False))
+
+
+def clear_path_folders() -> None:
+    """Forgets every folder chosen for the prefixes (「フォルダの対応を消去」)."""
+    _set("catalog/path_folders", "{}")
+
+
+def similar_tolerance() -> dict:
+    """The tolerances of 「類似画像の検索」 last used (core.catalog.similar.SimilarTolerance JSON)."""
+    try:
+        value = json.loads(_get("catalog/similar_tolerance", "{}"))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def set_similar_tolerance(value: dict) -> None:
+    _set("catalog/similar_tolerance", json.dumps(value))
+
+
 def plan_cloud() -> bool:
     """Whether the imaging plan asks for cloud forecasts (the person turned them on)."""
     return _get("plan_cloud") == "1"
