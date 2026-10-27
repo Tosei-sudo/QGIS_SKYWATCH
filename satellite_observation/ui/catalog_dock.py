@@ -23,12 +23,13 @@ from ..core.catalog.paths import PathError, PathMapping
 from ..core.catalog.query import CatalogSearch
 from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, read_catalog_layer, search_catalog, sensors_of
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
+from ..core.catalog.watch import areas_of
 from ..qgis_io import settings
 from ..qgis_io.catalog_io import Cancelled, footprint, open_record, overlap_measure, record_of_layer, results_layer
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
-from .catalog_overlay import FootprintOverlay, FootprintTool
+from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock
 from .flow_layout import FlowLayout
 
@@ -54,8 +55,8 @@ class CatalogDock(PluginDock):
         self.layers: dict[str, CatalogLayerInfo] = {}
         #: The image compared with in 「類似画像の検索」 (with its catalog); None for the usual search.
         self.reference: Optional[tuple[CatalogRecord, CatalogConfig]] = None
-        #: Opens the watch dialog of the 通知 dock (set by the plugin): (catalog, types, conditions).
-        self.watch_requested: Optional[Callable[[CatalogConfig, dict, CatalogSearch], None]] = None
+        #: Opens the watch dialog of the 通知 dock (set by the plugin): (catalog, types, conditions, area drawn).
+        self.watch_requested: Optional[Callable[[CatalogConfig, dict, CatalogSearch, Optional[list]], None]] = None
         self._shown_catalog: Optional[CatalogConfig] = None
         self._tasks: list = []
 
@@ -65,8 +66,20 @@ class CatalogDock(PluginDock):
         form.addRow(self.tr("カタログ"), self.catalog_box)
         self.area_box = QComboBox()
         self.area_box.addItem(self.tr("表示範囲"), "extent")
+        self.area_box.addItem(self.tr("描いた範囲"), "drawn")
         self.area_box.addItem(self.tr("指定なし"), "none")
-        form.addRow(self.tr("範囲"), self.area_box)
+        self.area_box.setCurrentIndex(0)
+        self.area_box.activated.connect(self._area_chosen)
+        self.draw_button = QPushButton(self.tr("範囲を描く"))
+        self.draw_button.setCheckable(True)
+        self.draw_button.setToolTip(self.tr("クリックで頂点を追加、ダブルクリックか右クリックで確定、Esc で取消"))
+        self.draw_button.toggled.connect(self._draw_toggled)
+        area_row = QHBoxLayout()
+        area_row.addWidget(self.area_box, 1)
+        area_row.addWidget(self.draw_button)
+        form.addRow(self.tr("範囲"), area_row)
+        #: The area drawn on the map (its corners, longitude / latitude; the ring closed); None before one is drawn.
+        self.drawn: Optional[list] = None
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
         form.addRow(self.tr("撮像日"), self._range(self.acquired_from, self.acquired_to))
         self.body.addLayout(form)
@@ -173,6 +186,10 @@ class CatalogDock(PluginDock):
 
         self.overlay: Optional[FootprintOverlay] = None
         self.tool = FootprintTool(self.canvas, self._picked)
+        self.draw_tool = DrawTool(self.canvas, self.set_drawn)
+        # Another map tool chosen: the buttons pop up.
+        self.tool.deactivated.connect(lambda: self.buttons["pick"].setChecked(False))
+        self.draw_tool.deactivated.connect(lambda: self.draw_button.setChecked(False))
         self._previous_tool = None
         self.visibilityChanged.connect(self._visibility)
         context.configChanged.connect(self._config_changed)
@@ -271,7 +288,10 @@ class CatalogDock(PluginDock):
         if catalog is None:
             return
         search = self.conditions()
-        box = self.extent() if self.area_box.currentData() == "extent" else None
+        box = self.area()
+        if self.area_box.currentData() == "drawn" and box is None:
+            self.status.setText(self.tr("範囲が未作成。「範囲を描く」で地図に描画"))
+            return
         client = self.context.esri()
         token = self.context.token_for(catalog.url, catalog.token)
 
@@ -429,16 +449,52 @@ class CatalogDock(PluginDock):
             selection.select(index, flags | selection.SelectionFlag.ClearAndSelect)
 
     def _pick_toggled(self, on: bool) -> None:
+        self._use_tool(self.tool, on)
+
+    def _draw_toggled(self, on: bool) -> None:
+        self._use_tool(self.draw_tool, on)
+
+    def _use_tool(self, tool, on: bool) -> None:
         if on:
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.tool)
-        elif self.canvas.mapTool() is self.tool:
-            self.canvas.unsetMapTool(self.tool)
+            current = self.canvas.mapTool()
+            if current not in (self.tool, self.draw_tool):
+                self._previous_tool = current
+            self.canvas.setMapTool(tool)
+        elif self.canvas.mapTool() is tool:
+            self.canvas.unsetMapTool(tool)
             if self._previous_tool is not None:
                 try:
                     self.canvas.setMapTool(self._previous_tool)
                 except RuntimeError:
                     pass
+
+    def _area_chosen(self, index: int) -> None:
+        if self.area_box.itemData(index) == "drawn" and self.drawn is None:
+            self.draw_button.setChecked(True)
+
+    def set_drawn(self, corners: Optional[list]) -> None:
+        """The area to search (and watch) drawn on the map: its corners in WGS 84; None forgets it."""
+        self.drawn = None
+        if corners:
+            ring = [list(p) for p in corners]
+            if ring[0] != ring[-1]:
+                ring.append(list(ring[0]))
+            self.drawn = ring
+            self.area_box.setCurrentIndex(self.area_box.findData("drawn"))
+        elif self.area_box.currentData() == "drawn":
+            self.area_box.setCurrentIndex(0)
+        self.draw_button.setChecked(False)
+        if self.overlay is not None:
+            self.overlay.show_area(self.drawn)
+
+    def area(self):
+        """Where to search: the map's extent (a box), the area drawn (an Esri polygon) or None for anywhere."""
+        kind = self.area_box.currentData()
+        if kind == "extent":
+            return self.extent()
+        if kind == "drawn" and self.drawn:
+            return areas_of([], [[self.drawn]])[0]
+        return None
 
     def zoom_to_chosen(self) -> None:
         rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
@@ -453,9 +509,11 @@ class CatalogDock(PluginDock):
     def _visibility(self, visible: bool) -> None:
         if visible and self.overlay is None:
             self.overlay = FootprintOverlay(self.canvas)
+            self.overlay.show_area(self.drawn)
             self._redraw()
         elif not visible and self.overlay is not None:
             self.buttons["pick"].setChecked(False)
+            self.draw_button.setChecked(False)
             self.overlay.remove()
             self.overlay = None
 
@@ -519,12 +577,14 @@ class CatalogDock(PluginDock):
             client = self.context.esri()
             token = self.context.token_for(catalog.url, catalog.token)
             self._start(self.tr("画像カタログの確認"), lambda task: self._layer_of(client, catalog, token),
-                        lambda info: self.watch_requested(catalog, info.types, self.conditions()))
+                        lambda info: self.watch_requested(catalog, info.types, self.conditions(), self.drawn))
             return
-        self.watch_requested(catalog, info.types, self.conditions())
+        self.watch_requested(catalog, info.types, self.conditions(), self.drawn)
 
     def close_down(self) -> None:
         self.buttons["pick"].setChecked(False)
+        self.draw_button.setChecked(False)
+        self.draw_tool.remove()
         if self.overlay is not None:
             self.overlay.remove()
             self.overlay = None

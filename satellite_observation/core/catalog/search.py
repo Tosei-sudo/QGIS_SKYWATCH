@@ -141,15 +141,21 @@ def _clamp(v: float, limit: float) -> float:
 
 
 def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLayerInfo, search: CatalogSearch,
-                   box: Optional[Sequence[float]], token: Optional[str]) -> CatalogResult:
+                   box: Optional[Any], token: Optional[str]) -> CatalogResult:
     """
-    The images matching `search` (over `box`, `[xmin, ymin, xmax, ymax]` in
-    WGS 84, when given), newest first. Services that cannot order or page
-    results are asked for everything and sorted here.
+    The images matching `search` (over `box` when given: `[xmin, ymin, xmax,
+    ymax]` or an Esri polygon `{"rings": …}` drawn on the map, WGS 84), newest
+    first. Services that cannot order or page results are asked for
+    everything and sorted here.
     """
     where = where_of(catalog, layer.types, search)
     spatial: dict[str, str] = {}
-    if box is not None:
+    if isinstance(box, dict):
+        spatial = {
+            "geometry": json.dumps({"rings": box["rings"], "spatialReference": {"wkid": 4326}}),
+            "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
+        }
+    elif box is not None:
         xmin, ymin, xmax, ymax = box
         spatial = {
             "geometry": json.dumps({"xmin": _clamp(xmin, 180), "ymin": _clamp(ymin, 90), "xmax": _clamp(xmax, 180), "ymax": _clamp(ymax, 90), "spatialReference": {"wkid": 4326}}),

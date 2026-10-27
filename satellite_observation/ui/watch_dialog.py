@@ -1,6 +1,6 @@
 """
 The dialogs of 新着画像の通知: 「この条件で監視…」 (a new watch over the map's
-extent, the chosen features or nowhere in particular) and 「この地点の新着画像を
+extent, the area drawn, the chosen features or nowhere in particular) and 「この地点の新着画像を
 監視…」 (a new watch of a point, or the point added to a watch).
 """
 from __future__ import annotations
@@ -47,19 +47,24 @@ def selected_areas(layer: Optional[QgsMapLayer]) -> list[dict]:
 class WatchDialog(QDialog):
     """「この条件で監視」: the watch's name and area."""
 
-    def __init__(self, catalog: CatalogConfig, conditions: CatalogSearch, canvas, layer: Optional[QgsMapLayer], parent=None):
+    def __init__(self, catalog: CatalogConfig, conditions: CatalogSearch, canvas, layer: Optional[QgsMapLayer], parent=None,
+                 drawn: Optional[list] = None):
         super().__init__(parent)
         self.setWindowTitle(self.tr("新着画像の監視"))
         self.catalog = catalog
         self.conditions = conditions
         self.canvas = canvas
         self.layer = layer
+        self.drawn = drawn
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.name = QLineEdit(conditions_text(catalog, conditions, [], with_areas=False))
         form.addRow(self.tr("名前"), self.name)
         self.area = QComboBox()
         self.area.addItem(self.tr("表示範囲"), "extent")
+        if drawn:
+            self.area.addItem(self.tr("描いた範囲"), "drawn")
+            self.area.setCurrentIndex(1)
         if selected_areas(layer):
             self.area.addItem(self.tr("選択中の地物（{name}）").format(name=layer.name()), "selected")
         self.area.addItem(self.tr("指定なし"), "none")
@@ -78,6 +83,8 @@ class WatchDialog(QDialog):
         kind = self.area.currentData()
         if kind == "extent":
             return extent_area(self.canvas)
+        if kind == "drawn":
+            return areas_of([], [[self.drawn]])
         if kind == "selected":
             return selected_areas(self.layer)
         return []

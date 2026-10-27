@@ -317,9 +317,9 @@ class NoticesDock(PluginDock):
         self._start(self.tr("新着画像の監視の追加"), work, done)
         return watch
 
-    def watch_conditions(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch) -> None:
-        """「この条件で監視…」 of the image catalog."""
-        dialog = WatchDialog(catalog, conditions, self.canvas, self.iface.activeLayer(), self)
+    def watch_conditions(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, drawn: Optional[list] = None) -> None:
+        """「この条件で監視…」 of the image catalog (`drawn`: the area drawn there, offered first)."""
+        dialog = WatchDialog(catalog, conditions, self.canvas, self.iface.activeLayer(), self, drawn)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.add_watch(catalog, types, conditions, dialog.areas(), dialog.name.text().strip() or catalog.label)
