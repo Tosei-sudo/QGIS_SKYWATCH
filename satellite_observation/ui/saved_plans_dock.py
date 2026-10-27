@@ -27,7 +27,10 @@ from ..core.plan.store import (
     STATUS_COLORS, STATUSES, PlanStoreConfig, SavedPlan, SavedShot, ShotCheck, delete_plan, list_plans, load_shots,
     progress_text, track_shots, update_shots,
 )
+from ..core.util import ms_of
+from ..qgis_io import settings
 from ..qgis_io.geometry import from_wgs84
+from ..qgis_io.obs_images import image_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
 from .plan_overlay import PlanOverlay
@@ -439,8 +442,10 @@ class SavedPlansDock(PluginDock):
             if not source:
                 self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), self.tr("{id} に画像の場所なし").format(id=shot.imageId))
                 return then(None) if then else None
-            path = f"/vsicurl/{source}" if source.lower().startswith(("http://", "https://")) else source
-            layer = QgsRasterLayer(path, shot.imageId)
+            # A sign-in is the authentication configuration chosen for the image's server: only its id goes in the layer's source.
+            acquired = catalog.fields.get("acquired")
+            when = ms_of(a.get(acquired)) if acquired else None
+            layer = image_layer(source, shot.imageId, image_id=shot.imageId, time=when, authcfg=settings.auth_for(source))
             if layer.isValid():
                 QgsProject.instance().addMapLayer(layer)
             else:
