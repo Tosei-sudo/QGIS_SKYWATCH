@@ -17,6 +17,8 @@ from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.docks import StubDock
 from .ui.imaging_plan_dock import ImagingPlanDock
+from .ui.moving_target_dialog import MovingTargetDialog
+from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 
@@ -53,6 +55,15 @@ class PluginApi:
         """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""
         return self._plugin.docks["SatObsImagingPlan"]
 
+    def moving_targets(self, layer=None) -> "MovingTargetDialog":
+        """Opens 「移動目標撮像計画」 for a point layer (or the active one); its `targets()`, `add_places()`, `plan()`."""
+        return self._plugin.open_moving_targets(layer)
+
+    @property
+    def satellite_pass(self) -> "SatellitePassDock":
+        """The satellite pass dock (its `tracks`, `choose()`, `set_time()`, `draw()`, `add_layer()`)."""
+        return self._plugin.docks["SatObsSatellitePass"]
+
     @property
     def saved_plans(self) -> "SavedPlansDock":
         """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
@@ -66,6 +77,7 @@ class SatelliteObservationPlugin:
         self.actions: list[QAction] = []
         self.docks: dict[str, QDockWidget] = {}
         self.toolbar = None
+        self.moving_targets: Optional[MovingTargetDialog] = None
         self.api = PluginApi(self)
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
@@ -77,13 +89,15 @@ class SatelliteObservationPlugin:
         specs = [
             ("SatObsImagingPlan", tr("撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsSavedPlans", tr("保存した撮像計画"), None, Qt.DockWidgetArea.RightDockWidgetArea),
-            ("SatObsSatellitePass", tr("衛星パス"), tr("段階 5"), Qt.DockWidgetArea.RightDockWidgetArea),
+            ("SatObsSatellitePass", tr("衛星パス"), None, Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsObservations", tr("観測記録"), tr("段階 6〜7"), Qt.DockWidgetArea.RightDockWidgetArea),
             ("SatObsTaxonomy", tr("分類体系の編集"), tr("段階 7"), Qt.DockWidgetArea.LeftDockWidgetArea),
         ]
         for name, title, stage, area in specs:
             if name == "SatObsImagingPlan":
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsSatellitePass":
+                dock = SatellitePassDock(self.iface, self.context, self.open_settings, self.docks["SatObsImagingPlan"], self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
@@ -99,6 +113,10 @@ class SatelliteObservationPlugin:
             self.actions.append(action)
 
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
+        moving = QAction(icon, tr("移動目標撮像計画…"), self.iface.mainWindow())
+        moving.triggered.connect(lambda: self.open_moving_targets())
+        self.iface.addPluginToMenu(MENU, moving)
+        self.actions.append(moving)
         settings = QAction(icon, tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self.iface.addPluginToMenu(MENU, settings)
@@ -118,6 +136,13 @@ class SatelliteObservationPlugin:
 
         action.triggered.connect(plan)
 
+    def open_moving_targets(self, layer=None) -> MovingTargetDialog:
+        """Opens 「移動目標撮像計画」 (once; kept while the plugin is loaded)."""
+        if self.moving_targets is None:
+            self.moving_targets = MovingTargetDialog(self.iface, self.docks["SatObsImagingPlan"].plan_moving, self.iface.mainWindow())
+        self.moving_targets.open_for(layer)
+        return self.moving_targets
+
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
@@ -135,6 +160,10 @@ class SatelliteObservationPlugin:
             self.iface.removeDockWidget(dock)
             dock.deleteLater()
         self.docks = {}
+        if self.moving_targets is not None:
+            self.moving_targets.close()
+            self.moving_targets.deleteLater()
+            self.moving_targets = None
         if self.toolbar is not None:
             self.toolbar.deleteLater()
             self.toolbar = None

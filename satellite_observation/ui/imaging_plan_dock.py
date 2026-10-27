@@ -19,7 +19,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Callable, Optional
 
-from qgis.core import Qgis, QgsFeatureRequest, QgsMapLayer, QgsMessageLog, QgsPointXY, QgsProject, QgsRectangle, QgsVectorLayer
+from qgis.core import Qgis, QgsFeatureRequest, QgsGeometry, QgsMapLayer, QgsMessageLog, QgsPointXY, QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsCollapsibleGroupBox, QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import QAbstractTableModel, QDateTime, QModelIndex, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtCore import QCoreApplication
@@ -43,6 +43,7 @@ from ..core.plan.output import (
     NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts,
     natural_key, percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
 )
+from ..core.plan.moving import MAX_HORIZON, MAX_SHIPS, ShipState, plan_ships
 from ..core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs
 from ..core.plan.remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
 from ..core.plan.revisit import (
@@ -154,6 +155,8 @@ class ImagingPlanDock(PluginDock):
         self.catalog_sats: list[SatelliteSpec] = []
         self.catalog_index = 0
         self.loading_task = None
+        #: Who waits for the catalog being read.
+        self._waiting: list = []
         self.plan_task = None
         self.clicked: Optional[tuple] = None
         self.plan: Optional[dict] = None
@@ -171,6 +174,8 @@ class ImagingPlanDock(PluginDock):
         self._pairs: Optional[tuple] = None
         #: The revisit map of the last plan: grid size, cells, their stats, the chosen cell.
         self.revisit: Optional[dict] = None
+        #: Moving targets from 「移動目標撮像計画」: {"ships": [ShipState], "label": str}.
+        self.moving: Optional[dict] = None
         #: Opens the 「保存した計画」 dock (set by the plugin).
         self.open_saved: Optional[Callable[[], None]] = None
         self._build()
@@ -540,6 +545,9 @@ class ImagingPlanDock(PluginDock):
                 then()
             return
         if self.loading_task is not None:
+            # Read once: whoever else waits (the satellite pass dock) is told too.
+            if then:
+                self._waiting.append(then)
             return
         catalog = config.satellite_catalogs[self.catalog_index]
         sensors = config.sensor_catalogs
@@ -566,11 +574,13 @@ class ImagingPlanDock(PluginDock):
             if problems:
                 text += self.tr("（読めなかったもの {n} 件: {list}）").format(n=len(problems), list="、".join(problems[:3]) + (" …" if len(problems) > 3 else ""))
             self.status.setText(text + self.tr("。対象と期間を選んで「計算」"))
-            if then:
-                then()
+            waiting, self._waiting = self._waiting, []
+            for f in ([then] if then else []) + waiting:
+                f()
 
         def failed(message):
             self.loading_task = None
+            self._waiting = []
             self.status.setText(self.tr("衛星カタログの読み込みに失敗: {message}").format(message=message))
 
         self.loading_task = run_task(self.tr("衛星カタログの読み込み"), work, done, failed)
@@ -606,6 +616,8 @@ class ImagingPlanDock(PluginDock):
             self.target.addItem(self.tr("選択中の地物（{n}）").format(n=active.selectedFeatureCount()), "selection")
         for layer in sorted(self._vector_layers(), key=lambda l: l.name()):
             self.target.addItem(f"{layer.name()}（{layer.featureCount():,}）", f"layer:{layer.id()}")
+        if self.moving:
+            self.target.addItem(self.tr("移動目標: {label}（{n}）").format(label=self.moving["label"], n=len(self.moving["ships"])), "moving")
         self.target.addItem(self.tr("地図でクリックした地点"), "click")
         values = [self.target.itemData(i) for i in range(self.target.count())]
         self.target.setCurrentIndex(values.index(before) if before in values else 0)
@@ -706,6 +718,9 @@ class ImagingPlanDock(PluginDock):
     def targets(self) -> list[PlanTarget] | str:
         """The targets the form asks for (in WGS84), or the reason there are none (as the viewer)."""
         choice = self.target.currentData()
+        if choice == "moving":
+            ships = self.ships()
+            return [PlanTarget(s.name, (s.lon, s.lat)) for s in ships] if ships else self.tr("移動目標なし")
         if choice == "click":
             if not self.clicked:
                 return self.tr("地図をクリックして地点を指定")
@@ -753,6 +768,10 @@ class ImagingPlanDock(PluginDock):
             self.overlay.clear(["target", "target_point"])
             if self.clicked:
                 self.overlay.point_target(*self.clicked)
+        elif self.target.currentData() == "moving":
+            # Each moving target where it was last reported.
+            ships = self.ships() or []
+            self.overlay.targets([QgsGeometry.fromPointXY(QgsPointXY(s.lon, s.lat)) for s in ships], WGS84)
         else:
             layer = self._target_layer()
             features = self._features(MAX_TARGETS) if layer is not None else []
@@ -885,13 +904,17 @@ class ImagingPlanDock(PluginDock):
             self.load_catalog(self.run)
             return
         sats = self.tree.checked()
-        targets = self.targets()
+        ships = self.ships()
+        targets = [] if ships else self.targets()
         if isinstance(targets, str):
             self.status.setText(targets)
             return
         if not sats:
             self.more.setCollapsed(False)
             self.status.setText(self.tr("衛星が未選択（詳細条件で選択）") if self.tree.items() else self.tr("衛星なし。衛星カタログを確認するか、「詳細条件」に TLE を貼り付け"))
+            return
+        if ships:
+            self.run_ships(sats, ships)
             return
         options = self.plan_options()
         self.cancel()
@@ -917,6 +940,70 @@ class ImagingPlanDock(PluginDock):
                     best[op.target] = max(best.get(op.target, 0), op.coverage)
             self.show_plan({"sats": sats, "targets": targets, "result": result, "options": options},
                            "cover" if any(c < 0.95 for c in best.values()) else "all")
+
+        def failed(message: str):
+            if self.plan_task is not task:
+                return
+            self.plan_task = None
+            self._running(False)
+            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算失敗: {m}").format(m=message))
+
+        task = run_task(what, work, done, failed)
+        self.plan_task = task
+        self._running(True)
+
+    def ships(self) -> Optional[list[ShipState]]:
+        """The moving targets when the target choice holds them; None otherwise."""
+        if self.target.currentData() == "moving" and self.moving:
+            return list(self.moving["ships"])
+        return None
+
+    def plan_moving(self, ships: list[ShipState], label: str) -> None:
+        """
+        Plans moving targets (from 「移動目標撮像計画」): they become the target
+        choice, and the plan is made at once when satellites are chosen.
+        """
+        self.moving = {"ships": list(ships), "label": label}
+        self.show()
+        self.raise_()
+        self.list_targets()
+        self.target.setCurrentIndex(max(0, self.target.findData("moving")))
+        # Reports older than the horizon: plan from the latest of them, as nothing can be guessed later.
+        latest = max(s.t for s in ships)
+        if latest + MAX_HORIZON * 3600000 < self.start.dateTime().toMSecsSinceEpoch():
+            self.start.setDateTime(QDateTime.fromMSecsSinceEpoch(int(latest)))
+        self.show_targets()
+        self.run()
+
+    def run_ships(self, sats: list[SatelliteSpec], ships: list[ShipState]) -> None:
+        """
+        Plans moving targets in a task: where each will be (carried on along
+        its course at its speed, up to 72 hours after its last report) is
+        planned every hour, then each pass found is aimed again at the circle
+        around where the target is at that moment.
+        """
+        options = self.plan_options()
+        self.cancel()
+        what = self.tr("{s} 機 × 移動目標 {n} 件の推測位置を計算中…").format(s=len(sats), n=min(len(ships), MAX_SHIPS))
+        self.status.setText(what)
+
+        def work(task):
+            def progress(done: float) -> None:
+                task.check()
+                task.progress(done * 100)
+
+            return plan_ships(sats, ships, options, progress, task.isCanceled)
+
+        def done(out):
+            if self.plan_task is not task:
+                return
+            self.plan_task = None
+            self._running(False)
+            if isinstance(out, str):
+                self.status.setText(out)
+                return
+            circles, result, planned = out
+            self.show_plan({"sats": sats, "targets": circles, "result": result, "options": planned}, "all")
 
         def failed(message: str):
             if self.plan_task is not task:
@@ -1054,6 +1141,11 @@ class ImagingPlanDock(PluginDock):
         if many and any(t.priority is not None for t in targets):
             cols.append(Column("priority", tr("優先度"), lambda op: targets[op.target].priority_text or "",
                                lambda op: tr("対象の優先度（属性の値）。並べ替えると優先度の高い順")))
+        if any(t.uncertainty is not None for t in targets):
+            cols.append(Column(
+                "uncertainty", tr("位置の誤差"), lambda op: f"±{js_round(targets[op.target].uncertainty or 0)} km",
+                lambda op: tr("最後の報告から {h} 後の推測位置（針路・速力から）。誤差の円のうち撮像範囲に入る割合が被覆").format(
+                    h=hours_text((targets[op.target].guessed or 0) / 3600000))))
         cols += [
             Column("offNadir", tr("オフナディア角"), lambda op: f"{js_round(op.offNadir)}°",
                    lambda op: tr("入射角 {i}°・距離 {d} km").format(i=js_round(op.incidence), d=js_round(op.range, 0))),
@@ -1174,7 +1266,10 @@ class ImagingPlanDock(PluginDock):
                     continue
                 other = pass_shapes(plan["sats"][step.satellite], plan["targets"][step.target], step)
                 steps.append((i + 1, other.scenes if other else []))
-        self.overlay.chosen(shapes, f"{satellite_label(sat)} {local_text(op.time)[5:]}", steps)
+        target = plan["targets"][op.target]
+        # A moving target: the circle its guessed place may be off by, at the moment of the pass.
+        circle = [*target.points, target.points[0]] if target.uncertainty is not None and len(target.points) > 2 else None
+        self.overlay.chosen(shapes, f"{satellite_label(sat)} {local_text(op.time)[5:]}", steps, circle)
         self.canvas.refresh()
 
     def zoom_to_chosen(self) -> None:

@@ -24,6 +24,8 @@ STYLES = {
     "reach": ("#0ea5e9", 1, Qt.PenStyle.DotLine, None),
     "scene": ("#2563eb", 2, None, QColor(37, 99, 235, 64)),
     "step": ("#7c3aed", 1, Qt.PenStyle.DashLine, QColor(124, 58, 237, 31)),
+    # A moving target: the circle its guessed place may be off by, at the moment of the pass.
+    "circle": ("#f97316", 2, Qt.PenStyle.DashLine, QColor(249, 115, 22, 31)),
 }
 
 
@@ -182,9 +184,15 @@ class PlanOverlay:
         p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(QgsPointXY(lon, lat))
         self._items.append(LabelItem(self.canvas, p, text, color, bold, offset_y, beside))
 
-    def chosen(self, shapes, label: str, steps: Sequence[tuple] = ()) -> None:
-        """A pass (`shapes` of core.plan.scene.pass_shapes) and the satellite's name; `steps`: (number, scenes) of the other passes."""
-        self.clear(["track", "reach", "scene", "step", "label"])
+    def chosen(self, shapes, label: str, steps: Sequence[tuple] = (), circle: Optional[Sequence[tuple]] = None) -> None:
+        """
+        A pass (`shapes` of core.plan.scene.pass_shapes) and the satellite's
+        name; `steps`: (number, scenes) of the other passes; `circle`: a
+        moving target's circle (closed ring) at the moment of the pass.
+        """
+        self.clear(["track", "reach", "scene", "step", "label", "circle"])
+        if circle:
+            self._add("circle", polygon_of([circle]))
         self._extent.pop("satellite", None)
         for part in split_antimeridian(shapes.track):
             self._add("track", line_of(part))

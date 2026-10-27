@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
 from satellite_observation.core.plan.access import PlanOptions, PlanTarget, plan_access  # noqa: E402
 from satellite_observation.core.plan.cover import cover_plan  # noqa: E402
+from satellite_observation.core.plan.moving import ShipState, refine_shots, sample_targets, ship_window  # noqa: E402
+from satellite_observation.core.plan.track import satellite_track  # noqa: E402
 from satellite_observation.core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs  # noqa: E402
 from satellite_observation.core.plan.revisit import box_of, cell_targets, grid_cells, revisit_stats  # noqa: E402
 from satellite_observation.core.plan.satellites import GroundStation, satellites_from_text  # noqa: E402
@@ -100,6 +102,17 @@ CASES = [
      "targets": [point("a", 139.0, 35.0), point("b", 140.5, 36.2)],
      "options": {"start": EPOCH, "end": EPOCH + 7 * DAY, "maxOffNadir": None, "daylight": "optical", "minSunElevation": 10},
      "revisit": {"size": 5}},
+    {"name": "moving-ships", "satellites": [{"tle": ISS, "spec": {"maxOffNadir": 45, "swath": 10}}, {"tle": SAR, "spec": {"maxOffNadir": 45, "minOffNadir": 15, "swath": 30, "sar": True}}],
+     "targets": [],
+     "ships": [{"id": "a", "name": "A", "t": EPOCH - 5 * 3600000, "lon": 139.0, "lat": 34.0, "course": 45, "speed": 12},
+               {"id": "b", "name": "B", "t": EPOCH - 30 * 3600000, "lon": -150.0, "lat": 20.0, "course": 270, "speed": 20},
+               {"id": "c", "name": "C", "t": EPOCH, "lon": 5.0, "lat": 55.0, "course": None, "speed": None}],
+     "options": {"start": EPOCH, "end": EPOCH + 3 * DAY, "maxOffNadir": None, "daylight": "none", "minSunElevation": 10}},
+    {"name": "satellite-track-moment", "satellites": [{"tle": OPT, "spec": {"maxOffNadir": 20}}, {"tle": SAR, "spec": {"maxOffNadir": 45, "minOffNadir": 20, "lookSide": "right", "sar": True}},
+                                                      {"tle": ISS, "spec": {"maxOffNadir": 30, "minOffNadir": 10, "lookSide": "both"}}],
+     "targets": [], "track": {"from": EPOCH + 3600000 - 15 * 60000, "to": EPOCH + 3600000 + 15 * 60000, "options": {"step": 10}}},
+    {"name": "satellite-track-week", "satellites": [{"tle": OPT, "spec": {"maxOffNadir": 20}}, {"tle": SAR, "spec": {"maxOffNadir": 45, "minOffNadir": 20, "lookSide": "right", "sar": True}}],
+     "targets": [], "track": {"from": EPOCH, "to": EPOCH + 7 * DAY, "options": {"minSun": 10, "maxOffNadir": 15}}},
     {"name": "speed-20-sats-week", "satellites": walker(20), "targets": [point("tokyo", 139.7, 35.7)],
      "options": {"start": EPOCH, "end": EPOCH + 7 * DAY, "maxOffNadir": None, "daylight": "optical", "minSunElevation": 10}},
 ]
@@ -110,6 +123,23 @@ def python_run(case):
     for s in case["satellites"]:
         sat = satellites_from_text(s["tle"], 30, 0, 10)[0]
         sats.append(replace(sat, **s["spec"]))
+    if case.get("track"):
+        tr = case["track"]
+        o = tr.get("options", {})
+        t0 = time.perf_counter()
+        tracks = [satellite_track(sat, tr["from"], tr["to"], o.get("step"), o.get("maxOffNadir"), o.get("minSun")) for sat in sats]
+        return {"tracks": tracks, "ms": (time.perf_counter() - t0) * 1000}
+    if case.get("ships"):
+        o = case["options"]
+        options = PlanOptions(o["start"], o["end"], o.get("maxOffNadir"), o["daylight"], o["minSunElevation"])
+        ships = [ShipState(**s) for s in case["ships"]]
+        t0 = time.perf_counter()
+        start, end = ship_window(ships, options.start, options.end)
+        planned = replace(options, start=start, end=end)
+        places, samples = sample_targets(ships, start, end)
+        first = plan_access(sats, places, planned)
+        shots = refine_shots(first, samples, ships, sats, planned)
+        return {"shots": shots, "problems": first.problems, "tooSoon": first.tooSoon, "ms": (time.perf_counter() - t0) * 1000}
     targets = [PlanTarget(t["label"], tuple(t["center"]), [tuple(p) for p in t["points"]], [tuple(c) for c in t["cells"]] if t.get("cells") else None, priority=t.get("priority")) for t in case["targets"]]
     cells = grid_cells(box_of(targets), case["revisit"]["size"]) if case.get("revisit") else None
     if cells:
@@ -149,7 +179,7 @@ def compare_pairs(label, theirs, ours, errors):
 
 def node_case(case):
     c = dict(case)
-    c["options"] = {k: v for k, v in case["options"].items() if v is not None}
+    c["options"] = {k: v for k, v in case.get("options", {}).items() if v is not None}
     return c
 
 
@@ -174,6 +204,49 @@ def compare_ops(label, theirs, ours, errors):
     return worst
 
 
+def compare_tracks(theirs, ours, errors):
+    """The same samples, places within 0.0001° (about 10 m), heights within 10 m, the same bands."""
+    worst = 0.0
+    for k, (a, b) in enumerate(zip(theirs, ours)):
+        if a["times"] != b.times or a["ascending"] != b.ascending or a["open"] != b.open:
+            errors.append(f"衛星 {k}: 時刻・北行南行・日照の差")
+            continue
+        if (a["offNadir"]["min"], a["offNadir"]["max"]) != b.offNadir:
+            errors.append(f"衛星 {k}: オフナディア角 {a['offNadir']} / {b.offNadir}")
+        lines = [(a["track"], b.track)] + [(p[e], getattr(q, e)) for p, q in zip(a["bands"], b.bands) for e in ("inner", "outer")]
+        if len(a["bands"]) != len(b.bands):
+            errors.append(f"衛星 {k}: 帯の数 {len(a['bands'])}/{len(b.bands)}")
+        for x, y in lines:
+            for p, q in zip(x, y):
+                d = max(abs(((p[0] - q[0] + 180) % 360) - 180), abs(p[1] - q[1]))
+                worst = max(worst, d)
+        dh = max((abs(h - g) for h, g in zip(a["heights"], b.heights)), default=0)
+        if dh > 10:
+            errors.append(f"衛星 {k}: 高度の差 {dh:.1f} m")
+    if worst > 1e-4:
+        errors.append(f"位置の差 {worst:.6f}°")
+    return worst
+
+
+def compare_shots(theirs, ours, errors):
+    """The same shots of the same ships: time ±1 s, angles ±0.05°, coverage ±1 %, the circle's centre and radius."""
+    worst = {"time": 0.0, "angle": 0.0, "coverage": 0.0}
+    if len(theirs) != len(ours):
+        errors.append(f"撮像 件数 ビューア {len(theirs)}・プラグイン {len(ours)}")
+    for a, b in zip(theirs, ours):
+        if (a["ship"], a["satellite"], a["side"], a["ascending"]) != (b.ship, b.op.satellite, b.op.side, b.op.ascending):
+            errors.append(f"別の撮像 {a['time']} / {b.op.time}")
+            continue
+        dt = abs(a["time"] - b.op.time) / 1000
+        da = max(abs(a["offNadir"] - b.op.offNadir), abs(a["incidence"] - b.op.incidence), abs(a["elevation"] - b.op.elevation), abs(a["sunElevation"] - b.op.sunElevation))
+        dc = abs(a["coverage"] - b.op.coverage)
+        worst = {"time": max(worst["time"], dt), "angle": max(worst["angle"], da), "coverage": max(worst["coverage"], dc)}
+        dp = max(abs(a["center"][0] - b.target.center[0]), abs(a["center"][1] - b.target.center[1]))
+        if dt > 1 or da > 0.05 or dc > 0.01 or dp > 1e-4 or abs(a["uncertainty"] - b.target.uncertainty) > 0.01:
+            errors.append(f"{a['time']} の差 時刻 {dt:.3f} s・角度 {da:.4f}°・被覆 {dc * 100:.2f}%・位置 {dp:.6f}°")
+    return worst
+
+
 def main(src: str) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         cases_path = os.path.join(tmp, "cases.json")
@@ -188,6 +261,23 @@ def main(src: str) -> int:
         theirs = viewer[case["name"]]
         ours = python_run(case)
         errors: list[str] = []
+        if case.get("track"):
+            worst = compare_tracks(theirs["tracks"], ours["tracks"], errors)
+            samples = sum(len(t.times) for t in ours["tracks"])
+            print(f"{case['name']}: {'一致' if not errors else '不一致'}（{len(ours['tracks'])} 機・{samples} 点、最大差 位置 {worst:.7f}°、"
+                  f"計算 ビューア {theirs['ms']:.0f} ms・プラグイン {ours['ms']:.0f} ms）")
+            for e in errors[:10]:
+                print("  " + e)
+            failed += bool(errors)
+            continue
+        if case.get("ships"):
+            worst = compare_shots(theirs["shots"], ours["shots"], errors)
+            print(f"{case['name']}: {'一致' if not errors else '不一致'}（撮像 {len(ours['shots'])} 件、最大差 時刻 {worst['time']:.3f} s・角度 {worst['angle']:.5f}°・"
+                  f"被覆 {worst['coverage'] * 100:.3f}%、計算 ビューア {theirs['ms']:.0f} ms・プラグイン {ours['ms']:.0f} ms）")
+            for e in errors[:10]:
+                print("  " + e)
+            failed += bool(errors)
+            continue
         if theirs["problems"] != ours["problems"] or theirs["tooSoon"] != ours["tooSoon"]:
             errors.append(f"problems・tooSoon の差 {theirs['problems']}/{ours['problems']} {theirs['tooSoon']}/{ours['tooSoon']}")
         worst = compare_ops("機会", theirs["opportunities"], ours["opportunities"], errors)
