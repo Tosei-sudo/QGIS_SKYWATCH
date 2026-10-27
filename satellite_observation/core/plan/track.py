@@ -92,7 +92,9 @@ def satellite_track(sat: SatelliteSpec, start: float, end: float, step: Optional
     step_ms = (step if step is not None else step_for(end - start)) * 1000
     angles = reach_angles(sat, max_off_nadir)
     off_nadirs = [a for _, inner, outer in angles for a in (inner, outer)]
-    result = SatelliteTrack(sat, start, end, offNadir=(min(abs(a[1]) for a in angles), max(abs(a[2]) for a in angles)))
+    # A band across the nadir starts at 0° (the viewer takes its edge, so shows 「20〜20°」 for 「20° 以下」).
+    smallest = min(0.0 if side == "both" else abs(inner) for side, inner, _ in angles)
+    result = SatelliteTrack(sat, start, end, offNadir=(smallest, max(abs(a[2]) for a in angles)))
     edges = [([], []) for _ in angles]
     n = max(1, math.ceil((end - start) / step_ms))
     for i in range(n + 1):

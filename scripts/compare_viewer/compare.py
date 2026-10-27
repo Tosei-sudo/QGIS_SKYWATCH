@@ -211,7 +211,9 @@ def compare_tracks(theirs, ours, errors):
         if a["times"] != b.times or a["ascending"] != b.ascending or a["open"] != b.open:
             errors.append(f"衛星 {k}: 時刻・北行南行・日照の差")
             continue
-        if (a["offNadir"]["min"], a["offNadir"]["max"]) != b.offNadir:
+        # A band across the nadir: the plugin says 0°, the viewer the band's edge (docs/differences.md).
+        smallest = 0 if any(band["side"] == "both" for band in a["bands"]) else a["offNadir"]["min"]
+        if (smallest, a["offNadir"]["max"]) != b.offNadir:
             errors.append(f"衛星 {k}: オフナディア角 {a['offNadir']} / {b.offNadir}")
         lines = [(a["track"], b.track)] + [(p[e], getattr(q, e)) for p, q in zip(a["bands"], b.bands) for e in ("inner", "outer")]
         if len(a["bands"]) != len(b.bands):

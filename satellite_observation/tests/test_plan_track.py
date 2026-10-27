@@ -48,7 +48,8 @@ def test_follows_the_sub_satellite_point():
     reach = ground_range(20, 6371 + track.heights[mid] / 1000)
     for edge in (band.inner, band.outer):
         assert abs(km(edge[mid], track.track[mid]) - reach) < 15
-    assert track.offNadir == (20, 20)
+    # A band across the nadir: 0° to 20° (the viewer says 20 to 20).
+    assert track.offNadir == (0, 20)
 
 
 def test_sar_band_on_its_side():
