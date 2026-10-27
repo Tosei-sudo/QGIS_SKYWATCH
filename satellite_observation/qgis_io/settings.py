@@ -24,9 +24,33 @@ def _set(key: str, value: str) -> None:
     QgsSettings().setValue(PREFIX + key, value)
 
 
+#: The plugin's folder, where a settings file shipped in the zip sits.
+PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#: The names a shipped settings file may have, first found wins.
+BUNDLED_NAMES = ("config.json", "config.jsonc")
+
+
 def config_source() -> str:
-    """The settings file: a path or an http(s) URL ('' for none)."""
+    """The settings file chosen in the settings dialog: a path or an http(s) URL ('' for none)."""
     return _get("config_source")
+
+
+def bundled_config() -> str:
+    """The settings file shipped in the plugin's folder (config.json or config.jsonc); '' when there is none."""
+    for name in BUNDLED_NAMES:
+        path = os.path.join(PLUGIN_DIR, name)
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def effective_config_source() -> tuple[str, bool]:
+    """The settings file to read: the one chosen, else the shipped one. (source, shipped)"""
+    chosen = config_source()
+    if chosen:
+        return chosen, False
+    shipped = bundled_config()
+    return shipped, bool(shipped)
 
 
 def set_config_source(source: str) -> None:
@@ -95,6 +119,24 @@ def local_gpkg_path() -> str:
     """The local GeoPackage of observations, checked areas and the classification."""
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
 
+
+class SettingsPrefs:
+    """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
+
+    def get(self, key: str) -> Optional[str]:
+        v = _get("observations/" + key)
+        return v or None
+
+    def set(self, key: str, value: str) -> None:
+        _set("observations/" + key, value)
+
+
+def two_point_setting() -> bool:
+    return _get("observations/two_point") == "1"
+
+
+def set_two_point(on: bool) -> None:
+    _set("observations/two_point", "1" if on else "0")
 
 def plan_reminders() -> list:
     """The imaging plan's reminders (JSON objects; see core.plan.remind)."""

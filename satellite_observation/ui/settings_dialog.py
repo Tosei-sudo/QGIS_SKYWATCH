@@ -32,7 +32,11 @@ class SettingsDialog(QDialog):
         self.resize(760, 560)
 
         self.source = QLineEdit(settings.config_source())
-        self.source.setPlaceholderText(self.tr("config.json のパスか URL（https://…/config.json）"))
+        shipped = settings.bundled_config()
+        self.source.setPlaceholderText(self.tr("空欄なら同梱の config.json を使用") if shipped
+                                       else self.tr("config.json のパスか URL（https://…/config.json）"))
+        if shipped:
+            self.source.setToolTip(self.tr("同梱の設定ファイル: {path}。ここに指定するとそちらを優先").format(path=shipped))
         browse = QPushButton(self.tr("参照…"))
         browse.clicked.connect(self._browse)
         load = QPushButton(self.tr("読み込み"))
@@ -113,6 +117,8 @@ class SettingsDialog(QDialog):
         self.problems.addItems(self.context.problems)
         if not self.context.source:
             self.status.setText(self.tr("設定ファイルなし（サンプルの衛星とローカル保存で動作）"))
+        elif self.context.bundled and not self.context.problems:
+            self.status.setText(self.tr("同梱の設定ファイルを使用。問題なし（接続 {n} 件）").format(n=len(services)))
         elif self.context.problems:
             self.status.setText(self.tr("問題 {n} 件").format(n=len(self.context.problems)))
         else:

@@ -15,7 +15,7 @@ from qgis.testing import start_app  # noqa: E402
 
 APP = start_app()
 
-from qgis.core import QgsProject, QgsSettings  # noqa: E402
+from qgis.core import QgsProject, QgsRasterLayer, QgsSettings  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.core.plan.store import DEFAULT_PLAN_FIELDS  # noqa: E402
@@ -218,6 +218,18 @@ def test_save_a_plan_and_follow_it_up(plugin, monkeypatch):
     assert next(s for s in saved.shots if s.status == "撮像済み").imageId == "IMG-1"
     assert saved.plan_model.item(0, 3).text().startswith("撮像済み 1 / ")
     assert len(saved.overlay._painted) == shots
+
+    # The image opens with only the server's authentication configuration in its source (no token), with its id and time.
+    opened = []
+    settings.set_auth_map({"https://example.com/": "img0001"})
+    monkeypatch.setattr("satellite_observation.ui.saved_plans_dock.image_layer",
+                        lambda source, name, **kw: opened.append((source, name, kw)) or QgsRasterLayer("", name))
+    saved.shot_table.selectRow(next(i for i, s in enumerate(saved.shots) if s.status == "撮像済み"))
+    got = []
+    saved.open_image(got.append)
+    assert wait_for(lambda: got, 10000)
+    assert opened == [("https://example.com/img-1.tif", "IMG-1", {"image_id": "IMG-1", "time": t0 + 600000, "authcfg": "img0001"})]
+    settings.set_auth_map({})
 
     # A status set by hand goes to the layer.
     saved.shot_table.selectRow(1)

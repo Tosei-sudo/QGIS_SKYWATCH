@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 移動目標撮像計画: a ship, where it goes and the circle it may be in -->
+  <circle cx="23" cy="10" r="7" fill="#fef3c7" stroke="#d97706" stroke-width="1.8" stroke-dasharray="3 2"/>
+  <line x1="12" y1="18" x2="20" y2="12" stroke="#d97706" stroke-width="2" stroke-dasharray="3 2"/>
+  <path d="M1 22h19l-4 7H4z" fill="#1e3a5f"/>
+  <rect x="5" y="15" width="8" height="7" fill="#1e3a5f"/>
+  <rect x="7" y="17" width="4" height="2" fill="#bfdbfe"/>
+  <circle cx="23" cy="10" r="2" fill="#d97706"/>
+</svg>

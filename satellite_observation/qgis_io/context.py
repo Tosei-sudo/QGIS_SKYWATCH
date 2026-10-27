@@ -39,13 +39,20 @@ class PluginContext(QObject):
         self.config = PluginConfig()
         self.problems: list[str] = []
         self.source = ""
+        #: The settings file read is the one shipped in the plugin's folder.
+        self.bundled = False
         self.loading = False
         self._gpkg: Optional[GeoPackage] = None
 
     def reload(self) -> None:
-        """Reads the settings file again (a URL in a task); the defaults when none is set."""
-        source = settings.config_source()
+        """
+        Reads the settings file again (a URL in a task): the one chosen in the
+        settings dialog, else the one shipped in the plugin's folder; the
+        defaults when there is neither.
+        """
+        source, bundled = settings.effective_config_source()
         self.source = source
+        self.bundled = bundled
         if not source:
             self.config, self.problems = PluginConfig(), []
             self.configChanged.emit()

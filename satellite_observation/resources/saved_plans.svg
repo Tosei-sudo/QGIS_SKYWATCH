@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 保存した撮像計画: a list with checks -->
+  <rect x="4" y="3" width="24" height="26" rx="2" fill="#fff" stroke="#15803d" stroke-width="2"/>
+  <path d="M8 10l2 2 4-4M8 18l2 2 4-4" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="17" y1="10" x2="24" y2="10" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+  <line x1="17" y1="18" x2="24" y2="18" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+  <rect x="8" y="23" width="4" height="3" fill="#94a3b8"/>
+  <line x1="17" y1="24.5" x2="24" y2="24.5" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+</svg>
