@@ -79,6 +79,19 @@ def test_added_to_each_new_project(config):
     plugin.unload()
 
 
+def test_added_beside_the_plugins_base_map(config):
+    from satellite_observation.qgis_io.basemap_layer import PROPERTY, put_base_map
+
+    # 「背景地図」's defaultBaseMap may be shown before the layers are read.
+    base = QgsVectorLayer("Point?crs=EPSG:4326", "base", "memory")
+    base.setCustomProperty(PROPERTY, "osm")
+    put_base_map(base)
+    plugin, iface = start()
+    assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 3)
+    assert names() == ["stations.geojson", "ortho.tif", "base"]
+    plugin.unload()
+
+
 def test_not_added_to_a_project_with_layers_nor_when_turned_off(config):
     QgsProject.instance().addMapLayer(QgsVectorLayer("Point?crs=EPSG:4326", "mine", "memory"))
     plugin, iface = start()

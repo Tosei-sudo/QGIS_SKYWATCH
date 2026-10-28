@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .auth import ArcgisPortalConfig, arcgis_portal_of
+from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
 from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
 from .catalog.paths import PathMapping, path_mappings_of
@@ -28,6 +29,7 @@ from .startup_layers import StartupLayer, startup_layers_of
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
+    "baseMaps", "defaultBaseMap",
 )
 
 
@@ -48,6 +50,10 @@ class PluginConfig:
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
     startup_layers: list[StartupLayer] = field(default_factory=list)
+    #: The background maps to switch between (the viewer's list when the file has none).
+    base_maps: list[BaseMapConfig] = field(default_factory=lambda: list(DEFAULT_BASE_MAPS))
+    #: The one shown at start ("" for none).
+    default_base_map: str = ""
 
 
 class JsoncError(ValueError):
@@ -172,6 +178,10 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             seen.add(p.url)
             portals.append(p)
         config.arcgis_portals = portals
+    if "baseMaps" in value:
+        config.base_maps = base_maps_of(value["baseMaps"], problems)
+    if "defaultBaseMap" in value:
+        config.default_base_map = default_base_map_of(value["defaultBaseMap"], config.base_maps, problems)
     return config, problems
 
 

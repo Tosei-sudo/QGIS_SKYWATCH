@@ -10,6 +10,7 @@ from qgis.core import QgsProject
 from qgis.PyQt.QtCore import QObject
 
 from ..qgis_io import settings
+from ..qgis_io.basemap_layer import base_map_layers
 from ..qgis_io.startup_layers import add_startup_layers
 
 TITLE = "設定ファイルのレイヤー"
@@ -17,7 +18,8 @@ TITLE = "設定ファイルのレイヤー"
 
 def _empty() -> bool:
     project = QgsProject.instance()
-    return not project.mapLayers() and not project.fileName()
+    # The plugin's own base map (「背景地図」, often shown first) does not count.
+    return len(project.mapLayers()) == len(base_map_layers(project)) and not project.fileName()
 
 
 class StartupLayers(QObject):

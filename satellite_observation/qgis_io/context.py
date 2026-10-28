@@ -112,4 +112,6 @@ class PluginContext(QObject):
                 out.append(Service("確認範囲", x.label, x.areas.url, bool(x.areas.token)))
             if x.taxonomy_table:
                 out.append(Service("分類体系", x.label, x.taxonomy_table.url, bool(x.taxonomy_table.token)))
+        # Base maps on an ArcGIS server (their token is not put in the layer: an authentication configuration is).
+        out += [Service("背景地図", x.label, x.url.rstrip("/"), bool(x.token)) for x in c.base_maps if x.type == "esri"]
         return out
