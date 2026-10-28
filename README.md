@@ -212,6 +212,15 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 保存: レイヤーパネルの順に、サービスのレイヤーはサービスとして、ファイル・メモリのベクターレイヤーはフィーチャーコレクション（5,000 件まで）として書き込む。シンボル（単一・分類・段階のシンプルな点・線・面）とラベル（属性 1 つ）は Web マップの形に変換。画像ファイルなど書き込めないものは理由とともに一覧。表示範囲・背景地図・ブックマークも書き込む
 - 「JSON として保存…」でファイルに、「ポータルに保存…」で新しいアイテムとして（開いたアイテムへの上書きも可、確認あり）
 
+## サーバ処理
+
+メニューの「サーバ処理…」で、ArcGIS のジオプロセシングサービス（GPServer）や OGC API – Processes のサーバの処理を、QGIS の Processing のアルゴリズムとして実行する。QGIS 本体にはどちらも呼び出す仕組みがない。
+
+- サービスは設定ファイルの `gpServices` から選ぶか、GPServer・GP タスク・OGC API のトップページ・`/processes`・1 つの処理の URL を入れて「読み込み」。処理を選んで「開く」（タスクや処理の URL なら読み込むとすぐ開く）
+- 非公開のサービスは「認証設定」で QGIS の認証設定を選ぶ（サービスごとに記憶）。設定ファイルの `token` も、そのサービスにだけ使う
+- 処理は Processing の「衛星撮像計画・観測記録 › サーバ処理」のアルゴリズムになり、入力（文字・選択肢・数値・距離と単位・真偽・日時・地物・表）を Processing のダイアログで入れて実行。地物はどのベクターレイヤーからでも送れ、Esri には Web メルカトルの Esri JSON、OGC には WGS 84 の GeoJSON で送る
+- ジョブは完了まで追跡（進行とメッセージを表示、取り消すとサーバ側も取り消し）。結果の地物はメモリレイヤー、画像はラスターレイヤー、ジョブの結果の地図はマップサービスのレイヤーとして追加し、値とリンクはログに表示
+
 ## 移動体（AIS・ADS-B）
 
 メニュー・ツールバーの「移動体」でドックを開き、船舶（AIS）・航空機（ADS-B）の位置をライブのフィードか履歴ファイルから地図に重ねる。フィードごとに点（向きで回る船・航空機の記号、ラベル付き）と航跡の 2 つのメモリレイヤーを作る。
@@ -292,7 +301,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

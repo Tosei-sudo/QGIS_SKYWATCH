@@ -12,6 +12,7 @@ from qgis.PyQt.QtCore import QObject, pyqtSignal
 
 from ..core.config import PluginConfig, parse_config_text, read_config_file
 from ..core.esri import EsriClient
+from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
 from . import settings
 from .network import get_bytes, qgis_transport
@@ -99,7 +100,7 @@ class PluginContext(QObject):
             self._gpkg = None
 
     def services(self) -> list[Service]:
-        """Every Esri service of the settings file, for choosing their authentication."""
+        """Every service of the settings file that may need a sign-in, for choosing their authentication."""
         c = self.config
         out: list[Service] = []
         out += [Service("画像カタログ", x.label, x.url, bool(x.token)) for x in c.image_catalogs]
@@ -114,4 +115,6 @@ class PluginContext(QObject):
                 out.append(Service("分類体系", x.label, x.taxonomy_table.url, bool(x.taxonomy_table.token)))
         # Base maps on an ArcGIS server (their token is not put in the layer: an authentication configuration is).
         out += [Service("背景地図", x.label, x.url.rstrip("/"), bool(x.token)) for x in c.base_maps if x.type == "esri"]
+        # Processing services, under the URL their sign-in is kept for (the GPServer, or the OGC API landing page).
+        out += [Service("サーバ処理", x.label, gp_service_root(x.url), bool(x.token)) for x in c.gp_services]
         return out
