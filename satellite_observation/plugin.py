@@ -35,6 +35,7 @@ from .ui.notices_dock import NoticesDock
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
+from .ui.transfer_dialog import TransferDialog
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
@@ -228,6 +229,7 @@ class SatelliteObservationPlugin:
         self.swipe: Optional[SwipeCompare] = None
         self.shift: Optional[LayerShift] = None
         self.segment: Optional[SegmentTool] = None
+        self.transfer_dialog: Optional[TransferDialog] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -362,6 +364,10 @@ class SatelliteObservationPlugin:
         self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
         self.iface.addPluginToMenu(MENU, segment)
         self.actions.append(segment)
+        transfer = QAction(icon("ai_transfer"), tr("検出結果を DB へ転記…"), self.iface.mainWindow())
+        transfer.triggered.connect(lambda: self.open_transfer())
+        self.iface.addPluginToMenu(MENU, transfer)
+        self.actions.append(transfer)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -590,6 +596,14 @@ class SatelliteObservationPlugin:
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:detect", detect_inputs(layers, self.iface.activeLayer(), self.iface.mapCanvas()))
 
+    def open_transfer(self) -> None:
+        if self.transfer_dialog is None:
+            self.transfer_dialog = TransferDialog(self.context, lambda text: self.iface.messageBar().pushInfo(tr("検出結果を DB へ転記"), text),
+                                                  self.iface.mainWindow())
+        self.transfer_dialog.prepare(self.iface.activeLayer())
+        self.transfer_dialog.show()
+        self.transfer_dialog.raise_()
+
     def open_remote_processing(self) -> None:
         if self.remote_dialog is None:
             self.remote_dialog = RemoteProcessingDialog(self.context, self.iface.mainWindow())
@@ -640,6 +654,10 @@ class SatelliteObservationPlugin:
             self.remote_dialog.close()
             self.remote_dialog.deleteLater()
             self.remote_dialog = None
+        if self.transfer_dialog is not None:
+            self.transfer_dialog.close()
+            self.transfer_dialog.deleteLater()
+            self.transfer_dialog = None
         if self.webmaps is not None:
             self.webmaps.close()
             self.webmaps.deleteLater()

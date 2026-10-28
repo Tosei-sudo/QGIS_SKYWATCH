@@ -34,6 +34,7 @@ from ..core.ai.model_config import SamModelConfig
 from ..core.ai.sam import SAM_MEAN, SAM_STD, SamPoint, part_at, sam_hwc, sam_mask, sam_prompt, sam_scale, sam_tensor
 from ..processing_provider.detect_algorithm import image_info, outline_symbol, source_fields
 from ..qgis_io.ai_io import image_rgba
+from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, LoadedModel, local_model, model_from, name_of
 from ..qgis_io.tasks import run_task
 
@@ -508,6 +509,7 @@ class SegmentTool(QObject):
             features.append(f)
         provider.addFeatures(features)
         layer.updateExtents()
+        mark_origin(layer)
         layer.setRenderer(QgsSingleSymbolRenderer(outline_symbol()))
         QgsProject.instance().addMapLayer(layer, False)
         QgsProject.instance().layerTreeRoot().insertChildNode(0, QgsLayerTreeLayer(layer))

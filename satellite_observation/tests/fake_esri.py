@@ -25,6 +25,8 @@ class FakeLayer:
         self.token = token
         self.rows: list[dict[str, Any]] = []
         self.next = 1
+        #: The layer's name, said when set.
+        self.name: Optional[str] = None
 
     def info(self) -> dict[str, Any]:
         return {
@@ -34,6 +36,7 @@ class FakeLayer:
             "maxRecordCount": self.max_record_count,
             "advancedQueryCapabilities": {"supportsPagination": self.pagination},
             "fields": [{"name": n, "type": t} for n, t in self.types.items()],
+            **({"name": self.name} if self.name else {}),
         }
 
     def add(self, attributes: dict[str, Any], geometry: Any = None) -> int:

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 検出結果を DB へ転記: detected boxes sent to a database -->
+  <rect x="2" y="4" width="15" height="13" rx="1.5" fill="#334155" stroke="#0f172a" stroke-width="1"/>
+  <rect x="5" y="7" width="6" height="5" fill="none" stroke="#00e5ff" stroke-width="1.4"/>
+  <rect x="10" y="10" width="4" height="4" fill="none" stroke="#00e5ff" stroke-width="1.4"/>
+  <ellipse cx="23" cy="18" rx="7" ry="2.5" fill="#64748b" stroke="#0f172a" stroke-width="1"/>
+  <path d="M16 18v8c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-8" fill="#94a3b8" stroke="#0f172a" stroke-width="1"/>
+  <ellipse cx="23" cy="18" rx="7" ry="2.5" fill="#cbd5e1" stroke="#0f172a" stroke-width="1"/>
+  <path d="M9 19v5h5" fill="none" stroke="#2ecc71" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12.5 21.5l2.5 2.5-2.5 2.5" fill="none" stroke="#2ecc71" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
