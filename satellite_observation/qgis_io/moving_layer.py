@@ -29,6 +29,7 @@ from ..core.moving import (
     FEED_TYPES, KINDS, FeedConfig, TrackStore, can_place, detect_fields, display_url, guess_kind, position_at, read_record, records_of,
     trail_of, utc_text,
 )
+from ..core.time_zone import zone_for
 from .moving_feeds import STATUSES, FeedConnection
 
 HERE = os.path.dirname(os.path.dirname(__file__))
@@ -117,6 +118,8 @@ class MovingLayer(QObject):
                  say: Optional[Callable[[str], None]] = None, now: Optional[Callable[[], float]] = None, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.feed = feed
+        #: The zone the feed's times are really in (the settings file's timeZone), when not what they say; not for a history file.
+        self.zone = None if history else zone_for(feed.url)
         self.history = history
         self.store = TrackStore()
         self.kind = feed.kind or "ship"
@@ -238,7 +241,7 @@ class MovingLayer(QObject):
             self._add_extra_fields(rows)
         added = 0
         for row in rows:
-            record = read_record(row, self.mapping, received_at)
+            record = read_record(row, self.mapping, received_at, self.zone)
             if record is None:
                 self.skipped += 1
                 continue

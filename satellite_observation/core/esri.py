@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
+from . import time_zone
 from .util import iso_text, is_number
 
 
@@ -54,14 +55,38 @@ class EsriClient:
         self._layers: dict[str, dict[str, Any]] = {}
 
     def ask(self, url: str, params: Optional[dict[str, str]] = None, token: Optional[str] = None) -> dict[str, Any]:
-        """The JSON answer of a request; raises EsriError with the reason when there is none."""
+        """
+        The JSON answer of a request; raises EsriError with the reason when
+        there is none. A layer whose dates are in another zone than the service
+        says (the settings file's timeZone) has them converted both ways.
+        """
+        params = params or {}
+        op = time_zone.esri_operation(url)
+        rule = time_zone.rule_for(op[0]) if op else None
+        times = self.layer_times(op[0], rule, token) if rule else None
+        if times:
+            params = time_zone.to_service(params, op[1], times)
+        value = self._ask_renewing(url, params, token)
+        if times:
+            time_zone.from_service(value, times)
+        return value
+
+    def layer_times(self, url: str, rule: "time_zone.TimeZoneRule", token: Optional[str] = None) -> "time_zone.LayerTimes":
+        """How a layer's dates are converted, from its information (the shift alone when it cannot be read)."""
         try:
-            return self._ask(url, params or {}, token)
+            info = self.layer(url, token).raw
+        except EsriError:
+            info = {}
+        return time_zone.layer_times(info, rule)
+
+    def _ask_renewing(self, url: str, params: dict[str, str], token: Optional[str]) -> dict[str, Any]:
+        try:
+            return self._ask(url, params, token)
         except InvalidTokenError:
             fresh = self.renew(url) if self.renew else None
             if not fresh:
                 raise
-            return self._ask(url, params or {}, fresh)
+            return self._ask(url, params, fresh)
 
     def _ask(self, url: str, params: dict[str, str], token: Optional[str]) -> dict[str, Any]:
         form = {**params, "f": "json"}
@@ -92,7 +117,7 @@ class EsriClient:
     def layer(self, url: str, token: Optional[str] = None, refresh: bool = False) -> "LayerInfo":
         """The layer's information (asked once per URL)."""
         if refresh or url not in self._layers:
-            self._layers[url] = self.ask(url, {}, token)
+            self._layers[url] = self._ask_renewing(url, {}, token)
         return LayerInfo(self._layers[url])
 
     def query_all(

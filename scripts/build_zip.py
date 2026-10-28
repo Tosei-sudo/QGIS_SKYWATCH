@@ -3,13 +3,14 @@ Builds the plugin's zip for QGIS (Plugins → Install from ZIP): dist/satellite_
 
     python3 scripts/build_zip.py                      # the plugin alone (or with satellite_observation/config.json if present)
     python3 scripts/build_zip.py --config my.json     # with a settings file shipped as satellite_observation/config.json
-    python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime and sgp4 inside
+    python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime, sgp4 and tzdata inside
 
 The Windows zip carries ONNX Runtime (for the AI tools, built for QGIS's
-Python 3.12) and sgp4 (the C++ accelerated orbits, any Python from 3.11) in
-satellite_observation/ext/win64, used when QGIS has none of its own. Their
-wheels are downloaded with pip (from PyPI, or the index pip is set to) unless
-given with --onnxruntime-wheel / --sgp4-wheel.
+Python 3.12), sgp4 (the C++ accelerated orbits, any Python from 3.11) and
+tzdata (the time zone database Windows lacks, for the settings file's
+timeZone) in satellite_observation/ext/win64, used when QGIS has none of its
+own. Their wheels are downloaded with pip (from PyPI, or the index pip is set
+to) unless given with --onnxruntime-wheel / --sgp4-wheel / --tzdata-wheel.
 
 A shipped settings file is read when the person has not chosen one in the
 settings dialog. It is checked first: the zip is not made when it cannot be
@@ -49,17 +50,17 @@ def check_config(path: str) -> list[str]:
     return problems
 
 
-def wheel(package: str, given: str, cache: str) -> str:
-    """A Windows (win_amd64) wheel of `package`: the one given, else one downloaded with pip into `cache`."""
+def wheel(package: str, given: str, cache: str, tag: str = "win_amd64") -> str:
+    """A Windows (win_amd64, or `tag`: `none-any` for pure Python) wheel of `package`: the one given, else one downloaded with pip into `cache`."""
     if given:
         return given
     os.makedirs(cache, exist_ok=True)
-    found = sorted(glob.glob(os.path.join(cache, f"{package}-*win_amd64.whl")))
+    found = sorted(glob.glob(os.path.join(cache, f"{package}-*{tag}.whl")))
     if found:
         return found[-1]
     subprocess.run([sys.executable, "-m", "pip", "download", package, "--only-binary=:all:", "--platform", "win_amd64",
                     "--python-version", WIN_PYTHON, "--no-deps", "-d", cache], check=True)
-    found = sorted(glob.glob(os.path.join(cache, f"{package}-*win_amd64.whl")))
+    found = sorted(glob.glob(os.path.join(cache, f"{package}-*{tag}.whl")))
     if not found:
         raise SystemExit(f"{package} の Windows 用 wheel を取得できず")
     return found[-1]
@@ -84,7 +85,8 @@ def wheel_files(path: str, package: str, keep=None, skip=()) -> list[tuple[str, 
     return out
 
 
-def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_wheel: str = "", sgp4_wheel: str = "") -> str:
+def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_wheel: str = "", sgp4_wheel: str = "",
+         tzdata_wheel: str = "") -> str:
     meta = configparser.ConfigParser()
     meta.read(os.path.join(PLUGIN, "metadata.txt"), encoding="utf-8")
     version = meta["general"]["version"]
@@ -100,6 +102,7 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
         cache = os.path.join(ROOT, "dist", "wheels")
         carried += wheel_files(wheel("onnxruntime", onnxruntime_wheel, cache), "onnxruntime", ONNXRUNTIME_KEEP)
         carried += wheel_files(wheel("sgp4", sgp4_wheel, cache), "sgp4", skip=("tests.py", "SGP4-VER.TLE", "tcppver.out"))
+        carried += wheel_files(wheel("tzdata", tzdata_wheel, cache, "none-any"), "tzdata")
     target = os.path.join(out_dir, f"satellite_observation-{version}{'-win64' if win64 else ''}.zip")
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for folder, dirs, files in os.walk(PLUGIN):
@@ -119,8 +122,10 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default="", help="同梱する設定ファイル（config.json）")
-    parser.add_argument("--win64", action="store_true", help="Windows 版（onnxruntime と sgp4 を同梱、-win64.zip）")
+    parser.add_argument("--win64", action="store_true", help="Windows 版（onnxruntime・sgp4・tzdata を同梱、-win64.zip）")
     parser.add_argument("--onnxruntime-wheel", default="", help="同梱する onnxruntime の wheel（cp312 win_amd64、指定なしで pip で取得）")
+    parser.add_argument("--tzdata-wheel", default="", help="同梱する tzdata の wheel（指定なしで pip で取得）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（win_amd64、指定なしで pip で取得）")
     args = parser.parse_args()
-    print(main(args.config, win64=args.win64, onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel))
+    print(main(args.config, win64=args.win64, onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
+               tzdata_wheel=args.tzdata_wheel))

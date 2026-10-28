@@ -24,3 +24,12 @@ def no_esri_network(monkeypatch):
         raise EsriError(f"テストでは通信なし（{url}）")
 
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(offline))
+
+
+@pytest.fixture(autouse=True)
+def no_time_zone_rules():
+    """Each test starts with no settings file's time zones (they are module state, as in the viewer)."""
+    from satellite_observation.core import time_zone
+
+    yield
+    time_zone.set_rules([])

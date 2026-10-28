@@ -14,6 +14,7 @@ from ..core.config import PluginConfig, parse_config_text, read_config_file
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
+from ..core.time_zone import set_rules
 from . import settings
 from .network import get_bytes, qgis_transport
 from .tasks import run_task
@@ -44,6 +45,8 @@ class PluginContext(QObject):
         self.bundled = False
         self.loading = False
         self._gpkg: Optional[GeoPackage] = None
+        # First of all who hear it: every request after a reload reads dates by the new file's time zones.
+        self.configChanged.connect(lambda: set_rules(self.config.time_zones))
 
     def reload(self) -> None:
         """

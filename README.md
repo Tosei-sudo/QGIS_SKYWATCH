@@ -3,7 +3,7 @@
 Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-sudo/browser-image-enhancement) の `usecase/image-viewer`）の「撮像計画」と「観測記録」と、ビューアの中心機能の画像補正（色調補正）を QGIS プラグイン（Python / PyQGIS）にしたもの。同じ設定ファイル（`config.json`）と同じ ArcGIS フィーチャーサービスを共用する。
 
 - 対応: QGIS 3.34 LTR 以上（Qt5 / Qt6）
-- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の道具だけに必要）。numpy は QGIS 付属のもの。Windows 版の zip には両方とも同梱
+- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の道具だけに必要）。numpy は QGIS 付属のもの。Windows 版の zip には両方とも同梱（`timeZone` の IANA 名に使う `tzdata` も）
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
 
 > 開発中。現在は改訂前の段階 8 までと画像カタログ（骨組み、画像カタログ: 検索・一覧・フットプリント・開く・類似画像の検索・新着画像の通知、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス、観測記録: 記録・継続・同一候補・2 点・確認範囲・モノの流れ・分類体系の編集・報告書・CSV とレイヤー・Python API）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
@@ -288,6 +288,38 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 ]
 ```
 
+## 日時のタイムゾーン（`timeZone`・`timeZones`）
+
+サービスの設定（Esri の `dateFieldsTimeReference`、文字列の `Z`・`+09:00`）と、データに実際に入っている日時のタイムゾーンがずれているときに、外部ソースごとに本当のタイムゾーンを書ける。書いたソースの日時は「そのタイムゾーンの時計の時刻」として読み書きし、サービス側の宣言は無視する。書かないソースはこれまでどおり。ビューアと同じ書き方・同じ意味。
+
+```jsonc
+"imageCatalogs": [
+  { "label": "衛星画像", "url": "https://gis.example/arcgis/rest/services/Catalog/FeatureServer/0",
+    "timeZone": "Asia/Tokyo", "fields": { … } }
+],
+"observationStores": [
+  { "label": "観測記録", "url": "https://gis.example/…/Obs/FeatureServer/0", "timeZone": "+09:00" }
+],
+"layers": [
+  // サービス全体（その下のレイヤー・テーブルすべて）
+  { "type": "esri", "url": "https://gis.example/…/Ships/FeatureServer", "layer": "0", "timeZone": "Asia/Tokyo" }
+],
+// URL の正規表現ごと（大文字小文字は区別なし）。上から最初に合うもの
+"timeZones": [
+  { "match": "gis\\.example/.*/Legacy/", "timeZone": "Asia/Tokyo", "serviceTimeZone": "UTC" }
+]
+```
+
+- `timeZone`: データの日時が記録されているタイムゾーン。IANA 名（`Asia/Tokyo`・`UTC`）、時差（`+09:00`・`+0900`・`UTC+9`）、Windows 名（`Tokyo Standard Time`）のいずれか
+- `serviceTimeZone`（任意）: サービスが日時を解釈しているタイムゾーン。Esri の日付型は、省略するとレイヤーの説明の `dateFieldsTimeReference`（`timeZoneIANA` か `timeZone`）、それもなければ UTC
+- 書ける項目: `layers`・`imageCatalogs`・`planStores`・`observationStores`（`areas`・`taxonomyTable` も含む）・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices`（ビューアの `stacCatalogs` も読むが、このプラグインに STAC はない）。項目の中の URL すべてと、その下の URL（`…/FeatureServer` なら `…/FeatureServer/0` も）が対象
+- 優先順位: 各項目の `timeZone` → `timeZones` の上から最初に合うもの。`serviceTimeZone` は同じ項目・規則のものだけを使い、なければレイヤーの説明 → UTC
+- 変換する範囲: プラグインが送る Esri の要求すべて（画像カタログ・新着の監視・衛星カタログ・撮像計画の保存先・観測記録の保存先・確認範囲・分類体系・DB へ転記・外部AI結果）の日付型（`esriFieldTypeDate`）の属性の読み込み、保存（`applyEdits` の追加・更新）、検索条件の `TIMESTAMP '…'`。移動体のフィードは時刻、サーバ処理（`gpServices`）は日時の入力
+- QGIS が自分で開くレイヤー（`layers` の `esri`・`wfs`・`ogc-features`、データソースマネージャーで追加したもの）: 日時は QGIS が読むので値は変えず、日時型の属性ごとに補正した仮想フィールド「〈属性名〉（Asia/Tokyo）」を足す（式は `satobs_time_zone("属性", 'Asia/Tokyo', 'UTC')`、関数は式ビルダーの「衛星観測」）。プロジェクトに保存され、開き直しても二重には足さない。Esri のレイヤーで `serviceTimeZone` がないときはレイヤーの説明を読んでから足す
+- 対象外: 日付だけの型（`esriFieldTypeDateOnly`）・時刻だけの型・時差を持つ型（`esriFieldTypeTimestampOffset`）、日時を文字列型に入れた Esri の属性、検索条件の `DATE '…'`、QGIS が開くレイヤーの文字列型の属性
+- 読み込めないタイムゾーン・正規表現は「設定…」の問題の一覧に出して無視する
+- 閉域でも動く: IANA 名は Python の zoneinfo（OS のデータベース）で読む。Windows には OS のデータベースがないため Windows 版の zip に `tzdata` を同梱。どちらもないときも、夏時間のないタイムゾーン（`Asia/Tokyo`・`Asia/Seoul`・`Asia/Shanghai`・`Asia/Singapore`・`Asia/Kolkata` など）と時差の書き方は読める
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -329,14 +361,14 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」
 3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る
 
-### Windows 版（onnxruntime・sgp4 を同梱）
+### Windows 版（onnxruntime・sgp4・tzdata を同梱）
 
 ```
 python3 scripts/build_zip.py --win64
 ```
 
-- `dist/satellite_observation-<版>-win64.zip` を作る。中の `satellite_observation/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
-- 2 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl` で持ち込んだものを指定
+- `dist/satellite_observation-<版>-win64.zip` を作る。中の `satellite_observation/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
+- 3 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
 - ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
 - `--config` と併用可
 
@@ -363,7 +395,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 
@@ -372,7 +404,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 ```
 satellite_observation/
   core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録・AI の前後処理（NumPy）
-  ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime と C++ 版 sgp4 も）
+  ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime と C++ 版 sgp4 と tzdata も）
   qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
   processing_provider/  Processing のアルゴリズム（パンシャープン）
   ui/        ドック・ダイアログ

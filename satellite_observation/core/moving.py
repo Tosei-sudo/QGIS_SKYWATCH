@@ -28,6 +28,7 @@ from urllib.parse import urljoin, urlsplit
 
 from .geocode import decode_csv, parse_csv
 from .obs.image_time import parse_time
+from .time_zone import UTC, TimeShift, TimeZone, read_instant, read_text_instant
 
 ROLES = {
     "id": "ID（MMSI・ICAO）",
@@ -255,15 +256,18 @@ def number_of(v: Any) -> Optional[float]:
     return None
 
 
-def time_of(v: Any) -> Optional[float]:
+def time_of(v: Any, zone: Optional[TimeZone] = None) -> Optional[float]:
     """
     A time from a feed: ms or s since 1970 as numbers, or text (ISO 8601 and
     the like). Text without a time zone is UTC, as AIS and ADS-B times are;
-    aisstream.io's `… +0000 UTC` reads too.
+    aisstream.io's `… +0000 UTC` reads too. A feed whose times are in another
+    zone than they say (the settings file's timeZone: `zone`) is read as that
+    zone's clock.
     """
     n = number_of(v)
     if n is not None:
-        return n if n > 1e11 else n * 1000 if n > 1e8 else None
+        t = n if n > 1e11 else n * 1000 if n > 1e8 else None
+        return read_instant(t, TimeShift(zone, UTC)) if t is not None and zone else t
     if not isinstance(v, str):
         return None
     text = re.sub(r"\s*UTC$", "", v.strip(), flags=re.IGNORECASE)
@@ -271,6 +275,10 @@ def time_of(v: Any) -> Optional[float]:
         return None
     # Nanoseconds and more: milliseconds are enough.
     trimmed = re.sub(r"([.,]\d{3})\d+", r"\1", text)
+    if zone:
+        t = read_text_instant(re.sub(r"\s+([+-]\d{4})$", r"\1", trimmed), zone)
+        if t is not None:
+            return t
     zoned = re.search(r"(Z|[+-]\d{2}:?\d{2})$", trimmed, re.IGNORECASE) is not None
     t = None if zoned else parse_time(f"{trimmed}Z")
     if t is None:
@@ -284,8 +292,12 @@ def _angle_of(v: Any) -> Optional[float]:
     return None if n is None or n < 0 or n > 360 else n % 360
 
 
-def read_record(flat: dict, mapping: dict, now: float) -> Optional[MovingRecord]:
-    """One record as a position report by `mapping`, or None without an id or a valid position; `now` is its time when it has none."""
+def read_record(flat: dict, mapping: dict, now: float, zone: Optional[TimeZone] = None) -> Optional[MovingRecord]:
+    """
+    One record as a position report by `mapping`, or None without an id or a
+    valid position; `now` is its time when it has none. `zone`: the zone the
+    feed's times are really in (the settings file's timeZone).
+    """
     def get(role: str) -> Any:
         return flat.get(mapping[role]) if mapping.get(role) else None
 
@@ -296,7 +308,7 @@ def read_record(flat: dict, mapping: dict, now: float) -> Optional[MovingRecord]
     lat, lon = number_of(get("lat")), number_of(get("lon"))
     if lat is None or lon is None or abs(lat) > 90 or abs(lon) > 180:
         return None
-    t = time_of(get("time"))
+    t = time_of(get("time"), zone)
     speed = number_of(get("speed"))
 
     def text(v: Any) -> Optional[str]:

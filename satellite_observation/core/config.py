@@ -32,13 +32,14 @@ from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_for
 from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .startup_layers import StartupLayer, startup_layers_of
+from .time_zone import TimeZoneRule, time_zones_of
 
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs", "aiResultSources",
+    "aiModels", "detectionOutputs", "aiResultSources", "timeZones",
 )
 
 
@@ -77,6 +78,9 @@ class PluginConfig:
     detection_outputs: list[DetectionOutput] = field(default_factory=list)
     #: External AI results shown for the image opened from the catalog (「外部AI結果」).
     ai_result_sources: list[AiResultSource] = field(default_factory=list)
+    #: The zone each source's dates are really in, when the service says otherwise:
+    #: the `timeZone` of a source entry (its URLs and the layers under them), then `timeZones` rules.
+    time_zones: list[TimeZoneRule] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -216,6 +220,7 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     config.ai_models = listed("aiModels", ai_model_of)
     config.detection_outputs = listed("detectionOutputs", detection_output_of)
     config.ai_result_sources = listed("aiResultSources", ai_result_source_of)
+    config.time_zones = time_zones_of(value, problems)
     return config, problems
 
 

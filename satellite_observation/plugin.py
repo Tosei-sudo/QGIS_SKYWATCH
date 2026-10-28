@@ -19,6 +19,7 @@ from .processing_provider.pansharpen_algorithm import default_inputs
 from .processing_provider import detect_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
+from .qgis_io import time_zone_fields
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
@@ -512,6 +513,15 @@ class SatelliteObservationPlugin:
         self.iface.addCustomActionForLayerType(self.similar_action, "", QgsMapLayerType.RasterLayer, False)
         QgsProject.instance().layersAdded.connect(self._layers_added)
         self._layers_added(QgsProject.instance().mapLayers().values())
+        # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
+        time_zone_fields.register()
+        self.time_zone_fields = time_zone_fields.TimeZoneFields(self.context.esri)
+        QgsProject.instance().layersAdded.connect(self.time_zone_fields.layers_added)
+        self.context.configChanged.connect(self._time_zones_changed)
+
+    def _time_zones_changed(self) -> None:
+        if getattr(self, "time_zone_fields", None) is not None:
+            self.time_zone_fields.layers_added(QgsProject.instance().mapLayers().values())
 
     def _layers_added(self, layers) -> None:
         for layer in layers:
@@ -652,6 +662,13 @@ class SatelliteObservationPlugin:
                 pass
             self.iface.removeCustomActionForLayerType(self.similar_action)
             self.similar_action = None
+        if getattr(self, "time_zone_fields", None) is not None:
+            try:
+                QgsProject.instance().layersAdded.disconnect(self.time_zone_fields.layers_added)
+            except (TypeError, RuntimeError):
+                pass
+            self.time_zone_fields = None
+            time_zone_fields.unregister()
         if self.swipe is not None:
             self.swipe.close()
             self.swipe.deleteLater()

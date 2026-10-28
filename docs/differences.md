@@ -448,6 +448,20 @@ Windows 版の zip には `sgp4`（2.27 の C++ 版、abi3 の wheel なので Q
 | 二重の取り込み | 備考の印 `[AI:出どころ#結果ID]` で判定 | 観測記録の保存先（Esri・GeoPackage）の項目を増やさずに済むため。備考を消すと再び取り込める |
 | まとめて記録 | 観測記録の保存は 1 回（`ObservationBook.add_many`）。名前のない結果は「船舶-1」「船舶-2」と順に | Esri の保存先で 1 件ずつ送ると遅いため |
 
+## 日時のタイムゾーン（2026-10-28 に追加）
+
+tsudo の依頼（サービスの設定とデータの日時がずれていることがある）。ビューアでも同時に実装中（`claude/project-thread-7yv3h6`、time-zone.ts）だったので、書き方・意味・優先順位（各項目の `timeZone` → `timeZones` の最初に合うもの、サービス側は `serviceTimeZone` → `dateFieldsTimeReference` → UTC）はそれに合わせた。
+
+| 項目 | 決めたこと | 理由 |
+| --- | --- | --- |
+| 変換する場所 | Esri の要求はすべて `EsriClient.ask` で変換（`…/query`・`applyEdits`・`addFeatures`・`updateFeatures` の日付型と `TIMESTAMP '…'`） | ビューアの esriJson と同じ一か所。保存先・カタログ・外部AI結果などが個別に直さずに済む |
+| QGIS が開くレイヤー | 値は変えず、日時型の属性ごとに補正した仮想フィールド「〈属性〉（〈タイムゾーン〉）」を足す（式関数 `satobs_time_zone`） | ArcGIS・WFS・OGC API のプロバイダーが日時を読むため、プラグインが値に手を入れられない。ビューアは自分で読むので値そのものを直す |
+| 文字列の日時 | 移動体のフィードとサーバ処理（OGC）の日時だけ。QGIS が開く WFS・OGC API の文字列型の属性は対象外 | ビューアは WFS・OGC API の文字列の属性も直すが、QGIS では型の分からない文字列を調べるのに地物の読み込みが要る（地図の操作を止めるため） |
+| 新着画像の監視 | 対象（プラグインの監視も `EsriClient` を通る） | ビューアは Service Worker での確認が対象外 |
+| STAC | なし | プラグインに STAC カタログがない（`stacCatalogs` の `timeZone` は読むだけ） |
+| タイムゾーンのデータベース | Python の zoneinfo。Windows 版の zip に `tzdata` を同梱、なければ夏時間のないタイムゾーンだけ内蔵の表で読む | Windows には OS のデータベースがなく、閉域で pip が使えないため（ライブラリは Windows 版だけ同梱の方針） |
+| レイヤーの情報 | QGIS が開いたレイヤーはカスタムプロパティ `satobs/timeZone`（`Asia/Tokyo（サービス側: UTC）`）と仮想フィールドのコメント | ビューアの「情報」の「日時のタイムゾーン」の行の代わり |
+
 ## 表示の言語
 
 画面の文言は日本語のみ（2026-10-27 に決定）。ドックの文言は `self.tr()` で包んでいるが、一覧の上の要約文など core が作る文は翻訳の対象にしていない。
