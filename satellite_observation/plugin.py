@@ -21,6 +21,7 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
+from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
 from .ui.coordinate_box import CoordinateBox
@@ -53,7 +54,7 @@ MENU = "衛星撮像計画・観測記録"
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
 INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
@@ -167,6 +168,11 @@ class PluginApi:
         return self._plugin.docks["SatObsMoving"]
 
     @property
+    def ai_results(self) -> "AiResultsDock":
+        """The dock 「外部AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
+        return self._plugin.docks["SatObsAiResults"]
+
+    @property
     def swipe(self) -> "SwipeCompare":
         """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
         return self._plugin.swipe
@@ -246,7 +252,7 @@ class SatelliteObservationPlugin:
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
-                 "SatObsDashboard": "dashboard"}
+                 "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -261,6 +267,7 @@ class SatelliteObservationPlugin:
             ("SatObsSpectral", tr("スペクトル"), None),
             ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
             ("SatObsDashboard", tr("ダッシュボード"), None),
+            ("SatObsAiResults", tr("外部AI結果"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -286,6 +293,9 @@ class SatelliteObservationPlugin:
                 dock = MovingDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsDashboard":
                 dock = DashboardDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsAiResults":
+                dock = AiResultsDock(self.iface, self.context, self.open_settings, lambda: self.docks.get("SatObsObservations"),
+                                     self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:

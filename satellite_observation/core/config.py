@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
+from .ai_results import AiResultSource, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
@@ -37,7 +38,7 @@ KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs",
+    "aiModels", "detectionOutputs", "aiResultSources",
 )
 
 
@@ -74,6 +75,8 @@ class PluginConfig:
     #: The AI models offered in 「物体検出（AI）」 and 「クリック抽出（AI）」.
     ai_models: list[AiModelConfig] = field(default_factory=list)
     detection_outputs: list[DetectionOutput] = field(default_factory=list)
+    #: External AI results shown for the image opened from the catalog (「外部AI結果」).
+    ai_result_sources: list[AiResultSource] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -212,6 +215,7 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     config.gp_services = listed("gpServices", gp_service_of)
     config.ai_models = listed("aiModels", ai_model_of)
     config.detection_outputs = listed("detectionOutputs", detection_output_of)
+    config.ai_result_sources = listed("aiResultSources", ai_result_source_of)
     return config, problems
 
 
