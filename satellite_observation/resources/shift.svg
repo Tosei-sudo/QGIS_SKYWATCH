@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 位置ずらし: an image moved from where it was -->
+  <rect x="3" y="9" width="16" height="16" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="2 1.5"/>
+  <rect x="11" y="4" width="16" height="16" fill="#93c5fd" stroke="#1d4ed8" stroke-width="1.2"/>
+  <path d="M8 22l9-9" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M12 13h5v5" fill="none" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

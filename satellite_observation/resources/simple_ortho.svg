@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 簡易オルソ補正: a satellite's slanted view of a hill, the hilltop put back over its foot -->
+  <path d="M2 28h28" stroke="#0f172a" stroke-width="1.4"/>
+  <path d="M4 28l9-11 9 11z" fill="#a3c58c" stroke="#3f6212" stroke-width="1"/>
+  <rect x="24" y="2" width="6" height="4" fill="#475569"/>
+  <path d="M27 6L13 17" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="2 1.5"/>
+  <path d="M13 17v-6" stroke="#1d4ed8" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M10.5 13.5L13 11l2.5 2.5" fill="none" stroke="#1d4ed8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

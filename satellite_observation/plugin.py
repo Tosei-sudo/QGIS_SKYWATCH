@@ -36,6 +36,7 @@ from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.spectral_dock import SpectralDock
 from .ui.startup import StartupLayers
+from .ui.shift import LayerShift
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
 
@@ -153,6 +154,11 @@ class PluginApi:
         """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
         return self._plugin.swipe
 
+    @property
+    def shift(self) -> "LayerShift":
+        """「位置ずらし」 (its `set_active()`, `set_shift_metres(layer, east, north)`, `shift_metres(layer)`, `reset()`)."""
+        return self._plugin.shift
+
     def new_scratch_layer(self, template: Optional[str] = None, source: str = "builtin") -> "NewLayerDialog":
         """Opens 「新規スクラッチレイヤー（テンプレート）」 (with a template: `source` builtin, config or saved); its `create()`."""
         return self._plugin.open_new_layer(source, template)
@@ -197,6 +203,7 @@ class SatelliteObservationPlugin:
         self.provider: Optional[SatObsProvider] = None
         self.scratch_hook: Optional[ScratchDialogHook] = None
         self.swipe: Optional[SwipeCompare] = None
+        self.shift: Optional[LayerShift] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -295,6 +302,10 @@ class SatelliteObservationPlugin:
         classify.triggered.connect(lambda: self.open_classify())
         self.iface.addPluginToMenu(MENU, classify)
         self.actions.append(classify)
+        ortho = QAction(icon("simple_ortho"), tr("簡易オルソ補正…"), self.iface.mainWindow())
+        ortho.triggered.connect(lambda: self.open_simple_ortho())
+        self.iface.addPluginToMenu(MENU, ortho)
+        self.actions.append(ortho)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -317,6 +328,17 @@ class SatelliteObservationPlugin:
         self.iface.addPluginToMenu(MENU, swipe)
         self.toolbar.addAction(swipe)
         self.actions.append(swipe)
+        # 「位置ずらし」: the active image moved by hand.
+        shift = QAction(icon("shift"), tr("位置ずらし"), self.iface.mainWindow())
+        shift.setObjectName("SatObsShift")
+        self.shift = LayerShift(self.iface, shift, self.iface.mainWindow())
+        self.iface.addPluginToMenu(MENU, shift)
+        self.toolbar.addAction(shift)
+        self.actions.append(shift)
+        unshift = QAction(icon("unshift"), tr("位置ずらしの解除"), self.iface.mainWindow())
+        unshift.triggered.connect(lambda: self.shift.reset())
+        self.iface.addPluginToMenu(MENU, unshift)
+        self.actions.append(unshift)
         home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
         home.triggered.connect(lambda: self.place_docks())
         self.iface.addPluginToMenu(MENU, home)
@@ -468,6 +490,15 @@ class SatelliteObservationPlugin:
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:classify", classify_inputs(layers, self.iface.activeLayer()))
 
+    def open_simple_ortho(self) -> None:
+        """The algorithm's dialog, with the active image and a DEM-like layer."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.ortho_algorithm import default_inputs as ortho_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:simple_ortho", ortho_inputs(layers, self.iface.activeLayer()))
+
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
@@ -490,6 +521,10 @@ class SatelliteObservationPlugin:
             self.swipe.close()
             self.swipe.deleteLater()
             self.swipe = None
+        if self.shift is not None:
+            self.shift.close()
+            self.shift.deleteLater()
+            self.shift = None
         if self.base_maps is not None:
             self.base_maps.close()
             self.base_maps = None
