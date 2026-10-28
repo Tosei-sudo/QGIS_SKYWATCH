@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 正距方位での重心: a polygon and its centre of mass on the ground -->
+  <path d="M4 24L9 6l12 3 7 13-10 6z" fill="#bbf7d0" stroke="#15803d" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="16" cy="17" r="2.6" fill="#dc2626" stroke="white" stroke-width="1"/>
+  <path d="M16 11v3M16 20v3M10 17h3M19 17h3" stroke="#0f172a" stroke-width="1"/>
+</svg>
