@@ -283,6 +283,10 @@ class SatelliteObservationPlugin:
         pansharpen.triggered.connect(lambda: self.open_pansharpen())
         self.iface.addPluginToMenu(MENU, pansharpen)
         self.actions.append(pansharpen)
+        change = QAction(icon("change"), tr("変化抽出（2 時期）…"), self.iface.mainWindow())
+        change.triggered.connect(lambda: self.open_change())
+        self.iface.addPluginToMenu(MENU, change)
+        self.actions.append(change)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -427,6 +431,16 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:pansharpen", default_inputs(layers, self.iface.activeLayer()))
+
+    def open_change(self) -> None:
+        """The algorithm's dialog, with the two earliest images (else the lowest two in the list), the earlier as before."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.change_algorithm import default_inputs as change_inputs
+        from .qgis_io.obs_images import observed_image
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:change", change_inputs(layers, lambda layer: observed_image(layer).time))
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
