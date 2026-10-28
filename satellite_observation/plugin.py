@@ -34,6 +34,7 @@ from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
+from .ui.spectral_dock import SpectralDock
 from .ui.startup import StartupLayers
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
@@ -43,7 +44,7 @@ MENU = "衛星撮像計画・観測記録"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
@@ -143,6 +144,11 @@ class PluginApi:
         return self._plugin.coordinates
 
     @property
+    def spectral(self) -> "SpectralDock":
+        """The dock 「スペクトル」 (its `series`, `labels`, `add_point(point)`, `add_box(rect)`, `csv_text()`, `save_csv(path)`, `clear()`)."""
+        return self._plugin.docks["SatObsSpectral"]
+
+    @property
     def swipe(self) -> "SwipeCompare":
         """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
         return self._plugin.swipe
@@ -206,7 +212,7 @@ class SatelliteObservationPlugin:
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
-                 "SatObsShadowHeight": "shadow_height"}
+                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -218,6 +224,7 @@ class SatelliteObservationPlugin:
             ("SatObsNotices", tr("通知"), None),
             ("SatObsEnhance", tr("画像補正"), None),
             ("SatObsShadowHeight", tr("影から高さ"), None),
+            ("SatObsSpectral", tr("スペクトル"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -237,6 +244,8 @@ class SatelliteObservationPlugin:
                 dock = EnhanceDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsShadowHeight":
                 dock = ShadowHeightDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsSpectral":
+                dock = SpectralDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:

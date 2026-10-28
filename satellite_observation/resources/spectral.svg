@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- スペクトル: lines of band values for a few points -->
+  <rect x="2.5" y="3.5" width="27" height="25" rx="1.5" fill="#f8fafc" stroke="#0f172a" stroke-width="1"/>
+  <path d="M6 25h21M6 25V7" stroke="#64748b" stroke-width="1"/>
+  <path d="M7 21l5-3 5 1 5-11 4 2" fill="none" stroke="#30a46c" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M7 14l5 2 5 3 5 2 4 1" fill="none" stroke="#3e7bfa" stroke-width="1.8" stroke-linejoin="round"/>
+  <path d="M7 18l5-2 5-1 5 1 4-3" fill="none" stroke="#e5484d" stroke-width="1.8" stroke-linejoin="round"/>
+</svg>
