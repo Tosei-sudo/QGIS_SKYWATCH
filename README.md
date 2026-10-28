@@ -3,7 +3,7 @@
 Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-sudo/browser-image-enhancement) の `usecase/image-viewer`）の「撮像計画」と「観測記録」と、ビューアの中心機能の画像補正（色調補正）を QGIS プラグイン（Python / PyQGIS）にしたもの。同じ設定ファイル（`config.json`）と同じ ArcGIS フィーチャーサービスを共用する。
 
 - 対応: QGIS 3.34 LTR 以上（Qt5 / Qt6）
-- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）。numpy は QGIS 付属のもの
+- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の道具だけに必要）。numpy は QGIS 付属のもの。Windows 版の zip には両方とも同梱
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
 
 > 開発中。現在は改訂前の段階 8 までと画像カタログ（骨組み、画像カタログ: 検索・一覧・フットプリント・開く・類似画像の検索・新着画像の通知、撮像計画: 衛星カタログ・撮像モード・衛星ツリー・撮像機会の計算・組み合わせ・優先度・シーンの共有・撮像範囲の移動・タイムライン・一覧と地図・CSV とレイヤー・計画の保存と追跡・予定表と通知・雲量予報・地上局・ステレオペアと干渉ペア・再訪間隔マップ・移動目標撮像計画・衛星パス、観測記録: 記録・継続・同一候補・2 点・確認範囲・モノの流れ・分類体系の編集・報告書・CSV とレイヤー・Python API）。ビューアとの違いは [docs/differences.md](docs/differences.md)。
@@ -251,6 +251,15 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - カーソル位置の WGS 84 座標をステータスバーの右に表示。表記（10進・度分秒・MGRS・UTM）は地図の右クリックの「ステータスバーの表示」か、表示の右クリックで切り替え
 - 地図の右クリック「緯度経度・MGRS・UTM のコピー」で、その地点の座標をコピー
 
+## AI（物体検出・クリック抽出）
+
+ビューアと同じ ONNX のモデルで、画像から物を見つけてポリゴンにする。QGIS 本体にはない。モデルはプラグインに入っていない（設定ファイルの `aiModels` か、ONNX ファイルを指定）。
+
+- メニュー・ツールバーの「物体検出（AI）…」（Processing の「衛星撮像計画・観測記録」にも）: レイヤー・モデル・範囲・解析の画素の大きさ（0 で元の解像度。地図の表示から始まる）を選んで実行し、見つかった物を `class`・`class_id`・`score`（回転矩形なら `angle`）と画像の情報（`image`・`image_id`・`image_time`・`model`・`detected_at`・`note`）付きのポリゴンレイヤーにする。読めるモデルはビューアと同じ（YOLOv8/11 の検出・回転矩形・セグメンテーション、YOLOX、RT-DETR、Detectron2 など。入力の大きさとクラスはモデルの情報から読み、`aiModels` の値が優先）。レイヤーは表示のとおり（補正・スタイル込み）に描いて解析し、大きい範囲は区切って重なりを付けて解析する。詳細設定で確信度・重なり（IoU）・タイルの重なり・クラスの絞り込み
+- メニューの「クリック抽出（AI）」（地図ツール）: Segment Anything（SAM・MobileSAM など）のエンコーダーとデコーダーで、クリックした物の輪郭を描く。Shift+クリックで同じ物に足す点、Alt+クリックで除く点。地図の左上のパネルで、モデルの選択・「元に戻す」・「レイヤーにする」（一時レイヤー「AI 抽出」）。表示を動かすと次のクリックで描き直して解析する
+- `aiModels`: ビューアと同じ形。検出は `{"label", "url", "task", "inputSize", "classes", "mean", "std", "channels", "format", "maxDetections", …}`、SAM は `{"label", "encoder", "decoder", "inputSize", "mean", "std"}`。`url`・`encoder`・`decoder` は URL か、設定ファイルからの相対パス・絶対パス。URL のモデルは初回に読み込んでプロファイルの `ai_models` に保存する（「設定…」の認証設定を使う）
+- 実行に `onnxruntime` が要る。Windows 版の zip（下の「導入」）には同梱。ほかは QGIS の Python に入れる: OSGeo4W シェルで `python -m pip install onnxruntime`、macOS は `/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install onnxruntime`、Linux は `python3 -m pip install onnxruntime`。GPU 版（`onnxruntime-gpu`・`onnxruntime-directml`）を入れれば GPU で動く
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -292,6 +301,17 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」
 3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る
 
+### Windows 版（onnxruntime・sgp4 を同梱）
+
+```
+python3 scripts/build_zip.py --win64
+```
+
+- `dist/satellite_observation-<版>-win64.zip` を作る。中の `satellite_observation/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
+- 2 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl` で持ち込んだものを指定
+- ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
+- `--config` と併用可
+
 ### 設定ファイルを同梱して配る
 
 画像ビューアの `config.json`（`public/config.json` など）をそのまま zip に入れて配れる。
@@ -312,9 +332,10 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
+| URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 
@@ -322,7 +343,8 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 
 ```
 satellite_observation/
-  core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録
+  core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録・AI の前後処理（NumPy）
+  ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime と C++ 版 sgp4 も）
   qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
   processing_provider/  Processing のアルゴリズム（パンシャープン）
   ui/        ドック・ダイアログ

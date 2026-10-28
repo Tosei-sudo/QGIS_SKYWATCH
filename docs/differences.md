@@ -410,6 +410,27 @@
 | 地図の移動中 | 常に切り抜き | 描き直しが終わるまで（一瞬）線の両側が同じ表示 | 反対側を別に描くため |
 | 2 画面・4 画面の連動表示（`split-view.ts`） | あり | 移植しない | QGIS 標準の「新規マップビュー」と表示範囲の同期で代わりになる |
 
+## AI（物体検出・クリック抽出）（2026-10-28 に追加）
+
+参照: `ai.ts`・`ai-detect.ts`・`ai-segment.ts`・`ai-models.ts`・`mask-outline.ts`。
+
+| 項目 | ビューア | プラグイン | 理由 |
+| --- | --- | --- | --- |
+| 実行環境 | ONNX Runtime Web（WebGPU・WASM、Web Worker） | ONNX Runtime（Python）。QgsTask の中で実行、スレッド数は ONNX Runtime に任せる。GPU は入っている実行プロバイダー（CUDA・DirectML・CoreML）を使う | QGIS には WebGPU・Worker がないため |
+| onnxruntime | ビューアに同梱 | QGIS には入っていないため各自で入れる。Windows 版の zip（`--win64`）には同梱 | pip の wheel が OS・Python ごとに分かれ、ふつうの zip に全部は入らないため |
+| モデルの読み方 | ONNX の protobuf を読んで入力・出力・メタデータを判別 | ONNX Runtime のセッションから入力・出力の形と型、メタデータを取る。判別の規則は同じ | 同じ情報が取れるため |
+| サンプルのモデル | `public/models` に YOLO11s-OBB・MobileSAM | 同梱しない。`aiModels` か ONNX ファイルを指定 | 容量（数十 MB）と YOLO11 のライセンス（AGPL）のため |
+| 検出の範囲 | 画面に見えている範囲を画面の解像度で | Processing のダイアログで範囲と画素の大きさを指定（初期値は地図の表示） | Processing のアルゴリズムにしたため。大きな範囲も区切って解析（ブロック 4096 画素、上限 40000 画素四方） |
+| 検出の結果 | 地図に描いて一覧に表示、保存は転記で | ポリゴンのレイヤー（属性はビューアの `sourceFields` と同じ） | QGIS のレイヤーにすれば保存・編集・書き出しができるため |
+| クリック抽出の操作 | 情報欄のパネル | 地図の左上に重ねたパネル（モデル・元に戻す・レイヤーにする・閉じる）。ほかの地図ツールを選ぶと終了、Esc でも終了 | QGIS に情報欄がないため |
+| クリック抽出の結果 | 地図に描画、転記で保存 | 一時レイヤー「AI 抽出」 | 同上 |
+| 転記（`ai-transfer.ts`、`detectionOutputs` へ送る） | あり | 未移植（次の PR） | 分量のため |
+| 連結成分の判定（`part_at`） | 自前の塗りつぶし | SciPy があれば `scipy.ndimage.label`、なければ同じ塗りつぶし | 速さのため。結果は同じ |
+
+### 軌道計算の sgp4 も Windows 版に同梱（同時に追加）
+
+Windows 版の zip には `sgp4`（2.27 の C++ 版、abi3 の wheel なので QGIS の Python 3.11 以降で動く）も入る。QGIS 側に `sgp4` があればそちらを優先し、どちらもなければ従来どおり同梱の純 Python 版（`ext/sgp4`）を使う。
+
 ## 表示の言語
 
 画面の文言は日本語のみ（2026-10-27 に決定）。ドックの文言は `self.tr()` で包んでいるが、一覧の上の要約文など core が作る文は翻訳の対象にしていない。

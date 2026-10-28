@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .ai.model_config import AiModelConfig, ai_model_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
@@ -35,6 +36,7 @@ KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
+    "aiModels",
 )
 
 
@@ -68,6 +70,8 @@ class PluginConfig:
     #: The moving-object feeds (AIS, ADS-B) offered in 「移動体（AIS・ADS-B）」.
     moving_feeds: list[FeedConfig] = field(default_factory=list)
     gp_services: list[GpServiceConfig] = field(default_factory=list)
+    #: The AI models offered in 「物体検出（AI）」 and 「クリック抽出（AI）」.
+    ai_models: list[AiModelConfig] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -204,6 +208,7 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     if "movingFeeds" in value:
         config.moving_feeds = moving_feeds_of(value["movingFeeds"], problems)
     config.gp_services = listed("gpServices", gp_service_of)
+    config.ai_models = listed("aiModels", ai_model_of)
     return config, problems
 
 
