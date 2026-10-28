@@ -43,7 +43,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     plugin = classFactory(iface)
     plugin.initGui()
     assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル"]
-    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動目標撮像計画…", "新規スクラッチレイヤー（テンプレート）…", "パンシャープン…", "設定ファイルのレイヤーを追加", "背景地図", "スワイプ比較", "ドックを初期位置に戻す", "設定…"]
+    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動目標撮像計画…", "新規スクラッチレイヤー（テンプレート）…", "パンシャープン…", "変化抽出（2 時期）…", "設定ファイルのレイヤーを追加", "背景地図", "スワイプ比較", "ドックを初期位置に戻す", "設定…"]
     # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
     assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
     # They work as if opened: the catalog's footprints drawn on the map.
@@ -224,7 +224,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 18
+    assert len(set(drawn)) == len(plugin.actions) == 19
     plugin.unload()
 
 
