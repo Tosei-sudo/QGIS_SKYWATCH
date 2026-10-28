@@ -214,7 +214,7 @@ def test_the_dock_corrects_the_active_layer_and_follows_the_view(tmp_path):
 
         # A tone curve from a script survives the sliders.
         dock.enhance(layer, {"version": 1, "ops": [{"op": "curve", "points": [[0, 0], [0.5, 0.6], [1, 1]]}, {"op": "contrast", "amount": 0.1}]})
-        assert not dock.extra_label.isHidden()
+        assert dock.curve_box.isChecked() and dock.curve.step()["points"] == [[0, 0], [0.5, 0.6], [1, 1]]
         dock.apply()
         assert [op["op"] for op in er.enhance_renderer(layer).settings.correction.ops] == ["contrast", "curve"]
 
@@ -461,3 +461,65 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
     finally:
         dock.close_down()
         project.removeAllMapLayers()
+
+
+def test_the_tone_curve_is_edited_on_its_plot(tmp_path):
+    from qgis.PyQt.QtCore import QEvent, QPoint, QPointF, Qt
+    from qgis.PyQt.QtGui import QMouseEvent
+    from qgis.PyQt.QtTest import QTest
+    from qgis.PyQt.QtWidgets import QApplication
+
+    from satellite_observation.ui.curve_editor import CurveEditor
+
+    editor = CurveEditor()
+    editor.resize(220, 300)
+    editor.show()
+    plot = editor.plot
+    plot.resize(200, 200)
+    edits = []
+    editor.changed.connect(lambda: edits.append(1))
+    assert editor.step() is None
+
+    def move(pos):
+        # QTest.mouseMove sends no button held (Qt 5): a drag needs the event itself.
+        QApplication.sendEvent(plot, QMouseEvent(QEvent.Type.MouseMove, QPointF(pos), Qt.MouseButton.LeftButton,
+                                                 Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+
+    def at(x, y):
+        q = plot.to_screen(x, y)
+        return QPoint(round(q.x()), round(q.y()))
+
+    # A click off the points adds one on the curve; dragging it bends the curve.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.5, 0.2))
+    move(at(0.5, 0.7))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.5, 0.7))
+    pts = editor.step()["points"]
+    assert len(pts) == 3 and pts[1][0] == pytest.approx(0.5, abs=0.01) and pts[1][1] == pytest.approx(0.7, abs=0.01)
+    assert edits
+    # The ends move only up and down.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0, 0))
+    move(at(0.2, 0.1))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.2, 0.1))
+    assert editor.step()["points"][0] == [0.0, pytest.approx(0.1, abs=0.01)]
+    # A double-click removes a point; a channel of its own.
+    QTest.mouseDClick(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(*editor.step()["points"][1]))
+    assert len(editor.step()["points"]) == 2
+    editor.channel.setCurrentIndex(editor.channel.findData("red"))
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.25, 0.25))
+    move(at(0.25, 0.5))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.25, 0.5))
+    step = editor.step()
+    assert len(step["red"]) == 3 and step["green"] == [[0.0, 0.0], [1.0, 1.0]]
+    # Dragged out of the box: removed.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(*step["red"][1]))
+    move(QPoint(-60, -60))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(-60, -60))
+    assert len(editor.step()["red"]) == 2
+    editor.reset_channel()
+    editor.channel.setCurrentIndex(0)
+    editor.reset_channel()
+    assert editor.step() is None
+    editor.set_gray(True)
+    assert not editor.channel.model().item(1).isEnabled()
+    plot.grab()
+    editor.close()

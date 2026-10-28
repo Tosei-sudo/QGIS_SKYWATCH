@@ -6,9 +6,10 @@ pause; the correction is kept on the layer (so in the project) and comes
 back when a project is opened.
 
 The correction is built as the viewer's panel builds it: DRA first, then one
-step per kind in the order of its first slider, neutral steps left out. Steps
-that have no slider (a tone curve or white balance from `imageRules` or a
-saved correction) are kept after them.
+step per kind in the order of its first slider, neutral steps left out, then
+the tone curve (トーンカーブ, edited on its own plot). Steps that have no
+control (white balance or a stretch from `imageRules` or a saved correction)
+are kept after them.
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from ..core.enhance.rules import image_rule_for, resolve_bands
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io.tasks import run_task
 from .colorize_box import ColorizeBox, set_blend
+from .curve_editor import CurveEditor
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
 
@@ -218,6 +220,17 @@ class EnhanceDock(PluginDock):
         self.extra_label.setWordWrap(True)
         form.addRow(self.extra_label)
         v.addWidget(adjust)
+
+        self.curve_box = QGroupBox(self.tr("トーンカーブ"))
+        self.curve_box.setCheckable(True)
+        self.curve_box.setChecked(False)
+        cv = QVBoxLayout(self.curve_box)
+        self.curve = CurveEditor()
+        self.curve.changed.connect(self.changed)
+        cv.addWidget(self.curve)
+        self.curve_box.toggled.connect(self.curve.setVisible)
+        self.curve.setVisible(False)
+        v.addWidget(self.curve_box)
 
         self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
         self.colorize_box.changed.connect(self._colorize_changed)
@@ -441,6 +454,9 @@ class EnhanceDock(PluginDock):
         for op, params in steps.items():
             if not Pipeline().set(op, params).is_identity:
                 p = p.set(op, params)
+        curve = self.curve.step()
+        if curve is not None:
+            p = Pipeline([*p.ops, curve])
         for op in self._extra:
             p = Pipeline([*p.ops, op])
         return p
@@ -458,8 +474,12 @@ class EnhanceDock(PluginDock):
                 self.dra_method.setCurrentIndex(max(0, self.dra_method.findData(auto["method"])))
                 self.dra_clip.setValue(auto["lowPercent"])
                 self.dra_linked.setChecked(auto["linked"])
-            self._extra = [op for op in p.ops if op["op"] not in SLIDER_OPS and op["op"] != "autoStretch"]
-            names = {"curve": "トーンカーブ", "whiteBalance": "ホワイトバランス", "stretch": "ストレッチ"}
+            curve = p.get("curve")
+            self.curve.set_step(curve)
+            if curve is not None and not self.curve_box.isChecked():
+                self.curve_box.setChecked(True)
+            self._extra = [op for op in p.ops if op["op"] not in SLIDER_OPS and op["op"] not in ("autoStretch", "curve")]
+            names = {"whiteBalance": "ホワイトバランス", "stretch": "ストレッチ"}
             self.extra_label.setText(self.tr("スライダー外の補正: {s}").format(s="・".join(names.get(o["op"], o["op"]) for o in self._extra))
                                      if self._extra else "")
             self.extra_label.setVisible(bool(self._extra))
@@ -494,6 +514,7 @@ class EnhanceDock(PluginDock):
         for row in self.rows:
             row.show(not (gray and OP_INFO[row.op]["colorOnly"]))
         self.dra_linked.setEnabled(not gray)
+        self.curve.set_gray(gray)
 
     def settings(self) -> er.EnhanceSettings:
         current = er.enhance_renderer(self.layer) if self.layer is not None else None
@@ -573,6 +594,8 @@ class EnhanceDock(PluginDock):
             channels = []
         self.histogram_plot.set_channels(channels)
         self.histogram_table.set_channels(channels)
+        before = (self.histograms or {}).get("before") or None
+        self.curve.set_histogram(before)
         self.histogram_readout.setText("")
         if self.histograms is None:
             self.histogram_note.setText("")
