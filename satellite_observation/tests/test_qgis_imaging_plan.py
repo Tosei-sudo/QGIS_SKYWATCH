@@ -18,6 +18,7 @@ from qgis.PyQt.QtCore import QDateTime, QTimeZone  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.qgis_io import settings  # noqa: E402
+from satellite_observation.qgis_io.context import PluginContext  # noqa: E402
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from satellite_observation.tests.test_plan import EPOCH, LINE1, LINE2  # noqa: E402
@@ -28,7 +29,7 @@ SAR1 = "1 90002U 26902A   26280.50000000  .00000100  00000-0  40000-4 0  9992"
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, monkeypatch):
     QgsSettings().remove("satellite_observation")
     config = tmp_path / "config.json"
     config.write_text('{"satelliteCatalogs": [{"label": "テスト衛星", "url": "%s", '
@@ -44,8 +45,12 @@ def plugin(tmp_path):
 
     iface = FakeIface()
     p = classFactory(iface)
+    # The docks open at start read their catalogs right away.
+    monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
-    p.context.esri = lambda: EsriClient(fake)
+    # Each test opens the docks it uses.
+    for dock in p.docks.values():
+        dock.hide()
     assert p.api.problems == [] and p.api.config.satellite_catalogs, p.api.problems
     yield p, iface, tmp_path
     p.unload()
@@ -209,7 +214,8 @@ def test_plans_a_point_from_the_maps_right_click_menu(plugin):
     canvas.refresh()
     dock = p.api.imaging_plan
     start_at(dock, EPOCH, 7)
-    event = QgsMapMouseEvent(canvas, QEvent.Type.MouseButtonPress, QPoint(400, 300), Qt.MouseButton.RightButton)
+    # The middle of the canvas, whatever its size.
+    event = QgsMapMouseEvent(canvas, QEvent.Type.MouseButtonPress, QPoint(canvas.width() // 2, canvas.height() // 2), Qt.MouseButton.RightButton)
     clicked = event.mapPoint()
     menu = QMenu()
     canvas.contextMenuAboutToShow.emit(menu, event)
@@ -242,6 +248,8 @@ def _iss_only(plugin, tmp, gap=10, swath=10):
     settings.set_config_source(str(config))
     p.context.reload()
     dock = p.api.imaging_plan
+    # The dock open at start reads the (new) catalogs again: the choice below comes after.
+    assert wait_for(lambda: dock.loading_task is None)
     dock.tree.check_all(False)
     dock.paste_gap.setValue(gap)
     dock.paste_swath.setValue(swath)

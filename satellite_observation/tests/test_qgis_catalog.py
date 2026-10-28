@@ -21,6 +21,7 @@ from qgis.PyQt.QtCore import Qt  # noqa: E402
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.core.catalog.query import EMPTY_SEARCH  # noqa: E402
 from satellite_observation.qgis_io import settings  # noqa: E402
+from satellite_observation.qgis_io.context import PluginContext  # noqa: E402
 from satellite_observation.qgis_io.obs_images import IMAGE_ID  # noqa: E402
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
@@ -38,7 +39,7 @@ def ring(x0, y0, x1, y1):
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, monkeypatch):
     QgsSettings().remove("satellite_observation")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     config = {
@@ -67,8 +68,12 @@ def plugin(tmp_path):
     iface = FakeIface()
     iface.canvas.setDestinationCrs(QgsProject.instance().crs())
     p = classFactory(iface)
+    # The docks open at start read their catalogs right away.
+    monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
-    p.context.esri = lambda: EsriClient(fake)
+    # Each test opens the docks it uses.
+    for dock in p.docks.values():
+        dock.hide()
     assert p.api.problems == [], p.api.problems
     yield p, iface, folder, fake, layer
     p.unload()

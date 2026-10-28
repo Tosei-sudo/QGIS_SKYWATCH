@@ -21,6 +21,7 @@ from .qgis_io.geometry import to_wgs84
 from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
 from .ui.docks import StubDock
+from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.notices_dock import NoticesDock
@@ -35,9 +36,11 @@ MENU = "衛星撮像計画・観測記録"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
 ]
+#: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
+INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
 
 
 def badged(icon: QIcon, n: int) -> QIcon:
@@ -117,6 +120,11 @@ class PluginApi:
         """The notices dock (its `store()`, `check()`, `watch_conditions()`, `watch_point()`, `open_notices()`)."""
         return self._plugin.docks["SatObsNotices"]
 
+    @property
+    def image_enhance(self) -> "EnhanceDock":
+        """The image correction dock (its `enhance(layer, correction, bands)`, `pipeline()`, `set_pipeline()`, `apply()`)."""
+        return self._plugin.docks["SatObsEnhance"]
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -162,7 +170,7 @@ class SatelliteObservationPlugin:
         #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
-                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices"}
+                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -172,6 +180,7 @@ class SatelliteObservationPlugin:
             ("SatObsObservations", tr("観測記録"), None),
             ("SatObsTaxonomy", tr("分類体系の編集"), None),
             ("SatObsNotices", tr("通知"), None),
+            ("SatObsEnhance", tr("画像補正"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -187,12 +196,18 @@ class SatelliteObservationPlugin:
                 dock = CatalogDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsNotices":
                 dock = NoticesDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsEnhance":
+                dock = EnhanceDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
                 dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
-            dock.hide()
+            # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
+            # Its signals wait meanwhile, so a dock shown only for that moment reads nothing.
+            dock.blockSignals(True)
             self.iface.addDockWidget(area[name], dock)
+            dock.setVisible(name in INITIAL_DOCKS)
+            dock.blockSignals(False)
             self.docks[name] = dock
             action = dock.toggleViewAction()
             action.setText(title)
@@ -202,6 +217,9 @@ class SatelliteObservationPlugin:
             self.actions.append(action)
 
         self.place_docks()
+        # The docks left open now hear that they are shown (their signals waited while they were added).
+        for name in INITIAL_DOCKS:
+            self.docks[name].visibilityChanged.emit(True)
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
         self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())

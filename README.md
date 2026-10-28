@@ -1,6 +1,6 @@
 # 衛星撮像計画・観測記録（QGIS プラグイン）
 
-Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-sudo/browser-image-enhancement) の `usecase/image-viewer`）の「撮像計画」と「観測記録」を QGIS プラグイン（Python / PyQGIS）にしたもの。同じ設定ファイル（`config.json`）と同じ ArcGIS フィーチャーサービスを共用する。
+Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-sudo/browser-image-enhancement) の `usecase/image-viewer`）の「撮像計画」と「観測記録」と、ビューアの中心機能の画像補正（色調補正）を QGIS プラグイン（Python / PyQGIS）にしたもの。同じ設定ファイル（`config.json`）と同じ ArcGIS フィーチャーサービスを共用する。
 
 - 対応: QGIS 3.34 LTR 以上（Qt5 / Qt6）
 - 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）。numpy は QGIS 付属のもの
@@ -10,7 +10,8 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知）は左、記録系（観測記録・分類体系の編集）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正）は左、記録系（観測記録・分類体系の編集）は右の下段
+- 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
 
@@ -92,6 +93,22 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。
 
+## 画像補正
+
+「画像補正」ドックで、アクティブなラスターレイヤーにビューアと同じ補正をかける。計算はビューアのライブラリ（browser-image-enhancement）を NumPy に移したもので、同じ画像・同じ補正なら同じ画素になる（下の「ビューアとの数値比較」）。
+
+- 「補正」をオンにしたレイヤーだけが対象。オフか「QGIS の表示に戻す」で QGIS 標準のレンダラー（同じバンド・同じ引き伸ばし）に戻る
+- プリセット: 自動・鮮やか・やわらか・衛星画像・文書・白黒
+- DRA（表示範囲で自動レンジ）: 方式（パーセントクリップ・最小〜最大・標準偏差）、クリップ (%)、RGB 連動、範囲を固定。地図を動かすと表示範囲の統計で引き伸ばし直す
+- バンド割当: R・G・B に好きなバンド（GDAL のバンド名つき）。3 つとも同じバンドならそのバンドを白黒で表示し、色だけの補正（彩度・色温度・色かぶり）を隠す
+- スライダー: 不透明度・露出・明るさ・コントラスト・ガンマ・シャドウ・ハイライト・レベル（黒・白・中間）・色温度・色かぶり・彩度・シャープ（量・半径）。名前のダブルクリックで元の値
+- 16bit・float の画像は元の値の統計で 0〜255 に引き伸ばしてから補正する（DRA がオフなら画像全体の 2〜98 %、オンなら表示範囲から DRA の設定で）。8bit の画像はそのまま補正する
+- QGIS 標準にない補正: リニア光での計算、露出、色温度・色かぶり・ホワイトバランス、シャドウ・ハイライト、トーンカーブ（チャンネル別）、レベル、シャープ（アンシャープマスク）、RGB 連動・範囲固定の DRA
+- 描くのは画面に見えている画素だけ（QGIS が画面に合ったオーバービューを読む）なので、大きな COG でも処理量は画面の大きさ分
+- 補正はレイヤーのカスタムプロパティ `satobs/enhance`（JSON。補正はビューアのプロジェクトと同じ `{"version": 1, "ops": [...]}`）に保存。プロジェクトファイルには QGIS 標準のレンダラーとして書くので、プラグインなしでも普通に開け、プラグインがあれば補正が戻る
+
+Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）。
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -166,6 +183,12 @@ SATELLITE_OBSERVATION_SGP4=bundled python3 -m pytest   # 同梱の純 Python 版
 ```
 cd scripts/compare_viewer && npm install
 python3 compare.py /path/to/browser-image-enhancement/usecase/image-viewer/src
+```
+
+画像補正は、ビューアのライブラリのコミット済みの `dist/` を Node で動かして突き合わせる（`npm install` は不要）。
+
+```
+python3 scripts/compare_viewer/compare_enhance.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist
 ```
 
 ビューアの `imaging-plan.ts`（移動目標・衛星パスも）を esbuild で束ねて Node で動かし、同じ衛星・対象・条件でプラグインの計算と突き合わせる（時刻 ±1 秒、角度 ±0.05°、被覆 ±1%、組み合わせは同じパス）。ネットワークは `npm install` のときだけ使う。
