@@ -124,6 +124,16 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
   - プロジェクトには QGIS 標準の単バンド疑似カラー（区分は離散・値ごとは完全一致）として書くので、プラグインなしでも色分けが見える
 - 補正はレイヤーのカスタムプロパティ `satobs/enhance`（JSON。補正はビューアのプロジェクトと同じ `{"version": 1, "ops": [...]}`）に保存。プロジェクトファイルには QGIS 標準のレンダラーとして書くので、プラグインなしでも普通に開け、プラグインがあれば補正が戻る
 
+### パンシャープン
+
+メニューの「パンシャープン…」（Processing ツールボックスの「衛星撮像計画・観測記録 ▸ パンシャープン」と同じ）で、高解像度のパンクロ画像の細部を低解像度のマルチスペクトル画像に合成する。計算はビューアのライブラリの `panSharpen` を NumPy に移したもの（下の「ビューアとの数値比較」で一致を確認）。
+
+- 入力: パンクロ画像（とそのバンド）・マルチスペクトル画像。最初は一番細かい 1 バンドの画像と、複数バンドの画像（アクティブなレイヤーを優先）が選ばれた状態
+- 方式: Gram-Schmidt（推奨・色を維持）・IHS（くっきり・色が変わることも）・Brovey（コントラスト強め）。詳細設定に再サンプリング（バイリニア・バイキュービック）、強さ（0〜200 %）、輝度の重み（自動（パンクロに合わせて推定）・均等）
+- 結果: 2 つの画像の重なる範囲を、パンクロの解像度で、マルチスペクトル画像のバンド・型（16bit は 16bit のまま）・ノーデータ・アルファのままタイル分割の GeoTIFF（DEFLATE 圧縮・オーバービューつき）に出力。レイヤー名は `<マルチスペクトル>_pansharpen`、マルチスペクトル画像の画像補正（バンド割当・補正）を引き継ぐ
+- 大きな画像も 2048 px のブロックごとに処理（係数は重なり全体か、2048 × 2048 px を超えるときは全体に散らした 256 px の窓 8 × 8 から 1 回だけ求めるので、ブロックの継ぎ目なし）。処理はバックグラウンドで、中止も可
+- 2 つの画像の座標参照系が違っても、マルチスペクトル画像をパンクロの座標参照系に投影し直して合成
+
 Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）、着色は `api.image_enhance.colorize(layer, "cyan", blend="screen")`（`reverse`・`fade`・`classes` も）。
 
 ## 座標・地名へ移動
@@ -205,7 +215,8 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 ```
 satellite_observation/
   core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録
-  qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定
+  qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
+  processing_provider/  Processing のアルゴリズム（パンシャープン）
   ui/        ドック・ダイアログ
   tests/     pytest
 ```
@@ -230,6 +241,7 @@ python3 compare.py /path/to/browser-image-enhancement/usecase/image-viewer/src
 ```
 python3 scripts/compare_viewer/compare_enhance.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist
 python3 scripts/compare_viewer/compare_color.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist   # 着色（カラースケール・区分）
+python3 scripts/compare_viewer/compare_pansharpen.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist   # パンシャープン
 ```
 
 ビューアの `imaging-plan.ts`（移動目標・衛星パスも）を esbuild で束ねて Node で動かし、同じ衛星・対象・条件でプラグインの計算と突き合わせる（時刻 ±1 秒、角度 ±0.05°、被覆 ±1%、組み合わせは同じパス）。ネットワークは `npm install` のときだけ使う。

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- パンシャープン: a sharp gray image and a coarse colour image made into one -->
+  <rect x="2" y="3" width="12" height="12" fill="#cbd5e1" stroke="#0f172a" stroke-width="1"/>
+  <path d="M2 9h12M8 3v12M5 3v12M11 3v12M2 6h12M2 12h12" stroke="#64748b" stroke-width="0.6"/>
+  <rect x="2" y="17" width="6" height="6" fill="#ef4444"/><rect x="8" y="17" width="6" height="6" fill="#22c55e"/>
+  <rect x="2" y="23" width="6" height="6" fill="#3b82f6"/><rect x="8" y="23" width="6" height="6" fill="#eab308"/>
+  <path d="M15 16h5" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M18 13l3 3-3 3" fill="none" stroke="#0f172a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="21" y="9" width="10" height="14" rx="1" fill="#f8fafc" stroke="#0f172a" stroke-width="1"/>
+  <rect x="22" y="10" width="4" height="6" fill="#ef4444"/><rect x="26" y="10" width="4" height="6" fill="#22c55e"/>
+  <rect x="22" y="16" width="4" height="6" fill="#3b82f6"/><rect x="26" y="16" width="4" height="6" fill="#eab308"/>
+</svg>
