@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- ArcGIS Web マップとして保存: a folded map and an arrow out of it -->
+  <path d="M3 8l8-3 10 3 8-3v19l-8 3-10-3-8 3z" fill="#e0f2fe" stroke="#0369a1" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M11 5v19M21 8v19" stroke="#0369a1" stroke-width="1.2"/>
+  <circle cx="24" cy="24" r="6.5" fill="#ea580c" stroke="#fff" stroke-width="1.5"/>
+  <path d="M24 27.5v-6.5M21 23.5l3-3 3 3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
