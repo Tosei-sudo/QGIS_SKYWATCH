@@ -295,6 +295,10 @@ class SatelliteObservationPlugin:
         classify.triggered.connect(lambda: self.open_classify())
         self.iface.addPluginToMenu(MENU, classify)
         self.actions.append(classify)
+        ortho = QAction(icon("simple_ortho"), tr("簡易オルソ補正…"), self.iface.mainWindow())
+        ortho.triggered.connect(lambda: self.open_simple_ortho())
+        self.iface.addPluginToMenu(MENU, ortho)
+        self.actions.append(ortho)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -467,6 +471,15 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:classify", classify_inputs(layers, self.iface.activeLayer()))
+
+    def open_simple_ortho(self) -> None:
+        """The algorithm's dialog, with the active image and a DEM-like layer."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.ortho_algorithm import default_inputs as ortho_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:simple_ortho", ortho_inputs(layers, self.iface.activeLayer()))
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
