@@ -115,6 +115,8 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 16bit・float の画像は元の値の統計で 0〜255 に引き伸ばしてから補正する（DRA がオフなら画像全体の 2〜98 %、オンなら表示範囲から DRA の設定で）。8bit の画像はそのまま補正する
 - QGIS 標準にない補正: リニア光での計算、露出、色温度・色かぶり・ホワイトバランス、シャドウ・ハイライト、トーンカーブ（チャンネル別）、レベル、シャープ（アンシャープマスク）、RGB 連動・範囲固定の DRA
 - 描くのは画面に見えている画素だけ（QGIS が画面に合ったオーバービューを読む）なので、大きな COG でも処理量は画面の大きさ分
+- 設定ファイルの `imageRules`（ビューアと同じ書き方）: 開いた画像（カタログから開いたものも）のファイル名に最初に合った規則の補正（`preset`・`enhance`）・バンド（番号か GDAL のバンド名）・ノーデータ（`noData`）を自動でかける。プロジェクトから開いたレイヤーは保存した表示のまま。バンドが足りないときは補正だけかけて理由を表示
+- 「ヒストグラム（表示範囲）」: 表示範囲の補正後・補正前の値の分布（R・G・B を加算で重ねる。白黒は輝度）と、チャンネルごとの最小・平均・中央・最大。「対数」で少ない値も表示。グラフを指すとその値の画素数。地図を動かすか補正を変えると取り直す（開いている間だけ、最長 512 px で読んでタスクで計算）
 - 補正はレイヤーのカスタムプロパティ `satobs/enhance`（JSON。補正はビューアのプロジェクトと同じ `{"version": 1, "ops": [...]}`）に保存。プロジェクトファイルには QGIS 標準のレンダラーとして書くので、プラグインなしでも普通に開け、プラグインがあれば補正が戻る
 
 Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）。
@@ -189,7 +191,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

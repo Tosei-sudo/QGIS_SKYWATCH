@@ -13,9 +13,11 @@ saved correction) are kept after them.
 from __future__ import annotations
 
 import math
+import re
+from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsCoordinateTransform, QgsMapLayerType, QgsProject, QgsRasterLayer
+from qgis.core import QgsCoordinateTransform, QgsMapLayerType, QgsProject, QgsProviderRegistry, QgsRasterLayer
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
@@ -24,8 +26,11 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.enhance.ops import OP_INFO
 from ..core.enhance.pipeline import PRESET_NAMES, PRESETS, Pipeline
+from ..core.enhance.rules import image_rule_for, resolve_bands
 from ..qgis_io import enhance_renderer as er
+from ..qgis_io.tasks import run_task
 from .docks import PluginDock
+from .histogram_widget import HistogramPlot, StatsTable
 
 TITLE = "画像補正"
 
@@ -50,6 +55,18 @@ SLIDER_OPS = {s[0] for s in SLIDERS}
 METHODS = [("percentClip", "パーセントクリップ"), ("minMax", "最小〜最大"), ("standardDeviation", "標準偏差（±2σ）")]
 #: The pause after a change before drawing, ms.
 DELAY = 150
+#: The pause after the view or correction changes before the histogram is taken again, ms.
+HISTOGRAM_DELAY = 300
+
+
+def source_name(layer) -> str:
+    """What the layer was opened from (a path, or the URL behind /vsicurl/), else its name."""
+    try:
+        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
+        path = str(parts.get("path") or parts.get("url") or "")
+    except Exception:  # noqa: BLE001 (an unusual source: the layer's name)
+        path = ""
+    return re.sub(r"^/vsi\w+/", "", path) or layer.name()
 
 
 def neutral(op: str, param: str) -> float:
@@ -209,28 +226,132 @@ class EnhanceDock(PluginDock):
         self.off_button.clicked.connect(lambda: self.enabled.setChecked(False))
         buttons.addWidget(self.off_button)
         v.addLayout(buttons)
+
+        self.histogram_box = QGroupBox(self.tr("ヒストグラム（表示範囲）"))
+        self.histogram_box.setCheckable(True)
+        self.histogram_box.setChecked(False)
+        hv = QVBoxLayout(self.histogram_box)
+        row = QHBoxLayout()
+        self.histogram_after = QComboBox()
+        self.histogram_after.addItem(self.tr("補正後"), True)
+        self.histogram_after.addItem(self.tr("補正前"), False)
+        self.histogram_after.currentIndexChanged.connect(self.show_histogram)
+        row.addWidget(self.histogram_after)
+        self.histogram_log = QCheckBox(self.tr("対数"))
+        row.addWidget(self.histogram_log)
+        row.addStretch(1)
+        hv.addLayout(row)
+        self.histogram_log.setToolTip(self.tr("縦軸を対数にして、少ない値も表示"))
+        self.histogram_readout = QLabel()
+        self.histogram_plot = HistogramPlot(self.histogram_readout.setText)
+        self.histogram_log.toggled.connect(self.histogram_plot.set_log)
+        hv.addWidget(self.histogram_plot)
+        hv.addWidget(self.histogram_readout)
+        self.histogram_table = StatsTable()
+        hv.addWidget(self.histogram_table)
+        self.histogram_note = QLabel()
+        self.histogram_note.setWordWrap(True)
+        hv.addWidget(self.histogram_note)
+        self._histogram_body = [self.histogram_after, self.histogram_log, self.histogram_plot, self.histogram_readout,
+                                self.histogram_table, self.histogram_note]
+        self.histogram_box.toggled.connect(self._histogram_toggled)
+        self._histogram_toggled(False)
+        v.addWidget(self.histogram_box)
         v.addStretch(1)
+
+        #: The last histograms ({"before", "after"}, 256 counts per channel), and the number of the request whose answer is still wanted.
+        self.histograms: Optional[dict] = None
+        self._histogram_corrected = False
+        self._histogram_request = 0
+        self._histogram_timer = QTimer(self)
+        self._histogram_timer.setSingleShot(True)
+        self._histogram_timer.setInterval(HISTOGRAM_DELAY)
+        self._histogram_timer.timeout.connect(self.take_histogram)
 
         iface.currentLayerChanged.connect(self.follow_layer)
         self.canvas.extentsChanged.connect(self.update_views)
         self.canvas.destinationCrsChanged.connect(self.update_views)
+        self.canvas.mapCanvasRefreshed.connect(self.histogram_later)
         project = QgsProject.instance()
-        project.layersAdded.connect(self.restore_layers)
-        project.readProject.connect(lambda _doc: self.restore_layers(project.mapLayers().values()))
+        #: True while a project is being read: its layers keep their own look (no imageRules).
+        self._reading = False
+        project.layersAdded.connect(self.layers_added)
+        project.layersWillBeRemoved.connect(self.layers_removed)
+        project.loadingLayer.connect(self._start_reading)
+        project.readProject.connect(self._project_read)
         self.restore_layers(project.mapLayers().values())
         self.follow_layer(iface.activeLayer())
 
     def close_down(self) -> None:
         self._timer.stop()
-        for signal, slot in [(self.iface.currentLayerChanged, self.follow_layer), (self.canvas.extentsChanged, self.update_views),
+        self._histogram_timer.stop()
+        self._histogram_request += 1
+        for signal, slot in [(self.canvas.mapCanvasRefreshed, self.histogram_later),
+                             (self.iface.currentLayerChanged, self.follow_layer), (self.canvas.extentsChanged, self.update_views),
                              (self.canvas.destinationCrsChanged, self.update_views),
-                             (QgsProject.instance().layersAdded, self.restore_layers)]:
+                             (QgsProject.instance().layersAdded, self.layers_added),
+                             (QgsProject.instance().layersWillBeRemoved, self.layers_removed),
+                             (QgsProject.instance().loadingLayer, self._start_reading),
+                             (QgsProject.instance().readProject, self._project_read)]:
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
 
     # ---- layers ----
+
+    def _start_reading(self, *_args) -> None:
+        self._reading = True
+
+    def _project_read(self, *_args) -> None:
+        self._reading = False
+        self.restore_layers(QgsProject.instance().mapLayers().values())
+
+    def layers_added(self, layers) -> None:
+        """Layers from a project get their correction back; images opened now get their `imageRules`."""
+        layers = list(layers)
+        self.restore_layers(layers)
+        if self._reading:
+            return
+        for layer in layers:
+            if isinstance(layer, QgsRasterLayer) and er.enhance_renderer(layer) is None and not layer.customProperty(er.PROPERTY):
+                self.apply_rule(layer)
+
+    def layers_removed(self, ids) -> None:
+        if self.layer is not None and self.layer.id() in ids:
+            self.follow_layer(None)
+
+    def apply_rule(self, layer: QgsRasterLayer):
+        """Opens `layer` with the first of `imageRules` matching its file name; the rule, or None."""
+        rules = self.context.config.image_rules if self.context.config else []
+        rule = image_rule_for(rules, source_name(layer)) if rules else None
+        if rule is None or not layer.isValid():
+            return None
+        provider = layer.dataProvider()
+        settings = er.default_settings(layer)
+        problem = None
+        if rule.bands:
+            try:
+                names = [provider.bandDescription(b) for b in range(1, layer.bandCount() + 1)]
+                settings = replace(settings, bands=resolve_bands(rule.bands, layer.bandCount(), names))
+            except ValueError as error:
+                problem = self.tr("設定「{label}」のバンド割り当ての使用に失敗（{why}）").format(label=rule.label, why=error)
+        if rule.no_data:
+            settings = replace(settings, no_data=tuple(rule.no_data.get("values", ())))
+            if rule.no_data.get("auto") is False:
+                for b in range(1, layer.bandCount() + 1):
+                    provider.setUseSourceNoDataValue(b, False)
+        if rule.pipeline is not None:
+            settings = er.with_pipeline(settings, rule.pipeline)
+        er.apply(layer, settings)
+        self.set_view(layer)
+        bar = self.iface.messageBar()
+        bar.pushInfo(TITLE, self.tr("{name}: 設定「{label}」を適用").format(name=layer.name(), label=rule.label))
+        if problem:
+            bar.pushWarning(TITLE, problem)
+        if layer is self.layer:
+            self.follow_layer(layer)
+        return rule
 
     def restore_layers(self, layers) -> None:
         """Puts the correction kept on layers (opened from a project) back."""
@@ -245,15 +366,18 @@ class EnhanceDock(PluginDock):
             if isinstance(layer, QgsRasterLayer) and er.enhance_renderer(layer) is not None:
                 self.set_view(layer)
 
-    def set_view(self, layer: QgsRasterLayer) -> None:
-        """The canvas's view in the layer's CRS, for DRA."""
+    def view_of(self, layer: QgsRasterLayer):
+        """The canvas's view in the layer's CRS, or None (no transform)."""
         settings = self.canvas.mapSettings()
         try:
             ct = QgsCoordinateTransform(settings.destinationCrs(), layer.crs(), QgsProject.instance())
-            view = ct.transformBoundingBox(settings.visibleExtent())
+            return ct.transformBoundingBox(settings.visibleExtent())
         except Exception:  # noqa: BLE001 (no transform: DRA uses the area being drawn)
-            view = None
-        er.set_view(layer, view)
+            return None
+
+    def set_view(self, layer: QgsRasterLayer) -> None:
+        """The canvas's view in the layer's CRS, for DRA."""
+        er.set_view(layer, self.view_of(layer))
 
     def follow_layer(self, layer) -> None:
         """Shows the active raster layer's correction."""
@@ -275,6 +399,7 @@ class EnhanceDock(PluginDock):
         finally:
             self._loading = False
         self._show_color_rows()
+        self.histogram_later()
 
     def _fill_bands(self, layer, bands) -> None:
         n = layer.bandCount() if layer is not None else 0
@@ -364,7 +489,9 @@ class EnhanceDock(PluginDock):
         self.dra_linked.setEnabled(not gray)
 
     def settings(self) -> er.EnhanceSettings:
-        return er.EnhanceSettings(bands=self.bands(), pipeline=self.pipeline().to_json(), locked=self.dra_locked.isChecked())
+        current = er.enhance_renderer(self.layer) if self.layer is not None else None
+        return er.EnhanceSettings(bands=self.bands(), pipeline=self.pipeline().to_json(), locked=self.dra_locked.isChecked(),
+                                  no_data=current.settings.no_data if current else ())
 
     def apply(self) -> None:
         """Draws the active layer with the dock's correction (or QGIS's own renderer when 補正 is off)."""
@@ -380,6 +507,67 @@ class EnhanceDock(PluginDock):
         renderer.setOpacity(self.opacity.value() / 100)
         self.set_view(layer)
         layer.triggerRepaint()
+
+    # ---- histogram ----
+
+    def _histogram_toggled(self, on: bool) -> None:
+        for w in self._histogram_body:
+            w.setVisible(on)
+        if on:
+            self.histogram_later()
+
+    def histogram_later(self, *_args) -> None:
+        """Takes the histogram again after a short pause (only while it is shown)."""
+        if self.histogram_box.isChecked():
+            self._histogram_timer.start()
+
+    def take_histogram(self):
+        """Starts a task reading the view coarsely (at most 512 px a side) for the histogram; the task, or None."""
+        self._histogram_timer.stop()
+        self._histogram_request += 1
+        request = self._histogram_request
+        layer = self.layer
+        view = self.view_of(layer) if layer is not None and layer.isValid() else None
+        if view is None or view.isEmpty():
+            self.histograms = None
+            self.show_histogram()
+            self.histogram_note.setText(self.tr("レイヤーを選ぶと、表示範囲のヒストグラムを表示") if layer is None
+                                        else self.tr("表示範囲の取得不可"))
+            return None
+        r = er.enhance_renderer(layer)
+        settings = r.settings if r else er.default_settings(layer)
+        state = r.state if r else er.EnhanceState()
+        provider = layer.dataProvider().clone()
+
+        def done(result: dict) -> None:
+            if request != self._histogram_request:
+                return
+            self.histograms = result
+            self._histogram_corrected = r is not None
+            self.show_histogram()
+
+        def failed(message: str) -> None:
+            if request == self._histogram_request and message != "取消":
+                self.histogram_note.setText(self.tr("ヒストグラムの取得に失敗（{why}）").format(why=message))
+
+        return run_task(self.tr("ヒストグラム"), lambda _task: er.view_histograms(provider, settings, state, view), done, failed)
+
+    def show_histogram(self, *_args) -> None:
+        after = bool(self.histogram_after.currentData())
+        channels = (self.histograms or {}).get("after" if after else "before", [])
+        count = int(channels[0].sum()) if channels else 0
+        if self.histograms is not None and count == 0:
+            channels = []
+        self.histogram_plot.set_channels(channels)
+        self.histogram_table.set_channels(channels)
+        self.histogram_readout.setText("")
+        if self.histograms is None:
+            self.histogram_note.setText("")
+        elif count == 0:
+            self.histogram_note.setText(self.tr("表示範囲に画素なし"))
+        else:
+            which = self.tr("補正前（補正なし）") if after and not self._histogram_corrected else self.histogram_after.currentText()
+            self.histogram_note.setText(self.tr("表示範囲の {count} 画素・{which}").format(count=f"{count:,}", which=which))
 
     # ---- for scripts ----
 
