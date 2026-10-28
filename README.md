@@ -57,6 +57,16 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「存在予測を追加」で、一定間隔（既定 6 時間）の誤差円（時刻・経過時間・半径つき）と予測航跡をメモリレイヤーに追加
 - 「撮像計画の作成」で撮像計画ドックへ（最大 50 目標）。1 時間ごとの推測位置でパスを探し、各パスをその時刻の位置で計算し直す。撮像範囲は誤差円に向け、被覆は円のうち撮像範囲に入る割合
 
+## 新規スクラッチレイヤー（テンプレート）
+
+- 「レイヤー」→「レイヤーを作成」の「新規一時スクラッチレイヤー…」のすぐ下と、プラグインのメニューに「新規スクラッチレイヤー（テンプレート）…」
+- 「テンプレート」から選ぶと名前・ジオメトリ・属性が入り、そこから自由に変えて「作成」。テンプレートは標準（空のレイヤー・航跡〔生存圏計算用〕・調査地点・目標・物体・関心区域・被害状況・経路・測線・注記）、設定ファイルの `layerTemplates`（「組織の設定」、書き方はビューアの README と同じ）、「テンプレートとして保存」で残したもの（「保存済み」、ユーザープロファイルの `QgsSettings`）
+- 属性ごとに名前・エイリアス・型（文字列・整数・小数・日付）・必須・既定値・文字数の上限・最小・最大・候補値（`1=住宅, 2=店舗`）。作るとメモリレイヤーに、エイリアス、必須は非 NULL 制約、候補値は「値マップ」ウィジェットと制約、範囲は「範囲」ウィジェットと制約、既定値は属性の既定値として入る
+- 「ほかのレイヤーの属性をコピー…」で開いているベクターレイヤーの属性・ジオメトリ・座標系をひな形に（地物はコピーしない）
+- 「作成後すぐ地図に作図開始」で、編集を始めて「地物を追加」の状態に
+- 「航跡（生存圏計算用）」の属性名は「移動目標撮像計画…」の自動対応に合うので、描いたらそのまま存在予測を計算できる
+- QGIS 標準の「新規一時スクラッチレイヤー」の画面にも「テンプレート」欄が付き、選ぶとこの画面に切り替わる
+
 ## 衛星パス
 
 - 選んだ衛星（撮像計画と同じ衛星の一覧）の地上軌跡と撮像可能範囲（最小〜最大オフナディア角の帯、見られる側）を衛星ごとの色で表示
@@ -116,7 +126,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 導入
 
@@ -144,9 +154,9 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
-| `pathMappings` で選んだフォルダ、類似画像の許容差 | `QgsSettings` |
+| `pathMappings` で選んだフォルダ、類似画像の許容差、新規スクラッチレイヤーの保存済みテンプレート | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layerTemplates` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

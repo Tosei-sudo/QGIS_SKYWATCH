@@ -23,6 +23,7 @@ from .ui.docks import StubDock
 from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
+from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
 from .ui.notices_dock import NoticesDock
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
@@ -122,6 +123,10 @@ class PluginApi:
         """The image correction dock (its `enhance(layer, correction, bands)`, `pipeline()`, `set_pipeline()`, `apply()`)."""
         return self._plugin.docks["SatObsEnhance"]
 
+    def new_scratch_layer(self, template: Optional[str] = None, source: str = "builtin") -> "NewLayerDialog":
+        """Opens 「新規スクラッチレイヤー（テンプレート）」 (with a template: `source` builtin, config or saved); its `create()`."""
+        return self._plugin.open_new_layer(source, template)
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -154,6 +159,9 @@ class SatelliteObservationPlugin:
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
+        self.new_layer: Optional[NewLayerDialog] = None
+        self.new_layer_action: Optional[QAction] = None
+        self.scratch_hook: Optional[ScratchDialogHook] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -216,6 +224,7 @@ class SatelliteObservationPlugin:
         self.iface.addPluginToMenu(MENU, moving)
         self.toolbar.addAction(moving)
         self.actions.append(moving)
+        self._add_new_layer(icon("new_layer"))
         home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
         home.triggered.connect(lambda: self.place_docks())
         self.iface.addPluginToMenu(MENU, home)
@@ -227,6 +236,31 @@ class SatelliteObservationPlugin:
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self.context.reload()
+
+    def _add_new_layer(self, new_icon: QIcon) -> None:
+        """「新規スクラッチレイヤー（テンプレート）…」: in the plugin's menu, and in Layer ▸ Create Layer after QGIS's own scratch layer."""
+        action = QAction(new_icon, tr("新規スクラッチレイヤー（テンプレート）…"), self.iface.mainWindow())
+        action.setObjectName("SatObsNewScratchLayer")
+        action.triggered.connect(lambda: self.open_new_layer())
+        self.iface.addPluginToMenu(MENU, action)
+        self.actions.append(action)
+        self.new_layer_action = action
+        menu = self.iface.newLayerMenu() if hasattr(self.iface, "newLayerMenu") else None
+        if menu is not None:
+            actions = menu.actions()
+            native = next((a for a in actions if a.objectName() == "mActionNewMemoryLayer"), None)
+            after = actions[actions.index(native) + 1] if native is not None and actions.index(native) + 1 < len(actions) else None
+            menu.insertAction(after, action) if after is not None else menu.addAction(action)
+        self.scratch_hook = ScratchDialogHook(self.open_new_layer, self._templates, self.iface.mainWindow())
+
+    def _templates(self) -> list:
+        return offered_templates(self.context.config.layer_templates)
+
+    def open_new_layer(self, source: str = "builtin", template: Optional[str] = None) -> NewLayerDialog:
+        """Opens 「新規スクラッチレイヤー（テンプレート）」 (once; kept while the plugin is loaded)."""
+        if self.new_layer is None:
+            self.new_layer = NewLayerDialog(self.iface, lambda: self.context.config.layer_templates, self.iface.mainWindow())
+        return self.new_layer.open_with(source, template)
 
     def place_docks(self) -> None:
         """
@@ -322,6 +356,17 @@ class SatelliteObservationPlugin:
                 pass
             self.iface.removeCustomActionForLayerType(self.similar_action)
             self.similar_action = None
+        if self.scratch_hook is not None:
+            self.scratch_hook.close_down()
+            self.scratch_hook.deleteLater()
+            self.scratch_hook = None
+        if self.new_layer_action is not None and hasattr(self.iface, "newLayerMenu") and self.iface.newLayerMenu() is not None:
+            self.iface.newLayerMenu().removeAction(self.new_layer_action)
+        self.new_layer_action = None
+        if self.new_layer is not None:
+            self.new_layer.close()
+            self.new_layer.deleteLater()
+            self.new_layer = None
         for action in self.actions:
             self.iface.removePluginMenu(MENU, action)
         self.actions = []

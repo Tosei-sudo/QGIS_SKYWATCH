@@ -17,6 +17,7 @@ from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .catalog import CatalogConfig, catalog_of
 from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
 from .catalog.paths import PathMapping, path_mappings_of
+from .layer_templates import LayerTemplate, templates_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
@@ -27,6 +28,7 @@ from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_for
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals",
+    "layerTemplates",
 )
 
 
@@ -45,6 +47,8 @@ class PluginConfig:
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
+    #: The organisation's templates for a new scratch layer (after the built-in ones).
+    layer_templates: list[LayerTemplate] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -167,6 +171,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             seen.add(p.url)
             portals.append(p)
         config.arcgis_portals = portals
+    if "layerTemplates" in value:
+        config.layer_templates = templates_of(value["layerTemplates"], problems)
     return config, problems
 
 
