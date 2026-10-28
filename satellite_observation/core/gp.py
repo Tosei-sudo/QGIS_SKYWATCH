@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Protocol
 from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
 
+from .time_zone import UTC, ZULU, TimeShift, TimeZone, write_instant, write_text, zone_for
 from .util import is_record
 
 #: The most features read from one result, and sent as one input.
@@ -445,8 +446,21 @@ def _ms(value: Any) -> Optional[int]:
     return None
 
 
-def esri_params(task: GpTask, values: dict) -> dict:
-    """The parameters of an Esri `execute` / `submitJob` (each a string, as the form-encoded request takes them)."""
+_RULE = object()
+
+
+def _zone(task: GpTask, zone) -> Optional[TimeZone]:
+    return zone_for(task.url) if zone is _RULE else zone
+
+
+def esri_params(task: GpTask, values: dict, zone=_RULE) -> dict:
+    """
+    The parameters of an Esri `execute` / `submitJob` (each a string, as the
+    form-encoded request takes them). Dates of a service whose dates are in
+    another zone (`zone`, by default the settings file's timeZone for it) are
+    written as the clock it keeps.
+    """
+    zone = _zone(task, zone)
     problems = check_values(task, values)
     if problems:
         raise GpError("。".join(problems))
@@ -463,7 +477,7 @@ def esri_params(task: GpTask, values: dict) -> dict:
         elif f.type == "date":
             t = _ms(v)
             if t is not None:
-                params[f.name] = str(t)
+                params[f.name] = str(round(write_instant(t, TimeShift(zone, UTC))) if zone else t)
         elif f.type == "linear-unit":
             params[f.name] = json.dumps(v if is_record(v) else {"distance": float(v), "units": f.units or "esriMeters"})
         elif f.type in ("raster", "file"):
@@ -477,8 +491,9 @@ def esri_params(task: GpTask, values: dict) -> dict:
     return params
 
 
-def ogc_inputs(task: GpTask, values: dict) -> dict:
-    """The `inputs` of an OGC execute request."""
+def ogc_inputs(task: GpTask, values: dict, zone=_RULE) -> dict:
+    """The `inputs` of an OGC execute request (dates in `zone`'s clock, as esri_params)."""
+    zone = _zone(task, zone)
     problems = check_values(task, values)
     if problems:
         raise GpError("。".join(problems))
@@ -497,7 +512,12 @@ def ogc_inputs(task: GpTask, values: dict) -> dict:
             inputs[f.name] = v.get("distance") if is_record(v) else v
         elif f.type == "date":
             t = _ms(v)
-            inputs[f.name] = datetime.fromtimestamp(t / 1000, timezone.utc).isoformat().replace("+00:00", "Z") if t is not None else v
+            if t is None:
+                inputs[f.name] = v
+            elif zone:
+                inputs[f.name] = write_text(t, zone, ZULU)
+            else:
+                inputs[f.name] = datetime.fromtimestamp(t / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
         elif f.type == "choice":
             # Keep the type the server listed (a number stays a number).
             inputs[f.name] = next((c for c in f.choices if str(c) == str(v)), v)
