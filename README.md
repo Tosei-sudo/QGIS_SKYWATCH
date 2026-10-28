@@ -258,6 +258,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - メニュー・ツールバーの「物体検出（AI）…」（Processing の「衛星撮像計画・観測記録」にも）: レイヤー・モデル・範囲・解析の画素の大きさ（0 で元の解像度。地図の表示から始まる）を選んで実行し、見つかった物を `class`・`class_id`・`score`（回転矩形なら `angle`）と画像の情報（`image`・`image_id`・`image_time`・`model`・`detected_at`・`note`）付きのポリゴンレイヤーにする。読めるモデルはビューアと同じ（YOLOv8/11 の検出・回転矩形・セグメンテーション、YOLOX、RT-DETR、Detectron2 など。入力の大きさとクラスはモデルの情報から読み、`aiModels` の値が優先）。レイヤーは表示のとおり（補正・スタイル込み）に描いて解析し、大きい範囲は区切って重なりを付けて解析する。詳細設定で確信度・重なり（IoU）・タイルの重なり・クラスの絞り込み
 - メニューの「クリック抽出（AI）」（地図ツール）: Segment Anything（SAM・MobileSAM など）のエンコーダーとデコーダーで、クリックした物の輪郭を描く。Shift+クリックで同じ物に足す点、Alt+クリックで除く点。地図の左上のパネルで、モデルの選択・「元に戻す」・「レイヤーにする」（一時レイヤー「AI 抽出」）。表示を動かすと次のクリックで描き直して解析する
 - `aiModels`: ビューアと同じ形。検出は `{"label", "url", "task", "inputSize", "classes", "mean", "std", "channels", "format", "maxDetections", …}`、SAM は `{"label", "encoder", "decoder", "inputSize", "mean", "std"}`。`url`・`encoder`・`decoder` は URL か、設定ファイルからの相対パス・絶対パス。URL のモデルは初回に読み込んでプロファイルの `ai_models` に保存する（「設定…」の認証設定を使う）
+- メニューの「検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants", "token"}`）
 - 実行に `onnxruntime` が要る。Windows 版の zip（下の「導入」）には同梱。ほかは QGIS の Python に入れる: OSGeo4W シェルで `python -m pip install onnxruntime`、macOS は `/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install onnxruntime`、Linux は `python3 -m pip install onnxruntime`。GPU 版（`onnxruntime-gpu`・`onnxruntime-directml`）を入れれば GPU で動く
 
 ## Python API
@@ -335,7 +336,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

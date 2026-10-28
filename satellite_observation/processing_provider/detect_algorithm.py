@@ -28,6 +28,7 @@ from qgis.PyQt.QtGui import QIcon
 from ..core.ai.detect import class_filter, class_name
 from ..core.ai.model_config import DetectModelConfig, detector_spec
 from ..qgis_io.ai_io import angle_degrees, detect_layer, detection_rings, grid_of, render_rgba, summary
+from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, local_model, model_from
 
 HERE = os.path.dirname(os.path.dirname(__file__))
@@ -89,6 +90,8 @@ class AiLook(QgsProcessingLayerPostProcessorInterface):
         layer.setName(self.name)
         if isinstance(layer, QgsVectorLayer):
             layer.setRenderer(QgsSingleSymbolRenderer(outline_symbol()))
+            # As the model made them: a later change makes a feature 「修正」 when it is sent to a database.
+            mark_origin(layer)
             layer.triggerRepaint()
 
 

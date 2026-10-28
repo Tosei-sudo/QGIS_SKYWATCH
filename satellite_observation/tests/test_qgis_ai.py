@@ -202,6 +202,10 @@ def test_a_click_outlines_the_disc_round_it_and_keeps_it_as_a_layer(plugin):
     f = next(made.getFeatures())
     assert f["id"] == 1 and f["model"] == "sam-decoder.onnx + sam-encoder.onnx" and f["image"] == "square.tif"
     assert QgsProject.instance().layerTreeRoot().layerOrder()[0] is made
+    # Marked as the model made it, so a transfer tells a corrected outline.
+    from satellite_observation.qgis_io import ai_transfer_io
+
+    assert ai_transfer_io.status(made, f) == "ai"
     # Another map tool puts it away.
     iface.canvas.unsetMapTool(tool.tool)
     iface.canvas.setMapTool(type(tool.tool)(iface.canvas, tool))
