@@ -287,6 +287,10 @@ class SatelliteObservationPlugin:
         change.triggered.connect(lambda: self.open_change())
         self.iface.addPluginToMenu(MENU, change)
         self.actions.append(change)
+        align = QAction(icon("align"), tr("自動位置合わせ…"), self.iface.mainWindow())
+        align.triggered.connect(lambda: self.open_align())
+        self.iface.addPluginToMenu(MENU, align)
+        self.actions.append(align)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -441,6 +445,15 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:change", change_inputs(layers, lambda layer: observed_image(layer).time))
+
+    def open_align(self) -> None:
+        """The algorithm's dialog, with the active image to align and the finest other as the reference."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.align_algorithm import default_inputs as align_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:align", align_inputs(layers, self.iface.activeLayer()))
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
