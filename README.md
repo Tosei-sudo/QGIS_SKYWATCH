@@ -202,6 +202,16 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 画像のファイルは変えない。QGIS のプロファイルのフォルダーに位置情報だけ動かした小さな VRT を作り、レイヤーの参照先をそれに替える（スタイル・画像補正はそのまま）。ずらした画像は Processing・書き出し・このプラグインの道具でもずらした位置で扱われる
 - 「位置ずらしの解除」でファイルの位置に戻す
 
+## ArcGIS Web マップ
+
+メニューの「ArcGIS Web マップを開く…」「ArcGIS Web マップとして保存…」で、ArcGIS Online・Enterprise のポータルの Web マップ（バージョン 2.x）をそのまま開き、QGIS のプロジェクトを Web マップとして書き出す。QGIS 本体は ArcGIS のサービスを 1 つずつ開けるが、Web マップのアイテムは開けない。
+
+- 開く: アイテムのページ（`…/home/item.html?id=…`）、Map Viewer の URL、REST の URL、または 32 桁のアイテム ID（ポータルを選択）。JSON ファイルからも開ける。非公開のアイテムは「認証設定」で QGIS の認証設定（OAuth2・ESRI token など）を選ぶ（ポータルごとに記憶し、そのポータルのホストと、ArcGIS Online なら `*.arcgis.com` のサービスにだけ使う）
+- 読めるレイヤー: フィーチャー（定義式・シンボル・ラベル・ポップアップの属性名も）、マップ・イメージ・タイルのサービス、ベクタータイル、WMS（名前ごとに 1 レイヤー）、WMTS、WFS、Web タイル、地図に保存されたフィーチャーコレクション（メモリレイヤーに）。グループは平らにして、表示・不透明度・縮尺の範囲を引き継ぐ。読めないもの（KML・CSV・シーンなど）は理由とともに一覧
+- Web マップ名のグループをレイヤーパネルの一番上に作って並べ、初期表示範囲へ移動し、ブックマークを追加（グループは Web マップ名）。背景地図は設定ファイルの `baseMaps` に同じものがあれば「背景地図」で切り替え、なければグループの一番下にレイヤーとして追加
+- 保存: レイヤーパネルの順に、サービスのレイヤーはサービスとして、ファイル・メモリのベクターレイヤーはフィーチャーコレクション（5,000 件まで）として書き込む。シンボル（単一・分類・段階のシンプルな点・線・面）とラベル（属性 1 つ）は Web マップの形に変換。画像ファイルなど書き込めないものは理由とともに一覧。表示範囲・背景地図・ブックマークも書き込む
+- 「JSON として保存…」でファイルに、「ポータルに保存…」で新しいアイテムとして（開いたアイテムへの上書きも可、確認あり）
+
 ## 移動体（AIS・ADS-B）
 
 メニュー・ツールバーの「移動体」でドックを開き、船舶（AIS）・航空機（ADS-B）の位置をライブのフィードか履歴ファイルから地図に重ねる。フィードごとに点（向きで回る船・航空機の記号、ラベル付き）と航跡の 2 つのメモリレイヤーを作る。
@@ -280,7 +290,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
-| `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート | `QgsSettings` |
+| `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds` で、ほかの項目は無視する。
 

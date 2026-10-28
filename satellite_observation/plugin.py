@@ -40,6 +40,7 @@ from .ui.moving_dock import MovingDock
 from .ui.shift import LayerShift
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
+from .ui.webmap_dialog import WebMapDialogs
 
 HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
@@ -203,6 +204,7 @@ class SatelliteObservationPlugin:
         self.notices_action: Optional[QAction] = None
         self.startup_layers: Optional[StartupLayers] = None
         self.base_maps: Optional[BaseMapSwitch] = None
+        self.webmaps: Optional[WebMapDialogs] = None
         self.coordinates: Optional[CoordinateBox] = None
         self.new_layer: Optional[NewLayerDialog] = None
         self.new_layer_action: Optional[QAction] = None
@@ -337,6 +339,14 @@ class SatelliteObservationPlugin:
         if isinstance(button, QToolButton):
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.actions.append(base_maps)
+        # ArcGIS Web Maps: opened as layers, and the project saved as one.
+        self.webmaps = WebMapDialogs(self.iface, self.context, self.base_maps.choose, self.iface.mainWindow())
+        for name, label, show in (("webmap_open", "ArcGIS Web マップを開く…", self.webmaps.show_open),
+                                  ("webmap_save", "ArcGIS Web マップとして保存…", self.webmaps.show_save)):
+            action = QAction(icon(name), tr(label), self.iface.mainWindow())
+            action.triggered.connect(lambda _=False, f=show: f())
+            self.iface.addPluginToMenu(MENU, action)
+            self.actions.append(action)
         # 「スワイプ比較」: the active layer (or group) on one side of a line only.
         swipe = QAction(icon("swipe"), tr("スワイプ比較"), self.iface.mainWindow())
         swipe.setObjectName("SatObsSwipe")
@@ -556,6 +566,10 @@ class SatelliteObservationPlugin:
             self.shift.close()
             self.shift.deleteLater()
             self.shift = None
+        if self.webmaps is not None:
+            self.webmaps.close()
+            self.webmaps.deleteLater()
+            self.webmaps = None
         if self.base_maps is not None:
             self.base_maps.close()
             self.base_maps = None
