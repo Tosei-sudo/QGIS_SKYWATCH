@@ -7,6 +7,7 @@ from qgis.core import QgsProcessingProvider
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
+from .align_algorithm import AlignAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .pansharpen_algorithm import PanSharpenAlgorithm
 
@@ -26,3 +27,4 @@ class SatObsProvider(QgsProcessingProvider):
     def loadAlgorithms(self) -> None:  # noqa: N802 (QGIS's name)
         self.addAlgorithm(PanSharpenAlgorithm())
         self.addAlgorithm(ChangeAlgorithm())
+        self.addAlgorithm(AlignAlgorithm())

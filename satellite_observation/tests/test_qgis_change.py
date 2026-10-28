@@ -110,8 +110,24 @@ def test_the_algorithm_makes_the_image_and_the_outlines(tmp_path):
         assert layer.name() == "before_after_difference" and layer.renderer().type() == "singlebandpseudocolor"
         shader = layer.renderer().shader().rasterShaderFunction()
         assert shader.minimumValue() == -shader.maximumValue() and shader.maximumValue() > 0
-        # The same band twice: refused.
-        _, ok = algorithm.run({"BEFORE": before.id(), "AFTER": before.id(), "OUTPUT": str(tmp_path / "x.tif")}, context, QgsProcessingFeedback())
+    finally:
+        QgsApplication.processingRegistry().removeProvider(provider)
+        QgsProject.instance().removeAllMapLayers()
+
+
+def test_the_algorithm_refuses_the_same_band_twice(tmp_path):
+    # Apart from the run above: the refused run's exception keeps the frame that called it alive until Python exits, and a
+    # raster layer still referenced from it would be deleted after GDAL is gone.
+    from satellite_observation.processing_provider.provider import SatObsProvider
+
+    provider = SatObsProvider()
+    QgsApplication.processingRegistry().addProvider(provider)
+    try:
+        algorithm = QgsApplication.processingRegistry().algorithmById("satobs:change")
+        before = QgsRasterLayer(pair(tmp_path)[0], "before")
+        QgsProject.instance().addMapLayer(before)
+        _, ok = algorithm.run({"BEFORE": before.id(), "AFTER": before.id(), "OUTPUT": str(tmp_path / "x.tif")}, QgsProcessingContext(),
+                              QgsProcessingFeedback())
         assert not ok
     finally:
         QgsApplication.processingRegistry().removeProvider(provider)
