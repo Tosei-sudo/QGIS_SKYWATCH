@@ -121,7 +121,9 @@ def test_the_algorithm(tmp_path):
         layer = QgsRasterLayer(out, "x")
         context.layerToLoadOnCompletionDetails(out).postProcessor().postProcessLayer(layer, context, feedback)
         assert layer.name() == "image_ortho"
-        # No angles and none in the metadata: refused.
+        # No angles and none in the metadata: refused. The refused run's exception keeps this frame alive until Python exits, so
+        # nothing in it may still hold a layer GDAL would have to close after its own clean-up.
+        del layer
         _, ok = algorithm.run({"INPUT": image.id(), "DEM": dem.id(), "OUTPUT": str(tmp_path / "x.tif")}, context, QgsProcessingFeedback())
         assert not ok
     finally:
