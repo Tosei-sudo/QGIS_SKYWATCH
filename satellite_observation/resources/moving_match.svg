@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 移動体と検出の照合: a detection box matched with a ship, another unmatched -->
+  <rect x="3" y="5" width="12" height="12" fill="none" stroke="#2f9e44" stroke-width="1.6"/>
+  <path d="M9 7l2.5 3.5v5h-5v-5z" fill="#1971c2"/>
+  <rect x="17" y="15" width="12" height="12" fill="none" stroke="#e03131" stroke-width="1.6"/>
+  <path d="M20 21h6" stroke="#e03131" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

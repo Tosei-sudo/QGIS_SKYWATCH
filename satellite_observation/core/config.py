@@ -26,13 +26,14 @@ from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
+from .moving import FeedConfig, moving_feeds_of
 from .startup_layers import StartupLayer, startup_layers_of
 
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
-    "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules",
+    "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds",
 )
 
 
@@ -63,6 +64,8 @@ class PluginConfig:
     layer_templates: list[LayerTemplate] = field(default_factory=list)
     #: The correction, bands and no data an image gets by its file name.
     image_rules: list[ImageRule] = field(default_factory=list)
+    #: The moving-object feeds (AIS, ADS-B) offered in 「移動体（AIS・ADS-B）」.
+    moving_feeds: list[FeedConfig] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -196,6 +199,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.layer_templates = templates_of(value["layerTemplates"], problems)
     if "imageRules" in value:
         config.image_rules = image_rules_of(value["imageRules"], problems)
+    if "movingFeeds" in value:
+        config.moving_feeds = moving_feeds_of(value["movingFeeds"], problems)
     return config, problems
 
 

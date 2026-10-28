@@ -11,6 +11,7 @@ from .align_algorithm import AlignAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .classify_algorithm import ClassifyAlgorithm
 from .geodesic_algorithms import GeodesicBufferAlgorithm, GeodesicCentroidAlgorithm
+from .moving_match_algorithm import MovingMatchAlgorithm
 from .ortho_algorithm import SimpleOrthoAlgorithm
 from .pansharpen_algorithm import PanSharpenAlgorithm
 
@@ -35,3 +36,4 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(SimpleOrthoAlgorithm())
         self.addAlgorithm(GeodesicBufferAlgorithm())
         self.addAlgorithm(GeodesicCentroidAlgorithm())
+        self.addAlgorithm(MovingMatchAlgorithm())

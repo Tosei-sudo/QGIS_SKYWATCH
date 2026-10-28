@@ -202,6 +202,16 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 画像のファイルは変えない。QGIS のプロファイルのフォルダーに位置情報だけ動かした小さな VRT を作り、レイヤーの参照先をそれに替える（スタイル・画像補正はそのまま）。ずらした画像は Processing・書き出し・このプラグインの道具でもずらした位置で扱われる
 - 「位置ずらしの解除」でファイルの位置に戻す
 
+## 移動体（AIS・ADS-B）
+
+メニュー・ツールバーの「移動体」でドックを開き、船舶（AIS）・航空機（ADS-B）の位置をライブのフィードか履歴ファイルから地図に重ねる。フィードごとに点（向きで回る船・航空機の記号、ラベル付き）と航跡の 2 つのメモリレイヤーを作る。
+
+- ライブ: 設定ファイルの `movingFeeds` を「登録済み」から選ぶか、URL と種類（WebSocket・Server-Sent Events・定期取得・ArcGIS のストリームサービス）を入れて「接続」。読める形はビューアと同じ（GeoJSON、配列、`mmsi`・`icao24`・`lat`・`lon` などの列名を自動で判別、`fields` で指定も可）。切れたら間隔を空けて再接続
+- 履歴: 「履歴ファイルを開く…」で CSV・GeoJSON。QGIS の時系列コントローラーの時刻の位置を、前後の報告から補間して表示（間が空きすぎたら最後の位置で止め、古いものは薄く）
+- 「撮影時刻に同期」で、アクティブな画像の撮影時刻までの 30 分に時系列コントローラーを合わせる。「ライブに復帰」で最新の位置へ
+- 「詳細」で種類・取得間隔・航跡の長さ・古いとみなす時間・消すまでの時間（−1 か 0 で自動）、列の割当を変更
+- メニュー「移動体と検出の照合…」（Processing の「衛星撮像計画・観測記録」にも）で、検出のレイヤー（点・ポリゴン）の各地物の撮影時刻に最も近い位置の移動体を探し、`ais_status`（一致・なし・時刻なし）・`ais_id`・`ais_name`・`ais_dist_m`・`ais_dt_s` を付けたレイヤーにする。時刻は属性・画像の撮影時刻・入力から選ぶ
+
 ## 座標・地名へ移動
 
 - ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
@@ -272,7 +282,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 
