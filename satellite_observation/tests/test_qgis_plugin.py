@@ -44,6 +44,10 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     plugin.initGui()
     assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正"]
     assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "移動目標撮像計画…", "設定ファイルのレイヤーを追加", "背景地図", "ドックを初期位置に戻す", "設定…"]
+    # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
+    assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
+    # They work as if opened: the catalog's footprints drawn on the map.
+    assert plugin.docks["SatObsImageCatalog"].overlay is not None and plugin.docks["SatObsNotices"].isHidden()
     assert plugin.api.problems == []
     assert plugin.api.config.satellite_catalogs[0].label == "衛星カタログ"
     roles = [s.role for s in plugin.context.services()]

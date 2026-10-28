@@ -41,6 +41,8 @@ DOCK_GROUPS = [
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
 ]
+#: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
+INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
 
 
 def badged(icon: QIcon, n: int) -> QIcon:
@@ -211,8 +213,12 @@ class SatelliteObservationPlugin:
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
                 dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
-            dock.hide()
+            # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
+            # Its signals wait meanwhile, so a dock shown only for that moment reads nothing.
+            dock.blockSignals(True)
             self.iface.addDockWidget(area[name], dock)
+            dock.setVisible(name in INITIAL_DOCKS)
+            dock.blockSignals(False)
             self.docks[name] = dock
             action = dock.toggleViewAction()
             action.setText(title)
@@ -222,6 +228,9 @@ class SatelliteObservationPlugin:
             self.actions.append(action)
 
         self.place_docks()
+        # The docks left open now hear that they are shown (their signals waited while they were added).
+        for name in INITIAL_DOCKS:
+            self.docks[name].visibilityChanged.emit(True)
         self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
         self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())

@@ -50,6 +50,8 @@ class FakeIface(QObject):
 
     def addDockWidget(self, area, dock):  # noqa: N802
         self.window.addDockWidget(area, dock)
+        # As QGIS does (QgisApp::addDockWidget shows the dock).
+        dock.show()
         self.docks.append(dock)
 
     def removeDockWidget(self, dock):  # noqa: N802
