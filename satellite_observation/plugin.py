@@ -24,6 +24,7 @@ from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.docks import StubDock
+from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
@@ -205,6 +206,7 @@ class SatelliteObservationPlugin:
         self.startup_layers: Optional[StartupLayers] = None
         self.base_maps: Optional[BaseMapSwitch] = None
         self.webmaps: Optional[WebMapDialogs] = None
+        self.remote_dialog: Optional[RemoteProcessingDialog] = None
         self.coordinates: Optional[CoordinateBox] = None
         self.new_layer: Optional[NewLayerDialog] = None
         self.new_layer_action: Optional[QAction] = None
@@ -324,6 +326,11 @@ class SatelliteObservationPlugin:
             action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
             self.iface.addPluginToMenu(MENU, action)
             self.actions.append(action)
+        # 「サーバ処理…」: a task of a geoprocessing / OGC Processes service as a Processing algorithm.
+        remote = QAction(icon("gp"), tr("サーバ処理…"), self.iface.mainWindow())
+        remote.triggered.connect(lambda: self.open_remote_processing())
+        self.iface.addPluginToMenu(MENU, remote)
+        self.actions.append(remote)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -538,6 +545,13 @@ class SatelliteObservationPlugin:
             inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
         processing.execAlgorithmDialog(algorithm, inputs)
 
+    def open_remote_processing(self) -> None:
+        if self.remote_dialog is None:
+            self.remote_dialog = RemoteProcessingDialog(self.context, self.iface.mainWindow())
+        self.remote_dialog.prepare()
+        self.remote_dialog.show()
+        self.remote_dialog.raise_()
+
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
@@ -566,6 +580,10 @@ class SatelliteObservationPlugin:
             self.shift.close()
             self.shift.deleteLater()
             self.shift = None
+        if self.remote_dialog is not None:
+            self.remote_dialog.close()
+            self.remote_dialog.deleteLater()
+            self.remote_dialog = None
         if self.webmaps is not None:
             self.webmaps.close()
             self.webmaps.deleteLater()
