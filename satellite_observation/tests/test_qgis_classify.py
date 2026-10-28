@@ -131,7 +131,9 @@ def test_the_algorithm_makes_the_classes_table_and_outlines(tmp_path):
         results, ok = algorithm.run({"INPUT": layer.id(), "CLASSES": 4, "BANDS": [2], "OUTPUT": str(tmp_path / "k.tif")}, context, QgsProcessingFeedback())
         ds = gdal.Open(results["OUTPUT"])
         assert ok and ds.GetRasterBand(1).ReadAsArray().max() == 4
-        # Supervised without an attribute: refused.
+        # Supervised without an attribute: refused. The refused run's exception keeps this frame alive until Python exits, so
+        # nothing in it may still hold a layer or dataset GDAL would have to close after its own clean-up.
+        del result, ds
         _, ok = algorithm.run({"INPUT": layer.id(), "METHOD": 2, "TRAINING": training.id(), "OUTPUT": str(tmp_path / "z.tif")}, context, QgsProcessingFeedback())
         assert not ok
     finally:
