@@ -186,6 +186,19 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 最大 8 本まで重ね、地図に番号の印を付ける（古いものから消える）。グラフの上にカーソルを置くと、そのバンドの各線の値
 - 「CSV 保存」でバンドごとの行・線ごとの列の CSV（範囲は最小・最大・標準偏差も）。アクティブなレイヤーを変えるとグラフは最初から
 
+## ダッシュボード
+
+メニュー・ツールバーの「ダッシュボード」でドックを開くと、プロジェクトのレイヤーの概要と、1 つのベクターレイヤー（アクティブなレイヤー、または一覧で選んだもの）の集計を表示する。QGIS 本体の統計パネルは 1 つの属性の数値だけで、グラフで絞り込む仕組みはない。
+
+- 件数: 地物・表示範囲内・期間内（時系列コントローラーが有効なとき）・絞り込み後・選択中
+- 属性別: 属性の値ごとの件数（数値の属性の合計・平均も）。多い順に 15 件まで、残りは「その他」
+- 数値の分布: 20 区間のヒストグラムと件数・最小・平均・最大
+- 時間の推移: レイヤーのプロパティの「時系列」で設定した開始日時ごとの件数
+- 値をクリックすると（Ctrl / Shift で複数）、その値の地物だけを地図と属性テーブルに表示。ヒストグラムの区間も同じ（Shift で範囲を広げる）。各グラフは、ほかのグラフの絞り込みが残す地物を数える。「絞り込みを解除」で元に戻り、「地物を選択」で絞り込んだ地物を選択
+- 時間の推移の区間をクリックすると、時系列コントローラーをその期間に設定
+- 「ヒートマップ」で、表示中の地物のヒートマップレイヤーを一番上に追加（半径は変更可）
+- 絞り込みはレイヤーのフィルター（サブセット）にダッシュボードの条件を足して行い、ドックを閉じると元のフィルターに戻す。プロジェクトにはレイヤー本来のフィルターと、ダッシュボードの状態（集計するレイヤー・属性・絞り込み・ヒートマップ）を保存する
+
 ## スワイプ比較
 
 メニュー・ツールバーの「スワイプ比較」で、アクティブなレイヤー（レイヤーパネルでグループを選んでいればそのグループ）を線の左側だけに表示し、右側には下のレイヤーを表示する（画像同士のほか、ベクターや背景地図とも比較可）。アクティブなレイヤーを変えると、比べるレイヤーも追従。
@@ -255,7 +268,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 

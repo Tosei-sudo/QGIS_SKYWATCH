@@ -23,6 +23,7 @@ from .qgis_io.geometry import to_wgs84
 from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
 from .ui.coordinate_box import CoordinateBox
+from .ui.dashboard_dock import DashboardDock
 from .ui.docks import StubDock
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
@@ -48,7 +49,7 @@ MENU = "衛星撮像計画・観測記録"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
@@ -153,6 +154,11 @@ class PluginApi:
         return self._plugin.docks["SatObsSpectral"]
 
     @property
+    def dashboard(self) -> "DashboardDock":
+        """The dock 「ダッシュボード」 (its `figures`, `categories`, `click_value(v)`, `click_bin(i)`, `click_step(i)`, `set_heatmap(on)`, `clear_filter()`)."""
+        return self._plugin.docks["SatObsDashboard"]
+
+    @property
     def moving(self) -> "MovingDock":
         """The dock 「移動体（AIS・ADS-B）」 (its `connect_feed(FeedConfig)`, `open_history(path)`, `layers`, `align_to_image()`, `go_live()`)."""
         return self._plugin.docks["SatObsMoving"]
@@ -229,7 +235,8 @@ class SatelliteObservationPlugin:
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
-                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving"}
+                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
+                 "SatObsDashboard": "dashboard"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -243,6 +250,7 @@ class SatelliteObservationPlugin:
             ("SatObsShadowHeight", tr("影から高さ"), None),
             ("SatObsSpectral", tr("スペクトル"), None),
             ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
+            ("SatObsDashboard", tr("ダッシュボード"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -266,6 +274,8 @@ class SatelliteObservationPlugin:
                 dock = SpectralDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsMoving":
                 dock = MovingDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsDashboard":
+                dock = DashboardDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
@@ -558,6 +568,8 @@ class SatelliteObservationPlugin:
     def unload(self) -> None:
         if "SatObsMoving" in self.docks:
             self.docks["SatObsMoving"].close_all()
+        if "SatObsDashboard" in self.docks:
+            self.docks["SatObsDashboard"].close_all()
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
