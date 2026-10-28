@@ -21,7 +21,8 @@ from qgis.core import (  # noqa: E402
 from qgis.PyQt.QtCore import QSize  # noqa: E402
 from qgis.PyQt.QtGui import QColor  # noqa: E402
 
-from satellite_observation.core.enhance import Pipeline, process  # noqa: E402
+from satellite_observation.core.enhance import PRESETS, Pipeline, process  # noqa: E402
+from satellite_observation.core.enhance.histogram import channel_stats  # noqa: E402
 from satellite_observation.core.enhance.raster import compute_raster_stretch, sample_raster_histogram, stretch_to_rgba, valid_mask  # noqa: E402
 from satellite_observation.qgis_io import enhance_renderer as er  # noqa: E402
 
@@ -236,3 +237,121 @@ def test_strips_in_threads_give_the_whole_image_s_pixels(tmp_path):
     rgba = np.dstack(arrays + [np.full((600, 300), 255, np.uint8)])
     assert er.THREADS == 1 or 600 // er.STRIP > 1
     assert np.array_equal(got, process(rgba, p))
+
+
+def make_dock():
+    from satellite_observation.qgis_io.context import PluginContext
+    from satellite_observation.tests.qgis_fakes import FakeIface
+    from satellite_observation.ui.enhance_dock import EnhanceDock
+
+    iface = FakeIface()
+    return iface, EnhanceDock(iface, PluginContext(iface.window), lambda: None, iface.window)
+
+
+def test_image_rules_open_images_with_their_correction_bands_and_no_data(tmp_path):
+    from satellite_observation.core.config import parse_config
+
+    config, problems = parse_config({"imageRules": [
+        {"label": "Landsat", "match": r"^LC0[89]_", "preset": "satellite", "bands": [4, 3, 2]},
+        {"label": "名前", "match": r"_MS\.tif$", "bands": ["NIR", "Red", "Green"], "noData": {"auto": False, "values": [7]}},
+        {"label": "足りない", "match": r"_few\.tif$", "bands": [5, 4, 3], "enhance": {"contrast": 0.2}},
+    ]})
+    assert not problems
+    rng = np.random.default_rng(5)
+    four = [rng.normal(2000 + 300 * i, 200, (30, 40)).astype(np.uint16) for i in range(4)]
+    landsat = write_tif(tmp_path / "LC09_L2SP_107035.tif", four, gdal.GDT_UInt16)
+    named = write_tif(tmp_path / "scene_MS.tif", four, gdal.GDT_UInt16, no_data=0)
+    ds = gdal.Open(named, gdal.GA_Update)
+    for i, name in enumerate(["Blue", "Green", "Red", "NIR"]):
+        ds.GetRasterBand(i + 1).SetDescription(name)
+    ds = None
+    few = write_tif(tmp_path / "x_few.tif", four, gdal.GDT_UInt16)
+    other = write_tif(tmp_path / "other.tif", four, gdal.GDT_UInt16)
+
+    iface, dock = make_dock()
+    dock.context.config = config
+    messages = []
+    iface.bar.pushWarning = lambda _title, text: messages.append(text)
+    project = QgsProject.instance()
+    try:
+        layers = {p: layer_of(p) for p in (landsat, named, few, other)}
+        project.addMapLayers(list(layers.values()))
+        r = er.enhance_renderer(layers[landsat])
+        assert r.settings.bands == (4, 3, 2)
+        assert r.settings.correction.ops == PRESETS["satellite"].ops
+        r = er.enhance_renderer(layers[named])
+        assert r.settings.bands == (4, 3, 2) and r.settings.no_data == (7.0,)
+        assert not layers[named].dataProvider().useSourceNoDataValue(1)
+        # Bands it lacks: the correction still, on the layer's own bands, with a warning.
+        r = er.enhance_renderer(layers[few])
+        assert r.settings.bands == (1, 2, 3) and r.settings.correction.get("contrast")
+        assert any("足りない" in m and "バンド 5 なし" in m for m in messages)
+        assert er.enhance_renderer(layers[other]) is None
+
+        # The dock keeps the rule's no-data values when its sliders change.
+        iface.setActiveLayer(layers[named])
+        dock.apply()
+        assert er.enhance_renderer(layers[named]).settings.no_data == (7.0,)
+
+        # A project's layers keep their own look: no rule while it is read.
+        er.remove(layers[landsat])
+        qgs = str(tmp_path / "rules.qgs")
+        assert project.write(qgs)
+        project.clear()
+        assert project.read(qgs)
+        opened = next(lay for lay in project.mapLayers().values() if lay.source() == landsat)
+        assert er.enhance_renderer(opened) is None
+        opened_named = next(lay for lay in project.mapLayers().values() if lay.source() == named)
+        assert er.enhance_renderer(opened_named).settings.no_data == (7.0,)
+    finally:
+        dock.close_down()
+        project.clear()
+
+
+def test_the_histogram_of_the_view_before_and_after(tmp_path):
+    from satellite_observation.tests.qgis_fakes import wait_for
+
+    arrays = color8()
+    layer = layer_of(write_tif(tmp_path / "h.tif", arrays))
+    iface, dock = make_dock()
+    project = QgsProject.instance()
+    try:
+        project.addMapLayer(layer)
+        iface.canvas.setDestinationCrs(layer.crs())
+        iface.canvas.setLayers([layer])
+        iface.canvas.setExtent(layer.extent())
+        iface.setActiveLayer(layer)
+        p = Pipeline().add("contrast", 0.6)
+        dock.enhance(layer, p)
+
+        def wait(task):
+            assert task is not None and wait_for(lambda: dock.histograms is not None)
+
+        dock.histogram_box.setChecked(True)
+        dock.histograms = None
+        wait(dock.take_histogram())
+        rgba = np.dstack(arrays + [np.full((60, 80), 255, np.uint8)])
+        before, after = dock.histograms["before"], dock.histograms["after"]
+        assert len(before) == len(after) == 3
+        for c in range(3):
+            assert np.array_equal(before[c], np.bincount(rgba[..., c].ravel(), minlength=256))
+        # More contrast spreads the codes.
+        assert np.std(np.repeat(np.arange(256), after[0])) > np.std(np.repeat(np.arange(256), before[0]))
+        s = channel_stats(after[0])
+        assert dock.histogram_table.rowCount() == 3 and dock.histogram_table.item(0, 0).text() == str(s["min"])
+        assert dock.histogram_note.text() == "表示範囲の 4,800 画素・補正後"
+
+        dock.histogram_after.setCurrentIndex(1)
+        assert dock.histogram_table.item(0, 3).text() == str(rgba[..., 0].max())
+        dock.histogram_log.setChecked(True)
+        assert max(float(v.max()) for v in dock.histogram_plot.heights()) == pytest.approx(1.0)
+        dock.histogram_plot.grab()
+
+        # Gray: one channel.
+        dock.enhance(layer, p, bands=(2,))
+        dock.histograms = None
+        wait(dock.take_histogram())
+        assert len(dock.histograms["after"]) == 1 and dock.histogram_table.rowCount() == 1
+    finally:
+        dock.close_down()
+        project.removeAllMapLayers()

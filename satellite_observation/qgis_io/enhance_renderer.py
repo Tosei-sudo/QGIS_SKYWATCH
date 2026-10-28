@@ -30,11 +30,13 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Optional
 
 import numpy as np
+from qgis.PyQt import sip
 from qgis.core import (
     Qgis, QgsContrastEnhancement, QgsMultiBandColorRenderer, QgsRasterBlock, QgsRasterLayer,
     QgsRasterRenderer, QgsRectangle, QgsSingleBandGrayRenderer,
 )
 
+from ..core.enhance.histogram import channel_bins
 from ..core.enhance.pipeline import Pipeline
 from ..core.enhance.process import process
 from ..core.enhance.raster import compute_raster_stretch, sample_raster_histogram, stretch_to_rgba, valid_mask
@@ -370,6 +372,18 @@ def enhance_renderer(layer: QgsRasterLayer) -> Optional[EnhanceRenderer]:
     return r if isinstance(r, EnhanceRenderer) else None
 
 
+#: Renderers put on layers. A layer made in C++ (opened from a project or by QGIS) has a Python wrapper only
+#: while Python holds it, and the renderer handed to it lives only as long as that wrapper: without this, the
+#: Python half of the renderer goes and QGIS draws the layer with the plain base renderer.
+_kept: set = set()
+
+
+def _keep(renderer: EnhanceRenderer) -> None:
+    for r in [r for r in _kept if sip.isdeleted(r)]:
+        _kept.discard(r)
+    _kept.add(renderer)
+
+
 def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
     """Draws the layer with the correction (or updates it) and keeps the settings on the layer."""
     current = enhance_renderer(layer)
@@ -386,6 +400,7 @@ def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
         if old is not None:
             renderer.copyCommonProperties(old, True)
         layer.setRenderer(renderer)
+        _keep(renderer)
     layer.setCustomProperty(PROPERTY, settings.to_json())
     layer.triggerRepaint()
     return renderer
@@ -398,6 +413,7 @@ def remove(layer: QgsRasterLayer) -> None:
         fallback = current.fallback()
         if fallback is not None:
             layer.setRenderer(fallback)
+        _kept.discard(current)
     layer.removeCustomProperty(PROPERTY)
     layer.triggerRepaint()
 
@@ -417,6 +433,24 @@ def restore_layer(layer) -> bool:
         return False
     apply(layer, settings)
     return True
+
+
+def view_histograms(provider, settings: EnhanceSettings, state: EnhanceState, view: QgsRectangle) -> dict:
+    """
+    Counts (256 per channel, one for gray) of the area in view before and
+    after the correction, read at most STATS_SIZE a side. `provider` must be
+    the caller's own (a clone, off the main thread).
+    """
+    r = EnhanceRenderer(provider, settings, state)
+    read = r._coarse(view)
+    if read is None:
+        return {"before": [], "after": []}
+    bands, valid = read
+    black, white, ops = r.ranges(view.intersect(provider.extent()), settings.correction)
+    gray = len(settings.bands) == 1
+    before = stretch_to_rgba(bands, valid, black, white)
+    after = process(before, ops, mode="gray" if gray else "rgb")
+    return {"before": channel_bins(before, gray), "after": channel_bins(after, gray)}
 
 
 def set_view(layer: QgsRasterLayer, view: Optional[QgsRectangle]) -> None:
