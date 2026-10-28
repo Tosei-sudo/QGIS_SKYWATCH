@@ -117,9 +117,14 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 描くのは画面に見えている画素だけ（QGIS が画面に合ったオーバービューを読む）なので、大きな COG でも処理量は画面の大きさ分
 - 設定ファイルの `imageRules`（ビューアと同じ書き方）: 開いた画像（カタログから開いたものも）のファイル名に最初に合った規則の補正（`preset`・`enhance`）・バンド（番号か GDAL のバンド名）・ノーデータ（`noData`）を自動でかける。プロジェクトから開いたレイヤーは保存した表示のまま。バンドが足りないときは補正だけかけて理由を表示
 - 「ヒストグラム（表示範囲）」: 表示範囲の補正後・補正前の値の分布（R・G・B を加算で重ねる。白黒は輝度）と、チャンネルごとの最小・平均・中央・最大。「対数」で少ない値も表示。グラフを指すとその値の画素数。地図を動かすか補正を変えると取り直す（開いている間だけ、最長 512 px で読んでタスクで計算）
+- 「トーンカーブ」: 補正のトーンカーブをグラフで編集（ドラッグで移動、クリックで点の追加、ダブルクリックか枠の外へのドラッグで削除）。RGB 全体と赤・緑・青の別のカーブ（白黒の画像は全体のみ）。背景に表示範囲のヒストグラム（ヒストグラムを開いているとき）。カーブはスライダーの補正のあと、シャープの後ろにかかる
+- 「着色（単バンド画像）」: SAR・パンクロなど 1 バンドの画像をカラースケール（赤・緑・青・シアン・マゼンタ・黄・オレンジ・熱・ビリディス・虹・青→白→赤・好きな色）で着色。補正のあとに色を付ける。「反転」「暗い所を透明に」、下のレイヤーとの重ね方（通常・スクリーン・差・比較（明）・比較（暗）・乗算。QGIS のレイヤーの合成モード）
+  - 表示方法「区分」（等間隔・分位数・手動）と「値ごとに色分け」（分類画像。64 種類まで）は画像の値で色分けし、補正はかけない。凡例で色・上限・名前を変えられ、画像に占める面積も表示。区分は QGIS のレイヤーの凡例にも出る
+  - 「2 時期の色分け重ね合わせ」で前の画像を赤、後の画像をシアン（スクリーン）にして後を前の真上に置く。変化なしは白黒、後で明るくなった所はシアン、暗くなった所は赤。前後は撮像日時の順（日時がなければレイヤー一覧の下から）
+  - プロジェクトには QGIS 標準の単バンド疑似カラー（区分は離散・値ごとは完全一致）として書くので、プラグインなしでも色分けが見える
 - 補正はレイヤーのカスタムプロパティ `satobs/enhance`（JSON。補正はビューアのプロジェクトと同じ `{"version": 1, "ops": [...]}`）に保存。プロジェクトファイルには QGIS 標準のレンダラーとして書くので、プラグインなしでも普通に開け、プラグインがあれば補正が戻る
 
-Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）。
+Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）、着色は `api.image_enhance.colorize(layer, "cyan", blend="screen")`（`reverse`・`fade`・`classes` も）。
 
 ## 座標・地名へ移動
 
@@ -224,6 +229,7 @@ python3 compare.py /path/to/browser-image-enhancement/usecase/image-viewer/src
 
 ```
 python3 scripts/compare_viewer/compare_enhance.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist
+python3 scripts/compare_viewer/compare_color.py /path/to/browser-image-enhancement/packages/browser-image-enhancement/dist   # 着色（カラースケール・区分）
 ```
 
 ビューアの `imaging-plan.ts`（移動目標・衛星パスも）を esbuild で束ねて Node で動かし、同じ衛星・対象・条件でプラグインの計算と突き合わせる（時刻 ±1 秒、角度 ±0.05°、被覆 ±1%、組み合わせは同じパス）。ネットワークは `npm install` のときだけ使う。

@@ -214,7 +214,7 @@ def test_the_dock_corrects_the_active_layer_and_follows_the_view(tmp_path):
 
         # A tone curve from a script survives the sliders.
         dock.enhance(layer, {"version": 1, "ops": [{"op": "curve", "points": [[0, 0], [0.5, 0.6], [1, 1]]}, {"op": "contrast", "amount": 0.1}]})
-        assert not dock.extra_label.isHidden()
+        assert dock.curve_box.isChecked() and dock.curve.step()["points"] == [[0, 0], [0.5, 0.6], [1, 1]]
         dock.apply()
         assert [op["op"] for op in er.enhance_renderer(layer).settings.correction.ops] == ["contrast", "curve"]
 
@@ -355,3 +355,171 @@ def test_the_histogram_of_the_view_before_and_after(tmp_path):
     finally:
         dock.close_down()
         project.removeAllMapLayers()
+
+
+def test_color_scales_and_classes_are_drawn_kept_and_in_the_legend(tmp_path):
+    from qgis.core import QgsLayerTreeModel, QgsSingleBandPseudoColorRenderer
+
+    from satellite_observation.core.enhance.color_scale import apply_palette, color_scale_palette
+
+    a = color8()[0]
+    layer = layer_of(write_tif(tmp_path / "sar.tif", [a]))
+    p = Pipeline().add("contrast", 0.3)
+    r = er.apply(layer, er.EnhanceSettings(bands=(1,), pipeline=p.to_json(), color={"scale": "inferno", "reverse": True}))
+    rgba = np.dstack([a, a, a, np.full(a.shape, 255, np.uint8)])
+    assert np.array_equal(draw(r, layer.extent(), 80, 60), apply_palette(process(rgba, p, color_mode="gray"),
+                                                                           color_scale_palette("inferno", reverse=True)))
+
+    # Classes of the values as read (no correction), in the legend and, without the plugin, QGIS's pseudo-colour renderer.
+    codes = np.repeat(np.array([[1, 2, 3, 7]], np.uint8), 10, axis=0)
+    land = layer_of(write_tif(tmp_path / "land.tif", [codes]))
+    classes = {"kind": "exact", "classes": [{"value": v, "color": c, "label": n} for v, c, n in
+                                            ((1, [255, 0, 0], "市街地"), (2, [0, 128, 0], "森林"), (3, [0, 0, 255], "水域"))]}
+    r = er.apply(land, er.EnhanceSettings(bands=(1,), pipeline=p.to_json(), color={"scale": "turbo", "classes": classes}))
+    got = draw(r, land.extent(), 4, 10)
+    assert [list(got[0, x]) for x in range(4)] == [[255, 0, 0, 255], [0, 128, 0, 255], [0, 0, 255, 255], [0, 0, 0, 0]]
+    project = QgsProject()
+    project.addMapLayer(land)
+    model = QgsLayerTreeModel(project.layerTreeRoot())
+    assert [n.data(0) for n in model.layerLegendNodes(project.layerTreeRoot().findLayer(land.id()))] == ["市街地", "森林", "水域"]
+    qgs = str(tmp_path / "colors.qgs")
+    assert project.write(qgs)
+    other = QgsProject()
+    assert other.read(qgs)
+    opened = list(other.mapLayers().values())[0]
+    assert isinstance(opened.renderer(), QgsSingleBandPseudoColorRenderer)
+    assert [label for label, _c in opened.renderer().legendSymbologyItems()] == ["市街地", "森林", "水域"]
+    assert er.restore_layer(opened) and er.enhance_renderer(opened).settings.classes == classes
+
+
+def test_the_dock_colors_classes_and_two_dates(tmp_path):
+    from qgis.PyQt.QtGui import QPainter
+
+    from satellite_observation.tests.qgis_fakes import wait_for
+
+    rng = np.random.default_rng(6)
+    dem = rng.normal(500, 100, (40, 50)).astype(np.float32)
+    iface, dock = make_dock()
+    project = QgsProject.instance()
+    try:
+        layer = layer_of(write_tif(tmp_path / "dem.tif", [dem], gdal.GDT_Float32))
+        project.addMapLayer(layer)
+        iface.setActiveLayer(layer)
+        box = dock.colorize_box
+        assert not dock.enabled.isChecked() and box.color() is None
+
+        # A scale turns the correction on and colours after it.
+        box.scale.setCurrentIndex(box.scale.findData("viridis"))
+        dock.apply()
+        assert dock.enabled.isChecked() and er.enhance_renderer(layer).settings.color == {"scale": "viridis"}
+        box.blend.setCurrentIndex(box.blend.findData("multiply"))
+        assert layer.blendMode() == QPainter.CompositionMode.CompositionMode_Multiply
+
+        # Classes from the image's values (read in a task), with their shares.
+        box.mode.setCurrentIndex(box.mode.findData("classes"))
+        assert wait_for(lambda: box.classes is not None)
+        dock.apply()
+        classes = er.enhance_renderer(layer).settings.classes
+        assert classes["kind"] == "range" and len(classes["classes"]) == 5
+        assert wait_for(lambda: box.legend.item(0, 3) is not None and box.legend.item(0, 3).text().endswith("%"))
+        assert box.legend.rowCount() == 5
+        box.count.setValue(3)
+        assert wait_for(lambda: len(box.classes["classes"]) == 3)
+        box._bound(0, "450")
+        dock.apply()
+        classes = er.enhance_renderer(layer).settings.classes
+        assert classes["method"] == "manual" and sorted(c["value"] for c in classes["classes"])[0] == 450
+        assert box.method.currentData() == "manual"
+
+        # Back to a smooth scale, then none.
+        box.clear()
+        dock.apply()
+        assert er.enhance_renderer(layer).settings.color is None
+        assert layer.blendMode() == QPainter.CompositionMode.CompositionMode_SourceOver
+
+        # Two dates: the earlier red, the later cyan screened right above it.
+        earlier = layer_of(write_tif(tmp_path / "d1.tif", [dem]))
+        later = layer_of(write_tif(tmp_path / "d2.tif", [dem]))
+        project.addMapLayers([earlier, later])
+        box.pair_box.setChecked(True)
+        box.before.setCurrentIndex(box.before.findData(earlier.id()))
+        box.after.setCurrentIndex(box.after.findData(later.id()))
+        assert box.pair()
+        ids = [n.layerId() for n in project.layerTreeRoot().findLayers()]
+        assert ids.index(later.id()) == ids.index(earlier.id()) - 1
+        assert er.enhance_renderer(earlier).settings.color == {"scale": "red"}
+        assert er.enhance_renderer(later).settings.color == {"scale": "cyan"}
+        assert later.blendMode() == QPainter.CompositionMode.CompositionMode_Screen
+        box.before.setCurrentIndex(box.before.findData(earlier.id()))
+        box.after.setCurrentIndex(box.after.findData(earlier.id()))
+        assert not box.pair() and box.pair_note.text() == "別々の画像を選択"
+
+        # For scripts.
+        dock.colorize(layer, "red", blend="screen", fade=True)
+        assert er.enhance_renderer(layer).settings.color == {"scale": "red", "fade": True}
+        assert box.fade.isChecked() and box.scale.currentData() == "red"
+    finally:
+        dock.close_down()
+        project.removeAllMapLayers()
+
+
+def test_the_tone_curve_is_edited_on_its_plot(tmp_path):
+    from qgis.PyQt.QtCore import QEvent, QPoint, QPointF, Qt
+    from qgis.PyQt.QtGui import QMouseEvent
+    from qgis.PyQt.QtTest import QTest
+    from qgis.PyQt.QtWidgets import QApplication
+
+    from satellite_observation.ui.curve_editor import CurveEditor
+
+    editor = CurveEditor()
+    editor.resize(220, 300)
+    editor.show()
+    plot = editor.plot
+    plot.resize(200, 200)
+    edits = []
+    editor.changed.connect(lambda: edits.append(1))
+    assert editor.step() is None
+
+    def move(pos):
+        # QTest.mouseMove sends no button held (Qt 5): a drag needs the event itself.
+        QApplication.sendEvent(plot, QMouseEvent(QEvent.Type.MouseMove, QPointF(pos), Qt.MouseButton.LeftButton,
+                                                 Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+
+    def at(x, y):
+        q = plot.to_screen(x, y)
+        return QPoint(round(q.x()), round(q.y()))
+
+    # A click off the points adds one on the curve; dragging it bends the curve.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.5, 0.2))
+    move(at(0.5, 0.7))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.5, 0.7))
+    pts = editor.step()["points"]
+    assert len(pts) == 3 and pts[1][0] == pytest.approx(0.5, abs=0.01) and pts[1][1] == pytest.approx(0.7, abs=0.01)
+    assert edits
+    # The ends move only up and down.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0, 0))
+    move(at(0.2, 0.1))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.2, 0.1))
+    assert editor.step()["points"][0] == [0.0, pytest.approx(0.1, abs=0.01)]
+    # A double-click removes a point; a channel of its own.
+    QTest.mouseDClick(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(*editor.step()["points"][1]))
+    assert len(editor.step()["points"]) == 2
+    editor.channel.setCurrentIndex(editor.channel.findData("red"))
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.25, 0.25))
+    move(at(0.25, 0.5))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(0.25, 0.5))
+    step = editor.step()
+    assert len(step["red"]) == 3 and step["green"] == [[0.0, 0.0], [1.0, 1.0]]
+    # Dragged out of the box: removed.
+    QTest.mousePress(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at(*step["red"][1]))
+    move(QPoint(-60, -60))
+    QTest.mouseRelease(plot, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(-60, -60))
+    assert len(editor.step()["red"]) == 2
+    editor.reset_channel()
+    editor.channel.setCurrentIndex(0)
+    editor.reset_channel()
+    assert editor.step() is None
+    editor.set_gray(True)
+    assert not editor.channel.model().item(1).isEnabled()
+    plot.grab()
+    editor.close()
