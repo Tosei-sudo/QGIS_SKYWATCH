@@ -16,6 +16,7 @@ except ImportError:  # Qt5
 
 from .core.obs.api import ObservationApi
 from .processing_provider.pansharpen_algorithm import default_inputs
+from .processing_provider import detect_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
@@ -33,6 +34,7 @@ from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_temp
 from .ui.notices_dock import NoticesDock
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
+from .ui.segment_tool import SegmentTool
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
@@ -173,6 +175,11 @@ class PluginApi:
         """「位置ずらし」 (its `set_active()`, `set_shift_metres(layer, east, north)`, `shift_metres(layer)`, `reset()`)."""
         return self._plugin.shift
 
+    @property
+    def segment(self) -> "SegmentTool":
+        """「クリック抽出（AI）」 (its `set_active()`, `add_model_files([encoder, decoder])`, `click(point)`, `undo()`, `keep()`, `outlines()`)."""
+        return self._plugin.segment
+
     def new_scratch_layer(self, template: Optional[str] = None, source: str = "builtin") -> "NewLayerDialog":
         """Opens 「新規スクラッチレイヤー（テンプレート）」 (with a template: `source` builtin, config or saved); its `create()`."""
         return self._plugin.open_new_layer(source, template)
@@ -220,6 +227,7 @@ class SatelliteObservationPlugin:
         self.scratch_hook: Optional[ScratchDialogHook] = None
         self.swipe: Optional[SwipeCompare] = None
         self.shift: Optional[LayerShift] = None
+        self.segment: Optional[SegmentTool] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -307,6 +315,8 @@ class SatelliteObservationPlugin:
         self.actions.append(moving)
         self._add_new_layer(icon("new_layer"))
         # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
+        context = self.context
+        detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
@@ -341,6 +351,17 @@ class SatelliteObservationPlugin:
         remote.triggered.connect(lambda: self.open_remote_processing())
         self.iface.addPluginToMenu(MENU, remote)
         self.actions.append(remote)
+        # The AI tools: 「物体検出（AI）…」 as a Processing algorithm (its models set above), 「クリック抽出（AI）」 as a map tool.
+        self.context.configChanged.connect(self._refresh_algorithms)
+        detect = QAction(icon("ai_detect"), tr("物体検出（AI）…"), self.iface.mainWindow())
+        detect.triggered.connect(lambda: self.open_detect())
+        self.iface.addPluginToMenu(MENU, detect)
+        self.actions.append(detect)
+        segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
+        segment.setObjectName("SatObsSegment")
+        self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
+        self.iface.addPluginToMenu(MENU, segment)
+        self.actions.append(segment)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -555,6 +576,20 @@ class SatelliteObservationPlugin:
             inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
         processing.execAlgorithmDialog(algorithm, inputs)
 
+    def _refresh_algorithms(self) -> None:
+        """The settings file's AI models into the algorithm's choice."""
+        if self.provider is not None:
+            self.provider.refreshAlgorithms()
+
+    def open_detect(self) -> None:
+        """The algorithm's dialog, with the active image (else the first), the map's extent and the screen's pixel size."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.detect_algorithm import default_inputs as detect_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:detect", detect_inputs(layers, self.iface.activeLayer(), self.iface.mapCanvas()))
+
     def open_remote_processing(self) -> None:
         if self.remote_dialog is None:
             self.remote_dialog = RemoteProcessingDialog(self.context, self.iface.mainWindow())
@@ -570,9 +605,18 @@ class SatelliteObservationPlugin:
             self.docks["SatObsMoving"].close_all()
         if "SatObsDashboard" in self.docks:
             self.docks["SatObsDashboard"].close_all()
+        try:
+            self.context.configChanged.disconnect(self._refresh_algorithms)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
+        detect_algorithm.set_models(lambda: ([], ""))
+        if self.segment is not None:
+            self.segment.close()
+            self.segment.deleteLater()
+            self.segment = None
         try:
             self.iface.mapCanvas().contextMenuAboutToShow.disconnect(self._canvas_menu)
         except (TypeError, RuntimeError):

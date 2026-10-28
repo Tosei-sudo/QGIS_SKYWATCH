@@ -16,9 +16,20 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-try:  # The installed sgp4 (C++ accelerated when its wheel has it); SATELLITE_OBSERVATION_SGP4=bundled forces the copy (tests).
+
+def _windows_sgp4() -> None:
+    """The Windows zip's sgp4 (C++ accelerated, ext/win64, put there by scripts/build_zip.py --win64) on the path, when there is one."""
+    import sys
+
+    folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ext", "win64")
+    if os.path.isdir(os.path.join(folder, "sgp4")) and folder not in sys.path:
+        sys.path.append(folder)
+
+
+try:  # The installed sgp4 (C++ accelerated when its wheel has it), else the Windows zip's; SATELLITE_OBSERVATION_SGP4=bundled forces the copy (tests).
     if os.environ.get("SATELLITE_OBSERVATION_SGP4") == "bundled":
         raise ImportError
+    _windows_sgp4()
     from sgp4.api import Satrec  # type: ignore
     from sgp4.api import accelerated as SGP4_ACCELERATED  # type: ignore
 

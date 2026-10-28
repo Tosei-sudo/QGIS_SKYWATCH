@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 物体検出（AI）: objects on an image found and boxed -->
+  <rect x="3" y="3" width="26" height="26" rx="2" fill="#334155" stroke="#0f172a" stroke-width="1"/>
+  <rect x="7" y="8" width="7" height="5" fill="#cbd5e1"/>
+  <path d="M18 19l6-3 2 4-6 3z" fill="#cbd5e1"/>
+  <rect x="5.5" y="6.5" width="10" height="8" fill="none" stroke="#00e5ff" stroke-width="1.5"/>
+  <path d="M16.5 19.5l8-4 3 6-8 4z" fill="none" stroke="#00e5ff" stroke-width="1.5"/>
+</svg>
