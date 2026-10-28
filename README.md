@@ -10,7 +10,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正）は左、記録系（観測記録・分類体系の編集）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -136,6 +136,14 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）、着色は `api.image_enhance.colorize(layer, "cyan", blend="screen")`（`reverse`・`fade`・`classes` も）。
 
+## 影から高さ
+
+メニュー・ツールバーの「影から高さ」でドックを開くと、地図のクリックが計測になる（ほかの道具に切り替えたら「計測」で戻す）。建物・塔・木などの根元をクリックし、次にその影の先端をクリックすると、影の長さ（WGS 84 楕円体上の距離）× tan（太陽高度）で高さを出す（地面は平らとみなす）。
+
+- 太陽高度と方位は、根元の下の画像（アクティブなラスターレイヤー、なければその地点の一番上の GDAL 画像）のメタデータ（`SUN_ELEVATION`・`SUN_AZIMUTH`、Maxar の `MEANSUNEL`・`MEANSUNAZ`（.IMD も）、太陽天頂角、NITF の USE00A など）から。なければ撮影日時（レイヤーの時系列・メタデータ・NITF・ファイル名・TIFF の DateTime・観測記録で入力した日時）と根元の位置から計算。どちらもなければドックに太陽高度か撮影日時（UTC）を入力
+- 方位が分かるときは影の向きの案内線を出し、2 点目を影の向きに吸着（「影の向きに吸着」で切り替え）。Esc で 1 点目を取り消し
+- 測った高さは地図の上に描き、ドックに一覧。「レイヤーとして追加」で線のスクラッチレイヤー（高さ・影の長さ・太陽高度・方位、高さのラベル付き）にする
+
 ## 座標・地名へ移動
 
 - ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
@@ -160,7 +168,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 

@@ -75,6 +75,11 @@ def file_name(layer: QgsMapLayer) -> str:
 
 def _metadata(layer: QgsRasterLayer) -> dict[str, str]:
     """The GDAL metadata of the default domain (the TIFF and NITF tags too), {} when not a GDAL image."""
+    return gdal_metadata(layer)
+
+
+def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
+    """The GDAL metadata of a domain ('' the default, 'IMD' a Maxar .IMD…), {} when not a GDAL image."""
     if layer.providerType() != "gdal":
         return {}
     try:
@@ -89,7 +94,7 @@ def _metadata(layer: QgsRasterLayer) -> dict[str, str]:
     gdal.PushErrorHandler("CPLQuietErrorHandler")
     try:
         dataset = gdal.Open(path)
-        return dict(dataset.GetMetadata() or {}) if dataset else {}
+        return dict(dataset.GetMetadata(domain) or {}) if dataset else {}
     except Exception:  # noqa: BLE001 (an image GDAL cannot read here says nothing)
         return {}
     finally:

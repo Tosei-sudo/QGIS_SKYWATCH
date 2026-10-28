@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 影から高さ: the Sun, a tower and its shadow on the ground, the height measured -->
+  <circle cx="5.5" cy="5.5" r="3.5" fill="#facc15" stroke="#a16207" stroke-width="1"/>
+  <path d="M2 27h28" stroke="#0f172a" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M10 27l19-4v4z" fill="#475569" opacity="0.75"/>
+  <rect x="8" y="10" width="5" height="17" fill="#e2e8f0" stroke="#0f172a" stroke-width="1"/>
+  <path d="M5.5 5.5L29 23" stroke="#a16207" stroke-width="0.8" stroke-dasharray="1.6 1.4"/>
+  <path d="M16 10v17" stroke="#ff8a00" stroke-width="1.6"/>
+  <path d="M14.5 11.5L16 10l1.5 1.5M14.5 25.5L16 27l1.5-1.5" fill="none" stroke="#ff8a00" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
