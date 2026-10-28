@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- An aircraft pointing up (fuselage, wings and tail), coloured by QGIS -->
+  <path d="M12 1.5L13.6 8L22 13V15L13.6 13L13.2 18.5L16 21V22.5L12 21.5L8 22.5V21L10.8 18.5L10.4 13L2 15V13L10.4 8Z" fill="param(fill) #e8590c" stroke="param(outline) #ffffff" stroke-width="param(outline-width) 1.5" stroke-linejoin="round"/>
+</svg>

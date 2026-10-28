@@ -36,6 +36,7 @@ from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.spectral_dock import SpectralDock
 from .ui.startup import StartupLayers
+from .ui.moving_dock import MovingDock
 from .ui.shift import LayerShift
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
@@ -46,7 +47,7 @@ MENU = "衛星撮像計画・観測記録"
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral"]),
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
 INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
@@ -150,6 +151,11 @@ class PluginApi:
         return self._plugin.docks["SatObsSpectral"]
 
     @property
+    def moving(self) -> "MovingDock":
+        """The dock 「移動体（AIS・ADS-B）」 (its `connect_feed(FeedConfig)`, `open_history(path)`, `layers`, `align_to_image()`, `go_live()`)."""
+        return self._plugin.docks["SatObsMoving"]
+
+    @property
     def swipe(self) -> "SwipeCompare":
         """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
         return self._plugin.swipe
@@ -219,7 +225,7 @@ class SatelliteObservationPlugin:
         icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
-                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral"}
+                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -232,6 +238,7 @@ class SatelliteObservationPlugin:
             ("SatObsEnhance", tr("画像補正"), None),
             ("SatObsShadowHeight", tr("影から高さ"), None),
             ("SatObsSpectral", tr("スペクトル"), None),
+            ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -253,6 +260,8 @@ class SatelliteObservationPlugin:
                 dock = ShadowHeightDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSpectral":
                 dock = SpectralDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsMoving":
+                dock = MovingDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             else:
@@ -307,7 +316,8 @@ class SatelliteObservationPlugin:
         self.iface.addPluginToMenu(MENU, ortho)
         self.actions.append(ortho)
         for name, algorithm, label in (("geodesic_buffer", "satobs:geodesic_buffer", "測地線バッファ…"),
-                                       ("geodesic_centroid", "satobs:geodesic_centroids", "正距方位での重心…")):
+                                       ("geodesic_centroid", "satobs:geodesic_centroids", "正距方位での重心…"),
+                                       ("moving_match", "satobs:moving_match", "移動体と検出の照合…")):
             action = QAction(icon(name), tr(label), self.iface.mainWindow())
             action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
             self.iface.addPluginToMenu(MENU, action)
@@ -510,12 +520,20 @@ class SatelliteObservationPlugin:
         import processing  # QGIS's Processing plugin (loaded with QGIS)
 
         layer = self.iface.activeLayer()
-        processing.execAlgorithmDialog(algorithm, {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {})
+        if algorithm == "satobs:moving_match":
+            from .processing_provider.moving_match_algorithm import default_inputs as match_inputs
+
+            inputs = match_inputs(list(QgsProject.instance().mapLayers().values()), layer)
+        else:
+            inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
+        processing.execAlgorithmDialog(algorithm, inputs)
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
     def unload(self) -> None:
+        if "SatObsMoving" in self.docks:
+            self.docks["SatObsMoving"].close_all()
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None

@@ -42,8 +42,8 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
-    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル"]
-    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動目標撮像計画…", "新規スクラッチレイヤー（テンプレート）…", "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", "測地線バッファ…", "正距方位での重心…", "設定ファイルのレイヤーを追加", "背景地図", "スワイプ比較", "位置ずらし", "位置ずらしの解除", "ドックを初期位置に戻す", "設定…"]
+    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）"]
+    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "移動目標撮像計画…", "新規スクラッチレイヤー（テンプレート）…", "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", "設定ファイルのレイヤーを追加", "背景地図", "スワイプ比較", "位置ずらし", "位置ずらしの解除", "ドックを初期位置に戻す", "設定…"]
     # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
     assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
     # They work as if opened: the catalog's footprints drawn on the map.
@@ -87,7 +87,7 @@ def test_the_docks_start_in_three_groups_of_tabs_and_come_back_on_screen():
 
     assert tabs("SatObsImagingPlan") == ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]
     assert tabs("SatObsImageCatalog") == ["SatObsEnhance", "SatObsImageCatalog", "SatObsNotices", "SatObsShadowHeight", "SatObsSpectral"]
-    assert tabs("SatObsObservations") == ["SatObsObservations", "SatObsTaxonomy"]
+    assert tabs("SatObsObservations") == ["SatObsMoving", "SatObsObservations", "SatObsTaxonomy"]
     assert [w.dockWidgetArea(d[n]) for n in ("SatObsImagingPlan", "SatObsImageCatalog", "SatObsObservations")] == [right, left, right]
     # A floating dock off every screen is docked again when shown.
     d["SatObsSatellitePass"].setFloating(True)
@@ -224,7 +224,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 26
+    assert len(set(drawn)) == len(plugin.actions) == 28
     plugin.unload()
 
 

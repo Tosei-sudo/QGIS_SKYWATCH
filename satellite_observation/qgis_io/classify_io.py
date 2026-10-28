@@ -183,7 +183,6 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
             model = train_model(stats, method, names)
         except ValueError as e:
             raise ClassifyError(str(e))
-        source = None
 
     out = gdal.GetDriverByName("GTiff").Create(out_path, width, height, 1, gdal.GDT_Byte,
                                                options=["TILED=YES", "COMPRESS=DEFLATE", "BIGTIFF=IF_SAFER"])
