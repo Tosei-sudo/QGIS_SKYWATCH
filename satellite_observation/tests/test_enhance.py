@@ -3,6 +3,8 @@ core.enhance without QGIS: steps, the saved form, presets, DRA and the raw
 stretch. Pixel-for-pixel agreement with the viewer's library is checked by
 scripts/compare_viewer/compare_enhance.py.
 """
+import re
+
 import numpy as np
 import pytest
 
@@ -106,3 +108,57 @@ def test_raw_stretch_leaves_out_an_untagged_fill_value():
     assert 200 < s["black"][0] < 300 < s["white"][0] < 400
     rgba = stretch_to_rgba([band], valid_mask([band]), s["black"], s["white"])
     assert (rgba[:, :15, :3] == 0).all() and rgba[:, 15:, 0].mean() > 100
+
+
+def test_image_rules_by_file_name():
+    from satellite_observation.core.enhance.rules import file_name_of, image_rule_for, image_rules_of, resolve_bands
+
+    problems = []
+    rules = image_rules_of([
+        {"label": "Landsat", "match": r"^LC0[89]_.*\.tif$", "preset": "satellite", "enhance": {"contrast": 0.1}, "bands": [4, 3, 2]},
+        {"match": r"_MS\.tif$", "bands": ["NIR", "Red", "Green"]},
+        {"match": r"_warp\.tif$", "noData": {"auto": False, "values": [0, "x"]}},
+        {"match": r"_PAN\.tif$", "caseSensitive": True, "enhance": {"gamma": 1.2}},
+        {"match": "(", "preset": "vivid"},
+        {"match": "only_label", "label": "何もなし"},
+        {"match": "x", "bands": [1, 2]},
+    ], problems)
+    assert [r.label for r in rules] == ["Landsat", r"_MS\.tif$", r"_warp\.tif$", r"_PAN\.tif$"]
+    assert len(problems) == 4 and problems[0].startswith("imageRules[4] の match は正規表現として読み込み不可")
+    landsat = rules[0]
+    assert landsat.bands == [4, 3, 2]
+    assert landsat.pipeline.get("contrast")["amount"] == 0.1
+    assert rules[2].no_data == {"auto": False, "values": [0.0]}
+
+    assert file_name_of("https://h/a/LC08_x.tif?sig=1") == "LC08_x.tif"
+    assert file_name_of("C:\\img\\lc09_y.TIF") == "lc09_y.TIF"
+    assert file_name_of("/data/a%20b_MS.tif") == "a b_MS.tif"
+    assert image_rule_for(rules, "C:\\img\\lc09_y.TIF") is landsat      # case ignored
+    assert image_rule_for(rules, "/d/s_pan.tif") is None                # caseSensitive
+    assert image_rule_for(rules, "/d/s_PAN.tif") is rules[3]
+
+    assert resolve_bands([4, 3, 2], 4, []) == (4, 3, 2)
+    assert resolve_bands(["nir ", "RED", "green"], 4, ["Blue", "Green", "Red", "NIR"]) == (4, 3, 2)
+    for bands, count, why in [([4, 3, 2], 3, "バンド 4 なし（3 バンドの画像）"), ([1, 2, 3], 1, "バンドが 1 つのみ"),
+                              (["SWIR", "Red", "Green"], 4, "「SWIR」という名前のバンドなし")]:
+        with pytest.raises(ValueError, match=re.escape(why)):
+            resolve_bands(bands, count, ["Blue", "Green", "Red", "NIR"])
+
+
+def test_histogram_stats_and_bars_as_the_viewer_s_panel():
+    from satellite_observation.core.enhance.histogram import bar_heights, channel_bins, channel_stats
+
+    rgba = np.zeros((2, 4, 4), np.uint8)
+    rgba[..., 0] = [[0, 10, 10, 99], [255, 255, 255, 99]]
+    rgba[..., 3] = [[255, 255, 255, 0], [255, 255, 255, 0]]   # the last column is transparent
+    bins = channel_bins(rgba, gray=False)
+    assert len(bins) == 3 and bins[0][10] == 2 and bins[0][255] == 3 and bins[0].sum() == 6
+    assert channel_stats(bins[0]) == {"min": 0, "max": 255, "mean": pytest.approx(785 / 6), "median": 10, "count": 6}
+    assert channel_stats(np.zeros(256)) is None
+    # Linear: the ends do not set the scale (they are cut at 1); logarithmic: they do.
+    linear = bar_heights(bins, log=False)
+    assert linear[0][10] == 1 and linear[0][0] == 0.5 and linear[0][255] == 1
+    log = bar_heights(bins, log=True)
+    # (G and B are all 0 here: 6 at 0 is the peak of the three.)
+    assert log[1][0] == 1 and log[0][255] == pytest.approx(np.log(4) / np.log(7))
+    assert all((h == 0).all() for h in bar_heights([np.zeros(256)], log=False))

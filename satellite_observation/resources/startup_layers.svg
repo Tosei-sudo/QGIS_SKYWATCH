@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 設定ファイルのレイヤーを追加: stacked map layers and a plus -->
+  <path d="M14 22l-11-5.5 11-5.5 11 5.5z" fill="#c7d2fe" stroke="#4338ca" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M14 17l-11-5.5 11-5.5 11 5.5z" fill="#e0e7ff" stroke="#4338ca" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M3 21.5l11 5.5 5-2.5" fill="none" stroke="#4338ca" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="24.5" cy="24.5" r="6" fill="#16a34a" stroke="#fff" stroke-width="1.5"/>
+  <path d="M24.5 21.3v6.4M21.3 24.5h6.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+</svg>

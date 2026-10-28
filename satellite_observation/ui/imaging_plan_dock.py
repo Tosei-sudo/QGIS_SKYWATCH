@@ -610,7 +610,8 @@ class ImagingPlanDock(PluginDock):
 
     def list_targets(self) -> None:
         """Fills the target choice: the selected features, each vector layer, a clicked point."""
-        before = self.target.currentData()
+        # The choice is kept, unless there was nothing to choose (a layer added then comes first).
+        before = self.target.currentData() if self.target.count() > 1 else None
         self.target.blockSignals(True)
         self.target.clear()
         active = self.iface.activeLayer()

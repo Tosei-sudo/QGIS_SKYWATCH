@@ -5,16 +5,29 @@ result (or error) comes back on the main thread.
 """
 from __future__ import annotations
 
+import threading
 import traceback
 from typing import Any, Callable, Optional
 
-from qgis.core import Qgis, QgsApplication, QgsMessageLog, QgsTask
+from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
+
+from ..core.esri import EsriError
 
 LOG_TAG = "衛星撮像計画・観測記録"
 
 
 class Cancelled(Exception):
     """The person cancelled the task."""
+
+
+#: The task whose work runs in this thread (its requests stop when it is cancelled).
+_current = threading.local()
+
+
+def current_feedback() -> Optional[QgsFeedback]:
+    """The feedback of the task running in this thread, for requests to stop on cancel; None outside a task."""
+    task = getattr(_current, "task", None)
+    return task.feedback if task is not None else None
 
 
 class FunctionTask(QgsTask):
@@ -34,6 +47,8 @@ class FunctionTask(QgsTask):
         self._failed = failed
         self.result: Any = None
         self.error: Optional[str] = None
+        #: Cancelled with the task: a request waiting on the network stops at once.
+        self.feedback = QgsFeedback()
 
     # Called by the work.
     def progress(self, percent: float) -> None:
@@ -44,17 +59,29 @@ class FunctionTask(QgsTask):
         if self.isCanceled():
             raise Cancelled()
 
+    def cancel(self) -> None:
+        self.feedback.cancel()
+        super().cancel()
+
     def run(self) -> bool:
+        _current.task = self
         try:
             self.result = self._work(self)
             return True
         except Cancelled:
             self.error = "取消"
             return False
+        except EsriError as error:
+            # A service that cannot be reached or refuses: shown where it was asked, logged as a line (not a warning).
+            self.error = str(error) or type(error).__name__
+            QgsMessageLog.logMessage(f"{self.description()}: {self.error}", LOG_TAG, Qgis.MessageLevel.Info)
+            return False
         except Exception as error:  # noqa: BLE001 (any failure is shown, not raised)
             self.error = str(error) or type(error).__name__
             QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Warning)
             return False
+        finally:
+            _current.task = None
 
     def finished(self, ok: bool) -> None:
         try:

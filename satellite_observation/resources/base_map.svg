@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 背景地図: stacked map sheets -->
+  <path d="M4 20 L16 26 L28 20 L16 14 Z" fill="#94a3b8" stroke="#475569" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M4 13 L16 19 L28 13 L16 7 Z" fill="#86efac" stroke="#15803d" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M10 13 L16 10 M14 16 L22 12" stroke="#2563eb" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

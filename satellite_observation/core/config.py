@@ -14,19 +14,25 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .auth import ArcgisPortalConfig, arcgis_portal_of
+from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
 from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
 from .catalog.paths import PathMapping, path_mappings_of
+from .enhance.rules import ImageRule, image_rules_of
+from .geocode import GeocoderConfig, geocoder_of
+from .layer_templates import LayerTemplate, templates_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
+from .startup_layers import StartupLayer, startup_layers_of
 
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals",
+    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
+    "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules",
 )
 
 
@@ -45,6 +51,18 @@ class PluginConfig:
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
+    #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
+    startup_layers: list[StartupLayer] = field(default_factory=list)
+    #: The background maps to switch between (the viewer's list when the file has none).
+    base_maps: list[BaseMapConfig] = field(default_factory=lambda: list(DEFAULT_BASE_MAPS))
+    #: The one shown at start ("" for none).
+    default_base_map: str = ""
+    #: The jump field's place search; none (the default) looks nothing up.
+    geocoders: list[GeocoderConfig] = field(default_factory=list)
+    #: The organisation's templates for a new scratch layer (after the built-in ones).
+    layer_templates: list[LayerTemplate] = field(default_factory=list)
+    #: The correction, bands and no data an image gets by its file name.
+    image_rules: list[ImageRule] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -143,6 +161,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         return [c for c in (read(v, problems, i) for i, v in enumerate(value[key])) if c is not None]
 
     config.image_catalogs = listed("imageCatalogs", catalog_of)
+    if "layers" in value:
+        config.startup_layers = startup_layers_of(value["layers"], problems)
     if "watchInterval" in value:
         config.watch_interval = watch_interval_of(value["watchInterval"], problems)
     if "pathMappings" in value:
@@ -167,6 +187,15 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             seen.add(p.url)
             portals.append(p)
         config.arcgis_portals = portals
+    if "baseMaps" in value:
+        config.base_maps = base_maps_of(value["baseMaps"], problems)
+    if "defaultBaseMap" in value:
+        config.default_base_map = default_base_map_of(value["defaultBaseMap"], config.base_maps, problems)
+    config.geocoders = listed("geocoders", geocoder_of)
+    if "layerTemplates" in value:
+        config.layer_templates = templates_of(value["layerTemplates"], problems)
+    if "imageRules" in value:
+        config.image_rules = image_rules_of(value["imageRules"], problems)
     return config, problems
 
 

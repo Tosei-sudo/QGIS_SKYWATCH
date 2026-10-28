@@ -37,11 +37,17 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     from satellite_observation import classFactory
 
     settings.set_config_source(os.path.join(HERE, "data", "viewer-config.jsonc"))
+    # Its `layers` are examples on example.com: not opened here (test_qgis_startup_layers covers them).
+    settings.set_startup_layers_on(False)
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
     assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正"]
-    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "移動目標撮像計画…", "ドックを初期位置に戻す", "設定…"]
+    assert [t for _, t in iface.menus] == ["画像カタログ", "撮像計画", "保存した撮像計画", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "移動目標撮像計画…", "新規スクラッチレイヤー（テンプレート）…", "設定ファイルのレイヤーを追加", "背景地図", "ドックを初期位置に戻す", "設定…"]
+    # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
+    assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
+    # They work as if opened: the catalog's footprints drawn on the map.
+    assert plugin.docks["SatObsImageCatalog"].overlay is not None and plugin.docks["SatObsNotices"].isHidden()
     assert plugin.api.problems == []
     assert plugin.api.config.satellite_catalogs[0].label == "衛星カタログ"
     roles = [s.role for s in plugin.context.services()]
@@ -53,6 +59,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     dialog = SettingsDialog(plugin.context, iface.window)
     assert dialog.services.rowCount() == len(plugin.context.services())
     assert dialog.problems.count() == 0
+    assert not dialog.startup_layers.isChecked()
     plugin.unload()
     assert iface.docks == [] and iface.menus == []
 
@@ -214,5 +221,23 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 11
+    assert len(set(drawn)) == len(plugin.actions) == 14
     plugin.unload()
+
+
+def test_a_service_out_of_reach_is_logged_as_a_line_not_a_warning():
+    from qgis.core import Qgis
+
+    from satellite_observation.core.esri import EsriError
+
+    logs, failed = [], []
+    QgsApplication.messageLog().messageReceived.connect(lambda m, tag, level: logs.append((tag, level, m)))
+
+    def work(task):
+        raise EsriError("接続不可（https://x.example/FeatureServer/0）")
+
+    run_task("衛星カタログの読み込み", work, failed=failed.append)
+    assert wait_for(lambda: failed)
+    assert failed == ["接続不可（https://x.example/FeatureServer/0）"]
+    mine = [(level, m) for tag, level, m in logs if tag == "衛星撮像計画・観測記録"]
+    assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの読み込み: 接続不可（https://x.example/FeatureServer/0）")]

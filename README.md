@@ -11,8 +11,18 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 ## ドックの配置
 
 - 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正）は左、記録系（観測記録・分類体系の編集）は右の下段
+- 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
+
+## 背景地図
+
+- ツールバーの「背景地図」（メニューでは同名のサブメニュー）で、なし・地理院 標準・地理院 淡色・地理院 写真・地理院 ベクトル・OpenStreetMap・OpenStreetMap（Esri ベクトル）を切り替え。表示中のものにチェック
+- 一覧はビューアと同じ `config.json` の `baseMaps`（書くとこの一覧で置き換え）。`type` は `xyz`・`mvt`・`style`・`esri`、書かなければ URL から判断。相対 URL は設定ファイルの場所が基準
+- 背景地図はプロジェクトのいちばん下のレイヤー 1 枚。切り替えると差し替え、「なし」で削除。ほかのレイヤーはそのまま
+- `defaultBaseMap` があれば、空のプロジェクトで起動したときと新規プロジェクトで表示
+- 閉域では `baseMaps` を社内のタイルに書き換え（既定の一覧はインターネットの地図）。読み込めない背景地図はメッセージバーに理由
+- ArcGIS の VectorTileServer で認証が要るものは「設定…」でそのサービスの認証設定を選択（`token` はレイヤーに書かない）
 
 ## 画像カタログ
 
@@ -57,6 +67,16 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「存在予測を追加」で、一定間隔（既定 6 時間）の誤差円（時刻・経過時間・半径つき）と予測航跡をメモリレイヤーに追加
 - 「撮像計画の作成」で撮像計画ドックへ（最大 50 目標）。1 時間ごとの推測位置でパスを探し、各パスをその時刻の位置で計算し直す。撮像範囲は誤差円に向け、被覆は円のうち撮像範囲に入る割合
 
+## 新規スクラッチレイヤー（テンプレート）
+
+- 「レイヤー」→「レイヤーを作成」の「新規一時スクラッチレイヤー…」のすぐ下と、プラグインのメニューに「新規スクラッチレイヤー（テンプレート）…」
+- 「テンプレート」から選ぶと名前・ジオメトリ・属性が入り、そこから自由に変えて「作成」。テンプレートは標準（空のレイヤー・航跡〔生存圏計算用〕・調査地点・目標・物体・関心区域・被害状況・経路・測線・注記）、設定ファイルの `layerTemplates`（「組織の設定」、書き方はビューアの README と同じ）、「テンプレートとして保存」で残したもの（「保存済み」、ユーザープロファイルの `QgsSettings`）
+- 属性ごとに名前・エイリアス・型（文字列・整数・小数・日付）・必須・既定値・文字数の上限・最小・最大・候補値（`1=住宅, 2=店舗`）。作るとメモリレイヤーに、エイリアス、必須は非 NULL 制約、候補値は「値マップ」ウィジェットと制約、範囲は「範囲」ウィジェットと制約、既定値は属性の既定値として入る
+- 「ほかのレイヤーの属性をコピー…」で開いているベクターレイヤーの属性・ジオメトリ・座標系をひな形に（地物はコピーしない）
+- 「作成後すぐ地図に作図開始」で、編集を始めて「地物を追加」の状態に
+- 「航跡（生存圏計算用）」の属性名は「移動目標撮像計画…」の自動対応に合うので、描いたらそのまま存在予測を計算できる
+- QGIS 標準の「新規一時スクラッチレイヤー」の画面にも「テンプレート」欄が付き、選ぶとこの画面に切り替わる
+
 ## 衛星パス
 
 - 選んだ衛星（撮像計画と同じ衛星の一覧）の地上軌跡と撮像可能範囲（最小〜最大オフナディア角の帯、見られる側）を衛星ごとの色で表示
@@ -95,9 +115,18 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 16bit・float の画像は元の値の統計で 0〜255 に引き伸ばしてから補正する（DRA がオフなら画像全体の 2〜98 %、オンなら表示範囲から DRA の設定で）。8bit の画像はそのまま補正する
 - QGIS 標準にない補正: リニア光での計算、露出、色温度・色かぶり・ホワイトバランス、シャドウ・ハイライト、トーンカーブ（チャンネル別）、レベル、シャープ（アンシャープマスク）、RGB 連動・範囲固定の DRA
 - 描くのは画面に見えている画素だけ（QGIS が画面に合ったオーバービューを読む）なので、大きな COG でも処理量は画面の大きさ分
+- 設定ファイルの `imageRules`（ビューアと同じ書き方）: 開いた画像（カタログから開いたものも）のファイル名に最初に合った規則の補正（`preset`・`enhance`）・バンド（番号か GDAL のバンド名）・ノーデータ（`noData`）を自動でかける。プロジェクトから開いたレイヤーは保存した表示のまま。バンドが足りないときは補正だけかけて理由を表示
+- 「ヒストグラム（表示範囲）」: 表示範囲の補正後・補正前の値の分布（R・G・B を加算で重ねる。白黒は輝度）と、チャンネルごとの最小・平均・中央・最大。「対数」で少ない値も表示。グラフを指すとその値の画素数。地図を動かすか補正を変えると取り直す（開いている間だけ、最長 512 px で読んでタスクで計算）
 - 補正はレイヤーのカスタムプロパティ `satobs/enhance`（JSON。補正はビューアのプロジェクトと同じ `{"version": 1, "ops": [...]}`）に保存。プロジェクトファイルには QGIS 標準のレンダラーとして書くので、プラグインなしでも普通に開け、プラグインがあれば補正が戻る
 
 Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])`（補正はプリセット名・`{"version": 1, "ops": [...]}`・`Pipeline`）。
+
+## 座標・地名へ移動
+
+- ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
+- 設定ファイルに `geocoders` があれば地名・住所も入れられ、打つ途中で見つかった場所が欄の下に並ぶ（↑↓と Enter かクリックで移動）。種類はビューアと同じ `gsi`・`nominatim`・`arcgis`・`features`（Esri の地名レイヤー）・`csv`（名前・緯度・経度の列がある CSV。設定ファイルからの相対パス可）。`geocoders` がなければ地名は検索せず、入力が外へ送られることはない
+- カーソル位置の WGS 84 座標をステータスバーの右に表示。表記（10進・度分秒・MGRS・UTM）は地図の右クリックの「ステータスバーの表示」か、表示の右クリックで切り替え
+- 地図の右クリック「緯度経度・MGRS・UTM のコピー」で、その地点の座標をコピー
 
 ## Python API
 
@@ -116,7 +145,23 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+
+## 起動時のレイヤー
+
+設定ファイルの `layers`（ビューアの「起動時に読み込むレイヤー」）を、QGIS を空のプロジェクトで起動したときと「新規プロジェクト」のときに追加する。上に書いたものが下になる。メニューの「設定ファイルのレイヤーを追加」でいつでも追加でき、「設定…」の「起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加」で止められる。
+
+| type | QGIS での開き方 |
+| --- | --- |
+| `cog` | GDAL（URL は `/vsicurl/`） |
+| `file` | GeoJSON などは OGR、Shapefile の .zip は `/vsizip/`、画像・GeoTIFF は GDAL。相対パスは設定ファイルの場所から |
+| `wms`・`wmts`・`xyz` | WMS プロバイダー（WMTS の `matrixSet` 省略時は GoogleMapsCompatible、XYZ の `#name=`・`zmin`・`zmax` も読む） |
+| `wfs`・`ogc-features` | WFS・OAPIF プロバイダー（`filter` はレイヤーのフィルター） |
+| `esri` | フィーチャーサービスは ArcGIS フィーチャーサーバー、マップ・イメージサービスは ArcGIS マップサーバーのプロバイダー |
+| `wcs`・`ogc-coverage` | WCS プロバイダー・GDAL の OGCAPI ドライバー |
+| `ogc-tiles` | XYZ のタイル（ベクタータイルはベクタータイルレイヤー） |
+
+読み込みは QgsTask の中で行い、開けないレイヤーはメッセージバーに理由を出して残りを追加する。サービスの認証は「設定…」で選んだ認証設定を使う。
 
 ## 導入
 
@@ -144,9 +189,9 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
-| `pathMappings` で選んだフォルダ、類似画像の許容差 | `QgsSettings` |
+| `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 
@@ -182,3 +227,5 @@ python3 scripts/compare_viewer/compare_enhance.py /path/to/browser-image-enhance
 ```
 
 ビューアの `imaging-plan.ts`（移動目標・衛星パスも）を esbuild で束ねて Node で動かし、同じ衛星・対象・条件でプラグインの計算と突き合わせる（時刻 ±1 秒、角度 ±0.05°、被覆 ±1%、組み合わせは同じパス）。ネットワークは `npm install` のときだけ使う。
+
+座標の表記は `python3 coords.py /path/to/browser-image-enhancement/packages/coordinate-notation/src/index.ts` で、ビューアの `coordinate-notation`（mgrs も）と読み取り・書き出しを突き合わせる。
