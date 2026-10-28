@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.core import QgsMapLayerType, QgsProject
+from qgis.core import QgsApplication, QgsMapLayerType, QgsProject
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QToolButton
@@ -15,6 +15,8 @@ except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
 from .core.obs.api import ObservationApi
+from .processing_provider.pansharpen_algorithm import default_inputs
+from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
@@ -174,6 +176,7 @@ class SatelliteObservationPlugin:
         self.coordinates: Optional[CoordinateBox] = None
         self.new_layer: Optional[NewLayerDialog] = None
         self.new_layer_action: Optional[QAction] = None
+        self.provider: Optional[SatObsProvider] = None
         self.scratch_hook: Optional[ScratchDialogHook] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
@@ -247,6 +250,13 @@ class SatelliteObservationPlugin:
         self.toolbar.addAction(moving)
         self.actions.append(moving)
         self._add_new_layer(icon("new_layer"))
+        # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
+        self.provider = SatObsProvider()
+        QgsApplication.processingRegistry().addProvider(self.provider)
+        pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
+        pansharpen.triggered.connect(lambda: self.open_pansharpen())
+        self.iface.addPluginToMenu(MENU, pansharpen)
+        self.actions.append(pansharpen)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -378,10 +388,20 @@ class SatelliteObservationPlugin:
         self.moving_targets.open_for(layer)
         return self.moving_targets
 
+    def open_pansharpen(self) -> None:
+        """The algorithm's dialog, with the finest one-band image as pan and a multi-band one as ms."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:pansharpen", default_inputs(layers, self.iface.activeLayer()))
+
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
     def unload(self) -> None:
+        if self.provider is not None:
+            QgsApplication.processingRegistry().removeProvider(self.provider)
+            self.provider = None
         try:
             self.iface.mapCanvas().contextMenuAboutToShow.disconnect(self._canvas_menu)
         except (TypeError, RuntimeError):
