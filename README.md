@@ -118,6 +118,22 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 
 ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）。
 
+## 起動時のレイヤー
+
+設定ファイルの `layers`（ビューアの「起動時に読み込むレイヤー」）を、QGIS を空のプロジェクトで起動したときと「新規プロジェクト」のときに追加する。上に書いたものが下になる。メニューの「設定ファイルのレイヤーを追加」でいつでも追加でき、「設定…」の「起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加」で止められる。
+
+| type | QGIS での開き方 |
+| --- | --- |
+| `cog` | GDAL（URL は `/vsicurl/`） |
+| `file` | GeoJSON などは OGR、Shapefile の .zip は `/vsizip/`、画像・GeoTIFF は GDAL。相対パスは設定ファイルの場所から |
+| `wms`・`wmts`・`xyz` | WMS プロバイダー（WMTS の `matrixSet` 省略時は GoogleMapsCompatible、XYZ の `#name=`・`zmin`・`zmax` も読む） |
+| `wfs`・`ogc-features` | WFS・OAPIF プロバイダー（`filter` はレイヤーのフィルター） |
+| `esri` | フィーチャーサービスは ArcGIS フィーチャーサーバー、マップ・イメージサービスは ArcGIS マップサーバーのプロバイダー |
+| `wcs`・`ogc-coverage` | WCS プロバイダー・GDAL の OGCAPI ドライバー |
+| `ogc-tiles` | XYZ のタイル（ベクタータイルはベクタータイルレイヤー） |
+
+読み込みは QgsTask の中で行い、開けないレイヤーはメッセージバーに理由を出して残りを追加する。サービスの認証は「設定…」で選んだ認証設定を使う。
+
 ## 導入
 
 1. `python3 scripts/build_zip.py` で `dist/satellite_observation-<版>.zip` を作る
@@ -146,7 +162,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差 | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

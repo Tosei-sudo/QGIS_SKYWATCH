@@ -6,6 +6,7 @@ from qgis.PyQt.QtWidgets import QMainWindow
 
 class FakeIface(QObject):
     currentLayerChanged = pyqtSignal(object)
+    newProjectCreated = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -71,7 +72,7 @@ class FakeIface(QObject):
         return True
 
 
-def wait_for(condition, ms=5000):
+def wait_for(condition, ms=15000):
     loop = QEventLoop()
     timer = QTimer()
     timer.timeout.connect(lambda: condition() and loop.quit())

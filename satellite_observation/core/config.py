@@ -22,11 +22,12 @@ from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
+from .startup_layers import StartupLayer, startup_layers_of
 
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals",
+    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
 )
 
 
@@ -45,6 +46,8 @@ class PluginConfig:
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
+    #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
+    startup_layers: list[StartupLayer] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -143,6 +146,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         return [c for c in (read(v, problems, i) for i, v in enumerate(value[key])) if c is not None]
 
     config.image_catalogs = listed("imageCatalogs", catalog_of)
+    if "layers" in value:
+        config.startup_layers = startup_layers_of(value["layers"], problems)
     if "watchInterval" in value:
         config.watch_interval = watch_interval_of(value["watchInterval"], problems)
     if "pathMappings" in value:
