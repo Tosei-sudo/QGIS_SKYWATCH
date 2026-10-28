@@ -23,7 +23,7 @@ from urllib.parse import urlencode, urlsplit, parse_qsl, urlunsplit
 
 from qgis.core import QgsNetworkAccessManager
 from qgis.PyQt.QtCore import QObject, QTimer, QUrl, pyqtSignal
-from qgis.PyQt.QtNetwork import QAbstractSocket, QNetworkReply, QNetworkRequest, QSslSocket, QTcpSocket
+from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest, QSslSocket, QTcpSocket
 
 from ..core.moving import FeedConfig, feed_url
 
@@ -224,7 +224,8 @@ class FeedConnection(QObject):
             self.url = feed_url(feed.url, feed.type, base)
         except ValueError as e:
             self.url = ""
-            QTimer.singleShot(0, lambda: self._say("error", str(e)))
+            message = str(e)
+            QTimer.singleShot(0, lambda: self._say("error", message))
             return
         start = {"websocket": lambda: self._socket_open(self.url), "sse": self._sse_open, "poll": self._poll,
                  "esri-stream": self._stream_open}[feed.type]

@@ -13,7 +13,6 @@ import struct
 import threading
 from datetime import datetime, timezone
 
-import numpy as np
 import pytest
 
 pytest.importorskip("qgis.core")
@@ -23,7 +22,7 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import (  # noqa: E402
-    QgsApplication, QgsFeature, QgsGeometry, QgsPointXY, QgsProcessingContext, QgsProcessingFeedback, QgsProject, QgsRasterLayer,
+    QgsApplication, QgsFeature, QgsGeometry, QgsProcessingContext, QgsProcessingFeedback, QgsProject, QgsRasterLayer,
     QgsSettings, QgsVectorLayer,
 )
 from qgis.PyQt.QtCore import QDateTime, QTimeZone  # noqa: E402
@@ -141,6 +140,15 @@ def test_polling_and_server_sent_events(http_server):
     assert wait_for(lambda: any(s == "error" for s, _ in states), 10000)
     assert "HTTP 500" in next(d for s, d in states if s == "error")
     bad.close()
+
+
+def test_a_feed_url_that_cannot_be_used_says_why():
+    states = []
+    connection = FeedConnection(FeedConfig("x", "poll", "ftp://example.com/feed"))
+    connection.status.connect(lambda state, detail: states.append((state, detail)))
+    assert wait_for(lambda: states, 5000)
+    assert states[0][0] == "error" and states[0][1]
+    connection.close()
 
 
 def test_stream_service_description():
