@@ -162,3 +162,57 @@ def test_histogram_stats_and_bars_as_the_viewer_s_panel():
     # (G and B are all 0 here: 6 at 0 is the peak of the three.)
     assert log[1][0] == 1 and log[0][255] == pytest.approx(np.log(4) / np.log(7))
     assert all((h == 0).all() for h in bar_heights([np.zeros(256)], log=False))
+
+
+def test_color_scales_as_the_library_s():
+    from satellite_observation.core.enhance.color_scale import apply_palette, color_scale_palette
+
+    red = color_scale_palette("red")
+    assert red.shape == (256, 4) and list(red[0]) == [0, 0, 0, 255] and list(red[128]) == [128, 0, 0, 255]
+    assert list(color_scale_palette("red", reverse=True)[0]) == [255, 0, 0, 255]
+    fade = color_scale_palette("cyan", fade=True)
+    assert fade[0, 3] == 0 and fade[255, 3] == 255 and fade[128, 3] == 128
+    custom = color_scale_palette([[1, [0, 0, 255]], [0, [255, 0, 0]]])     # sorted by position
+    assert list(custom[0][:3]) == [255, 0, 0] and list(custom[255][:3]) == [0, 0, 255]
+    with pytest.raises(ValueError):
+        color_scale_palette("rainbow")
+
+    rgba = np.array([[[100, 100, 100, 255], [255, 0, 0, 128], [0, 0, 0, 0]]], np.uint8)
+    out = apply_palette(rgba, red)
+    assert list(out[0, 0]) == [100, 0, 0, 255]            # gray: its own value
+    assert list(out[0, 1]) == [54, 0, 0, 128]             # colour: its luminance (0.2126 × 255)
+    assert out[0, 2, 3] == 0
+
+
+def test_color_classes_and_editing_them():
+    from satellite_observation.core.enhance.color_classes import (
+        class_palette, class_range, class_shares, color_classes, format_class_value, recolor, resize_classes, set_bound,
+    )
+    from satellite_observation.core.enhance.raster import RasterHistogram
+
+    values = np.repeat([0.0, 10.0, 20.0, 30.0, 40.0], [10, 20, 30, 20, 20])
+    hist = RasterHistogram((0.0, 40.0), [np.bincount((values / 10).astype(int), minlength=5).astype(float)], values.size)
+    equal = color_classes(hist, method="equal", count=4)
+    assert equal["kind"] == "range" and [c["value"] for c in equal["classes"]] == [10, 20, 30, 40]
+    assert [c["label"] for c in equal["classes"]] == ["0 – 10", "10 – 20", "20 – 30", "30 – 40"]
+    assert class_shares(hist, equal) == pytest.approx([0.3, 0.3, 0.2, 0.2])
+    assert class_range(equal) == (0.0, 40.0)
+    palette = class_palette(equal)
+    assert list(palette[0]) == equal["classes"][0]["color"] and list(palette[255]) == equal["classes"][3]["color"]
+
+    unique = color_classes(hist, method="unique", scale="red")
+    assert unique["kind"] == "exact" and [c["label"] for c in unique["classes"]] == ["0", "10", "20", "30", "40"]
+    assert unique["classes"][0]["color"] == [0, 0, 0, 255] and unique["classes"][-1]["color"] == [255, 0, 0, 255]
+    assert color_classes(hist, method="unique", max_values=3) is None
+    assert color_classes(RasterHistogram((0.0, 1.0), [np.zeros(4)], 0)) is None
+
+    # By hand: a bound moves (names that followed the bounds follow), the count grows at the top.
+    moved = set_bound(equal, 1, 25)
+    assert moved["method"] == "manual" and moved["classes"][1]["label"] == "10 – 25" and moved["classes"][2]["label"] == "25 – 30"
+    named = set_bound(dict(equal, classes=[dict(equal["classes"][0], label="低い")] + equal["classes"][1:]), 0, 5)
+    assert named["classes"][0]["label"] == "低い"
+    grown = resize_classes(equal, 5)
+    assert [c["value"] for c in grown["classes"]] == [10, 20, 30, 35, 40]
+    assert [c["value"] for c in resize_classes(equal, 2)["classes"]] == [10, 40]
+    assert recolor(equal, "red")["classes"][0]["color"] == [0, 0, 0, 255]
+    assert format_class_value(0.125, 0.1) == "0.125" and format_class_value(2.5, 100) == "3" and format_class_value(-2.5, 100) == "-3"

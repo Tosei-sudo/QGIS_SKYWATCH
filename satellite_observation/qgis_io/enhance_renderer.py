@@ -32,14 +32,17 @@ from typing import Optional
 import numpy as np
 from qgis.PyQt import sip
 from qgis.core import (
-    Qgis, QgsContrastEnhancement, QgsMultiBandColorRenderer, QgsRasterBlock, QgsRasterLayer,
-    QgsRasterRenderer, QgsRectangle, QgsSingleBandGrayRenderer,
+    Qgis, QgsColorRampShader, QgsContrastEnhancement, QgsMultiBandColorRenderer, QgsRasterBlock, QgsRasterLayer,
+    QgsRasterRenderer, QgsRasterShader, QgsRectangle, QgsSingleBandGrayRenderer, QgsSingleBandPseudoColorRenderer,
 )
+from qgis.PyQt.QtGui import QColor
 
+from ..core.enhance.color_classes import class_palette, class_range
+from ..core.enhance.color_scale import apply_palette, color_scale_palette
 from ..core.enhance.histogram import channel_bins
 from ..core.enhance.pipeline import Pipeline
 from ..core.enhance.process import process
-from ..core.enhance.raster import compute_raster_stretch, sample_raster_histogram, stretch_to_rgba, valid_mask
+from ..core.enhance.raster import RasterHistogram, compute_raster_stretch, sample_raster_histogram, stretch_to_rgba, valid_mask
 from ..core.enhance.stats import count_pixels, resolve_ops
 
 RENDERER_TYPE = "satobsEnhance"
@@ -86,6 +89,8 @@ class EnhanceSettings:
     locked: bool = False
     #: Values that are no data in every picture band, besides the file's own.
     no_data: tuple = ()
+    #: The colour scale, the viewer's LayerColorScale: {"scale": name or stops, "reverse", "fade", "classes"}; None for none.
+    color: Optional[dict] = None
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -100,17 +105,48 @@ class EnhanceSettings:
         bands = tuple(int(b) for b in d.get("bands") or (1,))
         if len(bands) not in (1, 3):
             bands = bands[:1]
+        color = d.get("color")
         return EnhanceSettings(bands, p.to_json(), bool(d.get("locked", False)),
-                               tuple(float(v) for v in d.get("no_data") or ()))
+                               tuple(float(v) for v in d.get("no_data") or ()), color if isinstance(color, dict) else None)
 
     @property
     def correction(self) -> Pipeline:
         return Pipeline.from_json(self.pipeline)
 
     @property
+    def classes(self) -> Optional[dict]:
+        """Colour classes, when the image is shown by classes of its values (no correction then)."""
+        return (self.color or {}).get("classes") or None
+
+    @property
+    def palette(self) -> Optional[np.ndarray]:
+        """The 256-entry RGBA table the picture is coloured through, or None."""
+        return palette_of(self.color)
+
+    @property
     def dra(self) -> Optional[dict]:
         """The `autoStretch` step's options when DRA is on."""
         return self.correction.get("autoStretch")
+
+
+_palettes: dict = {}
+
+
+def palette_of(color: Optional[dict]) -> Optional[np.ndarray]:
+    """The palette of a LayerColorScale (classes over their own value range), kept by its JSON."""
+    if not color:
+        return None
+    key = json.dumps(color, sort_keys=True)
+    if key not in _palettes:
+        classes = color.get("classes")
+        if classes:
+            table = class_palette(classes, class_range(classes))
+        else:
+            table = color_scale_palette(color.get("scale") or "gray", reverse=bool(color.get("reverse")), fade=bool(color.get("fade")))
+        if len(_palettes) > 32:
+            _palettes.clear()
+        _palettes[key] = table
+    return _palettes[key]
 
 
 class EnhanceState:
@@ -227,7 +263,7 @@ class EnhanceRenderer(QgsRasterRenderer):
     def render(self, extent: QgsRectangle, width: int, height: int, feedback=None) -> np.ndarray:
         """The corrected H×W×4 uint8 RGBA of `extent`."""
         s = self.settings
-        correction = s.correction
+        correction = Pipeline() if s.classes else s.correction
         m = correction.margin
         read_extent, rw, rh = extent, width, height
         if m:
@@ -239,12 +275,14 @@ class EnhanceRenderer(QgsRasterRenderer):
         bands, valid = read_bands(self.input(), s.bands, read_extent, rw, rh, s.no_data, feedback)
         black, white, ops = self.ranges(extent, correction)
         mode = "gray" if len(s.bands) == 1 else "rgb"
+        palette = s.palette
 
         def rows(y0: int, y1: int) -> np.ndarray:
             """Output rows y0..y1 (of the area read), from those rows and `m` more each side."""
             a0, a1 = max(0, y0 - m), min(rh, y1 + m)
             rgba = stretch_to_rgba([b[a0:a1] for b in bands], valid[a0:a1], black, white)
-            return process(rgba, ops, mode=mode)[y0 - a0:y1 - a0]
+            out = process(rgba, ops, mode=mode)[y0 - a0:y1 - a0]
+            return out if palette is None else apply_palette(out, palette)
 
         # Strips in threads (NumPy lets go of the GIL); with `m` rows of margin each is what the whole would give.
         parts = min(THREADS, max(1, height // STRIP))
@@ -260,6 +298,10 @@ class EnhanceRenderer(QgsRasterRenderer):
     def ranges(self, extent: QgsRectangle, correction: Pipeline) -> tuple:
         """The raw black and white per band, and the steps with DRA resolved."""
         s = self.settings
+        if s.classes:
+            # Classes take the values as read, stretched over the classes' own range (no correction).
+            lo, hi = class_range(s.classes)
+            return [lo] * len(s.bands), [hi] * len(s.bands), []
         n = len(s.bands)
         dra = correction.get("autoStretch")
         ops = list(correction.ops)
@@ -331,6 +373,41 @@ class EnhanceRenderer(QgsRasterRenderer):
 
     # ---- in the project ----
 
+    def legendSymbologyItems(self):  # noqa: N802 (QGIS's name)
+        """The classes, for the layer's legend (a smooth scale has none, as QGIS's own renderers in the layer tree)."""
+        classes = self.settings.classes
+        if not classes:
+            return []
+        return [(c.get("label") or str(c["value"]), QColor(*_rgba_of(c["color"])))
+                for c in sorted(classes["classes"], key=lambda c: c["value"])]
+
+    def _pseudo_color(self, stretch: Optional[dict]) -> QgsSingleBandPseudoColorRenderer:
+        """QGIS's single-band pseudo-colour renderer with the classes or the scale (over the raw stretch, without the correction)."""
+        s = self.settings
+        classes = s.classes
+        shader = QgsColorRampShader()
+        if classes:
+            items = sorted(classes["classes"], key=lambda c: c["value"])
+            exact = classes["kind"] == "exact"
+            shader.setColorRampType(QgsColorRampShader.Type.Exact if exact else QgsColorRampShader.Type.Discrete)
+            ramp = [QgsColorRampShader.ColorRampItem(float("inf") if not exact and i == len(items) - 1 else c["value"],
+                                                     QColor(*_rgba_of(c["color"])), c.get("label") or str(c["value"]))
+                    for i, c in enumerate(items)]
+            lo, hi = class_range(classes)
+        else:
+            lo, hi = (stretch["black"][0], stretch["white"][0]) if stretch else (0.0, 255.0)
+            palette = s.palette
+            shader.setColorRampType(QgsColorRampShader.Type.Interpolated)
+            # Every 8th code of the palette (the fade and the reverse come with it).
+            ramp = [QgsColorRampShader.ColorRampItem(lo + (hi - lo) * v / 255, QColor(*(int(x) for x in palette[v])), "")
+                    for v in list(range(0, 256, 8)) + [255]]
+        shader.setColorRampItemList(ramp)
+        shader.setMinimumValue(lo)
+        shader.setMaximumValue(hi)
+        raster_shader = QgsRasterShader(lo, hi)
+        raster_shader.setRasterShaderFunction(shader)
+        return QgsSingleBandPseudoColorRenderer(self.input(), s.bands[0], raster_shader)
+
     def fallback(self) -> Optional[QgsRasterRenderer]:
         """QGIS's own renderer with the same raw stretch (for the project file, and QGIS without the plugin)."""
         p = self.input()
@@ -355,7 +432,9 @@ class EnhanceRenderer(QgsRasterRenderer):
                 ce.setMaximumValue(255)
             return ce
 
-        if len(s.bands) == 1:
+        if len(s.bands) == 1 and s.color:
+            r = self._pseudo_color(stretch)
+        elif len(s.bands) == 1:
             r = QgsSingleBandGrayRenderer(p, s.bands[0])
             r.setContrastEnhancement(enhancement(0, s.bands[0]))
         else:
@@ -365,6 +444,11 @@ class EnhanceRenderer(QgsRasterRenderer):
             r.setBlueContrastEnhancement(enhancement(2, s.bands[2]))
         r.copyCommonProperties(self, True)
         return r
+
+
+def _rgba_of(color) -> tuple:
+    c = [int(round(float(x))) for x in list(color)[:4]]
+    return tuple(c + [0] * (3 - len(c)) + ([255] if len(c) < 4 else []))[:4]
 
 
 def enhance_renderer(layer: QgsRasterLayer) -> Optional[EnhanceRenderer]:
@@ -438,8 +522,10 @@ def restore_layer(layer) -> bool:
 def view_histograms(provider, settings: EnhanceSettings, state: EnhanceState, view: QgsRectangle) -> dict:
     """
     Counts (256 per channel, one for gray) of the area in view before and
-    after the correction, read at most STATS_SIZE a side. `provider` must be
-    the caller's own (a clone, off the main thread).
+    after the correction (and the colour scale, counted as the image's
+    colour mode, as the viewer counts what it shows), read at most
+    STATS_SIZE a side. `provider` must be the caller's own (a clone, off the
+    main thread).
     """
     r = EnhanceRenderer(provider, settings, state)
     read = r._coarse(view)
@@ -450,7 +536,31 @@ def view_histograms(provider, settings: EnhanceSettings, state: EnhanceState, vi
     gray = len(settings.bands) == 1
     before = stretch_to_rgba(bands, valid, black, white)
     after = process(before, ops, mode="gray" if gray else "rgb")
-    return {"before": channel_bins(before, gray), "after": channel_bins(after, gray)}
+    palette = settings.palette
+    if palette is None:
+        return {"before": channel_bins(before, gray), "after": channel_bins(after, gray)}
+    shown = count_pixels(apply_palette(after, palette), "gray" if gray else "rgb").bins
+    return {"before": channel_bins(before, gray), "after": [b.astype(np.int64) for b in shown]}
+
+
+def value_histogram(provider, settings: EnhanceSettings) -> Optional[RasterHistogram]:
+    """
+    The values of the whole image's first picture band (read at most
+    STATS_SIZE a side), as the viewer's getValueHistogram: the raw values of
+    16-bit and float images, the codes 0..255 of 8-bit ones. For classes;
+    `provider` must be the caller's own (a clone, off the main thread).
+    """
+    one = replace(settings, bands=settings.bands[:1], color=None)
+    r = EnhanceRenderer(provider, one, EnhanceState())
+    read = r._coarse(provider.extent())
+    if read is None:
+        return None
+    bands, valid = read
+    if r.eight_bit():
+        codes = np.clip(np.asarray(bands[0])[valid].astype(np.int64), 0, 255)
+        return RasterHistogram((0.0, 255.0), [np.bincount(codes, minlength=256).astype(np.float64)], int(codes.size)) \
+            if codes.size else None
+    return sample_raster_histogram(bands, valid)
 
 
 def set_view(layer: QgsRasterLayer, view: Optional[QgsRectangle]) -> None:

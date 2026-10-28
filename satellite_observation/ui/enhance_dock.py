@@ -29,6 +29,7 @@ from ..core.enhance.pipeline import PRESET_NAMES, PRESETS, Pipeline
 from ..core.enhance.rules import image_rule_for, resolve_bands
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io.tasks import run_task
+from .colorize_box import ColorizeBox, set_blend
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
 
@@ -218,6 +219,11 @@ class EnhanceDock(PluginDock):
         form.addRow(self.extra_label)
         v.addWidget(adjust)
 
+        self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
+        self.colorize_box.changed.connect(self._colorize_changed)
+        self.colorize_box.colored.connect(lambda: self.follow_layer(self.layer))
+        v.addWidget(self.colorize_box)
+
         buttons = QHBoxLayout()
         reset = QPushButton(self.tr("リセット"))
         reset.clicked.connect(self.reset)
@@ -396,6 +402,7 @@ class EnhanceDock(PluginDock):
             self.dra_locked.setChecked(settings.locked)
             self.opacity.setValue(round((layer.renderer().opacity() if has and layer.renderer() else 1.0) * 100))
             self.set_pipeline(settings.correction)
+            self.colorize_box.show_layer(layer, settings.color if r else None)
         finally:
             self._loading = False
         self._show_color_rows()
@@ -491,7 +498,13 @@ class EnhanceDock(PluginDock):
     def settings(self) -> er.EnhanceSettings:
         current = er.enhance_renderer(self.layer) if self.layer is not None else None
         return er.EnhanceSettings(bands=self.bands(), pipeline=self.pipeline().to_json(), locked=self.dra_locked.isChecked(),
-                                  no_data=current.settings.no_data if current else ())
+                                  no_data=current.settings.no_data if current else (), color=self.colorize_box.color())
+
+    def _colorize_changed(self) -> None:
+        """A colour scale needs the plugin's renderer: 補正 turns on with it."""
+        if self.colorize_box.color() is not None and not self.enabled.isChecked():
+            self.enabled.setChecked(True)
+        self.changed()
 
     def apply(self) -> None:
         """Draws the active layer with the dock's correction (or QGIS's own renderer when 補正 is off)."""
@@ -580,8 +593,30 @@ class EnhanceDock(PluginDock):
         current = er.enhance_renderer(layer)
         base = current.settings if current else er.default_settings(layer)
         settings = er.EnhanceSettings(bands=tuple(bands) if bands else base.bands,
-                                      pipeline=(correction or base.correction).to_json(), locked=base.locked, no_data=base.no_data)
+                                      pipeline=(correction or base.correction).to_json(), locked=base.locked, no_data=base.no_data,
+                                      color=base.color)
         er.apply(layer, settings)
+        self.set_view(layer)
+        if layer is self.layer:
+            self.follow_layer(layer)
+
+    def colorize(self, layer: QgsRasterLayer, scale=None, blend: Optional[str] = None, reverse: bool = False, fade: bool = False,
+                 classes: Optional[dict] = None) -> None:
+        """
+        Colours `layer` with a colour scale (a name such as "red" or "turbo", or
+        stops [[position, [r, g, b]], ...]; None removes it), or with `classes`
+        (the viewer's ColorClasses), and blends it with the layers under it
+        ("normal", "screen", "difference", "lighten", "darken", "multiply").
+        """
+        current = er.enhance_renderer(layer)
+        base = current.settings if current else er.default_settings(layer)
+        color = None
+        if scale is not None or classes:
+            color = {"scale": scale or "turbo", **({"reverse": True} if reverse else {}),
+                     **({"classes": classes} if classes else {"fade": True} if fade else {})}
+        er.apply(layer, replace(base, color=color))
+        if blend is not None:
+            set_blend(layer, blend)
         self.set_view(layer)
         if layer is self.layer:
             self.follow_layer(layer)
