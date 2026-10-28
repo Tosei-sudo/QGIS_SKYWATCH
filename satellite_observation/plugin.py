@@ -35,6 +35,7 @@ from .ui.saved_plans_dock import SavedPlansDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.startup import StartupLayers
+from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
 
 HERE = os.path.dirname(__file__)
@@ -141,6 +142,11 @@ class PluginApi:
         """The jump field and the cursor position (its `jump(text)`, `search`, `go_to_place()`, `set_notation()`)."""
         return self._plugin.coordinates
 
+    @property
+    def swipe(self) -> "SwipeCompare":
+        """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
+        return self._plugin.swipe
+
     def new_scratch_layer(self, template: Optional[str] = None, source: str = "builtin") -> "NewLayerDialog":
         """Opens 「新規スクラッチレイヤー（テンプレート）」 (with a template: `source` builtin, config or saved); its `create()`."""
         return self._plugin.open_new_layer(source, template)
@@ -184,6 +190,7 @@ class SatelliteObservationPlugin:
         self.new_layer_action: Optional[QAction] = None
         self.provider: Optional[SatObsProvider] = None
         self.scratch_hook: Optional[ScratchDialogHook] = None
+        self.swipe: Optional[SwipeCompare] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -282,6 +289,13 @@ class SatelliteObservationPlugin:
         if isinstance(button, QToolButton):
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.actions.append(base_maps)
+        # 「スワイプ比較」: the active layer (or group) on one side of a line only.
+        swipe = QAction(icon("swipe"), tr("スワイプ比較"), self.iface.mainWindow())
+        swipe.setObjectName("SatObsSwipe")
+        self.swipe = SwipeCompare(self.iface, swipe, self.iface.mainWindow())
+        self.iface.addPluginToMenu(MENU, swipe)
+        self.toolbar.addAction(swipe)
+        self.actions.append(swipe)
         home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
         home.triggered.connect(lambda: self.place_docks())
         self.iface.addPluginToMenu(MENU, home)
@@ -423,6 +437,10 @@ class SatelliteObservationPlugin:
                 pass
             self.iface.removeCustomActionForLayerType(self.similar_action)
             self.similar_action = None
+        if self.swipe is not None:
+            self.swipe.close()
+            self.swipe.deleteLater()
+            self.swipe = None
         if self.base_maps is not None:
             self.base_maps.close()
             self.base_maps = None

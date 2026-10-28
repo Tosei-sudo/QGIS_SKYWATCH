@@ -144,6 +144,15 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 方位が分かるときは影の向きの案内線を出し、2 点目を影の向きに吸着（「影の向きに吸着」で切り替え）。Esc で 1 点目を取り消し
 - 測った高さは地図の上に描き、ドックに一覧。「レイヤーとして追加」で線のスクラッチレイヤー（高さ・影の長さ・太陽高度・方位、高さのラベル付き）にする
 
+## スワイプ比較
+
+メニュー・ツールバーの「スワイプ比較」で、アクティブなレイヤー（レイヤーパネルでグループを選んでいればそのグループ）を線の左側だけに表示し、右側には下のレイヤーを表示する（画像同士のほか、ベクターや背景地図とも比較可）。アクティブなレイヤーを変えると、比べるレイヤーも追従。
+
+- 線のドラッグで移動、それ以外のドラッグで地図を移動、ホイールで拡大縮小
+- ダブルクリックで縦線（左右で比較）と横線（上下で比較）を切り替え。矢印キー（Shift で大きく）・Home・End でも移動
+- Esc か、ほかの地図ツールを選ぶと終了（前の地図ツールに戻る）
+- レイヤーの表示・非表示やプロジェクトは変えない（線の反対側に、比べるレイヤーを除いた地図を重ねて描く）
+
 ## 座標・地名へ移動
 
 - ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
@@ -168,7 +177,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
