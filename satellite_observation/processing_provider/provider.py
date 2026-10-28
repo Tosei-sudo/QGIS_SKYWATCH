@@ -10,6 +10,7 @@ from qgis.PyQt.QtGui import QIcon
 from .align_algorithm import AlignAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .classify_algorithm import ClassifyAlgorithm
+from .geodesic_algorithms import GeodesicBufferAlgorithm, GeodesicCentroidAlgorithm
 from .ortho_algorithm import SimpleOrthoAlgorithm
 from .pansharpen_algorithm import PanSharpenAlgorithm
 
@@ -32,3 +33,5 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(AlignAlgorithm())
         self.addAlgorithm(ClassifyAlgorithm())
         self.addAlgorithm(SimpleOrthoAlgorithm())
+        self.addAlgorithm(GeodesicBufferAlgorithm())
+        self.addAlgorithm(GeodesicCentroidAlgorithm())

@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.core import QgsApplication, QgsMapLayerType, QgsProject
+from qgis.core import QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QToolButton
@@ -306,6 +306,12 @@ class SatelliteObservationPlugin:
         ortho.triggered.connect(lambda: self.open_simple_ortho())
         self.iface.addPluginToMenu(MENU, ortho)
         self.actions.append(ortho)
+        for name, algorithm, label in (("geodesic_buffer", "satobs:geodesic_buffer", "測地線バッファ…"),
+                                       ("geodesic_centroid", "satobs:geodesic_centroids", "正距方位での重心…")):
+            action = QAction(icon(name), tr(label), self.iface.mainWindow())
+            action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
+            self.iface.addPluginToMenu(MENU, action)
+            self.actions.append(action)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -498,6 +504,13 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:simple_ortho", ortho_inputs(layers, self.iface.activeLayer()))
+
+    def open_vector_algorithm(self, algorithm: str) -> None:
+        """A vector algorithm's dialog, with the active vector layer as its input."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        layer = self.iface.activeLayer()
+        processing.execAlgorithmDialog(algorithm, {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {})
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
