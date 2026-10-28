@@ -219,3 +219,21 @@ def test_each_feature_has_its_own_icon():
     # No two menu entries look the same.
     assert len(set(drawn)) == len(plugin.actions) == 13
     plugin.unload()
+
+
+def test_a_service_out_of_reach_is_logged_as_a_line_not_a_warning():
+    from qgis.core import Qgis
+
+    from satellite_observation.core.esri import EsriError
+
+    logs, failed = [], []
+    QgsApplication.messageLog().messageReceived.connect(lambda m, tag, level: logs.append((tag, level, m)))
+
+    def work(task):
+        raise EsriError("接続不可（https://x.example/FeatureServer/0）")
+
+    run_task("衛星カタログの読み込み", work, failed=failed.append)
+    assert wait_for(lambda: failed)
+    assert failed == ["接続不可（https://x.example/FeatureServer/0）"]
+    mine = [(level, m) for tag, level, m in logs if tag == "衛星撮像計画・観測記録"]
+    assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの読み込み: 接続不可（https://x.example/FeatureServer/0）")]

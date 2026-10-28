@@ -20,6 +20,7 @@ from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
+from .ui.coordinate_box import CoordinateBox
 from .ui.docks import StubDock
 from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
@@ -124,6 +125,11 @@ class PluginApi:
         """The image correction dock (its `enhance(layer, correction, bands)`, `pipeline()`, `set_pipeline()`, `apply()`)."""
         return self._plugin.docks["SatObsEnhance"]
 
+    @property
+    def coordinates(self) -> "CoordinateBox":
+        """The jump field and the cursor position (its `jump(text)`, `search`, `go_to_place()`, `set_notation()`)."""
+        return self._plugin.coordinates
+
 
 def _observation_function(name: str):
     """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
@@ -158,9 +164,12 @@ class SatelliteObservationPlugin:
         self.notices_action: Optional[QAction] = None
         self.startup_layers: Optional[StartupLayers] = None
         self.base_maps: Optional[BaseMapSwitch] = None
+        self.coordinates: Optional[CoordinateBox] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
+        # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
+        self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
         self.toolbar.setObjectName("SatelliteObservationToolbar")
 
@@ -364,6 +373,10 @@ class SatelliteObservationPlugin:
             self.startup_layers.close()
             self.startup_layers.deleteLater()
             self.startup_layers = None
+        if self.coordinates is not None:
+            self.coordinates.close()
+            self.coordinates.deleteLater()
+            self.coordinates = None
         if self.context is not None:
             self.context.close()
             self.context.deleteLater()

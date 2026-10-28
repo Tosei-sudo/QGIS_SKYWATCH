@@ -11,6 +11,8 @@ from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
 
+from ..core.esri import EsriError
+
 LOG_TAG = "衛星撮像計画・観測記録"
 
 
@@ -68,6 +70,11 @@ class FunctionTask(QgsTask):
             return True
         except Cancelled:
             self.error = "取消"
+            return False
+        except EsriError as error:
+            # A service that cannot be reached or refuses: shown where it was asked, logged as a line (not a warning).
+            self.error = str(error) or type(error).__name__
+            QgsMessageLog.logMessage(f"{self.description()}: {self.error}", LOG_TAG, Qgis.MessageLevel.Info)
             return False
         except Exception as error:  # noqa: BLE001 (any failure is shown, not raised)
             self.error = str(error) or type(error).__name__
