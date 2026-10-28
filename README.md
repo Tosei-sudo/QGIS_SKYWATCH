@@ -10,7 +10,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集・移動体・外部AI結果）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -261,6 +261,33 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - メニューの「検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants", "token"}`）
 - 実行に `onnxruntime` が要る。Windows 版の zip（下の「導入」）には同梱。ほかは QGIS の Python に入れる: OSGeo4W シェルで `python -m pip install onnxruntime`、macOS は `/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install onnxruntime`、Linux は `python3 -m pip install onnxruntime`。GPU 版（`onnxruntime-gpu`・`onnxruntime-directml`）を入れれば GPU で動く
 
+## 外部AI結果
+
+ほかの AI の処理系が Esri フィーチャーサービスに書いた結果を、画像カタログから開いた画像ごとに表示し、選んだものを観測記録に取り込む。ビューアにはない（ビューアの AI は書き出しの「DB へ転記」だけ）。
+
+- ドック「外部AI結果」（観測記録と同じ右側のタブ）: 画像カタログから画像を開くと、設定ファイルの `aiResultSources` の各レイヤーから、その画像 ID の結果を読んで一覧と地図に出す（結果があればドックを表示）。カタログから開いた別の画像をアクティブにすると切り替わり、前の画像の結果レイヤーは消える（一度読んだ画像は読み直さない。「再読み込み」で読み直す）
+- 結果はポイントでもポリゴンでもよい（ライン・マルチポイントも可）。レイヤーは出どころごとに一時レイヤー「外部AI結果 〈名前〉（〈画像ID〉）」で、クラスと確信度のラベル付き。「確信度の下限」より低い結果は一覧と地図から除く
+- 一覧と地図の選択は連動。「選択を観測記録へ取り込み」「未取込をすべて取り込み」で、その画像の観測記録（ポイント）として記録する。ポイントはその位置、ポリゴンは内側の点で、長さは最小の回転矩形の長辺（m。`length` の属性があればそちら）。種別は `kind` の属性 → `kinds` の対応 → クラスの順、名前は `name` の属性（なければ「船舶-1」のように自動）。備考に「外部AI 〈出どころ〉: 〈クラス〉 〈確信度〉 [AI:〈出どころ〉#〈結果ID〉]」を書き、この印がある結果は「済」として二度は取り込まない
+- 取り込みには、その画像が観測記録の画像一覧にあること（開いていること）が要る。保存先は観測記録ドックで選んでいる保存先
+
+```jsonc
+"aiResultSources": [
+  { "label": "船舶検出（外部）",
+    "url": "https://example.com/arcgis/rest/services/AI/FeatureServer/0", // ポイントかポリゴンのレイヤー
+    "fields": {
+      "imageId": "IMAGE_ID",      // 必須。画像カタログの画像IDと同じ値の属性
+      "id": "DET_ID",             // 結果ID（なければ OBJECTID）
+      "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",
+      "name": "NAME", "kind": "KIND", "activity": "ACTIVITY", "length": "LENGTH_M", "heading": "HEADING", "note": "NOTE"
+    },
+    "where": "STATUS <> 'rejected'",       // 画像 ID の条件に AND で足す
+    "minScore": 0.3,                       // 確信度の下限の初期値（0〜1。百分率の値は 100 で割る）
+    "kinds": { "ship": "船舶", "plane": "航空機" }, // クラス → 種別
+    "activity": "停泊", "confidence": "推定",       // 結果にないときの活動・確度（確度は保存先の段階にあるときだけ）
+    "maxResults": 2000, "token": "…" }
+]
+```
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -278,7 +305,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、外部AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
@@ -336,7 +363,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

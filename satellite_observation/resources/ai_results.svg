@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 外部AI結果: boxes another system found, pulled in from a database -->
+  <rect x="3" y="3" width="22" height="22" rx="2" fill="#334155" stroke="#0f172a" stroke-width="1"/>
+  <rect x="6.5" y="7" width="8" height="6" fill="none" stroke="#f97316" stroke-width="1.5"/>
+  <circle cx="18" cy="18" r="2.5" fill="none" stroke="#f97316" stroke-width="1.5"/>
+  <ellipse cx="24" cy="21" rx="6" ry="2.2" fill="#e2e8f0" stroke="#475569" stroke-width="1"/>
+  <path d="M18 21v6.5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V21" fill="#e2e8f0" stroke="#475569" stroke-width="1"/>
+  <path d="M18 24.3c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2" fill="none" stroke="#475569" stroke-width="1"/>
+</svg>

@@ -434,6 +434,34 @@ class ObservationBook:
         saved = self._save_records([record], f"{record.object_name} を記録")
         return saved[0] if saved else None
 
+    def add_many(self, entries: Sequence[Any], image: Optional[str] = None) -> Optional[list[Observation]]:
+        """
+        Records several new observations at once on this image (or `image`), in
+        one save: each entry has lon, lat, object, kind, activity, confidence,
+        note, length, heading (as add takes them). Entries without a name are new
+        things named in turn (船舶-1, 船舶-2…); the same new name is one thing.
+        """
+        info = self._image(image)
+        if info is None:
+            self._say("画像なし（取り込む画像を開いて）")
+            return None
+        taken = {f.name for f in flows(self.records)}
+        made: dict[str, tuple[str, str]] = {}
+        rows: list[Observation] = []
+        for e in entries:
+            values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
+                                length="" if e.length is None else str(e.length), heading="" if e.heading is None else str(e.heading))
+            record = self.record_from(info, e.lon, e.lat, None, None, values, True)
+            name = e.object.strip()
+            if name and name in made:
+                record = replace(record, object_id=made[name][0], object_name=made[name][1])
+            elif not name:
+                record = replace(record, object_name=next_name(record.kind, taken))
+            made.setdefault(record.object_name, (record.object_id, record.object_name))
+            taken.add(record.object_name)
+            rows.append(record)
+        return self._save_records(rows, f"{len(rows)} 件を記録")
+
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
         """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading."""
         was = next((o for o in self.records if o.id == record_id and o.deleted_at is None), None)
