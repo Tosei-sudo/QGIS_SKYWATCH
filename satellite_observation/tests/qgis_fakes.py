@@ -1,7 +1,12 @@
 """A stand-in for QGIS's interface (just what the plugin uses), for qgis.testing tests."""
 from qgis.gui import QgsMapCanvas, QgsMessageBar
 from qgis.PyQt.QtCore import QEventLoop, QObject, QTimer, pyqtSignal
-from qgis.PyQt.QtWidgets import QMainWindow, QStatusBar
+from qgis.PyQt.QtWidgets import QMainWindow, QMenu, QStatusBar
+
+try:  # Qt6
+    from qgis.PyQt.QtGui import QAction
+except ImportError:  # Qt5
+    from qgis.PyQt.QtWidgets import QAction
 
 
 class FakeIface(QObject):
@@ -24,6 +29,14 @@ class FakeIface(QObject):
         #: Custom layer actions: (action, layer type) and the layers each was put on.
         self.layer_actions: list = []
         self.layer_action_layers: dict = {}
+        #: Layer ▸ Create Layer, with QGIS's scratch layer item and one after it.
+        self.new_layer_menu = QMenu(self.window)
+        for name, text in (("mActionNewGeoPackageLayer", "新規 GeoPackage レイヤー…"), ("mActionNewMemoryLayer", "新規一時スクラッチレイヤー…"),
+                           ("mActionNewVirtualLayer", "新規仮想レイヤー…")):
+            action = QAction(text, self.window)
+            action.setObjectName(name)
+            self.new_layer_menu.addAction(action)
+        self.add_feature = QAction("地物を追加", self.window)
         self.window.show()
 
     def mainWindow(self):  # noqa: N802
@@ -44,6 +57,12 @@ class FakeIface(QObject):
     def setActiveLayer(self, layer):  # noqa: N802
         self.layer = layer
         self.currentLayerChanged.emit(layer)
+
+    def newLayerMenu(self):  # noqa: N802
+        return self.new_layer_menu
+
+    def actionAddFeature(self):  # noqa: N802
+        return self.add_feature
 
     def addToolBar(self, name):  # noqa: N802
         return self.window.addToolBar(name)
