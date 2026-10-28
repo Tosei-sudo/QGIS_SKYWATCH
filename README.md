@@ -147,6 +147,14 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 
 メニューの「自動位置合わせ…」（Processing ツールボックスの「衛星撮像計画・観測記録 ▸ 自動位置合わせ」と同じ）で、合わせる画像（最初はアクティブな画像）と基準の画像（最初はほかで最も細かい画像）の模様を照合（位相相関）して、ずれを自動で求める。重なる範囲全体を粗く照合してから、格子状の数か所（既定 4 × 4）を基準の画像の解像度で照合してタイポイントにし、平行移動（中央値）かアフィン（回転・伸縮も、最小二乗、外れ値は除外）で直す。結果は基準の画像と同じ格子に載せた、すべてのバンドを持つ画像（画像補正は引き継ぎ）。ずれ（東・北）・照合できた数・残差は処理のログに出る。明るさの違う画像どうし（別の日、別のセンサー）でも照合できるが、模様の少ない画像（水面など）は照合できない。
 
+### 簡易オルソ補正
+
+メニューの「簡易オルソ補正…」（Processing ツールボックスの「衛星撮像計画・観測記録 ▸ 簡易オルソ補正」と同じ）で、RPC がなく平らな地面（基準高）に載せてある画像を、標高データ（DEM のラスター）と衛星の方向（方位角・仰角）で地形のずれを直す。基準高より h m 高い所は衛星と反対の向きに h ÷ tan（仰角）m ずれて写るので、その分を戻す。
+
+- 方位角・仰角を空欄にすると画像のメタデータ（`meanSatAz`・`meanSatEl`・`satellite_azimuth`・`off_nadir` など）か、画像と同じ名前の .IMD から読む。基準高を空欄にすると画像の範囲の平均標高
+- 標高データのない所は動かさない。結果は元の画像と同じ格子・すべてのバンド（画像補正は引き継ぎ）
+- RPC のある画像は QGIS の「ワープ（再投影）」で RPC と DEM を使って補正できるので対象外
+
 ### 土地被覆分類
 
 メニューの「土地被覆分類…」（Processing ツールボックスの「衛星撮像計画・観測記録 ▸ 土地被覆分類」と同じ）で、画像の画素を色（バンドの値）の似たものどうしのクラスに分けて色分けし、クラスごとの面積を出す。
@@ -180,6 +188,13 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - Esc か、ほかの地図ツールを選ぶと終了（前の地図ツールに戻る）
 - レイヤーの表示・非表示やプロジェクトは変えない（線の反対側に、比べるレイヤーを除いた地図を重ねて描く）
 
+## 位置ずらし
+
+位置情報が数 m〜数十 m ずれた画像を手で合わせる。メニュー・ツールバーの「位置ずらし」で、アクティブな画像（ファイルのラスター）を地図のドラッグで動かす（ドラッグ中は画像の写しがマウスに付いて動き、放すと移動）。矢印キーで画面の 1 画素（Shift で 10 画素）ずつ。ずらし量（東・北、m）はステータスバーに出る。Esc か、ほかの地図ツールを選ぶと終了。
+
+- 画像のファイルは変えない。QGIS のプロファイルのフォルダーに位置情報だけ動かした小さな VRT を作り、レイヤーの参照先をそれに替える（スタイル・画像補正はそのまま）。ずらした画像は Processing・書き出し・このプラグインの道具でもずらした位置で扱われる
+- 「位置ずらしの解除」でファイルの位置に戻す
+
 ## 座標・地名へ移動
 
 - ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
@@ -204,7 +219,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
