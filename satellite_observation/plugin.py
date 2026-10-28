@@ -291,6 +291,10 @@ class SatelliteObservationPlugin:
         align.triggered.connect(lambda: self.open_align())
         self.iface.addPluginToMenu(MENU, align)
         self.actions.append(align)
+        classify = QAction(icon("classify"), tr("土地被覆分類…"), self.iface.mainWindow())
+        classify.triggered.connect(lambda: self.open_classify())
+        self.iface.addPluginToMenu(MENU, classify)
+        self.actions.append(classify)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
@@ -454,6 +458,15 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:align", align_inputs(layers, self.iface.activeLayer()))
+
+    def open_classify(self) -> None:
+        """The algorithm's dialog, with the active image and a polygon layer for the training."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.classify_algorithm import default_inputs as classify_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:classify", classify_inputs(layers, self.iface.activeLayer()))
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
