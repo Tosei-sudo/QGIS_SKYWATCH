@@ -261,6 +261,14 @@ class ObservationApi:
         self._said(b, self._run("観測記録の削除", lambda bk: bk.remove(rows)), "削除")
         return len(rows)
 
+    def clear_observations(self, deleted_only: bool = False) -> dict[str, int]:
+        """Removes the local store's records and checked areas for good (only the deleted ones when asked)."""
+        b = self._b()
+        if not b.can_clear():
+            raise RuntimeError(f"{b.label} の記録は消去不可（ローカルのみ）")
+        records, areas = self._said(b, self._run("観測記録の消去", lambda bk: bk.clear(bool(deleted_only))), "消去")
+        return {"observations": records, "areas": areas}
+
     def add_checked_area(self, bbox: Any = None, polygon: Any = None, kind: Optional[str] = None, note: Optional[str] = None,
                          image: Optional[str] = None) -> dict[str, Any]:
         """Records a checked area on this image (or `image`): `bbox` or `polygon`, the kind looked for (None all)."""

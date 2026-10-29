@@ -132,6 +132,43 @@ def test_changes_deletes_restores_renames_and_merges(book):
     assert [f.name for f in book.flows()] == ["第一丸"]
 
 
+def test_clears_the_deleted_records_then_everything_for_good(book):
+    a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
+    b = book.submit(139.8, 35.6, FormValues(object="B", kind="船舶"))
+    kept_area = book.add_box_area([139.69, 35.59, 139.72, 35.62], "船舶")
+    gone_area = book.add_box_area([139.79, 35.59, 139.82, 35.62], "船舶")
+    book.remove_areas([gone_area])
+    book.remove([book.record(a.id)])
+    book.list_image("nofile", "nofile.tif", day(5))
+    assert book.can_clear()
+    # Only the deleted ones: the rest stay, and nothing comes back on reading again.
+    assert book.clear(deleted_only=True) == (1, 1)
+    assert book.said[-1] == "ローカル の削除済みの記録 1 件・確認範囲 1 件を消去"
+    assert [o.id for o in book.records] == [b.id] and [x.id for x in book.areas] == [kept_area.id]
+    book.reload()
+    assert [o.id for o in book.records] == [b.id] and [x.id for x in book.areas] == [kept_area.id]
+    assert any(i.id == "nofile" for i in book.images)
+    # Everything: the images listed without their file go too.
+    assert book.clear() == (1, 1)
+    assert book.records == [] and book.areas == [] and book.listed == []
+    assert [i.id for i in book.images] == ["d1", "d3", "dx"]
+    book.reload()
+    assert book.records == [] and book.areas == []
+
+
+def test_a_store_without_clear_is_not_cleared(book):
+    class Remote:
+        label = "共有"
+
+        def __init__(self, store):
+            self.load, self.save, self.remove = store.load, store.save, store.remove
+
+    book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
+    book.store = Remote(book.store)
+    assert not book.can_clear() and book.clear() is None and len(book.records) == 1
+    assert book.said[-1] == "共有 の記録は消去不可"
+
+
 def test_renames_moves_and_removes_classes_with_the_records_under_them(book):
     a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶 > 支援船 > 〇〇級"))
     assert [kind_of(t.path) for t in book.taxonomy()][:4] == ["船舶", "船舶 > 支援船", "船舶 > 支援船 > 〇〇級", "航空機"]
@@ -246,4 +283,8 @@ def test_gives_scripts_the_records_things_and_areas(book):
     report = api.observation_report(title="週報", map=False)
     assert report["things"] == 1 and "<title>週報</title>" in report["html"]
     assert api.delete_observations([a["id"]]) == 1 and api.observations() == []
+    assert api.clear_observations(deleted_only=True) == {"observations": 1, "areas": 1}
+    assert api.observations(deleted=True) == [] and api.checked_areas(deleted=True) == []
+    api.add_observation(139.7, 35.6, object="次", kind="船舶")
+    assert api.clear_observations() == {"observations": 1, "areas": 0} and api.observations() == []
     assert api.confidences()[0] == {"label": "確定", "color": "#15803d", "note": "識別済み"}

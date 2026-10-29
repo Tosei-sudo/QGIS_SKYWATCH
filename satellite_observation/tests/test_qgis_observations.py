@@ -154,6 +154,33 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     assert len(dock.book.living()) == 3 and dock.book is not book
 
 
+def test_clears_the_local_records_after_asking(plugin, monkeypatch):
+    p, iface, dock, layers, tmp_path = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name in ("あおば", "しらせ"):
+        dock.map_clicked(139.7, 35.6, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText("船舶")
+        dock.submit()
+    dock.remove([o for o in book.living() if o.object_name == "しらせ"])
+    dock.more.setChecked(True)
+    assert dock.clear_button.isVisible() and dock.clear_button.isEnabled()
+    answers = [None, True, False]
+    asked = []
+    monkeypatch.setattr(dock, "ask_clear", lambda b: asked.append(len(b.records)) or answers.pop(0))
+    # Cancelled: nothing goes.
+    assert dock.clear_local() is None and len(book.records) == 2
+    # Only the deleted one.
+    assert dock.clear_local() == (1, 0)
+    assert [o.object_name for o in book.records] == ["あおば"] and dock.status.text() == "ローカル の削除済みの記録 1 件・確認範囲 0 件を消去"
+    # Everything, for good: a new book reads nothing back.
+    assert dock.clear_local() == (1, 0)
+    assert asked == [2, 2, 1] and book.records == [] and dock.scene().marks == []
+    dock.reset_stores()
+    assert dock.book.records == []
+
+
 def test_the_kind_chosen_is_the_next_new_records_default_in_later_sessions_too(plugin):
     p, iface, dock, layers, tmp_path = plugin
     dock.set_active(True)
