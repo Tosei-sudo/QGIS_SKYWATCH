@@ -23,7 +23,7 @@ from qgis.PyQt.QtCore import QSize, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPainter
 
 from ..core.ai.detect import (
-    Detection, blocks_of, box_corners, class_name, crop_of, detect_tile, is_empty, nms, offset, tiles_of, wanted,
+    Detection, band_picture, blocks_of, box_corners, class_name, crop_of, detect_tile, is_empty, nms, offset, tiles_of, wanted,
 )
 from ..core.ai.model_config import DetectorSpec
 from .ai_runtime import AiError, LoadedModel
@@ -62,6 +62,26 @@ def render_rgba(layer: QgsMapLayer, extent: QgsRectangle, width: int, height: in
     job.renderSynchronously()
     painter.end()
     return image_rgba(image)
+
+
+def check_bands(layer: QgsMapLayer, bands) -> None:
+    """Refuses bands the image does not have (a model trained on band values needs an image with them)."""
+    count = layer.bandCount() if hasattr(layer, "bandCount") else 0
+    if layer.providerType() in ("wms", "arcgismapserver", "xyz") or count < max(bands):
+        raise AiError(f"このモデルはバンド {', '.join(map(str, bands))} の値で学習。画像のバンドが不足（{count} バンド）")
+
+
+def band_values(layer: QgsMapLayer, bands, extent: QgsRectangle, width: int, height: int) -> np.ndarray:
+    """
+    The values of `bands` over `extent` (the layer's CRS) at `width` ×
+    `height` pixels, with where they have data, as a picture of band values
+    (core.ai.detect.band_picture): what a model trained on band values takes.
+    """
+    from .enhance_renderer import read_bands
+
+    arrays, valid = read_bands(layer.dataProvider(), list(bands), extent, width, height)
+    values = np.stack([np.nan_to_num(a.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0) for a in arrays], axis=2)
+    return band_picture(values, valid)
 
 
 @dataclass

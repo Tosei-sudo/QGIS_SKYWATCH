@@ -218,6 +218,21 @@ class DetectorSpec:
     unbatched: bool = False
     #: The most objects the model gives for one input (0: no limit).
     max_detections: int = 0
+    #: The bands (1 first) the model takes as they are, scaled by `mean` and `std` per band (a model trained
+    #: here on band values); empty for the image as shown (RGB).
+    bands: list[int] = field(default_factory=list)
+
+
+def trained_input(metadata: dict[str, str]) -> Optional[dict]:
+    """The input of a model trained by this plugin (`satobs` metadata, see core/ai/train): mode, bands, mean, std."""
+    import json
+
+    try:
+        state = json.loads(metadata.get("satobs", ""))
+    except ValueError:
+        return None
+    value = state.get("input") if isinstance(state, dict) else None
+    return value if isinstance(value, dict) else None
 
 
 def detector_spec(config: Optional[DetectModelConfig], metadata: dict[str, str], signature: Optional[OnnxSignature] = None) -> DetectorSpec:
@@ -239,7 +254,14 @@ def detector_spec(config: Optional[DetectModelConfig], metadata: dict[str, str],
     detectron2 = fmt == "detectron2" or (fmt == "auto" and signature is not None and has_detectron2_outputs(signature))
     # YOLOX and Detectron2 take 0–255 B, G, R (Detectron2 normalizes inside the model).
     raw = fmt == "yolox" or detectron2
-    return DetectorSpec(
+    trained = trained_input(metadata) or {}
+    bands = [int(b) for b in trained.get("bands", [])] if trained.get("mode") == "bands" else []
+    if bands:
+        mean = [float(v) for v in trained.get("mean", [])]
+        std = [float(v) for v in trained.get("std", [])]
+        if len(mean) != len(bands) or len(std) != len(bands):
+            mean, std = [0.0] * len(bands), [1.0] * len(bands)
+    spec = DetectorSpec(
         task="detect" if detectron2 else task,
         # Detectron2's models are trained with the shorter side about 800.
         input_size=c.input_size or from_meta or fixed or ((800, 800) if detectron2 else (640, 640)),
@@ -255,6 +277,9 @@ def detector_spec(config: Optional[DetectModelConfig], metadata: dict[str, str],
         # Detectron2 keeps the best 100 of an image unless told otherwise when exported.
         max_detections=c.max_detections if c.max_detections is not None else (100 if detectron2 else 0),
     )
+    if bands:
+        spec.bands, spec.mean, spec.std, spec.bgr = bands, tuple(mean), tuple(std), False
+    return spec
 
 
 def has_detectron2_outputs(signature: OnnxSignature) -> bool:

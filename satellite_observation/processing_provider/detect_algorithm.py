@@ -27,7 +27,7 @@ from qgis.PyQt.QtGui import QIcon
 
 from ..core.ai.detect import class_filter, class_name
 from ..core.ai.model_config import DetectModelConfig, detector_spec
-from ..qgis_io.ai_io import angle_degrees, detect_layer, detection_rings, grid_of, render_rgba, summary
+from ..qgis_io.ai_io import angle_degrees, band_values, check_bands, detect_layer, detection_rings, grid_of, render_rgba, summary
 from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, local_model, model_from
 
@@ -51,8 +51,12 @@ def set_models(models: Callable[[], tuple[list, str]]) -> None:
 
 
 def detect_models() -> tuple[list[DetectModelConfig], str]:
+    """The settings file's detection models, then those trained in QGIS (「学習済み」, absolute paths)."""
+    from ..qgis_io.settings import trained_models
+
     models, base = _models()
-    return [m for m in models if isinstance(m, DetectModelConfig)], base
+    own = [m for m in models if isinstance(m, DetectModelConfig)]
+    return own + [DetectModelConfig(tr("学習済み: {label}").format(label=label), path) for label, path in trained_models()], base
 
 
 def source_fields(fields: QgsFields) -> None:
@@ -188,7 +192,15 @@ class DetectAlgorithm(QgsProcessingAlgorithm):
         return True
 
     def processAlgorithm(self, parameters, context, feedback) -> dict:  # noqa: N802 (QGIS's name)
+        try:
+            return self._process(parameters, context, feedback)
+        finally:
+            # The layer copies go now: a refused run's algorithm lives on in QGIS's exception until exit, after GDAL.
+            self._layer = None
+
+    def _process(self, parameters, context, feedback) -> dict:
         started = time.monotonic()
+        error = ""
         try:
             feedback.setProgressText(tr("モデルを読み込み中…"))
             path = local_model(self._source, self._base, progress=lambda p: feedback.setProgress(10 * p), cancelled=feedback.isCanceled)
@@ -208,8 +220,15 @@ class DetectAlgorithm(QgsProcessingAlgorithm):
                 classes=f"{len(classes)} クラス（{'・'.join(classes[:8])}{'…' if len(classes) > 8 else ''}）" if classes else "クラス名なし（番号で表示）"))
             grid = grid_of(self._extent, self._pixel_size)
             feedback.pushInfo(tr("{w} × {h} 画素（画素 {s:g}）を解析").format(w=f"{grid.width:,}", h=f"{grid.height:,}", s=self._pixel_size))
+            if spec.bands:
+                # A model trained here on band values: the bands as they are, not the image as shown.
+                check_bands(self._layer, spec.bands)
+                feedback.pushInfo(tr("バンド {bands} の値で解析（表示の設定は不使用）").format(bands=", ".join(map(str, spec.bands))))
+                render = lambda extent, w, h: band_values(self._layer, spec.bands, extent, w, h)  # noqa: E731
+            else:
+                render = lambda extent, w, h: render_rgba(self._layer, extent, w, h, self._crs, self._transform_context)  # noqa: E731
             run = detect_layer(
-                model, spec, lambda extent, w, h: render_rgba(self._layer, extent, w, h, self._crs, self._transform_context), grid,
+                model, spec, render, grid,
                 overlap=self.parameterAsInt(parameters, self.OVERLAP, context) / 100,
                 classes=class_filter(self.parameterAsString(parameters, self.CLASSES, context)),
                 progress=lambda text, done: (feedback.setProgressText(tr(text)), done is not None and feedback.setProgress(10 + 88 * done)),
@@ -218,7 +237,10 @@ class DetectAlgorithm(QgsProcessingAlgorithm):
         except AiError as e:
             if feedback.isCanceled():
                 return {}
-            raise QgsProcessingException(tr(str(e)))
+            # Raised after the handler: the error's frames (one holding the layer) do not live on with the run.
+            error = str(e)
+        if error:
+            raise QgsProcessingException(tr(error))
         self.result = run
 
         fields = QgsFields()

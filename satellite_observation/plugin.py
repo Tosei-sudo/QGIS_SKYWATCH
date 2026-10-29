@@ -16,7 +16,7 @@ except ImportError:  # Qt5
 
 from .core.obs.api import ObservationApi
 from .processing_provider.pansharpen_algorithm import default_inputs
-from .processing_provider import detect_algorithm
+from .processing_provider import detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import time_zone_fields
@@ -330,6 +330,7 @@ class SatelliteObservationPlugin:
         # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
         context = self.context
         detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
+        train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
@@ -370,6 +371,10 @@ class SatelliteObservationPlugin:
         detect.triggered.connect(lambda: self.open_detect())
         self.iface.addPluginToMenu(MENU, detect)
         self.actions.append(detect)
+        train = QAction(icon("ai_train"), tr("AI 学習（物体検出）…"), self.iface.mainWindow())
+        train.triggered.connect(lambda: self.open_train())
+        self.iface.addPluginToMenu(MENU, train)
+        self.actions.append(train)
         segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
         segment.setObjectName("SatObsSegment")
         self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
@@ -616,6 +621,15 @@ class SatelliteObservationPlugin:
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:detect", detect_inputs(layers, self.iface.activeLayer(), self.iface.mapCanvas()))
 
+    def open_train(self) -> None:
+        """The training algorithm's dialog, with the active image (else the first)."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.train_algorithm import default_inputs as train_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:train_detector", train_inputs(layers, self.iface.activeLayer()))
+
     def open_transfer(self) -> None:
         if self.transfer_dialog is None:
             self.transfer_dialog = TransferDialog(self.context, lambda text: self.iface.messageBar().pushInfo(tr("検出結果を DB へ転記"), text),
@@ -647,6 +661,7 @@ class SatelliteObservationPlugin:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
         detect_algorithm.set_models(lambda: ([], ""))
+        train_algorithm.set_book(lambda: None)
         if self.segment is not None:
             self.segment.close()
             self.segment.deleteLater()
