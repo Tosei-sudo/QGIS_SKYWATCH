@@ -154,6 +154,42 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     assert len(dock.book.living()) == 3 and dock.book is not book
 
 
+def test_the_kind_chosen_is_the_next_new_records_default_in_later_sessions_too(plugin):
+    p, iface, dock, layers, tmp_path = plugin
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    assert dock.kind_input.text() == "船舶"
+    dock.kind_input.setText("船舶 > 護衛艦")
+    dock.submit()
+    dock.map_clicked(139.71, 35.61, None)
+    assert dock.kind_input.text() == "船舶 > 護衛艦"
+    # Chosen in the form (by its class buttons or typed), then left without recording: still the next one's.
+    dock.kind_input.setText("航空機")
+    dock._kind_changed()
+    dock.escape()
+    dock.map_clicked(139.72, 35.62, None)
+    assert dock.kind_input.text() == "航空機"
+    dock.close_form()
+    # The stores read again (the settings file reloaded, or QGIS started again): kept.
+    dock.reset_stores()
+    dock.set_active(True)
+    dock.map_clicked(139.72, 35.62, None)
+    assert dock.kind_input.text() == "航空機"
+    # A record changed or carried over shows its own kind and does not change the default by being opened.
+    dock.kind_input.setText("船舶 > 護衛艦")
+    dock._kind_changed()
+    dock.submit()
+    [o] = [o for o in dock.book.living() if o.kind == "船舶 > 護衛艦" and o.lon == 139.72]
+    dock.kind_input.setText("")
+    dock.map_clicked(o.lon, o.lat, next(m for m in dock.scene().marks if m.key == o.id))
+    assert dock.pending[2] is not None
+    dock.kind_input.setText("車両")
+    dock._kind_changed()
+    dock.escape()
+    dock.map_clicked(139.65, 35.65, None)
+    assert dock.kind_input.text() == "船舶 > 護衛艦"
+
+
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     p, iface, dock, layers, _ = plugin
     dock.set_two_point(True)

@@ -66,6 +66,19 @@ def test_records_carries_over_and_marks_gone(book):
     assert [s.activity for s in flow.steps] == ["停泊", "航行", ""] and flow.present is False
 
 
+def test_remembers_what_the_next_record_offers_per_store_across_sessions(book):
+    book.remember(kind="船舶 >  護衛艦 ", activity="停泊", confidence="推定")
+    assert (book.last.kind, book.last.activity, book.last.confidence) == ("船舶 > 護衛艦", "停泊", "推定")
+    # Only what is given changes.
+    book.remember(kind="航空機")
+    assert (book.last.kind, book.last.activity) == ("航空機", "停泊")
+    # A new book of the same store (the next session) starts with it; another store does not.
+    again = ObservationBook(book.store, book.area_store, book.taxonomy_store, ObservationVocabulary(), prefs=book.prefs)
+    assert (again.last.kind, again.last.activity, again.last.confidence) == ("航空機", "停泊", "推定")
+    book.prefs.set(f"last_values/{book.store.label}", "壊れた値")
+    assert ObservationBook(book.store, book.area_store, book.taxonomy_store, ObservationVocabulary(), prefs=book.prefs).last == FormValues()
+
+
 def test_carries_all_but_those_in_a_checked_area_which_are_gone(book):
     a = book.submit(139.70, 35.60, FormValues(object="A", kind="船舶"))
     b = book.submit(139.75, 35.65, FormValues(object="B", kind="船舶"))
