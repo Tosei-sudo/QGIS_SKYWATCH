@@ -125,6 +125,7 @@ class TaxonomyDock(PluginDock):
         bar.addWidget(self._button(tr("＋ 大分類"), tr("大分類の追加（「船舶 > 支援船」で階層ごと）"), lambda: self.start_add("")))
         bar.addWidget(self._button(tr("展開"), tr("すべて展開"), self._expand_all))
         bar.addWidget(self._button(tr("折りたたみ"), tr("すべて折りたたみ"), self._fold_all))
+        bar.addWidget(self._button(tr("更新"), tr("保存先から分類体系を読み直し（他の人の編集を反映）"), lambda: self.obs.reload_taxonomy()))
         self.body.addLayout(bar)
 
         split = QSplitter(Qt.Orientation.Vertical)

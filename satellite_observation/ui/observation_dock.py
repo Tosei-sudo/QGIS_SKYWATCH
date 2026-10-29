@@ -497,6 +497,7 @@ class ObservationDock(PluginDock):
         actions.addWidget(self.editor_button)
         actions.addWidget(self._button(tr("JSON 保存"), tr("分類体系の JSON 保存（config.json の observationVocabulary.taxonomy に記載可）"), self.save_taxonomy_file))
         actions.addWidget(self._button(tr("JSON 読み込み"), tr("分類体系の JSON 読み込み（現在の分類と置き換え）"), self.load_taxonomy_file))
+        actions.addWidget(self._button(tr("更新"), tr("保存先から分類体系を読み直し（他の人の編集を反映）"), self.reload_taxonomy))
         gl.addRow(actions)
         self.taxa_note = QLabel()
         self.taxa_note.setWordWrap(True)
@@ -720,6 +721,10 @@ class ObservationDock(PluginDock):
     def reload(self) -> None:
         """Reads the records again from the store."""
         self.do(self.tr("観測記録の読み込み"), lambda b: b.reload())
+
+    def reload_taxonomy(self) -> None:
+        """Reads the classification again from the store (others may have changed it)."""
+        self.do(self.tr("分類の読み込み"), lambda b: b.reload_taxonomy())
 
     # ---- the images ------------------------------------------------------
 
