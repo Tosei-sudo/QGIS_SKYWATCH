@@ -171,6 +171,22 @@ class ObservationBook:
             self.loaded = True
         return self._say(message or text)
 
+    def reload_taxonomy(self) -> str:
+        """
+        Reads the classification and specification fields again (as others may
+        have changed them in a shared store); kept as they were when it fails.
+        """
+        self._say(f"{self.taxonomy_store.label} から分類を読み込み中…")
+        try:
+            kept = self.taxonomy_store.load()
+            fields = self.taxonomy_store.load_fields()
+        except Exception as error:  # noqa: BLE001
+            return self._say(f"{self.taxonomy_store.label} から分類の読み込み失敗: {_error_text(error)}")
+        with self.lock:
+            self._taxonomy = kept if kept is not None else list(self.vocabulary.taxonomy)
+            self.spec_fields = fields if fields is not None else list(self.vocabulary.spec_fields)
+        return self._say(f"{self.taxonomy_store.label}: 分類 {len(self._taxonomy)} 件を読み込み")
+
     def flows(self) -> list[ObjectFlow]:
         """Every thing's flow."""
         return flows(self.records)

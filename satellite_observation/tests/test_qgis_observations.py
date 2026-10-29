@@ -17,9 +17,11 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
+from qgis.PyQt.QtWidgets import QPushButton  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.core.obs.flows import living  # noqa: E402
+from satellite_observation.core.obs.taxonomy import Taxon  # noqa: E402
 from satellite_observation.qgis_io import settings  # noqa: E402
 from satellite_observation.qgis_io.obs_images import IMAGE_ID, image_layer, observed_image  # noqa: E402
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
@@ -365,6 +367,9 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert wait_for(lambda: len(layer.rows) == 1)
     assert wait_for(lambda: dock.status.text() == "共有のモノを記録")
     assert layer.rows[0]["attributes"]["OBSERVER"] == "田中"
+    # The classification read again in a task too.
+    dock.reload_taxonomy()
+    assert wait_for(lambda: dock.status.text().endswith("件を読み込み"))
     # The local store is the other choice, with its own records.
     dock.store_select.setCurrentIndex(1)
     assert dock.book.label == "ローカル" and dock.book.living() == []
@@ -445,6 +450,13 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     editor._add_field()
     editor.save_fields()
     assert dock.book.spec_fields[-1].name == "項目12" and dock.status.text() == "諸元の項目 12 件を設定"
+    # 「更新」: the classification as someone else saved it since.
+    dock.book.taxonomy_store.save([Taxon(["船舶"]), Taxon(["船舶", "新型"])])
+    editor.select(["車両"])
+    [refresh] = [b for b in editor.findChildren(QPushButton) if b.text() == "更新"]
+    refresh.click()
+    assert editor._item_of("船舶 > 新型") is not None and editor.selected is None
+    assert dock.status.text().endswith("分類 2 件を読み込み")
 
 
 def test_gives_scripts_the_observations_through_plugin_api(plugin, tmp_path):

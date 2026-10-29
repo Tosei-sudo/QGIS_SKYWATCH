@@ -191,6 +191,29 @@ def test_renames_moves_and_removes_classes_with_the_records_under_them(book):
     assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
 
 
+def test_reads_the_classification_again_as_changed_by_someone_else(book):
+    other = ObservationBook(LocalObservationStore(book.store.gpkg), LocalAreaStore(book.store.gpkg, "ローカル"),
+                            LocalTaxonomyStore(book.store.gpkg, "ローカル"), ObservationVocabulary())
+    other.reload()
+    assert other.set_taxonomy([{"name": "X", "children": ["Y"]}])
+    assert "X" not in [kind_of(t.path) for t in book.taxonomy()]
+    a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
+    assert book.reload_taxonomy() == f"{book.taxonomy_store.label}: 分類 2 件を読み込み"
+    assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
+    # The records are as they were; their kinds still offered.
+    assert book.record(a.id).kind == "船舶" and "船舶" in [kind_of(t.path) for t in book.taxonomy()]
+
+    class Failing:
+        label = "共有"
+
+        def load(self):
+            raise OSError("つながらない")
+
+    book.taxonomy_store = Failing()
+    assert "分類の読み込み失敗: つながらない" in book.reload_taxonomy()
+    assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
+
+
 def test_lists_images_without_their_file_per_store(book):
     entry = book.list_image("EXT-1", "外部", day(2))
     assert not entry.file and [i.id for i in book.images] == ["d1", "EXT-1", "d3", "dx"]
