@@ -432,7 +432,7 @@ def save_layer(layer: QgsMapLayer, visible: bool, project: QgsProject) -> SaveLa
         return SaveLayer(type="ref", ref=ServiceRef("wfs", uri.param("url"), uri.param("typename")), **common)
     if isinstance(layer, QgsVectorTileLayer):
         params = _query(layer.source())
-        if params.get("type") == "arcgis" and params.get("url"):
+        if (params.get("type") == "arcgis" or params.get("serviceType") == "arcgis") and params.get("url"):
             style = params.get("styleUrl") or f"{params['url'].rstrip('/')}/resources/styles/root.json"
             return SaveLayer(type="json", json={"layerType": "VectorTileLayer", "styleUrl": style}, **common)
         if params.get("styleUrl"):
