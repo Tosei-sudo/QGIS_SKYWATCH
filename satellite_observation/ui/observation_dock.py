@@ -21,7 +21,7 @@ from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSi
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -527,6 +527,9 @@ class ObservationDock(PluginDock):
         actions.addWidget(self._button(tr("レイヤー化"), tr("記録をポイント、モノの流れをラインとして一時レイヤー化（属性テーブル・タイムライン・書き出しで利用可）"),
                                        self.to_layers))
         mf.addRow(actions)
+        self.clear_button = self._button(tr("ローカル記録の消去…"), tr("ローカル GeoPackage の記録・確認範囲の完全な消去（削除済みのみも可。復元不可）"),
+                                         lambda: self.clear_local())
+        mf.addRow(self.clear_button)
         self.more.toggled.connect(lambda on: [w.setVisible(on) for w in self.more.findChildren(QWidget)])
         for w in self.more.findChildren(QWidget):
             w.setVisible(False)
@@ -1288,6 +1291,38 @@ class ObservationDock(PluginDock):
 
     # ---- what the book does, from the dock ---------------------------------
 
+    def ask_clear(self, book: ObservationBook) -> Optional[bool]:
+        """Asks what to clear: True only the deleted, False everything, None nothing."""
+        living_records = len(book.living())
+        gone = len(book.records) - living_records
+        areas = len(book.areas)
+        text = self.tr("{store} の記録を完全に消去（元に戻せません）。\n\n記録 {n} 件（うち削除済み {d} 件）、確認範囲 {a} 件。"
+                       "\n分類体系・参考写真は残ります。").format(store=book.label, n=len(book.records), d=gone, a=areas)
+        box = QMessageBox(QMessageBox.Icon.Warning, self.tr("ローカル記録の消去"), text, parent=self)
+        everything = box.addButton(self.tr("すべて消去"), QMessageBox.ButtonRole.DestructiveRole)
+        deleted = box.addButton(self.tr("削除済みのみ消去"), QMessageBox.ButtonRole.AcceptRole)
+        deleted.setEnabled(gone > 0 or any(a.deleted_at is not None for a in book.areas))
+        cancel = box.addButton(self.tr("取消"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        return False if clicked is everything else True if clicked is deleted else None
+
+    def clear_local(self, deleted_only: Optional[bool] = None) -> Optional[tuple[int, int]]:
+        """Removes the local records for good, after asking (`deleted_only` given: without asking)."""
+        book = self.book
+        if book is None or self.store_set is None or self.store_set.remote or not book.can_clear():
+            return None
+        if deleted_only is None:
+            deleted_only = self.ask_clear(book)
+            if deleted_only is None:
+                return None
+        self.close_form()
+        self.chosen = None
+        result = self.do(self.tr("ローカル記録の消去"), lambda b: b.clear(deleted_only))
+        self.refresh_images()
+        return result
+
     def carry(self, object_id: str, present: bool = True) -> None:
         self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present))
 
@@ -1598,6 +1633,7 @@ class ObservationDock(PluginDock):
         self.prev_button.setEnabled(many)
         self.next_button.setEnabled(many)
         self.time_row.setVisible(image is not None and image.time is None)
+        self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         if book is None:
             self._set_head(self.tr("観測記録"))
             self._row([self.tr("保存先なし")])

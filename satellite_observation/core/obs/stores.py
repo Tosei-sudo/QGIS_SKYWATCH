@@ -120,6 +120,10 @@ class LocalObservationStore:
         self.save(marked)
         return marked
 
+    def clear(self, deleted_only: bool = False) -> int:
+        """Removes the records for good (only the deleted ones when asked); how many."""
+        return self.gpkg.delete(OBSERVATIONS, '"DELETED_AT" IS NOT NULL' if deleted_only else "1")
+
 
 class LocalAreaStore:
     """Checked areas in the local GeoPackage (`checked_areas`), one set per observation store."""
@@ -157,6 +161,10 @@ class LocalAreaStore:
         marked = _marked(areas, now)
         self.save(marked)
         return marked
+
+    def clear(self, deleted_only: bool = False) -> int:
+        """Removes this store's checked areas for good (only the deleted ones when asked); how many."""
+        return self.gpkg.delete(AREAS, '"STORE" = ?' + (' AND "DELETED_AT" IS NOT NULL' if deleted_only else ""), [self.of])
 
 
 def _row_key(store: str, path: str) -> str:
