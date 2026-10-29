@@ -2,7 +2,7 @@
 from urllib.parse import parse_qsl
 
 from satellite_observation.core.basemaps import (
-    DEFAULT_BASE_MAPS, attribution_text, base_map_type, raster_source, resolve_url, style_tiles, vector_tile_source,
+    DEFAULT_BASE_MAPS, attribution_text, base_map_type, pmtiles_archive, raster_source, resolve_url, style_tiles, vector_tile_source,
 )
 from satellite_observation.core.config import parse_config
 
@@ -67,7 +67,7 @@ def test_qgis_sources():
     assert source == "type=xyz&zmin=0&zmax=18&authcfg=abc1234&url=https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png"
     esri = DEFAULT_BASE_MAPS[5]
     params = dict(parse_qsl(vector_tile_source(esri, esri.url + "/")))
-    assert params == {"type": "arcgis", "url": esri.url}
+    assert params == {"type": "xyz", "serviceType": "arcgis", "url": esri.url}
     params = dict(parse_qsl(vector_tile_source(DEFAULT_BASE_MAPS[3], "https://t/{z}/{x}/{y}.pbf", style_url="https://s/std.json", zmin=4, zmax=16)))
     assert params == {"type": "xyz", "url": "https://t/{z}/{x}/{y}.pbf", "zmin": "4", "zmax": "16", "styleUrl": "https://s/std.json"}
 
@@ -77,6 +77,19 @@ def test_a_styles_tiles():
     assert style_tiles(style, "https://s/style/std.json") == {"tiles": "https://s/t/{z}/{x}/{y}.pbf", "minzoom": 4, "maxzoom": 16}
     assert style_tiles({"sources": {"v": {"type": "vector", "url": "tiles.json"}}}, "https://s/a/style.json") == {"tilejson": "https://s/a/tiles.json"}
     assert style_tiles({"sources": {}}, "https://s") is None
+
+
+def test_pmtiles_in_a_style():
+    # 地理院 ベクトル (optimal_bvmap style/std.json): its PMTiles archive is also served as {z}/{x}/{y} tiles.
+    gsi = {"sources": {"v": {"type": "vector", "minzoom": 4, "maxzoom": 16,
+                             "tiles": ["pmtiles://https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/optimal_bvmap-v1.pmtiles/{z}/{x}/{y}"]}}}
+    assert style_tiles(gsi, "https://gsi-cyberjapan.github.io/optimal_bvmap/style/std.json") == {
+        "tiles": "https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/{z}/{x}/{y}.pbf", "minzoom": 4, "maxzoom": 16}
+    # Others: QGIS 3.34 cannot read them.
+    assert style_tiles({"sources": {"v": {"type": "vector", "url": "pmtiles://./a.pmtiles"}}}, "https://s/style/x.json") == {
+        "pmtiles": "https://s/style/a.pmtiles"}
+    assert pmtiles_archive("pmtiles://https://h/b.pmtiles/{z}/{x}/{y}") == "https://h/b.pmtiles"
+    assert pmtiles_archive("https://h/{z}/{x}/{y}.pbf") is None
 
 
 def test_attribution_as_text():

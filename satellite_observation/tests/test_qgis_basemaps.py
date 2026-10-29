@@ -15,7 +15,12 @@ from qgis.testing import start_app  # noqa: E402
 
 APP = start_app()
 
-from qgis.core import QgsProject, QgsSettings, QgsVectorLayer  # noqa: E402
+from qgis.core import (  # noqa: E402
+    QgsCoordinateReferenceSystem, QgsFeature, QgsGeometry, QgsMapRendererSequentialJob, QgsMapSettings, QgsProject,
+    QgsRectangle, QgsSettings, QgsVectorLayer, QgsVectorTileWriter,
+)
+from qgis.PyQt.QtCore import QSize  # noqa: E402
+from qgis.PyQt.QtGui import QColor  # noqa: E402
 
 from satellite_observation.qgis_io import settings  # noqa: E402
 from satellite_observation.qgis_io.basemap_layer import PROPERTY, current_base_map  # noqa: E402
@@ -28,14 +33,54 @@ STYLE = {
 }
 
 
+#: An ArcGIS VectorTileServer's description (512 px tiles, levels 0–3).
+SERVICE = {
+    "currentVersion": 10.9, "name": "海", "capabilities": "TilesOnly", "type": "indexedVector",
+    "defaultStyles": "resources/styles", "tiles": ["tile/{z}/{y}/{x}.pbf"],
+    "fullExtent": {"xmin": -20037508.34, "ymin": -20037508.34, "xmax": 20037508.34, "ymax": 20037508.34,
+                   "spatialReference": {"wkid": 102100, "latestWkid": 3857}},
+    "tileInfo": {"rows": 512, "cols": 512, "dpi": 96, "format": "pbf",
+                 "origin": {"x": -20037508.342787, "y": 20037508.342787}, "spatialReference": {"wkid": 102100, "latestWkid": 3857},
+                 "lods": [{"level": i, "resolution": 78271.517018 / 2 ** i, "scale": 295828763.7957775 / 2 ** i} for i in range(4)]},
+    "minLOD": 0, "maxLOD": 3,
+}
+SERVICE_STYLE = {
+    "version": 8, "sources": {"esri": {"type": "vector", "url": "../../"}},
+    "layers": [{"id": "sea", "type": "fill", "source": "esri", "source-layer": "water", "paint": {"fill-color": "#ff0000"}}],
+}
+
+
+@pytest.fixture(scope="module")
+def tiles(tmp_path_factory):
+    """Vector tiles (zoom 0–3) of one layer, water, covering the world."""
+    folder = tmp_path_factory.mktemp("tiles")
+    water = QgsVectorLayer("Polygon?crs=EPSG:3857", "water", "memory")
+    feature = QgsFeature()
+    feature.setGeometry(QgsGeometry.fromRect(QgsRectangle(-2e7, -2e7, 2e7, 2e7)))
+    water.dataProvider().addFeatures([feature])
+    writer = QgsVectorTileWriter()
+    writer.setDestinationUri(f"type=xyz&url=file://{folder}/{{z}}/{{x}}/{{y}}.pbf")
+    writer.setMinZoom(0)
+    writer.setMaxZoom(3)
+    writer.setLayers([QgsVectorTileWriter.Layer(water)])
+    assert writer.writeTiles(), writer.errorMessage()
+    return folder
+
+
 @pytest.fixture()
-def server():
+def server(tiles):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802
-            if self.path.startswith("/style.json"):
-                body = json.dumps(STYLE).encode()
+            path = self.path.split("?", 1)[0]
+            tile = path.split("/")
+            if path.startswith("/style.json") or path in ("/VectorTileServer", "/VectorTileServer/resources/styles"):
+                body = json.dumps(STYLE if path == "/style.json" else SERVICE if path == "/VectorTileServer" else SERVICE_STYLE).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+            elif path.startswith("/VectorTileServer/tile/") and (tiles / tile[3] / tile[5].split(".")[0] / f"{tile[4]}.pbf").exists():
+                body = (tiles / tile[3] / tile[5].split(".")[0] / f"{tile[4]}.pbf").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-protobuf")
             else:
                 body = b""
                 self.send_response(404)
@@ -63,6 +108,7 @@ def plugin(tmp_path, server):
              "attributions": "<a href=\"https://example.com\">例</a>"},
             {"id": "vector", "label": "ベクトル", "url": f"{server}/style.json"},
             {"id": "pbf", "label": "タイル", "url": f"{server}/t/{{z}}/{{x}}/{{y}}.pbf"},
+            {"id": "esri", "label": "Esri", "url": f"{server}/VectorTileServer"},
         ],
         "defaultBaseMap": "local",
     }), encoding="utf-8")
@@ -91,7 +137,7 @@ def test_switches_the_background_map(plugin):
     [layer] = project.mapLayers().values()
     assert layer.name() == "手元のタイル" and layer.providerType() == "wms"
     assert f"file://{tmp}/tiles/{{z}}/{{x}}/{{y}}.png" in layer.source() and "zmax=12" in layer.source()
-    assert entries(p) == [("なし", False), ("手元のタイル", True), ("ベクトル", False), ("タイル", False)]
+    assert entries(p) == [("なし", False), ("手元のタイル", True), ("ベクトル", False), ("タイル", False), ("Esri", False)]
     # Another layer on top: the base map stays at the bottom when switched.
     points = QgsVectorLayer("Point?crs=EPSG:4326", "点", "memory")
     project.addMapLayer(points)
@@ -135,3 +181,44 @@ def test_a_new_project_gets_the_default(plugin):
     QgsProject.instance().clear()
     iface.newProjectCreated.emit()
     assert wait_for(lambda: current_base_map() == "local", 10000)
+
+
+def center_color(layer) -> str:
+    settings_ = QgsMapSettings()
+    settings_.setLayers([layer])
+    settings_.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
+    settings_.setExtent(QgsRectangle(-1e7, -1e7, 1e7, 1e7))
+    settings_.setOutputSize(QSize(256, 256))
+    settings_.setBackgroundColor(QColor("white"))
+    job = QgsMapRendererSequentialJob(settings_)
+    job.start()
+    job.waitForFinished()
+    return QColor(job.renderedImage().pixel(128, 128)).name()
+
+
+def test_an_arcgis_vector_tile_server(plugin):
+    p, iface, tmp = plugin
+    assert wait_for(lambda: current_base_map() == "local", 10000)
+    iface.bar.clearWidgets()
+    p.base_maps.choose("esri")
+    assert wait_for(lambda: p.base_maps.task is None, 15000)
+    assert current_base_map() == "esri", [w.text() for w in iface.bar.items()]
+    [layer] = QgsProject.instance().mapLayers().values()
+    assert layer.dataProvider().name() == "arcgisvectortileservice"
+    # The server's style, and its tiles drawn with it.
+    assert [st.styleName() for st in layer.renderer().styles()] == ["sea"]
+    assert center_color(layer) == "#ff0000"
+
+
+def test_a_style_with_pmtiles_says_why(plugin, server):
+    p, iface, tmp = plugin
+    assert wait_for(lambda: current_base_map() == "local", 10000)
+    STYLE["sources"]["v"]["tiles"] = [f"pmtiles://{server}/a.pmtiles/{{z}}/{{x}}/{{y}}"]
+    try:
+        iface.bar.clearWidgets()
+        p.base_maps.choose("vector")
+        assert wait_for(lambda: p.base_maps.task is None, 15000)
+    finally:
+        STYLE["sources"]["v"]["tiles"] = ["./tiles/{z}/{x}/{y}.pbf"]
+    assert current_base_map() == "local"
+    assert any("PMTiles" in w.text() and "a.pmtiles" in w.text() for w in iface.bar.items())

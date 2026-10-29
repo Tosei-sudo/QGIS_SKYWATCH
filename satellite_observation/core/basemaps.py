@@ -160,7 +160,8 @@ def vector_tile_source(base: BaseMapConfig, url: str, authcfg: Optional[str] = N
     """A vector tile layer's source: {z}/{x}/{y} tiles (mvt, a style's tiles) or an ArcGIS VectorTileServer (esri)."""
     auth = {"authcfg": authcfg} if authcfg else {}
     if base.type == "esri":
-        params = {"type": "arcgis", "url": url.split("?", 1)[0].rstrip("/"), **auth}
+        # QGIS reads an ArcGIS VectorTileServer as xyz tiles of the service type arcgis (type=arcgis alone opens nothing).
+        params = {"type": "xyz", "serviceType": "arcgis", "url": url.split("?", 1)[0].rstrip("/"), **auth}
         if style_url:
             params["styleUrl"] = style_url
         return urlencode(params, safe=":/{}")
@@ -170,18 +171,43 @@ def vector_tile_source(base: BaseMapConfig, url: str, authcfg: Optional[str] = N
     return urlencode(params, safe=":/{}")
 
 
+_PMTILES = re.compile(r"^pmtiles://(.+?\.pmtiles)(?:/\{z\}/\{x\}/\{y\}.*)?$", re.IGNORECASE)
+
+#: PMTiles archives also served as {z}/{x}/{y} tiles (QGIS 3.34 cannot read PMTiles): 地理院 最適化ベクトルタイル.
+PMTILES_AS_XYZ = {
+    "https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/optimal_bvmap-v1.pmtiles":
+        "https://cyberjapandata.gsi.go.jp/xyz/optimal_bvmap-v1/{z}/{x}/{y}.pbf",
+}
+
+
+def pmtiles_archive(url: str) -> Optional[str]:
+    """The archive of a `pmtiles://…` tile URL or source URL (None for other URLs)."""
+    m = _PMTILES.match(url)
+    return m.group(1) if m else None
+
+
 def style_tiles(style: dict, style_url: str) -> Optional[dict]:
     """
     The first vector source of a Mapbox / MapLibre style: {"tiles": template,
-    "minzoom", "maxzoom"}, or {"tilejson": url} when the source points to a
-    TileJSON to read; None when the style has none.
+    "minzoom", "maxzoom"}, {"tilejson": url} when the source points to a
+    TileJSON to read, or {"pmtiles": archive} for a PMTiles archive with no
+    {z}/{x}/{y} tiles known for it; None when the style has none.
     """
     for source in (style.get("sources") or {}).values():
         if not isinstance(source, dict) or source.get("type") != "vector":
             continue
         tiles = source.get("tiles")
-        if isinstance(tiles, list) and tiles and isinstance(tiles[0], str):
-            return {"tiles": urljoin(style_url, tiles[0]), "minzoom": int(source.get("minzoom", 0)), "maxzoom": int(source.get("maxzoom", 14))}
-        if isinstance(source.get("url"), str):
-            return {"tilejson": urljoin(style_url, source["url"])}
+        zooms = {"minzoom": int(source.get("minzoom", 0)), "maxzoom": int(source.get("maxzoom", 14))}
+        url = tiles[0] if isinstance(tiles, list) and tiles and isinstance(tiles[0], str) else source.get("url")
+        if not isinstance(url, str):
+            continue
+        archive = pmtiles_archive(url)
+        if archive is not None:
+            archive = urljoin(style_url, archive)
+            if archive in PMTILES_AS_XYZ:
+                return {"tiles": PMTILES_AS_XYZ[archive], **zooms}
+            return {"pmtiles": archive}
+        if url is not source.get("url"):
+            return {"tiles": urljoin(style_url, url), **zooms}
+        return {"tilejson": urljoin(style_url, url)}
     return None
