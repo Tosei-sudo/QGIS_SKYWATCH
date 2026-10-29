@@ -18,7 +18,7 @@ from typing import Any, Iterator, Optional
 
 import numpy as np
 
-from .net import STRIDE, Conv, Up, grid_centres
+from .net import BN_EPS, STRIDE, Add, Conv, Up, grid_centres
 
 #: ONNX's element types.
 FLOAT, INT64 = 1, 7
@@ -81,6 +81,10 @@ def _attr_int(name: str, v: int) -> bytes:
     return _str(1, name) + _int(3, v) + _int(20, 2)
 
 
+def _attr_float(name: str, v: float) -> bytes:
+    return _str(1, name) + _float(2, v) + _int(20, 1)
+
+
 def _attr_str(name: str, v: str) -> bytes:
     return _str(1, name) + _bytes(4, v.encode()) + _int(20, 3)
 
@@ -104,10 +108,20 @@ def model_bytes(layers: list, params: dict[str, np.ndarray], channels: int, size
     for layer in layers:
         if isinstance(layer, Conv):
             p = layer.k // 2
-            nodes.append(node("Conv", [layer.source if layer.source != "x" else "images", f"{layer.name}.w", f"{layer.name}.b"],
-                              [layer.name + ("_pre" if layer.relu else "")], layer.name + "_conv",
+            source = layer.source if layer.source != "x" else "images"
+            done = layer.name + ("_pre" if layer.relu else "")
+            conv_out = layer.name + "_conv" if layer.bn else done
+            inputs = [source, f"{layer.name}.w"] + ([] if layer.bn else [f"{layer.name}.b"])
+            nodes.append(node("Conv", inputs, [conv_out], layer.name + "_conv",
                               [_attr_ints("kernel_shape", [layer.k, layer.k]), _attr_ints("strides", [layer.stride] * 2),
                                _attr_ints("pads", [p] * 4)]))
+            if layer.bn:
+                nodes.append(node("BatchNormalization", [conv_out, f"{layer.name}.bn_w", f"{layer.name}.bn_b", f"{layer.name}.bn_m",
+                                                         f"{layer.name}.bn_v"], [done], layer.name + "_bn", [_attr_float("epsilon", BN_EPS)]))
+            if layer.relu:
+                nodes.append(node("Relu", [layer.name + "_pre"], [layer.name]))
+        elif isinstance(layer, Add):
+            nodes.append(node("Add", list(layer.sources), [layer.name + ("_pre" if layer.relu else "")], layer.name + "_add"))
             if layer.relu:
                 nodes.append(node("Relu", [layer.name + "_pre"], [layer.name]))
         elif isinstance(layer, Up):
@@ -121,10 +135,22 @@ def model_bytes(layers: list, params: dict[str, np.ndarray], channels: int, size
     inits.append(tensor("stride", np.array(float(STRIDE), np.float32)))
     inits.append(tensor("out_shape", np.array([1, -1, gw * gh], np.int64)))
     classes = params["cls.w"].shape[0]
+    if "box.w" in params:
+        # Distances from the cell (left, top, right, bottom): the centre moves by half of right − left, the size is their sum.
+        inits.append(tensor("split_2_2", np.array([2, 2], np.int64)))
+        inits.append(tensor("half", np.array(0.5, np.float32)))
+        nodes += [
+            node("Exp", ["box"], ["dist"]),
+            node("Split", ["dist", "split_2_2"], ["lt", "rb"], "split_dist", [_attr_int("axis", 1)]),
+            node("Sub", ["rb", "lt"], ["shift_cells"]),
+            node("Mul", ["shift_cells", "half"], ["half_shift"]),
+            node("Add", ["grid", "half_shift"], ["xy_cells"]),
+            node("Add", ["lt", "rb"], ["wh_cells"]),
+        ]
+    else:
+        nodes += [node("Add", ["off", "grid"], ["xy_cells"]), node("Exp", ["size"], ["wh_cells"])]
     nodes += [
-        node("Add", ["off", "grid"], ["xy_cells"]),
         node("Mul", ["xy_cells", "stride"], ["xy"]),
-        node("Exp", ["size"], ["wh_cells"]),
         node("Mul", ["wh_cells", "stride"], ["wh"]),
         node("Sigmoid", ["cls"], ["scores"]),
         node("Concat", ["xy", "wh", "scores"], ["joined"], attrs=[_attr_int("axis", 1)]),

@@ -22,8 +22,11 @@ import numpy as np
 
 from ..detect import PAD, Detection, decode_yolo, nms
 from ..model_config import detector_spec
-from .loss import batch_targets, detection_loss
-from .net import STRIDE, WIDTHS, Adam, Conv, Network, architecture, grow_classes, init_params, yolo_output
+from .loss import batch_box_targets, batch_targets, box_loss, detection_loss
+from .metrics import Scores, evaluate
+from .net import (
+    RES_WIDTHS, STRIDE, WIDTHS, Adam, Network, architecture, grow_classes, init_buffers, init_params, res_architecture, yolo_output,
+)
 from .onnx_io import FORMAT, META_KEY, model_bytes, names_text, read_model, training_state
 
 #: Input sizes offered (multiples of 16, the network's coarsest level).
@@ -88,18 +91,14 @@ class TrainOptions:
     seed: int = 0
 
 
-@dataclass
-class Check:
-    """The model checked on the held-back windows."""
-    precision: float
-    recall: float
-    f1: float
-    found: int
-    objects: int
+#: The networks: 高精度 (residual, batch-normalized, GIoU and quality scores) and 軽量 (the first, small plain one).
+ARCHS = ("res", "fpn4")
 
-    def to_json(self) -> dict:
-        return {"precision": round(self.precision, 3), "recall": round(self.recall, 3), "f1": round(self.f1, 3),
-                "found": self.found, "objects": self.objects}
+
+def layers_of(arch: str, size: str, classes: int) -> list:
+    if arch == "res":
+        return res_architecture(RES_WIDTHS[size], classes)
+    return architecture(WIDTHS[size], classes)
 
 
 @dataclass
@@ -113,10 +112,12 @@ class Model:
     history: list[dict] = field(default_factory=list)
     #: Depth of the classification the classes are cut to (0: as recorded).
     depth: int = 0
+    arch: str = "fpn4"
 
     def state(self) -> dict:
-        return {"format": FORMAT, "version": 1, "arch": {"name": "fpn4", "size": self.widths, "widths": list(WIDTHS[self.widths]),
-                                                         "stride": STRIDE},
+        widths = RES_WIDTHS if self.arch == "res" else WIDTHS
+        return {"format": FORMAT, "version": 1,
+                "arch": {"name": self.arch, "size": self.widths, "widths": list(widths[self.widths]), "stride": STRIDE},
                 "input": self.input.to_json(), "tile": self.tile, "classes": self.classes, "depth": self.depth, "history": self.history}
 
     def onnx(self) -> bytes:
@@ -125,17 +126,20 @@ class Model:
         meta = {"task": "detect", "imgsz": f"[{self.tile}, {self.tile}]", "names": names_text(self.classes), "stride": str(STRIDE),
                 "description": "satellite_observation で学習した物体検出モデル", "author": "satellite_observation",
                 META_KEY: json.dumps(self.state(), ensure_ascii=False)}
-        return model_bytes(self.network.layers, self.network.params, self.input.channels, (self.tile, self.tile), meta)
+        return model_bytes(self.network.layers, {**self.network.params, **self.network.buffers}, self.input.channels,
+                           (self.tile, self.tile), meta)
 
 
-def new_model(classes: Sequence[str], input_spec: InputSpec, tile: int, size: str, depth: int = 0, seed: int = 0) -> Model:
+def new_model(classes: Sequence[str], input_spec: InputSpec, tile: int, size: str, depth: int = 0, seed: int = 0, arch: str = "res") -> Model:
     if tile not in TILE_SIZES:
         raise TrainError(f"入力の大きさは {'・'.join(map(str, TILE_SIZES))} のいずれか")
     if size not in WIDTHS:
         raise TrainError("モデルの大きさは small・medium・large のいずれか")
-    layers = architecture(WIDTHS[size], len(classes))
+    if arch not in ARCHS:
+        raise TrainError("ネットワークは res・fpn4 のいずれか")
+    layers = layers_of(arch, size, len(classes))
     params = init_params(layers, input_spec.channels, np.random.default_rng(seed))
-    return Model(Network(layers, params), size, list(classes), input_spec, tile, depth=depth)
+    return Model(Network(layers, params), size, list(classes), input_spec, tile, depth=depth, arch=arch)
 
 
 def load_model(data: bytes) -> Model:
@@ -147,25 +151,23 @@ def load_model(data: bytes) -> Model:
     state = training_state(meta)
     if state is None:
         raise TrainError("このプラグインで学習したモデルのみ追加学習可能（他の ONNX は物体検出（AI）で利用）")
+    arch = state.get("arch", {}).get("name", "fpn4")
     size = state.get("arch", {}).get("size")
-    if size not in WIDTHS:
+    if arch not in ARCHS or size not in WIDTHS:
         raise TrainError("モデルの形式が不明（新しい版のプラグインで学習したモデルの可能性）")
     classes = [str(c) for c in state.get("classes", [])]
-    layers = architecture(WIDTHS[size], len(classes))
-    params = {}
-    for layer in layers:
-        if not isinstance(layer, Conv):
-            continue
-        for part in ("w", "b"):
-            key = f"{layer.name}.{part}"
-            if key not in inits:
-                raise TrainError(f"モデルの重み {key} なし")
-            params[key] = inits[key].astype(np.float32)
+    layers = layers_of(arch, size, len(classes))
+    wanted = init_params(layers, 1, np.random.default_rng(0))
+    params, buffers = {}, {}
+    for key in list(wanted) + list(init_buffers(layers)):
+        if key not in inits:
+            raise TrainError(f"モデルの重み {key} なし")
+        (buffers if key.endswith((".bn_m", ".bn_v")) else params)[key] = inits[key].astype(np.float32)
     i = state.get("input", {})
     spec = InputSpec(i.get("mode", "rgb"), [int(b) for b in i.get("bands", [])], [float(v) for v in i.get("mean", [])],
                      [float(v) for v in i.get("std", [])])
-    return Model(Network(layers, params), size, classes, spec, int(state.get("tile", 256)), list(state.get("history", [])),
-                 int(state.get("depth", 0)))
+    return Model(Network(layers, params, buffers), size, classes, spec, int(state.get("tile", 256)), list(state.get("history", [])),
+                 int(state.get("depth", 0)), arch)
 
 
 def add_classes(model: Model, classes: Sequence[str], seed: int = 0) -> list[str]:
@@ -251,12 +253,26 @@ def turn(x: np.ndarray, boxes: np.ndarray, k: int, flip: bool) -> tuple[np.ndarr
     return np.ascontiguousarray(x), b
 
 
-def sample(window: Window, spec: InputSpec, tile: int, rng: np.random.Generator, augment: bool = True) -> tuple[np.ndarray, np.ndarray]:
-    """A random training tile of a window and its boxes."""
+#: The range of the random zoom of training tiles (objects seen a little smaller and larger than they are).
+SCALES = (0.75, 1.33)
+
+
+def sample(window: Window, spec: InputSpec, tile: int, rng: np.random.Generator, augment: bool = True,
+           scales: Optional[tuple[float, float]] = SCALES) -> tuple[np.ndarray, np.ndarray]:
+    """A random training tile of a window and its boxes: zoomed, turned, flipped and brightened at random when `augment`."""
     h, w = window.pixels.shape[:2]
-    x0 = int(rng.integers(0, w - tile + 1)) if w > tile else -int(rng.integers(0, tile - w + 1))
-    y0 = int(rng.integers(0, h - tile + 1)) if h > tile else -int(rng.integers(0, tile - h + 1))
-    pixels, boxes = crop(window, x0, y0, tile)
+    scale = math.exp(rng.uniform(math.log(scales[0]), math.log(scales[1]))) if augment and scales else 1.0
+    side = max(16, int(round(tile / scale)))
+    x0 = int(rng.integers(0, w - side + 1)) if w > side else -int(rng.integers(0, side - w + 1))
+    y0 = int(rng.integers(0, h - side + 1)) if h > side else -int(rng.integers(0, side - h + 1))
+    pixels, boxes = crop(window, x0, y0, side)
+    if side != tile:
+        # Nearest neighbour: cheap, and the band values stay values.
+        index = np.minimum(((np.arange(tile) + 0.5) * side / tile).astype(np.int64), side - 1)
+        pixels = pixels[index][:, index]
+        boxes = boxes.copy()
+        boxes[:, :4] *= tile / side
+        boxes = boxes[(boxes[:, 2] >= 1.5) & (boxes[:, 3] >= 1.5)]
     x = input_of(pixels, spec)
     if augment:
         valid = (pixels[..., -1:] > 0).astype(np.float32)
@@ -277,20 +293,11 @@ def split(windows: Sequence[Window], share: float, rng: np.random.Generator) -> 
 
 # Checking.
 
-def iou(a: Sequence[float], b: Sequence[float]) -> float:
-    ax1, ay1, ax2, ay2 = a[0] - a[2] / 2, a[1] - a[3] / 2, a[0] + a[2] / 2, a[1] + a[3] / 2
-    bx1, by1, bx2, by2 = b[0] - b[2] / 2, b[1] - b[3] / 2, b[0] + b[2] / 2, b[1] + b[3] / 2
-    w, h = min(ax2, bx2) - max(ax1, bx1), min(ay2, by2) - max(ay1, by1)
-    if w <= 0 or h <= 0:
-        return 0.0
-    inter = w * h
-    return inter / (a[2] * a[3] + b[2] * b[3] - inter)
-
-
-def detect_window(model: Model, window: Window, score: float = SCORE) -> list[Detection]:
+def detect_window(model: Model, window: Window, score: float = SCORE, network: Optional[Network] = None) -> list[Detection]:
     """The model run over a whole window in overlapping tiles, as 物体検出（AI） runs it over an image."""
     from ..detect import offset, tiles_of
 
+    net = network or model.network
     tile = model.tile
     spec = detector_spec(None, {"imgsz": f"[{tile}, {tile}]", "names": names_text(model.classes)})
     spec.score, spec.iou = score, IOU
@@ -300,7 +307,7 @@ def detect_window(model: Model, window: Window, score: float = SCORE) -> list[De
         pixels, _ = crop(window, x0, y0, tile)
         if not (pixels[..., -1] > 0).any():
             continue
-        out = yolo_output(model.network.forward(input_of(pixels, model.input)[None]))
+        out = yolo_output(net.forward(input_of(pixels, model.input)[None], training=False))
         for d in nms(decode_yolo(out.shape, out[0], spec, score), IOU):
             x, y = int(d.box[0]), int(d.box[1])
             if 0 <= x < tile and 0 <= y < tile and pixels[y, x, -1] > 0:
@@ -308,29 +315,12 @@ def detect_window(model: Model, window: Window, score: float = SCORE) -> list[De
     return nms(found, IOU)
 
 
-def check(model: Model, windows: Sequence[Window]) -> Check:
-    """Precision and recall on windows: a find is right when it overlaps an object of its class by IoU 0.5."""
-    hits = found = objects = 0
-    for window in windows:
-        truth = [list(b) for b in window.boxes]
-        objects += len(truth)
-        used = [False] * len(truth)
-        detections = sorted(detect_window(model, window), key=lambda d: -d.score)
-        found += len(detections)
-        for d in detections:
-            best, at = MATCH_IOU, -1
-            for i, t in enumerate(truth):
-                if not used[i] and int(t[4]) == d.cls:
-                    v = iou(d.box, t[:4])
-                    if v >= best:
-                        best, at = v, i
-            if at >= 0:
-                used[at] = True
-                hits += 1
-    precision = hits / found if found else 0.0
-    recall = hits / objects if objects else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return Check(precision, recall, f1, found, objects)
+def check(model: Model, windows: Sequence[Window], network: Optional[Network] = None) -> Scores:
+    """mAP50, mAP50-95 (and precision and recall at the score 0.25) on labelled windows."""
+    found = []
+    for w in windows:
+        found.append(np.array([[*d.box, d.cls, d.score] for d in detect_window(model, w, 0.05, network)], float).reshape(-1, 6))
+    return evaluate(found, [w.boxes for w in windows], model.classes, SCORE)
 
 
 # Training.
@@ -340,8 +330,8 @@ class TrainRun:
     epochs: int = 0
     steps: int = 0
     losses: list[float] = field(default_factory=list)
-    checks: list[Check] = field(default_factory=list)
-    best: Optional[Check] = None
+    checks: list[Scores] = field(default_factory=list)
+    best: Optional[Scores] = None
     best_epoch: int = 0
     seconds: float = 0.0
     stopped: bool = False
@@ -355,13 +345,40 @@ def learning_rate(step: int, total: int, base: float, warmup: int) -> float:
     return base * (0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * min(1.0, p))))
 
 
+class Average:
+    """
+    The exponential moving average of the weights (and batch statistics),
+    what is checked and kept: steadier than the last step's weights. It
+    reaches over about a tenth of the training, and starts short.
+    """
+
+    def __init__(self, net: Network, total: int):
+        self.params = {k: v.copy() for k, v in net.params.items()}
+        self.buffers = {k: v.copy() for k, v in net.buffers.items()}
+        self.most = min(0.9999, max(0.9, 1 - 10 / max(1, total)))
+        self.ramp = max(20.0, total / 20)
+        self.steps = 0
+
+    def update(self, net: Network) -> None:
+        self.steps += 1
+        d = self.most * (1 - math.exp(-self.steps / self.ramp))
+        for store, now in ((self.params, net.params), (self.buffers, net.buffers)):
+            for k, v in now.items():
+                store[k] *= d
+                store[k] += (1 - d) * v
+
+    def network(self, net: Network) -> Network:
+        return Network(net.layers, self.params, self.buffers)
+
+
 def train(model: Model, train_windows: Sequence[Window], check_windows: Sequence[Window], options: TrainOptions,
           progress: Optional[Callable[[str, float], None]] = None, log: Optional[Callable[[str], None]] = None,
           cancelled: Callable[[], bool] = lambda: False) -> TrainRun:
     """
-    Trains the model in place for `options.epochs` over the windows; when
-    some are held back, the weights of the epoch that found them best are
-    kept. Stopped (cancelled) early, it keeps what it had learnt.
+    Trains the model in place for `options.epochs` over the windows, and
+    keeps the moving average of its weights; when some windows are held
+    back, the average of the epoch that found them best (mAP50-95). Stopped
+    (cancelled) early, it keeps what it had learnt.
     """
     if not train_windows:
         raise TrainError("学習する画像の範囲なし")
@@ -369,14 +386,16 @@ def train(model: Model, train_windows: Sequence[Window], check_windows: Sequence
     net = model.network
     tile = model.tile
     cells = tile // STRIDE
+    residual = "box" in net.heads
     per_epoch = max(MIN_STEPS, math.ceil(len(train_windows) / options.batch))
     total = per_epoch * options.epochs
     warmup = min(100, max(1, total // 10))
-    optimizer = Adam(net.params, options.lr)
+    optimizer = Adam(net.params, options.lr, decay=5e-4 if residual else 1e-4)
+    average = Average(net, total)
     run = TrainRun()
     started = time.monotonic()
-    best_params = None
-    best_f1 = -1.0
+    best = None
+    best_score = -1.0
     for epoch in range(options.epochs):
         order = np.concatenate([rng.permutation(len(train_windows)) for _ in range(math.ceil(per_epoch * options.batch / len(train_windows)))])
         epoch_loss = 0.0
@@ -387,10 +406,13 @@ def train(model: Model, train_windows: Sequence[Window], check_windows: Sequence
             picks = order[s * options.batch:(s + 1) * options.batch]
             batch = [sample(train_windows[i], model.input, tile, rng) for i in picks]
             x = np.stack([b[0] for b in batch])
-            targets = batch_targets([b[1] for b in batch], cells, cells, len(model.classes))
             heads = net.forward(x, keep=True)
-            losses, grads = detection_loss(heads, targets)
+            if residual:
+                losses, grads = box_loss(heads, batch_box_targets([b[1] for b in batch], cells, cells))
+            else:
+                losses, grads = detection_loss(heads, batch_targets([b[1] for b in batch], cells, cells, len(model.classes)))
             optimizer.step(net.params, net.backward(grads), learning_rate(run.steps, total, options.lr, warmup))
+            average.update(net)
             run.steps += 1
             epoch_loss += losses["total"]
             if progress:
@@ -404,17 +426,19 @@ def train(model: Model, train_windows: Sequence[Window], check_windows: Sequence
         if check_windows and (last or (epoch + 1) % max(1, options.epochs // 10) == 0):
             if progress:
                 progress(f"検証中… エポック {epoch + 1}", run.steps / total)
-            c = check(model, check_windows)
+            c = check(model, check_windows, average.network(net))
             run.checks.append(c)
-            text += f"・検証 適合率 {c.precision:.2f}・再現率 {c.recall:.2f}・F1 {c.f1:.2f}"
-            if c.f1 > best_f1:
-                best_f1, run.best, run.best_epoch = c.f1, c, epoch + 1
-                best_params = {k: v.copy() for k, v in net.params.items()}
+            text += f"・検証 mAP50 {c.map50:.3f}・mAP50-95 {c.map:.3f}"
+            if c.map > best_score:
+                best_score, run.best, run.best_epoch = c.map, c, epoch + 1
+                best = ({k: v.copy() for k, v in average.params.items()}, {k: v.copy() for k, v in average.buffers.items()})
         if log:
             log(text)
-    if best_params is not None and run.best_epoch != run.epochs:
-        net.params.update(best_params)
-        if log:
+    if run.steps:
+        params, buffers = best if best is not None else (average.params, average.buffers)
+        net.params.update(params)
+        net.buffers.update(buffers)
+        if best is not None and run.best_epoch != run.epochs and log:
             log(f"検証で最もよいエポック {run.best_epoch} の重みを採用")
     run.seconds = time.monotonic() - started
     return run
