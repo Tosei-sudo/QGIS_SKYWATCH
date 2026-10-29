@@ -206,7 +206,7 @@ def _observation_function(name: str):
 #: As the viewer's scripts have them (viewer.observations → api.observations, viewer.addObservation → api.add_observation…).
 OBSERVATION_FUNCTIONS = [
     "observations", "observed_things", "observation_images", "observe_image", "add_observation", "update_observation",
-    "rename_observed_thing", "delete_observations", "observation_candidates", "confidences", "checked_areas", "add_checked_area",
+    "rename_observed_thing", "delete_observations", "clear_observations", "observation_candidates", "confidences", "checked_areas", "add_checked_area",
     "delete_checked_areas", "observation_report",
 ]
 for _name in OBSERVATION_FUNCTIONS:

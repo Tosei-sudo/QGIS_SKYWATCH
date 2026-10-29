@@ -536,6 +536,39 @@ class ObservationBook:
         back = [replace(o, deleted_at=None, updated_at=now) for o in rows]
         return self._save_records(back, f"{len(back)} 件の記録を復元") is not None
 
+    def can_clear(self) -> bool:
+        """Whether the store can remove its records for good (the local GeoPackage)."""
+        return callable(getattr(self.store, "clear", None)) and callable(getattr(self.area_store, "clear", None))
+
+    def clear(self, deleted_only: bool = False) -> Optional[tuple[int, int]]:
+        """
+        Removes the records and checked areas for good, with the images listed
+        without their file (only the deleted records and areas when asked);
+        how many records and areas, None when the store cannot.
+        """
+        if not self.can_clear():
+            self._say(f"{self.store.label} の記録は消去不可")
+            return None
+        try:
+            records = self.store.clear(deleted_only)
+            areas = self.area_store.clear(deleted_only)
+        except Exception as error:  # noqa: BLE001
+            self._say(f"消去失敗: {_error_text(error)}")
+            return None
+        with self.lock:
+            if deleted_only:
+                self.records = [o for o in self.records if o.deleted_at is None]
+                self.areas = [a for a in self.areas if a.deleted_at is None]
+            else:
+                self.records = []
+                self.areas = []
+                self.listed = []
+                self._save_listed()
+                self._order()
+        what = "削除済みの" if deleted_only else ""
+        self._say(f"{self.store.label} の{what}記録 {records} 件・確認範囲 {areas} 件を消去")
+        return records, areas
+
     def rename(self, object_id: str, name: str, kind: Optional[str] = None) -> bool:
         """Renames a thing in all its records (and changes its kind, when given)."""
         now = now_ms()

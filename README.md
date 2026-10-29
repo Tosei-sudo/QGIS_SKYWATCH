@@ -95,6 +95,8 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 前後の画像のモノは白抜きの印。クリックか「継続」「不在」、「すべて継続」で一括。新しい記録には近くの「同一候補」（Alt+1〜5）
 - 「確認範囲」（A）は対角の 2 点（または表示範囲・画像の範囲）と対象の種別。範囲内で記録のないモノは「確認範囲内 n 件を不在」で一括
 - 印はドラッグで場所を直せる。削除は削除日時を入れて残し、「詳細」の「削除済みも表示」から復元
+- 記録の削除: 印をクリックして開いたフォームの「削除」、「この画像」タブの行の「削除」、「モノ」タブの「このモノの記録を削除」（2 回押し）
+- 「詳細」の「ローカル記録の消去…」でローカル GeoPackage の記録・確認範囲・ファイルなしの画像の一覧を完全に消去（確認あり。「削除済みのみ消去」も可。分類体系・参考写真は残す。Esri の保存先では使用不可）
 - 「モノ」タブで流れ（帯グラフ・表・地図の軌跡）、名前・種別の変更・統合。「分類」タブで分類体系
 - 「詳細」から報告書（HTML 保存・印刷・PDF 保存。地図はキャンバスのレイヤーに記録の印を重ねて描画）、再読み込み、CSV 保存、レイヤー化（記録のポイント・確認範囲のポリゴン・流れのライン。時系列コントローラー対応）
 - 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、常にあるローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
@@ -337,7 +339,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、外部AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、外部AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
