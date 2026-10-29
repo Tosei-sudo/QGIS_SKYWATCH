@@ -1100,6 +1100,8 @@ class ObservationDock(PluginDock):
             return
         lon, lat, editing, source = self.pending
         values = self.form_values()
+        # Offered first by the next new record, in later sessions too.
+        self.book.remember(values.kind, values.activity if present else None, values.confidence)
         self.close_form()
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source))
 
@@ -1146,6 +1148,9 @@ class ObservationDock(PluginDock):
             self._pick_activity(words[n - 1])
 
     def _kind_changed(self) -> None:
+        """The kind typed or chosen; for a new record, also what the next new record starts with."""
+        if self.book is not None and self.pending is not None and self.pending[2] is None and self.pending[3] is None:
+            self.book.remember(kind=self.kind_input.text())
         self._render_kind_path()
         self._render_candidates()
 

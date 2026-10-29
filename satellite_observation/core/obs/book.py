@@ -13,6 +13,7 @@ dock runs them in a QgsTask.
 """
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
@@ -117,8 +118,8 @@ class ObservationBook:
         #: Times typed for images that do not say (by image id).
         self.manual_times: dict[str, int] = {}
         self.listed: list[ListedImage] = parse_listed_images(self.prefs.get(self._listed_key))
-        #: What the last record said (offered first next time).
-        self.last = FormValues()
+        #: What the last record said (offered first next time; kept per store across sessions).
+        self.last = self._read_last()
         self.loaded = False
         self.status = ""
 
@@ -197,6 +198,32 @@ class ObservationBook:
     @property
     def _listed_key(self) -> str:
         return f"listed_images/{self.store.label}"
+
+    @property
+    def _last_key(self) -> str:
+        return f"last_values/{self.store.label}"
+
+    def _read_last(self) -> FormValues:
+        try:
+            value = json.loads(self.prefs.get(self._last_key) or "{}")
+        except ValueError:
+            value = {}
+        if not isinstance(value, dict):
+            value = {}
+        return FormValues(**{k: str(value.get(k) or "") for k in ("kind", "activity", "confidence")})
+
+    def remember(self, kind: Optional[str] = None, activity: Optional[str] = None, confidence: Optional[str] = None) -> None:
+        """
+        What the next new record offers first (None: as it was), kept for the
+        next session too. Not in a task: the prefs are QgsSettings in QGIS.
+        """
+        last = self.last
+        self.last = FormValues(kind=last.kind if kind is None else kind_of(path_of(kind)),
+                               activity=last.activity if activity is None else activity.strip(),
+                               confidence=last.confidence if confidence is None else confidence.strip())
+        if self.last != last:
+            self.prefs.set(self._last_key, json.dumps({"kind": self.last.kind, "activity": self.last.activity,
+                                                       "confidence": self.last.confidence}, ensure_ascii=False))
 
     def set_open_images(self, images: Sequence[ObservedImage], selected: Optional[str] = None) -> None:
         """The project's images again (call when they change): in order of acquisition time with those listed without their file."""
@@ -278,8 +305,6 @@ class ObservationBook:
         return True
 
     def _save_listed(self) -> None:
-        import json
-
         self.prefs.set(self._listed_key, json.dumps([i.to_json() for i in self.listed], ensure_ascii=False))
 
     def recorded_images(self) -> list[ListedImage]:
