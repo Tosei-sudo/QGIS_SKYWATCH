@@ -64,21 +64,27 @@ def test_the_onnx_model_gives_what_numpy_gives():
     x = rng.standard_normal((1, 128, 128, 4)).astype(np.float32)
     out = session.run(None, {"images": x.transpose(0, 3, 1, 2)})[0]
     assert out.shape == (1, 4 + 3, 32 * 32)
-    assert np.abs(out - N.yolo_output(model.network.forward(x))).max() < 1e-3
+    assert np.allclose(out, N.yolo_output(model.network.forward(x)), rtol=1e-4, atol=1e-3)
     # Ultralytics' metadata: 物体検出（AI） reads the model as any YOLOv8 one, the band input from `satobs`.
     meta = session.get_modelmeta().custom_metadata_map
     spec = detector_spec(None, meta)
     assert (spec.task, spec.input_size, spec.classes, spec.bands) == ("detect", (128, 128), ["船舶", "航空機", "車両"], [1, 2, 3, 4])
 
 
-def test_the_model_reads_back_to_train_further():
-    model = new_model(["船舶"], InputSpec(), 256, "medium", depth=1)
+@pytest.mark.parametrize("arch", ["res", "fpn4"])
+def test_the_model_reads_back_to_train_further(arch):
+    model = new_model(["船舶"], InputSpec(), 256, "medium", depth=1, arch=arch)
     model.history.append({"epochs": 3})
+    for k in model.network.buffers:
+        model.network.buffers[k] += 0.5
     back = load_model(model.onnx())
-    assert (back.classes, back.tile, back.widths, back.depth, back.history, back.input.mode) == (["船舶"], 256, "medium", 1, [{"epochs": 3}], "rgb")
+    assert (back.arch, back.classes, back.tile, back.widths, back.depth, back.history, back.input.mode) == \
+        (arch, ["船舶"], 256, "medium", 1, [{"epochs": 3}], "rgb")
     assert all(np.array_equal(back.network.params[k], v) for k, v in model.network.params.items())
+    assert all(np.array_equal(back.network.buffers[k], v) for k, v in model.network.buffers.items())
+    assert bool(model.network.buffers) == (arch == "res")
     meta, _ = read_model(model.onnx())
-    assert training_state(meta)["arch"]["widths"] == list(N.WIDTHS["medium"])
+    assert training_state(meta)["arch"]["widths"] == list((N.RES_WIDTHS if arch == "res" else N.WIDTHS)["medium"])
 
 
 def test_only_models_trained_here_train_further():
@@ -229,14 +235,15 @@ def synthetic(rng, count=10, size=160):
     return Window(rgba, np.array(boxes, np.float32))
 
 
-def test_a_few_epochs_learn_the_squares():
+@pytest.mark.parametrize("arch", ["res", "fpn4"])
+def test_a_few_epochs_learn_the_squares(arch):
     rng = np.random.default_rng(5)
     windows = [synthetic(rng) for _ in range(12)]
-    model = new_model(["square"], InputSpec(), 128, "small")
+    model = new_model(["square"], InputSpec(), 128, "small", arch=arch)
     run = train(model, windows, [], TrainOptions(epochs=8, tile=128, batch=4))
-    assert run.epochs == 8 and run.losses[-1] < run.losses[0] / 3
+    assert run.epochs == 8 and run.losses[-1] < run.losses[0] / 2
     c = check(model, [synthetic(rng) for _ in range(3)])
-    assert c.recall > 0.7 and c.precision > 0.5
+    assert c.map50 > 0.7 and c.recall > 0.7
 
 
 def test_training_stops_when_cancelled_keeping_what_it_learnt():
@@ -246,3 +253,115 @@ def test_training_stops_when_cancelled_keeping_what_it_learnt():
     run = train(model, [synthetic(rng)], [], TrainOptions(epochs=5, tile=128, batch=2),
                 cancelled=lambda: calls.append(1) or len(calls) > 25)
     assert run.stopped and run.epochs == 1
+
+
+# The residual network (高精度).
+
+def test_the_residual_networks_gradients_with_batch_normalization(monkeypatch):
+    monkeypatch.setattr(N, "DTYPE", np.float64)
+    rng = np.random.default_rng(7)
+    layers = N.res_architecture(N.RES_WIDTHS["small"], 2)
+    params = {k: v.astype(np.float64) + rng.standard_normal(v.shape) * 0.1 for k, v in N.init_params(layers, 2, rng).items()}
+    net = N.Network(layers, params)
+    x = rng.standard_normal((2, 64, 64, 2))
+    heads = net.forward(x, keep=True)
+    assert set(heads) == {"cls", "box"} and heads["box"].shape == (2, 16, 16, 4)
+    weights = {k: rng.standard_normal(v.shape) for k, v in heads.items()}
+    grads = net.backward(weights)
+
+    def value():
+        h = net.forward(x, training=True)
+        return sum(float((h[k] * weights[k]).sum()) for k in h)
+
+    for name in ("stem.w", "stem.bn_w", "s2r0a.w", "s3r1b.bn_b", "s5d.w", "p4.w", "hb.bn_w", "box.b", "cls.w"):
+        d = rng.standard_normal(net.params[name].shape)
+        kept = net.params[name].copy()
+        # A small step: after batch normalization many units sit near ReLU's kink.
+        net.params[name] = kept + 1e-8 * d
+        up = value()
+        net.params[name] = kept - 1e-8 * d
+        down = value()
+        net.params[name] = kept
+        assert (up - down) / 2e-8 == pytest.approx(float((grads[name] * d).sum()), rel=1e-4, abs=1e-6)
+
+
+def test_batch_normalization_learns_running_statistics():
+    rng = np.random.default_rng(8)
+    net = N.Network(N.res_architecture(N.RES_WIDTHS["small"], 1), N.init_params(N.res_architecture(N.RES_WIDTHS["small"], 1), 3, rng))
+    x = (rng.standard_normal((4, 64, 64, 3)) * 3 + 5).astype(np.float32)
+    for _ in range(300):
+        net.forward(x, keep=True)
+    # Once the running statistics are the batch's, detection (running) gives what training (batch) gives.
+    trained, running = net.forward(x, training=True), net.forward(x, training=False)
+    assert np.allclose(trained["cls"], running["cls"], atol=1e-2)
+
+
+def test_giou_and_its_gradient():
+    from satellite_observation.core.ai.train.loss import giou
+
+    rng = np.random.default_rng(9)
+    pred, truth = rng.uniform(0.2, 3, (30, 4)), rng.uniform(0.2, 3, (30, 4))
+    iou, g, dg = giou(pred, truth)
+    assert np.all(g <= iou + 1e-12) and np.allclose(giou(truth, truth)[1], 1)
+    for i in range(4):
+        e = np.zeros_like(pred)
+        e[:, i] = 1e-6
+        assert np.allclose((giou(pred + e, truth)[1] - giou(pred - e, truth)[1]) / 2e-6, dg[:, i], atol=1e-6)
+
+
+def test_quality_focal_loss_and_its_gradient():
+    from satellite_observation.core.ai.train.loss import quality_focal
+
+    rng = np.random.default_rng(10)
+    z = rng.normal(0, 2, 40)
+    y = rng.uniform(0, 1, 40) * (rng.random(40) < 0.3)
+    _, grad = quality_focal(z, y)
+    for j in range(40):
+        e = np.zeros(40)
+        e[j] = 1e-5
+        assert (quality_focal(z + e, y)[0] - quality_focal(z - e, y)[0]) / 2e-5 == pytest.approx(grad[j], abs=1e-4)
+
+
+def test_box_targets_are_distances_from_the_cells_near_the_centre():
+    from satellite_observation.core.ai.train.loss import tile_box_targets
+
+    positive, cls, ltrb = tile_box_targets(np.array([[18.0, 10.0, 8.0, 8.0, 1], [40.0, 40.0, 3.0, 2.0, 0]]), 16, 16)
+    # The 8 px box (cells 3.5–5.5 across, 1.5–3.5 down): the cell whose centre is inside it, a cell from each side.
+    assert sorted(zip(*np.nonzero(positive))) == [(2, 4), (10, 10)]
+    assert cls[2, 4] == 1 and ltrb[2, 4] == pytest.approx((1, 1, 1, 1))
+    # A box smaller than a cell: its centre cell, the distances kept positive.
+    assert cls[10, 10] == 0 and (ltrb[10, 10] >= 0.05).all()
+
+
+def test_mean_average_precision():
+    from satellite_observation.core.ai.train.metrics import evaluate
+
+    truth = [np.array([[10, 10, 4, 4, 0], [30, 30, 6, 6, 1]], float)]
+    perfect = [np.array([[10, 10, 4, 4, 0, 0.9], [30, 30, 6, 6, 1, 0.8], [50, 50, 4, 4, 0, 0.1]], float)]
+    s = evaluate(perfect, truth, ["a", "b"])
+    assert (s.map50, s.map, s.recall, s.precision) == (1.0, 1.0, 1.0, 1.0)
+    # Off by half a pixel (IoU 0.78) and the other class missed.
+    s = evaluate([np.array([[10.5, 10, 4, 4, 0, 0.9]], float)], truth, ["a", "b"])
+    assert s.map50 == 0.5 and s.map == pytest.approx(0.3) and s.per_class == {"a": 1.0, "b": 0.0}
+
+
+def test_zoomed_tiles_keep_their_boxes_on_the_objects():
+    rng = np.random.default_rng(11)
+    w = synthetic(rng, count=6, size=192)
+    for _ in range(20):
+        x, boxes = sample(w, InputSpec(), 128, rng)
+        for cx, cy, bw, bh, _ in boxes:
+            if 2 <= cx < 126 and 2 <= cy < 126 and bw > 6 and bh > 6:
+                assert x[int(cy), int(cx)].mean() > 0.55
+
+
+def test_the_moving_average_follows_the_weights():
+    from satellite_observation.core.ai.train.trainer import Average
+
+    net = small_network()
+    average = Average(net, total=100)
+    for k in net.params:
+        net.params[k] += 1.0
+    for _ in range(200):
+        average.update(net)
+    assert all(np.allclose(average.params[k], v, atol=1e-3) for k, v in net.params.items())

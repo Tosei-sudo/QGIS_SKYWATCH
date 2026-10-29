@@ -9,6 +9,11 @@ at each level) with two upsampling steps back to a quarter of the input
 CenterNet / FCOS: class scores (sigmoid), the object centre's offset from
 the cell centre, and the object's log size, both in cells.
 
+A second, more accurate network (`res_architecture`, 高精度) adds batch
+normalization and residual blocks (a small ResNet down to ¹⁄₃₂, an FPN back
+to ¼) and gives the box as its distances from the cell (FCOS), trained with
+GIoU and quality focal losses (loss.py).
+
 Arrays are NHWC inside (convolutions as one matrix product per kernel
 tap); weights are kept as ONNX lays them out (out, in, kh, kw) so the
 trained model is written out as it is (see onnx_io).
@@ -43,6 +48,8 @@ class Conv:
     k: int = 3
     stride: int = 1
     relu: bool = True
+    #: Batch normalization after the convolution (then no bias of its own).
+    bn: bool = False
 
 
 @dataclass
@@ -59,7 +66,27 @@ class Cat:
     sources: tuple[str, str]
 
 
+@dataclass
+class Add:
+    """A residual sum, then ReLU."""
+    name: str
+    sources: tuple[str, str]
+    relu: bool = True
+
+
 HEADS = ("cls", "off", "size")
+#: The heads of the residual network: class scores and the box's log distances (left, top, right, bottom) in cells.
+RES_HEADS = ("cls", "box")
+#: Channels of the residual network (stem, the levels ¼ ⅛ ¹⁄₁₆ ¹⁄₃₂, the neck, the heads) by model size.
+RES_WIDTHS = {
+    "small": (16, 32, 64, 96, 128, 64, 32),
+    "medium": (24, 48, 96, 128, 192, 96, 48),
+    "large": (32, 64, 128, 192, 256, 128, 64),
+}
+#: Residual blocks at each level (¼ ⅛ ¹⁄₁₆ ¹⁄₃₂).
+RES_BLOCKS = (1, 2, 2, 1)
+BN_EPS = 1e-3
+BN_MOMENTUM = 0.03
 
 
 def architecture(widths: Sequence[int], classes: int) -> list:
@@ -76,6 +103,42 @@ def architecture(widths: Sequence[int], classes: int) -> list:
     ]
 
 
+def res_architecture(widths: Sequence[int], classes: int, blocks: Sequence[int] = RES_BLOCKS) -> list:
+    """
+    The residual network (高精度): a ResNet-like encoder (batch-normalized
+    3×3 convolutions, residual blocks of two, halving five times to ¹⁄₃₂),
+    a top-down FPN back to ¼ joining each level, and decoupled heads there:
+    class scores, and the box as its distances from the cell (FCOS).
+    """
+    stem, c4, c8, c16, c32, neck, head = widths
+    layers: list = [Conv("stem", "x", stem, stride=2, bn=True)]
+    source = "stem"
+    levels = []
+    for level, (width, count) in enumerate(zip((c4, c8, c16, c32), blocks)):
+        name = f"s{level + 2}"
+        layers.append(Conv(f"{name}d", source, width, stride=2, bn=True))
+        source = f"{name}d"
+        for i in range(count):
+            layers += [Conv(f"{name}r{i}a", source, width, bn=True), Conv(f"{name}r{i}b", f"{name}r{i}a", width, relu=False, bn=True),
+                       Add(f"{name}r{i}", (f"{name}r{i}b", source))]
+            source = f"{name}r{i}"
+        levels.append(source)
+    l4, l8, l16, l32 = levels
+    layers += [
+        Conv("p5", l32, neck, k=1, bn=True),
+        Up("u5", "p5"), Cat("k4", ("u5", l16)), Conv("p4", "k4", neck, bn=True),
+        Up("u4", "p4"), Cat("k3", ("u4", l8)), Conv("p3", "k3", neck, bn=True),
+        Up("u3", "p3"), Cat("k2", ("u3", l4)), Conv("p2", "k2", head, bn=True),
+        Conv("hc", "p2", head, bn=True), Conv("hb", "p2", head, bn=True),
+        Conv("cls", "hc", classes, k=1, relu=False), Conv("box", "hb", 4, k=1, relu=False),
+    ]
+    return layers
+
+
+def heads_of(layers: list) -> tuple:
+    return RES_HEADS if any(isinstance(l, Conv) and l.name == "box" for l in layers) else HEADS
+
+
 def channels_of(layers: list, cin: int) -> dict[str, int]:
     """The channels of every tensor, the input having `cin`."""
     out = {"x": cin}
@@ -84,24 +147,45 @@ def channels_of(layers: list, cin: int) -> dict[str, int]:
             out[layer.name] = layer.cout
         elif isinstance(layer, Up):
             out[layer.name] = out[layer.source]
+        elif isinstance(layer, Add):
+            out[layer.name] = out[layer.sources[0]]
         else:
             out[layer.name] = out[layer.sources[0]] + out[layer.sources[1]]
     return out
 
 
 def init_params(layers: list, cin: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
-    """He-initialized weights (ONNX layout), zero biases, the class bias at the prior."""
+    """
+    He-initialized weights (ONNX layout), zero biases, the class bias at the
+    prior; batch normalization at 1 and 0, but 0 for the last of a residual
+    block (each block starts as nothing, the network shallow).
+    """
     channels = channels_of(layers, cin)
     params: dict[str, np.ndarray] = {}
+    last_of_block = {l.sources[0] for l in layers if isinstance(l, Add)}
     for layer in layers:
         if not isinstance(layer, Conv):
             continue
         fan_in = channels[layer.source] * layer.k * layer.k
-        scale = math.sqrt(2.0 / fan_in) if layer.relu else 0.01
+        scale = math.sqrt(2.0 / fan_in) if layer.relu or layer.bn else 0.01
         params[f"{layer.name}.w"] = (rng.standard_normal((layer.cout, channels[layer.source], layer.k, layer.k)) * scale).astype(DTYPE)
-        params[f"{layer.name}.b"] = np.zeros(layer.cout, DTYPE)
+        if layer.bn:
+            params[f"{layer.name}.bn_w"] = np.full(layer.cout, 0.0 if layer.name in last_of_block else 1.0, DTYPE)
+            params[f"{layer.name}.bn_b"] = np.zeros(layer.cout, DTYPE)
+        else:
+            params[f"{layer.name}.b"] = np.zeros(layer.cout, DTYPE)
     params["cls.b"][:] = -math.log((1 - PRIOR) / PRIOR)
     return params
+
+
+def init_buffers(layers: list) -> dict[str, np.ndarray]:
+    """The running mean and variance of every batch normalization."""
+    out = {}
+    for layer in layers:
+        if isinstance(layer, Conv) and layer.bn:
+            out[f"{layer.name}.bn_m"] = np.zeros(layer.cout, DTYPE)
+            out[f"{layer.name}.bn_v"] = np.ones(layer.cout, DTYPE)
+    return out
 
 
 def grow_classes(params: dict[str, np.ndarray], classes: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
@@ -123,22 +207,38 @@ def _taps(w: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(w.transpose(2, 3, 1, 0).reshape(k * k, cin, cout))
 
 
+def _span(length: int, out: int, tap: int, pad: int, stride: int) -> tuple[int, int]:
+    """The outputs (first, past the last) whose input under kernel tap `tap` lies inside `length`."""
+    first = max(0, -((tap - pad) // stride) if tap < pad else 0)
+    last = min(out, (length - 1 - tap + pad) // stride + 1)
+    return first, max(first, last)
+
+
 def _patches(x: np.ndarray, k: int, stride: int) -> tuple[np.ndarray, int, int]:
     """
-    The input under each kernel tap (padded by k // 2): (kh·kw, output
-    pixels, channels). Tap by tap, each a contiguous copy (much faster than
-    one row of all taps per pixel when the channels are few).
+    The input under each kernel tap (padded by k // 2 with zeros): (kh·kw,
+    output pixels, channels). Tap by tap, each a contiguous copy (much faster
+    than one row of all taps per pixel when the channels are few), the
+    padding written as zeros rather than padding the input first.
     """
     n, h, w, c = x.shape
     if k == 1 and stride == 1:
         return x.reshape(1, n * h * w, c), h, w
     p = k // 2
     ho, wo = (h + 2 * p - k) // stride + 1, (w + 2 * p - k) // stride + 1
-    xp = np.pad(x, ((0, 0), (p, p), (p, p), (0, 0)))
     cols = np.empty((k * k, n, ho, wo, c), DTYPE)
     for i in range(k):
+        y0, y1 = _span(h, ho, i, p, stride)
         for j in range(k):
-            cols[i * k + j] = xp[:, i:i + stride * (ho - 1) + 1:stride, j:j + stride * (wo - 1) + 1:stride, :]
+            x0, x1 = _span(w, wo, j, p, stride)
+            t = cols[i * k + j]
+            t[:, :y0] = 0
+            t[:, y1:] = 0
+            t[:, y0:y1, :x0] = 0
+            t[:, y0:y1, x1:] = 0
+            if y1 > y0 and x1 > x0:
+                t[:, y0:y1, x0:x1] = x[:, y0 * stride + i - p:(y1 - 1) * stride + i - p + 1:stride,
+                                       x0 * stride + j - p:(x1 - 1) * stride + j - p + 1:stride]
     return cols.reshape(k * k, n * ho * wo, c), ho, wo
 
 
@@ -155,23 +255,37 @@ def _unpatch(g: np.ndarray, taps: np.ndarray, shape: tuple, k: int, stride: int,
     if k == 1 and stride == 1:
         return (g @ taps[0].T).reshape(shape)
     p = k // 2
-    dxp = np.zeros((n, h + 2 * p, w + 2 * p, c), DTYPE)
+    dx = np.zeros(shape, DTYPE)
     for i in range(k):
+        y0, y1 = _span(h, ho, i, p, stride)
         for j in range(k):
-            dxp[:, i:i + stride * (ho - 1) + 1:stride, j:j + stride * (wo - 1) + 1:stride, :] += (g @ taps[i * k + j].T).reshape(n, ho, wo, c)
-    return dxp[:, p:p + h, p:p + w, :]
+            x0, x1 = _span(w, wo, j, p, stride)
+            if y1 <= y0 or x1 <= x0:
+                continue
+            d = (g @ taps[i * k + j].T).reshape(n, ho, wo, c)
+            dx[:, y0 * stride + i - p:(y1 - 1) * stride + i - p + 1:stride,
+               x0 * stride + j - p:(x1 - 1) * stride + j - p + 1:stride] += d[:, y0:y1, x0:x1]
+    return dx
 
 
 class Network:
-    """The layers and their weights; `forward` keeps what `backward` needs."""
+    """
+    The layers and their weights (and batch normalization's running
+    statistics, `buffers`); `forward` keeps what `backward` needs. Training
+    (`training=True`) normalizes by the batch's statistics and updates the
+    running ones; otherwise by the running ones, as the ONNX model does.
+    """
 
-    def __init__(self, layers: list, params: dict[str, np.ndarray]):
+    def __init__(self, layers: list, params: dict[str, np.ndarray], buffers: Optional[dict[str, np.ndarray]] = None):
         self.layers = layers
         self.params = params
+        self.buffers = buffers if buffers is not None else init_buffers(layers)
+        self.heads = heads_of(layers)
         self._cache: dict = {}
 
-    def forward(self, x: np.ndarray, keep: bool = False) -> dict[str, np.ndarray]:
-        """The heads (NHWC) for a batch `x` (NHWC float32); `keep` to call `backward` after."""
+    def forward(self, x: np.ndarray, keep: bool = False, training: Optional[bool] = None) -> dict[str, np.ndarray]:
+        """The heads (NHWC) for a batch `x` (NHWC float32); `keep` to call `backward` after (and train batch normalization)."""
+        training = keep if training is None else training
         values = {"x": x.astype(DTYPE, copy=False)}
         cache: dict = {}
         for layer in self.layers:
@@ -179,25 +293,50 @@ class Network:
                 src = values[layer.source]
                 cols, ho, wo = _patches(src, layer.k, layer.stride)
                 out = _conv(cols, _taps(self.params[f"{layer.name}.w"]))
-                out += self.params[f"{layer.name}.b"]
+                bn = None
+                if layer.bn:
+                    out, bn = self._normalize(layer.name, out, training)
+                else:
+                    out += self.params[f"{layer.name}.b"]
                 if layer.relu:
                     np.maximum(out, 0, out=out)
                 out = out.reshape(src.shape[0], ho, wo, layer.cout)
                 if keep:
-                    cache[layer.name] = (cols, src.shape, ho, wo)
+                    cache[layer.name] = (cols, src.shape, ho, wo, bn)
                 values[layer.name] = out
             elif isinstance(layer, Up):
                 values[layer.name] = values[layer.source].repeat(2, axis=1).repeat(2, axis=2)
+            elif isinstance(layer, Add):
+                out = values[layer.sources[0]] + values[layer.sources[1]]
+                if layer.relu:
+                    np.maximum(out, 0, out=out)
+                values[layer.name] = out
             else:
                 values[layer.name] = np.concatenate([values[s] for s in layer.sources], axis=3)
         if keep:
             self._cache = {"values": values, "layers": cache}
-        return {h: values[h] for h in HEADS}
+        return {h: values[h] for h in self.heads}
+
+    def _normalize(self, name: str, out: np.ndarray, training: bool) -> tuple[np.ndarray, Optional[tuple]]:
+        g, b = self.params[f"{name}.bn_w"], self.params[f"{name}.bn_b"]
+        mean_key, var_key = f"{name}.bn_m", f"{name}.bn_v"
+        if not training:
+            scale = g / np.sqrt(self.buffers[var_key] + BN_EPS)
+            return out * scale + (b - self.buffers[mean_key] * scale), None
+        mean = out.mean(axis=0)
+        centred = out - mean
+        var = (centred * centred).mean(axis=0)
+        inv = 1 / np.sqrt(var + BN_EPS)
+        xhat = centred * inv
+        m = len(out)
+        self.buffers[mean_key] = ((1 - BN_MOMENTUM) * self.buffers[mean_key] + BN_MOMENTUM * mean).astype(DTYPE)
+        self.buffers[var_key] = ((1 - BN_MOMENTUM) * self.buffers[var_key] + BN_MOMENTUM * var * m / max(1, m - 1)).astype(DTYPE)
+        return xhat * g + b, (xhat, inv)
 
     def backward(self, grads: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """The weights' gradients from those of the heads (as `forward` gave them)."""
         values, cache = self._cache["values"], self._cache["layers"]
-        d: dict[str, np.ndarray] = {h: grads[h] for h in HEADS}
+        d: dict[str, np.ndarray] = {h: grads[h] for h in self.heads}
         out: dict[str, np.ndarray] = {}
 
         def add(name: str, g: np.ndarray) -> None:
@@ -212,18 +351,30 @@ class Network:
             if isinstance(layer, Conv):
                 if layer.relu:
                     g = g * (values[layer.name] > 0)
-                cols, shape, ho, wo = cache[layer.name]
+                cols, shape, ho, wo, bn = cache[layer.name]
                 gm = g.reshape(-1, layer.cout)
+                if layer.bn:
+                    xhat, inv = bn
+                    out[f"{layer.name}.bn_w"] = (gm * xhat).sum(axis=0)
+                    out[f"{layer.name}.bn_b"] = gm.sum(axis=0)
+                    dx = gm * self.params[f"{layer.name}.bn_w"]
+                    gm = inv * (dx - dx.mean(axis=0) - xhat * (dx * xhat).mean(axis=0))
+                else:
+                    out[f"{layer.name}.b"] = gm.sum(axis=0)
                 w = self.params[f"{layer.name}.w"]
                 cout, cin, k, _ = w.shape
                 dtaps = np.stack([cols[t].T @ gm for t in range(k * k)])
                 out[f"{layer.name}.w"] = dtaps.reshape(k, k, cin, cout).transpose(3, 2, 0, 1)
-                out[f"{layer.name}.b"] = gm.sum(axis=0)
                 if layer.source != "x":
                     add(layer.source, _unpatch(gm, _taps(w), shape, k, layer.stride, ho, wo))
             elif isinstance(layer, Up):
                 n, h, w, c = g.shape
                 add(layer.source, g.reshape(n, h // 2, 2, w // 2, 2, c).sum(axis=(2, 4)))
+            elif isinstance(layer, Add):
+                if layer.relu:
+                    g = g * (values[layer.name] > 0)
+                add(layer.sources[0], g)
+                add(layer.sources[1], g)
             else:
                 a = values[layer.sources[0]].shape[3]
                 add(layer.sources[0], g[..., :a])
@@ -276,12 +427,17 @@ def yolo_output(heads: dict[str, np.ndarray]) -> np.ndarray:
     ONNX model gives it: so the plugin's object detection reads it as any
     YOLOv8 model.
     """
-    cls, off, size = heads["cls"], heads["off"], heads["size"]
+    cls = heads["cls"]
     n, h, w, _ = cls.shape
     centres = grid_centres(h, w).transpose(1, 2, 0)[None]
     with np.errstate(over="ignore"):
-        xy = (off + centres) * STRIDE
-        wh = np.exp(size) * STRIDE
+        if "box" in heads:
+            d = np.exp(heads["box"])
+            xy = (centres + (d[..., 2:] - d[..., :2]) / 2) * STRIDE
+            wh = (d[..., :2] + d[..., 2:]) * STRIDE
+        else:
+            xy = (heads["off"] + centres) * STRIDE
+            wh = np.exp(heads["size"]) * STRIDE
         scores = 1 / (1 + np.exp(-cls))
     out = np.concatenate([xy, wh, scores], axis=3)
     return out.reshape(n, h * w, -1).transpose(0, 2, 1)

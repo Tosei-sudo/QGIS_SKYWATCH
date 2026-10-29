@@ -138,7 +138,7 @@ def test_trained_on_records_it_finds_the_squares_again(provider, tmp_path):
         "BOXES": "memory:"})
     assert ok and results["OUTPUT"] == model and os.path.isfile(model)
     trained = load_model(open(model, "rb").read())
-    assert trained.classes == ["船舶"] and trained.input.mode == "rgb"
+    assert trained.classes == ["船舶"] and trained.input.mode == "rgb" and trained.arch == "res"
     history = trained.history
     assert len(history) == 1 and history[0]["objects"] == {"船舶": 14} and history[0]["images"] == ["train.tif"]
     assert history[0]["epochs"] == 12 and history[0]["source"] == "観測記録（テスト）"
@@ -177,7 +177,7 @@ def test_trained_on_band_values(provider, tmp_path, bands):
     provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
     model = str(tmp_path / "bands.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "BANDS": bands, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
+        "IMAGES": [layer.id()], "BANDS": bands, "NETWORK": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
     assert ok
     trained = load_model(open(model, "rb").read())
     wanted = [4] if bands == "4" else [1, 2, 3, 4]
@@ -205,7 +205,7 @@ def test_trained_further_with_a_new_class_from_a_vector_layer(provider, tmp_path
     QgsProject.instance().addMapLayer(layer)
     provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
     base = str(tmp_path / "base.onnx")
-    _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "DEPTH": 1, "EPOCHS": 2, "TILE": 0, "VALIDATION": 0,
+    _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "DEPTH": 1, "NETWORK": 1, "EPOCHS": 2, "TILE": 0, "VALIDATION": 0,
                                                 "REMEMBER": False, "OUTPUT": base})
     assert ok
     bars = [(60, 300), (200, 330), (320, 60)]
@@ -225,8 +225,8 @@ def test_trained_further_with_a_new_class_from_a_vector_layer(provider, tmp_path
         "TILE": 2, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": further})
     assert ok
     trained = load_model(open(further, "rb").read())
-    # The old class first, the new one added; the input size of the base model kept.
-    assert trained.classes == ["船舶", "航空機"] and trained.tile == 128
+    # The old class first, the new one added; the network (軽量) and input size of the base model kept.
+    assert trained.classes == ["船舶", "航空機"] and trained.tile == 128 and trained.arch == "fpn4"
     history = trained.history
     assert len(history) == 2 and history[1]["base"] == "base.onnx" and history[1]["newClasses"] == ["航空機"]
     assert history[1]["objects"] == {"船舶": 10, "航空機": 3}

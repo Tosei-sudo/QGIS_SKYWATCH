@@ -46,6 +46,8 @@ from .detect_algorithm import image_info
 
 HERE = os.path.dirname(os.path.dirname(__file__))
 SIZES = ("small", "medium", "large")
+#: The networks offered: 高精度 (residual), 軽量 (the first, plain one).
+NETWORKS = ("res", "fpn4")
 SOURCES = ("book", "layer")
 
 #: The observation book of the plugin (records, areas, classification), given by the plugin.
@@ -93,6 +95,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
     EPOCHS = "EPOCHS"
     TILE = "TILE"
     SIZE = "SIZE"
+    NETWORK = "NETWORK"
     PIXEL_SIZE = "PIXEL_SIZE"
     DEFAULT_SIZE = "DEFAULT_SIZE"
     BATCH = "BATCH"
@@ -125,7 +128,9 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             "バンド: 空なら表示のまま（RGB）。番号を指定するとバンドの値で学習（1 つなら単バンド、例 1,2,3,4 でマルチバンド）。"
             "値は学習時の平均・標準偏差で正規化し、モデルに保存。\n"
             "追加学習: このプラグインで学習したモデルを指定すると、その重みから学習を継続。新しい種別はクラスとして追加。"
-            "以前のクラスを忘れないよう、以前の画像も一緒に指定すると効果的。\n\n"
+            "以前のクラスを忘れないよう、以前の画像も一緒に指定すると効果的。\n"
+            "ネットワーク: 高精度は残差ブロックとバッチ正規化の自作ネットワーク（GIoU・品質つき分類・重みの移動平均）。"
+            "軽量は 1 回の更新が 2/3 ほどの時間で済むが精度は低め。\n\n"
             "追加ライブラリ不要（NumPy で学習、CPU のみ）。小さな物体は画素を小さく、大きな物体は画素を大きく。"
         )
 
@@ -145,6 +150,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterFile(self.BASE_MODEL, tr("追加学習の元のモデル（空で新規）"), extension="onnx", optional=True))
         self.addParameter(QgsProcessingParameterNumber(self.EPOCHS, tr("エポック数"), QgsProcessingParameterNumber.Type.Integer, 30, False, 1, 1000))
         self.addParameter(QgsProcessingParameterEnum(self.TILE, tr("入力の大きさ（画素）"), [str(t) for t in TILE_SIZES], defaultValue=1))
+        self.addParameter(QgsProcessingParameterEnum(self.NETWORK, tr("ネットワーク"),
+                                                     [tr("高精度（残差ネットワーク・BN）"), tr("軽量（速い・精度は低め）")], defaultValue=0))
         self.addParameter(QgsProcessingParameterEnum(self.SIZE, tr("モデルの大きさ"), [tr("小（速い）"), tr("中"), tr("大（高精度・遅い）")],
                                                      defaultValue=0))
         self.addParameter(QgsProcessingParameterNumber(self.PIXEL_SIZE, tr("画素の大きさ（画像の単位、0 で画像の画素）"),
@@ -267,13 +274,16 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             classes = class_order(found, self._taxonomy)
             spec = InputSpec("bands", bands) if bands else InputSpec()
             try:
-                model = new_model(classes, spec, options.tile, options.size, self.parameterAsInt(parameters, self.DEPTH, context))
+                model = new_model(classes, spec, options.tile, options.size, self.parameterAsInt(parameters, self.DEPTH, context),
+                                  arch=NETWORKS[self.parameterAsEnum(parameters, self.NETWORK, context)])
             except TrainError as e:
                 raise QgsProcessingException(tr(str(e)))
             options.lr = rate or options.lr
             new = []
         model.depth = self.parameterAsInt(parameters, self.DEPTH, context)
         feedback.pushInfo(tr("クラス: {c}").format(c="・".join(model.classes)))
+        feedback.pushInfo(tr("ネットワーク: {net}・{size}").format(
+            net=tr("高精度（残差・BN）") if model.arch == "res" else tr("軽量"), size=model.widths))
         feedback.pushInfo(tr("入力: {input}・{t}×{t} 画素").format(
             input=tr("バンド {b} の値").format(b=", ".join(map(str, model.input.bands))) if model.input.mode == "bands" else tr("表示のまま（RGB）"),
             t=model.tile))
@@ -339,8 +349,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         self._remember = self.parameterAsBool(parameters, self.REMEMBER, context)
         self._path = path
         if run.best is not None:
-            feedback.pushInfo(tr("検証（エポック {e}）: 適合率 {p:.2f}・再現率 {r:.2f}・F1 {f:.2f}（{n} 件中）").format(
-                e=run.best_epoch, p=run.best.precision, r=run.best.recall, f=run.best.f1, n=run.best.objects))
+            feedback.pushInfo(tr("検証（エポック {e}）: mAP50 {m50:.3f}・mAP50-95 {m:.3f}・適合率 {p:.2f}・再現率 {r:.2f}（{n} 件中）").format(
+                e=run.best_epoch, m50=run.best.map50, m=run.best.map, p=run.best.precision, r=run.best.recall, n=run.best.objects))
         feedback.pushInfo(tr("保存: {path}（{s:.0f} 秒）").format(path=path, s=time.monotonic() - started))
 
         answer = {self.OUTPUT: path}
