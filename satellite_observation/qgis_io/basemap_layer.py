@@ -45,6 +45,8 @@ def open_base_map(base: BaseMapConfig, config_source: str) -> tuple[QgsMapLayer,
         tiles = style_tiles(style, url)
         if tiles is None:
             raise ValueError("スタイルにベクタータイルのソースなし")
+        if "pmtiles" in tiles:
+            raise ValueError(f"PMTiles（{tiles['pmtiles'].split('?', 1)[0]}）は QGIS 3.34 で読み込み不可")
         if "tilejson" in tiles:
             info = _json(tiles["tilejson"], authcfg)
             found = info.get("tiles")
