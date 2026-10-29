@@ -74,31 +74,44 @@ def tile_tensor(rgba: np.ndarray, x0: int, y0: int, size: Sequence[int], mean: S
     at (`x0`, `y0`) of an RGBA picture (height × width × 4, uint8):
     (value − mean) / std per channel (mean and std in R, G, B order). Pixels
     outside the picture, and transparent ones (no data), are the padding gray.
+
+    A picture of band values (float, height × width × (bands + 1), the last
+    channel whether the pixel has data; see `band_picture`) gives its bands
+    scaled the same way, no data at the mean (0 once scaled).
     """
     tw, th = int(size[0]), int(size[1])
     height, width = rgba.shape[:2]
-    tile = np.full((th, tw, 3), PAD, np.float32)
+    channels = rgba.shape[2] - 1
+    bands = rgba.dtype != np.uint8
+    mean_ = np.asarray(mean, np.float32)
+    tile = np.empty((th, tw, channels), np.float32)
+    tile[...] = mean_ if bands else PAD
     xa, ya = max(0, x0), max(0, y0)
     xb, yb = min(width, x0 + tw), min(height, y0 + th)
     if xb > xa and yb > ya:
         part = rgba[ya:yb, xa:xb]
-        visible = part[..., 3] != 0
+        visible = part[..., -1] != 0
         target = tile[ya - y0:yb - y0, xa - x0:xb - x0]
-        target[visible] = part[..., :3][visible]
-    tile = (tile - np.asarray(mean, np.float32)) / np.asarray(std, np.float32)
+        target[visible] = part[..., :-1][visible]
+    tile = (tile - mean_) / np.asarray(std, np.float32)
     if bgr:
         tile = tile[..., ::-1]
     return np.ascontiguousarray(tile.transpose(2, 0, 1))
 
 
+def band_picture(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    """A picture of band values (height × width × bands) and where they have data, as `tile_tensor` takes it."""
+    return np.concatenate([values.astype(np.float32, copy=False), valid[..., None].astype(np.float32)], axis=2)
+
+
 def is_empty(rgba: np.ndarray, x0: int, y0: int, tw: int, th: int) -> bool:
     """Whether the tile at (x0, y0) has no visible pixel."""
-    return not rgba[y0:y0 + th:2, x0:x0 + tw:2, 3].any()
+    return not rgba[y0:y0 + th:2, x0:x0 + tw:2, -1].any()
 
 
 def crop_of(rgba: np.ndarray, x0: int, y0: int, tw: int, th: int) -> np.ndarray:
     """The tile at (x0, y0) of an RGBA picture, `tw` × `th` (transparent past the edges)."""
-    out = np.zeros((th, tw, 4), np.uint8)
+    out = np.zeros((th, tw, rgba.shape[2]), rgba.dtype)
     part = rgba[y0:y0 + th, x0:x0 + tw]
     out[:part.shape[0], :part.shape[1]] = part
     return out
@@ -437,7 +450,7 @@ def run_tile(run: RunModel, output_types: dict[str, str], rgba: np.ndarray, x0: 
     out = []
     for d in found:
         x, y = math.floor(d.box[0] + x0), math.floor(d.box[1] + y0)
-        if 0 <= x < width and 0 <= y < height and rgba[y, x, 3] != 0:
+        if 0 <= x < width and 0 <= y < height and rgba[y, x, -1] != 0:
             out.append(offset(d, x0, y0))
     return out, full
 
@@ -463,7 +476,7 @@ def detect_tile(run: RunModel, output_types: dict[str, str], rgba: np.ndarray, x
     for sy in (0, region[1] - qh):
         for sx in (0, region[0] - qw):
             # The quarter alone at the corner of an input-size picture, the rest transparent (padding).
-            piece = np.zeros((th, tw, 4), np.uint8)
+            piece = np.zeros((th, tw, rgba.shape[2]), rgba.dtype)
             ya, xa = max(0, y0 + sy), max(0, x0 + sx)
             yb, xb = min(height, y0 + sy + qh), min(width, x0 + sx + qw)
             if yb > ya and xb > xa:

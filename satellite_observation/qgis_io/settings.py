@@ -211,3 +211,28 @@ def startup_layers_on() -> bool:
 
 def set_startup_layers_on(on: bool) -> None:
     _set("startup_layers", "1" if on else "0")
+
+
+#: The most trained models remembered for 物体検出（AI）.
+TRAINED_MAX = 20
+
+
+def trained_models() -> list[tuple[str, str]]:
+    """Models trained in this profile (newest first), as (label, path), those whose file is still there."""
+    try:
+        value = json.loads(_get("trained_models", "[]"))
+    except ValueError:
+        return []
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("path"), str) and os.path.isfile(item["path"]):
+            out.append((str(item.get("label") or os.path.basename(item["path"])), item["path"]))
+    return out
+
+
+def remember_trained_model(label: str, path: str) -> None:
+    """Lists a trained model first among 物体検出（AI）'s models (the same file once)."""
+    path = os.path.abspath(path)
+    kept = [(l, p) for l, p in trained_models() if os.path.abspath(p) != path]
+    items = [{"label": label, "path": path}] + [{"label": l, "path": p} for l, p in kept]
+    _set("trained_models", json.dumps(items[:TRAINED_MAX], ensure_ascii=False))

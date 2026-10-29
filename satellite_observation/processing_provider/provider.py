@@ -16,6 +16,7 @@ from .geodesic_algorithms import GeodesicBufferAlgorithm, GeodesicCentroidAlgori
 from .moving_match_algorithm import MovingMatchAlgorithm
 from .ortho_algorithm import SimpleOrthoAlgorithm
 from .pansharpen_algorithm import PanSharpenAlgorithm
+from .train_algorithm import TrainAlgorithm
 
 HERE = os.path.dirname(os.path.dirname(__file__))
 
@@ -40,5 +41,6 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(GeodesicCentroidAlgorithm())
         self.addAlgorithm(MovingMatchAlgorithm())
         self.addAlgorithm(DetectAlgorithm())
+        self.addAlgorithm(TrainAlgorithm())
         for algorithm in gp_algorithm.registered():
             self.addAlgorithm(algorithm)
