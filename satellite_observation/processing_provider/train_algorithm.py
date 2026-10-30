@@ -91,7 +91,7 @@ def parse_bands(text: str) -> list[int]:
 
 class TrainAlgorithm(QgsProcessingAlgorithm):
     IMAGES = "IMAGES"
-    DATASETS = "DATASETS"
+    DATASET = "DATASET"
     SOURCE = "SOURCE"
     LABELS = "LABELS"
     CLASS_FIELD = "CLASS_FIELD"
@@ -128,7 +128,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         return tr(
             "画像と、そこに記録した物体から物体検出モデルを学習し、ONNX で保存。保存したモデルは「物体検出（AI）」の"
             "「学習済み」で利用。\n\n"
-            "画像: 地図上の画像（カタログの画像など）と、教師データセット（「教師データセットの作成」で作る外部の画像と注釈の一覧）。"
+            "画像: 地図上の画像（カタログの画像など）と、教師データセット（「教師データセットの作成」で作る外部の画像と注釈の一覧。"
+            "1 つのファイルに複数のフォルダーを追記できる）。"
             "どちらか、または両方。データセットの画像はすべて注釈済みとみなし背景も学習。画素は画像のまま"
             "（地図上にある画像なら「画素の大きさ」も適用）。\n"
             "教師データ: 観測記録なら各画像の記録（不在を除く）。枠の大きさは記録の長さ・向き、なければ分類体系の諸元（全長・全幅）、"
@@ -147,8 +148,9 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
     def initAlgorithm(self, config=None) -> None:  # noqa: N802 (QGIS's name)
         self.addParameter(QgsProcessingParameterMultipleLayers(self.IMAGES, tr("学習する画像（カタログ・地図上の画像）"),
                                                                QgsProcessing.SourceType.TypeRaster, optional=True))
-        self.addParameter(QgsProcessingParameterMultipleLayers(self.DATASETS, tr("教師データセット（外部の画像と注釈、.json）"),
-                                                               QgsProcessing.SourceType.TypeFile, optional=True))
+        # A file, not a list of files: Processing's list of files takes only files it can open as layers.
+        self.addParameter(QgsProcessingParameterFile(self.DATASET, tr("教師データセット（外部の画像と注釈、.json）"),
+                                                     fileFilter=tr("教師データセット (*.json)"), optional=True))
         self.addParameter(QgsProcessingParameterEnum(self.SOURCE, tr("教師データ"),
                                                      [tr("観測記録（各画像の記録と確認範囲）"), tr("ベクタレイヤー（下の欄）")], defaultValue=0))
         self.addParameter(QgsProcessingParameterFeatureSource(
@@ -188,7 +190,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
 
     def prepareAlgorithm(self, parameters, context, feedback) -> bool:  # noqa: N802 (QGIS's name)
         layers = [l for l in self.parameterAsLayerList(parameters, self.IMAGES, context) if isinstance(l, QgsRasterLayer)]
-        dataset_paths = [p for p in self.parameterAsFileList(parameters, self.DATASETS, context) if p]
+        # Several datasets: paths separated by `;` (one dataset file can also hold several folders).
+        dataset_paths = [p.strip() for p in (self.parameterAsFile(parameters, self.DATASET, context) or "").split(";") if p.strip()]
         if not layers and not dataset_paths:
             raise QgsProcessingException(tr("学習する画像か教師データセットを指定"))
         try:
