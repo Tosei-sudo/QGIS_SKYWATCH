@@ -290,3 +290,143 @@ def test_bands_as_written():
     for bad in ("赤", "0", "1,1"):
         with pytest.raises(QgsProcessingException):
             parse_bands(bad)
+
+
+# Training datasets (教師データセット) of images outside the catalog.
+
+def png(path, centres, side=10, bars=()):
+    """An image without a place on the map (its own pixels), the squares (and bars) on noise."""
+    os.makedirs(os.path.dirname(str(path)), exist_ok=True)
+    rng = np.random.default_rng(len(centres) + 100)
+    mem = gdal.GetDriverByName("MEM").Create("", SIZE, SIZE, 3, gdal.GDT_Byte)
+    for b in range(3):
+        a = rng.normal(40, 8, (SIZE, SIZE))
+        for x, y in centres:
+            a[y - side // 2:y + side // 2, x - side // 2:x + side // 2] = 230
+        for x, y in bars:
+            a[y - 3:y + 3, x - 12:x + 12] = 230
+        mem.GetRasterBand(b + 1).WriteArray(a.clip(0, 255))
+    gdal.GetDriverByName("PNG").CreateCopy(str(path), mem)
+    return str(path)
+
+
+def yolo_set(root, seeds=(11, 12, 13), side=10):
+    """YOLO folders: images/*.png, labels/*.txt (class 0 = ship), classes.txt; and an image without annotations."""
+    for seed in seeds:
+        centres = objects(seed)
+        png(root / "images" / f"s{seed}.png", centres)
+        os.makedirs(root / "labels", exist_ok=True)
+        with open(root / "labels" / f"s{seed}.txt", "w") as f:
+            f.writelines(f"0 {x / SIZE} {y / SIZE} {side / SIZE} {side / SIZE}\n" for x, y in centres)
+    png(root / "images" / "empty.png", [])
+    with open(root / "labels" / "classes.txt", "w") as f:
+        f.write("ship\n")
+
+
+def make_dataset(params):
+    results, ok, _ = run("satobs:make_dataset", params)
+    assert ok
+    return results
+
+
+def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path):
+    import json
+
+    yolo_set(tmp_path)
+    path = str(tmp_path / "ships.json")
+    results = make_dataset({"IMAGES": str(tmp_path / "images"), "LABELS": str(tmp_path / "labels"), "CLASS_MAP": "ship=船舶 > 支援船",
+                            "BACKGROUND": True, "NAME": "外部の船", "OUTPUT": path})
+    assert results["OUTPUT"] == path and results["COUNT"] == 4
+    data = json.load(open(path, encoding="utf-8"))
+    [group] = data["groups"]
+    assert data["name"] == "外部の船" and group["format"] == "yolo" and group["names"] == ["ship"]
+    assert data["stats"] == {"images": 4, "objects": 42, "classes": {"ship": 42}}
+    assert all(os.path.isabs(i["image"]) for i in group["items"]) and {i["labels"] for i in group["items"] if "empty" in i["image"]} == {""}
+    # Run again on the same file: nothing new.
+    assert make_dataset({"IMAGES": str(tmp_path / "images"), "LABELS": str(tmp_path / "labels"), "OUTPUT": path})["COUNT"] == 0
+
+    # Trained on the dataset alone (no image on the map), at depth 1.
+    model = str(tmp_path / "ships.onnx")
+    results, ok, _ = run("satobs:train_detector", {
+        "DATASETS": [path], "DEPTH": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
+    assert ok
+    trained = load_model(open(model, "rb").read())
+    history = trained.history[0]
+    assert trained.classes == ["船舶"] and history["objects"] == {"船舶": 42} and history["source"] == "データセット「外部の船」"
+    assert sorted(history["images"]) == ["empty.png", "s11.png", "s12.png", "s13.png"]
+    # It finds the squares on an image on the map.
+    test_image = QgsRasterLayer(tiff(tmp_path / "test.tif", objects(2)), "test")
+    QgsProject.instance().addMapLayer(test_image)
+    assert found_at(detect(test_image, model), objects(2)) >= 11
+
+
+def test_a_dataset_with_the_catalogs_images_and_records(provider, tmp_path):
+    import json
+
+    # The catalog's image with its records (squares, 船舶), and a VOC dataset of bars (plane → 航空機 > 輸送機).
+    centres = objects(14, 6)
+    layer = QgsRasterLayer(tiff(tmp_path / "train.tif", centres), "train")
+    QgsProject.instance().addMapLayer(layer)
+    provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
+    bars = [(60, 300), (200, 330), (320, 60)]
+    png(tmp_path / "voc" / "bars.png", [], bars=bars)
+    objects_xml = "".join(f"<object><name>plane</name><bndbox><xmin>{x - 11}</xmin><ymin>{y - 2}</ymin><xmax>{x + 12}</xmax>"
+                          f"<ymax>{y + 3}</ymax></bndbox></object>" for x, y in bars)
+    with open(tmp_path / "voc" / "bars.xml", "w") as f:
+        f.write(f"<annotation>{objects_xml}</annotation>")
+    path = str(tmp_path / "planes.json")
+    make_dataset({"IMAGES": str(tmp_path / "voc"), "FORMAT": 3, "CLASS_MAP": "plane=航空機 > 輸送機", "OUTPUT": path})
+    assert json.load(open(path, encoding="utf-8"))["groups"][0]["format"] == "voc"
+    model = str(tmp_path / "both.onnx")
+    results, ok, context = run("satobs:train_detector", {
+        "IMAGES": [layer.id()], "DATASETS": [path], "DEPTH": 1, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+        "OUTPUT": model, "BOXES": "memory:"})
+    assert ok
+    history = load_model(open(model, "rb").read()).history[0]
+    assert history["objects"] == {"船舶": 6, "航空機": 3} and history["images"] == ["train.tif", "bars.png"]
+    assert history["source"] == "観測記録（テスト）・データセット「planes」"
+    # The boxes on the map: the catalog image's (the PNG has no place on it).
+    boxes = context.takeResultLayer(results["BOXES"])
+    assert sorted(f["image"] for f in boxes.getFeatures()) == ["train.tif"] * 6
+
+
+def test_a_vector_dataset_on_georeferenced_images(provider, tmp_path):
+    import json
+
+    centres = objects(15, 8)
+    os.makedirs(tmp_path / "geo")
+    tiff(tmp_path / "geo" / "a.tif", centres)
+    features = [{"type": "Feature", "properties": {"種別": "船舶"},
+                 "geometry": {"type": "Point", "coordinates": [X0 + x, Y0 - y]}} for x, y in centres]
+    labels = tmp_path / "ships.geojson"
+    labels.write_text(json.dumps({"type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "EPSG:32654"}},
+                                  "features": features}), encoding="utf-8")
+    path = str(tmp_path / "geo.json")
+    make_dataset({"IMAGES": str(tmp_path / "geo"), "LABELS_FILE": str(labels), "OUTPUT": path})
+    group = json.load(open(path, encoding="utf-8"))["groups"][0]
+    assert group["format"] == "vector" and group["class_field"] == "種別"
+    results, ok, context = run("satobs:train_detector", {
+        "DATASETS": [path], "DEFAULT_SIZE": 10, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+        "OUTPUT": str(tmp_path / "m.onnx"), "BOXES": "memory:"})
+    assert ok
+    boxes = context.takeResultLayer(results["BOXES"])
+    # On the map, where the points are (a 10 m box: 船舶 has no 全長 in the classification).
+    assert boxes.featureCount() == 8 and boxes.crs().authid() == "EPSG:32654"
+    assert found_at(boxes, centres) == 8
+
+
+def test_missing_files_are_left_out(provider, tmp_path):
+    yolo_set(tmp_path, seeds=(16, 17))
+    path = str(tmp_path / "set.json")
+    make_dataset({"IMAGES": str(tmp_path / "images"), "LABELS": str(tmp_path / "labels"), "CLASS_MAP": "ship=船舶", "OUTPUT": path})
+    os.remove(tmp_path / "images" / "s16.png")
+    model = str(tmp_path / "m.onnx")
+    results, ok, _ = run("satobs:train_detector", {"DATASETS": [path], "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0,
+                                                     "REMEMBER": False, "OUTPUT": model})
+    assert ok and load_model(open(model, "rb").read()).history[0]["images"] == ["s17.png"]
+    # Neither images nor a dataset; not a dataset.
+    _, ok, _ = run("satobs:train_detector", {"EPOCHS": 1, "REMEMBER": False, "OUTPUT": model})
+    assert not ok
+    (tmp_path / "x.json").write_text("{}")
+    _, ok, _ = run("satobs:train_detector", {"DATASETS": [str(tmp_path / "x.json")], "EPOCHS": 1, "REMEMBER": False, "OUTPUT": model})
+    assert not ok
