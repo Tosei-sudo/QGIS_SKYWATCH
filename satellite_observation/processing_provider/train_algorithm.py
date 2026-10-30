@@ -10,6 +10,10 @@ vector layer (points or polygons) and a class field. Classes are kinds of
 the classification (分類体系), cut to a depth if asked, so what is found
 can go straight back into the observation book.
 
+Images outside the catalog come from training datasets (教師データセット,
+made by 「教師データセットの作成」): image and annotation files listed by
+their paths, trained on with the catalog's images or alone.
+
 The input is the image as shown (RGB) or the values of chosen bands: one
 band (単バンド) or several (マルチバンド). A model trained before can be
 trained further (追加学習), new classes added to it.
@@ -26,7 +30,7 @@ from typing import Callable
 
 import numpy as np
 from qgis.core import (
-    QgsCoordinateTransform, QgsFeature, QgsFeatureSink, QgsField, QgsFields, QgsGeometry, QgsPointXY, QgsProcessing,
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature, QgsFeatureSink, QgsField, QgsFields, QgsGeometry, QgsPointXY, QgsProcessing,
     QgsProcessingAlgorithm, QgsProcessingException, QgsProcessingParameterBoolean, QgsProcessingParameterDefinition,
     QgsProcessingParameterEnum, QgsProcessingParameterFeatureSink, QgsProcessingParameterFeatureSource, QgsProcessingParameterField,
     QgsProcessingParameterFile, QgsProcessingParameterFileDestination, QgsProcessingParameterMultipleLayers, QgsProcessingParameterNumber,
@@ -40,7 +44,9 @@ from ..core.ai.train.trainer import (
     TILE_SIZES, InputSpec, TrainError, TrainOptions, add_classes, band_statistics, history_entry, load_model, new_model, normalize, split, train,
 )
 from ..qgis_io.ai_io import band_values, check_bands, grid_of, render_rgba
+from ..core.ai.train.dataset import DatasetError
 from ..qgis_io.ai_runtime import AiError
+from ..qgis_io.dataset_io import DatasetImage, dataset_labels, image_grid, open_image, pixel_rows, read_datasets, whole_image
 from ..qgis_io.train_io import Gathered, area_geometries, labels_from_book, labels_from_features, pixel_boxes, thin, windows_of
 from .detect_algorithm import image_info
 
@@ -85,6 +91,7 @@ def parse_bands(text: str) -> list[int]:
 
 class TrainAlgorithm(QgsProcessingAlgorithm):
     IMAGES = "IMAGES"
+    DATASETS = "DATASETS"
     SOURCE = "SOURCE"
     LABELS = "LABELS"
     CLASS_FIELD = "CLASS_FIELD"
@@ -121,6 +128,9 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         return tr(
             "画像と、そこに記録した物体から物体検出モデルを学習し、ONNX で保存。保存したモデルは「物体検出（AI）」の"
             "「学習済み」で利用。\n\n"
+            "画像: 地図上の画像（カタログの画像など）と、教師データセット（「教師データセットの作成」で作る外部の画像と注釈の一覧）。"
+            "どちらか、または両方。データセットの画像はすべて注釈済みとみなし背景も学習。画素は画像のまま"
+            "（地図上にある画像なら「画素の大きさ」も適用）。\n"
             "教師データ: 観測記録なら各画像の記録（不在を除く）。枠の大きさは記録の長さ・向き、なければ分類体系の諸元（全長・全幅）、"
             "なければ既定の大きさ。その画像の確認範囲は「すべて記録済み」とみなし背景も学習。"
             "ベクタレイヤーなら点・ポリゴンとクラスのフィールド（種別、または分類の名前・別名）。image_id のある地物はその画像だけに使用。\n"
@@ -135,7 +145,10 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         )
 
     def initAlgorithm(self, config=None) -> None:  # noqa: N802 (QGIS's name)
-        self.addParameter(QgsProcessingParameterMultipleLayers(self.IMAGES, tr("学習する画像"), QgsProcessing.SourceType.TypeRaster))
+        self.addParameter(QgsProcessingParameterMultipleLayers(self.IMAGES, tr("学習する画像（カタログ・地図上の画像）"),
+                                                               QgsProcessing.SourceType.TypeRaster, optional=True))
+        self.addParameter(QgsProcessingParameterMultipleLayers(self.DATASETS, tr("教師データセット（外部の画像と注釈、.json）"),
+                                                               QgsProcessing.SourceType.TypeFile, optional=True))
         self.addParameter(QgsProcessingParameterEnum(self.SOURCE, tr("教師データ"),
                                                      [tr("観測記録（各画像の記録と確認範囲）"), tr("ベクタレイヤー（下の欄）")], defaultValue=0))
         self.addParameter(QgsProcessingParameterFeatureSource(
@@ -175,8 +188,13 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
 
     def prepareAlgorithm(self, parameters, context, feedback) -> bool:  # noqa: N802 (QGIS's name)
         layers = [l for l in self.parameterAsLayerList(parameters, self.IMAGES, context) if isinstance(l, QgsRasterLayer)]
-        if not layers:
-            raise QgsProcessingException(tr("学習する画像を指定"))
+        dataset_paths = [p for p in self.parameterAsFileList(parameters, self.DATASETS, context) if p]
+        if not layers and not dataset_paths:
+            raise QgsProcessingException(tr("学習する画像か教師データセットを指定"))
+        try:
+            self._datasets = read_datasets(dataset_paths)
+        except DatasetError as e:
+            raise QgsProcessingException(tr(str(e)))
         size = self.parameterAsDouble(parameters, self.PIXEL_SIZE, context)
         self._images = []
         self._layers = []
@@ -196,8 +214,12 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         depth = self.parameterAsInt(parameters, self.DEPTH, context)
         kinds = [k.strip() for k in re.split(r"[,、，]", self.parameterAsString(parameters, self.KINDS, context) or "") if k.strip()]
         default_size = self.parameterAsDouble(parameters, self.DEFAULT_SIZE, context) or 20.0
+        self._label_options = (taxonomy, depth, kinds, default_size)
         source = SOURCES[self.parameterAsEnum(parameters, self.SOURCE, context)]
-        if source == "book":
+        if not layers:
+            self._gathered = Gathered()
+            self._source_label = ""
+        elif source == "book":
             if book is None:
                 raise QgsProcessingException(tr("観測記録が開かれていない（観測記録パネルで保存先を選択、またはベクタレイヤーを指定）"))
             self._gathered = labels_from_book(list(book.records), list(book.areas), taxonomy, depth, kinds, default_size)
@@ -242,11 +264,25 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             validation=self.parameterAsInt(parameters, self.VALIDATION, context) / 100,
         )
         rate = self.parameterAsDouble(parameters, self.LEARNING_RATE, context)
-        for why, n in gathered.skipped.items():
+        # The datasets' annotations: read first, for their classes.
+        try:
+            external = dataset_labels(self._datasets, *self._label_options, self._transform_context, feedback.isCanceled)
+        except DatasetError as e:
+            raise QgsProcessingException(tr(str(e)))
+        for path in external.missing[:10]:
+            feedback.pushWarning(tr("ファイルなし（除外）: {path}").format(path=path))
+        if len(external.missing) > 10:
+            feedback.pushWarning(tr("ほか {n} ファイルなし").format(n=len(external.missing) - 10))
+        for name, n in external.read.items():
+            feedback.pushInfo(tr("教師データセット「{name}」: 画像 {n}").format(name=name, n=n))
+        skipped = dict(gathered.skipped)
+        for why, n in external.skipped.items():
+            skipped[why] = skipped.get(why, 0) + n
+        for why, n in skipped.items():
             feedback.pushInfo(tr("対象外: {why} {n} 件").format(why=why, n=n))
-        found = sorted({l.cls for l in gathered.labels})
+        found = sorted({l.cls for l in gathered.labels} | external.classes)
         if not found:
-            raise QgsProcessingException(tr("学習できる物体なし（種別のある記録・地物が必要）"))
+            raise QgsProcessingException(tr("学習できる物体なし（種別のある記録・地物、またはデータセットの注釈が必要）"))
 
         # The model: trained on from a file, or new.
         if self._base_path:
@@ -298,7 +334,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             if feedback.isCanceled():
                 return {}
             feedback.setProgressText(tr("画像を読み込み中… {name}").format(name=image["name"]))
-            found_here, error = self._read(self._layers[i], image, model, gathered, rng, feedback)
+            found_here, error = self._read(self._layers[i], image, model, self._labels_of(gathered, image), rng, feedback)
             if error:
                 raise QgsProcessingException(error)
             feedback.setProgress(10 * (i + 1) / len(self._images))
@@ -310,6 +346,24 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             windows += part.windows
             names.append(image["name"])
             used_boxes.append((image, grid, kept))
+        pixel = self.parameterAsDouble(parameters, self.PIXEL_SIZE, context)
+        for i, external_image in enumerate(external.images):
+            if feedback.isCanceled():
+                return {}
+            feedback.setProgressText(tr("画像を読み込み中… {name}").format(name=external_image.name))
+            found_here, error = self._read_external(external_image, model, pixel, rng, feedback)
+            feedback.setProgress(10 * (i + 1) / len(external.images))
+            if error:
+                feedback.pushWarning(error)
+            if found_here is None:
+                continue
+            part, image, grid, kept = found_here
+            for c in kept[:, 4].astype(int):
+                counts[model.classes[c]] = counts.get(model.classes[c], 0) + 1
+            windows += part.windows
+            names.append(image["name"])
+            if image["crs"].isValid():
+                used_boxes.append((image, grid, kept))
         if not windows:
             raise QgsProcessingException(tr("学習できる範囲なし。観測記録なら、記録した画像（同じ画像 ID）を指定"))
         if model.input.mode == "bands":
@@ -336,7 +390,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         if run.stopped:
             feedback.pushWarning(tr("中止。エポック {n} までの学習結果を保存").format(n=run.epochs))
         model.history.append(history_entry(run, names, counts, options, os.path.basename(self._base_path) if self._base_path else "", new))
-        model.history[-1]["source"] = self._source_label
+        model.history[-1]["source"] = "・".join(
+            [s for s in [self._source_label] if s] + [tr("データセット「{name}」").format(name=n) for n in external.read])
 
         path = self.parameterAsFileOutput(parameters, self.OUTPUT, context)
         if not path.lower().endswith(".onnx"):
@@ -354,7 +409,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         feedback.pushInfo(tr("保存: {path}（{s:.0f} 秒）").format(path=path, s=time.monotonic() - started))
 
         answer = {self.OUTPUT: path}
-        sink_crs = self._images[0]["crs"]
+        sink_crs = self._images[0]["crs"] if self._images else (used_boxes[0][0]["crs"] if used_boxes else QgsCoordinateReferenceSystem())
         fields = QgsFields()
         for name, kind in (("class", QVariant.String), ("image", QVariant.String)):
             fields.append(QgsField(name, kind))
@@ -374,14 +429,48 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         feedback.setProgress(100)
         return answer
 
-    def _read(self, layer, image: dict, model, gathered: Gathered, rng, feedback) -> tuple:
+    def _labels_of(self, gathered: Gathered, image: dict) -> Callable:
+        """The objects and checked areas of a map image, in a grid's pixels."""
+        def labels(grid, classes):
+            return (pixel_boxes(gathered.labels, grid, image["crs"], self._transform_context, classes, image["id"]),
+                    area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"]))
+        return labels
+
+    def _read_external(self, external: DatasetImage, model, pixel_size: float, rng, feedback) -> tuple:
+        """
+        The windows of a dataset's image: ((windows, image, grid, boxes kept)
+        or None, why it is left out). The image is opened here and dropped
+        before returning; errors are given, not raised.
+        """
+        try:
+            layer = open_image(external.item.image)
+            native, grid = image_grid(layer, pixel_size)
+        except (DatasetError, AiError) as e:
+            return None, tr("{name}: {e}（除外）").format(name=external.name, e=e)
+        image = {"name": external.name, "id": None, "crs": layer.crs(), "extent": layer.extent(), "pixel": grid.size_x,
+                 "bands": layer.bandCount(), "background": True}
+        if external.labels is not None:
+            labels = lambda g, classes: (pixel_boxes(external.labels.labels, g, image["crs"], self._transform_context, classes, None),  # noqa: E731
+                                         [whole_image(g)])
+        else:
+            labels = lambda g, classes: (pixel_rows(external.boxes, native, g, classes), [whole_image(g)])  # noqa: E731
+        found, error = self._read(layer, image, model, labels, rng, feedback, grid)
+        del layer
+        if error:
+            return None, error + tr("（除外）")
+        if found is None:
+            return None, ""
+        part, grid, kept = found
+        return (part, image, grid, kept), ""
+
+    def _read(self, layer, image: dict, model, labels: Callable, rng, feedback, grid=None) -> tuple:
         """
         The windows of one image: ((windows, grid, boxes kept) or None when it
         has no objects, '' ) or (None, why it cannot be read). Errors are given,
         not raised, so no frame holding the layer outlives the run.
         """
         try:
-            grid = grid_of(image["extent"], image["pixel"])
+            grid = grid or grid_of(image["extent"], image["pixel"])
             if model.input.mode == "bands":
                 check_bands(layer, model.input.bands)
         except AiError as e:
@@ -390,11 +479,10 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             read = lambda extent, w, h: band_values(layer, model.input.bands, extent, w, h)  # noqa: E731
         else:
             read = lambda extent, w, h: render_rgba(layer, extent, w, h, image["crs"], self._transform_context)  # noqa: E731
-        boxes = pixel_boxes(gathered.labels, grid, image["crs"], self._transform_context, model.classes, image["id"])
-        if not len(boxes):
+        boxes, areas = labels(grid, model.classes)
+        if not len(boxes) and not image.get("background"):
             feedback.pushWarning(tr("{name}: 物体なし（この画像の記録・地物がない）").format(name=image["name"]))
             return None, ""
-        areas = area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"])
         part = windows_of(read, grid, boxes, areas, model.tile, rng, image["name"], feedback.isCanceled)
         if part.too_big:
             feedback.pushWarning(tr("{name}: 入力より大きな物体 {n} 件を除外（画素を大きく、または入力を大きく）").format(name=image["name"], n=part.too_big))

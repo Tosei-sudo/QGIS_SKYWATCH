@@ -375,6 +375,10 @@ class SatelliteObservationPlugin:
         train.triggered.connect(lambda: self.open_train())
         self.iface.addPluginToMenu(MENU, train)
         self.actions.append(train)
+        dataset = QAction(icon("ai_dataset"), tr("教師データセットの作成…"), self.iface.mainWindow())
+        dataset.triggered.connect(lambda: self.open_dataset())
+        self.iface.addPluginToMenu(MENU, dataset)
+        self.actions.append(dataset)
         segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
         segment.setObjectName("SatObsSegment")
         self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
@@ -629,6 +633,12 @@ class SatelliteObservationPlugin:
 
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:train_detector", train_inputs(layers, self.iface.activeLayer()))
+
+    def open_dataset(self) -> None:
+        """The dialog making a training dataset of images outside the catalog."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        processing.execAlgorithmDialog("satobs:make_dataset", {})
 
     def open_transfer(self) -> None:
         if self.transfer_dialog is None:

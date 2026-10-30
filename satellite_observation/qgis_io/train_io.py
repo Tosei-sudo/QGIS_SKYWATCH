@@ -99,12 +99,14 @@ IMAGE_FIELDS = ("image_id", "IMAGE_ID")
 
 
 def labels_from_features(features, fields, crs: QgsCoordinateReferenceSystem, transform_context, class_field: str,
-                         taxonomy: Sequence[Taxon], depth: int = 0, within_kinds: Sequence[str] = (), default_size: float = 20.0) -> Gathered:
+                         taxonomy: Sequence[Taxon], depth: int = 0, within_kinds: Sequence[str] = (), default_size: float = 20.0,
+                         class_map: Optional[dict] = None) -> Gathered:
     """
     Features (of a vector layer, in `crs`) as labels: polygons by their
     outline, points by a box of the class' 全長・全幅 (else `default_size`
-    metres); the class from `class_field` (a kind, or a class' name). A
-    feature with an image id (image_id field) labels that image only.
+    metres); the class from `class_field` (a kind, or a class' name; through
+    `class_map` when given, as a dataset's). A feature with an image id
+    (image_id field) labels that image only.
     """
     out = Gathered()
     index = fields.indexFromName(class_field) if class_field else -1
@@ -118,6 +120,8 @@ def labels_from_features(features, fields, crs: QgsCoordinateReferenceSystem, tr
             out.skip("形状なし")
             continue
         value = f.attribute(index)
+        if value is not None and class_map:
+            value = class_map.get(str(value), value)
         cls = class_of(str(value) if value is not None else "", taxonomy, depth, within_kinds)
         if not cls:
             out.skip("クラスなし" if value in (None, "") else "対象外のクラス")
