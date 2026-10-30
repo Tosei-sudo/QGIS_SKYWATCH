@@ -11,6 +11,11 @@ image; 「再読み込み」 reads them again) and the layers of the image befor
 are replaced. A result already recorded (its tag in a record's note) is
 marked 取込済 and is not recorded again.
 
+Each result not yet recorded is matched with the things of the images
+before and after (継続, core/obs/continuation): a sure one is recorded as
+that thing (「継続: 船舶-3」 chosen in the 継続 column), an unsure one offers
+the things it may be (recorded as a new thing unless one is chosen).
+
 The viewer has no such dock (its AI only writes results, 「DB へ転記」).
 """
 from __future__ import annotations
@@ -20,10 +25,11 @@ from typing import Any, Callable, Optional
 from qgis.core import QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
+    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
 from ..core.ai_results import AiResult, AiResultSource, import_entry, kind_for, recorded_tags, score_text
+from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
 from ..core.obs.flows import living
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, mark_imported, place_of, results_layer
 from ..qgis_io.catalog_io import CATALOG_URL
@@ -64,6 +70,10 @@ class AiResultsDock(PluginDock):
         self.rows: list[tuple[AiResultSource, AiResult]] = []
         self.layers: list[QgsVectorLayer] = []
         self.imported: set[str] = set()
+        #: What each row (not recorded yet) may continue, by row.
+        self.continued: dict[int, Continuation] = {}
+        #: The thing chosen to continue, by result tag ("" for a new thing), when not the one matched.
+        self.picks: dict[str, str] = {}
         self._task = None
         self._syncing = False
 
@@ -90,7 +100,7 @@ class AiResultsDock(PluginDock):
         self.body.addLayout(filters)
 
         self.list = QTreeWidget()
-        self.list.setHeaderLabels([_tr("取込"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前")])
+        self.list.setHeaderLabels([_tr("取込"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前"), _tr("継続")])
         self.list.setRootIsDecorated(False)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self._list_selected)
@@ -233,6 +243,7 @@ class AiResultsDock(PluginDock):
                 if r.geometry is None:
                     item.setToolTip(1, _tr("位置なし（取り込み不可）"))
                 self.list.addTopLevelItem(item)
+            self._match()
             for i in range(self.list.columnCount()):
                 self.list.resizeColumnToContents(i)
         finally:
@@ -241,12 +252,68 @@ class AiResultsDock(PluginDock):
         total = sum(len(results) for _s, results, _e in found)
         text = _tr("{n} 件（全 {total} 件）・取込済 {done} 件").format(
             n=len(self.rows), total=total, done=sum(1 for _s, r in self.rows if r.tag in self.imported))
+        auto = sum(1 for c in self.continued.values() if c.tier == AUTO)
+        maybe = len(self.continued) - auto
+        if auto or maybe:
+            text += _tr("・継続 {auto} 件・継続の候補 {maybe} 件").format(auto=auto, maybe=maybe)
         if problems:
             text += " / " + " / ".join(problems)
         self.status.setText(text)
         if reveal and self.rows and not self.isVisible():
             self.show()
             self.raise_()
+
+    def _match(self) -> None:
+        """What the rows not recorded yet continue (the things of the images before and after), shown in the 継続 column."""
+        self.continued = {}
+        for i in range(self.list.topLevelItemCount()):
+            item = self.list.topLevelItem(i)
+            if self.list.itemWidget(item, 6) is not None:
+                self.list.removeItemWidget(item, 6)
+        book = self._book()
+        image_id = self.image_id
+        if book is None or not book.loaded or not image_id or not any(i.id == image_id for i in book.images):
+            return
+        rows, found = [], []
+        for row, (source, r) in enumerate(self.rows):
+            if r.tag in self.imported or source.candidate_radius <= 0:
+                continue
+            place = place_of(r)
+            if place is None:
+                continue
+            entry = import_entry(r, source, place[0], place[1], place[2])
+            rows.append(row)
+            found.append(Found(entry.lon, entry.lat, entry.kind, entry.length, entry.heading,
+                               source.continue_radius, source.candidate_radius))
+        if not found:
+            return
+        for row, c in zip(rows, continuations(found, book.carried_for(image_id), book.kept_taxonomy())):
+            if c.options:
+                self.continued[row] = c
+        for row, c in self.continued.items():
+            item = self.list.topLevelItem(row)
+            if item is None:
+                continue
+            box = QComboBox()
+            box.addItem(_tr("新規（候補あり）") if c.tier == CANDIDATE else _tr("新規"), "")
+            for o in c.options:
+                box.addItem(_tr("継続: {t}").format(t=o.text), o.object_id)
+            tag = self.rows[row][1].tag
+            chosen = self.picks.get(tag, c.pick.object_id if c.pick else "")
+            box.setCurrentIndex(max(0, box.findData(chosen)))
+            box.setToolTip(_tr("自動で継続（近く、分類と長さが合い、紛らわしいものがない）") if c.tier == AUTO
+                           else _tr("継続の候補あり（近いが確かでない）: 選ぶと継続として記録"))
+            box.currentIndexChanged.connect(lambda _i, b=box, t=tag: self.picks.__setitem__(t, b.currentData() or ""))
+            self.list.setItemWidget(item, 6, box)
+
+    def chosen_carry(self, row: int):
+        """The record of the thing a row is recorded as continuing (継続), None for a new thing."""
+        c = self.continued.get(row)
+        if c is None:
+            return None
+        tag = self.rows[row][1].tag
+        chosen = self.picks.get(tag, c.pick.object_id if c.pick else "")
+        return next((o.source for o in c.options if o.object_id == chosen), None)
 
     def _replace_layers(self, per_source) -> None:
         project = QgsProject.instance()
@@ -353,15 +420,25 @@ class AiResultsDock(PluginDock):
             entry = import_entry(r, source, place[0], place[1], place[2])
             if entry.confidence and entry.confidence not in levels:
                 entry.confidence = ""
+            entry.carry = self.chosen_carry(row)
+            if entry.carry is not None:
+                c = self.continued[row]
+                how = "自動継続" if c.pick is not None and c.pick.object_id == entry.carry.object_id else "選択継続"
+                entry.note = f"{entry.note} [{how}]"
             entries.append(entry)
             done_rows.append(row)
         if not entries:
             self.status.setText(_tr("取り込む結果なし（取込済か、位置なし）") if rows else _tr("結果を選択"))
             return []
 
+        carried_ids = {e.carry.object_id for e in entries if e.carry is not None}
+
         def after(saved) -> None:
             if not saved:
                 return
+            continued = {o.object_id for o in saved if o.object_id in carried_ids}
+            saved_names = {i: _tr("継続: {n}").format(n=e.carry.object_name) for i, e in zip(done_rows, entries)
+                           if e.carry is not None and e.carry.object_id in continued}
             self.imported |= {self.rows[i][1].tag for i in done_rows if i < len(self.rows)}
             for layer in self.layers:
                 mark_imported(layer, set(done_rows))
@@ -369,7 +446,12 @@ class AiResultsDock(PluginDock):
                 item = self.list.topLevelItem(i)
                 if item is not None:
                     item.setText(0, _tr("済"))
+                    item.setText(6, saved_names.get(i, ""))
+            # What the rest may continue, without the things now in this image.
+            self._match()
             text = _tr("{n} 件を観測記録に取り込み").format(n=len(saved))
+            if continued:
+                text += _tr("（継続 {k} 件）").format(k=len(continued))
             if skipped:
                 text += _tr("（位置なし {k} 件は除外）").format(k=skipped)
             self.status.setText(text)

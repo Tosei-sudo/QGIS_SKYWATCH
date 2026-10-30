@@ -76,6 +76,10 @@ class StoreError(Exception):
     """A store refused (the reason is in the message, as the panel says it)."""
 
 
+def _text(n: Optional[float]) -> str:
+    return "" if n is None else str(n)
+
+
 def _error_text(error: Exception) -> str:
     return str(error) or type(error).__name__
 
@@ -361,6 +365,13 @@ class ObservationBook:
             return []
         return carry_overs(self.records, self.current.ref, self.inside())
 
+    def carried_for(self, image: Optional[str] = None) -> list[CarryOver]:
+        """What may still be there in this image or the one of `image` (its id); within the footprint for this one."""
+        info = self._image(image)
+        if info is None:
+            return []
+        return carry_overs(self.records, info.ref, self.inside() if info is self.current else None)
+
     def inside_carried(self, carried: Optional[list[CarryOver]] = None) -> list[CarryOver]:
         """The carried-over things that lie in one of this image's checked areas (so were not there)."""
         image = self.current
@@ -489,9 +500,26 @@ class ObservationBook:
         taken = {f.name for f in flows(self.records)}
         made: dict[str, tuple[str, str]] = {}
         rows: list[Observation] = []
+        # The things already in the image, and those continued in this save: each once.
+        here = {o.object_id for o in living(self.records) if o.image_id == info.id}
+        carried = 0
         for e in entries:
+            source = getattr(e, "carry", None)
+            if source is not None and source.object_id in here:
+                source = None
+            if source is not None:
+                # The same thing: its class unless the AI says it (or one below it), its activity and size when the AI has none.
+                kind = e.kind if e.kind and within(e.kind, path_of(source.kind)) else source.kind
+                values = FormValues(object="", kind=kind, activity=e.activity or source.activity, confidence=e.confidence, note=e.note,
+                                    length=_text(e.length if e.length is not None else source.length),
+                                    heading=_text(e.heading if e.heading is not None else source.heading))
+                record = self.record_from(info, e.lon, e.lat, None, source, values, True)
+                here.add(record.object_id)
+                carried += 1
+                rows.append(record)
+                continue
             values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
-                                length="" if e.length is None else str(e.length), heading="" if e.heading is None else str(e.heading))
+                                length=_text(e.length), heading=_text(e.heading))
             record = self.record_from(info, e.lon, e.lat, None, None, values, True)
             name = e.object.strip()
             if name and name in made:
@@ -501,7 +529,7 @@ class ObservationBook:
             made.setdefault(record.object_name, (record.object_id, record.object_name))
             taken.add(record.object_name)
             rows.append(record)
-        return self._save_records(rows, f"{len(rows)} 件を記録")
+        return self._save_records(rows, f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else ""))
 
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
         """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading."""

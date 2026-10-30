@@ -7,9 +7,15 @@ from satellite_observation.core.ai_results import (
     ai_result_source_of, image_where, import_entry, kind_for, recorded_tags, result_of, result_tag,
 )
 from satellite_observation.core.config import parse_config
+from satellite_observation.core.obs.book import FormValues
 from satellite_observation.tests.test_obs_book import book  # noqa: F401 (the fixture)
 
 URL = "https://example.com/arcgis/rest/services/AI/FeatureServer/0"
+
+
+def _carried(entry, record):
+    entry.carry = record
+    return entry
 
 
 def source(**more):
@@ -68,3 +74,21 @@ def test_several_results_recorded_at_once_are_named_in_turn(book):  # noqa: F811
     assert len({o.object_id for o in saved}) == 3
     assert book.said[-1] == "3 件を記録"
     assert book.add_many([], image="nope") is None and book.said[-1] == "画像なし（取り込む画像を開いて）"
+
+
+def test_a_result_near_a_thing_of_the_image_before_continues_it(book):  # noqa: F811
+    s, problems = source(continueRadius=80, candidateRadius=500)
+    assert problems == [] and (s.continue_radius, s.candidate_radius) == (80, 500)
+    a = book.submit(139.7, 35.6, FormValues(object="あおば", kind="船舶 > 支援船", activity="停泊", length="100"))
+    book.step(1)
+    r = result_of(s, {"attributes": {"OBJECTID": 1, "IMAGE_ID": "d3", "CLS": "ship"}}, "OBJECTID")
+    e = import_entry(r, s, 139.7003, 35.6, None)
+    e.carry = book.record(a.id)
+    # Twice: the second is the same thing again, so a new one.
+    saved = book.add_many([e, _carried(import_entry(r, s, 139.7004, 35.6), book.record(a.id))], image="d3")
+    first, second = saved
+    assert (first.object_id, first.object_name, first.kind, first.activity, first.length) == (a.object_id, "あおば", "船舶 > 支援船", "停泊", 100)
+    assert second.object_id != a.object_id
+    assert book.said[-1] == "2 件を記録（継続 1 件）"
+    _, problems = source(continueRadius=-1)
+    assert problems == ["aiResultSources[0] の continueRadius は 0〜100000（m）で指定"]

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
 from .esri import quote
+from .obs.continuation import CANDIDATE_METRES, CONTINUE_METRES
 from .util import is_name, is_number, is_record, is_url, layer_url, ms_of, text_of
 
 #: What an attribute of a result can be, by role (imageId is needed).
@@ -60,6 +61,10 @@ class AiResultSource:
     confidence: str = ""
     max_results: int = 2000
     token: Optional[str] = None
+    #: Nearer than this (m) to a thing of the image before or after (and sure) is recorded as it (継続); 0 never without asking.
+    continue_radius: float = CONTINUE_METRES
+    #: Nearer than this (m) is offered as what it may continue; 0 offers nothing.
+    candidate_radius: float = CANDIDATE_METRES
 
 
 def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional[AiResultSource]:
@@ -99,6 +104,12 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
     least = value.get("minScore")
     if "minScore" in value and not (is_number(least) and 0 <= least <= 1):
         problems.append(f"{at} の minScore は 0〜1 で指定")
+    radii = {}
+    for key, default in (("continueRadius", CONTINUE_METRES), ("candidateRadius", CANDIDATE_METRES)):
+        v = value.get(key)
+        if key in value and not (is_number(v) and 0 <= v <= 100_000):
+            problems.append(f"{at} の {key} は 0〜100000（m）で指定")
+        radii[key] = float(v) if is_number(v) and 0 <= v <= 100_000 else default
     most = value.get("maxResults")
     label, where, token = value.get("label"), value.get("where"), value.get("token")
     activity, confidence = value.get("activity"), value.get("confidence")
@@ -113,6 +124,8 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
         confidence=confidence.strip() if isinstance(confidence, str) else "",
         max_results=min(most, 20000) if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 2000,
         token=token if isinstance(token, str) and token else None,
+        continue_radius=radii["continueRadius"],
+        candidate_radius=radii["candidateRadius"],
     )
 
 
@@ -240,6 +253,8 @@ class ImportEntry:
     note: str
     length: Optional[float]
     heading: Optional[float]
+    #: The record of the thing (of the image before or after) this one continues (継続); None for a new thing.
+    carry: Optional[Any] = None
 
 
 def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: float, length: Optional[float] = None) -> ImportEntry:

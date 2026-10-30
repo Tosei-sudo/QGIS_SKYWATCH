@@ -56,6 +56,8 @@ def plugin(tmp_path, monkeypatch):
     polygons.add({"IMAGE_ID": "IMG1", "CLS": "ship", "SCORE": 0.9, "DET_ID": "d-1"}, box(139.70, 35.60, 0.0011, 0.00018))
     polygons.add({"IMAGE_ID": "IMG1", "CLS": "ship", "SCORE": 0.2, "DET_ID": "d-2"}, box(139.65, 35.62, 0.0003, 0.0003))
     polygons.add({"IMAGE_ID": "IMG2", "CLS": "ship", "SCORE": 0.8, "DET_ID": "d-3"}, box(139.66, 35.61, 0.0005, 0.0002))
+    # The ship of IMG1 again, about 10 m east.
+    polygons.add({"IMAGE_ID": "IMG2", "CLS": "ship", "SCORE": 0.9, "DET_ID": "d-4"}, box(139.7001, 35.60, 0.0011, 0.00018))
     points = fake.add_layer(POINTS, FakeLayer({"IMG": "esriFieldTypeString", "CLS": "esriFieldTypeString", "NAME": "esriFieldTypeString"}))
     points.add({"IMG": "IMG1", "CLS": "car", "NAME": "トラックA"}, {"x": 139.72, "y": 35.65})
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
@@ -142,7 +144,7 @@ def test_results_of_the_image_are_shown_and_recorded_once(plugin):
 
     # Another image: its results replace the layers.
     other = open_catalog_image(tmp_path, "IMG2")
-    assert wait_for(lambda: dock.image_id == "IMG2" and [r.key for _s, r in dock.rows] == ["d-3"])
+    assert wait_for(lambda: dock.image_id == "IMG2" and [r.key for _s, r in dock.rows] == ["d-3", "d-4"])
     assert [layer.name() for layer in result_layers()] == ["外部AI結果 船舶検出（IMG2）"]
     # Back to the first: from the cache, without asking again.
     iface.setActiveLayer(image)
@@ -160,6 +162,45 @@ def test_an_image_not_from_the_catalog_reads_nothing_and_importing_needs_the_ima
     assert dock.image_label.text() == "画像カタログから画像を開くと、その画像の結果を表示"
     # Results of an image that is not open cannot be recorded.
     dock.load("IMG2")
-    assert wait_for(lambda: len(dock.rows) == 1)
+    assert wait_for(lambda: len(dock.rows) == 2)
     assert dock.import_rows([0]) == []
     assert dock.status.text() == "画像 IMG2 が観測記録の画像一覧になし（画像を開いて）"
+
+
+def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    book = p.api.observation_dock.book
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    [ship] = dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    # d-4 is the ship of IMG1 (sure); d-3 is far from it.
+    assert list(dock.continued) == [1] and dock.continued[1].tier == "auto"
+    box_widget = dock.list.itemWidget(dock.list.topLevelItem(1), 6)
+    assert box_widget.currentText().startswith("継続: 船舶-1（")
+    assert "継続 1 件" in dock.status.text()
+    saved = dock.import_rows([0, 1])
+    assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(False, "船舶-2"), (True, "船舶-1")]
+    assert saved[1].note.endswith("[AI:船舶検出#d-4] [自動継続]")
+    assert dock.list.topLevelItem(1).text(6) == "継続: 船舶-1" and dock.status.text() == "2 件を観測記録に取り込み（継続 1 件）"
+    assert [o.image_id for o in living(book.records) if o.object_id == ship.object_id] == ["IMG1", "IMG2"]
+
+
+def test_the_thing_to_continue_can_be_chosen_or_left_new(plugin):
+    p, iface, tmp_path = plugin
+    dock = p.api.ai_results
+    first = open_catalog_image(tmp_path, "IMG1")
+    iface.setActiveLayer(first)
+    assert wait_for(lambda: len(dock.rows) == 3)
+    dock.import_rows([0])
+    second = open_catalog_image(tmp_path, "IMG2")
+    iface.setActiveLayer(second)
+    assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
+    # Left new: chosen in the 継続 column.
+    dock.list.itemWidget(dock.list.topLevelItem(1), 6).setCurrentIndex(0)
+    [o] = dock.import_rows([1])
+    assert o.object_name == "船舶-2" and "継続" not in o.note
