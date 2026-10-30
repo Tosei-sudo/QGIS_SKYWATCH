@@ -348,7 +348,7 @@ def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path):
     # Trained on the dataset alone (no image on the map), at depth 1.
     model = str(tmp_path / "ships.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "DATASETS": [path], "DEPTH": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
+        "DATASET": path, "DEPTH": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
     assert ok
     trained = load_model(open(model, "rb").read())
     history = trained.history[0]
@@ -379,7 +379,7 @@ def test_a_dataset_with_the_catalogs_images_and_records(provider, tmp_path):
     assert json.load(open(path, encoding="utf-8"))["groups"][0]["format"] == "voc"
     model = str(tmp_path / "both.onnx")
     results, ok, context = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "DATASETS": [path], "DEPTH": 1, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+        "IMAGES": [layer.id()], "DATASET": path, "DEPTH": 1, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
         "OUTPUT": model, "BOXES": "memory:"})
     assert ok
     history = load_model(open(model, "rb").read()).history[0]
@@ -406,7 +406,7 @@ def test_a_vector_dataset_on_georeferenced_images(provider, tmp_path):
     group = json.load(open(path, encoding="utf-8"))["groups"][0]
     assert group["format"] == "vector" and group["class_field"] == "種別"
     results, ok, context = run("satobs:train_detector", {
-        "DATASETS": [path], "DEFAULT_SIZE": 10, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+        "DATASET": path, "DEFAULT_SIZE": 10, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
         "OUTPUT": str(tmp_path / "m.onnx"), "BOXES": "memory:"})
     assert ok
     boxes = context.takeResultLayer(results["BOXES"])
@@ -421,12 +421,12 @@ def test_missing_files_are_left_out(provider, tmp_path):
     make_dataset({"IMAGES": str(tmp_path / "images"), "LABELS": str(tmp_path / "labels"), "CLASS_MAP": "ship=船舶", "OUTPUT": path})
     os.remove(tmp_path / "images" / "s16.png")
     model = str(tmp_path / "m.onnx")
-    results, ok, _ = run("satobs:train_detector", {"DATASETS": [path], "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0,
+    results, ok, _ = run("satobs:train_detector", {"DATASET": path, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0,
                                                      "REMEMBER": False, "OUTPUT": model})
     assert ok and load_model(open(model, "rb").read()).history[0]["images"] == ["s17.png"]
     # Neither images nor a dataset; not a dataset.
     _, ok, _ = run("satobs:train_detector", {"EPOCHS": 1, "REMEMBER": False, "OUTPUT": model})
     assert not ok
     (tmp_path / "x.json").write_text("{}")
-    _, ok, _ = run("satobs:train_detector", {"DATASETS": [str(tmp_path / "x.json")], "EPOCHS": 1, "REMEMBER": False, "OUTPUT": model})
+    _, ok, _ = run("satobs:train_detector", {"DATASET": str(tmp_path / "x.json"), "EPOCHS": 1, "REMEMBER": False, "OUTPUT": model})
     assert not ok
