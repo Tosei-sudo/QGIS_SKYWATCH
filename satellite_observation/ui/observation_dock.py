@@ -57,6 +57,7 @@ from .obs_tool import ObservationTool
 
 HINT = "地図クリックで記録（白抜きの印は継続）"
 HINT_TWO = "前端（船首・機首）→ 後端の 2 点クリックで記録（白抜きの印は継続）"
+HINT_TWO_REAR = "後端 → 前端（船首・機首）の 2 点クリックで記録（白抜きの印は継続）"
 HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」"
 NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
 ACTIVITY_COLORS = ["#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5", "#e11d48"]
@@ -146,6 +147,7 @@ class ObservationDock(PluginDock):
         self.offered: list[MatchCandidate] = []
         self.active = False
         self.two_point = settings.two_point_setting()
+        self.rear_first = settings.rear_first_setting()
         self.area_mode = False
         self.front: Optional[tuple] = None
         self.cursor: Optional[tuple] = None
@@ -272,9 +274,13 @@ class ObservationDock(PluginDock):
         self.two_point_button = self._button(tr("2 点"), tr("前端（船首・機首）→ 後端の 2 点クリックで、中心・長さ・向きを記録（L）"),
                                              self.set_two_point, checkable=True)
         self.two_point_button.setChecked(self.two_point)
+        self.rear_first_button = self._button(tr("後端から"), tr("2 点を後端 → 前端（船首・機首）の順にクリック（Shift+L）"),
+                                              self.set_rear_first, checkable=True)
+        self.rear_first_button.setChecked(self.rear_first)
+        self.rear_first_button.setEnabled(self.two_point)
         self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは不在）（A）"),
                                         self.set_area_mode, checkable=True)
-        for w in (self.record_button, self.two_point_button, self.area_button):
+        for w in (self.record_button, self.two_point_button, self.rear_first_button, self.area_button):
             row.addWidget(w)
         row.addStretch(1)
         b.addLayout(row)
@@ -547,6 +553,7 @@ class ObservationDock(PluginDock):
         key("Esc", self.escape)
         key("R", lambda: self.record_button.setChecked(not self.active))
         key("L", lambda: self.two_point_button.setChecked(not self.two_point))
+        key("Shift+L", lambda: self.rear_first_button.setChecked(not self.rear_first))
         key("A", lambda: self.area_button.setChecked(not self.area_mode))
         for n in range(1, 10):
             key(str(n), lambda n=n: self._chip(n))
@@ -889,7 +896,7 @@ class ObservationDock(PluginDock):
             self.front = None
             self.close_form()
         elif not quiet:
-            self._say(HINT_TWO if self.two_point else HINT)
+            self._say(self._hint())
         self.draw()
 
     def set_two_point(self, on: bool) -> None:
@@ -900,11 +907,34 @@ class ObservationDock(PluginDock):
             self.two_point_button.blockSignals(False)
         self.two_point = on
         self.front = None
+        self.rear_first_button.setEnabled(on)
         settings.set_two_point(on)
         if on and not self.active:
             self.set_active(True, quiet=True)
-        self._say(HINT_TWO if on else HINT)
+        self._say(self._hint())
         self.draw()
+
+    def set_rear_first(self, on: bool) -> None:
+        """Turns 「後端から」 on (two points clicked rear then front) or off (front then rear)."""
+        if self.rear_first_button.isChecked() != on:
+            self.rear_first_button.blockSignals(True)
+            self.rear_first_button.setChecked(on)
+            self.rear_first_button.blockSignals(False)
+        self.rear_first = on
+        self.front = None
+        settings.set_rear_first(on)
+        if self.two_point:
+            self._say(self._hint())
+        self.draw()
+
+    def _hint(self) -> str:
+        if not self.two_point:
+            return HINT
+        return HINT_TWO_REAR if self.rear_first else HINT_TWO
+
+    def _measure(self, first, second):
+        """The thing measured by the two clicks, in the order 「後端から」 says."""
+        return two_point(second, first) if self.rear_first else two_point(first, second)
 
     def set_area_mode(self, on: bool) -> None:
         """Turns 「確認範囲」 on (two corners on the map, the view or the image, then its kind) or off."""
@@ -977,15 +1007,16 @@ class ObservationDock(PluginDock):
                     return self.open_form(c.source.lon, c.source.lat, source=c.source)
         if not self.two_point:
             return self.open_form(lon, lat)
-        # Two points: the front, then the rear.
+        # Two points: the front, then the rear (or the rear first, 「後端から」).
+        # self.front holds the first point clicked, whichever end it is.
         if self.front is None:
             self.close_form()
             self.front = (lon, lat)
             self.cursor = None
-            self._say(self.tr("後端をクリック（Esc で取消）"))
+            self._say(self.tr("前端をクリック（Esc で取消）") if self.rear_first else self.tr("後端をクリック（Esc で取消）"))
             self.draw()
             return
-        m = two_point(self.front, (lon, lat))
+        m = self._measure(self.front, (lon, lat))
         self.front = None
         self.open_form(m.lon, m.lat, measured=(m.length, m.heading))
 
@@ -1880,7 +1911,7 @@ class ObservationDock(PluginDock):
             s.front = self.front
             if self.cursor:
                 s.cursor = self.cursor
-                m = two_point(self.front, self.cursor)
+                m = self._measure(self.front, self.cursor)
                 s.rubber_label = f"{km_text(m.length)}・{heading_text(m.heading)}"
         return s
 
