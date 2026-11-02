@@ -56,8 +56,8 @@ class Scene:
     pending: Optional[tuple] = None
     #: The area being made.
     area_pending: Optional[list] = None
-    #: The front clicked while measuring, the pointer, and the line's label.
-    front: Optional[tuple] = None
+    #: The first point clicked while measuring (the rear), the pointer, and the line's label.
+    first: Optional[tuple] = None
     cursor: Optional[tuple] = None
     rubber_label: str = ""
 
@@ -113,18 +113,18 @@ class ScenePainter:
             self._mark(painter, mark)
         if s.pending:
             self._cross(painter, self.to_pixel(*s.pending))
-        if s.front:
-            front = self.to_pixel(*s.front)
-            self._cross(painter, front)
+        if s.first:
+            first = self.to_pixel(*s.first)
+            self._cross(painter, first)
             if s.cursor:
                 cursor = self.to_pixel(*s.cursor)
                 painter.setPen(QPen(QColor("white"), 5 * k))
-                painter.drawLine(front, cursor)
+                painter.drawLine(first, cursor)
                 pen = QPen(QColor("#e11d48"), 2 * k)
                 pen.setDashPattern([3, 2])
                 painter.setPen(pen)
-                painter.drawLine(front, cursor)
-                mid = QPointF((front.x() + cursor.x()) / 2, (front.y() + cursor.y()) / 2 - 10 * k)
+                painter.drawLine(first, cursor)
+                mid = QPointF((first.x() + cursor.x()) / 2, (first.y() + cursor.y()) / 2 - 10 * k)
                 _halo_text(painter, mid, s.rubber_label, "#111111", self._bold)
 
     def _area(self, painter, ring, label: str, color: str, fill: QColor) -> None:

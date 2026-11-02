@@ -222,12 +222,13 @@ def test_the_kind_chosen_is_the_next_new_records_default_in_later_sessions_too(p
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     p, iface, dock, layers, _ = plugin
     dock.set_two_point(True)
-    assert dock.active and dock.status.text().startswith("前端")
-    dock.map_clicked(139.7, 35.6, None)
-    assert dock.front == (139.7, 35.6) and dock.status.text() == "後端をクリック（Esc で取消）"
-    dock.map_hovered(139.7, 35.599)
-    assert dock.scene().rubber_label == "111 m・000°"
+    assert dock.active and dock.status.text().startswith("後端 →")
+    # The rear first, then the front.
     dock.map_clicked(139.7, 35.5985, None)
+    assert dock.rear == (139.7, 35.5985) and dock.status.text() == "前端をクリック（Esc で取消）"
+    dock.map_hovered(139.7, 35.5995)
+    assert dock.scene().rubber_label == "111 m・000°"
+    dock.map_clicked(139.7, 35.6, None)
     assert dock.length_input.isVisible() and float(dock.length_input.text()) == pytest.approx(166.8, abs=0.2)
     assert dock.heading_input.text() == "0.0"
     dock.object_input.setText("タンカーA")
@@ -255,33 +256,11 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     assert dock.object_input.text() == "タンカーA" and dock.kind_input.text() == "船舶"
     dock.submit()
     assert len(dock.book.flow(a.object_id).observations) == 2
-    # Esc steps back: the front, then the form.
+    # Esc steps back: the first point, then the form.
     dock.set_two_point(True)
     dock.map_clicked(139.7, 35.6, None)
     dock.escape()
-    assert dock.front is None and dock.status.text() == "2 点目の取消"
-
-
-def test_two_points_rear_first(plugin):
-    p, iface, dock, layers, _ = plugin
-    assert not dock.rear_first_button.isEnabled()
-    dock.set_two_point(True)
-    assert dock.rear_first_button.isEnabled()
-    dock.rear_first_button.setChecked(True)
-    assert dock.rear_first and dock.status.text().startswith("後端 →")
-    # The rear first, then the front: the same thing as front then rear.
-    dock.map_clicked(139.7, 35.5985, None)
-    assert dock.status.text() == "前端をクリック（Esc で取消）"
-    dock.map_hovered(139.7, 35.5995)
-    assert dock.scene().rubber_label == "111 m・000°"
-    dock.map_clicked(139.7, 35.6, None)
-    assert float(dock.length_input.text()) == pytest.approx(166.8, abs=0.2)
-    assert dock.heading_input.text() == "0.0"
-    from satellite_observation.qgis_io import settings
-
-    assert settings.rear_first_setting()
-    dock.set_rear_first(False)
-    assert not settings.rear_first_setting() and dock.status.text().startswith("前端（")
+    assert dock.rear is None and dock.status.text() == "2 点目の取消"
 
 
 def test_checked_areas_carry_all_and_absent_inside(plugin):

@@ -138,15 +138,6 @@ def two_point_setting() -> bool:
 def set_two_point(on: bool) -> None:
     _set("observations/two_point", "1" if on else "0")
 
-
-def rear_first_setting() -> bool:
-    """「後端から」: two points clicked rear then front (default front then rear)."""
-    return _get("observations/two_point_rear_first") == "1"
-
-
-def set_rear_first(on: bool) -> None:
-    _set("observations/two_point_rear_first", "1" if on else "0")
-
 def plan_reminders() -> list:
     """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
     try:
