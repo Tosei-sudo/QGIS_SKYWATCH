@@ -35,7 +35,7 @@ from ..core.obs.areas import CheckedArea, area_label, box_ring
 from ..core.obs.book import FormValues, ObservationBook, ObservedImage
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
 from ..core.obs.flows import (
-    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, living, now_ms, time_key, two_point,
+    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, living, now_ms, outline_of, side_points, time_key, two_point,
 )
 from ..core.obs.geo import get_distance, js_round, km_text
 from ..core.obs.model import Observation
@@ -56,7 +56,13 @@ from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
 
 HINT = "地図クリックで記録（白抜きの印は継続）"
-HINT_TWO = "後端 → 前端（船首・機首）の 2 点クリックで記録（白抜きの印は継続）"
+HINT_POINTS = {
+    2: "後端 → 前端（船首・機首）の 2 点クリックで記録（白抜きの印は継続）",
+    3: "後端 → 前端 → 側面の 3 点クリックで長さ・幅・向きを記録（白抜きの印は継続）",
+    4: "後端 → 前端 → 両側面の 4 点クリックで長さ・幅・向きを記録（白抜きの印は継続）",
+}
+#: The choices of 「点数」.
+POINT_CHOICES = [(1, "1 点"), (2, "2 点（長さ・向き）"), (3, "3 点（＋片側面）"), (4, "4 点（＋両側面）")]
 HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」"
 NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
 ACTIVITY_COLORS = ["#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5", "#e11d48"]
@@ -145,9 +151,11 @@ class ObservationDock(PluginDock):
         self.pending: Optional[tuple] = None
         self.offered: list[MatchCandidate] = []
         self.active = False
-        self.two_point = settings.two_point_setting()
+        self.points = settings.point_count_setting()
         self.area_mode = False
         self.rear: Optional[tuple] = None
+        #: The points clicked after the rear: the front, then the sides.
+        self.placed: list[tuple] = []
         self.cursor: Optional[tuple] = None
         self.area_corner: Optional[tuple] = None
         self.area_ring: Optional[list] = None
@@ -269,12 +277,19 @@ class ObservationDock(PluginDock):
         # Recording.
         row = QHBoxLayout()
         self.record_button = self._button(tr("クリック記録"), tr("クリック地点にこの画像の観測を記録（R）"), self.set_active, checkable=True)
-        self.two_point_button = self._button(tr("2 点"), tr("後端 → 前端（船首・機首）の 2 点クリックで、中心・長さ・向きを記録（L）"),
-                                             self.set_two_point, checkable=True)
-        self.two_point_button.setChecked(self.two_point)
+        self.points_select = QComboBox()
+        for n, label in POINT_CHOICES:
+            self.points_select.addItem(tr(label), n)
+        self.points_select.setToolTip(tr("記録のクリック数（L で切り替え）\n"
+                                         "1 点: 位置\n"
+                                         "2 点: 後端 → 前端（船首・機首）で中心・長さ・向き\n"
+                                         "3 点: さらに片側の側面（舷側）で幅（中心線から左右同じ幅）\n"
+                                         "4 点: さらに両側の側面で幅（中心は両側面の中間）"))
+        self.points_select.setCurrentIndex(max(0, self.points - 1))
+        self.points_select.currentIndexChanged.connect(lambda _i: self.set_points(self.points_select.currentData()))
         self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは不在）（A）"),
                                         self.set_area_mode, checkable=True)
-        for w in (self.record_button, self.two_point_button, self.area_button):
+        for w in (self.record_button, self.points_select, self.area_button):
             row.addWidget(w)
         row.addStretch(1)
         b.addLayout(row)
@@ -352,9 +367,14 @@ class ObservationDock(PluginDock):
         self.heading_input = QLineEdit()
         self.heading_input.setToolTip(tr("北から時計回り、後端→前端"))
         self.heading_input.textEdited.connect(lambda _t: self._render_candidates())
+        self.width_input = QLineEdit()
+        self.width_input.setToolTip(tr("側面から側面まで（向きに直角）"))
+        self.width_input.textEdited.connect(lambda _t: self._render_measure())
         self.length_label = QLabel(tr("長さ（m）"))
         self.heading_label = QLabel(tr("向き（°）"))
+        self.width_label = QLabel(tr("幅（m）"))
         f.addRow(self.length_label, self.length_input)
+        f.addRow(self.width_label, self.width_input)
         f.addRow(self.heading_label, self.heading_input)
         self.measure_note = QLabel()
         f.addRow(self.measure_note)
@@ -367,7 +387,8 @@ class ObservationDock(PluginDock):
         for w in (self.submit_button, self.absent_button, self.delete_button, self._button(tr("取消（Esc）"), "", self.close_form)):
             actions.addWidget(w)
         f.addRow(actions)
-        for edit in (self.object_input, self.kind_input, self.activity_input, self.length_input, self.heading_input, self.note_input):
+        for edit in (self.object_input, self.kind_input, self.activity_input, self.length_input, self.width_input, self.heading_input,
+                     self.note_input):
             edit.returnPressed.connect(lambda: self.submit(True))
         self.form.hide()
         b.addWidget(self.form)
@@ -546,7 +567,7 @@ class ObservationDock(PluginDock):
         key("PgDown", lambda: self.step(1))
         key("Esc", self.escape)
         key("R", lambda: self.record_button.setChecked(not self.active))
-        key("L", lambda: self.two_point_button.setChecked(not self.two_point))
+        key("L", lambda: self.set_points(self.points % 4 + 1))
         key("A", lambda: self.area_button.setChecked(not self.area_mode))
         for n in range(1, 10):
             key(str(n), lambda n=n: self._chip(n))
@@ -748,7 +769,7 @@ class ObservationDock(PluginDock):
     def _went(self) -> None:
         """Another image: the form closes, the layer is chosen, 「この画像のみ」 follows."""
         self.close_form()
-        self.rear = None
+        self._clear_points()
         image = self.book.current if self.book else None
         if image is not None and image.layer_id:
             layer = QgsProject.instance().mapLayer(image.layer_id)
@@ -886,25 +907,42 @@ class ObservationDock(PluginDock):
         self.record_button.setText(self.tr("クリック記録中") if on else self.tr("クリック記録"))
         self._use_tool(on or self.area_mode)
         if not on:
-            self.rear = None
+            self._clear_points()
             self.close_form()
         elif not quiet:
-            self._say(HINT_TWO if self.two_point else HINT)
+            self._say(HINT_POINTS.get(self.points, HINT))
+        self.draw()
+
+    def set_points(self, n: int) -> None:
+        """
+        How many clicks a record takes: 1 a point; 2 the rear then the front
+        (centre, length, heading); 3 a side too (as wide on the other side);
+        4 both sides (the centre halfway between them).
+        """
+        n = n if n in (1, 2, 3, 4) else 1
+        if self.points_select.currentData() != n:
+            self.points_select.blockSignals(True)
+            self.points_select.setCurrentIndex(n - 1)
+            self.points_select.blockSignals(False)
+        self.points = n
+        self._clear_points()
+        settings.set_point_count(n)
+        if n > 1 and not self.active:
+            self.set_active(True, quiet=True)
+        self._say(HINT_POINTS.get(n, HINT))
         self.draw()
 
     def set_two_point(self, on: bool) -> None:
-        """Turns 「2 点」 on (rear then front: centre, length, heading) or off (a point)."""
-        if self.two_point_button.isChecked() != on:
-            self.two_point_button.blockSignals(True)
-            self.two_point_button.setChecked(on)
-            self.two_point_button.blockSignals(False)
-        self.two_point = on
+        """「2 点」 on (rear then front) or off (a point), as before the 3 and 4 points."""
+        self.set_points(2 if on else 1)
+
+    @property
+    def two_point(self) -> bool:
+        return self.points > 1
+
+    def _clear_points(self) -> None:
         self.rear = None
-        settings.set_two_point(on)
-        if on and not self.active:
-            self.set_active(True, quiet=True)
-        self._say(HINT_TWO if on else HINT)
-        self.draw()
+        self.placed = []
 
     def set_area_mode(self, on: bool) -> None:
         """Turns 「確認範囲」 on (two corners on the map, the view or the image, then its kind) or off."""
@@ -922,7 +960,7 @@ class ObservationDock(PluginDock):
         self._use_tool(on or self.active)
         if on:
             self.close_form()
-            self.rear = None
+            self._clear_points()
             self.area_kind.clear()
             self.area_note.clear()
             self.area_image_button.setEnabled(bool(self.book.current.box))
@@ -940,8 +978,12 @@ class ObservationDock(PluginDock):
             else:
                 self.set_area_mode(False)
         elif self.rear is not None:
-            self.rear = None
-            self._say(self.tr("2 点目の取消"))
+            if self.placed:
+                self.placed.pop()
+                self._say(self.tr("側面の取消") if self.placed else self.tr("前端の取消"))
+            else:
+                self._clear_points()
+                self._say(self.tr("後端の取消"))
             self.draw()
         elif self.form.isVisible():
             self.close_form()
@@ -975,9 +1017,9 @@ class ObservationDock(PluginDock):
                 c = next((x for x in self.book.carried() if x.source.id == mark.key), None)
                 if c is not None:
                     return self.open_form(c.source.lon, c.source.lat, source=c.source)
-        if not self.two_point:
+        if self.points < 2:
             return self.open_form(lon, lat)
-        # Two points: the rear, then the front (tsudo, 2026-11-02).
+        # The rear, then the front (tsudo, 2026-11-02), then a side or both (tsudo, 2026-11-03).
         if self.rear is None:
             self.close_form()
             self.rear = (lon, lat)
@@ -985,9 +1027,19 @@ class ObservationDock(PluginDock):
             self._say(self.tr("前端をクリック（Esc で取消）"))
             self.draw()
             return
-        m = two_point((lon, lat), self.rear)
-        self.rear = None
-        self.open_form(m.lon, m.lat, measured=(m.length, m.heading))
+        clicked = [*self.placed, (lon, lat)]
+        if len(clicked) < self.points - 1:
+            self.placed = clicked
+            self.cursor = None
+            if len(clicked) == 1:
+                self._say(self.tr("側面（舷側）をクリック（Esc で取消）") if self.points == 3 else self.tr("片側の側面をクリック（Esc で取消）"))
+            else:
+                self._say(self.tr("反対側の側面をクリック（Esc で取消）"))
+            self.draw()
+            return
+        m = side_points(clicked[0], self.rear, clicked[1:])
+        self._clear_points()
+        self.open_form(m.lon, m.lat, measured=(m.length, m.heading, m.width))
 
     def map_hovered(self, lon: float, lat: float) -> None:
         if self.rear is not None or (self.area_mode and self.area_corner is not None and self.area_ring is None):
@@ -1063,11 +1115,15 @@ class ObservationDock(PluginDock):
         known = editing or source
         length = measured[0] if measured else (known.length if known else None)
         heading = measured[1] if measured else (known.heading if known else None)
+        width = (measured[2] if len(measured) > 2 else None) if measured else (known.width if known else None)
         self.length_input.setText("" if length is None else f"{length:.1f}")
         self.heading_input.setText("" if heading is None else f"{heading:.1f}")
-        measuring = self.two_point or length is not None
+        self.width_input.setText("" if width is None else f"{width:.1f}")
+        measuring = self.points > 1 or length is not None
         for w in (self.length_label, self.length_input, self.heading_label, self.heading_input, self.measure_note):
             w.setVisible(measuring)
+        for w in (self.width_label, self.width_input):
+            w.setVisible(self.points > 2 or width is not None)
         last = self.book.last
         self.object_input.setText(known.object_name if known else "")
         self.kind_input.setText(known.kind if known else (last.kind or (self.book.vocabulary.kinds[0] if self.book.vocabulary.kinds else "")))
@@ -1100,7 +1156,7 @@ class ObservationDock(PluginDock):
     def form_values(self) -> FormValues:
         return FormValues(object=self.object_input.text(), kind=self.kind_input.text(), activity=self.activity_input.text(),
                           note=self.note_input.text(), confidence=self.confidence_select.currentData() or "",
-                          length=self.length_input.text(), heading=self.heading_input.text())
+                          length=self.length_input.text(), heading=self.heading_input.text(), width=self.width_input.text())
 
     def submit(self, present: bool = True) -> None:
         """Records what the form says (a new record, a change, or a thing carried over)."""
@@ -1206,20 +1262,25 @@ class ObservationDock(PluginDock):
         self.specs_label.setVisible(bool(text))
 
     def _render_measure(self) -> None:
-        """The measured length against the class's 全長, when both are known."""
+        """The measured length and width against the class's 全長 and 全幅, when known."""
         import re
 
-        try:
-            length = float(self.length_input.text())
-        except ValueError:
-            length = 0
         path = path_of(self.kind_input.text())
-        spec = specs_at(self.book.taxonomy(), path).get("全長") if self.book and path else None
-        try:
-            full = float(re.sub(r"[^\d.]", "", spec[0])) if spec else 0
-        except ValueError:
-            full = 0
-        self.measure_note.setText(f"全長 {spec[0]} m（{spec[1][-1]}）の {js_round(length / full * 100)}%" if length > 0 and full > 0 else "")
+        specs = specs_at(self.book.taxonomy(), path) if self.book and path else {}
+        parts = []
+        for edit, name in ((self.length_input, "全長"), (self.width_input, "全幅")):
+            try:
+                size = float(edit.text())
+            except ValueError:
+                size = 0
+            spec = specs.get(name)
+            try:
+                full = float(re.sub(r"[^\d.]", "", spec[0])) if spec else 0
+            except ValueError:
+                full = 0
+            if size > 0 and full > 0:
+                parts.append(f"{name} {spec[0]} m（{spec[1][-1]}）の {js_round(size / full * 100)}%")
+        self.measure_note.setText("・".join(parts))
 
     def _object_typed(self) -> None:
         """A known thing's name typed: its kind and latest activity come with it; a known individual's name brings its class."""
@@ -1680,11 +1741,14 @@ class ObservationDock(PluginDock):
 
     def _render_image(self, here: list[Observation], carried: list[CarryOver], inside: list[CarryOver]) -> None:
         tr = self.tr
-        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ・向き"), tr("備考"), tr("更新"), "")
+        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("更新"), "")
         book = self.book
 
         def measure(o: Observation) -> str:
-            return f"{km_text(o.length)}・{heading_text(o.heading)}" if o.length is not None else ""
+            if o.length is None:
+                return ""
+            size = f"{km_text(o.length)} × {km_text(o.width)}" if o.width is not None else km_text(o.length)
+            return f"{size}・{heading_text(o.heading)}"
 
         for o in here:
             gone = o.deleted_at is not None
@@ -1855,7 +1919,7 @@ class ObservationDock(PluginDock):
             for c in book.carried():
                 o = c.source
                 s.marks.append(Mark("ghost", o.lon, o.lat, color(o.kind), o.object_name, ends=ends_of(o.lon, o.lat, o.length, o.heading),
-                                    heading=o.heading, key=o.id))
+                                    heading=o.heading, key=o.id, outline=outline_of(o.lon, o.lat, o.length, o.width, o.heading)))
             editing = self.pending[2].id if self.pending and self.pending[2] else None
             for o in book.living():
                 if o.image_id != image.id:
@@ -1864,7 +1928,8 @@ class ObservationDock(PluginDock):
                 what = (f"・{o.activity}" if o.activity else "") if o.present else "（不在）"
                 sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
                 s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}", o.present, ring_of.get(o.confidence or ""),
-                                    ends=ends_of(lon, lat, o.length, o.heading), heading=o.heading, editing=o.id == editing, key=o.id))
+                                    ends=ends_of(lon, lat, o.length, o.heading), heading=o.heading, editing=o.id == editing, key=o.id,
+                                    outline=outline_of(lon, lat, o.length, o.width, o.heading) if o.present else None))
         p = self.pending
         if p and not p[2]:
             s.pending = (p[0], p[1])
@@ -1878,7 +1943,14 @@ class ObservationDock(PluginDock):
                 s.pending = self.area_corner
         if self.rear:
             s.first = self.rear
-            if self.cursor:
+            s.placed = list(self.placed)
+            if self.placed:
+                sides = [*self.placed[1:], *([self.cursor] if self.cursor else [])]
+                m = side_points(self.placed[0], self.rear, sides)
+                s.rubber_outline = outline_of(m.lon, m.lat, m.length, m.width, m.heading)
+                size = f"{km_text(m.length)} × {km_text(m.width)}" if m.width else km_text(m.length)
+                s.rubber_label = f"{size}・{heading_text(m.heading)}"
+            elif self.cursor:
                 s.cursor = self.cursor
                 m = two_point(self.cursor, self.rear)
                 s.rubber_label = f"{km_text(m.length)}・{heading_text(m.heading)}"

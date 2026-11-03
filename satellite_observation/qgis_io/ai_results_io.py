@@ -73,10 +73,11 @@ def _local_crs(point: QgsPointXY) -> QgsCoordinateReferenceSystem:
     return QgsCoordinateReferenceSystem.fromProj(f"+proj=aeqd +lat_0={point.y()} +lon_0={point.x()} +datum=WGS84 +units=m +no_defs")
 
 
-def place_of(result: AiResult) -> Optional[tuple[float, float, Optional[float]]]:
+def place_of(result: AiResult) -> Optional[tuple[float, float, Optional[float], Optional[float]]]:
     """
     Where a result is recorded: a point as it is, a polygon's point inside it
-    (and the long side of its smallest rotated rectangle, m), a line's middle; None without a geometry.
+    (and the long and short sides of its smallest rotated rectangle, m), a
+    line's middle; None without a geometry. (lon, lat, length, width)
     """
     g = geometry_of(result.geometry)
     if g is None or g.isEmpty():
@@ -84,15 +85,15 @@ def place_of(result: AiResult) -> Optional[tuple[float, float, Optional[float]]]
     kind = g.type()
     if kind == QgsWkbTypes.GeometryType.PointGeometry:
         p = g.asPoint() if not g.isMultipart() else g.asMultiPoint()[0]
-        return p.x(), p.y(), None
+        return p.x(), p.y(), None, None
     if kind == QgsWkbTypes.GeometryType.LineGeometry:
         p = g.interpolate(g.length() / 2).asPoint()
-        return p.x(), p.y(), None
+        return p.x(), p.y(), None, None
     inside = g.pointOnSurface()
     if inside.isNull():
         inside = g.centroid()
     p = inside.asPoint()
-    length = None
+    length = width = None
     try:
         local = QgsGeometry(g)
         local.transform(QgsCoordinateTransform(WGS84, _local_crs(p), QgsProject.instance()))
@@ -100,9 +101,10 @@ def place_of(result: AiResult) -> Optional[tuple[float, float, Optional[float]]]
         # (geometry, area, angle, width, height)
         if box and len(box) >= 5 and box[3] and box[4]:
             length = round(max(box[3], box[4]), 1)
+            width = round(min(box[3], box[4]), 1)
     except Exception:  # noqa: BLE001 (a polygon that cannot be measured is recorded without a length)
-        length = None
-    return p.x(), p.y(), length
+        length = width = None
+    return p.x(), p.y(), length, width
 
 
 def results_layer(results: Sequence[AiResult], rows: Sequence[int], source: AiResultSource, image_id: str,

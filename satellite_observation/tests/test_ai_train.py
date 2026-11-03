@@ -208,6 +208,9 @@ def test_object_sizes_from_records_then_specifications():
     assert object_size(["船舶", "駆逐艦"], taxonomy) == ObjectSize(150, 15, None, "諸元")
     assert object_size(["船舶"], taxonomy, 30) == ObjectSize(30, 30, None, "記録")
     assert object_size(["船舶"], taxonomy, default=12) == ObjectSize(12, 12, None, "既定")
+    # Measured by three or four points: the record's own width.
+    assert object_size(["船舶", "駆逐艦"], taxonomy, 100, 45, width=18) == ObjectSize(100, 18, 45, "記録（幅も）")
+    assert object_size(["船舶"], taxonomy, 30, None, width=8) == ObjectSize(30, 8, None, "記録（幅も）")
 
 
 def test_a_footprint_is_the_object_turned_to_its_heading():

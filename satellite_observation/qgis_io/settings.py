@@ -131,12 +131,16 @@ class SettingsPrefs:
         _set("observations/" + key, value)
 
 
-def two_point_setting() -> bool:
-    return _get("observations/two_point") == "1"
+def point_count_setting() -> int:
+    """How many clicks a record takes (1 a point; 2 rear and front; 3 and 4 the sides too); 「2 点」 of before as 2."""
+    v = _get("observations/points")
+    if v in ("1", "2", "3", "4"):
+        return int(v)
+    return 2 if _get("observations/two_point") == "1" else 1
 
 
-def set_two_point(on: bool) -> None:
-    _set("observations/two_point", "1" if on else "0")
+def set_point_count(n: int) -> None:
+    _set("observations/points", str(n))
 
 def plan_reminders() -> list:
     """The imaging plan's reminders (JSON objects; see core.plan.remind)."""

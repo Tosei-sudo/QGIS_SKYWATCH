@@ -260,7 +260,50 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     dock.set_two_point(True)
     dock.map_clicked(139.7, 35.6, None)
     dock.escape()
-    assert dock.rear is None and dock.status.text() == "2 点目の取消"
+    assert dock.rear is None and dock.status.text() == "後端の取消"
+
+
+def test_measures_the_width_by_three_or_four_points(plugin):
+    p, iface, dock, layers, _ = plugin
+    dock.set_points(3)
+    assert dock.active and dock.points_select.currentData() == 3 and dock.status.text().startswith("後端 → 前端 → 側面")
+    dock.map_clicked(139.7, 35.5985, None)
+    dock.map_clicked(139.7, 35.6, None)
+    assert dock.placed == [(139.7, 35.6)] and not dock.form.isVisible()
+    assert dock.status.text() == "側面（舷側）をクリック（Esc で取消）"
+    # The outline follows the pointer.
+    dock.map_hovered(139.7002, 35.5992)
+    scene = dock.scene()
+    assert scene.rubber_outline is not None and len(scene.rubber_outline) == 4 and " × " in scene.rubber_label
+    dock.map_clicked(139.7002, 35.5992, None)
+    assert dock.width_input.isVisible() and float(dock.width_input.text()) == pytest.approx(36.2, abs=0.3)
+    assert float(dock.length_input.text()) == pytest.approx(166.8, abs=0.2) and dock.heading_input.text() == "0.0"
+    dock.object_input.setText("タンカーB")
+    dock.kind_input.setText("船舶")
+    dock.submit()
+    [a] = dock.book.living()
+    assert a.width == pytest.approx(36.2, abs=0.3) and a.lon == pytest.approx(139.7, abs=1e-9)
+    [m] = dock.scene().marks
+    assert m.outline is not None and len(m.outline) == 4
+    # Four points: both sides, the centre halfway between them.
+    dock.set_points(4)
+    for lon, lat in ((139.71, 35.5985), (139.71, 35.6), (139.7102, 35.5992)):
+        dock.map_clicked(lon, lat, None)
+    assert dock.status.text() == "反対側の側面をクリック（Esc で取消）" and len(dock.placed) == 2
+    # Esc takes back the last point only.
+    dock.escape()
+    assert dock.placed == [(139.71, 35.6)] and dock.status.text() == "側面の取消"
+    dock.map_clicked(139.7102, 35.5992, None)
+    dock.map_clicked(139.7099, 35.5992, None)
+    assert float(dock.width_input.text()) == pytest.approx(27.15, abs=0.3)
+    dock.object_input.setText("タンカーC")
+    dock.submit()
+    c = next(o for o in dock.book.living() if o.object_name == "タンカーC")
+    assert c.width == pytest.approx(27.15, abs=0.3) and c.lon > 139.71
+    # 「L」 goes round 1 → 2 → 3 → 4 → 1.
+    dock.set_points(4)
+    dock.set_points(dock.points % 4 + 1)
+    assert dock.points == 1 and dock.points_select.currentData() == 1
 
 
 def test_checked_areas_carry_all_and_absent_inside(plugin):

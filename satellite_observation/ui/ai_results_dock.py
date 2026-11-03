@@ -281,7 +281,7 @@ class AiResultsDock(PluginDock):
             place = place_of(r)
             if place is None:
                 continue
-            entry = import_entry(r, source, place[0], place[1], place[2])
+            entry = import_entry(r, source, place[0], place[1], place[2], place[3])
             rows.append(row)
             found.append(Found(entry.lon, entry.lat, entry.kind, entry.length, entry.heading,
                                source.continue_radius, source.candidate_radius))
@@ -417,7 +417,7 @@ class AiResultsDock(PluginDock):
             if place is None:
                 skipped += 1
                 continue
-            entry = import_entry(r, source, place[0], place[1], place[2])
+            entry = import_entry(r, source, place[0], place[1], place[2], place[3])
             if entry.confidence and entry.confidence not in levels:
                 entry.confidence = ""
             entry.carry = self.chosen_carry(row)

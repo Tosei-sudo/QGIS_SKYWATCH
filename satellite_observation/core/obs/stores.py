@@ -101,7 +101,7 @@ class LocalObservationStore:
                 image_time=datetime_ms(r.get("IMAGE_TIME")), object_id=r["OBJECT_ID"], object_name=r.get("OBJECT_NAME") or "",
                 kind=r.get("KIND") or "", activity=r.get("ACTIVITY") or "", present=r.get("PRESENT") != 0, note=r.get("NOTE") or "",
                 lon=g[0], lat=g[1], created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
-                deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"),
+                deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
             ))
         return out
@@ -110,7 +110,7 @@ class LocalObservationStore:
         self.gpkg.upsert(OBSERVATIONS, [{
             "OBS_ID": o.id, "OBJECT_ID": o.object_id, "OBJECT_NAME": o.object_name, "IMAGE_ID": o.image_id,
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
-            "PRESENT": 1 if o.present else 0, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading,
+            "PRESENT": 1 if o.present else 0, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
             "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
@@ -303,7 +303,7 @@ class EsriObservationStore:
         values = {
             f["id"]: o.id, f["imageId"]: o.image_id, f["imageName"]: o.image_name, f["imageTime"]: o.image_time,
             f["objectId"]: o.object_id, f["objectName"]: o.object_name, f["kind"]: o.kind, f["activity"]: o.activity,
-            f["present"]: o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading,
+            f["present"]: o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
             f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at,
         }
@@ -328,7 +328,8 @@ class EsriObservationStore:
             image_time=ms_of(a.get(f["imageTime"])), object_id=object_id, object_name=_text(a.get(f["objectName"])),
             kind=_text(a.get(f["kind"])), activity=_text(a.get(f["activity"])),
             present=_present_of(a[f["present"]]) if f["present"] in a else True, note=_text(a.get(f["note"])),
-            length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])), confidence=_text(a.get(f["confidence"])),
+            length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])),
+            width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
