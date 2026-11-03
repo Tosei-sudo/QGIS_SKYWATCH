@@ -322,6 +322,7 @@ OBSERVATIONS = TableSpec(
         Column("CONFIDENCE", "TEXT(50)"),
         Column("LENGTH_M", "DOUBLE"),
         Column("HEADING", "DOUBLE"),
+        Column("WIDTH_M", "DOUBLE"),
         Column("NOTE", "TEXT(1000)"),
         Column("OBSERVER", "TEXT(50)"),
         Column("UPDATED_BY", "TEXT(50)"),

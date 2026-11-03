@@ -37,7 +37,7 @@ def test_the_settings_need_a_layer_and_the_image_id():
     assert problems == [
         "aiResultSources[0] に fields.imageId（画像IDの入った属性名）なし",
         "aiResultSources[1] の url は …/FeatureServer/0 のようなレイヤーの URL で指定",
-        "aiResultSources[2] の fields.colour は使用不可の役割（imageId / id / class / score / model / detectedAt / name / kind / activity / length / heading / note）",
+        "aiResultSources[2] の fields.colour は使用不可の役割（imageId / id / class / score / model / detectedAt / name / kind / activity / length / heading / width / note）",
         "aiResultSources[2] の fields.score は属性名（英数字と _）で指定",
         "aiResultSources[2] の minScore は 0〜1 で指定",
     ]

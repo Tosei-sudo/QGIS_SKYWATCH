@@ -3,7 +3,7 @@ What the observations draw on the map while their dock is open, as the
 viewer's overlay: this image's records (filled marks, the ring in the colour
 of their 確度, a diamond for 「不在」), the things carried over from other
 images (hollow marks), records measured by two points (a line with an arrow
-at the front), the chosen thing's track, the checked areas, the place
+at the front) and by three or four (their outline too), the chosen thing's track, the checked areas, the place
 clicked and the line to the pointer while measuring.
 
 One canvas item paints everything (nothing is added to the project); the
@@ -39,6 +39,8 @@ class Mark:
     ring: Optional[str] = None
     #: The front and rear when measured by two points.
     ends: Optional[tuple] = None
+    #: The corners when measured with a width (three or four points).
+    outline: Optional[list] = None
     heading: Optional[float] = None
     editing: bool = False
     #: What it stands for (a record id), for clicks and drags.
@@ -60,6 +62,9 @@ class Scene:
     first: Optional[tuple] = None
     cursor: Optional[tuple] = None
     rubber_label: str = ""
+    #: The points clicked after the first (the front, then the sides) and the outline they make with the pointer.
+    placed: list[tuple] = field(default_factory=list)
+    rubber_outline: Optional[list] = None
 
 
 def _halo_text(painter, at: QPointF, text: str, color: str, font: QFont, align_left: bool = False) -> None:
@@ -107,6 +112,9 @@ class ScenePainter:
             painter.setPen(pen)
             painter.drawPolyline(points)
         for mark in s.marks:
+            if mark.outline:
+                self._outline(painter, mark.outline, mark.color, mark.role == "ghost")
+        for mark in s.marks:
             if mark.ends:
                 self._line(painter, mark)
         for mark in s.marks:
@@ -116,7 +124,17 @@ class ScenePainter:
         if s.first:
             first = self.to_pixel(*s.first)
             self._cross(painter, first)
-            if s.cursor:
+            if s.rubber_outline:
+                self._outline(painter, s.rubber_outline, "#e11d48", True)
+            for p in s.placed:
+                self._cross(painter, self.to_pixel(*p))
+            if s.placed:
+                painter.setPen(QPen(QColor("#e11d48"), 2 * k))
+                painter.drawLine(first, self.to_pixel(*s.placed[0]))
+                if s.rubber_label:
+                    at = self.to_pixel(*s.placed[0])
+                    _halo_text(painter, QPointF(at.x(), at.y() - 14 * k), s.rubber_label, "#111111", self._bold)
+            elif s.cursor:
                 cursor = self.to_pixel(*s.cursor)
                 painter.setPen(QPen(QColor("white"), 5 * k))
                 painter.drawLine(first, cursor)
@@ -138,6 +156,21 @@ class ScenePainter:
             # Its name at its top left corner, clear of the marks inside.
             corner = QPointF(min(p.x() for p in points) + 2, min(p.y() for p in points) - 4)
             _halo_text(painter, corner, label, color, self._font, align_left=True)
+
+    def _outline(self, painter, corners, color: str, dashed: bool) -> None:
+        k = self.scale
+        points = QPolygonF([self.to_pixel(p[0], p[1]) for p in corners])
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("white"), 4 * k))
+        painter.drawPolygon(points)
+        pen = QPen(QColor(color), 2 * k)
+        if dashed:
+            pen.setDashPattern([3, 2])
+        painter.setPen(pen)
+        fill = QColor(color)
+        fill.setAlpha(20 if dashed else 45)
+        painter.setBrush(QBrush(fill))
+        painter.drawPolygon(points)
 
     def _cross(self, painter, at: QPointF) -> None:
         r = 10 * self.scale

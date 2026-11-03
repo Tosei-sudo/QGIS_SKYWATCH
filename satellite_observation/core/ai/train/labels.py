@@ -6,7 +6,7 @@ the classes.
 A class is a kind cut to a depth of the tree (`船舶 > 支援船 > 〇〇級` at
 depth 1 is `船舶`), so what the model finds is a kind the observation book
 knows. Sizes come from the record (its length, measured by two points, and
-heading), else from the class' specifications (全長・全幅), else a default.
+heading, and its width when measured by three or four), else from the class' specifications (全長・全幅), else a default.
 """
 from __future__ import annotations
 
@@ -82,17 +82,19 @@ def _number(text: Optional[str]) -> Optional[float]:
 
 
 def object_size(kind_path_: Sequence[str], taxonomy: Sequence[Taxon], length: Optional[float] = None, heading: Optional[float] = None,
-                default: float = 20.0) -> ObjectSize:
+                default: float = 20.0, width: Optional[float] = None) -> ObjectSize:
     """
-    How big a recorded object is: the record's length (and heading), the
-    width from the class' 全幅 / 全長 ratio; else the class' 全長 and 全幅;
-    else a `default` square.
+    How big a recorded object is: the record's length (and heading) and its
+    width (measured by three or four points), else the width from the class'
+    全幅 / 全長 ratio; else the class' 全長 and 全幅; else a `default` square.
     """
     specs = specs_at(list(taxonomy), list(kind_path_)) if kind_path_ else {}
     spec_length = _number(specs.get("全長", ("",))[0])
     spec_width = _number(specs.get("全幅", ("",))[0])
     if heading is not None and not math.isfinite(heading):
         heading = None
+    if length and length > 0 and width is not None and width > 0 and math.isfinite(width):
+        return ObjectSize(length, width, heading, "記録（幅も）")
     if length and length > 0:
         width = length * spec_width / spec_length if spec_length and spec_width else length
         return ObjectSize(length, width, heading, "記録")

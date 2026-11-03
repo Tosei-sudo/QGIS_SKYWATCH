@@ -35,6 +35,7 @@ RESULT_ROLES = {
     "activity": "活動",
     "length": "長さ（m）",
     "heading": "向き（°）",
+    "width": "幅（m）",
     "note": "備考",
 }
 
@@ -163,6 +164,7 @@ class AiResult:
     #: The Esri geometry (WGS 84) as the service gave it.
     geometry: Optional[dict[str, Any]]
     attributes: dict[str, Any]
+    width: Optional[float] = None
 
     @property
     def tag(self) -> str:
@@ -202,6 +204,7 @@ def result_of(source: AiResultSource, feature: dict[str, Any], oid_field: str) -
         score = score / 100
     length = _number(_get(a, f.get("length")))
     heading = _number(_get(a, f.get("heading")))
+    width = _number(_get(a, f.get("width")))
     return AiResult(
         source=source.label, oid=oid, key=own or text_of(oid), image_id=text_of(_get(a, f["imageId"])),
         cls=text_of(_get(a, f.get("class"))), score=score, model=text_of(_get(a, f.get("model"))),
@@ -210,6 +213,7 @@ def result_of(source: AiResultSource, feature: dict[str, Any], oid_field: str) -
         length=length if length is not None and length > 0 else None,
         heading=None if heading is None else (heading % 360 + 360) % 360,
         note=text_of(_get(a, f.get("note"))), geometry=feature.get("geometry"), attributes=dict(a),
+        width=width if width is not None and width > 0 else None,
     )
 
 
@@ -255,9 +259,11 @@ class ImportEntry:
     heading: Optional[float]
     #: The record of the thing (of the image before or after) this one continues (継続); None for a new thing.
     carry: Optional[Any] = None
+    width: Optional[float] = None
 
 
-def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: float, length: Optional[float] = None) -> ImportEntry:
+def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: float, length: Optional[float] = None,
+                 width: Optional[float] = None) -> ImportEntry:
     """A result as an observation: its point, 種別, 活動, 確度, the note with what the AI said and the tag."""
     said = " ".join(x for x in (result.cls, score_text(result.score), result.model) if x)
     note = " ".join(x for x in (f"外部AI {source.label}" + (f": {said}" if said else ""), result.note, result.tag) if x)
@@ -265,4 +271,5 @@ def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: floa
         lon=lon, lat=lat, object=result.name, kind=kind_for(result, source),
         activity=result.activity or source.activity, confidence=source.confidence, note=note,
         length=result.length if result.length is not None else length, heading=result.heading,
+        width=result.width if result.width is not None else width,
     )

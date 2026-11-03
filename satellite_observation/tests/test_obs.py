@@ -5,6 +5,7 @@ candidates of the same thing, two points, CSV, the stores (a fake Esri
 server and the local GeoPackage), checked areas and the report.
 """
 import json
+import math
 from dataclasses import replace
 from datetime import datetime, timezone
 from itertools import count
@@ -18,9 +19,9 @@ from satellite_observation.core.obs.areas import (
 )
 from satellite_observation.core.obs.csv import observations_csv
 from satellite_observation.core.obs.flows import (
-    ImageRef, carried_into, carry_overs, ends_of, flows, heading_text, match_candidates, next_name, two_point,
+    ImageRef, carried_into, carry_overs, ends_of, flows, heading_text, match_candidates, next_name, outline_of, side_points, two_point,
 )
-from satellite_observation.core.obs.geo import bearing
+from satellite_observation.core.obs.geo import bearing, get_distance, offset
 from satellite_observation.core.obs.model import (
     ConfidenceLevel, ListedImage, Observation, observation_store_of, parse_listed_images, recorded_images, vocabulary_of,
 )
@@ -128,7 +129,7 @@ class TestNamesCsvAndConfig:
 
     def test_writes_length_heading_confidence_and_who_recorded(self):
         text = observations_csv([obs(length=152.25, heading=45.04), obs()])
-        assert "経度,緯度,長さ（m）,向き（度）,備考" in text.split("\r\n")[0]
+        assert "経度,緯度,長さ（m）,向き（度）,幅（m）,備考" in text.split("\r\n")[0]
         assert ",152.3,45.0," in text
         head, row = observations_csv([obs(confidence="推定", recorded_by="tanaka", updated_by="sato")])[1:].strip().split("\r\n")
         assert "有無,確度,撮像日時" in head and "備考,記録者,更新者,登録日時" in head
@@ -429,7 +430,7 @@ class TestLocalStores:
     def test_keep_records_areas_the_classification_and_photos_in_the_geopackage(self, tmp_path):
         with open_local(str(tmp_path / "o.gpkg")) as db:
             store = LocalObservationStore(db)
-            a = obs(id="x1", length=12.5, heading=30.0, confidence="推定", recorded_by="tanaka")
+            a = obs(id="x1", length=12.5, heading=30.0, width=4.0, confidence="推定", recorded_by="tanaka")
             b = obs(id="x2", image_time=None, present=False, activity="")
             store.save([a, b])
             read = {o.id: o for o in store.load()}
@@ -492,3 +493,26 @@ class TestReport:
         assert "港内すべて" in page and "<h2>記録一覧</h2>" in page and "田中" in page
         made = int(datetime(2026, 10, 25, 12).timestamp() * 1000)
         assert report_file_name("週報 10/25", made) == "週報_10_25_20261025.html"
+
+
+def test_three_and_four_points_measure_the_width():
+    rear, front = [139.7, 35.6], [139.7, 35.6018]
+    two = two_point(front, rear)
+    # One side 15 m to the right: as wide again on the left; the centre stays on the line.
+    side = offset(offset(rear, 60, 0), 15, math.pi / 2)
+    m = side_points(front, rear, [side])
+    assert m.length == pytest.approx(two.length) and m.heading == pytest.approx(0, abs=1e-9)
+    assert m.width == pytest.approx(30, abs=0.01) and (m.lon, m.lat) == pytest.approx((two.lon, two.lat))
+    # Both sides, 15 m right and 5 m left: 20 m wide, the centre 5 m to the right of the line.
+    left = offset(offset(rear, 120, 0), 5, -math.pi / 2)
+    m4 = side_points(front, rear, [side, left])
+    assert m4.width == pytest.approx(20, abs=0.01)
+    assert get_distance((two.lon, two.lat), (m4.lon, m4.lat)) == pytest.approx(5, abs=0.01) and m4.lon > two.lon
+    # On the line: no width.
+    assert side_points(front, rear, [offset(rear, 50, 0)]).width is None
+    assert side_points(front, rear, []).width is None
+    corners = outline_of(m4.lon, m4.lat, m4.length, m4.width, m4.heading)
+    rl, fl, fr, rr = corners
+    assert get_distance(rl, fl) == pytest.approx(m4.length, rel=1e-6) and get_distance(fl, fr) == pytest.approx(20, abs=0.01)
+    assert fl[0] < fr[0] and fl[1] > rl[1]
+    assert outline_of(0, 0, 10, None, 0) is None and outline_of(0, 0, 10, 5, None) is None

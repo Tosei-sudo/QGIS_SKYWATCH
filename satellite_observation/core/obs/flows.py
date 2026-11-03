@@ -259,11 +259,12 @@ def match_candidates(records: Iterable[Observation], image: ImageRef, lon: float
 
 @dataclass
 class Measure:
-    """A thing measured by two points: its centre, length (m) and heading (rear to front)."""
+    """A thing measured by points: its centre, length (m) and heading (rear to front), and its width (m) from three or four."""
     lon: float
     lat: float
     length: float
     heading: float
+    width: Optional[float] = None
 
 
 def two_point(front: Sequence[float], rear: Sequence[float]) -> Measure:
@@ -275,12 +276,55 @@ def two_point(front: Sequence[float], rear: Sequence[float]) -> Measure:
     return Measure(lon, lat, length, heading)
 
 
+def across(rear: Sequence[float], heading: float, place: Sequence[float]) -> float:
+    """How far (m) a place is from the line through the rear along the heading: + to the right (starboard), - to the left."""
+    d = get_distance(rear, place)
+    if d == 0:
+        return 0.0
+    return d * math.sin(math.radians(bearing(rear, place) - heading))
+
+
+def side_points(front: Sequence[float], rear: Sequence[float], sides: Sequence[Sequence[float]]) -> Measure:
+    """
+    A thing measured by its rear and front, then one side (three points: as
+    wide again on the other side) or both sides (four points: the centre
+    moves halfway between them). Two points when no side is given.
+    """
+    m = two_point(front, rear)
+    if not sides or m.length <= 0:
+        return m
+    gaps = [across(rear, m.heading, p) for p in sides[:2]]
+    if len(gaps) == 1:
+        width = 2 * abs(gaps[0])
+        return replace(m, width=width if width > 0 else None)
+    width = abs(gaps[0] - gaps[1])
+    shift = (gaps[0] + gaps[1]) / 2
+    lon, lat = offset((m.lon, m.lat), shift, math.radians(m.heading + 90)) if shift else (m.lon, m.lat)
+    return Measure(lon, lat, m.length, m.heading, width if width > 0 else None)
+
+
 def ends_of(lon: float, lat: float, length: Optional[float], heading: Optional[float]) -> Optional[tuple[list[float], list[float]]]:
     """The front and rear (lon, lat) of a measured record; None when it is a point."""
     if length is None or heading is None or not length > 0:
         return None
     centre = (lon, lat)
     return offset(centre, length / 2, math.radians(heading)), offset(centre, length / 2, math.radians(heading + 180))
+
+
+def outline_of(lon: float, lat: float, length: Optional[float], width: Optional[float],
+               heading: Optional[float]) -> Optional[list[list[float]]]:
+    """
+    The corners (lon, lat) of a record measured with its width: rear left,
+    front left, front right, rear right; None without length, width and heading.
+    """
+    if length is None or width is None or heading is None or not length > 0 or not width > 0:
+        return None
+    centre = (lon, lat)
+    out = []
+    for along, side in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        end = offset(centre, length / 2, math.radians(heading if along > 0 else heading + 180))
+        out.append(offset(end, width / 2, math.radians(heading + 90 * side)))
+    return out
 
 
 def heading_text(deg: Optional[float]) -> str:

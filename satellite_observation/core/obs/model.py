@@ -52,6 +52,8 @@ class Observation:
     confidence: str = ""
     recorded_by: str = ""
     updated_by: str = ""
+    #: m, side to side (across the heading), when measured by three or four points.
+    width: Optional[float] = None
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -68,6 +70,7 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "note": "NOTE",
     "length": "LENGTH_M",
     "heading": "HEADING",
+    "width": "WIDTH_M",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",
@@ -260,7 +263,7 @@ def new_object_id() -> str:
 _JSON_NAMES = {
     "id": "id", "image_id": "imageId", "image_name": "imageName", "image_time": "imageTime", "object_id": "objectId",
     "object_name": "objectName", "kind": "kind", "activity": "activity", "present": "present", "note": "note",
-    "lon": "lon", "lat": "lat", "length": "length", "heading": "heading", "confidence": "confidence",
+    "lon": "lon", "lat": "lat", "length": "length", "heading": "heading", "width": "width", "confidence": "confidence",
     "recorded_by": "recordedBy", "updated_by": "updatedBy", "created_at": "createdAt", "updated_at": "updatedAt",
     "deleted_at": "deletedAt",
 }
@@ -293,7 +296,7 @@ def observation_from_json(value: Any) -> Optional[Observation]:
         present=v["present"] is not False, note=text("note"), lon=float(v["lon"]), lat=float(v["lat"]),
         created_at=created, updated_at=int(v["updated_at"]) if is_number(v["updated_at"]) else created,
         deleted_at=int(v["deleted_at"]) if is_number(v["deleted_at"]) else None,
-        length=number("length"), heading=number("heading"), confidence=text("confidence"),
+        length=number("length"), heading=number("heading"), width=number("width"), confidence=text("confidence"),
         recorded_by=text("recorded_by"), updated_by=text("updated_by"),
     )
 

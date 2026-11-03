@@ -73,7 +73,7 @@ def record_out(o: Observation) -> dict[str, Any]:
     return {
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": _iso(o.image_time), "objectId": o.object_id,
         "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "confidence": o.confidence or "",
-        "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "recordedBy": o.recorded_by or "",
+        "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
 
@@ -206,7 +206,7 @@ class ObservationApi:
     def add_observation(self, lon: float, lat: float, image: Optional[str] = None, object: Optional[str] = None,
                         kind: Optional[str] = None, activity: Optional[str] = None, confidence: Optional[str] = None,
                         note: Optional[str] = None, present: bool = True, length: Optional[float] = None,
-                        heading: Optional[float] = None) -> dict[str, Any]:
+                        heading: Optional[float] = None, width: Optional[float] = None) -> dict[str, Any]:
         """Records a thing at a place on this image (or `image`); the kind, activity and 確度 not given are the last ones."""
         b = self._b()
         self._image(b, _str(image, "image"))
@@ -214,17 +214,18 @@ class ObservationApi:
         if confidence and confidence not in levels:
             raise ValueError(f"確度「{confidence}」なし（{'・'.join(levels)}）")
         x, y = _num(lon, "lon", -180, 180), _num(lat, "lat", -90, 90)
-        size, turn = _maybe_num(length, "length", 0), _maybe_num(heading, "heading", -360, 360)
+        size, turn, across = _maybe_num(length, "length", 0), _maybe_num(heading, "heading", -360, 360), _maybe_num(width, "width", 0)
         record = self._run("観測記録の追加", lambda bk: bk.add(
             x, y, image=image, object=_str(object, "object") or "", kind=_str(kind, "kind"), activity=_str(activity, "activity"),
-            confidence=confidence, note=_str(note, "note") or "", present=bool(present), length=size, heading=turn))
+            confidence=confidence, note=_str(note, "note") or "", present=bool(present), length=size, heading=turn,
+            width=across))
         return record_out(self._said(b, record, "観測記録"))
 
     def update_observation(self, record_id: str, **changes: Any) -> dict[str, Any]:
-        """Changes a record: kind, activity, confidence, note, present, lon, lat, length, heading (a thing's name: rename_observed_thing)."""
+        """Changes a record: kind, activity, confidence, note, present, lon, lat, length, heading, width (a thing's name: rename_observed_thing)."""
         b = self._b()
         self._record(b, record_id)
-        allowed = {"kind", "activity", "confidence", "note", "present", "lon", "lat", "length", "heading"}
+        allowed = {"kind", "activity", "confidence", "note", "present", "lon", "lat", "length", "heading", "width"}
         unknown = [k for k in changes if k not in allowed]
         if unknown:
             raise ValueError(f"変更できない項目: {', '.join(unknown)}（モノの名前は rename_observed_thing で）")
@@ -240,6 +241,8 @@ class ObservationApi:
             out["lat"] = _num(changes["lat"], "lat", -90, 90)
         if "length" in changes:
             out["length"] = _maybe_num(changes["length"], "length", 0)
+        if "width" in changes:
+            out["width"] = _maybe_num(changes["width"], "width", 0)
         if "heading" in changes:
             h = _maybe_num(changes["heading"], "heading", -360, 360)
             out["heading"] = None if h is None else (h % 360 + 360) % 360

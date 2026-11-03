@@ -273,6 +273,26 @@ def test_makes_layers_of_the_records_areas_and_flows(book):
     assert (lines.title, lines.end_field, lines.features[0][1]["images"]) == ("観測の流れ", "last", 2)
 
 
+
+def test_records_measured_with_a_width_are_also_outlines(book):
+    from satellite_observation.core.obs.output import observation_layers
+
+    a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶", length="120", heading="90", width="20"))
+    assert (a.length, a.heading, a.width) == (120, 90, 20)
+    book.submit(139.71, 35.6, FormValues(object="B", kind="船舶", length="80", heading="0"))
+    points, outlines, *_ = observation_layers(book.records, book.areas)
+    assert points.features[0][1]["width_m"] == 20
+    assert (outlines.title, outlines.geometry, len(outlines.features)) == ("観測の外形", "polygon", 1)
+    ring, values = outlines.features[0]
+    assert len(ring) == 4 and (values["object"], values["length_m"], values["width_m"]) == ("A", 120, 20)
+    # Heading east: the long sides run east-west.
+    assert abs(ring[0][1] - ring[1][1]) < 1e-9 and ring[1][0] > ring[0][0]
+    # Bad or no width typed: none kept.
+    c = book.submit(139.72, 35.6, FormValues(object="C", kind="船舶", length="50", heading="0", width="x"))
+    assert c.width is None
+    assert book.update(c.id, width=7.5).width == 7.5
+
+
 def test_gives_scripts_the_records_things_and_areas(book):
     from satellite_observation.core.obs.api import ObservationApi
 

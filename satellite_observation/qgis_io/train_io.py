@@ -79,7 +79,7 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         if not cls:
             out.skip("種別なし" if not o.kind else "対象外の種別")
             continue
-        size = object_size(kind_path(o.kind, taxonomy), taxonomy, o.length, o.heading, default_size)
+        size = object_size(kind_path(o.kind, taxonomy), taxonomy, o.length, o.heading, default_size, o.width)
         ring = [QgsPointXY(x, y) for x, y in footprint(o.lon, o.lat, size)]
         out.labels.append(Label(cls, QgsGeometry.fromPolygonXY([ring + ring[:1]]), WGS84, o.image_id or None, size.source))
     classes = {l.cls for l in out.labels}

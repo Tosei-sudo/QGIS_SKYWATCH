@@ -39,7 +39,7 @@ def observations_csv(records: list[Observation]) -> str:
     """The CSV of observations (with a BOM, for spreadsheets), by thing and in flow order."""
     levels = depth_columns(records)
     head = ["観測ID", "モノID", "モノ", "種別", *levels, "活動", "有無", "確度", "撮像日時", "画像ID", "画像", "経度", "緯度", "長さ（m）", "向き（度）",
-            "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時"]
+            "幅（m）", "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時"]
     rows = []
     for o in sorted(records, key=lambda o: (o.object_id, time_key(o), o.created_at)):
         path = path_of(o.kind)
@@ -47,7 +47,7 @@ def observations_csv(records: list[Observation]) -> str:
             o.id, o.object_id, o.object_name, kind_of(path), *(path[i] if i < len(path) else "" for i in range(len(levels))),
             o.activity, "あり" if o.present else "なし", o.confidence or "", _iso(o.image_time), o.image_id, o.image_name,
             to_fixed(o.lon, 7), to_fixed(o.lat, 7), "" if o.length is None else to_fixed(o.length, 1), "" if o.heading is None else to_fixed(o.heading, 1),
-            o.note, o.recorded_by or "", o.updated_by or "", _iso(o.created_at), _iso(o.updated_at), _iso(o.deleted_at),
+            "" if o.width is None else to_fixed(o.width, 1), o.note, o.recorded_by or "", o.updated_by or "", _iso(o.created_at), _iso(o.updated_at), _iso(o.deleted_at),
         ])
     return "\ufeff" + "\r\n".join(",".join(_cell(c) for c in r) for r in [head, *rows]) + "\r\n"
 

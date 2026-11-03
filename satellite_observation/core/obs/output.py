@@ -2,7 +2,8 @@
 The records as layers (the viewer's 「レイヤー化」): the living records as
 points, the checked areas as polygons, each thing's flow as a line, with a
 field per level of the kinds (kind_1 the top class) to style and filter a
-branch. Times are ms (UTC); the QGIS side makes them dates.
+branch, and the records measured with a width as their outline (an
+oriented rectangle). Times are ms (UTC); the QGIS side makes them dates.
 """
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ from typing import Iterable, Optional
 
 from ..plan.output import LayerField
 from .areas import CheckedArea
-from .flows import flows, living
+from .flows import flows, living, outline_of
 from .geo import js_round
 from .model import Observation
 from .taxonomy import path_of
@@ -52,15 +53,32 @@ def observation_layers(records: Iterable[Observation], areas: Iterable[CheckedAr
         LayerField("kind", "string", "種別"), *levels, LayerField("activity", "string", "活動"), LayerField("present", "string", "有無"),
         LayerField("confidence", "string", "確度"), LayerField("image_time", "date", "撮像日時"), LayerField("image_id", "string", "画像ID"),
         LayerField("image", "string", "画像"), LayerField("length_m", "double", "長さ（m）"), LayerField("heading_deg", "double", "向き（度）"),
-        LayerField("note", "string", "備考"), LayerField("recorded_by", "string", "記録者"), LayerField("created_at", "date", "登録日時"),
+        LayerField("width_m", "double", "幅（m）"), LayerField("note", "string", "備考"), LayerField("recorded_by", "string", "記録者"), LayerField("created_at", "date", "登録日時"),
         LayerField("updated_at", "date", "更新日時"),
     ], [((o.lon, o.lat), {
         **_level_values(o.kind, depth), "obs_id": o.id, "object_id": o.object_id, "object": o.object_name, "kind": o.kind,
         "activity": o.activity, "present": "あり" if o.present else "なし", "confidence": o.confidence or "",
         "recorded_by": o.recorded_by or "", "image_time": o.image_time, "image_id": o.image_id, "image": o.image_name,
-        "length_m": o.length, "heading_deg": o.heading, "note": o.note, "created_at": o.created_at, "updated_at": o.updated_at,
+        "length_m": o.length, "heading_deg": o.heading, "width_m": o.width, "note": o.note, "created_at": o.created_at,
+        "updated_at": o.updated_at,
     }) for o in rows], time_field="image_time")
     out = [points]
+    outlines = []
+    for o in rows:
+        ring = outline_of(o.lon, o.lat, o.length, o.width, o.heading) if o.present else None
+        if ring:
+            outlines.append(([tuple(p) for p in ring], {
+                **_level_values(o.kind, depth), "obs_id": o.id, "object_id": o.object_id, "object": o.object_name, "kind": o.kind,
+                "activity": o.activity, "confidence": o.confidence or "", "image_time": o.image_time, "image_id": o.image_id,
+                "image": o.image_name, "length_m": o.length, "width_m": o.width, "heading_deg": o.heading,
+            }))
+    if outlines:
+        out.append(ObservationLayer("観測の外形", "polygon", [
+            LayerField("obs_id", "string", "観測ID"), LayerField("object_id", "string", "モノID"), LayerField("object", "string", "モノ"),
+            LayerField("kind", "string", "種別"), *levels, LayerField("activity", "string", "活動"), LayerField("confidence", "string", "確度"),
+            LayerField("image_time", "date", "撮像日時"), LayerField("image_id", "string", "画像ID"), LayerField("image", "string", "画像"),
+            LayerField("length_m", "double", "長さ（m）"), LayerField("width_m", "double", "幅（m）"), LayerField("heading_deg", "double", "向き（度）"),
+        ], outlines, time_field="image_time"))
     shown = [a for a in areas if a.deleted_at is None]
     if shown:
         out.append(ObservationLayer("確認範囲", "polygon", [

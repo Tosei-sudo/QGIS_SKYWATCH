@@ -80,6 +80,11 @@ def _text(n: Optional[float]) -> str:
     return "" if n is None else str(n)
 
 
+def _width_of(entry: Any) -> Optional[float]:
+    """An entry's width, when it has one (entries made before widths have none)."""
+    return getattr(entry, "width", None)
+
+
 def _error_text(error: Exception) -> str:
     return str(error) or type(error).__name__
 
@@ -94,6 +99,7 @@ class FormValues:
     confidence: str = ""
     length: str = ""
     heading: str = ""
+    width: str = ""
 
 
 class ObservationBook:
@@ -434,7 +440,9 @@ class ObservationBook:
 
         length = number(values.length)
         heading = number(values.heading)
-        measure = {"length": length if length is not None and length > 0 else None, "heading": None if heading is None else (heading % 360 + 360) % 360}
+        width = number(values.width)
+        measure = {"length": length if length is not None and length > 0 else None, "heading": None if heading is None else (heading % 360 + 360) % 360,
+                   "width": width if width is not None and width > 0 else None}
         name = values.object.strip()
         kind = kind_of(path_of(values.kind))
         activity = values.activity.strip() if present else ""
@@ -473,7 +481,7 @@ class ObservationBook:
 
     def add(self, lon: float, lat: float, image: Optional[str] = None, object: str = "", kind: Optional[str] = None,
             activity: Optional[str] = None, confidence: Optional[str] = None, note: str = "", present: bool = True,
-            length: Optional[float] = None, heading: Optional[float] = None) -> Optional[Observation]:
+            length: Optional[float] = None, heading: Optional[float] = None, width: Optional[float] = None) -> Optional[Observation]:
         """Records a new observation (as the form does) on this image or the one of `image` (its id)."""
         info = self._image(image)
         if info is None:
@@ -481,7 +489,8 @@ class ObservationBook:
         values = FormValues(object=object, kind=self.last.kind if kind is None else kind,
                             activity=self.last.activity if activity is None else activity,
                             confidence=self.last.confidence if confidence is None else confidence, note=note,
-                            length="" if length is None else str(length), heading="" if heading is None else str(heading))
+                            length="" if length is None else str(length), heading="" if heading is None else str(heading),
+                            width="" if width is None else str(width))
         record = self.record_from(info, lon, lat, None, None, values, present)
         saved = self._save_records([record], f"{record.object_name} を記録")
         return saved[0] if saved else None
@@ -490,7 +499,7 @@ class ObservationBook:
         """
         Records several new observations at once on this image (or `image`), in
         one save: each entry has lon, lat, object, kind, activity, confidence,
-        note, length, heading (as add takes them). Entries without a name are new
+        note, length, heading, width (as add takes them). Entries without a name are new
         things named in turn (船舶-1, 船舶-2…); the same new name is one thing.
         """
         info = self._image(image)
@@ -512,14 +521,15 @@ class ObservationBook:
                 kind = e.kind if e.kind and within(e.kind, path_of(source.kind)) else source.kind
                 values = FormValues(object="", kind=kind, activity=e.activity or source.activity, confidence=e.confidence, note=e.note,
                                     length=_text(e.length if e.length is not None else source.length),
-                                    heading=_text(e.heading if e.heading is not None else source.heading))
+                                    heading=_text(e.heading if e.heading is not None else source.heading),
+                                    width=_text(_width_of(e) if _width_of(e) is not None else source.width))
                 record = self.record_from(info, e.lon, e.lat, None, source, values, True)
                 here.add(record.object_id)
                 carried += 1
                 rows.append(record)
                 continue
             values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
-                                length=_text(e.length), heading=_text(e.heading))
+                                length=_text(e.length), heading=_text(e.heading), width=_text(_width_of(e)))
             record = self.record_from(info, e.lon, e.lat, None, None, values, True)
             name = e.object.strip()
             if name and name in made:
@@ -532,11 +542,11 @@ class ObservationBook:
         return self._save_records(rows, f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else ""))
 
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
-        """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading."""
+        """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading, width."""
         was = next((o for o in self.records if o.id == record_id and o.deleted_at is None), None)
         if was is None:
             return None
-        allowed = {"kind", "activity", "present", "confidence", "note", "lon", "lat", "length", "heading", "object_name"}
+        allowed = {"kind", "activity", "present", "confidence", "note", "lon", "lat", "length", "heading", "width", "object_name"}
         bad = set(changes) - allowed
         if bad:
             raise ValueError(f"変更不可の項目: {', '.join(sorted(bad))}")
