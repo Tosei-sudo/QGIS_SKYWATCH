@@ -99,7 +99,8 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「詳細」の「ローカル記録の消去…」でローカル GeoPackage の記録・確認範囲・ファイルなしの画像の一覧を完全に消去（確認あり。「削除済みのみ消去」も可。分類体系・参考写真は残す。Esri の保存先では使用不可）
 - 「モノ」タブで流れ（帯グラフ・表・地図の軌跡）、名前・種別の変更・統合。「分類」タブで分類体系
 - 「詳細」から報告書（HTML 保存・印刷・PDF 保存。地図はキャンバスのレイヤーに記録の印を重ねて描画）、再読み込み、CSV 保存、レイヤー化（記録のポイント・確認範囲のポリゴン・流れのライン。時系列コントローラー対応）
-- 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、常にあるローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
+- 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、ローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
+- 設定ファイルに `"localObservations": false` と書くとローカル GeoPackage を保存先にしない（選べるのは `observationStores` だけ。どれもなければ記録不可）。省略時は `true`
 
 ## 分類体系の編集
 
@@ -425,7 +426,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

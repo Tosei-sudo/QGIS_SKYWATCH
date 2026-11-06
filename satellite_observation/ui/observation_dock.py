@@ -581,10 +581,11 @@ class ObservationDock(PluginDock):
         return settings.recorder_name(url)
 
     def reset_stores(self) -> None:
-        """The stores of the settings file (again), the local one last."""
+        """The stores of the settings file (again), the local one last (unless `localObservations` is false)."""
         c = self.context
         try:
-            self.sets = store_sets(c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for)
+            self.sets = store_sets(c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for,
+                                   local=c.config.local_observations)
         except Exception as error:  # noqa: BLE001 (the local GeoPackage could not be opened)
             self.sets = []
             self._show_status(self.tr("保存先の準備失敗: {e}").format(e=error))
@@ -1702,7 +1703,8 @@ class ObservationDock(PluginDock):
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         if book is None:
             self._set_head(self.tr("観測記録"))
-            self._row([self.tr("保存先なし")])
+            self._row([self.tr("保存先なし") if self.context.config.local_observations
+                       else self.tr("保存先なし（ローカルは使用不可。設定ファイルの observationStores で指定）")])
             self.draw()
             return
         if not self.status.text() and book.status:

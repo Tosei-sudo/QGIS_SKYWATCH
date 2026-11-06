@@ -1,7 +1,7 @@
 """
 The observation stores the settings name, as the viewer wires them
 (main.ts): the Esri stores of `observationStores` first, then the local
-GeoPackage, always there. Each store's kinds, activities, classification and
+GeoPackage unless `localObservations` is false. Each store's kinds, activities, classification and
 levels of 確度 are its own, else `observationVocabulary`'s; the
 specification fields and the match radius are always the vocabulary's. Its
 checked areas and classification go to its own layer and table when it
@@ -51,8 +51,12 @@ def store_vocabulary(config: Optional[ObservationStoreConfig], base: Observation
 
 
 def store_sets(configs: list[ObservationStoreConfig], vocabulary: ObservationVocabulary, gpkg: Callable[[], GeoPackage],
-               client: Callable[[], EsriClient], token_for: Callable[[str, Optional[str]], Optional[str]]) -> list[StoreSet]:
-    """Every store, the Esri ones first. `token_for(url, token)` gives the token to send (None where QGIS authenticates)."""
+               client: Callable[[], EsriClient], token_for: Callable[[str, Optional[str]], Optional[str]],
+               local: bool = True) -> list[StoreSet]:
+    """
+    Every store, the Esri ones first, then the local one unless `local` is
+    false. `token_for(url, token)` gives the token to send (None where QGIS authenticates).
+    """
     out: list[StoreSet] = []
     for c in configs:
         esri = client()
@@ -67,6 +71,8 @@ def store_sets(configs: list[ObservationStoreConfig], vocabulary: ObservationVoc
         else:
             taxonomy = LocalTaxonomyStore(gpkg(), c.label)
         out.append(StoreSet(c.label, records, areas, taxonomy, store_vocabulary(c, vocabulary), c))
+    if not local:
+        return out
     db = gpkg()
     out.append(StoreSet(LOCAL_LABEL, LocalObservationStore(db), LocalAreaStore(db, LOCAL_LABEL), LocalTaxonomyStore(db, LOCAL_LABEL), vocabulary))
     return out

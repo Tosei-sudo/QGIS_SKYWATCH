@@ -37,7 +37,7 @@ from .time_zone import TimeZoneRule, time_zones_of
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "observationVocabulary", "arcgisPortals", "layers",
+    "imageCatalogs", "watchInterval", "pathMappings", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones",
 )
@@ -56,6 +56,8 @@ class PluginConfig:
     ground_stations: list[GroundStation] = field(default_factory=list)
     plan_stores: list[PlanStoreConfig] = field(default_factory=list)
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
+    #: `localObservations`: whether the local GeoPackage is offered as a store of records (false: only `observationStores`).
+    local_observations: bool = True
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
@@ -193,6 +195,11 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.ground_stations = ground_stations_of(value["groundStations"], problems)
     config.plan_stores = listed("planStores", plan_store_of)
     config.observation_stores = listed("observationStores", observation_store_of)
+    if "localObservations" in value:
+        if isinstance(value["localObservations"], bool):
+            config.local_observations = value["localObservations"]
+        else:
+            problems.append("localObservations は true か false で指定")
     if "observationVocabulary" in value:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
     if "arcgisPortals" in value:
