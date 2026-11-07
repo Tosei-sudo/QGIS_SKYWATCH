@@ -19,7 +19,7 @@ def plugin_constants() -> dict:
     from satellite_observation.core import ai_results, basemaps, config, edit_stamp, geocode, layer_templates, moving, overviews, startup_layers
     from satellite_observation.core.ai import model_config, transfer
     from satellite_observation.core.enhance import pipeline
-    from satellite_observation.core.obs import model as obs_model, stores as obs_stores
+    from satellite_observation.core.obs import alerts, model as obs_model, stores as obs_stores
     from satellite_observation.core.plan import modes, names, satellites, store as plan_store
     from satellite_observation.core.request import export, store as request_store, systems
 
@@ -39,7 +39,11 @@ def plugin_constants() -> dict:
             "detectionOutputs": list(transfer.TRANSFER_ROLES),
             "aiResultSources": list(ai_results.RESULT_ROLES),
             "editTracking": dict(edit_stamp.DEFAULT_FIELDS),
+            "alertRules": dict(alerts.DEFAULT_RULE_FIELDS),
+            "alertGeofences": dict(alerts.DEFAULT_FENCE_FIELDS),
+            "alertLog": dict(alerts.DEFAULT_LOG_FIELDS),
         },
+        "alertSources": list(alerts.SOURCES),
         "exportSources": list(export.SOURCES),
         "geometries": list(export.GEOMETRIES),
         "exportFormats": list(systems.FORMATS),

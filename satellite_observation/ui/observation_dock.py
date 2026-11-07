@@ -140,6 +140,7 @@ class ObservationDock(PluginDock):
         self._stores_read: Optional[tuple] = None
         self.books: dict[str, ObservationBook] = {}
         self.book: Optional[ObservationBook] = None
+        self._alerts = None
         self.store_set: Optional[StoreSet] = None
         self.tab = "image"
         self.chosen: Optional[str] = None
@@ -556,6 +557,8 @@ class ObservationDock(PluginDock):
         mf.addRow(tr("記録者"), self.observer_input)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("報告書…"), tr("期間・分類・確度を指定した報告書（HTML 保存・印刷）"), self.open_report))
+        actions.addWidget(self._button(tr("通報…"), tr("注目の記録を区切り文字の 1 行ずつの通報文に（設定ファイルの alertReports）"),
+                                       lambda: self.open_alerts()))
         actions.addWidget(self._button(tr("再読み込み"), tr("保存先から記録を再読み込み"), self.reload))
         actions.addWidget(self._button(tr("CSV 保存"), tr("すべての記録の CSV 保存（モノ・撮像日時の順）"), self.save_csv))
         actions.addWidget(self._button(tr("レイヤー化"), tr("記録をポイント、モノの流れをラインとして一時レイヤー化（属性テーブル・タイムライン・書き出しで利用可）"),
@@ -1718,6 +1721,19 @@ class ObservationDock(PluginDock):
         self._say(self.tr("{n} をレイヤーとして追加").format(n="・".join(m.title for m in made)))
         return layers
 
+    def open_alerts(self, tab: int = 0):
+        """Opens 「通報」 (its tab 0 通報文の作成, 1 通報記録); one kept while the dock lives."""
+        from .alert_dialog import AlertDialog
+
+        if self._alerts is None:
+            self._alerts = AlertDialog(self, self)
+            self.context.configChanged.connect(self._alerts.reset)
+        self._alerts.tabs.setCurrentIndex(tab)
+        self._alerts.show()
+        self._alerts.raise_()
+        self._alerts.activateWindow()
+        return self._alerts
+
     def open_report(self) -> None:
         if self.book is None:
             return
@@ -2145,6 +2161,12 @@ class ObservationDock(PluginDock):
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
+        if self._alerts is not None:
+            try:
+                self.context.configChanged.disconnect(self._alerts.reset)
+            except (TypeError, RuntimeError):
+                pass
+            self._alerts.close()
         scene = self.canvas.scene()
         if scene is not None:
             scene.removeItem(self.overlay)
