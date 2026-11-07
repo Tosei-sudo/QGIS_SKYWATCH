@@ -4,10 +4,10 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.core import QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
+from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
-from qgis.PyQt.QtWidgets import QDockWidget, QToolButton
+from qgis.PyQt.QtWidgets import QDockWidget, QPushButton, QToolButton
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
@@ -248,6 +248,9 @@ class SatelliteObservationPlugin:
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
+        # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
+        self._problems_shown: Optional[tuple] = None
+        self.context.configChanged.connect(self._config_problems)
         # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read.
         self._overviews_ready = False
         self._overviews_waiting: list = []
@@ -678,6 +681,26 @@ class SatelliteObservationPlugin:
 
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
+
+    def _config_problems(self) -> None:
+        """「設定ファイルの問題 n 件」 in the message bar after a read that found any (the list is in 「設定…」)."""
+        c = self.context
+        if c is None or c.loading:
+            return
+        key = (c.source, tuple(c.problems))
+        if not c.problems:
+            self._problems_shown = None
+            return
+        if key == self._problems_shown:
+            return
+        self._problems_shown = key
+        bar = self.iface.messageBar()
+        item = bar.createMessage(tr("設定ファイル"), tr("問題 {n} 件（一覧はメニュー「設定…」）").format(n=len(c.problems)))
+        button = QPushButton(tr("設定…"), item)
+        button.clicked.connect(self.open_settings)
+        item.layout().addWidget(button)
+        item.setToolTip("\n".join(c.problems))
+        bar.pushWidget(item, Qgis.MessageLevel.Warning, 0)
 
     def _overviews_changed(self) -> None:
         if self.context is None:

@@ -7,6 +7,7 @@
 | 項目 | ビューア | プラグイン | 理由 |
 | --- | --- | --- | --- |
 | 設定ファイルの形式 | JSON（README に「コメントは書けません」） | JSON と JSONC（`//`・`/* */`・末尾のカンマ） | 指示書どおり。ビューアの `config.json` はそのまま読める |
+| 設定ファイルの指定 | なし（ページと同じ場所の `config.json` を読む） | メニュー「設定…」だけ。各ドックの上に設定ファイルの状態と「設定…」ボタンは出さず、問題があるときだけメッセージバーに件数と「設定…」ボタンを出す | tsudo の依頼（2026-11-07）。プラグインのメニューからたどれば足りるため |
 | 設定ファイルの固定 | なし（ページと同じ場所の `config.json` を読む） | `build_zip.py --lock-config` で作った zip（`config.lock` 入り）は同梱の設定ファイルだけを読み、「設定…」での指定を受け付けない。設定ファイルの項目ではなく zip の作り方で決める（受け取った人が選ぶファイルに書いても意味がなく、同梱のファイルが読めなくても固定が外れないように） | tsudo の依頼（2026-11-07） |
 | 雲量予報の取り込み | `cloudForecast` は Open-Meteo 互換の `url` のみ | `cloudForecast` に `file`・`folder` も書け、外部で毎日作った GFS の雲量の GeoTIFF（`docs/cloud-forecast-file.md`）を読む。ビューアの設定ファイルにこの書き方をするとビューアでは使えない | 閉域ネットワーク向け、tsudo の依頼（2026-11-07） |
 | 読む項目 | 全項目 | `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` のみ（他は無視、問題にも出さない） | 共用のため |
