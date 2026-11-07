@@ -16,6 +16,7 @@ without writing anything (limit_sim_dialog.py).
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import os
 import time
@@ -349,6 +350,14 @@ class PlanFileDock(PluginDock):
             return
         c = self.plan.candidates[item.row()]
         checked = item.checkState() == Qt.CheckState.Checked
+        if self.task is not None:
+            # Not while writing: the files and history are made from the plan as it was (#84).
+            was = c.result == TAKEN if item.column() == 0 else c.boost_taken
+            if checked != was:
+                self._rendering = True
+                item.setCheckState(Qt.CheckState.Checked if was else Qt.CheckState.Unchecked)
+                self._rendering = False
+            return
         if item.column() == 0:
             c.manual = TAKEN if checked else HELD
         elif item.column() == len(COLUMNS) - 1:
@@ -366,7 +375,7 @@ class PlanFileDock(PluginDock):
 
     def move(self, step: int) -> None:
         """Moves the chosen row up or down (kept as a place in the order)."""
-        if self.plan is None:
+        if self.plan is None or self.task is not None:
             return
         row = self.table.currentIndex().row()
         cands = self.plan.candidates
@@ -378,7 +387,7 @@ class PlanFileDock(PluginDock):
         self.refit(cands[row])
 
     def reset(self) -> None:
-        if self.plan is None:
+        if self.plan is None or self.task is not None:
             return
         for c in self.plan.candidates:
             c.manual, c.rank, c.boost_taken = None, None, True
@@ -400,9 +409,11 @@ class PlanFileDock(PluginDock):
         Builds the files (schemas read and the day's earlier history counted
         in a task), asks, writes them, then saves the history and raises.
         """
-        plan = self.plan
-        if plan is None or self.task is not None:
+        if self.plan is None or self.task is not None:
             return
+        # One copy for the files, the history and the raises, whatever is changed in the table meanwhile (#84).
+        live = self.plan
+        plan = dataclasses.replace(live, candidates=[dataclasses.replace(c, warnings=list(c.warnings)) for c in live.candidates])
         run = _now_ms()
         store, client, token = self.store, self.context.esri(), self.token()
         self.status.setText(self.tr("ファイルを作成中…"))

@@ -111,3 +111,51 @@ def test_answers_and_errors(http):
     assert kind == "failed" and message.startswith("接続不可（")
     with pytest.raises(RuntimeError):
         get_bytes(http + "/ok")
+
+
+def test_unloading_cancels_the_tasks_and_drops_their_answers(silent_server):
+    """#88: the plugin's tasks stop when it is unloaded, and nothing is told to the docks that are gone."""
+    from qgis.core import QgsApplication
+
+    from satellite_observation.qgis_io import tasks
+
+    url, connections = silent_server
+    told = []
+    waiting = run_task("止まる要求", lambda task: get_bytes(url), lambda r: told.append("done"), lambda m: told.append(m))
+
+    def busy(task):
+        while True:
+            task.check()
+            time.sleep(0.01)
+
+    looping = run_task("計算", busy, lambda r: told.append("done"), lambda m: told.append(m))
+    assert wait_for(lambda: connections and looping.status() == looping.TaskStatus.Running)
+    begun = time.monotonic()
+    assert tasks.cancel_all() >= 2
+    assert time.monotonic() - begun < 5
+    assert waiting.discarded and looping.discarded
+    assert wait_for(lambda: QgsApplication.taskManager().countActiveTasks() == 0, 5000)
+    assert not wait_for(lambda: told, 300) and told == []
+
+
+def test_an_answer_for_a_closed_window_is_not_an_error():
+    """#88: a done() that touches a widget already deleted is logged as a note, not a critical error."""
+    from qgis.core import Qgis, QgsApplication
+    from qgis.PyQt import sip
+    from qgis.PyQt.QtWidgets import QLabel
+
+    label = QLabel()
+    sip.delete(label)
+    levels = []
+
+    def log(message, tag, level):
+        if tag == "衛星撮像計画・観測記録":
+            levels.append(level)
+
+    QgsApplication.messageLog().messageReceived.connect(log)
+    try:
+        task = run_task("閉じた画面", lambda task: 1, lambda r: label.setText("済"))
+        assert wait_for(lambda: levels)
+    finally:
+        QgsApplication.messageLog().messageReceived.disconnect(log)
+    assert levels == [Qgis.MessageLevel.Info] and not task.discarded

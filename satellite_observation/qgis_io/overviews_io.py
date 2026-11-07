@@ -624,9 +624,11 @@ class OverviewQueue:
         return queued
 
     def cancel_all(self) -> None:
+        """Stops all (the plugin is unloaded): the running task's answer is dropped with the others' (#88)."""
         self._waiting.clear()
         if self._task is not None:
             self._task.cancel()
+        self._task, self._current = None, None
 
     def _next(self) -> None:
         if self._task is not None or not self._waiting:
