@@ -123,3 +123,29 @@ def test_without_assignments_the_bar_is_hidden_and_the_memo_still_works(plugin):
     dialog.make()
     assert wait_for(lambda: dialog.text_edit.toPlainText().startswith("引き継ぎメモ"))
     assert "■ 分担" not in dialog.text_edit.toPlainText()
+
+
+def test_the_buttons_ask_as_when_clicked(plugin, monkeypatch):
+    """The buttons' clicked(bool) does not reach the slots' own arguments (a crash on メモ…, asking skipped)."""
+    from satellite_observation.ui import handover_dialog
+
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    work.add({"IMAGE_ID": "IMG9", "IMAGE_NAME": "img9.tif", "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
+    dialog = dock.open_handover(0)
+    assert wait_for(lambda: dialog.table.rowCount() == 1)
+    dialog.table.selectRow(0)
+    monkeypatch.setattr(handover_dialog.QInputDialog, "getMultiLineText", staticmethod(lambda *a: ("北側から", True)))
+    asked = []
+    monkeypatch.setattr(handover_dialog.QMessageBox, "question",
+                        staticmethod(lambda *a: asked.append(a[1]) or handover_dialog.QMessageBox.StandardButton.No))
+    dialog.note_button.click()
+    assert wait_for(lambda: work.rows[0]["attributes"]["NOTE"] == "北側から")
+    # Someone else's row: asked first, and left as it is on いいえ.
+    dialog.table.selectRow(0)
+    dialog.status_select.setCurrentText("完了")
+    dialog.status_button.click()
+    monkeypatch.setattr(handover_dialog.QInputDialog, "getText", staticmethod(lambda *a: ("佐藤", True)))
+    dialog.hand_button.click()
+    assert asked == ["状態の変更", "担当の変更"]
+    assert work.rows[0]["attributes"]["STATUS"] == "作業中" and work.rows[0]["attributes"]["ASSIGNEE"] == "鈴木"

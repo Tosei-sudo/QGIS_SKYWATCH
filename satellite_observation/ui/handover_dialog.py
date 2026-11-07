@@ -82,14 +82,14 @@ class HandoverDialog(QDialog):
         for s in STATUSES:
             self.status_select.addItem(s)
         self.status_button = QPushButton(self.tr("状態を変更"))
-        self.status_button.clicked.connect(self.change_status)
+        self.status_button.clicked.connect(lambda _on=False: self.change_status())
         self.note_button = QPushButton(self.tr("メモ…"))
-        self.note_button.clicked.connect(self.change_note)
+        self.note_button.clicked.connect(lambda _on=False: self.change_note())
         self.hand_button = QPushButton(self.tr("ほかの人に渡す…"))
         self.hand_button.setToolTip(self.tr("選んだ画像の担当者を変更（交代で続きを任せるときなど）"))
-        self.hand_button.clicked.connect(self.hand_over)
+        self.hand_button.clicked.connect(lambda _on=False: self.hand_over())
         self.release_button = QPushButton(self.tr("手放す"))
-        self.release_button.clicked.connect(self.give_back)
+        self.release_button.clicked.connect(lambda _on=False: self.give_back())
         row.addWidget(self.status_select)
         for b in (self.status_button, self.note_button, self.hand_button, self.release_button):
             row.addWidget(b)
