@@ -537,6 +537,14 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest            # QGIS の Python があ�
 SATELLITE_OBSERVATION_SGP4=bundled python3 -m pytest   # 同梱の純 Python 版 SGP4 で
 ```
 
+### Esri なしで試す（モックサーバー）
+
+```
+python3 scripts/mock_esri/mock_esri.py      # http://127.0.0.1:8765 に ArcGIS フィーチャーサービスのモック（サンプルデータ入り）
+```
+
+書き出される `scripts/mock_esri/data/config.mock.jsonc` を「設定…」で選ぶと、画像カタログ・衛星・撮像計画・観測記録（分類体系・確認範囲）・外部AI結果・転記先・地名・撮像依頼台帳がすべてモックにつながる。詳しくは [scripts/mock_esri/README.md](scripts/mock_esri/README.md)。
+
 ## ビューアとの数値比較
 
 ```
