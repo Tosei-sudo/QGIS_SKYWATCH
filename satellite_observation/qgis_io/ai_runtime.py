@@ -27,6 +27,7 @@ from urllib.parse import urljoin, urlsplit
 import numpy as np
 
 from ..core.ai.model_config import OnnxSignature, OnnxValue
+from ..core.win64 import add_package
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Where the Windows zip keeps its ONNX Runtime.
@@ -69,8 +70,7 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         if sys.version_info[:2] != VENDORED_PYTHON:
             raise RuntimeMissing(f"同梱の onnxruntime は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
                                  f"（この QGIS は {sys.version_info[0]}.{sys.version_info[1]}）。{install_hint(system)}")
-        if vendored not in sys.path:
-            sys.path.insert(0, vendored)
+        add_package("onnxruntime", vendored, first=True)  # From a copy outside the plugin's folder (core/win64).
         try:
             import onnxruntime as ort  # noqa: PLC0415
         except ImportError as error:

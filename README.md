@@ -491,6 +491,8 @@ python3 scripts/build_zip.py --win64
 - 3 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
 - ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
 - `--config` と併用可
+- DLL を含む onnxruntime と sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\satellite_observation\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
+- この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/satellite_observation` を消す）
 
 ### 設定ファイルを同梱して配る
 
