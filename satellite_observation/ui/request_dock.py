@@ -19,12 +19,14 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.bulk import RequestChange, apply_change
+from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import field_roles, request_of_row, row_problems
 from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
+from . import last_inputs
 from .docks import PluginDock
 from .plan_overlay import PlanOverlay
 
@@ -301,7 +303,8 @@ class RequestDock(PluginDock):
         if self.form is not None:
             self.form.close()
         if new or (request is None and self.chosen is None):
-            base = request or ImagingRequest(id=new_request_id())
+            # A new request starts from the conditions last saved (入力の初期値の記憶).
+            base = request or with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
         else:
             base = request or self.chosen
         self.form = RequestForm(self.iface, base, self._save, self.known(), self)
@@ -312,6 +315,7 @@ class RequestDock(PluginDock):
         form = self.form
 
         def done(saved):
+            last_inputs.write("request", remembered(request))
             self.chosen = saved
             if form is not None:
                 form.accept()

@@ -28,6 +28,7 @@ from ..core.layer_templates import (
 )
 from ..qgis_io import scratch_layer as store
 from ..qgis_io.scratch_layer import field_design_of, geometry_of, scratch_layer
+from . import last_inputs
 
 #: The table's columns: key, heading, tooltip.
 COLUMNS = [
@@ -349,6 +350,12 @@ class NewLayerDialog(QDialog):
         self.list_layers()
         crs = QgsProject.instance().crs()
         self.crs.setCrs(crs if crs.isValid() else QgsCoordinateReferenceSystem("EPSG:4326"))
+        if not name:
+            # The template last made a layer from is offered first (入力の初期値の記憶).
+            last = last_inputs.read("new_layer").get("template")
+            if isinstance(last, list) and len(last) == 2 and all(isinstance(x, str) for x in last):
+                source, name = last
+        last_inputs.InputMemory("new_layer", {"draw": self.draw}).restore()
         if not (name and self.choose(source, name)):
             self.template.setCurrentIndex(1)
             self.apply_template()
@@ -371,6 +378,10 @@ class NewLayerDialog(QDialog):
             self._say(self.tr("座標系を選択"), error=True)
             return None
         layer = scratch_layer(self.title.text(), design.geometryType, crs, specs)
+        chosen = self.chosen()
+        kept = last_inputs.read("new_layer")
+        kept.update({"draw": self.draw.isChecked(), "template": [chosen[0], chosen[1].name] if chosen else None})
+        last_inputs.write("new_layer", kept)
         QgsProject.instance().addMapLayer(layer)
         self.iface.setActiveLayer(layer)
         if self.draw.isChecked():

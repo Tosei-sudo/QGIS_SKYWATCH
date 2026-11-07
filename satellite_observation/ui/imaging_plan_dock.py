@@ -60,6 +60,7 @@ from .docks import PluginDock
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
+from .last_inputs import InputMemory
 from .satellite_tree import SatelliteTree
 
 #: The most opportunities listed as rows (the CSV and the layer take them all).
@@ -187,6 +188,15 @@ class ImagingPlanDock(PluginDock):
         self._watched: Optional[QgsVectorLayer] = None
         self.visibilityChanged.connect(self._visibility)
         self._config_changed()
+        #: The conditions last used are offered first (入力の初期値の記憶).
+        self.memory = InputMemory("imaging_plan", {
+            "days": self.days, "max_off_nadir": self.max_off_nadir, "daylight": self.daylight, "min_sun": self.min_sun,
+            "min_incidence": self.min_incidence, "max_incidence": self.max_incidence, "pass": self.pass_, "side": self.side,
+            "max_cloud": self.max_cloud, "each": self.each, "priority_order": self.priority_order,
+            "goal": self.goal, "share": self.share, "first": self.first,
+        })
+        self.memory.restore()
+        self.memory.watch()
         # Reminders are checked while QGIS runs, whether the dock is open or not.
         self.remind_timer = QTimer(self)
         self.remind_timer.setInterval(REMIND_EVERY)
@@ -240,7 +250,7 @@ class ImagingPlanDock(PluginDock):
         more.collapsedStateChanged.connect(lambda collapsed: collapsed or self._hide_rows())
         self._priority_shown = False
         more_layout = QVBoxLayout(more)
-        self.tree = SatelliteTree()
+        self.tree = SatelliteTree(remember_as="imaging_plan")
         more_layout.addWidget(self.tree)
         options = QFormLayout()
         self.daylight = QComboBox()

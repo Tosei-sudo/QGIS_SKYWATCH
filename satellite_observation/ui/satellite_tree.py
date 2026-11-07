@@ -17,6 +17,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.plan.satellites import SatelliteSpec
 from ..core.plan.tree import Group, Listed, SatelliteChoice, facts_of, is_old, label_of, source_text, tle_age_days
 from ..core.plan.output import js_round
+from .last_inputs import checked_satellites, keep_checked_satellites
 
 ROLE = Qt.ItemDataRole.UserRole
 OLD_COLOR = QColor("#b45309")
@@ -27,9 +28,13 @@ class SatelliteTree(QWidget):
 
     changed = pyqtSignal()
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, remember_as: str = ""):
         super().__init__(parent)
         self.choice = SatelliteChoice()
+        #: The form whose last checks are put back the first time satellites are listed, and kept on each change ('' for none).
+        self.remember_as = remember_as
+        if remember_as:
+            self.changed.connect(self._keep)
         self._items: list[tuple[QTreeWidgetItem, object]] = []
         self._mode_boxes: list[tuple[QCheckBox, str]] = []
         self._busy = False
@@ -67,7 +72,12 @@ class SatelliteTree(QWidget):
         """Lists `sats`, keeping which were checked (new ones start checked, a satellite's other modes unchecked)."""
         open_keys = {key for item, key in self._groups() if item.isExpanded()}
         first = not self.choice.listed
+        before = {l.key for l in self.choice.listed}
         added = self.choice.set(sats)
+        # Satellites new to the list are checked as they were last time (入力の初期値の記憶).
+        for key, on in self.restore_kept({l.key for l in self.choice.listed} - before).items():
+            if not on:
+                added.discard(key)
         self._busy = True
         self.tree.clear()
         self._items = []
@@ -119,6 +129,18 @@ class SatelliteTree(QWidget):
         self.choice.check_only(names)
         self.refresh()
         self.changed.emit()
+
+    def restore_kept(self, keys) -> dict:
+        """Checks those of `keys` as they were last kept (call `refresh` after); returns {key: checked} of those put back."""
+        kept = checked_satellites(self.remember_as) if self.remember_as else None
+        done = {}
+        for listed in self.choice.listed:
+            if kept and listed.key in keys and listed.key in kept:
+                listed.checked = done[listed.key] = kept[listed.key]
+        return done
+
+    def _keep(self) -> None:
+        keep_checked_satellites(self.remember_as, {l.key: l.checked for l in self.choice.listed})
 
     def items(self) -> list[Listed]:
         return self.choice.listed

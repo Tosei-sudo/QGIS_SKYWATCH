@@ -25,6 +25,7 @@ from ..core.request.model import (
     bbox_of, day_bounds, jst_day, level_of, level_value, priority_text, repeat_of, repeat_text, square_rings,
 )
 from ..qgis_io.geometry import shape_of, to_wgs84
+from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
 
 _WEEKDAYS = "月火水木金土日"
@@ -74,6 +75,9 @@ class RequestForm(QDialog):
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
         self.point_tool.canvasClicked.connect(self._point_clicked)
         self.finished.connect(self._closed)
+        #: The size of a clicked point's area last used (入力の初期値の記憶).
+        self.memory = InputMemory("request_form", {"size": self.size})
+        self.memory.restore()
 
     # --- Building -----------------------------------------------------------------------------
 
@@ -423,6 +427,7 @@ class RequestForm(QDialog):
             self.message.setText("・".join(problems))
             return
         self.message.setText("")
+        self.memory.save()
         self.save(r)
 
     def _closed(self, _result=None) -> None:

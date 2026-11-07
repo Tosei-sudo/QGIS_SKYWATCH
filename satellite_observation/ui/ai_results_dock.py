@@ -44,6 +44,7 @@ from ..qgis_io.detection_results import detection_layers, detection_results, ima
 from ..qgis_io.obs_images import IMAGE_ID, observed_image
 from ..qgis_io.tasks import current_feedback, run_task
 from .docks import PluginDock
+from .last_inputs import InputMemory
 
 TITLE = "AI結果"
 #: The edits of a detection layer that read its results again.
@@ -121,7 +122,10 @@ class AiResultsDock(PluginDock):
         self.min_score.setSingleStep(0.05)
         self.min_score.setDecimals(2)
         self.min_score.setToolTip(_tr("これより低い結果は一覧と地図から除外（確信度のない結果は常に表示）"))
+        # The lower limit last set is kept (入力の初期値の記憶).
+        InputMemory("ai_results", {"min_score": self.min_score}).restore()
         self.min_score.valueChanged.connect(lambda _v: self.show_results())
+        self.min_score_memory = InputMemory("ai_results", {"min_score": self.min_score}).watch()
         filters.addWidget(self.min_score)
         filters.addStretch(1)
         self.body.addLayout(filters)

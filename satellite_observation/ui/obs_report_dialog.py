@@ -27,6 +27,7 @@ from ..core.obs.model import Observation
 from ..core.obs.report import ReportOptions, ReportSelection, report_file_name
 from ..core.obs.taxonomy import kind_of, path_of
 from ..qgis_io.geometry import from_wgs84
+from .last_inputs import InputMemory
 from .obs_overlay import Mark, Scene, ScenePainter, color_of
 
 #: The map's size in the report (pixels).
@@ -198,6 +199,12 @@ class ReportDialog(QDialog):
             b.setAutoDefault(False)
             actions.addWidget(b)
         layout.addLayout(actions)
+        #: The title, class, 確度 and parts last used (入力の初期値の記憶).
+        self.memory = InputMemory("observation_report", {
+            "title": self.title_input, "kind": self.kind_select, "confidence": self.confidence_select,
+            "map": self.map_check, "flows": self.flows_check, "areas": self.areas_check, "records": self.records_check,
+        })
+        self.memory.restore()
         self.count()
 
     def options(self) -> ReportOptions:
@@ -225,6 +232,7 @@ class ReportDialog(QDialog):
 
     def make(self, then: Callable[[str, ReportOptions, Optional[QImage]], None]) -> None:
         """Makes the report (its map first, when asked), then saves or prints it."""
+        self.memory.save()
         o = self.options()
         selection: ReportSelection = self.book.report_selection(o)
         if not selection.records and not self.book.areas:

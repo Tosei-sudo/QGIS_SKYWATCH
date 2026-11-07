@@ -33,6 +33,7 @@ from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
 from .plan_overlay import LabelItem
+from .last_inputs import InputMemory
 from .satellite_tree import SatelliteTree
 
 #: How often the moment follows the clock, ms.
@@ -158,11 +159,18 @@ class SatellitePassDock(PluginDock):
         self.live_timer.timeout.connect(self._tick)
         self.visibilityChanged.connect(self._visibility)
         context.configChanged.connect(self._config_changed)
+        #: The conditions last used are offered first (入力の初期値の記憶).
+        self.memory = InputMemory("satellite_pass", {
+            "mode": self.mode, "window": self.window, "max_off_nadir": self.max_off_nadir, "daylight": self.daylight,
+            "ticks": self.ticks,
+        })
+        self.memory.restore()
+        self.memory.watch()
 
     # --- The form ---------------------------------------------------------------------------
 
     def _build(self) -> None:
-        self.tree = SatelliteTree()
+        self.tree = SatelliteTree(remember_as="satellite_pass")
         self.tree.changed.connect(self._chosen_changed)
         self.body.addWidget(self.tree, 2)
         form = QFormLayout()
@@ -347,6 +355,9 @@ class SatellitePassDock(PluginDock):
             for l in self.tree.items():
                 if l.key not in before and not any(l.sat is s for s in pasted):
                     l.checked = False
+            self.tree.refresh()
+        # Those chosen last time are chosen again (入力の初期値の記憶).
+        if self.tree.restore_kept({l.key for l in self.tree.items()} - before):
             self.tree.refresh()
         self._chosen_changed()
 
