@@ -17,6 +17,15 @@ image; 「再読み込み」 reads them again) and the layers of the image befor
 are replaced. A result already recorded (its tag in a record's note) is
 marked 取込済 and is not recorded again.
 
+Review first what the AI is least sure of (能動学習, core/ai/review): the
+list puts first the results neither recorded nor rejected under 「確認不要の
+確信度」 (要確認), least sure first. 「正（記録して次へ）」 records the chosen
+one, 「誤検出（次へ）」 records a small checked area around it as nothing
+there, and both move to the next one to look at. Both are training data for
+「AI 学習（物体検出）」 (a labelled object, a window of background around what
+the model mistook); 「確認結果で追加学習…」 opens it on the image and the
+model, to train it further.
+
 Each result not yet recorded is matched with the things of the images
 before and after (継続, core/obs/continuation): a sure one is recorded as
 that thing (「継続: 船舶-3」 chosen in the 継続 column), an unsure one offers
@@ -30,11 +39,13 @@ from typing import Any, Callable, Optional
 
 from qgis.core import QgsCoordinateTransform, QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
+from qgis.PyQt.QtGui import QBrush, QColor
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
 from ..core.ai.model_config import DetectModelConfig
+from ..core.ai.review import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
 from ..core.ai_results import AiResult, AiResultSource, import_entry, kind_for, recorded_tags, score_text
 from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
 from ..core.obs.flows import living
@@ -42,6 +53,7 @@ from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, mark_imported, place
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
 from ..qgis_io.obs_images import IMAGE_ID, observed_image
+from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, run_task
 from .docks import PluginDock
 from .last_inputs import InputMemory
@@ -49,6 +61,10 @@ from .last_inputs import InputMemory
 TITLE = "AI結果"
 #: The edits of a detection layer that read its results again.
 EDITS = ("featureAdded", "featuresDeleted", "attributeValueChanged", "geometryChanged", "editingStopped")
+#: The list's orders: for review (要確認 first, least sure first), as read.
+ORDERS = ("確認優先（確信度の低い順）", "読み込み順")
+#: The list's column of the review state.
+REVIEW_COLUMN = 7
 
 
 def _tr(text: str) -> str:
@@ -90,6 +106,8 @@ class AiResultsDock(PluginDock):
         self.rows: list[tuple[AiResultSource, AiResult]] = []
         self.layers: list[QgsVectorLayer] = []
         self.imported: set[str] = set()
+        #: The results recorded as wrong (誤検出, a checked area around each), by tag.
+        self.rejected: set[str] = set()
         #: What each row (not recorded yet) may continue, by row.
         self.continued: dict[int, Continuation] = {}
         #: The thing chosen to continue, by result tag ("" for a new thing), when not the one matched.
@@ -130,8 +148,31 @@ class AiResultsDock(PluginDock):
         filters.addStretch(1)
         self.body.addLayout(filters)
 
+        review = QHBoxLayout()
+        review.addWidget(QLabel(_tr("並び")))
+        self.order = QComboBox()
+        for text in ORDERS:
+            self.order.addItem(_tr(text), text)
+        self.order.setToolTip(_tr("確認優先: 要確認（未取込・誤検出でもなく確信度が「確認不要」未満）を確信度の低い順に先頭へ"))
+        review.addWidget(self.order)
+        review.addWidget(QLabel(_tr("確認不要の確信度")))
+        self.sure = QDoubleSpinBox()
+        self.sure.setRange(0, 1.01)
+        self.sure.setSingleStep(0.05)
+        self.sure.setDecimals(2)
+        self.sure.setValue(SURE_SCORE)
+        self.sure.setToolTip(_tr("これ以上の結果は AI を信頼して要確認に含めない（1.01 ですべて要確認）"))
+        review.addWidget(self.sure)
+        review.addStretch(1)
+        self.body.addLayout(review)
+        memory = {"order": self.order, "sure": self.sure}
+        InputMemory("ai_results_review", memory).restore()
+        self.order.currentIndexChanged.connect(lambda _i: self.show_results())
+        self.sure.valueChanged.connect(lambda _v: self.show_results())
+        self.review_memory = InputMemory("ai_results_review", memory).watch()
+
         self.list = QTreeWidget()
-        self.list.setHeaderLabels([_tr("取込"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前"), _tr("継続")])
+        self.list.setHeaderLabels([_tr("取込"), _tr("出どころ"), _tr("クラス"), _tr("確信度"), _tr("種別"), _tr("名前"), _tr("継続"), _tr("確認")])
         self.list.setRootIsDecorated(False)
         self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.itemSelectionChanged.connect(self._list_selected)
@@ -148,6 +189,25 @@ class AiResultsDock(PluginDock):
             buttons.addWidget(b)
         buttons.addStretch(1)
         self.body.addLayout(buttons)
+
+        judge = QHBoxLayout()
+        self.next_button = QPushButton(_tr("次の要確認へ"))
+        self.next_button.setToolTip(_tr("要確認のうち確信度の最も低い結果を選んで表示"))
+        self.next_button.clicked.connect(lambda: self.next_to_review())
+        self.accept_button = QPushButton(_tr("正（記録して次へ）"))
+        self.accept_button.setToolTip(_tr("選んだ結果を観測記録として記録（学習の教師データになる）し、次の要確認へ"))
+        self.accept_button.clicked.connect(lambda: self.accept_rows(self.selected_rows()))
+        self.reject_button = QPushButton(_tr("誤検出（次へ）"))
+        self.reject_button.setToolTip(_tr("選んだ結果を誤検出として、その周りを確認範囲（何もない所）に記録し、次の要確認へ。"
+                                          "学習ではその周りを背景として学習。確認範囲を削除すると取り消し"))
+        self.reject_button.clicked.connect(lambda: self.reject_rows(self.selected_rows()))
+        self.train_button = QPushButton(_tr("確認結果で追加学習…"))
+        self.train_button.setToolTip(_tr("この画像と、検出に使った学習済みモデル（あれば追加学習の元に）で「AI 学習（物体検出）」を開く"))
+        self.train_button.clicked.connect(lambda: self.open_training())
+        for b in (self.next_button, self.accept_button, self.reject_button, self.train_button):
+            judge.addWidget(b)
+        judge.addStretch(1)
+        self.body.addLayout(judge)
         self.status = QLabel()
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
@@ -303,24 +363,30 @@ class AiResultsDock(PluginDock):
         book = self._book()
         records = living(book.records) if book is not None else []
         self.imported = recorded_tags(o.note for o in records if o.image_id == self.image_id)
+        areas = [a for a in (book.areas if book is not None else []) if a.deleted_at is None and a.image_id == self.image_id]
+        self.rejected = rejected_tags(a.note for a in areas)
+
+    def state(self, row: int) -> str:
+        """A row's review state (core/ai/review)."""
+        return state_of(self.rows[row][1], self.imported, self.rejected, self.sure.value())
+
+    def review_queue(self) -> list[int]:
+        """The rows to look at, least sure first."""
+        return queue([r for _s, r in self.rows], self.imported, self.rejected, self.sure.value())
 
     def show_results(self, reveal: bool = False) -> None:
         """The cached results of the image, those at or above the lowest score, listed and drawn."""
         found = self.cache.get(self.image_id or "", [])
         least = self.min_score.value()
         self._refresh_imported()
-        self.rows = []
-        per_source: list[tuple[AiResultSource, list[AiResult], list[int]]] = []
+        # Every result kept: (source, result, its source's index (external) or its layer and feature (own)).
+        read: list[tuple[AiResultSource, AiResult, Any]] = []
         problems = []
-        for source, results, error in found:
+        for index, (source, results, error) in enumerate(found):
             if error:
                 problems.append(f"{source.label}: {error}")
-            kept = [r for r in results if r.score is None or r.score >= least]
-            rows = list(range(len(self.rows), len(self.rows) + len(kept)))
-            self.rows += [(source, r) for r in kept]
-            per_source.append((source, kept, rows))
+            read += [(source, r, index) for r in results if r.score is None or r.score >= least]
         # The plugin's own detection, from its layers (as they are now).
-        self.local_rows = {}
         local_total = 0
         book = self._book()
         taxonomy = book.kept_taxonomy() if book is not None and book.loaded else []
@@ -333,19 +399,25 @@ class AiResultsDock(PluginDock):
                 continue
             local_total += len(found_here)
             source = local_source(layer)
-            for r, fid in found_here:
-                if r.score is None or r.score >= least:
-                    self.local_rows[len(self.rows)] = (layer, fid)
-                    self.rows.append((source, r))
+            read += [(source, r, (layer, fid)) for r, fid in found_here if r.score is None or r.score >= least]
+        if self.order.currentData() == ORDERS[0]:
+            # For review: what to look at first, least sure first.
+            read = [read[i] for i in review_order([r for _s, r, _w in read], self.imported, self.rejected, self.sure.value())]
+        self.rows = [(source, r) for source, r, _w in read]
+        self.local_rows = {row: where for row, (_s, _r, where) in enumerate(read) if isinstance(where, tuple)}
+        per_source: list[tuple[AiResultSource, list[AiResult], list[int]]] = []
+        for index, (source, _results, _error) in enumerate(found):
+            rows = [row for row, (_s, _r, where) in enumerate(read) if not isinstance(where, tuple) and where == index]
+            per_source.append((source, [self.rows[row][1] for row in rows], rows))
         self._syncing = True
         try:
             self.list.clear()
-            for source, r in self.rows:
-                done = r.tag in self.imported
-                item = QTreeWidgetItem([_tr("済") if done else "", source.label, r.cls, score_text(r.score), kind_for(r, source), r.name])
+            for row, (source, r) in enumerate(self.rows):
+                item = QTreeWidgetItem(["", source.label, r.cls, score_text(r.score), kind_for(r, source), r.name, "", ""])
                 if r.geometry is None:
                     item.setToolTip(1, _tr("位置なし（取り込み不可）"))
                 self.list.addTopLevelItem(item)
+                self._render_state(row)
             self._match()
             for i in range(self.list.columnCount()):
                 self.list.resizeColumnToContents(i)
@@ -355,6 +427,7 @@ class AiResultsDock(PluginDock):
         total = sum(len(results) for _s, results, _e in found) + local_total
         text = _tr("{n} 件（全 {total} 件）・取込済 {done} 件").format(
             n=len(self.rows), total=total, done=sum(1 for _s, r in self.rows if r.tag in self.imported))
+        text += self._review_text()
         auto = sum(1 for c in self.continued.values() if c.tier == AUTO)
         maybe = len(self.continued) - auto
         if auto or maybe:
@@ -514,8 +587,8 @@ class AiResultsDock(PluginDock):
 
     # ---- recording -----------------------------------------------------------
 
-    def import_rows(self, rows: list[int]) -> list:
-        """Records the results of these rows (those not recorded yet, with a place) as observations of the image."""
+    def import_rows(self, rows: list[int], then: Optional[Callable[[], None]] = None) -> list:
+        """Records the results of these rows (those not recorded yet, with a place) as observations of the image; `then` after."""
         dock = self.observations()
         book = self._book()
         if dock is None or book is None:
@@ -569,7 +642,7 @@ class AiResultsDock(PluginDock):
             for i in done_rows:
                 item = self.list.topLevelItem(i)
                 if item is not None:
-                    item.setText(0, _tr("済"))
+                    self._render_state(i)
                     item.setText(6, saved_names.get(i, ""))
             # What the rest may continue, without the things now in this image.
             self._match()
@@ -578,10 +651,133 @@ class AiResultsDock(PluginDock):
                 text += _tr("（継続 {k} 件）").format(k=len(continued))
             if skipped:
                 text += _tr("（位置なし {k} 件は除外）").format(k=skipped)
-            self.status.setText(text)
+            self.status.setText(text + self._review_text())
+            if then is not None:
+                then()
 
         result = dock.do(_tr("AI結果の取り込み"), lambda b: b.add_many(entries, image=image_id), after)
         return result or []
+
+    # ---- the review (能動学習) ---------------------------------------------------
+
+    def _render_state(self, row: int) -> None:
+        item = self.list.topLevelItem(row)
+        if item is None or not (0 <= row < len(self.rows)):
+            return
+        state = self.state(row)
+        item.setText(0, _tr("済") if state == ACCEPTED else _tr("誤") if state == REJECTED_STATE else "")
+        if state == REJECTED_STATE:
+            item.setToolTip(0, _tr("誤検出として確認範囲に記録済み（確認範囲を削除すると取り消し）"))
+        item.setText(REVIEW_COLUMN, _tr("要確認") if state == TO_REVIEW else "")
+        item.setBackground(REVIEW_COLUMN, QBrush(QColor(255, 210, 90, 110)) if state == TO_REVIEW else QBrush())
+
+    def _review_text(self) -> str:
+        if not self.rows:
+            return ""
+        left = len(self.review_queue())
+        wrong = sum(1 for _s, r in self.rows if r.tag in self.rejected and r.tag not in self.imported)
+        if not left and not wrong:
+            return ""
+        return _tr("・要確認 {n} 件・誤検出 {k} 件").format(n=left, k=wrong)
+
+    def next_to_review(self) -> Optional[int]:
+        """Chooses (and shows) the least sure result still to look at; None when none is left."""
+        todo = self.review_queue()
+        if not todo:
+            self.list.clearSelection()
+            self.status.setText(_tr("要確認の結果なし") + self._review_text())
+            return None
+        row = todo[0]
+        self.list.clearSelection()
+        item = self.list.topLevelItem(row)
+        if item is not None:
+            item.setSelected(True)
+            self.list.scrollToItem(item)
+        self.zoom_to([row])
+        return row
+
+    def accept_rows(self, rows: list[int]) -> list:
+        """Records the chosen results as right (observations), then goes to the next one to look at."""
+        if not rows:
+            self.status.setText(_tr("結果を選択"))
+            return []
+        return self.import_rows(rows, then=self.next_to_review)
+
+    def reject_rows(self, rows: list[int]) -> list:
+        """
+        Records the chosen results as wrong: a checked area (every kind) around
+        each, its note naming the result, then goes to the next one to look at.
+        """
+        dock = self.observations()
+        book = self._book()
+        if dock is None or book is None:
+            self.status.setText(_tr("観測記録は使用不可"))
+            return []
+        if not book.loaded:
+            self.status.setText(_tr("観測記録の読み込み待ち"))
+            return []
+        image_id = self.image_id
+        if not image_id or not any(i.id == image_id for i in book.images):
+            self.status.setText(_tr("画像 {id} が観測記録の画像一覧になし（画像を開いて）").format(id=image_id or ""))
+            return []
+        self._refresh_imported()
+        specs, tags = [], []
+        for row in rows:
+            if not (0 <= row < len(self.rows)):
+                continue
+            _source, r = self.rows[row]
+            if r.tag in self.rejected or r.tag in self.imported:
+                continue
+            ring = rejection_ring(r)
+            if ring is None:
+                continue
+            specs.append((ring, "", rejection_note(r)))
+            tags.append(r.tag)
+        if not specs:
+            self.status.setText(_tr("誤検出にする結果なし（取込済・誤検出済か、位置なし）") if rows else _tr("結果を選択"))
+            return []
+
+        def after(saved) -> None:
+            if not saved:
+                return
+            self.rejected |= set(tags)
+            for i in range(len(self.rows)):
+                self._render_state(i)
+            self._match()
+            self.status.setText(_tr("{n} 件を誤検出として確認範囲に記録").format(n=len(saved)) + self._review_text())
+            self.next_to_review()
+
+        result = dock.do(_tr("AI誤検出の記録"), lambda b: b.add_areas(specs, image=image_id), after)
+        return result or []
+
+    def _image_layer(self) -> Optional[QgsRasterLayer]:
+        """The image of the list on the map."""
+        for layer in QgsProject.instance().mapLayers().values():
+            if isinstance(layer, QgsRasterLayer) and self.image_id in (raster_image_id(layer), catalog_image_id(layer)):
+                return layer
+        return None
+
+    def training_inputs(self) -> dict:
+        """What 「AI 学習（物体検出）」 opens with: this image, and the trained model that found its results (to train further)."""
+        from ..processing_provider.train_algorithm import TrainAlgorithm
+        from ..qgis_io.settings import trained_models
+
+        out: dict = {TrainAlgorithm.SOURCE: 0}
+        layer = self._image_layer()
+        if layer is not None:
+            out[TrainAlgorithm.IMAGES] = [layer.id()]
+        used = {r.model for _s, r in self.rows if r.model}
+        trained = {_tr("学習済み: {label}").format(label=label): path for label, path in trained_models()}
+        trained.update({f"学習済み: {label}": path for label, path in trained_models()})
+        base = next((trained[m] for m in used if m in trained), None)
+        if base:
+            out[TrainAlgorithm.BASE_MODEL] = base
+        return out
+
+    def open_training(self) -> None:
+        import processing
+
+        processing.execAlgorithmDialog("satobs:train_detector", self.training_inputs())
 
     def close_down(self) -> None:
         """Called when the plugin unloads."""
