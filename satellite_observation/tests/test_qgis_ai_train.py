@@ -279,6 +279,32 @@ def test_a_trained_model_is_listed_for_detection(provider, tmp_path):
         settings._set("trained_models", "[]")
 
 
+def test_a_wrong_result_of_the_review_is_trained_as_background(provider, tmp_path):
+    """A checked area recorded as 誤検出 in 「AI結果」 is read as a window of background around it."""
+    centres = objects(4, 3)
+    layer = QgsRasterLayer(tiff(tmp_path / "train.tif", centres, bars=[(300, 300)]), "train")
+    QgsProject.instance().addMapLayer(layer)
+    records = [record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]
+    ring = [list(lonlat(x, y)) for x, y in ((290, 290), (330, 290), (330, 330), (290, 330), (290, 290))]
+    provider.set_book(lambda: Book(records, [CheckedArea("a1", "train.tif", "train.tif", None, ring, "", "AI誤検出: 船舶 0.40 [AI:検出@1#7]", 0, 0)]))
+
+    class Feedback(QgsProcessingFeedback):
+        said: list = []
+
+        def pushInfo(self, text):  # noqa: N802 (QGIS's name)
+            self.said.append(text)
+            super().pushInfo(text)
+
+    algorithm = QgsApplication.processingRegistry().algorithmById("satobs:train_detector").create()
+    context = QgsProcessingContext()
+    context.setProject(QgsProject.instance())
+    feedback = Feedback()
+    _, ok = algorithm.run({"IMAGES": [layer.id()], "DEPTH": 1, "EPOCHS": 1, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+                           "OUTPUT": str(tmp_path / "m.onnx")}, context, feedback)
+    assert ok
+    assert any("誤検出として確認した 1 件の周りを背景として学習" in t for t in feedback.said), feedback.said
+
+
 def test_without_records_of_the_image(provider, tmp_path):
     layer = QgsRasterLayer(tiff(tmp_path / "train.tif", objects(9, 3)), "train")
     QgsProject.instance().addMapLayer(layer)

@@ -47,6 +47,8 @@ def plugin(tmp_path):
     p.initGui()
     assert p.api.problems == [], p.api.problems
     p.api.observation_dock.show()
+    # The list as read (the review order is tested in test_qgis_ai_review).
+    p.api.ai_results.order.setCurrentIndex(1)
     yield p, iface, tmp_path
     p.unload()
     iface.setActiveLayer(None)

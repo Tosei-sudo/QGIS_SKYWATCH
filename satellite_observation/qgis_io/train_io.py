@@ -19,6 +19,7 @@ from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsRectangle, QgsWkbTypes,
 )
 
+from ..core.ai.review import is_rejection
 from ..core.ai.train.labels import class_of, footprint, kind_path, object_size
 from ..core.ai.train.trainer import Window
 from ..core.obs.taxonomy import Taxon, path_of, within
@@ -48,6 +49,8 @@ class Area:
     geometry: QgsGeometry
     crs: QgsCoordinateReferenceSystem
     image_id: Optional[str] = None
+    #: A wrong AI result recorded in the review (誤検出, core/ai/review): always read as a window of background.
+    hard: bool = False
 
 
 @dataclass
@@ -90,7 +93,7 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         if a.kind and not all(within(c, path_of(a.kind)) for c in classes):
             continue
         ring = [QgsPointXY(x, y) for x, y in a.ring]
-        out.areas.append(Area(QgsGeometry.fromPolygonXY([ring]), WGS84, a.image_id or None))
+        out.areas.append(Area(QgsGeometry.fromPolygonXY([ring]), WGS84, a.image_id or None, is_rejection(a.note)))
     return out
 
 
@@ -166,11 +169,13 @@ def pixel_boxes(labels: Sequence[Label], grid: Grid, crs: QgsCoordinateReference
 
 
 def area_geometries(areas: Sequence[Area], grid: Grid, crs: QgsCoordinateReferenceSystem, transform_context,
-                    image_id: Optional[str]) -> list[QgsGeometry]:
-    """The checked areas of an image in its pixels (x right, y down)."""
+                    image_id: Optional[str], hard: Optional[bool] = None) -> list[QgsGeometry]:
+    """The checked areas of an image in its pixels (x right, y down); only the wrong AI results' (or only the others') when `hard` is given."""
     out = []
     for a in areas:
         if a.image_id is not None and image_id is not None and a.image_id != image_id:
+            continue
+        if hard is not None and a.hard != hard:
             continue
         g = QgsGeometry(a.geometry)
         try:
@@ -191,6 +196,8 @@ class ImageWindows:
     #: Objects too big for the model's input (the pixels should be larger).
     too_big: int = 0
     negatives: int = 0
+    #: Windows around wrong AI results (誤検出 of the review).
+    hard: int = 0
 
 
 def window_starts(boxes: np.ndarray, tile: int, width: int, height: int) -> list[tuple[int, int]]:
@@ -203,11 +210,13 @@ def window_starts(boxes: np.ndarray, tile: int, width: int, height: int) -> list
 
 
 def windows_of(read: Callable[[QgsRectangle, int, int], np.ndarray], grid: Grid, boxes: np.ndarray, areas: Sequence[QgsGeometry], tile: int,
-               rng: np.random.Generator, image: str = "", cancelled: Callable[[], bool] = lambda: False) -> ImageWindows:
+               rng: np.random.Generator, image: str = "", cancelled: Callable[[], bool] = lambda: False,
+               hard: Sequence[QgsGeometry] = ()) -> ImageWindows:
     """
     The windows of one image: around its objects (each window with every
     object in it), and from its checked areas, some windows anywhere inside
-    (where whatever is not labelled is background).
+    (where whatever is not labelled is background); and one around each
+    wrong AI result (`hard`, checked areas too), what the model mistook.
     """
     out = ImageWindows()
     big = (boxes[:, 2] > tile * 0.9) | (boxes[:, 3] > tile * 0.9)
@@ -242,6 +251,14 @@ def windows_of(read: Callable[[QgsRectangle, int, int], np.ndarray], grid: Grid,
         if (w.pixels[..., -1] > 0).mean() > 0.5:
             out.windows.append(w)
             out.negatives += 1
+    for area in hard:
+        if cancelled():
+            return out
+        c = area.boundingBox().center()
+        w = window_at(int(c.x()) - side // 2, int(c.y()) - side // 2)
+        if (w.pixels[..., -1] > 0).any():
+            out.windows.append(w)
+            out.hard += 1
     return out
 
 

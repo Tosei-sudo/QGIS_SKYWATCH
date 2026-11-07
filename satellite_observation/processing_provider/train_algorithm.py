@@ -134,6 +134,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             "（地図上にある画像なら「画素の大きさ」も適用）。\n"
             "教師データ: 観測記録なら各画像の記録（不在を除く）。枠の大きさは記録の長さ・向き、なければ分類体系の諸元（全長・全幅）、"
             "なければ既定の大きさ。その画像の確認範囲は「すべて記録済み」とみなし背景も学習。"
+            "「AI結果」で誤検出とした結果（その周りの確認範囲）は、必ずその周りを背景として学習。"
             "ベクタレイヤーなら点・ポリゴンとクラスのフィールド（種別、または分類の名前・別名）。image_id のある地物はその画像だけに使用。\n"
             "クラス: 分類体系の種別。深さを指定すると上位の分類にまとめて学習（例 1 で「船舶」）。対象の種別を指定するとその配下だけ。\n"
             "バンド: 空なら表示のまま（RGB）。番号を指定するとバンドの値で学習（1 つなら単バンド、例 1,2,3,4 でマルチバンド）。"
@@ -436,7 +437,8 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         """The objects and checked areas of a map image, in a grid's pixels."""
         def labels(grid, classes):
             return (pixel_boxes(gathered.labels, grid, image["crs"], self._transform_context, classes, image["id"]),
-                    area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"]))
+                    area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"]),
+                    area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"], hard=True))
         return labels
 
     def _read_external(self, external: DatasetImage, model, pixel_size: float, rng, feedback) -> tuple:
@@ -482,16 +484,21 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             read = lambda extent, w, h: band_values(layer, model.input.bands, extent, w, h)  # noqa: E731
         else:
             read = lambda extent, w, h: render_rgba(layer, extent, w, h, image["crs"], self._transform_context)  # noqa: E731
-        boxes, areas = labels(grid, model.classes)
-        if not len(boxes) and not image.get("background"):
+        got = labels(grid, model.classes)
+        boxes, areas = got[0], got[1]
+        # The wrong AI results recorded in the review (誤検出): a window of background each.
+        hard = got[2] if len(got) > 2 else []
+        if not len(boxes) and not image.get("background") and not hard:
             feedback.pushWarning(tr("{name}: 物体なし（この画像の記録・地物がない）").format(name=image["name"]))
             return None, ""
-        part = windows_of(read, grid, boxes, areas, model.tile, rng, image["name"], feedback.isCanceled)
+        part = windows_of(read, grid, boxes, areas, model.tile, rng, image["name"], feedback.isCanceled, hard)
         if part.too_big:
             feedback.pushWarning(tr("{name}: 入力より大きな物体 {n} 件を除外（画素を大きく、または入力を大きく）").format(name=image["name"], n=part.too_big))
         kept = boxes[(boxes[:, 2] <= model.tile * 0.9) & (boxes[:, 3] <= model.tile * 0.9)]
         feedback.pushInfo(tr("{name}: 物体 {objects} 件・範囲 {windows}（背景のみ {neg}）・画素 {px:g}").format(
-            name=image["name"], objects=len(kept), windows=len(part.windows), neg=part.negatives, px=image["pixel"]))
+            name=image["name"], objects=len(kept), windows=len(part.windows), neg=part.negatives + part.hard, px=image["pixel"]))
+        if part.hard:
+            feedback.pushInfo(tr("{name}: 誤検出として確認した {n} 件の周りを背景として学習").format(name=image["name"], n=part.hard))
         return (part, grid, kept), ""
 
     def postProcessAlgorithm(self, context, feedback) -> dict:  # noqa: N802 (QGIS's name)
