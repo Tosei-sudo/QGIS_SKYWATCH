@@ -109,6 +109,30 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「保存・追跡…」で一覧の撮像を `planStores` のフィーチャーサービスに保存。「保存した撮像計画」ドックで計画を開くと、撮像時刻を過ぎた予定の撮像を画像カタログ（`imageCatalogs`）で確かめ、撮像済み・未撮像にする
 - 設定ファイルに `satelliteCatalogs` がなければ、架空のサンプル衛星 2 機（光学・SAR、SAR は 3 モード）で試せる
 
+### 衛星名の対応表（`satelliteAliases`）
+
+衛星カタログと画像カタログで衛星の名前が違う（衛星カタログは「WorldView-3」、画像カタログのセンサーは「WV03」など）ときは、Esri のテーブルに対応を書き、設定ファイルにはそのテーブルの場所と属性名だけを書く（名前の一覧は設定ファイルに持たない）。
+
+```jsonc
+"satelliteAliases": {
+  "label": "衛星名の対応表",
+  "url": "https://gis.example/arcgis/rest/services/Satellites/FeatureServer/2",
+  "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" }   // 衛星カタログの名前（か ID）・画像カタログでの名前
+}
+```
+
+| SAT_NAME | ALIAS |
+| --- | --- |
+| WorldView-3 | WV03, WV3 |
+| SkySat-C12 | SkySat |
+| SkySat-C13 | SkySat |
+
+- 1 行に別名 1 つでも、カンマ（`,`・`、`）区切りで複数でも可。同じ衛星の行はまとめる。テーブルを複数使うなら配列。`where`・`token` も書ける
+- 名前は英数字だけを大文字小文字の区別なく比べる（`WorldView-3` = `worldview3`、`WV-3` = `WV3`）
+- 使うところ: 保存した撮像計画の追跡と撮像依頼の撮像済みの確認（画像のセンサーが衛星の名前・ID・別名と同じ画像を優先し、次に一方が他方を含む画像、なければ従来どおり時刻と範囲が合う最初の画像）、撮像依頼の衛星の指定と `requestExports` の `satellites`、フォルダのレコードの `imagePatterns`（センサーの別名のキーでも合う）
+- 1 つの別名を同じシリーズの複数の衛星に付けてよい（画像カタログが号機を区別しない場合）。SkySat-C12 と SkySat-C13 は互いの別名にはならない。号機の区別は撮像時刻（`matchMinutes`）と範囲による
+- テーブルは使うとき（衛星カタログの読み込み・画像カタログの検索・追跡）に一度読み、設定ファイルを読み直すまで使い回す。読めなければ別名なしで続ける
+
 ## 撮像依頼（定点・臨時）と日次出力
 
 設計と設定の書き方は [docs/imaging-requests.md](docs/imaging-requests.md)。
@@ -602,13 +626,13 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | --- | --- | --- | --- | --- |
 | `satelliteCatalogs` | 配列 | `url`（必須）、`fields`（`tle` か `tle1`＋`tle2` が必須。ほかに `name`・`id`・`maxOffNadir`・`minOffNadir`・`swath`・`length`・`lookSide`・`kind`・`scenesPerPass`・`minInterval`・`maxPerDay`・`series`・`leadTime`・`sensor`・`mode`・`resolution`・`system`）、`defaults`（属性がないときの値）、`swathUnit`（`km` か `m`）、`sarPattern`（SAR とみなす衛星名の正規表現）、`where`、`token` | なし | [撮像計画](#撮像計画) |
 | `sensorCatalogs` | 配列 | 設定ファイルに書くなら `sensors`（`[{ "sensor", "modes": [{ "mode", "swath", … }] }]`）、テーブルなら `url` と `fields`（`sensor` 必須。`mode`・`kind`・`swath`・`primary` など）。`swathUnit`・`sarPattern` | なし | [撮像計画](#撮像計画) |
+| `satelliteAliases` | オブジェクトか配列 | 衛星名の対応表（Esri のテーブル）の `url`（必須）、`fields`（`satellite` 衛星カタログの名前か ID・`alias` 画像カタログでの名前、ともに必須）、`label`・`where`・`token` | なし（名前の英数字の部分一致のみ） | [衛星名の対応表](#衛星名の対応表satellitealiases) |
 | `planStores` | 配列 | `url`（編集できるレイヤー、必須）、`fields`（`planId`・`shotTime`・`satellite`・`status`・`imageId` など。既定は `PLAN_ID` などの大文字の名前）、`catalog`（撮像済みを確かめる画像カタログの `label`）、`matchMinutes`（既定 30）、`missAfterDays`（既定 3）、`token` | なし | [撮像計画](#撮像計画) |
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 | `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding` など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
-衛星カタログと画像カタログで衛星名の書き方が違うとき（`WorldView-3` と `WV03` など）の対応表は、設定ファイルではなく Esri の衛星カタログ側の属性に持たせる方針で作業中（できしだい、ここに `fields` の役割を追記）。
 
 #### 観測記録・分類体系
 

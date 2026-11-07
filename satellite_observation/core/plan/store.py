@@ -16,6 +16,7 @@ from ..esri import EsriClient, EsriError, quote
 from ..util import is_number, is_record, layer_url, time_of, utc_text
 from .access import Opportunity, PlanTarget
 from .remind import shots_of
+from .names import NO_NAMES, SatelliteNames, best_named
 from .satellites import SatelliteSpec
 
 #: The attribute names used when the settings do not map a role.
@@ -321,17 +322,14 @@ def between_condition(name: str, field_type: Optional[str], start: float, end: f
     return f"{name} >= TIMESTAMP '{utc_text(start)}' AND {name} <= TIMESTAMP '{utc_text(end)}'"
 
 
-def _plain(s: str) -> str:
-    """Letters and digits only, lower case: `WorldView-3` → `worldview3`."""
-    return "".join(ch for ch in s.lower() if ch.isalnum())
-
-
 def track_shots(client: EsriClient, store: PlanStoreConfig, catalog: CatalogConfig, catalog_token: Optional[str],
-                shots: Sequence[SavedShot], now: float, cancelled: Optional[Callable[[], bool]] = None) -> list[ShotCheck]:
+                shots: Sequence[SavedShot], now: float, cancelled: Optional[Callable[[], bool]] = None,
+                names: SatelliteNames = NO_NAMES) -> list[ShotCheck]:
     """
     Follows up the shots still 「予定」 whose moment has passed: an image of
     `catalog` taken within `match_minutes` of the shot over its scenes makes
-    it 「撮像済み」 (an image whose sensor names the satellite preferred);
+    it 「撮像済み」 (an image whose sensor names the satellite preferred: its
+    name, id or an alias of `names` the same, else one inside the other);
     none after `miss_after_days` makes it 「未撮像」; otherwise it waits.
     Returns the changes only.
     """
@@ -354,14 +352,9 @@ def track_shots(client: EsriClient, store: PlanStoreConfig, catalog: CatalogConf
                           geometryType="esriGeometryPolygon", inSR="4326", spatialRel="esriSpatialRelIntersects")
         found = client.ask(f"{catalog.url}/query", params, catalog_token).get("features") or []
         if found:
-            names = [n for n in (_plain(shot.satellite), _plain(shot.satelliteId)) if n]
             sensor = catalog.fields.get("sensor")
-
-            def named(feature: dict) -> bool:
-                s = _plain(_text((feature.get("attributes") or {}).get(sensor))) if sensor else ""
-                return s != "" and any(s in n or n in s for n in names)
-
-            best = next((x for x in found if named(x)), found[0])
+            wanted = names.expand(shot.satellite, shot.satelliteId) if sensor else set()
+            best = best_named(found, lambda x: _text((x.get("attributes") or {}).get(sensor)), wanted)
             a = best.get("attributes") or {}
             image_id = catalog.fields.get("id")
             value = a.get(image_id) if image_id else None

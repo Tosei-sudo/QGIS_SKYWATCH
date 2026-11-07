@@ -338,6 +338,8 @@ class CatalogDock(PluginDock):
         token = self.context.token_for(catalog.url, catalog.token)
 
         def work(task):
+            # Read here (once) so that opening a record's folder finds the imagePatterns of a sensor's other names.
+            self.context.satellite_names(client, task.isCanceled)
             return search_catalog(client, catalog, self._layer_of(client, catalog, token), search, box, token)
 
         def done(result) -> None:
@@ -421,6 +423,8 @@ class CatalogDock(PluginDock):
         token = self.context.token_for(catalog.url, catalog.token)
 
         def work(task):
+            # Read here (once) so that opening a record's folder finds the imagePatterns of a sensor's other names.
+            self.context.satellite_names(client, task.isCanceled)
             return search_catalog(client, catalog, self._layer_of(client, catalog, token), search, box, token)
 
         def done(result) -> None:
@@ -603,7 +607,8 @@ class CatalogDock(PluginDock):
         for record in records:
             try:
                 opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder,
-                                     lambda r, files, more: self.choose_images(r, files, more), problems)
+                                     lambda r, files, more: self.choose_images(r, files, more), problems,
+                                     names=self.context.known_names())
             except Cancelled:
                 break
             except PathError as error:

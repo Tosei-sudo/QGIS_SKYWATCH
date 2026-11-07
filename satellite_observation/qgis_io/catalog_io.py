@@ -195,12 +195,13 @@ class RecordImages:
 
 
 def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
-                  choose_folder: Callable[[PathMapping], Optional[str]]) -> RecordImages:
+                  choose_folder: Callable[[PathMapping], Optional[str]], names=None) -> RecordImages:
     """
     Where a record's images are: a URL, a local path as it is, under a
     mapping's URL, or in the folder chosen for its prefix (asked through
     `choose_folder` the first time). A local folder's images are the files
-    below it matching the catalog's `imagePatterns` for the record's sensor.
+    below it matching the catalog's `imagePatterns` for the record's sensor
+    (or for another name of it in `names`, the satellite name tables).
     Raises PathError with the reason, Cancelled when no folder was chosen.
     """
     source = record.source
@@ -224,7 +225,7 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
         return RecordImages(url, True, given=source.value)
     if not os.path.isdir(url):
         return RecordImages(url, False, given=source.value)
-    patterns = patterns_for(catalog.image_patterns, record.sensor)
+    patterns = patterns_for(catalog.image_patterns, record.sensor, names)
     found = find_images(url, patterns)
     if not found.files:
         raise PathError(f"{record.id or source.value} のフォルダ「{url}」に画像なし（{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認）")
@@ -234,7 +235,7 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
 def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
                 choose_folder: Callable[[PathMapping], Optional[str]],
                 choose_images: Optional[ChooseImages] = None,
-                problems: Optional[list[str]] = None) -> list[QgsRasterLayer]:
+                problems: Optional[list[str]] = None, names=None) -> list[QgsRasterLayer]:
     """
     The images of a record as raster layers (not yet in the project; see
     add_record_layers): one for an image, or those of a folder's images
@@ -244,7 +245,7 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     that cannot, beside others that can, go to `problems`), Cancelled when no
     folder or image was chosen.
     """
-    where = locate_record(record, catalog, mappings, choose_folder)
+    where = locate_record(record, catalog, mappings, choose_folder, names)
     time = ms_of(record.acquired)
     if not where.files:
         url = where.place

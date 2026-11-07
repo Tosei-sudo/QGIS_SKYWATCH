@@ -33,7 +33,7 @@ def system_of_satellite(sat: SatelliteSpec, systems: Sequence[ExportSystem]) -> 
     for s in systems:
         if s.kind == "光学" and sat.sar or s.kind == "SAR" and not sat.sar:
             continue
-        if _named(s.satellites, sat.name, sat.id) or _named(s.series, sat.series):
+        if _named(s.satellites, sat.name, sat.id, *sat.aliases) or _named(s.series, sat.series):
             return s
     return None
 
@@ -44,7 +44,7 @@ def why_not(req: ImagingRequest, sat: SatelliteSpec) -> Optional[str]:
         return "種別"
     if req.kind == "SAR" and not sat.sar:
         return "種別"
-    if req.satellites and not _named(req.satellites, sat.name, sat.id):
+    if req.satellites and not _named(req.satellites, sat.name, sat.id, *sat.aliases):
         return "衛星"
     if req.series and not _named(req.series, sat.series):
         return "シリーズ"

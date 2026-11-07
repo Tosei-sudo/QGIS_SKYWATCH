@@ -346,7 +346,8 @@ class SavedPlansDock(PluginDock):
         shots = list(self.shots)
 
         def work(task):
-            changes = track_shots(client, store, catalog, catalog_token, shots, _now_ms(), task.isCanceled)
+            names = self.context.satellite_names(client, task.isCanceled)
+            changes = track_shots(client, store, catalog, catalog_token, shots, _now_ms(), task.isCanceled, names)
             update_shots(client, store, token, changes)
             return changes
 
@@ -445,7 +446,8 @@ class SavedPlansDock(PluginDock):
             problems: list[str] = []
             try:
                 layers = open_record(record, catalog, self.context.config.path_mappings, self._choose_folder,
-                                     lambda r, files, more: self.choose_images(r, files, more), problems)
+                                     lambda r, files, more: self.choose_images(r, files, more), problems,
+                                     names=self.context.known_names())
                 add_record_layers(layers, record)
                 overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
                 # The first of a folder's images is the one handed on (the rest are beside it in the group).
