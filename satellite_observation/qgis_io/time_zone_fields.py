@@ -105,12 +105,20 @@ def add_fields(layer: QgsVectorLayer, rule: TimeZoneRule, shift: TimeShift) -> l
     return added
 
 
+_ERROR = "__error__"
+
+
 class TimeZoneFields:
     """Gives the layers added to the project their corrected date fields."""
 
-    def __init__(self, esri: Callable[[], EsriClient]):
+    def __init__(self, esri: Callable[[], EsriClient], token_for: Callable[[str], Optional[str]] = lambda url: None,
+                 warn: Callable[[str], None] = lambda text: None):
         #: An Esri client for a task (its requests carry the authentication chosen for the service).
         self.esri = esri
+        #: The settings file's token for a service URL (None when an authentication configuration is chosen, #86).
+        self.token_for = token_for
+        #: Tells the person (the message bar) when the service's zone could not be read.
+        self.warn = warn
 
     def layers_added(self, layers) -> None:
         for layer in layers:
@@ -127,17 +135,24 @@ class TimeZoneFields:
         """An Esri layer: the zone it reads its dates in, from its information (`dateFieldsTimeReference`), then the fields."""
         layer_id = layer.id()
 
+        name = layer.name()
+
         def work(task):
             try:
-                return self.esri().layer(url).raw
-            except EsriError:
-                return {}
+                return self.esri().layer(url, self.token_for(url)).raw
+            except EsriError as error:
+                return {_ERROR: str(error)}
 
         def done(info) -> None:
             from qgis.core import QgsProject
 
+            if isinstance(info, dict) and _ERROR in info:
+                # Not silently: the corrected times are then off by the service's offset, if it has one (#86).
+                self.warn(f"「{name}」のサービス側のタイムゾーンを読めず（{info[_ERROR]}）。UTC として補正"
+                          "（違うなら設定ファイルの timeZones に serviceTimeZone を指定）")
+                info = {}
             target = QgsProject.instance().mapLayer(layer_id)
             if target is not None:
                 add_fields(target, rule, TimeShift(rule.zone, service_zone_of(info, rule)))
 
-        run_task("日時のタイムゾーンの確認", work, done, lambda message: done({}))
+        run_task("日時のタイムゾーンの確認", work, done, lambda message: done({_ERROR: message}))

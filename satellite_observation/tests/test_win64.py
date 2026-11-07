@@ -41,9 +41,16 @@ def test_a_package_with_a_dll_is_loaded_from_a_copy_so_qgis_can_replace_the_plug
     win64._added.clear()
     assert win64.add_package("onnxruntime", str(folder), str(cache)) == path
     (folder / "onnxruntime" / "capi" / "onnxruntime.dll").write_bytes(b"MZ2")
+    # While this QGIS still has the old copy on its path (a plugin reloaded), it stays whole (#82).
     win64._added.clear()
     newer = win64.add_package("onnxruntime", str(folder), str(cache))
-    assert newer != path and sorted(os.listdir(cache)) == [os.path.basename(newer)]
+    assert newer != path and sorted(os.listdir(cache)) == sorted([os.path.basename(path), os.path.basename(newer)])
+    # The next session (the old copy used by nobody): it goes.
+    while path in sys.path:
+        sys.path.remove(path)
+    win64._added.clear()
+    assert win64.add_package("onnxruntime", str(folder), str(cache)) == newer
+    assert sorted(os.listdir(cache)) == [os.path.basename(newer)]
 
 
 def test_the_copy_is_imported(tmp_path):
@@ -75,3 +82,24 @@ def test_without_the_package_nothing_is_added(tmp_path):
 def test_the_copies_go_to_the_local_application_data(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert win64.cache_root() == os.path.join(str(tmp_path), "satellite_observation", "win64")
+
+
+def test_a_copy_another_qgis_has_loaded_is_left_whole(tmp_path, monkeypatch):
+    """#82: when the folder cannot be renamed away (Windows: a DLL in it is loaded), nothing of it is removed."""
+    folder, cache = tmp_path / "win64", tmp_path / "cache"
+    package(folder, "lockedpkg_for_test", {"__init__.py": b"x = 1\n", "_core.pyd": b"MZ1"})
+    old = win64.add_package("lockedpkg_for_test", str(folder), str(cache))
+    sys.path.remove(old)
+    (folder / "lockedpkg_for_test" / "_core.pyd").write_bytes(b"MZ2")
+    real = os.rename
+
+    def locked(a, b):
+        if os.path.abspath(a) == os.path.abspath(old):
+            raise PermissionError("in use")
+        return real(a, b)
+
+    monkeypatch.setattr(win64.os, "rename", locked)
+    win64._added.clear()
+    newer = win64.add_package("lockedpkg_for_test", str(folder), str(cache))
+    assert newer != old and os.path.isfile(os.path.join(old, "lockedpkg_for_test", "__init__.py"))
+    sys.path.remove(newer)

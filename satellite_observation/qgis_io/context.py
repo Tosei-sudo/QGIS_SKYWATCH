@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 
-from ..core.config import PluginConfig, parse_config_text, read_config_file
+from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_text, read_config_file
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
@@ -54,6 +55,8 @@ class PluginContext(QObject):
         #: Only the shipped settings file is read (a file chosen in the settings dialog is ignored).
         self.locked = False
         self.loading = False
+        #: Counts reloads: only the latest one's answer is taken.
+        self._generation = 0
         self._gpkg: Optional[GeoPackage] = None
         #: The satellite name tables (`satelliteAliases`) once read; None until then (read again after a reload).
         self._names: Optional[SatelliteNames] = None
@@ -78,6 +81,8 @@ class PluginContext(QObject):
             self.config, self.problems = PluginConfig(), []
             self.configChanged.emit()
             return
+        self._generation += 1
+        generation = self._generation
         if re.match(r"^https?://", source, re.IGNORECASE):
             self.loading = True
 
@@ -85,13 +90,29 @@ class PluginContext(QObject):
                 return get_bytes(source, settings.auth_for(source)).decode("utf-8-sig", errors="replace")
 
             def done(text):
+                if generation != self._generation:
+                    return  # An older answer: a later reload is the one that counts (#85).
                 self.loading = False
                 self.config, self.problems = parse_config_text(text)
+                try:
+                    settings.set_cached_config(source, load_jsonc(text), time.strftime("%Y-%m-%d %H:%M"))
+                except ValueError:
+                    pass
                 self.configChanged.emit()
 
             def failed(message):
+                if generation != self._generation:
+                    return
                 self.loading = False
-                self.config, self.problems = PluginConfig(), [f"設定ファイルの取得不可（{message}）"]
+                cached = settings.cached_config(source)
+                if cached is not None:
+                    # The last file read, rather than nothing (the stores would all be gone, #85); its tokens are not kept.
+                    value, when = cached
+                    self.config, problems = parse_config(value)
+                    self.problems = [f"設定ファイルの取得不可（{message}）。前回{f'（{when}）' if when else ''}読めた設定で動作中"
+                                     "（トークンは控えていないため、認証設定を選んでいないサービスは使えない場合あり）", *problems]
+                else:
+                    self.config, self.problems = PluginConfig(), [f"設定ファイルの取得不可（{message}）"]
                 self.configChanged.emit()
 
             run_task("設定ファイルの読み込み", work, done, failed)
@@ -102,6 +123,37 @@ class PluginContext(QObject):
     def esri(self) -> EsriClient:
         """An Esri client whose requests follow QGIS's proxy and the authcfg chosen per service (use inside a task)."""
         return EsriClient(qgis_transport(settings.auth_for))
+
+    def token_of(self, url: str) -> Optional[str]:
+        """
+        The settings file's token for a service URL: that of the entry whose
+        URL is it or above it (`…/FeatureServer` for `…/FeatureServer/0`), the
+        longest such; None when no entry gives one (#86).
+        """
+        want = url.split("?", 1)[0].rstrip("/").lower()
+        best: list = [-1, None]
+        seen: set = set()
+
+        def visit(value, depth: int = 0) -> None:
+            if depth > 4 or id(value) in seen:
+                return
+            seen.add(id(value))
+            if isinstance(value, (list, tuple)):
+                for v in value:
+                    visit(v, depth + 1)
+                return
+            if not hasattr(value, "__dataclass_fields__"):
+                return
+            entry_url, token = getattr(value, "url", None), getattr(value, "token", None)
+            if isinstance(entry_url, str) and isinstance(token, str) and token:
+                base = entry_url.split("?", 1)[0].rstrip("/").lower()
+                if (want == base or want.startswith(base + "/")) and len(base) > best[0]:
+                    best[:] = [len(base), token]
+            for name in value.__dataclass_fields__:
+                visit(getattr(value, name, None), depth + 1)
+
+        visit(self.config)
+        return best[1]
 
     @staticmethod
     def token_for(url: str, token: Optional[str]) -> Optional[str]:

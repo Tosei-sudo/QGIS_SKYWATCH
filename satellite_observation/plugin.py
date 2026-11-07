@@ -634,7 +634,9 @@ class SatelliteObservationPlugin:
         self._layers_added(QgsProject.instance().mapLayers().values())
         # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
         time_zone_fields.register()
-        self.time_zone_fields = time_zone_fields.TimeZoneFields(self.context.esri)
+        self.time_zone_fields = time_zone_fields.TimeZoneFields(
+            self.context.esri, lambda url: self.context.token_for(url, self.context.token_of(url)),
+            lambda text: self.iface.messageBar().pushWarning(tr("タイムゾーン"), text))
         QgsProject.instance().layersAdded.connect(self.time_zone_fields.layers_added)
         self.context.configChanged.connect(self._time_zones_changed)
         # Esri layers QGIS edits itself: who and when in their tracking fields (the settings file's editTracking).

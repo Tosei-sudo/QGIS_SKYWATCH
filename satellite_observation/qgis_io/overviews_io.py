@@ -204,7 +204,8 @@ def _config(ds, options: OverviewOptions) -> dict[str, str]:
             config["PREDICTOR_OVERVIEW"] = "3"
         elif not gdal.GetDataTypeName(dtype).startswith("C"):
             config["PREDICTOR_OVERVIEW"] = "2"
-    if compress == "JPEG" and ds.RasterCount >= 3:
+    # YCbCr only for exactly three bands (RGB): GDAL refuses it for four (RGBN, RGBA), which stay plain JPEG (#80).
+    if compress == "JPEG" and ds.RasterCount == 3:
         config["PHOTOMETRIC_OVERVIEW"] = "YCBCR"
         config["INTERLEAVE_OVERVIEW"] = "PIXEL"
     return config

@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
-from ..esri import ConflictError, EsriClient, EsriError, quote
+from ..esri import ConflictError, EsriClient, EsriError, deleted_count, quote
 from ..util import is_number, is_record, layer_url, time_of
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
@@ -341,9 +341,10 @@ def update_requests(client: EsriClient, store: RequestStoreConfig, token: Option
                     lambda r: r.update_results, "台帳の更新")
 
 
-def delete_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest) -> None:
-    """Deletes a request from the ledger."""
-    client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['id']} = {quote(req.id)}"}, token)
+def delete_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest) -> int:
+    """Deletes a request from the ledger; how many features went (EsriError when the server kept any, #81)."""
+    value = client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['id']} = {quote(req.id)}"}, token)
+    return deleted_count(value, "依頼の削除")
 
 
 # --- History ---------------------------------------------------------------------------------

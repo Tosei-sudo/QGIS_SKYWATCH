@@ -353,3 +353,39 @@ def test_every_service_of_the_settings_can_be_given_a_sign_in():
     assert services[f"{base}/Req/FeatureServer/1"] == "出力履歴"
     assert services["https://weather.example.com/v1/forecast"] == "雲量予報"
     assert problems == [] and services[f"{base}/Ai/FeatureServer/0"] == "外部AI結果"
+
+
+def test_a_settings_url_that_cannot_be_read_falls_back_to_the_last_one_read(monkeypatch):
+    """#85: the last file read from the URL (its tokens not kept) rather than nothing; an older answer does not win."""
+    from satellite_observation.core.esri import EsriError
+    from satellite_observation.qgis_io import context as context_module
+    from satellite_observation.qgis_io.context import PluginContext
+    from satellite_observation.tests.qgis_fakes import wait_for
+
+    url = "https://config.example.com/skywatch/config.json"
+    text = json.dumps({"requestStores": [{"label": "台帳", "url": "https://g/arcgis/rest/services/R/FeatureServer/0", "token": "SECRET"}]})
+    answers = {"next": text}
+
+    def fetch(source, authcfg=None):
+        value = answers["next"]
+        if isinstance(value, Exception):
+            raise value
+        return value.encode("utf-8")
+
+    monkeypatch.setattr(context_module, "get_bytes", fetch)
+    QgsSettings().remove("satellite_observation/config_cache")
+    settings.set_config_source(url)
+    try:
+        context = PluginContext()
+        context.reload()
+        assert wait_for(lambda: not context.loading)
+        assert context.config.request_stores[0].token == "SECRET"
+        assert "SECRET" not in QgsSettings().value("satellite_observation/config_cache", "")
+        answers["next"] = EsriError("接続不可")
+        context.reload()
+        assert wait_for(lambda: not context.loading)
+        assert context.config.request_stores[0].label == "台帳" and context.config.request_stores[0].token is None
+        assert context.problems[0].startswith("設定ファイルの取得不可（接続不可）。前回")
+    finally:
+        settings.set_config_source("")
+        QgsSettings().remove("satellite_observation/config_cache")

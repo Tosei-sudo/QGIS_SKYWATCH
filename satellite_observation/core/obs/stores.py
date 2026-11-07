@@ -517,10 +517,19 @@ class EsriAreaStore:
             self.save(marked)
             return marked
         ids = [self.oids[a.id] for a in areas if a.id in self.oids]
+        failed: set[int] = set()
+        reason = ""
         if ids:
-            self.client.delete_features(self.config.url, ids, token=self.token)
+            # Each one deleted or not on its own: those the server kept stay known, and the person is told (#81).
+            for r in self.client.delete_features(self.config.url, ids, token=self.token):
+                if not r.get("success") and is_number(r.get("objectId")):
+                    failed.add(int(r["objectId"]))
+                    reason = reason or (r.get("error") or {}).get("description") or ""
         for a in areas:
-            self.oids.pop(a.id, None)
+            if self.oids.get(a.id, -1) not in failed:
+                self.oids.pop(a.id, None)
+        if failed:
+            raise EsriError(f"確認範囲 {len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
         return []
 
 

@@ -66,6 +66,31 @@ def set_config_source(source: str) -> None:
     _set("config_source", source.strip())
 
 
+def _without_tokens(value):
+    """A settings file's value with every `token` left out (tokens are never kept in the profile)."""
+    if isinstance(value, dict):
+        return {k: _without_tokens(v) for k, v in value.items() if k != "token"}
+    if isinstance(value, list):
+        return [_without_tokens(v) for v in value]
+    return value
+
+
+def cached_config(source: str) -> Optional[tuple[object, str]]:
+    """The settings file last read from `source` (a URL), without its tokens, and when: None when there is none (#85)."""
+    try:
+        value = json.loads(_get("config_cache", "{}"))
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or value.get("source") != source or "config" not in value:
+        return None
+    return value["config"], str(value.get("when") or "")
+
+
+def set_cached_config(source: str, config: object, when: str) -> None:
+    """Keeps the settings file read from `source` (tokens left out) for when it cannot be read next time."""
+    _set("config_cache", json.dumps({"source": source, "when": when, "config": _without_tokens(config)}, ensure_ascii=False))
+
+
 def auth_map() -> dict[str, str]:
     """authcfg ids by service URL."""
     try:

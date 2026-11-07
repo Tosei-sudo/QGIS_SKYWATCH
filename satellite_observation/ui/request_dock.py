@@ -324,11 +324,13 @@ class RequestDock(PluginDock):
             return
         store, client, token = self.store, self.context.esri(), self.token()
 
-        def done(_):
+        def done(count):
             self.chosen = None
-            self.reload()
+            gone = self.tr("「{name}」を削除").format(name=r.name) if count else self.tr("「{name}」は台帳になし（ほかの人が削除済み）").format(name=r.name)
+            self.reload(lambda: self.status.setText(gone))
 
-        self._start(self.tr("撮像依頼の削除"), lambda task: delete_request(client, store, token, r), done)
+        self._start(self.tr("撮像依頼の削除"), lambda task: delete_request(client, store, token, r), done,
+                    lambda m: self.status.setText(self.tr("削除失敗: {m}").format(m=m)))
 
     # --- Layers ---------------------------------------------------------------------------------
 
