@@ -43,7 +43,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
-    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "撮像依頼", "撮像計画ファイル出力", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果"]
+    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "撮像依頼", "撮像計画ファイル出力", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果", "イベント"]
     # By area (tsudo, 2026-11-07): a submenu each, then the dock layout and 「設定…」 in the menu itself.
     # (「通知」 shows its unread count, 「通知（1）」, when an earlier test left a notice.)
     tree = [(e[0], [re.sub(r"^通知（\d+）$", "通知", t) for t in e[1]]) if isinstance(e, tuple) else e for e in iface.menu_tree()]
@@ -57,10 +57,10 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
         ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", "-", "教師データセットの作成…", "AI 学習（物体検出）…"]),
         ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", "-",
                        "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
-        "-", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…",
+        "-", "イベント", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…",
     ]
     # Every entry of the plugin is in the menu once.
-    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
+    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["イベント", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
     assert sorted(shown) == sorted(a.text() for a in plugin.actions)
     # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
     assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
@@ -155,7 +155,7 @@ def test_the_docks_start_in_three_groups_of_tabs_and_come_back_on_screen():
 
     assert tabs("SatObsImagingPlan") == ["SatObsImagingPlan", "SatObsPlanFiles", "SatObsRequests", "SatObsSatellitePass", "SatObsSavedPlans"]
     assert tabs("SatObsImageCatalog") == ["SatObsDashboard", "SatObsEnhance", "SatObsImageCatalog", "SatObsNotices", "SatObsShadowHeight", "SatObsSpectral"]
-    assert tabs("SatObsObservations") == ["SatObsAiResults", "SatObsMoving", "SatObsObservations", "SatObsTaxonomy"]
+    assert tabs("SatObsObservations") == ["SatObsAiResults", "SatObsEvents", "SatObsMoving", "SatObsObservations", "SatObsTaxonomy"]
     assert [w.dockWidgetArea(d[n]) for n in ("SatObsImagingPlan", "SatObsImageCatalog", "SatObsObservations")] == [right, left, right]
     # A floating dock off every screen is docked again when shown.
     d["SatObsSatellitePass"].setFloating(True)
@@ -328,7 +328,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 45
+    assert len(set(drawn)) == len(plugin.actions) == 46
     plugin.unload()
 
 

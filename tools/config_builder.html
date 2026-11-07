@@ -176,7 +176,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "editTracking",
   "alertReports",
   "assignments",
-  "handover"
+  "handover",
+  "events"
  ],
  "roles": {
   "imageCatalogs": [
@@ -417,6 +418,24 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "end": "PERIOD_END",
    "writtenAt": "WRITTEN_AT",
    "writtenBy": "WRITTEN_BY"
+  },
+  "eventLayer": {
+   "id": "EVENT_ID",
+   "name": "EVENT_NAME",
+   "kind": "EVENT_KIND",
+   "status": "STATUS",
+   "start": "START_AT",
+   "end": "END_AT",
+   "note": "NOTE"
+  },
+  "eventLinks": {
+   "event": "EVENT_ID",
+   "type": "ITEM_TYPE",
+   "item": "ITEM_ID",
+   "label": "ITEM_LABEL",
+   "time": "ITEM_TIME",
+   "source": "SOURCE",
+   "note": "NOTE"
   }
  },
  "alertSources": [
@@ -937,6 +956,14 @@ const SPEC = [
         S("newline", "改行", [["crlf", "CRLF"], ["lf", "LF"]], { ph: "crlf" }),
         TJ("file", "ファイル", { ph: 'パスか { "path": "D:/handover/handover_{now:%Y%m%d_%H%M}.txt", "encoding": "cp932", "append": false }', help: "encoding は " + K.encodings.join("・") }),
       ]) },
+    { key: "events", label: "イベント（地震対応など）", doc: "イベント地震対応などevents", help: "地震・風水害・事故などの対応で使った画像・観測記録・撮像依頼を束ねる。イベントと紐付け（多対多）は Esri に置き、ここには URL と属性名だけ。",
+      field: O("events", "イベント", [
+        TJ("layer", "イベントのレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴン（範囲あり）かテーブル。役割: " + Object.entries(K.roles.eventLayer).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 項目 1 行。役割: " + Object.entries(K.roles.eventLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
+      ], { check: (it, at, p) => {
+        if (!it.layer) p.push(`${at}.layer: イベントのレイヤーが必要`);
+        if (!it.links) p.push(`${at}.links: 紐付けテーブルが必要`);
+      } }) },
   ] },
   { group: "地図・レイヤー・場所", keys: [
     { key: "baseMaps", label: "背景地図", doc: "背景地図", help: "書くと一覧をこれで置き換える（既定は地理院・OSM）。",

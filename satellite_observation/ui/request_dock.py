@@ -112,7 +112,10 @@ class RequestDock(PluginDock):
         self.bulk_button.clicked.connect(lambda: self.bulk_edit())
         self.reload_button = QPushButton(self.tr("再読み込み"))
         self.reload_button.clicked.connect(lambda: self.reload())
-        for b in (self.new_button, self.edit_button, self.bulk_button, self.delete_button, self.reload_button):
+        self.event_button = QPushButton(self.tr("イベントに追加"))
+        self.event_button.setToolTip(self.tr("選んだ依頼を対応中のイベント（地震対応など）に入れる"))
+        self.event_button.clicked.connect(lambda: self.add_to_event())
+        for b in (self.new_button, self.edit_button, self.bulk_button, self.delete_button, self.event_button, self.reload_button):
             edit.addWidget(b)
         self.body.addLayout(edit)
 
@@ -279,6 +282,8 @@ class RequestDock(PluginDock):
         self.edit_button.setEnabled(ready and self.chosen is not None)
         self.delete_button.setEnabled(ready and self.chosen is not None)
         self.bulk_button.setEnabled(ready and bool(self.selected()))
+        self.event_button.setVisible(self.context.config.events is not None)
+        self.event_button.setEnabled(bool(self.selected()))
         self.export_button.setEnabled(bool(self.shown))
 
     # --- Adding, changing, deleting -------------------------------------------------------------
@@ -344,6 +349,21 @@ class RequestDock(PluginDock):
         """The requests chosen in the list (several with Ctrl / Shift)."""
         rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
         return [self.shown[r] for r in rows if 0 <= r < len(self.shown)]
+
+    #: The 「イベント」 dock (plugin.py sets it).
+    event_linker: Optional[Callable[[], object]] = None
+
+    def event_items(self) -> list:
+        """The chosen requests as items of an event."""
+        from ..core.events import LinkItem
+
+        url = self.store.url if self.store else ""
+        return [LinkItem("request", r.id, label=r.name or r.id, time=int(r.start) if math.isfinite(r.start) else None, source=url)
+                for r in self.selected()]
+
+    def add_to_event(self):
+        events = self.event_linker() if self.event_linker else None
+        return events.offer(self.event_button, self.event_items) if events and self.selected() else None
 
     def select(self, ids) -> None:
         """Chooses the listed requests of these ids."""

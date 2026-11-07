@@ -16,7 +16,7 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
-    from satellite_observation.core import ai_results, basemaps, config, edit_stamp, geocode, layer_templates, moving, overviews, startup_layers
+    from satellite_observation.core import ai_results, basemaps, config, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
     from satellite_observation.core.ai import model_config, transfer
     from satellite_observation.core.enhance import pipeline
     from satellite_observation.core.obs import alerts, assignments, handover, model as obs_model, stores as obs_stores
@@ -44,6 +44,8 @@ def plugin_constants() -> dict:
             "alertLog": dict(alerts.DEFAULT_LOG_FIELDS),
             "assignments": dict(assignments.DEFAULT_ASSIGNMENT_FIELDS),
             "handoverMemos": dict(handover.DEFAULT_HANDOVER_FIELDS),
+            "eventLayer": dict(events.DEFAULT_EVENT_FIELDS),
+            "eventLinks": dict(events.DEFAULT_LINK_FIELDS),
         },
         "alertSources": list(alerts.SOURCES),
         "exportSources": list(export.SOURCES),
