@@ -23,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..qgis_io import overviews_io, settings
 from ..qgis_io.context import PluginContext
+from . import last_inputs
 
 
 class SettingsDialog(QDialog):
@@ -74,6 +75,15 @@ class SettingsDialog(QDialog):
         cache_row.addWidget(self.clear_cache)
         form.addRow(self.tr("ピラミッドのキャッシュ"), cache_row)
         self._show_cache()
+        self.last_inputs = QLabel(self.tr("前回の入力を次の入力の初期値に使用（このユーザープロファイルに保存）"))
+        self.last_inputs.setWordWrap(True)
+        self.forget_inputs = QPushButton(self.tr("覚えた値を消去"))
+        self.forget_inputs.setToolTip(self.tr("撮像依頼・撮像計画の衛星と条件・観測記録の種別などで覚えた前回の入力を消し、各フォームの既定値に戻す"))
+        self.forget_inputs.clicked.connect(self._forget_inputs)
+        inputs_row = QHBoxLayout()
+        inputs_row.addWidget(self.last_inputs, 1)
+        inputs_row.addWidget(self.forget_inputs)
+        form.addRow(self.tr("入力の初期値"), inputs_row)
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -124,6 +134,10 @@ class SettingsDialog(QDialog):
     def _clear_cache(self) -> None:
         overviews_io.clear_cache_next_start()
         self._show_cache()
+
+    def _forget_inputs(self) -> None:
+        last_inputs.forget_all()
+        self.last_inputs.setText(self.tr("消去済み。次に開くフォームから既定値（開いているフォームは今の値のまま）"))
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, self.tr("設定ファイルの選択"), self.source.text(), self.tr("設定ファイル (*.json *.jsonc);;すべてのファイル (*)"))
