@@ -479,7 +479,7 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 
 1. `python3 scripts/build_zip.py` で `dist/satellite_observation-<版>.zip` を作る
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」
-3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る
+3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る。設定ファイルの指定はこのメニューだけで、各ドックには出さない。読み込んだ設定ファイルに問題があると、QGIS のメッセージバーに「問題 n 件」と「設定…」ボタンを出す（同じファイル・同じ問題では繰り返さない）
 
 ### Windows 版（onnxruntime・sgp4・tzdata を同梱）
 
@@ -503,7 +503,7 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 ```
 
 - zip の中では `satellite_observation/config.json`（`.jsonc` ならそのまま）になる。`satellite_observation/` に `config.json` を置いて `--config` なしで作っても同じ（この場所は git の対象外）
-- 受け取った人が「設定…」で設定ファイルを指定していなければ、同梱のものを読む。指定していればそちらが優先。欄を空にすると同梱のものに戻る。ドック上部の表示は「同梱の設定ファイル読み込み済み」
+- 受け取った人が「設定…」で設定ファイルを指定していなければ、同梱のものを読む。指定していればそちらが優先。欄を空にすると同梱のものに戻る。「設定…」の表示は「同梱の設定ファイルを使用」
 - 作るときに設定ファイルを読んで確かめ、読めない・問題があるときは zip を作らない。`token` が書いてあれば注意を出す（zip を受け取った人全員に渡るため。サインインが要るサービスは各自の QGIS の認証設定を使う方がよい）
 - プラグインを入れ直すと同梱の設定ファイルも新しい zip のものに置き換わる。各自の指定（`QgsSettings`）は残る
 
@@ -514,7 +514,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config
 python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 ```
 
-- 受け取った人は同梱の設定ファイルしか使えない。「設定…」の設定ファイル欄は同梱のファイルを表示するだけで変えられず（「参照…」は押せない、「読み込み」は同梱のものを読み直す）、前に指定したパス・URL があっても無視する。ドック上部の表示は「同梱の設定ファイル読み込み済み（固定）」
+- 受け取った人は同梱の設定ファイルしか使えない。「設定…」の設定ファイル欄は同梱のファイルを表示するだけで変えられず（「参照…」は押せない、「読み込み」は同梱のものを読み直す）、前に指定したパス・URL があっても無視する。「設定…」の表示は「同梱の設定ファイルに固定」
 - 記録者とサービスごとの認証設定はこれまでどおり各自で選べる
 - 仕組み: zip に設定ファイルと並べて `satellite_observation/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`satellite_observation/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
 - 設定ファイルなしで `--lock-config` を付けると zip を作らない

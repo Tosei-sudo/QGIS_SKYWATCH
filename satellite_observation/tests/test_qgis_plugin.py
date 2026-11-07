@@ -67,6 +67,41 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     assert QgsApplication.processingRegistry().algorithmById("satobs:pansharpen") is None
 
 
+def test_the_settings_file_is_chosen_from_the_menu_only_and_its_problems_go_to_the_message_bar(tmp_path):
+    """No dock carries a 「設定…」 button (tsudo, 2026-11-07); a file with problems says so once in the message bar."""
+    from qgis.PyQt.QtWidgets import QPushButton
+
+    from satellite_observation import classFactory
+
+    broken = tmp_path / "broken.json"
+    broken.write_text('{"imageCatalogs": 1}', encoding="utf-8")
+    settings.set_config_source(str(broken))
+    settings.set_startup_layers_on(False)
+    iface = FakeIface()
+    plugin = classFactory(iface)
+    plugin.initGui()
+    try:
+        assert plugin.context.problems
+        for dock in plugin.docks.values():
+            assert not [b for b in dock.findChildren(QPushButton) if b.text() == "設定…"], dock.windowTitle()
+        assert [t for _, t in iface.menus][-1] == "設定…"
+        items = iface.bar.items()
+        assert len(items) == 1 and "問題 " in items[0].text()
+        assert [b for b in items[0].findChildren(QPushButton) if b.text() == "設定…"]
+        # Reading the same file again doesn't repeat it.
+        plugin.context.reload()
+        assert len(iface.bar.items()) == 1
+        # A file without problems adds nothing.
+        good = tmp_path / "good.json"
+        good.write_text("{}", encoding="utf-8")
+        settings.set_config_source(str(good))
+        plugin.context.reload()
+        assert len(iface.bar.items()) == 1
+    finally:
+        plugin.unload()
+        settings.set_config_source("")
+
+
 def test_the_docks_start_in_three_groups_of_tabs_and_come_back_on_screen():
     from qgis.PyQt.QtCore import QPoint, Qt
 
@@ -179,7 +214,7 @@ def test_a_settings_file_shipped_in_the_plugin_folder(tmp_path, monkeypatch):
     import shutil
 
     from satellite_observation.qgis_io.context import PluginContext
-    from satellite_observation.ui.docks import ConfigBar
+    from satellite_observation.ui.settings_dialog import SettingsDialog
 
     shutil.copy(os.path.join(HERE, "data", "viewer-config.jsonc"), tmp_path / "config.jsonc")
     monkeypatch.setattr(settings, "PLUGIN_DIR", str(tmp_path))
@@ -188,15 +223,14 @@ def test_a_settings_file_shipped_in_the_plugin_folder(tmp_path, monkeypatch):
     context.reload()
     assert context.source == str(tmp_path / "config.jsonc") and context.bundled
     assert context.problems == [] and context.config.satellite_catalogs[0].label == "衛星カタログ"
-    bar = ConfigBar(context, lambda: None)
-    assert bar.label.text() == "同梱の設定ファイル読み込み済み"
+    assert SettingsDialog(context).status.text().startswith("同梱の設定ファイルを使用")
     # A file chosen in the settings dialog wins over the shipped one.
     chosen = tmp_path / "mine.json"
     chosen.write_text("{}", encoding="utf-8")
     settings.set_config_source(str(chosen))
     context.reload()
     assert context.source == str(chosen) and not context.bundled
-    assert bar.label.text() == "設定ファイル読み込み済み"
+    assert SettingsDialog(context).status.text().startswith("問題なし")
     # Without either: the defaults.
     settings.set_config_source("")
     os.remove(tmp_path / "config.jsonc")
@@ -209,7 +243,6 @@ def test_a_locked_zip_reads_only_its_shipped_settings_file(tmp_path, monkeypatch
     import shutil
 
     from satellite_observation.qgis_io.context import PluginContext
-    from satellite_observation.ui.docks import ConfigBar
     from satellite_observation.ui.settings_dialog import SettingsDialog
 
     monkeypatch.setattr(settings, "PLUGIN_DIR", str(tmp_path))
@@ -226,7 +259,6 @@ def test_a_locked_zip_reads_only_its_shipped_settings_file(tmp_path, monkeypatch
     context.reload()
     assert context.source == str(tmp_path / "config.jsonc") and context.bundled and context.locked
     assert context.config.satellite_catalogs[0].label == "衛星カタログ"
-    assert ConfigBar(context, lambda: None).label.text() == "同梱の設定ファイル読み込み済み（固定）"
     # The settings dialog shows the shipped file, can't change it, and leaves the person's own choice as it was.
     dialog = SettingsDialog(context)
     assert dialog.source.text() == str(tmp_path / "config.jsonc") and dialog.source.isReadOnly()
