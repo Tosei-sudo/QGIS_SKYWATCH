@@ -57,10 +57,10 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
         ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", "-", "教師データセットの作成…", "AI 学習（物体検出）…"]),
         ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", "-",
                        "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
-        "-", "ドックを初期位置に戻す", "設定…",
+        "-", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…",
     ]
     # Every entry of the plugin is in the menu once.
-    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["ドックを初期位置に戻す", "設定…"]
+    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
     assert sorted(shown) == sorted(a.text() for a in plugin.actions)
     # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
     assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
@@ -328,7 +328,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 40
+    assert len(set(drawn)) == len(plugin.actions) == 41
     plugin.unload()
 
 
