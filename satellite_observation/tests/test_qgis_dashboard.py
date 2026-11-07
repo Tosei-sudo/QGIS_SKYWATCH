@@ -42,6 +42,8 @@ def plugin(tmp_path):
     QgsSettings().remove("satellite_observation")
     settings.set_config_source("")
     iface = FakeIface()
+    # A tall, narrow map, so 「表示範囲内」's extent below stays as narrow as it is set.
+    iface.window.resize(1100, 1300)
     p = classFactory(iface)
     p.initGui()
     layer = survey(tmp_path / "survey.geojson")
