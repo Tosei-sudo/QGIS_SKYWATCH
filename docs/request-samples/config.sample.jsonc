@@ -1,0 +1,119 @@
+// 撮像依頼台帳と日次出力の設定サンプル（設計書 imaging-requests-design.md §3・§8）
+// URL やシステム名は架空。実際のシステムに合わせて書き換えて使う。
+{
+  // 撮像依頼台帳と出力履歴（§3・§4・§9）
+  "requestStores": [
+    {
+      "label": "撮像依頼",
+      "url": "https://gis.example.local/server/rest/services/Requests/FeatureServer/0",
+      "history": "https://gis.example.local/server/rest/services/Requests/FeatureServer/1",
+      "catalog": "画像カタログ",
+      "fields": {}
+    }
+  ],
+
+  // 衛星システムごとの出力（§3・§8）
+  "requestExports": [
+    {
+      // ---- A システム: CSV / CP932 / JST / 優先度は High・Middle・Low ----
+      "system": "SYS-A",
+      "label": "A システム（光学）",
+      "kind": "光学",
+      "series": ["OPT-X"],
+      "order": 1,
+      "limit": { "count": 20 },
+      "quota": { "定点": 12, "臨時": 8 },
+      "sceneKm": [12, 12],
+      "format": "csv",
+      "folder": "D:/requests/SYS-A",
+      "fileName": "{system}_{date:%Y%m%d}.csv",
+      "encoding": "cp932",
+      "header": true,
+      "timeZone": "Asia/Tokyo",
+      "dateFormat": "%Y/%m/%d %H:%M",
+      "priority": {
+        "table": [
+          { "max": 200, "value": "High" },
+          { "max": 600, "value": "Middle" },
+          { "max": 1000, "value": "Low" }
+        ]
+      },
+      "columns": [
+        { "key": "依頼ID",   "source": "id" },
+        { "key": "名称",     "source": "name" },
+        { "key": "区分",     "source": "category", "map": { "定点": "FIX", "臨時": "TMP" } },
+        { "key": "衛星",     "source": "satellite" },
+        { "key": "開始",     "source": "start" },
+        { "key": "終了",     "source": "end" },
+        { "key": "中心緯度", "source": "centerLat", "digits": 5 },
+        { "key": "中心経度", "source": "centerLon", "digits": 5 },
+        { "key": "範囲",     "source": "geometry", "geometry": "wkt", "digits": 5 },
+        { "key": "優先度",   "source": "priority", "allowed": ["High", "Middle", "Low"] },
+        { "key": "雲量予報", "source": "cloudForecast", "format": "%d" },
+        { "key": "最大ONA",  "source": "offNadirMax" },
+        { "key": "備考",     "source": "warnings" }
+      ]
+    },
+    {
+      // ---- B システム: CSV / UTF-8 / UTC / unix 時刻 / 優先度は 00〜99（大きいほど高い） ----
+      "system": "SYS-B",
+      "label": "B システム（SAR）",
+      "kind": "SAR",
+      "series": ["SAR-Y"],
+      "order": 2,
+      "limit": { "count": 30, "scenes": 40 },
+      "format": "csv",
+      "folder": "D:/requests/SYS-B",
+      "fileName": "order_{date:%Y-%m-%d}.csv",
+      "encoding": "utf-8",
+      "header": true,
+      "timeZone": "UTC",
+      "dateFormat": "unix",
+      "priority": { "linear": { "min": 0, "max": 99, "higherIsLarger": true }, "format": "%02d" },
+      "values": {
+        "lookSide": { "右": "R", "左": "L", "任意": "B" },
+        "orbitDir": { "昇交": "ASC", "降交": "DSC", "任意": "ANY" }
+      },
+      "columns": [
+        { "key": "REQ_ID",   "source": "id" },
+        { "key": "SAT",      "source": "satellite" },
+        { "key": "MODE",     "source": "mode" },
+        { "key": "T_START",  "source": "start" },
+        { "key": "T_END",    "source": "end" },
+        { "key": "BBOX",     "source": "geometry", "geometry": "bbox", "digits": 4 },
+        { "key": "PRIO",     "source": "priority" },
+        { "key": "LOOK",     "source": "lookSide" },
+        { "key": "ORBIT",    "source": "orbitDir" },
+        { "key": "INC_MIN",  "source": "incidenceMin" },
+        { "key": "INC_MAX",  "source": "incidenceMax" },
+        { "key": "SCENES",   "source": "scenes" },
+        { "key": "CREATED",  "source": "runDate", "format": "%Y%m%d" }
+      ]
+    },
+    {
+      // ---- C システム: JSON / JSON Schema / UTC / ISO / 優先度は 1〜5 の数値 ----
+      "system": "SYS-C",
+      "label": "C システム（光学・コンステレーション）",
+      "kind": "光学",
+      "series": ["CONST-Z"],
+      "order": 3,
+      "limit": { "scenes": 100 },
+      "format": "json",
+      "schema": "schemas/sys-c.schema.json",
+      "folder": "D:/requests/SYS-C",
+      "fileName": "tasking_{date:%Y%m%d}.json",
+      "encoding": "utf-8",
+      "timeZone": "UTC",
+      "dateFormat": "iso",
+      "priority": {
+        "table": [
+          { "max": 200, "value": 1 },
+          { "max": 400, "value": 2 },
+          { "max": 600, "value": 3 },
+          { "max": 800, "value": 4 },
+          { "max": 1000, "value": 5 }
+        ]
+      }
+    }
+  ]
+}

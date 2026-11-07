@@ -40,6 +40,7 @@ from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
 from .ui.transfer_dialog import TransferDialog
 from .ui.saved_plans_dock import SavedPlansDock
+from .ui.request_dock import RequestDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.spectral_dock import SpectralDock
@@ -54,7 +55,7 @@ HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults"]),
 ]
@@ -128,6 +129,11 @@ class PluginApi:
     def saved_plans(self) -> "SavedPlansDock":
         """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
         return self._plugin.docks["SatObsSavedPlans"]
+
+    @property
+    def requests(self) -> "RequestDock":
+        """The imaging requests dock (its `requests`, `reload()`, `edit()`, `import_layer()`, `export_layer()`, `open_daily()`)."""
+        return self._plugin.docks["SatObsRequests"]
 
     @property
     def image_catalog(self) -> "CatalogDock":
@@ -259,12 +265,13 @@ class SatelliteObservationPlugin:
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
-                 "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results"}
+                 "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
             ("SatObsImagingPlan", tr("撮像計画"), None),
             ("SatObsSavedPlans", tr("保存した撮像計画"), None),
+            ("SatObsRequests", tr("撮像依頼"), None),
             ("SatObsSatellitePass", tr("衛星パス"), None),
             ("SatObsObservations", tr("観測記録"), None),
             ("SatObsTaxonomy", tr("分類体系の編集"), None),
@@ -305,6 +312,13 @@ class SatelliteObservationPlugin:
                                      self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsRequests":
+                plan_dock = self.docks["SatObsImagingPlan"]
+
+                def satellites(then, plan_dock=plan_dock):
+                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]))
+
+                dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
             else:
                 dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
             # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
@@ -694,6 +708,8 @@ class SatelliteObservationPlugin:
             self.docks["SatObsMoving"].close_all()
         if "SatObsDashboard" in self.docks:
             self.docks["SatObsDashboard"].close_all()
+        if "SatObsRequests" in self.docks:
+            self.docks["SatObsRequests"].close_all()
         try:
             self.context.configChanged.disconnect(self._refresh_algorithms)
         except (TypeError, RuntimeError, AttributeError):

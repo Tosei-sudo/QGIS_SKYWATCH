@@ -10,7 +10,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集・移動体・AI結果）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集・移動体・AI結果）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -108,6 +108,22 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「予定・通知…」で一覧の撮像を予定表（.ics）に保存、または撮像の何分前かに QGIS のメッセージバーで通知（QGIS の起動中のみ）
 - 「保存・追跡…」で一覧の撮像を `planStores` のフィーチャーサービスに保存。「保存した撮像計画」ドックで計画を開くと、撮像時刻を過ぎた予定の撮像を画像カタログ（`imageCatalogs`）で確かめ、撮像済み・未撮像にする
 - 設定ファイルに `satelliteCatalogs` がなければ、架空のサンプル衛星 2 機（光学・SAR、SAR は 3 モード）で試せる
+
+## 撮像依頼（定点・臨時）と日次出力
+
+設計と設定の書き方は [docs/imaging-requests.md](docs/imaging-requests.md)。
+
+- 「撮像依頼」ドックで、いつからいつまで・どこを・どの条件で撮るかを登録する（保存先は `requestStores` の Esri フィーチャーサービス）。区分は定点（毎日・曜日・N 日ごとの繰り返し）と臨時、達成条件は毎回と期間内1回
+- 優先度は 5 段階（最優先〜最低）から選ぶ。「詳細」で 1〜1000 を直接指定（1 ほど高い）
+- 条件: 種別（光学・SAR）、衛星シリーズ、衛星、センサー・モード、オフナディア角・入射角の範囲、観測方向、軌道方向、分解能、時間帯、実施しない雲量、優先するシステム。空欄は問わない
+- 範囲は地図で矩形・点（一辺の長さ指定）、または選択中の地物から
+- 「レイヤーから取り込み」で作業中のレイヤーの地物を定点の依頼として登録（依頼ID が同じものは上書き）。属性は台帳と同じ名前（`REQ_NAME`・`START_AT` …）か、名称・開始・終了・優先度 などの見出しで対応づけ。「レイヤーへ書き出し」で一覧の依頼を一時レイヤーに
+- 「本日分を出力…」で対象日（日本時間）の依頼を集め、衛星システム（`requestExports`）ごとの CSV（キー指定）・JSON（JSON Schema）を書き出す
+  - 光学の依頼は日中（地方時 9〜15 時）の雲量予報を見て、10% ごとの段階を優先度の 1 の位に入れる。実施しない雲量以上なら見送り（期間内1回で期限まで 2 日以内なら警告付きで出す）
+  - 優先度順に、システムの 1 日の件数・枚数の上限、区分ごとの枠、衛星ごとの 1 日の上限（`maxPerDay`）に詰める。衛星を指定した依頼はその衛星に、指定がなければ分解能の細かい衛星から。入らなければ次のシステムへ
+  - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
+  - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
+  - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
 
 ## 移動目標撮像計画
 
@@ -513,7 +529,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）・`requestStores`・`requestExports` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "issuedAt": "2026-11-07T23:30:00Z",
+  "count": 2,
+  "tasks": [
+    {
+      "taskId": "R-0001",
+      "label": "東京湾定点",
+      "type": "MONITORING",
+      "window": { "start": "2026-11-07T15:00:00Z", "end": "2026-11-08T14:59:59Z" },
+      "aoi": {
+        "type": "Polygon",
+        "coordinates": [[[139.8, 35.45], [139.9, 35.45], [139.9, 35.55], [139.8, 35.55], [139.8, 35.45]]]
+      },
+      "priority": 2,
+      "constraints": { "maxCloudPercent": 70, "maxOffNadirDeg": 30, "minGsdMeters": 1.0 },
+      "forecast": { "cloudPercent": 42, "flag": "OK" },
+      "estimatedScenes": 1
+    },
+    {
+      "taskId": "R-0005",
+      "label": "那覇港（臨時・期限間近）",
+      "type": "AD_HOC",
+      "window": { "start": "2026-11-07T15:00:00Z", "end": "2026-11-09T14:59:59Z" },
+      "aoi": {
+        "type": "Polygon",
+        "coordinates": [[[127.64, 26.2], [127.7, 26.2], [127.7, 26.25], [127.64, 26.25], [127.64, 26.2]]]
+      },
+      "priority": 1,
+      "constraints": { "maxCloudPercent": 60, "maxOffNadirDeg": null, "minGsdMeters": null },
+      "forecast": { "cloudPercent": 75, "flag": "CLOUDY" },
+      "estimatedScenes": 1
+    }
+  ]
+}

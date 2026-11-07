@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SYS-C tasking request（サンプル）",
+  "type": "object",
+  "required": [
+    "version",
+    "issuedAt",
+    "tasks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "const の値はそのまま出力に入る（x-source 不要）"
+    },
+    "issuedAt": {
+      "type": "string",
+      "format": "date-time",
+      "x-source": "runDate"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "x-source": "count"
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 500,
+      "x-source": "requests",
+      "items": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "window",
+          "aoi",
+          "priority"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "pattern": "^R-[0-9]{4,}$",
+            "x-source": "id"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 64,
+            "x-source": "name"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "MONITORING",
+              "AD_HOC"
+            ],
+            "x-source": "category",
+            "x-map": {
+              "定点": "MONITORING",
+              "臨時": "AD_HOC"
+            }
+          },
+          "window": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time",
+                "x-source": "start"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time",
+                "x-source": "end"
+              }
+            }
+          },
+          "aoi": {
+            "type": "object",
+            "x-source": "geometry",
+            "x-geometry": "geojson",
+            "x-digits": 5
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "x-source": "priority"
+          },
+          "constraints": {
+            "type": "object",
+            "properties": {
+              "maxCloudPercent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100,
+                "x-source": "cloudMax"
+              },
+              "maxOffNadirDeg": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 60,
+                "x-source": "offNadirMax"
+              },
+              "minGsdMeters": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "x-source": "resolution"
+              }
+            }
+          },
+          "forecast": {
+            "type": "object",
+            "properties": {
+              "cloudPercent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "x-source": "cloudForecast"
+              },
+              "flag": {
+                "type": "string",
+                "enum": [
+                  "OK",
+                  "CLOUDY",
+                  "NO_FORECAST"
+                ],
+                "x-source": "weatherFlag",
+                "x-map": {
+                  "OK": "OK",
+                  "雲多": "CLOUDY",
+                  "予報なし": "NO_FORECAST"
+                }
+              }
+            }
+          },
+          "estimatedScenes": {
+            "type": "integer",
+            "minimum": 1,
+            "x-source": "scenes"
+          }
+        }
+      }
+    }
+  }
+}
