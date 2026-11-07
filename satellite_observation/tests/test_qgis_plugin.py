@@ -204,6 +204,45 @@ def test_a_settings_file_shipped_in_the_plugin_folder(tmp_path, monkeypatch):
     assert context.source == "" and not context.bundled
 
 
+def test_a_locked_zip_reads_only_its_shipped_settings_file(tmp_path, monkeypatch):
+    """config.lock beside the shipped config.json (build_zip.py --lock-config): a file chosen in the settings dialog is ignored."""
+    import shutil
+
+    from satellite_observation.qgis_io.context import PluginContext
+    from satellite_observation.ui.docks import ConfigBar
+    from satellite_observation.ui.settings_dialog import SettingsDialog
+
+    monkeypatch.setattr(settings, "PLUGIN_DIR", str(tmp_path))
+    (tmp_path / "config.lock").write_text("", encoding="utf-8")
+    chosen = tmp_path / "mine.json"
+    chosen.write_text("{}", encoding="utf-8")
+    settings.set_config_source(str(chosen))
+    # A lock without a shipped file does nothing.
+    assert not settings.config_locked()
+    assert settings.effective_config_source() == (str(chosen), False)
+    shutil.copy(os.path.join(HERE, "data", "viewer-config.jsonc"), tmp_path / "config.jsonc")
+    assert settings.config_locked()
+    context = PluginContext()
+    context.reload()
+    assert context.source == str(tmp_path / "config.jsonc") and context.bundled and context.locked
+    assert context.config.satellite_catalogs[0].label == "衛星カタログ"
+    assert ConfigBar(context, lambda: None).label.text() == "同梱の設定ファイル読み込み済み（固定）"
+    # The settings dialog shows the shipped file, can't change it, and leaves the person's own choice as it was.
+    dialog = SettingsDialog(context)
+    assert dialog.source.text() == str(tmp_path / "config.jsonc") and dialog.source.isReadOnly()
+    assert dialog.status.text().startswith("同梱の設定ファイルに固定")
+    dialog.source.setText(str(chosen))
+    dialog._load()
+    assert context.source == str(tmp_path / "config.jsonc")
+    dialog.accept()
+    assert settings.config_source() == str(chosen)
+    # Without the lock the person's choice counts again.
+    os.remove(tmp_path / "config.lock")
+    context.reload()
+    assert context.source == str(chosen) and not context.locked
+    settings.set_config_source("")
+
+
 def test_each_feature_has_its_own_icon():
     from qgis.PyQt.QtCore import QBuffer, QByteArray
 

@@ -28,6 +28,8 @@ def _set(key: str, value: str) -> None:
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: The names a shipped settings file may have, first found wins.
 BUNDLED_NAMES = ("config.json", "config.jsonc")
+#: The marker beside the shipped settings file that locks the plugin to it (scripts/build_zip.py --lock-config).
+LOCK_NAME = "config.lock"
 
 
 def config_source() -> str:
@@ -44,8 +46,15 @@ def bundled_config() -> str:
     return ""
 
 
+def config_locked() -> bool:
+    """Whether the plugin reads only the shipped settings file: a config.lock beside it (no effect without one)."""
+    return bool(bundled_config()) and os.path.isfile(os.path.join(PLUGIN_DIR, LOCK_NAME))
+
+
 def effective_config_source() -> tuple[str, bool]:
-    """The settings file to read: the one chosen, else the shipped one. (source, shipped)"""
+    """The settings file to read: the one chosen, else the shipped one; always the shipped one when locked. (source, shipped)"""
+    if config_locked():
+        return bundled_config(), True
     chosen = config_source()
     if chosen:
         return chosen, False

@@ -43,6 +43,8 @@ class PluginContext(QObject):
         self.source = ""
         #: The settings file read is the one shipped in the plugin's folder.
         self.bundled = False
+        #: Only the shipped settings file is read (a file chosen in the settings dialog is ignored).
+        self.locked = False
         self.loading = False
         self._gpkg: Optional[GeoPackage] = None
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
@@ -52,11 +54,13 @@ class PluginContext(QObject):
         """
         Reads the settings file again (a URL in a task): the one chosen in the
         settings dialog, else the one shipped in the plugin's folder; the
-        defaults when there is neither.
+        defaults when there is neither. Only the shipped one when the zip
+        locks the plugin to it (config.lock).
         """
         source, bundled = settings.effective_config_source()
         self.source = source
         self.bundled = bundled
+        self.locked = bundled and settings.config_locked()
         if not source:
             self.config, self.problems = PluginConfig(), []
             self.configChanged.emit()

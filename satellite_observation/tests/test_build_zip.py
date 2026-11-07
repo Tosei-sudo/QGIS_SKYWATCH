@@ -31,3 +31,24 @@ def test_refuses_a_broken_config(tmp_path):
     broken.write_text('{"satelliteCatalogs": [', encoding="utf-8")
     with pytest.raises(SystemExit):
         b.main(str(broken), str(tmp_path))
+
+
+def test_locks_the_plugin_to_the_shipped_config(tmp_path):
+    b = build()
+    target = b.main(os.path.join(HERE, "data", "viewer-config.jsonc"), str(tmp_path), lock_config=True)
+    z = zipfile.ZipFile(target)
+    assert "satellite_observation/config.lock" in z.namelist()
+    assert "--lock-config" in z.read("satellite_observation/config.lock").decode("utf-8")
+    # Without the option: no lock.
+    target = b.main(os.path.join(HERE, "data", "viewer-config.jsonc"), str(tmp_path))
+    assert "satellite_observation/config.lock" not in zipfile.ZipFile(target).namelist()
+
+
+def test_refuses_a_lock_without_a_config(tmp_path, monkeypatch):
+    b = build()
+    plugin = tmp_path / "satellite_observation"
+    plugin.mkdir()
+    (plugin / "metadata.txt").write_text("[general]\nversion=0.0.1\n", encoding="utf-8")
+    monkeypatch.setattr(b, "PLUGIN", str(plugin))
+    with pytest.raises(SystemExit):
+        b.main("", str(tmp_path / "out"), lock_config=True)
