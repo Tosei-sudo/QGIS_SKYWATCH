@@ -12,6 +12,7 @@ import time
 from typing import Callable, Optional
 
 from qgis.core import QgsApplication, QgsNetworkAccessManager
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QByteArray, QEventLoop, QThread, QTimer, QUrl
 from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest
 from qgis.PyQt.QtWidgets import QApplication
@@ -85,7 +86,17 @@ def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[b
     if authcfg:
         QgsApplication.authManager().updateNetworkReply(reply, authcfg)
     loop = QEventLoop()
-    reply.finished.connect(loop.quit)
+    # What the answer is, kept as it finishes: the reply object itself can be gone (deleted on Qt's side)
+    # by the time the loop below returns, which left the task failing with "wrapped C/C++ object … deleted".
+    answer: dict = {}
+
+    def finished() -> None:
+        if not answer:
+            answer.update(error=reply.error(), status=reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute),
+                          message=reply.errorString(), body=bytes(reply.readAll()))
+        loop.quit()
+
+    reply.finished.connect(finished)
     timer = QTimer()
     timeout = QgsNetworkAccessManager.timeout()
     if timeout > 0 and _EDITS.search(url.split("?", 1)[0]):
@@ -95,7 +106,7 @@ def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[b
     state = {"timed_out": False}
 
     def watch() -> None:
-        if reply.isFinished():
+        if sip.isdeleted(reply) or reply.isFinished():
             loop.quit()
         elif feedback is not None and feedback.isCanceled():
             reply.abort()
@@ -113,15 +124,20 @@ def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[b
             raise Cancelled()
         if state["timed_out"]:
             raise EsriError(f"応答なし（タイムアウト）（{_address(url)}）")
-        if reply.error() != QNetworkReply.NetworkError.NoError:
-            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        if not answer and not sip.isdeleted(reply) and reply.isFinished():
+            finished()
+        if not answer:
+            raise EsriError(f"接続不可（{_address(url)}：応答が途中で切れた）")
+        if answer["error"] != QNetworkReply.NetworkError.NoError:
+            status = answer["status"]
             reason = "サーバーのエラー" if isinstance(status, int) and status >= 500 else "接続不可"
             # Qt's message repeats the address with its query: a token may be in it.
-            detail = re.sub(r"\?\S*", "", reply.errorString())
+            detail = re.sub(r"\?\S*", "", answer["message"])
             raise EsriError(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
-        return bytes(reply.readAll())
+        return answer["body"]
     finally:
-        reply.deleteLater()
+        if not sip.isdeleted(reply):
+            reply.deleteLater()
 
 
 def _address(url: str) -> str:

@@ -1,0 +1,9 @@
+# テストに使う Python パッケージ（プラグイン本体は QGIS の Python だけで動く）
+#   python3 -m pip install -r requirements-test.txt
+# QGIS / GDAL は NumPy 1.x でビルドされているので NumPy 2 は入れない（onnxruntime を入れると上がることがある）
+numpy<2
+pytest
+pytest-xdist
+pytest-timeout
+sgp4
+onnxruntime

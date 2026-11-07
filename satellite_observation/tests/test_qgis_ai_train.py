@@ -31,6 +31,10 @@ SIZE = 384
 X0, Y0 = 380000, 3950000
 UTM = QgsCoordinateReferenceSystem("EPSG:32654")
 
+# Trained until it learns (finds the squares again) only in the full run (--full); otherwise one epoch,
+# which still goes through reading, training, writing and detecting.
+EPOCHS = [pytest.param(12, marks=pytest.mark.slow, id="learns"), pytest.param(1, id="1-epoch")]
+
 
 def objects(seed: int, count: int = 14, side: int = 10):
     """Centres (pixels) of squares well apart."""
@@ -124,7 +128,8 @@ def found_at(out, centres, side=10):
     return hits
 
 
-def test_trained_on_records_it_finds_the_squares_again(provider, tmp_path):
+@pytest.mark.parametrize("epochs", EPOCHS)
+def test_trained_on_records_it_finds_the_squares_again(provider, tmp_path, epochs):
     centres = objects(1)
     layer = QgsRasterLayer(tiff(tmp_path / "train.tif", centres), "train")
     QgsProject.instance().addMapLayer(layer)
@@ -134,20 +139,21 @@ def test_trained_on_records_it_finds_the_squares_again(provider, tmp_path):
     provider.set_book(lambda: Book(records, [CheckedArea("a1", "train.tif", "train.tif", None, ring, "", "", 0, 0)]))
     model = str(tmp_path / "ships.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "DEPTH": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model,
+        "IMAGES": [layer.id()], "DEPTH": 1, "EPOCHS": epochs, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model,
         "BOXES": "memory:"})
     assert ok and results["OUTPUT"] == model and os.path.isfile(model)
     trained = load_model(open(model, "rb").read())
     assert trained.classes == ["船舶"] and trained.input.mode == "rgb" and trained.arch == "res"
     history = trained.history
     assert len(history) == 1 and history[0]["objects"] == {"船舶": 14} and history[0]["images"] == ["train.tif"]
-    assert history[0]["epochs"] == 12 and history[0]["source"] == "観測記録（テスト）"
+    assert history[0]["epochs"] == epochs and history[0]["source"] == "観測記録（テスト）"
     # Found again by 物体検出（AI）, with the class of the classification.
     test_image = QgsRasterLayer(tiff(tmp_path / "test.tif", objects(2)), "test")
     QgsProject.instance().addMapLayer(test_image)
-    out = detect(test_image, model)
+    out = detect(test_image, model, score=0.3 if epochs > 1 else 0.0)
     assert {f["class"] for f in out.getFeatures()} == {"船舶"}
-    assert found_at(out, objects(2)) >= 11
+    if epochs > 1:
+        assert found_at(out, objects(2)) >= 11
 
 
 def test_trained_boxes_follow_the_records_sizes(provider, tmp_path):
@@ -159,7 +165,7 @@ def test_trained_boxes_follow_the_records_sizes(provider, tmp_path):
     records[3].present = False
     provider.set_book(lambda: Book(records))
     results, ok, context = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": str(tmp_path / "m.onnx"),
+        "IMAGES": [layer.id()], "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": str(tmp_path / "m.onnx"),
         "BOXES": "memory:"})
     assert ok
     boxes = context.takeResultLayer(results["BOXES"])
@@ -168,8 +174,9 @@ def test_trained_boxes_follow_the_records_sizes(provider, tmp_path):
     assert sizes == {"船舶 > 支援船": (10, 10), "航空機 > 輸送機": (24, 24)}
 
 
+@pytest.mark.parametrize("epochs", EPOCHS)
 @pytest.mark.parametrize("bands", ["4", "1-4"])
-def test_trained_on_band_values(provider, tmp_path, bands):
+def test_trained_on_band_values(provider, tmp_path, bands, epochs):
     centres = objects(4)
     # The squares only in band 4 (float values); bands 1–3 noise.
     layer = QgsRasterLayer(tiff(tmp_path / "train.tif", centres, bands=4, dtype=gdal.GDT_Float32, band_of_objects=4), "train")
@@ -177,15 +184,16 @@ def test_trained_on_band_values(provider, tmp_path, bands):
     provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
     model = str(tmp_path / "bands.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "BANDS": bands, "NETWORK": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
+        "IMAGES": [layer.id()], "BANDS": bands, "NETWORK": 1, "EPOCHS": epochs, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
     assert ok
     trained = load_model(open(model, "rb").read())
     wanted = [4] if bands == "4" else [1, 2, 3, 4]
     assert trained.input.mode == "bands" and trained.input.bands == wanted and len(trained.input.mean) == len(wanted)
     test_image = QgsRasterLayer(tiff(tmp_path / "test.tif", objects(5), bands=4, dtype=gdal.GDT_Float32, band_of_objects=4), "test")
     QgsProject.instance().addMapLayer(test_image)
-    out = detect(test_image, model)
-    assert found_at(out, objects(5)) >= 11
+    out = detect(test_image, model, score=0.3 if epochs > 1 else 0.0)
+    if epochs > 1:
+        assert found_at(out, objects(5)) >= 11
 
 
 def test_a_band_model_refuses_an_image_without_its_bands(provider, tmp_path):
@@ -205,7 +213,7 @@ def test_trained_further_with_a_new_class_from_a_vector_layer(provider, tmp_path
     QgsProject.instance().addMapLayer(layer)
     provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
     base = str(tmp_path / "base.onnx")
-    _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "DEPTH": 1, "NETWORK": 1, "EPOCHS": 2, "TILE": 0, "VALIDATION": 0,
+    _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "DEPTH": 1, "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0,
                                                 "REMEMBER": False, "OUTPUT": base})
     assert ok
     bars = [(60, 300), (200, 330), (320, 60)]
@@ -221,7 +229,7 @@ def test_trained_further_with_a_new_class_from_a_vector_layer(provider, tmp_path
     QgsProject.instance().addMapLayer(labels)
     further = str(tmp_path / "further.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "IMAGES": [image.id()], "SOURCE": 1, "LABELS": labels.id(), "CLASS_FIELD": "class", "DEPTH": 1, "BASE_MODEL": base, "EPOCHS": 2,
+        "IMAGES": [image.id()], "SOURCE": 1, "LABELS": labels.id(), "CLASS_FIELD": "class", "DEPTH": 1, "BASE_MODEL": base, "EPOCHS": 1,
         "TILE": 2, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": further})
     assert ok
     trained = load_model(open(further, "rb").read())
@@ -245,7 +253,7 @@ def test_polygon_labels_keep_their_outline(provider, tmp_path):
         labels.dataProvider().addFeature(f)
     QgsProject.instance().addMapLayer(labels)
     results, ok, context = run("satobs:train_detector", {
-        "IMAGES": [layer.id()], "SOURCE": 1, "LABELS": labels.id(), "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+        "IMAGES": [layer.id()], "SOURCE": 1, "LABELS": labels.id(), "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
         "OUTPUT": str(tmp_path / "m.onnx"), "BOXES": "memory:"})
     assert ok
     boxes = context.takeResultLayer(results["BOXES"])
@@ -263,7 +271,7 @@ def test_a_trained_model_is_listed_for_detection(provider, tmp_path):
     provider.set_book(lambda: Book([record(i, "train.tif", x, y) for i, (x, y) in enumerate(centres)]))
     model = str(tmp_path / "listed.onnx")
     try:
-        _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "OUTPUT": model})
+        _, ok, _ = run("satobs:train_detector", {"IMAGES": [layer.id()], "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "OUTPUT": model})
         assert ok
         models, _ = detect_models()
         assert [(m.label, m.url) for m in models][:1] == [("学習済み: listed", os.path.abspath(model))]
@@ -329,7 +337,8 @@ def make_dataset(params):
     return results
 
 
-def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path):
+@pytest.mark.parametrize("epochs", EPOCHS)
+def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path, epochs):
     import json
 
     yolo_set(tmp_path)
@@ -348,7 +357,7 @@ def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path):
     # Trained on the dataset alone (no image on the map), at depth 1.
     model = str(tmp_path / "ships.onnx")
     results, ok, _ = run("satobs:train_detector", {
-        "DATASET": path, "DEPTH": 1, "EPOCHS": 12, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
+        "DATASET": path, "DEPTH": 1, "EPOCHS": epochs, "BATCH": 4, "TILE": 0, "VALIDATION": 0, "REMEMBER": False, "OUTPUT": model})
     assert ok
     trained = load_model(open(model, "rb").read())
     history = trained.history[0]
@@ -357,7 +366,9 @@ def test_a_yolo_dataset_outside_the_catalog_trains_a_model(provider, tmp_path):
     # It finds the squares on an image on the map.
     test_image = QgsRasterLayer(tiff(tmp_path / "test.tif", objects(2)), "test")
     QgsProject.instance().addMapLayer(test_image)
-    assert found_at(detect(test_image, model), objects(2)) >= 11
+    out = detect(test_image, model, score=0.3 if epochs > 1 else 0.0)
+    if epochs > 1:
+        assert found_at(out, objects(2)) >= 11
 
 
 def test_a_dataset_with_the_catalogs_images_and_records(provider, tmp_path):
