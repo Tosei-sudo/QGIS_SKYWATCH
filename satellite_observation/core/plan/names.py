@@ -90,6 +90,40 @@ def name_rank(value: Any, names: set[str]) -> int:
     return 1 if any(s in n or n in s for n in names) else 0
 
 
+def _words(s: Any) -> str:
+    """Lower case, every run of other characters one space: `WorldView-3 PAN` → `worldview 3 pan`."""
+    return " ".join("".join(ch if ch.isalnum() else " " for ch in str(s or "").lower()).split())
+
+
+def names_satellite(value: Any, names: set[str], written: Iterable[Any] = ()) -> bool:
+    """
+    Whether a catalog value (an image's sensor) is of one of the satellites
+    `names` (plain names, aliases included) or `written` (as written: a
+    satellite or a series): the same plain name; a written name as whole
+    words at the start (`OPT-X` → `OPT-X 2`, `WorldView-3` → `WorldView-3 PAN`);
+    or a plain name followed by digits (`optx` → `optx2`). Not a model
+    number running on (`KOMPSAT-3` is not `KOMPSAT-3A`), nor a shorter name
+    (`ALOS` is not `ALOS-2`): those are other satellites (#78).
+    """
+    s = plain(value)
+    if not s:
+        return False
+    if s in names:
+        return True
+    words = _words(value)
+    for w in written:
+        ww = _words(w)
+        if ww and (words == ww or words.startswith(ww + " ")):
+            # 「KOMPSAT 3」 then 「A」: the words go on, but a letter right after a number is another model.
+            rest = words[len(ww):].split()
+            if not (rest and ww[-1].isdigit() and rest[0][0].isalpha() and len(rest[0]) == 1):
+                return True
+    for n in names:
+        if n and s.startswith(n) and len(s) > len(n) and n[-1].isalpha() and s[len(n):].isdigit():
+            return True
+    return False
+
+
 def best_named(found: Sequence[dict], value_of: Callable[[dict], Any], names: set[str]) -> dict:
     """The feature whose value names the satellite best (the same name, then one inside the other), else the first."""
     best, rank = found[0], 0

@@ -12,9 +12,11 @@ import pytest
 
 from satellite_observation.core.catalog import catalog_of
 from satellite_observation.core.config import parse_config, parse_config_text
-from satellite_observation.core.esri import EsriClient
+from satellite_observation.core.esri import EsriClient, EsriError, TooManyError
 from satellite_observation.core.plan.names import SatelliteNames
 from satellite_observation.core.plan.satellites import SatelliteSpec
+from satellite_observation.core.plan.store import between_condition
+from satellite_observation.core.time_zone import parse_time_zone
 from satellite_observation.core.plan.weather import CloudSeries, key_of
 from satellite_observation.core.request.daily import HELD, TAKEN, allocate, carries_over, gather, room_text
 from satellite_observation.core.request.export import (
@@ -31,13 +33,14 @@ from satellite_observation.core.request.model import (
 from satellite_observation.core.request.route import fitting, scenes_of, system_of_satellite, why_not
 from satellite_observation.core.request.schema import validate
 from satellite_observation.core.request.store import (
-    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, HistoryRow, add_history, load_history, load_requests, request_store_of, save_request,
+    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, HistoryRow, add_history, count_history, delete_history, history_where, load_history,
+    replaced_where, load_requests, request_store_of, save_request,
     update_history, update_requests,
 )
 from satellite_observation.core.request.systems import export_systems_of
 from satellite_observation.core.request.weather import cloud_step, daytime_cloud, places_of, with_cloud
 from satellite_observation.core.request.workflow import (
-    boost_changes, clouds_of, forecast_places, history_of, missed_done, plan_day,
+    boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day,
 )
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer
 
@@ -370,11 +373,11 @@ def test_ledger_round_trip_history_and_follow_up():
 
     sys_ = systems()
     plan = plan_day(list(loaded.values()), DAY, sys_, SATS, {"R-0001": 30})
-    rows = history_of(plan, FIRST + 8 * H, {"SYS-A": "SYS-A_20261108.csv"}, "RUN1")
+    rows = history_of(plan, FIRST + 8 * H, {"SYS-A": "SYS-A_20261108.csv", "SYS-B": "SYS-B_20261108.json"}, "RUN1")
     assert add_history(client, store, None, rows) == 2
     history = load_history(client, store, None)
     assert {(h.request_id, h.system, h.result, h.file, h.captured) for h in history} == {
-        ("R-0001", "SYS-A", "採用", "SYS-A_20261108.csv", "未判定"), ("R-0002", "SYS-B", "採用", "", "未判定")}
+        ("R-0001", "SYS-A", "採用", "SYS-A_20261108.csv", "未判定"), ("R-0002", "SYS-B", "採用", "SYS-B_20261108.json", "未判定")}
 
     catalog = catalog_of({"label": "画像", "url": CATALOG, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}, [], 0)
     by_id = {r.id: r for r in load_requests(client, store, None)}
@@ -513,3 +516,150 @@ def test_sample_config_reads():
     assert problems == []
     assert [s.system for s in config.request_exports] == ["SYS-A", "SYS-B", "SYS-C"]
     assert config.request_stores[0].history
+
+
+def test_a_system_not_written_is_not_handed_out():
+    """#68: a candidate taken for a system whose file was not written is 見送り in the history, not 採用・未判定."""
+    sys_ = systems()
+    r1 = request("R-0001", priority=742, series=["OPT-X"], satellites=["OPT-X 1"], systems=["SYS-A"], object_id=1)
+    r2 = request("R-0002", kind="SAR", priority=100, look_side="右", object_id=2,
+                 rings=[[[135.4, 34.6], [135.5, 34.6], [135.5, 34.7], [135.4, 34.7], [135.4, 34.6]]])
+    plan = plan_day([r1, r2], DAY, sys_, SATS, {"R-0001": 30})
+    assert sorted(c.request.id for c in plan.candidates if c.result == TAKEN) == ["R-0001", "R-0002"]
+    rows = history_of(plan, FIRST, {"SYS-A": "SYS-A_20261108.csv"}, "RUN1", failures={"SYS-B": "必須項目 tasks なし"})
+    got = {r.request_id: (r.result, r.captured, r.file, r.reason) for r in rows}
+    assert got["R-0001"] == ("採用", "未判定", "SYS-A_20261108.csv", "")
+    assert got["R-0002"] == ("見送り", "", "", "書き出し失敗（必須項目 tasks なし）")
+    assert not_written(plan, {"SYS-A": "x"}) == {"R-0002"}
+    # Its raise and its 未撮像 row are left for the next day.
+    plan.candidates[[c.request.id for c in plan.candidates].index("R-0002")].boost_offer = 100
+    plan.missed_rows = [HistoryRow("RUN0", FIRST - D, "2026-11-07", "R-0002", "SYS-B", captured="未撮像", object_id=7)]
+    assert boost_changes(plan, {"R-0002"}) == [] and missed_done(plan, {"R-0002"}) == []
+    assert boost_changes(plan) == [(2, {"boost": 100})] and missed_done(plan) == [(7, {"boostDone": 1})]
+
+
+def test_history_reads_only_what_is_needed():
+    """#69: the history is read by condition (open rows, a span, some requests), not the whole table."""
+    problems = []
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, problems, 0)
+    fake = server()
+    client = EsriClient(fake)
+    history = fake.layers[HISTORY]
+    for day, rid, result, captured, done in (
+            ("2026-01-01", "OLD", "採用", "撮像済み", 0), ("2026-01-02", "OLD2", "見送り", "", 0),
+            ("2026-11-01", "MISS", "採用", "未撮像", 0), ("2026-11-02", "RAISED", "採用", "未撮像", 1),
+            ("2026-11-07", "OPEN", "採用", "未判定", 0), ("2026-11-08", "HELD", "見送り", "", 0)):
+        history.add({"TARGET_DAY": day, "REQ_ID": rid, "RESULT": result, "CAPTURED": captured, "BOOST_DONE": done})
+    open_rows = load_history(client, store, None, history_where(store, open_rows=True))
+    assert {r.request_id for r in open_rows} == {"MISS", "OPEN"}
+    span = load_history(client, store, None, history_where(store, first="2026-11-02", last="2026-11-07"))
+    assert [r.request_id for r in span] == ["RAISED", "OPEN"]
+    assert {r.request_id for r in load_history(client, store, None, history_where(store, request_ids=["OLD", "HELD", "OLD"]))} == {"OLD", "HELD"}
+    assert count_history(client, store, None, replaced_where(store, "2026-11-08")) == 1
+    assert int(delete_history(client, store, None, replaced_where(store, "2026-11-08"))) == 1
+    assert count_history(client, store, None, "1=1") == 5
+
+
+def test_query_all_never_cuts_silently():
+    """#69: more rows than the limit is an error (paging in object id order), unless a cut is asked for."""
+    fake = FakeEsri()
+    for pagination in (True, False):
+        url = f"https://example.com/arcgis/rest/services/T{int(pagination)}/FeatureServer/0"
+        layer = fake.add_layer(url, FakeLayer({"N": "esriFieldTypeInteger"}, "esriGeometryNone", max_record_count=3, pagination=pagination))
+        for i in range(7):
+            layer.add({"N": i})
+        client = EsriClient(fake)
+        assert [f["attributes"]["N"] for f in client.query_all(url, geometry=False, limit=7)] == list(range(7))
+        with pytest.raises(TooManyError):
+            client.query_all(url, geometry=False, limit=6)
+        assert [f["attributes"]["N"] for f in client.query_all(url, geometry=False, limit=5, cut=True)] == list(range(5))
+        if pagination:
+            asked = [form for u, form in fake.asked if u == f"{url}/query" and "resultOffset" in form]
+            assert all(form.get("orderByFields") == "OBJECTID" for form in asked)
+
+
+def test_saves_tell_what_failed():
+    """#71: a batch that fails (or rows refused) is told, not counted as saved; follow-ups settle only saved rows."""
+    problems = []
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, problems, 0)
+    fake = server()
+    client = EsriClient(fake)
+    rows = [HistoryRow("RUN", FIRST, DAY.isoformat(), f"R-{i}") for i in range(250)]
+    calls = {"n": 0}
+    real = fake.answer
+
+    def flaky(url, form):
+        if url.endswith("/applyEdits"):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise EsriError("タイムアウト")
+        return real(url, form)
+
+    fake.answer = flaky
+    saved = add_history(client, store, None, rows)
+    assert saved == 200 and saved.failed and "50 件を保存できず（タイムアウト）" in saved.problems[0]
+    # An update of a row that is gone: refused, so not settled.
+    fake.answer = real
+    oids = [r["attributes"]["OBJECTID"] for r in fake.layers[HISTORY].rows[:2]]
+    done = update_history(client, store, None, [(oids[0], {"captured": "撮像済み"}), (9999, {"captured": "撮像済み"})])
+    assert done == 1 and done.ok == {oids[0]} and done.problems == ["出力履歴の更新: 見つからない地物"]
+    a = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-0", object_id=oids[0])
+    b = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-1", object_id=9999)
+    out = []
+    save_marked(client, store, None, marked([a, b], "撮像済み", "IMG"), {}, [a, b], FIRST, out)
+    assert (a.captured, b.captured) == ("撮像済み", "未判定") and out
+
+
+def test_rows_without_a_request_are_not_settled():
+    """#77: a history row whose request left the ledger is not followed up (no area: any image would do)."""
+    fake = server()
+    client = EsriClient(fake)
+    catalog = catalog_of({"label": "画像", "url": CATALOG, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}, [], 0)
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "GONE", "SYS-A", "OPT-X 1", object_id=1)
+    assert follow_up(client, catalog, None, [row], {}, LAST + D, 3) == []
+    assert follow_up(client, catalog, None, [row], {}, LAST + 10 * D, 3) == []
+    no_area = request("GONE", rings=[])
+    assert follow_up(client, catalog, None, [row], {"GONE": no_area}, LAST + D, 3) == []
+    assert next_step(replace(row, captured="未判定"), None, DAY) == "台帳に依頼なし"
+
+
+def test_model_numbers_are_other_satellites():
+    """#78: KOMPSAT-3 is not KOMPSAT-3A, ALOS-2 not ALOS; a series still takes its members, a satellite its products."""
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-1", "SYS-A", "KOMPSAT-3")
+    k3 = request("R-1", satellites=["KOMPSAT-3"])
+    ids = lambda found, req, r=row: [f["attributes"]["IMAGE_ID"] for f in fitting_images(found, "SENSOR", r, req)]
+    assert ids([image("KOMPSAT-3A", "A"), image("KOMPSAT-3", "B"), image("KOMPSAT 3", "C")], k3) == ["B", "C"]
+    alos2 = request("R-1", satellites=["ALOS-2"])
+    assert ids([image("ALOS", "A"), image("ALOS-2", "B")], alos2, replace(row, satellite="ALOS-2")) == ["B"]
+    assert ids([image("WorldView-3 PAN", "W")], request("R-1", satellites=["WorldView-3"]), replace(row, satellite="WorldView-3")) == ["W"]
+    assert ids([image("KOMPSAT-3A", "A"), image("OTHER", "O")], request("R-1", series=["KOMPSAT"]), replace(row, satellite="")) == ["A"]
+    # An alias given in satelliteAliases still counts.
+    names = SatelliteNames.of([("KOMPSAT-3", "K3")])
+    assert [f["attributes"]["IMAGE_ID"] for f in fitting_images([image("K3", "X")], "SENSOR", row, k3, names)] == ["X"]
+
+
+def test_text_dates_are_compared_as_the_catalog_writes_them():
+    """#79: a text 撮像日時 is compared in the catalog's own shape (T or space, its zone), the end an open bound."""
+    first, last = day_bounds(DAY)  # 2026-11-08 JST
+    assert between_condition("ACQ", "esriFieldTypeString", first, last, "2026-11-01T00:00:00Z") == \
+        "ACQ >= '2026-11-07T15:00:00' AND ACQ < '2026-11-08T15:00:00'"
+    assert between_condition("ACQ", "esriFieldTypeString", first, last, "2026-11-01 00:00:00") == \
+        "ACQ >= '2026-11-07 15:00:00' AND ACQ < '2026-11-08 15:00:00'"
+    assert between_condition("ACQ", "esriFieldTypeString", first, last, "2026-11-01T09:00:00+09:00") == \
+        "ACQ >= '2026-11-08T00:00:00' AND ACQ < '2026-11-09T00:00:00'"
+    tokyo = parse_time_zone("Asia/Tokyo")
+    assert between_condition("ACQ", "esriFieldTypeString", first, last, "2026-11-01 09:00:00", tokyo) == \
+        "ACQ >= '2026-11-08 00:00:00' AND ACQ < '2026-11-09 00:00:00'"
+    # The catalog end to end: ISO text in UTC, the image at 01:00Z on the 8th is the JST 8th's, the 7th's (00:00Z) is not.
+    fake = FakeEsri()
+    url = "https://example.com/arcgis/rest/services/Text/FeatureServer/0"
+    layer = fake.add_layer(url, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeString", "URL": "esriFieldTypeString"},
+                                          "esriGeometryPolygon"))
+    area = {"rings": [[[139.7, 35.4], [139.7, 35.6], [140.0, 35.6], [140.0, 35.4], [139.7, 35.4]]], "spatialReference": {"wkid": 4326}}
+    layer.add({"IMAGE_ID": "BEFORE", "ACQ": "2026-11-07T00:00:00Z"}, area)
+    layer.add({"IMAGE_ID": "ON", "ACQ": "2026-11-08T01:00:00Z"}, area)
+    catalog = catalog_of({"label": "画像", "url": url, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-1", "SYS-A", object_id=1)
+    req = request("R-1", rings=area["rings"])
+    found = follow_up(EsriClient(fake), catalog, None, [row], {"R-1": req}, LAST + D, 3)
+    assert [(f.captured, f.image_id) for f in found] == [("撮像済み", "ON")]

@@ -22,7 +22,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.request.follow import follow_and_save, found_text, in_days, marked, next_step, save_marked, tally
 from ..core.request.model import jst_day
-from ..core.request.store import load_history, load_requests
+from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
 
 COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先")
@@ -51,6 +51,8 @@ class PlanResultsDialog(QDialog):
         self.history: list = []
         self.requests: dict = {}
         self.rows: list = []
+        #: The target days whose history was read (first, last), once read.
+        self.loaded: Optional[tuple] = None
         self._build()
 
     def _build(self) -> None:
@@ -63,7 +65,7 @@ class PlanResultsDialog(QDialog):
         for d in (self.first, self.last):
             d.setCalendarPopup(True)
             d.setDisplayFormat("yyyy-MM-dd")
-            d.dateChanged.connect(lambda _=None: self.render())
+            d.dateChanged.connect(lambda _=None: self._span_changed())
         top.addWidget(self.first)
         top.addWidget(QLabel("〜"))
         top.addWidget(self.last)
@@ -127,17 +129,25 @@ class PlanResultsDialog(QDialog):
         client, token = self.context.esri(), dock.token()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
         now = _now_ms()
+        first, last = self.span()
+        # The span's rows and those still open (followed up as 「計算」 does), not the whole table.
+        where = (f"({history_where(store, first=first.isoformat(), last=last.isoformat())}) OR "
+                 f"({history_where(store, open_rows=True)})")
         self.status.setText(self.tr("出力履歴を読み込み、画像カタログと照合中…") if follow else self.tr("出力履歴を読み込み中…"))
 
         def work(task):
             notes = []
             requests = load_requests(client, store, token, task.isCanceled)
-            history = load_history(client, store, token, cancelled=task.isCanceled)
+            history = load_history(client, store, token, where, cancelled=task.isCanceled)
             by_id = {r.id: r for r in requests}
             if catalog is not None:
                 names = self.context.satellite_names(client, task.isCanceled)
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled)
+                problems = []
+                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled,
+                                                 problems)
                 notes.append(found_text(found) if found else "新たに判定できた依頼なし")
+                if problems:
+                    notes.append("照合結果の保存に一部失敗（" + "、".join(problems[:3]) + "）")
                 if changed:
                     requests = load_requests(client, store, token, task.isCanceled)
             elif follow:
@@ -149,6 +159,7 @@ class PlanResultsDialog(QDialog):
             requests, history, notes = result
             self.requests = {r.id: r for r in requests}
             self.history = history
+            self.loaded = (first, last)
             dock.requests_changed(requests)
             self.status.setText("。".join(notes))
             self.render()
@@ -160,6 +171,14 @@ class PlanResultsDialog(QDialog):
 
         self.task = run_task(self.tr("計画と実績の照合"), work, done, failed)
         self._update_buttons()
+
+    def _span_changed(self) -> None:
+        """Shows the new span: from what was read when it is inside it, else read again (without following up)."""
+        first, last = self.span()
+        if self.loaded is not None and not (self.loaded[0] <= first and last <= self.loaded[1]) and self.task is None:
+            self.run(follow=False)
+            return
+        self.render()
 
     def span(self) -> tuple[date, date]:
         a, b = self.first.date(), self.last.date()
@@ -217,15 +236,22 @@ class PlanResultsDialog(QDialog):
         requests, history = self.requests, self.history
 
         def work(task):
-            changed = save_marked(client, store, token, findings, requests, history, now)
-            return load_requests(client, store, token, task.isCanceled) if changed else None
+            # Every row of those requests (not only the span's): whether another is still 撮像済み.
+            rows = load_history(client, store, token, history_where(store, request_ids=[f.row.request_id for f in findings]),
+                                cancelled=task.isCanceled)
+            problems = []
+            changed = save_marked(client, store, token, findings, requests, rows or history, now, problems)
+            return (load_requests(client, store, token, task.isCanceled) if changed else None), problems
 
         def done(result):
             self.task = None
+            result, problems = result
             if result is not None:
                 self.requests = {r.id: r for r in result}
                 dock.requests_changed(result)
-            self.status.setText(self.tr("{n} 件を{c}に変更").format(n=len(findings), c=captured))
+            text = (self.tr("{n} 件を{c}に変更").format(n=len(findings), c=captured) if not problems
+                    else self.tr("変更の一部を保存できず: {m}").format(m="、".join(problems[:3])))
+            self.status.setText(text)
             self.render()
 
         def failed(message):

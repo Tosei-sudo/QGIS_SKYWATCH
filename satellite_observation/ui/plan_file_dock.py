@@ -35,9 +35,12 @@ from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.model import JST, jst_day, priority_text
-from ..core.request.store import RequestStoreConfig, add_history, load_history, load_requests, update_history, update_requests
+from ..core.request.store import (
+    RequestStoreConfig, add_history, count_history, delete_history, history_where, load_history, load_requests, replaced_where,
+    update_history, update_requests,
+)
 from ..core.request.workflow import (
-    DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, plan_day, written_summary,
+    DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day, written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
@@ -247,14 +250,20 @@ class PlanFileDock(PluginDock):
         def work(task):
             notes = []
             requests = load_requests(client, store, token, task.isCanceled)
-            history = load_history(client, store, token, cancelled=task.isCanceled) if store.history else []
+            # Only the rows still to be followed up or raised for, not the whole (ever growing) table.
+            history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
+                       if store.history else [])
             task.progress(30)
             if history and catalog is not None:
                 by_id = {r.id: r for r in requests}
                 names = self.context.satellite_names(client, task.isCanceled)
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled)
+                problems = []
+                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled,
+                                                 problems)
                 if found:
                     notes.append(found_text(found))
+                if problems:
+                    notes.append("照合結果の保存に一部失敗（" + "、".join(problems[:3]) + "）")
                 if changed:
                     requests = load_requests(client, store, token, task.isCanceled)
             elif store.history and catalog is None:
@@ -382,28 +391,56 @@ class PlanFileDock(PluginDock):
     # --- Writing --------------------------------------------------------------------------------
 
     def write(self, ask: bool = True) -> None:
-        """Builds the files (schemas read in a task), asks, writes them, then saves the history and raises."""
+        """
+        Builds the files (schemas read and the day's earlier history counted
+        in a task), asks, writes them, then saves the history and raises.
+        """
         plan = self.plan
         if plan is None or self.task is not None:
             return
         run = _now_ms()
+        store, client, token = self.store, self.context.esri(), self.token()
         self.status.setText(self.tr("ファイルを作成中…"))
 
-        def done(files):
+        def work(task):
+            files = render(plan.candidates, plan.systems, plan.day, run, load_schema)
+            earlier = count_history(client, store, token, replaced_where(store, plan.day.isoformat())) if store and store.history else 0
+            return files, earlier
+
+        def done(result):
             self.task = None
             self._update_buttons()
-            self._write_files(plan, run, files, ask)
+            files, earlier = result
+            self._write_files(plan, run, files, ask, earlier)
 
         def failed(message):
             self.task = None
             self.status.setText(self.tr("ファイルの作成に失敗: {m}").format(m=message))
             self._update_buttons()
 
-        self.task = run_task(self.tr("出力ファイルの作成"), lambda task: render(plan.candidates, plan.systems, plan.day, run, load_schema),
-                             done, failed)
+        self.task = run_task(self.tr("出力ファイルの作成"), work, done, failed)
         self._update_buttons()
 
-    def _write_files(self, plan: DayPlan, run: float, files: list, ask: bool) -> None:
+    def _confirm(self, lines: list, earlier: int) -> Optional[bool]:
+        """
+        Asks before writing: None to stop, else whether the day's earlier
+        history rows (not yet followed up) are replaced rather than kept.
+        """
+        if not earlier:
+            ok = QMessageBox.question(self, self.tr("書き出し"), "\n".join(lines)) == QMessageBox.StandardButton.Yes
+            return False if ok else None
+        lines = [*lines, "", self.tr("この日の出力履歴（未判定）が既に {n} 件あります。"
+                                      "置き換えると前回の行を消してから今回の行を保存します。").format(n=earlier)]
+        box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), "\n".join(lines), parent=self)
+        replace = box.addButton(self.tr("置き換えて書き出し"), QMessageBox.ButtonRole.AcceptRole)
+        keep = box.addButton(self.tr("追加して書き出し"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(self.tr("取りやめ"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(replace)
+        box.exec()
+        clicked = box.clickedButton()
+        return True if clicked is replace else False if clicked is keep else None
+
+    def _write_files(self, plan: DayPlan, run: float, files: list, ask: bool, earlier: int = 0) -> None:
         broken = [w for w in files if w.errors]
         good = [w for w in files if not w.errors]
         fallback = self.folder.text().strip()
@@ -412,23 +449,29 @@ class PlanFileDock(PluginDock):
             return
         targets = [(w, w.system.folder or fallback) for w in good]
         existing = [os.path.join(f, w.file_name) for w, f in targets if os.path.exists(os.path.join(f, w.file_name))]
+        replace = bool(earlier)
         if ask:
             lines = [f"{w.system.label}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
             if broken:
                 lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{w.system.label}: {'、'.join(w.errors[:3])}" for w in broken]
             if existing:
                 lines.append(self.tr("上書きするファイル {n} 件").format(n=len(existing)))
-            if QMessageBox.question(self, self.tr("書き出し"), "\n".join(lines)) != QMessageBox.StandardButton.Yes:
+            choice = self._confirm(lines, earlier)
+            if choice is None:
                 self.status.setText(self.tr("書き出しを取りやめ"))
                 return
+            replace = choice
         paths, problems = [], []
         written: dict = {}
+        failures = {w.system.system: "、".join(w.errors[:2]) for w in broken}
         for w, folder in targets:
             try:
                 paths.append(write(w, folder))
                 written[w.system.system] = w.file_name
             except OSError as error:
-                problems.append(f"{w.system.label}: {error.strerror or error}")
+                reason = error.strerror or str(error)
+                problems.append(f"{w.system.label}: {reason}")
+                failures[w.system.system] = reason
                 continue
             _, notes = encoded(w)
             problems += [f"{w.system.label}: {n}" for n in notes + w.warnings[:3]]
@@ -436,35 +479,48 @@ class PlanFileDock(PluginDock):
         if fallback:
             settings.set_request_export_folder(fallback)
         store, client, token = self.store, self.context.esri(), self.token()
-        rows = history_of(plan, run, written)
-        boosts = boost_changes(plan)
-        done_rows = missed_done(plan)
+        # A request taken for a system whose file was not written is kept as 見送り, its raise left for later.
+        rows = history_of(plan, run, written, failures=failures)
+        skip = not_written(plan, written)
+        boosts = boost_changes(plan, skip)
+        done_rows = missed_done(plan, skip)
+        day = plan.day.isoformat()
 
         def work(task):
+            notes = []
+            removed = 0
+            if replace and earlier and store.history:
+                gone = delete_history(client, store, token, replaced_where(store, day))
+                removed, notes = int(gone), notes + gone.problems
             saved = add_history(client, store, token, rows)
             raised = update_requests(client, store, token, boosts, run)
-            update_history(client, store, token, done_rows)
-            return saved, raised
+            marked = update_history(client, store, token, done_rows)
+            return saved, raised, marked, removed, notes + saved.problems + raised.problems + marked.problems
 
         def done(result):
             self.task = None
-            saved, raised = result
+            saved, raised, _, removed, failed_saves = result
             text = self.tr("書き出し: {s}").format(s=written_summary([w for w, _ in targets if w.system.system in written]))
             if store.history:
-                text += self.tr("・出力履歴 {n} 件").format(n=saved)
+                text += (self.tr("・出力履歴 {n} 件").format(n=saved) if saved == len(rows)
+                         else self.tr("・出力履歴 {n}/{m} 件").format(n=saved, m=len(rows)))
+                if removed:
+                    text += self.tr("（前回の {n} 件を置き換え）").format(n=removed)
             if raised:
                 text += self.tr("・繰り上げ {n} 件").format(n=raised)
             if broken:
                 text += self.tr("・書き出さなかったシステム {n}（{list}）").format(n=len(broken), list="、".join(f"{w.system.label}: {w.errors[0]}" for w in broken))
             if problems:
                 text += "・" + "、".join(problems)
+            if failed_saves:
+                text += self.tr("。保存できなかったもの（もう一度「書き出し」で置き換えてやり直せます）: {m}").format(m="、".join(failed_saves[:5]))
             self.status.setText(text)
             self._update_buttons()
             self.requests_changed()
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("ファイルは書き出し済み。出力履歴・繰り上げの保存に失敗: {m}").format(m=message))
+            self.status.setText(self.tr("ファイルは書き出し済み。出力履歴・繰り上げの保存に失敗（もう一度「書き出し」で置き換えてやり直せます）: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("出力履歴の保存"), work, done, failed)

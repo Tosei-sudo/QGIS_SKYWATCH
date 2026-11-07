@@ -46,28 +46,89 @@ class FakeLayer:
         return oid
 
 
+def _split(text: str, word: str) -> list[str]:
+    """`text` split at `word` (AND / OR) outside parentheses and quotes."""
+    parts, depth, quoted, start, i = [], 0, False, 0, 0
+    pattern = re.compile(rf"\s+{word}\s+", re.IGNORECASE)
+    while i < len(text):
+        ch = text[i]
+        if ch == "'":
+            quoted = not quoted
+        elif not quoted and ch == "(":
+            depth += 1
+        elif not quoted and ch == ")":
+            depth -= 1
+        elif not quoted and depth == 0:
+            m = pattern.match(text, i)
+            if m:
+                parts.append(text[start:i])
+                start = i = m.end()
+                continue
+        i += 1
+    parts.append(text[start:])
+    return parts
+
+
+def _unwrap(text: str) -> str:
+    """`text` without parentheses around all of it."""
+    text = text.strip()
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for i, ch in enumerate(text):
+            depth += ch == "("
+            depth -= ch == ")"
+            if depth == 0 and i < len(text) - 1:
+                return text
+        text = text[1:-1].strip()
+    return text
+
+
+def _compare(v: Any, op: str, other: Any) -> bool:
+    if v is None:
+        return False
+    try:
+        return {"=": v == other, ">=": v >= other, "<=": v <= other, ">": v > other, "<": v < other, "<>": v != other}[op]
+    except TypeError:
+        return False
+
+
 def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
-    """`1=1`, `A = 'x'`, `A IS NULL`, `F >= TIMESTAMP '…'` joined by AND."""
+    """
+    `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A IN ('x', 'y')`, `A >= 'x'`,
+    `F >= TIMESTAMP '…'`, joined by AND / OR with parentheses. Parts not
+    understood match (as before).
+    """
     if not where or where.strip() == "1=1":
         return True
-    for part in re.split(r"\s+AND\s+", where.strip(), flags=re.IGNORECASE):
-        part = part.strip().strip("()")
-        m = re.fullmatch(r"(\w+)\s*=\s*'(.*)'", part)
-        if m:
-            if str(a.get(m.group(1))) != m.group(2).replace("''", "'"):
-                return False
-            continue
-        m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
-        if m:
-            if a.get(m.group(1)) is not None:
-                return False
-            continue
-        m = re.fullmatch(r"(\w+)\s*(>=|<=)\s*TIMESTAMP\s*'(.+)'", part)
-        if m:
-            t = datetime.fromisoformat(m.group(3).replace(" ", "T")).replace(tzinfo=timezone.utc).timestamp() * 1000
-            v = a.get(m.group(1))
-            if v is None or not (v >= t if m.group(2) == ">=" else v <= t):
-                return False
+    text = _unwrap(where)
+    ors = _split(text, "OR")
+    if len(ors) > 1:
+        return any(_matches(p, a) for p in ors)
+    ands = _split(text, "AND")
+    if len(ands) > 1:
+        return all(_matches(p, a) for p in ands)
+    part = text
+    m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
+    if m:
+        return a.get(m.group(1)) is None
+    m = re.fullmatch(r"(\w+)\s+IN\s*\((.*)\)", part, re.IGNORECASE | re.DOTALL)
+    if m:
+        values = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(2))]
+        return str(a.get(m.group(1))) in values
+    m = re.fullmatch(r"(\w+)\s*(>=|<=|<>|=|>|<)\s*TIMESTAMP\s*'(.+)'", part)
+    if m:
+        t = datetime.fromisoformat(m.group(3).replace(" ", "T")).replace(tzinfo=timezone.utc).timestamp() * 1000
+        return _compare(a.get(m.group(1)), m.group(2), t)
+    m = re.fullmatch(r"(\w+)\s*(>=|<=|<>|=|>|<)\s*'(.*)'", part, re.DOTALL)
+    if m:
+        v = a.get(m.group(1))
+        other = m.group(3).replace("''", "'")
+        if m.group(2) == "=":
+            return str(v) == other
+        return _compare(None if v is None else str(v), m.group(2), other)
+    m = re.fullmatch(r"(\w+)\s*(>=|<=|<>|=|>|<)\s*(-?\d+(?:\.\d+)?)", part)
+    if m:
+        return _compare(a.get(m.group(1)), m.group(2), float(m.group(3)))
     return True
 
 
@@ -146,6 +207,9 @@ class FakeEsri:
         if form.get("geometry"):
             area = _box(json.loads(form["geometry"]))
             found = [r for r in found if r["geometry"] and _overlaps(area, _box(r["geometry"]))]
+        if form.get("returnCountOnly") == "true":
+            return {"count": len(found)}
+        # orderByFields is not followed: the rows stay in object id order (what query_all asks for when paging).
         if form.get("returnIdsOnly") == "true":
             return {"objectIdFieldName": layer.oid, "objectIds": [r["attributes"][layer.oid] for r in found]}
         offset = int(form.get("resultOffset", 0))

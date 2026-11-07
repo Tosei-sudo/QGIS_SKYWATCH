@@ -23,6 +23,10 @@ class EsriError(Exception):
     """The service could not be asked, or answered with an error."""
 
 
+class TooManyError(EsriError):
+    """A query matched more features than the caller's limit (read nothing rather than a part)."""
+
+
 class InvalidTokenError(EsriError):
     """The server called the token invalid or expired (498, 499)."""
 
@@ -131,11 +135,17 @@ class EsriClient:
         page: int = 2000,
         limit: int = 1_000_000,
         cancelled: Optional[Callable[[], bool]] = None,
+        cut: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Every feature matching `where` (in WGS 84 when `geometry`): pages of
-        `resultOffset` while the layer pages, else the object ids first and
+        `resultOffset` (in object id order, so that pages neither skip nor
+        repeat rows) while the layer pages, else the object ids first and
         the features by ids, `maxRecordCount` at a time.
+
+        More than `limit` features is an error (TooManyError: never a silent
+        cut, which would drop the newest rows), unless `cut` (the first
+        `limit` are wanted, e.g. a user-set maximum).
         """
         info = self.layer(url, token)
         params = {"where": where or "1=1", "outFields": out_fields, "returnGeometry": "true" if geometry else "false", **(extra or {})}
@@ -143,22 +153,41 @@ class EsriClient:
             params["outSR"] = "4326"
         size = max(1, min(page, info.max_record_count or page))
         out: list[dict[str, Any]] = []
+
+        def too_many() -> "TooManyError":
+            return TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
+
         if info.supports_pagination:
+            if "orderByFields" not in params:
+                params["orderByFields"] = info.object_id_field
             offset = 0
-            while offset < limit:
+            while True:
                 if cancelled and cancelled():
                     raise EsriError("取消")
-                json_ = self.ask(f"{url}/query", {**params, "resultOffset": str(offset), "resultRecordCount": str(size)}, token)
+                count = size if cut is False else max(1, min(size, limit - offset))
+                json_ = self.ask(f"{url}/query", {**params, "resultOffset": str(offset), "resultRecordCount": str(count)}, token)
                 features = json_.get("features") or []
                 out.extend(features)
                 # Servers that page say so; some leave the flag out on a full page.
-                more = bool(json_.get("exceededTransferLimit")) or len(features) >= size
+                more = bool(json_.get("exceededTransferLimit")) or len(features) >= count
                 if not features or not more:
                     break
                 offset += len(features)
-            return out
+                if offset >= limit:
+                    if cut:
+                        break
+                    # Exactly `limit` is fine: only a row past it is too many.
+                    probe = self.ask(f"{url}/query", {**params, "resultOffset": str(offset), "resultRecordCount": "1"}, token)
+                    if probe.get("features"):
+                        raise too_many()
+                    break
+            return out[:limit]
         ids_json = self.ask(f"{url}/query", {"where": params["where"], "returnIdsOnly": "true", **(extra or {})}, token)
-        ids = sorted(i for i in ids_json.get("objectIds") or [] if is_number(i))[:limit]
+        ids = sorted(i for i in ids_json.get("objectIds") or [] if is_number(i))
+        if len(ids) > limit:
+            if not cut:
+                raise too_many()
+            ids = ids[:limit]
         for start in range(0, len(ids), size):
             if cancelled and cancelled():
                 raise EsriError("取消")

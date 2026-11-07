@@ -25,7 +25,7 @@ from ..core.request.model import CATEGORIES, priority_text
 from ..core.request.simulate import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, simulate,
 )
-from ..core.request.store import load_history, load_requests
+from ..core.request.store import history_where, load_history, load_requests
 from ..core.request.workflow import clouds_of, forecast_places
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
@@ -201,7 +201,8 @@ class LimitSimDialog(QDialog):
             notes = []
             if read_ledger or old is None:
                 requests = load_requests(client, store, token, task.isCanceled)
-                history = load_history(client, store, token, cancelled=task.isCanceled) if store.history else []
+                history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
+                           if store.history else [])
             else:
                 requests, history = old[0], old[1]
             forecasts = {}
