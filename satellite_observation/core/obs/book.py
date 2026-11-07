@@ -129,6 +129,27 @@ class BulkOutcome:
         return "・".join(parts)
 
 
+@dataclass
+class RemoveOutcome:
+    """What became of deleting several records at once."""
+    removed: list = field(default_factory=list)
+    #: Chosen but no longer here (already deleted).
+    missing: int = 0
+    #: Not deleted: of them, changed by someone else since read.
+    failed: int = 0
+    conflicts: int = 0
+    error: str = ""
+
+    def text(self) -> str:
+        parts = [f"{len(self.removed)} 件の記録を削除"]
+        if self.missing:
+            parts.append(f"削除済み {self.missing} 件")
+        if self.failed:
+            why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから削除）" if self.conflicts else self.error)
+            parts.append(f"削除できず {self.failed} 件（{why}）")
+        return "・".join(parts)
+
+
 class ObservationBook:
     """The records of one store, and what is done with them."""
 
@@ -659,6 +680,40 @@ class ObservationBook:
             self.records = [kept.get(o.id, o) for o in self.records if o.id not in ids or o.id in kept]
         self._say(f"{len(rows)} 件の記録を削除")
         return True
+
+    def removes_for_good(self) -> bool:
+        """Whether deleting removes the records for good (an Esri layer without soft delete), so they can't be restored."""
+        check = getattr(self.store, "removes_for_good", None)
+        return bool(check()) if callable(check) else False
+
+    def remove_many(self, record_ids: Sequence[str]) -> "RemoveOutcome":
+        """
+        Deletes several records at once (選んだ記録の削除), in one go. The store's checks
+        hold: a record someone else changed since it was read is left; those that went
+        through are taken out (or marked) here, and the rest told.
+        """
+        outcome = RemoveOutcome()
+        wanted = set(record_ids)
+        targets = [o for o in self.records if o.id in wanted and o.deleted_at is None]
+        outcome.missing = len(wanted) - len(targets)
+        if not targets:
+            self._say(outcome.text())
+            return outcome
+        try:
+            marked = self.store.remove(targets)
+            done = {o.id for o in targets}
+        except Exception as error:  # noqa: BLE001 (told; the part that went through is kept)
+            done = set(getattr(self.store, "last_removed", set())) & {o.id for o in targets}
+            marked = list(getattr(self.store, "last_marked", []))
+            outcome.conflicts = len(getattr(self.store, "last_conflicts", set()) & {o.id for o in targets})
+            outcome.failed = len(targets) - len(done)
+            outcome.error = _error_text(error)
+        kept = {o.id: o for o in marked if o.id in done}
+        with self.lock:
+            self.records = [kept.get(o.id, o) for o in self.records if o.id not in done or o.id in kept]
+        outcome.removed = [o for o in targets if o.id in done]
+        self._say(outcome.text())
+        return outcome
 
     def restore(self, rows: Iterable[Observation]) -> bool:
         """Brings deleted records back."""

@@ -131,3 +131,67 @@ def test_records_someone_else_changed_are_left_and_the_rest_saved(tmp_path):
     server = {o.id: o for o in theirs.load()}
     assert (server["a"].confidence, server["b"].confidence, server["b"].note) == ("確定", "", "ほかの人")
     db.close()
+
+
+# ---- 選んだ記録の削除 (ObservationBook.remove_many) ------------------------------------------
+
+
+def test_records_are_deleted_together_locally_and_can_be_restored(tmp_path):
+    said = []
+    db = open_local(str(tmp_path / "local.gpkg"))
+    store = LocalObservationStore(db)
+    store.save([obs(id="a"), obs(id="b"), obs(id="c"), obs(id="d", deleted_at=day(21))])
+    book, other = _book(store, tmp_path, said)
+    assert not book.removes_for_good()
+    out = book.remove_many(["a", "c", "d"])
+    assert sorted(o.id for o in out.removed) == ["a", "c"] and out.missing == 1 and out.failed == 0
+    assert said[-1] == "2 件の記録を削除・削除済み 1 件"
+    assert sorted(o.id for o in book.living()) == ["b"]
+    rec = {o.id: o for o in store.load()}
+    assert rec["a"].deleted_at is not None and rec["c"].deleted_at is not None and rec["b"].deleted_at is None
+    # Soft: still restorable.
+    assert book.restore([o for o in book.records if o.id in ("a", "c")])
+    assert sorted(o.id for o in book.living()) == ["a", "b", "c"]
+    db.close()
+    other.close()
+
+
+def test_records_someone_else_changed_are_not_deleted_and_the_rest_are(tmp_path):
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: DATES.get(n, "esriFieldTypeString") for n in ALL + ["CONFIDENCE", "UPDATED_BY"]}))
+    config = observation_store_of({"url": URL}, [], 0)
+    mine, theirs = EsriObservationStore(config, EsriClient(fake)), EsriObservationStore(config, EsriClient(fake))
+    mine.save([obs(id="a"), obs(id="b"), obs(id="c")])
+    said = []
+    book, db = _book(mine, tmp_path, said)
+    b = next(o for o in theirs.load() if o.id == "b")
+    theirs.save([replace(b, note="ほかの人", updated_at=day(25))])
+    assert not book.removes_for_good()
+    out = book.remove_many(["a", "b", "c"])
+    assert sorted(o.id for o in out.removed) == ["a", "c"]
+    assert (out.failed, out.conflicts) == (1, 1)
+    assert said[-1].startswith("2 件の記録を削除・削除できず 1 件（うち 1 件はほかの人が読み込み後に更新")
+    here = {o.id: o for o in book.records}
+    assert here["a"].deleted_at is not None and here["c"].deleted_at is not None and here["b"].deleted_at is None
+    server = {o.id: o for o in theirs.load()}
+    assert server["a"].deleted_at is not None and server["b"].deleted_at is None and server["b"].note == "ほかの人"
+    db.close()
+
+
+def test_records_are_removed_for_good_where_the_layer_has_no_soft_delete(tmp_path):
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: DATES.get(n, "esriFieldTypeString") for n in ALL if n != "DELETED_AT"}))
+    config = observation_store_of({"url": URL}, [], 0)
+    store = EsriObservationStore(config, EsriClient(fake))
+    store.save([obs(id="a"), obs(id="b"), obs(id="c")])
+    said = []
+    book, db = _book(store, tmp_path, said)
+    assert book.removes_for_good()
+    # Someone else already removed b: a and c go, b is told.
+    fake.layers[URL].rows = [r for r in fake.layers[URL].rows if r["attributes"]["OBS_ID"] != "b"]
+    out = book.remove_many(["a", "b", "c"])
+    assert sorted(o.id for o in out.removed) == ["a", "c"] and out.failed == 1
+    assert "削除できず 1 件（1 件の削除に失敗" in said[-1]
+    assert [o.id for o in book.records] == ["b"]
+    assert fake.layers[URL].rows == []
+    db.close()

@@ -306,6 +306,9 @@ class EsriObservationStore:
         self.pending: dict[str, float] = {}
         self.last_saved: set[str] = set()
         self.last_conflicts: set[str] = set()
+        #: The ids the last remove went through for, and the records of them marked (kept): when it raises, part may be done.
+        self.last_removed: set[str] = set()
+        self.last_marked: list[Observation] = []
         self._layer = _EsriLayer(client, config.url, token, config.label, [config.fields["id"], config.fields["objectId"]])
 
     def _feature_of(self, o: Observation, types: dict[str, str], oid: str) -> dict[str, Any]:
@@ -382,12 +385,12 @@ class EsriObservationStore:
         return conflicts
 
     def save(self, records: list[Observation]) -> None:
+        #: The ids this save wrote, and those it left for someone else's change (for a bulk change to tell which went through).
+        self.last_saved, self.last_conflicts = set(), set()
         if not records:
             return
         types, oid = self._layer.ready()
         failed: list[str] = []
-        #: The ids this save wrote, and those it left for someone else's change (for a bulk change to tell which went through).
-        self.last_saved, self.last_conflicts = set(), set()
         conflicts = set(self._check(records, types, oid))
         self.last_conflicts = set(conflicts)
         records = [o for o in records if o.id not in conflicts]
@@ -421,12 +424,22 @@ class EsriObservationStore:
                 parts.append(f"{len(failed)} 件の保存に失敗: {failed[0]}")
             raise (EsriError if failed else ConflictError)("・".join(parts))
 
+    def removes_for_good(self) -> bool:
+        """Whether a delete removes the features (no 削除日時 field to mark, or `softDelete: false`)."""
+        types, _ = self._layer.ready()
+        return not (self.config.soft_delete and self.config.fields["deleted"] in types)
+
     def remove(self, records: list[Observation], now: Optional[int] = None) -> list[Observation]:
         marked = _marked(records, now)
-        types, _ = self._layer.ready()
-        if self.config.soft_delete and self.config.fields["deleted"] in types:
-            self.save(marked)
+        self.last_removed, self.last_marked = set(), []
+        if not self.removes_for_good():
+            try:
+                self.save(marked)
+            finally:
+                self.last_removed = set(self.last_saved)
+                self.last_marked = [o for o in marked if o.id in self.last_saved]
             return marked
+        self.last_removed = {o.id for o in records if o.id not in self.oids}
         ids = [self.oids[o.id] for o in records if o.id in self.oids]
         if ids:
             results = self.client.delete_features(self.config.url, ids, token=self.token)
@@ -441,6 +454,7 @@ class EsriObservationStore:
             for o in records:
                 if self.oids.get(o.id, -1) not in failed:
                     self.oids.pop(o.id, None)
+                    self.last_removed.add(o.id)
             if failed:
                 raise EsriError(f"{len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
         return []
