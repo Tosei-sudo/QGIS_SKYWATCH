@@ -8,7 +8,8 @@ never in the settings file.
 their text), line edits, spin boxes and check boxes: `restore()` puts back
 what was kept (a choice no longer offered is left as it is), `save()` keeps
 what the widgets say now, and `watch()` saves whenever one changes (the
-docks, which have no 「OK」). `forget_all()` clears every form's values.
+docks, which have no 「OK」). `forget_all()` clears every form's values
+(the settings dialog's 「覚えた値を消去」).
 """
 from __future__ import annotations
 
@@ -37,9 +38,14 @@ def write(form: str, values: Mapping) -> None:
     QgsSettings().setValue(f"{PREFIX}{KEY}/{form}", json.dumps(dict(values), ensure_ascii=False))
 
 
+#: The observation form's last kind, activity and 確度, per store (core.obs.book.ObservationBook.remember).
+OBSERVATION_LAST = "observations/last_values"
+
+
 def forget_all() -> None:
-    """Every form's kept values cleared: the forms start from their own defaults again."""
+    """Every form's kept values cleared (the observation form's too): the forms start from their own defaults again."""
     QgsSettings().remove(f"{PREFIX}{KEY}")
+    QgsSettings().remove(f"{PREFIX}{OBSERVATION_LAST}")
 
 
 def value_of(widget: QWidget):

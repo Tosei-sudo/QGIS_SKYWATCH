@@ -105,3 +105,20 @@ def test_a_new_request_starts_from_the_last_one_saved(plugin):
         "SAR", 150, "SYS-B", "RADAR 1", "山田")
     assert form.size.value() == 25
     form.close()
+
+
+def test_the_settings_dialog_forgets_the_kept_values(plugin):
+    from satellite_observation.ui.settings_dialog import SettingsDialog
+
+    p, iface, fake, tmp_path = plugin
+    last_inputs.write("request", {"kind": "SAR"})
+    QgsSettings().setValue("satellite_observation/observations/last_values/ローカル", '{"kind": "船舶"}')
+    QgsSettings().setValue("satellite_observation/observations/points", "2")
+    dialog = SettingsDialog(p.context)
+    dialog.forget_inputs.click()
+    assert last_inputs.read("request") == {}
+    assert QgsSettings().value("satellite_observation/observations/last_values/ローカル", "") == ""
+    # Other settings stay.
+    assert QgsSettings().value("satellite_observation/observations/points") == "2"
+    assert "消去済み" in dialog.last_inputs.text()
+    dialog.close()
