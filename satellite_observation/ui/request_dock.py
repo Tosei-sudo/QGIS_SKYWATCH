@@ -1,8 +1,9 @@
 """
 The 「撮像依頼」 dock: the imaging request ledger (`requestStores`). It lists
 the requests (filtered by category and status) and shows them on the map;
-requests are added and changed in a form, 定点 requests taken in from a
-layer or written out to one (docs/imaging-requests.md). The day's files are
+requests are added and changed in a form; 「レイヤーから取り込み…」 takes the
+areas and names of a layer's features and asks the rest once in the form
+(or reads every item from a layer written out by 「レイヤーへ書き出し」) (docs/imaging-requests.md). The day's files are
 written in a dock of its own, 「撮像計画ファイル出力」 (plan_file_dock.py). Every request to the service runs in a QgsTask.
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ from qgis.core import QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
+    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
 )
 
 from ..core.request.bulk import RequestChange, apply_change
@@ -116,20 +117,16 @@ class RequestDock(PluginDock):
         self.body.addLayout(edit)
 
         layers = QHBoxLayout()
-        self.import_button = QPushButton(self.tr("レイヤーから取り込み"))
-        self.import_button.setToolTip(self.tr("作業中のレイヤーの地物（選択があれば選択中のもの）を定点の依頼として取り込み。"
-                                              "依頼ID が同じ依頼は上書き"))
+        self.import_button = QPushButton(self.tr("レイヤーから取り込み…"))
+        self.import_button.setToolTip(self.tr("レイヤーと名称の属性を選び、地物の範囲と名称で依頼を登録。"
+                                              "期間・優先度・衛星などは入力画面でまとめて指定"))
         self.import_button.clicked.connect(lambda: self.import_layer())
-        self.point_km = QDoubleSpinBox()
-        self.point_km.setRange(0.1, 500)
-        self.point_km.setValue(10)
-        self.point_km.setSuffix(" km")
-        self.point_km.setToolTip(self.tr("点の地物を取り込むときの範囲の一辺"))
+        #: The side of a point feature's square last used.
+        self.point_km = 10.0
         self.export_button = QPushButton(self.tr("レイヤーへ書き出し"))
         self.export_button.setToolTip(self.tr("一覧に出ている依頼を一時レイヤーとして追加（区分で「定点」を選ぶと定点のみ）"))
         self.export_button.clicked.connect(lambda: self.export_layer())
         layers.addWidget(self.import_button)
-        layers.addWidget(self.point_km)
         layers.addWidget(self.export_button)
         layers.addStretch(1)
         self.body.addLayout(layers)
@@ -410,8 +407,105 @@ class RequestDock(PluginDock):
         self.status.setText(self.tr("{n} 件をレイヤー「{name}」に書き出し").format(n=len(self.shown), name=layer.name()))
         return layer
 
-    def import_layer(self, layer: Optional[QgsVectorLayer] = None, ask: bool = True) -> None:
-        """Takes in the features of a layer (the active one) as 定点 requests: new ones added, those with a known 依頼ID changed."""
+    def import_layer(self, layer: Optional[QgsVectorLayer] = None):
+        """Asks which layer and which attribute names the requests (「レイヤーから取り込み…」), then opens the form for the rest."""
+        from .layer_import_dialog import LayerImportDialog
+
+        if not self._loaded or self.store is None:
+            self.status.setText(self.tr("台帳を読み込んでから取り込み"))
+            return None
+        active = layer or self.iface.activeLayer()
+        dialog = LayerImportDialog(active if isinstance(active, QgsVectorLayer) and active.isSpatial() else None, self.point_km, self)
+
+        def chosen():
+            layer = dialog.chosen_layer()
+            self.point_km = dialog.point_km.value()
+            if layer is None:
+                return
+            selected = dialog.selected_only.isChecked()
+            if dialog.full.isChecked():
+                self.import_rows(layer, selected=selected)
+            else:
+                self.take_layer(layer, dialog.name_field.currentField(), selected)
+
+        dialog.accepted.connect(chosen)
+        dialog.finished.connect(lambda _r: dialog.deleteLater())
+        dialog.open()
+        return dialog
+
+    def take_layer(self, layer: QgsVectorLayer, name_field: str = "", selected: bool = False):
+        """Opens the form for the features of a layer: their areas and names (`name_field`) as they are, the rest asked once."""
+        from .request_form import RequestForm
+
+        if self.store is None:
+            return None
+        rows = layer_rows(layer, selected and layer.selectedFeatureCount() > 0, self.point_km)
+        items, skipped = [], 0
+        for i, (values, rings, kind) in enumerate(rows):
+            if not rings:
+                skipped += 1
+                continue
+            name = values.get(name_field) if name_field else None
+            name = str(name).strip() if name not in (None, "") else ""
+            items.append((name or f"{layer.name()} {i + 1}", rings, kind))
+        if not items:
+            self.status.setText(self.tr("取り込める地物なし（範囲のない地物のみ）"))
+            return None
+        if self.form is not None:
+            self.form.close()
+        base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+        base.category, base.achieve = "定点", "毎回"
+        names = "、".join(n for n, _r, _k in items[:3]) + ("…" if len(items) > 3 else "")
+        text = self.tr("レイヤー「{layer}」の地物 {n} 件（名称: {field}）").format(
+            layer=layer.name(), n=len(items), field=name_field or self.tr("レイヤー名と連番"))
+        if skipped:
+            text += self.tr("・範囲のない地物 {k} 件は除く").format(k=skipped)
+        batch = {"items": items, "text": text, "names": names}
+        self.form = RequestForm(self.iface, base, lambda template: self._save_batch(template, items), self.known(), self, batch=batch)
+        self.form.show()
+        return self.form
+
+    def _save_batch(self, template: ImagingRequest, items: list) -> None:
+        """Saves one request per feature: the form's items, the feature's name and area."""
+        store, client, token = self.store, self.context.esri(), self.token()
+        form = self.form
+        todo = []
+        for name, rings, kind in items:
+            r = ImagingRequest(**{**template.__dict__})
+            r.id, r.object_id = new_request_id(), None
+            r.name, r.rings, r.shape_kind = name, [list(x) for x in rings], kind
+            todo.append(r)
+
+        def work(task):
+            saved, failed = 0, []
+            for k, r in enumerate(todo):
+                if task.isCanceled():
+                    break
+                try:
+                    save_request(client, store, token, r, _now_ms())
+                    saved += 1
+                except Exception as error:  # noqa: BLE001 (each one reported)
+                    failed.append(f"{r.name}: {error}")
+                task.progress(100 * (k + 1) / len(todo))
+            return saved, failed
+
+        def done(result):
+            saved, failed = result
+            last_inputs.write("request", remembered(template))
+            if form is not None:
+                form.accept()
+            self.reload(lambda: self.status.setText(
+                self.tr("{n} 件を取り込み").format(n=saved)
+                + (self.tr("（失敗 {m} 件: {list}）").format(m=len(failed), list="、".join(failed[:3])) if failed else "")))
+
+        if not self._start(self.tr("撮像依頼の取り込み"), work, done,
+                           lambda m: form.message.setText(self.tr("取り込み失敗: {m}").format(m=m)) if form else self.status.setText(m)):
+            if form is not None:
+                form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
+
+    def import_rows(self, layer: Optional[QgsVectorLayer] = None, ask: bool = True, selected: Optional[bool] = None) -> None:
+        """Takes in the features of a layer with every item from its attributes (as 「レイヤーへ書き出し」 writes them):
+        new ones added, those with a known 依頼ID changed."""
         layer = layer or self.iface.activeLayer()
         if not isinstance(layer, QgsVectorLayer) or not layer.isSpatial():
             self.status.setText(self.tr("取り込むレイヤー（ポリゴンか点）を作業中のレイヤーに選択"))
@@ -419,8 +513,8 @@ class RequestDock(PluginDock):
         if not self._loaded or self.store is None:
             self.status.setText(self.tr("台帳を読み込んでから取り込み"))
             return
-        selected = layer.selectedFeatureCount() > 0
-        rows = layer_rows(layer, selected, self.point_km.value())
+        selected = layer.selectedFeatureCount() > 0 if selected is None else selected and layer.selectedFeatureCount() > 0
+        rows = layer_rows(layer, selected, self.point_km)
         roles = field_roles([f.name() for f in layer.fields()])
         by_id = {r.id: r for r in self.requests}
         requests, skipped, kept = [], [], []

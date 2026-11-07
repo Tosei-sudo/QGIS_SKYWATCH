@@ -15,7 +15,7 @@ from qgis.testing import start_app  # noqa: E402
 
 APP = start_app()
 
-from qgis.core import QgsFeature, QgsGeometry, QgsPointXY, QgsProject, QgsSettings, QgsVectorLayer  # noqa: E402
+from qgis.core import QgsFeature, QgsGeometry, QgsPointXY, QgsProject, QgsRectangle, QgsSettings, QgsVectorLayer  # noqa: E402
 from qgis.PyQt.QtCore import QDate, Qt  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
@@ -134,7 +134,7 @@ def test_requests_dock_form_layers_and_the_day(plugin):
 
     # 定点 requests from a point layer: the row without a period is left out.
     layer = fixed_layer()
-    dock.import_layer(layer, ask=False)
+    dock.import_rows(layer, ask=False)
     assert wait_for(lambda: dock.task is None and len(dock.requests) == 3)
     fixed = {x.name: x for x in dock.requests if x.category == "定点"}
     assert set(fixed) == {"横須賀", "呉"}
@@ -143,9 +143,39 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     dock.category_filter.setCurrentText("定点")
     out = dock.export_layer()
     assert out.featureCount() == 2 and out.fields().indexOf("REQ_ID") >= 0
-    dock.import_layer(out, ask=False)
+    dock.import_rows(out, ask=False)
     assert wait_for(lambda: dock.task is None and dock.status.text().startswith("2 件を取り込み"))
     assert len(dock.requests) == 3
+
+    # 「レイヤーから取り込み…」: a layer chosen with its name attribute, the rest given once in the form.
+    zones = QgsVectorLayer("Polygon?crs=EPSG:4326&field=地区:string&field=番号:integer", "監視区域", "memory")
+    feats = []
+    for name, lon in (("舞鶴", 135.3), ("佐世保", 129.7)):
+        f = QgsFeature(zones.fields())
+        f.setAttributes([name, 1])
+        f.setGeometry(QgsGeometry.fromRect(QgsRectangle(lon, 35.0, lon + 0.1, 35.1)))
+        feats.append(f)
+    zones.dataProvider().addFeatures(feats)
+    QgsProject.instance().addMapLayer(zones)
+    dialog = dock.import_layer(zones)
+    assert dialog.chosen_layer() is zones and dialog.simple.isChecked()
+    dialog.name_field.setField("地区")
+    dialog.accept()
+    form = dock.form
+    assert form.batch is not None and len(form.batch["items"]) == 2 and not form.name.isEnabled()
+    form.category.setCurrentText("定点")
+    form.kind.setCurrentText("SAR")
+    form.priority.setValue(700)
+    form._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 5), dock.status.text()
+    zoned = {x.name: x for x in dock.requests if x.name in ("舞鶴", "佐世保")}
+    assert set(zoned) == {"舞鶴", "佐世保"} and len({x.id for x in zoned.values()}) == 2
+    assert all(x.kind == "SAR" and x.priority == 700 and x.category == "定点" and x.shape_kind == "範囲" for x in zoned.values())
+    assert abs(zoned["舞鶴"].rings[0][0][0] - 135.3) < 1e-6
+    # Out of the day's work below.
+    fake.layers[LEDGER].rows[:] = [row for row in fake.layers[LEDGER].rows if row["attributes"]["REQ_NAME"] not in ("舞鶴", "佐世保")]
+    dock.reload()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 3)
 
     # The day: SYS-A takes one a day (横須賀, higher), 呉 is held back; the SAR one goes to SYS-B by the catalog's system.
     # The day's files are a dock of their own (those writing them are not those registering requests).
@@ -311,7 +341,7 @@ def test_import_reads_the_ledger_first_and_skips_repeated_ids(plugin):
         feats.append(f)
     layer.dataProvider().addFeatures(feats)
     QgsProject.instance().addMapLayer(layer)
-    dock.import_layer(layer, ask=False)
+    dock.import_rows(layer, ask=False)
     assert wait_for(lambda: dock.task is None and dock.status.text().startswith("2 件を取り込み")), dock.status.text()
     ids = sorted(r["attributes"]["REQ_ID"] for r in fake.layers[LEDGER].rows)
     assert ids == ["R-10", "R-9"]
