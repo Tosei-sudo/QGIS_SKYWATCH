@@ -30,6 +30,8 @@ from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
+from .request.store import RequestStoreConfig, request_store_of
+from .request.systems import ExportSystem, export_systems_of
 from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .startup_layers import StartupLayer, startup_layers_of
@@ -40,7 +42,7 @@ KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs", "aiResultSources", "timeZones",
+    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports",
 )
 
 
@@ -86,6 +88,10 @@ class PluginConfig:
     #: The zone each source's dates are really in, when the service says otherwise:
     #: the `timeZone` of a source entry (its URLs and the layers under them), then `timeZones` rules.
     time_zones: list[TimeZoneRule] = field(default_factory=list)
+    #: The imaging request ledgers (撮像依頼) and their history tables.
+    request_stores: list[RequestStoreConfig] = field(default_factory=list)
+    #: The satellite systems the day's requests are written for (in the order they are tried).
+    request_exports: list[ExportSystem] = field(default_factory=list)
 
 
 class JsoncError(ValueError):
@@ -233,6 +239,9 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     config.detection_outputs = listed("detectionOutputs", detection_output_of)
     config.ai_result_sources = listed("aiResultSources", ai_result_source_of)
     config.time_zones = time_zones_of(value, problems)
+    config.request_stores = listed("requestStores", request_store_of)
+    if "requestExports" in value:
+        config.request_exports = export_systems_of(value["requestExports"], problems)
     return config, problems
 
 

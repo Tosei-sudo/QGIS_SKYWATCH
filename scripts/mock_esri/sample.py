@@ -294,9 +294,9 @@ REQUEST_FIELDS = {
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
     "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
 }
-HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "REQ_ID": {"type": S, "length": 64}, "SYSTEM": S, "PRIORITY_OUT": S,
-                  "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000}, "FILE": {"type": S, "length": 1000},
-                  "CAPTURED": S, "IMAGE_ID": S}
+HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "REQ_ID": {"type": S, "length": 64}, "SYSTEM": S,
+                  "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
+                  "FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
 
 TAXONOMY_ROWS = [
     ("船舶", "大分類,種別,級", "艦名", "", "入港,出港,停泊,航行,荷役"),
@@ -476,10 +476,27 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
     {{ "type": "features", "label": "モック地名", "url": "{rest}/Places/FeatureServer/0", "field": "NAME"{tk} }},
     {{ "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" }}
   ],
-  // 撮像依頼台帳（開発中の機能。設計書 imaging-requests-design.md の既定の属性名）
+  // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）
   "requestStores": [
     {{ "label": "モック撮像依頼", "url": "{rest}/Requests/FeatureServer/0", "history": "{rest}/Requests/FeatureServer/1",
       "catalog": "モック画像カタログ", "fields": {{}}{tk} }}
+  ],
+  "requestExports": [
+    {{ "system": "MOCK-OPT", "label": "モック光学システム", "kind": "光学", "series": ["OPT-X"], "limit": {{ "count": 10 }},
+      "format": "csv", "encoding": "cp932", "timeZone": "Asia/Tokyo", "dateFormat": "%Y/%m/%d %H:%M",
+      "priority": {{ "table": [{{ "max": 200, "value": "High" }}, {{ "max": 600, "value": "Middle" }}, {{ "max": 1000, "value": "Low" }}] }},
+      "columns": [{{ "key": "依頼ID", "source": "id" }}, {{ "key": "名称", "source": "name" }}, {{ "key": "衛星", "source": "satellite" }},
+                  {{ "key": "開始", "source": "start" }}, {{ "key": "終了", "source": "end" }}, {{ "key": "範囲", "source": "geometry", "geometry": "wkt", "digits": 5 }},
+                  {{ "key": "優先度", "source": "priority" }}, {{ "key": "雲量予報", "source": "cloudForecast" }}, {{ "key": "備考", "source": "warnings" }}] }},
+    {{ "system": "MOCK-SAR", "label": "モックSARシステム", "kind": "SAR", "series": ["SAR-Y"], "limit": {{ "count": 10, "scenes": 20 }}, "sceneKm": [30, 30],
+      "format": "json", "timeZone": "UTC",
+      "priority": {{ "linear": {{ "min": 1, "max": 5 }} }},
+      "schema": {{ "type": "object", "required": ["tasks"], "properties": {{
+        "issuedAt": {{ "type": "string", "format": "date-time", "x-source": "runDate" }},
+        "tasks": {{ "type": "array", "x-source": "requests", "items": {{ "type": "object", "required": ["id", "aoi"], "properties": {{
+          "id": {{ "type": "string", "x-source": "id" }}, "satellite": {{ "type": "string", "x-source": "satellite" }},
+          "start": {{ "type": "string", "format": "date-time", "x-source": "start" }}, "end": {{ "type": "string", "format": "date-time", "x-source": "end" }},
+          "aoi": {{ "type": "object", "x-source": "geometry", "x-geometry": "geojson" }}, "priority": {{ "type": "integer", "x-source": "priority" }} }} }} }} }} }} }}
   ]
 }}
 """

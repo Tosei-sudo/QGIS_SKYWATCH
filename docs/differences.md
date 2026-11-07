@@ -513,3 +513,15 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 
 - 衛星パスの一覧で、左右に見られて最小オフナディア角が 0 の衛星（1 本の帯）の撮像可能範囲が「20〜20°・左右」になる（`offNadir.min` が帯の内側の端の絶対値 = 最大角になるため。テストもこの値を期待している）。「20° 以下・左右」が意図と思われる。プラグインは直した（2026-10-27 に決定）
 - README の `config.json` の例（設定ファイルの節）は `detectionOutputs` の後ろの `],` が抜けていて JSON として読めない。テスト用の写し（`satellite_observation/tests/data/viewer-config.jsonc`）では補った
+
+## 撮像依頼台帳と日次出力（2026-11-07）
+
+ビューアにない、プラグインだけの機能（tsudo の依頼）。設計は [imaging-requests.md](imaging-requests.md)。
+
+| 項目 | ビューア | プラグイン | 理由 |
+| --- | --- | --- | --- |
+| 撮像依頼（定点・臨時）の台帳 | なし | 「撮像依頼」ドック。`requestStores` の Esri フィーチャーサービスに保存 | 実際の運用では、パスの可否より「いつ・どこを・どのセンサーで」を各システムに入力するため |
+| 日次出力 | なし | 「本日分を出力…」。`requestExports` のシステムごとに CSV（キー指定）か JSON（JSON Schema、`x-source` で項目を指定）を書き出す | 同上 |
+| 衛星カタログの `system` | なし | `satelliteCatalogs[].fields.system` で衛星ごとの発注システムを指定可（なければ `requestExports` の `series`・`satellites`） | 衛星の入れ替えをカタログの更新だけで済ませるため |
+| 枚数の見積もり | — | 依頼の範囲の外接矩形をシーンの大きさ（モード指定時はその幅と長さ、なければ `sceneKm`）の格子に分け、範囲にかかるマスの数。パスの向きは考えない | 依頼の段階ではパスを決めないため |
+| JSON Schema の検証 | — | プラグイン内の実装（type・required・properties・items・enum・const・pattern・範囲・長さ・個数・format（date / date-time）・anyOf / oneOf / allOf・ローカルの `$ref`）。外部ライブラリは使わない | 閉域でも動かすため |

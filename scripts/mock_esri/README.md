@@ -48,7 +48,7 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | AI | 0 | 外部AIの結果（画像ごとの船と誤検出 1 件） | `aiResultSources` |
 | Detections | 0 | AI 結果の転記先（空） | `detectionOutputs` |
 | Places | 0 | 地名（横須賀港など 6 件） | `geocoders`（`type: "features"`） |
-| Requests | 0, 1 | 撮像依頼台帳（3 件）と出力履歴（設計書 imaging-requests-design.md の既定の属性名） | `requestStores`（開発中） |
+| Requests | 0, 1 | 撮像依頼台帳（3 件）と出力履歴（docs/imaging-requests.md の既定の属性名） | `requestStores`。日次出力のシステムは `requestExports`（光学 CSV・SAR JSON の 2 つ） |
 
 画像の `FILE_PATH` はこの PC の絶対パス、`COG_URL` はモックの `/files/…`（HTTP の Range に対応。`/vsicurl/` で開ける）。
 

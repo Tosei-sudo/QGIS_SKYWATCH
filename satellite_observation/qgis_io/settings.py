@@ -267,3 +267,12 @@ def remember_trained_model(label: str, path: str) -> None:
     kept = [(l, p) for l, p in trained_models() if os.path.abspath(p) != path]
     items = [{"label": label, "path": path}] + [{"label": l, "path": p} for l, p in kept]
     _set("trained_models", json.dumps(items[:TRAINED_MAX], ensure_ascii=False))
+
+
+def request_export_folder() -> str:
+    """Where the day's request files go for systems whose settings name no folder (the last one chosen)."""
+    return _get("request_export_folder")
+
+
+def set_request_export_folder(folder: str) -> None:
+    _set("request_export_folder", folder.strip())

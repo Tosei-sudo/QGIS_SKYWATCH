@@ -1,0 +1,95 @@
+"""
+The day's work end to end, without Qt: what is asked of the services
+(forecast places), the candidates fitted, and what is written back
+(history rows, raises, follow-ups).
+"""
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Optional, Sequence
+
+from ..plan.satellites import SatelliteSpec
+from ..plan.weather import CloudSeries
+from .daily import TAKEN, Candidate, allocate, gather, wants_weather
+from .export import Written, convert_priority
+from .follow import missed_ids
+from .model import ImagingRequest, occurs_on
+from .store import HistoryRow
+from .systems import ExportSystem
+from .weather import DAYLIGHT, daytime_cloud, places_of
+
+
+def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec]) -> list[tuple]:
+    """The places whose forecasts the day's optical requests need."""
+    seen: dict = {}
+    for req in requests:
+        if occurs_on(req, day) and wants_weather(req, sats):
+            for p in places_of(req):
+                seen[p] = None
+    return list(seen)
+
+
+def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str, CloudSeries],
+              hours: Sequence[float] = DAYLIGHT) -> dict:
+    """Each request's daytime cover (None where not forecast)."""
+    return {r.id: daytime_cloud(r, forecasts, day, hours) for r in requests}
+
+
+@dataclass
+class DayPlan:
+    """The day's candidates, as fitted."""
+    day: date
+    candidates: list = field(default_factory=list)
+    systems: list = field(default_factory=list)
+    sats: list = field(default_factory=list)
+    #: History rows found 未撮像 and not yet raised for (their raise is offered).
+    missed_rows: list = field(default_factory=list)
+
+    def refit(self) -> list[Candidate]:
+        """Fits again (after a change by hand)."""
+        self.candidates = allocate(self.candidates, self.systems, self.sats)
+        return self.candidates
+
+
+def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
+             clouds: dict, history: Sequence[HistoryRow] = ()) -> DayPlan:
+    """The candidates of a day, gathered and fitted."""
+    missed = missed_ids(history)
+    cands = gather(requests, day, sats, clouds, missed)
+    plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done])
+    plan.refit()
+    return plan
+
+
+def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = None) -> list[HistoryRow]:
+    """The history rows of a day written out: every candidate, taken or held back (`files`: system name → file name)."""
+    run_id = run_id or str(uuid.uuid4()).upper()
+    rows = []
+    for c in plan.candidates:
+        system = c.system.system if c.system else ""
+        rows.append(HistoryRow(
+            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id, system=system,
+            satellite=c.satellite.name if c.satellite else "",
+            priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
+            cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if c.result == TAKEN else None,
+            result=c.result, reason=c.reason or "・".join(c.warnings), file=files.get(system, "") if c.result == TAKEN else "",
+            captured="未判定" if c.result == TAKEN else "", boost_done=0))
+    return rows
+
+
+def boost_changes(plan: DayPlan) -> list[tuple[int, dict]]:
+    """The raises taken (object id, {boost})."""
+    return [(c.request.object_id, {"boost": c.boost_offer}) for c in plan.candidates
+            if c.boost_offer is not None and c.boost_taken and c.request.object_id is not None]
+
+
+def missed_done(plan: DayPlan) -> list[tuple[int, dict]]:
+    """The 未撮像 rows whose raise has now been offered (taken or not): they are not offered again."""
+    return [(r.object_id, {"boostDone": 1}) for r in plan.missed_rows if r.object_id is not None]
+
+
+def written_summary(files: Sequence[Written]) -> str:
+    """「SYS-A 12 件・SYS-C 3 件」."""
+    return "・".join(f"{w.system.label} {w.count} 件" for w in files) or "出力なし"

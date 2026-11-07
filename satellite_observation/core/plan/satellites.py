@@ -15,7 +15,7 @@ from ..util import is_name, is_number, is_record, is_url, layer_url
 #: Roles of the satellite catalog's attributes.
 SATELLITE_ROLES = (
     "name", "id", "tle", "tle1", "tle2", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "kind",
-    "scenesPerPass", "minInterval", "maxPerDay", "series", "leadTime", "sensor", "mode", "resolution",
+    "scenesPerPass", "minInterval", "maxPerDay", "series", "leadTime", "sensor", "mode", "resolution", "system",
 )
 DEFAULT_KEYS = ("maxOffNadir", "minOffNadir", "swath", "scenesPerPass", "minInterval", "maxPerDay", "leadTime")
 
@@ -174,6 +174,8 @@ class SatelliteSpec:
     resolution: Optional[float] = None
     #: Whether this is the satellite's usual mode (None for a satellite with one way of imaging).
     primary: Optional[bool] = None
+    #: The satellite system (`requestExports`) it is ordered through, when the catalog says (its `system` attribute).
+    system: Optional[str] = None
 
 
 def platform_key(sat: SatelliteSpec) -> str:
@@ -280,6 +282,7 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         sensor=_text(get("sensor")) or None,
         mode=_text(get("mode")) or None,
         resolution=resolution,
+        system=_text(get("system")) or None,
     )
 
 

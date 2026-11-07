@@ -1,0 +1,370 @@
+"""
+Writing the day's requests for each system: a CSV whose columns are named
+by keys, or a JSON built from (and checked against) the system's JSON
+Schema, whose properties say what goes in them with `x-source`.
+
+What can go in (`source` / `x-source`): see SOURCES. A request's `start`
+and `end` are the window for the day: from the day's start (or the
+request's, if later) to the day's end for 毎回, or to the request's end for
+期間内1回; `periodStart` / `periodEnd` are the request's own.
+
+Times are written in the system's `timeZone` by `dateFormat` (or the
+column's `format`): `iso` (default), `iso-date`, `unix`, `unixms`, or a
+strftime pattern (`%Y%m%d`).
+"""
+from __future__ import annotations
+
+import csv
+import io
+import json
+import math
+import os
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable, Optional, Sequence
+
+from ..time_zone import TimeZone, clock_of
+from .daily import TAKEN, Candidate, satellite_name
+from .model import bbox_of, center_of, day_bounds
+from .schema import resolve, validate
+from .systems import Column, ExportSystem, PriorityRule
+
+#: The sources a column or property can take.
+SOURCES = (
+    "id", "name", "category", "achieve", "start", "end", "periodStart", "periodEnd", "repeat", "priority", "priorityRaw",
+    "priorityBase", "boost", "kind", "series", "satellites", "modes", "satellite", "satelliteId", "mode", "sensor",
+    "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
+    "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
+    "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "note", "system", "runDate", "day", "count", "warnings",
+)
+TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate")
+GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices")
+_MISSING = object()
+
+
+def format_time(ms: float, fmt: str, zone: TimeZone) -> Any:
+    """A moment written by a format: iso, iso-date, unix, unixms or strftime, in `zone`."""
+    if ms is None or not math.isfinite(ms):
+        return None
+    if fmt == "unix":
+        return int(ms // 1000)
+    if fmt == "unixms":
+        return int(ms)
+    offset = zone.offset(ms)
+    clock = datetime.fromtimestamp(clock_of(ms, zone) / 1000, tz=timezone.utc).replace(tzinfo=timezone(timedelta(milliseconds=offset)))
+    if fmt == "iso-date":
+        return clock.strftime("%Y-%m-%d")
+    if fmt in ("iso", ""):
+        text = clock.strftime("%Y-%m-%dT%H:%M:%S")
+        if offset == 0:
+            return text + "Z"
+        sign = "+" if offset > 0 else "-"
+        m = int(abs(offset) // 60000)
+        return f"{text}{sign}{m // 60:02d}:{m % 60:02d}"
+    return clock.strftime(fmt)
+
+
+def _round(v: float, digits: int) -> float:
+    r = round(v, digits)
+    return int(r) if digits == 0 else r
+
+
+def geometry_value(rings: Sequence, kind: str, digits: int, as_object: bool = False) -> Any:
+    """Rings (longitude, latitude) written as WKT, GeoJSON, a box, a centre (with a radius) or a vertex list."""
+    if not rings:
+        return None
+    r = [[[_round(p[0], digits), _round(p[1], digits)] for p in ring] for ring in rings]
+    box = bbox_of(rings)
+    mid = center_of(rings)
+    if kind == "geojson":
+        value = {"type": "Polygon", "coordinates": r}
+        return value if as_object else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if kind == "bbox":
+        return ",".join(f"{_round(v, digits)}" for v in box)
+    if kind in ("center", "centerRadius"):
+        text = f"{_round(mid[1], digits)},{_round(mid[0], digits)}"
+        if kind == "centerRadius":
+            w, s, e, n = box
+            km_lon = 111.320 * math.cos(math.radians(mid[1]))
+            radius = math.hypot((e - w) / 2 * km_lon, (n - s) / 2 * 110.574)
+            text += f",{round(radius, 3)}"
+        return text
+    if kind == "vertices":
+        return ",".join(f"{p[1]},{p[0]}" for p in r[0])
+    def ring_text(ring):
+        return "(" + ", ".join(f"{p[0]:.{digits}f} {p[1]:.{digits}f}" for p in ring) + ")"
+    return "POLYGON (" + ", ".join(ring_text(ring) for ring in r) + ")"
+
+
+def convert_priority(p: int, rule: PriorityRule) -> Any:
+    """1 … 1000 as a system writes it (a band's value, a linear range), then its format."""
+    value: Any = p
+    if rule.table:
+        value = next((v for top, v in rule.table if p <= top), rule.table[-1][1])
+    elif rule.linear:
+        low, high = rule.linear["min"], rule.linear["max"]
+        t = (p - 1) / 999
+        value = high - t * (high - low) if rule.linear["higherIsLarger"] else low + t * (high - low)
+        if float(low).is_integer() and float(high).is_integer():
+            value = int(math.floor(value + 0.5))
+    if rule.format and isinstance(value, (int, float)):
+        value = printf(rule.format, value)
+    return value
+
+
+def printf(fmt: str, value: Any) -> Any:
+    """`%03d`, `%.1f` … applied to a number; the value as it is when the format does not fit."""
+    try:
+        if re.search(r"%[-+ 0#]*\d*d", fmt):
+            return fmt % int(math.floor(float(value) + 0.5))
+        return fmt % value
+    except (TypeError, ValueError):
+        return value
+
+
+@dataclass
+class Context:
+    """What the values of one file are made from."""
+    system: ExportSystem
+    day: date
+    run: float
+    count: int = 0
+
+
+def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str = "wkt", digits: Optional[int] = None,
+              as_object: bool = False) -> Any:
+    """The value of a source for one candidate (or the file, `c` None), before maps and formats."""
+    if source == "system":
+        return ctx.system.system
+    if source == "runDate":
+        return ctx.run
+    if source == "day":
+        return ctx.day.isoformat()
+    if source == "count":
+        return ctx.count
+    if c is None:
+        return _MISSING
+    req = c.request
+    first, last = day_bounds(ctx.day)
+    digits = ctx.system.digits if digits is None else digits
+    box = bbox_of(req.rings)
+    mid = center_of(req.rings)
+    values = {
+        "id": req.id, "name": req.name, "category": req.category, "achieve": req.achieve,
+        "start": max(req.start, first) if math.isfinite(req.start) else first,
+        "end": (min(req.end, last) if req.achieve == "毎回" else req.end) if math.isfinite(req.end) else last,
+        "periodStart": req.start, "periodEnd": req.end, "repeat": req.repeat,
+        "priority": convert_priority(c.priority, ctx.system.priority), "priorityRaw": c.priority,
+        "priorityBase": req.priority, "boost": c.boost, "kind": req.kind,
+        "series": ",".join(req.series), "satellites": ",".join(req.satellites), "modes": ",".join(req.modes),
+        "satellite": c.satellite.name if c.satellite else "", "satelliteId": c.satellite.id if c.satellite else "",
+        "mode": (c.satellite.mode or "") if c.satellite else "", "sensor": (c.satellite.sensor or "") if c.satellite else "",
+        "offNadirMin": req.off_nadir_min, "offNadirMax": req.off_nadir_max,
+        "incidenceMin": req.incidence_min, "incidenceMax": req.incidence_max,
+        "lookSide": req.look_side, "orbitDir": req.orbit_dir, "resolution": req.resolution, "timeOfDay": req.time_of_day,
+        "cloudMax": req.cloud_no_go, "cloudForecast": None if c.cloud is None else int(math.floor(c.cloud + 0.5)),
+        "weatherFlag": c.weather_flag or "", "scenes": c.scenes,
+        "centerLat": _round(mid[1], digits) if mid else None, "centerLon": _round(mid[0], digits) if mid else None,
+        "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,
+        "bboxEast": _round(box[2], digits) if box else None, "bboxNorth": _round(box[3], digits) if box else None,
+        "requester": req.requester, "note": req.note, "warnings": "・".join(c.warnings),
+    }
+    if source == "geometry":
+        return geometry_value(req.rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
+    return values.get(source, _MISSING)
+
+
+def shaped(value: Any, source: str, ctx: Context, fmt: Optional[str], mapping: dict) -> Any:
+    """A value with the system's map of its source, the column's map, and its format."""
+    if value is _MISSING:
+        return value
+    system_map = ctx.system.values.get(source) or {}
+    if isinstance(value, str) and value in system_map:
+        value = system_map[value]
+    if isinstance(value, (str, int, float)) and str(value) in {str(k) for k in mapping}:
+        value = next(v for k, v in mapping.items() if str(k) == str(value))
+    if source in TIME_SOURCES and isinstance(value, (int, float)):
+        return format_time(value, fmt or ctx.system.date_format, ctx.system.time_zone)
+    if fmt and isinstance(value, (int, float)) and not isinstance(value, bool):
+        return printf(fmt, value)
+    return value
+
+
+def cell_value(c: Candidate, col: Column, ctx: Context) -> Any:
+    if col.source is None:
+        return col.value
+    v = raw_value(c, col.source, ctx, col.geometry or "wkt", col.digits)
+    return shaped(v, col.source, ctx, col.format, col.map)
+
+
+@dataclass
+class Written:
+    """One system's file: its text, and what was found wrong."""
+    system: ExportSystem
+    file_name: str
+    text: str
+    count: int
+    errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+
+
+def csv_text(cands: Sequence[Candidate], ctx: Context) -> tuple[str, list[str]]:
+    """The CSV of a system's requests (CRLF lines), and the values not allowed."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n")
+    columns: list[Column] = ctx.system.columns
+    if ctx.system.header:
+        writer.writerow([c.key for c in columns])
+    warnings = []
+    for cand in cands:
+        row = []
+        for col in columns:
+            v = cell_value(cand, col, ctx)
+            if v is _MISSING:
+                warnings.append(f"{col.key}: 項目 {col.source} なし")
+                v = ""
+            if col.allowed is not None and v not in col.allowed and str(v) not in {str(a) for a in col.allowed}:
+                warnings.append(f"{cand.request.name} の {col.key}: {v!r} は許可された値以外")
+            row.append("" if v is None else v)
+        writer.writerow(row)
+    return out.getvalue(), sorted(set(warnings), key=warnings.index)
+
+
+def _coerce(value: Any, schema: dict) -> Any:
+    """A value turned to the schema's type where that is plain (text ↔ number)."""
+    t = schema.get("type")
+    types = t if isinstance(t, list) else [t] if t else []
+    if value is None or not types:
+        return value
+    if "string" in types and isinstance(value, (int, float)) and not isinstance(value, bool) and not any(x in types for x in ("integer", "number")):
+        return str(value)
+    if isinstance(value, str) and ("integer" in types or "number" in types) and "string" not in types:
+        try:
+            n = float(value)
+        except ValueError:
+            return value
+        return int(n) if "integer" in types and n.is_integer() else n
+    if "integer" in types and isinstance(value, float) and value.is_integer() and "number" not in types:
+        return int(value)
+    return value
+
+
+def build(schema: Any, root: dict, c: Optional[Candidate], cands: Sequence[Candidate], ctx: Context) -> Any:
+    """The value a schema (with `x-source`) asks for; _MISSING for nothing."""
+    schema = resolve(schema, root)
+    if not isinstance(schema, dict):
+        return _MISSING
+    source = schema.get("x-source")
+    if source == "requests":
+        items = schema.get("items") or {}
+        return [v for v in (build(items, root, cand, cands, ctx) for cand in cands) if v is not _MISSING]
+    if isinstance(source, str):
+        v = raw_value(c, source, ctx, schema.get("x-geometry") or "geojson",
+                      schema.get("x-digits") if isinstance(schema.get("x-digits"), int) else None, as_object=True)
+        v = shaped(v, source, ctx, schema.get("x-format"), schema.get("x-map") if isinstance(schema.get("x-map"), dict) else {})
+        if v is _MISSING:
+            return v
+        return _coerce(v, schema)
+    if "const" in schema:
+        return schema["const"]
+    if "default" in schema and schema.get("x-default", True):
+        return schema["default"]
+    props = schema.get("properties")
+    if isinstance(props, dict):
+        out = {}
+        for name, sub in props.items():
+            v = build(sub, root, c, cands, ctx)
+            if v is _MISSING:
+                continue
+            if v is None and not _allows_null(resolve(sub, root)) and name not in (schema.get("required") or []):
+                continue
+            out[name] = v
+        return out if out or schema.get("required") else _MISSING
+    return _MISSING
+
+
+def _allows_null(schema: Any) -> bool:
+    t = schema.get("type") if isinstance(schema, dict) else None
+    return t is None or t == "null" or isinstance(t, list) and "null" in t
+
+
+def json_text(cands: Sequence[Candidate], schema: dict, ctx: Context) -> tuple[str, list[str]]:
+    """The JSON of a system's requests built from its schema, and what the schema finds wrong with it."""
+    value = build(schema, schema, None, cands, ctx)
+    if value is _MISSING:
+        value = {}
+    errors = validate(value, schema)
+    return json.dumps(value, ensure_ascii=False, indent=2) + "\n", errors
+
+
+def file_name_of(system: ExportSystem, day: date, run: float) -> str:
+    """The file's name: `{system}`, `{date}` / `{date:%Y%m%d}` (the day), `{run:%H%M}` (when written, JST), `{ext}`."""
+    from .model import JST
+
+    ran = datetime.fromtimestamp(run / 1000, tz=JST)
+
+    def sub(m: re.Match) -> str:
+        key, fmt = m.group(1), m.group(2)
+        if key == "system":
+            return system.system
+        if key == "ext":
+            return system.format
+        if key == "date":
+            return day.strftime(fmt or "%Y%m%d")
+        if key == "run":
+            return ran.strftime(fmt or "%Y%m%d%H%M")
+        return m.group(0)
+
+    name = re.sub(r"\{(\w+)(?::([^}]*))?\}", sub, system.file_name)
+    return re.sub(r'[\\/:*?"<>|]', "_", name)
+
+
+SchemaLoader = Callable[[str], dict]
+
+
+def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: date, run: float,
+           load_schema: Optional[SchemaLoader] = None) -> list[Written]:
+    """The files of the day: one per system with requests taken (in the candidates' order)."""
+    out = []
+    for system in systems:
+        mine = [c for c in cands if c.result == TAKEN and c.system is system]
+        if not mine:
+            continue
+        ctx = Context(system, day, run, len(mine))
+        name = file_name_of(system, day, run)
+        if system.format == "json":
+            schema = system.schema
+            if isinstance(schema, str):
+                try:
+                    schema = load_schema(schema) if load_schema else None
+                except (OSError, ValueError) as error:
+                    out.append(Written(system, name, "", len(mine), [f"スキーマ {system.schema} の読み込み不可（{error}）"]))
+                    continue
+            if not isinstance(schema, dict):
+                out.append(Written(system, name, "", len(mine), ["JSON Schema なし"]))
+                continue
+            text, errors = json_text(mine, schema, ctx)
+            out.append(Written(system, name, text, len(mine), errors))
+        else:
+            text, warnings = csv_text(mine, ctx)
+            out.append(Written(system, name, text, len(mine), [], warnings))
+    return out
+
+
+def encoded(w: Written) -> tuple[bytes, list[str]]:
+    """A file's bytes in its system's encoding; characters it cannot hold become ? (and are told)."""
+    try:
+        return w.text.encode(w.system.encoding), []
+    except UnicodeEncodeError:
+        return w.text.encode(w.system.encoding, errors="replace"), [f"{w.system.encoding} で書けない文字を ? に置き換え"]
+
+
+def write(w: Written, folder: str) -> str:
+    """Writes a file into a folder (made when missing); its path."""
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, w.file_name)
+    data, _ = encoded(w)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
