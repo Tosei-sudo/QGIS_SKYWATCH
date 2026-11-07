@@ -2,7 +2,8 @@
 The observation stores the settings name, as the viewer wires them
 (main.ts): the Esri stores of `observationStores` first, then the local
 GeoPackage unless `localObservations` is false. Each store's kinds, activities, classification and
-levels of 確度 are its own, else `observationVocabulary`'s; the
+levels of 確度 are its own, else `observationVocabulary`'s (a class's own activities, from the
+classification or its table, come before the store's); the
 specification fields and the match radius are always the vocabulary's. Its
 checked areas and classification go to its own layer and table when it
 names them, else to the GeoPackage under its name.
@@ -14,7 +15,7 @@ from typing import Callable, Optional
 
 from ..esri import EsriClient
 from ..gpkg import GeoPackage
-from .model import ObservationStoreConfig, ObservationVocabulary
+from .model import ObservationStoreConfig, ObservationVocabulary, without_activities
 from .stores import (
     LOCAL_LABEL, AreaStore, EsriAreaStore, EsriObservationStore, EsriTaxonomyStore, LocalAreaStore, LocalObservationStore,
     LocalTaxonomyStore, ObservationStore, TaxonomyStore,
@@ -46,7 +47,8 @@ def store_vocabulary(config: Optional[ObservationStoreConfig], base: Observation
         kinds=list(config.kinds) if config.kinds else list(base.kinds),
         activities=list(config.activities) if config.activities else list(base.activities),
         confidences=list(config.confidences) if config.confidences else list(base.confidences),
-        taxonomy=list(config.taxonomy) if config.taxonomy else list(base.taxonomy),
+        # A store's own activities without its own classification are offered for every class.
+        taxonomy=list(config.taxonomy) if config.taxonomy else without_activities(base.taxonomy) if config.activities else list(base.taxonomy),
     )
 
 

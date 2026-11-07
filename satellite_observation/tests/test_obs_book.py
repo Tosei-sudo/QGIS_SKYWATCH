@@ -331,3 +331,33 @@ def test_gives_scripts_the_records_things_and_areas(book):
     api.add_observation(139.7, 35.6, object="次", kind="船舶")
     assert api.clear_observations() == {"observations": 1, "areas": 0} and api.observations() == []
     assert api.confidences()[0] == {"label": "確定", "color": "#15803d", "note": "識別済み"}
+
+
+def test_offers_the_activities_of_the_kinds_class(book):
+    # The default classes have their own activities: a ship's are not an aircraft's.
+    ship, ship_at = book.activities_for("船舶 > 護衛艦")
+    assert ship_at == ["船舶"] and "航行" in ship and "駐機" not in ship
+    plane, _ = book.activities_for("航空機")
+    assert "駐機" in plane and "航行" not in plane
+    # A class without any: the vocabulary's.
+    assert book.activities_for("その他") == (book.vocabulary.activities, [])
+    # Set below the 大分類: the nearest class wins; used ones follow, only those under the same class.
+    assert book.update_class(["船舶"], activities=["停泊", "曳航"]) == ["船舶"]
+    book.add_class(["船舶", "潜水艦"])
+    assert book.update_class(["船舶", "潜水艦"], activities=["浮上", "潜航"])
+    assert book.activities_for("船舶 > 潜水艦 > X級") == (["浮上", "潜航"], ["船舶", "潜水艦"])
+    book.submit(139.7, 35.6, FormValues(object="A", kind="船舶", activity="給油"))
+    book.submit(139.7, 35.6, FormValues(object="B", kind="航空機", activity="離陸"))
+    assert book.activity_words("船舶 > 護衛艦") == ["停泊", "曳航", "給油"]
+    # Kept with the classification.
+    book.reload()
+    assert find_activities(book, ["船舶"]) == ["停泊", "曳航"]
+    # Cleared: the 大分類's again.
+    assert book.update_class(["船舶", "潜水艦"], activities=[])
+    assert book.activities_for("船舶 > 潜水艦")[1] == ["船舶"]
+
+
+def find_activities(book, path):
+    from satellite_observation.core.obs.taxonomy import find
+
+    return find(book.kept_taxonomy(), path).activities

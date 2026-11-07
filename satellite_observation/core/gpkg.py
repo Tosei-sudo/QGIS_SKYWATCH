@@ -369,6 +369,8 @@ TAXONOMY = TableSpec(
         Column("SPECS", "TEXT"),
         Column("PHOTOS", "TEXT(4000)"),
         Column("SORT_ORDER", "INTEGER"),
+        # Added later (ensure() adds it to older files): the class's activities, comma separated.
+        Column("ACTIVITIES", "TEXT(1000)"),
     ),
     key="ROW_KEY",
     description="分類体系",

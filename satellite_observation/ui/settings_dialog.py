@@ -42,6 +42,14 @@ class SettingsDialog(QDialog):
         browse.clicked.connect(self._browse)
         load = QPushButton(self.tr("読み込み"))
         load.clicked.connect(self._load)
+        #: The zip locks the plugin to its shipped settings file: no other can be chosen.
+        self.locked = settings.config_locked()
+        if self.locked:
+            self.source.setText(shipped)
+            self.source.setReadOnly(True)
+            self.source.setToolTip(self.tr("同梱の設定ファイルに固定（ほかの設定ファイルは指定不可）: {path}").format(path=shipped))
+            browse.setEnabled(False)
+            load.setToolTip(self.tr("同梱の設定ファイルを読み直す"))
         row = QHBoxLayout()
         row.addWidget(self.source, 1)
         row.addWidget(browse)
@@ -90,7 +98,8 @@ class SettingsDialog(QDialog):
 
     def _load(self) -> None:
         self._keep_auth()
-        settings.set_config_source(self.source.text())
+        if not self.locked:
+            settings.set_config_source(self.source.text())
         self.status.setText(self.tr("読み込み中…"))
         self.context.reload()
 
@@ -121,6 +130,8 @@ class SettingsDialog(QDialog):
         self.problems.addItems(self.context.problems)
         if not self.context.source:
             self.status.setText(self.tr("設定ファイルなし（サンプルの衛星とローカル保存で動作）"))
+        elif self.context.locked and not self.context.problems:
+            self.status.setText(self.tr("同梱の設定ファイルに固定。問題なし（接続 {n} 件）").format(n=len(services)))
         elif self.context.bundled and not self.context.problems:
             self.status.setText(self.tr("同梱の設定ファイルを使用。問題なし（接続 {n} 件）").format(n=len(services)))
         elif self.context.problems:
@@ -132,7 +143,7 @@ class SettingsDialog(QDialog):
         self._keep_auth()
         settings.set_recorder(self.recorder.text())
         settings.set_startup_layers_on(self.startup_layers.isChecked())
-        if self.source.text().strip() != settings.config_source():
+        if not self.locked and self.source.text().strip() != settings.config_source():
             settings.set_config_source(self.source.text())
             self.context.reload()
         super().accept()

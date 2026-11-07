@@ -102,6 +102,28 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、ローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
 - 設定ファイルに `"localObservations": false` と書くとローカル GeoPackage を保存先にしない（選べるのは `observationStores` だけ。どれもなければ記録不可）。省略時は `true`
 
+### 活動（大分類ごとの切り替え）
+
+活動のボタン（1〜9）と入力候補は、フォームの種別の分類によって切り替わる。種別の分類から上へたどって最初に「活動」を持つ分類のもの（ふつうは大分類に設定）、どれも持たなければ既定の活動（`observationVocabulary.activities`、保存先ごとの `activities` が優先）。その分類以下の記録で使った活動も後ろに並ぶ。種別を別の大分類に切り替えたとき、入力済みの活動が新しい候補になければ空欄に戻す（既存の記録を開いたときはそのまま）。
+
+- 既定の分類体系では大分類ごとに活動を持つ（船舶: 停泊・航行・入港・出港・荷役・活動なし、航空機: 駐機・移動・離陸準備・整備・活動なし、車両: 駐車・移動・集積・活動なし、建物: 工事・使用中・活動なし、構造物: 工事・集積・活動なし。その他は既定の活動）。分類体系を書かずに `activities` だけ書いたときは、その活動をすべての分類で使う
+- 変更は「分類体系の編集」ドック・「分類」タブの「活動」欄（読点区切り。空欄なら上位の分類、なければ既定の活動）
+- 設定ファイルでは分類ごとの `activities`:
+
+```jsonc
+"observationVocabulary": {
+  "taxonomy": [
+    { "name": "船舶", "activities": ["停泊", "航行", "入港", "出港"], "children": [
+      { "name": "潜水艦", "activities": ["浮上", "潜航"] }   // 下位で上書きも可
+    ] },
+    { "name": "航空機", "activities": ["駐機", "移動", "整備"] }
+  ]
+}
+```
+
+- Esri の分類テーブル（保存先の `taxonomyTable`）では属性 `ACTIVITIES`（文字列。活動を読点かカンマ区切り。`fields.activities` で別名可）に保存し、同じテーブルを使う人と共有する。テーブルに属性がなければ活動は保存されず、変更時にその旨を表示（追加するフィールドの例: 名前 `ACTIVITIES`、文字列、長さ 1000）。他の人の変更は「更新」で読み直す
+- ローカル GeoPackage の分類体系（`taxonomy` テーブル）にも `ACTIVITIES` 列を自動で追加
+
 ## 分類体系の編集
 
 「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。共有の保存先（`taxonomyTable`）を他の人が編集したときは「更新」（ドック上部、または「分類」タブ）で分類体系と諸元の項目を読み直す（記録はそのまま、選択中の分類は残っていれば保持）。
@@ -416,12 +438,26 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 - 作るときに設定ファイルを読んで確かめ、読めない・問題があるときは zip を作らない。`token` が書いてあれば注意を出す（zip を受け取った人全員に渡るため。サインインが要るサービスは各自の QGIS の認証設定を使う方がよい）
 - プラグインを入れ直すと同梱の設定ファイルも新しい zip のものに置き換わる。各自の指定（`QgsSettings`）は残る
 
+#### 同梱の設定ファイルに固定する（`--lock-config`）
+
+```
+python3 scripts/build_zip.py --config /path/to/config.json --lock-config
+python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
+```
+
+- 受け取った人は同梱の設定ファイルしか使えない。「設定…」の設定ファイル欄は同梱のファイルを表示するだけで変えられず（「参照…」は押せない、「読み込み」は同梱のものを読み直す）、前に指定したパス・URL があっても無視する。ドック上部の表示は「同梱の設定ファイル読み込み済み（固定）」
+- 記録者とサービスごとの認証設定はこれまでどおり各自で選べる
+- 仕組み: zip に設定ファイルと並べて `satellite_observation/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`satellite_observation/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
+- 設定ファイルなしで `--lock-config` を付けると zip を作らない
+- 固定を外すには `--lock-config` なしで作った zip を入れ直す（またはプラグインのフォルダの `config.lock` を消す）。各自が前に指定していたファイルがあれば、またそちらを読む
+
 ## 設定
 
 | 項目 | 保存先 |
 | --- | --- |
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
+| 同梱の設定ファイルへの固定（`--lock-config`） | プラグインのフォルダーの `config.lock` |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |

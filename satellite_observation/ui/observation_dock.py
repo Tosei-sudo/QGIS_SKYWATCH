@@ -42,7 +42,7 @@ from ..core.obs.model import Observation
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
-    children_of, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
+    activities_at, children_of, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
@@ -490,6 +490,9 @@ class ObservationDock(PluginDock):
         tf.addRow(tr("この枝の階層名"), self.taxon_levels)
         tf.addRow(tr("個体名の呼称"), self.taxon_label)
         tf.addRow(tr("既知の個体"), self.taxon_members)
+        self.taxon_activities = QLineEdit()
+        self.taxon_activities.setToolTip(tr("この分類以下で選べる活動、読点区切り（大分類に設定すれば大分類ごとに切り替え）。空なら上位の分類、なければ既定の活動"))
+        tf.addRow(tr("活動"), self.taxon_activities)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("変更"), "", self._apply_taxon))
         actions.addWidget(self._button(tr("モノ一覧"), "", lambda: self.filter_class(self.taxon)))
@@ -1132,6 +1135,8 @@ class ObservationDock(PluginDock):
         self.object_input.setText(known.object_name if known else "")
         self.kind_input.setText(known.kind if known else (last.kind or (self.book.vocabulary.kinds[0] if self.book.vocabulary.kinds else "")))
         self.activity_input.setText(known.activity if known else last.activity)
+        if not known:
+            self._fit_activity()
         self.note_input.setText(editing.note if editing else "")
         self._fill_confidence((known.confidence or "") if known else last.confidence)
         self.delete_button.setVisible(editing is not None)
@@ -1197,12 +1202,26 @@ class ObservationDock(PluginDock):
     def _activity_words(self) -> list[str]:
         if self.book is None:
             return []
-        used = [o.activity for o in self.book.living() if o.activity]
-        return list(dict.fromkeys([*self.book.vocabulary.activities, *used]))[:9]
+        return self.book.activity_words(self.kind_input.text())[:9]
+
+    def _fit_activity(self) -> None:
+        """The activity left out when the kind's class has its own activities and they do not include it."""
+        if self.book is None:
+            return
+        kind, value = self.kind_input.text(), self.activity_input.text().strip()
+        _offered, at = self.book.activities_for(kind)
+        if at and value and value not in self.book.activity_words(kind):
+            self.activity_input.clear()
 
     def _render_chips(self) -> None:
         self._clear(self.chips_layout)
         value = self.activity_input.text()
+        if self.book is not None:
+            kind = self.kind_input.text()
+            _offered, at = self.book.activities_for(kind)
+            self.activities_model.setStringList(self.book.activity_words(kind))
+            self.activity_input.setPlaceholderText(self.tr("{c}の活動").format(c=at[-1]) if at else "")
+            self.chips_box.setToolTip(self.tr("分類「{c}」の活動（分類の編集で変更）").format(c=kind_of(at)) if at else self.tr("既定の活動"))
         for i, w in enumerate(self._activity_words()):
             self.chips_layout.addWidget(self._chip_button(f"{i + 1} {w}", f"{w}（{i + 1}）", lambda w=w: self._pick_activity(w), value == w))
 
@@ -1219,6 +1238,8 @@ class ObservationDock(PluginDock):
         """The kind typed or chosen; for a new record, also what the next new record starts with."""
         if self.book is not None and self.pending is not None and self.pending[2] is None and self.pending[3] is None:
             self.book.remember(kind=self.kind_input.text())
+        self._fit_activity()
+        self._render_chips()
         self._render_kind_path()
         self._render_candidates()
 
@@ -1355,6 +1376,7 @@ class ObservationDock(PluginDock):
             return
         self.kind_input.setText(flow.kind)
         self._render_kind_path()
+        self._fit_activity()
         if not self.activity_input.text():
             self.activity_input.setText(flow.activity)
         self._render_chips()
@@ -1572,7 +1594,7 @@ class ObservationDock(PluginDock):
             return
         parent = path_of(self.taxon_parent.currentData() or "")
         own = {"levels": _split(self.taxon_levels.text()), "name_label": self.taxon_label.text().strip(),
-               "members": _split(self.taxon_members.text())}
+               "members": _split(self.taxon_members.text()), "activities": _split(self.taxon_activities.text())}
         name = self.taxon_name.text()
 
         def after(to) -> None:
@@ -1784,7 +1806,7 @@ class ObservationDock(PluginDock):
         kinds = list(dict.fromkeys(k for k in [*book.vocabulary.kinds, *(kind_of(t.path) for t in taxa), *(f.kind for f in objects)] if k))
         self.kinds_model.setStringList(kinds)
         self.area_kinds_model.setStringList(kinds)
-        self.activities_model.setStringList(list(dict.fromkeys(a for a in [*book.vocabulary.activities, *(o.activity for o in book.living())] if a)))
+        self.activities_model.setStringList(book.activity_words(self.kind_input.text()))
         self.class_filter_row.setVisible(self.tab == "objects" and bool(self.class_filter))
         self.class_filter_label.setText(self.tr("分類: {k} 以下").format(k=kind_of(self.class_filter)) if self.class_filter else "")
         if self.tab == "image":
@@ -1936,10 +1958,13 @@ class ObservationDock(PluginDock):
             self.taxon_levels.setText("、".join(t.levels or []))
             self.taxon_label.setText(t.name_label or "")
             self.taxon_members.setText("、".join(t.members or []))
+            self.taxon_activities.setText("、".join(t.activities or []))
             self.taxon_child.clear()
             self.taxon_delete.setProperty("armed", False)
             self.taxon_delete.setText(self.tr("削除"))
         self.taxon_child.setPlaceholderText(f"{level_name(taxa, path, len(path)) or '下位分類'}の名前")
+        above, at = activities_at(taxa, path[:-1])
+        self.taxon_activities.setPlaceholderText(f"{'、'.join(above)}（{at[-1]}）" if above else "、".join(self.book.vocabulary.activities) + "（既定）")
         self.taxon_parent.clear()
         self.taxon_parent.addItem(self.tr("（なし: 大分類）"), "")
         for x in taxa:
