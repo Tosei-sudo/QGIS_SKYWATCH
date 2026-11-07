@@ -92,3 +92,22 @@ def test_a_result_near_a_thing_of_the_image_before_continues_it(book):  # noqa: 
     assert book.said[-1] == "2 件を記録（継続 1 件）"
     _, problems = source(continueRadius=-1)
     assert problems == ["aiResultSources[0] の continueRadius は 0〜100000（m）で指定"]
+
+
+def test_the_kind_of_a_class_found_by_the_plugins_own_detection():
+    from satellite_observation.core.ai.model_config import ai_model_of
+    from satellite_observation.core.ai_results import detected_kind
+    from satellite_observation.core.obs.taxonomy import Taxon
+
+    taxonomy = [Taxon(path=["船舶"]), Taxon(path=["船舶", "支援船"], specs={"別名": "tender, 補給艦"})]
+    kinds = {"Boat": "船舶 > 支援船"}
+    assert detected_kind("boat", kinds, taxonomy) == "船舶 > 支援船"
+    # A model trained here: its classes are the classification's kinds.
+    assert detected_kind("船舶 > 支援船", {}, taxonomy) == "船舶 > 支援船"
+    # Another name of a class.
+    assert detected_kind("補給艦", {}, taxonomy) == "船舶 > 支援船"
+    assert detected_kind("car", {}, taxonomy) == "car" and detected_kind("", kinds, taxonomy) == ""
+
+    problems = []
+    model = ai_model_of({"url": "./a.onnx", "kinds": {"boat": "船舶", "x": 3}}, problems, 0)
+    assert model.kinds == {"boat": "船舶"} and problems == ["aiModels[0] の kinds.x は種別（「船舶 > 支援船」など）で指定"]
