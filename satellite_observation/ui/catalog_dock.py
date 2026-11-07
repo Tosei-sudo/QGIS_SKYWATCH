@@ -34,7 +34,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
-from .docks import PluginDock
+from .docks import PluginDock, ask_no
 from .flow_layout import FlowLayout
 from .image_files_dialog import choose_image_files
 
@@ -195,6 +195,17 @@ class CatalogDock(PluginDock):
 
         buttons = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
+        tips = {
+            "open": self.tr("選んだ画像をラスターレイヤーとして開く（ダブルクリックでも）"),
+            "zoom": self.tr("選んだ画像の範囲へ地図を移動"),
+            "copy": self.tr("選んだ画像のファイルのパスをクリップボードへ"),
+            "layer": self.tr("一覧の画像の範囲を地物レイヤーとして追加（属性つき）"),
+            "similar": self.tr("選んだ画像と同じ場所を写した画像を探す"),
+            "watch": self.tr("今の検索条件で新しい画像を見張る（新着画像の通知）"),
+            "pick": self.tr("地図上の範囲をクリックして一覧の画像を選ぶ"),
+            "folders": self.tr("この PC で画像のパスの読み替え（pathMappings）に選んだフォルダを忘れる"),
+            "event": self.tr("選んだ画像をイベントに紐付ける"),
+        }
         for key, text, slot in [
             ("open", self.tr("開く"), lambda: self.open_records(self.chosen())),
             ("zoom", self.tr("範囲へ移動"), self.zoom_to_chosen),
@@ -207,6 +218,7 @@ class CatalogDock(PluginDock):
             ("event", self.tr("イベントに追加"), self.add_to_event),
         ]:
             button = QPushButton(text)
+            button.setToolTip(tips[key])
             if slot is None:
                 button.setCheckable(True)
                 button.toggled.connect(self._pick_toggled)
@@ -656,6 +668,9 @@ class CatalogDock(PluginDock):
         self.status.setText(self.tr("パス {n} 件をコピー").format(n=len(paths)))
 
     def clear_folders(self) -> None:
+        if not ask_no(self, self.tr("フォルダの対応を消去"),
+                      self.tr("この PC で画像のパスの読み替えに選んだフォルダをすべて忘れますか？次に画像を開くとき、フォルダをまた選ぶことになります。")):
+            return
         settings.clear_path_folders()
         self.status.setText(self.tr("フォルダの対応を消去"))
 

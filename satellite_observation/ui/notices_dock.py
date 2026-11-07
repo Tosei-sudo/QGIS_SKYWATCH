@@ -29,7 +29,7 @@ from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, ask_no
 from .watch_dialog import PointWatchDialog, WatchDialog
 
 TITLE = "通知"
@@ -70,10 +70,14 @@ class NoticesDock(PluginDock):
         self.notices.itemDoubleClicked.connect(lambda item, column: self.open_notices([item.data(0, Qt.ItemDataRole.UserRole)]))
         v.addWidget(self.notices, 1)
         row = QHBoxLayout()
-        for text, slot in [(self.tr("開く"), lambda: self.open_notices(self.chosen_notices())),
-                           (self.tr("移動"), self.zoom_to_chosen), (self.tr("既読"), self.mark_chosen_read),
-                           (self.tr("すべて既読"), lambda: self._mark(None)), (self.tr("削除"), self.delete_chosen_notices)]:
+        for text, tip, slot in [
+                (self.tr("開く"), self.tr("選んだ新着画像をレイヤーとして開く（ダブルクリックでも）"), lambda: self.open_notices(self.chosen_notices())),
+                (self.tr("移動"), self.tr("選んだ新着画像の範囲へ地図を移動"), self.zoom_to_chosen),
+                (self.tr("既読"), self.tr("選んだ新着画像を既読に"), self.mark_chosen_read),
+                (self.tr("すべて既読"), self.tr("一覧の新着画像をすべて既読に"), lambda: self._mark(None)),
+                (self.tr("削除"), self.tr("選んだ新着画像を一覧から消す（画像そのものは消えない）"), self.delete_chosen_notices)]:
             button = QPushButton(text)
+            button.setToolTip(tip)
             button.clicked.connect(slot)
             row.addWidget(button)
         v.addLayout(row)
@@ -309,7 +313,11 @@ class NoticesDock(PluginDock):
 
     def delete_chosen_watch(self) -> None:
         watch_id = self._chosen_watch_id()
-        if watch_id:
+        watch = self.store().watch(watch_id or "")
+        if watch is None:
+            return
+        if ask_no(self, self.tr("監視の削除"),
+                  self.tr("監視「{name}」を削除しますか？条件とこの監視の新着画像の一覧も消え、元に戻せません（画像そのものは消えません）。").format(name=watch.name)):
             self.store().delete_watch(watch_id)
             self.refresh()
 

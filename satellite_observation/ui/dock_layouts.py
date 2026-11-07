@@ -324,13 +324,16 @@ class DockLayoutMenu(QMenu):
         if not ok or not name:
             return
         if name in self.store.saved() and QMessageBox.question(
-                self.window_, tr("ドックのレイアウトを保存"), tr("「{name}」を今の配置で置き換えますか。").format(name=name)) != QMessageBox.StandardButton.Yes:
+                self.window_, tr("ドックのレイアウトを保存"), tr("「{name}」を今の配置で置き換えますか。").format(name=name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         self.save_current(name)
         self.message(tr("ドックのレイアウト「{name}」を保存しました").format(name=name))
 
     def ask_delete(self, name: str) -> None:
-        if QMessageBox.question(self.window_, tr("ドックのレイアウトの削除"), tr("「{name}」を削除しますか。").format(name=name)) == QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self.window_, tr("ドックのレイアウトの削除"), tr("「{name}」を削除しますか。").format(name=name),
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
             self.store.delete(name)
 
     def ask_export(self) -> None:

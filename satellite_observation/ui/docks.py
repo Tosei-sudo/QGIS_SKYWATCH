@@ -17,7 +17,7 @@ from typing import Callable
 
 from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
-from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
+from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
 from ..qgis_io.context import PluginContext
 
@@ -31,6 +31,15 @@ def plain_tip(text: str) -> str:
     if not any(c in text for c in "<>&"):
         return text
     return "<p style='white-space:pre-wrap'>" + html.escape(text).replace("\n", "<br>") + "</p>"
+
+
+def ask_no(parent, title: str, text: str) -> bool:
+    """
+    Asks before something that can't be undone; Enter (and Esc) answer いいえ,
+    so a key pressed by habit never deletes anything. True for はい.
+    """
+    yes, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+    return QMessageBox.question(parent, title, plain_tip(text), yes | no, no) == yes
 
 
 class PluginDock(QDockWidget):
