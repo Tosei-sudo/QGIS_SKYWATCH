@@ -94,5 +94,6 @@ class LayerImportDialog(QDialog):
             return
         self.selected_only.setEnabled(layer.selectedFeatureCount() > 0)
         n = layer.selectedFeatureCount() if self.selected_only.isChecked() and layer.selectedFeatureCount() else layer.featureCount()
-        self.count.setText(self.tr("地物 {n} 件").format(n=n))
-        self.ok.setEnabled(n > 0)
+        # A provider that cannot count says -1: the features are read all the same.
+        self.count.setText(self.tr("地物 {n} 件").format(n=n) if n >= 0 else self.tr("地物の件数不明（読み込んで確認）"))
+        self.ok.setEnabled(n != 0)

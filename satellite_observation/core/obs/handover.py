@@ -281,17 +281,29 @@ def last_memo(client: EsriClient, table: EsriSource, token: Optional[str] = None
     return max(memos, key=lambda m: (m.written_at or 0, m.end or 0), default=None)
 
 
-def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData, token: Optional[str] = None) -> None:
-    """Adds the memo to the table."""
+def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData, token: Optional[str] = None) -> list[str]:
+    """
+    Adds the memo to the table; the attributes cut to the length the table
+    takes (said back, so the person knows the file and the clipboard have it whole).
+    """
     token = token or table.token
     types = _types(client, table, token)
+    lengths = client.layer(table.url, token).field_lengths
     f = table.fields
     values = {f["text"]: text, f["memo"]: d.memo, f["start"]: int(d.start), f["end"]: int(d.end), f["writtenAt"]: int(d.now),
               f["writtenBy"]: d.user}
+    cut = []
+    for k, v in values.items():
+        n = lengths.get(k)
+        if isinstance(v, str) and n and len(v) > n:
+            mark = "…（以下省略）"
+            values[k] = v[:max(0, n - len(mark))] + mark[:n]
+            cut.append(f"{k}（{n} 文字まで）")
     r = (client.apply_edits(table.url, adds=[{"attributes": {k: fit_value(v, types[k]) for k, v in values.items() if k in types}}],
                             token=token).add_results or [{}])[0]
     if not r.get("success"):
         raise EsriError(f"引き継ぎメモの保存の失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
+    return cut
 
 
 def file_path(s: HandoverSettings, now: float) -> str:

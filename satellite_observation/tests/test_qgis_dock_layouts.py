@@ -141,3 +141,20 @@ def test_layouts_go_to_a_file_and_come_back_from_it(plugin, tmp_path):
     other.write_text('{"layouts": {}}', encoding="utf-8")
     with pytest.raises(ValueError):
         menu.store.import_file(str(other))
+
+
+def test_a_broken_file_s_layouts_are_cleaned_before_use(plugin, tmp_path):
+    menu = plugin.dock_layouts
+    path = tmp_path / "broken.json"
+    path.write_text(json.dumps({"kind": "satellite_observation.dockLayouts", "layouts": {
+        " 壊れた ": {"groups": [{"area": "middle", "docks": [{"name": "SatObsObservations"}, "x", {"name": 3}], "size": ["a", 1]},
+                               "not a group"],
+                    "floating": [{"name": "SatObsRequests", "geometry": [1, 2, "x", 4]}, 5]},
+        "空でない": "not a layout"}}), encoding="utf-8")
+    assert menu.store.import_file(str(path)) == ["壊れた"]
+    layout = menu.store.saved()["壊れた"]
+    assert layout["groups"] == [{"area": "right", "docks": [{"name": "SatObsObservations", "visible": True}],
+                                 "front": "SatObsObservations", "size": None}]
+    assert layout["floating"][0]["geometry"] is None
+    assert menu.use("壊れた")
+    assert plugin.docks["SatObsObservations"].isVisible() and plugin.docks["SatObsRequests"].isFloating()

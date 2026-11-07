@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
-from ..util import is_number, js_string, ms_of
+from ..util import is_number, js_string, ms_of, utc_text
 from .alerts import EsriSource, esri_source_of
 from .model import Observation
 
@@ -114,11 +114,22 @@ def _where(source: EsriSource, extra: str) -> str:
     return " AND ".join(f"({c})" for c in (source.where, extra) if c) or "1=1"
 
 
-def load_assignments(client: EsriClient, source: EsriSource, token: Optional[str] = None, where: str = "") -> list[Assignment]:
-    """The assignments (held first, then the newest taken)."""
+def load_assignments(client: EsriClient, source: EsriSource, token: Optional[str] = None, where: str = "",
+                     done_since: Optional[float] = None) -> list[Assignment]:
+    """
+    The assignments (held first, then the newest taken). `done_since`: of
+    the 完了 rows (which only grow), only those done since then (when the
+    table has the state and done-time attributes).
+    """
     token = token or source.token
-    _types(client, source, token)
+    types = _types(client, source, token)
     oid = client.layer(source.url, token).object_id_field
+    f = source.fields
+    if done_since is not None and f["status"] in types and f["doneAt"] in types:
+        # UTC literal: the client shifts it for services keeping local times.
+        recent = (f"{f['status']} IS NULL OR {f['status']} <> {quote(DONE)} OR {f['doneAt']} IS NULL"
+                  f" OR {f['doneAt']} >= TIMESTAMP '{utc_text(done_since)}'")
+        where = " AND ".join(f"({c})" for c in (where, recent) if c)
     rows = client.query_all(source.url, _where(source, where), token, geometry=False, limit=100_000)
     out = [assignment_of(r.get("attributes") or {}, source.fields, oid) for r in rows]
     return sorted(out, key=lambda x: (x.done, -(x.taken_at or 0), -(x.oid or 0)))

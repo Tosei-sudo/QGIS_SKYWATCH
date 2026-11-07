@@ -9,6 +9,7 @@ Pure: the values are JSON (kept in QgsSettings by the dock).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Mapping
 
@@ -33,7 +34,7 @@ def remembered(r: ImagingRequest) -> dict:
 
 
 def _number(v) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def with_remembered(r: ImagingRequest, last: Mapping) -> ImagingRequest:

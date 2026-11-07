@@ -114,6 +114,7 @@ def capture(window: QMainWindow, docks: dict[str, QDockWidget]) -> dict:
 
 def apply(window: QMainWindow, docks: dict[str, QDockWidget], layout: dict) -> None:
     """Puts `docks` as `layout` says; a dock it doesn't name (one added since) is closed."""
+    layout = clean(layout) or {"groups": [], "floating": []}
     listed: set = set()
     resize: list = []
     for group in layout.get("groups") or []:
@@ -163,8 +164,42 @@ def apply(window: QMainWindow, docks: dict[str, QDockWidget], layout: dict) -> N
             window.resizeDocks([d for d, _ in rows], [int(s[0]) for _, s in rows], Qt.Orientation.Horizontal)
 
 
+def _numbers(v, n: int) -> Optional[list]:
+    """`n` whole numbers (a size or a geometry), else None."""
+    if not isinstance(v, (list, tuple)) or len(v) != n:
+        return None
+    try:
+        out = [int(x) for x in v if not isinstance(x, bool)]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return out if len(out) == n and all(abs(x) < 100_000 for x in out) else None
+
+
+def clean(layout) -> Optional[dict]:
+    """
+    A layout with only what `apply` can use (a file read from another PC, or
+    edited by hand, may hold anything): None when it is not a layout at all.
+    """
+    if not isinstance(layout, dict) or not isinstance(layout.get("groups", []), list) or not isinstance(layout.get("floating", []), list):
+        return None
+    groups = []
+    for g in layout.get("groups") or []:
+        if not isinstance(g, dict) or not isinstance(g.get("docks"), list):
+            continue
+        members = [{"name": e["name"], "visible": e.get("visible", True) is not False} for e in g["docks"]
+                   if isinstance(e, dict) and isinstance(e.get("name"), str)]
+        if members:
+            groups.append({"area": g.get("area") if g.get("area") in _AREAS else "right", "docks": members,
+                           "front": g.get("front") if isinstance(g.get("front"), str) else members[0]["name"],
+                           "size": _numbers(g.get("size"), 2)})
+    floating = [{"name": e["name"], "visible": e.get("visible", True) is not False,
+                 "area": e.get("area") if e.get("area") in _AREAS else "right", "geometry": _numbers(e.get("geometry"), 4)}
+                for e in layout.get("floating") or [] if isinstance(e, dict) and isinstance(e.get("name"), str)]
+    return {"groups": groups, "floating": floating}
+
+
 def valid(layout) -> bool:
-    return isinstance(layout, dict) and isinstance(layout.get("groups", []), list) and isinstance(layout.get("floating", []), list)
+    return clean(layout) is not None
 
 
 class DockLayoutStore:
@@ -221,10 +256,12 @@ class DockLayoutStore:
             raise ValueError(tr("ドックのレイアウトのファイルではありません"))
         layouts = self.saved()
         names = [k for k, v in data["layouts"].items() if isinstance(k, str) and k.strip() and valid(v)]
+        if not names:
+            raise ValueError(tr("ドックのレイアウトのファイルに使えるレイアウトがありません"))
         for name in names:
-            layouts[name] = data["layouts"][name]
+            layouts[name.strip()] = clean(data["layouts"][name])
         self._write(layouts)
-        return names
+        return [n.strip() for n in names]
 
 
 class DockLayoutMenu(QMenu):
@@ -299,7 +336,11 @@ class DockLayoutMenu(QMenu):
     def ask_export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self.window_, tr("ドックのレイアウトを書き出す"), "dock_layouts.json", tr("JSON (*.json)"))
         if path:
-            n = self.store.export(path)
+            try:
+                n = self.store.export(path)
+            except OSError as e:
+                QMessageBox.warning(self.window_, tr("ドックのレイアウトを書き出す"), tr("書き出せません: {e}").format(e=e.strerror or e))
+                return
             self.message(tr("ドックのレイアウト {n} 件を書き出しました").format(n=n))
 
     def ask_import(self) -> None:
@@ -308,7 +349,7 @@ class DockLayoutMenu(QMenu):
             return
         try:
             names = self.store.import_file(path)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, UnicodeDecodeError) as e:
             QMessageBox.warning(self.window_, tr("ドックのレイアウトを読み込む"), str(e))
             return
         self.message(tr("ドックのレイアウト {n} 件を読み込みました: {names}").format(n=len(names), names="、".join(names)))

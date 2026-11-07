@@ -379,7 +379,7 @@ def trends(rows: Iterable[tuple[str, float]], unit: str, baseline: int = BASELIN
 
     The step starts and every key with a record in them, sudden increases first, then by how far above 「平常」.
     """
-    rows = [(k, t) for k, t in rows if t is not None]
+    rows = [(k, t) for k, t in rows if t is not None and math.isfinite(t)]
     if not rows:
         return [], []
     end = max(t for _, t in rows) if end is None else end

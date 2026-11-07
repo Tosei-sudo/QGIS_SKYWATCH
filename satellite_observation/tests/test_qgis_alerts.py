@@ -148,16 +148,24 @@ def test_records_added_by_hand_whatever_the_conditions(plugin):
     dialog = dock._alerts
     assert wait_for(lambda: dialog.status.text().startswith("手動で 1 件を追加"))
     assert dialog.lines_table.item(0, 1).text() == "船A|停泊|手動|手動" and dialog.lines_table.item(0, 0).text().startswith("手動 ")
-    # Picking by the conditions keeps it, above what the conditions find.
+    # Edited by hand: picking by the conditions keeps the edit, and the row, above what the conditions find.
+    dialog.lines_table.item(0, 1).setText("船A|停泊|手動|至急")
     dialog.pick()
     assert wait_for(lambda: "件を抽出" in dialog.status.text())
-    assert [dialog.lines_table.item(r, 1).text() for r in range(2)] == ["船A|停泊|手動|手動", "船B|航行|航行中|"]
+    assert [dialog.lines_table.item(r, 1).text() for r in range(2)] == ["船A|停泊|手動|至急", "船B|航行|航行中|"]
+    # Unticked rows stay unticked when the list is made again.
+    dialog.lines_table.item(1, 0).setCheckState(Qt.CheckState.Unchecked)
+    dialog.pick()
+    assert wait_for(lambda: dialog.lines_table.rowCount() == 2 and dialog.status.text().count("抽出") == 1)
+    assert dialog.lines_table.item(1, 0).checkState() == Qt.CheckState.Unchecked
+    dialog.lines_table.item(1, 0).setCheckState(Qt.CheckState.Checked)
     # Again from the table's chosen rows: one already listed is not added twice.
     dock.add_to_alerts([a, b])
     assert wait_for(lambda: dialog.status.text().startswith("追加する記録なし"))
     dialog.send()
     assert wait_for(lambda: "件を通報" in dialog.status.text())
     assert sorted((r["attributes"]["OBS_ID"] == a.id, r["attributes"]["MANUAL"]) for r in log.rows) == [(False, 0), (True, 1)]
+    assert "船A|停泊|手動|至急" in [r["attributes"]["TEXT"] for r in log.rows]
 
 
 def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin):
@@ -179,8 +187,19 @@ def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin
     dock.submit()
     assert wait_for(lambda: dock._alert_widget is not None)
     assert "船D（航行）" in dock._alert_widget.text()
+    # The next notable save joins the notice shown (one notice, both records).
+    first = dock._alert_widget
+    dock.map_clicked(139.72, 35.62, None)
+    dock.object_input.setText("船E")
+    dock.kind_input.setText("船舶")
+    dock.activity_input.setText("航行")
+    dock.submit()
+    assert wait_for(lambda: dock._alert_widget is not first)
+    assert "船D（航行）・船E（航行）" in dock._alert_widget.text()
+    assert [w for w in iface.messageBar().items() if w.title() == "注目の記録"] == [dock._alert_widget]
     from qgis.PyQt.QtWidgets import QPushButton
     button = next(b for b in dock._alert_widget.findChildren(QPushButton) if b.text() == "通報文を作成")
     button.click()
     dialog = dock._alerts
-    assert dialog.isVisible() and dialog.lines_table.item(0, 1).text() == "船D|航行|航行中|"
+    assert dialog.isVisible() and dialog.lines_table.rowCount() == 2
+    assert {dialog.lines_table.item(r, 1).text().split("|")[0] for r in range(2)} == {"船D", "船E"}

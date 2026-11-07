@@ -283,6 +283,12 @@ class LayerInfo:
         return {f["name"]: f.get("type", "") for f in self.raw.get("fields") or [] if isinstance(f, dict) and "name" in f}
 
     @property
+    def field_lengths(self) -> dict[str, int]:
+        """The length text fields take (those that say it)."""
+        return {f["name"]: int(f["length"]) for f in self.raw.get("fields") or []
+                if isinstance(f, dict) and "name" in f and isinstance(f.get("length"), int) and f["length"] > 0}
+
+    @property
     def object_id_field(self) -> str:
         oid = self.raw.get("objectIdField")
         if isinstance(oid, str) and oid:
