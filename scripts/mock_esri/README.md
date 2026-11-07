@@ -50,6 +50,7 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Places | 0 | 地名（横須賀港など 6 件） | `geocoders`（`type: "features"`） |
 | Requests | 0, 1 | 撮像依頼台帳（3 件）と出力履歴（docs/imaging-requests.md の既定の属性名） | `requestStores`。日次出力のシステムは `requestExports`（光学 CSV・SAR JSON の 2 つ） |
 | Alerts | 0, 1, 2 | 通報条件（3 行、1 行は停止中）・ジオフェンス（横須賀）・通報記録（空） | `alertReports`（フォーマット「速報」（既定）と「ファイル（タブ区切り）」） |
+| Work | 0, 1 | 分担（画像ごとの担当、空）・引き継ぎメモ（空） | `assignments`・`handover.table` |
 
 どのレイヤーにも作成者・更新者の記録の属性 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` がある（プラグインの `editTracking` の既定の属性名。前のバージョンで作ったデータには起動時に列を足す）。
 

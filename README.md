@@ -317,6 +317,43 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 }
 ```
 
+### 分担と引き継ぎメモ（`assignments`・`handover`）
+
+**分担**: 誰がどの画像を担当中かを Esri のテーブルで共有し、同じ画像を 2 人が見る重複作業を防ぐ。単位は画像（1 行 1 画像）。割り当てる人はおらず、各自が取る。
+
+- 「観測記録」ドックの画像の下の行: 「分担: 担当者なし」なら「この画像を担当」で自分の担当に。自分の担当なら「完了」「手放す」。ほかの人が担当中の画像は「分担: ○○ さんが担当中。重複作業に注意」（橙）と出て、取れない
+- 取るときは 2 回確かめる: 追加の前に、ほかの人が担当中でないか。追加の後に、同じ瞬間にほかの人が取っていないか（先に追加された行が残り、後の行は消して「○○ さんが担当中」）
+- 完了した画像は担当者なしに戻り、ほかの人が見直しで取れる
+- 担当者は [`editTracking`](#作成者更新者の記録edittracking) のユーザー名（既定は環境変数 `USERNAME`。大文字・小文字は区別しない）
+- メニュー「観測記録 ▸ 分担…」（またはドックの「分担…」）: 全員の分担の一覧（画像・撮像日時・担当者・状態・進捗・担当にした日時・メモ）。「自分の担当のみ」「完了も表示」。選んだ行の「状態を変更」（作業中・保留・完了）・「メモ…」・「ほかの人に渡す…」（交代で続きを任せるとき）・「手放す」。ほかの人の行を変えるときは確認する。ダブルクリックでその画像へ
+- 進捗: 担当にした後にその画像で付けた記録の件数（うち担当者の記録の件数）
+- 変更は変えた属性だけを書く（担当者の状態の変更とほかの人のメモが打ち消し合わない）。「ほかの人に渡す」は、読んだ後にほかの人が渡したり完了にしたりしていれば失敗する
+- 一覧は 1 分ごと（別の画像を表示したとき）と変更の後に読み直す
+
+テーブル（`assignments`。URL か `{ "url", "fields", "where", "token" }`。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
+
+**引き継ぎメモ**: メニュー「観測記録 ▸ 引き継ぎメモ…」。交代のとき、次の担当者に渡す文章を作る。
+
+- 期間（前回のメモがテーブルにあればその終わりから、なければ `hours` 時間前から今まで）と申し送り（手書き）を入れて「作成」。期間の観測記録（新規・不在・更新・削除の件数、分類・記録者・画像ごとの件数）、通報（[`alertReports`](#通報注目の記録alertreports) の通報テーブルの行）、未処理の撮像依頼（状態「有効」で期間が終わっていない依頼。優先度の順、期限が `dueHours` 時間以内なら【期限間近】）、分担（人ごとの担当中・期間内に完了した画像と進捗、観測記録ドックで開いているが担当者のいない画像）、申し送りをまとめる。設定していない部分は出さない。読めなかった部分は「読み込めなかったもの」に
+- 作ったメモは手で直せる。「保存」でテーブルに追加・ファイルに書き出し・クリップボードへコピー。「コピー」はコピーだけ
+- 上に前回のメモ（30 日以内の最新）を表示
+
+| キー | 中身 | 既定 |
+| --- | --- | --- |
+| `table` | メモの保存先（編集できるテーブル）。`TEXT`（必須。長い文字列）・`MEMO`（申し送り）・`PERIOD_START`・`PERIOD_END`・`WRITTEN_AT`（日付）・`WRITTEN_BY`。役割 `text`・`memo`・`start`・`end`・`writtenAt`・`writtenBy` | なし（前回のメモは出ない） |
+| `hours` | 1 交代の長さ（時間） | 12 |
+| `dueHours` | 期限間近とする時間 | 24 |
+| `limit` | 一覧の最大行数（残りは「…ほか n 件」） | 20 |
+| `dateFormat`・`timeZone` | 日時の書式とタイムゾーン | `%m/%d %H:%M`・`Asia/Tokyo` |
+| `newline` | `crlf`・`lf` | `crlf` |
+| `file` | パスか `{ "path", "encoding", "append" }`。パスの `{now}`（`{now:%Y%m%d}` で書式） | なし |
+
+```jsonc
+"assignments": "https://…/Work/FeatureServer/0",
+"handover": { "table": "https://…/Work/FeatureServer/1", "hours": 8,
+              "file": { "path": "D:/handover/handover_{now:%Y%m%d_%H%M}.txt", "encoding": "cp932" } }
+```
+
 ## 分類体系の編集
 
 「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。共有の保存先（`taxonomyTable`）を他の人が編集したときは「更新」（ドック上部、または「分類」タブ）で分類体系と諸元の項目を読み直す（記録はそのまま、選択中の分類は残っていれば保持）。
@@ -831,6 +868,8 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token" }` | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
+| `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 
 #### 地図・レイヤー・場所
 

@@ -174,7 +174,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "requestStores",
   "requestExports",
   "editTracking",
-  "alertReports"
+  "alertReports",
+  "assignments",
+  "handover"
  ],
  "roles": {
   "imageCatalogs": [
@@ -397,6 +399,24 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "reportedBy": "REPORTED_BY",
    "batch": "BATCH_ID",
    "manual": "MANUAL"
+  },
+  "assignments": {
+   "imageId": "IMAGE_ID",
+   "imageName": "IMAGE_NAME",
+   "imageTime": "IMAGE_TIME",
+   "assignee": "ASSIGNEE",
+   "status": "STATUS",
+   "note": "NOTE",
+   "takenAt": "TAKEN_AT",
+   "doneAt": "DONE_AT"
+  },
+  "handoverMemos": {
+   "text": "TEXT",
+   "memo": "MEMO",
+   "start": "PERIOD_START",
+   "end": "PERIOD_END",
+   "writtenAt": "WRITTEN_AT",
+   "writtenBy": "WRITTEN_BY"
   }
  },
  "alertSources": [
@@ -904,6 +924,19 @@ const SPEC = [
         const names = (Array.isArray(it.formats) ? it.formats : []).map((f) => f && f.name).filter(Boolean);
         if (!names.length) p.push(`${at}.formats: フォーマットが 1 つ以上必要`);
       } }) },
+    { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 画像）。各自が「この画像を担当」で取り、ほかの人が担当中の画像は取れない。",
+      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）" }) },
+    { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
+      field: O("handover", "引き継ぎメモ", [
+        TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        N("hours", "1 交代の長さ（時間）", { help: "前回のメモがないときの期間（既定 12）" }),
+        N("dueHours", "期限間近（時間）", { help: "この時間内に期限の依頼に印（既定 24）" }),
+        N("limit", "一覧の最大行数", { help: "既定 20（残りは件数のみ）" }),
+        T("dateFormat", "日時の書式", { ph: "%m/%d %H:%M", list: () => DATE_FORMATS }),
+        T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo" }),
+        S("newline", "改行", [["crlf", "CRLF"], ["lf", "LF"]], { ph: "crlf" }),
+        TJ("file", "ファイル", { ph: 'パスか { "path": "D:/handover/handover_{now:%Y%m%d_%H%M}.txt", "encoding": "cp932", "append": false }', help: "encoding は " + K.encodings.join("・") }),
+      ]) },
   ] },
   { group: "地図・レイヤー・場所", keys: [
     { key: "baseMaps", label: "背景地図", doc: "背景地図", help: "書くと一覧をこれで置き換える（既定は地理院・OSM）。",

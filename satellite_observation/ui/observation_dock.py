@@ -149,6 +149,7 @@ class ObservationDock(PluginDock):
         self.books: dict[str, ObservationBook] = {}
         self.book: Optional[ObservationBook] = None
         self._alerts = None
+        self._handover = None
         #: (settings, when read, rules, geofences) of the last check of saved records.
         self._alert_conditions = None
         self._alert_widget = None
@@ -190,8 +191,10 @@ class ObservationDock(PluginDock):
         project.layersRemoved.connect(self._layers_changed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
         context.configChanged.connect(self.reset_stores)
+        context.configChanged.connect(self.assignment_bar.reset)
         self.visibilityChanged.connect(self._visibility)
         self.reset_stores()
+        self.assignment_bar.reset()
 
     # ---- building ------------------------------------------------------
 
@@ -236,6 +239,11 @@ class ObservationDock(PluginDock):
         for w in (self.prev_button, self.image_select, self.next_button, self.list_button, self.only):
             row.addWidget(w)
         b.addLayout(row)
+        # 分担: who holds the image (the settings file's assignments).
+        from .assignment_bar import AssignmentBar
+
+        self.assignment_bar = AssignmentBar(self)
+        b.addWidget(self.assignment_bar)
 
         # An image without its file.
         self.list_form = QGroupBox(tr("ファイルなしの画像"))
@@ -1837,6 +1845,23 @@ class ObservationDock(PluginDock):
         self._alerts.activateWindow()
         return self._alerts
 
+    def open_handover(self, tab: int = 0):
+        """Opens 「分担と引き継ぎ」 (its tab 0 分担, 1 引き継ぎメモ); one kept while the dock lives."""
+        from .handover_dialog import HandoverDialog
+
+        if self._handover is None:
+            self._handover = HandoverDialog(self, self)
+            self.context.configChanged.connect(self._handover.reset)
+        if tab == 0 and self.assignment_bar.source is None:
+            tab = 1
+        self._handover.tabs.setCurrentIndex(tab)
+        if tab == 0:
+            self.assignment_bar.reload()
+        self._handover.show()
+        self._handover.raise_()
+        self._handover.activateWindow()
+        return self._handover
+
     def add_to_alerts(self, records: Optional[list[Observation]] = None):
         """「通報に追加」: the chosen records (or `records`) into 「通報」, whatever the conditions say."""
         records = records if records is not None else self.selected_records()
@@ -1981,6 +2006,7 @@ class ObservationDock(PluginDock):
         self.prev_button.setEnabled(many)
         self.next_button.setEnabled(many)
         self.time_row.setVisible(image is not None and image.time is None)
+        self.assignment_bar.show_image(image)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         if book is None:
             self._set_head(self.tr("観測記録"))
@@ -2268,7 +2294,7 @@ class ObservationDock(PluginDock):
         project = QgsProject.instance()
         for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
-                             (self.context.configChanged, self.reset_stores)):
+                             (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset)):
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
@@ -2279,6 +2305,12 @@ class ObservationDock(PluginDock):
             except (TypeError, RuntimeError):
                 pass
             self._alerts.close()
+        if self._handover is not None:
+            try:
+                self.context.configChanged.disconnect(self._handover.reset)
+            except (TypeError, RuntimeError):
+                pass
+            self._handover.close()
         scene = self.canvas.scene()
         if scene is not None:
             scene.removeItem(self.overlay)

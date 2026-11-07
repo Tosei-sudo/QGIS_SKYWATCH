@@ -310,6 +310,11 @@ ALERT_RULES = [
     {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
+ASSIGNMENT_FIELDS = {"IMAGE_ID": {"type": S, "length": 255}, "IMAGE_NAME": S, "IMAGE_TIME": T, "ASSIGNEE": S, "STATUS": S,
+                     "NOTE": {"type": S, "length": 2000}, "TAKEN_AT": T, "DONE_AT": T}
+HANDOVER_FIELDS = {"TEXT": {"type": S, "length": 100000}, "MEMO": {"type": S, "length": 4000}, "PERIOD_START": T, "PERIOD_END": T,
+                   "WRITTEN_AT": T, "WRITTEN_BY": S}
+
 #: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
 EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
 
@@ -417,6 +422,9 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D},
              "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0}, "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []}]},
+        {"name": "Work", "layers": [
+            {"id": 0, "name": "分担", "fields": ASSIGNMENT_FIELDS, "features": []},
+            {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
@@ -537,6 +545,9 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
         "file": {{ "path": {alert_file}, "encoding": "cp932", "append": true }} }}
     ]
   }},
+  // 分担（画像ごとに誰が担当中か。各自が「この画像を担当」で取る）と引き継ぎメモ（保存先のテーブル）
+  "assignments": "{rest}/Work/FeatureServer/0",
+  "handover": {{ "table": "{rest}/Work/FeatureServer/1", "hours": 12, "timeZone": "Asia/Tokyo" }},
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}
