@@ -179,3 +179,86 @@ def test_the_project_keeps_the_layers_own_filter_and_the_dashboard(plugin):
     settle(dock)
     assert dock.isVisible() and dock.heat_box.isChecked() and shown(again) == ["地点2", "地点3"]
     assert [l.name() for l in QgsProject.instance().mapLayers().values()].count("ヒートマップ（survey）") <= 1
+
+
+def activity(path):
+    """A port with a record a day and a base with six on the last day only, over nine days."""
+    features = [("港", 139.71, f"2024-01-0{d}T12:00:00") for d in range(1, 10)]
+    features += [("基地", 139.96, f"2024-01-09T0{h}:00:00") for h in range(6)] + [("基地", 139.96, "2024-01-02T00:00:00")]
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [x, 35.61]}, "properties": {"kind": kind, "observed": t}}
+        for kind, x, t in features]}, ensure_ascii=False), encoding="utf-8")
+    layer = QgsVectorLayer(str(path), "records", "ogr")
+    props = layer.temporalProperties()
+    props.setIsActive(True)
+    props.setMode(QgsVectorLayerTemporalProperties.TemporalMode.ModeFeatureDateTimeInstantFromField)
+    props.setStartField("observed")
+    return layer
+
+
+def test_activity_over_time_by_value_and_by_region(plugin):
+    p, iface, _, tmp_path = plugin
+    layer = activity(tmp_path / "records.geojson")
+    QgsProject.instance().addMapLayer(layer)
+    iface.setActiveLayer(layer)
+    dock = p.api.dashboard
+    dock.toggleViewAction().trigger()
+    settle(dock)
+    assert dock.layer is layer and dock.group == "kind"
+    assert [(t.key, t.latest, t.surge) for t in dock.trends] == [("基地", 6, True), ("港", 1, False)]
+    assert dock.figures["急増"] == 1 and "直近の日（2024-01-09〜）" in dock.trend_note.text()
+    assert dock.trend_chart.rows[0][3] and dock.surge_layer is None
+    # A row filters the layer by its value.
+    dock.click_trend(0)
+    settle(dock)
+    assert dock.values == {"基地"} and layer.featureCount() == 7
+    dock.clear_filter()
+
+    # By region (a grid): the base's cell is shown on the map.
+    dock.trend_combo.setCurrentIndex(dock.trend_combo.findData("grid"))
+    settle(dock)
+    assert dock.trend_by == "grid" and dock._grid == 0.05 and [t.surge for t in dock.trends] == [True, False]
+    assert dock.surge_regions() == ["35.62N 139.98E"] and dock.surge_layer.extent().contains(QgsRectangle(139.96, 35.61, 139.96, 35.61))
+    dock.click_trend(0)
+    assert iface.canvas.extent().contains(QgsRectangle(139.96, 35.61, 139.96, 35.61))
+    # In weeks (from Monday 8 January): the port's two that week are its normal.
+    dock.set_trend(unit="week")
+    settle(dock)
+    assert len(dock.trend_starts) == 9 and "直近の週（2024-01-08〜）" in dock.trend_note.text()
+    assert [(t.latest, t.surge) for t in dock.trends] == [(6, True), (2, False)]
+
+    # By the polygons of another layer, named by their display expression.
+    regions = QgsVectorLayer("Polygon?crs=EPSG:4326&field=name:string", "areas", "memory")
+    from qgis.core import QgsFeature, QgsGeometry
+    for name, wkt in (("東", "POLYGON((139.9 35.5, 140 35.5, 140 35.7, 139.9 35.7, 139.9 35.5))"),
+                      ("西", "POLYGON((139.6 35.5, 139.8 35.5, 139.8 35.7, 139.6 35.7, 139.6 35.5))")):
+        f = QgsFeature(regions.fields())
+        f.setAttributes([name])
+        f.setGeometry(QgsGeometry.fromWkt(wkt))
+        regions.dataProvider().addFeature(f)
+    regions.setDisplayExpression('"name"')
+    QgsProject.instance().addMapLayer(regions)
+    iface.setActiveLayer(layer)
+    dock.set_trend(regions.id(), "")
+    settle(dock)
+    assert dock.trend_combo.currentData() == regions.id()
+    assert [(dock._regions[t.key][0], t.latest, t.surge) for t in dock.trends] == [("東", 6, True), ("西", 1, False)]
+    assert dock.surge_regions() == ["東"] and dock.surge_layer.crs().authid() == "EPSG:4326"
+    surge_id = dock.surge_layer.id()
+    state = dock.get_state()
+    assert state["trendBy"] == regions.id() and state["surgeMap"]
+    dock.surge_box.setChecked(False)
+    settle(dock)
+    assert dock.surge_layer is None and QgsProject.instance().mapLayer(surge_id) is None
+    dock.surge_box.setChecked(True)
+    settle(dock)
+    # The regions going: back to the attribute; closing the dock takes the layer away.
+    QgsProject.instance().removeMapLayer(regions.id())
+    settle(dock)
+    assert dock.trend_by == "group" and dock.surge_layer is None
+    dock.set_trend("grid")
+    settle(dock)
+    assert dock.surge_layer is not None
+    dock.toggleViewAction().trigger()
+    APP.processEvents()
+    assert dock.surge_layer is None and not [l for l in QgsProject.instance().mapLayers().values() if l.name().startswith("急増")]

@@ -14,6 +14,14 @@ The settings name several formats (one the default); the rules, the
 geofences and the log are shared by them. A record goes out once: the Esri
 log table keeps each record reported (its id, the format's name, the line,
 when and by whom), and the records already there are left out next time.
+
+Each record picked gets an importance score (0–100, `score`): the weighted
+mean of its 確度 (where it stands among the levels), its place (the
+heaviest geofence it is in, a WEIGHT column of the layer), the rule it met
+(the rules table's WEIGHT) and its rarity (fewer records of its class near
+it in the days before, the rarer). The lines go out highest score first.
+The weights and the rarity's window are `alertReports.score`; the
+per-place and per-rule weights are Esri data.
 """
 from __future__ import annotations
 
@@ -28,7 +36,7 @@ from ..esri import EsriClient, EsriError, fit_value, quote
 from ..time_zone import UTC, TimeZone, parse_time_zone
 from ..util import is_name, is_number, is_record, js_string, layer_url, ms_of, utc_text
 from ..request.export import format_time
-from .geo import to_fixed
+from .geo import get_distance, to_fixed
 from .model import ConfidenceLevel, Observation
 from .taxonomy import kind_of, path_of, within
 
@@ -36,10 +44,10 @@ from .taxonomy import kind_of, path_of, within
 SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated",
-    "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count",
+    "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
 )
 TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
-NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width")
+NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
 #: The fields written when the settings give none.
 DEFAULT_FIELDS = ("imageTime", "kind", "objectName", "activity", "confidence", "lat", "lon", "area", "note")
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M"
@@ -51,10 +59,13 @@ NEWLINES = {"crlf": "\r\n", "lf": "\n"}
 #: The rules table's attributes by role.
 DEFAULT_RULE_FIELDS = {
     "kind": "KIND", "activities": "ACTIVITIES", "minConfidence": "MIN_CONFIDENCE", "area": "AREA",
-    "active": "ACTIVE", "note": "NOTE",
+    "active": "ACTIVE", "note": "NOTE", "weight": "WEIGHT",
 }
 #: The geofence layer's attributes by role.
-DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE"}
+DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT"}
+#: The parts of the score and their weights when the settings give none.
+DEFAULT_WEIGHTS = {"confidence": 1.0, "area": 1.0, "rule": 1.0, "rarity": 1.0}
+SCORE_PARTS = {"confidence": "確度", "area": "場所", "rule": "条件", "rarity": "珍しさ"}
 #: The log table's attributes by role.
 DEFAULT_LOG_FIELDS = {
     "obsId": "OBS_ID", "report": "REPORT_NAME", "text": "TEXT", "reportedAt": "REPORTED_AT", "reportedBy": "REPORTED_BY",
@@ -123,6 +134,20 @@ class AlertFormat:
 
 
 @dataclass
+class ScoreSettings:
+    """`alertReports.score`: how the importance score is made."""
+    #: Each part's weight (0 leaves it out).
+    weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
+    #: Rarity: the records of the same class (to `level`; the whole path when None) within
+    #: `radius_km` (0 anywhere) in the `days` before a record.
+    days: float = 30.0
+    radius_km: float = 50.0
+    level: Optional[int] = None
+    #: Records picked by the conditions below this are left out (those added by hand stay).
+    min_score: float = 0.0
+
+
+@dataclass
 class AlertSettings:
     """`alertReports`: which records are notable, the log, and the named formats (one the default)."""
     formats: list[AlertFormat] = field(default_factory=list)
@@ -137,6 +162,8 @@ class AlertSettings:
     table: Optional[EsriSource] = None
     #: A record saved that meets the conditions (and is not reported yet) is said in QGIS's message bar.
     notify_on_save: bool = True
+    #: The importance score (None: no score, lines in image time order).
+    score: Optional[ScoreSettings] = field(default_factory=ScoreSettings)
 
     def format(self, name: str = "") -> Optional[AlertFormat]:
         """The format of a name, else the default one, else the first."""
@@ -154,6 +181,8 @@ class AlertRule:
     #: A geofence's name ('' anywhere, `*` inside any).
     area: str = ""
     note: str = ""
+    #: How much meeting it weighs (0–1, the WEIGHT column; 1 when empty).
+    weight: float = 1.0
 
 
 @dataclass
@@ -161,6 +190,8 @@ class Geofence:
     """A polygon of the geofence layer (WGS 84 rings)."""
     name: str
     rings: list
+    #: How much being inside weighs (0–1, the WEIGHT column; 1 when empty).
+    weight: float = 1.0
 
 
 @dataclass
@@ -171,12 +202,29 @@ class AlertItem:
     rules: list[str] = field(default_factory=list)
     #: Added by hand (whether or not it meets the conditions).
     manual: bool = False
+    #: The importance score (0–100; None when not scored) and its parts (0–1 each).
+    score: Optional[float] = None
+    parts: dict[str, float] = field(default_factory=dict)
+    #: The records of the same class near it in the days before (for the rarity).
+    similar: int = 0
+    #: The heaviest geofence and rule it met (0–1; None when there are none to meet).
+    area_weight: Optional[float] = None
+    rule_weight: Optional[float] = None
 
 
-def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()) -> list[AlertItem]:
-    """Records chosen by hand: reported whatever the conditions say (their geofences still named)."""
-    return [AlertItem(o, list(dict.fromkeys(g.name for g in fences if inside_rings(o.lon, o.lat, g.rings))), [MANUAL_RULE], True)
-            for o in records if o.deleted_at is None]
+def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = (), settings: Optional[AlertSettings] = None,
+                 levels: Sequence[ConfidenceLevel] = (), history: Iterable[Observation] = ()) -> list[AlertItem]:
+    """Records chosen by hand: reported whatever the conditions say (their geofences still named; scored by `settings`)."""
+    out = []
+    for o in records:
+        if o.deleted_at is not None:
+            continue
+        inside = [g for g in fences if inside_rings(o.lon, o.lat, g.rings)]
+        out.append(AlertItem(o, list(dict.fromkeys(g.name for g in inside)), [MANUAL_RULE], True,
+                             area_weight=max((g.weight for g in inside), default=0.0) if fences else None, rule_weight=1.0))
+    if settings is not None and settings.score is not None:
+        score_items(out, settings.score, levels, history)
+    return out
 
 
 # ---- the settings file ------------------------------------------------------------
@@ -327,6 +375,52 @@ def alert_format_of(value: Any, problems: list[str], at: str) -> Optional[AlertF
     return fmt
 
 
+def _number(v: dict, key: str, at: str, problems: list[str], default: float, low: float = 0.0, high: float = math.inf) -> float:
+    if key not in v:
+        return default
+    x = v[key]
+    if is_number(x) and math.isfinite(x) and low <= x <= high:
+        return float(x)
+    problems.append(f"{at}.{key} は {low:g}" + (f"〜{high:g}" if math.isfinite(high) else " 以上") + " の数で指定")
+    return default
+
+
+def score_settings_of(value: Any, at: str, problems: list[str]) -> Optional[ScoreSettings]:
+    """`alertReports.score`: false for no score, else { weights, rarity: { days, radiusKm, level }, minScore }."""
+    if value is False:
+        return None
+    score = ScoreSettings()
+    if value is True or value is None:
+        return score
+    if not is_record(value):
+        problems.append(f"{at} は false か {{ weights, rarity, minScore }} で指定")
+        return score
+    weights = value.get("weights")
+    if "weights" in value and not is_record(weights):
+        problems.append(f"{at}.weights は {{ {'・'.join(DEFAULT_WEIGHTS)}: 重み }} で指定")
+    for k, w in (weights if is_record(weights) else {}).items():
+        if k not in DEFAULT_WEIGHTS:
+            problems.append(f"{at}.weights.{k} は使用不可（{'・'.join(DEFAULT_WEIGHTS)}）")
+        elif is_number(w) and math.isfinite(w) and w >= 0:
+            score.weights[k] = float(w)
+        else:
+            problems.append(f"{at}.weights.{k} は 0 以上の数で指定")
+    rarity = value.get("rarity")
+    if "rarity" in value and not is_record(rarity):
+        problems.append(f"{at}.rarity は {{ days, radiusKm, level }} で指定")
+    if is_record(rarity):
+        score.days = _number(rarity, "days", f"{at}.rarity", problems, score.days, 0.0)
+        score.radius_km = _number(rarity, "radiusKm", f"{at}.rarity", problems, score.radius_km, 0.0)
+        if "level" in rarity:
+            level = rarity["level"]
+            if is_number(level) and int(level) == level and level != 0:
+                score.level = int(level)
+            elif level is not None:
+                problems.append(f"{at}.rarity.level は 1（最上位）からの階層、または -1（最下位）で指定")
+    score.min_score = _number(value, "minScore", at, problems, 0.0, 0.0, 100.0)
+    return score
+
+
 def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings]:
     """`alertReports`; None when it cannot be used (no format)."""
     at = "alertReports"
@@ -362,6 +456,8 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
             problems.append(f"{at}.minConfidence は確度の名前で指定")
     settings.present_only = _bool(value, "presentOnly", at, problems, True)
     settings.notify_on_save = _bool(value, "notifyOnSave", at, problems, True)
+    if "score" in value:
+        settings.score = score_settings_of(value["score"], f"{at}.score", problems)
     if "rules" in value:
         settings.rules = _source_of(value["rules"], f"{at}.rules", DEFAULT_RULE_FIELDS, problems)
     if "geofences" in value:
@@ -390,6 +486,21 @@ def _list(v: Any) -> list[str]:
     return [s.strip() for s in re.split(r"[,、，\n]", _text(v)) if s.strip()]
 
 
+def weight_of(v: Any) -> float:
+    """A WEIGHT value (0–1, clipped; a percent when over 1 and up to 100); 1 when empty or not a number."""
+    if isinstance(v, str):
+        try:
+            v = float(v.strip().rstrip("%")) if v.strip() else None
+        except ValueError:
+            v = None
+    if not is_number(v) or not math.isfinite(v):
+        return 1.0
+    v = float(v)
+    if v > 1:
+        v = v / 100
+    return min(1.0, max(0.0, v))
+
+
 def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> list[AlertRule]:
     """The active rules of the table's rows (attributes)."""
     out = []
@@ -403,6 +514,7 @@ def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> lis
             min_confidence=_text(a.get(fields["minConfidence"])),
             area=_text(a.get(fields["area"])),
             note=_text(a.get(fields["note"])),
+            weight=weight_of(a.get(fields["weight"])),
         ))
     return out
 
@@ -422,7 +534,7 @@ def load_geofences(client: EsriClient, source: EsriSource, token: Optional[str] 
         rings = (feature.get("geometry") or {}).get("rings") or []
         if not rings or (f["active"] in a and not _active(a.get(f["active"]))):
             continue
-        out.append(Geofence(name=_text(a.get(f["name"])), rings=rings))
+        out.append(Geofence(name=_text(a.get(f["name"])), rings=rings, weight=weight_of(a.get(f["weight"]))))
     return out
 
 
@@ -550,13 +662,17 @@ def select(
     start: Optional[float] = None,
     end: Optional[float] = None,
     by: str = "created",
+    history: Optional[Iterable[Observation]] = None,
 ) -> list[AlertItem]:
     """
     The notable records: living ones of the period (`by` 登録日時 `created`
     or 撮像日時 `imageTime`), meeting the fixed conditions and one
     of the rules (every record when there is no rules table: `rules` None),
-    and not reported yet; in image time order.
+    and not reported yet; highest score first (`settings.score`; the rarity
+    counted among `history`, the records themselves when None), else in
+    image time order.
     """
+    records = list(records)
     done = set(reported)
     out = []
     for o in records:
@@ -571,14 +687,102 @@ def select(
             continue
         if (start is not None and t < start) or (end is not None and t > end):
             continue
-        areas = list(dict.fromkeys(g.name for g in fences if inside_rings(o.lon, o.lat, g.rings)))
+        inside = [g for g in fences if inside_rings(o.lon, o.lat, g.rings)]
+        areas = list(dict.fromkeys(g.name for g in inside))
+        area_weight = max((g.weight for g in inside), default=0.0) if fences else None
         if rules is None:
-            out.append(AlertItem(o, areas, []))
+            out.append(AlertItem(o, areas, [], area_weight=area_weight))
             continue
         met = [r for r in rules if rule_matches(r, o, areas, levels)]
         if met:
-            out.append(AlertItem(o, areas, list(dict.fromkeys(r.note for r in met if r.note))))
-    return sorted(out, key=lambda i: (i.record.image_time if i.record.image_time is not None else i.record.created_at, i.record.created_at))
+            out.append(AlertItem(o, areas, list(dict.fromkeys(r.note for r in met if r.note)), area_weight=area_weight,
+                                 rule_weight=max(r.weight for r in met)))
+    out.sort(key=_time_key)
+    if settings.score is None:
+        return out
+    score_items(out, settings.score, levels, records if history is None else history)
+    return ranked([i for i in out if i.score >= settings.score.min_score])
+
+
+def _time_key(i: AlertItem) -> tuple:
+    o = i.record
+    return (o.image_time if o.image_time is not None else o.created_at, o.created_at)
+
+
+def ranked(items: Iterable[AlertItem]) -> list[AlertItem]:
+    """Highest score first (then image time order); the ones not scored last, in time order."""
+    return sorted(items, key=lambda i: (i.score is None, -(i.score or 0.0), *_time_key(i)))
+
+
+# ---- the importance score ----------------------------------------------------------
+
+
+def confidence_part(label: str, levels: Sequence[ConfidenceLevel]) -> Optional[float]:
+    """Where a 確度 stands among the levels (surest first): 1 the surest, 0 the least or unknown; None with no levels."""
+    order = [c.label for c in levels]
+    if not order:
+        return None
+    if label not in order:
+        return 0.0
+    return 1.0 if len(order) == 1 else 1 - order.index(label) / (len(order) - 1)
+
+
+def _same_kind(path: list[str], level: Optional[int]) -> list[str]:
+    if level is None:
+        return path
+    n = level if level > 0 else len(path) + level + 1
+    return path[:max(1, n)]
+
+
+def similar_count(o: Observation, history: Sequence[Observation], score: ScoreSettings) -> int:
+    """The living records of the same class (to `score.level`) within the radius in the days before `o` (itself not counted)."""
+    t = o.image_time if o.image_time is not None else o.created_at
+    if t is None:
+        return 0
+    kind = _same_kind(path_of(o.kind), score.level)
+    window = score.days * 86_400_000
+    n = 0
+    for x in history:
+        if x.id == o.id or x.deleted_at is not None or not x.present:
+            continue
+        tx = x.image_time if x.image_time is not None else x.created_at
+        if tx is None or tx > t or tx < t - window:
+            continue
+        if kind and path_of(x.kind)[:len(kind)] != kind:
+            continue
+        if score.radius_km > 0 and get_distance((o.lon, o.lat), (x.lon, x.lat)) > score.radius_km * 1000:
+            continue
+        n += 1
+    return n
+
+
+def score_items(items: Sequence[AlertItem], score: ScoreSettings, levels: Sequence[ConfidenceLevel] = (),
+                history: Iterable[Observation] = ()) -> None:
+    """
+    Sets each item's score: 100 × the weighted mean of its parts (確度, place,
+    rule, rarity = 1 / (1 + similar records)); a part with nothing to
+    measure (no levels, no geofences, no rules table) is left out of the mean.
+    """
+    history = list(history)
+    for item in items:
+        item.similar = similar_count(item.record, history, score) if score.weights.get("rarity", 0) > 0 else 0
+        parts = {
+            "confidence": confidence_part(item.record.confidence, levels),
+            "area": item.area_weight,
+            "rule": item.rule_weight,
+            "rarity": 1 / (1 + item.similar),
+        }
+        item.parts = {k: v for k, v in parts.items() if v is not None}
+        total = sum(score.weights.get(k, 0.0) for k in item.parts)
+        item.score = round(100 * sum(score.weights.get(k, 0.0) * v for k, v in item.parts.items()) / total, 1) if total > 0 else 0.0
+
+
+def score_note(item: AlertItem) -> str:
+    """The score's parts as text (確度 100・場所 50・条件 100・珍しさ 33（類似 2 件）)."""
+    if item.score is None:
+        return ""
+    text = "・".join(f"{SCORE_PARTS[k]} {round(v * 100)}" for k, v in item.parts.items())
+    return text + (f"（類似 {item.similar} 件）" if "rarity" in item.parts else "")
 
 
 # ---- writing ---------------------------------------------------------------
@@ -608,7 +812,8 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width,
         "recordedBy": o.recorded_by, "updatedBy": o.updated_by, "created": o.created_at, "updated": o.updated_at,
         "area": "・".join(item.areas), "rule": "・".join(item.rules), "report": report.name, "reportedAt": at.now,
-        "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual,
+        "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
+        "similar": item.similar if item.score is not None else None,
     }.get(s or "")
 
 

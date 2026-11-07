@@ -4,7 +4,8 @@ from datetime import date, datetime
 
 from satellite_observation.core.dashboard import (
     MAX_VALUES, OTHERS, add_time, bin_chosen, categories, category_value, choose_range, choose_value, filter_expression, floor_time,
-    format_time, histogram, in_values, number_value, pick_group, pick_measure, short, step_at_least, time_bins,
+    format_time, grid_cell, grid_key, grid_label, grid_size, histogram, in_values, number_value, pick_group, pick_measure, short,
+    step_at_least, time_bins, trend_step, trends,
 )
 
 
@@ -84,3 +85,32 @@ def test_the_filter_as_a_where_clause():
     assert filter_expression("kind", {OTHERS}, {"a", ""}, None, None) == "(\"kind\" NOT IN ('a') AND \"kind\" IS NOT NULL AND \"kind\" <> '')"
     assert filter_expression("kind", {"it's"}, set(), None, None, quote=lambda n: n) == "kind IN ('it''s')"
     assert filter_expression("kind", set(), set(), "value", None) is None
+
+
+def test_the_latest_step_against_the_steps_before_it():
+    steady = [("港", ms(2024, 1, d, 12)) for d in range(1, 10)]
+    sudden = [("基地", ms(2024, 1, 9, h)) for h in range(6)] + [("基地", ms(2024, 1, 2))]
+    starts, rows = trends(steady + sudden + [("古い", ms(2023, 12, 1))], "day")
+    assert [format_time(t, "day") for t in (starts[0], starts[-1])] == ["2024-01-01", "2024-01-09"] and len(starts) == 9
+    # Sudden increases first; a key with nothing in the window is left out.
+    assert [(r.key, r.counts, r.surge) for r in rows] == [("基地", [0, 1, 0, 0, 0, 0, 0, 0, 6], True), ("港", [1] * 9, False)]
+    base = rows[0]
+    assert (base.latest, base.normal, base.change, base.spread) == (6, 0.125, 5.875, 1.0) and rows[1].score == 0
+    # The end chosen (the temporal controller's) makes its step the latest.
+    starts, rows = trends(steady + sudden, "day", end=ms(2024, 1, 5, 23))
+    assert format_time(starts[-1], "day") == "2024-01-05" and [(r.key, r.latest) for r in rows] == [("港", 1), ("基地", 0)]
+    # Few records are not a sudden increase, however few there were before.
+    assert not trends([("a", ms(2024, 1, 9)), ("a", ms(2024, 1, 9, 1))], "day")[1][0].surge
+    # Weeks start on Monday, months on the 1st.
+    starts, _ = trends([("a", ms(2024, 3, 13))], "week")
+    assert format_time(starts[-1], "day") == "2024-03-11" and format_time(trends([("a", ms(2024, 3, 13))], "month")[0][0], "month") == "2023-07"
+    assert trends([], "day") == ([], [])
+    assert (trend_step([ms(2024, 1, 1), ms(2024, 1, 5)]), trend_step([ms(2024, 1, 1), ms(2024, 2, 20)]),
+            trend_step([ms(2024, 1, 1), ms(2024, 6, 1)])) == ("day", "week", "month")
+
+
+def test_the_grid_of_regions():
+    assert (grid_size(0.07, 0.16), grid_size(30, 12), grid_size(800_000, 10), grid_size(0, 0)) == (0.02, 5, 100_000, 1.0)
+    key = grid_key(139.71, 35.68, 0.02)
+    assert key == "6985,1784" and grid_key(139.95, -0.05, 0.05) == "2799,-1" and grid_cell("-1,2", 5) == (-5, 10, 0, 15)
+    assert grid_label(key, 0.02, True) == "35.69N 139.71E" and grid_label("-3,-1", 10, True) == "5S 25W" and grid_label("1,2", 1000, False) == "1,500, 2,500"

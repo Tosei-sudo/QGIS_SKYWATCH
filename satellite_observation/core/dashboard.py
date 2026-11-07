@@ -331,3 +331,107 @@ def filter_expression(group: Optional[str], chosen: set, listed: set, measure: O
         field = quote(measure)
         parts.append(f"{field} >= {chosen_range[0]!r} AND {field} <= {chosen_range[1]!r}")
     return " AND ".join(parts) if parts else None
+
+
+# ---- Activity over time: the latest step against the steps before it ----
+
+#: The steps the trend counts in (自動: by the span of the times).
+TREND_STEPS = {"day": "日", "week": "週", "month": "月"}
+#: The steps before the latest one that make 「平常」.
+BASELINE = 8
+#: How far above 「平常」 (in its spread) and how many records make a sudden increase.
+SURGE_SCORE = 2.0
+SURGE_MIN = 3
+
+
+@dataclass
+class Trend:
+    key: str
+    #: Records per step, the oldest first; the last is the latest step.
+    counts: list
+    #: The mean of the steps before the latest one.
+    normal: float
+    #: Their spread (standard deviation, at least the square root of the mean and at least 1).
+    spread: float
+    #: (latest - normal) / spread.
+    score: float
+    surge: bool
+
+    @property
+    def latest(self) -> int:
+        return self.counts[-1]
+
+    @property
+    def change(self) -> float:
+        return self.latest - self.normal
+
+
+def trend_step(times: list, baseline: int = BASELINE) -> str:
+    """The step for the times: days when BASELINE + 1 days hold them, weeks up to as many weeks, else months."""
+    if not times:
+        return "day"
+    span = (max(times) - min(times)) / 86_400_000
+    return "day" if span <= baseline + 1 else "week" if span <= 7 * (baseline + 1) else "month"
+
+
+def trends(rows: Iterable[tuple[str, float]], unit: str, baseline: int = BASELINE, end: Optional[float] = None) -> tuple[list, list[Trend]]:
+    """(key, time ms) of each record counted per key in the step `end` is in (else the newest record's) and the `baseline` steps before.
+
+    The step starts and every key with a record in them, sudden increases first, then by how far above 「平常」.
+    """
+    rows = [(k, t) for k, t in rows if t is not None]
+    if not rows:
+        return [], []
+    end = max(t for _, t in rows) if end is None else end
+    last = floor_time(end, unit)
+    starts = [floor_time(add_time(last, unit, -k), unit) for k in range(baseline, -1, -1)]
+    after = add_time(last, unit, 1)
+    counts: dict[str, list] = {}
+    for key, t in rows:
+        if t < starts[0] or t >= after:
+            continue
+        i = len(starts) - 1
+        while starts[i] > t:
+            i -= 1
+        counts.setdefault(key, [0] * len(starts))[i] += 1
+    out = []
+    for key, c in counts.items():
+        before = c[:-1]
+        normal = sum(before) / len(before) if before else 0.0
+        var = sum((x - normal) ** 2 for x in before) / (len(before) - 1) if len(before) > 1 else 0.0
+        spread = math.sqrt(max(var, normal, 1.0))
+        score = (c[-1] - normal) / spread
+        out.append(Trend(key, c, normal, spread, score, score >= SURGE_SCORE and c[-1] >= SURGE_MIN and c[-1] > normal))
+    out.sort(key=lambda r: (not r.surge, -r.score, -r.latest, r.key))
+    return starts, out
+
+
+def grid_size(width: float, height: float, cells: int = 8) -> float:
+    """A round cell size (1, 2 or 5 × 10^k) that puts about `cells` cells across the longer side."""
+    side = max(width, height)
+    if not math.isfinite(side) or side <= 0:
+        return 1.0
+    raw = side / cells
+    power = 10 ** math.floor(math.log10(raw))
+    return next((m * power for m in (1, 2, 5, 10) if m * power >= raw), 10 * power)
+
+
+def grid_key(x: float, y: float, size: float) -> str:
+    """The cell a point is in (a point on a cell's edge, as 139.95 for 0.05, in the cell it starts)."""
+    return f"{math.floor(x / size + 1e-9)},{math.floor(y / size + 1e-9)}"
+
+
+def grid_cell(key: str, size: float) -> tuple[float, float, float, float]:
+    """The cell (xmin, ymin, xmax, ymax) of a key of grid_key."""
+    i, j = (int(v) for v in key.split(","))
+    return i * size, j * size, (i + 1) * size, (j + 1) * size
+
+
+def grid_label(key: str, size: float, geographic: bool) -> str:
+    """The cell's centre: 35.65N 139.75E in degrees, else x, y."""
+    x0, y0, x1, y1 = grid_cell(key, size)
+    x, y = (x0 + x1) / 2, (y0 + y1) / 2
+    if geographic:
+        digits = max(0, -math.floor(math.log10(size / 2))) if size < 2 else 0
+        return f"{abs(y):.{digits}f}{'N' if y >= 0 else 'S'} {abs(x):.{digits}f}{'E' if x >= 0 else 'W'}"
+    return f"{short(x)}, {short(y)}"

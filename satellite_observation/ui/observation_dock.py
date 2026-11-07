@@ -773,6 +773,7 @@ class ObservationDock(PluginDock):
         cached = self._alert_conditions if self._alert_conditions and self._alert_conditions[0] is s and now - self._alert_conditions[1] < 600 else None
         token = self.context.token_for
         levels = book.confidences()
+        history = list(book.records)
 
         def work(_task):
             if cached:
@@ -781,7 +782,7 @@ class ObservationDock(PluginDock):
                 rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
                 fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
             done = reported_ids(client, s, token(s.table.url, s.table.token)) if s.table else set()
-            return rules, fences, select(records, s, rules, fences, levels, done)
+            return rules, fences, select(records, s, rules, fences, levels, done, history=history)
 
         def finished(result) -> None:
             rules, fences, items = result

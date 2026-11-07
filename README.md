@@ -163,8 +163,11 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「撮像依頼」ドックで、いつからいつまで・どこを・どの条件で撮るかを登録する（保存先は `requestStores` の Esri フィーチャーサービス）。区分は定点（毎日・曜日・N 日ごとの繰り返し）と臨時、達成条件は毎回と期間内1回
 - 優先度は 5 段階（最優先〜最低）から選ぶ。「詳細」で 1〜1000 を直接指定（1 ほど高い）
 - 条件: 種別（光学・SAR）、衛星シリーズ、衛星、センサー・モード、オフナディア角・入射角の範囲、観測方向、軌道方向、分解能、時間帯、実施しない雲量、優先するシステム。空欄は問わない
+  - 衛星シリーズ・衛星・センサーモードは撮像計画と同じ階層選択（種別 → シリーズ → 衛星 → モード、撮像モードのまとめ選択と絞り込み）で選ぶ。チェックなしは衛星を問わない。シリーズ全体のチェックは衛星シリーズ、一部なら衛星（台帳にあった順、続けて新しくチェックした順に優先）、衛星のモードの一部だけならセンサーモードとして保存。保存する条件はツリーの下に表示
+  - 台帳の名前（別名 `satelliteAliases` を含む）はチェックとして表示し、触らなければそのまま保存。衛星カタログにない名前もそのまま残る。「手入力」で名前を直接入力（衛星カタログを読めないときは手入力のみ）
 - 範囲は地図で矩形・点（一辺の長さ指定）、または選択中の地物から
-- 「レイヤーから取り込み」で作業中のレイヤーの地物を定点の依頼として登録（依頼ID が同じものは上書き）。属性は台帳と同じ名前（`REQ_NAME`・`START_AT` …）か、名称・開始・終了・優先度 などの見出しで対応づけ。「レイヤーへ書き出し」で一覧の依頼を一時レイヤーに
+- 「レイヤーから取り込み…」で、任意のレイヤー（ポリゴン・点・線）と名称に使う属性を選ぶと、地物ごとの範囲と名称で依頼を登録する。期間・優先度・衛星などの残りの項目は、入力画面で全件まとめて指定する（点は一辺を指定した正方形、選択中の地物だけも可）
+- 「台帳と同じ属性も読む」を選ぶと、属性を台帳と同じ名前（`REQ_NAME`・`START_AT` …）か、名称・開始・終了・優先度 などの見出しで対応づけて読む（依頼ID が同じものは上書き）。「レイヤーへ書き出し」で一覧の依頼を一時レイヤーにしたものを戻すとき用
 - 「一括編集…」: 一覧で Ctrl・Shift + クリックで選んだ複数の依頼の優先度（繰り上げの解除も可）・状態・種別をまとめて変更。チェックした項目だけを変え、1 件ずつ台帳と照合して保存（ほかの人が先に変えた依頼は保存せず名前を表示、残りは保存）
 - ファイルの出力は別のドック「撮像計画ファイル出力」（依頼を登録する人と出力する人が別のため、撮像依頼ドックとは分けている）。対象日（日本時間）を選んで「計算」で依頼を集め、衛星システム（`requestExports`）ごとの CSV（キー指定）・JSON（JSON Schema）を書き出す
   - 光学の依頼は日中（地方時 9〜15 時）の雲量予報を見て、10% ごとの段階を優先度の 1 の位に入れる。実施しない雲量以上なら見送り（期間内1回で期限まで 2 日以内なら警告付きで出す）
@@ -253,13 +256,19 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 対象は削除されていない記録。`presentOnly`（既定 `true`）で不在を除き、`minConfidence` で確度の下限
 - **手動の通報**: 条件に合わない記録も、記録のフォームの「通報」、または一覧で選んだ行（Ctrl・Shift + クリックで複数）の「通報に追加」で通報文の先頭に入る（「手動」と表示。抽出し直しても残る）。項目 `rule` は「手動」、項目 `manual` は「手動」か空欄、通報テーブルの `MANUAL` は 1
 - **保存時のお知らせ**: 記録を保存（記録・継続・位置の修正・復元・一括編集）したとき、条件に合い通報済みでない記録があれば、メッセージバーに「注目の記録」と「通報文を作成」ボタン（その記録を入れて「通報」を開く）。条件・ジオフェンスは 10 分ごとに読み直す。`"notifyOnSave": false` で出さない
+- **重要度スコア**（`score`）: 抽出した記録に 0〜100 点を付け、高い順に並べる（手動で追加した記録は先頭のまま）。一覧の左の列に点数、マウスを乗せると内訳。項目 `score`（点数。`digits` で小数の桁）・`similar`（珍しさで数えた似た記録の件数）で行や通報テーブルに書ける。点数は次の 4 つ（それぞれ 0〜1）の重み付き平均 × 100:
+  - 確度: 確度の並びで一番上が 1、一番下が 0
+  - 場所: 入っているジオフェンスの `WEIGHT` の最大（空欄は 1）。どれにも入っていなければ 0
+  - 条件: 合った条件の `WEIGHT` の最大（空欄は 1）。手動で追加した記録は 1
+  - 珍しさ: 1 ÷ (1 + 似た記録の件数)。似た記録 = 同じ分類（`rarity.level` の階層まで）の削除されていない在の記録で、その記録より前 `rarity.days` 日以内・半径 `rarity.radiusKm` km 以内のもの（読み込んでいる記録から数える）
+  - 測るものがない要素（ジオフェンスなし・条件テーブルなし）は平均から外す。`minScore` 未満は抽出しない。`"score": false` で点数を付けず撮像日時の順
 
 **注目の条件は Esri に置く**（増えたり変わったりするため）。設定ファイルには URL と属性名だけ。
 
-- 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`AREA`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）。`rules` がなければ固定の条件に合う記録すべて
-- ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`。記録が入っているジオフェンスの名前は項目 `area`
+- 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`AREA`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
+- ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。記録が入っているジオフェンスの名前は項目 `area`
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
-- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`／`name`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
+- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
 
 **フォーマット**（`formats`。名前を付けて複数）:
 
@@ -277,7 +286,17 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}` | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）。
+
+**重要度スコア**（`score`。書かなければ既定の重みで付ける）:
+
+| キー | 中身 | 既定 |
+| --- | --- | --- |
+| `weights` | 要素の重み `{ "confidence", "area", "rule", "rarity" }`（0 でその要素を使わない） | どれも `1` |
+| `rarity.days` | 似た記録をさかのぼる日数 | `30` |
+| `rarity.radiusKm` | 似た記録を数える半径（km。`0` で場所を問わない） | `50` |
+| `rarity.level` | 同じ分類とみなす階層（1 が最上位、-1 が最下位） | 分類全体 |
+| `minScore` | これ未満は抽出しない（0〜100） | `0` |
 
 ```jsonc
 "alertReports": {
@@ -285,6 +304,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
   "geofences": "https://…/Alerts/FeatureServer/1",
   "table": "https://…/Alerts/FeatureServer/2",
   "minConfidence": "推定",
+  "score": { "weights": { "confidence": 1, "area": 2, "rule": 1, "rarity": 1 }, "rarity": { "days": 14, "radiusKm": 30, "level": 1 } },
   "default": "速報",
   "formats": [
     { "name": "速報", "delimiter": "|", "dateFormat": "%m/%d %H:%M",
@@ -432,7 +452,8 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 値をクリックすると（Ctrl / Shift で複数）、その値の地物だけを地図と属性テーブルに表示。ヒストグラムの区間も同じ（Shift で範囲を広げる）。各グラフは、ほかのグラフの絞り込みが残す地物を数える。「絞り込みを解除」で元に戻り、「地物を選択」で絞り込んだ地物を選択
 - 時間の推移の区間をクリックすると、時系列コントローラーをその期間に設定
 - 「ヒートマップ」で、表示中の地物のヒートマップレイヤーを一番上に追加（半径は変更可）
-- 絞り込みはレイヤーのフィルター（サブセット）にダッシュボードの条件を足して行い、ドックを閉じると元のフィルターに戻す。プロジェクトにはレイヤー本来のフィルターと、ダッシュボードの状態（集計するレイヤー・属性・絞り込み・ヒートマップ）を保存する
+- 活動の推移（平常との差）: 上の属性の値ごと、または地域ごと（自動の大きさの格子か、プロジェクトのポリゴンレイヤーの各ポリゴン）に、直近の 1 区間（日・週・月、既定は記録の期間から自動）の件数を、その前の 8 区間の平均（平常）と比べる。各行に区間ごとの件数の小さなグラフと「直近 件（平常・差）」を表示し、急に増えたもの（平常よりばらつきの 2 倍以上多く、3 件以上）を赤で先頭に並べる。ばらつきは前の 8 区間の標準偏差（平均の平方根と 1 を下限）。時系列コントローラーが有効なときは、その期間の終わりを含む区間が直近。値の行をクリックで絞り込み、地域の行をクリックでその地域へ移動。地域ごとのときは急増した地域を「急増した地域」レイヤー（赤の面、直近・平常・差・スコアの属性つき）として一番上に表示（チェックで切替、閉じると削除）
+- 絞り込みはレイヤーのフィルター（サブセット）にダッシュボードの条件を足して行い、ドックを閉じると元のフィルターに戻す。プロジェクトにはレイヤー本来のフィルターと、ダッシュボードの状態（集計するレイヤー・属性・絞り込み・ヒートマップ・活動の推移のまとめ方と区切り）を保存する
 
 ## スワイプ比較
 
@@ -629,7 +650,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 撮像依頼台帳・観測記録は、保存の前にサーバーの更新日時（台帳の `UPDATED_AT`、観測記録の `updated`）を読み込んだときの値と比べる。ほかの人が先に保存（日次の繰り上げ・照合の完了を含む）していたら上書きせずに止め、「読み込み直してから変更」と出す。ほかの人が削除した依頼は保存しても戻さない
 - 分類体系はこちらで変えたクラスの行だけを送る（ほかの人が変えたクラスは書き戻さない）
 - 追加の前に同じ ID（依頼ID・記録の ID・確認範囲の ID・分類のパス）がサーバーにあるかを確かめる。応答のタイムアウトでサーバー側だけ保存されていても、もう一度保存すると更新になり重複しない。撮像計画の保存は途中で失敗したらその計画の行を消す（やり直しで二重にならない）。編集の要求は読み取りより長く待つ（QGIS のタイムアウトの 3 倍、少なくとも 3 分）
-- 「レイヤーから取り込み」は台帳を読み込んでから使える。取り込む直前に台帳を読み直して既存の依頼IDを判定し、レイヤー内で同じ依頼IDが続く行は取り込まない
+- 「レイヤーから取り込み…」は台帳を読み込んでから使える。「台帳と同じ属性も読む」では取り込む直前に台帳を読み直して既存の依頼IDを判定し、レイヤー内で同じ依頼IDが続く行は取り込まない
 - 一括編集も同じ照合を 1 件ずつ（観測記録は 1 回の保存の中で）行い、止まったものだけを知らせて残りは保存する。作成者・更新者の列（`editTracking`）も通常の保存と同じく入る
 
 ## 作成者・更新者の記録（`editTracking`）
@@ -672,7 +693,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
@@ -845,7 +866,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
-| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token" }` | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 
