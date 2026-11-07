@@ -21,23 +21,19 @@ import os
 from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import QByteArray, QTimer, Qt, QUrl
-from qgis.PyQt.QtGui import QDesktopServices, QKeySequence, QPixmap
+from qgis.PyQt.QtGui import QDesktopServices, QPixmap
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QScrollArea, QSplitter, QTableWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
-try:  # Qt6
-    from qgis.PyQt.QtGui import QShortcut
-except ImportError:  # Qt5
-    from qgis.PyQt.QtWidgets import QShortcut
-
 from ..core.obs.stores import LOCAL_LABEL, LocalPhotoStore, is_local_photo, photo_url
 from ..core.obs.taxonomy import (
     SpecField, Taxon, activities_at, children_of, find, kind_of, level_name, name_label_of, path_of, photos_at, spec_text, specs_at, within,
 )
 from ..qgis_io.context import PluginContext
+from . import shortcuts
 from .docks import PluginDock
 from .flow_layout import FlowLayout
 
@@ -140,11 +136,10 @@ class TaxonomyDock(PluginDock):
         self.tree.itemCollapsed.connect(lambda item: self.folded.add(item.data(0, KIND_ROLE)))
         self.tree.itemDelegate().closeEditor.connect(self._editor_closed)
         split.addWidget(self.tree)
-        for keys, slot in (("Alt+Up", lambda: self.reorder(-1)), ("Alt+Down", lambda: self.reorder(1)), ("Ins", self._add_below),
-                           ("Del", self._delete_key)):
-            s = QShortcut(QKeySequence(keys), self.tree)
-            s.setContext(Qt.ShortcutContext.WidgetShortcut)
-            s.activated.connect(slot)
+        for name, label, keys, slot in (("TaxonUp", "上へ", "Alt+Up", lambda: self.reorder(-1)),
+                                        ("TaxonDown", "下へ", "Alt+Down", lambda: self.reorder(1)),
+                                        ("TaxonAdd", "下に追加", "Ins", self._add_below), ("TaxonDelete", "削除", "Del", self._delete_key)):
+            shortcuts.dock_key(self.tree, name, f"分類体系の編集（一覧内）: {label}", keys, slot, widget_only=True)
 
         # The chosen class.
         scroll = QScrollArea()

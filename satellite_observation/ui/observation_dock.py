@@ -18,17 +18,12 @@ from typing import Any, Callable, Optional
 
 from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
+from qgis.PyQt.QtGui import QColor, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
-
-try:  # Qt6
-    from qgis.PyQt.QtGui import QShortcut
-except ImportError:  # Qt5
-    from qgis.PyQt.QtWidgets import QShortcut
 
 from ..core.obs.api import ObservationApi
 from ..core.obs.areas import CheckedArea, area_label, box_ring
@@ -50,6 +45,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
+from . import shortcuts
 from .docks import PluginDock
 from .flow_layout import FlowLayout
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
@@ -573,22 +569,20 @@ class ObservationDock(PluginDock):
             w.setVisible(False)
         b.addWidget(self.more)
 
-        # Keys, while the dock has the focus.
-        def key(seq: str, slot: Callable) -> None:
-            s = QShortcut(QKeySequence(seq), self)
-            s.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            s.activated.connect(slot)
-
-        key("PgUp", lambda: self.step(-1))
-        key("PgDown", lambda: self.step(1))
-        key("Esc", self.escape)
-        key("R", lambda: self.record_button.setChecked(not self.active))
-        key("L", lambda: self.set_points(self.points % 4 + 1))
-        key("A", lambda: self.area_button.setChecked(not self.area_mode))
+        # Keys, while the dock has the focus (changeable in Settings ▸ Keyboard Shortcuts).
+        key = shortcuts.dock_key
+        key(self, "ObsPreviousImage", "観測記録（ドック内）: 前の画像", "PgUp", lambda: self.step(-1))
+        key(self, "ObsNextImage", "観測記録（ドック内）: 次の画像", "PgDown", lambda: self.step(1))
+        key(self, "ObsSubmit", "観測記録（ドック内）: フォームの記録・更新", "Ctrl+Return", self._submit_key)
+        key(self, "ObsSubmitKeypad", "観測記録（ドック内）: フォームの記録・更新（テンキーの Enter）", "Ctrl+Enter", self._submit_key)
+        key(self, "ObsEscape", "観測記録（ドック内）: 取消・終了", "Esc", self.escape)
+        key(self, "ObsRecord", "観測記録（ドック内）: 記録の開始・終了", "R", self.toggle_recording)
+        key(self, "ObsPoints", "観測記録（ドック内）: 入力点数の切り替え", "L", lambda: self.set_points(self.points % 4 + 1))
+        key(self, "ObsArea", "観測記録（ドック内）: 確認範囲の記録", "A", lambda: self.area_button.setChecked(not self.area_mode))
         for n in range(1, 10):
-            key(str(n), lambda n=n: self._chip(n))
+            key(self, f"ObsActivity{n}", f"観測記録（ドック内）: 活動 {n} 番目", str(n), lambda n=n: self._chip(n))
         for n in range(1, 6):
-            key(f"Alt+{n}", lambda n=n: self._candidate_key(n))
+            key(self, f"ObsCandidate{n}", f"観測記録（ドック内）: 候補 {n} 番目", f"Alt+{n}", lambda n=n: self._candidate_key(n))
 
     # ---- the stores ----------------------------------------------------
 
@@ -805,6 +799,10 @@ class ObservationDock(PluginDock):
                     self._following = False
         self._apply_only()
         self.render()
+
+    def toggle_recording(self) -> None:
+        """Starts recording, or ends it (「記録」 pressed)."""
+        self.record_button.setChecked(not self.active)
 
     def step(self, by: int) -> Optional[ObservedImage]:
         """The next (or previous) image in time."""
@@ -1426,6 +1424,13 @@ class ObservationDock(PluginDock):
         self.object_input.setText(c.name)
         self._object_typed()
         self.submit_button.setFocus()
+
+    def _submit_key(self) -> None:
+        """Ctrl+Enter: the open form saved, wherever in the dock the focus is (Enter alone only in its text boxes)."""
+        if self.form.isVisible():
+            self.submit(True)
+        elif self.area_form.isVisible():
+            self._submit_area()
 
     def _candidate_key(self, n: int) -> None:
         if self.form.isVisible() and 0 < n <= len(self.offered):

@@ -23,17 +23,12 @@ from qgis.core import Qgis, QgsFeatureRequest, QgsGeometry, QgsMapLayer, QgsMess
 from qgis.gui import QgsCollapsibleGroupBox, QgsMapToolEmitPoint
 from qgis.PyQt.QtCore import QAbstractTableModel, QDateTime, QModelIndex, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.PyQt.QtGui import QBrush, QColor, QKeySequence, QStandardItem, QStandardItemModel
+from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableView,
     QVBoxLayout, QWidget,
 )
-
-try:  # Qt6
-    from qgis.PyQt.QtGui import QShortcut
-except ImportError:  # Qt5
-    from qgis.PyQt.QtWidgets import QShortcut
 
 from ..core.plan.access import Opportunity, PlanOptions, PlanResult, PlanTarget, plan_access
 from ..core.plan.catalogs import load_satellites, load_sensor_modes
@@ -60,6 +55,7 @@ from ..qgis_io.network import get_bytes
 from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
+from . import shortcuts
 from .docks import PluginDock
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
@@ -463,10 +459,9 @@ class ImagingPlanDock(PluginDock):
         self._update_buttons()
 
         # Shortcuts while the dock has the focus only.
-        for keys, slot in (("Ctrl+Return", self.run), ("Ctrl+Enter", self.run), ("Esc", self.cancel)):
-            shortcut = QShortcut(QKeySequence(keys), self)
-            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(slot)
+        shortcuts.dock_key(self, "PlanRun", "撮像計画（ドック内）: 計算", "Ctrl+Return", self.run)
+        shortcuts.dock_key(self, "PlanRunKeypad", "撮像計画（ドック内）: 計算（テンキーの Enter）", "Ctrl+Enter", self.run)
+        shortcuts.dock_key(self, "PlanCancel", "撮像計画（ドック内）: 中止", "Esc", self.cancel)
 
         self.map_tool = QgsMapToolEmitPoint(self.canvas)
         self.map_tool.canvasClicked.connect(self._map_clicked)
