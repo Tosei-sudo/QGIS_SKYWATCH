@@ -438,12 +438,26 @@ python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 - 作るときに設定ファイルを読んで確かめ、読めない・問題があるときは zip を作らない。`token` が書いてあれば注意を出す（zip を受け取った人全員に渡るため。サインインが要るサービスは各自の QGIS の認証設定を使う方がよい）
 - プラグインを入れ直すと同梱の設定ファイルも新しい zip のものに置き換わる。各自の指定（`QgsSettings`）は残る
 
+#### 同梱の設定ファイルに固定する（`--lock-config`）
+
+```
+python3 scripts/build_zip.py --config /path/to/config.json --lock-config
+python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
+```
+
+- 受け取った人は同梱の設定ファイルしか使えない。「設定…」の設定ファイル欄は同梱のファイルを表示するだけで変えられず（「参照…」は押せない、「読み込み」は同梱のものを読み直す）、前に指定したパス・URL があっても無視する。ドック上部の表示は「同梱の設定ファイル読み込み済み（固定）」
+- 記録者とサービスごとの認証設定はこれまでどおり各自で選べる
+- 仕組み: zip に設定ファイルと並べて `satellite_observation/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`satellite_observation/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
+- 設定ファイルなしで `--lock-config` を付けると zip を作らない
+- 固定を外すには `--lock-config` なしで作った zip を入れ直す（またはプラグインのフォルダの `config.lock` を消す）。各自が前に指定していたファイルがあれば、またそちらを読む
+
 ## 設定
 
 | 項目 | 保存先 |
 | --- | --- |
 | 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
+| 同梱の設定ファイルへの固定（`--lock-config`） | プラグインのフォルダーの `config.lock` |
 | 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |

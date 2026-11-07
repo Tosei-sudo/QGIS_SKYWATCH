@@ -7,6 +7,7 @@
 | 項目 | ビューア | プラグイン | 理由 |
 | --- | --- | --- | --- |
 | 設定ファイルの形式 | JSON（README に「コメントは書けません」） | JSON と JSONC（`//`・`/* */`・末尾のカンマ） | 指示書どおり。ビューアの `config.json` はそのまま読める |
+| 設定ファイルの固定 | なし（ページと同じ場所の `config.json` を読む） | `build_zip.py --lock-config` で作った zip（`config.lock` 入り）は同梱の設定ファイルだけを読み、「設定…」での指定を受け付けない。設定ファイルの項目ではなく zip の作り方で決める（受け取った人が選ぶファイルに書いても意味がなく、同梱のファイルが読めなくても固定が外れないように） | tsudo の依頼（2026-11-07） |
 | 読む項目 | 全項目 | `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` のみ（他は無視、問題にも出さない） | 共用のため |
 | サインイン | `arcgisPortals` の OAuth（PKCE、ポップアップ） | QGIS の認証設定（`authcfg`）をサービスごとに選ぶ。`arcgisPortals` は読み込みと検証のみ | QGIS の OAuth2 / ESRI token 認証に任せる |
 | `token` と認証設定 | `token` があればそれ、なければサインインのトークン | 認証設定を選んだサービスは `token` を送らない | 二重送信を避けるため |
