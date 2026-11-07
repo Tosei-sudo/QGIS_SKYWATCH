@@ -89,9 +89,9 @@ _WINDOWS = {
 
 def _windows_tzdata() -> None:
     """The Windows zip's tzdata (ext/win64, put there by scripts/build_zip.py --win64) on the path, when there is one."""
-    folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ext", "win64")
-    if os.path.isdir(os.path.join(folder, "tzdata")) and folder not in sys.path:
-        sys.path.append(folder)
+    from .win64 import add_package
+
+    add_package("tzdata")
 
 
 _iana_cache: dict[str, Optional[TimeZone]] = {}

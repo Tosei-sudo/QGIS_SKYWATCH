@@ -263,13 +263,15 @@ def test_the_carried_onnxruntime_runs_without_its_extras(tmp_path):
         "import sys; sys.path = [p for p in sys.path if not os.path.isdir(os.path.join(p, 'onnxruntime'))]\n"
         "from satellite_observation.qgis_io import ai_runtime as r\n"
         f"ort = r.load_ort({str(tmp_path / 'win64')!r}, 'Windows')\n"
-        "assert ort.__file__.startswith(" + repr(str(tmp_path)) + "), ort.__file__\n"
+        # Loaded from a copy outside the plugin's folder, so QGIS can still replace or remove that folder (core/win64).
+        "assert ort.__file__.startswith(" + repr(str(tmp_path / 'cache')) + "), ort.__file__\n"
+        f"assert {str(tmp_path / 'win64')!r} not in sys.path\n"
         f"m = r.create_model({os.path.join(DATA, 'detect.onnx')!r})\n"
         "import numpy as np; out = m.run({'images': np.zeros((1, 3, 64, 64), np.float32)})\n"
         "print(m.metadata['task'], list(out.values())[0].shape)\n"
     )
     result = subprocess.run([sys.executable, "-c", "import os\n" + code], cwd=root, capture_output=True, text=True, timeout=120,
-                            env=dict(os.environ, PYTHONPATH=root))
+                            env=dict(os.environ, PYTHONPATH=root, LOCALAPPDATA=str(tmp_path / 'cache')))
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "detect (1, 6, 16)"
 

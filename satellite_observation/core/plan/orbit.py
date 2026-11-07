@@ -18,12 +18,10 @@ import numpy as np
 
 
 def _windows_sgp4() -> None:
-    """The Windows zip's sgp4 (C++ accelerated, ext/win64, put there by scripts/build_zip.py --win64) on the path, when there is one."""
-    import sys
+    """The Windows zip's sgp4 (C++ accelerated, ext/win64, put there by scripts/build_zip.py --win64) on the path, when there is one (loaded from a copy, see core/win64)."""
+    from ..win64 import add_package
 
-    folder = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ext", "win64")
-    if os.path.isdir(os.path.join(folder, "sgp4")) and folder not in sys.path:
-        sys.path.append(folder)
+    add_package("sgp4")
 
 
 try:  # The installed sgp4 (C++ accelerated when its wheel has it), else the Windows zip's; SATELLITE_OBSERVATION_SGP4=bundled forces the copy (tests).
