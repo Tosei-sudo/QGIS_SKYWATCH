@@ -26,6 +26,7 @@ from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, read_catalog_
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
 from ..qgis_io import settings
+from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
     Cancelled, add_record_layers, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer,
 )
@@ -609,6 +610,7 @@ class CatalogDock(PluginDock):
                 problems.append(str(error))
                 continue
             add_record_layers(opened, record)
+            overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
         if problems:
             self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))

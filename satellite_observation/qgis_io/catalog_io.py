@@ -40,6 +40,7 @@ from ..core.catalog.watch import areas_of
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_ID, image_layer
+from .overviews_io import before_open
 from .plan_layer import make_field, qdatetime
 
 CATALOG = "satobs/catalog"
@@ -248,6 +249,8 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     if not where.files:
         url = where.place
         name = record.id or url.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        if not where.is_url:
+            before_open(url)
         layer = image_layer(url, name, image_id=record.id or None, time=time,
                             authcfg=settings.auth_for(url) if where.is_url else None)
         if not layer.isValid():
@@ -264,6 +267,7 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     for rel in files:
         path = os.path.join(where.place, *rel.split("/"))
         name = rel if len(files) > 1 or not record.id else f"{record.id} {rel}"
+        before_open(path)
         layer = image_layer(path, name, image_id=record.id or None, time=time)
         if not layer.isValid():
             failed.append(rel)

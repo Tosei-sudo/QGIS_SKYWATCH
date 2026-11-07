@@ -21,6 +21,7 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import time_zone_fields
 from .qgis_io.context import PluginContext
+from .qgis_io import overviews_io
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
@@ -240,6 +241,7 @@ class SatelliteObservationPlugin:
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
+        self.context.configChanged.connect(self._overviews_changed)
         # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
         self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
@@ -659,7 +661,12 @@ class SatelliteObservationPlugin:
     def open_settings(self) -> None:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
+    def _overviews_changed(self) -> None:
+        if self.context is not None:
+            overviews_io.configure_cache(self.context.config.overviews)
+
     def unload(self) -> None:
+        overviews_io.queue.cancel_all()
         if "SatObsMoving" in self.docks:
             self.docks["SatObsMoving"].close_all()
         if "SatObsDashboard" in self.docks:

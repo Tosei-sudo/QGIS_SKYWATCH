@@ -54,6 +54,30 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 書かない、または合うセンサーも `*` もないときは、ふつうの画像ファイル（`.tif`・`.tiff`・`.jp2`・`.j2k`・`.ntf`・`.nitf`・`.img`）。`.aux.xml`・`.ovr` などは合わない
 - 1 フォルダから最大 1000 枚まで（超えたら先頭のみ。選択画面に表示）。フォルダの場所は画像ファイルと同じく `pathMappings` に従う（大文字小文字を区別せずにたどる）。URL（COG・`pathMappings` の `url`）のフォルダは一覧できないので不可
 - 正規表現の誤りは設定の問題に表示し、その正規表現だけ使わない
+
+### ピラミッド（.ovr）の自動作成（`overviews`）
+
+- カタログ（通知・保存した撮像計画を含む）から開いたローカルの画像にピラミッドがなければ、バックグラウンド（QGIS のタスク。ステータスバーで進捗・取消）で外部の `.ovr` を作り、できたらレイヤーを読み直す。**画像本体は書き換えない**（読み取りのみ）。1 枚ずつ順に作り、同じ画像は二重に作らない。内部ピラミッド・既存の `.ovr`・JPEG 2000 などの解像度レベルがあれば作らない。URL（COG）の画像は対象外
+- 置き場所（`location`）:
+  - `"auto"`（既定）: 画像のフォルダに書き込めれば隣に `画像名.tif.ovr`（一時フォルダで作ってから移すので、作りかけは読まれない）。書き込めなければ PC ごとのキャッシュフォルダ
+  - `"cache"`: 書き込めるフォルダでも常にキャッシュフォルダ（画像のフォルダには何も書かない）
+- キャッシュフォルダは GDAL の `GDAL_PAM_PROXY_DIR`。既定は QGIS 自身が設定しているプロファイルの `gdal_pam` フォルダ（読み取り専用フォルダの画像の統計なども GDAL がここに置く）。設定ファイルの `cacheFolder` で別のフォルダに変更できる（GDAL はこの値を最初に使うときに 1 回だけ読むので、**変更は QGIS の再起動後に有効**）
+- キャッシュの .ovr は GDAL が画像を開くたびに自分で見つける（レイヤーの参照先は元の画像のまま。RPC・ファイル名のルール・観測記録はそのまま）。このプラグインを入れていない QGIS や他の GIS からは見えない
+- `"cache"` のときは、カタログから画像を開く前に、その画像の `.aux.xml` をキャッシュ側に移す（隣にあれば内容を写す。隣のファイルはそのまま）。以後 GDAL はキャッシュ側を読み書きするので、QGIS が計算する統計・ヒストグラムも画像のフォルダには書かれない。キャッシュ側に `.ovr` の場所（`OVERVIEW_FILE`）を書く。**画像の隣の `.aux.xml` をあとで変えても反映されない**（キャッシュを消すと元に戻る）
+- `"auto"` で書き込めるフォルダの場合、QGIS は（このプラグインと関係なく）統計を画像の隣の `.aux.xml` に書く
+- キャッシュの大きさは設定ダイアログの「ピラミッドのキャッシュ」に表示。「キャッシュを消去」で次回起動時に消す（開いている画像が使っているため）。キャッシュは PC ごとなので、人ごとに 1 回ずつ作る。共有フォルダを複数人のキャッシュにするのは、GDAL の索引ファイル（`gdal_pam_proxy.dat`）に同時に書き込むと壊れるおそれがあるので不可
+- 長辺が `minSize` 以下の画像は作らない。段は 2・4・8…（最小の段の長辺が 256 ピクセル以下になるまで）
+
+```jsonc
+"overviews": {
+  "location": "auto",          // "auto" | "cache"
+  "cacheFolder": "",           // "" = QGIS プロファイルの中
+  "resampling": "AVERAGE",     // NEAREST・AVERAGE・BILINEAR・CUBIC・CUBICSPLINE・LANCZOS・GAUSS・MODE・RMS
+  "compress": "DEFLATE",       // NONE・DEFLATE・LZW・ZSTD・JPEG（JPEG は 8 ビットの 1・3・4 バンドのみ。ほかは DEFLATE）
+  "minSize": 2048
+}
+// "overviews": false で作らない（省略時は上の既定値で作る）
+```
 - 「レイヤーとして追加」で一覧をフットプリントのメモリレイヤーに（撮像日時で時系列コントローラーが効く）
 - 「類似画像の検索」（一覧のボタン、またはカタログから開いたレイヤーの右クリック「類似画像の検索…」）で、同じセンサー・角度 ±5°・方位角 ±20° の画像を重なりの大きい順に。比較元は赤い破線。許容差は記憶。「通常の検索に復帰」で戻る
 
@@ -486,7 +510,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

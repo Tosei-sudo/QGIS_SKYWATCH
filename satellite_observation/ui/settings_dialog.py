@@ -21,7 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from ..qgis_io import settings
+from ..qgis_io import overviews_io, settings
 from ..qgis_io.context import PluginContext
 
 
@@ -64,6 +64,16 @@ class SettingsDialog(QDialog):
         self.startup_layers = QCheckBox(self.tr("起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加"))
         self.startup_layers.setChecked(settings.startup_layers_on())
         form.addRow("", self.startup_layers)
+        self.cache = QLabel()
+        self.cache.setWordWrap(True)
+        self.clear_cache = QPushButton(self.tr("キャッシュを消去"))
+        self.clear_cache.setToolTip(self.tr("書き込めないフォルダの画像のピラミッド（.ovr）を消す。使用中のことがあるので、次に QGIS を起動したときに消去"))
+        self.clear_cache.clicked.connect(self._clear_cache)
+        cache_row = QHBoxLayout()
+        cache_row.addWidget(self.cache, 1)
+        cache_row.addWidget(self.clear_cache)
+        form.addRow(self.tr("ピラミッドのキャッシュ"), cache_row)
+        self._show_cache()
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -89,6 +99,23 @@ class SettingsDialog(QDialog):
         self._selects: dict[str, QgsAuthConfigSelect] = {}
         context.configChanged.connect(self._fill)
         self._fill()
+
+    def _show_cache(self) -> None:
+        folder = overviews_io.cache_folder()
+        if not folder:
+            self.cache.setText(self.tr("なし（書き込めないフォルダの画像にはピラミッドを作らない）"))
+            self.clear_cache.setEnabled(False)
+            return
+        n, size = overviews_io.cache_size(folder)
+        text = self.tr("{folder}（{n} 件、{mb:.1f} MB）").format(folder=folder, n=n, mb=size / 1048576)
+        if settings.overview_cache_to_clear():
+            text += self.tr("。次回起動時に消去")
+        self.cache.setText(text)
+        self.clear_cache.setEnabled(n > 0 and not settings.overview_cache_to_clear())
+
+    def _clear_cache(self) -> None:
+        overviews_io.clear_cache_next_start()
+        self._show_cache()
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, self.tr("設定ファイルの選択"), self.source.text(), self.tr("設定ファイル (*.json *.jsonc);;すべてのファイル (*)"))

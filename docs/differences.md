@@ -135,6 +135,7 @@
 | 開いたレイヤー | — | カスタムプロパティ `satobs/imageId`（観測記録・計画の追跡が使う）・`satobs/catalog`・`satobs/catalogUrl`・`satobs/feature`・`satobs/sensorAzimuth`・`satobs/sensorElevation`、メタデータにカタログの属性 | 指示書どおり |
 | 「保存した撮像計画」の画像 | — | 画像カタログと同じ開き方に（`pathMappings` も効く） | 共通化 |
 | パスがフォルダのレコード | — | フォルダの下（何段でも）の `imagePatterns`（カタログごと・センサーごとの正規表現、`*` はその他、なければふつうの画像の拡張子）に合うファイルをレコードの画像に。複数なら「開く画像の選択」で選び、レコード ID のグループに開く（各レイヤーの `satobs/imageId` はレコードの ID、`satobs/imageFile` はフォルダからのパス）。URL のフォルダは不可、最大 1000 枚 | tsudo の依頼（2026-11-07、プラグインのみ） |
+| ピラミッド（.ovr）の自動作成 | —（ブラウザは COG の解像度レベルを読む） | カタログから開いたローカル画像にピラミッドがなければバックグラウンドで外部 `.ovr` を作成（画像本体は書き換えない）。`overviews.location` が `auto` なら書き込めるフォルダは画像の隣、書き込めなければ PC ごとのキャッシュ（`GDAL_PAM_PROXY_DIR`）、`cache` なら常にキャッシュ。`overviews: false` で無効 | tsudo の依頼（2026-11-07、プラグインのみ） |
 | 類似画像の検索の入口 | 画像の右クリック・一覧のボタン | カタログから開いたラスターレイヤーの右クリック「類似画像の検索…」・一覧のボタン | — |
 | 重なり | 平面の面積比 | QgsDistanceArea（WGS84 楕円体）の面積比 | 指示書どおり |
 | 監視の保存 | IndexedDB | ローカル GeoPackage の `catalog_watches`・`watch_notices` | ほかのローカル保存と同じ |
