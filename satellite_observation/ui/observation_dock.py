@@ -19,12 +19,17 @@ from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
-from qgis.PyQt.QtGui import QColor, QPainter
+from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
+
+try:
+    from qgis.PyQt.QtGui import QShortcut
+except ImportError:  # Qt 5
+    from qgis.PyQt.QtWidgets import QShortcut
 
 from ..core.obs.api import ObservationApi
 from ..core.obs.areas import CheckedArea, area_label, box_ring
@@ -457,6 +462,12 @@ class ObservationDock(PluginDock):
         self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
                                         lambda: self.bulk_edit())
         self.bulk_button.hide()
+        self.remove_chosen_button = self._button(tr("選んだ記録を削除…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）をまとめて削除（Delete キーでも。確認あり）"),
+                                                 lambda: self.remove_selected())
+        self.remove_chosen_button.hide()
+        delete_key = QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.table)
+        delete_key.setContext(Qt.ShortcutContext.WidgetShortcut)
+        delete_key.activated.connect(lambda: self.remove_selected())
         self.alert_add_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加（通報の条件に合わなくても。設定ファイルの alertReports）"),
                                              lambda: self.add_to_alerts())
         self.alert_add_button.hide()
@@ -466,6 +477,7 @@ class ObservationDock(PluginDock):
         self.table.itemSelectionChanged.connect(self._selection_changed)
         chosen = QHBoxLayout()
         chosen.addWidget(self.bulk_button)
+        chosen.addWidget(self.remove_chosen_button)
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
@@ -1955,6 +1967,7 @@ class ObservationDock(PluginDock):
         self._row_actions = []
         self._row_records = []
         self.bulk_button.hide()
+        self.remove_chosen_button.hide()
         self.alert_add_button.hide()
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
@@ -2009,6 +2022,7 @@ class ObservationDock(PluginDock):
     def _selection_changed(self) -> None:
         rows = {i.row() for i in self.table.selectionModel().selectedRows()}
         self.bulk_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
+        self.remove_chosen_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
         self.alert_add_button.setVisible(bool(rows) and self.context.config.alert_reports is not None and bool(self.selected_records()))
         self.event_add_button.setVisible(bool(rows) and self.context.config.events is not None and bool(self.selected_records()))
 
@@ -2043,6 +2057,25 @@ class ObservationDock(PluginDock):
         if not values:
             return None
         return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values), watch=True)
+
+    def ask_remove(self, records: list[Observation]) -> bool:
+        """Asks before deleting the chosen records (いいえ by default)."""
+        things = len({o.object_id for o in records})
+        what = self.tr("選んだ記録 {n} 件（モノ {m} 件）を削除しますか？").format(n=len(records), m=things)
+        how = (self.tr("この保存先では記録が完全に消え、元に戻せません。") if self.book.removes_for_good()
+               else self.tr("「詳細」の「削除済みも表示」から復元できます。"))
+        return ask_no(self, self.tr("選んだ記録の削除"), what + "\n\n" + how)
+
+    def remove_selected(self, records: Optional[list[Observation]] = None, ask: bool = True) -> Any:
+        """Deletes the chosen records (a thing's row: all its records) after asking; what went through and what not is told."""
+        book = self.book
+        records = self.selected_records() if records is None else records
+        if book is None or not records:
+            return None
+        if ask and not self.ask_remove(records):
+            return None
+        ids = [o.id for o in records]
+        return self.do(self.tr("選んだ記録の削除"), lambda b: b.remove_many(ids))
 
     def _small(self, *buttons: tuple) -> QWidget:
         box = QWidget()

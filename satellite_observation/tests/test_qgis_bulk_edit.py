@@ -99,3 +99,50 @@ def test_records_and_things_chosen_together(obs_plugin):
     assert len(dock.selected_records()) == 3
     dock.apply_bulk([o.id for o in dock.selected_records()], {"activity": "航行"})
     assert sorted(o.activity for o in book.living() if o.object_name in ("いぶき", "あおば")) == ["航行"] * 3
+
+
+def test_records_and_things_chosen_together_are_deleted_after_asking(obs_plugin, monkeypatch):
+    p, iface, dock, layers, tmp_path = obs_plugin
+    book = dock.book
+    for name, lon in (("あおば", 139.65), ("いぶき", 139.7), ("うらが", 139.75)):
+        book.add(lon, 35.6, object=name, kind="船舶", activity="停泊")
+    dock.render()
+    assert not dock.remove_chosen_button.isVisible()
+    _choose(dock.table, [0, 2])
+    assert dock.remove_chosen_button.isVisible()
+    asked = []
+    monkeypatch.setattr(dock, "ask_remove", lambda records: asked.append(len(records)) or False)
+    dock.remove_selected()
+    assert asked == [2] and len(book.living()) == 3  # いいえ: nothing deleted
+    monkeypatch.setattr(dock, "ask_remove", lambda records: asked.append(len(records)) or True)
+    dock.remove_selected()
+    assert sorted(o.object_name for o in book.living()) == ["いぶき"]
+    assert dock.status.text() == "2 件の記録を削除"
+    assert dock.table.rowCount() == 1 and not dock.remove_chosen_button.isVisible()
+    # Restorable from 「削除済みも表示」.
+    dock.deleted_check.setChecked(True)
+    assert dock.table.rowCount() == 3
+    dock.deleted_check.setChecked(False)
+    # On 「モノ」, a thing's row stands for all its records.
+    dock.step(1)
+    book.add(139.7, 35.6, object="いぶき", kind="船舶", activity="航行")
+    book.add(139.8, 35.6, object="えとろふ", kind="船舶", activity="航行")
+    dock.tabs.setCurrentIndex(1)
+    names = [dock.table.item(r, 0).text() for r in range(dock.table.rowCount())]
+    _choose(dock.table, [names.index("いぶき"), names.index("えとろふ")])
+    assert len(dock.selected_records()) == 3
+    dock.remove_selected()
+    assert book.living() == []
+
+
+def test_the_question_says_whether_deleted_records_can_be_restored(obs_plugin, monkeypatch):
+    p, iface, dock, layers, tmp_path = obs_plugin
+    book = dock.book
+    o = book.add(139.65, 35.6, object="あおば", kind="船舶", activity="停泊")
+    seen = []
+    monkeypatch.setattr("satellite_observation.ui.observation_dock.ask_no", lambda parent, title, text: seen.append(text) or False)
+    assert dock.ask_remove([o]) is False
+    assert "1 件（モノ 1 件）" in seen[0] and "復元できます" in seen[0]
+    monkeypatch.setattr(book, "removes_for_good", lambda: True)
+    dock.ask_remove([o])
+    assert "元に戻せません" in seen[1]
