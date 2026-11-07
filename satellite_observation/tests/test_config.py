@@ -229,6 +229,13 @@ class TestObservationSettings:
         assert observation_store_of({"url": "https://x/MapServer/2"}, problems, 1) is None
         assert vocabulary_of({"kinds": ["艦艇"]}, problems).kinds == ["艦艇"]
 
+    def test_local_observations_can_be_turned_off(self):
+        assert parse_config({})[0].local_observations is True
+        config, problems = parse_config({"localObservations": False})
+        assert config.local_observations is False and problems == []
+        config, problems = parse_config({"localObservations": "false"})
+        assert config.local_observations is True and problems == ["localObservations は true か false で指定"]
+
     def test_takes_confidence_levels_as_words_or_objects(self):
         problems = []
         assert confidences_of(["確定", {"label": "可能性大", "color": "#d97706", "note": "特徴が一致"}, {"label": "確定"}, {"color": "red"}, {"label": "x", "color": "url(evil)"}], problems, "c") == [

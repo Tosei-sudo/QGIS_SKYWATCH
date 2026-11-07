@@ -421,6 +421,31 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert [o.object_name for o in living(dock.book.records)] == ["共有のモノ"]
 
 
+def test_local_records_can_be_turned_off_in_the_settings(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}], "localObservations": False}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    # Only the Esri store, chosen in place of the local one.
+    assert dock.store_select.count() == 1 and dock.store_set.remote and dock.book.label == "共有"
+    assert not dock.store_select.isVisible() and not dock.clear_button.isEnabled()
+    # With no Esri store either, nothing can be recorded.
+    config.write_text(json.dumps({"localObservations": False}), encoding="utf-8")
+    p.context.reload()
+    assert dock.sets == [] and dock.book is None
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    assert dock.book is None
+    # Turned on again, the local store is back.
+    config.write_text(json.dumps({}), encoding="utf-8")
+    p.context.reload()
+    assert dock.book.label == "ローカル"
+
+
 def test_opens_a_catalog_image_signed_in_by_an_authcfg(tmp_path):
     path = geotiff(tmp_path / "c.tif")
     layer = image_layer(path, "カタログ画像", image_id="CAT-9", time=ms(5), authcfg="abc1234")
