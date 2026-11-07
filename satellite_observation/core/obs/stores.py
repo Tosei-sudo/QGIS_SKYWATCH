@@ -16,7 +16,7 @@ import uuid
 from dataclasses import replace
 from typing import Any, Iterable, Optional, Protocol
 
-from ..esri import EsriClient, EsriError, fit_value, point_geometry, ring_geometry
+from ..esri import ConflictError, EsriClient, EsriError, fit_value, point_geometry, ring_geometry
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
@@ -286,6 +286,10 @@ class _EsriLayer:
         return self._types, self._oid
 
 
+#: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
+_STAMP_SLACK_MS = 1000
+
+
 class EsriObservationStore:
     """Observations in an Esri point feature layer (one record per feature)."""
 
@@ -296,6 +300,10 @@ class EsriObservationStore:
         self.client = client
         #: The object id of each record (by its own id) as the layer gave it.
         self.oids: dict[str, int] = {}
+        #: Each record's 更新日時 as read (or last saved here): a record changed by someone else since is not overwritten (#74).
+        self.stamps: dict[str, Optional[float]] = {}
+        #: The 更新日時 of saves whose answer was lost (a timeout): the server may hold them.
+        self.pending: dict[str, float] = {}
         self._layer = _EsriLayer(client, config.url, token, config.label, [config.fields["id"], config.fields["objectId"]])
 
     def _feature_of(self, o: Observation, types: dict[str, str], oid: str) -> dict[str, Any]:
@@ -322,6 +330,7 @@ class EsriObservationStore:
             return None
         if is_number(a.get(oid)):
             self.oids[record_id] = int(a[oid])
+        self.stamps[record_id] = ms_of(a.get(f["updated"]))
         created = ms_of(a.get(f["created"])) or 0
         return Observation(
             id=record_id, image_id=_text(a.get(f["imageId"])), image_name=_text(a.get(f["imageName"])),
@@ -339,27 +348,71 @@ class EsriObservationStore:
         features = self.client.query_all(self.config.url, self.config.where or "1=1", self.token, limit=200_000)
         return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
 
+    def _check(self, records: list[Observation], types: dict[str, str], oid: str) -> list[str]:
+        """
+        Asks the layer about the records before saving: those already there
+        but not known here (an add whose answer was lost, #73) become
+        updates; those changed by someone else since read are left out
+        (their reasons returned, #74).
+        """
+        f = self.config.fields
+        updated = f["updated"] if f["updated"] in types else None
+        found = self.client.find(self.config.url, f["id"], [o.id for o in records], self.token,
+                                 out_fields=",".join(n for n in (f["id"], oid, updated) if n))
+        conflicts = []
+        for o in list(records):
+            a = found.get(o.id)
+            if a is None:
+                if o.id in self.oids:
+                    # Deleted by someone else: added again as it is here (it was kept, not removed, here).
+                    self.oids.pop(o.id, None)
+                continue
+            if is_number(a.get(oid)):
+                known = o.id in self.oids
+                self.oids[o.id] = int(a[oid])
+                if not known:
+                    continue
+            if updated:
+                server, seen, pending = ms_of(a.get(updated)), self.stamps.get(o.id), self.pending.get(o.id)
+                if (server is not None and seen is not None and abs(server - seen) > _STAMP_SLACK_MS
+                        and not (pending is not None and abs(server - pending) <= _STAMP_SLACK_MS)):
+                    conflicts.append(o.id)
+        return conflicts
+
     def save(self, records: list[Observation]) -> None:
         if not records:
             return
         types, oid = self._layer.ready()
         failed: list[str] = []
+        conflicts = set(self._check(records, types, oid))
+        records = [o for o in records if o.id not in conflicts]
         for i in range(0, len(records), 200):
             batch = records[i:i + 200]
             adds = [o for o in batch if o.id not in self.oids]
             updates = [o for o in batch if o.id in self.oids]
-            result = self.client.apply_edits(self.config.url, [self._feature_of(o, types, oid) for o in adds],
-                                             [self._feature_of(o, types, oid) for o in updates], token=self.token)
+            try:
+                result = self.client.apply_edits(self.config.url, [self._feature_of(o, types, oid) for o in adds],
+                                                 [self._feature_of(o, types, oid) for o in updates], token=self.token)
+            except EsriError:
+                for o in batch:
+                    self.pending[o.id] = o.updated_at
+                raise
             for o, r in zip(adds, result.add_results):
                 if r.get("success") and is_number(r.get("objectId")):
                     self.oids[o.id] = int(r["objectId"])
+                    self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
                 elif not r.get("success"):
                     failed.append((r.get("error") or {}).get("description") or "追加失敗")
-            for r in result.update_results:
-                if not r.get("success"):
+            for o, r in zip(updates, result.update_results):
+                if r.get("success"):
+                    self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
+                else:
                     failed.append((r.get("error") or {}).get("description") or "更新失敗")
-        if failed:
-            raise EsriError(f"{len(failed)} 件の保存に失敗: {failed[0]}")
+        if conflicts or failed:
+            parts = [f"{len(conflicts)} 件はほかの人が読み込み後に更新したため保存せず（読み込み直してから変更）"] if conflicts else []
+            if failed:
+                parts.append(f"{len(failed)} 件の保存に失敗: {failed[0]}")
+            raise (EsriError if failed else ConflictError)("・".join(parts))
 
     def remove(self, records: list[Observation], now: Optional[int] = None) -> list[Observation]:
         marked = _marked(records, now)
@@ -434,6 +487,13 @@ class EsriAreaStore:
         if not areas:
             return
         types, oid = self._layer.ready()
+        # Already there but not known here (an add whose answer was lost): changed, not added again (#73).
+        new = [a.id for a in areas if a.id not in self.oids]
+        if new:
+            for area_id, attrs in self.client.find(self.config.url, self.config.fields["id"], new, self.token,
+                                                    out_fields=f"{self.config.fields['id']},{oid}").items():
+                if is_number(attrs.get(oid)):
+                    self.oids[area_id] = int(attrs[oid])
         adds = [a for a in areas if a.id not in self.oids]
         updates = [a for a in areas if a.id in self.oids]
         result = self.client.apply_edits(self.config.url, [self._feature_of(a, types, oid) for a in adds],
@@ -524,6 +584,8 @@ class EsriTaxonomyStore:
         self.token = token
         #: The object id of each class's row (by its kind).
         self.oids: dict[str, int] = {}
+        #: Each class's row as read (or last saved here): only rows changed here are sent (#74).
+        self.rows: dict[str, dict[str, Any]] = {}
         self._fields_row: tuple[Optional[int], Optional[list[SpecField]]] = (None, None)
         self._loaded = False
         self._layer = _EsriLayer(client, config.url, token, "分類のテーブル", [config.fields["path"]])
@@ -533,6 +595,7 @@ class EsriTaxonomyStore:
         f = self.config.fields
         rows: list[tuple[Taxon, float]] = []
         self.oids.clear()
+        self.rows.clear()
         for feature in self.client.query_all(self.config.url, "1=1", self.token, geometry=False, limit=100_000):
             a = feature.get("attributes") or {}
             if _text(a.get(f["path"])) == FIELDS_ROW:
@@ -544,8 +607,10 @@ class EsriTaxonomyStore:
             if is_number(a.get(oid)):
                 self.oids[kind_of(path)] = int(a[oid])
             order = _order_of(a.get(f["order"]))
+            taxon = _taxon_of_row(a, f)
+            self.rows[kind_of(path)] = {k: (_text(v) if k != f["order"] else _order_of(v)) for k, v in a.items() if k != oid}
             # The first class is saved as 0: only a missing order goes after the rest.
-            rows.append((_taxon_of_row(a, f), order if order is not None else len(rows)))
+            rows.append((taxon, order if order is not None else len(rows)))
         self._loaded = True
         if not rows:
             return None
@@ -563,20 +628,44 @@ class EsriTaxonomyStore:
                 out[oid] = self.oids[kind_of(t.path)]
             return {"attributes": out}
 
+        def unchanged(t: Taxon, i: int) -> bool:
+            seen = self.rows.get(kind_of(t.path))
+            if seen is None:
+                return False
+            row = attributes_of(t, i)["attributes"]
+            return all((_order_of(v) if k == f["order"] else _text(v)) == seen.get(k, None if k == f["order"] else "")
+                       for k, v in row.items() if k != oid)
+
         kept = {kind_of(t.path) for t in everything}
+        # Rows added by an earlier save whose answer was lost (or by someone else, the same class): changed, not added (#73).
+        new = [kind_of(t.path) for t in everything if kind_of(t.path) not in self.oids]
+        if new:
+            for kind, a in self.client.find(self.config.url, f["path"], new, self.token, out_fields=f"{f['path']},{oid}").items():
+                if is_number(a.get(oid)):
+                    self.oids[kind] = int(a[oid])
         deletes = [i for k, i in self.oids.items() if k not in kept]
         adds = [(t, i) for i, t in enumerate(everything) if kind_of(t.path) not in self.oids]
-        updates = [(t, i) for i, t in enumerate(everything) if kind_of(t.path) in self.oids]
+        # Only the rows changed here: what someone else changed in the others is kept (#74).
+        updates = [(t, i) for i, t in enumerate(everything) if kind_of(t.path) in self.oids and not unchanged(t, i)]
+        if not (adds or updates or deletes):
+            return
         result = self.client.apply_edits(self.config.url, [attributes_of(t, i) for t, i in adds],
                                          [attributes_of(t, i) for t, i in updates], deletes, token=self.token)
         failed = []
-        for (t, _), r in zip(adds, result.add_results):
+        def remember(t: Taxon, i: int) -> None:
+            self.rows[kind_of(t.path)] = {k: (_order_of(v) if k == f["order"] else _text(v))
+                                          for k, v in attributes_of(t, i)["attributes"].items() if k != oid}
+
+        for (t, i), r in zip(adds, result.add_results):
             if r.get("success") and is_number(r.get("objectId")):
                 self.oids[kind_of(t.path)] = int(r["objectId"])
+                remember(t, i)
             elif not r.get("success"):
                 failed.append((r.get("error") or {}).get("description") or "追加失敗")
-        for r in result.update_results:
-            if not r.get("success"):
+        for (t, i), r in zip(updates, result.update_results):
+            if r.get("success"):
+                remember(t, i)
+            else:
                 failed.append((r.get("error") or {}).get("description") or "更新失敗")
         # Rows the server did not delete stay known (deleted again with the next save).
         undeleted = {int(r["objectId"]) for r in result.delete_results if not r.get("success") and is_number(r.get("objectId"))}
@@ -586,6 +675,7 @@ class EsriTaxonomyStore:
         for k, i in list(self.oids.items()):
             if i in gone:
                 del self.oids[k]
+                self.rows.pop(k, None)
         if failed:
             raise EsriError(f"分類 {len(failed)} 件の保存に失敗: {failed[0]}")
 

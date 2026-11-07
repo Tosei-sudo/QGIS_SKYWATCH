@@ -139,6 +139,8 @@ class ImagingRequest:
     rings: list = field(default_factory=list)
     #: The feature's object id (None until saved).
     object_id: Optional[int] = None
+    #: The 更新日時 of a save whose answer was lost (a timeout): the server may hold it (#73, #74).
+    pending_update: Optional[float] = field(default=None, compare=False, repr=False)
 
     @property
     def effective(self) -> int:

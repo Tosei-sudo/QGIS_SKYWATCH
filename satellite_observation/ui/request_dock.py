@@ -194,6 +194,7 @@ class RequestDock(PluginDock):
             if store is not self.store:
                 return
             self.requests, self._loaded = requests, True
+            self._update_buttons()
             chosen = self.chosen.id if self.chosen else None
             self.chosen = next((r for r in requests if r.id == chosen), None)
             self.render()
@@ -266,8 +267,10 @@ class RequestDock(PluginDock):
 
     def _update_buttons(self) -> None:
         ready = self.store is not None and self.task is None
-        for b in (self.new_button, self.reload_button, self.import_button):
+        for b in (self.new_button, self.reload_button):
             b.setEnabled(ready)
+        # Only once the ledger was read: what is new is told by it (#72).
+        self.import_button.setEnabled(ready and self._loaded)
         self.edit_button.setEnabled(ready and self.chosen is not None)
         self.delete_button.setEnabled(ready and self.chosen is not None)
         self.export_button.setEnabled(bool(self.shown))
@@ -345,20 +348,32 @@ class RequestDock(PluginDock):
         if not isinstance(layer, QgsVectorLayer) or not layer.isSpatial():
             self.status.setText(self.tr("取り込むレイヤー（ポリゴンか点）を作業中のレイヤーに選択"))
             return
+        if not self._loaded or self.store is None:
+            self.status.setText(self.tr("台帳を読み込んでから取り込み"))
+            return
         selected = layer.selectedFeatureCount() > 0
         rows = layer_rows(layer, selected, self.point_km.value())
         roles = field_roles([f.name() for f in layer.fields()])
         by_id = {r.id: r for r in self.requests}
-        requests, skipped = [], []
+        requests, skipped, kept = [], [], []
+        seen: set = set()
         for i, (values, rings, kind) in enumerate(rows):
             rid = values.get(roles["id"]) if "id" in roles else None
-            existing = by_id.get(str(rid).strip()) if rid not in (None, "") else None
+            key = str(rid).strip() if rid not in (None, "") else None
+            if key is not None and key in seen:
+                # The same id twice in the layer: the first one only (#72).
+                skipped.append(f"{i + 1} 行目: 依頼ID {key} が重複")
+                continue
+            existing = by_id.get(key) if key is not None else None
             r = request_of_row(values, roles, rings, kind, existing)
             problems = row_problems(r)
             if problems:
                 skipped.append(f"{i + 1} 行目: {'・'.join(problems)}")
             else:
+                if key is not None:
+                    seen.add(key)
                 requests.append(r)
+                kept.append((values, rings, kind, key))
         if not requests:
             self.status.setText(self.tr("取り込める地物なし（{why}）").format(why="、".join(skipped[:3]) or self.tr("地物なし")))
             return
@@ -374,8 +389,17 @@ class RequestDock(PluginDock):
         store, client, token = self.store, self.context.esri(), self.token()
 
         def work(task):
+            # The ledger as it is now (not as the dock last read it): ids already there are changed, not added again (#72).
+            fresh = {r.id: r for r in load_requests(client, store, token, task.isCanceled)}
+            todo = []
+            for values, rings, kind, key in kept:
+                existing = fresh.get(key) if key is not None else None
+                r = request_of_row(values, roles, rings, kind, existing)
+                if existing is not None:
+                    r.updated = existing.updated
+                todo.append(r)
             saved, failed = 0, []
-            for k, r in enumerate(requests):
+            for k, r in enumerate(todo):
                 if task.isCanceled():
                     break
                 try:
@@ -383,7 +407,7 @@ class RequestDock(PluginDock):
                     saved += 1
                 except Exception as error:  # noqa: BLE001 (each one reported)
                     failed.append(f"{r.name}: {error}")
-                task.progress(100 * (k + 1) / len(requests))
+                task.progress(100 * (k + 1) / len(todo))
             return saved, failed
 
         def done(result):

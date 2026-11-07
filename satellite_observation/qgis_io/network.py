@@ -67,6 +67,11 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
     return exchange.result
 
 
+#: Edit requests (applyEdits and the like) wait at least this long (ms).
+EDIT_TIMEOUT_MS = 180_000
+_EDITS = re.compile(r"/(applyEdits|addFeatures|updateFeatures|deleteFeatures)/?$", re.IGNORECASE)
+
+
 def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes], feedback) -> bytes:
     """The request, waited for in a local event loop that aborts it when `feedback` is cancelled or it takes too long."""
     url = request.url().toString()
@@ -83,6 +88,9 @@ def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[b
     reply.finished.connect(loop.quit)
     timer = QTimer()
     timeout = QgsNetworkAccessManager.timeout()
+    if timeout > 0 and _EDITS.search(url.split("?", 1)[0]):
+        # Edits wait longer than reads: a large batch on a busy server is still being saved when a read would give up (#73).
+        timeout = max(timeout * 3, EDIT_TIMEOUT_MS)
     started = time.monotonic()
     state = {"timed_out": False}
 
