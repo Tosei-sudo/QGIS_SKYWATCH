@@ -1,6 +1,8 @@
 """Satellite names that differ between catalogs (`satelliteAliases`)."""
 from dataclasses import replace
 
+import pytest
+
 from satellite_observation.core.catalog.images import ANY, patterns_for
 from satellite_observation.core.config import parse_config
 from satellite_observation.core.plan.names import (
@@ -105,6 +107,7 @@ def test_requests_name_satellites_by_their_aliases():
 
 
 def test_the_plugin_reads_the_tables_once_until_the_settings_change():
+    pytest.importorskip("qgis.core")
     from satellite_observation.qgis_io.context import PluginContext
 
     context = PluginContext()

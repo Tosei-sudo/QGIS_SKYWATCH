@@ -238,6 +238,7 @@ def synthetic(rng, count=10, size=160):
     return Window(rgba, np.array(boxes, np.float32))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("arch", ["res", "fpn4"])
 def test_a_few_epochs_learn_the_squares(arch):
     rng = np.random.default_rng(5)
@@ -247,6 +248,20 @@ def test_a_few_epochs_learn_the_squares(arch):
     assert run.epochs == 8 and run.losses[-1] < run.losses[0] / 2
     c = check(model, [synthetic(rng) for _ in range(3)])
     assert c.map50 > 0.7 and c.recall > 0.7
+
+
+@pytest.mark.parametrize("arch", ["res", "fpn4"])
+def test_an_epoch_runs_and_the_loss_falls_within_it(arch):
+    """The quick run's stand-in for the above: one epoch of a few windows trains (the loss falls) and checks."""
+    rng = np.random.default_rng(5)
+    windows = [synthetic(rng) for _ in range(4)]
+    model = new_model(["square"], InputSpec(), 128, "small", arch=arch)
+    before = {k: v.copy() for k, v in model.network.params.items()}
+    run = train(model, windows, [], TrainOptions(epochs=2, tile=128, batch=2))
+    assert run.epochs == 2 and all(math.isfinite(v) for v in run.losses) and run.losses[-1] < run.losses[0]
+    assert any(not np.array_equal(v, model.network.params[k]) for k, v in before.items())
+    c = check(model, [synthetic(rng)])
+    assert 0 <= c.map50 <= 1 and 0 <= c.recall <= 1
 
 
 def test_training_stops_when_cancelled_keeping_what_it_learnt():
