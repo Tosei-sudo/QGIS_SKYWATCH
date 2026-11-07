@@ -137,7 +137,7 @@ def test_results_of_the_image_are_shown_and_recorded_once(plugin):
     saved = dock.import_rows(list(range(len(dock.rows))))
     assert [(o.object_name, o.kind, o.lon, o.lat) for o in saved] == [("トラックA", "car", 139.72, 35.65)]
     assert dock.import_rows(list(range(len(dock.rows)))) == []
-    assert dock.status.text() == "取り込む結果なし（取込済か、位置なし）"
+    assert dock.status.text() == "取り込む結果なし（取込済・誤検出か、位置なし）"
     assert len(living(book.records)) == 2
 
     # Shown again later (read from the cache), the recorded ones stay marked.
