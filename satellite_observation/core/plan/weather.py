@@ -2,6 +2,10 @@
 Cloud cover forecasts for optical shots (`cloudForecast`), as the viewer
 (imaging-plan-weather.ts). Nothing is asked until the person turns the
 forecast on, as the targets' places go to the service.
+
+In a closed network the forecast can instead be a file brought in each day
+(`file`, or the newest of a `folder`; docs/cloud-forecast-file.md), read by
+`weather_file`.
 """
 from __future__ import annotations
 
@@ -16,9 +20,16 @@ from ..util import is_number, is_record, is_url, time_of
 
 @dataclass(frozen=True)
 class CloudForecastConfig:
-    """An Open-Meteo-style forecast API."""
+    """An Open-Meteo-style forecast API (`url`), or a forecast file (`file`) or folder of them (`folder`)."""
     url: str
     label: str
+    file: str = ""
+    folder: str = ""
+
+    @property
+    def local(self) -> bool:
+        """Read from a file, not asked of a service."""
+        return bool(self.file or self.folder)
 
 
 DEFAULT_CLOUD_FORECAST = CloudForecastConfig("https://api.open-meteo.com/v1/forecast", "Open-Meteo")
@@ -27,14 +38,20 @@ FORECAST_DAYS = 16
 
 
 def cloud_forecast_of(value: Any, problems: list[str]) -> Optional[CloudForecastConfig]:
-    """`cloudForecast`: an object with `url` (and `label`), or false for none."""
+    """`cloudForecast`: an object with `url`, `file` or `folder` (and `label`), or false for none."""
     if value is False or value is None:
         return None
     if is_record(value):
         url, label = value.get("url"), value.get("label")
-        if is_url(url):
-            return CloudForecastConfig(url, label if isinstance(label, str) and label else "雲量予報")
-    problems.append('cloudForecast は { "url": "…/v1/forecast" } か false で指定')
+        label = label.strip() if isinstance(label, str) and label.strip() else ""
+        paths = {k: value.get(k) for k in ("file", "folder") if k in value}
+        if len(paths) == 1 and "url" not in value:
+            (key, path), = paths.items()
+            if isinstance(path, str) and path.strip():
+                return CloudForecastConfig("", label or "雲量予報（取込）", **{key: path.strip()})
+        elif not paths and is_url(url):
+            return CloudForecastConfig(url, label or "雲量予報")
+    problems.append('cloudForecast は { "url": "…/v1/forecast" }・{ "folder": "…" }・{ "file": "….tif" } のどれか 1 つか false で指定')
     return DEFAULT_CLOUD_FORECAST
 #: Places closer than this (degrees) share one forecast.
 GRID = 0.25
@@ -47,6 +64,11 @@ class CloudSeries:
     """One place's hourly cloud cover: times (ms) and percents (NaN where missing)."""
     times: list
     cover: list
+
+
+class CloudForecasts(dict):
+    """The series by grid cell (`key_of`), with when the forecast was made (`issued`, ms; NaN when not told)."""
+    issued: float = math.nan
 
 
 def cloud_at(series: CloudSeries, ms: float) -> Optional[float]:
@@ -124,8 +146,14 @@ def forecast_urls(config: CloudForecastConfig, places: Sequence[Sequence[float]]
 
 def fetch_clouds(config: CloudForecastConfig, places: Sequence[Sequence[float]], fetch: Fetch,
                  cancelled: Optional[Callable[[], bool]] = None) -> dict[str, CloudSeries]:
-    """The forecasts for places (longitude, latitude), by grid cell, asked for in batches."""
-    out: dict[str, CloudSeries] = {}
+    """
+    The forecasts for places (longitude, latitude), by grid cell, asked for in
+    batches (`fetch` asks a URL) or read from the forecast file.
+    """
+    if config.local:
+        from .weather_file import read_clouds
+        return read_clouds(config, places, cancelled)
+    out = CloudForecasts()
     for batch, url in forecast_urls(config, places):
         if cancelled and cancelled():
             break

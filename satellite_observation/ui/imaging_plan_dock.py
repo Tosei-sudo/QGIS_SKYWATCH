@@ -510,6 +510,9 @@ class ImagingPlanDock(PluginDock):
         self._hide_rows()
         if forecast is not None:
             self.cloud.setText(self.tr("雲量予報（{label}）").format(label=forecast.label))
+            self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。"
+                                          "取り込んだ予報ファイルから読む（どこにも送信しない）") if forecast.local else
+                                  self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。対象の位置を予報サービスへ送信"))
         self.store_choice.clear()
         for store in config.plan_stores:
             self.store_choice.addItem(store.label)
@@ -1467,8 +1470,11 @@ class ImagingPlanDock(PluginDock):
         if not places:
             self.status.setText(before + self.tr("（雲量予報は 16 日先までの光学衛星の機会のみ）"))
             return
-        self.status.setText(self.tr("{label} に雲量予報を問い合わせ中…").format(label=config.label))
-        authcfg = settings.auth_for(config.url)
+        if config.local:
+            self.status.setText(self.tr("{label} の雲量予報ファイルを読み込み中…").format(label=config.label))
+        else:
+            self.status.setText(self.tr("{label} に雲量予報を問い合わせ中…").format(label=config.label))
+        authcfg = None if config.local else settings.auth_for(config.url)
 
         def work(task):
             return fetch_clouds(config, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
@@ -1482,13 +1488,23 @@ class ImagingPlanDock(PluginDock):
             self._pairs = None
             self.show_view()
             if self.view.currentData() != "revisit":
-                self.status.setText(before + self.tr("（雲量予報 {n} 回分: {label}）").format(n=n, label=config.label))
+                self.status.setText(before + self.tr("（雲量予報 {n} 回分: {label}{issued}）").format(
+                    n=n, label=config.label, issued=self._issued_text(forecasts)))
 
         def failed(message):
             self.cloud_task = None
             self.status.setText(before + self.tr("（雲量予報の取得に失敗: {m}）").format(m=message))
 
         self.cloud_task = run_task(self.tr("雲量予報の取得"), work, done, failed)
+
+    def _issued_text(self, forecasts) -> str:
+        """When a forecast was made, and how many days ago when that is a day or more (empty when not told)."""
+        issued = getattr(forecasts, "issued", math.nan)
+        if not math.isfinite(issued):
+            return ""
+        text = self.tr("、{t} の予報").format(t=local_text(issued))
+        days = math.floor((_now_ms() - issued) / 86400000)
+        return text + (self.tr("（{d} 日前）").format(d=days) if days >= 1 else "")
 
     # --- Pairs ---------------------------------------------------------------------------------
 

@@ -252,3 +252,43 @@ def test_save_a_plan_and_follow_it_up(plugin, monkeypatch):
     saved.delete(lambda: gone.append(1))
     assert wait_for(lambda: gone, 10000)
     assert fake.layers[PLANS].rows == [] and saved.plans == []
+
+
+def test_cloud_forecast_from_a_file(plugin, monkeypatch):
+    """A GFS cloud file brought in (docs/cloud-forecast-file.md): read from the folder, nothing asked of a service."""
+    import numpy as np
+    from datetime import datetime, timezone
+    from osgeo import gdal
+    from satellite_observation.core.plan.weather import CloudForecastConfig
+
+    p, iface, tmp, fake = plugin
+    folder = tmp / "gfs"
+    folder.mkdir()
+    hours = 15 * 24
+    ds = gdal.GetDriverByName("GTiff").Create(str(folder / "gfs_tcdc_2026010100.tif"), 8, 8, hours, gdal.GDT_Byte, ["TILED=YES", "INTERLEAVE=BAND"])
+    ds.SetGeoTransform((137.875, 0.25, 0, 37.125, 0, -0.25))
+    issued = EPOCH - 2 * DAY
+    ds.SetMetadata({"INIT_TIME": datetime.fromtimestamp(issued / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    for h in range(hours):
+        band = ds.GetRasterBand(h + 1)
+        band.SetNoDataValue(255)
+        band.WriteArray(np.full((8, 8), (h * 7) % 100, dtype=np.uint8))
+        band.SetMetadata({"GRIB_VALID_TIME": str(int(EPOCH / 1000) + h * 3600)})
+    ds = None
+    monkeypatch.setattr("satellite_observation.ui.imaging_plan_dock.get_bytes", lambda *a, **k: pytest.fail("no service asked"))
+    monkeypatch.setattr("satellite_observation.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
+    config = json.loads((tmp / "config.json").read_text(encoding="utf-8"))
+    config["cloudForecast"] = {"folder": str(folder), "label": "GFS 雲量"}
+    (tmp / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    context = p.api.imaging_plan.context
+    context.reload()
+    assert context.config.cloud_forecast == CloudForecastConfig("", "GFS 雲量", folder=str(folder))
+    dock = planned(p, [("東京", 139.7, 35.68)])
+    dock.more.setCollapsed(False)
+    assert dock.cloud.text() == "雲量予報（GFS 雲量）" and "送信しない" in dock.cloud.toolTip()
+    dock.cloud.setChecked(True)
+    assert wait_for(lambda: dock.cloud_task is None)
+    assert "GFS 雲量、" in dock.status.text() and "（2 日前）" in dock.status.text(), dock.status.text()
+    sats = dock.plan["sats"]
+    optical = [op for op in dock.shown if not sats[op.satellite].sar]
+    assert optical and all(op.cloud is not None for op in optical)
