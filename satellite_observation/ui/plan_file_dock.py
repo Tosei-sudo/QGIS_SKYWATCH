@@ -1,5 +1,8 @@
 """
-「本日分を出力」: the day's work on the imaging requests.
+The 「撮像計画ファイル出力」 dock: the day's work of writing the imaging plan
+files from the request ledger (`requestStores`, `requestExports`). It is a
+dock of its own, apart from 「撮像依頼」, since those writing the files are
+not those registering requests (tsudo, 2026-11-07).
 
 「計算」 follows up what was handed out before (the image catalog asked
 whether those requests were taken), reads the ledger again, asks the cloud
@@ -17,11 +20,11 @@ import time
 from datetime import date
 from typing import Optional
 
-from qgis.PyQt.QtCore import QDate, Qt, QTimer
+from qgis.PyQt.QtCore import QCoreApplication, QDate, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QDateEdit, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QTableView, QVBoxLayout,
+    QAbstractItemView, QComboBox, QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QTableView,
 )
 
 from ..core.catalog import CatalogConfig
@@ -30,7 +33,7 @@ from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
 from ..core.request.follow import follow_up, request_changes
 from ..core.request.model import JST, jst_day, priority_text
-from ..core.request.store import add_history, load_history, load_requests, update_history, update_requests
+from ..core.request.store import RequestStoreConfig, add_history, load_history, load_requests, update_history, update_requests
 from ..core.request.workflow import (
     DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, plan_day, written_summary,
 )
@@ -38,6 +41,7 @@ from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
+from .docks import PluginDock
 
 COLUMNS = ("採用", "システム", "衛星", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
 
@@ -46,26 +50,32 @@ def _now_ms() -> float:
     return time.time() * 1000
 
 
-class DailyExportDialog(QDialog):
+class PlanFileDock(PluginDock):
     """The day's candidates, changes by hand, and writing the files."""
 
-    def __init__(self, iface, context, dock, parent=None):
-        super().__init__(parent or iface.mainWindow())
+    def __init__(self, iface, context, open_settings, satellites, requests_changed=None, parent=None):
+        super().__init__("SatObsPlanFiles", QCoreApplication.translate("PlanFileDock", "撮像計画ファイル出力"), context, open_settings, parent)
         self.iface = iface
-        self.context = context
-        self.dock = dock
+        #: Calls back with the satellites to plan with (the imaging plan's catalog), once they are read.
+        self.satellites = satellites
+        #: Told when the ledger was read or changed here (the 「撮像依頼」 dock shows it again).
+        self.requests_changed = requests_changed or (lambda requests=None: None)
+        self.store: Optional[RequestStoreConfig] = None
         self.plan: Optional[DayPlan] = None
         self.task = None
         self._rendering = False
         #: The files last written.
         self.paths: list = []
-        self.setWindowTitle(self.tr("本日分を出力"))
-        self.setModal(False)
-        self.resize(1000, 560)
         self._build()
+        context.configChanged.connect(self._config_changed)
+        self._config_changed()
 
     def _build(self) -> None:
-        layout = QVBoxLayout(self)
+        layout = self.body
+        self.store_choice = QComboBox()
+        self.store_choice.setToolTip(self.tr("依頼の保存先"))
+        self.store_choice.currentIndexChanged.connect(self._store_chosen)
+        layout.addWidget(self.store_choice)
         top = QHBoxLayout()
         top.addWidget(QLabel(self.tr("対象日（日本時間）")))
         self.day = QDateEdit()
@@ -105,6 +115,7 @@ class DailyExportDialog(QDialog):
             moves.addWidget(b)
         moves.addStretch(1)
         self.room = QLabel()
+        self.room.setWordWrap(True)
         moves.addWidget(self.room)
         layout.addLayout(moves)
         out = QHBoxLayout()
@@ -122,6 +133,32 @@ class DailyExportDialog(QDialog):
         layout.addLayout(out)
         self._update_buttons()
 
+    def _config_changed(self) -> None:
+        stores = self.context.config.request_stores
+        self.store_choice.blockSignals(True)
+        self.store_choice.clear()
+        for s in stores:
+            self.store_choice.addItem(s.label)
+        self.store_choice.blockSignals(False)
+        self.store_choice.setVisible(len(stores) > 1)
+        self.store = stores[0] if stores else None
+        self.plan = None
+        self.render()
+        self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし") if self.store is None else "")
+
+    def _store_chosen(self, index: int) -> None:
+        stores = self.context.config.request_stores
+        self.store = stores[index] if 0 <= index < len(stores) else None
+        self.plan = None
+        self.render()
+
+    def token(self) -> Optional[str]:
+        return self.context.token_for(self.store.url, self.store.token) if self.store else None
+
+    def close_all(self) -> None:
+        """Stops nothing running but forgets the day (when the plugin is unloaded)."""
+        self.plan = None
+
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, self.tr("出力先"), self.folder.text())
         if folder:
@@ -132,7 +169,7 @@ class DailyExportDialog(QDialog):
         return date(d.year(), d.month(), d.day())
 
     def catalog(self) -> Optional[CatalogConfig]:
-        store, catalogs = self.dock.store, self.context.config.image_catalogs
+        store, catalogs = self.store, self.context.config.image_catalogs
         if store is None:
             return None
         if store.catalog:
@@ -143,20 +180,20 @@ class DailyExportDialog(QDialog):
 
     def run(self) -> None:
         """Works the day out (satellites first, then the services in a task)."""
-        if self.task is not None or self.dock.store is None:
+        if self.task is not None or self.store is None:
             return
         self.status.setText(self.tr("衛星カタログを読み込み中…"))
         self.run_button.setEnabled(False)
-        self.dock.satellites(self._run_with)
+        self.satellites(self._run_with)
 
     def _run_with(self, sats) -> None:
-        store = self.dock.store
+        store = self.store
         config = self.context.config
         systems = config.request_exports
         day = self.chosen_day()
         catalog = self.catalog()
         client = self.context.esri()
-        token = self.dock.token()
+        token = self.token()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
         forecast = config.cloud_forecast
         authcfg = settings.auth_for(forecast.url) if forecast else None
@@ -199,8 +236,7 @@ class DailyExportDialog(QDialog):
         def done(result):
             self.task = None
             requests, history, forecasts, notes = result
-            self.dock.requests = requests
-            self.dock.render()
+            self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
             self.plan = plan_day(requests, day, systems, sats, clouds, history)
             self.render()
@@ -299,7 +335,7 @@ class DailyExportDialog(QDialog):
     def _update_buttons(self) -> None:
         busy = self.task is not None
         has = self.plan is not None and bool(self.plan.candidates)
-        self.run_button.setEnabled(not busy)
+        self.run_button.setEnabled(not busy and self.store is not None)
         for b in (self.up_button, self.down_button, self.reset_button):
             b.setEnabled(has and not busy)
         self.write_button.setEnabled(has and not busy and any(c.result == TAKEN for c in self.plan.candidates))
@@ -360,7 +396,7 @@ class DailyExportDialog(QDialog):
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
-        store, client, token = self.dock.store, self.context.esri(), self.dock.token()
+        store, client, token = self.store, self.context.esri(), self.token()
         rows = history_of(plan, run, written)
         boosts = boost_changes(plan)
         done_rows = missed_done(plan)
@@ -385,7 +421,7 @@ class DailyExportDialog(QDialog):
                 text += "・" + "、".join(problems)
             self.status.setText(text)
             self._update_buttons()
-            self.dock.reload()
+            self.requests_changed()
 
         def failed(message):
             self.task = None

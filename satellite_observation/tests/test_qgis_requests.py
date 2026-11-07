@@ -1,5 +1,5 @@
 """
-The 「撮像依頼」 dock in QGIS: the ledger in a fake Esri service, the form,
+The 「撮像依頼」 and 「撮像計画ファイル出力」 docks in QGIS: the ledger in a fake Esri service, the form,
 taking 定点 requests in from a layer and out to one, and the day's work
 written to files with the history and raises saved.
 """
@@ -144,7 +144,10 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert len(dock.requests) == 3
 
     # The day: SYS-A takes one a day (横須賀, higher), 呉 is held back; the SAR one goes to SYS-B by the catalog's system.
-    daily = dock.open_daily()
+    # The day's files are a dock of their own (those writing them are not those registering requests).
+    assert not hasattr(dock, "open_daily")
+    daily = p.api.plan_files
+    daily.show()
     daily.folder.setText(str(tmp_path / "out"))
     daily.run()
     assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()

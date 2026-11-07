@@ -2,8 +2,8 @@
 The 「撮像依頼」 dock: the imaging request ledger (`requestStores`). It lists
 the requests (filtered by category and status) and shows them on the map;
 requests are added and changed in a form, 定点 requests taken in from a
-layer or written out to one, and 「本日分を出力…」 opens the day's work
-(docs/imaging-requests.md). Every request to the service runs in a QgsTask.
+layer or written out to one (docs/imaging-requests.md). The day's files are
+written in a dock of its own, 「撮像計画ファイル出力」 (plan_file_dock.py). Every request to the service runs in a QgsTask.
 """
 from __future__ import annotations
 
@@ -57,7 +57,6 @@ class RequestDock(PluginDock):
         self.chosen: Optional[ImagingRequest] = None
         self.task = None
         self.form = None
-        self.daily = None
         self._loaded = False
         self._build()
         context.configChanged.connect(self._config_changed)
@@ -127,13 +126,6 @@ class RequestDock(PluginDock):
         layers.addStretch(1)
         self.body.addLayout(layers)
 
-        daily = QHBoxLayout()
-        self.daily_button = QPushButton(self.tr("本日分を出力…"))
-        self.daily_button.setToolTip(self.tr("その日の依頼を集め、枠に詰めて、衛星システムごとの CSV・JSON を書き出し"))
-        self.daily_button.clicked.connect(lambda: self.open_daily())
-        daily.addWidget(self.daily_button)
-        daily.addStretch(1)
-        self.body.addLayout(daily)
         self._update_buttons()
 
     # --- Stores ---------------------------------------------------------------------------------
@@ -274,7 +266,7 @@ class RequestDock(PluginDock):
 
     def _update_buttons(self) -> None:
         ready = self.store is not None and self.task is None
-        for b in (self.new_button, self.reload_button, self.import_button, self.daily_button):
+        for b in (self.new_button, self.reload_button, self.import_button):
             b.setEnabled(ready)
         self.edit_button.setEnabled(ready and self.chosen is not None)
         self.delete_button.setEnabled(ready and self.chosen is not None)
@@ -403,24 +395,9 @@ class RequestDock(PluginDock):
         self._start(self.tr("撮像依頼の取り込み"), work, done)
 
     def close_all(self) -> None:
-        """Closes the form and the day's dialog, and takes the areas off the map (when the plugin is unloaded)."""
-        for w in (self.form, self.daily):
-            if w is not None:
-                w.close()
-                w.deleteLater()
-        self.form = self.daily = None
+        """Closes the form and takes the areas off the map (when the plugin is unloaded)."""
+        if self.form is not None:
+            self.form.close()
+            self.form.deleteLater()
+        self.form = None
         self.overlay.unpaint()
-
-    # --- The day's work -------------------------------------------------------------------------
-
-    def open_daily(self):
-        """Opens 「本日分を出力」."""
-        from .daily_export_dialog import DailyExportDialog
-
-        if self.store is None:
-            return None
-        if self.daily is not None:
-            self.daily.close()
-        self.daily = DailyExportDialog(self.iface, self.context, self, self)
-        self.daily.show()
-        return self.daily
