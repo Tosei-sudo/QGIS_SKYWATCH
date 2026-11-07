@@ -49,6 +49,7 @@ from .ui.spectral_dock import SpectralDock
 from .ui.startup import StartupLayers
 from .ui.moving_dock import MovingDock
 from .ui.shift import LayerShift
+from .ui.shortcuts import Shortcuts
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
 from .ui.webmap_dialog import WebMapDialogs
@@ -516,6 +517,8 @@ class SatelliteObservationPlugin:
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self._build_menu()
+        # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
+        self.shortcuts = Shortcuts(self.iface, self.docks)
         self.context.reload()
 
     def _add_to_menu(self, action: QAction) -> None:
@@ -828,6 +831,9 @@ class SatelliteObservationPlugin:
         overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:
+        if getattr(self, "shortcuts", None) is not None:
+            self.shortcuts.unload()
+            self.shortcuts = None
         overviews_io.queue.cancel_all()
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
