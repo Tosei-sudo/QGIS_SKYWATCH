@@ -24,6 +24,7 @@ import time
 from typing import Callable, Optional, Sequence
 
 from qgis.core import QgsFeature, QgsGeometry, QgsPointXY, QgsProject, QgsRectangle, QgsVectorLayer
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QDateTime, QPoint, Qt
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
@@ -91,13 +92,18 @@ class EventForm(QDialog):
         self.status.addItems(list(STATUSES))
         self.status.setCurrentText(event.status if event else OPEN)
         form.addRow(self.tr("状態"), self.status)
+        self.has_start = QCheckBox(self.tr("開始日時"))
+        self.has_start.setChecked(event is None or event.start is not None)
         self.start = _time_edit(event.start if event else None)
+        self.start.setEnabled(self.has_start.isChecked())
+        self.has_start.toggled.connect(self.start.setEnabled)
         self.has_end = QCheckBox(self.tr("終了日時"))
         self.end = _time_edit(event.end if event else None)
         self.has_end.setChecked(bool(event and event.end is not None))
         self.end.setEnabled(self.has_end.isChecked())
         self.has_end.toggled.connect(self.end.setEnabled)
         period = QHBoxLayout()
+        period.addWidget(self.has_start)
         period.addWidget(self.start, 1)
         period.addWidget(QLabel("〜"))
         period.addWidget(self.has_end)
@@ -124,6 +130,9 @@ class EventForm(QDialog):
         self.problem.setStyleSheet("color: #b91c1c")
         form.addRow(self.problem)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box = buttons
+        #: Saves the values (in a task): `saver(values, done, failed)`; the form closes only once saved.
+        self.saver: Optional[Callable] = None
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         form.addRow(buttons)
@@ -163,7 +172,7 @@ class EventForm(QDialog):
     def values(self) -> dict:
         return {
             "name": self.name.text().strip(), "kind": self.kind.currentText().strip(), "status": self.status.currentText(),
-            "start": int(self.start.dateTime().toMSecsSinceEpoch()),
+            "start": int(self.start.dateTime().toMSecsSinceEpoch()) if self.has_start.isChecked() else None,
             "end": int(self.end.dateTime().toMSecsSinceEpoch()) if self.has_end.isChecked() else None,
             "note": self.note.toPlainText().strip(), "rings": self.rings,
         }
@@ -173,10 +182,24 @@ class EventForm(QDialog):
         if not v["name"]:
             self.problem.setText(self.tr("名前を入力"))
             return
-        if v["end"] is not None and v["end"] < v["start"]:
+        if v["end"] is not None and v["start"] is not None and v["end"] < v["start"]:
             self.problem.setText(self.tr("終了日時が開始日時より前"))
             return
-        self.accept()
+        if self.saver is None:
+            self.accept()
+            return
+        self.problem.setText(self.tr("保存中…"))
+        self.button_box.setEnabled(False)
+
+        def failed(message: str) -> None:
+            # Kept open with what was typed: a save that did not go through loses nothing.
+            if sip.isdeleted(self):
+                return
+            self.button_box.setEnabled(True)
+            self.problem.setText(self.tr("保存できませんでした: {m}").format(m=message))
+
+        # Closed meanwhile (Esc): the answer has no form to close.
+        self.saver(v, lambda: None if sip.isdeleted(self) else self.accept(), failed)
 
 
 class EventsDock(PluginDock):
@@ -194,6 +217,8 @@ class EventsDock(PluginDock):
         self.task = None
         self._then: list[Callable[[], None]] = []
         self._tasks: list = []
+        #: Read again when the running reload ends (the event id to choose, or True).
+        self._again = None
 
         self.note = QLabel()
         self.note.setWordWrap(True)
@@ -251,6 +276,8 @@ class EventsDock(PluginDock):
         self.body.addWidget(holder)
 
         self.event_note = QLabel()
+        # Names and notes are other people's text: never read as HTML.
+        self.event_note.setTextFormat(Qt.TextFormat.PlainText)
         self.event_note.setWordWrap(True)
         self.event_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.body.addWidget(self.event_note)
@@ -287,6 +314,7 @@ class EventsDock(PluginDock):
         self.body.addLayout(items)
         self.tabs.currentChanged.connect(lambda _i: self._update_buttons())
         self.status = QLabel()
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
 
@@ -301,7 +329,9 @@ class EventsDock(PluginDock):
         return self.context.config.events
 
     def _config_changed(self) -> None:
-        self.events, self.links, self._then = None, [], []
+        self.events, self.links = None, []
+        if self.task is None:
+            self._then = []
         s = self.settings
         self.note.setText("" if s else self.tr("設定ファイルに events（イベントのレイヤーと紐付けテーブル）がないため使用不可"))
         self.note.setVisible(s is None)
@@ -366,7 +396,10 @@ class EventsDock(PluginDock):
         if then is not None:
             self._then.append(then)
         if self.task is not None:
+            # Asked while one runs (after an add, or another settings file): read again once it ends.
+            self._again = keep or self._again or True
             return
+        self._again = None
         chosen = keep or (self.chosen().id if self.chosen() else None)
         client = self.context.esri()
         token = self.context.token_for(s.layer.url, s.layer.token)
@@ -377,7 +410,9 @@ class EventsDock(PluginDock):
 
         def done(result) -> None:
             self.task = None
-            if s is not self.settings:
+            if s is not self.settings or self._again:
+                again = self._again
+                self.reload(keep=again if isinstance(again, str) else chosen)
                 return
             self.events, self.links = result
             self.render()
@@ -391,6 +426,9 @@ class EventsDock(PluginDock):
 
         def failed(message: str) -> None:
             self.task = None
+            if s is not self.settings or self._again:
+                self.reload()
+                return
             self._then = []
             self.say(self.tr("イベントの読み込みに失敗: {m}").format(m=message))
             self._update_buttons()
@@ -470,7 +508,8 @@ class EventsDock(PluginDock):
             return None
         form = EventForm(self, None, self._kinds(), self)
         form.use_extent()
-        form.accepted.connect(lambda: self.save(new_event(**form.values())))
+        event_id = new_event("").id
+        form.saver = lambda v, done, failed: self.save(Event(id=event_id, **v), lambda _s: done(), failed)
         form.finished.connect(lambda _r: form.deleteLater())
         form.open()
         return form
@@ -481,17 +520,12 @@ class EventsDock(PluginDock):
             return None
         form = EventForm(self, e, self._kinds(), self)
 
-        def accepted() -> None:
-            v = form.values()
-            changed = Event(id=e.id, oid=e.oid, created_by=e.created_by, **v)
-            self.save(changed)
-
-        form.accepted.connect(accepted)
+        form.saver = lambda v, done, failed: self.save(Event(id=e.id, oid=e.oid, created_by=e.created_by, **v), lambda _s: done(), failed)
         form.finished.connect(lambda _r: form.deleteLater())
         form.open()
         return form
 
-    def save(self, event: Event, then: Optional[Callable[[Event], None]] = None) -> None:
+    def save(self, event: Event, then: Optional[Callable[[Event], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
         """Saves the event (in a task), then reads the list again with it chosen."""
         s = self.settings
         client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
@@ -501,7 +535,13 @@ class EventsDock(PluginDock):
                 self.status_filter.setCurrentIndex(self.status_filter.findData(""))
             self.reload(lambda: (self.say(self.tr("「{n}」を保存").format(n=saved.name)), then(saved) if then else None), keep=saved.id)
 
-        self._start(self.tr("イベントの保存"), lambda _t: save_event(client, s, event, token), done)
+        def fail(message: str) -> None:
+            self._update_buttons()
+            self.say(self.tr("イベントの保存に失敗: {m}").format(m=message))
+            if failed is not None:
+                failed(message)
+
+        self._start(self.tr("イベントの保存"), lambda _t: save_event(client, s, event, token), done, fail)
 
     def toggle_status(self) -> None:
         e = self.chosen()
@@ -525,11 +565,13 @@ class EventsDock(PluginDock):
         n = len(self.links_of(e))
         if confirm and QMessageBox.question(
                 self, TITLE, self.tr("「{name}」を削除しますか？\n紐付け {n} 件も消えます（画像・記録・依頼そのものは残ります）。元に戻せません。")
-                .format(name=e.name, n=n)) != QMessageBox.StandardButton.Yes:
+                .format(name=e.name, n=n), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         s = self.settings
         client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
-        self._start(self.tr("イベントの削除"), lambda _t: delete_event(client, s, e, token),
+        link_token = self.context.token_for(s.links.url, s.links.token)
+        self._start(self.tr("イベントの削除"), lambda _t: delete_event(client, s, e, token, link_token),
                     lambda removed: self.reload(lambda: self.say(self.tr("「{name}」を削除（紐付け {n} 件）").format(name=e.name, n=removed))))
 
     # ---- items ---------------------------------------------------------------------------------
@@ -581,7 +623,12 @@ class EventsDock(PluginDock):
         chosen = list(items())
         form = EventForm(self, None, self._kinds(), self)
         form.use_extent()
-        form.accepted.connect(lambda: self.save(new_event(**form.values()), lambda saved: self.link_items([saved.id], chosen)))
+        event_id = new_event("").id
+
+        def saver(v, done, failed) -> None:
+            self.save(Event(id=event_id, **v), lambda saved: (done(), self.link_items([saved.id], chosen)), failed)
+
+        form.saver = saver
         form.finished.connect(lambda _r: form.deleteLater())
         form.open()
         self.show()
@@ -592,8 +639,8 @@ class EventsDock(PluginDock):
         if not links:
             return
         if confirm and QMessageBox.question(
-                self, TITLE, self.tr("選んだ {n} 件をこのイベントから外しますか？（項目そのものは残ります）").format(n=len(links))
-        ) != QMessageBox.StandardButton.Yes:
+                self, TITLE, self.tr("選んだ {n} 件をこのイベントから外しますか？（項目そのものは残ります）").format(n=len(links)),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         s = self.settings
         client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
@@ -866,6 +913,9 @@ class EventsDock(PluginDock):
                 g = footprint({"rings": e.rings})
                 ring = _box_ring(g.boundingBox()) if g is not None else None
             dock.set_drawn([tuple(p[:2]) for p in ring] if ring else None)
+        else:
+            # No area: anywhere (not whatever area the catalog had before).
+            dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
         dock.show()
         dock.raise_()
         dock.search()

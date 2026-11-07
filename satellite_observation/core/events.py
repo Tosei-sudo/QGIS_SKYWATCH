@@ -204,6 +204,11 @@ def save_event(client: EsriClient, settings: EventSettings, event: Event, token:
         # No area on an update: an empty polygon, so the area is taken away.
         feature["geometry"] = {"rings": event.rings or [], "spatialReference": {"wkid": 4326}}
     if event.oid is None:
+        # Saved already (an answer lost on the way, then 保存 again): updated, not added twice.
+        there = client.find(s.url, f["id"], [event.id], token, out_fields=info.object_id_field + "," + f["id"])
+        if event.id in there and is_number(there[event.id].get(info.object_id_field)):
+            return save_event(client, settings, replace(event, oid=int(there[event.id][info.object_id_field])), token)
+    if event.oid is None:
         result = client.apply_edits(s.url, adds=[feature], token=token)
         r = (result.add_results or [{}])[0]
         if not r.get("success"):
@@ -228,15 +233,19 @@ def set_status(client: EsriClient, settings: EventSettings, event: Event, status
     return save_event(client, settings, changed, token)
 
 
-def delete_event(client: EsriClient, settings: EventSettings, event: Event, token: Optional[str] = None) -> int:
-    """Deletes the event and its links (the items themselves stay); how many links went."""
-    links = load_links(client, settings, [event.id], token)
-    removed = remove_links(client, settings, links, token)
+def delete_event(client: EsriClient, settings: EventSettings, event: Event, token: Optional[str] = None,
+                 links_token: Optional[str] = None) -> int:
+    """
+    Deletes the event, then its links (the items themselves stay); how many
+    links went. The event goes first: should the links then fail, they are
+    left pointing at no event (never listed) rather than an event left without them.
+    """
+    links = load_links(client, settings, [event.id], links_token)
     if event.oid is not None:
         results = client.delete_features(settings.layer.url, [event.oid], _token(settings.layer, token))
         if results and not all(r.get("success") for r in results):
             raise EsriError("イベントの削除失敗（" + ((results[0].get("error") or {}).get("description") or "理由不明") + "）")
-    return removed
+    return remove_links(client, settings, links, links_token)
 
 
 # ---- links ---------------------------------------------------------------------------------------
