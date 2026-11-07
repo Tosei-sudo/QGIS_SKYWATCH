@@ -531,9 +531,128 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）・`requestStores`・`requestExports` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可、ほかの項目は無視）。読む項目と書き方は[設定ファイルの書き方](#設定ファイルの書き方)。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
+
+## 設定ファイルの書き方
+
+プラグインが読む設定ファイル（`config.json`）の書き方。ビューアの `config.json` と共用できるが、プラグインだけの項目・読み方の違いが増えたので、**プラグインが実際に読む項目**をここにまとめる（`satellite_observation/core/config.py` の `KEYS` と各項目の読み込み処理が元）。各機能の細かい動きは、表の「詳しく」の節を参照。
+
+### 読み込みと基本の決まり
+
+- 指定: メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で、設定ファイルのパスか URL を選んで「読み込み」。問題があれば一覧に出る。指定がなければプラグインのフォルダーに同梱の `config.json`（または `config.jsonc`）を読む（[設定ファイルを同梱して配る](#設定ファイルを同梱して配る)、固定するなら [`--lock-config`](#同梱の設定ファイルに固定する--lock-config)）
+- 形式: UTF-8 の JSON。コメント（`//`・`/* */`）と末尾のカンマも可（JSONC）。いちばん外はオブジェクト
+- 知らない項目は無視する（ビューアだけの項目があってもよい）。項目の値が誤っていればその項目（配列なら誤った要素だけ）を既定に戻し、理由を問題の一覧に出す。設定ファイルが壊れていてもプラグインは起動する
+- 相対パス・相対 URL（`./`・`../`）は設定ファイルの場所が基準（`layers`・`baseMaps`・`movingFeeds`・`aiModels` など）
+- `label`（画面に出す名前）は省略可。省略すると「カタログ 1」のような名前
+
+多くのサービスの項目に共通する書き方:
+
+| 項目 | 内容 |
+| --- | --- |
+| `label` | 一覧・メニューに出す名前 |
+| `url` | ArcGIS のレイヤーかテーブルの URL（`…/FeatureServer/0` など） |
+| `fields` | `{ 役割: 属性名 }`。属性名は英数字と `_`。書かない役割は既定の属性名（既定のある項目）か、使わない |
+| `where` | 対象を絞る SQL の条件（任意） |
+| `token` | ArcGIS のトークン（任意）。各自の QGIS の認証設定を「設定…」で選んだサービスには送らない。配る設定ファイルには書かない方がよい |
+| `timeZone`・`serviceTimeZone` | そのサービスの日時の本当のタイムゾーン（[日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones)） |
+
+### 最小の例
+
+```jsonc
+{
+  // 画像カタログ（必須なのは url・fields.source）
+  "imageCatalogs": [
+    { "label": "衛星画像", "url": "https://gis.example/arcgis/rest/services/Catalog/FeatureServer/0",
+      "fields": { "id": "IMG_ID", "acquired": "ACQ_TIME", "sensor": "SENSOR", "source": "PATH" } }
+  ],
+  // 衛星（TLE）。撮像計画に必要
+  "satelliteCatalogs": [
+    { "label": "衛星", "url": "https://gis.example/arcgis/rest/services/Sat/FeatureServer/0",
+      "fields": { "name": "NAME", "tle1": "TLE1", "tle2": "TLE2", "swath": "SWATH_KM" } }
+  ],
+  // 観測記録を Esri に保存（書かなければローカルの GeoPackage だけ）
+  "observationStores": [
+    { "label": "共有の観測記録", "url": "https://gis.example/arcgis/rest/services/Obs/FeatureServer/0" }
+  ]
+}
+```
+
+全部の項目がそろった例は、モックサーバーが書き出す `scripts/mock_esri/data/config.mock.jsonc`（`python3 scripts/mock_esri/mock_esri.py config`、[Esri なしで試す](#esri-なしで試すモックサーバー)）。撮像依頼の例は [docs/request-samples/config.sample.jsonc](docs/request-samples/config.sample.jsonc)。
+
+### 項目の一覧
+
+いずれも省略可。省略時は「既定」の列のとおり。
+
+#### 画像カタログ・通知・画像
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `imageCatalogs` | 配列 | `url`（必須）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`。`source` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
+| `imagePatterns`（`imageCatalogs` の中） | オブジェクト・文字列・配列 | `{ "センサー名": "正規表現" か [ … ], "*": … }`。フォルダのレコードから開く画像を選ぶ | ふつうの画像ファイル | [フォルダのレコードの画像](#フォルダのレコードの画像imagepatterns) |
+| `watchInterval` | 数 | 新着画像を確かめる間隔（分、1〜1440） | 10 | [通知](#通知) |
+| `pathMappings` | 配列 | `prefix`（必須。レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ） | なし | [画像カタログ](#画像カタログ) |
+| `overviews` | `false` かオブジェクト | `enabled`、`resampling`（`AVERAGE` など）、`minSize`、`compress`（`DEFLATE` など）、`location`（`auto`: 書ければ画像の隣、`cache`: キャッシュのフォルダ）、`scope`（`all`: QGIS に追加したローカル画像すべて、`catalog`: カタログなどから開いたものだけ）、`cacheFolder`（空ならプロファイルの中） | 作る（`auto`・`all`） | [ピラミッドの自動作成](#ピラミッドovrの自動作成overviews) |
+| `imageRules` | 配列 | `match`（ファイル名の正規表現、必須）、`caseSensitive`、`preset`・`enhance`（補正）、`bands`、`noData` | なし | [画像補正](#画像補正) |
+
+#### 撮像計画・撮像依頼
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `satelliteCatalogs` | 配列 | `url`（必須）、`fields`（`tle` か `tle1`＋`tle2` が必須。ほかに `name`・`id`・`maxOffNadir`・`minOffNadir`・`swath`・`length`・`lookSide`・`kind`・`scenesPerPass`・`minInterval`・`maxPerDay`・`series`・`leadTime`・`sensor`・`mode`・`resolution`・`system`）、`defaults`（属性がないときの値）、`swathUnit`（`km` か `m`）、`sarPattern`（SAR とみなす衛星名の正規表現）、`where`、`token` | なし | [撮像計画](#撮像計画) |
+| `sensorCatalogs` | 配列 | 設定ファイルに書くなら `sensors`（`[{ "sensor", "modes": [{ "mode", "swath", … }] }]`）、テーブルなら `url` と `fields`（`sensor` 必須。`mode`・`kind`・`swath`・`primary` など）。`swathUnit`・`sarPattern` | なし | [撮像計画](#撮像計画) |
+| `planStores` | 配列 | `url`（編集できるレイヤー、必須）、`fields`（`planId`・`shotTime`・`satellite`・`status`・`imageId` など。既定は `PLAN_ID` などの大文字の名前）、`catalog`（撮像済みを確かめる画像カタログの `label`）、`matchMinutes`（既定 30）、`missAfterDays`（既定 3）、`token` | なし | [撮像計画](#撮像計画) |
+| `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
+| `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
+| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding` など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+
+衛星カタログと画像カタログで衛星名の書き方が違うとき（`WorldView-3` と `WV03` など）の対応表は、設定ファイルではなく Esri の衛星カタログ側の属性に持たせる方針で作業中（できしだい、ここに `fields` の役割を追記）。
+
+#### 観測記録・分類体系
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
+| `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
+| `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
+
+#### 地図・レイヤー・場所
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `baseMaps` | 配列 | `id`・`label`・`url`・`type`（`xyz`・`mvt`・`style`・`esri`。省略時は URL から判断）・`style`・`maxZoom`・`attributions`・`token`。書くと一覧をこれで置き換え | 地理院・OSM | [背景地図](#背景地図) |
+| `defaultBaseMap` | 文字列 | 起動時の背景地図の `id` | なし | [背景地図](#背景地図) |
+| `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`） | なし | [起動時のレイヤー](#起動時のレイヤー) |
+| `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須）、`token` | なし（地名は検索しない） | [座標・地名へ移動](#座標地名へ移動) |
+| `layerTemplates` | 配列 | `name`（必須）・`geometryType`・`fields`（`[{ "name", "type", "alias", "required", "length", "min", "max", "defaultValue", "codes" }]`）・`title`・`description` | 組み込みのテンプレートだけ | [新規スクラッチレイヤー](#新規スクラッチレイヤーテンプレート) |
+| `arcgisPortals` | 配列 | `url`（ポータルの https）・`clientId`（必須）・`label` | なし | [ArcGIS Web マップ](#arcgis-web-マップ) |
+| `movingFeeds` | 配列 | `type`（`websocket`・`sse`・`poll`）、`url`、`label`、`interval`（秒）、`fields`（`id`・`time`・`lat`・`lon` など）、`kind`（`ship`・`aircraft`） | なし | [移動体](#移動体aisads-b) |
+| `gpServices` | 配列 | `url`（GP サービスか OGC API – Processes）・`label`・`token` | なし | [サーバ処理](#サーバ処理) |
+
+#### AI
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `aiModels` | 配列 | 検出: `url`（必須）・`task`（`detect`・`obb`・`segment`）・`inputSize`・`classes`（配列か `"coco"`）・`format`・`channels`・`mean`・`std`・`maxDetections`・`strides`・`kinds`（クラス → 種別、プラグインだけ）。SAM: `encoder`・`decoder`・`inputSize` | なし | [AI](#ai物体検出クリック抽出) |
+| `detectionOutputs` | 配列 | 検出結果の転記先。`url`、`fields`（`imageId`・`class`・`score`・`status` など）、`statusValues`、`constants`、`token` | なし | [AI](#ai物体検出クリック抽出) |
+| `aiResultSources` | 配列 | 外部 AI の結果。`url`、`fields`（`imageId`・`id`・`class`・`score`・`model`・`detectedAt`・`name`・`kind`・`activity`・`length`・`heading`・`width`・`note`）、`kinds`、`minScore`（0〜1）、`continueRadius`・`candidateRadius`（m）、`maxResults`、`activity`・`confidence`（取り込み時の既定）、`where`、`token` | なし | [AI結果](#ai結果外部aiプラグイン内の物体検出) |
+
+#### 日時
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `timeZones` | 配列 | `match`（URL の正規表現、必須）・`timeZone`（必須）・`serviceTimeZone`・`label` | なし | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
+| `timeZone`・`serviceTimeZone`（各項目の中） | 文字列 | `layers`・`imageCatalogs`・`planStores`・`observationStores`・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices` の要素に書ける。IANA 名（`Asia/Tokyo`）・時差（`+09:00`）・Windows の名前。`timeZones` より優先 | サービスの申告、なければ UTC | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
+
+### 設定ファイルに書かないもの
+
+- 設定ファイルのパス・URL、記録者、サービスごとの認証設定、`pathMappings` で選んだフォルダなどは各自の QGIS に保存する（下の[設定](#設定)の表）
+- ZIP に同梱・固定するかどうかは設定ファイルの項目ではなく、ZIP を作るときの `--config`・`--lock-config`（[導入](#導入)）
+- 増えたり変わったりする対応表などのデータは、設定ファイルではなく Esri のテーブル・レイヤーに置き、設定ファイルには属性名・テーブルの URL だけを書く（分類体系の `taxonomyTable` など）
+
+ビューアとの違い（プラグインだけの項目、ビューアと読み方が違う項目）は [docs/differences.md](docs/differences.md)。
 
 ## 構成
 
