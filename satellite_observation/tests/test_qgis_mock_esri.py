@@ -21,7 +21,7 @@ from satellite_observation.qgis_io import settings  # noqa: E402
 from satellite_observation.qgis_io.context import PluginContext  # noqa: E402
 from satellite_observation.qgis_io.network import qgis_transport  # noqa: E402
 from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
-from satellite_observation.tests.test_mock_esri import mock_esri, sample  # noqa: E402
+from satellite_observation.tests.test_mock_esri import mock_esri, sample, transport  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -95,6 +95,32 @@ def test_qgis_arcgis_provider_reads_the_mock(plugin):
     assert feature.geometry().area() > 0 and feature["IMG_ID"]
     points = QgsVectorLayer(f"crs='EPSG:4326' url='{rest}/Observations/FeatureServer/0'", "obs", "arcgisfeatureserver")
     assert points.isValid() and points.featureCount() == 2
+
+
+def test_esri_layers_edited_in_qgis_get_who_and_when(plugin, monkeypatch):
+    """A layer opened in QGIS's ArcGIS provider: features added and changed there get the tracking fields on saving."""
+    from qgis.core import QgsFeature, QgsGeometry, QgsPointXY
+
+    _, _, base = plugin
+    monkeypatch.setenv("USERNAME", "qgis-user")
+    url = f"{base}/arcgis/rest/services/Places/FeatureServer/0"
+    layer = QgsVectorLayer(f"crs='EPSG:4326' url='{url}'", "places", "arcgisfeatureserver")
+    assert layer.isValid()
+    QgsProject.instance().addMapLayer(layer)
+    layer.startEditing()
+    feature = QgsFeature(layer.fields())
+    feature["NAME"] = "新しい港"
+    feature.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(139.8, 35.4)))
+    assert layer.addFeature(feature)
+    old = next(f for f in layer.getFeatures() if f["NAME"] == "東京港")
+    layer.changeAttributeValue(old.id(), layer.fields().indexOf("NAME"), "東京港（改）")
+    assert layer.commitChanges(), layer.commitErrors()
+
+    rows = {f["attributes"]["NAME"]: f["attributes"] for f in EsriClient(transport).query_all(url, geometry=False)}
+    added, changed, kept = rows["新しい港"], rows["東京港（改）"], rows["横須賀港"]
+    assert added["CREATED_USER"] == added["UPDATED_USER"] == "qgis-user" and added["CREATED_DATE"] > 1.7e12
+    assert changed["UPDATED_USER"] == "qgis-user" and changed["CREATED_USER"] is None
+    assert kept["UPDATED_USER"] is None
 
 
 def test_imaging_plan_from_the_mock_satellites(plugin):

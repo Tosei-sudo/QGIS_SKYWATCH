@@ -191,3 +191,38 @@ def test_files_are_served_with_ranges(server):
     request = urllib.request.Request(f"{base}/files/catalog/{name}", headers={"Range": "bytes=0-3"})
     with urllib.request.urlopen(request) as answer:
         assert answer.status == 206 and answer.read() == b"II*\0"
+
+
+def test_every_layer_written_gets_who_and_when(server, monkeypatch):
+    """Plan store, request ledger, observations: CREATED_* / UPDATED_* from USERNAME, not from the sign-in."""
+    from satellite_observation.core import edit_stamp
+
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    edit_stamp.set_tracking(config.edit_tracking)
+    monkeypatch.setenv("USERNAME", "tester-a")
+    client = EsriClient(transport)
+    c = config.observation_stores[0]
+    store = EsriObservationStore(c, client)
+    store.load()
+    now = int(time.time() * 1000)
+    new = Observation(id="stamp-1", image_id="X", image_name="x.tif", image_time=now, object_id="o-9", object_name="船舶-9",
+                      kind="船舶", activity="入港", present=True, note="", lon=139.75, lat=35.3, created_at=now, updated_at=now)
+    store.save([new])
+
+    def row():
+        [f] = client.query_all(c.url, "OBS_ID = 'stamp-1'", geometry=False)
+        return f["attributes"]
+
+    first = row()
+    assert (first["CREATED_USER"], first["UPDATED_USER"]) == ("tester-a", "tester-a")
+    assert abs(first["CREATED_DATE"] - now) < 60_000 and first["UPDATED_DATE"] == first["CREATED_DATE"]
+    monkeypatch.setenv("USERNAME", "tester-b")
+    store.save([replace(new, note="直した", updated_at=now + 5)])
+    second = row()
+    assert (second["CREATED_USER"], second["UPDATED_USER"]) == ("tester-a", "tester-b")
+    assert second["CREATED_DATE"] == first["CREATED_DATE"] and second["UPDATED_DATE"] >= first["UPDATED_DATE"]
+    # Every layer of the sample has the fields.
+    for s in sample.services(server[2], server[0], with_features=False)["services"]:
+        for layer in s["layers"]:
+            assert set(sample.EDIT_FIELDS) <= set(layer["fields"]), (s["name"], layer["id"])

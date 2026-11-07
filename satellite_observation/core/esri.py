@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
-from . import time_zone
+from . import edit_stamp, time_zone
 from .util import iso_text, is_number
 
 
@@ -175,9 +175,21 @@ class EsriClient:
         deletes: Iterable[int] = (),
         token: Optional[str] = None,
     ) -> "EditResults":
-        """Adds, updates and deletes features in one request (`rollbackOnFailure=false`)."""
+        """
+        Adds, updates and deletes features in one request
+        (`rollbackOnFailure=false`). Adds and updates get the layer's
+        tracking fields (who and when, core/edit_stamp.py).
+        """
         params = {"rollbackOnFailure": "false"}
         adds, updates, deletes = list(adds), list(updates), list(deletes)
+        if (adds or updates) and edit_stamp.tracking().enabled:
+            try:
+                types = self.layer(url, token).field_types
+            except EsriError:
+                types = {}
+            when, user = edit_stamp.now_ms(), edit_stamp.user_name()
+            adds = edit_stamp.stamp(adds, types, True, when, user=user)
+            updates = edit_stamp.stamp(updates, types, False, when, user=user)
         if adds:
             params["adds"] = json.dumps(adds, ensure_ascii=False)
         if updates:

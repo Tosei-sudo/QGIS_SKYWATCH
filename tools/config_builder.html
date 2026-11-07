@@ -172,7 +172,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "aiResultSources",
   "timeZones",
   "requestStores",
-  "requestExports"
+  "requestExports",
+  "editTracking"
  ],
  "roles": {
   "imageCatalogs": [
@@ -366,7 +367,13 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "heading",
    "width",
    "note"
-  ]
+  ],
+  "editTracking": {
+   "createdAt": "CREATED_DATE",
+   "createdBy": "CREATED_USER",
+   "updatedAt": "UPDATED_DATE",
+   "updatedBy": "UPDATED_USER"
+  }
  },
  "exportSources": [
   "id",
@@ -573,6 +580,7 @@ const ROLE_LABELS = {
   members: "構成", specs: "諸元", photos: "写真", activities: "活動", order: "並び順", time: "時刻", lat: "緯度",
   lon: "経度", course: "針路（COG）", speed: "速度", fileName: "ファイル名", detectedAt: "検出日時", sentAt: "転記日時",
   class: "クラス", classId: "クラス番号", score: "確信度", model: "モデル", area: "面積（m²）", angleDeg: "向き（°）",
+  createdAt: "作成日時", createdBy: "作成者", updatedAt: "更新日時",
 };
 const SOURCE_LABELS = {
   id: "依頼 ID", name: "名称", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
@@ -838,6 +846,15 @@ const SPEC = [
       field: I("aiResultSources", "結果", [LABEL, URL_(), R("fields", "属性名", K.roles.aiResultSources, { required: ["imageId"] }), M("kinds", "クラス → 種別"),
         N("minScore", "最低の確信度（0〜1）", { min: 0, max: 1 }), N("continueRadius", "続きとみなす半径（m）"), N("candidateRadius", "候補の半径（m）"), N("maxResults", "最大件数"),
         T("activity", "取り込み時の活動"), T("confidence", "取り込み時の確度"), WHERE, TOKEN, TZ, STZ]) },
+  ] },
+  { group: "編集の記録", keys: [
+    { key: "editTracking", label: "作成者・更新者の記録", doc: "作成者更新者の記録edittracking", help: "プラグインが書き込む Esri のレイヤー・テーブル（QGIS で直接編集した Esri レイヤーも）の作成日時・作成者・更新日時・更新者。属性があるレイヤーだけ書く。ユーザー名は ArcGIS の認証ではなく環境変数（既定 USERNAME）。",
+      field: O("editTracking", "記録", [
+        B("enabled", "記録する", { help: "既定 true（false で書かない）" }),
+        T("userVariable", "ユーザー名の環境変数", { ph: "USERNAME", help: "この環境変数の値を作成者・更新者に入れる" }),
+        T("user", "固定のユーザー名", { help: "書くと環境変数より優先（任意）" }),
+        R("fields", "属性名", K.roles.editTracking),
+      ]) },
   ] },
   { group: "日時", keys: [
     { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",

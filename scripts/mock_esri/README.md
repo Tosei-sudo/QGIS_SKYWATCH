@@ -50,6 +50,8 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Places | 0 | 地名（横須賀港など 6 件） | `geocoders`（`type: "features"`） |
 | Requests | 0, 1 | 撮像依頼台帳（3 件）と出力履歴（docs/imaging-requests.md の既定の属性名） | `requestStores`。日次出力のシステムは `requestExports`（光学 CSV・SAR JSON の 2 つ） |
 
+どのレイヤーにも作成者・更新者の記録の属性 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` がある（プラグインの `editTracking` の既定の属性名。前のバージョンで作ったデータには起動時に列を足す）。
+
 画像の `FILE_PATH` はこの PC の絶対パス、`COG_URL` はモックの `/files/…`（HTTP の Range に対応。`/vsicurl/` で開ける）。
 
 QGIS の「ArcGIS REST サーバー」接続に `http://127.0.0.1:8765/arcgis/rest/services` を登録すれば、各レイヤーを普通のレイヤーとして開いて編集もできる。ブラウザ版ビューアからも使える（CORS 許可済み）。

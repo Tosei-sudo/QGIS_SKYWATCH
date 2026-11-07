@@ -106,6 +106,8 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。点で指�
 | requester / note | `REQUESTER` / `NOTE` | 依頼者・メモ |
 | created / updated | `CREATED_AT` / `UPDATED_AT` | 登録・更新日時 |
 
+台帳・出力履歴とも、`CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` の属性があれば、追加・更新のたびに日時と書き込んだ人（環境変数 `USERNAME`）も入る（設定ファイルの `editTracking`、README の「作成者・更新者の記録」）。
+
 条件の項目は、空なら「問わない」として扱う。
 
 ## 5. 優先度
