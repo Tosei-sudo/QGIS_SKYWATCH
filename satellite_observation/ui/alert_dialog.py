@@ -151,7 +151,7 @@ class AlertDialog(QDialog):
         self.log_copy = QPushButton(self.tr("選択をコピー"))
         self.log_copy.clicked.connect(self.copy_log)
         self.log_remove = QPushButton(self.tr("選択を削除（再通報可にする）"))
-        self.log_remove.clicked.connect(self.remove_log)
+        self.log_remove.clicked.connect(lambda _on=False: self.remove_log())
         row.addStretch(1)
         row.addWidget(self.log_copy)
         row.addWidget(self.log_remove)
