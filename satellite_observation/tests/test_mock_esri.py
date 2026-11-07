@@ -252,3 +252,22 @@ def test_alerts_rules_geofence_and_log_over_http(server):
     assert reported_ids(client, s) == {"mock-a"}
     rows = load_log(client, s, start=now - 60_000)
     assert [(r.obs_id, r.format) for r in rows] == [("mock-a", "速報")] and rows[0].text.split("|")[2] == "船X"
+
+
+def test_assignments_and_handover_memos_over_http(server):
+    from satellite_observation.core.obs.assignments import TakenError, holders, take
+    from satellite_observation.core.obs.handover import HandoverData, keep_memo, last_memo
+
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    client = EsriClient(transport)
+    now = int(time.time() * 1000)
+    mine = take(client, config.assignments, "IMG-A", "tester", now, "a.tif", now - 3_600_000)
+    assert mine.oid is not None
+    with pytest.raises(TakenError):
+        take(client, config.assignments, "IMG-A", "other", now)
+    assert [h.assignee for h in holders(client, config.assignments, "IMG-A")] == ["tester"]
+    table = config.handover.table
+    keep_memo(client, table, "引き継ぎ本文", HandoverData(start=now - 3_600_000, end=now, now=now, user="tester", memo="申し送り"))
+    last = last_memo(client, table, since=now - 86_400_000)
+    assert (last.text, last.memo, last.written_by) == ("引き継ぎ本文", "申し送り", "tester")

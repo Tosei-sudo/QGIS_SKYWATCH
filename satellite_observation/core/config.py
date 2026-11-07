@@ -26,7 +26,9 @@ from .enhance.rules import ImageRule, image_rules_of
 from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
-from .obs.alerts import AlertSettings, alert_settings_of
+from .obs.alerts import AlertSettings, EsriSource, alert_settings_of
+from .obs.assignments import assignment_source_of
+from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.names import AliasTableConfig, alias_tables_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
@@ -46,7 +48,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports",
+    "alertReports", "assignments", "handover",
 )
 
 
@@ -102,6 +104,10 @@ class PluginConfig:
     edit_tracking: EditTracking = DEFAULT_EDIT_TRACKING
     #: `alertReports`: notable records as delimited text (通報); None hides it.
     alert_reports: Optional[AlertSettings] = None
+    #: `assignments`: the Esri table of who holds which image (分担); None hides it.
+    assignments: Optional[EsriSource] = None
+    #: `handover`: how the shift handover memo (引き継ぎメモ) is written and kept.
+    handover: HandoverSettings = field(default_factory=HandoverSettings)
 
 
 class JsoncError(ValueError):
@@ -258,6 +264,10 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.edit_tracking = edit_tracking_of(value["editTracking"], problems)
     if "alertReports" in value:
         config.alert_reports = alert_settings_of(value["alertReports"], problems)
+    if "assignments" in value:
+        config.assignments = assignment_source_of(value["assignments"], problems)
+    if "handover" in value:
+        config.handover = handover_settings_of(value["handover"], problems)
     return config, problems
 
 

@@ -238,6 +238,10 @@ def _source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str], e
     )
 
 
+#: An Esri layer or table of the settings file (URL, or { url, fields, where, token }); also used by other settings.
+esri_source_of = _source_of
+
+
 def _lines_of(v: Any, at: str, problems: list[str]) -> str:
     if v is None:
         return ""
