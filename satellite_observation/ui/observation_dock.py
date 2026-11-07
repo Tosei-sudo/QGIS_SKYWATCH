@@ -460,10 +460,14 @@ class ObservationDock(PluginDock):
         self.alert_add_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加（通報の条件に合わなくても。設定ファイルの alertReports）"),
                                              lambda: self.add_to_alerts())
         self.alert_add_button.hide()
+        self.event_add_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベント（地震対応など）に入れる（設定ファイルの events）"),
+                                             lambda: self.add_to_event())
+        self.event_add_button.hide()
         self.table.itemSelectionChanged.connect(self._selection_changed)
         chosen = QHBoxLayout()
         chosen.addWidget(self.bulk_button)
         chosen.addWidget(self.alert_add_button)
+        chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
         b.addLayout(chosen)
 
@@ -1872,6 +1876,25 @@ class ObservationDock(PluginDock):
         self._handover.raise_()
         self._handover.activateWindow()
         return self._handover
+    #: The 「イベント」 dock (plugin.py sets it).
+    event_linker: Optional[Callable[[], Any]] = None
+
+    def event_items(self, records: Optional[list[Observation]] = None) -> list:
+        """The chosen records as items of an event."""
+        from ..core.events import LinkItem
+
+        url = self.store_set.config.url if self.store_set and self.store_set.config else "local"
+        out = []
+        for o in records if records is not None else self.selected_records():
+            kind = o.kind.split(">")[-1].strip() if o.kind else ""
+            label = " / ".join(x for x in (o.object_name or o.object_id, kind, o.activity, o.image_name or o.image_id) if x)
+            out.append(LinkItem("observation", o.id, label=label, time=o.image_time, source=url))
+        return out
+
+    def add_to_event(self):
+        """「イベントに追加」: the chosen records into an open event (a menu of them)."""
+        events = self.event_linker() if self.event_linker else None
+        return events.offer(self.event_add_button, self.event_items) if events and self.selected_records() else None
 
     def add_to_alerts(self, records: Optional[list[Observation]] = None):
         """「通報に追加」: the chosen records (or `records`) into 「通報」, whatever the conditions say."""
@@ -1956,6 +1979,7 @@ class ObservationDock(PluginDock):
         rows = {i.row() for i in self.table.selectionModel().selectedRows()}
         self.bulk_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
         self.alert_add_button.setVisible(bool(rows) and self.context.config.alert_reports is not None and bool(self.selected_records()))
+        self.event_add_button.setVisible(bool(rows) and self.context.config.events is not None and bool(self.selected_records()))
 
     def bulk_edit(self, records: Optional[list[Observation]] = None):
         """Asks what to set on the chosen records (the kind, the activity, the 確度), then saves it on all of them."""
