@@ -2,6 +2,13 @@
 The plugin's docks. The settings file is chosen only from the plugin's menu
 (「設定…」); the docks don't repeat it (tsudo, 2026-11-07). Problems found when
 it is read go to QGIS's message bar instead (plugin.py).
+
+Every dock's body sits in a scroll area (tsudo, 2026-11-07): without it a dock
+can't be smaller than everything in it, and QGIS's window then grows past the
+screen when several docks are stacked on one side (all docks open: about
+1250 × 1055 at least), so the lower docks and the window's bottom are out of
+reach. In the scroll area a dock gets as small as the user drags it and its
+body scrolls; at its full size nothing changes.
 """
 from __future__ import annotations
 
@@ -9,7 +16,7 @@ from typing import Callable
 
 from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
-from qgis.PyQt.QtWidgets import QDockWidget, QLabel, QVBoxLayout, QWidget
+from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from ..qgis_io.context import PluginContext
 
@@ -25,7 +32,12 @@ class PluginDock(QDockWidget):
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         body = QWidget()
         self.body = QVBoxLayout(body)
-        self.setWidget(body)
+        scroll = QScrollArea()
+        scroll.setObjectName(object_name + "Scroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(body)
+        self.setWidget(scroll)
         self.topLevelChanged.connect(lambda _: QTimer.singleShot(0, self.keep_on_screen))
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
@@ -33,13 +45,27 @@ class PluginDock(QDockWidget):
         QTimer.singleShot(0, self.keep_on_screen)
 
     def keep_on_screen(self) -> None:
-        """Docks a floating dock again when its title bar is off every screen (as after a screen is unplugged)."""
+        """
+        Docks a floating dock again when its title bar is off every screen (as after a screen is unplugged),
+        and makes one larger than its screen (as one saved on a larger screen) fit in it.
+        """
         if not self.isFloating():
             return
         frame = self.frameGeometry()
         title = frame.adjusted(0, 0, 0, -max(0, frame.height() - 30))
-        if not any(s.availableGeometry().intersects(title) for s in QGuiApplication.screens()):
+        screens = [s.availableGeometry() for s in QGuiApplication.screens()]
+        if not any(s.intersects(title) for s in screens):
             self.setFloating(False)
+            return
+        screen = next(s for s in screens if s.intersects(title))
+        if frame.width() <= screen.width() and frame.height() <= screen.height():
+            return
+        extra_w, extra_h = frame.width() - self.width(), frame.height() - self.height()
+        w = min(frame.width(), screen.width()) - extra_w
+        h = min(frame.height(), screen.height()) - extra_h
+        x = min(max(frame.x(), screen.x()), screen.right() + 1 - (w + extra_w))
+        y = min(max(frame.y(), screen.y()), screen.bottom() + 1 - (h + extra_h))
+        self.setGeometry(x + (self.geometry().x() - frame.x()), y + (self.geometry().y() - frame.y()), w, h)
 
 
 class StubDock(PluginDock):
