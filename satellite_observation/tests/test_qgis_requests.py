@@ -372,3 +372,41 @@ def test_a_satellite_catalog_that_cannot_be_read_gives_the_buttons_back(plugin, 
     sim.run()
     assert wait_for(lambda: sim.run_button.isEnabled() and "衛星カタログの読み込みに失敗" in sim.status.text()), sim.status.text()
     sim.close()
+
+
+def test_the_form_picks_satellites_in_the_imaging_plan_tree(plugin):
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+    dock.edit(new=True)
+    form = dock.form
+    assert wait_for(lambda: len(form.tree.items()) == 2), form.picked_label.text()
+    # The same tree as the imaging plan (kind → series → satellite), nothing checked: any satellite.
+    assert [form.tree.tree.topLevelItem(i).text(0) for i in range(form.tree.tree.topLevelItemCount())] == ["光学（0 / 1）", "SAR（0 / 1）"]
+    assert not form.hand.isVisibleTo(form) and "指定なし" in form.picked_label.text()
+    sar = form.tree.tree.topLevelItem(1).child(0)
+    sar.setCheckState(0, Qt.CheckState.Checked)
+    assert (form.series.text(), form.satellites.text(), form.modes.text()) == ("RADAR", "", "")
+    assert "衛星シリーズ RADAR" in form.picked_label.text()
+    form.name.setText("大阪湾")
+    form._point_clicked(QgsPointXY(135.3, 34.6))
+    form._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 1)
+    assert dock.requests[0].series == ["RADAR"]
+
+    # Names typed by hand (or kept in the ledger) show as checks; names the catalog lacks are kept.
+    dock.chosen = dock.requests[0]
+    dock.edit()
+    form = dock.form
+    assert wait_for(lambda: len(form.tree.items()) == 2)
+    assert [l.sat.name for l in form.tree.items() if l.checked] == ["RADAR 1"]
+    form.by_hand.setChecked(True)
+    form.satellites.setText("OPT 1,GONE-1")
+    form.series.setText("")
+    form._names_typed()
+    assert [l.sat.name for l in form.tree.items() if l.checked] == ["OPT 1"]
+    assert "GONE-1" in form.picked_label.text()
+    form.tree.check_all(False)
+    assert form.satellites.text() == "GONE-1"
+    form.close()

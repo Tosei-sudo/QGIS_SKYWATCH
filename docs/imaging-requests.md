@@ -92,7 +92,7 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。点で指�
 | priority | `PRIORITY` | 1〜1000（1 ほど高い） |
 | boost | `BOOST` | 繰り上げ量（100 単位。§9） |
 | kind | `KIND` | 光学 / SAR / 任意 |
-| series | `SERIES` | 衛星シリーズ（カンマ区切り、空なら問わない） |
+| series | `SERIES` | 衛星シリーズ（カンマ区切り、空なら問わない）。フォームでは撮像計画と同じ階層選択でシリーズ全体をチェック |
 | satellites | `SATELLITES` | 衛星を個別に指定（任意） |
 | modes | `SENSOR_MODES` | センサー・モード（カタログから選択） |
 | offNadir | `OFF_NADIR_MIN` / `OFF_NADIR_MAX` | オフナディア角の範囲 |

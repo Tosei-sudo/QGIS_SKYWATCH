@@ -81,8 +81,10 @@ def _by(items: list, key: Callable) -> list:
 class SatelliteChoice:
     """Which satellites (and modes) are chosen."""
 
-    def __init__(self) -> None:
+    def __init__(self, whole_satellites: bool = False) -> None:
         self.listed: list[Listed] = []
+        #: A group checks every mode of its satellites (imaging requests: any mode will do), not just the usual one.
+        self.whole_satellites = whole_satellites
 
     def set(self, sats: Sequence[SatelliteSpec], check_new: Callable[[SatelliteSpec, bool], bool] = lambda s, first: True) -> set:
         """Lists `sats`, keeping which were checked; returns the keys new to the list that start checked."""
@@ -129,12 +131,16 @@ class SatelliteChoice:
         return list(groups.values())
 
     def choose(self, members: Sequence[Listed], on: bool) -> None:
-        """Checks `members` (each satellite with none of its modes checked by its usual mode) or clears them."""
+        """Checks `members` (each satellite with none of its modes checked by its usual mode, or by all with `whole_satellites`) or clears them."""
         if not on:
             for m in members:
                 m.checked = False
             return
         for same in self._platforms(members):
+            if self.whole_satellites:
+                for m in same:
+                    m.checked = True
+                continue
             if any(m.checked for m in same):
                 continue
             next((m for m in same if m.sat.primary is not False), same[0]).checked = True
