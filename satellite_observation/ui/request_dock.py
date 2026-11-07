@@ -18,7 +18,8 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
 )
 
-from ..core.request.model import ImagingRequest, jst_day, priority_text
+from ..core.request.bulk import RequestChange, apply_change
+from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import field_roles, request_of_row, row_problems
 from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request
 from ..qgis_io.geometry import from_wgs84
@@ -85,11 +86,13 @@ class RequestDock(PluginDock):
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Ctrl / Shift + click chooses several, for 「一括編集」.
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row(current.row()))
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         self.table.doubleClicked.connect(lambda _: self.edit())
         self.body.addWidget(self.table, 1)
 
@@ -101,9 +104,12 @@ class RequestDock(PluginDock):
         self.delete_button = QPushButton(self.tr("削除"))
         self.delete_button.setToolTip(self.tr("選んだ依頼を保存先から削除"))
         self.delete_button.clicked.connect(self._delete_clicked)
+        self.bulk_button = QPushButton(self.tr("一括編集…"))
+        self.bulk_button.setToolTip(self.tr("選んだ依頼（Ctrl・Shift + クリックで複数）の優先度・状態・種別をまとめて変更"))
+        self.bulk_button.clicked.connect(lambda: self.bulk_edit())
         self.reload_button = QPushButton(self.tr("再読み込み"))
         self.reload_button.clicked.connect(lambda: self.reload())
-        for b in (self.new_button, self.edit_button, self.delete_button, self.reload_button):
+        for b in (self.new_button, self.edit_button, self.bulk_button, self.delete_button, self.reload_button):
             edit.addWidget(b)
         self.body.addLayout(edit)
 
@@ -273,6 +279,7 @@ class RequestDock(PluginDock):
         self.import_button.setEnabled(ready and self._loaded)
         self.edit_button.setEnabled(ready and self.chosen is not None)
         self.delete_button.setEnabled(ready and self.chosen is not None)
+        self.bulk_button.setEnabled(ready and bool(self.selected()))
         self.export_button.setEnabled(bool(self.shown))
 
     # --- Adding, changing, deleting -------------------------------------------------------------
@@ -331,6 +338,61 @@ class RequestDock(PluginDock):
 
         self._start(self.tr("撮像依頼の削除"), lambda task: delete_request(client, store, token, r), done,
                     lambda m: self.status.setText(self.tr("削除失敗: {m}").format(m=m)))
+
+    def selected(self) -> list[ImagingRequest]:
+        """The requests chosen in the list (several with Ctrl / Shift)."""
+        rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
+        return [self.shown[r] for r in rows if 0 <= r < len(self.shown)]
+
+    def select(self, ids) -> None:
+        """Chooses the listed requests of these ids."""
+        ids = set(ids)
+        sel = self.table.selectionModel()
+        sel.clearSelection()
+        for i, r in enumerate(self.shown):
+            if r.id in ids:
+                sel.select(self.model.index(i, 0), sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
+        self._update_buttons()
+
+    def bulk_edit(self):
+        """Asks what to set on the chosen requests, then saves it on each."""
+        from .bulk_edit_dialog import BulkEditDialog, BulkField
+
+        chosen = self.selected()
+        if not chosen or self.store is None:
+            return None
+        first = chosen[0]
+        fields = [
+            BulkField("priority", self.tr("優先度"), priority=True, value=first.priority,
+                      tip=self.tr("1 が最も高い（最優先 1〜200・高・中・低・最低）"), extra=("reset_boost", self.tr("繰り上げも解除"))),
+            BulkField("status", self.tr("状態"), choices=STATUSES, value=first.status),
+            BulkField("kind", self.tr("種別"), choices=KINDS, value=first.kind),
+        ]
+        dialog = BulkEditDialog(self.tr("撮像依頼の一括編集"), self.tr("選んだ依頼 {n} 件").format(n=len(chosen)), fields, self)
+        dialog.accepted.connect(lambda: self.apply_bulk(chosen, RequestChange(**dialog.values())))
+        dialog.finished.connect(lambda _r: dialog.deleteLater())
+        dialog.open()
+        return dialog
+
+    def apply_bulk(self, chosen: list[ImagingRequest], change: RequestChange) -> bool:
+        """Saves a change on each request (in a task): each one checked against the ledger, the failures told by name."""
+        problems = change.problems()
+        if change.empty or problems:
+            self.status.setText("、".join(problems) or self.tr("変更する項目なし"))
+            return False
+        store, client, token = self.store, self.context.esri(), self.token()
+        ids = [r.id for r in chosen]
+        self.status.setText(self.tr("{n} 件を変更中（{what}）…").format(n=len(chosen), what=change.text()))
+
+        def done(result):
+            self.reload(lambda: (self.select(ids), self.status.setText(result.text())))
+
+        started = self._start(self.tr("撮像依頼の一括編集"),
+                              lambda task: apply_change(client, store, token, chosen, change, _now_ms, task.isCanceled, task.progress),
+                              done, lambda m: self.status.setText(self.tr("一括編集の失敗: {m}").format(m=m)))
+        if not started:
+            self.status.setText(self.tr("ほかの処理の実行中。少し待ってから変更"))
+        return started
 
     # --- Layers ---------------------------------------------------------------------------------
 

@@ -304,6 +304,8 @@ class EsriObservationStore:
         self.stamps: dict[str, Optional[float]] = {}
         #: The 更新日時 of saves whose answer was lost (a timeout): the server may hold them.
         self.pending: dict[str, float] = {}
+        self.last_saved: set[str] = set()
+        self.last_conflicts: set[str] = set()
         self._layer = _EsriLayer(client, config.url, token, config.label, [config.fields["id"], config.fields["objectId"]])
 
     def _feature_of(self, o: Observation, types: dict[str, str], oid: str) -> dict[str, Any]:
@@ -384,7 +386,10 @@ class EsriObservationStore:
             return
         types, oid = self._layer.ready()
         failed: list[str] = []
+        #: The ids this save wrote, and those it left for someone else's change (for a bulk change to tell which went through).
+        self.last_saved, self.last_conflicts = set(), set()
         conflicts = set(self._check(records, types, oid))
+        self.last_conflicts = set(conflicts)
         records = [o for o in records if o.id not in conflicts]
         for i in range(0, len(records), 200):
             batch = records[i:i + 200]
@@ -401,11 +406,13 @@ class EsriObservationStore:
                 if r.get("success") and is_number(r.get("objectId")):
                     self.oids[o.id] = int(r["objectId"])
                     self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
+                    self.last_saved.add(o.id)
                 elif not r.get("success"):
                     failed.append((r.get("error") or {}).get("description") or "追加失敗")
             for o, r in zip(updates, result.update_results):
                 if r.get("success"):
                     self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
+                    self.last_saved.add(o.id)
                 else:
                     failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if conflicts or failed:
