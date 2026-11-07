@@ -55,6 +55,9 @@ class AlertDialog(QDialog):
         self.resize(900, 600)
         self.items: list[AlertItem] = []
         self.log_rows: list[LogRow] = []
+        #: The rows shown: (record id, the line as made) and the format they were made in.
+        self._shown_lines: list[tuple[str, str]] = []
+        self._shown_format = ""
         self._filling = False
         layout = QVBoxLayout(self)
         self.note = QLabel()
@@ -270,7 +273,7 @@ class AlertDialog(QDialog):
 
         def work(_task):
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
-            done = reported_ids(client, s, tokens["table"]) if s.table else set()
+            done = reported_ids(client, s, tokens["table"], ids=[o.id for o in records]) if s.table else set()
             return manual_items(records, fences, s, levels, history), done
 
         def finished(result) -> None:
@@ -300,20 +303,40 @@ class AlertDialog(QDialog):
     def _moment(self, count: int) -> Moment:
         return Moment(now=QDateTime.currentMSecsSinceEpoch(), user=edit_stamp.user_name(), count=count)
 
+    def _kept_rows(self) -> dict[str, tuple[bool, Optional[str]]]:
+        """
+        What the person did to the rows shown, by record: unticked, and the
+        line edited by hand (kept while the format is the same), so that adding
+        records or picking again does not undo it.
+        """
+        kept: dict[str, tuple[bool, Optional[str]]] = {}
+        same_format = self._shown_format == (self.format_select.currentData() or "")
+        for r, (record_id, line) in enumerate(self._shown_lines):
+            check, cell = self.lines_table.item(r, 0), self.lines_table.item(r, 1)
+            if check is None or cell is None:
+                continue
+            edited = cell.text() if same_format and cell.text() != line else None
+            kept[record_id] = (check.checkState() == Qt.CheckState.Checked, edited)
+        return kept
+
     def _render_lines(self) -> None:
         fmt = self._format()
+        kept = self._kept_rows()
         self._filling = True
         self.lines_table.blockSignals(True)
         self.lines_table.setRowCount(0)
         lines = build_lines(self.items, fmt, self._moment(len(self.items))) if fmt else []
+        self._shown_lines = [(i.record.id, line) for i, line in zip(self.items, lines)]
+        self._shown_format = self.format_select.currentData() or ""
         for r, line in enumerate(lines):
             self.lines_table.insertRow(r)
+            item = self.items[r] if r < len(self.items) else None
+            ticked, edited = kept.get(item.record.id, (True, None)) if item is not None else (True, None)
             check = QTableWidgetItem()
             check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            check.setCheckState(Qt.CheckState.Checked)
+            check.setCheckState(Qt.CheckState.Checked if ticked else Qt.CheckState.Unchecked)
             self.lines_table.setItem(r, 0, check)
-            cell = QTableWidgetItem(line)
-            item = self.items[r] if r < len(self.items) else None
+            cell = QTableWidgetItem(edited if edited is not None else line)
             marks, tips = [], []
             if item is not None and item.manual:
                 tips.append(self.tr("手動で追加（条件に関係なく通報）"))
