@@ -1,7 +1,8 @@
 """
 The satellites as a checklist (core/plan/tree.py drawn in a QTreeWidget):
 kind → series → satellite → mode, with a box per mode name above it and a
-search line. Shared by the imaging plan and the satellite pass docks.
+search line. Shared by the imaging plan and the satellite pass docks and the imaging
+request form.
 """
 from __future__ import annotations
 
@@ -28,9 +29,12 @@ class SatelliteTree(QWidget):
 
     changed = pyqtSignal()
 
-    def __init__(self, parent: Optional[QWidget] = None, remember_as: str = ""):
+    def __init__(self, parent: Optional[QWidget] = None, remember_as: str = "", start_checked: bool = True,
+                 whole_satellites: bool = False):
         super().__init__(parent)
-        self.choice = SatelliteChoice()
+        self.choice = SatelliteChoice(whole_satellites)
+        #: Whether satellites new to the list start checked (the imaging request form starts with none: no condition).
+        self.start_checked = start_checked
         #: The form whose last checks are put back the first time satellites are listed, and kept on each change ('' for none).
         self.remember_as = remember_as
         if remember_as:
@@ -73,7 +77,7 @@ class SatelliteTree(QWidget):
         open_keys = {key for item, key in self._groups() if item.isExpanded()}
         first = not self.choice.listed
         before = {l.key for l in self.choice.listed}
-        added = self.choice.set(sats)
+        added = self.choice.set(sats, lambda sat, first: self.start_checked)
         # Satellites new to the list are checked as they were last time (入力の初期値の記憶).
         for key, on in self.restore_kept({l.key for l in self.choice.listed} - before).items():
             if not on:
@@ -129,6 +133,17 @@ class SatelliteTree(QWidget):
         self.choice.check_only(names)
         self.refresh()
         self.changed.emit()
+
+    def set_checks(self, checks: dict) -> None:
+        """Checks the satellites (modes) whose keys map to True, clears the rest, and opens the groups holding a check (no `changed`)."""
+        for l in self.choice.listed:
+            l.checked = bool(checks.get(l.key))
+        self.tree.blockSignals(True)
+        for item, node in self._items:
+            if isinstance(node, Group) and any(m.checked for m in node.members):
+                item.setExpanded(True)
+        self.tree.blockSignals(False)
+        self.refresh()
 
     def restore_kept(self, keys) -> dict:
         """Checks those of `keys` as they were last kept (call `refresh` after); returns {key: checked} of those put back."""

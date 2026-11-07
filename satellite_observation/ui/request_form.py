@@ -16,10 +16,11 @@ from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer, Qgs
 from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
 from qgis.PyQt.QtCore import QDate, Qt
 from qgis.PyQt.QtWidgets import (
-    QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from ..core.request.pick import Picked, checks_of, picked, summary, unknown
 from ..core.request.model import (
     ACHIEVES, CATEGORIES, JST, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest,
     bbox_of, day_bounds, jst_day, level_of, level_value, priority_text, repeat_of, repeat_text, square_rings,
@@ -27,6 +28,7 @@ from ..core.request.model import (
 from ..qgis_io.geometry import shape_of, to_wgs84
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
+from .satellite_tree import SatelliteTree
 
 _WEEKDAYS = "月火水木金土日"
 
@@ -58,18 +60,21 @@ class RequestForm(QDialog):
     """Adds or changes one request; `save(request)` is called with it on 「保存」."""
 
     def __init__(self, iface, request: ImagingRequest, save: Callable[[ImagingRequest], None],
-                 known: Optional[dict] = None, parent=None):
+                 known: Optional[dict] = None, parent=None, satellites: Optional[Callable] = None):
         super().__init__(parent or iface.mainWindow())
         self.iface = iface
         self.canvas = iface.mapCanvas()
         self.request = request
         self.save = save
         self.rings = [list(r) for r in request.rings]
+        self._note = ""
+        self._closing = False
         self.overlay = PlanOverlay(self.canvas)
         self.setWindowTitle(self.tr("撮像依頼の編集") if request.object_id is not None else self.tr("撮像依頼の登録"))
         self.setModal(False)
         self._build(known or {})
         self._fill(request)
+        self._fit()
         self.extent_tool = QgsMapToolExtent(self.canvas)
         self.extent_tool.extentChanged.connect(self._extent_drawn)
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
@@ -78,11 +83,28 @@ class RequestForm(QDialog):
         #: The size of a clicked point's area last used (入力の初期値の記憶).
         self.memory = InputMemory("request_form", {"size": self.size})
         self.memory.restore()
+        if satellites is None:
+            self._no_catalog(self.tr("衛星カタログなし。名前で入力"))
+        else:
+            self._note = self.tr("衛星カタログを読み込み中…")
+            self._names_changed()
+            satellites(self._satellites_read, lambda m: self._no_catalog(self.tr("衛星カタログを読めず（{m}）。名前で入力").format(m=m)))
 
     # --- Building -----------------------------------------------------------------------------
 
     def _build(self, known: dict) -> None:
-        layout = QVBoxLayout(self)
+        # The fields scroll when the window is shorter than they are (the satellite tree makes the form tall).
+        outer = QVBoxLayout(self)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(body)
+        outer.addWidget(scroll, 1)
+        self._body = body
         form = QFormLayout()
         self.name = QLineEdit()
         form.addRow(self.tr("名称"), self.name)
@@ -170,15 +192,41 @@ class RequestForm(QDialog):
             kinds.addWidget(w)
         kinds.addStretch(1)
         cf.addRow(kinds)
+        # The satellites as in the imaging plan: kind → series → satellite → mode (none checked: any satellite).
+        self.tree = SatelliteTree(start_checked=False, whole_satellites=True)
+        self.tree.setToolTip(self.tr("チェックなしは衛星を問わない。シリーズ全体なら衛星シリーズ、一部なら衛星（チェック順に優先）、モードの一部ならセンサーモードとして保存"))
+        self.tree.changed.connect(self._tree_changed)
+        self.tree.tree.setMinimumHeight(170)
+        cf.addRow(self.tr("衛星"), self.tree)
+        self.picked_label = QLabel()
+        self.picked_label.setWordWrap(True)
+        self.picked_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.by_hand = QPushButton(self.tr("手入力"))
+        self.by_hand.setCheckable(True)
+        self.by_hand.setToolTip(self.tr("衛星シリーズ・衛星・センサーモードを名前で直接入力（カンマ区切り）"))
+        cf.addRow("", self.picked_label)
+        hand_row = QHBoxLayout()
+        hand_row.addWidget(self.by_hand)
+        hand_row.addStretch(1)
+        cf.addRow("", hand_row)
+        self.hand = QWidget()
+        hf = QFormLayout(self.hand)
+        hf.setContentsMargins(0, 0, 0, 0)
         self.series = QLineEdit()
         self.series.setPlaceholderText("、".join(known.get("series", [])[:8]) or self.tr("カンマ区切り"))
-        cf.addRow(self.tr("衛星シリーズ"), self.series)
+        hf.addRow(self.tr("衛星シリーズ"), self.series)
         self.satellites = QLineEdit()
         self.satellites.setPlaceholderText(self.tr("個別に指定する衛星（書いた順に優先、カンマ区切り）"))
-        cf.addRow(self.tr("衛星"), self.satellites)
+        hf.addRow(self.tr("衛星"), self.satellites)
         self.modes = QLineEdit()
         self.modes.setPlaceholderText("、".join(known.get("modes", [])[:8]) or self.tr("センサー・モード（カンマ区切り）"))
-        cf.addRow(self.tr("センサー・モード"), self.modes)
+        hf.addRow(self.tr("センサー・モード"), self.modes)
+        for edit in (self.series, self.satellites, self.modes):
+            edit.textChanged.connect(self._names_changed)
+            edit.editingFinished.connect(self._names_typed)
+        self.hand.setVisible(False)
+        self.by_hand.toggled.connect(self.hand.setVisible)
+        cf.addRow(self.hand)
         angles = QHBoxLayout()
         self.ona_min, self.ona_max = _optional(0, 89, "°"), _optional(0, 89, "°")
         self.inc_min, self.inc_max = _optional(0, 89, "°"), _optional(0, 89, "°")
@@ -234,16 +282,17 @@ class RequestForm(QDialog):
         self.note.setFixedHeight(54)
         people.addRow(self.tr("メモ"), self.note)
         layout.addLayout(people)
+        layout.addStretch(1)
         self.message = QLabel()
         self.message.setStyleSheet("color: #b91c1c")
         self.message.setWordWrap(True)
-        layout.addWidget(self.message)
+        outer.addWidget(self.message)
         box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         box.button(QDialogButtonBox.StandardButton.Save).setText(self.tr("保存"))
         box.button(QDialogButtonBox.StandardButton.Cancel).setText(self.tr("閉じる"))
         box.accepted.connect(self._save_clicked)
         box.rejected.connect(self.reject)
-        layout.addWidget(box)
+        outer.addWidget(box)
 
     def _fill(self, r: ImagingRequest) -> None:
         self.name.setText(r.name if r.object_id is not None else "")
@@ -281,12 +330,74 @@ class RequestForm(QDialog):
         self.requester.setText(r.requester)
         self.note.setPlainText(r.note)
         self.shape_kind = r.shape_kind
+        self._names_typed()
         self._category_changed(r.category)
         self._repeat_changed(rep.kind)
         self._priority_changed(r.priority)
         self._area_changed()
 
+    def _fit(self) -> None:
+        """As tall as the fields, but no taller than the screen (the rest scrolls)."""
+        want = self._body.sizeHint()
+        screen = self.screen().availableGeometry() if self.screen() else None
+        height = want.height() + 110
+        if screen is not None:
+            height = min(height, int(screen.height() * 0.9))
+        self.resize(max(self.sizeHint().width(), want.width() + 40), height)
+
     # --- Reactions ----------------------------------------------------------------------------
+
+    def _satellites_read(self, sats) -> None:
+        if self._closing:
+            return
+        self.tree.set(list(sats))
+        if not self.tree.items():
+            self._no_catalog(self.tr("衛星カタログに衛星なし。名前で入力"))
+            return
+        self._note = ""
+        self._names_typed()
+
+    def _no_catalog(self, text: str) -> None:
+        """No satellites to pick from: the names are typed."""
+        if self._closing:
+            return
+        self.tree.setVisible(False)
+        self.by_hand.setChecked(True)
+        self.by_hand.setVisible(False)
+        self._note = text
+        self._names_changed()
+
+    def _lists(self) -> Picked:
+        return Picked(_words(self.series.text()), _words(self.satellites.text()), _words(self.modes.text()))
+
+    def _names_typed(self) -> None:
+        """The names as typed (or as the request has them) shown as checks."""
+        names = self._lists()
+        listed = self.tree.items()
+        if listed:
+            self.tree.set_checks(checks_of(listed, names.series, names.satellites, names.modes))
+        self._names_changed()
+
+    def _names_changed(self, _text: str = "") -> None:
+        names = self._lists()
+        lines = [self._note] if self._note else []
+        lines.append(self.tr("保存する条件: {s}").format(s=summary(names)))
+        listed = self.tree.items()
+        if listed:
+            odd = unknown(listed, names.series, names.satellites, names.modes)
+            odd_names = [*odd.series, *odd.satellites, *odd.modes]
+            if odd_names:
+                lines.append(self.tr("衛星カタログにない名前（そのまま保存）: {n}").format(n="、".join(odd_names)))
+        self.picked_label.setText("\n".join(lines))
+
+    def _tree_changed(self) -> None:
+        """The checks written as the request's series, satellites and modes."""
+        p = picked(self.tree.items(), self._lists())
+        for edit, names in ((self.series, p.series), (self.satellites, p.satellites), (self.modes, p.modes)):
+            edit.blockSignals(True)
+            edit.setText(",".join(names))
+            edit.blockSignals(False)
+        self._names_changed()
 
     def _category_changed(self, text: str) -> None:
         self.repeat_row.setEnabled(text == "定点")
@@ -431,6 +542,7 @@ class RequestForm(QDialog):
         self.save(r)
 
     def _closed(self, _result=None) -> None:
+        self._closing = True
         for tool in (self.extent_tool, self.point_tool):
             if self.canvas.mapTool() is tool:
                 self.canvas.unsetMapTool(tool)
