@@ -170,7 +170,7 @@ class PluginApi:
 
     @property
     def ai_results(self) -> "AiResultsDock":
-        """The dock 「外部AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
+        """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
         return self._plugin.docks["SatObsAiResults"]
 
     @property
@@ -268,7 +268,7 @@ class SatelliteObservationPlugin:
             ("SatObsSpectral", tr("スペクトル"), None),
             ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
             ("SatObsDashboard", tr("ダッシュボード"), None),
-            ("SatObsAiResults", tr("外部AI結果"), None),
+            ("SatObsAiResults", tr("AI結果"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:

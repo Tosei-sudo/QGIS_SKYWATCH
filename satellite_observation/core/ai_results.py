@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Sequence
 
 from .esri import quote
 from .obs.continuation import CANDIDATE_METRES, CONTINUE_METRES
@@ -66,6 +66,8 @@ class AiResultSource:
     continue_radius: float = CONTINUE_METRES
     #: Nearer than this (m) is offered as what it may continue; 0 offers nothing.
     candidate_radius: float = CANDIDATE_METRES
+    #: The plugin's own detection (物体検出（AI）) read from a layer of the project, not a feature service.
+    local: bool = False
 
 
 def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional[AiResultSource]:
@@ -266,10 +268,39 @@ def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: floa
                  width: Optional[float] = None) -> ImportEntry:
     """A result as an observation: its point, 種別, 活動, 確度, the note with what the AI said and the tag."""
     said = " ".join(x for x in (result.cls, score_text(result.score), result.model) if x)
-    note = " ".join(x for x in (f"外部AI {source.label}" + (f": {said}" if said else ""), result.note, result.tag) if x)
+    head = "AI検出" if source.local else f"外部AI {source.label}"
+    note = " ".join(x for x in (head + (f": {said}" if said else ""), result.note, result.tag) if x)
     return ImportEntry(
         lon=lon, lat=lat, object=result.name, kind=kind_for(result, source),
         activity=result.activity or source.activity, confidence=source.confidence, note=note,
         length=result.length if result.length is not None else length, heading=result.heading,
         width=result.width if result.width is not None else width,
     )
+
+
+def detected_kind(cls: str, kinds: dict[str, str], taxonomy: Sequence[Any] = ()) -> str:
+    """
+    The 種別 a class found by the plugin's own detection is recorded as: the
+    model's `kinds` entry for it (any case), else the class of the
+    classification it names (its path, own name, 別名 or 英名; a model
+    trained here has the classification's kinds as its classes), else the
+    class as it is.
+    """
+    from .obs.taxonomy import class_by_name, find, kind_of, path_of
+
+    name = (cls or "").strip()
+    if not name:
+        return ""
+    if name in kinds:
+        return kinds[name]
+    lower = name.lower()
+    hit = next((v for k, v in kinds.items() if k.lower() == lower), None)
+    if hit:
+        return hit
+    items = list(taxonomy)
+    path = path_of(name)
+    if items and path and find(items, path) is None and len(path) == 1:
+        found = class_by_name(items, path[0])
+        if found:
+            return kind_of(list(found))
+    return kind_of(path) if path else name

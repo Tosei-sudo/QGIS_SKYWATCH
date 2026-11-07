@@ -41,7 +41,9 @@ def fetch(client: EsriClient, source: AiResultSource, image_id: str, token: Opti
 
 
 def geometry_of(esri: Optional[dict[str, Any]]) -> Optional[QgsGeometry]:
-    """An Esri geometry (WGS 84) as a QGIS one; None without one."""
+    """An Esri geometry (WGS 84) as a QGIS one (a QGIS one, of the plugin's own detection, as a copy); None without one."""
+    if isinstance(esri, QgsGeometry):
+        return QgsGeometry(esri)
     if not isinstance(esri, dict):
         return None
     if is_number(esri.get("x")) and is_number(esri.get("y")):

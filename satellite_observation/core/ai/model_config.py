@@ -62,6 +62,8 @@ class DetectModelConfig:
     score: Optional[float] = None
     iou: Optional[float] = None
     kind: str = "detect"
+    #: The 種別 a class is recorded as in observations (`{"boat": "船舶"}`); else the class of the classification of that name.
+    kinds: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -170,6 +172,15 @@ def ai_model_of(value: Any, problems: list[str], index: int) -> Optional[AiModel
             model.strides = list(s)
         else:
             problems.append(f"{at} の strides は [8, 16, 32] のような正の整数の配列で指定")
+    if value.get("kinds") is not None:
+        if isinstance(value["kinds"], dict):
+            for k, v in value["kinds"].items():
+                if isinstance(v, str) and v.strip():
+                    model.kinds[str(k)] = v.strip()
+                else:
+                    problems.append(f"{at} の kinds.{k} は種別（「船舶 > 支援船」など）で指定")
+        else:
+            problems.append(f"{at} の kinds はクラスと種別の対応（オブジェクト）で指定")
     for key in ("score", "iou"):
         if value.get(key) is None:
             continue

@@ -1,9 +1,15 @@
 """
-The dock 「外部AI結果」: what another AI system found in the image opened
+The dock 「AI結果」: what another AI system found in the image opened
 from the image catalog, read from the settings file's `aiResultSources`
-(Esri feature layers of points or polygons, by the image id), listed and
-drawn on the map, and the chosen ones recorded as observations (観測記録),
+(Esri feature layers of points or polygons, by the image id), and what the
+plugin's own 「物体検出（AI）」 found (its layers in the project), listed
+and drawn on the map, and the chosen ones recorded as observations (観測記録),
 a polygon at its point inside with its long side as the length.
+
+A detection run shows its image's results here when its layer comes; the
+layer is the list's own (no copy): choosing there chooses here, and what the
+person changes in it (a class corrected, a false one deleted) is what is
+recorded.
 
 It follows the image: when an image is opened from the catalog, or a layer
 opened from it becomes the active one, its results are read (once per
@@ -22,23 +28,26 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from qgis.core import QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer
-from qgis.PyQt.QtCore import QCoreApplication, Qt
+from qgis.core import QgsCoordinateTransform, QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer
+from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
+from ..core.ai.model_config import DetectModelConfig
 from ..core.ai_results import AiResult, AiResultSource, import_entry, kind_for, recorded_tags, score_text
 from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
 from ..core.obs.flows import living
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, mark_imported, place_of, results_layer
 from ..qgis_io.catalog_io import CATALOG_URL
-from ..qgis_io.geometry import from_wgs84
-from ..qgis_io.obs_images import IMAGE_ID
+from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
+from ..qgis_io.obs_images import IMAGE_ID, observed_image
 from ..qgis_io.tasks import current_feedback, run_task
 from .docks import PluginDock
 
-TITLE = "外部AI結果"
+TITLE = "AI結果"
+#: The edits of a detection layer that read its results again.
+EDITS = ("featureAdded", "featuresDeleted", "attributeValueChanged", "geometryChanged", "editingStopped")
 
 
 def _tr(text: str) -> str:
@@ -53,8 +62,18 @@ def catalog_image_id(layer) -> Optional[str]:
     return str(image_id) if image_id and layer.customProperty(CATALOG_URL) else None
 
 
+def raster_image_id(layer) -> Optional[str]:
+    """The id the observation book (and so the plugin's detection) gives an image layer."""
+    if not isinstance(layer, QgsRasterLayer):
+        return None
+    try:
+        return observed_image(layer).id
+    except Exception:  # noqa: BLE001 (a layer the book cannot read)
+        return None
+
+
 class AiResultsDock(PluginDock):
-    """The image's external AI results, and what records them as observations."""
+    """The image's AI results (external, and the plugin's own detection), and what records them as observations."""
 
     def __init__(self, iface, context, open_settings: Callable[[], None], observations: Callable[[], Any],
                  parent: Optional[QWidget] = None):
@@ -74,8 +93,16 @@ class AiResultsDock(PluginDock):
         self.continued: dict[int, Continuation] = {}
         #: The thing chosen to continue, by result tag ("" for a new thing), when not the one matched.
         self.picks: dict[str, str] = {}
+        #: The rows of the plugin's own detection: the layer and the feature, by row.
+        self.local_rows: dict[int, tuple[QgsVectorLayer, int]] = {}
+        #: The detection layers followed (their edits read the list again), by layer id.
+        self.watched: dict[str, tuple[QgsVectorLayer, list]] = {}
         self._task = None
         self._syncing = False
+        self._again = QTimer(self)
+        self._again.setSingleShot(True)
+        self._again.setInterval(200)
+        self._again.timeout.connect(lambda: self.image_id and self.show_results())
 
         head = QHBoxLayout()
         self.image_label = QLabel()
@@ -109,7 +136,7 @@ class AiResultsDock(PluginDock):
 
         buttons = QHBoxLayout()
         self.import_button = QPushButton(_tr("選択を観測記録へ取り込み"))
-        self.import_button.setToolTip(_tr("一覧か地図で選んだ結果を、この画像の観測記録（ポイント）として記録。ポリゴンは内側の点と長辺の長さで記録"))
+        self.import_button.setToolTip(_tr("一覧か地図で選んだ結果を、この画像の観測記録（ポイント）として記録。ポリゴンは内側の点と長辺・短辺（長さ・幅）で記録"))
         self.import_button.clicked.connect(lambda: self.import_rows(self.selected_rows()))
         self.import_all_button = QPushButton(_tr("未取込をすべて取り込み"))
         self.import_all_button.clicked.connect(lambda: self.import_rows(list(range(len(self.rows)))))
@@ -126,6 +153,8 @@ class AiResultsDock(PluginDock):
         project.layersWillBeRemoved.connect(self._layers_removed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
         context.configChanged.connect(self._config_changed)
+        for layer in detection_layers(project):
+            self._watch(layer)
         self._render_head()
 
     # ---- the image ---------------------------------------------------------
@@ -140,29 +169,78 @@ class AiResultsDock(PluginDock):
             self.load(self.image_id)
 
     def _layers_added(self, layers) -> None:
-        ids = [i for i in (catalog_image_id(layer) for layer in layers) if i]
-        if ids and self.sources():
-            # The last image opened.
+        found = []
+        for layer in layers:
+            if is_detection_layer(layer):
+                self._watch(layer)
+                # A detection run: its image's results.
+                found += image_ids_of(layer)[:1]
+        ids = [i for i in (catalog_image_id(layer) for layer in layers) if i] if self.sources() else []
+        ids += found
+        if ids:
+            # The last image opened, or detected.
             self.load(ids[-1], reveal=True)
 
+    def _detected_ids(self) -> set[str]:
+        out: set[str] = set()
+        for layer, _slots in self.watched.values():
+            try:
+                out.update(image_ids_of(layer))
+            except RuntimeError:
+                pass
+        return out
+
     def _layer_chosen(self, layer) -> None:
-        image_id = catalog_image_id(layer)
-        if image_id and image_id != self.image_id and self.sources():
+        image_id = catalog_image_id(layer) if self.sources() else None
+        if image_id is None and layer is not None and layer.id() in self.watched:
+            ids = image_ids_of(layer)
+            image_id = ids[0] if ids and self.image_id not in ids else None
+        if image_id is None and self.watched:
+            # An image the plugin's detection has results of.
+            own = raster_image_id(layer)
+            image_id = own if own and own in self._detected_ids() else None
+        if image_id and image_id != self.image_id:
             self.load(image_id)
+
+    def _watch(self, layer: QgsVectorLayer) -> None:
+        if layer.id() in self.watched:
+            return
+        slots = []
+        for name in EDITS:
+            slot = lambda *_a: self._again.start()  # noqa: E731
+            getattr(layer, name).connect(slot)
+            slots.append((name, slot))
+        selected = lambda *_a, lyr=layer: self._map_selected(lyr)  # noqa: E731
+        layer.selectionChanged.connect(selected)
+        slots.append(("selectionChanged", selected))
+        self.watched[layer.id()] = (layer, slots)
+
+    def _unwatch(self, layer_id: str) -> None:
+        layer, slots = self.watched.pop(layer_id, (None, []))
+        for name, slot in slots:
+            try:
+                getattr(layer, name).disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
 
     def _layers_removed(self, ids) -> None:
         gone = set(ids)
         self.layers = [layer for layer in self.layers if layer.id() not in gone]
+        shown = {layer.id() for layer, _fid in self.local_rows.values()}
+        for layer_id in gone & set(self.watched):
+            self._unwatch(layer_id)
+        if gone & shown:
+            self.local_rows = {}
+            self._again.start()
 
     def _render_head(self) -> None:
-        if not self.sources():
-            self.image_label.setText(_tr("設定ファイルに aiResultSources（外部AI結果のフィーチャーサービス）なし"))
-        elif not self.image_id:
-            self.image_label.setText(_tr("画像カタログから画像を開くと、その画像の結果を表示"))
-        else:
+        if self.image_id:
             self.image_label.setText(_tr("画像: {id}").format(id=self.image_id))
-        has = bool(self.sources() and self.image_id)
-        self.reload_button.setEnabled(has)
+        elif self.sources():
+            self.image_label.setText(_tr("画像カタログから画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示"))
+        else:
+            self.image_label.setText(_tr("「物体検出（AI）」を実行すると、その画像の結果を表示（外部AIの結果は設定ファイルの aiResultSources）"))
+        self.reload_button.setEnabled(bool(self.image_id))
 
     def load(self, image_id: Optional[str], again: bool = False, reveal: bool = False) -> None:
         """Shows the results of an image (read from every source, once unless `again`)."""
@@ -175,6 +253,9 @@ class AiResultsDock(PluginDock):
             return
         sources = self.sources()
         if not sources:
+            # Only the plugin's own detection, read from the project's layers.
+            self.cache[image_id] = []
+            self.show_results(reveal=reveal)
             return
         if self._task is not None:
             try:
@@ -206,7 +287,7 @@ class AiResultsDock(PluginDock):
             if image_id == self.image_id:
                 self.status.setText(_tr("読み込み失敗: {m}").format(m=message))
 
-        self._task = run_task(_tr("外部AI結果の読み込み"), work, done, failed)
+        self._task = run_task(_tr("AI結果の読み込み"), work, done, failed)
 
     # ---- the list and the layers ----------------------------------------------
 
@@ -234,6 +315,24 @@ class AiResultsDock(PluginDock):
             rows = list(range(len(self.rows), len(self.rows) + len(kept)))
             self.rows += [(source, r) for r in kept]
             per_source.append((source, kept, rows))
+        # The plugin's own detection, from its layers (as they are now).
+        self.local_rows = {}
+        local_total = 0
+        book = self._book()
+        taxonomy = book.kept_taxonomy() if book is not None and book.loaded else []
+        for layer, _slots in list(self.watched.values()):
+            try:
+                found_here = detection_results(layer, self.image_id or "", self._model_kinds, taxonomy)
+            except RuntimeError:
+                continue
+            if not found_here:
+                continue
+            local_total += len(found_here)
+            source = local_source(layer)
+            for r, fid in found_here:
+                if r.score is None or r.score >= least:
+                    self.local_rows[len(self.rows)] = (layer, fid)
+                    self.rows.append((source, r))
         self._syncing = True
         try:
             self.list.clear()
@@ -249,7 +348,7 @@ class AiResultsDock(PluginDock):
         finally:
             self._syncing = False
         self._replace_layers(per_source)
-        total = sum(len(results) for _s, results, _e in found)
+        total = sum(len(results) for _s, results, _e in found) + local_total
         text = _tr("{n} 件（全 {total} 件）・取込済 {done} 件").format(
             n=len(self.rows), total=total, done=sum(1 for _s, r in self.rows if r.tag in self.imported))
         auto = sum(1 for c in self.continued.values() if c.tier == AUTO)
@@ -306,6 +405,13 @@ class AiResultsDock(PluginDock):
             box.currentIndexChanged.connect(lambda _i, b=box, t=tag: self.picks.__setitem__(t, b.currentData() or ""))
             self.list.setItemWidget(item, 6, box)
 
+    def _model_kinds(self, model: str) -> dict:
+        """The `kinds` of the settings file's detection model of this label."""
+        for m in self.context.config.ai_models:
+            if isinstance(m, DetectModelConfig) and m.label == model:
+                return m.kinds
+        return {}
+
     def chosen_carry(self, row: int):
         """The record of the thing a row is recorded as continuing (継続), None for a new thing."""
         c = self.continued.get(row)
@@ -340,6 +446,12 @@ class AiResultsDock(PluginDock):
             index = layer.fields().indexOf(ROW)
             ids = [f.id() for f in layer.getFeatures() if f[index] in rows]
             yield layer, ids
+        own: dict[str, tuple[QgsVectorLayer, list[int]]] = {}
+        for row, (layer, fid) in self.local_rows.items():
+            entry = own.setdefault(layer.id(), (layer, []))
+            if row in rows:
+                entry[1].append(fid)
+        yield from own.values()
 
     def _list_selected(self) -> None:
         if self._syncing:
@@ -359,6 +471,11 @@ class AiResultsDock(PluginDock):
         for lyr in self.layers:
             index = lyr.fields().indexOf(ROW)
             rows |= {f[index] for f in lyr.getSelectedFeatures()}
+        chosen: dict[str, set[int]] = {}
+        for row, (lyr, fid) in self.local_rows.items():
+            ids = chosen.setdefault(lyr.id(), set(lyr.selectedFeatureIds()))
+            if fid in ids:
+                rows.add(row)
         self._syncing = True
         try:
             for i in range(self.list.topLevelItemCount()):
@@ -372,9 +489,12 @@ class AiResultsDock(PluginDock):
     def zoom_to(self, rows: list[int]) -> None:
         box: Optional[QgsRectangle] = None
         for layer, ids in self._features_of(set(rows)):
+            if not ids:
+                continue
+            to = QgsCoordinateTransform(layer.crs(), self.canvas.mapSettings().destinationCrs(), QgsProject.instance())
             for f in layer.getFeatures(QgsFeatureRequest().setFilterFids(ids)):
                 if f.hasGeometry():
-                    b = from_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(f.geometry().boundingBox())
+                    b = to.transformBoundingBox(f.geometry().boundingBox())
                     if box is None:
                         box = b
                     else:
@@ -456,7 +576,7 @@ class AiResultsDock(PluginDock):
                 text += _tr("（位置なし {k} 件は除外）").format(k=skipped)
             self.status.setText(text)
 
-        result = dock.do(_tr("外部AI結果の取り込み"), lambda b: b.add_many(entries, image=image_id), after)
+        result = dock.do(_tr("AI結果の取り込み"), lambda b: b.add_many(entries, image=image_id), after)
         return result or []
 
     def close_down(self) -> None:
@@ -466,6 +586,9 @@ class AiResultsDock(PluginDock):
                 self._task.cancel()
             except RuntimeError:
                 pass
+        self._again.stop()
+        for layer_id in list(self.watched):
+            self._unwatch(layer_id)
         project = QgsProject.instance()
         for signal, slot in ((project.layersAdded, self._layers_added), (project.layersWillBeRemoved, self._layers_removed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.context.configChanged, self._config_changed)):

@@ -159,7 +159,7 @@ def test_an_image_not_from_the_catalog_reads_nothing_and_importing_needs_the_ima
     QgsProject.instance().addMapLayer(plain)
     iface.setActiveLayer(plain)
     assert dock.image_id is None and dock.rows == []
-    assert dock.image_label.text() == "画像カタログから画像を開くと、その画像の結果を表示"
+    assert dock.image_label.text() == "画像カタログから画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示"
     # Results of an image that is not open cannot be recorded.
     dock.load("IMG2")
     assert wait_for(lambda: len(dock.rows) == 2)
