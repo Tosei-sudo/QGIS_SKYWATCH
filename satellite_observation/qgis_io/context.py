@@ -15,12 +15,17 @@ from ..core.config import PluginConfig, parse_config_text, read_config_file
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
+from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
 from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
 from ..core.edit_stamp import set_tracking
 from ..core.time_zone import set_rules
 from . import settings
 from .network import get_bytes, qgis_transport
 from .tasks import run_task
+
+
+def _web(url: object) -> bool:
+    return isinstance(url, str) and url.lower().startswith(("http://", "https://"))
 
 
 @dataclass
@@ -164,4 +169,28 @@ class PluginContext(QObject):
         out += [Service("背景地図", x.label, x.url.rstrip("/"), bool(x.token)) for x in c.base_maps if x.type == "esri"]
         # Processing services, under the URL their sign-in is kept for (the GPServer, or the OGC API landing page).
         out += [Service("サーバ処理", x.label, gp_service_root(x.url), bool(x.token)) for x in c.gp_services]
-        return out
+        # The request ledger and its history, AI results, the weather and the rest (#75).
+        for x in c.request_stores:
+            out.append(Service("撮像依頼台帳", x.label, x.url, bool(x.token)))
+            if x.history:
+                out.append(Service("出力履歴", x.label, x.history, bool(x.token)))
+        out += [Service("AI 結果の送信先", x.label, x.url, bool(x.token)) for x in c.detection_outputs]
+        out += [Service("外部AI結果", x.label, x.url, bool(x.token)) for x in c.ai_result_sources]
+        if c.cloud_forecast is not None and _web(getattr(c.cloud_forecast, "url", "")) and c.cloud_forecast.url != DEFAULT_CLOUD_FORECAST.url:
+            out.append(Service("雲量予報", c.cloud_forecast.label, c.cloud_forecast.url, False))
+        out += [Service("移動体の情報源", x.label, x.url, bool(getattr(x, "token", None))) for x in c.moving_feeds if _web(x.url)]
+        out += [Service("地名検索", x.label, x.url, bool(x.token)) for x in c.geocoders if _web(x.url)]
+        out += [Service("起動時レイヤー", x.layer or x.url, x.url, bool(getattr(x, "token", None))) for x in c.startup_layers if _web(x.url)]
+        for x in c.ai_models:
+            for url in (getattr(x, name, "") for name in ("url", "encoder", "decoder")):
+                if _web(url):
+                    out.append(Service("AI モデル", x.label, url, False))
+        # One row per URL: the first role that names it.
+        seen: set = set()
+        unique = []
+        for service in out:
+            key = service.url.rstrip("/").lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(service)
+        return unique

@@ -346,15 +346,15 @@ class SatelliteObservationPlugin:
             elif name == "SatObsRequests":
                 plan_dock = self.docks["SatObsImagingPlan"]
 
-                def satellites(then, plan_dock=plan_dock):
-                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]))
+                def satellites(then, failed=None, plan_dock=plan_dock):
+                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
 
                 dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
             elif name == "SatObsPlanFiles":
                 plan_dock, request_dock = self.docks["SatObsImagingPlan"], self.docks["SatObsRequests"]
 
-                def satellites(then, plan_dock=plan_dock):
-                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]))
+                def satellites(then, failed=None, plan_dock=plan_dock):
+                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
 
                 def requests_changed(requests=None, request_dock=request_dock):
                     # The 「撮像依頼」 dock shows the ledger as read here, or reads it again when it was changed.

@@ -231,7 +231,12 @@ class PlanFileDock(PluginDock):
             return
         self.status.setText(self.tr("衛星カタログを読み込み中…"))
         self.run_button.setEnabled(False)
-        self.satellites(self._run_with)
+        self.satellites(self._run_with, self._satellites_failed)
+
+    def _satellites_failed(self, message: str) -> None:
+        """The satellite catalog could not be read: says why and gives 「計算」 back (#70)."""
+        self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=message))
+        self._update_buttons()
 
     def _run_with(self, sats) -> None:
         store = self.store

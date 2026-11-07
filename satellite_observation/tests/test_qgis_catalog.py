@@ -16,7 +16,7 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
-from qgis.PyQt.QtCore import Qt  # noqa: E402
+from qgis.PyQt.QtCore import Qt, QTimer  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.core.catalog.query import EMPTY_SEARCH  # noqa: E402
@@ -462,3 +462,32 @@ def test_the_dialog_choosing_a_records_images():
     dialog.filter.setText("")
     dialog._set_shown(Qt.CheckState.Unchecked)
     assert dialog.chosen() == [] and not dialog.buttons.button(dialog.buttons.StandardButton.Ok).isEnabled()
+
+
+def test_a_long_look_in_a_folder_keeps_qgis_answering_and_can_be_cancelled(tmp_path):
+    """#76: the folder is looked through off the main thread; cancelling the window stops waiting."""
+    import threading
+
+    from qgis.PyQt.QtWidgets import QApplication, QProgressDialog
+
+    from satellite_observation.core.catalog.images import FolderImages
+    from satellite_observation.qgis_io.catalog_io import Cancelled, scan_folder
+
+    assert scan_folder(str(tmp_path), ["x"], find=lambda folder, patterns, cancelled: FolderImages(["a.tif"])).files == ["a.tif"]
+    release = threading.Event()
+
+    def slow(folder, patterns, cancelled):
+        release.wait(5)
+        return FolderImages([], stopped="取消" if cancelled() else "")
+
+    def cancel_soon():
+        for w in QApplication.topLevelWidgets():
+            if isinstance(w, QProgressDialog) and w.isVisible():
+                w.cancel()
+                return
+        QTimer.singleShot(20, cancel_soon)
+
+    QTimer.singleShot(50, cancel_soon)
+    with pytest.raises(Cancelled):
+        scan_folder(str(tmp_path), ["x"], find=slow, wait_before_dialog=0.01)
+    release.set()

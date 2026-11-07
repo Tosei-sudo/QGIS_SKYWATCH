@@ -157,6 +157,8 @@ class ImagingPlanDock(PluginDock):
         self.loading_task = None
         #: Who waits for the catalog being read.
         self._waiting: list = []
+        #: Told when the catalog cannot be read (those waiting get their buttons back).
+        self._waiting_failed: list = []
         self.plan_task = None
         self.clicked: Optional[tuple] = None
         self.plan: Optional[dict] = None
@@ -542,8 +544,13 @@ class ImagingPlanDock(PluginDock):
         self._loaded = False
         self.load_catalog()
 
-    def load_catalog(self, then: Optional[Callable[[], None]] = None) -> None:
-        """Reads the chosen catalog and the sensors' modes in a task; `then` once read."""
+    def load_catalog(self, then: Optional[Callable[[], None]] = None,
+                     failed: Optional[Callable[[str], None]] = None) -> None:
+        """
+        Reads the chosen catalog and the sensors' modes in a task; `then` once
+        read, `failed` (with the reason) when it cannot be: whoever waits is
+        always told, so its buttons come back (#70).
+        """
         config = self.context.config
         if self._loaded or not config.satellite_catalogs:
             if then:
@@ -553,6 +560,8 @@ class ImagingPlanDock(PluginDock):
             # Read once: whoever else waits (the satellite pass dock) is told too.
             if then:
                 self._waiting.append(then)
+            if failed:
+                self._waiting_failed.append(failed)
             return
         catalog = config.satellite_catalogs[self.catalog_index]
         sensors = config.sensor_catalogs
@@ -582,16 +591,18 @@ class ImagingPlanDock(PluginDock):
             if problems:
                 text += self.tr("（読めなかったもの {n} 件: {list}）").format(n=len(problems), list="、".join(problems[:3]) + (" …" if len(problems) > 3 else ""))
             self.status.setText(text + self.tr("。対象と期間を選んで「計算」"))
-            waiting, self._waiting = self._waiting, []
+            waiting, self._waiting, self._waiting_failed = self._waiting, [], []
             for f in ([then] if then else []) + waiting:
                 f()
 
-        def failed(message):
+        def not_read(message):
             self.loading_task = None
-            self._waiting = []
+            told, self._waiting, self._waiting_failed = self._waiting_failed, [], []
             self.status.setText(self.tr("衛星カタログの読み込みに失敗: {message}").format(message=message))
+            for f in ([failed] if failed else []) + told:
+                f(message)
 
-        self.loading_task = run_task(self.tr("衛星カタログの読み込み"), work, done, failed)
+        self.loading_task = run_task(self.tr("衛星カタログの読み込み"), work, done, not_read)
 
     def pasted(self) -> list[SatelliteSpec]:
         return satellites_from_text(
