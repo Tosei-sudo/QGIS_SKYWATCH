@@ -307,7 +307,7 @@ class RequestDock(PluginDock):
             base = request or with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
         else:
             base = request or self.chosen
-        self.form = RequestForm(self.iface, base, self._save, self.known(), self)
+        self.form = RequestForm(self.iface, base, self._save, self.known(), self, self.satellites)
         self.form.show()
 
     def _save(self, request: ImagingRequest) -> None:
