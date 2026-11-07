@@ -117,3 +117,70 @@ def test_without_settings_the_dialog_says_so(plugin):
     dialog = dock.open_alerts()
     assert "alertReports" in dialog.note.text()
     assert not dialog.pick_button.isEnabled() and not dialog.log_button.isEnabled()
+
+
+def _setup(p, tmp_path, extra=None):
+    fake = FakeEsri()
+    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")}, ""))
+    rules.add({"KIND": "船舶", "ACTIVITIES": "航行", "NOTE": "航行中"})
+    log = fake.add_layer(LOG, FakeLayer({"OBS_ID": "esriFieldTypeString", "REPORT_NAME": "esriFieldTypeString", "TEXT": "esriFieldTypeString",
+                                         "MANUAL": "esriFieldTypeSmallInteger"}, ""))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"alertReports": {"rules": RULES, "table": LOG, **(extra or {}),
+                                                   "formats": [{"name": "速報", "fields": ["objectName", "activity", "rule", "manual"]}]}}),
+                      encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    return fake, log
+
+
+def test_records_added_by_hand_whatever_the_conditions(plugin):
+    p, iface, dock, tmp_path = plugin
+    _, log = _setup(p, tmp_path, {"notifyOnSave": False})
+    book = dock.book
+    a = book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")   # outside the conditions
+    b = book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")   # inside
+    # From the form of a record: 「通報」.
+    dock.open_form(a.lon, a.lat, editing=a)
+    assert not dock.alert_button.isHidden()
+    dock.alert_button.click()
+    dialog = dock._alerts
+    assert wait_for(lambda: dialog.status.text().startswith("手動で 1 件を追加"))
+    assert dialog.lines_table.item(0, 1).text() == "船A|停泊|手動|手動" and dialog.lines_table.item(0, 0).text() == "手動"
+    # Picking by the conditions keeps it, above what the conditions find.
+    dialog.pick()
+    assert wait_for(lambda: "件を抽出" in dialog.status.text())
+    assert [dialog.lines_table.item(r, 1).text() for r in range(2)] == ["船A|停泊|手動|手動", "船B|航行|航行中|"]
+    # Again from the table's chosen rows: one already listed is not added twice.
+    dock.add_to_alerts([a, b])
+    assert wait_for(lambda: dialog.status.text().startswith("追加する記録なし"))
+    dialog.send()
+    assert wait_for(lambda: "件を通報" in dialog.status.text())
+    assert sorted((r["attributes"]["OBS_ID"] == a.id, r["attributes"]["MANUAL"]) for r in log.rows) == [(False, 0), (True, 1)]
+
+
+def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin):
+    p, iface, dock, tmp_path = plugin
+    _setup(p, tmp_path)
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("船C")
+    dock.kind_input.setText("船舶")
+    dock.activity_input.setText("停泊")
+    dock.submit()
+    APP.processEvents()
+    # Not notable: nothing said.
+    assert not wait_for(lambda: dock._alert_widget is not None, 800)
+    dock.map_clicked(139.71, 35.61, None)
+    dock.object_input.setText("船D")
+    dock.kind_input.setText("船舶")
+    dock.activity_input.setText("航行")
+    dock.submit()
+    assert wait_for(lambda: dock._alert_widget is not None)
+    assert "船D（航行）" in dock._alert_widget.text()
+    from qgis.PyQt.QtWidgets import QPushButton
+    button = next(b for b in dock._alert_widget.findChildren(QPushButton) if b.text() == "通報文を作成")
+    button.click()
+    dialog = dock._alerts
+    assert dialog.isVisible() and dialog.lines_table.item(0, 1).text() == "船D|航行|航行中|"

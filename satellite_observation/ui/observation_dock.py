@@ -13,10 +13,11 @@ match candidate, Esc steps back.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
+from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter
 from qgis.PyQt.QtWidgets import (
@@ -121,6 +122,13 @@ class FlowStrip(QWidget):
         p.end()
 
 
+class _Saved:
+    """A change's result and the records it added or changed (for the 通報 check)."""
+
+    def __init__(self, result: Any, changed: list):
+        self.result, self.changed = result, changed
+
+
 class ObservationDock(PluginDock):
     """Recording what is seen on the images, image by image."""
 
@@ -141,6 +149,9 @@ class ObservationDock(PluginDock):
         self.books: dict[str, ObservationBook] = {}
         self.book: Optional[ObservationBook] = None
         self._alerts = None
+        #: (settings, when read, rules, geofences) of the last check of saved records.
+        self._alert_conditions = None
+        self._alert_widget = None
         self.store_set: Optional[StoreSet] = None
         self.tab = "image"
         self.chosen: Optional[str] = None
@@ -386,7 +397,9 @@ class ObservationDock(PluginDock):
         self.submit_button = self._button(tr("記録（Enter）"), "", lambda: self.submit(True))
         self.absent_button = self._button(tr("不在"), tr("この画像での不在（見当たらず）を記録"), lambda: self.submit(False))
         self.delete_button = self._button(tr("削除"), tr("この記録の削除（「詳細」の「削除済みも表示」から復元可）"), self._delete_pending)
-        for w in (self.submit_button, self.absent_button, self.delete_button, self._button(tr("取消（Esc）"), "", self.close_form)):
+        self.alert_button = self._button(tr("通報"), tr("この記録を通報文に追加（通報の条件に合わなくても）"),
+                                         lambda: self.add_to_alerts([self.pending[2]]) if self.pending and self.pending[2] else None)
+        for w in (self.submit_button, self.absent_button, self.delete_button, self.alert_button, self._button(tr("取消（Esc）"), "", self.close_form)):
             actions.addWidget(w)
         f.addRow(actions)
         for edit in (self.object_input, self.kind_input, self.activity_input, self.length_input, self.width_input, self.heading_input,
@@ -435,8 +448,15 @@ class ObservationDock(PluginDock):
         self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
                                         lambda: self.bulk_edit())
         self.bulk_button.hide()
+        self.alert_add_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加（通報の条件に合わなくても。設定ファイルの alertReports）"),
+                                             lambda: self.add_to_alerts())
+        self.alert_add_button.hide()
         self.table.itemSelectionChanged.connect(self._selection_changed)
-        b.addWidget(self.bulk_button)
+        chosen = QHBoxLayout()
+        chosen.addWidget(self.bulk_button)
+        chosen.addWidget(self.alert_add_button)
+        chosen.addStretch(1)
+        b.addLayout(chosen)
 
         # The chosen thing's flow.
         self.flow_box = QGroupBox()
@@ -666,7 +686,8 @@ class ObservationDock(PluginDock):
             self.book.status = message
         self._show_status(message)
 
-    def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None) -> Any:
+    def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None,
+           watch: bool = False) -> Any:
         """
         Runs what changes the book: at once for the local store (its result
         returned), else in a task, one after another (None returned; `after` gets the result).
@@ -674,12 +695,14 @@ class ObservationDock(PluginDock):
         book, s = self.book, self.store_set
         if book is None or s is None:
             return None
+        if watch and self._alert_watch() is not None:
+            work, after = self._watching(work, after)
         if not s.remote:
             result = work(book)
             if after is not None:
                 after(result)
             self.render()
-            return result
+            return result.result if isinstance(result, _Saved) else result
         self._queue.append((description, work, after, book))
         self._next()
         return None
@@ -701,6 +724,84 @@ class ObservationDock(PluginDock):
             self._next()
 
         run_task(description, lambda task: work(book), lambda r: finish(r), lambda m: finish(message=m))
+
+    # ---- 通報: a record saved that meets the conditions is said in the message bar ----------------
+
+    def _alert_watch(self):
+        """The alert settings when saved records are to be checked against them (`alertReports.notifyOnSave`)."""
+        s = self.context.config.alert_reports
+        return s if s is not None and s.notify_on_save else None
+
+    def _watching(self, work: Callable, after: Optional[Callable]) -> tuple[Callable, Callable]:
+        """`work` that also returns the records it added or changed, and `after` that checks them."""
+        def watched(book: ObservationBook):
+            before = {o.id: o.updated_at for o in book.records}
+            result = work(book)
+            return _Saved(result, [o for o in book.records if o.deleted_at is None and before.get(o.id) != o.updated_at])
+
+        def then(result) -> None:
+            saved = result if isinstance(result, _Saved) else _Saved(result, [])
+            if after is not None:
+                after(saved.result)
+            if saved.changed:
+                self.check_alerts(saved.changed)
+
+        return watched, then
+
+    def check_alerts(self, records: list[Observation]) -> None:
+        """
+        Checks records just saved against the conditions (the rules and
+        geofences read once per settings file and kept 10 minutes, what was
+        reported asked each time), in a task; those notable are said in the
+        message bar with 「通報文を作成」.
+        """
+        from ..core.obs.alerts import load_geofences, load_rules, reported_ids, select
+
+        s = self._alert_watch()
+        book = self.book
+        if s is None or book is None:
+            return
+        client, now = self.context.esri(), time.monotonic()
+        cached = self._alert_conditions if self._alert_conditions and self._alert_conditions[0] is s and now - self._alert_conditions[1] < 600 else None
+        token = self.context.token_for
+        levels = book.confidences()
+
+        def work(_task):
+            if cached:
+                rules, fences = cached[2], cached[3]
+            else:
+                rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
+                fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
+            done = reported_ids(client, s, token(s.table.url, s.table.token)) if s.table else set()
+            return rules, fences, select(records, s, rules, fences, levels, done)
+
+        def finished(result) -> None:
+            rules, fences, items = result
+            self._alert_conditions = (s, now if not cached else cached[1], rules, fences)
+            if items and book is self.book:
+                self._alert_notice(items)
+
+        def failed(message: str) -> None:
+            QgsMessageLog.logMessage(self.tr("通報の条件の確認に失敗: {m}").format(m=message), self.tr("観測記録"), Qgis.MessageLevel.Warning)
+
+        run_task(self.tr("通報の条件の確認"), work, finished, failed)
+
+    def _alert_notice(self, items) -> None:
+        """「注目の記録」 in the message bar, with 「通報文を作成」 (those records put in 「通報」)."""
+        names = "・".join(f"{i.record.object_name}（{i.record.activity}）" if i.record.activity else i.record.object_name for i in items[:3])
+        more = self.tr(" ほか {n} 件").format(n=len(items) - 3) if len(items) > 3 else ""
+        bar = self.iface.messageBar()
+        widget = bar.createMessage(self.tr("注目の記録"), self.tr("通報の条件に合う記録: {r}{m}").format(r=names, m=more))
+        button = QPushButton(self.tr("通報文を作成"))
+
+        def open_() -> None:
+            self.open_alerts(0).add_items(items)
+            bar.popWidget(widget)
+
+        button.clicked.connect(open_)
+        widget.layout().addWidget(button)
+        bar.pushWidget(widget, Qgis.MessageLevel.Info, 0)
+        self._alert_widget = widget
 
     def run_now(self, description: str, work: Callable[[ObservationBook], Any]) -> Any:
         """
@@ -1081,7 +1182,7 @@ class ObservationDock(PluginDock):
             return
         self.dragging = None
         key = mark.key
-        self.do(self.tr("位置の修正"), lambda b: b.move(key, lon, lat))
+        self.do(self.tr("位置の修正"), lambda b: b.move(key, lon, lat), watch=True)
 
     def _extent_changed(self) -> None:
         if self.overlay.isVisible():
@@ -1158,6 +1259,7 @@ class ObservationDock(PluginDock):
         self.note_input.setText(editing.note if editing else "")
         self._fill_confidence((known.confidence or "") if known else last.confidence)
         self.delete_button.setVisible(editing is not None)
+        self.alert_button.setVisible(editing is not None and self.context.config.alert_reports is not None)
         self.absent_button.setVisible(known is not None)
         self.submit_button.setText(self.tr("更新（Enter）") if editing else self.tr("継続（Enter）") if source else self.tr("記録（Enter）"))
         self.form.setTitle(editing.object_name if editing else source.object_name if source else self.tr("新規の記録"))
@@ -1194,7 +1296,7 @@ class ObservationDock(PluginDock):
         # Offered first by the next new record, in later sessions too.
         self.book.remember(values.kind, values.activity if present else None, values.confidence)
         self.close_form()
-        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source))
+        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source), watch=True)
 
     def _delete_pending(self) -> None:
         if self.pending is None or self.pending[2] is None:
@@ -1495,10 +1597,10 @@ class ObservationDock(PluginDock):
         return result
 
     def carry(self, object_id: str, present: bool = True) -> None:
-        self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present))
+        self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present), watch=True)
 
     def carry_all(self) -> None:
-        self.do(self.tr("すべて継続"), lambda b: b.carry_all())
+        self.do(self.tr("すべて継続"), lambda b: b.carry_all(), watch=True)
 
     def absent_inside(self) -> None:
         self.do(self.tr("確認範囲内の不在"), lambda b: b.absent_inside())
@@ -1507,7 +1609,7 @@ class ObservationDock(PluginDock):
         self.do(self.tr("記録の削除"), lambda b: b.remove(rows))
 
     def restore(self, rows: list[Observation]) -> None:
-        self.do(self.tr("記録の復元"), lambda b: b.restore(rows))
+        self.do(self.tr("記録の復元"), lambda b: b.restore(rows), watch=True)
 
     def remove_areas(self, rows: list[CheckedArea]) -> None:
         self.do(self.tr("確認範囲の削除"), lambda b: b.remove_areas(rows))
@@ -1734,6 +1836,13 @@ class ObservationDock(PluginDock):
         self._alerts.activateWindow()
         return self._alerts
 
+    def add_to_alerts(self, records: Optional[list[Observation]] = None):
+        """「通報に追加」: the chosen records (or `records`) into 「通報」, whatever the conditions say."""
+        records = records if records is not None else self.selected_records()
+        dialog = self.open_alerts(0)
+        dialog.add_records(records)
+        return dialog
+
     def open_report(self) -> None:
         if self.book is None:
             return
@@ -1755,6 +1864,7 @@ class ObservationDock(PluginDock):
         self._row_actions = []
         self._row_records = []
         self.bulk_button.hide()
+        self.alert_add_button.hide()
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
@@ -1808,6 +1918,7 @@ class ObservationDock(PluginDock):
     def _selection_changed(self) -> None:
         rows = {i.row() for i in self.table.selectionModel().selectedRows()}
         self.bulk_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
+        self.alert_add_button.setVisible(bool(rows) and self.context.config.alert_reports is not None and bool(self.selected_records()))
 
     def bulk_edit(self, records: Optional[list[Observation]] = None):
         """Asks what to set on the chosen records (the kind, the activity, the 確度), then saves it on all of them."""
@@ -1839,7 +1950,7 @@ class ObservationDock(PluginDock):
         values = {k: v for k, v in values.items() if k in ("kind", "activity", "confidence")}
         if not values:
             return None
-        return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values))
+        return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values), watch=True)
 
     def _small(self, *buttons: tuple) -> QWidget:
         box = QWidget()

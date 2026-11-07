@@ -301,7 +301,7 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
 ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
 ALERT_LOG_FIELDS = {"OBS_ID": {"type": S, "length": 64}, "REPORT_NAME": S, "TEXT": {"type": S, "length": 4000}, "REPORTED_AT": T,
-                    "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "KIND": S}
+                    "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "MANUAL": F, "KIND": S}
 #: 通報条件 (alertReports.rules): ships moving in the 横須賀 geofence, and every aircraft.
 ALERT_RULES = [
     {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き"},
