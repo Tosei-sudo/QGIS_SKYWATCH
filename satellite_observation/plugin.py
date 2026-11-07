@@ -7,7 +7,7 @@ from typing import Optional
 from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
-from qgis.PyQt.QtWidgets import QDockWidget, QPushButton, QToolButton
+from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton, QToolButton
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
@@ -54,6 +54,21 @@ from .ui.webmap_dialog import WebMapDialogs
 
 HERE = os.path.dirname(__file__)
 MENU = "衛星撮像計画・観測記録"
+#: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
+#: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
+MENU_GROUPS = [
+    ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…"]),
+    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
+    ("観測記録", ["観測記録", "分類体系の編集", "移動体（AIS・ADS-B）", "ダッシュボード"]),
+    ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
+    ("解析・処理", ["パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
+                "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
+    ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "AI 学習（物体検出）…"]),
+    ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", None,
+                   "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
+]
+#: In the menu itself, after the groups (behind a separator).
+MENU_TOP = ["ドックを初期位置に戻す", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles"]),
@@ -250,6 +265,11 @@ class SatelliteObservationPlugin:
         self.shift: Optional[LayerShift] = None
         self.segment: Optional[SegmentTool] = None
         self.transfer_dialog: Optional[TransferDialog] = None
+        #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
+        self._menu_entries: list[QAction] = []
+        self._submenus: list[QMenu] = []
+        self._menu_top: list[QAction] = []
+        self._menu_separator: Optional[QAction] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
@@ -359,7 +379,7 @@ class SatelliteObservationPlugin:
             action = dock.toggleViewAction()
             action.setText(title)
             action.setIcon(icon(icons[name]))
-            self.iface.addPluginToMenu(MENU, action)
+            self._add_to_menu(action)
             self.toolbar.addAction(action)
             self.actions.append(action)
 
@@ -371,7 +391,7 @@ class SatelliteObservationPlugin:
         self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
-        self.iface.addPluginToMenu(MENU, moving)
+        self._add_to_menu(moving)
         self.toolbar.addAction(moving)
         self.actions.append(moving)
         self._add_new_layer(icon("new_layer"))
@@ -383,69 +403,69 @@ class SatelliteObservationPlugin:
         QgsApplication.processingRegistry().addProvider(self.provider)
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
         pansharpen.triggered.connect(lambda: self.open_pansharpen())
-        self.iface.addPluginToMenu(MENU, pansharpen)
+        self._add_to_menu(pansharpen)
         self.actions.append(pansharpen)
         change = QAction(icon("change"), tr("変化抽出（2 時期）…"), self.iface.mainWindow())
         change.triggered.connect(lambda: self.open_change())
-        self.iface.addPluginToMenu(MENU, change)
+        self._add_to_menu(change)
         self.actions.append(change)
         align = QAction(icon("align"), tr("自動位置合わせ…"), self.iface.mainWindow())
         align.triggered.connect(lambda: self.open_align())
-        self.iface.addPluginToMenu(MENU, align)
+        self._add_to_menu(align)
         self.actions.append(align)
         classify = QAction(icon("classify"), tr("土地被覆分類…"), self.iface.mainWindow())
         classify.triggered.connect(lambda: self.open_classify())
-        self.iface.addPluginToMenu(MENU, classify)
+        self._add_to_menu(classify)
         self.actions.append(classify)
         ortho = QAction(icon("simple_ortho"), tr("簡易オルソ補正…"), self.iface.mainWindow())
         ortho.triggered.connect(lambda: self.open_simple_ortho())
-        self.iface.addPluginToMenu(MENU, ortho)
+        self._add_to_menu(ortho)
         self.actions.append(ortho)
         for name, algorithm, label in (("geodesic_buffer", "satobs:geodesic_buffer", "測地線バッファ…"),
                                        ("geodesic_centroid", "satobs:geodesic_centroids", "正距方位での重心…"),
                                        ("moving_match", "satobs:moving_match", "移動体と検出の照合…")):
             action = QAction(icon(name), tr(label), self.iface.mainWindow())
             action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
-            self.iface.addPluginToMenu(MENU, action)
+            self._add_to_menu(action)
             self.actions.append(action)
         # 「サーバ処理…」: a task of a geoprocessing / OGC Processes service as a Processing algorithm.
         remote = QAction(icon("gp"), tr("サーバ処理…"), self.iface.mainWindow())
         remote.triggered.connect(lambda: self.open_remote_processing())
-        self.iface.addPluginToMenu(MENU, remote)
+        self._add_to_menu(remote)
         self.actions.append(remote)
         # The AI tools: 「物体検出（AI）…」 as a Processing algorithm (its models set above), 「クリック抽出（AI）」 as a map tool.
         self.context.configChanged.connect(self._refresh_algorithms)
         detect = QAction(icon("ai_detect"), tr("物体検出（AI）…"), self.iface.mainWindow())
         detect.triggered.connect(lambda: self.open_detect())
-        self.iface.addPluginToMenu(MENU, detect)
+        self._add_to_menu(detect)
         self.actions.append(detect)
         train = QAction(icon("ai_train"), tr("AI 学習（物体検出）…"), self.iface.mainWindow())
         train.triggered.connect(lambda: self.open_train())
-        self.iface.addPluginToMenu(MENU, train)
+        self._add_to_menu(train)
         self.actions.append(train)
         dataset = QAction(icon("ai_dataset"), tr("教師データセットの作成…"), self.iface.mainWindow())
         dataset.triggered.connect(lambda: self.open_dataset())
-        self.iface.addPluginToMenu(MENU, dataset)
+        self._add_to_menu(dataset)
         self.actions.append(dataset)
         segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
         segment.setObjectName("SatObsSegment")
         self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
-        self.iface.addPluginToMenu(MENU, segment)
+        self._add_to_menu(segment)
         self.actions.append(segment)
         transfer = QAction(icon("ai_transfer"), tr("検出結果を DB へ転記…"), self.iface.mainWindow())
         transfer.triggered.connect(lambda: self.open_transfer())
-        self.iface.addPluginToMenu(MENU, transfer)
+        self._add_to_menu(transfer)
         self.actions.append(transfer)
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
         add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
         add_layers.triggered.connect(lambda: self.startup_layers.add())
-        self.iface.addPluginToMenu(MENU, add_layers)
+        self._add_to_menu(add_layers)
         self.actions.append(add_layers)
         # 「背景地図」: the toolbar button opens the list; in the menu, a submenu.
         base_maps = QAction(icon("base_map"), tr("背景地図"), self.iface.mainWindow())
         self.base_maps = BaseMapSwitch(self.iface, self.context, base_maps, self.iface.mainWindow())
-        self.iface.addPluginToMenu(MENU, base_maps)
+        self._add_to_menu(base_maps)
         self.toolbar.addAction(base_maps)
         button = self.toolbar.widgetForAction(base_maps)
         if isinstance(button, QToolButton):
@@ -457,44 +477,85 @@ class SatelliteObservationPlugin:
                                   ("webmap_save", "ArcGIS Web マップとして保存…", self.webmaps.show_save)):
             action = QAction(icon(name), tr(label), self.iface.mainWindow())
             action.triggered.connect(lambda _=False, f=show: f())
-            self.iface.addPluginToMenu(MENU, action)
+            self._add_to_menu(action)
             self.actions.append(action)
         # 「スワイプ比較」: the active layer (or group) on one side of a line only.
         swipe = QAction(icon("swipe"), tr("スワイプ比較"), self.iface.mainWindow())
         swipe.setObjectName("SatObsSwipe")
         self.swipe = SwipeCompare(self.iface, swipe, self.iface.mainWindow())
-        self.iface.addPluginToMenu(MENU, swipe)
+        self._add_to_menu(swipe)
         self.toolbar.addAction(swipe)
         self.actions.append(swipe)
         # 「位置ずらし」: the active image moved by hand.
         shift = QAction(icon("shift"), tr("位置ずらし"), self.iface.mainWindow())
         shift.setObjectName("SatObsShift")
         self.shift = LayerShift(self.iface, shift, self.iface.mainWindow())
-        self.iface.addPluginToMenu(MENU, shift)
+        self._add_to_menu(shift)
         self.toolbar.addAction(shift)
         self.actions.append(shift)
         unshift = QAction(icon("unshift"), tr("位置ずらしの解除"), self.iface.mainWindow())
         unshift.triggered.connect(lambda: self.shift.reset())
-        self.iface.addPluginToMenu(MENU, unshift)
+        self._add_to_menu(unshift)
         self.actions.append(unshift)
         home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
         home.triggered.connect(lambda: self.place_docks())
-        self.iface.addPluginToMenu(MENU, home)
+        self._add_to_menu(home)
         self.actions.append(home)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
-        self.iface.addPluginToMenu(MENU, settings)
+        self._add_to_menu(settings)
         self.actions.append(settings)
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
+        self._build_menu()
         self.context.reload()
+
+    def _add_to_menu(self, action: QAction) -> None:
+        """An entry of the plugin's menu: placed in its group by `_build_menu` (MENU_GROUPS)."""
+        self._menu_entries.append(action)
+
+    def _build_menu(self) -> None:
+        """
+        The plugin's menu: a submenu per area (MENU_GROUPS), then MENU_TOP. An entry
+        in neither (a new one not yet listed) goes after the groups, so it can still be reached.
+        """
+        by_text = {a.text(): a for a in self._menu_entries}
+        placed: set = set()
+        window = self.iface.mainWindow()
+        for title, texts in MENU_GROUPS:
+            entries = [by_text.get(tr(t)) if t is not None else None for t in texts]
+            if not any(entries):
+                continue
+            menu = QMenu(tr(title), window)
+            menu.setObjectName(f"SatObsMenu{len(self._submenus)}")
+            last_separator = True
+            for entry in entries:
+                if entry is None:
+                    if not last_separator:
+                        menu.addSeparator()
+                        last_separator = True
+                    continue
+                menu.addAction(entry)
+                placed.add(entry)
+                last_separator = False
+            self._submenus.append(menu)
+            self.iface.addPluginToMenu(MENU, menu.menuAction())
+        top = [by_text[tr(t)] for t in MENU_TOP if tr(t) in by_text]
+        rest = [a for a in self._menu_entries if a not in placed and a not in top]
+        separator = QAction(window)
+        separator.setSeparator(True)
+        self._menu_separator = separator
+        self.iface.addPluginToMenu(MENU, separator)
+        for action in rest + top:
+            self.iface.addPluginToMenu(MENU, action)
+            self._menu_top.append(action)
 
     def _add_new_layer(self, new_icon: QIcon) -> None:
         """「新規スクラッチレイヤー（テンプレート）…」: in the plugin's menu, and in Layer ▸ Create Layer after QGIS's own scratch layer."""
         action = QAction(new_icon, tr("新規スクラッチレイヤー（テンプレート）…"), self.iface.mainWindow())
         action.setObjectName("SatObsNewScratchLayer")
         action.triggered.connect(lambda: self.open_new_layer())
-        self.iface.addPluginToMenu(MENU, action)
+        self._add_to_menu(action)
         self.actions.append(action)
         self.new_layer_action = action
         menu = self.iface.newLayerMenu() if hasattr(self.iface, "newLayerMenu") else None
@@ -824,8 +885,15 @@ class SatelliteObservationPlugin:
             self.new_layer.close()
             self.new_layer.deleteLater()
             self.new_layer = None
-        for action in self.actions:
+        for action in self._menu_top:
             self.iface.removePluginMenu(MENU, action)
+        if self._menu_separator is not None:
+            self.iface.removePluginMenu(MENU, self._menu_separator)
+            self._menu_separator = None
+        for menu in self._submenus:
+            self.iface.removePluginMenu(MENU, menu.menuAction())
+            menu.deleteLater()
+        self._submenus, self._menu_top, self._menu_entries = [], [], []
         self.actions = []
         for dock in self.docks.values():
             if hasattr(dock, "close_down"):

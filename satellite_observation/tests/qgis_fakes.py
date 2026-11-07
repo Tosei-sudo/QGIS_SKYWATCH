@@ -81,6 +81,17 @@ class FakeIface(QObject):
         self.menus.append((menu, action.text()))
         self._menu_actions.append(action)
 
+    def menu_tree(self) -> list:
+        """The plugin's menu as shown: its own submenus as (title, [their entries]), a separator as "-"."""
+        def entry(action):
+            if action.isSeparator():
+                return "-"
+            if action.menu() is not None and action.menu().objectName().startswith("SatObsMenu"):
+                return (action.text(), [entry(a) for a in action.menu().actions()])
+            return action.text()
+
+        return [entry(a) for a in self._menu_actions]
+
     def removePluginMenu(self, menu, action):  # noqa: N802
         # By the action, as QGIS does (its text may have changed, as 「通知（n）」 does).
         i = self._menu_actions.index(action)
