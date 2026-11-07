@@ -416,9 +416,12 @@ class HandoverDialog(QDialog):
             return
         client, token = self.dock.context.esri(), self._token(s.table)
 
-        def finished(_r) -> None:
+        def finished(cut) -> None:
             self.save_button.setEnabled(True)
-            self._say("・".join([self.tr("引き継ぎメモのテーブルに保存")] + said))
+            kept = self.tr("引き継ぎメモのテーブルに保存")
+            if cut:
+                kept += self.tr("（長すぎるため切り詰め: {f}。全文はコピー・ファイルに）").format(f="・".join(cut))
+            self._say("・".join([kept] + said))
             self._read_last()
 
         def failed(message: str) -> None:

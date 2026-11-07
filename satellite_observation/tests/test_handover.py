@@ -198,3 +198,23 @@ def test_done_rows_long_ago_are_not_read():
     work.add({"IMAGE_ID": "HELD", "ASSIGNEE": "b", "STATUS": "作業中"})
     assert {x.image_id for x in load_assignments(client, src, done_since=T0 - 7 * 24 * H)} == {"NEW", "HELD"}
     assert len(load_assignments(client, src)) == 3
+
+
+def test_a_memo_longer_than_the_table_takes_is_cut_and_said():
+    fake = FakeEsri()
+    layer = fake.add_layer(MEMO_URL, FakeLayer({"TEXT": S, "WRITTEN_AT": D}, ""))
+    real = layer.info
+
+    def info():
+        value = real()
+        for f in value["fields"]:
+            if f["name"] == "TEXT":
+                f["length"] = 20
+        return value
+
+    layer.info = info
+    s = handover_settings_of({"table": MEMO_URL}, [])
+    cut = keep_memo(EsriClient(fake), s.table, "あ" * 50, HandoverData(start=T0, end=T0 + H, now=T0 + H))
+    assert cut == ["TEXT（20 文字まで）"]
+    text = layer.rows[0]["attributes"]["TEXT"]
+    assert len(text) == 20 and text.endswith("…（以下省略）")
