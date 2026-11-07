@@ -605,3 +605,19 @@ class TestEsriSavesTwiceAndTogether:
         before = len(fake.asked)
         mine.save([replace(taxa[0], members=["護衛艦"]), taxa[1]])
         assert not any(u.endswith("/applyEdits") for u, _ in fake.asked[before:])  # nothing changed: nothing sent
+
+
+def test_an_area_the_server_keeps_stays_known():
+    """#81: an area whose delete was refused is not forgotten (it would come back on reading)."""
+    fake = FakeEsri()
+    url = "https://x/FeatureServer/1"
+    fake.add_layer(url, FakeLayer({n: "esriFieldTypeString" for n in ("AREA_ID", "IMAGE_ID")}, "esriGeometryPolygon"))
+    store = EsriAreaStore("確認範囲", area_store_of(url, [], "a"), EsriClient(fake))
+    a = area(id="KEEP")
+    store.save([a])
+    oid = store.oids["KEEP"]
+    fake.fail_next = {"deleteResults": [{"objectId": oid, "success": False, "error": {"description": "ロック中"}}]}
+    with pytest.raises(EsriError, match="ロック中"):
+        store.remove([a])
+    assert store.oids["KEEP"] == oid
+    assert store.remove([a]) == [] and "KEEP" not in store.oids

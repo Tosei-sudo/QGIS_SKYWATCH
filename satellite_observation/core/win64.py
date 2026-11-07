@@ -69,8 +69,37 @@ def _copy(package: str, package_dir: str, files: list[str], root: str) -> str:
                 shutil.rmtree(work, ignore_errors=True)
     for other in os.listdir(root):
         if other != name and (other.startswith(f"{package}-") or other.startswith(f".{package}-")):
-            shutil.rmtree(os.path.join(root, other), ignore_errors=True)  # A copy another QGIS still uses stays.
+            _remove_unused(os.path.join(root, other))
     return target
+
+
+def _in_use_here(folder: str) -> bool:
+    """Whether this QGIS has the copy on its path or has imported from it (a plugin reloaded keeps the old one)."""
+    folder = os.path.normcase(os.path.abspath(folder))
+    if any(os.path.normcase(os.path.abspath(p)) == folder for p in sys.path if isinstance(p, str) and p):
+        return True
+    for module in list(sys.modules.values()):
+        f = getattr(module, "__file__", None)
+        if isinstance(f, str) and os.path.normcase(os.path.abspath(f)).startswith(folder + os.sep):
+            return True
+    return False
+
+
+def _remove_unused(folder: str) -> None:
+    """
+    Removes an older copy only when no QGIS uses it (#82): not one on this
+    QGIS's path, and only after the whole folder could be renamed away
+    (Windows refuses that while another QGIS has one of its DLLs loaded), so
+    a copy in use is left whole rather than with its .py files gone.
+    """
+    if _in_use_here(folder):
+        return
+    doomed = f"{folder}.removing-{os.getpid()}"
+    try:
+        os.rename(folder, doomed)
+    except OSError:
+        return  # In use (or already gone): kept as it is, removed another time.
+    shutil.rmtree(doomed, ignore_errors=True)
 
 
 _added: dict[str, Optional[str]] = {}

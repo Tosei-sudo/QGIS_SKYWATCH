@@ -719,3 +719,22 @@ def test_a_request_changed_by_someone_else_is_not_overwritten():
     with pytest.raises(ConflictError):
         save_request(client, store, None, fresh, FIRST + 6 * H)
     assert fake.layers[LEDGER].rows == []
+
+
+def test_deletes_are_checked():
+    """#81: a delete the server refused is an error; how many went is told."""
+    from satellite_observation.core.esri import deleted_count
+
+    assert deleted_count({"deleteResults": [{"objectId": 1, "success": True}]}) == 1
+    assert deleted_count({"deleteResults": []}) == 0
+    with pytest.raises(EsriError, match="1 件の削除に失敗（ロック中）"):
+        deleted_count({"deleteResults": [{"objectId": 1, "success": True}, {"objectId": 2, "success": False, "error": {"description": "ロック中"}}]})
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, [], 0)
+    fake = server()
+    client = EsriClient(fake)
+    r = save_request(client, store, None, request("R-DEL"), FIRST)
+    fake.fail_next = {"deleteResults": [{"objectId": r.object_id, "success": False, "error": {"description": "権限なし"}}]}
+    with pytest.raises(EsriError, match="権限なし"):
+        delete_request(client, store, None, r)
+    assert delete_request(client, store, None, r) == 1
+    assert delete_request(client, store, None, r) == 0

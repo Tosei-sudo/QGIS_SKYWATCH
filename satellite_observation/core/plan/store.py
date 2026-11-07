@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from .. import time_zone
 from ..catalog import CatalogConfig
-from ..esri import EsriClient, EsriError, quote
+from ..esri import EsriClient, EsriError, deleted_count, quote
 from ..util import is_number, is_record, layer_url, time_of, utc_text
 from .access import Opportunity, PlanTarget
 from .remind import shots_of
@@ -319,9 +319,10 @@ def update_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str
     return done
 
 
-def delete_plan(client: EsriClient, store: PlanStoreConfig, token: Optional[str], plan_id: str) -> None:
-    """Deletes a plan's shots from the layer."""
-    client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['planId']} = {quote(plan_id)}"}, token)
+def delete_plan(client: EsriClient, store: PlanStoreConfig, token: Optional[str], plan_id: str) -> int:
+    """Deletes a plan's shots from the layer; how many went (EsriError when the server kept any, #81)."""
+    value = client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['planId']} = {quote(plan_id)}"}, token)
+    return deleted_count(value, "撮像の削除")
 
 
 _SUFFIX = re.compile(r"([+-]\d{2}:?\d{2})$")

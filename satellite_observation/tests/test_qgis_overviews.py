@@ -308,3 +308,22 @@ def test_layers_added_cache_from_next_time(tmp_path):
     assert {n: os.path.getmtime(folder / n) for n in beside} == stamp
     proxied = [n for n in os.listdir(cache) if n.endswith("_img.tif.aux.xml")]
     assert proxied and "STATISTICS_" in (cache / proxied[0]).read_text()
+
+
+def test_jpeg_four_bands_builds_without_ycbcr(tmp_path, no_cache):
+    """#80: GDAL refuses YCbCr for four bands, so RGBN/RGBA Byte images get plain JPEG overviews."""
+    mem = gdal.GetDriverByName("MEM")
+    three = mem.Create("", 10, 10, 3, gdal.GDT_Byte)
+    four = mem.Create("", 10, 10, 4, gdal.GDT_Byte)
+    options = OverviewOptions(compress="JPEG")
+    assert overviews_io._config(three, options)["PHOTOMETRIC_OVERVIEW"] == "YCBCR"
+    assert "PHOTOMETRIC_OVERVIEW" not in overviews_io._config(four, options)
+    assert overviews_io._config(four, options)["COMPRESS_OVERVIEW"] == "JPEG"
+    path = str(tmp_path / "rgbn.tif")
+    ds = gdal.GetDriverByName("GTiff").Create(path, 3000, 2000, 4, gdal.GDT_Byte, ["TILED=YES"])
+    ds.SetGeoTransform([139.6, 0.0001, 0, 35.7, 0, -0.0001])
+    for b in range(4):
+        ds.GetRasterBand(b + 1).Fill(50 + b)
+    ds = None
+    outcome = build_external(path, options)
+    assert outcome.kind == BUILT and overview_count(path) == 4

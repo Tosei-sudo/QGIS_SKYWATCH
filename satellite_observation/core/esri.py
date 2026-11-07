@@ -256,6 +256,23 @@ class EsriClient:
         return value.get("deleteResults") or []
 
 
+def deleted_count(value: dict[str, Any], what: str = "削除") -> int:
+    """
+    How many features a deleteFeatures answer says were deleted; raises
+    EsriError with the reason when any was not (#81).
+    """
+    results = value.get("deleteResults")
+    if results is None:
+        if value.get("success") is False:
+            raise EsriError(f"{what}失敗")
+        return 0
+    failed = [r for r in results if not r.get("success")]
+    if failed:
+        reason = (failed[0].get("error") or {}).get("description") or ""
+        raise EsriError(f"{len(failed)} 件の{what}に失敗{'（' + reason + '）' if reason else ''}")
+    return len(results)
+
+
 @dataclass
 class LayerInfo:
     """What a layer says of itself."""
