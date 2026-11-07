@@ -33,3 +33,12 @@ def no_time_zone_rules():
 
     yield
     time_zone.set_rules([])
+
+
+@pytest.fixture(autouse=True)
+def default_edit_tracking():
+    """Each test starts with the default tracking fields (module state, set from the settings file)."""
+    from satellite_observation.core import edit_stamp
+
+    yield
+    edit_stamp.set_tracking(None)

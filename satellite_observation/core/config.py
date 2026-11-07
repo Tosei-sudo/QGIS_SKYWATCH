@@ -17,6 +17,7 @@ from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
 from .ai_results import AiResultSource, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
+from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
 from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
@@ -43,7 +44,7 @@ KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports",
+    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
 )
 
 
@@ -95,6 +96,8 @@ class PluginConfig:
     request_stores: list[RequestStoreConfig] = field(default_factory=list)
     #: The satellite systems the day's requests are written for (in the order they are tried).
     request_exports: list[ExportSystem] = field(default_factory=list)
+    #: `editTracking`: the fields every Esri layer written gets (when and who added / updated), and where the user name comes from.
+    edit_tracking: EditTracking = DEFAULT_EDIT_TRACKING
 
 
 class JsoncError(ValueError):
@@ -247,6 +250,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     config.request_stores = listed("requestStores", request_store_of)
     if "requestExports" in value:
         config.request_exports = export_systems_of(value["requestExports"], problems)
+    if "editTracking" in value:
+        config.edit_tracking = edit_tracking_of(value["editTracking"], problems)
     return config, problems
 
 

@@ -16,7 +16,7 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
-    from satellite_observation.core import ai_results, basemaps, config, geocode, layer_templates, moving, overviews, startup_layers
+    from satellite_observation.core import ai_results, basemaps, config, edit_stamp, geocode, layer_templates, moving, overviews, startup_layers
     from satellite_observation.core.ai import model_config, transfer
     from satellite_observation.core.enhance import pipeline
     from satellite_observation.core.obs import model as obs_model, stores as obs_stores
@@ -38,6 +38,7 @@ def plugin_constants() -> dict:
             "movingFeeds": list(moving.ROLES),
             "detectionOutputs": list(transfer.TRANSFER_ROLES),
             "aiResultSources": list(ai_results.RESULT_ROLES),
+            "editTracking": dict(edit_stamp.DEFAULT_FIELDS),
         },
         "exportSources": list(export.SOURCES),
         "geometries": list(export.GEOMETRIES),

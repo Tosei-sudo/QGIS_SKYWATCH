@@ -527,3 +527,12 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 | 衛星カタログの `system` | なし | `satelliteCatalogs[].fields.system` で衛星ごとの発注システムを指定可（なければ `requestExports` の `series`・`satellites`） | 衛星の入れ替えをカタログの更新だけで済ませるため |
 | 枚数の見積もり | — | 依頼の範囲の外接矩形をシーンの大きさ（モード指定時はその幅と長さ、なければ `sceneKm`）の格子に分け、範囲にかかるマスの数。パスの向きは考えない | 依頼の段階ではパスを決めないため |
 | JSON Schema の検証 | — | プラグイン内の実装（type・required・properties・items・enum・const・pattern・範囲・長さ・個数・format（date / date-time）・anyOf / oneOf / allOf・ローカルの `$ref`）。外部ライブラリは使わない | 閉域でも動かすため |
+
+## 作成者・更新者の記録（`editTracking`）（2026-11-07 に追加）
+
+プラグインだけの項目。ビューアの `config.json` に書いてもビューアは読まない。
+
+| 項目 | ビューア | プラグイン | 理由 |
+| --- | --- | --- | --- |
+| 作成日時・作成者・更新日時・更新者 | 書かない | 書き込む Esri のレイヤー・テーブルすべてと、QGIS で直接編集した Esri レイヤーに、属性があれば書く（既定 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`） | 誰がいつ足したか・直したかをサービス側で追えるように |
+| 作成者・更新者の名前 | — | 環境変数 `USERNAME`（`userVariable` で変更、`user` で固定）。ArcGIS の認証のユーザーは使わない | 共有アカウントでサインインする環境でも個人を残すため |

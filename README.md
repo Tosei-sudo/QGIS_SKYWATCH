@@ -464,6 +464,29 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 - 読み込めないタイムゾーン・正規表現は「設定…」の問題の一覧に出して無視する
 - 閉域でも動く: IANA 名は Python の zoneinfo（OS のデータベース）で読む。Windows には OS のデータベースがないため Windows 版の zip に `tzdata` を同梱。どちらもないときも、夏時間のないタイムゾーン（`Asia/Tokyo`・`Asia/Seoul`・`Asia/Shanghai`・`Asia/Singapore`・`Asia/Kolkata` など）と時差の書き方は読める
 
+## 作成者・更新者の記録（`editTracking`）
+
+プラグインが書き込む Esri のレイヤー・テーブルすべて（撮像計画の保存先・撮像依頼台帳と出力履歴・観測記録・確認範囲・分類テーブル・DB へ転記）と、QGIS で直接編集した ArcGIS フィーチャサービスのレイヤー（`layers` の `esri`、Web マップ、データソースマネージャーで追加したもの）に、作成日時・作成者・更新日時・更新者を書き込む。
+
+- 追加: 4 つとも書く。更新（削除の印を付けるのも含む）: 更新日時・更新者だけ書く
+- 作成者・更新者は ArcGIS の認証（サインインしたユーザー）ではなく、PC の環境変数 `USERNAME`（Windows のログオン名）。`userVariable` で別の環境変数に、`user` で固定の名前にできる。環境変数がないときは OS のログイン名
+- 書くのはレイヤーにその属性があるときだけ（属性名の大文字小文字は区別しない）。ないレイヤーはこれまでどおり。属性はサービス側で足す（日時は日付型、作成者・更新者は文字列型。日時を文字列型にすると ISO 8601 の UTC で書く）
+- 既定の属性名 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` は、Esri の編集者トラッキングの属性（`CreationDate`・`Creator`・`EditDate`・`Editor`、`created_user`・`last_edited_user` など）とは別。編集者トラッキングを有効にした属性はサーバが認証のユーザーで上書きするので、ここには使わない
+- 観測記録の `recordedBy`（記録者、`OBSERVER`）・`updatedBy`・`created`・`updated`、撮像依頼台帳の `created`・`updated` は記録の中身としてこれまでどおり別に書く
+- 日時の書き方は他の属性と同じ（`timeZone` を書いたサービスはそのタイムゾーンで書く）
+
+```jsonc
+"editTracking": {
+  "userVariable": "USERNAME",            // 作成者・更新者を読む環境変数（既定 USERNAME）
+  "user": "",                             // 書くと環境変数より優先（任意）
+  "fields": {                             // 役割 → 属性名。"" か null でその役割は書かない
+    "createdAt": "CREATED_DATE", "createdBy": "CREATED_USER",
+    "updatedAt": "UPDATED_DATE", "updatedBy": "UPDATED_USER"
+  }
+}
+// "editTracking": false で何も書かない
+```
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -673,6 +696,12 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `aiModels` | 配列 | 検出: `url`（必須）・`task`（`detect`・`obb`・`segment`）・`inputSize`・`classes`（配列か `"coco"`）・`format`・`channels`・`mean`・`std`・`maxDetections`・`strides`・`kinds`（クラス → 種別、プラグインだけ）。SAM: `encoder`・`decoder`・`inputSize` | なし | [AI](#ai物体検出クリック抽出) |
 | `detectionOutputs` | 配列 | 検出結果の転記先。`url`、`fields`（`imageId`・`class`・`score`・`status` など）、`statusValues`、`constants`、`token` | なし | [AI](#ai物体検出クリック抽出) |
 | `aiResultSources` | 配列 | 外部 AI の結果。`url`、`fields`（`imageId`・`id`・`class`・`score`・`model`・`detectedAt`・`name`・`kind`・`activity`・`length`・`heading`・`width`・`note`）、`kinds`、`minScore`（0〜1）、`continueRadius`・`candidateRadius`（m）、`maxResults`、`activity`・`confidence`（取り込み時の既定）、`where`、`token` | なし | [AI結果](#ai結果外部aiプラグイン内の物体検出) |
+
+#### 編集の記録
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `editTracking` | オブジェクトか `false` | 書き込む Esri のレイヤー・テーブルの作成日時・作成者・更新日時・更新者。`userVariable`（ユーザー名の環境変数、既定 `USERNAME`）、`user`（固定のユーザー名）、`fields`（`createdAt`・`createdBy`・`updatedAt`・`updatedBy`。既定 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`）、`enabled`。`false` で書かない | 既定の属性名があるレイヤーに書く | [作成者・更新者の記録](#作成者更新者の記録edittracking) |
 
 #### 日時
 
