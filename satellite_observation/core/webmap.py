@@ -383,7 +383,36 @@ def _layer(base: dict, **kw) -> WebMapLayer:
     return WebMapLayer(**base, **kw)
 
 
+#: What a web map's URL or layer name may not hold: it goes into a QGIS data source (`url='…' authcfg='…'`,
+#: `layers=…&url=…`), and a quote, a backslash, a space or a second `url=` there would point the sign-in elsewhere.
+_UNSAFE_URL = re.compile(r"""['"\\\s<>]|[?&]url=""", re.IGNORECASE)
+_UNSAFE_NAME = re.compile(r"""['"\\&\r\n]""")
+
+
+def unsafe_reason(layer: WebMapLayer) -> Optional[str]:
+    """Why a layer read from a web map is not opened (a URL or name that would break the data source), else None."""
+    urls = [layer.url, *layer.urls] + ([layer.ref.url] if layer.ref else [])
+    if any(u and (_UNSAFE_URL.search(u) or not re.match(r"^https?://", u, re.IGNORECASE)) for u in urls):
+        return "URL に使えない文字（引用符・空白・url= など）"
+    names = [layer.ref.layer, layer.ref.matrix_set, layer.ref.format] if layer.ref else []
+    if any(n and _UNSAFE_NAME.search(n) for n in names):
+        return "レイヤー名に使えない文字（引用符・& など）"
+    return None
+
+
 def _read_layer(item: dict, base: dict) -> "list[WebMapLayer] | str":
+    """One layer of a web map, as `_read_layer_as_is` reads it, unless a URL or name would break its data source."""
+    read = _read_layer_as_is(item, base)
+    if isinstance(read, str):
+        return read
+    for layer in read:
+        why = unsafe_reason(layer)
+        if why:
+            return why
+    return read
+
+
+def _read_layer_as_is(item: dict, base: dict) -> "list[WebMapLayer] | str":
     """One layer of a web map (not a group) as layers to open (one, or a WMS layer's several), or why it cannot be shown."""
     kind = _str(item.get("layerType")) or ("ArcGISFeatureLayer" if is_record(item.get("featureCollection")) else "")
     url = _str(item.get("url"))

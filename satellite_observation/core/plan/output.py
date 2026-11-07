@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
+from ..util import formula_safe
 from .access import Opportunity, PlanTarget
 from .satellites import SatelliteSpec, satellite_label
 from .scene import pass_shapes, scenes_taken
@@ -81,7 +82,7 @@ def mode_facts(sat: SatelliteSpec) -> str:
 
 
 def _cell(v: Any) -> str:
-    text = "" if v is None else str(v)
+    text = "" if v is None else formula_safe(v) if isinstance(v, str) else str(v)
     return '"' + text.replace('"', '""') + '"' if any(c in text for c in '",\r\n') else text
 
 

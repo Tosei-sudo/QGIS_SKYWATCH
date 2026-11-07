@@ -43,7 +43,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_tip
 from .flow_layout import FlowLayout
 
 TITLE = "イベント"
@@ -474,7 +474,7 @@ class EventsDock(PluginDock):
             for i, x in enumerate(links):
                 for j, v in enumerate([x.label or x.item_id, _local(x.time), x.note, x.linked_by, _local(x.linked_at)]):
                     item = QTableWidgetItem(v)
-                    item.setToolTip(f"{x.item_id}\n{x.source}" if j == 0 else v)
+                    item.setToolTip(plain_tip(f"{x.item_id}\n{x.source}" if j == 0 else v))
                     table.setItem(i, j, item)
             table.blockSignals(False)
             self.tabs.setTabText(TYPES.index(t), f"{TYPE_LABELS[t]}（{len(links)}）" if e else TYPE_LABELS[t])
@@ -564,8 +564,8 @@ class EventsDock(PluginDock):
             return
         n = len(self.links_of(e))
         if confirm and QMessageBox.question(
-                self, TITLE, self.tr("「{name}」を削除しますか？\n紐付け {n} 件も消えます（画像・記録・依頼そのものは残ります）。元に戻せません。")
-                .format(name=e.name, n=n), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                self, TITLE, plain_tip(self.tr("「{name}」を削除しますか？\n紐付け {n} 件も消えます（画像・記録・依頼そのものは残ります）。元に戻せません。")
+                .format(name=e.name, n=n)), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         s = self.settings
@@ -589,7 +589,7 @@ class EventsDock(PluginDock):
             text = self.tr("「{e}」に {n} 件を追加").format(e="」「".join(names), n=added)
             if skipped:
                 text += self.tr("（{k} 件は追加済み）").format(k=skipped)
-            self.iface.messageBar().pushSuccess(TITLE, text)
+            self.iface.messageBar().pushSuccess(TITLE, plain_tip(text))
             self.reload(lambda: (self.say(text), then(added, skipped) if then else None), keep=event_ids[0] if len(event_ids) == 1 else None)
 
         self._start(self.tr("イベントへの追加"), lambda _t: add_links(client, s, list(event_ids), list(items), token=token), done)

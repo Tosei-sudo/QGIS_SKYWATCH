@@ -16,6 +16,9 @@ where that store keeps its classification.
 """
 from __future__ import annotations
 
+import html
+import re
+
 import mimetypes
 import os
 from typing import Callable, Optional
@@ -34,7 +37,7 @@ from ..core.obs.taxonomy import (
 )
 from ..qgis_io.context import PluginContext
 from . import shortcuts
-from .docks import PluginDock
+from .docks import PluginDock, plain_tip
 from .flow_layout import FlowLayout
 
 KIND_ROLE = Qt.ItemDataRole.UserRole
@@ -496,8 +499,13 @@ class TaxonomyDock(PluginDock):
             thumb.clicked.connect(lambda _on=False: self._show_photo(pixmap, title))
         else:
             thumb.setText(self.tr("URL を開く"))
-            thumb.clicked.connect(lambda _on=False: QDesktopServices.openUrl(QUrl(photo_url(ref) or ref)))
-        thumb.setToolTip(title if pixmap is not None else f"{title}: {ref}")
+            # Only a web page: a photo is shared text, and a file, a UNC path or another scheme would be run by the system.
+            web = photo_url(ref) or ""
+            if re.match(r"^https?://", web, re.IGNORECASE):
+                thumb.clicked.connect(lambda _on=False, web=web: QDesktopServices.openUrl(QUrl(web)))
+            else:
+                thumb.setEnabled(False)
+        thumb.setToolTip(plain_tip(title if pixmap is not None else f"{title}: {ref}"))
         lay.addWidget(thumb)
         if own:
             remove = QToolButton()

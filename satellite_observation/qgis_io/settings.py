@@ -7,6 +7,7 @@ QGIS's encrypted authentication database.
 from __future__ import annotations
 
 import json
+import re
 import os
 from typing import Optional
 
@@ -66,12 +67,21 @@ def set_config_source(source: str) -> None:
     _set("config_source", source.strip())
 
 
+#: A URL's query parameters that carry a secret (`?token=…` of a moving feed, an API key).
+_SECRET_PARAM = re.compile(r"([?&])(token|access_token|apikey|api_key|key|password|secret)=[^&#]*&?", re.IGNORECASE)
+
+
 def _without_tokens(value):
-    """A settings file's value with every `token` left out (tokens are never kept in the profile)."""
+    """
+    A settings file's value with every `token` left out, and the secret
+    parameters of its URLs too (tokens are never kept in the profile).
+    """
     if isinstance(value, dict):
         return {k: _without_tokens(v) for k, v in value.items() if k != "token"}
     if isinstance(value, list):
         return [_without_tokens(v) for v in value]
+    if isinstance(value, str) and "=" in value and re.match(r"^[a-z][a-z0-9+.-]*://", value, re.IGNORECASE):
+        return re.sub(r"[?&]$", "", _SECRET_PARAM.sub(lambda m: m.group(1), value))
     return value
 
 

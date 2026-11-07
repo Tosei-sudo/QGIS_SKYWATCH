@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Iterable, Optional
 
-from ..util import iso_text
+from ..util import formula_safe, iso_text
 from .flows import time_key
 from .geo import to_fixed
 from .model import Observation
@@ -25,7 +25,8 @@ def _iso(t: Optional[float]) -> str:
 
 
 def _cell(v) -> str:
-    text = "" if v is None else str(v)
+    # Notes and names are other people's text: never a formula in Excel.
+    text = "" if v is None else formula_safe(v) if isinstance(v, str) else str(v)
     return '"' + text.replace('"', '""') + '"' if re.search(r'[",\r\n]', text) else text
 
 

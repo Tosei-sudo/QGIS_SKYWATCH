@@ -122,3 +122,14 @@ def new_id() -> str:
 def unique(items: Iterable[Any]) -> list[Any]:
     """Items in their order, without repeats."""
     return list(dict.fromkeys(items))
+
+
+def formula_safe(text: str) -> str:
+    """
+    A CSV cell's text that a spreadsheet won't run as a formula: one that
+    starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a quote
+    first (a number such as -12.5 stays as it is).
+    """
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r") and not re.fullmatch(r"[-+]?\d[\d.,]*(?:[eE][-+]?\d+)?", text):
+        return "'" + text
+    return text
