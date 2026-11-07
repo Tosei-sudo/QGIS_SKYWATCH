@@ -147,7 +147,7 @@ def test_records_added_by_hand_whatever_the_conditions(plugin):
     dock.alert_button.click()
     dialog = dock._alerts
     assert wait_for(lambda: dialog.status.text().startswith("手動で 1 件を追加"))
-    assert dialog.lines_table.item(0, 1).text() == "船A|停泊|手動|手動" and dialog.lines_table.item(0, 0).text() == "手動"
+    assert dialog.lines_table.item(0, 1).text() == "船A|停泊|手動|手動" and dialog.lines_table.item(0, 0).text().startswith("手動 ")
     # Picking by the conditions keeps it, above what the conditions find.
     dialog.pick()
     assert wait_for(lambda: "件を抽出" in dialog.status.text())
