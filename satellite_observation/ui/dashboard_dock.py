@@ -9,6 +9,10 @@ up in a dock.
   an attribute, the distribution of a number, and the count over time (by
   the layer's temporal settings).
 - Where they are: a heatmap layer of the features shown.
+- 「活動の推移」: per value of the attribute, or per region (a grid, or the
+  polygons of another layer), the records of the latest day, week or month
+  against 「平常」 (the mean of the 8 steps before it), sudden increases
+  first; the regions that increased suddenly as a layer on top of the map.
 
 The charts filter the layer: clicking a value (Ctrl / Shift: several) or a
 bin of the number shows only those features, on the map and in the
@@ -25,7 +29,7 @@ from typing import Callable, Optional
 
 from qgis.core import (
     QgsCoordinateTransform, QgsDateTimeRange, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFeature, QgsFeatureRequest,
-    QgsField, QgsGeometry, QgsHeatmapRenderer, QgsMapLayer, QgsProject, QgsProviderRegistry, QgsReadWriteContext,
+    QgsField, QgsFields, QgsFillSymbol, QgsGeometry, QgsHeatmapRenderer, QgsPointXY, QgsRectangle, QgsSingleSymbolRenderer, QgsSpatialIndex, QgsMapLayer, QgsProject, QgsProviderRegistry, QgsReadWriteContext,
     QgsStyle, QgsTemporalNavigationObject, QgsUnitTypes, QgsVectorLayer, QgsVectorLayerTemporalContext, QgsVectorLayerTemporalProperties,
     QgsWkbTypes,
 )
@@ -37,12 +41,17 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.dashboard import (
-    OTHERS, STATISTICS, bin_chosen, categories, category_value, choose_range, choose_value, filter_expression, format_time, histogram,
-    in_values, number_value, pick_group, pick_measure, short, time_bins,
+    BASELINE, OTHERS, STATISTICS, TREND_STEPS, bin_chosen, categories, category_value, choose_range, choose_value, filter_expression,
+    format_time, grid_cell, grid_key, grid_label, grid_size, histogram, in_values, number_value, pick_group, pick_measure, short,
+    time_bins, trend_step, trends,
 )
 from .docks import PluginDock
 
 HEATMAP = "satobs/dashboard_heatmap"
+SURGES = "satobs/dashboard_surges"
+SURGE = QColor("#dc2626")
+#: The most rows of 「活動の推移」 listed.
+MAX_TRENDS = 15
 STATE_TAG = "SatObsDashboard"
 ACCENT = QColor("#2563eb")
 
@@ -223,6 +232,86 @@ class ColumnChart(QWidget):
             self.clicked.emit(i, event.modifiers())
 
 
+class TrendChart(QWidget):
+    """Rows of a label and the latest against 「平常」 over the counts per step (the latest at the right); a click says which row."""
+
+    clicked = pyqtSignal(int, object)
+    ROW = 38
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        #: (label, counts, figure text, surge, tooltip)
+        self.rows: list = []
+        self.note = ""
+        self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_rows(self, rows: list, note: str = "") -> None:
+        self.rows, self.note = rows, note
+        self.setFixedHeight(max(1, len(rows)) * self.ROW + 4)
+        self.update()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt's name)
+        return QSize(240, max(1, len(self.rows)) * self.ROW + 4)
+
+    def row_at(self, y: float) -> int:
+        i = int(y // self.ROW)
+        return i if 0 <= i < len(self.rows) else -1
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        p = QPainter(self)
+        text = self.palette().color(QPalette.ColorRole.WindowText)
+        p.setPen(text)
+        if not self.rows:
+            p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.note)
+            return
+        w = self.width()
+        line = (self.ROW - 4) / 2
+        for i, (label, counts, figure, surge, _) in enumerate(self.rows):
+            y = i * self.ROW
+            if surge:
+                back = QColor(SURGE)
+                back.setAlphaF(0.12)
+                p.fillRect(QRectF(0, y + 1, w, self.ROW - 2), back)
+            p.setPen(SURGE if surge else text)
+            metrics = p.fontMetrics()
+            figure_w = min(metrics.horizontalAdvance(figure) + 4, int(w * 0.6))
+            p.drawText(QRectF(w - figure_w - 2, y + 1, figure_w, line), int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                       metrics.elidedText(figure, Qt.TextElideMode.ElideRight, figure_w))
+            label_w = max(10, w - figure_w - 10)
+            p.drawText(QRectF(4, y + 1, label_w, line), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                       metrics.elidedText(label, Qt.TextElideMode.ElideRight, label_w))
+            # The counts per step under it, the latest at the right.
+            most = max(counts, default=0) or 1
+            width = (w - 8) / max(1, len(counts))
+            bottom = y + self.ROW - 3
+            for j, c in enumerate(counts):
+                latest = j == len(counts) - 1
+                color = QColor(SURGE if latest and surge else ACCENT if latest else "#94a3b8")
+                h = (line - 2) * c / most
+                p.fillRect(QRectF(4 + j * width + 1, bottom - h, max(1.0, width - 2), max(h, 1.0)), color)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        i = self.row_at(event.pos().y())
+        if i >= 0:
+            QToolTip.showText(event.globalPos(), self.rows[i][4], self)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        i = self.row_at(event.pos().y())
+        if i >= 0 and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(i, event.modifiers())
+
+
+def _point_of(feature: QgsFeature) -> Optional[QgsGeometry]:
+    """Where a feature is, as one point (a point on a polygon, the middle of a line); None without a geometry."""
+    g = feature.geometry()
+    if g is None or g.isEmpty():
+        return None
+    point = g if g.type() == QgsWkbTypes.GeometryType.PointGeometry and not g.isMultipart() else (
+        g.pointOnSurface() if g.type() == QgsWkbTypes.GeometryType.PolygonGeometry else QgsGeometry.fromPointXY(g.boundingBox().center()))
+    return None if point is None or point.isEmpty() else point
+
+
 def _several(modifiers) -> bool:
     keys = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier | Qt.KeyboardModifier.MetaModifier
     return bool(int(modifiers) & int(keys))
@@ -255,6 +344,15 @@ class DashboardDock(PluginDock):
         self.hist = None
         self.bins = None
         self.heat_layer: Optional[QgsVectorLayer] = None
+        #: 「活動の推移」: by "group" (the attribute above), "grid" or a polygon layer's id; the step ("" = 自動).
+        self.trend_by = "group"
+        self.trend_unit = ""
+        self.trend_starts: list = []
+        self.trends: list = []
+        #: Per key of self.trends: its label and its shape (in the layer's CRS for the grid, else the regions' CRS).
+        self._regions: dict = {}
+        self._grid = 1.0
+        self.surge_layer: Optional[QgsVectorLayer] = None
         # The layer's features, read without the dashboard's condition.
         self._features: list = []
         self._dirty = True
@@ -360,6 +458,31 @@ class DashboardDock(PluginDock):
         self.time_chart = ColumnChart()
         self.time_chart.clicked.connect(lambda i, m: self.click_step(i))
         detail.addWidget(self.time_chart)
+
+        detail.addWidget(self._heading(_tr("活動の推移（平常との差）")))
+        row = QHBoxLayout()
+        self.trend_combo = QComboBox()
+        self.trend_combo.setToolTip(_tr("まとめ方: 上の属性の値ごと、地域（格子・ポリゴンのレイヤー）ごと"))
+        self.trend_combo.currentIndexChanged.connect(self._trend_chosen)
+        self.trend_step_combo = QComboBox()
+        self.trend_step_combo.setToolTip(_tr("区切り: 直近の区間を、その前の {n} 区間の平均（平常）と比べる").format(n=BASELINE))
+        self.trend_step_combo.addItem(_tr("自動"), "")
+        for key, name in TREND_STEPS.items():
+            self.trend_step_combo.addItem(_tr(name), key)
+        self.trend_step_combo.currentIndexChanged.connect(self._trend_step_chosen)
+        row.addWidget(self.trend_combo, 1)
+        row.addWidget(self.trend_step_combo)
+        detail.addLayout(row)
+        self.trend_note = QLabel()
+        self.trend_note.setWordWrap(True)
+        detail.addWidget(self.trend_note)
+        self.trend_chart = TrendChart()
+        self.trend_chart.clicked.connect(lambda i, m: self.click_trend(i, _several(m)))
+        detail.addWidget(self.trend_chart)
+        self.surge_box = QCheckBox(_tr("急増した地域を地図に表示"))
+        self.surge_box.setChecked(True)
+        self.surge_box.toggled.connect(self.schedule)
+        detail.addWidget(self.surge_box)
         box.addWidget(self.detail)
         self.empty = QLabel(_tr("ベクターレイヤーを開くと、件数・属性別の集計・時間の推移・ヒートマップを表示。"))
         self.empty.setWordWrap(True)
@@ -396,6 +519,11 @@ class DashboardDock(PluginDock):
         else:
             self._apply_filter()
             self._remove_heatmap()
+            self._remove_surges()
+
+    def _ours(self, layer) -> bool:
+        """Whether a layer is the dashboard's own (the heatmap, the regions that increased)."""
+        return layer is not None and (layer is self.heat_layer or layer is self.surge_layer)
 
     def _usable(self, layer) -> bool:
         return isinstance(layer, QgsVectorLayer) and layer.isValid()
@@ -408,11 +536,11 @@ class DashboardDock(PluginDock):
                 return layer
             self.pinned = None
         active = self.iface.activeLayer()
-        if self._usable(active) and active is not self.heat_layer:
+        if self._usable(active) and not self._ours(active):
             return active
         if self.layer is not None and self._usable(self.layer) and self.project.mapLayer(self.layer.id()) is not None:
             return self.layer
-        return next((l for l in self._layers() if self._usable(l) and l is not self.heat_layer), None)
+        return next((l for l in self._layers() if self._usable(l) and not self._ours(l)), None)
 
     def _layers(self) -> list:
         return [l for l in self.project.layerTreeRoot().layerOrder() if l is not None]
@@ -435,6 +563,10 @@ class DashboardDock(PluginDock):
         ids = set(ids)
         if self.heat_layer is not None and self.heat_layer.id() in ids:
             self.heat_layer = None
+        if self.surge_layer is not None and self.surge_layer.id() in ids:
+            self.surge_layer = None
+        if self.trend_by in ids:
+            self.trend_by = "group"
         if self.layer is not None and self.layer.id() in ids:
             self._disconnect()
             self._filtered = None if self._filtered in ids else self._filtered
@@ -686,7 +818,7 @@ class DashboardDock(PluginDock):
 
     def _overview_clicked(self, item: QTreeWidgetItem) -> None:
         layer = self.project.mapLayer(item.data(0, Qt.ItemDataRole.UserRole) or "")
-        if self._usable(layer) and layer is not self.heat_layer:
+        if self._usable(layer) and not self._ours(layer):
             self.choose_layer(layer)
 
     def _in_view_toggled(self, on: bool) -> None:
@@ -756,12 +888,8 @@ class DashboardDock(PluginDock):
         for f in self._features:
             if not (self._passes(f) and ok_time(f)):
                 continue
-            g = f.geometry()
-            if g is None or g.isEmpty():
-                continue
-            point = g if g.type() == QgsWkbTypes.GeometryType.PointGeometry and not g.isMultipart() else (
-                g.pointOnSurface() if g.type() == QgsWkbTypes.GeometryType.PolygonGeometry else QgsGeometry.fromPointXY(g.boundingBox().center()))
-            if point is None or point.isEmpty():
+            point = _point_of(f)
+            if point is None:
                 continue
             feature = QgsFeature()
             feature.setGeometry(point)
@@ -860,6 +988,7 @@ class DashboardDock(PluginDock):
         if layer is None:
             self.figures = {}
             self._remove_heatmap()
+            self._remove_surges()
             return
         if self._dirty:
             self._read()
@@ -877,10 +1006,14 @@ class DashboardDock(PluginDock):
         if filtering:
             tiles.append((_tr("絞り込み後"), len(shown)))
         tiles.append((_tr("選択中"), layer.selectedFeatureCount()))
-        self._render_tiles(tiles)
         self._render_categories([f for f in base if self._in_range(f)])
         self._render_histogram([f for f in base if self._in_values(f)])
-        self._render_time([f for f in features if ok_view(f) and self._passes(f)])
+        over_time = [f for f in features if ok_view(f) and self._passes(f)]
+        self._render_time(over_time)
+        self._render_trends(over_time)
+        if self.trend_starts:
+            tiles.append((_tr("急増"), sum(1 for t in self.trends if t.surge)))
+        self._render_tiles(tiles)
         if self.heat_box.isChecked():
             self._heat_timer.start()
 
@@ -907,7 +1040,7 @@ class DashboardDock(PluginDock):
                 font.setBold(True)
                 for c in range(3):
                     item.setFont(c, font)
-            if not isinstance(layer, QgsVectorLayer) or layer is self.heat_layer:
+            if not isinstance(layer, QgsVectorLayer) or self._ours(layer):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             else:
                 item.setToolTip(1, _tr("このレイヤーを集計"))
@@ -916,13 +1049,13 @@ class DashboardDock(PluginDock):
             self.overview.resizeColumnToContents(c)
 
     def _render_choices(self) -> None:
-        for combo in (self.layer_combo, self.group_combo, self.measure_combo, self.stat_combo):
+        for combo in (self.layer_combo, self.group_combo, self.measure_combo, self.stat_combo, self.trend_combo, self.trend_step_combo):
             combo.blockSignals(True)
         try:
             self.layer_combo.clear()
             self.layer_combo.addItem(_tr("アクティブなレイヤー"), "")
             for layer in self._layers():
-                if self._usable(layer) and layer is not self.heat_layer:
+                if self._usable(layer) and not self._ours(layer):
                     self.layer_combo.addItem(layer.name(), layer.id())
             self.layer_combo.setCurrentIndex(max(0, self.layer_combo.findData(self.pinned)) if self.pinned else 0)
             fields = self._fields()
@@ -938,6 +1071,16 @@ class DashboardDock(PluginDock):
                 if kind in ("integer", "double"):
                     self.measure_combo.addItem(alias.get(name, name), name)
             self.measure_combo.setCurrentIndex(max(0, self.measure_combo.findData(self.measure or "")))
+            self.trend_combo.clear()
+            self.trend_combo.addItem(_tr("上の属性の値ごと"), "group")
+            self.trend_combo.addItem(_tr("地域（格子）ごと"), "grid")
+            for other in self._layers():
+                if self._region_layer(other):
+                    self.trend_combo.addItem(_tr("地域: {name}").format(name=other.name()), other.id())
+            if self.trend_combo.findData(self.trend_by) < 0:
+                self.trend_by = "group"
+            self.trend_combo.setCurrentIndex(self.trend_combo.findData(self.trend_by))
+            self.trend_step_combo.setCurrentIndex(max(0, self.trend_step_combo.findData(self.trend_unit)))
             # A sum or a mean needs a number.
             model = self.stat_combo.model()
             for i in range(self.stat_combo.count()):
@@ -946,7 +1089,7 @@ class DashboardDock(PluginDock):
                 self.statistic = "count"
             self.stat_combo.setCurrentIndex(self.stat_combo.findData(self.statistic))
         finally:
-            for combo in (self.layer_combo, self.group_combo, self.measure_combo, self.stat_combo):
+            for combo in (self.layer_combo, self.group_combo, self.measure_combo, self.stat_combo, self.trend_combo, self.trend_step_combo):
                 combo.blockSignals(False)
 
     def _render_tiles(self, tiles: list) -> None:
@@ -1046,12 +1189,231 @@ class DashboardDock(PluginDock):
                             _tr("{t}: {n} 件 — クリックで時系列コントローラーをこの期間に").format(t=format_time(start, b.unit), n=f"{b.counts[i]:,}")))
         self.time_chart.set_columns(columns, (format_time(b.first, b.unit), format_time(b.last, b.unit)))
 
+    # ---- activity over time ----
+
+    def _region_layer(self, layer) -> bool:
+        """Whether a layer can be the regions: polygons, not the dashboard's own."""
+        return (self._usable(layer) and not self._ours(layer) and layer is not self.layer
+                and layer.geometryType() == QgsWkbTypes.GeometryType.PolygonGeometry)
+
+    def set_trend(self, by: Optional[str] = None, unit: Optional[str] = None) -> None:
+        """「活動の推移」 by "group", "grid" or a polygon layer's id; in steps of "day", "week", "month" ("" = 自動)."""
+        if by is not None:
+            self.trend_by = by
+        if unit is not None:
+            self.trend_unit = unit if unit in TREND_STEPS else ""
+        self.schedule()
+
+    def _trend_chosen(self) -> None:
+        if not self.trend_combo.signalsBlocked():
+            self.set_trend(by=self.trend_combo.currentData() or "group")
+
+    def _trend_step_chosen(self) -> None:
+        if not self.trend_step_combo.signalsBlocked():
+            self.set_trend(unit=self.trend_step_combo.currentData() or "")
+
+    def click_trend(self, index: int, several: bool = False) -> None:
+        """A row of 「活動の推移」: its value filters the layer (by the attribute), or the map goes to the region."""
+        if not 0 <= index < len(self.trends):
+            return
+        key = self.trends[index].key
+        if self.trend_by == "group":
+            self.click_value(key, several)
+            return
+        region = self._regions.get(key)
+        if region is None:
+            return
+        crs = self.layer.crs() if self.trend_by == "grid" else self.project.mapLayer(self.trend_by).crs()
+        try:
+            extent = QgsCoordinateTransform(crs, self.canvas.mapSettings().destinationCrs(), self.project).transformBoundingBox(
+                region[1].boundingBox())
+        except Exception:  # noqa: BLE001 (a region that cannot be transformed stays where the map is)
+            return
+        extent.scale(1.5)
+        self.canvas.setExtent(extent)
+        self.canvas.refresh()
+
+    def _end_of_time(self) -> Optional[float]:
+        """The temporal controller's end when it is on: the latest step is the one it is in."""
+        if not self._time_active():
+            return None
+        end = self.canvas.temporalRange().end()
+        return float(end.toMSecsSinceEpoch()) - 1 if end.isValid() else None
+
+    def _keys(self, features: list) -> Optional[list]:
+        """(key, feature) of the features by the way chosen; self._regions their labels and shapes. None: no way to group them."""
+        self._regions = {}
+        if self.trend_by == "group":
+            if not self.group or self.layer.fields().indexOf(self.group) < 0:
+                return None
+            return [(category_value(self._value_of(f, self.group)), f) for f in features]
+        if self.trend_by == "grid":
+            points = [(p, f) for p, f in ((_point_of(f), f) for f in features) if p is not None]
+            extent = QgsRectangle()
+            for p, _ in points:
+                extent.combineExtentWith(p.asPoint().x(), p.asPoint().y())
+            size = self._grid = grid_size(extent.width(), extent.height()) if points else 1.0
+            geographic = self.layer.crs().isGeographic()
+            out = []
+            for p, f in points:
+                key = grid_key(p.asPoint().x(), p.asPoint().y(), size)
+                if key not in self._regions:
+                    x0, y0, x1, y1 = grid_cell(key, size)
+                    self._regions[key] = (grid_label(key, size, geographic), QgsGeometry.fromRect(QgsRectangle(x0, y0, x1, y1)))
+                out.append((key, f))
+            return out
+        regions = self.project.mapLayer(self.trend_by)
+        if not self._region_layer(regions):
+            return None
+        index = QgsSpatialIndex()
+        shapes = {}
+        name = QgsExpression(regions.displayExpression() or "$id")
+        context = QgsExpressionContext(QgsExpressionContextUtils.globalProjectLayerScopes(regions))
+        name.prepare(context)
+        for r in regions.getFeatures():
+            if not r.hasGeometry():
+                continue
+            context.setFeature(r)
+            label = name.evaluate(context)
+            shapes[r.id()] = (str(label) if label not in (None, "") and not isinstance(label, QVariant) else str(r.id()), QgsGeometry(r.geometry()))
+            index.addFeature(r)
+        try:
+            transform = QgsCoordinateTransform(self.layer.crs(), regions.crs(), self.project)
+        except Exception:  # noqa: BLE001
+            return None
+        out = []
+        for f in features:
+            p = _point_of(f)
+            if p is None:
+                continue
+            try:
+                p.transform(transform)
+            except Exception:  # noqa: BLE001 (a point outside the regions' CRS is in none of them)
+                continue
+            for rid in index.intersects(p.boundingBox()):
+                if shapes[rid][1].intersects(p):
+                    key = str(rid)
+                    self._regions[key] = shapes[rid]
+                    out.append((key, f))
+                    break
+        return out
+
+    def _render_trends(self, features: list) -> None:
+        self.trend_starts, self.trends = [], []
+        start_of = self._start_of()
+        if start_of is None:
+            self.trend_note.setText("")
+            self.trend_chart.set_rows([], _tr("時間の属性なし（レイヤーのプロパティの「時系列」で設定）"))
+            self._build_surges()
+            return
+        keyed = self._keys(features)
+        if keyed is None:
+            self.trend_note.setText("")
+            self.trend_chart.set_rows([], _tr("属性を選ぶと、値ごとに推移を表示"))
+            self._build_surges()
+            return
+        rows = [(key, start_of(f)) for key, f in keyed]
+        times = [t for _, t in rows if t is not None]
+        unit = self.trend_unit or trend_step(times)
+        self.trend_starts, self.trends = trends(rows, unit, BASELINE, self._end_of_time())
+        if not self.trend_starts:
+            self.trend_note.setText("")
+            self.trend_chart.set_rows([], _tr("時間のある地物なし"))
+            self._build_surges()
+            return
+        shown_unit = "day" if unit == "week" else unit
+        latest = self.trend_starts[-1]
+        surges = sum(1 for t in self.trends if t.surge)
+        self.trend_note.setText(_tr("直近の{step}（{t}〜）を、その前の {n} {step}の平均（平常）と比較。急増 {k} 件").format(
+            step=_tr(TREND_STEPS[unit]), t=format_time(latest, shown_unit), n=BASELINE, k=surges))
+        if self.trend_by == "group":
+            name_of = self._value_names()
+        else:
+            def name_of(key):
+                return self._regions[key][0] if key in self._regions else key
+        rows = []
+        for t in self.trends[:MAX_TRENDS]:
+            change = t.change
+            sign = "+" if change >= 0 else "−"
+            figure = _tr("{n} 件（平常 {m}・{s}{d}）").format(n=t.latest, m=f"{t.normal:.1f}", s=sign, d=f"{abs(change):.1f}")
+            steps = "、".join(f"{format_time(start, shown_unit)}: {c}" for start, c in zip(self.trend_starts, t.counts))
+            click = _tr("クリックで絞り込み") if self.trend_by == "group" else _tr("クリックでこの地域へ移動")
+            tip = _tr("{name}: 直近 {n} 件・平常 {m} 件（ばらつき {sd}）{surge}\n{steps}\n— {click}").format(
+                name=name_of(t.key), n=t.latest, m=short(t.normal), sd=short(t.spread), surge=_tr("・急増") if t.surge else "",
+                steps=steps, click=click)
+            rows.append((name_of(t.key), t.counts, figure, t.surge, tip))
+        self.trend_chart.set_rows(rows, _tr("直近の期間に記録なし"))
+        self._build_surges()
+
+    def _value_names(self) -> Callable[[str], str]:
+        """The names of the attribute's values (値マップ's names, 「（空）」)."""
+        codes = {}
+        if self.group and self.layer.fields().indexOf(self.group) >= 0:
+            setup = self.layer.editorWidgetSetup(self.layer.fields().indexOf(self.group))
+            if setup.type() == "ValueMap":
+                entries = setup.config().get("map")
+                for entry in entries if isinstance(entries, list) else [entries] if isinstance(entries, dict) else []:
+                    if isinstance(entry, dict):
+                        codes.update({str(v): k for k, v in entry.items()})
+        return lambda v: _tr("（空）") if v == "" else codes.get(v, v)
+
+    def surge_regions(self) -> list:
+        """The labels of the regions shown as increased suddenly (for scripts and tests)."""
+        if self.surge_layer is None:
+            return []
+        return [f["地域"] for f in self.surge_layer.getFeatures()]
+
+    def _remove_surges(self) -> None:
+        if self.surge_layer is not None:
+            layer, self.surge_layer = self.surge_layer, None
+            if self.project.mapLayer(layer.id()) is not None:
+                self.project.removeMapLayer(layer.id())
+
+    def _build_surges(self) -> None:
+        """The regions that increased suddenly as a layer on top of the map (only by region, while the box is ticked)."""
+        surges = [t for t in self.trends if t.surge and t.key in self._regions]
+        if self.trend_by == "group" or not surges or not self.surge_box.isChecked() or not self.isVisible():
+            self._remove_surges()
+            return
+        crs = self.layer.crs() if self.trend_by == "grid" else self.project.mapLayer(self.trend_by).crs()
+        layer = self.surge_layer
+        if layer is None or layer.crs() != crs:
+            self._remove_surges()
+            layer = QgsVectorLayer("Polygon", _tr("急増した地域"), "memory")
+            layer.setCrs(crs)
+            layer.setCustomProperty(SURGES, True)
+            fields = QgsFields()
+            for name, kind in (("地域", QVariant.String), ("直近", QVariant.Int), ("平常", QVariant.Double), ("差", QVariant.Double),
+                               ("スコア", QVariant.Double)):
+                fields.append(QgsField(name, kind))
+            layer.dataProvider().addAttributes(fields)
+            layer.updateFields()
+            symbol = QgsFillSymbol.createSimple({"color": "220,38,38,70", "outline_color": "220,38,38,255", "outline_width": "0.6"})
+            layer.setRenderer(QgsSingleSymbolRenderer(symbol))
+            self.project.addMapLayer(layer, False)
+            self.project.layerTreeRoot().insertLayer(0, layer)
+            self.surge_layer = layer
+        layer.setName(_tr("急増した地域（{name}）").format(name=self.layer.name()))
+        out = []
+        for t in surges:
+            label, shape = self._regions[t.key]
+            feature = QgsFeature(layer.fields())
+            feature.setGeometry(QgsGeometry(shape))
+            feature.setAttributes([label, t.latest, round(t.normal, 3), round(t.change, 3), round(t.score, 3)])
+            out.append(feature)
+        provider = layer.dataProvider()
+        provider.truncate()
+        provider.addFeatures(out)
+        layer.updateExtents()
+        layer.triggerRepaint()
+
     # ---- the project ----
 
     def get_state(self) -> dict:
         return {"open": self.isVisible(), "layer": self.pinned, "groupBy": self.group, "statistic": self.statistic, "measure": self.measure,
                 "values": sorted(v for v in self.values if v != OTHERS), "range": list(self.range) if self.range else None,
-                "inView": self.in_view, "heatmap": self.heat_box.isChecked(), "radius": self.radius.value()}
+                "inView": self.in_view, "heatmap": self.heat_box.isChecked(), "radius": self.radius.value(),
+                "trendBy": self.trend_by, "trendStep": self.trend_unit, "surgeMap": self.surge_box.isChecked()}
 
     def set_state(self, state: dict) -> None:
         layer = self.project.mapLayer(state.get("layer") or "") if isinstance(state.get("layer"), str) else None
@@ -1076,6 +1438,12 @@ class DashboardDock(PluginDock):
             isinstance(x, (int, float)) for x in chosen) else None
         if isinstance(state.get("heatmap"), bool):
             self.set_heatmap(state["heatmap"])
+        if isinstance(state.get("trendBy"), str):
+            self.trend_by = state["trendBy"]
+        if state.get("trendStep") in ("", *TREND_STEPS):
+            self.trend_unit = state["trendStep"]
+        if isinstance(state.get("surgeMap"), bool):
+            self.surge_box.setChecked(state["surgeMap"])
         self._filter_changed()
 
     def _write_state(self, document) -> None:
@@ -1085,7 +1453,7 @@ class DashboardDock(PluginDock):
 
     def _read_state(self, document) -> None:
         # Heatmaps left in the project file are rebuilt when needed.
-        stale = [l.id() for l in self.project.mapLayers().values() if l.customProperty(HEATMAP)]
+        stale = [l.id() for l in self.project.mapLayers().values() if l.customProperty(HEATMAP) or l.customProperty(SURGES)]
         if stale:
             self.project.removeMapLayers(stale)
         element = document.documentElement().firstChildElement(STATE_TAG)
@@ -1100,13 +1468,15 @@ class DashboardDock(PluginDock):
 
     def _project_cleared(self) -> None:
         self._disconnect()
-        self.layer, self.pinned, self.heat_layer, self._filtered = None, None, None, None
+        self.layer, self.pinned, self.heat_layer, self._filtered, self.surge_layer = None, None, None, None, None
+        self.trend_by, self.trends, self.trend_starts, self._regions = "group", [], [], {}
         self._features, self.values, self.range = [], set(), None
 
     def close_all(self) -> None:
         """Takes the condition off the layer and the heatmap away (the plugin unloads)."""
         self._restore_filter()
         self._remove_heatmap()
+        self._remove_surges()
         self._disconnect()
         for signal, slot in self._outside:
             try:
