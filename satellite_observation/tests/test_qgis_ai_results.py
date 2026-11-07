@@ -69,6 +69,8 @@ def plugin(tmp_path, monkeypatch):
     assert p.api.problems == [], p.api.problems
     obs = p.api.observation_dock
     obs.show()
+    # The list as read (the review order is tested in test_qgis_ai_review).
+    p.api.ai_results.order.setCurrentIndex(1)
     yield p, iface, tmp_path
     p.unload()
     iface.setActiveLayer(None)

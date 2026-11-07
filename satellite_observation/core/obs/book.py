@@ -779,6 +779,34 @@ class ObservationBook:
         self._say(f"{area_label(area)}を記録{f'（範囲内で記録のない前後の画像のモノ {missing} 件）' if missing else ''}")
         return area
 
+    def add_areas(self, rings: Sequence[tuple[Sequence[Sequence[float]], str, str]], image: Optional[str] = None) -> Optional[list[CheckedArea]]:
+        """Records several checked areas on an image in one save: each (outline, kind, note), as add_area takes them."""
+        info = self._image(image)
+        if info is None:
+            return None
+        now = now_ms()
+        made = []
+        for ring, kind, note in rings:
+            points = [[float(p[0]), float(p[1])] for p in ring]
+            if len(points) < 3:
+                continue
+            if points[0] != points[-1]:
+                points.append(list(points[0]))
+            made.append(CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
+                                    kind=kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
+                                    recorded_by=self.observer()))
+        if not made:
+            return []
+        try:
+            self.area_store.save(made)
+        except Exception as error:  # noqa: BLE001
+            self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
+            return None
+        with self.lock:
+            self.areas = [*self.areas, *made]
+        self._say(f"確認範囲 {len(made)} 件を記録")
+        return made
+
     def add_box_area(self, box: Sequence[float], kind: str = "", note: str = "") -> Optional[CheckedArea]:
         return self.add_area(box_ring(box), kind, note)
 
