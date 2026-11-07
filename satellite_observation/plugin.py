@@ -29,6 +29,7 @@ from .ui.catalog_dock import CatalogDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.dashboard_dock import DashboardDock
 from .ui.docks import StubDock
+from .ui.dock_layouts import DockLayoutMenu
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
 from .ui.imaging_plan_dock import ImagingPlanDock
@@ -68,7 +69,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["ドックを初期位置に戻す", "設定…"]
+MENU_TOP = ["ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles"]),
@@ -501,6 +502,13 @@ class SatelliteObservationPlugin:
         home.triggered.connect(lambda: self.place_docks())
         self._add_to_menu(home)
         self.actions.append(home)
+        # 「ドックのレイアウト」: named layouts per kind of work (ui/dock_layouts.py).
+        self.dock_layouts = DockLayoutMenu(self.iface.mainWindow(), lambda: self.docks,
+                                           lambda text: self.iface.messageBar().pushSuccess(tr("ドックのレイアウト"), text), self.iface.mainWindow())
+        layouts = self.dock_layouts.menuAction()
+        layouts.setIcon(icon("dock_layouts"))
+        self._add_to_menu(layouts)
+        self.actions.append(layouts)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self._add_to_menu(settings)
@@ -917,6 +925,9 @@ class SatelliteObservationPlugin:
             self.iface.removePluginMenu(MENU, menu.menuAction())
             menu.deleteLater()
         self._submenus, self._menu_top, self._menu_entries = [], [], []
+        if getattr(self, "dock_layouts", None) is not None:
+            self.dock_layouts.deleteLater()
+            self.dock_layouts = None
         self.actions = []
         for dock in self.docks.values():
             if hasattr(dock, "close_down"):

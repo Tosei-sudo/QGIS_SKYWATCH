@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- ドックのレイアウト: a window with a panel on the left, and a bookmark for a saved layout -->
+  <rect x="2" y="5" width="24" height="20" rx="2" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <rect x="3" y="10" width="8" height="14" fill="#94a3b8"/>
+  <rect x="3" y="7" width="4" height="3" fill="#475569"/>
+  <path d="M19 14 h10 v15 l-5 -4 l-5 4 z" fill="#2563eb" stroke="#1e3a8a" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>
