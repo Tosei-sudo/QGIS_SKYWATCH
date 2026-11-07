@@ -29,6 +29,7 @@ from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: 
 from satellite_observation.ui.obs_report_dialog import ReportDialog  # noqa: E402
 
 URL = "https://example.com/arcgis/rest/services/Obs/FeatureServer/0"
+URL2 = "https://example.com/arcgis/rest/services/Obs2/FeatureServer/0"
 FIELDS = ["OBS_ID", "IMAGE_ID", "IMAGE_NAME", "IMAGE_TIME", "OBJECT_ID", "OBJECT_NAME", "KIND", "ACTIVITY", "PRESENT", "NOTE",
           "LENGTH_M", "HEADING", "CONFIDENCE", "OBSERVER", "UPDATED_BY", "CREATED_AT", "UPDATED_AT", "DELETED_AT"]
 TYPES = {"IMAGE_TIME": "esriFieldTypeDate", "CREATED_AT": "esriFieldTypeDate", "UPDATED_AT": "esriFieldTypeDate",
@@ -449,9 +450,7 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     settings.set_config_source(str(config))
     p.context.esri = lambda: EsriClient(fake)
     p.context.reload()
-    # The store chosen before stays chosen; the Esri stores come first.
-    assert dock.store_select.currentText() == "ローカル"
-    dock.store_select.setCurrentIndex(0)
+    # Another settings file chooses its first store; the Esri stores come first.
     assert dock.store_select.count() == 2 and dock.store_select.currentText() == "共有" and dock.store_set.remote
     assert wait_for(lambda: dock.book.loaded)
     dock.set_active(True)
@@ -469,6 +468,40 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert dock.book.label == "ローカル" and dock.book.living() == []
     dock.store_select.setCurrentIndex(0)
     assert [o.object_name for o in living(dock.book.records)] == ["共有のモノ"]
+
+
+def test_the_store_chosen_follows_the_settings_file(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    for url in (URL, URL2):
+        fake.add_layer(url, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    p.context.esri = lambda: EsriClient(fake)
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    a.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    b.write_text(json.dumps({"observationStores": [{"label": "部署", "url": URL2}]}), encoding="utf-8")
+    assert dock.store_select.currentText() == "ローカル"
+    settings.set_config_source(str(a))
+    p.context.reload()
+    assert dock.store_select.currentText() == "共有" and dock.book.label == "共有"
+    # The same file read again keeps what was chosen by hand.
+    dock.store_select.setCurrentIndex(1)
+    p.context.reload()
+    assert dock.store_select.currentText() == "ローカル" and dock.book.label == "ローカル"
+    # Another file: its first store, though the local one is in it too.
+    settings.set_config_source(str(b))
+    p.context.reload()
+    assert dock.store_select.currentText() == "部署" and dock.book.label == "部署"
+    # The same file with other stores in it: its first store again.
+    dock.store_select.setCurrentIndex(1)
+    b.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}, {"label": "部署", "url": URL2}]}),
+                 encoding="utf-8")
+    p.context.reload()
+    assert dock.store_select.currentText() == "共有" and dock.store_select.count() == 3
+    # No settings file: the local store.
+    settings.set_config_source("")
+    p.context.reload()
+    assert dock.store_select.count() == 1 and dock.book.label == "ローカル"
+    assert wait_for(lambda: not dock._running)
 
 
 def test_local_records_can_be_turned_off_in_the_settings(plugin, tmp_path):
