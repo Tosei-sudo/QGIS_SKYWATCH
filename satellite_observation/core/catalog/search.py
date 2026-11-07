@@ -140,27 +140,41 @@ def _clamp(v: float, limit: float) -> float:
     return max(-limit, min(limit, v))
 
 
+#: The Esri geometry types of the shapes a search can be over, by their key.
+_SHAPES = (("rings", "esriGeometryPolygon"), ("paths", "esriGeometryPolyline"), ("points", "esriGeometryMultipoint"))
+
+
+def spatial_filter(box: Optional[Any]) -> dict[str, str]:
+    """
+    The spatial part of a query over `box`: `[xmin, ymin, xmax, ymax]`, or an
+    Esri polygon `{"rings": …}`, polyline `{"paths": …}` or multipoint
+    `{"points": …}` (WGS 84), the image footprints intersecting it; {} for anywhere.
+    """
+    if box is None:
+        return {}
+    if isinstance(box, dict):
+        for key, kind in _SHAPES:
+            if box.get(key):
+                return {"geometry": json.dumps({key: box[key], "spatialReference": {"wkid": 4326}}),
+                        "geometryType": kind, "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
+        return {}
+    xmin, ymin, xmax, ymax = box
+    return {
+        "geometry": json.dumps({"xmin": _clamp(xmin, 180), "ymin": _clamp(ymin, 90), "xmax": _clamp(xmax, 180), "ymax": _clamp(ymax, 90), "spatialReference": {"wkid": 4326}}),
+        "geometryType": "esriGeometryEnvelope", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
+    }
+
+
 def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLayerInfo, search: CatalogSearch,
                    box: Optional[Any], token: Optional[str]) -> CatalogResult:
     """
-    The images matching `search` (over `box` when given: `[xmin, ymin, xmax,
-    ymax]` or an Esri polygon `{"rings": …}` drawn on the map, WGS 84), newest
-    first. Services that cannot order or page results are asked for
+    The images matching `search` (over `box` when given: see
+    `spatial_filter`; the map's extent, the area drawn or a layer's
+    geometry), newest first. Services that cannot order or page results are asked for
     everything and sorted here.
     """
     where = where_of(catalog, layer.types, search)
-    spatial: dict[str, str] = {}
-    if isinstance(box, dict):
-        spatial = {
-            "geometry": json.dumps({"rings": box["rings"], "spatialReference": {"wkid": 4326}}),
-            "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        }
-    elif box is not None:
-        xmin, ymin, xmax, ymax = box
-        spatial = {
-            "geometry": json.dumps({"xmin": _clamp(xmin, 180), "ymin": _clamp(ymin, 90), "xmax": _clamp(xmax, 180), "ymax": _clamp(ymax, 90), "spatialReference": {"wkid": 4326}}),
-            "geometryType": "esriGeometryEnvelope", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects",
-        }
+    spatial = spatial_filter(box)
     order = catalog.fields.get("acquired") or catalog.fields.get("registered")
     base = {"where": where, **spatial, "outFields": "*", "returnGeometry": "true", "outSR": "4326"}
     url = f"{catalog.url}/query"
