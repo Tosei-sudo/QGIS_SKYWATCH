@@ -41,7 +41,7 @@ from qgis.core import QgsCoordinateTransform, QgsFeatureRequest, QgsProject, Qgs
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
+    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
 from ..core.ai.model_config import DetectModelConfig
@@ -63,6 +63,8 @@ TITLE = "AI結果"
 EDITS = ("featureAdded", "featuresDeleted", "attributeValueChanged", "geometryChanged", "editingStopped")
 #: The list's orders: for review (要確認 first, least sure first), as read.
 ORDERS = ("確認優先（確信度の低い順）", "読み込み順")
+#: 「未取込をすべて取り込み」 asks first above this many.
+ASK_OVER = 20
 #: The list's column of the review state.
 REVIEW_COLUMN = 7
 
@@ -184,7 +186,8 @@ class AiResultsDock(PluginDock):
         self.import_button.setToolTip(_tr("一覧か地図で選んだ結果を、この画像の観測記録（ポイント）として記録。ポリゴンは内側の点と長辺・短辺（長さ・幅）で記録"))
         self.import_button.clicked.connect(lambda: self.import_rows(self.selected_rows()))
         self.import_all_button = QPushButton(_tr("未取込をすべて取り込み"))
-        self.import_all_button.clicked.connect(lambda: self.import_rows(list(range(len(self.rows)))))
+        self.import_all_button.setToolTip(_tr("取込済・誤検出を除く結果をすべて観測記録に（多いときは確認）"))
+        self.import_all_button.clicked.connect(lambda: self.import_all())
         for b in (self.import_button, self.import_all_button):
             buttons.addWidget(b)
         buttons.addStretch(1)
@@ -587,6 +590,19 @@ class AiResultsDock(PluginDock):
 
     # ---- recording -----------------------------------------------------------
 
+    def import_all(self, confirm: bool = True) -> list:
+        """「未取込をすべて取り込み」: every result not recorded nor rejected; more than ASK_OVER asked first."""
+        self._refresh_imported()
+        todo = [i for i, (_s, r) in enumerate(self.rows) if r.tag not in self.imported and r.tag not in self.rejected]
+        if confirm and len(todo) > ASK_OVER:
+            box = QMessageBox(QMessageBox.Icon.Question, _tr("未取込をすべて取り込み"),
+                              _tr("未取込 {n} 件を観測記録に取り込みますか？（誤検出は除外）").format(n=len(todo)),
+                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return []
+        return self.import_rows(todo)
+
     def import_rows(self, rows: list[int], then: Optional[Callable[[], None]] = None) -> list:
         """Records the results of these rows (those not recorded yet, with a place) as observations of the image; `then` after."""
         dock = self.observations()
@@ -603,12 +619,16 @@ class AiResultsDock(PluginDock):
             return []
         self._refresh_imported()
         levels = {c.label for c in book.confidences()}
-        entries, done_rows, skipped = [], [], 0
+        entries, done_rows, skipped, wrong = [], [], 0, 0
         for row in rows:
             if not (0 <= row < len(self.rows)):
                 continue
             source, r = self.rows[row]
             if r.tag in self.imported:
+                continue
+            if r.tag in self.rejected:
+                # Recorded as wrong (誤検出): not recorded as a thing too (delete its checked area to take that back).
+                wrong += 1
                 continue
             place = place_of(r)
             if place is None:
@@ -625,7 +645,7 @@ class AiResultsDock(PluginDock):
             entries.append(entry)
             done_rows.append(row)
         if not entries:
-            self.status.setText(_tr("取り込む結果なし（取込済か、位置なし）") if rows else _tr("結果を選択"))
+            self.status.setText(_tr("取り込む結果なし（取込済・誤検出か、位置なし）") if rows else _tr("結果を選択"))
             return []
 
         carried_ids = {e.carry.object_id for e in entries if e.carry is not None}
@@ -651,6 +671,8 @@ class AiResultsDock(PluginDock):
                 text += _tr("（継続 {k} 件）").format(k=len(continued))
             if skipped:
                 text += _tr("（位置なし {k} 件は除外）").format(k=skipped)
+            if wrong:
+                text += _tr("（誤検出 {k} 件は除外）").format(k=wrong)
             self.status.setText(text + self._review_text())
             if then is not None:
                 then()
