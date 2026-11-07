@@ -30,10 +30,11 @@ from ..core.plan.store import (
     STATUS_COLORS, STATUSES, PlanStoreConfig, SavedPlan, SavedShot, ShotCheck, delete_plan, list_plans, load_shots,
     progress_text, track_shots, update_shots,
 )
-from ..qgis_io.catalog_io import Cancelled, open_record
+from ..qgis_io.catalog_io import Cancelled, add_record_layers, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
+from .image_files_dialog import choose_image_files
 from .plan_overlay import PlanOverlay
 
 
@@ -440,9 +441,15 @@ class SavedPlansDock(PluginDock):
                 return then(None) if then else None
             # Opened as in 「画像カタログ」: a COG with the authentication chosen for its server, a local path through pathMappings.
             record = record_of(features[0], catalog.fields)
+            problems: list[str] = []
             try:
-                layer = open_record(record, catalog, self.context.config.path_mappings, self._choose_folder)
-                QgsProject.instance().addMapLayer(layer)
+                layers = open_record(record, catalog, self.context.config.path_mappings, self._choose_folder,
+                                     lambda r, files, more: self.choose_images(r, files, more), problems)
+                add_record_layers(layers, record)
+                # The first of a folder's images is the one handed on (the rest are beside it in the group).
+                layer = layers[0]
+                if problems:
+                    self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), " / ".join(problems))
             except Cancelled:
                 layer = None
             except PathError as error:
@@ -452,6 +459,10 @@ class SavedPlansDock(PluginDock):
                 then(layer)
 
         self._start(self.tr("画像の検索"), work, done, lambda m: self.status.setText(self.tr("画像の読み込みに失敗: {m}").format(m=m)))
+
+    def choose_images(self, record, files, more):
+        """Which of a record's images to open (a record whose path is a folder)."""
+        return choose_image_files(self, record, files, more)
 
     def _choose_folder(self, mapping):
         return QFileDialog.getExistingDirectory(self, self.tr("「{label}」（{prefix}）のフォルダの選択").format(label=mapping.label, prefix=mapping.prefix)) or None

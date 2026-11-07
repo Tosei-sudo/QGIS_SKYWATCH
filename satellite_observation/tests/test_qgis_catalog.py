@@ -44,7 +44,9 @@ def plugin(tmp_path, monkeypatch):
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     config = {
         "imageCatalogs": [{"label": "衛星画像", "url": IMAGES, "fields": {
-            "id": "IMG_ID", "acquired": "ACQ", "sensor": "SENSOR", "angle": "OFF_NADIR", "azimuth": "AZ", "source": "PATH"}}],
+            "id": "IMG_ID", "acquired": "ACQ", "sensor": "SENSOR", "angle": "OFF_NADIR", "azimuth": "AZ", "source": "PATH"},
+            # A record whose path is a folder: its images by sensor.
+            "imagePatterns": {"S1": "^PAN/.*_P\\.tif$", "*": "\\.jp2$"}}],
         "pathMappings": [{"prefix": "\\\\nas\\images", "label": "画像サーバー"}],
         "watchInterval": 30,
     }
@@ -403,3 +405,60 @@ def test_searching_over_a_layers_geometry_as_it_is(plugin):
     # Back to the extent: the layer row hides.
     dock.area_box.setCurrentIndex(dock.area_box.findData("extent"))
     assert dock.layer_row.isHidden()
+
+
+def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugin, monkeypatch):
+    from satellite_observation.core.catalog.search import record_of
+    from satellite_observation.qgis_io.catalog_io import IMAGE_FILE
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    searched(dock)
+    scene = folder / "2026" / "Scene_D"
+    for rel in ("PAN/b_P.TIF", "PAN/a_P.tif", "PAN/sub/c_P.tif", "MS/a_M.tif", "PAN/a_P.tif.aux.xml"):
+        (scene / rel).parent.mkdir(parents=True, exist_ok=True)
+        if rel.endswith(".xml"):
+            (scene / rel).write_text("<PAMDataset/>")
+        else:
+            geotiff(scene / rel)
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: str(folder))
+    catalog = dock._shown_catalog
+    record = record_of({"attributes": {"IMG_ID": "D", "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\scene_d"}}, catalog.fields)
+    asked = []
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: asked.append((r.id, files, more)) or files[:2])
+    layers = dock.open_records([record])
+    # S1's pattern: the PAN images at any depth (not MS, nor the .aux.xml), in natural order; the two chosen open.
+    assert asked == [("D", ["PAN/a_P.tif", "PAN/b_P.TIF", "PAN/sub/c_P.tif"], False)]
+    assert [l.name() for l in layers] == ["PAN/a_P.tif", "PAN/b_P.TIF"]
+    assert all(l.isValid() and l.customProperty(IMAGE_ID) == "D" for l in layers)
+    assert [l.customProperty(IMAGE_FILE) for l in layers] == ["PAN/a_P.tif", "PAN/b_P.TIF"]
+    group = QgsProject.instance().layerTreeRoot().findGroup("D")
+    assert group is not None and [n.layerId() for n in group.findLayers()] == [l.id() for l in layers]
+    # Cancelled: nothing opens.
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: None)
+    assert dock.open_records([record]) == []
+    # Another sensor: the `*` pattern (.jp2), none here, so the reason is shown.
+    other = record_of({"attributes": {"IMG_ID": "E", "SENSOR": "S7", "PATH": "\\\\nas\\images\\2026\\scene_d"}}, catalog.fields)
+    assert dock.open_records([other]) == []
+    assert "E のフォルダ" in dock.status.text() and "画像なし" in dock.status.text()
+    # One image only: opened without asking, by itself (no group).
+    (scene / "only").mkdir()
+    geotiff(scene / "only" / "x.jp2")
+    one = record_of({"attributes": {"IMG_ID": "F", "SENSOR": "S7", "PATH": "\\\\nas\\images\\2026\\scene_d\\only"}}, catalog.fields)
+    asked.clear()
+    [layer] = dock.open_records([one])
+    assert layer.name() == "F x.jp2" and layer.customProperty(IMAGE_FILE) == "x.jp2"
+    assert QgsProject.instance().layerTreeRoot().findGroup("F") is None
+
+
+def test_the_dialog_choosing_a_records_images():
+    from satellite_observation.ui.image_files_dialog import ImageFilesDialog
+
+    dialog = ImageFilesDialog("D", ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"], more=True)
+    assert dialog.chosen() == ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"]
+    dialog.filter.setText("ms/")
+    dialog._set_shown(Qt.CheckState.Unchecked)
+    assert dialog.chosen() == ["PAN/a.tif", "PAN/b.tif"]
+    dialog.filter.setText("")
+    dialog._set_shown(Qt.CheckState.Unchecked)
+    assert dialog.chosen() == [] and not dialog.buttons.button(dialog.buttons.StandardButton.Ok).isEnabled()

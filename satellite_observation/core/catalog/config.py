@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from ..util import is_name, is_number, is_record, is_url, layer_url
+from .images import image_patterns_of
 
 ROLE_LABELS = {"id": "画像ID", "acquired": "撮像日時", "registered": "登録日時", "systemRegistered": "システム登録日時", "sensor": "センサー", "angle": "角度", "azimuth": "方位角"}
 ANGLE_KINDS = ("offNadir", "incidence", "elevation")
@@ -31,6 +32,8 @@ class CatalogConfig:
     orbit_height: float = 600
     token: Optional[str] = None
     authcfg: Optional[str] = None
+    #: The images of a record whose path is a folder, by sensor (`*` for the others); see images.py.
+    image_patterns: dict[str, list[str]] = field(default_factory=dict)
 
     def label_of(self, role: str) -> str:
         """The heading of a role: the settings file's `labels`, else the viewer's default."""
@@ -42,6 +45,7 @@ class CatalogConfig:
             "label": self.label, "url": self.url, "fields": dict(self.fields), "labels": dict(self.labels),
             "columns": [dict(c) for c in self.columns], "where": self.where, "maxResults": self.max_results,
             "angleKind": self.angle_kind, "orbitHeight": self.orbit_height,
+            **({"imagePatterns": {k: list(v) for k, v in self.image_patterns.items()}} if self.image_patterns else {}),
         }
 
     @staticmethod
@@ -54,6 +58,7 @@ class CatalogConfig:
             where=value.get("where") or None, max_results=int(value.get("maxResults") or 500),
             angle_kind=value.get("angleKind") if value.get("angleKind") in ANGLE_KINDS else "offNadir",
             orbit_height=float(value.get("orbitHeight") or 600),
+            image_patterns=image_patterns_of(value["imagePatterns"], [], "imagePatterns") if "imagePatterns" in value else {},
         )
 
 
@@ -109,6 +114,7 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         problems.append(f"{at} の angleKind は {' / '.join(ANGLE_KINDS)} のいずれかで指定")
     if "orbitHeight" in value and not (is_number(height) and height > 0):
         problems.append(f"{at} の orbitHeight は衛星の高度（km）で指定")
+    patterns = image_patterns_of(value["imagePatterns"], problems, f"{at}.imagePatterns") if "imagePatterns" in value else {}
     label, token, where, most = value.get("label"), value.get("token"), value.get("where"), value.get("maxResults")
     return CatalogConfig(
         label=label if isinstance(label, str) and label else f"カタログ {index + 1}",
@@ -121,6 +127,7 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         max_results=min(most, 5000) if isinstance(most, int) and not isinstance(most, bool) and most > 0 else 500,
         angle_kind=angle_kind if angle_kind in ANGLE_KINDS else "offNadir",
         orbit_height=height if is_number(height) and height > 0 else 600,
+        image_patterns=patterns,
     )
 
 
