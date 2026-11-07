@@ -30,6 +30,7 @@ from ..core.plan.store import (
     STATUS_COLORS, STATUSES, PlanStoreConfig, SavedPlan, SavedShot, ShotCheck, delete_plan, list_plans, load_shots,
     progress_text, track_shots, update_shots,
 )
+from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
@@ -446,6 +447,7 @@ class SavedPlansDock(PluginDock):
                 layers = open_record(record, catalog, self.context.config.path_mappings, self._choose_folder,
                                      lambda r, files, more: self.choose_images(r, files, more), problems)
                 add_record_layers(layers, record)
+                overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
                 # The first of a folder's images is the one handed on (the rest are beside it in the group).
                 layer = layers[0]
                 if problems:

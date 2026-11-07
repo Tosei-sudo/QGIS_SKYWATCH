@@ -124,6 +124,24 @@ def profile_folder() -> str:
     return folder
 
 
+def overview_cache_setting() -> str:
+    """The settings file's `overviews.cacheFolder` as last read ("" for the profile's folder), used when QGIS starts."""
+    return _get("overview_cache_folder")
+
+
+def set_overview_cache_setting(folder: str) -> None:
+    _set("overview_cache_folder", folder)
+
+
+def overview_cache_to_clear() -> str:
+    """The overview cache folder to clear when QGIS starts next ("" for none)."""
+    return _get("overview_cache_clear")
+
+
+def set_overview_cache_to_clear(folder: str) -> None:
+    _set("overview_cache_clear", folder)
+
+
 def local_gpkg_path() -> str:
     """The local GeoPackage of observations, checked areas and the classification."""
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")

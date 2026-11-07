@@ -25,6 +25,7 @@ from ..core.catalog.query import CatalogSearch, time_text
 from ..core.catalog.search import read_catalog_layer, record_of
 from ..core.catalog.watch import CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch
 from ..core.catalog.watch_store import WatchStore, check_due
+from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
@@ -275,6 +276,7 @@ class NoticesDock(PluginDock):
                 problems.append(str(error))
                 continue
             add_record_layers(opened, record)
+            overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
         if any(n.kind == PLAN for n in notices):
             self.zoom_to_chosen()
