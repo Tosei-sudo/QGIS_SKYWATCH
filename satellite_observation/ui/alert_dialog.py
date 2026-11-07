@@ -4,7 +4,8 @@
 Tab 「通報文の作成」: a format (the settings file's default first), the
 period (登録日時 or 撮像日時), then 「抽出」 reads the rules, the geofences
 and what was already reported from Esri (in a task) and lists a line per
-record: untick one to leave it out, edit a line by hand. 「通報」 adds the
+record, highest importance score first (the score in the first column,
+its parts in the tooltip): untick one to leave it out, edit a line by hand. 「通報」 adds the
 lines to the Esri log table, then copies the text (header, lines, footer)
 and writes the file, as the format says; 「コピーのみ」 copies without
 recording anything.
@@ -25,7 +26,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core import edit_stamp
 from ..core.obs.alerts import (
     AlertItem, AlertSettings, LogRow, Moment, build_lines, load_geofences, load_log, load_rules, manual_items, remove_log,
-    report_text, reported_ids, select, write_file, write_log,
+    report_text, reported_ids, score_note, select, write_file, write_log,
 )
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
@@ -92,7 +93,7 @@ class AlertDialog(QDialog):
         row.addStretch(1)
         m.addLayout(row)
         self.lines_table = QTableWidget(0, 2)
-        self.lines_table.setHorizontalHeaderLabels([self.tr("通報"), self.tr("行（編集可）")])
+        self.lines_table.setHorizontalHeaderLabels([self.tr("通報・重要度"), self.tr("行（編集可）")])
         self.lines_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.lines_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.lines_table.itemChanged.connect(lambda _item: self._render_text())
@@ -231,13 +232,13 @@ class AlertDialog(QDialog):
             rules = load_rules(client, s.rules, tokens["rules"]) if s.rules else None
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = set() if again or not s.table else reported_ids(client, s, tokens["table"])
-            return select(records, s, rules, fences, levels, done, start, end, by), rules
+            return select(records, s, rules, fences, levels, done, start, end, by, history=records), rules
 
         def finished(result) -> None:
             self.pick_button.setEnabled(True)
             picked, rules = result
             ids = {i.record.id for i in picked}
-            # Records added by hand stay (first), unless picked by the conditions too.
+            # Records added by hand stay first (unless picked by the conditions too); those picked follow, highest score first.
             self.items = [i for i in self.items if i.manual and i.record.id not in ids] + picked
             self._render_lines()
             rule_note = "" if rules is None else self.tr("（条件 {n} 件）").format(n=len(rules))
@@ -264,11 +265,13 @@ class AlertDialog(QDialog):
         self.tabs.setCurrentIndex(0)
         client = self.dock.context.esri()
         tokens = {k: self._token(getattr(s, k)) for k in ("geofences", "table")}
+        book = self.dock.book
+        history, levels = (list(book.records), book.confidences()) if book else ([], [])
 
         def work(_task):
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = reported_ids(client, s, tokens["table"]) if s.table else set()
-            return manual_items(records, fences), done
+            return manual_items(records, fences, s, levels, history), done
 
         def finished(result) -> None:
             added, done = result
@@ -279,7 +282,7 @@ class AlertDialog(QDialog):
 
         def failed(message: str) -> None:
             # Added all the same: only the geofence names are missing.
-            self.items = manual_items(records) + self.items
+            self.items = manual_items(records, (), s, levels, history) + self.items
             self._render_lines()
             self._say(self.tr("手動で {n} 件を追加（ジオフェンス・通報済みの確認に失敗: {m}）").format(n=len(records), m=message))
 
@@ -310,9 +313,19 @@ class AlertDialog(QDialog):
             check.setCheckState(Qt.CheckState.Checked)
             self.lines_table.setItem(r, 0, check)
             cell = QTableWidgetItem(line)
-            if r < len(self.items) and self.items[r].manual:
-                cell.setToolTip(self.tr("手動で追加（条件に関係なく通報）"))
-                check.setText(self.tr("手動"))
+            item = self.items[r] if r < len(self.items) else None
+            marks, tips = [], []
+            if item is not None and item.manual:
+                tips.append(self.tr("手動で追加（条件に関係なく通報）"))
+                marks.append(self.tr("手動"))
+            if item is not None and item.score is not None:
+                marks.append(f"{item.score:g}")
+                tips.append(self.tr("重要度 {s}: {p}").format(s=f"{item.score:g}", p=score_note(item)))
+            if marks:
+                check.setText(" ".join(marks))
+            if tips:
+                check.setToolTip("\n".join(tips))
+                cell.setToolTip("\n".join(tips))
             self.lines_table.setItem(r, 1, cell)
         self.lines_table.blockSignals(False)
         self._filling = False

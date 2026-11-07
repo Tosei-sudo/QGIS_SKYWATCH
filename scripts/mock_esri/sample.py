@@ -299,13 +299,14 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
 
 ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
-                     "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
+                     "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
 ALERT_LOG_FIELDS = {"OBS_ID": {"type": S, "length": 64}, "REPORT_NAME": S, "TEXT": {"type": S, "length": 4000}, "REPORTED_AT": T,
                     "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "MANUAL": F, "KIND": S}
 #: 通報条件 (alertReports.rules): ships moving in the 横須賀 geofence, and every aircraft.
 ALERT_RULES = [
-    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き"},
-    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "AREA": "", "ACTIVE": 1, "NOTE": "航空機"},
+    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き",
+     "WEIGHT": 1.0},
+    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "AREA": "", "ACTIVE": 1, "NOTE": "航空機", "WEIGHT": 0.6},
     {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
@@ -413,8 +414,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 1, "name": "出力履歴", "fields": HISTORY_FIELDS, "features": []}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
-            {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F},
-             "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1}, "geometry": {"rings": [_box_ring(AREA)]}}])},
+            {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D},
+             "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0}, "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []}]},
     ]}
     for service in out["services"]:

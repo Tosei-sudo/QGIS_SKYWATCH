@@ -4,8 +4,8 @@ import json
 from satellite_observation.core.config import parse_config
 from satellite_observation.core.esri import EsriClient
 from satellite_observation.core.obs.alerts import (
-    AlertRule, Geofence, Moment, alert_settings_of, build_lines, fill, inside_rings, load_geofences, load_log, load_rules,
-    remove_log, report_text, reported_ids, rules_of_rows, select, write_file, write_log,
+    AlertField, AlertRule, Geofence, Moment, alert_settings_of, build_lines, fill, inside_rings, load_geofences, load_log, load_rules,
+    manual_items, remove_log, report_text, reported_ids, rules_of_rows, score_note, select, weight_of, write_file, write_log,
 )
 from satellite_observation.core.obs.model import DEFAULT_CONFIDENCES, Observation
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer
@@ -107,10 +107,12 @@ def test_select_by_rules_geofence_confidence_period_and_reported():
         obs(id="i", created_at=T0 - 86_400_000),                          # before the period
     ]
     items = select(records, s, rules, fences, DEFAULT_CONFIDENCES, reported={"h"}, start=T0)
-    assert [i.record.id for i in items] == ["a", "c"]
-    assert items[0].rules == ["支援船"] and items[1].areas == ["舞鶴"]
+    # Highest score first: c is the only aircraft (rarer than a, with ships near it before).
+    assert [i.record.id for i in items] == ["c", "a"]
+    assert items[1].rules == ["支援船"] and items[0].areas == ["舞鶴"]
     # No rules table: everything meeting the fixed conditions.
-    assert [i.record.id for i in select(records, s, None, (), DEFAULT_CONFIDENCES, start=T0)] == ["a", "b", "c", "d", "h"]
+    assert sorted(i.record.id for i in select(records, s, None, (), DEFAULT_CONFIDENCES, start=T0)) == ["a", "b", "c", "d", "h"]
+    assert [i.record.id for i in select(records, settings({"score": False}), None, (), DEFAULT_CONFIDENCES, start=T0)] == ["a", "b", "c", "d", "h"]
     # By image time.
     assert [i.record.id for i in select([obs(id="x", image_time=T0 - 1)], s, None, (), DEFAULT_CONFIDENCES, start=T0, by="imageTime")] == []
 
@@ -193,3 +195,59 @@ def test_manual_items_and_notify_on_save():
     assert build_lines(items, fmt, at) == ["船A|手動|手動|手動"]
     auto = select([obs()], s, None, (), DEFAULT_CONFIDENCES)
     assert build_lines(auto, fmt, at) == ["船A|||自動"]
+
+
+def test_score_parts_weights_rarity_and_order():
+    problems = []
+    s = settings({"score": {"weights": {"confidence": 1, "area": 2, "rule": 1, "rarity": 2},
+                            "rarity": {"days": 10, "radiusKm": 20, "level": 1}, "minScore": 10}}, problems)
+    assert problems == [] and s.score.weights["area"] == 2 and s.score.days == 10 and s.score.level == 1
+    fences = [Geofence("舞鶴", SQUARE, 0.5), Geofence("湾内", [[[134.9, 34.9], [135.1, 34.9], [135.1, 35.1], [134.9, 35.1], [134.9, 34.9]]], 1.0)]
+    rules = [AlertRule(kind=["船舶"], weight=0.4), AlertRule(kind=["船舶"], activities=["航行"], weight=0.8),
+             AlertRule(kind=["航空機"])]
+    day = 86_400_000
+    records = [
+        obs(id="a", lon=135.0, lat=35.0),                                     # 確定, 湾内 (1.0), rule 0.8, 2 ships before → 1/3
+        obs(id="b", confidence="推定", activity="停泊", lon=135.3, lat=35.3),   # 推定 0.5, 舞鶴 0.5, rule 0.4
+        obs(id="c", kind="航空機", lon=136.0, lat=36.0),                       # outside, aircraft: none before
+        obs(id="old1", image_time=T0 - 2 * day, created_at=T0 - day, lon=135.01),    # counted for a (same 大分類 船舶, near)
+        obs(id="old2", kind="船舶 > 貨物船", image_time=T0 - 3 * day, created_at=T0 - day),
+        obs(id="far", image_time=T0 - day, created_at=T0 - day, lon=137.0),           # too far
+        obs(id="long", image_time=T0 - 20 * day, created_at=T0 - day),                # too long ago
+    ]
+    items = select(records, s, rules, fences, DEFAULT_CONFIDENCES, start=T0)
+    by = {i.record.id: i for i in items}
+    a, b, c = by["a"], by["b"], by["c"]
+    assert a.parts == {"confidence": 1.0, "area": 1.0, "rule": 0.8, "rarity": 1 / 3} and a.similar == 2
+    assert a.score == round(100 * (1 + 2 + 0.8 + 2 / 3) / 6, 1)
+    assert b.parts["confidence"] == 0.5 and b.parts["area"] == 0.5 and b.parts["rule"] == 0.4
+    assert c.parts["area"] == 0.0 and c.similar == 0
+    assert [i.record.id for i in items] == sorted(by, key=lambda k: -by[k].score)
+    assert score_note(a) == "確度 100・場所 100・条件 80・珍しさ 33（類似 2 件）"
+    # Written as fields.
+    fmt = s.format("詳細")
+    fmt.fields = [AlertField(source="score", digits=0), AlertField(source="similar")]
+    assert build_lines([a], fmt, Moment(now=T0))[0] == f"{round(a.score)}\t2"
+    # minScore drops the low ones.
+    s.score.min_score = 99
+    assert select(records, s, rules, fences, DEFAULT_CONFIDENCES, start=T0) == []
+    # No score: image time order, no score field.
+    plain = settings({"score": False})
+    assert plain.score is None
+    items = select(records, plain, rules, fences, DEFAULT_CONFIDENCES, start=T0)
+    assert all(i.score is None for i in items) and score_note(items[0]) == ""
+    # Parts with nothing to measure are left out (no geofences, no rules, no levels).
+    only = select([obs(id="z")], settings({"minConfidence": ""}), None, (), (), start=T0)[0]
+    assert set(only.parts) == {"rarity"} and only.score == 100.0
+    # Records added by hand: the rule part is 1.
+    m = manual_items([obs(id="m", activity="停泊")], fences, settings(), DEFAULT_CONFIDENCES, records)[0]
+    assert m.parts["rule"] == 1.0 and m.score is not None
+
+
+def test_score_settings_problems_and_weight_values():
+    problems = []
+    s = settings({"score": {"weights": {"confidence": -1, "size": 1}, "rarity": {"days": "x", "level": 0}, "minScore": 200}}, problems)
+    assert s.score.weights == {"confidence": 1.0, "area": 1.0, "rule": 1.0, "rarity": 1.0} and s.score.min_score == 0
+    assert len(problems) == 5
+    assert [weight_of(v) for v in (None, "", 0.3, "50", "80%", 2, -1, "高")] == [1.0, 1.0, 0.3, 0.5, 0.8, 0.02, 0.0, 1.0]
+    assert rules_of_rows([{"KIND": "船舶", "WEIGHT": 0.25}], dict(s.rules.fields))[0].weight == 0.25
