@@ -8,3 +8,4 @@ satellite_observation/config.jsonc
 satellite_observation/ext/win64/
 satellite_observation/config.lock
 xView
+scripts/mock_esri/data/
