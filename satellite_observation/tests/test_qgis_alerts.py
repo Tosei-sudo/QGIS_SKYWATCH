@@ -1,0 +1,119 @@
+"""「通報」 in QGIS: from the plugin menu, rules / geofences / log read and written in tasks, the clipboard and the file."""
+import json
+
+import pytest
+
+pytest.importorskip("qgis.core")
+from qgis.testing import start_app  # noqa: E402
+
+APP = start_app()
+
+from qgis.core import QgsProject, QgsRasterLayer, QgsSettings  # noqa: E402
+from qgis.PyQt.QtCore import Qt  # noqa: E402
+from qgis.PyQt.QtWidgets import QApplication  # noqa: E402
+
+from satellite_observation.core.esri import EsriClient  # noqa: E402
+from satellite_observation.qgis_io import settings  # noqa: E402
+from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
+from satellite_observation.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from satellite_observation.tests.test_qgis_observations import geotiff  # noqa: E402
+
+RULES = "https://x/arcgis/rest/services/Alerts/FeatureServer/0"
+FENCES = "https://x/arcgis/rest/services/Alerts/FeatureServer/1"
+LOG = "https://x/arcgis/rest/services/Alerts/FeatureServer/2"
+
+
+@pytest.fixture
+def plugin(tmp_path):
+    QgsSettings().remove("satellite_observation")
+    settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
+    settings.set_recorder("田中")
+    from satellite_observation import classFactory
+
+    iface = FakeIface()
+    p = classFactory(iface)
+    p.initGui()
+    layer = QgsRasterLayer(geotiff(tmp_path / "d1.tif", "2026-10-01T01:00:00Z"), "d1")
+    QgsProject.instance().addMapLayers([layer])
+    iface.canvas.setDestinationCrs(layer.crs())
+    iface.canvas.setLayers([layer])
+    iface.canvas.setExtent(layer.extent())
+    dock = p.api.observation_dock
+    dock.show()
+    yield p, iface, dock, tmp_path
+    p.unload()
+
+
+def test_alerts_from_rules_to_the_log_clipboard_and_file(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake = FakeEsri()
+    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")}, ""))
+    rules.add({"KIND": "船舶", "ACTIVITIES": "航行", "AREA": "東京湾", "NOTE": "湾内航行"})
+    fences = fake.add_layer(FENCES, FakeLayer({"NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    fences.add({"NAME": "東京湾"}, {"rings": [[[139.6, 35.5], [139.8, 35.5], [139.8, 35.7], [139.6, 35.7], [139.6, 35.5]]]})
+    log = fake.add_layer(LOG, FakeLayer({"OBS_ID": "esriFieldTypeString", "REPORT_NAME": "esriFieldTypeString", "TEXT": "esriFieldTypeString",
+                                         "REPORTED_AT": "esriFieldTypeDate", "REPORTED_BY": "esriFieldTypeString"}, ""))
+    out = tmp_path / "out" / "alert_{now:%Y%m%d}.txt"
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"alertReports": {
+        "default": "速報", "rules": RULES, "geofences": FENCES, "table": LOG,
+        "formats": [
+            {"name": "詳細", "delimiter": ","},
+            {"name": "速報", "fields": ["objectName", "activity", "area", "rule"], "header": "【注目】{count}件", "footer": "以上",
+             "newline": "lf", "file": {"path": str(out), "encoding": "cp932"}},
+        ]}}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    book = dock.book
+    book.add(139.7, 35.6, object="船A", kind="船舶 > 支援船", activity="航行")
+    book.add(139.7, 35.6, object="船B", kind="船舶", activity="停泊")
+    book.add(140.5, 35.6, object="船C", kind="船舶", activity="航行")
+    # From the plugin menu: 観測記録 ▸ 通報文の作成…
+    action = next(a for a in p.actions if a.objectName() == "SatObsAlert")
+    action.trigger()
+    dialog = dock._alerts
+    assert dialog.isVisible() and dialog.tabs.currentIndex() == 0
+    assert dialog.format_select.currentData() == "速報" and dialog.format_select.count() == 2
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("1 件を抽出"))
+    assert dialog.lines_table.item(0, 1).text() == "船A|航行|東京湾|湾内航行"
+    assert dialog.preview.toPlainText() == "【注目】1件\n船A|航行|東京湾|湾内航行\n以上\n"
+    # Edited by hand, then sent: the log row, the clipboard and the file.
+    dialog.lines_table.item(0, 1).setText("船A|航行|東京湾|至急")
+    dialog.send()
+    assert wait_for(lambda: "件を通報" in dialog.status.text())
+    assert [r["attributes"]["TEXT"] for r in log.rows] == ["船A|航行|東京湾|至急"]
+    assert log.rows[0]["attributes"]["REPORT_NAME"] == "速報"
+    assert QApplication.clipboard().text() == "【注目】1件\n船A|航行|東京湾|至急\n以上\n"
+    written = list((tmp_path / "out").glob("alert_*.txt"))
+    assert len(written) == 1 and written[0].read_bytes().decode("cp932") == "【注目】1件\n船A|航行|東京湾|至急\n以上\n"
+    assert dialog.lines_table.rowCount() == 0
+    # Reported once: not picked again unless asked.
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("0 件を抽出"))
+    dialog.again_check.setChecked(True)
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("1 件を抽出"))
+    # Unticked: nothing to send.
+    dialog.lines_table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
+    assert dialog.chosen() == ([], [])
+    # 通報記録の確認… : the log, copied and deleted (so the record can be reported again).
+    next(a for a in p.actions if a.objectName() == "SatObsAlertLog").trigger()
+    assert dialog.tabs.currentIndex() == 1
+    dialog.read_log()
+    assert wait_for(lambda: dialog.status.text() == "通報記録 1 件")
+    assert dialog.log_table.item(0, 3).text() == "船A|航行|東京湾|至急" and dialog.log_table.item(0, 1).text() == "速報"
+    dialog.log_table.selectRow(0)
+    dialog.copy_log()
+    assert QApplication.clipboard().text() == "船A|航行|東京湾|至急\r\n"
+    dialog.remove_log(confirm=False)
+    assert wait_for(lambda: dialog.status.text() == "通報記録 1 行を削除")
+    assert log.rows == [] and dialog.log_table.rowCount() == 0
+
+
+def test_without_settings_the_dialog_says_so(plugin):
+    p, iface, dock, _ = plugin
+    dialog = dock.open_alerts()
+    assert "alertReports" in dialog.note.text()
+    assert not dialog.pick_button.isEnabled() and not dialog.log_button.isEnabled()

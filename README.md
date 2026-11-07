@@ -243,6 +243,58 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - Esri の分類テーブル（保存先の `taxonomyTable`）では属性 `ACTIVITIES`（文字列。活動を読点かカンマ区切り。`fields.activities` で別名可）に保存し、同じテーブルを使う人と共有する。テーブルに属性がなければ活動は保存されず、変更時にその旨を表示（追加するフィールドの例: 名前 `ACTIVITIES`、文字列、長さ 1000）。他の人の変更は「更新」で読み直す
 - ローカル GeoPackage の分類体系（`taxonomy` テーブル）にも `ACTIVITIES` 列を自動で追加
 
+### 通報（注目の記録・`alertReports`）
+
+注目すべき記録を、値を区切り文字でつないだ 1 件 1 行のテキストにして流す。メニューの「観測記録 ▸ 通報文の作成…」（または「観測記録」ドックの「詳細」の「通報…」）と「観測記録 ▸ 通報記録の確認…」。
+
+- 「通報文の作成」: フォーマット（設定ファイルの `default` が最初に選ばれる）と期間（登録日時か撮像日時）を選んで「抽出」。条件・ジオフェンス・通報済みを Esri から読み、条件に合う記録を 1 行ずつ並べる。チェックを外した行は送らない。行は手で直せる。下にヘッダー・行・フッターの通報文
+- 「通報」で行を Esri の通報テーブルに追加し、フォーマットの指定どおりクリップボードへコピー・ファイルへ書き出し。通報テーブルにある記録は次から抽出しない（「通報済みも含める」で再通報）。「コピーのみ」は通報テーブルに記録せずコピーだけ
+- 「通報記録」タブ: 通報日時の期間・フォーマットで通報テーブルの行を一覧。「選択をコピー」、ダブルクリックでその記録へ、「選択を削除（再通報可にする）」
+- 対象は削除されていない記録。`presentOnly`（既定 `true`）で不在を除き、`minConfidence` で確度の下限
+
+**注目の条件は Esri に置く**（増えたり変わったりするため）。設定ファイルには URL と属性名だけ。
+
+- 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`AREA`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）。`rules` がなければ固定の条件に合う記録すべて
+- ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`。記録が入っているジオフェンスの名前は項目 `area`
+- 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）。フォーマットの `columns` で記録の値を別の属性にも書ける
+- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`／`name`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`）
+
+**フォーマット**（`formats`。名前を付けて複数）:
+
+| キー | 中身 | 既定 |
+| --- | --- | --- |
+| `name` | フォーマットの名前（必須。通報テーブルの `REPORT_NAME`） | — |
+| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "digits", "level", "map", "empty" }`、固定の文字は `{ "text": "…" }` | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
+| `delimiter` | 区切り文字（タブは `"\t"`） | `\|` |
+| `escape` | 値の中の区切り文字・改行の置き換え | 空白 |
+| `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}` | なし |
+| `dateFormat` | 日時の書式（strftime。`iso`・`iso-date`・`unix`・`unixms` も可） | `%Y-%m-%d %H:%M` |
+| `timeZone` | 日時のタイムゾーン | `Asia/Tokyo` |
+| `newline` | `crlf`・`lf` | `crlf` |
+| `clipboard` | 「通報」でクリップボードへコピー | `true` |
+| `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}` | なし |
+| `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
+
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）。
+
+```jsonc
+"alertReports": {
+  "rules": "https://…/Alerts/FeatureServer/0",
+  "geofences": "https://…/Alerts/FeatureServer/1",
+  "table": "https://…/Alerts/FeatureServer/2",
+  "minConfidence": "推定",
+  "default": "速報",
+  "formats": [
+    { "name": "速報", "delimiter": "|", "dateFormat": "%m/%d %H:%M",
+      "fields": ["imageTime", { "source": "kind", "level": 1 }, "objectName", "activity",
+                 { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
+      "header": "【注目】{date} {count}件", "footer": "以上" },
+    { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
+      "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
+  ]
+}
+```
+
 ## 分類体系の編集
 
 「分類体系の編集」ドック（または「分類」タブの「編集ツール」）でツリーを編集する。ドラッグで移動（行の上で下位、行の間で前後、余白で大分類）、F2・ダブルクリックで名前の変更、＋ 大分類・Insert で追加（「A > B」で階層ごと）、削除は 2 回押す、Alt+↑↓ で並べ替え、検索（名前・既知の個体・諸元）。右側で階層名・個体名の呼称・既知の個体・諸元・参考写真（ファイルはローカル GeoPackage、または URL）、下で「諸元の項目」。JSON の保存・読み込みは `config.json` の `observationVocabulary.taxonomy` と同じ形。名前の変更・移動・削除は配下の記録の種別にも反映する。共有の保存先（`taxonomyTable`）を他の人が編集したときは「更新」（ドック上部、または「分類」タブ）で分類体系と諸元の項目を読み直す（記録はそのまま、選択中の分類は残っていれば保持）。
@@ -754,6 +806,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 
 #### 地図・レイヤー・場所
 
