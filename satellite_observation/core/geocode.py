@@ -307,7 +307,8 @@ def search_gazetteer(gazetteer: Gazetteer, query: str, limit: int = LIMIT) -> li
 
 def like_text(text: str) -> str:
     """Escapes a text for a SQL LIKE pattern in single quotes."""
-    return re.sub(r"[%_]", lambda m: "\\" + m[0], text.replace("'", "''"))
+    # The escape character itself first, so that a trailing \ does not escape the closing %.
+    return re.sub(r"[\\%_]", lambda m: "\\" + m[0], text.replace("'", "''"))
 
 
 # --- Asking ------------------------------------------------------------------
@@ -318,13 +319,18 @@ GetBytes = Callable[[str], bytes]
 AskEsri = Callable[[str, dict, Optional[str]], dict]
 
 
+#: What `quote` leaves as it is in a query (as the viewer's encodeURIComponent). Not inside the f-strings:
+#: quotes there need Python 3.12, and QGIS 3.34 runs on 3.10 or 3.11 on some systems.
+_SAFE = "!*'()"
+
+
 def gsi_url(base: str, q: str) -> str:
-    return f"{base}?q={quote(q, safe="!*'()")}"
+    return f"{base}?q={quote(q, safe=_SAFE)}"
 
 
 def nominatim_url(base: str, q: str) -> str:
     url = base if re.search(r"/search$", base) else f"{base}/search"
-    return f"{url}?q={quote(q, safe="!*'()")}&format=jsonv2&limit={LIMIT}&accept-language=ja"
+    return f"{url}?q={quote(q, safe=_SAFE)}&format=jsonv2&limit={LIMIT}&accept-language=ja"
 
 
 class PlaceSearch:

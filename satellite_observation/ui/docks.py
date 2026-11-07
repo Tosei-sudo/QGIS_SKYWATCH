@@ -12,6 +12,7 @@ body scrolls; at its full size nothing changes.
 """
 from __future__ import annotations
 
+import html
 from typing import Callable
 
 from qgis.PyQt.QtCore import QTimer, Qt
@@ -19,6 +20,17 @@ from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from ..qgis_io.context import PluginContext
+
+
+def plain_tip(text: str) -> str:
+    """
+    Other people's text (a name, a note, a URL) for a tooltip, a message box
+    or the message bar, which Qt reads as HTML when it looks like it: shown as
+    it is, never as a link or markup.
+    """
+    if not any(c in text for c in "<>&"):
+        return text
+    return "<p style='white-space:pre-wrap'>" + html.escape(text).replace("\n", "<br>") + "</p>"
 
 
 class PluginDock(QDockWidget):

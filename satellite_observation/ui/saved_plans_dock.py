@@ -34,7 +34,7 @@ from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_tip
 from .image_files_dialog import choose_image_files
 from .plan_overlay import PlanOverlay
 
@@ -81,6 +81,7 @@ class SavedPlansDock(PluginDock):
         top.addWidget(self.store_choice, 1)
         self.body.addLayout(top)
         self.status = QLabel()
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.body.addWidget(self.status)
@@ -366,7 +367,7 @@ class SavedPlansDock(PluginDock):
             text = (self.tr("新たに撮像済み {n} 回").format(n=taken) + (self.tr("・未撮像 {n} 回").format(n=missed) if missed else "")) if changes else self.tr("変わった撮像なし")
             self.status.setText(f"{plan.name}: {text}。{progress_text(plan.statuses)}")
             if say and changes:
-                self.iface.messageBar().pushInfo(self.tr("保存した撮像計画"), f"{plan.name}: {text}")
+                self.iface.messageBar().pushInfo(self.tr("保存した撮像計画"), plain_tip(f"{plan.name}: {text}"))
             if then:
                 then()
 
@@ -439,7 +440,7 @@ class SavedPlansDock(PluginDock):
 
         def done(features):
             if not features:
-                self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), self.tr("{id} が画像カタログになし").format(id=shot.imageId))
+                self.iface.messageBar().pushWarning(self.tr("保存した撮像計画"), plain_tip(self.tr("{id} が画像カタログになし").format(id=shot.imageId)))
                 return then(None) if then else None
             # Opened as in 「画像カタログ」: a COG with the authentication chosen for its server, a local path through pathMappings.
             record = record_of(features[0], catalog.fields)

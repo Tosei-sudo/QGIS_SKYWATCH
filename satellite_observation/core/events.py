@@ -30,7 +30,7 @@ from typing import Any, Iterable, Optional, Sequence
 from . import edit_stamp
 from .esri import EsriClient, EsriError, fit_value, quote
 from .obs.alerts import EsriSource, _source_of
-from .util import is_number, is_record, js_string, ms_of
+from .util import formula_safe, is_number, is_record, js_string, ms_of
 
 #: The item types, and what the plugin calls them.
 TYPES = ("image", "observation", "request")
@@ -413,7 +413,7 @@ def export_csv(event: Event, links: Sequence[EventLink]) -> str:
 
 def _safe_cell(value: str) -> str:
     """A cell Excel won't run as a formula (`=`, `+`, `-`, `@` first are written after a quote)."""
-    return "'" + value if value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+    return formula_safe(value)
 
 
 def summary_text(event: Event, links: Sequence[EventLink]) -> str:

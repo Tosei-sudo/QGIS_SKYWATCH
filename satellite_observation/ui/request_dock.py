@@ -28,7 +28,7 @@ from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
-from .docks import PluginDock
+from .docks import PluginDock, plain_tip
 from .plan_overlay import PlanOverlay
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
@@ -231,7 +231,7 @@ class RequestDock(PluginDock):
                                                 r.achieve, _period(r), prio, r.kind, r.status)]
             items[6].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
-                items[0].setToolTip(r.note)
+                items[0].setToolTip(plain_tip(r.note))
             self.model.appendRow(items)
             if r is self.chosen:
                 chosen_row = i
@@ -332,7 +332,8 @@ class RequestDock(PluginDock):
         r = self.chosen
         if r is None:
             return
-        answer = QMessageBox.question(self, self.tr("撮像依頼の削除"), self.tr("「{name}」を保存先から削除。元に戻せない操作").format(name=r.name))
+        answer = QMessageBox.question(self, self.tr("撮像依頼の削除"), plain_tip(self.tr("「{name}」を保存先から削除しますか？ほかの人の一覧からも消え、元に戻せません。").format(name=r.name)),
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
         store, client, token = self.store, self.context.esri(), self.token()
