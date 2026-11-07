@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
-from ..esri import EsriClient, EsriError, quote
+from ..esri import ConflictError, EsriClient, EsriError, quote
 from ..util import is_number, is_record, layer_url, time_of
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
@@ -217,26 +217,65 @@ def load_requests(client: EsriClient, store: RequestStoreConfig, token: Optional
     return sorted(out, key=lambda r: (r.name, r.id))
 
 
+#: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
+STAMP_SLACK_MS = 1000
+
+
+def _same_stamp(a: Optional[float], b: Optional[float]) -> bool:
+    return a is not None and b is not None and abs(a - b) <= STAMP_SLACK_MS
+
+
 def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float) -> ImagingRequest:
-    """Adds a new request (no object id) or changes one; the request as saved (its object id set)."""
-    names, oid = _layer(client, store.url, token, store.label, (store.fields["id"],))
+    """
+    Adds a new request (no object id) or changes one; the request as saved
+    (its object id set). The ledger is asked first: a request whose id is
+    already there (an earlier save whose answer was lost, #73) is changed,
+    not added again; one that someone else saved (or deleted) since it was
+    read is not overwritten (ConflictError, #74).
+    """
+    f = store.fields
+    names, oid = _layer(client, store.url, token, store.label, (f["id"],))
+    found = client.find(store.url, f["id"], [req.id], token).get(req.id)
+    tracked = f["updated"] in names
+    if found is not None:
+        server_oid = int(found[oid]) if is_number(found.get(oid)) else None
+        server_stamp = _number(found.get(f["updated"])) if tracked else None
+        if req.object_id is None:
+            # Already there: an earlier save went through (or the same id came in again from a layer).
+            req.object_id = server_oid
+            if req.pending_update is None and req.updated is None:
+                req.updated = server_stamp
+        elif server_oid is not None and server_oid != req.object_id:
+            req.object_id = server_oid
+        if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
+                and not _same_stamp(server_stamp, req.pending_update)):
+            raise ConflictError(f"「{req.name}」はほかの人が読み込み後に更新したため保存を中止（読み込み直してから変更）")
+    elif req.object_id is not None:
+        raise ConflictError(f"「{req.name}」はほかの人が台帳から削除済み（読み込み直して確認）")
+    baseline = req.updated
     if req.created is None:
         req.created = now
     req.updated = now
-    feature = {"attributes": _only(attributes_of(req, store.fields), names),
+    feature = {"attributes": _only(attributes_of(req, f), names),
                "geometry": {"rings": esri_rings(req.rings), "spatialReference": {"wkid": 4326}}}
-    if req.object_id is None:
-        result = client.apply_edits(store.url, adds=[feature], token=token)
-        r = (result.add_results or [{}])[0]
-        if not r.get("success"):
-            raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
-        req.object_id = int(r.get("objectId"))
-    else:
-        feature["attributes"][oid] = req.object_id
-        result = client.apply_edits(store.url, updates=[feature], token=token)
-        r = (result.update_results or [{}])[0]
-        if not r.get("success"):
-            raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
+    try:
+        if req.object_id is None:
+            result = client.apply_edits(store.url, adds=[feature], token=token)
+            r = (result.add_results or [{}])[0]
+            if not r.get("success"):
+                raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
+            req.object_id = int(r.get("objectId"))
+        else:
+            feature["attributes"][oid] = req.object_id
+            result = client.apply_edits(store.url, updates=[feature], token=token)
+            r = (result.update_results or [{}])[0]
+            if not r.get("success"):
+                raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
+    except EsriError:
+        # Kept as read: saving again checks the ledger, which may or may not hold this attempt.
+        req.updated, req.pending_update = baseline, now
+        raise
+    req.pending_update = None
     return req
 
 

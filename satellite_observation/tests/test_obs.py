@@ -12,7 +12,7 @@ from itertools import count
 
 import pytest
 
-from satellite_observation.core.esri import EsriClient, EsriError
+from satellite_observation.core.esri import ConflictError, EsriClient, EsriError
 from satellite_observation.core.gpkg import open_local
 from satellite_observation.core.obs.areas import (
     CheckedArea, area_contains, area_store_of, box_ring, covering_areas,
@@ -530,3 +530,78 @@ def test_three_and_four_points_measure_the_width():
     assert get_distance(rl, fl) == pytest.approx(m4.length, rel=1e-6) and get_distance(fl, fr) == pytest.approx(20, abs=0.01)
     assert fl[0] < fr[0] and fl[1] > rl[1]
     assert outline_of(0, 0, 10, None, 0) is None and outline_of(0, 0, 10, 5, None) is None
+
+
+def _losing_answers(fake, times=1):
+    """The fake saves the next `times` edits but the answer is lost (a timeout after the server applied them)."""
+    real = fake.answer
+    state = {"left": times}
+
+    def answer(url, form):
+        value = real(url, form)
+        if url.endswith("/applyEdits") and state["left"] > 0:
+            state["left"] -= 1
+            raise EsriError("応答なし（タイムアウト）")
+        return value
+
+    fake.answer = answer
+
+
+class TestEsriSavesTwiceAndTogether:
+    def test_an_add_whose_answer_was_lost_is_not_added_again(self):
+        """#73: saving again after a timeout changes the record the server already has."""
+        fake, layer = esri_layer(ALL, DATES)
+        store = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(fake))
+        a = obs(id="lost")
+        _losing_answers(fake)
+        with pytest.raises(EsriError):
+            store.save([a])
+        assert len(layer.rows) == 1
+        store.save([replace(a, note="もう一度")])
+        assert len(layer.rows) == 1 and layer.rows[0]["attributes"]["NOTE"] == "もう一度"
+
+    def test_a_record_changed_by_someone_else_is_not_overwritten(self):
+        """#74: the 更新日時 read is checked before an update."""
+        fake, layer = esri_layer(ALL, DATES)
+        config = observation_store_of({"url": URL}, [], 0)
+        mine, theirs = EsriObservationStore(config, EsriClient(fake)), EsriObservationStore(config, EsriClient(fake))
+        mine.save([obs(id="r1", note="最初")])
+        [a] = mine.load()
+        [b] = theirs.load()
+        theirs.save([replace(b, note="ほかの人", updated_at=day(25))])
+        with pytest.raises(ConflictError):
+            mine.save([replace(a, note="自分", updated_at=day(26))])
+        assert layer.rows[0]["attributes"]["NOTE"] == "ほかの人"
+        # Read again, then it saves.
+        [a] = mine.load()
+        mine.save([replace(a, note="自分", updated_at=day(27))])
+        assert layer.rows[0]["attributes"]["NOTE"] == "自分"
+
+    def test_an_area_add_whose_answer_was_lost_is_not_added_again(self):
+        fake = FakeEsri()
+        url = "https://x/FeatureServer/1"
+        layer = fake.add_layer(url, FakeLayer({n: "esriFieldTypeDate" if n.endswith("_AT") else "esriFieldTypeString"
+                                               for n in ("AREA_ID", "IMAGE_ID", "CREATED_AT", "UPDATED_AT")}, "esriGeometryPolygon"))
+        store = EsriAreaStore("確認範囲", area_store_of(url, [], "a"), EsriClient(fake))
+        _losing_answers(fake)
+        with pytest.raises(EsriError):
+            store.save([area(id="A1")])
+        store.save([area(id="A1")])
+        assert len(layer.rows) == 1
+
+    def test_the_taxonomy_sends_only_the_classes_changed_here(self):
+        """#74: a class someone else changed is not written back with the old content."""
+        fake = FakeEsri()
+        layer = fake.add_layer(TABLE, FakeLayer({n: "esriFieldTypeString" for n in ("PATH", "MEMBERS", "SORT_ORDER")}, ""))
+        layer.add({"PATH": "船舶", "MEMBERS": "", "SORT_ORDER": 0})
+        layer.add({"PATH": "航空機", "MEMBERS": "", "SORT_ORDER": 1})
+        mine, theirs = taxonomy_store(fake), taxonomy_store(fake)
+        taxa = mine.load()
+        other = theirs.load()
+        theirs.save([other[0], replace(other[1], members=["F-15"])])
+        mine.save([replace(taxa[0], members=["護衛艦"]), taxa[1]])
+        rows = {r["attributes"]["PATH"]: r["attributes"]["MEMBERS"] for r in layer.rows}
+        assert rows == {"船舶": "護衛艦", "航空機": "F-15"}
+        before = len(fake.asked)
+        mine.save([replace(taxa[0], members=["護衛艦"]), taxa[1]])
+        assert not any(u.endswith("/applyEdits") for u, _ in fake.asked[before:])  # nothing changed: nothing sent

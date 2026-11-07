@@ -269,3 +269,32 @@ def test_plan_results_against_the_catalog(plugin):
     assert (rows["R-2"]["CAPTURED"], rows["R-2"]["IMAGE_ID"]) == ("撮像済み", "IMG-HAND")
     assert {f["attributes"]["REQ_ID"]: f["attributes"]["STATUS"] for f in ledger.rows}["R-2"] == "完了"
     assert dialog.model.rowCount() == 0  # no longer 未撮像
+
+
+def test_import_reads_the_ledger_first_and_skips_repeated_ids(plugin):
+    """#72: ids already in the ledger (added since the dock read it) are changed, an id twice in the layer is taken once."""
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    assert not dock.import_button.isEnabled()  # not read yet
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+    assert dock.import_button.isEnabled()
+    # Someone else adds R-9 after the dock read the ledger.
+    fake.layers[LEDGER].add({"REQ_ID": "R-9", "REQ_NAME": "先に追加", "CATEGORY": "定点", "STATUS": "有効", "PRIORITY": 500},
+                            {"rings": [[[139.6, 35.0], [139.7, 35.0], [139.7, 35.1], [139.6, 35.1], [139.6, 35.0]]], "spatialReference": {"wkid": 4326}})
+    layer = QgsVectorLayer("Point?crs=EPSG:4326&field=REQ_ID:string&field=名称:string&field=開始:string&field=終了:string", "定点", "memory")
+    today = jst_day(time.time() * 1000).isoformat()
+    feats = []
+    for rid, name, lon in (("R-9", "横須賀", 139.67), ("R-10", "呉", 132.55), ("R-10", "呉（重複）", 132.6)):
+        f = QgsFeature(layer.fields())
+        f.setAttributes([rid, name, today, "2099-12-31"])
+        f.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(lon, 35.0)))
+        feats.append(f)
+    layer.dataProvider().addFeatures(feats)
+    QgsProject.instance().addMapLayer(layer)
+    dock.import_layer(layer, ask=False)
+    assert wait_for(lambda: dock.task is None and dock.status.text().startswith("2 件を取り込み")), dock.status.text()
+    ids = sorted(r["attributes"]["REQ_ID"] for r in fake.layers[LEDGER].rows)
+    assert ids == ["R-10", "R-9"]
+    assert {r["attributes"]["REQ_ID"]: r["attributes"]["REQ_NAME"] for r in fake.layers[LEDGER].rows}["R-9"] == "横須賀"
+    assert "取り込まなかったもの 1 件" in dock.status.text()

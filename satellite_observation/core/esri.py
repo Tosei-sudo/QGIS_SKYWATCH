@@ -27,6 +27,10 @@ class TooManyError(EsriError):
     """A query matched more features than the caller's limit (read nothing rather than a part)."""
 
 
+class ConflictError(EsriError):
+    """Someone else changed (or deleted) the feature since it was read: it is not overwritten (#74)."""
+
+
 class InvalidTokenError(EsriError):
     """The server called the token invalid or expired (498, 499)."""
 
@@ -194,6 +198,24 @@ class EsriClient:
             chunk = ids[start:start + size]
             json_ = self.ask(f"{url}/query", {**params, "objectIds": ",".join(str(int(i)) for i in chunk)}, token)
             out.extend(json_.get("features") or [])
+        return out
+
+    def find(self, url: str, field: str, values: Iterable[Any], token: Optional[str] = None,
+             out_fields: str = "*") -> dict[str, dict[str, Any]]:
+        """
+        The features whose `field` is one of `values` (text), by that value
+        (the attributes of the last one met for a value): whether records of
+        those ids are already there before adding them (#73).
+        """
+        wanted = list(dict.fromkeys(str(v) for v in values if v not in (None, "")))
+        out: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(wanted), 100):
+            chunk = wanted[i:i + 100]
+            where = f"{field} IN ({','.join(quote(v) for v in chunk)})"
+            for f in self.query_all(url, where, token, out_fields=out_fields, geometry=False, limit=100_000):
+                a = f.get("attributes") or {}
+                if a.get(field) is not None:
+                    out[str(a[field]).strip()] = a
         return out
 
     def apply_edits(

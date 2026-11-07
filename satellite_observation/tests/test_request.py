@@ -12,7 +12,7 @@ import pytest
 
 from satellite_observation.core.catalog import catalog_of
 from satellite_observation.core.config import parse_config, parse_config_text
-from satellite_observation.core.esri import EsriClient, EsriError, TooManyError
+from satellite_observation.core.esri import ConflictError, EsriClient, EsriError, TooManyError
 from satellite_observation.core.plan.names import SatelliteNames
 from satellite_observation.core.plan.satellites import SatelliteSpec
 from satellite_observation.core.plan.store import between_condition
@@ -33,7 +33,8 @@ from satellite_observation.core.request.model import (
 from satellite_observation.core.request.route import fitting, scenes_of, system_of_satellite, why_not
 from satellite_observation.core.request.schema import validate
 from satellite_observation.core.request.store import (
-    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, HistoryRow, add_history, count_history, delete_history, history_where, load_history,
+    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, HistoryRow, add_history, count_history, delete_history, delete_request, history_where,
+    load_history,
     replaced_where, load_requests, request_store_of, save_request,
     update_history, update_requests,
 )
@@ -663,3 +664,58 @@ def test_text_dates_are_compared_as_the_catalog_writes_them():
     req = request("R-1", rings=area["rings"])
     found = follow_up(EsriClient(fake), catalog, None, [row], {"R-1": req}, LAST + D, 3)
     assert [(f.captured, f.image_id) for f in found] == [("撮像済み", "ON")]
+
+
+def test_a_request_saved_twice_is_one_feature():
+    """#73: a save whose answer was lost (applied on the server) is changed, not added again, when saved again."""
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, [], 0)
+    fake = server()
+    client = EsriClient(fake)
+    real = fake.answer
+    state = {"lose": True}
+
+    def answer(url, form):
+        value = real(url, form)
+        if url.endswith("/applyEdits") and state["lose"]:
+            state["lose"] = False
+            raise EsriError("応答なし（タイムアウト）")
+        return value
+
+    fake.answer = answer
+    r = request("R-LOST")
+    with pytest.raises(EsriError):
+        save_request(client, store, None, r, FIRST)
+    assert r.object_id is None and r.updated is None and len(fake.layers[LEDGER].rows) == 1
+    save_request(client, store, None, r, FIRST + H)
+    assert len(fake.layers[LEDGER].rows) == 1 and r.object_id == fake.layers[LEDGER].rows[0]["attributes"]["OBJECTID"]
+
+
+def test_a_request_changed_by_someone_else_is_not_overwritten():
+    """#74: saving a request read before someone else's save stops; read again, it saves."""
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, [], 0)
+    fake = server()
+    client = EsriClient(fake)
+    save_request(client, store, None, request("R-1", priority=500), FIRST)
+    [mine] = load_requests(client, store, None)
+    [theirs] = load_requests(client, store, None)
+    theirs.priority = 100
+    save_request(client, store, None, theirs, FIRST + H)
+    mine.note = "備考だけ"
+    with pytest.raises(ConflictError):
+        save_request(client, store, None, mine, FIRST + 2 * H)
+    assert load_requests(client, store, None)[0].priority == 100
+    # A raise by the day's run (only some attributes) also counts as a change.
+    [fresh] = load_requests(client, store, None)
+    update_requests(client, store, None, [(fresh.object_id, {"boost": 100})], FIRST + 3 * H)
+    with pytest.raises(ConflictError):
+        save_request(client, store, None, fresh, FIRST + 4 * H)
+    [fresh] = load_requests(client, store, None)
+    fresh.note = "備考だけ"
+    save_request(client, store, None, fresh, FIRST + 5 * H)
+    got = load_requests(client, store, None)[0]
+    assert (got.priority, got.boost, got.note) == (100, 100, "備考だけ")
+    # Deleted by someone else: not added back by a save.
+    delete_request(client, store, None, got)
+    with pytest.raises(ConflictError):
+        save_request(client, store, None, fresh, FIRST + 6 * H)
+    assert fake.layers[LEDGER].rows == []

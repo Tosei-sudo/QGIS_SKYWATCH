@@ -215,7 +215,17 @@ def add_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str], 
         if cancelled and cancelled():
             break
         batch = [{**f, "attributes": _only(f["attributes"], names)} for f in features[i:i + 200]]
-        result = client.apply_edits(store.url, adds=batch, token=token)
+        try:
+            result = client.apply_edits(store.url, adds=batch, token=token)
+        except EsriError:
+            # All or nothing: a plan cut short (its last answer lost) is taken out again, so saving again makes no copies (#73).
+            plan_ids = {f["attributes"].get(store.fields["planId"]) for f in features} - {None}
+            for plan_id in plan_ids:
+                try:
+                    delete_plan(client, store, token, plan_id)
+                except EsriError:
+                    pass
+            raise
         for r in result.add_results:
             if r.get("success"):
                 saved += 1
