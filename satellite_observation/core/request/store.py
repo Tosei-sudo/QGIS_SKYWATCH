@@ -30,7 +30,7 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "requestId": "REQ_ID", "system": "SYSTEM",
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
-    "reason": "REASON", "file": "FILE_NAME", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
+    "reason": "REASON", "file": "FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
 }
 #: What a history row says about whether the request was taken.
 CAPTURED = ("未判定", "撮像済み", "未撮像")

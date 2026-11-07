@@ -347,7 +347,7 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 ## 16. 実装メモ
 
-- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`REQ_ID`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`FILE_NAME`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`（名前は `historyFields` で変えられる）。
+- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`REQ_ID`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`FILE`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`（名前は `historyFields` で変えられる）。
 - 撮像済みの判定は「本日分を出力…」の「計算」のたびに行う。対象日の範囲（日本時間の 1 日）に、依頼の範囲と重なる画像がカタログにあれば撮像済み。`missAfterDays`（既定 3 日）を過ぎても無ければ未撮像。
 - 衛星の `maxPerDay` は 1 日に受ける依頼の件数として数える。
 - 光学かどうか: 種別が光学の依頼、または種別「任意」で条件に合う衛星がすべて光学の依頼に、気象を効かせる。
