@@ -50,7 +50,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     assert tree == [
         ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…"]),
         ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
-        ("観測記録", ["観測記録", "分類体系の編集", "移動体（AIS・ADS-B）", "ダッシュボード"]),
+        ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
         ("画像", ["画像カタログ", "通知", "-", "画像補正", "影から高さ", "スペクトル", "-", "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
         ("解析・処理", ["パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", "-",
                     "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", "-", "サーバ処理…"]),
@@ -328,7 +328,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 41
+    assert len(set(drawn)) == len(plugin.actions) == 43
     plugin.unload()
 
 

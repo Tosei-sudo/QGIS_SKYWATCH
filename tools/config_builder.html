@@ -173,7 +173,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "timeZones",
   "requestStores",
   "requestExports",
-  "editTracking"
+  "editTracking",
+  "alertReports"
  ],
  "roles": {
   "imageCatalogs": [
@@ -373,8 +374,57 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "createdBy": "CREATED_USER",
    "updatedAt": "UPDATED_DATE",
    "updatedBy": "UPDATED_USER"
+  },
+  "alertRules": {
+   "kind": "KIND",
+   "activities": "ACTIVITIES",
+   "minConfidence": "MIN_CONFIDENCE",
+   "area": "AREA",
+   "active": "ACTIVE",
+   "note": "NOTE"
+  },
+  "alertGeofences": {
+   "name": "NAME",
+   "active": "ACTIVE"
+  },
+  "alertLog": {
+   "obsId": "OBS_ID",
+   "report": "REPORT_NAME",
+   "text": "TEXT",
+   "reportedAt": "REPORTED_AT",
+   "reportedBy": "REPORTED_BY",
+   "batch": "BATCH_ID"
   }
  },
+ "alertSources": [
+  "id",
+  "imageId",
+  "imageName",
+  "imageTime",
+  "objectId",
+  "objectName",
+  "kind",
+  "activity",
+  "present",
+  "confidence",
+  "note",
+  "lon",
+  "lat",
+  "length",
+  "heading",
+  "width",
+  "recordedBy",
+  "updatedBy",
+  "created",
+  "updated",
+  "area",
+  "rule",
+  "report",
+  "reportedAt",
+  "reportedBy",
+  "index",
+  "count"
+ ],
  "exportSources": [
   "id",
   "name",
@@ -803,6 +853,39 @@ const SPEC = [
         J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
         N("matchRadius", "同一候補の半径（m）"),
       ]) },
+    { key: "alertReports", label: "通報（注目の記録）", doc: "通報注目の記録alertreports", help: "注目の記録を区切り文字の 1 件 1 行の通報文に。条件（分類・活動・確度・ジオフェンス）と通報した記録は Esri に置き、ここには URL・属性名と、名前付きのフォーマット（複数）を書く。",
+      field: O("alertReports", "通報", [
+        TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),
+        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
+        T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
+        B("presentOnly", "不在を除く", { help: "既定 true" }),
+        S("default", "既定のフォーマット", () => ((state.alertReports && state.alertReports.formats) || []).map((f) => f && f.name).filter(Boolean)),
+        I("formats", "フォーマット", [
+          T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
+          J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": "lat", "digits": 4 }, { "text": "固定" }]',
+            help: "項目名か { source, format, digits, level, map, empty }、固定の文字は { text }。項目: " + K.alertSources.join("・") }),
+          T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
+          TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}" }),
+          TJ("footer", "フッター", { ph: "以上" }),
+          T("dateFormat", "日時の書式", { ph: "%Y-%m-%d %H:%M", list: () => DATE_FORMATS, help: "strftime か iso・iso-date・unix・unixms" }),
+          T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo" }),
+          S("newline", "改行", [["crlf", "CRLF"], ["lf", "LF"]], { ph: "crlf" }),
+          B("clipboard", "クリップボードへコピー", { help: "既定 true" }),
+          TJ("file", "ファイル", { ph: 'パスか { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true }', help: "encoding は " + K.encodings.join("・") + "。パスに {name}・{now:%Y%m%d}" }),
+          J("columns", "通報テーブルに書く記録の値", { ph: '{ "KIND": "kind", "LAT": { "source": "lat", "digits": 5 } }' }),
+        ], { title: (it) => it.name, unique: "name", check: (it, at, p) => {
+          if (it.delimiter === "") p.push(`${at}.delimiter: 空の区切り文字は不可`);
+          for (const [i, x] of (Array.isArray(it.fields) ? it.fields : []).entries()) {
+            const src = typeof x === "string" ? x : isObj(x) ? x.source : undefined;
+            if (src !== undefined && !K.alertSources.includes(src)) p.push(`${at}.fields[${i}]: 項目「${src}」は使用不可`);
+            if (src === undefined && !(isObj(x) && "text" in x)) p.push(`${at}.fields[${i}]: 項目名か { source } か { text }`);
+          }
+        } }),
+      ], { check: (it, at, p) => {
+        const names = (Array.isArray(it.formats) ? it.formats : []).map((f) => f && f.name).filter(Boolean);
+        if (!names.length) p.push(`${at}.formats: フォーマットが 1 つ以上必要`);
+      } }) },
   ] },
   { group: "地図・レイヤー・場所", keys: [
     { key: "baseMaps", label: "背景地図", doc: "背景地図", help: "書くと一覧をこれで置き換える（既定は地理院・OSM）。",

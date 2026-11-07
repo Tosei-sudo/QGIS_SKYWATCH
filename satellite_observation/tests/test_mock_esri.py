@@ -226,3 +226,29 @@ def test_every_layer_written_gets_who_and_when(server, monkeypatch):
     for s in sample.services(server[2], server[0], with_features=False)["services"]:
         for layer in s["layers"]:
             assert set(sample.EDIT_FIELDS) <= set(layer["fields"]), (s["name"], layer["id"])
+
+
+def test_alerts_rules_geofence_and_log_over_http(server):
+    from satellite_observation.core.obs.alerts import (
+        Moment, build_lines, load_geofences, load_log, load_rules, reported_ids, select, write_log,
+    )
+    from satellite_observation.core.obs.model import DEFAULT_CONFIDENCES
+
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    s = config.alert_reports
+    assert [f.name for f in s.formats] == ["速報", "ファイル（タブ区切り）"] and s.default == "速報"
+    assert s.format("ファイル（タブ区切り）").delimiter == "\t"
+    client = EsriClient(transport)
+    rules, fences = load_rules(client, s.rules), load_geofences(client, s.geofences)
+    assert [r.note for r in rules] == ["港内の船舶の動き", "航空機"] and [g.name for g in fences] == ["横須賀"]
+    now = int(time.time() * 1000)
+    ship = Observation(id="mock-a", image_id="i", image_name="i", image_time=now, object_id="o", object_name="船X", kind="船舶 > 護衛艦",
+                       activity="出港", present=True, note="", lon=139.75, lat=35.30, created_at=now, updated_at=now, confidence="確定")
+    items = select([ship, replace(ship, id="mock-b", lon=139.9)], s, rules, fences, DEFAULT_CONFIDENCES)
+    assert [i.record.id for i in items] == ["mock-a"] and items[0].areas == ["横須賀"]
+    at = Moment(now=now, user="tester", count=1)
+    assert write_log(client, s, s.format(), items, build_lines(items, s.format(), at), at) == 1
+    assert reported_ids(client, s) == {"mock-a"}
+    rows = load_log(client, s, start=now - 60_000)
+    assert [(r.obs_id, r.format) for r in rows] == [("mock-a", "速報")] and rows[0].text.split("|")[2] == "船X"

@@ -298,6 +298,17 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
                   "FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
 
+ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
+                     "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
+ALERT_LOG_FIELDS = {"OBS_ID": {"type": S, "length": 64}, "REPORT_NAME": S, "TEXT": {"type": S, "length": 4000}, "REPORTED_AT": T,
+                    "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "KIND": S}
+#: 通報条件 (alertReports.rules): ships moving in the 横須賀 geofence, and every aircraft.
+ALERT_RULES = [
+    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き"},
+    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "AREA": "", "ACTIVE": 1, "NOTE": "航空機"},
+    {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
+]
+
 #: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
 EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
 
@@ -400,6 +411,11 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
         {"name": "Requests", "layers": [
             {"id": 0, "name": "撮像依頼台帳", "geometryType": "polygon", "fields": REQUEST_FIELDS, "features": feats(requests)},
             {"id": 1, "name": "出力履歴", "fields": HISTORY_FIELDS, "features": []}]},
+        {"name": "Alerts", "layers": [
+            {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
+            {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F},
+             "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1}, "geometry": {"rings": [_box_ring(AREA)]}}])},
+            {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
@@ -430,6 +446,7 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
     """A settings file (JSONC) whose services are the mock's."""
     rest = f"{base}/arcgis/rest/services"
     tk = f', "token": "{token}"' if token else ""
+    alert_file = json.dumps(os.path.join(files, "alerts", "alert_{now:%Y%m%d}.txt"), ensure_ascii=False)
     text = f"""// mock_esri.py が書き出した設定ファイル（起動のたびに上書き）。プラグインの「設定…」でこのファイルを選ぶ
 // サービスはすべて {rest} のモック。手で直すならコピーしてから
 {{
@@ -505,6 +522,20 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
           "start": {{ "type": "string", "format": "date-time", "x-source": "start" }}, "end": {{ "type": "string", "format": "date-time", "x-source": "end" }},
           "aoi": {{ "type": "object", "x-source": "geometry", "x-geometry": "geojson" }}, "priority": {{ "type": "integer", "x-source": "priority" }} }} }} }} }} }} }}
   ],
+  // 注目の記録の通報（条件・ジオフェンス・通報記録は Esri。フォーマットは名前付きで複数、default が最初に選ばれる）
+  "alertReports": {{
+    "rules": "{rest}/Alerts/FeatureServer/0", "geofences": "{rest}/Alerts/FeatureServer/1", "table": "{rest}/Alerts/FeatureServer/2",
+    "minConfidence": "推定", "default": "速報",
+    "formats": [
+      {{ "name": "速報", "delimiter": "|", "timeZone": "Asia/Tokyo", "dateFormat": "%m/%d %H:%M",
+        "fields": ["imageTime", {{ "source": "kind", "level": 1 }}, "objectName", "activity", "confidence",
+                   {{ "source": "lat", "digits": 4 }}, {{ "source": "lon", "digits": 4 }}, "area", "rule"],
+        "header": "【注目】{{date}} {{count}}件", "footer": "以上", "columns": {{ "KIND": "kind" }} }},
+      {{ "name": "ファイル（タブ区切り）", "delimiter": "\\t", "dateFormat": "%Y-%m-%d %H:%M:%S", "timeZone": "UTC", "clipboard": false,
+        "fields": ["id", "imageTime", "kind", "objectName", "activity", "lat", "lon", "note"],
+        "file": {{ "path": {alert_file}, "encoding": "cp932", "append": true }} }}
+    ]
+  }},
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}
