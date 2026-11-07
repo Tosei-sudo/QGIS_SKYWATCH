@@ -12,11 +12,19 @@ and the imaging plan's follow-up), the catalog `satobs/catalog` and
 for 「類似画像の検索」) and the satellite's view `satobs/sensorAzimuth` /
 `satobs/sensorElevation` for other plugins; its metadata has the catalog's
 rows. No token is put on a layer.
+
+A record whose path is a folder has its images below it (`imagePatterns`,
+core/catalog/images.py): each opens as its own layer with the record's id
+(so the observations and AI results of the record are shared by its images)
+and its path below the folder `satobs/imageFile`, together in a group.
 """
 from __future__ import annotations
 
 import json
 import math
+import os
+import re
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
@@ -25,6 +33,7 @@ from qgis.core import (
 )
 
 from ..core.catalog.config import CatalogConfig
+from ..core.catalog.images import find_images, patterns_for
 from ..core.catalog.paths import PathError, PathMapping, resolve_path
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
 from ..core.catalog.watch import areas_of
@@ -38,6 +47,8 @@ CATALOG_URL = "satobs/catalogUrl"
 FEATURE = "satobs/feature"
 SENSOR_AZIMUTH = "satobs/sensorAzimuth"
 SENSOR_ELEVATION = "satobs/sensorElevation"
+#: The image's path below the record's folder, for a record whose images are in a folder.
+IMAGE_FILE = "satobs/imageFile"
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
@@ -160,17 +171,36 @@ def overlap_measure(reference: Optional[QgsGeometry]) -> Callable[[CatalogRecord
 
 
 class Cancelled(Exception):
-    """The person did not choose the folder of a local path."""
+    """The person did not choose the folder of a local path (or none of a folder's images)."""
 
 
-def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
-                choose_folder: Callable[[PathMapping], Optional[str]]) -> QgsRasterLayer:
+#: Asked which of a record's images to open (the record, their paths below its folder, whether more were left out): the chosen ones, None to open none.
+ChooseImages = Callable[[CatalogRecord, list[str], bool], Optional[list[str]]]
+
+
+@dataclass(frozen=True)
+class RecordImages:
     """
-    The image of a record as a raster layer (not yet in the project): a URL
-    through /vsicurl/ with the authentication chosen for its server, a local
-    path as it is, under a mapping's URL, or in the folder chosen for its
-    prefix (asked through `choose_folder` the first time). Raises PathError
-    with the reason when it cannot be opened, Cancelled when no folder was chosen.
+    Where a record's images are: `place` (a URL or a path here) is the image
+    itself, or, with `files`, the folder they are in (`files` their paths
+    below it, `more` when some were left out).
+    """
+    place: str
+    is_url: bool
+    files: list[str] = field(default_factory=list)
+    more: bool = False
+    #: The path the catalog gives (for messages).
+    given: str = ""
+
+
+def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
+                  choose_folder: Callable[[PathMapping], Optional[str]]) -> RecordImages:
+    """
+    Where a record's images are: a URL, a local path as it is, under a
+    mapping's URL, or in the folder chosen for its prefix (asked through
+    `choose_folder` the first time). A local folder's images are the files
+    below it matching the catalog's `imagePatterns` for the record's sensor.
+    Raises PathError with the reason, Cancelled when no folder was chosen.
     """
     source = record.source
     if source is None:
@@ -187,19 +217,87 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
             resolved = resolve_path(source.value, mappings, settings.path_folder)
         url = resolved.value
     is_url = url.lower().startswith(("http://", "https://"))
-    name = record.id or url.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-    layer = image_layer(url, name, image_id=record.id or None, time=ms_of(record.acquired),
-                        authcfg=settings.auth_for(url) if is_url else None)
-    if not layer.isValid():
-        raise PathError(f"{record.id or url} の画像を開けず（{url if is_url else source.value}）")
-    remember(layer, record, catalog)
-    return layer
+    if is_url:
+        if re.split(r"[?#]", url)[0].endswith("/"):
+            raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できず。フォルダはローカルパスか pathMappings の url なしで指定）")
+        return RecordImages(url, True, given=source.value)
+    if not os.path.isdir(url):
+        return RecordImages(url, False, given=source.value)
+    patterns = patterns_for(catalog.image_patterns, record.sensor)
+    found = find_images(url, patterns)
+    if not found.files:
+        raise PathError(f"{record.id or source.value} のフォルダ「{url}」に画像なし（{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認）")
+    return RecordImages(url, False, found.files, found.more, given=source.value)
 
 
-def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig) -> None:
-    """Puts what the catalog says of an image on its layer (custom properties and metadata)."""
+def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
+                choose_folder: Callable[[PathMapping], Optional[str]],
+                choose_images: Optional[ChooseImages] = None,
+                problems: Optional[list[str]] = None) -> list[QgsRasterLayer]:
+    """
+    The images of a record as raster layers (not yet in the project; see
+    add_record_layers): one for an image, or those of a folder's images
+    chosen through `choose_images` (all without it). A URL is read through
+    /vsicurl/ with the authentication chosen for its server. Raises
+    PathError with the reason when none can be opened (the reasons of those
+    that cannot, beside others that can, go to `problems`), Cancelled when no
+    folder or image was chosen.
+    """
+    where = locate_record(record, catalog, mappings, choose_folder)
+    time = ms_of(record.acquired)
+    if not where.files:
+        url = where.place
+        name = record.id or url.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        layer = image_layer(url, name, image_id=record.id or None, time=time,
+                            authcfg=settings.auth_for(url) if where.is_url else None)
+        if not layer.isValid():
+            raise PathError(f"{record.id or url} の画像を開けず（{url if where.is_url else where.given}）")
+        remember(layer, record, catalog)
+        return [layer]
+    files = where.files
+    if choose_images is not None and (len(files) > 1 or where.more):
+        chosen = choose_images(record, list(files), where.more)
+        if not chosen:
+            raise Cancelled()
+        files = [f for f in files if f in set(chosen)]
+    layers, failed = [], []
+    for rel in files:
+        path = os.path.join(where.place, *rel.split("/"))
+        name = rel if len(files) > 1 or not record.id else f"{record.id} {rel}"
+        layer = image_layer(path, name, image_id=record.id or None, time=time)
+        if not layer.isValid():
+            failed.append(rel)
+            continue
+        remember(layer, record, catalog, rel)
+        layers.append(layer)
+    if failed:
+        message = f"{record.id or where.given} の画像を開けず（{where.place}: {'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）"
+        if not layers:
+            raise PathError(message)
+        if problems is not None:
+            problems.append(message)
+    return layers
+
+
+def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> None:
+    """Adds a record's layers to the project: one as it is, several in a group of the record's id at the top of the layer tree."""
+    project = project or QgsProject.instance()
+    if len(layers) <= 1:
+        for layer in layers:
+            project.addMapLayer(layer)
+        return
+    group = project.layerTreeRoot().insertGroup(0, record.id or layers[0].name())
+    for layer in layers:
+        project.addMapLayer(layer, False)
+        group.addLayer(layer)
+
+
+def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig, file: Optional[str] = None) -> None:
+    """Puts what the catalog says of an image on its layer (custom properties and metadata; `file` the image's path below the record's folder)."""
     if record.id:
         layer.setCustomProperty(IMAGE_ID, record.id)
+    if file:
+        layer.setCustomProperty(IMAGE_FILE, file)
     layer.setCustomProperty(CATALOG, catalog.label)
     layer.setCustomProperty(CATALOG_URL, catalog.url)
     layer.setCustomProperty(FEATURE, json.dumps(record.feature(), ensure_ascii=False))
@@ -208,7 +306,7 @@ def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig) 
         layer.setCustomProperty(SENSOR_AZIMUTH, view["azimuth"])
         layer.setCustomProperty(SENSOR_ELEVATION, view["elevation"])
     metadata = layer.metadata() if hasattr(layer, "metadata") else QgsLayerMetadata()
-    metadata.setTitle(record.id or layer.name())
+    metadata.setTitle(f"{record.id} {file}".strip() if file else record.id or layer.name())
     metadata.setAbstract("\n".join(f"{k}: {v}" for k, v in catalog_info(record, catalog)))
     metadata.addKeywords("画像カタログ", [catalog.label])
     layer.setMetadata(metadata)

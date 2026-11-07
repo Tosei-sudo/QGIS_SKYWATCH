@@ -126,11 +126,15 @@ def native_path(path: str) -> str:
 
 
 def find_file(root: str, rest: Sequence[str], listdir: Callable[[str], list[str]] = os.listdir) -> Optional[str]:
-    """The file at `rest` inside `root`, each name matched as it is or else regardless of case (as on Windows and most NAS shares)."""
+    """
+    The file (or folder, for a record whose images are in a folder) at `rest`
+    inside `root`, each name matched as it is or else regardless of case (as
+    on Windows and most NAS shares).
+    """
     here = root
     for i, name in enumerate(rest):
         last = i == len(rest) - 1
-        kind = os.path.isfile if last else os.path.isdir
+        kind = os.path.exists if last else os.path.isdir
         candidate = os.path.join(here, name)
         if kind(candidate):
             here = candidate
@@ -160,9 +164,9 @@ class Resolved:
 
 
 def resolve_path(path: str, mappings: Sequence[PathMapping], folder_for: Callable[[str], Optional[str]],
-                 exists: Callable[[str], bool] = os.path.isfile) -> Resolved:
+                 exists: Callable[[str], bool] = os.path.exists) -> Resolved:
     """
-    Where `path` leads: a mapping's URL; the path itself when it is here; the
+    Where `path` (a file, or a folder of images) leads: a mapping's URL; the path itself when it is here; the
     folder chosen for its mapping followed down; or `folder` when that folder
     is still to be chosen. Raises PathError with the reason when it cannot be opened.
     """

@@ -490,3 +490,33 @@ def test_the_spatial_filter_of_each_kind_of_area():
         key = next(iter(shape))
         assert f["geometryType"] == kind and f["spatialRel"] == "esriSpatialRelIntersects" and f["inSR"] == "4326"
         assert json.loads(f["geometry"]) == {key: shape[key], "spatialReference": {"wkid": 4326}}
+
+
+def test_image_patterns_by_sensor_and_the_images_of_a_folder(tmp_path):
+    from satellite_observation.core.catalog.config import CatalogConfig
+    from satellite_observation.core.catalog.images import DEFAULT_PATTERN, find_images, image_patterns_of, patterns_for
+
+    problems = []
+    c = catalog_of({**ENTRY, "imagePatterns": {"WV03": "-P1BS-.*\\.tif$", "SPOT7": ["^IMG_.*_P_", "\\.JP2$"], "*": "\\.tif$", "bad": "("}}, problems, 0)
+    assert c.image_patterns == {"WV03": ["-P1BS-.*\\.tif$"], "SPOT7": ["^IMG_.*_P_", "\\.JP2$"], "*": ["\\.tif$"]}
+    assert len(problems) == 1 and "imageCatalogs[0].imagePatterns.bad の正規表現が不正" in problems[0]
+    # By sensor (case and spaces ignored), else `*`, else the usual image files.
+    assert patterns_for(c.image_patterns, " wv03 ") == ["-P1BS-.*\\.tif$"]
+    assert patterns_for(c.image_patterns, "GF2") == ["\\.tif$"]
+    assert patterns_for({}, "GF2") == [DEFAULT_PATTERN]
+    # A string or array for every sensor; anything else is a problem.
+    assert image_patterns_of("\\.ntf$", [], "x") == {"*": ["\\.ntf$"]}
+    problems = []
+    assert image_patterns_of(3, problems, "x") == {} and problems
+    # Kept with a watch's catalog.
+    assert CatalogConfig.from_json(c.to_json()).image_patterns == c.image_patterns
+    # The files below the folder at any depth whose path below it matches, case ignored, in natural order.
+    for rel in ("IMG_1_P_x/a10.JP2", "IMG_1_P_x/a9.jp2", "IMG_1_MS_x/a1.jp2", "notes.txt", "IMG_1_P_x/deep/b.jp2"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("")
+    found = find_images(str(tmp_path), ["^img_[^/]*_p_.*\\.jp2$"])
+    assert found.files == ["IMG_1_P_x/a9.jp2", "IMG_1_P_x/a10.JP2", "IMG_1_P_x/deep/b.jp2"] and not found.more
+    assert find_images(str(tmp_path), [DEFAULT_PATTERN], limit=2).more
+    # resolve_path leads to a folder too (followed down regardless of case).
+    folder = PathMapping("\\\\nas\\img", "NAS")
+    assert resolve_path("\\\\nas\\img\\img_1_p_X", [folder], lambda prefix: str(tmp_path)).value == str(tmp_path / "IMG_1_P_x")

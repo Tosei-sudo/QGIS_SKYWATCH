@@ -506,6 +506,7 @@ class SatelliteObservationPlugin:
         catalog, notices = self.docks["SatObsImageCatalog"], self.docks["SatObsNotices"]
         catalog.watch_requested = notices.watch_conditions
         notices.choose_folder = catalog.choose_folder
+        notices.choose_images = catalog.choose_images
         self.notices_action = notices.toggleViewAction()
 
         bell = self.notices_action.icon()

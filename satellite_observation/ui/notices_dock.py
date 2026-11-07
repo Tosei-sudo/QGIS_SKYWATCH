@@ -25,7 +25,7 @@ from ..core.catalog.query import CatalogSearch, time_text
 from ..core.catalog.search import read_catalog_layer, record_of
 from ..core.catalog.watch import CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch
 from ..core.catalog.watch_store import WatchStore, check_due
-from ..qgis_io.catalog_io import Cancelled, footprint, open_record
+from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
@@ -53,6 +53,8 @@ class NoticesDock(PluginDock):
         self.unread_changed: Optional[Callable[[int], None]] = None
         #: Opens an image of a notice with the image catalog dock's folder dialog (set by the plugin).
         self.choose_folder = None
+        #: Which of a record's images to open (the image catalog dock's); all without it.
+        self.choose_images = None
         self._tasks: list = []
 
         tabs = QTabWidget()
@@ -265,14 +267,15 @@ class NoticesDock(PluginDock):
                 continue
             record = record_of(n.feature, catalog.fields)
             try:
-                layer = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder or (lambda m: None))
+                opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder or (lambda m: None),
+                                     self.choose_images, problems)
             except Cancelled:
                 break
             except PathError as error:
                 problems.append(str(error))
                 continue
-            QgsProject.instance().addMapLayer(layer)
-            layers.append(layer)
+            add_record_layers(opened, record)
+            layers += opened
         if any(n.kind == PLAN for n in notices):
             self.zoom_to_chosen()
         self._mark([n.id for n in notices])

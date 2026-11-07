@@ -26,13 +26,16 @@ from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, read_catalog_
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
 from ..qgis_io import settings
-from ..qgis_io.catalog_io import Cancelled, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer
+from ..qgis_io.catalog_io import (
+    Cancelled, add_record_layers, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer,
+)
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock
 from .flow_layout import FlowLayout
+from .image_files_dialog import choose_image_files
 
 TITLE = "画像カタログ"
 
@@ -578,11 +581,19 @@ class CatalogDock(PluginDock):
 
     # --- Opening ----------------------------------------------------------------------------------
 
+    def choose_images(self, record, files: list[str], more: bool) -> Optional[list[str]]:
+        """Which of a record's images (its folder's files matching `imagePatterns`) to open."""
+        return choose_image_files(self, record, files, more)
+
     def choose_folder(self, mapping: PathMapping) -> Optional[str]:
         return QFileDialog.getExistingDirectory(self, self.tr("「{label}」（{prefix}）のフォルダの選択").format(label=mapping.label, prefix=mapping.prefix)) or None
 
     def open_records(self, records) -> list:
-        """Opens images of the list as raster layers; the reason is shown for those that cannot be opened."""
+        """
+        Opens images of the list as raster layers (a record whose path is a
+        folder: the images chosen among its files, in a group); the reason is
+        shown for those that cannot be opened.
+        """
         catalog = self._shown_catalog
         if catalog is None:
             return []
@@ -590,14 +601,15 @@ class CatalogDock(PluginDock):
         problems = []
         for record in records:
             try:
-                layer = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder)
+                opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder,
+                                     lambda r, files, more: self.choose_images(r, files, more), problems)
             except Cancelled:
                 break
             except PathError as error:
                 problems.append(str(error))
                 continue
-            QgsProject.instance().addMapLayer(layer)
-            layers.append(layer)
+            add_record_layers(opened, record)
+            layers += opened
         if problems:
             self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
             self.status.setText(problems[-1])
