@@ -33,7 +33,7 @@ from ..core.catalog import CatalogConfig
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
-from ..core.request.follow import follow_up, request_changes
+from ..core.request.follow import follow_and_save, found_text
 from ..core.request.model import JST, jst_day, priority_text
 from ..core.request.store import RequestStoreConfig, add_history, load_history, load_requests, update_history, update_requests
 from ..core.request.workflow import (
@@ -70,6 +70,8 @@ class PlanFileDock(PluginDock):
         self._rendering = False
         #: The files last written.
         self.paths: list = []
+        #: The 「計画と実績の照合」 dialog, once opened.
+        self.results = None
         self._build()
         context.configChanged.connect(self._config_changed)
         self._config_changed()
@@ -96,6 +98,10 @@ class PlanFileDock(PluginDock):
         self.sim_button.setToolTip(self.tr("日ごとの上限や使うシステムを変えた場合の枠超過・期限切れを今後の日数で試算（台帳には書き込まない）"))
         self.sim_button.clicked.connect(self.open_simulation)
         top.addWidget(self.sim_button)
+        self.results_button = QPushButton(self.tr("照合…"))
+        self.results_button.setToolTip(self.tr("出力した依頼が撮像されたかを画像カタログと照合（計画と実績の照合）"))
+        self.results_button.clicked.connect(lambda: self.show_results())
+        top.addWidget(self.results_button)
         top.addStretch(1)
         layout.addLayout(top)
         self.status = QLabel()
@@ -141,6 +147,17 @@ class PlanFileDock(PluginDock):
         layout.addLayout(out)
         self._update_buttons()
 
+    def show_results(self, run: bool = True):
+        """Opens 「計画と実績の照合」 (and follows the history up)."""
+        from .plan_results_dialog import PlanResultsDialog
+        if self.results is None:
+            self.results = PlanResultsDialog(self)
+        self.results.show()
+        self.results.raise_()
+        if run:
+            self.results.run()
+        return self.results
+
     def _config_changed(self) -> None:
         stores = self.context.config.request_stores
         self.store_choice.blockSignals(True)
@@ -151,6 +168,9 @@ class PlanFileDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.plan = None
+        if self.results is not None:
+            self.results.close()
+            self.results = None
         self.render()
         self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし") if self.store is None else "")
 
@@ -179,6 +199,9 @@ class PlanFileDock(PluginDock):
         if self.simulation is not None:
             self.simulation.close()
             self.simulation = None
+        if self.results is not None:
+            self.results.close()
+            self.results = None
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, self.tr("出力先"), self.folder.text())
@@ -229,17 +252,11 @@ class PlanFileDock(PluginDock):
             if history and catalog is not None:
                 by_id = {r.id: r for r in requests}
                 names = self.context.satellite_names(client, task.isCanceled)
-                found = follow_up(client, catalog, catalog_token, history, by_id, now, store.miss_after_days, task.isCanceled, names)
+                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled)
                 if found:
-                    update_history(client, store, token, [(f.row.object_id, {"captured": f.captured, "imageId": f.image_id}) for f in found if f.row.object_id is not None])
-                    for f in found:
-                        f.row.captured, f.row.image_id = f.captured, f.image_id
-                    changes = request_changes(found, by_id)
-                    update_requests(client, store, token, changes, now)
-                    taken = sum(1 for f in found if f.captured == "撮像済み")
-                    notes.append(f"撮像済み {taken} 件・未撮像 {len(found) - taken} 件を確認")
-                    if changes:
-                        requests = load_requests(client, store, token, task.isCanceled)
+                    notes.append(found_text(found))
+                if changed:
+                    requests = load_requests(client, store, token, task.isCanceled)
             elif store.history and catalog is None:
                 notes.append("画像カタログがないため撮像済みの確認なし")
             task.progress(60)
