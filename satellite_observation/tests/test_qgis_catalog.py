@@ -312,3 +312,94 @@ def test_closing_the_docks_cancels_their_tasks(plugin):
         dock.close_down()
         assert wait_for(lambda: ended, 5000)
         assert ended == ["取消"]
+
+
+def _layer(kind: str, crs: str, wkts) -> "QgsVectorLayer":
+    from qgis.core import QgsFeature, QgsGeometry, QgsVectorLayer
+
+    layer = QgsVectorLayer(f"{kind}?crs={crs}", "範囲", "memory")
+    features = []
+    for wkt in wkts:
+        f = QgsFeature(layer.fields())
+        f.setGeometry(QgsGeometry.fromWkt(wkt))
+        features.append(f)
+    layer.dataProvider().addFeatures(features)
+    QgsProject.instance().addMapLayer(layer)
+    return layer
+
+
+def _asked_shape(fake):
+    form = next(f for u, f in fake.asked if u.endswith("/query") and "returnCountOnly" not in f)
+    return form["geometryType"], json.loads(form["geometry"])
+
+
+def test_searching_over_a_layers_geometry_as_it_is(plugin):
+    from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    # A triangle in Web Mercator over C only; and a second polygon overlapping it: joined into one.
+    to_3857 = QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:4326"), QgsCoordinateReferenceSystem("EPSG:3857"), QgsProject.instance())
+
+    def mercator(wkt):
+        g = QgsGeometry.fromWkt(wkt)
+        g.transform(to_3857)
+        return g.asWkt()
+
+    polygons = _layer("Polygon", "EPSG:3857", [mercator("POLYGON((139.71 35.61, 139.74 35.61, 139.74 35.64, 139.71 35.61))"),
+                                               mercator("POLYGON((139.72 35.61, 139.73 35.61, 139.73 35.60, 139.72 35.61))")])
+    # 「レイヤー」 chosen: the active layer is taken, and the row with the layer shows.
+    iface.setActiveLayer(polygons)
+    i = dock.area_box.findData("layer")
+    dock.area_box.setCurrentIndex(i)
+    dock._area_chosen(i)
+    assert dock.area_layer.currentLayer() is polygons and not dock.layer_row.isHidden()
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    kind, shape = _asked_shape(fake)
+    assert kind == "esriGeometryPolygon" and len(shape["rings"]) == 1
+    ring = shape["rings"][0]
+    # The shape itself in WGS 84 (not its extent): the union's corners, the outer ring clockwise.
+    assert ring[0] == ring[-1] and len(ring) > 5
+    assert any(abs(x - 139.71) < 1e-6 and abs(y - 35.61) < 1e-6 for x, y in ring)
+    assert any(abs(x - 139.73) < 1e-6 and abs(y - 35.60) < 1e-6 for x, y in ring)
+    assert sum(ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1] for i in range(len(ring) - 1)) < 0
+    assert {r.id for r in dock.records} == {"A", "B", "C"}
+
+    # Only the chosen features: none chosen says so and asks nothing.
+    dock.selected_only.setChecked(True)
+    fake.asked.clear()
+    dock.search()
+    assert dock.status.text() == "「範囲」に選択地物なし" and not fake.asked
+    polygons.selectByIds([next(polygons.getFeatures()).id()])
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    assert len(_asked_shape(fake)[1]["rings"][0]) == 4
+
+    # A line layer: a polyline; a point layer: a multipoint.
+    lines = _layer("LineString", "EPSG:4326", ["LINESTRING(139.71 35.62, 139.74 35.63)", "LINESTRING(139.60 35.52, 139.61 35.53)"])
+    dock.use_layer(lines)
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    kind, shape = _asked_shape(fake)
+    assert kind == "esriGeometryPolyline" and sorted(shape["paths"]) == [[[139.6, 35.52], [139.61, 35.53]], [[139.71, 35.62], [139.74, 35.63]]]
+    points = _layer("Point", "EPSG:4326", ["POINT(139.72 35.62)", "POINT(139.79 35.69)"])
+    dock.use_layer(points)
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    kind, shape = _asked_shape(fake)
+    assert kind == "esriGeometryMultipoint" and shape["points"] == [[139.72, 35.62], [139.79, 35.69]]
+
+    # The layer removed: nothing chosen, and the search says so.
+    QgsProject.instance().removeMapLayer(points.id())
+    dock.area_layer.setLayer(None)
+    fake.asked.clear()
+    dock.search()
+    assert dock.status.text() == "範囲のレイヤーが未選択" and not fake.asked
+    # Back to the extent: the layer row hides.
+    dock.area_box.setCurrentIndex(dock.area_box.findData("extent"))
+    assert dock.layer_row.isHidden()

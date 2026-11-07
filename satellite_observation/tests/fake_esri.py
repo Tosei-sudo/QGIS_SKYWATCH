@@ -72,9 +72,10 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
 
 
 def _box(geometry: dict[str, Any]) -> tuple[float, float, float, float]:
-    """The bounding box of an Esri point, envelope or polygon."""
-    if "rings" in geometry:
-        points = [p for ring in geometry["rings"] for p in ring]
+    """The bounding box of an Esri point, multipoint, envelope, polyline or polygon."""
+    if "rings" in geometry or "paths" in geometry or "points" in geometry:
+        points = ([p for ring in geometry["rings"] for p in ring] if "rings" in geometry
+                  else [p for path in geometry["paths"] for p in path] if "paths" in geometry else geometry["points"])
         xs, ys = [p[0] for p in points], [p[1] for p in points]
         return min(xs), min(ys), max(xs), max(ys)
     if "xmin" in geometry:

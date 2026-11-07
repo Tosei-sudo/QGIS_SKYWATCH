@@ -1,6 +1,6 @@
 """
 画像カタログ: searching the image catalogs of the settings file (over the
-map's extent or anywhere, by dates, sensor, angle, azimuth and SQL), the list
+map's extent, an area drawn, a vector layer's geometry as it is, or anywhere, by dates, sensor, angle, azimuth and SQL), the list
 of images found with their footprints on the map, opening them as raster
 layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsProject
+from qgis.core import QgsMapLayer, QgsProject
+from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -25,7 +26,7 @@ from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, read_catalog_
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
 from ..qgis_io import settings
-from ..qgis_io.catalog_io import Cancelled, footprint, open_record, overlap_measure, record_of_layer, results_layer
+from ..qgis_io.catalog_io import Cancelled, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
@@ -41,6 +42,17 @@ def _number(edit: QLineEdit) -> Optional[float]:
         return float(edit.text().strip())
     except ValueError:
         return None
+
+
+#: The layers a search can be over: vector layers with geometries.
+try:
+    from qgis.core import QgsMapLayerProxyModel
+
+    _GEOMETRY_LAYERS = QgsMapLayerProxyModel.Filter.HasGeometry
+except AttributeError:  # older bindings: the enum unscoped
+    from qgis.core import QgsMapLayerProxyModel
+
+    _GEOMETRY_LAYERS = QgsMapLayerProxyModel.HasGeometry
 
 
 def _day(edit: QLineEdit) -> str:
@@ -67,9 +79,11 @@ class CatalogDock(PluginDock):
         self.area_box = QComboBox()
         self.area_box.addItem(self.tr("表示範囲"), "extent")
         self.area_box.addItem(self.tr("描いた範囲"), "drawn")
+        self.area_box.addItem(self.tr("レイヤー"), "layer")
         self.area_box.addItem(self.tr("指定なし"), "none")
         self.area_box.setCurrentIndex(0)
         self.area_box.activated.connect(self._area_chosen)
+        self.area_box.currentIndexChanged.connect(lambda *_: self._show_layer_row())
         self.draw_button = QPushButton(self.tr("範囲を描く"))
         self.draw_button.setCheckable(True)
         self.draw_button.setToolTip(self.tr("クリックで頂点を追加、ダブルクリックか右クリックで確定、Esc で取消"))
@@ -77,7 +91,22 @@ class CatalogDock(PluginDock):
         area_row = QHBoxLayout()
         area_row.addWidget(self.area_box, 1)
         area_row.addWidget(self.draw_button)
-        form.addRow(self.tr("範囲"), area_row)
+        # 「レイヤー」: the features of a vector layer, searched over as they are (not their extent).
+        self.area_layer = QgsMapLayerComboBox()
+        self.area_layer.setFilters(_GEOMETRY_LAYERS)
+        self.area_layer.setAllowEmptyLayer(True)
+        self.area_layer.setToolTip(self.tr("地物の形そのもの（外接矩形ではなく）と重なる画像を検索"))
+        self.selected_only = QCheckBox(self.tr("選択地物のみ"))
+        self.layer_row = QWidget()
+        layer_row = QHBoxLayout(self.layer_row)
+        layer_row.setContentsMargins(0, 0, 0, 0)
+        layer_row.addWidget(self.area_layer, 1)
+        layer_row.addWidget(self.selected_only)
+        self.layer_row.hide()
+        area_column = QVBoxLayout()
+        area_column.addLayout(area_row)
+        area_column.addWidget(self.layer_row)
+        form.addRow(self.tr("範囲"), area_column)
         #: The area drawn on the map (its corners, longitude / latitude; the ring closed); None before one is drawn.
         self.drawn: Optional[list] = None
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
@@ -292,6 +321,15 @@ class CatalogDock(PluginDock):
         if self.area_box.currentData() == "drawn" and box is None:
             self.status.setText(self.tr("範囲が未作成。「範囲を描く」で地図に描画"))
             return
+        if self.area_box.currentData() == "layer" and box is None:
+            layer = self.area_layer.currentLayer()
+            if layer is None:
+                self.status.setText(self.tr("範囲のレイヤーが未選択"))
+            elif self.selected_only.isChecked():
+                self.status.setText(self.tr("「{name}」に選択地物なし").format(name=layer.name()))
+            else:
+                self.status.setText(self.tr("「{name}」に形のある地物なし").format(name=layer.name()))
+            return
         client = self.context.esri()
         token = self.context.token_for(catalog.url, catalog.token)
 
@@ -469,8 +507,23 @@ class CatalogDock(PluginDock):
                     pass
 
     def _area_chosen(self, index: int) -> None:
-        if self.area_box.itemData(index) == "drawn" and self.drawn is None:
+        kind = self.area_box.itemData(index)
+        if kind == "drawn" and self.drawn is None:
             self.draw_button.setChecked(True)
+        if kind == "layer" and self.area_layer.currentLayer() is None:
+            active = self.iface.activeLayer()
+            if active is not None and layer_area(active) is not None:
+                self.area_layer.setLayer(active)
+        self._show_layer_row()
+
+    def _show_layer_row(self) -> None:
+        self.layer_row.setVisible(self.area_box.currentData() == "layer")
+
+    def use_layer(self, layer: Optional[QgsMapLayer], selected_only: bool = False) -> None:
+        """Searches over a vector layer's geometry (its chosen features only, when asked)."""
+        self.area_layer.setLayer(layer)
+        self.selected_only.setChecked(selected_only)
+        self.area_box.setCurrentIndex(self.area_box.findData("layer"))
 
     def set_drawn(self, corners: Optional[list]) -> None:
         """The area to search (and watch) drawn on the map: its corners in WGS 84; None forgets it."""
@@ -488,12 +541,18 @@ class CatalogDock(PluginDock):
             self.overlay.show_area(self.drawn)
 
     def area(self):
-        """Where to search: the map's extent (a box), the area drawn (an Esri polygon) or None for anywhere."""
+        """
+        Where to search: the map's extent (a box), the area drawn (an Esri
+        polygon), a layer's geometry (an Esri polygon, polyline or multipoint)
+        or None for anywhere.
+        """
         kind = self.area_box.currentData()
         if kind == "extent":
             return self.extent()
         if kind == "drawn" and self.drawn:
             return areas_of([], [[self.drawn]])[0]
+        if kind == "layer":
+            return layer_area(self.area_layer.currentLayer(), self.selected_only.isChecked())
         return None
 
     def zoom_to_chosen(self) -> None:

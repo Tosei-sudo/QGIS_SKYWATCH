@@ -475,3 +475,18 @@ def test_local_paths_open_as_they_are_through_a_url_or_in_the_folder_chosen(tmp_
     with pytest.raises(PathError, match="pathMappings"):
         resolve_path("\\\\elsewhere\\a.tif", MAPPINGS, folder_for)
     assert find_file(str(folder), ["2026", "SCENE.tif"]) == here
+
+
+def test_the_spatial_filter_of_each_kind_of_area():
+    from satellite_observation.core.catalog.search import spatial_filter
+
+    assert spatial_filter(None) == {} and spatial_filter({}) == {}
+    box = spatial_filter([-200, 10, 20, 95])
+    assert box["geometryType"] == "esriGeometryEnvelope" and json.loads(box["geometry"])["xmin"] == -180 and json.loads(box["geometry"])["ymax"] == 90
+    for shape, kind in [({"rings": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}, "esriGeometryPolygon"),
+                        ({"paths": [[[0, 0], [1, 1]]]}, "esriGeometryPolyline"),
+                        ({"points": [[0, 0], [1, 1]]}, "esriGeometryMultipoint")]:
+        f = spatial_filter(shape)
+        key = next(iter(shape))
+        assert f["geometryType"] == kind and f["spatialRel"] == "esriSpatialRelIntersects" and f["inSR"] == "4326"
+        assert json.loads(f["geometry"]) == {key: shape[key], "spatialReference": {"wkid": 4326}}

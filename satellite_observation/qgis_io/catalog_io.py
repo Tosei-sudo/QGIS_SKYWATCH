@@ -20,13 +20,14 @@ import math
 from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsDistanceArea, QgsFeature, QgsFields, QgsGeometry, QgsLayerMetadata, QgsMapLayer, QgsPointXY,
-    QgsProject, QgsRasterLayer, QgsVectorLayer, QgsVectorLayerTemporalProperties,
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsDistanceArea, QgsFeature, QgsFields, QgsGeometry, QgsLayerMetadata, QgsMapLayer, QgsPointXY,
+    QgsProject, QgsRasterLayer, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
 
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError, PathMapping, resolve_path
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
+from ..core.catalog.watch import areas_of
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_ID, image_layer
@@ -39,6 +40,65 @@ SENSOR_AZIMUTH = "satobs/sensorAzimuth"
 SENSOR_ELEVATION = "satobs/sensorElevation"
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
+
+#: Decimals of the coordinates sent for a layer's geometry (about 1 cm).
+_DECIMALS = 7
+
+
+def _xy(p) -> list[float]:
+    return [round(p.x(), _DECIMALS), round(p.y(), _DECIMALS)]
+
+
+def layer_area(layer: Optional[QgsMapLayer], selected_only: bool = False) -> Optional[dict[str, Any]]:
+    """
+    A vector layer's geometry (its chosen features only, when asked) in WGS 84
+    as an Esri shape to search the catalog over, as it is rather than its
+    extent: polygons joined into one polygon `{"rings": …}`, lines into one
+    polyline `{"paths": …}`, points as a multipoint `{"points": …}`. None
+    without a vector layer or a feature with a geometry.
+    """
+    if layer is None or layer.type() != QgsMapLayer.LayerType.VectorLayer or not layer.isSpatial():
+        return None
+    kind = layer.geometryType()
+    if kind not in (QgsWkbTypes.GeometryType.PolygonGeometry, QgsWkbTypes.GeometryType.LineGeometry, QgsWkbTypes.GeometryType.PointGeometry):
+        return None
+    transform = QgsCoordinateTransform(layer.crs(), WGS84, QgsProject.instance())
+    features = layer.selectedFeatures() if selected_only else layer.getFeatures()
+    geometries: list[QgsGeometry] = []
+    for feature in features:
+        g = QgsGeometry(feature.geometry())
+        if g.isNull() or g.isEmpty():
+            continue
+        if QgsWkbTypes.isCurvedType(g.wkbType()):
+            g.convertToStraightSegment()
+        if layer.crs() != WGS84:
+            try:
+                g.transform(transform)
+            except Exception:  # noqa: BLE001 (a feature outside the CRS's area: left out)
+                continue
+        if kind == QgsWkbTypes.GeometryType.PolygonGeometry and not g.isGeosValid():
+            g = g.makeValid()
+        geometries.append(g)
+    if not geometries:
+        return None
+    if kind == QgsWkbTypes.GeometryType.PointGeometry:
+        points = [_xy(v) for g in geometries for v in g.vertices()]
+        return {"points": points} if points else None
+    joined = QgsGeometry.unaryUnion(geometries) if len(geometries) > 1 else geometries[0]
+    if joined.isNull() or joined.isEmpty():
+        return None
+    if kind == QgsWkbTypes.GeometryType.LineGeometry:
+        lines = joined.asMultiPolyline() if joined.isMultipart() else [joined.asPolyline()]
+        paths = [[_xy(p) for p in line] for line in lines if len(line) >= 2]
+        return {"paths": paths} if paths else None
+    # A union can give a collection (polygons with stray lines): only its polygons count.
+    parts = []
+    for part in joined.asGeometryCollection() if joined.isMultipart() else [joined]:
+        if part.type() == QgsWkbTypes.GeometryType.PolygonGeometry:
+            parts += part.asMultiPolygon() if part.isMultipart() else [part.asPolygon()]
+    polygons = [[[_xy(p) for p in ring] for ring in polygon] for polygon in parts if polygon]
+    areas = areas_of([], polygons)
+    return {"rings": areas[0]["rings"]} if areas else None
 
 
 def _signed_area(ring: Sequence[Sequence[float]]) -> float:
