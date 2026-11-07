@@ -6,6 +6,7 @@ the settings file is read, and requests go through QGIS's network stack
 import http.server
 import json
 import os
+import re
 import threading
 
 import pytest
@@ -44,7 +45,9 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     plugin.initGui()
     assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "保存した撮像計画", "撮像依頼", "撮像計画ファイル出力", "衛星パス", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果"]
     # By area (tsudo, 2026-11-07): a submenu each, then the dock layout and 「設定…」 in the menu itself.
-    assert iface.menu_tree() == [
+    # (「通知」 shows its unread count, 「通知（1）」, when an earlier test left a notice.)
+    tree = [(e[0], [re.sub(r"^通知（\d+）$", "通知", t) for t in e[1]]) if isinstance(e, tuple) else e for e in iface.menu_tree()]
+    assert tree == [
         ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…"]),
         ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
         ("観測記録", ["観測記録", "分類体系の編集", "移動体（AIS・ADS-B）", "ダッシュボード"]),
