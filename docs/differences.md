@@ -8,6 +8,7 @@
 | --- | --- | --- | --- |
 | 設定ファイルの形式 | JSON（README に「コメントは書けません」） | JSON と JSONC（`//`・`/* */`・末尾のカンマ） | 指示書どおり。ビューアの `config.json` はそのまま読める |
 | 設定ファイルの固定 | なし（ページと同じ場所の `config.json` を読む） | `build_zip.py --lock-config` で作った zip（`config.lock` 入り）は同梱の設定ファイルだけを読み、「設定…」での指定を受け付けない。設定ファイルの項目ではなく zip の作り方で決める（受け取った人が選ぶファイルに書いても意味がなく、同梱のファイルが読めなくても固定が外れないように） | tsudo の依頼（2026-11-07） |
+| 雲量予報の取り込み | `cloudForecast` は Open-Meteo 互換の `url` のみ | `cloudForecast` に `file`・`folder` も書け、外部で毎日作った GFS の雲量の GeoTIFF（`docs/cloud-forecast-file.md`）を読む。ビューアの設定ファイルにこの書き方をするとビューアでは使えない | 閉域ネットワーク向け、tsudo の依頼（2026-11-07） |
 | 読む項目 | 全項目 | `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` のみ（他は無視、問題にも出さない） | 共用のため |
 | サインイン | `arcgisPortals` の OAuth（PKCE、ポップアップ） | QGIS の認証設定（`authcfg`）をサービスごとに選ぶ。`arcgisPortals` は読み込みと検証のみ | QGIS の OAuth2 / ESRI token 認証に任せる |
 | `token` と認証設定 | `token` があればそれ、なければサインインのトークン | 認証設定を選んだサービスは `token` を送らない | 二重送信を避けるため |
@@ -135,7 +136,7 @@
 | 開いたレイヤー | — | カスタムプロパティ `satobs/imageId`（観測記録・計画の追跡が使う）・`satobs/catalog`・`satobs/catalogUrl`・`satobs/feature`・`satobs/sensorAzimuth`・`satobs/sensorElevation`、メタデータにカタログの属性 | 指示書どおり |
 | 「保存した撮像計画」の画像 | — | 画像カタログと同じ開き方に（`pathMappings` も効く） | 共通化 |
 | パスがフォルダのレコード | — | フォルダの下（何段でも）の `imagePatterns`（カタログごと・センサーごとの正規表現、`*` はその他、なければふつうの画像の拡張子）に合うファイルをレコードの画像に。複数なら「開く画像の選択」で選び、レコード ID のグループに開く（各レイヤーの `satobs/imageId` はレコードの ID、`satobs/imageFile` はフォルダからのパス）。URL のフォルダは不可、最大 1000 枚 | tsudo の依頼（2026-11-07、プラグインのみ） |
-| ピラミッド（.ovr）の自動作成 | —（ブラウザは COG の解像度レベルを読む） | カタログから開いたローカル画像にピラミッドがなければバックグラウンドで外部 `.ovr` を作成（画像本体は書き換えない）。`overviews.location` が `auto` なら書き込めるフォルダは画像の隣、書き込めなければ PC ごとのキャッシュ（`GDAL_PAM_PROXY_DIR`）、`cache` なら常にキャッシュ。`overviews: false` で無効 | tsudo の依頼（2026-11-07、プラグインのみ） |
+| ピラミッド（.ovr）の自動作成 | —（ブラウザは COG の解像度レベルを読む） | QGIS に追加したローカル画像（`overviews.scope` が `catalog` ならカタログから開いた画像だけ）にピラミッドがなければバックグラウンドで外部 `.ovr` を作成（画像本体は書き換えない）。`overviews.location` が `auto` なら書き込めるフォルダは画像の隣、書き込めなければ PC ごとのキャッシュ（`GDAL_PAM_PROXY_DIR`）、`cache` なら常にキャッシュ。`overviews: false` で無効 | tsudo の依頼（2026-11-07、プラグインのみ） |
 | 類似画像の検索の入口 | 画像の右クリック・一覧のボタン | カタログから開いたラスターレイヤーの右クリック「類似画像の検索…」・一覧のボタン | — |
 | 重なり | 平面の面積比 | QgsDistanceArea（WGS84 楕円体）の面積比 | 指示書どおり |
 | 監視の保存 | IndexedDB | ローカル GeoPackage の `catalog_watches`・`watch_notices` | ほかのローカル保存と同じ |

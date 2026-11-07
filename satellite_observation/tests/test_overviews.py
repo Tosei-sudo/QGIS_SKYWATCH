@@ -12,8 +12,8 @@ def test_bool_and_object():
     problems = []
     assert overviews_of(False, problems) == OverviewOptions(enabled=False)
     o = overviews_of({"resampling": "cubic", "minSize": 512, "compress": "lzw", "cacheFolder": " D:/cache ",
-                      "location": "Cache"}, problems)
-    assert o == OverviewOptions(True, "CUBIC", 512, "LZW", "D:/cache", "cache") and not problems
+                      "location": "Cache", "scope": "Catalog"}, problems)
+    assert o == OverviewOptions(True, "CUBIC", 512, "LZW", "D:/cache", "cache", "catalog") and not problems
     config, problems = parse_config({"overviews": {"enabled": False}})
     assert not config.overviews.enabled and not problems
 
@@ -21,8 +21,8 @@ def test_bool_and_object():
 def test_bad_values_fall_back():
     problems = []
     o = overviews_of({"resampling": "fancy", "minSize": -1, "compress": 3, "cacheFolder": 1, "enabled": "yes",
-                      "location": "elsewhere"}, problems)
-    assert o == DEFAULT_OVERVIEWS and len(problems) == 6
+                      "location": "elsewhere", "scope": "some"}, problems)
+    assert o == DEFAULT_OVERVIEWS and len(problems) == 7
     problems = []
     assert overviews_of("on", problems) == DEFAULT_OVERVIEWS and problems
 
