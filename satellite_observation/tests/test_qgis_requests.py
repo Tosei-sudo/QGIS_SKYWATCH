@@ -153,6 +153,33 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
     got = {c.request.name: (c.result, c.system.system if c.system else c.reason) for c in daily.plan.candidates}
     assert got == {"横須賀": ("採用", "SYS-A"), "呉": ("見送り", "枠超過"), "大阪湾": ("採用", "SYS-B")}
+
+    # 上限シミュレーション: SYS-A at 2 a day takes 呉 too; SYS-B off leaves 大阪湾 without a system. Nothing is written.
+    ledger_before = json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str)
+    history_before = len(fake.layers[HISTORY].rows)
+    daily.open_simulation()
+    sim = daily.simulation
+    sim.days.setValue(2)
+    rows = {sim.systems.item(r, 1).data(Qt.ItemDataRole.UserRole): r for r in range(sim.systems.rowCount())}
+    assert sim.systems.item(rows["SYS-A"], 2).text() == "1" and sim.systems.item(rows["SYS-B"], 2).text() == ""
+    sim.systems.item(rows["SYS-A"], 2).setText("2")
+    sim.systems.item(rows["SYS-B"], 0).setCheckState(Qt.CheckState.Unchecked)
+    sim.run()
+    assert wait_for(lambda: sim.trial is not None and sim.task is None), sim.status.text()
+    assert sim.base.total("over") == 2 and sim.base.total("lost") == 2
+    assert sim.trial.total("over") == 0 and sim.trial.days[0].used["SYS-A"][0] == 2
+    assert sim.trial.days[0].no_system == 1 and "SYS-B" not in sim.trial.days[0].used
+    summary = {sim.summary.item(r, 0).text(): (sim.summary.item(r, 1).text(), sim.summary.item(r, 2).text(), sim.summary.item(r, 3).text())
+               for r in range(sim.summary.rowCount())}
+    assert summary["枠超過で見送り"] == ("2", "0", "-2")
+    assert sim.daily.rowCount() == 2 and "A 2/2 件" in sim.daily.item(0, 11).text()
+    # Back to the settings' values: the same as the base, without reading the ledger again.
+    sim.fill_systems()
+    sim.run()
+    assert sim.trial.total("over") == sim.base.total("over") == 2
+    assert json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str) == ledger_before
+    assert len(fake.layers[HISTORY].rows) == history_before
+    sim.close()
     # By hand: 呉 in (over the limit), 横須賀 out.
     model = daily.model
     names = [c.request.name for c in daily.plan.candidates]

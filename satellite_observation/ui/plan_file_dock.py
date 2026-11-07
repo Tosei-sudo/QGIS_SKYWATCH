@@ -11,6 +11,8 @@ systems' limits. The table shows every candidate: ticking 採用 or not,
 moving rows up and down and ticking a raise are kept and the fitting is
 done again. 「書き出し」 writes one file per system (CSV, or JSON checked
 against its schema), then the history and the raises taken.
+「上限シミュレーション…」 tries other daily limits over the coming days
+without writing anything (limit_sim_dialog.py).
 """
 from __future__ import annotations
 
@@ -63,6 +65,8 @@ class PlanFileDock(PluginDock):
         self.store: Optional[RequestStoreConfig] = None
         self.plan: Optional[DayPlan] = None
         self.task = None
+        #: The 上限シミュレーション window, while open.
+        self.simulation = None
         self._rendering = False
         #: The files last written.
         self.paths: list = []
@@ -88,6 +92,10 @@ class PlanFileDock(PluginDock):
         self.run_button.setToolTip(self.tr("撮像済みの確認・依頼の再読み込み・雲量予報のあと、その日の依頼を枠に詰める"))
         self.run_button.clicked.connect(lambda: self.run())
         top.addWidget(self.run_button)
+        self.sim_button = QPushButton(self.tr("上限シミュレーション…"))
+        self.sim_button.setToolTip(self.tr("日ごとの上限や使うシステムを変えた場合の枠超過・期限切れを今後の日数で試算（台帳には書き込まない）"))
+        self.sim_button.clicked.connect(self.open_simulation)
+        top.addWidget(self.sim_button)
         top.addStretch(1)
         layout.addLayout(top)
         self.status = QLabel()
@@ -152,12 +160,25 @@ class PlanFileDock(PluginDock):
         self.plan = None
         self.render()
 
+    def open_simulation(self) -> None:
+        """Opens 「上限シミュレーション」 for the chosen store, from the chosen day."""
+        if self.store is None:
+            return
+        from .limit_sim_dialog import LimitSimDialog
+        if self.simulation is not None:
+            self.simulation.close()
+        self.simulation = LimitSimDialog(self.context, self.store, self.satellites, self.chosen_day(), self)
+        self.simulation.show()
+
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
     def close_all(self) -> None:
         """Stops nothing running but forgets the day (when the plugin is unloaded)."""
         self.plan = None
+        if self.simulation is not None:
+            self.simulation.close()
+            self.simulation = None
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, self.tr("出力先"), self.folder.text())
@@ -336,6 +357,7 @@ class PlanFileDock(PluginDock):
         busy = self.task is not None
         has = self.plan is not None and bool(self.plan.candidates)
         self.run_button.setEnabled(not busy and self.store is not None)
+        self.sim_button.setEnabled(self.store is not None)
         for b in (self.up_button, self.down_button, self.reset_button):
             b.setEnabled(has and not busy)
         self.write_button.setEnabled(has and not busy and any(c.result == TAKEN for c in self.plan.candidates))
