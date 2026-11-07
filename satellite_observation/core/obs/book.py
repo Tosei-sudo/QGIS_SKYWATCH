@@ -102,6 +102,33 @@ class FormValues:
     width: str = ""
 
 
+@dataclass
+class BulkOutcome:
+    """What became of a bulk change of records."""
+    saved: list = field(default_factory=list)
+    #: Already as asked.
+    unchanged: int = 0
+    #: 不在 records, whose activity was left empty.
+    absent: int = 0
+    #: Chosen but no longer here (deleted).
+    missing: int = 0
+    #: Not saved: of them, changed by someone else since read.
+    failed: int = 0
+    conflicts: int = 0
+    error: str = ""
+
+    def text(self) -> str:
+        parts = [f"{len(self.saved)} 件の記録を一括変更"]
+        if self.unchanged:
+            parts.append(f"変更不要 {self.unchanged} 件")
+        if self.absent:
+            parts.append(f"不在の {self.absent} 件は活動なしのまま")
+        if self.failed:
+            why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから変更）" if self.conflicts else self.error)
+            parts.append(f"保存できず {self.failed} 件（{why}）")
+        return "・".join(parts)
+
+
 class ObservationBook:
     """The records of one store, and what is done with them."""
 
@@ -557,6 +584,55 @@ class ObservationBook:
         record = replace(was, **changes, updated_at=now_ms())
         saved = self._save_records([record], f"{record.object_name} を更新")
         return saved[0] if saved else None
+
+    def update_many(self, record_ids: Sequence[str], kind: Optional[str] = None, activity: Optional[str] = None,
+                    confidence: Optional[str] = None) -> "BulkOutcome":
+        """
+        Sets the kind, the activity or the 確度 of several records at once (一括編集), in one save.
+        A 不在 record keeps no activity. The store's checks hold: records someone else changed since
+        they were read are not overwritten; those that went through are kept here, and the rest told.
+        """
+        outcome = BulkOutcome()
+        wanted = set(record_ids)
+        targets = [o for o in self.records if o.id in wanted and o.deleted_at is None]
+        outcome.missing = len(wanted) - len(targets)
+        new_kind = kind_of(path_of(kind)) if kind is not None else None
+        now = now_ms()
+        rows = []
+        for o in targets:
+            values: dict[str, Any] = {}
+            if new_kind is not None and new_kind != o.kind:
+                values["kind"] = new_kind
+            if activity is not None and o.present and activity.strip() != o.activity:
+                values["activity"] = activity.strip()
+            elif activity is not None and not o.present:
+                outcome.absent += 1
+            if confidence is not None and confidence.strip() != o.confidence:
+                values["confidence"] = confidence.strip()
+            if values:
+                rows.append(replace(o, **values, updated_at=now))
+            else:
+                outcome.unchanged += 1
+        if not rows:
+            self._say(outcome.text())
+            return outcome
+        by = self.observer()
+        rows = [replace(o, updated_by=by) for o in rows]
+        try:
+            self.store.save(rows)
+            saved = rows
+        except Exception as error:  # noqa: BLE001 (told; the part that went through is kept)
+            done = getattr(self.store, "last_saved", set())
+            saved = [o for o in rows if o.id in done]
+            outcome.conflicts = len(getattr(self.store, "last_conflicts", set()) & {o.id for o in rows})
+            outcome.failed = len(rows) - len(saved)
+            outcome.error = _error_text(error)
+        with self.lock:
+            by_id = {o.id: o for o in saved}
+            self.records = [by_id.get(o.id, o) for o in self.records]
+        outcome.saved = saved
+        self._say(outcome.text())
+        return outcome
 
     def move(self, record_id: str, lon: float, lat: float) -> Optional[Observation]:
         """A record's mark dragged: its place corrected."""

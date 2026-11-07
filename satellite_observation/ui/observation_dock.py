@@ -20,7 +20,7 @@ from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -423,7 +423,8 @@ class ObservationDock(PluginDock):
         b.addWidget(self.class_filter_row)
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Ctrl / Shift + click chooses several records (or things), for 「一括編集」.
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -432,6 +433,13 @@ class ObservationDock(PluginDock):
         self.table.cellDoubleClicked.connect(self._row_double_clicked)
         b.addWidget(self.table, 1)
         self._row_actions: list[tuple[Callable, Optional[Callable]]] = []
+        #: The records each row stands for (a record, or a thing's records), for 「一括編集」.
+        self._row_records: list[list[Observation]] = []
+        self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
+                                        lambda: self.bulk_edit())
+        self.bulk_button.hide()
+        self.table.itemSelectionChanged.connect(self._selection_changed)
+        b.addWidget(self.bulk_button)
 
         # The chosen thing's flow.
         self.flow_box = QGroupBox()
@@ -1724,9 +1732,12 @@ class ObservationDock(PluginDock):
         self.table.setHorizontalHeaderLabels(list(names))
         self.table.setRowCount(0)
         self._row_actions = []
+        self._row_records = []
+        self.bulk_button.hide()
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
-             style: str = "", widget: Optional[QWidget] = None, selected: bool = False) -> None:
+             style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
+             records: Optional[list[Observation]] = None) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         for i, c in enumerate(cells):
@@ -1749,16 +1760,65 @@ class ObservationDock(PluginDock):
         if widget is not None:
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
         self._row_actions.append((on_click, on_double))
+        self._row_records.append(list(records or []))
         if selected:
             self.table.selectRow(r)
 
     def _row_clicked(self, row: int, _col: int) -> None:
+        if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+            return  # choosing several, not opening one
         if 0 <= row < len(self._row_actions) and self._row_actions[row][0]:
             self._row_actions[row][0]()
 
     def _row_double_clicked(self, row: int, _col: int) -> None:
         if 0 <= row < len(self._row_actions) and self._row_actions[row][1]:
             self._row_actions[row][1]()
+
+    def selected_records(self) -> list[Observation]:
+        """The living records of the rows chosen (a thing's row: all its records), each once."""
+        rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
+        out: dict[str, Observation] = {}
+        for r in rows:
+            for o in self._row_records[r] if 0 <= r < len(self._row_records) else []:
+                if o.deleted_at is None:
+                    out.setdefault(o.id, o)
+        return list(out.values())
+
+    def _selection_changed(self) -> None:
+        rows = {i.row() for i in self.table.selectionModel().selectedRows()}
+        self.bulk_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
+
+    def bulk_edit(self, records: Optional[list[Observation]] = None):
+        """Asks what to set on the chosen records (the kind, the activity, the 確度), then saves it on all of them."""
+        from .bulk_edit_dialog import BulkEditDialog, BulkField
+
+        book = self.book
+        records = self.selected_records() if records is None else records
+        if book is None or not records:
+            return None
+        things = len({o.object_id for o in records})
+        first = records[0]
+        fields = [
+            BulkField("kind", self.tr("種別"), words=self.kinds_model.stringList(), value=first.kind,
+                      tip=self.tr("「大分類 > 種別 > 級」の形")),
+            BulkField("activity", self.tr("活動"), words=book.activity_words(first.kind), value=first.activity,
+                      tip=self.tr("不在の記録は活動なしのまま")),
+            BulkField("confidence", self.tr("確度"), choices=["", *(c.label for c in book.confidences())], value=first.confidence),
+        ]
+        what = self.tr("選んだ記録 {n} 件（モノ {m} 件）").format(n=len(records), m=things)
+        dialog = BulkEditDialog(self.tr("観測記録の一括編集"), what, fields, self)
+        ids = [o.id for o in records]
+        dialog.accepted.connect(lambda: self.apply_bulk(ids, dialog.values()))
+        dialog.finished.connect(lambda _r: dialog.deleteLater())
+        dialog.open()
+        return dialog
+
+    def apply_bulk(self, ids: list[str], values: dict) -> Any:
+        """Sets the values on the records (in a task for an Esri store); what went through and what not is told."""
+        values = {k: v for k, v in values.items() if k in ("kind", "activity", "confidence")}
+        if not values:
+            return None
+        return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values))
 
     def _small(self, *buttons: tuple) -> QWidget:
         box = QWidget()
@@ -1846,7 +1906,7 @@ class ObservationDock(PluginDock):
                 self._small((tr("流れ"), tr("このモノの流れの表示"), lambda o=o: self.choose(o.object_id)))
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
-                      style="deleted" if gone else "", widget=widget)
+                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o])
         inside_ids = {id(c) for c in inside}
         for c in carried:
             s = c.source
@@ -1881,7 +1941,7 @@ class ObservationDock(PluginDock):
         for f in listed:
             self._row([f.name, f.kind, f.activity if f.present else tr("不在"), local_time(f.first), local_time(f.last), f.seen],
                       lambda f=f: self.choose(None if self.chosen == f.object_id else f.object_id), lambda f=f: self._fit_flow(f),
-                      selected=f.object_id == self.chosen)
+                      selected=f.object_id == self.chosen, records=f.observations)
         if self.table.rowCount() == 0:
             self._row([tr("該当するモノなし") if objects else tr("記録なし")])
 
