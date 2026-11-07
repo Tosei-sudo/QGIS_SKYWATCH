@@ -5,6 +5,9 @@ the conditions on satellites, and the area: drawn on the map as a box,
 clicked as a point with a size, or taken from the selected feature.
 
 It stays open beside the map (not modal) so the area can be drawn.
+
+Given `batch` (「レイヤーから取り込み」), the names and areas are the layer's
+features: the form then asks only the rest, once for all of them.
 """
 from __future__ import annotations
 
@@ -60,8 +63,11 @@ class RequestForm(QDialog):
     """Adds or changes one request; `save(request)` is called with it on 「保存」."""
 
     def __init__(self, iface, request: ImagingRequest, save: Callable[[ImagingRequest], None],
-                 known: Optional[dict] = None, parent=None, satellites: Optional[Callable] = None):
+                 known: Optional[dict] = None, parent=None, satellites: Optional[Callable] = None,
+                 batch: Optional[dict] = None):
         super().__init__(parent or iface.mainWindow())
+        #: 「レイヤーから取り込み」: {"items": [(name, rings, 範囲 / 点)], "text": what they are}; None for one request.
+        self.batch = batch
         self.iface = iface
         self.canvas = iface.mapCanvas()
         self.request = request
@@ -70,7 +76,10 @@ class RequestForm(QDialog):
         self._note = ""
         self._closing = False
         self.overlay = PlanOverlay(self.canvas)
-        self.setWindowTitle(self.tr("撮像依頼の編集") if request.object_id is not None else self.tr("撮像依頼の登録"))
+        if batch is not None:
+            self.setWindowTitle(self.tr("レイヤーから取り込み（{n} 件）").format(n=len(batch["items"])))
+        else:
+            self.setWindowTitle(self.tr("撮像依頼の編集") if request.object_id is not None else self.tr("撮像依頼の登録"))
         self.setModal(False)
         self._build(known or {})
         self._fill(request)
@@ -89,6 +98,8 @@ class RequestForm(QDialog):
             self._note = self.tr("衛星カタログを読み込み中…")
             self._names_changed()
             satellites(self._satellites_read, lambda m: self._no_catalog(self.tr("衛星カタログを読めず（{m}）。名前で入力").format(m=m)))
+        if batch is not None:
+            self._as_batch(batch)
 
     # --- Building -----------------------------------------------------------------------------
 
@@ -474,6 +485,16 @@ class RequestForm(QDialog):
         self.message.setText("")
         self._area_changed()
 
+    def _as_batch(self, batch: dict) -> None:
+        """Names and areas from the layer's features: shown, not asked."""
+        self.name.setEnabled(False)
+        self.name.setText(batch.get("names", ""))
+        for w in (self.box_button, self.point_button, self.size, self.selected_button):
+            w.hide()
+        self.area_label.setText(batch.get("text", ""))
+        self.overlay.paint([(rings, "#f59e0b", 2, name) for name, rings, _kind in batch["items"]])
+        self.canvas.refresh()
+
     def _area_changed(self) -> None:
         box = bbox_of(self.rings)
         if box is None:
@@ -518,9 +539,9 @@ class RequestForm(QDialog):
 
     def problems(self, r: ImagingRequest) -> list:
         out = []
-        if not r.name:
+        if not r.name and self.batch is None:
             out.append(self.tr("名称なし"))
-        if not r.rings:
+        if not r.rings and self.batch is None:
             out.append(self.tr("範囲なし"))
         if r.end < r.start:
             out.append(self.tr("期間の終わりが始まりより前"))
