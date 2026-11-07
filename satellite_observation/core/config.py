@@ -39,6 +39,7 @@ from .request.store import RequestStoreConfig, request_store_of
 from .request.systems import ExportSystem, export_systems_of
 from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
+from .events import EventSettings, events_settings_of
 from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
 
@@ -48,7 +49,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports", "assignments", "handover",
+    "alertReports", "assignments", "handover", "events",
 )
 
 
@@ -108,6 +109,8 @@ class PluginConfig:
     assignments: Optional[EsriSource] = None
     #: `handover`: how the shift handover memo (引き継ぎメモ) is written and kept.
     handover: HandoverSettings = field(default_factory=HandoverSettings)
+    #: `events`: the event layer and its link table (イベント); None hides the dock's work.
+    events: Optional[EventSettings] = None
 
 
 class JsoncError(ValueError):
@@ -268,6 +271,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.assignments = assignment_source_of(value["assignments"], problems)
     if "handover" in value:
         config.handover = handover_settings_of(value["handover"], problems)
+    if "events" in value:
+        config.events = events_settings_of(value["events"], problems)
     return config, problems
 
 

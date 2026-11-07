@@ -32,6 +32,7 @@ from .ui.docks import StubDock
 from .ui.dock_layouts import DockLayoutMenu
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
+from .ui.events_dock import EventsDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
@@ -70,12 +71,12 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
+MENU_TOP = ["イベント", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
 INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
@@ -199,6 +200,11 @@ class PluginApi:
         return self._plugin.docks["SatObsMoving"]
 
     @property
+    def events(self) -> "EventsDock":
+        """The dock 「イベント」 (its `events`, `links`, `reload()`, `link_items(event_ids, items)`, `choose(id)`)."""
+        return self._plugin.docks["SatObsEvents"]
+
+    @property
     def ai_results(self) -> "AiResultsDock":
         """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
         return self._plugin.docks["SatObsAiResults"]
@@ -297,7 +303,7 @@ class SatelliteObservationPlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files"}
+                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -315,6 +321,7 @@ class SatelliteObservationPlugin:
             ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
             ("SatObsDashboard", tr("ダッシュボード"), None),
             ("SatObsAiResults", tr("AI結果"), None),
+            ("SatObsEvents", tr("イベント"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -343,6 +350,8 @@ class SatelliteObservationPlugin:
             elif name == "SatObsAiResults":
                 dock = AiResultsDock(self.iface, self.context, self.open_settings, lambda: self.docks.get("SatObsObservations"),
                                      self.iface.mainWindow())
+            elif name == "SatObsEvents":
+                dock = EventsDock(self.iface, self.context, self.open_settings, lambda: self.docks, self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsRequests":
@@ -386,6 +395,9 @@ class SatelliteObservationPlugin:
             self.actions.append(action)
 
         self.place_docks()
+        # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
+        for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
+            self.docks[name].event_linker = lambda: self.docks.get("SatObsEvents")
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)

@@ -204,6 +204,7 @@ class CatalogDock(PluginDock):
             ("watch", self.tr("この条件で監視…"), self._watch),
             ("pick", self.tr("地図で選択"), None),
             ("folders", self.tr("フォルダの対応を消去"), self.clear_folders),
+            ("event", self.tr("イベントに追加"), self.add_to_event),
         ]:
             button = QPushButton(text)
             if slot is None:
@@ -260,6 +261,7 @@ class CatalogDock(PluginDock):
         self.catalog_box.setCurrentIndex(i if i >= 0 else 0)
         self.catalog_box.blockSignals(False)
         self.layers = {}
+        self.buttons["event"].setVisible(self.context.config.events is not None)
         self.search_button.setEnabled(bool(self.catalogs()))
         if not self.catalogs():
             self.status.setText(self.tr("設定ファイルに画像カタログなし"))
@@ -621,6 +623,28 @@ class CatalogDock(PluginDock):
             self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
             self.status.setText(problems[-1])
         return layers
+
+    #: The 「イベント」 dock (plugin.py sets it).
+    event_linker: Optional[Callable[[], object]] = None
+
+    def event_items(self, records=None) -> list:
+        """The chosen images as items of an event."""
+        from ..core.events import LinkItem
+        from ..core.util import ms_of
+
+        catalog = self._shown_catalog
+        if catalog is None:
+            return []
+        return [LinkItem("image", r.id, label=" ".join(x for x in (r.id, r.sensor) if x), time=ms_of(r.acquired), source=catalog.url)
+                for r in (records if records is not None else self.chosen()) if r.id]
+
+    def add_to_event(self):
+        """「イベントに追加」: the chosen images into an open event (a menu of them)."""
+        if not self.event_items():
+            self.status.setText(self.tr("一覧で画像を選択（Ctrl・Shift + クリックで複数）"))
+            return None
+        events = self.event_linker() if self.event_linker else None
+        return events.offer(self.buttons["event"], self.event_items) if events else None
 
     def copy_paths(self) -> None:
         """Copies where the chosen images are (their URL or path), one per line."""

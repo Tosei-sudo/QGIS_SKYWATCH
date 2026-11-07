@@ -22,11 +22,11 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 | AI | 物体検出（AI）…・クリック抽出（AI）・AI結果・検出結果を DB へ転記… ／ 教師データセットの作成…・AI 学習（物体検出）… |
 | 地図・レイヤー | 背景地図・設定ファイルのレイヤーを追加・新規スクラッチレイヤー（テンプレート）… ／ ArcGIS Web マップを開く…・ArcGIS Web マップとして保存… |
 
-サブメニューのあと（区切り線の下）に「ドックのレイアウト」「ドックを初期位置に戻す」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
+サブメニューのあと（区切り線の下）に「イベント」「ドックのレイアウト」「ドックを初期位置に戻す」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼・撮像計画ファイル出力）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集・移動体・AI結果）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼・撮像計画ファイル出力）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ）は左、記録系（観測記録・分類体系の編集・移動体・AI結果・イベント）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -353,6 +353,36 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 "handover": { "table": "https://…/Work/FeatureServer/1", "hours": 8,
               "file": { "path": "D:/handover/handover_{now:%Y%m%d_%H%M}.txt", "encoding": "cp932" } }
 ```
+
+## イベント（地震対応など・`events`）
+
+地震・風水害・事故などの対応で使った画像・観測記録・撮像依頼を、イベントとして束ねて管理する。メニュー（区切り線の下）かツールバーの「イベント」。
+
+- 一覧: 対応中のイベント（「終了」「すべて」に切り替え）。名前・種別・メモで絞り込み。列は名前・種別・状態・開始・終了と、画像・観測記録・撮像依頼の件数
+- 「新規…」「編集…」（ダブルクリックでも）: 名前（必須）・種別（地震・津波・風水害… 入力も可。使った種別が候補に出る）・状態（対応中／終了）・期間（開始と、任意で終了）・範囲（「地図の表示範囲」「選択地物」（ポリゴンはそのまま、線・点は外接矩形）「消去」）・メモ（経緯・方針・引き継ぎなど）
+- 「終了」: 終了にする（終了日時が空なら現在）。終了したイベントは「イベントに追加」の候補に出ない。「再開」で対応中に戻す
+- 「削除」: イベントと紐付けを消す（画像・記録・依頼そのものは残る。元に戻せない）
+- 下のタブ（画像・観測記録・撮像依頼）: イベントの項目。「開く」（ダブルクリックでも）で画像はレイヤーとして開く、記録は「観測記録」ドックでその記録へ、依頼は「撮像依頼」で選択。「カタログで表示」で画像を画像カタログの一覧に出す（類似画像の検索などがそのまま使える）。「メモ…」で項目ごとのメモ（このイベントでの扱い）。「イベントから外す」
+- 「地図に表示」: グループ「イベント: 名前」に範囲・画像の範囲・観測記録の位置のレイヤー（もう一度押すと置き換え）。「範囲へ移動」
+- 「画像を検索」: 画像カタログの撮像日と範囲をイベントの期間・範囲にして検索
+- 「エクスポート…」: 項目の一覧を CSV（UTF-8 BOM、Excel で開ける）に。「概要をコピー」: 名前・状態・期間・件数・メモの数行をクリップボードへ（報告や引き継ぎに）
+
+**項目の追加**: 画像カタログ・観測記録（一覧で記録を選んだとき）・撮像依頼の「イベントに追加」。対応中のイベントのメニュー（「イベント」ドックで選んでいるものが先頭に「（選択中）」）と「新しいイベント…」（作ってすぐ追加）。Ctrl・Shift + クリックで複数をまとめて。1 つの項目を複数のイベントに入れられる（多対多）。同じイベントにすでにある項目は追加しない
+
+**Esri に置く**（設定ファイルには URL と属性名だけ）:
+
+- イベントのレイヤー（`layer`、編集可）: ポリゴンレイヤー（範囲を持つ）かテーブル（範囲なし）。`EVENT_ID`（必須）・`EVENT_NAME`（必須）・`EVENT_KIND`・`STATUS`（`対応中`／`終了`）・`START_AT`・`END_AT`（日付）・`NOTE`
+- 紐付けテーブル（`links`、編集可）: 1 項目 1 行。`EVENT_ID`・`ITEM_TYPE`（`image`・`observation`・`request`）・`ITEM_ID`（画像はカタログの画像ID、記録は記録ID、依頼は依頼ID。以上 3 つは必須）・`ITEM_LABEL`・`ITEM_TIME`（撮像日時など。一覧に出す）・`SOURCE`（カタログ・保存先・台帳の URL。ローカルの記録は `local`）・`NOTE`。追加者・追加日時は [`editTracking`](#作成者更新者の記録edittracking) の `CREATED_USER`・`CREATED_DATE`（あれば）
+- 属性名はそれぞれの `fields` で変更可（役割: `id`・`name`・`kind`・`status`・`start`・`end`・`note`／`event`・`type`・`item`・`label`・`time`・`source`・`note`）。`where`・`token` も可
+
+```jsonc
+"events": {
+  "layer": "https://…/Events/FeatureServer/0",
+  "links": { "url": "https://…/Events/FeatureServer/1", "fields": { "note": "REMARKS" } }
+}
+```
+
+- 観測記録は「観測記録」ドックでいま選んでいる保存先から開く。別の保存先の記録は、その保存先に切り替えてから
 
 ## 分類体系の編集
 
@@ -694,7 +724,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 起動時のレイヤー
 
@@ -870,6 +900,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token" }` | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
+| `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }` | なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |
 
 #### 地図・レイヤー・場所
 
