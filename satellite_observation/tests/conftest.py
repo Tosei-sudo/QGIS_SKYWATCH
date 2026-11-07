@@ -25,6 +25,11 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: long tests (AI training until it learns), only with --full")
+    # With pytest-timeout (requirements-test.txt): a test that hangs (Qt waiting in C++, where Python's signals
+    # never come) is stopped after 5 minutes with every thread's stack, instead of holding the run for good.
+    if config.pluginmanager.hasplugin("timeout") and not getattr(config.option, "timeout", None):
+        config.option.timeout = 300
+        config.option.timeout_method = "thread"
     # QGIS / GDAL on the system are built against NumPy 1.x: with NumPy 2 (e.g. pulled in by `pip install onnxruntime`)
     # about 200 tests fail or crash in GDAL. Say so once instead.
     if int(numpy.__version__.split(".")[0]) >= 2 and importlib.util.find_spec("osgeo") is not None:

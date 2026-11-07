@@ -763,7 +763,7 @@ tools/
 ## テスト
 
 ```
-python3 -m pip install -r requirements-test.txt       # pytest・pytest-xdist・sgp4・onnxruntime（NumPy は 2 未満のまま）
+python3 -m pip install -r requirements-test.txt       # pytest・pytest-xdist・pytest-timeout・sgp4・onnxruntime（NumPy は 2 未満のまま）
 
 QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto         # 高速版（約 40 秒・4 コア）: 学習が「当たるまで」のテストを除く
 QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto --full  # 完全版（約 2 分半）: AI 学習が四角を見つけ直すまで学ぶテストも
@@ -774,6 +774,7 @@ SATELLITE_OBSERVATION_SGP4=bundled python3 -m pytest        # 同梱の純 Pytho
 - 遅いテストには `@pytest.mark.slow`。高速版では飛ばし、`--full`（または環境変数 `SATOBS_FULL_TESTS=1`）で実行。AI 学習のテストは高速版でも 1 エポックで読み込み・学習・書き出し・検出まで通す（精度だけ完全版）
 - マージ前は高速版。AI（`core/ai`・`processing_provider` の学習・検出・データセット）を変えたときは完全版も
 - `-n auto` は pytest-xdist の並列実行。NumPy の BLAS は 1 プロセス 1 スレッド（`tests/conftest.py`）。並列でなくても動く（高速版で約 1 分 45 秒）
+- pytest-timeout があれば、1 件 5 分を超えたテストは全スレッドのスタックを出して止める（固まったまま待たない）
 - NumPy 2 では QGIS / GDAL の `gdal_array` が読めず約 200 件が落ちるので、テストは始まる前に止まる。`pip uninstall numpy` でシステムの 1.x に戻す
 
 ### Esri なしで試す（モックサーバー）

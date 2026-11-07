@@ -4,5 +4,6 @@
 numpy<2
 pytest
 pytest-xdist
+pytest-timeout
 sgp4
 onnxruntime
