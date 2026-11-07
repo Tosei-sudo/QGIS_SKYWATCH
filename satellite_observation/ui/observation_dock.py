@@ -414,8 +414,8 @@ class ObservationDock(PluginDock):
         for edit in (self.object_input, self.kind_input, self.activity_input, self.length_input, self.width_input, self.heading_input,
                      self.note_input):
             edit.returnPressed.connect(lambda: self.submit(True))
+        # Below the list (added after it): the record chosen there opens under it.
         self.form.hide()
-        b.addWidget(self.form)
 
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -470,6 +470,7 @@ class ObservationDock(PluginDock):
         chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
         b.addLayout(chosen)
+        b.addWidget(self.form)
 
         # The chosen thing's flow.
         self.flow_box = QGroupBox()
@@ -1292,6 +1293,7 @@ class ObservationDock(PluginDock):
         self.submit_button.setText(self.tr("更新（Enter）") if editing else self.tr("継続（Enter）") if source else self.tr("記録（Enter）"))
         self.form.setTitle(editing.object_name if editing else source.object_name if source else self.tr("新規の記録"))
         self.form.show()
+        self.reveal(self.form)
         self._render_chips()
         self._render_kind_path()
         self._render_candidates()

@@ -670,3 +670,26 @@ def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeyp
     monkeypatch.undo()
     dock.submit()
     assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]
+
+
+def test_the_record_chosen_in_the_list_opens_below_the_list(plugin):
+    p, iface, dock, layers, _ = plugin
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.submit()
+    dock.parentWidget().resize(400, 300)
+    dock.resize(400, 300)
+    APP.processEvents()
+    # 「この画像」 tab: its row opens the record's form, under the table (as a thing's and a class's details).
+    assert dock.tabs.currentIndex() == 0 and dock.table.rowCount() == 1
+    dock._row_clicked(0, 0)
+    assert dock.form.isVisible() and dock.form.title() == "あおば"
+    order = [dock.body.itemAt(i).widget() for i in range(dock.body.count())]
+    assert order.index(dock.table) < order.index(dock.form) < order.index(dock.flow_box)
+    APP.processEvents()
+    APP.processEvents()
+    assert dock.form.y() > dock.table.y()
+    # Scrolled to it when the dock is too small to show it all.
+    bar = dock.scroll.verticalScrollBar()
+    assert bar.maximum() > 0 and bar.value() > 0
