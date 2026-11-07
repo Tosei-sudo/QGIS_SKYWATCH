@@ -180,7 +180,10 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     # Back to the settings' values: the same as the base, without reading the ledger again.
     sim.fill_systems()
     sim.run()
-    assert sim.trial.total("over") == sim.base.total("over") == 2
+    # The run is a task of its own (#83): the dialog stays live meanwhile.
+    assert sim.task is not None and not sim.run_button.isEnabled()
+    assert wait_for(lambda: sim.task is None), sim.status.text()
+    assert sim.trial.total("over") == sim.base.total("over") == 2 and sim.run_button.isEnabled()
     assert json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str) == ledger_before
     assert len(fake.layers[HISTORY].rows) == history_before
     sim.close()
@@ -196,6 +199,18 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert got == {"横須賀": "見送り", "呉": "採用", "大阪湾": "採用"}
 
     daily.write(ask=False)
+    # While the files are made (#84): a tick in the table is put back, and the plan is not changed.
+    assert daily.task is not None
+    names = [c.request.name for c in daily.plan.candidates]
+    daily.model.item(names.index("横須賀"), 0).setCheckState(Qt.CheckState.Checked)
+    assert daily.model.item(names.index("横須賀"), 0).checkState() == Qt.CheckState.Unchecked
+    daily.move(-1)
+    daily.reset()
+    assert {c.request.name: c.result for c in daily.plan.candidates} == got
+    # Even a change made to the plan meanwhile does not reach the files and history (they are of a copy).
+    live = next(c for c in daily.plan.candidates if c.request.name == "横須賀")
+    live.manual = "採用"
+    daily.plan.refit()
     assert wait_for(lambda: len(daily.paths) == 2), daily.status.text()
     paths = daily.paths
     a = next(x for x in paths if "SYS-A" in x)
@@ -207,6 +222,10 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert wait_for(lambda: daily.task is None and len(fake.layers[HISTORY].rows) == 3), daily.status.text()
     assert settings.request_export_folder() == str(tmp_path / "out")
     assert {r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows} == {"採用", "見送り"}
+    yokosuka = next(x.id for x in dock.requests if x.name == "横須賀")
+    assert {r["attributes"]["REQ_ID"]: r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows}[yokosuka] == "見送り"
+    live.manual = "見送り"
+    daily.plan.refit()
 
     # Written again the same day (#71): the earlier rows are replaced, not doubled.
     daily.paths = []

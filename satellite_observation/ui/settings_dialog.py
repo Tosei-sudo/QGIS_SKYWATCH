@@ -100,6 +100,14 @@ class SettingsDialog(QDialog):
         context.configChanged.connect(self._fill)
         self._fill()
 
+    def done(self, result: int) -> None:
+        """Closed: no longer fills itself again on each reading of the settings (#87)."""
+        try:
+            self.context.configChanged.disconnect(self._fill)
+        except (TypeError, RuntimeError):
+            pass
+        super().done(result)
+
     def _show_cache(self) -> None:
         folder = overviews_io.cache_folder()
         if not folder:

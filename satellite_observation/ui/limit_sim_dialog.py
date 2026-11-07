@@ -235,6 +235,9 @@ class LimitSimDialog(QDialog):
         self.task = run_task(self.tr("上限シミュレーションの読み込み"), work, done, failed)
 
     def _simulate(self, notes=()) -> None:
+        """Runs the settings' limits and those tried in a task (a large ledger takes seconds, #83); draws the result."""
+        if self.task is not None:
+            return
         requests, history, sats = self.data
         start, days = self.chosen_start(), self.days.value()
         forecasts = self.forecasts if self.weather.isChecked() else {}
@@ -243,14 +246,35 @@ class LimitSimDialog(QDialog):
             return clouds_of(requests, day, forecasts) if forecasts else {}
 
         systems = self.context.config.request_exports
-        self.base = simulate(requests, start, days, systems, sats, clouds, history)
-        self.trial = simulate(requests, start, days, changed_systems(systems, self.changes()), sats, clouds, history)
-        self.render()
-        text = self.tr("{start} から {n} 日・依頼 {r} 件で試算（台帳への書き込みなし）").format(start=start.isoformat(), n=days, r=len(requests))
-        if not systems:
-            text += self.tr("（設定ファイルに requestExports なし）")
-        self.status.setText("。".join([text, *notes]))
-        self.run_button.setEnabled(True)
+        tried = changed_systems(systems, self.changes())
+        self.run_button.setEnabled(False)
+        self.status.setText(self.tr("試算中…"))
+
+        def work(task):
+            base = simulate(requests, start, days, systems, sats, clouds, history, task.isCanceled)
+            task.check()
+            task.progress(50)
+            trial = simulate(requests, start, days, tried, sats, clouds, history, task.isCanceled)
+            task.check()
+            return base, trial
+
+        def done(result):
+            self.task = None
+            self.base, self.trial = result
+            self.render()
+            text = self.tr("{start} から {n} 日・依頼 {r} 件で試算（台帳への書き込みなし）").format(
+                start=start.isoformat(), n=days, r=len(requests))
+            if not systems:
+                text += self.tr("（設定ファイルに requestExports なし）")
+            self.status.setText("。".join([text, *notes]))
+            self.run_button.setEnabled(True)
+
+        def failed(message):
+            self.task = None
+            self.status.setText(self.tr("試算できず: {m}").format(m=message))
+            self.run_button.setEnabled(True)
+
+        self.task = run_task(self.tr("上限シミュレーションの試算"), work, done, failed)
 
     # --- Showing --------------------------------------------------------------------------------
 

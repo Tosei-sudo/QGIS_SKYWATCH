@@ -21,7 +21,7 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, time_zone_fields
 from .qgis_io.context import PluginContext
-from .qgis_io import overviews_io
+from .qgis_io import overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
@@ -773,7 +773,12 @@ class SatelliteObservationPlugin:
         self.remote_dialog.raise_()
 
     def open_settings(self) -> None:
-        SettingsDialog(self.context, self.iface.mainWindow()).exec()
+        dialog = SettingsDialog(self.context, self.iface.mainWindow())
+        try:
+            dialog.exec()
+        finally:
+            # Made anew each time: the closed one goes, with its auth lists (#87).
+            dialog.deleteLater()
 
     def _config_problems(self) -> None:
         """「設定ファイルの問題 n 件」 in the message bar after a read that found any (the list is in 「設定…」)."""
@@ -816,6 +821,8 @@ class SatelliteObservationPlugin:
 
     def unload(self) -> None:
         overviews_io.queue.cancel_all()
+        # Before the docks and the local store go: a task ending later would write into them (#88).
+        tasks.cancel_all()
         try:
             QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
         except (TypeError, RuntimeError):

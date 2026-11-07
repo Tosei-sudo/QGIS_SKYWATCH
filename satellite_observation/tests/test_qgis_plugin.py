@@ -78,6 +78,21 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     assert dialog.services.rowCount() == len(plugin.context.services())
     assert dialog.problems.count() == 0
     assert not dialog.startup_layers.isChecked()
+    # Closed, it no longer fills itself on each reading of the settings (#87); the menu's one is deleted.
+    listening = plugin.context.receivers(plugin.context.configChanged)
+    dialog.reject()
+    assert plugin.context.receivers(plugin.context.configChanged) == listening - 1
+    opened = []
+    SettingsDialog.exec = lambda self: opened.append(self) or 0
+    try:
+        plugin.open_settings()
+    finally:
+        del SettingsDialog.exec
+    assert len(opened) == 1 and plugin.context.receivers(plugin.context.configChanged) == listening
+    from qgis.PyQt import sip
+    from qgis.PyQt.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert sip.isdeleted(opened[0])
     # 「パンシャープン」 in the Processing toolbox while the plugin is loaded.
     assert QgsApplication.processingRegistry().algorithmById("satobs:pansharpen") is not None
     plugin.unload()
