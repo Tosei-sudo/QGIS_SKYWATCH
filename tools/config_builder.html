@@ -1,0 +1,1766 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>設定ファイル作成ツール</title>
+<!--
+  衛星撮像計画・観測記録プラグインの設定ファイル（config.json）を作る・直すツール。
+  ブラウザでこのファイルを開くだけで動く（サーバー・ネットワーク・ライブラリ不要）。
+  項目と既定はプラグインの satellite_observation/core/config.py（KEYS と各項目の読み込み処理）に合わせてある。
+  下の plugin-constants はプラグインの定数の写し: satellite_observation/tests/test_config_builder.py が一致を確かめる。
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel2: #f0f2f5; --text: #1d2433; --muted: #5d6677; --line: #d8dce3;
+  --accent: #2257c9; --accent-bg: #e7eefc; --bad: #c62828; --bad-bg: #fdecec; --warn: #9a6200; --ok: #1b7f3b;
+  --code: #eef1f5; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --panel: #1d2129; --panel2: #252a33; --text: #e4e7ec; --muted: #9aa3b2; --line: #343a46;
+    --accent: #7ea6ff; --accent-bg: #23314f; --bad: #ff7b7b; --bad-bg: #3a2224; --warn: #f0b75a; --ok: #6fd28f; --code: #262b35;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181e; --panel: #1d2129; --panel2: #252a33; --text: #e4e7ec; --muted: #9aa3b2; --line: #343a46;
+  --accent: #7ea6ff; --accent-bg: #23314f; --bad: #ff7b7b; --bad-bg: #3a2224; --warn: #f0b75a; --ok: #6fd28f; --code: #262b35;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif; display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0 12px 0 0; }
+header .file { color: var(--muted); font-size: 12px; }
+header .spacer { flex: 1; }
+button, .button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); cursor: pointer; }
+button:hover, .button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.small { padding: 1px 8px; font-size: 12px; }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+.layout { flex: 1; display: grid; grid-template-columns: 230px minmax(0, 1fr) minmax(300px, 34%); min-height: 0; }
+nav { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 8px 0 24px; }
+nav h2 { font-size: 12px; color: var(--muted); margin: 14px 14px 4px; font-weight: 600; }
+nav a { display: flex; align-items: center; gap: 6px; padding: 3px 14px; color: var(--text); text-decoration: none; font-size: 13px; }
+nav a:hover { background: var(--panel2); }
+nav a.current { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+nav a .n { margin-left: auto; font-size: 11px; color: var(--muted); }
+nav a .dot { width: 7px; height: 7px; border-radius: 50%; background: transparent; flex: none; }
+nav a.set .dot { background: var(--ok); }
+nav a.bad .dot { background: var(--bad); }
+#editor { overflow: auto; padding: 16px 20px 80px; }
+aside { overflow: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+aside h3 { font-size: 13px; margin: 4px 0; }
+#problems { margin: 0; padding-left: 18px; font-size: 12px; max-height: 32vh; overflow: auto; }
+#problems li { color: var(--bad); }
+#problems li.warn { color: var(--warn); }
+#problems.none { list-style: none; padding-left: 0; }
+#problems.none li { color: var(--ok); }
+pre, textarea, code, input.mono { font-family: var(--mono); font-size: 12px; }
+#preview { flex: 1; margin: 0; padding: 10px; background: var(--code); border-radius: 6px; overflow: auto; white-space: pre; min-height: 200px; }
+h2.key { font-size: 18px; margin: 0 0 2px; }
+h2.key code { font-size: 14px; color: var(--muted); font-weight: 400; margin-left: 8px; }
+p.help { color: var(--muted); margin: 4px 0 12px; }
+.row { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 4px 12px; align-items: start; padding: 5px 0; }
+.row > .lab { padding-top: 5px; }
+.row > .lab code { display: block; color: var(--muted); font-size: 11px; }
+.row .req { color: var(--bad); margin-left: 2px; }
+.row small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+input[type=text], input[type=number], select, textarea { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
+textarea { min-height: 70px; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.invalid { border-color: var(--bad) !important; background: var(--bad-bg) !important; }
+.err { color: var(--bad); font-size: 12px; }
+.roles { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 3px 8px; align-items: center; }
+.roles span { font-size: 12px; }
+.roles span code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.pairs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 3px 6px; align-items: center; }
+.card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 10px 0; }
+.card > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel2); border-radius: 8px; }
+.card[open] > summary { border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; }
+.card > summary::-webkit-details-marker { display: none; }
+.card > summary .title { font-weight: 600; }
+.card > summary .sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.card > summary .tools { display: flex; gap: 4px; }
+.card > .body { padding: 6px 12px 10px; }
+.card.bad > summary .title::after { content: " ●"; color: var(--bad); }
+fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px 8px; margin: 4px 0; min-width: 0; }
+legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.note { font-size: 12px; color: var(--muted); }
+.choices { display: flex; flex-wrap: wrap; gap: 4px 14px; padding-top: 5px; }
+.choices label { display: inline-flex; gap: 4px; align-items: center; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.overview { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.overview a { display: block; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); text-decoration: none; }
+.overview a:hover { border-color: var(--accent); }
+.overview a b { display: block; }
+.overview a span { font-size: 12px; color: var(--muted); }
+/* JSON Schema の木 */
+.node { border-left: 2px solid var(--line); padding: 4px 0 4px 10px; margin: 4px 0 4px 4px; }
+.node-head { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.node-head input[type=text], .node-head select { width: auto; padding: 3px 6px; font-size: 13px; }
+.node-head input.name { width: 150px; font-family: var(--mono); }
+.node-head input.short { width: 110px; }
+.node-head select { max-width: 260px; }
+.node-head label { font-size: 12px; display: inline-flex; gap: 3px; align-items: center; }
+.node .other { font-size: 11px; color: var(--muted); }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--accent-bg); color: var(--accent); }
+.sample { margin: 6px 0 0; padding: 8px; background: var(--code); border-radius: 6px; white-space: pre; overflow: auto; max-height: 340px; }
+.cols { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cols th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 2px 4px; }
+.cols td { padding: 2px 4px; vertical-align: top; }
+.cols input, .cols select { padding: 3px 6px; font-size: 13px; }
+.hidden { display: none !important; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: 1fr; }
+  nav { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30vh; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  .row { grid-template-columns: 1fr; }
+  #editor { padding: 12px 16px 60px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>設定ファイル作成ツール</h1>
+  <span class="file" id="fileName">新規</span>
+  <span class="spacer"></span>
+  <button id="btnNew" type="button">新規</button>
+  <label class="button" for="fileInput">開く…</label>
+  <input id="fileInput" type="file" accept=".json,.jsonc,application/json" class="hidden">
+  <button id="btnCopy" type="button">コピー</button>
+  <button id="btnSave" type="button" class="primary">config.json を保存</button>
+</header>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="editor"></main>
+  <aside>
+    <h3>確認</h3>
+    <ul id="problems"></ul>
+    <h3>config.json（プレビュー）</h3>
+    <pre id="preview"></pre>
+  </aside>
+</div>
+
+<script type="application/json" id="plugin-constants">
+{
+ "keys": [
+  "satelliteCatalogs",
+  "sensorCatalogs",
+  "satelliteAliases",
+  "planStores",
+  "groundStations",
+  "cloudForecast",
+  "imageCatalogs",
+  "watchInterval",
+  "pathMappings",
+  "overviews",
+  "observationStores",
+  "localObservations",
+  "observationVocabulary",
+  "arcgisPortals",
+  "layers",
+  "baseMaps",
+  "defaultBaseMap",
+  "geocoders",
+  "layerTemplates",
+  "imageRules",
+  "movingFeeds",
+  "gpServices",
+  "aiModels",
+  "detectionOutputs",
+  "aiResultSources",
+  "timeZones",
+  "requestStores",
+  "requestExports"
+ ],
+ "roles": {
+  "imageCatalogs": [
+   "id",
+   "acquired",
+   "registered",
+   "systemRegistered",
+   "sensor",
+   "angle",
+   "azimuth",
+   "source"
+  ],
+  "satelliteCatalogs": [
+   "name",
+   "id",
+   "tle",
+   "tle1",
+   "tle2",
+   "maxOffNadir",
+   "minOffNadir",
+   "swath",
+   "length",
+   "lookSide",
+   "kind",
+   "scenesPerPass",
+   "minInterval",
+   "maxPerDay",
+   "series",
+   "leadTime",
+   "sensor",
+   "mode",
+   "resolution",
+   "system"
+  ],
+  "sensorCatalogs": [
+   "sensor",
+   "mode",
+   "kind",
+   "maxOffNadir",
+   "minOffNadir",
+   "swath",
+   "length",
+   "lookSide",
+   "scenesPerPass",
+   "minInterval",
+   "maxPerDay",
+   "leadTime",
+   "resolution",
+   "primary"
+  ],
+  "satelliteAliases": [
+   "satellite",
+   "alias"
+  ],
+  "planStores": {
+   "planId": "PLAN_ID",
+   "planName": "PLAN_NAME",
+   "shotTime": "SHOT_TIME",
+   "satellite": "SATELLITE",
+   "satelliteId": "SATELLITE_ID",
+   "mode": "MODE",
+   "target": "TARGET",
+   "offNadir": "OFF_NADIR",
+   "incidence": "INCIDENCE",
+   "pass": "PASS_DIR",
+   "side": "LOOK_SIDE",
+   "status": "STATUS",
+   "imageId": "IMAGE_ID",
+   "created": "CREATED_AT"
+  },
+  "requestStores": {
+   "id": "REQ_ID",
+   "name": "REQ_NAME",
+   "category": "CATEGORY",
+   "achieve": "ACHIEVE",
+   "start": "START_AT",
+   "end": "END_AT",
+   "repeat": "REPEAT",
+   "status": "STATUS",
+   "priority": "PRIORITY",
+   "boost": "BOOST",
+   "kind": "KIND",
+   "series": "SERIES",
+   "satellites": "SATELLITES",
+   "modes": "SENSOR_MODES",
+   "offNadirMin": "OFF_NADIR_MIN",
+   "offNadirMax": "OFF_NADIR_MAX",
+   "incidenceMin": "INCIDENCE_MIN",
+   "incidenceMax": "INCIDENCE_MAX",
+   "lookSide": "LOOK_SIDE",
+   "orbitDir": "ORBIT_DIR",
+   "resolution": "RESOLUTION_MAX",
+   "timeOfDay": "TIME_OF_DAY",
+   "cloudNoGo": "CLOUD_NO_GO",
+   "systems": "SYSTEMS",
+   "shapeKind": "SHAPE_KIND",
+   "requester": "REQUESTER",
+   "note": "NOTE",
+   "created": "CREATED_AT",
+   "updated": "UPDATED_AT"
+  },
+  "requestHistory": {
+   "runId": "RUN_ID",
+   "runDate": "RUN_DATE",
+   "day": "TARGET_DAY",
+   "requestId": "REQ_ID",
+   "system": "SYSTEM",
+   "satellite": "SATELLITE",
+   "priority": "PRIORITY_OUT",
+   "cloud": "CLOUD",
+   "scenes": "SCENES",
+   "result": "RESULT",
+   "reason": "REASON",
+   "file": "FILE",
+   "captured": "CAPTURED",
+   "imageId": "IMAGE_ID",
+   "boostDone": "BOOST_DONE"
+  },
+  "observationStores": {
+   "id": "OBS_ID",
+   "imageId": "IMAGE_ID",
+   "imageName": "IMAGE_NAME",
+   "imageTime": "IMAGE_TIME",
+   "objectId": "OBJECT_ID",
+   "objectName": "OBJECT_NAME",
+   "kind": "KIND",
+   "activity": "ACTIVITY",
+   "present": "PRESENT",
+   "note": "NOTE",
+   "length": "LENGTH_M",
+   "heading": "HEADING",
+   "width": "WIDTH_M",
+   "confidence": "CONFIDENCE",
+   "recordedBy": "OBSERVER",
+   "updatedBy": "UPDATED_BY",
+   "created": "CREATED_AT",
+   "updated": "UPDATED_AT",
+   "deleted": "DELETED_AT"
+  },
+  "taxonomyTable": {
+   "path": "PATH",
+   "levels": "LEVELS",
+   "nameLabel": "NAME_LABEL",
+   "members": "MEMBERS",
+   "specs": "SPECS",
+   "photos": "PHOTOS",
+   "activities": "ACTIVITIES",
+   "order": "SORT_ORDER"
+  },
+  "movingFeeds": [
+   "id",
+   "time",
+   "lat",
+   "lon",
+   "heading",
+   "course",
+   "speed",
+   "name",
+   "kind"
+  ],
+  "detectionOutputs": [
+   "imageId",
+   "fileName",
+   "imageTime",
+   "detectedAt",
+   "sentAt",
+   "class",
+   "classId",
+   "score",
+   "model",
+   "status",
+   "lon",
+   "lat",
+   "area",
+   "length",
+   "width",
+   "angle",
+   "note"
+  ],
+  "aiResultSources": [
+   "imageId",
+   "id",
+   "class",
+   "score",
+   "model",
+   "detectedAt",
+   "name",
+   "kind",
+   "activity",
+   "length",
+   "heading",
+   "width",
+   "note"
+  ]
+ },
+ "exportSources": [
+  "id",
+  "name",
+  "category",
+  "achieve",
+  "start",
+  "end",
+  "periodStart",
+  "periodEnd",
+  "repeat",
+  "priority",
+  "priorityRaw",
+  "priorityBase",
+  "boost",
+  "kind",
+  "series",
+  "satellites",
+  "modes",
+  "satellite",
+  "satelliteId",
+  "mode",
+  "sensor",
+  "offNadirMin",
+  "offNadirMax",
+  "incidenceMin",
+  "incidenceMax",
+  "lookSide",
+  "orbitDir",
+  "resolution",
+  "timeOfDay",
+  "cloudMax",
+  "cloudForecast",
+  "weatherFlag",
+  "scenes",
+  "geometry",
+  "centerLat",
+  "centerLon",
+  "bboxWest",
+  "bboxSouth",
+  "bboxEast",
+  "bboxNorth",
+  "requester",
+  "note",
+  "system",
+  "runDate",
+  "day",
+  "count",
+  "warnings"
+ ],
+ "geometries": [
+  "wkt",
+  "geojson",
+  "bbox",
+  "center",
+  "centerRadius",
+  "vertices"
+ ],
+ "exportFormats": [
+  "csv",
+  "json"
+ ],
+ "encodings": [
+  "cp932",
+  "utf-8",
+  "utf-8-sig"
+ ],
+ "layerTypes": [
+  "cog",
+  "file",
+  "wms",
+  "wmts",
+  "wfs",
+  "esri",
+  "ogc-features",
+  "ogc-tiles",
+  "wcs",
+  "ogc-coverage",
+  "xyz"
+ ],
+ "baseMapTypes": [
+  "xyz",
+  "mvt",
+  "style",
+  "esri"
+ ],
+ "defaultBaseMaps": [
+  "gsi-std",
+  "gsi-pale",
+  "gsi-photo",
+  "gsi-vector",
+  "osm",
+  "esri-osm"
+ ],
+ "geocoderTypes": [
+  "gsi",
+  "nominatim",
+  "arcgis",
+  "features",
+  "csv"
+ ],
+ "feedTypes": [
+  "websocket",
+  "sse",
+  "poll",
+  "esri-stream"
+ ],
+ "feedKinds": [
+  "ship",
+  "aircraft"
+ ],
+ "detectTasks": [
+  "detect",
+  "obb",
+  "segment"
+ ],
+ "detectFormats": [
+  "auto",
+  "yolov8",
+  "yolov5",
+  "end2end",
+  "yolox",
+  "detectron2"
+ ],
+ "detectionStatuses": [
+  "ai",
+  "corrected",
+  "manual"
+ ],
+ "resamplings": [
+  "NEAREST",
+  "AVERAGE",
+  "BILINEAR",
+  "CUBIC",
+  "CUBICSPLINE",
+  "LANCZOS",
+  "GAUSS",
+  "MODE",
+  "RMS"
+ ],
+ "compressions": [
+  "NONE",
+  "DEFLATE",
+  "LZW",
+  "ZSTD",
+  "JPEG"
+ ],
+ "overviewLocations": [
+  "auto",
+  "cache"
+ ],
+ "overviewScopes": [
+  "all",
+  "catalog"
+ ],
+ "presets": [
+  "auto",
+  "vivid",
+  "soft",
+  "satellite",
+  "document",
+  "blackAndWhite"
+ ],
+ "geometryTypes": [
+  "Point",
+  "LineString",
+  "Polygon",
+  "MultiPoint",
+  "MultiLineString",
+  "MultiPolygon"
+ ],
+ "fieldTypes": [
+  "string",
+  "integer",
+  "double",
+  "date"
+ ]
+}
+</script>
+<script>
+"use strict";
+const K = JSON.parse(document.getElementById("plugin-constants").textContent);
+
+// ---------------------------------------------------------------- 表示名
+
+const ROLE_LABELS = {
+  id: "ID", acquired: "撮像日時", registered: "登録日時", systemRegistered: "システム登録日時", sensor: "センサー",
+  angle: "角度", azimuth: "方位角", source: "画像の場所（COG の URL・パス。複数はカンマ区切り）", name: "名前",
+  tle: "TLE（2 行まとめて）", tle1: "TLE 1 行目", tle2: "TLE 2 行目", maxOffNadir: "最大オフナディア角", minOffNadir: "最小オフナディア角",
+  swath: "観測幅", length: "シーンの長さ", lookSide: "観測方向", kind: "種別", scenesPerPass: "1 パスのシーン数",
+  minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
+  resolution: "分解能", system: "システム", primary: "既定のモード", satellite: "衛星（衛星カタログの名前か ID）",
+  alias: "別名（画像カタログでの名前）", planId: "計画 ID", planName: "計画名", shotTime: "撮像時刻", satelliteId: "衛星 ID",
+  target: "目標", offNadir: "オフナディア角", incidence: "入射角", pass: "軌道方向", side: "観測方向", status: "状態",
+  imageId: "画像 ID", created: "作成日時", updated: "更新日時", category: "区分", achieve: "達成条件", start: "開始",
+  end: "終了", repeat: "繰り返し", priority: "優先度", boost: "繰り上げ量", satellites: "衛星", modes: "センサーモード",
+  offNadirMin: "オフナディア角下限", offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限",
+  orbitDir: "軌道方向", timeOfDay: "時間帯", cloudNoGo: "実施しない雲量", systems: "優先システム", shapeKind: "範囲の種類",
+  requester: "依頼者", note: "備考", runId: "出力 ID", runDate: "出力日時", day: "対象日", requestId: "依頼 ID",
+  cloud: "雲量", scenes: "シーン数", result: "結果", reason: "理由", file: "ファイル", captured: "撮像済みの判定",
+  boostDone: "繰り上げ済み", imageName: "画像名", imageTime: "撮像日時", objectId: "モノの ID", objectName: "モノの名前",
+  activity: "活動", present: "有無", heading: "向き（°）", width: "幅（m）", confidence: "確度", recordedBy: "記録者",
+  updatedBy: "更新者", deleted: "削除日時", path: "分類のパス", levels: "階層名", nameLabel: "名前の見出し",
+  members: "構成", specs: "諸元", photos: "写真", activities: "活動", order: "並び順", time: "時刻", lat: "緯度",
+  lon: "経度", course: "針路（COG）", speed: "速度", fileName: "ファイル名", detectedAt: "検出日時", sentAt: "転記日時",
+  class: "クラス", classId: "クラス番号", score: "確信度", model: "モデル", area: "面積（m²）", angleDeg: "向き（°）",
+};
+const SOURCE_LABELS = {
+  id: "依頼 ID", name: "名称", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
+  periodStart: "依頼の開始", periodEnd: "依頼の終了", repeat: "繰り返し", priority: "優先度（システムの書き方に変換）",
+  priorityRaw: "出力用の優先度（1〜1000）", priorityBase: "台帳の優先度", boost: "繰り上げ量", kind: "種別（光学・SAR）",
+  series: "衛星シリーズ", satellites: "衛星（依頼の指定）", modes: "センサーモード（依頼の指定）", satellite: "割り当てた衛星",
+  satelliteId: "割り当てた衛星の ID", mode: "割り当てたモード", sensor: "割り当てたセンサー", offNadirMin: "オフナディア角下限",
+  offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限", lookSide: "観測方向", orbitDir: "軌道方向",
+  resolution: "分解能", timeOfDay: "時間帯", cloudMax: "実施しない雲量", cloudForecast: "雲量予報（%）", weatherFlag: "気象の注意",
+  scenes: "シーン数", geometry: "範囲（座標）", centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "範囲の西端",
+  bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", note: "メモ",
+  system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
+};
+const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度" };
+const DATE_FORMATS = ["iso", "iso-date", "unix", "unixms", "%Y%m%d", "%Y/%m/%d %H:%M", "%Y-%m-%dT%H:%M:%S"];
+
+// ---------------------------------------------------------------- 小道具
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k in e && typeof v !== "string") e[k] = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const isEmpty = (v) => v === undefined || v === "" || (Array.isArray(v) && v.length === 0) || (isObj(v) && Object.keys(v).length === 0);
+const ATTR = /^[A-Za-z0-9_.]+$/;
+const opt = (o) => Array.isArray(o) ? o : [o, o];
+
+/** JSONC（コメント・末尾のカンマつき）の JSON（プラグインの strip_jsonc と同じ扱い）。 */
+function stripJsonc(text) {
+  let out = "", i = 0, inStr = false;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (inStr) {
+      out += c;
+      if (c === "\\" && i + 1 < n) { out += text[i + 1]; i += 2; continue; }
+      if (c === '"') inStr = false;
+      i++;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; i++; }
+    else if (text.startsWith("//", i)) { const e = text.indexOf("\n", i); i = e < 0 ? n : e; }
+    else if (text.startsWith("/*", i)) {
+      const e = text.indexOf("*/", i + 2);
+      if (e < 0) throw new Error("閉じていないコメント");
+      out += "\n".repeat((text.slice(i, e).match(/\n/g) || []).length);
+      i = e + 2;
+    } else { out += c; i++; }
+  }
+  let res = "";
+  inStr = false;
+  for (let j = 0; j < out.length; j++) {
+    const c = out[j];
+    if (inStr) {
+      res += c;
+      if (c === "\\" && j + 1 < out.length) { res += out[++j]; continue; }
+      if (c === '"') inStr = false;
+    } else if (c === '"') { inStr = true; res += c; }
+    else if (c === ",") {
+      let k = j + 1;
+      while (k < out.length && " \t\r\n".includes(out[k])) k++;
+      if (k < out.length && "}]".includes(out[k])) continue;
+      res += c;
+    } else res += c;
+  }
+  return res;
+}
+function loadJsonc(text) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  return JSON.parse(stripJsonc(text));
+}
+function download(name, text) {
+  const a = el("a", { href: URL.createObjectURL(new Blob([text], { type: "application/json" })), download: name });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+/** 数・true/false・null に見える文字はその値に、ほかは文字列のまま。 */
+function autoValue(s) {
+  const t = s.trim();
+  if (t === "") return undefined;
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+  if (t === "true") return true;
+  if (t === "false") return false;
+  if (t === "null") return null;
+  return s;
+}
+const showAuto = (v) => v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v);
+
+// ---------------------------------------------------------------- 項目の定義
+
+const T = (k, l, o = {}) => ({ k, t: "text", l, ...o });
+const N = (k, l, o = {}) => ({ k, t: "number", l, ...o });
+const B = (k, l, o = {}) => ({ k, t: "bool", l, ...o });
+const S = (k, l, opts, o = {}) => ({ k, t: "select", l, opts, ...o });
+const L = (k, l, o = {}) => ({ k, t: "list", l, ...o });
+const J = (k, l, o = {}) => ({ k, t: "json", l, ...o });
+const TJ = (k, l, o = {}) => ({ k, t: "textOrJson", l, ...o });
+const R = (k, l, roles, o = {}) => ({ k, t: "roles", l, roles, ...o });
+const M = (k, l, o = {}) => ({ k, t: "map", l, ...o });
+const I = (k, l, fields, o = {}) => ({ k, t: "items", l, fields, ...o });
+const O = (k, l, fields, o = {}) => ({ k, t: "object", l, fields, ...o });
+
+const LABEL = T("label", "名前", { help: "一覧・メニューに出す名前（省略すると「… 1」のような名前）" });
+const URL_ = (help, ph = "https://gis.example/arcgis/rest/services/…/FeatureServer/0") => T("url", "URL", { req: true, ph, help });
+const WHERE = T("where", "絞り込み（where）", { ph: "STATUS = 'ACTIVE'", help: "対象を絞る SQL の条件（任意）" });
+const TOKEN = T("token", "トークン", { help: "ArcGIS のトークン（任意）。各自の QGIS 認証設定を選んだサービスには送らない。配る設定ファイルには書かない方がよい" });
+const TZ = T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo・UTC・+09:00", help: "サービスの日時の本当のタイムゾーン（サービスの申告と違うとき）" });
+const STZ = T("serviceTimeZone", "サービスの申告", { ph: "UTC", help: "サービスが申告しているタイムゾーン（任意）" });
+const SWATH_UNIT = S("swathUnit", "観測幅の単位", [["km", "km"], ["m", "m"]]);
+const SAR = T("sarPattern", "SAR とみなす名前", { ph: "SAR|radar|レーダ", help: "衛星名・センサー名の正規表現" });
+const catalogLabels = () => (state.imageCatalogs || []).map((c, i) => (c && c.label) || `カタログ ${i + 1}`);
+const CATALOG = T("catalog", "撮像済みを確かめるカタログ", { help: "画像カタログの名前（label）", list: catalogLabels });
+
+const PRIORITY = { k: "priority", t: "priority", l: "優先度の書き方" };
+const COLUMNS = { k: "columns", t: "columns", l: "CSV の列", showIf: (it) => (it.format || "csv") === "csv" };
+const SCHEMA = { k: "schema", t: "schema", l: "JSON Schema", showIf: (it) => it.format === "json" };
+const SAMPLE = { k: "", t: "sample", l: "見本" };
+
+const SPEC = [
+  { group: "画像カタログ・通知・画像", keys: [
+    { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須。",
+      field: I("imageCatalogs", "画像カタログ", [
+        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], multi: ["source"] }),
+        M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
+        J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
+        WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
+        S("angleKind", "角度の種類", [["offNadir", "オフナディア角"], ["incidence", "入射角"], ["elevation", "仰角"]]),
+        N("orbitHeight", "軌道高度（km）", { ph: "600" }),
+        J("imagePatterns", "フォルダのレコードの画像（imagePatterns）", { ph: '{ "WV03": "_PAN\\\\.tif$", "*": "\\\\.tif$" }', help: "{ センサー名: 正規表現か配列, \"*\": … }、文字列か配列も可" }),
+        TOKEN, TZ, STZ,
+      ]) },
+    { key: "watchInterval", label: "新着画像の確認間隔", doc: "通知", help: "新着画像を確かめる間隔（分）。",
+      field: N("watchInterval", "間隔（分）", { min: 1, max: 1440, ph: "10" }) },
+    { key: "pathMappings", label: "パスの読み替え", doc: "画像カタログ", help: "レコードのパスの先頭を、http(s) の URL か各自が選ぶフォルダに読み替える。",
+      field: I("pathMappings", "読み替え", [T("prefix", "パスの先頭", { req: true, ph: "\\\\fileserver\\images" }), LABEL, T("url", "同じフォルダの URL", { help: "なければ各自が PC のフォルダを選ぶ" })], { title: (it) => it.prefix }) },
+    { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
+      field: O("overviews", "ピラミッド", [
+        B("enabled", "作る"), S("resampling", "リサンプリング", K.resamplings), N("minSize", "作る最小の大きさ（px）"),
+        S("compress", "圧縮", K.compressions), S("location", "置き場所", [["auto", "auto（書ければ画像の隣）"], ["cache", "cache（キャッシュのフォルダ）"]]),
+        S("scope", "対象", [["all", "all（追加したローカル画像すべて）"], ["catalog", "catalog（カタログなどから開いたものだけ）"]]),
+        T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中" }),
+      ], { allowFalse: "作らない（false）" }) },
+    { key: "imageRules", label: "画像ごとの補正", doc: "画像補正", help: "ファイル名に合う画像に補正・バンド・no data を当てる。",
+      field: I("imageRules", "規則", [
+        LABEL, T("match", "ファイル名（正規表現）", { req: true, ph: "^WV03_.*\\.tif$" }), B("caseSensitive", "大文字小文字を区別"),
+        S("preset", "プリセット", K.presets), J("enhance", "補正（enhance）", { ph: '{ "contrast": 0.2, "autoStretch": { "lowPercent": 1 } }' }),
+        J("bands", "バンド（bands）", { ph: "[3, 2, 1]" }), J("noData", "no data", { ph: "0" }),
+      ], { title: (it) => it.label || it.match }) },
+  ] },
+  { group: "撮像計画・撮像依頼", keys: [
+    { key: "satelliteCatalogs", label: "衛星カタログ（TLE）", doc: "撮像計画", help: "衛星の TLE と諸元。fields に tle か tle1＋tle2 が必須。",
+      field: I("satelliteCatalogs", "衛星カタログ", [
+        LABEL, URL_(), R("fields", "属性名", K.roles.satelliteCatalogs, { requiredAny: [["tle"], ["tle1", "tle2"]] }),
+        J("defaults", "属性がないときの値（defaults）", { ph: '{ "maxOffNadir": 30, "swath": 10 }' }), SWATH_UNIT, SAR, WHERE, TOKEN, TZ, STZ,
+      ]) },
+    { key: "sensorCatalogs", label: "センサーモード", doc: "撮像計画", help: "センサーごとのモード。設定ファイルに sensors で書くか、テーブルの url と fields（sensor 必須）。",
+      field: I("sensorCatalogs", "センサーモード", [
+        LABEL, T("url", "テーブルの URL", { ph: "https://…/FeatureServer/1" }), R("fields", "属性名", K.roles.sensorCatalogs),
+        J("sensors", "ファイルに書くモード（sensors）", { ph: '[{ "sensor": "SAR-1", "modes": [{ "mode": "Stripmap", "swath": 30 }] }]' }),
+        SWATH_UNIT, SAR, WHERE, TOKEN, TZ, STZ,
+      ], { check: (it, at, p) => { if (!it.url && !it.sensors) p.push(`${at}: url か sensors が必要`); if (it.url && !(it.fields && it.fields.sensor)) p.push(`${at}: fields.sensor が必要`); } }) },
+    { key: "satelliteAliases", label: "衛星名の対応表", doc: "衛星名の対応表satellitealiases", help: "衛星カタログの名前と画像カタログでの名前（WV03 など）の対応。対応表のデータは Esri のテーブルに置き、ここにはテーブルと属性名だけを書く。",
+      field: I("satelliteAliases", "対応表", [LABEL, URL_("対応表のテーブル", "https://…/FeatureServer/2"), R("fields", "属性名", K.roles.satelliteAliases, { required: ["satellite", "alias"] }), WHERE, TOKEN]) },
+    { key: "planStores", label: "撮像計画の保存先", doc: "撮像計画", help: "撮像計画を保存する編集できるレイヤー。属性名は書かなければ大文字の既定名。",
+      field: I("planStores", "保存先", [LABEL, URL_(), R("fields", "属性名", K.roles.planStores), CATALOG,
+        N("matchMinutes", "撮像済みとみなす時間差（分）", { ph: "30" }), N("missAfterDays", "未撮像とする日数", { ph: "3" }), TOKEN, TZ, STZ]) },
+    { key: "groundStations", label: "地上局", doc: "撮像計画", help: "受信可能を判定する地上局。",
+      field: I("groundStations", "地上局", [T("name", "名前", { req: true }), N("lon", "経度", { req: true }), N("lat", "緯度", { req: true }), N("minElevation", "最低仰角（°）", { ph: "5" })], { title: (it) => it.name }) },
+    { key: "cloudForecast", label: "雲量予報", doc: "", ext: "docs/cloud-forecast-file.md", help: "既定は Open-Meteo。閉じたネットワークでは予報ファイル（file）か、いちばん新しいファイルを読むフォルダ（folder）。url・file・folder のどれか 1 つ。",
+      field: O("cloudForecast", "雲量予報", [LABEL, T("url", "API の URL", { ph: "https://api.open-meteo.com/v1/forecast" }), T("file", "予報ファイル"), T("folder", "予報のフォルダ")],
+        { allowFalse: "出さない（false）", check: (o, at, p) => { const n = ["url", "file", "folder"].filter((k) => o[k]).length; if (n > 1) p.push(`${at}: url・file・folder は 1 つだけ`); } }) },
+    { key: "requestStores", label: "撮像依頼台帳", doc: "", ext: "docs/imaging-requests.md", help: "撮像依頼（定点・臨時）の台帳と出力履歴のテーブル。属性名は書かなければ既定名。",
+      field: I("requestStores", "台帳", [LABEL, URL_("依頼台帳のレイヤー"), T("history", "出力履歴のテーブル", { ph: "https://…/FeatureServer/1" }),
+        R("fields", "台帳の属性名", K.roles.requestStores), R("historyFields", "履歴の属性名", K.roles.requestHistory), CATALOG,
+        N("missAfterDays", "未撮像とする日数"), TOKEN]) },
+    { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
+      field: I("requestExports", "システム", [
+        T("system", "システム名", { req: true, ph: "SYS-A" }), LABEL,
+        S("kind", "受け持つ種別", [["光学", "光学"], ["SAR", "SAR"], ["両方", "両方"]], { ph: "両方" }),
+        L("series", "衛星シリーズ", { ph: "OPT-X, OPT-Y" }), L("satellites", "衛星", { help: "衛星名（シリーズで足りなければ）" }),
+        N("order", "試す順番", { help: "小さいほど先" }),
+        O("limit", "1 日の上限", [N("count", "依頼件数", { min: 0 }), N("scenes", "シーン数", { min: 0 })]),
+        M("quota", "区分ごとの上限", { keys: ["定点", "臨時"], value: "number" }),
+        L("sceneKm", "シーンの大きさ（km、幅, 長さ）", { numbers: true, ph: "10, 10" }),
+        S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
+        T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}" }),
+        S("encoding", "文字コード", K.encodings, { ph: "utf-8" }), B("header", "見出し行（CSV）", { showIf: (it) => (it.format || "csv") === "csv" }),
+        T("timeZone", "出力のタイムゾーン", { ph: "UTC・Asia/Tokyo・+09:00" }),
+        T("dateFormat", "日時の書式", { ph: "iso", list: () => DATE_FORMATS, help: "iso・iso-date・unix・unixms か strftime（%Y%m%d など）" }),
+        N("digits", "座標の小数の桁", { min: 0, max: 12, ph: "6" }), PRIORITY,
+        J("values", "値の読み替え（values）", { ph: '{ "lookSide": { "右": "R", "左": "L", "任意": "B" } }', help: "項目ごとに { 値: 書き方 }。全部の列・プロパティに効く" }),
+        COLUMNS, SCHEMA, SAMPLE,
+      ], { title: (it) => it.label || it.system, check: checkExport, unique: "system" }) },
+  ] },
+  { group: "観測記録・分類体系", keys: [
+    { key: "observationStores", label: "観測記録の保存先", doc: "観測記録", help: "観測記録を保存する編集できるポイントレイヤー。書かなければローカルの GeoPackage だけ。",
+      field: I("observationStores", "保存先", [LABEL, URL_(), R("fields", "属性名", K.roles.observationStores), WHERE,
+        B("softDelete", "削除は印だけ（softDelete）", { help: "既定 true" }), L("kinds", "種別"), L("activities", "活動"),
+        J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b" }]' }), J("taxonomy", "分類の木（taxonomy）"),
+        TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\", \"token\" }" }),
+        TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\", \"token\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),
+        TOKEN, TZ, STZ]) },
+    { key: "localObservations", label: "ローカルの観測記録", doc: "観測記録", help: "false でローカルの GeoPackage を保存先にしない（observationStores だけ）。",
+      field: B("localObservations", "ローカルを使う", { help: "既定 true" }) },
+    { key: "observationVocabulary", label: "観測記録の語彙", doc: "活動大分類ごとの切り替え", help: "分類の木・種別・活動・確度・諸元の項目。書かなければ既定の分類体系。",
+      field: O("observationVocabulary", "語彙", [
+        J("taxonomy", "分類の木", { ph: '[{ "name": "船舶", "activities": ["停泊", "航行"], "children": ["護衛艦", "貨物船"] }]' }),
+        L("kinds", "種別（taxonomy がないとき）"), L("activities", "既定の活動"),
+        J("confidences", "確度", { ph: '["確実", "推定", { "label": "要確認", "color": "#dc2626" }]' }),
+        J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
+        N("matchRadius", "同一候補の半径（m）"),
+      ]) },
+  ] },
+  { group: "地図・レイヤー・場所", keys: [
+    { key: "baseMaps", label: "背景地図", doc: "背景地図", help: "書くと一覧をこれで置き換える（既定は地理院・OSM）。",
+      field: I("baseMaps", "背景地図", [T("id", "ID", { req: true }), LABEL, T("url", "URL", { req: true, ph: "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png" }),
+        S("type", "種類", K.baseMapTypes, { help: "省略時は URL から判断" }), T("style", "スタイル"), N("maxZoom", "最大ズーム"), T("attributions", "出典"), TOKEN],
+        { title: (it) => it.label || it.id, unique: "id" }) },
+    { key: "defaultBaseMap", label: "起動時の背景地図", doc: "背景地図", help: "起動時に出す背景地図の id。",
+      field: S("defaultBaseMap", "背景地図", () => (state.baseMaps ? state.baseMaps.map((b) => b && b.id).filter(Boolean) : K.defaultBaseMaps)) },
+    { key: "layers", label: "起動時のレイヤー", doc: "起動時のレイヤー", help: "空のプロジェクトで起動したときに追加する（先頭がいちばん下）。",
+      field: I("layers", "レイヤー", [S("type", "種類", K.layerTypes, { req: true }), T("url", "URL・パス", { req: true }), T("layer", "レイヤー名", { help: "サービスのとき必須" }),
+        T("matrixSet", "タイル行列（WMTS）"), T("format", "形式"), L("bbox", "範囲（西, 南, 東, 北）", { numbers: true }), T("filter", "絞り込み"),
+        J("settings", "設定（esri）"), N("zmin", "最小ズーム"), N("zmax", "最大ズーム"), TZ, STZ],
+        { title: (it) => `${it.type || "?"} ${it.layer || it.url || ""}`, check: (it, at, p) => { if (it.type && it.type !== "cog" && it.type !== "file" && it.type !== "xyz" && !it.layer) p.push(`${at}: ${it.type} は layer が必要`); } }) },
+    { key: "geocoders", label: "地名検索", doc: "座標地名へ移動", help: "「座標・地名へ移動」の地名検索。書かなければ地名は検索しない。",
+      field: I("geocoders", "地名検索", [S("type", "種類", K.geocoderTypes, { req: true }), T("url", "URL"), LABEL, T("field", "名前の属性（features）"), TOKEN],
+        { check: (it, at, p) => { if (it.type === "features" && !it.field) p.push(`${at}: features は field が必要`); } }) },
+    { key: "layerTemplates", label: "新規スクラッチレイヤーのテンプレート", doc: "新規スクラッチレイヤーテンプレート", help: "組み込みのテンプレートのあとに出す。",
+      field: I("layerTemplates", "テンプレート", [T("name", "名前", { req: true }), T("title", "見出し"), T("description", "説明"),
+        S("geometryType", "ジオメトリ", K.geometryTypes, { nullLabel: "なし（属性だけ）" }),
+        J("fields", "属性", { ph: '[{ "name": "NAME", "type": "string", "alias": "名前", "required": true, "length": 50 }]', help: "type は " + K.fieldTypes.join("・") }),
+      ], { title: (it) => it.name }) },
+    { key: "arcgisPortals", label: "ArcGIS ポータル", doc: "arcgis-web-マップ", help: "Web マップを開くポータル（OAuth の clientId が必須）。",
+      field: I("arcgisPortals", "ポータル", [LABEL, T("url", "ポータルの URL", { req: true, ph: "https://portal.example/portal" }), T("clientId", "clientId", { req: true })], { unique: "url" }) },
+    { key: "movingFeeds", label: "移動体（AIS・ADS-B）", doc: "移動体aisads-b", help: "移動体のフィード。",
+      field: I("movingFeeds", "フィード", [S("type", "種類", K.feedTypes), T("url", "URL", { req: true }), LABEL, N("interval", "間隔（秒）"),
+        R("fields", "項目名", K.roles.movingFeeds), S("kind", "種類", [["ship", "船舶"], ["aircraft", "航空機"]]), TZ, STZ]) },
+    { key: "gpServices", label: "サーバ処理", doc: "サーバ処理", help: "GP サービスか OGC API – Processes。",
+      field: I("gpServices", "サービス", [LABEL, URL_("", "https://gis.example/arcgis/rest/services/Tools/GPServer"), TOKEN, TZ, STZ]) },
+  ] },
+  { group: "AI", keys: [
+    { key: "aiModels", label: "AI のモデル", doc: "ai物体検出クリック抽出", help: "物体検出は url、クリック抽出（SAM）は encoder と decoder。",
+      field: I("aiModels", "モデル", [LABEL, T("url", "モデル（.onnx）"), S("task", "タスク", K.detectTasks), J("inputSize", "入力の大きさ", { ph: "640 か [640, 640]" }),
+        J("classes", "クラス", { ph: '"coco" か ["ship", "plane"]' }), S("format", "出力の形式", K.detectFormats), J("channels", "チャンネル", { ph: "[1, 2, 3]" }),
+        L("mean", "mean", { numbers: true }), L("std", "std", { numbers: true }), N("maxDetections", "最大検出数"), L("strides", "strides", { numbers: true }),
+        M("kinds", "クラス → 種別"), T("encoder", "SAM の encoder"), T("decoder", "SAM の decoder")],
+        { check: (it, at, p) => { if (!it.url && !(it.encoder && it.decoder)) p.push(`${at}: url か encoder と decoder が必要`); } }) },
+    { key: "detectionOutputs", label: "検出結果の転記先", doc: "ai物体検出クリック抽出", help: "物体検出の結果を書き込むレイヤー。",
+      field: I("detectionOutputs", "転記先", [LABEL, URL_(), R("fields", "属性名", K.roles.detectionOutputs, { requiredSome: true }),
+        M("statusValues", "状態の書き方", { keys: K.detectionStatuses, value: "auto" }), M("constants", "固定の属性", { value: "auto", keyHelp: "属性名", valueHelp: "値" }), TOKEN, TZ, STZ]) },
+    { key: "aiResultSources", label: "外部 AI の結果", doc: "ai結果外部aiプラグイン内の物体検出", help: "カタログから開いた画像の外部 AI の結果を出す。fields.imageId が必須。",
+      field: I("aiResultSources", "結果", [LABEL, URL_(), R("fields", "属性名", K.roles.aiResultSources, { required: ["imageId"] }), M("kinds", "クラス → 種別"),
+        N("minScore", "最低の確信度（0〜1）", { min: 0, max: 1 }), N("continueRadius", "続きとみなす半径（m）"), N("candidateRadius", "候補の半径（m）"), N("maxResults", "最大件数"),
+        T("activity", "取り込み時の活動"), T("confidence", "取り込み時の確度"), WHERE, TOKEN, TZ, STZ]) },
+  ] },
+  { group: "日時", keys: [
+    { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",
+      field: I("timeZones", "規則", [LABEL, T("match", "URL（正規表現）", { req: true }), T("timeZone", "タイムゾーン", { req: true, ph: "Asia/Tokyo" }), T("serviceTimeZone", "サービスの申告")], { title: (it) => it.label || it.match }) },
+  ] },
+];
+const ALL = SPEC.flatMap((g) => g.keys.map((k) => ({ ...k, group: g.group })));
+
+// ---------------------------------------------------------------- 状態
+
+let state = {};
+let fileName = "config.json";
+let current = "";               // 表示中の項目（"" は一覧）
+const openCards = new WeakSet(); // 開いているカード
+const STORE = "satellite_observation.config_builder";
+
+function changed() {
+  const text = JSON.stringify(state, null, 2) + "\n";
+  document.getElementById("preview").textContent = text;
+  const probs = check();
+  const ul = document.getElementById("problems");
+  ul.replaceChildren(...(probs.length ? probs.map((p) => el("li", { class: p.warn ? "warn" : "", text: p.text })) : [el("li", { text: "問題は見つからない（最後はプラグインの「設定…」で読み込んで確認）" })]));
+  ul.className = probs.length ? "" : "none";
+  for (const a of document.querySelectorAll("nav a[data-key]")) {
+    const k = a.dataset.key;
+    a.classList.toggle("set", k in state);
+    a.classList.toggle("bad", probs.some((p) => p.key === k));
+    const n = a.querySelector(".n");
+    if (n) n.textContent = Array.isArray(state[k]) ? String(state[k].length) : "";
+  }
+  try { localStorage.setItem(STORE, JSON.stringify({ state, fileName })); } catch (e) { /* 保存できなくても動く */ }
+}
+
+// ---------------------------------------------------------------- 入力欄
+
+/** 1 項目の欄。obj[f.k] を読み書きし、変えたら commit()（親への反映）と changed()。 */
+function field(f, obj, commit, item) {
+  if (f.showIf && !f.showIf(item || obj)) return null;
+  const set = (v) => {
+    if (v === undefined) delete obj[f.k]; else obj[f.k] = v;
+    commit();
+    changed();
+  };
+  const v = obj[f.k];
+  if (f.t === "sample") return sampleBox(obj);
+  if (f.t === "priority") return priorityField(f, obj, commit);
+  if (f.t === "columns") return columnsField(f, obj, commit);
+  if (f.t === "schema") return schemaField(f, obj, commit);
+  if (f.t === "items") return itemsField(f, obj, commit);
+  if (f.t === "object") return objectField(f, obj, commit);
+  let control;
+  // 読み込んだ値が欄の形と違うときは JSON のまま見せて壊さない。
+  const mismatch = v !== undefined && !fits(f, v);
+  const t = mismatch ? "json" : f.t;
+  if (t === "text") {
+    const dl = f.list ? el("datalist", { id: "dl" + Math.random().toString(36).slice(2) }, ...f.list().map((x) => el("option", { value: x }))) : null;
+    control = el("span", {}, el("input", { type: "text", value: v ?? "", placeholder: f.ph || "", list: dl ? dl.id : null, oninput: (e) => set(e.target.value === "" ? undefined : e.target.value) }), dl);
+  } else if (t === "number") {
+    control = el("input", { type: "number", step: "any", value: v ?? "", placeholder: f.ph || "", min: f.min, max: f.max, oninput: (e) => {
+      const s = e.target.value;
+      e.target.classList.toggle("invalid", s !== "" && !isFinite(Number(s)));
+      set(s === "" ? undefined : Number(s));
+    } });
+  } else if (t === "bool") {
+    control = el("select", { onchange: (e) => set(e.target.value === "" ? undefined : e.target.value === "true") },
+      el("option", { value: "", text: "未指定（既定）" }), el("option", { value: "true", text: "true", selected: v === true }), el("option", { value: "false", text: "false", selected: v === false }));
+  } else if (t === "select") {
+    const opts = (typeof f.opts === "function" ? f.opts() : f.opts).map(opt);
+    if (v !== undefined && v !== null && !opts.some(([x]) => x === v)) opts.push([v, `${v}（いまの値）`]);
+    const sel = el("select", { onchange: (e) => {
+      const s = e.target.value;
+      set(s === "" ? undefined : s === "\u0000null" ? null : s);
+      if (f.rerender) render();
+    } }, el("option", { value: "", text: f.ph ? `未指定（${f.ph}）` : "未指定" }),
+      f.nullLabel ? el("option", { value: "\u0000null", text: f.nullLabel, selected: v === null }) : null,
+      ...opts.map(([x, label]) => el("option", { value: x, text: label === x ? x : `${label}`, selected: v === x })));
+    control = sel;
+  } else if (t === "list") {
+    control = el("input", { type: "text", value: Array.isArray(v) ? v.join(", ") : v ?? "", placeholder: f.ph || "カンマ区切り", oninput: (e) => {
+      const parts = e.target.value.split(/[,、\n]/).map((s) => s.trim()).filter(Boolean);
+      const vals = f.numbers ? parts.map(Number) : parts;
+      e.target.classList.toggle("invalid", f.numbers && vals.some((x) => !isFinite(x)));
+      set(vals.length ? vals : undefined);
+    } });
+  } else if (t === "textOrJson") {
+    control = el("input", { type: "text", class: "mono", value: v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v), placeholder: f.ph || "", oninput: (e) => {
+      const s = e.target.value.trim();
+      if (s.startsWith("{") || s.startsWith("[")) {
+        try { set(loadJsonc(s)); e.target.classList.remove("invalid"); } catch (err) { e.target.classList.add("invalid"); }
+      } else set(s === "" ? undefined : s);
+    } });
+  } else if (t === "roles") {
+    control = rolesField(f, obj, commit);
+  } else if (t === "map") {
+    control = mapField(f, obj, commit);
+  } else {
+    control = jsonArea(v, (x) => set(x), f.ph);
+  }
+  return el("div", { class: "row" },
+    el("div", { class: "lab" }, f.l, f.req ? el("span", { class: "req", text: "*" }) : null, el("code", { text: f.k })),
+    el("div", {}, control, f.help ? el("small", { text: f.help }) : null, mismatch ? el("small", { class: "err", text: "読み込んだ値の形がこの欄と違うため JSON のまま表示" }) : null));
+}
+
+function fits(f, v) {
+  switch (f.t) {
+    case "text": return typeof v === "string";
+    case "number": return typeof v === "number";
+    case "bool": return typeof v === "boolean";
+    case "select": return typeof v === "string" || (v === null && !!f.nullLabel);
+    case "list": return Array.isArray(v) && v.every((x) => typeof x === (f.numbers ? "number" : "string"));
+    case "roles": case "map": return isObj(v);
+    default: return true;
+  }
+}
+
+function jsonArea(v, onValue, ph) {
+  const msg = el("div", { class: "err" });
+  const ta = el("textarea", { class: "mono", placeholder: ph || "JSON", oninput: (e) => {
+    const s = e.target.value.trim();
+    if (s === "") { ta.classList.remove("invalid"); msg.textContent = ""; onValue(undefined); return; }
+    try { const x = loadJsonc(s); ta.classList.remove("invalid"); msg.textContent = ""; onValue(x); }
+    catch (err) { ta.classList.add("invalid"); msg.textContent = "JSON として読めない: " + err.message; }
+  } });
+  ta.value = v === undefined ? "" : JSON.stringify(v, null, 2);
+  ta.rows = Math.min(14, Math.max(3, ta.value.split("\n").length));
+  return el("div", {}, ta, msg);
+}
+
+function rolesField(f, obj, commit) {
+  const roles = Array.isArray(f.roles) ? f.roles.map((r) => [r, ""]) : Object.entries(f.roles);
+  const get = () => (isObj(obj[f.k]) ? obj[f.k] : {});
+  const grid = el("div", { class: "roles" });
+  for (const [role, def] of roles) {
+    const cur = get()[role];
+    const required = (f.required || []).includes(role);
+    grid.append(el("span", {}, ROLE_LABELS[role] || role, required ? el("span", { class: "req", text: "*" }) : null, el("code", { text: role })),
+      el("input", { type: "text", class: "mono", value: Array.isArray(cur) ? cur.join(", ") : cur ?? "", placeholder: def || "", oninput: (e) => {
+        const m = { ...get() };
+        const parts = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+        if (!parts.length) delete m[role];
+        else m[role] = (f.multi || []).includes(role) && parts.length > 1 ? parts : parts.join(",");
+        e.target.classList.toggle("invalid", parts.some((p) => !ATTR.test(p)));
+        if (isEmpty(m)) delete obj[f.k]; else obj[f.k] = m;
+        commit();
+        changed();
+      } }));
+  }
+  const extra = Object.keys(get()).filter((r) => !roles.some(([x]) => x === r));
+  return el("div", {}, grid,
+    !Array.isArray(f.roles) ? el("small", { text: "空欄は薄字の既定の属性名" }) : null,
+    extra.length ? el("small", { class: "err", text: `プラグインの知らない役割（そのまま残す）: ${extra.join("・")}` }) : null);
+}
+
+function mapField(f, obj, commit) {
+  const conv = f.value === "number" ? (s) => (s.trim() === "" ? undefined : Number(s)) : f.value === "auto" ? autoValue : (s) => (s === "" ? undefined : s);
+  const get = () => (isObj(obj[f.k]) ? obj[f.k] : {});
+  const store = (m) => { if (isEmpty(m)) delete obj[f.k]; else obj[f.k] = m; commit(); changed(); };
+  if (f.keys) {
+    const grid = el("div", { class: "roles" });
+    for (const key of f.keys) {
+      grid.append(el("span", { text: key }), el("input", { type: f.value === "number" ? "number" : "text", value: showAuto(get()[key]), oninput: (e) => {
+        const m = { ...get() };
+        const x = conv(e.target.value);
+        if (x === undefined) delete m[key]; else m[key] = x;
+        store(m);
+      } }));
+    }
+    return grid;
+  }
+  // 自由なキー: 行を並べ替えずに書き換える。
+  const rows = Object.entries(get()).map(([a, b]) => [a, showAuto(b)]);
+  const grid = el("div", { class: "pairs" });
+  const commitRows = () => {
+    const m = {};
+    for (const [a, b] of rows) if (a.trim() !== "") { const x = conv(b); if (x !== undefined) m[a.trim()] = x; }
+    store(m);
+  };
+  const draw = () => {
+    grid.replaceChildren(el("span", { class: "note", text: f.keyHelp || "キー" }), el("span", { class: "note", text: f.valueHelp || "値" }), el("span"));
+    rows.forEach((r, i) => {
+      grid.append(el("input", { type: "text", value: r[0], oninput: (e) => { r[0] = e.target.value; commitRows(); } }),
+        el("input", { type: "text", value: r[1], oninput: (e) => { r[1] = e.target.value; commitRows(); } }),
+        el("button", { type: "button", class: "small danger", text: "×", onclick: () => { rows.splice(i, 1); commitRows(); draw(); } }));
+    });
+    grid.append(el("button", { type: "button", class: "small", text: "＋ 追加", onclick: () => { rows.push(["", ""]); draw(); } }));
+  };
+  draw();
+  return grid;
+}
+
+function objectField(f, obj, commit) {
+  const v = obj[f.k];
+  const box = el("fieldset", {}, el("legend", { text: `${f.l}（${f.k}）` }));
+  if (f.allowFalse) {
+    const mode = v === false ? "false" : v === undefined ? "" : "obj";
+    const radio = (val, label) => el("label", {}, el("input", { type: "radio", name: "m" + f.k + Math.random(), checked: mode === val, onchange: () => {
+      if (val === "") delete obj[f.k]; else if (val === "false") obj[f.k] = false; else obj[f.k] = isObj(obj[f.k]) ? obj[f.k] : {};
+      commit(); changed(); render();
+    } }), label);
+    box.append(el("div", { class: "choices" }, radio("", "未指定（既定）"), radio("false", f.allowFalse), radio("obj", "指定する")));
+    if (mode !== "obj") return box;
+  }
+  if (v !== undefined && !isObj(v) && !f.allowFalse) {
+    box.append(el("div", { class: "err", text: "オブジェクト以外の値。JSON で直す:" }), jsonArea(v, (x) => { if (x === undefined) delete obj[f.k]; else obj[f.k] = x; commit(); changed(); }));
+    return box;
+  }
+  const sub = isObj(obj[f.k]) ? obj[f.k] : {};
+  const subCommit = () => {
+    if (isEmpty(sub) && !f.allowFalse) delete obj[f.k]; else obj[f.k] = sub;
+    commit();
+  };
+  for (const g of f.fields) { const r = field(g, sub, subCommit, sub); if (r) box.append(r); }
+  extraNote(sub, f.fields, box);
+  return box;
+}
+
+function extraNote(obj, fields, box) {
+  const known = new Set(fields.map((g) => g.k));
+  const extra = Object.keys(obj).filter((k) => !known.has(k));
+  if (extra.length) box.append(el("small", { class: "note", text: `この欄にないキー（そのまま残す）: ${extra.join("・")}` }));
+}
+
+function itemsField(f, obj, commit) {
+  if (obj[f.k] !== undefined && !Array.isArray(obj[f.k])) {
+    if (isObj(obj[f.k])) obj[f.k] = [obj[f.k]]; // satelliteAliases などの 1 件だけのオブジェクト
+    else return el("div", {}, el("div", { class: "err", text: `${f.k} は配列で指定。JSON で直す:` }), jsonArea(obj[f.k], (x) => { if (x === undefined) delete obj[f.k]; else obj[f.k] = x; changed(); }));
+  }
+  const list = obj[f.k] || [];
+  const wrap = el("div", {});
+  const store = () => { if (list.length) obj[f.k] = list; else delete obj[f.k]; commit(); changed(); };
+  const probs = check();
+  list.forEach((item, i) => {
+    if (!isObj(item)) {
+      wrap.append(el("div", { class: "card" }, el("div", { class: "body" }, el("div", { class: "err", text: `${i + 1} 件目はオブジェクト以外。JSON で直す:` }),
+        jsonArea(item, (x) => { list[i] = x; store(); }))));
+      return;
+    }
+    const at = `${f.k}[${i}]`;
+    const title = (f.title ? f.title(item) : item.label || item.name) || `${f.l} ${i + 1}`;
+    const body = el("div", { class: "body" });
+    const card = el("details", { class: "card" + (probs.some((p) => p.at && p.at.startsWith(at)) ? " bad" : ""), open: openCards.has(item) || list.length === 1, ontoggle: (e) => {
+      if (e.target !== card) return;
+      if (card.open) { openCards.add(item); if (!body.firstChild) fill(); } else openCards.delete(item);
+    } });
+    const fill = () => {
+      for (const g of f.fields) { const r = field(g, item, () => { commit(); }, item); if (r) body.append(r); }
+      extraNote(item, f.fields, body);
+    };
+    const tool = (text, fn, cls = "small") => el("button", { type: "button", class: cls, text, onclick: (e) => { e.preventDefault(); e.stopPropagation(); fn(); } });
+    card.append(el("summary", {}, el("span", { class: "title", text: title }), el("span", { class: "sub", text: item.url || "" }),
+      el("span", { class: "tools" },
+        i > 0 ? tool("↑", () => { list.splice(i - 1, 0, list.splice(i, 1)[0]); store(); render(); }) : null,
+        i < list.length - 1 ? tool("↓", () => { list.splice(i + 1, 0, list.splice(i, 1)[0]); store(); render(); }) : null,
+        tool("複製", () => { const c = structuredClone(item); list.splice(i + 1, 0, c); openCards.add(c); store(); render(); }),
+        tool("削除", () => { list.splice(i, 1); store(); render(); }, "small danger"))), body);
+    if (card.open) fill();
+    wrap.append(card);
+  });
+  wrap.append(el("div", { class: "bar" }, el("button", { type: "button", text: `＋ ${f.l}を追加`, onclick: () => {
+    const it = {};
+    list.push(it);
+    openCards.add(it);
+    obj[f.k] = list;
+    commit(); changed(); render();
+  } })));
+  return wrap;
+}
+
+// ---------------------------------------------------------------- 日次出力: 優先度・列・JSON Schema
+
+function priorityField(f, obj, commit) {
+  const p = isObj(obj.priority) ? obj.priority : undefined;
+  const mode = !p ? "" : Array.isArray(p.table) ? "table" : isObj(p.linear) ? "linear" : "";
+  const box = el("fieldset", {}, el("legend", { text: "優先度の書き方（priority）" }),
+    el("div", { class: "note", text: "台帳の優先度から決めた出力用の優先度 1〜1000（1 がいちばん高い）を、このシステムの書き方に変える。" }));
+  const save = () => { commit(); changed(); };
+  const radio = (val, label) => el("label", {}, el("input", { type: "radio", name: "prio" + Math.random(), checked: mode === val, onchange: () => {
+    if (val === "") delete obj.priority;
+    else if (val === "table") obj.priority = { table: [{ max: 200, value: "High" }, { max: 600, value: "Middle" }, { max: 1000, value: "Low" }], ...(p && p.format ? { format: p.format } : {}) };
+    else obj.priority = { linear: { min: 1, max: 5 }, ...(p && p.format ? { format: p.format } : {}) };
+    save(); render();
+  } }), label);
+  box.append(el("div", { class: "choices" }, radio("", "そのまま（1〜1000）"), radio("table", "区切りの表（max まで → 値）"), radio("linear", "範囲に比例（min〜max）")));
+  if (mode === "table") {
+    const rows = p.table;
+    const grid = el("div", { class: "pairs" }, el("span", { class: "note", text: "この値まで（max）" }), el("span", { class: "note", text: "書く値" }), el("span"));
+    rows.forEach((r, i) => grid.append(
+      el("input", { type: "number", value: isObj(r) ? r.max ?? "" : "", oninput: (e) => { rows[i] = { ...rows[i], max: e.target.value === "" ? undefined : Number(e.target.value) }; save(); } }),
+      el("input", { type: "text", value: isObj(r) ? showAuto(r.value) : "", oninput: (e) => { rows[i] = { ...rows[i], value: autoValue(e.target.value) }; save(); } }),
+      el("button", { type: "button", class: "small danger", text: "×", onclick: () => { rows.splice(i, 1); save(); render(); } })));
+    grid.append(el("button", { type: "button", class: "small", text: "＋ 行", onclick: () => { rows.push({ max: 1000, value: "" }); save(); render(); } }));
+    box.append(grid);
+  } else if (mode === "linear") {
+    const lin = p.linear;
+    box.append(el("div", { class: "roles" },
+      el("span", { text: "1 のときの値（min）" }), el("input", { type: "number", value: lin.min ?? "", oninput: (e) => { lin.min = e.target.value === "" ? undefined : Number(e.target.value); save(); } }),
+      el("span", { text: "1000 のときの値（max）" }), el("input", { type: "number", value: lin.max ?? "", oninput: (e) => { lin.max = e.target.value === "" ? undefined : Number(e.target.value); save(); } }),
+      el("span", { text: "大きいほど高い" }), el("label", {}, el("input", { type: "checkbox", checked: !!lin.higherIsLarger, onchange: (e) => { if (e.target.checked) lin.higherIsLarger = true; else delete lin.higherIsLarger; save(); } }), " higherIsLarger（1 → max）")));
+  }
+  if (mode) {
+    box.append(el("div", { class: "roles" }, el("span", { text: "数の書式（format）" }), el("input", { type: "text", class: "mono", value: p.format ?? "", placeholder: "%02d・%.1f", oninput: (e) => { if (e.target.value) p.format = e.target.value; else delete p.format; save(); } })));
+  }
+  return box;
+}
+
+const sourceOptions = (extra = []) => [...extra, ...K.exportSources.map((s) => [s, `${s}（${SOURCE_LABELS[s] || s}）`])];
+const COMMON_COLUMNS = ["id", "name", "category", "satellite", "start", "end", "geometry", "priority", "cloudForecast", "warnings"];
+
+function columnsField(f, obj, commit) {
+  const cols = Array.isArray(obj.columns) ? obj.columns : [];
+  const save = () => { if (!cols.length) delete obj.columns; else obj.columns = cols; commit(); changed(); };
+  const box = el("fieldset", {}, el("legend", { text: "CSV の列（columns）。上から順に左の列" }));
+  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", "許す値（allowed）", ""].map((h) => el("th", { text: h }))));
+  cols.forEach((c, i) => {
+    if (!isObj(c)) { table.append(el("tr", {}, el("td", { colspan: 6 }, jsonArea(c, (x) => { cols[i] = x; save(); })))); return; }
+    const upd = (k, v) => { if (v === undefined || v === "") delete c[k]; else c[k] = v; save(); };
+    const src = el("select", { onchange: (e) => {
+      const s = e.target.value;
+      if (s === "\u0000value") { delete c.source; if (!("value" in c)) c.value = ""; } else { c.source = s; delete c.value; }
+      if (c.source !== "geometry") delete c.geometry;
+      save(); render();
+    } }, ...sourceOptions([["\u0000value", "固定値"]]).map(([v, l]) => el("option", { value: v, text: l, selected: c.source === undefined ? v === "\u0000value" : c.source === v })));
+    const fmtCell = el("td", {});
+    if (c.source === undefined) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", oninput: (e) => { c.value = autoValue(e.target.value) ?? ""; save(); } }));
+    else if (c.source === "geometry") {
+      fmtCell.append(el("select", { onchange: (e) => upd("geometry", e.target.value) }, ...K.geometries.map((g) => el("option", { value: g, text: `${g}（${GEOMETRY_LABELS[g]}）`, selected: (c.geometry || "wkt") === g }))),
+        el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
+    } else {
+      fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: ["start", "end", "periodStart", "periodEnd", "runDate"].includes(c.source) ? "日時の書式（既定はシステムの）" : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
+      if (["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"].includes(c.source))
+        fmtCell.append(el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
+    }
+    const mapText = isObj(c.map) ? Object.entries(c.map).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "";
+    table.append(el("tr", {},
+      el("td", {}, el("input", { type: "text", value: c.key ?? "", class: c.key ? "" : "invalid", oninput: (e) => { e.target.classList.toggle("invalid", !e.target.value); upd("key", e.target.value); } })),
+      el("td", {}, src), fmtCell,
+      el("td", {}, el("input", { type: "text", value: mapText, placeholder: "右=R, 左=L", oninput: (e) => {
+        const m = {};
+        for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
+        upd("map", isEmpty(m) ? undefined : m);
+      } })),
+      el("td", {}, el("input", { type: "text", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", oninput: (e) => {
+        const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map(autoValue);
+        upd("allowed", a.length ? a : undefined);
+      } })),
+      el("td", {}, el("span", { class: "tools" },
+        i > 0 ? el("button", { type: "button", class: "small", text: "↑", onclick: () => { cols.splice(i - 1, 0, cols.splice(i, 1)[0]); save(); render(); } }) : null,
+        el("button", { type: "button", class: "small danger", text: "×", onclick: () => { cols.splice(i, 1); save(); render(); } })))));
+  });
+  box.append(table, el("div", { class: "bar" },
+    el("button", { type: "button", class: "small", text: "＋ 列", onclick: () => { cols.push({ key: "", source: "id" }); save(); render(); } }),
+    el("button", { type: "button", class: "small", text: "よく使う列をまとめて追加", onclick: () => {
+      for (const s of COMMON_COLUMNS) if (!cols.some((c) => c && c.source === s)) cols.push(s === "geometry" ? { key: "AOI", source: s, geometry: "wkt", digits: 5 } : { key: s.toUpperCase(), source: s });
+      save(); render();
+    } })));
+  return box;
+}
+
+const SCHEMA_TYPES = ["string", "integer", "number", "boolean", "object", "array", "null"];
+const NODE_KEYS = new Set(["type", "properties", "required", "items", "x-source", "x-format", "x-map", "x-geometry", "x-digits", "const", "format", "enum", "title", "description"]);
+
+function schemaTemplate() {
+  return {
+    type: "object", required: ["issuedAt", "requests"],
+    properties: {
+      issuedAt: { type: "string", format: "date-time", "x-source": "runDate" },
+      requests: { type: "array", "x-source": "requests", items: { type: "object", required: ["id", "aoi"], properties: {
+        id: { type: "string", "x-source": "id" },
+        satellite: { type: "string", "x-source": "satellite" },
+        start: { type: "string", format: "date-time", "x-source": "start" },
+        end: { type: "string", format: "date-time", "x-source": "end" },
+        aoi: { type: "object", "x-source": "geometry", "x-geometry": "geojson" },
+        priority: { type: "integer", "x-source": "priority" },
+      } } },
+    },
+  };
+}
+
+function schemaField(f, obj, commit) {
+  const s = obj.schema;
+  const mode = typeof s === "string" ? "path" : isObj(s) ? "here" : "";
+  const save = () => { commit(); changed(); };
+  const box = el("fieldset", {}, el("legend", { text: "JSON Schema（schema）" }),
+    el("div", { class: "note", text: "システムが求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が requests の配列が依頼の一覧になり、その items の中は依頼 1 件ごとの値。固定値は const。" }));
+  const radio = (val, label) => el("label", {}, el("input", { type: "radio", name: "sch" + Math.random(), checked: mode === val, onchange: () => {
+    if (val === "path") obj.schema = typeof s === "string" ? s : "schemas/" + (obj.system || "system") + ".schema.json";
+    else if (val === "here") obj.schema = isObj(s) ? s : schemaTemplate();
+    save(); render();
+  } }), label);
+  box.append(el("div", { class: "choices" }, radio("here", "ここで組む（設定ファイルに埋め込む）"), radio("path", "ファイルを指定（パス）")));
+  if (mode === "path") {
+    box.append(el("div", { class: "row" }, el("div", { class: "lab", text: "スキーマのファイル" }),
+      el("div", {}, el("input", { type: "text", value: s, oninput: (e) => { obj.schema = e.target.value; save(); } }),
+        el("small", { text: "設定ファイルからの相対パスも可。中身はこのツールの「ファイルを開いて組む」で作れる" }),
+        el("div", { class: "bar" },
+          el("label", { class: "button" }, "ファイルを開いて組む…", el("input", { type: "file", class: "hidden", accept: ".json", onchange: async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try { obj.schema = loadJsonc(await file.text()); save(); render(); } catch (err) { alert("JSON として読めない: " + err.message); }
+          } }))))));
+    return box;
+  }
+  if (mode !== "here") return box;
+  const root = obj.schema;
+  box.append(el("div", { class: "bar" },
+    el("button", { type: "button", class: "small", text: "雛形に置き換え", onclick: () => { obj.schema = schemaTemplate(); save(); render(); } }),
+    el("label", { class: "button small" }, "システムのスキーマを読み込む…", el("input", { type: "file", class: "hidden", accept: ".json", onchange: async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try { obj.schema = loadJsonc(await file.text()); save(); render(); } catch (err) { alert("JSON として読めない: " + err.message); }
+    } })),
+    el("button", { type: "button", class: "small", text: ".schema.json として保存", onclick: () => download(`${obj.system || "system"}.schema.json`, JSON.stringify(root, null, 2) + "\n") })));
+  box.append(schemaNode(root, null, null, root, save));
+  const raw = el("details", {}, el("summary", { class: "note", text: "JSON で直接直す" }), jsonArea(root, (x) => { if (isObj(x)) { obj.schema = x; save(); } }));
+  raw.addEventListener("toggle", () => { if (!raw.open) render(); });
+  box.append(raw);
+  return box;
+}
+
+/** スキーマの 1 節（name は親の properties での名前、parent はその親の節）。 */
+function schemaNode(node, name, parent, root, save, inRequests = false) {
+  const wrap = el("div", { class: "node" });
+  if (!isObj(node)) { wrap.append(el("span", { class: "err", text: `${name}: オブジェクト以外（JSON で直す）` })); return wrap; }
+  if (typeof node.$ref === "string") {
+    wrap.append(el("div", { class: "node-head" }, name !== null ? el("code", { text: name }) : null, el("span", { class: "tag", text: "$ref " + node.$ref }), el("span", { class: "note", text: "参照先（$defs）は JSON で直す" })));
+    return wrap;
+  }
+  const type = Array.isArray(node.type) ? node.type[0] : node.type || "";
+  const head = el("div", { class: "node-head" });
+  const redraw = () => { save(); render(); };
+  if (name !== null && parent) {
+    head.append(el("input", { type: "text", class: "name", value: name, title: "プロパティ名", onchange: (e) => {
+      const nn = e.target.value.trim();
+      if (!nn || nn === name || (nn in parent.properties)) { e.target.value = name; return; }
+      parent.properties = Object.fromEntries(Object.entries(parent.properties).map(([k, v]) => [k === name ? nn : k, v]));
+      if (Array.isArray(parent.required)) parent.required = parent.required.map((r) => (r === name ? nn : r));
+      redraw();
+    } }));
+    const req = Array.isArray(parent.required) && parent.required.includes(name);
+    head.append(el("label", {}, el("input", { type: "checkbox", checked: req, onchange: (e) => {
+      const r = (Array.isArray(parent.required) ? parent.required : []).filter((x) => x !== name);
+      if (e.target.checked) r.push(name);
+      if (r.length) parent.required = r; else delete parent.required;
+      save();
+    } }), "必須"));
+  } else if (name === null) head.append(el("span", { class: "tag", text: parent ? "items（配列の 1 要素）" : "いちばん外" }));
+  head.append(el("select", { title: "型", onchange: (e) => {
+    if (e.target.value) node.type = e.target.value; else delete node.type;
+    if (node.type === "object" && !isObj(node.properties) && !node["x-source"]) node.properties = {};
+    if (node.type === "array" && !isObj(node.items)) node.items = { type: "object", properties: {} };
+    redraw();
+  } }, el("option", { value: "", text: "型なし" }), ...SCHEMA_TYPES.map((t) => el("option", { value: t, text: t, selected: type === t }))));
+  // 入れる値
+  const src = node["x-source"];
+  const what = "const" in node ? "\u0000const" : typeof src === "string" ? src : "";
+  const srcOpts = [["", type === "object" ? "（中のプロパティで組む）" : "なし（default か空）"], ["\u0000const", "固定値（const）"]];
+  if (type === "array") srcOpts.push(["requests", "requests（依頼の一覧）"]);
+  head.append(el("select", { title: "入れる値（x-source）", onchange: (e) => {
+    const v = e.target.value;
+    delete node["x-source"];
+    if (v !== "\u0000const") delete node.const;
+    if (v === "\u0000const") node.const = node.const ?? "";
+    else if (v) node["x-source"] = v;
+    if (v === "requests" && !isObj(node.items)) node.items = { type: "object", properties: {} };
+    if (v !== "geometry") delete node["x-geometry"];
+    redraw();
+  } }, ...[...srcOpts, ...sourceOptions()].map(([v, l]) => el("option", { value: v, text: l, selected: what === v }))));
+  if (what === "\u0000const") head.append(el("input", { type: "text", class: "short", value: showAuto(node.const), placeholder: "値", oninput: (e) => { node.const = autoValue(e.target.value) ?? ""; save(); } }));
+  if (src === "geometry") {
+    head.append(el("select", { title: "座標の書き方（x-geometry）", onchange: (e) => { node["x-geometry"] = e.target.value; save(); } },
+      ...K.geometries.map((g) => el("option", { value: g, text: `${g}（${GEOMETRY_LABELS[g]}）`, selected: (node["x-geometry"] || "geojson") === g }))));
+    head.append(el("input", { type: "number", class: "short", min: 0, max: 12, value: node["x-digits"] ?? "", placeholder: "小数の桁", oninput: (e) => { if (e.target.value === "") delete node["x-digits"]; else node["x-digits"] = Number(e.target.value); save(); } }));
+  }
+  if (type === "string") {
+    head.append(el("select", { title: "format", onchange: (e) => { if (e.target.value) node.format = e.target.value; else delete node.format; save(); } },
+      ...["", "date", "date-time"].map((x) => el("option", { value: x, text: x || "format なし", selected: (node.format || "") === x }))));
+  }
+  if (typeof src === "string" && src !== "requests" && src !== "geometry") {
+    head.append(el("input", { type: "text", class: "short mono", value: node["x-format"] ?? "", placeholder: "x-format", title: "書式（x-format）: 日時なら iso・unix・%Y%m%d、数なら %02d", oninput: (e) => { if (e.target.value) node["x-format"] = e.target.value; else delete node["x-format"]; save(); } }));
+    head.append(el("input", { type: "text", class: "short", value: isObj(node["x-map"]) ? Object.entries(node["x-map"]).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "", placeholder: "x-map 右=R", title: "読み替え（x-map）", oninput: (e) => {
+      const m = {};
+      for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
+      if (isEmpty(m)) delete node["x-map"]; else node["x-map"] = m;
+      save();
+    } }));
+  }
+  if (type === "string" || type === "integer" || type === "number") {
+    head.append(el("input", { type: "text", class: "short", value: Array.isArray(node.enum) ? node.enum.map(showAuto).join(", ") : "", placeholder: "enum", title: "許す値（enum）", oninput: (e) => {
+      const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map((x) => (type === "string" ? x : autoValue(x)));
+      if (a.length) node.enum = a; else delete node.enum;
+      save();
+    } }));
+  }
+  if (name !== null && parent) head.append(el("button", { type: "button", class: "small danger", text: "削除", onclick: () => {
+    delete parent.properties[name];
+    if (Array.isArray(parent.required)) { parent.required = parent.required.filter((r) => r !== name); if (!parent.required.length) delete parent.required; }
+    redraw();
+  } }));
+  wrap.append(head);
+  const others = Object.keys(node).filter((k) => !NODE_KEYS.has(k));
+  if (others.length) wrap.append(el("div", { class: "other", text: "ほかのキーワード（そのまま残す）: " + others.join("・") }));
+  if (!inRequests && typeof src === "string" && !["system", "runDate", "day", "count", "requests"].includes(src))
+    wrap.append(el("div", { class: "err", text: "依頼ごとの値は x-source: requests の配列の items の中に置く（外に置くと出ない）" }));
+  if (type === "object" && !src && isObj(node.properties)) {
+    for (const [k, v] of Object.entries(node.properties)) wrap.append(schemaNode(v, k, node, root, save, inRequests));
+    wrap.append(el("button", { type: "button", class: "small", text: "＋ プロパティ", onclick: () => {
+      let n = 1;
+      while (("prop" + n) in node.properties) n++;
+      node.properties["prop" + n] = { type: "string" };
+      redraw();
+    } }));
+  }
+  if (type === "array" && isObj(node.items) && src !== "geometry") wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === "requests"));
+  return wrap;
+}
+
+// ---------------------------------------------------------------- 見本（架空の依頼で試算）
+
+const DAY = Date.UTC(2026, 10, 7, 15, 0, 0); // 2026-11-08 00:00 JST
+const SAMPLE_REQS = [
+  { id: "R-0001", name: "東京湾 定点", category: "定点", achieve: "毎回", start: DAY, end: DAY + 86400000 - 1, periodStart: DAY - 30 * 86400000, periodEnd: DAY + 60 * 86400000,
+    repeat: "毎日", priorityRaw: 120, priorityBase: 2, boost: 0, kind: "光学", series: "OPT-X", satellites: "", modes: "", satellite: "OPT-X1", satelliteId: "40001", mode: "", sensor: "PAN",
+    offNadirMin: null, offNadirMax: 25, incidenceMin: null, incidenceMax: null, lookSide: "任意", orbitDir: "任意", resolution: 1, timeOfDay: "", cloudMax: 60, cloudForecast: 20, weatherFlag: "",
+    scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", note: "", warnings: "" },
+  { id: "R-0002", name: "臨時 舞鶴", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
+    repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: "SAR-Y", satellites: "SAR-Y2", modes: "Spotlight", satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
+    offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
+    scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", note: "至急", warnings: "シーン数が多い" },
+];
+const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate"];
+
+function zoneOffset(zone, ms) {
+  if (!zone || /^(utc|z|gmt)$/i.test(zone)) return 0;
+  const m = /^([+-])(\d{1,2}):?(\d{2})?$/.exec(zone);
+  if (m) return (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0)) * 60000;
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      .formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+    return Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - Math.floor(ms / 1000) * 1000;
+  } catch (e) { return 0; }
+}
+function formatTime(ms, fmt, zone) {
+  if (fmt === "unix") return Math.floor(ms / 1000);
+  if (fmt === "unixms") return ms;
+  const off = zoneOffset(zone, ms);
+  const d = new Date(ms + off);
+  const p2 = (n) => String(n).padStart(2, "0");
+  const Y = d.getUTCFullYear(), mo = p2(d.getUTCMonth() + 1), da = p2(d.getUTCDate()), H = p2(d.getUTCHours()), Mi = p2(d.getUTCMinutes()), Se = p2(d.getUTCSeconds());
+  if (fmt === "iso-date") return `${Y}-${mo}-${da}`;
+  if (!fmt || fmt === "iso") {
+    const a = Math.abs(off / 60000);
+    return `${Y}-${mo}-${da}T${H}:${Mi}:${Se}` + (off === 0 ? "Z" : `${off > 0 ? "+" : "-"}${p2(Math.floor(a / 60))}:${p2(a % 60)}`);
+  }
+  return fmt.replace(/%([YmdHMSy%])/g, (_, c) => ({ Y, m: mo, d: da, H, M: Mi, S: Se, y: String(Y).slice(2), "%": "%" }[c]));
+}
+function printf(fmt, v) {
+  const m = /%([-+ 0#]*)(\d*)(?:\.(\d+))?([dfs])/.exec(fmt);
+  if (!m || typeof v !== "number") return v;
+  let s = m[4] === "d" ? String(Math.floor(v + 0.5)) : m[4] === "f" ? v.toFixed(m[3] ? Number(m[3]) : 6) : String(v);
+  const w = Number(m[2] || 0);
+  if (s.length < w) s = (m[1].includes("0") && !m[1].includes("-") ? "0" : " ").repeat(w - s.length) + s;
+  return fmt.slice(0, m.index) + s + fmt.slice(m.index + m[0].length);
+}
+function convertPriority(p, rule) {
+  let v = p;
+  if (!isObj(rule)) return v;
+  if (Array.isArray(rule.table) && rule.table.length) {
+    const rows = rule.table.filter((r) => isObj(r) && typeof r.max === "number").sort((a, b) => a.max - b.max);
+    if (rows.length) v = (rows.find((r) => p <= r.max) || rows[rows.length - 1]).value;
+  } else if (isObj(rule.linear) && typeof rule.linear.min === "number" && typeof rule.linear.max === "number") {
+    const { min, max } = rule.linear, t = (p - 1) / 999;
+    v = rule.linear.higherIsLarger ? max - t * (max - min) : min + t * (max - min);
+    if (Number.isInteger(min) && Number.isInteger(max)) v = Math.floor(v + 0.5);
+  }
+  if (rule.format && typeof v === "number") v = printf(rule.format, v);
+  return v;
+}
+const round = (v, d) => Number(v.toFixed(d));
+function geometryValue(ring, kind, d, asObject) {
+  const r = ring.map(([x, y]) => [round(x, d), round(y, d)]);
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  const box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  const mid = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  if (kind === "geojson") { const g = { type: "Polygon", coordinates: [r] }; return asObject ? g : JSON.stringify(g); }
+  if (kind === "bbox") return box.map((v) => round(v, d)).join(",");
+  if (kind === "center" || kind === "centerRadius") {
+    let t = `${round(mid[1], d)},${round(mid[0], d)}`;
+    if (kind === "centerRadius") t += "," + round(Math.hypot((box[2] - box[0]) / 2 * 111.32 * Math.cos(mid[1] * Math.PI / 180), (box[3] - box[1]) / 2 * 110.574), 3);
+    return t;
+  }
+  if (kind === "vertices") return r.map((p) => `${p[1]},${p[0]}`).join(",");
+  return "POLYGON ((" + r.map((p) => `${p[0].toFixed(d)} ${p[1].toFixed(d)}`).join(", ") + "))";
+}
+const MISSING = Symbol("missing");
+function rawValue(req, source, sys, n, geometry, digits, asObject) {
+  const d = typeof digits === "number" ? digits : typeof sys.digits === "number" ? sys.digits : 6;
+  if (source === "system") return sys.system || "";
+  if (source === "runDate") return DAY - 6 * 3600000;
+  if (source === "day") return "2026-11-08";
+  if (source === "count") return n;
+  if (!req) return MISSING;
+  if (source === "geometry") return geometryValue(req.ring, K.geometries.includes(geometry) ? geometry : "wkt", d, asObject);
+  if (source === "priority") return convertPriority(req.priorityRaw, sys.priority);
+  const xs = req.ring.map((p) => p[0]), ys = req.ring.map((p) => p[1]);
+  const box = { bboxWest: Math.min(...xs), bboxSouth: Math.min(...ys), bboxEast: Math.max(...xs), bboxNorth: Math.max(...ys) };
+  if (source in box) return round(box[source], d);
+  if (source === "centerLat") return round((box.bboxSouth + box.bboxNorth) / 2, d);
+  if (source === "centerLon") return round((box.bboxWest + box.bboxEast) / 2, d);
+  return source in req ? req[source] : MISSING;
+}
+function shaped(v, source, sys, fmt, map) {
+  if (v === MISSING) return v;
+  const sm = isObj(sys.values) && isObj(sys.values[source]) ? sys.values[source] : {};
+  if (typeof v === "string" && v in sm) v = sm[v];
+  if (isObj(map) && (typeof v === "string" || typeof v === "number") && String(v) in map) v = map[String(v)];
+  if (TIME_SOURCES.includes(source) && typeof v === "number") return formatTime(v, fmt || sys.dateFormat || "iso", sys.timeZone || "UTC");
+  if (fmt && typeof v === "number") return printf(fmt, v);
+  return v;
+}
+function csvCell(v) {
+  const s = v === null || v === undefined || v === MISSING ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function resolveRef(s, root) {
+  let n = 0;
+  while (isObj(s) && typeof s.$ref === "string" && n++ < 20) {
+    if (!s.$ref.startsWith("#/")) return {};
+    let node = root;
+    for (const part of s.$ref.slice(2).split("/")) node = isObj(node) ? node[part.replace(/~1/g, "/").replace(/~0/g, "~")] : undefined;
+    s = isObj(node) ? node : {};
+  }
+  return s;
+}
+function coerce(v, s) {
+  const types = Array.isArray(s.type) ? s.type : s.type ? [s.type] : [];
+  if (v === null || v === undefined || !types.length) return v;
+  if (types.includes("string") && typeof v === "number" && !types.includes("integer") && !types.includes("number")) return String(v);
+  if (typeof v === "string" && (types.includes("integer") || types.includes("number")) && !types.includes("string")) { const x = Number(v); return v.trim() !== "" && isFinite(x) ? x : v; }
+  return v;
+}
+function build(s, root, req, sys) {
+  s = resolveRef(s, root);
+  if (!isObj(s)) return MISSING;
+  const src = s["x-source"];
+  if (src === "requests") return SAMPLE_REQS.map((r) => build(s.items || {}, root, r, sys)).filter((v) => v !== MISSING);
+  if (typeof src === "string") {
+    let v = rawValue(req, src, sys, SAMPLE_REQS.length, s["x-geometry"] || "geojson", s["x-digits"], true);
+    v = shaped(v, src, sys, s["x-format"], s["x-map"]);
+    return v === MISSING ? v : coerce(v, s);
+  }
+  if ("const" in s) return s.const;
+  if ("default" in s && s["x-default"] !== false) return s.default;
+  if (isObj(s.properties)) {
+    const out = {};
+    for (const [k, sub] of Object.entries(s.properties)) {
+      const v = build(sub, root, req, sys);
+      if (v === MISSING) continue;
+      const rs = resolveRef(sub, root);
+      const allowsNull = !rs.type || rs.type === "null" || (Array.isArray(rs.type) && rs.type.includes("null"));
+      if (v === null && !allowsNull && !(s.required || []).includes(k)) continue;
+      out[k] = v;
+    }
+    return Object.keys(out).length || s.required ? out : MISSING;
+  }
+  return MISSING;
+}
+function typeOk(v, t) {
+  switch (t) {
+    case "null": return v === null;
+    case "boolean": return typeof v === "boolean";
+    case "integer": return typeof v === "number" && Number.isInteger(v);
+    case "number": return typeof v === "number";
+    case "string": return typeof v === "string";
+    case "array": return Array.isArray(v);
+    case "object": return isObj(v);
+    default: return true;
+  }
+}
+/** プラグインの request/schema.py の validate と同じ範囲の検査（見本の確認用）。 */
+function validate(v, s, root, path = "$") {
+  s = resolveRef(s, root);
+  if (!isObj(s)) return [];
+  const errs = [];
+  if (s.type !== undefined) {
+    const ts = Array.isArray(s.type) ? s.type : [s.type];
+    if (!ts.some((t) => typeOk(v, t))) return [`${path}: 型が ${ts.join("・")} 以外`];
+  }
+  if ("const" in s && JSON.stringify(v) !== JSON.stringify(s.const)) errs.push(`${path}: ${JSON.stringify(s.const)} 以外の値`);
+  if (Array.isArray(s.enum) && !s.enum.some((x) => JSON.stringify(x) === JSON.stringify(v))) errs.push(`${path}: ${JSON.stringify(v)} は enum 以外`);
+  if (typeof v === "string") {
+    if (typeof s.minLength === "number" && v.length < s.minLength) errs.push(`${path}: ${s.minLength} 文字未満`);
+    if (typeof s.maxLength === "number" && v.length > s.maxLength) errs.push(`${path}: ${s.maxLength} 文字超過`);
+    if (typeof s.pattern === "string") { try { if (!new RegExp(s.pattern).test(v)) errs.push(`${path}: 形式（${s.pattern}）に不一致`); } catch (e) { /* */ } }
+    if (s.format === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) errs.push(`${path}: 日付（YYYY-MM-DD）以外`);
+    if (s.format === "date-time" && !/^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/.test(v)) errs.push(`${path}: 日時（ISO 8601）以外`);
+  }
+  if (typeof v === "number") {
+    if (typeof s.minimum === "number" && v < s.minimum) errs.push(`${path}: ${s.minimum} 未満`);
+    if (typeof s.maximum === "number" && v > s.maximum) errs.push(`${path}: ${s.maximum} 超過`);
+  }
+  if (Array.isArray(v)) {
+    if (typeof s.minItems === "number" && v.length < s.minItems) errs.push(`${path}: 要素が ${s.minItems} 個未満`);
+    if (typeof s.maxItems === "number" && v.length > s.maxItems) errs.push(`${path}: 要素が ${s.maxItems} 個超過`);
+    if (isObj(s.items)) v.forEach((x, i) => errs.push(...validate(x, s.items, root, `${path}[${i}]`)));
+  }
+  if (isObj(v)) {
+    for (const k of s.required || []) if (!(k in v)) errs.push(`${path}: 必須の ${k} なし`);
+    const props = isObj(s.properties) ? s.properties : {};
+    for (const [k, x] of Object.entries(v)) {
+      if (k in props) errs.push(...validate(x, props[k], root, `${path}.${k}`));
+      else if (s.additionalProperties === false) errs.push(`${path}: 定義にない ${k}`);
+    }
+  }
+  for (const sub of s.allOf || []) errs.push(...validate(v, sub, root, path));
+  if (Array.isArray(s.anyOf) && s.anyOf.length && s.anyOf.every((sub) => validate(v, sub, root, path).length)) errs.push(`${path}: anyOf のどれにも不一致`);
+  if (Array.isArray(s.oneOf) && s.oneOf.length) { const n = s.oneOf.filter((sub) => !validate(v, sub, root, path).length).length; if (n !== 1) errs.push(`${path}: oneOf に ${n} 個一致`); }
+  return errs;
+}
+
+function sampleText(sys) {
+  const fmt = sys.format || "csv";
+  const fileName = (sys.fileName || "{system}_{date:%Y%m%d}.{ext}").replace(/\{(\w+)(?::([^}]*))?\}/g, (m, k, f) =>
+    k === "system" ? sys.system || "" : k === "ext" ? fmt : k === "date" ? formatTime(DAY, f || "%Y%m%d", "+09:00") : k === "run" ? formatTime(DAY - 6 * 3600000, f || "%Y%m%d%H%M", "+09:00") : m);
+  const head = `ファイル名: ${fileName.replace(/[\\/:*?"<>|]/g, "_")}　文字コード: ${sys.encoding || "utf-8"}\n`;
+  if (fmt === "json") {
+    if (typeof sys.schema === "string") return { text: head + "スキーマはファイル（" + sys.schema + "）。見本は「ここで組む」のときだけ", errors: [] };
+    if (!isObj(sys.schema)) return { text: head + "JSON Schema がまだない", errors: [] };
+    let v = build(sys.schema, sys.schema, null, sys);
+    if (v === MISSING) v = {};
+    return { text: head + JSON.stringify(v, null, 2), errors: validate(v, sys.schema, sys.schema) };
+  }
+  const cols = Array.isArray(sys.columns) ? sys.columns.filter(isObj) : [];
+  if (!cols.length) return { text: head + "列がまだない", errors: [] };
+  const lines = [];
+  if (sys.header !== false) lines.push(cols.map((c) => csvCell(c.key)).join(","));
+  const warns = [];
+  for (const r of SAMPLE_REQS) {
+    lines.push(cols.map((c) => {
+      let v = c.source === undefined ? c.value : shaped(rawValue(r, c.source, sys, SAMPLE_REQS.length, c.geometry || "wkt", c.digits, false), c.source, sys, c.format, c.map);
+      if (v === MISSING) { warns.push(`${c.key}: 項目 ${c.source} なし`); v = ""; }
+      if (Array.isArray(c.allowed) && !c.allowed.some((a) => String(a) === String(v))) warns.push(`${r.name} の ${c.key}: ${JSON.stringify(v)} は許可された値以外`);
+      return csvCell(v);
+    }).join(","));
+  }
+  return { text: head + lines.join("\n"), errors: [...new Set(warns)] };
+}
+
+function sampleBox(sys) {
+  const pre = el("pre", { class: "sample" });
+  const errs = el("div", { class: "err" });
+  const draw = () => {
+    const { text, errors } = sampleText(sys);
+    pre.textContent = text;
+    errs.textContent = errors.length ? "見本の確認: " + errors.join(" / ") : "";
+  };
+  draw();
+  const box = el("fieldset", {}, el("legend", { text: "見本（架空の依頼 2 件、2026-11-08 分）" }),
+    el("div", { class: "bar" }, el("button", { type: "button", class: "small", text: "見本を更新", onclick: draw })), pre, errs,
+    el("small", { class: "note", text: "このツールでの試算。本番の出力は撮像依頼の「日次出力」で確認する" }));
+  box.addEventListener("input", draw);
+  sampleRefreshers.add(draw);
+  return box;
+}
+let sampleRefreshers = new Set();
+
+function checkExport(it, at, p) {
+  const fmt = it.format || "csv";
+  if (fmt === "csv" && !(Array.isArray(it.columns) && it.columns.length)) p.push(`${at}: CSV の列（columns）がない`);
+  if (fmt === "csv" && Array.isArray(it.columns)) it.columns.forEach((c, i) => {
+    if (!isObj(c) || !c.key) p.push(`${at}.columns[${i}]: 列名（key）がない`);
+    else if (c.source === undefined && !("value" in c)) p.push(`${at}.columns[${i}]: source か value がない`);
+  });
+  if (fmt === "json" && !(isObj(it.schema) || (typeof it.schema === "string" && it.schema))) p.push(`${at}: JSON Schema（schema）がない`);
+  if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"requests"')) p.push({ warn: true, text: `${at}: スキーマに x-source: requests の配列がない（依頼が出ない）` });
+  if (it.kind !== undefined && !["光学", "SAR", "両方"].includes(it.kind)) p.push(`${at}: kind は 光学・SAR・両方`);
+  if (it.timeZone && zoneOffset(it.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(it.timeZone) && !isIana(it.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${it.timeZone}」をこのブラウザで確かめられない` });
+}
+function isIana(z) { try { new Intl.DateTimeFormat("en-US", { timeZone: z }); return true; } catch (e) { return false; } }
+
+// ---------------------------------------------------------------- 確認
+
+function check() {
+  const out = [];
+  for (const spec of ALL) {
+    if (!(spec.key in state)) continue;
+    const p = [];
+    checkField(spec.field, state, spec.key, p);
+    for (const x of p) out.push(typeof x === "string" ? { key: spec.key, at: x.split(":")[0], text: x } : { key: spec.key, at: x.text.split(":")[0], ...x });
+  }
+  const known = new Set(K.keys);
+  const extra = Object.keys(state).filter((k) => !known.has(k));
+  if (extra.length) out.push({ key: "", warn: true, text: `プラグインが読まない項目（ビューアだけの項目ならそのままでよい）: ${extra.join("・")}` });
+  return out;
+}
+function checkField(f, obj, at, p) {
+  const v = obj[f.k];
+  if (v === undefined) { if (f.req) p.push(`${at}: ${f.l}（${f.k}）がない`); return; }
+  if (f.t === "number") {
+    if (typeof v !== "number" || !isFinite(v)) p.push(`${at}: 数で指定`);
+    else if ((f.min !== undefined && v < f.min) || (f.max !== undefined && v > f.max)) p.push(`${at}: ${f.min ?? ""}〜${f.max ?? ""} で指定`);
+  } else if (f.t === "text" && typeof v !== "string") p.push(`${at}: 文字列で指定`);
+  else if (f.t === "bool" && typeof v !== "boolean") p.push(`${at}: true か false で指定`);
+  else if (f.t === "select") {
+    const opts = (typeof f.opts === "function" ? f.opts() : f.opts).map(opt).map(([x]) => x);
+    if (!(v === null && f.nullLabel) && !opts.includes(v)) p.push(`${at}: ${opts.join("・")} のどれか`);
+  } else if (f.t === "roles") {
+    if (!isObj(v)) { p.push(`${at}: { 役割: 属性名 } で指定`); return; }
+    for (const [role, name] of Object.entries(v)) for (const n of Array.isArray(name) ? name : [name]) if (typeof n !== "string" || !ATTR.test(n)) p.push(`${at}.${role}: 属性名は英数字と _`);
+    for (const r of f.required || []) if (!v[r]) p.push(`${at}.${r}: ${ROLE_LABELS[r] || r} の属性名がない`);
+    if (f.requiredAny && !f.requiredAny.some((set) => set.every((r) => v[r]))) p.push(`${at}: ${f.requiredAny.map((s) => s.join("＋")).join(" か ")} が必要`);
+    if (f.requiredSome && isEmpty(v)) p.push(`${at}: 書き込む属性がない`);
+  } else if (f.t === "object") {
+    if (v === false && f.allowFalse) return;
+    if (!isObj(v)) { p.push(`${at}: オブジェクトで指定`); return; }
+    for (const g of f.fields) checkField(g, v, `${at}.${g.k}`, p);
+    if (f.check) f.check(v, at, p);
+  } else if (f.t === "items") {
+    if (!Array.isArray(v)) { if (!isObj(v)) p.push(`${at}: 配列で指定`); return; }
+    const seen = new Set();
+    v.forEach((it, i) => {
+      const a = `${at}[${i}]`;
+      if (!isObj(it)) { p.push(`${a}: オブジェクトで指定`); return; }
+      for (const g of f.fields) if (g.k && !(g.showIf && !g.showIf(it)) && !["sample", "priority", "columns", "schema"].includes(g.t)) checkField(g, it, `${a}.${g.k}`, p);
+      if (f.check) f.check(it, a, p);
+      if (f.unique && it[f.unique] !== undefined) { if (seen.has(it[f.unique])) p.push(`${a}: ${f.unique}「${it[f.unique]}」が重複`); seen.add(it[f.unique]); }
+    });
+  }
+}
+
+// ---------------------------------------------------------------- 画面
+
+function buildNav() {
+  const nav = document.getElementById("nav");
+  nav.replaceChildren(el("a", { href: "#", "data-page": "", class: current === "" ? "current" : "", onclick: (e) => { e.preventDefault(); go(""); } }, "一覧"));
+  for (const g of SPEC) {
+    nav.append(el("h2", { text: g.group }));
+    for (const k of g.keys) nav.append(el("a", { href: "#" + k.key, "data-key": k.key, class: current === k.key ? "current" : "", onclick: (e) => { e.preventDefault(); go(k.key); } },
+      el("span", { class: "dot" }), k.label, el("span", { class: "n" })));
+  }
+  nav.append(el("h2", { text: "そのほか" }), el("a", { href: "#", "data-key": "__other", class: current === "__other" ? "current" : "", onclick: (e) => { e.preventDefault(); go("__other"); } }, el("span", { class: "dot" }), "読まない項目・JSON"));
+}
+function go(key) {
+  current = key;
+  try { history.replaceState(null, "", key ? "#" + key : "#"); } catch (e) { /* file:// で失敗してもよい */ }
+  render();
+  document.getElementById("editor").scrollTop = 0;
+}
+
+function render() {
+  const ed = document.getElementById("editor");
+  const scroll = ed.scrollTop;
+  sampleRefreshers = new Set();
+  buildNav();
+  if (current === "") {
+    ed.replaceChildren(el("h2", { class: "key", text: "設定ファイルの項目" }),
+      el("p", { class: "help", text: "左の項目を選んで入力する。どの項目も省略可（省略すると既定）。右に config.json ができていくので、「config.json を保存」で書き出し、プラグインのメニュー「設定…」で読み込む。既存の設定ファイルは「開く…」で読み込んで直せる（コメントは消える）。" }),
+      ...SPEC.map((g) => el("section", {}, el("h3", { text: g.group }), el("div", { class: "overview" },
+        ...g.keys.map((k) => el("a", { href: "#" + k.key, onclick: (e) => { e.preventDefault(); go(k.key); } },
+          el("b", { text: k.label + (k.key in state ? (Array.isArray(state[k.key]) ? `（${state[k.key].length}）` : "（指定あり）") : "") }), el("span", { text: k.key })))))));
+  } else if (current === "__other") {
+    const known = new Set(K.keys);
+    const other = Object.fromEntries(Object.entries(state).filter(([k]) => !known.has(k)));
+    ed.replaceChildren(el("h2", { class: "key", text: "読まない項目・JSON" }),
+      el("p", { class: "help", text: "プラグインが読まない項目（ビューアだけの項目など）。そのまま残して保存する。ここで直接書き足すこともできる。" }),
+      jsonArea(isEmpty(other) ? undefined : other, (x) => {
+        for (const k of Object.keys(state)) if (!known.has(k)) delete state[k];
+        if (isObj(x)) for (const [k, v] of Object.entries(x)) if (!known.has(k)) state[k] = v;
+        changed();
+      }, '{ "viewerOnlyKey": … }'),
+      el("h3", { text: "設定ファイル全体を JSON で直す" }),
+      jsonArea(state, (x) => { if (isObj(x)) { state = x; changed(); } }));
+  } else {
+    const spec = ALL.find((k) => k.key === current);
+    const docLink = spec.ext ? el("a", { href: "../" + spec.ext, target: "_blank", text: spec.ext }) : spec.doc ? el("a", { href: "../README.md#" + spec.doc, target: "_blank", text: "README の説明" }) : null;
+    ed.replaceChildren(el("h2", { class: "key" }, spec.label, el("code", { text: spec.key })),
+      el("p", { class: "help" }, spec.help, docLink ? " 詳しく: " : "", docLink),
+      field(spec.field, state, () => {}, state),
+      spec.key in state ? el("div", { class: "bar" }, el("button", { type: "button", class: "small danger", text: "この項目を消す", onclick: () => { delete state[spec.key]; changed(); render(); } })) : null);
+  }
+  ed.scrollTop = scroll;
+  changed();
+}
+
+function setState(value, name) {
+  if (!isObj(value)) { alert("いちばん外がオブジェクトの JSON ではない"); return; }
+  state = value;
+  fileName = name || "config.json";
+  document.getElementById("fileName").textContent = name || "新規";
+  render();
+}
+
+document.getElementById("btnNew").onclick = () => { if (isEmpty(state) || confirm("いまの内容を消して新しく始める？")) { setState({}, ""); go(""); } };
+document.getElementById("fileInput").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try { setState(loadJsonc(await file.text()), file.name); } catch (err) { alert(`${file.name} を JSON として読めない: ${err.message}`); }
+};
+document.getElementById("btnSave").onclick = () => {
+  const probs = check().filter((p) => !p.warn);
+  if (probs.length && !confirm(`確認で ${probs.length} 件の問題がある。このまま保存する？（プラグインはその項目を既定に戻して起動する）`)) return;
+  download(fileName.replace(/\.jsonc$/, ".json") || "config.json", JSON.stringify(state, null, 2) + "\n");
+};
+document.getElementById("btnCopy").onclick = async () => {
+  const text = JSON.stringify(state, null, 2) + "\n";
+  try { await navigator.clipboard.writeText(text); } catch (e) {
+    const ta = el("textarea", { value: text });
+    document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  const b = document.getElementById("btnCopy");
+  b.textContent = "コピーした";
+  setTimeout(() => { b.textContent = "コピー"; }, 1200);
+};
+
+(function start() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+    if (saved && isObj(saved.state)) { state = saved.state; fileName = saved.fileName || "config.json"; document.getElementById("fileName").textContent = isEmpty(state) ? "新規" : `${fileName}（前回の続き）`; }
+  } catch (e) { /* 前回の内容がなくても動く */ }
+  const hash = decodeURIComponent(location.hash.slice(1));
+  current = ALL.some((k) => k.key === hash) || hash === "__other" ? hash : "";
+  render();
+})();
+</script>
+</body>
+</html>
