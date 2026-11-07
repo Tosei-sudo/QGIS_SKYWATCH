@@ -140,6 +140,8 @@ class ObservationDock(PluginDock):
         self.canvas = iface.mapCanvas()
         self.edit_taxonomy = edit_taxonomy
         self.sets: list[StoreSet] = []
+        #: The settings file and its stores when they were last listed (a change picks the first store again).
+        self._stores_read: Optional[tuple] = None
         self.books: dict[str, ObservationBook] = {}
         self.book: Optional[ObservationBook] = None
         self.store_set: Optional[StoreSet] = None
@@ -587,7 +589,12 @@ class ObservationDock(PluginDock):
         return settings.recorder_name(url)
 
     def reset_stores(self) -> None:
-        """The stores of the settings file (again), the local one last (unless `localObservations` is false)."""
+        """
+        The stores of the settings file (again), the local one last (unless
+        `localObservations` is false). The store chosen stays chosen while the
+        settings file and its stores are the same; another file, or other
+        stores in it, choose its first store (the local one only when there is no other).
+        """
         c = self.context
         try:
             self.sets = store_sets(c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for,
@@ -596,12 +603,14 @@ class ObservationDock(PluginDock):
             self.sets = []
             self._show_status(self.tr("保存先の準備失敗: {e}").format(e=error))
         self.books = {}
+        read = (c.source, tuple((s.label, s.config.url if s.config else None) for s in self.sets))
+        same, self._stores_read = read == self._stores_read, read
         was = self.store_select.currentText()
         self.store_select.blockSignals(True)
         self.store_select.clear()
         for s in self.sets:
             self.store_select.addItem(s.label)
-        i = self.store_select.findText(was)
+        i = self.store_select.findText(was) if same else -1
         self.store_select.setCurrentIndex(i if i >= 0 else 0)
         self.store_select.blockSignals(False)
         self.store_select.setVisible(len(self.sets) > 1)
