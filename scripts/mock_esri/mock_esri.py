@@ -1032,9 +1032,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         # New layers of the sample (a newer version of this script) are added, kept data is left as it is.
         for s in sample.services(files, base, with_features=False)["services"]:
             for l in s["layers"]:
-                if (s["name"].lower(), int(l.get("id", 0))) not in store.layers:
+                old = store.layers.get((s["name"].lower(), int(l.get("id", 0))))
+                if old is None:
                     store.define(s["name"], l)
                     print(f"レイヤーを追加: {s['name']}/FeatureServer/{l.get('id', 0)}")
+                    continue
+                # New fields of the sample (the tracking fields …) are added as columns.
+                have = {f["name"].lower() for f in old.fields}
+                missing = {n: v for n, v in l["fields"].items() if n.lower() not in have}
+                if missing:
+                    definition = old.definition()
+                    store.define(s["name"], {**definition, "fields": {**definition["fields"], **missing}})
+                    print(f"属性を追加: {s['name']}/FeatureServer/{l.get('id', 0)}（{', '.join(missing)}）")
     for path in a.services:
         with open(path, encoding="utf-8-sig") as f:
             n = load_services(store, json.load(f))

@@ -13,13 +13,17 @@ import pytest
 from satellite_observation.core.catalog import catalog_of
 from satellite_observation.core.config import parse_config, parse_config_text
 from satellite_observation.core.esri import EsriClient
+from satellite_observation.core.plan.names import SatelliteNames
 from satellite_observation.core.plan.satellites import SatelliteSpec
 from satellite_observation.core.plan.weather import CloudSeries, key_of
-from satellite_observation.core.request.daily import HELD, TAKEN, allocate, gather, room_text
+from satellite_observation.core.request.daily import HELD, TAKEN, allocate, carries_over, gather, room_text
 from satellite_observation.core.request.export import (
     Context, convert_priority, csv_text, file_name_of, format_time, geometry_value, json_text, render,
 )
-from satellite_observation.core.request.follow import follow_up, missed_ids, request_changes
+from satellite_observation.core.request.follow import (
+    Finding, accepted_names, fitting_images, follow_and_save, follow_up, history_changes, in_days, marked, missed_ids, next_step,
+    request_changes, save_marked, tally, undone_changes,
+)
 from satellite_observation.core.request.model import (
     JST, ImagingRequest, day_bounds, days_left, level_of, next_boost, occurs_on, priority_text, repeat_of, repeat_text,
     square_rings,
@@ -27,7 +31,7 @@ from satellite_observation.core.request.model import (
 from satellite_observation.core.request.route import fitting, scenes_of, system_of_satellite, why_not
 from satellite_observation.core.request.schema import validate
 from satellite_observation.core.request.store import (
-    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, add_history, load_history, load_requests, request_store_of, save_request,
+    DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, HistoryRow, add_history, load_history, load_requests, request_store_of, save_request,
     update_history, update_requests,
 )
 from satellite_observation.core.request.systems import export_systems_of
@@ -398,6 +402,98 @@ def test_ledger_round_trip_history_and_follow_up():
     plan2 = plan_day([r3], nxt, sys_, SATS, {}, [replace(missed, request_id="R-0003")])
     assert boost_changes(plan2) == [(99, {"boost": 100})]
     assert missed_done(plan2) == [(missed.object_id, {"boostDone": 1})]
+
+
+def image(sensor, iid="IMG"):
+    return {"attributes": {"SENSOR": sensor, "IMAGE_ID": iid}}
+
+
+def test_images_must_come_from_a_named_satellite():
+    names = SatelliteNames.of([("WorldView-3", "WV-3", "WV03")])
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-1", "SYS-A", "WorldView-3")
+    found = [image("SkySat-C12", "S1"), image("WV03", "W1")]
+    # Any satellite will do: every image counts (the planned one preferred by follow_up).
+    assert accepted_names(row, request("R-1")) == set()
+    assert fitting_images(found, "SENSOR", row, request("R-1"), names) == found
+    # Satellites named: only images of them (or of the planned one, by its other names).
+    named = request("R-1", satellites=["WorldView-3"])
+    assert "wv03" in accepted_names(row, named, names)
+    assert [f["attributes"]["IMAGE_ID"] for f in fitting_images(found, "SENSOR", row, named, names)] == ["W1"]
+    assert fitting_images([image("SkySat-C12")], "SENSOR", row, named, names) == []
+    # A series named: its members' images count (the name inside the sensor's).
+    assert len(fitting_images([image("OPT-X 2")], "SENSOR", replace(row, satellite="OPT-X 1"), request("R-1", series=["OPT-X"]))) == 1
+
+
+def test_follow_up_leaves_another_satellites_image_unsettled():
+    problems = []
+    store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY, "catalog": "画像"}, problems, 0)
+    fake = server()
+    client = EsriClient(fake)
+    catalog = catalog_of({"label": "画像", "url": CATALOG, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}, [], 0)
+    other = request("R-0009", satellites=["OPT-X 2"], object_id=9)
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-0009", "SYS-A", "OPT-X 2", object_id=1)
+    # Only an image of OPT-X 1 over the area: not this request's, so 未撮像 once the wait is over.
+    assert follow_up(client, catalog, None, [row], {"R-0009": other}, LAST + D, 3) == []
+    assert [f.captured for f in follow_up(client, catalog, None, [row], {"R-0009": other}, LAST + 4 * D, 3)] == ["未撮像"]
+    anyone = replace(other, satellites=[])
+    assert [(f.captured, f.image_id) for f in follow_up(client, catalog, None, [row], {"R-0009": anyone}, LAST + D, 3)] == [("撮像済み", "IMG-1")]
+    # Followed up and saved: the history row and the ledger (raise undone, 期間内1回 完了).
+    fake.layers[HISTORY].add({"REQ_ID": "R-0009", "TARGET_DAY": DAY.isoformat(), "RESULT": "採用", "CAPTURED": "未判定"})
+    save_request(client, store, None, replace(anyone, boost=200, object_id=None), FIRST - D)
+    history = load_history(client, store, None)
+    by_id = {r.id: r for r in load_requests(client, store, None)}
+    found, changed = follow_and_save(client, store, None, catalog, None, history, by_id, LAST + D)
+    assert [f.captured for f in found] == ["撮像済み"] and changed and history[0].captured == "撮像済み"
+    saved = load_requests(client, store, None)[0]
+    assert (saved.boost, saved.status) == (0, "完了")
+    assert load_history(client, store, None)[0].image_id == "IMG-1"
+    # By hand back to 未撮像: the request is 有効 again and the row offered its raise again.
+    history = load_history(client, store, None)
+    history[0].boost_done = 1
+    by_id = {r.id: r for r in load_requests(client, store, None)}
+    findings = marked(history, "未撮像")
+    assert history_changes(findings) == [(history[0].object_id, {"captured": "未撮像", "imageId": "", "boostDone": 0})]
+    assert undone_changes(findings, by_id, history) == [(by_id["R-0009"].object_id, {"status": "有効"})]
+    assert save_marked(client, store, None, findings, by_id, history, LAST + 2 * D)
+    assert load_requests(client, store, None)[0].status == "有効"
+    assert (load_history(client, store, None)[0].captured, history[0].boost_done) == ("未撮像", 0)
+    assert marked(history, "未撮像") == []  # already so
+
+
+def test_missed_requests_carry_over_to_the_next_plan():
+    weekly = request("R-W", category="定点", achieve="毎回", repeat="曜日:日", object_id=5)  # DAY is a Sunday
+    nxt = date(2026, 11, 11)  # a Wednesday
+    assert occurs_on(weekly, DAY) and not occurs_on(weekly, nxt)
+    assert carries_over(weekly, nxt) and not carries_over(replace(weekly, status="停止"), nxt)
+    assert not carries_over(weekly, date(2026, 11, 30))  # past its period
+    assert gather([weekly], nxt, SATS, {}, set()) == []
+    [c] = gather([weekly], nxt, SATS, {"R-W": 10}, {"R-W"})
+    assert c.carried and "未撮像の持ち越し" in c.warnings and c.boost_offer == 100 and c.boost_reason == "未撮像"
+    row = HistoryRow("RUN", FIRST, DAY.isoformat(), "R-W", "SYS-A", "OPT-X 1", captured="未撮像", object_id=3)
+    plan = plan_day([weekly], nxt, systems(), SATS, {"R-W": 10}, [row])
+    assert [(c.request.id, c.result) for c in plan.candidates] == [("R-W", TAKEN)]
+    assert boost_changes(plan) == [(5, {"boost": 100})] and missed_done(plan) == [(3, {"boostDone": 1})]
+
+
+def test_tally_and_what_comes_next():
+    rows = [HistoryRow("R", FIRST, "2026-11-06", "A", "SYS-A", captured="撮像済み"),
+            HistoryRow("R", FIRST, "2026-11-07", "B", "SYS-A", captured="未撮像"),
+            HistoryRow("R", FIRST, "2026-11-08", "C", "SYS-B", captured="未判定"),
+            HistoryRow("R", FIRST, "2026-11-08", "D", "SYS-B", result="見送り", captured="")]
+    t = {x.system: x for x in tally(rows)}
+    assert (t["SYS-A"].taken, t["SYS-A"].missed, t["SYS-B"].pending, t["計"].total) == (1, 1, 1, 3)
+    assert t["SYS-A"].text == "撮像済み 1・未撮像 1・未判定 0（撮像率 50%）"
+    assert t["SYS-B"].text == "撮像済み 0・未撮像 0・未判定 1"
+    assert [r.request_id for r in in_days(rows, date(2026, 11, 7), DAY)] == ["B", "C", "D"]
+    reqs = {"A": request("A", status="完了"), "B": request("B"), "C": request("C")}
+    assert next_step(rows[0], reqs["A"], DAY) == "完了"
+    assert next_step(rows[1], reqs["B"], DAY) == "次回の計算で持ち越し・繰り上げ候補"
+    assert next_step(replace(rows[1], boost_done=1), reqs["B"], DAY) == "繰り上げ確認済み"
+    assert next_step(rows[1], reqs["B"], date(2026, 12, 1)) == "期間終了"
+    assert next_step(rows[1], replace(reqs["B"], status="停止"), DAY) == "依頼は停止"
+    assert next_step(rows[2], reqs["C"], DAY) == "撮像待ち"
+    assert next_step(rows[2], None, DAY) == "台帳に依頼なし"
+    assert next_step(rows[3], None, DAY) == ""
 
 
 def test_forecast_places_and_clouds():

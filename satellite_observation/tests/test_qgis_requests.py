@@ -30,6 +30,7 @@ from satellite_observation.tests.test_plan import LINE1, LINE2  # noqa: E402
 SATS = "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
 HISTORY = "https://example.com/arcgis/rest/services/Req/FeatureServer/1"
+IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
 SAR1 = "1 90002U 26902A   26280.50000000  .00000100  00000-0  40000-4 0  9992"
 SAR2 = "2 90002  98.1800 283.0000 0001300  90.0000 270.0000 14.59200000    16"
 
@@ -37,6 +38,7 @@ CONFIG = {
     "cloudForecast": False,
     "satelliteCatalogs": [{"label": "衛星", "url": SATS, "fields": {"name": "NAME", "tle": "TLE", "kind": "KIND", "series": "SERIES",
                                                                     "resolution": "RES", "maxPerDay": "PERDAY", "system": "SYSTEM"}}],
+    "imageCatalogs": [{"label": "画像", "url": IMAGES, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}],
     "requestStores": [{"label": "撮像依頼", "url": LEDGER, "history": HISTORY}],
     "requestExports": [
         {"system": "SYS-A", "label": "A", "kind": "光学", "series": ["OPT"], "limit": {"count": 1}, "format": "csv", "encoding": "cp932",
@@ -73,6 +75,8 @@ def plugin(tmp_path, monkeypatch):
     htypes = {n: "esriFieldTypeString" for n in DEFAULT_HISTORY_FIELDS.values()}
     htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
     fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
+    fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
+                                      "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
     from satellite_observation import classFactory
 
     iface = FakeIface()
@@ -153,6 +157,33 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
     got = {c.request.name: (c.result, c.system.system if c.system else c.reason) for c in daily.plan.candidates}
     assert got == {"横須賀": ("採用", "SYS-A"), "呉": ("見送り", "枠超過"), "大阪湾": ("採用", "SYS-B")}
+
+    # 上限シミュレーション: SYS-A at 2 a day takes 呉 too; SYS-B off leaves 大阪湾 without a system. Nothing is written.
+    ledger_before = json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str)
+    history_before = len(fake.layers[HISTORY].rows)
+    daily.open_simulation()
+    sim = daily.simulation
+    sim.days.setValue(2)
+    rows = {sim.systems.item(r, 1).data(Qt.ItemDataRole.UserRole): r for r in range(sim.systems.rowCount())}
+    assert sim.systems.item(rows["SYS-A"], 2).text() == "1" and sim.systems.item(rows["SYS-B"], 2).text() == ""
+    sim.systems.item(rows["SYS-A"], 2).setText("2")
+    sim.systems.item(rows["SYS-B"], 0).setCheckState(Qt.CheckState.Unchecked)
+    sim.run()
+    assert wait_for(lambda: sim.trial is not None and sim.task is None), sim.status.text()
+    assert sim.base.total("over") == 2 and sim.base.total("lost") == 2
+    assert sim.trial.total("over") == 0 and sim.trial.days[0].used["SYS-A"][0] == 2
+    assert sim.trial.days[0].no_system == 1 and "SYS-B" not in sim.trial.days[0].used
+    summary = {sim.summary.item(r, 0).text(): (sim.summary.item(r, 1).text(), sim.summary.item(r, 2).text(), sim.summary.item(r, 3).text())
+               for r in range(sim.summary.rowCount())}
+    assert summary["枠超過で見送り"] == ("2", "0", "-2")
+    assert sim.daily.rowCount() == 2 and "A 2/2 件" in sim.daily.item(0, 11).text()
+    # Back to the settings' values: the same as the base, without reading the ledger again.
+    sim.fill_systems()
+    sim.run()
+    assert sim.trial.total("over") == sim.base.total("over") == 2
+    assert json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str) == ledger_before
+    assert len(fake.layers[HISTORY].rows) == history_before
+    sim.close()
     # By hand: 呉 in (over the limit), 横須賀 out.
     model = daily.model
     names = [c.request.name for c in daily.plan.candidates]
@@ -176,3 +207,49 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert wait_for(lambda: daily.task is None and len(fake.layers[HISTORY].rows) == 3), daily.status.text()
     assert settings.request_export_folder() == str(tmp_path / "out")
     assert {r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows} == {"採用", "見送り"}
+
+
+def test_plan_results_against_the_catalog(plugin):
+    p, iface, fake, tmp_path = plugin
+    daily = p.api.plan_files
+    # Two requests handed out five days ago (and one held back): 横須賀 imaged, 呉 not.
+    day = jst_day(time.time() * 1000 - 5 * 86400000)
+    first, last = day_bounds(day)
+    square = lambda lon: {"rings": [[[lon - 0.05, 34.95], [lon + 0.05, 34.95], [lon + 0.05, 35.05], [lon - 0.05, 35.05], [lon - 0.05, 34.95]]],
+                          "spatialReference": {"wkid": 4326}}
+    ledger = fake.layers[LEDGER]
+    for rid, name, lon, sats in (("R-1", "横須賀", 139.67, ""), ("R-2", "呉", 132.55, "OPT 1")):
+        ledger.add({"REQ_ID": rid, "REQ_NAME": name, "CATEGORY": "臨時", "ACHIEVE": "期間内1回", "STATUS": "有効", "PRIORITY": 500,
+                    "BOOST": 100, "KIND": "光学", "SATELLITES": sats, "START_AT": first - 86400000, "END_AT": last + 30 * 86400000},
+                   square(lon))
+    history = fake.layers[HISTORY]
+    for rid, result in (("R-1", "採用"), ("R-2", "採用"), ("R-3", "見送り")):
+        history.add({"RUN_ID": "RUN", "TARGET_DAY": day.isoformat(), "REQ_ID": rid, "SYSTEM": "SYS-A", "SATELLITE": "OPT 1",
+                     "RESULT": result, "CAPTURED": "未判定" if result == "採用" else "", "BOOST_DONE": 0})
+    images = fake.layers[IMAGES]
+    images.add({"IMAGE_ID": "IMG-Y", "ACQ": first + 3 * 3600000, "SENSOR": "OTHER 9"}, square(139.67))
+    images.add({"IMAGE_ID": "IMG-K", "ACQ": first + 3 * 3600000, "SENSOR": "OTHER 9"}, square(132.55))
+
+    dialog = daily.show_results()
+    assert wait_for(lambda: dialog.task is None and dialog.history), dialog.status.text()
+    # 横須賀 takes any satellite; 呉 named OPT 1, so another satellite's image does not count.
+    got = {r.request_id: (r.captured, r.image_id) for r in dialog.history if r.result == "採用"}
+    assert got == {"R-1": ("撮像済み", "IMG-Y"), "R-2": ("未撮像", "")}, dialog.status.text()
+    assert dialog.status.text().startswith("撮像済み 1 件・未撮像 1 件を確認")
+    assert dialog.model.rowCount() == 2
+    assert "SYS-A: 撮像済み 1・未撮像 1・未判定 0（撮像率 50%）" in dialog.summary.text()
+    steps = {dialog.model.item(i, 3).text(): dialog.model.item(i, 7).text() for i in range(dialog.model.rowCount())}
+    assert steps == {"R-1": "完了", "R-2": "次回の計算で持ち越し・繰り上げ候補"}
+    saved = {f["attributes"]["REQ_ID"]: f["attributes"] for f in ledger.rows}
+    assert (saved["R-1"]["STATUS"], saved["R-1"]["BOOST"]) == ("完了", 0)
+    dialog.shown.setCurrentText("未撮像")
+    assert dialog.model.rowCount() == 1
+
+    # By hand: 呉 was in fact imaged (the catalog is late).
+    dialog.table.selectRow(0)
+    dialog.mark("撮像済み", "IMG-HAND")
+    assert wait_for(lambda: dialog.task is None and dialog.status.text().startswith("1 件を撮像済みに変更")), dialog.status.text()
+    rows = {f["attributes"]["REQ_ID"]: f["attributes"] for f in history.rows}
+    assert (rows["R-2"]["CAPTURED"], rows["R-2"]["IMAGE_ID"]) == ("撮像済み", "IMG-HAND")
+    assert {f["attributes"]["REQ_ID"]: f["attributes"]["STATUS"] for f in ledger.rows}["R-2"] == "完了"
+    assert dialog.model.rowCount() == 0  # no longer 未撮像

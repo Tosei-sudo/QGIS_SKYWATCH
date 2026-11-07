@@ -19,7 +19,7 @@ from .processing_provider.pansharpen_algorithm import default_inputs
 from .processing_provider import detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
-from .qgis_io import time_zone_fields
+from .qgis_io import edit_stamp_layers, time_zone_fields
 from .qgis_io.context import PluginContext
 from .qgis_io import overviews_io
 from .qgis_io.geometry import to_wgs84
@@ -637,6 +637,11 @@ class SatelliteObservationPlugin:
         self.time_zone_fields = time_zone_fields.TimeZoneFields(self.context.esri)
         QgsProject.instance().layersAdded.connect(self.time_zone_fields.layers_added)
         self.context.configChanged.connect(self._time_zones_changed)
+        # Esri layers QGIS edits itself: who and when in their tracking fields (the settings file's editTracking).
+        self.edit_stamp_layers = edit_stamp_layers.EditStampLayers()
+        QgsProject.instance().layersAdded.connect(self.edit_stamp_layers.layers_added)
+        QgsProject.instance().layersRemoved.connect(self.edit_stamp_layers.layers_removed)
+        self.edit_stamp_layers.layers_added(QgsProject.instance().mapLayers().values())
 
     def _time_zones_changed(self) -> None:
         if getattr(self, "time_zone_fields", None) is not None:
@@ -844,6 +849,15 @@ class SatelliteObservationPlugin:
                 pass
             self.iface.removeCustomActionForLayerType(self.similar_action)
             self.similar_action = None
+        if getattr(self, "edit_stamp_layers", None) is not None:
+            for signal, slot in ((QgsProject.instance().layersAdded, self.edit_stamp_layers.layers_added),
+                                 (QgsProject.instance().layersRemoved, self.edit_stamp_layers.layers_removed)):
+                try:
+                    signal.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+            self.edit_stamp_layers.active = False
+            self.edit_stamp_layers = None
         if getattr(self, "time_zone_fields", None) is not None:
             try:
                 QgsProject.instance().layersAdded.disconnect(self.time_zone_fields.layers_added)

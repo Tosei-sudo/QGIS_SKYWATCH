@@ -298,6 +298,9 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
                   "FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
 
+#: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
+EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
+
 TAXONOMY_ROWS = [
     ("船舶", "大分類,種別,級", "艦名", "", "入港,出港,停泊,航行,荷役"),
     ("船舶 > 貨物船", "", "", "", ""),
@@ -362,7 +365,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
     taxonomy = [{"attributes": {"PATH": p, "LEVELS": lv, "NAME_LABEL": nl, "MEMBERS": m, "SPECS": "", "PHOTOS": "", "ACTIVITIES": act, "SORT_ORDER": i}}
                 for i, (p, lv, nl, m, act) in enumerate(TAXONOMY_ROWS)]
 
-    return {"services": [
+    out = {"services": [
         {"name": "Catalog", "layers": [{
             "id": 0, "name": "画像カタログ", "geometryType": "polygon", "maxRecordCount": 1000,
             "fields": {"IMG_ID": S, "ACQ_TIME": T, "REG_TIME": T, "SYS_TIME": T, "SENSOR_NAME": S, "OFF_NADIR": D, "SAT_AZIMUTH": D,
@@ -398,6 +401,10 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 0, "name": "撮像依頼台帳", "geometryType": "polygon", "fields": REQUEST_FIELDS, "features": feats(requests)},
             {"id": 1, "name": "出力履歴", "fields": HISTORY_FIELDS, "features": []}]},
     ]}
+    for service in out["services"]:
+        for layer in service["layers"]:
+            layer["fields"] = {**layer["fields"], **EDIT_FIELDS}
+    return out
 
 
 def add_new_image(store, files: str, base: str) -> str:
@@ -497,7 +504,9 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
           "id": {{ "type": "string", "x-source": "id" }}, "satellite": {{ "type": "string", "x-source": "satellite" }},
           "start": {{ "type": "string", "format": "date-time", "x-source": "start" }}, "end": {{ "type": "string", "format": "date-time", "x-source": "end" }},
           "aoi": {{ "type": "object", "x-source": "geometry", "x-geometry": "geojson" }}, "priority": {{ "type": "integer", "x-source": "priority" }} }} }} }} }} }} }}
-  ]
+  ],
+  // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
+  "editTracking": {{ "userVariable": "USERNAME" }}
 }}
 """
     with open(path, "w", encoding="utf-8") as f:

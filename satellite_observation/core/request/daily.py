@@ -11,7 +11,9 @@ in order of priority.
    期間内1回 with 2 days or less left: then it goes, with a warning.
    The cover's tenth becomes the priority's ones digit.
 3. Raises (繰り上げ): requests missed (未撮像) or 期間内1回 near the deadline
-   are offered for a raise of 100; those ticked count now.
+   are offered for a raise of 100; those ticked count now. A 定点 request
+   missed on a day of its repeat (weekday, interval) is carried over to the
+   next day planned, even when that is not one of its days (持ち越し).
 4. Order: output priority, then the nearer deadline, then the older request.
 5. Fitting: in that order, each request goes to the first system (its own
    order, then `requestExports`') with a satellite that can take it and room
@@ -31,7 +33,7 @@ from datetime import date
 from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
-from .model import ImagingRequest, clamp_priority, days_left, next_boost, occurs_on
+from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .route import fitting, scenes_of, system_of_satellite, why_not
 from .systems import ExportSystem
 from .weather import with_cloud
@@ -55,6 +57,8 @@ class Candidate:
     boost_reason: str = ""
     #: Whether the offered raise is taken (ticked).
     boost_taken: bool = True
+    #: Missed (未撮像) on a day of its repeat and carried over to this day, not one of its repeat.
+    carried: bool = False
     #: Held back before fitting (the reason), e.g. 雲量.
     held: str = ""
     #: The person's say: None, TAKEN (keep in, even over the limits) or HELD (leave out).
@@ -96,6 +100,18 @@ class Candidate:
         return "雲多" if no_go is not None and self.cloud >= no_go else "OK"
 
 
+def carries_over(req: ImagingRequest, day: date) -> bool:
+    """
+    Whether a request missed (未撮像) goes to a day that is not one of its
+    repeat (a 定点 request by weekday or interval): 有効 and the day still
+    in its period. Others come every day of their period anyway.
+    """
+    if req.status != "有効":
+        return False
+    first, last = day_bounds(day)
+    return math.isfinite(req.start) and math.isfinite(req.end) and req.start <= last and req.end >= first
+
+
 def wants_weather(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
     """Whether the weather matters: 光学, or 任意 when every satellite that can take it is optical."""
     if req.kind == "光学":
@@ -115,9 +131,12 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
     """
     out = []
     for req in requests:
-        if not occurs_on(req, day):
+        carried = not occurs_on(req, day) and req.id in missed and carries_over(req, day)
+        if not occurs_on(req, day) and not carried:
             continue
-        c = Candidate(req)
+        c = Candidate(req, carried=carried)
+        if carried:
+            c.warnings.append("未撮像の持ち越し")
         left = days_left(req, day)
         near = req.achieve == "期間内1回" and left <= DEADLINE_DAYS
         if wants_weather(req, sats):
