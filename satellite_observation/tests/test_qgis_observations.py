@@ -17,7 +17,7 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
-from qgis.PyQt.QtWidgets import QPushButton  # noqa: E402
+from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
 
 from satellite_observation.core.esri import EsriClient  # noqa: E402
 from satellite_observation.core.obs.flows import living  # noqa: E402
@@ -217,6 +217,31 @@ def test_the_kind_chosen_is_the_next_new_records_default_in_later_sessions_too(p
     dock.escape()
     dock.map_clicked(139.65, 35.65, None)
     assert dock.kind_input.text() == "船舶 > 護衛艦"
+
+
+def test_the_kind_is_chosen_level_by_level_with_every_top_class_shown(plugin):
+    p, iface, dock, layers, tmp_path = plugin
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.choose_kind(["船舶", "護衛艦"])
+    # 大分類 stays on show with the chosen one pressed, so another one is a click away.
+    rows = dock.kind_level_rows()
+    assert rows[0][0] == "大分類" and rows[0][2] == "船舶" and {"船舶", "航空機", "車両"} <= set(rows[0][1])
+    assert rows[1][2] == "護衛艦"
+    top = dock.kind_levels.findChildren(QToolButton)
+    [plane] = [b for b in top if b.text() == "航空機"]
+    plane.click()
+    assert dock.kind_input.text() == "航空機"
+    # The pressed one again clears that level and the ones below.
+    [ship] = [b for b in dock.kind_levels.findChildren(QToolButton) if b.text() == "航空機"]
+    assert ship.isChecked()
+    ship.click()
+    assert dock.kind_input.text() == "" and dock.kind_level_rows()[0][2] == ""
+    # A kind typed outside the classes still shows on its level.
+    dock.kind_input.setText("船舶 > 未知の艦")
+    dock._kind_changed()
+    assert dock.kind_level_rows()[1][2] == "未知の艦" and "未知の艦" in dock.kind_level_rows()[1][1]
+    dock.close_form()
 
 
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
