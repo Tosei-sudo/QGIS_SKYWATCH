@@ -36,7 +36,7 @@ from ..core.shadow import (
 from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name, gdal_metadata, observed_image
-from .docks import PluginDock
+from .docks import PluginDock, ask_no
 from .last_inputs import InputMemory
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
@@ -231,6 +231,7 @@ class ShadowHeightDock(PluginDock):
         self.body.addWidget(self.list, 1)
         buttons = QHBoxLayout()
         self.clear_button = QPushButton(self.tr("消去"))
+        self.clear_button.setToolTip(self.tr("測った高さをすべて消す"))
         self.clear_button.clicked.connect(self.clear)
         self.layer_button = QPushButton(self.tr("レイヤーとして追加"))
         self.layer_button.clicked.connect(self.add_layer)
@@ -503,6 +504,8 @@ class ShadowHeightDock(PluginDock):
 
     def clear(self) -> None:
         """Removes every height measured."""
+        if len(self.measurements) > 1 and not ask_no(self, self.tr("消去"), self.tr("測った高さ {n} 件をすべて消しますか？").format(n=len(self.measurements))):
+            return
         self.measurements.clear()
         self.drop_foot()
         self._redraw()

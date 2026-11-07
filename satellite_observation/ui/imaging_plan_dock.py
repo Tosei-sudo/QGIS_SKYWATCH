@@ -56,7 +56,7 @@ from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock
+from .docks import PluginDock, ask_no
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
@@ -1417,6 +1417,7 @@ class ImagingPlanDock(PluginDock):
         ics.setToolTip(self.tr("一覧の撮像を予定表（iCalendar .ics）で保存。Outlook などに取り込み可能（設定した分前のアラーム付き）"))
         ics.clicked.connect(lambda: self.save_ics())
         clear = QPushButton(self.tr("通知をすべて解除"))
+        clear.setToolTip(self.tr("設定した撮像の通知をすべて取り消す（ほかの計画で設定したものも）"))
         clear.clicked.connect(self.clear_reminders)
         self.remind_count = QLabel()
         for w in (self.remind_minutes, notify, ics, clear, self.remind_count):
@@ -1708,6 +1709,9 @@ class ImagingPlanDock(PluginDock):
         return len(fresh)
 
     def clear_reminders(self) -> None:
+        n = len(self.reminders())
+        if n and not ask_no(self, self.tr("通知をすべて解除"), self.tr("撮像の通知 {n} 件をすべて解除しますか？").format(n=n)):
+            return
         settings.set_plan_reminders([])
         self.count_reminders()
         self.iface.messageBar().pushInfo(self.tr("撮像計画"), self.tr("撮像の通知をすべて解除"))

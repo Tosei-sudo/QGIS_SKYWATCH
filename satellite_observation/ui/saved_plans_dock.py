@@ -234,6 +234,8 @@ class SavedPlansDock(PluginDock):
 
     def _plan_row(self, row: int) -> None:
         if 0 <= row < len(self.plans) and self.plans[row] is not self.plan:
+            # 「もう一度押すと削除」 belongs to the plan it was pressed for.
+            self._disarm()
             self.choose(self.plans[row])
 
     def choose(self, plan: SavedPlan, track: bool = True, then: Optional[Callable[[], None]] = None) -> None:

@@ -177,6 +177,11 @@ def test_reminders_and_calendar_file(plugin, monkeypatch):
     text = open(path, encoding="utf-8", newline="").read()
     assert text.startswith("BEGIN:VCALENDAR\r\n") and "TRIGGER:-PT15M" in text
     assert text.count("BEGIN:VEVENT") == len(dock.shown)
+    from satellite_observation.ui.docks import QMessageBox as Box
+    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.No)
+    dock.clear_reminders()
+    assert settings.plan_reminders() != []
+    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
     dock.clear_reminders()
     assert settings.plan_reminders() == []
 
@@ -247,8 +252,13 @@ def test_save_a_plan_and_follow_it_up(plugin, monkeypatch):
     # Deleting takes two clicks.
     saved.delete_button.click()
     assert saved.delete_button.text() == "もう一度押すと削除" and fake.layers[PLANS].rows
+    # Another plan chosen in between: the second click must not delete that one.
+    plan = saved.plan
+    saved.plan = None
+    saved._plan_row(0)
+    assert saved.delete_button.text() == "計画を削除" and not saved._armed and saved.plan is plan
+    assert wait_for(lambda: saved.task is None, 10000)
     gone = []
-    saved._disarm()
     saved.delete(lambda: gone.append(1))
     assert wait_for(lambda: gone, 10000)
     assert fake.layers[PLANS].rows == [] and saved.plans == []

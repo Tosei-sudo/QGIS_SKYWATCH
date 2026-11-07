@@ -47,7 +47,7 @@ from ..qgis_io.obs_images import open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock
+from .docks import PluginDock, ask_no
 from .flow_layout import FlowLayout
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
@@ -499,10 +499,11 @@ class ObservationDock(PluginDock):
         more.addRow(tr("種別"), self.rekind_input)
         more.addRow(tr("同一のモノとして統合"), self.merge_select)
         actions = QHBoxLayout()
-        actions.addWidget(self._button(tr("名前・種別の変更"), "", self._rename_chosen))
-        actions.addWidget(self._button(tr("統合"), "", self._merge_chosen))
-        actions.addWidget(self._button(tr("範囲へ移動"), "", lambda: self._fit_flow(self._chosen_flow())))
-        self.remove_all_button = self._button(tr("このモノの記録を削除"), "", self._remove_chosen)
+        actions.addWidget(self._button(tr("名前・種別の変更"), tr("このモノのすべての記録の名前・種別を上の値に変える"), self._rename_chosen))
+        actions.addWidget(self._button(tr("統合"), tr("このモノの記録を、選んだ統合先のモノの記録にする（同じモノを別々に記録していたとき）"),
+                                       self._merge_chosen))
+        actions.addWidget(self._button(tr("範囲へ移動"), tr("このモノの記録すべての範囲へ地図を移動"), lambda: self._fit_flow(self._chosen_flow())))
+        self.remove_all_button = self._button(tr("このモノの記録を削除"), tr("このモノの記録をすべて削除（2 回押す）"), self._remove_chosen)
         actions.addWidget(self.remove_all_button)
         more.addRow(actions)
         self.flow_more.toggled.connect(lambda on: [w.setVisible(on) for w in self.flow_more.findChildren(QWidget)])
@@ -1700,6 +1701,9 @@ class ObservationDock(PluginDock):
         flow = self._chosen_flow()
         into = self.merge_select.currentData()
         if flow is None or not into:
+            return
+        if not ask_no(self, self.tr("統合"), self.tr("「{a}」の記録 {n} 件を「{b}」の記録にしますか？元に戻すには記録を 1 件ずつ直す必要があります。").format(
+                a=flow.name, n=len(flow.observations), b=self.merge_select.currentText())):
             return
         self.chosen = into
         self.do(self.tr("統合"), lambda b: b.merge(flow.object_id, into))

@@ -152,7 +152,13 @@ def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(
     assert settings.similar_tolerance()["angle"] == 5
     dock.normal_search()
     assert wait_for(lambda: dock.status.text() == "3 件") and dock.similar.isHidden()
-    # Forgetting the folders.
+    # Forgetting the folders: asked first, いいえ keeps them.
+    from satellite_observation.ui.docks import QMessageBox as Box
+    answers = []
+    monkeypatch.setattr(Box, "question", lambda *a: answers.append(a) or a[4])
+    dock.clear_folders()
+    assert settings.path_folder("\\\\nas\\images") is not None and answers[0][4] == Box.StandardButton.No
+    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
     dock.clear_folders()
     assert settings.path_folder("\\\\nas\\images") is None
 
@@ -198,7 +204,7 @@ def test_the_list_as_a_layer_with_its_time(plugin):
     assert {f["IMG_ID"] for f in layer.getFeatures()} == {"A", "B", "C"}
 
 
-def test_watches_notify_new_images_only(plugin):
+def test_watches_notify_new_images_only(plugin, monkeypatch):
     p, iface, folder, fake, images = plugin
     notices = p.api.notices
     catalog = p.api.config.image_catalogs[0]
@@ -227,6 +233,11 @@ def test_watches_notify_new_images_only(plugin):
     item.setCheckState(0, Qt.CheckState.Unchecked)
     assert not notices.store().watch(watch.id).enabled
     notices.watches.setCurrentItem(item)
+    from satellite_observation.ui.docks import QMessageBox as Box
+    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.No)
+    notices.delete_chosen_watch()
+    assert len(notices.store().watches()) == 1
+    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
     notices.delete_chosen_watch()
     assert notices.store().watches() == [] and notices.store().notices() == []
 
