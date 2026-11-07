@@ -14,6 +14,7 @@ from typing import Callable, Optional, Sequence
 
 from ..catalog import CatalogConfig
 from ..esri import EsriClient, EsriError
+from ..plan.names import NO_NAMES, SatelliteNames, best_named
 from ..plan.store import between_condition
 from .model import ImagingRequest
 from .model import day_bounds
@@ -28,14 +29,14 @@ class Finding:
     image_id: str = ""
 
 
-def _plain(s: str) -> str:
-    return "".join(ch for ch in s.lower() if ch.isalnum())
-
-
 def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], rows: Sequence[HistoryRow],
               requests: dict, now: float, miss_after_days: float,
-              cancelled: Optional[Callable[[], bool]] = None) -> list[Finding]:
-    """The rows (採用, 未判定, their day begun) whose outcome is now known."""
+              cancelled: Optional[Callable[[], bool]] = None, names: SatelliteNames = NO_NAMES) -> list[Finding]:
+    """
+    The rows (採用, 未判定, their day begun) whose outcome is now known. Of the
+    images found, one whose sensor names the row's satellite (or an alias of
+    `names`) is preferred.
+    """
     acquired = catalog.fields.get("acquired")
     if not acquired:
         raise EsriError(f"{catalog.label} に撮像日時の属性（fields.acquired）なし")
@@ -63,13 +64,8 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
         found = client.ask(f"{catalog.url}/query", params, token).get("features") or []
         if found:
             sensor = catalog.fields.get("sensor")
-            name = _plain(row.satellite)
-
-            def named(feature: dict) -> bool:
-                s = _plain(str((feature.get("attributes") or {}).get(sensor) or "")) if sensor else ""
-                return bool(s and name and (s in name or name in s))
-
-            best = next((x for x in found if named(x)), found[0])
+            wanted = names.expand(row.satellite) if sensor else set()
+            best = best_named(found, lambda x: (x.get("attributes") or {}).get(sensor), wanted)
             a = best.get("attributes") or {}
             id_field = catalog.fields.get("id")
             value = a.get(id_field) if id_field else None

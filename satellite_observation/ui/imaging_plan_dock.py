@@ -562,6 +562,9 @@ class ImagingPlanDock(PluginDock):
 
         def work(task):
             sats, problems = load_satellites(client, catalog, token_for, task.isCanceled)
+            names = self.context.satellite_names(client, task.isCanceled)
+            if names:
+                sats = [replace(s, aliases=tuple(sorted(names.expand(s.name, s.id)))) for s in sats]
             task.progress(70)
             modes, more = load_sensor_modes(client, sensors, token_for, task.isCanceled)
             return sats, modes, problems + more

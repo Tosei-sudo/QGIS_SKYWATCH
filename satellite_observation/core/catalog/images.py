@@ -70,10 +70,16 @@ def image_patterns_of(value: Any, problems: list[str], at: str) -> dict[str, lis
     return out
 
 
-def patterns_for(patterns: dict[str, list[str]], sensor: str) -> list[str]:
-    """The patterns of a sensor (its own, regardless of case and spaces around), else `*`'s, else DEFAULT_PATTERN."""
+def patterns_for(patterns: dict[str, list[str]], sensor: str, names=None) -> list[str]:
+    """
+    The patterns of a sensor (its own, regardless of case and spaces around,
+    else those of a name `names` (SatelliteNames) gives it), else `*`'s,
+    else DEFAULT_PATTERN.
+    """
     key = (sensor or "").strip().casefold()
     own = next((p for s, p in patterns.items() if s != ANY and s.casefold() == key), None) if key else None
+    if own is None and key and names:
+        own = next((p for s, p in patterns.items() if s != ANY and names.same(s, sensor)), None)
     return own or patterns.get(ANY) or [DEFAULT_PATTERN]
 
 

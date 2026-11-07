@@ -269,7 +269,8 @@ class NoticesDock(PluginDock):
             record = record_of(n.feature, catalog.fields)
             try:
                 opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder or (lambda m: None),
-                                     self.choose_images, problems)
+                                     self.choose_images, problems,
+                                     names=self.context.known_names())
             except Cancelled:
                 break
             except PathError as error:

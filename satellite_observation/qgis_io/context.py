@@ -5,6 +5,7 @@ in it), the Esri client and the local GeoPackage.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
@@ -14,6 +15,7 @@ from ..core.config import PluginConfig, parse_config_text, read_config_file
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
+from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
 from ..core.time_zone import set_rules
 from . import settings
 from .network import get_bytes, qgis_transport
@@ -47,6 +49,10 @@ class PluginContext(QObject):
         self.locked = False
         self.loading = False
         self._gpkg: Optional[GeoPackage] = None
+        #: The satellite name tables (`satelliteAliases`) once read; None until then (read again after a reload).
+        self._names: Optional[SatelliteNames] = None
+        self._names_lock = threading.Lock()
+        self.configChanged.connect(self._forget_names)
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
         self.configChanged.connect(lambda: set_rules(self.config.time_zones))
 
@@ -95,6 +101,37 @@ class PluginContext(QObject):
         """The settings file's token for a service, unless an authentication configuration is chosen for it."""
         return None if settings.auth_for(url) else token
 
+    def _forget_names(self) -> None:
+        with self._names_lock:
+            self._names = None
+
+    def satellite_names(self, client: Optional[EsriClient] = None, cancelled=None) -> SatelliteNames:
+        """
+        The satellites' other names of `satelliteAliases` (use inside a task:
+        the tables are read the first time, then kept until the settings file
+        is read again). None configured, or unreadable: no other names.
+        """
+        tables = self.config.satellite_aliases
+        if not tables:
+            return NO_NAMES
+        with self._names_lock:
+            if self._names is not None:
+                return self._names
+        try:
+            names, problems = load_satellite_names(client or self.esri(), tables, self.token_for, cancelled)
+        except Exception:  # noqa: BLE001 (names only make matches better; the work goes on without them)
+            return NO_NAMES
+        with self._names_lock:
+            # Kept only when every table was read (one that failed is asked again next time).
+            if not problems and self.config.satellite_aliases is tables:
+                self._names = names
+        return names
+
+    def known_names(self) -> SatelliteNames:
+        """The other names already read (for the main thread, which does not wait for the tables)."""
+        with self._names_lock:
+            return self._names or NO_NAMES
+
     def gpkg(self) -> GeoPackage:
         """The local GeoPackage (opened once)."""
         if self._gpkg is None:
@@ -113,6 +150,7 @@ class PluginContext(QObject):
         out += [Service("画像カタログ", x.label, x.url, bool(x.token)) for x in c.image_catalogs]
         out += [Service("衛星カタログ", x.label, x.url, bool(x.token)) for x in c.satellite_catalogs]
         out += [Service("センサーカタログ", x.label, x.url, bool(x.token)) for x in c.sensor_catalogs if x.url]
+        out += [Service("衛星名の対応表", x.label, x.url, bool(x.token)) for x in c.satellite_aliases]
         out += [Service("計画の保存先", x.label, x.url, bool(x.token)) for x in c.plan_stores]
         for x in c.observation_stores:
             out.append(Service("観測記録の保存先", x.label, x.url, bool(x.token)))

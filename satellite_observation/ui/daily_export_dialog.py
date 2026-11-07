@@ -170,7 +170,8 @@ class DailyExportDialog(QDialog):
             task.progress(30)
             if history and catalog is not None:
                 by_id = {r.id: r for r in requests}
-                found = follow_up(client, catalog, catalog_token, history, by_id, now, store.miss_after_days, task.isCanceled)
+                names = self.context.satellite_names(client, task.isCanceled)
+                found = follow_up(client, catalog, catalog_token, history, by_id, now, store.miss_after_days, task.isCanceled, names)
                 if found:
                     update_history(client, store, token, [(f.row.object_id, {"captured": f.captured, "imageId": f.image_id}) for f in found if f.row.object_id is not None])
                     for f in found:

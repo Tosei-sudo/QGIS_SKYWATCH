@@ -26,6 +26,7 @@ from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
+from .plan.names import AliasTableConfig, alias_tables_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.store import PlanStoreConfig, plan_store_of
@@ -39,7 +40,7 @@ from .time_zone import TimeZoneRule, time_zones_of
 
 #: The keys this plugin reads.
 KEYS = (
-    "satelliteCatalogs", "sensorCatalogs", "planStores", "groundStations", "cloudForecast",
+    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "planStores", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports",
@@ -56,6 +57,8 @@ class PluginConfig:
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
     sensor_catalogs: list[SensorCatalogConfig] = field(default_factory=list)
+    #: `satelliteAliases`: Esri tables of satellites' other names (the image catalog's 「WV03」 for 「WorldView-3」).
+    satellite_aliases: list[AliasTableConfig] = field(default_factory=list)
     #: None hides the choice.
     cloud_forecast: Optional[CloudForecastConfig] = DEFAULT_CLOUD_FORECAST
     ground_stations: list[GroundStation] = field(default_factory=list)
@@ -200,6 +203,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.overviews = overviews_of(value["overviews"], problems)
     config.satellite_catalogs = listed("satelliteCatalogs", satellite_catalog_of)
     config.sensor_catalogs = listed("sensorCatalogs", sensor_catalog_of)
+    if "satelliteAliases" in value:
+        config.satellite_aliases = alias_tables_of(value["satelliteAliases"], problems)
     if "cloudForecast" in value:
         config.cloud_forecast = cloud_forecast_of(value["cloudForecast"], problems)
     if "groundStations" in value:

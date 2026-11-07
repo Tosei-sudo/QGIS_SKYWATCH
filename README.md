@@ -109,6 +109,30 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「保存・追跡…」で一覧の撮像を `planStores` のフィーチャーサービスに保存。「保存した撮像計画」ドックで計画を開くと、撮像時刻を過ぎた予定の撮像を画像カタログ（`imageCatalogs`）で確かめ、撮像済み・未撮像にする
 - 設定ファイルに `satelliteCatalogs` がなければ、架空のサンプル衛星 2 機（光学・SAR、SAR は 3 モード）で試せる
 
+### 衛星名の対応表（`satelliteAliases`）
+
+衛星カタログと画像カタログで衛星の名前が違う（衛星カタログは「WorldView-3」、画像カタログのセンサーは「WV03」など）ときは、Esri のテーブルに対応を書き、設定ファイルにはそのテーブルの場所と属性名だけを書く（名前の一覧は設定ファイルに持たない）。
+
+```jsonc
+"satelliteAliases": {
+  "label": "衛星名の対応表",
+  "url": "https://gis.example/arcgis/rest/services/Satellites/FeatureServer/2",
+  "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" }   // 衛星カタログの名前（か ID）・画像カタログでの名前
+}
+```
+
+| SAT_NAME | ALIAS |
+| --- | --- |
+| WorldView-3 | WV03, WV3 |
+| SkySat-C12 | SkySat |
+| SkySat-C13 | SkySat |
+
+- 1 行に別名 1 つでも、カンマ（`,`・`、`）区切りで複数でも可。同じ衛星の行はまとめる。テーブルを複数使うなら配列。`where`・`token` も書ける
+- 名前は英数字だけを大文字小文字の区別なく比べる（`WorldView-3` = `worldview3`、`WV-3` = `WV3`）
+- 使うところ: 保存した撮像計画の追跡と撮像依頼の撮像済みの確認（画像のセンサーが衛星の名前・ID・別名と同じ画像を優先し、次に一方が他方を含む画像、なければ従来どおり時刻と範囲が合う最初の画像）、撮像依頼の衛星の指定と `requestExports` の `satellites`、フォルダのレコードの `imagePatterns`（センサーの別名のキーでも合う）
+- 1 つの別名を同じシリーズの複数の衛星に付けてよい（画像カタログが号機を区別しない場合）。SkySat-C12 と SkySat-C13 は互いの別名にはならない。号機の区別は撮像時刻（`matchMinutes`）と範囲による
+- テーブルは使うとき（衛星カタログの読み込み・画像カタログの検索・追跡）に一度読み、設定ファイルを読み直すまで使い回す。読めなければ別名なしで続ける
+
 ## 撮像依頼（定点・臨時）と日次出力
 
 設計と設定の書き方は [docs/imaging-requests.md](docs/imaging-requests.md)。
@@ -531,7 +555,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 
-設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）・`requestStores`・`requestExports` で、ほかの項目は無視する。
+設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可）。読む項目は `satelliteCatalogs`・`sensorCatalogs`・`satelliteAliases`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`watchInterval`・`pathMappings`・`overviews`・`observationStores`・`localObservations`・`observationVocabulary`・`arcgisPortals`・`layers`・`baseMaps`・`defaultBaseMap`・`geocoders`・`layerTemplates`・`imageRules`・`movingFeeds`・`gpServices`・`aiModels`・`detectionOutputs`・`aiResultSources`・`timeZones`（と各項目の `timeZone`・`serviceTimeZone`）・`requestStores`・`requestExports` で、ほかの項目は無視する。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
 

@@ -176,6 +176,8 @@ class SatelliteSpec:
     primary: Optional[bool] = None
     #: The satellite system (`requestExports`) it is ordered through, when the catalog says (its `system` attribute).
     system: Optional[str] = None
+    #: Its other names (`satelliteAliases`), matched like its name and id.
+    aliases: tuple = ()
 
 
 def platform_key(sat: SatelliteSpec) -> str:
