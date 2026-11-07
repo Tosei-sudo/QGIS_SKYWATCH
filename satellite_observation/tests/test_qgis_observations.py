@@ -652,3 +652,21 @@ def test_the_classification_editor_sets_a_classs_activities(plugin):
     p.edit_taxonomy(["船舶", "護衛艦"])
     # Empty: the class above's, shown faintly.
     assert editor.activities_input.text() == "" and editor.activities_input.placeholderText() == "停泊、曳航（船舶）"
+
+
+def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeypatch):
+    p, iface, dock, layers, tmp_path = plugin
+    book = dock.book
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶 > 護衛艦")
+    dock.note_input.setText("入港直後")
+    # The store refuses (as an Esri store does when the network or the token fails).
+    monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
+    dock.submit()
+    assert dock.form.isVisible() and dock.object_input.text() == "あおば" and dock.note_input.text() == "入港直後"
+    assert any("入力は残しています" in w.text() for w in iface.bar.items())
+    monkeypatch.undo()
+    dock.submit()
+    assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]

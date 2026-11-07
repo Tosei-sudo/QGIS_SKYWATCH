@@ -112,3 +112,24 @@ def test_search_export_and_summary():
 
 def teardown_function(_f):
     edit_stamp.set_tracking(edit_stamp.DEFAULT_EDIT_TRACKING)
+
+
+def test_saving_again_after_a_lost_answer_updates_rather_than_adds():
+    client, s, events, _links = setup()
+    e = new_event("地震")
+    save_event(client, s, e)
+    # The answer was lost: the form still has no oid, and 保存 is pressed again.
+    save_event(client, s, type(e)(**{**e.__dict__, "note": "再送"}))
+    assert len(events.rows) == 1 and events.rows[0]["attributes"]["NOTE"] == "再送"
+
+
+def test_deleting_takes_the_event_first_and_asks_the_links_with_their_own_token():
+    fake = FakeEsri()
+    events = fake.add_layer(EVENTS, FakeLayer({"EVENT_ID": S, "EVENT_NAME": S}, ""))
+    links = fake.add_layer(LINKS, FakeLayer({"EVENT_ID": S, "ITEM_TYPE": S, "ITEM_ID": S}, "", token="L"))
+    config, _p = parse_config({"events": {"layer": EVENTS, "links": {"url": LINKS, "token": "L"}}})
+    client, s = EsriClient(fake), config.events
+    e = save_event(client, s, new_event("地震"))
+    add_links(client, s, [e.id], [LinkItem("image", "IMG1")])
+    assert delete_event(client, s, e, token="E", links_token="L") == 1
+    assert events.rows == [] and links.rows == []

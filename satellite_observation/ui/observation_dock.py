@@ -700,10 +700,11 @@ class ObservationDock(PluginDock):
         self._show_status(message)
 
     def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None,
-           watch: bool = False) -> Any:
+           watch: bool = False, failed: Optional[Callable[[str], None]] = None) -> Any:
         """
         Runs what changes the book: at once for the local store (its result
-        returned), else in a task, one after another (None returned; `after` gets the result).
+        returned), else in a task, one after another (None returned; `after`
+        gets the result, `failed` the reason when the task fails).
         """
         book, s = self.book, self.store_set
         if book is None or s is None:
@@ -716,20 +717,22 @@ class ObservationDock(PluginDock):
                 after(result)
             self.render()
             return result.result if isinstance(result, _Saved) else result
-        self._queue.append((description, work, after, book))
+        self._queue.append((description, work, after, book, failed))
         self._next()
         return None
 
     def _next(self) -> None:
         if self._running or not self._queue:
             return
-        description, work, after, book = self._queue.pop(0)
+        description, work, after, book, failed = self._queue.pop(0)
         self._running = True
 
         def finish(result=None, message: Optional[str] = None) -> None:
             self._running = False
             if message is not None:
                 self._say(self.tr("{d}の失敗: {m}").format(d=description, m=message))
+                if failed is not None and book is self.book:
+                    failed(message)
             elif book is self.book and after is not None:
                 after(result)
             if book is self.book:
@@ -1320,7 +1323,31 @@ class ObservationDock(PluginDock):
         # Offered first by the next new record, in later sessions too.
         self.book.remember(values.kind, values.activity if present else None, values.confidence)
         self.close_form()
-        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source), watch=True)
+
+        def lost(message: str) -> None:
+            # Not saved (the network, the token, a conflict): the form comes back as it was typed.
+            self.restore_form(lon, lat, editing, source, values)
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr("記録を保存できませんでした（入力は残しています）: {m}").format(m=message))
+
+        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source),
+                lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)
+
+    def restore_form(self, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation], values: FormValues) -> None:
+        """The form opened again with what was typed (a save that did not go through), unless another one is open."""
+        if self.book is None or self.pending is not None:
+            return
+        self.open_form(lon, lat, editing=editing, source=source)
+        self.object_input.setText(values.object)
+        self.kind_input.setText(values.kind)
+        self.activity_input.setText(values.activity)
+        self.note_input.setText(values.note)
+        self._fill_confidence(values.confidence)
+        for edit, text in ((self.length_input, values.length), (self.heading_input, values.heading), (self.width_input, values.width)):
+            edit.setText(text)
+            if text:
+                edit.setVisible(True)
+        self._render_chips()
+        self._render_kind_path()
 
     def _delete_pending(self) -> None:
         if self.pending is None or self.pending[2] is None:

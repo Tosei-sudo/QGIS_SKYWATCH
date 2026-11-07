@@ -12,7 +12,7 @@ APP = start_app()
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
 from qgis.PyQt.QtWidgets import QApplication, QMenu  # noqa: E402
 
-from satellite_observation.core.esri import EsriClient  # noqa: E402
+from satellite_observation.core.esri import EsriClient, EsriError  # noqa: E402
 from satellite_observation.core.events import CLOSED, LinkItem, new_event  # noqa: E402
 from satellite_observation.qgis_io import settings  # noqa: E402
 from satellite_observation.qgis_io.context import PluginContext  # noqa: E402
@@ -216,3 +216,34 @@ def test_without_settings_the_dock_says_so(tmp_path):
         assert not p.api.image_catalog.buttons["event"].isVisibleTo(p.api.image_catalog)
     finally:
         p.unload()
+
+
+def test_a_failed_save_keeps_the_form_and_a_reload_asked_meanwhile_is_not_lost(plugin, monkeypatch):
+    p, iface, events, links, tmp_path = plugin
+    dock = p.api.events
+    dock.show()
+    assert wait_for(lambda: dock.events == [] and dock.task is None)
+    import satellite_observation.ui.events_dock as module
+
+    def broken(*_a, **_k):
+        raise EsriError("ネットワーク")
+
+    real = module.save_event
+    monkeypatch.setattr(module, "save_event", broken)
+    form = dock.create()
+    form.name.setText("地震")
+    form.has_start.setChecked(False)
+    form._accept()
+    assert wait_for(lambda: "保存できませんでした" in form.problem.text())
+    assert form.isVisible() and form.name.text() == "地震" and form.values()["start"] is None
+    monkeypatch.setattr(module, "save_event", real)
+    form._accept()
+    from qgis.PyQt import sip
+
+    assert wait_for(lambda: (sip.isdeleted(form) or not form.isVisible()) and dock.events and dock.events[0].name == "地震")
+    assert dock.events[0].start is None
+    # An add from another dock while a reload runs: the list is read again after it.
+    events.add({"EVENT_ID": "x", "EVENT_NAME": "外で作成", "STATUS": "対応中"})
+    dock.reload()
+    dock.reload()
+    assert wait_for(lambda: dock.task is None and any(e.name == "外で作成" for e in dock.events or []))
