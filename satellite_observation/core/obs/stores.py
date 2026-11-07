@@ -466,7 +466,7 @@ class EsriAreaStore:
 
 #: The local table's attribute names (the default role names).
 DEFAULT_LOCAL_FIELDS = {"path": "PATH", "levels": "LEVELS", "nameLabel": "NAME_LABEL", "members": "MEMBERS", "specs": "SPECS",
-                        "photos": "PHOTOS", "order": "SORT_ORDER"}
+                        "photos": "PHOTOS", "activities": "ACTIVITIES", "order": "SORT_ORDER"}
 
 
 def _list(text: Any) -> list[str]:
@@ -502,6 +502,7 @@ def _taxon_of_row(a: dict[str, Any], f: dict[str, str]) -> Taxon:
         members=_list(a.get(f["members"])) or None,
         specs=_json_of(a.get(f["specs"]), specs_of),
         photos=photos or None,
+        activities=_list(a.get(f["activities"])) or None,
     )
 
 
@@ -509,7 +510,7 @@ def _row_of_taxon(t: Taxon, i: int, f: dict[str, str]) -> dict[str, Any]:
     return {
         f["path"]: kind_of(t.path), f["levels"]: ",".join(t.levels or []), f["nameLabel"]: t.name_label or "",
         f["members"]: ",".join(t.members or []), f["specs"]: json.dumps(t.specs, ensure_ascii=False, separators=(",", ":")) if t.specs else "",
-        f["photos"]: "\n".join(t.photos or []), f["order"]: i,
+        f["photos"]: "\n".join(t.photos or []), f["activities"]: ",".join(t.activities or []), f["order"]: i,
     }
 
 
@@ -587,6 +588,12 @@ class EsriTaxonomyStore:
                 del self.oids[k]
         if failed:
             raise EsriError(f"分類 {len(failed)} 件の保存に失敗: {failed[0]}")
+
+    def lacks(self, role: str) -> Optional[str]:
+        """The attribute of a role the table does not have (its classes' values for it are not saved), else None."""
+        types, _ = self._layer.ready()
+        name = self.config.fields.get(role)
+        return name if name and name not in types else None
 
     def load_fields(self) -> Optional[list[SpecField]]:
         # Read with the classes.

@@ -244,6 +244,31 @@ def test_the_kind_is_chosen_level_by_level_with_every_top_class_shown(plugin):
     dock.close_form()
 
 
+def test_the_activities_switch_with_the_top_class(plugin):
+    p, iface, dock, layers, tmp_path = plugin
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+
+    def chips():
+        layout = dock.chips_layout
+        return [layout.itemAt(i).widget().text().split(" ", 1)[1] for i in range(layout.count())]
+
+    dock.choose_kind(["船舶"])
+    assert "航行" in chips() and "駐機" not in chips()
+    dock._pick_activity("航行")
+    dock.choose_kind(["航空機"])
+    assert "駐機" in chips() and "航行" not in chips()
+    # Not one of the aircraft's: left out.
+    assert dock.activity_input.text() == ""
+    dock._chip(1)
+    assert dock.activity_input.text() == "駐機"
+    # A class's own activities, changed in the 分類 tab's way.
+    assert dock.book.update_class(["航空機"], activities=["給油", "駐機"])
+    dock._kind_changed()
+    assert chips()[:2] == ["給油", "駐機"] and dock.activity_input.text() == "駐機"
+    dock.close_form()
+
+
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     p, iface, dock, layers, _ = plugin
     dock.set_two_point(True)

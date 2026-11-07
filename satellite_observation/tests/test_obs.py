@@ -389,6 +389,20 @@ class TestEsriTaxonomyStore:
         assert json.loads(fake.asked[-1][1]["updates"]) == [{"attributes": {"PATH": "#諸元項目", "SPECS": '[{"name":"英名","type":"text"}]', "OBJECTID": 2}}]
 
 
+    def test_reads_and_writes_a_classs_activities_and_says_when_the_table_has_no_attribute_for_them(self):
+        fake = FakeEsri()
+        layer = fake.add_layer(TABLE, FakeLayer({n: "esriFieldTypeString" for n in ("PATH", "ACTIVITIES")}, ""))
+        layer.add({"PATH": "船舶", "ACTIVITIES": "停泊、航行,入港"})
+        store = taxonomy_store(fake)
+        assert store.load() == [Taxon(["船舶"], activities=["停泊", "航行", "入港"])]
+        assert store.lacks("activities") is None
+        store.save([Taxon(["船舶"], activities=["停泊"])])
+        assert json.loads(fake.asked[-1][1]["updates"]) == [{"attributes": {"PATH": "船舶", "ACTIVITIES": "停泊", "OBJECTID": 1}}]
+        bare = FakeEsri()
+        bare.add_layer(TABLE, FakeLayer({"PATH": "esriFieldTypeString"}, ""))
+        assert taxonomy_store(bare).lacks("activities") == "ACTIVITIES"
+
+
 class TestSpecifications:
     taxa = flatten([
         {"name": "船舶", "specs": {"開発国": "日本"}, "photos": ["https://x/ship.jpg"],

@@ -33,16 +33,18 @@ class Taxon:
     specs: Optional[dict[str, str]] = None
     #: Reference photos: URLs, or `local:` ids of photos kept locally.
     photos: Optional[list[str]] = None
+    #: The activities (活動) offered for this class and below, when it names them.
+    activities: Optional[list[str]] = None
 
     def own(self) -> dict[str, Any]:
         """Its own settings, without the empty ones."""
-        return _own_of(self.levels, self.name_label, self.members, self.specs, self.photos)
+        return _own_of(self.levels, self.name_label, self.members, self.specs, self.photos, self.activities)
 
     def to_json(self) -> dict[str, Any]:
         """As the viewer writes a class (`nameLabel`)."""
         out: dict[str, Any] = {"path": list(self.path)}
         own = self.own()
-        for k in ("levels", "name_label", "members", "specs", "photos"):
+        for k in ("levels", "name_label", "members", "specs", "photos", "activities"):
             if k in own:
                 out["nameLabel" if k == "name_label" else k] = own[k]
         return out
@@ -123,7 +125,7 @@ def specs_of(value: Any) -> Optional[dict[str, str]]:
     return out or None
 
 
-def _own_of(levels, name_label, members, specs, photos) -> dict[str, Any]:
+def _own_of(levels, name_label, members, specs, photos, activities=None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if levels:
         out["levels"] = list(levels)
@@ -136,6 +138,9 @@ def _own_of(levels, name_label, members, specs, photos) -> dict[str, Any]:
         out["specs"] = s
     if photos:
         out["photos"] = list(dict.fromkeys(photos))
+    acts = _words(activities)
+    if acts:
+        out["activities"] = acts
     return out
 
 
@@ -166,6 +171,8 @@ def normalize(items: Iterable[Taxon]) -> list[Taxon]:
             had.specs = {**s, **(had.specs or {})}
         if t.photos:
             had.photos = list(dict.fromkeys([*(had.photos or []), *t.photos]))
+        if t.activities and not had.activities:
+            had.activities = list(t.activities)
 
     for t in items:
         path = [p for p in (_segment(s) for s in t.path) if p]
@@ -198,7 +205,8 @@ def flatten(trees: list[dict[str, Any]], parent: Optional[list[str]] = None) -> 
         out: list[Taxon] = []
         for t in nodes:
             path = [*above, t["name"]]
-            out.append(Taxon(path=path, **_own_of(t.get("levels"), t.get("nameLabel"), t.get("members"), t.get("specs"), t.get("photos"))))
+            out.append(Taxon(path=path, **_own_of(t.get("levels"), t.get("nameLabel"), t.get("members"), t.get("specs"), t.get("photos"),
+                                                         t.get("activities"))))
             if t.get("children"):
                 out.extend(walk(t["children"], path))
         return out
@@ -257,6 +265,11 @@ def taxonomy_of(value: Any, problems: list[str], at: str = "observationTaxonomy"
             node["specs"] = specs_of(v.get("specs"))
         if _words(v.get("photos")):
             node["photos"] = _words(v.get("photos"))
+        if "activities" in v:
+            if _words(v.get("activities")) is None:
+                problems.append(f"{where}.activities は活動の文字列の配列で指定")
+            elif _words(v.get("activities")):
+                node["activities"] = _words(v.get("activities"))
         if children:
             node["children"] = children
         return node
@@ -361,9 +374,11 @@ def update_taxon(items: list[Taxon], path: list[str], **changes: Any) -> list[Ta
     out = []
     for t in items:
         if _key(t.path) == k:
-            own = {"levels": t.levels, "name_label": t.name_label, "members": t.members, "specs": t.specs, "photos": t.photos}
+            own = {"levels": t.levels, "name_label": t.name_label, "members": t.members, "specs": t.specs, "photos": t.photos,
+                   "activities": t.activities}
             own.update(changes)
-            out.append(Taxon(path=list(t.path), **_own_of(own["levels"], own["name_label"], own["members"], own["specs"], own["photos"])))
+            out.append(Taxon(path=list(t.path), **_own_of(own["levels"], own["name_label"], own["members"], own["specs"], own["photos"],
+                                                          own["activities"])))
         else:
             out.append(t)
     return normalize(out)
@@ -400,6 +415,15 @@ def specs_at(items: list[Taxon], path: list[str]) -> dict[str, tuple[str, list[s
         for name, value in ((t.specs if t else None) or {}).items():
             out.setdefault(name, (value, path[:d]))
     return out
+
+
+def activities_at(items: list[Taxon], path: list[str]) -> tuple[list[str], list[str]]:
+    """The activities offered for a path: those of the nearest class on it that names some (and that class), else ([], [])."""
+    for d in range(len(path), 0, -1):
+        t = find(items, path[:d])
+        if t and t.activities:
+            return list(t.activities), path[:d]
+    return [], []
 
 
 def photos_at(items: list[Taxon], path: list[str]) -> tuple[list[str], list[str]]:
@@ -445,7 +469,8 @@ def taxa_from_json(value: Any) -> list[Taxon]:
     out = []
     for t in value:
         if is_record(t) and isinstance(t.get("path"), list):
-            out.append(Taxon(path=[js_string(p) for p in t["path"]], **_own_of(t.get("levels"), t.get("nameLabel"), t.get("members"), t.get("specs"), t.get("photos"))))
+            out.append(Taxon(path=[js_string(p) for p in t["path"]], **_own_of(t.get("levels"), t.get("nameLabel"), t.get("members"), t.get("specs"), t.get("photos"),
+                                                                                   t.get("activities"))))
     return normalize(out)
 
 
@@ -457,6 +482,7 @@ DEFAULT_TAXONOMY_FIELDS: dict[str, str] = {
     "members": "MEMBERS",
     "specs": "SPECS",
     "photos": "PHOTOS",
+    "activities": "ACTIVITIES",
     "order": "SORT_ORDER",
 }
 #: The table row that holds the specification fields (its PATH), not a class.

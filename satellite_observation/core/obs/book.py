@@ -30,7 +30,7 @@ from .model import (
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
 from .stores import AreaStore, ObservationStore, TaxonomyStore
 from .taxonomy import (
-    SpecField, Taxon, find, kind_of, move_taxon, normalize, path_of, place_taxon, remove_taxon, rewrite, taxonomy_of,
+    SpecField, Taxon, activities_at, find, kind_of, move_taxon, normalize, path_of, place_taxon, remove_taxon, rewrite, taxonomy_of,
     update_taxon, with_kinds, within,
 )
 
@@ -749,6 +749,20 @@ class ObservationBook:
         """The classification shown: the kept one with the kinds records use added."""
         return with_kinds(self._taxonomy, [o.kind for o in self.records])
 
+    def activities_for(self, kind: str) -> tuple[list[str], list[str]]:
+        """
+        The activities offered for a kind: those of the nearest class on its
+        path that names some, with that class; else the vocabulary's, with [].
+        """
+        own, at = activities_at(self.taxonomy(), path_of(kind))
+        return (own, at) if own else (list(self.vocabulary.activities), [])
+
+    def activity_words(self, kind: str) -> list[str]:
+        """The activities offered for a kind, then those its records (under the same class) have used."""
+        offered, at = self.activities_for(kind)
+        used = [o.activity for o in self.living() if o.activity and (not at or within(o.kind, at))]
+        return list(dict.fromkeys([*offered, *used]))
+
     def kept_taxonomy(self) -> list[Taxon]:
         return list(self._taxonomy)
 
@@ -794,7 +808,7 @@ class ObservationBook:
         Changes a class: its name or parent (the records under it follow), its
         place among its siblings (`before`: a sibling's path, None last), the
         names of its branch's levels, what an individual's name is called, its
-        known individuals, specifications and photos. Its new path, or None.
+        known individuals, specifications, photos and activities. Its new path, or None.
         """
         path = list(path)
         taxa = self.taxonomy()
@@ -805,7 +819,7 @@ class ObservationBook:
 
         new_name = re.sub(r"\s*[>›＞]\s*", " ", (name or "").strip()) or path[-1]
         to = [*(list(parent) if parent is not None else path[:-1]), new_name]
-        bad = set(own) - {"levels", "name_label", "members", "specs", "photos"}
+        bad = set(own) - {"levels", "name_label", "members", "specs", "photos", "activities"}
         if bad:
             raise ValueError(f"変更不可の項目: {', '.join(sorted(bad))}")
         taxa = update_taxon(taxa, path, **own)
@@ -830,6 +844,10 @@ class ObservationBook:
             done = f"分類「{kind_of(path)}」の順序を変更"
         else:
             done = f"分類「{kind_of(path)}」を変更"
+        lacks = getattr(self.taxonomy_store, "lacks", None)
+        missing = lacks("activities") if own.get("activities") and lacks else None
+        if missing:
+            done += f"（分類のテーブルに属性 {missing} がなく、活動は未保存）"
         return to if self._save_taxonomy(taxa, records, done) else None
 
     def remove_class(self, path: Sequence[str]) -> bool:

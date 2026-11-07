@@ -8,7 +8,8 @@ from satellite_observation.core.catalog import catalog_of
 from satellite_observation.core.config import load_jsonc, parse_config, parse_config_text, read_config_file, JsoncError
 from satellite_observation.core.obs.areas import area_store_of
 from satellite_observation.core.obs.model import confidences_of, observation_store_of, vocabulary_of, ConfidenceLevel
-from satellite_observation.core.obs.taxonomy import kind_of, spec_fields_of, taxonomy_of, SpecField, Taxon
+from satellite_observation.core.obs.setup import store_vocabulary
+from satellite_observation.core.obs.taxonomy import kind_of, nest, spec_fields_of, taxonomy_of, SpecField, Taxon
 from satellite_observation.core.plan.modes import sensor_catalog_of, sensor_mode_of
 from satellite_observation.core.plan.satellites import BUILT_IN_DEFAULTS, ground_stations_of, look_side_of, satellite_catalog_of, GroundStation
 from satellite_observation.core.plan.store import DEFAULT_PLAN_FIELDS, plan_store_of
@@ -281,6 +282,20 @@ class TestObservationSettings:
         assert v.kinds == ["船舶", "航空機"]
         assert len(v.taxonomy) == 7
         assert vocabulary_of({"kinds": ["艦艇"]}, []).taxonomy == [Taxon(["艦艇"])]
+
+    def test_reads_a_classs_activities_and_lets_activities_set_alone_go_everywhere(self):
+        problems = []
+        items = taxonomy_of([{"name": "船舶", "activities": ["停泊", "航行", 3], "children": [{"name": "潜水艦", "activities": "潜航"}]}], problems)
+        assert items == [Taxon(["船舶"], activities=["停泊", "航行"]), Taxon(["船舶", "潜水艦"])]
+        assert problems == ["observationTaxonomy[0].children[0].activities は活動の文字列の配列で指定"]
+        assert nest(items) == [{"name": "船舶", "activities": ["停泊", "航行"], "children": [{"name": "潜水艦"}]}]
+        # The defaults have activities per 大分類; activities set without a classification replace them everywhere.
+        assert any(t.activities for t in vocabulary_of({}, []).taxonomy)
+        alone = vocabulary_of({"activities": ["入港"]}, [])
+        assert alone.activities == ["入港"] and not any(t.activities for t in alone.taxonomy)
+        store = observation_store_of({"url": "https://x/FeatureServer/0", "activities": ["荷役"], "taxonomyTable": {"url": "https://x/FeatureServer/1", "fields": {"activities": "ACTS"}}}, problems, 0)
+        assert store.taxonomy_table.fields["activities"] == "ACTS"
+        assert not any(t.activities for t in store_vocabulary(store, vocabulary_of({}, [])).taxonomy)
 
     def test_reads_the_specification_fields(self):
         problems = []
