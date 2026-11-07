@@ -24,6 +24,7 @@ from ..core.plan.moving import (
 from ..core.plan.output import local_text
 from ..qgis_io.geometry import to_wgs84
 from ..qgis_io.plan_layer import memory_layer
+from .last_inputs import InputMemory
 
 #: The attributes of a target: role, label, what it does.
 ROLES = [
@@ -119,6 +120,11 @@ class MovingTargetDialog(QDialog):
         for b in (close, self.places_button, self.plan_button):
             buttons.addWidget(b)
         layout.addLayout(buttons)
+        #: How far ahead, how often and how the guess grows uncertain, as last used (入力の初期値の記憶).
+        self.memory = InputMemory("moving_targets", {
+            "horizon": self.horizon, "step": self.step, "base": self.base, "per_hour": self.per_hour, "share": self.share,
+        })
+        self.memory.restore()
 
     def _spin(self, low: float, high: float, value: float, decimals: int, suffix: str) -> QDoubleSpinBox:
         box = QDoubleSpinBox()
@@ -234,6 +240,7 @@ class MovingTargetDialog(QDialog):
         if isinstance(targets, str):
             self.note.setText(targets)
             return None
+        self.memory.save()
         s = self.settings()
         circles, tracks = places_layers(targets, s["horizon"], s["step"])
         layer = self.chosen_layer()
@@ -255,6 +262,7 @@ class MovingTargetDialog(QDialog):
         if isinstance(targets, str):
             self.note.setText(targets)
             return
+        self.memory.save()
         layer = self.chosen_layer()
         self.close()
         self.plan_targets(targets, layer.name() if layer else self.tr("移動目標"))

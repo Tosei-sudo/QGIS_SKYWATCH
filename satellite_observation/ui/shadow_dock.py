@@ -37,6 +37,7 @@ from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name, gdal_metadata, observed_image
 from .docks import PluginDock
+from .last_inputs import InputMemory
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 COLOR = QColor("#ff8a00")
@@ -207,7 +208,10 @@ class ShadowHeightDock(PluginDock):
         self.azimuth.editingFinished.connect(self._typed)
         self.snap = QCheckBox(self.tr("影の向きに吸着"))
         self.snap.setChecked(True)
+        # Kept as last set (入力の初期値の記憶).
+        InputMemory("shadow", {"snap": self.snap}).restore()
         self.snap.toggled.connect(lambda _: self._update_guide())
+        self.snap_memory = InputMemory("shadow", {"snap": self.snap}).watch()
         form.addRow(self.tr("太陽高度"), self.elevation)
         form.addRow(self.tr("太陽の方位"), self.azimuth)
         form.addRow("", self.snap)

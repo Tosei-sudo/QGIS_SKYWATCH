@@ -16,6 +16,7 @@ from ..core.catalog.config import CatalogConfig
 from ..core.catalog.query import CatalogSearch
 from ..core.catalog.watch import CatalogWatch, areas_of, conditions_text
 from ..qgis_io.geometry import shape_of, to_wgs84
+from .last_inputs import InputMemory
 
 
 def extent_area(canvas) -> list[dict]:
@@ -108,6 +109,9 @@ class PointWatchDialog(QDialog):
         self.catalog = QComboBox()
         for c in self.catalogs:
             self.catalog.addItem(c.label)
+        #: The catalog last chosen is offered first (入力の初期値の記憶).
+        self.memory = InputMemory("point_watch", {"catalog": self.catalog})
+        self.memory.restore()
         form.addRow(self.tr("カタログ"), self.catalog)
         self.name = QLineEdit(self.tr("地点 {lat:.4f}, {lon:.4f}").format(lat=lat, lon=lon))
         form.addRow(self.tr("名前"), self.name)
@@ -130,6 +134,11 @@ class PointWatchDialog(QDialog):
         if not self.catalogs and self.watches:
             self.add.setChecked(True)
             self.new.setEnabled(False)
+
+    def accept(self) -> None:
+        if self.new.isChecked():
+            self.memory.save()
+        super().accept()
 
     def chosen_watch(self) -> Optional[str]:
         """The watch to add the point to; None for a new one."""

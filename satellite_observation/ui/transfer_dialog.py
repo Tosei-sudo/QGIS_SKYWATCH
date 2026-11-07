@@ -20,6 +20,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.ai.transfer import TRANSFER_ROLES, DetectionOutput, Plan, Target, missing_fields, target_of
 from ..qgis_io import ai_transfer_io
 from ..qgis_io.tasks import run_task
+from . import last_inputs
 
 
 def _tr(text: str) -> str:
@@ -93,6 +94,8 @@ class TransferDialog(QDialog):
             self.source.setCurrentIndex(self.layers.index(active))
         for o in self.context.config.detection_outputs:
             self.target.addItem(o.label)
+        # The output last sent to is offered first (入力の初期値の記憶).
+        last_inputs.InputMemory("ai_transfer", {"target": self.target}).restore()
         for combo in (self.source, self.target):
             combo.blockSignals(False)
         layer = self.layer()
@@ -199,6 +202,7 @@ class TransferDialog(QDialog):
             return
         todo: Plan = ai_transfer_io.plan(layer, self.features(layer), output, target, int(time.time() * 1000))
         token = self._token(output)
+        last_inputs.InputMemory("ai_transfer", {"target": self.target}).save()
         self.running = True
         self.run_button.setEnabled(False)
         self.note.setText(_tr("転記中…"))
