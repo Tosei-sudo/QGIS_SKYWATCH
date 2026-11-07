@@ -59,7 +59,19 @@ class PluginDock(QDockWidget):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(body)
         self.setWidget(scroll)
+        self.scroll = scroll
         self.topLevelChanged.connect(lambda _: QTimer.singleShot(0, self.keep_on_screen))
+
+    def reveal(self, widget: QWidget) -> None:
+        """Scrolls the dock so that a part just shown (as a form under a list) is in view, once it is laid out."""
+        def show() -> None:
+            try:
+                if widget.isVisible():
+                    self.scroll.ensureWidgetVisible(widget, 0, 0)
+            except RuntimeError:  # closed meanwhile
+                pass
+
+        QTimer.singleShot(0, show)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
         super().showEvent(event)
