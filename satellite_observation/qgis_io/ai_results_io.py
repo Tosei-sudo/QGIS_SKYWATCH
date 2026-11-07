@@ -36,7 +36,7 @@ def fetch(client: EsriClient, source: AiResultSource, image_id: str, token: Opti
     """The results of one image in a source (use inside a task)."""
     info = client.layer(source.url, token)
     where = image_where(source, image_id, info.field_types.get(source.fields["imageId"]))
-    features = client.query_all(source.url, where, token, limit=source.max_results, cancelled=cancelled)
+    features = client.query_all(source.url, where, token, limit=source.max_results, cancelled=cancelled, cut=True)
     return [result_of(source, f, info.object_id_field) for f in features]
 
 

@@ -14,8 +14,9 @@ from typing import Callable, Optional, Sequence
 
 from ..catalog import CatalogConfig
 from ..esri import EsriClient, EsriError
-from ..plan.names import NO_NAMES, SatelliteNames, best_named, name_rank
-from ..plan.store import between_condition
+from ..plan.names import NO_NAMES, SatelliteNames, best_named, names_satellite
+from .. import time_zone
+from ..plan.store import between_condition, text_sample
 from .model import ImagingRequest
 from .model import day_bounds
 from .store import HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests
@@ -35,12 +36,15 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
     """
     The rows (採用, 未判定, their day begun) whose outcome is now known. Of the
     images found, one whose sensor names the row's satellite (or an alias of
-    `names`) is preferred.
+    `names`) is preferred. A row whose request is not in the ledger (or has
+    no area) is left 未判定: the day's images anywhere do not settle it (#77).
     """
     acquired = catalog.fields.get("acquired")
     if not acquired:
         raise EsriError(f"{catalog.label} に撮像日時の属性（fields.acquired）なし")
     types = client.layer(catalog.url, token).field_types
+    zone = time_zone.zone_for(catalog.url)
+    like: Optional[str] = None
     out: list[Finding] = []
     for row in rows:
         if cancelled and cancelled():
@@ -55,12 +59,16 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
         if now < first:
             continue
         req: Optional[ImagingRequest] = requests.get(row.request_id)
-        where = " AND ".join([between_condition(acquired, types.get(acquired), first, last),
+        if req is None or not req.rings:
+            # No area to ask about (the request left the ledger): any image of the day would do, so none is asked (#77).
+            continue
+        if like is None:
+            like = text_sample(client, catalog.url, acquired, types.get(acquired), token, catalog.where)
+        where = " AND ".join([between_condition(acquired, types.get(acquired), first, last, like, zone),
                               *([f"({catalog.where})"] if catalog.where else [])])
-        params = {"where": where, "outFields": "*", "returnGeometry": "false"}
-        if req is not None and req.rings:
-            params.update(geometry=json.dumps({"rings": esri_rings(req.rings), "spatialReference": {"wkid": 4326}}),
-                          geometryType="esriGeometryPolygon", inSR="4326", spatialRel="esriSpatialRelIntersects")
+        params = {"where": where, "outFields": "*", "returnGeometry": "false",
+                  "geometry": json.dumps({"rings": esri_rings(req.rings), "spatialReference": {"wkid": 4326}}),
+                  "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
         found = client.ask(f"{catalog.url}/query", params, token).get("features") or []
         sensor = catalog.fields.get("sensor")
         if found and sensor:
@@ -102,7 +110,8 @@ def fitting_images(found: Sequence[dict], sensor: str, row: HistoryRow, req: Opt
     wanted = accepted_names(row, req, names)
     if not wanted:
         return list(found)
-    return [f for f in found if name_rank((f.get("attributes") or {}).get(sensor), wanted) > 0]
+    written = [row.satellite, *req.satellites, *req.series] if req is not None else [row.satellite]
+    return [f for f in found if names_satellite((f.get("attributes") or {}).get(sensor), wanted, written)]
 
 
 def request_changes(findings: Sequence[Finding], requests: dict) -> list[tuple[int, dict]]:
@@ -140,8 +149,11 @@ def undone_changes(findings: Sequence[Finding], requests: dict, history: Sequenc
     A 期間内1回 request marked 未撮像 by hand after it was 完了 goes back to
     有効, unless another of its rows is still 撮像済み.
     """
-    changed = {id(f.row) for f in findings}
-    still = {r.request_id for r in history if r.captured == "撮像済み" and id(r) not in changed}
+    def key(r):
+        return r.object_id if r.object_id is not None else id(r)
+
+    changed = {key(f.row) for f in findings}
+    still = {r.request_id for r in history if r.captured == "撮像済み" and key(r) not in changed}
     out: dict[int, dict] = {}
     for f in findings:
         req = requests.get(f.row.request_id)
@@ -238,35 +250,48 @@ def in_days(rows: Sequence[HistoryRow], first: date, last: date) -> list[History
     return [r for r in rows if a <= r.day <= b]
 
 
+def _saved_only(findings: Sequence[Finding], saved) -> list[Finding]:
+    """The findings whose row was saved (`saved.ok`: object ids), the others left as they were."""
+    return [f for f in findings if f.row.object_id is not None and f.row.object_id in saved.ok]
+
+
 def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Optional[str], catalog: CatalogConfig, catalog_token: Optional[str],
                     history: Sequence[HistoryRow], requests: dict, now: float, names: SatelliteNames = NO_NAMES,
-                    cancelled: Optional[Callable[[], bool]] = None) -> tuple[list[Finding], bool]:
+                    cancelled: Optional[Callable[[], bool]] = None, problems: Optional[list] = None) -> tuple[list[Finding], bool]:
     """
     Follows the history up against the catalog and saves what was found:
     the rows' outcome, and on the ledger the raises undone and 完了. The
-    findings, and whether the ledger was changed.
+    findings saved, and whether the ledger was changed. Rows that could not
+    be saved keep their outcome (they are followed up again next time) and
+    the reasons go to `problems`.
     """
+    problems = problems if problems is not None else []
     found = follow_up(client, catalog, catalog_token, history, requests, now, store.miss_after_days, cancelled, names)
     if not found:
         return [], False
-    update_history(client, store, token, history_changes(found))
+    saved = update_history(client, store, token, history_changes(found))
+    problems += saved.problems
+    found = _saved_only(found, saved)
     settle(found)
     changes = request_changes(found, requests)
     if changes:
-        update_requests(client, store, token, changes, now)
+        problems += update_requests(client, store, token, changes, now).problems
     return found, bool(changes)
 
 
 def save_marked(client: EsriClient, store: RequestStoreConfig, token: Optional[str], findings: Sequence[Finding], requests: dict,
-                history: Sequence[HistoryRow], now: float) -> bool:
-    """Saves outcomes set by hand (rows and ledger); whether the ledger was changed."""
+                history: Sequence[HistoryRow], now: float, problems: Optional[list] = None) -> bool:
+    """Saves outcomes set by hand (rows and ledger); whether the ledger was changed (the reasons of what failed in `problems`)."""
+    problems = problems if problems is not None else []
     if not findings:
         return False
-    update_history(client, store, token, history_changes(findings))
+    saved = update_history(client, store, token, history_changes(findings))
+    problems += saved.problems
+    findings = _saved_only(findings, saved)
     changes = request_changes(findings, requests) + undone_changes(findings, requests, history)
     settle(findings)
     if changes:
-        update_requests(client, store, token, changes, now)
+        problems += update_requests(client, store, token, changes, now).problems
     return bool(changes)
 
 

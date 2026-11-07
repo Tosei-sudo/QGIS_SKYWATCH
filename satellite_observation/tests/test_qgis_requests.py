@@ -208,6 +208,22 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert settings.request_export_folder() == str(tmp_path / "out")
     assert {r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows} == {"採用", "見送り"}
 
+    # Written again the same day (#71): the earlier rows are replaced, not doubled.
+    daily.paths = []
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(daily.paths) == 2 and "置き換え" in daily.status.text()), daily.status.text()
+    assert len(fake.layers[HISTORY].rows) == 3
+
+    # A system whose file cannot be made (#68): its request is 見送り in the history, not 採用・未判定.
+    (tmp_path / "sys-b.schema.json").write_text(json.dumps({**SCHEMA, "required": ["tasks", "missing"]}), encoding="utf-8")
+    daily.paths = []
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(daily.paths) == 1 and "置き換え" in daily.status.text()), daily.status.text()
+    rows = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    osaka = next(x.id for x in dock.requests if x.name == "大阪湾")
+    assert (rows[osaka]["RESULT"], rows[osaka]["CAPTURED"]) == ("見送り", "")
+    assert rows[osaka]["REASON"].startswith("書き出し失敗")
+
 
 def test_plan_results_against_the_catalog(plugin):
     p, iface, fake, tmp_path = plugin

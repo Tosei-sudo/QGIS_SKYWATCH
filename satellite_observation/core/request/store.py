@@ -240,24 +240,66 @@ def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[
     return req
 
 
+class Saved(int):
+    """
+    How many edits were saved (an int, as before), with why the others were
+    not (`problems`) and the object ids saved (`ok`, for updates).
+    """
+    problems: list
+    ok: set
+
+    def __new__(cls, done: int = 0, problems: Optional[list] = None, ok: Optional[set] = None):
+        value = super().__new__(cls, done)
+        value.problems = list(problems or [])
+        value.ok = set(ok or ())
+        return value
+
+    @property
+    def failed(self) -> bool:
+        return bool(self.problems)
+
+
+def _batches(send: Callable[[list], Any], items: Sequence, results: Callable[[Any], list], label: str) -> Saved:
+    """
+    Sends `items` 200 at a time; a batch that cannot be sent stops the rest
+    (the rows not sent are told in `problems`, not lost silently).
+    """
+    done, problems, ok = 0, [], set()
+    for i in range(0, len(items), 200):
+        batch = list(items[i:i + 200])
+        try:
+            answer = send(batch)
+        except EsriError as error:
+            problems.append(f"{label} {len(items) - i} 件を保存できず（{error}）")
+            break
+        got = results(answer)
+        for r in got:
+            if r.get("success"):
+                done += 1
+                if is_number(r.get("objectId")):
+                    ok.add(int(r["objectId"]))
+            else:
+                problems.append(f"{label}: {(r.get('error') or {}).get('description') or '保存失敗'}")
+        if len(got) < len(batch):
+            problems.append(f"{label} {len(batch) - len(got)} 件の結果なし")
+    return Saved(done, problems, ok)
+
+
 def update_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str], changes: Sequence[tuple[int, dict]],
-                    now: Optional[float] = None) -> int:
-    """Changes some attributes (by role) of requests (object id, {role: value}); how many were changed."""
+                    now: Optional[float] = None) -> Saved:
+    """Changes some attributes (by role) of requests (object id, {role: value}); how many were changed (and why not)."""
     if not changes:
-        return 0
+        return Saved()
     names, oid = _layer(client, store.url, token, store.label, (store.fields["id"],))
     f = store.fields
-    done = 0
-    for i in range(0, len(changes), 200):
-        updates = []
-        for object_id, values in changes[i:i + 200]:
-            attributes = {oid: object_id, **{f[k]: v for k, v in values.items()}}
-            if now is not None:
-                attributes[f["updated"]] = now
-            updates.append({"attributes": _only(attributes, names | {oid})})
-        result = client.apply_edits(store.url, updates=updates, token=token)
-        done += sum(1 for r in result.update_results if r.get("success"))
-    return done
+    updates = []
+    for object_id, values in changes:
+        attributes = {oid: object_id, **{f[k]: v for k, v in values.items()}}
+        if now is not None:
+            attributes[f["updated"]] = now
+        updates.append({"attributes": _only(attributes, names | {oid})})
+    return _batches(lambda batch: client.apply_edits(store.url, updates=batch, token=token), updates,
+                    lambda r: r.update_results, "台帳の更新")
 
 
 def delete_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest) -> None:
@@ -298,18 +340,67 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
     }
 
 
-def add_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], rows: Sequence[HistoryRow]) -> int:
-    """Adds history rows; how many were saved (none when the store keeps no history)."""
+def add_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], rows: Sequence[HistoryRow]) -> Saved:
+    """Adds history rows; how many were saved, and why the others were not (none when the store keeps no history)."""
     if not store.history or not rows:
-        return 0
+        return Saved()
     hf = store.history_fields
     names, _ = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]))
-    saved = 0
-    for i in range(0, len(rows), 200):
-        adds = [{"attributes": _only(history_attributes(r, hf), names)} for r in rows[i:i + 200]]
-        result = client.apply_edits(store.history, adds=adds, token=token)
-        saved += sum(1 for r in result.add_results if r.get("success"))
-    return saved
+    adds = [{"attributes": _only(history_attributes(r, hf), names)} for r in rows]
+    return _batches(lambda batch: client.apply_edits(store.history, adds=batch, token=token), adds,
+                    lambda r: r.add_results, "出力履歴の追加")
+
+
+def history_where(store: RequestStoreConfig, *, open_rows: bool = False, first: Optional[str] = None,
+                  last: Optional[str] = None, request_ids: Sequence[str] = ()) -> str:
+    """
+    A condition on the history table (its names) so that only the rows a
+    use needs are read, not the whole table: `open_rows` those still to be
+    followed up (採用・未判定) or raised for (未撮像, not yet offered); `first`
+    / `last` the target days (`2026-11-08`); `request_ids` some requests.
+    The parts given are joined by AND.
+    """
+    hf = store.history_fields
+    parts = []
+    if open_rows:
+        captured, result, done = hf["captured"], hf["result"], hf["boostDone"]
+        parts.append(f"(({result} = '採用' AND ({captured} = '未判定' OR {captured} IS NULL)) OR "
+                     f"({captured} = '未撮像' AND ({done} = 0 OR {done} IS NULL)))")
+    if first:
+        parts.append(f"{hf['day']} >= {quote(first)}")
+    if last:
+        parts.append(f"{hf['day']} <= {quote(last)}")
+    if request_ids:
+        parts.append(f"{hf['requestId']} IN ({','.join(quote(i) for i in dict.fromkeys(request_ids))})")
+    return " AND ".join(parts) or "1=1"
+
+
+def count_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str) -> int:
+    """How many history rows match `where` (0 without a history)."""
+    if not store.history:
+        return 0
+    value = client.ask(f"{store.history}/query", {"where": where, "returnCountOnly": "true"}, token)
+    n = value.get("count")
+    return int(n) if is_number(n) else 0
+
+
+def replaced_where(store: RequestStoreConfig, day: str) -> str:
+    """The rows of a target day that writing the day again replaces: all but those already followed up."""
+    hf = store.history_fields
+    captured = hf["captured"]
+    return (f"{hf['day']} = {quote(day)} AND ({captured} IS NULL OR {captured} = '' OR {captured} = '未判定')")
+
+
+def delete_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str) -> Saved:
+    """Deletes the history rows matching `where`; how many were deleted (and why not)."""
+    if not store.history:
+        return Saved()
+    value = client.ask(f"{store.history}/deleteFeatures", {"where": where}, token)
+    results = value.get("deleteResults")
+    if results is None:
+        return Saved(1 if value.get("success") else 0, [] if value.get("success", True) else ["出力履歴の削除失敗"])
+    ok = [r for r in results if r.get("success")]
+    return Saved(len(ok), [f"出力履歴の削除: {(r.get('error') or {}).get('description') or '削除失敗'}" for r in results if not r.get("success")])
 
 
 def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str = "1=1",
@@ -337,16 +428,12 @@ def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[
     return sorted(out, key=lambda r: (r.day, r.run_date if math.isfinite(r.run_date) else 0))
 
 
-def update_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], changes: Sequence[tuple[int, dict]]) -> int:
-    """Changes history rows (object id, {role: value}); how many were changed."""
+def update_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], changes: Sequence[tuple[int, dict]]) -> Saved:
+    """Changes history rows (object id, {role: value}); how many were changed, which (`ok`), and why the others were not."""
     if not store.history or not changes:
-        return 0
+        return Saved()
     hf = store.history_fields
     names, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"],))
-    done = 0
-    for i in range(0, len(changes), 200):
-        updates = [{"attributes": _only({oid: o, **{hf[k]: v for k, v in values.items()}}, names | {oid})}
-                   for o, values in changes[i:i + 200]]
-        result = client.apply_edits(store.history, updates=updates, token=token)
-        done += sum(1 for r in result.update_results if r.get("success"))
-    return done
+    updates = [{"attributes": _only({oid: o, **{hf[k]: v for k, v in values.items()}}, names | {oid})} for o, values in changes]
+    return _batches(lambda batch: client.apply_edits(store.history, updates=batch, token=token), updates,
+                    lambda r: r.update_results, "出力履歴の更新")

@@ -12,7 +12,7 @@ from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
 from ..plan.weather import CloudSeries
-from .daily import TAKEN, Candidate, allocate, gather, wants_weather
+from .daily import HELD, TAKEN, Candidate, allocate, gather, wants_weather
 from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
@@ -63,31 +63,50 @@ def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[Ex
     return plan
 
 
-def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = None) -> list[HistoryRow]:
-    """The history rows of a day written out: every candidate, taken or held back (`files`: system name → file name)."""
+def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = None,
+               failures: Optional[dict] = None) -> list[HistoryRow]:
+    """
+    The history rows of a day written out: every candidate, taken or held
+    back (`files`: system name → file name). A candidate taken for a system
+    whose file was not written (`failures`: system name → why; or simply
+    absent from `files`) is kept as 見送り with the reason, never as 採用:
+    it was not handed to anyone, so it is neither followed up nor 完了.
+    """
     run_id = run_id or str(uuid.uuid4()).upper()
+    failures = failures or {}
     rows = []
     for c in plan.candidates:
         system = c.system.system if c.system else ""
+        result, reason = c.result, c.reason or "・".join(c.warnings)
+        if result == TAKEN and system not in files:
+            result, reason = HELD, f"書き出し失敗（{failures.get(system) or 'ファイルなし'}）"
+        taken = result == TAKEN
         rows.append(HistoryRow(
             run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id, system=system,
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
-            cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if c.result == TAKEN else None,
-            result=c.result, reason=c.reason or "・".join(c.warnings), file=files.get(system, "") if c.result == TAKEN else "",
-            captured="未判定" if c.result == TAKEN else "", boost_done=0))
+            cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
+            result=result, reason=reason, file=files.get(system, "") if taken else "",
+            captured="未判定" if taken else "", boost_done=0))
     return rows
 
 
-def boost_changes(plan: DayPlan) -> list[tuple[int, dict]]:
-    """The raises taken (object id, {boost})."""
+def not_written(plan: DayPlan, files: dict) -> set:
+    """The requests taken for a system whose file was not written."""
+    return {c.request.id for c in plan.candidates if c.result == TAKEN and (c.system.system if c.system else "") not in files}
+
+
+def boost_changes(plan: DayPlan, skip: Optional[set] = None) -> list[tuple[int, dict]]:
+    """The raises taken (object id, {boost}); those of `skip` (requests not written) are left for the next day."""
+    skip = skip or set()
     return [(c.request.object_id, {"boost": c.boost_offer}) for c in plan.candidates
-            if c.boost_offer is not None and c.boost_taken and c.request.object_id is not None]
+            if c.boost_offer is not None and c.boost_taken and c.request.object_id is not None and c.request.id not in skip]
 
 
-def missed_done(plan: DayPlan) -> list[tuple[int, dict]]:
-    """The 未撮像 rows whose raise has now been offered (taken or not): they are not offered again."""
-    return [(r.object_id, {"boostDone": 1}) for r in plan.missed_rows if r.object_id is not None]
+def missed_done(plan: DayPlan, skip: Optional[set] = None) -> list[tuple[int, dict]]:
+    """The 未撮像 rows whose raise has now been offered (taken or not): they are not offered again (but those of `skip` are)."""
+    skip = skip or set()
+    return [(r.object_id, {"boostDone": 1}) for r in plan.missed_rows if r.object_id is not None and r.request_id not in skip]
 
 
 def written_summary(files: Sequence[Written]) -> str:
