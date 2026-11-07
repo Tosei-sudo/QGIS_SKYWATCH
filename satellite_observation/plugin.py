@@ -242,6 +242,10 @@ class SatelliteObservationPlugin:
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         self.context = PluginContext(self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
+        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read.
+        self._overviews_ready = False
+        self._overviews_waiting: list = []
+        QgsProject.instance().layersAdded.connect(self._overview_layers_added)
         # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
         self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
@@ -662,11 +666,30 @@ class SatelliteObservationPlugin:
         SettingsDialog(self.context, self.iface.mainWindow()).exec()
 
     def _overviews_changed(self) -> None:
-        if self.context is not None:
-            overviews_io.configure_cache(self.context.config.overviews)
+        if self.context is None:
+            return
+        overviews_io.configure_cache(self.context.config.overviews)
+        if not self._overviews_ready:
+            self._overviews_ready = True
+            # Those added before the settings file was read (a project opened at start): its `location` and `scope` apply.
+            ids = set(QgsProject.instance().mapLayers())
+            waiting = [layer for layer_id, layer in self._overviews_waiting if layer_id in ids]
+            self._overviews_waiting = []
+            if waiting:
+                overviews_io.layers_added(waiting, self.iface.messageBar())
+
+    def _overview_layers_added(self, layers) -> None:
+        if not self._overviews_ready:
+            self._overviews_waiting += [(layer.id(), layer) for layer in layers]
+            return
+        overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:
         overviews_io.queue.cancel_all()
+        try:
+            QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
+        except (TypeError, RuntimeError):
+            pass
         if "SatObsMoving" in self.docks:
             self.docks["SatObsMoving"].close_all()
         if "SatObsDashboard" in self.docks:

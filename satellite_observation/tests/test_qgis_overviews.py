@@ -6,6 +6,7 @@ folder cannot be written; the image itself is never changed.
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -164,7 +165,7 @@ def test_cache_location_even_when_writable(tmp_path):
     assert sorted(os.listdir(folder)) == ["img.tif", "img.tif.aux.xml"]
     assert (digest(path), (folder / "img.tif.aux.xml").read_text()) == before
     names = os.listdir(cache)
-    assert any(n.endswith("_img.tif.ovr") and not n[0:6].isdigit() for n in names) and "gdal_pam_proxy.dat" in names
+    assert any(re.match(r"^[0-9a-f]{12}_img\.tif\.ovr$", n) for n in names) and "gdal_pam_proxy.dat" in names
     assert in_fresh_gdal(cache, f"print(json.dumps(count({path!r})))") == 4
     assert overview_count(path) == 0
     n, size = overviews_io.cache_size(str(cache))
@@ -219,6 +220,7 @@ def test_before_open_keeps_aux_in_cache(tmp_path):
     # Statistics QGIS computes on a layer opened after before_open go to the cache, not beside the image.
     out = in_fresh_gdal(cache, "from qgis.core import QgsApplication, QgsRasterLayer\n"
                                "app = QgsApplication([], False); app.initQgis()\n"
+                               "gdal.SetConfigOption('GDAL_PAM_PROXY_DIR', os.environ['GDAL_PAM_PROXY_DIR'])  # QGIS sets its own\n"
                                "o.current = OverviewOptions(location='cache')\n"
                                f"o.before_open({path!r})\n"
                                f"layer = QgsRasterLayer({path!r}, 'x', 'gdal')\n"
@@ -253,3 +255,56 @@ def test_queue_builds_once_and_reloads(tmp_path, no_cache):
         assert q.pending() == []
     finally:
         QgsProject.instance().removeAllMapLayers()
+
+
+def test_layers_added_any_way(tmp_path, no_cache, monkeypatch):
+    path = image(tmp_path / "any.tif")
+    layer = QgsRasterLayer(path, "any", "gdal")
+    url = QgsRasterLayer("/vsicurl/https://example.com/x.tif", "u", "gdal")
+    queued = []
+    monkeypatch.setattr(overviews_io.queue, "request", lambda layers, options, bar=None: queued.append([local_path_of(l) for l in layers]) or [])
+    try:
+        overviews_io.current = OverviewOptions(scope="catalog")
+        overviews_io.layers_added([layer, url])
+        assert queued == []
+        overviews_io.current = OverviewOptions(enabled=False)
+        overviews_io.layers_added([layer])
+        assert queued == []
+        overviews_io.current = OverviewOptions()
+        overviews_io.layers_added([layer, url])
+        assert queued == [[path]]
+    finally:
+        overviews_io.current = OverviewOptions()
+
+
+def local_path_of(layer):
+    return overviews_io.local_path(layer)
+
+
+def test_layers_added_cache_from_next_time(tmp_path):
+    folder = tmp_path / "w"
+    folder.mkdir()
+    path = image(folder / "img.tif")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    head = "from qgis.core import QgsApplication, QgsRasterLayer\n" \
+           "app = QgsApplication([], False); app.initQgis()\n" \
+           "gdal.SetConfigOption('GDAL_PAM_PROXY_DIR', os.environ['GDAL_PAM_PROXY_DIR'])\n"
+    # Opened by QGIS first (not from the catalog): the layer keeps writing beside the image (QGIS's statistics, on close)...
+    out = in_fresh_gdal(cache, head + "o.current = OverviewOptions(location='cache')\n"
+                                      f"layer = QgsRasterLayer({path!r}, 'x', 'gdal')\n"
+                                      "o.queue.request = lambda layers, options, bar=None: [o.local_path(l) for l in layers]\n"
+                                      "print(json.dumps(o.layers_added([layer])))")
+    assert out == [path]
+    beside = [n for n in os.listdir(folder) if n != "img.tif"]
+    stamp = {n: os.path.getmtime(folder / n) for n in beside}
+    # ...but from the next opening on, GDAL reads and writes the one in the cache.
+    out = in_fresh_gdal(cache, head + f"layer = QgsRasterLayer({path!r}, 'x', 'gdal')\n"
+                                      "layer.dataProvider().bandStatistics(1)\n"
+                                      f"ds = gdal.Open({path!r}); ds.GetRasterBand(1).ComputeStatistics(False); ds = None\n"
+                                      "del layer\n"
+                                      f"print(json.dumps(sorted(os.listdir({str(folder)!r}))))")
+    assert out == sorted(["img.tif"] + beside)
+    assert {n: os.path.getmtime(folder / n) for n in beside} == stamp
+    proxied = [n for n in os.listdir(cache) if n.endswith("_img.tif.aux.xml")]
+    assert proxied and "STATISTICS_" in (cache / proxied[0]).read_text()
