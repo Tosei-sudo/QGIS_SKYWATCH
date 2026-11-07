@@ -56,6 +56,7 @@ class DailyExportDialog(QDialog):
         self.dock = dock
         self.plan: Optional[DayPlan] = None
         self.task = None
+        self._rendering = False
         #: The files last written.
         self.paths: list = []
         self.setWindowTitle(self.tr("本日分を出力"))
@@ -220,7 +221,7 @@ class DailyExportDialog(QDialog):
     # --- The table ------------------------------------------------------------------------------
 
     def render(self) -> None:
-        self.model.blockSignals(True)
+        self._rendering = True
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(c) for c in COLUMNS])
         plan = self.plan
@@ -249,13 +250,13 @@ class DailyExportDialog(QDialog):
             if c.warnings:
                 items[8].setForeground(QBrush(QColor("#b45309")))
             self.model.appendRow(items)
-        self.model.blockSignals(False)
+        self._rendering = False
         rooms = room_text(plan.candidates, plan.systems) if plan else {}
         self.room.setText("　".join(f"{s.label} {rooms[s.system]}" for s in (plan.systems if plan else [])))
         self._update_buttons()
 
     def _item_changed(self, item: QStandardItem) -> None:
-        if self.plan is None:
+        if self.plan is None or self._rendering:
             return
         c = self.plan.candidates[item.row()]
         checked = item.checkState() == Qt.CheckState.Checked
