@@ -10,7 +10,8 @@ puts every image's .ovr there, even when its folder can be written.
     "overviews": false                                  // never build
     "overviews": {"resampling": "AVERAGE", "minSize": 2048, "compress": "DEFLATE",
                   "cacheFolder": "D:/ovr-cache",         // "" (default): the QGIS profile's
-                  "location": "cache"}                   // "auto" (default): beside the image when it can be written
+                  "location": "cache",                   // "auto" (default): beside the image when it can be written
+                  "scope": "catalog"}                    // "all" (default): every local image added to QGIS
 
 Omitted, overviews are built with the defaults below.
 """
@@ -25,6 +26,8 @@ RESAMPLINGS = ("NEAREST", "AVERAGE", "BILINEAR", "CUBIC", "CUBICSPLINE", "LANCZO
 COMPRESSIONS = ("NONE", "DEFLATE", "LZW", "ZSTD", "JPEG")
 #: Where the .ovr goes: beside the image when its folder can be written (else the cache), or always the cache.
 LOCATIONS = ("auto", "cache")
+#: Which images: every local image added to QGIS, or only those opened from the image catalog.
+SCOPES = ("all", "catalog")
 #: The smallest overview: levels are added (2, 4, 8…) until the image's longer side fits in this.
 SMALLEST = 256
 
@@ -41,6 +44,8 @@ class OverviewOptions:
     cache_folder: str = ""
     #: "auto" or "cache" (LOCATIONS).
     location: str = "auto"
+    #: "all" or "catalog" (SCOPES).
+    scope: str = "all"
 
 
 DEFAULT_OVERVIEWS = OverviewOptions()
@@ -93,7 +98,14 @@ def overviews_of(value: Any, problems: list[str]) -> OverviewOptions:
             location = text
         else:
             problems.append("overviews.location は auto（書き込めれば画像の隣）か cache（常にキャッシュ）で指定")
-    return OverviewOptions(enabled, resampling, min_size, compress, cache_folder, location)
+    scope = DEFAULT_OVERVIEWS.scope
+    if "scope" in value:
+        text = str(value["scope"]).strip().lower()
+        if text in SCOPES:
+            scope = text
+        else:
+            problems.append("overviews.scope は all（QGIS に追加した画像すべて）か catalog（画像カタログから開いた画像だけ）で指定")
+    return OverviewOptions(enabled, resampling, min_size, compress, cache_folder, location, scope)
 
 
 def overview_factors(width: int, height: int, smallest: int = SMALLEST) -> list[int]:

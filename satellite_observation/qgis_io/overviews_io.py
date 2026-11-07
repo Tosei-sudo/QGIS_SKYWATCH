@@ -345,7 +345,7 @@ def _read_pam(path: str):
     return root if root is not None and root.tag == "PAMDataset" else ElementTree.Element("PAMDataset")
 
 
-def proxy_pams(path: str) -> list[str]:
+def proxy_pams(path: str, made: Optional[list] = None) -> list[str]:
     """
     The image's .aux.xml in the cache folder (one per spelling of its path),
     registered through GDAL (PamAllocateProxy) with what the one beside the
@@ -367,6 +367,8 @@ def proxy_pams(path: str) -> list[str]:
                 raise RuntimeError("GDAL のキャッシュフォルダ（GDAL_PAM_PROXY_DIR）に登録できず")
             aux = proxied.decode("utf-8")
             ElementTree.ElementTree(_read_pam(key + ".aux.xml")).write(aux, encoding="utf-8", xml_declaration=False)
+            if made is not None:
+                made.append(aux)
         out.append(aux)
     return out
 
@@ -386,21 +388,42 @@ def point_to_overviews(path: str, ovr: str) -> None:
 current = OverviewOptions()
 
 
-def before_open(path: str) -> None:
+def before_open(path: str) -> bool:
     """
     With `location` "cache", before an image of the catalog is opened: its
     .aux.xml moves to the cache folder (proxy_pams), so what QGIS writes
     there (statistics, histograms) never goes beside the image either.
+    Whether it was moved now (not before).
     """
     options = current
     if not options.enabled or options.location != "cache" or not path or path.startswith("/vsi") or "://" in path:
-        return
+        return False
     if not cache_folder() or not os.path.isfile(path) or pam_proxy() is None:
-        return
+        return False
+    made: list[str] = []
     try:
-        proxy_pams(path)
+        proxy_pams(path, made)
     except (RuntimeError, OSError) as error:
         QgsMessageLog.logMessage(f"{path} の .aux.xml をキャッシュに置けず（{error}）", LOG_TAG, Qgis.MessageLevel.Info)
+    return bool(made)
+
+
+def layers_added(layers: Sequence[QgsMapLayer], message_bar=None) -> list[str]:
+    """
+    With `scope` "all": the local GDAL images added to the project in any
+    way (Add Layer, drag and drop, a project read) get overviews like the
+    catalog's. With `location` "cache" the image's .aux.xml moves to the
+    cache folder too, but the layer already open keeps the one beside the
+    image (QGIS reuses its GDAL handle), so QGIS may still write its
+    statistics there until the image is opened again. The paths queued.
+    """
+    options = current
+    if not options.enabled or options.scope != "all":
+        return []
+    rasters = [layer for layer in layers if local_path(layer)]
+    for layer in rasters:
+        before_open(local_path(layer))
+    return queue.request(rasters, options, message_bar)
 
 
 _pam: Optional[tuple] = None
