@@ -393,7 +393,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "text": "TEXT",
    "reportedAt": "REPORTED_AT",
    "reportedBy": "REPORTED_BY",
-   "batch": "BATCH_ID"
+   "batch": "BATCH_ID",
+   "manual": "MANUAL"
   }
  },
  "alertSources": [
@@ -419,6 +420,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "updated",
   "area",
   "rule",
+  "manual",
   "report",
   "reportedAt",
   "reportedBy",
@@ -860,6 +862,7 @@ const SPEC = [
         TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
         B("presentOnly", "不在を除く", { help: "既定 true" }),
+        B("notifyOnSave", "保存時に知らせる", { help: "既定 true。保存した記録が条件に合えばメッセージバーに「注目の記録」" }),
         S("default", "既定のフォーマット", () => ((state.alertReports && state.alertReports.formats) || []).map((f) => f && f.name).filter(Boolean)),
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),

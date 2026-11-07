@@ -24,8 +24,8 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import edit_stamp
 from ..core.obs.alerts import (
-    AlertItem, AlertSettings, LogRow, Moment, build_lines, load_geofences, load_log, load_rules, remove_log, report_text,
-    reported_ids, select, write_file, write_log,
+    AlertItem, AlertSettings, LogRow, Moment, build_lines, load_geofences, load_log, load_rules, manual_items, remove_log,
+    report_text, reported_ids, select, write_file, write_log,
 )
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
@@ -235,7 +235,10 @@ class AlertDialog(QDialog):
 
         def finished(result) -> None:
             self.pick_button.setEnabled(True)
-            self.items, rules = result
+            picked, rules = result
+            ids = {i.record.id for i in picked}
+            # Records added by hand stay (first), unless picked by the conditions too.
+            self.items = [i for i in self.items if i.manual and i.record.id not in ids] + picked
             self._render_lines()
             rule_note = "" if rules is None else self.tr("（条件 {n} 件）").format(n=len(rules))
             self._say(self.tr("{n} 件を抽出{r}").format(n=len(self.items), r=rule_note))
@@ -247,6 +250,49 @@ class AlertDialog(QDialog):
         self.pick_button.setEnabled(False)
         self._say(self.tr("抽出中…"))
         run_task(self.tr("通報の抽出"), work, finished, failed)
+
+    def add_records(self, records) -> None:
+        """
+        Adds records by hand (「通報に追加」), whether or not they meet the
+        conditions: their geofences and whether they were reported are read in a task.
+        """
+        s = self.settings
+        records = [o for o in records if o.deleted_at is None and all(i.record.id != o.id for i in self.items)]
+        if s is None or not records:
+            self._say(self.tr("追加する記録なし（すでに一覧にある記録は追加しない）") if s else self.tr("設定ファイルに alertReports なし"))
+            return
+        self.tabs.setCurrentIndex(0)
+        client = self.dock.context.esri()
+        tokens = {k: self._token(getattr(s, k)) for k in ("geofences", "table")}
+
+        def work(_task):
+            fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
+            done = reported_ids(client, s, tokens["table"]) if s.table else set()
+            return manual_items(records, fences), done
+
+        def finished(result) -> None:
+            added, done = result
+            added = self.add_items(added)
+            again = sum(1 for i in added if i.record.id in done)
+            note = self.tr("（うち通報済み {n} 件）").format(n=again) if again else ""
+            self._say(self.tr("手動で {n} 件を追加{a}").format(n=len(added), a=note))
+
+        def failed(message: str) -> None:
+            # Added all the same: only the geofence names are missing.
+            self.items = manual_items(records) + self.items
+            self._render_lines()
+            self._say(self.tr("手動で {n} 件を追加（ジオフェンス・通報済みの確認に失敗: {m}）").format(n=len(records), m=message))
+
+        self._say(self.tr("追加中…"))
+        run_task(self.tr("通報への追加"), work, finished, failed)
+
+    def add_items(self, items: list[AlertItem]) -> list[AlertItem]:
+        """Puts records (already chosen) at the top of the list, those not there yet; the ones added."""
+        ids = {i.record.id for i in self.items}
+        added = [i for i in items if i.record.id not in ids]
+        self.items = added + self.items
+        self._render_lines()
+        return added
 
     def _moment(self, count: int) -> Moment:
         return Moment(now=QDateTime.currentMSecsSinceEpoch(), user=edit_stamp.user_name(), count=count)
@@ -263,7 +309,11 @@ class AlertDialog(QDialog):
             check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
             check.setCheckState(Qt.CheckState.Checked)
             self.lines_table.setItem(r, 0, check)
-            self.lines_table.setItem(r, 1, QTableWidgetItem(line))
+            cell = QTableWidgetItem(line)
+            if r < len(self.items) and self.items[r].manual:
+                cell.setToolTip(self.tr("手動で追加（条件に関係なく通報）"))
+                check.setText(self.tr("手動"))
+            self.lines_table.setItem(r, 1, cell)
         self.lines_table.blockSignals(False)
         self._filling = False
         self._render_text()

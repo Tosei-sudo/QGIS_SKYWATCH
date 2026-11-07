@@ -178,3 +178,18 @@ def test_esri_rules_fences_log_round_trip():
     assert load_log(client, s, start=T0 + 1000) == []
     assert remove_log(client, s, rows) == 1
     assert reported_ids(client, s) == set() and len(log.rows) == 0
+
+
+def test_manual_items_and_notify_on_save():
+    from satellite_observation.core.obs.alerts import manual_items
+
+    s = settings()
+    assert s.notify_on_save is True
+    assert alert_settings_of({"notifyOnSave": False, "formats": [{"name": "a"}]}, []).notify_on_save is False
+    items = manual_items([obs(id="a", activity="停泊"), obs(id="g", deleted_at=T0)], [Geofence("舞鶴", SQUARE)])
+    assert [(i.record.id, i.areas, i.rules, i.manual) for i in items] == [("a", ["舞鶴"], ["手動"], True)]
+    fmt = alert_settings_of({"formats": [{"name": "a", "fields": ["objectName", "rule", "manual", {"source": "manual", "map": {"": "自動"}}]}]}, []).format()
+    at = Moment(now=T0)
+    assert build_lines(items, fmt, at) == ["船A|手動|手動|手動"]
+    auto = select([obs()], s, None, (), DEFAULT_CONFIDENCES)
+    assert build_lines(auto, fmt, at) == ["船A|||自動"]

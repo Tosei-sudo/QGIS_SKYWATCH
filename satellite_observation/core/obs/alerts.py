@@ -36,7 +36,7 @@ from .taxonomy import kind_of, path_of, within
 SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated",
-    "area", "rule", "report", "reportedAt", "reportedBy", "index", "count",
+    "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count",
 )
 TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
 NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width")
@@ -58,8 +58,10 @@ DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE"}
 #: The log table's attributes by role.
 DEFAULT_LOG_FIELDS = {
     "obsId": "OBS_ID", "report": "REPORT_NAME", "text": "TEXT", "reportedAt": "REPORTED_AT", "reportedBy": "REPORTED_BY",
-    "batch": "BATCH_ID",
+    "batch": "BATCH_ID", "manual": "MANUAL",
 }
+#: What `rule` says of a record added by hand (outside the conditions).
+MANUAL_RULE = "手動"
 _FEATURE_LAYER = re.compile(r"/(Feature|Map)Server/\d+/?$", re.IGNORECASE)
 _EDITABLE = re.compile(r"/FeatureServer/\d+/?$", re.IGNORECASE)
 
@@ -133,6 +135,8 @@ class AlertSettings:
     geofences: Optional[EsriSource] = None
     #: The Esri log table (the main output; also what was reported).
     table: Optional[EsriSource] = None
+    #: A record saved that meets the conditions (and is not reported yet) is said in QGIS's message bar.
+    notify_on_save: bool = True
 
     def format(self, name: str = "") -> Optional[AlertFormat]:
         """The format of a name, else the default one, else the first."""
@@ -165,6 +169,14 @@ class AlertItem:
     record: Observation
     areas: list[str] = field(default_factory=list)
     rules: list[str] = field(default_factory=list)
+    #: Added by hand (whether or not it meets the conditions).
+    manual: bool = False
+
+
+def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()) -> list[AlertItem]:
+    """Records chosen by hand: reported whatever the conditions say (their geofences still named)."""
+    return [AlertItem(o, list(dict.fromkeys(g.name for g in fences if inside_rings(o.lon, o.lat, g.rings))), [MANUAL_RULE], True)
+            for o in records if o.deleted_at is None]
 
 
 # ---- the settings file ------------------------------------------------------------
@@ -345,6 +357,7 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
         else:
             problems.append(f"{at}.minConfidence は確度の名前で指定")
     settings.present_only = _bool(value, "presentOnly", at, problems, True)
+    settings.notify_on_save = _bool(value, "notifyOnSave", at, problems, True)
     if "rules" in value:
         settings.rules = _source_of(value["rules"], f"{at}.rules", DEFAULT_RULE_FIELDS, problems)
     if "geofences" in value:
@@ -591,7 +604,7 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width,
         "recordedBy": o.recorded_by, "updatedBy": o.updated_by, "created": o.created_at, "updated": o.updated_at,
         "area": "・".join(item.areas), "rule": "・".join(item.rules), "report": report.name, "reportedAt": at.now,
-        "reportedBy": at.user, "index": index + 1, "count": at.count,
+        "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual,
     }.get(s or "")
 
 
@@ -606,6 +619,8 @@ def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at:
         text = "" if v is None or not math.isfinite(v) else (to_fixed(v, f.digits) if f.digits is not None else js_string(v))
     elif f.source == "present":
         text = "あり" if v else "なし"
+    elif f.source == "manual":
+        text = MANUAL_RULE if v else ""
     else:
         text = "" if v is None else js_string(v)
     if f.map:
@@ -674,7 +689,7 @@ def write_log(client: EsriClient, settings: AlertSettings, report: AlertFormat, 
     for i, (item, line) in enumerate(zip(items, lines)):
         values: dict[str, Any] = {
             f["obsId"]: item.record.id, f["report"]: report.name, f["text"]: line, f["reportedAt"]: int(at.now),
-            f["reportedBy"]: at.user, f["batch"]: batch,
+            f["reportedBy"]: at.user, f["batch"]: batch, f["manual"]: 1 if item.manual else 0,
         }
         for attr, col in report.columns.items():
             raw = raw_value(col, item, i, report, at) if col.source else col.text
