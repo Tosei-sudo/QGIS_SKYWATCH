@@ -333,3 +333,23 @@ def test_a_service_out_of_reach_is_logged_as_a_line_not_a_warning():
     assert failed == ["接続不可（https://x.example/FeatureServer/0）"]
     mine = [(level, m) for tag, level, m in logs if tag == "衛星撮像計画・観測記録"]
     assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの読み込み: 接続不可（https://x.example/FeatureServer/0）")]
+
+
+def test_every_service_of_the_settings_can_be_given_a_sign_in():
+    """#75: the request ledger, its history, AI results, the weather and the rest are in 「接続の認証」."""
+    from satellite_observation.core.config import parse_config
+    from satellite_observation.qgis_io.context import PluginContext
+
+    base = "https://gis.example.com/arcgis/rest/services"
+    context = PluginContext()
+    context.config, problems = parse_config({
+        "requestStores": [{"label": "台帳", "url": f"{base}/Req/FeatureServer/0", "history": f"{base}/Req/FeatureServer/1"}],
+        "aiResultSources": [{"label": "外部", "url": f"{base}/Ai/FeatureServer/0",
+                             "fields": {"imageId": "IMAGE_ID", "kind": "CLASS", "score": "SCORE"}}],
+        "cloudForecast": {"url": "https://weather.example.com/v1/forecast", "label": "社内予報"},
+    })
+    services = {s.url: s.role for s in context.services()}
+    assert services[f"{base}/Req/FeatureServer/0"] == "撮像依頼台帳"
+    assert services[f"{base}/Req/FeatureServer/1"] == "出力履歴"
+    assert services["https://weather.example.com/v1/forecast"] == "雲量予報"
+    assert problems == [] and services[f"{base}/Ai/FeatureServer/0"] == "外部AI結果"

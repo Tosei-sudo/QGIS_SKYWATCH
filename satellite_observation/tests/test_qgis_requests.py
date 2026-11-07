@@ -298,3 +298,28 @@ def test_import_reads_the_ledger_first_and_skips_repeated_ids(plugin):
     assert ids == ["R-10", "R-9"]
     assert {r["attributes"]["REQ_ID"]: r["attributes"]["REQ_NAME"] for r in fake.layers[LEDGER].rows}["R-9"] == "横須賀"
     assert "取り込まなかったもの 1 件" in dock.status.text()
+
+
+def test_a_satellite_catalog_that_cannot_be_read_gives_the_buttons_back(plugin, monkeypatch):
+    """#70: 「計算」 and 「試算」 come back with the reason when the satellite catalog cannot be read."""
+    from satellite_observation.core.esri import EsriError
+    from satellite_observation.ui import imaging_plan_dock
+
+    p, iface, fake, tmp_path = plugin
+
+    def down(*args, **kwargs):
+        raise EsriError("接続不可（テスト）")
+
+    plan_dock = p.docks["SatObsImagingPlan"]
+    assert wait_for(lambda: plan_dock.loading_task is None)
+    monkeypatch.setattr(imaging_plan_dock, "load_satellites", down)
+    plan_dock._loaded = False
+    daily = p.api.plan_files
+    daily.show()
+    daily.run()
+    assert wait_for(lambda: daily.run_button.isEnabled() and "衛星カタログの読み込みに失敗" in daily.status.text()), daily.status.text()
+    daily.open_simulation()
+    sim = daily.simulation
+    sim.run()
+    assert wait_for(lambda: sim.run_button.isEnabled() and "衛星カタログの読み込みに失敗" in sim.status.text()), sim.status.text()
+    sim.close()

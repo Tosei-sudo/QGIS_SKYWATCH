@@ -520,3 +520,32 @@ def test_image_patterns_by_sensor_and_the_images_of_a_folder(tmp_path):
     # resolve_path leads to a folder too (followed down regardless of case).
     folder = PathMapping("\\\\nas\\img", "NAS")
     assert resolve_path("\\\\nas\\img\\img_1_p_X", [folder], lambda prefix: str(tmp_path)).value == str(tmp_path / "IMG_1_P_x")
+
+
+def test_the_look_in_a_folder_is_bounded(tmp_path):
+    """#76: depth, entries and time are bounded, links are not followed, and it says why it stopped."""
+    import os
+
+    from satellite_observation.core.catalog.images import find_images
+
+    deep = tmp_path / "a" / "b" / "c"
+    deep.mkdir(parents=True)
+    (tmp_path / "top.tif").write_text("")
+    (deep / "deep.tif").write_text("")
+    found = find_images(str(tmp_path), ["\\.tif$"], max_depth=2)
+    assert found.files == ["top.tif"] and "2 階層" in found.stopped
+    assert find_images(str(tmp_path), ["\\.tif$"]).files == ["a/b/c/deep.tif", "top.tif"]
+    for i in range(20):
+        (tmp_path / f"n{i}.txt").write_text("")
+    many = find_images(str(tmp_path), ["\\.tif$"], max_entries=10)
+    assert many.more and "10" in many.stopped
+    ticks = iter(range(0, 1000, 100))
+    slow = find_images(str(tmp_path), ["\\.tif$"], max_seconds=50, clock=lambda: next(ticks))
+    assert slow.more and "50 秒" in slow.stopped
+    assert find_images(str(tmp_path), ["\\.tif$"], cancelled=lambda: True).stopped == "取消"
+    # A link back up (a loop) is not followed.
+    try:
+        os.symlink(str(tmp_path), str(deep / "loop"), target_is_directory=True)
+    except (OSError, NotImplementedError):
+        return
+    assert find_images(str(tmp_path), ["\\.tif$"]).files == ["a/b/c/deep.tif", "top.tif"]

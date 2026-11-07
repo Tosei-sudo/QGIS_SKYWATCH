@@ -24,6 +24,7 @@ import json
 import math
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
@@ -33,7 +34,7 @@ from qgis.core import (
 )
 
 from ..core.catalog.config import CatalogConfig
-from ..core.catalog.images import find_images, patterns_for
+from ..core.catalog.images import FolderImages, find_images, patterns_for
 from ..core.catalog.paths import PathError, PathMapping, resolve_path
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
 from ..core.catalog.watch import areas_of
@@ -194,6 +195,56 @@ class RecordImages:
     given: str = ""
 
 
+def scan_folder(folder: str, patterns: Sequence[str], find: Callable[..., FolderImages] = find_images,
+                wait_before_dialog: float = 0.3) -> FolderImages:
+    """
+    The images of a folder, looked for off the main thread (a share with many
+    sub-folders takes long): QGIS keeps answering, and after a moment a
+    progress window offers to cancel (Cancelled). The look itself is bounded
+    (core/catalog/images.py, #76).
+    """
+    from qgis.PyQt.QtCore import QCoreApplication, QEventLoop, Qt
+    from qgis.PyQt.QtWidgets import QProgressDialog
+
+    result: dict = {}
+    stop = threading.Event()
+
+    def run() -> None:
+        try:
+            result["found"] = find(folder, patterns, cancelled=stop.is_set)
+        except Exception as error:  # noqa: BLE001 (raised again on the main thread)
+            result["error"] = error
+
+    worker = threading.Thread(target=run, name="satobs-folder-scan", daemon=True)
+    worker.start()
+    worker.join(wait_before_dialog)
+    dialog = None
+    try:
+        while worker.is_alive():
+            if dialog is None:
+                dialog = QProgressDialog(f"フォルダ「{folder}」の画像を探しています…", "取消", 0, 0)
+                dialog.setWindowTitle("画像の場所")
+                dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+                dialog.setMinimumDuration(0)
+                dialog.show()
+            QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+            if dialog.wasCanceled():
+                # The look stops at its next folder; nothing waits for it.
+                stop.set()
+                raise Cancelled()
+            worker.join(0.05)
+    finally:
+        if dialog is not None:
+            dialog.close()
+            dialog.deleteLater()
+    if "error" in result:
+        raise result["error"]
+    found = result["found"]
+    if found.stopped == "取消":
+        raise Cancelled()
+    return found
+
+
 def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
                   choose_folder: Callable[[PathMapping], Optional[str]], names=None) -> RecordImages:
     """
@@ -226,9 +277,14 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     if not os.path.isdir(url):
         return RecordImages(url, False, given=source.value)
     patterns = patterns_for(catalog.image_patterns, record.sensor, names)
-    found = find_images(url, patterns)
+    found = scan_folder(url, patterns)
     if not found.files:
-        raise PathError(f"{record.id or source.value} のフォルダ「{url}」に画像なし（{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認）")
+        why = [f"{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認"]
+        if found.stopped:
+            why.append(found.stopped)
+        if found.unreadable:
+            why.append(f"読めないフォルダ {found.unreadable} 件")
+        raise PathError(f"{record.id or source.value} のフォルダ「{url}」に画像なし（{'・'.join(why)}）")
     return RecordImages(url, False, found.files, found.more, given=source.value)
 
 

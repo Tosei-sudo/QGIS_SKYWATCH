@@ -316,7 +316,7 @@ class SatellitePassDock(PluginDock):
     def load(self) -> None:
         """Lists the imaging plan's satellites (reading its catalog first when needed) and draws."""
         self.status.setText(self.tr("衛星を読み込み中…"))
-        self.imaging_plan.load_catalog(self._loaded)
+        self.imaging_plan.load_catalog(self._loaded, lambda m: self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=m)))
 
     def _loaded(self) -> None:
         self.list_sats()

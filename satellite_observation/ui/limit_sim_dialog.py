@@ -187,7 +187,12 @@ class LimitSimDialog(QDialog):
             return
         self.run_button.setEnabled(False)
         self.status.setText(self.tr("衛星カタログを読み込み中…"))
-        self.satellites(lambda sats: self._load(sats, start, days, key, reload or self.data is None))
+        self.satellites(lambda sats: self._load(sats, start, days, key, reload or self.data is None), self._satellites_failed)
+
+    def _satellites_failed(self, message: str) -> None:
+        """The satellite catalog could not be read: says why and gives 「試算」 back (#70)."""
+        self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=message))
+        self.run_button.setEnabled(True)
 
     def _load(self, sats, start: date, days: int, key, read_ledger: bool) -> None:
         store, client = self.store, self.context.esri()

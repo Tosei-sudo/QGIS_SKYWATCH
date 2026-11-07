@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Sequence
 
@@ -85,25 +86,68 @@ def patterns_for(patterns: dict[str, list[str]], sensor: str, names=None) -> lis
 
 @dataclass(frozen=True)
 class FolderImages:
-    """The images found in a folder: their paths below it (`/` between parts, natural order), and whether more were left out."""
+    """
+    The images found in a folder: their paths below it (`/` between parts,
+    natural order), whether more were left out, why the look stopped early
+    (`stopped`: too deep, too many entries, too long, cancelled; "" when it
+    went through) and how many sub-folders could not be read.
+    """
     files: list[str]
     more: bool = False
+    stopped: str = ""
+    unreadable: int = 0
 
 
-def _walk(folder: str) -> Iterable[tuple[str, list[str], list[str]]]:
-    return os.walk(folder)
+#: How deep below the record's folder images are looked for.
+MAX_DEPTH = 8
+#: How many files and folders are looked at, at most (matching or not).
+MAX_ENTRIES = 50_000
+#: How long the look may take (seconds).
+MAX_SECONDS = 60.0
 
 
-def find_images(folder: str, patterns: Sequence[str], walk: Callable[[str], Iterable] = _walk,
-                limit: int = MAX_IMAGES) -> FolderImages:
-    """The files under `folder` (at any depth) whose path below it any of `patterns` matches."""
+def _is_link(path: str) -> bool:
+    """A symbolic link or (Windows) a junction: not followed, as a loop of them never ends (#76)."""
+    try:
+        if os.path.islink(path):
+            return True
+        is_junction = getattr(os.path, "isjunction", None)
+        return bool(is_junction and is_junction(path))
+    except OSError:
+        return True
+
+
+def _walk(folder: str, errors: Optional[list] = None) -> Iterable[tuple[str, list[str], list[str]]]:
+    """os.walk without links or junctions; unreadable folders go to `errors`."""
+    for here, dirs, files in os.walk(folder, followlinks=False, onerror=(errors.append if errors is not None else None)):
+        dirs[:] = [d for d in dirs if not _is_link(os.path.join(here, d))]
+        yield here, dirs, files
+
+
+def find_images(folder: str, patterns: Sequence[str], walk: Optional[Callable[[str], Iterable]] = None,
+                limit: int = MAX_IMAGES, max_depth: int = MAX_DEPTH, max_entries: int = MAX_ENTRIES,
+                max_seconds: float = MAX_SECONDS, cancelled: Optional[Callable[[], bool]] = None,
+                clock: Callable[[], float] = time.monotonic) -> FolderImages:
+    """
+    The files under `folder` (down to `max_depth` folders) whose path below
+    it any of `patterns` matches. The look is bounded (entries, time), can
+    be cancelled, does not follow links or junctions, and says why it
+    stopped (#76).
+    """
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
     found: list[str] = []
-    more = False
-    for here, dirs, files in walk(folder):
-        dirs.sort(key=natural_key)
+    more, stopped = False, ""
+    errors: list = []
+    seen, started = 0, clock()
+    for here, dirs, files in (walk(folder) if walk is not None else _walk(folder, errors)):
         rel = os.path.relpath(here, folder).replace(os.sep, "/")
+        depth = 0 if rel in (".", "") else rel.count("/") + 1
+        if depth >= max_depth and dirs:
+            dirs[:] = []
+            stopped = stopped or f"{max_depth} 階層より深いフォルダは見ていない"
+        dirs.sort(key=natural_key)
         prefix = "" if rel in (".", "") else rel + "/"
+        seen += len(files) + len(dirs)
         for name in sorted(files, key=natural_key):
             path = prefix + name
             if any(c.search(path) for c in compiled):
@@ -113,4 +157,13 @@ def find_images(folder: str, patterns: Sequence[str], walk: Callable[[str], Iter
                 found.append(path)
         if more:
             break
-    return FolderImages(sorted(found, key=natural_key), more)
+        if cancelled and cancelled():
+            stopped = "取消"
+            break
+        if seen > max_entries:
+            more, stopped = True, f"ファイル・フォルダが {max_entries:,} を超えたため途中まで"
+            break
+        if clock() - started > max_seconds:
+            more, stopped = True, f"{int(max_seconds)} 秒を超えたため途中まで"
+            break
+    return FolderImages(sorted(found, key=natural_key), more, stopped, len(errors))
