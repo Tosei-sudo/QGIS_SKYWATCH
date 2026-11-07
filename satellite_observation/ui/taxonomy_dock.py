@@ -35,7 +35,7 @@ except ImportError:  # Qt5
 
 from ..core.obs.stores import LOCAL_LABEL, LocalPhotoStore, is_local_photo, photo_url
 from ..core.obs.taxonomy import (
-    SpecField, Taxon, children_of, find, kind_of, level_name, name_label_of, path_of, photos_at, spec_text, specs_at, within,
+    SpecField, Taxon, activities_at, children_of, find, kind_of, level_name, name_label_of, path_of, photos_at, spec_text, specs_at, within,
 )
 from ..qgis_io.context import PluginContext
 from .docks import PluginDock
@@ -175,6 +175,9 @@ class TaxonomyDock(PluginDock):
         f.addRow(tr("この枝の階層名"), self.levels_input)
         f.addRow(tr("個体名の呼称"), self.label_input)
         f.addRow(tr("既知の個体（1 行に 1 つ、読点区切りも可）"), self.members_input)
+        self.activities_input = QLineEdit()
+        self.activities_input.setToolTip(tr("この分類以下で選べる活動、読点区切り（大分類に設定すれば大分類ごとに切り替え）。空なら上位の分類、なければ既定の活動"))
+        f.addRow(tr("活動"), self.activities_input)
         self.specs_box = QGroupBox(tr("諸元"))
         self.specs_form = QFormLayout(self.specs_box)
         f.addRow(self.specs_box)
@@ -202,7 +205,7 @@ class TaxonomyDock(PluginDock):
         self.delete_button = self._button(tr("削除"), "", self._delete_key)
         actions.addWidget(self.delete_button)
         f.addRow(actions)
-        for edit in (self.name_input, self.levels_input, self.label_input):
+        for edit in (self.name_input, self.levels_input, self.label_input, self.activities_input):
             edit.returnPressed.connect(self.apply)
         self.detail.addWidget(self.form)
         self.detail.addStretch(1)
@@ -410,7 +413,8 @@ class TaxonomyDock(PluginDock):
         parent = path_of(self.parent_select.currentData() or "")
         specs = {k: e.text().strip() for k, e in self._spec_inputs.items() if e.text().strip()}
         own = {"levels": _split(self.levels_input.text()), "name_label": self.label_input.text().strip(),
-               "members": _split(self.members_input.toPlainText()), "specs": specs}
+               "members": _split(self.members_input.toPlainText()), "specs": specs,
+               "activities": _split(self.activities_input.text())}
         self.selected = kind_of([*parent, name])
         self.obs.do(self.tr("分類の変更"), lambda b: b.update_class(path, name=name, parent=parent, **own))
 
@@ -733,6 +737,9 @@ class TaxonomyDock(PluginDock):
         self.levels_input.setText("、".join(t.levels or []))
         self.label_input.setText(t.name_label or "")
         self.members_input.setPlainText("\n".join(t.members or []))
+        self.activities_input.setText("、".join(t.activities or []))
+        above, at = activities_at(taxa, path[:-1])
+        self.activities_input.setPlaceholderText(f"{'、'.join(above)}（{at[-1]}）" if above else "、".join(book.vocabulary.activities) + "（既定）")
         self.parent_select.clear()
         self.parent_select.addItem(self.tr("（なし: 大分類）"), "")
         for x in taxa:

@@ -12,7 +12,7 @@ import json
 import math
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..util import is_number, is_record, layer_url, words
@@ -102,13 +102,18 @@ DEFAULT_ACTIVITIES = ["停泊", "航行", "駐機", "移動", "工事", "集積"
 def default_taxonomy() -> list[Taxon]:
     """The classes offered at first: each branch with its own levels."""
     return [
-        Taxon(["船舶"], levels=["大分類", "種別", "級"], name_label="船名"),
-        Taxon(["航空機"], levels=["大分類", "種別", "型式"], name_label="機番"),
-        Taxon(["車両"], levels=["大分類", "種別", "車種"]),
-        Taxon(["建物"], levels=["大分類", "用途"]),
-        Taxon(["構造物"], levels=["大分類", "種別"]),
+        Taxon(["船舶"], levels=["大分類", "種別", "級"], name_label="船名", activities=["停泊", "航行", "入港", "出港", "荷役", "活動なし"]),
+        Taxon(["航空機"], levels=["大分類", "種別", "型式"], name_label="機番", activities=["駐機", "移動", "離陸準備", "整備", "活動なし"]),
+        Taxon(["車両"], levels=["大分類", "種別", "車種"], activities=["駐車", "移動", "集積", "活動なし"]),
+        Taxon(["建物"], levels=["大分類", "用途"], activities=["工事", "使用中", "活動なし"]),
+        Taxon(["構造物"], levels=["大分類", "種別"], activities=["工事", "集積", "活動なし"]),
         Taxon(["その他"]),
     ]
+
+
+def without_activities(taxa: list[Taxon]) -> list[Taxon]:
+    """The classes without their own activities (so a list of activities set alone is the one offered everywhere)."""
+    return [replace(t, activities=None) for t in taxa]
 
 
 @dataclass
@@ -228,6 +233,9 @@ def vocabulary_of(value: Any, problems: list[str]) -> ObservationVocabulary:
         taxonomy = from_kinds(kinds) if kinds else None
     base = ObservationVocabulary()
     activities = words(value.get("activities"))
+    if activities and not taxonomy:
+        # Activities set without a classification: they are offered for every class, not the defaults' own.
+        base.taxonomy = without_activities(base.taxonomy)
     spec_fields = spec_fields_of(value["specFields"], problems, "observationVocabulary.specFields") if "specFields" in value else None
     confidences = confidences_of(value["confidences"], problems, "observationVocabulary.confidences") if "confidences" in value else None
     return ObservationVocabulary(

@@ -244,6 +244,31 @@ def test_the_kind_is_chosen_level_by_level_with_every_top_class_shown(plugin):
     dock.close_form()
 
 
+def test_the_activities_switch_with_the_top_class(plugin):
+    p, iface, dock, layers, tmp_path = plugin
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+
+    def chips():
+        layout = dock.chips_layout
+        return [layout.itemAt(i).widget().text().split(" ", 1)[1] for i in range(layout.count())]
+
+    dock.choose_kind(["船舶"])
+    assert "航行" in chips() and "駐機" not in chips()
+    dock._pick_activity("航行")
+    dock.choose_kind(["航空機"])
+    assert "駐機" in chips() and "航行" not in chips()
+    # Not one of the aircraft's: left out.
+    assert dock.activity_input.text() == ""
+    dock._chip(1)
+    assert dock.activity_input.text() == "駐機"
+    # A class's own activities, changed in the 分類 tab's way.
+    assert dock.book.update_class(["航空機"], activities=["給油", "駐機"])
+    dock._kind_changed()
+    assert chips()[:2] == ["給油", "駐機"] and dock.activity_input.text() == "駐機"
+    dock.close_form()
+
+
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     p, iface, dock, layers, _ = plugin
     dock.set_two_point(True)
@@ -580,3 +605,17 @@ def test_gives_scripts_an_esri_store_waiting_for_its_tasks(plugin, tmp_path):
     a = p.api.add_observation(139.7, 35.6, object="共有A")
     assert len(layer.rows) == 1 and a["objectName"] == "共有A"
     assert p.api.delete_observations(a["id"]) == 1 and p.api.observations() == []
+
+
+def test_the_classification_editor_sets_a_classs_activities(plugin):
+    p, iface, dock, layers, tmp_path = plugin
+    p.edit_taxonomy(["船舶"])
+    editor = p.docks["SatObsTaxonomy"]
+    assert editor.activities_input.text().startswith("停泊")
+    editor.activities_input.setText("停泊、曳航")
+    editor.apply()
+    assert dock.book.activities_for("船舶 > 護衛艦") == (["停泊", "曳航"], ["船舶"])
+    dock.book.add_class(["船舶", "護衛艦"])
+    p.edit_taxonomy(["船舶", "護衛艦"])
+    # Empty: the class above's, shown faintly.
+    assert editor.activities_input.text() == "" and editor.activities_input.placeholderText() == "停泊、曳航（船舶）"
