@@ -153,6 +153,7 @@ class ObservationDock(PluginDock):
         #: (settings, when read, rules, geofences) of the last check of saved records.
         self._alert_conditions = None
         self._alert_widget = None
+        self._alert_items: list = []
         self.store_set: Optional[StoreSet] = None
         self.tab = "image"
         self.chosen: Optional[str] = None
@@ -781,7 +782,7 @@ class ObservationDock(PluginDock):
             else:
                 rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
                 fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
-            done = reported_ids(client, s, token(s.table.url, s.table.token)) if s.table else set()
+            done = reported_ids(client, s, token(s.table.url, s.table.token), ids=[o.id for o in records]) if s.table else set()
             return rules, fences, select(records, s, rules, fences, levels, done, history=history)
 
         def finished(result) -> None:
@@ -796,10 +797,18 @@ class ObservationDock(PluginDock):
         run_task(self.tr("通報の条件の確認"), work, finished, failed)
 
     def _alert_notice(self, items) -> None:
-        """「注目の記録」 in the message bar, with 「通報文を作成」 (those records put in 「通報」)."""
+        """
+        「注目の記録」 in the message bar, with 「通報文を作成」 (those records put
+        in 「通報」). One notice at a time: while it is still shown, the records
+        of the next save join it (saving one after another does not stack them).
+        """
+        bar = self.iface.messageBar()
+        shown = self._alert_widget is not None and any(w is self._alert_widget for w in bar.items())
+        if shown:
+            ids = {i.record.id for i in items}
+            items = [i for i in self._alert_items if i.record.id not in ids] + list(items)
         names = "・".join(f"{i.record.object_name}（{i.record.activity}）" if i.record.activity else i.record.object_name for i in items[:3])
         more = self.tr(" ほか {n} 件").format(n=len(items) - 3) if len(items) > 3 else ""
-        bar = self.iface.messageBar()
         widget = bar.createMessage(self.tr("注目の記録"), self.tr("通報の条件に合う記録: {r}{m}").format(r=names, m=more))
         button = QPushButton(self.tr("通報文を作成"))
 
@@ -809,8 +818,10 @@ class ObservationDock(PluginDock):
 
         button.clicked.connect(open_)
         widget.layout().addWidget(button)
+        if shown:
+            bar.popWidget(self._alert_widget)
         bar.pushWidget(widget, Qgis.MessageLevel.Info, 0)
-        self._alert_widget = widget
+        self._alert_widget, self._alert_items = widget, list(items)
 
     def run_now(self, description: str, work: Callable[[ObservationBook], Any]) -> Any:
         """

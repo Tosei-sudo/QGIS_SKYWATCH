@@ -57,7 +57,7 @@ class HandoverDialog(QDialog):
         g = QVBoxLayout(page)
         row = QHBoxLayout()
         self.mine_check = QCheckBox(self.tr("自分の担当のみ"))
-        self.done_check = QCheckBox(self.tr("完了も表示"))
+        self.done_check = QCheckBox(self.tr("完了も表示（7 日以内）"))
         for c in (self.mine_check, self.done_check):
             c.toggled.connect(lambda _on: self.render_assignments())
             row.addWidget(c)
@@ -362,7 +362,7 @@ class HandoverDialog(QDialog):
                         problems.append(f"撮像依頼（{store.label}）: {error}")
             if source:
                 try:
-                    data.assignments = load_assignments(client, source, assign_token)
+                    data.assignments = load_assignments(client, source, assign_token, done_since=start)
                 except Exception as error:  # noqa: BLE001
                     problems.append(f"分担: {error}")
             data.problems = problems

@@ -546,16 +546,31 @@ def _log_types(client: EsriClient, settings: AlertSettings, token: Optional[str]
     return types
 
 
-def reported_ids(client: EsriClient, settings: AlertSettings, token: Optional[str] = None) -> set[str]:
-    """The ids of the records already reported (in any format, from the log table)."""
+def reported_ids(client: EsriClient, settings: AlertSettings, token: Optional[str] = None,
+                 ids: Optional[Iterable[str]] = None) -> set[str]:
+    """
+    The ids of the records already reported (in any format, from the log
+    table); with `ids`, only which of those (a few records just saved: the
+    whole log is not read each time).
+    """
     table = settings.table
     if table is None:
         return set()
     f = table.fields
     _log_types(client, settings, token)
-    rows = client.query_all(table.url, table.where or "1=1", token or table.token, out_fields=f["obsId"], geometry=False,
-                            limit=1_000_000)
-    return {_text((r.get("attributes") or {}).get(f["obsId"])) for r in rows} - {""}
+    if ids is None:
+        wheres = [table.where or "1=1"]
+    else:
+        wanted = sorted({i for i in ids if i})
+        if not wanted:
+            return set()
+        wheres = [" AND ".join(f"({c})" for c in (table.where, f"{f['obsId']} IN ({', '.join(quote(i) for i in wanted[k:k + 100])})") if c)
+                  for k in range(0, len(wanted), 100)]
+    out: set[str] = set()
+    for where in wheres:
+        rows = client.query_all(table.url, where, token or table.token, out_fields=f["obsId"], geometry=False, limit=1_000_000)
+        out |= {_text((r.get("attributes") or {}).get(f["obsId"])) for r in rows}
+    return out - {""}
 
 
 @dataclass

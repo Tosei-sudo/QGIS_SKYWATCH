@@ -179,8 +179,19 @@ def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin
     dock.submit()
     assert wait_for(lambda: dock._alert_widget is not None)
     assert "船D（航行）" in dock._alert_widget.text()
+    # The next notable save joins the notice shown (one notice, both records).
+    first = dock._alert_widget
+    dock.map_clicked(139.72, 35.62, None)
+    dock.object_input.setText("船E")
+    dock.kind_input.setText("船舶")
+    dock.activity_input.setText("航行")
+    dock.submit()
+    assert wait_for(lambda: dock._alert_widget is not first)
+    assert "船D（航行）・船E（航行）" in dock._alert_widget.text()
+    assert [w for w in iface.messageBar().items() if w.title() == "注目の記録"] == [dock._alert_widget]
     from qgis.PyQt.QtWidgets import QPushButton
     button = next(b for b in dock._alert_widget.findChildren(QPushButton) if b.text() == "通報文を作成")
     button.click()
     dialog = dock._alerts
-    assert dialog.isVisible() and dialog.lines_table.item(0, 1).text() == "船D|航行|航行中|"
+    assert dialog.isVisible() and dialog.lines_table.rowCount() == 2
+    assert {dialog.lines_table.item(r, 1).text().split("|")[0] for r in range(2)} == {"船D", "船E"}

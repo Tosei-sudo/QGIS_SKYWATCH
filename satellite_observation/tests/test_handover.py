@@ -188,3 +188,13 @@ def test_memo_table_round_trip_and_file(tmp_path):
     assert file_path(s, T0).endswith("handover_20251107_1620.txt")
     path = write_file("引き継ぎ\r\n", s, T0)
     assert open(path, encoding="cp932", newline="").read() == "引き継ぎ\r\n"
+
+
+def test_done_rows_long_ago_are_not_read():
+    fake, work, _, config = esri()
+    client, src = EsriClient(fake), config.assignments
+    work.add({"IMAGE_ID": "OLD", "ASSIGNEE": "a", "STATUS": "完了", "DONE_AT": T0 - 30 * 24 * H})
+    work.add({"IMAGE_ID": "NEW", "ASSIGNEE": "a", "STATUS": "完了", "DONE_AT": T0})
+    work.add({"IMAGE_ID": "HELD", "ASSIGNEE": "b", "STATUS": "作業中"})
+    assert {x.image_id for x in load_assignments(client, src, done_since=T0 - 7 * 24 * H)} == {"NEW", "HELD"}
+    assert len(load_assignments(client, src)) == 3

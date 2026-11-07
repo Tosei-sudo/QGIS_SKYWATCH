@@ -21,6 +21,8 @@ from ..qgis_io.tasks import run_task
 
 #: Seconds the assignments read stay fresh.
 FRESH_S = 60
+#: Days the 完了 rows are read back.
+DONE_DAYS = 7
 
 
 class AssignmentBar(QWidget):
@@ -116,7 +118,9 @@ class AssignmentBar(QWidget):
             if self._again:
                 self.reload(then)
 
-        self._task = run_task(self.tr("分担の読み込み"), lambda _t: load_assignments(client, source, token), done, failed)
+        # The rows done long ago are left: they only grow (a week back, as the dialog's 「完了も表示」 shows).
+        since = time.time() * 1000 - DONE_DAYS * 86_400_000
+        self._task = run_task(self.tr("分担の読み込み"), lambda _t: load_assignments(client, source, token, done_since=since), done, failed)
 
     def show_image(self, image) -> None:
         """The dock shows another image (or the same again)."""

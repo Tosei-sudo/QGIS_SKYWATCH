@@ -173,6 +173,9 @@ def test_esri_rules_fences_log_round_trip():
     assert (a["OBS_ID"], a["REPORT_NAME"], a["TEXT"], a["REPORTED_BY"], a["KIND1"], a["LAT"]) == ("a", "速報", lines[0], "tsudo", "船舶", 35.0)
     assert "NOPE" not in a and a["BATCH_ID"]
     assert reported_ids(client, s) == {"a"}
+    # Only the records asked about (a save's few records: the whole log is not read).
+    assert reported_ids(client, s, ids=["a", "zz"]) == {"a"} and reported_ids(client, s, ids=["zz"]) == set()
+    assert "OBS_ID IN ('a', 'zz')" in [f for u, f in fake.asked if u.endswith("/query")][-2]["where"]
     # Reported once: left out next time, whatever the format.
     assert select([obs(id="a")], s, rules, fences, DEFAULT_CONFIDENCES, reported=reported_ids(client, s)) == []
     rows = load_log(client, s, start=T0 - 1000)
