@@ -32,7 +32,7 @@ from .ui.catalog_dock import CatalogDock
 from .ui.cloud_dock import CloudDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.dashboard_dock import DashboardDock
-from .ui.docks import StubDock
+from .ui.docks import StubDock, plain_tip
 from .ui.dock_layouts import DockLayoutMenu, float_docks
 from .ui import first_setup
 from .ui.gp_dialog import RemoteProcessingDialog
@@ -963,7 +963,7 @@ class SkywatchPlugin:
         def open_reported(record_id: str) -> None:
             o = observations.book.record(record_id) if observations.book else None
             if o is None:
-                self.iface.messageBar().pushWarning(tr("通報"), tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id))
+                self.iface.messageBar().pushWarning(tr("通報"), plain_tip(tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id)))
                 return
             observations.show()
             observations.raise_()

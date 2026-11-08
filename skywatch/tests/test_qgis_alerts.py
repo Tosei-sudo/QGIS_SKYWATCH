@@ -337,3 +337,37 @@ def test_place_names_from_the_smallest_named_area(plugin):
     dialog.add_records([c])
     assert wait_for(lambda: "手動で 1 件を追加" in dialog.status.text())
     assert dialog.lines_table.item(0, 1).text() == "船C|地名なし"
+
+
+def test_other_peoples_text_is_never_read_as_html(plugin):
+    """
+    Security re-check 2026-11-09: a report's text, a name or a server's message
+    with markup (an image on a share makes Windows sign in to that host) is
+    shown as it is: escaped in tooltips and the message bar, plain in labels.
+    """
+    import time as _time
+
+    from skywatch.ui.docks import plain_label
+    from qgis.PyQt.QtWidgets import QLabel
+
+    p, iface, dock, tmp_path = plugin
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False, "live": {"seconds": 5, "days": 3}})
+    log.types["REPORTED_AT"] = "esriFieldTypeDate"
+    trap = '<img src="file://evil.example/share/x.png">至急'
+    log.add({"OBS_ID": "x", "REPORT_NAME": "速報", "TEXT": trap, "REPORTED_AT": int(_time.time() * 1000)})
+    notices = p.docks["SatObsNotices"]
+    feed = notices.alerts
+    p.context.configChanged.emit()
+    notices.show()
+    assert wait_for(lambda: feed.table.rowCount() == 1)
+    tip = feed.table.item(0, 3).toolTip()
+    assert "<img" not in tip and "&lt;img" in tip
+    assert feed.status.textFormat() == Qt.TextFormat.PlainText
+    assert dock.status.textFormat() == Qt.TextFormat.PlainText
+    assert dock.assignment_bar.label.textFormat() == Qt.TextFormat.PlainText
+    assert plain_label(QLabel()).textFormat() == Qt.TextFormat.PlainText
+    # A record of the log not found: its id (someone else's text) goes to the message bar escaped.
+    iface.bar.clearWidgets()
+    feed.open_record(trap)
+    texts = [w.text() for w in iface.bar.items()]
+    assert any("&lt;img" in t for t in texts) and not any("<img" in t for t in texts)

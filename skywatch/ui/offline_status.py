@@ -18,6 +18,7 @@ from ..core.offline_upload import upload_all
 from ..qgis_io import settings
 from ..qgis_io.network import qgis_transport
 from ..qgis_io.tasks import run_task
+from .docks import plain_tip
 
 
 def tr(text: str) -> str:
@@ -230,7 +231,7 @@ class OfflineController(QObject):
         def done(report: UploadReport) -> None:
             self._uploading = False
             bar = self.iface.messageBar()
-            (bar.pushWarning if report.kept or report.drafts else bar.pushSuccess)(tr("オフライン作業の送信"), report.text())
+            (bar.pushWarning if report.kept or report.drafts else bar.pushSuccess)(tr("オフライン作業の送信"), plain_tip(report.text()))
             self._update()
             self.finished.emit()
             if then is not None:
@@ -238,7 +239,7 @@ class OfflineController(QObject):
 
         def failed(message: str) -> None:
             self._uploading = False
-            self.iface.messageBar().pushWarning(tr("オフライン作業の送信"), tr("送信できず（{m}）。送信待ちのまま残しています。").format(m=message))
+            self.iface.messageBar().pushWarning(tr("オフライン作業の送信"), plain_tip(tr("送信できず（{m}）。送信待ちのまま残しています。").format(m=message)))
             self._update()
 
         run_task(tr("オフライン中の作業の送信"), work, done, failed)

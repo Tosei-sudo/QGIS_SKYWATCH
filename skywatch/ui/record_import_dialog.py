@@ -17,7 +17,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.obs import record_import as ri
 from ..qgis_io import record_import_io
-from .docks import ask_no
+from .docks import ask_no, plain_label
 
 try:
     VECTOR_LAYERS = QgsMapLayerProxyModel.Filter.VectorLayer
@@ -74,7 +74,7 @@ class RecordImportDialog(QDialog):
         csv_row.addWidget(choose)
         sl.addRow(csv_row)
         self.from_layer.toggled.connect(lambda _on: self._source_changed())
-        self.source_note = QLabel()
+        self.source_note = plain_label(QLabel())
         self.source_note.setWordWrap(True)
         sl.addRow(self.source_note)
         main.addWidget(source)
@@ -106,7 +106,7 @@ class RecordImportDialog(QDialog):
         self.import_button.setToolTip(self.tr("試行の結果の新規・更新を保存先に保存（重複・エラーの行は飛ばす）"))
         self.import_button.clicked.connect(lambda: self.run_import())
         self.import_button.setEnabled(False)
-        self.summary = QLabel()
+        self.summary = plain_label(QLabel())
         self.summary.setWordWrap(True)
         run_row.addWidget(self.try_button)
         run_row.addWidget(self.import_button)
@@ -122,7 +122,7 @@ class RecordImportDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         main.addWidget(self.table, 2)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         main.addWidget(self.status)
         self.reset()

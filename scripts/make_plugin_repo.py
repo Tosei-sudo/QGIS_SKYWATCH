@@ -3,7 +3,7 @@ Makes (or updates) an internal QGIS plugin repository: a folder holding the plug
 QGIS's plugin manager reads, for closed networks where plugins.qgis.org cannot be reached.
 
     python3 scripts/make_plugin_repo.py \\\\server\\share\\qgis-plugins            # builds both zips with a new version, lists them
-    python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url http://intra.example/qgis-plugins
+    python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url https://intra.example/qgis-plugins
     python3 scripts/make_plugin_repo.py OUT --config my.json --lock-config     # build_zip.py's options pass through
     python3 scripts/make_plugin_repo.py OUT --zip dist/a.zip dist/a-win64.zip  # zips already built (their own versions)
     python3 scripts/make_plugin_repo.py OUT --onnxruntime-wheel w/onnxruntime-....whl --sgp4-wheel ... --tzdata-wheel ...
@@ -222,10 +222,16 @@ def publish(out: str, zips: list[str], url: str = "", changelog: str = "", exper
     return addresses
 
 
+def plain_http(url: str) -> bool:
+    """Whether zips would be downloaded over plain http (anyone on the way could swap the plugin's code that every PC then runs)."""
+    return url.strip().lower().startswith("http://")
+
+
 def main(argv=None) -> list[str]:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out", help="リポジトリのフォルダー（共有フォルダーか Web サーバーの公開フォルダー）")
-    parser.add_argument("--url", default="", help="そのフォルダーのアドレス（http://… か file://…、指定なしでフォルダーの file:// アドレス）")
+    parser.add_argument("--url", default="", help="そのフォルダーのアドレス（https://… か file://…、指定なしでフォルダーの file:// アドレス。"
+                                                    "http:// は経路で zip を差し替えられるので非推奨）")
     parser.add_argument("--zip", nargs="+", default=[], help="作ってある zip を載せる（指定なしで通常版と Windows 版を新しい版で作る）")
     parser.add_argument("--version", default="", help="作る zip の版（指定なしで metadata.txt の版 + UTC の日時）")
     parser.add_argument("--no-win64", action="store_true", help="Windows 版を作らない")
@@ -239,6 +245,9 @@ def main(argv=None) -> list[str]:
     parser.add_argument("--experimental", action="store_true", help="実験版として載せる（各 PC で「実験的なプラグインも表示する」が要る）")
     parser.add_argument("--allow-older", action="store_true", help="掲載中より古い版でも載せる（前の版に戻すとき）")
     args = parser.parse_args(argv)
+    if plain_http(args.url):
+        print("注意: http:// で配ると、途中の機器で zip（各 PC で動くプラグインのコード）を差し替えられる恐れがある。"
+              "https:// か共有フォルダー（file://）を推奨", file=sys.stderr)
     zips = list(args.zip)
     if not zips:
         if args.no_win64 and args.no_regular:

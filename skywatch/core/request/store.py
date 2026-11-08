@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
-from ..offline import OfflineWork, Pending, UploadReport, offline_of
+from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
@@ -269,7 +269,12 @@ def _keep_request(work: OfflineWork, store: RequestStoreConfig, req: ImagingRequ
     base = req.updated if req.object_id is not None else None
     req.updated = now
     data = {k: getattr(req, k) for k in _REQUEST_FIELDS if k != "pending_update"}
-    work.keep(KIND, store.label, req.id, "save", {"request": data}, base, req.object_id is not None, req.name)
+    kept = {"request": data}
+    if req.pending_update is not None:
+        # The save that found the ledger down timed out: it may be there (not someone else's change when sent).
+        kept["tried"] = [req.pending_update]
+    work.keep(KIND, store.label, req.id, "save", kept, base, req.object_id is not None, req.name)
+    req.pending_update = None
     return req
 
 
@@ -295,11 +300,13 @@ def upload_requests(client: EsriClient, store: RequestStoreConfig, token: Option
                 # Checked against what it was before the change made offline (#74).
                 req.updated = p.base if p.known else None
                 req.pending_update = None
-                _save_online(client, store, token, req, now)
+                _save_online(client, store, token, req, now, tried_of(p))
         except UnreachableError as error:
+            work.add_tried(KIND, store.label, p.item_id, [req.pending_update])
             report.kept.append(f"撮像依頼（{store.label}）: {error}")
             return
         except EsriError as error:
+            work.add_tried(KIND, store.label, p.item_id, [req.pending_update])
             work.note(p, str(error))
             report.kept.append(f"撮像依頼「{req.name}」: {error}")
             continue
@@ -335,22 +342,35 @@ def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[
     work = offline_of(client)
     if work is not None and work.down(store.url):
         return _keep_request(work, store, req, now)
+    waiting = work.item(KIND, store.label, req.id) if work is not None else None
+    tried: list[float] = []
+    if waiting is not None:
+        # Changed offline and not sent yet (the ledger answers again): checked against the ledger as it was
+        # before that change (#74), as sending it would be; what waited is then superseded by this save.
+        req.updated = waiting.base if waiting.known else None
+        req.pending_update = None
+        tried = tried_of(waiting)
     try:
-        return _save_online(client, store, token, req, now)
+        saved = _save_online(client, store, token, req, now, tried)
     except EsriError:
         # Cut off on the way (its reads may then have come from the cache): kept to send later.
         if work is None or not work.down(store.url):
             raise
         return _keep_request(work, store, req, now)
+    if waiting is not None:
+        work.drop(KIND, store.label, [req.id])
+    return saved
 
 
-def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float) -> ImagingRequest:
+def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float,
+                 tried: Sequence[float] = ()) -> ImagingRequest:
     """
     Adds a new request (no object id) or changes one; the request as saved
     (its object id set). The ledger is asked first: a request whose id is
     already there (an earlier save whose answer was lost, #73) is changed,
     not added again; one that someone else saved (or deleted) since it was
-    read is not overwritten (ConflictError, #74).
+    read is not overwritten (ConflictError, #74). `tried`: the 更新日時 of
+    earlier saves of it whose answer was lost while offline (not a conflict).
     """
     f = store.fields
     names, oid = _layer(client, store.url, token, store.label, (f["id"],))
@@ -367,7 +387,7 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
         elif server_oid is not None and server_oid != req.object_id:
             req.object_id = server_oid
         if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
-                and not _same_stamp(server_stamp, req.pending_update)):
+                and not any(_same_stamp(server_stamp, s) for s in (req.pending_update, *tried))):
             raise ConflictError(f"「{req.name}」はほかの人が読み込み後に更新したため保存を中止（読み込み直してから変更）")
     elif req.object_id is not None:
         raise ConflictError(f"「{req.name}」はほかの人が台帳から削除済み（読み込み直して確認）")

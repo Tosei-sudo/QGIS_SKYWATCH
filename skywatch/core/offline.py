@@ -390,12 +390,16 @@ class OfflineWork:
              known: bool = False, title: str = "") -> Pending:
         """
         Keeps an item to send (replacing what was kept for it, but not what it
-        was on the server before: the first change's `base` and `known` stay).
+        was on the server before: the first change's `base` and `known` stay,
+        and so do the saves whose answer was lost, data["tried"]).
         """
         with self.lock:
             before = self.item(kind, store, item_id)
             if before is not None:
                 base, known = before.base, before.known
+                tried = sorted(set(tried_of(before)) | set(data.get("tried") or ()))
+                if tried:
+                    data = dict(data, tried=tried)
             db = self.db()
             text = json.dumps(_plain(data), ensure_ascii=False)
             if before is None:
@@ -409,6 +413,25 @@ class OfflineWork:
             kept = self.item(kind, store, item_id)
         self._changed()
         return kept
+
+    def add_tried(self, kind: str, store: str, item_id: str, stamps: Iterable[Optional[float]]) -> None:
+        """
+        Remembers the 更新日時 of saves of an item kept here whose answer was
+        lost (a timeout: the server may hold them), so sending it later does
+        not take that save for someone else's change (data["tried"]).
+        """
+        new = [float(s) for s in stamps if isinstance(s, (int, float)) and math.isfinite(s)]
+        if not new:
+            return
+        with self.lock:
+            p = self.item(kind, store, item_id)
+            if p is None:
+                return
+            tried = sorted(set(tried_of(p)) | set(new))
+            data = dict(p.data, tried=tried)
+            db = self.db()
+            db.execute("UPDATE outbox SET data = ? WHERE seq = ?", (json.dumps(_plain(data), ensure_ascii=False), p.seq))
+            db.commit()
 
     def note(self, item: Pending, note: str) -> None:
         with self.lock:
@@ -463,6 +486,11 @@ class OfflineWork:
         order = {k: i for i, k in enumerate(KINDS)}
         rows.sort(key=lambda r: (order.get(r[0], 99), r[1]))
         return [(KINDS.get(k, k), store, n) for k, store, n in rows]
+
+
+def tried_of(p: Pending) -> list[float]:
+    """The 更新日時 of the saves of a waiting item whose answer was lost (OfflineWork.add_tried)."""
+    return [float(s) for s in p.data.get("tried") or () if isinstance(s, (int, float)) and not isinstance(s, bool)]
 
 
 def offline_of(client: Any) -> Optional[OfflineWork]:

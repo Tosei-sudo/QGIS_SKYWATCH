@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.health import NOTE, OK, PROBLEM, Result, check_all, report_text
 from ..qgis_io.tasks import run_task
+from .docks import plain_label
 
 COLORS = {PROBLEM: "#b91c1c", NOTE: "#b45309", OK: "#15803d"}
 
@@ -37,7 +38,7 @@ class HealthDialog(QDialog):
         intro = QLabel(tr("設定ファイルにある ArcGIS のサービスに 1 回ずつ問い合わせ、応答・サインイン・属性・編集の可否を確かめます（書き込みはしません）。"))
         intro.setWordWrap(True)
         layout.addWidget(intro)
-        self.summary = QLabel()
+        self.summary = plain_label(QLabel())
         layout.addWidget(self.summary)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels([tr("結果"), tr("設定の場所"), tr("内容")])

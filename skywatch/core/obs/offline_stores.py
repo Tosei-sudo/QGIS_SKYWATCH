@@ -15,7 +15,7 @@ from dataclasses import asdict, fields, replace
 from typing import Any, Callable, Optional
 
 from ..esri import ConflictError, EsriError, UnreachableError
-from ..offline import OfflineWork, Pending, UploadReport, now_ms
+from ..offline import OfflineWork, Pending, UploadReport, now_ms, tried_of
 from .areas import CheckedArea
 from .drafts import Draft
 from .model import Observation
@@ -95,8 +95,18 @@ class _Waiting:
                 self.work.drop(self.kind, self.label, [x.id])
                 continue
             seen = getattr(self.inner, "stamps", {}).get(x.id) if known else None
-            self.work.keep(self.kind, self.label, x.id, op, {self.key: asdict(x), "forGood": for_good}, seen, known,
-                           self._title(x))
+            data = {self.key: asdict(x), "forGood": for_good}
+            lost = getattr(self.inner, "pending", {}).get(x.id)
+            if lost is not None:
+                # The save that found the server down timed out: it may be there (not someone else's change when sent).
+                data["tried"] = [lost]
+            self.work.keep(self.kind, self.label, x.id, op, data, seen, known, self._title(x))
+
+    def _sent(self, ids) -> None:
+        """Items saved (or removed) on the server directly: what waited for them is superseded, not sent later over them."""
+        ids = [i for i in ids if i]
+        if ids and self.work.ids(self.kind, self.label) & set(ids):
+            self.work.drop(self.kind, self.label, ids)
 
     def _title(self, x) -> str:
         return ""
@@ -144,13 +154,16 @@ class OfflineObservationStore(_Waiting):
             try:
                 self.inner.save(records)
                 self.last_saved, self.last_conflicts = set(self.inner.last_saved), set(self.inner.last_conflicts)
+                self._sent(self.last_saved)
                 return
             except EsriError:
                 # Cut off on the way (its checks may then have read the cache): what was not saved waits.
                 if not self.offline:
                     self.last_saved, self.last_conflicts = set(self.inner.last_saved), set(self.inner.last_conflicts)
+                    self._sent(self.last_saved)
                     raise
                 done = set(self.inner.last_saved)
+                self._sent(done)
                 records = [o for o in records if o.id not in done]
                 self.last_saved = done
         self._keep(records, "save")
@@ -165,13 +178,16 @@ class OfflineObservationStore(_Waiting):
                 out = self.inner.remove(records, now)
                 self.last_removed, self.last_marked = set(self.inner.last_removed), list(self.inner.last_marked)
                 self.last_conflicts = set(self.inner.last_conflicts)
+                self._sent(self.last_removed)
                 return out
             except EsriError:
                 if not self.offline:
                     self.last_removed, self.last_marked = set(self.inner.last_removed), list(self.inner.last_marked)
                     self.last_conflicts = set(self.inner.last_conflicts)
+                    self._sent(self.last_removed)
                     raise
                 done = set(self.inner.last_removed)
+                self._sent(done)
                 marked_done = list(self.inner.last_marked)
                 records = [o for o in records if o.id not in done]
         for_good = self.removes_for_good()
@@ -209,7 +225,7 @@ class OfflineObservationStore(_Waiting):
                 gone.append(o)
                 continue
             if p.known:
-                self.inner.expect(o.id, p.base, at)
+                self.inner.expect(o.id, p.base, at, tried_of(p))
             saves.append(o)
         if saves:
             try:
@@ -220,6 +236,8 @@ class OfflineObservationStore(_Waiting):
                 for o in saves:
                     if o.id not in self.inner.last_saved:
                         self.work.note(by_id[o.id], str(error))
+                        # This send's answer lost (a timeout): it may be on the server when sent again.
+                        self.work.add_tried(self.kind, self.label, o.id, [self.inner.pending.get(o.id)])
                 if not self.inner.last_saved:
                     report.kept.append(f"{KIND_NAME}（{self.label}）: {error}")
             sent = set(self.inner.last_saved)
@@ -284,6 +302,7 @@ class OfflineAreaStore(_Waiting):
         if not self.offline:
             try:
                 self.inner.save(areas)
+                self._sent([a.id for a in areas])
                 return
             except EsriError:
                 if not self.offline:
@@ -293,7 +312,9 @@ class OfflineAreaStore(_Waiting):
     def remove(self, areas: list[CheckedArea], now: Optional[int] = None) -> list[CheckedArea]:
         if not self.offline:
             try:
-                return self.inner.remove(areas, now)
+                out = self.inner.remove(areas, now)
+                self._sent([a.id for a in areas])
+                return out
             except EsriError:
                 if not self.offline:
                     raise

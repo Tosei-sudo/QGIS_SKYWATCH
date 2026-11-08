@@ -262,7 +262,8 @@ def main(argv=None) -> int:
     def common(p):
         p.add_argument("--portal", required=True, help="ポータルの URL（https://gis.example/portal）")
         p.add_argument("--user", default="", help="ポータルのユーザー（省略すると ArcGIS Pro のサインインを使う）")
-        p.add_argument("--password", default="", help="パスワード（省略すると環境変数 SKYWATCH_PORTAL_PASSWORD か入力）")
+        p.add_argument("--password", default="", help="パスワード（非推奨: コマンドの履歴・プロセスの一覧に残る。"
+                                                   "省略すると環境変数 SKYWATCH_PORTAL_PASSWORD か入力）")
         p.add_argument("--no-verify", action="store_true", help="証明書を確かめない（社内の自己署名証明書のとき）")
         p.add_argument("--config", default="", help="書き出すプラグインの設定ファイル（省略すると画面に出す）")
 
@@ -284,6 +285,9 @@ def main(argv=None) -> int:
     p.add_argument("--url", required=True, help="サービスの URL（…/FeatureServer）")
 
     args = parser.parse_args(argv)
+    if args.password:
+        print("  ! --password のパスワードはコマンドの履歴・プロセスの一覧に残る（環境変数 SKYWATCH_PORTAL_PASSWORD か入力を推奨）",
+              file=sys.stderr)
     for name in getattr(args, "tables", []) + getattr(args, "skip", []):
         if name not in schema.BY_NAME:
             parser.error(f"知らないテーブル: {name}")

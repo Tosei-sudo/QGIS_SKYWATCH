@@ -34,7 +34,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
-from .docks import PluginDock, ask_no
+from .docks import PluginDock, ask_no, plain_label
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .image_files_dialog import choose_image_files
@@ -147,7 +147,7 @@ class CatalogDock(PluginDock):
 
         self.similar = QGroupBox(self.tr("類似画像の検索"))
         similar = QFormLayout(self.similar)
-        self.reference_label = QLabel()
+        self.reference_label = plain_label(QLabel())
         self.reference_label.setWordWrap(True)
         similar.addRow(self.reference_label)
         self.same_sensor = QCheckBox(self.tr("同じセンサー"))
@@ -176,7 +176,7 @@ class CatalogDock(PluginDock):
         self.search_button = QPushButton(self.tr("検索"))
         self.search_button.clicked.connect(self.search)
         row.addWidget(self.search_button)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         row.addWidget(self.status, 1)
         # 分担 (`assignments`): who works which image, and only those nobody has taken.

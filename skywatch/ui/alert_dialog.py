@@ -30,6 +30,7 @@ from ..core.obs.alerts import (
 )
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
+from .docks import plain_label, plain_tip
 
 DAY_MS = 86_400_000
 
@@ -60,7 +61,7 @@ class AlertDialog(QDialog):
         self._shown_format = ""
         self._filling = False
         layout = QVBoxLayout(self)
-        self.note = QLabel()
+        self.note = plain_label(QLabel())
         self.note.setWordWrap(True)
         layout.addWidget(self.note)
         self.tabs = QTabWidget()
@@ -158,7 +159,7 @@ class AlertDialog(QDialog):
         g.addLayout(row)
         self.tabs.addTab(log, self.tr("通報記録"))
 
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.reset()
@@ -352,8 +353,8 @@ class AlertDialog(QDialog):
             if marks:
                 check.setText(" ".join(marks))
             if tips:
-                check.setToolTip("\n".join(tips))
-                cell.setToolTip("\n".join(tips))
+                check.setToolTip(plain_tip("\n".join(tips)))
+                cell.setToolTip(plain_tip("\n".join(tips)))
             self.lines_table.setItem(r, 1, cell)
         self.lines_table.blockSignals(False)
         self._filling = False
