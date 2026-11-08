@@ -856,7 +856,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 ## 設定ファイルの書き方
 
-プラグインが読む設定ファイル（`config.json`）の書き方。ビューアの `config.json` と共用できるが、プラグインだけの項目・読み方の違いが増えたので、**プラグインが実際に読む項目**をここにまとめる（`satellite_observation/core/config.py` の `KEYS` と各項目の読み込み処理が元）。各機能の細かい動きは、表の「詳しく」の節を参照。
+プラグインが読む設定ファイル（`config.json`）の書き方。ビューアの `config.json` と共用できるが、プラグインだけの項目・読み方の違いが増えたので、**プラグインが実際に読む項目**をここにまとめる（`satellite_observation/core/config.py` の `KEYS` と各項目の読み込み処理が元）。各機能の細かい動きは、表の「詳しく」の節を参照。Esri 側に作るテーブル・属性の一覧は [Esri 側のテーブル定義](#esri-側のテーブル定義)。
 
 ### 設定ファイル作成ツール（`tools/config_builder.html`）
 
@@ -995,6 +995,506 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 - 増えたり変わったりする対応表などのデータは、設定ファイルではなく Esri のテーブル・レイヤーに置き、設定ファイルには属性名・テーブルの URL だけを書く（分類体系の `taxonomyTable` など）
 
 ビューアとの違い（プラグインだけの項目、ビューアと読み方が違う項目）は [docs/differences.md](docs/differences.md)。
+
+## Esri 側のテーブル定義
+
+プラグインが読み書きする Esri のレイヤー・テーブルの一覧（RDBMS（エンタープライズ ジオデータベース）に作る前提）。属性名と役割の対応は各モジュールの既定（`DEFAULT_*_FIELDS`）と各項目の読み込み処理が元。プラグインは**属性名**（エイリアスではなく）で読み書きするので、エイリアスは表のとおりでなくてもよい。
+
+### 命名の決まり
+
+- テーブル・フィーチャクラスの名前は `TBL_` で始め、すべて大文字、語は `_` で区切る（`TBL_OBSERVATION`、`TBL_EVENT_LINK`）
+- 属性名もすべて大文字・`_` 区切り（`IMAGE_ID`・`CREATED_AT`）。30 文字以内
+- DBMS の予約語は属性名に使わない。プラグインの既定の属性名のうち **`MODE`（Oracle の予約語）と `FILE`（Oracle・SQL Server の予約語）** だけが当たるので、下の表ではそれぞれ `SENSOR_MODE`・`OUTPUT_FILE` とし、設定ファイルで対応を書く（[既定の属性名と違う名前の設定](#既定の属性名と違う名前の設定)）。プラグインの既定の名前はそのまま（変えていない）
+- 既定の属性名がない役割（画像カタログ・衛星カタログなど、設定ファイルの `fields` で必ず指定するもの）は、この決まりに従った推奨の名前を書いた。既にあるテーブルを使うなら、その属性名を `fields` に書けばよい
+- テーブルの名前はプラグインからは見えない（設定ファイルにはサービスの URL `…/FeatureServer/n` を書く）。下の名前は推奨
+
+### 型と共通の属性
+
+| 型（表の書き方） | Esri の型 | ArcGIS Pro での名前 | 中身 |
+| --- | --- | --- | --- |
+| `String(n)` | `esriFieldTypeString`（長さ n） | テキスト | 文字列。長さを書いていないものは 255 |
+| `Date` | `esriFieldTypeDate` | 日付 | 日時（UTC で保存。表示のタイムゾーンは[日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones)） |
+| `Double` | `esriFieldTypeDouble` | Double | 実数 |
+| `Integer` | `esriFieldTypeInteger` | Long | 整数 |
+| `SmallInteger` | `esriFieldTypeSmallInteger` | Short | 0・1 の印など（`ACTIVE`・`PRESENT`・`MANUAL`） |
+
+- `OBJECTID`（`esriFieldTypeOID`）と形状（`SHAPE`）は ArcGIS が作る。座標系は何でもよい（プラグインは WGS 84（4326）で送受信し、サーバーが変換する）
+- 4000 を超える長さの文字列（分類体系の `SPECS`、引き継ぎメモの `TEXT` など）は、DBMS によっては CLOB などの大きな文字列の型になる（ArcGIS が作る）。日本語を入れるので、データベースの文字コードは Unicode（Oracle なら AL32UTF8 か各国語文字セットの NVARCHAR2）に
+- **作成者・更新者の 4 属性**: プラグインが書き込むテーブル（下の表で「書き込み」のもの）にはすべて、次の 4 つを足しておくと、追加・更新のたびに入る（[作成者・更新者の記録](#作成者更新者の記録edittracking)、設定ファイルの `editTracking`。ない属性は書かない）。ArcGIS 自身の編集者トラッキング（`created_user` など）はサインインのアカウントで上書きするので、この 4 属性には使わない
+
+| 属性名 | エイリアス | 型 | 中身 | 役割（`editTracking.fields`） |
+| --- | --- | --- | --- | --- |
+| `CREATED_DATE` | 作成日時 | `Date` | 追加した日時 | `createdAt` |
+| `CREATED_USER` | 作成者 | `String(255)` | 追加した人（環境変数 `USERNAME`） | `createdBy` |
+| `UPDATED_DATE` | 更新日時 | `Date` | 最後に更新した日時 | `updatedAt` |
+| `UPDATED_USER` | 更新者 | `String(255)` | 最後に更新した人 | `updatedBy` |
+
+### テーブルの一覧
+
+| 推奨の名前 | 形状 | 読み書き | 中身 | 設定ファイルの項目 |
+| --- | --- | --- | --- | --- |
+| [`TBL_IMAGE_CATALOG`](#tbl_image_catalog画像カタログ) | ポリゴン | 読み | 画像カタログ（フットプリント） | `imageCatalogs[].url` |
+| [`TBL_SATELLITE`](#tbl_satellite衛星カタログ) | なし（テーブル） | 読み | 衛星カタログ（TLE・諸元） | `satelliteCatalogs[].url` |
+| [`TBL_SENSOR_MODE`](#tbl_sensor_modeセンサーモード) | なし | 読み | センサーの撮像モード | `sensorCatalogs[].url` |
+| [`TBL_SATELLITE_ALIAS`](#tbl_satellite_alias衛星名の対応表) | なし | 読み | 衛星名の対応表 | `satelliteAliases.url` |
+| [`TBL_IMAGING_PLAN`](#tbl_imaging_plan撮像計画) | ポリゴン | 書き込み | 保存した撮像計画 | `planStores[].url` |
+| [`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) | ポリゴン | 書き込み | 撮像依頼台帳 | `requestStores[].url` |
+| [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) | なし | 書き込み | 撮像依頼の日次出力の履歴 | `requestStores[].history` |
+| [`TBL_OBSERVATION`](#tbl_observation観測記録) | ポイント | 書き込み | 観測記録 | `observationStores[].url` |
+| [`TBL_OBSERVATION_AREA`](#tbl_observation_area確認範囲) | ポリゴン | 書き込み | 確認範囲 | `observationStores[].areas` |
+| [`TBL_TAXONOMY`](#tbl_taxonomy分類体系) | なし | 書き込み | 共有の分類体系 | `observationStores[].taxonomyTable` |
+| [`TBL_ALERT_RULE`](#tbl_alert_rule通報の条件) | なし | 読み | 通報の条件 | `alertReports.rules` |
+| [`TBL_ALERT_GEOFENCE`](#tbl_alert_geofenceジオフェンス) | ポリゴン | 読み | ジオフェンス | `alertReports.geofences` |
+| [`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) | ポリゴン | 読み | 地名・施設名の範囲 | `alertReports.namedAreas` |
+| [`TBL_ALERT_LOG`](#tbl_alert_log通報記録) | なし | 書き込み | 通報した記録 | `alertReports.table` |
+| [`TBL_ASSIGNMENT`](#tbl_assignment分担) | なし | 書き込み | 画像ごとの分担 | `assignments` |
+| [`TBL_HANDOVER_MEMO`](#tbl_handover_memo引き継ぎメモ) | なし | 書き込み | 引き継ぎメモ | `handover.table` |
+| [`TBL_EVENT`](#tbl_eventイベント) | ポリゴン（なしも可） | 書き込み | イベント（地震対応など） | `events.layer` |
+| [`TBL_EVENT_LINK`](#tbl_event_linkイベントの紐付け) | なし | 書き込み | イベントと画像・記録・依頼の紐付け | `events.links` |
+| [`TBL_AI_RESULT`](#tbl_ai_result外部-ai-の結果) | ポリゴンかポイント | 読み | 外部 AI の結果 | `aiResultSources[].url` |
+| [`TBL_DETECTION`](#tbl_detection検出結果の転記先) | ポリゴンかポイント | 書き込み | プラグインの物体検出の転記先 | `detectionOutputs[].url` |
+| [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
+
+使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
+
+### `TBL_IMAGE_CATALOG`（画像カタログ）
+
+フットプリントのポリゴン（1 画像 = 1 フィーチャ）。`imageCatalogs[].fields` で役割ごとに属性名を指定する（既定なし）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID。観測記録・計画の追跡・AI結果が使う | `id` |
+| `ACQUIRED_AT` | 撮像日時 | `Date` | 撮像日時 | `acquired` |
+| `REGISTERED_AT` | 登録日時 | `Date` | カタログに登録した日時（新着の通知） | `registered` |
+| `SYSTEM_REGISTERED_AT` | システム登録日時 | `Date` | 元のシステムに登録した日時 | `systemRegistered` |
+| `SENSOR` | センサー | `String(255)` | 衛星・センサー名（衛星カタログの名前か[対応表](#衛星名の対応表satellitealiases)の別名と照合） | `sensor` |
+| `OFF_NADIR` | オフナディア角 | `Double` | 撮像の角度（度）。種類は `angleKind`（`offNadir`・`incidence`・`elevation`） | `angle` |
+| `SAT_AZIMUTH` | 衛星方位角 | `Double` | 地上から見た衛星の方位角（度） | `azimuth` |
+| `FILE_PATH` | ファイルパス | `String(1000)` | 画像（かフォルダ）のパス。**必須**（`source` のどれか 1 つ以上） | `source` |
+| `COG_URL` | 画像URL | `String(1000)` | 画像の URL（COG など）。`source` は配列で複数書け、先に書いたものから使う | `source` |
+
+### `TBL_SATELLITE`（衛星カタログ）
+
+1 衛星 1 行（モードごとに行を分けてもよい）。`satelliteCatalogs[].fields` で指定（既定なし）。数の属性が空なら `defaults`、それもなければプラグインの既定。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `SAT_NAME` | 衛星名 | `String(255)` | 衛星名（なければ TLE の名前） | `name` |
+| `NORAD_ID` | NORAD番号 | `String(64)` | 衛星の ID（なければ衛星名） | `id` |
+| `TLE_LINE1` | TLE1行目 | `String(255)` | TLE の 1 行目。**必須**（`TLE_LINE1`＋`TLE_LINE2` か `tle` のどちらか） | `tle1` |
+| `TLE_LINE2` | TLE2行目 | `String(255)` | TLE の 2 行目 | `tle2` |
+| （`TLE`） | TLE | `String(1000)` | 2 行（か名前つき 3 行）をまとめて 1 属性に持つとき | `tle` |
+| `MAX_OFF_NADIR` | 最大オフナディア角 | `Double` | 向けられる角度の上限（度、既定 30） | `maxOffNadir` |
+| `MIN_OFF_NADIR` | 最小オフナディア角 | `Double` | 角度の下限（度、既定 0。SAR の近距離側など） | `minOffNadir` |
+| `SWATH` | 観測幅 | `Double` | 観測幅（`swathUnit` の単位、既定 km。既定 10） | `swath` |
+| `SCENE_LENGTH` | シーン長 | `Double` | 1 シーンの長さ（`swath` と同じ単位。空なら観測幅と同じ） | `length` |
+| `LOOK_SIDE` | 観測方向 | `String(16)` | `右`・`左`・`両方`（`right`・`R` なども可） | `lookSide` |
+| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR` など（`sarPattern` に合えば SAR） | `kind` |
+| `SCENES_PER_PASS` | 1パスのシーン数 | `Integer` | 1 回のパスで撮れるシーン数（既定 1） | `scenesPerPass` |
+| `MIN_INTERVAL_MIN` | 最小撮像間隔 | `Double` | 撮像と撮像の間隔の下限（分、既定 0） | `minInterval` |
+| `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の撮像数の上限（0 で制限なし） | `maxPerDay` |
+| `SERIES` | シリーズ | `String(255)` | 衛星シリーズ（空なら名前の末尾の番号を除いたもの） | `series` |
+| `LEAD_TIME_H` | 発注リードタイム | `Double` | 撮像の何時間前までに発注するか（時間、既定 0） | `leadTime` |
+| `SENSOR` | センサー | `String(255)` | 使うセンサー（`TBL_SENSOR_MODE` の `SENSOR`） | `sensor` |
+| `SENSOR_MODE` | センサーモード | `String(255)` | この行のモード（モードごとに行を分けるとき） | `mode` |
+| `RESOLUTION_M` | 分解能 | `Double` | 分解能（m） | `resolution` |
+| `SAT_SYSTEM` | 衛星システム | `String(255)` | 発注するシステム（`requestExports` の `system`） | `system` |
+
+### `TBL_SENSOR_MODE`（センサーモード）
+
+1 センサー・モード 1 行。空の値は衛星の値を使う。`sensorCatalogs[].fields` で指定（既定なし）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `SENSOR` | センサー | `String(255)` | センサー名。**必須** | `sensor` |
+| `SENSOR_MODE` | センサーモード | `String(255)` | モード名（ストリップマップ・スポットライトなど） | `mode` |
+| `SENSOR_TYPE` | センサー種別 | `String(64)` | `光学`・`SAR` など | `kind` |
+| `MAX_OFF_NADIR` | 最大オフナディア角 | `Double` | 角度の上限（度） | `maxOffNadir` |
+| `MIN_OFF_NADIR` | 最小オフナディア角 | `Double` | 角度の下限（度） | `minOffNadir` |
+| `SWATH` | 観測幅 | `Double` | 観測幅（`swathUnit`） | `swath` |
+| `SCENE_LENGTH` | シーン長 | `Double` | 1 シーンの長さ | `length` |
+| `LOOK_SIDE` | 観測方向 | `String(16)` | `右`・`左`・`両方` | `lookSide` |
+| `SCENES_PER_PASS` | 1パスのシーン数 | `Integer` | 1 パスのシーン数 | `scenesPerPass` |
+| `MIN_INTERVAL_MIN` | 最小撮像間隔 | `Double` | 撮像間隔の下限（分） | `minInterval` |
+| `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の上限 | `maxPerDay` |
+| `LEAD_TIME_H` | 発注リードタイム | `Double` | 発注の期限（時間前） | `leadTime` |
+| `RESOLUTION_M` | 分解能 | `Double` | 分解能（m） | `resolution` |
+| `IS_DEFAULT` | 既定モード | `SmallInteger` | そのセンサーのふだんのモードなら 1（`はい`・`true` などの文字も可） | `primary` |
+
+### `TBL_SATELLITE_ALIAS`（衛星名の対応表）
+
+1 行に 1 つ（かカンマ区切りで複数）の別名。`satelliteAliases.fields` で指定（既定なし。2 つとも必須）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `SAT_NAME` | 衛星名 | `String(255)` | 衛星カタログの名前か ID。**必須** | `satellite` |
+| `ALIAS` | 別名 | `String(1000)` | 画像カタログでの名前（`WV03, WV3`）。**必須** | `alias` |
+
+### `TBL_IMAGING_PLAN`（撮像計画）
+
+撮像範囲のポリゴン（1 撮像 = 1 フィーチャ）。`planStores[].fields`（既定は下の名前。`mode` だけ既定 `MODE` と違う）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `PLAN_ID` | 計画ID | `String(64)` | 計画（保存 1 回分）の ID。**必須** | `planId` |
+| `PLAN_NAME` | 計画名 | `String(255)` | 計画の名前 | `planName` |
+| `SHOT_TIME` | 撮像日時 | `Date` | 撮像の時刻。**必須** | `shotTime` |
+| `SATELLITE` | 衛星名 | `String(255)` | 衛星名 | `satellite` |
+| `SATELLITE_ID` | 衛星ID | `String(64)` | 衛星の ID | `satelliteId` |
+| `SENSOR_MODE` | センサーモード | `String(255)` | モード（既定の属性名は `MODE`。設定が必要） | `mode` |
+| `TARGET` | 対象 | `String(255)` | 対象の名前 | `target` |
+| `OFF_NADIR` | オフナディア角 | `Double` | オフナディア角（度） | `offNadir` |
+| `INCIDENCE` | 入射角 | `Double` | 入射角（度） | `incidence` |
+| `PASS_DIR` | 軌道方向 | `String(16)` | 昇交・降交 | `pass` |
+| `LOOK_SIDE` | 観測方向 | `String(16)` | 右・左 | `side` |
+| `STATUS` | 状態 | `String(16)` | `予定`・`撮像済み`・`未撮像`・`取消` | `status` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 撮像済みにした画像の ID | `imageId` |
+| `CREATED_AT` | 保存日時 | `Date` | 保存した日時 | `created` |
+
+### `TBL_IMAGING_REQUEST`（撮像依頼台帳）
+
+依頼の範囲のポリゴン（1 依頼 = 1 フィーチャ。点の依頼も正方形にして `SHAPE_KIND` に `点`）。`requestStores[].fields`（既定は下の名前）。値の詳しい意味は [docs/imaging-requests.md](docs/imaging-requests.md) の「4. 依頼台帳」。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `REQ_ID` | 依頼ID | `String(64)` | 依頼の ID（UUID）。**必須** | `id` |
+| `REQ_NAME` | 名称 | `String(255)` | 依頼の名前 | `name` |
+| `CATEGORY` | 区分 | `String(16)` | `定点`・`臨時` | `category` |
+| `ACHIEVE` | 達成条件 | `String(16)` | `毎回`・`期間内1回` | `achieve` |
+| `START_AT` | 開始 | `Date` | 期間の始まり | `start` |
+| `END_AT` | 終了 | `Date` | 期間の終わり | `end` |
+| `REPEAT` | 繰り返し | `String(64)` | `毎日`・`曜日:月水金`・`間隔:3` | `repeat` |
+| `STATUS` | 状態 | `String(16)` | `有効`・`停止`・`完了` | `status` |
+| `PRIORITY` | 優先度 | `Integer` | 1〜1000（小さいほど高い） | `priority` |
+| `BOOST` | 繰り上げ量 | `Integer` | 未撮像のときの繰り上げ（100 単位） | `boost` |
+| `KIND` | 種別 | `String(16)` | `任意`・`光学`・`SAR` | `kind` |
+| `SERIES` | 衛星シリーズ | `String(1000)` | シリーズ（カンマ区切り。空なら問わない） | `series` |
+| `SATELLITES` | 衛星 | `String(1000)` | 個別に指定する衛星（カンマ区切り） | `satellites` |
+| `SENSOR_MODES` | センサーモード | `String(1000)` | センサー・モード（カンマ区切り） | `modes` |
+| `OFF_NADIR_MIN` | オフナディア角下限 | `Double` | 度 | `offNadirMin` |
+| `OFF_NADIR_MAX` | オフナディア角上限 | `Double` | 度 | `offNadirMax` |
+| `INCIDENCE_MIN` | 入射角下限 | `Double` | 度 | `incidenceMin` |
+| `INCIDENCE_MAX` | 入射角上限 | `Double` | 度 | `incidenceMax` |
+| `LOOK_SIDE` | 観測方向 | `String(16)` | `任意`・`右`・`左` | `lookSide` |
+| `ORBIT_DIR` | 軌道方向 | `String(16)` | `任意`・`昇交`・`降交` | `orbitDir` |
+| `RESOLUTION_MAX` | 分解能 | `Double` | これより細かい分解能（m） | `resolution` |
+| `TIME_OF_DAY` | 時間帯 | `String(16)` | `任意`・`昼`・`夜` | `timeOfDay` |
+| `CLOUD_NO_GO` | 実施しない雲量 | `Integer` | この雲量（%）以上なら実施しない（光学） | `cloudNoGo` |
+| `SYSTEMS` | 優先システム | `String(1000)` | 優先するシステムの順（カンマ区切り） | `systems` |
+| `SHAPE_KIND` | 範囲の種類 | `String(16)` | `範囲`・`点` | `shapeKind` |
+| `REQUESTER` | 依頼者 | `String(255)` | 依頼者 | `requester` |
+| `NOTE` | メモ | `String(4000)` | メモ | `note` |
+| `CREATED_AT` | 登録日時 | `Date` | 登録した日時 | `created` |
+| `UPDATED_AT` | 更新日時 | `Date` | 更新した日時 | `updated` |
+
+### `TBL_REQUEST_HISTORY`（撮像依頼の出力履歴）
+
+日次出力の 1 依頼・1 日 1 行（形状なし）。`requestStores[].historyFields`（既定は下の名前。`file` だけ既定 `FILE` と違う）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `RUN_ID` | 出力ID | `String(64)` | 出力 1 回の ID | `runId` |
+| `RUN_DATE` | 出力日時 | `Date` | 出力した日時 | `runDate` |
+| `TARGET_DAY` | 対象日 | `String(16)` | 対象の日（`2026-11-08`）。**必須** | `day` |
+| `REQ_ID` | 依頼ID | `String(64)` | 台帳の `REQ_ID`。**必須** | `requestId` |
+| `SYSTEM` | システム | `String(255)` | 出力した衛星システム | `system` |
+| `SATELLITE` | 衛星 | `String(255)` | 割り当てた衛星 | `satellite` |
+| `PRIORITY_OUT` | 出力優先度 | `String(64)` | システムに渡した優先度（`High` など） | `priority` |
+| `CLOUD` | 雲量予報 | `Double` | 出力時の雲量予報（%） | `cloud` |
+| `SCENES` | シーン数 | `Integer` | 見積もったシーン数 | `scenes` |
+| `RESULT` | 結果 | `String(64)` | 出力・見送りなど | `result` |
+| `REASON` | 理由 | `String(1000)` | 見送り・警告の理由 | `reason` |
+| `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル（既定の属性名は `FILE`。設定が必要） | `file` |
+| `CAPTURED` | 撮像結果 | `String(16)` | `未判定`・`撮像済み`・`未撮像` | `captured` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 撮像済みにした画像の ID | `imageId` |
+| `BOOST_DONE` | 繰り上げ済み | `Integer` | 繰り上げを済ませた量 | `boostDone` |
+
+### `TBL_OBSERVATION`（観測記録）
+
+記録の位置のポイント（1 記録 = 1 フィーチャ）。`observationStores[].fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `OBS_ID` | 記録ID | `String(64)` | 記録の ID（UUID）。**必須** | `id` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID（カタログの画像 ID か、ファイル名） | `imageId` |
+| `IMAGE_NAME` | 画像名 | `String(255)` | 画像の名前 | `imageName` |
+| `IMAGE_TIME` | 撮像日時 | `Date` | 画像の撮像日時 | `imageTime` |
+| `OBJECT_ID` | モノID | `String(64)` | モノ（同じ船・機体など）の ID（UUID）。**必須** | `objectId` |
+| `OBJECT_NAME` | モノの名前 | `String(255)` | 船名・機番など | `objectName` |
+| `KIND` | 種別 | `String(1000)` | 分類のパス（`船舶 > 貨物船 > コンテナ船`） | `kind` |
+| `ACTIVITY` | 活動 | `String(255)` | 停泊・航行など | `activity` |
+| `PRESENT` | 在不在 | `SmallInteger` | 在 1・不在 0 | `present` |
+| `NOTE` | 備考 | `String(4000)` | 備考（AI の結果から取り込んだ印 `[AI:…]` も） | `note` |
+| `LENGTH_M` | 長さ | `Double` | 長さ（m、2 点以上で測ったとき） | `length` |
+| `HEADING` | 向き | `Double` | 向き（度、北から時計回り） | `heading` |
+| `WIDTH_M` | 幅 | `Double` | 幅（m、3・4 点で測ったとき） | `width` |
+| `CONFIDENCE` | 確度 | `String(64)` | 確定・推定・不明など | `confidence` |
+| `OBSERVER` | 記録者 | `String(255)` | 記録した人 | `recordedBy` |
+| `UPDATED_BY` | 更新者名 | `String(255)` | 最後に直した人（記録者と同じ名前の欄） | `updatedBy` |
+| `CREATED_AT` | 記録日時 | `Date` | 記録した日時 | `created` |
+| `UPDATED_AT` | 修正日時 | `Date` | 最後に直した日時（ほかの人の変更との食い違いの確認にも使う） | `updated` |
+| `DELETED_AT` | 削除日時 | `Date` | 削除した日時（`softDelete`。空なら有効。この属性がなければ完全に消す） | `deleted` |
+
+### `TBL_OBSERVATION_AREA`（確認範囲）
+
+確認した範囲のポリゴン。`observationStores[].areas.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `AREA_ID` | 範囲ID | `String(64)` | 範囲の ID（UUID）。**必須** | `id` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID | `imageId` |
+| `IMAGE_NAME` | 画像名 | `String(255)` | 画像の名前 | `imageName` |
+| `IMAGE_TIME` | 撮像日時 | `Date` | 画像の撮像日時 | `imageTime` |
+| `KIND` | 対象の種別 | `String(1000)` | 確かめた種別（分類のパス。空ならすべて） | `kind` |
+| `NOTE` | 備考 | `String(4000)` | 備考 | `note` |
+| `OBSERVER` | 記録者 | `String(255)` | 記録した人 | `recordedBy` |
+| `CREATED_AT` | 記録日時 | `Date` | 記録した日時 | `created` |
+| `UPDATED_AT` | 修正日時 | `Date` | 直した日時 | `updated` |
+| `DELETED_AT` | 削除日時 | `Date` | 削除した日時 | `deleted` |
+
+### `TBL_TAXONOMY`（分類体系）
+
+1 分類 1 行（形状なし）。`PATH` が `#諸元項目` の行は分類ではなく諸元の項目の定義。`observationStores[].taxonomyTable.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `PATH` | 分類 | `String(1000)` | 分類のパス（`船舶 > 貨物船`）。**必須** | `path` |
+| `LEVELS` | 階層名 | `String(1000)` | 階層の名前（`大分類,種別,級`。大分類の行） | `levels` |
+| `NAME_LABEL` | 名前の見出し | `String(255)` | モノの名前の見出し（船名・機番） | `nameLabel` |
+| `MEMBERS` | 個体 | `String(8000)` | その分類のモノの名前（カンマ区切り） | `members` |
+| `SPECS` | 諸元 | `String(16000)` | 諸元（JSON） | `specs` |
+| `PHOTOS` | 参考写真 | `String(8000)` | 参考写真（JSON） | `photos` |
+| `ACTIVITIES` | 活動 | `String(2000)` | その大分類の活動（カンマ区切り） | `activities` |
+| `SORT_ORDER` | 並び順 | `Integer` | 並び順 | `order` |
+
+### `TBL_ALERT_RULE`（通報の条件）
+
+1 行 1 条件（形状なし）。`alertReports.rules.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `KIND` | 分類 | `String(1000)` | 分類（その分類以下。空欄ですべて） | `kind` |
+| `ACTIVITIES` | 活動 | `String(2000)` | 活動（カンマ区切り。空欄か `*` ですべて） | `activities` |
+| `MIN_CONFIDENCE` | 確度の下限 | `String(64)` | 確度の下限 | `minConfidence` |
+| `AREA` | ジオフェンス | `String(255)` | ジオフェンスの `NAME`（`*` でどれかの中、空欄で問わない） | `area` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 で停止 | `active` |
+| `NOTE` | 備考 | `String(1000)` | 条件の説明 | `note` |
+| `WEIGHT` | 重み | `Double` | 重要度スコアの条件の重み（0〜1 か 0〜100、空欄は 1） | `weight` |
+
+### `TBL_ALERT_GEOFENCE`（ジオフェンス）
+
+ポリゴン。`alertReports.geofences.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `NAME` | 名前 | `String(255)` | ジオフェンスの名前（条件の `AREA`） | `name` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
+| `WEIGHT` | 重み | `Double` | 重要度スコアの場所の重み（空欄は 1） | `weight` |
+
+### `TBL_NAMED_AREA`（地名のポリゴン）
+
+地名・施設名の範囲のポリゴン（記録を含むいちばん小さいものが通報の `place`）。`alertReports.namedAreas.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `NAME` | 地名 | `String(255)` | 地名・施設名 | `name` |
+| `KIND` | 種類 | `String(64)` | 港・施設など | `kind` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
+
+### `TBL_ALERT_LOG`（通報記録）
+
+通報した記録の 1 記録 1 行（形状なし）。`alertReports.table.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `OBS_ID` | 記録ID | `String(64)` | 観測記録の `OBS_ID`。**必須** | `obsId` |
+| `REPORT_NAME` | フォーマット名 | `String(255)` | 使ったフォーマットの名前 | `report` |
+| `TEXT` | 通報文 | `String(4000)` | 通報した行 | `text` |
+| `REPORTED_AT` | 通報日時 | `Date` | 通報した日時 | `reportedAt` |
+| `REPORTED_BY` | 通報者 | `String(255)` | 通報した人 | `reportedBy` |
+| `BATCH_ID` | 通報ID | `String(64)` | 1 回の通報の ID | `batch` |
+| `MANUAL` | 手動 | `SmallInteger` | 手動で追加した記録は 1 | `manual` |
+
+### `TBL_ASSIGNMENT`（分担）
+
+画像ごとの担当（形状なし）。`assignments.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID。**必須** | `imageId` |
+| `IMAGE_NAME` | 画像名 | `String(255)` | 画像の名前 | `imageName` |
+| `IMAGE_TIME` | 撮像日時 | `Date` | 画像の撮像日時 | `imageTime` |
+| `ASSIGNEE` | 担当者 | `String(255)` | 担当者（`editTracking` と同じユーザー名）。**必須** | `assignee` |
+| `STATUS` | 状態 | `String(16)` | `作業中`・`保留`・`完了` | `status` |
+| `NOTE` | メモ | `String(2000)` | メモ | `note` |
+| `TAKEN_AT` | 担当開始 | `Date` | 担当にした日時 | `takenAt` |
+| `DONE_AT` | 完了日時 | `Date` | 完了にした日時 | `doneAt` |
+
+### `TBL_HANDOVER_MEMO`（引き継ぎメモ）
+
+1 メモ 1 行（形状なし）。`handover.table.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `TEXT` | 本文 | `String(100000)` | メモの全文。**必須** | `text` |
+| `MEMO` | 申し送り | `String(4000)` | 手で書いた申し送り | `memo` |
+| `PERIOD_START` | 期間開始 | `Date` | メモの期間の始まり | `start` |
+| `PERIOD_END` | 期間終了 | `Date` | 期間の終わり（次のメモの始まり） | `end` |
+| `WRITTEN_AT` | 作成日時 | `Date` | 書いた日時 | `writtenAt` |
+| `WRITTEN_BY` | 作成者名 | `String(255)` | 書いた人 | `writtenBy` |
+
+### `TBL_EVENT`（イベント）
+
+イベントの範囲のポリゴン（範囲を持たないなら形状なしのテーブルでもよい）。`events.layer.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `EVENT_ID` | イベントID | `String(64)` | イベントの ID（UUID）。**必須** | `id` |
+| `EVENT_NAME` | イベント名 | `String(255)` | 名前。**必須** | `name` |
+| `EVENT_KIND` | 種類 | `String(64)` | 地震・津波・事故など | `kind` |
+| `STATUS` | 状態 | `String(16)` | `対応中`・`終了` | `status` |
+| `START_AT` | 開始 | `Date` | 期間の始まり | `start` |
+| `END_AT` | 終了 | `Date` | 期間の終わり | `end` |
+| `NOTE` | メモ | `String(4000)` | メモ | `note` |
+
+### `TBL_EVENT_LINK`（イベントの紐付け）
+
+イベントと項目の 1 組 1 行（形状なし。多対多）。`events.links.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `EVENT_ID` | イベントID | `String(64)` | `TBL_EVENT` の `EVENT_ID`。**必須** | `event` |
+| `ITEM_TYPE` | 項目の種類 | `String(16)` | `image`・`observation`・`request`。**必須** | `type` |
+| `ITEM_ID` | 項目ID | `String(128)` | 画像 ID・記録 ID・依頼 ID。**必須** | `item` |
+| `ITEM_LABEL` | 項目名 | `String(1000)` | 一覧に出す名前 | `label` |
+| `ITEM_TIME` | 項目の日時 | `Date` | 撮像日時など | `time` |
+| `SOURCE` | 出典 | `String(1000)` | カタログ・保存先・台帳の URL | `source` |
+| `NOTE` | メモ | `String(4000)` | メモ | `note` |
+
+### `TBL_AI_RESULT`（外部 AI の結果）
+
+外部の AI が書く検出結果（ポリゴンかポイント）。プラグインは読むだけ。`aiResultSources[].fields` で指定（既定なし。`imageId` は必須）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `RESULT_ID` | 結果ID | `String(128)` | 結果の ID | `id` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像カタログの画像 ID。**必須** | `imageId` |
+| `CLASS` | クラス | `String(255)` | AI のクラス（`kinds` で種別に読み替え） | `class` |
+| `SCORE` | 確信度 | `Double` | 0〜1 | `score` |
+| `MODEL` | モデル | `String(255)` | モデルの名前 | `model` |
+| `DETECTED_AT` | 検出日時 | `Date` | 検出した日時 | `detectedAt` |
+| `OBJECT_NAME` | モノの名前 | `String(255)` | モノの名前 | `name` |
+| `KIND` | 種別 | `String(1000)` | 種別（分類のパス） | `kind` |
+| `ACTIVITY` | 活動 | `String(255)` | 活動 | `activity` |
+| `LENGTH_M` | 長さ | `Double` | 長さ（m） | `length` |
+| `HEADING` | 向き | `Double` | 向き（度） | `heading` |
+| `WIDTH_M` | 幅 | `Double` | 幅（m） | `width` |
+| `NOTE` | 備考 | `String(4000)` | 備考 | `note` |
+
+### `TBL_DETECTION`（検出結果の転記先）
+
+プラグインの物体検出の結果を転記するレイヤー（ポリゴンか、中心点を書くポイント）。`detectionOutputs[].fields` で指定（既定なし。書いた役割だけ書き込む）。`constants` で決まった値を書く属性（`SOURCE` など）も足せる。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID | `imageId` |
+| `FILE_NAME` | ファイル名 | `String(255)` | 画像のファイル名 | `fileName` |
+| `IMAGE_TIME` | 撮像日時 | `Date` | 撮像日時 | `imageTime` |
+| `DETECTED_AT` | 検出日時 | `Date` | 検出した日時 | `detectedAt` |
+| `SENT_AT` | 転記日時 | `Date` | 転記した日時 | `sentAt` |
+| `CLASS` | クラス | `String(255)` | クラス名 | `class` |
+| `CLASS_ID` | クラス番号 | `Integer` | クラスの番号 | `classId` |
+| `SCORE` | 確信度 | `Double` | 0〜1 | `score` |
+| `MODEL` | モデル | `String(255)` | モデルの名前 | `model` |
+| `STATUS` | 状態 | `String(16)` | `AI`・`修正`・`手動`（`statusValues` で変更可） | `status` |
+| `LON` | 経度 | `Double` | 中心の経度 | `lon` |
+| `LAT` | 緯度 | `Double` | 中心の緯度 | `lat` |
+| `AREA_M2` | 面積 | `Double` | 面積（m²） | `area` |
+| `LENGTH_M` | 長辺 | `Double` | 長辺（m） | `length` |
+| `WIDTH_M` | 短辺 | `Double` | 短辺（m） | `width` |
+| `HEADING` | 向き | `Double` | 向き（度） | `angle` |
+| `NOTE` | 備考 | `String(4000)` | 備考 | `note` |
+
+### `TBL_PLACE_NAME`（地名検索）
+
+閉域で「座標・地名へ移動」の地名を引くレイヤー（ふつうはポイント）。`geocoders[]` に `{ "type": "features", "url": …, "field": "PLACE_NAME" }`。
+
+| 属性名 | エイリアス | 型 | 中身 | 設定 |
+| --- | --- | --- | --- | --- |
+| `PLACE_NAME` | 地名 | `String(255)` | 地名（部分一致で検索） | `field` |
+
+### 既定の属性名と違う名前の設定
+
+上の表の名前で作ったときに設定ファイルに書く対応。既定の属性名のある項目は、違うもの（`MODE` → `SENSOR_MODE`、`FILE` → `OUTPUT_FILE`）だけ書けばよい。URL はサービスに合わせる。
+
+```jsonc
+{
+  "imageCatalogs": [
+    { "label": "衛星画像", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/0",   // TBL_IMAGE_CATALOG
+      "fields": { "id": "IMAGE_ID", "acquired": "ACQUIRED_AT", "registered": "REGISTERED_AT", "systemRegistered": "SYSTEM_REGISTERED_AT",
+                  "sensor": "SENSOR", "angle": "OFF_NADIR", "azimuth": "SAT_AZIMUTH", "source": ["COG_URL", "FILE_PATH"] } }
+  ],
+  "satelliteCatalogs": [
+    { "label": "衛星", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/1",       // TBL_SATELLITE
+      "fields": { "name": "SAT_NAME", "id": "NORAD_ID", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2", "maxOffNadir": "MAX_OFF_NADIR",
+                  "minOffNadir": "MIN_OFF_NADIR", "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "kind": "SENSOR_TYPE",
+                  "scenesPerPass": "SCENES_PER_PASS", "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "series": "SERIES",
+                  "leadTime": "LEAD_TIME_H", "sensor": "SENSOR", "mode": "SENSOR_MODE", "resolution": "RESOLUTION_M", "system": "SAT_SYSTEM" } }
+  ],
+  "sensorCatalogs": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/2",                         // TBL_SENSOR_MODE
+      "fields": { "sensor": "SENSOR", "mode": "SENSOR_MODE", "kind": "SENSOR_TYPE", "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR",
+                  "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "scenesPerPass": "SCENES_PER_PASS",
+                  "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "leadTime": "LEAD_TIME_H", "resolution": "RESOLUTION_M",
+                  "primary": "IS_DEFAULT" } }
+  ],
+  "satelliteAliases": { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/3",       // TBL_SATELLITE_ALIAS
+                        "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },
+  "planStores": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4",                         // TBL_IMAGING_PLAN
+      "fields": { "mode": "SENSOR_MODE" } }
+  ],
+  "requestStores": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5",                         // TBL_IMAGING_REQUEST
+      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6",                     // TBL_REQUEST_HISTORY
+      "historyFields": { "file": "OUTPUT_FILE" } }
+  ],
+  "observationStores": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/7",                         // TBL_OBSERVATION
+      "areas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/8",                       // TBL_OBSERVATION_AREA
+      "taxonomyTable": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/9" }              // TBL_TAXONOMY
+  ],
+  "alertReports": {
+    "rules": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/10",                        // TBL_ALERT_RULE
+    "geofences": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/11",                    // TBL_ALERT_GEOFENCE
+    "namedAreas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/12",                   // TBL_NAMED_AREA
+    "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/13",                        // TBL_ALERT_LOG
+    "formats": [{ "name": "既定" }]
+  },
+  "assignments": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/14",                    // TBL_ASSIGNMENT
+  "handover": { "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/15" },          // TBL_HANDOVER_MEMO
+  "events": {
+    "layer": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/16",                        // TBL_EVENT
+    "links": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/17"                         // TBL_EVENT_LINK
+  },
+  "aiResultSources": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/18",                        // TBL_AI_RESULT
+      "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",
+                  "name": "OBJECT_NAME", "kind": "KIND", "activity": "ACTIVITY", "length": "LENGTH_M", "heading": "HEADING", "width": "WIDTH_M",
+                  "note": "NOTE" } }
+  ],
+  "detectionOutputs": [
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/19",                        // TBL_DETECTION
+      "fields": { "imageId": "IMAGE_ID", "fileName": "FILE_NAME", "imageTime": "IMAGE_TIME", "detectedAt": "DETECTED_AT", "sentAt": "SENT_AT",
+                  "class": "CLASS", "classId": "CLASS_ID", "score": "SCORE", "model": "MODEL", "status": "STATUS", "lon": "LON", "lat": "LAT",
+                  "area": "AREA_M2", "length": "LENGTH_M", "width": "WIDTH_M", "angle": "HEADING", "note": "NOTE" } }
+  ],
+  "geocoders": [
+    { "type": "features", "label": "地名", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/20", "field": "PLACE_NAME" }  // TBL_PLACE_NAME
+  ]
+  // editTracking は既定（CREATED_DATE・CREATED_USER・UPDATED_DATE・UPDATED_USER）のままなら書かなくてよい
+}
+```
 
 ## 構成
 
