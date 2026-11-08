@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+from .util import formula_safe
+
 #: The most rows read from one table (more is an error: narrow it with its condition).
 DEFAULT_TABLE_LIMIT = 100_000
 #: The most rows a query returns (the rest are left out, and the result says so).
@@ -375,10 +377,29 @@ class Result:
 
 
 _ALLOWED = {getattr(sqlite3, n) for n in ("SQLITE_SELECT", "SQLITE_READ", "SQLITE_FUNCTION", "SQLITE_RECURSIVE") if hasattr(sqlite3, n)}
+#: Functions a query may not call even though they only read (security audit 2026-11-08):
+#: fts3_tokenizer hands out and takes pointers into the process' memory, the rest reach
+#: files or extensions when the SQLite of the computer has them.
+DENIED_FUNCTIONS = frozenset({
+    "fts3_tokenizer", "load_extension", "readfile", "writefile", "edit", "fsdir", "zipfile", "sqlar_compress", "sqlar_uncompress",
+    "sqlite_dbpage", "sqlite_dbdata", "sqlite_dbptr", "shell_add_schema", "shell_module_schema", "shell_escape_crnl",
+})
+#: The longest text or blob a query can make (randomblob, printf, group_concat …): 100 MB, not the default 1 GB.
+LENGTH_LIMIT = 100_000_000
 
 
-def _reading_only(action: int, *_args) -> int:
-    return sqlite3.SQLITE_OK if action in _ALLOWED else sqlite3.SQLITE_DENY
+def _reading_only(action: int, arg1: Any = None, arg2: Any = None, *_args) -> int:
+    if action not in _ALLOWED:
+        return sqlite3.SQLITE_DENY
+    if action == getattr(sqlite3, "SQLITE_FUNCTION", -1) and isinstance(arg2, str) and arg2.lower() in DENIED_FUNCTIONS:
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+def _limit(conn: sqlite3.Connection, name: str, value: int) -> None:
+    """A run-time limit of the connection (Python 3.11 and later; older ones keep SQLite's own)."""
+    if hasattr(conn, "setlimit") and hasattr(sqlite3, name):
+        conn.setlimit(getattr(sqlite3, name), value)
 
 
 class Database:
@@ -386,6 +407,9 @@ class Database:
 
     def __init__(self):
         self.conn = sqlite3.connect(":memory:", check_same_thread=False)
+        # Belt and braces with the authorizer: no other database can be attached, and no huge values.
+        _limit(self.conn, "SQLITE_LIMIT_ATTACHED", 0)
+        _limit(self.conn, "SQLITE_LIMIT_LENGTH", LENGTH_LIMIT)
         self.tables: dict[str, list[Column]] = {}
 
     def close(self) -> None:
@@ -459,12 +483,18 @@ def _sql_message(error: Exception) -> str:
 def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, limit: int = DEFAULT_TABLE_LIMIT,
               token: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None) -> tuple[list[Column], list[list[Any]]]:
     """The columns and rows of an Esri table (the settings file's condition and `where` both apply)."""
-    from .esri import EsriError, TooManyError
+    from .esri import EsriError, TooManyError, own_condition
+    clauses = [f"({table.where})"] if table.where and table.where.strip() else []
+    if where and where.strip():
+        try:
+            # In parentheses that it cannot close: the settings file's `where` always applies.
+            clauses.append(own_condition(where))
+        except EsriError as error:
+            raise AnalysisError(f"{table.name} の読み込み条件: {error}") from None
     try:
         info = client.layer(table.url, token)
         fields = [f for f in info.raw.get("fields") or [] if isinstance(f, dict) and isinstance(f.get("name"), str)]
         geometry = bool(info.geometry_type) and shape
-        clauses = [f"({w})" for w in (table.where, where) if w and w.strip()]
         features = client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit,
                                     cancelled=cancelled)
     except TooManyError as error:
@@ -572,9 +602,19 @@ def aliases(builder: Builder) -> list[tuple[str, str]]:
     return [("t0", builder.table)] + [(f"t{i + 1}", j.table) for i, j in enumerate(builder.joins)]
 
 
+_ALIAS = re.compile(r"t\d{1,3}")
+
+
+def _alias(alias: str) -> str:
+    """A table's alias of 「かんたん集計」 (t0, t1 …); anything else (a project file's text) is refused."""
+    if not _ALIAS.fullmatch(alias or ""):
+        raise AnalysisError(f"表の別名が t0, t1 … でない: {alias}")
+    return alias
+
+
 def _column(ref: str) -> str:
     alias, _, name = ref.partition(".")
-    return f"{alias}.{quote_name(name)}" if name else quote_name(alias)
+    return f"{_alias(alias)}.{quote_name(name)}" if name else quote_name(alias)
 
 
 def figure_name(f: Figure) -> str:
@@ -615,7 +655,7 @@ def build_sql(builder: Builder) -> str:
         if not (j.table and j.left and j.right):
             raise AnalysisError(f"結合 {i + 1} の表と列を選ぶ")
         alias = f"t{i + 1}"
-        left = j.of or "t0"
+        left = _alias(j.of or "t0")
         lines.append(f"{JOIN_TYPES[j.type][1]} {quote_name(j.table)} AS {alias} ON {left}.{quote_name(j.left)} = {alias}.{quote_name(j.right)}")
     if builder.where.strip():
         lines.append(f"WHERE {builder.where.strip()}")
@@ -732,30 +772,28 @@ def cell_text(value: Any) -> str:
 
 def _safe(text: str) -> str:
     """A cell a spreadsheet would read as a formula, with ' in front (CSV injection)."""
-    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") and not _is_number(text) else text
-
-
-def _is_number(text: str) -> bool:
-    try:
-        float(text)
-        return True
-    except ValueError:
-        return False
+    return formula_safe(text)
 
 
 def csv_text(result: Result, delimiter: str = ",") -> str:
     out = io.StringIO()
     w = csv.writer(out, delimiter=delimiter, lineterminator="\r\n")
-    w.writerow(result.columns)
+    # The column names too: an alias of the SQL (or of a project file) can be a formula.
+    w.writerow([_safe(str(c)) for c in result.columns])
     for r in result.rows:
         w.writerow([_safe(cell_text(v)) for v in r])
     return out.getvalue()
 
 
+def _tsv_cell(text: str) -> str:
+    # Pasted into a spreadsheet as well: other people's text never a formula (security audit 2026-11-08).
+    return _safe(text.replace("\t", " ").replace("\r", " ").replace("\n", " "))
+
+
 def tsv_text(result: Result) -> str:
-    lines = ["\t".join(result.columns)]
+    lines = ["\t".join(_tsv_cell(str(c)) for c in result.columns)]
     for r in result.rows:
-        lines.append("\t".join(cell_text(v).replace("\t", " ").replace("\r", " ").replace("\n", " ") for v in r))
+        lines.append("\t".join(_tsv_cell(cell_text(v)) for v in r))
     return "\n".join(lines) + "\n"
 
 
