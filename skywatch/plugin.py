@@ -76,7 +76,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -247,6 +247,8 @@ def _observation_function(name: str):
 
     call.__name__ = name
     call.__doc__ = getattr(ObservationApi, name).__doc__
+    # Its arguments as ObservationApi has them (inspect.signature, the API reference).
+    call.__wrapped__ = getattr(ObservationApi, name)
     return call
 
 
@@ -591,6 +593,12 @@ class SkywatchPlugin:
         health.triggered.connect(lambda: self.open_health_check())
         self._add_to_menu(health)
         self.actions.append(health)
+        # 「Python API リファレンス」: plugin.api in Japanese with examples (ui/api_reference_dialog.py).
+        reference = QAction(icon("api_reference"), tr("Python API リファレンス…"), self.iface.mainWindow())
+        reference.setObjectName("SatObsApiReference")
+        reference.triggered.connect(lambda: self.open_api_reference())
+        self._add_to_menu(reference)
+        self.actions.append(reference)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self._add_to_menu(settings)
@@ -618,6 +626,16 @@ class SkywatchPlugin:
         except (TypeError, RuntimeError):
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_api_reference(self):
+        """「Python API リファレンス…」: what plugin.api has, with examples (not blocking QGIS)."""
+        from .ui.api_reference_dialog import ApiReferenceDialog
+
+        if getattr(self, "api_reference", None) is None:
+            self.api_reference = ApiReferenceDialog(self.api, self.iface.mainWindow())
+        self.api_reference.show()
+        self.api_reference.raise_()
+        return self.api_reference
 
     def open_health_check(self):
         """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
@@ -1108,6 +1126,10 @@ class SkywatchPlugin:
             self.place_reader.stop()
             self.place_reader = None
         expression_functions.unregister()
+        if getattr(self, "api_reference", None) is not None:
+            self.api_reference.close()
+            self.api_reference.deleteLater()
+            self.api_reference = None
         if self.swipe is not None:
             self.swipe.close()
             self.swipe.deleteLater()
