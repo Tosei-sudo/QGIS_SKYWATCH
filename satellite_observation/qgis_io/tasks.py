@@ -14,7 +14,7 @@ from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
 
 from ..core.esri import EsriError
 
-LOG_TAG = "衛星撮像計画・観測記録"
+LOG_TAG = "SKYWATCH"
 
 
 class Cancelled(Exception):

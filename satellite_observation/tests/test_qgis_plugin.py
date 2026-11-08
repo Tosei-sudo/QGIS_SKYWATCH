@@ -346,7 +346,7 @@ def test_a_service_out_of_reach_is_logged_as_a_line_not_a_warning():
     run_task("衛星カタログの読み込み", work, failed=failed.append)
     assert wait_for(lambda: failed)
     assert failed == ["接続不可（https://x.example/FeatureServer/0）"]
-    mine = [(level, m) for tag, level, m in logs if tag == "衛星撮像計画・観測記録"]
+    mine = [(level, m) for tag, level, m in logs if tag == "SKYWATCH"]
     assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの読み込み: 接続不可（https://x.example/FeatureServer/0）")]
 
 

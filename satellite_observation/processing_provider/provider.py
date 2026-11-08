@@ -1,4 +1,4 @@
-"""The Processing provider 「衛星撮像計画・観測記録」 (id `satobs`)."""
+"""The Processing provider 「SKYWATCH」 (id `satobs`)."""
 from __future__ import annotations
 
 import os
@@ -28,7 +28,7 @@ class SatObsProvider(QgsProcessingProvider):
         return "satobs"
 
     def name(self) -> str:
-        return QCoreApplication.translate("SatelliteObservation", "衛星撮像計画・観測記録")
+        return QCoreApplication.translate("SatelliteObservation", "SKYWATCH")
 
     def icon(self) -> QIcon:
         return QIcon(os.path.join(HERE, "resources", "icon.svg"))

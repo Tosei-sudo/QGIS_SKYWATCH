@@ -30,7 +30,7 @@ class SettingsDialog(QDialog):
     def __init__(self, context: PluginContext, parent: QWidget | None = None):
         super().__init__(parent)
         self.context = context
-        self.setWindowTitle(self.tr("衛星撮像計画・観測記録の設定"))
+        self.setWindowTitle(self.tr("SKYWATCH の設定"))
         self.resize(760, 560)
 
         self.source = QLineEdit(settings.config_source())

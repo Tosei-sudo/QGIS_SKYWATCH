@@ -1,16 +1,16 @@
 [general]
-name=衛星撮像計画・観測記録
+name=SKYWATCH
 qgisMinimumVersion=3.34
 qgisMaximumVersion=3.99
-description=Satellite imaging plans and image observation records (衛星撮像計画・観測記録)
-about=衛星カタログの TLE と諸元から対象の撮像機会と組み合わせを計算する「撮像計画」と、画像ごとにモノの位置・種別・活動を記録して画像をまたいで追う「観測記録」。Web 画像ビューアと同じ設定ファイル（config.json）と ArcGIS フィーチャーサービスを共用。
+description=SKYWATCH: 衛星の撮像計画・撮像依頼から画像カタログ・画像補正・観測記録・通報まで（Satellite imaging plans, image catalog and observation records）
+about=衛星画像の判読業務を QGIS でまとめて行うプラグイン。撮像計画（TLE と諸元から撮像機会・組み合わせ・衛星パス・移動目標・雲量予報・雲量マップ）、撮像依頼と日次の計画ファイル出力、画像カタログ（検索・フットプリント・新着通知・ピラミッド自動作成・複素 SAR（SICD）の振幅表示）、画像補正と解析（色調補正・パンシャープン・変化抽出・自動位置合わせ・簡易オルソ・土地被覆分類・スワイプ比較）、観測記録（モノの位置・種別・活動を画像をまたいで記録・一括編集・分担と引き継ぎ・イベント・通報と通報記録・CSV/JSON エクスポート）、AI（物体検出・クリック抽出・学習・外部 AI 結果の取り込み）、移動体（AIS・ADS-B）、ダッシュボード。Web 画像ビューアと同じ設定ファイル（config.json）と ArcGIS フィーチャーサービスを共用し、閉域ネットワークで動く。初回起動時に担当と個人設定を選ぶ画面があり、社内のプラグインリポジトリ（plugins.xml）で更新を配れる。
 version=0.4.0
 author=tsudo
 email=tosei.sudo@gmail.com
 supportsQt6=True
 tracker=https://github.com/Tosei-sudo/QGIS_SKYWATCH/issues
 repository=https://github.com/Tosei-sudo/QGIS_SKYWATCH
-tags=satellite,imaging plan,TLE,SGP4,observation,ArcGIS
+tags=satellite,imaging plan,TLE,SGP4,observation,image catalog,SAR,SICD,cloud,ArcGIS,AI,skywatch
 category=Plugins
 icon=resources/icon.svg
 experimental=True
