@@ -286,7 +286,7 @@ AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME"
 TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL": S, "MEMBERS": {"type": S, "length": 8000},
                    "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000}, "ACTIVITIES": {"type": S, "length": 2000},
                    "SORT_ORDER": I}
-PLAN_FIELDS = {"PLAN_ID": {"type": S, "length": 64}, "PLAN_NAME": S, "SHOT_TIME": T, "SATELLITE": S, "SATELLITE_ID": S, "MODE": S,
+PLAN_FIELDS = {"PLAN_ID": {"type": S, "length": 64}, "PLAN_NAME": S, "SHOT_TIME": T, "SATELLITE": S, "SATELLITE_ID": S, "SENSOR_MODE": S,
                "TARGET": S, "OFF_NADIR": D, "INCIDENCE": D, "PASS_DIR": S, "LOOK_SIDE": S, "STATUS": S, "IMAGE_ID": S, "CREATED_AT": T}
 REQUEST_FIELDS = {
     "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
@@ -296,7 +296,7 @@ REQUEST_FIELDS = {
 }
 HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "REQ_ID": {"type": S, "length": 64}, "SYSTEM": S,
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
-                  "FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
+                  "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
 
 ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
@@ -361,7 +361,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                     "MIN_INTERVAL_MIN": 0, "MAX_PER_DAY": 0, "STATUS": "ACTIVE"}})
     for mode, lo, hi, swath, length, res, primary in (("ストリップマップ", 15, 30, 30, 50, 3.0, 1), ("スポットライト", 15, 30, 5, 5, 1.0, 0),
                                                        ("スキャンSAR", 21, 29, 100, 100, 15.0, 0)):
-        sensors.append({"attributes": {"SENSOR": "SAR-Y", "MODE": mode, "MIN_OFF_NADIR": lo, "MAX_OFF_NADIR": hi, "SWATH": swath,
+        sensors.append({"attributes": {"SENSOR": "SAR-Y", "SENSOR_MODE": mode, "MIN_OFF_NADIR": lo, "MAX_OFF_NADIR": hi, "SWATH": swath,
                                        "SCENE_LENGTH": length, "SCENES_PER_PASS": 1, "RESOLUTION_M": res, "IS_DEFAULT": primary}})
 
     first = plans[0]
@@ -405,7 +405,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                 "SWATH": D, "SCENE_LENGTH": D, "LOOK_SIDE": S, "SENSOR_TYPE": S, "SERIES": S, "SCENES_PER_PASS": I,
                                                 "MIN_INTERVAL_MIN": D, "MAX_PER_DAY": I, "STATUS": S},
              "features": feats(sats)},
-            {"id": 1, "name": "センサーモード", "fields": {"SENSOR": S, "MODE": S, "MIN_OFF_NADIR": D, "MAX_OFF_NADIR": D, "SWATH": D,
+            {"id": 1, "name": "センサーモード", "fields": {"SENSOR": S, "SENSOR_MODE": S, "MIN_OFF_NADIR": D, "MAX_OFF_NADIR": D, "SWATH": D,
                                                        "SCENE_LENGTH": D, "SCENES_PER_PASS": I, "RESOLUTION_M": D, "IS_DEFAULT": F},
              "features": feats(sensors)}]},
         {"name": "ImagingPlans", "layers": [{"id": 0, "name": "撮像計画", "geometryType": "polygon", "fields": PLAN_FIELDS, "features": []}]},
@@ -498,7 +498,7 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   ],
   "sensorCatalogs": [
     {{ "label": "モック SAR モード", "url": "{rest}/Satellites/FeatureServer/1"{tk},
-      "fields": {{ "sensor": "SENSOR", "mode": "MODE", "minOffNadir": "MIN_OFF_NADIR", "maxOffNadir": "MAX_OFF_NADIR", "swath": "SWATH",
+      "fields": {{ "sensor": "SENSOR", "mode": "SENSOR_MODE", "minOffNadir": "MIN_OFF_NADIR", "maxOffNadir": "MAX_OFF_NADIR", "swath": "SWATH",
                   "length": "SCENE_LENGTH", "scenesPerPass": "SCENES_PER_PASS", "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" }},
       "swathUnit": "km" }}
   ],

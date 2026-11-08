@@ -258,7 +258,7 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 ## 9. 撮像済みの判定と繰り上げ
 
-- **出力履歴**（Esri テーブル）: `RUN_ID`, `RUN_DATE`, `REQ_ID`, `SYSTEM`, `PRIORITY_OUT`, `CLOUD`, `SCENES`, `RESULT`（採用 / 見送り）, `REASON`, `FILE`, `CAPTURED`（未判定 / 撮像済み / 未撮像）, `IMAGE_ID`
+- **出力履歴**（Esri テーブル）: `RUN_ID`, `RUN_DATE`, `REQ_ID`, `SYSTEM`, `PRIORITY_OUT`, `CLOUD`, `SCENES`, `RESULT`（採用 / 見送り）, `REASON`, `OUTPUT_FILE`, `CAPTURED`（未判定 / 撮像済み / 未撮像）, `IMAGE_ID`
 - **撮像済みの判定**: 採用した依頼について、画像カタログで「範囲と重なり、出力日以降に撮られた、条件に合う画像」を探す。見つかれば撮像済み、`miss_after_days` を過ぎても無ければ未撮像（保存した撮像計画の照合と同じ仕組み）。
 - **「期間内1回」の依頼**: 撮像済みになったら台帳の `STATUS` を「完了」にする。
 - **繰り上げ候補**: 未撮像になった依頼と、期限まで 2 日を切った「期間内1回」の依頼。
