@@ -94,3 +94,29 @@ def test_points_and_boxes_give_the_bands_values(plugin):
     assert dock.series == [] and dock.next_number == 1
     dock.hide()
     assert dock.marks is None and iface.canvas.mapTool() is not dock.tool
+
+
+@pytest.mark.parametrize("qt5", [True, False])
+def test_hovering_the_graph_shows_the_values_with_qt5_and_qt6_events(monkeypatch, qt5):
+    """Qt5 mouse events have only pos() (a QPoint, no toPoint()); Qt6 ones have position() (a QPointF)."""
+    from qgis.PyQt.QtCore import QPoint, QPointF
+    from satellite_observation.core.spectral import BandStat, Spectrum
+    from satellite_observation.ui import spectral_dock
+
+    chart = spectral_dock.SpectralChart()
+    chart.resize(300, 200)
+    chart.set_data([Spectrum(1, "点", "#f00", [BandStat(1.0, 1, 1, 0, 1), BandStat(2.0, 2, 2, 0, 1)])], ["B1", "B2"])
+    shown = []
+    monkeypatch.setattr(spectral_dock.QToolTip, "showText", lambda at, text, widget: shown.append((at, text)))
+
+    class Qt5Event:
+        def pos(self):
+            return QPoint(290, 100)
+
+    class Qt6Event:
+        def position(self):
+            return QPointF(290.4, 100.6)
+
+    chart.mouseMoveEvent(Qt5Event() if qt5 else Qt6Event())
+    assert len(shown) == 1 and isinstance(shown[0][0], QPoint)
+    assert shown[0][1].splitlines()[0] == "B2" and shown[0][1].splitlines()[1].startswith("1: 2")

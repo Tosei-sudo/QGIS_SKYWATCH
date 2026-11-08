@@ -187,7 +187,8 @@ class SpectralChart(QWidget):
         return 0 if n == 1 else min(n - 1, max(0, round((x - plot.left()) / plot.width() * (n - 1))))
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
-        pos = event.position() if hasattr(event, "position") else event.pos()
+        # Qt6 gives position() (QPointF); Qt5 has only pos() (QPoint). QPointF(...) takes either.
+        pos = QPointF(event.position() if hasattr(event, "position") else event.pos())
         b = self.band_at(pos.x())
         if b is None:
             return
