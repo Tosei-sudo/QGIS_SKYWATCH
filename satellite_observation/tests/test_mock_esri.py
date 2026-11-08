@@ -230,7 +230,7 @@ def test_every_layer_written_gets_who_and_when(server, monkeypatch):
 
 def test_alerts_rules_geofence_and_log_over_http(server):
     from satellite_observation.core.obs.alerts import (
-        Moment, build_lines, load_geofences, load_log, load_rules, reported_ids, select, write_log,
+        Moment, build_lines, load_geofences, load_log, load_named_areas, load_rules, reported_ids, select, write_log,
     )
     from satellite_observation.core.obs.model import DEFAULT_CONFIDENCES
 
@@ -245,13 +245,16 @@ def test_alerts_rules_geofence_and_log_over_http(server):
     now = int(time.time() * 1000)
     ship = Observation(id="mock-a", image_id="i", image_name="i", image_time=now, object_id="o", object_name="船X", kind="船舶 > 護衛艦",
                        activity="出港", present=True, note="", lon=139.75, lat=35.30, created_at=now, updated_at=now, confidence="確定")
-    items = select([ship, replace(ship, id="mock-b", lon=139.9)], s, rules, fences, DEFAULT_CONFIDENCES)
+    named = load_named_areas(client, s.named_areas, max_age=0)
+    assert [a.name for a in named] == ["東京湾", "横須賀港", "横須賀本港"]
+    items = select([ship, replace(ship, id="mock-b", lon=139.9)], s, rules, fences, DEFAULT_CONFIDENCES, named=named)
     assert [i.record.id for i in items] == ["mock-a"] and items[0].areas == ["横須賀"]
+    assert [a.name for a in items[0].places] == ["横須賀本港", "横須賀港", "東京湾"]
     at = Moment(now=now, user="tester", count=1)
     assert write_log(client, s, s.format(), items, build_lines(items, s.format(), at), at) == 1
     assert reported_ids(client, s) == {"mock-a"}
     rows = load_log(client, s, start=now - 60_000)
-    assert [(r.obs_id, r.format) for r in rows] == [("mock-a", "速報")] and rows[0].text.split("|")[2] == "船X"
+    assert [(r.obs_id, r.format) for r in rows] == [("mock-a", "速報")] and rows[0].text.split("|")[2] == "船X" and rows[0].text.split("|")[5] == "横須賀本港"
 
 
 def test_assignments_and_handover_memos_over_http(server):

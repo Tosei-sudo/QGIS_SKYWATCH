@@ -799,7 +799,7 @@ class ObservationDock(PluginDock):
         reported asked each time), in a task; those notable are said in the
         message bar with 「通報文を作成」.
         """
-        from ..core.obs.alerts import load_geofences, load_rules, reported_ids, select
+        from ..core.obs.alerts import load_geofences, load_named_areas, load_rules, reported_ids, select
 
         s = self._alert_watch()
         book = self.book
@@ -818,7 +818,8 @@ class ObservationDock(PluginDock):
                 rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
                 fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
             done = reported_ids(client, s, token(s.table.url, s.table.token), ids=[o.id for o in records]) if s.table else set()
-            return rules, fences, select(records, s, rules, fences, levels, done, history=history)
+            named = load_named_areas(client, s.named_areas, token(s.named_areas.url, s.named_areas.token)) if s.named_areas else []
+            return rules, fences, select(records, s, rules, fences, levels, done, history=history, named=named)
 
         def finished(result) -> None:
             rules, fences, items = result

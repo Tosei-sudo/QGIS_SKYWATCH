@@ -41,6 +41,7 @@ def plugin_constants() -> dict:
             "editTracking": dict(edit_stamp.DEFAULT_FIELDS),
             "alertRules": dict(alerts.DEFAULT_RULE_FIELDS),
             "alertGeofences": dict(alerts.DEFAULT_FENCE_FIELDS),
+            "alertPlaces": dict(alerts.DEFAULT_PLACE_FIELDS),
             "alertLog": dict(alerts.DEFAULT_LOG_FIELDS),
             "assignments": dict(assignments.DEFAULT_ASSIGNMENT_FIELDS),
             "handoverMemos": dict(handover.DEFAULT_HANDOVER_FIELDS),

@@ -22,12 +22,21 @@ heaviest geofence it is in, a WEIGHT column of the layer), the rule it met
 it in the days before, the rarer). The lines go out highest score first.
 The weights and the rarity's window are `alertReports.score`; the
 per-place and per-rule weights are Esri data.
+
+A record can also be named by where it is: an optional polygon layer of
+named areas (`namedAreas`: place and facility names, maybe a kind). The
+smallest area holding the record is its place (`place`, `placeKind`; all of
+them smallest first `places`); a field can say what to write when it is in
+none (`empty`), or leave itself out (`omitEmpty`), and add text around a
+value only when there is one (`prefix`, `suffix`).
 """
 from __future__ import annotations
 
 import math
 import os
 import re
+import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Sequence
@@ -45,6 +54,7 @@ SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated",
     "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
+    "place", "placeKind", "places",
 )
 TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
 NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
@@ -63,6 +73,10 @@ DEFAULT_RULE_FIELDS = {
 }
 #: The geofence layer's attributes by role.
 DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT"}
+#: The named area layer's attributes by role (place and facility names).
+DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE"}
+#: How long the named areas read are kept (seconds).
+PLACE_CACHE_SECONDS = 600
 #: The parts of the score and their weights when the settings give none.
 DEFAULT_WEIGHTS = {"confidence": 1.0, "area": 1.0, "rule": 1.0, "rarity": 1.0}
 SCORE_PARTS = {"confidence": "確度", "area": "場所", "rule": "条件", "rarity": "珍しさ"}
@@ -93,6 +107,11 @@ class AlertField:
     map: dict[str, str] = field(default_factory=dict)
     #: Written when the value is empty.
     empty: str = ""
+    #: Written before / after the value, only when there is one.
+    prefix: str = ""
+    suffix: str = ""
+    #: In a line, left out (with its delimiter) when empty.
+    omit_empty: bool = False
 
 
 @dataclass
@@ -158,6 +177,8 @@ class AlertSettings:
     present_only: bool = True
     rules: Optional[EsriSource] = None
     geofences: Optional[EsriSource] = None
+    #: Place and facility names (polygons): a record's place is the smallest one it is in.
+    named_areas: Optional[EsriSource] = None
     #: The Esri log table (the main output; also what was reported).
     table: Optional[EsriSource] = None
     #: A record saved that meets the conditions (and is not reported yet) is said in QGIS's message bar.
@@ -195,6 +216,18 @@ class Geofence:
 
 
 @dataclass
+class NamedArea:
+    """A polygon of the named area layer (WGS 84 rings) and its size."""
+    name: str
+    rings: list
+    kind: str = ""
+    #: The size (km², roughly: the rings on a plane scaled by the latitude), the smaller the more precise.
+    size: float = 0.0
+    #: The rings' extent (west, south, east, north), to skip the far ones fast.
+    box: tuple = (0.0, 0.0, 0.0, 0.0)
+
+
+@dataclass
 class AlertItem:
     """A notable record, the geofences it is in and the rules it met."""
     record: Observation
@@ -210,11 +243,14 @@ class AlertItem:
     #: The heaviest geofence and rule it met (0–1; None when there are none to meet).
     area_weight: Optional[float] = None
     rule_weight: Optional[float] = None
+    #: The named areas it is in, smallest first (the first is its place).
+    places: list[NamedArea] = field(default_factory=list)
 
 
 def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = (), settings: Optional[AlertSettings] = None,
-                 levels: Sequence[ConfidenceLevel] = (), history: Iterable[Observation] = ()) -> list[AlertItem]:
-    """Records chosen by hand: reported whatever the conditions say (their geofences still named; scored by `settings`)."""
+                 levels: Sequence[ConfidenceLevel] = (), history: Iterable[Observation] = (),
+                 named: Sequence["NamedArea"] = ()) -> list[AlertItem]:
+    """Records chosen by hand: reported whatever the conditions say (their geofences and places still named; scored by `settings`)."""
     out = []
     for o in records:
         if o.deleted_at is not None:
@@ -222,6 +258,7 @@ def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()
         inside = [g for g in fences if inside_rings(o.lon, o.lat, g.rings)]
         out.append(AlertItem(o, list(dict.fromkeys(g.name for g in inside)), [MANUAL_RULE], True,
                              area_weight=max((g.weight for g in inside), default=0.0) if fences else None, rule_weight=1.0))
+    name_places(out, named)
     if settings is not None and settings.score is not None:
         score_items(out, settings.score, levels, history)
     return out
@@ -258,7 +295,19 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         level=int(level) if is_number(level) and int(level) == level and level != 0 else None,
         map={str(k): js_string(x) for k, x in mapping.items()} if is_record(mapping) else {},
         empty=js_string(v["empty"]) if "empty" in v and v["empty"] is not None else "",
+        prefix=_affix(v, "prefix", at, problems),
+        suffix=_affix(v, "suffix", at, problems),
+        omit_empty=_bool(v, "omitEmpty", at, problems, False),
     )
+
+
+def _affix(v: dict, key: str, at: str, problems: list[str]) -> str:
+    if key not in v or v[key] is None:
+        return ""
+    if isinstance(v[key], str):
+        return v[key]
+    problems.append(f"{at}.{key} は文字列で指定")
+    return ""
 
 
 def _source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str], editable: bool = False,
@@ -462,6 +511,8 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
         settings.rules = _source_of(value["rules"], f"{at}.rules", DEFAULT_RULE_FIELDS, problems)
     if "geofences" in value:
         settings.geofences = _source_of(value["geofences"], f"{at}.geofences", DEFAULT_FENCE_FIELDS, problems)
+    if "namedAreas" in value and value["namedAreas"] not in (None, False, ""):
+        settings.named_areas = _source_of(value["namedAreas"], f"{at}.namedAreas", DEFAULT_PLACE_FIELDS, problems)
     if "table" in value:
         settings.table = _source_of(value["table"], f"{at}.table", DEFAULT_LOG_FIELDS, problems, editable=True)
     return settings
@@ -536,6 +587,83 @@ def load_geofences(client: EsriClient, source: EsriSource, token: Optional[str] 
             continue
         out.append(Geofence(name=_text(a.get(f["name"])), rings=rings, weight=weight_of(a.get(f["weight"]))))
     return out
+
+
+def ring_size(rings: Sequence) -> float:
+    """
+    Roughly how large polygon rings are (km²): each ring on a plane, the
+    longitudes scaled by the latitude's cosine; holes (the other winding) take off.
+    """
+    points = [p for ring in rings for p in ring]
+    if not points:
+        return 0.0
+    lat0 = math.radians(sum(p[1] for p in points) / len(points))
+    kx, ky = 111.32 * math.cos(lat0), 110.57
+    total = 0.0
+    for ring in rings:
+        n = len(ring)
+        total += sum(ring[i][0] * ring[(i + 1) % n][1] - ring[(i + 1) % n][0] * ring[i][1] for i in range(n)) / 2
+    return abs(total) * kx * ky
+
+
+def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) -> list[NamedArea]:
+    """The active named areas of the layer's features (polygons, WGS 84); those without a name or rings left out."""
+    out = []
+    for feature in features:
+        a = feature.get("attributes") or {}
+        rings = (feature.get("geometry") or {}).get("rings") or []
+        name = _text(a.get(fields["name"]))
+        if not rings or not name or (fields["active"] in a and not _active(a.get(fields["active"]))):
+            continue
+        xs = [p[0] for ring in rings for p in ring]
+        ys = [p[1] for ring in rings for p in ring]
+        out.append(NamedArea(name=name, rings=rings, kind=_text(a.get(fields["kind"])), size=ring_size(rings),
+                             box=(min(xs), min(ys), max(xs), max(ys))))
+    return out
+
+
+_place_cache: dict[tuple, tuple[float, list[NamedArea]]] = {}
+_place_lock = threading.Lock()
+
+
+def load_named_areas(client: EsriClient, source: Optional[EsriSource], token: Optional[str] = None,
+                     max_age: float = PLACE_CACHE_SECONDS, clock: Callable[[], float] = time.monotonic) -> list[NamedArea]:
+    """
+    The active named areas (polygons, WGS 84); read once and kept `max_age`
+    seconds (they change seldom; every report and save asks for them).
+    """
+    if source is None:
+        return []
+    key = (source.url, source.where, tuple(sorted(source.fields.items())))
+    now = clock()
+    with _place_lock:
+        hit = _place_cache.get(key)
+    if hit is not None and now - hit[0] < max_age:
+        return hit[1]
+    rows = client.query_all(source.url, source.where or "1=1", token or source.token, limit=100_000)
+    areas = named_areas_of_features(rows, source.fields)
+    with _place_lock:
+        _place_cache[key] = (now, areas)
+    return areas
+
+
+def forget_named_areas() -> None:
+    """Drops the named areas kept (read again next time)."""
+    with _place_lock:
+        _place_cache.clear()
+
+
+def places_of(lon: float, lat: float, areas: Sequence[NamedArea]) -> list[NamedArea]:
+    """The named areas a point is in, smallest first (same size: the layer's order)."""
+    inside = [a for a in areas
+              if a.box[0] <= lon <= a.box[2] and a.box[1] <= lat <= a.box[3] and inside_rings(lon, lat, a.rings)]
+    return sorted(inside, key=lambda a: a.size)
+
+
+def name_places(items: Iterable[AlertItem], areas: Sequence[NamedArea]) -> None:
+    """Sets each item's places (the named areas it is in, smallest first)."""
+    for item in items:
+        item.places = places_of(item.record.lon, item.record.lat, areas) if areas else []
 
 
 def _log_types(client: EsriClient, settings: AlertSettings, token: Optional[str]) -> dict[str, str]:
@@ -678,6 +806,7 @@ def select(
     end: Optional[float] = None,
     by: str = "created",
     history: Optional[Iterable[Observation]] = None,
+    named: Sequence[NamedArea] = (),
 ) -> list[AlertItem]:
     """
     The notable records: living ones of the period (`by` 登録日時 `created`
@@ -685,7 +814,7 @@ def select(
     of the rules (every record when there is no rules table: `rules` None),
     and not reported yet; highest score first (`settings.score`; the rarity
     counted among `history`, the records themselves when None), else in
-    image time order.
+    image time order. Each is given its places among the named areas `named`.
     """
     records = list(records)
     done = set(reported)
@@ -713,6 +842,7 @@ def select(
             out.append(AlertItem(o, areas, list(dict.fromkeys(r.note for r in met if r.note)), area_weight=area_weight,
                                  rule_weight=max(r.weight for r in met)))
     out.sort(key=_time_key)
+    name_places(out, named)
     if settings.score is None:
         return out
     score_items(out, settings.score, levels, records if history is None else history)
@@ -829,6 +959,8 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "area": "・".join(item.areas), "rule": "・".join(item.rules), "report": report.name, "reportedAt": at.now,
         "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
         "similar": item.similar if item.score is not None else None,
+        "place": item.places[0].name if item.places else "", "placeKind": item.places[0].kind if item.places else "",
+        "places": "・".join(dict.fromkeys(a.name for a in item.places)),
     }.get(s or "")
 
 
@@ -850,7 +982,7 @@ def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at:
     if f.map:
         key = js_string(v).lower() if isinstance(v, bool) else text
         text = f.map.get(key, f.map.get(text, text))
-    return text if text != "" else f.empty
+    return f.prefix + text + f.suffix if text != "" else f.empty
 
 
 def escaped(text: str, report: AlertFormat) -> str:
@@ -860,8 +992,9 @@ def escaped(text: str, report: AlertFormat) -> str:
 
 
 def line_of(item: AlertItem, index: int, report: AlertFormat, at: Moment) -> str:
-    """A record's line."""
-    return report.delimiter.join(escaped(written(f, item, index, report, at), report) for f in report.fields)
+    """A record's line (the fields `omitEmpty` that are empty left out, with their delimiter)."""
+    values = ((f, written(f, item, index, report, at)) for f in report.fields)
+    return report.delimiter.join(escaped(text, report) for f, text in values if text != "" or not f.omit_empty)
 
 
 _PLACE = re.compile(r"\{(\w+)(?::([^}]*))?\}")
