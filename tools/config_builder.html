@@ -155,6 +155,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "watchInterval",
   "pathMappings",
   "overviews",
+  "complexImages",
   "observationStores",
   "localObservations",
   "observationVocabulary",
@@ -828,6 +829,8 @@ const SPEC = [
         S("scope", "対象", [["all", "all（追加したローカル画像すべて）"], ["catalog", "catalog（カタログなどから開いたものだけ）"]]),
         T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中" }),
       ], { allowFalse: "作らない（false）" }) },
+    { key: "complexImages", label: "複素 SAR 画像（SICD）の表示", doc: "複素-sar-画像sicdの表示compleximages", help: "SICD の I・Q バンドや複素数の画素の画像を振幅で表示する（既定は dB）。",
+      field: S("complexImages", "表示", [["dB", "dB（20·log10 振幅）"], ["amplitude", "amplitude（振幅 √(I²+Q²)）"]], { ph: "dB", falseLabel: "false（QGIS のまま I・Q を表示）" }) },
     { key: "imageRules", label: "画像ごとの補正", doc: "画像補正", help: "ファイル名に合う画像に補正・バンド・no data を当てる。",
       field: I("imageRules", "規則", [
         LABEL, T("match", "ファイル名（正規表現）", { req: true, ph: "^WV03_.*\\.tif$" }), B("caseSensitive", "大文字小文字を区別"),
@@ -1084,13 +1087,14 @@ function field(f, obj, commit, item) {
       el("option", { value: "", text: "未指定（既定）" }), el("option", { value: "true", text: "true", selected: v === true }), el("option", { value: "false", text: "false", selected: v === false }));
   } else if (t === "select") {
     const opts = (typeof f.opts === "function" ? f.opts() : f.opts).map(opt);
-    if (v !== undefined && v !== null && !opts.some(([x]) => x === v)) opts.push([v, `${v}（いまの値）`]);
+    if (v !== undefined && v !== null && !(v === false && f.falseLabel) && !opts.some(([x]) => x === v)) opts.push([v, `${v}（いまの値）`]);
     const sel = el("select", { onchange: (e) => {
       const s = e.target.value;
-      set(s === "" ? undefined : s === "\u0000null" ? null : s);
+      set(s === "" ? undefined : s === "\u0000null" ? null : s === "\u0000false" ? false : s);
       if (f.rerender) render();
     } }, el("option", { value: "", text: f.ph ? `未指定（${f.ph}）` : "未指定" }),
       f.nullLabel ? el("option", { value: "\u0000null", text: f.nullLabel, selected: v === null }) : null,
+      f.falseLabel ? el("option", { value: "\u0000false", text: f.falseLabel, selected: v === false }) : null,
       ...opts.map(([x, label]) => el("option", { value: x, text: label === x ? x : `${label}`, selected: v === x })));
     control = sel;
   } else if (t === "list") {
@@ -1124,7 +1128,7 @@ function fits(f, v) {
     case "text": return typeof v === "string";
     case "number": return typeof v === "number";
     case "bool": return typeof v === "boolean";
-    case "select": return typeof v === "string" || (v === null && !!f.nullLabel);
+    case "select": return typeof v === "string" || (v === null && !!f.nullLabel) || (v === false && !!f.falseLabel);
     case "list": return Array.isArray(v) && v.every((x) => typeof x === (f.numbers ? "number" : "string"));
     case "roles": case "map": return isObj(v);
     default: return true;
@@ -1820,7 +1824,7 @@ function checkField(f, obj, at, p) {
   else if (f.t === "bool" && typeof v !== "boolean") p.push(`${at}: true か false で指定`);
   else if (f.t === "select") {
     const opts = (typeof f.opts === "function" ? f.opts() : f.opts).map(opt).map(([x]) => x);
-    if (!(v === null && f.nullLabel) && !opts.includes(v)) p.push(`${at}: ${opts.join("・")} のどれか`);
+    if (!(v === null && f.nullLabel) && !(v === false && f.falseLabel) && !opts.includes(v)) p.push(`${at}: ${opts.join("・")} のどれか`);
   } else if (f.t === "roles") {
     if (!isObj(v)) { p.push(`${at}: { 役割: 属性名 } で指定`); return; }
     for (const [role, name] of Object.entries(v)) for (const n of Array.isArray(name) ? name : [name]) if (typeof n !== "string" || !ATTR.test(n)) p.push(`${at}.${role}: 属性名は英数字と _`);

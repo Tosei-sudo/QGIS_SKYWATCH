@@ -29,6 +29,7 @@ from ..core.enhance.ops import OP_INFO
 from ..core.enhance.pipeline import PRESET_NAMES, PRESETS, Pipeline
 from ..core.enhance.rules import image_rule_for, resolve_bands
 from ..qgis_io import enhance_renderer as er
+from ..qgis_io import complex_sar
 from ..qgis_io.tasks import run_task
 from .colorize_box import ColorizeBox, set_blend
 from .curve_editor import CurveEditor
@@ -63,7 +64,10 @@ HISTOGRAM_DELAY = 300
 
 
 def source_name(layer) -> str:
-    """What the layer was opened from (a path, or the URL behind /vsicurl/), else its name."""
+    """What the layer was opened from (a path, or the URL behind /vsicurl/; a complex SAR image's own path), else its name."""
+    shown = complex_sar.source_of(layer)
+    if shown:
+        return shown
     try:
         parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
         path = str(parts.get("path") or parts.get("url") or "")

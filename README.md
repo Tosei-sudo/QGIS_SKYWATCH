@@ -107,6 +107,22 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 - 「レイヤーとして追加」で一覧をフットプリントのメモリレイヤーに（撮像日時で時系列コントローラーが効く）
 - 「類似画像の検索」（一覧のボタン、またはカタログから開いたレイヤーの右クリック「類似画像の検索…」）で、同じセンサー・角度 ±5°・方位角 ±20° の画像を重なりの大きい順に。比較元は赤い破線。許容差は記憶。「通常の検索に復帰」で戻る
 
+### 複素 SAR 画像（SICD）の表示（`complexImages`）
+
+QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバンドとして読まれ、どちらか一方を灰色で表示するだけなので SAR の画像としては読めない。プラグインは、QGIS に追加した（カタログから開く・レイヤーの追加・ドラッグ＆ドロップなど、開き方を問わない）ローカルの複素 SAR 画像の前に GDAL の VRT を置き、**振幅 √(I² + Q²) を dB（20·log10）で表示**する。
+
+- 対象: SICD など NITF のバンドの `ISUBCAT` が `I`・`Q` の並び、複素数の画素の画像（CInt16・CFloat32 など。Sentinel-1 SLC の TIFF など）、バンドの説明が `I`・`Q`（`real`・`imag`）の 2 バンド。I・Q の組が複数あれば組ごとに 1 バンド。振幅・位相（`ISUBCAT` が `M`・`P`、SICD の AMP8I_PHS8I）は `M` のバンドをそのまま振幅とする（AmpTable は使わない）
+- 計算は GDAL の画素関数（`complex`・`dB`・`mod`）で描画のたびに行うので、追加のライブラリは不要。**画像本体は書き換えない**。I = Q = 0 の画素（SICD の余白）は no data
+- 表示は灰色の 1 バンドで、値の 2〜98 % を引き伸ばす。色調補正（「画像補正」ドック）もそのまま使える
+- VRT は QGIS プロファイルの `satellite_observation/complex-sar` フォルダに、画像のパス・大きさ・更新日時ごとの名前で置く（同じ画像を開き直すと使い回す）。プロジェクトに保存したレイヤーはこの VRT を読む（フォルダを消すとそのレイヤーは開けなくなるので、画像を開き直す）
+- レイヤーのファイル名（観測記録の画像名）・NITF のメタデータ（撮像日時）・`imageRules` の照合は元の画像のもの。VRT は元の画像の位置情報（ジオトランスフォーム・GCP・RPC）とメタデータを引き継ぐ
+- ピラミッド（`overviews`）は I・Q ではなく振幅（dB）の VRT について作る（I・Q のまま平均すると打ち消し合うため）
+- URL（`/vsicurl/`）の画像は対象外。起動時に開いたプロジェクトの画像は設定ファイルを読み終えてから変換する。複数の画像セグメントに分かれた大きな SICD は、GDAL が開く最初のセグメントだけ
+
+```jsonc
+"complexImages": "dB"          // "dB"（既定）| "amplitude"（√(I²+Q²)）| false（QGIS のまま I・Q を表示）
+```
+
 ## 通知
 
 「この条件で監視…」（画像カタログ）か地図の右クリック「この地点の新着画像を監視…」で監視を作る。範囲は表示範囲・描いた範囲・選択中の地物・地点・指定なし。地点は既存の監視に足すこともできる。
@@ -895,6 +911,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `watchInterval` | 数 | 新着画像を確かめる間隔（分、1〜1440） | 10 | [通知](#通知) |
 | `pathMappings` | 配列 | `prefix`（必須。レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ） | なし | [画像カタログ](#画像カタログ) |
 | `overviews` | `false` かオブジェクト | `enabled`、`resampling`（`AVERAGE` など）、`minSize`、`compress`（`DEFLATE` など）、`location`（`auto`: 書ければ画像の隣、`cache`: キャッシュのフォルダ）、`scope`（`all`: QGIS に追加したローカル画像すべて、`catalog`: カタログなどから開いたものだけ）、`cacheFolder`（空ならプロファイルの中） | 作る（`auto`・`all`） | [ピラミッドの自動作成](#ピラミッドovrの自動作成overviews) |
+| `complexImages` | `"dB"`・`"amplitude"`・`false` | SICD（I・Q のバンド）や複素数の画素の画像を振幅で表示。`"dB"` は 20·log10(振幅)、`false` で QGIS のまま | `"dB"` | [複素 SAR 画像の表示](#複素-sar-画像sicdの表示compleximages) |
 | `imageRules` | 配列 | `match`（ファイル名の正規表現、必須）、`caseSensitive`、`preset`・`enhance`（補正）、`bands`、`noData` | なし | [画像補正](#画像補正) |
 
 #### 撮像計画・撮像依頼

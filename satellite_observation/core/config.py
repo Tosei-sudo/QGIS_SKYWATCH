@@ -26,6 +26,7 @@ from .enhance.rules import ImageRule, image_rules_of
 from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
+from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of
 from .obs.assignments import assignment_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
@@ -46,7 +47,7 @@ from .time_zone import TimeZoneRule, time_zones_of
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "planStores", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
+    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
     "alertReports", "assignments", "handover", "events",
@@ -61,6 +62,8 @@ class PluginConfig:
     path_mappings: list[PathMapping] = field(default_factory=list)
     #: `overviews`: an image opened from the catalog without overviews gets an external .ovr built in the background.
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
+    #: `complexImages`: complex SAR images (SICD's I/Q bands, complex pixels) shown as "dB" or "amplitude"; None as QGIS opens them.
+    complex_images: Optional[str] = DEFAULT_COMPLEX_MODE
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
     sensor_catalogs: list[SensorCatalogConfig] = field(default_factory=list)
     #: `satelliteAliases`: Esri tables of satellites' other names (the image catalog's 「WV03」 for 「WorldView-3」).
@@ -217,6 +220,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.path_mappings = path_mappings_of(value["pathMappings"], problems)
     if "overviews" in value:
         config.overviews = overviews_of(value["overviews"], problems)
+    if "complexImages" in value:
+        config.complex_images = complex_images_of(value["complexImages"], problems)
     config.satellite_catalogs = listed("satelliteCatalogs", satellite_catalog_of)
     config.sensor_catalogs = listed("sensorCatalogs", sensor_catalog_of)
     if "satelliteAliases" in value:
