@@ -2176,6 +2176,19 @@ class ObservationDock(PluginDock):
         self._export.activateWindow()
         return self._export
 
+    def open_import(self):
+        """Opens 「観測記録の一括取込み」 (a CSV or a layer into the chosen store; one kept while the dock lives)."""
+        from .record_import_dialog import RecordImportDialog
+
+        if getattr(self, "_import", None) is None:
+            self._import = RecordImportDialog(self, self)
+        else:
+            self._import.reset()
+        self._import.show()
+        self._import.raise_()
+        self._import.activateWindow()
+        return self._import
+
     def open_handover(self, tab: int = 0):
         """Opens 「分担と引き継ぎ」 (its tab 0 分担, 1 引き継ぎメモ); one kept while the dock lives."""
         from .handover_dialog import HandoverDialog
