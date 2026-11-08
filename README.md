@@ -1261,6 +1261,8 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 プラグインが読み書きする Esri のレイヤー・テーブルの一覧（RDBMS（エンタープライズ ジオデータベース）に作る前提）。属性名と役割の対応は各モジュールの既定（`DEFAULT_*_FIELDS`）と各項目の読み込み処理が元。プラグインは**属性名**（エイリアスではなく）で読み書きするので、エイリアスは表のとおりでなくてもよい。
 
+この表のとおりにテーブルを作り、ポータルに公開して設定ファイルまで作るスクリプトが `tools/arcgis/` にある（ArcGIS Pro の Python で実行。手順は [docs/arcgis-setup.md](docs/arcgis-setup.md)）。何度実行してもよく、プラグインを新しくして属性が増えたら足りない属性だけ足す。
+
 ### 命名の決まり
 
 - テーブル・フィーチャクラスの名前は `TBL_` で始め、すべて大文字、語は `_` で区切る（`TBL_OBSERVATION`、`TBL_EVENT_LINK`）
@@ -1769,6 +1771,7 @@ skywatch/
   tests/     pytest
 tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
+  arcgis/              ArcGIS でテーブルを作り、ポータルに公開するスクリプト（docs/arcgis-setup.md）
 ```
 
 ## テスト
