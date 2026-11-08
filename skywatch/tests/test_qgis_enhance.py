@@ -461,6 +461,27 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         assert er.enhance_renderer(earlier).settings.color == {"scale": "red"}
         assert er.enhance_renderer(later).settings.color == {"scale": "cyan"}
         assert later.blendMode() == QPainter.CompositionMode.CompositionMode_Screen
+        # While laid over each other the colouring is locked, on either image, until 着色の解除 takes it off both.
+        dock.follow_layer(earlier)
+        assert box.locked() and not box.scale.isEnabled() and not box.blend.isEnabled() and not box.pair_box.isEnabled()
+        assert box.clear_button.isEnabled() and later.name() in box.lock_note.text()
+        dock.follow_layer(later)
+        assert box.locked() and not box.mode.isEnabled()
+        box.clear()
+        dock.apply()
+        assert not box.locked() and box.scale.isEnabled() and box.pair_box.isEnabled()
+        assert er.enhance_renderer(later).settings.color is None and er.enhance_renderer(earlier).settings.color is None
+        assert earlier.blendMode() == later.blendMode() == QPainter.CompositionMode.CompositionMode_SourceOver
+        assert not earlier.customProperty("satobs/pair") and not later.customProperty("satobs/pair")
+        # Coloured another way (a script), the pair is over.
+        dock.follow_layer(earlier)
+        box.other.setCurrentIndex(box.other.findData(later.id()))
+        assert box.pair() and box.locked()
+        dock.colorize(later, "turbo")
+        dock.follow_layer(earlier)
+        assert not box.locked()
+        dock.colorize(later, None)
+        dock.colorize(earlier, None)
         # The target follows the dock's; the other image chosen stays.
         dock.follow_layer(later)
         assert box.target_label.text() == later.name()
