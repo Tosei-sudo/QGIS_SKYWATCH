@@ -3,7 +3,8 @@
 (SAR, panchromatic, one band of a multispectral image) in a colour scale,
 red from black for example, laid over the layers under it in a blend mode.
 Two dates in red and cyan, the later screened over the earlier, show white
-where nothing changed and their own colour where only one is bright.
+where nothing changed and their own colour where only one is bright; one of
+the two is always the dock's target image, the other is chosen.
 
 The image can also be shown by classes of its values: equal intervals,
 quantiles, bounds typed in, or one colour per value for a classified image
@@ -52,6 +53,8 @@ BLENDS = [
 MODES = [("", "連続（なめらかに）"), ("classes", "区分（値の範囲ごとに色分け）"), ("unique", "値ごとに色分け（分類画像）")]
 METHODS = [("equal", "等間隔"), ("quantile", "分位数（面積が同じ）"), ("manual", "手動（境界の値を入力）")]
 CUSTOM_COLOR = "#ff8800"
+#: Which of the two dates the target image is.
+ORDERS = [("auto", "撮像日時の順"), ("before", "対象が前（赤）"), ("after", "対象が後（シアン）")]
 
 
 def blend_of(layer: QgsRasterLayer) -> str:
@@ -203,10 +206,21 @@ class ColorizeBox(QGroupBox):
         self.pair_box.setChecked(False)
         pv = QVBoxLayout(self.pair_box)
         pf = QFormLayout()
-        self.before = QComboBox()
-        self.after = QComboBox()
-        pf.addRow(self.tr("前の画像"), self.before)
-        pf.addRow(self.tr("後の画像"), self.after)
+        self.target_label = QLabel()
+        self.target_label.setWordWrap(True)
+        pf.addRow(self.tr("対象の画像"), self.target_label)
+        self.other = QComboBox()
+        self.other.setToolTip(self.tr("対象の画像と重ねる別の時期の画像"))
+        self.other.currentIndexChanged.connect(self._show_order)
+        pf.addRow(self.tr("比べる画像"), self.other)
+        self.order = QComboBox()
+        for key, label in ORDERS:
+            self.order.addItem(self.tr(label), key)
+        self.order.currentIndexChanged.connect(self._show_order)
+        pf.addRow(self.tr("前後"), self.order)
+        self.order_label = QLabel()
+        self.order_label.setWordWrap(True)
+        pf.addRow("", self.order_label)
         pv.addLayout(pf)
         pair_hint = QLabel(self.tr("前を赤、後をシアンとし、後をスクリーンで重ね合わせ。変化なしの所は白黒、"
                                    "後で明るくなった所はシアン、暗くなった所は赤。"))
@@ -496,34 +510,46 @@ class ColorizeBox(QGroupBox):
             self._fill_pair()
 
     def _fill_pair(self) -> None:
-        """Every raster layer; the earliest two one-band images by their time (else the lowest two in the layer list)."""
-        layers = raster_layers()
-        for combo in (self.before, self.after):
-            combo.blockSignals(True)
-            combo.clear()
-            for layer in layers:
-                combo.addItem(layer.name(), layer.id())
-            combo.blockSignals(False)
-        single = [lay for lay in layers if lay.bandCount() == 1]
-        pool = single if len(single) >= 2 else layers
-        rank = {lay.id(): -n for n, lay in enumerate(layers)}
-        times = {lay.id(): observed_image(lay).time for lay in pool}
-        if all(t is not None for t in times.values()):
-            rank.update(times)
-        pool = sorted(pool, key=lambda lay: rank[lay.id()])
-        if pool:
-            self.before.setCurrentIndex(self.before.findData(pool[0].id()))
-        if len(pool) > 1:
-            self.after.setCurrentIndex(self.after.findData(pool[1].id()))
-        self.pair_box.setEnabled(len(layers) >= 2)
+        """The other image: every raster layer but the target; the one-band image nearest in time to it (else the next in the layer list) unless one is already chosen."""
+        target = self.layer
+        self.target_label.setText(target.name() if target is not None else self.tr("ラスターレイヤーの選択なし"))
+        layers = [lay for lay in raster_layers() if target is None or lay.id() != target.id()]
+        chosen = self.other.currentData()
+        self.other.blockSignals(True)
+        self.other.clear()
+        for layer in layers:
+            self.other.addItem(layer.name(), layer.id())
+        index = self.other.findData(chosen) if chosen else -1
+        if index < 0 and layers:
+            other = nearest_image(target, layers)
+            index = self.other.findData(other.id()) if other is not None else 0
+        self.other.setCurrentIndex(index)
+        self.other.blockSignals(False)
+        self.pair_box.setEnabled(target is not None and bool(layers))
+        self._show_order()
+
+    def pair_layers(self) -> tuple:
+        """(before, after) for the target and the other image chosen; None in place of the missing ones."""
+        target = self.layer
+        other = QgsProject.instance().mapLayer(self.other.currentData() or "")
+        if target is None or other is None or other.id() == target.id():
+            return None, None
+        order = self.order.currentData()
+        if order == "auto":
+            order = "before" if earlier_first(target, other) else "after"
+        return (target, other) if order == "before" else (other, target)
+
+    def _show_order(self, *_args) -> None:
+        before, after = self.pair_layers()
+        self.order_label.setText(self.tr("前（赤）: {before}\n後（シアン）: {after}").format(before=before.name(), after=after.name())
+                                 if before is not None else "")
 
     def pair(self) -> bool:
-        """The earlier image in red, the later in cyan screened over it, both shown; False when two images are not chosen."""
+        """The earlier image in red, the later in cyan screened over it, both shown; False when there is no target or other image."""
         project = QgsProject.instance()
-        before = project.mapLayer(self.before.currentData() or "")
-        after = project.mapLayer(self.after.currentData() or "")
-        if before is None or after is None or before is after:
-            self.pair_note.setText(self.tr("別々の画像を選択"))
+        before, after = self.pair_layers()
+        if before is None or after is None:
+            self.pair_note.setText(self.tr("対象の画像と比べる画像を選択"))
             return False
         root = project.layerTreeRoot()
         # The later image goes right above the earlier one.
@@ -547,6 +573,42 @@ class ColorizeBox(QGroupBox):
         self.say(self.tr("{before} を赤、{after} をシアンで重ね合わせ").format(before=before.name(), after=after.name()))
         self.colored.emit()
         return True
+
+
+def earlier_first(a: QgsRasterLayer, b: QgsRasterLayer) -> bool:
+    """Whether `a` is the earlier of the two: by their times when both have one, else the lower in the layer list."""
+    ta, tb = observed_image(a).time, observed_image(b).time
+    if ta is not None and tb is not None and ta != tb:
+        return ta < tb
+    ids = [lay.id() for lay in raster_layers()]
+    if a.id() in ids and b.id() in ids:
+        return ids.index(a.id()) > ids.index(b.id())
+    return True
+
+
+def nearest_image(target: Optional[QgsRasterLayer], layers: list) -> Optional[QgsRasterLayer]:
+    """The image to compare `target` with: of the one-band images when it is one-band and there are some, the nearest in time when all
+    have a time, else the next below it in the layer list (else the one right above)."""
+    if not layers:
+        return None
+    if target is None:
+        return layers[0]
+    pool = [lay for lay in layers if lay.bandCount() == 1] if target.bandCount() == 1 else []
+    pool = pool or layers
+    t = observed_image(target).time
+    times = {lay.id(): observed_image(lay).time for lay in pool}
+    if t is not None and all(v is not None for v in times.values()):
+        return min(pool, key=lambda lay: abs(times[lay.id()] - t))
+    order = [lay.id() for lay in raster_layers()]
+    if target.id() in order:
+        at = order.index(target.id())
+        below = [lay for lay in pool if lay.id() in order and order.index(lay.id()) > at]
+        if below:
+            return min(below, key=lambda lay: order.index(lay.id()))
+        above = [lay for lay in pool if lay.id() in order]
+        if above:
+            return max(above, key=lambda lay: order.index(lay.id()))
+    return pool[0]
 
 
 def raster_layers() -> list:
