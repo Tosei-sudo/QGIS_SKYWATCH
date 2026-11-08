@@ -693,3 +693,43 @@ def test_the_record_chosen_in_the_list_opens_below_the_list(plugin):
     # Scrolled to it when the dock is too small to show it all.
     bar = dock.scroll.verticalScrollBar()
     assert bar.maximum() > 0 and bar.value() > 0
+
+
+def test_the_lists_are_filtered_by_a_top_class(plugin):
+    p, iface, dock, layers, _ = plugin
+    dock.set_active(True)
+    for name, kind, lon in (("あおば", ["船舶", "護衛艦"], 139.7), ("はやて", ["航空機"], 139.8), ("みずほ", ["船舶"], 139.9)):
+        dock.map_clicked(lon, 35.6, None)
+        dock.object_input.setText(name)
+        dock.choose_kind(kind)
+        dock.submit()
+
+    def names():
+        return sorted(dock.table.item(r, 0).text() for r in range(dock.table.rowCount()))
+
+    assert dock.tabs.currentIndex() == 0 and dock.class_filter_row.isVisible()
+    combo = dock.root_filter
+    roots = [combo.itemData(i) for i in range(combo.count())]
+    assert roots[0] == "" and {"船舶", "航空機", "車両"} <= set(roots)
+    assert names() == ["あおば", "はやて", "みずほ"]
+    # 「この画像」: only the ships, and it stays on the tab.
+    combo.setCurrentIndex(combo.findData("船舶"))
+    combo.activated.emit(combo.currentIndex())
+    assert dock.tabs.currentIndex() == 0 and names() == ["あおば", "みずほ"]
+    # 「モノ」 keeps the same filter.
+    dock.tabs.setCurrentIndex(1)
+    assert names() == ["あおば", "みずほ"] and combo.currentData() == "船舶"
+    dock.filter_root("航空機")
+    assert names() == ["はやて"]
+    # A class below (分類 tab's double click) shows its top class and the path.
+    dock.filter_class(["船舶", "護衛艦"])
+    assert names() == ["あおば"] and combo.currentData() == "船舶" and "護衛艦" in dock.class_filter_label.text()
+    # Nothing of a top class: says so; × shows all again.
+    dock.tabs.setCurrentIndex(0)
+    dock.filter_root("車両")
+    assert dock.table.rowCount() == 1 and "絞り込み" in dock.table.item(0, 0).text()
+    dock.unfilter_button.click()
+    assert names() == ["あおば", "はやて", "みずほ"] and combo.currentData() == ""
+    # Not offered in 「分類」.
+    dock.tabs.setCurrentIndex(2)
+    assert not dock.class_filter_row.isVisible()
