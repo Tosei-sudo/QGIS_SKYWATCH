@@ -149,30 +149,55 @@ def forecast_file(config: CloudForecastConfig) -> str:
 def read_clouds(config: CloudForecastConfig, places: Sequence[Sequence[float]],
                 cancelled: Optional[Callable[[], bool]] = None) -> CloudForecasts:
     """The forecasts for places (longitude, latitude), by grid cell, from the forecast file (GDAL)."""
+    return read_file_clouds(forecast_file(config), places, cancelled)
+
+
+def _open(path: str):
     from osgeo import gdal
 
-    path = forecast_file(config)
     try:
         ds = gdal.Open(path, gdal.GA_ReadOnly)
     except RuntimeError:  # GDAL raising (gdal.UseExceptions)
         ds = None
     if ds is None:
         raise ValueError(f"雲量予報のファイルを開けない: {os.path.basename(path)}")
+    return ds
+
+
+def _grid_of(ds, path: str) -> CloudGrid:
+    transform = tuple(ds.GetGeoTransform(can_return_null=True) or ())
+    if len(transform) != 6 or transform[2] or transform[4]:
+        raise ValueError(f"雲量予報のファイルが北が上の経緯度の格子でない: {os.path.basename(path)}")
+    bands = [ds.GetRasterBand(i + 1) for i in range(ds.RasterCount)]
+    times = [band_time(b.GetMetadata() or {}, b.GetDescription()) for b in bands]
+    if not any(math.isfinite(t) for t in times):
+        raise ValueError(f"雲量予報のファイルのバンドに時刻（VALID_TIME）がない: {os.path.basename(path)}")
+    first = bands[0]
+    meta = ds.GetMetadata() or {}
+    issued = time_of(meta.get("INIT_TIME", ""))
+    if not math.isfinite(issued):
+        issued = named_time(os.path.basename(path))
+    return CloudGrid(transform, ds.RasterXSize, ds.RasterYSize, times, issued,
+                     first.GetNoDataValue(), first.GetScale() or 1.0, first.GetOffset() or 0.0)
+
+
+def read_grid(path: str) -> CloudGrid:
+    """What a forecast file holds (its grid and its bands' times), without its pixels; raises with the reason."""
+    ds = _open(path)
     try:
-        transform = tuple(ds.GetGeoTransform(can_return_null=True) or ())
-        if len(transform) != 6 or transform[2] or transform[4]:
-            raise ValueError(f"雲量予報のファイルが北が上の経緯度の格子でない: {os.path.basename(path)}")
-        bands = [ds.GetRasterBand(i + 1) for i in range(ds.RasterCount)]
-        times = [band_time(b.GetMetadata() or {}, b.GetDescription()) for b in bands]
-        if not any(math.isfinite(t) for t in times):
-            raise ValueError(f"雲量予報のファイルのバンドに時刻（VALID_TIME）がない: {os.path.basename(path)}")
-        first = bands[0]
-        meta = ds.GetMetadata() or {}
-        issued = time_of(meta.get("INIT_TIME", ""))
-        if not math.isfinite(issued):
-            issued = named_time(os.path.basename(path))
-        grid = CloudGrid(transform, ds.RasterXSize, ds.RasterYSize, times, issued,
-                         first.GetNoDataValue(), first.GetScale() or 1.0, first.GetOffset() or 0.0)
+        return _grid_of(ds, path)
+    finally:
+        ds = None
+
+
+def read_file_clouds(path: str, places: Sequence[Sequence[float]],
+                     cancelled: Optional[Callable[[], bool]] = None) -> CloudForecasts:
+    """The forecasts for places (longitude, latitude), by grid cell, from one forecast file (GDAL)."""
+    from osgeo import gdal
+
+    ds = _open(path)
+    try:
+        grid = _grid_of(ds, path)
 
         def sample(col: int, row: int) -> list:
             values = ds.ReadRaster(col, row, 1, 1, buf_type=gdal.GDT_Float64)
@@ -181,3 +206,62 @@ def read_clouds(config: CloudForecastConfig, places: Sequence[Sequence[float]],
         return clouds_from_grid(grid, places, sample, cancelled)
     finally:
         ds = None
+
+
+def folder_files(folder: str, listdir: Callable[[str], list] = os.listdir) -> list[tuple[float, str]]:
+    """The `gfs_tcdc_YYYYMMDDHH.tif` files of a folder with their initial times, oldest first."""
+    named = [(named_time(n), os.path.join(folder, n)) for n in listdir(folder) if _TIF.search(n)]
+    return sorted((t, p) for t, p in named if math.isfinite(t))
+
+
+def join_forecasts(forecasts: Sequence[CloudForecasts]) -> CloudForecasts:
+    """
+    Forecasts of several initial times as one (oldest first): each is used up
+    to the next one's initial time, the newest to its end. So a folder kept
+    day after day tells the cover of the past days from the forecast made
+    closest before them.
+    """
+    ordered = sorted(forecasts, key=lambda f: f.issued if math.isfinite(f.issued) else -math.inf)
+    out = CloudForecasts()
+    if ordered:
+        out.issued = ordered[-1].issued
+    for i, forecast in enumerate(ordered):
+        until = ordered[i + 1].issued if i + 1 < len(ordered) else math.inf
+        if not math.isfinite(until):
+            until = math.inf
+        for key, series in forecast.items():
+            pairs = [(t, v) for t, v in zip(series.times, series.cover) if t < until]
+            if not pairs:
+                continue
+            have = out.get(key)
+            if have is None:
+                have = out[key] = CloudSeries([], [])
+            # The newer forecast replaces the older from its first time on.
+            start = pairs[0][0]
+            keep = [(t, v) for t, v in zip(have.times, have.cover) if t < start]
+            merged = keep + pairs
+            have.times[:] = [t for t, _ in merged]
+            have.cover[:] = [v for _, v in merged]
+    return out
+
+
+def read_folder_clouds(folder: str, places: Sequence[Sequence[float]],
+                       cancelled: Optional[Callable[[], bool]] = None) -> CloudForecasts:
+    """
+    The forecasts for places from every `gfs_tcdc_YYYYMMDDHH.tif` of a folder,
+    joined (`join_forecasts`); the newest `.tif` alone when none is so named.
+    """
+    if not os.path.isdir(folder):
+        raise ValueError(f"雲量予報のフォルダがない: {folder}")
+    files = folder_files(folder)
+    if not files:
+        path = newest_file(folder)
+        if not path:
+            raise ValueError(f"雲量予報のフォルダに .tif がない: {folder}")
+        return read_file_clouds(path, places, cancelled)
+    out = []
+    for _, path in files:
+        if cancelled and cancelled():
+            break
+        out.append(read_file_clouds(path, places, cancelled))
+    return join_forecasts(out)

@@ -120,8 +120,12 @@ def _series_of(entry: Any) -> Optional[CloudSeries]:
 Fetch = Callable[[str], bytes]
 
 
-def forecast_urls(config: CloudForecastConfig, places: Sequence[Sequence[float]]) -> list[tuple[list[str], str]]:
-    """The requests for places (longitude, latitude): the grid cells of each, and its URL."""
+#: The most days before today the service tells (Open-Meteo's `past_days`).
+PAST_DAYS = 92
+
+
+def forecast_urls(config: CloudForecastConfig, places: Sequence[Sequence[float]], past_days: int = 0) -> list[tuple[list[str], str]]:
+    """The requests for places (longitude, latitude): the grid cells of each, and its URL (`past_days` before today too)."""
     cells: dict[str, tuple[float, float]] = {}
     for p in places:
         key = key_of(p)
@@ -132,29 +136,37 @@ def forecast_urls(config: CloudForecastConfig, places: Sequence[Sequence[float]]
     out = []
     for i in range(0, len(keys), PER_REQUEST):
         batch = keys[i:i + PER_REQUEST]
-        params = urlencode({
+        query = {
             "latitude": ",".join(f"{cells[k][1]:.2f}" for k in batch),
             "longitude": ",".join(f"{cells[k][0]:.2f}" for k in batch),
             "hourly": "cloud_cover",
             "forecast_days": str(FORECAST_DAYS),
             "timezone": "GMT",
             "timeformat": "unixtime",
-        })
+        }
+        if past_days > 0:
+            query["past_days"] = str(min(PAST_DAYS, int(past_days)))
+        params = urlencode(query)
         out.append((batch, f"{config.url}{'&' if '?' in config.url else '?'}{params}"))
     return out
 
 
 def fetch_clouds(config: CloudForecastConfig, places: Sequence[Sequence[float]], fetch: Fetch,
-                 cancelled: Optional[Callable[[], bool]] = None) -> dict[str, CloudSeries]:
+                 cancelled: Optional[Callable[[], bool]] = None, past_days: int = 0,
+                 every_file: bool = False) -> dict[str, CloudSeries]:
     """
     The forecasts for places (longitude, latitude), by grid cell, asked for in
-    batches (`fetch` asks a URL) or read from the forecast file.
+    batches (`fetch` asks a URL) or read from the forecast file. `past_days`
+    asks the service for the days before today too; `every_file` reads every
+    file of a folder (joined, the newer forecast winning), not only the newest.
     """
     if config.local:
-        from .weather_file import read_clouds
+        from .weather_file import read_clouds, read_folder_clouds
+        if every_file and config.folder:
+            return read_folder_clouds(config.folder, places, cancelled)
         return read_clouds(config, places, cancelled)
     out = CloudForecasts()
-    for batch, url in forecast_urls(config, places):
+    for batch, url in forecast_urls(config, places, past_days):
         if cancelled and cancelled():
             break
         try:
