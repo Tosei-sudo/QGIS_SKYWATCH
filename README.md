@@ -856,7 +856,7 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 ## 導入
 
 1. `python3 scripts/build_zip.py` で `dist/satellite_observation-<版>.zip` を作る
-2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」
+2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」（閉域で多くの PC に配り、更新も知らせるなら下の「社内のプラグインリポジトリで更新を配る」）
 3. メニュー「プラグイン」→「衛星撮像計画・観測記録」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る。設定ファイルの指定はこのメニューだけで、各ドックには出さない。読み込んだ設定ファイルに問題があると、QGIS のメッセージバーに「問題 n 件」と「設定…」ボタンを出す（同じファイル・同じ問題では繰り返さない）
 
 ### Windows 版（onnxruntime・sgp4・tzdata を同梱）
@@ -897,6 +897,49 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 - 仕組み: zip に設定ファイルと並べて `satellite_observation/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`satellite_observation/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
 - 設定ファイルなしで `--lock-config` を付けると zip を作らない
 - 固定を外すには `--lock-config` なしで作った zip を入れ直す（またはプラグインのフォルダの `config.lock` を消す）。各自が前に指定していたファイルがあれば、またそちらを読む
+
+### 社内のプラグインリポジトリで更新を配る（閉域）
+
+公式のプラグインリポジトリ（plugins.qgis.org）に届かない閉域でも、社内の共有フォルダーか Web サーバーに「社内リポジトリ」を置けば、各 PC の QGIS が普通のプラグインと同じく更新を知らせ、「プラグインの管理」のボタン 1 つで入れ替えられる。
+
+**作る（リリースのたび）**
+
+```
+python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins
+python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url http://intra.example/qgis-plugins
+python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config config.json --lock-config --changelog "通報の地名を追加"
+```
+
+- 通常版と Windows 版の zip を新しい版で作り、フォルダーに `plugins.xml`（通常版）・`plugins-win64.xml`（Windows 版）・`satellite_observation.<版>.zip`・`satellite_observation.<版>.win64.zip`・`icon.svg` を置く。最後に各 PC で登録するアドレスを出す
+- 版は `metadata.txt` の版の後ろに UTC の日時（秒まで）を付けたもの（例 `0.4.0.20261108123000`）。QGIS は掲載の版が入っている版より大きいときだけ更新と見なすため、作るたびに必ず大きくなるようにしている。`--version` で指定もできる。大きな変更では `metadata.txt` の版（`0.4.0` → `0.5.0`）を上げる
+- 掲載中の版より新しくない zip は載せない。前の版に戻すときは、残っている古い zip を `--zip 古い.zip --allow-older` で載せ直す（各 PC では「プラグインの管理」で入れ直し）。古い zip は消さずに残す
+- `--config`・`--lock-config` は `build_zip.py` と同じ。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
+- zip を先に置いてから `plugins.xml` を差し替えるので、作っている途中に各 PC が読んでも、ない zip を指すことはない
+- `--url` を付けないと、ダウンロード先はフォルダーの `file://` アドレス（`\\fileserver\share\qgis-plugins` なら `file://fileserver/share/qgis-plugins`）。Linux でマウントした共有フォルダーに作るときは、各 PC から見えるアドレスを `--url file://fileserver/share/qgis-plugins` のように付ける
+- 掲載は「実験的でない」扱いにする（`metadata.txt` は `experimental=True` だが、そのままだと各 PC で「実験的なプラグインも表示する」を入れないと見えないため）。`--experimental` で実験版として載せることもできる
+
+**置き場所**
+
+- 共有フォルダー: 各 PC から読めればよい（書けるのはリリースする人だけにする）。サーバーは要らない
+- Web サーバー: IIS・Apache・nginx など、ファイルをそのまま返すもの（`.xml`・`.zip` の MIME 型が要る。IIS の既定で可）。サインインが要るなら、各 PC で QGIS の認証設定をリポジトリに付ける
+
+**各 PC で登録する（最初の 1 回）**
+
+1. 「プラグイン」→「プラグインの管理とインストール」→「設定」→「追加…」
+2. 名前（例「社内」）と URL を入れる。Windows 版を使う PC は `…/plugins-win64.xml`、それ以外は `…/plugins.xml`。共有フォルダーなら `file://fileserver/share/qgis-plugins/plugins-win64.xml`、Web サーバーなら `http://intra.example/qgis-plugins/plugins-win64.xml`
+3. 公式のリポジトリ（QGIS Official Plugin Repository）は届かないので、チェックを外して無効にしておくとエラーが出ない
+4. 同じ画面の「起動時に更新を確認する」を入れておくと、QGIS は 3 日おきに起動時に確かめ、新しい版があれば知らせる。すぐ確かめるときは「すべてのリポジトリを再読み込み」
+5. 「すべて」の一覧で「衛星撮像計画・観測記録」を選び「プラグインをインストール」（入っていれば「プラグインをアップグレード」）
+
+QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に入るので、多くの PC に配るときは QGIS の `qgis_global_settings.ini` の `[app]` に `plugin_repositories\internal\url=file://fileserver/share/qgis-plugins/plugins-win64.xml` と書いておくこともできる（公式のリポジトリは消しても QGIS が足し直すので、`plugin_repositories\QGIS%20Official%20Plugin%20Repository\enabled=false` のように無効にする）。
+
+**更新のとき（Windows 版）**
+
+- 更新は QGIS の中でプラグインのフォルダーを消して zip を展開し直す。Windows 版の DLL（onnxruntime・sgp4）は `%LOCALAPPDATA%` の写しから読むので、QGIS を開いたままでも更新できる（上の「Windows 版」）
+- この仕組みより前の Windows 版が入っている PC は一度だけ、プラグインを無効にして QGIS を再起動してから更新する（または QGIS を閉じて `python/plugins/satellite_observation` を消してから入れる）。今の版の `metadata.txt` は `0.4.0` 以上なので、`0.3.0` などの手元の版から入れた PC にも更新として出る
+- 更新後に動きがおかしければ QGIS を再起動する
+
+**確かめたこと**: QGIS 3.34 のプラグイン管理のコード（`pyplugin_installer`）で、`file://` と `http://` のどちらのリポジトリも読めて、`0.4.0` が入った状態で「アップグレード可能」になり、ダウンロードと展開で新しい版に入れ替わることを確かめた（Linux）。UNC の `file://サーバー/共有/…` は Qt が Windows で UNC パスとして開く書き方。
 
 ## 設定
 
