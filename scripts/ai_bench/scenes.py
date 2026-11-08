@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-from satellite_observation.core.ai.train.trainer import Window
+from skywatch.core.ai.train.trainer import Window
 
 CLASSES = ["ship", "aircraft", "vehicle"]
 

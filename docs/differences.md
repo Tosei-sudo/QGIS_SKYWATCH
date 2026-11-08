@@ -15,7 +15,7 @@
 | `token` と認証設定 | `token` があればそれ、なければサインインのトークン | 認証設定を選んだサービスは `token` を送らない | 二重送信を避けるため |
 | 全件読み込み | `resultOffset` で `exceededTransferLimit` が立つ間 | 同じ。加えて、ページが満杯なら次も読む。ページングできないレイヤーは ID を先に読み `maxRecordCount` ずつ取得 | 指示書「`maxRecordCount` を超える件数はページングで全件読む」 |
 | 通信 | `fetch`（GET か POST） | すべて form POST（`f=json`）、`QgsBlockingNetworkRequest`（QgsTask 内のみ） | トークンを URL に出さない・QGIS のプロキシと認証に従う |
-| ローカル保存 | IndexedDB・localStorage | ユーザープロファイルの `satellite_observation/observations.gpkg`（`observations`・`checked_areas`・`taxonomy`・`taxon_photos`） | 指示書どおり。属性名は Esri と同じ |
+| ローカル保存 | IndexedDB・localStorage | ユーザープロファイルの `skywatch/observations.gpkg`（`observations`・`checked_areas`・`taxonomy`・`taxon_photos`） | 指示書どおり。属性名は Esri と同じ |
 | ローカルの分類体系 | localStorage に保存先ごと | `taxonomy` テーブルに `STORE`（保存先の label）と `ROW_KEY` の列を追加 | 1 つのテーブルで保存先ごとに持つため |
 | 日時（ローカル） | ms の数値 | GeoPackage の DATETIME（UTC の ISO 8601） | QGIS・ArcGIS Pro で日時として扱えるように |
 
@@ -255,7 +255,7 @@
 | 候補値・範囲・必須 | ビューアの属性テーブルで選択・検査 | QGIS の「値マップ」「範囲」ウィジェットと、非 NULL 制約・式の制約（強制） | QGIS の属性フォームで同じ働き |
 | 日付型 | 日時（ms） | 日時（QDateTime）。既定値は `2026-10-17`（UTC の 0 時）・`2026-10-17 09:30`（端末の時刻）・時差付きを読む | ビューアの `new Date()` に近い読み方 |
 | 座標系 | 「詳細設定」の書き出しの既定（初期値 WGS84） | レイヤーの座標系（初期値はプロジェクトの座標系、なければ WGS84） | QGIS のメモリレイヤーは座標系を持つため |
-| 保存したテンプレート | ブラウザ（localStorage） | ユーザープロファイルの `QgsSettings`（`satellite_observation/layer_templates`、`layerTemplates` と同じ JSON） | — |
+| 保存したテンプレート | ブラウザ（localStorage） | ユーザープロファイルの `QgsSettings`（`skywatch/layer_templates`、`layerTemplates` と同じ JSON） | — |
 | 作った層の保存 | ブラウザ・プロジェクト（.ivproj） | QGIS のメモリレイヤー（プロジェクトを閉じると地物は消える。残すときは「エクスポート」か「レイヤーを固定化」） | QGIS 標準のスクラッチレイヤーと同じ扱い |
 
 ## ダッシュボード（2026-10-28 に追加）
@@ -530,7 +530,7 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 ## 参照実装側で見つけた点
 
 - 衛星パスの一覧で、左右に見られて最小オフナディア角が 0 の衛星（1 本の帯）の撮像可能範囲が「20〜20°・左右」になる（`offNadir.min` が帯の内側の端の絶対値 = 最大角になるため。テストもこの値を期待している）。「20° 以下・左右」が意図と思われる。プラグインは直した（2026-10-27 に決定）
-- README の `config.json` の例（設定ファイルの節）は `detectionOutputs` の後ろの `],` が抜けていて JSON として読めない。テスト用の写し（`satellite_observation/tests/data/viewer-config.jsonc`）では補った
+- README の `config.json` の例（設定ファイルの節）は `detectionOutputs` の後ろの `],` が抜けていて JSON として読めない。テスト用の写し（`skywatch/tests/data/viewer-config.jsonc`）では補った
 
 ## 撮像依頼台帳と日次出力（2026-11-07）
 
