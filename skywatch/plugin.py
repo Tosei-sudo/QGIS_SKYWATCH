@@ -19,7 +19,7 @@ from .processing_provider.pansharpen_algorithm import default_inputs
 from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
-from .qgis_io import edit_stamp_layers, time_zone_fields
+from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from .qgis_io.context import PluginContext
 from .core.enhance.rules import image_rule_for
 from .qgis_io import complex_sar, overviews_io, tasks
@@ -807,6 +807,11 @@ class SkywatchPlugin:
         self.iface.addCustomActionForLayerType(self.similar_action, "", QgsMapLayerType.RasterLayer, False)
         QgsProject.instance().layersAdded.connect(self._layers_added)
         self._layers_added(QgsProject.instance().mapLayers().values())
+        # QGIS の式の関数 「SKYWATCH」: the records the observation dock read and the named areas.
+        expression_functions.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        expression_functions.register()
+        self.place_reader = expression_functions.PlaceReader(self.context)
+        self.place_reader.start()
         # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
         time_zone_fields.register()
         self.time_zone_fields = time_zone_fields.TimeZoneFields(
@@ -1093,6 +1098,10 @@ class SkywatchPlugin:
                 pass
             self.time_zone_fields = None
             time_zone_fields.unregister()
+        if getattr(self, "place_reader", None) is not None:
+            self.place_reader.stop()
+            self.place_reader = None
+        expression_functions.unregister()
         if self.swipe is not None:
             self.swipe.close()
             self.swipe.deleteLater()
