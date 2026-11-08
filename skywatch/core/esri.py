@@ -185,6 +185,9 @@ class EsriClient:
                     if probe.get("features"):
                         raise too_many()
                     break
+            if len(out) > limit and not cut:
+                # The last page went past the limit (a page larger than what was left).
+                raise too_many()
             return out[:limit]
         ids_json = self.ask(f"{url}/query", {"where": params["where"], "returnIdsOnly": "true", **(extra or {})}, token)
         ids = sorted(i for i in ids_json.get("objectIds") or [] if is_number(i))
