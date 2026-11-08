@@ -43,7 +43,7 @@ from ..core.obs.model import Observation
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
-    activities_at, children_of, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
+    activities_at, children_of, class_by_name, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
@@ -436,13 +436,22 @@ class ObservationDock(PluginDock):
         self.class_filter_row = QWidget()
         row = QHBoxLayout(self.class_filter_row)
         row.setContentsMargins(0, 0, 0, 0)
+        # 大分類 (a root of the classification) the lists 「この画像」「モノ」 show.
+        self.root_filter_label = QLabel(tr("大分類"))
+        row.addWidget(self.root_filter_label)
+        self.root_filter = QComboBox()
+        self.root_filter.setToolTip(tr("一覧（この画像・モノ）に表示する大分類"))
+        self.root_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.root_filter.activated.connect(lambda _i: self.filter_root(self.root_filter.currentData() or None))
+        row.addWidget(self.root_filter)
         self.class_filter_label = QLabel()
         row.addWidget(self.class_filter_label, 1)
         unfilter = QToolButton()
         unfilter.setText("×")
         unfilter.setToolTip(tr("分類の絞り込み解除"))
-        unfilter.clicked.connect(lambda: self.filter_class(None))
+        unfilter.clicked.connect(lambda: self.filter_root(None))
         row.addWidget(unfilter)
+        self.unfilter_button = unfilter
         self.class_filter_row.hide()
         b.addWidget(self.class_filter_row)
         self.table = QTableWidget()
@@ -1700,6 +1709,37 @@ class ObservationDock(PluginDock):
         else:
             self.render()
 
+    def filter_root(self, root: Optional[str]) -> None:
+        """Limits 「この画像」「モノ」 to a 大分類 (None: all), staying on the tab."""
+        self.class_filter = [root] if root else None
+        self.render()
+
+    def _kind_path(self, kind: str, taxa) -> list[str]:
+        """A record's kind as a path of the classification (a class's other name → its path)."""
+        path = path_of(kind)
+        if len(path) == 1 and taxa and not find(taxa, path):
+            return list(class_by_name(taxa, path[0]) or path)
+        return path
+
+    def _shown_kind(self, kind: str, taxa) -> bool:
+        """Whether a kind is in the class the lists are limited to."""
+        return not self.class_filter or within(kind_of(self._kind_path(kind, taxa)), self.class_filter)
+
+    def _render_root_filter(self, taxa) -> None:
+        # The classification shown has the kinds records use added, so its roots cover every record.
+        roots = [t.path[0] for t in taxa if len(t.path) == 1]
+        chosen = self.class_filter[0] if self.class_filter else ""
+        if chosen and chosen not in roots:
+            roots.append(chosen)
+        combo = self.root_filter
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(self.tr("すべて"), "")
+        for r in roots:
+            combo.addItem(r, r)
+        combo.setCurrentIndex(max(0, combo.findData(chosen)))
+        combo.blockSignals(False)
+
     def _chosen_flow(self) -> Optional[ObjectFlow]:
         return self.book.flow(self.chosen) if self.book and self.chosen else None
 
@@ -2136,8 +2176,15 @@ class ObservationDock(PluginDock):
         self.kinds_model.setStringList(kinds)
         self.area_kinds_model.setStringList(kinds)
         self.activities_model.setStringList(book.activity_words(self.kind_input.text()))
-        self.class_filter_row.setVisible(self.tab == "objects" and bool(self.class_filter))
-        self.class_filter_label.setText(self.tr("分類: {k} 以下").format(k=kind_of(self.class_filter)) if self.class_filter else "")
+        self.class_filter_row.setVisible(self.tab != "classes")
+        self._render_root_filter(taxa)
+        deeper = bool(self.class_filter) and len(self.class_filter) > 1
+        self.class_filter_label.setText(self.tr("分類: {k} 以下").format(k=kind_of(self.class_filter)) if deeper else "")
+        self.unfilter_button.setVisible(bool(self.class_filter))
+        if self.class_filter:
+            here = [o for o in here if self._shown_kind(o.kind, taxa)]
+            carried = [c for c in carried if self._shown_kind(c.source.kind, taxa)]
+            inside = [c for c in inside if self._shown_kind(c.source.kind, taxa)]
         if self.tab == "image":
             self._render_image(here, carried, inside)
         elif self.tab == "objects":
@@ -2177,14 +2224,18 @@ class ObservationDock(PluginDock):
                        tr("確認範囲内（記録なし）") if id(c) in inside_ids else "", "", ""],
                       lambda s=s: (self._ensure_active(), self.open_form(s.lon, s.lat, source=s), self._center(s)),
                       style="inside" if id(c) in inside_ids else "ghost", widget=widget)
+        taxa = book.taxonomy() if self.class_filter else []
         for a in book.image_areas(deleted=self.deleted_check.isChecked()):
+            if a.kind and not self._shown_kind(a.kind, taxa):
+                continue
             gone = a.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した確認範囲の復元"), lambda a=a: self.restore_areas([a]))) if gone else \
                 self._small((tr("削除"), tr("この確認範囲の削除"), lambda a=a: self.remove_areas([a])))
             self._row([area_label(a), a.kind, "", "", a.note, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
                       style="deleted" if gone else "area", widget=widget)
         if self.table.rowCount() == 0:
-            self._row([tr("記録なし（「クリック記録」で地図をクリック）") if book.current else tr("画像なし")])
+            self._row([tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter and book.current
+                       else tr("記録なし（「クリック記録」で地図をクリック）") if book.current else tr("画像なし")])
 
     def _ensure_active(self) -> None:
         if not self.active:
@@ -2194,8 +2245,8 @@ class ObservationDock(PluginDock):
         tr = self.tr
         self._set_head(tr("モノ"), tr("種別"), tr("最新"), tr("初出"), tr("最終"), tr("画像"))
         q = self.filter_input.text().strip().lower()
-        within_ = self.class_filter
-        listed = [f for f in objects if within(f.kind, within_)] if within_ else objects
+        taxa = self.book.taxonomy()
+        listed = [f for f in objects if self._shown_kind(f.kind, taxa)] if self.class_filter else objects
         if q:
             listed = [f for f in listed if any(q in v.lower() for v in [f.name, f.object_id, f.kind, *(o.activity for o in f.observations)])]
         for f in listed:
