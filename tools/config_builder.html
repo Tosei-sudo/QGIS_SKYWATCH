@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>設定ファイル作成ツール</title>
 <!--
-  衛星撮像計画・観測記録プラグインの設定ファイル（config.json）を作る・直すツール。
+  SKYWATCH プラグインの設定ファイル（config.json）を作る・直すツール。
   ブラウザでこのファイルを開くだけで動く（サーバー・ネットワーク・ライブラリ不要）。
-  項目と既定はプラグインの satellite_observation/core/config.py（KEYS と各項目の読み込み処理）に合わせてある。
-  下の plugin-constants はプラグインの定数の写し: satellite_observation/tests/test_config_builder.py が一致を確かめる。
+  項目と既定はプラグインの skywatch/core/config.py（KEYS と各項目の読み込み処理）に合わせてある。
+  下の plugin-constants はプラグインの定数の写し: skywatch/tests/test_config_builder.py が一致を確かめる。
 -->
 <style>
 :root {
@@ -1165,7 +1165,7 @@ let state = {};
 let fileName = "config.json";
 let current = "";               // 表示中の項目（"" は一覧）
 const openCards = new WeakSet(); // 開いているカード
-const STORE = "satellite_observation.config_builder";
+const STORE = "skywatch.config_builder";
 
 function changed() {
   const text = JSON.stringify(state, null, 2) + "\n";
