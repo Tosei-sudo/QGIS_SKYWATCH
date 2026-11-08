@@ -7,7 +7,7 @@ from typing import Optional
 from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
-from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton, QToolButton
+from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
@@ -57,6 +57,7 @@ from .ui.shift import LayerShift
 from .ui.shortcuts import Shortcuts
 from .ui.swipe import SwipeCompare
 from .ui.taxonomy_dock import TaxonomyDock
+from .ui.toolbar_buttons import ToolbarButtons, ToolbarButtonsDialog
 from .ui.webmap_dialog import WebMapDialogs
 
 HERE = os.path.dirname(__file__)
@@ -75,7 +76,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -289,6 +290,8 @@ class SkywatchPlugin:
         self._menu_top: list[QAction] = []
         self._menu_separator: Optional[QAction] = None
         self.setup_dialog: Optional[first_setup.FirstSetupDialog] = None
+        self.toolbar_buttons: Optional[ToolbarButtons] = None
+        self.toolbar_dialog: Optional[ToolbarButtonsDialog] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
@@ -412,7 +415,6 @@ class SkywatchPlugin:
             action.setText(title)
             action.setIcon(icon(icons[name]))
             self._add_to_menu(action)
-            self.toolbar.addAction(action)
             self.actions.append(action)
 
         self.place_docks()
@@ -427,7 +429,6 @@ class SkywatchPlugin:
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
         self._add_to_menu(moving)
-        self.toolbar.addAction(moving)
         self.actions.append(moving)
         self._add_new_layer(icon("new_layer"))
         # 「通報」 (alertReports): the notable records as delimited text, and what was reported.
@@ -527,10 +528,6 @@ class SkywatchPlugin:
         base_maps = QAction(icon("base_map"), tr("背景地図"), self.iface.mainWindow())
         self.base_maps = BaseMapSwitch(self.iface, self.context, base_maps, self.iface.mainWindow())
         self._add_to_menu(base_maps)
-        self.toolbar.addAction(base_maps)
-        button = self.toolbar.widgetForAction(base_maps)
-        if isinstance(button, QToolButton):
-            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.actions.append(base_maps)
         # ArcGIS Web Maps: opened as layers, and the project saved as one.
         self.webmaps = WebMapDialogs(self.iface, self.context, self.base_maps.choose, self.iface.mainWindow())
@@ -545,14 +542,12 @@ class SkywatchPlugin:
         swipe.setObjectName("SatObsSwipe")
         self.swipe = SwipeCompare(self.iface, swipe, self.iface.mainWindow())
         self._add_to_menu(swipe)
-        self.toolbar.addAction(swipe)
         self.actions.append(swipe)
         # 「位置ずらし」: the active image moved by hand.
         shift = QAction(icon("shift"), tr("位置ずらし"), self.iface.mainWindow())
         shift.setObjectName("SatObsShift")
         self.shift = LayerShift(self.iface, shift, self.iface.mainWindow())
         self._add_to_menu(shift)
-        self.toolbar.addAction(shift)
         self.actions.append(shift)
         unshift = QAction(icon("unshift"), tr("位置ずらしの解除"), self.iface.mainWindow())
         unshift.triggered.connect(lambda: self.shift.reset())
@@ -575,6 +570,12 @@ class SkywatchPlugin:
         setup.triggered.connect(lambda: self.open_first_setup())
         self._add_to_menu(setup)
         self.actions.append(setup)
+        # 「ツールバーのボタン…」: the toolbar's buttons for the role, and the person's own (ui/toolbar_buttons.py).
+        buttons = QAction(icon("toolbar_buttons"), tr("ツールバーのボタン…"), self.iface.mainWindow())
+        buttons.setObjectName("SatObsToolbarButtons")
+        buttons.triggered.connect(lambda: self.open_toolbar_buttons())
+        self._add_to_menu(buttons)
+        self.actions.append(buttons)
         # 「接続と表の点検」: every ArcGIS service of the settings file asked once (ui/health_dialog.py).
         health = QAction(icon("health_check"), tr("接続と表の点検…"), self.iface.mainWindow())
         health.triggered.connect(lambda: self.open_health_check())
@@ -587,6 +588,9 @@ class SkywatchPlugin:
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self._build_menu()
+        # The toolbar: the role's buttons (or the person's own), from the entries in menu order.
+        self.toolbar_buttons = ToolbarButtons(self.toolbar, self._entries_in_menu_order(), first_setup.role)
+        self.toolbar_buttons.apply()
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks)
         self.context.reload()
@@ -628,8 +632,28 @@ class SkywatchPlugin:
             self.iface.mainWindow(), lambda: self.docks, first=first,
             observation_dock=lambda: self.docks.get("SatObsObservations"), coordinates=lambda: self.coordinates,
             open_settings=self.open_settings)
+        # A new role: its toolbar buttons too.
+        self.setup_dialog.accepted.connect(lambda: self.toolbar_buttons.apply() if self.context is not None else None)
         self.setup_dialog.open()
         return self.setup_dialog
+
+    def open_toolbar_buttons(self):
+        """「ツールバーのボタン…」: the buttons for the role in use (beside the main window, not blocking it)."""
+        if self.context is None:
+            return None
+        if self.toolbar_dialog is not None:
+            self.toolbar_dialog.deleteLater()
+        self.toolbar_dialog = ToolbarButtonsDialog(self.toolbar_buttons, self.iface.mainWindow())
+        self.toolbar_dialog.open()
+        return self.toolbar_dialog
+
+    def _entries_in_menu_order(self) -> dict:
+        """The menu's entries (text → action) in the order the menu shows them (「通知」 without its unread count)."""
+        by_text = {(tr("通知") if a is self.notices_action else a.text()): a for a in self._menu_entries}
+        order = [t for _title, texts in MENU_GROUPS for t in texts if t] + MENU_TOP
+        entries = {tr(t): by_text[tr(t)] for t in order if tr(t) in by_text}
+        entries.update((t, a) for t, a in by_text.items() if t not in entries)
+        return entries
 
     def _add_to_menu(self, action: QAction) -> None:
         """An entry of the plugin's menu: placed in its group by `_build_menu` (MENU_GROUPS)."""
@@ -1102,6 +1126,11 @@ class SkywatchPlugin:
             self.setup_dialog.close()
             self.setup_dialog.deleteLater()
             self.setup_dialog = None
+        if self.toolbar_dialog is not None:
+            self.toolbar_dialog.close()
+            self.toolbar_dialog.deleteLater()
+            self.toolbar_dialog = None
+        self.toolbar_buttons = None
         if getattr(self, "health_dialog", None) is not None:
             self.health_dialog.close()
             self.health_dialog.deleteLater()
