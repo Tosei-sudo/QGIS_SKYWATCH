@@ -25,6 +25,7 @@ from qgis.core import (
 
 from ..core.obs.book import ObservedImage
 from ..core.obs.image_time import image_time, parse_time
+from .complex_sar import source_of
 from .geometry import to_wgs84
 from .plan_layer import qdatetime
 
@@ -62,7 +63,10 @@ def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Op
 
 
 def file_name(layer: QgsMapLayer) -> str:
-    """The layer's file name (as the viewer's shortName), else its name."""
+    """The layer's file name (as the viewer's shortName; a complex SAR image's own, not its VRT's), else its name."""
+    shown = source_of(layer)
+    if shown:
+        return os.path.basename(shown)
     try:
         parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
         path = parts.get("path") or parts.get("url") or ""
@@ -87,7 +91,7 @@ def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
     except ImportError:
         return {}
     parts = QgsProviderRegistry.instance().decodeUri("gdal", layer.source())
-    path = parts.get("path")
+    path = source_of(layer) or parts.get("path")
     if not path or re.match(r"^/vsicurl/", path):
         # Not opened again over the network: the provider's own metadata then.
         return {}

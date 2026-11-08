@@ -16,16 +16,17 @@ except ImportError:  # Qt5
 
 from .core.obs.api import ObservationApi
 from .processing_provider.pansharpen_algorithm import default_inputs
-from .processing_provider import detect_algorithm, train_algorithm
+from .processing_provider import cloud_algorithm, detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, time_zone_fields
 from .qgis_io.context import PluginContext
-from .qgis_io import overviews_io, tasks
+from .qgis_io import complex_sar, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
 from .ui.catalog_dock import CatalogDock
+from .ui.cloud_dock import CloudDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.dashboard_dock import DashboardDock
 from .ui.docks import StubDock
@@ -60,7 +61,7 @@ MENU = "衛星撮像計画・観測記録"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
-    ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…"]),
+    ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
@@ -74,7 +75,8 @@ MENU_GROUPS = [
 MENU_TOP = ["イベント", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
+                                             "SatObsCloud"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
 ]
@@ -285,7 +287,8 @@ class SatelliteObservationPlugin:
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
         self.context.configChanged.connect(self._config_problems)
-        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read.
+        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read;
+        # complex SAR images are shown as amplitude first (`complexImages`). Before the docks' own layersAdded (imageRules).
         self._overviews_ready = False
         self._overviews_waiting: list = []
         QgsProject.instance().layersAdded.connect(self._overview_layers_added)
@@ -303,7 +306,7 @@ class SatelliteObservationPlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events"}
+                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events", "SatObsCloud": "cloud_map"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -312,6 +315,7 @@ class SatelliteObservationPlugin:
             ("SatObsRequests", tr("撮像依頼"), None),
             ("SatObsPlanFiles", tr("撮像計画ファイル出力"), None),
             ("SatObsSatellitePass", tr("衛星パス"), None),
+            ("SatObsCloud", tr("雲量マップ"), None),
             ("SatObsObservations", tr("観測記録"), None),
             ("SatObsTaxonomy", tr("分類体系の編集"), None),
             ("SatObsNotices", tr("通知"), None),
@@ -352,6 +356,8 @@ class SatelliteObservationPlugin:
                                      self.iface.mainWindow())
             elif name == "SatObsEvents":
                 dock = EventsDock(self.iface, self.context, self.open_settings, lambda: self.docks, self.iface.mainWindow())
+            elif name == "SatObsCloud":
+                dock = CloudDock(self.iface, self.context, self.open_settings, lambda: self.open_cloud_cover(), self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
                 dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsRequests":
@@ -426,6 +432,7 @@ class SatelliteObservationPlugin:
         # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
         context = self.context
         detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
+        cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
         train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
@@ -456,6 +463,11 @@ class SatelliteObservationPlugin:
             action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
             self._add_to_menu(action)
             self.actions.append(action)
+        # 「雲量を属性に付与…」: each feature's cover at its time and place (the 「雲量マップ」 dock shows the forecast).
+        cloud_cover = QAction(icon("cloud_cover"), tr("雲量を属性に付与…"), self.iface.mainWindow())
+        cloud_cover.triggered.connect(lambda: self.open_cloud_cover())
+        self._add_to_menu(cloud_cover)
+        self.actions.append(cloud_cover)
         # 「サーバ処理…」: a task of a geoprocessing / OGC Processes service as a Processing algorithm.
         remote = QAction(icon("gp"), tr("サーバ処理…"), self.iface.mainWindow())
         remote.triggered.connect(lambda: self.open_remote_processing())
@@ -752,6 +764,15 @@ class SatelliteObservationPlugin:
         layers = list(QgsProject.instance().mapLayers().values())
         processing.execAlgorithmDialog("satobs:simple_ortho", ortho_inputs(layers, self.iface.activeLayer()))
 
+    def open_cloud_cover(self) -> None:
+        """「雲量を属性に付与」's dialog, with the active vector layer and its date-time field."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.cloud_algorithm import default_inputs as cloud_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("satobs:cloud_cover", cloud_inputs(layers, self.iface.activeLayer()))
+
     def open_vector_algorithm(self, algorithm: str) -> None:
         """A vector algorithm's dialog, with the active vector layer as its input."""
         import processing  # QGIS's Processing plugin (loaded with QGIS)
@@ -848,12 +869,18 @@ class SatelliteObservationPlugin:
             waiting = [layer for layer_id, layer in self._overviews_waiting if layer_id in ids]
             self._overviews_waiting = []
             if waiting:
-                overviews_io.layers_added(waiting, self.iface.messageBar())
+                self._raster_layers_added(waiting)
 
     def _overview_layers_added(self, layers) -> None:
         if not self._overviews_ready:
             self._overviews_waiting += [(layer.id(), layer) for layer in layers]
             return
+        self._raster_layers_added(layers)
+
+    def _raster_layers_added(self, layers) -> None:
+        """Complex SAR images first get their amplitude VRT (`complexImages`), whose overviews are then built, not those of I and Q."""
+        layers = list(layers)
+        complex_sar.layers_added(layers, self.context.config.complex_images if self.context else None, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:
@@ -882,6 +909,9 @@ class SatelliteObservationPlugin:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
         detect_algorithm.set_models(lambda: ([], ""))
+        cloud_algorithm.set_forecast(lambda: None)
+        if "SatObsCloud" in self.docks:
+            self.docks["SatObsCloud"].unload()
         train_algorithm.set_book(lambda: None)
         if self.segment is not None:
             self.segment.close()

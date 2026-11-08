@@ -10,6 +10,7 @@ from qgis.PyQt.QtGui import QIcon
 from .align_algorithm import AlignAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .classify_algorithm import ClassifyAlgorithm
+from .cloud_algorithm import CloudCoverAlgorithm
 from .dataset_algorithm import DatasetAlgorithm
 from .detect_algorithm import DetectAlgorithm
 from . import gp_algorithm
@@ -41,6 +42,7 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(GeodesicBufferAlgorithm())
         self.addAlgorithm(GeodesicCentroidAlgorithm())
         self.addAlgorithm(MovingMatchAlgorithm())
+        self.addAlgorithm(CloudCoverAlgorithm())
         self.addAlgorithm(DetectAlgorithm())
         self.addAlgorithm(TrainAlgorithm())
         self.addAlgorithm(DatasetAlgorithm())
