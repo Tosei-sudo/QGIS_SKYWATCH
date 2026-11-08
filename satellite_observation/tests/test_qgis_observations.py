@@ -312,6 +312,34 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     dock.map_clicked(139.7, 35.6, None)
     dock.escape()
     assert dock.rear is None and dock.status.text() == "後端の取消"
+    # Esc with the map focused (the dock's key is not active then) does the same.
+    from qgis.PyQt.QtCore import QEvent, Qt
+    from qgis.PyQt.QtGui import QKeyEvent
+
+    def esc_on_map():
+        event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+        dock.canvas.keyPressEvent(event)
+        return event.isAccepted()
+
+    assert dock.canvas.mapTool() is dock.tool
+    dock.map_clicked(139.7, 35.6, None)
+    assert dock.rear is not None
+    assert esc_on_map() and dock.rear is None and dock.status.text() == "後端の取消"
+    dock.set_area_mode(True)
+    dock.map_clicked(139.7, 35.6, None)
+    assert dock.area_corner is not None
+    esc_on_map()
+    assert dock.area_corner is None and dock.area_mode
+    esc_on_map()
+    assert not dock.area_mode
+    # A drag under way: left where it was.
+    dock.dragging = ("x", 1.0, 2.0)
+    esc_on_map()
+    assert dock.dragging is None
+    # Other keys go on to QGIS.
+    other = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_X, Qt.KeyboardModifier.NoModifier)
+    dock.tool.keyPressEvent(other)
+    assert not other.isAccepted()
 
 
 def test_measures_the_width_by_three_or_four_points(plugin):

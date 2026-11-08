@@ -2,7 +2,8 @@
 Recording on the map (the viewer's clicks on its overlay): a click gives a
 place (or the record or carried-over thing under it), a press on one of this
 image's records drags it to a new place, and the pointer's moves feed the
-line drawn while measuring by two points.
+line drawn while measuring by two points. Esc on the map steps back as Esc in
+the dock does (the last point, the area corner, then the form).
 """
 from __future__ import annotations
 
@@ -21,15 +22,17 @@ class ObservationTool(QgsMapTool):
     """
     `clicked(lon, lat, mark)` on a click (`mark`: the record or carried-over
     thing hit, else None), `hovered(lon, lat)` on moves, `dragged(mark, lon,
-    lat, done)` while a record is dragged; `can_drag()` says whether records may move now.
+    lat, done)` while a record is dragged, `escaped()` on Esc while the map has the
+    focus; `can_drag()` says whether records may move now.
     """
 
     def __init__(self, canvas, overlay: ObservationOverlay, clicked: Callable[[float, float, Optional[Mark]], None],
                  hovered: Callable[[float, float], None], dragged: Callable[[Mark, float, float, bool], None],
-                 can_drag: Callable[[], bool]):
+                 can_drag: Callable[[], bool], escaped: Optional[Callable[[], None]] = None):
         super().__init__(canvas)
         self.overlay = overlay
         self._clicked, self._hovered, self._dragged, self._can_drag = clicked, hovered, dragged, can_drag
+        self._escaped = escaped
         self._press: Optional[tuple] = None
         self._drag: Optional[Mark] = None
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -73,3 +76,14 @@ class ObservationTool(QgsMapTool):
             self._dragged(mark, p.x(), p.y(), True)
             return
         self._clicked(p.x(), p.y(), press[2])
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        # The dock's Esc key works only while the dock has the focus; on the map it comes here.
+        if event.key() == Qt.Key.Key_Escape and self._escaped is not None and not event.isAutoRepeat():
+            # A record being dragged stays where it was (the dock forgets the drag).
+            self._drag = self._press = None
+            self.canvas().setCursor(Qt.CursorShape.CrossCursor)
+            self._escaped()
+            event.accept()
+        else:
+            event.ignore()
