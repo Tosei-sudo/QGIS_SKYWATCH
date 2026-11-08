@@ -11,6 +11,7 @@ hold the token.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
@@ -372,6 +373,44 @@ def fit_value(value: Any, field_type: Optional[str]) -> Any:
 def quote(text: str) -> str:
     """An SQL string literal."""
     return "'" + str(text).replace("'", "''") + "'"
+
+
+_CONDITION_TOKEN = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|--|/\*|;|[()]|['\"]")
+
+
+def condition_problem(text: str) -> Optional[str]:
+    """
+    Why a condition typed by a person (or kept in a project or a watch)
+    cannot be ANDed in parentheses with the settings file's own `where`, or
+    None: a `)` that closes the parentheses around it (`1=1) OR (1=1` would
+    leave the settings file's condition out), a `(` or a quote left open, a
+    `;` or a comment (security audit 2026-11-08). Text inside quotes is not
+    looked at.
+    """
+    depth = 0
+    for m in _CONDITION_TOKEN.finditer(text or ""):
+        t = m.group(0)
+        if t in ("'", '"'):
+            return "引用符（' または \"）が閉じていない"
+        if t == "(":
+            depth += 1
+        elif t == ")":
+            depth -= 1
+            if depth < 0:
+                return "閉じ括弧 ) が開き括弧より多い"
+        elif t in ("--", "/*"):
+            return "コメント（-- や /*）は書けない"
+        elif t == ";":
+            return "; は書けない（条件は 1 つの式）"
+    return "括弧 ( が閉じていない" if depth else None
+
+
+def own_condition(text: str) -> str:
+    """A person's condition in parentheses, to AND with the rest; EsriError when `condition_problem` finds one."""
+    problem = condition_problem(text)
+    if problem:
+        raise EsriError(f"条件を使えない: {problem}（{text.strip()}）")
+    return f"({text.strip()})"
 
 
 def ring_geometry(rings: list[list[list[float]]]) -> dict[str, Any]:

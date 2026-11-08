@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from ..esri import own_condition
 from ..util import is_number, time_of, utc_text
 from .config import CatalogConfig
 
@@ -118,7 +119,8 @@ def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -
             if is_number(b):
                 parts.append(f"{name} <= {_num(b)}")
     if search.where.strip():
-        parts.append(f"({search.where.strip()})")
+        # In parentheses that it cannot close: the catalog's own `where` always applies.
+        parts.append(own_condition(search.where))
     return " AND ".join(parts) if parts else "1=1"
 
 
