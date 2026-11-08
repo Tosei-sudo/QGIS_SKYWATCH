@@ -310,6 +310,13 @@ ALERT_RULES = [
     {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
+#: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place).
+NAMED_AREAS = [
+    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70)),
+    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34)),
+    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315)),
+]
+
 ASSIGNMENT_FIELDS = {"IMAGE_ID": {"type": S, "length": 255}, "IMAGE_NAME": S, "IMAGE_TIME": T, "ASSIGNEE": S, "STATUS": S,
                      "NOTE": {"type": S, "length": 2000}, "TAKEN_AT": T, "DONE_AT": T}
 HANDOVER_FIELDS = {"TEXT": {"type": S, "length": 100000}, "MEMO": {"type": S, "length": 4000}, "PERIOD_START": T, "PERIOD_END": T,
@@ -426,7 +433,10 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D},
              "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0}, "geometry": {"rings": [_box_ring(AREA)]}}])},
-            {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []}]},
+            {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []},
+            {"id": 3, "name": "地名", "geometryType": "polygon", "fields": {"NAME": S, "KIND": S, "ACTIVE": F},
+             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1}, "geometry": {"rings": [_box_ring(b)]}}
+                                for n, k, b in NAMED_AREAS])}]},
         {"name": "Work", "layers": [
             {"id": 0, "name": "分担", "fields": ASSIGNMENT_FIELDS, "features": []},
             {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []}]},
@@ -545,11 +555,12 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   // 注目の記録の通報（条件・ジオフェンス・通報記録は Esri。フォーマットは名前付きで複数、default が最初に選ばれる）
   "alertReports": {{
     "rules": "{rest}/Alerts/FeatureServer/0", "geofences": "{rest}/Alerts/FeatureServer/1", "table": "{rest}/Alerts/FeatureServer/2",
+    "namedAreas": "{rest}/Alerts/FeatureServer/3",
     "minConfidence": "推定", "default": "速報",
     "formats": [
       {{ "name": "速報", "delimiter": "|", "timeZone": "Asia/Tokyo", "dateFormat": "%m/%d %H:%M",
         "fields": ["imageTime", {{ "source": "kind", "level": 1 }}, "objectName", "activity", "confidence",
-                   {{ "source": "lat", "digits": 4 }}, {{ "source": "lon", "digits": 4 }}, "area", "rule"],
+                   {{ "source": "place", "empty": "（地名なし）" }}, {{ "source": "lat", "digits": 4 }}, {{ "source": "lon", "digits": 4 }}, "area", "rule"],
         "header": "【注目】{{date}} {{count}}件", "footer": "以上", "columns": {{ "KIND": "kind" }} }},
       {{ "name": "ファイル（タブ区切り）", "delimiter": "\\t", "dateFormat": "%Y-%m-%d %H:%M:%S", "timeZone": "UTC", "clipboard": false,
         "fields": ["id", "imageTime", "kind", "objectName", "activity", "lat", "lon", "note"],
