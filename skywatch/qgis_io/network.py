@@ -17,7 +17,7 @@ from qgis.PyQt.QtCore import QByteArray, QEventLoop, QThread, QTimer, QUrl
 from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest
 from qgis.PyQt.QtWidgets import QApplication
 
-from ..core.esri import EsriError, form_body
+from ..core.esri import EsriError, UnreachableError, form_body
 from .tasks import Cancelled, current_feedback
 
 #: The authcfg for a URL (the plugin settings' choice for the service it belongs to).
@@ -123,17 +123,20 @@ def _exchange(request: QNetworkRequest, authcfg: Optional[str], body: Optional[b
         if feedback is not None and feedback.isCanceled():
             raise Cancelled()
         if state["timed_out"]:
-            raise EsriError(f"応答なし（タイムアウト）（{_address(url)}）")
+            raise UnreachableError(f"応答なし（タイムアウト）（{_address(url)}）")
         if not answer and not sip.isdeleted(reply) and reply.isFinished():
             finished()
         if not answer:
-            raise EsriError(f"接続不可（{_address(url)}：応答が途中で切れた）")
+            raise UnreachableError(f"接続不可（{_address(url)}：応答が途中で切れた）")
         if answer["error"] != QNetworkReply.NetworkError.NoError:
             status = answer["status"]
             reason = "サーバーのエラー" if isinstance(status, int) and status >= 500 else "接続不可"
             # Qt's message repeats the address with its query: a token may be in it.
             detail = re.sub(r"\?\S*", "", answer["message"])
-            raise EsriError(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
+            # Not reached (or the server is down): the plugin works offline until it answers (core/offline.py).
+            # A 4xx answer is the server's refusal, not an outage.
+            unreachable = not isinstance(status, int) or status <= 0 or status >= 500
+            raise (UnreachableError if unreachable else EsriError)(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
         return answer["body"]
     finally:
         if not sip.isdeleted(reply):
