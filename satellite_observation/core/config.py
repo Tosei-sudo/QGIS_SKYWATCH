@@ -38,6 +38,7 @@ from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
 from .request.store import RequestStoreConfig, request_store_of
 from .request.systems import ExportSystem, export_systems_of
+from .obs.export import ExportSettings, export_settings_of
 from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .events import EventSettings, events_settings_of
@@ -50,7 +51,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports", "assignments", "handover", "events",
+    "alertReports", "observationExports", "assignments", "handover", "events",
 )
 
 
@@ -108,6 +109,8 @@ class PluginConfig:
     edit_tracking: EditTracking = DEFAULT_EDIT_TRACKING
     #: `alertReports`: notable records as delimited text (通報); None hides it.
     alert_reports: Optional[AlertSettings] = None
+    #: `observationExports`: the named formats (CSV / JSON) of 観測記録のエクスポート, besides the built-in ones.
+    observation_exports: Optional[ExportSettings] = None
     #: `assignments`: the Esri table of who holds which image (分担); None hides it.
     assignments: Optional[EsriSource] = None
     #: `handover`: how the shift handover memo (引き継ぎメモ) is written and kept.
@@ -272,6 +275,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.edit_tracking = edit_tracking_of(value["editTracking"], problems)
     if "alertReports" in value:
         config.alert_reports = alert_settings_of(value["alertReports"], problems)
+    if "observationExports" in value:
+        config.observation_exports = export_settings_of(value["observationExports"], problems)
     if "assignments" in value:
         config.assignments = assignment_source_of(value["assignments"], problems)
     if "handover" in value:

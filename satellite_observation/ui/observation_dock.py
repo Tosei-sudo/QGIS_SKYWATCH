@@ -156,6 +156,7 @@ class ObservationDock(PluginDock):
         self.books: dict[str, ObservationBook] = {}
         self.book: Optional[ObservationBook] = None
         self._alerts = None
+        self._export = None
         self._handover = None
         #: (settings, when read, rules, geofences) of the last check of saved records.
         self._alert_conditions = None
@@ -624,7 +625,8 @@ class ObservationDock(PluginDock):
         actions.addWidget(self._button(tr("通報…"), tr("注目の記録を区切り文字の 1 行ずつの通報文に（設定ファイルの alertReports）"),
                                        lambda: self.open_alerts()))
         actions.addWidget(self._button(tr("再読み込み"), tr("保存先から記録を再読み込み"), self.reload))
-        actions.addWidget(self._button(tr("CSV 保存"), tr("すべての記録の CSV 保存（モノ・撮像日時の順）"), self.save_csv))
+        actions.addWidget(self._button(tr("エクスポート…"), tr("期間・場所・大分類を指定して CSV・JSON に保存（地名なども付加、フォーマットは設定ファイルの observationExports）"),
+                                       lambda: self.open_export()))
         actions.addWidget(self._button(tr("レイヤー化"), tr("記録をポイント、モノの流れをラインとして一時レイヤー化（属性テーブル・タイムライン・書き出しで利用可）"),
                                        self.to_layers))
         mf.addRow(actions)
@@ -2047,6 +2049,21 @@ class ObservationDock(PluginDock):
         self._alerts.raise_()
         self._alerts.activateWindow()
         return self._alerts
+
+    def open_export(self):
+        """Opens 「観測記録のエクスポート」 (one kept while the dock lives; not modal, so the map can be drawn on)."""
+        from .obs_export_dialog import ExportDialog
+
+        if self._export is None:
+            self._export = ExportDialog(self, self)
+            self.context.configChanged.connect(self._export.reset)
+        else:
+            self._export.reset()
+        self._export.count()
+        self._export.show()
+        self._export.raise_()
+        self._export.activateWindow()
+        return self._export
 
     def open_handover(self, tab: int = 0):
         """Opens 「分担と引き継ぎ」 (its tab 0 分担, 1 引き継ぎメモ); one kept while the dock lives."""
