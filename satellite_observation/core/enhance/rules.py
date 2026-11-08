@@ -24,6 +24,8 @@ class ImageRule:
     bands: Optional[list] = None
     #: {"values": [...]} and "auto": False to leave the file's own no-data value out; None for nothing.
     no_data: Optional[dict] = None
+    #: `complexImages` for a complex SAR image of this name: "dB", "amplitude", False (as QGIS opens it); None follows the settings file's.
+    complex_images: Union[str, bool, None] = None
 
 
 def image_rule_of(value: Any, problems: list, index: int) -> Optional[ImageRule]:
@@ -84,11 +86,21 @@ def image_rule_of(value: Any, problems: list, index: int) -> Optional[ImageRule]
         else:
             problems.append(f'{at} の noData は値（数値か数値の配列）か {{ "auto": false, "values": [0] }} の形で指定')
 
-    if pipeline is None and bands is None and no_data is None:
-        problems.append(f"{at} は補正（preset・enhance）もバンド（bands）もノーデータ（noData）も未指定のため無視")
+    complex_images: Union[str, bool, None] = None
+    if "complexImages" in value:
+        from ..complex_images import complex_images_of
+        found: list = []
+        mode = complex_images_of(value["complexImages"], found)
+        if found:
+            problems.append(f"{at} の {found[0]}")
+        else:
+            complex_images = mode if mode else False
+
+    if pipeline is None and bands is None and no_data is None and complex_images is None:
+        problems.append(f"{at} は補正（preset・enhance）もバンド（bands）もノーデータ（noData）も複素 SAR の表示（complexImages）も未指定のため無視")
         return None
     label = value.get("label")
-    return ImageRule(label if isinstance(label, str) and label else match, pattern, pipeline, bands, no_data)
+    return ImageRule(label if isinstance(label, str) and label else match, pattern, pipeline, bands, no_data, complex_images)
 
 
 def image_rules_of(value: Any, problems: list) -> list:

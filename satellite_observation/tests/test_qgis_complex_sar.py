@@ -230,3 +230,46 @@ def test_an_alpha_band_after_i_and_q_is_left_out(tmp_path):
     # A GeoTIFF whose third band is an alpha band.
     tif, _ = tiff(tmp_path / "iqa.tif", bands=3, dtype=gdal.GDT_Float32, descriptions=("I", "Q"))
     assert outputs_of(gdal.Open(tif)) == [Output((1, 2))]
+
+
+def test_image_rules_choose_the_mode_by_file_name(tmp_path, monkeypatch):
+    """imageRules[].complexImages wins over the settings file's for the images it matches (tsudo, 2026-11-08)."""
+    import json
+
+    from satellite_observation import classFactory
+    from satellite_observation.core.enhance.rules import image_rules_of
+    from satellite_observation.qgis_io import overviews_io, settings
+    from satellite_observation.tests.qgis_fakes import FakeIface
+
+    problems = []
+    rules = image_rules_of([{"match": "^raw_", "complexImages": False}, {"match": "^amp_", "complexImages": "amplitude"},
+                            {"match": "^bad_", "complexImages": "phase"}], problems)
+    assert [r.complex_images for r in rules] == [False, "amplitude"] and "complexImages は" in problems[0]
+
+    monkeypatch.setattr(complex_sar, "default_folder", lambda: str(tmp_path / "cache"))
+    monkeypatch.setattr(overviews_io, "layers_added", lambda layers, bar=None: [])
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"imageRules": [
+        {"match": "^raw_", "complexImages": False},
+        {"match": "^amp_", "label": "振幅", "complexImages": "amplitude"},
+    ]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    settings.set_startup_layers_on(False)
+    iface = FakeIface()
+    plugin = classFactory(iface)
+    plugin.initGui()
+    try:
+        layers = {}
+        for name in ("raw_a.ntf", "amp_a.ntf", "other.ntf"):
+            path, i, q = sicd(tmp_path / name)
+            layers[name] = QgsRasterLayer(path, name, "gdal")
+            QgsProject.instance().addMapLayer(layers[name])
+        assert layers["raw_a.ntf"].bandCount() == 2 and not layers["raw_a.ntf"].customProperty(COMPLEX_SOURCE)
+        assert layers["amp_a.ntf"].source().endswith(".amplitude.vrt")
+        assert layers["other.ntf"].source().endswith(".dB.vrt")
+        # A rule of only complexImages leaves the stretch the conversion gave.
+        assert layers["amp_a.ntf"].renderer().type() == "singlebandgray"
+    finally:
+        QgsProject.instance().removeAllMapLayers()
+        plugin.unload()
+        settings.set_config_source("")

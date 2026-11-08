@@ -350,6 +350,9 @@ class EnhanceDock(PluginDock):
         rule = image_rule_for(rules, source_name(layer)) if rules else None
         if rule is None or not layer.isValid():
             return None
+        if rule.pipeline is None and rule.bands is None and rule.no_data is None:
+            # Only `complexImages` (the plugin's conversion when the image was added): the look it gave stays.
+            return rule
         provider = layer.dataProvider()
         settings = er.default_settings(layer)
         problem = None
