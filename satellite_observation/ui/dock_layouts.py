@@ -18,6 +18,7 @@ from typing import Callable, Optional
 
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, QRect, Qt
+from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QInputDialog, QMainWindow, QMenu, QMessageBox, QWidget
 
 try:  # Qt6
@@ -28,6 +29,9 @@ except ImportError:  # Qt5
 KEY = "satellite_observation/dockLayouts"
 LAST_KEY = "satellite_observation/dockLayoutLast"
 FILE_KIND = "satellite_observation.dockLayouts"
+#: A dock's size in a window of its own (「別ウィンドウで開く」), and how far each next one is moved (cascaded).
+FLOAT_SIZE = (440, 620)
+FLOAT_STEP = 32
 
 _AREAS = {
     "left": Qt.DockWidgetArea.LeftDockWidgetArea,
@@ -164,6 +168,29 @@ def apply(window: QMainWindow, docks: dict[str, QDockWidget], layout: dict) -> N
             window.resizeDocks([d for d, _ in rows], [int(s[0]) for _, s in rows], Qt.Orientation.Horizontal)
 
 
+def float_docks(window: QMainWindow, docks: dict[str, QDockWidget]) -> None:
+    """
+    Every dock in its own window, the open ones cascaded at the right of the
+    main window (within its screen), the closed ones where they will open later.
+    """
+    frame = window.frameGeometry() if window.isVisible() else QRect(0, 0, 1280, 800)
+    screen = QGuiApplication.screenAt(frame.center()) or QGuiApplication.primaryScreen()
+    area = screen.availableGeometry() if screen is not None else frame
+    w, h = min(FLOAT_SIZE[0], area.width()), min(FLOAT_SIZE[1], max(200, area.height() - 120))
+    names = [n for n, d in docks.items() if d.isVisible()] + [n for n, d in docks.items() if not d.isVisible()]
+    shown = sum(1 for d in docks.values() if d.isVisible())
+    for i, name in enumerate(names):
+        dock = docks[name]
+        step = i if i < shown else 0
+        x = min(frame.right() - w - 24, area.right() - w) - step * FLOAT_STEP
+        y = max(frame.top() + 90, area.top()) + step * FLOAT_STEP
+        x, y = max(area.left(), x), min(y, max(area.top(), area.bottom() - h))
+        visible = dock.isVisible()
+        dock.setFloating(True)
+        dock.setGeometry(QRect(x, y, w, h))
+        dock.setVisible(visible)
+
+
 def _numbers(v, n: int) -> Optional[list]:
     """`n` whole numbers (a size or a geometry), else None."""
     if not isinstance(v, (list, tuple)) or len(v) != n:
@@ -270,8 +297,11 @@ class DockLayoutMenu(QMenu):
     one last used checked), then 「現在の配置を保存…」, 「削除」 and file in/out.
     """
 
-    def __init__(self, window: QMainWindow, docks: Callable[[], dict], message: Callable[[str], None], parent: QWidget | None = None):
+    def __init__(self, window: QMainWindow, docks: Callable[[], dict], message: Callable[[str], None], parent: QWidget | None = None,
+                 floating: Callable[[], bool] = lambda: False):
         super().__init__(tr("ドックのレイアウト"), parent)
+        #: 「別ウィンドウで開く」 (「担当と個人設定」): a layout without windows of its own opens each dock in one.
+        self.floating = floating
         self.setObjectName("SatObsDockLayouts")
         self.window_ = window
         self.docks = docks
@@ -307,6 +337,8 @@ class DockLayoutMenu(QMenu):
         if layout is None:
             return False
         apply(self.window_, self.docks(), layout)
+        if self.floating() and not layout.get("floating"):
+            float_docks(self.window_, self.docks())
         self.store.last = name
         return True
 

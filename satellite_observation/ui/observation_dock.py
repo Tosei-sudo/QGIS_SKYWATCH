@@ -1200,6 +1200,18 @@ class ObservationDock(PluginDock):
         self._say(HINT_POINTS.get(n, HINT))
         self.draw()
 
+    def use_points(self, n: int) -> None:
+        """The clicks a record takes, chosen elsewhere (「担当と個人設定」): only the choice, recording stays as it is."""
+        n = n if n in (1, 2, 3, 4) else 1
+        self.points_select.blockSignals(True)
+        self.points_select.setCurrentIndex(n - 1)
+        self.points_select.blockSignals(False)
+        if n != self.points:
+            self.points = n
+            self._clear_points()
+            self.draw()
+        settings.set_point_count(n)
+
     def set_two_point(self, on: bool) -> None:
         """「2 点」 on (rear then front) or off (a point), as before the 3 and 4 points."""
         self.set_points(2 if on else 1)
