@@ -162,6 +162,9 @@ class FirstSetupDialog(QDialog):
         self.role_group.addButton(keep)
         self.role_buttons[""] = keep
         (self.role_buttons.get(current) or keep).setChecked(True)
+        toolbar_hint = QLabel(tr("ツールバーのボタンも担当に合わせて変わります（メニュー「ツールバーのボタン…」で自分用に選べる）。"))
+        toolbar_hint.setWordWrap(True)
+        roles.addWidget(toolbar_hint)
         layout.addWidget(roles_box)
 
         # How the docks open.
