@@ -362,6 +362,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 **分担**: 誰がどの画像を担当中かを Esri のテーブルで共有し、同じ画像を 2 人が見る重複作業を防ぐ。単位は画像（1 行 1 画像）。割り当てる人はおらず、各自が取る。
 
 - 「観測記録」ドックの画像の下の行: 「分担: 担当者なし」なら「この画像を担当」で自分の担当に。自分の担当なら「完了」「手放す」。ほかの人が担当中の画像は「分担: ○○ さんが担当中。重複作業に注意」（橙）と出て、取れない
+- 「クリック記録」を始めると、その画像を自動で自分の担当にする（記録中に別の画像へ移ったときも同じ）。ほかの人が担当中なら「クリック記録できません: ○○ は △△ さんが担当中」と出て記録は始まらない。テーブルを読み書きできないとき（オフライン・サービスのエラー）も、重複かどうか確かめられないため始まらない。自分が担当中の画像はそのまま始まる。止めるには `"assignments": { "url": …, "claimOnRecord": false }`
 - 取るときは 2 回確かめる: 追加の前に、ほかの人が担当中でないか。追加の後に、同じ瞬間にほかの人が取っていないか（先に追加された行が残り、後の行は消して「○○ さんが担当中」）
 - 完了した画像は担当者なしに戻り、ほかの人が見直しで取れる
 - 担当者は [`editTracking`](#作成者更新者の記録edittracking) のユーザー名（既定は環境変数 `USERNAME`。大文字・小文字は区別しない）
@@ -370,7 +371,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 変更は変えた属性だけを書く（担当者の状態の変更とほかの人のメモが打ち消し合わない）。「ほかの人に渡す」は、読んだ後にほかの人が渡したり完了にしたりしていれば失敗する
 - 一覧は 1 分ごと（別の画像を表示したとき）と変更の後に読み直す
 
-テーブル（`assignments`。URL か `{ "url", "fields", "where", "token" }`。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
+テーブル（`assignments`。URL か `{ "url", "fields", "where", "token", "claimOnRecord" }`。`claimOnRecord`（既定 `true`）は「クリック記録」の開始で担当を取るか。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
 
 **引き継ぎメモ**: メニュー「観測記録 ▸ 引き継ぎメモ…」。交代のとき、次の担当者に渡す文章を作る。
 
@@ -941,7 +942,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
-| `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token" }` | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
+| `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }` | なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |
 
