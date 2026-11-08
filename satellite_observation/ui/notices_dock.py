@@ -3,7 +3,8 @@
 newest first, with 開く・移動・既読・削除, and the watches themselves (on or
 off, renamed, deleted, when last checked and why a check failed). The
 watches are checked when QGIS starts and every `watchInterval` minutes, in
-a task; a check finding new images says so in the message bar.
+a task; a check finding new images says so in the message bar. The tab
+通報 lists the 通報 log table, polled while the dock is shown (alert_feed).
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
+from .alert_feed import AlertFeed
 from .docks import PluginDock, ask_no
 from .watch_dialog import PointWatchDialog, WatchDialog
 
@@ -102,6 +104,14 @@ class NoticesDock(PluginDock):
         v.addWidget(self.status)
         tabs.addTab(page, self.tr("監視条件"))
 
+        # 通報: the 通報 log table, read again every alertReports.live.seconds while the dock is shown.
+        self.alerts = AlertFeed(context)
+        self.alerts_tab = tabs.addTab(self.alerts, self.tr("通報"))
+        self.tabs = tabs
+        self.alerts.unseen_changed.connect(self._alerts_unseen)
+        tabs.currentChanged.connect(lambda i: self.alerts.seen() if i == self.alerts_tab else None)
+        self.visibilityChanged.connect(self._shown_changed)
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(lambda: self.check())
         context.configChanged.connect(self._config_changed)
@@ -113,7 +123,30 @@ class NoticesDock(PluginDock):
             self._store = WatchStore(self.context.gpkg())
         return self._store
 
+    def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().showEvent(event)
+        self._shown_changed(True)
+
+    def hideEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().hideEvent(event)
+        self._shown_changed(False)
+
+    def _shown_changed(self, shown: bool) -> None:
+        if shown == self.alerts.active:
+            return
+        self.alerts.set_active(shown and not self._closed)
+        if shown and self.tabs.currentIndex() == self.alerts_tab:
+            self.alerts.seen()
+
+    def _alerts_unseen(self, n: int) -> None:
+        if n and self.isVisible() and self.tabs.currentIndex() == self.alerts_tab:
+            # Looked at as they come in: not counted.
+            self.alerts.unseen = set()
+            n = 0
+        self.tabs.setTabText(self.alerts_tab, self.tr("通報") + (f"（{n}）" if n else ""))
+
     def _config_changed(self) -> None:
+        self.alerts.reset()
         minutes = self.context.config.watch_interval
         self.timer.start(int(minutes * 60 * 1000))
         self.refresh()
@@ -409,5 +442,6 @@ class NoticesDock(PluginDock):
         for task in list(self._tasks):
             task.cancel()
         self.timer.stop()
+        self.alerts.close_down()
         # A check still waiting to start (the plugin unloaded right after showing the dock) finds the store closed.
         self._closed = True

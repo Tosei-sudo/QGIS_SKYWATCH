@@ -116,9 +116,19 @@ _running: set[FunctionTask] = set()
 
 
 def run_task(description: str, work: Callable[[FunctionTask], Any], done: Optional[Callable[[Any], None]] = None,
-             failed: Optional[Callable[[str], None]] = None) -> FunctionTask:
-    """Starts a task in QGIS's task manager (its progress shows in the status bar, where it can be cancelled)."""
-    task = FunctionTask(description, work, done, failed)
+             failed: Optional[Callable[[str], None]] = None, hidden: bool = False) -> FunctionTask:
+    """
+    Starts a task in QGIS's task manager (its progress shows in the status
+    bar, where it can be cancelled). `hidden`: a small task run again and
+    again (a poll) is kept out of the status bar and its notices.
+    """
+    flags = QgsTask.Flag.CanCancel
+    if hidden:
+        for name in ("Hidden", "Silent"):  # Hidden: QGIS 3.26+
+            flag = getattr(QgsTask.Flag, name, None)
+            if flag is not None:
+                flags = flags | flag
+    task = FunctionTask(description, work, done, failed, flags)
     _running.add(task)
     task.taskCompleted.connect(lambda: _running.discard(task))
     task.taskTerminated.connect(lambda: _running.discard(task))

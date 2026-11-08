@@ -5,7 +5,7 @@ from satellite_observation.core.config import parse_config
 from satellite_observation.core.esri import EsriClient
 from satellite_observation.core.obs.alerts import (
     AlertField, AlertRule, Geofence, Moment, alert_settings_of, build_lines, fill, inside_rings, load_geofences, load_log, load_rules,
-    manual_items, remove_log, report_text, reported_ids, rules_of_rows, score_note, select, weight_of, write_file, write_log,
+    manual_items, poll_log, remove_log, report_text, reported_ids, rules_of_rows, score_note, select, weight_of, write_file, write_log,
 )
 from satellite_observation.core.obs.model import DEFAULT_CONFIDENCES, Observation
 from satellite_observation.tests.fake_esri import FakeEsri, FakeLayer
@@ -254,6 +254,34 @@ def test_score_settings_problems_and_weight_values():
     assert len(problems) == 5
     assert [weight_of(v) for v in (None, "", 0.3, "50", "80%", 2, -1, "高")] == [1.0, 1.0, 0.3, 0.5, 0.8, 0.02, 0.0, 1.0]
     assert rules_of_rows([{"KIND": "船舶", "WEIGHT": 0.25}], dict(s.rules.fields))[0].weight == 0.25
+
+
+def test_live_settings_and_polling_only_what_changed():
+    assert (settings().live.seconds, settings().live.days) == (10.0, 7.0)
+    assert settings({"live": False}).live.seconds == 0 and settings({"live": 30}).live.seconds == 30
+    assert settings({"live": {"seconds": 0.1, "days": 1}}).live.seconds == 2.0  # not shorter than 2 s
+    problems = []
+    assert settings({"live": "fast"}, problems).live.seconds == 10.0 and problems
+    fake, _, _, log = esri()
+    client = EsriClient(fake)
+    s = settings()
+    a = log.add({"OBS_ID": "a", "REPORT_NAME": "速報", "TEXT": "船A", "REPORTED_AT": T0, "REPORTED_BY": "tsudo"})
+    log.add({"OBS_ID": "old", "TEXT": "古い", "REPORTED_AT": T0 - 10 * 86_400_000})
+    first = poll_log(client, s, set(), since=T0 - 86_400_000)
+    assert [r.obs_id for r in first.added] == ["a"] and first.gone == set() and first.ids == {a}
+    # Nothing new: only the ids are asked for.
+    fake.asked.clear()
+    again = poll_log(client, s, first.ids, since=T0 - 86_400_000)
+    assert again.added == [] and again.gone == set()
+    assert len(fake.asked) == 1 and fake.asked[0][1]["returnIdsOnly"] == "true"
+    # A row added and one deleted (by someone else).
+    b = log.add({"OBS_ID": "b", "TEXT": "船B", "REPORTED_AT": T0 + 1000})
+    log.rows = [r for r in log.rows if r["attributes"]["OBJECTID"] != a]
+    changed = poll_log(client, s, again.ids, since=T0 - 86_400_000)
+    assert [(r.obs_id, r.oid) for r in changed.added] == [("b", b)] and changed.gone == {a} and changed.ids == {b}
+    # No window: every row, newest first, at most `limit` at first.
+    assert [r.obs_id for r in poll_log(client, s, set()).added] == ["b", "old"]
+    assert [r.obs_id for r in poll_log(client, s, set(), limit=1).added] == ["b"]
 
 
 PLACE_URL = "https://x/FeatureServer/13"
