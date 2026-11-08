@@ -5,6 +5,7 @@ Builds the plugin's zip for QGIS (Plugins → Install from ZIP): dist/satellite_
     python3 scripts/build_zip.py --config my.json     # with a settings file shipped as satellite_observation/config.json
     python3 scripts/build_zip.py --config my.json --lock-config   # ...and the plugin reads only that file
     python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime, sgp4 and tzdata inside
+    python3 scripts/build_zip.py --version 0.4.0.20261108123000   # the zip's metadata.txt says this version (scripts/make_plugin_repo.py)
 
 The Windows zip carries ONNX Runtime (for the AI tools, built for QGIS's
 Python 3.12), sgp4 (the C++ accelerated orbits, any Python from 3.11) and
@@ -24,6 +25,7 @@ import argparse
 import configparser
 import glob
 import os
+import re
 import subprocess
 import sys
 import zipfile
@@ -91,11 +93,21 @@ def wheel_files(path: str, package: str, keep=None, skip=()) -> list[tuple[str, 
     return out
 
 
+def stamp_version(path: str, version: str) -> str:
+    """metadata.txt's text with its version line saying `version` (the rest as written)."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    return re.sub(r"(?m)^version\s*=.*$", f"version={version}", text, count=1)
+
+
 def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_wheel: str = "", sgp4_wheel: str = "",
-         tzdata_wheel: str = "", lock_config: bool = False) -> str:
+         tzdata_wheel: str = "", lock_config: bool = False, version: str = "") -> str:
+    """Builds the zip; `version` (when given) replaces metadata.txt's in the zip, as an internal plugin repository needs a new one for each release."""
+    if version and not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
+        raise SystemExit(f"版の書き方が違う: {version}（数字とピリオドだけ、例 0.4.0.20261108123000）")
     meta = configparser.ConfigParser()
     meta.read(os.path.join(PLUGIN, "metadata.txt"), encoding="utf-8")
-    version = meta["general"]["version"]
+    version = version or meta["general"]["version"]
     shipped = config or next((os.path.join(PLUGIN, n) for n in BUNDLED if os.path.isfile(os.path.join(PLUGIN, n))), "")
     if shipped:
         problems = check_config(shipped)
@@ -121,6 +133,9 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
                 if name.endswith(".pyc") or (folder == PLUGIN and (name == LOCK or (config and name in BUNDLED))):
                     continue
                 path = os.path.join(folder, name)
+                if folder == PLUGIN and name == "metadata.txt":
+                    z.writestr("satellite_observation/metadata.txt", stamp_version(path, version))
+                    continue
                 z.write(path, os.path.relpath(path, ROOT))
         if config:
             z.write(config, os.path.join("satellite_observation", "config.jsonc" if config.endswith(".jsonc") else "config.json"))
@@ -138,7 +153,8 @@ if __name__ == "__main__":
     parser.add_argument("--win64", action="store_true", help="Windows 版（onnxruntime・sgp4・tzdata を同梱、-win64.zip）")
     parser.add_argument("--onnxruntime-wheel", default="", help="同梱する onnxruntime の wheel（cp312 win_amd64、指定なしで pip で取得）")
     parser.add_argument("--tzdata-wheel", default="", help="同梱する tzdata の wheel（指定なしで pip で取得）")
+    parser.add_argument("--version", default="", help="zip の metadata.txt に書く版（指定なしで metadata.txt のまま）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（win_amd64、指定なしで pip で取得）")
     args = parser.parse_args()
     print(main(args.config, win64=args.win64, onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
-               tzdata_wheel=args.tzdata_wheel, lock_config=args.lock_config))
+               tzdata_wheel=args.tzdata_wheel, lock_config=args.lock_config, version=args.version))
