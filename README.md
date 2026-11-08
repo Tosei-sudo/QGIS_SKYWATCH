@@ -503,12 +503,14 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - イベントのレイヤー（`layer`、編集可）: ポリゴンレイヤー（範囲を持つ）かテーブル（範囲なし）。`EVENT_ID`（必須）・`EVENT_NAME`（必須）・`EVENT_KIND`・`STATUS`（`対応中`／`終了`）・`START_AT`・`END_AT`（日付）・`NOTE`
 - 紐付けテーブル（`links`、編集可）: 1 項目 1 行。`EVENT_ID`・`ITEM_TYPE`（`image`・`observation`・`request`）・`ITEM_ID`（画像はカタログの画像ID、記録は記録ID、依頼は依頼ID。以上 3 つは必須）・`ITEM_LABEL`・`ITEM_TIME`（撮像日時など。一覧に出す）・`SOURCE`（カタログ・保存先・台帳の URL。ローカルの記録は `local`）・`NOTE`。追加者・追加日時は [`editTracking`](#作成者更新者の記録edittracking) の `CREATED_USER`・`CREATED_DATE`（あれば）
+- 種別の候補（設定ファイルの `kinds`、文字列の配列）: フォームの「種別」に出す候補をこの順で。書くと既定の候補（地震・津波・風水害・火山・火災・事故・その他）とレイヤーで使われている種別は出さない。書かなければ使われている種別、続けて既定の候補。どちらでも候補にない種別を手で入力できる
 - 属性名はそれぞれの `fields` で変更可（役割: `id`・`name`・`kind`・`status`・`start`・`end`・`note`／`event`・`type`・`item`・`label`・`time`・`source`・`note`）。`where`・`token` も可
 
 ```jsonc
 "events": {
   "layer": "https://…/Events/FeatureServer/0",
-  "links": { "url": "https://…/Events/FeatureServer/1", "fields": { "note": "REMARKS" } }
+  "links": { "url": "https://…/Events/FeatureServer/1", "fields": { "note": "REMARKS" } },
+  "kinds": ["地震", "津波", "風水害", "火山噴火", "訓練", "その他"]
 }
 ```
 
@@ -1076,7 +1078,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
-| `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }` | なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |
+| `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`kinds`（種別の候補、文字列の配列）| なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |
 
 #### 地図・レイヤー・場所
 

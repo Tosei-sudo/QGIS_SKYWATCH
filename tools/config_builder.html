@@ -1089,6 +1089,7 @@ const SPEC = [
       field: O("events", "イベント", [
         TJ("layer", "イベントのレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴン（範囲あり）かテーブル。役割: " + Object.entries(K.roles.eventLayer).map(([k, v]) => `${k}（${v}）`).join("・") }),
         TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 項目 1 行。役割: " + Object.entries(K.roles.eventLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        L("kinds", "種別の候補", { help: "フォームの種別に出す候補（この順）。書くと既定の候補（地震・津波など）と使用済みの種別は出さない。候補にない種別も手で入力できる" }),
       ], { check: (it, at, p) => {
         if (!it.layer) p.push(`${at}.layer: イベントのレイヤーが必要`);
         if (!it.links) p.push(`${at}.links: 紐付けテーブルが必要`);
