@@ -216,6 +216,7 @@ class EventsDock(PluginDock):
         self.shown: list[Event] = []
         self.task = None
         self._then: list[Callable[[], None]] = []
+        self._failed: list[Callable[[str], None]] = []
         self._tasks: list = []
         #: Read again when the running reload ends (the event id to choose, or True).
         self._again = None
@@ -331,7 +332,7 @@ class EventsDock(PluginDock):
     def _config_changed(self) -> None:
         self.events, self.links = None, []
         if self.task is None:
-            self._then = []
+            self._then, self._failed = [], []
         s = self.settings
         self.note.setText("" if s else self.tr("設定ファイルに events（イベントのレイヤーと紐付けテーブル）がないため使用不可"))
         self.note.setVisible(s is None)
@@ -388,13 +389,19 @@ class EventsDock(PluginDock):
         task.taskCompleted.connect(lambda: self._tasks.remove(task) if task in self._tasks else None)
         task.taskTerminated.connect(lambda: self._tasks.remove(task) if task in self._tasks else None)
 
-    def reload(self, then: Optional[Callable[[], None]] = None, keep: Optional[str] = None) -> None:
-        """Reads the events and links again (in a task), then lists them (the event chosen stays chosen)."""
+    def reload(self, then: Optional[Callable[[], None]] = None, keep: Optional[str] = None,
+               failed: Optional[Callable[[str], None]] = None) -> None:
+        """
+        Reads the events and links again (in a task), then lists them (the
+        event chosen stays chosen); `then` once read, `failed` with the reason when they cannot be.
+        """
         s = self.settings
         if s is None:
             return
         if then is not None:
             self._then.append(then)
+        if failed is not None:
+            self._failed.append(failed)
         if self.task is not None:
             # Asked while one runs (after an add, or another settings file): read again once it ends.
             self._again = keep or self._again or True
@@ -420,21 +427,23 @@ class EventsDock(PluginDock):
                 self.choose(chosen)
             n = len(self.open_events())
             self.say(self.tr("対応中 {n} 件・全 {m} 件").format(n=n, m=len(self.events)))
-            waiting, self._then = self._then, []
+            waiting, self._then, self._failed = self._then, [], []
             for f in waiting:
                 f()
 
-        def failed(message: str) -> None:
+        def not_read(message: str) -> None:
             self.task = None
             if s is not self.settings or self._again:
                 self.reload()
                 return
-            self._then = []
+            told, self._then, self._failed = self._failed, [], []
             self.say(self.tr("イベントの読み込みに失敗: {m}").format(m=message))
             self._update_buttons()
+            for f in told:
+                f(message)
 
         self.task = True
-        self._start(self.tr("イベントの読み込み"), work, done, failed)
+        self._start(self.tr("イベントの読み込み"), work, done, not_read)
 
     # ---- showing -------------------------------------------------------------------------------
 

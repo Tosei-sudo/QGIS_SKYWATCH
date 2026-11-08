@@ -99,6 +99,9 @@ ENTRIES: list[Entry] = [
     Entry("config", "設定", "設定ファイル", "読み込んだ設定ファイル（PluginConfig）。", "[c.label for c in api.config.image_catalogs]"),
     Entry("problems", "設定", "設定ファイルの問題", "設定ファイルを読んだときの問題（文字列の一覧）。", "api.problems"),
     Entry("reload_config", "設定", "設定ファイルを読み直す", "設定ファイルを読み直し、各ドックに反映。", "api.reload_config()"),
+    Entry("startup_times", "設定", "起動と先読みの所要時間", "起動の各段階（steps）と合計（total）、先読みした表ごと（reads）の秒数。"
+          "同じ内容はログメッセージの「SKYWATCH」タブにも出る。", 'api.startup_times["reads"]'),
+    Entry("preload", "設定", "先読みし直す", "設定ファイルの preload に書いた表を、いま裏で読み直す（衛星カタログ・撮像依頼など）。", "api.preload()"),
 
     # ---- プロセシング（plugin.api の外） ----
     Entry("processing:analysis", "プロセシング", "保存した分析のツール", "プロジェクトに保存した分析は「SKYWATCH ▸ 保存した分析」のツール。"

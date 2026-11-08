@@ -194,8 +194,8 @@ class RequestDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
-    def reload(self, then: Optional[Callable[[], None]] = None) -> None:
-        """Reads the ledger again."""
+    def reload(self, then: Optional[Callable[[], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
+        """Reads the ledger again (`then` once read, `failed` with the reason when it cannot be)."""
         store = self.store
         if store is None:
             return
@@ -215,9 +215,13 @@ class RequestDock(PluginDock):
             if then:
                 then()
 
-        if not self._start(self.tr("撮像依頼の読み込み"), lambda task: load_requests(client, store, token, task.isCanceled), done,
-                           lambda m: self.status.setText(self.tr("読み込み失敗: {m}").format(m=m))):
-            QTimer.singleShot(300, lambda: self.reload(then))
+        def not_read(m):
+            self.status.setText(self.tr("読み込み失敗: {m}").format(m=m))
+            if failed:
+                failed(m)
+
+        if not self._start(self.tr("撮像依頼の読み込み"), lambda task: load_requests(client, store, token, task.isCanceled), done, not_read):
+            QTimer.singleShot(300, lambda: self.reload(then, failed))
 
     # --- The list -------------------------------------------------------------------------------
 

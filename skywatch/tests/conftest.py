@@ -110,3 +110,13 @@ def no_first_setup_page(monkeypatch):
     except ImportError:  # no QGIS
         return
     monkeypatch.setattr(first_setup, "ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
+def no_preload(monkeypatch):
+    """「先読み」 does not start reads of its own in every plugin test (tests/test_qgis_preload.py turns it on)."""
+    try:
+        from skywatch.qgis_io import preload
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(preload.Preloader, "DELAY_MS", 24 * 3600 * 1000)

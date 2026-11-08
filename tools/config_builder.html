@@ -180,6 +180,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "assignments",
   "handover",
   "events",
+  "preload",
   "offlineWork"
  ],
  "roles": {
@@ -1003,6 +1004,8 @@ const SPEC = [
         N("cacheMB", "控えの上限（MB）", { min: 0, ph: "500", help: "古いものから消す。0 で控えを残さない" }),
         N("probeSeconds", "復旧の確認間隔（秒）", { min: 5, ph: "30" }),
       ]) },
+    { key: "preload", label: "先読み（起動直後に Esri の表を読む）", doc: "先読み", help: "QGIS の起動が終わったら、開いたときに初めて読む表を裏で読んでおく（開いたときに待たない）。true ですべて（既定）、false で先読みしない、一覧で選ぶ: satellites（衛星カタログ）・requests（撮像依頼）・savedPlans（保存した撮像計画）・events（イベント）。",
+      field: J("preload", "先読みするもの", { ph: 'true / false / ["satellites", "requests", "savedPlans", "events"]', help: "既定 true（すべて）" }) },
     { key: "observationVocabulary", label: "観測記録の語彙", doc: "活動大分類ごとの切り替え", help: "分類の木・種別・活動・確度・諸元の項目。書かなければ既定の分類体系。",
       field: O("observationVocabulary", "語彙", [
         J("taxonomy", "分類の木", { ph: '[{ "name": "船舶", "activities": ["停泊", "航行"], "children": ["護衛艦", "貨物船"] }]' }),

@@ -186,8 +186,8 @@ class SavedPlansDock(PluginDock):
         self.task = run_task(what, work, finish, fail)
         return True
 
-    def reload(self, then: Optional[Callable[[], None]] = None) -> None:
-        """Reads the plans of the store again."""
+    def reload(self, then: Optional[Callable[[], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
+        """Reads the plans of the store again (`then` once read, `failed` with the reason when it cannot be)."""
         store = self.store
         if store is None:
             self.status.setText(self.tr("設定ファイルに計画の保存先（planStores）なし"))
@@ -210,8 +210,12 @@ class SavedPlansDock(PluginDock):
             elif then:
                 then()
 
-        self._start(self.tr("保存した計画の読み込み"), lambda task: list_plans(client, store, token, task.isCanceled), done,
-                    lambda m: self.status.setText(self.tr("読み込み失敗: {m}").format(m=m)))
+        def not_read(m):
+            self.status.setText(self.tr("読み込み失敗: {m}").format(m=m))
+            if failed:
+                failed(m)
+
+        self._start(self.tr("保存した計画の読み込み"), lambda task: list_plans(client, store, token, task.isCanceled), done, not_read)
 
     def _render_plans(self) -> None:
         self.plan_model.clear()

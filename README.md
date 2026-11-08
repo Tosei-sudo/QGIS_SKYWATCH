@@ -31,7 +31,16 @@
 | AI | 物体検出（AI）…・クリック抽出（AI）・AI結果・検出結果を DB へ転記… ／ 教師データセットの作成…・AI 学習（物体検出）… |
 | 地図・レイヤー | 背景地図・設定ファイルのレイヤーを追加・新規スクラッチレイヤー（テンプレート）… ／ ArcGIS Web マップを開く…・ArcGIS Web マップとして保存… |
 
-サブメニューのあと（区切り線の下）に「イベント」「担当と個人設定…」「ツールバーのボタン…」「ドックのレイアウト」「ドックを初期位置に戻す」「接続と表の点検…」「Python API リファレンス…」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
+サブメニューのあと（区切り線の下）に「イベント」「担当と個人設定…」「ツールバーのボタン…」「ドックのレイアウト」「ドックを初期位置に戻す」「接続と表の点検…」「使い方（ヘルプ）…」「Python API リファレンス…」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
+
+## 使い方（ヘルプ）
+
+一般の利用者向けの手引き（日本語）。メニュー「使い方（ヘルプ）…」（QGIS の「ヘルプ ▸ プラグイン」とツールバーにも）で開く。
+
+- 中身: はじめに・最初にすること（担当と個人設定・設定ファイル・接続と表の点検）・画面のつくり・どの担当でも使う操作（ドック・一覧のビュー・画像カタログ・場所へ移動・イベント）・撮像計画の担当・観測記録の担当・画像判読・キーボードショートカット・困ったとき・サーバーにつながらないとき・用語。設定ファイルの書き方や Esri のテーブルなど管理者向けのことはこの README に書き、ヘルプには書かない
+- 画面: 左に目次（見出し）、右に本文。上の欄で検索すると、当たった所をすべて黄色にして最初へ移動（Enter で次へ。「n / m 件」）、当たりのない見出しは目次から隠す。緑のリンク（「観測記録」など）はそのドック・画面を開く。「ブラウザで開く」で同じページを PC のブラウザで（印刷・拡大に）
+- ページは 1 つの HTML ファイル `skywatch/help/index.html`。外部のファイル・フォント・スクリプトを使わないので閉域でもそのまま見える。QGIS の中では QTextBrowser で表示するため、HTML と CSS は簡単なもの（`h2`・`h3` に `id`、表・箇条書き）だけ。`skywatch:open/<メニューの文字>` のリンクはヘルプ画面の中でだけメニューの項目を開く（ブラウザでは何もしない）
+- 機能を足したり変えたりしたら、一般の利用者に関わる所はヘルプも直す。テスト（`tests/test_qgis_help.py`）は、ページ内のリンク先の見出し、`skywatch:open/` のリンクがメニューにあること、どこでも効くキー（`ui/shortcuts.py` の `GLOBAL`）がすべて載っていること、外部への参照がないことを確かめる
 
 ## ツールバーのボタン
 
@@ -40,7 +49,7 @@
   - 観測記録の担当: 画像カタログ・通知・画像補正・観測記録・AI結果・分類体系の編集・イベント・通報文の作成・分担・引き継ぎメモ・背景地図・スワイプ比較・位置ずらし
   - 画像判読: 画像カタログ・通知・画像補正・影から高さ・スペクトル・観測記録・移動体・変化抽出（2 時期）・自動位置合わせ・背景地図・スワイプ比較・位置ずらし
   - 担当なし・自分で保存したレイアウトの名前: これまでの並び（ドック 18 個・移動目標撮像計画・背景地図・スワイプ比較・位置ずらし）
-  - どれも最後に「ツールバーのボタン…」
+  - どれも最後に「使い方（ヘルプ）…」「ツールバーのボタン…」
 - メニュー「ツールバーのボタン…」で、今の担当のボタンを自分用に選ぶ。メニューの項目すべてから、チェックで出す・外す、ドラッグか「上へ」「下へ」で並べ替え。「担当の標準に戻す」で選んだものを忘れる
 - 自分で選んだボタンは担当ごとに覚える（担当を変えるとその担当のボタン、戻すと前に選んだボタン）。保存先はユーザープロファイルの QGIS 設定（`skywatch/toolbarButtons`）
 - 担当ごとの標準は `ui/toolbar_buttons.py` の `ROLE_SETS`（項目はメニューの文字で書く）
@@ -988,6 +997,21 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 
 ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
+## 先読み（起動直後に Esri の表を読む）
+
+QGIS の起動が終わって設定ファイルを読んだら、ドックを初めて開いたときに読む Esri の表を裏で読んでおく。ドックを開いたときに待たない。読むのは各ドックが開いたときと同じ読み込みで、表ごとに並行して QgsTask の中で行う。読めなかった表は、ドックを開いたときに改めて読む。
+
+| 項目 | 読むもの |
+| --- | --- |
+| `satellites` | 撮像計画の衛星カタログ（`satelliteCatalogs`・`sensorCatalogs`・`satelliteAliases`）。撮像計画ドックが開いていればドック自身が読むので、二重には読まない |
+| `requests` | 撮像依頼の台帳（`requestStores` の最初の保存先） |
+| `savedPlans` | 保存した撮像計画（`planStores`） |
+| `events` | イベントと紐付け（`events`） |
+
+観測記録（記録・分類体系・通報済みの印）は、これまでどおり設定ファイルを読んだ時点で観測記録ドックが読む。設定ファイルの `preload` で選べる（`true` ですべて（既定）、`false` で先読みしない、`["requests", "events"]` のように一覧で選ぶ）。設定ファイルを読み直したときも、もう一度先読みする。
+
+起動の所要時間（プラグインの読み込み、ドックの作成、メニュー・ツールバー、設定ファイルの読み込み）と、先読みした表ごとの秒数は、最初の先読みが終わったときにログメッセージの「SKYWATCH」タブに 1 行で出る。Python コンソールからは `plugin.api.startup_times`、先読みのやり直しは `plugin.api.preload()`。
+
 ## 起動時のレイヤー
 
 設定ファイルの `layers`（ビューアの「起動時に読み込むレイヤー」）を、QGIS を空のプロジェクトで起動したときと「新規プロジェクト」のときに追加する。上に書いたものが下になる。メニューの「地図・レイヤー ▸ 設定ファイルのレイヤーを追加」でいつでも追加でき、「設定…」の「起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加」で止められる。
@@ -1214,6 +1238,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
+| `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`savedPlans`・`events` から | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
@@ -1266,6 +1291,8 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 ## Esri 側のテーブル定義
 
 プラグインが読み書きする Esri のレイヤー・テーブルの一覧（RDBMS（エンタープライズ ジオデータベース）に作る前提）。属性名と役割の対応は各モジュールの既定（`DEFAULT_*_FIELDS`）と各項目の読み込み処理が元。プラグインは**属性名**（エイリアスではなく）で読み書きするので、エイリアスは表のとおりでなくてもよい。
+
+この表のとおりにテーブルを作り、ポータルに公開して設定ファイルまで作るスクリプトが `tools/arcgis/` にある（ArcGIS Pro の Python で実行。手順は [docs/arcgis-setup.md](docs/arcgis-setup.md)）。何度実行してもよく、プラグインを新しくして属性が増えたら足りない属性だけ足す。
 
 ### 命名の決まり
 
@@ -1775,6 +1802,7 @@ skywatch/
   tests/     pytest
 tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
+  arcgis/              ArcGIS でテーブルを作り、ポータルに公開するスクリプト（docs/arcgis-setup.md）
 ```
 
 ## テスト

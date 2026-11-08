@@ -4,9 +4,9 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
+from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsMessageLog, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QIcon, QPainter
+from qgis.PyQt.QtGui import QColor, QCursor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton
 
 try:  # Qt6
@@ -21,6 +21,8 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from .qgis_io.context import PluginContext
+from .qgis_io.preload import LOG_TAG, Preloader
+from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
 from .core.enhance.rules import image_rule_for
 from .qgis_io import complex_sar, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
@@ -77,7 +79,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "Python API リファレンス…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -131,6 +133,16 @@ class PluginApi:
     def reload_config(self) -> None:
         """Reads the settings file again."""
         self._plugin.context.reload()
+
+    @property
+    def startup_times(self) -> dict:
+        """How long the startup took (`steps`, `total`) and each read ahead (`reads`), in seconds."""
+        return self._plugin.clock.times()
+
+    def preload(self) -> None:
+        """Reads ahead now what the settings file's `preload` lists (in the background)."""
+        if self._plugin.preloader is not None:
+            self._plugin.preloader.run()
 
     @property
     def observation_dock(self) -> "ObservationDock":
@@ -296,13 +308,21 @@ class SkywatchPlugin:
         self.setup_dialog: Optional[first_setup.FirstSetupDialog] = None
         self.toolbar_buttons: Optional[ToolbarButtons] = None
         self.toolbar_dialog: Optional[ToolbarButtonsDialog] = None
+        #: How long the startup took (classFactory gives the one started before the plugin was imported).
+        self.clock = StartupClock()
+        #: 「先読み」: the Esri tables read in the background once QGIS has started (qgis_io/preload.py).
+        self.preloader: Optional[Preloader] = None
+        self._qgis_started = False
+        self._startup_told = False
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
+        self.clock.lap()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
         self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
+        self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
@@ -423,6 +443,7 @@ class SkywatchPlugin:
             self._add_to_menu(action)
             self.actions.append(action)
 
+        self.clock.step("ドックの作成")
         self.place_docks()
         # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
         for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
@@ -597,6 +618,18 @@ class SkywatchPlugin:
         health.triggered.connect(lambda: self.open_health_check())
         self._add_to_menu(health)
         self.actions.append(health)
+        # 「使い方（ヘルプ）」: the help for everyday users, bundled HTML (help/index.html, ui/help_dialog.py).
+        help_action = QAction(icon("help"), tr("使い方（ヘルプ）…"), self.iface.mainWindow())
+        help_action.setObjectName("SatObsHelp")
+        help_action.triggered.connect(lambda: self.open_help())
+        self._add_to_menu(help_action)
+        self.actions.append(help_action)
+        # Also in QGIS's Help ▸ Plugins.
+        help_menu = self.iface.pluginHelpMenu() if hasattr(self.iface, "pluginHelpMenu") else None
+        if help_menu is not None:
+            help_menu.addAction(help_action)
+        self._help_menu = help_menu
+        self.help_action = help_action
         # 「Python API リファレンス」: plugin.api in Japanese with examples (ui/api_reference_dialog.py).
         reference = QAction(icon("api_reference"), tr("Python API リファレンス…"), self.iface.mainWindow())
         reference.setObjectName("SatObsApiReference")
@@ -615,7 +648,17 @@ class SkywatchPlugin:
         self.toolbar_buttons.apply()
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks)
+        self.clock.step("メニュー・ツールバー")
+        self._add_preload_items()
+        self.context.configChanged.connect(self._config_read_for_preload)
+        self._config_asked = self.clock.now()
         self.context.reload()
+        started = getattr(self.iface, "initializationCompleted", None)
+        if self.iface.mainWindow().isVisible() or started is None:
+            # Installed or turned on while QGIS runs (or no such signal): started already.
+            self._qgis_ready()
+        else:
+            started.connect(self._qgis_ready)
         if self._first_start and first_setup.ENABLED:
             # Once QGIS has started (and put back its own window layout), or now when installed while it runs.
             started = getattr(self.iface, "initializationCompleted", None)
@@ -624,12 +667,107 @@ class SkywatchPlugin:
             else:
                 started.connect(self._first_setup_after_start)
 
+    # ---- 「先読み」 and the startup's timings ------------------------------------------------------------
+
+    def _add_preload_items(self) -> None:
+        """The reads ahead (core/preload.ITEMS), each through its dock's own read."""
+        docks, config = self.docks, lambda: self.context.config
+
+        def satellites(then, failed) -> bool:
+            dock = docks.get("SatObsImagingPlan")
+            if dock is None or not config().satellite_catalogs or dock._loaded:
+                return False
+            dock.load_catalog(then, failed)
+            return True
+
+        def requests(then, failed) -> bool:
+            dock = docks.get("SatObsRequests")
+            if dock is None or dock.store is None or dock._loaded:
+                return False
+            dock.reload(then, failed)
+            return True
+
+        def saved_plans(then, failed) -> bool:
+            dock = docks.get("SatObsSavedPlans")
+            if dock is None or dock.store is None or dock.plans or dock.task is not None:
+                return False
+            dock.reload(then, failed)
+            return True
+
+        def events(then, failed) -> bool:
+            dock = docks.get("SatObsEvents")
+            if dock is None or dock.settings is None or dock.events is not None:
+                return False
+            dock.reload(then, failed=failed)
+            return True
+
+        for key, start in (("satellites", satellites), ("requests", requests), ("savedPlans", saved_plans), ("events", events)):
+            self.preloader.add(key, PRELOAD_ITEMS[key], start)
+        self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
+        self.preloader.finished.connect(self._preload_finished)
+
+    def _qgis_ready(self) -> None:
+        """QGIS has started (its window shown): the reads ahead begin once the settings file is read."""
+        try:
+            self.iface.initializationCompleted.disconnect(self._qgis_ready)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        if self.context is None or self._qgis_started:
+            return
+        self._qgis_started = True
+        if not self.context.loading:
+            self.preloader.schedule()
+
+    def _config_read_for_preload(self) -> None:
+        if getattr(self, "_config_asked", None) is not None:
+            # The first settings file read (a URL is read in a task): how long it took.
+            self.clock.step("設定ファイルの読み込み", self.clock.now() - self._config_asked)
+            self._config_asked = None
+        if self._qgis_started and self.preloader is not None:
+            self.preloader.schedule()
+
+    def _preload_finished(self) -> None:
+        """The first round of reads ahead ended: the startup's timings in QGIS's log (tab SKYWATCH), once."""
+        if self._startup_told:
+            return
+        self._startup_told = True
+        self.clock.ready()
+        QgsMessageLog.logMessage(self.clock.report(), LOG_TAG, Qgis.MessageLevel.Info, notifyUser=False)
+
     def _first_setup_after_start(self) -> None:
         try:
             self.iface.initializationCompleted.disconnect(self._first_setup_after_start)
         except (TypeError, RuntimeError):
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_help(self, section: Optional[str] = None):
+        """「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given."""
+        from .ui.help_dialog import HelpDialog
+
+        if getattr(self, "help_dialog", None) is None:
+            self.help_dialog = HelpDialog(self.run_menu_entry, self.iface.mainWindow())
+        self.help_dialog.show()
+        self.help_dialog.raise_()
+        if section:
+            self.help_dialog.go(section)
+        return self.help_dialog
+
+    def run_menu_entry(self, text: str) -> bool:
+        """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""
+        action = self._entries_in_menu_order().get(tr(text))
+        if action is None:
+            return False
+        dock = next((d for d in self.docks.values() if d.toggleViewAction() is action), None)
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+            return True
+        if action.menu() is not None:  # a submenu (背景地図): shown where the mouse is
+            action.menu().popup(QCursor.pos())
+            return True
+        action.trigger()
+        return True
 
     def open_api_reference(self):
         """「Python API リファレンス…」: what plugin.api has, with examples (not blocking QGIS)."""
@@ -1057,6 +1195,38 @@ class SkywatchPlugin:
         complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
+    def _warm_offline_cache(self, then, failed) -> bool:
+        """
+        With the reads ahead (unless `preload` is false): every observation store's records, checked areas and
+        classification are read once, so they are in the offline cache even for a store not chosen today.
+        """
+        context = self.context
+        config = context.config
+        if not config.offline_work.enabled or not config.observation_stores or not getattr(config, "preload", True):
+            return False
+        from .core.obs.setup import store_sets
+
+        def work(task) -> int:
+            sets = store_sets(config.observation_stores, config.observation_vocabulary, context.gpkg, context.esri,
+                              context.token_for, local=False)
+            n = 0
+            for s in sets:
+                # Only the server's tables (an area or classification kept in the GeoPackage is not read from this thread).
+                reads = [s.records.load] + ([s.areas.load] if s.config.areas else []) + \
+                    ([s.taxonomy.load, s.taxonomy.load_fields] if s.config.taxonomy_table else [])
+                for read in reads:
+                    if task.isCanceled():
+                        return n
+                    try:
+                        read()
+                        n += 1
+                    except Exception:  # noqa: BLE001 (one table unreadable: the others are still kept)
+                        pass
+            return n
+
+        tasks.run_task(tr("オフライン用の控えの更新"), work, lambda _n: then(), failed, hidden=True)
+        return True
+
     def _reload_after_offline(self) -> None:
         """The work kept offline was sent or thrown away (or a server is back): the docks that show it read again."""
         for name in ("SatObsObservations", "SatObsRequests", "SatObsSavedPlans"):
@@ -1071,6 +1241,18 @@ class SkywatchPlugin:
         if getattr(self, "offline", None) is not None:
             self.offline.unload()
             self.offline = None
+        if self.preloader is not None:
+            self.preloader.close()
+            try:
+                self.context.configChanged.disconnect(self._config_read_for_preload)
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+            try:
+                self.iface.initializationCompleted.disconnect(self._qgis_ready)
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+            self.preloader.deleteLater()
+            self.preloader = None
         if getattr(self, "shortcuts", None) is not None:
             self.shortcuts.unload()
             self.shortcuts = None
@@ -1143,6 +1325,16 @@ class SkywatchPlugin:
             self.place_reader.stop()
             self.place_reader = None
         expression_functions.unregister()
+        if getattr(self, "help_dialog", None) is not None:
+            self.help_dialog.close()
+            self.help_dialog.deleteLater()
+            self.help_dialog = None
+        if getattr(self, "_help_menu", None) is not None:
+            try:
+                self._help_menu.removeAction(self.help_action)
+            except RuntimeError:
+                pass
+            self._help_menu = None
         if getattr(self, "api_reference", None) is not None:
             self.api_reference.close()
             self.api_reference.deleteLater()
