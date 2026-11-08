@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import ConflictError, EsriClient, EsriError, deleted_count, quote
-from ..util import is_number, is_record, layer_url, time_of
+from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
 )
@@ -30,8 +30,10 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "requestId": "REQ_ID", "system": "SYSTEM",
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
-    "reason": "REASON", "file": "FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
+    "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
 }
+#: Default names before 2026-11-08 (FILE is an Oracle / SQL Server reserved word), still read from a table that has them.
+LEGACY_HISTORY_FIELDS: dict[str, str] = {"file": "FILE"}
 #: What a history row says about whether the request was taken.
 CAPTURED = ("未判定", "撮像済み", "未撮像")
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+/?$", re.IGNORECASE)
@@ -194,9 +196,12 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
 
 # --- The ledger ------------------------------------------------------------------------------
 
-def _layer(client: EsriClient, url: str, token: Optional[str], label: str, needed: Sequence[str]) -> tuple[set, str]:
+def _layer(client: EsriClient, url: str, token: Optional[str], label: str, needed: Sequence[str],
+           history: Optional[dict] = None) -> tuple[set, str]:
     info = client.layer(url, token, refresh=True)
     names = set(info.field_types)
+    if history is not None:
+        use_legacy_names(history, names, DEFAULT_HISTORY_FIELDS, LEGACY_HISTORY_FIELDS)
     missing = [n for n in needed if n not in names]
     if missing:
         raise EsriError(f"{label} に属性 {'・'.join(missing)} なし")
@@ -385,7 +390,7 @@ def add_history(client: EsriClient, store: RequestStoreConfig, token: Optional[s
     if not store.history or not rows:
         return Saved()
     hf = store.history_fields
-    names, _ = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]))
+    names, _ = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
     adds = [{"attributes": _only(history_attributes(r, hf), names)} for r in rows]
     return _batches(lambda batch: client.apply_edits(store.history, adds=batch, token=token), adds,
                     lambda r: r.add_results, "出力履歴の追加")
@@ -449,7 +454,7 @@ def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[
     if not store.history:
         return []
     hf = store.history_fields
-    _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]))
+    _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
     rows = client.query_all(store.history, where, token, geometry=False, limit=100000, cancelled=cancelled)
     out = []
     for row in rows:
@@ -473,7 +478,7 @@ def update_history(client: EsriClient, store: RequestStoreConfig, token: Optiona
     if not store.history or not changes:
         return Saved()
     hf = store.history_fields
-    names, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"],))
+    names, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"],), history=hf)
     updates = [{"attributes": _only({oid: o, **{hf[k]: v for k, v in values.items()}}, names | {oid})} for o, values in changes]
     return _batches(lambda batch: client.apply_edits(store.history, updates=batch, token=token), updates,
                     lambda r: r.update_results, "出力履歴の更新")

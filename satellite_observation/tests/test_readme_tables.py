@@ -34,8 +34,6 @@ DEFAULTS = {
     "TBL_EVENT": events.DEFAULT_EVENT_FIELDS,
     "TBL_EVENT_LINK": events.DEFAULT_LINK_FIELDS,
 }
-#: Default names the README replaces (DBMS reserved words), each mapped in the settings example.
-RENAMED = {("TBL_IMAGING_PLAN", "mode"): "SENSOR_MODE", ("TBL_REQUEST_HISTORY", "file"): "OUTPUT_FILE"}
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,29}$")
 
 
@@ -69,7 +67,7 @@ def test_every_default_attribute_is_listed_with_its_role():
     for table, defaults in DEFAULTS.items():
         rows = {r[-1]: r[0] for r in tables[table]}
         for role, name in defaults.items():
-            assert rows.get(role) == RENAMED.get((table, role), name), f"{table} の {role}"
+            assert rows.get(role) == name, f"{table} の {role}"
 
 
 def test_names_follow_the_rule():
@@ -100,3 +98,4 @@ def test_the_settings_example_reads_without_problems():
     assert problems == []
     assert config.plan_stores[0].fields["mode"] == "SENSOR_MODE"
     assert config.request_stores[0].history_fields["file"] == "OUTPUT_FILE"
+    assert config.image_catalogs[0].fields["source"] == ["COG_URL", "FILE_PATH"]

@@ -1004,7 +1004,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 - テーブル・フィーチャクラスの名前は `TBL_` で始め、すべて大文字、語は `_` で区切る（`TBL_OBSERVATION`、`TBL_EVENT_LINK`）
 - 属性名もすべて大文字・`_` 区切り（`IMAGE_ID`・`CREATED_AT`）。30 文字以内
-- DBMS の予約語は属性名に使わない。プラグインの既定の属性名のうち **`MODE`（Oracle の予約語）と `FILE`（Oracle・SQL Server の予約語）** だけが当たるので、下の表ではそれぞれ `SENSOR_MODE`・`OUTPUT_FILE` とし、設定ファイルで対応を書く（[既定の属性名と違う名前の設定](#既定の属性名と違う名前の設定)）。プラグインの既定の名前はそのまま（変えていない）
+- DBMS の予約語は属性名に使わない。プラグインの既定の属性名もこれに従う（2026-11-08 に `MODE`（Oracle の予約語）を `SENSOR_MODE` に、`FILE`（Oracle・SQL Server の予約語）を `OUTPUT_FILE` に変えた。それより前に作ったレイヤーで新しい名前がなく古い名前だけがあれば、設定を変えなくても古い名前に読み書きする）
 - 既定の属性名がない役割（画像カタログ・衛星カタログなど、設定ファイルの `fields` で必ず指定するもの）は、この決まりに従った推奨の名前を書いた。既にあるテーブルを使うなら、その属性名を `fields` に書けばよい
 - テーブルの名前はプラグインからは見えない（設定ファイルにはサービスの URL `…/FeatureServer/n` を書く）。下の名前は推奨
 
@@ -1132,7 +1132,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 ### `TBL_IMAGING_PLAN`（撮像計画）
 
-撮像範囲のポリゴン（1 撮像 = 1 フィーチャ）。`planStores[].fields`（既定は下の名前。`mode` だけ既定 `MODE` と違う）。
+撮像範囲のポリゴン（1 撮像 = 1 フィーチャ）。`planStores[].fields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
@@ -1141,7 +1141,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `SHOT_TIME` | 撮像日時 | `Date` | 撮像の時刻。**必須** | `shotTime` |
 | `SATELLITE` | 衛星名 | `String(255)` | 衛星名 | `satellite` |
 | `SATELLITE_ID` | 衛星ID | `String(64)` | 衛星の ID | `satelliteId` |
-| `SENSOR_MODE` | センサーモード | `String(255)` | モード（既定の属性名は `MODE`。設定が必要） | `mode` |
+| `SENSOR_MODE` | センサーモード | `String(255)` | モード（古い既定の `MODE` だけがあるレイヤーはそれを使う） | `mode` |
 | `TARGET` | 対象 | `String(255)` | 対象の名前 | `target` |
 | `OFF_NADIR` | オフナディア角 | `Double` | オフナディア角（度） | `offNadir` |
 | `INCIDENCE` | 入射角 | `Double` | 入射角（度） | `incidence` |
@@ -1189,7 +1189,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 ### `TBL_REQUEST_HISTORY`（撮像依頼の出力履歴）
 
-日次出力の 1 依頼・1 日 1 行（形状なし）。`requestStores[].historyFields`（既定は下の名前。`file` だけ既定 `FILE` と違う）。
+日次出力の 1 依頼・1 日 1 行（形状なし）。`requestStores[].historyFields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
@@ -1204,7 +1204,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `SCENES` | シーン数 | `Integer` | 見積もったシーン数 | `scenes` |
 | `RESULT` | 結果 | `String(64)` | 出力・見送りなど | `result` |
 | `REASON` | 理由 | `String(1000)` | 見送り・警告の理由 | `reason` |
-| `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル（既定の属性名は `FILE`。設定が必要） | `file` |
+| `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル（古い既定の `FILE` だけがあるテーブルはそれを使う） | `file` |
 | `CAPTURED` | 撮像結果 | `String(16)` | `未判定`・`撮像済み`・`未撮像` | `captured` |
 | `IMAGE_ID` | 画像ID | `String(255)` | 撮像済みにした画像の ID | `imageId` |
 | `BOOST_DONE` | 繰り上げ済み | `Integer` | 繰り上げを済ませた量 | `boostDone` |
@@ -1423,9 +1423,9 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | --- | --- | --- | --- | --- |
 | `PLACE_NAME` | 地名 | `String(255)` | 地名（部分一致で検索） | `field` |
 
-### 既定の属性名と違う名前の設定
+### 上の表の名前で作ったときの設定
 
-上の表の名前で作ったときに設定ファイルに書く対応。既定の属性名のある項目は、違うもの（`MODE` → `SENSOR_MODE`、`FILE` → `OUTPUT_FILE`）だけ書けばよい。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -1451,13 +1451,11 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
   "satelliteAliases": { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/3",       // TBL_SATELLITE_ALIAS
                         "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },
   "planStores": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4",                         // TBL_IMAGING_PLAN
-      "fields": { "mode": "SENSOR_MODE" } }
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4" }                        // TBL_IMAGING_PLAN
   ],
   "requestStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5",                         // TBL_IMAGING_REQUEST
-      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6",                     // TBL_REQUEST_HISTORY
-      "historyFields": { "file": "OUTPUT_FILE" } }
+      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6" }                    // TBL_REQUEST_HISTORY
   ],
   "observationStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/7",                         // TBL_OBSERVATION

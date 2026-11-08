@@ -133,3 +133,11 @@ def formula_safe(text: str) -> str:
     if text[:1] in ("=", "+", "-", "@", "\t", "\r") and not re.fullmatch(r"[-+]?\d[\d.,]*(?:[eE][-+]?\d+)?", text):
         return "'" + text
     return text
+
+
+def use_legacy_names(fields: dict[str, str], names: set, defaults: dict[str, str], legacy: dict[str, str]) -> None:
+    """Points a role left at its default at the old default name, when the layer has only the old one."""
+    lower = {n.lower() for n in names}
+    for role, old in legacy.items():
+        if fields.get(role) == defaults[role] and defaults[role].lower() not in lower and old.lower() in lower:
+            fields[role] = next(n for n in names if n.lower() == old.lower())

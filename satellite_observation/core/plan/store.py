@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional, Sequence
 from .. import time_zone
 from ..catalog import CatalogConfig
 from ..esri import EsriClient, EsriError, deleted_count, quote
-from ..util import is_number, is_record, layer_url, time_of, utc_text
+from ..util import is_number, is_record, layer_url, time_of, use_legacy_names, utc_text
 from .access import Opportunity, PlanTarget
 from .remind import shots_of
 from .names import NO_NAMES, SatelliteNames, best_named
@@ -27,7 +27,7 @@ DEFAULT_PLAN_FIELDS: dict[str, str] = {
     "shotTime": "SHOT_TIME",
     "satellite": "SATELLITE",
     "satelliteId": "SATELLITE_ID",
-    "mode": "MODE",
+    "mode": "SENSOR_MODE",
     "target": "TARGET",
     "offNadir": "OFF_NADIR",
     "incidence": "INCIDENCE",
@@ -37,6 +37,8 @@ DEFAULT_PLAN_FIELDS: dict[str, str] = {
     "imageId": "IMAGE_ID",
     "created": "CREATED_AT",
 }
+#: Default names before 2026-11-08 (MODE is an Oracle reserved word), still read from a layer that has them.
+LEGACY_PLAN_FIELDS: dict[str, str] = {"mode": "MODE"}
 #: The statuses of a shot.
 STATUSES = ("予定", "撮像済み", "未撮像", "取消")
 #: Their colours on the map and in the table.
@@ -142,6 +144,7 @@ def layer_of(client: EsriClient, store: PlanStoreConfig, token: Optional[str]) -
     info = client.layer(store.url, token, refresh=True)
     types = info.field_types
     names = set(types)
+    use_legacy_names(store.fields, names, DEFAULT_PLAN_FIELDS, LEGACY_PLAN_FIELDS)
     for role in ("planId", "shotTime"):
         if store.fields[role] not in names:
             raise EsriError(f"{store.label} に属性 {store.fields[role]} なし")
@@ -209,7 +212,12 @@ def _only(attributes: dict[str, Any], names: set) -> dict[str, Any]:
 def add_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str], features: Sequence[dict[str, Any]],
               cancelled: Optional[Callable[[], bool]] = None) -> tuple[int, list[str]]:
     """Adds features to the layer (200 at a time); how many were saved, and why others were not."""
+    before = dict(store.fields)
     names, _, _ = layer_of(client, store, token)
+    # Features made before the layer was read carry the new default names; a layer with only the old ones gets those.
+    renamed = {before[r]: n for r, n in store.fields.items() if before.get(r) != n}
+    if renamed:
+        features = [{**f, "attributes": {renamed.get(k, k): v for k, v in f["attributes"].items()}} for f in features]
     saved, failed = 0, []
     for i in range(0, len(features), 200):
         if cancelled and cancelled():

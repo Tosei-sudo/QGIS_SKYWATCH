@@ -76,7 +76,7 @@ def plan_server():
     fake = FakeEsri()
     fields = {name: "esriFieldTypeString" for name in DEFAULT_PLAN_FIELDS.values()}
     fields.update(SHOT_TIME="esriFieldTypeDate", CREATED_AT="esriFieldTypeDate", OFF_NADIR="esriFieldTypeDouble", INCIDENCE="esriFieldTypeDouble")
-    del fields["MODE"]
+    del fields["SENSOR_MODE"]
     fake.add_layer(PLAN_URL, FakeLayer(fields, "esriGeometryPolygon"))
     images = fake.add_layer(CATALOG_URL, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
     # Taken 10 minutes after the Tokyo shot, over it, by the planned satellite (and another one at the same time).
@@ -107,10 +107,10 @@ def test_save_list_follow_up_and_delete_a_plan():
     a = features[0]["attributes"]
     assert (a["PLAN_ID"], a["SHOT_TIME"], a["SATELLITE"], a["STATUS"], a["PASS_DIR"]) == ("P1", T0, "WorldView-3", "予定", "南行")
     assert add_shots(client, store, None, features) == (3, [])
-    # Outer rings go clockwise; attributes the layer lacks (MODE) are left out.
+    # Outer rings go clockwise; attributes the layer lacks (SENSOR_MODE) are left out.
     ring = fake.layers[PLAN_URL].rows[0]["geometry"]["rings"][0]
     assert ring[1][1] > ring[0][1]
-    assert "MODE" not in fake.layers[PLAN_URL].rows[0]["attributes"]
+    assert "SENSOR_MODE" not in fake.layers[PLAN_URL].rows[0]["attributes"]
 
     plans = list_plans(client, store, None)
     assert [(p.id, p.name, p.shots, p.first, p.statuses) for p in plans] == [("P1", "十月の計画", 3, T0, {"予定": 3})]
