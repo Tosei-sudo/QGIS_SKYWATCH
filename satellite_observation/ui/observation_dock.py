@@ -194,7 +194,7 @@ class ObservationDock(PluginDock):
         self.overlay = ObservationOverlay(self.canvas)
         self.overlay.hide()
         self.tool = ObservationTool(self.canvas, self.overlay, self.map_clicked, self.map_hovered, self.map_dragged,
-                                    lambda: self.active and not self.area_mode and not self.rear)
+                                    lambda: self.active and not self.area_mode and not self.rear, self.escape)
         self.tool.deactivated.connect(self._tool_gone)
         self.canvas.extentsChanged.connect(self._extent_changed)
         project = QgsProject.instance()
@@ -1187,7 +1187,11 @@ class ObservationDock(PluginDock):
         self.draw()
 
     def escape(self) -> None:
-        if self.area_mode:
+        if self.dragging is not None:
+            # A record being dragged (Esc on the map): left where it was.
+            self.dragging = None
+            self.draw()
+        elif self.area_mode:
             # A corner clicked: that goes first; then the mode.
             if self.area_corner is not None and self.area_ring is None:
                 self.area_corner = None
