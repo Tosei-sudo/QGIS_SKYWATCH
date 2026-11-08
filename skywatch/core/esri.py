@@ -32,6 +32,13 @@ class ConflictError(EsriError):
     """Someone else changed (or deleted) the feature since it was read: it is not overwritten (#74)."""
 
 
+class UnreachableError(EsriError):
+    """
+    The server could not be reached (no connection, no answer in time, or a
+    5xx error): the plugin then works offline (core/offline.py) until it answers again.
+    """
+
+
 class InvalidTokenError(EsriError):
     """The server called the token invalid or expired (498, 499)."""
 
@@ -104,7 +111,7 @@ class EsriClient:
         try:
             body = self.transport(url, form)
         except EsriError as error:
-            raise EsriError(_redact(str(error), token)) from None
+            raise (UnreachableError if isinstance(error, UnreachableError) else EsriError)(_redact(str(error), token)) from None
         try:
             value = json.loads(body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body)
         except (ValueError, UnicodeDecodeError):

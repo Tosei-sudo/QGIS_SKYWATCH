@@ -81,3 +81,10 @@ def parse_drafts(text: Optional[str]) -> list[Draft]:
 
 def drafts_text(drafts: list[Draft]) -> str:
     return json.dumps([d.to_json() for d in drafts[-LIMIT:]], ensure_ascii=False)
+
+
+def keep_draft_in(prefs: Any, store_label: str, draft: Draft) -> None:
+    """Adds a draft to a store's 「未保存の記録」 (book.Prefs / QgsSettings, as ObservationBook.keep_draft keeps them)."""
+    key = f"drafts/{store_label}"
+    kept = [d for d in parse_drafts(prefs.get(key)) if d.id != draft.id]
+    prefs.set(key, drafts_text(kept + [draft]))

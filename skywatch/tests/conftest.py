@@ -75,6 +75,16 @@ def no_esri_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def own_offline_file(monkeypatch, tmp_path):
+    """Each test has its own file of offline work (the cache and what waits): none is left from another test."""
+    try:
+        from skywatch.qgis_io import settings
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(settings, "offline_path", lambda: str(tmp_path / "offline_work.sqlite"))
+
+
+@pytest.fixture(autouse=True)
 def no_time_zone_rules():
     """Each test starts with no settings file's time zones (they are module state, as in the viewer)."""
     from skywatch.core import time_zone

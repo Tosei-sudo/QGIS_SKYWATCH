@@ -16,6 +16,7 @@ from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_t
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
+from ..core.offline import OfflineWork
 from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
 from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
 from ..core.edit_stamp import set_tracking
@@ -65,6 +66,9 @@ class PluginContext(QObject):
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
         self.configChanged.connect(lambda: set_rules(self.config.time_zones))
         self.configChanged.connect(lambda: set_tracking(self.config.edit_tracking))
+        #: 一時的なオフライン作業: the cache of reads and the changes waiting for a server down (core/offline.py).
+        self.offline = OfflineWork(settings.offline_path())
+        self.configChanged.connect(self._offline_settings)
 
     def reload(self) -> None:
         """
@@ -121,8 +125,19 @@ class PluginContext(QObject):
         self.configChanged.emit()
 
     def esri(self) -> EsriClient:
-        """An Esri client whose requests follow QGIS's proxy and the authcfg chosen per service (use inside a task)."""
-        return EsriClient(qgis_transport(settings.auth_for))
+        """
+        An Esri client whose requests follow QGIS's proxy and the authcfg chosen
+        per service (use inside a task). Its reads are kept for offline work and
+        answered from there while their server is down (core/offline.py).
+        """
+        client = EsriClient(self.offline.transport(qgis_transport(settings.auth_for)))
+        client.offline = self.offline
+        return client
+
+    def _offline_settings(self) -> None:
+        o = self.config.offline_work
+        self.offline.enabled = o.enabled
+        self.offline.cache_bytes = int(o.cache_mb * 1024 * 1024)
 
     def token_of(self, url: str) -> Optional[str]:
         """
@@ -198,6 +213,7 @@ class PluginContext(QObject):
         return self._gpkg
 
     def close(self) -> None:
+        self.offline.close()
         if self._gpkg is not None:
             self._gpkg.close()
             self._gpkg = None

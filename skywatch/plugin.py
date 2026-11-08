@@ -43,6 +43,7 @@ from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
 from .ui.notices_dock import NoticesDock
+from .ui.offline_status import OfflineController
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
@@ -298,6 +299,7 @@ class SkywatchPlugin:
         self.shift: Optional[LayerShift] = None
         self.segment: Optional[SegmentTool] = None
         self.transfer_dialog: Optional[TransferDialog] = None
+        self.offline: Optional[OfflineController] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -318,6 +320,8 @@ class SkywatchPlugin:
         self.clock.lap()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
+        # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
+        self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
@@ -699,6 +703,7 @@ class SkywatchPlugin:
 
         for key, start in (("satellites", satellites), ("requests", requests), ("savedPlans", saved_plans), ("events", events)):
             self.preloader.add(key, PRELOAD_ITEMS[key], start)
+        self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
         self.preloader.finished.connect(self._preload_finished)
 
     def _qgis_ready(self) -> None:
@@ -1190,7 +1195,52 @@ class SkywatchPlugin:
         complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
+    def _warm_offline_cache(self, then, failed) -> bool:
+        """
+        With the reads ahead (unless `preload` is false): every observation store's records, checked areas and
+        classification are read once, so they are in the offline cache even for a store not chosen today.
+        """
+        context = self.context
+        config = context.config
+        if not config.offline_work.enabled or not config.observation_stores or not getattr(config, "preload", True):
+            return False
+        from .core.obs.setup import store_sets
+
+        def work(task) -> int:
+            sets = store_sets(config.observation_stores, config.observation_vocabulary, context.gpkg, context.esri,
+                              context.token_for, local=False)
+            n = 0
+            for s in sets:
+                # Only the server's tables (an area or classification kept in the GeoPackage is not read from this thread).
+                reads = [s.records.load] + ([s.areas.load] if s.config.areas else []) + \
+                    ([s.taxonomy.load, s.taxonomy.load_fields] if s.config.taxonomy_table else [])
+                for read in reads:
+                    if task.isCanceled():
+                        return n
+                    try:
+                        read()
+                        n += 1
+                    except Exception:  # noqa: BLE001 (one table unreadable: the others are still kept)
+                        pass
+            return n
+
+        tasks.run_task(tr("オフライン用の控えの更新"), work, lambda _n: then(), failed, hidden=True)
+        return True
+
+    def _reload_after_offline(self) -> None:
+        """The work kept offline was sent or thrown away (or a server is back): the docks that show it read again."""
+        for name in ("SatObsObservations", "SatObsRequests", "SatObsSavedPlans"):
+            dock = self.docks.get(name)
+            if dock is not None:
+                try:
+                    dock.reload()
+                except RuntimeError:
+                    pass
+
     def unload(self) -> None:
+        if getattr(self, "offline", None) is not None:
+            self.offline.unload()
+            self.offline = None
         if self.preloader is not None:
             self.preloader.close()
             try:

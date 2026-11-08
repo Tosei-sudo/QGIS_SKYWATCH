@@ -15,6 +15,8 @@ from typing import Callable, Optional
 
 from ..esri import EsriClient
 from ..gpkg import GeoPackage
+from ..offline import offline_of
+from .offline_stores import OfflineAreaStore, OfflineObservationStore
 from .model import ObservationStoreConfig, ObservationVocabulary, without_activities
 from .stores import (
     LOCAL_LABEL, AreaStore, EsriAreaStore, EsriObservationStore, EsriTaxonomyStore, LocalAreaStore, LocalObservationStore,
@@ -62,9 +64,15 @@ def store_sets(configs: list[ObservationStoreConfig], vocabulary: ObservationVoc
     out: list[StoreSet] = []
     for c in configs:
         esri = client()
-        records = EsriObservationStore(c, esri, token_for(c.url, c.token))
+        work = offline_of(esri)
+        records: ObservationStore = EsriObservationStore(c, esri, token_for(c.url, c.token))
+        if work is not None:
+            # Through a server outage: the last reads, and changes kept to send (core/obs/offline_stores.py).
+            records = OfflineObservationStore(records, work)
         if c.areas:
             areas: AreaStore = EsriAreaStore(f"{c.label}の確認範囲", c.areas, esri, token_for(c.areas.url, c.areas.token))
+            if work is not None:
+                areas = OfflineAreaStore(areas, work)
         else:
             areas = LocalAreaStore(gpkg(), c.label)
         if c.taxonomy_table:
