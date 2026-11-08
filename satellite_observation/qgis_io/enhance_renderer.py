@@ -239,7 +239,7 @@ class EnhanceRenderer(QgsRasterRenderer):
             import traceback
 
             from qgis.core import QgsMessageLog
-            QgsMessageLog.logMessage(traceback.format_exc(), "衛星撮像計画・観測記録", Qgis.MessageLevel.Warning)
+            QgsMessageLog.logMessage(traceback.format_exc(), "SKYWATCH", Qgis.MessageLevel.Warning)
             out.setIsNoData()
             return out
         alpha = rgba[..., 3].astype(np.uint32)

@@ -213,7 +213,7 @@ def convert_layer(layer, mode: str, folder: Optional[str] = None) -> bool:
         vrt = build_vrt(path, mode, folder or default_folder())
     except (OSError, RuntimeError) as error:
         from qgis.core import Qgis, QgsMessageLog
-        QgsMessageLog.logMessage(f"複素 SAR 画像の振幅 VRT を作れず（{path}: {error}）", "衛星撮像計画・観測記録", Qgis.MessageLevel.Warning)
+        QgsMessageLog.logMessage(f"複素 SAR 画像の振幅 VRT を作れず（{path}: {error}）", "SKYWATCH", Qgis.MessageLevel.Warning)
         return False
     if not vrt:
         return False

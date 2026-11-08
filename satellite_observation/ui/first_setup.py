@@ -126,7 +126,7 @@ class FirstSetupDialog(QDialog):
         self.setWindowTitle(tr("最初の設定") if first else tr("担当と個人設定"))
         self.setMinimumWidth(580)
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("衛星撮像計画・観測記録へようこそ。担当と使い方を選んでください。\n"
+        intro = QLabel(tr("SKYWATCH へようこそ。担当と使い方を選んでください。\n"
                           "あとでメニュー「担当と個人設定…」から変えられます。") if first else
                        tr("担当を選ぶと、そのドックのレイアウトで開き直します。"))
         intro.setWordWrap(True)

@@ -149,7 +149,7 @@ def test_an_answer_for_a_closed_window_is_not_an_error():
     levels = []
 
     def log(message, tag, level):
-        if tag == "衛星撮像計画・観測記録":
+        if tag == "SKYWATCH":
             levels.append(level)
 
     QgsApplication.messageLog().messageReceived.connect(log)

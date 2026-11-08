@@ -59,7 +59,7 @@ from .ui.taxonomy_dock import TaxonomyDock
 from .ui.webmap_dialog import WebMapDialogs
 
 HERE = os.path.dirname(__file__)
-MENU = "衛星撮像計画・観測記録"
+MENU = "SKYWATCH"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
@@ -299,7 +299,7 @@ class SatelliteObservationPlugin:
         QgsProject.instance().layersAdded.connect(self._overview_layers_added)
         # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
         self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
-        self.toolbar = self.iface.addToolBar(tr("衛星撮像計画・観測記録"))
+        self.toolbar = self.iface.addToolBar(tr("SKYWATCH"))
         self.toolbar.setObjectName("SatelliteObservationToolbar")
 
         def icon(name: str) -> QIcon:
