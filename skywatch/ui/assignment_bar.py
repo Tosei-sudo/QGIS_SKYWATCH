@@ -22,6 +22,7 @@ from ..core.obs.assignments import (
     DONE, Assignment, holder_of, holders_of, is_shared, own_row, release, roots_by_person, roots_text, same_person, take, update, with_status,
 )
 from ..qgis_io.tasks import run_task
+from .docks import plain_label, plain_tip
 
 #: Seconds the assignments read stay fresh.
 FRESH_S = 60
@@ -49,7 +50,7 @@ class AssignmentBar(QWidget):
         self.image = None
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
-        self.label = QLabel()
+        self.label = plain_label(QLabel())
         self.label.setWordWrap(True)
         self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row.addWidget(self.label, 1)
@@ -323,7 +324,7 @@ class AssignmentBar(QWidget):
         source = self.source
         if source is None or x is None:
             return
-        if confirm and QMessageBox.question(self, self.tr("分担を手放す"), self.tr("{name} の担当をやめます（記録は残る）。").format(name=x.label)) \
+        if confirm and QMessageBox.question(self, self.tr("分担を手放す"), plain_tip(self.tr("{name} の担当をやめます（記録は残る）。").format(name=x.label))) \
                 != QMessageBox.StandardButton.Yes:
             return
         client, token = self.dock.context.esri(), self.token()

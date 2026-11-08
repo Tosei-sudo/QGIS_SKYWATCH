@@ -52,7 +52,7 @@ from ..qgis_io.obs_images import open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock, ask_no
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
@@ -401,7 +401,7 @@ class ObservationDock(PluginDock):
         self.kind_path_layout.setContentsMargins(0, 0, 0, 0)
         self.kind_levels: Optional[QWidget] = None
         f.addRow(self.kind_path_box)
-        self.specs_label = QLabel()
+        self.specs_label = plain_label(QLabel())
         self.specs_label.setWordWrap(True)
         f.addRow(self.specs_label)
         self.chips_box = QWidget()
@@ -457,7 +457,7 @@ class ObservationDock(PluginDock):
         if offline is not None:
             offline.listeners.append(self._offline_changed)
             self.offlineChanged.connect(self._show_offline)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         b.addWidget(self.status)
         # 保存できなかった記録 (kept on this computer, core/obs/drafts.py): sent again, opened, or thrown away.
@@ -486,7 +486,7 @@ class ObservationDock(PluginDock):
         self.root_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.root_filter.activated.connect(lambda _i: self.filter_root(self.root_filter.currentData() or None))
         row.addWidget(self.root_filter)
-        self.class_filter_label = QLabel()
+        self.class_filter_label = plain_label(QLabel())
         row.addWidget(self.class_filter_label, 1)
         unfilter = QToolButton()
         unfilter.setText("×")
@@ -543,7 +543,7 @@ class ObservationDock(PluginDock):
         # The chosen thing's flow.
         self.flow_box = QGroupBox()
         fl = QVBoxLayout(self.flow_box)
-        self.flow_summary = QLabel()
+        self.flow_summary = plain_label(QLabel())
         self.flow_summary.setWordWrap(True)
         self.flow_strip = FlowStrip()
         self.steps_table = QTableWidget(0, 4)
@@ -1037,10 +1037,10 @@ class ObservationDock(PluginDock):
         who = now.updated_by or now.recorded_by or self.tr("ほかの人")
         if self._filled is not None and self.form_values() == self._filled:
             self.open_form(now.lon, now.lat, editing=now)
-            self.iface.messageBar().pushInfo(self.tr("観測記録"), self.tr("開いている記録を {who} さんが更新したので、最新の内容にしました").format(who=who))
+            self.iface.messageBar().pushInfo(self.tr("観測記録"), plain_tip(self.tr("開いている記録を {who} さんが更新したので、最新の内容にしました").format(who=who)))
         else:
-            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr(
-                "開いている記録を {who} さんが更新しました。このまま「更新」しても上書きはしません（Esc で閉じて開き直すと最新の内容）").format(who=who))
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
+                "開いている記録を {who} さんが更新しました。このまま「更新」しても上書きはしません（Esc で閉じて開き直すと最新の内容）").format(who=who)))
 
     def refresh_reported(self) -> None:
         """
@@ -1301,11 +1301,11 @@ class ObservationDock(PluginDock):
                 self.set_active(True, quiet=True, claimed=True)
                 text = self.tr("分担を記録できませんでした（クリック記録は続けられます）: {m}").format(m=message)
                 self._say(text)
-                self.iface.messageBar().pushWarning(self.tr("観測記録"), text)
+                self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
                 return
             text = self.tr("クリック記録できません: {m}").format(m=message)
             self._say(text)
-            self.iface.messageBar().pushWarning(self.tr("観測記録"), text)
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
 
         bar.claim(image, done, failed)
 
@@ -1593,8 +1593,8 @@ class ObservationDock(PluginDock):
             # Not saved (the network, the token, a conflict): the form comes back as it was typed.
             self.restore_form(lon, lat, editing, source, values)
             self.refresh(force=True)
-            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr(
-                "記録を保存できませんでした（「未保存の記録」に保管しました）: {m}").format(m=message))
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
+                "記録を保存できませんでした（「未保存の記録」に保管しました）: {m}").format(m=message)))
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None),
                 lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)

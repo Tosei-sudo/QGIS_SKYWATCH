@@ -241,6 +241,30 @@ def test_without_onnxruntime_the_person_is_told_how_to_add_it(monkeypatch, tmp_p
         ai_runtime.load_ort(str(tmp_path), "Windows")
 
 
+def test_onnxruntime_telemetry_is_turned_off(monkeypatch):
+    """Security re-check 2026-11-09: official ONNX Runtime 1.31 sends telemetry to Microsoft unless switched off."""
+    import types
+
+    calls = []
+    fake = types.ModuleType("onnxruntime")
+    fake.disable_telemetry_events = lambda: calls.append(os.environ.get("ORT_DISABLE_TELEMETRY"))
+    fake.set_default_logger_severity = lambda n: None
+    monkeypatch.setattr(ai_runtime, "_ort", None)
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    monkeypatch.delenv("ORT_DISABLE_TELEMETRY", raising=False)
+    assert ai_runtime.load_ort() is fake
+    assert calls == ["1"] and os.environ["ORT_DISABLE_TELEMETRY"] == "1"
+    # An administrator's own setting is left as it is.
+    monkeypatch.setattr(ai_runtime, "_ort", None)
+    monkeypatch.setenv("ORT_DISABLE_TELEMETRY", "0")
+    ai_runtime.load_ort()
+    assert calls == ["1", "0"]
+    # A version without the API still loads.
+    del fake.disable_telemetry_events
+    monkeypatch.setattr(ai_runtime, "_ort", None)
+    assert ai_runtime.load_ort() is fake
+
+
 def test_the_carried_onnxruntime_runs_without_its_extras(tmp_path):
     """The package as scripts/build_zip.py --win64 lays it out (its core only), found when Python has none of its own."""
     import onnxruntime
@@ -269,9 +293,12 @@ def test_the_carried_onnxruntime_runs_without_its_extras(tmp_path):
         f"m = r.create_model({os.path.join(DATA, 'detect.onnx')!r})\n"
         "import numpy as np; out = m.run({'images': np.zeros((1, 3, 64, 64), np.float32)})\n"
         "print(m.metadata['task'], list(out.values())[0].shape)\n"
+        # Its telemetry (official builds 1.31+) switched off before it started.
+        "assert os.environ['ORT_DISABLE_TELEMETRY'] == '1'\n"
     )
     result = subprocess.run([sys.executable, "-c", "import os\n" + code], cwd=root, capture_output=True, text=True, timeout=120,
-                            env=dict(os.environ, PYTHONPATH=root, LOCALAPPDATA=str(tmp_path / 'cache')))
+                            env={k: v for k, v in dict(os.environ, PYTHONPATH=root, LOCALAPPDATA=str(tmp_path / 'cache')).items()
+                                 if k != "ORT_DISABLE_TELEMETRY"})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "detect (1, 6, 16)"
 

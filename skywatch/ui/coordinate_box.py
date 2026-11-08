@@ -36,6 +36,7 @@ from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task
+from .docks import plain_tip
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 #: The scale the map goes to at least when jumping: the viewer's zoom 16 in Web Mercator (about 2.4 m per pixel).
@@ -196,7 +197,7 @@ class CoordinateBox(QObject):
 
     def warn(self, message: str) -> None:
         self.message = message
-        self.iface.messageBar().pushInfo(self.tr("座標・地名へ移動"), message)
+        self.iface.messageBar().pushInfo(self.tr("座標・地名へ移動"), plain_tip(message))
 
     # --- Jumping ----------------------------------------------------------
 
@@ -324,7 +325,7 @@ class CoordinateBox(QObject):
         for i, p in enumerate(places):
             item = QStandardItem("　".join(x for x in (p.name, p.source, p.detail) if x))
             item.setData(i, Qt.ItemDataRole.UserRole)
-            item.setToolTip("\n".join(x for x in (p.name, p.detail, p.source) if x))
+            item.setToolTip(plain_tip("\n".join(x for x in (p.name, p.detail, p.source) if x)))
             item.setEditable(False)
             self.model.appendRow(item)
         if not places:

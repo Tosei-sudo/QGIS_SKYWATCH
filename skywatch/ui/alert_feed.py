@@ -23,6 +23,7 @@ from ..core.obs.alerts import AlertSettings, LogRow, poll_log
 from ..core.request.export import format_time
 from ..core.time_zone import UTC
 from ..qgis_io.tasks import run_task
+from .docks import plain_label, plain_tip
 
 DAY_MS = 86_400_000
 #: The longest wait after polls failing one after another (ms).
@@ -82,7 +83,7 @@ class AlertFeed(QWidget):
             row.addWidget(button)
         row.addStretch(1)
         v.addLayout(row)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         v.addWidget(self.status)
 
@@ -226,7 +227,7 @@ class AlertFeed(QWidget):
                 if row.oid in self.unseen:
                     item.setFont(bold)
                 if c == 3:
-                    item.setToolTip(v)
+                    item.setToolTip(plain_tip(v))
                 self.table.setItem(r, c, item)
         self.table.resizeColumnsToContents()
 

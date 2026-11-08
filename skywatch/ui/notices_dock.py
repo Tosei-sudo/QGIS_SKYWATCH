@@ -31,7 +31,7 @@ from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_r
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .alert_feed import AlertFeed
-from .docks import PluginDock, ask_no
+from .docks import PluginDock, ask_no, plain_label
 from .watch_dialog import PointWatchDialog, WatchDialog
 
 TITLE = "通知"
@@ -99,7 +99,7 @@ class NoticesDock(PluginDock):
             button.clicked.connect(slot)
             row.addWidget(button)
         v.addLayout(row)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         v.addWidget(self.status)
         tabs.addTab(page, self.tr("監視条件"))

@@ -28,7 +28,7 @@ from ..qgis_io.cloud_layer import PROPERTY, STYLE_LABELS, CloudFile, cloud_file,
 from ..qgis_io.context import PluginContext
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_label
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 #: Milliseconds between frames when played.
@@ -63,7 +63,7 @@ class CloudDock(PluginDock):
         self.task = None
         self._following = False
 
-        self.source = QLabel()
+        self.source = plain_label(QLabel())
         self.source.setWordWrap(True)
         self.body.addWidget(self.source)
         load_row = QHBoxLayout()
@@ -131,7 +131,7 @@ class CloudDock(PluginDock):
             row.addWidget(tool)
             row.addStretch(1)
             self.body.addLayout(row)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
         self.body.addStretch(1)

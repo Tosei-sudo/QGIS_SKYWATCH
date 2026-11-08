@@ -153,3 +153,15 @@ def test_main_passes_the_wheels_brought_in(repo, tmp_path, monkeypatch):
                os.path.join(ROOT, "skywatch", "tests", "data", "viewer-config.jsonc")])
     assert seen[0]["win64"] and seen[0]["lock_config"]
     assert (seen[0]["onnxruntime_wheel"], seen[0]["sgp4_wheel"], seen[0]["tzdata_wheel"]) == ("o.whl", "s.whl", "t.whl")
+
+
+def test_plain_http_is_warned_about(repo, tmp_path, monkeypatch, capsys):
+    """Security re-check 2026-11-09: zips over http:// can be swapped on the way (the plugin's code runs on every PC)."""
+    assert repo.plain_http("http://intra.example/qgis-plugins") and repo.plain_http(" HTTP://x/")
+    assert not repo.plain_http("https://intra.example/qgis-plugins") and not repo.plain_http("file://fileserver/share")
+    monkeypatch.setattr(repo, "publish", lambda *a, **k: [])
+    zips = [str(tmp_path / "a.zip")]
+    repo.main([str(tmp_path / "repo"), "--zip", *zips, "--url", "http://intra.example/qgis-plugins"])
+    assert "http://" in capsys.readouterr().err
+    repo.main([str(tmp_path / "repo"), "--zip", *zips, "--url", "https://intra.example/qgis-plugins"])
+    assert capsys.readouterr().err == ""

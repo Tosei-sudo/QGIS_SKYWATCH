@@ -33,6 +33,18 @@ def plain_tip(text: str) -> str:
     return "<p style='white-space:pre-wrap'>" + html.escape(text).replace("\n", "<br>") + "</p>"
 
 
+def plain_label(label: QLabel) -> QLabel:
+    """
+    A label that shows its text as it is, never as HTML (Qt reads a label's
+    text as HTML when it looks like it): for labels that show other people's
+    text (names, notes) or a server's message. Security re-check 2026-11-09:
+    markup there could load an image from a share (\\\\host\\…), which makes
+    Windows sign in to that host.
+    """
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    return label
+
+
 def ask_no(parent, title: str, text: str) -> bool:
     """
     Asks before something that can't be undone; Enter (and Esc) answer いいえ,

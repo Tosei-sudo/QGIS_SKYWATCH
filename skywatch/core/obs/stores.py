@@ -304,6 +304,8 @@ class EsriObservationStore:
         self.stamps: dict[str, Optional[float]] = {}
         #: The 更新日時 of saves whose answer was lost (a timeout): the server may hold them.
         self.pending: dict[str, float] = {}
+        #: Earlier such saves of records kept while offline (core/offline.py): none of them is someone else's change either.
+        self.tried: dict[str, tuple[float, ...]] = {}
         self.last_saved: set[str] = set()
         self.last_conflicts: set[str] = set()
         #: The ids the last remove went through for, and the records of them marked (kept): when it raises, part may be done.
@@ -396,9 +398,10 @@ class EsriObservationStore:
                 if not known:
                     continue
             if updated:
-                server, seen, pending = ms_of(a.get(updated)), self.stamps.get(o.id), self.pending.get(o.id)
+                server, seen = ms_of(a.get(updated)), self.stamps.get(o.id)
+                ours = [s for s in (self.pending.get(o.id), *self.tried.get(o.id, ())) if s is not None]
                 if (server is not None and seen is not None and abs(server - seen) > _STAMP_SLACK_MS
-                        and not (pending is not None and abs(server - pending) <= _STAMP_SLACK_MS)):
+                        and not any(abs(server - s) <= _STAMP_SLACK_MS for s in ours)):
                     conflicts.append(o.id)
         return conflicts
 
@@ -427,12 +430,14 @@ class EsriObservationStore:
                 if r.get("success") and is_number(r.get("objectId")):
                     self.oids[o.id] = int(r["objectId"])
                     self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
+                    self.tried.pop(o.id, None)
                     self.last_saved.add(o.id)
                 elif not r.get("success"):
                     failed.append((r.get("error") or {}).get("description") or "追加失敗")
             for o, r in zip(updates, result.update_results):
                 if r.get("success"):
                     self.stamps[o.id], _ = o.updated_at, self.pending.pop(o.id, None)
+                    self.tried.pop(o.id, None)
                     self.last_saved.add(o.id)
                 else:
                     failed.append((r.get("error") or {}).get("description") or "更新失敗")
@@ -453,18 +458,24 @@ class EsriObservationStore:
             if is_number(attrs.get(oid)):
                 self.oids[record_id] = int(attrs[oid])
 
-    def expect(self, record_id: str, seen: Optional[float], sending: Optional[float] = None) -> None:
+    def expect(self, record_id: str, seen: Optional[float], sending: Optional[float] = None,
+               tried: Iterable[float] = ()) -> None:
         """
         Before sending a change made while the server could not be reached
         (core/obs/offline_stores.py): the record was on the server, with the
         更新日時 `seen` then, so a change someone else made meanwhile is not
-        saved over (#74); `sending` is the 更新日時 sent (an answer lost then is no conflict).
+        saved over (#74); `sending` is the 更新日時 sent (an answer lost then is
+        no conflict), `tried` those of earlier saves whose answer was lost (the
+        timeout that started the offline work: the server may hold them).
         """
         self.oids.setdefault(record_id, -1)
         if seen is not None:
             self.stamps[record_id] = seen
         if sending is not None:
             self.pending[record_id] = sending
+        tried = tuple(tried)
+        if tried:
+            self.tried[record_id] = tried
 
     def removes_for_good(self) -> bool:
         """Whether a delete removes the features (no 削除日時 field to mark, or `softDelete: false`)."""

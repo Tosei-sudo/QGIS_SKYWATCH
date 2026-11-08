@@ -55,7 +55,7 @@ from ..qgis_io.detection_results import detection_layers, detection_results, ima
 from ..qgis_io.obs_images import IMAGE_ID, observed_image
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_label
 from .last_inputs import InputMemory
 
 TITLE = "AI結果"
@@ -138,7 +138,7 @@ class AiResultsDock(PluginDock):
         self._again.timeout.connect(lambda: self.image_id and self.show_results())
 
         head = QHBoxLayout()
-        self.image_label = QLabel()
+        self.image_label = plain_label(QLabel())
         self.image_label.setWordWrap(True)
         self.reload_button = QPushButton(_tr("再読み込み"))
         self.reload_button.setToolTip(_tr("この画像の結果を読み直し"))
@@ -223,7 +223,7 @@ class AiResultsDock(PluginDock):
             judge.addWidget(b)
         judge.addStretch(1)
         self.body.addLayout(judge)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
 

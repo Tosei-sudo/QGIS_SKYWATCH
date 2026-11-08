@@ -1056,6 +1056,7 @@ python3 scripts/build_zip.py --win64
 - `dist/skywatch-<版>-win64.zip` を作る。中の `skywatch/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
 - 3 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
 - ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
+- ONNX Runtime のテレメトリー（公式版は 1.31 から Microsoft へ HTTPS で送る。既定でオン）は、プラグインが読み込む前に環境変数 `ORT_DISABLE_TELEMETRY=1` を設定し、読み込み後も `disable_telemetry_events()` で止める（同梱・QGIS 側に入れたもののどちらでも）。管理者が `ORT_DISABLE_TELEMETRY` を設定済みならその値のまま
 - `--config` と併用可
 - DLL を含む onnxruntime と sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\skywatch\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
 - この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/skywatch` を消す）
@@ -1094,7 +1095,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 ```
 python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins
-python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url http://intra.example/qgis-plugins
+python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url https://intra.example/qgis-plugins
 python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config config.json --lock-config --changelog "通報の地名を追加"
 ```
 
@@ -1115,7 +1116,7 @@ python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config con
 **各 PC で登録する（最初の 1 回）**
 
 1. 「プラグイン」→「プラグインの管理とインストール」→「設定」→「追加…」
-2. 名前（例「社内」）と URL を入れる。Windows 版を使う PC は `…/plugins-win64.xml`、それ以外は `…/plugins.xml`。共有フォルダーなら `file://fileserver/share/qgis-plugins/plugins-win64.xml`、Web サーバーなら `http://intra.example/qgis-plugins/plugins-win64.xml`
+2. 名前（例「社内」）と URL を入れる。Windows 版を使う PC は `…/plugins-win64.xml`、それ以外は `…/plugins.xml`。共有フォルダーなら `file://fileserver/share/qgis-plugins/plugins-win64.xml`、Web サーバーなら `https://intra.example/qgis-plugins/plugins-win64.xml`（http:// は経路で zip を差し替えられるため避ける）
 3. 公式のリポジトリ（QGIS Official Plugin Repository）は届かないので、チェックを外して無効にしておくとエラーが出ない
 4. 同じ画面の「起動時に更新を確認する」を入れておくと、QGIS は 3 日おきに起動時に確かめ、新しい版があれば知らせる。すぐ確かめるときは「すべてのリポジトリを再読み込み」
 5. 「すべて」の一覧で「SKYWATCH」を選び「プラグインをインストール」（入っていれば「プラグインをアップグレード」）

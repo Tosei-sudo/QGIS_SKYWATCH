@@ -29,6 +29,7 @@ from ..core.obs.export import (
 from ..core.obs.flows import now_ms
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
+from .docks import plain_label
 from .last_inputs import InputMemory
 
 #: The place choices (their data, their label).
@@ -160,9 +161,9 @@ class ExportDialog(QDialog):
         form.addRow("", self.deleted_check)
         layout.addLayout(form)
 
-        self.count_label = QLabel()
+        self.count_label = plain_label(QLabel())
         layout.addWidget(self.count_label)
-        self.status = QLabel()
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)

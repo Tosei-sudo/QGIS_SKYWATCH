@@ -11,6 +11,12 @@ Models are files: a path (relative paths from the settings file's folder)
 or an http(s) URL, downloaded once into the plugin's folder of the QGIS
 profile (through QGIS's network, its proxy and the authentication chosen
 for the address).
+
+ONNX Runtime's own telemetry is turned off (security re-check 2026-11-09):
+the official builds from 1.31 send trace events to Microsoft over HTTPS
+(1DS) unless ORT_DISABLE_TELEMETRY is set before it starts, and the
+non-essential events are switched off through its API as well. An
+ORT_DISABLE_TELEMETRY already set (by an administrator) is left as it is.
 """
 from __future__ import annotations
 
@@ -55,6 +61,18 @@ def install_hint(system: Optional[str] = None) -> str:
 
 
 _ort: Any = None
+#: ONNX Runtime's switch for its telemetry (official builds 1.31+: sent to Microsoft over HTTPS), read when it starts.
+TELEMETRY_ENV = "ORT_DISABLE_TELEMETRY"
+
+
+def quiet_telemetry(ort: Any = None) -> None:
+    """Keeps ONNX Runtime from sending telemetry: the switch set before it is imported, the events off once it is."""
+    os.environ.setdefault(TELEMETRY_ENV, "1")
+    if ort is not None:
+        try:
+            ort.disable_telemetry_events()
+        except Exception:  # noqa: BLE001 (a version without it)
+            pass
 
 
 def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
@@ -62,6 +80,7 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
     global _ort
     if _ort is not None:
         return _ort
+    quiet_telemetry()
     try:
         import onnxruntime as ort  # noqa: PLC0415 (large, and most sessions never need it)
     except ImportError:
@@ -77,6 +96,7 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
             raise RuntimeMissing(f"同梱の onnxruntime を読み込めず（{error}）。{install_hint(system)}") from error
     if ort is None:
         raise RuntimeMissing(f"AI の実行に必要な onnxruntime なし。{install_hint(system)}")
+    quiet_telemetry(ort)
     try:
         ort.set_default_logger_severity(3)
     except Exception:  # noqa: BLE001 (an old version)

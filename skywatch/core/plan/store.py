@@ -234,13 +234,19 @@ def waiting_plan_ids(client: EsriClient, store: PlanStoreConfig) -> set[str]:
 
 
 def upload_plans(client: EsriClient, store: PlanStoreConfig, token: Optional[str], report: UploadReport) -> None:
-    """Sends the plans kept while the layer could not be reached (each whole, or not at all)."""
+    """
+    Sends the plans kept while the layer could not be reached (each whole, or
+    not at all). A plan's shots already in the layer (the save that found it
+    down timed out but went through, wholly or in part) are taken out first:
+    the plan is never there twice. Its id is new to that save, so nothing else has it.
+    """
     work = offline_of(client)
     if work is None:
         return
     for p in work.pending(KIND, store.label):
         features = p.data.get("features") or []
         try:
+            _delete_online(client, store, token, p.item_id)
             saved, failed = _add_online(client, store, token, features)
         except UnreachableError as error:
             report.kept.append(f"撮像計画（{store.label}）: {error}")
