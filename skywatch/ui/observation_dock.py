@@ -54,6 +54,7 @@ from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no
 from .flow_layout import FlowLayout
+from .list_views import ListViews
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
 
@@ -517,6 +518,11 @@ class ObservationDock(PluginDock):
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
+        # 「ビュー」: the columns of each list (この画像・モノ・分類) and the 大分類 shown, kept under a name (per user).
+        self.views = ListViews(lambda: f"observations-{self.tabs.currentIndex()}", self.table, {
+            "classes": (lambda: list(self.class_filter) if self.class_filter else None, self._set_class_filter),
+        }, None, self)
+        chosen.addWidget(self.views.button)
         b.addLayout(chosen)
         b.addWidget(self.form)
 
@@ -1924,6 +1930,10 @@ class ObservationDock(PluginDock):
             self.tabs.setCurrentIndex(1)
         else:
             self.render()
+
+    def _set_class_filter(self, path) -> None:
+        self.class_filter = [str(p) for p in path] if isinstance(path, list) and path else None
+        self.render()
 
     def filter_root(self, root: Optional[str]) -> None:
         """Limits 「この画像」「モノ」 to a 大分類 (None: all), staying on the tab."""

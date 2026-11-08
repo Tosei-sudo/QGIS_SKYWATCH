@@ -29,6 +29,7 @@ from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .docks import PluginDock, plain_tip
+from .list_views import ListViews
 from .plan_overlay import PlanOverlay
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
@@ -98,6 +99,9 @@ class RequestDock(PluginDock):
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         self.table.doubleClicked.connect(lambda _: self.edit())
         self.body.addWidget(self.table, 1)
+        # 「ビュー」: the columns and the filters kept under a name (per user).
+        self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter}, None, self)
+        top.addWidget(self.views.button)
 
         edit = QHBoxLayout()
         self.new_button = QPushButton(self.tr("新規…"))
