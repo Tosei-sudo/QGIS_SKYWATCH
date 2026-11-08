@@ -36,6 +36,7 @@ from .ui import first_setup
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
 from .ui.events_dock import EventsDock
+from .ui.analysis_dock import AnalysisDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
@@ -67,7 +68,7 @@ MENU_GROUPS = [
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
-    ("解析・処理", ["パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
+    ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
     ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "AI 学習（物体検出）…"]),
     ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", None,
@@ -79,7 +80,7 @@ MENU_TOP = ["イベント", "担当と個人設定…", "ドックのレイア�
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
                                              "SatObsCloud"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard", "SatObsAnalysis"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
@@ -209,6 +210,11 @@ class PluginApi:
         return self._plugin.docks["SatObsEvents"]
 
     @property
+    def analysis(self) -> "AnalysisDock":
+        """The dock 「データ分析」 (its `tables`, `set_sql(text)`, `set_value(name, v)`, `run(then)`, `result`, `save(name)`, `load(name)`, `add_layer()`)."""
+        return self._plugin.docks["SatObsAnalysis"]
+
+    @property
     def ai_results(self) -> "AiResultsDock":
         """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
         return self._plugin.docks["SatObsAiResults"]
@@ -311,7 +317,8 @@ class SkywatchPlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events", "SatObsCloud": "cloud_map"}
+                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events", "SatObsCloud": "cloud_map",
+                 "SatObsAnalysis": "analysis"}
 
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
@@ -331,6 +338,7 @@ class SkywatchPlugin:
             ("SatObsDashboard", tr("ダッシュボード"), None),
             ("SatObsAiResults", tr("AI結果"), None),
             ("SatObsEvents", tr("イベント"), None),
+            ("SatObsAnalysis", tr("データ分析"), None),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
         for name, title, stage in specs:
@@ -361,6 +369,8 @@ class SkywatchPlugin:
                                      self.iface.mainWindow())
             elif name == "SatObsEvents":
                 dock = EventsDock(self.iface, self.context, self.open_settings, lambda: self.docks, self.iface.mainWindow())
+            elif name == "SatObsAnalysis":
+                dock = AnalysisDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsCloud":
                 dock = CloudDock(self.iface, self.context, self.open_settings, lambda: self.open_cloud_cover(), self.iface.mainWindow())
             elif name == "SatObsSavedPlans":
@@ -997,6 +1007,8 @@ class SkywatchPlugin:
             self.docks["SatObsMoving"].close_all()
         if "SatObsDashboard" in self.docks:
             self.docks["SatObsDashboard"].close_all()
+        if "SatObsAnalysis" in self.docks:
+            self.docks["SatObsAnalysis"].close_all()
         for name in ("SatObsRequests", "SatObsPlanFiles"):
             if name in self.docks:
                 self.docks[name].close_all()
