@@ -38,7 +38,7 @@ TYPE_LABELS = {"image": "画像", "observation": "観測記録", "request": "撮
 #: The statuses: an event 対応中 is offered for adding items; 終了 ones are listed on demand.
 OPEN, CLOSED = "対応中", "終了"
 STATUSES = (OPEN, CLOSED)
-#: Kinds offered when the layer has none yet (the ones in the layer come first; any text can be typed).
+#: Kinds offered when `events.kinds` is not set (after the ones in the layer; any text can be typed).
 SUGGESTED_KINDS = ("地震", "津波", "風水害", "火山", "火災", "事故", "その他")
 
 #: The event layer's attributes by role.
@@ -58,6 +58,14 @@ class EventSettings:
     """`events`: the event layer and the link table."""
     layer: EsriSource
     links: EsriSource
+    #: `kinds`: the kinds offered in the form, in this order (replaces the layer's and the built-in ones); None = not set.
+    kinds: Optional[tuple[str, ...]] = None
+
+    def kind_choices(self, used: Iterable[str]) -> list[str]:
+        """The kinds offered: `kinds` when set, else the ones in use then SUGGESTED_KINDS."""
+        if self.kinds is not None:
+            return list(self.kinds)
+        return list(dict.fromkeys([*(k for k in used if k), *SUGGESTED_KINDS]))
 
 
 @dataclass
@@ -122,16 +130,23 @@ def events_settings_of(value: Any, problems: list[str]) -> Optional[EventSetting
     """`events`; None when it cannot be used."""
     at = "events"
     if not is_record(value):
-        problems.append(f"{at} はオブジェクト（layer・links）で指定")
+        problems.append(f"{at} はオブジェクト（layer・links・kinds）で指定")
         return None
     for k in value:
-        if k not in ("layer", "links"):
-            problems.append(f"{at}.{k} は使用不可のキー（layer・links）")
+        if k not in ("layer", "links", "kinds"):
+            problems.append(f"{at}.{k} は使用不可のキー（layer・links・kinds）")
+    kinds: Optional[tuple[str, ...]] = None
+    if "kinds" in value:
+        raw = value["kinds"]
+        if not isinstance(raw, list) or not all(isinstance(k, str) for k in raw):
+            problems.append(f"{at}.kinds は文字列の配列で指定（例: [\"地震\", \"風水害\"]）")
+        else:
+            kinds = tuple(dict.fromkeys(k.strip() for k in raw if k.strip()))
     layer = _source_of(value.get("layer"), f"{at}.layer", DEFAULT_EVENT_FIELDS, problems, editable=True)
     links = _source_of(value.get("links"), f"{at}.links", DEFAULT_LINK_FIELDS, problems, editable=True)
     if layer is None or links is None:
         return None
-    return EventSettings(layer=layer, links=links)
+    return EventSettings(layer=layer, links=links, kinds=kinds)
 
 
 def _text(v: Any) -> str:

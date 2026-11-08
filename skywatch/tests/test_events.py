@@ -30,11 +30,22 @@ def setup():
 def test_settings_need_both_editable_layers():
     _c, problems = parse_config({"events": {"layer": EVENTS}})
     assert _c.events is None and any("events.links" in p for p in problems)
-    c, problems = parse_config({"events": {"layer": {"url": EVENTS, "fields": {"name": "TITLE", "bogus": "X"}}, "links": LINKS, "kinds": []}})
+    c, problems = parse_config({"events": {"layer": {"url": EVENTS, "fields": {"name": "TITLE", "bogus": "X"}}, "links": LINKS, "kinds": "地震"}})
     assert c.events.layer.fields["name"] == "TITLE" and c.events.links.fields["item"] == "ITEM_ID"
     assert any("bogus" in p for p in problems) and any("events.kinds" in p for p in problems)
     c, problems = parse_config({"events": {"layer": "https://x/arcgis/rest/services/Events/MapServer/0", "links": LINKS}})
     assert c.events is None and problems
+
+
+def test_kinds_come_from_the_config_when_set():
+    c, problems = parse_config({"events": {"layer": EVENTS, "links": LINKS}})
+    assert problems == [] and c.events.kinds is None
+    assert c.events.kind_choices(["火災", "", "訓練"]) == ["火災", "訓練", "地震", "津波", "風水害", "火山", "事故", "その他"]
+    c, problems = parse_config({"events": {"layer": EVENTS, "links": LINKS, "kinds": [" 地震 ", "訓練", "地震", ""]}})
+    assert problems == [] and c.events.kinds == ("地震", "訓練")
+    assert c.events.kind_choices(["火災"]) == ["地震", "訓練"]
+    c, problems = parse_config({"events": {"layer": EVENTS, "links": LINKS, "kinds": ["地震", 3]}})
+    assert any("events.kinds" in p for p in problems) and c.events.kinds is None
 
 
 def test_events_are_saved_closed_reopened_and_deleted_with_their_links(monkeypatch):

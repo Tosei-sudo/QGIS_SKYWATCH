@@ -35,7 +35,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog.search import record_of
 from ..core.esri import quote
 from ..core.events import (
-    CLOSED, LISTED, OPEN, STATUSES, SUGGESTED_KINDS, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,
+    CLOSED, LISTED, OPEN, STATUSES, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,
     export_csv, is_url, load_events, load_links, matches, new_event, remove_links, save_event, set_link_note, set_status, summary_text,
 )
 from ..qgis_io.catalog_io import Cancelled, PathError, add_record_layers, footprint, layer_area, open_record
@@ -84,7 +84,7 @@ class EventForm(QDialog):
         form.addRow(self.tr("名前"), self.name)
         self.kind = QComboBox()
         self.kind.setEditable(True)
-        for k in dict.fromkeys([*kinds, *SUGGESTED_KINDS]):
+        for k in kinds:
             self.kind.addItem(k)
         self.kind.setCurrentText(event.kind if event else "")
         form.addRow(self.tr("種別"), self.kind)
@@ -501,7 +501,8 @@ class EventsDock(PluginDock):
     # ---- events --------------------------------------------------------------------------------
 
     def _kinds(self) -> list[str]:
-        return list(dict.fromkeys(e.kind for e in self.events or [] if e.kind))
+        used = [e.kind for e in self.events or []]
+        return self.settings.kind_choices(used) if self.settings else list(dict.fromkeys(k for k in used if k))
 
     def create(self) -> Optional[EventForm]:
         if self.settings is None:
