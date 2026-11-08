@@ -67,6 +67,8 @@ HINT_POINTS = {
 POINT_CHOICES = [(1, "1 点"), (2, "2 点（長さ・向き）"), (3, "3 点（＋片側面）"), (4, "4 点（＋両側面）")]
 HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」"
 NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
+#: The background of the rows of records already reported (通報済み).
+REPORTED_ROW = "#fde68a"
 ACTIVITY_COLORS = ["#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5", "#e11d48"]
 
 
@@ -157,6 +159,9 @@ class ObservationDock(PluginDock):
         self._handover = None
         #: (settings, when read, rules, geofences) of the last check of saved records.
         self._alert_conditions = None
+        #: The ids of the records in the 通報 log table (their rows and marks highlighted).
+        self.reported: set[str] = set()
+        self._reported_asked = 0
         self._alert_widget = None
         self._alert_items: list = []
         self.store_set: Optional[StoreSet] = None
@@ -912,8 +917,45 @@ class ObservationDock(PluginDock):
         return ObservationApi(lambda: self.book, self.run_now, self.report_html)
 
     def reload(self) -> None:
-        """Reads the records again from the store."""
-        self.do(self.tr("観測記録の読み込み"), lambda b: b.reload())
+        """Reads the records again from the store (and which are reported)."""
+        self.do(self.tr("観測記録の読み込み"), lambda b: b.reload(), after=lambda _r: self.refresh_reported())
+
+    def refresh_reported(self) -> None:
+        """
+        Reads which records are in the 通報 log table (in a task; none
+        without `alertReports.table`); their rows and marks are highlighted.
+        """
+        s = self.context.config.alert_reports
+        self._reported_asked += 1
+        asked = self._reported_asked
+        if s is None or s.table is None:
+            if self.reported:
+                self.reported = set()
+                self.render()
+            return
+        from ..core.obs.alerts import reported_ids
+
+        client, token = self.context.esri(), self.context.token_for(s.table.url, s.table.token)
+
+        def finished(ids) -> None:
+            if asked != self._reported_asked:
+                return  # asked again since
+            if set(ids) != self.reported:
+                self.reported = set(ids)
+                self.render()
+
+        def failed(message: str) -> None:
+            QgsMessageLog.logMessage(self.tr("通報済みの記録の読み込みに失敗: {m}").format(m=message), self.tr("観測記録"),
+                                     Qgis.MessageLevel.Warning)
+
+        run_task(self.tr("通報済みの記録の読み込み"), lambda _t: reported_ids(client, s, token), finished, failed)
+
+    def mark_reported(self, ids) -> None:
+        """Records just put in the 通報 log table: highlighted at once (without reading the table again)."""
+        new = set(ids) - self.reported
+        if new:
+            self.reported |= new
+            self.render()
 
     def reload_taxonomy(self) -> None:
         """Reads the classification again from the store (others may have changed it)."""
@@ -2014,7 +2056,7 @@ class ObservationDock(PluginDock):
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
-             records: Optional[list[Observation]] = None) -> None:
+             records: Optional[list[Observation]] = None, reported: bool = False) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         for i, c in enumerate(cells):
@@ -2033,6 +2075,10 @@ class ObservationDock(PluginDock):
                 item.setForeground(QColor("#0f766e"))
             elif style == "area":
                 item.setForeground(QColor("#0f766e"))
+            if reported and style != "deleted":
+                item.setBackground(QColor(REPORTED_ROW))
+                item.setForeground(QColor("#1f2937"))
+                item.setToolTip(self.tr("通報済み（通報テーブルに記録あり）"))
             self.table.setItem(r, i, item)
         if widget is not None:
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
@@ -2213,7 +2259,7 @@ class ObservationDock(PluginDock):
                 self._small((tr("流れ"), tr("このモノの流れの表示"), lambda o=o: self.choose(o.object_id)))
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
-                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o])
+                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported)
         inside_ids = {id(c) for c in inside}
         for c in carried:
             s = c.source
@@ -2252,7 +2298,8 @@ class ObservationDock(PluginDock):
         for f in listed:
             self._row([f.name, f.kind, f.activity if f.present else tr("不在"), local_time(f.first), local_time(f.last), f.seen],
                       lambda f=f: self.choose(None if self.chosen == f.object_id else f.object_id), lambda f=f: self._fit_flow(f),
-                      selected=f.object_id == self.chosen, records=f.observations)
+                      selected=f.object_id == self.chosen, records=f.observations,
+                      reported=any(o.id in self.reported for o in f.observations if o.deleted_at is None))
         if self.table.rowCount() == 0:
             self._row([tr("該当するモノなし") if objects else tr("記録なし")])
 
@@ -2393,7 +2440,8 @@ class ObservationDock(PluginDock):
                 sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
                 s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}", o.present, ring_of.get(o.confidence or ""),
                                     ends=ends_of(lon, lat, o.length, o.heading), heading=o.heading, editing=o.id == editing, key=o.id,
-                                    outline=outline_of(lon, lat, o.length, o.width, o.heading) if o.present else None))
+                                    outline=outline_of(lon, lat, o.length, o.width, o.heading) if o.present else None,
+                                    reported=o.id in self.reported))
         p = self.pending
         if p and not p[2]:
             s.pending = (p[0], p[1])

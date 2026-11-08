@@ -405,6 +405,8 @@ class AlertDialog(QDialog):
                     said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=error.strerror or error))
             self.send_button.setEnabled(True)
             sent = {i.record.id for i in items}
+            if s.table and logged:
+                self.dock.mark_reported(sent)
             self.items = [i for i in self.items if i.record.id not in sent] if s.table else self.items
             self._render_lines()
             message = self.tr("{n} 件を通報: ").format(n=len(items)) + "・".join(said or [self.tr("出力先なし")])
@@ -420,6 +422,7 @@ class AlertDialog(QDialog):
         def failed(message: str) -> None:
             self.send_button.setEnabled(True)
             self._say(self.tr("通報テーブルへの記録の失敗（コピー・ファイル出力もせず）: {m}").format(m=message))
+            self.dock.refresh_reported()  # some rows may have gone in
 
         self.send_button.setEnabled(False)
         run_task(self.tr("通報の記録"), lambda _t: write_log(client, s, fmt, items, lines, at, token), outputs, failed)
@@ -485,6 +488,7 @@ class AlertDialog(QDialog):
             gone = {id(r) for r in rows}
             self.log_rows = [r for r in self.log_rows if id(r) not in gone]
             self._render_log()
+            self.dock.refresh_reported()  # another format's row may keep a record reported
             self._say(self.tr("通報記録 {n} 行を削除").format(n=n))
 
         run_task(self.tr("通報記録の削除"), lambda _t: remove_log(client, s, rows, token), finished,

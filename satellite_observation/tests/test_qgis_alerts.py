@@ -203,3 +203,46 @@ def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin
     dialog = dock._alerts
     assert dialog.isVisible() and dialog.lines_table.rowCount() == 2
     assert {dialog.lines_table.item(r, 1).text().split("|")[0] for r in range(2)} == {"船D", "船E"}
+
+
+def test_reported_records_are_highlighted_in_the_table_and_on_the_map(plugin):
+    from satellite_observation.ui.observation_dock import REPORTED_ROW
+
+    p, iface, dock, tmp_path = plugin
+    _, log = _setup(p, tmp_path, {"notifyOnSave": False})
+    book = dock.book
+    a = book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")
+    b = book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")
+    log.add({"OBS_ID": b.id, "REPORT_NAME": "速報", "TEXT": "船B"})   # reported before (by someone else)
+    dock.reload()
+    assert wait_for(lambda: dock.reported == {b.id})
+
+    def colored() -> dict:
+        return {dock.table.item(r, 0).text(): dock.table.item(r, 0).background().color().name() == REPORTED_ROW
+                for r in range(dock.table.rowCount())}
+
+    def halos() -> dict:
+        return {m.key: m.reported for m in dock.scene().marks if m.role == "obs"}
+
+    assert colored() == {"船A": False, "船B": True}
+    assert halos() == {a.id: False, b.id: True}
+    assert "通報済み" in dock.table.item(1, 0).toolTip()
+    # A thing's row (モノ) too.
+    dock.tabs.setCurrentIndex(1)
+    assert colored() == {"船A": False, "船B": True}
+    dock.tabs.setCurrentIndex(0)
+    # Reported from 「通報」: highlighted at once.
+    dialog = dock.add_to_alerts([a])
+    assert wait_for(lambda: dialog.lines_table.rowCount() == 1)
+    dialog.send()
+    assert wait_for(lambda: "件を通報" in dialog.status.text())
+    assert dock.reported == {a.id, b.id} and colored() == {"船A": True, "船B": True}
+    # Its log row deleted: not highlighted any more.
+    dialog.tabs.setCurrentIndex(1)
+    dialog.read_log()
+    assert wait_for(lambda: dialog.status.text() == "通報記録 2 件")
+    row = next(r for r, x in enumerate(dialog._shown_log()) if x.obs_id == a.id)
+    dialog.log_table.selectRow(row)
+    dialog.remove_log(confirm=False)
+    assert wait_for(lambda: dock.reported == {b.id})
+    assert colored() == {"船A": False, "船B": True}
