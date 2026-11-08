@@ -192,3 +192,50 @@ def test_the_builder_suggests_keys_and_analyses_stay_in_the_project(plugin):
     assert dock.delete(confirm=False) and dock.analyses == []
     b = Builder.from_json(json.loads(text)[0]["builder"])
     assert b.table == "TBL_AI_RESULT" and b.joins[0].right == "IMG_ID"
+
+
+def test_saved_analyses_are_processing_tools_that_follow_the_project(plugin, tmp_path):
+    from qgis.core import QgsApplication, QgsProcessingContext, QgsProcessingFeedback
+
+    from skywatch.processing_provider import analysis_algorithm
+
+    p, _iface, _fake, _tmp = plugin
+    ports_layer()
+    dock = p.api.analysis
+    dock.show()
+    registry = QgsApplication.processingRegistry()
+    ids = lambda: sorted(a.id() for a in registry.providerById("skywatch").algorithms() if a.id().startswith("skywatch:analysis_"))  # noqa: E731
+    assert ids() == []
+    dock.set_sql("SELECT p.port, COUNT(a.IMAGE_ID) AS results, p.SHAPE\n"
+                 "FROM 港_一覧 AS p LEFT JOIN TBL_AI_RESULT AS a ON a.IMAGE_ID = p.image AND a.MODEL = :model\n"
+                 "GROUP BY p.port ORDER BY p.port")
+    dock.set_value("model", "yolo")
+    dock.tabs.setCurrentIndex(1)
+    assert dock.save("港ごとの AI 件数")
+    algorithm_id = dock.algorithm_id()
+    assert ids() == [algorithm_id] and algorithm_id == "skywatch:" + analysis_algorithm.algorithm_name("港ごとの AI 件数")
+    algorithm = registry.algorithmById(algorithm_id)
+    assert algorithm.displayName() == "港ごとの AI 件数" and algorithm.group() == "保存した分析"
+    assert [d.name() for d in algorithm.parameterDefinitions()] == ["model", "LIMIT", "OUTPUT"]
+    assert algorithm.parameterDefinition("model").defaultValue() == "yolo"
+    assert "FROM 港_一覧" in algorithm.shortHelpString()
+
+    context = QgsProcessingContext()
+    context.setProject(QgsProject.instance())
+    out = str(tmp_path / "ports.gpkg")
+    results, ok = algorithm.run({"model": "detr", "OUTPUT": out}, context, QgsProcessingFeedback())
+    assert ok and results["ROWS"] == 3
+    layer = QgsVectorLayer(results["OUTPUT"], "out", "ogr")
+    assert layer.isValid() and QgsWkbTypes.flatType(layer.wkbType()) == QgsWkbTypes.Type.MultiPoint
+    assert {f["port"]: f["results"] for f in layer.getFeatures()} == {"A港": 0, "B港": 1, "C港": 0}
+    # A value is needed.
+    feedback = QgsProcessingFeedback()
+    _r, ok = algorithm.run({"model": "", "OUTPUT": "memory:"}, context, feedback)
+    assert not ok
+    del layer
+
+    # Renamed / deleted / another project: the tools follow.
+    assert dock.save("別名", ask=False) and len(ids()) == 2
+    assert dock.delete(confirm=False) and len(ids()) == 1
+    QgsProject.instance().clear()
+    assert ids() == []

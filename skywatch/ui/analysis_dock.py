@@ -48,6 +48,7 @@ from ..core.analysis import (
     quote_name, suggest_join, tsv_text,
 )
 from ..core.esri import EsriError
+from ..processing_provider import analysis_algorithm
 from ..qgis_io import analysis_io
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, ask_no, plain_tip
@@ -134,6 +135,9 @@ class AnalysisDock(PluginDock):
             ("save", self.tr("保存"), self.tr("この分析をプロジェクトに保存（名前がなければ尋ねる）"), lambda: self.save()),
             ("save_as", self.tr("名前を付けて保存…"), self.tr("別の名前でプロジェクトに保存"), lambda: self.save(ask=True)),
             ("delete", self.tr("削除"), self.tr("この分析をプロジェクトから削除"), lambda: self.delete()),
+            ("processing", self.tr("処理ツールで開く…"), self.tr("保存した分析をプロセシングのツールとして開く（結果をファイルに出力、"
+                                                             "バッチ処理・モデラーでも使える。ツールボックスの「SKYWATCH ▸ 保存した分析」）"),
+             lambda: self.open_processing()),
         ]:
             b = QPushButton(text)
             b.setToolTip(tip)
@@ -937,6 +941,8 @@ class AnalysisDock(PluginDock):
     def _write(self) -> None:
         self.project.writeEntry(PROJECT_SCOPE, PROJECT_KEY, analyses_text(self.analyses))
         self.project.setDirty(True)
+        # 保存した分析 in the Processing toolbox follow.
+        analysis_algorithm.refresh()
 
     def _fill_chooser(self) -> None:
         self.chooser.blockSignals(True)
@@ -1028,6 +1034,21 @@ class AnalysisDock(PluginDock):
         self.say(self.tr("「{n}」をプロジェクトに保存（プロジェクトの保存で残る）").format(n=name))
         return name
 
+    def algorithm_id(self, name: Optional[str] = None) -> str:
+        """The Processing id of a saved analysis (`skywatch:analysis_…`)."""
+        return "skywatch:" + analysis_algorithm.algorithm_name(name or self.current)
+
+    def open_processing(self, name: Optional[str] = None) -> bool:
+        """Opens the saved analysis as a Processing tool (its dialog); False when it is not saved."""
+        name = name or self.current
+        if not name or not any(a.name == name for a in self.analyses):
+            self.say(self.tr("先に分析を保存する"))
+            return False
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        processing.execAlgorithmDialog(self.algorithm_id(name), {})
+        return True
+
     def delete(self, confirm: bool = True) -> bool:
         if not self.current:
             return False
@@ -1048,6 +1069,7 @@ class AnalysisDock(PluginDock):
         for key in ("csv", "copy", "layer"):
             self.buttons[key].setEnabled(has and not running)
         self.buttons["delete"].setEnabled(bool(self.current))
+        self.buttons["processing"].setEnabled(bool(self.current))
 
     def close_all(self) -> None:
         """Lets go of the project's signals and stops a running query (the plugin unloads)."""

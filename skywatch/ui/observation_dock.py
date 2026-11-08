@@ -54,6 +54,7 @@ from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no
 from .flow_layout import FlowLayout
+from .list_views import ListViews
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
 
@@ -517,6 +518,11 @@ class ObservationDock(PluginDock):
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
+        # 「ビュー」: the columns of each list (この画像・モノ・分類) and the 大分類 shown, kept under a name (per user).
+        self.views = ListViews(lambda: f"observations-{self.tabs.currentIndex()}", self.table, {
+            "classes": (lambda: list(self.class_filter) if self.class_filter else None, self._set_class_filter),
+        }, None, self)
+        chosen.addWidget(self.views.button)
         b.addLayout(chosen)
         b.addWidget(self.form)
 
@@ -1925,6 +1931,10 @@ class ObservationDock(PluginDock):
         else:
             self.render()
 
+    def _set_class_filter(self, path) -> None:
+        self.class_filter = [str(p) for p in path] if isinstance(path, list) and path else None
+        self.render()
+
     def filter_root(self, root: Optional[str]) -> None:
         """Limits 「この画像」「モノ」 to a 大分類 (None: all), staying on the tab."""
         self.class_filter = [root] if root else None
@@ -2175,6 +2185,19 @@ class ObservationDock(PluginDock):
         self._export.raise_()
         self._export.activateWindow()
         return self._export
+
+    def open_import(self):
+        """Opens 「観測記録の一括取込み」 (a CSV or a layer into the chosen store; one kept while the dock lives)."""
+        from .record_import_dialog import RecordImportDialog
+
+        if getattr(self, "_import", None) is None:
+            self._import = RecordImportDialog(self, self)
+        else:
+            self._import.reset()
+        self._import.show()
+        self._import.raise_()
+        self._import.activateWindow()
+        return self._import
 
     def open_handover(self, tab: int = 0):
         """Opens 「分担と引き継ぎ」 (its tab 0 分担, 1 引き継ぎメモ); one kept while the dock lives."""

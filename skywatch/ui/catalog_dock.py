@@ -36,6 +36,7 @@ from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock, ask_no
 from .flow_layout import FlowLayout
+from .list_views import ListViews
 from .image_files_dialog import choose_image_files
 
 TITLE = "画像カタログ"
@@ -198,6 +199,14 @@ class CatalogDock(PluginDock):
         self.model.layoutChanged.connect(self._redraw)
         self.model.layoutChanged.connect(self._apply_work_filter)
         self.body.addWidget(self.table, 1)
+        # 「ビュー」: the columns, the sort and the search conditions kept under a name (per user).
+        self.views = ListViews("catalog", self.table, {
+            "catalog": self.catalog_box, "area": self.area_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
+            "more": self.more, "registeredFrom": self.registered_from, "registeredTo": self.registered_to, "systemFrom": self.system_from,
+            "systemTo": self.system_to, "sensor": self.sensor_box, "maxAngle": self.max_angle, "azimuthFrom": self.azimuth_from,
+            "azimuthTo": self.azimuth_to, "where": self.where, "unworkedOnly": self.unworked_only,
+        }, self._view_applied, self)
+        row.addWidget(self.views.button)
         #: The 分担 of the listed images read again every minute while the dock is shown.
         self._work_asked = 0
         self._work_timer = QTimer(self)
@@ -252,6 +261,11 @@ class CatalogDock(PluginDock):
         context.configChanged.connect(self._config_changed)
         self._load_tolerance()
         self._config_changed()
+
+    def _view_applied(self) -> None:
+        """A view chosen: the list searched again with its conditions (when it was searched before)."""
+        if self.model.records:
+            self.search()
 
     # --- Form -------------------------------------------------------------------------------------
 

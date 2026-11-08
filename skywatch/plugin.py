@@ -16,10 +16,10 @@ except ImportError:  # Qt5
 
 from .core.obs.api import ObservationApi
 from .processing_provider.pansharpen_algorithm import default_inputs
-from .processing_provider import cloud_algorithm, detect_algorithm, train_algorithm
+from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
-from .qgis_io import edit_stamp_layers, time_zone_fields
+from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from .qgis_io.context import PluginContext
 from .core.enhance.rules import image_rule_for
 from .qgis_io import complex_sar, overviews_io, tasks
@@ -67,7 +67,7 @@ MENU = "SKYWATCH"
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
-    ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
+    ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
@@ -76,7 +76,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -247,6 +247,8 @@ def _observation_function(name: str):
 
     call.__name__ = name
     call.__doc__ = getattr(ObservationApi, name).__doc__
+    # Its arguments as ObservationApi has them (inspect.signature, the API reference).
+    call.__wrapped__ = getattr(ObservationApi, name)
     return call
 
 
@@ -444,6 +446,12 @@ class SkywatchPlugin:
         export.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_export())
         self._add_to_menu(export)
         self.actions.append(export)
+        # 「観測記録の一括取込み」: a CSV or a layer into the chosen store, after a dry run.
+        record_import = QAction(icon("obs_import"), tr("観測記録の一括取込み…"), self.iface.mainWindow())
+        record_import.setObjectName("SatObsObservationImport")
+        record_import.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_import())
+        self._add_to_menu(record_import)
+        self.actions.append(record_import)
         # 「分担」 (assignments: who holds which image) and 「引き継ぎメモ」 (the shift handover).
         for name, text, tab in (("assignments", "分担…", 0), ("handover", "引き継ぎメモ…", 1)):
             action = QAction(icon(name), tr(text), self.iface.mainWindow())
@@ -456,8 +464,12 @@ class SkywatchPlugin:
         detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
         cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
         train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        # 保存した分析 (the project's analyses of 「データ分析」) as algorithms, following the project.
+        analysis_algorithm.set_context(lambda: context)
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            signal.connect(self._analyses_changed)
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
         pansharpen.triggered.connect(lambda: self.open_pansharpen())
         self._add_to_menu(pansharpen)
@@ -581,6 +593,12 @@ class SkywatchPlugin:
         health.triggered.connect(lambda: self.open_health_check())
         self._add_to_menu(health)
         self.actions.append(health)
+        # 「Python API リファレンス」: plugin.api in Japanese with examples (ui/api_reference_dialog.py).
+        reference = QAction(icon("api_reference"), tr("Python API リファレンス…"), self.iface.mainWindow())
+        reference.setObjectName("SatObsApiReference")
+        reference.triggered.connect(lambda: self.open_api_reference())
+        self._add_to_menu(reference)
+        self.actions.append(reference)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self._add_to_menu(settings)
@@ -608,6 +626,16 @@ class SkywatchPlugin:
         except (TypeError, RuntimeError):
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_api_reference(self):
+        """「Python API リファレンス…」: what plugin.api has, with examples (not blocking QGIS)."""
+        from .ui.api_reference_dialog import ApiReferenceDialog
+
+        if getattr(self, "api_reference", None) is None:
+            self.api_reference = ApiReferenceDialog(self.api, self.iface.mainWindow())
+        self.api_reference.show()
+        self.api_reference.raise_()
+        return self.api_reference
 
     def open_health_check(self):
         """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
@@ -803,6 +831,11 @@ class SkywatchPlugin:
         self.iface.addCustomActionForLayerType(self.similar_action, "", QgsMapLayerType.RasterLayer, False)
         QgsProject.instance().layersAdded.connect(self._layers_added)
         self._layers_added(QgsProject.instance().mapLayers().values())
+        # QGIS の式の関数 「SKYWATCH」: the records the observation dock read and the named areas.
+        expression_functions.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        expression_functions.register()
+        self.place_reader = expression_functions.PlaceReader(self.context)
+        self.place_reader.start()
         # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
         time_zone_fields.register()
         self.time_zone_fields = time_zone_fields.TimeZoneFields(
@@ -907,6 +940,10 @@ class SkywatchPlugin:
         else:
             inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
         processing.execAlgorithmDialog(algorithm, inputs)
+
+    def _analyses_changed(self, *_args) -> None:
+        if self.provider is not None:
+            analysis_algorithm.refresh()
 
     def _refresh_algorithms(self) -> None:
         """The settings file's AI models into the algorithm's choice."""
@@ -1040,6 +1077,12 @@ class SkywatchPlugin:
             self.context.configChanged.disconnect(self._refresh_algorithms)
         except (TypeError, RuntimeError, AttributeError):
             pass
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            try:
+                signal.disconnect(self._analyses_changed)
+            except (TypeError, RuntimeError):
+                pass
+        analysis_algorithm.set_context(lambda: None)
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
@@ -1079,6 +1122,14 @@ class SkywatchPlugin:
                 pass
             self.time_zone_fields = None
             time_zone_fields.unregister()
+        if getattr(self, "place_reader", None) is not None:
+            self.place_reader.stop()
+            self.place_reader = None
+        expression_functions.unregister()
+        if getattr(self, "api_reference", None) is not None:
+            self.api_reference.close()
+            self.api_reference.deleteLater()
+            self.api_reference = None
         if self.swipe is not None:
             self.swipe.close()
             self.swipe.deleteLater()
