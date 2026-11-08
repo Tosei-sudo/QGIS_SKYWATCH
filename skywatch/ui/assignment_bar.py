@@ -2,7 +2,9 @@
 The 分担 line of the observation dock, under the image: who holds the image
 shown (core/obs/assignments.py), and a button to take it (「この画像を担当」),
 or, when it is yours, to finish it or give it back. An image someone else
-holds says so in orange, so that nobody records it twice.
+holds says so in orange, so that nobody records it twice. In 協業 (the
+default, `mode: "shared"`) everyone holding it is named, each with the
+大分類 of the records they made in it, and anyone may join.
 
 The bar keeps the assignments read (the 「分担と引き継ぎ」 dialog shares
 them) and reads them again when they are a minute old and another image is shown.
@@ -16,7 +18,9 @@ from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
 
 from ..core import edit_stamp
-from ..core.obs.assignments import DONE, Assignment, holder_of, release, same_person, take, update, with_status
+from ..core.obs.assignments import (
+    DONE, Assignment, holder_of, holders_of, is_shared, own_row, release, roots_by_person, roots_text, same_person, take, update, with_status,
+)
 from ..qgis_io.tasks import run_task
 
 #: Seconds the assignments read stay fresh.
@@ -49,7 +53,7 @@ class AssignmentBar(QWidget):
         self.label.setWordWrap(True)
         self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row.addWidget(self.label, 1)
-        self.take_button = self._button(self.tr("この画像を担当"), self.tr("この画像を自分の担当に（ほかの人が担当中なら不可）"), self.take)
+        self.take_button = self._button(self.tr("この画像を担当"), self.tr("この画像を自分の担当に（設定が排他 exclusive なら、ほかの人が担当中のときは不可）"), self.take)
         self.done_button = self._button(self.tr("完了"), self.tr("この画像の担当を完了に"), lambda: self.set_status(DONE))
         self.release_button = self._button(self.tr("手放す"), self.tr("この画像の担当をやめる（ほかの人が担当できる）"), self.give_back)
         self.list_button = self._button(self.tr("分担…"), self.tr("全員の分担と引き継ぎメモ"), lambda: self.dock.open_handover(0))
@@ -140,8 +144,15 @@ class AssignmentBar(QWidget):
         source = self.source
         if source is None or image is None or not getattr(source, "claim_on_record", True):
             return False
+        if self.shared:
+            return own_row(self.items, image.id, self.user()) is None
         x = holder_of(self.items, image.id)
         return x is None or not same_person(x.assignee, self.user())
+
+    @property
+    def shared(self) -> bool:
+        """協業 (`assignments.mode: "shared"`, the default): several people may hold an image."""
+        return self.source is not None and is_shared(self.source)
 
     def claim(self, image, done: Callable[[Assignment], None], failed: Callable[[str], None]) -> None:
         """
@@ -188,7 +199,43 @@ class AssignmentBar(QWidget):
         self.render()
 
     def holder(self) -> Optional[Assignment]:
-        return holder_of(self.items, self.image.id) if self.image else None
+        """The row the buttons act on: one's own (協業), else whoever holds the image."""
+        if self.image is None:
+            return None
+        if self.shared:
+            return own_row(self.items, self.image.id, self.user())
+        return holder_of(self.items, self.image.id)
+
+    def _roots(self) -> dict[str, dict[str, int]]:
+        """Of the image shown, the 大分類 each person recorded (協業's 「だれがどの分野」)."""
+        book = getattr(self.dock, "book", None)
+        if book is None or self.image is None:
+            return {}
+        return roots_by_person(book.records, self.image.id)
+
+    def _shared_text(self, image) -> tuple[str, str]:
+        """The line in 協業: everyone holding the image, with the 大分類 they recorded."""
+        user = self.user()
+        held = holders_of(self.items, image.id)
+        roots = self._roots()
+
+        def who(x: Assignment, name: str) -> str:
+            counts = next((c for k, c in roots.items() if same_person(k, x.assignee)), None)
+            extra = [s for s in (roots_text(counts), x.status if x.status != "作業中" else "") if s]
+            return name + (f"（{'、'.join(extra)}）" if extra else "")
+
+        mine = [x for x in held if same_person(x.assignee, user)]
+        others = [x for x in held if not same_person(x.assignee, user)]
+        if not held:
+            done = [d for d in self.items if d.image_id == image.id and d.done]
+            return self.tr("分担: 担当者なし") + (self.tr("（{who} さんが完了済み）").format(
+                who="・".join(dict.fromkeys(d.assignee for d in done))) if done else ""), ""
+        names = "・".join([who(x, self.tr("自分")) for x in mine[:1]] + [who(x, self.tr("{who} さん").format(who=x.assignee or self.tr("（名前なし）"))) for x in others])
+        if mine and not others:
+            return self.tr("分担: {who}が担当中").format(who=names), "color: #2e7d32;"
+        if mine:
+            return self.tr("分担: {who}で担当中（協業）").format(who=names), "color: #2e7d32;"
+        return self.tr("分担: {who}が担当中。一緒に担当できます").format(who=names), "color: #1565c0;"
 
     def render(self) -> None:
         if self.source is None:
@@ -202,6 +249,8 @@ class AssignmentBar(QWidget):
             text = self.tr("分担: 画像なし")
         elif self.error and not self.read_at:
             text = self.tr("分担: 読み込みの失敗（{m}）").format(m=self.error)
+        elif self.shared:
+            text, style = self._shared_text(image)
         elif x is None:
             done = [d for d in self.items if d.image_id == image.id and d.done]
             text = self.tr("分担: 担当者なし") + (self.tr("（{who} さんが完了済み）").format(who="・".join(d.assignee for d in done)) if done else "")
@@ -215,6 +264,7 @@ class AssignmentBar(QWidget):
         self.label.setStyleSheet(style)
         busy = self._writing is not None or self.claiming is not None
         self.take_button.setVisible(image is not None and x is None)
+        self.take_button.setText(self.tr("一緒に担当") if self.shared and image is not None and holders_of(self.items, image.id) else self.tr("この画像を担当"))
         self.done_button.setVisible(mine)
         self.release_button.setVisible(mine)
         for b in (self.take_button, self.done_button, self.release_button):

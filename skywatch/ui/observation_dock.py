@@ -1192,16 +1192,19 @@ class ObservationDock(PluginDock):
         if self.active:
             self.record_button.setChecked(False)
 
-    def set_active(self, on: bool, quiet: bool = False) -> None:
+    def set_active(self, on: bool, quiet: bool = False, claimed: bool = False) -> None:
         """
         Turns 「クリック記録」 on or off. With `assignments`, turning it on takes
-        the image first (in a task; recording starts once it is one's own) and
-        is refused when someone else holds it or the table cannot be reached.
+        the image first (in a task; recording starts once it is one's own). In
+        協業 (the default) others holding it do not matter, and a table that
+        cannot be reached only warns; with `mode: "exclusive"` it is refused
+        when someone else holds it or the table cannot be reached.
+        `claimed`: the taking was tried already (no second try).
         """
         if on and (self.book is None or self.book.current is None):
             self._say(NO_IMAGE)
             on = False
-        if on and not self.active and self.assignment_bar.needs_claim(self.book.current):
+        if on and not claimed and not self.active and self.assignment_bar.needs_claim(self.book.current):
             self._claim_then_record(self.book.current, quiet)
             on = False
         if self.record_button.isChecked() != on:
@@ -1245,6 +1248,14 @@ class ObservationDock(PluginDock):
 
         def failed(message: str) -> None:
             end()
+            current = self.book.current if self.book is not None else None
+            if bar.shared and current is not None and current.id == image.id and self.isVisible():
+                # 協業: nobody is kept out, so the work goes on; only the 分担 row is missing.
+                self.set_active(True, quiet=True, claimed=True)
+                text = self.tr("分担を記録できませんでした（クリック記録は続けられます）: {m}").format(m=message)
+                self._say(text)
+                self.iface.messageBar().pushWarning(self.tr("観測記録"), text)
+                return
             text = self.tr("クリック記録できません: {m}").format(m=message)
             self._say(text)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), text)

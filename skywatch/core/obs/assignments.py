@@ -14,13 +14,19 @@ adding, whether a row of the image is held by someone else; after adding,
 whether someone else added one at the same moment — the first row (by its
 object id) keeps the image and the later one is deleted again.
 
+By default (`mode: "shared"`, 協業) the image is not held by one person: anyone
+may take it beside the others (e.g. one organisation per 大分類), so
+taking never fails for someone else's row; each person still has their
+own row (状態, メモ), and who works which 大分類 is read from the
+records they made (roots_by_person()).
+
 Progress is the holder's own 状態 (作業中・完了・保留) and, read from the
 observation records, how many records were made in the image since it was
 taken.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields, replace
+from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from typing import Any, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
@@ -73,10 +79,16 @@ class AssignmentSource(EsriSource):
     """`assignments`: the table, and whether starting 「クリック記録」 takes the image."""
     #: `claimOnRecord`: starting 「クリック記録」 on an image takes it (refused when someone else holds it).
     claim_on_record: bool = True
+    #: `mode: "shared"` (協業): several people may take the same image (nobody is refused for someone else's row).
+    shared: bool = True
+
+
+#: `assignments.mode`: several people together (協業, the default), or one person per image.
+MODES = ("shared", "exclusive")
 
 
 def assignment_source_of(value: Any, problems: list[str]) -> Optional[AssignmentSource]:
-    """`assignments`: the URL of an editable table, or { url, fields, where, token, claimOnRecord }."""
+    """`assignments`: the URL of an editable table, or { url, fields, where, token, claimOnRecord, mode }."""
     source = esri_source_of(value, "assignments", DEFAULT_ASSIGNMENT_FIELDS, problems, editable=True)
     if source is None:
         return None
@@ -84,7 +96,17 @@ def assignment_source_of(value: Any, problems: list[str]) -> Optional[Assignment
     if not isinstance(claim, bool):
         problems.append("assignments.claimOnRecord は true か false で指定")
         claim = True
-    return AssignmentSource(**{f.name: getattr(source, f.name) for f in dataclass_fields(EsriSource)}, claim_on_record=claim)
+    mode = value.get("mode", MODES[0]) if isinstance(value, dict) else MODES[0]
+    if mode not in MODES:
+        problems.append("assignments.mode は \"shared\"（協業: 何人でも）か \"exclusive\"（画像ごとに 1 人）で指定")
+        mode = MODES[0]
+    return AssignmentSource(**{f.name: getattr(source, f.name) for f in dataclass_fields(EsriSource)}, claim_on_record=claim,
+                            shared=mode == "shared")
+
+
+def is_shared(source: Any) -> bool:
+    """Whether the assignments are 協業 (`mode: "shared"`)."""
+    return bool(getattr(source, "shared", True))
 
 
 def same_person(a: str, b: str) -> bool:
@@ -156,23 +178,37 @@ def holders(client: EsriClient, source: EsriSource, image_id: str, token: Option
     return sorted((x for x in rows if not x.done), key=lambda x: x.oid if x.oid is not None else 0)
 
 
+def holders_of(items: Iterable[Assignment], image_id: str) -> list[Assignment]:
+    """Who holds an image, of rows already read (not 完了), first taken first."""
+    return sorted((x for x in items if x.image_id == image_id and not x.done), key=lambda x: x.oid if x.oid is not None else 0)
+
+
 def holder_of(items: Iterable[Assignment], image_id: str) -> Optional[Assignment]:
     """Who holds an image, of rows already read (the first taken)."""
-    held = [x for x in items if x.image_id == image_id and not x.done]
-    return min(held, key=lambda x: x.oid if x.oid is not None else 0) if held else None
+    held = holders_of(items, image_id)
+    return held[0] if held else None
+
+
+def own_row(items: Iterable[Assignment], image_id: str, user: str) -> Optional[Assignment]:
+    """`user`'s row holding an image, of rows already read."""
+    return next((x for x in holders_of(items, image_id) if same_person(x.assignee, user)), None)
 
 
 def take(client: EsriClient, source: EsriSource, image_id: str, user: str, now: int, image_name: str = "",
          image_time: Optional[int] = None, note: str = "", token: Optional[str] = None) -> Assignment:
     """
     Takes an image for `user`: a TakenError when someone else holds it (also
-    when they took it at the same moment); the row held when `user` holds it already.
+    when they took it at the same moment); the row held when `user` holds it
+    already. 協業 (`mode: "shared"`): others' rows do not stop it; `user`
+    gets a row of their own beside them.
     """
     token = token or source.token
+    shared = is_shared(source)
     for x in holders(client, source, image_id, token):
-        if not same_person(x.assignee, user):
+        if same_person(x.assignee, user):
+            return x
+        if not shared:
             raise TakenError(x)
-        return x
     types = _types(client, source, token)
     mine = Assignment(image_id=image_id, assignee=user, image_name=image_name, image_time=image_time, note=note, taken_at=now)
     values = {k: fit_value(v, types[k]) for k, v in attributes_of(mine, source.fields).items() if k in types}
@@ -180,6 +216,13 @@ def take(client: EsriClient, source: EsriSource, image_id: str, user: str, now: 
     if not r.get("success"):
         raise EsriError(f"分担の取得の失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
     mine = replace(mine, oid=int(r["objectId"]) if is_number(r.get("objectId")) else None)
+    if shared:
+        # Taken twice at the same moment (two PCs of the same person): the first row is kept.
+        own = [x for x in holders(client, source, image_id, token) if same_person(x.assignee, user)]
+        if own and own[0].oid != mine.oid and mine.oid is not None:
+            client.delete_features(source.url, [mine.oid], token)
+            return own[0]
+        return mine
     # Someone else may have taken it between the check and the add: the first row keeps it.
     rows = holders(client, source, image_id, token)
     first = rows[0] if rows else mine
@@ -241,6 +284,8 @@ class Progress:
     by_assignee: int = 0
     #: The last one's time (ms).
     last: Optional[int] = None
+    #: The holder's records by 大分類 (who works what, in 協業).
+    roots: dict[str, int] = field(default_factory=dict)
 
 
 def progress_of(x: Assignment, records: Iterable[Observation]) -> Progress:
@@ -249,18 +294,52 @@ def progress_of(x: Assignment, records: Iterable[Observation]) -> Progress:
         if o.deleted_at is not None or o.image_id != x.image_id or (x.taken_at is not None and o.created_at < x.taken_at):
             continue
         p.records += 1
-        p.by_assignee += same_person(o.recorded_by, x.assignee)
+        if same_person(o.recorded_by, x.assignee):
+            p.by_assignee += 1
+            root = root_of(o.kind) or "分類なし"
+            p.roots[root] = p.roots.get(root, 0) + 1
         p.last = max(p.last or 0, o.created_at)
     return p
+
+
+def root_of(kind: str) -> str:
+    """The 大分類 of a kind (`船舶 > 貨物船` → `船舶`)."""
+    from .taxonomy import path_of
+
+    path = path_of(kind or "")
+    return path[0] if path else ""
+
+
+def roots_by_person(records: Iterable[Observation], image_id: str, since: Optional[int] = None) -> dict[str, dict[str, int]]:
+    """
+    Of an image's living records (made since `since`, ms), how many each
+    person made of each 大分類: {記録者 (as written): {大分類: 件数}}, both in
+    the order first met. Who works which 大分類 in 協業.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for o in sorted(records, key=lambda o: o.created_at or 0):
+        if o.deleted_at is not None or o.image_id != image_id or (since is not None and (o.created_at or 0) < since):
+            continue
+        who = next((k for k in out if same_person(k, o.recorded_by)), o.recorded_by or "")
+        root = root_of(o.kind) or "分類なし"
+        counts = out.setdefault(who, {})
+        counts[root] = counts.get(root, 0) + 1
+    return out
+
+
+def roots_text(counts: Optional[dict[str, int]]) -> str:
+    """`船舶 3・航空機 1`; "" with none."""
+    return "・".join(f"{k} {n}" for k, n in (counts or {}).items())
 
 
 def progress_text(p: Progress) -> str:
     """`記録 5 件・うち担当者 3 件`."""
     if not p.records:
         return "記録なし"
+    roots = f"（{roots_text(p.roots)}）" if p.roots else ""
     if p.by_assignee == p.records:
-        return f"記録 {p.records} 件"
-    return f"記録 {p.records} 件・うち担当者 {p.by_assignee} 件"
+        return f"記録 {p.records} 件{roots}"
+    return f"記録 {p.records} 件・うち担当者 {p.by_assignee} 件{roots}"
 
 
 def assignees(items: Sequence[Assignment]) -> list[str]:
@@ -291,12 +370,14 @@ def assignments_of_images(client: EsriClient, source: EsriSource, image_ids: Ite
 def work_state(rows: Sequence[Assignment]) -> tuple[str, str]:
     """
     An image's state for the catalog's list, of its rows: (UNWORKED, '')
-    with none, the holder's (作業中 or 保留, who) while held, else (完了,
-    who finished last).
+    with none, (作業中 or 保留, who) while held — 作業中 when anyone of
+    those holding it (協業: several) is at work, everyone named — else
+    (完了, who finished last).
     """
-    held = holder_of(rows, rows[0].image_id) if rows else None
-    if held is not None:
-        return held.status or STATUSES[0], held.assignee
+    held = holders_of(rows, rows[0].image_id) if rows else []
+    if held:
+        working = [x for x in held if (x.status or STATUSES[0]) == STATUSES[0]]
+        return (STATUSES[0] if working else held[0].status or STATUSES[0]), "・".join(assignees(held))
     if not rows:
         return UNWORKED, ""
     last = max(rows, key=lambda x: (x.done_at or 0, x.oid or 0))
