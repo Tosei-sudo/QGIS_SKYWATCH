@@ -377,8 +377,10 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             "CREATED_AT": first["acquired"] + 5 * HOUR, "UPDATED_AT": first["acquired"] + 5 * HOUR, "PROJECT": "A"},
             "geometry": {"x": round(ship["lon"], 7), "y": round(ship["lat"], 7)}})
 
-    places = [("横須賀港", 139.672, 35.284), ("東京港", 139.790, 35.620), ("千葉港", 140.080, 35.580), ("木更津港", 139.890, 35.375),
-              ("羽田空港", 139.781, 35.549), ("浦賀水道", 139.750, 35.230)]
+    # Name, reading, other names (comma-separated), lon, lat.
+    places = [("横須賀港", "よこすかこう", "横須賀本港", 139.672, 35.284), ("東京港", "とうきょうこう", "", 139.790, 35.620),
+              ("千葉港", "ちばこう", "", 140.080, 35.580), ("木更津港", "きさらづこう", "", 139.890, 35.375),
+              ("羽田空港", "はねだくうこう", "東京国際空港,HND", 139.781, 35.549), ("浦賀水道", "うらがすいどう", "", 139.750, 35.230)]
     requests = []
     for k, (name, cat, achieve, lon, lat, priority, kind) in enumerate([
             ("横須賀 定点", "定点", "毎回", 139.672, 35.284, 120, "光学"), ("木更津 臨時", "臨時", "期間内1回", 139.890, 35.375, 450, "任意"),
@@ -424,8 +426,10 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                        "CONFIDENCE": D, "MODEL": S, "STATUS": S, "LON": D, "LAT": D, "AREA_M2": D, "LENGTH_M": D, "WIDTH_M": D, "HEADING": D,
                        "REMARKS": {"type": S, "length": 4000}, "SOURCE": S},
             "features": []}]},
-        {"name": "Places", "layers": [{"id": 0, "name": "地名", "geometryType": "point", "fields": {"NAME": S},
-                                       "features": feats([{"attributes": {"NAME": n}, "geometry": {"x": x, "y": y}} for n, x, y in places])}]},
+        {"name": "Places", "layers": [{"id": 0, "name": "地名", "geometryType": "point",
+                                       "fields": {"NAME": S, "NAME_KANA": {"type": S, "alias": "読み"}, "ALIAS": {"type": S, "alias": "別名"}},
+                                       "features": feats([{"attributes": {"NAME": n, "NAME_KANA": k, "ALIAS": a or None}, "geometry": {"x": x, "y": y}}
+                                                          for n, k, a, x, y in places])}]},
         {"name": "Requests", "layers": [
             {"id": 0, "name": "撮像依頼台帳", "geometryType": "polygon", "fields": REQUEST_FIELDS, "features": feats(requests)},
             {"id": 1, "name": "出力履歴", "fields": HISTORY_FIELDS, "features": []}]},
@@ -527,7 +531,7 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
       "constants": {{ "SOURCE": "mock" }} }}
   ],
   "geocoders": [
-    {{ "type": "features", "label": "モック地名", "url": "{rest}/Places/FeatureServer/0", "field": "NAME"{tk} }},
+    {{ "type": "features", "label": "モック地名", "url": "{rest}/Places/FeatureServer/0", "field": ["NAME", "NAME_KANA", "ALIAS"]{tk} }},
     {{ "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" }}
   ],
   // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）

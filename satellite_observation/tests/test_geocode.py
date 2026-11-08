@@ -5,7 +5,7 @@ import pytest
 
 from satellite_observation.core.config import parse_config
 from satellite_observation.core.geocode import (
-    GeocoderConfig, PlaceSearch, decode_csv, fold_name, like_text, nominatim_url, parse_arcgis, parse_features, parse_gsi,
+    GeocoderConfig, PlaceSearch, decode_csv, kana_variants, fold_name, like_text, nominatim_url, parse_arcgis, parse_features, parse_gsi,
     parse_nominatim, read_gazetteer, search_gazetteer,
 )
 
@@ -107,11 +107,51 @@ def test_the_settings_file_lists_geocoders_and_says_what_is_wrong():
         {"type": "features", "url": "https://x.test/FeatureServer/0"},
         {"type": "google", "url": "https://x.test"},
         {"type": "gsi"},
+        {"type": "features", "url": "https://x.test/FeatureServer/0", "field": ["NAME", "NAME_KANA", "NAME"]},
+        {"type": "features", "url": "https://x.test/FeatureServer/0", "field": []},
+        {"type": "csv", "url": "./places.csv", "field": ["a", "b"]},
     ]})
-    assert [(g.type, g.label, g.url, g.field) for g in config.geocoders] == [("csv", "地名表", "./places.csv", "名称")]
+    assert [(g.type, g.label, g.url, g.field, g.fields) for g in config.geocoders] == [
+        ("csv", "地名表", "./places.csv", "名称", ("名称",)),
+        ("features", "features", "https://x.test/FeatureServer/0", "NAME", ("NAME", "NAME_KANA")),
+    ]
     assert problems == [
         "geocoders[1] の features には名前の属性（field）が必要",
         "geocoders[2] の type は gsi・nominatim・arcgis・features・csv のいずれかで指定",
         "geocoders[3] に url（http(s) か相対パス）なし",
+        "geocoders[5] の field は属性名か、属性名の配列で指定",
+        "geocoders[6] の field は属性名（文字）で指定（複数の属性は features のみ）",
     ]
     assert parse_config({})[0].geocoders == []  # none: nothing typed is sent anywhere
+
+
+def test_features_with_several_fields_ask_any_and_say_which_matched():
+    asked = []
+
+    def esri(url, params, token):
+        asked.append((url, params))
+        if url.endswith("/query"):
+            return {"features": [
+                {"attributes": {"NAME": "羽田空港", "NAME_KANA": "はねだくうこう", "ALIAS": "東京国際空港"}, "geometry": {"x": 139.78, "y": 35.55}},
+                {"attributes": {"NAME": "東京港", "NAME_KANA": "とうきょうこう", "ALIAS": None}, "geometry": {"x": 139.79, "y": 35.62}},
+                {"attributes": {"NAME": "東京港", "NAME_KANA": "とうきょうこう", "ALIAS": None}, "geometry": {"x": 139.79, "y": 35.62}},
+                {"attributes": {"NAME": None, "NAME_KANA": None, "ALIAS": "東京の名前なし"}, "geometry": {"x": 139.7, "y": 35.6}},
+            ]}
+        return {"fields": [{"name": "NAME", "alias": "NAME"}, {"name": "ALIAS", "alias": "別名"}]}
+
+    g = GeocoderConfig("features", "地名", "https://esri.test/Places/FeatureServer/0", fields=("NAME", "NAME_KANA", "ALIAS"))
+    search = PlaceSearch([g], lambda url: b"", esri)
+    places, errors = search.search("東京")
+    assert errors == []
+    # The name's match first; the same place once; an alias said with the layer's alias of the field;
+    # a feature without its name named by the attribute that has one.
+    # (Names and aliases starting with it first, then the shorter.)
+    assert [(p.name, p.detail) for p in places] == [("東京港", None), ("羽田空港", "別名: 東京国際空港"), ("東京の名前なし", None)]
+    query = asked[0][1]
+    assert query["where"] == "(NAME LIKE '%東京%' ESCAPE '\\' OR NAME_KANA LIKE '%東京%' ESCAPE '\\' OR ALIAS LIKE '%東京%' ESCAPE '\\')"
+    assert query["outFields"] == "NAME,NAME_KANA,ALIAS"
+    places, _ = search.search("トウキョウ")  # katakana finds the hiragana reading, said by the attribute's name (no alias)
+    assert places[0].detail == "NAME_KANA: とうきょうこう"
+    assert "NAME_KANA LIKE '%とうきょう%' ESCAPE '\\'" in asked[-1][1]["where"]
+    assert kana_variants("ヨコスカ港") == ["ヨコスカ港", "よこすか港"] and kana_variants("東京") == ["東京"]
+    assert sum(1 for url, _ in asked if not url.endswith("/query")) == 1  # the aliases asked once

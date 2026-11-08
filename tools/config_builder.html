@@ -995,8 +995,12 @@ const SPEC = [
         J("settings", "設定（esri）"), N("zmin", "最小ズーム"), N("zmax", "最大ズーム"), TZ, STZ],
         { title: (it) => `${it.type || "?"} ${it.layer || it.url || ""}`, check: (it, at, p) => { if (it.type && it.type !== "cog" && it.type !== "file" && it.type !== "xyz" && !it.layer) p.push(`${at}: ${it.type} は layer が必要`); } }) },
     { key: "geocoders", label: "地名検索", doc: "座標地名へ移動", help: "「座標・地名へ移動」の地名検索。書かなければ地名は検索しない。",
-      field: I("geocoders", "地名検索", [S("type", "種類", K.geocoderTypes, { req: true }), T("url", "URL"), LABEL, T("field", "名前の属性（features）"), TOKEN],
-        { check: (it, at, p) => { if (it.type === "features" && !it.field) p.push(`${at}: features は field が必要`); } }) },
+      field: I("geocoders", "地名検索", [S("type", "種類", K.geocoderTypes, { req: true }), T("url", "URL"), LABEL, L("field", "名前の属性", { single: true, ph: "NAME, NAME_KANA, ALIAS",
+          help: "features: 検索する属性（カンマ区切りで複数可。先頭が地名、ほかは読み・別名など。どれかに含まれれば見つかり、合ったものを横に出す）。csv: 名前の列（1 つ）" }), TOKEN],
+        { check: (it, at, p) => {
+          if (it.type === "features" && !(it.field && it.field.length)) p.push(`${at}: features は field が必要`);
+          if (Array.isArray(it.field) && it.field.length > 1 && it.type !== "features") p.push(`${at}: 複数の field は features のみ`);
+        } }) },
     { key: "layerTemplates", label: "新規スクラッチレイヤーのテンプレート", doc: "新規スクラッチレイヤーテンプレート", help: "組み込みのテンプレートのあとに出す。",
       field: I("layerTemplates", "テンプレート", [T("name", "名前", { req: true }), T("title", "見出し"), T("description", "説明"),
         S("geometryType", "ジオメトリ", K.geometryTypes, { nullLabel: "なし（属性だけ）" }),
@@ -1116,7 +1120,7 @@ function field(f, obj, commit, item) {
       const parts = e.target.value.split(/[,、\n]/).map((s) => s.trim()).filter(Boolean);
       const vals = f.numbers ? parts.map(Number) : parts;
       e.target.classList.toggle("invalid", f.numbers && vals.some((x) => !isFinite(x)));
-      set(vals.length ? vals : undefined);
+      set(!vals.length ? undefined : f.single && vals.length === 1 ? vals[0] : vals);
     } });
   } else if (t === "textOrJson") {
     control = el("input", { type: "text", class: "mono", value: v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v), placeholder: f.ph || "", oninput: (e) => {
@@ -1143,7 +1147,7 @@ function fits(f, v) {
     case "number": return typeof v === "number";
     case "bool": return typeof v === "boolean";
     case "select": return typeof v === "string" || (v === null && !!f.nullLabel) || (v === false && !!f.falseLabel);
-    case "list": return Array.isArray(v) && v.every((x) => typeof x === (f.numbers ? "number" : "string"));
+    case "list": return (f.single && typeof v === "string") || (Array.isArray(v) && v.every((x) => typeof x === (f.numbers ? "number" : "string")));
     case "roles": case "map": return isObj(v);
     default: return true;
   }

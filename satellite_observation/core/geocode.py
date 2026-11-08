@@ -7,7 +7,9 @@ looks them up (geocode.ts). Where to ask is set in the settings file
 - `nominatim`: OpenStreetMap's Nominatim, or a server of one's own.
 - `arcgis`: an ArcGIS geocode service (`…/GeocodeServer`).
 - `features`: an Esri feature layer of named places, searched by an
-  attribute (`field`), for a closed network.
+  attribute (`field`), or by several (`field: ["NAME", "NAME_KANA",
+  "ALIAS"]`: a place is found when any of them holds what is typed, and
+  the one that matched is shown beside it), for a closed network.
 - `csv`: a CSV of names with latitude and longitude, read once and
   searched here, for a closed network without any server.
 
@@ -43,6 +45,14 @@ class GeocoderConfig:
     token: Optional[str] = None
     #: `features`: the attribute holding the name. `csv`: the column of names (else the first that reads as one).
     field: Optional[str] = None
+    #: `features`: every attribute searched, the name's first (`field` given as a list); just `field` when one.
+    fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.fields and self.field:
+            self.fields = (self.field,)
+        elif self.fields and not self.field:
+            self.field = self.fields[0]
 
 
 @dataclass
@@ -70,13 +80,25 @@ def geocoder_of(value: Any, problems: list[str], index: int) -> Optional[Geocode
     if not is_url(url):
         problems.append(f"geocoders[{index}] に url（http(s) か相対パス）なし")
         return None
-    if type_ == "features" and not (isinstance(name, str) and name):
+    names: tuple[str, ...] = ()
+    if isinstance(name, str) and name:
+        names = (name,)
+    elif isinstance(name, list) and type_ == "features":
+        if not name or not all(isinstance(n, str) and n for n in name):
+            problems.append(f"geocoders[{index}] の field は属性名か、属性名の配列で指定")
+            return None
+        names = tuple(dict.fromkeys(name))  # a name twice: once
+    elif name is not None and name != "":
+        problems.append(f"geocoders[{index}] の field は属性名（文字）で指定"
+                        + ("（複数の属性は features のみ）" if isinstance(name, list) else ""))
+        return None
+    if type_ == "features" and not names:
         problems.append(f"geocoders[{index}] の features には名前の属性（field）が必要")
         return None
     return GeocoderConfig(
         type=type_, url=url, label=label if isinstance(label, str) and label else str(type_),
         token=token if isinstance(token, str) and token else None,
-        field=name if isinstance(name, str) and name else None,
+        field=names[0] if names else None, fields=names,
     )
 
 
@@ -164,16 +186,43 @@ def _js_text(value: Any) -> str:
     return str(value)
 
 
-def parse_features(data: Any, name_field: str, source: str) -> list[Place]:
-    """An Esri layer's query (outSR 4326, `returnCentroid` or point geometry): each feature's name and where it is."""
+def _text_of(value: Any) -> Optional[str]:
+    """An attribute as a name: None when empty."""
+    if value is None:
+        return None
+    text = _js_text(value).strip()
+    return text or None
+
+
+def parse_features(data: Any, name_field: "str | list[str] | tuple[str, ...]", source: str,
+                   query: Optional[str] = None, labels: Optional[dict[str, str]] = None) -> list[Place]:
+    """
+    An Esri layer's query (outSR 4326, `returnCentroid` or point geometry): each feature's name and where it is.
+
+    With several attributes (`name_field` a list, the name's first), the name is the first one that has a
+    value; when `query` matched another (a reading, an alias), that one is the place's detail, as
+    "label: value" (`labels`: the layer's aliases of the attributes). The places come best match first
+    (names starting with `query`, then shorter ones), and the same name at the same place only once.
+    """
     features = _get(data, "features")
     if not isinstance(features, list):
         return []
-    out = []
-    for f in features:
-        name = _get(f, "attributes", name_field)
-        if name is None:
+    fields = [name_field] if isinstance(name_field, str) else list(name_field)
+    labels = labels or {}
+    q = fold_name(query) if query else ""
+    ranked = []
+    seen = set()
+    for n, f in enumerate(features):
+        values = [(k, _text_of(_get(f, "attributes", k))) for k in fields]
+        values = [(k, v) for k, v in values if v is not None]
+        if not values:
             continue
+        name = values[0][1]
+        # Which attribute holds what was typed (the service may match in its own way: then the name).
+        at, (key, value) = next(((i, kv) for i, kv in enumerate(values) if q and q in fold_name(kv[1])), (0, values[0]))
+        folded = fold_name(value)
+        rank = (((0 if folded.startswith(q) else 1000) + len(folded)) if q else 0, at, n)
+        detail = f"{labels.get(key) or key}: {value}" if at and value != name else None
         g = f.get("geometry") or {}
         at = f.get("centroid") or (g if math.isfinite(_num(g.get("x"))) else None)
         lon, lat = (_num(at.get("x")), _num(at.get("y"))) if isinstance(at, dict) else (math.nan, math.nan)
@@ -187,9 +236,15 @@ def parse_features(data: Any, name_field: str, source: str) -> list[Place]:
                 extent = box
                 if not _valid(lon, lat):
                     lon, lat = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
-        if _valid(lon, lat):
-            out.append(Place(_js_text(name), (lon, lat), source, None, extent))
-    return out
+        if not _valid(lon, lat):
+            continue
+        same = (name, round(lon, 6), round(lat, 6))
+        if same in seen:
+            continue
+        seen.add(same)
+        ranked.append((rank, Place(name, (lon, lat), source, detail, extent)))
+    ranked.sort(key=lambda r: r[0])
+    return [p for _, p in ranked]
 
 
 def fold_name(text: str) -> str:
@@ -197,6 +252,13 @@ def fold_name(text: str) -> str:
     t = unicodedata.normalize("NFKC", text).lower()
     t = re.sub("[ァ-ヶ]", lambda m: chr(ord(m[0]) - 0x60), t)
     return re.sub(r"\s+", "", t)
+
+
+def kana_variants(text: str) -> list[str]:
+    """`text`, and as hiragana and as katakana when they differ (a reading may be written either way)."""
+    hira = re.sub("[ァ-ヶ]", lambda m: chr(ord(m[0]) - 0x60), text)
+    kata = re.sub("[ぁ-ゖ]", lambda m: chr(ord(m[0]) + 0x60), text)
+    return list(dict.fromkeys((text, hira, kata)))
 
 
 # --- CSV (the viewer's csv.ts) -----------------------------------------------
@@ -344,6 +406,8 @@ class PlaceSearch:
         #: A geocoder's URL as asked (a relative one against the settings file's place).
         self._resolve = resolve
         self._gazetteers: dict[str, Gazetteer] = {}
+        #: A `features` layer's aliases of its attributes, asked once (none when it cannot be read).
+        self._aliases: dict[str, dict[str, str]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -368,6 +432,21 @@ class PlaceSearch:
     def _json(self, url: str) -> Any:
         return json.loads(self._get(url).decode("utf-8-sig"))
 
+    def _aliases_of(self, base: str, g: GeocoderConfig) -> dict[str, str]:
+        """The layer's aliases of its attributes (読み, 別名), to say which one matched; the names when not readable."""
+        if base not in self._aliases:
+            try:
+                info = self._esri(base, {}, g.token)
+                fields = info.get("fields") if isinstance(info, dict) else None
+                self._aliases[base] = {
+                    f["name"]: f["alias"] for f in fields or []
+                    if isinstance(f, dict) and isinstance(f.get("name"), str) and isinstance(f.get("alias"), str)
+                    and f["alias"] and f["alias"] != f["name"]
+                }
+            except Exception:  # noqa: BLE001 (only the labels; the attribute names do, asked again next time)
+                return {}
+        return self._aliases[base]
+
     def _ask(self, g: GeocoderConfig, q: str) -> list[Place]:
         base = re.sub(r"/+$", "", self._resolve(g.url))
         if g.type == "gsi":
@@ -378,13 +457,18 @@ class PlaceSearch:
             params = {"SingleLine": q, "outSR": "4326", "maxLocations": str(LIMIT), "outFields": "Type"}
             return parse_arcgis(self._esri(f"{base}/findAddressCandidates", params, g.token), g.label)
         if g.type == "features":
-            name = g.field or ""
+            names = list(g.fields or (g.field or "",))
+            # Several attributes (a name and its reading): kana typed either way finds the reading.
+            texts = kana_variants(q) if len(names) > 1 else [q]
+            where = " OR ".join(f"{name} LIKE '%{like_text(t)}%' ESCAPE '\\'" for name in names for t in texts)
             params = {
-                "where": f"{name} LIKE '%{like_text(q)}%' ESCAPE '\\'",
-                "outFields": name, "returnGeometry": "true", "returnCentroid": "true", "outSR": "4326",
-                "resultRecordCount": str(LIMIT),
+                "where": where if len(names) == 1 else f"({where})",
+                "outFields": ",".join(names), "returnGeometry": "true", "returnCentroid": "true", "outSR": "4326",
+                # Several attributes: more asked, the best kept (ranked here).
+                "resultRecordCount": str(LIMIT if len(names) == 1 else LIMIT * 3),
             }
-            return parse_features(self._esri(f"{base}/query", params, g.token), name, g.label)
+            data = self._esri(f"{base}/query", params, g.token)
+            return parse_features(data, names, g.label, q, self._aliases_of(base, g) if len(names) > 1 else None)
         # csv: read once; a failure is tried again next time.
         url = self._resolve(g.url)
         gazetteer = self._gazetteers.get(url)
