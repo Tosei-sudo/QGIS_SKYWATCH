@@ -31,7 +31,7 @@
 | AI | 物体検出（AI）…・クリック抽出（AI）・AI結果・検出結果を DB へ転記… ／ 教師データセットの作成…・AI 学習（物体検出）… |
 | 地図・レイヤー | 背景地図・設定ファイルのレイヤーを追加・新規スクラッチレイヤー（テンプレート）… ／ ArcGIS Web マップを開く…・ArcGIS Web マップとして保存… |
 
-サブメニューのあと（区切り線の下）に「イベント」「担当と個人設定…」「ドックのレイアウト」「ドックを初期位置に戻す」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
+サブメニューのあと（区切り線の下）に「イベント」「担当と個人設定…」「ドックのレイアウト」「ドックを初期位置に戻す」「接続と表の点検…」「設定…」を直接置く（設定ファイルの指定は「設定…」だけなので、すぐ届く所に）。並びは `plugin.py` の `MENU_GROUPS` で決まる。
 
 ## ドックの配置
 
@@ -69,6 +69,7 @@
 
 「画像カタログ」ドックで `imageCatalogs` の画像を検索する。範囲（既定は表示範囲。「範囲を描く」で地図に多角形を描いて「描いた範囲」も。クリックで頂点、ダブルクリックか右クリックで確定、Esc で取消）、「レイヤー」でベクターレイヤーを選ぶとその地物の形そのもの（外接矩形ではなく。ポリゴンは結合、ラインはライン、ポイントは複数点として。「選択地物のみ」も可）と重なる画像）、撮像日、「詳細条件」で登録日・システム登録日・センサー・角度の上限・方位角・SQL。
 
+- 分担（[`assignments`](#分担と引き継ぎメモassignmentshandover)）を設定していると、一覧の最後の列「分担」に画像ごとの状態: 「未着手」（誰も担当にしていない）・「作業中（名前）」「保留（名前）」・「完了（最後に完了にした人）」。検索の後と、ドックを表示している間は 1 分ごとに読み直す。検索ボタンの横の「未着手のみ」で、未着手の画像だけを一覧に出す（読み込み前の行も隠す）
 - 一覧は新しい順で、見出しのクリックで並べ替え（空の値は常に最後）。地図に全件のフットプリント（青）と選んだもの（橙、画像 ID 付き）。「地図で選択」を押すとフットプリントのクリックで選べる（Ctrl・Shift で追加）
 - 「開く」かダブルクリックでラスターレイヤーに。URL は `/vsicurl/`、ローカルパスは `pathMappings` に従う（`url` があればそれ、なければそのままのパス、だめなら初回にフォルダを選び記憶。「フォルダの対応を消去」で忘れる）。開けないときは理由を表示。「パスをコピー」で場所をクリップボードへ
 - 開いたレイヤーはカタログの属性をカスタムプロパティとメタデータに持つ（`satobs/imageId` は観測記録と計画の追跡が使う）
@@ -288,6 +289,25 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、ローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
 - 設定ファイルに `"localObservations": false` と書くとローカル GeoPackage を保存先にしない（選べるのは `observationStores` だけ。どれもなければ記録不可）。省略時は `true`
 
+### ほかの人の記録の読み直し（`refreshMinutes`）
+
+分担で画像ごとに担当が分かれていても、記録はモノ単位で画像をまたぐ（「継続」）。担当のない記録の修正・一括編集・完了後の見直しもあるため、Esri の保存先ではほかの人の記録を自動で読み直す。
+
+- 読み直すとき: 表示する画像を変えたとき（続けて切り替えても 30 秒に 1 回まで）、既存の記録をフォームで開いたとき、保存に失敗したとき、`observationStores[].refreshMinutes` を書いたときはその間隔（分。0.5〜1440）でも
+- 読むのは更新日時（`fields.updated`、既定 `UPDATED_AT`）が前回の読み込みの 10 分前以降の記録だけ（PC の時計のずれの分）。更新日時の属性がない、または削除で地物ごと消えるレイヤー（`softDelete: false`・削除日時なし）では全件を読み直す
+- 静かに読む（失敗しても表示しない。次の読み直しか「再読み込み」で再び）。変わったものがあれば「ほかの人の記録 n 件を反映」
+- フォームで開いている記録をほかの人が変えていたら: まだ何も入力していなければ最新の内容で開き直し、入力中ならメッセージで知らせる。そのまま「更新」しても相手の変更は上書きしない（保存せず「未保存の記録」に残る。閉じて開き直してから直す）
+
+### 未保存の記録（保存できなかった記録）
+
+通信やサインインの失敗、ほかの人の先の変更で保存できなかった記録は、この PC（`QgsSettings`。保存先ごと、最大 200 件）に残す。フォームに入力が戻らないとき（別のフォームを開いていた、ドックや QGIS を閉じた）も失われない。
+
+- 残っていればドックの状態の下に「未保存の記録 n 件…」（橙）。押すと一覧（保管日時・画像・モノ・内容・失敗の理由）
+- 「送り直す」: 選んだ記録（選ばなければすべて）を作ったときの内容で送る。新しい記録は最初の試みと同じ ID で送るので、応答だけが失われて実は保存されていた記録も 2 件にならない（更新になる）。記録の変更は、元にした記録をその後ほかの人が変えていれば送らない（理由を一覧に）
+- 「フォームで開く」（ダブルクリック）: その画像（開いておく）のフォームに入力を戻して開く。変更なら今の記録に対して直す。「記録」「更新」で保存すると一覧から消える
+- 「捨てる…」: 確認してから一覧から消す（保存先には送らない）
+- 保存に失敗してフォームに入力が戻ったときも一覧に入る。そのフォームで保存すれば一覧から消え、Esc で閉じても一覧には残る
+
 ### 活動（大分類ごとの切り替え）
 
 活動のボタン（1〜9）と入力候補は、フォームの種別の分類によって切り替わる。種別の分類から上へたどって最初に「活動」を持つ分類のもの（ふつうは大分類に設定）、どれも持たなければ既定の活動（`observationVocabulary.activities`、保存先ごとの `activities` が優先）。その分類以下の記録で使った活動も後ろに並ぶ。種別を別の大分類に切り替えたとき、入力済みの活動が新しい候補になければ空欄に戻す（既存の記録を開いたときはそのまま）。
@@ -457,6 +477,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 進捗: 担当にした後にその画像で付けた記録の件数（うち担当者の記録の件数）
 - 変更は変えた属性だけを書く（担当者の状態の変更とほかの人のメモが打ち消し合わない）。「ほかの人に渡す」は、読んだ後にほかの人が渡したり完了にしたりしていれば失敗する
 - 一覧は 1 分ごと（別の画像を表示したとき）と変更の後に読み直す
+- 「画像カタログ」ドックの一覧にも画像ごとの分担（未着手・作業中・保留・完了）が出て、「未着手のみ」で誰も手を付けていない画像に絞れる（[画像カタログ](#画像カタログ)）
 
 テーブル（`assignments`。URL か `{ "url", "fields", "where", "token", "claimOnRecord" }`。`claimOnRecord`（既定 `true`）は「クリック記録」の開始で担当を取るか。編集できる …/FeatureServer/n）の属性: `IMAGE_ID`（必須）・`IMAGE_NAME`・`IMAGE_TIME`（日付）・`ASSIGNEE`（必須）・`STATUS`（作業中・保留・完了）・`NOTE`・`TAKEN_AT`（日付）・`DONE_AT`（日付）。名前は `fields` で変更可（役割 `imageId`・`imageName`・`imageTime`・`assignee`・`status`・`note`・`takenAt`・`doneAt`）。
 
@@ -974,10 +995,20 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、担当とドックの開き方（最初の設定）、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 | 入力の初期値（前回の入力） | `QgsSettings`（`skywatch/last_inputs/…`） |
+| 未保存の記録（保存先ごと） | `QgsSettings`（`skywatch/observations/drafts/<保存先>`） |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可、ほかの項目は無視）。読む項目と書き方は[設定ファイルの書き方](#設定ファイルの書き方)。
 
 認証: ArcGIS のサービスごとに QGIS の認証設定（OAuth2・ESRI token・Basic など）を「設定…」の表で選ぶ。設定ファイルの `token` も使えるが、認証設定を選んだサービスでは送らない。トークンや認証情報はログ・CSV・レイヤー・プロジェクトファイルに残さない。
+
+## 接続と表の点検
+
+メニュー「接続と表の点検…」: 設定ファイルにある ArcGIS のサービス（レイヤー・テーブル、背景地図・サーバ処理などのサービス）に 1 回ずつ問い合わせ、作業が止まる前に問題を見つける。書き込みはしない（レイヤーの説明 `?f=json` を読むだけ）。
+
+- 見ること: 応答があるか、サインインが通るか（「設定…」の認証設定・`token`）、設定の `fields` の属性がレイヤーにあるか（大文字・小文字は区別しない）、プラグインが書き込むレイヤー（観測記録・確認範囲・分類テーブル・撮像計画・撮像依頼と出力履歴・分担・引き継ぎメモ・通報記録・イベント・検出結果の転記先）が編集できるか、書き込むレイヤーに作成者・更新者の属性（[`editTracking`](#作成者更新者の記録edittracking)）があるか
+- 結果は「問題」（その表が使えない: 応答なし・サインインできない・ID などの欠かせない属性がない・編集できない）、「注意」（一部の機能だけ働かない: そのほかの属性がない・追加のみ・作成者・更新者の属性がない）、「OK」。問題・注意の順に並ぶ
+- 「結果をコピー」で、設定ファイルの場所・日時・各サービスの URL と結果を文章でクリップボードへ（管理者に送る、問い合わせに貼る）。「もう一度点検」で読み直す
+- 設定ファイルに `baseMaps` がないときの既定の背景地図（インターネットのもの）は点検しない
 
 ## 設定ファイルの書き方
 
@@ -1071,7 +1102,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
+| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |

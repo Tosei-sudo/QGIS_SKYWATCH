@@ -230,3 +230,33 @@ def test_claim_on_record_setting():
     assert s.claim_on_record is False and s.fields["assignee"] == "WHO" and s.url.endswith("/0") and not problems
     assert assignment_source_of({"url": url, "claimOnRecord": "no"}, problems).claim_on_record is True
     assert problems == ["assignments.claimOnRecord は true か false で指定"]
+
+
+# ---- 画像カタログの「分担」列 ----------------------------------------------------------------------
+
+def test_the_work_state_of_each_image():
+    from skywatch.core.esri import EsriClient
+    from skywatch.core.obs.assignments import (
+        UNWORKED, Assignment, assignment_source_of, assignments_of_images, take, with_status, update, work_state, work_text,
+    )
+    from skywatch.tests.fake_esri import FakeEsri, FakeLayer
+
+    url = "https://x/arcgis/rest/services/Work/FeatureServer/0"
+    s, d = "esriFieldTypeString", "esriFieldTypeDate"
+    fake = FakeEsri()
+    fake.add_layer(url, FakeLayer({"IMAGE_ID": s, "IMAGE_NAME": s, "IMAGE_TIME": d, "ASSIGNEE": s, "STATUS": s, "NOTE": s,
+                                   "TAKEN_AT": d, "DONE_AT": d}, ""))
+    source = assignment_source_of(url, [])
+    client = EsriClient(fake)
+    take(client, source, "A", "田中", 1000)
+    b = take(client, source, "B", "鈴木", 1000)
+    update(client, source, with_status(b, "完了", 2000), b)
+    take(client, source, "B", "佐藤", 3000)  # a second look
+    c = take(client, source, "C", "鈴木", 1000)
+    update(client, source, with_status(c, "完了", 2000), c)
+    rows = assignments_of_images(client, source, ["A", "B", "C", "D", "A"], chunk=2)
+    assert sorted(rows) == ["A", "B", "C"]
+    states = {i: work_state(rows.get(i, [])) for i in "ABCD"}
+    assert states == {"A": ("作業中", "田中"), "B": ("作業中", "佐藤"), "C": ("完了", "鈴木"), "D": (UNWORKED, "")}
+    assert [work_text(states[i]) for i in "ACD"] == ["作業中（田中）", "完了（鈴木）", "未着手"]
+    assert work_state([]) == (UNWORKED, "") and isinstance(rows["A"][0], Assignment)

@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
-from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
@@ -172,6 +172,11 @@ class ObservationDock(PluginDock):
         self.class_filter: Optional[list[str]] = None
         #: The form's place and what it is about: (lon, lat, the record changed, the thing carried over).
         self.pending: Optional[tuple] = None
+        #: What the form said when opened (to tell whether anything was typed since).
+        self._filled: Optional[FormValues] = None
+        #: The kept record (保存できなかった記録) the form is open on again, '' for none.
+        self._draft_id = ""
+        self._drafts_dialog = None
         self.offered: list[MatchCandidate] = []
         self.active = False
         self.points = settings.point_count_setting()
@@ -206,6 +211,11 @@ class ObservationDock(PluginDock):
         context.configChanged.connect(self.reset_stores)
         context.configChanged.connect(self.assignment_bar.reset)
         self.visibilityChanged.connect(self._visibility)
+        # Others' records read quietly (another image, after a conflict, and every `refreshMinutes`).
+        self._refreshing = False
+        self._refreshed_at = 0.0
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(lambda: self.refresh(force=True))
         self.reset_stores()
         self.assignment_bar.reset()
 
@@ -435,6 +445,13 @@ class ObservationDock(PluginDock):
         self.status = QLabel()
         self.status.setWordWrap(True)
         b.addWidget(self.status)
+        # 保存できなかった記録 (kept on this computer, core/obs/drafts.py): sent again, opened, or thrown away.
+        self.drafts_button = QPushButton()
+        self.drafts_button.setStyleSheet("QPushButton { color: #b45309; font-weight: bold; }")
+        self.drafts_button.setToolTip(tr("保存できなかった記録（この PC に保管中）。送り直す・フォームで開く・捨てる"))
+        self.drafts_button.clicked.connect(lambda _on=False: self.open_drafts())
+        self.drafts_button.hide()
+        b.addWidget(self.drafts_button)
 
         # The lists.
         self.tabs = QTabBar()
@@ -706,6 +723,10 @@ class ObservationDock(PluginDock):
         self.store_set = self.sets[index]
         self._observer_cache = self._observer()
         self.book = self._book_of(self.store_set)
+        minutes = self.store_set.config.refresh_minutes if self.store_set.config is not None else None
+        self._refresh_timer.stop()
+        if minutes:
+            self._refresh_timer.start(int(minutes * 60 * 1000))
         self.refresh_images()
         if not self.book.loaded:
             self.reload()
@@ -927,6 +948,53 @@ class ObservationDock(PluginDock):
         """Reads the records again from the store (and which are reported)."""
         self.do(self.tr("観測記録の読み込み"), lambda b: b.reload(), after=lambda _r: self.refresh_reported())
 
+    #: The least time between two quiet reads on another image (s): flipping through images asks once.
+    REFRESH_GAP = 30
+
+    def refresh(self, force: bool = False) -> None:
+        """
+        Reads quietly what others saved since the last read (an Esri store;
+        only the records with a newer 更新日時 when the layer has one). Asked
+        on another image (at most every REFRESH_GAP s), after a save that
+        found someone else's change, when a record is opened to change, and
+        every `refreshMinutes`. A record open in the form that someone else
+        changed meanwhile is filled again when nothing was typed yet, else
+        told.
+        """
+        book, s = self.book, self.store_set
+        if book is None or s is None or not s.remote or not book.loaded or self._refreshing:
+            return
+        if not force and time.monotonic() - self._refreshed_at < self.REFRESH_GAP:
+            return
+        self._refreshing = True
+        self._refreshed_at = time.monotonic()
+
+        def done(said) -> None:
+            self._refreshing = False
+            if said and self.book is book:
+                self._editing_changed()
+
+        def failed(_message: str) -> None:
+            self._refreshing = False
+
+        self.do(self.tr("ほかの人の記録の読み込み"), lambda b: b.refresh(), after=done, failed=failed)
+
+    def _editing_changed(self) -> None:
+        """The record open in the form, if someone else changed it: filled again (nothing typed yet) or told."""
+        if self.pending is None or self.pending[2] is None or self.book is None:
+            return
+        editing = self.pending[2]
+        now = self.book.record(editing.id)
+        if now is None or now == editing:
+            return
+        who = now.updated_by or now.recorded_by or self.tr("ほかの人")
+        if self._filled is not None and self.form_values() == self._filled:
+            self.open_form(now.lon, now.lat, editing=now)
+            self.iface.messageBar().pushInfo(self.tr("観測記録"), self.tr("開いている記録を {who} さんが更新したので、最新の内容にしました").format(who=who))
+        else:
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr(
+                "開いている記録を {who} さんが更新しました。このまま「更新」しても上書きはしません（Esc で閉じて開き直すと最新の内容）").format(who=who))
+
     def refresh_reported(self) -> None:
         """
         Reads which records are in the 通報 log table (in a task; none
@@ -1008,6 +1076,7 @@ class ObservationDock(PluginDock):
                     self._following = False
         self._apply_only()
         self.render()
+        self.refresh()
 
     def toggle_recording(self) -> None:
         """Starts recording, or ends it (「記録」 pressed)."""
@@ -1397,6 +1466,7 @@ class ObservationDock(PluginDock):
         if self.book is None:
             return
         self.pending = (lon, lat, editing, source)
+        self._draft_id = ""
         known = editing or source
         length = measured[0] if measured else (known.length if known else None)
         heading = measured[1] if measured else (known.heading if known else None)
@@ -1431,6 +1501,9 @@ class ObservationDock(PluginDock):
         # A new thing gets its name typed; a known one is saved with Enter (or 1–9 picks its activity first).
         self.raise_()
         (self.submit_button if known else self.object_input).setFocus()
+        self._filled = self.form_values()
+        if editing is not None:
+            self.refresh(force=True)
 
     def close_form(self) -> None:
         if self.pending is None and not self.form.isVisible():
@@ -1453,6 +1526,7 @@ class ObservationDock(PluginDock):
             return
         lon, lat, editing, source = self.pending
         values = self.form_values()
+        draft = self._draft_id
         # Offered first by the next new record, in later sessions too.
         self.book.remember(values.kind, values.activity if present else None, values.confidence)
         self.close_form()
@@ -1460,9 +1534,11 @@ class ObservationDock(PluginDock):
         def lost(message: str) -> None:
             # Not saved (the network, the token, a conflict): the form comes back as it was typed.
             self.restore_form(lon, lat, editing, source, values)
-            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr("記録を保存できませんでした（入力は残しています）: {m}").format(m=message))
+            self.refresh(force=True)
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), self.tr(
+                "記録を保存できませんでした（「未保存の記録」に保管しました）: {m}").format(m=message))
 
-        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source),
+        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None),
                 lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)
 
     def restore_form(self, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation], values: FormValues) -> None:
@@ -1470,6 +1546,7 @@ class ObservationDock(PluginDock):
         if self.book is None or self.pending is not None:
             return
         self.open_form(lon, lat, editing=editing, source=source)
+        self._draft_id = self.book.last_draft_id
         self.object_input.setText(values.object)
         self.kind_input.setText(values.kind)
         self.activity_input.setText(values.activity)
@@ -2301,8 +2378,91 @@ class ObservationDock(PluginDock):
             lay.addWidget(b)
         return box
 
+    # ---- 保存できなかった記録 -------------------------------------------------------
+
+    def _render_drafts(self) -> None:
+        n = len(self.book.drafts()) if self.book is not None else 0
+        self.drafts_button.setText(self.tr("未保存の記録 {n} 件…").format(n=n))
+        self.drafts_button.setVisible(n > 0)
+        if self._drafts_dialog is not None and self._drafts_dialog.isVisible():
+            self._drafts_dialog.render()
+
+    def open_drafts(self):
+        """The list of records not saved (kept here): send again, open in the form, throw away."""
+        from .drafts_dialog import DraftsDialog
+
+        if self.book is None:
+            return None
+        if self._drafts_dialog is None:
+            self._drafts_dialog = DraftsDialog(self, self)
+        self._drafts_dialog.render()
+        self._drafts_dialog.show()
+        self._drafts_dialog.raise_()
+        return self._drafts_dialog
+
+    def send_drafts(self, ids: list[str]) -> Any:
+        """Sends the kept records again (in a task for an Esri store), one by one."""
+        if not ids:
+            return None
+
+        def work(book):
+            sent = [book.send_draft(i) for i in ids]
+            ok = sum(1 for x in sent if x is not None)
+            left = len(ids) - ok
+            if len(ids) > 1:
+                book._say(f"未保存の記録 {ok} 件を送信" + (f"、{left} 件は送れず（理由は一覧に）" if left else ""))
+            return ok
+
+        return self.do(self.tr("未保存の記録の送信"), work, watch=True)
+
+    def open_draft(self, draft_id: str) -> bool:
+        """
+        A kept record opened in the form again, on its image (which must be
+        open): a change on the record as it is now, with what was typed.
+        """
+        book = self.book
+        d = book.draft(draft_id) if book else None
+        if d is None:
+            return False
+        entry = next((e for e in book.images if e.id == d.record.image_id), None)
+        if entry is None:
+            self._say(self.tr("画像（{n}）を開いてからフォームで開いてください").format(n=d.record.image_name or d.record.image_id))
+            return False
+        if entry is not book.current:
+            book.current = entry
+            self._went()
+        editing = book.record(d.editing_id) if d.editing else None
+        if d.editing and editing is None:
+            self._say(self.tr("{n}: 元の記録が見つかりません（削除されたか、読み込み前）").format(n=d.record.object_name))
+            return False
+        source = book.record(d.source_id) if d.source_id else None
+        r = d.record
+        self.open_form(r.lon, r.lat, editing=editing, source=source)
+        v = d.values
+        self.object_input.setText(v.get("object", ""))
+        self.kind_input.setText(v.get("kind", ""))
+        self.activity_input.setText(v.get("activity", ""))
+        self.note_input.setText(v.get("note", ""))
+        self._fill_confidence(v.get("confidence", ""))
+        for edit, key in ((self.length_input, "length"), (self.heading_input, "heading"), (self.width_input, "width")):
+            edit.setText(v.get(key, ""))
+            if v.get(key):
+                edit.setVisible(True)
+        self._draft_id = d.id
+        self._filled = None  # typed (not what the record says): never filled again by a refresh
+        self._center(r)
+        return True
+
+    def drop_drafts(self, ids: list[str]) -> int:
+        n = sum(1 for i in ids if self.book is not None and self.book.drop_draft(i))
+        if self._draft_id in ids:
+            self._draft_id = ""
+        self._render_drafts()
+        return n
+
     def render(self) -> None:
         """Shows the book as it is now."""
+        self._render_drafts()
         book = self.book
         image = book.current if book else None
         # The images.

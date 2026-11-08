@@ -74,7 +74,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -565,6 +565,11 @@ class SkywatchPlugin:
         setup.triggered.connect(lambda: self.open_first_setup())
         self._add_to_menu(setup)
         self.actions.append(setup)
+        # 「接続と表の点検」: every ArcGIS service of the settings file asked once (ui/health_dialog.py).
+        health = QAction(icon("health_check"), tr("接続と表の点検…"), self.iface.mainWindow())
+        health.triggered.connect(lambda: self.open_health_check())
+        self._add_to_menu(health)
+        self.actions.append(health)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self._add_to_menu(settings)
@@ -589,6 +594,19 @@ class SkywatchPlugin:
         except (TypeError, RuntimeError):
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_health_check(self):
+        """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
+        from .ui.health_dialog import HealthDialog
+
+        if self.context is None:
+            return None
+        if getattr(self, "health_dialog", None) is None:
+            self.health_dialog = HealthDialog(self.context, self.iface.mainWindow())
+        self.health_dialog.show()
+        self.health_dialog.raise_()
+        self.health_dialog.run()
+        return self.health_dialog
 
     def open_first_setup(self, first: bool = False) -> Optional[first_setup.FirstSetupDialog]:
         """「最初の設定」 (first) or 「担当と個人設定」: the page, open beside the main window (not blocking it)."""
@@ -1072,6 +1090,10 @@ class SkywatchPlugin:
             self.setup_dialog.close()
             self.setup_dialog.deleteLater()
             self.setup_dialog = None
+        if getattr(self, "health_dialog", None) is not None:
+            self.health_dialog.close()
+            self.health_dialog.deleteLater()
+            self.health_dialog = None
         if getattr(self, "dock_layouts", None) is not None:
             self.dock_layouts.deleteLater()
             self.dock_layouts = None

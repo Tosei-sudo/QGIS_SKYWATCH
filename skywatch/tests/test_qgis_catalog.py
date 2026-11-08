@@ -502,3 +502,41 @@ def test_a_long_look_in_a_folder_keeps_qgis_answering_and_can_be_cancelled(tmp_p
     with pytest.raises(Cancelled):
         scan_folder(str(tmp_path), ["x"], find=slow, wait_before_dialog=0.01)
     release.set()
+
+
+def test_the_list_says_who_works_each_image_and_shows_the_unworked_only(plugin, tmp_path):
+    """分担 column (`assignments`): 未着手 / 作業中（名前） / 完了, and 「未着手のみ」."""
+    from skywatch.core.obs.assignments import assignment_source_of, take
+
+    p, iface, folder, fake, _ = plugin
+    work_url = "https://x/arcgis/rest/services/Work/FeatureServer/0"
+    s, d = "esriFieldTypeString", "esriFieldTypeDate"
+    fake.add_layer(work_url, FakeLayer({"IMAGE_ID": s, "IMAGE_NAME": s, "IMAGE_TIME": d, "ASSIGNEE": s, "STATUS": s, "NOTE": s,
+                                        "TAKEN_AT": d, "DONE_AT": d}, ""))
+    take(EsriClient(fake), assignment_source_of(work_url, []), "B", "鈴木", 1000)
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["assignments"] = work_url
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    dock = p.api.image_catalog
+    searched(dock)
+    headings = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
+    assert headings[:2] == ["画像ID", "分担"]
+    column = 1
+    assert wait_for(lambda: dock.model.index(0, column).data() != "…")
+    cells = {r.id: dock.model.index(i, column).data() for i, r in enumerate(dock.records)}
+    assert cells == {"A": "未着手", "B": "作業中（鈴木）", "C": "未着手"}
+    assert dock.unworked_only.isVisibleTo(dock)
+    dock.unworked_only.setChecked(True)
+    hidden = {r.id for i, r in enumerate(dock.records) if dock.table.isRowHidden(i)}
+    assert hidden == {"B"}
+    # Sorting keeps the filter on the right rows.
+    dock.table.sortByColumn(3, Qt.SortOrder.DescendingOrder)
+    assert {r.id for i, r in enumerate(dock.records) if dock.table.isRowHidden(i)} == {"B"}
+    # Someone takes A: read again (every minute; asked here).
+    take(EsriClient(fake), assignment_source_of(work_url, []), "A", "田中", 2000)
+    dock.load_work()
+    assert wait_for(lambda: {r.id for i, r in enumerate(dock.records) if dock.table.isRowHidden(i)} == {"A", "B"})
+    dock.unworked_only.setChecked(False)
+    assert not any(dock.table.isRowHidden(i) for i in range(len(dock.records)))

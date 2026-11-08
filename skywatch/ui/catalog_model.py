@@ -11,9 +11,13 @@ from qgis.PyQt.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.search import CatalogRecord, Column, cell_text, list_columns, place_text, sort_records
+from ..core.obs.assignments import work_text
 
 PLACE = Column("place", "場所")
 OVERLAP = Column("overlap", "重なり")
+WORK = Column("work", "分担")
+#: The 分担 cell before the table has been read.
+WORK_UNKNOWN = "…"
 
 
 class CatalogModel(QAbstractTableModel):
@@ -23,11 +27,16 @@ class CatalogModel(QAbstractTableModel):
         self.records: list[CatalogRecord] = []
         #: The share of the image compared with each record covers (「類似画像の検索」 only), by id(record).
         self.overlaps: Optional[dict[int, Optional[float]]] = None
+        #: 分担 of each image by its id ((状態, 担当者); `assignments` only, else None: no column). Images not in it are not read yet.
+        self.work: Optional[dict[str, tuple[str, str]]] = None
 
     def set_records(self, catalog: Optional[CatalogConfig], records: Sequence[CatalogRecord],
-                    overlaps: Optional[dict[int, Optional[float]]] = None) -> None:
+                    overlaps: Optional[dict[int, Optional[float]]] = None, work: bool = False) -> None:
         self.beginResetModel()
-        self.columns = (list_columns(catalog) if catalog else []) + [PLACE] + ([OVERLAP] if overlaps is not None else [])
+        columns = (list_columns(catalog) if catalog else []) + [PLACE] + ([OVERLAP] if overlaps is not None else [])
+        # 分担 next to the image's id (seen without scrolling sideways).
+        self.columns = columns[:1] + [WORK] + columns[1:] if work else columns
+        self.work = {} if work else None
         self.records = list(records)
         self.overlaps = overlaps
         self.endResetModel()
@@ -44,7 +53,23 @@ class CatalogModel(QAbstractTableModel):
         if key == "overlap":
             v = (self.overlaps or {}).get(id(record))
             return "" if v is None else f"{round(v * 100)}%"
+        if key == "work":
+            state = (self.work or {}).get(record.id)
+            return work_text(state) if state else WORK_UNKNOWN
         return cell_text(record, key)
+
+    def work_state(self, record: CatalogRecord) -> Optional[tuple[str, str]]:
+        """(状態, 担当者) of a record's image; None before it was read (or without `assignments`)."""
+        return (self.work or {}).get(record.id) if self.work is not None else None
+
+    def set_work(self, work: dict[str, tuple[str, str]]) -> None:
+        """The 分担 read for the listed images."""
+        if self.work is None:
+            return
+        self.work = dict(work)
+        column = next((i for i, c in enumerate(self.columns) if c.key == "work"), -1)
+        if column >= 0 and self.records:
+            self.dataChanged.emit(self.index(0, column), self.index(len(self.records) - 1, column))
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
@@ -70,8 +95,11 @@ class CatalogModel(QAbstractTableModel):
         key = self.columns[column].key
         descending = order == Qt.SortOrder.DescendingOrder
         self.layoutAboutToBeChanged.emit()
-        if key in ("place", "overlap"):
+        if key in ("place", "overlap", "work"):
             def value(r: CatalogRecord):
+                if key == "work":
+                    state = (self.work or {}).get(r.id)
+                    return work_text(state) if state else None
                 return (self.overlaps or {}).get(id(r)) if key == "overlap" else (r.source.kind if r.source else None)
             present = sorted((r for r in self.records if value(r) is not None), key=value, reverse=descending)
             self.records = present + [r for r in self.records if value(r) is None]

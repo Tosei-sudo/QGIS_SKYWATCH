@@ -144,6 +144,8 @@ class ObservationStoreConfig:
     taxonomy: Optional[list[Taxon]] = None
     taxonomy_table: Optional[TaxonomyTableConfig] = None
     authcfg: Optional[str] = None
+    #: Minutes between quiet reads of others' records (`refreshMinutes`); None: only on another image, after a conflict and 「再読み込み」.
+    refresh_minutes: Optional[float] = None
 
 
 _COLOR = re.compile(r"^(#[0-9a-f]{3,8}|[a-z]+|(rgb|hsl)a?\([\d\s.,%]+\))$", re.IGNORECASE)
@@ -205,6 +207,10 @@ def observation_store_of(value: Any, problems: list[str], index: int) -> Optiona
                 problems.append(f"{at} の fields.{key} は属性名で指定")
     label, token, where = value.get("label"), value.get("token"), value.get("where")
     activities = words(value.get("activities"))
+    refresh = value.get("refreshMinutes")
+    if refresh is not None and not (is_number(refresh) and 0.5 <= refresh <= 1440):
+        problems.append(f"{at} の refreshMinutes は 0.5〜1440 の数で指定")
+        refresh = None
     return ObservationStoreConfig(
         label=label if isinstance(label, str) and label else f"観測の保存先 {index + 1}",
         url=layer_url(url),
@@ -218,6 +224,7 @@ def observation_store_of(value: Any, problems: list[str], index: int) -> Optiona
         areas=areas,
         taxonomy=classes or None,
         taxonomy_table=table,
+        refresh_minutes=float(refresh) if refresh is not None else None,
     )
 
 

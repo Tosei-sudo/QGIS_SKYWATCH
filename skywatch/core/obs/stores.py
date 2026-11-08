@@ -353,6 +353,24 @@ class EsriObservationStore:
         features = self.client.query_all(self.config.url, self.config.where or "1=1", self.token, limit=200_000)
         return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
 
+    def load_changed(self, since: float) -> Optional[list[Observation]]:
+        """
+        The records saved at or after `since` (ms; the 更新日時 field), to be
+        merged into those read before; None when the layer has no 更新日時
+        or deletes for good (a removed feature cannot be seen this way): read
+        everything then.
+        """
+        from ..catalog.watch import since_condition
+
+        types, oid = self._layer.ready()
+        updated = self.config.fields["updated"]
+        if updated not in types or self.removes_for_good():
+            return None
+        changed = since_condition(updated, types.get(updated), since)
+        where = f"({self.config.where}) AND {changed}" if self.config.where else changed
+        features = self.client.query_all(self.config.url, where, self.token, limit=200_000)
+        return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
+
     def _check(self, records: list[Observation], types: dict[str, str], oid: str) -> list[str]:
         """
         Asks the layer about the records before saving: those already there
