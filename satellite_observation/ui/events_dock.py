@@ -35,8 +35,8 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog.search import record_of
 from ..core.esri import quote
 from ..core.events import (
-    CLOSED, OPEN, STATUSES, SUGGESTED_KINDS, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,
-    export_csv, load_events, load_links, matches, new_event, remove_links, save_event, set_link_note, set_status, summary_text,
+    CLOSED, LISTED, OPEN, STATUSES, SUGGESTED_KINDS, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,
+    export_csv, is_url, load_events, load_links, matches, new_event, remove_links, save_event, set_link_note, set_status, summary_text,
 )
 from ..qgis_io.catalog_io import Cancelled, PathError, add_record_layers, footprint, layer_area, open_record
 from ..qgis_io.geometry import from_wgs84, to_wgs84
@@ -666,10 +666,83 @@ class EventsDock(PluginDock):
         catalogs = self.context.config.image_catalogs
         return next((c for c in catalogs if _same_url(c.url, source)), None) or next((c for c in catalogs if c.label == source), None)
 
+    def is_local(self, x: EventLink) -> bool:
+        """An image link not of a catalog: opened by hand (its path) or listed without its file."""
+        return x.type == "image" and self._catalog_for(x.source) is None and not is_url(x.source)
+
+    def _known_images(self) -> dict:
+        """The images the plugin knows without a catalog, by id: the project's raster layers and the images listed in 「観測記録」."""
+        from ..qgis_io.obs_images import open_images
+
+        dock = self._observation_dock()
+        book = dock.book if dock else None
+        out = {i.id: i for i in (book.images if book else []) if not i.file}
+        try:
+            out.update({i.id: i for i in open_images()})
+        except Exception:  # noqa: BLE001 (a layer that cannot be read is left out)
+            pass
+        return out
+
+    def _open_local(self, links: Sequence[EventLink]) -> list[str]:
+        """Opens image links not of a catalog: the layer already open is shown, else the file is opened; what could not be."""
+        import os
+
+        from qgis.core import QgsRasterLayer
+
+        from ..qgis_io.obs_images import image_layer, observed_image, set_manual_time
+
+        project = QgsProject.instance()
+        known = self._known_images()
+        problems: list[str] = []
+        shown = []
+        for x in links:
+            image = known.get(x.item_id)
+            layer = project.mapLayer(image.layer_id) if image and image.layer_id else None
+            if layer is None and x.source not in ("", LISTED) and os.path.isfile(x.source):
+                layer = image_layer(x.source, os.path.basename(x.source), image_id=x.item_id)
+                if not layer.isValid():
+                    problems.append(self.tr("開けない画像: {p}").format(p=x.source))
+                    continue
+                if x.time is not None and observed_image(layer).time is None:
+                    set_manual_time(layer, x.time)
+                project.addMapLayer(layer)
+                overview_queue.request([layer], self.context.config.overviews, self.iface.messageBar())
+            if isinstance(layer, QgsRasterLayer):
+                shown.append(layer)
+            elif image is not None and not image.file:
+                problems.append(self.tr("{n} はファイルなしの画像（「観測記録」で選択）").format(n=x.label or x.item_id))
+            else:
+                problems.append(self.tr("ファイルが見つからない画像: {n}").format(n=x.source if x.source not in ("", LISTED) else x.label or x.item_id))
+        if shown:
+            self.iface.setActiveLayer(shown[-1])
+            box: Optional[QgsRectangle] = None
+            for layer in shown:
+                b = self._wgs84_box(layer)
+                if b is None:
+                    continue
+                if box is None:
+                    box = QgsRectangle(b)
+                else:
+                    box.combineExtentWith(b)
+            if box is not None:
+                self._fit(box)
+        return problems
+
+    @staticmethod
+    def _wgs84_box(layer) -> Optional[QgsRectangle]:
+        try:
+            return to_wgs84(layer.crs()).transformBoundingBox(layer.extent())
+        except Exception:  # noqa: BLE001
+            return None
+
     def _fetch_images(self, links: Sequence[EventLink], done: Callable[[list], None]) -> None:
         """The catalog records of image links (in a task): [(catalog, [records])], and why some are missing."""
         groups: dict[int, tuple] = {}
         missing: list[str] = []
+        links = [x for x in links if not self.is_local(x)]
+        if not links:
+            done([])
+            return
         for x in links:
             c = self._catalog_for(x.source)
             if c is None:
@@ -706,7 +779,14 @@ class EventsDock(PluginDock):
         if not links:
             return
         if type_ == "image":
-            self._fetch_images(links, self._open_images)
+            local = [x for x in links if self.is_local(x)]
+            problems = self._open_local(local) if local else []
+            if problems:
+                self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
+            if len(local) < len(links):
+                self._fetch_images(links, self._open_images)
+            elif len(local) > len(problems):
+                self.say(self.tr("画像 {n} 枚を表示").format(n=len(local) - len(problems)))
         elif type_ == "observation":
             self._open_observations(links)
         else:
@@ -736,8 +816,9 @@ class EventsDock(PluginDock):
         self.say(self.tr("画像 {n} 枚を開いた").format(n=opened) if opened else self.status.text())
 
     def show_in_catalog(self) -> None:
-        links = self.links_of(self.chosen(), "image")
+        links = [x for x in self.links_of(self.chosen(), "image") if not self.is_local(x)]
         if not links:
+            self.say(self.tr("カタログの画像なし（カタログ外・ファイルなしの画像のみ）"))
             return
 
         def done(result) -> None:
@@ -854,17 +935,25 @@ class EventsDock(PluginDock):
             area.renderer().symbol().setOpacity(0.35)
             add(area)
             grow(g.boundingBox())
-        footprints = [(r, footprint(r.geometry)) for _c, rs in image_result for r in rs]
-        footprints = [(r, fg) for r, fg in footprints if fg is not None]
+        footprints = [(r.id, r.sensor, footprint(r.geometry)) for _c, rs in image_result for r in rs]
+        known = self._known_images()
+        for x in self.links_of(e, "image"):
+            image = known.get(x.item_id) if self.is_local(x) else None
+            if image is not None and image.box:
+                w, s_, east, n = image.box
+                fg = QgsGeometry.fromRect(QgsRectangle(w, s_, east, n))
+                fg.convertToMultiType()
+                footprints.append((x.item_id, self.tr("カタログ外"), fg))
+        footprints = [(i, sensor, fg) for i, sensor, fg in footprints if fg is not None]
         if footprints:
             layer = QgsVectorLayer("MultiPolygon?crs=EPSG:4326", self.tr("画像の範囲"), "memory")
             layer.dataProvider().addAttributes([make_field("image_id", "string"), make_field("sensor", "string")])
             layer.updateFields()
             feats = []
-            for r, fg in footprints:
+            for image_id, sensor, fg in footprints:
                 f = QgsFeature(layer.fields())
                 f.setGeometry(fg)
-                f.setAttributes([r.id, r.sensor])
+                f.setAttributes([image_id, sensor])
                 feats.append(f)
                 grow(fg.boundingBox())
             layer.dataProvider().addFeatures(feats)

@@ -247,3 +247,62 @@ def test_a_failed_save_keeps_the_form_and_a_reload_asked_meanwhile_is_not_lost(p
     dock.reload()
     dock.reload()
     assert wait_for(lambda: dock.task is None and any(e.name == "外で作成" for e in dock.events or []))
+
+
+def test_images_outside_the_catalog_go_into_events(plugin, monkeypatch):
+    """An image opened by hand (by its path) and one listed without its file (「⚑」 of 観測記録), opened and shown from the event."""
+    from qgis.core import QgsRasterLayer
+
+    from satellite_observation.core.events import LISTED
+
+    p, iface, events, links, tmp_path = plugin
+    dock = p.api.events
+    dock.show()
+    assert wait_for(lambda: dock.events == [] and dock.task is None)
+    quake = new_event("〇〇沖地震")
+    saved(dock, quake)
+    path = geotiff(tmp_path / "hand.tif", "2026-10-01T01:00:00Z")
+    layer = QgsRasterLayer(path, "hand")
+    QgsProject.instance().addMapLayers([layer])
+    iface.canvas.setDestinationCrs(layer.crs())
+    iface.canvas.setLayers([layer])
+    obs = p.api.observation_dock
+    obs.show()
+    obs.render()
+    assert obs.image_event_button.isVisibleTo(obs)
+    [item] = obs.image_event_items()
+    assert (item.type, item.item_id, item.source) == ("image", "hand.tif", path) and item.time is not None
+    menu = obs.add_image_to_event()
+    assert isinstance(menu, QMenu)
+    menu.actions()[0].trigger()
+    menu.close()
+    assert wait_for(lambda: len(links.rows) == 1 and dock.task is None)
+    # Listed without its file: its source says so.
+    obs.book.list_image("EXT-001", "外部 1", None, [140.0, 37.0, 140.1, 37.1])
+    [listed] = obs.image_event_items()
+    assert (listed.item_id, listed.label, listed.source) == ("EXT-001", "外部 1", LISTED)
+    dock.link_items([quake.id], [listed])
+    assert wait_for(lambda: len(links.rows) == 2 and dock.task is None)
+    assert {r["attributes"]["SOURCE"] for r in links.rows} == {path, LISTED}
+
+    # 地図に表示: both footprints, without asking a catalog (none says it misses them).
+    dock.choose(quake.id)
+    dock.show_on_map()
+    assert wait_for(lambda: QgsProject.instance().layerTreeRoot().findGroup("イベント: 〇〇沖地震") is not None)
+    footprints = next(l for l in QgsProject.instance().mapLayers().values() if l.name() == "画像の範囲")
+    assert sorted(f["image_id"] for f in footprints.getFeatures()) == ["EXT-001", "hand.tif"]
+    assert "カタログに見つからない" not in dock.status.text()
+
+    # 開く: the image file opens again once its layer is gone; the listed one says where to choose it.
+    QgsProject.instance().removeMapLayer(layer.id())
+    warnings = []
+    monkeypatch.setattr(iface.messageBar(), "pushWarning", lambda title, text, *a: warnings.append(text), raising=False)
+    dock.open_items("image", dock.links_of(dock.chosen(), "image"))
+    opened = [l for l in QgsProject.instance().mapLayers().values() if isinstance(l, QgsRasterLayer)]
+    assert [l.name() for l in opened] == ["hand.tif"] and iface.activeLayer() is opened[0]
+    assert any("ファイルなしの画像" in w for w in warnings)
+    # Opened again: the open layer is shown, not a second one.
+    dock.open_items("image", [x for x in dock.links_of(dock.chosen(), "image") if x.source == path])
+    assert len([l for l in QgsProject.instance().mapLayers().values() if isinstance(l, QgsRasterLayer)]) == 1
+    dock.show_in_catalog()
+    assert "カタログの画像なし" in dock.status.text()
