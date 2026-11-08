@@ -195,7 +195,8 @@ class ObservationDock(PluginDock):
         self.overlay = ObservationOverlay(self.canvas)
         self.overlay.hide()
         self.tool = ObservationTool(self.canvas, self.overlay, self.map_clicked, self.map_hovered, self.map_dragged,
-                                    lambda: self.active and not self.area_mode and not self.rear, self.escape)
+                                    lambda: self.active and not self.area_mode and not self.rear, self.escape,
+                                    self.map_entered)
         self.tool.deactivated.connect(self._tool_gone)
         self.canvas.extentsChanged.connect(self._extent_changed)
         project = QgsProject.instance()
@@ -1719,6 +1720,16 @@ class ObservationDock(PluginDock):
             self.submit(True)
         elif self.area_form.isVisible():
             self._submit_area()
+
+    def map_entered(self) -> bool:
+        """Enter with the map focused (the dock's keys are not active then): the open form or area saved."""
+        if self.form.isVisible() and self.pending is not None:
+            self.submit(True)
+            return True
+        if self.area_mode and self.area_form.isVisible():
+            self._submit_area()
+            return True
+        return False
 
     def _candidate_key(self, n: int) -> None:
         if self.form.isVisible() and 0 < n <= len(self.offered):
