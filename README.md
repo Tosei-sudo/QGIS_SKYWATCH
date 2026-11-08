@@ -304,15 +304,16 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`AREA`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
 - ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。記録が入っているジオフェンスの名前は項目 `area`
+- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略）。地名は 10 分間覚えておき（保存時のお知らせ・手動の追加）、「抽出」では毎回読み直す
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
-- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
+- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`／`name`・`kind`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
 
 **フォーマット**（`formats`。名前を付けて複数）:
 
 | キー | 中身 | 既定 |
 | --- | --- | --- |
 | `name` | フォーマットの名前（必須。通報テーブルの `REPORT_NAME`） | — |
-| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "digits", "level", "map", "empty" }`、固定の文字は `{ "text": "…" }` | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
+| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty" }`、固定の文字は `{ "text": "…" }`。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く） | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
 | `delimiter` | 区切り文字（タブは `"\t"`） | `\|` |
 | `escape` | 値の中の区切り文字・改行の置き換え | 空白 |
 | `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}` | なし |
@@ -323,7 +324,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}` | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）。
 
 **重要度スコア**（`score`。書かなければ既定の重みで付ける）:
 
@@ -340,13 +341,14 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   "rules": "https://…/Alerts/FeatureServer/0",
   "geofences": "https://…/Alerts/FeatureServer/1",
   "table": "https://…/Alerts/FeatureServer/2",
+  "namedAreas": "https://…/Alerts/FeatureServer/3",
   "minConfidence": "推定",
   "score": { "weights": { "confidence": 1, "area": 2, "rule": 1, "rarity": 1 }, "rarity": { "days": 14, "radiusKm": 30, "level": 1 } },
   "default": "速報",
   "formats": [
     { "name": "速報", "delimiter": "|", "dateFormat": "%m/%d %H:%M",
       "fields": ["imageTime", { "source": "kind", "level": 1 }, "objectName", "activity",
-                 { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
+                 { "source": "place", "omitEmpty": true }, { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
       "header": "【注目】{date} {count}件", "footer": "以上" },
     { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
       "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
@@ -937,7 +939,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
-| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token" }` | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }` | なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |

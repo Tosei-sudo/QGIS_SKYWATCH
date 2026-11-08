@@ -246,3 +246,38 @@ def test_reported_records_are_highlighted_in_the_table_and_on_the_map(plugin):
     dialog.remove_log(confirm=False)
     assert wait_for(lambda: dock.reported == {b.id})
     assert colored() == {"船A": False, "船B": True}
+
+
+def test_place_names_from_the_smallest_named_area(plugin):
+    """namedAreas: the smallest area holding a record is its place, in 抽出 and when added by hand."""
+    from satellite_observation.core.obs.alerts import forget_named_areas
+
+    p, iface, dock, tmp_path = plugin
+    forget_named_areas()
+    fake = FakeEsri()
+    places = fake.add_layer("https://x/arcgis/rest/services/Alerts/FeatureServer/3",
+                            FakeLayer({"NAME": "esriFieldTypeString", "KIND": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    places.add({"NAME": "東京湾", "KIND": "海域"}, {"rings": [[[139.5, 35.0], [140.1, 35.0], [140.1, 35.7], [139.5, 35.7], [139.5, 35.0]]]})
+    places.add({"NAME": "横須賀港", "KIND": "港"}, {"rings": [[[139.65, 35.25], [139.75, 35.25], [139.75, 35.35], [139.65, 35.35], [139.65, 35.25]]]})
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"alertReports": {
+        "namedAreas": "https://x/arcgis/rest/services/Alerts/FeatureServer/3", "notifyOnSave": False,
+        "formats": [{"name": "速報", "fields": ["objectName", {"source": "place", "empty": "地名なし"}, {"source": "placeKind", "omitEmpty": True}]}],
+    }}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    book = dock.book
+    book.add(139.7, 35.3, object="船A", kind="船舶", activity="航行")
+    book.add(139.9, 35.5, object="船B", kind="船舶", activity="航行")
+    c = book.add(141.0, 35.5, object="船C", kind="船舶", activity="航行")
+    dialog = dock.open_alerts()
+    assert "地名あり" in dialog.note.text()
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("3 件を抽出"))
+    lines = sorted(dialog.lines_table.item(r, 1).text() for r in range(dialog.lines_table.rowCount()))
+    assert lines == ["船A|横須賀港|港", "船B|東京湾|海域", "船C|地名なし"]
+    dialog.items = []
+    dialog.add_records([c])
+    assert wait_for(lambda: "手動で 1 件を追加" in dialog.status.text())
+    assert dialog.lines_table.item(0, 1).text() == "船C|地名なし"
