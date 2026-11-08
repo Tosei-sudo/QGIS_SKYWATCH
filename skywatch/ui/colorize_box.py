@@ -4,7 +4,9 @@
 red from black for example, laid over the layers under it in a blend mode.
 Two dates in red and cyan, the later screened over the earlier, show white
 where nothing changed and their own colour where only one is bright; one of
-the two is always the dock's target image, the other is chosen.
+the two is always the dock's target image, the other is chosen. While the
+two are laid over each other, their colouring is locked (on either image)
+until 着色の解除, which takes it off both.
 
 The image can also be shown by classes of its values: equal intervals,
 quantiles, bounds typed in, or one colour per value for a classified image
@@ -21,6 +23,8 @@ from typing import Callable, Optional
 
 from qgis.core import QgsLayerTreeLayer, QgsProject, QgsRasterLayer
 from qgis.gui import QgsColorButton
+import json
+
 from qgis.PyQt.QtCore import QRectF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter
 from qgis.PyQt.QtWidgets import (
@@ -53,6 +57,10 @@ BLENDS = [
 MODES = [("", "連続（なめらかに）"), ("classes", "区分（値の範囲ごとに色分け）"), ("unique", "値ごとに色分け（分類画像）")]
 METHODS = [("equal", "等間隔"), ("quantile", "分位数（面積が同じ）"), ("manual", "手動（境界の値を入力）")]
 CUSTOM_COLOR = "#ff8800"
+#: Layer property (kept in the project) of the two images laid over each other: {"role": "before"|"after", "with": other layer id}.
+PAIR_PROPERTY = "satobs/pair"
+#: The colour each role gets.
+PAIR_SCALES = {"before": "red", "after": "cyan"}
 #: Which of the two dates the target image is.
 ORDERS = [("auto", "撮像日時の順"), ("before", "対象が前（赤）"), ("after", "対象が後（シアン）")]
 
@@ -237,9 +245,14 @@ class ColorizeBox(QGroupBox):
         self._pair_toggled(False)
         v.addWidget(self.pair_box)
 
-        clear = QPushButton(self.tr("着色の解除"))
-        clear.clicked.connect(self.clear)
-        v.addWidget(clear)
+        self.lock_note = QLabel()
+        self.lock_note.setWordWrap(True)
+        self.lock_note.setStyleSheet("color: #b45309;")
+        self.lock_note.hide()
+        v.addWidget(self.lock_note)
+        self.clear_button = QPushButton(self.tr("着色の解除"))
+        self.clear_button.clicked.connect(self.clear)
+        v.addWidget(self.clear_button)
         # Long choices must not widen the dock.
         for combo in self.findChildren(QComboBox):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -279,6 +292,7 @@ class ColorizeBox(QGroupBox):
         self._fill_pair()
         self._show_parts()
         self.show_legend()
+        self._show_lock()
 
     def scale_value(self):
         """The scale chosen (turbo when none is, for classes)."""
@@ -346,6 +360,16 @@ class ColorizeBox(QGroupBox):
         self.rebuild()
 
     def clear(self) -> None:
+        """No colour; while two dates are laid over each other, off both of them."""
+        partner = paired_with(self.layer) if self.layer is not None else None
+        if partner is not None:
+            r = er.enhance_renderer(partner)
+            if r is not None:
+                er.apply(partner, replace(r.settings, color=None))
+            set_blend(partner, "normal")
+            partner.removeCustomProperty(PAIR_PROPERTY)
+        if self.layer is not None:
+            self.layer.removeCustomProperty(PAIR_PROPERTY)
         self._loading = True
         self.scale.setCurrentIndex(0)
         self.mode.setCurrentIndex(0)
@@ -356,6 +380,21 @@ class ColorizeBox(QGroupBox):
             set_blend(self.layer, "normal")
         self._apply()
         self.show_legend()
+        self._show_lock()
+
+    def locked(self) -> bool:
+        """Whether the colouring is locked: the layer is one of two dates laid over each other."""
+        return self.layer is not None and paired_with(self.layer) is not None
+
+    def _show_lock(self) -> None:
+        partner = paired_with(self.layer) if self.layer is not None else None
+        on = partner is not None
+        for w in (self.scale, self.custom, self.mode, self.classes_box, self.reverse, self.fade, self.blend, self.pair_box):
+            w.setEnabled(not on)
+        self.lock_note.setVisible(on)
+        if on:
+            self.lock_note.setText(self.tr("2 時期の重ね合わせ中（相手: {other}）。着色を変えるには「着色の解除」（両方の画像の着色を解除）")
+                                   .format(other=partner.name()))
 
     # ---- classes ----
 
@@ -560,12 +599,23 @@ class ColorizeBox(QGroupBox):
             parent = under.parent()
             parent.insertChildNode(parent.children().index(under), clone)
             node.parent().removeChildNode(node)
-        for layer, scale, blend in ((before, "red", "normal"), (after, "cyan", "screen")):
+        # A pair either image was in before ends: its partner loses the colour.
+        for layer in (before, after):
+            old = paired_with(layer)
+            if old is not None and old.id() not in (before.id(), after.id()):
+                r = er.enhance_renderer(old)
+                if r is not None:
+                    er.apply(old, replace(r.settings, color=None))
+                set_blend(old, "normal")
+                old.removeCustomProperty(PAIR_PROPERTY)
+        for layer, other, role, blend in ((before, after, "before", "normal"), (after, before, "after", "screen")):
+            scale = PAIR_SCALES[role]
             r = er.enhance_renderer(layer)
             settings = r.settings if r else er.default_settings(layer)
             r = er.apply(layer, replace(settings, color={"scale": scale}))
             r.setOpacity(1.0)
             set_blend(layer, blend)
+            layer.setCustomProperty(PAIR_PROPERTY, json.dumps({"role": role, "with": other.id()}))
             tree = root.findLayer(layer.id())
             if isinstance(tree, QgsLayerTreeLayer):
                 tree.setItemVisibilityChecked(True)
@@ -573,6 +623,29 @@ class ColorizeBox(QGroupBox):
         self.say(self.tr("{before} を赤、{after} をシアンで重ね合わせ").format(before=before.name(), after=after.name()))
         self.colored.emit()
         return True
+
+
+def paired_with(layer: QgsRasterLayer) -> Optional[QgsRasterLayer]:
+    """The other image `layer` is laid over (or under) as two dates, while both still have their pair colour; else None."""
+    def mark(lay):
+        try:
+            m = json.loads(lay.customProperty(PAIR_PROPERTY) or "null")
+        except (TypeError, ValueError):
+            return None
+        return m if isinstance(m, dict) and m.get("role") in PAIR_SCALES else None
+
+    def colored(lay, role):
+        r = er.enhance_renderer(lay)
+        return r is not None and (r.settings.color or {}).get("scale") == PAIR_SCALES[role]
+
+    m = mark(layer)
+    if m is None:
+        return None
+    other = QgsProject.instance().mapLayer(str(m.get("with") or ""))
+    n = mark(other) if isinstance(other, QgsRasterLayer) else None
+    if n is None or n.get("with") != layer.id() or n["role"] == m["role"]:
+        return None
+    return other if colored(layer, m["role"]) and colored(other, n["role"]) else None
 
 
 def earlier_first(a: QgsRasterLayer, b: QgsRasterLayer) -> bool:
