@@ -393,6 +393,11 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "active": "ACTIVE",
    "weight": "WEIGHT"
   },
+  "alertPlaces": {
+   "name": "NAME",
+   "kind": "KIND",
+   "active": "ACTIVE"
+  },
   "alertLog": {
    "obsId": "OBS_ID",
    "report": "REPORT_NAME",
@@ -469,7 +474,10 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "index",
   "count",
   "score",
-  "similar"
+  "similar",
+  "place",
+  "placeKind",
+  "places"
  ],
  "exportSources": [
   "id",
@@ -905,6 +913,7 @@ const SPEC = [
       field: O("alertReports", "通報", [
         TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),
         TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "地名・施設名のポリゴンのレイヤー（なくてもよい）。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むいちばん小さいものが項目 place（種類 placeKind、全部 places）。10 分ごと・「抽出」で読み直す" }),
         TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
         B("presentOnly", "不在を除く", { help: "既定 true" }),
@@ -928,7 +937,7 @@ const SPEC = [
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
           J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": "lat", "digits": 4 }, { "text": "固定" }]',
-            help: "項目名か { source, format, digits, level, map, empty }、固定の文字は { text }。項目: " + K.alertSources.join("・") }),
+            help: "項目名か { source, format, digits, level, map, empty, prefix, suffix, omitEmpty }、固定の文字は { text }。empty は値が空のときの文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く。項目: " + K.alertSources.join("・") }),
           T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
           TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}" }),
           TJ("footer", "フッター", { ph: "以上" }),

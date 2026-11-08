@@ -282,3 +282,78 @@ def test_live_settings_and_polling_only_what_changed():
     # No window: every row, newest first, at most `limit` at first.
     assert [r.obs_id for r in poll_log(client, s, set()).added] == ["b", "old"]
     assert [r.obs_id for r in poll_log(client, s, set(), limit=1).added] == ["b"]
+
+
+PLACE_URL = "https://x/FeatureServer/13"
+
+
+def _box(w, s, e, n):
+    return [[[w, s], [w, n], [e, n], [e, s], [w, s]]]
+
+
+def test_named_areas_smallest_place_cache_and_field_options():
+    from satellite_observation.core.obs.alerts import (
+        DEFAULT_PLACE_FIELDS, forget_named_areas, load_named_areas, named_areas_of_features, places_of, ring_size,
+    )
+
+    # Size: about 111 km × 91 km for 1° at 35°N; a hole takes off.
+    assert 9_500 < ring_size(_box(135, 34.5, 136, 35.5)) < 10_500
+    hole = [[[135.25, 34.75], [135.75, 34.75], [135.75, 35.25], [135.25, 35.25], [135.25, 34.75]]]
+    assert ring_size(_box(135, 34.5, 136, 35.5) + hole) < ring_size(_box(135, 34.5, 136, 35.5)) * 0.8
+
+    fake = FakeEsri()
+    layer = fake.add_layer(PLACE_URL, FakeLayer({"NAME": "esriFieldTypeString", "KIND": "esriFieldTypeString",
+                                                 "ACTIVE": "esriFieldTypeSmallInteger"}, "esriGeometryPolygon"))
+    layer.add({"NAME": "若狭湾", "KIND": "湾"}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    layer.add({"NAME": "舞鶴港", "KIND": "港"}, {"rings": _box(134.8, 34.8, 135.2, 35.2)})
+    layer.add({"NAME": "北吸岸壁", "KIND": "施設", "ACTIVE": 0}, {"rings": _box(134.99, 34.99, 135.01, 35.01)})
+    layer.add({"NAME": "", "KIND": "名前なし"}, {"rings": _box(134.9, 34.9, 135.1, 35.1)})
+    client = EsriClient(fake)
+    problems = []
+    s = settings({"namedAreas": PLACE_URL}, problems)
+    assert problems == [] and s.named_areas.fields == DEFAULT_PLACE_FIELDS
+    assert settings({"namedAreas": False}).named_areas is None and settings().named_areas is None
+    assert settings({"namedAreas": "https://x/nope"}, problems).named_areas is None and problems
+
+    forget_named_areas()
+    clock = [0.0]
+    areas = load_named_areas(client, s.named_areas, clock=lambda: clock[0])
+    assert [a.name for a in areas] == ["若狭湾", "舞鶴港"]  # inactive and nameless ones left out
+    asked = len(fake.asked)
+    clock[0] = 599
+    assert load_named_areas(client, s.named_areas, clock=lambda: clock[0]) is areas and len(fake.asked) == asked
+    clock[0] = 601
+    assert load_named_areas(client, s.named_areas, clock=lambda: clock[0]) is not areas and len(fake.asked) > asked
+    asked = len(fake.asked)
+    load_named_areas(client, s.named_areas, max_age=0, clock=lambda: clock[0])
+    assert len(fake.asked) > asked
+    assert load_named_areas(client, None) == []
+
+    # Several hits: the smallest first, whatever the layer's order.
+    assert [a.name for a in places_of(135.0, 35.0, list(reversed(areas)))] == ["舞鶴港", "若狭湾"]
+    assert places_of(137.0, 35.0, areas) == []
+
+    fmt = alert_settings_of({"formats": [{"name": "a", "fields": [
+        "objectName", "place", "placeKind", "places",
+        {"source": "place", "prefix": "（", "suffix": "付近）"},
+        {"source": "place", "empty": "地名なし"},
+        {"source": "place", "omitEmpty": True},
+        "activity",
+    ]}]}, []).format()
+    items = select([obs(id="in"), obs(id="bay", lon=134.2, lat=34.2), obs(id="out", lon=137.0)], s, None, (), DEFAULT_CONFIDENCES,
+                   named=areas)
+    at = Moment(now=T0)
+    by = dict(zip([i.record.id for i in items], build_lines(items, fmt, at)))
+    assert by["in"] == "船A|舞鶴港|港|舞鶴港・若狭湾|（舞鶴港付近）|舞鶴港|舞鶴港|航行"
+    assert by["bay"] == "船A|若狭湾|湾|若狭湾|（若狭湾付近）|若狭湾|若狭湾|航行"
+    # Outside every area: empty, the `empty` text, or left out with its delimiter.
+    assert by["out"] == "船A|||||地名なし|航行"
+    # No named areas: places stay empty.
+    assert build_lines(select([obs()], s, None, (), DEFAULT_CONFIDENCES), fmt, at) == ["船A|||||地名なし|航行"]
+    # By hand too.
+    manual = manual_items([obs(id="m")], (), s, DEFAULT_CONFIDENCES, (), areas)
+    assert [a.name for a in manual[0].places] == ["舞鶴港", "若狭湾"]
+    # Bad options are said.
+    problems = []
+    alert_settings_of({"formats": [{"name": "a", "fields": [{"source": "place", "prefix": 1, "omitEmpty": "yes"}]}]}, problems)
+    assert any("prefix" in p for p in problems) and any("omitEmpty" in p for p in problems)
