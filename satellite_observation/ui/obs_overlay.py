@@ -45,6 +45,8 @@ class Mark:
     editing: bool = False
     #: What it stands for (a record id), for clicks and drags.
     key: Optional[str] = None
+    #: Already reported (通報済み): an amber halo behind it.
+    reported: bool = False
 
 
 @dataclass
@@ -206,6 +208,10 @@ class ScenePainter:
         self.painted.append((at, mark))
         color = QColor(mark.color)
         if mark.role == "obs":
+            if mark.reported:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(245, 158, 11, 140)))
+                painter.drawEllipse(at, 14 * k, 14 * k)
             if mark.present:
                 r = (9 if mark.editing else 7) * k
                 ring = QColor(mark.ring) if mark.ring else QColor("white")
