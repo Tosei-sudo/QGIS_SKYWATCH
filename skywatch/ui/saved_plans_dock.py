@@ -28,7 +28,7 @@ from ..core.esri import quote
 from ..core.plan.output import js_round, local_text
 from ..core.plan.store import (
     STATUS_COLORS, STATUSES, PlanStoreConfig, SavedPlan, SavedShot, ShotCheck, delete_plan, list_plans, load_shots,
-    progress_text, track_shots, update_shots,
+    progress_text, track_shots, update_shots, waiting_plan_ids,
 )
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, open_record
@@ -217,12 +217,22 @@ class SavedPlansDock(PluginDock):
         self.plan_model.clear()
         self.plan_model.setHorizontalHeaderLabels([self.tr("計画"), self.tr("撮像"), self.tr("期間"), self.tr("状況")])
         chosen_row = -1
+        try:
+            # Saved while the layer could not be reached, waiting to be sent (core/offline.py): marked blue.
+            waiting = waiting_plan_ids(self.context.esri(), self.store) if self.store is not None else set()
+        except Exception:  # noqa: BLE001
+            waiting = set()
         for i, p in enumerate(self.plans):
             span = f"{local_text(p.first)[:10]}〜{local_text(p.last)[5:10]}" if math.isfinite(p.first) else ""
-            items = [QStandardItem(t) for t in (p.name, str(p.shots), span, progress_text(p.statuses))]
+            items = [QStandardItem(t) for t in (p.name + (self.tr("（送信待ち）") if p.id in waiting else ""), str(p.shots), span,
+                                                progress_text(p.statuses))]
             if p.created:
                 for item in items:
                     item.setToolTip(self.tr("保存 {t}").format(t=local_text(p.created)))
+            if p.id in waiting:
+                for item in items:
+                    item.setBackground(QBrush(QColor("#dbeafe")))
+                    item.setToolTip(self.tr("送信待ち（オフライン中に保存。保存先にはまだない）"))
             self.plan_model.appendRow(items)
             if p is self.plan:
                 chosen_row = i

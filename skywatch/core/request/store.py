@@ -11,7 +11,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
-from ..esri import ConflictError, EsriClient, EsriError, deleted_count, quote
+from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
+from ..offline import OfflineWork, Pending, UploadReport, offline_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
@@ -219,7 +220,103 @@ def load_requests(client: EsriClient, store: RequestStoreConfig, token: Optional
     _, oid = _layer(client, store.url, token, store.label, (f["id"],))
     rows = client.query_all(store.url, "1=1", token, limit=50000, cancelled=cancelled)
     out = [r for r in (request_of(row.get("attributes") or {}, row.get("geometry"), f, oid) for row in rows) if r]
+    work = offline_of(client)
+    if work is not None:
+        out = _with_waiting(work, store, out)
     return sorted(out, key=lambda r: (r.name, r.id))
+
+
+# --- While the ledger cannot be reached (core/offline.py) --------------------------------------
+
+KIND = "request"
+_REQUEST_FIELDS = set(ImagingRequest.__dataclass_fields__)
+
+
+def waiting_request(p: Pending) -> Optional[ImagingRequest]:
+    value = p.data.get("request") or {}
+    try:
+        req = ImagingRequest(**{k: v for k, v in value.items() if k in _REQUEST_FIELDS and k != "pending_update"})
+    except TypeError:
+        return None
+    req.start = math.nan if req.start is None else req.start
+    req.end = math.nan if req.end is None else req.end
+    return req
+
+
+def waiting_ids(client: EsriClient, store: RequestStoreConfig) -> set[str]:
+    """The requests of this ledger changed while it could not be reached, waiting to be sent."""
+    work = offline_of(client)
+    return work.ids(KIND, store.label) if work is not None else set()
+
+
+def _with_waiting(work: OfflineWork, store: RequestStoreConfig, requests: list[ImagingRequest]) -> list[ImagingRequest]:
+    out = {r.id: r for r in requests}
+    for p in work.pending(KIND, store.label):
+        if p.op == "remove":
+            out.pop(p.item_id, None)
+            continue
+        req = waiting_request(p)
+        if req is not None:
+            out[req.id] = req
+    return list(out.values())
+
+
+def _keep_request(work: OfflineWork, store: RequestStoreConfig, req: ImagingRequest, now: float) -> ImagingRequest:
+    """Keeps a request saved while the ledger cannot be reached; it is sent when it answers again."""
+    if req.created is None:
+        req.created = now
+    # What it was on the server before (its 更新日時): the first change made offline keeps it (OfflineWork.keep).
+    base = req.updated if req.object_id is not None else None
+    req.updated = now
+    data = {k: getattr(req, k) for k in _REQUEST_FIELDS if k != "pending_update"}
+    work.keep(KIND, store.label, req.id, "save", {"request": data}, base, req.object_id is not None, req.name)
+    return req
+
+
+def upload_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str], report: UploadReport,
+                    now: float) -> None:
+    """
+    Sends the requests of this ledger kept while it could not be reached. One
+    someone else changed (or deleted) meanwhile is not saved over: it stays
+    waiting, with why (to be thrown away, or changed again after a read).
+    """
+    work = offline_of(client)
+    if work is None:
+        return
+    for p in work.pending(KIND, store.label):
+        req = waiting_request(p)
+        if req is None:
+            work.drop(KIND, store.label, [p.item_id])
+            continue
+        try:
+            if p.op == "remove":
+                _send_removal(client, store, token, req, p)
+            else:
+                # Checked against what it was before the change made offline (#74).
+                req.updated = p.base if p.known else None
+                req.pending_update = None
+                _save_online(client, store, token, req, now)
+        except UnreachableError as error:
+            report.kept.append(f"撮像依頼（{store.label}）: {error}")
+            return
+        except EsriError as error:
+            work.note(p, str(error))
+            report.kept.append(f"撮像依頼「{req.name}」: {error}")
+            continue
+        work.drop(KIND, store.label, [p.item_id])
+        report.add(KIND)
+
+
+def _send_removal(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, p: Pending) -> None:
+    f = store.fields
+    names, oid = _layer(client, store.url, token, store.label, (f["id"],))
+    found = client.find(store.url, f["id"], [req.id], token).get(req.id)
+    if found is None:
+        return  # already gone
+    stamp = _number(found.get(f["updated"])) if f["updated"] in names else None
+    if p.base is not None and stamp is not None and not _same_stamp(stamp, p.base):
+        raise ConflictError(f"「{req.name}」はオフライン中にほかの人が更新したため削除せず")
+    _online_delete(client, store, token, req)
 
 
 #: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
@@ -231,6 +328,23 @@ def _same_stamp(a: Optional[float], b: Optional[float]) -> bool:
 
 
 def save_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float) -> ImagingRequest:
+    """
+    Saves a request (`_save_online`); while the ledger cannot be reached it is
+    kept to be sent once it answers (core/offline.py), and returned as saved.
+    """
+    work = offline_of(client)
+    if work is not None and work.down(store.url):
+        return _keep_request(work, store, req, now)
+    try:
+        return _save_online(client, store, token, req, now)
+    except EsriError:
+        # Cut off on the way (its reads may then have come from the cache): kept to send later.
+        if work is None or not work.down(store.url):
+            raise
+        return _keep_request(work, store, req, now)
+
+
+def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, now: float) -> ImagingRequest:
     """
     Adds a new request (no object id) or changes one; the request as saved
     (its object id set). The ledger is asked first: a request whose id is
@@ -347,7 +461,41 @@ def update_requests(client: EsriClient, store: RequestStoreConfig, token: Option
 
 
 def delete_request(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest) -> int:
-    """Deletes a request from the ledger; how many features went (EsriError when the server kept any, #81)."""
+    """
+    Deletes a request from the ledger; how many features went (EsriError when
+    the server kept any, #81). While the ledger cannot be reached the deletion
+    waits to be sent (a request made offline is just forgotten).
+    """
+    work = offline_of(client)
+
+    def keep() -> int:
+        before = work.item(KIND, store.label, req.id)
+        known = before.known if before is not None else req.object_id is not None
+        if not known:
+            work.drop(KIND, store.label, [req.id])
+            return 1
+        data = {k: getattr(req, k) for k in _REQUEST_FIELDS if k != "pending_update"}
+        work.keep(KIND, store.label, req.id, "remove", {"request": data}, req.updated, True, req.name)
+        return 1
+
+    if work is not None:
+        before = work.item(KIND, store.label, req.id)
+        if before is not None and not before.known:
+            work.drop(KIND, store.label, [req.id])  # made offline, never sent
+            return 1
+        if work.down(store.url):
+            return keep()
+        if before is not None:
+            work.drop(KIND, store.label, [req.id])
+    try:
+        return _online_delete(client, store, token, req)
+    except EsriError:
+        if work is None or not work.down(store.url):
+            raise
+        return keep()
+
+
+def _online_delete(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest) -> int:
     value = client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['id']} = {quote(req.id)}"}, token)
     return deleted_count(value, "依頼の削除")
 

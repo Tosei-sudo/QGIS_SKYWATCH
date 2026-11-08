@@ -23,7 +23,7 @@ from ..core.request.bulk import RequestChange, apply_change
 from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import field_roles, request_of_row, row_problems
-from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request
+from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, waiting_ids
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
@@ -229,13 +229,23 @@ class RequestDock(PluginDock):
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "区分", "達成条件", "期間", "優先度", "種別", "状態")])
         chosen_row = -1
+        try:
+            # Saved while the ledger could not be reached, waiting to be sent (core/offline.py): marked blue.
+            waiting = waiting_ids(self.context.esri(), self.store) if self.store is not None else set()
+        except Exception:  # noqa: BLE001
+            waiting = set()
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
-            items = [QStandardItem(t) for t in (r.name, r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
+            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
+                                                r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
                                                 r.achieve, _period(r), prio, r.kind, r.status)]
             items[6].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
+            if r.id in waiting:
+                for item in items:
+                    item.setBackground(QBrush(QColor("#dbeafe")))
+                items[0].setToolTip(self.tr("送信待ち（オフライン中に保存。台帳にはまだない）"))
             self.model.appendRow(items)
             if r is self.chosen:
                 chosen_row = i

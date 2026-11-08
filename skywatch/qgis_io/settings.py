@@ -182,6 +182,11 @@ def local_gpkg_path() -> str:
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
 
 
+def offline_path() -> str:
+    """The file of offline work (the cache of reads and the changes waiting to be sent): never the local GeoPackage."""
+    return _get("offline_file") or os.path.join(profile_folder(), "offline_work.sqlite")
+
+
 class SettingsPrefs:
     """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
 

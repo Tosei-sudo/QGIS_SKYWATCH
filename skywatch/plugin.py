@@ -41,6 +41,7 @@ from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
 from .ui.notices_dock import NoticesDock
+from .ui.offline_status import OfflineController
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
@@ -286,6 +287,7 @@ class SkywatchPlugin:
         self.shift: Optional[LayerShift] = None
         self.segment: Optional[SegmentTool] = None
         self.transfer_dialog: Optional[TransferDialog] = None
+        self.offline: Optional[OfflineController] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -299,6 +301,8 @@ class SkywatchPlugin:
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
+        # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
+        self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
@@ -1053,7 +1057,20 @@ class SkywatchPlugin:
         complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
+    def _reload_after_offline(self) -> None:
+        """The work kept offline was sent or thrown away (or a server is back): the docks that show it read again."""
+        for name in ("SatObsObservations", "SatObsRequests", "SatObsSavedPlans"):
+            dock = self.docks.get(name)
+            if dock is not None:
+                try:
+                    dock.reload()
+                except RuntimeError:
+                    pass
+
     def unload(self) -> None:
+        if getattr(self, "offline", None) is not None:
+            self.offline.unload()
+            self.offline = None
         if getattr(self, "shortcuts", None) is not None:
             self.shortcuts.unload()
             self.shortcuts = None

@@ -70,6 +70,8 @@ HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または�
 NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
 #: The background of the rows of records already reported (通報済み).
 REPORTED_ROW = "#fde68a"
+#: Records saved while their server could not be reached, waiting to be sent (core/offline.py).
+WAITING_ROW = "#dbeafe"
 ACTIVITY_COLORS = ["#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5", "#e11d48"]
 
 
@@ -144,6 +146,8 @@ class ObservationDock(PluginDock):
     said = pyqtSignal(str)
     #: The records or the classification changed (for the classification editor).
     changed = pyqtSignal()
+    #: A server went down or came back, or the work waiting changed (core/offline.py), from any thread.
+    offlineChanged = pyqtSignal()
 
     def __init__(self, iface, context: PluginContext, open_settings: Callable[[], None], parent: Optional[QWidget] = None,
                  edit_taxonomy: Optional[Callable[[Optional[list]], None]] = None):
@@ -443,6 +447,16 @@ class ObservationDock(PluginDock):
         # Below the list (added after it): the record chosen there opens under it.
         self.form.hide()
 
+        # 一時的なオフライン作業 (core/offline.py): said while this store's server cannot be reached.
+        self.offline_note = QLabel()
+        self.offline_note.setWordWrap(True)
+        self.offline_note.setStyleSheet("QLabel { background: #dbeafe; color: #1e3a8a; padding: 3px; }")
+        self.offline_note.hide()
+        b.addWidget(self.offline_note)
+        offline = getattr(self.context, "offline", None)
+        if offline is not None:
+            offline.listeners.append(self._offline_changed)
+            self.offlineChanged.connect(self._show_offline)
         self.status = QLabel()
         self.status.setWordWrap(True)
         b.addWidget(self.status)
@@ -754,6 +768,33 @@ class ObservationDock(PluginDock):
 
     def _show_status(self, message: str) -> None:
         self.status.setText(message)
+
+    def waiting_ids(self) -> set[str]:
+        """The records of this store saved offline and waiting to be sent (marked in the lists and on the map)."""
+        ids = getattr(self.book.store, "pending_ids", None) if self.book is not None else None
+        try:
+            return ids() if callable(ids) else set()
+        except Exception:  # noqa: BLE001 (the file of offline work unreadable: nothing marked)
+            return set()
+
+    def _offline_changed(self) -> None:
+        try:
+            self.offlineChanged.emit()  # from any thread
+        except RuntimeError:
+            pass
+
+    def _show_offline(self) -> None:
+        store = self.book.store if self.book is not None else None
+        down = bool(getattr(store, "offline", False))
+        n = len(self.waiting_ids())
+        if down:
+            self.offline_note.setText(tr("オフライン作業中: サーバーに接続できないため、最後に読めた記録で作業しています。"
+                                         "保存した記録は「送信待ち」（青）として残し、接続が戻ったら送信するか確認します。")
+                                      + (tr("（送信待ち {n} 件）").format(n=n) if n else ""))
+        elif n:
+            self.offline_note.setText(tr("送信待ちの記録 {n} 件（青）: オフライン中に保存し、まだサーバーにありません。"
+                                         "ステータスバーの「送信待ち」から送信できます。").format(n=n))
+        self.offline_note.setVisible(down or bool(n))
 
     def _say(self, message: str) -> None:
         if self.book is not None:
@@ -2291,7 +2332,7 @@ class ObservationDock(PluginDock):
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
-             records: Optional[list[Observation]] = None, reported: bool = False) -> None:
+             records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False) -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         for i, c in enumerate(cells):
@@ -2314,6 +2355,11 @@ class ObservationDock(PluginDock):
                 item.setBackground(QColor(REPORTED_ROW))
                 item.setForeground(QColor("#1f2937"))
                 item.setToolTip(self.tr("通報済み（通報テーブルに記録あり）"))
+            if waiting:
+                # Not the local store: saved offline, on its way to this store's server.
+                item.setBackground(QColor(WAITING_ROW))
+                item.setForeground(QColor("#1e3a8a"))
+                item.setToolTip(self.tr("送信待ち（オフライン中に保存。サーバーにはまだない）"))
             self.table.setItem(r, i, item)
         if widget is not None:
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
@@ -2558,6 +2604,7 @@ class ObservationDock(PluginDock):
             self._render_classes(taxa, objects)
         self._render_flow()
         self._render_taxon(taxa, objects)
+        self._show_offline()
         self.changed.emit()
         self.draw()
 
@@ -2572,13 +2619,15 @@ class ObservationDock(PluginDock):
             size = f"{km_text(o.length)} × {km_text(o.width)}" if o.width is not None else km_text(o.length)
             return f"{size}・{heading_text(o.heading)}"
 
+        waiting = self.waiting_ids()
         for o in here:
             gone = o.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した記録の復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れの表示"), lambda o=o: self.choose(o.object_id)))
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
-                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported)
+                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
+                      waiting=o.id in waiting)
         inside_ids = {id(c) for c in inside}
         for c in carried:
             s = c.source
@@ -2614,11 +2663,13 @@ class ObservationDock(PluginDock):
         listed = [f for f in objects if self._shown_kind(f.kind, taxa)] if self.class_filter else objects
         if q:
             listed = [f for f in listed if any(q in v.lower() for v in [f.name, f.object_id, f.kind, *(o.activity for o in f.observations)])]
+        waiting = self.waiting_ids()
         for f in listed:
             self._row([f.name, f.kind, f.activity if f.present else tr("不在"), local_time(f.first), local_time(f.last), f.seen],
                       lambda f=f: self.choose(None if self.chosen == f.object_id else f.object_id), lambda f=f: self._fit_flow(f),
                       selected=f.object_id == self.chosen, records=f.observations,
-                      reported=any(o.id in self.reported for o in f.observations if o.deleted_at is None))
+                      reported=any(o.id in self.reported for o in f.observations if o.deleted_at is None),
+                      waiting=any(o.id in waiting for o in f.observations))
         if self.table.rowCount() == 0:
             self._row([tr("該当するモノなし") if objects else tr("記録なし")])
 
@@ -2751,13 +2802,15 @@ class ObservationDock(PluginDock):
                 s.marks.append(Mark("ghost", o.lon, o.lat, color(o.kind), o.object_name, ends=ends_of(o.lon, o.lat, o.length, o.heading),
                                     heading=o.heading, key=o.id, outline=outline_of(o.lon, o.lat, o.length, o.width, o.heading)))
             editing = self.pending[2].id if self.pending and self.pending[2] else None
+            waiting = self.waiting_ids()
             for o in book.living():
                 if o.image_id != image.id:
                     continue
                 lon, lat = (self.dragging[1], self.dragging[2]) if self.dragging and self.dragging[0] == o.id else (o.lon, o.lat)
                 what = (f"・{o.activity}" if o.activity else "") if o.present else "（不在）"
                 sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
-                s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}", o.present, ring_of.get(o.confidence or ""),
+                late = self.tr("（送信待ち）") if o.id in waiting else ""
+                s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}{late}", o.present, ring_of.get(o.confidence or ""),
                                     ends=ends_of(lon, lat, o.length, o.heading), heading=o.heading, editing=o.id == editing, key=o.id,
                                     outline=outline_of(lon, lat, o.length, o.width, o.heading) if o.present else None,
                                     reported=o.id in self.reported))

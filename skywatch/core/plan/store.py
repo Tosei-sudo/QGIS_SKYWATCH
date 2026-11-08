@@ -13,7 +13,8 @@ from typing import Any, Callable, Optional, Sequence
 
 from .. import time_zone
 from ..catalog import CatalogConfig
-from ..esri import EsriClient, EsriError, deleted_count, quote
+from ..esri import EsriClient, EsriError, UnreachableError, deleted_count, quote
+from ..offline import OfflineWork, UploadReport, offline_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names, utc_text
 from .access import Opportunity, PlanTarget
 from .remind import shots_of
@@ -209,9 +210,72 @@ def _only(attributes: dict[str, Any], names: set) -> dict[str, Any]:
     return {k: v for k, v in attributes.items() if k in names}
 
 
+KIND = "plan"
+
+
+def _keep_plan(work: OfflineWork, store: PlanStoreConfig, features: Sequence[dict[str, Any]]) -> tuple[int, list[str]]:
+    """Keeps a plan saved while the layer cannot be reached (by plan, all its shots); sent when it answers again."""
+    f = store.fields
+    by_plan: dict[str, list] = {}
+    for feature in features:
+        by_plan.setdefault(_text(feature["attributes"].get(f["planId"])), []).append(feature)
+    for plan_id, shots in by_plan.items():
+        before = work.item(KIND, store.label, plan_id)
+        kept = list((before.data.get("features") if before is not None else None) or [])
+        name = _text(shots[0]["attributes"].get(f["planName"])) or plan_id
+        work.keep(KIND, store.label, plan_id, "save", {"features": kept + list(shots)}, None, False, name)
+    return len(features), []
+
+
+def waiting_plan_ids(client: EsriClient, store: PlanStoreConfig) -> set[str]:
+    """The plans of this layer saved while it could not be reached, waiting to be sent."""
+    work = offline_of(client)
+    return work.ids(KIND, store.label) if work is not None else set()
+
+
+def upload_plans(client: EsriClient, store: PlanStoreConfig, token: Optional[str], report: UploadReport) -> None:
+    """Sends the plans kept while the layer could not be reached (each whole, or not at all)."""
+    work = offline_of(client)
+    if work is None:
+        return
+    for p in work.pending(KIND, store.label):
+        features = p.data.get("features") or []
+        try:
+            saved, failed = _add_online(client, store, token, features)
+        except UnreachableError as error:
+            report.kept.append(f"撮像計画（{store.label}）: {error}")
+            return
+        except EsriError as error:
+            work.note(p, str(error))
+            report.kept.append(f"撮像計画「{p.title}」: {error}")
+            continue
+        work.drop(KIND, store.label, [p.item_id])
+        report.add(KIND)
+        if failed:
+            report.kept.append(f"撮像計画「{p.title}」の撮像 {len(failed)} 件: {failed[0]}")
+
+
 def add_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str], features: Sequence[dict[str, Any]],
               cancelled: Optional[Callable[[], bool]] = None) -> tuple[int, list[str]]:
-    """Adds features to the layer (200 at a time); how many were saved, and why others were not."""
+    """
+    Adds features to the layer (200 at a time); how many were saved, and why
+    others were not. While the layer cannot be reached the plan is kept to be
+    sent once it answers (core/offline.py).
+    """
+    work = offline_of(client)
+    if work is not None and work.down(store.url):
+        return _keep_plan(work, store, features)
+    try:
+        return _add_online(client, store, token, features, cancelled)
+    except EsriError:
+        # Cut off on the way (the plan taken out again, or never in): kept to send later.
+        if work is None or not work.down(store.url):
+            raise
+        return _keep_plan(work, store, features)
+
+
+def _add_online(client: EsriClient, store: PlanStoreConfig, token: Optional[str], features: Sequence[dict[str, Any]],
+                cancelled: Optional[Callable[[], bool]] = None) -> tuple[int, list[str]]:
     before = dict(store.fields)
     names, _, _ = layer_of(client, store, token)
     # Features made before the layer was read carry the new default names; a layer with only the old ones gets those.
@@ -230,7 +294,7 @@ def add_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str], 
             plan_ids = {f["attributes"].get(store.fields["planId"]) for f in features} - {None}
             for plan_id in plan_ids:
                 try:
-                    delete_plan(client, store, token, plan_id)
+                    _delete_online(client, store, token, plan_id)
                 except EsriError:
                     pass
             raise
@@ -269,6 +333,12 @@ def list_plans(client: EsriClient, store: PlanStoreConfig, token: Optional[str],
     names, _, _ = layer_of(client, store, token)
     wanted = [n for n in (f["planId"], f["planName"], f["shotTime"], f["status"], f["created"]) if n in names]
     rows = client.query_all(store.url, "1=1", token, out_fields=",".join(wanted), geometry=False, limit=20000, cancelled=cancelled)
+    work = offline_of(client)
+    if work is not None:
+        waiting = work.pending(KIND, store.label)
+        ids = {p.item_id for p in waiting}
+        rows = [r for r in rows if _text((r.get("attributes") or {}).get(f["planId"])) not in ids]
+        rows += [feature for p in waiting for feature in p.data.get("features") or []]
     plans: dict[str, SavedPlan] = {}
     for row in rows:
         a = row.get("attributes") or {}
@@ -292,8 +362,15 @@ def load_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str],
                cancelled: Optional[Callable[[], bool]] = None) -> list[SavedShot]:
     """The shots of a plan, in time order."""
     f = store.fields
-    _, _, oid = layer_of(client, store, token)
-    rows = client.query_all(store.url, f"{f['planId']} = {quote(plan_id)}", token, limit=20000, cancelled=cancelled)
+    work = offline_of(client)
+    kept = work.item(KIND, store.label, plan_id) if work is not None else None
+    if kept is not None:
+        # Saved while the layer could not be reached: its shots as kept (no object ids yet: negative).
+        oid = "\u0000oid"
+        rows = [{**r, "attributes": {**(r.get("attributes") or {}), oid: -(i + 1)}} for i, r in enumerate(kept.data.get("features") or [])]
+    else:
+        _, _, oid = layer_of(client, store, token)
+        rows = client.query_all(store.url, f"{f['planId']} = {quote(plan_id)}", token, limit=20000, cancelled=cancelled)
     shots = []
     for row in rows:
         a = row.get("attributes") or {}
@@ -310,6 +387,8 @@ def load_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str],
 
 def update_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str], changes: Sequence[ShotCheck]) -> int:
     """Changes shots' status (and image id) in the layer; how many were changed."""
+    # Shots saved offline (negative ids, not in the layer yet) are sent as they were kept.
+    changes = [c for c in changes if c.objectId >= 0]
     if not changes:
         return 0
     names, _, oid = layer_of(client, store, token)
@@ -329,6 +408,15 @@ def update_shots(client: EsriClient, store: PlanStoreConfig, token: Optional[str
 
 def delete_plan(client: EsriClient, store: PlanStoreConfig, token: Optional[str], plan_id: str) -> int:
     """Deletes a plan's shots from the layer; how many went (EsriError when the server kept any, #81)."""
+    work = offline_of(client)
+    kept = work.item(KIND, store.label, plan_id) if work is not None else None
+    if kept is not None:
+        work.drop(KIND, store.label, [plan_id])  # saved offline, never sent
+        return len(kept.data.get("features") or [])
+    return _delete_online(client, store, token, plan_id)
+
+
+def _delete_online(client: EsriClient, store: PlanStoreConfig, token: Optional[str], plan_id: str) -> int:
     value = client.ask(f"{store.url}/deleteFeatures", {"where": f"{store.fields['planId']} = {quote(plan_id)}"}, token)
     return deleted_count(value, "撮像の削除")
 

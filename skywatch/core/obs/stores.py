@@ -442,6 +442,30 @@ class EsriObservationStore:
                 parts.append(f"{len(failed)} 件の保存に失敗: {failed[0]}")
             raise (EsriError if failed else ConflictError)("・".join(parts))
 
+    def know(self, record_ids: list[str]) -> None:
+        """Asks the layer for the object ids of records not known here (before deleting them for good)."""
+        new = [i for i in record_ids if i not in self.oids]
+        if not new:
+            return
+        _, oid = self._layer.ready()
+        for record_id, attrs in self.client.find(self.config.url, self.config.fields["id"], new, self.token,
+                                                  out_fields=f"{self.config.fields['id']},{oid}").items():
+            if is_number(attrs.get(oid)):
+                self.oids[record_id] = int(attrs[oid])
+
+    def expect(self, record_id: str, seen: Optional[float], sending: Optional[float] = None) -> None:
+        """
+        Before sending a change made while the server could not be reached
+        (core/obs/offline_stores.py): the record was on the server, with the
+        更新日時 `seen` then, so a change someone else made meanwhile is not
+        saved over (#74); `sending` is the 更新日時 sent (an answer lost then is no conflict).
+        """
+        self.oids.setdefault(record_id, -1)
+        if seen is not None:
+            self.stamps[record_id] = seen
+        if sending is not None:
+            self.pending[record_id] = sending
+
     def removes_for_good(self) -> bool:
         """Whether a delete removes the features (no 削除日時 field to mark, or `softDelete: false`)."""
         types, _ = self._layer.ready()
@@ -548,6 +572,21 @@ class EsriAreaStore:
                 failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if failed:
             raise EsriError(f"{len(failed)} 件の保存に失敗: {failed[0]}")
+
+    def know(self, area_ids: list[str]) -> None:
+        """Asks the layer for the object ids of areas not known here (before deleting them for good)."""
+        new = [i for i in area_ids if i not in self.oids]
+        if not new:
+            return
+        _, oid = self._layer.ready()
+        for area_id, attrs in self.client.find(self.config.url, self.config.fields["id"], new, self.token,
+                                                out_fields=f"{self.config.fields['id']},{oid}").items():
+            if is_number(attrs.get(oid)):
+                self.oids[area_id] = int(attrs[oid])
+
+    def removes_for_good(self) -> bool:
+        types, _ = self._layer.ready()
+        return not (self.config.soft_delete and self.config.fields["deleted"] in types)
 
     def remove(self, areas: list[CheckedArea], now: Optional[int] = None) -> list[CheckedArea]:
         marked = _marked(areas, now)

@@ -924,6 +924,20 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 - 前回の値が選べなくなっていたら（カタログから消えた衛星、設定から消えた転記先など）、その項目はフォームの既定のまま
 - 覚えた値は「設定…」の「入力の初期値」→「覚えた値を消去」でまとめて消せる（観測記録の種別・活動・確度も）。開いているフォームは今の値のまま、次に開くフォームから既定値
 
+## サーバー障害時のオフライン作業（`offlineWork`）
+
+サーバー（Esri のフィーチャサービス）につながらない間も、最後に読めた内容で作業を続け、変更は**送信待ち**として PC に残す。つながったら件数を出して送信か破棄を確かめる。
+
+- **控え**: サーバーから読めた内容（レイヤーの情報と問い合わせの答え）は、ほかの機能が読むたびに PC の `offline_work.sqlite`（QGIS のプロファイルの `skywatch` フォルダ。ローカルの `observations.gpkg` とは別のファイル）に残す。起動時の先読み（撮像依頼・保存した計画・イベント・衛星など）もそのまま控えになる。トークンは控えに入れない。上限は `cacheMB`（既定 500 MB、古いものから消す）
+- **つながらなくなったとき**: 応答がない・タイムアウト・5xx のとき、そのサーバーを「オフライン」にする。以後そのサーバーへの読み取りは待たずに控えから答え（控えにないものは「控えなし」）、メッセージバーとステータスバーの「⚠ オフライン作業中」で知らせる。サーバーの拒否（4xx・権限なし・属性なしなど）はオフラインにしない
+- **送信待ちにできるもの**: 観測記録（追加・変更・削除、一括編集・継続を含む）、確認範囲、撮像依頼（登録・変更・削除）、撮像計画（計画の保存）。保存先ごと・1 件ごとに最新の内容だけを残し、最初に変えたときのサーバーの更新日時を覚えておく。オフライン中に作って消したものは何も送らない
+- **ローカルとは別**: 送信待ちは元の共有の保存先（そのラベル）に属し、つながれば送られる。観測記録の「ローカル」の保存先ではないので、`localObservations: false` でも使える。画面では青い背景と「（送信待ち）」で区別する（観測記録の一覧・地図の文字、撮像依頼の一覧、保存した計画の一覧）
+- **オフライン中に使えないもの**: 分類体系の変更、分担（同じ画像の取り合いを防げないため）、通報、日次出力・照合の書き込み、保存した計画の撮像の状態の変更など（今までどおりエラー）
+- **つながったとき**: `probeSeconds`（既定 30 秒）ごとに、止まったサーバーへ問い合わせる。答えが返ったら「オフライン中の作業をサーバーに送信しますか？」と種類・保存先ごとの件数を出し、**送信**・**破棄…**（確認あり）・**後で** を選ぶ。後でにしたものはステータスバーの「送信待ち n 件」からいつでも送信・破棄でき、QGIS を閉じても残る（次の起動で聞き直す）
+- **送信の決まり**: いつもの保存と同じ照合（[複数人で同じ保存先を使うとき](#複数人で同じ保存先を使うとき)）を、オフラインで最初に変えたときの更新日時で行う。オフラインの間にほかの人が同じ観測記録を変えていたら上書きせず [未保存の記録](#未保存の記録保存できなかった記録) に移す（開いて確かめてから送り直す）。撮像依頼で同じことが起きたら送信待ちのまま理由を残す。送った記録の更新日時は送った時刻にする（ほかの人の「最新を反映」で見えるように）
+- ステータスバーのボタンの「オフラインで作業する（手動）」で、計画停電などの前に自分で切り替えられる。「今すぐ接続を確認」で間隔を待たずに問い合わせる
+- 設定ファイル: `"offlineWork": false` で使わない（つながらないときは今までどおりエラー）。`{ "enabled": true, "cacheMB": 500, "probeSeconds": 30 }`
+
 ## 複数人で同じ保存先を使うとき
 
 - 撮像依頼台帳・観測記録は、保存の前にサーバーの更新日時（台帳の `UPDATED_AT`、観測記録の `updated`）を読み込んだときの値と比べる。ほかの人が先に保存（日次の繰り上げ・照合の完了を含む）していたら上書きせずに止め、「読み込み直してから変更」と出す。ほかの人が削除した依頼は保存しても戻さない
@@ -1199,6 +1213,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | --- | --- | --- | --- | --- |
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
+| `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |

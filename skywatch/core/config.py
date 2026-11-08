@@ -51,7 +51,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports", "observationExports", "assignments", "handover", "events",
+    "alertReports", "observationExports", "assignments", "handover", "events", "offlineWork",
 )
 
 
@@ -117,6 +117,41 @@ class PluginConfig:
     handover: HandoverSettings = field(default_factory=HandoverSettings)
     #: `events`: the event layer and its link table (イベント); None hides the dock's work.
     events: Optional[EventSettings] = None
+    #: `offlineWork`: working on through a server outage (cache of reads, changes kept to send later).
+    offline_work: OfflineSettings = field(default_factory=lambda: OfflineSettings())
+
+
+@dataclass
+class OfflineSettings:
+    """`offlineWork`: true / false, or {enabled, cacheMB, probeSeconds}."""
+    enabled: bool = True
+    #: The most the cache of reads may take (MB).
+    cache_mb: float = 500
+    #: How often a server down is asked whether it answers again (s).
+    probe_seconds: float = 30
+
+
+def offline_settings_of(value: Any, problems: list[str]) -> OfflineSettings:
+    if isinstance(value, bool):
+        return OfflineSettings(enabled=value)
+    if not isinstance(value, dict):
+        problems.append("offlineWork は true / false か {enabled, cacheMB, probeSeconds} で指定")
+        return OfflineSettings()
+    out = OfflineSettings()
+    enabled = value.get("enabled", True)
+    if isinstance(enabled, bool):
+        out.enabled = enabled
+    else:
+        problems.append("offlineWork.enabled は true か false で指定")
+    for key, attr, low in (("cacheMB", "cache_mb", 0), ("probeSeconds", "probe_seconds", 5)):
+        v = value.get(key)
+        if v is None:
+            continue
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= low:
+            setattr(out, attr, float(v))
+        else:
+            problems.append(f"offlineWork.{key} は {low} 以上の数で指定")
+    return out
 
 
 class JsoncError(ValueError):
@@ -240,6 +275,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             config.local_observations = value["localObservations"]
         else:
             problems.append("localObservations は true か false で指定")
+    if "offlineWork" in value:
+        config.offline_work = offline_settings_of(value["offlineWork"], problems)
     if "observationVocabulary" in value:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
     if "arcgisPortals" in value:
