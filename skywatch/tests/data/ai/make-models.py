@@ -15,6 +15,10 @@ package); the .onnx files are committed, so the tests do not need it.
 - sam-encoder.onnx / sam-decoder.onnx: a "Segment Anything" pair with the
   official decoder's inputs; the low-resolution mask (256 × 256 over the
   1024 input) is a disc of radius 64 input pixels round the first point.
+- sam-bright-decoder.onnx: a decoder for sam-encoder.onnx whose mask is
+  wherever the picture is brighter than the mean (the embeddings, 1/16 of
+  the input, averaged over the colours and enlarged to 256 × 256): so an
+  elongated bright object gives an elongated mask (アノテーション変換).
 """
 import numpy as np
 import onnx
@@ -150,6 +154,39 @@ def sam():
     save(decoder, 'sam-decoder.onnx')
 
 
-detect()
-detectron2()
-sam()
+
+def sam_bright():
+    nodes = [
+        helper.make_node('ReduceMean', ['image_embeddings'], ['grey'], axes=[1], keepdims=1),
+        helper.make_node('Resize', ['grey', '', 'scales'], ['masks'], mode='nearest'),
+        helper.make_node('Identity', ['iou'], ['iou_predictions']),
+    ]
+    decoder = helper.make_graph(
+        nodes,
+        'sam-bright-decoder',
+        [
+            helper.make_tensor_value_info('image_embeddings', TensorProto.FLOAT, [1, 3, 64, 64]),
+            helper.make_tensor_value_info('point_coords', TensorProto.FLOAT, [1, 'n', 2]),
+            helper.make_tensor_value_info('point_labels', TensorProto.FLOAT, [1, 'n']),
+            helper.make_tensor_value_info('mask_input', TensorProto.FLOAT, [1, 1, 256, 256]),
+            helper.make_tensor_value_info('has_mask_input', TensorProto.FLOAT, [1]),
+            helper.make_tensor_value_info('orig_im_size', TensorProto.FLOAT, [2]),
+        ],
+        [
+            helper.make_tensor_value_info('masks', TensorProto.FLOAT, [1, 1, 256, 256]),
+            helper.make_tensor_value_info('iou_predictions', TensorProto.FLOAT, [1, 1]),
+        ],
+        [
+            numpy_helper.from_array(np.array([1, 1, 4, 4], np.float32), 'scales'),
+            numpy_helper.from_array(np.array([[0.9]], np.float32), 'iou'),
+        ],
+    )
+    save(decoder, 'sam-bright-decoder.onnx')
+
+
+if __name__ == '__main__':
+    import sys
+
+    wanted = sys.argv[1:] or ['detect', 'detectron2', 'sam', 'sam_bright']
+    for name in wanted:
+        globals()[name]()

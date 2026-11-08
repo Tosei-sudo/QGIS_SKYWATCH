@@ -54,7 +54,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
         ("画像", ["画像カタログ", "通知", "-", "画像補正", "影から高さ", "スペクトル", "-", "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
         ("解析・処理", ["データ分析", "-", "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", "-",
                     "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", "-", "サーバ処理…"]),
-        ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", "-", "教師データセットの作成…", "AI 学習（物体検出）…"]),
+        ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", "-", "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…", "AI 学習（物体検出）…"]),
         ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", "-",
                        "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
         "-", "イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…",
@@ -328,7 +328,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 56
+    assert len(set(drawn)) == len(plugin.actions) == 58
     plugin.unload()
 
 
