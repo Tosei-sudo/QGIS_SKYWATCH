@@ -987,7 +987,9 @@ const SPEC = [
   { group: "観測記録・分類体系", keys: [
     { key: "observationStores", label: "観測記録の保存先", doc: "観測記録", help: "観測記録を保存する編集できるポイントレイヤー。書かなければローカルの GeoPackage だけ。",
       field: I("observationStores", "保存先", [LABEL, URL_(), R("fields", "属性名", K.roles.observationStores), WHERE,
-        B("softDelete", "削除は印だけ（softDelete）", { help: "既定 true" }), L("kinds", "種別"), L("activities", "活動"),
+        B("softDelete", "削除は印だけ（softDelete）", { help: "既定 true" }),
+        N("refreshMinutes", "読み直しの間隔（分）", { min: 0.5, max: 1440, ph: "なし", help: "ほかの人の記録をこの間隔でも読み直す。書かなければ、画像の切り替え・記録を直すときだけ" }),
+        L("kinds", "種別"), L("activities", "活動"),
         J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b" }]' }), J("taxonomy", "分類の木（taxonomy）"),
         TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\", \"token\" }" }),
         TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\", \"token\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),

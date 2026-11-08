@@ -715,7 +715,7 @@ def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeyp
     monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
     dock.submit()
     assert dock.form.isVisible() and dock.object_input.text() == "あおば" and dock.note_input.text() == "入港直後"
-    assert any("入力は残しています" in w.text() for w in iface.bar.items())
+    assert any("未保存の記録" in w.text() for w in iface.bar.items())
     monkeypatch.undo()
     dock.submit()
     assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]
@@ -811,3 +811,89 @@ def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
     dock.carry_all()
     dock.absent_inside()
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", False), ("C", True), ("D", True)]
+
+
+def test_others_records_are_read_quietly(plugin, tmp_path):
+    """観測記録の読み直し: another computer's record shows after a refresh; a form opened on a record they changed is filled again."""
+    from dataclasses import replace
+
+    from satellite_observation.core.obs.flows import now_ms
+    from satellite_observation.core.obs.model import observation_store_of
+    from satellite_observation.core.obs.stores import EsriObservationStore
+
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL, "refreshMinutes": 2}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    assert wait_for(lambda: dock.book.loaded)
+    assert dock._refresh_timer.isActive() and dock._refresh_timer.interval() == 120_000
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("共有のモノ")
+    dock.submit()
+    assert wait_for(lambda: dock.status.text() == "共有のモノを記録")
+    theirs = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(fake))
+    [mine] = theirs.load()
+    theirs.save([replace(mine, note="鈴木の備考", updated_by="鈴木", updated_at=now_ms() + 1000)])
+    # Opened before their change, nothing typed yet: filled again with theirs.
+    dock.open_form(mine.lon, mine.lat, editing=dock.book.record(mine.id))
+    assert wait_for(lambda: dock.note_input.text() == "鈴木の備考")
+    assert dock.pending[2].note == "鈴木の備考"
+    dock.close_form()
+    # A record of theirs: shown after the quiet read (on another image, at most every 30 s; forced here).
+    theirs.save([replace(mine, id="theirs-1", object_id="B", object_name="鈴木のモノ", updated_at=now_ms())])
+    dock.refresh(force=True)
+    assert wait_for(lambda: any(o.object_name == "鈴木のモノ" for o in dock.book.records))
+
+
+def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypatch):
+    """未保存の記録: kept on this computer when the save fails, even with another form open; sent again with the same id."""
+    from satellite_observation.core.obs.book import ObservationBook
+    from satellite_observation.qgis_io import settings as qs
+
+    p, iface, dock, layers, tmp_path = plugin
+    book = dock.book
+    real_save = book.store.save
+
+    def refuse(records):
+        raise OSError("ネットワークに接続できません")
+
+    monkeypatch.setattr(book.store, "save", refuse)
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.note_input.setText("一つ目")
+    dock.submit()
+    assert dock.form.isVisible() and dock.note_input.text() == "一つ目"
+    assert dock.drafts_button.isVisible() and dock.drafts_button.text() == "未保存の記録 1 件…"
+    first = book.drafts()[0]
+    assert first.record.object_name == "あおば" and "ネットワーク" in first.reason
+    # Sent again from the form: the same record (not a second one), still failing.
+    dock.submit()
+    assert [d.id for d in book.drafts()] == [first.id]
+    # Given up in the form (Esc): still kept; another one failing is kept beside it.
+    dock.close_form()
+    dock.map_clicked(139.71, 35.61, None)
+    dock.object_input.setText("いなづま")
+    dock.note_input.setText("二つ目")
+    dock.submit()
+    assert len(book.drafts()) == 2 and dock.drafts_button.text() == "未保存の記録 2 件…"
+    dock.close_form()
+    # Kept in QgsSettings: another book of the same store (QGIS started again) has them.
+    again = ObservationBook(book.store, book.area_store, book.taxonomy_store, book.vocabulary, prefs=qs.SettingsPrefs())
+    assert [d.record.note for d in again.drafts()] == ["一つ目", "二つ目"]
+    # The network is back: one opened in the form and saved, the other sent from the list.
+    monkeypatch.setattr(book.store, "save", real_save)
+    dialog = dock.open_drafts()
+    assert dialog.tree.topLevelItemCount() == 2
+    assert dock.open_draft(first.id) and dock.note_input.text() == "一つ目"
+    dock.submit()
+    assert [o.id for o in book.living()] == [first.id]
+    assert len(book.drafts()) == 1 and dialog.tree.topLevelItemCount() == 1
+    dialog.send()
+    assert book.drafts() == [] and not dock.drafts_button.isVisible()
+    assert sorted(o.note for o in book.living()) == ["一つ目", "二つ目"]

@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from qgis.core import QgsMapLayer, QgsProject
 from qgis.gui import QgsMapLayerComboBox
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
@@ -178,6 +178,11 @@ class CatalogDock(PluginDock):
         self.status = QLabel()
         self.status.setWordWrap(True)
         row.addWidget(self.status, 1)
+        # 分担 (`assignments`): who works which image, and only those nobody has taken.
+        self.unworked_only = QCheckBox(self.tr("未着手のみ"))
+        self.unworked_only.setToolTip(self.tr("まだ誰も担当にしていない画像だけを一覧に出す（分担）"))
+        self.unworked_only.toggled.connect(lambda _on: self._apply_work_filter())
+        row.addWidget(self.unworked_only)
         self.body.addLayout(row)
 
         self.model = CatalogModel(self)
@@ -191,7 +196,13 @@ class CatalogDock(PluginDock):
         self.table.doubleClicked.connect(lambda index: self.open_records([self.model.records[index.row()]]))
         self.table.selectionModel().selectionChanged.connect(self._selection_changed)
         self.model.layoutChanged.connect(self._redraw)
+        self.model.layoutChanged.connect(self._apply_work_filter)
         self.body.addWidget(self.table, 1)
+        #: The 分担 of the listed images read again every minute while the dock is shown.
+        self._work_asked = 0
+        self._work_timer = QTimer(self)
+        self._work_timer.setInterval(60_000)
+        self._work_timer.timeout.connect(self.load_work)
 
         buttons = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
@@ -274,6 +285,9 @@ class CatalogDock(PluginDock):
         self.catalog_box.blockSignals(False)
         self.layers = {}
         self.buttons["event"].setVisible(self.context.config.events is not None)
+        self.unworked_only.setVisible(self.context.config.assignments is not None)
+        if self.context.config.assignments is None:
+            self.unworked_only.setChecked(False)
         self.search_button.setEnabled(bool(self.catalogs()))
         if not self.catalogs():
             self.status.setText(self.tr("設定ファイルに画像カタログなし"))
@@ -371,7 +385,7 @@ class CatalogDock(PluginDock):
 
     def show_records(self, catalog: CatalogConfig, records, overlaps=None) -> None:
         self._shown_catalog = catalog
-        self.model.set_records(catalog, records, overlaps)
+        self.model.set_records(catalog, records, overlaps, work=self.context.config.assignments is not None)
         # The list comes newest first (類似画像: the most alike first): the heading says so without sorting again.
         header = self.table.horizontalHeader()
         header.blockSignals(True)
@@ -380,10 +394,58 @@ class CatalogDock(PluginDock):
         header.blockSignals(False)
         self.table.resizeColumnsToContents()
         self._redraw()
+        self.load_work()
 
     @property
     def records(self) -> list[CatalogRecord]:
         return list(self.model.records)
+
+    # --- 分担 -------------------------------------------------------------------------------------
+
+    def load_work(self) -> None:
+        """Reads who works the listed images (`assignments`; in a task): the 分担 column and 「未着手のみ」."""
+        source = self.context.config.assignments
+        if source is None or self.model.work is None or not self.model.records:
+            self._work_timer.stop()
+            return
+        if self.isVisible() and not self._work_timer.isActive():
+            self._work_timer.start()
+        from ..core.obs.assignments import assignments_of_images, work_state
+
+        self._work_asked += 1
+        asked = self._work_asked
+        ids = [r.id for r in self.model.records if r.id]
+        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+
+        def work(_task):
+            rows = assignments_of_images(client, source, ids, token)
+            return {i: work_state(rows.get(i, [])) for i in ids}
+
+        def done(states) -> None:
+            if asked != self._work_asked:
+                return  # listed again since
+            self.model.set_work(states)
+            self._apply_work_filter()
+
+        def failed(message: str) -> None:
+            if asked == self._work_asked:
+                self.status.setText(self.tr("分担の読み込みに失敗: {m}").format(m=message))
+
+        self._start(self.tr("分担の読み込み"), work, done, failed)
+
+    def _apply_work_filter(self) -> None:
+        """「未着手のみ」: the rows of images someone took (or not read yet) hidden."""
+        from ..core.obs.assignments import UNWORKED
+
+        only = self.unworked_only.isChecked() and self.model.work is not None
+        shown = 0
+        for row, r in enumerate(self.model.records):
+            state = self.model.work_state(r)
+            hide = only and (state is None or state[0] != UNWORKED)
+            self.table.setRowHidden(row, hide)
+            shown += not hide
+        base = self.status.text().split(self.tr("（表示: 未着手"))[0]
+        self.status.setText(base + (self.tr("（表示: 未着手 {n} 件）").format(n=shown) if only and self.model.records else ""))
 
     # --- 類似画像の検索 ---------------------------------------------------------------------------
 
@@ -588,6 +650,10 @@ class CatalogDock(PluginDock):
         self.canvas.refresh()
 
     def _visibility(self, visible: bool) -> None:
+        if not visible:
+            self._work_timer.stop()
+        elif self.model.work is not None and self.model.records:
+            self.load_work()
         if visible and self.overlay is None:
             self.overlay = FootprintOverlay(self.canvas)
             self.overlay.show_area(self.drawn)

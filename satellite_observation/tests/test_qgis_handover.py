@@ -233,3 +233,22 @@ def test_recording_does_not_take_when_switched_off_or_without_the_table(plugin):
     assert p.context.config.assignments.claim_on_record is False
     dock.set_active(True)
     assert dock.active and not work.rows
+
+
+def test_the_connection_check_dialog_lists_and_copies(plugin):
+    """「接続と表の点検…」: the services of the settings asked in a task, problems first, copied as text."""
+    p, iface, dock, tmp_path = plugin
+    fake, work, memo = _setup(p, tmp_path)
+    work.types.pop("ASSIGNEE")  # a needed attribute gone
+    dialog = p.open_health_check()
+    assert wait_for(lambda: dialog.results)
+    top = [dialog.tree.topLevelItem(i) for i in range(dialog.tree.topLevelItemCount())]
+    assert top[0].text(0) == "問題" and top[0].text(1) == "assignments"
+    assert any(t.text(1) == "handover.table" and t.text(0) in ("OK", "注意") for t in top)
+    text = dialog.copy()
+    assert text.startswith("接続と表の点検（") and "属性 ASSIGNEE がない" in text
+    assert top[0].child(0).text(0).startswith("問題: 属性 ASSIGNEE がない")
+    assert QApplication.clipboard().text() == text
+    # Asked again: the same dialog.
+    assert p.open_health_check() is dialog
+    assert wait_for(lambda: dialog.again_button.isEnabled())

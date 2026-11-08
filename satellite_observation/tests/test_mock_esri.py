@@ -289,3 +289,16 @@ def test_assignments_and_handover_memos_over_http(server):
     keep_memo(client, table, "引き継ぎ本文", HandoverData(start=now - 3_600_000, end=now, now=now, user="tester", memo="申し送り"))
     last = last_memo(client, table, since=now - 86_400_000)
     assert (last.text, last.memo, last.written_by) == ("引き継ぎ本文", "申し送り", "tester")
+
+
+def test_the_mock_passes_the_connection_check(server):
+    """「接続と表の点検」 over the mock and its settings file: every service answers with the attributes the file names."""
+    from satellite_observation.core.health import OK, check_all, report_text
+
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    results = check_all(EsriClient(transport), config, lambda url, token: token)
+    text = report_text(results)
+    assert len(results) >= 15
+    # The settings' Esri basemap is on the internet (not the mock).
+    assert [r.target.name for r in results if r.level != OK and "127.0.0.1" in r.target.url] == [], text

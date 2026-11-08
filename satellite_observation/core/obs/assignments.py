@@ -266,3 +266,44 @@ def progress_text(p: Progress) -> str:
 def assignees(items: Sequence[Assignment]) -> list[str]:
     """The people assigned, in the order first met."""
     return list(dict.fromkeys(x.assignee for x in items if x.assignee))
+
+
+# ---- 画像カタログの「分担」列 ------------------------------------------------------------------------
+
+#: An image nobody has taken yet (no row in the table).
+UNWORKED = "未着手"
+
+
+def assignments_of_images(client: EsriClient, source: EsriSource, image_ids: Iterable[str], token: Optional[str] = None,
+                          chunk: int = 200) -> dict[str, list[Assignment]]:
+    """The rows of each image (by id; images without a row left out), asked in chunks of `chunk` ids."""
+    f = source.fields
+    ids = list(dict.fromkeys(i for i in image_ids if i))
+    out: dict[str, list[Assignment]] = {}
+    for i in range(0, len(ids), chunk):
+        part = ids[i:i + chunk]
+        where = f"{f['imageId']} IN ({', '.join(quote(x) for x in part)})"
+        for x in load_assignments(client, source, token, where):
+            out.setdefault(x.image_id, []).append(x)
+    return out
+
+
+def work_state(rows: Sequence[Assignment]) -> tuple[str, str]:
+    """
+    An image's state for the catalog's list, of its rows: (UNWORKED, '')
+    with none, the holder's (作業中 or 保留, who) while held, else (完了,
+    who finished last).
+    """
+    held = holder_of(rows, rows[0].image_id) if rows else None
+    if held is not None:
+        return held.status or STATUSES[0], held.assignee
+    if not rows:
+        return UNWORKED, ""
+    last = max(rows, key=lambda x: (x.done_at or 0, x.oid or 0))
+    return DONE, last.assignee
+
+
+def work_text(state: tuple[str, str]) -> str:
+    """`未着手`, `作業中（鈴木）`, `完了（鈴木）`."""
+    status, who = state
+    return f"{status}（{who}）" if who else status
