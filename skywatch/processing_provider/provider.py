@@ -8,6 +8,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
 from .align_algorithm import AlignAlgorithm
+from .annotation_algorithm import DatasetPointsToBoxesAlgorithm, PointsToBoxesAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .classify_algorithm import ClassifyAlgorithm
 from .cloud_algorithm import CloudCoverAlgorithm
@@ -46,6 +47,8 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(DetectAlgorithm())
         self.addAlgorithm(TrainAlgorithm())
         self.addAlgorithm(DatasetAlgorithm())
+        self.addAlgorithm(PointsToBoxesAlgorithm())
+        self.addAlgorithm(DatasetPointsToBoxesAlgorithm())
         for algorithm in analysis_algorithm.registered():
             self.addAlgorithm(algorithm)
         for algorithm in gp_algorithm.registered():

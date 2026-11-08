@@ -74,7 +74,8 @@ MENU_GROUPS = [
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
-    ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "AI 学習（物体検出）…"]),
+    ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…",
+            "AI 学習（物体検出）…"]),
     ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", None,
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
@@ -546,6 +547,15 @@ class SkywatchPlugin:
         dataset.triggered.connect(lambda: self.open_dataset())
         self._add_to_menu(dataset)
         self.actions.append(dataset)
+        # 「アノテーション変換」: point annotations as boxes turned to the object (a layer, or a training dataset).
+        boxes = QAction(icon("ai_segment"), tr("アノテーション変換（点→矩形）…"), self.iface.mainWindow())
+        boxes.triggered.connect(lambda: self.open_points_to_boxes())
+        self._add_to_menu(boxes)
+        self.actions.append(boxes)
+        dataset_boxes = QAction(icon("ai_dataset"), tr("アノテーション変換（教師データセット）…"), self.iface.mainWindow())
+        dataset_boxes.triggered.connect(lambda: self.open_dataset_points_to_boxes())
+        self._add_to_menu(dataset_boxes)
+        self.actions.append(dataset_boxes)
         segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
         segment.setObjectName("SatObsSegment")
         self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
@@ -1115,6 +1125,20 @@ class SkywatchPlugin:
         import processing  # QGIS's Processing plugin (loaded with QGIS)
 
         processing.execAlgorithmDialog("skywatch:make_dataset", {})
+
+    def open_points_to_boxes(self) -> None:
+        """「アノテーション変換（点→矩形）」 with the active point layer and image."""
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        from .processing_provider.annotation_algorithm import default_inputs as box_inputs
+
+        layers = list(QgsProject.instance().mapLayers().values())
+        processing.execAlgorithmDialog("skywatch:points_to_boxes", box_inputs(layers, self.iface.activeLayer()))
+
+    def open_dataset_points_to_boxes(self) -> None:
+        import processing  # QGIS's Processing plugin (loaded with QGIS)
+
+        processing.execAlgorithmDialog("skywatch:dataset_points_to_boxes", {})
 
     def open_transfer(self) -> None:
         if self.transfer_dialog is None:
