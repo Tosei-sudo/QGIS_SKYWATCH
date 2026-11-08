@@ -176,6 +176,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "requestExports",
   "editTracking",
   "alertReports",
+  "observationExports",
   "assignments",
   "handover",
   "events"
@@ -479,6 +480,66 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "placeKind",
   "places"
  ],
+ "obsExportSources": [
+  "id",
+  "objectId",
+  "objectName",
+  "kind",
+  "activity",
+  "present",
+  "confidence",
+  "imageTime",
+  "imageId",
+  "imageName",
+  "lon",
+  "lat",
+  "length",
+  "heading",
+  "width",
+  "note",
+  "recordedBy",
+  "updatedBy",
+  "created",
+  "updated",
+  "deleted",
+  "place",
+  "placeKind",
+  "places",
+  "geofences",
+  "latLon",
+  "dms",
+  "mgrs",
+  "utm",
+  "geometry",
+  "index",
+  "count",
+  "exportedAt",
+  "exportedBy",
+  "periodStart",
+  "periodEnd",
+  "periodBasis",
+  "areaName",
+  "format"
+ ],
+ "obsExportFileSources": [
+  "count",
+  "exportedAt",
+  "exportedBy",
+  "periodStart",
+  "periodEnd",
+  "periodBasis",
+  "areaName",
+  "format"
+ ],
+ "obsGeometries": [
+  "geojson",
+  "wkt",
+  "latlon"
+ ],
+ "obsBuiltinFormats": [
+  "標準（CSV）",
+  "標準（JSON）"
+ ],
  "exportSources": [
   "id",
   "name",
@@ -699,6 +760,37 @@ const SOURCE_LABELS = {
   system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度" };
+const OBS_SOURCE_LABELS = {
+  id: "観測 ID", objectId: "モノ ID", objectName: "モノ", kind: "分類（level で階層）", activity: "活動", present: "有無", confidence: "確度",
+  imageTime: "撮像日時", imageId: "画像 ID", imageName: "画像", lon: "経度", lat: "緯度", length: "長さ（m）", heading: "向き（度）",
+  width: "幅（m）", note: "備考", recordedBy: "記録者", updatedBy: "更新者", created: "登録日時", updated: "更新日時", deleted: "削除日時",
+  place: "地名（いちばん小さいもの）", placeKind: "地名の種類", places: "含まれる地名すべて", geofences: "ジオフェンス",
+  latLon: "緯度経度（十進）", dms: "度分秒", mgrs: "MGRS", utm: "UTM", geometry: "点（座標）", index: "何件目",
+  count: "件数", exportedAt: "出力日時", exportedBy: "出力した人", periodStart: "期間の開始", periodEnd: "期間の終わり",
+  periodBasis: "期間の基準", areaName: "場所の名前", format: "フォーマット名",
+};
+const OBS_GEOMETRY_LABELS = { geojson: "GeoJSON の Point", wkt: "WKT の POINT", latlon: "緯度,経度" };
+/** 列・スキーマの編集の違い（撮像依頼の日次出力・観測記録のエクスポート）。 */
+const PROFILES = {
+  request: {
+    sources: () => K.exportSources, labels: SOURCE_LABELS, geometries: () => K.geometries, geometryLabels: GEOMETRY_LABELS,
+    array: "requests", arrayLabel: "requests（依頼の一覧）", fileSources: ["system", "runDate", "day", "count", "requests"],
+    timeSources: ["start", "end", "periodStart", "periodEnd", "runDate"], digitSources: ["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"],
+    common: ["id", "name", "category", "satellite", "start", "end", "geometry", "priority", "cloudForecast", "warnings"],
+    legend: "CSV の列（columns）。上から順に左の列", note: "システムが求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が requests の配列が依頼の一覧になり、その items の中は依頼 1 件ごとの値。固定値は const。",
+    inside: "依頼ごとの値は x-source: requests の配列の items の中に置く（外に置くと出ない）", name: (o) => o.system || "system",
+    template: () => schemaTemplate(), allowed: true,
+  },
+  observation: {
+    sources: () => K.obsExportSources, labels: OBS_SOURCE_LABELS, geometries: () => K.obsGeometries, geometryLabels: OBS_GEOMETRY_LABELS,
+    array: "records", arrayLabel: "records（記録の一覧）", fileSources: [...(K.obsExportFileSources || []), "records"],
+    timeSources: ["imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd"], digitSources: ["lon", "lat", "length", "heading", "width"],
+    common: ["id", "imageTime", "objectName", "kind", "activity", "present", "confidence", "lat", "lon", "place", "note"],
+    legend: "列（columns）。CSV は上から順に左の列、JSON（スキーマなし）は記録ごとのオブジェクトのキー", note: "受け取り側が求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が records の配列が記録の一覧になり、その items の中は記録 1 件ごとの値。固定値は const。",
+    inside: "記録ごとの値は x-source: records の配列の items の中に置く（外に置くと出ない）", name: (o) => o.name || "observations",
+    template: () => obsSchemaTemplate(), allowed: false,
+  },
+};
 const DATE_FORMATS = ["iso", "iso-date", "unix", "unixms", "%Y%m%d", "%Y/%m/%d %H:%M", "%Y-%m-%dT%H:%M:%S"];
 
 // ---------------------------------------------------------------- 小道具
@@ -960,6 +1052,26 @@ const SPEC = [
         const names = (Array.isArray(it.formats) ? it.formats : []).map((f) => f && f.name).filter(Boolean);
         if (!names.length) p.push(`${at}.formats: フォーマットが 1 つ以上必要`);
       } }) },
+    { key: "observationExports", label: "観測記録のエクスポート", doc: "観測記録のエクスポートobservationexports", help: "観測記録を期間・場所・大分類で絞って CSV・JSON に保存するときのフォーマット（名前付き、複数）。組み込みの「標準（CSV）」「標準（JSON）」はいつも選べる。撮像依頼の日次出力と同じく、CSV は列、JSON は列か JSON Schema（x-source）で組む。",
+      field: O("observationExports", "エクスポート", [
+        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "項目 place・placeKind・places に使う地名のポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の namedAreas" }),
+        TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "項目 geofences に使うポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ alertReports の geofences" }),
+        S("default", "既定のフォーマット", () => [K.obsBuiltinFormats[0], K.obsBuiltinFormats[1], ...((state.observationExports && state.observationExports.formats) || []).map((f) => f && f.name).filter(Boolean)]),
+        I("formats", "フォーマット", [
+          T("name", "名前", { req: true, help: "画面に出す名前（" + K.obsBuiltinFormats.join("・") + " は使えない）" }),
+          S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（列か JSON Schema）"]], { ph: "csv", rerender: true }),
+          { k: "columns", t: "columns", l: "列", profile: PROFILES.observation },
+          { k: "schema", t: "schema", l: "JSON Schema", profile: PROFILES.observation, showIf: (it) => it.format === "json" },
+          T("fileName", "ファイル名", { ph: "observations_{now:%Y%m%d_%H%M}.{ext}", help: "{now:%Y%m%d}（今、timeZone で）・{name}・{ext}" }),
+          S("encoding", "文字コード", K.encodings, { ph: "CSV は utf-8-sig、JSON は utf-8" }),
+          B("header", "見出し行（CSV）", { showIf: (it) => (it.format || "csv") === "csv" }),
+          T("delimiter", "区切り文字（CSV）", { ph: ",", help: "1 文字。タブは \\t（JSON の \"\\t\"）", showIf: (it) => (it.format || "csv") === "csv" }),
+          S("newline", "改行（CSV）", [["crlf", "CRLF"], ["lf", "LF"]], { ph: "crlf", showIf: (it) => (it.format || "csv") === "csv" }),
+          T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo" }),
+          T("dateFormat", "日時の書式", { ph: "iso", list: () => DATE_FORMATS, help: "iso・iso-date・unix・unixms か strftime（%Y/%m/%d %H:%M など）" }),
+          N("digits", "経度・緯度の小数の桁", { min: 0, max: 12, ph: "7" }),
+        ], { title: (it) => it.name, unique: "name", check: checkObsExport }),
+      ]) },
     { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 画像）。各自が「この画像を担当」で取り、ほかの人が担当中の画像は取れない。",
       field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にし、ほかの人が担当中なら記録できない（\"claimOnRecord\": false で止める）" }) },
     { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
@@ -1343,14 +1455,14 @@ function priorityField(f, obj, commit) {
   return box;
 }
 
-const sourceOptions = (extra = []) => [...extra, ...K.exportSources.map((s) => [s, `${s}（${SOURCE_LABELS[s] || s}）`])];
-const COMMON_COLUMNS = ["id", "name", "category", "satellite", "start", "end", "geometry", "priority", "cloudForecast", "warnings"];
+const sourceOptions = (extra = [], prof = PROFILES.request) => [...extra, ...prof.sources().map((s) => [s, `${s}（${prof.labels[s] || s}）`])];
 
 function columnsField(f, obj, commit) {
+  const prof = f.profile || PROFILES.request;
   const cols = Array.isArray(obj.columns) ? obj.columns : [];
   const save = () => { if (!cols.length) delete obj.columns; else obj.columns = cols; commit(); changed(); };
-  const box = el("fieldset", {}, el("legend", { text: "CSV の列（columns）。上から順に左の列" }));
-  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", "許す値（allowed）", ""].map((h) => el("th", { text: h }))));
+  const box = el("fieldset", {}, el("legend", { text: prof.legend }));
+  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", prof.allowed ? "許す値（allowed）" : "空のとき・前後（empty・prefix・suffix）", ""].map((h) => el("th", { text: h }))));
   cols.forEach((c, i) => {
     if (!isObj(c)) { table.append(el("tr", {}, el("td", { colspan: 6 }, jsonArea(c, (x) => { cols[i] = x; save(); })))); return; }
     const upd = (k, v) => { if (v === undefined || v === "") delete c[k]; else c[k] = v; save(); };
@@ -1359,16 +1471,18 @@ function columnsField(f, obj, commit) {
       if (s === "\u0000value") { delete c.source; if (!("value" in c)) c.value = ""; } else { c.source = s; delete c.value; }
       if (c.source !== "geometry") delete c.geometry;
       save(); render();
-    } }, ...sourceOptions([["\u0000value", "固定値"]]).map(([v, l]) => el("option", { value: v, text: l, selected: c.source === undefined ? v === "\u0000value" : c.source === v })));
+    } }, ...sourceOptions([["\u0000value", "固定値"]], prof).map(([v, l]) => el("option", { value: v, text: l, selected: c.source === undefined ? v === "\u0000value" : c.source === v })));
     const fmtCell = el("td", {});
     if (c.source === undefined) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", oninput: (e) => { c.value = autoValue(e.target.value) ?? ""; save(); } }));
     else if (c.source === "geometry") {
-      fmtCell.append(el("select", { onchange: (e) => upd("geometry", e.target.value) }, ...K.geometries.map((g) => el("option", { value: g, text: `${g}（${GEOMETRY_LABELS[g]}）`, selected: (c.geometry || "wkt") === g }))),
+      fmtCell.append(el("select", { onchange: (e) => upd("geometry", e.target.value) }, ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (c.geometry || "wkt") === g }))),
         el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
     } else {
-      fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: ["start", "end", "periodStart", "periodEnd", "runDate"].includes(c.source) ? "日時の書式（既定はシステムの）" : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
-      if (["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"].includes(c.source))
+      fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: prof.timeSources.includes(c.source) ? "日時の書式（既定はフォーマットの）" : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
+      if (prof.digitSources.includes(c.source))
         fmtCell.append(el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
+      if (!prof.allowed && c.source === "kind")
+        fmtCell.append(el("input", { type: "number", value: c.level ?? "", placeholder: "階層（1・-1）", title: "level: 1 が最上位、-1 が最下位。空で分類全体", oninput: (e) => upd("level", e.target.value === "" || Number(e.target.value) === 0 ? undefined : Number(e.target.value)) }));
     }
     const mapText = isObj(c.map) ? Object.entries(c.map).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "";
     table.append(el("tr", {},
@@ -1379,10 +1493,13 @@ function columnsField(f, obj, commit) {
         for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
         upd("map", isEmpty(m) ? undefined : m);
       } })),
-      el("td", {}, el("input", { type: "text", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", oninput: (e) => {
+      prof.allowed ? el("td", {}, el("input", { type: "text", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", oninput: (e) => {
         const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map(autoValue);
         upd("allowed", a.length ? a : undefined);
-      } })),
+      } })) : el("td", {},
+        el("input", { type: "text", class: "short", value: c.empty === undefined ? "" : showAuto(c.empty), placeholder: "空のとき", title: "empty: 値が空のときに書く", oninput: (e) => upd("empty", e.target.value === "" ? undefined : e.target.value) }),
+        el("input", { type: "text", class: "short", value: c.prefix ?? "", placeholder: "前", title: "prefix: 値があるときだけ前に", oninput: (e) => upd("prefix", e.target.value) }),
+        el("input", { type: "text", class: "short", value: c.suffix ?? "", placeholder: "後", title: "suffix: 値があるときだけ後に", oninput: (e) => upd("suffix", e.target.value) })),
       el("td", {}, el("span", { class: "tools" },
         i > 0 ? el("button", { type: "button", class: "small", text: "↑", onclick: () => { cols.splice(i - 1, 0, cols.splice(i, 1)[0]); save(); render(); } }) : null,
         el("button", { type: "button", class: "small danger", text: "×", onclick: () => { cols.splice(i, 1); save(); render(); } })))));
@@ -1390,7 +1507,7 @@ function columnsField(f, obj, commit) {
   box.append(table, el("div", { class: "bar" },
     el("button", { type: "button", class: "small", text: "＋ 列", onclick: () => { cols.push({ key: "", source: "id" }); save(); render(); } }),
     el("button", { type: "button", class: "small", text: "よく使う列をまとめて追加", onclick: () => {
-      for (const s of COMMON_COLUMNS) if (!cols.some((c) => c && c.source === s)) cols.push(s === "geometry" ? { key: "AOI", source: s, geometry: "wkt", digits: 5 } : { key: s.toUpperCase(), source: s });
+      for (const s of prof.common) if (!cols.some((c) => c && c.source === s)) cols.push(s === "geometry" ? { key: "AOI", source: s, geometry: "wkt", digits: 5 } : { key: s.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase(), source: s });
       save(); render();
     } })));
   return box;
@@ -1416,15 +1533,36 @@ function schemaTemplate() {
   };
 }
 
+function obsSchemaTemplate() {
+  return {
+    type: "object", required: ["exportedAt", "records"],
+    properties: {
+      exportedAt: { type: "string", format: "date-time", "x-source": "exportedAt" },
+      area: { type: "string", "x-source": "areaName" },
+      count: { type: "integer", "x-source": "count" },
+      records: { type: "array", "x-source": "records", items: { type: "object", required: ["id"], properties: {
+        id: { type: "string", "x-source": "id" },
+        imageTime: { type: "string", format: "date-time", "x-source": "imageTime" },
+        kind: { type: "string", "x-source": "kind" },
+        object: { type: "string", "x-source": "objectName" },
+        present: { type: "boolean", "x-source": "present" },
+        place: { type: ["string", "null"], "x-source": "place" },
+        geometry: { type: "object", "x-source": "geometry", "x-geometry": "geojson" },
+      } } },
+    },
+  };
+}
+
 function schemaField(f, obj, commit) {
+  const prof = f.profile || PROFILES.request;
   const s = obj.schema;
   const mode = typeof s === "string" ? "path" : isObj(s) ? "here" : "";
   const save = () => { commit(); changed(); };
   const box = el("fieldset", {}, el("legend", { text: "JSON Schema（schema）" }),
-    el("div", { class: "note", text: "システムが求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が requests の配列が依頼の一覧になり、その items の中は依頼 1 件ごとの値。固定値は const。" }));
+    el("div", { class: "note", text: prof.note }));
   const radio = (val, label) => el("label", {}, el("input", { type: "radio", name: "sch" + Math.random(), checked: mode === val, onchange: () => {
-    if (val === "path") obj.schema = typeof s === "string" ? s : "schemas/" + (obj.system || "system") + ".schema.json";
-    else if (val === "here") obj.schema = isObj(s) ? s : schemaTemplate();
+    if (val === "path") obj.schema = typeof s === "string" ? s : "schemas/" + prof.name(obj) + ".schema.json";
+    else if (val === "here") obj.schema = isObj(s) ? s : prof.template();
     save(); render();
   } }), label);
   box.append(el("div", { class: "choices" }, radio("here", "ここで組む（設定ファイルに埋め込む）"), radio("path", "ファイルを指定（パス）")));
@@ -1443,14 +1581,14 @@ function schemaField(f, obj, commit) {
   if (mode !== "here") return box;
   const root = obj.schema;
   box.append(el("div", { class: "bar" },
-    el("button", { type: "button", class: "small", text: "雛形に置き換え", onclick: () => { obj.schema = schemaTemplate(); save(); render(); } }),
-    el("label", { class: "button small" }, "システムのスキーマを読み込む…", el("input", { type: "file", class: "hidden", accept: ".json", onchange: async (e) => {
+    el("button", { type: "button", class: "small", text: "雛形に置き換え", onclick: () => { obj.schema = prof.template(); save(); render(); } }),
+    el("label", { class: "button small" }, "スキーマを読み込む…", el("input", { type: "file", class: "hidden", accept: ".json", onchange: async (e) => {
       const file = e.target.files[0];
       if (!file) return;
       try { obj.schema = loadJsonc(await file.text()); save(); render(); } catch (err) { alert("JSON として読めない: " + err.message); }
     } })),
-    el("button", { type: "button", class: "small", text: ".schema.json として保存", onclick: () => download(`${obj.system || "system"}.schema.json`, JSON.stringify(root, null, 2) + "\n") })));
-  box.append(schemaNode(root, null, null, root, save));
+    el("button", { type: "button", class: "small", text: ".schema.json として保存", onclick: () => download(`${prof.name(obj)}.schema.json`, JSON.stringify(root, null, 2) + "\n") })));
+  box.append(schemaNode(root, null, null, root, save, false, prof));
   const raw = el("details", {}, el("summary", { class: "note", text: "JSON で直接直す" }), jsonArea(root, (x) => { if (isObj(x)) { obj.schema = x; save(); } }));
   raw.addEventListener("toggle", () => { if (!raw.open) render(); });
   box.append(raw);
@@ -1458,7 +1596,7 @@ function schemaField(f, obj, commit) {
 }
 
 /** スキーマの 1 節（name は親の properties での名前、parent はその親の節）。 */
-function schemaNode(node, name, parent, root, save, inRequests = false) {
+function schemaNode(node, name, parent, root, save, inRequests = false, prof = PROFILES.request) {
   const wrap = el("div", { class: "node" });
   if (!isObj(node)) { wrap.append(el("span", { class: "err", text: `${name}: オブジェクト以外（JSON で直す）` })); return wrap; }
   if (typeof node.$ref === "string") {
@@ -1494,28 +1632,28 @@ function schemaNode(node, name, parent, root, save, inRequests = false) {
   const src = node["x-source"];
   const what = "const" in node ? "\u0000const" : typeof src === "string" ? src : "";
   const srcOpts = [["", type === "object" ? "（中のプロパティで組む）" : "なし（default か空）"], ["\u0000const", "固定値（const）"]];
-  if (type === "array") srcOpts.push(["requests", "requests（依頼の一覧）"]);
+  if (type === "array") srcOpts.push([prof.array, prof.arrayLabel]);
   head.append(el("select", { title: "入れる値（x-source）", onchange: (e) => {
     const v = e.target.value;
     delete node["x-source"];
     if (v !== "\u0000const") delete node.const;
     if (v === "\u0000const") node.const = node.const ?? "";
     else if (v) node["x-source"] = v;
-    if (v === "requests" && !isObj(node.items)) node.items = { type: "object", properties: {} };
+    if (v === prof.array && !isObj(node.items)) node.items = { type: "object", properties: {} };
     if (v !== "geometry") delete node["x-geometry"];
     redraw();
-  } }, ...[...srcOpts, ...sourceOptions()].map(([v, l]) => el("option", { value: v, text: l, selected: what === v }))));
+  } }, ...[...srcOpts, ...sourceOptions([], prof)].map(([v, l]) => el("option", { value: v, text: l, selected: what === v }))));
   if (what === "\u0000const") head.append(el("input", { type: "text", class: "short", value: showAuto(node.const), placeholder: "値", oninput: (e) => { node.const = autoValue(e.target.value) ?? ""; save(); } }));
   if (src === "geometry") {
     head.append(el("select", { title: "座標の書き方（x-geometry）", onchange: (e) => { node["x-geometry"] = e.target.value; save(); } },
-      ...K.geometries.map((g) => el("option", { value: g, text: `${g}（${GEOMETRY_LABELS[g]}）`, selected: (node["x-geometry"] || "geojson") === g }))));
+      ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (node["x-geometry"] || "geojson") === g }))));
     head.append(el("input", { type: "number", class: "short", min: 0, max: 12, value: node["x-digits"] ?? "", placeholder: "小数の桁", oninput: (e) => { if (e.target.value === "") delete node["x-digits"]; else node["x-digits"] = Number(e.target.value); save(); } }));
   }
   if (type === "string") {
     head.append(el("select", { title: "format", onchange: (e) => { if (e.target.value) node.format = e.target.value; else delete node.format; save(); } },
       ...["", "date", "date-time"].map((x) => el("option", { value: x, text: x || "format なし", selected: (node.format || "") === x }))));
   }
-  if (typeof src === "string" && src !== "requests" && src !== "geometry") {
+  if (typeof src === "string" && src !== prof.array && src !== "geometry") {
     head.append(el("input", { type: "text", class: "short mono", value: node["x-format"] ?? "", placeholder: "x-format", title: "書式（x-format）: 日時なら iso・unix・%Y%m%d、数なら %02d", oninput: (e) => { if (e.target.value) node["x-format"] = e.target.value; else delete node["x-format"]; save(); } }));
     head.append(el("input", { type: "text", class: "short", value: isObj(node["x-map"]) ? Object.entries(node["x-map"]).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "", placeholder: "x-map 右=R", title: "読み替え（x-map）", oninput: (e) => {
       const m = {};
@@ -1539,10 +1677,10 @@ function schemaNode(node, name, parent, root, save, inRequests = false) {
   wrap.append(head);
   const others = Object.keys(node).filter((k) => !NODE_KEYS.has(k));
   if (others.length) wrap.append(el("div", { class: "other", text: "ほかのキーワード（そのまま残す）: " + others.join("・") }));
-  if (!inRequests && typeof src === "string" && !["system", "runDate", "day", "count", "requests"].includes(src))
-    wrap.append(el("div", { class: "err", text: "依頼ごとの値は x-source: requests の配列の items の中に置く（外に置くと出ない）" }));
+  if (!inRequests && typeof src === "string" && !prof.fileSources.includes(src))
+    wrap.append(el("div", { class: "err", text: prof.inside }));
   if (type === "object" && !src && isObj(node.properties)) {
-    for (const [k, v] of Object.entries(node.properties)) wrap.append(schemaNode(v, k, node, root, save, inRequests));
+    for (const [k, v] of Object.entries(node.properties)) wrap.append(schemaNode(v, k, node, root, save, inRequests, prof));
     wrap.append(el("button", { type: "button", class: "small", text: "＋ プロパティ", onclick: () => {
       let n = 1;
       while (("prop" + n) in node.properties) n++;
@@ -1550,7 +1688,7 @@ function schemaNode(node, name, parent, root, save, inRequests = false) {
       redraw();
     } }));
   }
-  if (type === "array" && isObj(node.items) && src !== "geometry") wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === "requests"));
+  if (type === "array" && isObj(node.items) && src !== "geometry") wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === prof.array, prof));
   return wrap;
 }
 
@@ -1803,6 +1941,21 @@ function sampleBox(sys) {
 }
 let sampleRefreshers = new Set();
 
+function checkObsExport(it, at, p) {
+  const fmt = it.format || "csv";
+  if (K.obsBuiltinFormats.includes(it.name)) p.push(`${at}: 名前「${it.name}」は組み込みのフォーマット`);
+  const cols = Array.isArray(it.columns) ? it.columns : [];
+  if (!cols.length && !(fmt === "json" && it.schema)) p.push(`${at}: 列（columns）` + (fmt === "json" ? "か JSON Schema（schema）" : "") + "がない");
+  cols.forEach((c, i) => {
+    if (typeof c === "string") { if (!K.obsExportSources.includes(c)) p.push(`${at}.columns[${i}]: 項目「${c}」は使用不可`); return; }
+    if (!isObj(c) || !c.key) p.push(`${at}.columns[${i}]: 列名（key）がない`);
+    else if (c.source === undefined && !("value" in c)) p.push(`${at}.columns[${i}]: source か value がない`);
+    else if (c.source !== undefined && !K.obsExportSources.includes(c.source)) p.push(`${at}.columns[${i}]: 項目「${c.source}」は使用不可`);
+  });
+  if (fmt !== "json" && it.schema !== undefined) p.push(`${at}: schema は形式が JSON のときのみ`);
+  if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"records"')) p.push({ warn: true, text: `${at}: スキーマに x-source: records の配列がない（記録が出ない）` });
+  if (it.delimiter !== undefined && String(it.delimiter).length !== 1) p.push(`${at}.delimiter: 1 文字`);
+}
 function checkExport(it, at, p) {
   const fmt = it.format || "csv";
   if (fmt === "csv" && !(Array.isArray(it.columns) && it.columns.length)) p.push(`${at}: CSV の列（columns）がない`);

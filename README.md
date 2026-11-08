@@ -16,7 +16,7 @@ Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-su
 |---|---|
 | 撮像計画 | 撮像計画・保存した撮像計画・衛星パス・移動目標撮像計画… ／ 雲量マップ・雲量を属性に付与… |
 | 撮像依頼 | 撮像依頼・撮像計画ファイル出力 |
-| 観測記録 | 観測記録・分類体系の編集・移動体（AIS・ADS-B）・ダッシュボード |
+| 観測記録 | 観測記録・分類体系の編集・通報文の作成…・通報記録の確認…・観測記録のエクスポート…・分担…・引き継ぎメモ…・移動体（AIS・ADS-B）・ダッシュボード |
 | 画像 | 画像カタログ・通知 ／ 画像補正・影から高さ・スペクトル ／ スワイプ比較・位置ずらし・位置ずらしの解除 |
 | 解析・処理 | パンシャープン…・変化抽出（2 時期）…・自動位置合わせ…・土地被覆分類…・簡易オルソ補正… ／ 測地線バッファ…・正距方位での重心…・移動体と検出の照合… ／ サーバ処理… |
 | AI | 物体検出（AI）…・クリック抽出（AI）・AI結果・検出結果を DB へ転記… ／ 教師データセットの作成…・AI 学習（物体検出）… |
@@ -265,7 +265,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 「選んだ記録を削除…」: 一括編集と同じく複数の記録（「モノ」タブではモノの行がそのモノのすべての記録）を選ぶと出る（表で Delete キーでも）。件数を確認してからまとめて削除（既定は「いいえ」）。ふつうは削除済みとして残り「詳細」の「削除済みも表示」から復元できる。Esri の保存先でほかの人が先に変えた記録は削除せず件数を表示し、残りは削除。削除日時の列がない（または `softDelete: false` の）Esri レイヤーでは完全に消えるため、確認にそう表示
 - 「詳細」の「ローカル記録の消去…」でローカル GeoPackage の記録・確認範囲・ファイルなしの画像の一覧を完全に消去（確認あり。「削除済みのみ消去」も可。分類体系・参考写真は残す。Esri の保存先では使用不可）
 - 「モノ」タブで流れ（帯グラフ・表・地図の軌跡）、名前・種別の変更・統合。「分類」タブで分類体系
-- 「詳細」から報告書（HTML 保存・印刷・PDF 保存。地図はキャンバスのレイヤーに記録の印を重ねて描画）、再読み込み、CSV 保存、レイヤー化（記録のポイント・確認範囲のポリゴン・流れのライン。時系列コントローラー対応）
+- 「詳細」から報告書（HTML 保存・印刷・PDF 保存。地図はキャンバスのレイヤーに記録の印を重ねて描画）、再読み込み、エクスポート…（[観測記録のエクスポート](#観測記録のエクスポートobservationexports)）、レイヤー化（記録のポイント・確認範囲のポリゴン・流れのライン。時系列コントローラー対応）
 - 保存先は `observationStores` の Esri フィーチャーレイヤー（通信は QgsTask の中）か、ローカル GeoPackage。記録者は「詳細」の名前、なければ保存先の認証設定のユーザー名
 - 設定ファイルに `"localObservations": false` と書くとローカル GeoPackage を保存先にしない（選べるのは `observationStores` だけ。どれもなければ記録不可）。省略時は `true`
 
@@ -362,6 +362,65 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
       "header": "【注目】{date} {count}件", "footer": "以上" },
     { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
       "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
+  ]
+}
+```
+
+### 観測記録のエクスポート（`observationExports`）
+
+記録を期間・場所・大分類などで絞って CSV か JSON のファイルに保存する。メニューの「観測記録 ▸ 観測記録のエクスポート…」（または「観測記録」ドックの「詳細」の「エクスポート…」）。画面は開いたまま地図を操作できる（範囲を描くため）。
+
+- **フォーマット**: 組み込みの「標準（CSV）」（これまでの「CSV 保存」と同じ列。BOM 付き UTF-8）・「標準（JSON）」（同じ値の配列。キーは `OBS_ID`・`OBJECT_NAME`・`IMAGE_TIME` などの大文字）と、設定ファイルの `observationExports.formats` に名前を付けて書いたもの。最初に選ぶのは `default`（なければ「標準（CSV）」）
+- **期間**: 基準（撮像日時・登録日時・更新日時）と、から・まで（それぞれ指定するときだけ。日時は QGIS のローカル時刻）。撮像日時のない記録は登録日時で比べる
+- **場所**: すべての場所／地図の表示範囲（保存するときの範囲）／地図上に描いた範囲（「地図上に描く」でクリックして頂点、ダブルクリックか右クリックで閉じる。描いた範囲は紫で表示）／レイヤーの地物（ポリゴンレイヤー。「選択した地物のみ」も可）／地名（`namedAreas` の地名を選ぶ。同じ名前のポリゴンはどれに入っていてもよい）。記録の位置（点）が範囲の中にあるものだけ
+- **大分類**: 「すべての大分類」（既定。一覧の大分類の絞り込みに関わらずすべて）か、チェックした大分類だけ。確度（〜以上）、有無（ありのみ・なしのみ）、「削除済みの記録も含める」
+- 該当件数がすぐ出る。「保存…」でファイル名（フォーマットの `fileName`）を確かめて保存。地名・ジオフェンスを書くフォーマットなら保存のときに Esri から読む（10 分間覚えておく）
+- **付加できる値**: 通報と同じ地名（`place`・`placeKind`・`places`）、ジオフェンス（`geofences`）、座標の表記（`latLon`・`dms`・`mgrs`・`utm`）、点の形（`geometry`）、ファイル全体の値（`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`）。地名・ジオフェンスのレイヤーは `observationExports.namedAreas`・`geofences`、なければ [`alertReports`](#通報注目の記録alertreports) の `namedAreas`・`geofences` を使う。どちらかがあれば組み込みのフォーマットにも列が付く（CSV は「地名」「地名の種別」「含まれる地名」「ジオフェンス」、JSON は `PLACE`・`PLACE_KIND`・`PLACES`・`GEOFENCES`）
+
+**フォーマット**（`formats`。撮像依頼の [`requestExports`](docs/imaging-requests.md) と同じく、CSV は列のキー、JSON は列か JSON Schema）:
+
+| キー | 中身 | 既定 |
+| --- | --- | --- |
+| `name` | フォーマットの名前（必須。「標準（CSV）」「標準（JSON）」は使えない） | — |
+| `format` | `csv`・`json` | `csv` |
+| `columns` | 列（JSON ではプロパティ）の配列。`{ "key", "source", "value", "format", "map", "digits", "level", "geometry", "empty", "prefix", "suffix" }`、または項目名だけ（キーも同じ名前）。`value` は固定の値、`format` は日時の書式（`iso`・`iso-date`・`unix`・`unixms`・strftime）か数の書式（`%.3f`）、`map` は値の置き換え（`{ "true": "在", "false": "不在" }`）、`level` は `kind` の階層（1 が最上位、-1 が最下位）、`geometry` は `geojson`・`wkt`・`latlon`、`empty` は空のとき、`prefix`・`suffix` は値があるときだけ前後に付ける文字 | — |
+| `schema` | JSON のみ。JSON Schema（オブジェクトかファイルのパス）。プロパティの `x-source` が項目、記録の配列は `"x-source": "records"` と `items`。`x-format`・`x-map`・`x-digits`・`x-level`・`x-geometry`・`x-empty`。書いたあとスキーマで検査し、合わないところを画面に出す | なし（`columns` の配列） |
+| `fileName` | 保存するファイル名。`{now:%Y%m%d_%H%M}`（今、`timeZone` で）・`{name}`・`{ext}` | `observations_{now:%Y%m%d_%H%M}.{ext}` |
+| `encoding` | `utf-8`・`utf-8-sig`・`cp932`（書けない文字は ? にして画面に出す） | CSV は `utf-8-sig`、JSON は `utf-8` |
+| `header` | CSV の見出し行 | `true` |
+| `delimiter` | CSV の区切り文字（タブは `"\t"`） | `,` |
+| `newline` | CSV の改行 `crlf`・`lf` | `crlf` |
+| `timeZone` | 日時のタイムゾーン | `Asia/Tokyo` |
+| `dateFormat` | 日時の書式 | `iso` |
+| `digits` | 経度・緯度の小数の桁（長さ・向き・幅は 1 桁） | `7` |
+
+項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false）・`confidence`・`imageTime`・`imageId`・`imageName`・`lon`・`lat`・`length`・`heading`・`width`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
+
+```jsonc
+"observationExports": {
+  "namedAreas": "https://…/Alerts/FeatureServer/3",   // なければ alertReports.namedAreas
+  "default": "集計用",
+  "formats": [
+    { "name": "集計用", "format": "csv", "encoding": "cp932", "dateFormat": "%Y/%m/%d %H:%M",
+      "columns": [
+        { "key": "OBS_ID", "source": "id" }, { "key": "IMAGE_TIME", "source": "imageTime" },
+        { "key": "CATEGORY", "source": "kind", "level": 1 }, { "key": "KIND", "source": "kind", "level": -1 },
+        { "key": "PRESENT", "source": "present", "map": { "true": "1", "false": "0" } },
+        { "key": "PLACE", "source": "place", "empty": "（地名なし）" }, { "key": "MGRS", "source": "mgrs" },
+        { "key": "LAT", "source": "lat", "digits": 5 }, { "key": "LON", "source": "lon", "digits": 5 }
+      ] },
+    { "name": "連携 JSON", "format": "json", "fileName": "obs_{now:%Y%m%d}.json",
+      "schema": {
+        "type": "object", "required": ["exportedAt", "records"],
+        "properties": {
+          "exportedAt": { "type": "string", "x-source": "exportedAt" },
+          "area": { "type": "string", "x-source": "areaName" },
+          "records": { "type": "array", "x-source": "records", "items": { "type": "object", "properties": {
+            "id": { "type": "string", "x-source": "id" },
+            "place": { "type": ["string", "null"], "x-source": "place" },
+            "geometry": { "type": "object", "x-source": "geometry", "x-geometry": "geojson" }
+          } } }
+        } } }
   ]
 }
 ```
@@ -951,6 +1010,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `events` | オブジェクト | イベント（地震対応など）。`layer`（イベントのポリゴンレイヤーかテーブル、編集可）・`links`（紐付けテーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }` | なし（ドックはあるが使用不可） | [イベント](#イベント地震対応などevents) |

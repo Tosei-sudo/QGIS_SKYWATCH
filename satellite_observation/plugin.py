@@ -64,7 +64,7 @@ MENU = "衛星撮像計画・観測記録"
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
-    ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
+    ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
@@ -423,6 +423,12 @@ class SatelliteObservationPlugin:
             action.triggered.connect(lambda _on=False, tab=tab: self.docks["SatObsObservations"].open_alerts(tab))
             self._add_to_menu(action)
             self.actions.append(action)
+        # 「観測記録のエクスポート」: the records of a period and a place as CSV / JSON (observationExports).
+        export = QAction(icon("obs_export"), tr("観測記録のエクスポート…"), self.iface.mainWindow())
+        export.setObjectName("SatObsObservationExport")
+        export.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_export())
+        self._add_to_menu(export)
+        self.actions.append(export)
         # 「分担」 (assignments: who holds which image) and 「引き継ぎメモ」 (the shift handover).
         for name, text, tab in (("assignments", "分担…", 0), ("handover", "引き継ぎメモ…", 1)):
             action = QAction(icon(name), tr(text), self.iface.mainWindow())

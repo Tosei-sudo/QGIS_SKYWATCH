@@ -36,11 +36,17 @@ def depth_columns(records: Iterable[Observation], name: str = "分類") -> list[
     return [f"{name}{i + 1}" for i in range(depth)]
 
 
-def observations_csv(records: list[Observation]) -> str:
-    """The CSV of observations (with a BOM, for spreadsheets), by thing and in flow order."""
+def observations_csv(records: list[Observation], places: Optional[dict] = None, fences: Optional[dict] = None) -> str:
+    """
+    The CSV of observations (with a BOM, for spreadsheets), by thing and in
+    flow order; with `places` (record id → its named areas, smallest first)
+    the columns 地名・地名の種別・含まれる地名, with `fences` (record id →
+    geofence names) ジオフェンス.
+    """
     levels = depth_columns(records)
     head = ["観測ID", "モノID", "モノ", "種別", *levels, "活動", "有無", "確度", "撮像日時", "画像ID", "画像", "経度", "緯度", "長さ（m）", "向き（度）",
-            "幅（m）", "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時"]
+            "幅（m）", "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時",
+            *(("地名", "地名の種別", "含まれる地名") if places is not None else ()), *(("ジオフェンス",) if fences is not None else ())]
     rows = []
     for o in sorted(records, key=lambda o: (o.object_id, time_key(o), o.created_at)):
         path = path_of(o.kind)
@@ -50,6 +56,11 @@ def observations_csv(records: list[Observation]) -> str:
             to_fixed(o.lon, 7), to_fixed(o.lat, 7), "" if o.length is None else to_fixed(o.length, 1), "" if o.heading is None else to_fixed(o.heading, 1),
             "" if o.width is None else to_fixed(o.width, 1), o.note, o.recorded_by or "", o.updated_by or "", _iso(o.created_at), _iso(o.updated_at), _iso(o.deleted_at),
         ])
+        if places is not None:
+            mine = places.get(o.id) or []
+            rows[-1] += [mine[0].name if mine else "", mine[0].kind if mine else "", "・".join(dict.fromkeys(a.name for a in mine))]
+        if fences is not None:
+            rows[-1].append("・".join(fences.get(o.id) or []))
     return "\ufeff" + "\r\n".join(",".join(_cell(c) for c in r) for r in [head, *rows]) + "\r\n"
 
 
