@@ -149,3 +149,87 @@ def test_the_buttons_ask_as_when_clicked(plugin, monkeypatch):
     dialog.hand_button.click()
     assert asked == ["状態の変更", "担当の変更"]
     assert work.rows[0]["attributes"]["STATUS"] == "作業中" and work.rows[0]["attributes"]["ASSIGNEE"] == "鈴木"
+
+
+# ---- 「クリック記録」 takes the image -------------------------------------------------
+
+
+def _record_config(p, tmp_path, fake, claim=None, user="田中"):
+    value = WORK if claim is None else {"url": WORK, "claimOnRecord": claim}
+    (tmp_path / "config.json").write_text(json.dumps({"assignments": value, "editTracking": {"user": user}}), encoding="utf-8")
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+
+
+def test_recording_starts_by_taking_the_image(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    assert wait_for(lambda: dock.assignment_bar.read_at > 0)
+    dock.set_active(True)
+    assert not dock.active
+    assert wait_for(lambda: dock.active)
+    assert len(work.rows) == 1 and work.rows[0]["attributes"]["ASSIGNEE"] == "田中"
+    assert work.rows[0]["attributes"]["IMAGE_ID"] == dock.book.current.id
+    assert dock.record_button.isChecked() and dock.record_button.isEnabled() and dock.record_button.text() == "クリック記録中"
+    assert "を担当に" in dock.status.text()
+    assert wait_for(lambda: dock.assignment_bar.label.text().startswith("分担: 自分が担当中"))
+    # Again (one's own already): at once, nothing more written.
+    dock.set_active(False)
+    dock.set_active(True)
+    assert dock.active and len(work.rows) == 1
+
+
+def test_recording_is_refused_on_an_image_someone_else_holds(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    work.add({"IMAGE_ID": dock.book.current.id, "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
+    dock.set_active(True)
+    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert "鈴木 さんが担当中" in dock.status.text()
+    assert not dock.active and not dock.record_button.isChecked() and dock.record_button.isEnabled()
+    assert dock.record_button.text() == "クリック記録"
+    assert len(work.rows) == 1
+    assert any("クリック記録できません" in w.text() for w in iface.bar.items())
+
+
+def test_recording_is_refused_when_the_table_cannot_be_reached(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    from satellite_observation.core.esri import EsriError
+
+    def offline(_url, _form):
+        raise EsriError("接続できません")
+
+    p.context.esri = lambda: EsriClient(offline)
+    dock.set_active(True)
+    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert not dock.active and not work.rows
+
+
+def test_recording_takes_each_image_it_goes_to(plugin):
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    first = dock.book.current
+    dock.set_active(True)
+    assert wait_for(lambda: dock.active)
+    work.add({"IMAGE_ID": "B", "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
+    dock.book.list_image("A", "a.tif", None, None)
+    dock._went()
+    assert wait_for(lambda: dock.active and dock.book.current.id == "A")
+    assert {r["attributes"]["IMAGE_ID"] for r in work.rows} == {first.id, "A", "B"}
+    dock.book.list_image("B", "b.tif", None, None)
+    dock._went()
+    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert not dock.active and len(work.rows) == 3
+
+
+def test_recording_does_not_take_when_switched_off_or_without_the_table(plugin):
+    p, iface, dock, tmp_path = plugin
+    dock.set_active(True)
+    assert dock.active
+    dock.set_active(False)
+    fake, work, _ = _setup(p, tmp_path)
+    _record_config(p, tmp_path, fake, claim=False)
+    assert p.context.config.assignments.claim_on_record is False
+    dock.set_active(True)
+    assert dock.active and not work.rows

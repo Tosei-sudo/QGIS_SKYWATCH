@@ -40,6 +40,8 @@ class AssignmentBar(QWidget):
         self._task = None
         self._again = False
         self._writing = None
+        #: The image being taken because 「クリック記録」 started on it (claim()).
+        self.claiming = None
         self.image = None
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -129,6 +131,62 @@ class AssignmentBar(QWidget):
             self.reload()
         self.render()
 
+    def needs_claim(self, image) -> bool:
+        """
+        Whether starting 「クリック記録」 on `image` has to take it first: the
+        table is set (and `claimOnRecord` not false) and, as last read, the
+        image is not one's own.
+        """
+        source = self.source
+        if source is None or image is None or not getattr(source, "claim_on_record", True):
+            return False
+        x = holder_of(self.items, image.id)
+        return x is None or not same_person(x.assignee, self.user())
+
+    def claim(self, image, done: Callable[[Assignment], None], failed: Callable[[str], None]) -> None:
+        """
+        Takes `image` for 「クリック記録」, checking again in the table (take():
+        before and after adding). `failed`: someone else holds it, or the
+        table could not be read or written (offline): recording is refused,
+        as nobody can tell whether the work would be double.
+        """
+        source, user = self.source, self.user()
+        if source is None or image is None:
+            return
+        if self.claiming is not None:
+            return
+        if not user:
+            failed(self.tr("ユーザー名なし（環境変数 USERNAME か editTracking.user）: 分担を取得できない"))
+            return
+        client, token = self.dock.context.esri(), self.token()
+        now = int(time.time() * 1000)
+        self.claiming = image
+
+        def work(_task):
+            return take(client, source, image.id, user, now, image.name, image.time, token=token)
+
+        def taken(x: Assignment) -> None:
+            self.claiming = None
+            if source is not self.source:
+                failed(self.tr("設定が変わったため中止"))
+                return
+            # Known as one's own at once (the reading below may still be on its way).
+            self.items = [x, *(i for i in self.items if i.oid is None or i.oid != x.oid)]
+            self.render()
+            self.changed.emit()
+            self.read_at = 0.0
+            self.reload()
+            done(x)
+
+        def refused(message: str) -> None:
+            self.claiming = None
+            self.read_at = 0.0
+            self.reload()
+            failed(message)
+
+        run_task(self.tr("分担の取得"), work, taken, refused)
+        self.render()
+
     def holder(self) -> Optional[Assignment]:
         return holder_of(self.items, self.image.id) if self.image else None
 
@@ -155,7 +213,7 @@ class AssignmentBar(QWidget):
             style = "color: #e65100; font-weight: bold;"
         self.label.setText(text)
         self.label.setStyleSheet(style)
-        busy = self._writing is not None
+        busy = self._writing is not None or self.claiming is not None
         self.take_button.setVisible(image is not None and x is None)
         self.done_button.setVisible(mine)
         self.release_button.setVisible(mine)

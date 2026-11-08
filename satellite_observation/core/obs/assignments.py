@@ -20,7 +20,7 @@ taken.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields as dataclass_fields, replace
 from typing import Any, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
@@ -68,9 +68,23 @@ class TakenError(EsriError):
         self.holder = holder
 
 
-def assignment_source_of(value: Any, problems: list[str]) -> Optional[EsriSource]:
-    """`assignments`: the URL of an editable table, or { url, fields, where, token }."""
-    return esri_source_of(value, "assignments", DEFAULT_ASSIGNMENT_FIELDS, problems, editable=True)
+@dataclass
+class AssignmentSource(EsriSource):
+    """`assignments`: the table, and whether starting 「クリック記録」 takes the image."""
+    #: `claimOnRecord`: starting 「クリック記録」 on an image takes it (refused when someone else holds it).
+    claim_on_record: bool = True
+
+
+def assignment_source_of(value: Any, problems: list[str]) -> Optional[AssignmentSource]:
+    """`assignments`: the URL of an editable table, or { url, fields, where, token, claimOnRecord }."""
+    source = esri_source_of(value, "assignments", DEFAULT_ASSIGNMENT_FIELDS, problems, editable=True)
+    if source is None:
+        return None
+    claim = value.get("claimOnRecord", True) if isinstance(value, dict) else True
+    if not isinstance(claim, bool):
+        problems.append("assignments.claimOnRecord は true か false で指定")
+        claim = True
+    return AssignmentSource(**{f.name: getattr(source, f.name) for f in dataclass_fields(EsriSource)}, claim_on_record=claim)
 
 
 def same_person(a: str, b: str) -> bool:

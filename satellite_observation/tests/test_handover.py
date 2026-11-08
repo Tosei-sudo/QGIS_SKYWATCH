@@ -218,3 +218,15 @@ def test_a_memo_longer_than_the_table_takes_is_cut_and_said():
     assert cut == ["TEXT（20 文字まで）"]
     text = layer.rows[0]["attributes"]["TEXT"]
     assert len(text) == 20 and text.endswith("…（以下省略）")
+
+
+def test_claim_on_record_setting():
+    from satellite_observation.core.obs.assignments import assignment_source_of
+
+    url = "https://x/arcgis/rest/services/Work/FeatureServer/0"
+    problems: list[str] = []
+    assert assignment_source_of(url, problems).claim_on_record is True
+    s = assignment_source_of({"url": url, "claimOnRecord": False, "fields": {"assignee": "WHO"}}, problems)
+    assert s.claim_on_record is False and s.fields["assignee"] == "WHO" and s.url.endswith("/0") and not problems
+    assert assignment_source_of({"url": url, "claimOnRecord": "no"}, problems).claim_on_record is True
+    assert problems == ["assignments.claimOnRecord は true か false で指定"]

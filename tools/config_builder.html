@@ -961,7 +961,7 @@ const SPEC = [
         if (!names.length) p.push(`${at}.formats: フォーマットが 1 つ以上必要`);
       } }) },
     { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 画像）。各自が「この画像を担当」で取り、ほかの人が担当中の画像は取れない。",
-      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）" }) },
+      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にし、ほかの人が担当中なら記録できない（\"claimOnRecord\": false で止める）" }) },
     { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
       field: O("handover", "引き継ぎメモ", [
         TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),

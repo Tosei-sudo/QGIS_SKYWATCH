@@ -985,10 +985,16 @@ class ObservationDock(PluginDock):
             self._went()
 
     def _went(self) -> None:
-        """Another image: the form closes, the layer is chosen, 「この画像のみ」 follows."""
+        """
+        Another image: the form closes, the layer is chosen, 「この画像のみ」
+        follows; 「クリック記録」 goes on once the image is taken (分担).
+        """
         self.close_form()
         self._clear_points()
         image = self.book.current if self.book else None
+        if self.active and self.assignment_bar.needs_claim(image):
+            self.set_active(False)
+            self.set_active(True, quiet=True)
         if image is not None and image.layer_id:
             layer = QgsProject.instance().mapLayer(image.layer_id)
             if layer is not None and self.iface.activeLayer() is not layer:
@@ -1115,9 +1121,16 @@ class ObservationDock(PluginDock):
             self.record_button.setChecked(False)
 
     def set_active(self, on: bool, quiet: bool = False) -> None:
-        """Turns 「クリック記録」 on or off."""
+        """
+        Turns 「クリック記録」 on or off. With `assignments`, turning it on takes
+        the image first (in a task; recording starts once it is one's own) and
+        is refused when someone else holds it or the table cannot be reached.
+        """
         if on and (self.book is None or self.book.current is None):
             self._say(NO_IMAGE)
+            on = False
+        if on and not self.active and self.assignment_bar.needs_claim(self.book.current):
+            self._claim_then_record(self.book.current, quiet)
             on = False
         if self.record_button.isChecked() != on:
             self.record_button.blockSignals(True)
@@ -1134,6 +1147,37 @@ class ObservationDock(PluginDock):
         elif not quiet:
             self._say(HINT_POINTS.get(self.points, HINT))
         self.draw()
+
+    def _claim_then_record(self, image, quiet: bool) -> None:
+        """Takes the image (分担), then starts 「クリック記録」 on it; refused: an error, and no recording."""
+        bar = self.assignment_bar
+        if bar.claiming is not None:
+            self._say(self.tr("{name} の担当を取得中…").format(name=bar.claiming.name or bar.claiming.id))
+            return
+        self.record_button.setEnabled(False)
+        self.record_button.setText(self.tr("担当を取得中…"))
+        self._say(self.tr("{name} の担当を取得中…").format(name=image.name or image.id))
+
+        def end() -> None:
+            self.record_button.setEnabled(True)
+            self.record_button.setText(self.tr("クリック記録中") if self.active else self.tr("クリック記録"))
+
+        def done(_x) -> None:
+            end()
+            # Still the image shown, and the dock still open: recording starts.
+            current = self.book.current if self.book is not None else None
+            if current is not None and current.id == image.id and self.isVisible():
+                self.set_active(True, quiet=True)
+                if not quiet:
+                    self._say(self.tr("{name} を担当に。").format(name=image.name or image.id) + HINT_POINTS.get(self.points, HINT))
+
+        def failed(message: str) -> None:
+            end()
+            text = self.tr("クリック記録できません: {m}").format(m=message)
+            self._say(text)
+            self.iface.messageBar().pushWarning(self.tr("観測記録"), text)
+
+        bar.claim(image, done, failed)
 
     def set_points(self, n: int) -> None:
         """
