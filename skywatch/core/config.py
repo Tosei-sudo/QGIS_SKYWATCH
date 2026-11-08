@@ -44,6 +44,7 @@ from .moving import FeedConfig, moving_feeds_of
 from .events import EventSettings, events_settings_of
 from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
+from .preload import ITEMS as PRELOAD_ITEMS, preload_of
 
 #: The keys this plugin reads.
 KEYS = (
@@ -51,7 +52,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports", "observationExports", "assignments", "handover", "events",
+    "alertReports", "observationExports", "assignments", "handover", "events", "preload",
 )
 
 
@@ -76,6 +77,8 @@ class PluginConfig:
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
     #: `localObservations`: whether the local GeoPackage is offered as a store of records (false: only `observationStores`).
     local_observations: bool = True
+    #: `preload`: what is read from Esri in the background right after QGIS has started (core/preload.ITEMS; all by default).
+    preload: tuple = tuple(PRELOAD_ITEMS)
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
@@ -240,6 +243,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             config.local_observations = value["localObservations"]
         else:
             problems.append("localObservations は true か false で指定")
+    if "preload" in value:
+        config.preload = preload_of(value["preload"], problems)
     if "observationVocabulary" in value:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
     if "arcgisPortals" in value:

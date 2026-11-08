@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
+from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsMessageLog, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QCursor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton
@@ -21,6 +21,8 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from .qgis_io.context import PluginContext
+from .qgis_io.preload import LOG_TAG, Preloader
+from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
 from .core.enhance.rules import image_rule_for
 from .qgis_io import complex_sar, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
@@ -130,6 +132,16 @@ class PluginApi:
     def reload_config(self) -> None:
         """Reads the settings file again."""
         self._plugin.context.reload()
+
+    @property
+    def startup_times(self) -> dict:
+        """How long the startup took (`steps`, `total`) and each read ahead (`reads`), in seconds."""
+        return self._plugin.clock.times()
+
+    def preload(self) -> None:
+        """Reads ahead now what the settings file's `preload` lists (in the background)."""
+        if self._plugin.preloader is not None:
+            self._plugin.preloader.run()
 
     @property
     def observation_dock(self) -> "ObservationDock":
@@ -294,11 +306,19 @@ class SkywatchPlugin:
         self.setup_dialog: Optional[first_setup.FirstSetupDialog] = None
         self.toolbar_buttons: Optional[ToolbarButtons] = None
         self.toolbar_dialog: Optional[ToolbarButtonsDialog] = None
+        #: How long the startup took (classFactory gives the one started before the plugin was imported).
+        self.clock = StartupClock()
+        #: 「先読み」: the Esri tables read in the background once QGIS has started (qgis_io/preload.py).
+        self.preloader: Optional[Preloader] = None
+        self._qgis_started = False
+        self._startup_told = False
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
+        self.clock.lap()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
+        self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
@@ -419,6 +439,7 @@ class SkywatchPlugin:
             self._add_to_menu(action)
             self.actions.append(action)
 
+        self.clock.step("ドックの作成")
         self.place_docks()
         # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
         for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
@@ -623,7 +644,17 @@ class SkywatchPlugin:
         self.toolbar_buttons.apply()
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks)
+        self.clock.step("メニュー・ツールバー")
+        self._add_preload_items()
+        self.context.configChanged.connect(self._config_read_for_preload)
+        self._config_asked = self.clock.now()
         self.context.reload()
+        started = getattr(self.iface, "initializationCompleted", None)
+        if self.iface.mainWindow().isVisible() or started is None:
+            # Installed or turned on while QGIS runs (or no such signal): started already.
+            self._qgis_ready()
+        else:
+            started.connect(self._qgis_ready)
         if self._first_start and first_setup.ENABLED:
             # Once QGIS has started (and put back its own window layout), or now when installed while it runs.
             started = getattr(self.iface, "initializationCompleted", None)
@@ -631,6 +662,72 @@ class SkywatchPlugin:
                 QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
             else:
                 started.connect(self._first_setup_after_start)
+
+    # ---- 「先読み」 and the startup's timings ------------------------------------------------------------
+
+    def _add_preload_items(self) -> None:
+        """The reads ahead (core/preload.ITEMS), each through its dock's own read."""
+        docks, config = self.docks, lambda: self.context.config
+
+        def satellites(then, failed) -> bool:
+            dock = docks.get("SatObsImagingPlan")
+            if dock is None or not config().satellite_catalogs or dock._loaded:
+                return False
+            dock.load_catalog(then, failed)
+            return True
+
+        def requests(then, failed) -> bool:
+            dock = docks.get("SatObsRequests")
+            if dock is None or dock.store is None or dock._loaded:
+                return False
+            dock.reload(then, failed)
+            return True
+
+        def saved_plans(then, failed) -> bool:
+            dock = docks.get("SatObsSavedPlans")
+            if dock is None or dock.store is None or dock.plans or dock.task is not None:
+                return False
+            dock.reload(then, failed)
+            return True
+
+        def events(then, failed) -> bool:
+            dock = docks.get("SatObsEvents")
+            if dock is None or dock.settings is None or dock.events is not None:
+                return False
+            dock.reload(then, failed=failed)
+            return True
+
+        for key, start in (("satellites", satellites), ("requests", requests), ("savedPlans", saved_plans), ("events", events)):
+            self.preloader.add(key, PRELOAD_ITEMS[key], start)
+        self.preloader.finished.connect(self._preload_finished)
+
+    def _qgis_ready(self) -> None:
+        """QGIS has started (its window shown): the reads ahead begin once the settings file is read."""
+        try:
+            self.iface.initializationCompleted.disconnect(self._qgis_ready)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        if self.context is None or self._qgis_started:
+            return
+        self._qgis_started = True
+        if not self.context.loading:
+            self.preloader.schedule()
+
+    def _config_read_for_preload(self) -> None:
+        if getattr(self, "_config_asked", None) is not None:
+            # The first settings file read (a URL is read in a task): how long it took.
+            self.clock.step("設定ファイルの読み込み", self.clock.now() - self._config_asked)
+            self._config_asked = None
+        if self._qgis_started and self.preloader is not None:
+            self.preloader.schedule()
+
+    def _preload_finished(self) -> None:
+        """The first round of reads ahead ended: the startup's timings in QGIS's log (tab SKYWATCH), once."""
+        if self._startup_told:
+            return
+        self._startup_told = True
+        self.clock.ready()
+        QgsMessageLog.logMessage(self.clock.report(), LOG_TAG, Qgis.MessageLevel.Info, notifyUser=False)
 
     def _first_setup_after_start(self) -> None:
         try:
@@ -1094,6 +1191,18 @@ class SkywatchPlugin:
         overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:
+        if self.preloader is not None:
+            self.preloader.close()
+            try:
+                self.context.configChanged.disconnect(self._config_read_for_preload)
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+            try:
+                self.iface.initializationCompleted.disconnect(self._qgis_ready)
+            except (TypeError, RuntimeError, AttributeError):
+                pass
+            self.preloader.deleteLater()
+            self.preloader = None
         if getattr(self, "shortcuts", None) is not None:
             self.shortcuts.unload()
             self.shortcuts = None
