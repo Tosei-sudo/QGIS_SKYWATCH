@@ -101,6 +101,21 @@ def test_catalog_search_newest_first_over_an_area_and_by_sensor(server):
     assert {r.attributes["SENSOR_NAME"] for r in only.records} == {"OPT-X1"}
 
 
+def test_place_names_are_searched_by_name_reading_and_alias(server):
+    """The mock's 地名 layer, as its settings file has it (field: NAME, NAME_KANA, ALIAS)."""
+    from satellite_observation.core.geocode import PlaceSearch
+
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    client = EsriClient(transport)
+    search = PlaceSearch([g for g in config.geocoders if g.type == "features"], lambda url: b"", lambda url, params, token: client.ask(url, params, token))
+    assert search.geocoders[0].fields == ("NAME", "NAME_KANA", "ALIAS")
+    places, errors = search.search("ヨコスカ")  # the reading, typed in katakana
+    assert errors == [] and [(p.name, p.detail) for p in places] == [("横須賀港", "読み: よこすかこう")]
+    places, _ = search.search("東京")  # the name of one, an alias of another: both, the name's match first
+    assert [(p.name, p.detail) for p in places] == [("東京港", None), ("羽田空港", "別名: 東京国際空港,HND")]
+
+
 def test_satellites_have_tles_the_plugin_reads(server):
     _, _, _, path = server
     config, _ = read_config_file(path)

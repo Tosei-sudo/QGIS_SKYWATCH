@@ -585,7 +585,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 ## 座標・地名へ移動
 
 - ツールバー「座標・地名へ移動」の入力欄に座標を入れて Enter（か「移動」）で、その地点へ移動して青い丸の印を付ける。読める表記はビューアと同じ: 緯度経度（`35.6812, 139.7671`、`35°40'52"N 139°46'1"E`、`北緯35度40分52秒 東経139度46分1秒`、`354052N 1394601E`、`lat 35.68 lon 139.77`、`POINT(139.77 35.68)`、全角も可）、MGRS（`54SUE8843349290`、精度は任意）、UTM（`54N 388433 3949290`）
-- 設定ファイルに `geocoders` があれば地名・住所も入れられ、打つ途中で見つかった場所が欄の下に並ぶ（↑↓と Enter かクリックで移動）。種類はビューアと同じ `gsi`・`nominatim`・`arcgis`・`features`（Esri の地名レイヤー）・`csv`（名前・緯度・経度の列がある CSV。設定ファイルからの相対パス可）。`geocoders` がなければ地名は検索せず、入力が外へ送られることはない
+- 設定ファイルに `geocoders` があれば地名・住所も入れられ、打つ途中で見つかった場所が欄の下に並ぶ（↑↓と Enter かクリックで移動）。種類はビューアと同じ `gsi`・`nominatim`・`arcgis`・`features`（Esri の地名レイヤー。`field` を配列にすると複数の属性で探す: `["PLACE_NAME", "PLACE_NAME_KANA", "PLACE_ALIAS"]` なら地名・読み・別名のどれかに含まれれば見つかり、先頭の属性が地名として並び、読みや別名で見つかったときは「読み: よこすかこう」のように合った属性（レイヤーのエイリアス）と値が横に出る。読みはひらがな・カタカナどちらで打っても探す。同じ地名・同じ位置は 1 件にまとめ、打った文字で始まるもの・短いものから並べる）・`csv`（名前・緯度・経度の列がある CSV。設定ファイルからの相対パス可）。`geocoders` がなければ地名は検索せず、入力が外へ送られることはない
 - カーソル位置の WGS 84 座標をステータスバーの右に表示。表記（10進・度分秒・MGRS・UTM）は地図の右クリックの「ステータスバーの表示」か、表示の右クリックで切り替え
 - 地図の右クリック「緯度経度・MGRS・UTM のコピー」で、その地点の座標をコピー
 
@@ -962,7 +962,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `baseMaps` | 配列 | `id`・`label`・`url`・`type`（`xyz`・`mvt`・`style`・`esri`。省略時は URL から判断）・`style`・`maxZoom`・`attributions`・`token`。書くと一覧をこれで置き換え | 地理院・OSM | [背景地図](#背景地図) |
 | `defaultBaseMap` | 文字列 | 起動時の背景地図の `id` | なし | [背景地図](#背景地図) |
 | `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`） | なし | [起動時のレイヤー](#起動時のレイヤー) |
-| `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須）、`token` | なし（地名は検索しない） | [座標・地名へ移動](#座標地名へ移動) |
+| `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須。`features` は属性名の配列で複数可、先頭が地名）、`token` | なし（地名は検索しない） | [座標・地名へ移動](#座標地名へ移動) |
 | `layerTemplates` | 配列 | `name`（必須）・`geometryType`・`fields`（`[{ "name", "type", "alias", "required", "length", "min", "max", "defaultValue", "codes" }]`）・`title`・`description` | 組み込みのテンプレートだけ | [新規スクラッチレイヤー](#新規スクラッチレイヤーテンプレート) |
 | `arcgisPortals` | 配列 | `url`（ポータルの https）・`clientId`（必須）・`label` | なし | [ArcGIS Web マップ](#arcgis-web-マップ) |
 | `movingFeeds` | 配列 | `type`（`websocket`・`sse`・`poll`）、`url`、`label`、`interval`（秒）、`fields`（`id`・`time`・`lat`・`lon` など）、`kind`（`ship`・`aircraft`） | なし | [移動体](#移動体aisads-b) |
@@ -1418,11 +1418,13 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 ### `TBL_PLACE_NAME`（地名検索）
 
-閉域で「座標・地名へ移動」の地名を引くレイヤー（ふつうはポイント）。`geocoders[]` に `{ "type": "features", "url": …, "field": "PLACE_NAME" }`。
+閉域で「座標・地名へ移動」の地名を引くレイヤー（ふつうはポイント）。`geocoders[]` に `{ "type": "features", "url": …, "field": ["PLACE_NAME", "PLACE_NAME_KANA", "PLACE_ALIAS"] }`（地名だけなら `"field": "PLACE_NAME"`）。読み・別名のエイリアスは、読み・別名で見つかったときに候補の横に出る名前になる。
 
 | 属性名 | エイリアス | 型 | 中身 | 設定 |
 | --- | --- | --- | --- | --- |
-| `PLACE_NAME` | 地名 | `String(255)` | 地名（部分一致で検索） | `field` |
+| `PLACE_NAME` | 地名 | `String(255)` | 地名（部分一致で検索。候補に出る名前） | `field`（先頭） |
+| `PLACE_NAME_KANA` | 読み | `String(255)` | 読み（ひらがなかカタカナ。なくてもよい） | `field`（2 番目以降） |
+| `PLACE_ALIAS` | 別名 | `String(255)` | 別名・略称（複数なら「,」区切りで 1 つの値に。なくてもよい） | `field`（2 番目以降） |
 
 ### 上の表の名前で作ったときの設定
 
@@ -1489,7 +1491,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
                   "area": "AREA_M2", "length": "LENGTH_M", "width": "WIDTH_M", "angle": "HEADING", "note": "NOTE" } }
   ],
   "geocoders": [
-    { "type": "features", "label": "地名", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/20", "field": "PLACE_NAME" }  // TBL_PLACE_NAME
+    { "type": "features", "label": "地名", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/20", "field": ["PLACE_NAME", "PLACE_NAME_KANA", "PLACE_ALIAS"] }  // TBL_PLACE_NAME
   ]
   // editTracking は既定（CREATED_DATE・CREATED_USER・UPDATED_DATE・UPDATED_USER）のままなら書かなくてよい
 }
