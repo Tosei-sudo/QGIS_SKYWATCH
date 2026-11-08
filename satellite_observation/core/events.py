@@ -80,6 +80,15 @@ class Event:
         return self.status != CLOSED
 
 
+#: The source of an image link listed without its file (観測記録 「ファイルなしの画像」); an image opened by hand has its path.
+LISTED = "listed"
+
+
+def is_url(source: str) -> bool:
+    """Whether a link's source is a service's URL (a catalog's, a store's), not a file's path or `listed`."""
+    return source.lower().startswith(("http://", "https://"))
+
+
 @dataclass
 class LinkItem:
     """An item to put in an event."""

@@ -244,10 +244,13 @@ class ObservationDock(PluginDock):
         self.next_button = self._button("▶", tr("次の画像（撮像日時の順、PageDown）"), lambda: self.step(1))
         self.list_button = self._button("＋", tr("ファイルなしの画像の追加（カタログ外・未オープンの画像を ID・撮像日時で指定）"),
                                         self._toggle_list_form, checkable=True)
+        self.image_event_button = self._button("⚑", tr("この画像を対応中のイベント（地震対応など）に入れる（カタログ外・ファイルなしの画像も。設定ファイルの events）"),
+                                                lambda: self.add_image_to_event())
+        self.image_event_button.hide()
         self.only = QCheckBox(tr("この画像のみ"))
         self.only.setToolTip(tr("この画像のみ地図に表示（他の画像は非表示）"))
         self.only.toggled.connect(self._apply_only)
-        for w in (self.prev_button, self.image_select, self.next_button, self.list_button, self.only):
+        for w in (self.prev_button, self.image_select, self.next_button, self.list_button, self.image_event_button, self.only):
             row.addWidget(w)
         b.addLayout(row)
         # 分担: who holds the image (the settings file's assignments).
@@ -2031,6 +2034,29 @@ class ObservationDock(PluginDock):
             out.append(LinkItem("observation", o.id, label=label, time=o.image_time, source=url))
         return out
 
+    def image_event_items(self) -> list:
+        """The image shown as an item of an event: from the catalog by its id, else by its path (`listed` without its file)."""
+        from ..core.events import LISTED, LinkItem
+        from ..qgis_io.catalog_io import CATALOG_URL
+        from ..qgis_io.obs_images import image_path
+
+        image = self.book.current if self.book else None
+        if image is None:
+            return []
+        layer = QgsProject.instance().mapLayer(image.layer_id) if image.layer_id else None
+        if layer is not None and layer.customProperty(CATALOG_URL):
+            source = str(layer.customProperty(CATALOG_URL))
+        elif layer is not None:
+            source = image_path(layer) or layer.name()
+        else:
+            source = LISTED
+        return [LinkItem("image", image.id, label=image.name or image.id, time=image.time, source=source)]
+
+    def add_image_to_event(self):
+        """「⚑」: the image shown into an open event (a menu of them)."""
+        events = self.event_linker() if self.event_linker else None
+        return events.offer(self.image_event_button, self.image_event_items) if events and self.image_event_items() else None
+
     def add_to_event(self):
         """「イベントに追加」: the chosen records into an open event (a menu of them)."""
         events = self.event_linker() if self.event_linker else None
@@ -2207,6 +2233,7 @@ class ObservationDock(PluginDock):
         self.next_button.setEnabled(many)
         self.time_row.setVisible(image is not None and image.time is None)
         self.assignment_bar.show_image(image)
+        self.image_event_button.setVisible(image is not None and self.context.config.events is not None)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         if book is None:
             self._set_head(self.tr("観測記録"))

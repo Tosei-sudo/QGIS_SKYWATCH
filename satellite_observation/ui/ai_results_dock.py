@@ -81,6 +81,18 @@ def catalog_image_id(layer) -> Optional[str]:
     return str(image_id) if image_id and layer.customProperty(CATALOG_URL) else None
 
 
+def source_image_id(layer) -> Optional[str]:
+    """
+    The id to ask the external AI results of: the catalog's for a layer opened
+    from the catalog, else the observation book's (its file name) for an image
+    file opened by hand; None for other layers (a basemap, a web service).
+    """
+    found = catalog_image_id(layer)
+    if found or not isinstance(layer, QgsRasterLayer) or layer.providerType() != "gdal":
+        return found
+    return raster_image_id(layer)
+
+
 def raster_image_id(layer) -> Optional[str]:
     """The id the observation book (and so the plugin's detection) gives an image layer."""
     if not isinstance(layer, QgsRasterLayer):
@@ -242,7 +254,7 @@ class AiResultsDock(PluginDock):
                 self._watch(layer)
                 # A detection run: its image's results.
                 found += image_ids_of(layer)[:1]
-        ids = [i for i in (catalog_image_id(layer) for layer in layers) if i] if self.sources() else []
+        ids = [i for i in (source_image_id(layer) for layer in layers) if i] if self.sources() else []
         ids += found
         if ids:
             # The last image opened, or detected.
@@ -258,7 +270,7 @@ class AiResultsDock(PluginDock):
         return out
 
     def _layer_chosen(self, layer) -> None:
-        image_id = catalog_image_id(layer) if self.sources() else None
+        image_id = source_image_id(layer) if self.sources() else None
         if image_id is None and layer is not None and layer.id() in self.watched:
             ids = image_ids_of(layer)
             image_id = ids[0] if ids and self.image_id not in ids else None
@@ -304,7 +316,7 @@ class AiResultsDock(PluginDock):
         if self.image_id:
             self.image_label.setText(_tr("画像: {id}").format(id=self.image_id))
         elif self.sources():
-            self.image_label.setText(_tr("画像カタログから画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示"))
+            self.image_label.setText(_tr("画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示（カタログ外の画像はファイル名で検索）"))
         else:
             self.image_label.setText(_tr("「物体検出（AI）」を実行すると、その画像の結果を表示（外部AIの結果は設定ファイルの aiResultSources）"))
         self.reload_button.setEnabled(bool(self.image_id))

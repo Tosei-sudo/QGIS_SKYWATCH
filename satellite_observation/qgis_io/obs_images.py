@@ -62,6 +62,19 @@ def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Op
     return layer
 
 
+def image_path(layer: QgsMapLayer) -> str:
+    """Where the layer's image is (its path or URL, without /vsicurl/; a complex SAR image's own, not its VRT's), '' when unknown."""
+    shown = source_of(layer)
+    if shown:
+        return shown
+    try:
+        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
+        path = parts.get("path") or parts.get("url") or ""
+    except Exception:  # noqa: BLE001
+        path = ""
+    return re.sub(r"^/vsicurl/", "", str(path or ""))
+
+
 def file_name(layer: QgsMapLayer) -> str:
     """The layer's file name (as the viewer's shortName; a complex SAR image's own, not its VRT's), else its name."""
     shown = source_of(layer)

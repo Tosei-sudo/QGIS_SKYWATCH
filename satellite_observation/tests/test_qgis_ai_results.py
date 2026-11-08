@@ -58,6 +58,8 @@ def plugin(tmp_path, monkeypatch):
     polygons.add({"IMAGE_ID": "IMG2", "CLS": "ship", "SCORE": 0.8, "DET_ID": "d-3"}, box(139.66, 35.61, 0.0005, 0.0002))
     # The ship of IMG1 again, about 10 m east.
     polygons.add({"IMAGE_ID": "IMG2", "CLS": "ship", "SCORE": 0.9, "DET_ID": "d-4"}, box(139.7001, 35.60, 0.0011, 0.00018))
+    # An image opened by hand: its results under its file name.
+    polygons.add({"IMAGE_ID": "hand.tif", "CLS": "ship", "SCORE": 0.7, "DET_ID": "d-5"}, box(139.68, 35.60, 0.0011, 0.00018))
     points = fake.add_layer(POINTS, FakeLayer({"IMG": "esriFieldTypeString", "CLS": "esriFieldTypeString", "NAME": "esriFieldTypeString"}))
     points.add({"IMG": "IMG1", "CLS": "car", "NAME": "トラックA"}, {"x": 139.72, "y": 35.65})
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
@@ -154,14 +156,29 @@ def test_results_of_the_image_are_shown_and_recorded_once(plugin):
     assert other.isValid()
 
 
-def test_an_image_not_from_the_catalog_reads_nothing_and_importing_needs_the_image(plugin):
+def test_an_image_not_from_the_catalog_reads_by_its_file_name_and_importing_needs_the_image(plugin):
     p, iface, tmp_path = plugin
     dock = p.api.ai_results
+    assert dock.image_label.text() == "画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示（カタログ外の画像はファイル名で検索）"
     plain = QgsRasterLayer(geotiff(tmp_path / "plain.tif", "2026-10-01T01:00:00Z"), "plain")
     QgsProject.instance().addMapLayer(plain)
     iface.setActiveLayer(plain)
-    assert dock.image_id is None and dock.rows == []
-    assert dock.image_label.text() == "画像カタログから画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示"
+    # Asked by its file name: nothing there, and the dock stays hidden.
+    assert wait_for(lambda: dock.image_id == "plain.tif" and "plain.tif" in dock.cache)
+    assert dock.rows == [] and dock.isHidden()
+    # One with results: shown and recorded on the image (its id, the file name, as the observation book's).
+    hand = QgsRasterLayer(geotiff(tmp_path / "hand.tif", "2026-10-01T01:00:00Z"), "hand")
+    QgsProject.instance().addMapLayer(hand)
+    assert wait_for(lambda: len(dock.rows) == 1)
+    assert not dock.isHidden() and dock.rows[0][1].key == "d-5"
+    iface.setActiveLayer(hand)
+    made = dock.import_rows([0])
+    assert [o.image_id for o in made] == ["hand.tif"]
+    # A web basemap is no image to ask of.
+    from satellite_observation.ui.ai_results_dock import source_image_id
+
+    web = QgsRasterLayer("type=xyz&url=https://tile.openstreetmap.org/{z}/{x}/{y}.png", "osm", "wms")
+    assert source_image_id(web) is None
     # Results of an image that is not open cannot be recorded.
     dock.load("IMG2")
     assert wait_for(lambda: len(dock.rows) == 2)
