@@ -340,6 +340,27 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     other = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_X, Qt.KeyboardModifier.NoModifier)
     dock.tool.keyPressEvent(other)
     assert not other.isAccepted()
+    # Enter with the map focused saves the open form (both Enter keys), else goes on to QGIS.
+    def enter_on_map(key=Qt.Key.Key_Return):
+        event = QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+        dock.canvas.keyPressEvent(event)
+        return event.isAccepted()
+
+    dock.close_form()
+    assert not enter_on_map()
+    before = len(dock.book.here())
+    dock.set_two_point(False)
+    dock.map_clicked(139.71, 35.61, None)
+    assert dock.form.isVisible()
+    dock.object_input.setText("タグボートB")
+    dock.canvas.setFocus()
+    assert enter_on_map(Qt.Key.Key_Enter) and not dock.form.isVisible()
+    assert len(dock.book.here()) == before + 1 and dock.book.flow_by_name("タグボートB") is not None
+    # The area too.
+    dock.set_area_mode(True)
+    dock._area_view()
+    assert enter_on_map()
+    assert not dock.area_mode
 
 
 def test_measures_the_width_by_three_or_four_points(plugin):

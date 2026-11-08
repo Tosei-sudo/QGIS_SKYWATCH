@@ -3,7 +3,8 @@ Recording on the map (the viewer's clicks on its overlay): a click gives a
 place (or the record or carried-over thing under it), a press on one of this
 image's records drags it to a new place, and the pointer's moves feed the
 line drawn while measuring by two points. Esc on the map steps back as Esc in
-the dock does (the last point, the area corner, then the form).
+the dock does (the last point, the area corner, then the form), and Enter on
+the map saves the open form (or the area) as Enter in the dock does.
 """
 from __future__ import annotations
 
@@ -22,17 +23,20 @@ class ObservationTool(QgsMapTool):
     """
     `clicked(lon, lat, mark)` on a click (`mark`: the record or carried-over
     thing hit, else None), `hovered(lon, lat)` on moves, `dragged(mark, lon,
-    lat, done)` while a record is dragged, `escaped()` on Esc while the map has the
-    focus; `can_drag()` says whether records may move now.
+    lat, done)` while a record is dragged, `escaped()` on Esc and `entered()` on
+    Enter while the map has the focus (`entered` says whether it took the key);
+    `can_drag()` says whether records may move now.
     """
 
     def __init__(self, canvas, overlay: ObservationOverlay, clicked: Callable[[float, float, Optional[Mark]], None],
                  hovered: Callable[[float, float], None], dragged: Callable[[Mark, float, float, bool], None],
-                 can_drag: Callable[[], bool], escaped: Optional[Callable[[], None]] = None):
+                 can_drag: Callable[[], bool], escaped: Optional[Callable[[], None]] = None,
+                 entered: Optional[Callable[[], bool]] = None):
         super().__init__(canvas)
         self.overlay = overlay
         self._clicked, self._hovered, self._dragged, self._can_drag = clicked, hovered, dragged, can_drag
         self._escaped = escaped
+        self._entered = entered
         self._press: Optional[tuple] = None
         self._drag: Optional[Mark] = None
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -84,6 +88,10 @@ class ObservationTool(QgsMapTool):
             self._drag = self._press = None
             self.canvas().setCursor(Qt.CursorShape.CrossCursor)
             self._escaped()
+            event.accept()
+        elif (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._entered is not None
+              and not event.isAutoRepeat() and self._press is None and self._entered()):
+            # The form (or the area) saved; with nothing open the key goes on to QGIS.
             event.accept()
         else:
             event.ignore()
