@@ -437,22 +437,53 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         assert er.enhance_renderer(layer).settings.color is None
         assert layer.blendMode() == QPainter.CompositionMode.CompositionMode_SourceOver
 
-        # Two dates: the earlier red, the later cyan screened right above it.
+        # Two dates: one is the target image, the other is chosen; the earlier red, the later cyan screened right above it.
+        from skywatch.qgis_io.obs_images import set_manual_time
         earlier = layer_of(write_tif(tmp_path / "d1.tif", [dem]))
         later = layer_of(write_tif(tmp_path / "d2.tif", [dem]))
         project.addMapLayers([earlier, later])
         box.pair_box.setChecked(True)
-        box.before.setCurrentIndex(box.before.findData(earlier.id()))
-        box.after.setCurrentIndex(box.after.findData(later.id()))
+        dock.follow_layer(earlier)
+        assert box.target_label.text() == earlier.name()
+        assert box.other.findData(earlier.id()) < 0
+        box.other.setCurrentIndex(box.other.findData(later.id()))
+        # Without times the lower in the layer list is the earlier.
+        ids = [n.layerId() for n in project.layerTreeRoot().findLayers()]
+        assert ids.index(earlier.id()) < ids.index(later.id())
+        assert box.pair_layers() == (later, earlier)
+        # With times, by them.
+        set_manual_time(earlier, 1_000_000)
+        set_manual_time(later, 2_000_000)
+        assert box.pair_layers() == (earlier, later)
         assert box.pair()
         ids = [n.layerId() for n in project.layerTreeRoot().findLayers()]
         assert ids.index(later.id()) == ids.index(earlier.id()) - 1
         assert er.enhance_renderer(earlier).settings.color == {"scale": "red"}
         assert er.enhance_renderer(later).settings.color == {"scale": "cyan"}
         assert later.blendMode() == QPainter.CompositionMode.CompositionMode_Screen
-        box.before.setCurrentIndex(box.before.findData(earlier.id()))
-        box.after.setCurrentIndex(box.after.findData(earlier.id()))
-        assert not box.pair() and box.pair_note.text() == "別々の画像を選択"
+        # The target follows the dock's; the other image chosen stays.
+        dock.follow_layer(later)
+        assert box.target_label.text() == later.name()
+        assert box.other.findData(later.id()) < 0
+        box.other.setCurrentIndex(box.other.findData(earlier.id()))
+        dock.follow_layer(later)
+        assert box.other.currentData() == earlier.id()
+        assert box.pair_layers() == (earlier, later)
+        box.order.setCurrentIndex(box.order.findData("before"))
+        assert box.pair_layers() == (later, earlier)
+        assert "後（シアン）: " + earlier.name() in box.order_label.text()
+        box.order.setCurrentIndex(box.order.findData("auto"))
+        # First offered: the one-band image nearest in time.
+        far = layer_of(write_tif(tmp_path / "d3.tif", [dem]))
+        set_manual_time(far, 9_000_000_000)
+        project.addMapLayer(far)
+        set_manual_time(layer, 8_000_000_000)
+        box.other.clear()
+        dock.follow_layer(earlier)
+        assert box.other.currentData() == later.id()
+        dock.follow_layer(None)
+        assert not box.pair() and box.pair_note.text() == "対象の画像と比べる画像を選択"
+        dock.follow_layer(layer)
 
         # For scripts.
         dock.colorize(layer, "red", blend="screen", fade=True)
