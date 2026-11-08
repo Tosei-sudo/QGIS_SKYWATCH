@@ -229,7 +229,7 @@ class AnnotationBase(QgsProcessingAlgorithm):
         self._models = None
 
     def icon(self) -> QIcon:
-        return QIcon(os.path.join(HERE, "resources", "ai_segment.svg"))
+        return QIcon(os.path.join(HERE, "resources", "ai_boxes.svg"))
 
     def models(self, chosen, feedback):
         """The SAM encoder and decoder (loaded once per run)."""
@@ -429,6 +429,9 @@ class DatasetPointsToBoxesAlgorithm(AnnotationBase):
 
     def name(self) -> str:
         return "dataset_points_to_boxes"
+
+    def icon(self) -> QIcon:
+        return QIcon(os.path.join(HERE, "resources", "ai_dataset_boxes.svg"))
 
     def displayName(self) -> str:  # noqa: N802 (QGIS's name)
         return tr("アノテーション変換（教師データセット）")

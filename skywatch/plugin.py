@@ -548,11 +548,11 @@ class SkywatchPlugin:
         self._add_to_menu(dataset)
         self.actions.append(dataset)
         # 「アノテーション変換」: point annotations as boxes turned to the object (a layer, or a training dataset).
-        boxes = QAction(icon("ai_segment"), tr("アノテーション変換（点→矩形）…"), self.iface.mainWindow())
+        boxes = QAction(icon("ai_boxes"), tr("アノテーション変換（点→矩形）…"), self.iface.mainWindow())
         boxes.triggered.connect(lambda: self.open_points_to_boxes())
         self._add_to_menu(boxes)
         self.actions.append(boxes)
-        dataset_boxes = QAction(icon("ai_dataset"), tr("アノテーション変換（教師データセット）…"), self.iface.mainWindow())
+        dataset_boxes = QAction(icon("ai_dataset_boxes"), tr("アノテーション変換（教師データセット）…"), self.iface.mainWindow())
         dataset_boxes.triggered.connect(lambda: self.open_dataset_points_to_boxes())
         self._add_to_menu(dataset_boxes)
         self.actions.append(dataset_boxes)
