@@ -6,7 +6,7 @@ from typing import Optional
 
 from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QIcon, QPainter
+from qgis.PyQt.QtGui import QColor, QCursor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton
 
 try:  # Qt6
@@ -76,7 +76,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "Python API リファレンス…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -593,6 +593,18 @@ class SkywatchPlugin:
         health.triggered.connect(lambda: self.open_health_check())
         self._add_to_menu(health)
         self.actions.append(health)
+        # 「使い方（ヘルプ）」: the help for everyday users, bundled HTML (help/index.html, ui/help_dialog.py).
+        help_action = QAction(icon("help"), tr("使い方（ヘルプ）…"), self.iface.mainWindow())
+        help_action.setObjectName("SatObsHelp")
+        help_action.triggered.connect(lambda: self.open_help())
+        self._add_to_menu(help_action)
+        self.actions.append(help_action)
+        # Also in QGIS's Help ▸ Plugins.
+        help_menu = self.iface.pluginHelpMenu() if hasattr(self.iface, "pluginHelpMenu") else None
+        if help_menu is not None:
+            help_menu.addAction(help_action)
+        self._help_menu = help_menu
+        self.help_action = help_action
         # 「Python API リファレンス」: plugin.api in Japanese with examples (ui/api_reference_dialog.py).
         reference = QAction(icon("api_reference"), tr("Python API リファレンス…"), self.iface.mainWindow())
         reference.setObjectName("SatObsApiReference")
@@ -626,6 +638,34 @@ class SkywatchPlugin:
         except (TypeError, RuntimeError):
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_help(self, section: Optional[str] = None):
+        """「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given."""
+        from .ui.help_dialog import HelpDialog
+
+        if getattr(self, "help_dialog", None) is None:
+            self.help_dialog = HelpDialog(self.run_menu_entry, self.iface.mainWindow())
+        self.help_dialog.show()
+        self.help_dialog.raise_()
+        if section:
+            self.help_dialog.go(section)
+        return self.help_dialog
+
+    def run_menu_entry(self, text: str) -> bool:
+        """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""
+        action = self._entries_in_menu_order().get(tr(text))
+        if action is None:
+            return False
+        dock = next((d for d in self.docks.values() if d.toggleViewAction() is action), None)
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+            return True
+        if action.menu() is not None:  # a submenu (背景地図): shown where the mouse is
+            action.menu().popup(QCursor.pos())
+            return True
+        action.trigger()
+        return True
 
     def open_api_reference(self):
         """「Python API リファレンス…」: what plugin.api has, with examples (not blocking QGIS)."""
@@ -1126,6 +1166,16 @@ class SkywatchPlugin:
             self.place_reader.stop()
             self.place_reader = None
         expression_functions.unregister()
+        if getattr(self, "help_dialog", None) is not None:
+            self.help_dialog.close()
+            self.help_dialog.deleteLater()
+            self.help_dialog = None
+        if getattr(self, "_help_menu", None) is not None:
+            try:
+                self._help_menu.removeAction(self.help_action)
+            except RuntimeError:
+                pass
+            self._help_menu = None
         if getattr(self, "api_reference", None) is not None:
             self.api_reference.close()
             self.api_reference.deleteLater()
