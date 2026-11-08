@@ -246,3 +246,59 @@ def test_reported_records_are_highlighted_in_the_table_and_on_the_map(plugin):
     dialog.remove_log(confirm=False)
     assert wait_for(lambda: dock.reported == {b.id})
     assert colored() == {"船A": False, "船B": True}
+
+
+def test_notices_tab_lists_the_log_and_polls_only_while_shown(plugin):
+    import time as _time
+
+    p, iface, dock, tmp_path = plugin
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False, "live": {"seconds": 5, "days": 3}})
+    log.types["REPORTED_AT"] = "esriFieldTypeDate"
+    log.types["REPORTED_BY"] = "esriFieldTypeString"
+    now = int(_time.time() * 1000)
+    book = dock.book
+    a = book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")
+    log.add({"OBS_ID": a.id, "REPORT_NAME": "速報", "TEXT": "船A|停泊", "REPORTED_AT": now - 60_000, "REPORTED_BY": "佐藤"})
+    log.add({"OBS_ID": "old", "REPORT_NAME": "速報", "TEXT": "古い", "REPORTED_AT": now - 5 * 86_400_000})
+    notices = p.docks["SatObsNotices"]
+    feed = notices.alerts
+    p.context.configChanged.emit()
+    notices.show()
+    assert wait_for(lambda: feed.table.rowCount() == 1)
+    assert feed.table.item(0, 3).text() == "船A|停泊" and feed.table.item(0, 2).text() == "佐藤"
+    assert feed.active and feed.timer.isActive() and feed.timer.interval() == 5000
+    # A report by someone else comes in: counted on the tab, highlighted in 観測記録.
+    b = book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")
+    log.add({"OBS_ID": b.id, "REPORT_NAME": "速報", "TEXT": "船B|航行", "REPORTED_AT": now, "REPORTED_BY": "佐藤"})
+    asked = len(fake.asked)
+    feed.poll(force=True)
+    assert wait_for(lambda: feed.table.rowCount() == 2)
+    assert feed.table.item(0, 3).text() == "船B|航行" and feed.table.item(0, 0).font().bold()
+    assert notices.tabs.tabText(notices.alerts_tab) == "通報（1）"
+    assert wait_for(lambda: b.id in dock.reported)
+    # Only the ids and the new row were asked for.
+    queries = [f for u, f in fake.asked[asked:] if u.startswith(LOG)]
+    assert [("returnIdsOnly" in f, "objectIds" in f) for f in queries] == [(True, False), (False, True)]
+    notices.tabs.setCurrentIndex(notices.alerts_tab)
+    assert notices.tabs.tabText(notices.alerts_tab) == "通報" and not feed.table.item(0, 0).font().bold()
+    # A row deleted elsewhere goes from the list (and from the highlight).
+    dock.reported = {a.id, b.id}
+    log.rows = [r for r in log.rows if r["attributes"]["OBS_ID"] != b.id]
+    feed.poll(force=True)
+    assert wait_for(lambda: feed.table.rowCount() == 1)
+    assert wait_for(lambda: dock.reported == {a.id, "old"})  # read again: the whole log
+    # Hidden: no polling until shown again.
+    notices.hide()
+    assert not feed.active and not feed.timer.isActive()
+    feed.poll()
+    assert not feed._polling
+    notices.show()
+    assert feed.active
+
+
+def test_notices_tab_without_the_log_table_says_so(plugin):
+    p, iface, dock, tmp_path = plugin
+    notices = p.docks["SatObsNotices"]
+    notices.show()
+    assert "alertReports.table" in notices.alerts.status.text()
+    assert not notices.alerts.timer.isActive()

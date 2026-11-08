@@ -675,6 +675,29 @@ class SatelliteObservationPlugin:
 
         notices.unread_changed = unread
         self.docks["SatObsImagingPlan"].on_reminder = notices.add_plan_notice
+        # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
+        observations = self.docks["SatObsObservations"]
+        feed = notices.alerts
+        feed.on_reported = observations.mark_reported
+        feed.on_removed = observations.refresh_reported
+
+        def open_reported(record_id: str) -> None:
+            o = observations.book.record(record_id) if observations.book else None
+            if o is None:
+                self.iface.messageBar().pushWarning(tr("通報"), tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id))
+                return
+            observations.show()
+            observations.raise_()
+            observations.open_record(o)
+
+        feed.open_record = open_reported
+
+        def open_log() -> None:
+            dialog = observations.open_alerts(1)
+            if dialog.log_button.isEnabled():
+                dialog.read_log()
+
+        feed.open_log = open_log
         # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
         self.similar_action = QAction(QIcon(os.path.join(HERE, "resources", "catalog.svg")), tr("類似画像の検索…"), self.iface.mainWindow())
         self.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))

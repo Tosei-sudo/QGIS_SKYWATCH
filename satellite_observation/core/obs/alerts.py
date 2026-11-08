@@ -148,6 +148,15 @@ class ScoreSettings:
 
 
 @dataclass
+class LiveSettings:
+    """`alertReports.live`: the 通報 tab of 通知, the log table read again every `seconds`."""
+    #: How often the log table is asked for changes (0: only by hand).
+    seconds: float = 10.0
+    #: The rows of the last `days` days are shown (by REPORTED_AT; the newest rows when the table has none).
+    days: float = 7.0
+
+
+@dataclass
 class AlertSettings:
     """`alertReports`: which records are notable, the log, and the named formats (one the default)."""
     formats: list[AlertFormat] = field(default_factory=list)
@@ -164,6 +173,8 @@ class AlertSettings:
     notify_on_save: bool = True
     #: The importance score (None: no score, lines in image time order).
     score: Optional[ScoreSettings] = field(default_factory=ScoreSettings)
+    #: The 通報 tab of 通知 (polled while the dock is shown).
+    live: LiveSettings = field(default_factory=LiveSettings)
 
     def format(self, name: str = "") -> Optional[AlertFormat]:
         """The format of a name, else the default one, else the first."""
@@ -421,6 +432,29 @@ def score_settings_of(value: Any, at: str, problems: list[str]) -> Optional[Scor
     return score
 
 
+#: The shortest polling interval (s): a shorter one would only load the service.
+MIN_LIVE_SECONDS = 2.0
+
+
+def live_settings_of(value: Any, at: str, problems: list[str]) -> LiveSettings:
+    """`alertReports.live`: false (by hand only), seconds, or { seconds, days }."""
+    live = LiveSettings()
+    if value is False or value == 0:
+        live.seconds = 0.0
+        return live
+    if value is True or value is None:
+        return live
+    if is_number(value) and not isinstance(value, bool):
+        value = {"seconds": value}
+    if not is_record(value):
+        problems.append(f"{at} は false か秒数か {{ seconds, days }} で指定")
+        return live
+    seconds = _number(value, "seconds", at, problems, live.seconds, 0.0)
+    live.seconds = 0.0 if seconds == 0 else max(MIN_LIVE_SECONDS, seconds)
+    live.days = _number(value, "days", at, problems, live.days, 0.0)
+    return live
+
+
 def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings]:
     """`alertReports`; None when it cannot be used (no format)."""
     at = "alertReports"
@@ -456,6 +490,8 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
             problems.append(f"{at}.minConfidence は確度の名前で指定")
     settings.present_only = _bool(value, "presentOnly", at, problems, True)
     settings.notify_on_save = _bool(value, "notifyOnSave", at, problems, True)
+    if "live" in value:
+        settings.live = live_settings_of(value["live"], f"{at}.live", problems)
     if "score" in value:
         settings.score = score_settings_of(value["score"], f"{at}.score", problems)
     if "rules" in value:
@@ -585,6 +621,61 @@ class LogRow:
     oid: Optional[int] = None
 
 
+def _log_row(a: dict[str, Any], f: dict[str, str], oid: str) -> LogRow:
+    return LogRow(
+        obs_id=_text(a.get(f["obsId"])), format=_text(a.get(f["report"])), text=_text(a.get(f["text"])),
+        reported_at=ms_of(a.get(f["reportedAt"])), reported_by=_text(a.get(f["reportedBy"])), batch=_text(a.get(f["batch"])),
+        oid=int(a[oid]) if is_number(a.get(oid)) else None,
+    )
+
+
+@dataclass
+class LogChanges:
+    """What `poll_log` found: the rows added since, and the object ids no longer there."""
+    added: list[LogRow]
+    gone: set[int]
+    #: Object ids of the rows now in the window (to pass as `known` next time).
+    ids: set[int]
+
+
+def poll_log(client: EsriClient, settings: AlertSettings, known: Iterable[int], since: Optional[float] = None,
+             token: Optional[str] = None, limit: int = 2000) -> LogChanges:
+    """
+    The changes of the log table since a poll: one request for the object
+    ids of the rows reported since `since` (all rows when None, or when the
+    table has no time attribute), then the rows not `known` by their ids (so
+    each poll moves only what changed; rows deleted are told by their ids).
+    The first poll (nothing known) reads at most the `limit` newest rows.
+    """
+    table = settings.table
+    if table is None:
+        return LogChanges([], set(), set())
+    token = token or table.token
+    info = client.layer(table.url, token)
+    types = info.field_types
+    f = table.fields
+    if f["obsId"] not in types:
+        raise EsriError(f"通報テーブルに属性 {f['obsId']} なし")
+    clauses = [table.where] if table.where else []
+    if since is not None and f["reportedAt"] in types:
+        clauses.append(f"{f['reportedAt']} >= TIMESTAMP '{utc_text(since)}'")
+    where = " AND ".join(f"({c})" for c in clauses) or "1=1"
+    answer = client.ask(f"{table.url}/query", {"where": where, "returnIdsOnly": "true"}, token)
+    ids = {int(i) for i in answer.get("objectIds") or [] if is_number(i)}
+    known = set(known)
+    new = sorted(ids - known, reverse=True)[:limit]
+    size = max(1, min(500, info.max_record_count or 500))
+    added: list[LogRow] = []
+    oid = info.object_id_field
+    for k in range(0, len(new), size):
+        chunk = new[k:k + size]
+        rows = client.ask(f"{table.url}/query", {"objectIds": ",".join(str(i) for i in chunk), "outFields": "*",
+                                                 "returnGeometry": "false"}, token).get("features") or []
+        added += [_log_row(r.get("attributes") or {}, f, oid) for r in rows]
+    added.sort(key=lambda x: (-(x.reported_at or 0), -(x.oid or 0)))
+    return LogChanges(added, known - ids, ids)
+
+
 def load_log(client: EsriClient, settings: AlertSettings, start: Optional[float] = None, end: Optional[float] = None,
              token: Optional[str] = None, limit: int = 20_000) -> list[LogRow]:
     """The rows reported in a period (newest first; the whole log when the table has no time attribute)."""
@@ -604,14 +695,7 @@ def load_log(client: EsriClient, settings: AlertSettings, start: Optional[float]
             clauses.append(f"{f['reportedAt']} <= TIMESTAMP '{utc_text(end)}'")
     rows = client.query_all(table.url, " AND ".join(f"({c})" for c in clauses) or "1=1", token, geometry=False,
                             limit=limit, cut=True)
-    out = []
-    for r in rows:
-        a = r.get("attributes") or {}
-        out.append(LogRow(
-            obs_id=_text(a.get(f["obsId"])), format=_text(a.get(f["report"])), text=_text(a.get(f["text"])),
-            reported_at=ms_of(a.get(f["reportedAt"])), reported_by=_text(a.get(f["reportedBy"])), batch=_text(a.get(f["batch"])),
-            oid=int(a[oid]) if is_number(a.get(oid)) else None,
-        ))
+    out = [_log_row(r.get("attributes") or {}, f, oid) for r in rows]
     return sorted(out, key=lambda x: -(x.reported_at or 0))
 
 
