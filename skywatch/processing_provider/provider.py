@@ -13,7 +13,7 @@ from .classify_algorithm import ClassifyAlgorithm
 from .cloud_algorithm import CloudCoverAlgorithm
 from .dataset_algorithm import DatasetAlgorithm
 from .detect_algorithm import DetectAlgorithm
-from . import gp_algorithm
+from . import analysis_algorithm, gp_algorithm
 from .geodesic_algorithms import GeodesicBufferAlgorithm, GeodesicCentroidAlgorithm
 from .moving_match_algorithm import MovingMatchAlgorithm
 from .ortho_algorithm import SimpleOrthoAlgorithm
@@ -46,5 +46,7 @@ class SatObsProvider(QgsProcessingProvider):
         self.addAlgorithm(DetectAlgorithm())
         self.addAlgorithm(TrainAlgorithm())
         self.addAlgorithm(DatasetAlgorithm())
+        for algorithm in analysis_algorithm.registered():
+            self.addAlgorithm(algorithm)
         for algorithm in gp_algorithm.registered():
             self.addAlgorithm(algorithm)

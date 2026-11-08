@@ -16,7 +16,7 @@ except ImportError:  # Qt5
 
 from .core.obs.api import ObservationApi
 from .processing_provider.pansharpen_algorithm import default_inputs
-from .processing_provider import cloud_algorithm, detect_algorithm, train_algorithm
+from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm, train_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, time_zone_fields
@@ -456,8 +456,12 @@ class SkywatchPlugin:
         detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
         cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
         train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        # 保存した分析 (the project's analyses of 「データ分析」) as algorithms, following the project.
+        analysis_algorithm.set_context(lambda: context)
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            signal.connect(self._analyses_changed)
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
         pansharpen.triggered.connect(lambda: self.open_pansharpen())
         self._add_to_menu(pansharpen)
@@ -908,6 +912,10 @@ class SkywatchPlugin:
             inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
         processing.execAlgorithmDialog(algorithm, inputs)
 
+    def _analyses_changed(self, *_args) -> None:
+        if self.provider is not None:
+            analysis_algorithm.refresh()
+
     def _refresh_algorithms(self) -> None:
         """The settings file's AI models into the algorithm's choice."""
         if self.provider is not None:
@@ -1040,6 +1048,12 @@ class SkywatchPlugin:
             self.context.configChanged.disconnect(self._refresh_algorithms)
         except (TypeError, RuntimeError, AttributeError):
             pass
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            try:
+                signal.disconnect(self._analyses_changed)
+            except (TypeError, RuntimeError):
+                pass
+        analysis_algorithm.set_context(lambda: None)
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
