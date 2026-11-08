@@ -21,7 +21,7 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, time_zone_fields
 from .qgis_io.context import PluginContext
-from .qgis_io import overviews_io, tasks
+from .qgis_io import complex_sar, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
@@ -285,7 +285,8 @@ class SatelliteObservationPlugin:
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
         self.context.configChanged.connect(self._config_problems)
-        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read.
+        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read;
+        # complex SAR images are shown as amplitude first (`complexImages`). Before the docks' own layersAdded (imageRules).
         self._overviews_ready = False
         self._overviews_waiting: list = []
         QgsProject.instance().layersAdded.connect(self._overview_layers_added)
@@ -848,12 +849,18 @@ class SatelliteObservationPlugin:
             waiting = [layer for layer_id, layer in self._overviews_waiting if layer_id in ids]
             self._overviews_waiting = []
             if waiting:
-                overviews_io.layers_added(waiting, self.iface.messageBar())
+                self._raster_layers_added(waiting)
 
     def _overview_layers_added(self, layers) -> None:
         if not self._overviews_ready:
             self._overviews_waiting += [(layer.id(), layer) for layer in layers]
             return
+        self._raster_layers_added(layers)
+
+    def _raster_layers_added(self, layers) -> None:
+        """Complex SAR images first get their amplitude VRT (`complexImages`), whose overviews are then built, not those of I and Q."""
+        layers = list(layers)
+        complex_sar.layers_added(layers, self.context.config.complex_images if self.context else None, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:
