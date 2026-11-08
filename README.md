@@ -123,6 +123,15 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 "complexImages": "dB"          // "dB"（既定）| "amplitude"（√(I²+Q²)）| false（QGIS のまま I・Q を表示）
 ```
 
+画像ごとに変えるときは `imageRules` に `complexImages` を書く。ファイル名に最初に合った規則に `complexImages` があればそちらが設定ファイル全体の値より優先する（`false` でその画像だけ変換しない）。同じ規則の補正（`preset`・`enhance`）・`bands`・`noData` は変換後の振幅（dB）のバンドにかかる。`complexImages` だけの規則は、変換時の 2〜98 % の引き伸ばしをそのまま使う。
+
+```jsonc
+"imageRules": [
+  { "match": "^CSK_.*\\.ntf$", "complexImages": "amplitude", "enhance": { "autoStretch": { "lowPercent": 1 } } },
+  { "match": "_raw\\.ntf$", "complexImages": false }
+]
+```
+
 ## 通知
 
 「この条件で監視…」（画像カタログ）か地図の右クリック「この地点の新着画像を監視…」で監視を作る。範囲は表示範囲・描いた範囲・選択中の地物・地点・指定なし。地点は既存の監視に足すこともできる。
@@ -917,7 +926,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 | `pathMappings` | 配列 | `prefix`（必須。レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ） | なし | [画像カタログ](#画像カタログ) |
 | `overviews` | `false` かオブジェクト | `enabled`、`resampling`（`AVERAGE` など）、`minSize`、`compress`（`DEFLATE` など）、`location`（`auto`: 書ければ画像の隣、`cache`: キャッシュのフォルダ）、`scope`（`all`: QGIS に追加したローカル画像すべて、`catalog`: カタログなどから開いたものだけ）、`cacheFolder`（空ならプロファイルの中） | 作る（`auto`・`all`） | [ピラミッドの自動作成](#ピラミッドovrの自動作成overviews) |
 | `complexImages` | `"dB"`・`"amplitude"`・`false` | SICD（I・Q のバンド）や複素数の画素の画像を振幅で表示。`"dB"` は 20·log10(振幅)、`false` で QGIS のまま | `"dB"` | [複素 SAR 画像の表示](#複素-sar-画像sicdの表示compleximages) |
-| `imageRules` | 配列 | `match`（ファイル名の正規表現、必須）、`caseSensitive`、`preset`・`enhance`（補正）、`bands`、`noData` | なし | [画像補正](#画像補正) |
+| `imageRules` | 配列 | `match`（ファイル名の正規表現、必須）、`caseSensitive`、`preset`・`enhance`（補正）、`bands`、`noData`、`complexImages`（複素 SAR の表示。`"dB"`・`"amplitude"`・`false`） | なし | [画像補正](#画像補正) |
 
 #### 撮像計画・撮像依頼
 

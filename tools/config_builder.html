@@ -844,6 +844,7 @@ const SPEC = [
         LABEL, T("match", "ファイル名（正規表現）", { req: true, ph: "^WV03_.*\\.tif$" }), B("caseSensitive", "大文字小文字を区別"),
         S("preset", "プリセット", K.presets), J("enhance", "補正（enhance）", { ph: '{ "contrast": 0.2, "autoStretch": { "lowPercent": 1 } }' }),
         J("bands", "バンド（bands）", { ph: "[3, 2, 1]" }), J("noData", "no data", { ph: "0" }),
+        S("complexImages", "複素 SAR の表示", [["dB", "dB"], ["amplitude", "amplitude"]], { ph: "設定ファイルの complexImages", falseLabel: "false（QGIS のまま I・Q）" }),
       ], { title: (it) => it.label || it.match }) },
   ] },
   { group: "撮像計画・撮像依頼", keys: [

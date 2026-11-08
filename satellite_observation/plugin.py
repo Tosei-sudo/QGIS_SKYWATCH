@@ -21,6 +21,7 @@ from .processing_provider.provider import SatObsProvider
 from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, time_zone_fields
 from .qgis_io.context import PluginContext
+from .core.enhance.rules import image_rule_for
 from .qgis_io import complex_sar, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
@@ -900,10 +901,21 @@ class SatelliteObservationPlugin:
             return
         self._raster_layers_added(layers)
 
+    def _complex_mode(self, layer):
+        """How a complex SAR image is shown: the first imageRules entry for its file name with `complexImages`, else the settings file's."""
+        config = self.context.config if self.context else None
+        if config is None:
+            return None
+        path = overviews_io.local_path(layer)
+        rule = image_rule_for(config.image_rules, path) if path and config.image_rules else None
+        if rule is not None and rule.complex_images is not None:
+            return rule.complex_images or None
+        return config.complex_images
+
     def _raster_layers_added(self, layers) -> None:
         """Complex SAR images first get their amplitude VRT (`complexImages`), whose overviews are then built, not those of I and Q."""
         layers = list(layers)
-        complex_sar.layers_added(layers, self.context.config.complex_images if self.context else None, self.iface.messageBar())
+        complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
         overviews_io.layers_added(layers, self.iface.messageBar())
 
     def unload(self) -> None:

@@ -248,12 +248,20 @@ def stretch(layer, low: float = 0.02, high: float = 0.98) -> None:
     layer.triggerRepaint()
 
 
-def layers_added(layers: Sequence, mode: Optional[str], message_bar=None, folder: Optional[str] = None) -> list:
-    """Converts the complex images among `layers` (mode None: none); the layers converted, told in the message bar."""
-    if not mode:
-        return []
-    done = [layer for layer in layers if convert_layer(layer, mode, folder)]
+def layers_added(layers: Sequence, mode, message_bar=None, folder: Optional[str] = None) -> list:
+    """
+    Converts the complex images among `layers`; the layers converted, told
+    in the message bar. `mode` is a mode of MODES, None (none converted), or
+    a function giving a layer's (an imageRules entry's for its file name).
+    """
+    done = []
+    for layer in layers:
+        shown = mode(layer) if callable(mode) else mode
+        if shown and convert_layer(layer, shown, folder):
+            done.append((layer, shown))
     if done and message_bar is not None:
-        names = "、".join(layer.name() for layer in done[:3]) + (" ほか" if len(done) > 3 else "")
-        message_bar.pushInfo("複素 SAR 画像", f"{names} を{'振幅（dB）' if mode == 'dB' else '振幅'}で表示（I・Q から計算）")
-    return done
+        for shown in dict.fromkeys(m for _, m in done):
+            these = [layer for layer, m in done if m == shown]
+            names = "、".join(layer.name() for layer in these[:3]) + (" ほか" if len(these) > 3 else "")
+            message_bar.pushInfo("複素 SAR 画像", f"{names} を{'振幅（dB）' if shown == 'dB' else '振幅'}で表示（I・Q から計算）")
+    return [layer for layer, _ in done]
