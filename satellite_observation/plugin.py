@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsProject, QgsVectorLayer
-from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt
+from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QIcon, QPainter
 from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton, QToolButton
 
@@ -31,7 +31,8 @@ from .ui.cloud_dock import CloudDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.dashboard_dock import DashboardDock
 from .ui.docks import StubDock
-from .ui.dock_layouts import DockLayoutMenu
+from .ui.dock_layouts import DockLayoutMenu, float_docks
+from .ui import first_setup
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
 from .ui.events_dock import EventsDock
@@ -73,7 +74,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ドックのレイアウト", "ドックを初期位置に戻す", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
@@ -281,8 +282,11 @@ class SatelliteObservationPlugin:
         self._submenus: list[QMenu] = []
         self._menu_top: list[QAction] = []
         self._menu_separator: Optional[QAction] = None
+        self.setup_dialog: Optional[first_setup.FirstSetupDialog] = None
 
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
+        # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
+        self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
@@ -550,11 +554,17 @@ class SatelliteObservationPlugin:
         self.actions.append(home)
         # 「ドックのレイアウト」: named layouts per kind of work (ui/dock_layouts.py).
         self.dock_layouts = DockLayoutMenu(self.iface.mainWindow(), lambda: self.docks,
-                                           lambda text: self.iface.messageBar().pushSuccess(tr("ドックのレイアウト"), text), self.iface.mainWindow())
+                                           lambda text: self.iface.messageBar().pushSuccess(tr("ドックのレイアウト"), text), self.iface.mainWindow(),
+                                           floating=first_setup.docks_floating)
         layouts = self.dock_layouts.menuAction()
         layouts.setIcon(icon("dock_layouts"))
         self._add_to_menu(layouts)
         self.actions.append(layouts)
+        # 「担当と個人設定」: the role's docks, docks in windows of their own, and the person's settings (ui/first_setup.py).
+        setup = QAction(icon("first_setup"), tr("担当と個人設定…"), self.iface.mainWindow())
+        setup.triggered.connect(lambda: self.open_first_setup())
+        self._add_to_menu(setup)
+        self.actions.append(setup)
         settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
         settings.triggered.connect(self.open_settings)
         self._add_to_menu(settings)
@@ -565,6 +575,33 @@ class SatelliteObservationPlugin:
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks)
         self.context.reload()
+        if self._first_start and first_setup.ENABLED:
+            # Once QGIS has started (and put back its own window layout), or now when installed while it runs.
+            started = getattr(self.iface, "initializationCompleted", None)
+            if self.iface.mainWindow().isVisible() or started is None:
+                QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+            else:
+                started.connect(self._first_setup_after_start)
+
+    def _first_setup_after_start(self) -> None:
+        try:
+            self.iface.initializationCompleted.disconnect(self._first_setup_after_start)
+        except (TypeError, RuntimeError):
+            pass
+        QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
+
+    def open_first_setup(self, first: bool = False) -> Optional[first_setup.FirstSetupDialog]:
+        """「最初の設定」 (first) or 「担当と個人設定」: the page, open beside the main window (not blocking it)."""
+        if self.context is None:  # unloaded meanwhile
+            return None
+        if self.setup_dialog is not None:
+            self.setup_dialog.deleteLater()
+        self.setup_dialog = first_setup.FirstSetupDialog(
+            self.iface.mainWindow(), lambda: self.docks, first=first,
+            observation_dock=lambda: self.docks.get("SatObsObservations"), coordinates=lambda: self.coordinates,
+            open_settings=self.open_settings)
+        self.setup_dialog.open()
+        return self.setup_dialog
 
     def _add_to_menu(self, action: QAction) -> None:
         """An entry of the plugin's menu: placed in its group by `_build_menu` (MENU_GROUPS)."""
@@ -634,7 +671,7 @@ class SatelliteObservationPlugin:
     def place_docks(self) -> None:
         """
         Docks every dock where it starts (DOCK_GROUPS): each group on its side
-        as tabs, none floating. Open ones stay open, the group's first open one in front.
+        as tabs, none floating (each in its own window with 「別ウィンドウで開く」). Open ones stay open, the group's first open one in front.
         """
         window = self.iface.mainWindow()
         for area, names in DOCK_GROUPS:
@@ -647,6 +684,9 @@ class SatelliteObservationPlugin:
                 window.tabifyDockWidget(docks[0], dock)
             if shown:
                 shown[0].raise_()
+        # 「別ウィンドウで開く」 (「担当と個人設定」): each in a window of its own, cascaded beside the main window.
+        if first_setup.docks_floating():
+            float_docks(window, self.docks)
 
     def _canvas_menu(self, menu, event) -> None:
         canvas = self.iface.mapCanvas()
@@ -1028,6 +1068,10 @@ class SatelliteObservationPlugin:
             self.iface.removePluginMenu(MENU, menu.menuAction())
             menu.deleteLater()
         self._submenus, self._menu_top, self._menu_entries = [], [], []
+        if getattr(self, "setup_dialog", None) is not None:
+            self.setup_dialog.close()
+            self.setup_dialog.deleteLater()
+            self.setup_dialog = None
         if getattr(self, "dock_layouts", None) is not None:
             self.dock_layouts.deleteLater()
             self.dock_layouts = None

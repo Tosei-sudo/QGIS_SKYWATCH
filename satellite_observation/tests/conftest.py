@@ -90,3 +90,13 @@ def default_edit_tracking():
 
     yield
     edit_stamp.set_tracking(None)
+
+
+@pytest.fixture(autouse=True)
+def no_first_setup_page(monkeypatch):
+    """「最初の設定」 does not pop up in every plugin test (tests/test_qgis_first_setup.py turns it on)."""
+    try:
+        from satellite_observation.ui import first_setup
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(first_setup, "ENABLED", False)
