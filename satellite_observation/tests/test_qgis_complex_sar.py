@@ -210,3 +210,23 @@ def test_the_plugin_shows_a_sicd_added_in_any_way_as_db(tmp_path, monkeypatch):
         QgsProject.instance().removeAllMapLayers()
         plugin.unload()
         settings.set_config_source("")
+
+
+def test_an_alpha_band_after_i_and_q_is_left_out(tmp_path):
+    """I, Q and a third band (alpha): one dB band from I and Q, the alpha ignored (tsudo, 2026-11-08)."""
+    mem = gdal.GetDriverByName("MEM").Create("", W, H, 3, gdal.GDT_Float32)
+    _georef(mem)
+    rng = np.random.default_rng(3)
+    i, q = rng.normal(size=(H, W)).astype("f4"), rng.normal(size=(H, W)).astype("f4")
+    mem.GetRasterBand(1).WriteArray(i)
+    mem.GetRasterBand(2).WriteArray(q)
+    mem.GetRasterBand(3).WriteArray(np.zeros((H, W), "f4"))
+    path = str(tmp_path / "iqa.ntf")
+    gdal.GetDriverByName("NITF").CreateCopy(path, mem, options=["ISUBCAT=I,Q,A", "ICAT=SAR"])
+    assert outputs_of(gdal.Open(path)) == [Output((1, 2))]
+    ds = gdal.Open(build_vrt(path, "dB", str(tmp_path / "cache")))
+    assert ds.RasterCount == 1 and ds.GetRasterBand(1).GetMaskFlags() & gdal.GMF_ALPHA == 0
+    assert np.allclose(ds.ReadAsArray(), 20 * np.log10(np.hypot(i, q)), atol=1e-4)
+    # A GeoTIFF whose third band is an alpha band.
+    tif, _ = tiff(tmp_path / "iqa.tif", bands=3, dtype=gdal.GDT_Float32, descriptions=("I", "Q"))
+    assert outputs_of(gdal.Open(tif)) == [Output((1, 2))]
