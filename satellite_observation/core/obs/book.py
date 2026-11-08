@@ -784,10 +784,13 @@ class ObservationBook:
         saved = self._save_records([record], f"{record.object_name} を{'継続' if present else '不在'}として記録")
         return saved[0] if saved else None
 
-    def carry_all(self) -> list[Observation]:
-        """Records every carried-over thing as still there in this image (but those in a checked area, which were not)."""
+    def carry_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
+        """
+        Records every carried-over thing as still there in this image (but those in a checked area, which were not);
+        with `only`, just the ones it keeps (those the list shows).
+        """
         image = self.current
-        carried = self.carried()
+        carried = [c for c in self.carried() if only is None or only(c)]
         inside = self.inside_carried(carried)
         rows = [c for c in carried if c not in inside]
         if image is None or not rows:
@@ -797,10 +800,10 @@ class ObservationBook:
         note = f"（確認範囲内の {len(inside)} 件を除く）" if inside else ""
         return self._save_records(made, f"{len(made)} のモノを継続として記録{note}") or []
 
-    def absent_inside(self) -> list[Observation]:
-        """Records the things carried over into a checked area as gone in this image."""
+    def absent_inside(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
+        """Records the things carried over into a checked area as gone in this image (with `only`, just the ones it keeps)."""
         image = self.current
-        rows = self.inside_carried()
+        rows = [c for c in self.inside_carried() if only is None or only(c)]
         if image is None or not rows:
             return []
         now = now_ms()

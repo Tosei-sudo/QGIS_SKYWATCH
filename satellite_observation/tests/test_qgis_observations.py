@@ -733,3 +733,32 @@ def test_the_lists_are_filtered_by_a_top_class(plugin):
     # Not offered in 「分類」.
     dock.tabs.setCurrentIndex(2)
     assert not dock.class_filter_row.isVisible()
+
+
+def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name, kind, lon in (("A", "船舶", 139.70), ("B", "航空機", 139.71), ("C", "船舶", 139.76), ("D", "航空機", 139.77)):
+        dock.map_clicked(lon, 35.60, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText(kind)
+        dock.submit()
+    dock.step(1)
+    # A checked area (all kinds) over A and B.
+    dock.set_area_mode(True)
+    dock.map_clicked(139.69, 35.59, None)
+    dock.map_clicked(139.72, 35.62, None)
+    dock._submit_area()
+    dock.filter_root("船舶")
+    # Only the ships count, and only they are recorded; the aircraft stay as they were.
+    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_inside_button.text() == "確認範囲内 1 件を不在"
+    dock.carry_all()
+    dock.absent_inside()
+    assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("C", True)]
+    # Unfiltered again: the aircraft are still to be done.
+    dock.filter_root(None)
+    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.carry_all_button.isVisibleTo(dock)
+    dock.carry_all()
+    dock.absent_inside()
+    assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", False), ("C", True), ("D", True)]

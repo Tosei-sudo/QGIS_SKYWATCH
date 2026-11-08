@@ -1716,11 +1716,20 @@ class ObservationDock(PluginDock):
     def carry(self, object_id: str, present: bool = True) -> None:
         self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present), watch=True)
 
+    def _carry_shown(self) -> Optional[Callable[[CarryOver], bool]]:
+        """Which carried-over things the list shows (None: all), so 「すべて継続」 leaves the hidden ones alone."""
+        if not self.class_filter or self.book is None:
+            return None
+        taxa = self.book.taxonomy()
+        return lambda c: self._shown_kind(c.source.kind, taxa)
+
     def carry_all(self) -> None:
-        self.do(self.tr("すべて継続"), lambda b: b.carry_all(), watch=True)
+        only = self._carry_shown()
+        self.do(self.tr("すべて継続"), lambda b: b.carry_all(only), watch=True)
 
     def absent_inside(self) -> None:
-        self.do(self.tr("確認範囲内の不在"), lambda b: b.absent_inside())
+        only = self._carry_shown()
+        self.do(self.tr("確認範囲内の不在"), lambda b: b.absent_inside(only))
 
     def remove(self, rows: list[Observation]) -> None:
         self.do(self.tr("記録の削除"), lambda b: b.remove(rows))
@@ -2203,7 +2212,9 @@ class ObservationDock(PluginDock):
             return
         if not self.status.text() and book.status:
             self.status.setText(book.status)
-        carried = book.carried()
+        # Only what the list shows (大分類), which is all 「すべて継続」 and 「確認範囲内…を不在」 record.
+        shown_carry = self._carry_shown()
+        carried = [c for c in book.carried() if shown_carry is None or shown_carry(c)]
         inside = book.inside_carried(carried)
         self.carry_label.setText(self.tr("前後の画像のモノ {n} 件").format(n=len(carried)) if carried else "")
         self.carry_all_button.setVisible(len(carried) > len(inside))
@@ -2229,8 +2240,6 @@ class ObservationDock(PluginDock):
         self.unfilter_button.setVisible(bool(self.class_filter))
         if self.class_filter:
             here = [o for o in here if self._shown_kind(o.kind, taxa)]
-            carried = [c for c in carried if self._shown_kind(c.source.kind, taxa)]
-            inside = [c for c in inside if self._shown_kind(c.source.kind, taxa)]
         if self.tab == "image":
             self._render_image(here, carried, inside)
         elif self.tab == "objects":
