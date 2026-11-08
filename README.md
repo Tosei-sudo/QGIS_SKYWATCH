@@ -13,7 +13,7 @@
 - 対応: QGIS 3.34 LTR 以上（Qt5 / Qt6）
 - 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の推論だけに必要。AI 学習は追加なし）。numpy は QGIS 付属のもの。Windows 版の zip には両方とも同梱（`timeZone` の IANA 名に使う `tzdata` も）
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
-- 名前: 表示名は「SKYWATCH」（以前は「衛星撮像計画・観測記録」）。プラグインのフォルダー名・ID は `satellite_observation` のまま（変えると QGIS が別のプラグインとして扱い、社内リポジトリからの更新や QGIS 設定の `satellite_observation/…` が引き継がれないため）
+- 名前: 表示名は「SKYWATCH」、プラグインのフォルダー名・ID は `skywatch`（2026-11-08 に「衛星撮像計画・観測記録」・`satellite_observation` から変更。`satellite_observation` の版を入れた PC は、先にそれをアンインストールしてから入れる。設定・ドックのレイアウトなどは引き継がれない）
 
 ビューアとの違いは [docs/differences.md](docs/differences.md)。
 
@@ -44,7 +44,7 @@
   - 保存したレイアウトを選ぶと、その配置に切り替え（レイアウトにないドックは閉じる）。最後に使ったものにチェック
   - 初めから「撮像計画の担当」「観測記録の担当」「画像判読」の例がある。同じ名前で保存すると置き換わり、それを削除すると例に戻る
   - 「ファイルへ書き出し…」「ファイルから読み込み…」で JSON にして別の PC や担当者と共有。QGIS のパネルやツールバーは変えない
-  - 保存先はユーザープロファイルの QGIS 設定（`satellite_observation/dockLayouts`）
+  - 保存先はユーザープロファイルの QGIS 設定（`skywatch/dockLayouts`）
 
 ## 最初の設定（担当と個人設定）
 
@@ -54,7 +54,7 @@
   - ドックの開き方: 「メイン画面に連結する（タブでまとめる）」か「別ウィンドウで開く」。別ウィンドウでは、ドックごとに独立したウィンドウになり（閉じているドックも、開くとウィンドウで出る）、メイン画面の右寄りに少しずつずらして並べる。別のモニターにも置ける。このあと「ドックのレイアウト」の例や「ドックを初期位置に戻す」も別ウィンドウで開く（浮かせた位置ごと保存したレイアウトはその位置）
   - 個人の設定: 記録者名、観測記録のクリック数（1〜4 点）、カーソル位置の表記（10進・度分秒・MGRS・UTM）。「設定ファイルの指定・接続の認証…」で「設定…」も開ける
 - 「あとで」で閉じても次からは出ない。メニュー「担当と個人設定…」でいつでも選び直せる
-- 保存先はユーザープロファイルの QGIS 設定（`satellite_observation/firstSetupDone`・`role`・`docksFloating`、ほかは各項目の既存のキー）
+- 保存先はユーザープロファイルの QGIS 設定（`skywatch/firstSetupDone`・`role`・`docksFloating`、ほかは各項目の既存のキー）
 
 ## 背景地図
 
@@ -133,7 +133,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 対象: SICD など NITF のバンドの `ISUBCAT` が `I`・`Q` の並び、複素数の画素の画像（CInt16・CFloat32 など。Sentinel-1 SLC の TIFF など）、バンドの説明が `I`・`Q`（`real`・`imag`）の 2 バンド。I・Q の組が複数あれば組ごとに 1 バンド。振幅・位相（`ISUBCAT` が `M`・`P`、SICD の AMP8I_PHS8I）は `M` のバンドをそのまま振幅とする（AmpTable は使わない）
 - 計算は GDAL の画素関数（`complex`・`dB`・`mod`）で描画のたびに行うので、追加のライブラリは不要。**画像本体は書き換えない**。I = Q = 0 の画素（SICD の余白）は no data
 - 表示は灰色の 1 バンドで、値の 2〜98 % を引き伸ばす。色調補正（「画像補正」ドック）もそのまま使える
-- VRT は QGIS プロファイルの `satellite_observation/complex-sar` フォルダに、画像のパス・大きさ・更新日時ごとの名前で置く（同じ画像を開き直すと使い回す）。プロジェクトに保存したレイヤーはこの VRT を読む（フォルダを消すとそのレイヤーは開けなくなるので、画像を開き直す）
+- VRT は QGIS プロファイルの `skywatch/complex-sar` フォルダに、画像のパス・大きさ・更新日時ごとの名前で置く（同じ画像を開き直すと使い回す）。プロジェクトに保存したレイヤーはこの VRT を読む（フォルダを消すとそのレイヤーは開けなくなるので、画像を開き直す）
 - レイヤーのファイル名（観測記録の画像名）・NITF のメタデータ（撮像日時）・`imageRules` の照合は元の画像のもの。VRT は元の画像の位置情報（ジオトランスフォーム・GCP・RPC）とメタデータを引き継ぐ
 - ピラミッド（`overviews`）は I・Q ではなく振幅（dB）の VRT について作る（I・Q のまま平均すると打ち消し合うため）
 - URL（`/vsicurl/`）の画像は対象外。起動時に開いたプロジェクトの画像は設定ファイルを読み終えてから変換する。複数の画像セグメントに分かれた大きな SICD は、GDAL が開く最初のセグメントだけ
@@ -695,7 +695,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 
 カタログにない画像とその注釈（アノテーション）を、学習に使う「教師データセット」にまとめる。データセットは画像と注釈のファイルの場所（絶対パス）と対応を書いた小さな JSON（`*.json`）で、画像は複製しない。
 
-- メニューの「AI ▸ 教師データセットの作成…」（Processing の `satobs:make_dataset` にも）: 画像のフォルダーと、注釈のフォルダー（空なら画像と同じ）または全画像の注釈ファイルを指定して、保存先の JSON に書く。下のフォルダーも含める（既定）。保存先に既存のデータセットを指定すると追記（フォルダーごとにグループ、同じ画像は追加しない）
+- メニューの「AI ▸ 教師データセットの作成…」（Processing の `skywatch:make_dataset` にも）: 画像のフォルダーと、注釈のフォルダー（空なら画像と同じ）または全画像の注釈ファイルを指定して、保存先の JSON に書く。下のフォルダーも含める（既定）。保存先に既存のデータセットを指定すると追記（フォルダーごとにグループ、同じ画像は追加しない）
 - 注釈の形式（「自動」でファイルから判定）: YOLO（画像ごとの `.txt`、`class cx cy w h` の割合。8 値の OBB も可。クラス名は `classes.txt`・`obj.names`・`data.yaml` から、なければ欄で指定）、DOTA（`.txt`）、Pascal VOC（`.xml`、`robndbox` も可）、COCO（全画像で 1 つの `.json`、`file_name` で対応）、ベクタ（GeoJSON・GeoPackage・Shapefile など地図座標。画像ごと、または全画像で 1 つ。クラスのフィールドは空なら `class`・`種別` などを探す）。回転した枠は外接する枠で学習
 - 画像と注釈の対応: 同じ名前のファイル。`images/train/a.tif` と `labels/train/a.txt` のような YOLO の並びも対応する。注釈のない画像は除く（「背景として含める」で、何もない画像として学習）
 - クラスの対応: `ship=船舶, plane=航空機 > 輸送機` のように、注釈のクラス名を分類体系の種別に。書かない名前はそのまま種別（分類の名前・別名でも可）。その後は観測記録と同じく、分類の深さ・対象の種別で学習するクラスが決まる
@@ -798,7 +798,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 
 ## 入力の初期値の記憶
 
-- 前回の入力を次の入力の初期値にする。ユーザープロファイルの `QgsSettings`（`satellite_observation/last_inputs/…`）に人ごとに残し、設定ファイルには書かない
+- 前回の入力を次の入力の初期値にする。ユーザープロファイルの `QgsSettings`（`skywatch/last_inputs/…`）に人ごとに残し、設定ファイルには書かない
 - 撮像依頼: 新しい依頼は、最後にフォームで保存した依頼の区分・達成条件・繰り返し・優先度・種別・観測方向・軌道方向・時間帯・衛星シリーズ・衛星・センサー・モード・角度・分解能・雲量・優先するシステム・依頼者から始まる（名称・期間・範囲・状態・メモは毎回空から）。点の範囲の一辺も
 - 撮像計画・衛星パス: 選んだ衛星（一覧に新しく出た衛星は前回の選択どおり）と、期間・オフナディア角・日照条件・太陽高度・入射角・軌道・向き・雲量・地物ごと・優先する値・目標・集約・最初の機会のみ（衛星パスは表示・前後の時間・オフナディア角・日照条件・時刻表示）。変えたときに残す
 - 観測記録の種別・活動・確度（保存先ごと）は従来どおり
@@ -839,7 +839,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 
 ## Python API
 
-Python コンソールから `plugin = qgis.utils.plugins["satellite_observation"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
+Python コンソールから `plugin = qgis.utils.plugins["skywatch"]` で取り、`plugin.api` を使う。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
 
 ```python
 api = plugin.api
@@ -874,7 +874,7 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 
 ## 導入
 
-1. `python3 scripts/build_zip.py` で `dist/satellite_observation-<版>.zip` を作る
+1. `python3 scripts/build_zip.py` で `dist/skywatch-<版>.zip` を作る
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」（閉域で多くの PC に配り、更新も知らせるなら下の「社内のプラグインリポジトリで更新を配る」）
 3. メニュー「プラグイン」→「SKYWATCH」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る。設定ファイルの指定はこのメニューだけで、各ドックには出さない。読み込んだ設定ファイルに問題があると、QGIS のメッセージバーに「問題 n 件」と「設定…」ボタンを出す（同じファイル・同じ問題では繰り返さない）
 
@@ -884,12 +884,12 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 python3 scripts/build_zip.py --win64
 ```
 
-- `dist/satellite_observation-<版>-win64.zip` を作る。中の `satellite_observation/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
+- `dist/skywatch-<版>-win64.zip` を作る。中の `skywatch/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
 - 3 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
 - ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
 - `--config` と併用可
-- DLL を含む onnxruntime と sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\satellite_observation\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
-- この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/satellite_observation` を消す）
+- DLL を含む onnxruntime と sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\skywatch\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
+- この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/skywatch` を消す）
 
 ### 設定ファイルを同梱して配る
 
@@ -899,7 +899,7 @@ python3 scripts/build_zip.py --win64
 python3 scripts/build_zip.py --config /path/to/image-viewer/public/config.json
 ```
 
-- zip の中では `satellite_observation/config.json`（`.jsonc` ならそのまま）になる。`satellite_observation/` に `config.json` を置いて `--config` なしで作っても同じ（この場所は git の対象外）
+- zip の中では `skywatch/config.json`（`.jsonc` ならそのまま）になる。`skywatch/` に `config.json` を置いて `--config` なしで作っても同じ（この場所は git の対象外）
 - 受け取った人が「設定…」で設定ファイルを指定していなければ、同梱のものを読む。指定していればそちらが優先。欄を空にすると同梱のものに戻る。「設定…」の表示は「同梱の設定ファイルを使用」
 - 作るときに設定ファイルを読んで確かめ、読めない・問題があるときは zip を作らない。`token` が書いてあれば注意を出す（zip を受け取った人全員に渡るため。サインインが要るサービスは各自の QGIS の認証設定を使う方がよい）
 - プラグインを入れ直すと同梱の設定ファイルも新しい zip のものに置き換わる。各自の指定（`QgsSettings`）は残る
@@ -913,7 +913,7 @@ python3 scripts/build_zip.py --config /path/to/config.json --lock-config --win64
 
 - 受け取った人は同梱の設定ファイルしか使えない。「設定…」の設定ファイル欄は同梱のファイルを表示するだけで変えられず（「参照…」は押せない、「読み込み」は同梱のものを読み直す）、前に指定したパス・URL があっても無視する。「設定…」の表示は「同梱の設定ファイルに固定」
 - 記録者とサービスごとの認証設定はこれまでどおり各自で選べる
-- 仕組み: zip に設定ファイルと並べて `satellite_observation/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`satellite_observation/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
+- 仕組み: zip に設定ファイルと並べて `skywatch/config.lock` を入れる。プラグインは `config.lock` と `config.json`（または `config.jsonc`）が両方あるときだけ固定する（`config.lock` だけなら何もしない）。`skywatch/` に `config.json` と `config.lock` を置いて `--config` なしで作っても固定になる（どちらも git の対象外）
 - 設定ファイルなしで `--lock-config` を付けると zip を作らない
 - 固定を外すには `--lock-config` なしで作った zip を入れ直す（またはプラグインのフォルダの `config.lock` を消す）。各自が前に指定していたファイルがあれば、またそちらを読む
 
@@ -929,7 +929,7 @@ python3 scripts/make_plugin_repo.py /srv/www/qgis-plugins --url http://intra.exa
 python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config config.json --lock-config --changelog "通報の地名を追加"
 ```
 
-- 通常版と Windows 版の zip を新しい版で作り、フォルダーに `plugins.xml`（通常版）・`plugins-win64.xml`（Windows 版）・`satellite_observation.<版>.zip`・`satellite_observation.<版>.win64.zip`・`icon.svg` を置く。最後に各 PC で登録するアドレスを出す
+- 通常版と Windows 版の zip を新しい版で作り、フォルダーに `plugins.xml`（通常版）・`plugins-win64.xml`（Windows 版）・`skywatch.<版>.zip`・`skywatch.<版>.win64.zip`・`icon.svg` を置く。最後に各 PC で登録するアドレスを出す
 - 版は `metadata.txt` の版の後ろに UTC の日時（秒まで）を付けたもの（例 `0.4.0.20261108123000`）。QGIS は掲載の版が入っている版より大きいときだけ更新と見なすため、作るたびに必ず大きくなるようにしている。`--version` で指定もできる。大きな変更では `metadata.txt` の版（`0.4.0` → `0.5.0`）を上げる
 - 掲載中の版より新しくない zip は載せない。前の版に戻すときは、残っている古い zip を `--zip 古い.zip --allow-older` で載せ直す（各 PC では「プラグインの管理」で入れ直し）。古い zip は消さずに残す
 - `--config`・`--lock-config`（同梱の設定ファイルに固定）は `build_zip.py` と同じで、通常版・Windows 版の両方に効く。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
@@ -956,7 +956,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 **更新のとき（Windows 版）**
 
 - 更新は QGIS の中でプラグインのフォルダーを消して zip を展開し直す。Windows 版の DLL（onnxruntime・sgp4）は `%LOCALAPPDATA%` の写しから読むので、QGIS を開いたままでも更新できる（上の「Windows 版」）
-- この仕組みより前の Windows 版が入っている PC は一度だけ、プラグインを無効にして QGIS を再起動してから更新する（または QGIS を閉じて `python/plugins/satellite_observation` を消してから入れる）。今の版の `metadata.txt` は `0.4.0` 以上なので、`0.3.0` などの手元の版から入れた PC にも更新として出る
+- この仕組みより前の Windows 版が入っている PC は一度だけ、プラグインを無効にして QGIS を再起動してから更新する（または QGIS を閉じて `python/plugins/skywatch` を消してから入れる）。今の版の `metadata.txt` は `0.4.0` 以上なので、`0.3.0` などの手元の版から入れた PC にも更新として出る
 - 更新後に動きがおかしければ QGIS を再起動する
 
 **確かめたこと**: QGIS 3.34 のプラグイン管理のコード（`pyplugin_installer`）で、`file://` と `http://` のどちらのリポジトリも読めて、`0.4.0` が入った状態で「アップグレード可能」になり、ダウンロードと展開で新しい版に入れ替わることを確かめた（Linux）。UNC の `file://サーバー/共有/…` は Qt が Windows で UNC パスとして開く書き方。
@@ -965,13 +965,13 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 | 項目 | 保存先 |
 | --- | --- |
-| 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`satellite_observation/…`） |
+| 設定ファイルのパス・URL、記録者、サービスごとの認証設定 | `QgsSettings`（`skywatch/…`） |
 | 同梱の設定ファイル（指定がないときに読む） | プラグインのフォルダーの `config.json`（または `config.jsonc`） |
 | 同梱の設定ファイルへの固定（`--lock-config`） | プラグインのフォルダーの `config.lock` |
-| 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `satellite_observation/observations.gpkg` |
+| 観測記録・確認範囲・分類体系・写真・新着画像の監視と通知（ローカル） | ユーザープロファイルの `skywatch/observations.gpkg` |
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、担当とドックの開き方（最初の設定）、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
-| 入力の初期値（前回の入力） | `QgsSettings`（`satellite_observation/last_inputs/…`） |
+| 入力の初期値（前回の入力） | `QgsSettings`（`skywatch/last_inputs/…`） |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可、ほかの項目は無視）。読む項目と書き方は[設定ファイルの書き方](#設定ファイルの書き方)。
 
@@ -979,7 +979,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 ## 設定ファイルの書き方
 
-プラグインが読む設定ファイル（`config.json`）の書き方。ビューアの `config.json` と共用できるが、プラグインだけの項目・読み方の違いが増えたので、**プラグインが実際に読む項目**をここにまとめる（`satellite_observation/core/config.py` の `KEYS` と各項目の読み込み処理が元）。各機能の細かい動きは、表の「詳しく」の節を参照。Esri 側に作るテーブル・属性の一覧は [Esri 側のテーブル定義](#esri-側のテーブル定義)。
+プラグインが読む設定ファイル（`config.json`）の書き方。ビューアの `config.json` と共用できるが、プラグインだけの項目・読み方の違いが増えたので、**プラグインが実際に読む項目**をここにまとめる（`skywatch/core/config.py` の `KEYS` と各項目の読み込み処理が元）。各機能の細かい動きは、表の「詳しく」の節を参照。Esri 側に作るテーブル・属性の一覧は [Esri 側のテーブル定義](#esri-側のテーブル定義)。
 
 ### 設定ファイル作成ツール（`tools/config_builder.html`）
 
@@ -990,7 +990,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 - 必須の項目・属性名の形・数の範囲・重複などを「確認」に出す（最後はプラグインの「設定…」の問題の一覧で確かめる）
 - 撮像依頼の日次出力（`requestExports`、オーダー用ファイル）: CSV の列（`columns`）を表で、JSON の JSON Schema（`x-source` など）を木で組める。システムから受け取ったスキーマを読み込んで `x-source` を書き添え、`.schema.json` として保存もできる。架空の依頼 2 件での出力の見本と、スキーマでの検査結果を出す
 - 入力途中の内容はブラウザに残り、次に開いたとき続きから
-- 項目の役割・選択肢はプラグインの定数の写し。プラグインを変えたら `python3 -m satellite_observation.tests.test_config_builder` で更新する（テストが食い違いを見つける）
+- 項目の役割・選択肢はプラグインの定数の写し。プラグインを変えたら `python3 -m skywatch.tests.test_config_builder` で更新する（テストが食い違いを見つける）
 
 ### 読み込みと基本の決まり
 
@@ -1623,7 +1623,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 ## 構成
 
 ```
-satellite_observation/
+skywatch/
   core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録・AI の前後処理（NumPy）
   ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime と C++ 版 sgp4 と tzdata も）
   qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
@@ -1642,7 +1642,7 @@ python3 -m pip install -r requirements-test.txt       # pytest・pytest-xdist・
 QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto         # 高速版（約 40 秒・4 コア）: 学習が「当たるまで」のテストを除く
 QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto --full  # 完全版（約 2 分半）: AI 学習が四角を見つけ直すまで学ぶテストも
 python3 -m pytest                                           # core だけ（QGIS なしで動く）
-SATELLITE_OBSERVATION_SGP4=bundled python3 -m pytest        # 同梱の純 Python 版 SGP4 で
+SKYWATCH_SGP4=bundled python3 -m pytest        # 同梱の純 Python 版 SGP4 で
 ```
 
 - 遅いテストには `@pytest.mark.slow`。高速版では飛ばし、`--full`（または環境変数 `SATOBS_FULL_TESTS=1`）で実行。AI 学習のテストは高速版でも 1 エポックで読み込み・学習・書き出し・検出まで通す（精度だけ完全版）

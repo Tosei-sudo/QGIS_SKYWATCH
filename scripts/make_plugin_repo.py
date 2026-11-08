@@ -13,7 +13,7 @@ The folder then holds:
 
     plugins.xml            the repository for the regular zip (each PC adds this URL in QGIS)
     plugins-win64.xml      the repository for the Windows zip (onnxruntime, sgp4 and tzdata inside)
-    satellite_observation.<version>.zip / satellite_observation.<version>.win64.zip
+    skywatch.<version>.zip / skywatch.<version>.win64.zip
     icon.svg
 
 QGIS offers an update when the listed version is greater than the installed one, so each build gets a new version:
@@ -36,7 +36,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-PLUGIN_ID = "satellite_observation"
+PLUGIN_ID = "skywatch"
 #: Repository files, by kind of zip.
 XML_NAMES = {"regular": "plugins.xml", "win64": "plugins-win64.xml"}
 WIN64_DIR = f"{PLUGIN_ID}/ext/win64/"
@@ -121,7 +121,7 @@ def read_zip(path: str) -> dict:
 
 
 def file_name(version: str, kind: str) -> str:
-    """The zip's name in the repository. QGIS takes the plugin's id from the part before the first dot, so it must start with `satellite_observation.`."""
+    """The zip's name in the repository. QGIS takes the plugin's id from the part before the first dot, so it must start with `skywatch.`."""
     return f"{PLUGIN_ID}.{version}{'.win64' if kind == 'win64' else ''}.zip"
 
 
