@@ -1074,8 +1074,8 @@ const SPEC = [
           N("digits", "経度・緯度の小数の桁", { min: 0, max: 12, ph: "7" }),
         ], { title: (it) => it.name, unique: "name", check: checkObsExport }),
       ]) },
-    { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 画像）。各自が「この画像を担当」で取り、ほかの人が担当中の画像は取れない。",
-      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にし、ほかの人が担当中なら記録できない（\"claimOnRecord\": false で止める）" }) },
+    { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 人 × 1 画像）。各自が「この画像を担当」で取る。協業（既定）は同じ画像を何人でも、排他（mode: exclusive）はほかの人が担当中の画像は取れない。",
+      field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\", \"mode\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にする（\"claimOnRecord\": false で止める）。\"mode\": \"shared\"（協業、既定）は同じ画像を何人でも担当でき、\"exclusive\"（排他）はほかの人が担当中なら記録できない" }) },
     { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
       field: O("handover", "引き継ぎメモ", [
         TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),

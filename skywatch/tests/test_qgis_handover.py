@@ -21,13 +21,13 @@ MEMO = "https://x/arcgis/rest/services/Work/FeatureServer/1"
 S, D = "esriFieldTypeString", "esriFieldTypeDate"
 
 
-def _setup(p, tmp_path, user="田中", memo_table=True):
+def _setup(p, tmp_path, user="田中", memo_table=True, mode=None):
     fake = FakeEsri()
     work = fake.add_layer(WORK, FakeLayer({"IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": D, "ASSIGNEE": S, "STATUS": S, "NOTE": S,
                                            "TAKEN_AT": D, "DONE_AT": D}, ""))
     memo = fake.add_layer(MEMO, FakeLayer({"TEXT": S, "MEMO": S, "PERIOD_START": D, "PERIOD_END": D, "WRITTEN_AT": D, "WRITTEN_BY": S}, ""))
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({"assignments": WORK, "editTracking": {"user": user},
+    config.write_text(json.dumps({"assignments": WORK if mode is None else {"url": WORK, "mode": mode}, "editTracking": {"user": user},
                                   "handover": {"table": MEMO, "newline": "lf"} if memo_table else {"newline": "lf"}}), encoding="utf-8")
     settings.set_config_source(str(config))
     p.context.esri = lambda: EsriClient(fake)
@@ -37,7 +37,7 @@ def _setup(p, tmp_path, user="田中", memo_table=True):
 
 def test_take_an_image_and_someone_else_sees_it_held(plugin):
     p, iface, dock, tmp_path = plugin
-    fake, work, _ = _setup(p, tmp_path)
+    fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     bar = dock.assignment_bar
     assert bar.isVisible()
     assert wait_for(lambda: bar.read_at > 0)
@@ -60,7 +60,7 @@ def test_take_an_image_and_someone_else_sees_it_held(plugin):
 
 def test_dialog_lists_changes_state_and_hands_over(plugin):
     p, iface, dock, tmp_path = plugin
-    fake, work, _ = _setup(p, tmp_path)
+    fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     image = dock.book.current
     work.add({"IMAGE_ID": image.id, "IMAGE_NAME": image.name, "ASSIGNEE": "田中", "STATUS": "作業中", "TAKEN_AT": 0})
     work.add({"IMAGE_ID": "OTHER", "IMAGE_NAME": "other.tif", "ASSIGNEE": "鈴木", "STATUS": "完了", "TAKEN_AT": 0})
@@ -69,7 +69,7 @@ def test_dialog_lists_changes_state_and_hands_over(plugin):
     dialog = dock._handover
     assert dialog.isVisible() and dialog.tabs.currentIndex() == 0
     assert wait_for(lambda: dialog.table.rowCount() == 1)
-    assert dialog.table.item(0, 2).text() == "田中" and dialog.table.item(0, 4).text() == "記録 1 件"
+    assert dialog.table.item(0, 2).text() == "田中" and dialog.table.item(0, 4).text() == "記録 1 件（船舶 1）"
     dialog.done_check.setChecked(True)
     assert dialog.table.rowCount() == 2
     dialog.done_check.setChecked(False)
@@ -181,7 +181,7 @@ def test_recording_starts_by_taking_the_image(plugin):
 
 def test_recording_is_refused_on_an_image_someone_else_holds(plugin):
     p, iface, dock, tmp_path = plugin
-    fake, work, _ = _setup(p, tmp_path)
+    fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     work.add({"IMAGE_ID": dock.book.current.id, "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
     dock.set_active(True)
     assert wait_for(lambda: "クリック記録できません" in dock.status.text())
@@ -194,7 +194,7 @@ def test_recording_is_refused_on_an_image_someone_else_holds(plugin):
 
 def test_recording_is_refused_when_the_table_cannot_be_reached(plugin):
     p, iface, dock, tmp_path = plugin
-    fake, work, _ = _setup(p, tmp_path)
+    fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     from skywatch.core.esri import EsriError
 
     def offline(_url, _form):
@@ -208,7 +208,7 @@ def test_recording_is_refused_when_the_table_cannot_be_reached(plugin):
 
 def test_recording_takes_each_image_it_goes_to(plugin):
     p, iface, dock, tmp_path = plugin
-    fake, work, _ = _setup(p, tmp_path)
+    fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     first = dock.book.current
     dock.set_active(True)
     assert wait_for(lambda: dock.active)
@@ -221,6 +221,52 @@ def test_recording_takes_each_image_it_goes_to(plugin):
     dock._went()
     assert wait_for(lambda: "クリック記録できません" in dock.status.text())
     assert not dock.active and len(work.rows) == 3
+
+
+def test_shared_recording_starts_beside_someone_else(plugin):
+    """協業 (the default): someone else holding the image does not stop 「クリック記録」; both are named, with their 大分類."""
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    assert p.context.config.assignments.shared is True
+    image = dock.book.current
+    work.add({"IMAGE_ID": image.id, "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
+    dock.book.add(139.7, 35.6, object="機A", kind="航空機 > 戦闘機", activity="駐機")
+    dock.book.records[-1].recorded_by = "鈴木"
+    bar = dock.assignment_bar
+    assert wait_for(lambda: bar.read_at > 0)
+    dock.render()
+    assert bar.label.text() == "分担: 鈴木 さん（航空機 1）が担当中。一緒に担当できます"
+    assert bar.take_button.isVisible() and bar.take_button.text() == "一緒に担当" and not bar.done_button.isVisible()
+    dock.set_active(True)
+    assert wait_for(lambda: dock.active)
+    assert sorted(r["attributes"]["ASSIGNEE"] for r in work.rows) == ["田中", "鈴木"]
+    dock.book.add(139.7, 35.6, object="船A", kind="船舶", activity="航行")
+    dock.book.records[-1].recorded_by = "田中"
+    assert wait_for(lambda: bar.read_at > 0 and len(bar.items) == 2)
+    dock.render()
+    assert bar.label.text() == "分担: 自分（船舶 1）・鈴木 さん（航空機 1）で担当中（協業）"
+    assert bar.done_button.isVisible() and bar.release_button.isVisible() and not bar.take_button.isVisible()
+    # 完了 marks one's own row only.
+    bar.set_status("完了")
+    assert wait_for(lambda: any(r["attributes"]["ASSIGNEE"] == "田中" and r["attributes"]["STATUS"] == "完了" for r in work.rows))
+    assert next(r for r in work.rows if r["attributes"]["ASSIGNEE"] == "鈴木")["attributes"]["STATUS"] == "作業中"
+
+
+def test_shared_recording_goes_on_when_the_table_cannot_be_reached(plugin):
+    """協業: nobody is kept out, so a table that cannot be written only warns."""
+    p, iface, dock, tmp_path = plugin
+    fake, work, _ = _setup(p, tmp_path)
+    from skywatch.core.esri import EsriError
+
+    def offline(_url, _form):
+        raise EsriError("接続できません")
+
+    p.context.esri = lambda: EsriClient(offline)
+    dock.set_active(True)
+    assert wait_for(lambda: dock.active)
+    assert "分担を記録できませんでした" in dock.status.text() and dock.record_button.isChecked()
+    assert any("分担を記録できませんでした" in w.text() for w in iface.bar.items())
+    assert not work.rows
 
 
 def test_recording_does_not_take_when_switched_off_or_without_the_table(plugin):

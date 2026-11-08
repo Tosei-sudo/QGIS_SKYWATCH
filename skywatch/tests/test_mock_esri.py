@@ -282,9 +282,14 @@ def test_assignments_and_handover_memos_over_http(server):
     now = int(time.time() * 1000)
     mine = take(client, config.assignments, "IMG-A", "tester", now, "a.tif", now - 3_600_000)
     assert mine.oid is not None
+    from dataclasses import replace
+
     with pytest.raises(TakenError):
-        take(client, config.assignments, "IMG-A", "other", now)
+        take(client, replace(config.assignments, shared=False), "IMG-A", "other", now)
     assert [h.assignee for h in holders(client, config.assignments, "IMG-A")] == ["tester"]
+    # 協業 (the default): the other one takes it beside.
+    take(client, config.assignments, "IMG-A", "other", now)
+    assert [h.assignee for h in holders(client, config.assignments, "IMG-A")] == ["tester", "other"]
     table = config.handover.table
     keep_memo(client, table, "引き継ぎ本文", HandoverData(start=now - 3_600_000, end=now, now=now, user="tester", memo="申し送り"))
     last = last_memo(client, table, since=now - 86_400_000)

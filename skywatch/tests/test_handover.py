@@ -54,9 +54,16 @@ def test_settings_and_problems():
     assert parse_config({"assignments": "https://x/MapServer/0"})[1]
 
 
+def exclusive(source):
+    """`mode: "exclusive"`: one person per image."""
+    from dataclasses import replace
+
+    return replace(source, shared=False)
+
+
 def test_take_refuses_an_image_someone_else_holds():
     fake, work, _, config = esri()
-    client, src = EsriClient(fake), config.assignments
+    client, src = EsriClient(fake), exclusive(config.assignments)
     mine = take(client, src, "IMG1", "sato", T0, "img1.tif", T0 - H)
     assert mine.oid == 1 and work.rows[0]["attributes"]["ASSIGNEE"] == "sato" and work.rows[0]["attributes"]["STATUS"] == "作業中"
     # Taking it again: the same row (case of the name aside).
@@ -77,7 +84,7 @@ def test_take_refuses_an_image_someone_else_holds():
 
 def test_take_at_the_same_moment_keeps_the_first():
     fake, work, _, config = esri()
-    client, src = EsriClient(fake), config.assignments
+    client, src = EsriClient(fake), exclusive(config.assignments)
     real = fake.answer
 
     def racing(url, form):
@@ -119,7 +126,7 @@ def test_progress_counts_the_image_records_since_taken():
                obs(id="e", deleted_at=T0 + 2 * H)]
     p = progress_of(x, records)
     assert (p.records, p.by_assignee, p.last) == (2, 1, T0 + H)
-    assert progress_text(p) == "記録 2 件・うち担当者 1 件" and progress_text(progress_of(x, [])) == "記録なし"
+    assert progress_text(p).startswith("記録 2 件・うち担当者 1 件") and progress_text(progress_of(x, [])) == "記録なし"
     assert same_person(" sato ", "SATO") and not same_person("", "")
     items = [Assignment("IMG1", "a", status="完了", oid=1), Assignment("IMG1", "b", oid=3), Assignment("IMG1", "c", oid=2)]
     assert holder_of(items, "IMG1").assignee == "c" and holder_of(items, "IMG9") is None
@@ -159,7 +166,7 @@ def test_the_memo_has_every_part():
     i = lines.index("■ 未処理の撮像依頼: 3 件（うち 24 時間以内に期限 1 件）")
     assert lines[i + 1].startswith("  【期限間近】舞鶴（") and "横須賀港" in lines[i + 2] and "期限なし" in lines[i + 3]
     assert "■ 分担: 担当中 1 件・期間内に完了 1 件" in lines
-    assert "  sato: 担当中 1 件・完了 0 件" in lines and "    img1.tif（作業中・記録 2 件・うち担当者 1 件）" in lines
+    assert "  sato: 担当中 1 件・完了 0 件" in lines and "    img1.tif（作業中・記録 2 件・うち担当者 1 件（船舶 1））" in lines
     assert "    img2.tif（完了・記録なし）" in lines
     assert "  担当者なしの画像（観測記録で開いている画像）: 1 件" in lines and "    img3.tif" in lines
     assert lines[-4:] == ["■ 申し送り", "  港の北側は雲で未確認", "  次は IMG3 から", ""]
@@ -230,6 +237,74 @@ def test_claim_on_record_setting():
     assert s.claim_on_record is False and s.fields["assignee"] == "WHO" and s.url.endswith("/0") and not problems
     assert assignment_source_of({"url": url, "claimOnRecord": "no"}, problems).claim_on_record is True
     assert problems == ["assignments.claimOnRecord は true か false で指定"]
+    # 協業 by default; "exclusive" one person per image; anything else is a problem (協業 then).
+    assert assignment_source_of(url, problems).shared is True
+    assert assignment_source_of({"url": url, "mode": "exclusive"}, problems).shared is False
+    assert assignment_source_of({"url": url, "mode": "shared"}, problems).shared is True
+    assert assignment_source_of({"url": url, "mode": "solo"}, problems).shared is True
+    assert problems[-1].startswith("assignments.mode は") and len(problems) == 2
+
+
+def test_shared_lets_several_people_take_the_same_image():
+    """協業: someone else holding the image does not stop it; everyone has their own row, and the 大分類 they recorded show."""
+    from skywatch.core.obs.assignments import (
+        holders_of, own_row, roots_by_person, roots_text, work_state, work_text,
+    )
+
+    fake, work, _, config = esri()
+    client, src = EsriClient(fake), config.assignments
+    sato = take(client, src, "IMG1", "sato", T0)
+    suzuki = take(client, src, "IMG1", "suzuki", T0 + 1)
+    assert (sato.oid, suzuki.oid) == (1, 2) and len(work.rows) == 2
+    # Taking again: one's own row, no second one.
+    assert take(client, src, "IMG1", "SUZUKI", T0 + 2).oid == 2 and len(work.rows) == 2
+    rows = load_assignments(client, src)
+    assert [x.assignee for x in holders_of(rows, "IMG1")] == ["sato", "suzuki"]
+    assert own_row(rows, "IMG1", "Suzuki").oid == 2 and own_row(rows, "IMG1", "tanaka") is None
+    assert work_text(work_state(rows)) == "作業中（sato・suzuki）"
+    # On hold for one, at work for the other: 作業中; both on hold: 保留; both done: 完了.
+    x = next(r for r in rows if r.assignee == "sato")
+    update(client, src, with_status(x, "保留", T0), x)
+    assert work_state(load_assignments(client, src)) == ("作業中", "sato・suzuki")
+    y = next(r for r in rows if r.assignee == "suzuki")
+    update(client, src, with_status(y, "保留", T0), y)
+    assert work_state(load_assignments(client, src)) == ("保留", "sato・suzuki")
+    for r in load_assignments(client, src):
+        update(client, src, with_status(r, "完了", T0 + H), r)
+    assert work_state(load_assignments(client, src))[0] == "完了"
+    # Who works which 大分類: of the image's living records.
+    records = [obs(id="a", kind="船舶 > 支援船"), obs(id="b", kind="船舶", created_at=T0 + 2 * H),
+               obs(id="c", kind="航空機 > 戦闘機", recorded_by="Suzuki"), obs(id="d", kind="", recorded_by="suzuki"),
+               obs(id="e", kind="車両", deleted_at=T0 + 3 * H), obs(id="f", kind="車両", image_id="IMG2")]
+    roots = roots_by_person(records, "IMG1")
+    assert roots == {"sato": {"船舶": 2}, "Suzuki": {"航空機": 1, "分類なし": 1}}
+    assert roots_text(roots["sato"]) == "船舶 2" and roots_text(None) == ""
+    assert roots_by_person(records, "IMG1", since=T0 + 2 * H) == {"sato": {"船舶": 1}}
+    # The progress says the holder's 大分類 too.
+    assert progress_text(progress_of(Assignment("IMG1", "suzuki", taken_at=T0), records)) == "記録 4 件・うち担当者 2 件（航空機 1・分類なし 1）"
+
+
+def test_shared_take_by_one_person_at_the_same_moment_keeps_the_first():
+    """協業: two adds of the same person (two PCs) at once leave one row."""
+    fake, work, _, config = esri()
+    client, src = EsriClient(fake), config.assignments
+    real = fake.answer
+    added = []
+
+    def racing(url, form):
+        if url.endswith("/applyEdits") and "adds" in form and not added:
+            added.append(work.add({"IMAGE_ID": "IMG1", "ASSIGNEE": "sato", "STATUS": "作業中"}))
+        return real(url, form)
+
+    fake.answer = racing
+    take(client, src, "IMG1", "suzuki", T0)
+    fake.answer = real
+    assert [r["attributes"]["ASSIGNEE"] for r in work.rows] == ["sato", "suzuki"]
+    added.clear()
+    fake.answer = racing
+    work.rows[:] = []
+    x = take(client, src, "IMG1", "sato", T0)
+    assert [r["attributes"]["ASSIGNEE"] for r in work.rows] == ["sato"] and x.oid == work.rows[0]["attributes"]["OBJECTID"]
 
 
 # ---- 画像カタログの「分担」列 ----------------------------------------------------------------------
@@ -246,7 +321,7 @@ def test_the_work_state_of_each_image():
     fake = FakeEsri()
     fake.add_layer(url, FakeLayer({"IMAGE_ID": s, "IMAGE_NAME": s, "IMAGE_TIME": d, "ASSIGNEE": s, "STATUS": s, "NOTE": s,
                                    "TAKEN_AT": d, "DONE_AT": d}, ""))
-    source = assignment_source_of(url, [])
+    source = assignment_source_of({"url": url, "mode": "exclusive"}, [])
     client = EsriClient(fake)
     take(client, source, "A", "田中", 1000)
     b = take(client, source, "B", "鈴木", 1000)
