@@ -913,7 +913,8 @@ python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config con
 - 通常版と Windows 版の zip を新しい版で作り、フォルダーに `plugins.xml`（通常版）・`plugins-win64.xml`（Windows 版）・`satellite_observation.<版>.zip`・`satellite_observation.<版>.win64.zip`・`icon.svg` を置く。最後に各 PC で登録するアドレスを出す
 - 版は `metadata.txt` の版の後ろに UTC の日時（秒まで）を付けたもの（例 `0.4.0.20261108123000`）。QGIS は掲載の版が入っている版より大きいときだけ更新と見なすため、作るたびに必ず大きくなるようにしている。`--version` で指定もできる。大きな変更では `metadata.txt` の版（`0.4.0` → `0.5.0`）を上げる
 - 掲載中の版より新しくない zip は載せない。前の版に戻すときは、残っている古い zip を `--zip 古い.zip --allow-older` で載せ直す（各 PC では「プラグインの管理」で入れ直し）。古い zip は消さずに残す
-- `--config`・`--lock-config` は `build_zip.py` と同じ。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
+- `--config`・`--lock-config`（同梱の設定ファイルに固定）は `build_zip.py` と同じで、通常版・Windows 版の両方に効く。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
+- 閉域では Windows 版の wheel（onnxruntime・sgp4・tzdata）を pip で取れないので、外で `pip download onnxruntime sgp4 tzdata --only-binary=:all: --platform win_amd64 --python-version 3.12 --no-deps -d wheels` で取ったものを持ち込み、`dist/wheels/` に置く（そのまま使われる）か `--onnxruntime-wheel`・`--sgp4-wheel`・`--tzdata-wheel` で指定する。持ち込み直すのはライブラリの版を上げるときだけ
 - zip を先に置いてから `plugins.xml` を差し替えるので、作っている途中に各 PC が読んでも、ない zip を指すことはない
 - `--url` を付けないと、ダウンロード先はフォルダーの `file://` アドレス（`\\fileserver\share\qgis-plugins` なら `file://fileserver/share/qgis-plugins`）。Linux でマウントした共有フォルダーに作るときは、各 PC から見えるアドレスを `--url file://fileserver/share/qgis-plugins` のように付ける
 - 掲載は「実験的でない」扱いにする（`metadata.txt` は `experimental=True` だが、そのままだと各 PC で「実験的なプラグインも表示する」を入れないと見えないため）。`--experimental` で実験版として載せることもできる

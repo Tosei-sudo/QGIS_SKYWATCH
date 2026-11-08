@@ -128,3 +128,28 @@ def test_refuses_other_zips(repo, tmp_path):
 def test_folder_urls(repo, tmp_path):
     assert repo.folder_url(r"\\fileserver\共有\qgis plugins") == "file://fileserver/%E5%85%B1%E6%9C%89/qgis%20plugins"
     assert repo.folder_url(str(tmp_path)) == tmp_path.as_uri()
+
+
+def test_main_locks_the_config(repo, tmp_path):
+    out = tmp_path / "repo"
+    config = os.path.join(ROOT, "satellite_observation", "tests", "data", "viewer-config.jsonc")
+    repo.main([str(out), "--no-win64", "--config", config, "--lock-config", "--version", "0.4.0.20261108123000"])
+    with zipfile.ZipFile(out / "satellite_observation.0.4.0.20261108123000.zip") as z:
+        assert {"satellite_observation/config.lock", "satellite_observation/config.jsonc"} <= set(z.namelist())
+
+
+def test_main_passes_the_wheels_brought_in(repo, tmp_path, monkeypatch):
+    b = load("build_zip")
+    seen = []
+
+    def fake_main(config, out_dir, **kw):
+        seen.append(kw)
+        return b.main(config, out_dir, version=kw["version"], lock_config=kw["lock_config"])
+
+    monkeypatch.setattr(repo, "build_module", lambda: type("B", (), {"main": staticmethod(fake_main)}))
+    monkeypatch.setattr(repo, "publish", lambda *a, **k: [])
+    repo.main([str(tmp_path / "repo"), "--no-regular", "--onnxruntime-wheel", "o.whl", "--sgp4-wheel", "s.whl",
+               "--tzdata-wheel", "t.whl", "--lock-config", "--config",
+               os.path.join(ROOT, "satellite_observation", "tests", "data", "viewer-config.jsonc")])
+    assert seen[0]["win64"] and seen[0]["lock_config"]
+    assert (seen[0]["onnxruntime_wheel"], seen[0]["sgp4_wheel"], seen[0]["tzdata_wheel"]) == ("o.whl", "s.whl", "t.whl")
