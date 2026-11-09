@@ -27,8 +27,8 @@ from skywatch.core.request.follow import (
     request_changes, save_marked, tally, undone_changes,
 )
 from skywatch.core.request.model import (
-    JST, ImagingRequest, day_bounds, days_left, last_output_text, last_output_tip, level_of, next_boost, occurs_on, priority_text,
-    repeat_of, repeat_text, square_rings,
+    JST, ImagingRequest, day_bounds, days_left, level_of, next_boost, occurs_on, priority_text, repeat_of, repeat_text,
+    square_rings,
 )
 from skywatch.core.request.route import fitting, scenes_of, system_of_satellite, why_not
 from skywatch.core.request.schema import validate
@@ -41,7 +41,7 @@ from skywatch.core.request.store import (
 from skywatch.core.request.systems import export_systems_of
 from skywatch.core.request.weather import cloud_step, daytime_cloud, places_of, with_cloud
 from skywatch.core.request.workflow import (
-    boost_changes, clouds_of, forecast_places, history_of, ledger_results, missed_done, not_written, plan_day,
+    boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day,
 )
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer
 
@@ -337,14 +337,13 @@ CATALOG = "https://gis.example/rest/services/I/FeatureServer/0"
 def server():
     fake = FakeEsri()
     types = {name: "esriFieldTypeString" for name in DEFAULT_REQUEST_FIELDS.values()}
-    for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT", "LAST_RUN_DATE", "LAST_TARGET_DATE"):
+    for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT"):
         types[n] = "esriFieldTypeDate"
     for n in ("PRIORITY", "BOOST", "OFF_NADIR_MIN", "OFF_NADIR_MAX", "INCIDENCE_MIN", "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO"):
         types[n] = "esriFieldTypeDouble"
     fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
     htypes = {name: "esriFieldTypeString" for name in DEFAULT_HISTORY_FIELDS.values()}
-    htypes.update(RUN_DATE="esriFieldTypeDate", TARGET_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger",
-                  BOOST_DONE="esriFieldTypeInteger")
+    htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
     fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
     images = fake.add_layer(CATALOG, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
     images.add({"IMAGE_ID": "IMG-1", "ACQ": FIRST + 10 * H, "SENSOR": "OPT-X 1"},
@@ -452,16 +451,22 @@ def test_follow_up_leaves_another_satellites_image_unsettled():
     saved = load_requests(client, store, None)[0]
     assert (saved.boost, saved.status) == (0, "完了")
     assert load_history(client, store, None)[0].image_id == "IMG-1"
+    # Its image came in: it was in the system's plan (採用 by 画像の入着), though no answer was given (2026-11-09).
+    assert (history[0].adoption, history[0].adoption_source) == ("採用", "画像の入着")
+    assert (load_history(client, store, None)[0].adoption, load_history(client, store, None)[0].adoption_source) == ("採用", "画像の入着")
     # By hand back to 未撮像: the request is 有効 again and the row offered its raise again.
     history = load_history(client, store, None)
     history[0].boost_done = 1
     by_id = {r.id: r for r in load_requests(client, store, None)}
     findings = marked(history, "未撮像")
-    assert history_changes(findings) == [(history[0].object_id, {"captured": "未撮像", "imageId": "", "boostDone": 0})]
+    # (and that 採用 taken back: not known any more)
+    assert history_changes(findings) == [(history[0].object_id, {"captured": "未撮像", "imageId": "", "adoption": "不明", "adoptionSource": None,
+                                                                 "boostDone": 0})]
     assert undone_changes(findings, by_id, history) == [(by_id["R-0009"].object_id, {"status": "有効"})]
     assert save_marked(client, store, None, findings, by_id, history, LAST + 2 * D)
     assert load_requests(client, store, None)[0].status == "有効"
     assert (load_history(client, store, None)[0].captured, history[0].boost_done) == ("未撮像", 0)
+    assert (load_history(client, store, None)[0].adoption, history[0].adoption) == ("不明", "不明")
     assert marked(history, "未撮像") == []  # already so
 
 
@@ -538,81 +543,6 @@ def test_a_system_not_written_is_not_handed_out():
     plan.missed_rows = [HistoryRow("RUN0", FIRST - D, "2026-11-07", "R-0002", "SYS-B", captured="未撮像", object_id=7)]
     assert boost_changes(plan, {"R-0002"}) == [] and missed_done(plan, {"R-0002"}) == []
     assert boost_changes(plan) == [(2, {"boost": 100})] and missed_done(plan) == [(7, {"boostDone": 1})]
-
-
-def test_the_ledger_tells_the_latest_output_for_dashboards():
-    """
-    2026-11-09 (「今日採用されたか分かりにくい」, an ArcGIS Enterprise dashboard): writing the day out puts its result
-    in the ledger's 「最新の出力」 (LAST_…) and the history gets the day as a date and the request's names.
-    """
-    fake = server()
-    client = EsriClient(fake)
-    store = request_store_of({"url": LEDGER, "history": HISTORY}, [], 0)
-    r1 = request("R-0001", name="東京湾", management_no="K-1", requester="第三管区", priority=742, series=["OPT-X"],
-                 satellites=["OPT-X 1"], systems=["SYS-A"])
-    r2 = request("R-0002", name="大阪湾", kind="SAR", priority=100, look_side="右",
-                 rings=[[[135.4, 34.6], [135.5, 34.6], [135.5, 34.7], [135.4, 34.7], [135.4, 34.6]]])
-    for r in (r1, r2):
-        save_request(client, store, None, r, FIRST - D)
-    loaded = load_requests(client, store, None)
-    assert [(r.last_day, r.last_result, r.last_run) for r in loaded] == [("", "", None)] * 2
-
-    # Written the day before (15:00 JST); SYS-B's file could not be made, so 大阪湾 is 見送り.
-    run = FIRST - 9 * H
-    plan = plan_day(loaded, DAY, systems(), SATS, {"R-0001": 30})
-    rows = history_of(plan, run, {"SYS-A": "SYS-A_20261108.csv"}, "RUN1", failures={"SYS-B": "必須項目 tasks なし"})
-    assert add_history(client, store, None, rows) == 2
-    history = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[HISTORY].rows}
-    assert history["R-0001"]["TARGET_DATE"] == FIRST and history["R-0001"]["TARGET_DAY"] == "2026-11-08"
-    assert (history["R-0001"]["REQ_NAME"], history["R-0001"]["MANAGEMENT_NO"], history["R-0001"]["REQUESTER"]) == ("東京湾", "K-1", "第三管区")
-    assert (history["R-0002"]["REQ_NAME"], history["R-0002"]["MANAGEMENT_NO"], history["R-0002"]["REQUESTER"]) == ("大阪湾", None, None)
-    back = {h.request_id: h for h in load_history(client, store, None)}
-    assert (back["R-0001"].name, back["R-0001"].management_no, back["R-0001"].requester) == ("東京湾", "K-1", "第三管区")
-
-    results = ledger_results(plan, rows)
-    assert len(results) == 2
-    assert update_requests(client, store, None, results) == 2
-    ledger = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[LEDGER].rows}
-    assert {k: ledger["R-0001"][k] for k in ("LAST_RUN_DATE", "LAST_TARGET_DATE", "LAST_RESULT", "LAST_SYSTEM", "LAST_SATELLITE", "LAST_REASON")} == {
-        "LAST_RUN_DATE": run, "LAST_TARGET_DATE": FIRST, "LAST_RESULT": "採用", "LAST_SYSTEM": "SYS-A", "LAST_SATELLITE": "OPT-X 1",
-        "LAST_REASON": None}
-    # Taken for SYS-B, whose file failed: the system is kept with why.
-    assert (ledger["R-0002"]["LAST_RESULT"], ledger["R-0002"]["LAST_SYSTEM"]) == ("見送り", "SYS-B")
-    assert ledger["R-0002"]["LAST_REASON"].startswith("書き出し失敗")
-    # Not a change of the request: its 更新日時 (what tells someone else's change) is kept.
-    assert ledger["R-0001"]["UPDATED_AT"] == FIRST - D
-
-    by_id = {r.id: r for r in load_requests(client, store, None)}
-    tokyo, osaka = by_id["R-0001"], by_id["R-0002"]
-    assert (tokyo.last_day, tokyo.last_result, tokyo.last_system, tokyo.last_run) == ("2026-11-08", "採用", "SYS-A", run)
-    assert last_output_text(tokyo, date(2026, 11, 7)) == "明日 採用（SYS-A）"
-    assert last_output_text(tokyo, DAY) == "今日 採用（SYS-A）"
-    assert last_output_text(tokyo, date(2026, 11, 9)) == "昨日 採用（SYS-A）"
-    assert last_output_text(tokyo, date(2026, 12, 1)) == "11/8 採用（SYS-A）"
-    assert last_output_text(tokyo, date(2027, 1, 5)) == "2026-11-08 採用（SYS-A）"
-    assert last_output_text(osaka, DAY) == "今日 見送り（SYS-B）"
-    assert last_output_text(request("R-9"), DAY) == "" and last_output_tip(request("R-9")) == ""
-    assert last_output_tip(tokyo) == "対象日 2026-11-08\n出力 2026-11-07 15:00\n衛星 OPT-X 1"
-    assert last_output_tip(osaka).endswith("理由 書き出し失敗（必須項目 tasks なし）")
-
-    # A save of the request (the form) never writes them back: what the day wrote stays.
-    tokyo.name = "東京湾（北）"
-    save_request(client, store, None, replace(tokyo, last_result="", last_day="", last_system="", last_run=None), FIRST)
-    after = next(r["attributes"] for r in fake.layers[LEDGER].rows if r["attributes"]["REQ_ID"] == "R-0001")
-    assert (after["REQ_NAME"], after["LAST_RESULT"], after["LAST_TARGET_DATE"]) == ("東京湾（北）", "採用", FIRST)
-
-    # A later day already written (11/9) is not put back by writing 11/8 again; a request never written is.
-    later = replace(by_id["R-0001"], last_day="2026-11-09")
-    plan = plan_day([later, by_id["R-0002"]], DAY, systems(), SATS, {"R-0001": 30})
-    rows = history_of(plan, run, {"SYS-A": "a", "SYS-B": "b"}, "RUN2")
-    assert [oid for oid, _ in ledger_results(plan, rows)] == [by_id["R-0002"].object_id]
-
-    # A ledger without the fields: nothing is sent (no feature stamped as changed for nothing).
-    bare = request_store_of({"url": LEDGER, "fields": {k: f"NONE_{i}" for i, k in enumerate(
-        ("lastRun", "lastDay", "lastResult", "lastSystem", "lastSatellite", "lastReason"))}}, [], 0)
-    fake.asked.clear()
-    assert update_requests(client, bare, None, [(1, {"lastResult": "採用", "lastDay": FIRST})]) == 0
-    assert not any(url.endswith("/applyEdits") for url, _ in fake.asked)
 
 
 def test_history_reads_only_what_is_needed():

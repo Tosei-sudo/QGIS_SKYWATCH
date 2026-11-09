@@ -144,14 +144,8 @@ TABLES = (
         F("NOTE", "メモ", "TEXT", 4000, "note"),
         F("CREATED_AT", "登録日時", "DATE", None, "created"),
         F("UPDATED_AT", "更新日時", "DATE", None, "updated"),
-        F("LAST_RUN_DATE", "最新の出力日時", "DATE", None, "lastRun"),
-        F("LAST_TARGET_DATE", "最新の出力の対象日", "DATE", None, "lastDay"),
-        F("LAST_RESULT", "最新の出力の結果", "TEXT", 16, "lastResult"),
-        F("LAST_SYSTEM", "最新の出力のシステム", "TEXT", 255, "lastSystem"),
-        F("LAST_SATELLITE", "最新の出力の衛星", "TEXT", 255, "lastSatellite"),
-        F("LAST_REASON", "最新の出力の理由", "TEXT", 1000, "lastReason"),
     )),
-    Table("TBL_REQUEST_HISTORY", "撮像依頼の出力履歴", None, writable=True, setting="requestStores[].history", fields=(
+    Table("TBL_REQUEST_HISTORY", "撮像依頼の出力履歴", "POLYGON", writable=True, setting="requestStores[].history", fields=(
         F("RUN_ID", "出力ID", "TEXT", 64, "runId"),
         F("RUN_DATE", "出力日時", "DATE", None, "runDate"),
         F("TARGET_DAY", "対象日", "TEXT", 16, "day"),
@@ -171,6 +165,11 @@ TABLES = (
         F("CAPTURED", "撮像結果", "TEXT", 16, "captured"),
         F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
         F("BOOST_DONE", "繰り上げ済み", "LONG", None, "boostDone"),
+        F("ADOPTION", "採否", "TEXT", 16, "adoption"),
+        F("ADOPTION_REASON", "採否の理由", "TEXT", 1000, "adoptionReason"),
+        F("PLANNED_AT", "撮像予定日時", "DATE", None, "plannedAt"),
+        F("EXTERNAL_ID", "システム側の番号", "TEXT", 255, "externalId"),
+        F("ADOPTION_SOURCE", "採否の入力元", "TEXT", 1000, "adoptionSource"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),

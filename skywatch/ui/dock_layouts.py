@@ -44,7 +44,7 @@ _AREAS = {
 PRESETS = [
     ("撮像計画の担当", [
         ("right", ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
-        ("right", ["SatObsRequests", "SatObsPlanFiles"]),
+        ("right", ["SatObsRequests", "SatObsPlanFiles", "SatObsSchedule"]),
         ("left", ["SatObsImageCatalog"]),
     ]),
     ("観測記録の担当", [

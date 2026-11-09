@@ -21,7 +21,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.request.bulk import RequestChange, apply_change
 from ..core.request.last import remembered, with_remembered
-from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, last_output_text, last_output_tip, priority_text
+from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
 from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, waiting_ids
 from ..qgis_io.geometry import from_wgs84
@@ -33,8 +33,6 @@ from .list_views import ListViews
 from .plan_overlay import PlanOverlay
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
-#: 「最新の出力」: taken green, held back amber.
-RESULT_COLORS = {"採用": "#15803d", "見送り": "#b45309"}
 
 
 def _now_ms() -> float:
@@ -233,9 +231,7 @@ class RequestDock(PluginDock):
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
                       and (self.status_filter.currentIndex() == 0 or r.status == st)]
         self.model.clear()
-        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態",
-                                                                   "最新の出力")])
-        today = jst_day(time.time() * 1000)
+        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態")])
         chosen_row = -1
         try:
             # Saved while the ledger could not be reached, waiting to be sent (core/offline.py): marked blue.
@@ -247,12 +243,8 @@ class RequestDock(PluginDock):
             items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
                                                 r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
-                                                r.achieve, _period(r), prio, r.kind, r.status, last_output_text(r, today))]
-            items[8].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
-            # The latest day's output (written by 撮像計画ファイル出力): was it taken for today / tomorrow?
-            if r.last_result in RESULT_COLORS:
-                items[9].setForeground(QBrush(QColor(RESULT_COLORS[r.last_result])))
-            items[9].setToolTip(last_output_tip(r))
+                                                r.achieve, _period(r), prio, r.kind, r.status)]
+            items[-1].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
             if r.id in waiting:

@@ -35,6 +35,7 @@ SHAPE_TYPES = {"POLYGON": "Polygon", "POINT": "Point"}
 #: 形状を変えられるテーブル（README で「ポリゴンかポイント」「なしも可」のもの）と選べる形状。
 GEOMETRY_CHOICES = {
     "TBL_EVENT": ("POLYGON", "NONE"),
+    "TBL_REQUEST_HISTORY": ("POLYGON", "NONE"),
     "TBL_AI_RESULT": ("POLYGON", "POINT"),
     "TBL_DETECTION": ("POLYGON", "POINT"),
     "TBL_PLACE_NAME": ("POINT", "POLYGON"),

@@ -298,13 +298,13 @@ REQUEST_FIELDS = {
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
     "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
-    "LAST_RUN_DATE": T, "LAST_TARGET_DATE": T, "LAST_RESULT": S, "LAST_SYSTEM": S, "LAST_SATELLITE": S,
-    "LAST_REASON": {"type": S, "length": 1000},
 }
 HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T, "REQ_ID": {"type": S, "length": 64},
                   "REQ_NAME": S, "MANAGEMENT_NO": S, "REQUESTER": S, "SYSTEM": S,
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
-                  "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I}
+                  "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I,
+                  "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
+                  "ADOPTION_SOURCE": {"type": S, "length": 1000}}
 
 ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
@@ -441,7 +441,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                           for n, k, a, x, y in places])}]},
         {"name": "Requests", "layers": [
             {"id": 0, "name": "撮像依頼台帳", "geometryType": "polygon", "fields": REQUEST_FIELDS, "features": feats(requests)},
-            {"id": 1, "name": "出力履歴", "fields": HISTORY_FIELDS, "features": []}]},
+            {"id": 1, "name": "出力履歴", "geometryType": "polygon", "fields": HISTORY_FIELDS, "features": []}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D},

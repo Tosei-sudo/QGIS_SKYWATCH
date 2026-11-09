@@ -3,7 +3,7 @@
 衛星画像の判読業務を QGIS でまとめて行うプラグイン。撮像の計画と依頼から、届いた画像の検索・補正・解析、画像に写ったモノの観測記録・分担・通報・エクスポートまでを扱う。Web 画像ビューア（[browser-image-enhancement](https://github.com/Tosei-sudo/browser-image-enhancement) の `usecase/image-viewer`）の「撮像計画」「観測記録」「画像補正」を移したところから始まり、同じ設定ファイル（`config.json`）と同じ ArcGIS フィーチャーサービスを共用する。
 
 - 撮像計画: 衛星カタログ（TLE と諸元）から撮像機会・組み合わせ・優先度、衛星パス、移動目標撮像計画、ステレオ・干渉ペア、再訪間隔マップ、計画の保存と追跡、雲量予報・雲量マップ（閉域では GFS のファイル）
-- 撮像依頼: 定点・臨時の依頼台帳と日次の撮像計画ファイル出力
+- 撮像依頼: 定点・臨時の依頼台帳と日次の撮像計画ファイル出力、日ごとの撮像予定（システムの採否・要求外）
 - 画像: 画像カタログ（検索・フットプリント・新着通知・類似画像・フォルダのレコード）、ピラミッド（.ovr）の自動作成、複素 SAR（SICD）の振幅表示、画像補正（色調補正）、スワイプ比較・位置ずらし、影から高さ・スペクトル
 - 解析・処理: データ分析（Esri の表とプロジェクトのレイヤーを SQL で結合・集計）、パンシャープン・変化抽出・自動位置合わせ・簡易オルソ補正・土地被覆分類・測地線バッファ、サーバ処理、雲量を属性に付与（Processing にも同じものがある）
 - 観測記録: モノの位置・種別・活動を画像ごとに記録して画像をまたいで追う（2〜4 点入力・確認範囲・一括編集）、分類体系の編集、分担と引き継ぎメモ、イベント（地震対応など）、通報（条件・ジオフェンス・地名・通報記録）、観測記録のエクスポート（CSV・JSON）、作成者・更新者の記録、ダッシュボード
@@ -45,7 +45,7 @@
 ## ツールバーのボタン
 
 - ツールバー「SKYWATCH」に出すボタンは担当（「担当と個人設定…」で選んだもの）で変わる
-  - 撮像計画の担当: 撮像計画・衛星パス・保存した撮像計画・移動目標撮像計画・雲量マップ・撮像依頼・撮像計画ファイル出力・画像カタログ・イベント・背景地図
+  - 撮像計画の担当: 撮像計画・衛星パス・保存した撮像計画・移動目標撮像計画・雲量マップ・撮像依頼・撮像計画ファイル出力・撮像予定・画像カタログ・イベント・背景地図
   - 観測記録の担当: 画像カタログ・通知・画像補正・観測記録・AI結果・分類体系の編集・イベント・通報文の作成・分担・引き継ぎメモ・背景地図・スワイプ比較・位置ずらし
   - 画像判読: 画像カタログ・通知・画像補正・影から高さ・スペクトル・観測記録・移動体・変化抽出（2 時期）・自動位置合わせ・背景地図・スワイプ比較・位置ずらし
   - 担当なし・自分で保存したレイアウトの名前: これまでの並び（ドック 18 個・移動目標撮像計画・背景地図・スワイプ比較・位置ずらし）
@@ -56,7 +56,7 @@
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼・撮像計画ファイル出力・雲量マップ）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ・スペクトル・ダッシュボード・データ分析）は左、記録系（観測記録・分類体系の編集・移動体・AI結果・イベント）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼・撮像計画ファイル出力・撮像予定・雲量マップ）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ・スペクトル・ダッシュボード・データ分析）は左、記録系（観測記録・分類体系の編集・移動体・AI結果・イベント）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -273,11 +273,16 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
-  - 書き出すと、候補になった依頼の台帳に「最新の出力」（対象日・採用か見送りか・システム・衛星・理由）も書く。撮像依頼ドックの一覧の「最新の出力」列に「明日 採用（SYS-A）」「今日 見送り」のように出る（理由はツールチップ）。ArcGIS Enterprise のダッシュボードで採用状況を見る作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像依頼の採用状況のダッシュボード」。台帳と出力履歴に属性を足す必要がある（[`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) の `LAST_` の 6 属性、[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）
+  - 出力した依頼は、システムが実際にその日の計画に入れたか（採否）を待つ。採否は「撮像予定」ドックで、システムから返ってきた結果ファイル（`requestExports` の `resultFile`）を取り込むか手で入れる。採否の分からないシステムもあるので、分からないものは「不明」のまま扱い、画像が入って撮像済みになれば「採用」になる
   - 「上限シミュレーション…」で、システムごとの 1 日の件数・枚数・区分の上限や使うシステムを変えた場合に、今後の日数（1〜60 日）で何件が枠超過・次のシステムへ回送・欠測（毎回）・期限切れ（期間内1回）になるかを、設定の値と並べて試算する。台帳・出力履歴には書き込まない（採用した依頼は撮像できたものとして計算）
   - 「照合…」で計画と実績の照合。対象日の範囲を選び、出力した依頼が撮れたかを画像カタログと突き合わせて、システムごとの撮像済み・未撮像・未判定と撮像率を出す。衛星を指定した依頼は、その衛星（衛星名の対応表 `satelliteAliases` の別名も）の画像だけを撮像済みとする。指定のない依頼はどの衛星の画像でもよい
   - 未撮像の依頼は次回の「計算」に持ち越す（曜日・N 日ごとの定点も、その日が繰り返しの日でなくても候補に入る。期間内に限る）。繰り上げの候補にもなる
   - カタログへの登録が遅れたときなどは、照合の一覧で「撮像済みにする」「未撮像にする」で直せる（台帳の繰り上げ・完了も合わせて直る）
+- 「撮像予定」ドック: カレンダーで日を選ぶと、その日の計画（出力履歴の行）を一覧と地図に出す。状態は 採用・不明・不採用・見送り・要求外（システム側の定常の撮像など、依頼していない計画）。カレンダーは計画のある日が太字（計画に入ったものがあれば緑、採否不明だけなら青）
+  - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用を記録する。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
+  - 「採用」「不採用」「不明に戻す」で手入力（理由も書ける）。「要求外を追加…」で依頼していない計画を手で足す（名称・システム・衛星・日時・範囲）。要求外は「削除」で消せる
+  - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする
+  - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
 
 ## 移動目標撮像計画
 
@@ -1261,7 +1266,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding` など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系
@@ -1366,7 +1371,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | [`TBL_SATELLITE_ALIAS`](#tbl_satellite_alias衛星名の対応表) | なし | 読み | 衛星名の対応表 | `satelliteAliases.url` |
 | [`TBL_IMAGING_PLAN`](#tbl_imaging_plan撮像計画) | ポリゴン | 書き込み | 保存した撮像計画 | `planStores[].url` |
 | [`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) | ポリゴン | 書き込み | 撮像依頼台帳 | `requestStores[].url` |
-| [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) | なし | 書き込み | 撮像依頼の日次出力の履歴 | `requestStores[].history` |
+| [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) | ポリゴン（なしでも可） | 書き込み | 撮像依頼の日次出力の履歴・日ごとの撮像予定（採否・要求外） | `requestStores[].history` |
 | [`TBL_OBSERVATION`](#tbl_observation観測記録) | ポイント | 書き込み | 観測記録 | `observationStores[].url` |
 | [`TBL_OBSERVATION_AREA`](#tbl_observation_area確認範囲) | ポリゴン | 書き込み | 確認範囲 | `observationStores[].areas` |
 | [`TBL_TAXONOMY`](#tbl_taxonomy分類体系) | なし | 書き込み | 共有の分類体系 | `observationStores[].taxonomyTable` |
@@ -1515,18 +1520,10 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `NOTE` | メモ | `String(4000)` | メモ | `note` |
 | `CREATED_AT` | 登録日時 | `Date` | 登録した日時 | `created` |
 | `UPDATED_AT` | 更新日時 | `Date` | 更新した日時 | `updated` |
-| `LAST_RUN_DATE` | 最新の出力日時 | `Date` | 最新の出力（下）を書き出した日時 | `lastRun` |
-| `LAST_TARGET_DATE` | 最新の出力の対象日 | `Date` | その対象日（日本時間の 0 時） | `lastDay` |
-| `LAST_RESULT` | 最新の出力の結果 | `String(16)` | `採用`・`見送り` | `lastResult` |
-| `LAST_SYSTEM` | 最新の出力のシステム | `String(255)` | 割り当てた衛星システム（出力履歴の `SYSTEM` と同じ。見送りは空、システムごとに書き出したときはそのシステム） | `lastSystem` |
-| `LAST_SATELLITE` | 最新の出力の衛星 | `String(255)` | 割り当てた衛星 | `lastSatellite` |
-| `LAST_REASON` | 最新の出力の理由 | `String(1000)` | 見送り・警告の理由 | `lastReason` |
-
-`LAST_` の 6 属性（最新の出力）は、「撮像計画ファイル出力」の書き出しのたびに、その日の候補になった依頼に書く（依頼の保存では書かない。`UPDATED_AT` も変えない）。より後の対象日を既に書いた依頼は、前の日を書き出しても変えない。ArcGIS Enterprise のダッシュボードで「今日（明日）採用されたか」を地図・一覧に出すためのもの（[docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像依頼の採用状況のダッシュボード」）。なければ書かない。
 
 ### `TBL_REQUEST_HISTORY`（撮像依頼の出力履歴）
 
-日次出力の 1 依頼・1 日 1 行（形状なし）。`requestStores[].historyFields`（既定は下の名前）。
+日次出力の 1 依頼・1 日 1 行と、システムが依頼なしで計画したもの（要求外）の 1 計画 1 行。その日の撮像予定（「撮像予定」ドック・ダッシュボード）はこの表の対象日の行。ポリゴン（依頼の範囲、要求外は結果ファイルか手で描いた範囲）。形状なしのテーブルでもよい（範囲は残らず、ドックは台帳の範囲で描く。`create_tables.py` は既にある表の形状を変えないので、ポリゴンにするなら作り直す）。`requestStores[].historyFields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
@@ -1534,8 +1531,8 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `RUN_DATE` | 出力日時 | `Date` | 出力した日時 | `runDate` |
 | `TARGET_DAY` | 対象日 | `String(16)` | 対象の日（`2026-11-08`）。**必須** | `day` |
 | `TARGET_DATE` | 対象日（日付） | `Date` | 対象の日の日本時間 0 時（ダッシュボードの日付の絞り込み・グラフ用） | `targetDate` |
-| `REQ_ID` | 依頼ID | `String(64)` | 台帳の `REQ_ID`。**必須** | `requestId` |
-| `REQ_NAME` | 名称 | `String(255)` | 出力したときの依頼の名称 | `name` |
+| `REQ_ID` | 依頼ID | `String(64)` | 台帳の `REQ_ID`（要求外は空のことがある）。**必須** | `requestId` |
+| `REQ_NAME` | 名称 | `String(255)` | 出力したときの依頼の名称（要求外は計画の名称） | `name` |
 | `MANAGEMENT_NO` | 管理番号 | `String(255)` | 出力したときの管理番号 | `managementNo` |
 | `REQUESTER` | 依頼者 | `String(255)` | 出力したときの依頼者 | `requester` |
 | `SYSTEM` | システム | `String(255)` | 出力した衛星システム（見送りは空。システムごとに書き出したときは、そのシステム） | `system` |
@@ -1543,12 +1540,17 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `PRIORITY_OUT` | 出力優先度 | `String(64)` | システムに渡した優先度（`High` など） | `priority` |
 | `CLOUD` | 雲量予報 | `Double` | 出力時の雲量予報（%） | `cloud` |
 | `SCENES` | シーン数 | `Integer` | 見積もったシーン数 | `scenes` |
-| `RESULT` | 結果 | `String(64)` | 出力・見送りなど | `result` |
+| `RESULT` | 結果 | `String(64)` | `採用`（出力した）・`見送り`・`要求外`（システムが依頼なしで計画したもの） | `result` |
 | `REASON` | 理由 | `String(1000)` | 見送り・警告の理由 | `reason` |
 | `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル（古い既定の `FILE` だけがあるテーブルはそれを使う） | `file` |
 | `CAPTURED` | 撮像結果 | `String(16)` | `未判定`・`撮像済み`・`未撮像` | `captured` |
 | `IMAGE_ID` | 画像ID | `String(255)` | 撮像済みにした画像の ID | `imageId` |
 | `BOOST_DONE` | 繰り上げ済み | `Integer` | 繰り上げを済ませた量 | `boostDone` |
+| `ADOPTION` | 採否 | `String(16)` | システムの採否: `採用`・`不採用`・`不明`（出力した依頼。分からないまま、画像が入れば `採用`）。要求外は `採用`、見送りは空 | `adoption` |
+| `ADOPTION_REASON` | 採否の理由 | `String(1000)` | 不採用の理由・要求外のメモ（結果ファイルか手入力） | `adoptionReason` |
+| `PLANNED_AT` | 撮像予定日時 | `Date` | システムの撮像予定の日時（結果ファイルか手入力） | `plannedAt` |
+| `EXTERNAL_ID` | システム側の番号 | `String(255)` | システムが付けた番号 | `externalId` |
+| `ADOPTION_SOURCE` | 採否の入力元 | `String(1000)` | 結果ファイルの名前・`手入力`・`画像の入着` | `adoptionSource` |
 
 ### `TBL_OBSERVATION`（観測記録）
 

@@ -20,7 +20,7 @@ from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
     day_bounds, jst_day, level_value,
 )
-from .store import DEFAULT_REQUEST_FIELDS, RESULT_ROLES, new_request_id
+from .store import DEFAULT_REQUEST_FIELDS, new_request_id
 
 #: Japanese headings a layer may use, by item.
 HEADINGS = {
@@ -31,8 +31,8 @@ HEADINGS = {
     "orbitDir": "軌道方向", "resolution": "分解能", "timeOfDay": "時間帯", "cloudNoGo": "実施しない雲量",
     "systems": "優先システム", "shapeKind": "範囲の種類", "requester": "依頼者", "note": "メモ",
 }
-#: The items written out (the ledger's own times and its 「最新の出力」 left out).
-WRITTEN = [k for k in DEFAULT_REQUEST_FIELDS if k not in ("created", "updated", *RESULT_ROLES)]
+#: The items written out (the ledger's own times left out).
+WRITTEN = [k for k in DEFAULT_REQUEST_FIELDS if k not in ("created", "updated")]
 NUMBERS = ("priority", "boost", "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "resolution", "cloudNoGo")
 
 
@@ -44,8 +44,6 @@ def field_roles(names: list) -> dict:
     """Item → the layer's field for it."""
     out = {}
     for role, ledger in DEFAULT_REQUEST_FIELDS.items():
-        if role in RESULT_ROLES:
-            continue
         wanted = {_key(ledger), _key(role), _key(HEADINGS.get(role, ""))} - {""}
         for n in names:
             if _key(n) in wanted:

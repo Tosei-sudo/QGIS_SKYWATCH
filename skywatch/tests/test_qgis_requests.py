@@ -68,12 +68,12 @@ def plugin(tmp_path, monkeypatch):
     # The catalog says which system this one is ordered through.
     sats.add({"NAME": "RADAR 1", "TLE": f"{SAR1}\n{SAR2}", "KIND": "SAR", "SERIES": "RADAR", "RES": 1, "SYSTEM": "SYS-B"})
     types = {n: "esriFieldTypeString" for n in DEFAULT_REQUEST_FIELDS.values()}
-    types.update({n: "esriFieldTypeDate" for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT", "LAST_RUN_DATE", "LAST_TARGET_DATE")})
+    types.update({n: "esriFieldTypeDate" for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT")})
     types.update({n: "esriFieldTypeDouble" for n in ("PRIORITY", "BOOST", "OFF_NADIR_MIN", "OFF_NADIR_MAX", "INCIDENCE_MIN",
                                                      "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO")})
     fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
     htypes = {n: "esriFieldTypeString" for n in DEFAULT_HISTORY_FIELDS.values()}
-    htypes.update(RUN_DATE="esriFieldTypeDate", TARGET_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger",
+    htypes.update(RUN_DATE="esriFieldTypeDate", TARGET_DATE="esriFieldTypeDate", PLANNED_AT="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger",
                   BOOST_DONE="esriFieldTypeInteger")
     fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
     fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
@@ -194,7 +194,7 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert (zoned["佐世保"].management_no, zoned["佐世保"].identification_no) == ("K-共通", "12")
     # Both numbers are columns of the list too.
     heads = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
-    assert heads[:3] == ["名称", "管理番号", "識別番号"] and heads[-2:] == ["状態", "最新の出力"]
+    assert heads[:3] == ["名称", "管理番号", "識別番号"] and heads[-1] == "状態"
     row = next(i for i, x in enumerate(dock.shown) if x.name == "舞鶴")
     assert [dock.model.item(row, c).text() for c in (1, 2)] == ["K-0011", "11"]
     # Out of the day's work below.
@@ -297,19 +297,15 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert {r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows} == {"採用", "見送り"}
     yokosuka = next(x.id for x in dock.requests if x.name == "横須賀")
     assert {r["attributes"]["REQ_ID"]: r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows}[yokosuka] == "見送り"
-    # For dashboards (2026-11-09): the ledger's 「最新の出力」, the history's day as a date and the names.
+    # The day's plan (2026-11-09, 「撮像予定」, dashboards): the history has the day as a date, the names, and
+    # what was handed out waits for the system's answer; the ledger is left as it was.
     today = jst_day(time.time() * 1000)
-    assert {r["attributes"]["REQ_NAME"] for r in fake.layers[HISTORY].rows} == {"横須賀", "呉", "大阪湾"}
-    assert {r["attributes"]["TARGET_DATE"] for r in fake.layers[HISTORY].rows} == {day_bounds(today)[0]}
-    ledger = {r["attributes"]["REQ_NAME"]: r["attributes"] for r in fake.layers[LEDGER].rows}
-    assert {n: (a["LAST_RESULT"], a["LAST_SYSTEM"], a["LAST_TARGET_DATE"]) for n, a in ledger.items()} == {
-        "横須賀": ("見送り", None, day_bounds(today)[0]), "呉": ("採用", "SYS-A", day_bounds(today)[0]),
-        "大阪湾": ("採用", "SYS-B", day_bounds(today)[0])}
-    # The 「撮像依頼」 list reads the ledger again and shows it.
-    assert wait_for(lambda: dock.task is None and any(x.last_result for x in dock.requests)), dock.status.text()
-    column = {dock.shown[r].name: dock.model.item(r, 9) for r in range(dock.model.rowCount())}
-    assert column["呉"].text() == "今日 採用（SYS-A）" and column["横須賀"].text() == "今日 見送り"
-    assert "理由 " in column["横須賀"].toolTip() and column["呉"].toolTip().startswith(f"対象日 {today.isoformat()}")
+    rows = {r["attributes"]["REQ_NAME"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    assert set(rows) == {"横須賀", "呉", "大阪湾"}
+    assert {a["TARGET_DATE"] for a in rows.values()} == {day_bounds(today)[0]}
+    assert {n: (a["RESULT"], a["ADOPTION"]) for n, a in rows.items()} == {
+        "横須賀": ("見送り", None), "呉": ("採用", "不明"), "大阪湾": ("採用", "不明")}
+    assert not any(k.startswith("LAST_") for r in fake.layers[LEDGER].rows for k in r["attributes"])
     live.manual = "見送り"
     daily.plan.refit()
 
