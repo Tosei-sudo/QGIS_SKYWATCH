@@ -59,7 +59,7 @@ def _text(v: Any) -> str:
     return "" if s.upper() == "NULL" else s
 
 
-def _code(v: Any) -> str:
+def code_text(v: Any) -> str:
     """A number kept as text (管理番号・識別番号): a whole number from a numeric field without its 「.0」."""
     if isinstance(v, float) and v.is_integer():
         return str(int(v))
@@ -113,7 +113,7 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         priority = level_value(_text(p))
     r = ImagingRequest(
         id=rid, name=_text(get("name")) or rid,
-        management_no=_code(get("managementNo")), identification_no=_code(get("identificationNo")),
+        management_no=code_text(get("managementNo")), identification_no=code_text(get("identificationNo")),
         category=_choice(get("category"), CATEGORIES, default_category),
         achieve=_choice(get("achieve"), ACHIEVES, "毎回" if default_category == "定点" else "期間内1回"),
         start=_day_ms(get("start"), False), end=_day_ms(get("end"), True),

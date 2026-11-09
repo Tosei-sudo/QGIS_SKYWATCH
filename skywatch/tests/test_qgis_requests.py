@@ -152,30 +152,50 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert len(dock.requests) == 3
 
     # 「レイヤーから取り込み…」: a layer chosen with its name attribute, the rest given once in the form.
-    zones = QgsVectorLayer("Polygon?crs=EPSG:4326&field=地区:string&field=番号:integer", "監視区域", "memory")
+    zones = QgsVectorLayer("Polygon?crs=EPSG:4326&field=地区:string&field=番号:integer&field=Management_No:string",
+                           "監視区域", "memory")
     feats = []
-    for name, lon in (("舞鶴", 135.3), ("佐世保", 129.7)):
+    for name, lon, no, mgmt in (("舞鶴", 135.3, 11, "K-0011"), ("佐世保", 129.7, 12, None)):
         f = QgsFeature(zones.fields())
-        f.setAttributes([name, 1])
+        f.setAttributes([name, no, mgmt])
         f.setGeometry(QgsGeometry.fromRect(QgsRectangle(lon, 35.0, lon + 0.1, 35.1)))
         feats.append(f)
     zones.dataProvider().addFeatures(feats)
     QgsProject.instance().addMapLayer(zones)
     dialog = dock.import_layer(zones)
     assert dialog.chosen_layer() is zones and dialog.simple.isChecked()
+    # 管理番号・識別番号 by attribute (2026-11-09): a field named as the ledger names it is chosen by itself.
+    assert dialog.management_field.currentField() == "Management_No" and dialog.identification_field.currentField() == ""
     dialog.name_field.setField("地区")
+    dialog.identification_field.setField("番号")
+    dialog.full.setChecked(True)
+    assert not dialog.management_field.isEnabled()
+    dialog.simple.setChecked(True)
+    assert dialog.management_field.isEnabled() and dialog.fields() == {
+        "name": "地区", "management_no": "Management_No", "identification_no": "番号"}
     dialog.accept()
     form = dock.form
     assert form.batch is not None and len(form.batch["items"]) == 2 and not form.name.isEnabled()
+    assert "管理番号: Management_No・識別番号: 番号" in form.area_label.text()
+    assert "Management_No" in form.management_no.placeholderText() and "番号" in form.identification_no.placeholderText()
     form.category.setCurrentText("定点")
     form.kind.setCurrentText("SAR")
     form.priority.setValue(700)
+    # For the features whose attribute is empty (佐世保 has no 管理番号).
+    form.management_no.setText("K-共通")
     form._save_clicked()
     assert wait_for(lambda: dock.task is None and len(dock.requests) == 5), dock.status.text()
     zoned = {x.name: x for x in dock.requests if x.name in ("舞鶴", "佐世保")}
     assert set(zoned) == {"舞鶴", "佐世保"} and len({x.id for x in zoned.values()}) == 2
     assert all(x.kind == "SAR" and x.priority == 700 and x.category == "定点" and x.shape_kind == "範囲" for x in zoned.values())
     assert abs(zoned["舞鶴"].rings[0][0][0] - 135.3) < 1e-6
+    assert (zoned["舞鶴"].management_no, zoned["舞鶴"].identification_no) == ("K-0011", "11")
+    assert (zoned["佐世保"].management_no, zoned["佐世保"].identification_no) == ("K-共通", "12")
+    # Both numbers are columns of the list too.
+    heads = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
+    assert heads[:3] == ["名称", "管理番号", "識別番号"] and heads[-1] == "状態"
+    row = next(i for i, x in enumerate(dock.shown) if x.name == "舞鶴")
+    assert [dock.model.item(row, c).text() for c in (1, 2)] == ["K-0011", "11"]
     # Out of the day's work below.
     fake.layers[LEDGER].rows[:] = [row for row in fake.layers[LEDGER].rows if row["attributes"]["REQ_NAME"] not in ("舞鶴", "佐世保")]
     dock.reload()
