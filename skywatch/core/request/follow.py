@@ -19,7 +19,7 @@ from .. import time_zone
 from ..plan.store import between_condition, text_sample
 from .model import ImagingRequest
 from .model import day_bounds
-from .store import HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests
+from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests
 
 
 @dataclass
@@ -165,22 +165,39 @@ def undone_changes(findings: Sequence[Finding], requests: dict, history: Sequenc
 
 
 def history_changes(findings: Sequence[Finding]) -> list[tuple[int, dict]]:
-    """The history rows' new outcome (a row made 未撮像 again is offered its raise again)."""
+    """
+    The history rows' new outcome (a row made 未撮像 again is offered its raise
+    again). A row found taken was in the system's plan after all: 採用 (画像の
+    入着), whatever its answer was; made 未撮像 by hand again, that 採用 is
+    taken back (an answer from the system or by hand stays).
+    """
     out = []
     for f in findings:
         if f.row.object_id is None:
             continue
-        change = {"captured": f.captured, "imageId": f.image_id}
+        change = {"captured": f.captured, "imageId": f.image_id, **_adoption_change(f)}
         if f.captured == "未撮像":
             change["boostDone"] = 0
         out.append((f.row.object_id, change))
     return out
 
 
+def _adoption_change(f: Finding) -> dict:
+    row = f.row
+    if f.captured == "撮像済み" and row.adoption != "採用":
+        return {"adoption": "採用", "adoptionSource": IMAGE_ARRIVED}
+    if f.captured != "撮像済み" and row.adoption_source == IMAGE_ARRIVED:
+        return {"adoption": "不明", "adoptionSource": None}
+    return {}
+
+
 def settle(findings: Sequence[Finding]) -> None:
     """Puts the findings' outcome on their rows (after they were saved)."""
     for f in findings:
+        adoption = _adoption_change(f)
         f.row.captured, f.row.image_id = f.captured, f.image_id
+        if adoption:
+            f.row.adoption, f.row.adoption_source = adoption["adoption"], adoption["adoptionSource"] or ""
         if f.captured == "未撮像":
             f.row.boost_done = 0
 

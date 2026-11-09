@@ -451,16 +451,22 @@ def test_follow_up_leaves_another_satellites_image_unsettled():
     saved = load_requests(client, store, None)[0]
     assert (saved.boost, saved.status) == (0, "完了")
     assert load_history(client, store, None)[0].image_id == "IMG-1"
+    # Its image came in: it was in the system's plan (採用 by 画像の入着), though no answer was given (2026-11-09).
+    assert (history[0].adoption, history[0].adoption_source) == ("採用", "画像の入着")
+    assert (load_history(client, store, None)[0].adoption, load_history(client, store, None)[0].adoption_source) == ("採用", "画像の入着")
     # By hand back to 未撮像: the request is 有効 again and the row offered its raise again.
     history = load_history(client, store, None)
     history[0].boost_done = 1
     by_id = {r.id: r for r in load_requests(client, store, None)}
     findings = marked(history, "未撮像")
-    assert history_changes(findings) == [(history[0].object_id, {"captured": "未撮像", "imageId": "", "boostDone": 0})]
+    # (and that 採用 taken back: not known any more)
+    assert history_changes(findings) == [(history[0].object_id, {"captured": "未撮像", "imageId": "", "adoption": "不明", "adoptionSource": None,
+                                                                 "boostDone": 0})]
     assert undone_changes(findings, by_id, history) == [(by_id["R-0009"].object_id, {"status": "有効"})]
     assert save_marked(client, store, None, findings, by_id, history, LAST + 2 * D)
     assert load_requests(client, store, None)[0].status == "有効"
     assert (load_history(client, store, None)[0].captured, history[0].boost_done) == ("未撮像", 0)
+    assert (load_history(client, store, None)[0].adoption, history[0].adoption) == ("不明", "不明")
     assert marked(history, "未撮像") == []  # already so
 
 

@@ -41,6 +41,8 @@ def test_one_systems_rows_and_raises():
     rows = history_of(plan, FIRST + H, {"SYS-C": "c.json"}, "RUN-C", system="SYS-C")
     assert [(r.request_id, r.system, r.result) for r in rows] == [("R-2", "SYS-C", TAKEN), ("R-4", "SYS-C", TAKEN), ("R-5", "SYS-C", HELD)]
     assert rows[0].file == "c.json" and rows[0].captured == "未判定" and rows[2].captured == ""
+    # Handed out: the system's answer awaited (「撮像予定」); held back: none awaited.
+    assert [r.adoption for r in rows] == ["不明", "不明", ""]
     # R-4's raise is SYS-C's person's to save, not SYS-A's; written for every system, as before.
     assert boost_changes(plan, system="SYS-C") == [(14, {"boost": 100})] and missed_done(plan, system="SYS-C") == [(91, {"boostDone": 1})]
     assert boost_changes(plan, system="SYS-A") == [] and missed_done(plan, system="SYS-A") == []
@@ -102,3 +104,5 @@ def test_history_conditions_of_one_system():
     assert "SYSTEM" not in replaced_where(store, "2026-11-08")
     assert handed_where(store, "2026-11-08").endswith("AND RESULT = '採用'")
     assert replaced_where(store, "2026-11-08", "A'B").endswith("SYSTEM = 'A''B'")
+    # The systems' own plans (要求外) are never replaced by writing the day again.
+    assert "(RESULT IS NULL OR RESULT <> '要求外')" in replaced_where(store, "2026-11-08", "SYS-A")

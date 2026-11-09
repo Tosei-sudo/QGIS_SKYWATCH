@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from ..time_zone import UTC, TimeZone, parse_time_zone
 from ..util import is_number, is_record
+from .result_file import ResultFile, result_file_of
 
 FORMATS = ("csv", "json")
 ENCODINGS = {"utf-8": "utf-8", "utf8": "utf-8", "utf-8-sig": "utf-8-sig", "utf-8-bom": "utf-8-sig",
@@ -71,6 +72,8 @@ class ExportSystem:
     schema: Any = None
     #: Places of the geometry (decimals) when nothing else says.
     digits: int = 6
+    #: How the system's answer file (採否) is read; None when it sends none (answers by hand only).
+    result_file: Optional[ResultFile] = None
 
 
 def _texts(v: Any) -> list:
@@ -216,6 +219,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         columns=columns,
         schema=schema if is_record(schema) or isinstance(schema, str) else None,
         digits=int(digits) if is_number(digits) and 0 <= digits <= 12 else 6,
+        result_file=result_file_of(value.get("resultFile"), f"{at}.resultFile", problems, zone),
     )
 
 

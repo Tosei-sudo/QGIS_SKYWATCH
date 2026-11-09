@@ -73,7 +73,8 @@ def plugin(tmp_path, monkeypatch):
                                                      "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO")})
     fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
     htypes = {n: "esriFieldTypeString" for n in DEFAULT_HISTORY_FIELDS.values()}
-    htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
+    htypes.update(RUN_DATE="esriFieldTypeDate", TARGET_DATE="esriFieldTypeDate", PLANNED_AT="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger",
+                  BOOST_DONE="esriFieldTypeInteger")
     fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
     fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
                                       "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
@@ -296,6 +297,15 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert {r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows} == {"採用", "見送り"}
     yokosuka = next(x.id for x in dock.requests if x.name == "横須賀")
     assert {r["attributes"]["REQ_ID"]: r["attributes"]["RESULT"] for r in fake.layers[HISTORY].rows}[yokosuka] == "見送り"
+    # The day's plan (2026-11-09, 「撮像予定」, dashboards): the history has the day as a date, the names, and
+    # what was handed out waits for the system's answer; the ledger is left as it was.
+    today = jst_day(time.time() * 1000)
+    rows = {r["attributes"]["REQ_NAME"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    assert set(rows) == {"横須賀", "呉", "大阪湾"}
+    assert {a["TARGET_DATE"] for a in rows.values()} == {day_bounds(today)[0]}
+    assert {n: (a["RESULT"], a["ADOPTION"]) for n, a in rows.items()} == {
+        "横須賀": ("見送り", None), "呉": ("採用", "不明"), "大阪湾": ("採用", "不明")}
+    assert not any(k.startswith("LAST_") for r in fake.layers[LEDGER].rows for k in r["attributes"])
     live.manual = "見送り"
     daily.plan.refit()
 

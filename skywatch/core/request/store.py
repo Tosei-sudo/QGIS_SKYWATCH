@@ -9,6 +9,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
@@ -16,6 +17,7 @@ from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
+    day_bounds,
 )
 
 #: The attribute names used when the settings do not map a role.
@@ -30,10 +32,22 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "shapeKind": "SHAPE_KIND", "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
 }
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
-    "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "requestId": "REQ_ID", "system": "SYSTEM",
+    "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "targetDate": "TARGET_DATE", "requestId": "REQ_ID",
+    "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "requester": "REQUESTER", "system": "SYSTEM",
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
+    "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
+    "adoptionSource": "ADOPTION_SOURCE",
 }
+#: The history's 採否 (the system's own answer to what was handed out; core/request/adoption.py).
+ADOPTION_ROLES = ("adoption", "adoptionReason", "plannedAt", "externalId", "adoptionSource")
+#: The RESULT of a row the system planned without being asked (要求外, e.g. its routine tasks; no REQ_ID).
+UNREQUESTED = "要求外"
+#: ADOPTION_SOURCE of an answer given by hand.
+MANUAL = "手入力"
+#: ADOPTION_SOURCE of a row found taken (an image of it came in): it was in the system's plan after all
+#: (tsudo, 2026-11-09: 「採否がわからないやつもある。入ってきたら、採用されてたんだなとなる」).
+IMAGE_ARRIVED = "画像の入着"
 #: Default names before 2026-11-08 (FILE is an Oracle / SQL Server reserved word), still read from a table that has them.
 LEGACY_HISTORY_FIELDS: dict[str, str] = {"file": "FILE"}
 #: What a history row says about whether the request was taken.
@@ -126,6 +140,14 @@ def _number(v: Any) -> Optional[float]:
             return None
         return n if math.isfinite(n) else None
     return None
+
+
+def day_start_ms(day: str) -> Optional[float]:
+    """The first moment (ms) of a JST day `2026-11-10`; None when not a day."""
+    try:
+        return day_bounds(date.fromisoformat(day[:10]))[0]
+    except (TypeError, ValueError):
+        return None
 
 
 def _choice(v: Any, choices: Sequence[str], fallback: str) -> str:
@@ -552,15 +574,38 @@ class HistoryRow:
     image_id: str = ""
     boost_done: int = 0
     object_id: Optional[int] = None
+    #: The request's 名称・管理番号・依頼者 when written (so a dashboard lists them without joining the ledger).
+    name: str = ""
+    management_no: str = ""
+    requester: str = ""
+    #: The system's answer (採否): 不明 / 採用 / 不採用 for one handed out ("" for one held back); 採用 for 要求外.
+    adoption: str = ""
+    adoption_reason: str = ""
+    #: When the system plans to take it (ms), as its answer says.
+    planned_at: Optional[float] = None
+    #: The system's own id of it, and where the answer came from (the result file's name, or 手入力).
+    external_id: str = ""
+    adoption_source: str = ""
+    #: The area (longitude / latitude rings), kept when the table has polygons (the request's, or the file's for 要求外).
+    rings: list = field(default_factory=list)
 
 
 def history_attributes(row: HistoryRow, f: dict) -> dict:
     return {
-        f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day, f["requestId"]: row.request_id,
-        f["system"]: row.system, f["satellite"]: row.satellite, f["priority"]: row.priority, f["cloud"]: row.cloud,
-        f["scenes"]: row.scenes, f["result"]: row.result, f["reason"]: row.reason[:250], f["file"]: row.file[:250],
-        f["captured"]: row.captured, f["imageId"]: row.image_id, f["boostDone"]: row.boost_done,
+        f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day, f["targetDate"]: day_start_ms(row.day),
+        f["requestId"]: row.request_id, f["name"]: row.name[:250] or None, f["managementNo"]: row.management_no[:250] or None,
+        f["requester"]: row.requester[:250] or None, f["system"]: row.system, f["satellite"]: row.satellite,
+        f["priority"]: row.priority, f["cloud"]: row.cloud, f["scenes"]: row.scenes, f["result"]: row.result,
+        f["reason"]: row.reason[:250], f["file"]: row.file[:250], f["captured"]: row.captured, f["imageId"]: row.image_id,
+        f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
+        f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
+        f["adoptionSource"]: row.adoption_source[:1000] or None,
     }
+
+
+def _polygons(client: EsriClient, url: str, token: Optional[str]) -> bool:
+    """Whether a history table keeps areas (a polygon layer; a table without shapes does not)."""
+    return client.layer(url, token).geometry_type == "esriGeometryPolygon"
 
 
 def add_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], rows: Sequence[HistoryRow]) -> Saved:
@@ -569,7 +614,13 @@ def add_history(client: EsriClient, store: RequestStoreConfig, token: Optional[s
         return Saved()
     hf = store.history_fields
     names, _ = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
-    adds = [{"attributes": _only(history_attributes(r, hf), names)} for r in rows]
+    shapes = _polygons(client, store.history, token)
+    adds = []
+    for r in rows:
+        feature: dict = {"attributes": _only(history_attributes(r, hf), names)}
+        if shapes and r.rings:
+            feature["geometry"] = {"rings": esri_rings(r.rings), "spatialReference": {"wkid": 4326}}
+        adds.append(feature)
     return _batches(lambda batch: client.apply_edits(store.history, adds=batch, token=token), adds,
                     lambda r: r.add_results, "出力履歴の追加")
 
@@ -610,12 +661,14 @@ def count_history(client: EsriClient, store: RequestStoreConfig, token: Optional
 def replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = None) -> str:
     """
     The rows of a target day that writing the day again replaces: all but
-    those already followed up; only those of `system` when one system is
-    written (the others are another person's, 2026-11-09).
+    those already followed up and the systems' own plans (要求外); only those
+    of `system` when one system is written (the others are another person's,
+    2026-11-09).
     """
     hf = store.history_fields
     captured = hf["captured"]
-    where = f"{hf['day']} = {quote(day)} AND ({captured} IS NULL OR {captured} = '' OR {captured} = '未判定')"
+    where = (f"{hf['day']} = {quote(day)} AND ({captured} IS NULL OR {captured} = '' OR {captured} = '未判定')"
+             f" AND ({hf['result']} IS NULL OR {hf['result']} <> {quote(UNREQUESTED)})")
     return where + (f" AND {hf['system']} = {quote(system)}" if system else "")
 
 
@@ -637,9 +690,27 @@ def delete_history(client: EsriClient, store: RequestStoreConfig, token: Optiona
     return Saved(len(ok), [f"出力履歴の削除: {(r.get('error') or {}).get('description') or '削除失敗'}" for r in results if not r.get("success")])
 
 
+def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
+    """A history row of a feature's attributes (by the table's names)."""
+    cloud, scenes, done = _number(a.get(hf["cloud"])), _number(a.get(hf["scenes"])), _number(a.get(hf["boostDone"]))
+    rings = geometry.get("rings") if isinstance(geometry, dict) else None
+    return HistoryRow(
+        run_id=_text(a.get(hf["runId"])), run_date=time_of(a.get(hf["runDate"])), day=_text(a.get(hf["day"]))[:10],
+        request_id=_text(a.get(hf["requestId"])), name=_text(a.get(hf["name"])), management_no=_code(a.get(hf["managementNo"])),
+        requester=_text(a.get(hf["requester"])), system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
+        priority=_text(a.get(hf["priority"])), cloud=cloud, scenes=int(scenes) if scenes is not None else None,
+        result=_text(a.get(hf["result"])) or "採用", reason=_text(a.get(hf["reason"])), file=_text(a.get(hf["file"])),
+        captured=_choice(a.get(hf["captured"]), CAPTURED, "未判定"), image_id=_text(a.get(hf["imageId"])),
+        boost_done=int(done or 0), object_id=int(a[oid]) if is_number(a.get(oid)) else None,
+        adoption=_text(a.get(hf["adoption"])), adoption_reason=_text(a.get(hf["adoptionReason"])),
+        planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
+        adoption_source=_text(a.get(hf["adoptionSource"])),
+        rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
+
+
 def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str = "1=1",
                  cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
-    """History rows (a condition by the table's names), oldest day first."""
+    """History rows of requests (a condition by the table's names; 要求外 rows left out), oldest day first."""
     if not store.history:
         return []
     hf = store.history_fields
@@ -648,18 +719,94 @@ def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[
     out = []
     for row in rows:
         a = row.get("attributes") or {}
-        rid = _text(a.get(hf["requestId"]))
-        if not rid:
+        # 要求外 rows are the systems' own plans, not requests handed out: never followed up or raised.
+        if not _text(a.get(hf["requestId"])) or _text(a.get(hf["result"])) == UNREQUESTED:
             continue
-        cloud, scenes, done = _number(a.get(hf["cloud"])), _number(a.get(hf["scenes"])), _number(a.get(hf["boostDone"]))
-        out.append(HistoryRow(
-            run_id=_text(a.get(hf["runId"])), run_date=time_of(a.get(hf["runDate"])), day=_text(a.get(hf["day"]))[:10],
-            request_id=rid, system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
-            priority=_text(a.get(hf["priority"])), cloud=cloud, scenes=int(scenes) if scenes is not None else None,
-            result=_text(a.get(hf["result"])) or "採用", reason=_text(a.get(hf["reason"])), file=_text(a.get(hf["file"])),
-            captured=_choice(a.get(hf["captured"]), CAPTURED, "未判定"), image_id=_text(a.get(hf["imageId"])),
-            boost_done=int(done or 0), object_id=int(a[oid]) if is_number(a.get(oid)) else None))
+        out.append(history_row_of(a, None, hf, oid))
     return sorted(out, key=lambda r: (r.day, r.run_date if math.isfinite(r.run_date) else 0))
+
+
+def load_day(client: EsriClient, store: RequestStoreConfig, token: Optional[str], day: str,
+             cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """Every row of a target day (`2026-11-10`): requests handed out or held back and 要求外, with their areas."""
+    if not store.history:
+        return []
+    hf = store.history_fields
+    _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
+    shapes = _polygons(client, store.history, token)
+    rows = client.query_all(store.history, f"{hf['day']} = {quote(day)}", token, geometry=shapes, limit=100000, cancelled=cancelled)
+    out = [history_row_of(row.get("attributes") or {}, row.get("geometry"), hf, oid) for row in rows]
+    return sorted(out, key=lambda r: (r.system, r.planned_at or 0, r.name, r.run_date if math.isfinite(r.run_date) else 0))
+
+
+def day_counts(client: EsriClient, store: RequestStoreConfig, token: Optional[str], first: str, last: str) -> dict[str, dict]:
+    """
+    How many rows each target day from `first` to `last` has, by what they
+    are (採用 = in the system's plan, 要求外 included; 不採用; 不明;
+    見送り): for marking the calendar.
+    """
+    if not store.history:
+        return {}
+    hf = store.history_fields
+    names, _ = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
+    fields = ",".join(n for n in (hf["day"], hf["result"], hf["adoption"], hf["captured"]) if n in names)
+    rows = client.query_all(store.history, f"{hf['day']} >= {quote(first)} AND {hf['day']} <= {quote(last)}", token,
+                            out_fields=fields, geometry=False, limit=200000)
+    out: dict[str, dict] = {}
+    for row in rows:
+        a = row.get("attributes") or {}
+        day = _text(a.get(hf["day"]))[:10]
+        state = state_of(_text(a.get(hf["result"])) or "採用", _text(a.get(hf["adoption"])), _text(a.get(hf["captured"])))
+        tally = out.setdefault(day, {})
+        tally[state] = tally.get(state, 0) + 1
+    return out
+
+
+#: What a row is in the day's plan.
+PLANNED, DECLINED, AWAITING, HELD_BACK = "採用", "不採用", "不明", "見送り"
+STATES = (PLANNED, AWAITING, DECLINED, HELD_BACK, UNREQUESTED)
+
+
+def state_of(result: str, adoption: str, captured: str = "") -> str:
+    """
+    A row's place in the day's plan: 要求外 (planned by the system itself),
+    or for a request handed out its answer (採用 / 不採用), 不明 while none is
+    known (some systems never say), and 採用 once its image came in
+    (撮像済み: it was planned after all); or 見送り.
+    """
+    if result == UNREQUESTED:
+        return UNREQUESTED
+    if result != "採用":
+        return HELD_BACK
+    if captured == "撮像済み":
+        return PLANNED
+    return adoption if adoption in (PLANNED, DECLINED) else AWAITING
+
+
+def unrequested_where(store: RequestStoreConfig, day: str, system: str, by_hand: bool) -> str:
+    """The 要求外 rows of a day and system read from a file (`by_hand`: those added by hand)."""
+    hf = store.history_fields
+    source = hf["adoptionSource"]
+    which = f"{source} = {quote(MANUAL)}" if by_hand else f"({source} IS NULL OR {source} <> {quote(MANUAL)})"
+    return (f"{hf['day']} = {quote(day)} AND {hf['system']} = {quote(system)} AND {hf['result']} = {quote(UNREQUESTED)}"
+            f" AND {which}")
+
+
+def delete_history_rows(client: EsriClient, store: RequestStoreConfig, token: Optional[str], object_ids: Sequence[int]) -> Saved:
+    """Deletes history rows by object id (要求外 rows taken off the day's plan); how many went (and why not)."""
+    if not store.history or not object_ids:
+        return Saved()
+    results = client.delete_features(store.history, object_ids, token)
+    ok = [r for r in results if r.get("success")]
+    return Saved(len(ok), [f"出力履歴の削除: {(r.get('error') or {}).get('description') or '削除失敗'}" for r in results if not r.get("success")])
+
+
+def history_has(client: EsriClient, store: RequestStoreConfig, token: Optional[str], roles: Sequence[str]) -> list[str]:
+    """The roles' fields the history table lacks (their names; [] when it has them all, or keeps no history)."""
+    if not store.history:
+        return []
+    names = {n.lower() for n in client.layer(store.history, token, refresh=True).field_types}
+    return [store.history_fields[r] for r in roles if store.history_fields[r].lower() not in names]
 
 
 def update_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], changes: Sequence[tuple[int, dict]]) -> Saved:

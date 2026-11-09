@@ -125,12 +125,15 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             result, reason = HELD, f"書き出し失敗（{failures.get(name) or 'ファイルなし'}）"
         taken = result == TAKEN
         rows.append(HistoryRow(
-            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id, system=name,
+            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id,
+            name=c.request.name, management_no=c.request.management_no, requester=c.request.requester, system=name,
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
             result=result, reason=reason, file=files.get(name, "") if taken else "",
-            captured="未判定" if taken else "", boost_done=0))
+            captured="未判定" if taken else "", boost_done=0,
+            # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.
+            adoption="不明" if taken else "", rings=[[list(p[:2]) for p in r] for r in c.request.rings]))
     return rows
 
 

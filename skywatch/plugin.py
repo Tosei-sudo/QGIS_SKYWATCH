@@ -51,6 +51,7 @@ from .ui.transfer_dialog import TransferDialog
 from .ui.saved_plans_dock import SavedPlansDock
 from .ui.plan_file_dock import PlanFileDock
 from .ui.request_dock import RequestDock
+from .ui.schedule_dock import ScheduleDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.spectral_dock import SpectralDock
@@ -69,7 +70,7 @@ MENU = "SKYWATCH"
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
-    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力"]),
+    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
@@ -84,7 +85,7 @@ MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボ�
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
-                                             "SatObsCloud"]),
+                                             "SatObsSchedule", "SatObsCloud"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard", "SatObsAnalysis"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
 ]
@@ -178,6 +179,12 @@ class PluginApi:
     def plan_files(self) -> "PlanFileDock":
         """The imaging plan files dock (its `run()`, `plan`, `write()`, `paths`)."""
         return self._plugin.docks["SatObsPlanFiles"]
+
+    @property
+    def schedule(self) -> "ScheduleDock":
+        """The imaging schedule dock: a day's plan as the systems answered (its `rows`, `set_day()`, `reload()`, `answer()`,
+        `import_file()`, `to_layer()`)."""
+        return self._plugin.docks["SatObsSchedule"]
 
     @property
     def image_catalog(self) -> "CatalogDock":
@@ -347,7 +354,7 @@ class SkywatchPlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files", "SatObsEvents": "events", "SatObsCloud": "cloud_map",
+                 "SatObsPlanFiles": "plan_files", "SatObsSchedule": "schedule", "SatObsEvents": "events", "SatObsCloud": "cloud_map",
                  "SatObsAnalysis": "analysis"}
 
         specs = [
@@ -356,6 +363,7 @@ class SkywatchPlugin:
             ("SatObsSavedPlans", tr("保存した撮像計画"), None),
             ("SatObsRequests", tr("撮像依頼"), None),
             ("SatObsPlanFiles", tr("撮像計画ファイル出力"), None),
+            ("SatObsSchedule", tr("撮像予定"), None),
             ("SatObsSatellitePass", tr("衛星パス"), None),
             ("SatObsCloud", tr("雲量マップ"), None),
             ("SatObsObservations", tr("観測記録"), None),
@@ -412,6 +420,8 @@ class SkywatchPlugin:
                     plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
 
                 dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
+            elif name == "SatObsSchedule":
+                dock = ScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsPlanFiles":
                 plan_dock, request_dock = self.docks["SatObsImagingPlan"], self.docks["SatObsRequests"]
 
@@ -419,7 +429,11 @@ class SkywatchPlugin:
                     plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
 
                 def requests_changed(requests=None, request_dock=request_dock):
-                    # The 「撮像依頼」 dock shows the ledger as read here, or reads it again when it was changed.
+                    # The 「撮像依頼」 dock shows the ledger as read here, or reads it again when it was changed;
+                    # the 「撮像予定」 dock the day's rows again once files are written.
+                    schedule = self.docks.get("SatObsSchedule")
+                    if requests is None and schedule is not None and schedule._loaded and schedule.isVisible():
+                        schedule.reload()
                     if request_dock.store is None or request_dock.task is not None:
                         return
                     if requests is not None:
@@ -1293,7 +1307,7 @@ class SkywatchPlugin:
             self.docks["SatObsDashboard"].close_all()
         if "SatObsAnalysis" in self.docks:
             self.docks["SatObsAnalysis"].close_all()
-        for name in ("SatObsRequests", "SatObsPlanFiles"):
+        for name in ("SatObsRequests", "SatObsPlanFiles", "SatObsSchedule"):
             if name in self.docks:
                 self.docks[name].close_all()
         try:

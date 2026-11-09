@@ -78,7 +78,8 @@ def test_a_layout_is_saved_and_brought_back(plugin):
     plugin.place_docks()
     assert menu.use("撮像計画の担当")
     APP.processEvents()
-    assert open_names(plugin) == ["SatObsImageCatalog", "SatObsImagingPlan", "SatObsPlanFiles", "SatObsRequests", "SatObsSatellitePass", "SatObsSavedPlans"]
+    assert open_names(plugin) == ["SatObsImageCatalog", "SatObsImagingPlan", "SatObsPlanFiles", "SatObsRequests", "SatObsSatellitePass", "SatObsSavedPlans",
+                                  "SatObsSchedule"]
     assert w.dockWidgetArea(d["SatObsImagingPlan"]) == RIGHT and tabs(w, d["SatObsImagingPlan"]) == ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]
     assert d["SatObsImagingPlan"].geometry().y() < d["SatObsRequests"].geometry().y()
     assert menu.use("観測記録の担当（自分用）")
