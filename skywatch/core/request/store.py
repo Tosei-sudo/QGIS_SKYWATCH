@@ -642,11 +642,22 @@ def count_history(client: EsriClient, store: RequestStoreConfig, token: Optional
     return int(n) if is_number(n) else 0
 
 
-def replaced_where(store: RequestStoreConfig, day: str) -> str:
-    """The rows of a target day that writing the day again replaces: all but those already followed up."""
+def replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = None) -> str:
+    """
+    The rows of a target day that writing the day again replaces: all but
+    those already followed up; only those of `system` when one system is
+    written (the others are another person's, 2026-11-09).
+    """
     hf = store.history_fields
     captured = hf["captured"]
-    return (f"{hf['day']} = {quote(day)} AND ({captured} IS NULL OR {captured} = '' OR {captured} = '未判定')")
+    where = f"{hf['day']} = {quote(day)} AND ({captured} IS NULL OR {captured} = '' OR {captured} = '未判定')"
+    return where + (f" AND {hf['system']} = {quote(system)}" if system else "")
+
+
+def handed_where(store: RequestStoreConfig, day: str) -> str:
+    """The rows of a target day handed out (採用) and not yet followed up: what each system's file holds."""
+    hf = store.history_fields
+    return f"{replaced_where(store, day)} AND {hf['result']} = '採用'"
 
 
 def delete_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str) -> Saved:

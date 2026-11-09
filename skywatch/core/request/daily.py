@@ -24,6 +24,11 @@ in order of priority.
 
 Hand changes (taking in, leaving out, moving up or down) are kept on the
 candidates and the fitting is done again.
+
+A request already in the file another system's person wrote today is
+pinned there (`Candidate.pinned`): it is fitted first, to that system and
+satellite, whatever the limits or the hand say, since that file is not
+written again by whoever writes another system (tsudo, 2026-11-09).
 """
 from __future__ import annotations
 
@@ -75,6 +80,8 @@ class Candidate:
     #: The satellites (modes) that can take it, by system name: the systems it can go to, in the order tried
     #: (catalog order within a system; set by fitting, whatever became of it).
     able: dict = field(default_factory=dict)
+    #: (system name, satellite name) when already written today in the file of a system not written from here.
+    pinned: Optional[tuple] = None
 
     @property
     def boost(self) -> int:
@@ -202,7 +209,10 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if sys_ is not None:
             members[sys_.system].append(sat)
     out = ordered(cands)
-    for c in out:
+    by_name = {s.system: s for s in systems}
+    # Those already written for another system first: they hold their room there, whatever comes before them.
+    pinned = [c for c in out if c.pinned and c.pinned[0] in by_name]
+    for c in pinned + [c for c in out if not (c.pinned and c.pinned[0] in by_name)]:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
         c.warnings = [w for w in c.warnings if not w.startswith("枠超過")]
         req = c.request
@@ -211,6 +221,19 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             able = [s for s in members[system.system] if why_not(req, s) is None]
             if able:
                 c.able[system.system] = able
+        if c.pinned and c.pinned[0] in by_name:
+            system = by_name[c.pinned[0]]
+            choices = c.able.get(system.system) or members[system.system]
+            sat = next((s for s in choices if c.pinned[1] in (s.name, s.id)), choices[0] if choices else None)
+            scenes = scenes_of(req, *(((sat.swath, sat.length) if sat is not None and (req.modes or req.satellites) else system.scene_km)))
+            c.result, c.system, c.satellite, c.scenes = TAKEN, system, sat, scenes
+            room = rooms[system.system]
+            room.count += 1
+            room.scenes += scenes
+            room.by_category[req.category] = room.by_category.get(req.category, 0) + 1
+            if sat is not None:
+                per_sat[platform_key(sat)] = per_sat.get(platform_key(sat), 0) + 1
+            continue
         if c.manual == HELD:
             c.reason = "手動で見送り"
             continue

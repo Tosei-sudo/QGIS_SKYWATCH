@@ -91,7 +91,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 ## 3. 撮像依頼の採用状況のダッシュボード
 
-依頼した人が「今日（明日）の計画に採用されたか」を ArcGIS Enterprise のダッシュボードで見るための作り方。プラグインは「撮像計画ファイル出力」で書き出すたびに、次の属性を書く（[docs/imaging-requests.md](imaging-requests.md) の §19）。
+依頼した人が「今日（明日）の計画に採用されたか」を ArcGIS Enterprise のダッシュボードで見るための作り方。プラグインは「撮像計画ファイル出力」で書き出すたびに、次の属性を書く（[docs/imaging-requests.md](imaging-requests.md) の §20）。
 
 | テーブル | 属性 | ダッシュボードでの使い方 |
 | --- | --- | --- |
