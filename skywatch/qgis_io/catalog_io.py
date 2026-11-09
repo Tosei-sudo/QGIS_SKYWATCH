@@ -35,7 +35,7 @@ from qgis.core import (
 
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.images import FolderImages, find_images, patterns_for
-from ..core.catalog.paths import PathError, PathMapping, resolve_path
+from ..core.catalog.paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
 from ..core.catalog.watch import areas_of
 from ..core.util import is_number, ms_of
@@ -245,7 +245,7 @@ def scan_folder(folder: str, patterns: Sequence[str], find: Callable[..., Folder
     return found
 
 
-def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
+def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
                   choose_folder: Callable[[PathMapping], Optional[str]], names=None) -> RecordImages:
     """
     Where a record's images are: a URL, a local path as it is, under a
@@ -253,11 +253,35 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     `choose_folder` the first time). A local folder's images are the files
     below it matching the catalog's `imagePatterns` for the record's sensor
     (or for another name of it in `names`, the satellite name tables).
+    Before all that, where the rewrites of `pathMappings` (`pattern` / `to`)
+    take the path: the first place that is there (a folder: with images)
+    wins; when none is, the path goes on as written.
     Raises PathError with the reason, Cancelled when no folder was chosen.
     """
     source = record.source
     if source is None:
         raise PathError(f"{record.id or '画像'} に画像の場所なし")
+    tried: list[str] = []
+    for _, target in rewrites_of(mappings, source.value):
+        if not os.path.exists(target):
+            tried.append(f"{target} なし")
+            continue
+        try:
+            return _local_images(record, catalog, target, target, names)
+        except PathError:
+            tried.append(f"{target} に画像なし")
+    try:
+        return _as_written(record, catalog, mappings, choose_folder, names)
+    except PathError as e:
+        if not tried:
+            raise
+        raise PathError(f"{e}（読み替え先も: {'、'.join(tried)}）") from None
+
+
+def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
+                choose_folder: Callable[[PathMapping], Optional[str]], names) -> RecordImages:
+    """Where a record's images are by its path as the catalog writes it (see locate_record)."""
+    source = record.source
     if source.kind == "url":
         url = source.value if not source.value.startswith("//") else "https:" + source.value
     else:
@@ -274,21 +298,26 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
         if re.split(r"[?#]", url)[0].endswith("/"):
             raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できず。フォルダはローカルパスか pathMappings の url なしで指定）")
         return RecordImages(url, True, given=source.value)
-    if not os.path.isdir(url):
-        return RecordImages(url, False, given=source.value)
+    return _local_images(record, catalog, url, source.value, names)
+
+
+def _local_images(record: CatalogRecord, catalog: CatalogConfig, path: str, given: str, names) -> RecordImages:
+    """The image at `path` here, or the images below it when it is a folder (PathError when it has none)."""
+    if not os.path.isdir(path):
+        return RecordImages(path, False, given=given)
     patterns = patterns_for(catalog.image_patterns, record.sensor, names)
-    found = scan_folder(url, patterns)
+    found = scan_folder(path, patterns)
     if not found.files:
         why = [f"{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認"]
         if found.stopped:
             why.append(found.stopped)
         if found.unreadable:
             why.append(f"読めないフォルダ {found.unreadable} 件")
-        raise PathError(f"{record.id or source.value} のフォルダ「{url}」に画像なし（{'・'.join(why)}）")
-    return RecordImages(url, False, found.files, found.more, given=source.value)
+        raise PathError(f"{record.id or given} のフォルダ「{path}」に画像なし（{'・'.join(why)}）")
+    return RecordImages(path, False, found.files, found.more, given=given)
 
 
-def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping],
+def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
                 choose_folder: Callable[[PathMapping], Optional[str]],
                 choose_images: Optional[ChooseImages] = None,
                 problems: Optional[list[str]] = None, names=None) -> list[QgsRasterLayer]:

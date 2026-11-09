@@ -121,6 +121,50 @@ def test_search_list_footprints_and_sorting(plugin):
     assert asked[0]["returnCountOnly"] == "true" and asked[1]["orderByFields"] == "ACQ DESC"
 
 
+def test_the_footprints_filled_as_outlines_or_hidden(plugin):
+    """「フットプリント」 (tsudo, 2026-11-09: filled footprints made the image under them hard to see)."""
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    # Outlines unless chosen otherwise.
+    assert dock.footprint_box.currentData() == "outline" and settings.footprint_style() == "outline"
+    searched(dock)
+    overlay = dock.overlay
+    assert overlay.style == "outline"
+    assert overlay.all.numberOfVertices() > 0 and overlay.all.fillColor().alpha() == 0
+    dock._picked(139.61, 35.55, 0.001, False)
+    assert [r.id for r in dock.chosen()] == ["A"]
+    assert overlay.chosen.numberOfVertices() > 0 and overlay.chosen.fillColor().alpha() == 0
+    # The id above the footprint's top corner (35.7), not over the middle of the image.
+    [label] = overlay.labels
+    assert label._text == "A" and label._map_point.y() == pytest.approx(35.7) and label._offset_y < 0
+    assert label._map_point.x() == pytest.approx(139.7)
+    # Filled: as before, the id in the middle.
+    dock.footprint_box.setCurrentIndex(dock.footprint_box.findData("fill"))
+    assert settings.footprint_style() == "fill" and overlay.style == "fill"
+    assert overlay.all.fillColor().alpha() > 0 and overlay.chosen.fillColor().alpha() > 0
+    assert overlay.chosen.numberOfVertices() > 0
+    [label] = overlay.labels
+    assert 35.5 < label._map_point.y() < 35.7
+    # Hidden: nothing on the map, the choice and a click on the map still work.
+    dock.set_footprint_style("hidden")
+    assert dock.footprint_box.currentData() == "hidden" and settings.footprint_style() == "hidden"
+    assert overlay.all.numberOfVertices() == overlay.chosen.numberOfVertices() == 0 and overlay.labels == []
+    assert [r.id for r in dock.chosen()] == ["A"]
+    dock._picked(139.72, 35.62, 0.001, True)
+    assert sorted(r.id for r in dock.chosen()) == ["A", "C"] and overlay.chosen.numberOfVertices() == 0
+    # The area drawn for the search stays (a frame).
+    dock.set_drawn([[139.71, 35.61], [139.74, 35.61], [139.74, 35.64], [139.71, 35.61]])
+    assert overlay.area.numberOfVertices() > 0 and overlay.area.fillColor().alpha() == 0
+    # Shown again: the choice drawn again; the dock opened again keeps the style.
+    dock.set_footprint_style("outline")
+    assert overlay.all.numberOfVertices() > 0 and overlay.chosen.numberOfVertices() > 0 and len(overlay.labels) == 2
+    dock.set_footprint_style("hidden")
+    dock.hide()
+    assert dock.overlay is None
+    dock.show()
+    assert dock.overlay.style == "hidden" and dock.overlay.all.numberOfVertices() == 0
+
+
 def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(plugin, monkeypatch):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -460,6 +504,55 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     [layer] = dock.open_records([one])
     assert layer.name() == "F x.jp2" and layer.customProperty(IMAGE_FILE) == "x.jp2"
     assert QgsProject.instance().layerTreeRoot().findGroup("F") is None
+
+
+def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_otherwise(tmp_path):
+    """`pathMappings` `pattern` / `to`: //(host)/(any folders)/(image ID) → (drive):/(image ID), else the path as written."""
+    from skywatch.core.catalog import catalog_of
+    from skywatch.core.catalog.paths import PathError, path_mappings_of
+    from skywatch.core.catalog.search import record_of
+    from skywatch.qgis_io.catalog_io import locate_record
+
+    QgsSettings().remove("skywatch")
+    local, nas = tmp_path / "local", tmp_path / "nas"
+    for rel in ("local/SCENE_X/PAN/a.tif", "local/SCENE_Z/notes.txt", "local/b.tif",
+                "nas/2026/11/SCENE_Y/a.tif", "nas/2026/11/SCENE_Z/a.tif", "nas/2026/11/b.tif"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        if rel.endswith(".tif"):
+            geotiff(tmp_path / rel)
+        else:
+            (tmp_path / rel).write_text("")
+    problems = []
+    mappings = path_mappings_of([
+        {"pattern": "^//[^/]+/(?:[^/]+/)*([^/]+)$", "to": local.as_posix() + "/$1", "label": "手元の複製"},
+        {"prefix": "\\\\nas\\images", "label": "画像サーバー"},
+    ], problems)
+    assert not problems
+    settings.set_path_folder("\\\\nas\\images", str(nas))
+    catalog = catalog_of({"url": IMAGES, "fields": {"id": "IMG_ID", "source": "PATH"}}, problems, 0)
+
+    def where(path):
+        record = record_of({"attributes": {"IMG_ID": "R", "PATH": path}}, catalog.fields)
+        return locate_record(record, catalog, mappings, lambda mapping: pytest.fail("no folder to choose"))
+
+    # There: the copy opens (a folder with its images, a file), however deep the path was.
+    found = where("\\\\NAS\\images\\2026\\11\\SCENE_X")
+    assert found.place == (local / "SCENE_X").as_posix() and found.files == ["PAN/a.tif"]
+    assert where("\\\\nas\\images\\2026\\11\\b.tif").place == (local / "b.tif").as_posix()
+    # Written as //host/… (a protocol-relative URL otherwise): the copy too.
+    assert where("//nas/images/2026/11/SCENE_X").place == (local / "SCENE_X").as_posix()
+    # Not there, or a folder without images: the path as written (here through the folder chosen for the NAS).
+    assert where("\\\\nas\\images\\2026\\11\\SCENE_Y").place == str(nas / "2026" / "11" / "SCENE_Y")
+    found = where("\\\\nas\\images\\2026\\11\\SCENE_Z")
+    assert found.place == str(nas / "2026" / "11" / "SCENE_Z") and found.files == ["a.tif"]
+    url = where("//nas/images/2026/11/SCENE_Y")
+    assert url.is_url and url.place == "https://nas/images/2026/11/SCENE_Y"
+    # Nowhere: both are in the reason.
+    with pytest.raises(PathError) as e:
+        where("\\\\nas\\images\\2026\\11\\SCENE_W")
+    assert "2026/11/SCENE_W なし" in str(e.value) and f"読み替え先も: {(local / 'SCENE_W').as_posix()} なし" in str(e.value)
+    with pytest.raises(PathError, match="SCENE_Z に画像なし"):
+        where("\\\\nas\\images\\SCENE_Z")
 
 
 def test_the_dialog_choosing_a_records_images():

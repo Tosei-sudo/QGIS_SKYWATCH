@@ -209,6 +209,33 @@ def point_count_setting() -> int:
 def set_point_count(n: int) -> None:
     _set("observations/points", str(n))
 
+
+#: How the image catalog draws the listed images' footprints: filled, outlines only, or not at all.
+FOOTPRINT_STYLES = ("fill", "outline", "hidden")
+#: How the observations' marks are drawn: as they were, outlines only (no fill), or hidden (the input being made stays).
+MARK_STYLES = ("normal", "outline", "hidden")
+
+
+def footprint_style() -> str:
+    """The catalog's footprints on the map (tsudo, 2026-11-09: filled ones hid the images); outlines unless chosen."""
+    v = _get("catalog/footprints")
+    return v if v in FOOTPRINT_STYLES else "outline"
+
+
+def set_footprint_style(style: str) -> None:
+    _set("catalog/footprints", style if style in FOOTPRINT_STYLES else "outline")
+
+
+def mark_style() -> str:
+    """The observations' marks on the map ('normal' unless chosen)."""
+    v = _get("observations/marks")
+    return v if v in MARK_STYLES else "normal"
+
+
+def set_mark_style(style: str) -> None:
+    _set("observations/marks", style if style in MARK_STYLES else "normal")
+
+
 def plan_reminders() -> list:
     """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
     try:
