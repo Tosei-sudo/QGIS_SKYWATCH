@@ -6,6 +6,10 @@ layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
 the 通知 dock).
 
+A search lists the newest `maxResults` images; 「続きを読む」 under the list
+adds the next `maxResults` (older ones) of the same search (its area and
+conditions as they were when searched, not as the form says now).
+
 「ファイルなしで記録」: the images whose raw data is in another system only
 go to 観測記録 as images without their files (the catalog's id, time and
 footprint, so the records are the ones the image would have if opened). A
@@ -15,8 +19,8 @@ cannot be opened.
 """
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Callable, Optional
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMapLayer, QgsProject
 from qgis.gui import QgsMapLayerComboBox
@@ -69,6 +73,26 @@ except AttributeError:  # older bindings: the enum unscoped
     _GEOMETRY_LAYERS = QgsMapLayerProxyModel.HasGeometry
 
 
+@dataclass
+class _Listed:
+    """The search the list shows (or is being read), to read on from with 「続きを読む」."""
+    catalog: CatalogConfig
+    search: CatalogSearch
+    box: Any
+    #: 「類似画像の検索」: the images read → those listed (the most alike first) and their overlaps; None for the usual search.
+    rank: Optional[Callable[[list], tuple[list, dict]]] = None
+    #: Every image read so far, in the service's order (newest first).
+    read: list = field(default_factory=list)
+    total: Optional[int] = None
+    #: Where the next images start (the service's offset); None when there are no more.
+    next_offset: Optional[int] = None
+
+
+def _key(record: CatalogRecord) -> Any:
+    """What tells an image of the catalog from the others (an image read twice, the list having moved on since, is listed once)."""
+    return ("oid", record.object_id) if record.object_id is not None else ("id", record.id, record.acquired)
+
+
 def _day(edit: QLineEdit) -> str:
     """The day typed as yyyy-mm-dd (2026/11/9, 20261109, full-width digits too); '' when empty or unreadable (`input_problem` tells which)."""
     try:
@@ -88,6 +112,10 @@ class CatalogDock(PluginDock):
         #: Opens the watch dialog of the 通知 dock (set by the plugin): (catalog, types, conditions, area drawn).
         self.watch_requested: Optional[Callable[[CatalogConfig, dict, CatalogSearch, Optional[list]], None]] = None
         self._shown_catalog: Optional[CatalogConfig] = None
+        #: The search listed (「続きを読む」); None for a list that is not a search (an event's images).
+        self._listed: Optional[_Listed] = None
+        #: Searches (and 続き) being read.
+        self._reads = 0
         self._tasks: list = []
 
         form = QFormLayout()
@@ -218,6 +246,13 @@ class CatalogDock(PluginDock):
         self.model.layoutChanged.connect(self._redraw)
         self.model.layoutChanged.connect(self._apply_work_filter)
         self.body.addWidget(self.table, 1)
+        # 「続きを読む」: the next `maxResults` (older) images of the search listed, under the list.
+        self.more_button = QPushButton()
+        self.more_button.setToolTip(self.tr("この検索の続き（さらに古い画像）を一覧に足す。"
+                                            "範囲と条件は検索したときのまま（地図を動かしても変わらない）"))
+        self.more_button.clicked.connect(self.read_more)
+        self.more_button.hide()
+        self.body.addWidget(self.more_button)
         # 「ビュー」: the columns, the sort and the search conditions kept under a name (per user).
         self.views = ListViews("catalog", self.table, {
             "catalog": self.catalog_box, "area": self.area_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
@@ -347,6 +382,14 @@ class CatalogDock(PluginDock):
             # The list's catalog as the settings file says now (`imageFiles` changed, say).
             self._shown_catalog = next((c for c in self.catalogs() if c.url == self._shown_catalog.url and c.label == self._shown_catalog.label),
                                        self._shown_catalog)
+        if self._listed is not None:
+            # 「続きを読む」 asks the catalog as it is now (`maxResults`, the token); one no longer there has no 続き.
+            now = next((c for c in self.catalogs() if c.url == self._listed.catalog.url and c.label == self._listed.catalog.label), None)
+            if now is None:
+                self._listed.next_offset = None
+            else:
+                self._listed.catalog = now
+            self._show_more()
         self._catalog_changed()
 
     def _catalog_changed(self) -> None:
@@ -472,29 +515,124 @@ class CatalogDock(PluginDock):
             else:
                 self.status.setText(self.tr("「{name}」に形のある地物なし").format(name=layer.name()))
             return
+        self._read(_Listed(catalog, search, box))
+
+    def read_more(self) -> None:
+        """「続きを読む」: the next `maxResults` images of the search listed added to the list."""
+        listed = self._listed
+        if listed is None or listed.next_offset is None:
+            return
+        self._read(listed, more=True)
+
+    def _read(self, listed: _Listed, more: bool = False) -> None:
+        """Reads the newest images of `listed` (a new search; in a task), or with `more` the next ones."""
+        catalog = listed.catalog
         client = self.context.esri()
         token = self.context.token_for(catalog.url, catalog.token)
+        offset = (listed.next_offset or 0) if more else 0
+        similar = listed.rank is not None
+        if not more:
+            self._listed = listed
+            self.more_button.hide()
 
         def work(task):
             # Read here (once) so that opening a record's folder finds the imagePatterns of a sensor's other names.
             self.context.satellite_names(client, task.isCanceled)
-            return search_catalog(client, catalog, self._layer_of(client, catalog, token), search, box, token)
+            return search_catalog(client, catalog, self._layer_of(client, catalog, token), listed.search, listed.box, token,
+                                  offset, task.isCanceled)
 
         def done(result) -> None:
-            self.search_button.setEnabled(True)
-            self.show_records(catalog, result.records)
-            n = len(result.records)
-            if result.total is not None and result.total > n:
-                self.status.setText(self.tr("{total} 件中 新しい {n} 件").format(total=result.total, n=n))
+            self._reading(False)
+            if listed is not self._listed or (similar and self.reference is None):
+                return  # searched again since (another list shown, 「類似画像の検索」 left)
+            listed.total, listed.next_offset = result.total, result.next_offset
+            known = {_key(r) for r in listed.read}
+            new = [r for r in result.records if _key(r) not in known]
+            listed.read += new
+            if similar:
+                chosen = self.chosen() if more else []
+                records, overlaps = listed.rank(listed.read)
+                self.show_records(catalog, records, overlaps, listed)
+                self.choose(chosen)
+                self._show_count()
+            elif more:
+                self._add_records(new)
             else:
-                self.status.setText(self.tr("{n} 件").format(n=n))
+                self.show_records(catalog, new, listed=listed)
+                self._show_count()
 
-        self.search_button.setEnabled(False)
-        self.status.setText(self.tr("検索中"))
-        self._start(self.tr("画像カタログの検索"), work, done)
+        def failed(message: str) -> None:
+            self._reading(False)
+            what = self.tr("続きの読み込み") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索")
+            self.status.setText(self.tr("{what}に失敗: {m}").format(what=what, m=message))
 
-    def show_records(self, catalog: CatalogConfig, records, overlaps=None) -> None:
+        self._reading(True)
+        self.status.setText(self.tr("続きを読み込み中") if more else self.tr("類似画像の検索中") if similar else self.tr("検索中"))
+        self._start(self.tr("画像カタログの続き") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索"),
+                    work, done, failed)
+
+    def _reading(self, on: bool) -> None:
+        """A search (or its 続き) started (`on`) or ended: while any is read, neither button asks again."""
+        self._reads = max(0, self._reads + (1 if on else -1))
+        idle = self._reads == 0
+        self.search_button.setEnabled(idle and bool(self.catalogs()))
+        self.more_button.setEnabled(idle)
+
+    def _show_count(self) -> None:
+        """How many images the list has of how many match, and 「続きを読む」 when there are more."""
+        listed = self._listed
+        n = len(self.model.records)
+        if listed is not None and listed.rank is not None:
+            text = self.tr("類似画像 {n} 件").format(n=n)
+            if listed.next_offset is not None:
+                text += (self.tr("（候補 {total} 件中 新しい {read} 件から）").format(total=listed.total, read=len(listed.read))
+                         if listed.total is not None else self.tr("（候補の新しい {read} 件から）").format(read=len(listed.read)))
+        elif listed is not None and listed.total is not None and listed.total > n:
+            text = self.tr("{total} 件中 新しい {n} 件").format(total=listed.total, n=n)
+        elif listed is not None and listed.next_offset is not None:
+            text = self.tr("新しい {n} 件").format(n=n)
+        else:
+            text = self.tr("{n} 件").format(n=n)
+        self.status.setText(text)
+        self._show_more()
+
+    def _show_more(self) -> None:
+        """「続きを読む（次の n 件）」 while the search listed has more images."""
+        listed = self._listed
+        if listed is None or listed.next_offset is None:
+            self.more_button.hide()
+            return
+        n = listed.catalog.max_results
+        if listed.total is not None:
+            n = max(1, min(n, listed.total - listed.next_offset))
+        self.more_button.setText(self.tr("続きを読む（次の {n} 件）").format(n=n))
+        self.more_button.show()
+
+    def _add_records(self, records) -> None:
+        """
+        The images read on added to the list in its order (newest first, or by
+        the heading clicked), the rows chosen and where the list is scrolled to kept.
+        """
+        bar = self.table.verticalScrollBar()
+        scrolled = bar.value()
+        self.model.add_records(records)
+        self._show_count()
+        header = self.table.horizontalHeader()
+        section = header.sortIndicatorSection()
+        if 0 <= section < self.model.columnCount():
+            # The rows follow their images (the selection too); the map is drawn again and 「未着手のみ」 applied.
+            self.model.sort(section, header.sortIndicatorOrder())
+        else:
+            self._redraw()
+            self._apply_work_filter()
+        bar.setValue(scrolled)
+        self.load_work()
+
+    def show_records(self, catalog: CatalogConfig, records, overlaps=None, listed: Optional[_Listed] = None) -> None:
+        """Lists `records` of `catalog`; `listed`: the search they are of (「続きを読む」), None for other lists (an event's images)."""
         self._shown_catalog = catalog
+        self._listed = listed
+        self._show_more()
         self._show_file_buttons()
         self.model.set_records(catalog, records, overlaps, work=self.context.config.assignments is not None)
         # The list comes newest first (類似画像: the most alike first): the heading says so without sorting again.
@@ -606,25 +744,13 @@ class CatalogDock(PluginDock):
         if reference is not None:
             b = reference.boundingBox()
             box = [b.xMinimum(), b.yMinimum(), b.xMaximum(), b.yMaximum()]
-        client = self.context.esri()
-        token = self.context.token_for(catalog.url, catalog.token)
+        measure = overlap_measure(reference)
 
-        def work(task):
-            # Read here (once) so that opening a record's folder finds the imagePatterns of a sensor's other names.
-            self.context.satellite_names(client, task.isCanceled)
-            return search_catalog(client, catalog, self._layer_of(client, catalog, token), search, box, token)
+        def rank(records):
+            ranked = rank_similar(record, records, tolerance, measure)
+            return [s.record for s in ranked], {id(s.record): s.overlap for s in ranked}
 
-        def done(result) -> None:
-            self.search_button.setEnabled(True)
-            if self.reference is None:
-                return
-            ranked = rank_similar(record, result.records, tolerance, overlap_measure(reference))
-            self.show_records(catalog, [s.record for s in ranked], {id(s.record): s.overlap for s in ranked})
-            self.status.setText(self.tr("類似画像 {n} 件").format(n=len(ranked)))
-
-        self.search_button.setEnabled(False)
-        self.status.setText(self.tr("類似画像の検索中"))
-        self._start(self.tr("類似画像の検索"), work, done)
+        self._read(_Listed(catalog, search, box, rank))
 
     def normal_search(self) -> None:
         """「通常の検索に復帰」: leaves 「類似画像の検索」 and searches with the form."""

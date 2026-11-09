@@ -118,7 +118,67 @@ def test_search_list_footprints_and_sorting(plugin):
     assert QApplication.clipboard().text() == "\\\\nas\\images\\2026\\a.tif"
     # The search asks for the newest first, with the count.
     asked = [form for url, form in fake.asked if url.endswith("/query") and "returnDistinctValues" not in form]
-    assert asked[0]["returnCountOnly"] == "true" and asked[1]["orderByFields"] == "ACQ DESC"
+    assert asked[0]["returnCountOnly"] == "true" and asked[1]["orderByFields"] == "ACQ DESC, OBJECTID DESC"
+    # All of them read: no 「続きを読む」.
+    assert not dock.more_button.isVisibleTo(dock)
+
+
+def test_read_more_adds_the_next_images_of_the_search_as_it_was(plugin, tmp_path):
+    """「続きを読む」: `maxResults` at a time, newest first, the search's area and conditions kept, the rows chosen and the order too."""
+    p, iface, folder, fake, layer = plugin
+    layer.ordered = True
+    now = time.time() * 1000
+    for i in range(4):
+        layer.add({"IMG_ID": f"OLD{i}", "ACQ": now - (30 + i) * DAY, "SENSOR": "S1", "OFF_NADIR": 11, "AZ": 105,
+                   "PATH": f"https://x.example/old{i}.tif"}, ring(139.6, 35.5, 139.8, 35.7))
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["imageCatalogs"][0]["maxResults"] = 3
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    dock = p.api.image_catalog
+    searched(dock)
+    assert [r.id for r in dock.records] == ["A", "C", "B"]
+    assert dock.status.text() == "7 件中 新しい 3 件"
+    assert dock.more_button.isVisibleTo(dock) and dock.more_button.text() == "続きを読む（次の 3 件）"
+    # The form changed since (the map's extent now, a sensor): the 続き is still of the search listed.
+    dock.area_box.setCurrentIndex(dock.area_box.findData("extent"))
+    dock.more.setChecked(True)
+    dock.sensor_box.setEditText("S2")
+    dock.choose([r for r in dock.records if r.id == "C"])
+    asked = len(fake.asked)
+    dock.read_more()
+    assert wait_for(lambda: dock.more_button.isEnabled() and len(dock.records) == 6)
+    assert [r.id for r in dock.records] == ["A", "C", "B", "OLD0", "OLD1", "OLD2"]
+    assert [r.id for r in dock.chosen()] == ["C"]
+    assert dock.status.text() == "7 件中 新しい 6 件" and dock.more_button.text() == "続きを読む（次の 1 件）"
+    pages = [form for url, form in fake.asked[asked:] if "resultOffset" in form]
+    assert [f["resultOffset"] for f in pages] == ["3"] and "geometry" not in pages[0] and "S2" not in pages[0]["where"]
+    assert dock.overlay is not None and dock.overlay.all.numberOfVertices() > 0
+    # Sorted by a heading: the rows chosen follow their images, and the next ones go in that order.
+    dock.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+    assert [r.id for r in dock.chosen()] == ["C"]
+    dock.read_more()
+    assert wait_for(lambda: dock.more_button.isEnabled() and len(dock.records) == 7)
+    assert [r.id for r in dock.records] == ["A", "B", "C", "OLD0", "OLD1", "OLD2", "OLD3"]
+    assert [r.id for r in dock.chosen()] == ["C"]
+    assert dock.status.text() == "7 件" and not dock.more_button.isVisibleTo(dock)
+    # 「類似画像の検索」 reads on too, ranking all the candidates read.
+    dock.more.setChecked(False)
+    dock.find_similar(next(r for r in dock.records if r.id == "A"), p.context.config.image_catalogs[0])
+    assert wait_for(lambda: dock.status.text().startswith("類似画像 ") and dock.more_button.isEnabled())
+    # Candidates (S1, angle 5–15°, azimuth 80–120°): A, B, OLD0–3; the newest 3 read, A itself left out (OLD0 covers it all).
+    assert [r.id for r in dock.records] == ["OLD0", "B"] and dock.status.text() == "類似画像 2 件（候補 6 件中 新しい 3 件から）"
+    dock.read_more()
+    assert wait_for(lambda: dock.more_button.isEnabled() and len(dock.records) == 5)
+    assert sorted(r.id for r in dock.records) == ["B", "OLD0", "OLD1", "OLD2", "OLD3"]
+    assert dock.status.text() == "類似画像 5 件" and not dock.more_button.isVisibleTo(dock)
+    # A list that is not a search (an event's images) has no 続き.
+    dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
+    dock.normal_search()
+    assert wait_for(lambda: dock.more_button.isVisibleTo(dock))
+    dock.show_records(p.context.config.image_catalogs[0], dock.records[:1])
+    assert not dock.more_button.isVisibleTo(dock)
 
 
 def test_the_footprints_filled_as_outlines_or_hidden(plugin):

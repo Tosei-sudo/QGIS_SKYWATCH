@@ -3,6 +3,10 @@ Searching an image catalog (the viewer's catalog.ts): the layer's field
 types, the sensors to choose from, the images matching a search (newest
 first), their roles, their order in the list and the satellite's view for
 the simple orthorectification. Features stay Esri JSON in WGS 84.
+
+A search reads `maxResults` images at a time, newest first, in as many
+requests as the service's `maxRecordCount` needs (`resultOffset`), and
+「続きを読む」 asks for the next `maxResults` from where the last one ended.
 """
 from __future__ import annotations
 
@@ -11,9 +15,9 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
-from ..esri import EsriClient, EsriError
+from ..esri import EsriClient, EsriError, UnreachableError
 from ..plan.output import natural_key
 from ..util import js_string, time_of
 from .config import CatalogConfig
@@ -100,17 +104,21 @@ def record_of(feature: dict[str, Any], fields: dict[str, Any], object_id_field: 
 
 @dataclass
 class CatalogLayerInfo:
-    """The catalog layer's field types, whether it can order and page results, and its object id field."""
+    """
+    The catalog layer's field types, whether it can order and page results,
+    its object id field and how many features one answer holds at most.
+    """
     types: FieldTypes
     paging: bool
     object_id_field: str = "OBJECTID"
+    max_record_count: int = 1000
 
 
 def read_catalog_layer(client: EsriClient, catalog: CatalogConfig, token: Optional[str]) -> CatalogLayerInfo:
     info = client.layer(catalog.url, token)
     caps = info.raw.get("advancedQueryCapabilities")
     paging = caps.get("supportsPagination") is not False and caps.get("supportsOrderBy") is not False if isinstance(caps, dict) else True
-    return CatalogLayerInfo(info.field_types, paging, info.object_id_field)
+    return CatalogLayerInfo(info.field_types, paging, info.object_id_field, info.max_record_count)
 
 
 def sensors_of(client: EsriClient, catalog: CatalogConfig, token: Optional[str]) -> list[str]:
@@ -131,9 +139,15 @@ def sensors_of(client: EsriClient, catalog: CatalogConfig, token: Optional[str])
 
 @dataclass
 class CatalogResult:
-    """At most `max_results` images, newest first, and how many match in all (None when unknown)."""
+    """
+    At most `max_results` images, newest first, and how many match in all
+    (None when unknown). `next_offset`: where 「続きを読む」 asks from (the
+    images the service gave so far), None when there are no more (or the
+    service cannot page).
+    """
     records: list[CatalogRecord]
     total: Optional[int]
+    next_offset: Optional[int] = None
 
 
 def _clamp(v: float, limit: float) -> float:
@@ -166,12 +180,17 @@ def spatial_filter(box: Optional[Any]) -> dict[str, str]:
 
 
 def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLayerInfo, search: CatalogSearch,
-                   box: Optional[Any], token: Optional[str]) -> CatalogResult:
+                   box: Optional[Any], token: Optional[str], offset: int = 0,
+                   cancelled: Optional[Callable[[], bool]] = None) -> CatalogResult:
     """
     The images matching `search` (over `box` when given: see
     `spatial_filter`; the map's extent, the area drawn or a layer's
-    geometry), newest first. Services that cannot order or page results are asked for
-    everything and sorted here.
+    geometry), newest first: `max_results` of them from `offset` on, asked
+    `maxRecordCount` at a time (a service that answers 1000 at most still
+    gives 5000 when `maxResults` says so). Ties in time go by object id, so
+    that the pages neither skip nor repeat images. Services that cannot
+    order or page results are asked for everything (what one answer holds)
+    and sorted here; they have no 「続き」.
     """
     where = where_of(catalog, layer.types, search)
     spatial = spatial_filter(box)
@@ -183,20 +202,70 @@ def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLay
         total: Optional[int] = int(count) if isinstance(count, (int, float)) and not isinstance(count, bool) else None
     except EsriError:
         total = None
+    features: list[dict[str, Any]] = []
+    oid = layer.object_id_field
+    next_offset: Optional[int] = None
     if layer.paging:
         try:
-            answer = client.ask(url, {**base, **({"orderByFields": f"{order} DESC"} if order else {}), "resultRecordCount": str(catalog.max_results)}, token)
-        except EsriError:
+            features, more, oid = _pages(client, url, base, order, layer, catalog.max_results, offset, token, cancelled)
+            at = offset + len(features)
+            next_offset = at if more and (total is None or at < total) else None
+        except _Refused:
             # Older services refuse ordering or paging: ask plainly.
             layer.paging = False
-            answer = client.ask(url, base, token)
-    else:
+    if not layer.paging:
         answer = client.ask(url, base, token)
-    oid = answer.get("objectIdFieldName") or layer.object_id_field
-    records = [record_of(f, catalog.fields, oid) for f in answer.get("features") or [] if isinstance(f, dict)]
+        oid = answer.get("objectIdFieldName") or layer.object_id_field
+        features = [f for f in answer.get("features") or [] if isinstance(f, dict)]
+        if total is None and not answer.get("exceededTransferLimit"):
+            total = len(features)
+    records = [record_of(f, catalog.fields, oid) for f in features]
     if not layer.paging:
         records = sort_records(records, "acquired", True)[:catalog.max_results]
-    return CatalogResult(records, total if total is not None else (None if answer.get("exceededTransferLimit") else len(records)))
+    if total is None and next_offset is None and layer.paging:
+        # Not counted, but every one read: they are all.
+        total = offset + len(features)
+    return CatalogResult(records, total, next_offset)
+
+
+class _Refused(EsriError):
+    """The first answer of a new search refused ordering or paging (not a lost connection)."""
+
+
+def _pages(client: EsriClient, url: str, base: dict[str, str], order: Optional[str], layer: CatalogLayerInfo, wanted: int,
+           offset: int, token: Optional[str], cancelled: Optional[Callable[[], bool]]) -> tuple[list[dict[str, Any]], bool, str]:
+    """
+    Up to `wanted` features from `offset`, newest first, in answers of
+    `maxRecordCount` at most; whether more may follow; the object id field.
+    The first answer of a new search (`offset` 0) refused: `_Refused`.
+    """
+    oid = layer.object_id_field
+    ordering = f"{order} DESC, {oid} DESC" if order else f"{oid} DESC"
+    size = max(1, min(wanted, layer.max_record_count))
+    out: list[dict[str, Any]] = []
+    more = False
+    while len(out) < wanted:
+        if cancelled and cancelled():
+            raise EsriError("取消")
+        count = min(size, wanted - len(out))
+        params = {**base, "orderByFields": ordering, "resultOffset": str(offset + len(out)), "resultRecordCount": str(count)}
+        try:
+            answer = client.ask(url, params, token)
+        except UnreachableError:
+            raise
+        except EsriError as error:
+            if offset == 0 and not out:
+                raise _Refused(str(error)) from None
+            raise
+        oid = answer.get("objectIdFieldName") or oid
+        page = [f for f in answer.get("features") or [] if isinstance(f, dict)]
+        out.extend(page)
+        # Servers that page say so; some leave the flag out on a full page. One answering fewer than asked
+        # with the flag (its own limit lower than it says) is asked on from where it stopped.
+        more = bool(page) and (bool(answer.get("exceededTransferLimit")) or len(page) >= count)
+        if not more:
+            break
+    return out, more, oid
 
 
 #: The roles that are times.

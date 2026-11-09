@@ -1,7 +1,8 @@
 """
 The image catalog's list (a QTableView model): the catalog's roles and
 columns, 場所 (not for a catalog without image files), and, for 「類似画像の検索」, 重なり. A click on a heading sorts
-by it, empty values last whichever way.
+by it, empty values last whichever way (the rows chosen follow their images).
+「続きを読む」 adds rows at the end (`add_records`).
 """
 from __future__ import annotations
 
@@ -42,6 +43,15 @@ class CatalogModel(QAbstractTableModel):
         self.records = list(records)
         self.overlaps = overlaps
         self.endResetModel()
+
+    def add_records(self, records: Sequence[CatalogRecord]) -> None:
+        """More images (「続きを読む」) after those listed."""
+        records = list(records)
+        if not records:
+            return
+        self.beginInsertRows(QModelIndex(), len(self.records), len(self.records) + len(records) - 1)
+        self.records.extend(records)
+        self.endInsertRows()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802 (Qt's name)
         return 0 if parent.isValid() else len(self.records)
@@ -97,6 +107,7 @@ class CatalogModel(QAbstractTableModel):
         key = self.columns[column].key
         descending = order == Qt.SortOrder.DescendingOrder
         self.layoutAboutToBeChanged.emit()
+        before = list(self.records)
         if key in ("place", "overlap", "work"):
             def value(r: CatalogRecord):
                 if key == "work":
@@ -107,4 +118,8 @@ class CatalogModel(QAbstractTableModel):
             self.records = present + [r for r in self.records if value(r) is None]
         else:
             self.records = sort_records(self.records, key, descending)
+        # The rows chosen (and the current one) follow their images.
+        row_of = {id(r): i for i, r in enumerate(self.records)}
+        old = self.persistentIndexList()
+        self.changePersistentIndexList(old, [self.index(row_of[id(before[i.row()])], i.column()) for i in old])
         self.layoutChanged.emit()
