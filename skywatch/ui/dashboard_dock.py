@@ -46,6 +46,7 @@ from ..core.dashboard import (
     time_bins, trend_step, trends,
 )
 from .docks import PluginDock
+from .list_views import column_menus
 
 HEATMAP = "satobs/dashboard_heatmap"
 SURGES = "satobs/dashboard_surges"
@@ -385,6 +386,7 @@ class DashboardDock(PluginDock):
         self.overview.setRootIsDecorated(False)
         self.overview.setMaximumHeight(130)
         self.overview.itemClicked.connect(self._overview_clicked)
+        self.overview_columns = column_menus("dashboard-layers", self.overview, self)
         box.addWidget(self.overview)
         row = QHBoxLayout()
         row.addWidget(QLabel(_tr("集計するレイヤー")))

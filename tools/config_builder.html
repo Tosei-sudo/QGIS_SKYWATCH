@@ -181,7 +181,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "handover",
   "events",
   "preload",
-  "offlineWork"
+  "offlineWork",
+  "columnDrag"
  ],
  "roles": {
   "imageCatalogs": [
@@ -953,7 +954,7 @@ const SPEC = [
         B("imageFiles", "画像ファイル（imageFiles）", { help: "false: 画像ファイルのないカタログ（生データは別システムだけ）。「開く」の代わりに「ファイルなしで記録」（観測記録へ ID・撮像日時・範囲ごと）。fields.source は不要。既定 true" }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
-        WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
+        WHERE, N("maxResults", "1 回に読む件数", { min: 1, max: 5000, ph: "500", help: "検索と「続きを読む」で 1 回に読む画像の数（新しい順）。サービスの maxRecordCount より多くても分けて読む" }),
         S("angleKind", "角度の種類", [["offNadir", "オフナディア角"], ["incidence", "入射角"], ["elevation", "仰角"]]),
         N("orbitHeight", "軌道高度（km）", { ph: "600" }),
         J("imagePatterns", "フォルダのレコードの画像（imagePatterns）", { ph: '{ "WV03": "_PAN\\\\.tif$", "*": "\\\\.tif$" }', help: "{ センサー名: 正規表現か配列, \"*\": … }、文字列か配列も可" }),
@@ -1218,6 +1219,10 @@ const SPEC = [
   { group: "日時", keys: [
     { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",
       field: I("timeZones", "規則", [LABEL, T("match", "URL（正規表現）", { req: true }), T("timeZone", "タイムゾーン", { req: true, ph: "Asia/Tokyo" }), T("serviceTimeZone", "サービスの申告")], { title: (it) => it.label || it.match }) },
+  ] },
+  { group: "一覧", keys: [
+    { key: "columnDrag", label: "列の見出しのドラッグ", doc: "一覧のビュー列並べ替え絞り込みの保存", help: "ドックの一覧の列を見出しのドラッグで並べ替えられるか。false でドラッグでは動かず、見出しの右クリックのメニュー（この列を左へ・右へ・先頭へ・末尾へ、列の表示と順番…）だけで並べ替える。",
+      field: B("columnDrag", "ドラッグで並べ替える", { help: "既定 true" }) },
   ] },
 ];
 const ALL = SPEC.flatMap((g) => g.keys.map((k) => ({ ...k, group: g.group })));

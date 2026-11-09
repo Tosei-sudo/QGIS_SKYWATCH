@@ -25,7 +25,7 @@ from skywatch.core.catalog.similar import DEFAULT_TOLERANCE, SimilarTolerance, a
 from skywatch.core.catalog.watch import add_areas, areas_of, check_watch, conditions_text, join_areas, new_watch, since_condition, watch_query
 from skywatch.core.catalog.watch_store import WatchStore, check_due
 from skywatch.core.config import parse_config
-from skywatch.core.esri import EsriClient
+from skywatch.core.esri import EsriClient, EsriError, UnreachableError
 from skywatch.core.gpkg import GeoPackage
 from skywatch.core.util import utc_text
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer
@@ -216,7 +216,9 @@ def test_search_lists_newest_first_in_the_view_and_counts_all():
     assert [r.id for r in result.records] == ["OLD", "NEW"] and result.total == 2
     asked = [form for url, form in fake.asked if url.endswith("/query")]
     assert asked[0]["returnCountOnly"] == "true" and json.loads(asked[0]["geometry"])["xmin"] == 139
-    assert asked[1]["orderByFields"] == "ACQ DESC" and asked[1]["resultRecordCount"] == "500" and asked[1]["outSR"] == "4326"
+    # Ties in time by object id, so that the pages of 「続きを読む」 neither skip nor repeat images.
+    assert asked[1]["orderByFields"] == "ACQ DESC, OBJECTID DESC" and asked[1]["resultRecordCount"] == "500" and asked[1]["outSR"] == "4326"
+    assert asked[1]["resultOffset"] == "0" and result.next_offset is None
     # A sensor narrows it; the record knows where the image is.
     result = search_catalog(client, catalog, layer, EMPTY_SEARCH.with_(sensor="S2"), None, None)
     assert [(r.id, r.source.kind) for r in result.records] == [("NEW", "path")] and result.total == 1
@@ -229,6 +231,111 @@ def test_a_service_that_cannot_page_is_asked_plainly_and_sorted_here():
     result = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
     assert [r.id for r in result.records] == ["NEW", "FAR", "OLD"]
     assert not any("orderByFields" in form for _, form in fake.asked)
+
+
+def many_images(n, max_record_count=1000, pagination=True, ordered=True):
+    """A catalog of `n` images, one a day (image `I0001` the oldest), whose service answers `max_record_count` at most."""
+    fake = FakeEsri()
+    layer = fake.add_layer(URL, FakeLayer(TYPES, "esriGeometryPolygon", max_record_count=max_record_count,
+                                          pagination=pagination, ordered=ordered))
+    for i in range(1, n + 1):
+        layer.add({"IMG_ID": f"I{i:04d}", "ACQ": utc(2026, 1, 1) + i * 86400000, "SENSOR": "S1", "URL": f"https://x/{i}.tif"},
+                  ring(139.6, 35.6, 139.9, 35.75))
+    return fake, layer
+
+
+def test_max_results_are_read_in_as_many_answers_as_the_service_needs():
+    # The service answers 1000 at most; maxResults 2500 is still 2500, newest first.
+    fake, _ = many_images(3000)
+    catalog = catalog_of({"url": URL, "maxResults": 2500, "fields": {"id": "IMG_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    client = EsriClient(fake)
+    layer = read_catalog_layer(client, catalog, None)
+    assert layer.max_record_count == 1000
+    result = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
+    assert len(result.records) == 2500 and result.total == 3000
+    assert result.records[0].id == "I3000" and result.records[-1].id == "I0501"
+    assert len({r.id for r in result.records}) == 2500
+    pages = [(form["resultOffset"], form["resultRecordCount"]) for url, form in fake.asked if "resultOffset" in form]
+    assert pages == [("0", "1000"), ("1000", "1000"), ("2000", "500")]
+    # 「続きを読む」: the next 2500 from where these ended (500 are left).
+    assert result.next_offset == 2500
+    rest = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None, offset=result.next_offset)
+    assert [r.id for r in rest.records] == [f"I{i:04d}" for i in range(500, 0, -1)]
+    assert rest.total == 3000 and rest.next_offset is None
+
+
+def test_a_service_answering_less_than_it_says_is_asked_on_from_where_it_stopped():
+    fake, layer = many_images(1200, max_record_count=300)
+    catalog = catalog_of({"url": URL, "maxResults": 1000, "fields": {"id": "IMG_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    client = EsriClient(fake)
+    info = read_catalog_layer(client, catalog, None)
+    # It says 1000, but answers 300 (with exceededTransferLimit).
+    info.max_record_count = 1000
+    result = search_catalog(client, catalog, info, EMPTY_SEARCH, None, None)
+    assert len(result.records) == 1000 and result.records[0].id == "I1200" and result.next_offset == 1000
+    offsets = [form["resultOffset"] for url, form in fake.asked if "resultOffset" in form]
+    assert offsets == ["0", "300", "600", "900"]
+
+
+def test_without_a_count_the_next_page_is_offered_while_pages_come_full():
+    fake, _ = many_images(10)
+    catalog = catalog_of({"url": URL, "maxResults": 5, "fields": {"id": "IMG_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    client = EsriClient(fake)
+    layer = read_catalog_layer(client, catalog, None)
+    real = fake.answer
+
+    def no_count(url, form):
+        if form.get("returnCountOnly") == "true":
+            raise EsriError("count refused")
+        return real(url, form)
+
+    fake.answer = no_count
+    first = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
+    assert [r.id for r in first.records][:2] == ["I0010", "I0009"] and first.total is None and first.next_offset == 5
+    second = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None, offset=5)
+    assert [r.id for r in second.records][-1] == "I0001"
+    # The last page came full: one more look finds nothing, and then the count is known.
+    assert second.next_offset == 10
+    last = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None, offset=10)
+    assert last.records == [] and last.next_offset is None and last.total == 10
+
+
+def test_a_service_that_cannot_page_has_no_next_page():
+    fake, _ = many_images(20, pagination=False, ordered=False)
+    catalog = catalog_of({"url": URL, "maxResults": 5, "fields": {"id": "IMG_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    client = EsriClient(fake)
+    layer = read_catalog_layer(client, catalog, None)
+    result = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
+    assert [r.id for r in result.records] == ["I0020", "I0019", "I0018", "I0017", "I0016"]
+    assert result.total == 20 and result.next_offset is None
+
+
+def test_a_refused_ordering_falls_back_but_a_lost_connection_does_not():
+    fake, _ = many_images(3)
+    catalog = catalog_of({"url": URL, "fields": {"id": "IMG_ID", "acquired": "ACQ", "source": "URL"}}, [], 0)
+    client = EsriClient(fake)
+    layer = read_catalog_layer(client, catalog, None)
+    real = fake.answer
+
+    def refuse_order(url, form):
+        if "orderByFields" in form:
+            return {"error": {"code": 400, "message": "orderByFields not supported"}}
+        return real(url, form)
+
+    fake.answer = refuse_order
+    result = search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
+    assert [r.id for r in result.records] == ["I0003", "I0002", "I0001"] and not layer.paging and result.next_offset is None
+
+    def unreachable(url, form):
+        if "resultOffset" in form:
+            raise UnreachableError("接続できない")
+        return real(url, form)
+
+    layer = read_catalog_layer(client, catalog, None)
+    fake.answer = unreachable
+    with pytest.raises(UnreachableError):
+        search_catalog(client, catalog, layer, EMPTY_SEARCH, None, None)
+    assert layer.paging
 
 
 def test_sensors_come_from_distinct_values_or_none():

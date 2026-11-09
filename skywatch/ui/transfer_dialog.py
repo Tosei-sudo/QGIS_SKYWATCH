@@ -62,6 +62,8 @@ class TransferDialog(QDialog):
         self.mapping = QTreeWidget()
         self.mapping.setHeaderLabels([_tr("役割"), _tr("転記先の属性")])
         self.mapping.setRootIsDecorated(False)
+        # A fixed set of columns: not dragged about by their header (Qt lets a tree's be).
+        self.mapping.header().setSectionsMovable(False)
         self.mapping.setVisible(False)
         self.mapping_box.toggled.connect(self.mapping.setVisible)
         box.addWidget(self.mapping)

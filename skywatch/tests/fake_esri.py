@@ -16,8 +16,10 @@ from skywatch.core.esri import EsriError
 
 class FakeLayer:
     def __init__(self, fields: dict[str, str], geometry: str = "esriGeometryPoint", max_record_count: int = 1000,
-                 pagination: bool = True, oid: str = "OBJECTID", token: Optional[str] = None):
+                 pagination: bool = True, oid: str = "OBJECTID", token: Optional[str] = None, ordered: bool = False):
         self.types = {oid: "esriFieldTypeOID", **fields}
+        #: Whether queries follow `orderByFields` (else the rows stay in object id order).
+        self.ordered = ordered
         self.geometry = geometry
         self.max_record_count = max_record_count
         self.pagination = pagination
@@ -169,6 +171,17 @@ def _overlaps(a, b) -> bool:
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
+def _ordered(rows: list[dict[str, Any]], fields: str) -> list[dict[str, Any]]:
+    """`rows` in the order of `orderByFields` (`A DESC, B`; empty values last)."""
+    for part in reversed([p.strip() for p in fields.split(",") if p.strip()]):
+        name, _, way = part.partition(" ")
+        descending = way.strip().upper() == "DESC"
+        present = [r for r in rows if r["attributes"].get(name) is not None]
+        missing = [r for r in rows if r["attributes"].get(name) is None]
+        rows = sorted(present, key=lambda r: r["attributes"][name], reverse=descending) + missing
+    return rows
+
+
 class FakeEsri:
     """Feature layers by URL; call it as a transport."""
 
@@ -230,7 +243,10 @@ class FakeEsri:
             found = [r for r in found if r["geometry"] and _overlaps(area, _box(r["geometry"]))]
         if form.get("returnCountOnly") == "true":
             return {"count": len(found)}
-        # orderByFields is not followed: the rows stay in object id order (what query_all asks for when paging).
+        # orderByFields is followed only by an `ordered` layer: the rows stay in object id order otherwise
+        # (what query_all asks for when paging).
+        if layer.ordered and form.get("orderByFields"):
+            found = _ordered(found, form["orderByFields"])
         if form.get("returnIdsOnly") == "true":
             return {"objectIdFieldName": layer.oid, "objectIds": [r["attributes"][layer.oid] for r in found]}
         offset = int(form.get("resultOffset", 0))

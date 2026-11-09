@@ -94,7 +94,7 @@
 - 列の名前のチェックで表示・非表示（すべては隠せない）
 - 「列の表示と順番…」: 全列の一覧でチェックと「先頭へ」「上へ」「下へ」「末尾へ」をまとめて変えて OK。「標準に戻す」で全列をプラグインの順番に
 - 「標準の表示に戻す」: 全列をプラグインの順番で表示
-- 見出しのドラッグでも並べ替えられる
+- 見出しのドラッグでも並べ替えられる。設定ファイルに `"columnDrag": false` と書くとドラッグでは動かず、メニューだけで並べ替える（読み直した時点で開いている一覧にも効く）
 
 対象: 画像カタログ・観測記録（この画像・モノ・分類のタブごと、モノの流れ）・撮像依頼・撮像計画（機会・再訪間隔）・衛星パス・撮像予定・撮像計画ファイル出力・イベント（イベントと項目のタブごと）・AI結果・通知（新着画像・監視条件・通報）・移動体、ダイアログの「通報」の通報記録・「分担と引き継ぎ」・「計画と実績の照合」。データ分析の結果の表は SQL の列の順なので対象外。
 
@@ -128,7 +128,12 @@
 ```
 
 - 分担（[`assignments`](#分担と引き継ぎメモassignmentshandover)）を設定していると、一覧の最後の列「分担」に画像ごとの状態: 「未着手」（誰も担当にしていない）・「作業中（名前）」「保留（名前）」・「完了（最後に完了にした人）」。検索の後と、ドックを表示している間は 1 分ごとに読み直す。検索ボタンの横の「未着手のみ」で、未着手の画像だけを一覧に出す（読み込み前の行も隠す）
-- 一覧は新しい順で、見出しのクリックで並べ替え（空の値は常に最後）。地図に全件のフットプリント（青）と選んだもの（橙、画像 ID 付き）。「地図で選択」を押すとフットプリントのクリックで選べる（Ctrl・Shift で追加）
+- 一覧は新しい順で、見出しのクリックで並べ替え（空の値は常に最後。選んだ行はその画像についていく）。地図に全件のフットプリント（青）と選んだもの（橙、画像 ID 付き）。「地図で選択」を押すとフットプリントのクリックで選べる（Ctrl・Shift で追加）
+- 1 回の検索で読むのは新しい順に `maxResults` 件（既定 500）。該当がそれより多いと状況欄に「1234 件中 新しい 500 件」と出て、一覧の下の「続きを読む（次の 500 件）」で次の（古い）画像を一覧に足す（全部読むとボタンは消える）
+  - 続きは検索したときの範囲と条件のまま（検索の後に地図を動かしたり条件を変えたりしても、元の検索の続き）。足した画像も今の並べ替えの順に入り、選んだ行・スクロールの位置はそのまま。分担の列は足した画像の分も読み直す
+  - 「類似画像の検索」でも候補の続きを読み（状況欄に「類似画像 12 件（候補 2000 件中 新しい 500 件から）」）、読んだ候補全体で似ている順に並べ直す。イベントから開いた画像の一覧などは検索ではないので出ない
+  - サービスの `maxRecordCount`（1 回の応答の上限。ArcGIS の既定は 1000 か 2000）が `maxResults` より小さくても、上限ごとに分けて（`resultOffset`）`maxResults` 件まで読む。並びは撮像日時（なければ登録日時）の新しい順、同じ時刻はオブジェクト ID の大きい順なので、続きで画像が抜けたり重なったりしない（検索の後に新しい画像が登録されて同じ画像がもう一度来たときは 1 回だけ出す）
+  - 並べ替えか件数指定（`supportsPagination`・`supportsOrderBy`）のできない古いサービスは、1 回の応答の分だけ読んで手元で新しい順に並べ、「続きを読む」は出ない
 - ボタンの並びの「フットプリント」で地図の表示を選ぶ（PC ごとに記憶）: 「枠だけ」（既定。塗らずに枠線だけ、画像 ID は範囲の上端に出して画像の中央を隠さない）・「塗りつぶし」（以前の表示。範囲を薄く塗り、画像 ID は中央）・「非表示」（フットプリントを出さない。「地図で選択」のクリックは効き、描いた範囲は枠で残る）
 - 「開く」かダブルクリックでラスターレイヤーに。URL は `/vsicurl/`、ローカルパスは `pathMappings` に従う（`url` があればそれ、なければそのままのパス、だめなら初回にフォルダを選び記憶。「フォルダの対応を消去」で忘れる）。`pattern`・`to` の読み替えがあれば先にその場所を試し、なければ元のパスで開く（[下記](#パスの読み替えpathmappings)）。開けないときは理由を表示。「パスをコピー」で場所をクリップボードへ
 - 開いたレイヤーはカタログの属性をカスタムプロパティとメタデータに持つ（`satobs/imageId` は観測記録と計画の追跡が使う）
@@ -1098,7 +1103,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`read_more()`（続きを読む）・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 先読み（起動直後に Esri の表を読む）
 
@@ -1324,7 +1329,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `imageCatalogs` | 配列 | `url`（必須）、`imageFiles`（`false` で画像ファイルのないカタログ: 「開く」の代わりに「ファイルなしで記録」、`source` 不要。既定 `true`）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`・`keywords`（フリーワード検索の属性）。`source`・`keywords` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
+| `imageCatalogs` | 配列 | `url`（必須）、`imageFiles`（`false` で画像ファイルのないカタログ: 「開く」の代わりに「ファイルなしで記録」、`source` 不要。既定 `true`）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`・`keywords`（フリーワード検索の属性）。`source`・`keywords` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（検索と「続きを読む」で 1 回に読む件数。既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
 | `imagePatterns`（`imageCatalogs` の中） | オブジェクト・文字列・配列 | `{ "センサー名": "正規表現" か [ … ], "*": … }`。フォルダのレコードから開く画像を選ぶ | ふつうの画像ファイル | [フォルダのレコードの画像](#フォルダのレコードの画像imagepatterns) |
 | `watchInterval` | 数 | 新着画像を確かめる間隔（分、1〜1440） | 10 | [通知](#通知) |
 | `pathMappings` | 配列 | `prefix`（レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ）。または `pattern`（正規表現）・`to`（読み替え先。`$1` などがグループ）で先に試す読み替え（なければ元のパス） | なし | [パスの読み替え](#パスの読み替えpathmappings) |
@@ -1393,6 +1398,12 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | --- | --- | --- | --- | --- |
 | `timeZones` | 配列 | `match`（URL の正規表現、必須）・`timeZone`（必須）・`serviceTimeZone`・`label` | なし | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
 | `timeZone`・`serviceTimeZone`（各項目の中） | 文字列 | `layers`・`imageCatalogs`・`observationStores`・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices` の要素に書ける。IANA 名（`Asia/Tokyo`）・時差（`+09:00`）・Windows の名前。`timeZones` より優先 | サービスの申告、なければ UTC | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
+
+#### 一覧
+
+| 項目 | 形 | 主な中身 | 既定 | 詳しく |
+| --- | --- | --- | --- | --- |
+| `columnDrag` | `true`・`false` | `false` で一覧の列を見出しのドラッグで並べ替えない（見出しの右クリックのメニューだけ） | `true` | [一覧のビュー](#一覧のビュー列並べ替え絞り込みの保存) |
 
 ### 設定ファイルに書かないもの
 
