@@ -7,6 +7,10 @@ is opened), so the dock shows them at once when opened.
 The reads go through the docks' own paths (PluginContext.esri()), so what
 they read also lands where every Esri read lands (the offline cache of
 server outages). Other parts may add items of their own (`add`).
+
+The items are read one after another, not all at once: each read's Python
+(the answer's JSON, the records) holds Python's GIL, and with several at
+once QGIS's main thread waited for it far longer (the map stuttered).
 """
 from __future__ import annotations
 
@@ -51,8 +55,11 @@ class Preloader(QObject):
         self.context = context
         self.clock = clock or StartupClock()
         self.items: dict[str, Item] = {}
-        #: The keys still being read in this round.
+        #: The keys still being read in this round (one at a time).
         self.running: dict[str, float] = {}
+        #: The items of this round not started yet.
+        self._queue: list[Item] = []
+        self._starting = False
         #: The round wanted while one runs: started when it ends.
         self._again = False
         self._round = 0
@@ -76,17 +83,31 @@ class Preloader(QObject):
         self._timer.start(self.DELAY_MS if delay_ms is None else delay_ms)
 
     def run(self) -> None:
-        """Starts every wanted item's read now."""
+        """Starts the wanted items' reads now, one after another."""
         if self._closed:
             return
-        if self.running:
+        if self.running or self._queue:
             self._again = True
             return
         if getattr(self.context, "loading", False):
             return  # The settings file is still being read: asked again when it is.
         self._round += 1
-        round_ = self._round
-        for item in self.wanted():
+        self._queue = list(self.wanted())
+        self._start_next(self._round)
+
+    def _start_next(self, round_: int) -> None:
+        """Starts the next item that has something to read (none left: the round ends)."""
+        self._starting = True
+        try:
+            self._start_from_queue(round_)
+        finally:
+            self._starting = False
+        if not self.running and not self._queue and not self._closed and round_ == self._round:
+            self._round_ended()
+
+    def _start_from_queue(self, round_: int) -> None:
+        while self._queue and not self._closed and round_ == self._round:
+            item = self._queue.pop(0)
             t0 = self.clock.now()
             self.running[item.key] = t0
 
@@ -97,17 +118,18 @@ class Preloader(QObject):
                 self._ended(round_, item, t0, False, str(message))
 
             try:
-                if not item.start(then, failed):
-                    self.running.pop(item.key, None)
-                    continue
+                started = item.start(then, failed)
             except Exception as error:  # noqa: BLE001 (one item never keeps the others from being read)
                 self.running.pop(item.key, None)
                 self._log(f"{item.label}の先読みに失敗: {error}", Qgis.MessageLevel.Warning)
                 continue
+            if not started:
+                self.running.pop(item.key, None)
+                continue
             if item.key in self.running:
+                # Being read (not told done at once): the next waits for it.
                 QTimer.singleShot(int(self.TIMEOUT_S * 1000), lambda item=item, t0=t0: self._ended(round_, item, t0, False, "時間切れ"))
-        if not self.running:
-            self._round_ended()
+                return
 
     def _ended(self, round_: int, item: Item, t0: float, ok: bool, message: str) -> None:
         if self._closed or round_ != self._round or self.running.get(item.key) != t0:
@@ -116,8 +138,13 @@ class Preloader(QObject):
         took = self.clock.now() - t0
         self.clock.read(item.label, took, ok, message)
         self.item_done.emit(item.key, ok, took, message)
-        if not self.running:
-            self._round_ended()
+        if not self.running and not self._starting:
+            # (Told done while being started: the loop starting them goes on by itself.)
+            if self._queue:
+                # The next one after a moment (the main thread first shows what was read).
+                QTimer.singleShot(0, lambda: self._start_next(round_))
+            else:
+                self._round_ended()
 
     def _round_ended(self) -> None:
         self.finished.emit()
@@ -132,3 +159,4 @@ class Preloader(QObject):
         self._closed = True
         self._timer.stop()
         self.running.clear()
+        self._queue.clear()

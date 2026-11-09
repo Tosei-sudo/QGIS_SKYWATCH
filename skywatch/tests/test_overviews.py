@@ -31,3 +31,17 @@ def test_factors():
     assert overview_factors(200, 100) == []
     assert overview_factors(1000, 300) == [2, 4]
     assert overview_factors(4000, 3000) == [2, 4, 8, 16]
+
+
+def test_threads():
+    from skywatch.core.overviews import build_threads
+
+    assert OverviewOptions().threads == 0
+    assert overviews_of({"threads": 3}, []).threads == 3
+    problems = []
+    assert overviews_of({"threads": -1}, problems).threads == 0 and problems
+    problems = []
+    assert overviews_of({"threads": 1.5}, problems).threads == 0 and problems
+    # 0: half the cores, at least one; never more than the PC has.
+    assert [build_threads(OverviewOptions(), n) for n in (None, 1, 2, 3, 8, 16)] == [1, 1, 1, 1, 4, 8]
+    assert build_threads(OverviewOptions(threads=6), 4) == 4 and build_threads(OverviewOptions(threads=2), 8) == 2

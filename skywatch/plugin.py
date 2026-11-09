@@ -326,6 +326,8 @@ class SkywatchPlugin:
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
         self.clock.lap()
+        # The tasks' Python hands the GIL to QGIS's main thread sooner (qgis_io/tasks.py): the map and docks keep moving.
+        tasks.share_gil_faster()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
@@ -1297,6 +1299,7 @@ class SkywatchPlugin:
         overviews_io.queue.cancel_all()
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
+        tasks.restore_gil_sharing()
         try:
             QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
         except (TypeError, RuntimeError):

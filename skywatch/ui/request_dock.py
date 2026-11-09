@@ -165,7 +165,8 @@ class RequestDock(PluginDock):
             self.overlay.unpaint()
             self.canvas.refresh()
         else:
-            self.draw()
+            # (isVisible() may still say no while the dock's tab is being brought up.)
+            self.draw(shown=True)
 
     def _store_chosen(self, index: int) -> None:
         stores = self.context.config.request_stores
@@ -268,7 +269,14 @@ class RequestDock(PluginDock):
             self.zoom()
             self._update_buttons()
 
-    def draw(self) -> None:
+    def draw(self, shown: Optional[bool] = None) -> None:
+        """The listed requests' areas on the map (the chosen one thicker, with its name), while the dock is shown."""
+        if not (self.isVisible() if shown is None else shown):
+            # Read while closed (「先読み」): the areas are drawn when the dock is opened, not on the map meanwhile.
+            if self.overlay.painted():
+                self.overlay.unpaint()
+                self.canvas.refresh()
+            return
         polygons = []
         for r in self.shown:
             if r.rings:
