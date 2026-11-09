@@ -2804,6 +2804,7 @@ class ObservationDock(PluginDock):
             self.table.verticalScrollBar().setValue(scrolled)
         self._render_flow()
         self._render_taxon(taxa, objects)
+        self.many.follow_book()
         self._show_offline()
         self.changed.emit()
         self.draw()
