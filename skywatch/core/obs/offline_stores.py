@@ -12,17 +12,24 @@ store (its label) and is only on its way there — allowed even when
 from __future__ import annotations
 
 from dataclasses import asdict, fields, replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from ..esri import ConflictError, EsriError, UnreachableError
 from ..offline import OfflineWork, Pending, UploadReport, now_ms, tried_of
 from .areas import CheckedArea
-from .drafts import Draft
+from .drafts import KIND as DRAFT, Draft, OutboxDrafts
 from .model import Observation
 from .stores import EsriAreaStore, EsriObservationStore, _marked
 
 _RECORD_FIELDS = {f.name for f in fields(Observation)}
 _AREA_FIELDS = {f.name for f in fields(CheckedArea)}
+#: Items chosen to send ((kind, store, item id)); None: everything that is sent without being chosen.
+Only = Optional[set]
+
+
+def chosen(items: Iterable[Pending], only: Only) -> list[Pending]:
+    """The waiting items to send now: all of them, or those chosen in the list (ui/outbox_dialog.py)."""
+    return [p for p in items if only is None or (p.kind, p.store, p.item_id) in only]
 
 
 def record_of(p: Pending) -> Optional[Observation]:
@@ -200,13 +207,15 @@ class OfflineObservationStore(_Waiting):
         self.last_marked = marked_done + marked
         return marked_done + marked
 
-    def upload(self, report: UploadReport, keep_draft: Callable[[Draft], None], now: Callable[[], int] = now_ms) -> None:
+    def upload(self, report: UploadReport, keep_draft: Callable[[Draft], None], now: Callable[[], int] = now_ms,
+               only: Only = None) -> None:
         """
-        Sends what waits. A record someone else changed meanwhile is not saved
-        over: it goes to 「未保存の記録」 (`keep_draft`) to be looked at and sent
-        from there. What cannot be sent (the server refused) stays waiting.
+        Sends what waits (all, or the items in `only`). A record someone else
+        changed meanwhile is not saved over: it stays waiting as a draft to be
+        looked at in the form (`keep_draft`) and sent from there. What cannot
+        be sent (the server refused) stays waiting.
         """
-        waiting = self.work.pending(self.kind, self.label)
+        waiting = chosen(self.work.pending(self.kind, self.label), only)
         if not waiting:
             return
         at = now()
@@ -249,7 +258,8 @@ class OfflineObservationStore(_Waiting):
                     original = record_of(p) or o
                     keep_draft(Draft(original, _form_values(original), original.present, editing_id=o.id,
                                      base_updated=int(p.base) if p.base is not None else None, kept_at=at,
-                                     reason="オフライン中の変更: ほかの人が先に更新したため送らず"))
+                                     reason="オフライン中の変更: ほかの人が先に更新したため送らず（フォームで開いて直す）",
+                                     needs_check=True))
                     self.work.drop(self.kind, self.label, [o.id])
                     report.drafts += 1
         if gone:
@@ -323,8 +333,8 @@ class OfflineAreaStore(_Waiting):
         self._keep(marked, "remove", for_good)
         return [] if for_good else marked
 
-    def upload(self, report: UploadReport, now: Callable[[], int] = now_ms) -> None:
-        waiting = self.work.pending(self.kind, self.label)
+    def upload(self, report: UploadReport, now: Callable[[], int] = now_ms, only: Only = None) -> None:
+        waiting = chosen(self.work.pending(self.kind, self.label), only)
         if not waiting:
             return
         at = now()
@@ -348,3 +358,77 @@ class OfflineAreaStore(_Waiting):
                 report.add(self.kind, len(gone))
         except EsriError as error:
             report.kept.append(f"確認範囲（{self.label}）: {error}")
+
+
+def upload_drafts(store: Any, work: OfflineWork, report: UploadReport, prefs: Any = None,
+                  now: Callable[[], int] = now_ms, only: Only = None) -> None:
+    """
+    Sends the records of a store whose save did not go through (drafts,
+    core/obs/drafts.py), as they were made, the same way as the work kept
+    offline: a new record with the id of its first try (one the server took
+    after all is updated, not added twice, #73), a change checked against the
+    更新日時 it was made from (someone else's change meanwhile is not saved
+    over, #74: the draft waits for the person). Drafts that need the person
+    go only when chosen (`only`). `store`: the store itself (an Esri store,
+    past its offline wrapper, or the local one).
+    """
+    shelf = OutboxDrafts(work, prefs)
+    label = store.label
+    drafts = [d for d in shelf.all(label)
+              if ((DRAFT, label, d.id) in only if only is not None else not d.needs_check)]
+    if not drafts:
+        return
+    inner = getattr(store, "inner", store)
+    at = now()
+
+    def wait(d: Draft, reason: str, check: bool = False) -> None:
+        shelf.keep(label, replace(d, reason=reason, needs_check=check or d.needs_check))
+
+    gone: set[str] = set()
+    editing = [d for d in drafts if d.editing]
+    if editing and hasattr(inner, "know"):
+        try:
+            inner.know([d.editing_id for d in editing])
+        except Exception as error:  # noqa: BLE001 (any store: all kept with why)
+            for d in drafts:
+                wait(d, str(error))
+            report.kept.append(f"保存できなかった観測記録（{label}）: {error}")
+            return
+        gone = {d.editing_id for d in editing if d.editing_id not in inner.oids}
+    saves: list[Observation] = []
+    by_id: dict[str, Draft] = {}
+    for d in drafts:
+        if d.editing_id in gone:
+            wait(d, f"{d.record.object_name}: 元の記録が見つからず（削除されたか）", check=True)
+            report.drafts += 1
+            continue
+        if d.editing and hasattr(inner, "expect"):
+            # Checked against what it was when the form opened; the first try (its answer lost) is no conflict.
+            inner.expect(d.editing_id, d.base_updated, at, [d.record.updated_at])
+        o = replace(d.record, updated_at=at)
+        by_id[o.id] = d
+        saves.append(o)
+    if not saves:
+        return
+    error_text = ""
+    try:
+        inner.save(saves)
+        failed = False
+    except ConflictError:
+        failed = False
+    except Exception as error:  # noqa: BLE001 (any store: kept with why)
+        failed, error_text = True, str(error)
+    saved = set(inner.last_saved) if hasattr(inner, "last_saved") else (set() if failed else set(by_id))
+    conflicts = set(getattr(inner, "last_conflicts", None) or ())
+    shelf.drop(label, sorted(saved))
+    report.add("observation", len(saved))
+    for record_id, d in by_id.items():
+        if record_id in saved:
+            continue
+        if record_id in conflicts:
+            wait(d, f"{d.record.object_name}: 後でほかの人が更新したため送らず（フォームで開いて直す）", check=True)
+            report.drafts += 1
+        else:
+            wait(d, error_text or "送れず")
+    if failed:
+        report.kept.append(f"保存できなかった観測記録（{label}）: {error_text}")

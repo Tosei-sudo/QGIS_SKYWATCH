@@ -109,11 +109,16 @@ def test_refresh_minutes():
 
 def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_path):
     from skywatch.core.esri import EsriError
+    from skywatch.core.obs.drafts import OutboxDrafts
+    from skywatch.core.obs.offline_stores import upload_drafts
+    from skywatch.core.offline import OfflineWork, UploadReport
 
     fake = layer()
     mine, theirs = stores(fake)
     mine.save([obs(id="a", updated_at=now_ms())])
+    work = OfflineWork(str(tmp_path / "offline.sqlite"))
     book, db = book_of(mine, tmp_path)
+    book.shelf = OutboxDrafts(work)
     editing = book.record("a")
     real = mine.save
 
@@ -125,14 +130,21 @@ def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_pat
     assert book.submit(editing.lon, editing.lat, values, editing=editing) is None
     [d] = book.drafts()
     assert d.editing_id == "a" and d.base_updated == editing.updated_at and d.values["note"] == "私の変更"
+    assert not d.needs_check and d.record.updated_by == "田中"
+    # One outbox: the draft waits beside the work kept offline, with why.
+    [p] = work.pending("draft")
+    assert (p.store, p.op, p.note) == (mine.label, "retry", d.reason) and "接続不可" in p.note
     mine.save = real
-    # Someone else changes it meanwhile; read here.
+    # Someone else changes it meanwhile.
     a = next(o for o in theirs.load() if o.id == "a")
     theirs.save([replace(a, note="鈴木の変更", updated_by="鈴木", updated_at=now_ms() + 5000)])
-    book.reload()
-    assert book.send_draft(d.id) is None
-    assert "鈴木 さんが更新したため送らず" in book.drafts()[0].reason
+    report = UploadReport()
+    upload_drafts(stores(fake)[0], work, report)
+    [d] = book.drafts()
+    assert report.drafts == 1 and d.needs_check and "ほかの人が更新したため送らず" in d.reason
     assert next(o for o in theirs.load() if o.id == "a").note == "鈴木の変更"
+    # Not sent again by itself (要確認): only when chosen.
+    assert work.sendable() == 0
     # A new record whose answer was lost (the server holds it): sent again, it is not added twice.
     mine.save = down
     new = FormValues(object="新しいモノ", kind="船舶")
@@ -140,10 +152,30 @@ def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_pat
     kept = [x for x in book.drafts() if not x.editing][0]
     real([kept.record])  # the server took it after all
     mine.save = real
-    mine2, _ = stores(fake)  # as after QGIS started again: the store knows nothing of it
-    book.store = mine2
-    book.reload()
-    assert book.send_draft(kept.id) is not None
+    report = UploadReport()
+    upload_drafts(stores(fake)[0], work, report)  # as after QGIS started again: the store knows nothing of it
+    assert report.sent == {"observation": 1}
     assert sum(1 for r in fake.layers[URL].rows if r["attributes"]["OBJECT_NAME"] == "新しいモノ") == 1
-    assert book.drop_draft(d.id) and book.drafts() == []
+    assert [x.id for x in book.drafts()] == [d.id]
+    assert book.drop_draft(d.id) and book.drafts() == [] and work.total() == 0
     db.close()
+    work.close()
+
+
+def test_drafts_kept_in_qgis_settings_before_move_to_the_outbox(tmp_path):
+    from skywatch.core.obs.drafts import Draft, OutboxDrafts, PrefsDrafts
+    from skywatch.core.offline import OfflineWork
+
+    prefs = Prefs()
+    old = PrefsDrafts(prefs)
+    old.keep("共有", Draft(obs(id="x1", object_name="あおば"), reason="通信の失敗"))
+    old.keep("共有", Draft(obs(id="x2"), editing_id="x2", base_updated=day(3), reason="ほかの人", needs_check=True))
+    work = OfflineWork(str(tmp_path / "offline.sqlite"))
+    shelf = OutboxDrafts(work, prefs)
+    assert [d.id for d in shelf.all("共有")] == ["x1", "x2"]
+    assert not prefs.get("drafts/共有")  # moved, not kept twice
+    assert work.counts() == {"draft": 2} and work.sendable() == 1
+    [first, second] = work.pending("draft")
+    assert first.title.startswith("あおば: 新規") and (first.op, second.op) == ("retry", "check")
+    assert shelf.get("共有", "x2").base_updated == day(3)
+    work.close()

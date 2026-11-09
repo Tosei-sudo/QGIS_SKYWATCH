@@ -13,12 +13,16 @@ waiting, so it is allowed even with `localObservations: false`):
   token. While that server is down the same read is answered from here, so
   the classification, the records, the ledger, place names, … still show.
 - 送信待ち (the outbox): a change made while the server is down —
-  observation records, checked areas, imaging requests, imaging plans — is
-  kept per store and item (the latest version of each item, with what it was
-  on the server before the first change, so sending it later does not save
-  over someone else's change). The stores read it back over what the server
-  (or the cache) holds, so the work shows as done; the screens mark it as
-  送信待ち.
+  observation records, checked areas, imaging requests — is kept per store
+  and item (the latest version of each item, with what it was on the server
+  before the first change, so sending it later does not save over someone
+  else's change). The stores read it back over what the server (or the
+  cache) holds, so the work shows as done; the screens mark it as 送信待ち.
+  The observation records whose save failed while online (the network, the
+  sign-in, someone else's change: kind "draft", core/obs/drafts.py) wait in
+  the same outbox (2026-11-09: 「未保存の記録」 and 送信待ち were one job
+  kept twice), not read back over the store: they are listed with why, sent
+  again, opened in the form, or thrown away (ui/outbox_dialog.py).
 
 A server is marked down when a request to it fails without an answer
 (UnreachableError: no connection, a timeout, a 5xx). Its requests then go
@@ -46,8 +50,12 @@ KINDS: dict[str, str] = {
     "observation": "観測記録",
     "area": "確認範囲",
     "request": "撮像依頼",
+    #: Observation records whose save did not go through (core/obs/drafts.py): not read back over the store.
+    "draft": "保存できなかった観測記録",
     "plan": "撮像計画",  # retired (2026-11-09); kept so that what an older version left is still counted
 }
+#: The op of a draft that needs the person (someone else changed the record, or it is gone): not sent unless chosen.
+CHECK = "check"
 #: Requests that change data: never answered from the cache.
 _EDITS = re.compile(r"/(applyEdits|addFeatures|updateFeatures|deleteFeatures|calculate|append)/?$", re.IGNORECASE)
 #: Reads kept in the cache: layer / service information and queries.
@@ -118,7 +126,7 @@ class Pending:
 class UploadReport:
     """What became of sending the waiting work."""
     sent: dict = field(default_factory=dict)
-    #: Moved to 「未保存の記録」 (observation records someone else changed meanwhile).
+    #: Observation records not sent because someone else changed them meanwhile (left waiting, to be looked at).
     drafts: int = 0
     #: Left waiting, with why.
     kept: list = field(default_factory=list)
@@ -131,7 +139,8 @@ class UploadReport:
         parts = [f"{KINDS.get(k, k)} {n} 件" for k, n in self.sent.items() if n]
         out = ("送信: " + "・".join(parts)) if parts else "送信したものなし"
         if self.drafts:
-            out += f"。ほかの人が先に更新していた観測記録 {self.drafts} 件は「未保存の記録」へ（開いて確かめてから送信）"
+            out += (f"。ほかの人が先に更新していた観測記録 {self.drafts} 件は送らず送信待ちに残しました"
+                    "（一覧の「フォームで開く」で確かめてから送信）")
         if self.kept:
             out += f"。送れず残したもの {len(self.kept)} 件（{self.kept[0]}{' ほか' if len(self.kept) > 1 else ''}）"
         return out
@@ -387,11 +396,12 @@ class OfflineWork:
         return {p.item_id for p in self.pending(kind, store)}
 
     def keep(self, kind: str, store: str, item_id: str, op: str, data: dict, base: Optional[float] = None,
-             known: bool = False, title: str = "") -> Pending:
+             known: bool = False, title: str = "", note: str = "") -> Pending:
         """
         Keeps an item to send (replacing what was kept for it, but not what it
         was on the server before: the first change's `base` and `known` stay,
-        and so do the saves whose answer was lost, data["tried"]).
+        and so do the saves whose answer was lost, data["tried"]). `note`: why
+        it waits (a draft's reason).
         """
         with self.lock:
             before = self.item(kind, store, item_id)
@@ -404,11 +414,11 @@ class OfflineWork:
             text = json.dumps(_plain(data), ensure_ascii=False)
             if before is None:
                 db.execute("INSERT INTO outbox (kind, store, item_id, op, data, base, known, at, title, note)"
-                           " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')",
-                           (kind, store, item_id, op, text, base, 1 if known else 0, self.clock(), title))
+                           " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (kind, store, item_id, op, text, base, 1 if known else 0, self.clock(), title, note))
             else:
-                db.execute("UPDATE outbox SET op = ?, data = ?, at = ?, title = ?, note = '' WHERE seq = ?",
-                           (op, text, self.clock(), title, before.seq))
+                db.execute("UPDATE outbox SET op = ?, data = ?, at = ?, title = ?, note = ? WHERE seq = ?",
+                           (op, text, self.clock(), title, note, before.seq))
             db.commit()
             kept = self.item(kind, store, item_id)
         self._changed()
@@ -475,6 +485,15 @@ class OfflineWork:
 
     def total(self) -> int:
         return sum(self.counts().values())
+
+    def sendable(self) -> int:
+        """How many items wait that are sent without the person choosing them (drafts to look at left out)."""
+        try:
+            with self.lock:
+                return int(self.db().execute("SELECT COUNT(*) FROM outbox WHERE NOT (kind = 'draft' AND op = ?)",
+                                             (CHECK,)).fetchone()[0])
+        except sqlite3.Error:
+            return 0
 
     def summary(self) -> list[tuple[str, str, int]]:
         """(kind's name, store, how many) for every store with work waiting."""

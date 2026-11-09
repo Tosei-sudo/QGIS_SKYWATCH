@@ -34,6 +34,7 @@ except ImportError:  # Qt 5
 from ..core.obs.api import ObservationApi
 from ..core.obs.areas import CheckedArea, area_label, box_ring
 from ..core.obs.book import FormValues, ObservationBook, ObservedImage
+from ..core.obs.drafts import OutboxDrafts
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
 from ..core.obs.flows import (
     CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, living, now_ms, outline_of, side_points, time_key, two_point,
@@ -181,7 +182,8 @@ class ObservationDock(PluginDock):
         self._filled: Optional[FormValues] = None
         #: The kept record (保存できなかった記録) the form is open on again, '' for none.
         self._draft_id = ""
-        self._drafts_dialog = None
+        #: Opens 「送信待ち」 (the status bar's list, ui/outbox_dialog.py); set by the plugin.
+        self.open_outbox: Optional[Callable[[], Any]] = None
         self.offered: list[MatchCandidate] = []
         self.active = False
         self.points = settings.point_count_setting()
@@ -474,10 +476,11 @@ class ObservationDock(PluginDock):
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         b.addWidget(self.status)
-        # 保存できなかった記録 (kept on this computer, core/obs/drafts.py): sent again, opened, or thrown away.
+        # 送信待ち of this store (kept on this computer, core/offline.py): the records not saved and the work kept
+        # offline, in the one list of the status bar: sent, opened in the form, or thrown away.
         self.drafts_button = QPushButton()
         self.drafts_button.setStyleSheet("QPushButton { color: #b45309; font-weight: bold; }")
-        self.drafts_button.setToolTip(tr("保存できなかった記録（この PC に保管中）。送り直す・フォームで開く・捨てる"))
+        self.drafts_button.setToolTip(tr("この保存先の、サーバーにまだ送られていない記録（この PC に保管中）。一覧で送信・フォームで開く・捨てる"))
         self.drafts_button.clicked.connect(lambda _on=False: self.open_drafts())
         self.drafts_button.hide()
         b.addWidget(self.drafts_button)
@@ -745,7 +748,9 @@ class ObservationDock(PluginDock):
         if book is None:
             # Who records is read here (QgsSettings, the authentication database), never in a task.
             book = ObservationBook(s.records, s.areas, s.taxonomy, s.vocabulary, observer=lambda: self._observer_cache,
-                                   prefs=settings.SettingsPrefs(), say=self.said.emit)
+                                   prefs=settings.SettingsPrefs(), say=self.said.emit,
+                                   drafts=OutboxDrafts(self.context.offline, settings.SettingsPrefs()))
+            book.drafts()  # those kept in QgsSettings before moved to the outbox, here on the main thread
             self.books[s.label] = book
         return book
 
@@ -1650,7 +1655,7 @@ class ObservationDock(PluginDock):
             self.restore_form(lon, lat, editing, source, values)
             self.refresh(force=True)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
-                "記録を保存できませんでした（「未保存の記録」に保管しました）: {m}").format(m=message)))
+                "記録を保存できませんでした（送信待ちに保管しました）: {m}").format(m=message)))
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None),
                 lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)
@@ -2514,48 +2519,47 @@ class ObservationDock(PluginDock):
             lay.addWidget(b)
         return box
 
-    # ---- 保存できなかった記録 -------------------------------------------------------
+    # ---- 送信待ち (保存できなかった記録) -------------------------------------------------
+
+    def waiting_count(self) -> tuple[int, int]:
+        """This store's items in 送信待ち: (all of them, the records not saved among them)."""
+        book, work = self.book, self.context.offline
+        if book is None:
+            return 0, 0
+        drafts = len(book.drafts())
+        labels = [("observation", book.store.label)]
+        area_label_ = getattr(book.area_store, "label", None)
+        if area_label_:
+            labels.append(("area", area_label_))
+        others = sum(len(work.pending(kind, label)) for kind, label in labels)
+        return drafts + others, drafts
 
     def _render_drafts(self) -> None:
-        n = len(self.book.drafts()) if self.book is not None else 0
-        self.drafts_button.setText(self.tr("未保存の記録 {n} 件…").format(n=n))
+        try:
+            n, drafts = self.waiting_count()
+        except RuntimeError:  # closed
+            return
+        self.drafts_button.setText(self.tr("送信待ち {n} 件…").format(n=n))
+        # Orange while records not saved wait (to be sent or looked at); blue for the work kept offline only.
+        self.drafts_button.setStyleSheet("QPushButton { color: %s; font-weight: bold; }" % ("#b45309" if drafts else "#1d4ed8"))
         self.drafts_button.setVisible(n > 0)
-        if self._drafts_dialog is not None and self._drafts_dialog.isVisible():
-            self._drafts_dialog.render()
 
     def open_drafts(self):
-        """The list of records not saved (kept here): send again, open in the form, throw away."""
-        from .drafts_dialog import DraftsDialog
+        """「送信待ち」: the one list of what is not on the server yet (the status bar's)."""
+        return self.open_outbox() if self.open_outbox is not None else None
 
-        if self.book is None:
-            return None
-        if self._drafts_dialog is None:
-            self._drafts_dialog = DraftsDialog(self, self)
-        self._drafts_dialog.render()
-        self._drafts_dialog.show()
-        self._drafts_dialog.raise_()
-        return self._drafts_dialog
-
-    def send_drafts(self, ids: list[str]) -> Any:
-        """Sends the kept records again (in a task for an Esri store), one by one."""
-        if not ids:
-            return None
-
-        def work(book):
-            sent = [book.send_draft(i) for i in ids]
-            ok = sum(1 for x in sent if x is not None)
-            left = len(ids) - ok
-            if len(ids) > 1:
-                book._say(f"未保存の記録 {ok} 件を送信" + (f"、{left} 件は送れず（理由は一覧に）" if left else ""))
-            return ok
-
-        return self.do(self.tr("未保存の記録の送信"), work, watch=True)
-
-    def open_draft(self, draft_id: str) -> bool:
+    def open_draft(self, draft_id: str, store: Optional[str] = None) -> bool:
         """
         A kept record opened in the form again, on its image (which must be
         open): a change on the record as it is now, with what was typed.
+        `store`: its store, chosen in the dock first when another one is.
         """
+        if store and (self.book is None or self.book.store.label != store):
+            i = self.store_select.findText(store)
+            if i < 0:
+                self._say(self.tr("保存先「{s}」が設定ファイルにありません").format(s=store))
+                return False
+            self.store_select.setCurrentIndex(i)
         book = self.book
         d = book.draft(draft_id) if book else None
         if d is None:
@@ -2573,6 +2577,8 @@ class ObservationDock(PluginDock):
             return False
         source = book.record(d.source_id) if d.source_id else None
         r = d.record
+        self.show()
+        self.raise_()
         self.open_form(r.lon, r.lat, editing=editing, source=source)
         v = d.values
         self.object_input.setText(v.get("object", ""))
@@ -2588,13 +2594,6 @@ class ObservationDock(PluginDock):
         self._filled = None  # typed (not what the record says): never filled again by a refresh
         self._center(r)
         return True
-
-    def drop_drafts(self, ids: list[str]) -> int:
-        n = sum(1 for i in ids if self.book is not None and self.book.drop_draft(i))
-        if self._draft_id in ids:
-            self._draft_id = ""
-        self._render_drafts()
-        return n
 
     def render(self) -> None:
         """Shows the book as it is now."""

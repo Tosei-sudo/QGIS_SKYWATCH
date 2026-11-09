@@ -4,6 +4,10 @@ status bar that says when work is offline and how much waits to be sent, a
 note in the message bar when a server stops answering, a check every
 `offlineWork.probeSeconds` whether it answers again, and then the question:
 send what waits (with how many of each), throw it away, or later.
+
+What waits is one list, 「送信待ち」 (ui/outbox_dialog.py): the work kept
+offline and the observation records whose save did not go through (drafts,
+shown here even with `offlineWork` off).
 """
 from __future__ import annotations
 
@@ -13,6 +17,8 @@ from typing import Callable, Optional
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal
 from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox, QToolButton, QWidget
 
+from ..core.obs.drafts import OutboxDrafts
+from ..core.obs.stores import LOCAL_LABEL
 from ..core.offline import KINDS, OfflineWork, UploadReport
 from ..core.offline_upload import upload_all
 from ..qgis_io import settings
@@ -40,10 +46,10 @@ def ask_upload(parent: Optional[QWidget], work: OfflineWork, back: bool) -> str:
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle(tr("オフライン中の作業"))
     head = (tr("サーバーとの接続が戻りました。") if back else tr("オフライン中に作業した内容が送信されずに残っています。"))
-    box.setText(head + tr("オフライン中の作業をサーバーに送信しますか？"))
+    box.setText(head + tr("送信待ちの変更をサーバーに送信しますか？"))
     box.setInformativeText(counts_text(work) + "\n\n" + tr(
-        "送信: サーバーに保存します（ほかの人が先に更新していた観測記録は保存せず「未保存の記録」へ移します）。\n"
-        "破棄: 送信せずに消します（元に戻せません）。\n後で: 残したまま、ステータスバーの「送信待ち」からいつでも送信できます。"))
+        "送信: サーバーに保存します（ほかの人が先に更新していた観測記録は保存せず、送信待ちに「要確認」として残します）。\n"
+        "破棄: 送信せずに消します（元に戻せません）。\n後で: 残したまま、ステータスバーの「送信待ち」の一覧からいつでも送信できます。"))
     upload = box.addButton(tr("送信"), QMessageBox.ButtonRole.AcceptRole)
     discard = box.addButton(tr("破棄…"), QMessageBox.ButtonRole.DestructiveRole)
     box.addButton(tr("後で"), QMessageBox.ButtonRole.RejectRole)
@@ -55,8 +61,8 @@ def ask_upload(parent: Optional[QWidget], work: OfflineWork, back: bool) -> str:
 
 def ask_discard(parent: Optional[QWidget], work: OfflineWork) -> bool:
     return QMessageBox.warning(
-        parent, tr("オフライン中の作業の破棄"),
-        tr("次の作業を送信せずに破棄します。元に戻せません。よろしいですか？") + "\n\n" + counts_text(work),
+        parent, tr("送信待ちの破棄"),
+        tr("次の送信待ちをすべて送信せずに破棄します。元に戻せません。よろしいですか？") + "\n\n" + counts_text(work),
         QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
         QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Discard
 
@@ -79,6 +85,10 @@ class OfflineController(QObject):
         self._probing = False
         self._uploading = False
         self._asked_at_start = False
+        #: 「送信待ち」 (ui/outbox_dialog.py), kept while the plugin lives.
+        self.dialog = None
+        #: Opens a draft (store, record id) in the 観測記録 dock's form (set by the plugin); True when it did.
+        self.open_form: Optional[Callable[[str, str], bool]] = None
         #: Whether the question is on screen (not asked twice).
         self._asking = False
         self.work.listeners.append(self._from_any_thread)
@@ -89,9 +99,10 @@ class OfflineController(QObject):
         self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.button.setObjectName("SkywatchOfflineButton")
         self.menu = QMenu(self.button)
+        self.act_list = self.menu.addAction(tr("送信待ちの一覧…"), self.open_list)
         self.act_check = self.menu.addAction(tr("今すぐ接続を確認"), self.probe)
-        self.act_upload = self.menu.addAction(tr("オフライン中の作業を送信…"), lambda: self.ask(back=False))
-        self.act_discard = self.menu.addAction(tr("オフライン中の作業を破棄…"), self.discard)
+        self.act_upload = self.menu.addAction(tr("送信待ちを送信…"), lambda: self.ask(back=False))
+        self.act_discard = self.menu.addAction(tr("送信待ちをすべて破棄…"), self.discard)
         self.menu.addSeparator()
         self.act_forced = QAction(tr("オフラインで作業する（手動）"), self.menu)
         self.act_forced.setCheckable(True)
@@ -120,20 +131,35 @@ class OfflineController(QObject):
 
     def _config_changed(self) -> None:
         self.timer.setInterval(int(self.context.config.offline_work.probe_seconds * 1000))
+        self._move_old_drafts()
         self._update()
         if not self._asked_at_start:
             # Work left from an earlier session: asked once, a little after the start.
             self._asked_at_start = True
             QTimer.singleShot(3000, self._ask_left_over)
 
+    @property
+    def uploading(self) -> bool:
+        return self._uploading
+
+    def _move_old_drafts(self) -> None:
+        """The records not saved kept in QgsSettings before (each store's), moved to the outbox (core/obs/drafts.py)."""
+        shelf = OutboxDrafts(self.work, settings.SettingsPrefs())
+        for label in [s.label for s in self.context.config.observation_stores] + [LOCAL_LABEL]:
+            try:
+                shelf.all(label)
+            except Exception:  # noqa: BLE001 (left where it was; moved next time)
+                pass
+
     def _ask_left_over(self) -> None:
-        if self.work.enabled and self.work.total() and not self.work.offline:
+        if self.work.enabled and self.work.sendable() and not self.work.offline:
             self.ask(back=False)
 
     def _update(self) -> None:
         work = self.work
         down = work.offline
-        total = work.total() if work.enabled else 0
+        # The drafts wait here even with the offline work off.
+        total = work.total()
         if down:
             self.button.setText(tr("⚠ オフライン作業中") + (tr("（送信待ち {n} 件）").format(n=total) if total else ""))
             self.button.setStyleSheet("QToolButton { color: #b45309; font-weight: bold; }")
@@ -144,10 +170,13 @@ class OfflineController(QObject):
         elif total:
             self.button.setText(tr("送信待ち {n} 件").format(n=total))
             self.button.setStyleSheet("QToolButton { color: #b45309; }")
-            self.button.setToolTip(tr("オフライン中の作業がサーバーに送信されずに残っています（クリックで送信・破棄）"))
+            self.button.setToolTip(tr("サーバーに送られていない変更（オフライン中の作業・保存できなかった観測記録）が残っています"
+                                      "（クリックで一覧・送信・破棄）"))
         else:
             self.button.setText("")
-        self.button.setVisible(bool(work.enabled and (down or total)))
+        self.button.setVisible(bool(down or total))
+        if self.dialog is not None and self.dialog.isVisible():
+            self.dialog.render()
         if down and not work.forced and not self.timer.isActive():
             self.timer.start(int(self.context.config.offline_work.probe_seconds * 1000))
         elif not down:
@@ -160,7 +189,7 @@ class OfflineController(QObject):
         back = self._was_down and not down
         self._was_down = down
         if back:
-            if total:
+            if work.sendable():
                 self.ask(back=True)
             else:
                 self.iface.messageBar().pushSuccess(tr("オフライン作業"), tr("サーバーとの接続が戻りました。"))
@@ -168,7 +197,8 @@ class OfflineController(QObject):
 
     def _menu_shown(self) -> None:
         total = self.work.total()
-        self.act_upload.setEnabled(bool(total) and not self.work.offline and not self._uploading)
+        self.act_list.setEnabled(bool(total))
+        self.act_upload.setEnabled(bool(self.work.sendable()) and not self.work.offline and not self._uploading)
         self.act_discard.setEnabled(bool(total) and not self._uploading)
         self.act_check.setEnabled(self.work.offline and not self.work.forced)
         self.act_forced.blockSignals(True)
@@ -198,8 +228,35 @@ class OfflineController(QObject):
 
     # ---- sending or throwing away ---------------------------------------
 
+    # ---- the list ------------------------------------------------------------
+
+    def open_list(self):
+        """「送信待ち」: everything not on the server yet; send, open in the form, throw away."""
+        from .outbox_dialog import OutboxDialog
+
+        if self.dialog is None:
+            self.dialog = OutboxDialog(self, self.iface.mainWindow())
+        self.dialog.render()
+        self.dialog.show()
+        self.dialog.raise_()
+        return self.dialog
+
+    def open_draft(self, store: str, record_id: str) -> bool:
+        return bool(self.open_form(store, record_id)) if self.open_form is not None else False
+
+    def drop(self, keys) -> int:
+        """Throws away the items (kind, store, item id) chosen in the list; the docks read again."""
+        by: dict[tuple[str, str], list[str]] = {}
+        for kind, store, item_id in keys:
+            by.setdefault((kind, store), []).append(item_id)
+        n = sum(self.work.drop(kind, store, ids) for (kind, store), ids in by.items())
+        if n:
+            self.finished.emit()
+        self._update()
+        return n
+
     def ask(self, back: bool) -> None:
-        if self._asking or self._uploading or not self.work.total():
+        if self._asking or self._uploading or not self.work.sendable():
             return
         self._asking = True
         try:
@@ -215,23 +272,24 @@ class OfflineController(QObject):
         if not self.work.total() or not ask_discard(self.iface.mainWindow(), self.work):
             return
         n = self.work.discard()
-        self.iface.messageBar().pushInfo(tr("オフライン作業"), tr("オフライン中の作業 {n} 件を破棄しました。").format(n=n))
+        self.iface.messageBar().pushInfo(tr("オフライン作業"), tr("送信待ち {n} 件を破棄しました。").format(n=n))
         self.finished.emit()
 
-    def upload(self, then: Optional[Callable[[UploadReport], None]] = None) -> None:
+    def upload(self, then: Optional[Callable[[UploadReport], None]] = None, only: Optional[set] = None) -> None:
+        """Sends what waits (all that goes without being chosen, or the items in `only`), in a task."""
         if self._uploading:
             return
         self._uploading = True
         context = self.context
         config = context.config
-
         def work(task) -> UploadReport:
-            return upload_all(config, context.esri, context.token_for, settings.SettingsPrefs(), context.gpkg)
+            # The drafts of before were moved out of QgsSettings on the main thread (_move_old_drafts).
+            return upload_all(config, context.esri, context.token_for, None, context.gpkg, only=only, outbox=self.work)
 
         def done(report: UploadReport) -> None:
             self._uploading = False
             bar = self.iface.messageBar()
-            (bar.pushWarning if report.kept or report.drafts else bar.pushSuccess)(tr("オフライン作業の送信"), plain_tip(report.text()))
+            (bar.pushWarning if report.kept or report.drafts else bar.pushSuccess)(tr("送信待ちの送信"), plain_tip(report.text()))
             self._update()
             self.finished.emit()
             if then is not None:
@@ -239,10 +297,10 @@ class OfflineController(QObject):
 
         def failed(message: str) -> None:
             self._uploading = False
-            self.iface.messageBar().pushWarning(tr("オフライン作業の送信"), plain_tip(tr("送信できず（{m}）。送信待ちのまま残しています。").format(m=message)))
+            self.iface.messageBar().pushWarning(tr("送信待ちの送信"), plain_tip(tr("送信できず（{m}）。送信待ちのまま残しています。").format(m=message)))
             self._update()
 
-        run_task(tr("オフライン中の作業の送信"), work, done, failed)
+        run_task(tr("送信待ちの送信"), work, done, failed)
 
     def unload(self) -> None:
         self.timer.stop()

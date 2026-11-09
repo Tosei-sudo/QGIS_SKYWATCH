@@ -379,6 +379,10 @@ class SkywatchPlugin:
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsObservations":
                 dock = ObservationDock(self.iface, self.context, self.open_settings, self.iface.mainWindow(), edit_taxonomy=self.edit_taxonomy)
+                # 送信待ち is one list (the status bar's); its records not saved open in this dock's form.
+                dock.open_outbox = self.offline.open_list
+                self.offline.open_form = lambda store, record_id, dock=dock: dock.open_draft(record_id, store)
+                self.offline.changed.connect(dock._render_drafts)
             elif name == "SatObsSatellitePass":
                 dock = SatellitePassDock(self.iface, self.context, self.open_settings, self.docks["SatObsImagingPlan"], self.iface.mainWindow())
             elif name == "SatObsTaxonomy":

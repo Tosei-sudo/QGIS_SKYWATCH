@@ -10,7 +10,7 @@ from skywatch.core.config import parse_config
 from skywatch.core.esri import EsriClient, UnreachableError
 from skywatch.core.gpkg import open_local
 from skywatch.core.obs.book import ObservationBook, ObservedImage, Prefs
-from skywatch.core.obs.drafts import parse_drafts
+from skywatch.core.obs.drafts import OutboxDrafts
 from skywatch.core.obs.model import ObservationVocabulary, observation_store_of
 from skywatch.core.obs.offline_stores import OfflineObservationStore
 from skywatch.core.obs.setup import store_sets
@@ -113,10 +113,20 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     assert (server["a"].confidence, server["c"].object_name) == ("確定", "船舶-3")
     assert (server["b"].confidence, server["b"].note) == ("", "ほかの人")
     assert server["a"].updated_at == day(26)  # sent now: others' refresh sees it
-    assert report.sent == {"observation": 2} and report.drafts == 1 and work.total() == 0
-    drafts = parse_drafts(prefs.get("drafts/共有"))
+    # b waits in the same outbox, to be looked at (要確認): not sent again by itself.
+    assert report.sent == {"observation": 2} and report.drafts == 1 and work.counts() == {"draft": 1}
+    drafts = OutboxDrafts(work).all("共有")
     assert [d.id for d in drafts] == ["b"] and drafts[0].editing and "ほかの人が先に更新" in drafts[0].reason
-    assert "未保存の記録" in report.text()
+    assert drafts[0].needs_check and work.sendable() == 0 and work.pending("draft")[0].op == "check"
+    assert "送信待ちに残しました" in report.text()
+    again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(27))
+    assert again.sent == {} and work.counts() == {"draft": 1}
+    # Chosen in the list: tried, and still not saved over the other's change.
+    chosen = {("draft", "共有", "b")}
+    again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(28),
+                       only=chosen)
+    assert again.sent == {} and again.drafts == 1 and work.counts() == {"draft": 1}
+    assert next(o for o in theirs.load() if o.id == "b").note == "ほかの人"
     db.close()
     work.close()
 
@@ -267,7 +277,7 @@ def _upload(work, transport, **stores):
 
 def test_a_save_whose_answer_was_lost_is_no_conflict_when_sent(tmp_path):
     # The timeout that starts offline work: the server may have saved the change. Sent later, it is not
-    # taken for someone else's change (it went to 「未保存の記録」 as one before).
+    # taken for someone else's change (it was left to be looked at as one before).
     fake = obs_layer()
     lossy = Lossy(fake)
     work = OfflineWork(str(tmp_path / "offline.sqlite"))
@@ -283,7 +293,7 @@ def test_a_save_whose_answer_was_lost_is_no_conflict_when_sent(tmp_path):
     work.probe(lossy)
     report, prefs = _upload(work, lossy, observationStores=[{"label": "共有", "url": URL}])
     assert report.sent == {"observation": 1} and report.drafts == 0 and work.total() == 0
-    assert parse_drafts(prefs.get("drafts/共有")) == []
+    assert OutboxDrafts(work).all("共有") == []
     server = EsriObservationStore(config, EsriClient(fake)).load()
     assert [(o.note, o.updated_at) for o in server] == [("私の変更", day(30))]
 
