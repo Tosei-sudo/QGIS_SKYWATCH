@@ -51,7 +51,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
-    "alertReports", "observationExports", "assignments", "handover", "events", "preload", "offlineWork",
+    "alertReports", "observationExports", "assignments", "handover", "events", "preload", "offlineWork", "columnDrag",
 )
 
 
@@ -121,6 +121,8 @@ class PluginConfig:
     events: Optional[EventSettings] = None
     #: `offlineWork`: working on through a server outage (cache of reads, changes kept to send later).
     offline_work: OfflineSettings = field(default_factory=lambda: OfflineSettings())
+    #: `columnDrag`: whether a list's columns may be dragged by their header (false: only from the header's menu).
+    column_drag: bool = True
 
 
 @dataclass
@@ -278,6 +280,11 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             problems.append("localObservations は true か false で指定")
     if "offlineWork" in value:
         config.offline_work = offline_settings_of(value["offlineWork"], problems)
+    if "columnDrag" in value:
+        if isinstance(value["columnDrag"], bool):
+            config.column_drag = value["columnDrag"]
+        else:
+            problems.append("columnDrag は true か false で指定")
     if "preload" in value:
         config.preload = preload_of(value["preload"], problems)
     if "observationVocabulary" in value:

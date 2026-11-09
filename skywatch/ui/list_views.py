@@ -7,8 +7,9 @@ the sort (lists that sort by a header click) and the list's filters.
   menu (「この列を左へ」「右へ」「先頭へ」「末尾へ」, the columns to tick) or
   「列の表示と順番…」 (a list to tick and move up and down), also from
   「ビュー ▸ 列の表示」 (tsudo, 2026-11-09: the order from a menu, as the
-  showing and hiding; a header drag still works); the arrangement is kept as
-  it is (per list, also without a name).
+  showing and hiding); the arrangement is kept as it is (per list, also
+  without a name). A header drag also moves a column unless the settings
+  file says `"columnDrag": false` (`set_column_drag`).
 - 「ビュー ▸ 今の表示を保存…」 keeps it under a name, with the filters; a
   saved view is chosen from the same menu. 「標準の表示に戻す」 shows every
   column in the plugin's order.
@@ -29,7 +30,7 @@ from typing import Any, Callable, Optional, Union
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QObject, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
 
@@ -42,6 +43,25 @@ ROOT = "skywatch/listViews"
 
 #: A filter: (read its value, set a value).
 Filter = tuple[Callable[[], Any], Callable[[Any], None]]
+
+#: Whether the columns may be dragged by their header (the settings file's `columnDrag`; true when it does not say).
+_DRAG = {"on": True}
+
+
+def column_drag() -> bool:
+    return _DRAG["on"]
+
+
+def set_column_drag(on: bool) -> None:
+    """Every list's header dragged or not from now on (the settings file read again), also the lists open now."""
+    _DRAG["on"] = bool(on)
+    for top in QApplication.topLevelWidgets():
+        for views in top.findChildren(ListViews):
+            try:
+                views.header.setSectionsMovable(_DRAG["on"])
+            except RuntimeError:  # pragma: no cover - its list deleted meanwhile
+                pass
+
 
 #: Where a column is moved from the header's menu, and the menu's words.
 MOVES = (("left", "この列を左へ"), ("right", "この列を右へ"), ("first", "この列を先頭へ"), ("last", "この列を末尾へ"))
@@ -98,7 +118,7 @@ class ListViews(QObject):
         self._timer_arranged.setInterval(0)
         self._timer_arranged.timeout.connect(self._arranged)
         header = self.header
-        header.setSectionsMovable(True)
+        header.setSectionsMovable(_DRAG["on"])
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._header_menu_requested)
         header.sectionMoved.connect(self._moved)

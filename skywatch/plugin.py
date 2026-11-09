@@ -40,6 +40,7 @@ from .ui.enhance_dock import EnhanceDock
 from .ui.events_dock import EventsDock
 from .ui.analysis_dock import AnalysisDock
 from .ui.imaging_plan_dock import ImagingPlanDock
+from .ui.list_views import set_column_drag
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
 from .ui.notices_dock import NoticesDock
@@ -328,6 +329,8 @@ class SkywatchPlugin:
         self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
+        # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
+        self.context.configChanged.connect(self._column_drag_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self._problems_shown: Optional[tuple] = None
         self.context.configChanged.connect(self._config_problems)
@@ -1190,6 +1193,10 @@ class SkywatchPlugin:
         item.layout().addWidget(button)
         item.setToolTip("\n".join(c.problems))
         bar.pushWidget(item, Qgis.MessageLevel.Warning, 0)
+
+    def _column_drag_changed(self) -> None:
+        if self.context is not None:
+            set_column_drag(self.context.config.column_drag)
 
     def _overviews_changed(self) -> None:
         if self.context is None:
