@@ -23,7 +23,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError
 from ..core.catalog.query import CatalogSearch, time_text
-from ..core.catalog.search import read_catalog_layer, record_of
+from ..core.catalog.search import listed_image, read_catalog_layer, record_of
 from ..core.catalog.watch import CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch
 from ..core.catalog.watch_store import WatchStore, check_due
 from ..qgis_io.overviews_io import queue as overview_queue
@@ -73,7 +73,7 @@ class NoticesDock(PluginDock):
         v.addWidget(self.notices, 1)
         row = QHBoxLayout()
         for text, tip, slot in [
-                (self.tr("開く"), self.tr("選んだ新着画像をレイヤーとして開く（ダブルクリックでも）"), lambda: self.open_notices(self.chosen_notices())),
+                (self.tr("開く"), self.tr("選んだ新着画像をレイヤーとして開く（ダブルクリックでも）。画像ファイルなしのカタログの画像は、ファイルなしで観測記録へ"), lambda: self.open_notices(self.chosen_notices())),
                 (self.tr("移動"), self.tr("選んだ新着画像の範囲へ地図を移動"), self.zoom_to_chosen),
                 (self.tr("既読"), self.tr("選んだ新着画像を既読に"), self.mark_chosen_read),
                 (self.tr("すべて既読"), self.tr("一覧の新着画像をすべて既読に"), lambda: self._mark(None)),
@@ -291,9 +291,16 @@ class NoticesDock(PluginDock):
         self.canvas.refresh()
         self.mark_chosen_read()
 
+    #: The 「観測記録」 dock (plugin.py sets it): the images of a catalog without image files go there.
+    observations: Optional[Callable[[], object]] = None
+
     def open_notices(self, notices) -> list:
-        """Opens the images of notices as raster layers (the imaging plan's notices are moved to)."""
-        layers, problems = [], []
+        """
+        Opens the images of notices as raster layers (the imaging plan's
+        notices are moved to); those of a catalog without image files
+        (`imageFiles: false`) go to 観測記録 without their files.
+        """
+        layers, problems, without = [], [], []
         for n in notices:
             if n.kind == PLAN:
                 continue
@@ -304,6 +311,9 @@ class NoticesDock(PluginDock):
                 problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=n.image_id))
                 continue
             record = record_of(n.feature, catalog.fields)
+            if not catalog.image_files:
+                without.append(record)
+                continue
             try:
                 opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder or (lambda m: None),
                                      self.choose_images, problems,
@@ -316,6 +326,11 @@ class NoticesDock(PluginDock):
             add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
+        if without:
+            listed = [i for i in (listed_image(r) for r in without) if i is not None]
+            dock = self.observations() if self.observations else None
+            if not listed or dock is None or dock.list_catalog_images(listed) is None:
+                problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
         if any(n.kind == PLAN for n in notices):
             self.zoom_to_chosen()
         self._mark([n.id for n in notices])

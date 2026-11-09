@@ -708,3 +708,118 @@ def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     p.context.reload()
     assert not dock.keyword.isVisibleTo(dock) and dock.conditions().keyword == ""
+
+
+def _in_view(iface, box) -> bool:
+    from qgis.core import QgsRectangle
+
+    from skywatch.qgis_io.geometry import to_wgs84
+
+    view = to_wgs84(iface.canvas.mapSettings().destinationCrs()).transformBoundingBox(iface.canvas.extent())
+    return view.contains(QgsRectangle(*box))
+
+
+def test_images_without_their_files_are_recorded_on_from_the_catalog(plugin):
+    """
+    「ファイルなしで記録」 (tsudo, 2026-11-09: the raw data in another system
+    only, the catalog here): the catalog's id, time and footprint into
+    観測記録, without typing them; offered when an image cannot be opened.
+    """
+    from qgis.PyQt.QtWidgets import QPushButton
+
+    from skywatch.core.obs.book import FormValues
+    from skywatch.core.util import ms_of
+
+    p, iface, folder, fake, _ = plugin
+    dock, obs = p.api.image_catalog, p.api.observation_dock
+    searched(dock)
+    # A usual catalog: 「開く」 as before.
+    assert dock.buttons["open"].isVisibleTo(dock) and not dock.buttons["record"].isVisibleTo(dock)
+    # C has no place: the reason, with 「ファイルなしで記録」 beside it.
+    c = next(r for r in dock.records if r.id == "C")
+    iface.canvas.setExtent(iface.canvas.fullExtent())
+    assert dock.open_records([c]) == []
+    widget = dock.unopened_message
+    assert "C に画像の場所なし" in dock.status.text() and any(w is widget for w in iface.bar.items())
+    [button] = [b for b in widget.findChildren(QPushButton) if b.text() == "ファイルなしで記録"]
+    button.click()
+    image = obs.book.current
+    assert (image.id, image.name, image.file, image.time) == ("C", "C", False, ms_of(c.acquired))
+    assert image.box == pytest.approx([139.7, 35.6, 139.75, 35.65])
+    assert obs.isVisible() and not any(w is widget for w in iface.bar.items())
+    assert obs.image_select.currentText().endswith("C（ファイルなし）")
+    # The map at its footprint; recorded on the background map, with the catalog's id and time.
+    assert _in_view(iface, image.box)
+    rec = obs.book.submit(139.72, 35.62, FormValues(object="船 1", kind="船舶"))
+    assert (rec.image_id, rec.image_name, rec.image_time) == ("C", "C", ms_of(c.acquired))
+    # Several at once: the first one chosen in the list is recorded on; ◀ ▶ moves the map to the next when it is out of view.
+    dock.choose([r for r in dock.records if r.id in ("A", "B")])
+    entry = dock.record_without_files()
+    assert entry.id == "A" and dock.status.text().startswith("2 件を観測記録へ（ファイルなし）")
+    assert {i.id for i in obs.book.images if not i.file} == {"A", "B", "C"}
+    from qgis.core import QgsRectangle
+
+    from skywatch.qgis_io.geometry import from_wgs84
+
+    def look_far_away():
+        crs = iface.canvas.mapSettings().destinationCrs()
+        iface.canvas.setExtent(from_wgs84(crs).transformBoundingBox(QgsRectangle(0, 0, 1, 1)))
+        assert not _in_view(iface, [139.6, 35.5, 139.8, 35.7])
+
+    look_far_away()
+    stepped = obs.step(-1) if obs.book.images.index(obs.book.current) > 0 else obs.step(1)
+    assert stepped.id in ("B", "C") and _in_view(iface, stepped.box)
+    # In view already: the map stays where it is.
+    iface.canvas.setExtent(from_wgs84(iface.canvas.mapSettings().destinationCrs()).transformBoundingBox(QgsRectangle(139, 35, 141, 37)))
+    before = iface.canvas.extent()
+    obs.step(1)
+    assert iface.canvas.extent() == before
+    # Without an id: nothing to list.
+    assert dock.record_without_files([]) is None and dock.status.text().startswith("画像 ID のある画像を一覧で選択")
+
+
+def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_path, monkeypatch):
+    """`imageFiles: false`: no 「開く」 (nor paths, folders, 場所); 「ファイルなしで記録」 always, a double click and the notices too."""
+    p, iface, folder, fake, images = plugin
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["imageCatalogs"][0]["imageFiles"] = False
+    del config["imageCatalogs"][0]["fields"]["source"]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert p.api.problems == []
+    dock, obs = p.api.image_catalog, p.api.observation_dock
+    searched(dock)
+    headings = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
+    assert headings == ["画像ID", "撮像日時", "センサー", "角度", "方位角"]
+    for key in ("open", "copy", "folders"):
+        assert not dock.buttons[key].isVisibleTo(dock), key
+    assert dock.buttons["record"].isVisibleTo(dock)
+    a = next(r for r in dock.records if r.id == "A")
+    assert dock.buttons["record"].isEnabled() is False
+    dock.choose([a])
+    assert dock.buttons["record"].isEnabled()
+    # A double click (and 「開く」 asked by a script) records without the file; no layer is added.
+    dock._activated(a)
+    assert obs.book.current.id == "A" and not obs.book.current.file
+    assert dock.open_records([next(r for r in dock.records if r.id == "B")]) == [] and obs.book.current.id == "B"
+    from qgis.core import QgsRasterLayer
+
+    assert not any(isinstance(layer, QgsRasterLayer) for layer in QgsProject.instance().mapLayers().values())
+    # A new image noticed: 「開く」 in 通知 records it without its file too.
+    notices = p.api.notices
+    watch = notices.add_watch(p.api.config.image_catalogs[0], TYPES, EMPTY_SEARCH, [], "新着")
+    assert wait_for(lambda: notices.store().watch(watch.id).last_checked is not None)
+    now = time.time() * 1000
+    images.add({"IMG_ID": "D", "ACQ": now - DAY, "SENSOR": "S1"}, ring(139, 35, 140, 36))
+    notices.check(force=True)
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
+    [notice] = notices.store().notices()
+    assert notices.open_notices([notice]) == []
+    assert obs.book.current.id == "D" and obs.book.current.box == pytest.approx([139, 35, 140, 36])
+    # Back to a catalog with files: 「開く」 again.
+    config["imageCatalogs"][0]["imageFiles"] = True
+    config["imageCatalogs"][0]["fields"]["source"] = "PATH"
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert dock.buttons["open"].isVisibleTo(dock) and not dock.buttons["record"].isVisibleTo(dock)

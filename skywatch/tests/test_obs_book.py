@@ -225,6 +225,27 @@ def test_lists_images_without_their_file_per_store(book):
     assert [i.id for i in book.recorded_images()] == ["EXT-1"]
 
 
+def test_lists_the_catalog_images_without_their_files_at_once(book):
+    """The catalog's 「ファイルなしで記録」 (tsudo, 2026-11-09: raw data in another system only, the catalog only here)."""
+    from skywatch.core.obs.model import ListedImage
+
+    book.list_image("EXT-2", "手入力", None)
+    entry = book.list_images([ListedImage("EXT-2", "EXT-2", day(4), [1, 2, 3, 4]), ListedImage(" EXT-3 ", "", day(1), None),
+                              ListedImage("EXT-2", "重複", day(9), None), ListedImage("", "", None, None)])
+    # The first one is the one recorded on; one listed before takes the catalog's values.
+    assert entry.id == "EXT-2" and not entry.file and entry.time == day(4) and entry.box == [1, 2, 3, 4]
+    assert [i.id for i in book.images] == ["EXT-3", "d1", "d3", "EXT-2", "dx"]
+    assert next(i for i in book.images if i.id == "EXT-3").name == "EXT-3"
+    assert book.status == "2 件を追加（ファイルなし）"
+    rec = book.submit(1, 2, FormValues(object="Z", kind="車両"))
+    assert rec.image_id == "EXT-2" and rec.image_time == day(4) and rec.image_name == "EXT-2"
+    assert "EXT-3" in book.prefs.get("listed_images/ローカル")
+    # An image open with the same id: recorded on that one.
+    assert book.list_images([ListedImage("d3", "d3", day(3), None)]).file
+    assert book.status == "d3 は開いている画像と同じ ID（その画像で記録）"
+    assert book.list_images([ListedImage(" ", "", None, None)]) is None and book.status == "画像 ID のある画像を選択"
+
+
 def test_makes_a_report(book):
     book.submit(139.7, 35.6, FormValues(object="A", kind="船舶", confidence="確定"))
     page = book.report(ReportOptions(title="週報"))

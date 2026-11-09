@@ -5,13 +5,20 @@ of images found with their footprints on the map, opening them as raster
 layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
 the 通知 dock).
+
+「ファイルなしで記録」: the images whose raw data is in another system only
+go to 観測記録 as images without their files (the catalog's id, time and
+footprint, so the records are the ones the image would have if opened). A
+catalog of such images only (`imageFiles: false`) has this button instead
+of 「開く」 (a double click too); elsewhere it is offered when an image
+cannot be opened.
 """
 from __future__ import annotations
 
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsMapLayer, QgsProject
+from qgis.core import Qgis, QgsMapLayer, QgsProject
 from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import (
@@ -22,7 +29,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError, PathMapping
 from ..core.catalog.query import CatalogSearch
-from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, read_catalog_layer, search_catalog, sensors_of
+from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, search_catalog, sensors_of
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
 from ..qgis_io import settings
@@ -200,7 +207,7 @@ class CatalogDock(PluginDock):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide()
-        self.table.doubleClicked.connect(lambda index: self.open_records([self.model.records[index.row()]]))
+        self.table.doubleClicked.connect(lambda index: self._activated(self.model.records[index.row()]))
         self.table.selectionModel().selectionChanged.connect(self._selection_changed)
         self.model.layoutChanged.connect(self._redraw)
         self.model.layoutChanged.connect(self._apply_work_filter)
@@ -231,9 +238,12 @@ class CatalogDock(PluginDock):
             "pick": self.tr("地図上の範囲をクリックして一覧の画像を選ぶ"),
             "folders": self.tr("この PC で画像のパスの読み替え（pathMappings）に選んだフォルダを忘れる"),
             "event": self.tr("選んだ画像をイベントに紐付ける"),
+            "record": self.tr("選んだ画像を、画像ファイルを開かずに観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから。"
+                              "生データが別システムにしかない画像に。ダブルクリックでも）。背景地図の上をクリックして記録"),
         }
         for key, text, slot in [
             ("open", self.tr("開く"), lambda: self.open_records(self.chosen())),
+            ("record", self.tr("ファイルなしで記録"), lambda: self.record_without_files()),
             ("zoom", self.tr("範囲へ移動"), self.zoom_to_chosen),
             ("copy", self.tr("パスをコピー"), self.copy_paths),
             ("layer", self.tr("レイヤーとして追加"), self.add_layer),
@@ -327,6 +337,10 @@ class CatalogDock(PluginDock):
         self.search_button.setEnabled(bool(self.catalogs()))
         if not self.catalogs():
             self.status.setText(self.tr("設定ファイルに画像カタログなし"))
+        if self._shown_catalog is not None:
+            # The list's catalog as the settings file says now (`imageFiles` changed, say).
+            self._shown_catalog = next((c for c in self.catalogs() if c.url == self._shown_catalog.url and c.label == self._shown_catalog.label),
+                                       self._shown_catalog)
         self._catalog_changed()
 
     def _catalog_changed(self) -> None:
@@ -334,12 +348,25 @@ class CatalogDock(PluginDock):
         self.sensor_box.addItem("")
         catalog = self.catalog()
         self._show_keyword(catalog)
+        self._show_file_buttons()
         if catalog is None or not catalog.fields.get("sensor"):
             return
         client = self.context.esri()
         token = self.context.token_for(catalog.url, catalog.token)
         self._start(self.tr("センサーの取得"), lambda task: sensors_of(client, catalog, token),
                     lambda sensors: self.sensor_box.addItems(sensors) if self.catalog() is catalog else None, lambda m: None)
+
+    def has_files(self) -> bool:
+        """Whether the list's catalog (else the one chosen) has image files to open (not `imageFiles: false`)."""
+        catalog = self._shown_catalog or self.catalog()
+        return catalog is None or catalog.image_files
+
+    def _show_file_buttons(self) -> None:
+        """A catalog without image files: 「ファイルなしで記録」 instead of 「開く」, and no paths to copy or folders to forget."""
+        files = self.has_files()
+        for key in ("open", "copy", "folders"):
+            self.buttons[key].setVisible(files)
+        self.buttons["record"].setVisible(not files)
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
         """「フリーワード」 only for a catalog with `fields.keywords`, its hint naming them."""
@@ -437,6 +464,7 @@ class CatalogDock(PluginDock):
 
     def show_records(self, catalog: CatalogConfig, records, overlaps=None) -> None:
         self._shown_catalog = catalog
+        self._show_file_buttons()
         self.model.set_records(catalog, records, overlaps, work=self.context.config.assignments is not None)
         # The list comes newest first (類似画像: the most alike first): the heading says so without sorting again.
         header = self.table.horizontalHeader()
@@ -609,7 +637,7 @@ class CatalogDock(PluginDock):
         if self.overlay is not None:
             self.overlay.choose(rows, [self.model.records[r].id for r in rows])
         has = bool(rows)
-        for key in ("open", "zoom", "copy", "similar"):
+        for key in ("open", "record", "zoom", "copy", "similar"):
             self.buttons[key].setEnabled(has)
         if len(rows) == 1:
             self.table.scrollTo(self.model.index(rows[0], 0))
@@ -733,17 +761,56 @@ class CatalogDock(PluginDock):
     def choose_folder(self, mapping: PathMapping) -> Optional[str]:
         return QFileDialog.getExistingDirectory(self, self.tr("「{label}」（{prefix}）のフォルダの選択").format(label=mapping.label, prefix=mapping.prefix)) or None
 
+    def _activated(self, record: CatalogRecord) -> None:
+        """A double click: the image opened, or recorded without its file in a catalog without image files."""
+        if self.has_files():
+            self.open_records([record])
+        else:
+            self.record_without_files([record])
+
+    #: The 「観測記録」 dock (plugin.py sets it).
+    observations: Optional[Callable[[], object]] = None
+
+    def record_without_files(self, records=None):
+        """
+        「ファイルなしで記録」: the chosen images (`records`) listed in 観測記録
+        without their files, with the catalog's id, time and footprint; the
+        first one is recorded on (the map moved to it). Its entry, None when
+        none could be.
+        """
+        records = self.chosen() if records is None else list(records)
+        images = [i for i in (listed_image(r) for r in records) if i is not None]
+        if not images:
+            self.status.setText(self.tr("画像 ID のある画像を一覧で選択（Ctrl・Shift + クリックで複数）"))
+            return None
+        dock = self.observations() if self.observations else None
+        entry = dock.list_catalog_images(images) if dock is not None else None
+        if entry is None:
+            self.status.setText(self.tr("観測記録は使用不可（記録の保存先なし）"))
+            return None
+        if len(images) == 1:
+            self.status.setText(self.tr("{id} を観測記録へ（ファイルなし）").format(id=entry.name))
+        else:
+            self.status.setText(self.tr("{n} 件を観測記録へ（ファイルなし）。◀ ▶ で次の画像").format(n=len(images)))
+        return entry
+
     def open_records(self, records) -> list:
         """
         Opens images of the list as raster layers (a record whose path is a
         folder: the images chosen among its files, in a group); the reason is
-        shown for those that cannot be opened.
+        shown for those that cannot be opened, with 「ファイルなしで記録」 for
+        them. In a catalog without image files, they are recorded without
+        their files instead.
         """
         catalog = self._shown_catalog
         if catalog is None:
             return []
+        if not catalog.image_files:
+            self.record_without_files(records)
+            return []
         layers = []
         problems = []
+        unopened = []
         for record in records:
             try:
                 opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder,
@@ -753,14 +820,43 @@ class CatalogDock(PluginDock):
                 break
             except PathError as error:
                 problems.append(str(error))
+                unopened.append(record)
                 continue
             add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
         if problems:
-            self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
+            self._say_unopened(problems, [r for r in unopened if r.id])
             self.status.setText(problems[-1])
         return layers
+
+    def _say_unopened(self, problems: list[str], unopened: list[CatalogRecord]) -> None:
+        """Why images could not be opened, in the message bar; with 「ファイルなしで記録」 for those (their raw data elsewhere, say)."""
+        bar = self.iface.messageBar()
+        dock = self.observations() if self.observations else None
+        if not unopened or dock is None:
+            bar.pushWarning(TITLE, " / ".join(problems))
+            return
+        widget = bar.createMessage(TITLE, " / ".join(problems))
+        button = QPushButton(self.tr("ファイルなしで記録"))
+        button.setToolTip(self.tr("開けなかった画像 {n} 件を、ファイルなしで観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから）").format(n=len(unopened)))
+
+        def record() -> None:
+            self.record_without_files(unopened)
+            try:
+                bar.popWidget(widget)
+            except RuntimeError:  # closed meanwhile
+                pass
+
+        button.clicked.connect(record)
+        widget.layout().addWidget(button)
+        # One at a time (opening again does not stack them).
+        before = getattr(self, "unopened_message", None)
+        if before is not None and any(w is before for w in bar.items()):
+            bar.popWidget(before)
+        bar.pushWidget(widget, Qgis.MessageLevel.Warning, 0)
+        #: The last such message (for scripts and tests).
+        self.unopened_message = widget
 
     #: The 「イベント」 dock (plugin.py sets it).
     event_linker: Optional[Callable[[], object]] = None
