@@ -953,7 +953,7 @@ const SPEC = [
         B("imageFiles", "画像ファイル（imageFiles）", { help: "false: 画像ファイルのないカタログ（生データは別システムだけ）。「開く」の代わりに「ファイルなしで記録」（観測記録へ ID・撮像日時・範囲ごと）。fields.source は不要。既定 true" }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
-        WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
+        WHERE, N("maxResults", "1 回に読む件数", { min: 1, max: 5000, ph: "500", help: "検索と「続きを読む」で 1 回に読む画像の数（新しい順）。サービスの maxRecordCount より多くても分けて読む" }),
         S("angleKind", "角度の種類", [["offNadir", "オフナディア角"], ["incidence", "入射角"], ["elevation", "仰角"]]),
         N("orbitHeight", "軌道高度（km）", { ph: "600" }),
         J("imagePatterns", "フォルダのレコードの画像（imagePatterns）", { ph: '{ "WV03": "_PAN\\\\.tif$", "*": "\\\\.tif$" }', help: "{ センサー名: 正規表現か配列, \"*\": … }、文字列か配列も可" }),

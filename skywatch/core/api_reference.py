@@ -61,7 +61,7 @@ ENTRIES: list[Entry] = [
           "dock = api.observation_dock\nlen(dock.book.records)",
           ["book", "save_csv", "to_layers", "set_observer", "open_export", "open_import", "bulk_edit", "views"]),
     Entry("image_catalog", "ドックと道具", "画像カタログ", "画像の検索・一覧・開く。", "api.image_catalog.search()\n[r.id for r in api.image_catalog.records]",
-          ["search", "records", "choose", "open_records", "find_similar", "add_layer", "views"]),
+          ["search", "read_more", "records", "choose", "open_records", "find_similar", "add_layer", "views"]),
     Entry("notices", "ドックと道具", "通知（新着画像）", "見張りの条件と新着画像。", "api.notices.watch_point(139.7, 35.6)", ["store", "check", "watch_point"]),
     Entry("imaging_plan", "ドックと道具", "撮像計画", "地点を撮像できる衛星と時刻の計算。", "api.imaging_plan.set_point(139.7, 35.6)\napi.imaging_plan.run()",
           ["plan", "shown", "run", "set_point", "csv_text", "add_layer", "to_requests"]),
