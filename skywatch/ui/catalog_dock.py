@@ -36,7 +36,7 @@ from ..core.catalog.query import CatalogSearch
 from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, search_catalog, sensors_of
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
-from ..core.util import read_day, read_number
+from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
@@ -93,12 +93,37 @@ def _key(record: CatalogRecord) -> Any:
     return ("oid", record.object_id) if record.object_id is not None else ("id", record.id, record.acquired)
 
 
-def _day(edit: QLineEdit) -> str:
-    """The day typed as yyyy-mm-dd (2026/11/9, 20261109, full-width digits too); '' when empty or unreadable (`input_problem` tells which)."""
+def _when(edit: QLineEdit, day: str = "") -> str:
+    """
+    The day, or day and time, typed as `yyyy-mm-dd` or `yyyy-mm-dd hh:mm`
+    (2026/11/9 10:30, 20261109, full-width digits too; a time alone on
+    `day`, the start's day); '' when empty or unreadable (`input_problem`
+    tells which).
+    """
     try:
-        return read_day(edit.text())
+        return read_day_time(edit.text(), day)
     except ValueError:
         return ""
+
+
+def _is_clock(text: str) -> bool:
+    """Whether `text` is a time of day alone (12:00)."""
+    try:
+        return bool(read_clock(text))
+    except ValueError:
+        return False
+
+
+def _period(start: QLineEdit, end: QLineEdit) -> tuple[str, str]:
+    """A period typed (`_when`): the end may be a time alone (〜 12:00), on the start's day."""
+    a = _when(start)
+    return a, _when(end, a[:10])
+
+
+#: The hint of the period boxes.
+PERIOD_TIP = ("日付だけなら、その日の 0 時から（〜の左）・その日の終わりまで（〜の右）。"
+              "時刻をつけると分（秒も書けば秒）の単位で絞る（例 2026-11-09 10:30。10時30分・1030 も可）。"
+              "右に時刻だけ（12:00）なら左と同じ日。時刻はこの PC の時刻で、一覧の日時と同じ")
 
 
 class CatalogDock(PluginDock):
@@ -156,7 +181,7 @@ class CatalogDock(PluginDock):
         #: The area drawn on the map (its corners, longitude / latitude; the ring closed); None before one is drawn.
         self.drawn: Optional[list] = None
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
-        form.addRow(self.tr("撮像日"), self._range(self.acquired_from, self.acquired_to))
+        form.addRow(self.tr("撮像日時"), self._period_row(self.acquired_from, self.acquired_to))
         # 「フリーワード」: words looked for in the catalog's `fields.keywords` (shown only for a catalog that has them).
         self.keyword = QLineEdit()
         self.keyword.setClearButtonEnabled(True)
@@ -176,9 +201,9 @@ class CatalogDock(PluginDock):
         self.more.toggled.connect(more_body.setVisible)
         more = QFormLayout(more_body)
         self.registered_from, self.registered_to = QLineEdit(), QLineEdit()
-        more.addRow(self.tr("登録日"), self._range(self.registered_from, self.registered_to))
+        more.addRow(self.tr("登録日時"), self._period_row(self.registered_from, self.registered_to))
         self.system_from, self.system_to = QLineEdit(), QLineEdit()
-        more.addRow(self.tr("システム登録日"), self._range(self.system_from, self.system_to))
+        more.addRow(self.tr("システム登録日時"), self._period_row(self.system_from, self.system_to))
         self.sensor_box = QComboBox()
         self.sensor_box.setEditable(True)
         more.addRow(self.tr("センサー"), self.sensor_box)
@@ -342,6 +367,12 @@ class CatalogDock(PluginDock):
 
     # --- Form -------------------------------------------------------------------------------------
 
+    def _period_row(self, a: QLineEdit, b: QLineEdit) -> QWidget:
+        """A period's two boxes: a day, or a day and a time (PERIOD_TIP)."""
+        for box in (a, b):
+            box.setToolTip(self.tr(PERIOD_TIP))
+        return self._range(a, b, "YYYY-MM-DD [hh:mm]", "YYYY-MM-DD [hh:mm]")
+
     def _range(self, a: QLineEdit, b: QLineEdit, pa: str = "YYYY-MM-DD", pb: str = "YYYY-MM-DD") -> QWidget:
         a.setPlaceholderText(pa)
         b.setPlaceholderText(pb)
@@ -434,33 +465,52 @@ class CatalogDock(PluginDock):
         """The search the form describes (詳細条件 only while it is open; the free word only when the catalog has keyword fields)."""
         catalog = self.catalog()
         keyword = self.keyword.text().strip() if catalog is not None and catalog.keyword_fields else ""
-        search = CatalogSearch(acquired_from=_day(self.acquired_from), acquired_to=_day(self.acquired_to), keyword=keyword)
+        acquired = _period(self.acquired_from, self.acquired_to)
+        search = CatalogSearch(acquired_from=acquired[0], acquired_to=acquired[1], keyword=keyword)
         if not self.more.isChecked():
             return search
-        return replace(search, registered_from=_day(self.registered_from), registered_to=_day(self.registered_to),
-                       system_registered_from=_day(self.system_from), system_registered_to=_day(self.system_to),
+        registered, system = _period(self.registered_from, self.registered_to), _period(self.system_from, self.system_to)
+        return replace(search, registered_from=registered[0], registered_to=registered[1],
+                       system_registered_from=system[0], system_registered_to=system[1],
                        sensor=self.sensor_box.currentText().strip(), max_angle=_number(self.max_angle),
                        azimuth_from=_number(self.azimuth_from), azimuth_to=_number(self.azimuth_to), where=self.where.text().strip())
 
     def input_problem(self, days: bool = True) -> Optional[str]:
         """
-        Why a typed condition can't be read (a day such as 2026-02-30, an angle
-        with letters), or None. The search stops and says so, rather than
-        quietly asking without that condition (the whole period, every angle).
+        Why a typed condition can't be read (a day such as 2026-02-30, a time
+        such as 25:00, an angle with letters), or None. The search stops and
+        says so, rather than quietly asking without that condition (the whole
+        period, every angle).
         """
-        boxes = [(self.tr("撮像日"), self.acquired_from, read_day), (self.tr("撮像日"), self.acquired_to, read_day)] if days else []
+        periods = [(self.tr("撮像日時"), self.acquired_from, self.acquired_to)] if days else []
+        numbers = []
         if self.more.isChecked():
             if days:
-                boxes += [(self.tr("登録日"), e, read_day) for e in (self.registered_from, self.registered_to)]
-                boxes += [(self.tr("システム登録日"), e, read_day) for e in (self.system_from, self.system_to)]
-            boxes += [(self.tr("角度"), self.max_angle, read_number)]
-            boxes += [(self.tr("方位角"), e, read_number) for e in (self.azimuth_from, self.azimuth_to)]
-        for label, edit, read in boxes:
+                periods += [(self.tr("登録日時"), self.registered_from, self.registered_to),
+                            (self.tr("システム登録日時"), self.system_from, self.system_to)]
+            numbers += [(self.tr("角度"), self.max_angle)]
+            numbers += [(self.tr("方位角"), e) for e in (self.azimuth_from, self.azimuth_to)]
+
+        def unread(label: str, edit: QLineEdit, kind: str) -> str:
+            return self.tr("{label}の「{text}」を読めません（{kind}）").format(label=label, text=edit.text().strip(), kind=kind)
+
+        for label, start, end in periods:
             try:
-                read(edit.text())
+                first = read_day_time(start.text())
             except ValueError:
-                kind = self.tr("日付は 2026-11-09 の形で") if read is read_day else self.tr("数で")
-                return self.tr("{label}の「{text}」を読めません（{kind}）").format(label=label, text=edit.text().strip(), kind=kind)
+                return unread(label, start, self.tr("日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で"))
+            try:
+                read_day_time(end.text(), first[:10])
+            except ValueError:
+                alone = not first and bool(end.text().strip()) and _is_clock(end.text())
+                kind = (self.tr("時刻だけなら左に日付を") if alone
+                        else self.tr("日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で"))
+                return unread(label, end, kind)
+        for label, edit in numbers:
+            try:
+                read_number(edit.text())
+            except ValueError:
+                return unread(label, edit, self.tr("数で"))
         return None
 
     def extent(self) -> Optional[list[float]]:

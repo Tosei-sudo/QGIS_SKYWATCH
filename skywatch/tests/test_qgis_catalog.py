@@ -542,7 +542,7 @@ def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin)
     asked = where()
     assert "ACQ >= TIMESTAMP" in asked and "ACQ < TIMESTAMP" in asked and "OFF_NADIR <= 30" in asked
     # What can't be read stops the search and says which box: nothing is asked.
-    for box, text, said in ((dock.acquired_to, "2026-02-30", "撮像日の「2026-02-30」を読めません（日付は 2026-11-09 の形で）"),
+    for box, text, said in ((dock.acquired_to, "2026-02-30", "撮像日時の「2026-02-30」を読めません（日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で）"),
                             (dock.max_angle, "三十", "角度の「三十」を読めません（数で）")):
         before = box.text()
         box.setText(text)
@@ -556,6 +556,52 @@ def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin)
     assert dock.input_problem() is None
     dock.acquired_from.clear()
     dock.acquired_to.clear()
+
+
+def test_the_period_takes_times_to_the_minute(plugin):
+    from datetime import datetime
+
+    from skywatch.core.util import utc_text
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
+
+    def where():
+        return next(f for u, f in fake.asked if u.endswith("/query") and "returnCountOnly" not in f)["where"]
+
+    def ms(*args):
+        return datetime(*args).timestamp() * 1000
+
+    # A day and a time; the end a time alone, on the start's day (〜 12:00 takes in 12:00:59).
+    dock.acquired_from.setText("2026/11/9 10:30")
+    dock.acquired_to.setText("１２：００")
+    assert dock.conditions().acquired_from == "2026-11-09 10:30" and dock.conditions().acquired_to == "2026-11-09 12:00"
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    asked = where()
+    assert f"ACQ >= TIMESTAMP '{utc_text(ms(2026, 11, 9, 10, 30))}'" in asked
+    assert f"ACQ < TIMESTAMP '{utc_text(ms(2026, 11, 9, 12, 1))}'" in asked
+    # The 詳細条件 periods take times too.
+    dock.more.setChecked(True)
+    dock.registered_from.setText("2026-11-01 9:00")
+    dock.system_to.setText("2026-11-08T23:30")
+    c = dock.conditions()
+    assert (c.registered_from, c.system_registered_to) == ("2026-11-01 09:00", "2026-11-08 23:30")
+    # A time alone needs a day on the left; a time that is not one stops the search.
+    for start, end, said in (("", "12:00", "撮像日時の「12:00」を読めません（時刻だけなら左に日付を）"),
+                             ("2026-11-09 25:00", "", "撮像日時の「2026-11-09 25:00」を読めません（日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で）")):
+        dock.acquired_from.setText(start)
+        dock.acquired_to.setText(end)
+        fake.asked.clear()
+        dock.search()
+        assert dock.status.text() == said and not fake.asked
+    assert "2026-11-09 10:30" in dock.acquired_from.toolTip() and dock.acquired_to.placeholderText() == "YYYY-MM-DD [hh:mm]"
+    for box in (dock.acquired_from, dock.acquired_to, dock.registered_from, dock.registered_to, dock.system_from, dock.system_to):
+        box.clear()
+    dock.more.setChecked(False)
 
 
 def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugin, monkeypatch):
