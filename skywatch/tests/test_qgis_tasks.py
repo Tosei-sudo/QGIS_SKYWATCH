@@ -209,3 +209,62 @@ def test_slow_result_is_told_in_the_log(monkeypatch):
         assert not any(m.startswith("速い表示:") for m in heard)
     finally:
         log.messageReceived.disconnect(got)
+
+
+def test_requests_while_widgets_are_deleted(http):
+    """
+    Requests in tasks while the main thread deletes widgets with Python slots (docks and dialogs closing).
+    The request was driven from Python in its thread: it held Python's lock while Qt took its own, and the main
+    thread, deleting a widget, held one of those and waited for Python's, so QGIS could freeze. Its short-lived
+    Python wrappers were also taken for new objects at the same address ("wrapped C/C++ object … has been
+    deleted", answers "cut off"); both showed within seconds under this load.
+    """
+    from qgis.PyQt.QtCore import QTimer
+    from qgis.PyQt.QtWidgets import QLineEdit, QPushButton, QWidget
+
+    stop = threading.Event()
+    answers, failures = [], []
+
+    def ask(task, n):
+        while not stop.is_set():
+            got = get_bytes(f"{http}/ok?n={n}") if n % 2 else qgis_transport()(http + "/ok", {"n": str(n)})
+            answers.append(got == (f"got /ok?n={n}".encode() if n % 2 else f"posted n={n}".encode()) or got)
+        return n
+
+    ended = []
+    for n in range(4):
+        run_task(f"要求 {n}", lambda task, n=n: ask(task, n), ended.append, failures.append)
+    finish = time.monotonic() + 2.5
+    while time.monotonic() < finish:
+        for _ in range(20):
+            sender = QTimer()
+            panel = QWidget()
+            button, line = QPushButton("x", panel), QLineEdit(panel)
+            button.clicked.connect(lambda *_: None)
+            line.textChanged.connect(lambda *_: None)
+            sender.timeout.connect(line.clear)
+            panel.destroyed.connect(lambda *_: None)
+            panel.deleteLater()
+        APP.processEvents()
+    stop.set()
+    assert wait_for(lambda: len(ended) + len(failures) == 4, 30000)
+    assert failures == [] and sorted(ended) == [0, 1, 2, 3]
+    assert len(answers) > 20 and all(a is True for a in answers), [a for a in answers if a is not True][:3]
+
+
+def test_a_request_that_takes_too_long_gives_up(silent_server, monkeypatch):
+    from skywatch.qgis_io import network
+
+    url, connections = silent_server
+    monkeypatch.setattr(network, "_time_limit_ms", lambda url: 300)
+    begun = time.monotonic()
+    kind, message = in_task(lambda: get_bytes(url + "?token=secret"))
+    assert kind == "failed" and message == f"応答なし（タイムアウト）（{url}）"
+    assert time.monotonic() - begun < 5
+    # Its thread ends at once (the event loop QGIS waited in was quit), and is let go.
+    assert wait_for(lambda: all(e.wait(0) for e in network._ending), 5000)
+
+
+def test_an_authentication_that_cannot_be_used_is_told(http):
+    kind, message = in_task(lambda: get_bytes(http + "/ok", "nosuchcfg"))
+    assert (kind, message) == ("failed", f"認証設定（nosuchcfg）を使えず（{http}/ok）")
