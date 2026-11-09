@@ -34,6 +34,7 @@ from .taxonomy import (
     SpecField, Taxon, activities_at, find, kind_of, move_taxon, normalize, path_of, place_taxon, remove_taxon, rewrite, taxonomy_of,
     update_taxon, with_kinds, within,
 )
+from ..util import read_number
 
 _UNSET = object()
 #: How far back of the last read a refresh asks for (computers' clocks differ; what is read twice merges the same).
@@ -577,11 +578,11 @@ class ObservationBook:
         now = now_ms()
 
         def number(v: str) -> Optional[float]:
+            # Full-width digits and a unit (１２０．５, 120 m, 30°) too; the dock stops on what can't be read.
             try:
-                n = float(v) if v and v.strip() else None
+                return read_number(v)
             except ValueError:
                 return None
-            return n if n is not None and n == n and abs(n) != float("inf") else None
 
         length = number(values.length)
         heading = number(values.heading)

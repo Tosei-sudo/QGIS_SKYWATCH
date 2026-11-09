@@ -32,6 +32,7 @@ from ..core.catalog.query import CatalogSearch
 from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, search_catalog, sensors_of
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
+from ..core.util import read_day, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
@@ -50,8 +51,9 @@ TITLE = "画像カタログ"
 
 
 def _number(edit: QLineEdit) -> Optional[float]:
+    """The number typed (full-width digits and a ° too); None when empty or unreadable (`input_problem` tells which)."""
     try:
-        return float(edit.text().strip())
+        return read_number(edit.text())
     except ValueError:
         return None
 
@@ -68,7 +70,11 @@ except AttributeError:  # older bindings: the enum unscoped
 
 
 def _day(edit: QLineEdit) -> str:
-    return edit.text().strip().replace("/", "-")
+    """The day typed as yyyy-mm-dd (2026/11/9, 20261109, full-width digits too); '' when empty or unreadable (`input_problem` tells which)."""
+    try:
+        return read_day(edit.text())
+    except ValueError:
+        return ""
 
 
 class CatalogDock(PluginDock):
@@ -393,6 +399,27 @@ class CatalogDock(PluginDock):
                        sensor=self.sensor_box.currentText().strip(), max_angle=_number(self.max_angle),
                        azimuth_from=_number(self.azimuth_from), azimuth_to=_number(self.azimuth_to), where=self.where.text().strip())
 
+    def input_problem(self, days: bool = True) -> Optional[str]:
+        """
+        Why a typed condition can't be read (a day such as 2026-02-30, an angle
+        with letters), or None. The search stops and says so, rather than
+        quietly asking without that condition (the whole period, every angle).
+        """
+        boxes = [(self.tr("撮像日"), self.acquired_from, read_day), (self.tr("撮像日"), self.acquired_to, read_day)] if days else []
+        if self.more.isChecked():
+            if days:
+                boxes += [(self.tr("登録日"), e, read_day) for e in (self.registered_from, self.registered_to)]
+                boxes += [(self.tr("システム登録日"), e, read_day) for e in (self.system_from, self.system_to)]
+            boxes += [(self.tr("角度"), self.max_angle, read_number)]
+            boxes += [(self.tr("方位角"), e, read_number) for e in (self.azimuth_from, self.azimuth_to)]
+        for label, edit, read in boxes:
+            try:
+                read(edit.text())
+            except ValueError:
+                kind = self.tr("日付は 2026-11-09 の形で") if read is read_day else self.tr("数で")
+                return self.tr("{label}の「{text}」を読めません（{kind}）").format(label=label, text=edit.text().strip(), kind=kind)
+        return None
+
     def extent(self) -> Optional[list[float]]:
         """The map's extent in WGS 84 ([xmin, ymin, xmax, ymax])."""
         box = to_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(self.canvas.extent())
@@ -421,6 +448,10 @@ class CatalogDock(PluginDock):
 
     def search(self) -> None:
         """Searches the chosen catalog (images like the one compared with, during 「類似画像の検索」)."""
+        problem = self.input_problem()
+        if problem:
+            self.status.setText(problem)
+            return
         if self.reference is not None:
             self._search_similar()
             return
@@ -912,6 +943,11 @@ class CatalogDock(PluginDock):
     def _watch(self) -> None:
         catalog = self.catalog()
         if catalog is None or self.watch_requested is None:
+            return
+        # A watch keeps the sensor, angle, azimuth, SQL and free word (not the days).
+        problem = self.input_problem(days=False)
+        if problem:
+            self.status.setText(problem)
             return
         info = self.layers.get(catalog.url)
         if info is None:

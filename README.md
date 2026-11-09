@@ -475,7 +475,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `timeZone` | 日時のタイムゾーン（項目・`{now}` で別のゾーンを書いたもの以外） | `Asia/Tokyo` |
 | `newline` | `crlf`・`lf` | `crlf` |
 | `clipboard` | 「通報」でクリップボードへコピー | `true` |
-| `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可） | なし |
+| `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可）。その文字コードで書けない文字（cp932 の —・é・絵文字など）はファイルだけ ? にして画面に出す | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
 
 項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）。
@@ -624,7 +624,7 @@ Python からは `api.observation_dock.open_import()`（`choose_csv(path)`・`se
 | `limit` | 一覧の最大行数（残りは「…ほか n 件」） | 20 |
 | `dateFormat`・`timeZone` | 日時の書式とタイムゾーン | `%m/%d %H:%M`・`Asia/Tokyo` |
 | `newline` | `crlf`・`lf` | `crlf` |
-| `file` | パスか `{ "path", "encoding", "append" }`。パスの `{now}`（`{now:%Y%m%d}` で書式） | なし |
+| `file` | パスか `{ "path", "encoding", "append" }`。パスの `{now}`（`{now:%Y%m%d}` で書式）。書けない文字はファイルだけ ? にして画面に出す | なし |
 
 ```jsonc
 "assignments": "https://…/Work/FeatureServer/0",

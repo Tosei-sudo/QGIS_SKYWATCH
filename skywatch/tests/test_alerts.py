@@ -179,10 +179,12 @@ def test_write_file_appends_in_its_encoding(tmp_path):
     s = alert_settings_of({"formats": [{"name": "a", "file": {"path": str(tmp_path / "out" / "{name}_{now:%Y%m%d}.txt"), "encoding": "shift_jis", "append": True}}]}, [])
     fmt = s.format()
     at = Moment(now=T0)
-    path = write_file("注目\r\n", fmt, at)
-    write_file("二件目\r\n", fmt, at)
+    path, replaced = write_file("注目\r\n", fmt, at)
+    assert not replaced
+    # What cp932 cannot hold (a dash, an accent, an emoji) becomes ?, and is told: the file is still written.
+    assert write_file("二件目 — Café 🚢\r\n", fmt, at) == (path, True)
     assert path.endswith("a_20251107.txt")
-    assert open(path, "rb").read().decode("cp932") == "注目\r\n二件目\r\n"
+    assert open(path, "rb").read().decode("cp932") == "注目\r\n二件目 ? Caf? ?\r\n"
 
 
 def esri():

@@ -23,7 +23,7 @@ from ..core.spectral import (
 )
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name
-from .docks import PluginDock
+from .docks import PluginDock, save_text
 
 try:  # Qt5 / Qt6
     from qgis.core import QgsWkbTypes
@@ -476,8 +476,10 @@ class SpectralDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, _tr("CSV 保存"), f"{base}_spectrum.csv", "CSV (*.csv)")
             if not path:
                 return None
-        with open(path, "w", encoding="utf-8-sig", newline="") as f:
-            f.write(self.csv_text())
+        failed = save_text(path, self.csv_text(), "utf-8-sig", "")
+        if failed:
+            self.iface.messageBar().pushWarning(_tr("スペクトル"), _tr("CSV を保存できない: {m}").format(m=failed))
+            return None
         return path
 
     def _update(self) -> None:

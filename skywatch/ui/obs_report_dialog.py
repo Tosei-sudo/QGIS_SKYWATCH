@@ -27,6 +27,7 @@ from ..core.obs.model import Observation
 from ..core.obs.report import ReportOptions, ReportSelection, report_file_name
 from ..core.obs.taxonomy import kind_of, path_of
 from ..qgis_io.geometry import from_wgs84
+from .docks import save_text
 from .last_inputs import InputMemory
 from .obs_overlay import Mark, Scene, ScenePainter, color_of
 
@@ -265,8 +266,10 @@ class ReportDialog(QDialog):
         if not path:
             self._say("")
             return
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
+        failed = save_text(path, html)
+        if failed:
+            self._say(self.tr("報告書を保存できない: {m}").format(m=failed))
+            return
         self._say(self.tr("報告書を保存: {p}").format(p=path))
 
     def document(self, html: str, image: Optional[QImage]) -> QTextDocument:

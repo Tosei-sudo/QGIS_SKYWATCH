@@ -23,7 +23,7 @@ from ..esri import EsriClient, EsriError, fit_value
 from ..request.export import format_time
 from ..request.model import ImagingRequest
 from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import is_number, is_record, js_string, ms_of, utc_text
+from ..util import encodable, is_number, is_record, js_string, ms_of, utc_text
 from .alerts import ENCODINGS, NEWLINES, EsriSource, FileOutput, LogRow, esri_source_of
 from .assignments import Assignment, Progress, assignees, progress_of, progress_text, same_person
 from .model import Observation
@@ -309,20 +309,24 @@ def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData,
 def file_path(s: HandoverSettings, now: float) -> str:
     """The file's path, `{now:%Y%m%d}` filled (the settings' time zone)."""
     if s.file is None:
-        return ""
+        return "", False
     import re
 
     return re.sub(r"\{now(?::([^}]*))?\}", lambda m: _time(now, s, m.group(1) or "%Y%m%d_%H%M"), s.file.path)
 
 
-def write_file(text: str, s: HandoverSettings, now: float, opener: Callable = open) -> str:
-    """Writes (or appends) the memo to the settings' file; its path."""
+def write_file(text: str, s: HandoverSettings, now: float, opener: Callable = open) -> tuple[str, bool]:
+    """
+    Writes (or appends) the memo to the settings' file: its path, and True when
+    characters the file's encoding cannot hold (cp932: —, é, emoji…) became ?.
+    """
     if s.file is None:
-        return ""
+        return "", False
     path = file_path(s, now)
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
+    text, replaced = encodable(text, s.file.encoding)
     with opener(path, "a" if s.file.append else "w", encoding=s.file.encoding, newline="") as out:
         out.write(text)
-    return path
+    return path, replaced

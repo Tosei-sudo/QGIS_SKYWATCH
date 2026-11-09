@@ -270,6 +270,36 @@ def test_the_activities_switch_with_the_top_class(plugin):
     dock.close_form()
 
 
+def test_a_length_typed_full_width_or_with_a_unit_is_kept_and_an_unreadable_one_keeps_the_form(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    dock.set_two_point(True)
+    dock.map_clicked(139.7, 35.5985, None)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("タンカーB")
+    dock.kind_input.setText("船舶")
+    # Typed with the IME on (full-width digits and point) and with a unit: kept, not quietly dropped.
+    dock.length_input.setText("１２０．５")
+    dock.heading_input.setText("９０°")
+    dock.submit()
+    [a] = dock.book.living()
+    assert a.length == 120.5 and a.heading == 90
+    # Changed to something that is not a number: the form stays open and says which, and the record keeps its length.
+    dock.set_two_point(False)
+    dock.open_form(a.lon, a.lat, editing=a)
+    dock.length_input.setText("120m くらい")
+    dock.submit()
+    assert dock.form.isVisible() and dock.pending is not None
+    assert dock.measure_note.text() == "長さ（m）の「120m くらい」を読めません（数で）"
+    assert dock.book.living()[0].length == 120.5
+    dock.length_input.setText("130 m")
+    dock.submit()
+    assert not dock.form.isVisible() and dock.book.living()[0].length == 130
+    # A file that can't be written (open in Excel, a folder gone): said in the dock, not a Python error.
+    assert dock.save_csv(str(tmp_path / "gone" / "records.csv")) is None
+    assert dock.status.text().startswith("CSV を保存できない: ")
+    assert dock.save_csv(str(tmp_path / "records.csv")) == str(tmp_path / "records.csv")
+
+
 def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     p, iface, dock, layers, _ = plugin
     dock.set_two_point(True)

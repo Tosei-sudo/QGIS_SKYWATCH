@@ -55,7 +55,7 @@ from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock, ask_no, plain_label
+from .docks import PluginDock, ask_no, plain_label, save_text
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
@@ -1744,8 +1744,10 @@ class ImagingPlanDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("予定表 (.ics)"), self.default_ics_name(), self.tr("iCalendar (*.ics)"))
         if not path:
             return
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(plan_ics(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), _now_ms()))
+        failed = save_text(path, plan_ics(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), _now_ms()), newline="")
+        if failed:
+            self.iface.messageBar().pushWarning(self.tr("撮像計画"), self.tr("予定表を保存できない: {m}").format(m=failed))
+            return
         self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像の予定を予定表（.ics）で保存"))
 
     # --- Saving to a plan store -------------------------------------------------------------
@@ -1791,8 +1793,10 @@ class ImagingPlanDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), self.default_file_name(), self.tr("CSV (*.csv)"))
         if not path:
             return
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(self.csv_text())
+        failed = save_text(path, self.csv_text(), newline="")
+        if failed:
+            self.iface.messageBar().pushWarning(self.tr("撮像計画"), self.tr("CSV を保存できない: {m}").format(m=failed))
+            return
         if self.revisit_shown():
             self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("再訪間隔 {n} セルを CSV で保存").format(n=len(self.revisit["cells"])))
         else:
