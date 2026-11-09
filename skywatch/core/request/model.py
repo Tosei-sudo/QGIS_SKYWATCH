@@ -106,6 +106,9 @@ class ImagingRequest:
     """One request. Times are ms since 1970; angles degrees; resolution metres; cloud percent."""
     id: str
     name: str = ""
+    #: 管理番号 and 識別番号: the requester's own numbers (text), handed to the systems as written.
+    management_no: str = ""
+    identification_no: str = ""
     category: str = "臨時"
     achieve: str = "期間内1回"
     start: float = math.nan

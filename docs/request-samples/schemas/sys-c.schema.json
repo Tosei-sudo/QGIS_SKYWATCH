@@ -35,7 +35,8 @@
           "taskId",
           "window",
           "aoi",
-          "priority"
+          "priority",
+          "satellites"
         ],
         "additionalProperties": false,
         "properties": {
@@ -43,6 +44,12 @@
             "type": "string",
             "pattern": "^R-[0-9]{4,}$",
             "x-source": "id"
+          },
+          "controlNo": {
+            "type": "string",
+            "x-source": "managementNo",
+            "default": "",
+            "description": "管理番号（空なら空文字）"
           },
           "label": {
             "type": "string",
@@ -86,11 +93,40 @@
             "x-geometry": "geojson",
             "x-digits": 5
           },
+          "center": {
+            "type": "object",
+            "x-source": "geometry",
+            "x-geometry": "centerGeojson",
+            "x-digits": 5,
+            "description": "オーダーポリゴンの中央（GeoJSON の Point）"
+          },
           "priority": {
             "type": "integer",
             "minimum": 1,
             "maximum": 5,
             "x-source": "priority"
+          },
+          "satellites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "x-source": "seriesSatellites",
+            "default": [
+              ""
+            ],
+            "description": "シリーズで依頼したときのシリーズ配下の衛星。シリーズ指定がなければ既定値 [\"\"]"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "const": [
+              "On"
+            ],
+            "description": "固定値（配列）"
           },
           "constraints": {
             "type": "object",

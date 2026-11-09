@@ -40,6 +40,8 @@
       },
       "columns": [
         { "key": "依頼ID",   "source": "id" },
+        { "key": "管理番号", "source": "managementNo", "default": "-" },
+        { "key": "識別番号", "source": "identificationNo", "format": "%08d" },
         { "key": "名称",     "source": "name" },
         { "key": "区分",     "source": "category", "map": { "定点": "FIX", "臨時": "TMP" } },
         { "key": "衛星",     "source": "satellite" },

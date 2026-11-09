@@ -13,6 +13,11 @@ done again. 「書き出し」 writes one file per system (CSV, or JSON checked
 against its schema), then the history and the raises taken.
 「上限シミュレーション…」 tries other daily limits over the coming days
 without writing anything (limit_sim_dialog.py).
+
+The table can be narrowed to a system, a satellite series, a result and
+words (core/request/view.py): the files of each system are written by
+different people, so the system and series chosen are kept (per user).
+Writing still makes every system's file.
 """
 from __future__ import annotations
 
@@ -36,6 +41,7 @@ from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.model import JST, jst_day, priority_text
+from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
     RequestStoreConfig, add_history, count_history, delete_history, history_where, load_history, load_requests, replaced_where,
     update_history, update_requests,
@@ -50,6 +56,8 @@ from ..qgis_io.tasks import run_task
 from .docks import PluginDock
 
 COLUMNS = ("採用", "システム", "衛星", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+#: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
+_NO_SYSTEM_KEPT = "*none*"
 
 
 def _now_ms() -> float:
@@ -72,6 +80,10 @@ class PlanFileDock(PluginDock):
         #: The 上限シミュレーション window, while open.
         self.simulation = None
         self._rendering = False
+        #: The candidates the table shows (row → candidate), after the filters.
+        self.shown: list = []
+        #: The system and series filters kept from last time, until their choices are there.
+        self._kept_filter = settings.plan_file_filter()
         #: The files last written.
         self.paths: list = []
         #: The 「計画と実績の照合」 dialog, once opened.
@@ -112,6 +124,28 @@ class PlanFileDock(PluginDock):
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
+        filters = QHBoxLayout()
+        self.system_filter = QComboBox()
+        self.system_filter.setToolTip(self.tr("このシステムの依頼だけを表示（見送りは、そのシステムで撮れるものも）。次回も同じ選択"))
+        self.series_filter = QComboBox()
+        self.series_filter.setToolTip(self.tr("この衛星シリーズの依頼だけを表示（採用は割り当てた衛星、見送りは撮れる衛星のシリーズ）。次回も同じ選択"))
+        self.result_filter = QComboBox()
+        for text, value in ((self.tr("すべての結果"), None), (TAKEN, TAKEN), (HELD, HELD), (self.tr("繰り上げ候補"), BOOST)):
+            self.result_filter.addItem(text, value)
+        self.search = QLineEdit()
+        self.search.setClearButtonEnabled(True)
+        self.search.setPlaceholderText(self.tr("名称・ID・番号・衛星"))
+        self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
+        self.search.setMinimumWidth(90)
+        for w in (self.system_filter, self.series_filter, self.result_filter):
+            # Long system or series names do not widen the dock.
+            w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            w.setMinimumContentsLength(8)
+            filters.addWidget(w)
+            w.currentIndexChanged.connect(self._filter_changed)
+        self.search.textChanged.connect(lambda _text: self.render())
+        filters.addWidget(self.search, 1)
+        layout.addLayout(filters)
         self.model = QStandardItemModel(self)
         self.model.itemChanged.connect(self._item_changed)
         self.table = QTableView()
@@ -145,7 +179,7 @@ class PlanFileDock(PluginDock):
         browse.clicked.connect(self._browse)
         out.addWidget(browse)
         self.write_button = QPushButton(self.tr("書き出し"))
-        self.write_button.setToolTip(self.tr("採用の依頼をシステムごとのファイルに書き出し、出力履歴と繰り上げを保存"))
+        self.write_button.setToolTip(self.tr("採用の依頼をシステムごとのファイルに書き出し、出力履歴と繰り上げを保存（表示の絞り込みにかかわらず全システム分）"))
         self.write_button.clicked.connect(lambda: self.write())
         out.addWidget(self.write_button)
         layout.addLayout(out)
@@ -172,6 +206,8 @@ class PlanFileDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.plan = None
+        self._fill_systems()
+        self._fill_series()
         if self.results is not None:
             self.results.close()
             self.results = None
@@ -182,6 +218,55 @@ class PlanFileDock(PluginDock):
         stores = self.context.config.request_stores
         self.store = stores[index] if 0 <= index < len(stores) else None
         self.plan = None
+        self.render()
+
+    # --- Filters --------------------------------------------------------------------------------
+
+    def _fill_systems(self) -> None:
+        """The system filter's choices: every system of the settings, and 「該当システムなし」."""
+        box = self.system_filter
+        was = box.currentData() if box.count() else None
+        if was is None and self._kept_filter.get("system"):
+            kept = self._kept_filter["system"]
+            was = NO_SYSTEM if kept == _NO_SYSTEM_KEPT else kept
+        box.blockSignals(True)
+        box.clear()
+        box.addItem(self.tr("すべてのシステム"), None)
+        for s in self.context.config.request_exports:
+            box.addItem(s.label if s.label == s.system else f"{s.label}（{s.system}）", s.system)
+        box.addItem(self.tr("該当システムなし"), NO_SYSTEM)
+        index = box.findData(was) if was is not None else 0
+        box.setCurrentIndex(max(0, index))
+        box.blockSignals(False)
+
+    def _fill_series(self) -> None:
+        """The series filter's choices: those of the day's candidates, and the systems' own."""
+        box = self.series_filter
+        was = box.currentData() if box.count() else None
+        if was is None and self._kept_filter.get("series"):
+            was = self._kept_filter["series"]
+        box.blockSignals(True)
+        box.clear()
+        box.addItem(self.tr("すべてのシリーズ"), None)
+        names = series_choices(self.plan.candidates if self.plan else [], self.context.config.request_exports)
+        if was and was.lower() not in {n.lower() for n in names}:
+            names.append(was)
+        for name in names:
+            box.addItem(name, name)
+        index = next((i for i in range(box.count()) if was and str(box.itemData(i) or "").lower() == was.lower()), 0)
+        box.setCurrentIndex(index)
+        box.blockSignals(False)
+
+    def candidate_filter(self) -> CandidateFilter:
+        """The filters as chosen."""
+        return CandidateFilter(system=self.system_filter.currentData(), series=self.series_filter.currentData(),
+                               result=self.result_filter.currentData(), text=self.search.text())
+
+    def _filter_changed(self, _index: int = 0) -> None:
+        system, series = self.system_filter.currentData(), self.series_filter.currentData()
+        kept = _NO_SYSTEM_KEPT if system == NO_SYSTEM else system or ""
+        self._kept_filter = {"system": kept, "series": series or ""}
+        settings.set_plan_file_filter(kept, series or "")
         self.render()
 
     def open_simulation(self) -> None:
@@ -292,6 +377,7 @@ class PlanFileDock(PluginDock):
             self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
             self.plan = plan_day(requests, day, systems, sats, clouds, history)
+            self._fill_series()
             self.render()
             taken = sum(1 for c in self.plan.candidates if c.result == TAKEN)
             text = self.tr("{day}: 候補 {n} 件・採用 {t} 件・見送り {h} 件").format(day=day.isoformat(), n=len(self.plan.candidates), t=taken,
@@ -315,7 +401,9 @@ class PlanFileDock(PluginDock):
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(c) for c in COLUMNS])
         plan = self.plan
-        for c in plan.candidates if plan else []:
+        chosen = self.candidate_filter()
+        self.shown = shown(plan.candidates, chosen) if plan else []
+        for c in self.shown:
             r = c.request
             take = QStandardItem()
             take.setCheckable(True)
@@ -342,13 +430,18 @@ class PlanFileDock(PluginDock):
             self.model.appendRow(items)
         self._rendering = False
         rooms = room_text(plan.candidates, plan.systems) if plan else {}
-        self.room.setText("　".join(f"{s.label} {rooms[s.system]}" for s in (plan.systems if plan else [])))
+        listed = [s for s in (plan.systems if plan else []) if not chosen.system or s.system == chosen.system]
+        total = len(plan.candidates) if plan else 0
+        parts = [self.tr("表示 {n}/{m} 件").format(n=len(self.shown), m=total)] if len(self.shown) != total else []
+        self.room.setText("　".join(parts + [f"{s.label} {rooms[s.system]}" for s in listed]))
         self._update_buttons()
 
     def _item_changed(self, item: QStandardItem) -> None:
         if self.plan is None or self._rendering:
             return
-        c = self.plan.candidates[item.row()]
+        if not 0 <= item.row() < len(self.shown):
+            return
+        c = self.shown[item.row()]
         checked = item.checkState() == Qt.CheckState.Checked
         if self.task is not None:
             # Not while writing: the files and history are made from the plan as it was (#84).
@@ -370,21 +463,23 @@ class PlanFileDock(PluginDock):
     def refit(self, keep=None) -> None:
         self.plan.refit()
         self.render()
-        if keep is not None:
-            self.table.selectRow(self.plan.candidates.index(keep))
+        row = next((i for i, c in enumerate(self.shown) if c is keep), -1) if keep is not None else -1
+        if row >= 0:
+            self.table.selectRow(row)
 
     def move(self, step: int) -> None:
-        """Moves the chosen row up or down (kept as a place in the order)."""
+        """Moves the chosen row up or down past the next row shown (kept as a place in the order)."""
         if self.plan is None or self.task is not None:
             return
         row = self.table.currentIndex().row()
-        cands = self.plan.candidates
-        if not (0 <= row < len(cands)) or not (0 <= row + step < len(cands)):
+        rows = self.shown
+        if not (0 <= row < len(rows)) or not (0 <= row + step < len(rows)):
             return
-        for i, c in enumerate(cands):
+        for i, c in enumerate(self.plan.candidates):
             c.rank = float(i)
-        cands[row].rank, cands[row + step].rank = cands[row + step].rank, cands[row].rank
-        self.refit(cands[row])
+        a, b = rows[row], rows[row + step]
+        a.rank, b.rank = b.rank, a.rank
+        self.refit(a)
 
     def reset(self) -> None:
         if self.plan is None or self.task is not None:

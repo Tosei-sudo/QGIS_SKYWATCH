@@ -294,7 +294,7 @@ TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL
 PLAN_FIELDS = {"PLAN_ID": {"type": S, "length": 64}, "PLAN_NAME": S, "SHOT_TIME": T, "SATELLITE": S, "SATELLITE_ID": S, "SENSOR_MODE": S,
                "TARGET": S, "OFF_NADIR": D, "INCIDENCE": D, "PASS_DIR": S, "LOOK_SIDE": S, "STATUS": S, "IMAGE_ID": S, "CREATED_AT": T}
 REQUEST_FIELDS = {
-    "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
+    "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
     "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
@@ -392,7 +392,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             ("浦賀水道 夜間", "定点", "毎回", 139.750, 35.230, 700, "SAR")]):
         d = 0.02
         requests.append({"attributes": {
-            "REQ_ID": str(uuid.UUID(int=5000 + k)), "REQ_NAME": name, "CATEGORY": cat, "ACHIEVE": achieve, "START_AT": _day_start(now) - 2 * DAY,
+            "REQ_ID": str(uuid.UUID(int=5000 + k)), "REQ_NAME": name, "MANAGEMENT_NO": f"M-{k + 1:04d}",
+            "IDENTIFICATION_NO": f"{20261100 + k + 1}", "CATEGORY": cat, "ACHIEVE": achieve, "START_AT": _day_start(now) - 2 * DAY,
             "END_AT": _day_start(now) + 14 * DAY, "REPEAT": "毎日" if cat == "定点" else "", "STATUS": "有効", "PRIORITY": priority, "BOOST": 0,
             "KIND": kind, "SERIES": "", "LOOK_SIDE": "任意", "ORBIT_DIR": "任意", "TIME_OF_DAY": "夜" if kind == "SAR" else "任意",
             "CLOUD_NO_GO": 60 if kind == "光学" else None, "SHAPE_KIND": "範囲", "REQUESTER": "モック", "CREATED_AT": now - 3 * DAY, "UPDATED_AT": now - 3 * DAY},

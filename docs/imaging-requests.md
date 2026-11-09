@@ -38,6 +38,7 @@ flowchart LR
 | `core/request/quota.py` | 並べ替えと枠詰め |
 | `core/request/export.py` | CSV / JSON の組み立て、値の変換 |
 | `core/request/schema.py` | JSON Schema の検証（よく使う範囲を自前で実装） |
+| `core/request/view.py` | 「撮像計画ファイル出力」の一覧の絞り込み（システム・衛星シリーズ・結果・文字、§18） |
 | `ui/request_dock.py` | 「撮像依頼」ドック（一覧・絞り込み・登録フォーム） |
 | `ui/plan_file_dock.py` | 「撮像計画ファイル出力」ドック（日次の計算・確認・書き出し。依頼の登録とは別の人が使うため、撮像依頼ドックから独立） |
 | `core/request/simulate.py` / `ui/limit_sim_dialog.py` | 上限シミュレーション（§17） |
@@ -84,6 +85,8 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。点で指�
 |---|---|---|
 | id | `REQ_ID` | 依頼の ID（UUID） |
 | name | `REQ_NAME` | 名称 |
+| managementNo | `MANAGEMENT_NO` | 管理番号（文字列、任意。出力項目 `managementNo`） |
+| identificationNo | `IDENTIFICATION_NO` | 識別番号（文字列、任意。出力項目 `identificationNo`。管理番号とは別の項目） |
 | category | `CATEGORY` | 定点 / 臨時 |
 | achieve | `ACHIEVE` | 毎回 / 期間内1回 |
 | start / end | `START_AT` / `END_AT` | 期間 |
@@ -195,15 +198,21 @@ flowchart TD
 ```jsonc
 "columns": [
   { "key": "REQUEST_ID", "source": "id" },
+  { "key": "管理番号",   "source": "managementNo", "default": "000" },   // 空なら 000
+  { "key": "識別番号",   "source": "identificationNo", "format": "%08d" }, // 123 → 00000123
   { "key": "START",      "source": "start", "format": "%Y-%m-%dT%H:%M:%S" },
   { "key": "AOI",        "source": "geometry", "geometry": "wkt" },
+  { "key": "CENTER",     "source": "geometry", "geometry": "centerGeojson", "digits": 5 },
+  { "key": "SATS",       "source": "seriesSatellites", "default": "ANY" }, // OPT-X1,OPT-X2 / 空なら ANY
   { "key": "PRIORITY",   "source": "priority" },
   { "key": "SIDE",       "source": "lookSide", "map": { "右": "R", "左": "L", "任意": "" } },
-  { "key": "FIXED",      "value": "1" }          // 固定値
+  { "key": "FIXED",      "value": "001" }          // 固定値（書いたとおりの文字）
 ]
 ```
 - 列の順番は `columns` の並び順。ヘッダー行の有無も設定できる。
 - `allowed` に値の一覧を書けば、それ以外の値が出たときに警告する。
+- `default`: 値が空（なし・空文字・空の配列）のときに書く文字。
+- 配列の項目（§8.3 の「配列」）は、カンマ区切りの 1 つのセルになる（`OPT-X1,OPT-X2`）。固定値に配列を書いた場合も同じ。
 
 ### 8.2 JSON（JSON Schema で指定）
 システムが求める JSON Schema に `x-source` などの注記を足したファイルを置く。
@@ -218,12 +227,22 @@ flowchart TD
       "type": "array", "x-source": "requests",
       "items": {
         "type": "object",
-        "required": ["id", "aoi", "priority"],
+        "required": ["id", "aoi", "priority", "satellites", "cloud"],
         "properties": {
-          "id":       { "type": "string",  "x-source": "id" },
-          "aoi":      { "type": "object",  "x-source": "geometry", "x-geometry": "geojson" },
-          "priority": { "type": "string",  "enum": ["High", "Middle", "Low"], "x-source": "priority" },
-          "from":     { "type": "string",  "format": "date-time", "x-source": "start" }
+          "id":         { "type": "string",  "x-source": "id" },
+          "controlNo":  { "type": "string",  "x-source": "managementNo" },
+          "identNo":    { "type": "string",  "x-source": "identificationNo" },
+          "aoi":        { "type": "object",  "x-source": "geometry", "x-geometry": "geojson" },
+          "center":     { "type": "object",  "x-source": "geometry", "x-geometry": "centerGeojson" },
+          "priority":   { "type": "string",  "enum": ["High", "Middle", "Low"], "x-source": "priority" },
+          "from":       { "type": "string",  "format": "date-time", "x-source": "start" },
+          // シリーズで依頼したときのシリーズ配下の衛星。シリーズ指定のない依頼は [""]
+          "satellites": { "type": "array", "items": { "type": "string" }, "minItems": 1,
+                          "x-source": "seriesSatellites", "default": [""] },
+          // 必須だが雲量の指定がない依頼もある → 既定値 100
+          "cloud":      { "type": "integer", "x-source": "cloudMax", "default": 100 },
+          "options":    { "type": "array", "items": { "type": "string" }, "const": ["On"] },  // 固定値
+          "tags":       { "type": "array", "items": { "type": "string" }, "default": [] }     // いつも []
         }
       }
     }
@@ -231,15 +250,68 @@ flowchart TD
 }
 ```
 - `x-source`: 入れる項目。`requests` の付いた配列が依頼の一覧になり、`items` の中の `x-source` は依頼 1 件ごとの項目を指す。
-- `const` が書かれた項目は、その値をそのまま出す（`x-source` 不要）。
-- `x-format` / `x-map` / `x-geometry` / `x-digits`: CSV の `format` / `map` / `geometry` と同じ働き。
+- `x-format` / `x-map` / `x-geometry` / `x-digits`: CSV の `format` / `map` / `geometry` / `digits` と同じ働き。
 - 検証で扱う範囲: `type`、`required`、`enum`、`const`、`pattern`、`minimum` / `maximum`、`minLength` / `maxLength`、`minItems` / `maxItems`、`format`（date / date-time）、`items`、`properties`、`additionalProperties`。外部ライブラリの jsonschema を使う場合は、方針どおり Windows 版の zip にだけ同梱する。
 
+#### 固定値（`const`）と既定値（`default`）
+
+| 書き方 | 出る値 |
+|---|---|
+| `"const": ["On"]` | いつも `["On"]`（`x-source` 不要） |
+| `"default": []`（`x-source` なし） | いつも `[]` |
+| `"x-source": "…", "default": [""]` | 値があればその値、空（なし・空文字・空の配列）なら `[""]` |
+| `"x-source": "…", "default": 100` | 値があればその値、空なら `100`（必須の項目が空で検証に通らないときに使う） |
+| `"default": …, "x-default": false` | `default` は書かない（システム側の既定に任せる。スキーマにもとからある `default` を出したくないとき） |
+
+- `const` と `default` の値は、書いたとおり（配列・オブジェクト・文字・数）に出る。`x-map` や `x-format` はかからない。
+- `default` がないとき: 値がない（none）項目は、必須（`required`）でなく `null` を許さない型なら出さない（必須の項目と `null` を許す型は `null`）。空文字・空の配列はそのまま出る（`""`・`[]`）。必須の項目が空だと、検証で型の違い（`null` は integer 以外 など）や `minItems` で止まる。
+- 設定ファイル作成ツールでは、プロパティの行の「既定値」に書く。配列は JSON で（`[]`・`[""]`・`["On"]`）。型が `string` の固定値・既定値は書いたとおりの文字（`001` も `001` のまま）。
+
+#### 配列の項目
+`series`・`satellites`・`modes`・`seriesSatellites`・`seriesSatelliteIds` は配列の値。
+
+- プロパティの `type` が `array` なら JSON の配列（`["OPT-X1", "OPT-X2"]`）。`items` の `type` が `integer` なら要素を数にする。
+- `type` が `string`（や型なし）なら、カンマ区切りの文字（`"OPT-X1,OPT-X2"`）。これまでの設定はこのまま同じ出力になる。
+- `x-map` とシステムの `values` は要素ごとにかかる。
+
 ### 8.3 使える項目（`source` / `x-source`）
-`id`, `name`, `category`, `satellite`（割り当てた衛星）, `mode`（割り当てたモード）, `achieve`, `start`, `end`, `priority`（§5.4 で変換した値）, `priorityRaw`（出力用の優先度 1〜1000）, `priorityBase`（台帳の値）, `kind`, `series`, `satellites`, `modes`, `offNadirMin`, `offNadirMax`, `incidenceMin`, `incidenceMax`, `lookSide`, `orbitDir`, `resolution`, `timeOfDay`, `cloudMax`, `cloudForecast`, `weatherFlag`, `scenes`, `geometry`, `centerLat`, `centerLon`, `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth`, `requester`, `note`, `system`, `runDate`, `count`（そのファイルの依頼件数）, `warnings`
+
+| 項目 | 中身 |
+|---|---|
+| `id` / `name` | 依頼 ID / 名称 |
+| `managementNo` / `identificationNo` | 管理番号 / 識別番号（台帳の `MANAGEMENT_NO` / `IDENTIFICATION_NO`。別々の項目。依頼フォームで入力、文字のまま出る） |
+| `category` / `achieve` / `repeat` | 区分 / 達成条件 / 繰り返し |
+| `start` / `end` | その日の撮像の窓（§16） |
+| `periodStart` / `periodEnd` | 依頼そのものの期間 |
+| `priority` / `priorityRaw` / `priorityBase` / `boost` | §5.4 で変換した値 / 出力用の優先度 1〜1000 / 台帳の値 / 繰り上げ量 |
+| `kind` | 種別 |
+| `series` / `satellites` / `modes` | 依頼で指定した衛星シリーズ / 衛星 / センサーモード（配列） |
+| `seriesSatellites` | 衛星シリーズで依頼したとき、そのシリーズ配下の個々の衛星（配列）。出力するシステムの衛星のうち、依頼の条件（種別・分解能・角度など）で撮れるもの。衛星カタログの順、モード違いは 1 つにまとめる。シリーズ指定のない依頼は空の配列 |
+| `seriesSatelliteIds` | 同じ衛星の ID（衛星カタログの `id`、配列） |
+| `satellite` / `satelliteId` / `mode` / `sensor` | 割り当てた衛星 / その ID / モード / センサー |
+| `offNadirMin` / `offNadirMax` / `incidenceMin` / `incidenceMax` | 角度の範囲 |
+| `lookSide` / `orbitDir` / `resolution` / `timeOfDay` | 観測方向 / 軌道方向 / 分解能 / 時間帯 |
+| `cloudMax` / `cloudForecast` / `weatherFlag` | 実施しない雲量 / 雲量予報（%） / 気象の注意 |
+| `scenes` | シーン数 |
+| `geometry` | 範囲（§8.4 の書き方） |
+| `centerLat` / `centerLon` / `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth` | 中心・外接矩形の数値 |
+| `requester` / `note` / `warnings` | 依頼者 / メモ / 警告 |
+| `system` / `runDate` / `day` / `count` | システム名 / 出力日時 / 対象日 / そのファイルの依頼件数（ファイル全体の項目。`requests` の外でも使える） |
 
 ### 8.4 座標の書き方（`geometry` / `x-geometry`）
-`wkt` / `geojson` / `bbox`（西,南,東,北）/ `center`（緯度,経度）/ `centerRadius` / `vertices`（緯度経度を並べた文字列）。小数の桁数も指定できる。
+
+| 指定 | 例（小数 3 桁） |
+|---|---|
+| `wkt` | `POLYGON ((139.800 35.450, 139.900 35.450, …))` |
+| `geojson` | `{"type":"Polygon","coordinates":[[[139.8,35.45],…]]}`（JSON ではオブジェクト） |
+| `centerGeojson` | `{"type":"Point","coordinates":[139.85,35.5]}`（オーダーポリゴンの中央。JSON ではオブジェクト） |
+| `bbox` | `139.8,35.45,139.9,35.55`（西,南,東,北） |
+| `center` | `35.5,139.85`（緯度,経度） |
+| `centerRadius` | `35.5,139.85,7.148`（緯度,経度,外接矩形の対角の半分 km） |
+| `vertices` | `35.45,139.8,35.45,139.9,…`（緯度,経度 を頂点の順に） |
+
+- 中央は範囲の外接矩形の真ん中（`center`・`centerLat` / `centerLon` と同じ点）。
+- 小数の桁数は `digits` / `x-digits`（0〜12、既定はシステムの `digits`、無ければ 6）。
 
 ### 8.5 日時
 - **対象日**は JST で区切る（00:00〜24:00 JST）。
@@ -255,6 +327,70 @@ flowchart TD
 | strftime 形式 | `%Y%m%d` → `20261108`、`%Y/%m/%d %H:%M` → `2026/11/08 00:00` |
 
 unix / unixms はタイムゾーンに関係なく同じ値になる。
+
+### 8.6 数値の書式（`format` / `x-format` / 優先度の `format`）
+
+日時の項目（`start`・`end`・`periodStart`・`periodEnd`・`runDate`）以外では、`format`（CSV の列）・`x-format`（JSON のプロパティ）・優先度の変換（§5.4）の `format` は、**printf 形式**（C や Python の `%` と同じ書き方）で数を書く。
+
+#### 書き方
+`%` `[フラグ]` `[幅]` `[.精度]` `変換` の 1 つと、その前後の文字。
+
+| 部分 | 指定 | 意味 |
+|---|---|---|
+| 変換 | `d`（`i`・`u` も同じ） | 整数（10 進） |
+| | `f`（`F`） | 小数（既定は小数 6 桁） |
+| | `e` / `E` | 指数表記（`1.23e+03`） |
+| | `x` / `X` / `o` | 16 進（小文字 / 大文字）/ 8 進 |
+| | `s` | 文字のまま（前後に文字を付けるとき） |
+| フラグ | `0` | 幅に満たない分を 0 で埋める |
+| | `-` | 左寄せ（右側を空白で埋める） |
+| | `+` | 正の数にも `+` を付ける |
+| | ` `（空白） | 正の数の前に空白（負の数の `-` と桁をそろえる） |
+| | `#` | 16 進・8 進に `0x`・`0o` を付ける |
+| 幅 | 数字 | 全体の最小の文字数（符号・小数点も数える） |
+| 精度 | `.` + 数字 | `f`・`e` は小数の桁数、`d` は最小の桁数（足りない分を 0 で）、`s` は最大の文字数 |
+| `%%` | | `%` の文字そのもの |
+
+#### 例
+
+| 書式 | 値 | 出力 | 使いどころ |
+|---|---|---|---|
+| `%d` | `42.6` | `43` | 整数に（四捨五入） |
+| `%03d` | `7` | `007` | 0 埋め 3 桁（優先度・番号） |
+| `%08d` | `"123"`（文字の番号） | `00000123` | 識別番号の桁をそろえる |
+| `%.3d` | `5` | `005` | `%03d` と同じ（精度で桁数） |
+| `%5d` | `42` | `   42` | 右寄せ 5 文字 |
+| `%-5d` | `42` | `42   ` | 左寄せ 5 文字 |
+| `%+d` | `5` | `+5` | 符号を必ず付ける |
+| `%.1f` | `35.4567` | `35.5` | 小数 1 桁 |
+| `%.0f` | `2.5` | `2` | 小数なし（ちょうど半分は偶数側、下の注意） |
+| `%06.2f` | `-3.14159` | `-03.14` | 符号・小数点を含めて 6 文字、0 埋め |
+| `%.2e` | `1234.5` | `1.23e+03` | 指数表記 |
+| `%04X` | `255` | `00FF` | 16 進 4 桁（大文字） |
+| `%#x` | `255` | `0xff` | 16 進に 0x を付ける |
+| `P%02d` | `3` | `P03` | 前に文字を付ける |
+| `%d%%` | `42` | `42%` | 後ろに % を付ける |
+| `ID-%s` | `"abc"` | `ID-abc` | 文字の前に付ける |
+
+#### 決まりごと
+- **整数の変換（`d`・`i`・`u`・`x`・`X`・`o`）は四捨五入してから**書く（`12.5` → `13`、`12.4` → `12`、`-12.5` → `-12`。0.5 は大きい側に）。
+- **小数の変換（`f`・`e`）の丸め**は、コンピューター内部の 2 進数の値で決まる。ちょうど半分のときは偶数側（`%.1f` で `0.25` → `0.2`、`%.0f` で `2.5` → `2`、`3.5` → `4`）。`0.35` は内部では 0.34999… なので `%.1f` で `0.3`、`1.005` は `%.2f` で `1.00`。四捨五入をはっきりさせたいときは、整数の変換（`%d`）を使うか、桁を 1 つ多く出す。
+- **数に見える文字**（`"123"`・`"007"`・`"12.5"`。管理番号・識別番号など）は、数の変換では数として書く（`%05d` で `"123"` → `00123`）。数に見えない文字（`"K-12"`）は、数の変換ではそのまま出る。
+- **書式が合わないとき**（変換が 0 個か 2 個以上、数でない値に数の変換）は、値をそのまま出す（エラーにはしない）。
+- **空の値**（なし・空文字）には書式をかけない。`default` があればそれを書く（`default` には書式はかからない）。
+- **配列**には要素ごとにかける（`seriesSatelliteIds` に `%05d` → `["00042", "00043"]`）。
+- **書く順番**: システムの `values` → 列の `map`（`x-map`）→ 書式 → JSON ではスキーマの型に合わせる。優先度（`priority`）は §5.4 の変換と `format` のあとに、さらに列の書式をかけられる。
+- **JSON の型との関係**: 書式の結果は文字。プロパティの `type` が `integer` / `number` だと数に戻る（`%03d` → `"007"` → `7`）。0 埋めや `+` を残したいときは `"type": "string"` にする。
+
+| `x-format` | `type` | 値 `7` の出力 |
+|---|---|---|
+| `%03d` | `string` | `"007"` |
+| `%03d` | `integer` | `7` |
+| `%.1f` | `string` | `"7.0"` |
+| `%.1f` | `number` | `7.0`（JSON では `7.0`） |
+
+- **書式のない数**は、CSV ではそのまま（`35.5`・`1e-05` のように短い表記）、JSON では数として出る。座標は `digits` / `x-digits` で丸める（`wkt` だけは桁数をそろえて `35.450` のように書く）。
+- **優先度の `format`**: §5.4 の変換のあとにかかる（`{ "linear": { "min": 0, "max": 99, "higherIsLarger": true }, "format": "%02d" }` → `07`）。対応表（`table`）の値が文字（`High`）のときは、`%s` を含む書式だけがかかる（`P-%s` → `P-High`）。
 
 ## 9. 撮像済みの判定と繰り上げ
 
@@ -378,3 +514,20 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 - **結果**: 同じ期間を設定の値でも計算し、「合計」で並べて差を出す（採用・枠超過で見送り・次のシステムへ回送・雲量で見送り・該当システムなし・繰り上げ・欠測（毎回）・期限切れ（期間内1回）・最終日の持ち越し）。「日ごと」に日別の件数とシステムごとの使用量（件数/上限・枚数/上限）、「期限切れ」に最終日までに一度も採用されなかった期間内1回の依頼と最終日の理由。
 - **回送**: 依頼が最初に試すシステム（条件に合う衛星があるもののうち、依頼の優先システム → 設定の順で最初）以外で採用された件数。
 - 試算した値を使うには、設定ファイル（`requestExports` の `limit` / `quota`）を書き換える。
+
+## 18. 一覧の絞り込み（2026-11-09 追加）
+
+「撮像計画ファイル出力」ドックの一覧は、表の上の 4 つで絞り込める。システムごとにファイルを出力する人が違うため（tsudo, 2026-11-09）。
+
+| 絞り込み | 出すもの |
+|---|---|
+| システム | そのシステムで採用した依頼と、そのシステムに撮れる衛星があるのに見送った依頼（枠超過・雲量・手動の見送り。チェックで採用に戻せる）。「該当システムなし」はどのシステムでも撮れない依頼 |
+| 衛星シリーズ | 採用は割り当てた衛星のシリーズ、見送りは撮れる衛星のシリーズ（システムも選んでいればそのシステムの衛星）。衛星カタログにないシリーズ名を指定した依頼は、その名前 |
+| 結果 | 採用・見送り・繰り上げ候補 |
+| 文字 | 名称・依頼ID・管理番号・識別番号・割り当てた衛星に、空白で区切ったすべての語を含むもの（大文字・小文字は区別しない） |
+
+- 選んだシステムと衛星シリーズは、人ごと（QGIS のユーザープロファイル）に覚えて次回も同じにする。
+- 枠の残り（「12/20 件・30/50 枚」）は、システムを選んでいればそのシステムだけを出す。
+- 「上へ」「下へ」は表示中の隣の行と順番を入れ替える（間の表示していない依頼の順番は変わらない）。
+- 「書き出し」は絞り込みにかかわらず、全システムのファイルと出力履歴を作る（出力履歴と繰り上げの記録を 1 回の計算にそろえるため）。
+

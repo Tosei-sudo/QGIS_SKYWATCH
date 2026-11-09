@@ -72,6 +72,9 @@ class Candidate:
     satellite: Optional[SatelliteSpec] = None
     scenes: int = 1
     warnings: list = field(default_factory=list)
+    #: The satellites (modes) that can take it, by system name: the systems it can go to, in the order tried
+    #: (catalog order within a system; set by fitting, whatever became of it).
+    able: dict = field(default_factory=dict)
 
     @property
     def boost(self) -> int:
@@ -203,6 +206,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
         c.warnings = [w for w in c.warnings if not w.startswith("枠超過")]
         req = c.request
+        c.able = {}
+        for system in _systems_for(req, systems):
+            able = [s for s in members[system.system] if why_not(req, s) is None]
+            if able:
+                c.able[system.system] = able
         if c.manual == HELD:
             c.reason = "手動で見送り"
             continue
@@ -211,7 +219,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             continue
         tried_any = False
         for system in _systems_for(req, systems):
-            able = [s for s in members[system.system] if why_not(req, s) is None]
+            able = list(c.able.get(system.system, ()))
             if not able:
                 continue
             tried_any = True

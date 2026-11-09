@@ -127,10 +127,14 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     form.priority.setValue(150)
     form._point_clicked(QgsPointXY(135.3, 34.6))
     assert form.shape_kind == "点" and form.rings
+    form.management_no.setText(" K-2026-0012 ")
+    form.identification_no.setText("000123")
     form._save_clicked()
     assert wait_for(lambda: dock.task is None and len(dock.requests) == 1)
     r = dock.requests[0]
     assert (r.name, r.kind, r.priority, r.category, r.shape_kind) == ("大阪湾", "SAR", 150, "臨時", "点")
+    assert (r.management_no, r.identification_no) == ("K-2026-0012", "000123")
+    assert fake.layers[LEDGER].rows[0]["attributes"]["IDENTIFICATION_NO"] == "000123"
 
     # 定点 requests from a point layer: the row without a period is left out.
     layer = fixed_layer()
@@ -187,6 +191,24 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
     got = {c.request.name: (c.result, c.system.system if c.system else c.reason) for c in daily.plan.candidates}
     assert got == {"横須賀": ("採用", "SYS-A"), "呉": ("見送り", "枠超過"), "大阪湾": ("採用", "SYS-B")}
+    # Filters (each system's file is written by its own person, 2026-11-09): a system shows what it took and what it
+    # could still take (呉, held back); the system chosen is kept for next time.
+    def listed():
+        return [daily.model.item(r, 3).text() for r in range(daily.model.rowCount())]
+
+    daily.system_filter.setCurrentIndex(daily.system_filter.findData("SYS-A"))
+    assert listed() == ["横須賀", "呉"] and daily.room.text() == "表示 2/3 件　A 1/1 件・1 枚"
+    assert settings.plan_file_filter()["system"] == "SYS-A"
+    daily.system_filter.setCurrentIndex(daily.system_filter.findData("SYS-B"))
+    assert listed() == ["大阪湾"]
+    daily.system_filter.setCurrentIndex(0)
+    daily.result_filter.setCurrentIndex(daily.result_filter.findData("見送り"))
+    assert listed() == ["呉"]
+    daily.result_filter.setCurrentIndex(0)
+    daily.search.setText("大阪")
+    assert listed() == ["大阪湾"]
+    daily.search.setText("")
+    assert len(listed()) == 3 and daily.room.text().startswith("A ") and settings.plan_file_filter()["system"] == ""
 
     # 上限シミュレーション: SYS-A at 2 a day takes 呉 too; SYS-B off leaves 大阪湾 without a system. Nothing is written.
     ledger_before = json.dumps(fake.layers[LEDGER].rows, sort_keys=True, default=str)

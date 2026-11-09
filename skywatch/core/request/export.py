@@ -10,7 +10,13 @@ request's, if later) to the day's end for 毎回, or to the request's end for
 
 Times are written in the system's `timeZone` by `dateFormat` (or the
 column's `format`): `iso` (default), `iso-date`, `unix`, `unixms`, or a
-strftime pattern (`%Y%m%d`).
+strftime pattern (`%Y%m%d`). Numbers (and text that is a number) take a
+printf format (`%03d`, `%.1f`), see `printf`.
+
+Some sources are lists (LIST_SOURCES): an array in JSON where the schema
+says `type: array`, otherwise (CSV, or a string property) joined by commas.
+A value that is empty (none, "" or []) is written as the column's or
+property's `default` when it has one (`[]`, `[""]`, `["On"]` …).
 """
 from __future__ import annotations
 
@@ -32,15 +38,23 @@ from .systems import Column, ExportSystem, PriorityRule
 
 #: The sources a column or property can take.
 SOURCES = (
-    "id", "name", "category", "achieve", "start", "end", "periodStart", "periodEnd", "repeat", "priority", "priorityRaw",
-    "priorityBase", "boost", "kind", "series", "satellites", "modes", "satellite", "satelliteId", "mode", "sensor",
+    "id", "name", "managementNo", "identificationNo", "category", "achieve", "start", "end", "periodStart", "periodEnd", "repeat",
+    "priority", "priorityRaw", "priorityBase", "boost", "kind", "series", "satellites", "modes", "seriesSatellites",
+    "seriesSatelliteIds", "satellite", "satelliteId", "mode", "sensor",
     "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
     "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "note", "system", "runDate", "day", "count", "warnings",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate")
-GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices")
+#: Sources whose value is a list of names.
+LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds")
+GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")
 _MISSING = object()
+#: Text that is a plain number (a printf number format is applied to it as to a number).
+_NUMBER_TEXT = re.compile(r"^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$")
+#: The printf conversions that take a number (whole ones rounded half up first).
+_NUMBER_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxXeEfF]")
+_WHOLE_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxX]")
 
 
 def format_time(ms: float, fmt: str, zone: TimeZone) -> Any:
@@ -77,8 +91,12 @@ def geometry_value(rings: Sequence, kind: str, digits: int, as_object: bool = Fa
     r = [[[_round(p[0], digits), _round(p[1], digits)] for p in ring] for ring in rings]
     box = bbox_of(rings)
     mid = center_of(rings)
-    if kind == "geojson":
-        value = {"type": "Polygon", "coordinates": r}
+    if kind in ("geojson", "centerGeojson"):
+        if kind == "geojson":
+            value = {"type": "Polygon", "coordinates": r}
+        else:
+            # The middle of the area's box, as for `center` and centerLat / centerLon.
+            value = {"type": "Point", "coordinates": [_round(mid[0], digits), _round(mid[1], digits)]}
         return value if as_object else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if kind == "bbox":
         return ",".join(f"{_round(v, digits)}" for v in box)
@@ -108,19 +126,54 @@ def convert_priority(p: int, rule: PriorityRule) -> Any:
         value = high - t * (high - low) if rule.linear["higherIsLarger"] else low + t * (high - low)
         if float(low).is_integer() and float(high).is_integer():
             value = int(math.floor(value + 0.5))
-    if rule.format and isinstance(value, (int, float)):
+    if rule.format and (isinstance(value, (int, float)) and not isinstance(value, bool) or isinstance(value, str) and value):
         value = printf(rule.format, value)
     return value
 
 
 def printf(fmt: str, value: Any) -> Any:
-    """`%03d`, `%.1f` … applied to a number; the value as it is when the format does not fit."""
+    """
+    One printf conversion (`%03d`, `%.1f`, `%+d`, `%5.1f`, `%x`, `%e`, `%s`) with
+    text around it (`P%02d`, `%d%%`) applied to a value: whole conversions
+    (d i o u x X) round half up first (12.5 → 13). Text that is a number is
+    taken as the number by a number conversion. The value as it is when the
+    format does not fit (not a number, none or two conversions).
+    """
     try:
-        if re.search(r"%[-+ 0#]*\d*d", fmt):
+        if isinstance(value, str) and _NUMBER_FORMAT.search(fmt):
+            if not _NUMBER_TEXT.match(value):
+                return value
+            value = float(value)
+        if _WHOLE_FORMAT.search(fmt):
             return fmt % int(math.floor(float(value) + 0.5))
         return fmt % value
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return value
+
+
+def _empty(value: Any) -> bool:
+    """None, "", [] (or a number that is not one): what a `default` stands in for."""
+    return value is None or value == "" or value == [] or isinstance(value, float) and not math.isfinite(value)
+
+
+def _names(sats: Sequence, key: str) -> list:
+    out: list = []
+    for s in sats:
+        v = getattr(s, key) or ""
+        if v and v not in out:
+            out.append(v)
+    return out
+
+
+def series_satellites(c: Candidate, key: str = "name") -> list:
+    """
+    A request given by satellite series (衛星シリーズ): the satellites of its
+    system in those series that can take it (catalog order, one per
+    satellite, its modes together); [] for a request not given by series.
+    """
+    if not c.request.series or c.system is None:
+        return []
+    return _names(c.able.get(c.system.system, ()), key)
 
 
 @dataclass
@@ -151,13 +204,15 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     box = bbox_of(req.rings)
     mid = center_of(req.rings)
     values = {
-        "id": req.id, "name": req.name, "category": req.category, "achieve": req.achieve,
+        "id": req.id, "name": req.name, "managementNo": req.management_no, "identificationNo": req.identification_no,
+        "category": req.category, "achieve": req.achieve,
         "start": max(req.start, first) if math.isfinite(req.start) else first,
         "end": (min(req.end, last) if req.achieve == "毎回" else req.end) if math.isfinite(req.end) else last,
         "periodStart": req.start, "periodEnd": req.end, "repeat": req.repeat,
         "priority": convert_priority(c.priority, ctx.system.priority), "priorityRaw": c.priority,
         "priorityBase": req.priority, "boost": c.boost, "kind": req.kind,
-        "series": ",".join(req.series), "satellites": ",".join(req.satellites), "modes": ",".join(req.modes),
+        "series": list(req.series), "satellites": list(req.satellites), "modes": list(req.modes),
+        "seriesSatellites": series_satellites(c), "seriesSatelliteIds": series_satellites(c, "id"),
         "satellite": c.satellite.name if c.satellite else "", "satelliteId": c.satellite.id if c.satellite else "",
         "mode": (c.satellite.mode or "") if c.satellite else "", "sensor": (c.satellite.sensor or "") if c.satellite else "",
         "offNadirMin": req.off_nadir_min, "offNadirMax": req.off_nadir_max,
@@ -176,9 +231,11 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
 
 
 def shaped(value: Any, source: str, ctx: Context, fmt: Optional[str], mapping: dict) -> Any:
-    """A value with the system's map of its source, the column's map, and its format."""
+    """A value with the system's map of its source, the column's map, and its format (each element of a list)."""
     if value is _MISSING:
         return value
+    if isinstance(value, list):
+        return [shaped(v, source, ctx, fmt, mapping) for v in value]
     system_map = ctx.system.values.get(source) or {}
     if isinstance(value, str) and value in system_map:
         value = system_map[value]
@@ -186,16 +243,31 @@ def shaped(value: Any, source: str, ctx: Context, fmt: Optional[str], mapping: d
         value = next(v for k, v in mapping.items() if str(k) == str(value))
     if source in TIME_SOURCES and isinstance(value, (int, float)):
         return format_time(value, fmt or ctx.system.date_format, ctx.system.time_zone)
-    if fmt and isinstance(value, (int, float)) and not isinstance(value, bool):
+    if fmt and (isinstance(value, (int, float)) and not isinstance(value, bool) or isinstance(value, str) and value):
         return printf(fmt, value)
     return value
 
 
 def cell_value(c: Candidate, col: Column, ctx: Context) -> Any:
+    """A column's value: fixed, or its source shaped (its `default` when that is empty)."""
     if col.source is None:
         return col.value
     v = raw_value(c, col.source, ctx, col.geometry or "wkt", col.digits)
-    return shaped(v, col.source, ctx, col.format, col.map)
+    v = shaped(v, col.source, ctx, col.format, col.map)
+    if v is not _MISSING and col.default is not None and _empty(v):
+        return col.default
+    return v
+
+
+def cell_text(v: Any) -> Any:
+    """A value as a CSV cell: a list joined by commas, an object as JSON, none as empty."""
+    if v is None:
+        return ""
+    if isinstance(v, list):
+        return ",".join(str(cell_text(x)) for x in v)
+    if isinstance(v, dict):
+        return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+    return v
 
 
 @dataclass
@@ -224,17 +296,23 @@ def csv_text(cands: Sequence[Candidate], ctx: Context) -> tuple[str, list[str]]:
             if v is _MISSING:
                 warnings.append(f"{col.key}: 項目 {col.source} なし")
                 v = ""
+            v = cell_text(v)
             if col.allowed is not None and v not in col.allowed and str(v) not in {str(a) for a in col.allowed}:
                 warnings.append(f"{cand.request.name} の {col.key}: {v!r} は許可された値以外")
-            row.append("" if v is None else v)
+            row.append(v)
         writer.writerow(row)
     return out.getvalue(), sorted(set(warnings), key=warnings.index)
 
 
-def _coerce(value: Any, schema: dict) -> Any:
-    """A value turned to the schema's type where that is plain (text ↔ number)."""
+def _coerce(value: Any, schema: dict, root: Optional[dict] = None) -> Any:
+    """A value turned to the schema's type where that is plain (text ↔ number; a list → an array, or text joined by commas)."""
     t = schema.get("type")
     types = t if isinstance(t, list) else [t] if t else []
+    if isinstance(value, list):
+        if "array" not in types:
+            return cell_text(value)
+        items = resolve(schema.get("items"), root or schema)
+        return [_coerce(v, items, root) for v in value] if isinstance(items, dict) else value
     if value is None or not types:
         return value
     if "string" in types and isinstance(value, (int, float)) and not isinstance(value, bool) and not any(x in types for x in ("integer", "number")):
@@ -265,10 +343,13 @@ def build(schema: Any, root: dict, c: Optional[Candidate], cands: Sequence[Candi
         v = shaped(v, source, ctx, schema.get("x-format"), schema.get("x-map") if isinstance(schema.get("x-map"), dict) else {})
         if v is _MISSING:
             return v
-        return _coerce(v, schema)
+        if _empty(v) and _writes_default(schema):
+            # Empty (none, "", []): the property's default as written (`[]`, `[""]`, `["On"]` …), e.g. for a required one.
+            return schema["default"]
+        return _coerce(v, schema, root)
     if "const" in schema:
         return schema["const"]
-    if "default" in schema and schema.get("x-default", True):
+    if _writes_default(schema):
         return schema["default"]
     props = schema.get("properties")
     if isinstance(props, dict):
@@ -282,6 +363,11 @@ def build(schema: Any, root: dict, c: Optional[Candidate], cands: Sequence[Candi
             out[name] = v
         return out if out or schema.get("required") else _MISSING
     return _MISSING
+
+
+def _writes_default(schema: dict) -> bool:
+    """Whether a property's `default` is written (not with `x-default: false`, which leaves it to the system)."""
+    return "default" in schema and bool(schema.get("x-default", True))
 
 
 def _allows_null(schema: Any) -> bool:

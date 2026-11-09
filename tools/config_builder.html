@@ -70,6 +70,7 @@ input[type=text], input[type=number], select, textarea { width: 100%; font: inhe
 textarea { min-height: 70px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .invalid { border-color: var(--bad) !important; background: var(--bad-bg) !important; }
+.hint { border-color: var(--warn) !important; border-style: dashed !important; }
 .err { color: var(--bad); font-size: 12px; }
 .roles { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 3px 8px; align-items: center; }
 .roles span { font-size: 12px; }
@@ -256,6 +257,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "requestStores": {
    "id": "REQ_ID",
    "name": "REQ_NAME",
+   "managementNo": "MANAGEMENT_NO",
+   "identificationNo": "IDENTIFICATION_NO",
    "category": "CATEGORY",
    "achieve": "ACHIEVE",
    "start": "START_AT",
@@ -546,6 +549,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
  "exportSources": [
   "id",
   "name",
+  "managementNo",
+  "identificationNo",
   "category",
   "achieve",
   "start",
@@ -561,6 +566,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "series",
   "satellites",
   "modes",
+  "seriesSatellites",
+  "seriesSatelliteIds",
   "satellite",
   "satelliteId",
   "mode",
@@ -592,13 +599,21 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "count",
   "warnings"
  ],
+ "exportListSources": [
+  "series",
+  "satellites",
+  "modes",
+  "seriesSatellites",
+  "seriesSatelliteIds"
+ ],
  "geometries": [
   "wkt",
   "geojson",
   "bbox",
   "center",
   "centerRadius",
-  "vertices"
+  "vertices",
+  "centerGeojson"
  ],
  "exportFormats": [
   "csv",
@@ -739,6 +754,7 @@ const ROLE_LABELS = {
   target: "目標", offNadir: "オフナディア角", incidence: "入射角", pass: "軌道方向", side: "観測方向", status: "状態",
   imageId: "画像 ID", created: "作成日時", updated: "更新日時", category: "区分", achieve: "達成条件", start: "開始",
   end: "終了", repeat: "繰り返し", priority: "優先度", boost: "繰り上げ量", satellites: "衛星", modes: "センサーモード",
+  managementNo: "管理番号", identificationNo: "識別番号",
   offNadirMin: "オフナディア角下限", offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限",
   orbitDir: "軌道方向", timeOfDay: "時間帯", cloudNoGo: "実施しない雲量", systems: "優先システム", shapeKind: "範囲の種類",
   requester: "依頼者", note: "備考", runId: "出力 ID", runDate: "出力日時", day: "対象日", requestId: "依頼 ID",
@@ -752,10 +768,11 @@ const ROLE_LABELS = {
   createdAt: "作成日時", createdBy: "作成者", updatedAt: "更新日時",
 };
 const SOURCE_LABELS = {
-  id: "依頼 ID", name: "名称", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
+  id: "依頼 ID", name: "名称", managementNo: "管理番号", identificationNo: "識別番号", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
   periodStart: "依頼の開始", periodEnd: "依頼の終了", repeat: "繰り返し", priority: "優先度（システムの書き方に変換）",
   priorityRaw: "出力用の優先度（1〜1000）", priorityBase: "台帳の優先度", boost: "繰り上げ量", kind: "種別（光学・SAR）",
-  series: "衛星シリーズ", satellites: "衛星（依頼の指定）", modes: "センサーモード（依頼の指定）", satellite: "割り当てた衛星",
+  series: "衛星シリーズ（配列）", satellites: "衛星（依頼の指定・配列）", modes: "センサーモード（依頼の指定・配列）",
+  seriesSatellites: "シリーズ配下の衛星（シリーズ指定の依頼・配列）", seriesSatelliteIds: "シリーズ配下の衛星の ID（配列）", satellite: "割り当てた衛星",
   satelliteId: "割り当てた衛星の ID", mode: "割り当てたモード", sensor: "割り当てたセンサー", offNadirMin: "オフナディア角下限",
   offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限", lookSide: "観測方向", orbitDir: "軌道方向",
   resolution: "分解能", timeOfDay: "時間帯", cloudMax: "実施しない雲量", cloudForecast: "雲量予報（%）", weatherFlag: "気象の注意",
@@ -763,7 +780,8 @@ const SOURCE_LABELS = {
   bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", note: "メモ",
   system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
 };
-const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度" };
+const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
+  centerGeojson: "中央の GeoJSON（Point）" };
 const OBS_SOURCE_LABELS = {
   id: "観測 ID", objectId: "モノ ID", objectName: "モノ", kind: "分類（level で階層）", activity: "活動", present: "有無", confidence: "確度",
   imageTime: "撮像日時", imageId: "画像 ID", imageName: "画像", lon: "経度", lat: "緯度", length: "長さ（m）", heading: "向き（度）",
@@ -783,7 +801,7 @@ const PROFILES = {
     common: ["id", "name", "category", "satellite", "start", "end", "geometry", "priority", "cloudForecast", "warnings"],
     legend: "CSV の列（columns）。上から順に左の列", note: "システムが求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が requests の配列が依頼の一覧になり、その items の中は依頼 1 件ごとの値。固定値は const。",
     inside: "依頼ごとの値は x-source: requests の配列の items の中に置く（外に置くと出ない）", name: (o) => o.system || "system",
-    template: () => schemaTemplate(), allowed: true,
+    template: () => schemaTemplate(), allowed: true, listSources: () => K.exportListSources || [], defaults: true,
   },
   observation: {
     sources: () => K.obsExportSources, labels: OBS_SOURCE_LABELS, geometries: () => K.obsGeometries, geometryLabels: OBS_GEOMETRY_LABELS,
@@ -792,7 +810,7 @@ const PROFILES = {
     common: ["id", "imageTime", "objectName", "kind", "activity", "present", "confidence", "lat", "lon", "place", "note"],
     legend: "列（columns）。CSV は上から順に左の列、JSON（スキーマなし）は記録ごとのオブジェクトのキー", note: "受け取り側が求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が records の配列が記録の一覧になり、その items の中は記録 1 件ごとの値。固定値は const。",
     inside: "記録ごとの値は x-source: records の配列の items の中に置く（外に置くと出ない）", name: (o) => o.name || "observations",
-    template: () => obsSchemaTemplate(), allowed: false,
+    template: () => obsSchemaTemplate(), allowed: false, listSources: () => [], defaults: false,
   },
 };
 const DATE_FORMATS = ["iso", "iso-date", "unix", "unixms", "%Y%m%d", "%Y/%m/%d %H:%M", "%Y-%m-%dT%H:%M:%S"];
@@ -867,7 +885,7 @@ function download(name, text) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
-/** 数・true/false・null に見える文字はその値に、ほかは文字列のまま。 */
+/** 数・true/false・null に見える文字はその値に、[…]・{…} は JSON として読めれば配列・オブジェクトに、ほかは文字列のまま。 */
 function autoValue(s) {
   const t = s.trim();
   if (t === "") return undefined;
@@ -875,7 +893,27 @@ function autoValue(s) {
   if (t === "true") return true;
   if (t === "false") return false;
   if (t === "null") return null;
-  return s;
+  const json = jsonValue(t);
+  return json === undefined ? s : json;
+}
+/** […] か {…} の JSON（読めなければ undefined）。 */
+function jsonValue(t) {
+  if (!/^\[[\s\S]*\]$|^\{[\s\S]*\}$/.test(t)) return undefined;
+  try { return JSON.parse(t); } catch (e) { return undefined; }
+}
+/**
+ * スキーマの型に合わせた値（固定値 const・既定値 default）: string はそのまま（"001" も文字のまま）、
+ * integer・number は数、boolean は true/false、array・object は JSON（[]・[""]・["On"]）。
+ */
+function typedValue(s, type) {
+  const t = s.trim();
+  if (t === "") return undefined;
+  if (type === "string") return s;
+  if (type === "integer" || type === "number") return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : s;
+  if (type === "boolean") return t === "true" ? true : t === "false" ? false : s;
+  if (type === "array" || type === "object") { const json = jsonValue(t); return json === undefined ? s : json; }
+  if (type === "null") return t === "null" ? null : s;
+  return autoValue(s);
 }
 const showAuto = (v) => v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v);
 
@@ -1477,7 +1515,7 @@ function columnsField(f, obj, commit) {
   const cols = Array.isArray(obj.columns) ? obj.columns : [];
   const save = () => { if (!cols.length) delete obj.columns; else obj.columns = cols; commit(); changed(); };
   const box = el("fieldset", {}, el("legend", { text: prof.legend }));
-  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", prof.allowed ? "許す値（allowed）" : "空のとき・前後（empty・prefix・suffix）", ""].map((h) => el("th", { text: h }))));
+  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", prof.allowed ? "許す値（allowed）・空のとき（default）" : "空のとき・前後（empty・prefix・suffix）", ""].map((h) => el("th", { text: h }))));
   cols.forEach((c, i) => {
     if (!isObj(c)) { table.append(el("tr", {}, el("td", { colspan: 6 }, jsonArea(c, (x) => { cols[i] = x; save(); })))); return; }
     const upd = (k, v) => { if (v === undefined || v === "") delete c[k]; else c[k] = v; save(); };
@@ -1488,7 +1526,8 @@ function columnsField(f, obj, commit) {
       save(); render();
     } }, ...sourceOptions([["\u0000value", "固定値"]], prof).map(([v, l]) => el("option", { value: v, text: l, selected: c.source === undefined ? v === "\u0000value" : c.source === v })));
     const fmtCell = el("td", {});
-    if (c.source === undefined) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", oninput: (e) => { c.value = autoValue(e.target.value) ?? ""; save(); } }));
+    if (c.source === undefined) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", title: prof.defaults ? "固定値（value）。書いたとおりの文字を出す（001 も 001 のまま）" : "固定値（value）",
+      oninput: (e) => { c.value = prof.defaults ? e.target.value : autoValue(e.target.value) ?? ""; save(); } }));
     else if (c.source === "geometry") {
       fmtCell.append(el("select", { onchange: (e) => upd("geometry", e.target.value) }, ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (c.geometry || "wkt") === g }))),
         el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
@@ -1508,10 +1547,10 @@ function columnsField(f, obj, commit) {
         for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
         upd("map", isEmpty(m) ? undefined : m);
       } })),
-      prof.allowed ? el("td", {}, el("input", { type: "text", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", oninput: (e) => {
+      prof.allowed ? el("td", {}, el("input", { type: "text", class: "short", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", title: "許す値（allowed）: これ以外の値が出たら警告", oninput: (e) => {
         const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map(autoValue);
         upd("allowed", a.length ? a : undefined);
-      } })) : el("td", {},
+      } }), c.source === undefined ? null : el("input", { type: "text", class: "short", value: c.default === undefined ? "" : showAuto(c.default), placeholder: "空のとき", title: "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く文字", oninput: (e) => upd("default", e.target.value === "" ? undefined : e.target.value) })) : el("td", {},
         el("input", { type: "text", class: "short", value: c.empty === undefined ? "" : showAuto(c.empty), placeholder: "空のとき", title: "empty: 値が空のときに書く", oninput: (e) => upd("empty", e.target.value === "" ? undefined : e.target.value) }),
         el("input", { type: "text", class: "short", value: c.prefix ?? "", placeholder: "前", title: "prefix: 値があるときだけ前に", oninput: (e) => upd("prefix", e.target.value) }),
         el("input", { type: "text", class: "short", value: c.suffix ?? "", placeholder: "後", title: "suffix: 値があるときだけ後に", oninput: (e) => upd("suffix", e.target.value) })),
@@ -1529,7 +1568,7 @@ function columnsField(f, obj, commit) {
 }
 
 const SCHEMA_TYPES = ["string", "integer", "number", "boolean", "object", "array", "null"];
-const NODE_KEYS = new Set(["type", "properties", "required", "items", "x-source", "x-format", "x-map", "x-geometry", "x-digits", "const", "format", "enum", "title", "description"]);
+const NODE_KEYS = new Set(["type", "properties", "required", "items", "x-source", "x-format", "x-map", "x-geometry", "x-digits", "const", "default", "format", "enum", "title", "description"]);
 
 function schemaTemplate() {
   return {
@@ -1610,8 +1649,14 @@ function schemaField(f, obj, commit) {
   return box;
 }
 
-/** スキーマの 1 節（name は親の properties での名前、parent はその親の節）。 */
-function schemaNode(node, name, parent, root, save, inRequests = false, prof = PROFILES.request) {
+/** 配列の値（衛星シリーズなど）の配列の items を文字列にする（まだ組んでいない items のとき）。 */
+function listItems(node) {
+  const it = node.items;
+  if (!isObj(it) || (it.type === "object" && !it["x-source"] && (!isObj(it.properties) || !Object.keys(it.properties).length))) node.items = { type: "string" };
+}
+
+/** スキーマの 1 節（name は親の properties での名前、parent はその親の節。valueItems は値の配列の items で、型だけ選ぶ）。 */
+function schemaNode(node, name, parent, root, save, inRequests = false, prof = PROFILES.request, valueItems = false) {
   const wrap = el("div", { class: "node" });
   if (!isObj(node)) { wrap.append(el("span", { class: "err", text: `${name}: オブジェクト以外（JSON で直す）` })); return wrap; }
   if (typeof node.$ref === "string") {
@@ -1641,8 +1686,13 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
     if (e.target.value) node.type = e.target.value; else delete node.type;
     if (node.type === "object" && !isObj(node.properties) && !node["x-source"]) node.properties = {};
     if (node.type === "array" && !isObj(node.items)) node.items = { type: "object", properties: {} };
+    if (node.type === "array" && prof.listSources().includes(node["x-source"])) listItems(node);
     redraw();
   } }, el("option", { value: "", text: "型なし" }), ...SCHEMA_TYPES.map((t) => el("option", { value: t, text: t, selected: type === t }))));
+  if (valueItems) {
+    wrap.append(head, el("div", { class: "note", text: "配列の 1 要素の型（中身は上の x-source・固定値・既定値）" }));
+    return wrap;
+  }
   // 入れる値
   const src = node["x-source"];
   const what = "const" in node ? "\u0000const" : typeof src === "string" ? src : "";
@@ -1655,10 +1705,12 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
     if (v === "\u0000const") node.const = node.const ?? "";
     else if (v) node["x-source"] = v;
     if (v === prof.array && !isObj(node.items)) node.items = { type: "object", properties: {} };
+    if (node.type === "array" && prof.listSources().includes(v)) listItems(node);
     if (v !== "geometry") delete node["x-geometry"];
     redraw();
   } }, ...[...srcOpts, ...sourceOptions([], prof)].map(([v, l]) => el("option", { value: v, text: l, selected: what === v }))));
-  if (what === "\u0000const") head.append(el("input", { type: "text", class: "short", value: showAuto(node.const), placeholder: "値", oninput: (e) => { node.const = autoValue(e.target.value) ?? ""; save(); } }));
+  if (what === "\u0000const") head.append(el("input", { type: "text", class: "short", value: showAuto(node.const), placeholder: type === "array" ? '["On"]' : "値",
+    title: "固定値（const）。配列・オブジェクトは JSON で（[]・[\"\"]・[\"On\"]）。型が string なら書いたとおりの文字", oninput: (e) => { node.const = typedValue(e.target.value, type) ?? ""; save(); } }));
   if (src === "geometry") {
     head.append(el("select", { title: "座標の書き方（x-geometry）", onchange: (e) => { node["x-geometry"] = e.target.value; save(); } },
       ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (node["x-geometry"] || "geojson") === g }))));
@@ -1677,6 +1729,17 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
       save();
     } }));
   }
+  if (prof.defaults && parent && what !== "\u0000const" && src !== prof.array && !(type === "object" && !src)) {
+    const req = name !== null && Array.isArray(parent.required) && parent.required.includes(name);
+    const tip = (src ? "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く。必須の項目に。" : "既定値（default）: x-source がないので、いつもこの値。")
+      + "配列は JSON で（[]・[\"\"]・[\"On\"]）。空欄で指定なし";
+    head.append(el("label", { title: tip }, "既定値", el("input", { type: "text", class: "short" + (req && typeof src === "string" && !("default" in node) ? " hint" : ""),
+      value: "default" in node ? showAuto(node.default) : "", placeholder: type === "array" ? "[]" : "なし", title: tip, oninput: (e) => {
+        const v = typedValue(e.target.value, type);
+        if (v === undefined) delete node.default; else node.default = v;
+        save();
+      } })));
+  }
   if (type === "string" || type === "integer" || type === "number") {
     head.append(el("input", { type: "text", class: "short", value: Array.isArray(node.enum) ? node.enum.map(showAuto).join(", ") : "", placeholder: "enum", title: "許す値（enum）", oninput: (e) => {
       const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map((x) => (type === "string" ? x : autoValue(x)));
@@ -1690,7 +1753,7 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
     redraw();
   } }));
   wrap.append(head);
-  const others = Object.keys(node).filter((k) => !NODE_KEYS.has(k));
+  const others = Object.keys(node).filter((k) => !NODE_KEYS.has(k) || (k === "default" && !prof.defaults));
   if (others.length) wrap.append(el("div", { class: "other", text: "ほかのキーワード（そのまま残す）: " + others.join("・") }));
   if (!inRequests && typeof src === "string" && !prof.fileSources.includes(src))
     wrap.append(el("div", { class: "err", text: prof.inside }));
@@ -1703,7 +1766,9 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
       redraw();
     } }));
   }
-  if (type === "array" && isObj(node.items) && src !== "geometry") wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === prof.array, prof));
+  // 依頼の一覧（requests）でない配列は、値（x-source・const・default）の配列: items は 1 要素の型だけ。
+  if (type === "array" && isObj(node.items) && src !== "geometry")
+    wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === prof.array, prof, src !== prof.array));
   return wrap;
 }
 
@@ -1711,12 +1776,14 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
 
 const DAY = Date.UTC(2026, 10, 7, 15, 0, 0); // 2026-11-08 00:00 JST
 const SAMPLE_REQS = [
-  { id: "R-0001", name: "東京湾 定点", category: "定点", achieve: "毎回", start: DAY, end: DAY + 86400000 - 1, periodStart: DAY - 30 * 86400000, periodEnd: DAY + 60 * 86400000,
-    repeat: "毎日", priorityRaw: 120, priorityBase: 2, boost: 0, kind: "光学", series: "OPT-X", satellites: "", modes: "", satellite: "OPT-X1", satelliteId: "40001", mode: "", sensor: "PAN",
+  { id: "R-0001", name: "東京湾 定点", managementNo: "K-2026-0012", identificationNo: "000123", category: "定点", achieve: "毎回", start: DAY, end: DAY + 86400000 - 1, periodStart: DAY - 30 * 86400000, periodEnd: DAY + 60 * 86400000,
+    repeat: "毎日", priorityRaw: 120, priorityBase: 2, boost: 0, kind: "光学", series: ["OPT-X"], satellites: [], modes: [],
+    seriesSatellites: ["OPT-X1", "OPT-X2"], seriesSatelliteIds: ["40001", "40002"], satellite: "OPT-X1", satelliteId: "40001", mode: "", sensor: "PAN",
     offNadirMin: null, offNadirMax: 25, incidenceMin: null, incidenceMax: null, lookSide: "任意", orbitDir: "任意", resolution: 1, timeOfDay: "", cloudMax: 60, cloudForecast: 20, weatherFlag: "",
     scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", note: "", warnings: "" },
-  { id: "R-0002", name: "臨時 舞鶴", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
-    repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: "SAR-Y", satellites: "SAR-Y2", modes: "Spotlight", satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
+  { id: "R-0002", name: "臨時 舞鶴", managementNo: "", identificationNo: "", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
+    repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: [], satellites: ["SAR-Y2"], modes: ["Spotlight"],
+    seriesSatellites: [], seriesSatelliteIds: [], satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
     offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
     scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", note: "至急", warnings: "シーン数が多い" },
 ];
@@ -1746,13 +1813,51 @@ function formatTime(ms, fmt, zone) {
   }
   return fmt.replace(/%([YmdHMSy%])/g, (_, c) => ({ Y, m: mo, d: da, H, M: Mi, S: Se, y: String(Y).slice(2), "%": "%" }[c]));
 }
+/** 小数 p 桁（2 進数の値がちょうど半分のときだけ偶数側。Python の % と同じ）。 */
+function fixed(v, p) {
+  if (!Number.isFinite(v) || Math.abs(v) >= 1e21 || p > 70) return v.toFixed(Math.min(p, 100));
+  const exact = v.toFixed(p + 30), tail = exact.slice(exact.length - 30);
+  if (/^50*$/.test(tail)) {
+    const head = exact.slice(0, exact.length - 30), last = Number(head.replace(".", "").slice(-1));
+    if (last % 2 === 0) return head.endsWith(".") ? head.slice(0, -1) : head;
+  }
+  return v.toFixed(p);
+}
+/**
+ * プラグインの printf（request/export.py）と同じ: 変換 1 つ（d i o u x X e E f F s、%% は % の文字）と前後の文字。
+ * 整数の変換は四捨五入してから（12.5 → 13）。数に見える文字は数として扱う。合わない（数でない・変換が 0 個か 2 個以上）ときは値のまま。
+ */
 function printf(fmt, v) {
-  const m = /%([-+ 0#]*)(\d*)(?:\.(\d+))?([dfs])/.exec(fmt);
-  if (!m || typeof v !== "number") return v;
-  let s = m[4] === "d" ? String(Math.floor(v + 0.5)) : m[4] === "f" ? v.toFixed(m[3] ? Number(m[3]) : 6) : String(v);
-  const w = Number(m[2] || 0);
-  if (s.length < w) s = (m[1].includes("0") && !m[1].includes("-") ? "0" : " ").repeat(w - s.length) + s;
-  return fmt.slice(0, m.index) + s + fmt.slice(m.index + m[0].length);
+  const re = /%([-+ 0#]*)(\d*)(?:\.(\d+))?([diouxXeEfFs%])/g;
+  const specs = [...fmt.matchAll(re)].filter((m) => m[4] !== "%");
+  if (specs.length !== 1) return v;
+  const conv = specs[0][4];
+  if (conv !== "s") {
+    if (typeof v === "string") { if (!/^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$/.test(v)) return v; v = Number(v); }
+    if (typeof v !== "number" || !Number.isFinite(v)) return v;
+  } else if (v === null || v === undefined || typeof v === "object") return v;
+  return fmt.replace(re, (m, flags, width, prec, c) => {
+    if (c === "%") return "%";
+    let sign = "", body, prefix = "";
+    if (c === "s") body = prec !== undefined ? String(v).slice(0, Number(prec)) : String(v);
+    else {
+      let n = v;
+      if ("diouxX".includes(c)) n = Math.floor(v + 0.5);
+      sign = n < 0 ? "-" : flags.includes("+") ? "+" : flags.includes(" ") ? " " : "";
+      const a = Math.abs(n);
+      if ("diu".includes(c)) body = String(a);
+      else if (c === "o") { body = a.toString(8); if (flags.includes("#")) prefix = "0o"; }
+      else if (c === "x" || c === "X") { body = a.toString(16); if (flags.includes("#")) prefix = "0x"; if (c === "X") { body = body.toUpperCase(); prefix = prefix.toUpperCase(); } }
+      else if (c === "e" || c === "E") { body = a.toExponential(prec !== undefined ? Number(prec) : 6).replace(/e([+-])(\d)$/, "e$10$2"); if (c === "E") body = body.toUpperCase(); }
+      else body = fixed(a, prec !== undefined ? Number(prec) : 6);
+      if ("diouxX".includes(c) && prec !== undefined && body.length < Number(prec)) body = "0".repeat(Number(prec) - body.length) + body;
+    }
+    const w = Number(width || 0), len = sign.length + prefix.length + body.length;
+    if (len >= w) return sign + prefix + body;
+    if (flags.includes("-")) return sign + prefix + body + " ".repeat(w - len);
+    if (flags.includes("0") && c !== "s") return sign + prefix + "0".repeat(w - len) + body;
+    return " ".repeat(w - len) + sign + prefix + body;
+  });
 }
 function convertPriority(p, rule) {
   let v = p;
@@ -1765,7 +1870,7 @@ function convertPriority(p, rule) {
     v = rule.linear.higherIsLarger ? max - t * (max - min) : min + t * (max - min);
     if (Number.isInteger(min) && Number.isInteger(max)) v = Math.floor(v + 0.5);
   }
-  if (rule.format && typeof v === "number") v = printf(rule.format, v);
+  if (rule.format && (typeof v === "number" || (typeof v === "string" && v !== ""))) v = printf(rule.format, v);
   return v;
 }
 const round = (v, d) => Number(v.toFixed(d));
@@ -1775,6 +1880,7 @@ function geometryValue(ring, kind, d, asObject) {
   const box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
   const mid = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
   if (kind === "geojson") { const g = { type: "Polygon", coordinates: [r] }; return asObject ? g : JSON.stringify(g); }
+  if (kind === "centerGeojson") { const g = { type: "Point", coordinates: [round(mid[0], d), round(mid[1], d)] }; return asObject ? g : JSON.stringify(g); }
   if (kind === "bbox") return box.map((v) => round(v, d)).join(",");
   if (kind === "center" || kind === "centerRadius") {
     let t = `${round(mid[1], d)},${round(mid[0], d)}`;
@@ -1803,15 +1909,24 @@ function rawValue(req, source, sys, n, geometry, digits, asObject) {
 }
 function shaped(v, source, sys, fmt, map) {
   if (v === MISSING) return v;
+  if (Array.isArray(v)) return v.map((x) => shaped(x, source, sys, fmt, map));
   const sm = isObj(sys.values) && isObj(sys.values[source]) ? sys.values[source] : {};
   if (typeof v === "string" && v in sm) v = sm[v];
   if (isObj(map) && (typeof v === "string" || typeof v === "number") && String(v) in map) v = map[String(v)];
   if (TIME_SOURCES.includes(source) && typeof v === "number") return formatTime(v, fmt || sys.dateFormat || "iso", sys.timeZone || "UTC");
-  if (fmt && typeof v === "number") return printf(fmt, v);
+  if (fmt && (typeof v === "number" || (typeof v === "string" && v !== ""))) return printf(fmt, v);
   return v;
 }
+/** 値が空（なし・空文字・空の配列）: default に置き換える。 */
+const emptyValue = (v) => v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length) || (typeof v === "number" && !Number.isFinite(v));
+/** CSV の 1 つの値の文字（配列はカンマ区切り）。 */
+function cellText(v) {
+  if (v === null || v === undefined || v === MISSING) return "";
+  if (Array.isArray(v)) return v.map(cellText).join(",");
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
+}
 function csvCell(v) {
-  const s = v === null || v === undefined || v === MISSING ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  const s = cellText(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function resolveRef(s, root) {
@@ -1824,13 +1939,20 @@ function resolveRef(s, root) {
   }
   return s;
 }
-function coerce(v, s) {
+function coerce(v, s, root) {
   const types = Array.isArray(s.type) ? s.type : s.type ? [s.type] : [];
+  if (Array.isArray(v)) {
+    if (!types.includes("array")) return cellText(v);
+    const items = resolveRef(s.items, root || s);
+    return isObj(items) ? v.map((x) => coerce(x, items, root)) : v;
+  }
   if (v === null || v === undefined || !types.length) return v;
   if (types.includes("string") && typeof v === "number" && !types.includes("integer") && !types.includes("number")) return String(v);
   if (typeof v === "string" && (types.includes("integer") || types.includes("number")) && !types.includes("string")) { const x = Number(v); return v.trim() !== "" && isFinite(x) ? x : v; }
   return v;
 }
+/** default を書くか（x-default: false なら書かない。受け取る側の既定に任せる）。 */
+const writesDefault = (s) => "default" in s && !(("x-default" in s) && !s["x-default"]);
 function build(s, root, req, sys) {
   s = resolveRef(s, root);
   if (!isObj(s)) return MISSING;
@@ -1839,10 +1961,12 @@ function build(s, root, req, sys) {
   if (typeof src === "string") {
     let v = rawValue(req, src, sys, SAMPLE_REQS.length, s["x-geometry"] || "geojson", s["x-digits"], true);
     v = shaped(v, src, sys, s["x-format"], s["x-map"]);
-    return v === MISSING ? v : coerce(v, s);
+    if (v === MISSING) return v;
+    if (emptyValue(v) && writesDefault(s)) return s.default;
+    return coerce(v, s, root);
   }
   if ("const" in s) return s.const;
-  if ("default" in s && s["x-default"] !== false) return s.default;
+  if (writesDefault(s)) return s.default;
   if (isObj(s.properties)) {
     const out = {};
     for (const [k, sub] of Object.entries(s.properties)) {
@@ -1931,6 +2055,8 @@ function sampleText(sys) {
     lines.push(cols.map((c) => {
       let v = c.source === undefined ? c.value : shaped(rawValue(r, c.source, sys, SAMPLE_REQS.length, c.geometry || "wkt", c.digits, false), c.source, sys, c.format, c.map);
       if (v === MISSING) { warns.push(`${c.key}: 項目 ${c.source} なし`); v = ""; }
+      else if (c.source !== undefined && c.default !== undefined && c.default !== null && emptyValue(v)) v = c.default;
+      v = cellText(v);
       if (Array.isArray(c.allowed) && !c.allowed.some((a) => String(a) === String(v))) warns.push(`${r.name} の ${c.key}: ${JSON.stringify(v)} は許可された値以外`);
       return csvCell(v);
     }).join(","));

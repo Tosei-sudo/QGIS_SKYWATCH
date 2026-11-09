@@ -24,7 +24,7 @@ from .store import DEFAULT_REQUEST_FIELDS, new_request_id
 
 #: Japanese headings a layer may use, by item.
 HEADINGS = {
-    "id": "依頼ID", "name": "名称", "category": "区分", "achieve": "達成条件", "start": "開始", "end": "終了",
+    "id": "依頼ID", "name": "名称", "managementNo": "管理番号", "identificationNo": "識別番号", "category": "区分", "achieve": "達成条件", "start": "開始", "end": "終了",
     "repeat": "繰り返し", "status": "状態", "priority": "優先度", "boost": "繰り上げ量", "kind": "種別",
     "series": "衛星シリーズ", "satellites": "衛星", "modes": "センサーモード", "offNadirMin": "オフナディア角下限",
     "offNadirMax": "オフナディア角上限", "incidenceMin": "入射角下限", "incidenceMax": "入射角上限", "lookSide": "観測方向",
@@ -57,6 +57,13 @@ def _text(v: Any) -> str:
         return ""
     s = str(v).strip()
     return "" if s.upper() == "NULL" else s
+
+
+def _code(v: Any) -> str:
+    """A number kept as text (管理番号・識別番号): a whole number from a numeric field without its 「.0」."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return _text(v)
 
 
 def _number(v: Any) -> Optional[float]:
@@ -106,6 +113,7 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         priority = level_value(_text(p))
     r = ImagingRequest(
         id=rid, name=_text(get("name")) or rid,
+        management_no=_code(get("managementNo")), identification_no=_code(get("identificationNo")),
         category=_choice(get("category"), CATEGORIES, default_category),
         achieve=_choice(get("achieve"), ACHIEVES, "毎回" if default_category == "定点" else "期間内1回"),
         start=_day_ms(get("start"), False), end=_day_ms(get("end"), True),
@@ -145,7 +153,8 @@ def row_of(r: ImagingRequest) -> dict:
     """A request as a row by the ledger's attribute names (days as JST dates)."""
     f = DEFAULT_REQUEST_FIELDS
     values = {
-        "id": r.id, "name": r.name, "category": r.category, "achieve": r.achieve,
+        "id": r.id, "name": r.name, "managementNo": r.management_no, "identificationNo": r.identification_no,
+        "category": r.category, "achieve": r.achieve,
         "start": jst_day(r.start).isoformat() if math.isfinite(r.start) else None,
         "end": jst_day(r.end).isoformat() if math.isfinite(r.end) else None,
         "repeat": r.repeat, "status": r.status, "priority": r.priority, "boost": r.boost, "kind": r.kind,

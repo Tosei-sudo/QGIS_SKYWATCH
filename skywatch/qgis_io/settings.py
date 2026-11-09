@@ -316,3 +316,13 @@ def request_export_folder() -> str:
 
 def set_request_export_folder(folder: str) -> None:
     _set("request_export_folder", folder.strip())
+
+
+def plan_file_filter() -> dict:
+    """The 「撮像計画ファイル出力」 table's system and series filters last chosen (each person writes their own systems)."""
+    return {"system": _get("plan_files/system"), "series": _get("plan_files/series")}
+
+
+def set_plan_file_filter(system: str, series: str) -> None:
+    _set("plan_files/system", system)
+    _set("plan_files/series", series)
