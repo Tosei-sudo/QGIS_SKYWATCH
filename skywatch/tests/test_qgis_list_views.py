@@ -14,7 +14,8 @@ from qgis.PyQt.QtCore import Qt  # noqa: E402
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel  # noqa: E402
 from qgis.PyQt.QtWidgets import QComboBox, QDialogButtonBox, QLineEdit, QTableView, QTreeWidget, QTreeWidgetItem  # noqa: E402
 
-from skywatch.ui.list_views import ROOT, ColumnsDialog, ListViews, column_menus  # noqa: E402
+from skywatch.core.config import parse_config  # noqa: E402
+from skywatch.ui.list_views import ROOT, ColumnsDialog, ListViews, column_drag, column_menus, set_column_drag  # noqa: E402
 from skywatch.tests.test_qgis_alerts import plugin  # noqa: E402,F401
 
 HEAD = ["名称", "区分", "期間", "状態"]
@@ -23,8 +24,10 @@ HEAD = ["名称", "区分", "期間", "状態"]
 @pytest.fixture(autouse=True)
 def clean():
     QgsSettings().remove(ROOT)
+    set_column_drag(True)
     yield
     QgsSettings().remove(ROOT)
+    set_column_drag(True)
     QgsProject.instance().removeAllMapLayers()
 
 
@@ -243,3 +246,25 @@ def test_each_list_of_the_observations_dock_keeps_its_own(plugin):  # noqa: F811
     assert [c["hidden"] for c in views.columns()][:2] == [False, True]
     # The other docks have theirs.
     assert p.api.image_catalog.views.key == "catalog" and p.api.requests.views.key == "requests"
+
+
+def test_header_drag_turned_off_by_the_settings_file(plugin):  # noqa: F811
+    p, _iface, dock, _ = plugin
+    lists = [dock.views, dock.steps_columns, p.docks["SatObsEvents"].table_columns, p.docks["SatObsAiResults"].list_columns,
+             p.api.image_catalog.views, p.api.requests.views]
+    assert column_drag() and all(v.header.sectionsMovable() for v in lists)
+    # `"columnDrag": false`: the lists open now and those made later are not dragged; the menu still moves the columns.
+    p.context.config, _ = parse_config({"columnDrag": False})
+    p.context.configChanged.emit()
+    assert not column_drag() and not any(v.header.sectionsMovable() for v in lists)
+    model = QStandardItemModel()
+    fill(model)
+    view = QTableView()
+    view.setModel(model)
+    later = column_menus("test", view)
+    assert not view.horizontalHeader().sectionsMovable()
+    assert later.move(0, "last") and titles(later) == ["区分", "期間", "状態", "名称"]
+    # The file without it again: dragged as before.
+    p.context.config, _ = parse_config({})
+    p.context.configChanged.emit()
+    assert all(v.header.sectionsMovable() for v in lists)

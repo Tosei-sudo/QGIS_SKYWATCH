@@ -161,6 +161,8 @@ class AnalysisDock(PluginDock):
         self.tree.itemDoubleClicked.connect(self._insert_name)
         self.tree.itemExpanded.connect(lambda _item: self.read_columns())
         self.tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # A fixed set of columns: not dragged about by their header (Qt lets a tree's be).
+        self.tree.header().setSectionsMovable(False)
         self.tree.setMinimumHeight(180)
         tl.addWidget(self.tree, 1)
         row = QHBoxLayout()

@@ -231,6 +231,13 @@ class TestObservationSettings:
         config, problems = parse_config({"localObservations": "false"})
         assert config.local_observations is True and problems == ["localObservations は true か false で指定"]
 
+    def test_column_drag_can_be_turned_off(self):
+        assert parse_config({})[0].column_drag is True
+        config, problems = parse_config({"columnDrag": False})
+        assert config.column_drag is False and problems == []
+        config, problems = parse_config({"columnDrag": 0})
+        assert config.column_drag is True and problems == ["columnDrag は true か false で指定"]
+
     def test_takes_confidence_levels_as_words_or_objects(self):
         problems = []
         assert confidences_of(["確定", {"label": "可能性大", "color": "#d97706", "note": "特徴が一致"}, {"label": "確定"}, {"color": "red"}, {"label": "x", "color": "url(evil)"}], problems, "c") == [
