@@ -24,6 +24,7 @@ from ..core.request.follow import follow_and_save, found_text, in_days, marked, 
 from ..core.request.model import jst_day
 from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
+from .list_views import column_menus
 
 COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先")
 SHOWN = ("すべて", "未撮像", "撮像済み", "未判定")
@@ -96,6 +97,8 @@ class PlanResultsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         layout.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("plan-results", self.table, self)
         hand = QHBoxLayout()
         self.taken_button = QPushButton(self.tr("撮像済みにする"))
         self.taken_button.setToolTip(self.tr("選んだ依頼を撮像済みに（繰り上げを戻し、期間内1回は完了）"))

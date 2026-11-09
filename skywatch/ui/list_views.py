@@ -3,9 +3,12 @@
 name and switched to in one click: which columns show and in what order,
 the sort (lists that sort by a header click) and the list's filters.
 
-- Columns are dragged by their header to reorder, and shown or hidden from
-  the header's right-click menu or 「ビュー ▸ 列の表示」; the arrangement is
-  kept as it is (per list, also without a name).
+- Columns are shown, hidden and put in order from the header's right-click
+  menu (「この列を左へ」「右へ」「先頭へ」「末尾へ」, the columns to tick) or
+  「列の表示と順番…」 (a list to tick and move up and down), also from
+  「ビュー ▸ 列の表示」 (tsudo, 2026-11-09: the order from a menu, as the
+  showing and hiding; a header drag still works); the arrangement is kept as
+  it is (per list, also without a name).
 - 「ビュー ▸ 今の表示を保存…」 keeps it under a name, with the filters; a
   saved view is chosen from the same menu. 「標準の表示に戻す」 shows every
   column in the plugin's order.
@@ -14,6 +17,9 @@ the sort (lists that sort by a header click) and the list's filters.
 
 Columns are told by their titles, so a view still fits when a list gains or
 loses a column (a column it does not name is shown where it falls).
+
+The other lists of the docks (and of a few dialogs) only have the header's
+menu and the arrangement kept (`column_menus`), no 「ビュー」 button.
 """
 from __future__ import annotations
 
@@ -23,7 +29,8 @@ from typing import Any, Callable, Optional, Union
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QObject, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QGroupBox, QHeaderView, QInputDialog, QLineEdit, QMenu, QSpinBox, QToolButton, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
 
 try:
@@ -35,6 +42,9 @@ ROOT = "skywatch/listViews"
 
 #: A filter: (read its value, set a value).
 Filter = tuple[Callable[[], Any], Callable[[Any], None]]
+
+#: Where a column is moved from the header's menu, and the menu's words.
+MOVES = (("left", "この列を左へ"), ("right", "この列を右へ"), ("first", "この列を先頭へ"), ("last", "この列を末尾へ"))
 
 
 def widget_filter(widget: QWidget) -> Filter:
@@ -70,7 +80,7 @@ class ListViews(QObject):
     """The views of one list (a table view or widget): its 「ビュー」 button, the header's menu, the arrangement kept."""
 
     def __init__(self, key: Union[str, Callable[[], str]], view: QAbstractItemView, filters: Optional[dict[str, Union[QWidget, Filter]]] = None,
-                 applied: Optional[Callable[[], None]] = None, parent: Optional[QObject] = None):
+                 applied: Optional[Callable[[], None]] = None, parent: Optional[QObject] = None, button: bool = True):
         super().__init__(parent or view)
         self._key = key
         self.view = view
@@ -90,7 +100,7 @@ class ListViews(QObject):
         header = self.header
         header.setSectionsMovable(True)
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        header.customContextMenuRequested.connect(lambda pos: self.columns_menu().exec(header.mapToGlobal(pos)))
+        header.customContextMenuRequested.connect(self._header_menu_requested)
         header.sectionMoved.connect(self._moved)
         header.sortIndicatorChanged.connect(self._sorted)
         model = view.model()
@@ -98,20 +108,26 @@ class ListViews(QObject):
             # Columns made again (a new search, another tab): the arrangement put back once they are.
             for signal in (model.modelReset, model.headerDataChanged, model.columnsInserted):
                 signal.connect(self._later)
-        self.button = QToolButton()
-        self.button.setText(self.tr("ビュー"))
-        self.button.setToolTip(self.tr("一覧の見え方（列の表示・並び、並べ替え、絞り込み）を名前を付けて保存・切り替え。列は見出しのドラッグで並べ替え、"
-                                       "右クリックで表示・非表示"))
-        self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(self.button)
-        menu.aboutToShow.connect(lambda: self._fill(menu))
-        self.button.setMenu(menu)
+        #: The 「ビュー」 button (lists with named views; the others only have the header's menu).
+        self.button: Optional[QToolButton] = None
+        if button:
+            self.button = QToolButton()
+            self.button.setText(self.tr("ビュー"))
+            self.button.setToolTip(self.tr("一覧の見え方（列の表示・順番、並べ替え、絞り込み）を名前を付けて保存・切り替え。"
+                                           "列の表示・順番は見出しの右クリックでも"))
+            self.button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(self.button)
+            menu.aboutToShow.connect(lambda: self._fill(menu))
+            self.button.setMenu(menu)
+        if self._titles():
+            # The columns are there already (a list made once): the arrangement kept put back now.
+            self.reapply()
 
     # ---- where it is kept --------------------------------------------------------------------------
 
     @property
     def header(self) -> QHeaderView:
-        return self.view.horizontalHeader()
+        return self.view.header() if isinstance(self.view, QTreeView) else self.view.horizontalHeader()
 
     @property
     def key(self) -> str:
@@ -280,18 +296,84 @@ class ListViews(QObject):
         self._arranged()
         return True
 
+    def order(self) -> list[int]:
+        """The columns (their places in the model) in the order shown."""
+        return sorted(range(len(self._titles())), key=self.header.visualIndex)
+
+    def arrange(self, order: list[int], hidden: Optional[set] = None) -> None:
+        """The columns put in `order` (their places in the model; the ones it leaves out after them), those in `hidden` hidden."""
+        n = len(self._titles())
+        wanted = [i for i in dict.fromkeys(order) if isinstance(i, int) and 0 <= i < n]
+        wanted += [i for i in range(n) if i not in wanted]
+        hidden = {i for i in (hidden or set()) if 0 <= i < n}
+        if n and len(hidden) >= n:
+            hidden.discard(wanted[0])
+        h = self.header
+        self._applying = True
+        try:
+            for target, i in enumerate(wanted):
+                h.moveSection(h.visualIndex(i), target)
+            for i in range(n):
+                h.setSectionHidden(i, i in hidden)
+        finally:
+            self._applying = False
+        self._arranged()
+
+    def can_move(self, column: int, where: str) -> bool:
+        shown = [i for i in self.order() if not self.header.isSectionHidden(i)]
+        if column not in shown:
+            return False
+        at = shown.index(column)
+        return at > 0 if where in ("left", "first") else at < len(shown) - 1
+
+    def move(self, column: int, where: str) -> bool:
+        """A column (its place in the model) moved one place left / right among those shown, or first / last."""
+        if not self.can_move(column, where):
+            return False
+        shown = [i for i in self.order() if not self.header.isSectionHidden(i)]
+        at = shown.index(column)
+        other = {"left": shown[at - 1] if at else column, "right": shown[at + 1] if at + 1 < len(shown) else column,
+                 "first": shown[0], "last": shown[-1]}[where]
+        h = self.header
+        # Moving right puts it after `other`, left before it (Qt shifts the ones between).
+        self._applying = True
+        try:
+            h.moveSection(h.visualIndex(column), h.visualIndex(other))
+        finally:
+            self._applying = False
+        self._arranged()
+        return True
+
+    def ask_columns(self) -> bool:
+        """「列の表示と順番…」: the columns to tick and to move up and down; True when changed."""
+        dialog = ColumnsDialog(self, self.view)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        dialog.accept_into()
+        return True
+
     # ---- menus -------------------------------------------------------------------------------------
 
-    def columns_menu(self, parent: Optional[QWidget] = None) -> QMenu:
-        menu = QMenu(self.tr("列の表示"), parent or self.view)
+    def columns_menu(self, parent: Optional[QWidget] = None, column: int = -1) -> QMenu:
+        """The columns to tick (shown or hidden); with the column right-clicked, its moves first."""
+        menu = QMenu(self.tr("列の表示・順番"), parent or self.view)
+        if 0 <= column < len(self._titles()):
+            for where, text in MOVES:
+                a = menu.addAction(self.tr(text), lambda where=where: self.move(column, where))
+                a.setEnabled(self.can_move(column, where))
+            menu.addSeparator()
         for c in self.columns():
             a = menu.addAction(c["title"] or self.tr("（名前なし）"))
             a.setCheckable(True)
             a.setChecked(not c["hidden"])
             a.toggled.connect(lambda on, t=c["title"]: self.set_hidden(t, not on))
         menu.addSeparator()
+        menu.addAction(self.tr("列の表示と順番…"), self.ask_columns)
         menu.addAction(self.tr("標準の表示に戻す"), self.reset)
         return menu
+
+    def _header_menu_requested(self, pos) -> None:
+        self.columns_menu(column=self.header.logicalIndexAt(pos)).exec(self.header.mapToGlobal(pos))
 
     def ask_save(self) -> Optional[str]:
         name, ok = QInputDialog.getText(self.view, self.tr("ビューの保存"), self.tr("ビューの名前（列・並べ替え・絞り込みを保存。自分の PC だけ）"),
@@ -322,4 +404,98 @@ class ListViews(QObject):
                 remove.addAction(n, lambda n=n: self.delete(n))
         menu.addSeparator()
         menu.addMenu(self.columns_menu(menu))
+        menu.addAction(self.tr("列の表示と順番…"), self.ask_columns)
         menu.addAction(self.tr("標準の表示に戻す"), self.reset)
+
+
+def column_menus(key: Union[str, Callable[[], str]], view: QAbstractItemView, parent: Optional[QObject] = None) -> ListViews:
+    """A list's columns shown, hidden and put in order from its header's right-click menu, kept per user (no 「ビュー」 button)."""
+    return ListViews(key, view, parent=parent, button=False)
+
+
+class ColumnsDialog(QDialog):
+    """「列の表示と順番」: every column of a list, ticked when shown, moved up and down with the buttons."""
+
+    def __init__(self, views: ListViews, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.views = views
+        self.setWindowTitle(self.tr("列の表示と順番"))
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(self.tr("チェックした列を表示。上から順に一覧の左から並ぶ")))
+        row = QHBoxLayout()
+        self.list = QListWidget()
+        self.list.currentRowChanged.connect(lambda _row: self._update())
+        self.list.itemChanged.connect(lambda _item: self._update())
+        row.addWidget(self.list, 1)
+        side = QVBoxLayout()
+        self.move_buttons: dict[str, QPushButton] = {}
+        for where, text in (("first", "先頭へ"), ("up", "上へ"), ("down", "下へ"), ("last", "末尾へ")):
+            b = QPushButton(self.tr(text))
+            b.clicked.connect(lambda _on=False, where=where: self.move(where))
+            side.addWidget(b)
+            self.move_buttons[where] = b
+        side.addSpacing(12)
+        standard = QPushButton(self.tr("標準に戻す"))
+        standard.setToolTip(self.tr("すべての列をプラグインの順番で表示（OK で反映）"))
+        standard.clicked.connect(self.standard)
+        side.addWidget(standard)
+        side.addStretch(1)
+        row.addLayout(side)
+        layout.addLayout(row, 1)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        h = views.header
+        self._fill([(i, not h.isSectionHidden(i)) for i in views.order()])
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+    def _fill(self, columns: list[tuple[int, bool]]) -> None:
+        titles = self.views._titles()
+        self.list.blockSignals(True)
+        self.list.clear()
+        for i, shown in columns:
+            item = QListWidgetItem(titles[i] or self.tr("（名前なし）"))
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if shown else Qt.CheckState.Unchecked)
+            self.list.addItem(item)
+        self.list.blockSignals(False)
+        self._update()
+
+    def chosen(self) -> list[tuple[int, bool]]:
+        """The columns as the dialog says: (place in the model, shown), in order."""
+        out = []
+        for r in range(self.list.count()):
+            item = self.list.item(r)
+            out.append((int(item.data(Qt.ItemDataRole.UserRole)), item.checkState() == Qt.CheckState.Checked))
+        return out
+
+    def move(self, where: str) -> None:
+        row = self.list.currentRow()
+        if row < 0:
+            return
+        to = {"first": 0, "up": row - 1, "down": row + 1, "last": self.list.count() - 1}[where]
+        to = max(0, min(self.list.count() - 1, to))
+        if to == row:
+            return
+        item = self.list.takeItem(row)
+        self.list.insertItem(to, item)
+        self.list.setCurrentRow(to)
+
+    def standard(self) -> None:
+        self._fill([(i, True) for i in range(len(self.views._titles()))])
+        self.list.setCurrentRow(0)
+
+    def _update(self) -> None:
+        row, n = self.list.currentRow(), self.list.count()
+        for where, b in self.move_buttons.items():
+            b.setEnabled(row >= 0 and (row > 0 if where in ("first", "up") else row < n - 1))
+        # Never every column hidden.
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(any(shown for _i, shown in self.chosen()))
+
+    def accept_into(self) -> None:
+        """The list arranged as the dialog says."""
+        chosen = self.chosen()
+        self.views.arrange([i for i, _shown in chosen], {i for i, shown in chosen if not shown})

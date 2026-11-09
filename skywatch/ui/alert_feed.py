@@ -24,6 +24,7 @@ from ..core.request.export import format_time
 from ..core.time_zone import UTC
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
+from .list_views import column_menus
 
 DAY_MS = 86_400_000
 #: The longest wait after polls failing one after another (ms).
@@ -71,6 +72,8 @@ class AlertFeed(QWidget):
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.cellDoubleClicked.connect(lambda r, c: self.go(r))
         v.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("alert-feed", self.table, self)
         row = QHBoxLayout()
         for text, tip, slot in [
                 (self.tr("今すぐ更新"), self.tr("通報テーブルを今すぐ読み直す"), lambda: self.poll(force=True)),

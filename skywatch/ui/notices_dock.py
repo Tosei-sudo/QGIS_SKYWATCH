@@ -32,6 +32,7 @@ from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .alert_feed import AlertFeed
 from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .list_views import column_menus
 from .watch_dialog import PointWatchDialog, WatchDialog
 
 TITLE = "通知"
@@ -71,6 +72,8 @@ class NoticesDock(PluginDock):
         self.notices.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.notices.itemDoubleClicked.connect(lambda item, column: self.open_notices([item.data(0, Qt.ItemDataRole.UserRole)]))
         v.addWidget(self.notices, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.notices_columns = column_menus("notices", self.notices, self)
         row = QHBoxLayout()
         for text, tip, slot in [
                 (self.tr("開く"), self.tr("選んだ新着画像をレイヤーとして開く（ダブルクリックでも）。画像ファイルなしのカタログの画像は、ファイルなしで観測記録へ"), lambda: self.open_notices(self.chosen_notices())),
@@ -92,6 +95,7 @@ class NoticesDock(PluginDock):
         self.watches.setRootIsDecorated(False)
         self.watches.itemChanged.connect(self._watch_toggled)
         v.addWidget(self.watches, 1)
+        self.watches_columns = column_menus("notice-watches", self.watches, self)
         row = QHBoxLayout()
         for text, slot in [(self.tr("名前の変更"), self.rename_chosen), (self.tr("削除"), self.delete_chosen_watch),
                            (self.tr("今すぐ確認"), lambda: self.check(force=True))]:

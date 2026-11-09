@@ -43,6 +43,7 @@ from ..core.request.store import (
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 
 COLUMNS = ("状態", "名称", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由・メモ")
@@ -173,6 +174,8 @@ class ScheduleDock(PluginDock):
         self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row(current.row()))
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         layout.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("schedule", self.table, self)
         answer = QHBoxLayout()
         answer.addWidget(QLabel(self.tr("採否")))
         self.adopt_button = QPushButton(self.tr("採用"))

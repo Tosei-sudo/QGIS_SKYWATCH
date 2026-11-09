@@ -29,6 +29,7 @@ from ..core.obs.assignments import STATUSES, Assignment, progress_of, progress_t
 from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
+from .list_views import column_menus
 
 DAY_MS = 86_400_000
 
@@ -77,6 +78,8 @@ class HandoverDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.cellDoubleClicked.connect(lambda r, _c: self._go(r))
         g.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("handover", self.table, self)
         row = QHBoxLayout()
         self.status_select = QComboBox()
         for s in STATUSES:

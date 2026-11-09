@@ -44,6 +44,7 @@ from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_tip
+from .list_views import column_menus
 from .flow_layout import FlowLayout
 
 TITLE = "イベント"
@@ -253,6 +254,8 @@ class EventsDock(PluginDock):
         self.table.itemSelectionChanged.connect(self._event_chosen)
         self.table.cellDoubleClicked.connect(lambda _r, _c: self.edit())
         self.body.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("events", self.table, self)
 
         self.buttons: dict[str, QPushButton] = {}
         flow = FlowLayout()
@@ -284,6 +287,7 @@ class EventsDock(PluginDock):
         self.body.addWidget(self.event_note)
         self.tabs = QTabWidget()
         self.item_tables: dict[str, QTableWidget] = {}
+        self.item_columns: dict = {}
         for t in TYPES:
             table = QTableWidget(0, 5)
             table.setHorizontalHeaderLabels([self.tr("名称"), self.tr("日時"), self.tr("メモ"), self.tr("追加者"), self.tr("追加日時")])
@@ -296,6 +300,7 @@ class EventsDock(PluginDock):
             table.cellDoubleClicked.connect(lambda _r, _c, t=t: self.open_items(t))
             table.itemSelectionChanged.connect(self._update_buttons)
             self.item_tables[t] = table
+            self.item_columns[t] = column_menus(f"event-items-{t}", table, self)
             self.tabs.addTab(table, TYPE_LABELS[t])
         self.body.addWidget(self.tabs, 1)
         items = QHBoxLayout()

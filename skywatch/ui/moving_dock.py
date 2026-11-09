@@ -25,6 +25,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.moving import FEED_TYPES, KINDS, ROLES, FeedConfig, feed_type_of, feed_url, history_rows
 from ..qgis_io.moving_layer import MovingLayer
 from .docks import PluginDock
+from .list_views import column_menus
 
 #: How long the temporal controller's range is when set to an acquisition time: the half hour up to it.
 ALIGN_WINDOW = 30 * 60_000
@@ -125,6 +126,8 @@ class MovingDock(PluginDock):
         self.list.setHeaderLabels([_tr("フィード"), _tr("種別"), _tr("状態")])
         self.list.setRootIsDecorated(False)
         self.body.addWidget(self.list, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.list_columns = column_menus("moving-feeds", self.list, self)
         buttons = QHBoxLayout()
         self.close_button = QPushButton(_tr("切断"))
         self.close_button.setToolTip(_tr("選んだフィードを切断してレイヤーを削除"))

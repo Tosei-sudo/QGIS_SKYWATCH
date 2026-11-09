@@ -60,6 +60,7 @@ from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .list_views import column_menus
 
 COLUMNS = ("採用", "システム", "衛星", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
@@ -163,6 +164,8 @@ class PlanFileDock(PluginDock):
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("plan-files", self.table, self)
         moves = QHBoxLayout()
         self.up_button = QPushButton(self.tr("上へ"))
         self.up_button.clicked.connect(lambda: self.move(-1))

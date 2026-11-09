@@ -34,6 +34,7 @@ from ..qgis_io.tasks import run_task
 from .docks import PluginDock
 from .plan_overlay import LabelItem
 from .last_inputs import InputMemory
+from .list_views import column_menus
 from .satellite_tree import SatelliteTree
 
 #: How often the moment follows the clock, ms.
@@ -268,6 +269,8 @@ class SatellitePassDock(PluginDock):
         self.table.clicked.connect(lambda index: self.zoom_to(index.row()))
         self.table.setToolTip(self.tr("クリックでこの衛星へ移動"))
         self.body.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("satellite-passes", self.table, self)
         buttons = QHBoxLayout()
         self.layer_button = QPushButton(self.tr("レイヤーとして追加"))
         self.layer_button.setToolTip(self.tr("軌跡と撮像可能範囲をレイヤーとして追加"))

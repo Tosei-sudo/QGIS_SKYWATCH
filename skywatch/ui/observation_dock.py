@@ -56,7 +56,7 @@ from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
 from .flow_layout import FlowLayout
-from .list_views import ListViews
+from .list_views import ListViews, column_menus
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
 
@@ -571,6 +571,7 @@ class ObservationDock(PluginDock):
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.steps_table.horizontalHeader().setStretchLastSection(True)
         self.steps_table.cellClicked.connect(self._step_clicked)
+        self.steps_columns = column_menus("observation-steps", self.steps_table, self)
         fl.addWidget(self.flow_summary)
         fl.addWidget(self.flow_strip)
         fl.addWidget(self.steps_table)
