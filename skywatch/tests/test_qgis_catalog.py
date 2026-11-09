@@ -524,6 +524,24 @@ def test_the_dialog_choosing_a_records_images():
     assert dialog.chosen() == [] and not dialog.buttons.button(dialog.buttons.StandardButton.Ok).isEnabled()
 
 
+def test_a_double_click_in_the_dialog_opens_that_image_alone():
+    from qgis.PyQt.QtTest import QTest
+    from qgis.PyQt.QtWidgets import QDialog
+
+    from skywatch.ui.image_files_dialog import ImageFilesDialog
+
+    dialog = ImageFilesDialog("D", ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"])
+    dialog.list.item(2).setCheckState(Qt.CheckState.Unchecked)  # whatever is checked
+    dialog.show()
+    QTest.qWaitForWindowExposed(dialog)
+    at = dialog.list.visualItemRect(dialog.list.item(2)).center()
+    # What a window system sends for a double click: press, release, then the double click.
+    QTest.mouseClick(dialog.list.viewport(), Qt.MouseButton.LeftButton, pos=at)
+    QTest.mouseDClick(dialog.list.viewport(), Qt.MouseButton.LeftButton, pos=at)
+    assert dialog.result() == QDialog.DialogCode.Accepted and not dialog.isVisible()
+    assert dialog.chosen() == ["MS/a.tif"]
+
+
 def test_a_long_look_in_a_folder_keeps_qgis_answering_and_can_be_cancelled(tmp_path):
     """#76: the folder is looked through off the main thread; cancelling the window stops waiting."""
     import threading

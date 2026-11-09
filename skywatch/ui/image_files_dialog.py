@@ -1,7 +1,8 @@
 """
 「開く画像の選択」: which of a catalog record's images (the files of its
 folder that match `imagePatterns`) to open. Every image is chosen at first;
-the filter narrows the list (a part of the path, case ignored).
+the filter narrows the list (a part of the path, case ignored). A double click
+on a row opens that image alone and closes the window, whatever is checked.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ class ImageFilesDialog(QDialog):
 
     def __init__(self, record_id: str, files: list[str], more: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._only: Optional[str] = None
         self.setWindowTitle(_tr("開く画像の選択"))
         self.resize(520, 420)
         layout = QVBoxLayout(self)
@@ -39,7 +41,11 @@ class ImageFilesDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked)
             self.list.addItem(item)
         self.list.itemChanged.connect(lambda _: self._count())
+        self.list.itemDoubleClicked.connect(self._open_only)
         layout.addWidget(self.list, 1)
+        hint = QLabel(_tr("ダブルクリックでその画像だけを開く"))
+        hint.setEnabled(False)
+        layout.addWidget(hint)
         row = QHBoxLayout()
         for text, state in ((_tr("表示中をすべて選択"), Qt.CheckState.Checked), (_tr("表示中をすべて解除"), Qt.CheckState.Unchecked)):
             button = QPushButton(text)
@@ -74,7 +80,14 @@ class ImageFilesDialog(QDialog):
         self.counter.setText(_tr("{n} 件を選択").format(n=n))
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(n > 0)
 
+    def _open_only(self, item: QListWidgetItem) -> None:
+        """The double-clicked image alone, whatever is checked; the window closes."""
+        self._only = item.text()
+        self.accept()
+
     def chosen(self) -> list[str]:
+        if self._only is not None:
+            return [self._only]
         return [item.text() for item in self._items() if item.checkState() == Qt.CheckState.Checked]
 
 
