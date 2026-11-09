@@ -825,7 +825,7 @@ def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeyp
     monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
     dock.submit()
     assert dock.form.isVisible() and dock.object_input.text() == "あおば" and dock.note_input.text() == "入港直後"
-    assert any("未保存の記録" in w.text() for w in iface.bar.items())
+    assert any("送信待ちに保管しました" in w.text() for w in iface.bar.items())
     monkeypatch.undo()
     dock.submit()
     assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]
@@ -961,8 +961,9 @@ def test_others_records_are_read_quietly(plugin, tmp_path):
 
 
 def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypatch):
-    """未保存の記録: kept on this computer when the save fails, even with another form open; sent again with the same id."""
+    """Records not saved: kept in 送信待ち when the save fails, even with another form open; sent again with the same id."""
     from skywatch.core.obs.book import ObservationBook
+    from skywatch.core.obs.drafts import OutboxDrafts
     from skywatch.qgis_io import settings as qs
 
     p, iface, dock, layers, tmp_path = plugin
@@ -979,9 +980,11 @@ def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypat
     dock.note_input.setText("一つ目")
     dock.submit()
     assert dock.form.isVisible() and dock.note_input.text() == "一つ目"
-    assert dock.drafts_button.isVisible() and dock.drafts_button.text() == "未保存の記録 1 件…"
+    assert dock.drafts_button.isVisible() and dock.drafts_button.text() == "送信待ち 1 件…"
     first = book.drafts()[0]
     assert first.record.object_name == "あおば" and "ネットワーク" in first.reason
+    # The same list as the status bar's: the outbox of the offline work.
+    assert p.offline.work.counts() == {"draft": 1} and p.offline.button.text() == "送信待ち 1 件"
     # Sent again from the form: the same record (not a second one), still failing.
     dock.submit()
     assert [d.id for d in book.drafts()] == [first.id]
@@ -991,19 +994,24 @@ def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypat
     dock.object_input.setText("いなづま")
     dock.note_input.setText("二つ目")
     dock.submit()
-    assert len(book.drafts()) == 2 and dock.drafts_button.text() == "未保存の記録 2 件…"
+    assert len(book.drafts()) == 2 and dock.drafts_button.text() == "送信待ち 2 件…"
     dock.close_form()
-    # Kept in QgsSettings: another book of the same store (QGIS started again) has them.
-    again = ObservationBook(book.store, book.area_store, book.taxonomy_store, book.vocabulary, prefs=qs.SettingsPrefs())
+    # Kept in the offline work's file: another book of the same store (QGIS started again) has them.
+    again = ObservationBook(book.store, book.area_store, book.taxonomy_store, book.vocabulary, prefs=qs.SettingsPrefs(),
+                            drafts=OutboxDrafts(p.offline.work))
     assert [d.record.note for d in again.drafts()] == ["一つ目", "二つ目"]
     # The network is back: one opened in the form and saved, the other sent from the list.
     monkeypatch.setattr(book.store, "save", real_save)
     dialog = dock.open_drafts()
-    assert dialog.tree.topLevelItemCount() == 2
+    assert dialog is p.offline.dialog and dialog.tree.topLevelItemCount() == 2
+    assert all(dialog.tree.topLevelItem(i).text(4).startswith("保存できず") for i in range(2))
     assert dock.open_draft(first.id) and dock.note_input.text() == "一つ目"
     dock.submit()
     assert [o.id for o in book.living()] == [first.id]
     assert len(book.drafts()) == 1 and dialog.tree.topLevelItemCount() == 1
-    dialog.send()
-    assert book.drafts() == [] and not dock.drafts_button.isVisible()
-    assert sorted(o.note for o in book.living()) == ["一つ目", "二つ目"]
+    reports = []
+    dialog.controller.upload(then=reports.append)
+    assert wait_for(lambda: reports and not p.offline.uploading)
+    assert reports[0].sent == {"observation": 1} and p.offline.work.total() == 0
+    assert wait_for(lambda: sorted(o.note for o in dock.book.living()) == ["一つ目", "二つ目"])
+    assert not dock.drafts_button.isVisible() and not p.offline.button.isVisible()

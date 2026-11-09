@@ -93,3 +93,54 @@ def test_waiting_work_is_thrown_away_when_asked(setup, monkeypatch):
     monkeypatch.setattr(offline_status, "ask_discard", lambda parent, w: True)
     controller.discard()
     assert work.total() == 0 and reloaded and fake.layers[URL].rows == []
+
+
+def test_one_list_of_what_waits_sends_the_chosen_opens_and_drops(setup, monkeypatch):
+    """「送信待ち」: the offline changes and the records not saved in one list, each with why it waits."""
+    from qgis.PyQt.QtCore import Qt
+
+    from skywatch.core.obs.drafts import Draft, OutboxDrafts
+    from skywatch.ui.outbox_dialog import CHECK_COLOR
+
+    context, controller, switch, fake, reloaded, iface = setup
+    work = context.offline
+    controller.act_forced.setChecked(True)
+    store = OfflineObservationStore(EsriObservationStore(observation_store_of({"label": "共有", "url": URL}, [], 0), context.esri()), work)
+    store.save([obs(id="n3", object_name="オフライン中")])
+    monkeypatch.setattr(offline_status, "ask_upload", lambda parent, w, back: "later")
+    controller.act_forced.setChecked(False)
+    shelf = OutboxDrafts(work)
+    shelf.keep("共有", Draft(obs(id="d1", object_name="通信失敗"), reason="ネットワークに接続できません"))
+    shelf.keep("共有", Draft(obs(id="d2", object_name="他人が変更"), editing_id="d2", base_updated=1,
+                             reason="ほかの人が先に更新していました", needs_check=True))
+    APP.processEvents()
+    assert controller.button.text() == "送信待ち 3 件" and work.sendable() == 2
+    dialog = controller.open_list()
+    rows = {dialog.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)[2]: dialog.tree.topLevelItem(i)
+            for i in range(dialog.tree.topLevelItemCount())}
+    assert rows["n3"].text(4) == "オフライン中の変更" and rows["d1"].text(4) == "保存できず: ネットワークに接続できません"
+    assert rows["d2"].text(4).startswith("要確認") and rows["d2"].foreground(0).color().name() == CHECK_COLOR
+    assert all(r.text(1) == "観測記録" for r in rows.values()) and rows["d1"].text(3).startswith("通信失敗")
+    # Only one draft can be opened in the form; the offline change cannot.
+    rows["n3"].setSelected(True)
+    assert not dialog.open_button.isEnabled()
+    rows["n3"].setSelected(False)
+    opened = []
+    controller.open_form = lambda store_label, record_id: opened.append((store_label, record_id)) or True
+    rows["d2"].setSelected(True)
+    assert dialog.open_button.isEnabled() and dialog.open_chosen() and opened == [("共有", "d2")]
+    # Sending with nothing chosen: all but the one to look at.
+    dialog.render()
+    dialog.tree.clearSelection()
+    dialog.send()
+    assert wait_for(lambda: not controller.uploading and work.total() == 1)
+    assert sorted(r["attributes"]["OBJECT_NAME"] for r in fake.layers[URL].rows) == ["オフライン中", "通信失敗"]
+    assert "送信" in dialog.status.text() and [p.item_id for p in work.pending()] == ["d2"]
+    # Thrown away when chosen (asked first).
+    dialog.tree.topLevelItem(0).setSelected(True)
+    monkeypatch.setattr("skywatch.ui.outbox_dialog.ask_no", lambda *a: False)
+    assert dialog.drop() == 0 and work.total() == 1
+    monkeypatch.setattr("skywatch.ui.outbox_dialog.ask_no", lambda *a: True)
+    assert dialog.drop() == 1 and work.total() == 0 and dialog.tree.topLevelItemCount() == 0
+    APP.processEvents()
+    assert not controller.button.isVisibleTo(iface.window)

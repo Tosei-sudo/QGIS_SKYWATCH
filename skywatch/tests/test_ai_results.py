@@ -111,3 +111,44 @@ def test_the_kind_of_a_class_found_by_the_plugins_own_detection():
     problems = []
     model = ai_model_of({"url": "./a.onnx", "kinds": {"boat": "船舶", "x": 3}}, problems, 0)
     assert model.kinds == {"boat": "船舶"} and problems == ["aiModels[0] の kinds.x は種別（「船舶 > 支援船」など）で指定"]
+
+
+def test_the_detection_tables_are_read_back_unless_left_out():
+    """detectionOutputs (「検出結果を DB へ転記」) read by 「AI結果」 too, its roles as the result's (tsudo, 2026-11-09)."""
+    from skywatch.core.ai_results import result_sources
+
+    tables = "https://example.com/arcgis/rest/services/Detections/FeatureServer/"
+    config, problems = parse_config({
+        "aiResultSources": [{"label": "外部AI", "url": URL, "fields": {"imageId": "IMAGE_ID"}}],
+        "detectionOutputs": [
+            {"label": "検出DB", "url": tables + "0", "fields": {"imageId": "IMAGE_ID", "class": "CLASS", "score": "CONFIDENCE",
+                                                                "model": "MODEL", "detectedAt": "DETECTED_AT", "status": "STATUS",
+                                                                "angle": "ANGLE", "length": "LONG_M"}},
+            {"label": "外部AI", "url": tables + "1", "fields": {"imageId": "IMG"}},
+            {"label": "画像IDなし", "url": tables + "2", "fields": {"class": "CLASS"}},
+            {"label": "読まない", "url": tables + "3", "fields": {"imageId": "IMAGE_ID"}, "aiResults": False},
+            {"label": "同じ表", "url": URL, "fields": {"imageId": "IMAGE_ID"}},
+            {"label": "書き方違い", "url": tables + "4", "fields": {"imageId": "IMAGE_ID"}, "aiResults": "no"},
+        ]})
+    assert problems == ["detectionOutputs[5] の aiResults は true / false で指定"]
+    sources = result_sources(config)
+    assert [(s.label, s.detections) for s in sources] == [("外部AI", False), ("検出DB", True), ("外部AI（転記先）", True), ("書き方違い", True)]
+    db = sources[1]
+    assert db.fields == {"imageId": "IMAGE_ID", "class": "CLASS", "score": "CONFIDENCE", "model": "MODEL", "detectedAt": "DETECTED_AT",
+                         "length": "LONG_M"}
+    r = result_of(db, {"attributes": {"OBJECTID": 7, "IMAGE_ID": "IMG1", "CLASS": "boat", "CONFIDENCE": 0.8, "MODEL": "港湾モデル",
+                                      "DETECTED_AT": 1794013200000}, "geometry": {"x": 139.7, "y": 35.6}}, "OBJECTID")
+    assert (r.key, r.tag, r.detected_at) == ("7", "[AI:検出DB#7]", 1794013200000)
+    note = import_entry(r, db, 139.7, 35.6, also=["[AI:検出@1#2]"]).note
+    assert note == "AI検出（検出DB）: boat 0.80 港湾モデル [AI:検出DB#7] [AI:検出@1#2]"
+    assert recorded_tags([note]) == {"[AI:検出DB#7]", "[AI:検出@1#2]"}
+
+
+def test_a_detection_layers_tags_name_its_run():
+    from skywatch.core.ai_results import detection_runs, same_run
+
+    assert detection_runs("AI検出: boat [AI:検出@1794013200000#3] [AI:検出DB#7] [AI:検出@layer_1#2]") == [
+        ("[AI:検出@1794013200000#3]", 1794013200000), ("[AI:検出@layer_1#2]", None)]
+    # To the second (a database may keep no less), and either unknown.
+    assert same_run(1794013200000, 1794013200999) and not same_run(1794013202000, 1794013200000)
+    assert same_run(None, 5) and same_run(5, None)

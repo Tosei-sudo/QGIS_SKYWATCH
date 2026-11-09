@@ -311,16 +311,19 @@ def _keep_request(work: OfflineWork, store: RequestStoreConfig, req: ImagingRequ
 
 
 def upload_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str], report: UploadReport,
-                    now: float) -> None:
+                    now: float, only: Optional[set] = None) -> None:
     """
-    Sends the requests of this ledger kept while it could not be reached. One
-    someone else changed (or deleted) meanwhile is not saved over: it stays
-    waiting, with why (to be thrown away, or changed again after a read).
+    Sends the requests of this ledger kept while it could not be reached (all,
+    or those in `only`: (kind, store, item id)). One someone else changed (or
+    deleted) meanwhile is not saved over: it stays waiting, with why (to be
+    thrown away, or changed again after a read).
     """
     work = offline_of(client)
     if work is None:
         return
     for p in work.pending(KIND, store.label):
+        if only is not None and (p.kind, p.store, p.item_id) not in only:
+            continue
         req = waiting_request(p)
         if req is None:
             work.drop(KIND, store.label, [p.item_id])

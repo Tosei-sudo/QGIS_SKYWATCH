@@ -37,6 +37,16 @@ def _property(layer: QgsVectorLayer, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def sent_ids(layer: QgsVectorLayer, url: str) -> dict[str, str]:
+    """The features of a layer written to `url`, by feature id: the object id each has there (as text)."""
+    out: dict[str, str] = {}
+    for fid, entry in (_property(layer, SENT).get(url) or {}).items():
+        oid = entry.get("id") if isinstance(entry, dict) else None
+        if oid is not None and not isinstance(oid, bool):
+            out[str(fid)] = str(int(oid)) if isinstance(oid, float) and oid.is_integer() else str(oid)
+    return out
+
+
 def plain(value: Any) -> Any:
     """An attribute as plain Python: NULL as None, times as ISO 8601 (UTC)."""
     if value is None or (hasattr(value, "isNull") and not isinstance(value, (QDateTime, QDate)) and value.isNull()):

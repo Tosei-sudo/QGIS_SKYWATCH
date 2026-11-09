@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from .areas import CheckedArea, area_label, box_ring, covering_areas, new_area_id
-from .drafts import Draft, drafts_text, parse_drafts
+from .drafts import Draft, PrefsDrafts
 from .flows import (
     CarryOver, ImageRef, MatchCandidate, ObjectFlow, carried_into, carry_overs, flow_of, flows, living, match_candidates,
     next_name, now_ms,
@@ -169,13 +169,16 @@ class ObservationBook:
 
     def __init__(self, store: ObservationStore, area_store: AreaStore, taxonomy_store: TaxonomyStore,
                  vocabulary: ObservationVocabulary, observer: Callable[[], str] = lambda: "",
-                 prefs: Optional[Prefs] = None, say: Callable[[str], None] = lambda message: None):
+                 prefs: Optional[Prefs] = None, say: Callable[[str], None] = lambda message: None,
+                 drafts: Any = None):
         self.store = store
         self.area_store = area_store
         self.taxonomy_store = taxonomy_store
         self.vocabulary = vocabulary
         self.observer = observer
         self.prefs = prefs or Prefs()
+        #: Where the records not saved wait (core/obs/drafts.py): the 送信待ち outbox in the plugin.
+        self.shelf = drafts if drafts is not None else PrefsDrafts(self.prefs)
         self.say = say
         self.lock = threading.RLock()
         #: Every record and area (deleted ones too).
@@ -612,8 +615,8 @@ class ObservationBook:
                source: Optional[Observation] = None, draft: Optional[str] = None) -> Optional[Observation]:
         """
         Records what the form says on the image recorded now (a new record, a
-        change, or a thing carried over). Not saved: kept as a draft
-        (「未保存の記録」); `draft`: the form was opened again from that one
+        change, or a thing carried over). Not saved: kept as a draft (送信待ち,
+        「保存できなかった観測記録」); `draft`: the form was opened again from that one
         (its record id is kept, and it goes when saved).
         """
         image = self.current
@@ -627,9 +630,9 @@ class ObservationBook:
                 who = now.updated_by or now.recorded_by
                 self._say(f"{editing.object_name} は開いた後に{who + ' さんが' if who else 'ほかの人が'}更新したため保存せず（閉じて開き直してから変更）")
                 kept = self.draft(draft) if draft else None
-                self.keep_draft(Draft(self.record_from(image, lon, lat, editing, source, values, present),
+                self.keep_draft(Draft(self._by(self.record_from(image, lon, lat, editing, source, values, present)),
                                       {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present, editing.id,
-                                      editing.updated_at, source.id if source else "", now_ms(), self.status),
+                                      editing.updated_at, source.id if source else "", now_ms(), self.status, needs_check=True),
                                 replaces=kept.id if kept else None)
                 return None
         record = self.record_from(image, lon, lat, editing, source, values, present)
@@ -644,66 +647,37 @@ class ObservationBook:
             if kept is not None:
                 self.drop_draft(kept.id)
             return saved[0]
-        self.keep_draft(Draft(record, {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present,
+        # Someone else's change in the way (#74): to be looked at before it is sent again.
+        crossed = record.id in (getattr(self.store, "last_conflicts", None) or ())
+        self.keep_draft(Draft(self._by(record), {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present,
                               editing.id if editing else "", editing.updated_at if editing else None,
-                              source.id if source else "", now_ms(), self.status), replaces=kept.id if kept else None)
+                              source.id if source else "", now_ms(), self.status, needs_check=crossed),
+                        replaces=kept.id if kept else None)
         return None
 
-    # ---- 保存できなかった記録 (core/obs/drafts.py) ------------------------------------
+    def _by(self, record: Observation) -> Observation:
+        """A record as it is saved by the one recording now (as _save_records stamps it), for a draft sent later."""
+        by = self.observer()
+        if any(o.id == record.id for o in self.records):
+            return replace(record, updated_by=by)
+        return replace(record, recorded_by=by, updated_by=by)
 
-    @property
-    def _drafts_key(self) -> str:
-        return f"drafts/{self.store.label}"
+    # ---- 保存できなかった記録 (core/obs/drafts.py) ------------------------------------
+    # Kept in the 送信待ち outbox (self.shelf) and sent from its list (core/obs/offline_stores.upload_drafts).
 
     def drafts(self) -> list[Draft]:
-        """The records not saved, kept on this computer (oldest first)."""
-        return parse_drafts(self.prefs.get(self._drafts_key))
+        """The records of this store not saved, kept on this computer (oldest first)."""
+        return self.shelf.all(self.store.label)
 
     def draft(self, draft_id: str) -> Optional[Draft]:
-        return next((d for d in self.drafts() if d.id == draft_id), None)
+        return self.shelf.get(self.store.label, draft_id)
 
     def keep_draft(self, draft: Draft, replaces: Optional[str] = None) -> None:
-        kept = [d for d in self.drafts() if d.id not in (draft.id, replaces)]
-        self.prefs.set(self._drafts_key, drafts_text(kept + [draft]))
+        self.shelf.keep(self.store.label, draft, replaces)
         self.last_draft_id = draft.id
 
     def drop_draft(self, draft_id: str) -> bool:
-        kept = self.drafts()
-        rest = [d for d in kept if d.id != draft_id]
-        if len(rest) != len(kept):
-            self.prefs.set(self._drafts_key, drafts_text(rest))
-        return len(rest) != len(kept)
-
-    def send_draft(self, draft_id: str) -> Optional[Observation]:
-        """
-        Sends a kept record again (as it was made). A change to a record
-        that is gone, or that someone else changed since, is not sent (the
-        draft stays, the reason said).
-        """
-        d = self.draft(draft_id)
-        if d is None:
-            return None
-        record = d.record
-        if d.editing:
-            now = self.record(d.editing_id)
-            if now is None:
-                return self._draft_failed(d, f"{record.object_name}: 元の記録が見つからず（削除されたか、読み込み前）")
-            if d.base_updated is not None and abs(now.updated_at - d.base_updated) > 1000:
-                who = now.updated_by or now.recorded_by
-                return self._draft_failed(d, f"{record.object_name}: 後で{who + ' さんが' if who else 'ほかの人が'}更新したため送らず"
-                                             "（フォームで開いて直す）")
-        what = (f"（{record.activity}）" if record.activity else "") if record.present else "（不在）"
-        saved = self._save_records([replace(record, updated_at=now_ms())],
-                                   f"{record.object_name}{what}を{'更新' if d.editing else '記録'}（未保存の記録を送信）")
-        if saved:
-            self.drop_draft(d.id)
-            return saved[0]
-        return self._draft_failed(d, self.status)
-
-    def _draft_failed(self, d: Draft, reason: str) -> None:
-        self.keep_draft(replace(d, reason=reason))
-        self._say(reason)
-        return None
+        return self.shelf.drop(self.store.label, [draft_id]) > 0
 
     def add(self, lon: float, lat: float, image: Optional[str] = None, object: str = "", kind: Optional[str] = None,
             activity: Optional[str] = None, confidence: Optional[str] = None, note: str = "", present: bool = True,

@@ -113,7 +113,7 @@ def results_layer(results: Sequence[AiResult], rows: Sequence[int], source: AiRe
                   imported: set[str]) -> QgsVectorLayer:
     """One source's results as a memory layer (WGS 84), labelled with their class and score; `row` is the list's row."""
     family = family_of(results)
-    layer = QgsVectorLayer(f"{family}?crs=EPSG:4326", f"外部AI結果 {source.label}（{image_id}）", "memory")
+    layer = QgsVectorLayer(f"{family}?crs=EPSG:4326", f"{'AI検出結果' if source.detections else '外部AI結果'} {source.label}（{image_id}）", "memory")
     fields = QgsFields()
     for name, kind in ((ROW, "integer"), ("source", "string"), ("result_id", "string"), ("class", "string"), ("score", "double"),
                        ("kind", "string"), ("name", "string"), ("model", "string"), ("detected_at", "date"), ("imported", "integer")):
