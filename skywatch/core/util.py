@@ -193,3 +193,64 @@ def read_day(text: str) -> str:
     if not m:
         raise ValueError(text)
     return date(int(m[1]), int(m[2]), int(m[3])).isoformat()
+
+
+#: A time of day typed: `10:30`, `10:30:15`, `10時`, `10時30分`, `10時30分15秒`, `1030`, `103015`.
+_CLOCKS = (re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?"),
+           re.compile(r"(\d{1,2})\s*時(?:\s*(\d{1,2})\s*分(?:\s*(\d{1,2})\s*秒)?)?"),
+           re.compile(r"(\d{2})(\d{2})(\d{2})?"))
+#: The day at the start of a day and time (`2026-11-09`, `2026/11/9`, `2026年11月9日`, `20261109`).
+_DAY_HEADS = (re.compile(r"(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})(\s*日)?"), re.compile(r"(\d{4})(\d{2})(\d{2})"))
+
+
+def read_clock(text: str) -> str:
+    """
+    A time of day typed in a box as `hh:mm` (`hh:mm:ss` when seconds are
+    typed): `10:30`, `9:05:30`, `10時`, `10時30分`, `1030` and full-width
+    digits too. '' when empty; raises ValueError when it is not one (25:00).
+    """
+    t = unicodedata.normalize("NFKC", text or "").strip()
+    if not t:
+        return ""
+    for pattern in _CLOCKS:
+        m = pattern.fullmatch(t)
+        if m:
+            h, mi = int(m[1]), int(m[2] or 0)
+            s = int(m[3]) if m[3] is not None else None
+            if h > 23 or mi > 59 or (s is not None and s > 59):
+                raise ValueError(text)
+            return f"{h:02d}:{mi:02d}" + (f":{s:02d}" if s is not None else "")
+    raise ValueError(text)
+
+
+def read_day_time(text: str, day: str = "") -> str:
+    """
+    A day, or a day and a time, typed in a box: `yyyy-mm-dd`, or
+    `yyyy-mm-dd hh:mm` (`hh:mm:ss` when seconds are typed). The day as
+    `read_day` reads it, then a space or `T` (none after 日) and the time as
+    `read_clock` reads it: `2026/11/9 10:30`, `2026-11-09T10:30`,
+    `20261109 1030`, `2026年11月9日10時30分`. A time alone is on `day`
+    (`yyyy-mm-dd`, the start of a period) when one is given. '' when
+    empty; raises ValueError when it cannot be read.
+    """
+    t = unicodedata.normalize("NFKC", text or "").strip()
+    if not t:
+        return ""
+    for head in _DAY_HEADS:
+        m = head.match(t)
+        if not m:
+            continue
+        day_text = date(int(m[1]), int(m[2]), int(m[3])).isoformat()
+        rest = t[m.end():]
+        if not rest.strip():
+            return day_text
+        clock = rest.lstrip()
+        if clock[:1] in ("T", "t"):
+            clock = clock[1:]
+        elif clock == rest and not m.group(0).endswith("日"):
+            # 2026-11-0910:30: the day and the time run together.
+            raise ValueError(text)
+        return f"{day_text} {read_clock(clock)}"
+    if day:
+        return f"{day} {read_clock(t)}"
+    raise ValueError(text)

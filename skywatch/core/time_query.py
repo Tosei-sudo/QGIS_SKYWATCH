@@ -1,7 +1,8 @@
 """
 Conditions on a layer's time field (a date, a number of ms, or text written
 as the layer writes it): the image catalog asked for a day's images (the
-follow-up of the imaging requests).
+follow-up of the imaging requests), and the times of a catalog search's
+period written as a text field writes them.
 """
 from __future__ import annotations
 
@@ -39,6 +40,26 @@ def text_sample(client: EsriClient, url: str, name: str, field_type: Optional[st
     return ""
 
 
+def text_at(instant: float, like: str = "", zone: Optional["time_zone.TimeZone"] = None) -> str:
+    """
+    An instant (whole seconds) as a text date field writes its values, to
+    compare as text: the separator of `like` (a value of the field; `T` when
+    none), clock time in `zone` (the source's `timeZone`; else the offset
+    `like` carries; else UTC), no suffix or fraction (a value's `Z` or
+    fraction sorts after it, so it stays in a `>=` and out of a `<`), and no
+    seconds when the values have none and the seconds are 0 (`10:00` is not
+    before `10:00`).
+    """
+    m = _SUFFIX.search(like or "")
+    z = zone or (time_zone.parse_time_zone(m.group(1)) if m else None) or time_zone.UTC
+    shape = re.sub(r"(Z|z|[+-]\d{2}:?\d{2})$", "", like) if like else "2000-01-01T00:00:00"
+    shape = re.sub(r"\.\d+$", "", shape)
+    text = time_zone.write_text(instant, z, shape)
+    if not re.search(r"\d{2}:\d{2}:\d{2}$", shape) and text.endswith(":00"):
+        text = text[:-3]
+    return text
+
+
 def between_condition(name: str, field_type: Optional[str], start: float, end: float, like: str = "",
                       zone: Optional["time_zone.TimeZone"] = None) -> str:
     """
@@ -51,12 +72,8 @@ def between_condition(name: str, field_type: Optional[str], start: float, end: f
     if field_type and re.search(r"Integer|Double|Single", field_type):
         return f"{name} >= {math.floor(start)} AND {name} <= {math.ceil(end)}"
     if field_type == "esriFieldTypeString":
-        m = _SUFFIX.search(like or "")
-        z = zone or (time_zone.parse_time_zone(m.group(1)) if m else None) or time_zone.UTC
-        shape = re.sub(r"(Z|z|[+-]\d{2}:?\d{2})$", "", like) if like else "2000-01-01T00:00:00"
-        shape = re.sub(r"\.\d+$", "", shape)
-        lo = time_zone.write_text(math.floor(start / 1000) * 1000, z, shape)
-        hi = time_zone.write_text(math.floor(end / 1000) * 1000 + 1000, z, shape)
+        lo = text_at(math.floor(start / 1000) * 1000, like, zone)
+        hi = text_at(math.floor(end / 1000) * 1000 + 1000, like, zone)
         return f"{name} >= '{lo}' AND {name} < '{hi}'"
     return f"{name} >= TIMESTAMP '{utc_text(start)}' AND {name} <= TIMESTAMP '{utc_text(end)}'"
 
