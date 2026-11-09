@@ -23,6 +23,13 @@ with 「開いている記録を見本に」); without one, the form's last 種�
 point. Backspace takes the last made back (a row as one). What is put down
 waits while a save is under way and goes in the next save together, so an
 Esri store gets one request for many clicks.
+
+The panel follows the book (tsudo, 2026-11-09: 「消したとき連続作成の方に反映
+されない」): the 見本 shows its record as it is now, and when that record is
+deleted (from the list, by 取り消し, by someone else) it is no longer the
+見本; this image's newest record takes its place, else none. 取り消し forgets
+records deleted meanwhile, so Backspace always takes back something still
+there.
 """
 from __future__ import annotations
 
@@ -259,6 +266,32 @@ class ManyPanel(QGroupBox):
         if record is not None:
             self.use_record(record)
             self.dock._say(tr("見本: {s}").format(s=self.sample_label.text()))
+
+    def follow_book(self) -> None:
+        """
+        After any change to the book: the 見本 as its record is now (a deleted
+        one is not kept: this image's newest record, else none, while a mode
+        is on), and what 取り消し can take back without the records deleted
+        meanwhile.
+        """
+        book = self._book()
+        if book is None:
+            return
+        s = self.sample
+        if s is not None and s.record_id:
+            record = book.record(s.record_id)
+            if record is None or record.deleted_at is not None:
+                self.sample = self._newest_here() if self.mode else None
+            elif record.present:
+                self.sample = sample_of(record)
+        alive = self._alive()
+        made = [(image, [i for i in ids if i in alive]) for image, ids in self.made]
+        self.made = [(image, ids) for image, ids in made if ids]
+        self.render()
+
+    def _alive(self) -> set:
+        book = self._book()
+        return {o.id for o in book.records if o.deleted_at is None} if book else set()
 
     def went(self) -> None:
         """Another image: what was being laid out is dropped; 取り消し keeps to its image."""
@@ -522,7 +555,8 @@ class ManyPanel(QGroupBox):
         image = book.current.id if book and book.current else None
         if any(w[0] == image for w in self.waiting):
             return "waiting"
-        return next((m for m in reversed(self.made) if m[0] == image), None)
+        alive = self._alive()
+        return next((m for m in reversed(self.made) if m[0] == image and any(i in alive for i in m[1])), None)
 
     def undo(self) -> bool:
         """The last put down on this image taken back (not yet sent: dropped; saved: deleted); whether there was one."""
@@ -539,16 +573,20 @@ class ManyPanel(QGroupBox):
                 self.dock._say(tr("見本で記録するところを取り消し"))
                 self.dock.draw()
                 return True
-        last = next((m for m in reversed(self.made) if m[0] == image), None)
-        if last is None:
-            self.dock._say(tr("取り消せる記録なし（連続・並べるで記録したものだけ）"))
-            return False
-        self.made.remove(last)
-        rows = [o for o in (book.record(i) for i in last[1]) if o is not None and o.deleted_at is None]
-        if rows:
-            self.dock.remove(rows)
-        self.render()
-        return True
+        # Those deleted meanwhile (from the list, by someone else) are passed over: the last still there is taken back.
+        alive = {o.id: o for o in book.records if o.deleted_at is None}
+        while True:
+            last = next((m for m in reversed(self.made) if m[0] == image), None)
+            if last is None:
+                self.render()
+                self.dock._say(tr("取り消せる記録なし（連続・並べるで記録したもので、まだあるものだけ）"))
+                return False
+            self.made.remove(last)
+            rows = [alive[i] for i in last[1] if i in alive]
+            if rows:
+                self.dock.remove(rows)
+                self.render()
+                return True
 
     # ---- drawing -------------------------------------------------------------
 

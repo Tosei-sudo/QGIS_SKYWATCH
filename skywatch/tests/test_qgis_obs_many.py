@@ -145,6 +145,39 @@ def test_stamps_by_double_click_turns_by_drag_and_takes_back(plugin):
     assert dock.many.mode == "" and not dock.stamp_button.isChecked() and not dock.many.isVisibleTo(dock) and dock.active
 
 
+def test_records_deleted_elsewhere_are_not_the_sample_nor_taken_back_again(plugin):
+    """tsudo 2026-11-09: 「消したとき連続作成の方に反映されない…もうないやつが親になるのも変」."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    car = measured_sample(dock)
+    dock.stamp_button.setChecked(True)
+    for lon in (139.72, 139.74, 139.76):
+        double_click(dock, lon, 35.65)
+    one, two, three = sorted((o for o in living(book.records) if o.id != car.id), key=lambda o: o.created_at)
+    assert [o.object_name for o in (one, two, three)] == ["乗用車-2", "乗用車-3", "乗用車-4"]
+    # The 見本 follows its record as it is now.
+    dock.do("変更", lambda b: b.update(car.id, length=7.5))
+    assert dock.many.sample.length == 7.5 and "7.5 × " in dock.many.sample_label.text()
+    # The 見本 deleted from the list: no longer the 見本; this image's newest record is.
+    dock.remove_selected([book.record(car.id)], ask=False)
+    assert dock.many.sample.record_id == three.id and dock.many.sample_label.text().startswith("乗用車-4（")
+    double_click(dock, 139.78, 35.65)
+    four = max(living(book.records), key=lambda o: o.created_at)
+    assert (four.object_name, four.length) == ("乗用車-5", three.length)
+    # The last ones deleted from the list: Backspace takes back the last still there (乗用車-3), not nothing.
+    dock.remove_selected([book.record(four.id), book.record(three.id)], ask=False)
+    assert dock.many.sample.record_id == two.id
+    key(dock, Qt.Key.Key_Backspace)
+    assert [o.object_name for o in living(book.records)] == ["乗用車-2"]
+    assert dock.many.sample.record_id == one.id
+    # Deleted from the list too: nothing left to take back, and the button says so.
+    dock.remove_selected([book.record(one.id)], ask=False)
+    assert not dock.many.undo_button.isEnabled() and dock.many.made == []
+    assert dock.many.sample is None and dock.many.sample_label.text().startswith("なし")
+    key(dock, Qt.Key.Key_Backspace)
+    assert dock.status.text().startswith("取り消せる記録なし")
+
+
 def test_rows_and_grids_are_laid_out_left_out_and_recorded_in_one(plugin):
     p, iface, dock, layers, _ = plugin
     book = dock.book
