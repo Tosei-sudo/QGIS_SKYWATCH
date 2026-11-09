@@ -56,7 +56,7 @@ def test_every_role_of_the_examples_has_its_buttons_and_they_are_menu_entries(pl
         assert len(set(buttons)) == len(buttons) and buttons[-1] == "ツールバーのボタン…"
     # Every entry can be chosen, in menu order.
     assert sorted(plugin.toolbar_buttons.entries) == sorted(texts)
-    assert list(plugin.toolbar_buttons.entries)[:3] == ["撮像計画", "保存した撮像計画", "衛星パス"]
+    assert list(plugin.toolbar_buttons.entries)[:3] == ["撮像計画", "衛星パス", "移動目標撮像計画…"]
 
 
 def test_choosing_a_role_changes_the_buttons(plugin):

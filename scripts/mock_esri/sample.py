@@ -291,8 +291,6 @@ AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME"
 TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL": S, "MEMBERS": {"type": S, "length": 8000},
                    "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000}, "ACTIVITIES": {"type": S, "length": 2000},
                    "SORT_ORDER": I}
-PLAN_FIELDS = {"PLAN_ID": {"type": S, "length": 64}, "PLAN_NAME": S, "SHOT_TIME": T, "SATELLITE": S, "SATELLITE_ID": S, "SENSOR_MODE": S,
-               "TARGET": S, "OFF_NADIR": D, "INCIDENCE": D, "PASS_DIR": S, "LOOK_SIDE": S, "STATUS": S, "IMAGE_ID": S, "CREATED_AT": T}
 REQUEST_FIELDS = {
     "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
@@ -419,7 +417,6 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 1, "name": "センサーモード", "fields": {"SENSOR": S, "SENSOR_MODE": S, "MIN_OFF_NADIR": D, "MAX_OFF_NADIR": D, "SWATH": D,
                                                        "SCENE_LENGTH": D, "SCENES_PER_PASS": I, "RESOLUTION_M": D, "IS_DEFAULT": F},
              "features": feats(sensors)}]},
-        {"name": "ImagingPlans", "layers": [{"id": 0, "name": "撮像計画", "geometryType": "polygon", "fields": PLAN_FIELDS, "features": []}]},
         {"name": "Observations", "layers": [
             {"id": 0, "name": "観測記録", "geometryType": "point", "fields": OBSERVATION_FIELDS, "features": feats(observations)},
             {"id": 1, "name": "分類体系", "fields": TAXONOMY_FIELDS, "features": feats(taxonomy)},
@@ -519,9 +516,6 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   // 閉じたネットワークでも動くよう雲量予報は使わない（使うなら {{ "url": "https://api.open-meteo.com/v1/forecast" }}）
   "cloudForecast": false,
   "groundStations": [{{ "name": "勝浦", "lon": 140.3, "lat": 35.15, "minElevation": 5 }}],
-  "planStores": [
-    {{ "label": "モック撮像計画", "url": "{rest}/ImagingPlans/FeatureServer/0"{tk}, "catalog": "モック画像カタログ" }}
-  ],
   "observationStores": [
     {{ "label": "モック観測記録", "url": "{rest}/Observations/FeatureServer/0"{tk},
       "areas": "{rest}/Observations/FeatureServer/2",

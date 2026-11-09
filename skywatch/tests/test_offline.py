@@ -17,7 +17,6 @@ from skywatch.core.obs.setup import store_sets
 from skywatch.core.obs.stores import EsriObservationStore
 from skywatch.core.offline import OfflineWork, cache_key, host_of, is_edit
 from skywatch.core.offline_upload import upload_all
-from skywatch.core.plan.store import DEFAULT_PLAN_FIELDS, add_shots, delete_plan, list_plans, load_shots, plan_store_of
 from skywatch.core.request.store import delete_request, load_requests, request_store_of, save_request, waiting_ids
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer
 from skywatch.tests.test_obs import ALL, DATES, URL, day, obs
@@ -211,38 +210,14 @@ def test_a_request_changed_by_someone_else_meanwhile_stays_waiting(tmp_path):
     assert work.discard() == 1 and work.total() == 0
 
 
-PLAN_URL = "https://gis.example/arcgis/rest/services/Plans/FeatureServer/0"
-
-
-def test_plans_saved_offline_are_listed_and_sent(tmp_path):
+def test_plans_an_older_version_saved_offline_are_kept_and_said_so(tmp_path):
+    # 撮像計画の保存 is gone (2026-11-09): what is still waiting is neither sent nor lost.
     fake = FakeEsri()
-    fields = {name: "esriFieldTypeString" for name in DEFAULT_PLAN_FIELDS.values()}
-    fields.update(SHOT_TIME="esriFieldTypeDate", CREATED_AT="esriFieldTypeDate")
-    fake.add_layer(PLAN_URL, FakeLayer(fields, "esriGeometryPolygon"))
-    switch = Switch(fake)
     work = OfflineWork(str(tmp_path / "offline.sqlite"))
-    store = plan_store_of({"label": "計画", "url": PLAN_URL}, [], 0)
-    client = client_of(work, switch)
-    assert list_plans(client, store, None) == []
-    switch.down = True
-    ring = [[[139.6, 35.6], [139.8, 35.6], [139.8, 35.8], [139.6, 35.8], [139.6, 35.6]]]
-    features = [{"attributes": {"PLAN_ID": "P1", "PLAN_NAME": "東京", "SHOT_TIME": day(3) + i, "SATELLITE": "WV-3", "STATUS": "予定",
-                                "CREATED_AT": day(2)}, "geometry": {"rings": ring}} for i in range(2)]
-    assert add_shots(client, store, None, features) == (2, [])
-    plans = list_plans(client, store, None)
-    assert [(p.id, p.name, p.shots) for p in plans] == [("P1", "東京", 2)]
-    shots = load_shots(client, store, None, "P1")
-    assert [s.objectId for s in shots] == [-1, -2] and shots[0].satellite == "WV-3"
-    switch.down = False
-    work.probe(switch)
-    cfg, _ = parse_config({"planStores": [{"label": "計画", "url": PLAN_URL}]})
-    report = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, Prefs(), lambda: None)
-    assert report.sent == {"plan": 1} and len(fake.layers[PLAN_URL].rows) == 2
-    # A plan saved offline and deleted again never reaches the server.
-    switch.down = True
-    work.mark_down(PLAN_URL)
-    add_shots(client, store, None, [{**features[0], "attributes": {**features[0]["attributes"], "PLAN_ID": "P2"}}])
-    assert delete_plan(client, store, None, "P2") == 1 and work.total() == 0
+    work.keep("plan", "計画", "P1", "add", {"attributes": {"PLAN_ID": "P1"}})
+    report, _ = _upload(work, Switch(fake))
+    assert report.sent == {} and work.counts() == {"plan": 1}
+    assert report.kept == ["撮像計画の保存はなくなった（撮像依頼に一本化）ため送らない「計画」の撮像計画 1 件"]
 
 
 def test_the_settings_key(tmp_path):
@@ -373,24 +348,3 @@ def test_requests_lost_answers_and_saves_after_coming_back(tmp_path):
     online = {r.id: r.priority for r in load_requests(EsriClient(fake), store, None)}
     assert (online["R2"], online["R3"]) == (400, 700)
 
-
-def test_a_plan_whose_save_timed_out_is_not_there_twice(tmp_path):
-    fake = FakeEsri()
-    fields = {name: "esriFieldTypeString" for name in DEFAULT_PLAN_FIELDS.values()}
-    fields.update(SHOT_TIME="esriFieldTypeDate", CREATED_AT="esriFieldTypeDate")
-    fake.add_layer(PLAN_URL, FakeLayer(fields, "esriGeometryPolygon"))
-    lossy = Lossy(fake)
-    work = OfflineWork(str(tmp_path / "offline.sqlite"))
-    store = plan_store_of({"label": "計画", "url": PLAN_URL}, [], 0)
-    client = client_of(work, lossy)
-    ring = [[[139.6, 35.6], [139.8, 35.6], [139.8, 35.8], [139.6, 35.8], [139.6, 35.6]]]
-    features = [{"attributes": {"PLAN_ID": "P1", "PLAN_NAME": "東京", "SHOT_TIME": day(3) + i, "SATELLITE": "WV-3", "STATUS": "予定",
-                                "CREATED_AT": day(2)}, "geometry": {"rings": ring}} for i in range(2)]
-    lossy.losing = True
-    assert add_shots(client, store, None, features) == (2, [])
-    assert len(fake.layers[PLAN_URL].rows) == 2 and work.counts() == {"plan": 1}
-    lossy.losing = False
-    work.probe(lossy)
-    report, _ = _upload(work, lossy, planStores=[{"label": "計画", "url": PLAN_URL}])
-    assert report.sent == {"plan": 1} and work.total() == 0
-    assert len(fake.layers[PLAN_URL].rows) == 2

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import replace
 from typing import Callable, Optional
 
 from qgis.core import QgsProject, QgsRectangle, QgsVectorLayer
@@ -20,6 +21,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.bulk import RequestChange, apply_change
+from ..core.request.from_plan import requests_of_plan
 from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
@@ -525,8 +527,52 @@ class RequestDock(PluginDock):
         self.form.show()
         return self.form
 
-    def _save_batch(self, template: ImagingRequest, items: list) -> None:
-        """Saves one request per feature: the form's items, the feature's name and area."""
+    def from_plan(self, ops: list, sats: list, targets: list):
+        """
+        臨時 requests from the 「撮像計画」 dock's opportunities (one per target:
+        its area, the days and satellites of those chosen), opened in the form
+        to look over and save; several targets in one form, saved one each.
+        """
+        from .request_form import RequestForm
+
+        if self.store is None:
+            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            return None
+        base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+        made = requests_of_plan(ops, sats, targets, new_request_id, self.point_km, base)
+        if not made:
+            return None
+        if len(made) == 1:
+            self.edit(new=True, request=made[0])
+            return self.form
+        if self.form is not None:
+            self.form.close()
+        # One form for all of them: the days from the first to the last, the satellites of all. What the form
+        # leaves as it was is each target's own (its days, satellites, modes, kind); the shots go in each note.
+        kinds = {r.kind for r in made}
+        template = replace(made[0], start=min(r.start for r in made), end=max(r.end for r in made),
+                           satellites=list(dict.fromkeys(s for r in made for s in r.satellites)),
+                           modes=list(dict.fromkeys(m for r in made for m in r.modes)),
+                           kind=made[0].kind if len(kinds) == 1 else "任意", note="")
+        if template.kind != "光学":
+            template.cloud_no_go = None
+        own = ("start", "end", "satellites", "modes", "kind", "cloud_no_go")
+        items = [(r.name, r.rings, r.shape_kind, {"own": {k: getattr(r, k) for k in own}, "note": r.note}) for r in made]
+        names = "、".join(r.name for r in made[:3]) + ("…" if len(made) > 3 else "")
+        batch = {"items": items, "names": names, "title": self.tr("撮像計画から臨時依頼（{n} 件）").format(n=len(made)),
+                 "text": self.tr("撮像計画の対象 {n} 件（対象ごとに 1 件。範囲は対象のもの。期間・衛星・モード・種別は、"
+                                 "ここで変えなければ対象ごとの撮像機会のもの。撮像の一覧は各件の備考に）").format(n=len(made))}
+        self.form = RequestForm(self.iface, template, lambda t: self._save_batch(t, items, template), self.known(), self,
+                                satellites=self.satellites, batch=batch)
+        self.form.show()
+        return self.form
+
+    def _save_batch(self, template: ImagingRequest, items: list, first: Optional[ImagingRequest] = None) -> None:
+        """
+        Saves one request per feature: the form's items, the feature's name and
+        area. An item's `own` values stand where the form still has what it
+        opened with (`first`); its `note` follows the form's.
+        """
         store, client, token = self.store, self.context.esri(), self.token()
         form = self.form
         todo = []
@@ -537,6 +583,10 @@ class RequestDock(PluginDock):
             # The feature's own numbers; one it lacks is the form's.
             r.management_no = numbers.get("management_no") or template.management_no
             r.identification_no = numbers.get("identification_no") or template.identification_no
+            for key, value in (numbers.get("own") or {}).items():
+                if first is not None and getattr(template, key) == getattr(first, key):
+                    setattr(r, key, value)
+            r.note = "\n".join(x for x in (template.note, numbers.get("note") or "") if x)
             todo.append(r)
 
         def work(task):

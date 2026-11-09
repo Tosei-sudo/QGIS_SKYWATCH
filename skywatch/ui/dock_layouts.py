@@ -43,7 +43,7 @@ _AREAS = {
 #: Built-in examples: (name, [(side, [docks of a tab group, the first in front]), ...]); every dock listed is open.
 PRESETS = [
     ("撮像計画の担当", [
-        ("right", ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans"]),
+        ("right", ["SatObsImagingPlan", "SatObsSatellitePass"]),
         ("right", ["SatObsRequests", "SatObsPlanFiles", "SatObsSchedule"]),
         ("left", ["SatObsImageCatalog"]),
     ]),

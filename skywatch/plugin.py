@@ -48,7 +48,6 @@ from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
 from .ui.transfer_dialog import TransferDialog
-from .ui.saved_plans_dock import SavedPlansDock
 from .ui.plan_file_dock import PlanFileDock
 from .ui.request_dock import RequestDock
 from .ui.schedule_dock import ScheduleDock
@@ -69,7 +68,7 @@ MENU = "SKYWATCH"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
-    ("撮像計画", ["撮像計画", "保存した撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
+    ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
@@ -84,7 +83,7 @@ MENU_GROUPS = [
 MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsSavedPlans", "SatObsRequests", "SatObsPlanFiles",
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
                                              "SatObsSchedule", "SatObsCloud"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard", "SatObsAnalysis"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
@@ -164,11 +163,6 @@ class PluginApi:
     def satellite_pass(self) -> "SatellitePassDock":
         """The satellite pass dock (its `tracks`, `choose()`, `set_time()`, `draw()`, `add_layer()`)."""
         return self._plugin.docks["SatObsSatellitePass"]
-
-    @property
-    def saved_plans(self) -> "SavedPlansDock":
-        """The saved plans dock (its `plans`, `shots`, `reload()`, `choose()`, `track()`)."""
-        return self._plugin.docks["SatObsSavedPlans"]
 
     @property
     def requests(self) -> "RequestDock":
@@ -351,7 +345,7 @@ class SkywatchPlugin:
             return QIcon(os.path.join(HERE, "resources", f"{name}.svg"))
 
         #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
-        icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSavedPlans": "saved_plans", "SatObsSatellitePass": "satellite_pass",
+        icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSatellitePass": "satellite_pass",
                  "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
@@ -362,7 +356,6 @@ class SkywatchPlugin:
         specs = [
             ("SatObsImageCatalog", tr("画像カタログ"), None),
             ("SatObsImagingPlan", tr("撮像計画"), None),
-            ("SatObsSavedPlans", tr("保存した撮像計画"), None),
             ("SatObsRequests", tr("撮像依頼"), None),
             ("SatObsPlanFiles", tr("撮像計画ファイル出力"), None),
             ("SatObsSchedule", tr("撮像予定"), None),
@@ -413,8 +406,6 @@ class SkywatchPlugin:
                 dock = AnalysisDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsCloud":
                 dock = CloudDock(self.iface, self.context, self.open_settings, lambda: self.open_cloud_cover(), self.iface.mainWindow())
-            elif name == "SatObsSavedPlans":
-                dock = SavedPlansDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsRequests":
                 plan_dock = self.docks["SatObsImagingPlan"]
 
@@ -471,7 +462,8 @@ class SkywatchPlugin:
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)
-        self.docks["SatObsImagingPlan"].open_saved = self.docks["SatObsSavedPlans"].open
+        # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
+        self.docks["SatObsImagingPlan"].make_requests = self._requests_from_plan
         self._wire_catalog()
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
@@ -716,13 +708,6 @@ class SkywatchPlugin:
             dock.reload(then, failed)
             return True
 
-        def saved_plans(then, failed) -> bool:
-            dock = docks.get("SatObsSavedPlans")
-            if dock is None or dock.store is None or dock.plans or dock.task is not None:
-                return False
-            dock.reload(then, failed)
-            return True
-
         def events(then, failed) -> bool:
             dock = docks.get("SatObsEvents")
             if dock is None or dock.settings is None or dock.events is not None:
@@ -730,7 +715,7 @@ class SkywatchPlugin:
             dock.reload(then, failed=failed)
             return True
 
-        for key, start in (("satellites", satellites), ("requests", requests), ("savedPlans", saved_plans), ("events", events)):
+        for key, start in (("satellites", satellites), ("requests", requests), ("events", events)):
             self.preloader.add(key, PRELOAD_ITEMS[key], start)
         self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
         self.preloader.finished.connect(self._preload_finished)
@@ -1270,9 +1255,16 @@ class SkywatchPlugin:
         tasks.run_task(tr("オフライン用の控えの更新"), work, lambda _n: then(), failed, hidden=True)
         return True
 
+    def _requests_from_plan(self, ops: list, sats: list, targets: list):
+        """The 「撮像依頼」 dock shown, its form opened with 臨時 requests of the plan's opportunities."""
+        dock = self.docks["SatObsRequests"]
+        dock.show()
+        dock.raise_()
+        return dock.from_plan(ops, sats, targets)
+
     def _reload_after_offline(self) -> None:
         """The work kept offline was sent or thrown away (or a server is back): the docks that show it read again."""
-        for name in ("SatObsObservations", "SatObsRequests", "SatObsSavedPlans"):
+        for name in ("SatObsObservations", "SatObsRequests"):
             dock = self.docks.get(name)
             if dock is not None:
                 try:

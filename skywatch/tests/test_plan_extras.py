@@ -1,7 +1,7 @@
 """
-The viewer's imaging-plan-store.test.ts, imaging-plan-weather.test.ts,
-imaging-plan-pairs.test.ts and the calendar part of
-imaging-plan-extras.test.ts, ported.
+The viewer's imaging-plan-weather.test.ts, imaging-plan-pairs.test.ts and
+the calendar part of imaging-plan-extras.test.ts, ported (the plan store's
+tests went with the store: 撮像計画 now becomes 臨時 requests, 2026-11-09).
 """
 import json
 import math
@@ -11,9 +11,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from skywatch.core.catalog import catalog_of
 from skywatch.core.config import parse_config
-from skywatch.core.esri import EsriClient
 from skywatch.core.plan.access import Opportunity, PlanOptions, PlanTarget, plan_access
 from skywatch.core.plan.orbit import ecef_of
 from skywatch.core.plan.pairs import RepeatOptions, StereoOptions, relate, repeat_pairs, stereo_pairs
@@ -24,14 +22,10 @@ from skywatch.core.plan.revisit import (
     box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_stats, RevisitStats,
 )
 from skywatch.core.plan.satellites import satellites_from_text
-from skywatch.core.plan.store import (
-    DEFAULT_PLAN_FIELDS, ShotCheck, add_shots, between_condition, delete_plan, list_plans, load_shots, plan_store_of,
-    progress_text, shot_features, track_shots, update_shots,
-)
 from skywatch.core.plan.weather import (
     DEFAULT_CLOUD_FORECAST, CloudSeries, apply_clouds, cloud_at, cloud_forecast_of, fetch_clouds, places_for,
 )
-from skywatch.tests.fake_esri import FakeEsri, FakeLayer
+from skywatch.core.time_query import between_condition
 
 LINE1 = "1 25544U 98067A   26280.50000000  .00016717  00000-0  10270-3 0  9994"
 LINE2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49815399432717"
@@ -55,80 +49,10 @@ def op(time, sat_ecef=(0, 0, 6800), **extra):
     return Opportunity(**values)
 
 
-# --- plan stores -------------------------------------------------------------------------
-
-PLAN_URL = "https://gis.example/arcgis/rest/services/Plans/FeatureServer/0"
-CATALOG_URL = "https://gis.example/arcgis/rest/services/Images/FeatureServer/0"
-T0 = utc(2026, 10, 10, 1, 0)
-STORE_SATS = [sat("WorldView-3", id="WorldView-3"), sat("SAR-1", id="SAR-1")]
-STORE_TARGETS = [PlanTarget("東京", (139.7, 35.7), []), PlanTarget("大阪", (135.5, 34.7), [])]
-
+# --- time conditions ----------------------------------------------------------------------
 
 def box(lon, lat):
     return [[[lon - 0.05, lat - 0.05], [lon + 0.05, lat - 0.05], [lon + 0.05, lat + 0.05], [lon - 0.05, lat + 0.05], [lon - 0.05, lat - 0.05]]]
-
-
-def image_rings(w, s, e, n):
-    return {"rings": [[[w, s], [w, n], [e, n], [e, s], [w, s]]], "spatialReference": {"wkid": 4326}}
-
-
-def plan_server():
-    fake = FakeEsri()
-    fields = {name: "esriFieldTypeString" for name in DEFAULT_PLAN_FIELDS.values()}
-    fields.update(SHOT_TIME="esriFieldTypeDate", CREATED_AT="esriFieldTypeDate", OFF_NADIR="esriFieldTypeDouble", INCIDENCE="esriFieldTypeDouble")
-    del fields["SENSOR_MODE"]
-    fake.add_layer(PLAN_URL, FakeLayer(fields, "esriGeometryPolygon"))
-    images = fake.add_layer(CATALOG_URL, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
-    # Taken 10 minutes after the Tokyo shot, over it, by the planned satellite (and another one at the same time).
-    images.add({"IMAGE_ID": "WV3-001", "ACQ": T0 + 600000, "SENSOR": "WV-3 / WorldView3"}, image_rings(139.6, 35.6, 139.8, 35.8))
-    images.add({"IMAGE_ID": "OTHER", "ACQ": T0 + 600000, "SENSOR": "Pleiades"}, image_rings(139.6, 35.6, 139.8, 35.8))
-    # Over Osaka, but a week late.
-    images.add({"IMAGE_ID": "LATE", "ACQ": T0 + 8 * DAY, "SENSOR": "SAR-1"}, image_rings(135.4, 34.6, 135.6, 34.8))
-    return fake
-
-
-def test_plan_stores_from_settings():
-    problems = []
-    store = plan_store_of({"label": "計画", "url": PLAN_URL, "fields": {"status": "STATE"}, "catalog": "画像"}, problems, 0)
-    assert store.fields == {**DEFAULT_PLAN_FIELDS, "status": "STATE"}
-    assert store.match_minutes == 30 and store.miss_after_days == 3
-    assert plan_store_of({"url": "https://x/MapServer"}, problems, 1) is None
-    assert len(problems) == 1
-    assert len(parse_config({"planStores": [{"url": PLAN_URL}]})[0].plan_stores) == 1
-
-
-def test_save_list_follow_up_and_delete_a_plan():
-    store = plan_store_of({"url": PLAN_URL}, [], 0)
-    fake = plan_server()
-    client = EsriClient(fake)
-    ops = [op(T0, satellite=0, target=0), op(T0 + DAY, satellite=1, target=1), op(T0 + 20 * DAY, satellite=0, target=1)]
-    features = shot_features(ops, STORE_SATS, STORE_TARGETS, lambda o: box(*STORE_TARGETS[o.target].center), "P1", "十月の計画", store.fields, T0 - DAY)
-    assert len(features) == 3
-    a = features[0]["attributes"]
-    assert (a["PLAN_ID"], a["SHOT_TIME"], a["SATELLITE"], a["STATUS"], a["PASS_DIR"]) == ("P1", T0, "WorldView-3", "予定", "南行")
-    assert add_shots(client, store, None, features) == (3, [])
-    # Outer rings go clockwise; attributes the layer lacks (SENSOR_MODE) are left out.
-    ring = fake.layers[PLAN_URL].rows[0]["geometry"]["rings"][0]
-    assert ring[1][1] > ring[0][1]
-    assert "SENSOR_MODE" not in fake.layers[PLAN_URL].rows[0]["attributes"]
-
-    plans = list_plans(client, store, None)
-    assert [(p.id, p.name, p.shots, p.first, p.statuses) for p in plans] == [("P1", "十月の計画", 3, T0, {"予定": 3})]
-    shots = load_shots(client, store, None, "P1")
-    assert [s.target for s in shots] == ["東京", "大阪", "大阪"]
-    assert shots[0].rings
-
-    catalog = catalog_of({"label": "画像", "url": CATALOG_URL, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}, [], 0)
-    changes = track_shots(client, store, catalog, None, shots, T0 + 5 * DAY)
-    # Tokyo: the satellite's own image, not the other one; Osaka: nothing within 30 minutes and 3 days gone; the last shot is ahead.
-    assert changes == [ShotCheck(shots[0].objectId, "撮像済み", "WV3-001"), ShotCheck(shots[1].objectId, "未撮像")]
-    assert update_shots(client, store, None, changes) == 2
-    after = list_plans(client, store, None)
-    assert after[0].statuses == {"撮像済み": 1, "未撮像": 1, "予定": 1}
-    assert progress_text(after[0].statuses) == "撮像済み 1 / 2（50%）・未撮像 1・予定 1"
-
-    delete_plan(client, store, None, "P1")
-    assert list_plans(client, store, None) == []
 
 
 def test_time_conditions_for_the_field_type():

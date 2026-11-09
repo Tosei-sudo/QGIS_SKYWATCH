@@ -26,7 +26,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout,
-    QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableView,
+    QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableView,
     QVBoxLayout, QWidget,
 )
 
@@ -47,7 +47,6 @@ from ..core.plan.revisit import (
 from ..core.plan.satellites import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites, satellite_label, satellites_from_text
 from ..core.plan.scene import pass_shapes
 from ..core.plan.scene import shift_scene, track_place
-from ..core.plan.store import add_shots, new_plan_id, shot_features
 from ..core.plan.targets import MAX_TARGETS, name_of, priority_of, target_of
 from ..core.plan.weather import apply_clouds, fetch_clouds, places_for
 from ..qgis_io import settings
@@ -168,15 +167,14 @@ class ImagingPlanDock(PluginDock):
         self._drag: Optional[tuple] = None
         self.cloud_task = None
         self.revisit_task = None
-        self.store_task = None
         #: The pairs of the last plan in a pair view, for the conditions they were found with.
         self._pairs: Optional[tuple] = None
         #: The revisit map of the last plan: grid size, cells, their stats, the chosen cell.
         self.revisit: Optional[dict] = None
         #: Moving targets from 「移動目標撮像計画」: {"ships": [ShipState], "label": str}.
         self.moving: Optional[dict] = None
-        #: Opens the 「保存した計画」 dock (set by the plugin).
-        self.open_saved: Optional[Callable[[], None]] = None
+        #: Opens the 「撮像依頼」 form for 臨時 requests of opportunities (ops, sats, targets; set by the plugin).
+        self.make_requests: Optional[Callable[[list, list, list], object]] = None
         #: Told each reminder shown (reminder, text, now): the 通知 dock keeps it as a notice.
         self.on_reminder: Optional[Callable] = None
         self._build()
@@ -465,7 +463,6 @@ class ImagingPlanDock(PluginDock):
         bottom_layout.addLayout(actions)
         bottom_layout.addLayout(self._later_actions())
         bottom_layout.addWidget(self.remind_row)
-        bottom_layout.addWidget(self.save_row)
         self._update_buttons()
 
         # Shortcuts while the dock has the focus only.
@@ -520,14 +517,7 @@ class ImagingPlanDock(PluginDock):
             self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。"
                                           "取り込んだ予報ファイルから読む（どこにも送信しない）") if forecast.local else
                                   self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。対象の位置を予報サービスへ送信"))
-        self.store_choice.clear()
-        for store in config.plan_stores:
-            self.store_choice.addItem(store.label)
-        self.store_choice.setVisible(len(config.plan_stores) > 1)
-        for button in (self.store_button, self.saved_button):
-            button.setVisible(bool(config.plan_stores))
-        if not config.plan_stores and self.store_button.isChecked():
-            self.store_button.setChecked(False)
+        self.request_button.setVisible(bool(config.request_stores))
         if not config.satellite_catalogs:
             # Without a catalog, two fixed sample satellites stand in (the SAR one with three made-up modes, unless the settings have sensors).
             self.catalog_sats = with_modes(sample_satellites(), [] if config.sensor_catalogs else sample_sensor_modes())
@@ -1323,10 +1313,11 @@ class ImagingPlanDock(PluginDock):
         cells = self.revisit_shown()
         self.csv_button.setEnabled(any_ or cells)
         self.layer_button.setEnabled(any_ or cells)
-        for button in (self.remind_button, self.store_button):
-            button.setEnabled(any_)
-            if not any_ and button.isChecked():
-                button.setChecked(False)
+        self.remind_button.setEnabled(any_)
+        if not any_ and self.remind_button.isChecked():
+            self.remind_button.setChecked(False)
+        self.request_button.setEnabled(any_)
+        self.request_chosen.setEnabled(self.chosen is not None)
         self.zoom_button.setEnabled(self.chosen is not None)
         self.move_button.setEnabled(self.chosen is not None)
         if self.chosen is None and self.move_button.isChecked():
@@ -1387,18 +1378,23 @@ class ImagingPlanDock(PluginDock):
         return bar
 
     def _later_actions(self) -> QHBoxLayout:
-        """「予定・通知…」, 「保存・追跡…」 and 「保存した計画…」, and the rows they open."""
+        """「予定・通知…」 and 「臨時依頼にする」, and the row the first opens."""
         actions = QHBoxLayout()
         self.remind_button = QPushButton(self.tr("予定・通知…"))
         self.remind_button.setCheckable(True)
         self.remind_button.setToolTip(self.tr("撮像前の通知・予定表（.ics）への保存"))
-        self.store_button = QPushButton(self.tr("保存・追跡…"))
-        self.store_button.setCheckable(True)
-        self.store_button.setToolTip(self.tr("計画をフィーチャーサービスに保存し、撮れたかを追跡"))
-        self.saved_button = QPushButton(self.tr("保存した計画…"))
-        self.saved_button.setToolTip(self.tr("保存した計画の一覧と撮像の成否"))
-        self.saved_button.clicked.connect(lambda: self.open_saved and self.open_saved())
-        for b in (self.remind_button, self.store_button, self.saved_button):
+        # What is to be taken goes to the ledger as a 臨時 request (tsudo, 2026-11-09: 撮像計画と撮像依頼は同じ業務):
+        # from there the day's files, the systems' answers and whether it was taken, as every request.
+        self.request_button = QPushButton(self.tr("臨時依頼にする"))
+        self.request_button.setToolTip(self.tr("撮像機会の対象を、撮像依頼の台帳に臨時の依頼として登録する（範囲・その日・衛星を引き継ぎ、"
+                                               "依頼のフォームで確かめて保存）。出力・採否・撮れたかは撮像依頼の流れで"))
+        menu = QMenu(self.request_button)
+        self.request_chosen = menu.addAction(self.tr("選んだ撮像機会から"))
+        self.request_chosen.triggered.connect(lambda: self.to_requests(all_shown=False))
+        self.request_all = menu.addAction(self.tr("一覧のすべての撮像機会から（対象ごとに 1 件）"))
+        self.request_all.triggered.connect(lambda: self.to_requests(all_shown=True))
+        self.request_button.setMenu(menu)
+        for b in (self.remind_button, self.request_button):
             actions.addWidget(b)
         actions.addStretch(1)
 
@@ -1426,27 +1422,7 @@ class ImagingPlanDock(PluginDock):
         self.remind_row.hide()
         self.remind_button.toggled.connect(lambda on: (self.remind_row.setVisible(on), self.count_reminders()))
 
-        self.save_row = QWidget()
-        save = QHBoxLayout(self.save_row)
-        save.setContentsMargins(0, 0, 0, 0)
-        self.store_choice = QComboBox()
-        self.store_choice.setToolTip(self.tr("保存先"))
-        self.plan_name = QLineEdit()
-        self.plan_name.setPlaceholderText(self.tr("計画の名前"))
-        save_button = QPushButton(self.tr("保存"))
-        save_button.setToolTip(self.tr("一覧の撮像を保存先に保存。撮像時刻の後に画像カタログで撮れたかを確認可能"))
-        save_button.clicked.connect(lambda: self.save_to_store())
-        for w in (self.store_choice, self.plan_name, save_button):
-            save.addWidget(w)
-        save.setStretch(1, 1)
-        self.save_row.hide()
-        self.store_button.toggled.connect(self._store_toggled)
         return actions
-
-    def _store_toggled(self, on: bool) -> None:
-        self.save_row.setVisible(on)
-        if on and not self.plan_name.text() and self.plan:
-            self.plan_name.setText(self.tr("撮像計画 {day}").format(day=local_text(self.plan["options"].start)[:10]))
 
     # --- Cloud forecasts --------------------------------------------------------------------
 
@@ -1773,41 +1749,18 @@ class ImagingPlanDock(PluginDock):
 
     # --- Saving to a plan store -------------------------------------------------------------
 
-    def save_to_store(self, then: Optional[Callable[[Optional[str]], None]] = None) -> None:
-        """Saves the listed shots to the chosen plan layer (in a task); `then` hears the plan's id (None when nothing was saved)."""
+    def to_requests(self, all_shown: bool = False):
+        """
+        Opens the 「撮像依頼」 form with 臨時 requests of the chosen opportunity
+        (or of every one listed, one request per target); the form, or None.
+        """
         plan = self.plan
-        stores = self.context.config.plan_stores
-        index = max(0, self.store_choice.currentIndex())
-        if not plan or not self.shown or not stores or self.store_task is not None:
-            return
-        store = stores[min(index, len(stores) - 1)]
-        name = self.plan_name.text().strip() or self.tr("撮像計画 {day}").format(day=local_text(plan["options"].start)[:10])
-        plan_id = new_plan_id()
-        features = shot_features(self.shown, plan["sats"], plan["targets"], self._rings_of, plan_id, name, store.fields, _now_ms())
-        client = self.context.esri()
-        token = self.context.token_for(store.url, store.token)
-        self.status.setText(self.tr("{label} に {n} 回の撮像を保存中…").format(label=store.label, n=len(features)))
-
-        def work(task):
-            return add_shots(client, store, token, features, task.isCanceled)
-
-        def done(result):
-            self.store_task = None
-            saved, failed_ = result
-            more = self.tr("。保存失敗 {n} 回: {why}").format(n=len(failed_), why=failed_[0]) if failed_ else ""
-            self.status.setText(self.tr("「{name}」を {label} に保存（{n} 回{more}）。「保存した計画…」で撮像の成否を確認可能").format(
-                name=name, label=store.label, n=saved, more=more))
-            self.iface.messageBar().pushSuccess(self.tr("撮像計画"), self.tr("撮像計画「{name}」を保存").format(name=name))
-            if then:
-                then(plan_id if saved else None)
-
-        def failed(message):
-            self.store_task = None
-            self.status.setText(self.tr("保存失敗: {m}").format(m=message))
-            if then:
-                then(None)
-
-        self.store_task = run_task(self.tr("撮像計画の保存"), work, done, failed)
+        if not plan or self.make_requests is None:
+            return None
+        ops = list(self.shown) if all_shown or self.chosen is None else [self.chosen]
+        if not ops:
+            return None
+        return self.make_requests(ops, plan["sats"], plan["targets"])
 
     # --- Output ---------------------------------------------------------------------------
 

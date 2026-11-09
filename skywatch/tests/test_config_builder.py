@@ -22,7 +22,7 @@ def plugin_constants() -> dict:
     from skywatch.core.enhance import pipeline
     from skywatch.core.obs import export as obs_export
     from skywatch.core.obs import alerts, assignments, handover, model as obs_model, stores as obs_stores
-    from skywatch.core.plan import modes, names, satellites, store as plan_store
+    from skywatch.core.plan import modes, names, satellites
     from skywatch.core.request import export, store as request_store, systems
 
     return {
@@ -32,7 +32,6 @@ def plugin_constants() -> dict:
             "satelliteCatalogs": list(satellites.SATELLITE_ROLES),
             "sensorCatalogs": list(modes.SENSOR_ROLES),
             "satelliteAliases": list(names.ALIAS_ROLES),
-            "planStores": dict(plan_store.DEFAULT_PLAN_FIELDS),
             "requestStores": dict(request_store.DEFAULT_REQUEST_FIELDS),
             "requestHistory": dict(request_store.DEFAULT_HISTORY_FIELDS),
             "observationStores": dict(obs_model.DEFAULT_OBSERVATION_FIELDS),

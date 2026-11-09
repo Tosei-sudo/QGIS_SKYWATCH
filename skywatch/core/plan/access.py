@@ -48,6 +48,8 @@ class PlanTarget:
     #: For a moving target: the radius (km) of where it may be, and how long (ms) after its last report.
     uncertainty: Optional[float] = None
     guessed: Optional[float] = None
+    #: The features' outlines (the outer ring of each polygon, WGS 84): the area of a 臨時 request made from the plan.
+    rings: list = field(default_factory=list)
 
 
 @dataclass

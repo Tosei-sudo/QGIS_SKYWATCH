@@ -56,7 +56,6 @@ KINDS: dict[str, tuple[str, str]] = {
     "satellite": ("TBL_SATELLITE", "衛星カタログ"),
     "sensor": ("TBL_SENSOR_MODE", "センサーモード"),
     "alias": ("TBL_SATELLITE_ALIAS", "衛星名の対応表"),
-    "plan": ("TBL_IMAGING_PLAN", "撮像計画"),
     "request": ("TBL_IMAGING_REQUEST", "撮像依頼台帳"),
     "requestHistory": ("TBL_REQUEST_HISTORY", "撮像依頼の出力履歴"),
     "observation": ("TBL_OBSERVATION", "観測記録"),
@@ -89,7 +88,7 @@ RELATIONS: list[tuple[tuple[str, str], tuple[str, str]]] = [
     (("eventLink", "item"), ("observation", "id")),
     (("eventLink", "item"), ("request", "id")),
     (("requestHistory", "requestId"), ("request", "id")),
-    (("plan", "satellite"), ("satellite", "name")),
+    (("requestHistory", "satellite"), ("satellite", "name")),
 ]
 
 #: The figures of 「かんたん集計」: key → (label, SQL with {c} for the column).
@@ -178,8 +177,6 @@ def esri_tables(config: Any) -> list[Table]:
         add("sensor", x.label, x)
     for x in getattr(c, "satellite_aliases", []) or []:
         add("alias", x.label, x)
-    for x in getattr(c, "plan_stores", []) or []:
-        add("plan", x.label, x)
     for x in getattr(c, "request_stores", []) or []:
         add("request", x.label, x)
         if _web(x.history):

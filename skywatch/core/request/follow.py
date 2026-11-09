@@ -16,7 +16,7 @@ from ..catalog import CatalogConfig
 from ..esri import EsriClient, EsriError
 from ..plan.names import NO_NAMES, SatelliteNames, best_named, names_satellite
 from .. import time_zone
-from ..plan.store import between_condition, text_sample
+from ..time_query import between_condition, text_sample
 from .model import ImagingRequest
 from .model import day_bounds
 from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests

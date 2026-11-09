@@ -16,9 +16,10 @@ from typing import Optional
 ITEMS = {
     "satellites": "衛星カタログ",
     "requests": "撮像依頼",
-    "savedPlans": "保存した撮像計画",
     "events": "イベント",
 }
+#: Items that were there once and are skipped without a problem (保存した撮像計画, retired 2026-11-09).
+RETIRED = {"savedPlans"}
 
 
 def preload_of(value: object, problems: list[str]) -> tuple[str, ...]:
@@ -33,6 +34,8 @@ def preload_of(value: object, problems: list[str]) -> tuple[str, ...]:
             if isinstance(v, str) and v in ITEMS:
                 if v not in out:
                     out.append(v)
+            elif v in RETIRED:
+                continue
             else:
                 problems.append(f"preload の「{v}」は不明（使えるのは {'・'.join(ITEMS)}）")
         return tuple(out)

@@ -226,7 +226,6 @@ class PluginContext(QObject):
         out += [Service("衛星カタログ", x.label, x.url, bool(x.token)) for x in c.satellite_catalogs]
         out += [Service("センサーカタログ", x.label, x.url, bool(x.token)) for x in c.sensor_catalogs if x.url]
         out += [Service("衛星名の対応表", x.label, x.url, bool(x.token)) for x in c.satellite_aliases]
-        out += [Service("計画の保存先", x.label, x.url, bool(x.token)) for x in c.plan_stores]
         for x in c.observation_stores:
             out.append(Service("観測記録の保存先", x.label, x.url, bool(x.token)))
             if x.areas:
