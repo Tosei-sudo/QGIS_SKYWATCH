@@ -802,11 +802,19 @@ class EventsDock(PluginDock):
         else:
             self._open_requests(links)
 
+    #: The 「観測記録」 dock (plugin.py sets it): the images of a catalog without image files go there.
+    observations: Optional[Callable[[], object]] = None
+
     def _open_images(self, result) -> None:
         catalog_dock = self.docks().get("SatObsImageCatalog")
         problems: list[str] = []
         opened = 0
+        without = []
         for catalog, records in result:
+            if not catalog.image_files:
+                # Their raw data is in another system: recorded on without their files.
+                without += records
+                continue
             for record in records:
                 try:
                     layers = open_record(record, catalog, self.context.config.path_mappings,
@@ -821,9 +829,21 @@ class EventsDock(PluginDock):
                 add_record_layers(layers, record)
                 overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
                 opened += len(layers)
+        listed = 0
+        if without:
+            from ..core.catalog.search import listed_image
+
+            images = [i for i in (listed_image(r) for r in without) if i is not None]
+            dock = self.observations() if self.observations else None
+            if images and dock is not None and dock.list_catalog_images(images) is not None:
+                listed = len(images)
+            else:
+                problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
         if problems:
             self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
-        self.say(self.tr("画像 {n} 枚を開いた").format(n=opened) if opened else self.status.text())
+        said = [self.tr("画像 {n} 枚を開いた").format(n=opened) if opened else "",
+                self.tr("ファイルなしの画像 {n} 件を観測記録へ").format(n=listed) if listed else ""]
+        self.say("、".join(x for x in said if x) or self.status.text())
 
     def show_in_catalog(self) -> None:
         links = [x for x in self.links_of(self.chosen(), "image") if not self.is_local(x)]

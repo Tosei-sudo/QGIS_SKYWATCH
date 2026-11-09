@@ -1145,12 +1145,52 @@ class ObservationDock(PluginDock):
         self.record_button.setChecked(not self.active)
 
     def step(self, by: int) -> Optional[ObservedImage]:
-        """The next (or previous) image in time."""
+        """The next (or previous) image in time (one without its file: the map moves to it when it is out of view)."""
         if self.book is None:
             return None
         image = self.book.step(by)
         self._went()
+        self.show_image_area(image)
         return image
+
+    def list_catalog_images(self, images: list) -> Optional[ObservedImage]:
+        """
+        The catalog's 「ファイルなしで記録」: its images (core.obs.model.ListedImage,
+        their ids, times and footprints as the catalog says) listed without
+        their files, the first one recorded on; the dock comes forward and
+        the map moves to it.
+        """
+        if self.book is None:
+            return None
+        entry = self.book.list_images(images)
+        if entry is None:
+            return None
+        self.list_button.setChecked(False)
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+        self._went()
+        self.show_image_area(entry, always=True)
+        return entry
+
+    def show_image_area(self, image: Optional[ObservedImage], always: bool = False) -> None:
+        """Moves the map to an image without its file that has a footprint (unless already in view, `always` aside)."""
+        if image is None or image.file or not image.box:
+            return
+        west, south, east, north = image.box
+        box = QgsRectangle(west, south, east, north)
+        transform = from_wgs84(self.canvas.mapSettings().destinationCrs())
+        try:
+            extent = transform.transformBoundingBox(box)
+        except Exception:  # noqa: BLE001 (a footprint the map's CRS cannot show)
+            return
+        if not always and self.canvas.extent().intersects(extent):
+            return
+        extent.scale(1.2)
+        if extent.isEmpty():
+            extent = extent.buffered(max(self.canvas.mapUnitsPerPixel() * 200, 1e-6))
+        self.canvas.setExtent(extent)
+        self.canvas.refresh()
 
     def go_to(self, image_id: str) -> bool:
         if self.book is None or not self.book.go_to(image_id):
@@ -1162,6 +1202,7 @@ class ObservationDock(PluginDock):
         if self.book and 0 <= index < len(self.book.images):
             self.book.current = self.book.images[index]
             self._went()
+            self.show_image_area(self.book.current)
 
     def _toggle_list_form(self, on: bool) -> None:
         self.list_form.setVisible(on)

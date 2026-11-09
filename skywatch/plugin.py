@@ -465,6 +465,9 @@ class SkywatchPlugin:
         # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
         for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
             self.docks[name].event_linker = lambda: self.docks.get("SatObsEvents")
+        # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
+        for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
+            self.docks[name].observations = lambda: self.docks.get("SatObsObservations")
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)

@@ -1,6 +1,6 @@
 """
 The image catalog's list (a QTableView model): the catalog's roles and
-columns, 場所, and, for 「類似画像の検索」, 重なり. A click on a heading sorts
+columns, 場所 (not for a catalog without image files), and, for 「類似画像の検索」, 重なり. A click on a heading sorts
 by it, empty values last whichever way.
 """
 from __future__ import annotations
@@ -33,7 +33,9 @@ class CatalogModel(QAbstractTableModel):
     def set_records(self, catalog: Optional[CatalogConfig], records: Sequence[CatalogRecord],
                     overlaps: Optional[dict[int, Optional[float]]] = None, work: bool = False) -> None:
         self.beginResetModel()
-        columns = (list_columns(catalog) if catalog else []) + [PLACE] + ([OVERLAP] if overlaps is not None else [])
+        # 場所 says nothing of a catalog without image files (`imageFiles: false`).
+        place = [PLACE] if catalog is None or catalog.image_files else []
+        columns = (list_columns(catalog) if catalog else []) + place + ([OVERLAP] if overlaps is not None else [])
         # 分担 next to the image's id (seen without scrolling sideways).
         self.columns = columns[:1] + [WORK] + columns[1:] if work else columns
         self.work = {} if work else None

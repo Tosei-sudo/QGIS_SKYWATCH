@@ -964,9 +964,10 @@ const SAMPLE = { k: "", t: "sample", l: "見本" };
 
 const SPEC = [
   { group: "画像カタログ・通知・画像", keys: [
-    { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須。",
+    { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須（imageFiles: false のカタログは source 不要）。",
       field: I("imageCatalogs", "画像カタログ", [
-        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], multi: ["source", "keywords"] }),
+        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], requiredUnless: (it) => it.imageFiles === false, multi: ["source", "keywords"] }),
+        B("imageFiles", "画像ファイル（imageFiles）", { help: "false: 画像ファイルのないカタログ（生データは別システムだけ）。「開く」の代わりに「ファイルなしで記録」（観測記録へ ID・撮像日時・範囲ごと）。fields.source は不要。既定 true" }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
         WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
@@ -2170,7 +2171,7 @@ function checkField(f, obj, at, p) {
   } else if (f.t === "roles") {
     if (!isObj(v)) { p.push(`${at}: { 役割: 属性名 } で指定`); return; }
     for (const [role, name] of Object.entries(v)) for (const n of Array.isArray(name) ? name : [name]) if (typeof n !== "string" || !ATTR.test(n)) p.push(`${at}.${role}: 属性名は英数字と _`);
-    for (const r of f.required || []) if (!v[r]) p.push(`${at}.${r}: ${ROLE_LABELS[r] || r} の属性名がない`);
+    if (!(f.requiredUnless && f.requiredUnless(obj))) for (const r of f.required || []) if (!v[r]) p.push(`${at}.${r}: ${ROLE_LABELS[r] || r} の属性名がない`);
     if (f.requiredAny && !f.requiredAny.some((set) => set.every((r) => v[r]))) p.push(`${at}: ${f.requiredAny.map((s) => s.join("＋")).join(" か ")} が必要`);
     if (f.requiredSome && isEmpty(v)) p.push(`${at}: 書き込む属性がない`);
   } else if (f.t === "object") {
