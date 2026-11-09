@@ -239,6 +239,17 @@ a.open { color: #0b7a3e; font-weight: bold; }
 </table>
 <p>打っている間は外形の四角が地図に出ます。<span class="key">Esc</span> で最後の 1 点を取り消します。</p>
 
+<h3 id="obs-many">同じものがたくさん並んでいるとき</h3>
+<p>駐車場の車・駐機場の航空機・岸壁の船など、同じものが並んでいるときは、1 つを見本にして残りを手早く記録します。まず 1 つをふつうに記録します（2〜4 点で測っておくと、長さ・幅・向きも写されます）。フォームで最後に記録したものが見本です（ほかの記録は、印をクリックしてフォームで開き <span class="ui">開いている記録を見本に</span>）。</p>
+<table>
+<tr><th>やり方</th><th>操作</th></tr>
+<tr><td><span class="ui">連続</span>（<span class="key">S</span>）</td><td>ダブルクリックで見本と同じ向きのまま 1 つ記録。向きが違うものは、中心で押して前端の方へドラッグ。前の画像のモノ（白抜きの印）をダブルクリックすると継続</td></tr>
+<tr><td><span class="ui">並べる</span>（<span class="key">G</span>）</td><td>列の両端をクリック（格子はさらに最後の列の始め）。数を合わせ（地図で <span class="key">＋</span>・<span class="key">−</span>）、空いている所はクリックで外して <span class="key">Enter</span></td></tr>
+<tr><td><span class="ui">似たものを探す</span></td><td>地図の表示範囲で見本に似たものを画像から探し、<a href="#ai">AI結果</a> に並べます。正・誤検出で確かめて取り込みます</td></tr>
+</table>
+<p>名前は「乗用車-12」のように順に付きます。<span class="key">Backspace</span> で最後に記録したものを取り消します（並べたものはまとめて）。<span class="key">Esc</span> で終わります。</p>
+<div class="tip">「似たものを探す」は学習なしで画像の見た目を比べるだけです。光学画像で向きのそろった所ほどよく当たります。SAR や向きがばらばらな所では見落としや誤検出が増え、向きの前後が逆になることもあるので、AI結果で確かめてから取り込んでください。</div>
+
 <h3 id="obs-fix">直す・消す・まとめて変える</h3>
 <ul>
 <li>印が画像の邪魔なとき: <span class="ui">クリック記録</span> の行の <span class="ui">印</span> で <span class="ui">枠だけ</span>（塗らずに輪と枠線だけ）か <span class="ui">非表示</span>。<span class="key">H</span>（どこからでも <span class="key">Ctrl+Alt+D</span>）で隠す・戻すを切り替えられます</li>

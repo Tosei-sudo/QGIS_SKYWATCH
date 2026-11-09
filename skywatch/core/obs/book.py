@@ -696,12 +696,15 @@ class ObservationBook:
         saved = self._save_records([record], f"{record.object_name} を記録")
         return saved[0] if saved else None
 
-    def add_many(self, entries: Sequence[Any], image: Optional[str] = None) -> Optional[list[Observation]]:
+    def add_many(self, entries: Sequence[Any], image: Optional[str] = None, keep: bool = False,
+                 done: Optional[str] = None) -> Optional[list[Observation]]:
         """
         Records several new observations at once on this image (or `image`), in
         one save: each entry has lon, lat, object, kind, activity, confidence,
         note, length, heading, width (as add takes them). Entries without a name are new
         things named in turn (船舶-1, 船舶-2…); the same new name is one thing.
+        `keep`: not saved, each is kept in 送信待ち (as the form's records are);
+        `done`: what is said when saved (else 「n 件を記録」).
         """
         info = self._image(image)
         if info is None:
@@ -740,7 +743,16 @@ class ObservationBook:
             made.setdefault(record.object_name, (record.object_id, record.object_name))
             taken.add(record.object_name)
             rows.append(record)
-        return self._save_records(rows, f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else ""))
+        saved = self._save_records(rows, done or (f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else "")))
+        if saved is None and keep:
+            # Not lost: sent again from 送信待ち (or opened in the form from there).
+            for record in rows:
+                values = FormValues(object=record.object_name, kind=record.kind, activity=record.activity, note=record.note,
+                                    confidence=record.confidence, length=_text(record.length), heading=_text(record.heading),
+                                    width=_text(record.width))
+                self.keep_draft(Draft(self._by(record), {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, True,
+                                      "", None, "", now_ms(), self.status))
+        return saved
 
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
         """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading, width."""

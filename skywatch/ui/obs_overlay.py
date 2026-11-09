@@ -38,7 +38,11 @@ PALETTE = ["#e11d48", "#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#d
 
 @dataclass
 class Mark:
-    """A thing on the map: a record of this image (`obs`), one carried over (`ghost`), a step of the chosen flow (`step`)."""
+    """
+    A thing on the map: a record of this image (`obs`), one carried over
+    (`ghost`), a step of the chosen flow (`step`), a place something is being
+    put down (`slot`, 「見本で記録」: `present` False for one left out).
+    """
     role: str
     lon: float
     lat: float
@@ -115,7 +119,7 @@ class ScenePainter:
         painter.setRenderHint(painter.RenderHint.Antialiasing, True)
         self.painted = []
         hidden = self.style == "hidden"
-        marks = [m for m in s.marks if m.editing] if hidden else s.marks
+        marks = [m for m in s.marks if m.editing or m.role == "slot"] if hidden else s.marks
         for ring, label in [] if hidden else s.areas:
             self._area(painter, ring, label, "#0f766e", QColor(15, 118, 110, 18))
         if s.area_pending:
@@ -133,7 +137,7 @@ class ScenePainter:
             painter.drawPolyline(points)
         for mark in marks:
             if mark.outline:
-                self._outline(painter, mark.outline, mark.color, mark.role == "ghost")
+                self._outline(painter, mark.outline, mark.color, mark.role in ("ghost", "slot"))
         for mark in marks:
             if mark.ends:
                 self._line(painter, mark)
@@ -202,7 +206,7 @@ class ScenePainter:
         k = self.scale
         front = self.to_pixel(*mark.ends[0])
         rear = self.to_pixel(*mark.ends[1])
-        ghost = mark.role == "ghost"
+        ghost = mark.role in ("ghost", "slot")
         if not self.hollow:
             painter.setPen(QPen(QColor("white"), (4 if ghost else 6) * k))
             painter.drawLine(front, rear)
@@ -269,6 +273,20 @@ class ScenePainter:
             painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(QColor(255, 255, 255, 90)))
             painter.drawEllipse(at, 7 * k, 7 * k)
             _halo_text(painter, QPointF(at.x(), at.y() - 12 * k), mark.label, "#555555", self._font)
+        elif mark.role == "slot":
+            if mark.present:
+                pen = QPen(color, 2 * k)
+                pen.setDashPattern([2, 2])
+                painter.setPen(pen)
+                painter.setBrush(QBrush(QColor(255, 255, 255, 110)))
+                painter.drawEllipse(at, 5 * k, 5 * k)
+            else:
+                # Left out: a grey cross.
+                d = 5 * k
+                painter.setPen(QPen(QColor("#6b7280"), 2 * k))
+                painter.drawLine(QPointF(at.x() - d, at.y() - d), QPointF(at.x() + d, at.y() + d))
+                painter.drawLine(QPointF(at.x() - d, at.y() + d), QPointF(at.x() + d, at.y() - d))
+            _halo_text(painter, QPointF(at.x(), at.y() - 10 * k), mark.label, "#111111", self._font)
         elif mark.role == "step":
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(QColor("#111111" if mark.present else "#dc2626")))

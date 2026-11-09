@@ -217,6 +217,8 @@ class AiResult:
     geometry: Optional[dict[str, Any]]
     attributes: dict[str, Any]
     width: Optional[float] = None
+    #: 確度 the result says (「似たものを探す」: the 見本's), '' for the source's.
+    confidence: str = ""
 
     @property
     def tag(self) -> str:
@@ -354,7 +356,7 @@ def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: floa
     note = " ".join(x for x in (head + (f": {said}" if said else ""), result.note, result.tag, *also) if x)
     return ImportEntry(
         lon=lon, lat=lat, object=result.name, kind=kind_for(result, source),
-        activity=result.activity or source.activity, confidence=source.confidence, note=note,
+        activity=result.activity or source.activity, confidence=result.confidence or source.confidence, note=note,
         length=result.length if result.length is not None else length, heading=result.heading,
         width=result.width if result.width is not None else width,
     )
