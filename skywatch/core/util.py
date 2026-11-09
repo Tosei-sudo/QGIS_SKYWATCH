@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Iterable
 
 _NAME = re.compile(r"^[\w.]+$", re.ASCII)
@@ -141,3 +142,54 @@ def use_legacy_names(fields: dict[str, str], names: set, defaults: dict[str, str
     for role, old in legacy.items():
         if fields.get(role) == defaults[role] and defaults[role].lower() not in lower and old.lower() in lower:
             fields[role] = next(n for n in names if n.lower() == old.lower())
+
+
+def encodable(text: str, encoding: str) -> tuple[str, bool]:
+    """
+    `text` as a file in `encoding` can hold it: characters it cannot (in
+    cp932: —, –, é, emoji…) become ?. True when some did, to be told.
+    """
+    try:
+        text.encode(encoding)
+        return text, False
+    except UnicodeEncodeError:
+        return text.encode(encoding, errors="replace").decode(encoding), True
+
+
+#: Units and marks a typed number may carry (`120m`, `30°`, `45度`).
+_UNIT = re.compile(r"\s*(?:m|メートル|°|度)$", re.IGNORECASE)
+
+
+def read_number(text: str) -> float | None:
+    """
+    A number typed in a box: full-width digits (`１２０．５`), a thousands
+    comma and a unit (`120 m`, `30°`) are read too. None when empty; raises
+    ValueError when the text is not a number.
+    """
+    t = unicodedata.normalize("NFKC", text or "").strip().replace("−", "-")
+    if not t:
+        return None
+    t = _UNIT.sub("", re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", t)).strip()
+    n = float(t)
+    if not math.isfinite(n):
+        raise ValueError(text)
+    return n
+
+
+_DAY_PARTS = re.compile(r"(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?")
+
+
+def read_day(text: str) -> str:
+    """
+    A day typed in a box as `yyyy-mm-dd`: `2026/11/9`, `2026-11-9`,
+    `2026.11.09`, `20261109`, `2026年11月9日` and full-width digits too. ''
+    when empty; raises ValueError when the text is not a day (or no such day,
+    2026-02-30).
+    """
+    t = unicodedata.normalize("NFKC", text or "").strip()
+    if not t:
+        return ""
+    m = _DAY_PARTS.fullmatch(t) or re.fullmatch(r"(\d{4})(\d{2})(\d{2})", t)
+    if not m:
+        raise ValueError(text)
+    return date(int(m[1]), int(m[2]), int(m[3])).isoformat()

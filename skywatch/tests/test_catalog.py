@@ -624,3 +624,21 @@ def test_the_look_in_a_folder_is_bounded(tmp_path):
     except (OSError, NotImplementedError):
         return
     assert find_images(str(tmp_path), ["\\.tif$"]).files == ["a/b/c/deep.tif", "top.tif"]
+
+
+def test_days_and_numbers_typed_as_people_type_them():
+    from skywatch.core.util import read_day, read_number
+
+    # The dock's day boxes are plain text: the usual ways of writing a day are read as yyyy-mm-dd.
+    for typed in ("2026-11-09", "2026/11/9", "2026-11-9", "2026.11.09", "20261109", "２０２６／１１／０９", "2026年11月9日", " 2026/11/09 "):
+        assert read_day(typed) == "2026-11-09", typed
+    assert read_day("") == read_day("  ") == ""
+    # Not a day (or no such day): an error to tell, never a condition quietly left out.
+    for typed in ("2026-02-30", "11/9", "2026-1109", "昨日", "2026-13-01"):
+        with pytest.raises(ValueError):
+            read_day(typed)
+    # Numbers: full-width digits, a thousands comma, a unit.
+    assert [read_number(t) for t in ("30", "１２０．５", "120 m", "30°", "45度", "1,200", "−５", "")] == [30, 120.5, 120, 30, 45, 1200, -5, None]
+    for typed in ("abc", "1,2", "inf", "nan", "30度くらい"):
+        with pytest.raises(ValueError):
+            read_number(typed)

@@ -462,6 +462,42 @@ def test_searching_over_a_layers_geometry_as_it_is(plugin):
     assert dock.layer_row.isHidden()
 
 
+def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin):
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
+
+    def where():
+        return next(f for u, f in fake.asked if u.endswith("/query") and "returnCountOnly" not in f)["where"]
+
+    # 2026/11/9 and full-width digits are days too: the condition is asked (before, it was quietly left out).
+    dock.acquired_from.setText("２０２６／１０／１")
+    dock.acquired_to.setText("20261109")
+    dock.more.setChecked(True)
+    dock.max_angle.setText("３０°")
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    asked = where()
+    assert "ACQ >= TIMESTAMP" in asked and "ACQ < TIMESTAMP" in asked and "OFF_NADIR <= 30" in asked
+    # What can't be read stops the search and says which box: nothing is asked.
+    for box, text, said in ((dock.acquired_to, "2026-02-30", "撮像日の「2026-02-30」を読めません（日付は 2026-11-09 の形で）"),
+                            (dock.max_angle, "三十", "角度の「三十」を読めません（数で）")):
+        before = box.text()
+        box.setText(text)
+        fake.asked.clear()
+        dock.search()
+        assert dock.status.text() == said and not fake.asked
+        box.setText(before)
+    # A closed 詳細条件 is not read.
+    dock.max_angle.setText("三十")
+    dock.more.setChecked(False)
+    assert dock.input_problem() is None
+    dock.acquired_from.clear()
+    dock.acquired_to.clear()
+
+
 def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugin, monkeypatch):
     from skywatch.core.catalog.search import record_of
     from skywatch.qgis_io.catalog_io import IMAGE_FILE

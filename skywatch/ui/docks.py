@@ -13,7 +13,7 @@ body scrolls; at its full size nothing changes.
 from __future__ import annotations
 
 import html
-from typing import Callable
+from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
@@ -43,6 +43,20 @@ def plain_label(label: QLabel) -> QLabel:
     """
     label.setTextFormat(Qt.TextFormat.PlainText)
     return label
+
+
+def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[str] = None) -> Optional[str]:
+    """
+    Writes a file the user chose to save: None when it worked, else why not
+    (the CSV still open in Excel, a folder that can't be written), to be told
+    in the dock instead of a Python error.
+    """
+    try:
+        with open(path, "w", encoding=encoding, newline=newline) as f:
+            f.write(text)
+    except OSError as error:
+        return error.strerror or str(error)
+    return None
 
 
 def ask_no(parent, title: str, text: str) -> bool:

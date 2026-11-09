@@ -46,6 +46,7 @@ from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
     activities_at, children_of, class_by_name, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
+from ..core.util import read_number
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
@@ -53,7 +54,7 @@ from ..qgis_io.obs_images import open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
@@ -444,7 +445,7 @@ class ObservationDock(PluginDock):
         f.addRow(self.length_label, self.length_input)
         f.addRow(self.width_label, self.width_input)
         f.addRow(self.heading_label, self.heading_input)
-        self.measure_note = QLabel()
+        self.measure_note = plain_label(QLabel())
         f.addRow(self.measure_note)
         self.note_input = QLineEdit()
         f.addRow(tr("備考"), self.note_input)
@@ -1645,6 +1646,8 @@ class ObservationDock(PluginDock):
         if self.book is None or self.pending is None:
             return
         lon, lat, editing, source = self.pending
+        if not self._numbers_readable():
+            return
         values = self.form_values()
         draft = self._draft_id
         # Offered first by the next new record, in later sessions too.
@@ -1660,6 +1663,25 @@ class ObservationDock(PluginDock):
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None),
                 lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)
+
+    def _numbers_readable(self) -> bool:
+        """
+        The typed length, width and heading can be read (full-width digits and
+        a unit such as 120 m or 30° can): otherwise the form stays open and
+        says which, rather than saving the record without it (or, editing,
+        dropping the value it had).
+        """
+        for edit, label in ((self.length_input, self.length_label), (self.width_input, self.width_label), (self.heading_input, self.heading_label)):
+            try:
+                read_number(edit.text())
+            except ValueError:
+                self.measure_note.setText(self.tr("{label}の「{text}」を読めません（数で）").format(label=label.text(), text=edit.text().strip()))
+                self.measure_note.setVisible(True)
+                edit.setVisible(True)
+                edit.setFocus()
+                edit.selectAll()
+                return False
+        return True
 
     def restore_form(self, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation], values: FormValues) -> None:
         """The form opened again with what was typed (a save that did not go through), unless another one is open."""
@@ -1850,7 +1872,7 @@ class ObservationDock(PluginDock):
         parts = []
         for edit, name in ((self.length_input, "全長"), (self.width_input, "全幅")):
             try:
-                size = float(edit.text())
+                size = read_number(edit.text()) or 0
             except ValueError:
                 size = 0
             spec = specs.get(name)
@@ -1885,7 +1907,7 @@ class ObservationDock(PluginDock):
 
     def _number(self, edit: QLineEdit) -> Optional[float]:
         try:
-            return float(edit.text()) if edit.text().strip() else None
+            return read_number(edit.text())
         except ValueError:
             return None
 
@@ -2207,8 +2229,10 @@ class ObservationDock(PluginDock):
         path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系の JSON 保存"), "observation-taxonomy.json", "JSON (*.json)")
         if not path:
             return
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n")
+        failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n")
+        if failed:
+            self._say(self.tr("分類体系を保存できない: {m}").format(m=failed))
+            return
         self._say(self.tr("分類体系を保存: {p}").format(p=path))
 
     def load_taxonomy_file(self, path: Optional[str] = None) -> None:
@@ -2243,8 +2267,10 @@ class ObservationDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), csv_file_name(now_ms()), "CSV (*.csv)")
         if not path:
             return None
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(observations_csv(rows))
+        failed = save_text(path, observations_csv(rows), newline="")
+        if failed:
+            self._say(self.tr("CSV を保存できない: {m}").format(m=failed))
+            return None
         self._say(self.tr("CSV を保存: {p}").format(p=path))
         return path
 

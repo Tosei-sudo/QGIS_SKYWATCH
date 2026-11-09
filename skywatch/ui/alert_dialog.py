@@ -400,16 +400,20 @@ class AlertDialog(QDialog):
             return
 
         def outputs(logged: int) -> None:
+            # First: whatever happens below, 「通報」 can be pressed again.
+            self.send_button.setEnabled(True)
             said = [self.tr("通報テーブルに {n} 件").format(n=logged)] if s.table else []
             if fmt.clipboard:
                 QApplication.clipboard().setText(text)
                 said.append(self.tr("クリップボードへコピー"))
             if fmt.file:
                 try:
-                    said.append(self.tr("ファイル {p}").format(p=write_file(text, fmt, at)))
-                except OSError as error:
-                    said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=error.strerror or error))
-            self.send_button.setEnabled(True)
+                    path, replaced = write_file(text, fmt, at)
+                    said.append(self.tr("ファイル {p}").format(p=path))
+                    if replaced:
+                        said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
+                except (OSError, ValueError) as error:
+                    said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
             sent = {i.record.id for i in items}
             if s.table and logged:
                 self.dock.mark_reported(sent)

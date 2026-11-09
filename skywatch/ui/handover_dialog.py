@@ -408,9 +408,12 @@ class HandoverDialog(QDialog):
         said.append(self.tr("クリップボードへコピー"))
         if s.file:
             try:
-                said.append(self.tr("ファイル {p}").format(p=write_file(text, s, data.now)))
-            except OSError as error:
-                said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=error.strerror or error))
+                path, replaced = write_file(text, s, data.now)
+                said.append(self.tr("ファイル {p}").format(p=path))
+                if replaced:
+                    said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=s.file.encoding))
+            except (OSError, ValueError) as error:
+                said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
         if s.table is None:
             self._say("・".join(said))
             return

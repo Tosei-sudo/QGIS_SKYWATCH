@@ -193,8 +193,11 @@ def test_memo_table_round_trip_and_file(tmp_path):
     assert memo.rows[0]["attributes"]["MEMO"] == "申し送り"
     s = handover_settings_of({"file": {"path": str(tmp_path / "h" / "handover_{now}.txt"), "encoding": "cp932"}}, [])
     assert file_path(s, T0).endswith("handover_20251107_1620.txt")
-    path = write_file("引き継ぎ\r\n", s, T0)
-    assert open(path, encoding="cp932", newline="").read() == "引き継ぎ\r\n"
+    path, replaced = write_file("引き継ぎ\r\n", s, T0)
+    assert open(path, encoding="cp932", newline="").read() == "引き継ぎ\r\n" and not replaced
+    # The memo's own 「作成 —」 (no user name) and typed characters cp932 cannot hold: ? in the file, not an error.
+    assert write_file("作成 —・Café\r\n", s, T0) == (path, True)
+    assert open(path, encoding="cp932", newline="").read() == "作成 ?・Caf?\r\n"
 
 
 def test_done_rows_long_ago_are_not_read():

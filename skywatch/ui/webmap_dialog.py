@@ -31,6 +31,7 @@ from ..qgis_io.tasks import run_task
 from ..qgis_io.webmap_io import (
     add_opened, auth_with_portal, fetch_web_map, open_plan, project_web_map, save_to_portal, view_in_degrees,
 )
+from .docks import save_text
 
 TITLE = "ArcGIS Web マップ"
 PORTAL_KEY = "skywatch/webmap_portal"
@@ -260,8 +261,10 @@ class WebMapSaveDialog(QDialog):
             path, _ = QFileDialog.getSaveFileName(self, _tr("Web マップの JSON ファイル"), suggested, _tr("JSON (*.json)"))
             if not path:
                 return None
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(result.json, f, ensure_ascii=False)
+        failed = save_text(path, json.dumps(result.json, ensure_ascii=False))
+        if failed:
+            self.status.setText(_tr("保存に失敗: {m}").format(m=failed))
+            return None
         self.status.setText(_tr("{name} を保存").format(name=os.path.basename(path)))
         return path
 

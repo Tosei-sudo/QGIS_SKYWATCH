@@ -80,14 +80,16 @@ def test_alerts_from_rules_to_the_log_clipboard_and_file(plugin):
     assert dialog.lines_table.item(0, 1).text() == "船A|航行|東京湾|湾内航行"
     assert dialog.preview.toPlainText() == "【注目】1件\n船A|航行|東京湾|湾内航行\n以上\n"
     # Edited by hand, then sent: the log row, the clipboard and the file.
-    dialog.lines_table.item(0, 1).setText("船A|航行|東京湾|至急")
+    # A dash cp932 cannot hold (—): ? in the cp932 file only, and said; the send still finishes.
+    dialog.lines_table.item(0, 1).setText("船A|航行|東京湾|至急 — 北上")
     dialog.send()
     assert wait_for(lambda: "件を通報" in dialog.status.text())
-    assert [r["attributes"]["TEXT"] for r in log.rows] == ["船A|航行|東京湾|至急"]
+    assert "cp932 で書けない文字を ? に置き換え" in dialog.status.text() and dialog.send_button.isEnabled()
+    assert [r["attributes"]["TEXT"] for r in log.rows] == ["船A|航行|東京湾|至急 — 北上"]
     assert log.rows[0]["attributes"]["REPORT_NAME"] == "速報"
-    assert QApplication.clipboard().text() == "【注目】1件\n船A|航行|東京湾|至急\n以上\n"
+    assert QApplication.clipboard().text() == "【注目】1件\n船A|航行|東京湾|至急 — 北上\n以上\n"
     written = list((tmp_path / "out").glob("alert_*.txt"))
-    assert len(written) == 1 and written[0].read_bytes().decode("cp932") == "【注目】1件\n船A|航行|東京湾|至急\n以上\n"
+    assert len(written) == 1 and written[0].read_bytes().decode("cp932") == "【注目】1件\n船A|航行|東京湾|至急 ? 北上\n以上\n"
     assert dialog.lines_table.rowCount() == 0
     # Reported once: not picked again unless asked.
     dialog.pick()
@@ -103,10 +105,10 @@ def test_alerts_from_rules_to_the_log_clipboard_and_file(plugin):
     assert dialog.tabs.currentIndex() == 1
     dialog.read_log()
     assert wait_for(lambda: dialog.status.text() == "通報記録 1 件")
-    assert dialog.log_table.item(0, 3).text() == "船A|航行|東京湾|至急" and dialog.log_table.item(0, 1).text() == "速報"
+    assert dialog.log_table.item(0, 3).text() == "船A|航行|東京湾|至急 — 北上" and dialog.log_table.item(0, 1).text() == "速報"
     dialog.log_table.selectRow(0)
     dialog.copy_log()
-    assert QApplication.clipboard().text() == "船A|航行|東京湾|至急\r\n"
+    assert QApplication.clipboard().text() == "船A|航行|東京湾|至急 — 北上\r\n"
     dialog.remove_log(confirm=False)
     assert wait_for(lambda: dialog.status.text() == "通報記録 1 行を削除")
     assert log.rows == [] and dialog.log_table.rowCount() == 0

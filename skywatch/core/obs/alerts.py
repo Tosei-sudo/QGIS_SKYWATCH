@@ -43,7 +43,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
 from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import is_name, is_number, is_record, js_string, layer_url, ms_of, utc_text
+from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, utc_text
 from ..request.export import format_time
 from .geo import get_distance, to_fixed
 from .model import ConfidenceLevel, Observation
@@ -1195,15 +1195,19 @@ def file_path(report: AlertFormat, at: Moment) -> str:
     return fill(report.file.path, report, at) if report.file else ""
 
 
-def write_file(text: str, report: AlertFormat, at: Moment, opener: Callable = open) -> str:
-    """Writes (or appends) the text to the report's file; its path."""
+def write_file(text: str, report: AlertFormat, at: Moment, opener: Callable = open) -> tuple[str, bool]:
+    """
+    Writes (or appends) the text to the report's file: its path, and True when
+    characters the file's encoding cannot hold (cp932: —, é, emoji…) became ?.
+    """
     if report.file is None:
-        return ""
+        return "", False
     path = file_path(report, at)
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
+    text, replaced = encodable(text, report.file.encoding)
     with opener(path, "a" if report.file.append else "w", encoding=report.file.encoding, newline="") as out:
         out.write(text)
-    return path
+    return path, replaced
 
