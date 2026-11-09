@@ -12,8 +12,11 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from .. import time_zone
 from ..esri import EsriError, contains, own_condition
 from ..geocode import kana_variants
+from ..time_query import text_at
+from ..time_zone import TimeZone
 from ..util import is_number, time_of, utc_text
 from .config import CatalogConfig
 
@@ -21,6 +24,8 @@ from .config import CatalogConfig
 FieldTypes = dict[str, str]
 
 _DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+#: A period's bound: a local day, or a day and a time (`2026-11-09`, `2026-11-09 10:30`, `2026-11-09 10:30:15`).
+_WHEN = re.compile(r"^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2})(?::(\d{2}))?)?$")
 
 
 def local_day(day: str, plus: int = 0) -> int:
@@ -34,27 +39,62 @@ def _next_day(day: str) -> str:
     return (date(y, m, d) + timedelta(days=1)).isoformat()
 
 
-def day_range(field: str, field_type: Optional[str], start: str, end: str) -> list[str]:
+def has_time(when: str) -> bool:
+    """Whether a period's bound has a time (`2026-11-09 10:30`), not only a day."""
+    m = _WHEN.match(when or "")
+    return bool(m and m[4] is not None)
+
+
+def local_time(when: str, end: bool = False) -> int:
     """
-    A condition on a date-like field for local days `start` to `end` (both
-    included, either may be ''), written for the field's type: date fields
-    compare timestamps (UTC, as ArcGIS stores them), date-only fields dates,
-    numbers milliseconds, and text the leading `yyyy-mm-dd`.
+    The instant (ms) a period's bound stands for, in local time (as the list
+    shows times): its start, or with `end` the instant just after it (the
+    next day, minute or second, as far as it is written: `2026-11-09 12:00`
+    takes in 12:00:59).
     """
-    def bound(day: str, op: str) -> str:
-        if field_type in ("esriFieldTypeDate", "esriFieldTypeTimestampOffset"):
-            return f"{field} {op} TIMESTAMP '{utc_text(local_day(day))}'"
+    m = _WHEN.match(when)
+    if m is None:
+        raise ValueError(when)
+    y, mo, d, h, mi, s = (int(x) if x is not None else None for x in m.groups())
+    if h is None:
+        return local_day(when[:10], 1 if end else 0)
+    t = datetime(y, mo, d, h, mi, s or 0)
+    if end:
+        t += timedelta(seconds=1) if s is not None else timedelta(minutes=1)
+    return int(t.timestamp() * 1000)
+
+
+def day_range(field: str, field_type: Optional[str], start: str, end: str, like: str = "",
+              zone: Optional[TimeZone] = None) -> list[str]:
+    """
+    A condition on a date-like field for local days, or times, `start` to
+    `end` (`yyyy-mm-dd`, or `yyyy-mm-dd hh:mm[:ss]`; both included, to the
+    day, minute or second written; either may be ''), written for the
+    field's type: date fields compare timestamps (UTC, as ArcGIS stores
+    them; EsriClient moves them to the source's `timeZone`), date-only
+    fields dates (a time takes in its whole day), numbers milliseconds, and
+    text the leading `yyyy-mm-dd`; with a time, the text is written as the
+    field writes its values (`like`, one of them: see time_query.text_at,
+    `zone` the source's `timeZone`).
+    """
+    def bound(when: str, op: str, is_end: bool) -> str:
+        day = when[:10]
         if field_type == "esriFieldTypeDateOnly":
-            return f"{field} {op} DATE '{day}'"
+            return f"{field} {op} DATE '{_next_day(day) if is_end else day}'"
+        instant = local_time(when, is_end)
+        if field_type in ("esriFieldTypeDate", "esriFieldTypeTimestampOffset"):
+            return f"{field} {op} TIMESTAMP '{utc_text(instant)}'"
         if field_type and re.search(r"Integer|Double|Single", field_type):
-            return f"{field} {op} {local_day(day)}"
-        return f"{field} {op} '{day}'"
+            return f"{field} {op} {instant}"
+        if not has_time(when):
+            return f"{field} {op} '{_next_day(day) if is_end else day}'"
+        return f"{field} {op} {quote(text_at(instant, like, zone))}"
 
     parts = []
-    if _DAY.match(start or ""):
-        parts.append(bound(start, ">="))
-    if _DAY.match(end or ""):
-        parts.append(bound(_next_day(end), "<"))
+    if _WHEN.match(start or ""):
+        parts.append(bound(start, ">=", False))
+    if _WHEN.match(end or ""):
+        parts.append(bound(end, "<", True))
     return parts
 
 
@@ -65,7 +105,7 @@ def quote(text: str) -> str:
 
 @dataclass(frozen=True)
 class CatalogSearch:
-    """What the search asks for. Days are local `yyyy-mm-dd` ('' for open)."""
+    """What the search asks for. Periods are local `yyyy-mm-dd`, or `yyyy-mm-dd hh:mm[:ss]` ('' for open)."""
     acquired_from: str = ""
     acquired_to: str = ""
     registered_from: str = ""
@@ -156,20 +196,31 @@ def keyword_condition(catalog: CatalogConfig, types: FieldTypes, text: str) -> l
     return parts
 
 
-def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -> str:
-    """The `where` of a search."""
+def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch,
+             samples: Optional[dict[str, str]] = None) -> str:
+    """
+    The `where` of a search. `samples`: a value of each text date field
+    (by name) whose period has a time, to write the times as it does
+    (`text_samples`).
+    """
     f = catalog.fields
     parts: list[str] = []
     if catalog.where:
         parts.append(f"({catalog.where})")
+    zone = time_zone.zone_for(catalog.url)
+
+    def period(role: str, start: str, end: str) -> list[str]:
+        name = f[role]
+        return day_range(name, types.get(name), start, end, (samples or {}).get(name, ""), zone)
+
     if f.get("acquired"):
-        parts += day_range(f["acquired"], types.get(f["acquired"]), search.acquired_from, search.acquired_to)
+        parts += period("acquired", search.acquired_from, search.acquired_to)
     if f.get("registered"):
-        parts += day_range(f["registered"], types.get(f["registered"]), search.registered_from, search.registered_to)
+        parts += period("registered", search.registered_from, search.registered_to)
     if f.get("sensor") and search.sensor:
         parts.append(f"{f['sensor']} = {quote(search.sensor)}")
     if f.get("systemRegistered"):
-        parts += day_range(f["systemRegistered"], types.get(f["systemRegistered"]), search.system_registered_from, search.system_registered_to)
+        parts += period("systemRegistered", search.system_registered_from, search.system_registered_to)
     if f.get("angle") and is_number(search.max_angle):
         parts.append(f"{f['angle']} <= {_num(search.max_angle)}")
     if f.get("azimuth"):
@@ -187,6 +238,19 @@ def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -
         parts.append(own_condition(search.where))
     parts += keyword_condition(catalog, types, search.keyword)
     return " AND ".join(parts) if parts else "1=1"
+
+
+def timed_text_fields(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -> list[str]:
+    """The text date fields whose period in `search` has a time (their values are written as one of them shows)."""
+    f = catalog.fields
+    out = []
+    for role, start, end in (("acquired", search.acquired_from, search.acquired_to),
+                             ("registered", search.registered_from, search.registered_to),
+                             ("systemRegistered", search.system_registered_from, search.system_registered_to)):
+        name = f.get(role)
+        if name and types.get(name) == "esriFieldTypeString" and (has_time(start) or has_time(end)) and name not in out:
+            out.append(name)
+    return out
 
 
 def time_text(value: Any) -> str:

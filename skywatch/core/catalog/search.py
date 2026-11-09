@@ -14,14 +14,15 @@ import functools
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, UnreachableError
 from ..plan.output import natural_key
+from ..time_query import text_sample
 from ..util import js_string, time_of
 from .config import CatalogConfig
-from .query import CatalogSearch, FieldTypes, time_text, where_of
+from .query import CatalogSearch, FieldTypes, time_text, timed_text_fields, where_of
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,8 @@ class CatalogLayerInfo:
     paging: bool
     object_id_field: str = "OBJECTID"
     max_record_count: int = 1000
+    #: A value of each text date field asked with a time (`text_samples`), by name; "" for none read.
+    samples: dict[str, str] = field(default_factory=dict)
 
 
 def read_catalog_layer(client: EsriClient, catalog: CatalogConfig, token: Optional[str]) -> CatalogLayerInfo:
@@ -179,6 +182,19 @@ def spatial_filter(box: Optional[Any]) -> dict[str, str]:
     }
 
 
+def text_samples(client: EsriClient, catalog: CatalogConfig, layer: CatalogLayerInfo, search: CatalogSearch,
+                 token: Optional[str]) -> dict[str, str]:
+    """
+    A value of each text date field whose period has a time (read once per
+    layer), so that the times are written as the field writes them (`T` or
+    a space, its offset). Date fields need none: they compare timestamps.
+    """
+    for name in timed_text_fields(catalog, layer.types, search):
+        if name not in layer.samples:
+            layer.samples[name] = text_sample(client, catalog.url, name, layer.types.get(name), token, catalog.where)
+    return layer.samples
+
+
 def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLayerInfo, search: CatalogSearch,
                    box: Optional[Any], token: Optional[str], offset: int = 0,
                    cancelled: Optional[Callable[[], bool]] = None) -> CatalogResult:
@@ -192,7 +208,7 @@ def search_catalog(client: EsriClient, catalog: CatalogConfig, layer: CatalogLay
     order or page results are asked for everything (what one answer holds)
     and sorted here; they have no 「続き」.
     """
-    where = where_of(catalog, layer.types, search)
+    where = where_of(catalog, layer.types, search, text_samples(client, catalog, layer, search, token))
     spatial = spatial_filter(box)
     order = catalog.fields.get("acquired") or catalog.fields.get("registered")
     base = {"where": where, **spatial, "outFields": "*", "returnGeometry": "true", "outSR": "4326"}
