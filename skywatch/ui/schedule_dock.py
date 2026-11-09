@@ -42,7 +42,7 @@ from ..core.request.store import (
 )
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_label, plain_tip
 from .plan_overlay import PlanOverlay
 
 COLUMNS = ("状態", "名称", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由・メモ")
@@ -157,7 +157,8 @@ class ScheduleDock(PluginDock):
         self.search.textChanged.connect(lambda _t: self.render())
         filters.addWidget(self.search, 1)
         layout.addLayout(filters)
-        self.status = QLabel()
+        # Names and keys from the ledger and the systems' result files: shown as written, never as HTML.
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
@@ -418,13 +419,13 @@ class ScheduleDock(PluginDock):
             items[0].setForeground(QBrush(QColor(STATE_COLORS[state])))
             source = IMAGE_ARRIVED if r.captured == "撮像済み" and r.result == "採用" and not r.adoption_source else r.adoption_source
             if source:
-                items[0].setToolTip(self.tr("採否の入力元: {s}").format(s=source))
+                items[0].setToolTip(plain_tip(self.tr("採否の入力元: {s}").format(s=source)))
             elif state == AWAITING:
                 items[0].setToolTip(self.tr("システムの採否が分からない（画像が入れば採用になる）"))
             if r.image_id:
-                items[6].setToolTip(self.tr("画像 {i}").format(i=r.image_id))
+                items[6].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
             if row_note(r):
-                items[8].setToolTip(row_note(r))
+                items[8].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
             self.model.appendRow(items)
             if self.chosen is not None and r.object_id == self.chosen.object_id:
                 chosen_row = i
@@ -589,7 +590,7 @@ class ScheduleDock(PluginDock):
         lines.append(self.tr("この日・このシステムの要求外（前に結果ファイルから入れたもの）は置き換える"))
         if reading.problems:
             lines += ["", self.tr("読めなかった行など:")] + reading.problems[:8] + (["…"] if len(reading.problems) > 8 else [])
-        return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), "\n".join(lines)) == QMessageBox.StandardButton.Yes
+        return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
 
     def _save_reading(self, reading: Reading) -> None:
         store, client, token = self.store, self.context.esri(), self.token()
@@ -736,7 +737,7 @@ class UnrequestedDialog(QDialog):
         area.addWidget(self.selected_button)
         area.addWidget(self.area_label, 1)
         form.addRow(self.tr("範囲"), area)
-        self.message = QLabel()
+        self.message = plain_label(QLabel())
         form.addRow(self.message)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.save)

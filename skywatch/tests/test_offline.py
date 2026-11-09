@@ -228,6 +228,8 @@ def test_plans_an_older_version_saved_offline_are_kept_and_said_so(tmp_path):
     report, _ = _upload(work, Switch(fake))
     assert report.sent == {} and work.counts() == {"plan": 1}
     assert report.kept == ["撮像計画の保存はなくなった（撮像依頼に一本化）ため送らない「計画」の撮像計画 1 件"]
+    # Listed and counted, but never what the reconnection / start asks to send (it would ask every time).
+    assert work.total() == 1 and work.sendable() == 0
 
 
 def test_the_settings_key(tmp_path):

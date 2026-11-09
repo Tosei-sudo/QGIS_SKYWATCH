@@ -55,7 +55,7 @@ from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
-from .docks import PluginDock, ask_no
+from .docks import PluginDock, ask_no, plain_label
 from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
@@ -376,7 +376,8 @@ class ImagingPlanDock(PluginDock):
         buttons.addWidget(self.run_button, 1)
         buttons.addWidget(self.cancel_button)
         bottom_layout.addLayout(buttons)
-        self.status = QLabel()
+        # Target names from layers and the services' messages: shown as written, never as HTML.
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         bottom_layout.addWidget(self.status)

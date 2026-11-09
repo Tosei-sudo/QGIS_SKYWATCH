@@ -30,6 +30,7 @@ from ..core.request.model import (
     bbox_of, day_bounds, jst_day, level_of, level_value, priority_text, repeat_of, repeat_text, square_rings,
 )
 from ..qgis_io.geometry import shape_of, to_wgs84
+from .docks import plain_label
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
 from .satellite_tree import SatelliteTree
@@ -292,7 +293,8 @@ class RequestForm(QDialog):
             buttons.addWidget(w)
         buttons.addStretch(1)
         al.addLayout(buttons)
-        self.area_label = QLabel()
+        # The names of the layer's features (or the plan's targets) in a batch: shown as written, never as HTML.
+        self.area_label = plain_label(QLabel())
         al.addWidget(self.area_label)
         layout.addWidget(area)
 
@@ -304,7 +306,7 @@ class RequestForm(QDialog):
         people.addRow(self.tr("メモ"), self.note)
         layout.addLayout(people)
         layout.addStretch(1)
-        self.message = QLabel()
+        self.message = plain_label(QLabel())
         self.message.setStyleSheet("color: #b91c1c")
         self.message.setWordWrap(True)
         outer.addWidget(self.message)

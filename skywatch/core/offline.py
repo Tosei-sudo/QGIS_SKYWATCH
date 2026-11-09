@@ -54,6 +54,8 @@ KINDS: dict[str, str] = {
     "draft": "保存できなかった観測記録",
     "plan": "撮像計画",  # retired (2026-11-09); kept so that what an older version left is still counted
 }
+#: Kinds no longer sent anywhere (listed and counted, to be thrown away by the person; never asked to be sent).
+RETIRED = ("plan",)
 #: The op of a draft that needs the person (someone else changed the record, or it is gone): not sent unless chosen.
 CHECK = "check"
 #: Requests that change data: never answered from the cache.
@@ -487,11 +489,13 @@ class OfflineWork:
         return sum(self.counts().values())
 
     def sendable(self) -> int:
-        """How many items wait that are sent without the person choosing them (drafts to look at left out)."""
+        """How many items wait that are sent without the person choosing them (drafts to look at and retired kinds left out)."""
         try:
             with self.lock:
-                return int(self.db().execute("SELECT COUNT(*) FROM outbox WHERE NOT (kind = 'draft' AND op = ?)",
-                                             (CHECK,)).fetchone()[0])
+                retired = ",".join("?" * len(RETIRED))
+                return int(self.db().execute(
+                    f"SELECT COUNT(*) FROM outbox WHERE NOT (kind = 'draft' AND op = ?) AND kind NOT IN ({retired})",
+                    (CHECK, *RETIRED)).fetchone()[0])
         except sqlite3.Error:
             return 0
 

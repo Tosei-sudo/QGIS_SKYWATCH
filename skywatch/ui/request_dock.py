@@ -30,7 +30,7 @@ from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
-from .docks import PluginDock, plain_tip
+from .docks import PluginDock, plain_label, plain_tip
 from .list_views import ListViews
 from .plan_overlay import PlanOverlay
 
@@ -84,7 +84,8 @@ class RequestDock(PluginDock):
             c.currentIndexChanged.connect(lambda _: self.render())
             top.addWidget(c)
         self.body.addLayout(top)
-        self.status = QLabel()
+        # Request names (others' text) and the services' messages: shown as written, never as HTML.
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.body.addWidget(self.status)

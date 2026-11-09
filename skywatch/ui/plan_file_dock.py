@@ -58,7 +58,7 @@ from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock
+from .docks import PluginDock, plain_label, plain_tip
 
 COLUMNS = ("採用", "システム", "衛星", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
@@ -125,7 +125,8 @@ class PlanFileDock(PluginDock):
         top.addWidget(self.results_button)
         top.addStretch(1)
         layout.addLayout(top)
-        self.status = QLabel()
+        # Request names and the services' messages: shown as written, never as HTML.
+        self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
@@ -579,12 +580,12 @@ class PlanFileDock(PluginDock):
         are replaced rather than kept.
         """
         if not earlier:
-            ok = QMessageBox.question(self, self.tr("書き出し"), "\n".join(lines)) == QMessageBox.StandardButton.Yes
+            ok = QMessageBox.question(self, self.tr("書き出し"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
             return False if ok else None
         whose = self.tr("{system} の").format(system=label) if label else ""
         lines = [*lines, "", self.tr("この日の{whose}出力履歴（未判定）が既に {n} 件あります。"
                                       "置き換えると前回の行を消してから今回の行を保存します。").format(whose=whose, n=earlier)]
-        box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), "\n".join(lines), parent=self)
+        box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), plain_tip("\n".join(lines)), parent=self)
         replace = box.addButton(self.tr("置き換えて書き出し"), QMessageBox.ButtonRole.AcceptRole)
         keep = box.addButton(self.tr("追加して書き出し"), QMessageBox.ButtonRole.AcceptRole)
         box.addButton(self.tr("取りやめ"), QMessageBox.ButtonRole.RejectRole)

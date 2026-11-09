@@ -804,6 +804,7 @@ class ObservationDock(PluginDock):
             pass
 
     def _show_offline(self) -> None:
+        tr = self.tr
         store = self.book.store if self.book is not None else None
         down = bool(getattr(store, "offline", False))
         n = len(self.waiting_ids())
