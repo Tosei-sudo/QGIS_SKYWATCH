@@ -4,8 +4,9 @@ import json
 import pytest
 
 from skywatch.core.config import parse_config
+from skywatch.core.esri import like_text
 from skywatch.core.geocode import (
-    GeocoderConfig, PlaceSearch, decode_csv, kana_variants, fold_name, like_text, nominatim_url, parse_arcgis, parse_features, parse_gsi,
+    GeocoderConfig, PlaceSearch, decode_csv, kana_variants, fold_name, nominatim_url, parse_arcgis, parse_features, parse_gsi,
     parse_nominatim, read_gazetteer, search_gazetteer,
 )
 

@@ -244,12 +244,17 @@ def _box_ring(box) -> list[list[float]]:
     return [[w, s], [w, n], [e, n], [e, s], [w, s]]
 
 
+def note_of(plan: dict) -> str:
+    """The image's 備考 (for 「フリーワード」): a routine shot, or an urgent one with its request number in full-width letters."""
+    return "横須賀港 定期観測" if plan.get("seed", 0) % 2 == 0 else "横須賀港 臨時観測（ＥＶ０１）"
+
+
 def catalog_feature(plan: dict, files: str, base: str) -> dict:
     path = os.path.join(files, "catalog", plan["id"] + ".tif")
     return {"attributes": {
         "IMG_ID": plan["id"], "ACQ_TIME": plan["acquired"], "REG_TIME": plan.get("registered", plan["acquired"] + 3 * HOUR),
         "SYS_TIME": plan.get("registered", plan["acquired"] + 3 * HOUR), "SENSOR_NAME": plan["satellite"], "OFF_NADIR": plan["angle"],
-        "SAT_AZIMUTH": plan["azimuth"], "CLOUD": plan["cloud"], "STATUS": "PUBLISHED",
+        "SAT_AZIMUTH": plan["azimuth"], "CLOUD": plan["cloud"], "STATUS": "PUBLISHED", "NOTE": note_of(plan),
         "FILE_PATH": path, "COG_URL": f"{base}/files/catalog/{plan['id']}.tif",
     }, "geometry": {"rings": [_box_ring(plan["box"])]}}
 
@@ -400,7 +405,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
         {"name": "Catalog", "layers": [{
             "id": 0, "name": "画像カタログ", "geometryType": "polygon", "maxRecordCount": 1000,
             "fields": {"IMG_ID": S, "ACQ_TIME": T, "REG_TIME": T, "SYS_TIME": T, "SENSOR_NAME": S, "OFF_NADIR": D, "SAT_AZIMUTH": D,
-                       "CLOUD": D, "STATUS": S, "FILE_PATH": {"type": S, "length": 1000}, "COG_URL": {"type": S, "length": 1000}},
+                       "CLOUD": D, "STATUS": S, "NOTE": S, "FILE_PATH": {"type": S, "length": 1000}, "COG_URL": {"type": S, "length": 1000}},
             "features": feats([catalog_feature(p, files, base) for p in plans])}]},
         {"name": "Satellites", "layers": [
             {"id": 0, "name": "衛星", "fields": {"SAT_NAME": S, "NORAD_ID": S, "TLE_LINE1": S, "TLE_LINE2": S, "MAX_OFF_NADIR": D, "MIN_OFF_NADIR": D,
@@ -487,8 +492,9 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   "imageCatalogs": [
     {{ "label": "モック画像カタログ", "url": "{rest}/Catalog/FeatureServer/0"{tk},
       "fields": {{ "id": "IMG_ID", "acquired": "ACQ_TIME", "registered": "REG_TIME", "systemRegistered": "SYS_TIME",
-                  "sensor": "SENSOR_NAME", "angle": "OFF_NADIR", "azimuth": "SAT_AZIMUTH", "source": ["FILE_PATH", "COG_URL"] }},
-      "columns": [{{ "field": "CLOUD", "label": "雲量" }}],
+                  "sensor": "SENSOR_NAME", "angle": "OFF_NADIR", "azimuth": "SAT_AZIMUTH", "source": ["FILE_PATH", "COG_URL"],
+                  "keywords": ["NOTE", "IMG_ID"] }},
+      "columns": [{{ "field": "CLOUD", "label": "雲量" }}, {{ "field": "NOTE", "label": "備考" }}],
       "where": "STATUS = 'PUBLISHED'", "angleKind": "offNadir", "orbitHeight": 600 }}
   ],
   "watchInterval": 1,

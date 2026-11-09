@@ -5,7 +5,8 @@ import subprocess
 
 import pytest
 
-from skywatch.core.geocode import gsi_url, like_text
+from skywatch.core.esri import like_text
+from skywatch.core.geocode import gsi_url
 from skywatch.core.util import formula_safe
 from skywatch.core.webmap import plan_web_map
 

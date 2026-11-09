@@ -61,7 +61,7 @@ def _num(v: float) -> str:
 
 def similar_search(catalog: CatalogConfig, reference: CatalogRecord, tolerance: SimilarTolerance,
                    base: CatalogSearch = EMPTY_SEARCH) -> CatalogSearch:
-    """The catalog search for images like `reference` (dates and SQL of `base` kept)."""
+    """The catalog search for images like `reference` (dates, SQL and free word of `base` kept)."""
     f = catalog.fields
     search = replace(base, sensor="", max_angle=None, azimuth_from=None, azimuth_to=None)
     if f.get("sensor") and tolerance.same_sensor and reference.sensor:

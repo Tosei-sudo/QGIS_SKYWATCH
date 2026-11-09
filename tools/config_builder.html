@@ -192,7 +192,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "sensor",
    "angle",
    "azimuth",
-   "source"
+   "source",
+   "keywords"
   ],
   "satelliteCatalogs": [
    "name",
@@ -728,7 +729,8 @@ const K = JSON.parse(document.getElementById("plugin-constants").textContent);
 
 const ROLE_LABELS = {
   id: "ID", acquired: "撮像日時", registered: "登録日時", systemRegistered: "システム登録日時", sensor: "センサー",
-  angle: "角度", azimuth: "方位角", source: "画像の場所（COG の URL・パス。複数はカンマ区切り）", name: "名前",
+  angle: "角度", azimuth: "方位角", source: "画像の場所（COG の URL・パス。複数はカンマ区切り）",
+  keywords: "フリーワード検索の属性（文字列。複数はカンマ区切り）", name: "名前",
   tle: "TLE（2 行まとめて）", tle1: "TLE 1 行目", tle2: "TLE 2 行目", maxOffNadir: "最大オフナディア角", minOffNadir: "最小オフナディア角",
   swath: "観測幅", length: "シーンの長さ", lookSide: "観測方向", kind: "種別", scenesPerPass: "1 パスのシーン数",
   minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
@@ -911,7 +913,7 @@ const SPEC = [
   { group: "画像カタログ・通知・画像", keys: [
     { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須。",
       field: I("imageCatalogs", "画像カタログ", [
-        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], multi: ["source"] }),
+        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], multi: ["source", "keywords"] }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
         WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
