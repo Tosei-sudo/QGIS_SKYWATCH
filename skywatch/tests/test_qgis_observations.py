@@ -17,6 +17,8 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
+from qgis.PyQt.QtCore import QItemSelectionModel, Qt  # noqa: E402
+from qgis.PyQt.QtTest import QTest  # noqa: E402
 from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
 
 from skywatch.core.esri import EsriClient  # noqa: E402
@@ -657,6 +659,82 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert dock.book.label == "ローカル" and dock.book.living() == []
     dock.store_select.setCurrentIndex(0)
     assert [o.object_name for o in living(dock.book.records)] == ["共有のモノ"]
+
+
+def _click_row(table, row: int, modifier=Qt.KeyboardModifier.NoModifier) -> None:
+    QTest.mouseClick(table.viewport(), Qt.MouseButton.LeftButton, modifier, table.visualRect(table.model().index(row, 1)).center())
+
+
+def _chosen_rows(dock) -> list[int]:
+    return sorted({i.row() for i in dock.table.selectionModel().selectedRows()})
+
+
+def test_a_record_clicked_stays_chosen_after_the_read_in_a_task(plugin, tmp_path):
+    # 2026-11-09 tsudo: one row clicked in the list was chosen for a moment, then let go. The record opened in the form is
+    # read again (an Esri store, in a task), and the list shown anew forgot which row was chosen (and where it was scrolled).
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    assert wait_for(lambda: dock.book.loaded)
+    for name, lon in (("あおば", 139.65), ("いぶき", 139.7), ("うらが", 139.75)):
+        dock.set_active(True)
+        dock.map_clicked(lon, 35.6, None)
+        dock.object_input.setText(name)
+        dock.submit()
+        assert wait_for(lambda: not dock._running and not dock._queue)
+    assert dock.table.rowCount() == 3
+    _click_row(dock.table, 1)
+    assert dock.form.isVisible() and dock.pending[2].object_name == "いぶき"
+    assert wait_for(lambda: not dock._refreshing and not dock._running and not dock._queue)
+    assert _chosen_rows(dock) == [1] and dock.table.currentRow() == 1
+    # Ctrl + click adds one; both stay chosen whenever the list is shown again (a save, a refresh, the 通報 read).
+    _click_row(dock.table, 2, Qt.KeyboardModifier.ControlModifier)
+    dock.render()
+    assert _chosen_rows(dock) == [1, 2] and dock.bulk_button.isVisible()
+    assert sorted(o.object_name for o in dock.selected_records()) == ["いぶき", "うらが"]
+
+
+def test_the_rows_chosen_and_the_scroll_stay_while_the_same_list_is_shown_again(plugin):
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.resize(500, 700)
+    for i in range(60):
+        book.add(139.6 + i * 0.002, 35.6, object=f"モノ{i:02d}", kind="船舶", activity="停泊")
+    dock.render()
+    APP.processEvents()
+    table, bar = dock.table, dock.table.verticalScrollBar()
+    assert bar.maximum() > 0
+    bar.setValue(bar.maximum())
+    scrolled = bar.value()
+    names = [table.item(r, 0).text() for r in range(table.rowCount())]
+    sel = table.selectionModel()
+    for name in ("モノ57", "モノ59"):
+        sel.select(table.model().index(names.index(name), 0), QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+    # A record added elsewhere moves the rows: the same records are chosen again, not the same row numbers.
+    book.add(139.5, 35.6, object="あ", kind="船舶")
+    dock.render()
+    assert table.item(0, 0).text() == "あ" and bar.value() == scrolled
+    assert sorted(o.object_name for o in dock.selected_records()) == ["モノ57", "モノ59"]
+    # Another image: its own list, nothing chosen.
+    dock.step(1)
+    assert _chosen_rows(dock) == [] and bar.value() == 0
+    dock.step(-1)
+    assert _chosen_rows(dock) == []
+    # 「モノ」: a thing clicked is chosen (its flow below) and stays so; clicked again, its flow closes and the row is let go.
+    dock.tabs.setCurrentIndex(1)
+    APP.processEvents()
+    _click_row(table, 3)
+    chosen = dock.chosen
+    assert chosen and _chosen_rows(dock) == [3] and dock.flow_box.isVisible()
+    dock.render()
+    assert _chosen_rows(dock) == [3]
+    _click_row(table, 3)
+    assert dock.chosen is None and _chosen_rows(dock) == [] and not dock.flow_box.isVisible()
 
 
 def test_records_saved_offline_are_told_and_the_dock_keeps_drawing(plugin, tmp_path):

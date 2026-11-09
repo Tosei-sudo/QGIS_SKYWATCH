@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
-from qgis.PyQt.QtCore import QDateTime, QEventLoop, QStringListModel, Qt, QTimer, pyqtSignal
+from qgis.PyQt.QtCore import QDateTime, QEventLoop, QItemSelection, QItemSelectionModel, QStringListModel, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
@@ -549,6 +549,12 @@ class ObservationDock(PluginDock):
         self._row_actions: list[tuple[Callable, Optional[Callable]]] = []
         #: The records each row stands for (a record, or a thing's records), for 「一括編集」.
         self._row_records: list[list[Observation]] = []
+        #: What each row stands for (`o:` a record, `c:` a thing carried over, `a:` a checked area, `f:` a thing),
+        #: so the rows chosen stay chosen when the list is shown again (a read in a task, a refresh). 「分類」 rows
+        #: have none: there the row chosen is the class shown below, nothing else.
+        self._row_keys: list[str] = []
+        #: The list shown last (the tab and the image), whose chosen rows are chosen again.
+        self._shown_as: Optional[tuple] = None
         self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
                                         lambda: self.bulk_edit())
         self.bulk_button.hide()
@@ -2489,13 +2495,14 @@ class ObservationDock(PluginDock):
         self.table.setRowCount(0)
         self._row_actions = []
         self._row_records = []
+        self._row_keys = []
         self.bulk_button.hide()
         self.remove_chosen_button.hide()
         self.alert_add_button.hide()
 
     def _row(self, cells: list, on_click: Optional[Callable] = None, on_double: Optional[Callable] = None,
              style: str = "", widget: Optional[QWidget] = None, selected: bool = False,
-             records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False) -> None:
+             records: Optional[list[Observation]] = None, reported: bool = False, waiting: bool = False, key: str = "") -> None:
         r = self.table.rowCount()
         self.table.insertRow(r)
         for i, c in enumerate(cells):
@@ -2528,8 +2535,34 @@ class ObservationDock(PluginDock):
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
         self._row_actions.append((on_click, on_double))
         self._row_records.append(list(records or []))
+        self._row_keys.append(key)
         if selected:
             self.table.selectRow(r)
+
+    def _chosen_rows(self) -> tuple[set[str], str]:
+        """What the rows chosen now stand for, and the current row (where the keyboard and Shift + click go on from)."""
+        keys = self._row_keys
+        rows = {i.row() for i in self.table.selectionModel().selectedRows()}
+        current = self.table.currentRow()
+        return ({keys[r] for r in rows if 0 <= r < len(keys) and keys[r]},
+                keys[current] if 0 <= current < len(keys) else "")
+
+    def _choose_rows(self, keys: set[str], current: str = "") -> None:
+        """
+        The rows standing for `keys` chosen again after the list was shown
+        anew (else a click on a record let go of it as soon as the record was
+        read again in a task, and Ctrl + click choices went at every refresh).
+        """
+        model, last = self.table.model(), self.table.columnCount() - 1
+        chosen = QItemSelection()
+        for r, key in enumerate(self._row_keys):
+            if key and key in keys:
+                chosen.select(model.index(r, 0), model.index(r, last))
+        sel = self.table.selectionModel()
+        if not chosen.isEmpty():
+            sel.select(chosen, QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+        if current and current in self._row_keys:
+            sel.setCurrentIndex(model.index(self._row_keys.index(current), 0), QItemSelectionModel.SelectionFlag.NoUpdate)
 
     def _row_clicked(self, row: int, _col: int) -> None:
         if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
@@ -2718,6 +2751,7 @@ class ObservationDock(PluginDock):
         self.image_event_button.setVisible(image is not None and self.context.config.events is not None)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         if book is None:
+            self._shown_as = None
             self._set_head(self.tr("観測記録"))
             self._row([self.tr("保存先なし") if self.context.config.local_observations
                        else self.tr("保存先なし（ローカルは使用不可。設定ファイルの observationStores で指定）")])
@@ -2753,12 +2787,21 @@ class ObservationDock(PluginDock):
         self.unfilter_button.setVisible(bool(self.class_filter))
         if self.class_filter:
             here = [o for o in here if self._shown_kind(o.kind, taxa)]
+        shown_as = (self.tab, image.id if image is not None and self.tab == "image" else None)
+        kept = self._chosen_rows() if shown_as == self._shown_as else None
+        scrolled = self.table.verticalScrollBar().value()
         if self.tab == "image":
             self._render_image(here, carried, inside)
         elif self.tab == "objects":
             self._render_objects(objects)
         else:
             self._render_classes(taxa, objects)
+        self._shown_as = shown_as
+        if kept is not None:
+            self._choose_rows(*kept)
+            # Where the list was scrolled to, too (shown anew, it starts at the top).
+            self.table.updateGeometries()
+            self.table.verticalScrollBar().setValue(scrolled)
         self._render_flow()
         self._render_taxon(taxa, objects)
         self._show_offline()
@@ -2784,7 +2827,7 @@ class ObservationDock(PluginDock):
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
                       style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
-                      waiting=o.id in waiting)
+                      waiting=o.id in waiting, key=f"o:{o.id}")
         inside_ids = {id(c) for c in inside}
         for c in carried:
             s = c.source
@@ -2794,7 +2837,7 @@ class ObservationDock(PluginDock):
             self._row([s.object_name, s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("確認範囲内（記録なし）") if id(c) in inside_ids else "", "", ""],
                       lambda s=s: (self._ensure_active(), self.open_form(s.lon, s.lat, source=s), self._center(s)),
-                      style="inside" if id(c) in inside_ids else "ghost", widget=widget)
+                      style="inside" if id(c) in inside_ids else "ghost", widget=widget, key=f"c:{s.object_id}")
         taxa = book.taxonomy() if self.class_filter else []
         for a in book.image_areas(deleted=self.deleted_check.isChecked()):
             if a.kind and not self._shown_kind(a.kind, taxa):
@@ -2803,7 +2846,7 @@ class ObservationDock(PluginDock):
             widget = self._small((tr("復元"), tr("削除した確認範囲の復元"), lambda a=a: self.restore_areas([a]))) if gone else \
                 self._small((tr("削除"), tr("この確認範囲の削除"), lambda a=a: self.remove_areas([a])))
             self._row([area_label(a), a.kind, "", "", a.note, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
-                      style="deleted" if gone else "area", widget=widget)
+                      style="deleted" if gone else "area", widget=widget, key=f"a:{a.id}")
         if self.table.rowCount() == 0:
             self._row([tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter and book.current
                        else tr("記録なし（「クリック記録」で地図をクリック）") if book.current else tr("画像なし")])
@@ -2823,10 +2866,10 @@ class ObservationDock(PluginDock):
         waiting = self.waiting_ids()
         for f in listed:
             self._row([f.name, f.kind, f.activity if f.present else tr("不在"), local_time(f.first), local_time(f.last), f.seen],
-                      lambda f=f: self.choose(None if self.chosen == f.object_id else f.object_id), lambda f=f: self._fit_flow(f),
+                      lambda f=f: self._thing_clicked(f.object_id), lambda f=f: self._fit_flow(f),
                       selected=f.object_id == self.chosen, records=f.observations,
                       reported=any(o.id in self.reported for o in f.observations if o.deleted_at is None),
-                      waiting=any(o.id in waiting for o in f.observations))
+                      waiting=any(o.id in waiting for o in f.observations), key=f"f:{f.object_id}")
         if self.table.rowCount() == 0:
             self._row([tr("該当するモノなし") if objects else tr("記録なし")])
 
@@ -2845,6 +2888,14 @@ class ObservationDock(PluginDock):
                       lambda t=t: self.filter_class(list(t.path)), selected=same)
         if self.table.rowCount() == 0:
             self._row([tr("分類なし（下の「大分類の追加」から）")])
+
+    def _thing_clicked(self, object_id: str) -> None:
+        """A thing's row clicked under 「モノ」: its flow shown, or closed (and the row let go) when it was shown already."""
+        if self.chosen == object_id:
+            self.table.clearSelection()
+            self.choose(None)
+        else:
+            self.choose(object_id)
 
     def _choose_taxon(self, path: Optional[list[str]]) -> None:
         self.taxon = path
