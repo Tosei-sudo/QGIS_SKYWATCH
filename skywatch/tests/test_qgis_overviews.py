@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -144,9 +145,38 @@ def test_read_only_goes_to_cache(read_only, tmp_path):
     assert out == [CACHED, 4, HAS_OVERVIEWS]
     assert sorted(os.listdir(os.path.dirname(read_only))) == ["img.tif"] and digest(read_only) == before
     assert any(n.endswith(".ovr") for n in os.listdir(cache))
+    if overviews_io.gdaladdo():
+        # Built by gdaladdo aside, then named in the .aux.xml GDAL itself put in the cache folder.
+        assert any(re.match(r"^[0-9a-f]{12}_img\.tif\.ovr$", n) for n in os.listdir(cache))
     # Found again by a new QGIS (process); not without the cache folder.
     assert in_fresh_gdal(cache, f"print(json.dumps(count({read_only!r})))") == 4
     assert overview_count(read_only) == 0
+
+
+def test_read_only_goes_to_cache_without_gdaladdo(read_only, tmp_path):
+    """Without gdaladdo GDAL itself writes the levels to the cache folder, in QGIS (as before)."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    out = in_fresh_gdal(cache, "o.gdaladdo = lambda: None\n"
+                               f"r = o.build_external({read_only!r}, OverviewOptions())\n"
+                               f"print(json.dumps([r.kind, r.native, count({read_only!r})]))")
+    assert out == [CACHED, False, 4]
+    assert sorted(os.listdir(os.path.dirname(read_only))) == ["img.tif"]
+    assert not any(re.match(r"^[0-9a-f]{12}_img\.tif\.ovr$", n) for n in os.listdir(cache))
+    assert in_fresh_gdal(cache, f"print(json.dumps(count({read_only!r})))") == 4
+
+
+def test_read_only_attached_falls_back_when_not_found(read_only, tmp_path):
+    """When GDAL does not find the .ovr named in its .aux.xml, it builds the levels itself as before."""
+    if not overviews_io.gdaladdo():
+        pytest.skip("gdaladdo なし")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    out = in_fresh_gdal(cache, "o.attach_native = lambda path, ovr: None\n"
+                               f"r = o.build_external({read_only!r}, OverviewOptions())\n"
+                               f"print(json.dumps([r.kind, r.native, count({read_only!r})]))")
+    assert out == [CACHED, False, 4]
+    assert not any(re.match(r"^[0-9a-f]{12}_img\.tif\.ovr$", n) for n in os.listdir(cache))
 
 
 def test_cache_location_even_when_writable(tmp_path):
@@ -327,3 +357,107 @@ def test_jpeg_four_bands_builds_without_ycbcr(tmp_path, no_cache):
     ds = None
     outcome = build_external(path, options)
     assert outcome.kind == BUILT and overview_count(path) == 4
+
+
+# ---- The levels made by gdaladdo in a process of its own (QGIS keeps drawing the map smoothly) ----
+
+needs_gdaladdo = pytest.mark.skipif(overviews_io.gdaladdo() is None, reason="gdaladdo なし")
+
+
+@needs_gdaladdo
+def test_built_by_gdaladdo_in_its_own_process(tmp_path, no_cache, monkeypatch):
+    runs = []
+    run = overviews_io.run_gdaladdo
+    monkeypatch.setattr(overviews_io, "run_gdaladdo", lambda *a, **k: runs.append(a[3]) or run(*a, **k))
+    # Not built in QGIS: GDAL's BuildOverviews of this process is never called.
+    monkeypatch.setattr(gdal.Dataset, "BuildOverviews", lambda *a, **k: pytest.fail("QGIS の中で作成"))
+    folder = tmp_path / "日本語 のフォルダ"
+    folder.mkdir()
+    path = image(folder / "画像 1.tif")
+    seen = []
+    outcome = build_external(path, OverviewOptions(), seen.append)
+    assert outcome.kind == BUILT and runs == [[2, 4, 8, 16]]
+    assert overview_count(path) == 4 and seen[-1] >= 99
+    assert sorted(os.listdir(folder)) == ["画像 1.tif", "画像 1.tif.ovr"]
+    ds = gdal.Open(path)
+    assert int(ds.GetRasterBand(3).GetOverview(1).ReadAsArray().mean()) == 102
+
+
+@needs_gdaladdo
+def test_gdaladdo_gets_the_options(tmp_path, no_cache, monkeypatch):
+    asked = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: asked.append((args, k)) or popen(args, **k))
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    path = image(tmp_path / "o.tif")
+    assert build_external(path, OverviewOptions(resampling="CUBIC", compress="LZW")).kind == BUILT
+    (args, kwargs), = asked
+    text = " ".join(args)
+    assert "-r cubic image.vrt 2 4 8 16" in text and "--config COMPRESS_OVERVIEW LZW" in text
+    # Half the cores (the others stay for QGIS), no folder on the command line, GDAL's cache folder not passed on.
+    assert "--config GDAL_NUM_THREADS 4" in text and os.path.basename(kwargs["cwd"]).startswith("satobs-ovr-")
+    assert "GDAL_PAM_PROXY_DIR" not in kwargs["env"]
+    asked.clear()
+    other = image(tmp_path / "p.tif")
+    assert build_external(other, OverviewOptions(threads=1)).kind == BUILT
+    assert "--config GDAL_NUM_THREADS 1" in " ".join(asked[0][0])
+
+
+def test_progress_of_gdaladdo():
+    import io
+
+    for text, percent in ((b"", 0), (b"0", 0), (b"0.", 2.5), (b"0...", 7.5), (b"0...10..", 15), (b"0...10...20...30...40...50...60...70...80...90...100 - done.\n", 100)):
+        state = {"percent": 0.0}
+        overviews_io._read_progress(io.BytesIO(text), state)
+        assert state["percent"] == percent, text
+
+
+def test_without_gdaladdo_built_in_qgis(tmp_path, no_cache, monkeypatch):
+    monkeypatch.setattr(overviews_io, "gdaladdo", lambda: None)
+    path = image(tmp_path / "q.tif")
+    assert build_external(path, OverviewOptions()).kind == BUILT and overview_count(path) == 4
+    other = image(tmp_path / "c.tif")
+    with pytest.raises(overviews_io.Cancelled):
+        build_external(other, OverviewOptions(), cancelled=lambda: True)
+    assert sorted(os.listdir(tmp_path)) == ["c.tif", "q.tif", "q.tif.ovr"]
+
+
+def test_failing_gdaladdo_falls_back_to_qgis(tmp_path, no_cache, monkeypatch):
+    fake = tmp_path / "bin" / "gdaladdo"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\necho 'ERROR 1: something went wrong' >&2\nexit 1\n")
+    fake.chmod(0o755)
+    if sys.platform == "win32":
+        pytest.skip("シェルのスクリプトで代用")
+    monkeypatch.setattr(overviews_io, "gdaladdo", lambda: str(fake))
+    logged = []
+    monkeypatch.setattr(overviews_io.QgsMessageLog, "logMessage", lambda text, *a, **k: logged.append(text))
+    path = image(tmp_path / "f.tif")
+    assert build_external(path, OverviewOptions()).kind == BUILT and overview_count(path) == 4
+    assert any("something went wrong" in t and "QGIS の中で作り直し" in t for t in logged)
+
+
+def test_cancel_stops_gdaladdo(tmp_path, no_cache, monkeypatch):
+    if sys.platform == "win32":
+        pytest.skip("シェルのスクリプトで代用")
+    fake = tmp_path / "bin" / "gdaladdo"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\nprintf '0...10'\nexec sleep 60\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(overviews_io, "gdaladdo", lambda: str(fake))
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **k: started.append(popen(args, **k)) or started[-1])
+    path = image(tmp_path / "c.tif")
+    seen, clock = [], []
+
+    def cancelled():
+        clock.append(1)
+        return len(clock) > 5  # after the process has run for a moment
+
+    t0 = time.monotonic()
+    with pytest.raises(overviews_io.Cancelled):
+        build_external(path, OverviewOptions(), seen.append, cancelled)
+    assert time.monotonic() - t0 < 10 and started[0].poll() is not None
+    assert seen and seen[-1] == 10 * 0.95
+    assert sorted(os.listdir(tmp_path)) == ["bin", "c.tif"]

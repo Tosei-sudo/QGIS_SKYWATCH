@@ -11,9 +11,13 @@ puts every image's .ovr there, even when its folder can be written.
     "overviews": {"resampling": "AVERAGE", "minSize": 2048, "compress": "DEFLATE",
                   "cacheFolder": "D:/ovr-cache",         // "" (default): the QGIS profile's
                   "location": "cache",                   // "auto" (default): beside the image when it can be written
-                  "scope": "catalog"}                    // "all" (default): every local image added to QGIS
+                  "scope": "catalog",                    // "all" (default): every local image added to QGIS
+                  "threads": 2}                          // 0 (default): half the PC's cores
 
-Omitted, overviews are built with the defaults below.
+Omitted, overviews are built with the defaults below. The levels are made
+by GDAL's own gdaladdo in a process of its own, at a lower priority and on
+`threads` cores, so QGIS keeps drawing the map smoothly meanwhile
+(qgis_io/overviews_io.py).
 """
 from __future__ import annotations
 
@@ -46,6 +50,8 @@ class OverviewOptions:
     location: str = "auto"
     #: "all" or "catalog" (SCOPES).
     scope: str = "all"
+    #: Cores GDAL builds on (0: half the PC's, so the others stay for QGIS drawing the map).
+    threads: int = 0
 
 
 DEFAULT_OVERVIEWS = OverviewOptions()
@@ -105,7 +111,20 @@ def overviews_of(value: Any, problems: list[str]) -> OverviewOptions:
             scope = text
         else:
             problems.append("overviews.scope は all（QGIS に追加した画像すべて）か catalog（画像カタログから開いた画像だけ）で指定")
-    return OverviewOptions(enabled, resampling, min_size, compress, cache_folder, location, scope)
+    threads = DEFAULT_OVERVIEWS.threads
+    if "threads" in value:
+        v = value["threads"]
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 and v == int(v):
+            threads = int(v)
+        else:
+            problems.append("overviews.threads は 0 以上の整数（0 で PC のコアの半分）で指定")
+    return OverviewOptions(enabled, resampling, min_size, compress, cache_folder, location, scope, threads)
+
+
+def build_threads(options: OverviewOptions, cores: int | None = None) -> int:
+    """The cores one build uses: `threads`, or half the PC's (at least one), never more than it has."""
+    cores = max(1, cores or 1)
+    return max(1, min(cores, options.threads)) if options.threads else max(1, cores // 2)
 
 
 def overview_factors(width: int, height: int, smallest: int = SMALLEST) -> list[int]:

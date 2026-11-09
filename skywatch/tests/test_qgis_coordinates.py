@@ -147,7 +147,7 @@ def test_the_cursor_position_in_the_chosen_notation_and_the_right_click_menu(plu
 
     assert cursor_notation() == "dms"
     # Off the map: hidden.
-    QGuiApplication.sendEvent(canvas.viewport(), QEvent(QEvent.Type.Leave))
+    QGuiApplication.sendEvent(canvas, QEvent(QEvent.Type.Leave))
     assert box.position.isHidden()
 
 

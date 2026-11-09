@@ -20,6 +20,16 @@ when asked (clear_cache_next_start), as its files may be open now.
 One image is built at a time; an image asked for again while waiting or
 building is not queued twice. When one is done, the project's layers of
 that image are read again so the overviews are used at once.
+
+So that QGIS keeps drawing the map smoothly meanwhile, the levels are made
+by GDAL's own gdaladdo (QGIS's, found beside its programs or on PATH) in a
+process of its own: at a lower priority, on half the cores (`threads`),
+with its own GDAL block cache (in QGIS the build's reads pushed out the
+blocks the map was drawn from, which then had to be read again) and its
+own Python (no wait for the GIL). Without gdaladdo, or when it fails, the
+levels are made in QGIS as before (on `threads` cores too). An image in a
+folder that cannot be written then gets its .ovr into the cache folder,
+named in the .aux.xml GDAL itself keeps there (OVERVIEW_FILE).
 """
 from __future__ import annotations
 
@@ -29,17 +39,19 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass
 from xml.etree import ElementTree
 from typing import Callable, Optional, Sequence
 
 from osgeo import gdal
-from qgis.core import Qgis, QgsMapLayer, QgsMessageLog, QgsProject, QgsProviderRegistry, QgsRasterLayer
+from qgis.core import Qgis, QgsApplication, QgsMapLayer, QgsMessageLog, QgsProject, QgsProviderRegistry, QgsRasterLayer
 
-from ..core.overviews import OverviewOptions, overview_factors
+from ..core.overviews import OverviewOptions, build_threads, overview_factors
 from . import settings
 from .tasks import LOG_TAG, Cancelled, FunctionTask, run_task
 
@@ -157,8 +169,10 @@ class Outcome:
     path: str
     #: The levels built (BUILT).
     factors: tuple[int, ...] = ()
-    #: The .ovr the plugin put in the cache folder (location "cache").
+    #: The .ovr the plugin put in the cache folder (location "cache", or a read-only folder's built by gdaladdo).
     ovr: str = ""
+    #: `ovr` is named through GDAL itself (attach_native: a read-only folder), not through PamAllocateProxy.
+    native: bool = False
 
 
 def local_path(layer: QgsMapLayer) -> Optional[str]:
@@ -198,7 +212,9 @@ def _config(ds, options: OverviewOptions) -> dict[str, str]:
     compress = options.compress
     if compress == "JPEG" and (dtype != gdal.GDT_Byte or ds.RasterCount not in (1, 3, 4)):
         compress = "DEFLATE"
-    config = {"COMPRESS_OVERVIEW": compress, "BIGTIFF_OVERVIEW": "IF_SAFER", "GDAL_NUM_THREADS": "ALL_CPUS"}
+    # Half the cores by default (`threads`): with all of them QGIS's drawing of the map waited for the build.
+    threads = build_threads(options, os.cpu_count())
+    config = {"COMPRESS_OVERVIEW": compress, "BIGTIFF_OVERVIEW": "IF_SAFER", "GDAL_NUM_THREADS": str(threads)}
     if compress in ("DEFLATE", "LZW", "ZSTD"):
         if gdal.GetDataTypeName(dtype).startswith("Float"):
             config["PREDICTOR_OVERVIEW"] = "3"
@@ -241,6 +257,11 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     if not writable_folder(folder):
         if not cache_folder():
             return Outcome(READ_ONLY, path)
+        if gdaladdo() is not None:
+            # Built in gdaladdo's own process, then named in the .aux.xml GDAL keeps in the cache folder.
+            attached = _build_attached(src, path, options, factors, config, progress, cancelled)
+            if attached is not None:
+                return attached
         return _build_cached(path, options, factors, config, progress, cancelled)
     part = os.path.join(folder, f".{os.path.basename(target)}.{uuid.uuid4().hex[:8]}.part")
     work = tempfile.mkdtemp(prefix="satobs-ovr-")
@@ -269,6 +290,9 @@ def _build_in_temp(src, work: str, options: OverviewOptions, factors: list[int],
     vrt = os.path.join(work, "image.vrt")
     if gdal.Translate(vrt, src, format="VRT") is None:
         raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を作れず")
+    exe = gdaladdo()
+    if exe is not None and run_gdaladdo(exe, vrt, options, factors, config, progress, cancelled):
+        return vrt + ".ovr"
     ds = gdal.Open(vrt, gdal.GA_ReadOnly)
     if ds is None:
         raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を開けず")
@@ -291,6 +315,212 @@ def _build_in_temp(src, work: str, options: OverviewOptions, factors: list[int],
     if error != 0 or not os.path.exists(built):
         raise RuntimeError(gdal.GetLastErrorMsg() or "ピラミッドを作れず")
     return built
+
+
+#: gdaladdo's niceness below QGIS (Linux, macOS); on Windows its process is BELOW_NORMAL_PRIORITY_CLASS.
+NICE = 10
+_addo: Optional[str] = None
+_addo_tried = False
+_addo_lock = threading.Lock()
+
+
+def gdaladdo() -> Optional[str]:
+    """
+    GDAL's gdaladdo that comes with this QGIS (beside its programs, else on
+    PATH), of the same GDAL major version as QGIS's; None when there is none
+    (the levels are then made in QGIS). Looked for once.
+    """
+    global _addo, _addo_tried
+    with _addo_lock:
+        if _addo_tried:
+            return _addo
+        _addo_tried = True
+        name = "gdaladdo.exe" if sys.platform == "win32" else "gdaladdo"
+        folders = [os.path.dirname(sys.executable)]
+        prefix = QgsApplication.prefixPath()
+        if prefix:
+            # Windows: <QGIS>/apps/qgis(-ltr) → <QGIS>/bin; macOS: QGIS.app/Contents/MacOS/bin; Linux: /usr/bin.
+            folders += [os.path.join(prefix, "bin"), os.path.join(prefix, "..", "..", "bin")]
+        folders.append(os.path.join(sys.prefix, "..", "..", "bin"))
+        candidates = [os.path.normpath(os.path.join(f, name)) for f in folders if f] + [shutil.which("gdaladdo")]
+        wanted = gdal.__version__.split(".")[0]
+        for exe in dict.fromkeys(c for c in candidates if c):
+            if not os.path.isfile(exe):
+                continue
+            version = _version_of(exe)
+            if version and version.split(".")[0] == wanted:
+                _addo = exe
+                QgsMessageLog.logMessage(f"ピラミッドは別のプロセスで作成（{exe}、GDAL {version}）", LOG_TAG, Qgis.MessageLevel.Info)
+                return exe
+        QgsMessageLog.logMessage("gdaladdo が見つからず: ピラミッドは QGIS の中で作成", LOG_TAG, Qgis.MessageLevel.Info)
+        return None
+
+
+def _hidden() -> int:
+    """The process flags of a GDAL program run by the plugin: no console window and a lower priority (Windows)."""
+    if sys.platform != "win32":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x00004000)
+
+
+def _version_of(exe: str) -> Optional[str]:
+    try:
+        done = subprocess.run([exe, "--version"], stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+                              creationflags=_hidden())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = re.search(rb"GDAL (\d+\.\d+(?:\.\d+)?)", done.stdout or b"")
+    return found.group(1).decode("ascii") if done.returncode == 0 and found else None
+
+
+def _read_progress(stream, state: dict) -> None:
+    """gdaladdo's progress on its output ("0...10...20…100 - done."): a number every 10 %, a dot every 2.5 %."""
+    last, dots, number = 0, 0, b""
+    while True:
+        c = stream.read(1)
+        if not c:
+            return
+        if c.isdigit():
+            number += c
+            last, dots = int(number), 0
+        else:
+            number = b""
+            if c == b".":
+                dots += 1
+        state["percent"] = min(100.0, last + 2.5 * dots)
+
+
+def run_gdaladdo(exe: str, vrt: str, options: OverviewOptions, factors: Sequence[int], config: dict[str, str],
+                 progress: Callable[[float], None] = lambda p: None, cancelled: Callable[[], bool] = lambda: False) -> bool:
+    """
+    The levels of `vrt` (its `.ovr` beside it) made by gdaladdo in a process
+    of its own at a lower priority. It runs in the VRT's folder and is given
+    names without a folder, so no path with Japanese or other non-ASCII
+    letters goes through the command line (the VRT names the image in
+    UTF-8). Raises Cancelled when `cancelled()` turns true (the process is
+    stopped); False when gdaladdo failed (logged: the levels are then made
+    in QGIS).
+    """
+    folder, name = os.path.split(vrt)
+    args = [exe]
+    for key, value in config.items():
+        args += ["--config", key, value]
+    args += ["-r", options.resampling.lower(), name] + [str(f) for f in factors]
+    # GDAL's own cache folder is not given: gdaladdo writes only beside the VRT, and GDAL's index there stays QGIS's.
+    env = {k: v for k, v in os.environ.items() if k != PROXY_DIR}
+    errors_path = os.path.join(folder, "gdaladdo.log")
+    state: dict = {"percent": 0.0}
+    with open(errors_path, "wb") as errors:
+        try:
+            process = subprocess.Popen(args, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=errors, creationflags=_hidden())
+        except OSError as error:
+            QgsMessageLog.logMessage(f"gdaladdo を起動できず（{error}）: QGIS の中で作成", LOG_TAG, Qgis.MessageLevel.Info)
+            return False
+        if sys.platform != "win32":
+            try:
+                os.setpriority(os.PRIO_PROCESS, process.pid, NICE)
+            except (OSError, AttributeError):
+                pass
+        reader = threading.Thread(target=_read_progress, args=(process.stdout, state), name="satobs-gdaladdo", daemon=True)
+        reader.start()
+        shown = -1.0
+        try:
+            while True:
+                try:
+                    process.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                if cancelled():
+                    raise Cancelled()
+                if state["percent"] != shown:
+                    shown = state["percent"]
+                    progress(shown * 0.95)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            reader.join(2)
+            process.stdout.close()
+    if cancelled():
+        raise Cancelled()
+    built = vrt + ".ovr"
+    if process.returncode == 0 and os.path.exists(built):
+        try:
+            ds = gdal.Open(vrt, gdal.GA_ReadOnly)
+            ok = ds is not None and has_overviews(ds)
+            ds = None
+        except RuntimeError:
+            ok = False
+        if ok:
+            return True
+    try:
+        with open(errors_path, "rb") as f:
+            lines = [ln.strip() for ln in f.read().decode("utf-8", "replace").splitlines() if ln.strip()]
+    except OSError:
+        lines = []
+    why = lines[-1] if lines else f"終了コード {process.returncode}"
+    QgsMessageLog.logMessage(f"gdaladdo でピラミッドを作れず（{why}）: QGIS の中で作り直し", LOG_TAG, Qgis.MessageLevel.Info)
+    for leftover in (built, vrt + ".aux.xml"):
+        try:
+            os.remove(leftover)
+        except OSError:
+            pass
+    return False
+
+
+def _build_attached(src, path: str, options: OverviewOptions, factors: list[int], config: dict[str, str],
+                    progress: Callable[[float], None], cancelled: Callable[[], bool]) -> Optional[Outcome]:
+    """
+    The .ovr of an image in a read-only folder, built aside (gdaladdo), moved
+    to the cache folder and named in the image's .aux.xml there, which GDAL
+    itself writes there when it cannot beside the image (GDAL_PAM_PROXY_DIR).
+    None when GDAL does not then find it (the levels are then made the old
+    way, by GDAL writing them to the cache folder).
+    """
+    target = os.path.join(cache_folder(), cached_ovr_name(path))
+    part = target + f".{uuid.uuid4().hex[:8]}.part"
+    work = tempfile.mkdtemp(prefix="satobs-ovr-")
+    try:
+        built = _build_in_temp(src, work, options, factors, config, progress, cancelled)
+        shutil.copyfile(built, part)
+        os.replace(part, target)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        if os.path.exists(part):
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+    progress(99.0)
+    try:
+        attach_native(path, target)
+        again = gdal.Open(path, gdal.GA_ReadOnly)
+        found = again is not None and has_overviews(again)
+    except RuntimeError:
+        found = False
+    if found:
+        return Outcome(CACHED, path, tuple(factors), target, native=True)
+    QgsMessageLog.logMessage(f"{os.path.basename(path)}: キャッシュの .ovr を GDAL が見つけず、GDAL 自身に作り直させる", LOG_TAG, Qgis.MessageLevel.Info)
+    try:
+        os.remove(target)
+    except OSError:
+        pass
+    return None
+
+
+def attach_native(path: str, ovr: str) -> None:
+    """
+    Names `ovr` as the overviews of an image in a read-only folder
+    (OVERVIEW_FILE): GDAL writes it in the image's .aux.xml, which it puts
+    in the cache folder when it cannot beside the image.
+    """
+    ds = gdal.Open(path, gdal.GA_ReadOnly)
+    if ds is None:
+        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けず")
+    ds.SetMetadataItem("OVERVIEW_FILE", ovr, "OVERVIEWS")
+    ds = None
 
 
 def cached_ovr_name(path: str) -> str:
@@ -659,7 +889,7 @@ class OverviewQueue:
                     # The layers opened before kept the .aux.xml as it was, and wrote it back
                     # (with their statistics) when read again: the .ovr is named in it once more.
                     try:
-                        point_to_overviews(outcome.path, outcome.ovr)
+                        (attach_native if outcome.native else point_to_overviews)(outcome.path, outcome.ovr)
                     except (RuntimeError, OSError) as e:
                         QgsMessageLog.logMessage(f"{name}: {e}", LOG_TAG, Qgis.MessageLevel.Warning)
                     reload_layers(outcome.path)

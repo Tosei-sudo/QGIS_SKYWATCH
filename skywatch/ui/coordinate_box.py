@@ -142,7 +142,9 @@ class CoordinateBox(QObject):
         status = iface.statusBarIface()
         status.addPermanentWidget(self.position, 0)
         self.canvas.xyCoordinates.connect(self.show_position)
-        self.canvas.viewport().installEventFilter(self)
+        # On the map canvas itself, not its viewport: it too is told when the cursor leaves the map, but not of each
+        # mouse move and paint (each a call into Python on QGIS's main thread, waiting for the GIL while a task runs).
+        self.canvas.installEventFilter(self)
 
         self.canvas.contextMenuAboutToShow.connect(self._canvas_menu)
         context.configChanged.connect(self._config_changed)
@@ -351,7 +353,7 @@ class CoordinateBox(QObject):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt's name)
         if watched is self.field and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
             self.hide_places()
-        elif watched is self.canvas.viewport() and event.type() == QEvent.Type.Leave:
+        elif watched is self.canvas and event.type() == QEvent.Type.Leave:
             self.position.hide()
         return False
 
@@ -426,7 +428,7 @@ class CoordinateBox(QObject):
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
-        self.canvas.viewport().removeEventFilter(self)
+        self.canvas.removeEventFilter(self)
         self.timer.stop()
         if self._task is not None:
             try:

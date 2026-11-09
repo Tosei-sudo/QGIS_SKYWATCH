@@ -159,3 +159,53 @@ def test_an_answer_for_a_closed_window_is_not_an_error():
     finally:
         QgsApplication.messageLog().messageReceived.disconnect(log)
     assert levels == [Qgis.MessageLevel.Info] and not task.discarded
+
+
+def test_gil_handed_on_sooner_while_loaded(monkeypatch):
+    import sys
+
+    from skywatch.qgis_io import tasks
+
+    monkeypatch.setattr(tasks, "_switch_before", None)
+    before = sys.getswitchinterval()
+    try:
+        sys.setswitchinterval(0.005)
+        tasks.share_gil_faster()
+        assert sys.getswitchinterval() == pytest.approx(tasks.SWITCH_INTERVAL)
+        tasks.share_gil_faster()  # loaded again: the one from before the plugin is kept
+        tasks.restore_gil_sharing()
+        assert sys.getswitchinterval() == pytest.approx(0.005)
+        # Shorter already (someone else's): left as it is.
+        sys.setswitchinterval(0.0005)
+        tasks.share_gil_faster()
+        assert sys.getswitchinterval() == pytest.approx(0.0005)
+        tasks.restore_gil_sharing()
+        assert sys.getswitchinterval() == pytest.approx(0.0005)
+    finally:
+        sys.setswitchinterval(before)
+
+
+def test_slow_result_is_told_in_the_log(monkeypatch):
+    from qgis.core import QgsApplication
+
+    from skywatch.qgis_io import tasks
+
+    monkeypatch.setattr(tasks, "SLOW_MS", 30)
+    heard = []
+    log = QgsApplication.messageLog()
+
+    def got(message, tag, _level):
+        if tag == tasks.LOG_TAG:
+            heard.append(message)
+
+    log.messageReceived.connect(got)
+    try:
+        done = []
+        run_task("速い表示", lambda task: 1, done.append)
+        run_task("遅い表示", lambda task: 2, lambda r: (time.sleep(0.06), done.append(r)))
+        assert wait_for(lambda: sorted(done) == [1, 2], 5000)
+        APP.processEvents()
+        assert any(m.startswith("遅い表示: 結果の表示に ") for m in heard)
+        assert not any(m.startswith("速い表示:") for m in heard)
+    finally:
+        log.messageReceived.disconnect(got)

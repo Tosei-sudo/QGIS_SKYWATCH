@@ -970,6 +970,7 @@ const SPEC = [
         S("compress", "圧縮", K.compressions), S("location", "置き場所", [["auto", "auto（書ければ画像の隣）"], ["cache", "cache（キャッシュのフォルダ）"]]),
         S("scope", "対象", [["all", "all（追加したローカル画像すべて）"], ["catalog", "catalog（カタログなどから開いたものだけ）"]]),
         T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中" }),
+        N("threads", "作成に使うコア数", { min: 0, ph: "0", help: "0 で PC のコアの半分（残りは QGIS の地図の描画用）" }),
       ], { allowFalse: "作らない（false）" }) },
     { key: "complexImages", label: "複素 SAR 画像（SICD）の表示", doc: "複素-sar-画像sicdの表示compleximages", help: "SICD の I・Q バンドや複素数の画素の画像を振幅で表示する（既定は dB）。",
       field: S("complexImages", "表示", [["dB", "dB（20·log10 振幅）"], ["amplitude", "amplitude（振幅 √(I²+Q²)）"]], { ph: "dB", falseLabel: "false（QGIS のまま I・Q を表示）" }) },
