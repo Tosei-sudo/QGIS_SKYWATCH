@@ -406,6 +406,116 @@ def test_measures_the_width_by_three_or_four_points(plugin):
     assert dock.points == 1 and dock.points_select.currentData() == 1
 
 
+def _painted(scene, style):
+    """The scene painted (pixels = lon / lat as given) in a style, on a transparent image."""
+    from qgis.PyQt.QtCore import QPointF, Qt
+    from qgis.PyQt.QtGui import QImage, QPainter
+
+    from skywatch.ui.obs_overlay import ScenePainter
+
+    image = QImage(200, 200, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    scene_painter = ScenePainter(lambda lon, lat: QPointF(lon, lat), style=style)
+    scene_painter.paint(painter, scene)
+    painter.end()
+    return image, scene_painter
+
+
+def test_the_marks_painted_as_outlines_leave_what_they_mark_clear():
+    """「印」 枠だけ (tsudo, 2026-11-09): nothing filled over the thing; 非表示: only the input being made."""
+    from skywatch.ui.obs_overlay import Mark, Scene
+
+    def scene():
+        # A record by one click (reported), one with a width (front at the top), a thing carried over and a checked area.
+        return Scene(marks=[
+            Mark("obs", 50, 50, "#e11d48", "A", ring="#16a34a", key="a", reported=True),
+            Mark("obs", 150, 100, "#2563eb", "B", key="b", ends=((150, 60), (150, 140)),
+                 outline=[(140, 60), (160, 60), (160, 140), (140, 140)]),
+            Mark("ghost", 50, 150, "#16a34a", "C", key="c"),
+        ], areas=[([(5, 5), (195, 5), (195, 195), (5, 195), (5, 5)], "")], pending=(100, 20))
+
+    def alpha(image, x, y):
+        return image.pixelColor(x, y).alpha()
+
+    normal, _ = _painted(scene(), "normal")
+    outline, outline_painter = _painted(scene(), "outline")
+    hidden, hidden_painter = _painted(scene(), "hidden")
+    # The middle of a mark: filled as before; clear as outlines (the area's fill gone too).
+    assert alpha(normal, 50, 50) == 255 and alpha(outline, 50, 50) == 0
+    # Its rings (the class's colour inside the 確度's) and the reported ring are still there.
+    assert outline.pixelColor(57, 50).red() > 150 and outline.pixelColor(59, 50).green() > 100
+    assert alpha(outline, 64, 50) > 0 and alpha(outline, 61, 50) < alpha(normal, 61, 50)
+    # A record with a width: its outline is the frame, nothing along its middle line or inside.
+    # (Below its middle: its name is above.)
+    assert alpha(normal, 150, 120) > 0 and alpha(outline, 150, 120) == 0 and alpha(outline, 145, 120) == 0
+    assert alpha(outline, 140, 120) > 0 and alpha(outline, 150, 57) > 0
+    # The thing carried over: no white fill.
+    assert alpha(normal, 50, 150) > 0 and alpha(outline, 50, 150) == 0
+    assert alpha(outline, 10, 100) == 0 and alpha(normal, 10, 100) > 0
+    assert {m.key for _p, m in outline_painter.painted} == {"a", "b", "c"}
+    # Hidden: no marks (none to click), the area gone, the place clicked still shown.
+    assert alpha(hidden, 57, 50) == 0 and alpha(hidden, 140, 80) == 0 and alpha(hidden, 6, 100) == 0
+    assert alpha(hidden, 100, 20) > 0 and hidden_painter.painted == []
+    # …but the record open in the form stays.
+    s = scene()
+    s.marks[1].editing = True
+    _image, painter = _painted(s, "hidden")
+    assert [m.key for _p, m in painter.painted] == ["b"]
+
+
+def test_the_marks_style_is_chosen_kept_and_toggled_by_a_key(plugin):
+    p, iface, dock, layers, _ = plugin
+    assert dock.mark_style_select.currentData() == "normal" and dock.overlay.style == "normal"
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶")
+    dock.submit()
+    [a] = dock.book.living()
+    from qgis.PyQt.QtCore import Qt
+    from qgis.PyQt.QtGui import QImage, QPainter
+
+    def paint():
+        image = QImage(800, 600, QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        dock.overlay.paint(painter)
+        painter.end()
+        at = dock.overlay.to_pixel(a.lon, a.lat)
+        return image.pixelColor(int(at.x()), int(at.y())).alpha(), dock.overlay.hit(at.x(), at.y())
+
+    alpha, hit = paint()
+    assert alpha == 255 and hit.key == a.id
+    dock.mark_style_select.setCurrentIndex(dock.mark_style_select.findData("outline"))
+    assert settings.mark_style() == "outline" and dock.overlay.style == "outline"
+    alpha, hit = paint()
+    assert alpha == 0 and hit.key == a.id
+    # 「H」: hidden (nothing to click: a click records a new thing), then back to the outlines.
+    dock.toggle_marks()
+    assert dock.mark_style_select.currentData() == "hidden" and settings.mark_style() == "hidden"
+    alpha, hit = paint()
+    assert alpha == 0 and hit is None
+    dock.toggle_marks()
+    assert dock.mark_style_select.currentData() == "outline"
+    # Ctrl+Alt+D anywhere does the same.
+    p.shortcuts.actions["ToggleMarks"].trigger()
+    assert dock.mark_style_select.currentData() == "hidden"
+    p.shortcuts.actions["ToggleMarks"].trigger()
+    assert dock.mark_style_select.currentData() == "outline"
+    # Kept for the next session.
+    dock.set_mark_style("hidden")
+    from skywatch.ui.observation_dock import ObservationDock
+
+    again = ObservationDock(iface, dock.context, lambda: None)
+    try:
+        assert again.mark_style_select.currentData() == "hidden" and again.overlay.style == "hidden"
+        again.toggle_marks()
+        assert again.mark_style_select.currentData() == "normal"
+    finally:
+        again.close_down()
+
+
 def test_checked_areas_carry_all_and_absent_inside(plugin):
     p, iface, dock, layers, _ = plugin
     book = dock.book

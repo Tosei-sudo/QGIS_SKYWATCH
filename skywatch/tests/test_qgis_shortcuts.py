@@ -72,7 +72,7 @@ def test_every_key_is_in_qgis_shortcut_settings(plugin):
     assert manager.shortcutByName("SatObsKeyPlanRun").key().toString() == norm("Ctrl+Return")
     assert manager.shortcutByName("SatObsKeyTaxonDelete").key().toString() == norm("Del")
     names = [s.objectName() for s in manager.listShortcuts() if s.objectName().startswith(shortcuts.PREFIX)]
-    assert len(names) == len(set(names)) == 8 + 9 + 5 + 3 + 4
+    assert len(names) == len(set(names)) == 9 + 9 + 5 + 3 + 4
 
 
 def test_a_key_changed_in_qgis_is_used_and_kept(plugin):
