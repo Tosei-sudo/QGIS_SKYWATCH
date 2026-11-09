@@ -1,4 +1,7 @@
-"""一覧の「ビュー」: columns shown / hidden / reordered, the sort and the filters kept under a name, per user and per list."""
+"""一覧の「ビュー」: columns shown / hidden / reordered, the sort and the filters kept under a name, per user and per list;
+the order of the columns from the menus (the header's right-click, 「列の表示と順番…」) on every list of the docks."""
+import json
+
 import pytest
 
 pytest.importorskip("qgis.core")
@@ -9,9 +12,9 @@ APP = start_app()
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
 from qgis.PyQt.QtCore import Qt  # noqa: E402
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel  # noqa: E402
-from qgis.PyQt.QtWidgets import QComboBox, QLineEdit, QTableView  # noqa: E402
+from qgis.PyQt.QtWidgets import QComboBox, QDialogButtonBox, QLineEdit, QTableView, QTreeWidget, QTreeWidgetItem  # noqa: E402
 
-from skywatch.ui.list_views import ROOT, ListViews  # noqa: E402
+from skywatch.ui.list_views import ROOT, ColumnsDialog, ListViews, column_menus  # noqa: E402
 from skywatch.tests.test_qgis_alerts import plugin  # noqa: E402,F401
 
 HEAD = ["名称", "区分", "期間", "状態"]
@@ -88,7 +91,128 @@ def test_columns_sort_and_filters_under_a_name():
     views.save("A")
     views.button.menu().aboutToShow.emit()
     texts = [a.text() for a in views.button.menu().actions()]
-    assert texts[0] == "A" and "今の表示を名前を付けて保存…" in texts and "標準の表示に戻す" in texts
+    assert texts[0] == "A" and "今の表示を名前を付けて保存…" in texts and "標準の表示に戻す" in texts and "列の表示と順番…" in texts
+
+
+def titles(views):
+    return [c["title"] for c in views.columns() if not c["hidden"]]
+
+
+def menu_texts(menu):
+    return [(a.text(), a.isEnabled()) for a in menu.actions() if not a.isSeparator()]
+
+
+def test_columns_moved_from_the_header_menu():
+    model = QStandardItemModel()
+    fill(model)
+    view = QTableView()
+    view.setModel(model)
+    views = ListViews("test", view)
+    # The column right-clicked: its moves first, those it cannot do greyed.
+    menu = views.columns_menu(column=0)
+    texts = menu_texts(menu)
+    assert texts[:4] == [("この列を左へ", False), ("この列を右へ", True), ("この列を先頭へ", False), ("この列を末尾へ", True)]
+    assert [t for t, _on in texts[4:]] == HEAD + ["列の表示と順番…", "標準の表示に戻す"]
+    # Without a column (「ビュー ▸ 列の表示・順番」): no moves.
+    assert [t for t, _on in menu_texts(views.columns_menu())][0] == "名称"
+    [a for a in menu.actions() if a.text() == "この列を右へ"][0].trigger()
+    assert titles(views) == ["区分", "名称", "期間", "状態"]
+    assert views.move(0, "last") and titles(views) == ["区分", "期間", "状態", "名称"]
+    assert views.move(0, "first") and titles(views) == HEAD[:1] + ["区分", "期間", "状態"]
+    assert not views.move(0, "left") and not views.move(3, "right")
+    # A hidden column is stepped over.
+    views.set_hidden("区分", True)
+    assert views.move(2, "left") and titles(views) == ["期間", "名称", "状態"]
+    assert not views.can_move(1, "left") and not views.can_move(1, "right")
+    # Kept: the list made again, or another one of the same key, is arranged so.
+    fill(model)
+    settle()
+    assert titles(views) == ["期間", "名称", "状態"]
+    other = QStandardItemModel()
+    fill(other)
+    again = QTableView()
+    again.setModel(other)
+    kept = column_menus("test", again)
+    assert kept.button is None and titles(kept) == ["期間", "名称", "状態"]
+    assert [(c["title"], c["hidden"]) for c in kept.columns()] == [("期間", False), ("名称", False), ("区分", True), ("状態", False)]
+
+
+def test_columns_dialog():
+    model = QStandardItemModel()
+    fill(model)
+    view = QTableView()
+    view.setModel(model)
+    views = ListViews("test", view)
+    views.set_hidden("期間", True)
+    dialog = ColumnsDialog(views)
+    rows = lambda: [(dialog.list.item(r).text(), shown) for r, (_i, shown) in enumerate(dialog.chosen())]  # noqa: E731
+    assert rows() == [("名称", True), ("区分", True), ("期間", False), ("状態", True)]
+    buttons = dialog.move_buttons
+    assert dialog.list.currentRow() == 0 and not buttons["up"].isEnabled() and not buttons["first"].isEnabled() and buttons["down"].isEnabled()
+    dialog.list.setCurrentRow(3)
+    dialog.move("first")
+    dialog.list.setCurrentRow(2)
+    dialog.move("down")
+    assert [t for t, _s in rows()] == ["状態", "名称", "期間", "区分"] and dialog.list.currentRow() == 3
+    assert not buttons["down"].isEnabled() and not buttons["last"].isEnabled()
+    dialog.move("up")
+    assert [t for t, _s in rows()] == ["状態", "名称", "区分", "期間"]
+    dialog.list.item(1).setCheckState(Qt.CheckState.Unchecked)
+    # Not every column hidden: OK only while one is ticked.
+    ok = dialog.buttons.button(QDialogButtonBox.StandardButton.Ok)
+    for r in range(4):
+        dialog.list.item(r).setCheckState(Qt.CheckState.Unchecked)
+    assert not ok.isEnabled()
+    for r in (0, 2):
+        dialog.list.item(r).setCheckState(Qt.CheckState.Checked)
+    assert ok.isEnabled()
+    dialog.accept_into()
+    assert [(c["title"], c["hidden"]) for c in views.columns()] == [("状態", False), ("名称", True), ("区分", False), ("期間", True)]
+    # 「標準に戻す」 in the dialog: every column in the plugin's order (OK puts it so).
+    again = ColumnsDialog(views)
+    again.standard()
+    assert again.chosen() == [(0, True), (1, True), (2, True), (3, True)]
+    again.accept_into()
+    assert titles(views) == HEAD
+
+
+def test_a_tree_list_and_its_arrangement_kept():
+    def tree():
+        t = QTreeWidget()
+        t.setHeaderLabels(["フィード", "種別", "状態"])
+        QTreeWidgetItem(t, ["a", "AIS", "接続中"])
+        return t
+
+    first = tree()
+    views = column_menus("tree", first)
+    assert views.header is first.header() and views.header.sectionsMovable()
+    assert views.move(2, "first") and titles(views) == ["状態", "フィード", "種別"]
+    # The dock made again (QGIS started again): the order is back.
+    assert titles(column_menus("tree", tree())) == ["状態", "フィード", "種別"]
+
+
+def test_every_list_of_the_docks_has_the_menu(plugin):  # noqa: F811
+    p, _iface, dock, _ = plugin
+    d = p.docks
+    lists = {
+        "imaging-plan": d["SatObsImagingPlan"].table_columns, "imaging-plan-revisit": d["SatObsImagingPlan"].revisit_columns,
+        "satellite-passes": d["SatObsSatellitePass"].table_columns, "schedule": d["SatObsSchedule"].table_columns,
+        "plan-files": d["SatObsPlanFiles"].table_columns, "events": d["SatObsEvents"].table_columns,
+        "ai-results": d["SatObsAiResults"].list_columns, "notices": d["SatObsNotices"].notices_columns,
+        "notice-watches": d["SatObsNotices"].watches_columns, "moving-feeds": d["SatObsMoving"].list_columns,
+        "observation-steps": dock.steps_columns, "alert-feed": d["SatObsNotices"].alerts.table_columns,
+    }
+    lists.update({v.key: v for v in d["SatObsEvents"].item_columns.values()})
+    for key, views in lists.items():
+        assert views.key == key and views.header.sectionsMovable()
+        assert views.header.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+    assert len({v.key for v in lists.values()}) == len(lists) >= 15
+    # The events list: moved from the menu, kept for the next start.
+    events = d["SatObsEvents"].table_columns
+    first = titles(events)[0]
+    assert events.move(0, "last") and titles(events)[-1] == first
+    kept = json.loads(QgsSettings().value(f"{ROOT}/events"))["arrangement"]["columns"]
+    assert kept[-1]["title"] == first
 
 
 def test_each_list_of_the_observations_dock_keeps_its_own(plugin):  # noqa: F811

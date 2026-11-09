@@ -72,6 +72,7 @@ from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, run_task
 from .docks import PluginDock, plain_label
 from .last_inputs import InputMemory
+from .list_views import column_menus
 
 TITLE = "AI結果"
 #: The edits of a detection layer that read its results again.
@@ -216,6 +217,8 @@ class AiResultsDock(PluginDock):
         self.list.itemSelectionChanged.connect(self._list_selected)
         self.list.itemDoubleClicked.connect(lambda item, _c: self.zoom_to([self.list.indexOfTopLevelItem(item)]))
         self.body.addWidget(self.list, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.list_columns = column_menus("ai-results", self.list, self)
 
         buttons = QHBoxLayout()
         self.import_button = QPushButton(_tr("選択を観測記録へ取り込み"))

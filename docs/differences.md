@@ -601,4 +601,5 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 | 式の関数 | なし | QGIS の式のグループ「SKYWATCH」: skywatch_record_count・skywatch_object_names・skywatch_last_seen・skywatch_last_activity・skywatch_kind_level・skywatch_place・skywatch_places | tsudo の依頼（2026-11-08）。ビューアには QGIS の式がない |
 | 観測記録の一括取込み | なし（スクリプトの addObservation のみ） | メニュー「観測記録の一括取込み…」: CSV・レイヤーから、列の対応・試行（新規・更新・重複・エラー）・一度に保存 | tsudo の依頼（2026-11-08） |
 | 一覧のビュー | なし | 画像カタログ・観測記録・撮像依頼の列の表示・並び・並べ替え・絞り込みを名前を付けて保存（個人の設定） | tsudo の依頼（2026-11-08） |
+| 一覧の列の表示・順番 | なし | ドックの一覧すべてで、見出しの右クリック（この列を左へ・右へ・先頭へ・末尾へ、列のチェック）と「列の表示と順番…」で列の表示・順番を変え、一覧ごとに覚える（個人の設定） | tsudo の依頼（2026-11-09、順番はメニューから） |
 | API リファレンス | なし | メニュー「Python API リファレンス…」: plugin.api の説明・引数・例 | tsudo の依頼（2026-11-08） |

@@ -60,6 +60,7 @@ from .plan_drag_tool import PlanDragTool
 from .plan_overlay import PlanOverlay
 from .plan_timeline import PlanTimeline
 from .last_inputs import InputMemory
+from .list_views import column_menus
 from .satellite_tree import SatelliteTree
 
 #: The most opportunities listed as rows (the CSV and the layer take them all).
@@ -433,6 +434,8 @@ class ImagingPlanDock(PluginDock):
         self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row_chosen(current.row()))
         self.table.doubleClicked.connect(lambda _: self.zoom_to_chosen())
         bottom_layout.addWidget(self.table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.table_columns = column_menus("imaging-plan", self.table, self)
         self.revisit_model = QStandardItemModel(self)
         self.revisit_table = QTableView()
         self.revisit_table.setModel(self.revisit_model)
@@ -445,6 +448,7 @@ class ImagingPlanDock(PluginDock):
         self.revisit_table.doubleClicked.connect(lambda _: self.zoom_to_cell())
         self.revisit_table.hide()
         bottom_layout.addWidget(self.revisit_table, 1)
+        self.revisit_columns = column_menus("imaging-plan-revisit", self.revisit_table, self)
 
         actions = QHBoxLayout()
         self.csv_button = QPushButton(self.tr("CSV 保存"))

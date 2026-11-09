@@ -31,6 +31,7 @@ from ..core.obs.alerts import (
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
+from .list_views import column_menus
 
 DAY_MS = 86_400_000
 
@@ -148,6 +149,8 @@ class AlertDialog(QDialog):
         self.log_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.log_table.cellDoubleClicked.connect(lambda r, _c: self._go(self._shown_log()[r].obs_id))
         g.addWidget(self.log_table, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.log_columns = column_menus("alert-log", self.log_table, self)
         row = QHBoxLayout()
         self.log_copy = QPushButton(self.tr("選択をコピー"))
         self.log_copy.clicked.connect(self.copy_log)
