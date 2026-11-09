@@ -21,7 +21,7 @@ from skywatch.core.request.store import (
 )
 from skywatch.core.request.systems import export_systems_of
 from skywatch.core.time_zone import parse_time_zone
-from skywatch.core.request.workflow import history_of, plan_day
+from skywatch.core.request.workflow import history_of, keep_answers, plan_day
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer
 from skywatch.tests.test_request import DAY, FIRST, H, LEDGER, HISTORY, SATS, SYSTEMS_JSON, request, systems
 
@@ -265,6 +265,39 @@ def test_answers_by_hand():
     update_history(client, s, None, manual_changes([row], WAITING))
     row = next(r for r in load_day(client, s, None, d) if r.name == "東京湾")
     assert (row.adoption, row.adoption_reason, row.planned_at, row.adoption_source) == (WAITING, "", None, "")
+
+
+def test_writing_the_day_again_keeps_the_systems_answers():
+    # tsudo, 2026-11-09: 「置き換えて書き出し」 used to delete the 採否 read in; now carried over, or kept.
+    fake = server()
+    client, s, loaded = written_day(fake)
+    d = DAY.isoformat()
+    day = load_day(client, s, None, d)
+    tokyo = next(r for r in day if r.name == "東京湾")
+    osaka = next(r for r in day if r.name == "大阪湾")
+    at = FIRST + 10 * H
+    assert update_history(client, s, None, [
+        (tokyo.object_id, {"adoption": ADOPTED, "plannedAt": at, "externalId": "EXT-1", "adoptionSource": "a-result.csv"}),
+        (osaka.object_id, {"adoption": REJECTED, "adoptionReason": "枠なし", "adoptionSource": MANUAL})]) == 2
+    # Written again without 大阪湾 (and 横浜 still held back).
+    plan = plan_day([r for r in loaded if r.id != "R-0002"], DAY, systems(), SATS, {"R-0001": 30, "R-0003": 30})
+    rows = history_of(plan, FIRST - 8 * H, {"SYS-A": "a2.csv", "SYS-B": "b2.csv", "SYS-C": "c2.json"}, "RUN2")
+    rewrite = keep_answers(load_history(client, s, None, replaced_where(s, d)), rows)
+    assert (rewrite.carried, rewrite.kept, len(rewrite.gone)) == (1, 1, 2)
+    assert int(delete_history_rows(client, s, None, rewrite.gone)) == 2
+    assert add_history(client, s, None, rewrite.rows) == len(rows)
+    now = {r.name: r for r in load_day(client, s, None, d)}
+    assert set(now) == {"東京湾", "大阪湾", "横浜"}
+    # 東京湾 is in SYS-A's new file: the new row, with the system's answer.
+    t = now["東京湾"]
+    assert (t.run_id, t.file, t.adoption, t.planned_at, t.external_id, t.adoption_source) == ("RUN2", "a2.csv", ADOPTED, at, "EXT-1", "a-result.csv")
+    # 大阪湾 is not handed out this time: SYS-B's answer kept as it was; 横浜 (no answer) replaced.
+    o = now["大阪湾"]
+    assert (o.run_id, o.system, o.adoption, o.adoption_reason) == ("RUN1", "SYS-B", REJECTED, "枠なし")
+    assert now["横浜"].run_id == "RUN2"
+    # Rows still waiting (不明) are simply replaced, as before.
+    again = keep_answers([r for r in load_history(client, s, None, replaced_where(s, d)) if r.name == "横浜"], rows)
+    assert (again.carried, again.kept, again.gone) == (0, 0, [now["横浜"].object_id])
 
 
 def test_an_image_in_tells_it_was_planned():

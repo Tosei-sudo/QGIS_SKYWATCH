@@ -666,7 +666,8 @@ def replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = 
     The rows of a target day that writing the day again replaces: all but
     those already followed up and the systems' own plans (要求外); only those
     of `system` when one system is written (the others are another person's,
-    2026-11-09).
+    2026-11-09). The systems' answers among them are carried over or kept
+    (workflow.keep_answers).
     """
     hf = store.history_fields
     captured = hf["captured"]

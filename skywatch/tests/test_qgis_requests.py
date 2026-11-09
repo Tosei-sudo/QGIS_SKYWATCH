@@ -309,11 +309,18 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     live.manual = "見送り"
     daily.plan.refit()
 
-    # Written again the same day (#71): the earlier rows are replaced, not doubled.
+    # Written again the same day (#71): the earlier rows are replaced, not doubled;
+    # SYS-A's answer read in meanwhile stays (tsudo, 2026-11-09).
+    kure = next(x.id for x in dock.requests if x.name == "呉")
+    answered_ = next(r for r in fake.layers[HISTORY].rows if r["attributes"]["REQ_ID"] == kure)
+    answered_["attributes"].update({"ADOPTION": "採用", "EXTERNAL_ID": "A-77", "ADOPTION_SOURCE": "sys-a-result.csv"})
     daily.paths = []
     daily.write(ask=False)
     assert wait_for(lambda: daily.task is None and len(daily.paths) == 2 and "置き換え" in daily.status.text()), daily.status.text()
-    assert len(fake.layers[HISTORY].rows) == 3
+    assert len(fake.layers[HISTORY].rows) == 3 and "採否を引き継いだ行 1 件" in daily.status.text()
+    rows = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    assert (rows[kure]["ADOPTION"], rows[kure]["EXTERNAL_ID"], rows[kure]["ADOPTION_SOURCE"]) == ("採用", "A-77", "sys-a-result.csv")
+    assert all(r is not answered_ for r in fake.layers[HISTORY].rows)  # a new row (this run's), with the answer
 
     # A system whose file cannot be made (#68): its request is 見送り in the history, not 採用・未判定.
     (tmp_path / "sys-b.schema.json").write_text(json.dumps({**SCHEMA, "required": ["tasks", "missing"]}), encoding="utf-8")

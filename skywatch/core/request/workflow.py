@@ -13,6 +13,8 @@ systems and none is lost between them.
 """
 from __future__ import annotations
 
+import dataclasses
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
@@ -135,6 +137,61 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.
             adoption="不明" if taken else "", rings=[[list(p[:2]) for p in r] for r in c.request.rings]))
     return rows
+
+
+#: The systems' answers (core/request/adoption.py) that writing a day again keeps (不明 is no answer).
+ANSWERS = ("採用", "不採用")
+
+
+@dataclass
+class Rewrite:
+    """A day written again over its earlier rows (store.replaced_where)."""
+    #: The rows to save: the new ones, those handed to a system that had answered with its answer.
+    rows: list = field(default_factory=list)
+    #: The object ids of the earlier rows to delete.
+    gone: list = field(default_factory=list)
+    #: How many new rows took an earlier answer, and how many earlier answered rows are kept as they were.
+    carried: int = 0
+    kept: int = 0
+
+
+def answered(row: HistoryRow) -> bool:
+    """A row handed out that its system answered (from its result file or by hand)."""
+    return row.result == TAKEN and row.adoption in ANSWERS
+
+
+def keep_answers(earlier: Sequence[HistoryRow], rows: Sequence[HistoryRow]) -> Rewrite:
+    """
+    「置き換えて書き出し」 without losing the systems' answers (tsudo,
+    2026-11-09): a new row handed to the system that answered for the same
+    request takes that answer (採否, its reason, the planned time, the
+    system's id and where it came from; the latest when there are several);
+    an answered row whose request is not handed to that system this time is
+    kept as it was (the system has it in its plan, or said no). The rest of
+    `earlier` is replaced.
+    """
+    out = Rewrite()
+    answers: dict = {}
+    for r in sorted(earlier, key=lambda r: r.run_date if math.isfinite(r.run_date) else 0):
+        if answered(r):
+            answers[(r.request_id, r.system)] = r
+    taken: set = set()
+    for row in rows:
+        old = answers.get((row.request_id, row.system)) if row.result == TAKEN else None
+        if old is not None:
+            row = dataclasses.replace(row, adoption=old.adoption, adoption_reason=old.adoption_reason, planned_at=old.planned_at,
+                                      external_id=old.external_id, adoption_source=old.adoption_source)
+            taken.add((row.request_id, row.system))
+            out.carried += 1
+        out.rows.append(row)
+    for r in earlier:
+        if r.object_id is None:
+            continue
+        if answered(r) and (r.request_id, r.system) not in taken:
+            out.kept += 1
+        else:
+            out.gone.append(r.object_id)
+    return out
 
 
 def not_written(plan: DayPlan, files: dict, system: Optional[str] = None) -> set:

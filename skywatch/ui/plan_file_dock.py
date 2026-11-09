@@ -48,11 +48,12 @@ from ..core.request.follow import follow_and_save, found_text
 from ..core.request.model import JST, jst_day, priority_text
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
-    RequestStoreConfig, add_history, count_history, delete_history, handed_where, history_where, load_history, load_requests,
+    RequestStoreConfig, add_history, count_history, delete_history_rows, handed_where, history_where, load_history, load_requests,
     replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day, written_summary,
+    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, not_written, plan_day,
+    written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
@@ -584,7 +585,9 @@ class PlanFileDock(PluginDock):
             return False if ok else None
         whose = self.tr("{system} の").format(system=label) if label else ""
         lines = [*lines, "", self.tr("この日の{whose}出力履歴（未判定）が既に {n} 件あります。"
-                                      "置き換えると前回の行を消してから今回の行を保存します。").format(whose=whose, n=earlier)]
+                                      "置き換えると前回の行を消してから今回の行を保存します。"
+                                      "システムの採否（結果ファイル・手入力）は、今回も同じシステムに出す依頼の行へ引き継ぎ、"
+                                      "今回は出さない依頼の行は採否ごと残します。").format(whose=whose, n=earlier)]
         box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), plain_tip("\n".join(lines)), parent=self)
         replace = box.addButton(self.tr("置き換えて書き出し"), QMessageBox.ButtonRole.AcceptRole)
         keep = box.addButton(self.tr("追加して書き出し"), QMessageBox.ButtonRole.AcceptRole)
@@ -647,23 +650,30 @@ class PlanFileDock(PluginDock):
         def work(task):
             notes = []
             removed = 0
+            rewrite = Rewrite(rows=list(rows))
             if replace and earlier and store.history:
-                gone = delete_history(client, store, token, replaced_where(store, day, target))
+                # The systems' answers already read in are carried to the new rows, or kept (tsudo, 2026-11-09).
+                rewrite = keep_answers(load_history(client, store, token, replaced_where(store, day, target)), rows)
+                gone = delete_history_rows(client, store, token, rewrite.gone)
                 removed, notes = int(gone), notes + gone.problems
-            saved = add_history(client, store, token, rows)
+            saved = add_history(client, store, token, rewrite.rows)
             raised = update_requests(client, store, token, boosts, run)
             marked = update_history(client, store, token, done_rows)
-            return saved, raised, marked, removed, notes + saved.problems + raised.problems + marked.problems
+            return saved, raised, marked, removed, rewrite, notes + saved.problems + raised.problems + marked.problems
 
         def done(result):
             self.task = None
-            saved, raised, _, removed, failed_saves = result
+            saved, raised, _, removed, rewrite, failed_saves = result
             text = self.tr("書き出し: {s}").format(s=written_summary([w for w, _ in targets if w.system.system in written]))
             if store.history:
                 text += (self.tr("・出力履歴 {n} 件").format(n=saved) if saved == len(rows)
                          else self.tr("・出力履歴 {n}/{m} 件").format(n=saved, m=len(rows)))
                 if removed:
                     text += self.tr("（前回の {n} 件を置き換え）").format(n=removed)
+                if rewrite.carried:
+                    text += self.tr("・採否を引き継いだ行 {n} 件").format(n=rewrite.carried)
+                if rewrite.kept:
+                    text += self.tr("・採否ごと残した前回の行 {n} 件").format(n=rewrite.kept)
             if raised:
                 text += self.tr("・繰り上げ {n} 件").format(n=raised)
             if broken:
