@@ -176,7 +176,8 @@ def download(url: str, target: str, authcfg: Optional[str] = None, progress: Opt
     def fetch() -> None:
         request = QNetworkRequest(QUrl(url))
         request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
-        if authcfg and not QgsApplication.authManager().updateNetworkRequest(request, authcfg):
+        # Python gets (ok, request) back: the tuple itself is always true.
+        if authcfg and not QgsApplication.authManager().updateNetworkRequest(request, authcfg)[0]:
             raise AiError(f"認証設定（{authcfg}）を使えず（{url.split('?', 1)[0]}）")
         reply = QgsNetworkAccessManager.instance().get(request)
         if authcfg:
