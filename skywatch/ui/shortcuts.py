@@ -35,6 +35,7 @@ GLOBAL = [
     ("NextImage", "観測記録: 次の画像", "Ctrl+Alt+PgDown"),
     ("PreviousImage", "観測記録: 前の画像", "Ctrl+Alt+PgUp"),
     ("ToggleRecording", "観測記録: 記録の開始・終了", "Ctrl+Alt+E"),
+    ("ToggleMarks", "観測記録: 地図の印の表示・非表示", "Ctrl+Alt+D"),
 ]
 
 #: Every shortcut registered (to be taken off QGIS's list when the plugin unloads).
@@ -86,6 +87,7 @@ class Shortcuts:
             "NextImage": lambda: self._observations("step", 1),
             "PreviousImage": lambda: self._observations("step", -1),
             "ToggleRecording": lambda: self._observations("toggle_recording"),
+            "ToggleMarks": self._toggle_marks,
         }
         window = iface.mainWindow()
         for name, label, default in GLOBAL:
@@ -120,6 +122,18 @@ class Shortcuts:
         if not dock.isVisible():
             self.show_dock("SatObsObservations")
         getattr(dock, method)(*args)
+
+    def _toggle_marks(self) -> None:
+        """The marks hidden or shown again; the dock not open: opened with its marks shown."""
+        dock = self.docks.get("SatObsObservations")
+        if dock is None:
+            return
+        if dock.isVisible():
+            dock.toggle_marks()
+            return
+        self.show_dock("SatObsObservations")
+        if dock.mark_style_select.currentData() == "hidden":
+            dock.toggle_marks()
 
     def unload(self) -> None:
         window = self.iface.mainWindow()

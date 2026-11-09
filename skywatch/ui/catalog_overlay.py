@@ -6,6 +6,12 @@ dashed) and, for 「類似画像の検索」, the image compared
 with (red, dashed). Rubber bands only: nothing is added to the project. A
 map tool picks footprints by a click (Ctrl / Shift: adds); another draws
 the area.
+
+Styles (「フットプリント」, tsudo 2026-11-09: filled footprints over an opened
+image made it hard to see): 'fill' as above, 'outline' (no fill, the ids at
+the footprints' top so the image's middle stays clear), 'hidden' (no
+footprints; picking by a click still works, the area drawn stays as a
+frame).
 """
 from __future__ import annotations
 
@@ -31,43 +37,85 @@ def _band(canvas: QgsMapCanvas, stroke: str, width: int, fill: QColor, z: float,
     return band
 
 
+#: The fills of the bands for the style 'fill' (the others have none).
+_FILLS = {"all": QColor(37, 99, 235, 10), "chosen": QColor(245, 158, 11, 46), "reference": QColor(0, 0, 0, 0), "area": QColor(22, 163, 74, 20)}
+_NO_FILL = QColor(0, 0, 0, 0)
+#: The styles, in the order the dock offers them.
+STYLES = ("fill", "outline", "hidden")
+
+
 class FootprintOverlay:
-    def __init__(self, canvas: QgsMapCanvas):
+    def __init__(self, canvas: QgsMapCanvas, style: str = "fill"):
         self.canvas = canvas
-        self.all = _band(canvas, "#2563eb", 1, QColor(37, 99, 235, 10), 950)
-        self.chosen = _band(canvas, "#f59e0b", 3, QColor(245, 158, 11, 46), 952)
-        self.reference = _band(canvas, "#dc2626", 2, QColor(0, 0, 0, 0), 951, Qt.PenStyle.DashLine)
-        self.area = _band(canvas, "#16a34a", 2, QColor(22, 163, 74, 20), 949, Qt.PenStyle.DashLine)
+        self.all = _band(canvas, "#2563eb", 1, _FILLS["all"], 950)
+        self.chosen = _band(canvas, "#f59e0b", 3, _FILLS["chosen"], 952)
+        self.reference = _band(canvas, "#dc2626", 2, _FILLS["reference"], 951, Qt.PenStyle.DashLine)
+        self.area = _band(canvas, "#16a34a", 2, _FILLS["area"], 949, Qt.PenStyle.DashLine)
         self._labels: list = []
         self._geometries: list[Optional[QgsGeometry]] = []
+        self._reference: Optional[QgsGeometry] = None
+        self._chosen: tuple[list, list] = ([], [])
+        self.style = style if style in STYLES else "fill"
+        self._fill()
+
+    def _fill(self) -> None:
+        for name in ("all", "chosen", "reference", "area"):
+            getattr(self, name).setFillColor(_FILLS[name] if self.style == "fill" else _NO_FILL)
+
+    def set_style(self, style: str) -> None:
+        """'fill', 'outline' or 'hidden' (see the module's note): everything drawn again."""
+        style = style if style in STYLES else "fill"
+        if style == self.style:
+            return
+        self.style = style
+        self._fill()
+        chosen = self._chosen
+        self.show(self._geometries, self._reference)
+        self.choose(*chosen)
+        self.area.update()
 
     def show(self, geometries: Sequence[Optional[QgsGeometry]], reference: Optional[QgsGeometry] = None) -> None:
         """Draws the footprints of the list (WGS 84; None for an image without one) and the image compared with."""
         self._geometries = list(geometries)
+        self._reference = reference
+        drawn = self.style != "hidden"
         self.all.reset(QgsWkbTypes.GeometryType.PolygonGeometry)
         for g in self._geometries:
-            if g is not None:
+            if g is not None and drawn:
                 self.all.addGeometry(g, WGS84)
         self.reference.reset(QgsWkbTypes.GeometryType.PolygonGeometry)
-        if reference is not None:
+        if reference is not None and drawn:
             self.reference.addGeometry(reference, WGS84)
         self.choose([], [])
 
     def choose(self, indexes: Sequence[int], labels: Sequence[str]) -> None:
-        """Marks the chosen footprints with their labels."""
+        """Marks the chosen footprints with their labels (kept, not drawn, while hidden)."""
+        self._chosen = (list(indexes), list(labels))
         self.chosen.reset(QgsWkbTypes.GeometryType.PolygonGeometry)
         for item in self._labels:
             self.canvas.scene().removeItem(item)
         self._labels = []
+        if self.style == "hidden":
+            return
         crs = self.canvas.mapSettings().destinationCrs()
         for i, label in zip(indexes, labels):
             g = self._geometries[i] if 0 <= i < len(self._geometries) else None
             if g is None:
                 continue
             self.chosen.addGeometry(g, WGS84)
-            if label:
+            if not label:
+                continue
+            if self.style == "outline":
+                # Just above the footprint's top corner: the image's middle stays clear.
+                self._labels.append(LabelItem(self.canvas, _top_vertex(g, crs), label, "#111111", False, offset_y=-6))
+            else:
                 p = from_wgs84(crs).transform(g.pointOnSurface().asPoint())
                 self._labels.append(LabelItem(self.canvas, p, label, "#111111", False))
+
+    @property
+    def labels(self) -> list:
+        """The label items of the chosen footprints."""
+        return list(self._labels)
 
     def extent(self, indexes: Sequence[int]) -> Optional[QgsRectangle]:
         """The WGS 84 extent of some footprints."""
@@ -101,6 +149,22 @@ class FootprintOverlay:
         self.clear()
         for band in (self.all, self.chosen, self.reference, self.area):
             self.canvas.scene().removeItem(band)
+
+
+def _top_vertex(g: QgsGeometry, crs) -> QgsPointXY:
+    """The footprint's top on the map (in the canvas's CRS): its highest corner, or the middle of a level top edge."""
+    shown = QgsGeometry(g)
+    try:
+        shown.transform(from_wgs84(crs))
+    except Exception:  # noqa: BLE001 (a place the CRS cannot show: its middle as before)
+        return from_wgs84(crs).transform(g.pointOnSurface().asPoint())
+    points = [(v.x(), v.y()) for v in shown.vertices()]
+    if not points:
+        return from_wgs84(crs).transform(g.pointOnSurface().asPoint())
+    box = shown.boundingBox()
+    top = max(y for _x, y in points)
+    level = [x for x, y in points if top - y <= box.height() * 1e-6]
+    return QgsPointXY((min(level) + max(level)) / 2, top)
 
 
 class FootprintTool(QgsMapTool):

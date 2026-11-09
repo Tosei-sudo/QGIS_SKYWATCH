@@ -131,6 +131,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <li><span class="ui">開く</span> かダブルクリックで、画像がレイヤーとして地図に入ります</li>
 </ol>
 <ul>
+<li>地図の範囲（フットプリント）が画像の邪魔なときは、ボタンの並びの <span class="ui">フットプリント</span> で <span class="ui">枠だけ</span>（ふだんはこれ）・<span class="ui">塗りつぶし</span>・<span class="ui">非表示</span> を選べます。非表示でも <span class="ui">地図で選択</span> のクリックで選べます</li>
 <li>初めて開くとき「フォルダを選んで」と聞かれたら、画像が置いてある共有フォルダを選びます（次からは覚えています）</li>
 <li>分担を使っている職場では、一覧の最後の列に「未着手」「作業中（名前）」などが出ます。<span class="ui">未着手のみ</span> で、まだ誰も手を付けていない画像だけにできます</li>
 <li>同じ条件で新しい画像を待ちたいときは <span class="ui">この条件で監視…</span>。新着は <a class="open" href="skywatch:open/通知">通知</a> ドックに出て、ツールバーの「通知」に未読数が付きます。地図の右クリック「この地点の新着画像を監視…」でも作れます</li>
@@ -230,6 +231,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 
 <h3 id="obs-fix">直す・消す・まとめて変える</h3>
 <ul>
+<li>印が画像の邪魔なとき: <span class="ui">クリック記録</span> の行の <span class="ui">印</span> で <span class="ui">枠だけ</span>（塗らずに輪と枠線だけ）か <span class="ui">非表示</span>。<span class="key">H</span>（どこからでも <span class="key">Ctrl+Alt+D</span>）で隠す・戻すを切り替えられます</li>
 <li>場所を直す: 地図の印をドラッグ</li>
 <li>中身を直す: 印をクリックしてフォームで変えて <span class="ui">更新</span></li>
 <li>消す: フォームの <span class="ui">削除</span>、または一覧で選んで <span class="ui">選んだ記録を削除…</span>（<span class="key">Delete</span>）。ふつうは削除済みとして残り、<span class="ui">詳細 ▸ 削除済みも表示</span> から戻せます</li>
@@ -321,6 +323,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><td><span class="key">Ctrl+Alt+Q</span></td><td>撮像依頼ドックを開く</td></tr>
 <tr><td><span class="key">Ctrl+Alt+PageDown</span> ／ <span class="key">Ctrl+Alt+PageUp</span></td><td>観測記録: 次の画像 ／ 前の画像</td></tr>
 <tr><td><span class="key">Ctrl+Alt+E</span></td><td>観測記録: クリック記録の開始・終了</td></tr>
+<tr><td><span class="key">Ctrl+Alt+D</span></td><td>観測記録: 地図の印を隠す・戻す</td></tr>
 </table>
 <h3 id="keys-dock">そのドックを触っているときだけ効くキー</h3>
 <table>
@@ -333,6 +336,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><td>観測記録</td><td><span class="key">Esc</span></td><td>最後の点の取り消し・入力の終了</td></tr>
 <tr><td>観測記録</td><td><span class="key">L</span></td><td>クリック数の切り替え（1 → 2 → 3 → 4 点）</td></tr>
 <tr><td>観測記録</td><td><span class="key">A</span></td><td>確認範囲の記録</td></tr>
+<tr><td>観測記録</td><td><span class="key">H</span></td><td>地図の印を隠す・戻す</td></tr>
 <tr><td>観測記録（一覧）</td><td><span class="key">Delete</span></td><td>選んだ記録の削除（確認あり）</td></tr>
 <tr><td>撮像計画</td><td><span class="key">Ctrl+Enter</span> ／ <span class="key">Esc</span></td><td>計算 ／ 中止</td></tr>
 <tr><td>分類体系の編集</td><td><span class="key">Alt+↑↓</span> ／ <span class="key">Insert</span> ／ <span class="key">Delete</span></td><td>並べ替え ／ 下に追加 ／ 削除</td></tr>
