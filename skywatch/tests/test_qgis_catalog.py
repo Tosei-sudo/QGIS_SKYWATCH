@@ -540,3 +540,60 @@ def test_the_list_says_who_works_each_image_and_shows_the_unworked_only(plugin, 
     assert wait_for(lambda: {r.id for i, r in enumerate(dock.records) if dock.table.isRowHidden(i)} == {"A", "B"})
     dock.unworked_only.setChecked(False)
     assert not any(dock.table.isRowHidden(i) for i in range(len(dock.records)))
+
+
+def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
+    """「フリーワード」: shown only for `fields.keywords`, Enter searches, partly in any of them; views and watches keep it."""
+    p, iface, folder, fake, layer = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    # The catalog of the settings file has no keyword fields: no box.
+    assert not dock.keyword.isVisibleTo(dock) and not dock.keyword_label.isVisibleTo(dock)
+    layer.types["NOTE"] = "esriFieldTypeString"
+    for row, note in zip(layer.rows, ["横須賀港 定期観測", "横須賀港 臨時観測（ＥＶ０１）", "東京港 臨時"]):
+        row["attributes"]["NOTE"] = note
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["imageCatalogs"][0]["fields"]["keywords"] = ["NOTE", "IMG_ID"]
+    config["imageCatalogs"][0]["columns"] = [{"field": "NOTE", "label": "備考"}]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert p.api.problems == []
+    assert dock.keyword.isVisibleTo(dock) and dock.keyword_label.isVisibleTo(dock)
+    assert dock.keyword.placeholderText() == "備考・画像ID に部分一致"
+    dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
+
+    def found(text):
+        dock.keyword.setText(text)
+        dock.model.set_records(dock.catalog(), [])
+        dock.keyword.returnPressed.emit()
+        assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+        return sorted(r.id for r in dock.records)
+
+    assert found("臨時") == ["B", "C"]
+    assert found("ev01 横須賀") == ["B"]
+    assert found("x' OR '1'='1") == []
+    assert found("") == ["A", "B", "C"]
+    # The query asked: each word in either attribute, the word a value.
+    def asked_where():
+        return [form["where"] for url, form in fake.asked if url.endswith("/query") and "returnCountOnly" not in form][-1]
+
+    found("臨時")
+    assert asked_where() == "(UPPER(NOTE) LIKE '%臨時%' ESCAPE '\\' OR UPPER(IMG_ID) LIKE '%臨時%' ESCAPE '\\')"
+    found("o'k")
+    assert asked_where().startswith("(UPPER(NOTE) LIKE '%O''K%' ESCAPE '\\' OR ")
+    # A view keeps the word; 「この条件で監視…」 gets it.
+    dock.keyword.setText("臨時")
+    state = dock.views.state()
+    dock.keyword.setText("")
+    dock.views.apply(state)
+    assert dock.keyword.text() == "臨時"
+    asked = []
+    dock.watch_requested = lambda catalog, types, conditions, drawn: asked.append(conditions)
+    dock._watch()
+    assert asked and asked[0].keyword == "臨時"
+    # Another settings file without keyword fields: the box goes, and the word is not asked.
+    del config["imageCatalogs"][0]["fields"]["keywords"]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert not dock.keyword.isVisibleTo(dock) and dock.conditions().keyword == ""

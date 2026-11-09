@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from urllib.parse import quote
 
+from .esri import contains
 from .util import is_record, is_url
 
 GEOCODER_TYPES = ("gsi", "nominatim", "arcgis", "features", "csv")
@@ -367,12 +368,6 @@ def search_gazetteer(gazetteer: Gazetteer, query: str, limit: int = LIMIT) -> li
     return [p for _, _, p in found[:limit]]
 
 
-def like_text(text: str) -> str:
-    """Escapes a text for a SQL LIKE pattern in single quotes."""
-    # The escape character itself first, so that a trailing \ does not escape the closing %.
-    return re.sub(r"[\\%_]", lambda m: "\\" + m[0], text.replace("'", "''"))
-
-
 # --- Asking ------------------------------------------------------------------
 
 #: GETs a URL (or reads a local file) → its bytes; raises on failure.
@@ -460,7 +455,7 @@ class PlaceSearch:
             names = list(g.fields or (g.field or "",))
             # Several attributes (a name and its reading): kana typed either way finds the reading.
             texts = kana_variants(q) if len(names) > 1 else [q]
-            where = " OR ".join(f"{name} LIKE '%{like_text(t)}%' ESCAPE '\\'" for name in names for t in texts)
+            where = " OR ".join(contains(name, t) for name in names for t in texts)
             params = {
                 "where": where if len(names) == 1 else f"({where})",
                 "outFields": ",".join(names), "returnGeometry": "true", "returnCentroid": "true", "outSR": "4326",

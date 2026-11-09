@@ -101,6 +101,29 @@ def test_catalog_search_newest_first_over_an_area_and_by_sensor(server):
     assert {r.attributes["SENSOR_NAME"] for r in only.records} == {"OPT-X1"}
 
 
+def test_the_free_word_is_looked_for_in_the_keyword_fields(server):
+    """「フリーワード」 against the mock's SQLite: LIKE with its escape, capitals, the full-width letters of the catalog."""
+    _, _, _, path = server
+    config, _ = read_config_file(path)
+    catalog = config.image_catalogs[0]
+    assert catalog.keyword_fields == ["NOTE", "IMG_ID"]
+    client = EsriClient(transport)
+    layer = read_catalog_layer(client, catalog, None)
+
+    def ids(keyword):
+        return {r.id for r in search_catalog(client, catalog, layer, CatalogSearch(keyword=keyword), None, None).records}
+
+    every = ids("")
+    urgent = ids("臨時")
+    assert len(every) == 6 and len(urgent) == 3
+    assert ids("ev01") == urgent  # ＥＶ０１ in the catalog
+    assert ids("横須賀港 臨時") == urgent and ids("定期 臨時") == set()
+    assert ids("optx1") == {i for i in every if i.startswith("OPTX1_")} != set()
+    # Wildcards are characters: no image has a % in it; every image ID has an _.
+    assert ids("%") == set() and ids("_") == every
+    assert ids("x' OR '1'='1") == set()
+
+
 def test_place_names_are_searched_by_name_reading_and_alias(server):
     """The mock's 地名 layer, as its settings file has it (field: NAME, NAME_KANA, ALIAS)."""
     from skywatch.core.geocode import PlaceSearch

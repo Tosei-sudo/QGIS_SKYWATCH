@@ -18,6 +18,7 @@ def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from skywatch.core import ai_results, basemaps, config, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
     from skywatch.core.ai import model_config, transfer
+    from skywatch.core.catalog import config as catalog_config
     from skywatch.core.enhance import pipeline
     from skywatch.core.obs import export as obs_export
     from skywatch.core.obs import alerts, assignments, handover, model as obs_model, stores as obs_stores
@@ -27,7 +28,7 @@ def plugin_constants() -> dict:
     return {
         "keys": list(config.KEYS),
         "roles": {
-            "imageCatalogs": ["id", "acquired", "registered", "systemRegistered", "sensor", "angle", "azimuth", "source"],
+            "imageCatalogs": list(catalog_config.FIELD_ROLES),
             "satelliteCatalogs": list(satellites.SATELLITE_ROLES),
             "sensorCatalogs": list(modes.SENSOR_ROLES),
             "satelliteAliases": list(names.ALIAS_ROLES),

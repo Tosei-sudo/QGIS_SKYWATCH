@@ -1,7 +1,7 @@
 """
 Watches on image catalogs (the viewer's catalog-watch.ts and
 watch-areas.ts): conditions saved in advance (points or areas, the sensor,
-an angle limit, a SQL condition) that the catalog is asked again and again,
+an angle limit, a SQL condition, a free word) that the catalog is asked again and again,
 each image that newly matches becoming a notice in 「通知」.
 
 QGIS checks while it is open, as it starts (for what came while it was
@@ -36,9 +36,9 @@ EsriAsk = Callable[[str, dict], dict]
 
 
 def conditions_of(search: CatalogSearch) -> CatalogSearch:
-    """The conditions of a watch: the search's sensor, angle, azimuth and SQL, without its dates (what is new matters)."""
+    """The conditions of a watch: the search's sensor, angle, azimuth, SQL and free word, without its dates (what is new matters)."""
     return replace(EMPTY_SEARCH, sensor=search.sensor, max_angle=search.max_angle, azimuth_from=search.azimuth_from,
-                   azimuth_to=search.azimuth_to, where=search.where)
+                   azimuth_to=search.azimuth_to, where=search.where, keyword=search.keyword)
 
 
 def _number(v: Any) -> Optional[float]:
@@ -48,7 +48,8 @@ def _number(v: Any) -> Optional[float]:
 def _conditions_from(d: Any) -> CatalogSearch:
     d = d if isinstance(d, dict) else {}
     return replace(EMPTY_SEARCH, sensor=str(d.get("sensor") or ""), max_angle=_number(d.get("maxAngle")),
-                   azimuth_from=_number(d.get("azimuthFrom")), azimuth_to=_number(d.get("azimuthTo")), where=str(d.get("where") or ""))
+                   azimuth_from=_number(d.get("azimuthFrom")), azimuth_to=_number(d.get("azimuthTo")), where=str(d.get("where") or ""),
+                   keyword=str(d.get("keyword") or ""))
 
 
 @dataclass
@@ -77,7 +78,8 @@ class CatalogWatch:
         c = self.conditions
         return {
             "id": self.id, "name": self.name, "catalog": self.catalog.to_json(), "types": self.types,
-            "conditions": {"sensor": c.sensor, "maxAngle": c.max_angle, "azimuthFrom": c.azimuth_from, "azimuthTo": c.azimuth_to, "where": c.where},
+            "conditions": {"sensor": c.sensor, "maxAngle": c.max_angle, "azimuthFrom": c.azimuth_from, "azimuthTo": c.azimuth_to, "where": c.where,
+                           **({"keyword": c.keyword} if c.keyword else {})},
             "areas": self.areas, "enabled": self.enabled, "created": self.created, "lastChecked": self.last_checked,
             "lastTried": self.last_tried, "lastError": self.last_error, "seen": self.seen,
         }
@@ -315,6 +317,8 @@ def conditions_text(catalog: CatalogConfig, conditions: CatalogSearch, areas: Se
         parts.append(f"{catalog.label_of('azimuth')} {js_string(a)}〜{js_string(b)}°")
     if c.where.strip():
         parts.append(c.where.strip())
+    if c.keyword.strip() and catalog.keyword_fields:
+        parts.append(f"フリーワード「{' '.join(c.keyword.split())}」")
     return " ・ ".join(parts)
 
 
