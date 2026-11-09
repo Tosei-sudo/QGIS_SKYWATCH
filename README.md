@@ -871,7 +871,7 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 - ツールバーかメニュー「AI ▸ 物体検出（AI）…」（Processing の「SKYWATCH」にも）: レイヤー・モデル・範囲・解析の画素の大きさ（0 で元の解像度。地図の表示から始まる）を選んで実行し、見つかった物を `class`・`class_id`・`score`（回転矩形なら `angle`）と画像の情報（`image`・`image_id`・`image_time`・`model`・`detected_at`・`note`）付きのポリゴンレイヤーにする。読めるモデルはビューアと同じ（YOLOv8/11 の検出・回転矩形・セグメンテーション、YOLOX、RT-DETR、Detectron2 など。入力の大きさとクラスはモデルの情報から読み、`aiModels` の値が優先）。レイヤーは表示のとおり（補正・スタイル込み）に描いて解析し、大きい範囲は区切って重なりを付けて解析する。詳細設定で確信度・重なり（IoU）・タイルの重なり・クラスの絞り込み
 - メニューの「AI ▸ クリック抽出（AI）」（地図ツール）: Segment Anything（SAM・MobileSAM など）のエンコーダーとデコーダーで、クリックした物の輪郭を描く。Shift+クリックで同じ物に足す点、Alt+クリックで除く点。地図の左上のパネルで、モデルの選択・「元に戻す」・「レイヤーにする」（一時レイヤー「AI 抽出」）。表示を動かすと次のクリックで描き直して解析する
 - `aiModels`: ビューアと同じ形。検出は `{"label", "url", "task", "inputSize", "classes", "mean", "std", "channels", "format", "maxDetections", …}`（プラグインだけの `kinds` で、観測記録へ取り込むときのクラス → 種別の対応も）、SAM は `{"label", "encoder", "decoder", "inputSize", "mean", "std"}`。`url`・`encoder`・`decoder` は URL か、設定ファイルからの相対パス・絶対パス。URL のモデルは初回に読み込んでプロファイルの `ai_models` に保存する（「設定…」の認証設定を使う）
-- メニューの「AI ▸ 検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants", "token"}`）
+- メニューの「AI ▸ 検出結果を DB へ転記…」: AI のレイヤー（`class` の属性があるポリゴン・ポイントのレイヤー）の地物を、設定ファイルの `detectionOutputs` の Esri フィーチャーレイヤーへ書き込む。属性は役割ごとの対応（画像ID・ファイル名・撮像日時・検出日時・転記日時・クラス・クラス番号・確信度・モデル・状態・経度・緯度・面積・長辺・短辺・向き・備考）で、型に合わせて変換。状態はモデルのまま（AI）・人が直した（修正: 形かクラスを変更）・人が加えた（手動）。新しい地物は追加、転記後に変えた地物は更新、残りは送らない（何を送ったかはレイヤーに記録し、プロジェクトと一緒に保存）。「選択中の地物だけ」も可。ポイントのレイヤーへはポリゴンの中の点を送る。`detectionOutputs` の形はビューアと同じ（`{"label", "url", "fields": {役割: 属性名}, "statusValues", "constants", "token"}`。プラグインだけの `aiResults` はビューアでは無視）。転記した結果はドック「AI結果」でほかの人も確かめられる（[AI結果](#ai結果外部aiプラグイン内の物体検出)）
 - 実行に `onnxruntime` が要る。Windows 版の zip（下の「導入」）には同梱。ほかは QGIS の Python に入れる: OSGeo4W シェルで `python -m pip install onnxruntime`、macOS は `/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install onnxruntime`、Linux は `python3 -m pip install onnxruntime`。GPU 版（`onnxruntime-gpu`・`onnxruntime-directml`）を入れれば GPU で動く
 
 ## AI 学習（物体検出）
@@ -913,7 +913,10 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 
 ## AI結果（外部AI・プラグイン内の物体検出）
 
-ほかの AI の処理系が Esri フィーチャーサービスに書いた結果と、プラグインの「物体検出（AI）」で見つけた物を、画像ごとに表示し、選んだものを観測記録に取り込む。ビューアにはない（ビューアの AI は書き出しの「DB へ転記」だけ）。
+ほかの AI の処理系が Esri フィーチャーサービスに書いた結果と、プラグインの「物体検出（AI）」で見つけた物（自分のレイヤーと、だれかが「DB へ転記」した結果）を、画像ごとに表示し、選んだものを観測記録に取り込む。ビューアにはない（ビューアの AI は書き出しの「DB へ転記」だけ）。
+
+- 転記した検出結果（2026-11-09 から）: 設定ファイルの `detectionOutputs` の転記先（[`TBL_DETECTION`](#tbl_detection検出結果の転記先)）も `aiResultSources` と同じようにその画像の結果を読む。一人が検出して転記した結果を、ほかの人がそのまま確かめて取り込める（ビューアから転記した結果も）。読むのは `fields` の `imageId`（必須。ないものは読まない）・`class`・`score`・`model`・`detectedAt`・`length`・`width`・`note` の属性。種別はプラグイン内の検出と同じ（`aiModels` の `kinds` → 分類体系 → クラス）。一覧の出どころと一時レイヤー「AI検出結果 〈転記先〉（〈画像ID〉）」は転記先の `label`（`aiResultSources` と同じ名前なら「（転記先）」を付ける）。備考は「AI検出（〈転記先〉）: 〈クラス〉 〈確信度〉 〈モデル〉 [AI:〈転記先〉#〈OBJECTID〉]」。`aiResultSources` と同じ URL の転記先と、`"aiResults": false` を書いた転記先は読まない。表の形は変えない（ビューアと共通）
+- 自分で転記した結果は一度だけ: 自分の検出レイヤーから転記した結果は、転記先の行を出さずにレイヤーの行だけを出す（一覧の件数の後に「転記先の n 件は自分の検出レイヤーで表示」）。転記後にレイヤーの行を取り込むと、備考に転記先の印も書く。どちらから取り込んでも（誤検出にしても）もう一方も「済」（「誤」）になる。転記の前にレイヤーから取り込んだ記録・誤検出は、転記先の行の検出日時（`detectedAt`。秒まで）と記録の位置（転記先の輪郭の中。ポイントは 2 m 以内）・誤検出の確認範囲で同じものとみなす
 
 - プラグイン内の検出: 「物体検出（AI）」を実行して検出結果のレイヤーがプロジェクトに入ると、ドック「AI結果」にその画像（`image_id`）の結果が出る（`aiResultSources` は不要）。地図のレイヤーは検出結果のレイヤーそのもの（複製しない）で、一覧と選択が連動する。レイヤーでクラスを直す・誤検出を消す・輪郭を直すと一覧に反映され、その内容で記録する。検出した画像（またはその検出レイヤー）をアクティブにすると、その画像の結果に切り替わる。種別は `aiModels` のそのモデルの `kinds`（`{"boat": "船舶"}`）→ 分類体系の同じ名前・別名・英名の分類（このプラグインで学習したモデルはクラスが分類体系の種別）→ クラスのまま。備考は「AI検出: 〈クラス〉 〈確信度〉 〈モデル〉 [AI:検出@〈検出日時〉#〈地物ID〉]」で、二度は取り込まない。長さ・幅はポリゴンの最小の回転矩形の長辺と短辺、継続の自動判定も外部AIと同じ（下記）
 - ドック「AI結果」（観測記録と同じ右側のタブ）: 画像カタログから画像を開くと、設定ファイルの `aiResultSources` の各レイヤーから、その画像 ID の結果を読んで（手で開いたカタログ外の画像はファイル名を画像 ID として。Web の背景地図などは対象外）一覧と地図に出す（結果があればドックを表示）。カタログから開いた別の画像をアクティブにすると切り替わり、前の画像の結果レイヤーは消える（一度読んだ画像は読み直さない。「再読み込み」で読み直す）
@@ -1360,7 +1363,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
 | `aiModels` | 配列 | 検出: `url`（必須）・`task`（`detect`・`obb`・`segment`）・`inputSize`・`classes`（配列か `"coco"`）・`format`・`channels`・`mean`・`std`・`maxDetections`・`strides`・`kinds`（クラス → 種別、プラグインだけ）。SAM: `encoder`・`decoder`・`inputSize` | なし | [AI](#ai物体検出クリック抽出) |
-| `detectionOutputs` | 配列 | 検出結果の転記先。`url`、`fields`（`imageId`・`class`・`score`・`status` など）、`statusValues`、`constants`、`token` | なし | [AI](#ai物体検出クリック抽出) |
+| `detectionOutputs` | 配列 | 検出結果の転記先。`url`、`fields`（`imageId`・`class`・`score`・`status` など）、`statusValues`、`constants`、`token`、`aiResults`（`false` で「AI結果」に読まない。既定 `true`） | なし | [AI](#ai物体検出クリック抽出)・[AI結果](#ai結果外部aiプラグイン内の物体検出) |
 | `aiResultSources` | 配列 | 外部 AI の結果。`url`、`fields`（`imageId`・`id`・`class`・`score`・`model`・`detectedAt`・`name`・`kind`・`activity`・`length`・`heading`・`width`・`note`）、`kinds`、`minScore`（0〜1）、`continueRadius`・`candidateRadius`（m）、`maxResults`、`activity`・`confidence`（取り込み時の既定）、`where`、`token` | なし | [AI結果](#ai結果外部aiプラグイン内の物体検出) |
 
 #### 編集の記録
@@ -1441,7 +1444,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | [`TBL_EVENT`](#tbl_eventイベント) | ポリゴン（なしも可） | 書き込み | イベント（地震対応など） | `events.layer` |
 | [`TBL_EVENT_LINK`](#tbl_event_linkイベントの紐付け) | なし | 書き込み | イベントと画像・記録・依頼の紐付け | `events.links` |
 | [`TBL_AI_RESULT`](#tbl_ai_result外部-ai-の結果) | ポリゴンかポイント | 読み | 外部 AI の結果 | `aiResultSources[].url` |
-| [`TBL_DETECTION`](#tbl_detection検出結果の転記先) | ポリゴンかポイント | 書き込み | プラグインの物体検出の転記先 | `detectionOutputs[].url` |
+| [`TBL_DETECTION`](#tbl_detection検出結果の転記先) | ポリゴンかポイント | 書き込み | プラグインの物体検出の転記先（「AI結果」でも読む） | `detectionOutputs[].url` |
 | [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
@@ -1772,7 +1775,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 ### `TBL_DETECTION`（検出結果の転記先）
 
-プラグインの物体検出の結果を転記するレイヤー（ポリゴンか、中心点を書くポイント）。`detectionOutputs[].fields` で指定（既定なし。書いた役割だけ書き込む）。`constants` で決まった値を書く属性（`SOURCE` など）も足せる。
+プラグインの物体検出の結果を転記するレイヤー（ポリゴンか、中心点を書くポイント）。`detectionOutputs[].fields` で指定（既定なし。書いた役割だけ書き込む）。`constants` で決まった値を書く属性（`SOURCE` など）も足せる。ドック「AI結果」がこのレイヤーも画像 ID で読み、ほかの人の検出を確かめられる（`IMAGE_ID` が要る。読まないなら `"aiResults": false`。[AI結果](#ai結果外部aiプラグイン内の物体検出)）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |

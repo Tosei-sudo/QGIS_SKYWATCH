@@ -40,9 +40,9 @@ TO_REVIEW = "review"
 SURE = "sure"
 
 
-def rejection_note(result: AiResult) -> str:
-    """The note of the checked area recording a result as wrong."""
-    parts = [REJECTED + ":", result.cls or "", score_text(result.score), result.tag]
+def rejection_note(result: AiResult, also: Sequence[str] = ()) -> str:
+    """The note of the checked area recording a result as wrong (`also`: its tags elsewhere, a table it was sent to)."""
+    parts = [REJECTED + ":", result.cls or "", score_text(result.score), result.tag, *also]
     return " ".join(p for p in parts if p)
 
 

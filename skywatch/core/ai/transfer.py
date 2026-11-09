@@ -60,6 +60,8 @@ class DetectionOutput:
     #: Attributes written as they are on every feature (`{"SOURCE": "viewer"}`).
     constants: dict[str, Any] = field(default_factory=dict)
     token: Optional[str] = None
+    #: Read back by the dock 「AI結果」 (core/ai_results.output_source), so others review what one person detected.
+    ai_results: bool = True
 
 
 def _is_name(value: Any) -> bool:
@@ -107,6 +109,10 @@ def detection_output_of(value: Any, problems: list[str], index: int) -> Optional
                 problems.append(f"{at} の constants.{name} は属性名と値（文字・数・真偽）で指定")
     label = value.get("label")
     token = value.get("token")
+    read_back = value.get("aiResults", True)
+    if not isinstance(read_back, bool):
+        problems.append(f"{at} の aiResults は true / false で指定")
+        read_back = True
     return DetectionOutput(
         label=label if isinstance(label, str) and label else f"転記先 {index + 1}",
         url=url.split("?", 1)[0].rstrip("/"),
@@ -114,6 +120,7 @@ def detection_output_of(value: Any, problems: list[str], index: int) -> Optional
         status_values=status,
         constants=fixed,
         token=token if isinstance(token, str) and token else None,
+        ai_results=read_back,
     )
 
 

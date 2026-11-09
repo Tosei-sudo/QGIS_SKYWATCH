@@ -31,13 +31,24 @@ before and after (継続, core/obs/continuation): a sure one is recorded as
 that thing (「継続: 船舶-3」 chosen in the 継続 column), an unsure one offers
 the things it may be (recorded as a new thing unless one is chosen).
 
+The `detectionOutputs` tables (「検出結果を DB へ転記」, the plugin's and the
+viewer's) are read too (core/ai_results.result_sources), so what one person
+detected and sent is reviewed by others. A result the person's own
+detection layer sent there is listed once, as the layer's; recorded (or
+rejected) from either, it is 取込済 (誤) in both: the record's note carries
+the table's tag too, and one recorded from the layer before it was sent is
+known by its run and place.
+
 The viewer has no such dock (its AI only writes results, 「DB へ転記」).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
-from qgis.core import QgsCoordinateTransform, QgsFeatureRequest, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer
+from qgis.core import (
+    QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry, QgsPointXY, QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer, QgsWkbTypes,
+)
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor
 from qgis.PyQt.QtWidgets import (
@@ -46,10 +57,14 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.ai.model_config import DetectModelConfig
 from ..core.ai.review import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
-from ..core.ai_results import AiResult, AiResultSource, import_entry, kind_for, recorded_tags, score_text
+from ..core.ai_results import (
+    AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, same_run,
+    score_text,
+)
 from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
 from ..core.obs.flows import living
-from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, mark_imported, place_of, results_layer
+from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_imported, place_of, results_layer
+from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
 from ..qgis_io.obs_images import IMAGE_ID, observed_image
@@ -67,6 +82,8 @@ ORDERS = ("確認優先（確信度の低い順）", "読み込み順")
 ASK_OVER = 20
 #: The list's column of the review state.
 REVIEW_COLUMN = 7
+#: A table's point result is the one recorded from a detection layer this near (m).
+SAME_POINT_M = 2.0
 
 
 def _tr(text: str) -> str:
@@ -130,6 +147,13 @@ class AiResultsDock(PluginDock):
         self.local_rows: dict[int, tuple[QgsVectorLayer, int]] = {}
         #: The detection layers followed (their edits read the list again), by layer id.
         self.watched: dict[str, tuple[QgsVectorLayer, list]] = {}
+        #: The tags of results of detection layers recorded on the image, with the run and the point (or ring).
+        self._run_marks: list[tuple[str, Optional[int], QgsPointXY]] = []
+        self._run_rejects: list[tuple[str, Optional[int], QgsGeometry]] = []
+        #: Results of a detectionOutputs table not listed (the person's own layer has them), in the last list.
+        self.hidden = 0
+        #: What the detection layers followed sent to the detectionOutputs tables (_sent_maps), as last read.
+        self._sent: dict[str, list[tuple[AiResultSource, dict[str, str]]]] = {}
         self._task = None
         self._syncing = False
         self._again = QTimer(self)
@@ -239,7 +263,8 @@ class AiResultsDock(PluginDock):
     # ---- the image ---------------------------------------------------------
 
     def sources(self) -> list[AiResultSource]:
-        return list(self.context.config.ai_result_sources)
+        """aiResultSources, and the detectionOutputs tables read back."""
+        return result_sources(self.context.config)
 
     def _config_changed(self) -> None:
         self.cache.clear()
@@ -374,12 +399,84 @@ class AiResultsDock(PluginDock):
         dock = self.observations()
         return getattr(dock, "book", None) if dock is not None else None
 
-    def _refresh_imported(self) -> None:
+    def _refresh_imported(self, expand: bool = True) -> None:
+        """What is recorded (and recorded as wrong) on the image; `expand`: and which rows that makes 取込済 (誤) too."""
         book = self._book()
         records = living(book.records) if book is not None else []
-        self.imported = recorded_tags(o.note for o in records if o.image_id == self.image_id)
+        here = [o for o in records if o.image_id == self.image_id]
+        self.imported = recorded_tags(o.note for o in here)
         areas = [a for a in (book.areas if book is not None else []) if a.deleted_at is None and a.image_id == self.image_id]
         self.rejected = rejected_tags(a.note for a in areas)
+        self._run_marks = [(tag, run, QgsPointXY(o.lon, o.lat)) for o in here for tag, run in detection_runs(o.note)]
+        self._run_rejects = []
+        for a in areas:
+            runs = [(tag, run) for tag, run in detection_runs(a.note) if tag in self.rejected]
+            if runs and len(a.ring) >= 3:
+                ring = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for x, y, *_rest in a.ring]])
+                self._run_rejects += [(tag, run, ring) for tag, run in runs]
+        if expand:
+            self._sent = self._sent_maps()
+            self._expand_states()
+
+    def _sent_maps(self) -> dict[str, list[tuple[AiResultSource, dict[str, str]]]]:
+        """What each detection layer followed sent to each detectionOutputs table (feature id → object id there), by layer id."""
+        tables = [s for s in self.sources() if s.detections]
+        out: dict[str, list[tuple[AiResultSource, dict[str, str]]]] = {}
+        if not tables:
+            return out
+        for layer_id, (layer, _slots) in list(self.watched.items()):
+            try:
+                out[layer_id] = [(s, sent_ids(layer, s.url)) for s in tables]
+            except RuntimeError:
+                pass
+        return out
+
+    def _aliases(self, row: int) -> list[str]:
+        """The tags a row of a detection layer has in the detectionOutputs tables it was sent to."""
+        where = self.local_rows.get(row)
+        if where is None:
+            return []
+        layer, fid = where
+        try:
+            sent = self._sent.get(layer.id(), [])
+        except RuntimeError:
+            return []
+        return [result_tag(s.label, ids[str(fid)]) for s, ids in sent if str(fid) in ids]
+
+    def _expand_states(self) -> None:
+        """
+        The same result listed in one place but recorded (or rejected) from
+        another: a detection layer's row sent to a table, recorded from the
+        table (its tag there); a table's row recorded from the layer it came
+        from (the layer's tag in the record; before it was sent, its run and place).
+        """
+        for row, (source, r) in enumerate(self.rows):
+            if r.tag in self.imported or r.tag in self.rejected:
+                continue
+            aliases = self._aliases(row)
+            if any(a in self.imported for a in aliases):
+                self.imported.add(r.tag)
+                continue
+            if any(a in self.rejected for a in aliases):
+                self.rejected.add(r.tag)
+                continue
+            if not source.detections or not (self._run_marks or self._run_rejects):
+                continue
+            g = geometry_of(r.geometry)
+            if g is None or g.isEmpty():
+                continue
+            point = g.type() == QgsWkbTypes.GeometryType.PointGeometry
+            box = g.boundingBox()
+            if point:
+                # About SAME_POINT_M around (degrees; latitude kept).
+                box.grow(SAME_POINT_M / 111_000)
+            if any(same_run(r.detected_at, run) and box.contains(p) and (point or g.contains(QgsGeometry.fromPointXY(p)))
+                   for tag, run, p in self._run_marks if tag in self.imported):
+                self.imported.add(r.tag)
+                continue
+            inside = g.pointOnSurface() if not point else g
+            if any(same_run(r.detected_at, run) and ring.contains(inside) for _tag, run, ring in self._run_rejects):
+                self.rejected.add(r.tag)
 
     def state(self, row: int) -> str:
         """A row's review state (core/ai/review)."""
@@ -393,18 +490,31 @@ class AiResultsDock(PluginDock):
         """The cached results of the image, those at or above the lowest score, listed and drawn."""
         found = self.cache.get(self.image_id or "", [])
         least = self.min_score.value()
-        self._refresh_imported()
+        self._refresh_imported(expand=False)
+        self._sent = self._sent_maps()
         # Every result kept: (source, result, its source's index (external) or its layer and feature (own)).
         read: list[tuple[AiResultSource, AiResult, Any]] = []
         problems = []
+        book = self._book()
+        taxonomy = book.kept_taxonomy() if book is not None and book.loaded else []
+        # What the person's own detection layers sent to each table: listed as the layers' (they may still correct them).
+        own: dict[str, set[str]] = {}
+        for sent in self._sent.values():
+            for s, ids in sent:
+                own.setdefault(s.url, set()).update(ids.values())
+        self.hidden = 0
         for index, (source, results, error) in enumerate(found):
             if error:
                 problems.append(f"{source.label}: {error}")
+            if source.detections:
+                # The classes as the plugin's own detection records them (the model's kinds, else the classification).
+                mine = own.get(source.url, set())
+                kept = [r for r in results if r.key not in mine]
+                self.hidden += len(results) - len(kept)
+                results = [r if r.kind else replace(r, kind=detected_kind(r.cls, self._model_kinds(r.model), taxonomy)) for r in kept]
             read += [(source, r, index) for r in results if r.score is None or r.score >= least]
         # The plugin's own detection, from its layers (as they are now).
         local_total = 0
-        book = self._book()
-        taxonomy = book.kept_taxonomy() if book is not None and book.loaded else []
         for layer, _slots in list(self.watched.values()):
             try:
                 found_here = detection_results(layer, self.image_id or "", self._model_kinds, taxonomy)
@@ -420,6 +530,7 @@ class AiResultsDock(PluginDock):
             read = [read[i] for i in review_order([r for _s, r, _w in read], self.imported, self.rejected, self.sure.value())]
         self.rows = [(source, r) for source, r, _w in read]
         self.local_rows = {row: where for row, (_s, _r, where) in enumerate(read) if isinstance(where, tuple)}
+        self._expand_states()
         per_source: list[tuple[AiResultSource, list[AiResult], list[int]]] = []
         for index, (source, _results, _error) in enumerate(found):
             rows = [row for row, (_s, _r, where) in enumerate(read) if not isinstance(where, tuple) and where == index]
@@ -439,9 +550,11 @@ class AiResultsDock(PluginDock):
         finally:
             self._syncing = False
         self._replace_layers(per_source)
-        total = sum(len(results) for _s, results, _e in found) + local_total
+        total = sum(len(results) for _s, results, _e in found) + local_total - self.hidden
         text = _tr("{n} 件（全 {total} 件）・取込済 {done} 件").format(
             n=len(self.rows), total=total, done=sum(1 for _s, r in self.rows if r.tag in self.imported))
+        if self.hidden:
+            text += _tr("・転記先の {k} 件は自分の検出レイヤーで表示").format(k=self.hidden)
         text += self._review_text()
         auto = sum(1 for c in self.continued.values() if c.tier == AUTO)
         maybe = len(self.continued) - auto
@@ -646,7 +759,7 @@ class AiResultsDock(PluginDock):
             if place is None:
                 skipped += 1
                 continue
-            entry = import_entry(r, source, place[0], place[1], place[2], place[3])
+            entry = import_entry(r, source, place[0], place[1], place[2], place[3], also=self._aliases(row))
             if entry.confidence and entry.confidence not in levels:
                 entry.confidence = ""
             entry.carry = self.chosen_carry(row)
@@ -765,7 +878,7 @@ class AiResultsDock(PluginDock):
             ring = rejection_ring(r)
             if ring is None:
                 continue
-            specs.append((ring, "", rejection_note(r)))
+            specs.append((ring, "", rejection_note(r, self._aliases(row))))
             tags.append(r.tag)
         if not specs:
             self.status.setText(_tr("誤検出にする結果なし（取込済・誤検出済か、位置なし）") if rows else _tr("結果を選択"))

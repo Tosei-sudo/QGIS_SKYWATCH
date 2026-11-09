@@ -8,8 +8,18 @@ The viewer has no such feature (its AI only writes, `detectionOutputs`);
 the settings follow `detectionOutputs`: the layer's URL and its attribute
 names by role.
 
+The `detectionOutputs` tables (「検出結果を DB へ転記」, the plugin's and the
+viewer's detections) are read back the same way (`output_source`,
+tsudo 2026-11-09: one person detects, others review), their attribute names
+taken from the entry's roles; `"aiResults": false` leaves one out. A result
+the person's own detection layer sent there is listed once (as the layer's,
+which they may still be correcting).
+
 A result recorded as an observation carries a tag in its note
 (`[AI:<source>#<object id>]`), so the same result is not recorded twice.
+A detection layer's result already sent to a table carries the table's tag
+too; one recorded from the layer before it was sent is known in the table by
+its run (`検出@<detected at>`) and its place (`run_of`).
 """
 from __future__ import annotations
 
@@ -68,6 +78,8 @@ class AiResultSource:
     candidate_radius: float = CANDIDATE_METRES
     #: The plugin's own detection (物体検出（AI）) read from a layer of the project, not a feature service.
     local: bool = False
+    #: A `detectionOutputs` table read back (detections sent there by the plugin or the viewer).
+    detections: bool = False
 
 
 def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional[AiResultSource]:
@@ -130,6 +142,44 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
         continue_radius=radii["continueRadius"],
         candidate_radius=radii["candidateRadius"],
     )
+
+
+#: The roles of a `detectionOutputs` table read as results (its role → the result's).
+OUTPUT_ROLES = {"imageId": "imageId", "class": "class", "score": "score", "model": "model", "detectedAt": "detectedAt",
+                "length": "length", "width": "width", "note": "note"}
+
+
+def output_source(output: Any) -> Optional[AiResultSource]:
+    """
+    A `detectionOutputs` entry (core/ai/transfer.DetectionOutput) as a source
+    of results: its layer, its attribute names by role; None when it is left
+    out (`aiResults: false`) or does not write the image id.
+    """
+    if not getattr(output, "ai_results", True) or "imageId" not in output.fields:
+        return None
+    fields = {mine: output.fields[role] for role, mine in OUTPUT_ROLES.items() if role in output.fields}
+    return AiResultSource(label=output.label, url=output.url, fields=fields, token=output.token, detections=True)
+
+
+def result_sources(config: Any) -> list[AiResultSource]:
+    """
+    Where the dock 「AI結果」 reads: `aiResultSources`, then the
+    `detectionOutputs` tables not already among them (a label taken is given
+    「（転記先）」).
+    """
+    out = list(getattr(config, "ai_result_sources", []) or [])
+    urls = {s.url.lower() for s in out}
+    labels = {s.label for s in out}
+    for output in getattr(config, "detection_outputs", []) or []:
+        source = output_source(output)
+        if source is None or source.url.lower() in urls:
+            continue
+        if source.label in labels:
+            source.label = f"{source.label}（転記先）"
+        urls.add(source.url.lower())
+        labels.add(source.label)
+        out.append(source)
+    return out
 
 
 def image_where(source: AiResultSource, image_id: str, field_type: Optional[str] = None) -> str:
@@ -233,6 +283,29 @@ def recorded_tags(notes: Iterable[str]) -> set[str]:
     return out
 
 
+_RUN = re.compile(r"^検出@(-?\d+)$")
+
+
+def detection_runs(note: str) -> list[tuple[str, Optional[int]]]:
+    """
+    The tags in a note of results of the plugin's own detection layers
+    (`[AI:検出@<detected at, ms>#<feature id>]`), with the run's time (None
+    when the run had none).
+    """
+    out: list[tuple[str, Optional[int]]] = []
+    for m in _TAG.finditer(note or ""):
+        if not m.group(1).startswith("検出@"):
+            continue
+        run = _RUN.match(m.group(1))
+        out.append((f"[AI:{m.group(1)}#{m.group(2)}]", int(run.group(1)) if run else None))
+    return out
+
+
+def same_run(detected_at: Optional[int], run: Optional[int]) -> bool:
+    """Whether a table's result may be of a run (its 検出日時; to the second: a database may keep no less)."""
+    return detected_at is None or run is None or abs(detected_at - run) < 1000
+
+
 def kind_for(result: AiResult, source: AiResultSource) -> str:
     """The 種別 a result is recorded as: its own, the class's in `kinds`, else the class."""
     if result.kind:
@@ -264,12 +337,21 @@ class ImportEntry:
     width: Optional[float] = None
 
 
+def source_head(source: AiResultSource) -> str:
+    """How a recorded result's note names where it came from."""
+    return "AI検出" if source.local else f"AI検出（{source.label}）" if source.detections else f"外部AI {source.label}"
+
+
 def import_entry(result: AiResult, source: AiResultSource, lon: float, lat: float, length: Optional[float] = None,
-                 width: Optional[float] = None) -> ImportEntry:
-    """A result as an observation: its point, 種別, 活動, 確度, the note with what the AI said and the tag."""
+                 width: Optional[float] = None, also: Sequence[str] = ()) -> ImportEntry:
+    """
+    A result as an observation: its point, 種別, 活動, 確度, the note with what
+    the AI said and the tag (and `also`: the tags it has elsewhere, a table it
+    was sent to).
+    """
     said = " ".join(x for x in (result.cls, score_text(result.score), result.model) if x)
-    head = "AI検出" if source.local else f"外部AI {source.label}"
-    note = " ".join(x for x in (head + (f": {said}" if said else ""), result.note, result.tag) if x)
+    head = source_head(source)
+    note = " ".join(x for x in (head + (f": {said}" if said else ""), result.note, result.tag, *also) if x)
     return ImportEntry(
         lon=lon, lat=lat, object=result.name, kind=kind_for(result, source),
         activity=result.activity or source.activity, confidence=source.confidence, note=note,
