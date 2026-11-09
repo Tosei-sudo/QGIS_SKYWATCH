@@ -324,3 +324,33 @@ def cell_text(record: CatalogRecord, key: str) -> str:
 def place_text(record: CatalogRecord) -> str:
     """Where the image is, for the list: 「COG」・「ローカル」・「なし」."""
     return {"url": "COG", "path": "ローカル"}.get(record.source.kind if record.source else "", "なし")
+
+
+def footprint_box(geometry: Optional[dict[str, Any]]) -> Optional[list[float]]:
+    """[west, south, east, north] of an Esri polygon or envelope (WGS 84), None without one."""
+    if not isinstance(geometry, dict):
+        return None
+    points = [p for ring in geometry.get("rings") or [] for p in ring
+              if isinstance(p, (list, tuple)) and len(p) >= 2 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in p[:2])]
+    if points:
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        return [min(xs), min(ys), max(xs), max(ys)]
+    corners = [geometry.get(k) for k in ("xmin", "ymin", "xmax", "ymax")]
+    if all(isinstance(v, (int, float)) and math.isfinite(v) for v in corners):
+        return [float(v) for v in corners]
+    return None
+
+
+def listed_image(record: CatalogRecord):
+    """
+    「ファイルなしで記録」: a record as an image of 観測記録 without its file
+    (its raw data in another system only): the catalog's id (the same as the
+    image opened from the catalog would have), its time and its footprint's
+    extent; None without an id.
+    """
+    from ..obs.model import ListedImage
+    from ..util import ms_of
+
+    if not record.id:
+        return None
+    return ListedImage(record.id, record.id, ms_of(record.acquired), footprint_box(record.geometry))

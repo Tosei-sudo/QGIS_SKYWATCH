@@ -320,6 +320,8 @@ class SkywatchPlugin:
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
         self.clock.lap()
+        # The tasks' Python hands the GIL to QGIS's main thread sooner (qgis_io/tasks.py): the map and docks keep moving.
+        tasks.share_gil_faster()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
@@ -454,6 +456,9 @@ class SkywatchPlugin:
         # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
         for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
             self.docks[name].event_linker = lambda: self.docks.get("SatObsEvents")
+        # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
+        for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
+            self.docks[name].observations = lambda: self.docks.get("SatObsObservations")
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)
@@ -1289,6 +1294,7 @@ class SkywatchPlugin:
         overviews_io.queue.cancel_all()
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
+        tasks.restore_gil_sharing()
         try:
             QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
         except (TypeError, RuntimeError):

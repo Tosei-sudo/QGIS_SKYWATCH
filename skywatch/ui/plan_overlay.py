@@ -142,6 +142,10 @@ class PlanOverlay:
                 p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(c)
                 self._painted_items.append(LabelItem(self.canvas, p, label, "#111111", False))
 
+    def painted(self) -> bool:
+        """Whether `paint` left polygons on the map."""
+        return bool(self._painted or self._painted_items)
+
     def unpaint(self) -> None:
         for band in self._painted:
             self.canvas.scene().removeItem(band)

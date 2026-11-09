@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from skywatch.core.catalog import catalog_of
+from skywatch.core.catalog.config import CatalogConfig
 from skywatch.core.catalog.paths import (
     PathError, PathMapping, PathRewrite, find_file, mapping_for, path_mapping_of, path_mappings_of, path_parts, resolve_path,
     rewrite_target, rewrites_of, url_for,
@@ -68,6 +69,37 @@ def test_catalog_needs_a_layer_url_and_a_source_field():
     c = catalog_of({"url": ENTRY["url"], "fields": {"source": "PATH", "sensor": "bad name;"}}, problems, 2)
     assert c.label == "カタログ 3" and c.fields["source"] == ["PATH"]
     assert len(problems) == 3
+
+
+def test_a_catalog_without_image_files_needs_no_source():
+    """`imageFiles: false` (tsudo, 2026-11-09): the raw data in another system only; 「ファイルなしで記録」 instead of 「開く」."""
+    problems = []
+    c = catalog_of({"url": ENTRY["url"], "imageFiles": False, "fields": {"id": "SCENE", "acquired": "ACQ"}}, problems, 0)
+    assert problems == [] and not c.image_files and c.fields["source"] == []
+    assert CatalogConfig.from_json(c.to_json()).image_files is False and c.to_json()["imageFiles"] is False
+    assert CATALOG.image_files and "imageFiles" not in CATALOG.to_json() and CatalogConfig.from_json(CATALOG.to_json()).image_files
+    # A source given is not read; true is the usual catalog.
+    assert catalog_of({**ENTRY, "imageFiles": False}, [], 0).fields["source"] == []
+    assert catalog_of({**ENTRY, "imageFiles": True}, [], 0).image_files
+    assert catalog_of({"url": ENTRY["url"], "imageFiles": True, "fields": {"id": "SCENE"}}, problems, 0) is None
+    assert "imageFiles: false" in problems[-1]
+    c = catalog_of({**ENTRY, "imageFiles": "no"}, problems, 0)
+    assert c.image_files and "imageFiles は true か false" in problems[-1]
+
+
+def test_a_record_as_an_image_listed_without_its_file():
+    from skywatch.core.catalog.search import footprint_box, listed_image
+
+    rec = record_of({"attributes": {"IMG_ID": 12, "ACQ_TIME": utc(2026, 11, 1, 2, 3)},
+                     "geometry": {"rings": [[[139.6, 35.5], [139.6, 35.7], [139.8, 35.7], [139.8, 35.5], [139.6, 35.5]], [[140, 36], [140, 36.1], [140.1, 36]]]}},
+                    CATALOG.fields)
+    image = listed_image(rec)
+    assert (image.id, image.name, image.time) == ("12", "12", utc(2026, 11, 1, 2, 3))
+    assert image.box == [139.6, 35.5, 140.1, 36.1]
+    assert footprint_box({"xmin": 1, "ymin": 2, "xmax": 3, "ymax": 4}) == [1, 2, 3, 4]
+    assert footprint_box(None) is None and footprint_box({"rings": []}) is None
+    assert listed_image(record({"ACQ_TIME": utc(2026, 11, 1)})) is None
+    assert listed_image(record({"IMG_ID": "X"})).time is None and listed_image(record({"IMG_ID": "X"})).box is None
 
 
 def test_catalog_keys_in_the_settings_file():

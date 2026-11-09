@@ -947,9 +947,10 @@ const SAMPLE = { k: "", t: "sample", l: "見本" };
 
 const SPEC = [
   { group: "画像カタログ・通知・画像", keys: [
-    { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須。",
+    { key: "imageCatalogs", label: "画像カタログ", doc: "画像カタログ", help: "撮像済み画像の一覧（ArcGIS のレイヤーかテーブル）。url と fields.source が必須（imageFiles: false のカタログは source 不要）。",
       field: I("imageCatalogs", "画像カタログ", [
-        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], multi: ["source", "keywords"] }),
+        LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], requiredUnless: (it) => it.imageFiles === false, multi: ["source", "keywords"] }),
+        B("imageFiles", "画像ファイル（imageFiles）", { help: "false: 画像ファイルのないカタログ（生データは別システムだけ）。「開く」の代わりに「ファイルなしで記録」（観測記録へ ID・撮像日時・範囲ごと）。fields.source は不要。既定 true" }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
         WHERE, N("maxResults", "最大件数", { min: 1, max: 5000, ph: "500" }),
@@ -978,6 +979,7 @@ const SPEC = [
         S("compress", "圧縮", K.compressions), S("location", "置き場所", [["auto", "auto（書ければ画像の隣）"], ["cache", "cache（キャッシュのフォルダ）"]]),
         S("scope", "対象", [["all", "all（追加したローカル画像すべて）"], ["catalog", "catalog（カタログなどから開いたものだけ）"]]),
         T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中" }),
+        N("threads", "作成に使うコア数", { min: 0, ph: "0", help: "0 で PC のコアの半分（残りは QGIS の地図の描画用）" }),
       ], { allowFalse: "作らない（false）" }) },
     { key: "complexImages", label: "複素 SAR 画像（SICD）の表示", doc: "複素-sar-画像sicdの表示compleximages", help: "SICD の I・Q バンドや複素数の画素の画像を振幅で表示する（既定は dB）。",
       field: S("complexImages", "表示", [["dB", "dB（20·log10 振幅）"], ["amplitude", "amplitude（振幅 √(I²+Q²)）"]], { ph: "dB", falseLabel: "false（QGIS のまま I・Q を表示）" }) },
@@ -2149,7 +2151,7 @@ function checkField(f, obj, at, p) {
   } else if (f.t === "roles") {
     if (!isObj(v)) { p.push(`${at}: { 役割: 属性名 } で指定`); return; }
     for (const [role, name] of Object.entries(v)) for (const n of Array.isArray(name) ? name : [name]) if (typeof n !== "string" || !ATTR.test(n)) p.push(`${at}.${role}: 属性名は英数字と _`);
-    for (const r of f.required || []) if (!v[r]) p.push(`${at}.${r}: ${ROLE_LABELS[r] || r} の属性名がない`);
+    if (!(f.requiredUnless && f.requiredUnless(obj))) for (const r of f.required || []) if (!v[r]) p.push(`${at}.${r}: ${ROLE_LABELS[r] || r} の属性名がない`);
     if (f.requiredAny && !f.requiredAny.some((set) => set.every((r) => v[r]))) p.push(`${at}: ${f.requiredAny.map((s) => s.join("＋")).join(" か ")} が必要`);
     if (f.requiredSome && isEmpty(v)) p.push(`${at}: 書き込む属性がない`);
   } else if (f.t === "object") {

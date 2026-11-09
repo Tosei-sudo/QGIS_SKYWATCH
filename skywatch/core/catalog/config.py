@@ -36,6 +36,9 @@ class CatalogConfig:
     authcfg: Optional[str] = None
     #: The images of a record whose path is a folder, by sensor (`*` for the others); see images.py.
     image_patterns: dict[str, list[str]] = field(default_factory=dict)
+    #: `imageFiles: false`: the catalog lists images whose files are elsewhere only (another system's raw data):
+    #: no 「開く」, their observations recorded without the file (「ファイルなしで記録」); `fields.source` not needed.
+    image_files: bool = True
 
     def label_of(self, role: str) -> str:
         """The heading of a role: the settings file's `labels`, else the viewer's default."""
@@ -59,6 +62,7 @@ class CatalogConfig:
             "columns": [dict(c) for c in self.columns], "where": self.where, "maxResults": self.max_results,
             "angleKind": self.angle_kind, "orbitHeight": self.orbit_height,
             **({"imagePatterns": {k: list(v) for k, v in self.image_patterns.items()}} if self.image_patterns else {}),
+            **({"imageFiles": False} if not self.image_files else {}),
         }
 
     @staticmethod
@@ -74,6 +78,7 @@ class CatalogConfig:
             angle_kind=value.get("angleKind") if value.get("angleKind") in ANGLE_KINDS else "offNadir",
             orbit_height=float(value.get("orbitHeight") or 600),
             image_patterns=image_patterns_of(value["imagePatterns"], [], "imagePatterns") if "imagePatterns" in value else {},
+            image_files=value.get("imageFiles") is not False,
         )
 
 
@@ -100,11 +105,17 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
             mapped[role] = name
         else:
             problems.append(f"{at} の fields.{role} は属性名（英数字と _）で指定")
-    sources = fields.get("source") if isinstance(fields.get("source"), list) else [fields.get("source")]
-    mapped["source"] = [s for s in sources if is_name(s)]
-    if not mapped["source"]:
-        problems.append(f"{at} に fields.source（COG の URL かローカルパスの入った属性名）なし")
-        return None
+    files = value.get("imageFiles", True)
+    if not isinstance(files, bool):
+        problems.append(f"{at} の imageFiles は true か false で指定（false: 画像ファイルなしのカタログ）")
+        files = True
+    if files:
+        sources = fields.get("source") if isinstance(fields.get("source"), list) else [fields.get("source")]
+        mapped["source"] = [s for s in sources if is_name(s)]
+        if not mapped["source"]:
+            problems.append(f"{at} に fields.source（COG の URL かローカルパスの入った属性名）なし"
+                            "（画像ファイルなしのカタログなら imageFiles: false）")
+            return None
     # 「フリーワード」: the text attributes a word typed is looked for in (partly; a name or several).
     keywords = fields.get("keywords")
     if keywords is not None and keywords != "" and keywords != []:
@@ -152,6 +163,7 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         angle_kind=angle_kind if angle_kind in ANGLE_KINDS else "offNadir",
         orbit_height=height if is_number(height) and height > 0 else 600,
         image_patterns=patterns,
+        image_files=files,
     )
 
 

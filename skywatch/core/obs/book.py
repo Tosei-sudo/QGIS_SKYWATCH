@@ -428,6 +428,36 @@ class ObservationBook:
         self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"{info.name} を追加（ファイルなし）")
         return entry
 
+    def list_images(self, images: list[ListedImage]) -> Optional[ObservedImage]:
+        """
+        Lists several images without their files at once (the catalog's
+        「ファイルなしで記録」: their ids, times and footprints as the catalog
+        says), the first one recorded on from now on; one listed before is
+        replaced (the catalog's values win).
+        """
+        wanted: dict[str, ListedImage] = {}
+        for i in images:
+            image_id = i.id.strip()
+            if image_id and image_id not in wanted:
+                wanted[image_id] = replace(i, id=image_id, name=i.name.strip() or image_id)
+        if not wanted:
+            self._say("画像 ID のある画像を選択")
+            return None
+        first = next(iter(wanted))
+        with self.lock:
+            self.listed = [i for i in self.listed if i.id not in wanted] + list(wanted.values())
+            self._save_listed()
+            self._order()
+            self.go_to(first)
+        entry = self.current
+        if len(wanted) == 1:
+            info = wanted[first]
+            self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"{info.name} を追加（ファイルなし）")
+        else:
+            opened = sum(1 for e in self.images if e.file and e.id in wanted)
+            self._say(f"{len(wanted)} 件を追加（ファイルなし）" + (f"、うち {opened} 件は開いている画像で記録" if opened else ""))
+        return entry
+
     def unlist_image(self, image_id: str) -> bool:
         """Takes an image without its file off the list (its records stay)."""
         gone = next((i for i in self.listed if i.id == image_id), None)

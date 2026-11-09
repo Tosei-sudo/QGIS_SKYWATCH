@@ -28,7 +28,7 @@ SATS = "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
 
 
-def start(tmp_path, monkeypatch, extra=None):
+def start(tmp_path, monkeypatch, extra=None, ledger_rows=()):
     QgsSettings().remove("skywatch")
     monkeypatch.setattr(Preloader, "DELAY_MS", 0)
     config = {"cloudForecast": False,
@@ -41,7 +41,9 @@ def start(tmp_path, monkeypatch, extra=None):
     fake.add_layer(SATS, FakeLayer({"NAME": "esriFieldTypeString", "TLE": "esriFieldTypeString"})).add({"NAME": "OPT 1", "TLE": f"{LINE1}\n{LINE2}"})
     types = {n: "esriFieldTypeString" for n in DEFAULT_REQUEST_FIELDS.values()}
     types.update({n: "esriFieldTypeDate" for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT")})
-    fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
+    ledger = fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
+    for attributes, geometry in ledger_rows:
+        ledger.add(attributes, geometry)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     logged = []
     log = QgsApplication.messageLog()
@@ -94,6 +96,25 @@ def test_reads_ahead_after_start(tmp_path, monkeypatch, cleanup):
     requests.show()
     APP.processEvents()
     assert len(asked(fake, LEDGER)) == n
+
+
+def test_closed_requests_dock_draws_nothing_on_the_map(tmp_path, monkeypatch, cleanup):
+    """Read ahead while closed: the requests' areas appear on the map only once the dock is opened."""
+    ring = [[139.0, 35.0], [139.1, 35.0], [139.1, 35.1], [139.0, 35.0]]
+    rows = [({"REQ_ID": f"R{i}", "REQ_NAME": f"依頼 {i}", "STATUS": "有効"}, {"rings": [ring], "spatialReference": {"wkid": 4326}})
+            for i in range(3)]
+    p, fake, logged, stop = start(tmp_path, monkeypatch, ledger_rows=rows)
+    cleanup += [stop, p.unload]
+    requests = p.docks["SatObsRequests"]
+    assert wait_for(lambda: logged) and requests._loaded and len(requests.requests) == 3
+    assert not requests.isVisible() and not requests.overlay.painted()
+    requests.show()
+    requests.raise_()
+    APP.processEvents()
+    assert requests.overlay.painted()
+    requests.hide()
+    APP.processEvents()
+    assert not requests.overlay.painted()
 
 
 def test_reads_the_catalog_of_a_closed_imaging_plan(tmp_path, monkeypatch, cleanup):
@@ -154,18 +175,51 @@ def test_preloader_items_and_timeout(monkeypatch):
     loader.add("none", "設定なし", lambda then, failed: False, always=True)
     loader.add("broken", "壊れた", lambda then, failed: 1 / 0, always=True)
     loader.run()
-    assert told == [("cache", True, "")] and ends == []
+    # One at a time: the next starts once the first is read.
+    assert told == [] and ends == [] and loader.running.keys() == {"requests"}
     # Asked again while reading: once this round ends.
     loader.run()
     pending.pop("requests")[1]("つながらない")
-    assert told[-1] == ("requests", False, "つながらない") and ends == [1]
+    assert told == [("requests", False, "つながらない")] and ends == []
+    assert wait_for(lambda: ends == [1], 2000)
+    assert told == [("requests", False, "つながらない"), ("cache", True, "")]
     assert wait_for(lambda: "requests" in pending, 2000)
     # A read never told done ends the round all the same.
     monkeypatch.setattr(Preloader, "TIMEOUT_S", 0.05)
     then, _failed = pending.pop("requests")
     then()  # the second round's read
+    assert wait_for(lambda: ends == [1, 1], 2000)
+    told.clear()
     loader.run()
-    assert wait_for(lambda: told[-1] == ("requests", False, "時間切れ"), 2000)
+    assert wait_for(lambda: ends == [1, 1, 1], 2000)
+    assert told == [("requests", False, "時間切れ"), ("cache", True, "")]
     pending.pop("requests")[0]()  # told after the time ran out: not counted twice
-    assert [t for t in told if t[0] == "requests"][-1] == ("requests", False, "時間切れ")
+    assert told == [("requests", False, "時間切れ"), ("cache", True, "")]
+    loader.close()
+
+
+def test_preloader_reads_one_at_a_time():
+    context = FakeContext(("satellites", "requests"))
+    loader = Preloader(context)
+    started, pending, ends = [], {}, []
+    loader.finished.connect(lambda: ends.append(1))
+
+    def item(key):
+        def start(then, failed):
+            started.append(key)
+            pending[key] = then
+            return True
+        return start
+
+    loader.add("satellites", "衛星カタログ", item("satellites"))
+    loader.add("requests", "撮像依頼", item("requests"))
+    loader.add("offline", "控え", item("offline"), always=True)
+    loader.run()
+    assert started == ["satellites"]
+    pending.pop("satellites")()
+    assert wait_for(lambda: started == ["satellites", "requests"], 2000)
+    pending.pop("requests")()
+    assert wait_for(lambda: started[-1] == "offline", 2000) and ends == []
+    pending.pop("offline")()
+    assert ends == [1]
     loader.close()

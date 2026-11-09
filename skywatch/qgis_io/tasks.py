@@ -2,9 +2,16 @@
 Heavy work and requests in QgsTask, so the UI never waits: a function runs
 off the main thread with a progress callback and a cancel check, and its
 result (or error) comes back on the main thread.
+
+The tasks' Python shares Python's GIL with QGIS's main thread, which calls
+into Python for the plugin's map items, lists and events: while the plugin
+is loaded, a thread hands the GIL on after 1 ms instead of Python's 5 ms
+(share_gil_faster), and a result whose showing holds the main thread long
+is told in the log (SLOW_MS), so what still stutters can be found.
 """
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import traceback
@@ -90,6 +97,16 @@ class FunctionTask(QgsTask):
             _current.task = None
 
     def finished(self, ok: bool) -> None:
+        started = time.perf_counter()
+        try:
+            self._finished(ok)
+        finally:
+            took = (time.perf_counter() - started) * 1000
+            if took >= SLOW_MS:
+                QgsMessageLog.logMessage(f"{self.description()}: 結果の表示に {took:.0f} ms（その間 QGIS の画面が止まる）",
+                                         LOG_TAG, Qgis.MessageLevel.Info, notifyUser=False)
+
+    def _finished(self, ok: bool) -> None:
         if self.discarded:
             if not ok:
                 QgsMessageLog.logMessage(f"{self.description()}: プラグインの停止で取り消し（{self.error or '取消'}）",
@@ -109,6 +126,34 @@ class FunctionTask(QgsTask):
                 QgsMessageLog.logMessage(f"{self.description()}: 結果の表示先が閉じられていたため表示せず", LOG_TAG, Qgis.MessageLevel.Info)
         except Exception:  # noqa: BLE001 (a failing callback is logged, never taken down with QGIS)
             QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Critical)
+
+
+#: A task's result shown on the main thread for at least this long (ms) is told in the log (the screen stops meanwhile).
+SLOW_MS = 200
+
+#: How long a thread may keep Python's GIL while another waits for it (s), while the plugin is loaded. Python's own 0.005
+#: let one task's Python work hold each of the main thread's calls into Python up to 5 ms (with four, about 25 ms).
+SWITCH_INTERVAL = 0.001
+#: Python's own interval before the plugin changed it (None: not changed).
+_switch_before: float | None = None
+
+
+def share_gil_faster() -> None:
+    """While the plugin is loaded: the GIL is handed on after SWITCH_INTERVAL (never longer than it was)."""
+    global _switch_before
+    now = sys.getswitchinterval()
+    if _switch_before is None and now > SWITCH_INTERVAL:
+        _switch_before = now
+        sys.setswitchinterval(SWITCH_INTERVAL)
+
+
+def restore_gil_sharing() -> None:
+    """The plugin is unloaded: Python's interval as it was (unless someone else changed it since)."""
+    global _switch_before
+    if _switch_before is not None:
+        if abs(sys.getswitchinterval() - SWITCH_INTERVAL) < 1e-9:
+            sys.setswitchinterval(_switch_before)
+        _switch_before = None
 
 
 #: Running tasks are kept here so Python does not collect them early.
