@@ -15,8 +15,9 @@ rows. No token is put on a layer.
 
 A record whose path is a folder has its images below it (`imagePatterns`,
 core/catalog/images.py): each opens as its own layer with the record's id
-(so the observations and AI results of the record are shared by its images)
-and its path below the folder `satobs/imageFile`, together in a group.
+(so the observations and AI results of the record are shared by its images;
+「観測記録」 lists them as one image) and its path below the folder
+`satobs/imageFile`, together in a group.
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor
 from ..core.catalog.watch import areas_of
 from ..core.util import is_number, ms_of
 from . import settings
-from .obs_images import IMAGE_ID, image_layer
+from .obs_images import IMAGE_FILE, IMAGE_ID, image_layer
 from .overviews_io import before_open
 from .plan_layer import make_field, qdatetime
 
@@ -49,8 +50,6 @@ CATALOG_URL = "satobs/catalogUrl"
 FEATURE = "satobs/feature"
 SENSOR_AZIMUTH = "satobs/sensorAzimuth"
 SENSOR_ELEVATION = "satobs/sensorElevation"
-#: The image's path below the record's folder, for a record whose images are in a folder.
-IMAGE_FILE = "satobs/imageFile"
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
