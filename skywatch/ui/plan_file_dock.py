@@ -17,7 +17,12 @@ without writing anything (limit_sim_dialog.py).
 The table can be narrowed to a system, a satellite series, a result and
 words (core/request/view.py): the files of each system are written by
 different people, so the system and series chosen are kept (per user).
-Writing still makes every system's file.
+With a system chosen, 「書き出し」 writes that system's file only, with its
+history rows and raises (tsudo, 2026-11-09); the requests another system's
+person wrote earlier that day stay in that system (pinned, counted in the
+status after 計算), and writing stops when someone wrote meanwhile (計算
+again). 「すべてのシステム」
+writes every system's file, as before.
 """
 from __future__ import annotations
 
@@ -43,8 +48,8 @@ from ..core.request.follow import follow_and_save, found_text
 from ..core.request.model import JST, jst_day, priority_text
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
-    RequestStoreConfig, add_history, count_history, delete_history, history_where, load_history, load_requests, replaced_where,
-    update_history, update_requests,
+    RequestStoreConfig, add_history, count_history, delete_history, handed_where, history_where, load_history, load_requests,
+    replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
     DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day, written_summary,
@@ -179,7 +184,8 @@ class PlanFileDock(PluginDock):
         browse.clicked.connect(self._browse)
         out.addWidget(browse)
         self.write_button = QPushButton(self.tr("書き出し"))
-        self.write_button.setToolTip(self.tr("採用の依頼をシステムごとのファイルに書き出し、出力履歴と繰り上げを保存（表示の絞り込みにかかわらず全システム分）"))
+        self.write_button.setToolTip(self.tr("採用の依頼をシステムごとのファイルに書き出し、出力履歴と繰り上げを保存。"
+                                             "システムを選んでいればそのシステムの分だけ（ほかのシステムのファイル・出力履歴はそのまま）"))
         self.write_button.clicked.connect(lambda: self.write())
         out.addWidget(self.write_button)
         layout.addLayout(out)
@@ -257,6 +263,10 @@ class PlanFileDock(PluginDock):
         box.setCurrentIndex(index)
         box.blockSignals(False)
 
+    def target(self) -> Optional[str]:
+        """The system whose file 「書き出し」 writes: the one chosen, or None for all of them (and for 該当システムなし)."""
+        return self.system_filter.currentData() or None
+
     def candidate_filter(self) -> CandidateFilter:
         """The filters as chosen."""
         return CandidateFilter(system=self.system_filter.currentData(), series=self.series_filter.currentData(),
@@ -267,6 +277,10 @@ class PlanFileDock(PluginDock):
         kept = _NO_SYSTEM_KEPT if system == NO_SYSTEM else system or ""
         self._kept_filter = {"system": kept, "series": series or ""}
         settings.set_plan_file_filter(kept, series or "")
+        if self.plan is not None and self.task is None and self.plan.target != self.target():
+            # What the other systems' people wrote is pinned only when another system is written from here.
+            self.plan.target = self.target()
+            self.plan.refit()
         self.render()
 
     def open_simulation(self) -> None:
@@ -376,12 +390,15 @@ class PlanFileDock(PluginDock):
             requests, history, forecasts, notes = result
             self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
-            self.plan = plan_day(requests, day, systems, sats, clouds, history)
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target())
             self._fill_series()
             self.render()
             taken = sum(1 for c in self.plan.candidates if c.result == TAKEN)
             text = self.tr("{day}: 候補 {n} 件・採用 {t} 件・見送り {h} 件").format(day=day.isoformat(), n=len(self.plan.candidates), t=taken,
                                                                          h=len(self.plan.candidates) - taken)
+            pinned = sum(1 for c in self.plan.candidates if c.pinned)
+            if pinned:
+                text += self.tr("（うち ほかのシステムで書き出し済み {n} 件）").format(n=pinned)
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
             self.status.setText("。".join([text, *notes]))
@@ -495,7 +512,11 @@ class PlanFileDock(PluginDock):
         self.sim_button.setEnabled(self.store is not None)
         for b in (self.up_button, self.down_button, self.reset_button):
             b.setEnabled(has and not busy)
-        self.write_button.setEnabled(has and not busy and any(c.result == TAKEN for c in self.plan.candidates))
+        target = self.target()
+        self.write_button.setEnabled(has and not busy and self.system_filter.currentData() != NO_SYSTEM and any(
+            c.result == TAKEN and not c.pinned and (target is None or c.system.system == target) for c in self.plan.candidates))
+        label = next((s.label for s in self.context.config.request_exports if s.system == target), target) if target else ""
+        self.write_button.setText(self.tr("{system} を書き出し").format(system=label) if target else self.tr("書き出し"))
 
     # --- Writing --------------------------------------------------------------------------------
 
@@ -504,24 +525,43 @@ class PlanFileDock(PluginDock):
         Builds the files (schemas read and the day's earlier history counted
         in a task), asks, writes them, then saves the history and raises.
         """
-        if self.plan is None or self.task is not None:
+        if self.plan is None or self.task is not None or self.system_filter.currentData() == NO_SYSTEM:
             return
-        # One copy for the files, the history and the raises, whatever is changed in the table meanwhile (#84).
         live = self.plan
+        if live.target != self.target():
+            # The system chosen while a task ran: fitted for it before writing.
+            live.target = self.target()
+            live.refit()
+            self.render()
+        # One copy for the files, the history and the raises, whatever is changed in the table meanwhile (#84).
         plan = dataclasses.replace(live, candidates=[dataclasses.replace(c, warnings=list(c.warnings)) for c in live.candidates])
+        target = plan.target
         run = _now_ms()
         store, client, token = self.store, self.context.esri(), self.token()
         self.status.setText(self.tr("ファイルを作成中…"))
 
         def work(task):
-            files = render(plan.candidates, plan.systems, plan.day, run, load_schema)
-            earlier = count_history(client, store, token, replaced_where(store, plan.day.isoformat())) if store and store.history else 0
+            day = plan.day.isoformat()
+            if target and store and store.history:
+                # Another system written since 計算 would leave a request in two files, or in none.
+                now = frozenset((r.request_id, r.system) for r in load_history(client, store, token, handed_where(store, day))
+                                if r.system and r.system != target)
+                if now != plan.others_handed():
+                    return None, sorted({s for _, s in now ^ plan.others_handed()})
+            systems = [s for s in plan.systems if s.system == target] if target else plan.systems
+            files = render(plan.candidates, systems, plan.day, run, load_schema)
+            earlier = count_history(client, store, token, replaced_where(store, day, target)) if store and store.history else 0
             return files, earlier
 
         def done(result):
             self.task = None
             self._update_buttons()
             files, earlier = result
+            if files is None:
+                labels = {s.system: s.label for s in plan.systems}
+                self.status.setText(self.tr("計算のあとに {list} の出力履歴が変わったため書き出しを取りやめ。"
+                                            "「計算」し直してから書き出し").format(list="・".join(labels.get(s, s) for s in earlier)))
+                return
             self._write_files(plan, run, files, ask, earlier)
 
         def failed(message):
@@ -532,16 +572,18 @@ class PlanFileDock(PluginDock):
         self.task = run_task(self.tr("出力ファイルの作成"), work, done, failed)
         self._update_buttons()
 
-    def _confirm(self, lines: list, earlier: int) -> Optional[bool]:
+    def _confirm(self, lines: list, earlier: int, label: str = "") -> Optional[bool]:
         """
         Asks before writing: None to stop, else whether the day's earlier
-        history rows (not yet followed up) are replaced rather than kept.
+        history rows (not yet followed up; of the system written, `label`)
+        are replaced rather than kept.
         """
         if not earlier:
             ok = QMessageBox.question(self, self.tr("書き出し"), "\n".join(lines)) == QMessageBox.StandardButton.Yes
             return False if ok else None
-        lines = [*lines, "", self.tr("この日の出力履歴（未判定）が既に {n} 件あります。"
-                                      "置き換えると前回の行を消してから今回の行を保存します。").format(n=earlier)]
+        whose = self.tr("{system} の").format(system=label) if label else ""
+        lines = [*lines, "", self.tr("この日の{whose}出力履歴（未判定）が既に {n} 件あります。"
+                                      "置き換えると前回の行を消してから今回の行を保存します。").format(whose=whose, n=earlier)]
         box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), "\n".join(lines), parent=self)
         replace = box.addButton(self.tr("置き換えて書き出し"), QMessageBox.ButtonRole.AcceptRole)
         keep = box.addButton(self.tr("追加して書き出し"), QMessageBox.ButtonRole.AcceptRole)
@@ -561,13 +603,17 @@ class PlanFileDock(PluginDock):
         targets = [(w, w.system.folder or fallback) for w in good]
         existing = [os.path.join(f, w.file_name) for w, f in targets if os.path.exists(os.path.join(f, w.file_name))]
         replace = bool(earlier)
+        target = plan.target
+        label = next((s.label for s in plan.systems if s.system == target), target or "")
         if ask:
             lines = [f"{w.system.label}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
+            if target:
+                lines.append(self.tr("{system} の分だけ書き出します（ほかのシステムのファイル・出力履歴はそのまま）").format(system=label))
             if broken:
                 lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{w.system.label}: {'、'.join(w.errors[:3])}" for w in broken]
             if existing:
                 lines.append(self.tr("上書きするファイル {n} 件").format(n=len(existing)))
-            choice = self._confirm(lines, earlier)
+            choice = self._confirm(lines, earlier, label)
             if choice is None:
                 self.status.setText(self.tr("書き出しを取りやめ"))
                 return
@@ -591,17 +637,17 @@ class PlanFileDock(PluginDock):
             settings.set_request_export_folder(fallback)
         store, client, token = self.store, self.context.esri(), self.token()
         # A request taken for a system whose file was not written is kept as 見送り, its raise left for later.
-        rows = history_of(plan, run, written, failures=failures)
-        skip = not_written(plan, written)
-        boosts = boost_changes(plan, skip)
-        done_rows = missed_done(plan, skip)
+        rows = history_of(plan, run, written, failures=failures, system=target)
+        skip = not_written(plan, written, target)
+        boosts = boost_changes(plan, skip, target)
+        done_rows = missed_done(plan, skip, target)
         day = plan.day.isoformat()
 
         def work(task):
             notes = []
             removed = 0
             if replace and earlier and store.history:
-                gone = delete_history(client, store, token, replaced_where(store, day))
+                gone = delete_history(client, store, token, replaced_where(store, day, target))
                 removed, notes = int(gone), notes + gone.problems
             saved = add_history(client, store, token, rows)
             raised = update_requests(client, store, token, boosts, run)
