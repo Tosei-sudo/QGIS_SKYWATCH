@@ -29,6 +29,8 @@ class Column:
     geometry: Optional[str] = None
     digits: Optional[int] = None
     allowed: Optional[list] = None
+    #: Written when the source's value is empty (none, "" or []); a list is joined by commas.
+    default: Any = None
 
 
 @dataclass
@@ -98,6 +100,7 @@ def _column_of(v: Any, at: str, problems: list[str]) -> Optional[Column]:
         geometry=v["geometry"] if isinstance(v.get("geometry"), str) else None,
         digits=int(digits) if is_number(digits) and 0 <= digits <= 12 else None,
         allowed=list(allowed) if isinstance(allowed, list) else None,
+        default=v.get("default"),
     )
 
 

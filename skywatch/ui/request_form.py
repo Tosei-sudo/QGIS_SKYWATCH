@@ -119,6 +119,15 @@ class RequestForm(QDialog):
         form = QFormLayout()
         self.name = QLineEdit()
         form.addRow(self.tr("名称"), self.name)
+        numbers = QHBoxLayout()
+        self.management_no = QLineEdit()
+        self.management_no.setToolTip(self.tr("管理番号（任意の文字。システム向けファイルの項目 managementNo で出せる）"))
+        self.identification_no = QLineEdit()
+        self.identification_no.setToolTip(self.tr("識別番号（任意の文字。管理番号とは別。システム向けファイルの項目 identificationNo で出せる）"))
+        numbers.addWidget(self.management_no, 1)
+        numbers.addWidget(QLabel(self.tr("識別番号")))
+        numbers.addWidget(self.identification_no, 1)
+        form.addRow(self.tr("管理番号"), numbers)
         row = QHBoxLayout()
         self.category = QComboBox()
         self.category.addItems(CATEGORIES)
@@ -338,6 +347,8 @@ class RequestForm(QDialog):
         _set(self.resolution, r.resolution)
         _set(self.cloud, r.cloud_no_go)
         self.systems.setText(",".join(r.systems))
+        self.management_no.setText(r.management_no)
+        self.identification_no.setText(r.identification_no)
         self.requester.setText(r.requester)
         self.note.setPlainText(r.note)
         self.shape_kind = r.shape_kind
@@ -533,6 +544,7 @@ class RequestForm(QDialog):
         out.incidence_min, out.incidence_max = _get(self.inc_min), _get(self.inc_max)
         out.resolution, out.cloud_no_go = _get(self.resolution), _get(self.cloud)
         out.systems = _words(self.systems.text())
+        out.management_no, out.identification_no = self.management_no.text().strip(), self.identification_no.text().strip()
         out.requester, out.note = self.requester.text().strip(), self.note.toPlainText().strip()
         out.rings, out.shape_kind = [list(r) for r in self.rings], self.shape_kind
         return out

@@ -20,7 +20,8 @@ from .model import (
 
 #: The attribute names used when the settings do not map a role.
 DEFAULT_REQUEST_FIELDS: dict[str, str] = {
-    "id": "REQ_ID", "name": "REQ_NAME", "category": "CATEGORY", "achieve": "ACHIEVE",
+    "id": "REQ_ID", "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "identificationNo": "IDENTIFICATION_NO",
+    "category": "CATEGORY", "achieve": "ACHIEVE",
     "start": "START_AT", "end": "END_AT", "repeat": "REPEAT", "status": "STATUS",
     "priority": "PRIORITY", "boost": "BOOST", "kind": "KIND", "series": "SERIES", "satellites": "SATELLITES",
     "modes": "SENSOR_MODES", "offNadirMin": "OFF_NADIR_MIN", "offNadirMax": "OFF_NADIR_MAX",
@@ -108,6 +109,13 @@ def _text(v: Any) -> str:
     return "" if v is None else str(v).strip()
 
 
+def _code(v: Any) -> str:
+    """A number kept as text (管理番号・識別番号): a whole number from a numeric field without its 「.0」."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return _text(v)
+
+
 def _number(v: Any) -> Optional[float]:
     if is_number(v):
         return float(v)
@@ -149,7 +157,8 @@ def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
         return ",".join(items) or None
 
     return {
-        f["id"]: req.id, f["name"]: req.name[:250], f["category"]: req.category, f["achieve"]: req.achieve,
+        f["id"]: req.id, f["name"]: req.name[:250], f["managementNo"]: req.management_no[:250] or None,
+        f["identificationNo"]: req.identification_no[:250] or None, f["category"]: req.category, f["achieve"]: req.achieve,
         f["start"]: req.start if math.isfinite(req.start) else None, f["end"]: req.end if math.isfinite(req.end) else None,
         f["repeat"]: req.repeat, f["status"]: req.status, f["priority"]: clamp_priority(req.priority), f["boost"]: int(req.boost),
         f["kind"]: req.kind, f["series"]: join(req.series), f["satellites"]: join(req.satellites), f["modes"]: join(req.modes),
@@ -172,6 +181,7 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
     boost = _number(a.get(f["boost"]))
     return ImagingRequest(
         id=rid, name=_text(a.get(f["name"])) or rid,
+        management_no=_code(a.get(f["managementNo"])), identification_no=_code(a.get(f["identificationNo"])),
         category=_choice(a.get(f["category"]), CATEGORIES, "臨時"),
         achieve=_choice(a.get(f["achieve"]), ACHIEVES, "期間内1回"),
         start=time_of(a.get(f["start"])), end=time_of(a.get(f["end"])),

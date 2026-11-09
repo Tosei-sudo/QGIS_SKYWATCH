@@ -55,6 +55,7 @@ def plugin_constants() -> dict:
         "obsGeometries": list(obs_export.GEOMETRIES),
         "obsBuiltinFormats": [obs_export.BUILTIN_CSV, obs_export.BUILTIN_JSON],
         "exportSources": list(export.SOURCES),
+        "exportListSources": list(export.LIST_SOURCES),
         "geometries": list(export.GEOMETRIES),
         "exportFormats": list(systems.FORMATS),
         "encodings": sorted(set(systems.ENCODINGS.values())),

@@ -115,6 +115,8 @@ TABLES = (
     Table("TBL_IMAGING_REQUEST", "撮像依頼台帳", "POLYGON", writable=True, setting="requestStores[].url", fields=(
         F("REQ_ID", "依頼ID", "TEXT", 64, "id"),
         F("REQ_NAME", "名称", "TEXT", 255, "name"),
+        F("MANAGEMENT_NO", "管理番号", "TEXT", 255, "managementNo"),
+        F("IDENTIFICATION_NO", "識別番号", "TEXT", 255, "identificationNo"),
         F("CATEGORY", "区分", "TEXT", 16, "category"),
         F("ACHIEVE", "達成条件", "TEXT", 16, "achieve"),
         F("START_AT", "開始", "DATE", None, "start"),
