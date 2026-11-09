@@ -202,7 +202,7 @@ class ObservationDock(PluginDock):
         self.said.connect(self._show_status)
 
         self._build()
-        self.overlay = ObservationOverlay(self.canvas)
+        self.overlay = ObservationOverlay(self.canvas, self.mark_style_select.currentData())
         self.overlay.hide()
         self.tool = ObservationTool(self.canvas, self.overlay, self.map_clicked, self.map_hovered, self.map_dragged,
                                     lambda: self.active and not self.area_mode and not self.rear, self.escape,
@@ -341,6 +341,20 @@ class ObservationDock(PluginDock):
         for w in (self.record_button, self.points_select, self.area_button):
             row.addWidget(w)
         row.addStretch(1)
+        # 「印」: how the records are drawn on the map (filled marks hid what they mark).
+        self.mark_style_select = QComboBox()
+        for text, style in ((tr("通常"), "normal"), (tr("枠だけ"), "outline"), (tr("非表示"), "hidden")):
+            self.mark_style_select.addItem(text, style)
+        self.mark_style_select.setCurrentIndex(max(0, self.mark_style_select.findData(settings.mark_style())))
+        self.mark_style_select.setToolTip(tr("地図上の記録の印の表示（H で表示・非表示、どこからでも Ctrl+Alt+D）\n"
+                                             "通常: 塗りつぶした印\n"
+                                             "枠だけ: 塗らずに輪と枠線だけ（画像が透けて見える）\n"
+                                             "非表示: 入力中の点とフォームで開いている記録だけ"))
+        self.mark_style_select.currentIndexChanged.connect(lambda _i: self.set_mark_style(self.mark_style_select.currentData()))
+        #: The style 「H」 comes back to from 「非表示」.
+        self._shown_style = settings.mark_style() if settings.mark_style() != "hidden" else "normal"
+        row.addWidget(QLabel(tr("印")))
+        row.addWidget(self.mark_style_select)
         b.addLayout(row)
         row = QHBoxLayout()
         self.carry_label = QLabel()
@@ -686,6 +700,7 @@ class ObservationDock(PluginDock):
         key(self, "ObsRecord", "観測記録（ドック内）: 記録の開始・終了", "R", self.toggle_recording)
         key(self, "ObsPoints", "観測記録（ドック内）: 入力点数の切り替え", "L", lambda: self.set_points(self.points % 4 + 1))
         key(self, "ObsArea", "観測記録（ドック内）: 確認範囲の記録", "A", lambda: self.area_button.setChecked(not self.area_mode))
+        key(self, "ObsMarks", "観測記録（ドック内）: 地図の印の表示・非表示", "H", self.toggle_marks)
         for n in range(1, 10):
             key(self, f"ObsActivity{n}", f"観測記録（ドック内）: 活動 {n} 番目", str(n), lambda n=n: self._chip(n))
         for n in range(1, 6):
@@ -2839,6 +2854,21 @@ class ObservationDock(PluginDock):
                 m = two_point(self.cursor, self.rear)
                 s.rubber_label = f"{km_text(m.length)}・{heading_text(m.heading)}"
         return s
+
+    def set_mark_style(self, style: str) -> None:
+        """「印」: 'normal', 'outline' or 'hidden', kept for next time (per user)."""
+        settings.set_mark_style(style)
+        style = settings.mark_style()
+        if style != "hidden":
+            self._shown_style = style
+        if self.mark_style_select.currentData() != style:
+            self.mark_style_select.setCurrentIndex(max(0, self.mark_style_select.findData(style)))
+        if hasattr(self, "overlay"):
+            self.overlay.set_style(style)
+
+    def toggle_marks(self) -> None:
+        """「H」 (and Ctrl+Alt+D anywhere): the marks hidden, or back as they were shown."""
+        self.set_mark_style(self._shown_style if self.mark_style_select.currentData() == "hidden" else "hidden")
 
     def draw(self) -> None:
         if not hasattr(self, "overlay"):

@@ -121,6 +121,50 @@ def test_search_list_footprints_and_sorting(plugin):
     assert asked[0]["returnCountOnly"] == "true" and asked[1]["orderByFields"] == "ACQ DESC"
 
 
+def test_the_footprints_filled_as_outlines_or_hidden(plugin):
+    """「フットプリント」 (tsudo, 2026-11-09: filled footprints made the image under them hard to see)."""
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    # Outlines unless chosen otherwise.
+    assert dock.footprint_box.currentData() == "outline" and settings.footprint_style() == "outline"
+    searched(dock)
+    overlay = dock.overlay
+    assert overlay.style == "outline"
+    assert overlay.all.numberOfVertices() > 0 and overlay.all.fillColor().alpha() == 0
+    dock._picked(139.61, 35.55, 0.001, False)
+    assert [r.id for r in dock.chosen()] == ["A"]
+    assert overlay.chosen.numberOfVertices() > 0 and overlay.chosen.fillColor().alpha() == 0
+    # The id above the footprint's top corner (35.7), not over the middle of the image.
+    [label] = overlay.labels
+    assert label._text == "A" and label._map_point.y() == pytest.approx(35.7) and label._offset_y < 0
+    assert label._map_point.x() == pytest.approx(139.7)
+    # Filled: as before, the id in the middle.
+    dock.footprint_box.setCurrentIndex(dock.footprint_box.findData("fill"))
+    assert settings.footprint_style() == "fill" and overlay.style == "fill"
+    assert overlay.all.fillColor().alpha() > 0 and overlay.chosen.fillColor().alpha() > 0
+    assert overlay.chosen.numberOfVertices() > 0
+    [label] = overlay.labels
+    assert 35.5 < label._map_point.y() < 35.7
+    # Hidden: nothing on the map, the choice and a click on the map still work.
+    dock.set_footprint_style("hidden")
+    assert dock.footprint_box.currentData() == "hidden" and settings.footprint_style() == "hidden"
+    assert overlay.all.numberOfVertices() == overlay.chosen.numberOfVertices() == 0 and overlay.labels == []
+    assert [r.id for r in dock.chosen()] == ["A"]
+    dock._picked(139.72, 35.62, 0.001, True)
+    assert sorted(r.id for r in dock.chosen()) == ["A", "C"] and overlay.chosen.numberOfVertices() == 0
+    # The area drawn for the search stays (a frame).
+    dock.set_drawn([[139.71, 35.61], [139.74, 35.61], [139.74, 35.64], [139.71, 35.61]])
+    assert overlay.area.numberOfVertices() > 0 and overlay.area.fillColor().alpha() == 0
+    # Shown again: the choice drawn again; the dock opened again keeps the style.
+    dock.set_footprint_style("outline")
+    assert overlay.all.numberOfVertices() > 0 and overlay.chosen.numberOfVertices() > 0 and len(overlay.labels) == 2
+    dock.set_footprint_style("hidden")
+    dock.hide()
+    assert dock.overlay is None
+    dock.show()
+    assert dock.overlay.style == "hidden" and dock.overlay.all.numberOfVertices() == 0
+
+
 def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(plugin, monkeypatch):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
