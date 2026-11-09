@@ -47,7 +47,8 @@ from ..core.request.store import (
     update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, boost_changes, clouds_of, forecast_places, history_of, missed_done, not_written, plan_day, written_summary,
+    DayPlan, boost_changes, clouds_of, forecast_places, history_of, ledger_results, missed_done, not_written, plan_day,
+    written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
@@ -595,6 +596,7 @@ class PlanFileDock(PluginDock):
         skip = not_written(plan, written)
         boosts = boost_changes(plan, skip)
         done_rows = missed_done(plan, skip)
+        results = ledger_results(plan, rows)
         day = plan.day.isoformat()
 
         def work(task):
@@ -605,8 +607,10 @@ class PlanFileDock(PluginDock):
                 removed, notes = int(gone), notes + gone.problems
             saved = add_history(client, store, token, rows)
             raised = update_requests(client, store, token, boosts, run)
+            # The ledger's 「最新の出力」 (for dashboards): not a change of the request, so its 更新日時 is kept.
+            noted = update_requests(client, store, token, results)
             marked = update_history(client, store, token, done_rows)
-            return saved, raised, marked, removed, notes + saved.problems + raised.problems + marked.problems
+            return saved, raised, marked, removed, notes + saved.problems + raised.problems + noted.problems + marked.problems
 
         def done(result):
             self.task = None

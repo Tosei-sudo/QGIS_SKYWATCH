@@ -89,6 +89,47 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
     --portal https://gis.example/portal --config C:\gis\skywatch.config.json
 ```
 
+## 3. 撮像依頼の採用状況のダッシュボード
+
+依頼した人が「今日（明日）の計画に採用されたか」を ArcGIS Enterprise のダッシュボードで見るための作り方。プラグインは「撮像計画ファイル出力」で書き出すたびに、次の属性を書く（[docs/imaging-requests.md](imaging-requests.md) の §19）。
+
+| テーブル | 属性 | ダッシュボードでの使い方 |
+| --- | --- | --- |
+| `TBL_IMAGING_REQUEST`（台帳・ポリゴン） | `LAST_TARGET_DATE`（最新の出力の対象日）・`LAST_RESULT`（`採用`・`見送り`）・`LAST_SYSTEM`・`LAST_SATELLITE`・`LAST_REASON`・`LAST_RUN_DATE` | 地図と「いまの状態」の一覧。依頼ごとに最後に出した日の結果だけを持つ |
+| `TBL_REQUEST_HISTORY`（出力履歴・表） | `TARGET_DATE`（対象日）・`RESULT`・`SYSTEM`・`SATELLITE`・`REASON`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`RUN_DATE` | 日ごとの件数・一覧・グラフ。過去の日も残る |
+
+### 属性を足す
+
+既にテーブルを作ってあるなら、プラグインを新しくしてから `create_tables.py` をもう一度実行する（足りない属性だけ足す）。参照で公開したサービスは属性を足しただけでは見えないので、続けて `publish_service.py publish` で上書き公開する（レイヤー番号は変わらない）。
+
+前からある出力履歴の行には `TARGET_DATE` が空なので、過去の日もグラフに出すなら ArcGIS Pro の「フィールド演算」で一度だけ埋める（`TBL_REQUEST_HISTORY` の `TARGET_DATE`、式の種類 Python）。サービスの日付のタイムゾーンを既定（UTC）のままにしているとき、日本時間の 0 時は UTC の前日 15 時:
+
+```python
+datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(hours=9)
+```
+
+古い行の `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER` も要るなら、`REQ_ID` で台帳をテーブル結合してからフィールド演算で写す。
+
+### 作り方（例）
+
+1. Map Viewer で Web マップを作り、`TBL_IMAGING_REQUEST` を入れる。シンボルは「個別値」で `LAST_RESULT`（採用 = 緑、見送り = 橙、その他 = 灰）。ポップアップに `REQ_NAME`・`MANAGEMENT_NO`・`LAST_RESULT`・`LAST_SYSTEM`・`LAST_SATELLITE`・`LAST_REASON`
+2. ダッシュボードを作り、要素を置く:
+
+| 要素 | データ | 設定 |
+| --- | --- | --- |
+| 日付セレクター「対象日」 | — | 既定値「今日」（明日の計画を前日に出す運用なら「明日」も選べるように）。アクションで下の履歴の要素を `TARGET_DATE`、地図の台帳レイヤーを `LAST_TARGET_DATE` で絞る |
+| インジケーター「採用」「見送り」 | `TBL_REQUEST_HISTORY` | フィルター `RESULT` = `採用`（もう 1 つは `見送り`）、統計 = 件数 |
+| 円グラフ「システム別の採用」 | `TBL_REQUEST_HISTORY` | カテゴリ `SYSTEM`、フィルター `RESULT` = `採用` |
+| テーブル（または リスト）「依頼の一覧」 | `TBL_REQUEST_HISTORY` | 列 `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`RESULT`・`SYSTEM`・`SATELLITE`・`REASON`。リストなら `{REQ_NAME}（{MANAGEMENT_NO}） {RESULT} {SYSTEM} {REASON}` |
+| マップ | 1. の Web マップ | 地図の台帳を日付セレクターで絞る |
+| 系列グラフ「日ごとの採用・見送り」 | `TBL_REQUEST_HISTORY` | カテゴリ `TARGET_DATE`（日単位）、系列を `RESULT` で分ける、フィルター `TARGET_DATE` が過去 30 日 |
+| カテゴリ セレクター「依頼者」（任意） | `TBL_REQUEST_HISTORY` の `REQUESTER` | 自分の依頼だけを見る。アクションで履歴の要素と台帳を `REQUESTER` で絞る |
+
+- 台帳は依頼ごとに**最後に出した日**だけを持つ（明日の分を書き出すと、今日の分は台帳からは消え、出力履歴に残る）。過去の日やその日に何が採用されたかを確かめるのは、出力履歴の要素で。
+- 「今日書き出したもの」を見たいときは、`TARGET_DATE` の代わりに `RUN_DATE`（台帳は `LAST_RUN_DATE`）で絞る。
+- 同じ対象日を書き出し直すと、出力履歴の未判定の行は置き換わり、台帳の最新の出力も上書きされる（最後の書き出しの結果になる）。
+- 日付型は UTC で保存している（日本時間の 0 時 = 前日 15 時 UTC）。ダッシュボードはブラウザーの時刻（日本時間）で日を分けるので、そのままで日本時間の日になる。
+
 ## うまくいかないとき
 
 | 出たこと | すること |

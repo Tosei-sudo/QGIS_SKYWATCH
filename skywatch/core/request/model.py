@@ -138,6 +138,14 @@ class ImagingRequest:
     note: str = ""
     created: Optional[float] = None
     updated: Optional[float] = None
+    #: The latest day's output it was in (台帳の「最新の出力」, written by the 撮像計画ファイル出力 dock, never by a save):
+    #: when written (ms), the JST day (`2026-11-10`, "" when never), 採用 / 見送り, the system and satellite, why.
+    last_run: Optional[float] = None
+    last_day: str = ""
+    last_result: str = ""
+    last_system: str = ""
+    last_satellite: str = ""
+    last_reason: str = ""
     #: Longitude / latitude rings (WGS 84).
     rings: list = field(default_factory=list)
     #: The feature's object id (None until saved).
@@ -149,6 +157,39 @@ class ImagingRequest:
     def effective(self) -> int:
         """The priority after raises (繰り上げ)."""
         return clamp_priority(self.priority - self.boost)
+
+
+_NEAR_DAYS = {-1: "昨日", 0: "今日", 1: "明日"}
+
+
+def last_output_text(req: ImagingRequest, today: date) -> str:
+    """
+    The latest day's output the ledger holds, for the list: 「明日 採用（SYS-A）」,
+    「11/8 見送り」 ("" when the request was never written out, or the ledger
+    has no 「最新の出力」 fields).
+    """
+    if not req.last_day or not req.last_result:
+        return ""
+    try:
+        day = date.fromisoformat(req.last_day[:10])
+    except ValueError:
+        return ""
+    when = _NEAR_DAYS.get((day - today).days) or (f"{day.month}/{day.day}" if day.year == today.year else day.isoformat())
+    return f"{when} {req.last_result}" + (f"（{req.last_system}）" if req.last_system else "")
+
+
+def last_output_tip(req: ImagingRequest) -> str:
+    """The rest of it: the target day, when written, the satellite and why (lines)."""
+    if not req.last_day:
+        return ""
+    lines = [f"対象日 {req.last_day}"]
+    if req.last_run is not None and math.isfinite(req.last_run):
+        lines.append(f"出力 {datetime.fromtimestamp(req.last_run / 1000, tz=JST).strftime('%Y-%m-%d %H:%M')}")
+    if req.last_satellite:
+        lines.append(f"衛星 {req.last_satellite}")
+    if req.last_reason:
+        lines.append(f"理由 {req.last_reason}")
+    return "\n".join(lines)
 
 
 def day_bounds(day: date) -> tuple[float, float]:

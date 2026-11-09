@@ -16,7 +16,7 @@ from .daily import HELD, TAKEN, Candidate, allocate, gather, wants_weather
 from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
-from .store import HistoryRow
+from .store import HistoryRow, day_start_ms
 from .systems import ExportSystem
 from .weather import DAYLIGHT, daytime_cloud, places_of
 
@@ -82,13 +82,35 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             result, reason = HELD, f"書き出し失敗（{failures.get(system) or 'ファイルなし'}）"
         taken = result == TAKEN
         rows.append(HistoryRow(
-            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id, system=system,
+            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id,
+            name=c.request.name, management_no=c.request.management_no, requester=c.request.requester, system=system,
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
             result=result, reason=reason, file=files.get(system, "") if taken else "",
             captured="未判定" if taken else "", boost_done=0))
     return rows
+
+
+def ledger_results(plan: DayPlan, rows: Sequence[HistoryRow]) -> list[tuple[int, dict]]:
+    """
+    The ledger's 「最新の出力」 of the requests written out (object id, {role:
+    value}), from their history rows: when, the target day, 採用 / 見送り, the
+    system, satellite and why. A request whose ledger already holds a later
+    day (that day written before this one) keeps it: the fields always tell
+    the latest day handed out, so a dashboard can ask 「今日（明日）採用か」.
+    """
+    by_id = {r.request_id: r for r in rows}
+    out = []
+    for c in plan.candidates:
+        req, row = c.request, by_id.get(c.request.id)
+        if row is None or req.object_id is None or (req.last_day and req.last_day > row.day):
+            continue
+        out.append((req.object_id, {
+            "lastRun": row.run_date, "lastDay": day_start_ms(row.day), "lastResult": row.result,
+            "lastSystem": row.system or None, "lastSatellite": row.satellite or None, "lastReason": row.reason[:250] or None,
+        }))
+    return out
 
 
 def not_written(plan: DayPlan, files: dict) -> set:

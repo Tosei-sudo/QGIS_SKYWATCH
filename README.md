@@ -272,6 +272,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
+  - 書き出すと、候補になった依頼の台帳に「最新の出力」（対象日・採用か見送りか・システム・衛星・理由）も書く。撮像依頼ドックの一覧の「最新の出力」列に「明日 採用（SYS-A）」「今日 見送り」のように出る（理由はツールチップ）。ArcGIS Enterprise のダッシュボードで採用状況を見る作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像依頼の採用状況のダッシュボード」。台帳と出力履歴に属性を足す必要がある（[`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) の `LAST_` の 6 属性、[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）
   - 「上限シミュレーション…」で、システムごとの 1 日の件数・枚数・区分の上限や使うシステムを変えた場合に、今後の日数（1〜60 日）で何件が枠超過・次のシステムへ回送・欠測（毎回）・期限切れ（期間内1回）になるかを、設定の値と並べて試算する。台帳・出力履歴には書き込まない（採用した依頼は撮像できたものとして計算）
   - 「照合…」で計画と実績の照合。対象日の範囲を選び、出力した依頼が撮れたかを画像カタログと突き合わせて、システムごとの撮像済み・未撮像・未判定と撮像率を出す。衛星を指定した依頼は、その衛星（衛星名の対応表 `satelliteAliases` の別名も）の画像だけを撮像済みとする。指定のない依頼はどの衛星の画像でもよい
   - 未撮像の依頼は次回の「計算」に持ち越す（曜日・N 日ごとの定点も、その日が繰り返しの日でなくても候補に入る。期間内に限る）。繰り上げの候補にもなる
@@ -1513,6 +1514,14 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `NOTE` | メモ | `String(4000)` | メモ | `note` |
 | `CREATED_AT` | 登録日時 | `Date` | 登録した日時 | `created` |
 | `UPDATED_AT` | 更新日時 | `Date` | 更新した日時 | `updated` |
+| `LAST_RUN_DATE` | 最新の出力日時 | `Date` | 最新の出力（下）を書き出した日時 | `lastRun` |
+| `LAST_TARGET_DATE` | 最新の出力の対象日 | `Date` | その対象日（日本時間の 0 時） | `lastDay` |
+| `LAST_RESULT` | 最新の出力の結果 | `String(16)` | `採用`・`見送り` | `lastResult` |
+| `LAST_SYSTEM` | 最新の出力のシステム | `String(255)` | 割り当てた衛星システム（枠超過・雲量などの見送りは空） | `lastSystem` |
+| `LAST_SATELLITE` | 最新の出力の衛星 | `String(255)` | 割り当てた衛星 | `lastSatellite` |
+| `LAST_REASON` | 最新の出力の理由 | `String(1000)` | 見送り・警告の理由 | `lastReason` |
+
+`LAST_` の 6 属性（最新の出力）は、「撮像計画ファイル出力」の書き出しのたびに、その日の候補になった依頼に書く（依頼の保存では書かない。`UPDATED_AT` も変えない）。より後の対象日を既に書いた依頼は、前の日を書き出しても変えない。ArcGIS Enterprise のダッシュボードで「今日（明日）採用されたか」を地図・一覧に出すためのもの（[docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像依頼の採用状況のダッシュボード」）。なければ書かない。
 
 ### `TBL_REQUEST_HISTORY`（撮像依頼の出力履歴）
 
@@ -1523,7 +1532,11 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `RUN_ID` | 出力ID | `String(64)` | 出力 1 回の ID | `runId` |
 | `RUN_DATE` | 出力日時 | `Date` | 出力した日時 | `runDate` |
 | `TARGET_DAY` | 対象日 | `String(16)` | 対象の日（`2026-11-08`）。**必須** | `day` |
+| `TARGET_DATE` | 対象日（日付） | `Date` | 対象の日の日本時間 0 時（ダッシュボードの日付の絞り込み・グラフ用） | `targetDate` |
 | `REQ_ID` | 依頼ID | `String(64)` | 台帳の `REQ_ID`。**必須** | `requestId` |
+| `REQ_NAME` | 名称 | `String(255)` | 出力したときの依頼の名称 | `name` |
+| `MANAGEMENT_NO` | 管理番号 | `String(255)` | 出力したときの管理番号 | `managementNo` |
+| `REQUESTER` | 依頼者 | `String(255)` | 出力したときの依頼者 | `requester` |
 | `SYSTEM` | システム | `String(255)` | 出力した衛星システム | `system` |
 | `SATELLITE` | 衛星 | `String(255)` | 割り当てた衛星 | `satellite` |
 | `PRIORITY_OUT` | 出力優先度 | `String(64)` | システムに渡した優先度（`High` など） | `priority` |

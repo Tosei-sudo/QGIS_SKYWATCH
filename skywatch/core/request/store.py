@@ -9,6 +9,7 @@ import math
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
@@ -16,6 +17,7 @@ from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
+    day_bounds, jst_day,
 )
 
 #: The attribute names used when the settings do not map a role.
@@ -28,9 +30,14 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "incidenceMin": "INCIDENCE_MIN", "incidenceMax": "INCIDENCE_MAX", "lookSide": "LOOK_SIDE", "orbitDir": "ORBIT_DIR",
     "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "cloudNoGo": "CLOUD_NO_GO", "systems": "SYSTEMS",
     "shapeKind": "SHAPE_KIND", "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
+    "lastRun": "LAST_RUN_DATE", "lastDay": "LAST_TARGET_DATE", "lastResult": "LAST_RESULT", "lastSystem": "LAST_SYSTEM",
+    "lastSatellite": "LAST_SATELLITE", "lastReason": "LAST_REASON",
 }
+#: The ledger's 「最新の出力」: written when the day's files are written (for dashboards), read, never written by a save.
+RESULT_ROLES = ("lastRun", "lastDay", "lastResult", "lastSystem", "lastSatellite", "lastReason")
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
-    "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "requestId": "REQ_ID", "system": "SYSTEM",
+    "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "targetDate": "TARGET_DATE", "requestId": "REQ_ID",
+    "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "requester": "REQUESTER", "system": "SYSTEM",
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
 }
@@ -128,6 +135,23 @@ def _number(v: Any) -> Optional[float]:
     return None
 
 
+def _day_of(v: Any) -> str:
+    """The JST day (`2026-11-10`) of a date field's value; "" when empty."""
+    ms = _number(v)
+    if ms is None:
+        t = _text(v)[:10]
+        return t if re.fullmatch(r"\d{4}-\d{2}-\d{2}", t) else ""
+    return jst_day(ms).isoformat()
+
+
+def day_start_ms(day: str) -> Optional[float]:
+    """The first moment (ms) of a JST day `2026-11-10`; None when not a day."""
+    try:
+        return day_bounds(date.fromisoformat(day[:10]))[0]
+    except (TypeError, ValueError):
+        return None
+
+
 def _choice(v: Any, choices: Sequence[str], fallback: str) -> str:
     t = _text(v)
     return t if t in choices else fallback
@@ -200,6 +224,9 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
         shape_kind=_choice(a.get(f["shapeKind"]), SHAPE_KINDS, "範囲"),
         requester=_text(a.get(f["requester"])), note=_text(a.get(f["note"])),
         created=_number(a.get(f["created"])), updated=_number(a.get(f["updated"])),
+        last_run=_number(a.get(f["lastRun"])), last_day=_day_of(a.get(f["lastDay"])),
+        last_result=_text(a.get(f["lastResult"])), last_system=_text(a.get(f["lastSystem"])),
+        last_satellite=_text(a.get(f["lastSatellite"])), last_reason=_text(a.get(f["lastReason"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [],
         object_id=int(a[oid]) if is_number(a.get(oid)) else None,
     )
@@ -485,7 +512,10 @@ def update_requests(client: EsriClient, store: RequestStoreConfig, token: Option
         attributes = {oid: object_id, **{f[k]: v for k, v in values.items()}}
         if now is not None:
             attributes[f["updated"]] = now
-        updates.append({"attributes": _only(attributes, names | {oid})})
+        attributes = _only(attributes, names | {oid})
+        # Nothing the ledger has (e.g. no 「最新の出力」 fields): not sent, so that no feature is stamped as changed.
+        if len(attributes) > 1:
+            updates.append({"attributes": attributes})
     return _batches(lambda batch: client.apply_edits(store.url, updates=batch, token=token), updates,
                     lambda r: r.update_results, "台帳の更新")
 
@@ -552,13 +582,18 @@ class HistoryRow:
     image_id: str = ""
     boost_done: int = 0
     object_id: Optional[int] = None
+    #: The request's 名称・管理番号・依頼者 when written (so a dashboard lists them without joining the ledger).
+    name: str = ""
+    management_no: str = ""
+    requester: str = ""
 
 
 def history_attributes(row: HistoryRow, f: dict) -> dict:
     return {
-        f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day, f["requestId"]: row.request_id,
-        f["system"]: row.system, f["satellite"]: row.satellite, f["priority"]: row.priority, f["cloud"]: row.cloud,
-        f["scenes"]: row.scenes, f["result"]: row.result, f["reason"]: row.reason[:250], f["file"]: row.file[:250],
+        f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day, f["targetDate"]: day_start_ms(row.day),
+        f["requestId"]: row.request_id, f["name"]: row.name[:250] or None, f["managementNo"]: row.management_no[:250] or None,
+        f["requester"]: row.requester[:250] or None, f["system"]: row.system, f["satellite"]: row.satellite,
+        f["priority"]: row.priority, f["cloud"]: row.cloud, f["scenes"]: row.scenes, f["result"]: row.result, f["reason"]: row.reason[:250], f["file"]: row.file[:250],
         f["captured"]: row.captured, f["imageId"]: row.image_id, f["boostDone"]: row.boost_done,
     }
 
@@ -643,7 +678,8 @@ def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[
         cloud, scenes, done = _number(a.get(hf["cloud"])), _number(a.get(hf["scenes"])), _number(a.get(hf["boostDone"]))
         out.append(HistoryRow(
             run_id=_text(a.get(hf["runId"])), run_date=time_of(a.get(hf["runDate"])), day=_text(a.get(hf["day"]))[:10],
-            request_id=rid, system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
+            request_id=rid, name=_text(a.get(hf["name"])), management_no=_code(a.get(hf["managementNo"])),
+            requester=_text(a.get(hf["requester"])), system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
             priority=_text(a.get(hf["priority"])), cloud=cloud, scenes=int(scenes) if scenes is not None else None,
             result=_text(a.get(hf["result"])) or "採用", reason=_text(a.get(hf["reason"])), file=_text(a.get(hf["file"])),
             captured=_choice(a.get(hf["captured"]), CAPTURED, "未判定"), image_id=_text(a.get(hf["imageId"])),
