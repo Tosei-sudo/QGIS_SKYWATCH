@@ -1,6 +1,6 @@
 """
 画像カタログ: searching the image catalogs of the settings file (over the
-map's extent, an area drawn, a vector layer's geometry as it is, or anywhere, by dates, sensor, angle, azimuth and SQL), the list
+map's extent, an area drawn, a vector layer's geometry as it is, or anywhere, by dates, a free word, sensor, angle, azimuth and SQL), the list
 of images found with their footprints on the map, opening them as raster
 layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
@@ -116,6 +116,12 @@ class CatalogDock(PluginDock):
         self.drawn: Optional[list] = None
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
         form.addRow(self.tr("撮像日"), self._range(self.acquired_from, self.acquired_to))
+        # 「フリーワード」: words looked for in the catalog's `fields.keywords` (shown only for a catalog that has them).
+        self.keyword = QLineEdit()
+        self.keyword.setClearButtonEnabled(True)
+        self.keyword.returnPressed.connect(self.search)
+        self.keyword_label = QLabel(self.tr("フリーワード"))
+        form.addRow(self.keyword_label, self.keyword)
         self.body.addLayout(form)
 
         self.more = QGroupBox(self.tr("詳細条件"))
@@ -204,7 +210,7 @@ class CatalogDock(PluginDock):
             "catalog": self.catalog_box, "area": self.area_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
             "more": self.more, "registeredFrom": self.registered_from, "registeredTo": self.registered_to, "systemFrom": self.system_from,
             "systemTo": self.system_to, "sensor": self.sensor_box, "maxAngle": self.max_angle, "azimuthFrom": self.azimuth_from,
-            "azimuthTo": self.azimuth_to, "where": self.where, "unworkedOnly": self.unworked_only,
+            "azimuthTo": self.azimuth_to, "where": self.where, "unworkedOnly": self.unworked_only, "keyword": self.keyword,
         }, self._view_applied, self)
         row.addWidget(self.views.button)
         #: The 分担 of the listed images read again every minute while the dock is shown.
@@ -311,6 +317,7 @@ class CatalogDock(PluginDock):
         self.sensor_box.clear()
         self.sensor_box.addItem("")
         catalog = self.catalog()
+        self._show_keyword(catalog)
         if catalog is None or not catalog.fields.get("sensor"):
             return
         client = self.context.esri()
@@ -318,9 +325,24 @@ class CatalogDock(PluginDock):
         self._start(self.tr("センサーの取得"), lambda task: sensors_of(client, catalog, token),
                     lambda sensors: self.sensor_box.addItems(sensors) if self.catalog() is catalog else None, lambda m: None)
 
+    def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
+        """「フリーワード」 only for a catalog with `fields.keywords`, its hint naming them."""
+        fields = catalog.keyword_fields if catalog is not None else []
+        self.keyword_label.setVisible(bool(fields))
+        self.keyword.setVisible(bool(fields))
+        if not fields:
+            return
+        labels = "・".join(catalog.keyword_labels())
+        self.keyword.setPlaceholderText(self.tr("{labels} に部分一致").format(labels=labels))
+        self.keyword.setToolTip(self.tr(
+            "{labels} のどれかに入力した語を含む画像を検索。空白で区切ると、すべての語を含む画像。"
+            "大文字・小文字、ひらがな・カタカナ、全角・半角は区別しない。Enter で検索").format(labels=labels))
+
     def conditions(self) -> CatalogSearch:
-        """The search the form describes (詳細条件 only while it is open)."""
-        search = CatalogSearch(acquired_from=_day(self.acquired_from), acquired_to=_day(self.acquired_to))
+        """The search the form describes (詳細条件 only while it is open; the free word only when the catalog has keyword fields)."""
+        catalog = self.catalog()
+        keyword = self.keyword.text().strip() if catalog is not None and catalog.keyword_fields else ""
+        search = CatalogSearch(acquired_from=_day(self.acquired_from), acquired_to=_day(self.acquired_to), keyword=keyword)
         if not self.more.isChecked():
             return search
         return replace(search, registered_from=_day(self.registered_from), registered_to=_day(self.registered_to),

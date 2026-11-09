@@ -104,7 +104,20 @@
 
 ## 画像カタログ
 
-「画像カタログ」ドックで `imageCatalogs` の画像を検索する。範囲（既定は表示範囲。「範囲を描く」で地図に多角形を描いて「描いた範囲」も。クリックで頂点、ダブルクリックか右クリックで確定、Esc で取消）、「レイヤー」でベクターレイヤーを選ぶとその地物の形そのもの（外接矩形ではなく。ポリゴンは結合、ラインはライン、ポイントは複数点として。「選択地物のみ」も可）と重なる画像）、撮像日、「詳細条件」で登録日・システム登録日・センサー・角度の上限・方位角・SQL。
+「画像カタログ」ドックで `imageCatalogs` の画像を検索する。範囲（既定は表示範囲。「範囲を描く」で地図に多角形を描いて「描いた範囲」も。クリックで頂点、ダブルクリックか右クリックで確定、Esc で取消）、「レイヤー」でベクターレイヤーを選ぶとその地物の形そのもの（外接矩形ではなく。ポリゴンは結合、ラインはライン、ポイントは複数点として。「選択地物のみ」も可）と重なる画像）、撮像日、フリーワード（下記）、「詳細条件」で登録日・システム登録日・センサー・角度の上限・方位角・SQL。
+
+- 「フリーワード」: カタログの `fields.keywords` に書いた属性（文字列の属性。1 つなら文字列、複数なら配列）のどれかに、入力した語を含む画像を探す（部分一致）。空白（全角も）で区切ると、すべての語を含む画像（語ごとにどれかの属性に含めばよい）。大文字・小文字、ひらがな・カタカナ、全角・半角（`ＥＶ０１` と `ev01`）は区別しない。欄で Enter を押しても検索。`fields.keywords` のないカタログでは欄を出さない。欄の薄字に対象の属性（`columns` か役割の見出し、なければ属性名）
+  - 問い合わせは語ごとに `(UPPER(属性) LIKE '%語%' ESCAPE '\' OR …)` を AND でつなぐ。語は値として扱う（`'` は二重に、`%`・`_`・`\` はエスケープするので「50%」は 50% という文字だけに合う）。10 語・1 語 100 文字まで。数値・日付の属性は対象にしない（すべてそうなら理由を表示）
+  - 「この条件で監視…」の監視条件・「類似画像の検索」・「ビュー」にもフリーワードが残る
+  - `LIKE '%…%'` は属性インデックスが効かないので、件数の多いカタログでは撮像日や範囲と一緒に使う
+
+```jsonc
+"imageCatalogs": [
+  { "label": "衛星画像", "url": "https://gis.example/arcgis/rest/services/Catalog/FeatureServer/0",
+    "fields": { "id": "IMG_ID", "sensor": "SENSOR", "source": "PATH", "keywords": ["NOTE", "AREA_NAME", "IMG_ID"] },
+    "columns": [{ "field": "NOTE", "label": "備考" }, { "field": "AREA_NAME", "label": "地域" }] }
+]
+```
 
 - 分担（[`assignments`](#分担と引き継ぎメモassignmentshandover)）を設定していると、一覧の最後の列「分担」に画像ごとの状態: 「未着手」（誰も担当にしていない）・「作業中（名前）」「保留（名前）」・「完了（最後に完了にした人）」。検索の後と、ドックを表示している間は 1 分ごとに読み直す。検索ボタンの横の「未着手のみ」で、未着手の画像だけを一覧に出す（読み込み前の行も隠す）
 - 一覧は新しい順で、見出しのクリックで並べ替え（空の値は常に最後）。地図に全件のフットプリント（青）と選んだもの（橙、画像 ID 付き）。「地図で選択」を押すとフットプリントのクリックで選べる（Ctrl・Shift で追加）
@@ -1223,7 +1236,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `imageCatalogs` | 配列 | `url`（必須）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`。`source` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
+| `imageCatalogs` | 配列 | `url`（必須）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`・`keywords`（フリーワード検索の属性）。`source`・`keywords` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
 | `imagePatterns`（`imageCatalogs` の中） | オブジェクト・文字列・配列 | `{ "センサー名": "正規表現" か [ … ], "*": … }`。フォルダのレコードから開く画像を選ぶ | ふつうの画像ファイル | [フォルダのレコードの画像](#フォルダのレコードの画像imagepatterns) |
 | `watchInterval` | 数 | 新着画像を確かめる間隔（分、1〜1440） | 10 | [通知](#通知) |
 | `pathMappings` | 配列 | `prefix`（必須。レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ） | なし | [画像カタログ](#画像カタログ) |

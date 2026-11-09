@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
-from ..esri import own_condition
+from ..esri import EsriError, contains, own_condition
+from ..geocode import kana_variants
 from ..util import is_number, time_of, utc_text
 from .config import CatalogConfig
 
@@ -79,6 +81,8 @@ class CatalogSearch:
     azimuth_to: Optional[float] = None
     #: Extra SQL, ANDed with the rest.
     where: str = ""
+    #: 「フリーワード」: words (space-separated) each found in one of the catalog's `fields.keywords`, partly.
+    keyword: str = ""
 
     def with_(self, **changes: Any) -> "CatalogSearch":
         return replace(self, **changes)
@@ -90,6 +94,66 @@ EMPTY_SEARCH = CatalogSearch()
 def _num(v: float) -> str:
     """A number as JavaScript writes it in a template (20, 7.5)."""
     return str(int(v)) if float(v).is_integer() else repr(float(v))
+
+
+#: The most words of a free word search.
+MAX_WORDS = 10
+#: The most characters of a free word.
+MAX_WORD_LENGTH = 100
+#: The Esri field types a free word is looked for in (unknown types are tried too).
+TEXT_TYPES = ("esriFieldTypeString",)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def words_of(text: str) -> list[str]:
+    """The words of a free word search: split at spaces (full-width too), control characters as spaces, each once."""
+    return list(dict.fromkeys(_CONTROL.sub(" ", text or "").split()))
+
+
+def _wide(text: str) -> str:
+    """ASCII letters, digits and signs as full-width (`WV03` → `ＷＶ０３`), as some catalogs write them."""
+    return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in text)
+
+
+def word_variants(word: str) -> list[str]:
+    """
+    The ways a word may be written in the catalog: as typed, its half-width
+    form (NFKC: `ＷＶ０３` → `WV03`, half-width katakana → full-width), the
+    full-width form of that, and each as hiragana and katakana.
+    """
+    narrow = unicodedata.normalize("NFKC", word)
+    out: list[str] = []
+    for w in (word, narrow, _wide(narrow)):
+        out += kana_variants(w)
+    return list(dict.fromkeys(out))
+
+
+def keyword_condition(catalog: CatalogConfig, types: FieldTypes, text: str) -> list[str]:
+    """
+    The conditions of a free word search (ANDed): for each word, one of the
+    catalog's text `fields.keywords` holds it somewhere (`LIKE`, capitals and
+    small letters alike). The words are values, never SQL: quotes doubled and
+    `%`, `_` and the backslash escaped. [] when nothing is typed or the catalog has no
+    keyword fields; EsriError when it cannot be asked (too many or too long
+    words, no text attribute).
+    """
+    words = words_of(text)
+    names = catalog.keyword_fields
+    if not words or not names:
+        return []
+    if len(words) > MAX_WORDS:
+        raise EsriError(f"フリーワードは {MAX_WORDS} 語まで（{len(words)} 語）")
+    long = next((w for w in words if len(w) > MAX_WORD_LENGTH), None)
+    if long is not None:
+        raise EsriError(f"フリーワードの 1 語は {MAX_WORD_LENGTH} 文字まで（{long[:20]}…）")
+    text_names = [n for n in names if types.get(n) is None or types.get(n) in TEXT_TYPES]
+    if not text_names:
+        raise EsriError(f"フリーワードの属性（{'・'.join(names)}）に文字列の属性なし")
+    parts = []
+    for word in words:
+        either = [contains(n, v, any_case=True) for n in text_names for v in word_variants(word)]
+        parts.append(f"({' OR '.join(either)})")
+    return parts
 
 
 def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -> str:
@@ -121,6 +185,7 @@ def where_of(catalog: CatalogConfig, types: FieldTypes, search: CatalogSearch) -
     if search.where.strip():
         # In parentheses that it cannot close: the catalog's own `where` always applies.
         parts.append(own_condition(search.where))
+    parts += keyword_condition(catalog, types, search.keyword)
     return " AND ".join(parts) if parts else "1=1"
 
 

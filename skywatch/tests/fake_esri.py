@@ -92,11 +92,25 @@ def _compare(v: Any, op: str, other: Any) -> bool:
         return False
 
 
+def _like(pattern: str, escape: Optional[str]) -> "re.Pattern[str]":
+    """A SQL LIKE pattern (`%`, `_`, an escape character) as a regular expression."""
+    out, i = [], 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if escape and ch == escape and i + 1 < len(pattern):
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+            continue
+        out.append(".*" if ch == "%" else "." if ch == "_" else re.escape(ch))
+        i += 1
+    return re.compile("".join(out), re.DOTALL)
+
+
 def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     """
     `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A IN ('x', 'y')`, `A >= 'x'`,
-    `F >= TIMESTAMP '…'`, joined by AND / OR with parentheses. Parts not
-    understood match (as before).
+    `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, joined by
+    AND / OR with parentheses. Parts not understood match (as before).
     """
     if not where or where.strip() == "1=1":
         return True
@@ -108,6 +122,13 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     if len(ands) > 1:
         return all(_matches(p, a) for p in ands)
     part = text
+    m = re.fullmatch(r"(?:UPPER\((\w+)\)|(\w+))\s+LIKE\s+'((?:[^']|'')*)'(?:\s+ESCAPE\s+'(.)')?", part, re.IGNORECASE | re.DOTALL)
+    if m:
+        v = a.get(m.group(1) or m.group(2))
+        if v is None:
+            return False
+        text_value = str(v).upper() if m.group(1) else str(v)
+        return bool(_like(m.group(3).replace("''", "'"), m.group(4)).fullmatch(text_value))
     m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
     if m:
         return a.get(m.group(1)) is None

@@ -13,6 +13,8 @@ from ..util import is_name, is_number, is_record, is_url, layer_url
 from .images import image_patterns_of
 
 ROLE_LABELS = {"id": "画像ID", "acquired": "撮像日時", "registered": "登録日時", "systemRegistered": "システム登録日時", "sensor": "センサー", "angle": "角度", "azimuth": "方位角"}
+#: Every role of `fields` (`source` and `keywords` may be several names).
+FIELD_ROLES = ("id", "acquired", "registered", "systemRegistered", "sensor", "angle", "azimuth", "source", "keywords")
 ANGLE_KINDS = ("offNadir", "incidence", "elevation")
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 
@@ -39,6 +41,17 @@ class CatalogConfig:
         """The heading of a role: the settings file's `labels`, else the viewer's default."""
         return self.labels.get(role) or ROLE_LABELS[role]
 
+    @property
+    def keyword_fields(self) -> list[str]:
+        """The attributes 「フリーワード」 looks in (`fields.keywords`); empty: no free word search."""
+        return list(self.fields.get("keywords") or [])
+
+    def keyword_labels(self) -> list[str]:
+        """The headings of `keyword_fields`: a role's or a column's heading, else the attribute name."""
+        roles = {self.fields[r]: self.label_of(r) for r in ROLE_LABELS if isinstance(self.fields.get(r), str)}
+        columns = {c["field"]: c["label"] for c in self.columns}
+        return [columns.get(n) or roles.get(n) or n for n in self.keyword_fields]
+
     def to_json(self) -> dict[str, Any]:
         """The catalog as a watch keeps it, without its token (the settings file's token is used when checking)."""
         return {
@@ -52,6 +65,8 @@ class CatalogConfig:
     def from_json(value: dict[str, Any]) -> "CatalogConfig":
         fields = dict(value.get("fields") or {})
         fields["source"] = list(fields.get("source") or [])
+        if fields.get("keywords"):
+            fields["keywords"] = [k for k in fields["keywords"] if is_name(k)] if isinstance(fields["keywords"], list) else []
         return CatalogConfig(
             label=str(value.get("label") or ""), url=str(value.get("url") or ""), fields=fields,
             labels=dict(value.get("labels") or {}), columns=[dict(c) for c in value.get("columns") or []],
@@ -90,6 +105,15 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
     if not mapped["source"]:
         problems.append(f"{at} に fields.source（COG の URL かローカルパスの入った属性名）なし")
         return None
+    # 「フリーワード」: the text attributes a word typed is looked for in (partly; a name or several).
+    keywords = fields.get("keywords")
+    if keywords is not None and keywords != "" and keywords != []:
+        names = keywords if isinstance(keywords, list) else [keywords]
+        good = [n for n in names if is_name(n)]
+        if len(good) < len(names):
+            problems.append(f"{at} の fields.keywords は属性名（英数字と _）か、その配列で指定")
+        if good:
+            mapped["keywords"] = list(dict.fromkeys(good))
 
     headings: dict[str, str] = {}
     labels = value.get("labels")

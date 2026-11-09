@@ -382,6 +382,24 @@ def quote(text: str) -> str:
     return "'" + str(text).replace("'", "''") + "'"
 
 
+def like_text(text: str) -> str:
+    """Escapes a text for a SQL LIKE pattern in single quotes (`ESCAPE '\\'`): quotes doubled, `\\ % _` escaped."""
+    # The escape character itself first, so that a trailing \ does not escape the closing %.
+    return re.sub(r"[\\%_]", lambda m: "\\" + m[0], str(text).replace("'", "''"))
+
+
+def contains(field: str, text: str, any_case: bool = False) -> str:
+    """
+    `field` holds `text` anywhere (`LIKE '%…%'`), the text taken as it is (its
+    `%`, `_` and quotes are not SQL); `any_case`: compared in capitals
+    (`UPPER`), so that ASCII letters match either way. `field` is a settings
+    file's attribute name (trusted), not something typed.
+    """
+    name = f"UPPER({field})" if any_case else field
+    value = text.upper() if any_case else text
+    return f"{name} LIKE '%{like_text(value)}%' ESCAPE '\\'"
+
+
 _CONDITION_TOKEN = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|--|/\*|;|[()]|['\"]")
 
 
