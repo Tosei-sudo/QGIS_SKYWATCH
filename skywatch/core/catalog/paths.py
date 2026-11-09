@@ -9,6 +9,11 @@ what each prefix stands for on this computer.
   paths); when it is not there, the folder chosen for the prefix on this
   computer (kept in QgsSettings) is followed down, case-insensitively.
 
+Entries with `pattern` and `to` instead of `prefix` (PathRewrite) are tried
+before all that: a path matching `pattern` is rewritten to `to`
+(`//nas/…/ID` → `D:/ID`), and the rewritten place is opened when it is
+there; otherwise the path goes on as written.
+
 GDAL reads the .ovr, .RPB / _RPC.TXT and .IMD beside an image by itself.
 """
 from __future__ import annotations
@@ -33,12 +38,57 @@ class PathMapping:
     url: Optional[str] = None
 
 
-def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[PathMapping]:
-    """The mapping of one `pathMappings` entry; None (with the reason in `problems`) when it cannot be used."""
+@dataclass(frozen=True)
+class PathRewrite:
+    """
+    A path matching `pattern` (Python re, case ignored, on the path with `/`
+    for `\\`) tried first as `to` (`$1`, `${name}` the groups, `$$` a `$`),
+    the matched part replaced. When nothing is there, the path as written.
+    """
+    pattern: str
+    to: str
+    #: Its name in messages.
+    label: str
+
+
+#: `$1`, `${1}`, `${name}` and `$$` in a rewrite's `to`; any other `$` or `\\` is as written (Windows paths).
+_REF = re.compile(r"\$(?:(\d+)|\{(\w+)\}|(\$))")
+
+
+def _rewrite_of(value: dict, at: str, problems: list[str]) -> Optional[PathRewrite]:
+    pattern, to, label = value.get("pattern"), value.get("to"), value.get("label")
+    if "prefix" in value or "url" in value:
+        problems.append(f"{at} は prefix（・url）か pattern・to のどちらかで指定")
+        return None
+    if not isinstance(pattern, str) or not pattern:
+        problems.append(f"{at} の pattern は正規表現の文字列で指定")
+        return None
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        problems.append(f"{at} の pattern の正規表現が不正（{e}）")
+        return None
+    if not isinstance(to, str) or not to.strip():
+        problems.append(f"{at} に to（読み替え先）なし")
+        return None
+    for ref in _REF.finditer(to):
+        key = ref.group(1) or ref.group(2)
+        if key is None:
+            continue
+        if not (int(key) <= regex.groups if key.isdigit() else key in regex.groupindex):
+            problems.append(f"{at} の to の ${key} は pattern にないグループ")
+            return None
+    return PathRewrite(pattern, to.strip(), label if isinstance(label, str) and label else to.strip())
+
+
+def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[PathMapping | PathRewrite]:
+    """The mapping (or rewrite) of one `pathMappings` entry; None (with the reason in `problems`) when it cannot be used."""
     at = f"pathMappings[{index}]"
     if not is_record(value):
         problems.append(f"{at} はオブジェクトで指定")
         return None
+    if "pattern" in value or "to" in value:
+        return _rewrite_of(value, at, problems)
     prefix, label, url = value.get("prefix"), value.get("label"), value.get("url")
     if not isinstance(prefix, str) or not path_parts(prefix):
         problems.append(f"{at} に prefix（パスの先頭）なし")
@@ -49,7 +99,7 @@ def path_mapping_of(value: Any, problems: list[str], index: int) -> Optional[Pat
     return PathMapping(prefix, label if isinstance(label, str) and label else prefix, url if isinstance(url, str) else None)
 
 
-def path_mappings_of(value: Any, problems: list[str]) -> list[PathMapping]:
+def path_mappings_of(value: Any, problems: list[str]) -> list[PathMapping | PathRewrite]:
     if not isinstance(value, list):
         problems.append("pathMappings は配列で指定")
         return []
@@ -96,11 +146,13 @@ def path_parts(path: str) -> list[str]:
     return [head, *parts] if head else parts
 
 
-def mapping_for(mappings: Sequence[PathMapping], path: str) -> Optional[tuple[PathMapping, list[str]]]:
-    """The mapping with the longest prefix that `path` starts with, and the parts of the path after it."""
+def mapping_for(mappings: Sequence[PathMapping | PathRewrite], path: str) -> Optional[tuple[PathMapping, list[str]]]:
+    """The mapping with the longest prefix that `path` starts with, and the parts of the path after it (rewrites aside)."""
     parts = path_parts(path)
     best: Optional[tuple[PathMapping, list[str], int]] = None
     for mapping in mappings:
+        if not isinstance(mapping, PathMapping):
+            continue
         prefix = path_parts(mapping.prefix)
         if len(prefix) >= len(parts) or (best and len(prefix) <= best[2]):
             continue
@@ -123,6 +175,38 @@ def native_path(path: str) -> str:
     """A catalog's path as this computer opens it (a `file:` URL as its path)."""
     text = path.strip()
     return _file_path(text) or text
+
+
+def rewrite_target(rewrite: PathRewrite, path: str) -> Optional[str]:
+    """
+    Where `rewrite` takes `path` (`\\\\nas\\a\\b\\ID` is matched as `//nas/a/b/ID`,
+    a `file:` URL as its path, without a trailing `/`); None when the
+    pattern does not match.
+    """
+    text = re.sub(r"(?<=[^/:])/+$", "", native_path(path).replace("\\", "/"))
+    m = re.search(rewrite.pattern, text, re.IGNORECASE)
+    if not m:
+        return None
+
+    def ref(r: re.Match) -> str:
+        if r.group(3):
+            return "$"
+        key = r.group(1) or r.group(2)
+        return m.group(int(key) if key.isdigit() else key) or ""
+
+    target = (text[:m.start()] + _REF.sub(ref, rewrite.to) + text[m.end():]).strip()
+    return target or None
+
+
+def rewrites_of(mappings: Sequence[PathMapping | PathRewrite], path: str) -> list[tuple[PathRewrite, str]]:
+    """The places the rewrites take `path` to, in their order (each place once), to try before the path itself."""
+    found: list[tuple[PathRewrite, str]] = []
+    for rewrite in mappings:
+        if isinstance(rewrite, PathRewrite):
+            target = rewrite_target(rewrite, path)
+            if target and all(target != t for _, t in found):
+                found.append((rewrite, target))
+    return found
 
 
 def find_file(root: str, rest: Sequence[str], listdir: Callable[[str], list[str]] = os.listdir) -> Optional[str]:
@@ -163,7 +247,7 @@ class Resolved:
     mapping: Optional[PathMapping] = None
 
 
-def resolve_path(path: str, mappings: Sequence[PathMapping], folder_for: Callable[[str], Optional[str]],
+def resolve_path(path: str, mappings: Sequence[PathMapping | PathRewrite], folder_for: Callable[[str], Optional[str]],
                  exists: Callable[[str], bool] = os.path.exists) -> Resolved:
     """
     Where `path` (a file, or a folder of images) leads: a mapping's URL; the path itself when it is here; the

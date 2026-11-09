@@ -12,7 +12,8 @@ import pytest
 
 from skywatch.core.catalog import catalog_of
 from skywatch.core.catalog.paths import (
-    PathError, PathMapping, find_file, mapping_for, path_mapping_of, path_parts, resolve_path, url_for,
+    PathError, PathMapping, PathRewrite, find_file, mapping_for, path_mapping_of, path_mappings_of, path_parts, resolve_path,
+    rewrite_target, rewrites_of, url_for,
 )
 from skywatch.core.catalog.query import EMPTY_SEARCH, day_range, local_day, where_of
 from skywatch.core.catalog.search import (
@@ -475,6 +476,48 @@ def test_local_paths_open_as_they_are_through_a_url_or_in_the_folder_chosen(tmp_
     with pytest.raises(PathError, match="pathMappings"):
         resolve_path("\\\\elsewhere\\a.tif", MAPPINGS, folder_for)
     assert find_file(str(folder), ["2026", "SCENE.tif"]) == here
+
+
+#: //(host)/(any folders)/(image ID) → D:/(image ID).
+FLAT = {"pattern": "^//[^/]+/(?:[^/]+/)*([^/]+)$", "to": "D:/$1", "label": "手元の複製"}
+
+
+def test_rewrites_take_a_path_matching_their_pattern_somewhere_else():
+    problems = []
+    [rewrite, mapping] = path_mappings_of([FLAT, {"prefix": "\\\\nas\\img", "label": "NAS"}], problems)
+    assert not problems
+    assert rewrite == PathRewrite(FLAT["pattern"], "D:/$1", "手元の複製") and mapping == PathMapping("\\\\nas\\img", "NAS")
+    # UNC paths at any depth (with `\` or `/`, a trailing one, a file: URL), case ignored.
+    for path in ("\\\\nas\\img\\2026\\11\\WV3_0001", "\\\\NAS\\img\\WV3_0001\\", "//nas/a/b/c/d/WV3_0001", "file://nas/img/WV3_0001"):
+        assert rewrite_target(rewrite, path) == "D:/WV3_0001", path
+    # Other paths do not match.
+    assert rewrite_target(rewrite, "C:\\img\\WV3_0001") is None and rewrite_target(rewrite, "/mnt/img/x") is None
+    # Only the matched part is replaced: a prefix for another.
+    swap = PathRewrite("^//nas/img/", "E:\\copy\\", "E")
+    assert rewrite_target(swap, "\\\\nas\\IMG\\2026\\a.tif") == "E:\\copy\\2026/a.tif"
+    # ${n}, ${name} and $$; any other `$` and `\` as written (Windows paths).
+    named = PathRewrite("^//(?P<host>[^/]+)/.*/(\\d{4})_([^/]+)$", "\\\\${host}\\D$\\$2\\${3}$$\\$x", "x")
+    assert rewrite_target(named, "\\\\nas\\img\\2026_scene") == "\\\\nas\\D$\\2026\\scene$\\$x"
+    # The prefix mappings leave rewrites aside; the rewrites keep their order, each place once.
+    assert mapping_for([rewrite, mapping], "\\\\nas\\img\\x.tif") == (mapping, ["x.tif"])
+    second = PathRewrite("^//[^/]+/(?:[^/]+/)*([^/]+)$", "E:/$1", "E")
+    assert rewrites_of([rewrite, mapping, second, rewrite], "\\\\nas\\img\\ID") == [(rewrite, "D:/ID"), (second, "E:/ID")]
+    assert rewrites_of([mapping], "\\\\nas\\img\\ID") == []
+
+
+def test_rewrites_need_a_pattern_and_a_to_with_the_groups_it_has():
+    problems = []
+    entries = [{"pattern": "(", "to": "D:/"}, {"pattern": "x"}, {"pattern": "", "to": "D:/"}, {"pattern": "(a)", "to": "D:/$2"},
+               {"pattern": "(?P<id>a)", "to": "D:/${name}"}, {"prefix": "\\\\nas", "pattern": "x", "to": "D:/"},
+               {"pattern": "x", "to": "D:/", "url": "https://x/"}, {"pattern": "(?P<id>a)(b)", "to": "D:/${id}$2${2}"}]
+    assert path_mappings_of(entries, problems) == [PathRewrite("(?P<id>a)(b)", "D:/${id}$2${2}", "D:/${id}$2${2}")]
+    assert [p.split(" ", 1)[0] for p in problems] == [f"pathMappings[{i}]" for i in range(7)]
+    assert "正規表現が不正" in problems[0] and "to（読み替え先）なし" in problems[1] and "$2 は pattern にないグループ" in problems[3]
+    assert "${name}" not in problems[4] and "$name は pattern にないグループ" in problems[4]
+    assert "どちらか" in problems[5] and "どちらか" in problems[6]
+    # In the settings file as any other entry.
+    config, problems = parse_config({"pathMappings": [FLAT]})
+    assert not problems and config.path_mappings == [PathRewrite(FLAT["pattern"], "D:/$1", "手元の複製")]
 
 
 def test_the_spatial_filter_of_each_kind_of_area():
