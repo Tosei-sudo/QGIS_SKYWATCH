@@ -438,15 +438,15 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | キー | 中身 | 既定 |
 | --- | --- | --- |
 | `name` | フォーマットの名前（必須。通報テーブルの `REPORT_NAME`） | — |
-| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty" }`、固定の文字は `{ "text": "…" }`。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く） | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
+| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "timeZone", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty" }`、固定の文字は `{ "text": "…" }`。日時の項目は `format` でその項目だけの書式（`"%Y/%m/%d"` で日付だけ、`"%H:%M"` で時刻だけ）、`timeZone` でその項目だけのタイムゾーン（`{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }` で UTC の時刻。ゾーン名は `%z`（`+0900`）か `suffix` で付ける）。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く） | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
 | `delimiter` | 区切り文字（タブは `"\t"`） | `\|` |
 | `escape` | 値の中の区切り文字・改行の置き換え | 空白 |
-| `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}` | なし |
+| `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}`。`@` のあとにタイムゾーンを書くとそのゾーンで（`{now:%H:%M@UTC}`・`{date@UTC}`） | なし |
 | `dateFormat` | 日時の書式（strftime。`iso`・`iso-date`・`unix`・`unixms` も可） | `%Y-%m-%d %H:%M` |
-| `timeZone` | 日時のタイムゾーン | `Asia/Tokyo` |
+| `timeZone` | 日時のタイムゾーン（項目・`{now}` で別のゾーンを書いたもの以外） | `Asia/Tokyo` |
 | `newline` | `crlf`・`lf` | `crlf` |
 | `clipboard` | 「通報」でクリップボードへコピー | `true` |
-| `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}` | なし |
+| `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可） | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
 
 項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）。
@@ -472,9 +472,11 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   "default": "速報",
   "formats": [
     { "name": "速報", "delimiter": "|", "dateFormat": "%m/%d %H:%M",
-      "fields": ["imageTime", { "source": "kind", "level": 1 }, "objectName", "activity",
+      "fields": [{ "source": "imageTime", "format": "%Y/%m/%d" }, { "source": "imageTime", "format": "%H:%M", "suffix": "JST" },
+                 { "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" },
+                 { "source": "kind", "level": 1 }, "objectName", "activity",
                  { "source": "place", "omitEmpty": true }, { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
-      "header": "【注目】{date} {count}件", "footer": "以上" },
+      "header": "【注目】{date} JST（{now:%H%M@UTC}Z） {count}件", "footer": "以上" },
     { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
       "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
   ]
