@@ -1,8 +1,9 @@
 """
 「レイヤーから取り込み」: which layer, which attribute names the requests,
-and whether only the selected features. Only the shapes and names come from
-the layer; the rest (period, priority, satellites …) is filled in once in
-the request form for all of them (tsudo, 2026-11-07).
+which give their 管理番号 and 識別番号 (tsudo, 2026-11-09), and whether only
+the selected features. Only the shapes, names and numbers come from the
+layer; the rest (period, priority, satellites …) is filled in once in the
+request form for all of them (tsudo, 2026-11-07).
 
 「台帳と同じ属性も読む」 instead reads every item from the layer's attributes
 (a layer written out by 「レイヤーへ書き出し」, taken back in).
@@ -16,6 +17,8 @@ from qgis.gui import QgsFieldComboBox, QgsMapLayerComboBox
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel, QRadioButton, QVBoxLayout,
 )
+
+from ..core.request.rows import field_roles
 
 #: Vector layers with geometries (polygons, points, lines).
 try:
@@ -41,6 +44,15 @@ class LayerImportDialog(QDialog):
         self.name_field.setAllowEmptyFieldName(True)
         self.name_field.setToolTip(self.tr("依頼の名称にする属性（空なら「レイヤー名 連番」）"))
         form.addRow(self.tr("名称の属性"), self.name_field)
+        # Guessed only from a field named as the ledger or 「レイヤーへ書き出し」 names it (MANAGEMENT_NO, 管理番号 …).
+        self.management_field = QgsFieldComboBox()
+        self.management_field.setAllowEmptyFieldName(True)
+        self.management_field.setToolTip(self.tr("依頼の管理番号にする属性（空なら入力画面で入れた値。属性が空の地物も同じ）"))
+        form.addRow(self.tr("管理番号の属性"), self.management_field)
+        self.identification_field = QgsFieldComboBox()
+        self.identification_field.setAllowEmptyFieldName(True)
+        self.identification_field.setToolTip(self.tr("依頼の識別番号にする属性（空なら入力画面で入れた値。属性が空の地物も同じ）"))
+        form.addRow(self.tr("識別番号の属性"), self.identification_field)
         self.selected_only = QCheckBox(self.tr("選択中の地物のみ"))
         form.addRow("", self.selected_only)
         self.point_km = QDoubleSpinBox()
@@ -50,7 +62,7 @@ class LayerImportDialog(QDialog):
         self.point_km.setToolTip(self.tr("点の地物の範囲（正方形）の一辺"))
         form.addRow(self.tr("点の範囲の一辺"), self.point_km)
         layout.addLayout(form)
-        self.simple = QRadioButton(self.tr("範囲と名称だけ取り込み、ほかの項目は入力画面でまとめて指定"))
+        self.simple = QRadioButton(self.tr("範囲・名称・番号だけ取り込み、ほかの項目は入力画面でまとめて指定"))
         self.simple.setChecked(True)
         self.full = QRadioButton(self.tr("台帳と同じ属性も読む（「レイヤーへ書き出し」したものを戻すとき。依頼ID が同じものは上書き）"))
         layout.addWidget(self.simple)
@@ -75,19 +87,29 @@ class LayerImportDialog(QDialog):
         layer = self.layer.currentLayer()
         return layer if isinstance(layer, QgsVectorLayer) else None
 
+    def fields(self) -> dict:
+        """The attributes chosen, by item: name, management_no, identification_no ("" for none)."""
+        return {"name": self.name_field.currentField(), "management_no": self.management_field.currentField(),
+                "identification_no": self.identification_field.currentField()}
+
     def _layer_changed(self, layer) -> None:
-        self.name_field.setLayer(layer)
+        for combo in (self.name_field, self.management_field, self.identification_field):
+            combo.setLayer(layer)
         if isinstance(layer, QgsVectorLayer):
             names = [f.name() for f in layer.fields()]
             guess = next((n for hint in _NAME_HINTS for n in names if n.lower() == hint), "") or next(
                 (n for n in names if "名" in n or "name" in n.lower()), "")
             self.name_field.setField(guess)
+            roles = field_roles(names)
+            self.management_field.setField(roles.get("managementNo", ""))
+            self.identification_field.setField(roles.get("identificationNo", ""))
             self.selected_only.setChecked(layer.selectedFeatureCount() > 0)
         self._update()
 
     def _update(self) -> None:
         layer = self.chosen_layer()
-        self.name_field.setEnabled(not self.full.isChecked())
+        for combo in (self.name_field, self.management_field, self.identification_field):
+            combo.setEnabled(not self.full.isChecked())
         if layer is None:
             self.count.setText(self.tr("取り込むレイヤー（ポリゴン・点・線）を選択"))
             self.ok.setEnabled(False)

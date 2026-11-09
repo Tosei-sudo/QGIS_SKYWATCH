@@ -22,7 +22,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.bulk import RequestChange, apply_change
 from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
-from ..core.request.rows import field_roles, request_of_row, row_problems
+from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
 from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, waiting_ids
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
@@ -125,7 +125,7 @@ class RequestDock(PluginDock):
 
         layers = QHBoxLayout()
         self.import_button = QPushButton(self.tr("レイヤーから取り込み…"))
-        self.import_button.setToolTip(self.tr("レイヤーと名称の属性を選び、地物の範囲と名称で依頼を登録。"
+        self.import_button.setToolTip(self.tr("レイヤーと名称・管理番号・識別番号の属性を選び、地物の範囲と名称・番号で依頼を登録。"
                                               "期間・優先度・衛星などは入力画面でまとめて指定"))
         self.import_button.clicked.connect(lambda: self.import_layer())
         #: The side of a point feature's square last used.
@@ -231,7 +231,7 @@ class RequestDock(PluginDock):
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
                       and (self.status_filter.currentIndex() == 0 or r.status == st)]
         self.model.clear()
-        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "区分", "達成条件", "期間", "優先度", "種別", "状態")])
+        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態")])
         chosen_row = -1
         try:
             # Saved while the ledger could not be reached, waiting to be sent (core/offline.py): marked blue.
@@ -241,9 +241,10 @@ class RequestDock(PluginDock):
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
             items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
+                                                r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
                                                 r.achieve, _period(r), prio, r.kind, r.status)]
-            items[6].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
+            items[-1].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
             if r.id in waiting:
@@ -465,15 +466,18 @@ class RequestDock(PluginDock):
             if dialog.full.isChecked():
                 self.import_rows(layer, selected=selected)
             else:
-                self.take_layer(layer, dialog.name_field.currentField(), selected)
+                fields = dialog.fields()
+                self.take_layer(layer, fields["name"], selected, fields["management_no"], fields["identification_no"])
 
         dialog.accepted.connect(chosen)
         dialog.finished.connect(lambda _r: dialog.deleteLater())
         dialog.open()
         return dialog
 
-    def take_layer(self, layer: QgsVectorLayer, name_field: str = "", selected: bool = False):
-        """Opens the form for the features of a layer: their areas and names (`name_field`) as they are, the rest asked once."""
+    def take_layer(self, layer: QgsVectorLayer, name_field: str = "", selected: bool = False,
+                   management_field: str = "", identification_field: str = ""):
+        """Opens the form for the features of a layer: their areas, names (`name_field`) and 管理番号・識別番号 (the
+        attributes named) as they are, the rest asked once (a number a feature lacks: the one typed in the form)."""
         from .request_form import RequestForm
 
         if self.store is None:
@@ -486,7 +490,9 @@ class RequestDock(PluginDock):
                 continue
             name = values.get(name_field) if name_field else None
             name = str(name).strip() if name not in (None, "") else ""
-            items.append((name or f"{layer.name()} {i + 1}", rings, kind))
+            numbers = {"management_no": code_text(values.get(management_field)) if management_field else "",
+                       "identification_no": code_text(values.get(identification_field)) if identification_field else ""}
+            items.append((name or f"{layer.name()} {i + 1}", rings, kind, numbers))
         if not items:
             self.status.setText(self.tr("取り込める地物なし（範囲のない地物のみ）"))
             return None
@@ -494,12 +500,18 @@ class RequestDock(PluginDock):
             self.form.close()
         base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
         base.category, base.achieve = "定点", "毎回"
-        names = "、".join(n for n, _r, _k in items[:3]) + ("…" if len(items) > 3 else "")
-        text = self.tr("レイヤー「{layer}」の地物 {n} 件（名称: {field}）").format(
+        names = "、".join(n for n, *_rest in items[:3]) + ("…" if len(items) > 3 else "")
+        text = self.tr("レイヤー「{layer}」の地物 {n} 件（名称: {field}").format(
             layer=layer.name(), n=len(items), field=name_field or self.tr("レイヤー名と連番"))
+        if management_field:
+            text += self.tr("・管理番号: {field}").format(field=management_field)
+        if identification_field:
+            text += self.tr("・識別番号: {field}").format(field=identification_field)
+        text += self.tr("）")
         if skipped:
             text += self.tr("・範囲のない地物 {k} 件は除く").format(k=skipped)
-        batch = {"items": items, "text": text, "names": names}
+        batch = {"items": items, "text": text, "names": names,
+                 "fields": {"management_no": management_field, "identification_no": identification_field}}
         self.form = RequestForm(self.iface, base, lambda template: self._save_batch(template, items), self.known(), self,
                                 satellites=self.satellites, batch=batch)
         self.form.show()
@@ -510,10 +522,13 @@ class RequestDock(PluginDock):
         store, client, token = self.store, self.context.esri(), self.token()
         form = self.form
         todo = []
-        for name, rings, kind in items:
+        for name, rings, kind, numbers in items:
             r = ImagingRequest(**{**template.__dict__})
             r.id, r.object_id = new_request_id(), None
             r.name, r.rings, r.shape_kind = name, [list(x) for x in rings], kind
+            # The feature's own numbers; one it lacks is the form's.
+            r.management_no = numbers.get("management_no") or template.management_no
+            r.identification_no = numbers.get("identification_no") or template.identification_no
             todo.append(r)
 
         def work(task):

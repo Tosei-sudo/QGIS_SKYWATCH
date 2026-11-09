@@ -6,8 +6,9 @@ clicked as a point with a size, or taken from the selected feature.
 
 It stays open beside the map (not modal) so the area can be drawn.
 
-Given `batch` (「レイヤーから取り込み」), the names and areas are the layer's
-features: the form then asks only the rest, once for all of them.
+Given `batch` (「レイヤーから取り込み」), the names and areas (and the
+管理番号・識別番号 when attributes give them) are the layer's features: the
+form then asks only the rest, once for all of them.
 """
 from __future__ import annotations
 
@@ -503,7 +504,13 @@ class RequestForm(QDialog):
         for w in (self.box_button, self.point_button, self.size, self.selected_button):
             w.hide()
         self.area_label.setText(batch.get("text", ""))
-        self.overlay.paint([(rings, "#f59e0b", 2, name) for name, rings, _kind in batch["items"]])
+        self.overlay.paint([(rings, "#f59e0b", 2, name) for name, rings, *_rest in batch["items"]])
+        # Numbers from the layer's attributes: what is typed here is for the features whose attribute is empty.
+        fields = batch.get("fields") or {}
+        for key, edit in (("management_no", self.management_no), ("identification_no", self.identification_no)):
+            if fields.get(key):
+                edit.setPlaceholderText(self.tr("属性「{field}」から").format(field=fields[key]))
+                edit.setToolTip(self.tr("属性「{field}」の値で登録。ここに入れた値は属性が空の地物に").format(field=fields[key]))
         self.canvas.refresh()
 
     def _area_changed(self) -> None:
