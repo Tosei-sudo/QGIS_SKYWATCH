@@ -7,7 +7,8 @@ The workings are core.obs.book.ObservationBook; this dock shows it, sends
 the map's clicks to it, and runs what an Esri store answers in a task (the
 local GeoPackage answers at once, on this thread). Keys work while the dock
 has the focus: PageUp / PageDown step through the images, R records by
-clicks, L by two points, A a checked area, 1–9 pick an activity, Alt+1–5 a
+clicks, L by two points, A a checked area, S 「連続」 and G 「並べる」 (many
+alike things as a 見本, ui/obs_many.py), 1–9 pick an activity, Alt+1–5 a
 match candidate, Esc steps back.
 """
 from __future__ import annotations
@@ -57,6 +58,7 @@ from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
 from .flow_layout import FlowLayout
 from .list_views import ListViews, column_menus
+from .obs_many import ManyPanel
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
 from .obs_tool import ObservationTool
 
@@ -209,7 +211,8 @@ class ObservationDock(PluginDock):
         self.overlay.hide()
         self.tool = ObservationTool(self.canvas, self.overlay, self.map_clicked, self.map_hovered, self.map_dragged,
                                     lambda: self.active and not self.area_mode and not self.rear, self.escape,
-                                    self.map_entered)
+                                    self.map_entered, double_clicked=self.many.double_clicked, turned=self.many.turned,
+                                    stamping=lambda: self.many.stamping, undo=self.many.undo, stepped=self.many.step)
         self.tool.deactivated.connect(self._tool_gone)
         self.canvas.extentsChanged.connect(self._extent_changed)
         project = QgsProject.instance()
@@ -341,6 +344,15 @@ class ObservationDock(PluginDock):
         self.points_select.currentIndexChanged.connect(lambda _i: self.set_points(self.points_select.currentData()))
         self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは不在）（A）"),
                                         self.set_area_mode, checkable=True)
+        # Many alike things (ui/obs_many.py): put down as the 見本.
+        self.stamp_button = self._button(tr("連続"), tr("見本と同じものを続けて記録（S）\n"
+                                                        "ダブルクリック: 見本と同じ向きで記録\n"
+                                                        "押してドラッグ: ドラッグした方へ向けて記録\n"
+                                                        "Backspace: 1 つ取り消し"),
+                                         lambda on: self.set_many_mode("stamp" if on else ""), checkable=True)
+        self.row_button = self._button(tr("並べる"), tr("見本と同じものを列・格子に並べて記録（G）\n"
+                                                      "列の両端（格子はさらに最後の列の始め）をクリックし、数を合わせて Enter"),
+                                       lambda on: self.set_many_mode("row" if on else ""), checkable=True)
         for w in (self.record_button, self.points_select, self.area_button):
             row.addWidget(w)
         row.addStretch(1)
@@ -368,6 +380,15 @@ class ObservationDock(PluginDock):
         row.addWidget(self.carry_all_button)
         row.addWidget(self.absent_inside_button)
         b.addLayout(row)
+        # 「見本で記録」: its own row (the recording row is full), the panel shown while 連続 or 並べる is on.
+        row = QHBoxLayout()
+        row.addWidget(QLabel(tr("同じものが並ぶとき")))
+        row.addWidget(self.stamp_button)
+        row.addWidget(self.row_button)
+        row.addStretch(1)
+        b.addLayout(row)
+        self.many = ManyPanel(self)
+        b.addWidget(self.many)
 
         # A checked area.
         self.area_form = QGroupBox(tr("確認範囲"))
@@ -706,6 +727,11 @@ class ObservationDock(PluginDock):
         key(self, "ObsPoints", "観測記録（ドック内）: 入力点数の切り替え", "L", lambda: self.set_points(self.points % 4 + 1))
         key(self, "ObsArea", "観測記録（ドック内）: 確認範囲の記録", "A", lambda: self.area_button.setChecked(not self.area_mode))
         key(self, "ObsMarks", "観測記録（ドック内）: 地図の印の表示・非表示", "H", self.toggle_marks)
+        key(self, "ObsStamp", "観測記録（ドック内）: 連続（見本で続けて記録）", "S", lambda: self.stamp_button.setChecked(not self.stamp_button.isChecked()))
+        key(self, "ObsRow", "観測記録（ドック内）: 並べる（見本を列・格子に）", "G", lambda: self.row_button.setChecked(not self.row_button.isChecked()))
+        key(self, "ObsUndoMany", "観測記録（ドック内）: 連続・並べるの 1 つ取り消し", "Backspace", lambda: self.many.undo() if self.many.mode else None)
+        key(self, "ObsRowMore", "観測記録（ドック内）: 並べる数を 1 つ増やす", "+", lambda: self.many.step(1))
+        key(self, "ObsRowFewer", "観測記録（ドック内）: 並べる数を 1 つ減らす", "-", lambda: self.many.step(-1))
         for n in range(1, 10):
             key(self, f"ObsActivity{n}", f"観測記録（ドック内）: 活動 {n} 番目", str(n), lambda n=n: self._chip(n))
         for n in range(1, 6):
@@ -762,6 +788,9 @@ class ObservationDock(PluginDock):
             self.render()
             return
         self.close_form()
+        if self.many.mode:
+            self.set_many_mode("")
+        self.many.reset()
         self.store_set = self.sets[index]
         self._observer_cache = self._observer()
         self.book = self._book_of(self.store_set)
@@ -1132,6 +1161,7 @@ class ObservationDock(PluginDock):
         """
         self.close_form()
         self._clear_points()
+        self.many.went()
         image = self.book.current if self.book else None
         if self.active and self.assignment_bar.needs_claim(image):
             self.set_active(False)
@@ -1330,6 +1360,8 @@ class ObservationDock(PluginDock):
         if not on:
             self._clear_points()
             self.close_form()
+            if self.many.mode:
+                self.set_many_mode("")
         elif not quiet:
             self._say(HINT_POINTS.get(self.points, HINT))
         self.draw()
@@ -1387,6 +1419,9 @@ class ObservationDock(PluginDock):
         self.points = n
         self._clear_points()
         settings.set_point_count(n)
+        if self.many.mode:
+            # Measuring is by the form: 連続・並べる end.
+            self.set_many_mode("")
         if n > 1 and not self.active:
             self.set_active(True, quiet=True)
         self._say(HINT_POINTS.get(n, HINT))
@@ -1403,6 +1438,34 @@ class ObservationDock(PluginDock):
             self._clear_points()
             self.draw()
         settings.set_point_count(n)
+
+    def set_many_mode(self, mode: str) -> None:
+        """
+        「連続」 ('stamp'), 「並べる」 ('row') or neither (''): many alike things
+        put down as the 見本 (ui/obs_many.py); either starts 「クリック記録」.
+        """
+        mode = mode if mode in ("stamp", "row") else ""
+        if mode and (self.book is None or self.book.current is None):
+            self._say(NO_IMAGE)
+            mode = ""
+        for button, m in ((self.stamp_button, "stamp"), (self.row_button, "row")):
+            if button.isChecked() != (mode == m):
+                button.blockSignals(True)
+                button.setChecked(mode == m)
+                button.blockSignals(False)
+        if mode:
+            if self.area_mode:
+                self.set_area_mode(False)
+            self._clear_points()
+            self.cursor = None
+        self.many.set_mode(mode)
+        if mode and not self.active:
+            self.set_active(True, quiet=True)
+            if self.active:
+                self.many.set_mode(mode)
+        if mode:
+            self.reveal(self.many)
+        self.draw()
 
     def set_two_point(self, on: bool) -> None:
         """「2 点」 on (rear then front) or off (a point), as before the 3 and 4 points."""
@@ -1431,6 +1494,8 @@ class ObservationDock(PluginDock):
         self.area_form.setVisible(on)
         self._use_tool(on or self.active)
         if on:
+            if self.many.mode:
+                self.set_many_mode("")
             self.close_form()
             self._clear_points()
             self.area_kind.clear()
@@ -1463,6 +1528,8 @@ class ObservationDock(PluginDock):
             self.draw()
         elif self.form.isVisible():
             self.close_form()
+        elif self.many.escape():
+            pass
         elif self.list_form.isVisible():
             self.list_button.setChecked(False)
 
@@ -1483,6 +1550,8 @@ class ObservationDock(PluginDock):
             self.draw()
             return
         if not self.active:
+            return
+        if self.many.mode and self.many.clicked(lon, lat, mark):
             return
         if self.rear is None and mark is not None and mark.key:
             if mark.role == "obs":
@@ -1518,7 +1587,8 @@ class ObservationDock(PluginDock):
         self.open_form(m.lon, m.lat, measured=(m.length, m.heading, m.width))
 
     def map_hovered(self, lon: float, lat: float) -> None:
-        if self.rear is not None or (self.area_mode and self.area_corner is not None and self.area_ring is None):
+        if self.rear is not None or (self.area_mode and self.area_corner is not None and self.area_ring is None) or (
+                self.many.mode and self.active and not self.area_mode):
             self.cursor = (lon, lat)
             self.draw()
 
@@ -1621,6 +1691,7 @@ class ObservationDock(PluginDock):
         self._render_candidates()
         self.draw()
         # A new thing gets its name typed; a known one is saved with Enter (or 1–9 picks its activity first).
+        self.many.render()
         self.raise_()
         (self.submit_button if known else self.object_input).setFocus()
         self._filled = self.form_values()
@@ -1632,6 +1703,7 @@ class ObservationDock(PluginDock):
             return
         self.pending = None
         self.form.hide()
+        self.many.render()
         self.offered = []
         self._clear(self.candidates_layout)
         self.candidates_box.hide()
@@ -1663,7 +1735,7 @@ class ObservationDock(PluginDock):
                 "記録を保存できませんでした（送信待ちに保管しました）: {m}").format(m=message)))
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None),
-                lambda saved: lost(self.status.text()) if saved is None else None, watch=True, failed=lost)
+                lambda saved: lost(self.status.text()) if saved is None else self.many.use_record(saved), watch=True, failed=lost)
 
     def _numbers_readable(self) -> bool:
         """
@@ -1940,6 +2012,8 @@ class ObservationDock(PluginDock):
             self.submit(True)
         elif self.area_form.isVisible():
             self._submit_area()
+        else:
+            self.many.entered()
 
     def map_entered(self) -> bool:
         """Enter with the map focused (the dock's keys are not active then): the open form or area saved."""
@@ -1949,7 +2023,7 @@ class ObservationDock(PluginDock):
         if self.area_mode and self.area_form.isVisible():
             self._submit_area()
             return True
-        return False
+        return self.many.entered()
 
     def _candidate_key(self, n: int) -> None:
         if self.form.isVisible() and 0 < n <= len(self.offered):
@@ -2921,6 +2995,8 @@ class ObservationDock(PluginDock):
                 s.cursor = self.cursor
                 m = two_point(self.cursor, self.rear)
                 s.rubber_label = f"{km_text(m.length)}・{heading_text(m.heading)}"
+        if image is not None:
+            self.many.paint_into(s, color, self.cursor if self.many.mode and self.active and not self.area_mode else None)
         return s
 
     def set_mark_style(self, style: str) -> None:

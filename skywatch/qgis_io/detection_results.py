@@ -69,6 +69,11 @@ def _ms(value) -> Optional[int]:
     return None
 
 
+def _number(value) -> Optional[float]:
+    value = _plain(value)
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value == value else None
+
+
 def local_source(layer: QgsVectorLayer, kinds: Optional[dict] = None) -> AiResultSource:
     """The source the dock lists a detection layer's results under (its name; no continuation radii of its own)."""
     return AiResultSource(label=layer.name(), url="", fields={"imageId": "image_id"}, kinds=dict(kinds or {}), local=True)
@@ -84,6 +89,8 @@ def detection_results(layer: QgsVectorLayer, image_id: str, kinds_of: Callable[[
     fields = layer.fields()
     to_wgs84 = QgsCoordinateTransform(layer.crs(), WGS84, QgsProject.instance()) if layer.crs() != WGS84 else None
     has_note = fields.indexOf("note") >= 0
+    # 「似たものを探す」 (qgis_io/similar_io.py) says the 見本's heading, size, 活動 and 確度 too.
+    extra = {name for name in ("heading", "length_m", "width_m", "activity", "confidence") if fields.indexOf(name) >= 0}
     out: list[tuple[AiResult, int]] = []
     for f in layer.getFeatures():
         if text_of(_plain(f["image_id"])) != image_id:
@@ -102,8 +109,12 @@ def detection_results(layer: QgsVectorLayer, image_id: str, kinds_of: Callable[[
         out.append((AiResult(
             source=run, oid=f.id(), key=str(f.id()), image_id=image_id, cls=cls,
             score=float(score) if isinstance(score, (int, float)) else None, model=model, detected_at=detected,
-            name="", kind=detected_kind(cls, kinds_of(model), taxonomy), activity="", length=None, heading=None,
+            name="", kind=detected_kind(cls, kinds_of(model), taxonomy),
+            activity=text_of(_plain(f["activity"])) if "activity" in extra else "",
+            length=_number(f["length_m"]) if "length_m" in extra else None,
+            heading=_number(f["heading"]) if "heading" in extra else None,
             note=text_of(_plain(f["note"])) if has_note else "", geometry=g if g is not None and not g.isEmpty() else None,
-            attributes={},
+            attributes={}, width=_number(f["width_m"]) if "width_m" in extra else None,
+            confidence=text_of(_plain(f["confidence"])) if "confidence" in extra else "",
         ), f.id()))
     return out
