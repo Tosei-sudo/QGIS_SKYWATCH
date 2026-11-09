@@ -315,6 +315,50 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert (rows[osaka]["RESULT"], rows[osaka]["CAPTURED"]) == ("見送り", "")
     assert rows[osaka]["REASON"].startswith("書き出し失敗")
 
+    # Each system by its own person (2026-11-09): with a system chosen, only its file, history rows and raises.
+    (tmp_path / "sys-b.schema.json").write_text(json.dumps(SCHEMA), encoding="utf-8")
+    kure = next(x.id for x in dock.requests if x.name == "呉")
+    a_file = next(x for x in paths if "SYS-A" in x)
+    a_text = open(a_file, encoding="cp932").read()
+    daily.reset()
+    daily.run()
+    assert wait_for(lambda: daily.task is None and "候補 3 件" in daily.status.text()), daily.status.text()
+    # All systems: nothing pinned, 横須賀 back in SYS-A.
+    got = {c.request.name: (c.result, c.system.system if c.system else "", bool(c.pinned)) for c in daily.plan.candidates}
+    assert got == {"横須賀": ("採用", "SYS-A", False), "呉": ("見送り", "", False), "大阪湾": ("採用", "SYS-B", False)}
+    assert daily.write_button.text() == "書き出し"
+    # SYS-B's person: 呉 is in SYS-A's file (written earlier), so it stays there and 横須賀 is held back.
+    daily.system_filter.setCurrentIndex(daily.system_filter.findData("SYS-B"))
+    got = {c.request.name: (c.result, c.system.system if c.system else "", bool(c.pinned)) for c in daily.plan.candidates}
+    assert got == {"横須賀": ("見送り", "", False), "呉": ("採用", "SYS-A", True), "大阪湾": ("採用", "SYS-B", False)}
+    assert listed() == ["大阪湾"] and daily.write_button.text() == "B を書き出し" and daily.write_button.isEnabled()
+    before = {r["attributes"]["REQ_ID"]: dict(r["attributes"]) for r in fake.layers[HISTORY].rows}
+    daily.paths = []
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(daily.paths) == 1 and "置き換え" in daily.status.text()), daily.status.text()
+    assert "SYS-B" in daily.paths[0] and open(a_file, encoding="cp932").read() == a_text
+    rows = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    assert len(fake.layers[HISTORY].rows) == 3 and (rows[osaka]["RESULT"], rows[osaka]["SYSTEM"]) == ("採用", "SYS-B")
+    # SYS-A's rows (and the held one without a system) are left as they were.
+    assert rows[kure] == before[kure] and rows[yokosuka] == before[yokosuka]
+    # Someone writes SYS-A meanwhile: writing SYS-B stops until 計算 is done again.
+    fake.layers[HISTORY].add({"RUN_ID": "OTHER", "TARGET_DAY": daily.plan.day.isoformat(), "REQ_ID": yokosuka, "SYSTEM": "SYS-A",
+                              "SATELLITE": "OPT 1", "RESULT": "採用", "CAPTURED": "未判定", "BOOST_DONE": 0})
+    daily.paths = []
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and "計算" in daily.status.text()), daily.status.text()
+    assert daily.paths == [] and "A" in daily.status.text() and len(fake.layers[HISTORY].rows) == 4
+    daily.run()
+    assert wait_for(lambda: daily.task is None and "書き出し済み 2 件" in daily.status.text()), daily.status.text()
+    got = {c.request.name: (c.result, c.system.system, bool(c.pinned)) for c in daily.plan.candidates}
+    assert got == {"横須賀": ("採用", "SYS-A", True), "呉": ("採用", "SYS-A", True), "大阪湾": ("採用", "SYS-B", False)}
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(daily.paths) == 1), daily.status.text()
+    assert len(fake.layers[HISTORY].rows) == 4
+    # 該当システムなし: nothing to write.
+    daily.system_filter.setCurrentIndex(daily.system_filter.findData(""))
+    assert not daily.write_button.isEnabled()
+
 
 def test_plan_results_against_the_catalog(plugin):
     p, iface, fake, tmp_path = plugin

@@ -8,6 +8,13 @@ clicked and the line to the pointer while measuring.
 
 One canvas item paints everything (nothing is added to the project); the
 places are WGS 84 and follow the canvas's CRS.
+
+Styles (「印」, tsudo 2026-11-09: the marks hid what they mark): 'normal' as
+above; 'outline' paints nothing filled (rings instead of dots, the outlines
+and areas as frames, the line of a record with a width left out, other
+lines thin) so the image shows through; 'hidden' paints only what is being
+put in (the place clicked, the points while measuring, the area being made)
+and the record open in the form.
 """
 from __future__ import annotations
 
@@ -21,6 +28,9 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QBrush, QColor, QFont, QFontMetricsF, QPainterPath, QPen, QPolygonF
 
 from ..qgis_io.geometry import from_wgs84
+
+#: The styles, in the order the dock offers them.
+STYLES = ("normal", "outline", "hidden")
 
 #: Colours of the top classes, in the order they come (as the viewer).
 PALETTE = ["#e11d48", "#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5"]
@@ -84,9 +94,11 @@ def _halo_text(painter, at: QPointF, text: str, color: str, font: QFont, align_l
 class ScenePainter:
     """Paints a Scene through `to_pixel(lon, lat)` → QPointF (the canvas's, or a report map's)."""
 
-    def __init__(self, to_pixel: Callable[[float, float], QPointF], scale: float = 1.0):
+    def __init__(self, to_pixel: Callable[[float, float], QPointF], scale: float = 1.0, style: str = "normal"):
         self.to_pixel = to_pixel
         self.scale = scale
+        #: 'normal', 'outline' or 'hidden' (see the module's note).
+        self.style = style
         self._font = QFont()
         self._font.setPointSizeF(9 * scale)
         self._bold = QFont(self._font)
@@ -94,15 +106,21 @@ class ScenePainter:
         #: Where each mark was painted, for hits.
         self.painted: list[tuple[QPointF, Mark]] = []
 
+    @property
+    def hollow(self) -> bool:
+        return self.style == "outline"
+
     def paint(self, painter, s: Scene) -> None:
         k = self.scale
         painter.setRenderHint(painter.RenderHint.Antialiasing, True)
         self.painted = []
-        for ring, label in s.areas:
+        hidden = self.style == "hidden"
+        marks = [m for m in s.marks if m.editing] if hidden else s.marks
+        for ring, label in [] if hidden else s.areas:
             self._area(painter, ring, label, "#0f766e", QColor(15, 118, 110, 18))
         if s.area_pending:
             self._area(painter, s.area_pending, "", "#e11d48", QColor(225, 29, 72, 20))
-        for track in [s.track, *s.tracks]:
+        for track in [] if hidden else [s.track, *s.tracks]:
             if len(track) < 2:
                 continue
             points = QPolygonF([self.to_pixel(*p) for p in track])
@@ -113,13 +131,13 @@ class ScenePainter:
             pen.setDashPattern([3, 2])
             painter.setPen(pen)
             painter.drawPolyline(points)
-        for mark in s.marks:
+        for mark in marks:
             if mark.outline:
                 self._outline(painter, mark.outline, mark.color, mark.role == "ghost")
-        for mark in s.marks:
+        for mark in marks:
             if mark.ends:
                 self._line(painter, mark)
-        for mark in s.marks:
+        for mark in marks:
             self._mark(painter, mark)
         if s.pending:
             self._cross(painter, self.to_pixel(*s.pending))
@@ -152,7 +170,7 @@ class ScenePainter:
         pen = QPen(QColor(color), 2 * self.scale)
         pen.setDashPattern([4, 2])
         painter.setPen(pen)
-        painter.setBrush(QBrush(fill))
+        painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(fill))
         painter.drawPolygon(QPolygonF(points))
         if label:
             # Its name at its top left corner, clear of the marks inside.
@@ -171,7 +189,7 @@ class ScenePainter:
         painter.setPen(pen)
         fill = QColor(color)
         fill.setAlpha(20 if dashed else 45)
-        painter.setBrush(QBrush(fill))
+        painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(fill))
         painter.drawPolygon(points)
 
     def _cross(self, painter, at: QPointF) -> None:
@@ -185,21 +203,29 @@ class ScenePainter:
         front = self.to_pixel(*mark.ends[0])
         rear = self.to_pixel(*mark.ends[1])
         ghost = mark.role == "ghost"
-        painter.setPen(QPen(QColor("white"), (4 if ghost else 6) * k))
-        painter.drawLine(front, rear)
-        pen = QPen(QColor(mark.color), (2 if ghost else 3) * k)
-        if ghost:
-            pen.setDashPattern([2, 2])
-        painter.setPen(pen)
-        painter.drawLine(front, rear)
+        if not self.hollow:
+            painter.setPen(QPen(QColor("white"), (4 if ghost else 6) * k))
+            painter.drawLine(front, rear)
+        if not (self.hollow and mark.outline):
+            # Hollow: the outline shows the length already; a line alone is thin (it lies along the thing).
+            pen = QPen(QColor(mark.color), (1.5 if self.hollow else 2 if ghost else 3) * k)
+            if ghost:
+                pen.setDashPattern([2, 2])
+            painter.setPen(pen)
+            painter.drawLine(front, rear)
         # An arrow at the front, along the line on the screen.
         angle = math.atan2(front.y() - rear.y(), front.x() - rear.x())
         size = (6 if ghost else 7) * k
         tip = QPointF(front.x() + math.cos(angle) * size, front.y() + math.sin(angle) * size)
         left = QPointF(front.x() + math.cos(angle + 2.4) * size, front.y() + math.sin(angle + 2.4) * size)
         right = QPointF(front.x() + math.cos(angle - 2.4) * size, front.y() + math.sin(angle - 2.4) * size)
-        painter.setPen(QPen(QColor(mark.color if ghost else "white"), 1.5 * k))
-        painter.setBrush(QBrush(QColor(255, 255, 255, 150) if ghost else QColor(mark.color)))
+        if self.hollow:
+            # Off the thing (it starts at the front), so it may stay filled.
+            painter.setPen(QPen(QColor("white"), 1 * k))
+            painter.setBrush(QBrush(QColor(mark.color)))
+        else:
+            painter.setPen(QPen(QColor(mark.color if ghost else "white"), 1.5 * k))
+            painter.setBrush(QBrush(QColor(255, 255, 255, 150) if ghost else QColor(mark.color)))
         painter.drawPolygon(QPolygonF([tip, left, right]))
 
     def _mark(self, painter, mark: Mark) -> None:
@@ -209,10 +235,22 @@ class ScenePainter:
         color = QColor(mark.color)
         if mark.role == "obs":
             if mark.reported:
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(QColor(245, 158, 11, 140)))
+                if self.hollow:
+                    painter.setPen(QPen(QColor(245, 158, 11, 220), 3 * k))
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                else:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(QColor(245, 158, 11, 140)))
                 painter.drawEllipse(at, 14 * k, 14 * k)
-            if mark.present:
+            if mark.present and self.hollow:
+                # A ring in the class's colour (inside a white one, or the 確度's): nothing over the middle.
+                r = (9 if mark.editing else 7) * k
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor(mark.ring) if mark.ring else QColor("white"), (2.5 if mark.ring else 2) * k))
+                painter.drawEllipse(at, r + 2 * k, r + 2 * k)
+                painter.setPen(QPen(color, 2 * k))
+                painter.drawEllipse(at, r, r)
+            elif mark.present:
                 r = (9 if mark.editing else 7) * k
                 ring = QColor(mark.ring) if mark.ring else QColor("white")
                 painter.setPen(QPen(ring, (3 if mark.ring else 2) * k))
@@ -228,7 +266,7 @@ class ScenePainter:
             pen = QPen(color, 2 * k)
             pen.setDashPattern([2, 2])
             painter.setPen(pen)
-            painter.setBrush(QBrush(QColor(255, 255, 255, 90)))
+            painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(QColor(255, 255, 255, 90)))
             painter.drawEllipse(at, 7 * k, 7 * k)
             _halo_text(painter, QPointF(at.x(), at.y() - 12 * k), mark.label, "#555555", self._font)
         elif mark.role == "step":
@@ -241,16 +279,28 @@ class ScenePainter:
 class ObservationOverlay(QgsMapCanvasItem):
     """Paints a Scene over the whole canvas."""
 
-    def __init__(self, canvas: QgsMapCanvas):
+    def __init__(self, canvas: QgsMapCanvas, style: str = "normal"):
         super().__init__(canvas)
         self.canvas_ = canvas
         self.scene_ = Scene()
         self.setZValue(1100)
-        self._painter = ScenePainter(self.to_pixel)
+        self._painter = ScenePainter(self.to_pixel, style=style if style in STYLES else "normal")
 
     @property
     def painted(self) -> list[tuple[QPointF, Mark]]:
         return self._painter.painted
+
+    @property
+    def style(self) -> str:
+        return self._painter.style
+
+    def set_style(self, style: str) -> None:
+        """「印」: 'normal', 'outline' or 'hidden' (see the module's note)."""
+        self._painter.style = style if style in STYLES else "normal"
+        if style == "hidden":
+            # Nothing hidden can be clicked or dragged until painted again.
+            self._painter.painted = [p for p in self._painter.painted if p[1].editing]
+        self.update()
 
     def set_scene(self, scene: Scene) -> None:
         self.scene_ = scene

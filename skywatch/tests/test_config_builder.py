@@ -51,6 +51,7 @@ def plugin_constants() -> dict:
             "eventLinks": dict(events.DEFAULT_LINK_FIELDS),
         },
         "alertSources": list(alerts.SOURCES),
+        "alertTimeSources": list(alerts.TIME_SOURCES),
         "obsExportSources": list(obs_export.SOURCES),
         "obsExportFileSources": list(obs_export.FILE_SOURCES),
         "obsGeometries": list(obs_export.GEOMETRIES),

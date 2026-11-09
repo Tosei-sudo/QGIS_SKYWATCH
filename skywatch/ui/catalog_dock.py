@@ -252,6 +252,22 @@ class CatalogDock(PluginDock):
                 button.clicked.connect(slot)
             buttons.addWidget(button)
             self.buttons[key] = button
+        # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
+        self.footprint_box = QComboBox()
+        for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
+            self.footprint_box.addItem(text, style)
+        self.footprint_box.setCurrentIndex(max(0, self.footprint_box.findData(settings.footprint_style())))
+        self.footprint_box.setToolTip(self.tr("地図上の画像の範囲（フットプリント）の表示\n"
+                                              "塗りつぶし: 範囲を薄く塗る\n"
+                                              "枠だけ: 塗らずに枠線だけ（画像 ID は範囲の上端に）\n"
+                                              "非表示: 地図に出さない（「地図で選択」のクリックは効く）"))
+        self.footprint_box.currentIndexChanged.connect(lambda _i: self.set_footprint_style(self.footprint_box.currentData()))
+        footprints = QWidget()
+        footprint_row = QHBoxLayout(footprints)
+        footprint_row.setContentsMargins(0, 0, 0, 0)
+        footprint_row.addWidget(QLabel(self.tr("フットプリント")))
+        footprint_row.addWidget(self.footprint_box)
+        buttons.addWidget(footprints)
         holder = QWidget()
         holder.setLayout(buttons)
         self.body.addWidget(holder)
@@ -573,6 +589,14 @@ class CatalogDock(PluginDock):
             if id(r) in wanted:
                 selection.select(self.model.index(row, 0), flags)
 
+    def set_footprint_style(self, style: str) -> None:
+        """「フットプリント」: 'fill', 'outline' or 'hidden', kept for next time (per user)."""
+        settings.set_footprint_style(style)
+        if self.footprint_box.currentData() != style:
+            self.footprint_box.setCurrentIndex(max(0, self.footprint_box.findData(style)))
+        if self.overlay is not None:
+            self.overlay.set_style(style)
+
     def _redraw(self) -> None:
         if self.overlay is None:
             return
@@ -691,7 +715,7 @@ class CatalogDock(PluginDock):
         elif self.model.work is not None and self.model.records:
             self.load_work()
         if visible and self.overlay is None:
-            self.overlay = FootprintOverlay(self.canvas)
+            self.overlay = FootprintOverlay(self.canvas, self.footprint_box.currentData())
             self.overlay.show_area(self.drawn)
             self._redraw()
         elif not visible and self.overlay is not None:
