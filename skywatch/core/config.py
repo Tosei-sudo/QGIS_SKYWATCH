@@ -21,7 +21,7 @@ from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
 from .catalog.config import DEFAULT_WATCH_INTERVAL, watch_interval_of
-from .catalog.paths import PathMapping, path_mappings_of
+from .catalog.paths import PathMapping, PathRewrite, path_mappings_of
 from .enhance.rules import ImageRule, image_rules_of
 from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
@@ -61,7 +61,8 @@ class PluginConfig:
     image_catalogs: list[CatalogConfig] = field(default_factory=list)
     #: Minutes between checks for new images.
     watch_interval: float = DEFAULT_WATCH_INTERVAL
-    path_mappings: list[PathMapping] = field(default_factory=list)
+    #: `pathMappings`: prefixes and what they stand for, and rewrites (`pattern` / `to`) tried first.
+    path_mappings: list[PathMapping | PathRewrite] = field(default_factory=list)
     #: `overviews`: an image opened from the catalog without overviews gets an external .ovr built in the background.
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
     #: `complexImages`: complex SAR images (SICD's I/Q bands, complex pixels) shown as "dB" or "amplitude"; None as QGIS opens them.

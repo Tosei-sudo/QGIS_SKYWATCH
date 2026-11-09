@@ -462,6 +462,55 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     assert QgsProject.instance().layerTreeRoot().findGroup("F") is None
 
 
+def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_otherwise(tmp_path):
+    """`pathMappings` `pattern` / `to`: //(host)/(any folders)/(image ID) → (drive):/(image ID), else the path as written."""
+    from skywatch.core.catalog import catalog_of
+    from skywatch.core.catalog.paths import PathError, path_mappings_of
+    from skywatch.core.catalog.search import record_of
+    from skywatch.qgis_io.catalog_io import locate_record
+
+    QgsSettings().remove("skywatch")
+    local, nas = tmp_path / "local", tmp_path / "nas"
+    for rel in ("local/SCENE_X/PAN/a.tif", "local/SCENE_Z/notes.txt", "local/b.tif",
+                "nas/2026/11/SCENE_Y/a.tif", "nas/2026/11/SCENE_Z/a.tif", "nas/2026/11/b.tif"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        if rel.endswith(".tif"):
+            geotiff(tmp_path / rel)
+        else:
+            (tmp_path / rel).write_text("")
+    problems = []
+    mappings = path_mappings_of([
+        {"pattern": "^//[^/]+/(?:[^/]+/)*([^/]+)$", "to": local.as_posix() + "/$1", "label": "手元の複製"},
+        {"prefix": "\\\\nas\\images", "label": "画像サーバー"},
+    ], problems)
+    assert not problems
+    settings.set_path_folder("\\\\nas\\images", str(nas))
+    catalog = catalog_of({"url": IMAGES, "fields": {"id": "IMG_ID", "source": "PATH"}}, problems, 0)
+
+    def where(path):
+        record = record_of({"attributes": {"IMG_ID": "R", "PATH": path}}, catalog.fields)
+        return locate_record(record, catalog, mappings, lambda mapping: pytest.fail("no folder to choose"))
+
+    # There: the copy opens (a folder with its images, a file), however deep the path was.
+    found = where("\\\\NAS\\images\\2026\\11\\SCENE_X")
+    assert found.place == (local / "SCENE_X").as_posix() and found.files == ["PAN/a.tif"]
+    assert where("\\\\nas\\images\\2026\\11\\b.tif").place == (local / "b.tif").as_posix()
+    # Written as //host/… (a protocol-relative URL otherwise): the copy too.
+    assert where("//nas/images/2026/11/SCENE_X").place == (local / "SCENE_X").as_posix()
+    # Not there, or a folder without images: the path as written (here through the folder chosen for the NAS).
+    assert where("\\\\nas\\images\\2026\\11\\SCENE_Y").place == str(nas / "2026" / "11" / "SCENE_Y")
+    found = where("\\\\nas\\images\\2026\\11\\SCENE_Z")
+    assert found.place == str(nas / "2026" / "11" / "SCENE_Z") and found.files == ["a.tif"]
+    url = where("//nas/images/2026/11/SCENE_Y")
+    assert url.is_url and url.place == "https://nas/images/2026/11/SCENE_Y"
+    # Nowhere: both are in the reason.
+    with pytest.raises(PathError) as e:
+        where("\\\\nas\\images\\2026\\11\\SCENE_W")
+    assert "2026/11/SCENE_W なし" in str(e.value) and f"読み替え先も: {(local / 'SCENE_W').as_posix()} なし" in str(e.value)
+    with pytest.raises(PathError, match="SCENE_Z に画像なし"):
+        where("\\\\nas\\images\\SCENE_Z")
+
+
 def test_the_dialog_choosing_a_records_images():
     from skywatch.ui.image_files_dialog import ImageFilesDialog
 

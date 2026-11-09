@@ -962,8 +962,18 @@ const SPEC = [
       ]) },
     { key: "watchInterval", label: "新着画像の確認間隔", doc: "通知", help: "新着画像を確かめる間隔（分）。",
       field: N("watchInterval", "間隔（分）", { min: 1, max: 1440, ph: "10" }) },
-    { key: "pathMappings", label: "パスの読み替え", doc: "画像カタログ", help: "レコードのパスの先頭を、http(s) の URL か各自が選ぶフォルダに読み替える。",
-      field: I("pathMappings", "読み替え", [T("prefix", "パスの先頭", { req: true, ph: "\\\\fileserver\\images" }), LABEL, T("url", "同じフォルダの URL", { help: "なければ各自が PC のフォルダを選ぶ" })], { title: (it) => it.prefix }) },
+    { key: "pathMappings", label: "パスの読み替え", doc: "パスの読み替えpathmappings", help: "レコードのパスの先頭を、http(s) の URL か各自が選ぶフォルダに読み替える。pattern・to なら先に試す読み替え（なければ元のパス）。",
+      field: I("pathMappings", "読み替え", [
+        T("prefix", "パスの先頭", { ph: "\\\\fileserver\\images", showIf: (it) => !it.pattern && !it.to }), LABEL,
+        T("url", "同じフォルダの URL", { help: "なければ各自が PC のフォルダを選ぶ", showIf: (it) => !it.pattern && !it.to }),
+        T("pattern", "先に試すパス（正規表現）", { ph: "^//[^/]+/(?:[^/]+/)*([^/]+)$", help: "Python の re、大文字小文字は区別なし。区切りは \\ も / として合わせる", showIf: (it) => !it.prefix && !it.url }),
+        T("to", "読み替え先", { ph: "D:/$1", help: "$1・${name} がグループ、$$ が $。そこになければ元のパスで開く", showIf: (it) => !it.prefix && !it.url }),
+      ], { title: (it) => it.prefix || (it.pattern && `${it.pattern} → ${it.to || "?"}`), check: (it, at, p) => {
+        const rewrite = it.pattern !== undefined || it.to !== undefined;
+        if (rewrite && (it.prefix !== undefined || it.url !== undefined)) p.push(`${at}: prefix（・url）か pattern・to のどちらか`);
+        else if (rewrite && !(it.pattern && it.to)) p.push(`${at}: pattern と to が必要`);
+        else if (!rewrite && !it.prefix) p.push(`${at}: prefix（パスの先頭）か pattern・to が必要`);
+      } }) },
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [
         B("enabled", "作る"), S("resampling", "リサンプリング", K.resamplings), N("minSize", "作る最小の大きさ（px）"),
