@@ -47,6 +47,7 @@ from ..core.obs.geo import bearing, km_text
 from ..core.obs.similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
 from ..core.obs.stamps import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
 from ..core.obs.taxonomy import path_of
+from ..qgis_io.obs_images import image_layers, layer_at
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
 from .last_inputs import InputMemory
@@ -647,8 +648,7 @@ class ManyPanel(QGroupBox):
             return
         book = self._book()
         image = book.current if book else None
-        layer = QgsProject.instance().mapLayer(image.layer_id) if image is not None and image.layer_id else None
-        if layer is None:
+        if not image_layers(image):
             self.dock._say(tr("この画像のファイル（レイヤー）が開いていません"))
             return
         sample = self._search_sample()
@@ -656,6 +656,8 @@ class ManyPanel(QGroupBox):
             self.dock._say(tr("見本なし: この画像で 1 つを 2〜4 点（長さ・向き）で記録してから"))
             return
         self.sample = sample
+        # A record's images in its folder: searched in the one the 見本 is on.
+        layer = layer_at(image, sample.lon, sample.lat) if sample.lon is not None and sample.lat is not None else image_layers(image)[0]
         records = [o for o in book.living() if o.image_id == image.id and o.present]
         canvas = self.dock.canvas
         try:

@@ -40,10 +40,10 @@ def ms(day: int, hour: int = 1) -> int:
     return int(datetime(2026, 10, day, hour, tzinfo=timezone.utc).timestamp() * 1000)
 
 
-def geotiff(path, when: str = "", name_only: bool = False):
-    """A small GeoTIFF over Tokyo Bay (139.6–139.8, 35.5–35.7), its acquisition time in the GDAL metadata."""
+def geotiff(path, when: str = "", name_only: bool = False, west: float = 139.6):
+    """A small GeoTIFF over Tokyo Bay (139.6–139.8, 35.5–35.7; `west` its west edge), its acquisition time in the GDAL metadata."""
     ds = gdal.GetDriverByName("GTiff").Create(str(path), 20, 20, 1, gdal.GDT_Byte)
-    ds.SetGeoTransform([139.6, 0.01, 0, 35.7, 0, -0.01])
+    ds.SetGeoTransform([west, 0.01, 0, 35.7, 0, -0.01])
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
     ds.SetProjection(srs.ExportToWkt())
@@ -101,6 +101,58 @@ def test_reads_the_images_in_time_order_and_follows_the_chosen_layer(plugin):
     assert [root.findLayer(x.id()).itemVisibilityChecked() for x in layers] == [False, True, False]
     dock.only.setChecked(False)
     assert all(root.findLayer(x.id()).itemVisibilityChecked() for x in layers)
+
+
+def test_a_records_images_in_its_folder_are_one_image_to_record_on(plugin):
+    """tsudo 2026-11-09: a catalog record opened from its folder (several files) is one image in the list, recorded on as the record."""
+    from skywatch.qgis_io.obs_images import IMAGE_FILE
+
+    p, iface, dock, layers, tmp_path = plugin
+    book = dock.book
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    (tmp_path / "SCENE_R" / "PAN").mkdir(parents=True)
+    group = root.insertGroup(0, "R")
+    tiles = []
+    for i, rel in enumerate(("PAN/R1C1.tif", "PAN/R1C2.tif", "PAN/R1C3.tif")):
+        layer = image_layer(geotiff(tmp_path / "SCENE_R" / rel, west=139.6 + 0.2 * i), rel, image_id="R", time=ms(4))
+        layer.setCustomProperty(IMAGE_FILE, rel)
+        project.addMapLayer(layer, False)
+        group.addLayer(layer)
+        tiles.append(layer)
+    dock.refresh_images()
+    # One image of the record, named as its folder, its footprint around the files.
+    assert [i.name for i in book.images] == ["d1.tif", "d2.tif", "d3.tif", "SCENE_R"]
+    scene = book.images[3]
+    assert scene.id == "R" and scene.layer_ids == tuple(x.id() for x in tiles) and scene.time == ms(4)
+    assert scene.box == pytest.approx([139.6, 35.5, 140.2, 35.7])
+    assert dock.image_select.count() == 4 and dock.image_select.itemText(3).endswith("SCENE_R（3 ファイル）")
+    iface.setActiveLayer(tiles[1])
+    assert book.current.id == "R"
+    dock.set_active(True)
+    dock.map_clicked(139.95, 35.6, None)
+    assert dock.form.isVisible()
+    # Another of its files chosen in the layers panel: the same image, the form stays open.
+    iface.setActiveLayer(tiles[2])
+    assert dock.form.isVisible() and book.current.id == "R"
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶 > 護衛艦")
+    dock.submit()
+    [a] = book.living()
+    assert (a.image_id, a.image_name, a.image_time) == ("R", "SCENE_R", ms(4))
+    # 「この画像のみ」: all its files show; ◀ ▶ go image by image (to its first file).
+    dock.only.setChecked(True)
+    assert [root.findLayer(x.id()).itemVisibilityChecked() for x in layers + tiles] == [False] * 3 + [True] * 3
+    dock.step(-1)
+    assert book.current.name == "d3.tif" and iface.activeLayer() is layers[2]
+    assert [root.findLayer(x.id()).itemVisibilityChecked() for x in layers + tiles] == [False, False, True] + [False] * 3
+    dock.step(1)
+    assert book.current.id == "R" and iface.activeLayer() is tiles[0]
+    dock.only.setChecked(False)
+    # One of its files closed: still the image recorded on, with its records.
+    project.removeMapLayer(tiles[2].id())
+    assert book.current.id == "R" and book.current.layer_ids == (tiles[0].id(), tiles[1].id())
+    assert [o.id for o in book.here()] == [a.id]
 
 
 def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(plugin):

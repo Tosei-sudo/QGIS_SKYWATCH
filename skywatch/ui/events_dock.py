@@ -704,7 +704,7 @@ class EventsDock(PluginDock):
 
         from qgis.core import QgsRasterLayer
 
-        from ..qgis_io.obs_images import image_layer, observed_image, set_manual_time
+        from ..qgis_io.obs_images import image_layer, image_layers, observed_image, set_manual_time
 
         project = QgsProject.instance()
         known = self._known_images()
@@ -712,7 +712,8 @@ class EventsDock(PluginDock):
         shown = []
         for x in links:
             image = known.get(x.item_id)
-            layer = project.mapLayer(image.layer_id) if image and image.layer_id else None
+            layers = image_layers(image, project) if image else []
+            layer = layers[0] if layers else None
             if layer is None and x.source not in ("", LISTED) and os.path.isfile(x.source):
                 layer = image_layer(x.source, os.path.basename(x.source), image_id=x.item_id)
                 if not layer.isValid():
@@ -722,7 +723,9 @@ class EventsDock(PluginDock):
                     set_manual_time(layer, x.time)
                 project.addMapLayer(layer)
                 overview_queue.request([layer], self.context.config.overviews, self.iface.messageBar())
-            if isinstance(layer, QgsRasterLayer):
+            if len(layers) > 1:
+                shown += layers
+            elif isinstance(layer, QgsRasterLayer):
                 shown.append(layer)
             elif image is not None and not image.file:
                 problems.append(self.tr("{n} はファイルなしの画像（「観測記録」で選択）").format(n=x.label or x.item_id))

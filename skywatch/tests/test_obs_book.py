@@ -8,7 +8,7 @@ import pytest
 
 from skywatch.core.gpkg import open_local
 from skywatch.core.obs.areas import box_ring
-from skywatch.core.obs.book import FormValues, ObservationBook, ObservedImage, Prefs
+from skywatch.core.obs.book import FormValues, ObservationBook, ObservedImage, Prefs, joined_image
 from skywatch.core.obs.image_time import image_time, metadata_items_of_xml, nitf_time, parse_time, time_from_metadata, time_from_name
 from skywatch.core.obs.model import ObservationVocabulary
 from skywatch.core.obs.report import ReportOptions
@@ -47,6 +47,31 @@ def test_steps_through_the_images_in_time_order_and_types_a_time(book):
     assert [i.id for i in book.images] == ["d1", "dx", "d3"]
     assert book.current.id == "dx" and book.current.origin == "manual"
     assert book.record(rec.id).image_time == day(2)
+
+
+def test_a_records_images_in_its_folder_are_one_image_to_record_on(book):
+    """tsudo 2026-11-09: a catalog record whose folder has several images is recorded on as one image, not file by file."""
+    tiles = [ObservedImage("R", "R1C2.tif", None, [139.7, 35.5, 139.8, 35.6], "T2", "metadata"),
+             ObservedImage("R", "R1C1.tif", day(2), [139.6, 35.5, 139.7, 35.6], "T1", "layer")]
+    scene = joined_image(tiles, "SCENE_R")
+    assert (scene.id, scene.name, scene.time, scene.origin) == ("R", "SCENE_R", day(2), "layer")
+    assert scene.box == [139.6, 35.5, 139.8, 35.6] and scene.layer_id == "T2" and scene.layer_ids == ("T2", "T1") and scene.file
+    assert joined_image(tiles).name == "R1C2.tif"
+    assert ObservedImage("d1", "d1.tif", None, None, "L1").layer_ids == ("L1",) and ObservedImage("x", "x").layer_ids == ()
+    others = [i for i in book.images if i.file]
+    book.set_open_images(others + [scene], "T1")
+    assert [i.id for i in book.images] == ["d1", "R", "d3", "dx"]
+    # Any of its layers chosen: that image; recorded on it as the record (its folder's name).
+    assert book.go_to_layer("L1") and book.current.id == "d1"
+    assert book.go_to_layer("T1") and book.current is scene
+    rec = book.submit(139.75, 35.55, FormValues(object="", kind="船舶"))
+    assert (rec.image_id, rec.image_name, rec.image_time) == ("R", "SCENE_R", day(2))
+    # One of its files closed: still the image recorded on.
+    book.set_open_images(others + [joined_image(tiles[1:], "SCENE_R")])
+    assert book.current.id == "R" and book.current.layer_ids == ("T1",)
+    assert [o.id for o in book.here()] == [rec.id]
+    book.set_open_images(others)
+    assert book.current.id == "d1"
 
 
 def test_records_carries_over_and_marks_gone(book):

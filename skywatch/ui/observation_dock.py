@@ -51,7 +51,7 @@ from ..core.util import read_number
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
-from ..qgis_io.obs_images import open_images, set_manual_time
+from ..qgis_io.obs_images import image_layers, open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
 from . import shortcuts
@@ -1151,6 +1151,10 @@ class ObservationDock(PluginDock):
     def _layer_chosen(self, layer) -> None:
         if self._following or self.book is None or not isinstance(layer, QgsRasterLayer):
             return
+        current = self.book.current
+        if current is not None and layer.id() in current.layer_ids:
+            # Another of the record's images (its folder's): still the same image, the form stays open.
+            return
         if self.book.go_to_layer(layer.id()):
             self._went()
 
@@ -1166,9 +1170,11 @@ class ObservationDock(PluginDock):
         if self.active and self.assignment_bar.needs_claim(image):
             self.set_active(False)
             self.set_active(True, quiet=True)
-        if image is not None and image.layer_id:
-            layer = QgsProject.instance().mapLayer(image.layer_id)
-            if layer is not None and self.iface.activeLayer() is not layer:
+        layers = image_layers(image)
+        if layers:
+            layer = layers[0]
+            active = self.iface.activeLayer()
+            if active is None or active.id() not in image.layer_ids:
                 self._following = True
                 try:
                     self.iface.setActiveLayer(layer)
@@ -1283,14 +1289,12 @@ class ObservationDock(PluginDock):
         if image is None:
             return
         t = _ms_of(self.time_input)
-        if image.layer_id:
-            layer = QgsProject.instance().mapLayer(image.layer_id)
-            if layer is not None:
-                set_manual_time(layer, t)
+        for layer in image_layers(image):
+            set_manual_time(layer, t)
         self.do(self.tr("撮像日時の入力"), lambda b: b.set_image_time(t))
 
     def _apply_only(self, *_args) -> None:
-        """「この画像のみ」: only the current image's layer shows; the others come back as they were."""
+        """「この画像のみ」: only the current image's layers show (a record's images in its folder all); the others come back as they were."""
         root = QgsProject.instance().layerTreeRoot()
         rasters = [layer for layer in QgsProject.instance().mapLayers().values() if isinstance(layer, QgsRasterLayer)]
         image = self.book.current if self.book else None
@@ -1302,7 +1306,7 @@ class ObservationDock(PluginDock):
                 if node is None:
                     continue
                 self._shown.setdefault(layer.id(), node.itemVisibilityChecked())
-                node.setItemVisibilityChecked(layer.id() == image.layer_id)
+                node.setItemVisibilityChecked(layer.id() in image.layer_ids)
         elif self._shown is not None:
             for layer_id, visible in self._shown.items():
                 node = root.findLayer(layer_id)
@@ -2706,7 +2710,9 @@ class ObservationDock(PluginDock):
         self.image_select.blockSignals(True)
         self.image_select.clear()
         for e in book.images if book else []:
-            self.image_select.addItem(f"{local_time(e.time) if e.time is not None else '日時不明'}  {e.name}{'' if e.file else '（ファイルなし）'}")
+            files = len(e.layer_ids)
+            note = "（ファイルなし）" if not e.file else f"（{files} ファイル）" if files > 1 else ""
+            self.image_select.addItem(f"{local_time(e.time) if e.time is not None else '日時不明'}  {e.name}{note}")
         if book and image in book.images:
             self.image_select.setCurrentIndex(book.images.index(image))
         self.image_select.blockSignals(False)

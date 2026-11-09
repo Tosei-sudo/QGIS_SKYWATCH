@@ -607,6 +607,7 @@ def test_the_period_takes_times_to_the_minute(plugin):
 def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugin, monkeypatch):
     from skywatch.core.catalog.search import record_of
     from skywatch.qgis_io.catalog_io import IMAGE_FILE
+    from skywatch.qgis_io.obs_images import open_images
 
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -631,6 +632,9 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     assert [l.customProperty(IMAGE_FILE) for l in layers] == ["PAN/a_P.tif", "PAN/b_P.TIF"]
     group = QgsProject.instance().layerTreeRoot().findGroup("D")
     assert group is not None and [n.layerId() for n in group.findLayers()] == [l.id() for l in layers]
+    # 「観測記録」: one image of the record, named as its folder (tsudo 2026-11-09: recorded per record, not per file).
+    [image] = [i for i in open_images() if i.id == "D"]
+    assert image.name == "Scene_D" and image.layer_ids == tuple(l.id() for l in layers)
     # Cancelled: nothing opens.
     monkeypatch.setattr(dock, "choose_images", lambda r, files, more: None)
     assert dock.open_records([record]) == []
@@ -646,6 +650,7 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     [layer] = dock.open_records([one])
     assert layer.name() == "F x.jp2" and layer.customProperty(IMAGE_FILE) == "x.jp2"
     assert QgsProject.instance().layerTreeRoot().findGroup("F") is None
+    assert [(i.name, i.layer_ids) for i in open_images() if i.id == "F"] == [("only", (layer.id(),))]
 
 
 def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_otherwise(tmp_path):

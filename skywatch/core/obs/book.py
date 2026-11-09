@@ -53,6 +53,8 @@ class ObservedImage:
     layer_id: Optional[str] = None
     #: Where its time came from (image_time.ORIGINS), '' when unknown.
     origin: str = ""
+    #: Every layer of the image when it has several (a catalog record's images in its folder), `layer_id` the first.
+    layers: tuple = ()
 
     @property
     def ref(self) -> ImageRef:
@@ -61,6 +63,28 @@ class ObservedImage:
     @property
     def file(self) -> bool:
         return self.layer_id is not None
+
+    @property
+    def layer_ids(self) -> tuple:
+        """The image's layers (the project's raster layers' ids), () for one listed without its file."""
+        return tuple(self.layers) or ((self.layer_id,) if self.layer_id else ())
+
+
+def joined_image(parts: Sequence[ObservedImage], name: str = "") -> ObservedImage:
+    """
+    One image to record on of several layers of the same image id (a catalog
+    record whose folder has several images): `name` (else the first's), the
+    earliest time known, a footprint around them all, every layer (the first
+    one's first).
+    """
+    first = parts[0]
+    timed = [p for p in parts if p.time is not None]
+    earliest = min(timed, key=lambda p: p.time) if timed else None
+    boxes = [p.box for p in parts if p.box]
+    box = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)] if boxes else None
+    layers = tuple(dict.fromkeys(i for p in parts for i in p.layer_ids))
+    return ObservedImage(id=first.id, name=name or first.name, time=earliest.time if earliest else None, box=box,
+                         layer_id=layers[0] if layers else None, origin=earliest.origin if earliest else "", layers=layers)
 
 
 class Prefs:
@@ -387,9 +411,11 @@ class ObservationBook:
         was = self.current
         keep = None
         if was is not None:
-            keep = next((e for e in entries if (e.layer_id == was.layer_id if was.layer_id else (not e.layer_id and e.id == was.id))), None)
+            # The same image: one of its layers still there (another of a record's images may have closed), or listed without its file.
+            had = set(was.layer_ids)
+            keep = next((e for e in entries if (had & set(e.layer_ids) if had else (not e.layer_id and e.id == was.id))), None)
         if keep is None and selected:
-            keep = next((e for e in entries if e.layer_id == selected), None)
+            keep = next((e for e in entries if selected in e.layer_ids), None)
         self.images = entries
         self.current = keep or (entries[0] if entries else None)
 
@@ -401,7 +427,8 @@ class ObservationBook:
         return entry is not None
 
     def go_to_layer(self, layer_id: str) -> bool:
-        entry = next((e for e in self.images if e.layer_id == layer_id), None)
+        """Records on the image of this layer (any of a record's images) from now on."""
+        entry = next((e for e in self.images if layer_id in e.layer_ids), None)
         if entry is not None:
             self.current = entry
         return entry is not None

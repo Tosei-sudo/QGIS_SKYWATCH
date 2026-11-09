@@ -8,6 +8,10 @@ temporal properties), the GDAL metadata items, the NITF date, the file name,
 the TIFF DateTime; else the time typed for it (kept on the layer, so in the
 project).
 
+The layers of one catalog image id (a record whose folder has several
+images, or the same image opened twice) are one image to record on, named as
+the record's folder: what is recorded on any of its files is the record's.
+
 `image_layer()` opens an image the way both docks should: a sign-in is an
 authcfg id in the layer's URI (QGIS adds the credentials when asking), so no
 token reaches the project file.
@@ -23,7 +27,7 @@ from qgis.core import (
     QgsRasterLayer,
 )
 
-from ..core.obs.book import ObservedImage
+from ..core.obs.book import ObservedImage, joined_image
 from ..core.obs.image_time import image_time, parse_time
 from .complex_sar import source_of
 from .geometry import to_wgs84
@@ -32,6 +36,8 @@ from .plan_layer import qdatetime
 #: Layer properties (kept in the project): the catalog's image id, and the time typed for an image that does not say (ms).
 IMAGE_ID = "satobs/imageId"
 IMAGE_TIME = "satobs/imageTime"
+#: The image's path below the record's folder, for a catalog record whose images are in a folder (catalog_io).
+IMAGE_FILE = "satobs/imageFile"
 
 
 def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Optional[int] = None,
@@ -170,7 +176,59 @@ def observed_image(layer: QgsRasterLayer) -> ObservedImage:
     return ObservedImage(id=str(image_id), name=name, time=t, box=_box(layer), layer_id=layer.id(), origin=origin)
 
 
+def folder_name(layer: QgsMapLayer) -> str:
+    """The name of the catalog record's folder a layer's image is in ('' for an image not opened from a record's folder)."""
+    rel = str(layer.customProperty(IMAGE_FILE) or "").replace("\\", "/").strip("/")
+    path = image_path(layer).replace("\\", "/")
+    if not rel or not path.endswith("/" + rel):
+        return ""
+    return path[: -len(rel) - 1].rstrip("/").rsplit("/", 1)[-1]
+
+
 def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
-    """The project's raster layers as images to record on."""
+    """
+    The project's raster layers as images to record on: the layers of one
+    catalog image id (a record's images in its folder) as one image, named as
+    the record's folder (else as its first layer, top of the layer tree first).
+    """
     project = project or QgsProject.instance()
-    return [observed_image(layer) for layer in project.mapLayers().values() if isinstance(layer, QgsRasterLayer) and layer.isValid()]
+    order = {layer_id: i for i, layer_id in enumerate(project.layerTreeRoot().findLayerIds())}
+    rasters = [layer for layer in project.mapLayers().values() if isinstance(layer, QgsRasterLayer) and layer.isValid()]
+    rasters.sort(key=lambda layer: order.get(layer.id(), len(order)))
+    out: list = []
+    by_id: dict[str, list] = {}
+    for layer in rasters:
+        image = observed_image(layer)
+        if not layer.customProperty(IMAGE_ID):
+            out.append(image)
+            continue
+        if image.id not in by_id:
+            by_id[image.id] = []
+            out.append(image.id)
+        by_id[image.id].append((layer, image))
+    images = []
+    for entry in out:
+        if isinstance(entry, ObservedImage):
+            images.append(entry)
+            continue
+        parts = by_id[entry]
+        folder = next((name for name in (folder_name(layer) for layer, _image in parts) if name), "")
+        images.append(parts[0][1] if len(parts) == 1 and not folder else joined_image([image for _layer, image in parts], folder))
+    return images
+
+
+def image_layers(image: Optional[ObservedImage], project: Optional[QgsProject] = None) -> list[QgsRasterLayer]:
+    """The project's layers of an image (several for a record's images in its folder), [] for one listed without its file."""
+    project = project or QgsProject.instance()
+    layers = [project.mapLayer(layer_id) for layer_id in (image.layer_ids if image is not None else ())]
+    return [layer for layer in layers if isinstance(layer, QgsRasterLayer)]
+
+
+def layer_at(image: Optional[ObservedImage], lon: float, lat: float, project: Optional[QgsProject] = None) -> Optional[QgsRasterLayer]:
+    """The image's layer over a place (WGS 84), else its first; None for an image listed without its file."""
+    layers = image_layers(image, project)
+    for layer in layers:
+        box = _box(layer)
+        if box and box[0] <= lon <= box[2] and box[1] <= lat <= box[3]:
+            return layer
+    return layers[0] if layers else None
