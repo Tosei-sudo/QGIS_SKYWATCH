@@ -41,7 +41,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
-from .docks import PluginDock, ask_no, plain_label
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .image_files_dialog import choose_image_files
@@ -834,10 +834,12 @@ class CatalogDock(PluginDock):
         """Why images could not be opened, in the message bar; with 「ファイルなしで記録」 for those (their raw data elsewhere, say)."""
         bar = self.iface.messageBar()
         dock = self.observations() if self.observations else None
+        # The ids and paths are the catalog's (others' text): shown as written, never as HTML.
+        text = plain_tip(" / ".join(problems))
         if not unopened or dock is None:
-            bar.pushWarning(TITLE, " / ".join(problems))
+            bar.pushWarning(TITLE, text)
             return
-        widget = bar.createMessage(TITLE, " / ".join(problems))
+        widget = bar.createMessage(TITLE, text)
         button = QPushButton(self.tr("ファイルなしで記録"))
         button.setToolTip(self.tr("開けなかった画像 {n} 件を、ファイルなしで観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから）").format(n=len(unopened)))
 

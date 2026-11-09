@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.obs.drafts import KIND as DRAFT
 from ..core.offline import CHECK, KINDS, Pending
-from .docks import ask_no, plain_label
+from .docks import ask_no, plain_label, plain_tip
 
 #: Rows that need the person (someone else changed the record): orange.
 CHECK_COLOR = "#b45309"
@@ -103,7 +103,7 @@ class OutboxDialog(QDialog):
         for p in self.items():
             item = QTreeWidgetItem([_time(p.at), kind_text(p), p.store, p.title or p.item_id, state_text(p)])
             item.setData(0, Qt.ItemDataRole.UserRole, (p.kind, p.store, p.item_id))
-            item.setToolTip(4, state_text(p))
+            item.setToolTip(4, plain_tip(state_text(p)))  # a server's message, a record's name
             if p.kind == DRAFT and p.op == CHECK:
                 for c in range(5):
                     item.setForeground(c, QBrush(QColor(CHECK_COLOR)))

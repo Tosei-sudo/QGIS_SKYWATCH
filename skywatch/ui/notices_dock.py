@@ -31,7 +31,7 @@ from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_r
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .alert_feed import AlertFeed
-from .docks import PluginDock, ask_no, plain_label
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .watch_dialog import PointWatchDialog, WatchDialog
 
 TITLE = "通知"
@@ -335,7 +335,7 @@ class NoticesDock(PluginDock):
             self.zoom_to_chosen()
         self._mark([n.id for n in notices])
         if problems:
-            self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
+            self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
         return layers
 
     def _chosen_watch_id(self) -> Optional[str]:

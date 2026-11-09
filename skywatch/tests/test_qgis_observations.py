@@ -629,6 +629,34 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert [o.object_name for o in living(dock.book.records)] == ["共有のモノ"]
 
 
+def test_records_saved_offline_are_told_and_the_dock_keeps_drawing(plugin, tmp_path):
+    # Re-check 2026-11-09: the note on what waits once broke every render of the dock (and the map's marks) while offline.
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    layer = fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}], "localObservations": False}), encoding="utf-8")
+    settings.set_config_source(str(config))
+
+    def esri():
+        client = EsriClient(p.context.offline.transport(fake))
+        client.offline = p.context.offline
+        return client
+
+    p.context.esri = esri
+    p.context.reload()
+    assert wait_for(lambda: dock.book is not None and dock.book.loaded)
+    p.offline.act_forced.setChecked(True)
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("オフラインのモノ")
+    dock.submit()
+    assert wait_for(lambda: dock.waiting_ids())
+    dock.render()
+    assert dock.offline_note.isVisibleTo(dock) and "送信待ち 1 件" in dock.offline_note.text()
+    assert layer.rows == [] and [o.object_name for o in living(dock.book.records)] == ["オフラインのモノ"]
+
+
 def test_the_store_chosen_follows_the_settings_file(plugin, tmp_path):
     p, iface, dock, layers, _ = plugin
     fake = FakeEsri()

@@ -792,7 +792,7 @@ class EventsDock(PluginDock):
             local = [x for x in links if self.is_local(x)]
             problems = self._open_local(local) if local else []
             if problems:
-                self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
+                self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
             if len(local) < len(links):
                 self._fetch_images(links, self._open_images)
             elif len(local) > len(problems):
@@ -840,7 +840,7 @@ class EventsDock(PluginDock):
             else:
                 problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
         if problems:
-            self.iface.messageBar().pushWarning(TITLE, " / ".join(problems))
+            self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
         said = [self.tr("画像 {n} 枚を開いた").format(n=opened) if opened else "",
                 self.tr("ファイルなしの画像 {n} 件を観測記録へ").format(n=listed) if listed else ""]
         self.say("、".join(x for x in said if x) or self.status.text())
