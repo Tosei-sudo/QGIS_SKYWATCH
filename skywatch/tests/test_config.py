@@ -12,7 +12,6 @@ from skywatch.core.obs.setup import store_vocabulary
 from skywatch.core.obs.taxonomy import kind_of, nest, spec_fields_of, taxonomy_of, SpecField, Taxon
 from skywatch.core.plan.modes import sensor_catalog_of, sensor_mode_of
 from skywatch.core.plan.satellites import BUILT_IN_DEFAULTS, ground_stations_of, look_side_of, satellite_catalog_of, GroundStation
-from skywatch.core.plan.store import DEFAULT_PLAN_FIELDS, plan_store_of
 from skywatch.core.plan.weather import DEFAULT_CLOUD_FORECAST, cloud_forecast_of, CloudForecastConfig
 
 HERE = os.path.dirname(__file__)
@@ -46,7 +45,6 @@ class TestJsonc:
         assert config.satellite_catalogs[0].fields["tle1"] == "TLE_LINE1"
         assert [m.mode for m in config.sensor_catalogs[1].modes] == ["ストリップマップ", "スポットライト", "スキャンSAR"]
         assert config.ground_stations == [GroundStation("勝浦", 140.3, 35.15, 5)]
-        assert config.plan_stores[0].catalog == "衛星画像"
         assert config.observation_stores[0].fields["activity"] == "ACT"
         assert config.observation_stores[0].areas.url.endswith("/FeatureServer/2")
         assert config.observation_vocabulary.match_radius == 3000
@@ -146,16 +144,12 @@ class TestSensorCatalogs:
         assert [m.values() for m in config.sensor_catalogs[0].modes] == [{"sensor": "ICEYE", "mode": "Spot"}]
 
 
-class TestPlanStoresStationsForecast:
-    def test_reads_plan_stores_with_default_field_names(self):
-        problems = []
-        store = plan_store_of({"label": "計画", "url": "https://gis.example/arcgis/rest/services/Plans/FeatureServer/0", "fields": {"status": "STATE"}, "catalog": "画像"}, problems, 0)
-        assert store.fields == {**DEFAULT_PLAN_FIELDS, "status": "STATE"}
-        assert store.match_minutes == 30
-        assert store.miss_after_days == 3
-        assert plan_store_of({"url": "https://x/MapServer"}, problems, 1) is None
-        assert len(problems) == 1
-        assert len(parse_config({"planStores": [{"url": "https://gis.example/arcgis/rest/services/Plans/FeatureServer/0"}]})[0].plan_stores) == 1
+class TestStationsForecast:
+    def test_the_retired_plan_stores_are_ignored(self):
+        # 撮像計画の保存・追跡 went into 撮像依頼 (2026-11-09); old configs still load.
+        config, problems = parse_config({"planStores": [{"url": "https://gis.example/arcgis/rest/services/Plans/FeatureServer/0"}]})
+        assert problems == []
+        assert not hasattr(config, "plan_stores")
 
     def test_reads_ground_stations_with_a_default_lowest_elevation(self):
         problems = []

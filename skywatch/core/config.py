@@ -34,7 +34,6 @@ from .obs.model import ObservationStoreConfig, ObservationVocabulary, observatio
 from .plan.names import AliasTableConfig, alias_tables_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
-from .plan.store import PlanStoreConfig, plan_store_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
 from .request.store import RequestStoreConfig, request_store_of
 from .request.systems import ExportSystem, export_systems_of
@@ -48,7 +47,7 @@ from .preload import ITEMS as PRELOAD_ITEMS, preload_of
 
 #: The keys this plugin reads.
 KEYS = (
-    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "planStores", "groundStations", "cloudForecast",
+    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
@@ -74,7 +73,6 @@ class PluginConfig:
     #: None hides the choice.
     cloud_forecast: Optional[CloudForecastConfig] = DEFAULT_CLOUD_FORECAST
     ground_stations: list[GroundStation] = field(default_factory=list)
-    plan_stores: list[PlanStoreConfig] = field(default_factory=list)
     observation_stores: list[ObservationStoreConfig] = field(default_factory=list)
     #: `localObservations`: whether the local GeoPackage is offered as a store of records (false: only `observationStores`).
     local_observations: bool = True
@@ -272,7 +270,6 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.cloud_forecast = cloud_forecast_of(value["cloudForecast"], problems)
     if "groundStations" in value:
         config.ground_stations = ground_stations_of(value["groundStations"], problems)
-    config.plan_stores = listed("planStores", plan_store_of)
     config.observation_stores = listed("observationStores", observation_store_of)
     if "localObservations" in value:
         if isinstance(value["localObservations"], bool):

@@ -1,9 +1,9 @@
 """
 Stage 4 of the imaging plan in QGIS (the viewer's imaging-plan.spec.ts and
 imaging-plan-saved.spec.ts, as far as they go): cloud forecasts, stereo and
-repeat pairs, the revisit map, reminders and the calendar file, saving a plan
-to a plan store and following it up in 「保存した撮像計画」. Every service is
-a fake: nothing leaves the machine.
+repeat pairs, the revisit map, reminders and the calendar file, and the
+opportunities made into 臨時 requests (「保存・追跡」 went into 撮像依頼,
+2026-11-09). Every service is a fake: nothing leaves the machine.
 """
 import json
 from urllib.parse import parse_qs, urlsplit
@@ -15,18 +15,18 @@ from qgis.testing import start_app  # noqa: E402
 
 APP = start_app()
 
-from qgis.core import QgsProject, QgsRasterLayer, QgsSettings  # noqa: E402
+from qgis.core import QgsProject, QgsSettings  # noqa: E402
 
 from skywatch.core.esri import EsriClient  # noqa: E402
-from skywatch.core.plan.store import DEFAULT_PLAN_FIELDS  # noqa: E402
+from skywatch.core.request.model import day_bounds, jst_day  # noqa: E402
 from skywatch.qgis_io import settings  # noqa: E402
 from skywatch.qgis_io.context import PluginContext  # noqa: E402
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from skywatch.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from skywatch.tests.test_plan import EPOCH, LINE1, LINE2  # noqa: E402
 from skywatch.tests.test_qgis_imaging_plan import CATALOG, SAR1, SAR2, plan, points_layer, start_at  # noqa: E402
+from skywatch.tests.test_request import HISTORY, LEDGER, ledger_layers  # noqa: E402
 
-PLANS = "https://example.com/arcgis/rest/services/Plans/FeatureServer/0"
 IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
 FORECAST = "https://wx.example/v1/forecast"
 DAY = 86400000
@@ -39,7 +39,7 @@ def plugin(tmp_path, monkeypatch):
         "satelliteCatalogs": [{"label": "テスト衛星", "url": CATALOG, "fields": {
             "name": "NAME", "tle": "TLE", "kind": "KIND", "maxOffNadir": "MAX", "lookSide": "LOOK", "swath": "SWATH", "scenesPerPass": "SCENES"}}],
         "imageCatalogs": [{"label": "画像", "url": IMAGES, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}],
-        "planStores": [{"label": "計画レイヤー", "url": PLANS}],
+        "requestStores": [{"label": "依頼", "url": LEDGER, "history": HISTORY}],
         "cloudForecast": {"url": FORECAST, "label": "社内予報"},
     }
     path = tmp_path / "config.json"
@@ -49,9 +49,7 @@ def plugin(tmp_path, monkeypatch):
     sats = fake.add_layer(CATALOG, FakeLayer({n: "esriFieldTypeString" for n in ("NAME", "TLE", "KIND", "LOOK")} | {n: "esriFieldTypeDouble" for n in ("MAX", "SWATH", "SCENES")}))
     sats.add({"NAME": "OPT-1", "TLE": f"{LINE1}\n{LINE2}", "KIND": "光学", "MAX": 45, "SWATH": 40, "SCENES": 1})
     sats.add({"NAME": "SAR-1", "TLE": f"{SAR1}\n{SAR2}", "KIND": "SAR", "MAX": 45, "LOOK": "R", "SWATH": 50, "SCENES": 1})
-    fields = {name: "esriFieldTypeString" for name in DEFAULT_PLAN_FIELDS.values()}
-    fields.update(SHOT_TIME="esriFieldTypeDate", CREATED_AT="esriFieldTypeDate", OFF_NADIR="esriFieldTypeDouble", INCIDENCE="esriFieldTypeDouble")
-    fake.add_layer(PLANS, FakeLayer(fields, "esriGeometryPolygon"))
+    ledger_layers(fake)
     fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
     from skywatch import classFactory
 
@@ -186,82 +184,48 @@ def test_reminders_and_calendar_file(plugin, monkeypatch):
     assert settings.plan_reminders() == []
 
 
-def test_save_a_plan_and_follow_it_up(plugin, monkeypatch):
+def test_opportunities_become_temporary_requests(plugin, monkeypatch):
+    # 撮像計画と撮像依頼は同じ業務 (tsudo, 2026-11-09): what is to be taken goes to the ledger as 臨時 requests.
     p, iface, tmp, fake = plugin
     monkeypatch.setattr("skywatch.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
-    dock = planned(p, [("東京", 139.7, 35.68)], 3)
-    assert dock.store_button.isVisibleTo(dock) and dock.saved_button.isVisibleTo(dock)
-    dock.store_button.setChecked(True)
-    assert dock.plan_name.text().startswith("撮像計画 2026/10/0")
-    dock.plan_name.setText("十月の計画")
-    ids = []
-    dock.save_to_store(ids.append)
-    assert wait_for(lambda: ids, 10000), dock.status.text()
-    assert ids[0] and "「十月の計画」を 計画レイヤー に保存" in dock.status.text()
-    rows = fake.layers[PLANS].rows
-    shots = len(rows)
-    assert shots == len(dock.shown)
-    assert all(r["attributes"]["PLAN_NAME"] == "十月の計画" and r["geometry"]["rings"] for r in rows)
-    # Nothing secret in the layer: just the plan.
-    assert "token" not in json.dumps([r["attributes"] for r in rows]).lower()
+    dock = planned(p, [("東京", 139.7, 35.68), ("大阪", 135.5, 34.7)], 3)
+    assert dock.request_button.isVisibleTo(dock) and dock.request_button.isEnabled()
+    assert not hasattr(dock, "store_button") and "SatObsSavedPlans" not in p.docks
+    requests = p.api.requests
+    assert wait_for(lambda: requests.task is None, 10000)
 
-    # The first shot's satellite took an image ten minutes later, over it.
-    first = min(rows, key=lambda r: r["attributes"]["SHOT_TIME"])
-    t0 = first["attributes"]["SHOT_TIME"]
-    xs = [pt[0] for pt in first["geometry"]["rings"][0]]
-    ys = [pt[1] for pt in first["geometry"]["rings"][0]]
-    ring = {"rings": [[[min(xs), min(ys)], [min(xs), max(ys)], [max(xs), max(ys)], [max(xs), min(ys)], [min(xs), min(ys)]]]}
-    fake.layers[IMAGES].add({"IMAGE_ID": "IMG-1", "ACQ": t0 + 600000, "SENSOR": first["attributes"]["SATELLITE"], "URL": "https://example.com/img-1.tif"}, ring)
+    # The chosen one: the form with its target, day and satellite, to look over and save.
+    op = dock.chosen
+    sat, target = dock.plan["sats"][op.satellite], dock.plan["targets"][op.target]
+    dock.request_chosen.trigger()
+    form = requests.form
+    assert requests.isVisible() and form is not None and form.isVisible() and form.batch is None
+    r = form.value()
+    assert (r.name, r.category, r.achieve, r.status, r.shape_kind) == (target.label, "臨時", "期間内1回", "有効", "点")
+    assert jst_day(r.start) == jst_day(op.time) == jst_day(r.end)
+    assert r.satellites == [sat.name] and r.note.startswith("撮像計画から: ")
+    # (Shown, the dock reads the ledger first.)
+    assert wait_for(lambda: requests.task is None, 10000)
+    form._save_clicked()
+    assert wait_for(lambda: requests.task is None and not form.isVisible(), 10000), form.message.text()
+    rows = fake.layers[LEDGER].rows
+    assert [(x["attributes"]["REQ_NAME"], x["attributes"]["CATEGORY"]) for x in rows] == [(target.label, "臨時")]
 
-    monkeypatch.setattr("skywatch.ui.saved_plans_dock._now_ms", lambda: EPOCH + 30 * DAY)
-    saved = p.api.saved_plans
-    done = []
-    dock.saved_button.click()
-    assert saved.isVisible()
-    assert wait_for(lambda: saved.plans and saved.task is None, 10000), saved.status.text()
-    assert [pl.name for pl in saved.plans] == ["十月の計画"]
-    saved.choose(saved.plans[0], True, lambda: done.append(1))
-    assert wait_for(lambda: done, 10000), saved.status.text()
-    statuses = saved.counts()
-    # Opened long after: the shot with an image is taken, the others missed.
-    assert statuses.get("撮像済み") == 1 and statuses.get("未撮像") == shots - 1, statuses
-    assert next(s for s in saved.shots if s.status == "撮像済み").imageId == "IMG-1"
-    assert saved.plan_model.item(0, 3).text().startswith("撮像済み 1 / ")
-    assert len(saved.overlay._painted) == shots
-
-    # The image opens with only the server's authentication configuration in its source (no token), with its id and time.
-    opened = []
-    settings.set_auth_map({"https://example.com/": "img0001"})
-    monkeypatch.setattr("skywatch.qgis_io.catalog_io.image_layer",
-                        lambda source, name, **kw: opened.append((source, name, kw)) or QgsRasterLayer("", name))
-    saved.shot_table.selectRow(next(i for i, s in enumerate(saved.shots) if s.status == "撮像済み"))
-    got = []
-    saved.open_image(got.append)
-    assert wait_for(lambda: got, 10000)
-    assert opened == [("https://example.com/img-1.tif", "IMG-1", {"image_id": "IMG-1", "time": t0 + 600000, "authcfg": "img0001"})]
-    settings.set_auth_map({})
-
-    # A status set by hand goes to the layer.
-    saved.shot_table.selectRow(1)
-    assert saved.chosen is saved.shots[1] and saved.status_choice.isEnabled()
-    changed = []
-    saved.set_status("取消", lambda: changed.append(1))
-    assert wait_for(lambda: changed, 10000)
-    assert fake.layers[PLANS].rows[[r["attributes"]["OBJECTID"] for r in fake.layers[PLANS].rows].index(saved.shots[1].objectId)]["attributes"]["STATUS"] == "取消"
-
-    # Deleting takes two clicks.
-    saved.delete_button.click()
-    assert saved.delete_button.text() == "もう一度押すと削除" and fake.layers[PLANS].rows
-    # Another plan chosen in between: the second click must not delete that one.
-    plan = saved.plan
-    saved.plan = None
-    saved._plan_row(0)
-    assert saved.delete_button.text() == "計画を削除" and not saved._armed and saved.plan is plan
-    assert wait_for(lambda: saved.task is None, 10000)
-    gone = []
-    saved.delete(lambda: gone.append(1))
-    assert wait_for(lambda: gone, 10000)
-    assert fake.layers[PLANS].rows == [] and saved.plans == []
+    # Every one listed: one request per target, each its own days and satellites unless the form changes them.
+    dock.request_all.trigger()
+    form = requests.form
+    assert form.batch is not None and form.windowTitle() == "撮像計画から臨時依頼（2 件）"
+    form._save_clicked()
+    assert wait_for(lambda: requests.task is None and not form.isVisible(), 10000), form.message.text()
+    made = [x["attributes"] for x in fake.layers[LEDGER].rows[1:]]
+    assert sorted(a["REQ_NAME"] for a in made) == ["大阪", "東京"]
+    for a in made:
+        ops = [o for o in dock.shown if dock.plan["targets"][o.target].label == a["REQ_NAME"]]
+        assert a["START_AT"] == day_bounds(jst_day(min(o.time for o in ops)))[0]
+        assert a["END_AT"] == day_bounds(jst_day(max(o.time for o in ops)))[1]
+        assert a["NOTE"].startswith("撮像計画から: ")
+    # Nothing is saved apart any more: the ledger is all there is.
+    assert set(fake.layers) == {CATALOG, IMAGES, LEDGER, HISTORY}
 
 
 def test_cloud_forecast_from_a_file(plugin, monkeypatch):

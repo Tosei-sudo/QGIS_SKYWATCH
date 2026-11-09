@@ -96,22 +96,6 @@ TABLES = (
         F("SAT_NAME", "衛星名", "TEXT", 255, "satellite"),
         F("ALIAS", "別名", "TEXT", 1000, "alias"),
     )),
-    Table("TBL_IMAGING_PLAN", "撮像計画", "POLYGON", writable=True, setting="planStores[].url", fields=(
-        F("PLAN_ID", "計画ID", "TEXT", 64, "planId"),
-        F("PLAN_NAME", "計画名", "TEXT", 255, "planName"),
-        F("SHOT_TIME", "撮像日時", "DATE", None, "shotTime"),
-        F("SATELLITE", "衛星名", "TEXT", 255, "satellite"),
-        F("SATELLITE_ID", "衛星ID", "TEXT", 64, "satelliteId"),
-        F("SENSOR_MODE", "センサーモード", "TEXT", 255, "mode"),
-        F("TARGET", "対象", "TEXT", 255, "target"),
-        F("OFF_NADIR", "オフナディア角", "DOUBLE", None, "offNadir"),
-        F("INCIDENCE", "入射角", "DOUBLE", None, "incidence"),
-        F("PASS_DIR", "軌道方向", "TEXT", 16, "pass"),
-        F("LOOK_SIDE", "観測方向", "TEXT", 16, "side"),
-        F("STATUS", "状態", "TEXT", 16, "status"),
-        F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
-        F("CREATED_AT", "保存日時", "DATE", None, "created"),
-    )),
     Table("TBL_IMAGING_REQUEST", "撮像依頼台帳", "POLYGON", writable=True, setting="requestStores[].url", fields=(
         F("REQ_ID", "依頼ID", "TEXT", 64, "id"),
         F("REQ_NAME", "名称", "TEXT", 255, "name"),
@@ -324,7 +308,6 @@ INDEXES = {
     "TBL_IMAGE_CATALOG": ("IMAGE_ID", "REGISTERED_AT"),
     "TBL_SATELLITE": ("SAT_NAME",),
     "TBL_SATELLITE_ALIAS": ("SAT_NAME",),
-    "TBL_IMAGING_PLAN": ("PLAN_ID", "SHOT_TIME"),
     "TBL_IMAGING_REQUEST": ("REQ_ID",),
     "TBL_REQUEST_HISTORY": ("REQ_ID", "TARGET_DAY", "TARGET_DATE"),
     "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID"),
@@ -385,8 +368,6 @@ def plugin_config(urls: dict) -> dict:
         config["sensorCatalogs"] = [{"url": urls["TBL_SENSOR_MODE"], "fields": _fields_of("TBL_SENSOR_MODE")}]
     if has("TBL_SATELLITE_ALIAS"):
         config["satelliteAliases"] = {"url": urls["TBL_SATELLITE_ALIAS"], "fields": _fields_of("TBL_SATELLITE_ALIAS")}
-    if has("TBL_IMAGING_PLAN"):
-        config["planStores"] = [{"url": urls["TBL_IMAGING_PLAN"]}]
     if has("TBL_IMAGING_REQUEST"):
         store = {"url": urls["TBL_IMAGING_REQUEST"]}
         if has("TBL_REQUEST_HISTORY"):

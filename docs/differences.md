@@ -10,7 +10,7 @@
 | 設定ファイルの指定 | なし（ページと同じ場所の `config.json` を読む） | メニュー「設定…」だけ。各ドックの上に設定ファイルの状態と「設定…」ボタンは出さず、問題があるときだけメッセージバーに件数と「設定…」ボタンを出す | tsudo の依頼（2026-11-07）。プラグインのメニューからたどれば足りるため |
 | 設定ファイルの固定 | なし（ページと同じ場所の `config.json` を読む） | `build_zip.py --lock-config` で作った zip（`config.lock` 入り）は同梱の設定ファイルだけを読み、「設定…」での指定を受け付けない。設定ファイルの項目ではなく zip の作り方で決める（受け取った人が選ぶファイルに書いても意味がなく、同梱のファイルが読めなくても固定が外れないように） | tsudo の依頼（2026-11-07） |
 | 雲量予報の取り込み | `cloudForecast` は Open-Meteo 互換の `url` のみ | `cloudForecast` に `file`・`folder` も書け、外部で毎日作った GFS の雲量の GeoTIFF（`docs/cloud-forecast-file.md`）を読む。ビューアの設定ファイルにこの書き方をするとビューアでは使えない | 閉域ネットワーク向け、tsudo の依頼（2026-11-07） |
-| 読む項目 | 全項目 | `satelliteCatalogs`・`sensorCatalogs`・`planStores`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` のみ（他は無視、問題にも出さない） | 共用のため |
+| 読む項目 | 全項目 | `satelliteCatalogs`・`sensorCatalogs`・`groundStations`・`cloudForecast`・`imageCatalogs`・`observationStores`・`observationVocabulary`・`arcgisPortals` のみ（他は無視、問題にも出さない） | 共用のため |
 | サインイン | `arcgisPortals` の OAuth（PKCE、ポップアップ） | QGIS の認証設定（`authcfg`）をサービスごとに選ぶ。`arcgisPortals` は読み込みと検証のみ | QGIS の OAuth2 / ESRI token 認証に任せる |
 | `token` と認証設定 | `token` があればそれ、なければサインインのトークン | 認証設定を選んだサービスは `token` を送らない | 二重送信を避けるため |
 | 全件読み込み | `resultOffset` で `exceededTransferLimit` が立つ間 | 同じ。加えて、ページが満杯なら次も読む。ページングできないレイヤーは ID を先に読み `maxRecordCount` ずつ取得 | 指示書「`maxRecordCount` を超える件数はページングで全件読む」 |
@@ -59,8 +59,7 @@
 
 | 項目 | ビューア | プラグイン | 理由 |
 | --- | --- | --- | --- |
-| 保存した計画 | 「保存した計画」ダイアログ | 「保存した撮像計画」ドック（メニュー・ツールバー、撮像計画ドックの「保存した計画…」から開く）。一覧・撮像の表・地図の色分け・「撮像を確認」・「計画を削除」（2 回押し）は同じ | QGIS の作法。通信はすべて QgsTask |
-| 撮像の状態の変更 | 表の行ごとの選択欄 | 撮像を選び、表の下の「状態」で変更 | 表の中の選択欄は Qt では扱いにくいため |
+| 保存した計画 | 「保存・追跡」と「保存した計画」ダイアログ | なし。撮像計画ドックの「臨時依頼にする」で、撮像機会の対象・日・衛星を撮像依頼の台帳に臨時の依頼として登録し、出力・採否・撮れたかは撮像依頼の流れで追う（`planStores` は読み飛ばす） | tsudo の判断（2026-11-09: 撮像計画と撮像依頼は同じ業務。保存・追跡も依頼に一本化） |
 | 撮れた画像を開く | ビューアで画像を開く | 画像カタログで画像 ID を探し、`fields.source` の値をラスターレイヤーとして追加（http(s) は `/vsicurl/`、ほかはローカルパス）。観測記録と同じ `image_layer()` で開き、画像 ID と撮像日時（時系列）をレイヤーに付ける | 認証の要る画像は、画像のサーバーに「設定…」で選んだ QGIS の認証設定の ID だけをソースに書いて開く（トークンはプロジェクトファイルに残さない）。token しかないカタログは、QGIS の認証設定（API ヘッダー `X-Esri-Authorization: Bearer …`）を作って選ぶ |
 | 撮像前の通知 | ブラウザ（localStorage）に保存し、ビューアを開いている間 20 秒ごとに確認。通知センター（「通知」とアプリのバッジ）に出す | QgsSettings に保存し、QGIS の起動中 20 秒ごとに確認。メッセージバー（「移動」で撮像範囲へ）とログ（「撮像計画」タブ）に出す | QGIS には通知センターがないため。デスクトップ通知は使わない点は同じ |
 | 予定表（.ics） | ダウンロード | 保存ダイアログで保存。中身（イベント・アラーム・75 オクテットでの折り返し）は同じ | — |
@@ -138,10 +137,9 @@
 | フットプリントの表示 | ベクターレイヤー | キャンバスアイテム（ドックを開いている間だけ。プロジェクトには足さない）。「レイヤーとして追加」でメモリレイヤー（全属性、撮像日時で時系列コントローラー） | 観測記録の印と同じ |
 | 画像の開き方 | COG をブラウザで読む | URL は `/vsicurl/`（URI には認証設定の ID だけ）。ローカルパスは そのまま → `pathMappings` の `url` → 選んだフォルダ（QFileDialog、QgsSettings に記憶。大文字小文字を区別せずにたどる） | 指示書どおり |
 | 先に試すパスの読み替え | — | `pathMappings` の `pattern`・`to`: 合うパスを置き換えた場所（`//ホスト/…/画像ID` → `D:/画像ID` など）を先に試し、なければ読み替え前のパスで開く | tsudo の依頼（2026-11-09） |
-| 開いたレイヤー | — | カスタムプロパティ `satobs/imageId`（観測記録・計画の追跡が使う）・`satobs/catalog`・`satobs/catalogUrl`・`satobs/feature`・`satobs/sensorAzimuth`・`satobs/sensorElevation`、メタデータにカタログの属性 | 指示書どおり |
-| 「保存した撮像計画」の画像 | — | 画像カタログと同じ開き方に（`pathMappings` も効く） | 共通化 |
+| 開いたレイヤー | — | カスタムプロパティ `satobs/imageId`（観測記録が使う）・`satobs/catalog`・`satobs/catalogUrl`・`satobs/feature`・`satobs/sensorAzimuth`・`satobs/sensorElevation`、メタデータにカタログの属性 | 指示書どおり |
 | パスがフォルダのレコード | — | フォルダの下（何段でも）の `imagePatterns`（カタログごと・センサーごとの正規表現、`*` はその他、なければふつうの画像の拡張子）に合うファイルをレコードの画像に。複数なら「開く画像の選択」で選び（行のダブルクリックでその画像だけを開く）、レコード ID のグループに開く（各レイヤーの `satobs/imageId` はレコードの ID、`satobs/imageFile` はフォルダからのパス）。URL のフォルダは不可、最大 1000 枚 | tsudo の依頼（2026-11-07、プラグインのみ） |
-| 衛星名の対応表（`satelliteAliases`） | なし（名前の英数字の部分一致のみ） | Esri のテーブル（衛星名・別名の属性）で衛星カタログと画像カタログの名前の違いを対応づける。撮像済みの確認（保存した撮像計画・撮像依頼）は同じ名前・別名の画像を優先し、次に部分一致、なければ時刻と範囲が合う最初の画像。依頼の衛星指定・`requestExports.satellites`・`imagePatterns` のキーにも効く。1 つの別名を同じシリーズの複数衛星に付けてよい（互いの別名にはしない） | tsudo の依頼（2026-11-07、対応表は設定ファイルでなく Esri に） |
+| 衛星名の対応表（`satelliteAliases`） | なし（名前の英数字の部分一致のみ） | Esri のテーブル（衛星名・別名の属性）で衛星カタログと画像カタログの名前の違いを対応づける。撮像依頼の撮像済みの確認は同じ名前・別名の画像を優先し、次に部分一致、なければ時刻と範囲が合う最初の画像。依頼の衛星指定・`requestExports.satellites`・`imagePatterns` のキーにも効く。1 つの別名を同じシリーズの複数衛星に付けてよい（互いの別名にはしない） | tsudo の依頼（2026-11-07、対応表は設定ファイルでなく Esri に） |
 | ピラミッド（.ovr）の自動作成 | —（ブラウザは COG の解像度レベルを読む） | QGIS に追加したローカル画像（`overviews.scope` が `catalog` ならカタログから開いた画像だけ）にピラミッドがなければバックグラウンドで外部 `.ovr` を作成（画像本体は書き換えない）。`overviews.location` が `auto` なら書き込めるフォルダは画像の隣、書き込めなければ PC ごとのキャッシュ（`GDAL_PAM_PROXY_DIR`）、`cache` なら常にキャッシュ。`overviews: false` で無効 | tsudo の依頼（2026-11-07、プラグインのみ） |
 | 複素 SAR 画像（SICD）の表示 | —（ビューアは複素数の画像を読まない） | QGIS に追加したローカル画像のうち、SICD（NITF の ISUBCAT が I・Q のバンド）、複素数の画素（CInt16・CFloat32 など）、説明が I・Q（real・imag）の 2 バンドは、GDAL の VRT（画素関数 `complex`・`dB`・`mod`）を前に置いて振幅を dB で表示（2〜98 % で引き伸ばし、I = Q = 0 は no data）。VRT はプロファイルの `complex-sar` に置き、画像本体は書き換えない。ファイル名・NITF のメタデータ・imageRules は元の画像のもの。`complexImages` で `"amplitude"`・`false` | tsudo の依頼（2026-11-08、プラグインのみ） |
 | 類似画像の検索の入口 | 画像の右クリック・一覧のボタン | カタログから開いたラスターレイヤーの右クリック「類似画像の検索…」・一覧のボタン | — |

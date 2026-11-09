@@ -120,7 +120,8 @@ def target_of(shapes: Sequence[Shape], label: str) -> Optional[PlanTarget]:
         center = ((extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2)
     unique = [] if len(points) == 1 else spread_out(points, MAX_POINTS)
     cells = cells_of(polygons)
-    return PlanTarget(label, tuple(center[:2]), [tuple(p[:2]) for p in unique], cells or None)
+    outlines = [[list(p[:2]) for p in rings[0]] for rings in polygons if rings]
+    return PlanTarget(label, tuple(center[:2]), [tuple(p[:2]) for p in unique], cells or None, rings=outlines)
 
 
 def priority_of(value: Any) -> Optional[float]:

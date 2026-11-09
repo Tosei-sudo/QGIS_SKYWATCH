@@ -15,7 +15,7 @@ from skywatch.core.config import parse_config, parse_config_text
 from skywatch.core.esri import ConflictError, EsriClient, EsriError, TooManyError
 from skywatch.core.plan.names import SatelliteNames
 from skywatch.core.plan.satellites import SatelliteSpec
-from skywatch.core.plan.store import between_condition
+from skywatch.core.time_query import between_condition
 from skywatch.core.time_zone import parse_time_zone
 from skywatch.core.plan.weather import CloudSeries, key_of
 from skywatch.core.request.daily import HELD, TAKEN, allocate, carries_over, gather, room_text
@@ -335,19 +335,24 @@ CATALOG = "https://gis.example/rest/services/I/FeatureServer/0"
 
 
 def server():
-    fake = FakeEsri()
+    fake = ledger_layers(FakeEsri())
+    images = fake.add_layer(CATALOG, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    images.add({"IMAGE_ID": "IMG-1", "ACQ": FIRST + 10 * H, "SENSOR": "OPT-X 1"},
+               {"rings": [[[139.7, 35.4], [139.7, 35.6], [140.0, 35.6], [140.0, 35.4], [139.7, 35.4]]], "spatialReference": {"wkid": 4326}})
+    return fake
+
+
+def ledger_layers(fake: FakeEsri, ledger: str = LEDGER, history: str = HISTORY) -> FakeEsri:
+    """The ledger and its history table (default names) in `fake`."""
     types = {name: "esriFieldTypeString" for name in DEFAULT_REQUEST_FIELDS.values()}
     for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT"):
         types[n] = "esriFieldTypeDate"
     for n in ("PRIORITY", "BOOST", "OFF_NADIR_MIN", "OFF_NADIR_MAX", "INCIDENCE_MIN", "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO"):
         types[n] = "esriFieldTypeDouble"
-    fake.add_layer(LEDGER, FakeLayer(types, "esriGeometryPolygon"))
+    fake.add_layer(ledger, FakeLayer(types, "esriGeometryPolygon"))
     htypes = {name: "esriFieldTypeString" for name in DEFAULT_HISTORY_FIELDS.values()}
     htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
-    fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
-    images = fake.add_layer(CATALOG, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
-    images.add({"IMAGE_ID": "IMG-1", "ACQ": FIRST + 10 * H, "SENSOR": "OPT-X 1"},
-               {"rings": [[[139.7, 35.4], [139.7, 35.6], [140.0, 35.6], [140.0, 35.4], [139.7, 35.4]]], "spatialReference": {"wkid": 4326}})
+    fake.add_layer(history, FakeLayer(htypes, "esriGeometryNone"))
     return fake
 
 

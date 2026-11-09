@@ -14,7 +14,6 @@ from .obs.drafts import keep_draft_in
 from .obs.offline_stores import OfflineAreaStore, OfflineObservationStore
 from .obs.setup import store_sets
 from .offline import KINDS, UploadReport, now_ms, offline_of
-from .plan.store import upload_plans
 from .request.store import upload_requests
 
 
@@ -36,11 +35,11 @@ def upload_all(config: Any, client: Callable[[], EsriClient], token_for: Callabl
     for r in config.request_stores:
         known["request"].add(r.label)
         upload_requests(esri, r, token_for(r.url, r.token), report, now())
-    for p in config.plan_stores:
-        known["plan"].add(p.label)
-        upload_plans(esri, p, token_for(p.url, p.token), report)
     for kind, label, n in [(k, s, n) for k in KINDS for s, n in _stores_of(work, k).items()]:
-        if label not in known.get(kind, set()):
+        if kind == "plan":
+            # Saved before 撮像計画 became 臨時 requests (2026-11-09): there is no plan store to send it to.
+            report.kept.append(f"撮像計画の保存はなくなった（撮像依頼に一本化）ため送らない「{label}」の撮像計画 {n} 件")
+        elif label not in known.get(kind, set()):
             report.kept.append(f"設定ファイルにない保存先「{label}」の{KINDS[kind]} {n} 件")
     return report
 

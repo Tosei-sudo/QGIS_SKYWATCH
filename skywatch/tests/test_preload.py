@@ -17,6 +17,9 @@ def test_preload_key_mistakes():
     assert len(problems) == 2 and "catalog" in problems[0]
     problems = []
     assert preload_of("yes", problems) == tuple(ITEMS) and problems
+    # 保存した撮像計画 is gone (2026-11-09): an older file's savedPlans is just skipped.
+    problems = []
+    assert preload_of(["savedPlans", "requests"], problems) == ("requests",) and problems == []
 
 
 def test_clock():

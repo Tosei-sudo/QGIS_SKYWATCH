@@ -314,7 +314,7 @@ def shift_text(shift: TimeShift) -> str:
 
 #: The settings file's entries of external sources that can say their dates' time zone (`timeZone`).
 TIME_ZONE_SOURCES = (
-    "layers", "imageCatalogs", "planStores", "observationStores", "detectionOutputs", "aiResultSources",
+    "layers", "imageCatalogs", "observationStores", "detectionOutputs", "aiResultSources",
     "satelliteCatalogs", "sensorCatalogs", "movingFeeds", "stacCatalogs", "gpServices",
 )
 

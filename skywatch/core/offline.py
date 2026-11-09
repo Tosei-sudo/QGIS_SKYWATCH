@@ -46,7 +46,7 @@ KINDS: dict[str, str] = {
     "observation": "観測記録",
     "area": "確認範囲",
     "request": "撮像依頼",
-    "plan": "撮像計画",
+    "plan": "撮像計画",  # retired (2026-11-09); kept so that what an older version left is still counted
 }
 #: Requests that change data: never answered from the cache.
 _EDITS = re.compile(r"/(applyEdits|addFeatures|updateFeatures|deleteFeatures|calculate|append)/?$", re.IGNORECASE)

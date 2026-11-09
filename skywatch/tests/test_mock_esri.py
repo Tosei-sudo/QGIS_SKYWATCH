@@ -79,8 +79,8 @@ def test_the_settings_file_it_writes_reads_without_problems(server):
     _, _, _, path = server
     config, problems = read_config_file(path)
     assert problems == []
-    assert [len(x) for x in (config.image_catalogs, config.satellite_catalogs, config.plan_stores, config.observation_stores,
-                             config.ai_result_sources, config.detection_outputs)] == [1, 1, 1, 1, 1, 1]
+    assert [len(x) for x in (config.image_catalogs, config.satellite_catalogs, config.observation_stores,
+                             config.ai_result_sources, config.detection_outputs)] == [1, 1, 1, 1, 1]
 
 
 def test_catalog_search_newest_first_over_an_area_and_by_sensor(server):

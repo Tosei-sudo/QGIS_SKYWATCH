@@ -78,7 +78,7 @@ class RequestForm(QDialog):
         self._closing = False
         self.overlay = PlanOverlay(self.canvas)
         if batch is not None:
-            self.setWindowTitle(self.tr("レイヤーから取り込み（{n} 件）").format(n=len(batch["items"])))
+            self.setWindowTitle(batch.get("title") or self.tr("レイヤーから取り込み（{n} 件）").format(n=len(batch["items"])))
         else:
             self.setWindowTitle(self.tr("撮像依頼の編集") if request.object_id is not None else self.tr("撮像依頼の登録"))
         self.setModal(False)
@@ -316,7 +316,7 @@ class RequestForm(QDialog):
         outer.addWidget(box)
 
     def _fill(self, r: ImagingRequest) -> None:
-        self.name.setText(r.name if r.object_id is not None else "")
+        self.name.setText(r.name)
         self.category.setCurrentText(r.category)
         self.achieve.setCurrentText(r.achieve)
         self.status.setCurrentText(r.status)

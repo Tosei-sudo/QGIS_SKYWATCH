@@ -12,14 +12,12 @@ from skywatch.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
 from skywatch.core.obs.handover import DEFAULT_HANDOVER_FIELDS
 from skywatch.core.obs.model import DEFAULT_OBSERVATION_FIELDS
 from skywatch.core.obs.taxonomy import DEFAULT_TAXONOMY_FIELDS
-from skywatch.core.plan.store import DEFAULT_PLAN_FIELDS
 from skywatch.core.request.store import DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS
 
 README = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
 
 #: Each table's section and the code's default names by role.
 DEFAULTS = {
-    "TBL_IMAGING_PLAN": DEFAULT_PLAN_FIELDS,
     "TBL_IMAGING_REQUEST": DEFAULT_REQUEST_FIELDS,
     "TBL_REQUEST_HISTORY": DEFAULT_HISTORY_FIELDS,
     "TBL_OBSERVATION": DEFAULT_OBSERVATION_FIELDS,
@@ -96,6 +94,5 @@ def test_the_settings_example_reads_without_problems():
     example = _section().split("```jsonc\n", 1)[1].split("```", 1)[0]
     config, problems = parse_config_text(example)
     assert problems == []
-    assert config.plan_stores[0].fields["mode"] == "SENSOR_MODE"
     assert config.request_stores[0].history_fields["file"] == "OUTPUT_FILE"
     assert config.image_catalogs[0].fields["source"] == ["COG_URL", "FILE_PATH"]

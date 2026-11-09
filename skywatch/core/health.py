@@ -30,7 +30,7 @@ _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 
 #: The kinds of settings entries whose layer the plugin adds to or changes (the class names).
 WRITTEN = {
-    "ObservationStoreConfig", "AreaStoreConfig", "TaxonomyTableConfig", "PlanStoreConfig", "RequestStoreConfig",
+    "ObservationStoreConfig", "AreaStoreConfig", "TaxonomyTableConfig", "RequestStoreConfig",
     "AssignmentSource", "DetectionOutput",
 }
 #: Entries written to by where they are in the settings (their path ends so).

@@ -23,8 +23,8 @@
 
 | サブメニュー | 中身 |
 |---|---|
-| 撮像計画 | 撮像計画・保存した撮像計画・衛星パス・移動目標撮像計画… ／ 雲量マップ・雲量を属性に付与… |
-| 撮像依頼 | 撮像依頼・撮像計画ファイル出力 |
+| 撮像計画 | 撮像計画・衛星パス・移動目標撮像計画… ／ 雲量マップ・雲量を属性に付与… |
+| 撮像依頼 | 撮像依頼・撮像計画ファイル出力・撮像予定 |
 | 観測記録 | 観測記録・分類体系の編集・通報文の作成…・通報記録の確認…・観測記録のエクスポート…・観測記録の一括取込み…・分担…・引き継ぎメモ…・移動体（AIS・ADS-B）・ダッシュボード |
 | 画像 | 画像カタログ・通知 ／ 画像補正・影から高さ・スペクトル ／ スワイプ比較・位置ずらし・位置ずらしの解除 |
 | 解析・処理 | データ分析 ／ パンシャープン…・変化抽出（2 時期）…・自動位置合わせ…・土地被覆分類…・簡易オルソ補正… ／ 測地線バッファ…・正距方位での重心…・移動体と検出の照合… ／ サーバ処理… |
@@ -45,7 +45,7 @@
 ## ツールバーのボタン
 
 - ツールバー「SKYWATCH」に出すボタンは担当（「担当と個人設定…」で選んだもの）で変わる
-  - 撮像計画の担当: 撮像計画・衛星パス・保存した撮像計画・移動目標撮像計画・雲量マップ・撮像依頼・撮像計画ファイル出力・撮像予定・画像カタログ・イベント・背景地図
+  - 撮像計画の担当: 撮像計画・衛星パス・移動目標撮像計画・雲量マップ・撮像依頼・撮像計画ファイル出力・撮像予定・画像カタログ・イベント・背景地図
   - 観測記録の担当: 画像カタログ・通知・画像補正・観測記録・AI結果・分類体系の編集・イベント・通報文の作成・分担・引き継ぎメモ・背景地図・スワイプ比較・位置ずらし
   - 画像判読: 画像カタログ・通知・画像補正・影から高さ・スペクトル・観測記録・移動体・変化抽出（2 時期）・自動位置合わせ・背景地図・スワイプ比較・位置ずらし
   - 担当なし・自分で保存したレイアウトの名前: これまでの並び（ドック 18 個・移動目標撮像計画・背景地図・スワイプ比較・位置ずらし）
@@ -56,7 +56,7 @@
 
 ## ドックの配置
 
-- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・保存した撮像計画・撮像依頼・撮像計画ファイル出力・撮像予定・雲量マップ）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ・スペクトル・ダッシュボード・データ分析）は左、記録系（観測記録・分類体系の編集・移動体・AI結果・イベント）は右の下段
+- 初期位置は 3 つのタブのまとまり。撮像系（撮像計画・衛星パス・撮像依頼・撮像計画ファイル出力・撮像予定・雲量マップ）は右、カタログ系（画像カタログ・通知・画像補正・影から高さ・スペクトル・ダッシュボード・データ分析）は左、記録系（観測記録・分類体系の編集・移動体・AI結果・イベント）は右の下段
 - 最初に開いているのは「画像カタログ」と「撮像計画」だけ。ほかはメニューかツールバーから開く（QGIS が前回の配置を覚えていれば、そちらが優先）
 - 浮かせたドックが画面外にある場合（モニターを外したあとなど）、開いたときに元の場所へドッキング
 - メニュー「ドックを初期位置に戻す」で、すべてのドックを初期位置のタブに戻す。開いているドックは開いたまま
@@ -124,7 +124,7 @@
 - ボタンの並びの「フットプリント」で地図の表示を選ぶ（PC ごとに記憶）: 「枠だけ」（既定。塗らずに枠線だけ、画像 ID は範囲の上端に出して画像の中央を隠さない）・「塗りつぶし」（以前の表示。範囲を薄く塗り、画像 ID は中央）・「非表示」（フットプリントを出さない。「地図で選択」のクリックは効き、描いた範囲は枠で残る）
 - 「開く」かダブルクリックでラスターレイヤーに。URL は `/vsicurl/`、ローカルパスは `pathMappings` に従う（`url` があればそれ、なければそのままのパス、だめなら初回にフォルダを選び記憶。「フォルダの対応を消去」で忘れる）。`pattern`・`to` の読み替えがあれば先にその場所を試し、なければ元のパスで開く（[下記](#パスの読み替えpathmappings)）。開けないときは理由を表示。「パスをコピー」で場所をクリップボードへ
 - 開いたレイヤーはカタログの属性をカスタムプロパティとメタデータに持つ（`satobs/imageId` は観測記録と計画の追跡が使う）
-- パスが画像ではなくフォルダのレコード: フォルダの下（階層は何段でも）のファイルのうち、カタログの `imagePatterns` に合うものをそのレコードの画像とする（下記）。画像が複数なら「開く画像の選択」で選んで（既定は全部。絞り込み・表示中をすべて選択／解除あり。行をダブルクリックするとその画像だけを開いて閉じる）、レコードの画像 ID の名前のグループにまとめて開く。各レイヤーの名前はフォルダからのパス、`satobs/imageId` はレコードの ID（観測記録・AI結果・計画の追跡はレコード単位で共有）、`satobs/imageFile` にフォルダからのパス。1 枚だけなら聞かずに開く。通知・保存した撮像計画から開くときも同じ
+- パスが画像ではなくフォルダのレコード: フォルダの下（階層は何段でも）のファイルのうち、カタログの `imagePatterns` に合うものをそのレコードの画像とする（下記）。画像が複数なら「開く画像の選択」で選んで（既定は全部。絞り込み・表示中をすべて選択／解除あり。行をダブルクリックするとその画像だけを開いて閉じる）、レコードの画像 ID の名前のグループにまとめて開く。各レイヤーの名前はフォルダからのパス、`satobs/imageId` はレコードの ID（観測記録・AI結果はレコード単位で共有）、`satobs/imageFile` にフォルダからのパス。1 枚だけなら聞かずに開く。通知から開くときも同じ
 
 ### フォルダのレコードの画像（`imagePatterns`）
 
@@ -172,7 +172,7 @@
 
 ### ピラミッド（.ovr）の自動作成（`overviews`）
 
-- QGIS に追加したローカルの画像（レイヤーの追加・ドラッグ＆ドロップ・プロジェクトを開いたときなど、開き方を問わない。`scope` が `"catalog"` ならカタログ・通知・保存した撮像計画から開いた画像だけ）にピラミッドがなければ、バックグラウンド（QGIS のタスク。ステータスバーで進捗・取消）で外部の `.ovr` を作り、できたらレイヤーを読み直す。**画像本体は書き換えない**（読み取りのみ）。1 枚ずつ順に作り、同じ画像は二重に作らない。内部ピラミッド・既存の `.ovr`・JPEG 2000 などの解像度レベルがあれば作らない。URL（COG）の画像は対象外
+- QGIS に追加したローカルの画像（レイヤーの追加・ドラッグ＆ドロップ・プロジェクトを開いたときなど、開き方を問わない。`scope` が `"catalog"` ならカタログ・通知から開いた画像だけ）にピラミッドがなければ、バックグラウンド（QGIS のタスク。ステータスバーで進捗・取消）で外部の `.ovr` を作り、できたらレイヤーを読み直す。**画像本体は書き換えない**（読み取りのみ）。1 枚ずつ順に作り、同じ画像は二重に作らない。内部ピラミッド・既存の `.ovr`・JPEG 2000 などの解像度レベルがあれば作らない。URL（COG）の画像は対象外
 - 置き場所（`location`）:
   - `"auto"`（既定）: 画像のフォルダに書き込めれば隣に `画像名.tif.ovr`（一時フォルダで作ってから移すので、作りかけは読まれない）。書き込めなければ PC ごとのキャッシュフォルダ
   - `"cache"`: 書き込めるフォルダでも常にキャッシュフォルダ（画像のフォルダには何も書かない）
@@ -246,7 +246,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 「ステレオペア」「干渉ペア（同じ軌道・SAR）」で同じ対象を 2 回撮る組を、「再訪間隔マップ」で対象のまわりを格子に分けたセルごとの最長の待ちを表示（緑ほど早く、赤ほど長く待つ）
 - 「詳細条件」の「雲量予報」をオンにすると、光学衛星の機会に 16 日先までの雲量を付け、「雲量（以下）」で絞り込める。オンにするまで予報サービス（`cloudForecast`、既定は Open-Meteo）には何も送らない。閉域では社内の互換サービスを `cloudForecast` に指定するか、外部で毎日作った GFS の雲量ファイルを `{"folder": "…"}`（フォルダ内の最新）か `{"file": "….tif"}` で読む（ファイルの仕様は `docs/cloud-forecast-file.md`）。使わないなら `false`。ステータスに予報の初期時刻と何日前かを表示
 - 「予定・通知…」で一覧の撮像を予定表（.ics）に保存、または撮像の何分前かに QGIS のメッセージバーで通知（QGIS の起動中のみ）
-- 「保存・追跡…」で一覧の撮像を `planStores` のフィーチャーサービスに保存。「保存した撮像計画」ドックで計画を開くと、撮像時刻を過ぎた予定の撮像を画像カタログ（`imageCatalogs`）で確かめ、撮像済み・未撮像にする
+- 「臨時依頼にする」で、撮りたい撮像機会を撮像依頼の台帳（`requestStores`）に臨時の依頼として登録する。「選んだ撮像機会から」はその回の対象 1 件、「一覧のすべての撮像機会から」は対象ごとに 1 件。範囲は対象の範囲（ポリゴンはその形、線・複数の点はそれを囲む矩形、点は撮像依頼の点の一辺の正方形）、期間はその撮像機会の日（日本時間、複数ならはじめの日から終わりの日）、衛星・モードはその撮像機会のもの、達成条件は期間内1回、備考に撮像の日時と衛星。依頼のフォームで確かめて保存する（複数の対象なら 1 つのフォームでまとめて。期間・衛星・モード・種別はフォームで変えなければ対象ごとのもの）
+  - 撮像計画は別に保存しない（2026-11-09 に「保存・追跡」と「保存した撮像計画」ドックをやめた）。撮るものは依頼として、日々の撮像計画ファイル出力・出力履歴・「撮像予定」の採否・画像カタログでの撮像済みの確認（[撮像依頼](#撮像依頼定点臨時と日次出力)）で追う。古い設定ファイルの `planStores` は読み飛ばす
 - 設定ファイルに `satelliteCatalogs` がなければ、架空のサンプル衛星 2 機（光学・SAR、SAR は 3 モード）で試せる
 
 ### 衛星名の対応表（`satelliteAliases`）
@@ -269,7 +270,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - 1 行に別名 1 つでも、カンマ（`,`・`、`）区切りで複数でも可。同じ衛星の行はまとめる。テーブルを複数使うなら配列。`where`・`token` も書ける
 - 名前は英数字だけを大文字小文字の区別なく比べる（`WorldView-3` = `worldview3`、`WV-3` = `WV3`）
-- 使うところ: 保存した撮像計画の追跡と撮像依頼の撮像済みの確認（画像のセンサーが衛星の名前・ID・別名と同じ画像を優先し、次に一方が他方を含む画像、なければ従来どおり時刻と範囲が合う最初の画像）、撮像依頼の衛星の指定と `requestExports` の `satellites`、フォルダのレコードの `imagePatterns`（センサーの別名のキーでも合う）
+- 使うところ: 撮像依頼の撮像済みの確認（画像のセンサーが衛星の名前・ID・別名と同じ画像を優先し、次に一方が他方を含む画像、なければ従来どおり時刻と範囲が合う最初の画像）、撮像依頼の衛星の指定と `requestExports` の `satellites`、フォルダのレコードの `imagePatterns`（センサーの別名のキーでも合う）
 - 1 つの別名を同じシリーズの複数の衛星に付けてよい（画像カタログが号機を区別しない場合）。SkySat-C12 と SkySat-C13 は互いの別名にはならない。号機の区別は撮像時刻（`matchMinutes`）と範囲による
 - テーブルは使うとき（衛星カタログの読み込み・画像カタログの検索・追跡）に一度読み、設定ファイルを読み直すまで使い回す。読めなければ別名なしで続ける
 
@@ -284,6 +285,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 衛星シリーズ・衛星・センサーモードは撮像計画と同じ階層選択（種別 → シリーズ → 衛星 → モード、撮像モードのまとめ選択と絞り込み）で選ぶ。チェックなしは衛星を問わない。シリーズ全体のチェックは衛星シリーズ、一部なら衛星（台帳にあった順、続けて新しくチェックした順に優先）、衛星のモードの一部だけならセンサーモードとして保存。保存する条件はツリーの下に表示
   - 台帳の名前（別名 `satelliteAliases` を含む）はチェックとして表示し、触らなければそのまま保存。衛星カタログにない名前もそのまま残る。「手入力」で名前を直接入力（衛星カタログを読めないときは手入力のみ）
 - 範囲は地図で矩形・点（一辺の長さ指定）、または選択中の地物から
+- 撮像計画ドックの「臨時依頼にする」で、撮像機会の対象・日・衛星を引き継いだ臨時の依頼を入力画面に出す（[撮像計画](#撮像計画)）。撮像計画は別に保存せず、撮るものはここから依頼として追う
 - 「レイヤーから取り込み…」で、任意のレイヤー（ポリゴン・点・線）と名称に使う属性を選ぶと、地物ごとの範囲と名称で依頼を登録する。管理番号・識別番号に使う属性も選べる（`MANAGEMENT_NO`・管理番号 などの名前の属性は自動で選ぶ。属性が空の地物は入力画面で入れた値）。期間・優先度・衛星などの残りの項目は、入力画面で全件まとめて指定する（点は一辺を指定した正方形、選択中の地物だけも可）
 - 「台帳と同じ属性も読む」を選ぶと、属性を台帳と同じ名前（`REQ_NAME`・`START_AT` …）か、名称・開始・終了・優先度 などの見出しで対応づけて読む（依頼ID が同じものは上書き）。「レイヤーへ書き出し」で一覧の依頼を一時レイヤーにしたものを戻すとき用
 - 「一括編集…」: 一覧で Ctrl・Shift + クリックで選んだ複数の依頼の優先度（繰り上げの解除も可）・状態・種別をまとめて変更。チェックした項目だけを変え、1 件ずつ台帳と照合して保存（ほかの人が先に変えた依頼は保存せず名前を表示、残りは保存）
@@ -945,7 +947,7 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 
 - `timeZone`: データの日時が記録されているタイムゾーン。IANA 名（`Asia/Tokyo`・`UTC`）、時差（`+09:00`・`+0900`・`UTC+9`）、Windows 名（`Tokyo Standard Time`）のいずれか
 - `serviceTimeZone`（任意）: サービスが日時を解釈しているタイムゾーン。Esri の日付型は、省略するとレイヤーの説明の `dateFieldsTimeReference`（`timeZoneIANA` か `timeZone`）、それもなければ UTC
-- 書ける項目: `layers`・`imageCatalogs`・`planStores`・`observationStores`（`areas`・`taxonomyTable` も含む）・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices`（ビューアの `stacCatalogs` も読むが、このプラグインに STAC はない）。項目の中の URL すべてと、その下の URL（`…/FeatureServer` なら `…/FeatureServer/0` も）が対象
+- 書ける項目: `layers`・`imageCatalogs`・`observationStores`（`areas`・`taxonomyTable` も含む）・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices`（ビューアの `stacCatalogs` も読むが、このプラグインに STAC はない）。項目の中の URL すべてと、その下の URL（`…/FeatureServer` なら `…/FeatureServer/0` も）が対象
 - 優先順位: 各項目の `timeZone` → `timeZones` の上から最初に合うもの。`serviceTimeZone` は同じ項目・規則のものだけを使い、なければレイヤーの説明 → UTC
 - 変換する範囲: プラグインが送る Esri の要求すべて（画像カタログ・新着の監視・衛星カタログ・撮像計画の保存先・観測記録の保存先・確認範囲・分類体系・DB へ転記・外部AI結果）の日付型（`esriFieldTypeDate`）の属性の読み込み、保存（`applyEdits` の追加・更新）、検索条件の `TIMESTAMP '…'`。移動体のフィードは時刻、サーバ処理（`gpServices`）は日時の入力
 - QGIS が自分で開くレイヤー（`layers` の `esri`・`wfs`・`ogc-features`、データソースマネージャーで追加したもの）: 日時は QGIS が読むので値は変えず、日時型の属性ごとに補正した仮想フィールド「〈属性名〉（Asia/Tokyo）」を足す（式は `satobs_time_zone("属性", 'Asia/Tokyo', 'UTC')`、関数は式ビルダーの「衛星観測」）。プロジェクトに保存され、開き直しても二重には足さない。Esri のレイヤーで `serviceTimeZone` がないときはレイヤーの説明を読んでから足す
@@ -1067,7 +1069,6 @@ QGIS の起動が終わって設定ファイルを読んだら、ドックを初
 | --- | --- |
 | `satellites` | 撮像計画の衛星カタログ（`satelliteCatalogs`・`sensorCatalogs`・`satelliteAliases`）。撮像計画ドックが開いていればドック自身が読むので、二重には読まない |
 | `requests` | 撮像依頼の台帳（`requestStores` の最初の保存先） |
-| `savedPlans` | 保存した撮像計画（`planStores`） |
 | `events` | イベントと紐付け（`events`） |
 
 観測記録（記録・分類体系・通報済みの印）は、これまでどおり設定ファイルを読んだ時点で観測記録ドックが読む。設定ファイルの `preload` で選べる（`true` ですべて（既定）、`false` で先読みしない、`["requests", "events"]` のように一覧で選ぶ）。設定ファイルを読み直したときも、もう一度先読みする。
@@ -1289,7 +1290,6 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `satelliteCatalogs` | 配列 | `url`（必須）、`fields`（`tle` か `tle1`＋`tle2` が必須。ほかに `name`・`id`・`maxOffNadir`・`minOffNadir`・`swath`・`length`・`lookSide`・`kind`・`scenesPerPass`・`minInterval`・`maxPerDay`・`series`・`leadTime`・`sensor`・`mode`・`resolution`・`system`）、`defaults`（属性がないときの値）、`swathUnit`（`km` か `m`）、`sarPattern`（SAR とみなす衛星名の正規表現）、`where`、`token` | なし | [撮像計画](#撮像計画) |
 | `sensorCatalogs` | 配列 | 設定ファイルに書くなら `sensors`（`[{ "sensor", "modes": [{ "mode", "swath", … }] }]`）、テーブルなら `url` と `fields`（`sensor` 必須。`mode`・`kind`・`swath`・`primary` など）。`swathUnit`・`sarPattern` | なし | [撮像計画](#撮像計画) |
 | `satelliteAliases` | オブジェクトか配列 | 衛星名の対応表（Esri のテーブル）の `url`（必須）、`fields`（`satellite` 衛星カタログの名前か ID・`alias` 画像カタログでの名前、ともに必須）、`label`・`where`・`token` | なし（名前の英数字の部分一致のみ） | [衛星名の対応表](#衛星名の対応表satellitealiases) |
-| `planStores` | 配列 | `url`（編集できるレイヤー、必須）、`fields`（`planId`・`shotTime`・`satellite`・`status`・`imageId` など。既定は `PLAN_ID` などの大文字の名前）、`catalog`（撮像済みを確かめる画像カタログの `label`）、`matchMinutes`（既定 30）、`missAfterDays`（既定 3）、`token` | なし | [撮像計画](#撮像計画) |
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
@@ -1303,7 +1303,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
-| `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`savedPlans`・`events` から | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
+| `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
@@ -1343,7 +1343,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
 | `timeZones` | 配列 | `match`（URL の正規表現、必須）・`timeZone`（必須）・`serviceTimeZone`・`label` | なし | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
-| `timeZone`・`serviceTimeZone`（各項目の中） | 文字列 | `layers`・`imageCatalogs`・`planStores`・`observationStores`・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices` の要素に書ける。IANA 名（`Asia/Tokyo`）・時差（`+09:00`）・Windows の名前。`timeZones` より優先 | サービスの申告、なければ UTC | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
+| `timeZone`・`serviceTimeZone`（各項目の中） | 文字列 | `layers`・`imageCatalogs`・`observationStores`・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices` の要素に書ける。IANA 名（`Asia/Tokyo`）・時差（`+09:00`）・Windows の名前。`timeZones` より優先 | サービスの申告、なければ UTC | [日時のタイムゾーン](#日時のタイムゾーンtimezonetimezones) |
 
 ### 設定ファイルに書かないもの
 
@@ -1396,7 +1396,6 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | [`TBL_SATELLITE`](#tbl_satellite衛星カタログ) | なし（テーブル） | 読み | 衛星カタログ（TLE・諸元） | `satelliteCatalogs[].url` |
 | [`TBL_SENSOR_MODE`](#tbl_sensor_modeセンサーモード) | なし | 読み | センサーの撮像モード | `sensorCatalogs[].url` |
 | [`TBL_SATELLITE_ALIAS`](#tbl_satellite_alias衛星名の対応表) | なし | 読み | 衛星名の対応表 | `satelliteAliases.url` |
-| [`TBL_IMAGING_PLAN`](#tbl_imaging_plan撮像計画) | ポリゴン | 書き込み | 保存した撮像計画 | `planStores[].url` |
 | [`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) | ポリゴン | 書き込み | 撮像依頼台帳 | `requestStores[].url` |
 | [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) | ポリゴン（なしでも可） | 書き込み | 撮像依頼の日次出力の履歴・日ごとの撮像予定（採否・要求外） | `requestStores[].history` |
 | [`TBL_OBSERVATION`](#tbl_observation観測記録) | ポイント | 書き込み | 観測記録 | `observationStores[].url` |
@@ -1488,27 +1487,6 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | --- | --- | --- | --- | --- |
 | `SAT_NAME` | 衛星名 | `String(255)` | 衛星カタログの名前か ID。**必須** | `satellite` |
 | `ALIAS` | 別名 | `String(1000)` | 画像カタログでの名前（`WV03, WV3`）。**必須** | `alias` |
-
-### `TBL_IMAGING_PLAN`（撮像計画）
-
-撮像範囲のポリゴン（1 撮像 = 1 フィーチャ）。`planStores[].fields`（既定は下の名前）。
-
-| 属性名 | エイリアス | 型 | 中身 | 役割 |
-| --- | --- | --- | --- | --- |
-| `PLAN_ID` | 計画ID | `String(64)` | 計画（保存 1 回分）の ID。**必須** | `planId` |
-| `PLAN_NAME` | 計画名 | `String(255)` | 計画の名前 | `planName` |
-| `SHOT_TIME` | 撮像日時 | `Date` | 撮像の時刻。**必須** | `shotTime` |
-| `SATELLITE` | 衛星名 | `String(255)` | 衛星名 | `satellite` |
-| `SATELLITE_ID` | 衛星ID | `String(64)` | 衛星の ID | `satelliteId` |
-| `SENSOR_MODE` | センサーモード | `String(255)` | モード（古い既定の `MODE` だけがあるレイヤーはそれを使う） | `mode` |
-| `TARGET` | 対象 | `String(255)` | 対象の名前 | `target` |
-| `OFF_NADIR` | オフナディア角 | `Double` | オフナディア角（度） | `offNadir` |
-| `INCIDENCE` | 入射角 | `Double` | 入射角（度） | `incidence` |
-| `PASS_DIR` | 軌道方向 | `String(16)` | 昇交・降交 | `pass` |
-| `LOOK_SIDE` | 観測方向 | `String(16)` | 右・左 | `side` |
-| `STATUS` | 状態 | `String(16)` | `予定`・`撮像済み`・`未撮像`・`取消` | `status` |
-| `IMAGE_ID` | 画像ID | `String(255)` | 撮像済みにした画像の ID | `imageId` |
-| `CREATED_AT` | 保存日時 | `Date` | 保存した日時 | `created` |
 
 ### `TBL_IMAGING_REQUEST`（撮像依頼台帳）
 
@@ -1822,45 +1800,42 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
   ],
   "satelliteAliases": { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/3",       // TBL_SATELLITE_ALIAS
                         "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },
-  "planStores": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4" }                        // TBL_IMAGING_PLAN
-  ],
   "requestStores": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5",                         // TBL_IMAGING_REQUEST
-      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6" }                    // TBL_REQUEST_HISTORY
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4",                         // TBL_IMAGING_REQUEST
+      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5" }                    // TBL_REQUEST_HISTORY
   ],
   "observationStores": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/7",                         // TBL_OBSERVATION
-      "areas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/8",                       // TBL_OBSERVATION_AREA
-      "taxonomyTable": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/9" }              // TBL_TAXONOMY
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6",                         // TBL_OBSERVATION
+      "areas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/7",                       // TBL_OBSERVATION_AREA
+      "taxonomyTable": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/8" }              // TBL_TAXONOMY
   ],
   "alertReports": {
-    "rules": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/10",                        // TBL_ALERT_RULE
-    "geofences": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/11",                    // TBL_ALERT_GEOFENCE
-    "namedAreas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/12",                   // TBL_NAMED_AREA
-    "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/13",                        // TBL_ALERT_LOG
+    "rules": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/9",                         // TBL_ALERT_RULE
+    "geofences": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/10",                    // TBL_ALERT_GEOFENCE
+    "namedAreas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/11",                   // TBL_NAMED_AREA
+    "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/12",                        // TBL_ALERT_LOG
     "formats": [{ "name": "既定" }]
   },
-  "assignments": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/14",                    // TBL_ASSIGNMENT
-  "handover": { "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/15" },          // TBL_HANDOVER_MEMO
+  "assignments": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/13",                    // TBL_ASSIGNMENT
+  "handover": { "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/14" },          // TBL_HANDOVER_MEMO
   "events": {
-    "layer": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/16",                        // TBL_EVENT
-    "links": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/17"                         // TBL_EVENT_LINK
+    "layer": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/15",                        // TBL_EVENT
+    "links": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/16"                         // TBL_EVENT_LINK
   },
   "aiResultSources": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/18",                        // TBL_AI_RESULT
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/17",                        // TBL_AI_RESULT
       "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",
                   "name": "OBJECT_NAME", "kind": "KIND", "activity": "ACTIVITY", "length": "LENGTH_M", "heading": "HEADING", "width": "WIDTH_M",
                   "note": "NOTE" } }
   ],
   "detectionOutputs": [
-    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/19",                        // TBL_DETECTION
+    { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/18",                        // TBL_DETECTION
       "fields": { "imageId": "IMAGE_ID", "fileName": "FILE_NAME", "imageTime": "IMAGE_TIME", "detectedAt": "DETECTED_AT", "sentAt": "SENT_AT",
                   "class": "CLASS", "classId": "CLASS_ID", "score": "SCORE", "model": "MODEL", "status": "STATUS", "lon": "LON", "lat": "LAT",
                   "area": "AREA_M2", "length": "LENGTH_M", "width": "WIDTH_M", "angle": "HEADING", "note": "NOTE" } }
   ],
   "geocoders": [
-    { "type": "features", "label": "地名", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/20", "field": ["PLACE_NAME", "PLACE_NAME_KANA", "PLACE_ALIAS"] }  // TBL_PLACE_NAME
+    { "type": "features", "label": "地名", "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/19", "field": ["PLACE_NAME", "PLACE_NAME_KANA", "PLACE_ALIAS"] }  // TBL_PLACE_NAME
   ]
   // editTracking は既定（CREATED_DATE・CREATED_USER・UPDATED_DATE・UPDATED_USER）のままなら書かなくてよい
 }
