@@ -99,6 +99,8 @@ class AlertField:
     text: Optional[str] = None
     #: Times: strftime (`%Y%m%d %H%M`), `iso`, `iso-date`, `unix`, `unixms`; the report's dateFormat when None.
     format: Optional[str] = None
+    #: Times: the zone written in; the report's timeZone when None.
+    time_zone: Optional[TimeZone] = None
     #: Numbers: decimals.
     digits: Optional[int] = None
     #: `kind`: the depth (1 the top, -1 the last); the whole path when None.
@@ -299,9 +301,18 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
     mapping = v.get("map")
     if "map" in v and not is_record(mapping):
         problems.append(f"{at} の map はオブジェクトで指定")
+    zone = None
+    if "timeZone" in v and v["timeZone"] not in (None, ""):
+        zone = parse_time_zone(v["timeZone"])
+        if zone is None:
+            problems.append(f"{at} の timeZone は Asia/Tokyo・+09:00・UTC のように指定")
+        elif source not in TIME_SOURCES:
+            problems.append(f"{at} の timeZone は日時の項目（{'・'.join(TIME_SOURCES)}）だけに指定")
+            zone = None
     return AlertField(
         source=source,
         format=fmt if isinstance(fmt, str) and fmt else None,
+        time_zone=zone,
         digits=int(digits) if is_number(digits) and 0 <= digits <= 12 else None,
         level=int(level) if is_number(level) and int(level) == level and level != 0 else None,
         map={str(k): js_string(x) for k, x in mapping.items()} if is_record(mapping) else {},
@@ -393,6 +404,8 @@ def alert_format_of(value: Any, problems: list[str], at: str) -> Optional[AlertF
                 problems.append(f"{at}.{key} は文字列で指定")
     fmt.header = _lines_of(value.get("header"), f"{at}.header", problems)
     fmt.footer = _lines_of(value.get("footer"), f"{at}.footer", problems)
+    _check_places(fmt.header, f"{at}.header", problems)
+    _check_places(fmt.footer, f"{at}.footer", problems)
     if "dateFormat" in value:
         if isinstance(value["dateFormat"], str) and value["dateFormat"]:
             fmt.date_format = value["dateFormat"]
@@ -432,7 +445,16 @@ def alert_format_of(value: Any, problems: list[str], at: str) -> Optional[AlertF
                 problems.append(f"{at}.file.encoding は utf-8・utf-8-sig・cp932（shift_jis）のどれかで指定")
                 encoding = "utf-8"
             fmt.file = FileOutput(path=f["path"].strip(), encoding=encoding, append=_bool(f, "append", f"{at}.file", problems, False))
+            _check_places(fmt.file.path, f"{at}.file", problems)
     return fmt
+
+
+def _check_places(template: str, at: str, problems: list[str]) -> None:
+    """The time zones of a header's, footer's or path's `{now:…@zone}` places."""
+    for m in _PLACE.finditer(template):
+        _, zone = _place_parts(m.group(2))
+        if m.group(1) in ("now", "date") and zone is not None and parse_time_zone(zone) is None:
+            problems.append(f"{at} の {m.group(0)} のタイムゾーン「{zone}」は Asia/Tokyo・+09:00・UTC のように指定")
 
 
 def _number(v: dict, key: str, at: str, problems: list[str], default: float, low: float = 0.0, high: float = math.inf) -> float:
@@ -1054,7 +1076,7 @@ def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at:
         return f.text or ""
     v = raw_value(f, item, index, report, at)
     if f.source in TIME_SOURCES:
-        text = "" if v is None else js_string(format_time(v, f.format or report.date_format, report.time_zone))
+        text = "" if v is None else js_string(format_time(v, f.format or report.date_format, f.time_zone or report.time_zone))
     elif f.source in NUMBER_SOURCES:
         text = "" if v is None or not math.isfinite(v) else (to_fixed(v, f.digits) if f.digits is not None else js_string(v))
     elif f.source == "present":
@@ -1081,21 +1103,39 @@ def line_of(item: AlertItem, index: int, report: AlertFormat, at: Moment) -> str
     return report.delimiter.join(escaped(text, report) for f, text in values if text != "" or not f.omit_empty)
 
 
-_PLACE = re.compile(r"\{(\w+)(?::([^}]*))?\}")
+_PLACE = re.compile(r"\{(\w+)([:@][^}]*)?\}")
+
+
+def _place_parts(rest: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """A place's format and time zone from what follows its name: `:format`, `@zone`, `:format@zone`."""
+    if not rest:
+        return None, None
+    if rest[0] == "@":
+        return None, rest[1:].strip()
+    body = rest[1:]
+    if "@" in body:
+        fmt, zone = body.rsplit("@", 1)
+        return fmt or None, zone.strip()
+    return body or None, None
 
 
 def fill(template: str, report: AlertFormat, at: Moment, extra: Optional[dict[str, str]] = None) -> str:
     """
     A header, footer or file path with its places filled: `{name}`,
     `{count}`, `{user}`, `{date}` (now by dateFormat), `{now:%Y%m%d}` (now
-    by its own format); unknown places stay as written.
+    by its own format), in the report's time zone or the one after `@`
+    (`{now:%H:%M@UTC}`, `{date@+09:00}`); unknown places stay as written.
     """
     def one(m: re.Match) -> str:
-        key, fmt = m.group(1), m.group(2)
+        key = m.group(1)
+        fmt, zone_text = _place_parts(m.group(2))
         if key in ("now", "date"):
-            return js_string(format_time(at.now, fmt or report.date_format, report.time_zone))
+            zone = report.time_zone if zone_text is None else parse_time_zone(zone_text)
+            if zone is None:
+                return m.group(0)
+            return js_string(format_time(at.now, fmt or report.date_format, zone))
         values = {"name": report.name, "count": str(at.count), "user": at.user, **(extra or {})}
-        return values[key] if key in values else m.group(0)
+        return values[key] if key in values and not (m.group(2) or "").startswith("@") else m.group(0)
 
     return _PLACE.sub(one, template)
 

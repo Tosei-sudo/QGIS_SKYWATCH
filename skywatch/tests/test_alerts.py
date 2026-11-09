@@ -4,8 +4,8 @@ import json
 from skywatch.core.config import parse_config
 from skywatch.core.esri import EsriClient
 from skywatch.core.obs.alerts import (
-    AlertField, AlertRule, Geofence, Moment, alert_settings_of, build_lines, fill, inside_rings, load_geofences, load_log, load_rules,
-    manual_items, poll_log, remove_log, report_text, reported_ids, rules_of_rows, score_note, select, weight_of, write_file, write_log,
+    AlertField, AlertItem, AlertRule, Geofence, Moment, alert_settings_of, build_lines, fill, inside_rings, load_geofences, load_log, load_rules,
+    manual_items, poll_log, remove_log, report_text, reported_ids, rules_of_rows, score_note, select, weight_of, write_file, write_log, written,
 )
 from skywatch.core.obs.model import DEFAULT_CONFIDENCES, Observation
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer
@@ -130,6 +130,49 @@ def test_lines_header_footer_and_escape():
     detail = s.format("詳細")
     assert build_lines(item, detail, at)[0].split("\t")[0] == "2025-11-07 16:20"
     assert report_text(["x"], detail, at) == "x\r\n"
+
+
+def test_date_only_time_only_and_a_zone_per_field():
+    problems = []
+    s = alert_settings_of({"formats": [{
+        "name": "日時", "timeZone": "Asia/Tokyo",
+        "fields": [{"source": "imageTime", "format": "%Y/%m/%d"}, {"source": "imageTime", "format": "%H:%M"},
+                   {"source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z"},
+                   {"source": "imageTime", "format": "iso", "timeZone": "-05:00"}, {"source": "imageTime", "timeZone": "UTC"},
+                   {"source": "imageTime", "format": "iso-date", "timeZone": "America/New_York"}],
+        "columns": {"TIME_UTC": {"source": "imageTime", "format": "%H:%M", "timeZone": "UTC"}},
+        "header": "{date} JST／{now:%H:%M@UTC}Z／{now:%Y-%m-%d %H:%M@+05:30}／{date@UTC}／{now@-03:00}",
+        "file": "D:/alerts/{now:%Y%m%d@UTC}.txt",
+    }]}, problems)
+    assert problems == []
+    fmt = s.format()
+    at = Moment(now=T0)
+    # T0 = 2025-11-07 07:20 UTC = 16:20 JST = 02:20 in New York (EST since 11-02).
+    assert build_lines([AlertItem(obs(), [], [])], fmt, at) == [
+        "2025/11/07|16:20|0720Z|2025-11-07T02:20:00-05:00|2025-11-07 07:20|2025-11-07"]
+    assert written(fmt.columns["TIME_UTC"], AlertItem(obs(), [], []), 0, fmt, at) == "07:20"
+    assert fill(fmt.header, fmt, at) == "2025-11-07 16:20 JST／07:20Z／2025-11-07 12:50／2025-11-07 07:20／2025-11-07 04:20"
+    assert fill("{date:%d日@UTC}", fmt, at) == "07日"
+    # A zone not known stays as written; other places don't take one.
+    assert fill("{now:%H@Mars/Base} {name@UTC} {name}", fmt, at) == "{now:%H@Mars/Base} {name@UTC} 日時"
+    assert fmt.file.path == "D:/alerts/{now:%Y%m%d@UTC}.txt" and fill(fmt.file.path, fmt, at) == "D:/alerts/20251107.txt"
+
+
+def test_zone_per_field_problems():
+    problems = []
+    alert_settings_of({"formats": [{
+        "name": "a",
+        "fields": [{"source": "imageTime", "timeZone": "Mars/Base"}, {"source": "kind", "timeZone": "UTC"},
+                   {"source": "imageTime", "timeZone": ""}],
+        "header": "{now:%H@Nowhere}", "footer": "{date@UTC}", "file": "x_{now:%Y@??}.txt",
+    }]}, problems)
+    assert any("fields[0] の timeZone は" in p for p in problems)
+    assert any("fields[1] の timeZone は日時の項目" in p for p in problems)
+    assert not any("fields[2]" in p for p in problems)
+    assert any(".header の {now:%H@Nowhere} のタイムゾーン「Nowhere」" in p for p in problems)
+    assert not any(".footer" in p for p in problems)
+    assert any(".file の {now:%Y@??}" in p for p in problems)
+    assert len(problems) == 4
 
 
 def test_write_file_appends_in_its_encoding(tmp_path):

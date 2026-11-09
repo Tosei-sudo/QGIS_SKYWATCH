@@ -486,6 +486,12 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "placeKind",
   "places"
  ],
+ "alertTimeSources": [
+  "imageTime",
+  "created",
+  "updated",
+  "reportedAt"
+ ],
  "obsExportSources": [
   "id",
   "objectId",
@@ -1092,12 +1098,12 @@ const SPEC = [
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
           J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": "lat", "digits": 4 }, { "text": "固定" }]',
-            help: "項目名か { source, format, digits, level, map, empty, prefix, suffix, omitEmpty }、固定の文字は { text }。empty は値が空のときの文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く。項目: " + K.alertSources.join("・") }),
+            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。empty は値が空のときの文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く。項目: " + K.alertSources.join("・") }),
           T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
-          TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}" }),
+          TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}。@ のあとにタイムゾーンでそのゾーン（{now:%H:%M@UTC}・{date@UTC}）" }),
           TJ("footer", "フッター", { ph: "以上" }),
           T("dateFormat", "日時の書式", { ph: "%Y-%m-%d %H:%M", list: () => DATE_FORMATS, help: "strftime か iso・iso-date・unix・unixms" }),
-          T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo" }),
+          T("timeZone", "日時のタイムゾーン", { ph: "Asia/Tokyo", help: "項目の timeZone・{now:…@ゾーン} で別に書いたもの以外" }),
           S("newline", "改行", [["crlf", "CRLF"], ["lf", "LF"]], { ph: "crlf" }),
           B("clipboard", "クリップボードへコピー", { help: "既定 true" }),
           TJ("file", "ファイル", { ph: 'パスか { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true }', help: "encoding は " + K.encodings.join("・") + "。パスに {name}・{now:%Y%m%d}" }),
@@ -1108,6 +1114,8 @@ const SPEC = [
             const src = typeof x === "string" ? x : isObj(x) ? x.source : undefined;
             if (src !== undefined && !K.alertSources.includes(src)) p.push(`${at}.fields[${i}]: 項目「${src}」は使用不可`);
             if (src === undefined && !(isObj(x) && "text" in x)) p.push(`${at}.fields[${i}]: 項目名か { source } か { text }`);
+            if (isObj(x) && x.timeZone && src !== undefined && !K.alertTimeSources.includes(src)) p.push(`${at}.fields[${i}]: timeZone は日時の項目（${K.alertTimeSources.join("・")}）だけ`);
+            if (isObj(x) && x.timeZone && zoneOffset(x.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(x.timeZone) && !isIana(x.timeZone)) p.push({ warn: true, text: `${at}.fields[${i}]: timeZone「${x.timeZone}」をこのブラウザで確かめられない` });
           }
         } }),
       ], { check: (it, at, p) => {
