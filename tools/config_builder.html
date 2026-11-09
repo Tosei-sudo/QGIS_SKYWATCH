@@ -181,7 +181,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "handover",
   "events",
   "preload",
-  "offlineWork"
+  "offlineWork",
+  "columnDrag"
  ],
  "roles": {
   "imageCatalogs": [
@@ -1218,6 +1219,10 @@ const SPEC = [
   { group: "日時", keys: [
     { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",
       field: I("timeZones", "規則", [LABEL, T("match", "URL（正規表現）", { req: true }), T("timeZone", "タイムゾーン", { req: true, ph: "Asia/Tokyo" }), T("serviceTimeZone", "サービスの申告")], { title: (it) => it.label || it.match }) },
+  ] },
+  { group: "一覧", keys: [
+    { key: "columnDrag", label: "列の見出しのドラッグ", doc: "一覧のビュー列並べ替え絞り込みの保存", help: "ドックの一覧の列を見出しのドラッグで並べ替えられるか。false でドラッグでは動かず、見出しの右クリックのメニュー（この列を左へ・右へ・先頭へ・末尾へ、列の表示と順番…）だけで並べ替える。",
+      field: B("columnDrag", "ドラッグで並べ替える", { help: "既定 true" }) },
   ] },
 ];
 const ALL = SPEC.flatMap((g) => g.keys.map((k) => ({ ...k, group: g.group })));

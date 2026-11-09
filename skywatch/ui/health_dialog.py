@@ -44,6 +44,8 @@ class HealthDialog(QDialog):
         self.tree.setHeaderLabels([tr("結果"), tr("設定の場所"), tr("内容")])
         self.tree.setRootIsDecorated(True)
         self.tree.setWordWrap(True)
+        # A fixed set of columns: not dragged about by their header (Qt lets a tree's be).
+        self.tree.header().setSectionsMovable(False)
         layout.addWidget(self.tree, 1)
         row = QHBoxLayout()
         self.again_button = QPushButton(tr("もう一度点検"))

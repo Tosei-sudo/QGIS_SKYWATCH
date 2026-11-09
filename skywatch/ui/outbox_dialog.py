@@ -25,6 +25,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.obs.drafts import KIND as DRAFT
 from ..core.offline import CHECK, KINDS, Pending
 from .docks import ask_no, plain_label, plain_tip
+from .list_views import column_menus
 
 #: Rows that need the person (someone else changed the record): orange.
 CHECK_COLOR = "#b45309"
@@ -70,6 +71,8 @@ class OutboxDialog(QDialog):
         self.tree.itemDoubleClicked.connect(lambda _item, _c: self.open_chosen())
         self.tree.itemSelectionChanged.connect(self._enable)
         layout.addWidget(self.tree, 1)
+        # The columns shown, hidden and in order from the header's right-click menu, kept per user.
+        self.tree_columns = column_menus("outbox", self.tree, self)
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
