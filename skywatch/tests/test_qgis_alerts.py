@@ -341,6 +341,46 @@ def test_place_names_from_the_smallest_named_area(plugin):
     assert dialog.lines_table.item(0, 1).text() == "船C|地名なし"
 
 
+def test_country_english_names_and_the_coordinates_when_no_place(plugin):
+    """countries + fallback + several values in one + .en: in 抽出, when added by hand, and on save."""
+    from skywatch.core.obs.alerts import forget_named_areas
+
+    p, iface, dock, tmp_path = plugin
+    forget_named_areas()
+    fake = FakeEsri()
+    places = fake.add_layer("https://x/arcgis/rest/services/Alerts/FeatureServer/3",
+                            FakeLayer({"NAME": "esriFieldTypeString", "NAME_EN": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    places.add({"NAME": "横須賀港", "NAME_EN": "Yokosuka Port"}, {"rings": [[[139.65, 35.25], [139.75, 35.25], [139.75, 35.35], [139.65, 35.35], [139.65, 35.25]]]})
+    countries = fake.add_layer("https://x/arcgis/rest/services/Alerts/FeatureServer/4",
+                               FakeLayer({"COUNTRY_CODE": "esriFieldTypeString", "COUNTRY_NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    countries.add({"COUNTRY_CODE": "JPN", "COUNTRY_NAME": "日本"}, {"rings": [[[129.0, 30.0], [146.0, 30.0], [146.0, 46.0], [129.0, 46.0], [129.0, 30.0]]]})
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"alertReports": {
+        "namedAreas": "https://x/arcgis/rest/services/Alerts/FeatureServer/3",
+        "countries": "https://x/arcgis/rest/services/Alerts/FeatureServer/4", "notifyOnSave": False,
+        "formats": [{"name": "EN", "fields": [
+            "objectName", "confidence.en", {"source": "country", "empty": "--"},
+            {"source": "place.en", "fallback": {"source": ["lat", "lon"], "format": "{dd}{mm}{ss}{h}"}}]}],
+    }}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    book = dock.book
+    book.add(139.7, 35.3, object="船A", kind="船舶", activity="航行", confidence="確定")
+    book.add(139.9, 35.5, object="船B", kind="船舶", activity="航行", confidence="推定")
+    c = book.add(150.25, 35.5, object="船C", kind="船舶", activity="航行", confidence="確定")
+    dialog = dock.open_alerts()
+    assert "国あり" in dialog.note.text()
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("3 件を抽出"))
+    lines = sorted(dialog.lines_table.item(r, 1).text() for r in range(dialog.lines_table.rowCount()))
+    assert lines == ["船A|Confirmed|JPN|Yokosuka Port", "船B|Probable|JPN|353000N 1395400E", "船C|Confirmed|--|353000N 1501500E"]
+    dialog.items = []
+    dialog.add_records([c])
+    assert wait_for(lambda: "手動で 1 件を追加" in dialog.status.text())
+    assert dialog.lines_table.item(0, 1).text() == "船C|Confirmed|--|353000N 1501500E"
+
+
 def test_other_peoples_text_is_never_read_as_html(plugin):
     """
     Security re-check 2026-11-09: a report's text, a name or a server's message

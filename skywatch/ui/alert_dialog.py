@@ -200,6 +200,8 @@ class AlertDialog(QDialog):
                 parts.append(self.tr("ジオフェンスあり"))
             if s.named_areas:
                 parts.append(self.tr("地名あり"))
+            if s.countries:
+                parts.append(self.tr("国あり"))
             parts.append(self.tr("通報テーブル: ") + (self.tr("あり") if s.table else self.tr("なし（通報済みの管理なし）")))
             self.note.setText("・".join(parts))
         for w in (self.pick_button, self.send_button, self.copy_button, self.format_select):
@@ -235,15 +237,17 @@ class AlertDialog(QDialog):
         records, levels = list(book.records), book.confidences()
         start, end, by = _ms(self.start_edit), _ms(self.end_edit), self.by_select.currentData()
         again = self.again_check.isChecked()
-        tokens = {k: self._token(getattr(s, k)) for k in ("rules", "geofences", "named_areas", "table")}
+        tokens = {k: self._token(getattr(s, k)) for k in ("rules", "geofences", "named_areas", "countries", "table")}
 
         def work(_task):
             rules = load_rules(client, s.rules, tokens["rules"]) if s.rules else None
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = set() if again or not s.table else reported_ids(client, s, tokens["table"])
-            # 抽出 reads the named areas afresh (and keeps them for saving and adding by hand).
+            # 抽出 reads the named areas and countries afresh (and keeps them for saving and adding by hand).
             named = load_named_areas(client, s.named_areas, tokens["named_areas"], max_age=0)
-            return select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named), rules
+            countries = load_named_areas(client, s.countries, tokens["countries"], max_age=0)
+            return select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named,
+                          countries=countries), rules
 
         def finished(result) -> None:
             self.pick_button.setEnabled(True)
@@ -275,7 +279,7 @@ class AlertDialog(QDialog):
             return
         self.tabs.setCurrentIndex(0)
         client = self.dock.context.esri()
-        tokens = {k: self._token(getattr(s, k)) for k in ("geofences", "named_areas", "table")}
+        tokens = {k: self._token(getattr(s, k)) for k in ("geofences", "named_areas", "countries", "table")}
         book = self.dock.book
         history, levels = (list(book.records), book.confidences()) if book else ([], [])
 
@@ -283,7 +287,8 @@ class AlertDialog(QDialog):
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = reported_ids(client, s, tokens["table"], ids=[o.id for o in records]) if s.table else set()
             named = load_named_areas(client, s.named_areas, tokens["named_areas"])
-            return manual_items(records, fences, s, levels, history, named), done
+            countries = load_named_areas(client, s.countries, tokens["countries"])
+            return manual_items(records, fences, s, levels, history, named, countries), done
 
         def finished(result) -> None:
             added, done = result
@@ -296,7 +301,7 @@ class AlertDialog(QDialog):
             # Added all the same: only the geofence names are missing.
             self.items = manual_items(records, (), s, levels, history) + self.items
             self._render_lines()
-            self._say(self.tr("手動で {n} 件を追加（ジオフェンス・地名・通報済みの確認に失敗: {m}）").format(n=len(records), m=message))
+            self._say(self.tr("手動で {n} 件を追加（ジオフェンス・地名・国・通報済みの確認に失敗: {m}）").format(n=len(records), m=message))
 
         self._say(self.tr("追加中…"))
         run_task(self.tr("通報への追加"), work, finished, failed)
