@@ -85,6 +85,19 @@ def own_offline_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def no_upload_question(monkeypatch):
+    """
+    The question about the work waiting (a modal box) never opens by itself in a test: nobody answers it, and
+    the run would hang until its timeout. The tests that ask put their own answer in.
+    """
+    try:
+        from skywatch.ui import offline_status
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(offline_status, "ask_upload", lambda parent, work, back: "later")
+
+
+@pytest.fixture(autouse=True)
 def own_place_cache(monkeypatch, tmp_path):
     """Each test has its own 地名・国の控え (memory and file): none is left from another test."""
     from skywatch.core.obs import place_cache

@@ -118,6 +118,12 @@ class OfflineController(QObject):
             pass
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.probe)
+        #: The question about work left from an earlier session, a little after the start; stopped with the plugin
+        #: (a QTimer.singleShot would still fire after unload(), and ask for a plugin that is gone).
+        self.start_timer = QTimer(self)
+        self.start_timer.setSingleShot(True)
+        self.start_timer.timeout.connect(self._ask_left_over)
+        self._unloaded = False
         context.configChanged.connect(self._config_changed)
         self._update()
 
@@ -136,7 +142,7 @@ class OfflineController(QObject):
         if not self._asked_at_start:
             # Work left from an earlier session: asked once, a little after the start.
             self._asked_at_start = True
-            QTimer.singleShot(3000, self._ask_left_over)
+            self.start_timer.start(3000)
 
     @property
     def uploading(self) -> bool:
@@ -152,7 +158,7 @@ class OfflineController(QObject):
                 pass
 
     def _ask_left_over(self) -> None:
-        if self.work.enabled and self.work.sendable() and not self.work.offline:
+        if not self._unloaded and self.work.enabled and self.work.sendable() and not self.work.offline:
             self.ask(back=False)
 
     def _update(self) -> None:
@@ -303,7 +309,9 @@ class OfflineController(QObject):
         run_task(tr("送信待ちの送信"), work, done, failed)
 
     def unload(self) -> None:
+        self._unloaded = True
         self.timer.stop()
+        self.start_timer.stop()
         try:
             self.work.listeners.remove(self._from_any_thread)
         except ValueError:
