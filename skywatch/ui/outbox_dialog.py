@@ -14,7 +14,6 @@ The list belongs to the status bar's 「送信待ち」 (ui/offline_status.py); 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtGui import QBrush, QColor

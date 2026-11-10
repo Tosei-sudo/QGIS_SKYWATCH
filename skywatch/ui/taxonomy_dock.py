@@ -16,7 +16,6 @@ where that store keeps its classification.
 """
 from __future__ import annotations
 
-import html
 import re
 
 import mimetypes
@@ -330,11 +329,6 @@ class TaxonomyDock(PluginDock):
         self._rendering = False
         self.tree.setCurrentItem(item)
         self.tree.editItem(item, 0)
-
-    def start_rename(self, kind: Optional[str] = None) -> None:
-        item = self._item_of(kind or self.selected or "")
-        if item is not None:
-            self.tree.editItem(item, 0)
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._rendering or column != 0 or self.book is None:

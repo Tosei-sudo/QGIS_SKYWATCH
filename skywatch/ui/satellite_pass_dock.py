@@ -12,15 +12,15 @@ import time
 from typing import Optional
 
 from qgis.core import (
-    QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsGeometry, QgsLineSymbol, QgsPointXY, QgsProject, QgsRectangle,
-    QgsRendererCategory, QgsWkbTypes,
+    QgsCategorizedSymbolRenderer, QgsFillSymbol, QgsLineSymbol, QgsPointXY, QgsProject, QgsRectangle, QgsRendererCategory,
+    QgsWkbTypes,
 )
 from qgis.gui import QgsCollapsibleGroupBox, QgsRubberBand, QgsVertexMarker
 from qgis.PyQt.QtCore import QCoreApplication, QDateTime, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit, QDoubleSpinBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
-    QPlainTextEdit, QPushButton, QTableView, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QTableView, QWidget,
 )
 
 from ..core.plan.output import PlanLayer, local_text

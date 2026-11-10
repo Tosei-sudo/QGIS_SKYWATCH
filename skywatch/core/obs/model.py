@@ -293,47 +293,6 @@ def new_object_id() -> str:
 
 
 #: The viewer's names of the record's values (for JSON shared with the viewer and its scripts).
-_JSON_NAMES = {
-    "id": "id", "image_id": "imageId", "image_name": "imageName", "image_time": "imageTime", "object_id": "objectId",
-    "object_name": "objectName", "kind": "kind", "activity": "activity", "present": "present", "note": "note",
-    "lon": "lon", "lat": "lat", "length": "length", "heading": "heading", "width": "width", "confidence": "confidence",
-    "recorded_by": "recordedBy", "updated_by": "updatedBy", "created_at": "createdAt", "updated_at": "updatedAt",
-    "deleted_at": "deletedAt",
-}
-
-
-def observation_json(o: Observation) -> dict[str, Any]:
-    """A record as the viewer writes it (camelCase)."""
-    return {name: getattr(o, attr) for attr, name in _JSON_NAMES.items()}
-
-
-def observation_from_json(value: Any) -> Optional[Observation]:
-    """A record written as the viewer writes it; None when it is not one."""
-    if not is_record(value):
-        return None
-    v = {attr: value.get(name) for attr, name in _JSON_NAMES.items()}
-    if not isinstance(v["id"], str) or not isinstance(v["object_id"], str) or not is_number(v["lon"]) or not is_number(v["lat"]):
-        return None
-    created = int(v["created_at"]) if is_number(v["created_at"]) else 0
-
-    def text(key: str) -> str:
-        return v[key] if isinstance(v[key], str) else ""
-
-    def number(key: str) -> Optional[float]:
-        return float(v[key]) if is_number(v[key]) else None
-
-    return Observation(
-        id=v["id"], image_id=text("image_id"), image_name=text("image_name"),
-        image_time=int(v["image_time"]) if is_number(v["image_time"]) else None,
-        object_id=v["object_id"], object_name=text("object_name"), kind=text("kind"), activity=text("activity"),
-        present=v["present"] is not False, note=text("note"), lon=float(v["lon"]), lat=float(v["lat"]),
-        created_at=created, updated_at=int(v["updated_at"]) if is_number(v["updated_at"]) else created,
-        deleted_at=int(v["deleted_at"]) if is_number(v["deleted_at"]) else None,
-        length=number("length"), heading=number("heading"), width=number("width"), confidence=text("confidence"),
-        recorded_by=text("recorded_by"), updated_by=text("updated_by"),
-    )
-
-
 @dataclass
 class ListedImage:
     """An image recorded on without its file: one outside the catalog, or not opened here (id, name, time, footprint typed)."""

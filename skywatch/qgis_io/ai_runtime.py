@@ -105,14 +105,6 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
     return ort
 
 
-def runtime_available() -> bool:
-    try:
-        load_ort()
-        return True
-    except AiError:
-        return False
-
-
 # Where a model is.
 
 def resolve_source(source: str, base: str = "") -> str:

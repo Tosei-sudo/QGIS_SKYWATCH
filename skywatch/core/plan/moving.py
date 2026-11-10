@@ -230,8 +230,6 @@ NAMES = {
     "kind": ["kind", "vesseltype", "shiptype", "aircrafttype", "category", "type", "typecode"],
 }
 
-#: Roles of a target layer and how the dialog names them.
-TARGET_ROLES = {"id": "ID", "time": "時刻", "course": "針路（度）", "speed": "速度", "name": "名前"}
 SPEED_UNITS = {"kn": "ノット", "kmh": "km/h", "ms": "m/s"}
 TO_KNOTS = {"kn": 1.0, "kmh": 1 / 1.852, "ms": 3600 / 1852}
 

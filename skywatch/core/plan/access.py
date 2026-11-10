@@ -432,24 +432,6 @@ def add_downlinks(orbit: Orbit, ops: list[Opportunity], stations: Sequence[Groun
 # --- Scenes -------------------------------------------------------------------------
 
 
-def best_window(across: Sequence[float], width: float, open_: Optional[Callable[[int], bool]] = None):
-    """Where to put `width` radians across the track to take the most cells: (count, (from, to)), or None."""
-    xs = sorted(x for i, x in enumerate(across) if not math.isnan(x) and (open_ is None or open_(i)))
-    if not xs:
-        return None
-    best = 0
-    start = 0
-    j = 0
-    for i in range(len(xs)):
-        while xs[i] - xs[j] > width:
-            j += 1
-        if i - j + 1 > best:
-            best = i - j + 1
-            start = j
-    mid = (xs[start] + xs[start + best - 1]) / 2
-    return best, (mid - width / 2, mid + width / 2)
-
-
 def framed(start: float, end: float, length: float, most: int) -> tuple:
     """Whole scene lengths along the track over `start`–`end`: as many as it takes, at most `most`, centred on it."""
     k = min(most, max(1, math.ceil((end - start) / length - 1e-6)))

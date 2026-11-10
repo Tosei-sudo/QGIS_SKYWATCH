@@ -32,7 +32,7 @@ from .ui.catalog_dock import CatalogDock
 from .ui.cloud_dock import CloudDock
 from .ui.coordinate_box import CoordinateBox
 from .ui.dashboard_dock import DashboardDock
-from .ui.docks import StubDock, plain_tip
+from .ui.docks import plain_tip
 from .ui.dock_layouts import DockLayoutMenu, float_docks
 from .ui import first_setup
 from .ui.gp_dialog import RemoteProcessingDialog
@@ -357,27 +357,27 @@ class SkywatchPlugin:
                  "SatObsAnalysis": "analysis"}
 
         specs = [
-            ("SatObsImageCatalog", tr("画像カタログ"), None),
-            ("SatObsImagingPlan", tr("撮像計画"), None),
-            ("SatObsRequests", tr("撮像依頼"), None),
-            ("SatObsPlanFiles", tr("撮像計画ファイル出力"), None),
-            ("SatObsSchedule", tr("撮像予定"), None),
-            ("SatObsSatellitePass", tr("衛星パス"), None),
-            ("SatObsCloud", tr("雲量マップ"), None),
-            ("SatObsObservations", tr("観測記録"), None),
-            ("SatObsTaxonomy", tr("分類体系の編集"), None),
-            ("SatObsNotices", tr("通知"), None),
-            ("SatObsEnhance", tr("画像補正"), None),
-            ("SatObsShadowHeight", tr("影から高さ"), None),
-            ("SatObsSpectral", tr("スペクトル"), None),
-            ("SatObsMoving", tr("移動体（AIS・ADS-B）"), None),
-            ("SatObsDashboard", tr("ダッシュボード"), None),
-            ("SatObsAiResults", tr("AI結果"), None),
-            ("SatObsEvents", tr("イベント"), None),
-            ("SatObsAnalysis", tr("データ分析"), None),
+            ("SatObsImageCatalog", tr("画像カタログ")),
+            ("SatObsImagingPlan", tr("撮像計画")),
+            ("SatObsRequests", tr("撮像依頼")),
+            ("SatObsPlanFiles", tr("撮像計画ファイル出力")),
+            ("SatObsSchedule", tr("撮像予定")),
+            ("SatObsSatellitePass", tr("衛星パス")),
+            ("SatObsCloud", tr("雲量マップ")),
+            ("SatObsObservations", tr("観測記録")),
+            ("SatObsTaxonomy", tr("分類体系の編集")),
+            ("SatObsNotices", tr("通知")),
+            ("SatObsEnhance", tr("画像補正")),
+            ("SatObsShadowHeight", tr("影から高さ")),
+            ("SatObsSpectral", tr("スペクトル")),
+            ("SatObsMoving", tr("移動体（AIS・ADS-B）")),
+            ("SatObsDashboard", tr("ダッシュボード")),
+            ("SatObsAiResults", tr("AI結果")),
+            ("SatObsEvents", tr("イベント")),
+            ("SatObsAnalysis", tr("データ分析")),
         ]
         area = {name: a for a, names in DOCK_GROUPS for name in names}
-        for name, title, stage in specs:
+        for name, title in specs:
             if name == "SatObsImagingPlan":
                 dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsObservations":
@@ -444,7 +444,7 @@ class SkywatchPlugin:
 
                 dock = PlanFileDock(self.iface, self.context, self.open_settings, satellites, requests_changed, self.iface.mainWindow())
             else:
-                dock = StubDock(name, title, stage, self.context, self.open_settings, self.iface.mainWindow())
+                raise ValueError(f"no dock for {name}")
             # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
             # Its signals wait meanwhile, so a dock shown only for that moment reads nothing.
             dock.blockSignals(True)

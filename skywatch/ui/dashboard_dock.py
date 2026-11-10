@@ -29,9 +29,8 @@ from typing import Callable, Optional
 
 from qgis.core import (
     QgsCoordinateTransform, QgsDateTimeRange, QgsExpression, QgsExpressionContext, QgsExpressionContextUtils, QgsFeature, QgsFeatureRequest,
-    QgsField, QgsFields, QgsFillSymbol, QgsGeometry, QgsHeatmapRenderer, QgsPointXY, QgsRectangle, QgsSingleSymbolRenderer, QgsSpatialIndex, QgsMapLayer, QgsProject, QgsProviderRegistry, QgsReadWriteContext,
-    QgsStyle, QgsTemporalNavigationObject, QgsUnitTypes, QgsVectorLayer, QgsVectorLayerTemporalContext, QgsVectorLayerTemporalProperties,
-    QgsWkbTypes,
+    QgsField, QgsFields, QgsFillSymbol, QgsGeometry, QgsHeatmapRenderer, QgsRectangle, QgsSingleSymbolRenderer, QgsSpatialIndex, QgsMapLayer, QgsProject, QgsProviderRegistry, QgsReadWriteContext, QgsStyle,
+    QgsTemporalNavigationObject, QgsUnitTypes, QgsVectorLayer, QgsVectorLayerTemporalContext, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
 from qgis.PyQt.QtCore import QDate, QDateTime, QRectF, QSize, Qt, QTimer, QVariant, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter, QPalette
@@ -512,9 +511,6 @@ class DashboardDock(PluginDock):
 
     # ---- opening and the layer ----
 
-    def is_open(self) -> bool:
-        return self.isVisible()
-
     def _shown(self, visible: bool) -> None:
         if visible:
             self._set_layer(self._chosen_layer(), keep=True)
@@ -779,14 +775,6 @@ class DashboardDock(PluginDock):
         if panel is not None:
             panel.show()
         self.schedule()
-
-    def set_values(self, values) -> None:
-        self.values = set(values)
-        self._filter_changed()
-
-    def set_range(self, chosen: Optional[tuple[float, float]]) -> None:
-        self.range = chosen
-        self._filter_changed()
 
     def clear_filter(self) -> None:
         self.values, self.range = set(), None

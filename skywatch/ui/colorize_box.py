@@ -33,7 +33,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.enhance.color_classes import (
-    auto_label, class_label, class_shares, color_classes, format_class_value, recolor, resize_classes, set_bound,
+    auto_label, class_shares, color_classes, format_class_value, recolor, resize_classes, set_bound,
 )
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io.obs_images import observed_image
@@ -536,9 +536,6 @@ class ColorizeBox(QGroupBox):
         self._loading = False
         self._apply()
         self.show_legend()
-
-    def class_labels(self) -> list:
-        return [class_label(self.classes, i) for i in range(len(self.classes["classes"]))] if self.classes else []
 
     # ---- two dates ----
 

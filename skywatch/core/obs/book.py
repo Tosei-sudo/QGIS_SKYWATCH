@@ -100,10 +100,6 @@ class Prefs:
         self.values[key] = value
 
 
-class StoreError(Exception):
-    """A store refused (the reason is in the message, as the panel says it)."""
-
-
 def _text(n: Optional[float]) -> str:
     return "" if n is None else str(n)
 

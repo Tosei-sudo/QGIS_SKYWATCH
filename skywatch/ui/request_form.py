@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timedelta
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional
 
-from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer, QgsWkbTypes
+from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
 from qgis.PyQt.QtCore import QDate, Qt
 from qgis.PyQt.QtWidgets import (
@@ -26,8 +26,8 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.request.pick import Picked, checks_of, picked, summary, unknown
 from ..core.request.model import (
-    ACHIEVES, CATEGORIES, JST, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest,
-    bbox_of, day_bounds, jst_day, level_of, level_value, priority_text, repeat_of, repeat_text, square_rings,
+    ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest, bbox_of,
+    day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, square_rings,
 )
 from ..qgis_io.geometry import shape_of, to_wgs84
 from .docks import plain_label

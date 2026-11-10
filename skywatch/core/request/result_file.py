@@ -70,7 +70,6 @@ TARGETS = (
 )
 #: Targets whose columns are joined by a space (a date and a time in two columns).
 JOINED = ("plannedAt", "day", "reason", "name")
-TIME_TARGETS = ("plannedAt", "day")
 NUMBER_TARGETS = ("centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth")
 #: How a `geometry` column is written (the order files' kinds, §8.4); WKT and GeoJSON are known by themselves.
 GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")

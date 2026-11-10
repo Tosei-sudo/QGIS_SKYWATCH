@@ -36,7 +36,7 @@ KEEP_CUT = 0.4
 #: Updates per epoch at least (few windows are seen several times an epoch).
 MIN_STEPS = 20
 #: Score and overlap of the check on held-back windows (as detection's defaults).
-SCORE, IOU, MATCH_IOU = 0.25, 0.45, 0.5
+SCORE, IOU = 0.25, 0.45
 
 
 class TrainError(Exception):
