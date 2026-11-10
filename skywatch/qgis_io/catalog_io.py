@@ -17,7 +17,8 @@ A record whose path is a folder has its images below it (`imagePatterns`,
 core/catalog/images.py): each opens as its own layer with the record's id
 (so the observations and AI results of the record are shared by its images;
 「観測記録」 lists them as one image) and its path below the folder
-`satobs/imageFile`, together in a group.
+`satobs/imageFile`, together in a group. A record opened as one image (its
+file, or one of its folder's) is a layer named by the record's id.
 """
 from __future__ import annotations
 
@@ -50,6 +51,8 @@ CATALOG_URL = "satobs/catalogUrl"
 FEATURE = "satobs/feature"
 SENSOR_AZIMUTH = "satobs/sensorAzimuth"
 SENSOR_ELEVATION = "satobs/sensorElevation"
+#: On a group of a record's images (add_record_layers): the record's id.
+RECORD_GROUP = "satobs/recordGroup"
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
@@ -351,7 +354,8 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     layers, failed = [], []
     for rel in files:
         path = os.path.join(where.place, *rel.split("/"))
-        name = rel if len(files) > 1 or not record.id else f"{record.id} {rel}"
+        # One image: named as the record (its image id, as 観測記録 calls it); several: by their paths, in the record's group.
+        name = rel if len(files) > 1 or not record.id else record.id
         before_open(path)
         layer = image_layer(path, name, image_id=record.id or None, time=time)
         if not layer.isValid():
@@ -376,9 +380,33 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
             project.addMapLayer(layer)
         return
     group = project.layerTreeRoot().insertGroup(0, record.id or layers[0].name())
+    group.setCustomProperty(RECORD_GROUP, record.id or "")
     for layer in layers:
         project.addMapLayer(layer, False)
         group.addLayer(layer)
+
+
+def close_layers(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> int:
+    """
+    Takes images opened from the catalog out of the project (「前の画像を
+    閉じる」): the layers still there, and the groups add_record_layers made
+    for them once empty. How many layers went.
+    """
+    project = project or QgsProject.instance()
+    root = project.layerTreeRoot()
+    there = [i for i in dict.fromkeys(layer_ids) if project.mapLayer(i) is not None]
+    groups = []
+    for layer_id in there:
+        node = root.findLayer(layer_id)
+        parent = node.parent() if node is not None else None
+        if parent is not None and parent is not root and parent.customProperty(RECORD_GROUP) is not None and parent not in groups:
+            groups.append(parent)
+    if there:
+        project.removeMapLayers(there)
+    for group in groups:
+        if not group.children() and group.parent() is not None:
+            group.parent().removeChildNode(group)
+    return len(there)
 
 
 def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig, file: Optional[str] = None) -> None:

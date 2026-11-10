@@ -123,12 +123,12 @@ def test_a_records_images_in_its_folder_are_one_image_to_record_on(plugin):
         group.addLayer(layer)
         tiles.append(layer)
     dock.refresh_images()
-    # One image of the record, named as its folder, its footprint around the files.
-    assert [i.name for i in book.images] == ["d1.tif", "d2.tif", "d3.tif", "SCENE_R"]
+    # One image of the record, named by its id (tsudo 2026-11-10; it was its folder's name), its footprint around the files.
+    assert [i.name for i in book.images] == ["d1.tif", "d2.tif", "d3.tif", "R"]
     scene = book.images[3]
     assert scene.id == "R" and scene.layer_ids == tuple(x.id() for x in tiles) and scene.time == ms(4)
     assert scene.box == pytest.approx([139.6, 35.5, 140.2, 35.7])
-    assert dock.image_select.count() == 4 and dock.image_select.itemText(3).endswith("SCENE_R（3 ファイル）")
+    assert dock.image_select.count() == 4 and dock.image_select.itemText(3).endswith("  R（3 ファイル）")
     iface.setActiveLayer(tiles[1])
     assert book.current.id == "R"
     dock.set_active(True)
@@ -141,7 +141,7 @@ def test_a_records_images_in_its_folder_are_one_image_to_record_on(plugin):
     dock.kind_input.setText("船舶 > 護衛艦")
     dock.submit()
     [a] = book.living()
-    assert (a.image_id, a.image_name, a.image_time) == ("R", "SCENE_R", ms(4))
+    assert (a.image_id, a.image_name, a.image_time) == ("R", "R", ms(4))
     # 「この画像のみ」: all its files show; ◀ ▶ go image by image (to its first file).
     dock.only.setChecked(True)
     assert [root.findLayer(x.id()).itemVisibilityChecked() for x in layers + tiles] == [False] * 3 + [True] * 3
@@ -882,7 +882,8 @@ def test_opens_a_catalog_image_signed_in_by_an_authcfg(tmp_path):
     assert "authcfg='abc1234'" in layer.source() and layer.customProperty(IMAGE_ID) == "CAT-9"
     assert "token" not in layer.source()
     info = observed_image(layer)
-    assert (info.id, info.name, info.time, info.origin) == ("CAT-9", "c.tif", ms(5), "layer")
+    # Named by the catalog's id too (tsudo 2026-11-10: the records' image names were file names for some images).
+    assert (info.id, info.name, info.time, info.origin) == ("CAT-9", "CAT-9", ms(5), "layer")
     url = image_layer("https://example.com/c.tif", "遠隔", authcfg="abc1234")
     assert url.source().startswith("/vsicurl/https://example.com/c.tif")
 
