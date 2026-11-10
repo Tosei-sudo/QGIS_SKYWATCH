@@ -27,9 +27,10 @@ from qgis.PyQt.QtWidgets import (
 from ..core import edit_stamp
 from ..core.esri import EsriError
 from ..core.obs.alerts import (
-    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_named_areas,
-    load_rules, manual_items, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_rules,
+    manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
 )
+from ..core.obs.place_cache import areas_at, points_of
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
@@ -266,10 +267,13 @@ class AlertDialog(QDialog):
             rules = load_rules(client, s.rules, tokens["rules"]) if s.rules else None
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = set() if again or not s.table else reported_ids(client, s, tokens["table"])
-            # 抽出 reads the named areas and countries afresh (and keeps them for saving and adding by hand).
-            named = load_named_areas(client, s.named_areas, tokens["named_areas"], max_age=0)
-            countries = load_named_areas(client, s.countries, tokens["countries"], max_age=0)
-            picked = select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named, countries=countries)
+            picked = select(records, s, rules, fences, levels, done, start, end, by, history=records)
+            # The places and countries of the records picked: from the squares kept (place_cache), the server
+            # asked only for squares not kept; 抽出 asks whether the layers changed since (`fresh`).
+            points = points_of(picked)
+            named = areas_at(client, s.named_areas, points, tokens["named_areas"], fresh=True)
+            countries = areas_at(client, s.countries, points, tokens["countries"], fresh=True)
+            name_places(picked, named, countries, levels)
             return picked, rules, layer_key_problems(s, layer_fields(client, s, tokens))
 
         def finished(result) -> None:
@@ -314,8 +318,9 @@ class AlertDialog(QDialog):
         def work(_task):
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = reported_ids(client, s, tokens["table"], ids=[o.id for o in records]) if s.table else set()
-            named = load_named_areas(client, s.named_areas, tokens["named_areas"])
-            countries = load_named_areas(client, s.countries, tokens["countries"])
+            points = points_of(records)
+            named = areas_at(client, s.named_areas, points, tokens["named_areas"])
+            countries = areas_at(client, s.countries, points, tokens["countries"])
             return manual_items(records, fences, s, levels, history, named, countries), done
 
         def finished(result) -> None:

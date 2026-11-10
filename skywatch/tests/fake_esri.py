@@ -29,6 +29,8 @@ class FakeLayer:
         self.next = 1
         #: The layer's name, said when set.
         self.name: Optional[str] = None
+        #: More of the layer's information (editingInfo, editFieldsInfo…).
+        self.extra: dict[str, Any] = {}
 
     def info(self) -> dict[str, Any]:
         return {
@@ -39,6 +41,7 @@ class FakeLayer:
             "advancedQueryCapabilities": {"supportsPagination": self.pagination},
             "fields": [{"name": n, "type": t} for n, t in self.types.items()],
             **({"name": self.name} if self.name else {}),
+            **self.extra,
         }
 
     def add(self, attributes: dict[str, Any], geometry: Any = None) -> int:

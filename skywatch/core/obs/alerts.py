@@ -53,6 +53,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
+import numpy as np
+
 from ..coords import angle_pattern, format_angle
 from ..esri import EsriClient, EsriError, fit_value, quote
 from ..time_zone import UTC, TimeZone, parse_time_zone
@@ -316,9 +318,20 @@ class NamedArea:
     #: The feature's attributes, and their names by role (for `place.<key>`, `country.<key>`).
     attributes: dict = field(default_factory=dict, repr=False)
     roles: dict = field(default_factory=dict, repr=False)
+    #: Each ring as an array and its extent, made on the first `contains` (a country's border can have 100,000s of points).
+    _rings_fast: Optional[list] = field(default=None, repr=False, compare=False)
 
     def values(self) -> dict[str, Any]:
         return {"name": self.name, "kind": self.kind, "code": self.code, "nameEn": self.name_en, "kindEn": self.kind_en}
+
+    def contains(self, lon: float, lat: float) -> bool:
+        """Whether a point is inside (the same even-odd test as `inside_rings`, the rings away from the point skipped)."""
+        b = self.box
+        if not (b[0] <= lon <= b[2] and b[1] <= lat <= b[3]):
+            return False
+        if self._rings_fast is None:
+            self._rings_fast = [_fast_ring(r) for r in self.rings if len(r)]
+        return inside_fast(lon, lat, self._rings_fast)
 
 
 @dataclass
@@ -909,16 +922,76 @@ def ring_size(rings: Sequence) -> float:
     Roughly how large polygon rings are (km²): each ring on a plane, the
     longitudes scaled by the latitude's cosine; holes (the other winding) take off.
     """
-    points = [p for ring in rings for p in ring]
-    if not points:
+    arrays = [a for a in (_points_of(r) for r in rings) if len(a)]
+    if not arrays:
         return 0.0
-    lat0 = math.radians(sum(p[1] for p in points) / len(points))
+    lat0 = math.radians(float(np.concatenate([a[:, 1] for a in arrays]).mean()))
     kx, ky = 111.32 * math.cos(lat0), 110.57
     total = 0.0
-    for ring in rings:
-        n = len(ring)
-        total += sum(ring[i][0] * ring[(i + 1) % n][1] - ring[(i + 1) % n][0] * ring[i][1] for i in range(n)) / 2
+    for a in arrays:
+        x, y = a[:, 0], a[:, 1]
+        total += float((x * np.roll(y, -1) - np.roll(x, -1) * y).sum()) / 2
     return abs(total) * kx * ky
+
+
+def rings_box(rings: Sequence) -> tuple[float, float, float, float]:
+    """The extent (west, south, east, north) of rings."""
+    arrays = [a for a in (_points_of(r) for r in rings) if len(a)]
+    if not arrays:
+        return (0.0, 0.0, 0.0, 0.0)
+    both = np.concatenate(arrays)
+    return (float(both[:, 0].min()), float(both[:, 1].min()), float(both[:, 0].max()), float(both[:, 1].max()))
+
+
+def _points_of(ring: Any) -> "np.ndarray":
+    """A ring as an (n, 2) array of longitudes and latitudes (a list of points or an array already)."""
+    try:
+        a = np.asarray(ring, dtype=float)
+    except (TypeError, ValueError):  # points of uneven lengths (some with z)
+        a = np.asarray([[p[0], p[1]] for p in ring], dtype=float)
+    return a.reshape(-1, a.shape[-1])[:, :2] if a.size else np.zeros((0, 2))
+
+
+def _fast_ring(ring: Any) -> tuple:
+    """A ring for `inside_fast`: its points (an array) and extent."""
+    a = _points_of(ring)
+    return a, (float(a[:, 0].min()), float(a[:, 1].min()), float(a[:, 0].max()), float(a[:, 1].max()))
+
+
+def inside_fast(lon: float, lat: float, rings: Sequence[tuple]) -> bool:
+    """
+    `inside_rings` for rings made by `_fast_ring`: a ring whose extent does
+    not hold the point crosses the point's ray an even number of times (or
+    never), so it is skipped; the others are counted all at once (NumPy).
+    """
+    inside = False
+    for a, b in rings:
+        if not (b[0] <= lon <= b[2] and b[1] <= lat <= b[3]):
+            continue
+        x1, y1 = a[:, 0], a[:, 1]
+        x2, y2 = np.roll(x1, -1), np.roll(y1, -1)
+        cross = (y1 > lat) != (y2 > lat)
+        if not cross.any():
+            continue
+        x1, y1, x2, y2 = x1[cross], y1[cross], x2[cross], y2[cross]
+        if np.count_nonzero(lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1) % 2:
+            inside = not inside
+    return inside
+
+
+def named_area_of(a: dict, rings: Sequence, fields: dict[str, str]) -> Optional[NamedArea]:
+    """
+    A named area (or country) of a feature's attributes and rings (WGS 84);
+    None without rings, without a name (nor a code), or not active.
+    """
+    def text(role: str) -> str:
+        return _text(a.get(fields[role])) if role in fields else ""
+
+    name, code = text("name"), text("code")
+    if not len(rings) or not (name or code) or ("active" in fields and fields["active"] in a and not _active(a.get(fields["active"]))):
+        return None
+    return NamedArea(name=name, rings=rings, kind=text("kind"), size=ring_size(rings), box=rings_box(rings), name_en=text("nameEn"),
+                     kind_en=text("kindEn"), code=code, attributes=a, roles=fields)
 
 
 def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) -> list[NamedArea]:
@@ -928,20 +1001,9 @@ def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) ->
     """
     out = []
     for feature in features:
-        a = feature.get("attributes") or {}
-
-        def text(role: str) -> str:
-            return _text(a.get(fields[role])) if role in fields else ""
-
-        rings = (feature.get("geometry") or {}).get("rings") or []
-        name, code = text("name"), text("code")
-        if not rings or not (name or code) or ("active" in fields and fields["active"] in a and not _active(a.get(fields["active"]))):
-            continue
-        xs = [p[0] for ring in rings for p in ring]
-        ys = [p[1] for ring in rings for p in ring]
-        out.append(NamedArea(name=name, rings=rings, kind=text("kind"), size=ring_size(rings),
-                             box=(min(xs), min(ys), max(xs), max(ys)), name_en=text("nameEn"), kind_en=text("kindEn"), code=code,
-                             attributes=a, roles=fields))
+        area = named_area_of(feature.get("attributes") or {}, (feature.get("geometry") or {}).get("rings") or [], fields)
+        if area is not None:
+            out.append(area)
     return out
 
 
@@ -952,8 +1014,11 @@ _place_lock = threading.Lock()
 def load_named_areas(client: EsriClient, source: Optional[EsriSource], token: Optional[str] = None,
                      max_age: float = PLACE_CACHE_SECONDS, clock: Callable[[], float] = time.monotonic) -> list[NamedArea]:
     """
-    The active named areas (polygons, WGS 84); read once and kept `max_age`
-    seconds (they change seldom; every report and save asks for them).
+    All the active named areas of the layer (polygons, WGS 84); read once and
+    kept `max_age` seconds. Only for what needs every one of them (the names
+    to choose from in the export's place filter): the places of records are
+    looked up in the cache of the squares they are in (place_cache.areas_at),
+    without reading the whole layer.
     """
     if source is None:
         return []
@@ -971,16 +1036,17 @@ def load_named_areas(client: EsriClient, source: Optional[EsriSource], token: Op
 
 
 def forget_named_areas() -> None:
-    """Drops the named areas kept (read again next time)."""
+    """Drops the named areas kept (read again next time), and those of the squares kept in memory (place_cache)."""
     with _place_lock:
         _place_cache.clear()
+    from . import place_cache
+
+    place_cache.PLACES.forget_memory()
 
 
 def places_of(lon: float, lat: float, areas: Sequence[NamedArea]) -> list[NamedArea]:
     """The named areas a point is in, smallest first (same size: the layer's order)."""
-    inside = [a for a in areas
-              if a.box[0] <= lon <= a.box[2] and a.box[1] <= lat <= a.box[3] and inside_rings(lon, lat, a.rings)]
-    return sorted(inside, key=lambda a: a.size)
+    return sorted((a for a in areas if a.contains(lon, lat)), key=lambda a: a.size)
 
 
 def name_places(items: Iterable[AlertItem], areas: Sequence[NamedArea], countries: Sequence[NamedArea] = (),

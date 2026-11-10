@@ -21,6 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
+from ..core.obs import place_cache
 from ..qgis_io import overviews_io, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs
@@ -75,6 +76,16 @@ class SettingsDialog(QDialog):
         cache_row.addWidget(self.clear_cache)
         form.addRow(self.tr("ピラミッドのキャッシュ"), cache_row)
         self._show_cache()
+        self.places = QLabel()
+        self.places.setWordWrap(True)
+        self.clear_places = QPushButton(self.tr("控えを消去"))
+        self.clear_places.setToolTip(self.tr("通報・エクスポート・式の関数で読んだ地名・国のポリゴンの控えを消す（次に使うときサーバーから読み直す）"))
+        self.clear_places.clicked.connect(self._clear_places)
+        places_row = QHBoxLayout()
+        places_row.addWidget(self.places, 1)
+        places_row.addWidget(self.clear_places)
+        form.addRow(self.tr("地名・国の控え"), places_row)
+        self._show_places()
         self.last_inputs = QLabel(self.tr("前回の入力を次の入力の初期値に使用（このユーザープロファイルに保存）"))
         self.last_inputs.setWordWrap(True)
         self.forget_inputs = QPushButton(self.tr("覚えた値を消去"))
@@ -134,6 +145,16 @@ class SettingsDialog(QDialog):
     def _clear_cache(self) -> None:
         overviews_io.clear_cache_next_start()
         self._show_cache()
+
+    def _show_places(self) -> None:
+        squares, shapes, size = place_cache.PLACES.info()
+        self.places.setText(self.tr("1 度四方 {s} マス、ポリゴン {n} 件、{mb:.1f} MB（使った場所だけ。上限 {top} MB、古いものから消す）").format(
+            s=squares, n=shapes, mb=size / 1048576, top=place_cache.DISK_BYTES // 1048576))
+        self.clear_places.setEnabled(squares > 0 or shapes > 0)
+
+    def _clear_places(self) -> None:
+        place_cache.PLACES.clear()
+        self._show_places()
 
     def _forget_inputs(self) -> None:
         last_inputs.forget_all()

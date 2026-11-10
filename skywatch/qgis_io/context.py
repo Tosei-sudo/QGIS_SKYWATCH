@@ -16,6 +16,7 @@ from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_t
 from ..core.esri import EsriClient
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
+from ..core.obs import place_cache
 from ..core.offline import OfflineWork
 from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
 from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
@@ -69,6 +70,8 @@ class PluginContext(QObject):
         #: 一時的なオフライン作業: the cache of reads and the changes waiting for a server down (core/offline.py).
         self.offline = OfflineWork(settings.offline_path())
         self.configChanged.connect(self._offline_settings)
+        #: 地名・国の控え: the squares looked up and the polygons read, kept across sessions (core/obs/place_cache.py).
+        place_cache.PLACES.use_file(settings.place_cache_path())
 
     def reload(self) -> None:
         """
@@ -214,6 +217,7 @@ class PluginContext(QObject):
 
     def close(self) -> None:
         self.offline.close()
+        place_cache.PLACES.close()
         if self._gpkg is not None:
             self._gpkg.close()
             self._gpkg = None

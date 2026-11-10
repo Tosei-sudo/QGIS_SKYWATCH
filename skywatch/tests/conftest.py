@@ -85,6 +85,22 @@ def own_offline_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def own_place_cache(monkeypatch, tmp_path):
+    """Each test has its own 地名・国の控え (memory and file): none is left from another test."""
+    from skywatch.core.obs import place_cache
+
+    try:
+        from skywatch.qgis_io import settings
+    except ImportError:  # no QGIS
+        settings = None
+    if settings is not None:
+        monkeypatch.setattr(settings, "place_cache_path", lambda: str(tmp_path / "place_cache.sqlite"))
+    place_cache.PLACES.close()
+    yield
+    place_cache.PLACES.close()
+
+
+@pytest.fixture(autouse=True)
 def no_time_zone_rules():
     """Each test starts with no settings file's time zones (they are module state, as in the viewer)."""
     from skywatch.core import time_zone

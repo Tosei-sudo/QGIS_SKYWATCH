@@ -27,6 +27,7 @@ from ..core.obs.export import (
     BASES, FENCE_SOURCES, PLACE_SOURCES, ExportContext, ExportFilter, ExportSettings, items_of, render, select_records, settings_for,
 )
 from ..core.obs.flows import now_ms
+from ..core.obs.place_cache import areas_at, points_of
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
@@ -468,7 +469,8 @@ class ExportDialog(QDialog):
                 return json.load(fh)
 
         def work(_task):
-            named = load_named_areas(client, named_source, tokens[0]) if named_source else []
+            # The records' squares from the cache (place_cache): the whole layer is not read.
+            named = areas_at(client, named_source, points_of(rows), tokens[0]) if named_source else []
             fences = load_geofences(client, fence_source, tokens[1]) if fence_source else []
             out = render(items_of(rows, named, fences), ctx, load_schema)
             if out.data:
