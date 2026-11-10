@@ -32,7 +32,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsDistanceArea, QgsFeature, QgsFields, QgsGeometry, QgsLayerMetadata, QgsMapLayer, QgsPointXY,
-    QgsProject, QgsRasterLayer, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
+    QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
 
 from ..core.catalog.config import CatalogConfig
@@ -384,6 +384,33 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
     for layer in layers:
         project.addMapLayer(layer, False)
         group.addLayer(layer)
+
+
+def layers_extent(layers: Sequence[QgsMapLayer], crs: QgsCoordinateReferenceSystem,
+                  project: Optional[QgsProject] = None) -> Optional[QgsRectangle]:
+    """
+    The box around the layers' extents in `crs` (the map's, for 「開いた画像へ
+    移動」): each from its own CRS (one without a CRS as it is, the way QGIS
+    draws it). None when none has an extent that can be shown there.
+    """
+    project = project or QgsProject.instance()
+    box: Optional[QgsRectangle] = None
+    for layer in layers:
+        extent = QgsRectangle(layer.extent())
+        if extent.isNull() or not extent.isFinite():
+            continue
+        if layer.crs().isValid() and crs.isValid() and layer.crs() != crs:
+            try:
+                extent = QgsCoordinateTransform(layer.crs(), crs, project).transformBoundingBox(extent)
+            except Exception:  # noqa: BLE001 (QgsCsException: outside what the map's CRS can show)
+                continue
+            if extent.isNull() or not extent.isFinite():
+                continue
+        if box is None:
+            box = extent
+        else:
+            box.combineExtentWith(extent)
+    return box
 
 
 def close_layers(layer_ids: Sequence[str], project: Optional[QgsProject] = None) -> int:

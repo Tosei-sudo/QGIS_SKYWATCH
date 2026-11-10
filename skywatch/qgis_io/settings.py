@@ -244,6 +244,18 @@ def set_close_previous(on: bool) -> None:
     _set("catalog/closePrevious", "1" if on else "0")
 
 
+def zoom_to_opened() -> bool:
+    """
+    「開いた画像へ移動」 (tsudo, 2026-11-10): opening images from the catalog
+    moves the map to them (all of them when several). On unless turned off.
+    """
+    return _get("catalog/zoomToOpened") != "0"
+
+
+def set_zoom_to_opened(on: bool) -> None:
+    _set("catalog/zoomToOpened", "1" if on else "0")
+
+
 def mark_style() -> str:
     """The observations' marks on the map ('normal' unless chosen)."""
     v = _get("observations/marks")

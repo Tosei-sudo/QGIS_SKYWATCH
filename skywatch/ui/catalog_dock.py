@@ -43,7 +43,8 @@ from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
-    Cancelled, add_record_layers, close_layers, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer,
+    Cancelled, add_record_layers, close_layers, footprint, layer_area, layers_extent, open_record, overlap_measure, record_of_layer,
+    results_layer,
 )
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -303,6 +304,12 @@ class CatalogDock(PluginDock):
         self.close_previous.toggled.connect(settings.set_close_previous)
         #: The layers opened last with 「前の画像を閉じる」 on (their ids), which close when the next images open.
         self.last_opened: list[str] = []
+        # 「開いた画像へ移動」 (tsudo, 2026-11-10): the map goes to the images opened (all of a record's files, or of several records).
+        self.zoom_opened = QCheckBox(self.tr("開いた画像へ移動"))
+        self.zoom_opened.setToolTip(self.tr("「開く」・ダブルクリックで画像を開いたら、その画像ファイルの範囲へ地図を移動・ズーム"
+                                            "（複数枚のときはすべてを囲む範囲。開けなかったときは動かさない。PC ごとに記憶）"))
+        self.zoom_opened.setChecked(settings.zoom_to_opened())
+        self.zoom_opened.toggled.connect(settings.set_zoom_to_opened)
 
         buttons = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
@@ -342,6 +349,7 @@ class CatalogDock(PluginDock):
             self.buttons[key] = button
             if key == "open":
                 buttons.addWidget(self.close_previous)
+                buttons.addWidget(self.zoom_opened)
         # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
         self.footprint_box = QComboBox()
         for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
@@ -461,6 +469,7 @@ class CatalogDock(PluginDock):
         for key in ("open", "copy", "folders"):
             self.buttons[key].setVisible(files)
         self.close_previous.setVisible(files)
+        self.zoom_opened.setVisible(files)
         self.buttons["record"].setVisible(not files)
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
@@ -959,6 +968,17 @@ class CatalogDock(PluginDock):
         self.canvas.setExtent(extent)
         self.canvas.refresh()
 
+    def zoom_to_layers(self, layers) -> None:
+        """The map moved to the extent of the layers (their image files'; the box around all of them), with a small margin."""
+        extent = layers_extent(layers, self.canvas.mapSettings().destinationCrs())
+        if extent is None:
+            return
+        if extent.isEmpty():
+            extent = extent.buffered(max(self.canvas.mapUnitsPerPixel() * 200, 1e-6))
+        extent.scale(1.05)
+        self.canvas.setExtent(extent)
+        self.canvas.refresh()
+
     def _visibility(self, visible: bool) -> None:
         if not visible:
             self._work_timer.stop()
@@ -1022,8 +1042,9 @@ class CatalogDock(PluginDock):
         folder: the images chosen among its files, in a group); the reason is
         shown for those that cannot be opened, with 「ファイルなしで記録」 for
         them. With 「前の画像を閉じる」, the images opened here before close
-        once these are open (not when none could be). In a catalog without
-        image files, they are recorded without their files instead.
+        once these are open (not when none could be); with 「開いた画像へ移動」
+        the map goes to those opened. In a catalog without image files, they
+        are recorded without their files instead.
         """
         catalog = self._shown_catalog
         if catalog is None:
@@ -1056,6 +1077,8 @@ class CatalogDock(PluginDock):
                 self.last_opened = opened_ids
             else:
                 self.last_opened = []
+            if self.zoom_opened.isChecked():
+                self.zoom_to_layers(layers)
         if problems:
             self._say_unopened(problems, [r for r in unopened if r.id])
             self.status.setText(problems[-1])
