@@ -24,9 +24,10 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import edit_stamp
+from ..core.esri import EsriError
 from ..core.obs.alerts import (
-    AlertItem, AlertSettings, LogRow, Moment, build_lines, load_geofences, load_log, load_named_areas, load_rules, manual_items, remove_log,
-    report_text, reported_ids, score_note, select, write_file, write_log,
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_named_areas,
+    load_rules, manual_items, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
 )
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
@@ -34,6 +35,20 @@ from .docks import plain_label, plain_tip
 from .list_views import column_menus
 
 DAY_MS = 86_400_000
+
+
+def layer_fields(client, s: AlertSettings, tokens: dict) -> dict[str, list[str]]:
+    """The attribute names of the layers the formats' `country.code`… read (those that cannot be read left out)."""
+    out = {}
+    for name in dict.fromkeys(OBJECT_LAYERS[what][0] for _w, _s, what, _k in object_keys(s, fixed=True) if what in OBJECT_LAYERS):
+        source = getattr(s, name)
+        if source is None:
+            continue
+        try:
+            out[name] = list(client.layer(source.url, tokens.get(name) or source.token, refresh=True).field_types)
+        except EsriError:
+            pass
+    return out
 
 
 def _ms(edit: QDateTimeEdit) -> int:
@@ -246,18 +261,23 @@ class AlertDialog(QDialog):
             # 抽出 reads the named areas and countries afresh (and keeps them for saving and adding by hand).
             named = load_named_areas(client, s.named_areas, tokens["named_areas"], max_age=0)
             countries = load_named_areas(client, s.countries, tokens["countries"], max_age=0)
-            return select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named,
-                          countries=countries), rules
+            picked = select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named, countries=countries)
+            return picked, rules, layer_key_problems(s, layer_fields(client, s, tokens))
 
         def finished(result) -> None:
             self.pick_button.setEnabled(True)
-            picked, rules = result
+            picked, rules, problems = result
             ids = {i.record.id for i in picked}
             # Records added by hand stay first (unless picked by the conditions too); those picked follow, highest score first.
             self.items = [i for i in self.items if i.manual and i.record.id not in ids] + picked
             self._render_lines()
             rule_note = "" if rules is None else self.tr("（条件 {n} 件）").format(n=len(rules))
-            self._say(self.tr("{n} 件を抽出{r}").format(n=len(self.items), r=rule_note))
+            said = self.tr("{n} 件を抽出{r}").format(n=len(self.items), r=rule_note)
+            if problems:
+                # country.CODE… the layer has no attribute for: written empty (a typo, or a field not added yet).
+                said += self.tr("。フォーマットの属性に注意: ") + " / ".join(problems)
+                self.dock.iface.messageBar().pushWarning(self.tr("通報"), plain_tip(" / ".join(problems)))
+            self._say(said)
 
         def failed(message: str) -> None:
             self.pick_button.setEnabled(True)

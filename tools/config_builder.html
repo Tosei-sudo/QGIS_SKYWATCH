@@ -526,6 +526,41 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "area",
   "rule"
  ],
+ "alertObjectLayers": {
+  "country": {
+   "key": "countries",
+   "label": "alertReports.countries（国）",
+   "roles": "alertCountries"
+  },
+  "place": {
+   "key": "namedAreas",
+   "label": "alertReports.namedAreas（地名）",
+   "roles": "alertPlaces"
+  },
+  "places": {
+   "key": "namedAreas",
+   "label": "alertReports.namedAreas（地名）",
+   "roles": "alertPlaces"
+  },
+  "area": {
+   "key": "geofences",
+   "label": "alertReports.geofences（ジオフェンス）",
+   "roles": "alertGeofences"
+  },
+  "rule": {
+   "key": "rules",
+   "label": "alertReports.rules（条件テーブル）",
+   "roles": "alertRules"
+  }
+ },
+ "alertLevelKeys": [
+  "label",
+  "name",
+  "en",
+  "nameEn",
+  "note",
+  "color"
+ ],
  "anglePresets": {
   "dms": "{d}°{mm}'{ss}\"{h}",
   "dm": "{d}°{mm}'{h}"
@@ -1008,6 +1043,31 @@ function objectKey(src) {
   const m = src.match(/^([A-Za-z]+)\.([A-Za-z_][A-Za-z0-9_]*)$/);
   return m && K.alertObjectSources.includes(m[1]) ? [m[1], m[2]] : null;
 }
+/** Every 確度 level written (observationVocabulary's and the stores' own; the defaults have no other keys). */
+function confidenceLevels() {
+  const lists = [state.observationVocabulary && state.observationVocabulary.confidences,
+    ...(Array.isArray(state.observationStores) ? state.observationStores : []).map((st) => st && st.confidences)];
+  return lists.filter(Array.isArray).flat();
+}
+/**
+ * `country.code`, `confidence.code`…: the layer it is read from set (else always empty) and a 確度 key some level has, as the
+ * plugin says when it reads the settings. A layer's attribute names cannot be seen here: a key that is neither a role nor an
+ * attribute name of the settings is a warning (the plugin checks it against the layer when 抽出 reads it).
+ */
+function checkObjectKey(what, key, src, at, p) {
+  if (what === "confidence") {
+    const extra = new Set(confidenceLevels().filter(isObj).flatMap((c) => Object.keys(c)).map((k) => k.toLowerCase()));
+    if (!K.alertLevelKeys.includes(key) && !extra.has(key.toLowerCase())) p.push(`${at}: ${src} は確度に「${key}」がないので常に空（${K.alertLevelKeys.join("・")} か確度に書いたキー）`);
+    return;
+  }
+  const layer = K.alertObjectLayers[what];
+  const v = (state.alertReports || {})[layer.key];
+  if (v === undefined || v === null || v === false || v === "") { p.push(`${at}: ${src} は ${layer.label}がないので常に空`); return; }
+  const roles = { ...K.roles[layer.roles], ...(isObj(v) && isObj(v.fields) ? v.fields : {}) };
+  if ((key === "en" ? "nameEn" : key) in roles) return;
+  if (Object.values(roles).some((n) => typeof n === "string" && n.toLowerCase() === key.toLowerCase())) return;
+  p.push({ warn: true, text: `${at}: ${src} の「${key}」は役割（${Object.keys(roles).join("・")}）でも設定の属性名でもない。${layer.label}にこの名前の属性がなければ空（プラグインは「抽出」のときにレイヤーの属性と照らして知らせる）` });
+}
 /** One field of an alertReports format (a name, { source, … }, { text }, or several values in one), its parts and fallback. */
 function checkAlertField(x, at, p) {
   if (typeof x === "string" || Array.isArray(x)) x = { source: x };
@@ -1025,6 +1085,7 @@ function checkAlertField(x, at, p) {
   } else if (!K.alertSources.includes(src) && !objectKey(src)) {
     p.push(`${at}: 項目「${src}」は使用不可（属性なら ${K.alertObjectSources.map((o) => o + ".属性名").join("・")}）`);
   } else {
+    if (objectKey(src)) checkObjectKey(...objectKey(src), src, at, p);
     if (x.timeZone && !K.alertTimeSources.includes(src)) p.push(`${at}: timeZone は日時の項目（${K.alertTimeSources.join("・")}）だけ`);
     if (x.timeZone && zoneOffset(x.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(x.timeZone) && !isIana(x.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${x.timeZone}」をこのブラウザで確かめられない` });
     if (x.format && K.alertAngleSources.includes(src) && !isAnglePattern(x.format)) p.push(`${at}: lat・lon の format は dms・dm か {d}・{m}・{s} を含む書式（{dd}・{mm}・{ss}・{h}・{hj}・{sign} も）`);
@@ -1310,7 +1371,7 @@ const SPEC = [
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
           J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": ["lat", "lon"], "format": "dms" }, { "source": "place", "fallback": ["lat", "lon"] }, { "text": "固定" }]',
-            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。当てはまったものの属性: country.属性名（国）・place.属性名（いちばん小さい地名）・places.属性名（含む地名すべて）・area.属性名（ジオフェンス）・rule.属性名（合った条件）・confidence.キー（確度。設定の確度に書いたキー）。属性名は fields の役割（country.code・country.name・place.kind など）か、レイヤーの属性名そのもの（country.ISO_A3。大文字小文字は問わない）。.en は英語名（nameEn の役割）、confidence.en は確度の en。ないものは空。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。項目: " + K.alertSources.join("・") }),
+            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。当てはまったものの属性: country.属性名（国）・place.属性名（いちばん小さい地名）・places.属性名（含む地名すべて）・area.属性名（ジオフェンス）・rule.属性名（合った条件）・confidence.キー（確度。設定の確度に書いたキー）。属性名は fields の役割（country.code・country.name・place.kind など）か、レイヤーの属性名そのもの（country.ISO_A3。大文字小文字は問わない）。.en は英語名（nameEn の役割）、confidence.en は確度の en。ないものは空。読むレイヤーの設定がないもの・どの確度にもないキーはここでも問題に、役割でも設定の属性名でもない名前は注意に（レイヤーの属性はここでは読めない。プラグインが「抽出」のときにレイヤーの属性と照らして知らせる）。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。項目: " + K.alertSources.join("・") }),
           T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
           TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}。@ のあとにタイムゾーンでそのゾーン（{now:%H:%M@UTC}・{date@UTC}）" }),
           TJ("footer", "フッター", { ph: "以上" }),
