@@ -434,6 +434,44 @@ def test_country_english_names_and_the_coordinates_when_no_place(plugin):
     assert dialog.lines_table.item(0, 1).text() == "船C|Confirmed|--|353000N 1501500E"
 
 
+def test_pick_tells_attributes_the_layers_do_not_have(plugin):
+    """抽出 reads the layers' attribute names: `country.ISO_A3` and `place.en` they lack are said (written empty), in the dialog and the message bar."""
+    from skywatch.core.obs.alerts import forget_named_areas
+
+    p, iface, dock, tmp_path = plugin
+    forget_named_areas()
+    fake = FakeEsri()
+    places = fake.add_layer("https://x/arcgis/rest/services/Alerts/FeatureServer/3",
+                            FakeLayer({"NAME": "esriFieldTypeString", "PREF": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    places.add({"NAME": "横須賀港", "PREF": "神奈川県"}, {"rings": [[[139.65, 35.25], [139.75, 35.25], [139.75, 35.35], [139.65, 35.35], [139.65, 35.25]]]})
+    countries = fake.add_layer("https://x/arcgis/rest/services/Alerts/FeatureServer/4",
+                               FakeLayer({"COUNTRY_CODE": "esriFieldTypeString", "COUNTRY_NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    countries.add({"COUNTRY_CODE": "JPN", "COUNTRY_NAME": "日本"}, {"rings": [[[129.0, 30.0], [146.0, 30.0], [146.0, 46.0], [129.0, 46.0], [129.0, 30.0]]]})
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"alertReports": {
+        "namedAreas": "https://x/arcgis/rest/services/Alerts/FeatureServer/3",
+        "countries": "https://x/arcgis/rest/services/Alerts/FeatureServer/4", "notifyOnSave": False,
+        "formats": [{"name": "EN", "fields": ["objectName", "country.code", "country.ISO_A3", "place.pref", "place.en"]}],
+    }}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    dock.book.add(139.7, 35.3, object="船A", kind="船舶", activity="航行", confidence="確定")
+    dialog = dock.open_alerts()
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("1 件を抽出"))
+    assert dialog.lines_table.item(0, 1).text() == "船A|JPN||神奈川県|"
+    status = dialog.status.text()
+    assert "フォーマットの属性に注意" in status and "country.ISO_A3 は alertReports.countries（国）に属性「ISO_A3」がないので空" in status
+    assert "place.en は alertReports.namedAreas（地名）に nameEn の属性「NAME_EN」がないので空" in status and "place.pref" not in status
+    assert any(w.title() == "通報" and "ISO_A3" in w.text() for w in iface.messageBar().items())
+    # The layer given the attributes: nothing more to say.
+    countries.types["ISO_A3"] = "esriFieldTypeString"
+    places.types["NAME_EN"] = "esriFieldTypeString"
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text() == "1 件を抽出")
+
+
 def test_other_peoples_text_is_never_read_as_html(plugin):
     """
     Security re-check 2026-11-09: a report's text, a name or a server's message

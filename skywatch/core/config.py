@@ -27,7 +27,7 @@ from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
 from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
-from .obs.alerts import AlertSettings, EsriSource, alert_settings_of
+from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
@@ -330,6 +330,10 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.handover = handover_settings_of(value["handover"], problems)
     if "events" in value:
         config.events = events_settings_of(value["events"], problems)
+    if config.alert_reports is not None:
+        # confidence.<key>: a key some 確度 level has (the vocabulary's or a store's own).
+        levels = [*config.observation_vocabulary.confidences, *(c for st in config.observation_stores for c in st.confidences or [])]
+        problems.extend(level_key_problems(config.alert_reports, levels))
     return config, problems
 
 
