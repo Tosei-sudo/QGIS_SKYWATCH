@@ -305,8 +305,11 @@ def cars_image(path):
     return places
 
 
-def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp_path):
+def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp_path, monkeypatch):
     p, iface, dock, layers, _ = plugin
+    # (What an earlier test left unsent is not asked about meanwhile.)
+    from skywatch.ui import offline_status
+    monkeypatch.setattr(offline_status, "ask_upload", lambda parent, w, back: "later")
     places = cars_image(tmp_path / "park.tif")
     park = QgsRasterLayer(str(tmp_path / "park.tif"), "park")
     assert park.isValid()
@@ -327,7 +330,9 @@ def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp
     found = [x for x in QgsProject.instance().mapLayers().values() if isinstance(x, QgsVectorLayer)]
     assert len(found) == 1, dock.status.text()
     [layer] = found
-    assert layer.name() == "似たもの（乗用車・park.tif）" and dock.status.text().endswith("件（「AI結果」で確認して取り込み）")
+    first_id = layer.id()
+    assert layer.name() == "似たもの（乗用車・park.tif）"
+    assert dock.status.text().startswith(f"見本に似たもの {len(places) - 1} 件（見本 1 件から。「AI結果」で確認して取り込み")
     features = list(layer.getFeatures())
     # Every other car (the 見本 itself not), each at its place, turned as it is.
     assert len(features) == len(places) - 1
@@ -338,19 +343,50 @@ def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp
         # Its axis (alike cars may be found front to back).
         assert abs((f["heading"] - nearest[2] + 90) % 180 - 90) <= 20
         assert f["class"] == "車両 > 乗用車" and f["model"] == "見本照合" and f["score"] >= 0.7
-    # 「AI結果」 lists them and records them as the 見本.
+    # 「AI結果」 lists them; four checked right are recorded as the 見本, one is checked wrong.
     results = p.api.ai_results
     assert wait_for(lambda: len(results.rows) == len(features))
-    saved = results.import_rows(list(range(len(results.rows))))
-    assert len(saved) == len(features)
+    saved = results.import_rows([0, 1, 2, 3])
+    assert len(saved) == 4
     assert {(o.kind, o.activity, o.confidence, o.length, o.width) for o in saved} == {("車両 > 乗用車", "駐車", "推定", 6.6, 2.75)}
-    turned = sorted(round(o.heading) % 360 for o in saved if round(o.heading) % 360 != 0)
-    assert len(turned) == 3
     assert all("見本照合" in o.note for o in saved)
-    # Searched again: those recorded are not found again.
+    assert len(results.reject_rows([4])) == 1
+    wrong = results.rows[4][1]
+    # Searched again: learnt from the five 見本 and the one wrong; those checked are not found again (the cars left
+    # come first), and the list takes the last one's place.
     dock.many.find_similar()
     assert wait_for(lambda: not dock.many.searching, 60000)
-    assert dock.status.text().startswith("見本に似たものは見つかりませんでした")
+    assert dock.status.text().startswith("見本に似たもの ") and "件（見本 5 件・誤検出 1 件から。" in dock.status.text()
+    [again] = [x for x in QgsProject.instance().mapLayers().values() if isinstance(x, QgsVectorLayer)]
+    assert again.id() != first_id and again.name() == "似たもの（乗用車・park.tif）"
+    c0 = wrong.geometry.centroid().asPoint()
+    checked = [(o.lon, o.lat) for o in [sample, *saved]] + [(c0.x(), c0.y())]
+    left = [q for q in places if all(get_distance((q[0], q[1]), c) > 1 for c in checked)]
+    assert len(left) == len(places) - 6
+    ranked = sorted(again.getFeatures(), key=lambda f: -f["score"])
+    for f in ranked[:len(left)]:
+        c = f.geometry().centroid().asPoint()
+        assert min(get_distance((q[0], q[1]), (c.x(), c.y())) for q in left) < 1.5
+    for f in ranked:
+        c = f.geometry().centroid().asPoint()
+        assert all(get_distance(q, (c.x(), c.y())) > 1.5 for q in checked)
+    # The cars left recorded too: none of them found again (at most a stray place of the noisy ground).
+    assert wait_for(lambda: len(results.rows) == again.featureCount())
+    rows = sorted(range(len(results.rows)), key=lambda i: -(results.rows[i][1].score or 0))[:len(left)]
+    rest = results.import_rows(rows)
+    assert len(rest) == len(left)
+    turned = sorted(round(o.heading) % 360 for o in [*saved, *rest] if round(o.heading) % 360 != 0)
+    assert len(turned) >= 2
+    dock.many.threshold_input.setValue(0.9)
+    dock.many.find_similar()
+    assert wait_for(lambda: not dock.many.searching, 60000)
+    assert "（見本 9 件・誤検出 1 件から" in dock.status.text() or dock.status.text().startswith("見本に似たものは見つかりませんでした")
+    for lay in QgsProject.instance().mapLayers().values():
+        if isinstance(lay, QgsVectorLayer):
+            assert lay.featureCount() <= 2
+            for f in lay.getFeatures():
+                c = f.geometry().centroid().asPoint()
+                assert all(get_distance((q[0], q[1]), (c.x(), c.y())) > 1.5 for q in places)
 
 
 def test_the_search_says_what_it_needs(plugin, tmp_path):
