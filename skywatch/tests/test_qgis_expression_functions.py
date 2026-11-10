@@ -73,8 +73,10 @@ def test_records_and_places_in_expressions(plugin, tmp_path):  # noqa: F811
     assert value("skywatch_kind_level('船舶 > 支援船 > 〇〇級', -1)") == "〇〇級"
     assert value("skywatch_kind_level('船舶', 3)") is None
 
-    # The named areas, read in the background; a layer in another CRS.
-    assert wait_for(lambda: len(expression_functions._areas) == 2)
+    # The named areas: a square not kept is NULL at first, looked up in the background (its square only, not the
+    # whole layer), and the map drawn again; a layer in another CRS.
+    drawn = []
+    p.place_reader.refresh = lambda: drawn.append(1)
     layer = QgsVectorLayer("Point?crs=EPSG:3857", "点", "memory")
     QgsProject.instance().addMapLayer(layer)
     f = QgsFeature(layer.fields())
@@ -83,11 +85,23 @@ def test_records_and_places_in_expressions(plugin, tmp_path):  # noqa: F811
 
     g.transform(QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:4326"), layer.crs(), QgsProject.instance()))
     f.setGeometry(g)
+    asked = len(fake.asked)
+    assert value("skywatch_place($geometry)", layer, f) is None
+    assert value("skywatch_place($geometry)", layer, f) is None  # asked once
+    assert wait_for(lambda: drawn == [1])
     assert value("skywatch_place($geometry)", layer, f) == "横須賀港"
     assert value("array_to_string(skywatch_places($geometry), '・')", layer, f) == "横須賀港・東京湾"
+    queries = [form for url, form in fake.asked[asked:] if url.endswith("/query")]
+    assert queries and all("geometry" in form or "objectIds" in form for form in queries)
+    # Kept: no request for another point of the same square.
+    asked = len(fake.asked)
+    assert value("skywatch_place(transform(make_point(139.9, 35.5), 'EPSG:4326', 'EPSG:3857'))", layer) == "東京湾"
+    assert len(fake.asked) == asked
     far = QgsFeature(layer.fields())
     far.setGeometry(QgsGeometry.fromWkt("POINT(0 0)"))
     assert value("skywatch_place($geometry)", layer, far) is None
+    assert wait_for(lambda: len(drawn) == 2)
+    assert value("skywatch_place($geometry)", layer, far) is None and len(drawn) == 2  # in none: no lookup again
 
     # Gone with the plugin.
     expression_functions.unregister()

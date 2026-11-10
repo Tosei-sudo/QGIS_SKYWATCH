@@ -428,6 +428,15 @@ def test_country_english_names_and_the_coordinates_when_no_place(plugin):
     assert wait_for(lambda: dialog.status.text().startswith("3 件を抽出"))
     lines = sorted(dialog.lines_table.item(r, 1).text() for r in range(dialog.lines_table.rowCount()))
     assert lines == ["船A|Confirmed|JPN|Yokosuka Port", "船B|Probable|JPN|353000N 1395400E", "船C|Confirmed|--|353000N 1501500E"]
+    layers = ("https://x/arcgis/rest/services/Alerts/FeatureServer/3/query", "https://x/arcgis/rest/services/Alerts/FeatureServer/4/query")
+    asked = [form for url, form in fake.asked if url in layers]
+    assert asked and all("geometry" in form or "objectIds" in form for form in asked)  # never the whole layer
+    # 抽出 again: the places and countries from the cache (the squares' ids asked again, no polygon read again).
+    n = len(fake.asked)
+    dialog.pick()
+    assert wait_for(lambda: dialog.status.text().startswith("3 件を抽出"))
+    assert not [form for url, form in fake.asked[n:] if url in layers and "objectIds" in form]
+    assert sorted(dialog.lines_table.item(r, 1).text() for r in range(dialog.lines_table.rowCount())) == lines
     dialog.items = []
     dialog.add_records([c])
     assert wait_for(lambda: "手動で 1 件を追加" in dialog.status.text())

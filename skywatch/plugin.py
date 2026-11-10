@@ -997,7 +997,7 @@ class SkywatchPlugin:
         # QGIS の式の関数 「SKYWATCH」: the records the observation dock read and the named areas.
         expression_functions.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
         expression_functions.register()
-        self.place_reader = expression_functions.PlaceReader(self.context)
+        self.place_reader = expression_functions.PlaceReader(self.context, refresh=lambda: self.iface.mapCanvas().refreshAllLayers())
         self.place_reader.start()
         # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
         time_zone_fields.register()

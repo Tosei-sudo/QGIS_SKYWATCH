@@ -931,7 +931,8 @@ class ObservationDock(PluginDock):
         reported asked each time), in a task; those notable are said in the
         message bar with 「通報文を作成」.
         """
-        from ..core.obs.alerts import load_geofences, load_named_areas, load_rules, reported_ids, select
+        from ..core.obs.alerts import load_geofences, load_rules, name_places, reported_ids, select
+        from ..core.obs.place_cache import areas_at, points_of
 
         s = self._alert_watch()
         book = self.book
@@ -950,9 +951,14 @@ class ObservationDock(PluginDock):
                 rules = load_rules(client, s.rules, token(s.rules.url, s.rules.token)) if s.rules else None
                 fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
             done = reported_ids(client, s, token(s.table.url, s.table.token), ids=[o.id for o in records]) if s.table else set()
-            named = load_named_areas(client, s.named_areas, token(s.named_areas.url, s.named_areas.token)) if s.named_areas else []
-            countries = load_named_areas(client, s.countries, token(s.countries.url, s.countries.token)) if s.countries else []
-            return rules, fences, select(records, s, rules, fences, levels, done, history=history, named=named, countries=countries)
+            items = select(records, s, rules, fences, levels, done, history=history)
+            if items and (s.named_areas or s.countries):
+                # Only for those notable: their squares from the cache (place_cache), the server asked for the others.
+                points = points_of(items)
+                named = areas_at(client, s.named_areas, points, token(s.named_areas.url, s.named_areas.token)) if s.named_areas else []
+                countries = areas_at(client, s.countries, points, token(s.countries.url, s.countries.token)) if s.countries else []
+                name_places(items, named, countries, levels)
+            return rules, fences, items
 
         def finished(result) -> None:
             rules, fences, items = result
