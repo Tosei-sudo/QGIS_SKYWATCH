@@ -575,3 +575,73 @@ def test_names_in_english_and_the_country():
               NamedArea("小", _box(4, 4, 6, 6), code="B", size=4.0, box=(4, 4, 6, 6))]
     item = select([obs(lon=5.0, lat=5.0)], s, None, (), DEFAULT_CONFIDENCES, countries=nested)[0]
     assert written(AlertField(source="country"), item, 0, fmt, at) == "B"
+
+
+def test_any_value_of_what_a_record_was_matched_to():
+    """`country.code`, `place.PREF`, `area.CODE`, `rule.NOTE_EN`, `confidence.code`: roles, attributes (any case), level keys."""
+    from skywatch.core.obs.alerts import forget_named_areas, load_named_areas
+    from skywatch.core.obs.model import confidences_of
+
+    problems = []
+    levels = confidences_of([{"label": "確定", "en": "Confirmed", "code": "A", "rank": 1}, {"label": "推定", "code": "B"},
+                             {"label": "不明", "bad": [1]}], problems, "c")
+    assert levels[0].extra == {"code": "A", "rank": "1"} and len(problems) == 1 and "c[2] の bad" in problems[0]
+
+    country_url = "https://x/FeatureServer/14"
+    fake = FakeEsri()
+    rules = fake.add_layer(RULES_URL, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "NOTE", "NOTE_EN")} | {"PRIORITY": "esriFieldTypeDouble"}, ""))
+    rules.add({"KIND": "船舶", "NOTE": "船", "NOTE_EN": "Vessel", "PRIORITY": 2.5})
+    rules.add({"KIND": "船舶 > 支援船", "NOTE": "支援船", "PRIORITY": 1})
+    fences = fake.add_layer(FENCE_URL, FakeLayer({"NAME": "esriFieldTypeString", "NAME_EN": "esriFieldTypeString", "FENCE_CODE": "esriFieldTypeString"},
+                                                 "esriGeometryPolygon"))
+    fences.add({"NAME": "舞鶴", "NAME_EN": "Maizuru", "FENCE_CODE": "F1"}, {"rings": SQUARE})
+    fences.add({"NAME": "若狭", "FENCE_CODE": "F2"}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    places = fake.add_layer(PLACE_URL, FakeLayer({n: "esriFieldTypeString" for n in ("NAME", "KIND", "PREF")}, "esriGeometryPolygon"))
+    places.add({"NAME": "若狭湾", "KIND": "湾", "PREF": "福井県"}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    places.add({"NAME": "舞鶴港", "KIND": "港", "PREF": "京都府"}, {"rings": _box(134.8, 34.8, 135.2, 35.2)})
+    countries = fake.add_layer(country_url, FakeLayer({n: "esriFieldTypeString" for n in ("ISO2", "ISO_A3", "NAME_JA", "NAME_EN")}, "esriGeometryPolygon"))
+    countries.add({"ISO2": "JP", "ISO_A3": "JPN", "NAME_JA": "日本", "NAME_EN": "Japan"}, {"rings": _box(128.0, 30.0, 146.0, 46.0)})
+    client = EsriClient(fake)
+    s = settings({"namedAreas": PLACE_URL, "minConfidence": "",
+                  "countries": {"url": country_url, "fields": {"code": "ISO2", "name": "NAME_JA", "nameEn": "NAME_EN"}}})
+    forget_named_areas()
+    rule_list, fence_list = load_rules(client, s.rules), load_geofences(client, s.geofences)
+    named, found = load_named_areas(client, s.named_areas), load_named_areas(client, s.countries)
+
+    problems = []
+    fmt = _one([
+        "country.code", "country.name", "country.en", "country.nameEn", "country.ISO_A3", "country.iso_a3", "country.NOPE",
+        "place.name", "place.PREF", {"source": "places.PREF", "join": "／"}, "places.kind",
+        "area.FENCE_CODE", "area.en", "area.name",
+        "rule.note", "rule.NOTE_EN", {"source": "rule.PRIORITY", "digits": 1}, "rule.priority",
+        "confidence.code", "confidence.en", "confidence.label", "confidence.Rank",
+        {"source": "country.NOPE", "fallback": "country.ISO_A3"},
+        {"source": ["country.code", "place.PREF"], "join": "-"},
+    ], problems)
+    assert problems == []
+    at = Moment(now=T0)
+    item = select([obs(kind="船舶 > 支援船 > 〇〇級")], s, rule_list, fence_list, levels, named=named, countries=found)[0]
+    assert build_lines([item], fmt, at)[0].split("|") == [
+        "JP", "日本", "Japan", "Japan", "JPN", "JPN", "",
+        "舞鶴港", "京都府", "京都府／福井県", "港・湾",
+        "F1・F2", "Maizuru", "舞鶴・若狭",
+        "船・支援船", "Vessel", "2.5・1.0", "2.5・1",
+        "A", "Confirmed", "確定", "1",
+        "JPN", "JP-京都府",
+    ]
+    # Outside everything, by hand, and a level the settings give no keys: all empty.
+    far = manual_items([obs(id="far", lon=170.0, lat=0.0, confidence="??")], fence_list, s, levels, (), named, found)[0]
+    assert build_lines([far], fmt, at)[0].split("|") == [""] * 22 + ["", ""]
+    # A value that is a number keeps it for an attribute that is not text.
+    from skywatch.core.obs.alerts import value_of
+    assert value_of(AlertField(source="rule.PRIORITY"), AlertItem(obs(), [], [], met=rule_list[:1]), 0, fmt, at) == (2.5, "2.5")
+
+    problems = []
+    _one(["nation.code", "country.", "country.a-b", {"source": "country.code", "join": "/"}, {"source": "places.kind", "join": "/"},
+          {"source": "country.code", "format": "dms"}], problems)
+    assert any("fields[0] の source「nation.code」" in p for p in problems)
+    assert any("fields[1] の source「country.」" in p for p in problems)
+    assert any("fields[2] の source「country.a-b」" in p for p in problems)
+    assert any("fields[3] の join は" in p for p in problems)
+    assert any("fields[5] の format は" in p for p in problems)
+    assert len(problems) == 5

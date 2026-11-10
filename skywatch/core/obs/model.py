@@ -88,6 +88,8 @@ class ConfidenceLevel:
     note: Optional[str] = None
     #: Its name in English (the 通報's `confidence.en`).
     en: Optional[str] = None
+    #: Other values the settings give it (`{"label": "確定", "code": "A"}`: the 通報's `confidence.code`).
+    extra: dict[str, str] = field(default_factory=dict)
 
 
 #: The levels offered when the settings give none.
@@ -156,7 +158,10 @@ _NAME = re.compile(r"^[\w.]+$", re.ASCII)
 
 
 def confidences_of(value: Any, problems: list[str], at: str) -> Optional[list[ConfidenceLevel]]:
-    """The levels of 確度 (`["確定", …]` or `[{label, color, note, en}, …]`); None when none can be used."""
+    """
+    The levels of 確度 (`["確定", …]` or `[{label, color, note, en, …}, …]`:
+    other keys with a text or number are kept as `extra`); None when none can be used.
+    """
     if not isinstance(value, list):
         problems.append(f"{at} は配列で指定")
         return None
@@ -177,8 +182,16 @@ def confidences_of(value: Any, problems: list[str], at: str) -> Optional[list[Co
         note, en = item.get("note"), item.get("en")
         if "en" in item and en is not None and not isinstance(en, str):
             problems.append(f"{at}[{i}] の en（英語の名前）は文字列で指定")
+        extra = {}
+        for k, x in item.items():
+            if k in ("label", "color", "note", "en"):
+                continue
+            if isinstance(x, str) or (is_number(x) and not isinstance(x, bool)):
+                extra[str(k)] = x.strip() if isinstance(x, str) else (str(int(x)) if float(x).is_integer() else str(x))
+            elif x is not None:
+                problems.append(f"{at}[{i}] の {k} は文字列か数で指定")
         out.append(ConfidenceLevel(label, color, note.strip() if isinstance(note, str) and note.strip() else None,
-                                   en.strip() if isinstance(en, str) and en.strip() else None))
+                                   en.strip() if isinstance(en, str) and en.strip() else None, extra))
     return out or None
 
 

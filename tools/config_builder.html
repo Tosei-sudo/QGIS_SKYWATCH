@@ -513,6 +513,19 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "area.en",
   "places.en"
  ],
+ "alertObjectSources": [
+  "country",
+  "place",
+  "places",
+  "area",
+  "rule",
+  "confidence"
+ ],
+ "alertListObjects": [
+  "places",
+  "area",
+  "rule"
+ ],
  "anglePresets": {
   "dms": "{d}°{mm}'{ss}\"{h}",
   "dm": "{d}°{mm}'{h}"
@@ -985,9 +998,15 @@ function isAnglePattern(f) {
 function alertOptionApplies(key, src, value) {
   if (key === "format") return isAnglePattern(value) ? K.alertAngleSources.includes(src) : K.alertTimeSources.includes(src);
   if (key === "timeZone") return K.alertTimeSources.includes(src);
-  if (key === "digits") return ["lon", "lat", "length", "heading", "width", "score"].includes(src);
+  if (key === "digits") return ["lon", "lat", "length", "heading", "width", "score"].includes(src) || !!objectKey(src);
   if (key === "level") return src === "kind";
   return true;
+}
+/** `country.code`, `place.PREF_NAME`…: [object, key] of a value of what a record was matched to (not a fixed source), else null. */
+function objectKey(src) {
+  if (typeof src !== "string" || K.alertSources.includes(src)) return null;
+  const m = src.match(/^([A-Za-z]+)\.([A-Za-z_][A-Za-z0-9_]*)$/);
+  return m && K.alertObjectSources.includes(m[1]) ? [m[1], m[2]] : null;
 }
 /** One field of an alertReports format (a name, { source, … }, { text }, or several values in one), its parts and fallback. */
 function checkAlertField(x, at, p) {
@@ -1003,14 +1022,15 @@ function checkAlertField(x, at, p) {
         : part;
       checkAlertField(own, `${at}.source[${i}]`, p);
     }
-  } else if (!K.alertSources.includes(src)) {
-    p.push(`${at}: 項目「${src}」は使用不可`);
+  } else if (!K.alertSources.includes(src) && !objectKey(src)) {
+    p.push(`${at}: 項目「${src}」は使用不可（属性なら ${K.alertObjectSources.map((o) => o + ".属性名").join("・")}）`);
   } else {
     if (x.timeZone && !K.alertTimeSources.includes(src)) p.push(`${at}: timeZone は日時の項目（${K.alertTimeSources.join("・")}）だけ`);
     if (x.timeZone && zoneOffset(x.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(x.timeZone) && !isIana(x.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${x.timeZone}」をこのブラウザで確かめられない` });
     if (x.format && K.alertAngleSources.includes(src) && !isAnglePattern(x.format)) p.push(`${at}: lat・lon の format は dms・dm か {d}・{m}・{s} を含む書式（{dd}・{mm}・{ss}・{h}・{hj}・{sign} も）`);
     if (x.format && !K.alertAngleSources.includes(src) && !K.alertTimeSources.includes(src)) p.push(`${at}: format は日時の項目（${K.alertTimeSources.join("・")}）と lat・lon だけ`);
-    if (x.join !== undefined && x.join !== null && !K.alertListSources.includes(src)) p.push(`${at}: join は source が配列のときか ${K.alertListSources.join("・")} だけ`);
+    const listed = K.alertListSources.includes(src) || (objectKey(src) && K.alertListObjects.includes(objectKey(src)[0]));
+    if (x.join !== undefined && x.join !== null && !listed) p.push(`${at}: join は source が配列のときか ${[...K.alertListSources, ...K.alertListObjects.map((o) => o + ".属性名")].join("・")} だけ`);
   }
   if (x.fallback !== undefined && x.fallback !== null && x.fallback !== "") checkAlertField(x.fallback, `${at}.fallback`, p);
 }
@@ -1239,7 +1259,7 @@ const SPEC = [
         B("softDelete", "削除は印だけ（softDelete）", { help: "既定 true" }),
         N("refreshMinutes", "読み直しの間隔（分）", { min: 0.5, max: 1440, ph: "なし", help: "ほかの人の記録をこの間隔でも読み直す。書かなければ、画像の切り替え・記録を直すときだけ" }),
         L("kinds", "種別"), L("activities", "活動"),
-        J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b", "en": "Probable" }]', help: "文字列か { label, color, note, en }。en は英語の名前（通報の confidence.en）" }), J("taxonomy", "分類の木（taxonomy）"),
+        J("confidences", "確度", { ph: '["確実", { "label": "推定", "color": "#f59e0b", "en": "Probable" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など" }), J("taxonomy", "分類の木（taxonomy）"),
         TJ("areas", "確認範囲のレイヤー", { ph: "URL か { \"url\", \"fields\", \"softDelete\", \"token\" }" }),
         TJ("taxonomyTable", "共有の分類テーブル", { ph: "URL か { \"url\", \"fields\", \"token\" }", help: "役割: " + Object.keys(K.roles.taxonomyTable).join("・") }),
         TOKEN, TZ, STZ]) },
@@ -1257,7 +1277,7 @@ const SPEC = [
       field: O("observationVocabulary", "語彙", [
         J("taxonomy", "分類の木", { ph: '[{ "name": "船舶", "activities": ["停泊", "航行"], "children": ["護衛艦", "貨物船"] }]' }),
         L("kinds", "種別（taxonomy がないとき）"), L("activities", "既定の活動"),
-        J("confidences", "確度", { ph: '["確実", "推定", { "label": "要確認", "color": "#dc2626", "en": "To be confirmed" }]', help: "文字列か { label, color, note, en }。en は英語の名前（通報の confidence.en）。既定の確定・推定・不明は Confirmed・Probable・Unknown" }),
+        J("confidences", "確度", { ph: '["確実", "推定", { "label": "要確認", "color": "#dc2626", "en": "To be confirmed" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など。既定の確定・推定・不明は Confirmed・Probable・Unknown" }),
         J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
         N("matchRadius", "同一候補の半径（m）"),
       ]) },
@@ -1290,7 +1310,7 @@ const SPEC = [
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
           J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": ["lat", "lon"], "format": "dms" }, { "source": "place", "fallback": ["lat", "lon"] }, { "text": "固定" }]',
-            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。英語は .en（confidence.en は確度の en、area.en・place.en・places.en・placeKind.en・countryName.en は各レイヤーの英語名の属性）。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。項目: " + K.alertSources.join("・") }),
+            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。当てはまったものの属性: country.属性名（国）・place.属性名（いちばん小さい地名）・places.属性名（含む地名すべて）・area.属性名（ジオフェンス）・rule.属性名（合った条件）・confidence.キー（確度。設定の確度に書いたキー）。属性名は fields の役割（country.code・country.name・place.kind など）か、レイヤーの属性名そのもの（country.ISO_A3。大文字小文字は問わない）。.en は英語名（nameEn の役割）、confidence.en は確度の en。ないものは空。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。項目: " + K.alertSources.join("・") }),
           T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
           TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}。@ のあとにタイムゾーンでそのゾーン（{now:%H:%M@UTC}・{date@UTC}）" }),
           TJ("footer", "フッター", { ph: "以上" }),
