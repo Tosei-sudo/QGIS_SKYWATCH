@@ -187,6 +187,11 @@ def offline_path() -> str:
     return _get("offline_file") or os.path.join(profile_folder(), "offline_work.sqlite")
 
 
+def place_cache_path() -> str:
+    """The file of the named areas and countries looked up (地名・国の控え, core/obs/place_cache.py)."""
+    return os.path.join(profile_folder(), "place_cache.sqlite")
+
+
 class SettingsPrefs:
     """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
 

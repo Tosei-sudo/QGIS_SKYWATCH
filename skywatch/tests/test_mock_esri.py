@@ -285,6 +285,13 @@ def test_alerts_rules_geofence_and_log_over_http(server):
                        activity="出港", present=True, note="", lon=139.75, lat=35.30, created_at=now, updated_at=now, confidence="確定")
     named = load_named_areas(client, s.named_areas, max_age=0)
     assert [a.name for a in named] == ["東京湾", "横須賀港", "横須賀本港"]
+    # The same from the squares the records are in (place_cache): ids by envelope, then the features by ids.
+    from skywatch.core.obs.place_cache import PlaceCache
+
+    cache = PlaceCache()
+    assert [a.name for a in cache.areas_at(client, s.named_areas, [(139.75, 35.30)])] == ["東京湾", "横須賀港", "横須賀本港"]
+    assert cache.areas_at(client, s.named_areas, [(150.0, 30.0)]) == []
+    assert [(c.code, c.name_en) for c in cache.areas_at(client, s.countries, [(139.75, 35.30)])] == [("JP", "Japan")]
     items = select([ship, replace(ship, id="mock-b", lon=139.9)], s, rules, fences, DEFAULT_CONFIDENCES, named=named)
     assert [i.record.id for i in items] == ["mock-a"] and items[0].areas == ["横須賀"]
     assert [a.name for a in items[0].places] == ["横須賀本港", "横須賀港", "東京湾"]
