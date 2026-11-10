@@ -1470,6 +1470,8 @@ const SPEC = [
       field: I("aiModels", "モデル", [LABEL, T("url", "モデル（.onnx）"), S("task", "タスク", K.detectTasks), J("inputSize", "入力の大きさ", { ph: "640 か [640, 640]" }),
         J("classes", "クラス", { ph: '"coco" か ["ship", "plane"]' }), S("format", "出力の形式", K.detectFormats), J("channels", "チャンネル", { ph: "[1, 2, 3]" }),
         L("mean", "mean", { numbers: true }), L("std", "std", { numbers: true }), N("maxDetections", "最大検出数"), L("strides", "strides", { numbers: true }),
+        N("score", "確信度のしきい値", { min: 0.001, max: 0.999, ph: "0.25", help: "0 と 1 の間。これ未満の検出は捨てる（既定 0.25、Detectron2 は 0.5）" }),
+        N("iou", "重なりのしきい値", { min: 0.001, max: 0.999, ph: "0.45", help: "0 と 1 の間。同じ物の重なった検出をまとめる IoU（既定 0.45）" }),
         M("kinds", "クラス → 種別"), T("encoder", "SAM の encoder"), T("decoder", "SAM の decoder")],
         { check: (it, at, p) => { if (!it.url && !(it.encoder && it.decoder)) p.push(`${at}: url か encoder と decoder が必要`); } }) },
     { key: "detectionOutputs", label: "検出結果の転記先", doc: "ai物体検出クリック抽出", help: "物体検出の結果を書き込むレイヤー。",

@@ -26,16 +26,17 @@ flowchart LR
   H -->|未撮像 → 繰り上げ候補| D
 ```
 
-モジュールの置き場所（案）
+モジュールの置き場所
 
 | 置き場所 | 中身 |
 |---|---|
-| `core/request/model.py` | 依頼のデータ型、属性との読み書き |
-| `core/request/store.py` | 台帳・出力履歴の Esri 読み書き（`plan/store.py` と同じ書き方） |
-| `core/request/schedule.py` | 対象日に有効かどうか（期間・繰り返し・達成条件） |
+| `core/request/model.py` | 依頼のデータ型、対象日に有効かどうか（期間・繰り返し・達成条件） |
+| `core/request/store.py` | 台帳・出力履歴の Esri 読み書き、属性との読み書き |
+| `core/request/systems.py` | 出力先のシステムの設定（`requestExports`: 持つ衛星・1 日の上限・ファイルの書き方） |
 | `core/request/route.py` | 条件とシステムの突き合わせ、枚数の見積もり |
 | `core/request/weather.py` | 日中の雲量、優先度への反映（`plan/weather.py` を利用） |
-| `core/request/quota.py` | 並べ替えと枠詰め |
+| `core/request/daily.py` / `core/request/workflow.py` | 日次の計算（その日の依頼集め・並べ替え・枠詰め）と、出力履歴・繰り上げへの書き戻し |
+| `core/request/follow.py` | 出力した依頼の追跡（画像カタログと照らした撮像済み・未撮像） |
 | `core/request/export.py` | CSV / JSON の組み立て、値の変換 |
 | `core/request/schema.py` | JSON Schema の検証（よく使う範囲を自前で実装） |
 | `core/request/view.py` | 「撮像計画ファイル出力」の一覧の絞り込み（システム・衛星シリーズ・結果・文字、§18） |
