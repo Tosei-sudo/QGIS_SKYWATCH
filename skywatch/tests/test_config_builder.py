@@ -54,6 +54,8 @@ def plugin_constants() -> dict:
         "alertTimeSources": list(alerts.TIME_SOURCES),
         "alertAngleSources": list(alerts.ANGLE_SOURCES),
         "alertListSources": list(alerts.LIST_SOURCES),
+        "alertObjectSources": list(alerts.OBJECT_SOURCES),
+        "alertListObjects": list(alerts.LIST_OBJECTS),
         "anglePresets": dict(coords.ANGLE_PRESETS),
         "anglePlaces": list(coords.ANGLE_PLACES),
         "obsExportSources": list(obs_export.SOURCES),

@@ -36,7 +36,11 @@ the latitude and longitude together), take another field when its own value
 is empty (`fallback`: the coordinates when the record is in no named area),
 write a latitude or longitude in degrees, minutes and seconds (`format`
 `dms`, `dm` or a pattern), and take a name in English (`confidence.en`,
-`area.en`, `place.en`…: the levels' `en`, the layers' NAME_EN).
+`area.en`, `place.en`…: the levels' `en`, the layers' NAME_EN). More
+generally a field can name any value of what a record was matched to:
+`country.code`, `place.PREF_NAME`, `area.NAME_EN`, `rule.NOTE`,
+`confidence.code` — a role of the settings' `fields`, else an attribute of
+the layer (else a key of the 確度 level in the settings).
 """
 from __future__ import annotations
 
@@ -72,6 +76,12 @@ NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
 ANGLE_SOURCES = ("lat", "lon")
 #: Several names in one value, between them `join` (else ・, or ", " in English).
 LIST_SOURCES = ("area", "rule", "places", "area.en", "places.en")
+#: What a record is matched to, whose values a field can name (`country.code`, `place.PREF_NAME`):
+#: its country, its place (the smallest named area), all its places, its geofences, the rules it met, its 確度 level.
+OBJECT_SOURCES = ("country", "place", "places", "area", "rule", "confidence")
+#: Of those, the ones that are several (their values joined by `join`).
+LIST_OBJECTS = ("places", "area", "rule")
+_OBJECT_KEY = re.compile(r"^(country|place|places|area|rule|confidence)\.([A-Za-z_][A-Za-z0-9_]*)$")
 #: Between the values of a field of several (`source` as an array) when `join` is not given.
 DEFAULT_JOIN = " "
 #: The fields written when the settings give none.
@@ -246,6 +256,13 @@ class AlertRule:
     note: str = ""
     #: How much meeting it weighs (0–1, the WEIGHT column; 1 when empty).
     weight: float = 1.0
+    #: The row's attributes, and their names by role (for `rule.<key>`).
+    attributes: dict = field(default_factory=dict, repr=False)
+    roles: dict = field(default_factory=dict, repr=False)
+
+    def values(self) -> dict[str, Any]:
+        return {"kind": kind_of(self.kind), "activities": "・".join(self.activities), "minConfidence": self.min_confidence,
+                "area": self.area, "note": self.note, "weight": self.weight}
 
 
 @dataclass
@@ -257,6 +274,12 @@ class Geofence:
     weight: float = 1.0
     #: Its name in English (NAME_EN).
     name_en: str = ""
+    #: The feature's attributes, and their names by role (for `area.<key>`).
+    attributes: dict = field(default_factory=dict, repr=False)
+    roles: dict = field(default_factory=dict, repr=False)
+
+    def values(self) -> dict[str, Any]:
+        return {"name": self.name, "nameEn": self.name_en, "weight": self.weight}
 
 
 @dataclass
@@ -273,6 +296,12 @@ class NamedArea:
     name_en: str = ""
     kind_en: str = ""
     code: str = ""
+    #: The feature's attributes, and their names by role (for `place.<key>`, `country.<key>`).
+    attributes: dict = field(default_factory=dict, repr=False)
+    roles: dict = field(default_factory=dict, repr=False)
+
+    def values(self) -> dict[str, Any]:
+        return {"name": self.name, "kind": self.kind, "code": self.code, "nameEn": self.name_en, "kindEn": self.kind_en}
 
 
 @dataclass
@@ -299,6 +328,10 @@ class AlertItem:
     countries: list[NamedArea] = field(default_factory=list)
     #: Its 確度 in English (the level's `en`).
     confidence_en: str = ""
+    #: The geofences it is in, the rules it met, its 確度 level (for `area.<key>`, `rule.<key>`, `confidence.<key>`).
+    fences: list[Geofence] = field(default_factory=list)
+    met: list[AlertRule] = field(default_factory=list)
+    level: Optional[ConfidenceLevel] = None
 
 
 def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = (), settings: Optional[AlertSettings] = None,
@@ -312,7 +345,7 @@ def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()
         inside = [g for g in fences if inside_rings(o.lon, o.lat, g.rings)]
         out.append(AlertItem(o, list(dict.fromkeys(g.name for g in inside)), [MANUAL_RULE], True,
                              area_weight=max((g.weight for g in inside), default=0.0) if fences else None, rule_weight=1.0,
-                             areas_en=_names_en(inside)))
+                             areas_en=_names_en(inside), fences=inside))
     name_places(out, named, countries, levels)
     if settings is not None and settings.score is not None:
         score_items(out, settings.score, levels, history)
@@ -334,7 +367,7 @@ def _applies(key: str, source: str, value: Any) -> bool:
     if key == "timeZone":
         return source in TIME_SOURCES
     if key == "digits":
-        return source in NUMBER_SOURCES
+        return source in NUMBER_SOURCES or (source not in SOURCES and _OBJECT_KEY.match(source) is not None)
     if key == "level":
         return source == "kind"
     return True
@@ -355,8 +388,10 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
     source = v.get("source")
     if isinstance(source, list):
         return _parts_of(v, at, problems)
-    if source not in SOURCES:
-        problems.append(f"{at} の source「{js_string(source)}」は使用不可（{'・'.join(SOURCES)}、または text）")
+    keyed = _OBJECT_KEY.match(source) if isinstance(source, str) and source not in SOURCES else None
+    if source not in SOURCES and keyed is None:
+        problems.append(f"{at} の source「{js_string(source)}」は使用不可（{'・'.join(SOURCES)}、"
+                        f"{'・'.join(o + '.属性名' for o in OBJECT_SOURCES)}、または text）")
         return None
     digits, level = v.get("digits"), v.get("level")
     if "digits" in v and not (is_number(digits) and 0 <= digits <= 12):
@@ -388,8 +423,9 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
             problems.append(f"{at} の timeZone は日時の項目（{'・'.join(TIME_SOURCES)}）だけに指定")
             zone = None
     join = _affix(v, "join", at, problems) if "join" in v and v["join"] is not None else None
-    if join is not None and source not in LIST_SOURCES:
-        problems.append(f"{at} の join は source が配列のときか、名前を並べる項目（{'・'.join(LIST_SOURCES)}）だけに指定")
+    if join is not None and source not in LIST_SOURCES and not (keyed and keyed.group(1) in LIST_OBJECTS):
+        problems.append(f"{at} の join は source が配列のときか、名前を並べる項目（{'・'.join(LIST_SOURCES)}・"
+                        f"{'・'.join(o + '.属性名' for o in LIST_OBJECTS)}）だけに指定")
         join = None
     return AlertField(
         source=source,
@@ -756,6 +792,7 @@ def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> lis
             area=_text(a.get(fields["area"])),
             note=_text(a.get(fields["note"])),
             weight=weight_of(a.get(fields["weight"])),
+            attributes=a, roles=fields,
         ))
     return out
 
@@ -776,7 +813,7 @@ def load_geofences(client: EsriClient, source: EsriSource, token: Optional[str] 
         if not rings or (f["active"] in a and not _active(a.get(f["active"]))):
             continue
         out.append(Geofence(name=_text(a.get(f["name"])), rings=rings, weight=weight_of(a.get(f["weight"])),
-                            name_en=_text(a.get(f["nameEn"])) if "nameEn" in f else ""))
+                            name_en=_text(a.get(f["nameEn"])) if "nameEn" in f else "", attributes=a, roles=f))
     return out
 
 
@@ -816,7 +853,8 @@ def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) ->
         xs = [p[0] for ring in rings for p in ring]
         ys = [p[1] for ring in rings for p in ring]
         out.append(NamedArea(name=name, rings=rings, kind=text("kind"), size=ring_size(rings),
-                             box=(min(xs), min(ys), max(xs), max(ys)), name_en=text("nameEn"), kind_en=text("kindEn"), code=code))
+                             box=(min(xs), min(ys), max(xs), max(ys)), name_en=text("nameEn"), kind_en=text("kindEn"), code=code,
+                             attributes=a, roles=fields))
     return out
 
 
@@ -861,11 +899,12 @@ def places_of(lon: float, lat: float, areas: Sequence[NamedArea]) -> list[NamedA
 def name_places(items: Iterable[AlertItem], areas: Sequence[NamedArea], countries: Sequence[NamedArea] = (),
                 levels: Sequence[ConfidenceLevel] = ()) -> None:
     """Sets each item's places and countries (those it is in, smallest first) and its 確度 in English."""
-    english = {c.label: c.en for c in levels if c.en}
+    by_label = {c.label: c for c in levels}
     for item in items:
         item.places = places_of(item.record.lon, item.record.lat, areas) if areas else []
         item.countries = places_of(item.record.lon, item.record.lat, countries) if countries else []
-        item.confidence_en = english.get(item.record.confidence, "")
+        item.level = by_label.get(item.record.confidence)
+        item.confidence_en = (item.level.en or "") if item.level else ""
 
 
 def _names_en(fences: Iterable[Geofence]) -> list[str]:
@@ -1092,12 +1131,12 @@ def select(
         areas = list(dict.fromkeys(g.name for g in inside))
         area_weight = max((g.weight for g in inside), default=0.0) if fences else None
         if rules is None:
-            out.append(AlertItem(o, areas, [], area_weight=area_weight, areas_en=_names_en(inside)))
+            out.append(AlertItem(o, areas, [], area_weight=area_weight, areas_en=_names_en(inside), fences=inside))
             continue
         met = [r for r in rules if rule_matches(r, o, areas, levels)]
         if met:
             out.append(AlertItem(o, areas, list(dict.fromkeys(r.note for r in met if r.note)), area_weight=area_weight,
-                                 rule_weight=max(r.weight for r in met), areas_en=_names_en(inside)))
+                                 rule_weight=max(r.weight for r in met), areas_en=_names_en(inside), fences=inside, met=met))
     out.sort(key=_time_key)
     name_places(out, named, countries, levels)
     if settings.score is None:
@@ -1210,9 +1249,21 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         return path[i] if 0 <= i < len(path) else ""
 
     def joined(names: Iterable[str]) -> str:
-        sep = f.join if f.join is not None else ", " if (s or "").endswith(".en") else "・"
+        sep = f.join if f.join is not None else ", " if _english(s or "") else "・"
         return sep.join(dict.fromkeys(n for n in names if n))
 
+    keyed = _OBJECT_KEY.match(s or "") if s not in SOURCES else None
+    if keyed:
+        what, key = keyed.groups()
+        found = {"country": item.countries[:1], "place": item.places[:1], "places": item.places, "area": item.fences,
+                 "rule": item.met, "confidence": [item.level] if item.level else []}[what]
+        if what not in LIST_OBJECTS:
+            return attribute_of(found[0], key) if found else None
+        values = [v for v in (attribute_of(x, key) for x in found) if v is not None and v != ""]
+        if len(values) == 1:
+            return values[0]  # one: as it is (a number stays a number)
+        return joined(to_fixed(v, f.digits) if f.digits is not None and is_number(v) and not isinstance(v, bool) and math.isfinite(v)
+                      else js_string(v).strip() for v in values)
     place = item.places[0] if item.places else None
     country = item.countries[0] if item.countries else None
     return {
@@ -1232,6 +1283,40 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
     }.get(s or "")
 
 
+def _english(source: str) -> bool:
+    """Whether a source names something in English (`.en`, `…En`, `…_EN`): its list is joined by ", "."""
+    key = source.rsplit(".", 1)[-1]
+    return "." in source and (key == "en" or key.endswith("En") or key.upper().endswith("_EN"))
+
+
+def attribute_of(thing: Any, key: str) -> Any:
+    """
+    A value of what a record was matched to (a country, a named area, a
+    geofence, a rule, a 確度 level) by key: `en` for its English name, a
+    role of the settings' `fields` (`code`, `name`, `nameEn`, `kind`…), else
+    an attribute of its layer by name (any case; a 確度 level: a key the
+    settings give it). None when it has none.
+    """
+    if thing is None:
+        return None
+    if isinstance(thing, ConfidenceLevel):
+        own = {"label": thing.label, "name": thing.label, "en": thing.en, "nameEn": thing.en, "note": thing.note, "color": thing.color}
+        if key in own:
+            return own[key]
+        extra = thing.extra
+        return extra[key] if key in extra else next((v for k, v in extra.items() if k.lower() == key.lower()), None)
+    key = "nameEn" if key == "en" else key
+    own = thing.values()
+    if key in own:
+        return own[key]
+    roles, attributes = thing.roles, thing.attributes
+    if key in roles:
+        return attributes.get(roles[key])
+    if key in attributes:
+        return attributes[key]
+    return next((v for k, v in attributes.items() if k.lower() == key.lower()), None)
+
+
 def _own_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> tuple[Any, str]:
     """A field's value and its text (`prefix`, `suffix` around it), before its `fallback` and `empty`."""
     if f.parts:
@@ -1243,7 +1328,7 @@ def _own_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, 
         text = "" if v is None else js_string(format_time(v, f.format or report.date_format, f.time_zone or report.time_zone))
     elif f.source in ANGLE_SOURCES and f.format:
         text = "" if v is None or not math.isfinite(v) else format_angle(v, f.source, f.format, f.digits)
-    elif f.source in NUMBER_SOURCES:
+    elif f.source in NUMBER_SOURCES or (is_number(v) and not isinstance(v, bool) and f.digits is not None):
         text = "" if v is None or not math.isfinite(v) else (to_fixed(v, f.digits) if f.digits is not None else js_string(v))
     elif f.source == "present":
         text = "あり" if v else "なし"
