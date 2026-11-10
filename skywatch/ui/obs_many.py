@@ -44,6 +44,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.obs.flows import ends_of, outline_of
 from ..core.obs.geo import bearing, km_text
+from ..core.ai.review import is_rejection
 from ..core.obs.similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
 from ..core.obs.stamps import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
 from ..core.obs.taxonomy import path_of
@@ -157,17 +158,18 @@ class ManyPanel(QGroupBox):
         find = QHBoxLayout()
         self.find_button = self._button(tr("似たものを探す"), tr(
             "地図の表示範囲で見本に似たものを画像から探し、「AI結果」に一覧（正・誤検出で確認して取り込み）\n"
-            "見本はこの画像の、長さと向きのある記録（2〜4 点で測ったもの）。光学画像で向きのそろった所ほど確実"), self.find_similar)
+            "見本はこの画像の、長さと向きのある記録（2〜4 点で測ったもの）。同じ種別で大きさの近い記録もすべて見本に。\n"
+            "上位を確かめて（取り込み・誤検出）からもう一度押すと、それを学んで探し直す（誤検出がぐっと減る）"), self.find_similar)
         self.angles_select = QComboBox()
         self.angles_select.addItem(tr("すべての向き"), "all")
         self.angles_select.addItem(tr("見本に近い向き"), "near")
         self.angles_select.setToolTip(tr("探す向き: すべて（15° ごと）／見本の向きの ±30° と逆向き"))
         self.threshold_input = QDoubleSpinBox()
-        self.threshold_input.setRange(0.3, 0.95)
+        self.threshold_input.setRange(0.1, 0.95)
         self.threshold_input.setSingleStep(0.05)
         self.threshold_input.setDecimals(2)
         self.threshold_input.setValue(0.6)
-        self.threshold_input.setToolTip(tr("似ている度合いのしきい値（−1〜1、高いほど厳しい）"))
+        self.threshold_input.setToolTip(tr("似ている度合いのしきい値（0〜1、高いほど厳しい。0.6 で 9 割ほどが正解、0.8 以上はほぼ確実）"))
         find.addWidget(self.find_button)
         find.addWidget(self.angles_select)
         find.addWidget(QLabel(tr("しきい値")))
@@ -659,9 +661,14 @@ class ManyPanel(QGroupBox):
         # A record's images in its folder: searched in the one the 見本 is on.
         layer = layer_at(image, sample.lon, sample.lat) if sample.lon is not None and sample.lat is not None else image_layers(image)[0]
         records = [o for o in book.living() if o.image_id == image.id and o.present]
+        # More 見本: this image's records of the same kind and about its size, measured (a row checked and recorded
+        # from the last search among them); and the places checked as wrong (誤検出 in 「AI結果」).
+        alike = [o for o in records if o.id != sample.record_id and o.kind == sample.kind and o.length and o.heading is not None
+                 and ALIKE_SIZE[0] <= o.length / sample.length <= ALIKE_SIZE[1]]
+        wrong = [_centre(a.ring) for a in book.image_areas() if is_rejection(a.note) and a.ring]
         canvas = self.dock.canvas
         try:
-            pictures = prepare(layer, canvas.extent(), canvas.mapSettings().destinationCrs(), sample, records)
+            pictures = prepare(layer, canvas.extent(), canvas.mapSettings().destinationCrs(), sample, records, alike=alike, wrong=wrong)
         except SimilarError as error:
             self.dock._say(str(error))
             return
@@ -676,7 +683,8 @@ class ManyPanel(QGroupBox):
             try:
                 return find_similar(pictures.gray, pictures.valid, pictures.sample_gray, pictures.sample_valid, pictures.sx, pictures.sy,
                                     float(sample.heading), pictures.length_px, pictures.width_px, angles, threshold, pictures.taken,
-                                    progress=lambda f: task.progress(f * 100), cancelled=cancelled)
+                                    progress=lambda f: task.progress(f * 100), cancelled=cancelled,
+                                    alike=pictures.alike, wrong=pictures.wrong)
             except Cancelled:
                 return None
 
@@ -691,8 +699,14 @@ class ManyPanel(QGroupBox):
                 return
             places = found_places(found, pictures)
             out = found_layer(places, sample, image_id, image_name, image_time)
-            QgsProject.instance().addMapLayer(out)
-            self.dock._say(tr("見本に似たもの {n} 件（「AI結果」で確認して取り込み）").format(n=len(places)))
+            # Searched again: the last search's list gives way (what was checked is in the records and checked areas).
+            project = QgsProject.instance()
+            old = [lay.id() for lay in project.mapLayers().values() if lay.name() == out.name() and lay.providerType() == "memory"]
+            if old:
+                project.removeMapLayers(old)
+            project.addMapLayer(out)
+            self.dock._say(tr("見本に似たもの {n} 件（{learnt}。「AI結果」で確認して取り込み、上位を確かめたらもう一度探すと学び直し）").format(
+                n=len(places), learnt=_learnt(len(pictures.alike), len(pictures.wrong))))
 
         def failed(message: str) -> None:
             self.searching = False
@@ -704,6 +718,22 @@ class ManyPanel(QGroupBox):
         kind = (path_of(sample.kind) or [""])[-1]
         self.dock._say(tr("{kind}に似たものを探しています…").format(kind=kind))
         run_task(tr("似たものを探す"), work, done, failed)
+
+
+#: Records of the 見本's kind this share of its length are 見本 too.
+ALIKE_SIZE = (0.75, 1.33)
+
+
+def _centre(ring: list) -> tuple[float, float]:
+    """The middle of a checked area's outline (longitude, latitude)."""
+    points = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
+    return (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
+
+
+def _learnt(alike: int, wrong: int) -> str:
+    """What the search learnt from, said."""
+    text = tr("見本 {n} 件").format(n=1 + alike)
+    return text + (tr("・誤検出 {k} 件から").format(k=wrong) if wrong else tr("から"))
 
 
 def _metres(m: float) -> str:

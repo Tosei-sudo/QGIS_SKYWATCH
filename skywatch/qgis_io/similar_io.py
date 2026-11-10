@@ -8,7 +8,10 @@ made a layer like 「物体検出（AI）」's (`class`, `score`, `image_id`,
 (正・誤検出) and records as observations.
 
 Drawing is quick and done on the main thread (prepare); the search itself
-runs in a task (core.obs.similar.find_similar on the pictures).
+runs in a task (core.obs.similar.find_similar on the pictures). The other
+見本 (records of the kind and size) and the places checked as wrong (誤検出)
+are found in the searched picture: those outside the map's view are not
+learnt from.
 """
 from __future__ import annotations
 
@@ -60,8 +63,13 @@ class SearchPictures:
     mpp: float
     length_px: float
     width_px: Optional[float]
-    #: The places of this image's records in the searched picture (the 見本 among them).
+    #: The places of this image's records in the searched picture, (x, y, heading or None; the 見本 among them),
+    #: and of what was checked as wrong, (x, y).
     taken: list = field(default_factory=list)
+    #: More 見本 in the searched picture: (x, y, heading).
+    alike: list = field(default_factory=list)
+    #: Places in the searched picture checked as wrong (誤検出): (x, y).
+    wrong: list = field(default_factory=list)
 
 
 def local_crs(lon: float, lat: float) -> QgsCoordinateReferenceSystem:
@@ -92,11 +100,13 @@ def _array_place(grid: Grid, mx: float, my: float) -> tuple[float, float]:
 
 
 def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, sample: Sample,
-            records: Sequence = (), context=None) -> SearchPictures:
+            records: Sequence = (), context=None, alike: Sequence = (), wrong: Sequence[tuple[float, float]] = ()) -> SearchPictures:
     """
     The pictures for a search of the map's view (`view` in `view_crs`) on an
     image layer, the 見本 (measured, on this image) among them; `records`: the
-    image's records, not found again.
+    image's records, not found again; `alike`: more 見本 (records with a
+    heading; those in the view count); `wrong`: places checked as wrong
+    (longitude, latitude), learnt from and not found again.
     """
     if not sample.measured or sample.lon is None or sample.lat is None:
         raise SimilarError("見本に長さと向きが必要（2〜4 点で測って記録した記録を見本に）")
@@ -134,18 +144,31 @@ def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, s
     if not sample_valid[r, r]:
         raise SimilarError("見本の場所に画像がありません（この画像の上の記録を見本に）")
     to_local = QgsCoordinateTransform(WGS84, crs, context)
-    taken = []
-    for o in records:
+
+    def place(lon: float, lat: float, reach: float) -> Optional[tuple[float, float]]:
         try:
-            p = to_local.transform(QgsPointXY(o.lon, o.lat))
+            p = to_local.transform(QgsPointXY(lon, lat))
         except Exception:  # noqa: BLE001
-            continue
+            return None
         x, y = _array_place(grid, p.x(), p.y())
-        if -r <= x <= w + r and -r <= y <= h + r:
-            taken.append((x, y))
+        return (x, y) if -reach <= x <= w - 1 + reach and -reach <= y <= h - 1 + reach else None
+
+    taken: list = []
+    for o in records:
+        p = place(o.lon, o.lat, r)
+        if p is not None:
+            taken.append((p[0], p[1], o.heading))
     sx, sy = _array_place(grid, 0.0, 0.0)
-    taken.append((sx, sy))
-    return SearchPictures(crs, grid, gray, valid, sample_gray, sample_valid, float(r), float(r), mpp, length_px, width_px, taken)
+    taken.append((sx, sy, sample.heading))
+    more = []
+    for o in alike:
+        p = place(o.lon, o.lat, 0)
+        if p is not None and o.heading is not None:
+            more.append((p[0], p[1], float(o.heading)))
+    wrong_places = [p for p in (place(lon, lat, 0) for lon, lat in wrong) if p is not None]
+    taken.extend(wrong_places)
+    return SearchPictures(crs, grid, gray, valid, sample_gray, sample_valid, float(r), float(r), mpp, length_px, width_px, taken,
+                          more, wrong_places)
 
 
 def found_places(found: Sequence[Found], pictures: SearchPictures, context=None) -> list[tuple[float, float, float, float]]:
