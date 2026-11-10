@@ -47,8 +47,8 @@ def plugin(tmp_path):
 def test_alerts_from_rules_to_the_log_clipboard_and_file(plugin):
     p, iface, dock, tmp_path = plugin
     fake = FakeEsri()
-    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")}, ""))
-    rules.add({"KIND": "船舶", "ACTIVITIES": "航行", "AREA": "東京湾", "NOTE": "湾内航行"})
+    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "GEOFENCE_NAME", "NOTE")}, ""))
+    rules.add({"KIND": "船舶", "ACTIVITIES": "航行", "GEOFENCE_NAME": "東京湾", "NOTE": "湾内航行"})
     fences = fake.add_layer(FENCES, FakeLayer({"NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))
     fences.add({"NAME": "東京湾"}, {"rings": [[[139.6, 35.5], [139.8, 35.5], [139.8, 35.7], [139.6, 35.7], [139.6, 35.5]]]})
     log = fake.add_layer(LOG, FakeLayer({"OBS_ID": "esriFieldTypeString", "REPORT_NAME": "esriFieldTypeString", "TEXT": "esriFieldTypeString",
@@ -123,7 +123,7 @@ def test_without_settings_the_dialog_says_so(plugin):
 
 def _setup(p, tmp_path, extra=None):
     fake = FakeEsri()
-    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")}, ""))
+    rules = fake.add_layer(RULES, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "GEOFENCE_NAME", "NOTE")}, ""))
     rules.add({"KIND": "船舶", "ACTIVITIES": "航行", "NOTE": "航行中"})
     log = fake.add_layer(LOG, FakeLayer({"OBS_ID": "esriFieldTypeString", "REPORT_NAME": "esriFieldTypeString", "TEXT": "esriFieldTypeString",
                                          "MANUAL": "esriFieldTypeSmallInteger"}, ""))

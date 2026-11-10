@@ -83,6 +83,20 @@ def _field_matches(existing, wanted) -> bool:
     return wanted.type != "TEXT" or not wanted.length or int(existing.length or 0) >= wanted.length
 
 
+def _copy_legacy(arcpy, path: str, table, old: str, new: str, report: Report, dry_run: bool) -> None:
+    """前の名前の属性の値を、足したばかりの今の名前の属性に写す（前の属性は消さない）。"""
+    if dry_run:
+        report.did(f"{old} の値を {new} に写す")
+        return
+    try:
+        arcpy.management.CalculateField(path, new, f"!{old}!", "PYTHON3")
+    except Exception as e:  # noqa: BLE001 - 写せなくてもテーブルは使える
+        report.warn(f"{table.name}.{old} の値を {new} に写せない: {e}。ArcGIS Pro で写す（プラグインは {new} を読む）")
+        return
+    report.did(f"{old} の値を {new} に写した")
+    report.warn(f"{table.name}.{old} は前の名前（値は {new} に写した）。古いプラグインが使っていなければ消してよい")
+
+
 def ensure_table(arcpy, workspace: str, table, spatial_reference, report: Report, edit_tracking: bool = True,
                  dry_run: bool = False) -> str:
     """1 テーブルを表のとおりにする（なければ作る・属性を足す・エイリアス・インデックス）。そのパスを返す。"""
@@ -112,6 +126,7 @@ def ensure_table(arcpy, workspace: str, table, spatial_reference, report: Report
             report.warn(f"{table.name} のエイリアスを付けられない: {e}")
 
     existing = {f.name.upper(): f for f in arcpy.ListFields(path)} if arcpy.Exists(path) else {}
+    legacy = schema.LEGACY_FIELDS.get(table.name, {})
     for wanted in schema.all_fields(table, edit_tracking):
         have = existing.get(wanted.name.upper())
         if have is None:
@@ -119,6 +134,9 @@ def ensure_table(arcpy, workspace: str, table, spatial_reference, report: Report
                 arcpy.management.AddField(path, wanted.name, wanted.type, field_length=wanted.length,
                                           field_alias=wanted.alias, field_is_nullable="NULLABLE")
             report.did(f"属性を足した {wanted.name}（{wanted.type}{f'({wanted.length})' if wanted.length else ''}）")
+            old = existing.get(legacy.get(wanted.name, "").upper())
+            if old is not None:
+                _copy_legacy(arcpy, path, table, old.name, wanted.name, report, dry_run)
             continue
         if not _field_matches(have, wanted):
             report.warn(f"{table.name}.{have.name} は {have.type}({have.length})（表は {wanted.type}"

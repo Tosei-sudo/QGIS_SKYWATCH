@@ -202,7 +202,7 @@ TABLES = (
         F("KIND", "分類", "TEXT", 1000, "kind"),
         F("ACTIVITIES", "活動", "TEXT", 2000, "activities"),
         F("MIN_CONFIDENCE", "確度の下限", "TEXT", 64, "minConfidence"),
-        F("AREA", "ジオフェンス", "TEXT", 255, "area"),
+        F("GEOFENCE_NAME", "ジオフェンス", "TEXT", 255, "area"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("NOTE", "備考", "TEXT", 1000, "note"),
         F("WEIGHT", "重み", "DOUBLE", None, "weight"),
@@ -332,6 +332,14 @@ INDEXES = {
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
 BY_NAME = {t.name: t for t in TABLES}
+
+#: 名前を変えた既定の属性: テーブル → {今の名前: 前の名前}。前の名前だけがあるテーブルに今の名前を足すときは値を写す
+#: （プラグインは今の名前があればそちらを読むので、空のままだと前の値が使われなくなる）。
+#: FILE は Oracle・SQL Server の予約語（2026-11-08）。AREA は ArcSDE（ST_Geometry）が形状の面積に使う名前（2026-11-10）。
+LEGACY_FIELDS = {
+    "TBL_REQUEST_HISTORY": {"OUTPUT_FILE": "FILE"},
+    "TBL_ALERT_RULE": {"GEOFENCE_NAME": "AREA"},
+}
 
 
 def all_fields(table: Table, edit_tracking: bool = True) -> tuple:
