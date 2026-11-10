@@ -43,7 +43,7 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
 from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, utc_text
+from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, use_legacy_names, utc_text
 from ..request.export import format_time
 from .geo import get_distance, to_fixed
 from .model import ConfidenceLevel, Observation
@@ -68,9 +68,12 @@ NEWLINES = {"crlf": "\r\n", "lf": "\n"}
 
 #: The rules table's attributes by role.
 DEFAULT_RULE_FIELDS = {
-    "kind": "KIND", "activities": "ACTIVITIES", "minConfidence": "MIN_CONFIDENCE", "area": "AREA",
+    "kind": "KIND", "activities": "ACTIVITIES", "minConfidence": "MIN_CONFIDENCE", "area": "GEOFENCE_NAME",
     "active": "ACTIVE", "note": "NOTE", "weight": "WEIGHT",
 }
+#: Default names before 2026-11-10 (AREA is a name ArcSDE uses inside a shape (ST_Geometry) and did
+#: not work in an Oracle enterprise geodatabase), still read from a table that has only them.
+LEGACY_RULE_FIELDS: dict[str, str] = {"area": "AREA"}
 #: The geofence layer's attributes by role.
 DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT"}
 #: The named area layer's attributes by role (place and facility names).
@@ -612,6 +615,9 @@ def weight_of(v: Any) -> float:
 
 def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> list[AlertRule]:
     """The active rules of the table's rows (attributes)."""
+    rows = list(rows)
+    fields = dict(fields)
+    use_legacy_names(fields, {k for a in rows for k in a}, DEFAULT_RULE_FIELDS, LEGACY_RULE_FIELDS)
     out = []
     for a in rows:
         if fields["active"] in a and not _active(a.get(fields["active"])):

@@ -75,9 +75,9 @@ def test_plugin_config_reads_the_key():
 
 def test_rules_rows_activities_and_inactive():
     rules = rules_of_rows([
-        {"KIND": "船舶 > 支援船", "ACTIVITIES": "航行、入港", "MIN_CONFIDENCE": "確定", "AREA": "", "ACTIVE": 1, "NOTE": "支援船の航行"},
+        {"KIND": "船舶 > 支援船", "ACTIVITIES": "航行、入港", "MIN_CONFIDENCE": "確定", "GEOFENCE_NAME": "", "ACTIVE": 1, "NOTE": "支援船の航行"},
         {"KIND": "航空機", "ACTIVITIES": "*", "ACTIVE": 0},
-        {"KIND": "", "ACTIVITIES": "", "AREA": "*"},
+        {"KIND": "", "ACTIVITIES": "", "GEOFENCE_NAME": "*"},
     ], settings().rules.fields)
     assert len(rules) == 2
     assert rules[0].kind == ["船舶", "支援船"] and rules[0].activities == ["航行", "入港"]
@@ -189,7 +189,7 @@ def test_write_file_appends_in_its_encoding(tmp_path):
 
 def esri():
     fake = FakeEsri()
-    rules = fake.add_layer(RULES_URL, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")} | {"ACTIVE": "esriFieldTypeSmallInteger"}, ""))
+    rules = fake.add_layer(RULES_URL, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "GEOFENCE_NAME", "NOTE")} | {"ACTIVE": "esriFieldTypeSmallInteger"}, ""))
     rules.add({"KIND": "船舶", "ACTIVITIES": "*", "ACTIVE": 1, "NOTE": "船"})
     rules.add({"KIND": "航空機", "ACTIVE": 0})
     fences = fake.add_layer(FENCE_URL, FakeLayer({"NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))

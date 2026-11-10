@@ -304,16 +304,16 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
                   "ADOPTION_SOURCE": {"type": S, "length": 1000}}
 
-ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
+ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "GEOFENCE_NAME": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
 ALERT_LOG_FIELDS = {"OBS_ID": {"type": S, "length": 64}, "REPORT_NAME": S, "TEXT": {"type": S, "length": 4000}, "REPORTED_AT": T,
                     "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "MANUAL": F, "KIND": S}
 #: 通報条件 (alertReports.rules): ships moving in the 横須賀 geofence, and every aircraft.
 ALERT_RULES = [
-    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き",
+    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "GEOFENCE_NAME": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き",
      "WEIGHT": 1.0},
-    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "AREA": "", "ACTIVE": 1, "NOTE": "航空機", "WEIGHT": 0.6},
-    {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
+    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "GEOFENCE_NAME": "", "ACTIVE": 1, "NOTE": "航空機", "WEIGHT": 0.6},
+    {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "GEOFENCE_NAME": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
 #: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place).

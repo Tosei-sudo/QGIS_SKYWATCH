@@ -474,7 +474,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 **注目の条件は Esri に置く**（増えたり変わったりするため）。設定ファイルには URL と属性名だけ。
 
-- 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`AREA`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
+- 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`GEOFENCE_NAME`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない。2026-11-10 より前の既定は `AREA`。`GEOFENCE_NAME` がなく `AREA` だけのテーブルはそのまま読む）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
 - ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。記録が入っているジオフェンスの名前は項目 `area`
 - 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略）。地名は 10 分間覚えておき（保存時のお知らせ・手動の追加）、「抽出」では毎回読み直す
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
@@ -1424,7 +1424,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 - テーブル・フィーチャクラスの名前は `TBL_` で始め、すべて大文字、語は `_` で区切る（`TBL_OBSERVATION`、`TBL_EVENT_LINK`）
 - 属性名もすべて大文字・`_` 区切り（`IMAGE_ID`・`CREATED_AT`）。30 文字以内
-- DBMS の予約語は属性名に使わない。プラグインの既定の属性名もこれに従う（2026-11-08 に `MODE`（Oracle の予約語）を `SENSOR_MODE` に、`FILE`（Oracle・SQL Server の予約語）を `OUTPUT_FILE` に変えた。それより前に作ったレイヤーで新しい名前がなく古い名前だけがあれば、設定を変えなくても古い名前に読み書きする）
+- DBMS の予約語は属性名に使わない。ArcSDE（エンタープライズ ジオデータベース）が形状（ST_Geometry）の中身に使う名前 `FID`・`AREA`・`LEN`・`POINTS`・`NUMOFPTS`・`ENTITY`・`EMINX`・`EMINY`・`EMAXX`・`EMAXY`・`EMINZ`・`EMAXZ`・`MIN_MEASURE`・`MAX_MEASURE` も使わない。プラグインの既定の属性名もこれに従う（2026-11-08 に `MODE`（Oracle の予約語）を `SENSOR_MODE` に、`FILE`（Oracle・SQL Server の予約語）を `OUTPUT_FILE` に、2026-11-10 に通報の条件の `AREA`（ArcSDE の名前）を `GEOFENCE_NAME` に変えた。それより前に作ったレイヤーで新しい名前がなく古い名前だけがあれば、設定を変えなくても古い名前に読み書きする。`tools/arcgis/create_tables.py` は新しい名前の属性を足すとき古い属性の値を写す）
 - 既定の属性名がない役割（画像カタログ・衛星カタログなど、設定ファイルの `fields` で必ず指定するもの）は、この決まりに従った推奨の名前を書いた。既にあるテーブルを使うなら、その属性名を `fields` に書けばよい
 - テーブルの名前はプラグインからは見えない（設定ファイルにはサービスの URL `…/FeatureServer/n` を書く）。下の名前は推奨
 
@@ -1685,7 +1685,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `KIND` | 分類 | `String(1000)` | 分類（その分類以下。空欄ですべて） | `kind` |
 | `ACTIVITIES` | 活動 | `String(2000)` | 活動（カンマ区切り。空欄か `*` ですべて） | `activities` |
 | `MIN_CONFIDENCE` | 確度の下限 | `String(64)` | 確度の下限 | `minConfidence` |
-| `AREA` | ジオフェンス | `String(255)` | ジオフェンスの `NAME`（`*` でどれかの中、空欄で問わない） | `area` |
+| `GEOFENCE_NAME` | ジオフェンス | `String(255)` | ジオフェンスの `NAME`（`*` でどれかの中、空欄で問わない） | `area` |
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で停止 | `active` |
 | `NOTE` | 備考 | `String(1000)` | 条件の説明 | `note` |
 | `WEIGHT` | 重み | `Double` | 重要度スコアの条件の重み（0〜1 か 0〜100、空欄は 1） | `weight` |
@@ -1696,7 +1696,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
-| `NAME` | 名前 | `String(255)` | ジオフェンスの名前（条件の `AREA`） | `name` |
+| `NAME` | 名前 | `String(255)` | ジオフェンスの名前（条件の `GEOFENCE_NAME`） | `name` |
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
 | `WEIGHT` | 重み | `Double` | 重要度スコアの場所の重み（空欄は 1） | `weight` |
 
