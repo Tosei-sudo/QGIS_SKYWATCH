@@ -42,7 +42,7 @@ flowchart LR
 | `ui/request_dock.py` | 「撮像依頼」ドック（一覧・絞り込み・登録フォーム） |
 | `ui/plan_file_dock.py` | 「撮像計画ファイル出力」ドック（日次の計算・確認・書き出し。依頼の登録とは別の人が使うため、撮像依頼ドックから独立） |
 | `core/request/simulate.py` / `ui/limit_sim_dialog.py` | 上限シミュレーション（§17） |
-| `core/request/result_file.py` / `core/request/adoption.py` | システムの結果ファイルの読み方・依頼との突き合わせ、採否の手入力・要求外（§20） |
+| `core/request/result_file.py` / `core/request/adoption.py` | システムの結果ファイルの読み方（列・JSON Schema の `x-target`）・依頼との突き合わせ、採否の手入力・要求外（§20） |
 | `ui/schedule_dock.py` | 「撮像予定」ドック（日ごとの計画: カレンダー・一覧・地図・採否・要求外、§20） |
 
 ## 3. 設定（config.json）
@@ -75,7 +75,7 @@ flowchart LR
     "schema": "schemas/sys-b.schema.json",   // JSON のとき。§8
     "priority": { /* 優先度の変換。§5.4 */ },
     "values": { "lookSide": { "右": "R", "左": "L" } },  // 値の読み替え
-    "resultFile": { "key": "REQ_ID", "result": "STATUS" }  // システムから返る採否のファイルの読み方（任意。§20）
+    "resultFile": { "columns": [{ "key": "REQ_ID", "target": "id" }, { "key": "STATUS", "target": "result" }] }  // システムから返る採否のファイルの読み方（任意。§20）
   }]
 }
 ```
@@ -478,11 +478,14 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 | ファイル | 中身 |
 |---|---|
-| `config.sample.jsonc` | `requestStores`、`requestExports` 3 システム分 |
+| `config.sample.jsonc` | `requestStores`、`requestExports` 3 システム分（A・C は採否の結果ファイル `resultFile` も） |
 | `sys-a.csv.example` | A システム（CSV、CP932、JST、優先度 High/Middle/Low）の出力例 |
 | `sys-b.csv.example` | B システム（CSV、UTF-8、UTC、unix 時刻、優先度 00〜99 の 2 桁）の出力例 |
 | `schemas/sys-c.schema.json` | C システム（JSON）の JSON Schema に `x-source` を書き添えた例 |
 | `sys-c.json.example` | C システムの出力例 |
+| `sys-a.result.csv.example` | A システムから返る採否のファイルの例（タイトル行・日付と時刻が別の列・取消の行。§20） |
+| `schemas/sys-c.result.schema.json` | C システムの採否のファイルの JSON Schema に `x-target` を書き添えた例 |
+| `sys-c.result.json.example` | C システムから返る採否のファイルの例 |
 
 ## 15. レイヤーからの取り込み・レイヤーへの書き出し
 
@@ -577,37 +580,144 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 ### 結果ファイル（`requestExports[].resultFile`）
 
-システムから返ってくる採否のファイルの読み方を、システムごとに書く。CSV（見出しの行あり）か JSON（オブジェクトの配列。`records` で配列の場所をドット区切りで）。
+システムから返ってくる採否のファイルの読み方を、システムごとに書く。オーダーファイル（§8）と同じように様式を自由に決められる（tsudo、2026-11-10「オーダーファイルみたいに様式をフルカスタムできると嬉しい」）。
+
+- **CSV**（区切りのテキスト）: `columns` に、ファイルの列ごとに「どの列か（見出しの名前 `key` か何列目 `column`）」と「何の値か（`target`）」を書く。区切り文字・見出しの有無・前置きの行も決められる。
+- **JSON**: 同じ `columns` を記録の中の場所（`request.id` のようにドット区切り）で書くか、システムの JSON Schema に `x-target` を書き添える（オーダーの `x-source` の読む向き）。スキーマで組んだときはファイルをスキーマで検証もする（合わないところは取り込む前の確認に出て、読める行は読む）。
+
+設定ファイル作成ツール（`tools/config_builder.html`）の「日次出力」→ システム →「採否の結果ファイル」で、列の表・スキーマの木で組める。「試し読み」にシステムのファイルを貼るか開くと、プラグインと同じ読み方で読んだ結果（行ごとのキー・採否・撮像予定…と読めなかった行）がその場で出る。
+
+#### CSV の例
 
 ```jsonc
 "resultFile": {
   "format": "csv",                 // csv（既定）・json
-  "encoding": "cp932",             // utf-8（既定）・utf-8-sig・cp932
-  "key": "REQ_ID",                 // 依頼を表す列（必須）
-  "keySource": "id",               // その列の中身: id（依頼ID、既定）・managementNo（管理番号）・identificationNo（識別番号）
-  "result": "STATUS",              // 採否の列。なければ載っている行はすべて採用
-  "adopted": ["OK", "採用"],        // 採用を表す値（大文字小文字は問わない。既定は 採用・OK・○・1・TRUE・YES・ACCEPTED・PLANNED など）
-  "rejected": ["NG"],              // 不採用を表す値（既定は 不採用・NG・×・0・FALSE・NO・REJECTED・DECLINED など）
-  "missing": "不採用",              // 出したのにファイルにない依頼: 不採用・不明（result があれば既定は 不明、なければ 不採用）
-  "reason": "COMMENT",             // 理由
-  "plannedAt": "PLAN_TIME",        // 撮像予定日時（ISO 8601・2026/11/10 10:30・エポック秒/ミリ秒。ゾーンのない時刻はシステムの timeZone）
-  "timeFormat": "%Y%m%d%H%M",      // plannedAt の strptime の書式（任意）
-  "satellite": "SAT", "name": "NAME", "externalId": "TASK_ID",   // 衛星・名称（要求外）・システム側の番号（既定は key の列）
-  "geometry": {"wkt": "FOOTPRINT"} // 要求外の範囲: {"wkt": 列}・{"geojson": 列}・{"lon": 列, "lat": 列, "sizeKm": 10}・{"bbox": [西, 南, 東, 北 の列]}
+  "encoding": "cp932",             // utf-8（既定）・utf-8-sig・cp932・euc-jp・utf-16
+  "delimiter": "tab",              // ,（既定）・tab・;・|・space
+  "header": true,                  // 見出しの行（既定 true）。false なら列は上から順に左から（column で何列目かも）
+  "skipLines": 2,                  // 見出しの前に飛ばす行（タイトル・作成日など）
+  "columns": [
+    { "key": "依頼番号", "target": "identificationNo", "pattern": "^REQ-(\\d+)" },  // REQ-000123-A → 000123（= 123）
+    { "key": "判定", "target": "result", "map": { "○": "採用", "×": "不採用", "保留": "不明", "": "不明" } },
+    { "key": "予定日", "target": "plannedAt" },
+    { "key": "予定時刻", "target": "plannedAt", "format": "%Y%m%d %H%M" },  // 2 列をつないで 20261110 1030
+    { "key": "衛星", "target": "satellite", "default": "OPT-X 1" },
+    { "key": "理由", "target": "reason" },
+    { "key": "範囲", "target": "geometry", "geometry": "wkt" },
+    { "key": "種別", "only": ["計画", "変更"] },   // この列が 計画・変更 の行だけ読む
+    { "key": "取消", "skip": ["1"] },              // この列が 1 の行は読まない
+    { "target": "system", "value": "SYS-A" }      // 固定値（全行）
+  ],
+  "missing": "不採用",             // 出したのにファイルにない依頼: 不採用・不明（採否の列があれば既定は 不明、なければ 不採用）
+  "sizeKm": 10                     // 範囲が点（中心）だけのときの正方形の一辺（既定 10）
 }
 ```
 
-JSON の列名はドット区切りで入れ子も指せる（`request.id`）。列名は大文字小文字を問わない。
+#### JSON の例
+
+記録の中の場所で書く（`records` が結果の配列の場所）:
+
+```jsonc
+"resultFile": {
+  "format": "json", "records": "data.items",
+  "columns": [
+    { "key": "order.controlNo", "target": "managementNo" },
+    { "key": "status", "target": "result", "map": { "ACCEPT": "採用", "REJECT": "不採用", "*": "不明" } },
+    { "key": "window.start", "target": "plannedAt", "format": "unix" },
+    { "key": "passes.0.satellite", "target": "satellite" },
+    { "key": "footprint", "target": "geometry" }
+  ]
+}
+```
+
+システムの JSON Schema に `x-target` を書き添える（`"schema": "schemas/sys-c.result.schema.json"` のようにファイルでも、設定ファイルに埋め込んでもよい。例は [request-samples/schemas/sys-c.result.schema.json](request-samples/schemas/sys-c.result.schema.json)）:
+
+```jsonc
+{
+  "type": "object", "required": ["planDate", "results"],
+  "properties": {
+    "planDate": { "type": "string", "format": "date", "x-target": "day" },          // 全件の対象日
+    "results": { "type": "array", "x-target": "records", "items": {                // 結果の一覧
+      "type": "object", "required": ["requestId", "status"],
+      "properties": {
+        "requestId": { "type": ["string", "null"], "x-target": "id" },
+        "status": { "type": "string", "enum": ["ACCEPTED", "REJECTED", "PENDING"], "x-target": "result",
+                    "x-map": { "ACCEPTED": "採用", "REJECTED": "不採用", "PENDING": "不明" } },
+        "taskId": { "type": "string", "x-target": "externalId", "x-pattern": "^TASK-(.+)$" },
+        "acquisition": { "type": "object", "properties": {
+          "start": { "type": "string", "format": "date-time", "x-target": "plannedAt" },
+          "satellite": { "type": "string", "x-target": "satellite" } } },
+        "footprint": { "type": "object", "x-target": "geometry" }
+      } } }
+  }
+}
+```
+
+#### 何の値か（`target` / `x-target`）
+
+| 値 | 中身 |
+|---|---|
+| `id` / `managementNo` / `identificationNo` | 依頼を表すキー（依頼ID・管理番号・識別番号）。1 つ以上は必須。複数あれば `id` → `managementNo` → `identificationNo` の順に台帳を引く。前後の空白・大文字小文字・`{}` は問わず、数だけの番号は先頭の 0 を問わない（`000123` = `123`。オーダーで `%08d` にした識別番号がそのまま返ってきても合う） |
+| `result` | 採否。`採用`・`不採用`・`不明` に読み替える（下の「採否の読み方」）。列がなければ、載っている行はすべて採用 |
+| `reason` | 理由・メモ（不採用の理由、要求外のメモ） |
+| `plannedAt` | 撮像予定日時（下の「日時」） |
+| `satellite` | 衛星（システムの `values.satellite` の読み替えも逆向きにかかる: `{"OPT-X 1": "X1"}` なら `X1` → `OPT-X 1`） |
+| `name` | 名称（要求外の行の名前） |
+| `externalId` | システム側の番号 |
+| `geometry` | 範囲（要求外の行）。`geometry` / `x-geometry` はオーダーと同じ `wkt`・`geojson`・`bbox`（西,南,東,北）・`center`（緯度,経度）・`centerRadius`（緯度,経度,半径 km）・`vertices`（緯度,経度 を頂点の順）・`centerGeojson`。WKT と GeoJSON は中身で分かる（点は `sizeKm` の正方形） |
+| `centerLat` / `centerLon` | 中心の緯度・経度（数の列 2 つ。`sizeKm` の正方形） |
+| `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth` | 範囲の西・南・東・北（数の列 4 つ） |
+| `day` | その行の対象日。取り込む日（ドックで選んだ日）と違う行は読み飛ばす（1 週間分の計画が 1 ファイルで返ってくるとき）。日付（`2026-11-10`・`2026/11/10`・`20261110`、`format` で strptime も）か日時（日本時間の日にする） |
+| `system` | その行のシステム。取り込むシステム（`system` か `label`。大文字小文字は問わない）と違う行は読み飛ばす（全システム分が 1 ファイルのとき） |
+| （なし） | 読まない列。見出しのないファイルで並びを合わせるため、`only` / `skip` で行を絞るために書く |
+
+#### 列の書き方（`columns` の 1 件。JSON Schema では `x-…`）
+
+| キー | スキーマ | 働き |
+|---|---|---|
+| `key` | （プロパティの場所） | 見出しの名前（大文字小文字は問わない）。JSON はドット区切りの場所（`request.id`、配列は `passes.0.satellite`） |
+| `column` | — | 何列目か（1 が左）。見出しの名前の代わり。見出しのないファイルで `column` がなければ、`columns` の並び順（固定値の列は数えない） |
+| `target` | `x-target` | 何の値か（上の表） |
+| `value` | — | 固定値。ファイルを読まず全行この値（`{"target": "result", "value": "不採用"}` で不採用だけのファイル） |
+| `pattern` | `x-pattern` | 正規表現。最初の `( )` の中（なければ合った部分）を値にする。合わなければ空 |
+| `map` | `x-map` | 読み替え: ファイルの値 → プラグインの値（大文字小文字・前後の空白は問わない）。`""` は空の値、`"*"` はほかの値すべて |
+| `default` | `default` | 値が空のときの値（`"x-default": false` で使わない） |
+| `format` | `x-format` | 日時の読み方: `iso`（既定）・`iso-date`・`unix`（秒）・`unixms`（ミリ秒）・strptime（`%Y%m%d%H%M`・`%Y/%m/%d %H:%M` など） |
+| `geometry` | `x-geometry` | 範囲の書き方（上の表） |
+| `only` / `skip` | `x-only` / `x-skip` | この列のファイルの値（読み替え前）がどれかの行だけ読む / 読まない |
+
+- 値は `pattern` → `map` → `default` の順にかける。
+- 同じ `target` の列が 2 つ以上あると、`plannedAt`・`day`・`reason`・`name` は空白でつなぐ（日付と時刻が別の列 → 両方 `plannedAt`、`format` は `%Y%m%d %H%M`。`format` は最初に書いた列のもの）。ほかは最初の空でない値。
+- JSON Schema では、`x-target: records` の配列が結果の一覧で、その `items` の中が 1 件ごとの値。外のプロパティ（`day`・`system`・`satellite` など）は全件に効く。`$ref`・`allOf`・`anyOf`・`oneOf` の中も読む。一覧でない配列の中は最初の要素。スキーマはファイルのパスでもよい（オーダーの `schema` と同じく設定ファイルからの相対パスか URL。取り込むときに読む）。
+
+#### 採否の読み方
+
+1. `map`（読み替え）を当てる。
+2. JSON の `true` / `false` は採用・不採用。
+3. `採用`・`不採用`・`不明` そのものはそのまま。
+4. `map` のない列、または `map` で読み替えた値は、よくある書き方も読む: 採用 `OK`・`○`・`1`・`TRUE`・`YES`・`ACCEPTED`・`PLANNED` など、不採用 `NG`・`×`・`0`・`FALSE`・`NO`・`REJECTED`・`DECLINED` など、不明 `未定`・`保留`・`回答待ち`・`PENDING`・`WAITING`・`UNKNOWN`・`TBD`・`HOLD`。
+5. それでも分からない値（`map` のある列で `map` にない値も）は、その行を読まず「採否「…」が不明」と出す。採否の列が空の行も同じ（`""=不明` や `default` で決められる）。
+
+ファイルが `不明` と言う行（保留・回答待ち）は、出した依頼なら採否を `不明` にして理由・撮像予定などを書く（出していない依頼なら何もしない）。
+
+#### 日時
+
+`format` がなければ（`iso`）、ISO 8601（`2026-11-10T10:30`・`2026-11-10 10:30:00+09:00`・`…Z`）、`2026/11/10 10:30`・`2026/11/8 9:30`（Excel の書き方）、日付だけ（その日の 0 時）、数字だけ（10 桁 エポック秒・13 桁 エポックミリ秒・8 桁 `20261110`・12 桁 `202611101030`・14 桁 `20261110103000`）、JSON の数（エポック秒かミリ秒）を読む。ゾーンのない時刻はシステムの `timeZone`。
+
+#### はじめの形（2026-11-09）
+
+`key`・`keySource`・`result`・`adopted`・`rejected`・`reason`・`plannedAt`・`timeFormat`・`satellite`・`name`・`externalId`・`geometry`（`{"wkt": 列}`・`{"geojson": 列}`・`{"lon": 列, "lat": 列, "sizeKm": 10}`・`{"bbox": [西, 南, 東, 北 の列]}`）を 1 つずつ書く形も、そのまま読む（中では同じ列にする: `result` の列の `map` は `adopted` → 採用、`rejected` → 不採用、`externalId` がなければ `key` の列）。設定ファイル作成ツールの「列（columns）の形に直す」で書き換えられる。`columns` か `schema` を書いたときは、この形のキーは使わない（そう知らせる）。
 
 突き合わせ（`core/request/adoption.py`）:
 
-1. ファイルの行のキーで台帳の依頼を引く（`keySource`）。
+1. 対象日（`day`）・システム（`system`）の列があれば、取り込む日・システムと違う行を読み飛ばす（件数を知らせる）。
+1. ファイルの行のキーで台帳の依頼を引く（`id` → `managementNo` → `identificationNo`、数の番号は先頭の 0 を問わない）。
 2. その日・そのシステムに出した依頼（`RESULT` = 採用）なら、その行の採否を書く（`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE` = ファイル名、衛星があれば `SATELLITE` も）。
-3. 出していない依頼や依頼にない行で採用のものは要求外として足す（出していない依頼なら名称・管理番号・依頼者・範囲はその依頼から、理由「この日・このシステムには出力していない依頼」）。不採用のものは読み飛ばす（何も答えることがない）。
+3. 出していない依頼や依頼にない行で採用のものは要求外として足す（出していない依頼なら名称・管理番号・依頼者・範囲はその依頼から、理由「この日・このシステムには出力していない依頼」）。不採用・不明のものは読み飛ばす（何も答えることがない）。
 4. 出したのにファイルにない依頼は `missing`（不採用なら理由「結果ファイルになし」、不明ならそのまま）。
 5. 同じ依頼が 2 行あれば後の行。キーが複数の依頼に当たれば最初の依頼として、そう知らせる。
 
-取り込む前に、件数（採用・不採用・要求外・ファイルにない依頼）と読めなかった行を出して確かめる。取り込み直すと、その日・そのシステムの、前に結果ファイルから入れた要求外は置き換える（手で足した要求外は残る）。
+取り込む前に、件数（採用・不採用・不明・要求外・ファイルにない依頼）と読めなかった行（スキーマに合わないところ、ほかの日・システムの行の数も）を出して確かめる。取り込み直すと、その日・そのシステムの、前に結果ファイルから入れた要求外は置き換える（手で足した要求外は残る）。
 
 ### 「撮像予定」ドック（`ui/schedule_dock.py`）
 

@@ -40,7 +40,9 @@ CONFIG = {
          "columns": [{"key": "ID", "source": "id"}],
          "resultFile": {"key": "ID", "result": "判定", "adopted": ["OK"], "rejected": ["NG"], "missing": "不採用", "plannedAt": "予定",
                         "name": "名称", "geometry": {"bbox": ["W", "S", "E", "N"]}}},
-        {"system": "SYS-B", "label": "B", "kind": "SAR", "format": "csv", "columns": [{"key": "ID", "source": "id"}]},
+        # SYS-B answers in JSON, read by its JSON Schema (a file beside the settings file, x-target).
+        {"system": "SYS-B", "label": "B", "kind": "SAR", "format": "csv", "columns": [{"key": "ID", "source": "id"}],
+         "resultFile": {"format": "json", "schema": "b.result.schema.json"}},
     ],
 }
 
@@ -186,6 +188,51 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dock.set_day(today + timedelta(days=3))
     assert wait_for(lambda: dock.task is None and dock.day == (today + timedelta(days=3)).isoformat())
     assert dock.rows == [] and dock.status.text().endswith("計画なし") and dock.overlay._painted == []
+    dock.close_all()
+
+
+B_SCHEMA = {
+    "type": "object", "required": ["results"],
+    "properties": {
+        "planDate": {"type": "string", "x-target": "day", "x-format": "%Y%m%d"},
+        "results": {"type": "array", "x-target": "records", "items": {"type": "object", "properties": {
+            "order": {"type": "string", "x-target": "id", "x-pattern": "^ORD-(.+)$"},
+            "state": {"type": "string", "enum": ["ACCEPT", "REJECT", "PENDING"], "x-target": "result",
+                      "x-map": {"ACCEPT": "採用", "REJECT": "不採用", "PENDING": "不明"}},
+            "comment": {"type": "string", "x-target": "reason"},
+            "eta": {"type": "integer", "x-target": "plannedAt", "x-format": "unixms"}}}},
+    },
+}
+
+
+def test_a_json_file_read_by_the_systems_schema(plugin):
+    p, iface, fake, history, tmp_path = plugin
+    today = jst_day(time.time() * 1000)
+    written(history, today.isoformat())
+    (tmp_path / "b.result.schema.json").write_text(json.dumps(B_SCHEMA), encoding="utf-8")
+    dock = p.api.schedule
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    at = int(time.time() * 1000)
+    path = tmp_path / "b_answer.json"
+    path.write_text(json.dumps({"planDate": today.strftime("%Y%m%d"), "results": [
+        {"order": "ORD-R-2", "state": "REJECT", "comment": "衛星の都合"}, {"order": "ORD-Z-9", "state": "ACCEPT", "eta": at}]}),
+        encoding="utf-8")
+    dock.system_filter.setCurrentIndex(dock.system_filter.findData("SYS-B"))
+    dock.import_file(str(path), ask=False)
+    assert wait_for(lambda: dock.task is None and "b_answer.json: " in dock.status.text()), dock.status.text()
+    assert states(dock) == {("大阪湾", "SYS-B"): "不採用", ("Z-9", "SYS-B"): "要求外"}
+    osaka = next(r for r in dock.rows if r.name == "大阪湾")
+    assert (osaka.adoption_reason, osaka.adoption_source) == ("衛星の都合", "b_answer.json")
+    assert next(r for r in dock.rows if r.name == "Z-9").planned_at == at
+    # A file the schema does not fit: told, and read all the same.
+    path.write_text(json.dumps({"results": [{"order": "ORD-R-2", "state": "MAYBE"}]}), encoding="utf-8")
+    reading = []
+    dock._confirm_reading = lambda r, label: reading.append(r) or False
+    dock.import_file(str(path))
+    assert wait_for(lambda: dock.task is None and reading), dock.status.text()
+    assert reading[0].problems == ["スキーマ: $.results[0].state: 'MAYBE' は ['ACCEPT', 'REJECT', 'PENDING'] 以外",
+                                   "1 行目: 採否「MAYBE」が不明（列の読み替え map に MAYBE=採用 のように書く）"]
     dock.close_all()
 
 

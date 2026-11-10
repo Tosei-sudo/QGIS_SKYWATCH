@@ -1,0 +1,22 @@
+{
+  "planDate": "2026-11-08",
+  "system": "SYS-C",
+  "results": [
+    {
+      "requestId": "R-0001",
+      "controlNo": "K-2026-0012",
+      "status": "ACCEPTED",
+      "taskId": "TASK-88001",
+      "acquisition": { "start": "2026-11-08T01:32:00Z", "satellite": "CONST-Z2" }
+    },
+    { "requestId": "R-0005", "status": "REJECTED", "reason": "他の要求と競合" },
+    {
+      "requestId": null,
+      "status": "ROUTINE",
+      "taskId": "TASK-88002",
+      "title": "定常 房総沖",
+      "acquisition": { "start": "2026-11-08T02:10:00Z", "satellite": "CONST-Z1" },
+      "footprint": { "type": "Polygon", "coordinates": [[[140.0, 34.8], [140.3, 34.8], [140.3, 35.0], [140.0, 35.0], [140.0, 34.8]]] }
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$comment": "C システムの採否ファイルの JSON Schema（架空）に、各プロパティが何か（x-target）を書き添えた例。docs/imaging-requests.md §20",
+  "type": "object",
+  "required": ["planDate", "results"],
+  "properties": {
+    "planDate": { "type": "string", "format": "date", "x-target": "day" },
+    "system": { "type": "string", "const": "SYS-C", "x-target": "system" },
+    "results": {
+      "type": "array",
+      "x-target": "records",
+      "items": {
+        "type": "object",
+        "required": ["requestId", "status"],
+        "properties": {
+          "requestId": { "type": ["string", "null"], "x-target": "id" },
+          "controlNo": { "type": ["string", "null"], "x-target": "managementNo" },
+          "status": {
+            "type": "string",
+            "enum": ["ACCEPTED", "REJECTED", "PENDING", "ROUTINE"],
+            "x-target": "result",
+            "x-map": { "ACCEPTED": "採用", "ROUTINE": "採用", "REJECTED": "不採用", "PENDING": "不明" }
+          },
+          "reason": { "type": "string", "x-target": "reason" },
+          "taskId": { "type": "string", "x-target": "externalId", "x-pattern": "^TASK-(.+)$" },
+          "title": { "type": "string", "x-target": "name" },
+          "acquisition": {
+            "type": "object",
+            "properties": {
+              "start": { "type": "string", "format": "date-time", "x-target": "plannedAt" },
+              "satellite": { "type": "string", "x-target": "satellite" }
+            }
+          },
+          "footprint": { "type": "object", "x-target": "geometry", "x-geometry": "geojson" }
+        }
+      }
+    }
+  }
+}

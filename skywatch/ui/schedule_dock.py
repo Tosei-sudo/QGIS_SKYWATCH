@@ -41,6 +41,7 @@ from ..core.request.store import (
     update_history,
 )
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
+from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
@@ -554,7 +555,7 @@ class ScheduleDock(PluginDock):
         if path is None:
             folder = system.folder or ""
             path, _ = QFileDialog.getOpenFileName(self, self.tr("{s} の結果ファイル").format(s=system.label), folder,
-                                                  self.tr("結果ファイル (*.csv *.json *.txt);;すべて (*)"))
+                                                  self.tr("結果ファイル (*.csv *.tsv *.json *.txt);;すべて (*)"))
             if not path:
                 return
         try:
@@ -568,10 +569,10 @@ class ScheduleDock(PluginDock):
         day, name = self.day, os.path.basename(path)
 
         def work(task):
-            answers, problems = read_answers(data, spec)
+            answers, problems = read_answers(data, spec, load_schema)
             rows = load_day(client, store, token, day, task.isCanceled)
             requests = load_requests(client, store, token, task.isCanceled)
-            reading = match_answers(answers, rows, requests, system.system, day, spec, name)
+            reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label)
             reading.problems = problems + reading.problems
             return reading
 
@@ -586,7 +587,8 @@ class ScheduleDock(PluginDock):
     def _confirm_reading(self, reading: Reading, label: str) -> bool:
         t = reading.tally()
         lines = [self.tr("{s}・{d}・{f}").format(s=label, d=reading.day, f=reading.source),
-                 self.tr("採用 {a}・不採用 {r}・要求外 {u}").format(a=t[ADOPTED], r=t[REJECTED], u=t[UNREQUESTED])]
+                 self.tr("採用 {a}・不採用 {r}・要求外 {u}").format(a=t[ADOPTED], r=t[REJECTED], u=t[UNREQUESTED])
+                 + (self.tr("・不明 {w}").format(w=t[WAITING]) if t[WAITING] else "")]
         if t[NOT_IN_FILE]:
             lines.append(self.tr("出力したがファイルにない依頼 {n} 件: {what}").format(
                 n=t[NOT_IN_FILE], what=REJECTED if reading.missing_as == REJECTED else self.tr("不明のまま")))
@@ -611,6 +613,8 @@ class ScheduleDock(PluginDock):
             t = reading.tally()
             note = self.tr("{f}: 採用 {a}・不採用 {r}・要求外 {u} を記録").format(
                 f=reading.source, a=t[ADOPTED], r=t[REJECTED] + (t[NOT_IN_FILE] if reading.missing_as == REJECTED else 0), u=int(added))
+            if t[WAITING]:
+                note += self.tr("（不明 {w}）").format(w=t[WAITING])
             if problems or reading.problems:
                 note += self.tr("（{m}）").format(m="、".join((problems + reading.problems)[:3]))
             self.reload(then=lambda: self.status.setText(f"{self.status.text()}。{note}"))
