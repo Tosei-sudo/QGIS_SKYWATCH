@@ -972,6 +972,8 @@ class SkywatchPlugin:
         feed.on_removed = observations.refresh_reported
 
         def open_reported(record_id: str) -> None:
+            if not observations.records_ready(lambda: open_reported(record_id)):
+                return  # opened once read (no image chosen in 「観測記録」 yet)
             o = observations.book.record(record_id) if observations.book else None
             if o is None:
                 self.iface.messageBar().pushWarning(tr("通報"), plain_tip(tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id)))

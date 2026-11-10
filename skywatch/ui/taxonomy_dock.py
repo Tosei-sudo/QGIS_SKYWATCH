@@ -647,11 +647,17 @@ class TaxonomyDock(PluginDock):
     def render(self) -> None:
         """The tree and the chosen class."""
         book = self.book
+        # The records not read yet (no image chosen in 「観測記録」): read first (the classes count them, and renaming
+        # one renames them); from an Esri store the tree is shown once they are.
+        waiting = book is not None and not self.obs.records_ready(self.render)
         self._rendering = True
         try:
             self.tree.clear()
             if book is None:
                 self.note.setText(self.tr("保存先なし"))
+                return
+            if waiting:
+                self.note.setText(self.tr("観測記録を読み込み中…"))
                 return
             taxa = book.taxonomy()
             if self.selected and find(taxa, path_of(self.selected)) is None:

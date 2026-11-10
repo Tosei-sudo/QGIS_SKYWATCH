@@ -42,6 +42,9 @@ def plugin(tmp_path):
     dock.show()
     yield p, iface, dock, tmp_path
     p.unload()
+    # Its image gone with it: left in the project, a later test of this process (xdist) had a second d1.tif to step to.
+    QgsProject.instance().removeAllMapLayers()
+    QgsSettings().remove("skywatch")
 
 
 def test_alerts_from_rules_to_the_log_clipboard_and_file(plugin):

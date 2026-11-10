@@ -57,9 +57,11 @@ ENTRIES: list[Entry] = [
     Entry("observation_report", "観測記録の関数", "報告書", "期間・種別の記録を報告書（地図つき HTML）にする。", 'api.observation_report(title="週報", save="/tmp/週報.html")'),
 
     # ---- ドックと道具 ----
-    Entry("observation_dock", "ドックと道具", "観測記録ドック", "ドックそのもの。記録の本体は book（記録・画像・分類体系）。一括取込みは open_import()。",
-          "dock = api.observation_dock\nlen(dock.book.records)",
-          ["book", "save_csv", "to_layers", "set_observer", "open_export", "open_import", "bulk_edit", "views"]),
+    Entry("observation_dock", "ドックと道具", "観測記録ドック",
+          "ドックそのもの。記録の本体は book（記録・画像・分類体系）。画像を選ぶまで記録は読まないので、book.records は read_now() で読んでから。"
+          "一括取込みは open_import()。",
+          "dock = api.observation_dock\nlen(dock.read_now().records)",
+          ["book", "read_now", "save_csv", "to_layers", "set_observer", "open_export", "open_import", "bulk_edit", "views"]),
     Entry("image_catalog", "ドックと道具", "画像カタログ", "画像の検索・一覧・開く。", "api.image_catalog.search()\n[r.id for r in api.image_catalog.records]",
           ["search", "read_more", "records", "choose", "open_records", "find_similar", "add_layer", "views"]),
     Entry("notices", "ドックと道具", "通知（新着画像）", "見張りの条件と新着画像。", "api.notices.watch_point(139.7, 35.6)", ["store", "check", "watch_point"]),

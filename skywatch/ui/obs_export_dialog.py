@@ -426,11 +426,19 @@ class ExportDialog(QDialog):
         book = self.dock.book
         if book is None:
             return [], self.tr("観測記録の保存先なし")
+        if not self.dock.records_ready(self._records_read):
+            # Not read yet (no image chosen in 「観測記録」): counted again once they are.
+            return [], self.tr("観測記録を読み込み中…")
         flt, why = self.options()
         if flt is None:
             return [], why
         taxa = book.taxonomy()
         return select_records(book.records, flt, book.confidences(), lambda kind: self.dock._kind_path(kind, taxa)), ""
+
+    def _records_read(self) -> None:
+        """The records just read: the 大分類 they use listed, and those that match counted."""
+        self.reset()
+        self.count()
 
     def count(self) -> int:
         rows, why = self.records()

@@ -239,16 +239,15 @@ class AssignmentBar(QWidget):
         return self.tr("分担: {who}が担当中。一緒に担当できます").format(who=names), "color: #1565c0;"
 
     def render(self) -> None:
-        if self.source is None:
+        # No image chosen: hidden with the rest of the dock (tsudo 2026-11-10; everyone's 分担 is in the menu).
+        if self.source is None or self.image is None:
             self.setVisible(False)
             return
         self.setVisible(True)
         image, x = self.image, self.holder()
         mine = x is not None and same_person(x.assignee, self.user())
         style = ""
-        if image is None:
-            text = self.tr("分担: 画像なし")
-        elif self.error and not self.read_at:
+        if self.error and not self.read_at:
             text = self.tr("分担: 読み込みの失敗（{m}）").format(m=self.error)
         elif self.shared:
             text, style = self._shared_text(image)

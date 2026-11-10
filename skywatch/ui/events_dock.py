@@ -878,6 +878,10 @@ class EventsDock(PluginDock):
         dock = self._observation_dock()
         if dock is None:
             return
+        if not dock.records_ready(lambda: self._open_observations(links)):
+            # Not read yet (no image chosen in 「観測記録」): opened once they are.
+            self.say(self.tr("観測記録を読み込み中…"))
+            return
         book = dock.book
         found = [book.record(x.item_id) for x in links] if book else []
         found = [o for o in found if o is not None]
@@ -928,6 +932,11 @@ class EventsDock(PluginDock):
         """The event's area, its images' footprints and its records' points as layers in a group 「イベント: 名前」."""
         e = self.chosen()
         if e is None:
+            return
+        dock = self._observation_dock()
+        if dock is not None and self.links_of(e, "observation") and not dock.records_ready(self.show_on_map):
+            # The records' points come from 「観測記録」, not read yet (no image chosen there): shown once they are.
+            self.say(self.tr("観測記録を読み込み中…"))
             return
         images = self.links_of(e, "image")
         if images:
