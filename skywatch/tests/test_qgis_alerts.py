@@ -170,6 +170,59 @@ def test_records_added_by_hand_whatever_the_conditions(plugin):
     assert "船A|停泊|手動|至急" in [r["attributes"]["TEXT"] for r in log.rows]
 
 
+def test_rows_taken_off_the_list_before_sending(plugin):
+    p, iface, dock, tmp_path = plugin
+    _, log = _setup(p, tmp_path, {"notifyOnSave": False})
+    book = dock.book
+    a = book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")   # outside the conditions
+    book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")       # inside
+    book.add(139.7, 35.6, object="船C", kind="船舶", activity="航行")       # inside
+    dialog = dock.add_to_alerts([a])
+    assert wait_for(lambda: dialog.status.text().startswith("手動で 1 件を追加"))
+    dialog.pick()
+    assert wait_for(lambda: "件を抽出" in dialog.status.text())
+    table = dialog.lines_table
+
+    def names():
+        return [table.item(r, 1).text().split("|")[0] for r in range(table.rowCount())]
+
+    def row_of(name):
+        return names().index(name)
+
+    assert names()[0] == "船A" and sorted(names()[1:]) == ["船B", "船C"]
+    # Nothing chosen: the button is off (and says so when called).
+    assert not dialog.drop_button.isEnabled()
+    dialog.drop_rows()
+    assert dialog.status.text().startswith("一覧から削除する行なし")
+    # The rows left keep their edits and ticks.
+    table.item(row_of("船C"), 1).setText("船C|至急")
+    table.item(row_of("船C"), 0).setCheckState(Qt.CheckState.Unchecked)
+    table.selectRow(row_of("船A"))
+    assert dialog.drop_button.isEnabled()
+    dialog.drop_button.click()
+    assert dialog.status.text() == "1 件を一覧から削除（通報テーブルはそのまま）"
+    assert sorted(names()) == ["船B", "船C"] and not dialog.drop_button.isEnabled()
+    c = row_of("船C")
+    assert table.item(c, 1).text() == "船C|至急" and table.item(c, 0).checkState() == Qt.CheckState.Unchecked
+    assert "船A" not in dialog.preview.toPlainText() and "船C|至急" not in dialog.preview.toPlainText()
+    # Picking again: the record added by hand stays out, the edit and the tick stay.
+    dialog.pick()
+    assert wait_for(lambda: "件を抽出" in dialog.status.text())
+    assert sorted(names()) == ["船B", "船C"] and table.item(row_of("船C"), 1).text() == "船C|至急"
+    # Several rows at once; those meeting the conditions come back with the next 抽出 (as they were made).
+    model = table.selectionModel()
+    for r in range(table.rowCount()):
+        model.select(table.model().index(r, 1), model.SelectionFlag.Select | model.SelectionFlag.Rows)
+    dialog.drop_button.click()
+    assert dialog.status.text().startswith("2 件を一覧から削除") and table.rowCount() == 0 and dialog.items == []
+    dialog.pick()
+    assert wait_for(lambda: "件を抽出" in dialog.status.text())
+    assert sorted(table.item(r, 1).text() for r in range(2)) == ["船B|航行|航行中|", "船C|航行|航行中|"]
+    assert all(table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(2))
+    # Nothing was written to the log table.
+    assert log.rows == []
+
+
 def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin):
     p, iface, dock, tmp_path = plugin
     _setup(p, tmp_path)
