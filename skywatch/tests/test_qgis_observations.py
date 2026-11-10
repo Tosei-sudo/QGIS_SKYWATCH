@@ -17,7 +17,7 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
-from qgis.PyQt.QtCore import QItemSelectionModel, Qt  # noqa: E402
+from qgis.PyQt.QtCore import QItemSelectionModel, QPoint, Qt  # noqa: E402
 from qgis.PyQt.QtTest import QTest  # noqa: E402
 from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
 
@@ -58,6 +58,8 @@ def geotiff(path, when: str = "", name_only: bool = False, west: float = 139.6):
 
 @pytest.fixture
 def plugin(tmp_path):
+    # Layers another test of this process left in the project would be images here too.
+    QgsProject.instance().removeAllMapLayers()
     QgsSettings().remove("skywatch")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
@@ -749,6 +751,10 @@ def test_a_record_clicked_stays_chosen_after_the_read_in_a_task(plugin, tmp_path
     dock.render()
     assert _chosen_rows(dock) == [1, 2] and dock.bulk_button.isVisible()
     assert sorted(o.object_name for o in dock.selected_records()) == ["いぶき", "うらが"]
+    # Qt answers QApplication.keyboardModifiers() with the last ones it saw (Ctrl): a plain click below the rows lets go
+    # of them, or a row clicked in a later test of this process reads as Ctrl + click.
+    viewport = dock.table.viewport()
+    QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(2, viewport.height() - 2))
 
 
 def test_the_rows_chosen_and_the_scroll_stay_while_the_same_list_is_shown_again(plugin):
@@ -1033,7 +1039,8 @@ def test_the_record_chosen_in_the_list_opens_below_the_list(plugin):
     assert dock.tabs.currentIndex() == 0 and dock.table.rowCount() == 1
     dock._row_clicked(0, 0)
     assert dock.form.isVisible() and dock.form.title() == "あおば"
-    order = [dock.body.itemAt(i).widget() for i in range(dock.body.count())]
+    work = dock.work_area.layout()
+    order = [work.itemAt(i).widget() for i in range(work.count())]
     assert order.index(dock.table) < order.index(dock.form) < order.index(dock.flow_box)
     APP.processEvents()
     APP.processEvents()
@@ -1204,3 +1211,137 @@ def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypat
     assert reports[0].sent == {"observation": 1} and p.offline.work.total() == 0
     assert wait_for(lambda: sorted(o.note for o in dock.book.living()) == ["一つ目", "二つ目"])
     assert not dock.drafts_button.isVisible() and not p.offline.button.isVisible()
+
+
+@pytest.fixture
+def bare(tmp_path):
+    """The plugin with no image open: nothing chosen in 「観測記録」."""
+    QgsProject.instance().removeAllMapLayers()
+    QgsSettings().remove("skywatch")
+    settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
+    settings.set_recorder("田中")
+    from skywatch import classFactory
+
+    iface = FakeIface()
+    p = classFactory(iface)
+    p.initGui()
+    dock = p.api.observation_dock
+    dock.show()
+    yield p, iface, dock, tmp_path
+    p.unload()
+    QgsProject.instance().removeAllMapLayers()
+    QgsSettings().remove("skywatch")
+
+
+def _listed(image_id: str, day: int):
+    from skywatch.core.obs.model import ListedImage
+
+    return ListedImage(image_id, image_id, ms(day), [139.6, 35.5, 139.8, 35.7])
+
+
+def _idle(dock) -> bool:
+    """Only the note shown: no list, no form, no recording (the image row and ＋ stay)."""
+    return (dock.idle_note.isVisible() and not dock.work_area.isVisible() and not dock.table.isVisible() and not dock.tabs.isVisible()
+            and not dock.form.isVisible() and not dock.record_button.isVisible() and not dock.more.isVisible()
+            and dock.list_button.isVisible() and not dock.active)
+
+
+def test_with_no_image_chosen_only_a_note_is_shown_and_the_records_are_not_read(bare):
+    """
+    tsudo 2026-11-10: with no image chosen the dock showed empty lists (every
+    record read for 「モノ」) and could be worked on: now only a note, and the
+    records are read once an image is chosen (or something asks for them all).
+    """
+    p, iface, dock, tmp_path = bare
+    book = dock.book
+    assert book.current is None and not book.loaded
+    assert _idle(dock) and "画像が選ばれていません" in dock.idle_note.text() and not dock.only.isEnabled()
+    # Nothing to record on: R and A say so (in the note).
+    dock.set_active(True)
+    dock.set_area_mode(True)
+    assert not dock.active and not dock.area_mode and "画像なし" not in dock.idle_note.text()
+    # 「再読み込み」 (and the work kept offline sent) leaves them unread too.
+    dock.reload()
+    assert not book.loaded and dock.overlay.scene_.marks == []
+    # 「ファイルなしで記録」 from the catalog: the image chosen, its list and the recording shown, the records read.
+    dock.list_catalog_images([_listed("IMG1", 1)])
+    assert book.loaded and book.current.id == "IMG1"
+    assert dock.work_area.isVisible() and dock.table.isVisible() and not dock.idle_note.isVisible() and dock.only.isEnabled()
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.submit()
+    assert [o.object_name for o in book.living()] == ["あおば"]
+    # A form open and recording on, then the image taken off the list: all of it ends, the note again.
+    dock.map_clicked(139.71, 35.61, None)
+    assert dock.form.isVisible() and dock.active
+    dock._unlist()
+    assert book.current is None and _idle(dock) and dock.pending is None
+    assert iface.canvas.mapTool() is not dock.tool
+
+
+def test_what_uses_every_record_reads_them_when_none_is_chosen(bare):
+    """エクスポート, 分類体系, scripts…: the records not read (no image chosen) are read for them, then they go on."""
+    p, iface, dock, tmp_path = bare
+    dock.list_catalog_images([_listed("IMG1", 1)])
+    dock.set_active(True)
+    for name, lon in (("あおば", 139.7), ("いぶき", 139.75)):
+        dock.map_clicked(lon, 35.6, None)
+        dock.object_input.setText(name)
+        dock.submit()
+    dock._unlist()
+    dock.reset_stores()  # as in a later session: the store's records not read
+    assert _idle(dock) and not dock.book.loaded
+    # The local store reads at once: エクスポート counts them.
+    export = dock.open_export()
+    assert dock.book.loaded and export.count_label.text() == "該当する記録 2 件"
+    export.close()
+    dock.reset_stores()
+    assert len(p.api.observations()) == 2 and dock.book.loaded
+    dock.reset_stores()
+    assert len(dock.read_now().records) == 2
+    assert _idle(dock)
+
+
+def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
+    p, iface, dock, tmp_path = bare
+    fake = FakeEsri()
+    layer = fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    assert dock.store_set.remote and _idle(dock)
+
+    def queries() -> int:
+        return sum(1 for url, _form in fake.asked if url == URL + "/query")
+
+    APP.processEvents()
+    assert queries() == 0 and not dock.book.loaded
+    dock.list_catalog_images([_listed("IMG1", 1)])
+    assert wait_for(lambda: dock.book.loaded) and queries() > 0
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("共有のモノ")
+    dock.submit()
+    assert wait_for(lambda: len(layer.rows) == 1)
+    assert wait_for(lambda: not dock._running and not dock._queue)
+    dock._unlist()
+    dock.reset_stores()
+    asked = queries()
+    APP.processEvents()
+    assert _idle(dock) and not dock.book.loaded and queries() == asked
+    # エクスポート: read in a task, counted once read.
+    export = dock.open_export()
+    assert export.count_label.text() in ("観測記録を読み込み中…", "該当する記録 1 件")
+    assert wait_for(lambda: export.count_label.text() == "該当する記録 1 件")
+    export.close()
+    # The classification editor: its tree once read (a class's records are renamed with it).
+    dock.reset_stores()
+    taxonomy = p.docks["SatObsTaxonomy"]
+    dock.edit_taxonomy(None)
+    # (Read in a task: 「観測記録を読み込み中…」 with an empty tree until then.)
+    assert taxonomy.isVisible() and (taxonomy.note.text() == "観測記録を読み込み中…") == (taxonomy.tree.topLevelItemCount() == 0)
+    assert wait_for(lambda: dock.book.loaded) and wait_for(lambda: taxonomy.tree.topLevelItemCount() > 0)
+    assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類")

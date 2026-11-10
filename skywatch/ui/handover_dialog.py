@@ -187,6 +187,9 @@ class HandoverDialog(QDialog):
 
     def render_assignments(self) -> None:
         user = edit_stamp.user_name()
+        # The progress is counted from the records: not read yet (no image chosen), shown again once they are.
+        if self.isVisible():
+            self.dock.records_ready(self.render_assignments)
         book = self.dock.book
         records = list(book.records) if book else []
         items = [x for x in self.bar.items if (self.done_check.isChecked() or not x.done)
@@ -335,6 +338,10 @@ class HandoverDialog(QDialog):
         end = self.end_edit.dateTime().toMSecsSinceEpoch()
         if end <= start:
             self._say(self.tr("期間の終わりが始まりより前"))
+            return
+        if not self.dock.records_ready(self.make):
+            # Not read yet (no image chosen in 「観測記録」): made once they are.
+            self._say(self.tr("観測記録を読み込み中…（読み終えたら作成）"))
             return
         config, client = self.dock.context.config, self.dock.context.esri()
         book = self.dock.book

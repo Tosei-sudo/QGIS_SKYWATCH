@@ -242,6 +242,9 @@ class AlertDialog(QDialog):
         self.status.setText(text)
 
     def _go(self, record_id: str) -> None:
+        if not self.dock.records_ready(lambda: self._go(record_id)):
+            self._say(self.tr("観測記録を読み込み中…"))
+            return
         book = self.dock.book
         o = book.record(record_id) if book else None
         if o is None:
@@ -256,6 +259,10 @@ class AlertDialog(QDialog):
         s, book = self.settings, self.dock.book
         if s is None or book is None:
             self._say(self.tr("観測記録の保存先なし"))
+            return
+        if not self.dock.records_ready(self.pick):
+            # Not read yet (no image chosen in 「観測記録」): picked once they are.
+            self._say(self.tr("観測記録を読み込み中…（読み終えたら抽出）"))
             return
         client = self.dock.context.esri()
         records, levels = list(book.records), book.confidences()

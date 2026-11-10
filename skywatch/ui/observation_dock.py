@@ -203,6 +203,12 @@ class ObservationDock(PluginDock):
         self._following = False
         self._previous_tool = None
         self._observer_cache = ""
+        #: The books whose records are being read, and what waits for them (by id(book)). The records are read only
+        #: once needed (tsudo 2026-11-10): an image chosen here, or something that uses them all (通報, エクスポート…).
+        self._reading: set[int] = set()
+        self._after_read: dict[int, list] = {}
+        #: Whether the dock shows only its note (no image chosen, or no store): None before the first render.
+        self._idle: Optional[bool] = None
         self.said.connect(self._show_status)
 
         self._build()
@@ -327,6 +333,19 @@ class ObservationDock(PluginDock):
         t.addWidget(self._button(tr("入力"), "", self._set_image_time))
         self.time_row.hide()
         b.addWidget(self.time_row)
+
+        # No image chosen (tsudo 2026-11-10): only this note. What follows (recording, the lists, the forms) waits
+        # for an image, and the records are not read until then.
+        self.idle_note = plain_label(QLabel())
+        self.idle_note.setWordWrap(True)
+        self.idle_note.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.idle_note.setStyleSheet("QLabel { color: #57534e; padding: 6px 2px; }")
+        self.idle_note.hide()
+        b.addWidget(self.idle_note, 1)
+        self.work_area = QWidget()
+        b.addWidget(self.work_area, 1)
+        b = QVBoxLayout(self.work_area)
+        b.setContentsMargins(0, 0, 0, 0)
 
         # Recording.
         row = QHBoxLayout()
@@ -763,6 +782,7 @@ class ObservationDock(PluginDock):
             self.sets = []
             self._show_status(self.tr("保存先の準備失敗: {e}").format(e=error))
         self.books = {}
+        self._after_read = {}
         read = (c.source, tuple((s.label, s.config.url if s.config else None) for s in self.sets))
         same, self._stores_read = read == self._stores_read, read
         was = self.store_select.currentText()
@@ -803,11 +823,8 @@ class ObservationDock(PluginDock):
         self._refresh_timer.stop()
         if minutes:
             self._refresh_timer.start(int(minutes * 60 * 1000))
+        # Shown (and the records read once an image is chosen: render).
         self.refresh_images()
-        if not self.book.loaded:
-            self.reload()
-        else:
-            self.render()
 
     def _observer_typed(self) -> None:
         settings.set_recorder(self.observer_input.text())
@@ -824,6 +841,8 @@ class ObservationDock(PluginDock):
 
     def _show_status(self, message: str) -> None:
         self.status.setText(message)
+        if self._idle:
+            self._render_idle_note()
 
     def waiting_ids(self) -> set[str]:
         """The records of this store saved offline and waiting to be sent (marked in the lists and on the map)."""
@@ -1056,8 +1075,71 @@ class ObservationDock(PluginDock):
         return ObservationApi(lambda: self.book, self.run_now, self.report_html)
 
     def reload(self) -> None:
-        """Reads the records again from the store (and which are reported)."""
-        self.do(self.tr("観測記録の読み込み"), lambda b: b.reload(), after=lambda _r: self.refresh_reported())
+        """
+        Reads the records again from the store (and which are reported).
+        Records not read yet (no image chosen, nothing has asked for them)
+        are left until needed.
+        """
+        book = self.book
+        if book is None or (not book.loaded and book.current is None):
+            return
+        self._read_records()
+
+    def _read_records(self, then: Optional[Callable[[], Any]] = None) -> None:
+        """Reads the records, areas and classification (one read at a time per store); `then` once read."""
+        book = self.book
+        if book is None:
+            return
+        key = id(book)
+        if then is not None:
+            waiting = self._after_read.setdefault(key, [])
+            if then not in waiting:
+                waiting.append(then)
+        if key in self._reading:
+            return
+        self._reading.add(key)
+        reading = self._reading
+
+        def work(b: ObservationBook):
+            try:
+                return b.reload()
+            finally:
+                reading.discard(key)
+
+        def after(_r) -> None:
+            self.refresh_reported()
+            for f in self._after_read.pop(key, []):
+                f()
+
+        def failed(_message: str) -> None:
+            reading.discard(key)
+            self._after_read.pop(key, None)
+
+        self.do(self.tr("観測記録の読み込み"), work, after=after, failed=failed)
+
+    def records_ready(self, again: Optional[Callable[[], Any]] = None) -> bool:
+        """
+        Whether the records are read, for what uses them all (通報, エクスポート,
+        取込み, 引き継ぎ, イベント, 分類体系…): they are read only once needed,
+        so the first time they are read now. True at once for the local store
+        (read at once); else False, and `again` runs once they are read.
+        """
+        book, s = self.book, self.store_set
+        if book is None or s is None or book.loaded:
+            return True
+        if not s.remote:
+            self._read_records()
+            return True
+        self._read_records(again)
+        return False
+
+    def read_now(self) -> Optional[ObservationBook]:
+        """The book with its records read, waiting for them when not read yet (scripts, 「CSV 保存」, 「レイヤー化」)."""
+        book = self.book
+        if book is not None and not book.loaded:
+            self.run_now(self.tr("観測記録の読み込み"), lambda b: b.reload())
+            self.refresh_reported()
+        return self.book
 
     #: The least time between two quiet reads on another image (s): flipping through images asks once.
     REFRESH_GAP = 30
@@ -2348,7 +2430,7 @@ class ObservationDock(PluginDock):
 
     def save_csv(self, path: Optional[str] = None) -> Optional[str]:
         """Saves the records as CSV (the deleted ones too when shown)."""
-        if self.book is None:
+        if self.read_now() is None:
             return None
         rows = self.book.records if self.deleted_check.isChecked() else self.book.living()
         if not rows:
@@ -2367,7 +2449,7 @@ class ObservationDock(PluginDock):
 
     def to_layers(self) -> list:
         """Adds the records as a point layer, the checked areas as polygons and the flows as lines."""
-        if self.book is None:
+        if self.read_now() is None:
             return []
         made = observation_layers(self.book.records, self.book.areas)
         if not made:
@@ -2741,7 +2823,7 @@ class ObservationDock(PluginDock):
         return True
 
     def render(self) -> None:
-        """Shows the book as it is now."""
+        """Shows the book as it is now: with no image chosen, only a note (and the records not read)."""
         self._render_drafts()
         book = self.book
         image = book.current if book else None
@@ -2762,13 +2844,20 @@ class ObservationDock(PluginDock):
         self.assignment_bar.show_image(image)
         self.image_event_button.setVisible(image is not None and self.context.config.events is not None)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
-        if book is None:
-            self._shown_as = None
-            self._set_head(self.tr("観測記録"))
-            self._row([self.tr("保存先なし") if self.context.config.local_observations
-                       else self.tr("保存先なし（ローカルは使用不可。設定ファイルの observationStores で指定）")])
-            self.draw()
+        self.only.setEnabled(image is not None)
+        self.list_button.setEnabled(book is not None)
+        if book is None or image is None:
+            self._render_idle()
             return
+        if self._idle is not False:
+            self._idle = False
+            self.idle_note.hide()
+            self.work_area.show()
+        if not book.loaded:
+            # An image chosen: its records (and the others', for what carries over) are read now.
+            self._read_records()
+            if book.loaded:
+                return  # the local store: read and shown at once
         if not self.status.text() and book.status:
             self.status.setText(book.status)
         # Only what the list shows (大分類), which is all 「すべて継続」 and 「確認範囲内…を不在」 record.
@@ -2821,6 +2910,41 @@ class ObservationDock(PluginDock):
         self.changed.emit()
         self.draw()
 
+    def _render_idle(self) -> None:
+        """
+        No image chosen (or no store): only a note (tsudo 2026-11-10). What was
+        being done on an image ends; the lists, the forms and recording wait
+        for an image.
+        """
+        if self._idle is False:
+            self.status.clear()  # said of the image no longer chosen
+        self._idle = True
+        if self.area_mode:
+            self.set_area_mode(False)
+        if self.many.mode:
+            self.set_many_mode("")
+        if self.active:
+            self.set_active(False)
+        self.close_form()
+        self.work_area.hide()
+        self._shown_as = None
+        self._render_idle_note()
+        self.idle_note.show()
+        self.changed.emit()
+        self.draw()
+
+    def _render_idle_note(self) -> None:
+        tr = self.tr
+        if self.book is None:
+            text = tr("保存先なし") if self.context.config.local_observations else \
+                tr("保存先なし（ローカルは使用不可。設定ファイルの observationStores で指定）")
+        else:
+            text = tr("画像が選ばれていません。\n"
+                      "画像を開くか、画像カタログの「ファイルなしで記録」（または ＋ で画像 ID を指定）で画像を選ぶと、"
+                      "その画像の観測記録の一覧と入力が表示されます。")
+        said = self.status.text()
+        self.idle_note.setText(text + (f"\n\n{said}" if said and said != NO_IMAGE else ""))
+
     def _render_image(self, here: list[Observation], carried: list[CarryOver], inside: list[CarryOver]) -> None:
         tr = self.tr
         self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("更新"), "")
@@ -2861,8 +2985,7 @@ class ObservationDock(PluginDock):
             self._row([area_label(a), a.kind, "", "", a.note, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
                       style="deleted" if gone else "area", widget=widget, key=f"a:{a.id}")
         if self.table.rowCount() == 0:
-            self._row([tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter and book.current
-                       else tr("記録なし（「クリック記録」で地図をクリック）") if book.current else tr("画像なし")])
+            self._row([tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし（「クリック記録」で地図をクリック）")])
 
     def _ensure_active(self) -> None:
         if not self.active:
@@ -2996,7 +3119,7 @@ class ObservationDock(PluginDock):
         """What is drawn: this image's records, the things carried over, the chosen flow, the areas and the clicked place."""
         s = Scene()
         book = self.book
-        if book is None:
+        if book is None or book.current is None:
             return s
         image = book.current
         kinds = list(dict.fromkeys([*book.vocabulary.kinds, *(t.path[0] for t in book.taxonomy()), *((path_of(f.kind) or [""])[0] for f in book.flows())]))

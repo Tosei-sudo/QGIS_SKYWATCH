@@ -212,6 +212,10 @@ class RecordImportDialog(QDialog):
         if not mapping.get("image_id") and not mapping.get("id"):
             self.status.setText(self.tr("画像ID の列を選ぶ"))
             return []
+        if not self.dock.records_ready(self.try_run):
+            # Not read yet (no image chosen in 「観測記録」): tried once they are (what is there already matters).
+            self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試し読み）"))
+            return []
         records = list(book.records)
         times = {o.image_id: o.image_time for o in records if o.image_time is not None}
         names = {o.image_id: o.image_name for o in records if o.image_name}
