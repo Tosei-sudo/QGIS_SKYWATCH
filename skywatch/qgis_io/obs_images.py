@@ -8,9 +8,14 @@ temporal properties), the GDAL metadata items, the NITF date, the file name,
 the TIFF DateTime; else the time typed for it (kept on the layer, so in the
 project).
 
+An image opened from the catalog is named by its id (tsudo, 2026-11-10: the
+records' image names were file names for some images, folder names for
+others and ids for those without files): the records' 画像名 is then the
+catalog's image id for every catalog image, the file name for the others.
+
 The layers of one catalog image id (a record whose folder has several
-images, or the same image opened twice) are one image to record on, named as
-the record's folder: what is recorded on any of its files is the record's.
+images, or the same image opened twice) are one image to record on: what is
+recorded on any of its files is the record's.
 
 `image_layer()` opens an image the way both docks should: a sign-in is an
 authcfg id in the layer's URI (QGIS adds the credentials when asking), so no
@@ -162,34 +167,30 @@ def _box(layer: QgsRasterLayer) -> Optional[list[float]]:
 
 
 def observed_image(layer: QgsRasterLayer) -> ObservedImage:
-    name = file_name(layer)
-    image_id = layer.customProperty(IMAGE_ID) or name
+    """
+    A layer's image: the catalog's id (else the file name) as its id and its
+    name; its time from the layer, else its file (name, metadata), else the
+    one typed for it.
+    """
+    file = file_name(layer)
+    image_id = str(layer.customProperty(IMAGE_ID) or "") or file
     t = _layer_time(layer)
     origin = "layer" if t is not None else ""
     if t is None:
-        found = image_time(name, _metadata(layer))
+        found = image_time(file, _metadata(layer))
         if found:
             t, origin = found
     if t is None:
         t = manual_time(layer)
         origin = "manual" if t is not None else ""
-    return ObservedImage(id=str(image_id), name=name, time=t, box=_box(layer), layer_id=layer.id(), origin=origin)
-
-
-def folder_name(layer: QgsMapLayer) -> str:
-    """The name of the catalog record's folder a layer's image is in ('' for an image not opened from a record's folder)."""
-    rel = str(layer.customProperty(IMAGE_FILE) or "").replace("\\", "/").strip("/")
-    path = image_path(layer).replace("\\", "/")
-    if not rel or not path.endswith("/" + rel):
-        return ""
-    return path[: -len(rel) - 1].rstrip("/").rsplit("/", 1)[-1]
+    return ObservedImage(id=image_id, name=image_id, time=t, box=_box(layer), layer_id=layer.id(), origin=origin)
 
 
 def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
     """
     The project's raster layers as images to record on: the layers of one
-    catalog image id (a record's images in its folder) as one image, named as
-    the record's folder (else as its first layer, top of the layer tree first).
+    catalog image id (a record's images in its folder) as one image (top of
+    the layer tree first).
     """
     project = project or QgsProject.instance()
     order = {layer_id: i for i, layer_id in enumerate(project.layerTreeRoot().findLayerIds())}
@@ -212,8 +213,7 @@ def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
             images.append(entry)
             continue
         parts = by_id[entry]
-        folder = next((name for name in (folder_name(layer) for layer, _image in parts) if name), "")
-        images.append(parts[0][1] if len(parts) == 1 and not folder else joined_image([image for _layer, image in parts], folder))
+        images.append(parts[0][1] if len(parts) == 1 else joined_image([image for _layer, image in parts]))
     return images
 
 

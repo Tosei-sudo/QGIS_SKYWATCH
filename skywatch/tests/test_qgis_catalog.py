@@ -632,9 +632,9 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     assert [l.customProperty(IMAGE_FILE) for l in layers] == ["PAN/a_P.tif", "PAN/b_P.TIF"]
     group = QgsProject.instance().layerTreeRoot().findGroup("D")
     assert group is not None and [n.layerId() for n in group.findLayers()] == [l.id() for l in layers]
-    # 「観測記録」: one image of the record, named as its folder (tsudo 2026-11-09: recorded per record, not per file).
+    # 「観測記録」: one image of the record (tsudo 2026-11-09: recorded per record, not per file), named by its id (2026-11-10).
     [image] = [i for i in open_images() if i.id == "D"]
-    assert image.name == "Scene_D" and image.layer_ids == tuple(l.id() for l in layers)
+    assert image.name == "D" and image.layer_ids == tuple(l.id() for l in layers)
     # Cancelled: nothing opens.
     monkeypatch.setattr(dock, "choose_images", lambda r, files, more: None)
     assert dock.open_records([record]) == []
@@ -642,15 +642,82 @@ def test_a_record_whose_path_is_a_folder_opens_the_images_its_sensor_names(plugi
     other = record_of({"attributes": {"IMG_ID": "E", "SENSOR": "S7", "PATH": "\\\\nas\\images\\2026\\scene_d"}}, catalog.fields)
     assert dock.open_records([other]) == []
     assert "E のフォルダ" in dock.status.text() and "画像なし" in dock.status.text()
-    # One image only: opened without asking, by itself (no group).
+    # One image only: opened without asking, by itself (no group), named by the record's id (tsudo 2026-11-10).
     (scene / "only").mkdir()
     geotiff(scene / "only" / "x.jp2")
     one = record_of({"attributes": {"IMG_ID": "F", "SENSOR": "S7", "PATH": "\\\\nas\\images\\2026\\scene_d\\only"}}, catalog.fields)
     asked.clear()
     [layer] = dock.open_records([one])
-    assert layer.name() == "F x.jp2" and layer.customProperty(IMAGE_FILE) == "x.jp2"
+    assert layer.name() == "F" and layer.customProperty(IMAGE_FILE) == "x.jp2"
     assert QgsProject.instance().layerTreeRoot().findGroup("F") is None
-    assert [(i.name, i.layer_ids) for i in open_images() if i.id == "F"] == [("only", (layer.id(),))]
+    assert [(i.name, i.layer_ids) for i in open_images() if i.id == "F"] == [("F", (layer.id(),))]
+
+
+def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(plugin, monkeypatch):
+    """tsudo 2026-11-10: looking through the list one image after another, the image opened before closes (kept per user)."""
+    from skywatch.core.catalog.search import record_of
+    from skywatch.qgis_io.catalog_io import RECORD_GROUP
+    from skywatch.qgis_io.obs_images import open_images
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    searched(dock)
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: str(folder))
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    catalog = dock._shown_catalog
+    scene = folder / "2026" / "Scene_G"
+    for rel in ("PAN/a_P.tif", "PAN/b_P.tif"):
+        (scene / rel).parent.mkdir(parents=True, exist_ok=True)
+        geotiff(scene / rel)
+    a = next(r for r in dock.records if r.id == "A")
+    g = record_of({"attributes": {"IMG_ID": "G", "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\scene_g"}}, catalog.fields)
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files)
+    # A record of one file: its layer and its image in 観測記録 are named by its id (tsudo 2026-11-10: not by the file).
+    assert not dock.close_previous.isChecked() and not dock.close_previous.isHidden()
+    [first] = dock.open_records([a])
+    assert first.name() == "A" and [(i.id, i.name) for i in open_images()] == [("A", "A")]
+    # Off (as it starts): the images stay.
+    [second] = dock.open_records([a])
+    assert {first.id(), second.id()} <= set(project.mapLayers())
+    # On: the next opens, then those opened since it was on close (the one opened before it was turned on stays).
+    dock.close_previous.setChecked(True)
+    assert settings.close_previous()
+    tiles = dock.open_records([g])
+    assert [l.name() for l in tiles] == ["PAN/a_P.tif", "PAN/b_P.tif"] and first.id() in project.mapLayers()
+    tile_ids = [t.id() for t in tiles]
+    group = root.findGroup("G")
+    assert group is not None and group.customProperty(RECORD_GROUP) == "G"
+    [third] = dock.open_records([a])
+    # The folder record's layers went, and its group with them; the new image is there.
+    third_id = third.id()
+    assert all(project.mapLayer(i) is None for i in tile_ids) and root.findGroup("G") is None
+    assert {third_id, first.id(), second.id()} <= set(project.mapLayers())
+    # Nothing opened (no place): what was opened stays.
+    assert dock.open_records([r for r in dock.records if r.id == "C"]) == []
+    assert third_id in project.mapLayers()
+    # One of a folder's images opened by itself: named by the record's id, not grouped; the one before closes.
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files[1:])
+    [one] = dock.open_records([g])
+    assert one.name() == "G" and root.findGroup("G") is None and project.mapLayer(third_id) is None
+    # Off again: nothing closes, and turning it on later does not close what was opened while it was off.
+    dock.close_previous.setChecked(False)
+    assert not settings.close_previous()
+    [fourth] = dock.open_records([a])
+    dock.close_previous.setChecked(True)
+    [fifth] = dock.open_records([a])
+    assert {one.id(), fourth.id(), fifth.id()} <= set(project.mapLayers())
+    # A layer taken out by hand meanwhile: nothing to close, nothing breaks.
+    one_id = one.id()
+    project.removeMapLayer(fifth.id())
+    [sixth] = dock.open_records([a])
+    assert {sixth.id(), fourth.id(), one_id} <= set(project.mapLayers())
+    # A catalog without image files has no 開く, so no such option either.
+    catalog.image_files = False
+    dock._show_file_buttons()
+    assert dock.close_previous.isHidden()
+    catalog.image_files = True
+    dock._show_file_buttons()
 
 
 def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_otherwise(tmp_path):

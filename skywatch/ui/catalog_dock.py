@@ -6,6 +6,9 @@ layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
 the 通知 dock).
 
+「前の画像を閉じる」 (per user): looking through images one after another,
+opening the next closes the layers opened here before.
+
 A search lists the newest `maxResults` images; 「続きを読む」 under the list
 adds the next `maxResults` (older ones) of the same search (its area and
 conditions as they were when searched, not as the form says now).
@@ -40,7 +43,7 @@ from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
-    Cancelled, add_record_layers, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer,
+    Cancelled, add_record_layers, close_layers, footprint, layer_area, open_record, overlap_measure, record_of_layer, results_layer,
 )
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -292,6 +295,15 @@ class CatalogDock(PluginDock):
         self._work_timer.setInterval(60_000)
         self._work_timer.timeout.connect(self.load_work)
 
+        # 「前の画像を閉じる」 (tsudo, 2026-11-10): looking through images one after another, the one opened before closes.
+        self.close_previous = QCheckBox(self.tr("前の画像を閉じる"))
+        self.close_previous.setToolTip(self.tr("「開く」・ダブルクリックで画像を開いたら、その前にここから開いた画像のレイヤーを"
+                                               "プロジェクトから外す（連続して画像を見るときに。開けなかったときは外さない。PC ごとに記憶）"))
+        self.close_previous.setChecked(settings.close_previous())
+        self.close_previous.toggled.connect(settings.set_close_previous)
+        #: The layers opened last with 「前の画像を閉じる」 on (their ids), which close when the next images open.
+        self.last_opened: list[str] = []
+
         buttons = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
         tips = {
@@ -328,6 +340,8 @@ class CatalogDock(PluginDock):
                 button.clicked.connect(slot)
             buttons.addWidget(button)
             self.buttons[key] = button
+            if key == "open":
+                buttons.addWidget(self.close_previous)
         # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
         self.footprint_box = QComboBox()
         for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
@@ -446,6 +460,7 @@ class CatalogDock(PluginDock):
         files = self.has_files()
         for key in ("open", "copy", "folders"):
             self.buttons[key].setVisible(files)
+        self.close_previous.setVisible(files)
         self.buttons["record"].setVisible(not files)
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
@@ -1006,8 +1021,9 @@ class CatalogDock(PluginDock):
         Opens images of the list as raster layers (a record whose path is a
         folder: the images chosen among its files, in a group); the reason is
         shown for those that cannot be opened, with 「ファイルなしで記録」 for
-        them. In a catalog without image files, they are recorded without
-        their files instead.
+        them. With 「前の画像を閉じる」, the images opened here before close
+        once these are open (not when none could be). In a catalog without
+        image files, they are recorded without their files instead.
         """
         catalog = self._shown_catalog
         if catalog is None:
@@ -1032,6 +1048,14 @@ class CatalogDock(PluginDock):
             add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
+        if layers:
+            # Only those opened with it on close (an image opened before it was turned on stays).
+            opened_ids = [layer.id() for layer in layers]
+            if self.close_previous.isChecked():
+                close_layers([i for i in self.last_opened if i not in opened_ids])
+                self.last_opened = opened_ids
+            else:
+                self.last_opened = []
         if problems:
             self._say_unopened(problems, [r for r in unopened if r.id])
             self.status.setText(problems[-1])

@@ -226,6 +226,19 @@ def set_footprint_style(style: str) -> None:
     _set("catalog/footprints", style if style in FOOTPRINT_STYLES else "outline")
 
 
+def close_previous() -> bool:
+    """
+    「前の画像を閉じる」 (tsudo, 2026-11-10: looking through images one after
+    another): opening images from the catalog closes those it opened before.
+    Off unless turned on.
+    """
+    return _get("catalog/closePrevious") == "1"
+
+
+def set_close_previous(on: bool) -> None:
+    _set("catalog/closePrevious", "1" if on else "0")
+
+
 def mark_style() -> str:
     """The observations' marks on the map ('normal' unless chosen)."""
     v = _get("observations/marks")
