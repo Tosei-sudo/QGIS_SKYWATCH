@@ -56,6 +56,9 @@ def plugin_constants() -> dict:
         "alertListSources": list(alerts.LIST_SOURCES),
         "alertObjectSources": list(alerts.OBJECT_SOURCES),
         "alertListObjects": list(alerts.LIST_OBJECTS),
+        "alertObjectLayers": {what: {"key": LAYER_KEYS[name][0], "label": label, "roles": LAYER_KEYS[name][1]}
+                              for what, (name, label) in alerts.OBJECT_LAYERS.items()},
+        "alertLevelKeys": list(alerts.LEVEL_KEYS),
         "anglePresets": dict(coords.ANGLE_PRESETS),
         "anglePlaces": list(coords.ANGLE_PLACES),
         "obsExportSources": list(obs_export.SOURCES),
@@ -90,6 +93,11 @@ def plugin_constants() -> dict:
         "geometryTypes": list(layer_templates.GEOMETRY_NAMES),
         "fieldTypes": list(layer_templates.DESIGN_TYPES),
     }
+
+
+#: alerts.OBJECT_LAYERS' AlertSettings attributes: their key in alertReports and their roles' constants.
+LAYER_KEYS = {"countries": ("countries", "alertCountries"), "named_areas": ("namedAreas", "alertPlaces"),
+              "geofences": ("geofences", "alertGeofences"), "rules": ("rules", "alertRules")}
 
 
 def _read():

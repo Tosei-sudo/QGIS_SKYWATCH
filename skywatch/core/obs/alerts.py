@@ -51,7 +51,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 from ..coords import angle_pattern, format_angle
 from ..esri import EsriClient, EsriError, fit_value, quote
@@ -82,6 +82,23 @@ OBJECT_SOURCES = ("country", "place", "places", "area", "rule", "confidence")
 #: Of those, the ones that are several (their values joined by `join`).
 LIST_OBJECTS = ("places", "area", "rule")
 _OBJECT_KEY = re.compile(r"^(country|place|places|area|rule|confidence)\.([A-Za-z_][A-Za-z0-9_]*)$")
+#: The settings' layer each of those (but confidence) is read from: its AlertSettings attribute and its name.
+OBJECT_LAYERS = {
+    "country": ("countries", "alertReports.countries（国）"),
+    "place": ("named_areas", "alertReports.namedAreas（地名）"),
+    "places": ("named_areas", "alertReports.namedAreas（地名）"),
+    "area": ("geofences", "alertReports.geofences（ジオフェンス）"),
+    "rule": ("rules", "alertReports.rules（条件テーブル）"),
+}
+#: The fixed sources that are a role of those layers' (`place.en` the named area's nameEn…), as `object.role`.
+FIXED_ROLES = {
+    "country": ("country", "code"), "countryName": ("country", "name"), "countryName.en": ("country", "nameEn"),
+    "place": ("place", "name"), "placeKind": ("place", "kind"), "places": ("places", "name"),
+    "place.en": ("place", "nameEn"), "placeKind.en": ("place", "kindEn"), "places.en": ("places", "nameEn"),
+    "area": ("area", "name"), "area.en": ("area", "nameEn"),
+}
+#: The keys every 確度 level has (`confidence.en`…; others are those the settings give it).
+LEVEL_KEYS = ("label", "name", "en", "nameEn", "note", "color")
 #: Between the values of a field of several (`source` as an array) when `join` is not given.
 DEFAULT_JOIN = " "
 #: The fields written when the settings give none.
@@ -738,7 +755,77 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
         settings.countries = _source_of(value["countries"], f"{at}.countries", DEFAULT_COUNTRY_FIELDS, problems)
     if "table" in value:
         settings.table = _source_of(value["table"], f"{at}.table", DEFAULT_LOG_FIELDS, problems, editable=True)
+    for where, source, what, _key in object_keys(settings):
+        if what in OBJECT_LAYERS and getattr(settings, OBJECT_LAYERS[what][0]) is None:
+            problems.append(f"{at}.formats{where}: {source} は {OBJECT_LAYERS[what][1]}がないので常に空")
     return settings
+
+
+def _fields_in(f: AlertField) -> Iterator[AlertField]:
+    """A field, its parts and its fallback (and theirs)."""
+    yield f
+    for part in f.parts:
+        yield from _fields_in(part)
+    if f.fallback is not None:
+        yield from _fields_in(f.fallback)
+
+
+def object_keys(settings: AlertSettings, fixed: bool = False) -> list[tuple[str, str, str, str]]:
+    """
+    The values of what records are matched to that the formats write
+    (`country.code`, `place.PREF_NAME`…), each once a format (or a column):
+    (where — 「format」 or 「format」の columns.X —, source, object, key);
+    `fixed` the fixed sources that are a role too (`place.en`: place, nameEn).
+    """
+    out: dict[tuple[str, str], tuple[str, str, str, str]] = {}
+    for fmt in settings.formats:
+        tops = [(f"「{fmt.name}」", f) for f in fmt.fields] + [(f"「{fmt.name}」の columns.{a}", f) for a, f in fmt.columns.items()]
+        for where, top in tops:
+            for f in _fields_in(top):
+                keyed = _OBJECT_KEY.match(f.source or "") if f.source not in SOURCES else None
+                if keyed:
+                    out.setdefault((where, f.source), (where, f.source, *keyed.groups()))
+                elif fixed and f.source in FIXED_ROLES:
+                    out.setdefault((where, f.source), (where, f.source, *FIXED_ROLES[f.source]))
+    return list(out.values())
+
+
+def level_key_problems(settings: AlertSettings, levels: Iterable[ConfidenceLevel]) -> list[str]:
+    """`confidence.<key>` no 確度 level of the settings has (always written empty)."""
+    extra = {k.lower() for level in levels for k in level.extra}
+    return [f"alertReports.formats{where}: {source} は確度に「{key}」がないので常に空（{'・'.join(LEVEL_KEYS)} か確度に書いたキー）"
+            for where, source, what, key in object_keys(settings)
+            if what == "confidence" and key not in LEVEL_KEYS and key.lower() not in extra]
+
+
+def layer_key_problems(settings: AlertSettings, layer_fields: dict[str, Iterable[str]]) -> list[str]:
+    """
+    `country.CODE`, `place.en`… whose layer has no attribute for it (written
+    empty): `layer_fields` the attribute names of the layers read, by
+    AlertSettings attribute (countries, named_areas, geofences, rules); the
+    others are not checked. A key is a role (`en` nameEn) or an attribute name
+    (any case), as attribute_of reads it; a fixed source (`place.en`) its role.
+    """
+    out = []
+    for where, source, what, key in object_keys(settings, fixed=True):
+        if what not in OBJECT_LAYERS:
+            continue
+        name, label = OBJECT_LAYERS[what]
+        src = getattr(settings, name)
+        if src is None or name not in layer_fields:
+            continue
+        names = list(layer_fields[name])
+        roles = dict(src.fields)
+        if name == "rules":
+            use_legacy_names(roles, set(names), DEFAULT_RULE_FIELDS, LEGACY_RULE_FIELDS)
+        role = "nameEn" if key == "en" else key
+        if role in roles:
+            if roles[role] not in names:
+                out.append(f"通報フォーマット{where}: {source} は {label}に {role} の属性「{roles[role]}」がないので空")
+        elif not any(n.lower() == key.lower() for n in names):
+            shown = "・".join(names[:12]) + ("…" if len(names) > 12 else "")
+            out.append(f"通報フォーマット{where}: {source} は {label}に属性「{key}」がないので空（属性: {shown or 'なし'}）")
+    return out
 
 
 # ---- reading the rules, the geofences and the log ------------------------------------------------
@@ -1306,12 +1393,11 @@ def attribute_of(thing: Any, key: str) -> Any:
         extra = thing.extra
         return extra[key] if key in extra else next((v for k, v in extra.items() if k.lower() == key.lower()), None)
     key = "nameEn" if key == "en" else key
-    own = thing.values()
-    if key in own:
-        return own[key]
     roles, attributes = thing.roles, thing.attributes
     if key in roles:
-        return attributes.get(roles[key])
+        # A role (as read: a weight a number…); one the layer's settings do not have (a named area's code) is an attribute name.
+        own = thing.values()
+        return own[key] if key in own else attributes.get(roles[key])
     if key in attributes:
         return attributes[key]
     return next((v for k, v in attributes.items() if k.lower() == key.lower()), None)

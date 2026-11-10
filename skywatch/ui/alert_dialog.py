@@ -5,7 +5,8 @@ Tab 「通報文の作成」: a format (the settings file's default first), the
 period (登録日時 or 撮像日時), then 「抽出」 reads the rules, the geofences
 and what was already reported from Esri (in a task) and lists a line per
 record, highest importance score first (the score in the first column,
-its parts in the tooltip): untick one to leave it out, edit a line by hand. 「通報」 adds the
+its parts in the tooltip): untick one to leave it out, 「選択を一覧から削除」 to
+take rows off the list, edit a line by hand. 「通報」 adds the
 lines to the Esri log table, then copies the text (header, lines, footer)
 and writes the file, as the format says; 「コピーのみ」 copies without
 recording anything.
@@ -24,9 +25,10 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import edit_stamp
+from ..core.esri import EsriError
 from ..core.obs.alerts import (
-    AlertItem, AlertSettings, LogRow, Moment, build_lines, load_geofences, load_log, load_named_areas, load_rules, manual_items, remove_log,
-    report_text, reported_ids, score_note, select, write_file, write_log,
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_named_areas,
+    load_rules, manual_items, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
 )
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
@@ -34,6 +36,20 @@ from .docks import plain_label, plain_tip
 from .list_views import column_menus
 
 DAY_MS = 86_400_000
+
+
+def layer_fields(client, s: AlertSettings, tokens: dict) -> dict[str, list[str]]:
+    """The attribute names of the layers the formats' `country.code`… read (those that cannot be read left out)."""
+    out = {}
+    for name in dict.fromkeys(OBJECT_LAYERS[what][0] for _w, _s, what, _k in object_keys(s, fixed=True) if what in OBJECT_LAYERS):
+        source = getattr(s, name)
+        if source is None:
+            continue
+        try:
+            out[name] = list(client.layer(source.url, tokens.get(name) or source.token, refresh=True).field_types)
+        except EsriError:
+            pass
+    return out
 
 
 def _ms(edit: QDateTimeEdit) -> int:
@@ -96,12 +112,19 @@ class AlertDialog(QDialog):
         self.pick_button.clicked.connect(self.pick)
         row.addWidget(self.pick_button)
         row.addStretch(1)
+        self.drop_button = QPushButton(self.tr("選択を一覧から削除"))
+        self.drop_button.setToolTip(self.tr("選んだ行を送らずに一覧から外す（通報テーブルには何もしない。"
+                                            "条件に合う記録は次の「抽出」でまた出る）"))
+        self.drop_button.clicked.connect(lambda _on=False: self.drop_rows())
+        row.addWidget(self.drop_button)
         m.addLayout(row)
         self.lines_table = QTableWidget(0, 2)
         self.lines_table.setHorizontalHeaderLabels([self.tr("通報・重要度"), self.tr("行（編集可）")])
         self.lines_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.lines_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.lines_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.lines_table.itemChanged.connect(lambda _item: self._render_text())
+        self.lines_table.itemSelectionChanged.connect(self._update_drop)
         self.lines_table.cellDoubleClicked.connect(lambda r, _c: self._go(self.items[r].record.id) if r < len(self.items) else None)
         m.addWidget(self.lines_table, 2)
         self.preview = QPlainTextEdit()
@@ -246,18 +269,23 @@ class AlertDialog(QDialog):
             # 抽出 reads the named areas and countries afresh (and keeps them for saving and adding by hand).
             named = load_named_areas(client, s.named_areas, tokens["named_areas"], max_age=0)
             countries = load_named_areas(client, s.countries, tokens["countries"], max_age=0)
-            return select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named,
-                          countries=countries), rules
+            picked = select(records, s, rules, fences, levels, done, start, end, by, history=records, named=named, countries=countries)
+            return picked, rules, layer_key_problems(s, layer_fields(client, s, tokens))
 
         def finished(result) -> None:
             self.pick_button.setEnabled(True)
-            picked, rules = result
+            picked, rules, problems = result
             ids = {i.record.id for i in picked}
             # Records added by hand stay first (unless picked by the conditions too); those picked follow, highest score first.
             self.items = [i for i in self.items if i.manual and i.record.id not in ids] + picked
             self._render_lines()
             rule_note = "" if rules is None else self.tr("（条件 {n} 件）").format(n=len(rules))
-            self._say(self.tr("{n} 件を抽出{r}").format(n=len(self.items), r=rule_note))
+            said = self.tr("{n} 件を抽出{r}").format(n=len(self.items), r=rule_note)
+            if problems:
+                # country.CODE… the layer has no attribute for: written empty (a typo, or a field not added yet).
+                said += self.tr("。フォーマットの属性に注意: ") + " / ".join(problems)
+                self.dock.iface.messageBar().pushWarning(self.tr("通報"), plain_tip(" / ".join(problems)))
+            self._say(said)
 
         def failed(message: str) -> None:
             self.pick_button.setEnabled(True)
@@ -314,6 +342,28 @@ class AlertDialog(QDialog):
         self._render_lines()
         return added
 
+    def _chosen_rows(self) -> list[int]:
+        """The rows selected in the list (those of a record)."""
+        return sorted({i.row() for i in self.lines_table.selectedIndexes() if i.row() < len(self.items)})
+
+    def _update_drop(self) -> None:
+        self.drop_button.setEnabled(bool(self._chosen_rows()))
+
+    def drop_rows(self, rows: Optional[list[int]] = None) -> None:
+        """
+        「選択を一覧から削除」: the selected rows (or `rows`) out of the list,
+        not sent; nothing is written. The rows left keep their ticks and edits;
+        a record meeting the conditions is listed again by the next 「抽出」.
+        """
+        rows = self._chosen_rows() if rows is None else sorted({r for r in rows if 0 <= r < len(self.items)})
+        if not rows:
+            self._say(self.tr("一覧から削除する行なし（行を選択）"))
+            return
+        gone = set(rows)
+        self.items = [i for r, i in enumerate(self.items) if r not in gone]
+        self._render_lines()
+        self._say(self.tr("{n} 件を一覧から削除（通報テーブルはそのまま）").format(n=len(rows)))
+
     def _moment(self, count: int) -> Moment:
         return Moment(now=QDateTime.currentMSecsSinceEpoch(), user=edit_stamp.user_name(), count=count)
 
@@ -366,6 +416,7 @@ class AlertDialog(QDialog):
             self.lines_table.setItem(r, 1, cell)
         self.lines_table.blockSignals(False)
         self._filling = False
+        self._update_drop()
         self._render_text()
 
     def chosen(self) -> tuple[list[AlertItem], list[str]]:

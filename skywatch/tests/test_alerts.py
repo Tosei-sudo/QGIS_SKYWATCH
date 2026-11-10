@@ -609,7 +609,7 @@ def test_any_value_of_what_a_record_was_matched_to():
     named, found = load_named_areas(client, s.named_areas), load_named_areas(client, s.countries)
 
     problems = []
-    fmt = _one([
+    fmt = _one_with_layers([
         "country.code", "country.name", "country.en", "country.nameEn", "country.ISO_A3", "country.iso_a3", "country.NOPE",
         "place.name", "place.PREF", {"source": "places.PREF", "join": "／"}, "places.kind",
         "area.FENCE_CODE", "area.en", "area.name",
@@ -637,11 +637,76 @@ def test_any_value_of_what_a_record_was_matched_to():
     assert value_of(AlertField(source="rule.PRIORITY"), AlertItem(obs(), [], [], met=rule_list[:1]), 0, fmt, at) == (2.5, "2.5")
 
     problems = []
-    _one(["nation.code", "country.", "country.a-b", {"source": "country.code", "join": "/"}, {"source": "places.kind", "join": "/"},
-          {"source": "country.code", "format": "dms"}], problems)
+    _one_with_layers(["nation.code", "country.", "country.a-b", {"source": "country.code", "join": "/"}, {"source": "places.kind", "join": "/"},
+                      {"source": "country.code", "format": "dms"}], problems)
     assert any("fields[0] の source「nation.code」" in p for p in problems)
     assert any("fields[1] の source「country.」" in p for p in problems)
     assert any("fields[2] の source「country.a-b」" in p for p in problems)
     assert any("fields[3] の join は" in p for p in problems)
     assert any("fields[5] の format は" in p for p in problems)
     assert len(problems) == 5
+
+
+def _one_with_layers(fields, problems):
+    """A format of these fields, the settings having every layer `country.code`… read."""
+    s = alert_settings_of({"rules": RULES_URL, "geofences": FENCE_URL, "namedAreas": PLACE_URL, "countries": "https://x/FeatureServer/14",
+                           "formats": [{"name": "a", "fields": fields}]}, problems)
+    return s.format()
+
+
+def test_values_of_a_layer_not_set_and_keys_no_level_has_are_settings_problems():
+    """
+    `country.code` without alertReports.countries (and the others without
+    theirs) is always empty; so is `confidence.<key>` no 確度 level has (the
+    vocabulary's or a store's own): both are told when the settings are read.
+    """
+    problems = []
+    _one(["country.code", {"source": "place.PREF", "fallback": "places.kind"}, ["area.CODE", "lat"], "rule.note", "confidence.en"],
+         problems, columns={"CODE": "country.code"})
+    assert problems == [
+        "alertReports.formats「a」: country.code は alertReports.countries（国）がないので常に空",
+        "alertReports.formats「a」: place.PREF は alertReports.namedAreas（地名）がないので常に空",
+        "alertReports.formats「a」: places.kind は alertReports.namedAreas（地名）がないので常に空",
+        "alertReports.formats「a」: area.CODE は alertReports.geofences（ジオフェンス）がないので常に空",
+        "alertReports.formats「a」: rule.note は alertReports.rules（条件テーブル）がないので常に空",
+        "alertReports.formats「a」の columns.CODE: country.code は alertReports.countries（国）がないので常に空",
+    ]
+    config = {
+        "observationVocabulary": {"confidences": [{"label": "確定", "code": "A"}, "推定"]},
+        "observationStores": [{"url": "https://x/FeatureServer/0", "confidences": [{"label": "要確認", "Rank": 3}]}],
+        "alertReports": {"formats": [{"name": "a", "fields": ["confidence.code", "confidence.rank", "confidence.en", "confidence.note",
+                                                              "confidence.cod", "confidence.Label"]}]},
+    }
+    _, problems = parse_config(config)
+    assert problems == [
+        "alertReports.formats「a」: confidence.cod は確度に「cod」がないので常に空（label・name・en・nameEn・note・color か確度に書いたキー）",
+        "alertReports.formats「a」: confidence.Label は確度に「Label」がないので常に空（label・name・en・nameEn・note・color か確度に書いたキー）",
+    ]
+
+
+def test_layer_attributes_the_formats_read_are_checked_against_the_layers():
+    """
+    抽出 reads each layer's attribute names: a role whose attribute the layer
+    lacks, or a name it has not (any case), is told (written empty); a named
+    area's `code` with no such role is the attribute CODE; the rules' old AREA.
+    """
+    from skywatch.core.obs.alerts import NamedArea, attribute_of, layer_key_problems
+
+    problems = []
+    s = alert_settings_of({
+        "rules": RULES_URL, "geofences": FENCE_URL, "namedAreas": PLACE_URL, "countries": "https://x/FeatureServer/14",
+        "formats": [{"name": "a", "fields": ["country.code", "country.en", "country.iso_a3", "country.ISO_A2", "place.code", "place.PREF",
+                                             "rule.area", "area.weight", "confidence.en"]},
+                    {"name": "b", "columns": {"PREF": {"source": "place.name", "fallback": "places.PREFF"}}}],
+    }, problems)
+    assert problems == []
+    fields = {"countries": ["OBJECTID", "COUNTRY_CODE", "COUNTRY_NAME", "ISO_A3"], "named_areas": ["NAME", "KIND", "CODE", "PREF"],
+              "rules": ["KIND", "AREA", "NOTE"]}
+    assert layer_key_problems(s, fields) == [
+        "通報フォーマット「a」: country.en は alertReports.countries（国）に nameEn の属性「COUNTRY_NAME_EN」がないので空",
+        "通報フォーマット「a」: country.ISO_A2 は alertReports.countries（国）に属性「ISO_A2」がないので空（属性: OBJECTID・COUNTRY_CODE・COUNTRY_NAME・ISO_A3）",
+        "通報フォーマット「b」の columns.PREF: places.PREFF は alertReports.namedAreas（地名）に属性「PREFF」がないので空（属性: NAME・KIND・CODE・PREF）",
+    ]
+    # Read as checked: a role the layer's settings do not have is an attribute name.
+    port = NamedArea(name="舞鶴港", rings=[], attributes={"NAME": "舞鶴港", "CODE": "P1"}, roles=dict(s.named_areas.fields))
+    assert attribute_of(port, "code") == "P1" and attribute_of(port, "name") == "舞鶴港" and attribute_of(port, "kindEn") == ""
