@@ -720,6 +720,99 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     dock._show_file_buttons()
 
 
+def test_the_map_goes_to_the_images_opened_all_of_them_when_several(plugin, monkeypatch):
+    """tsudo 2026-11-10: opening from the catalog moves and zooms the map to the opened files (the box around all of them)."""
+    from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsRectangle
+    from skywatch.core.catalog.search import record_of
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    searched(dock)
+    canvas = iface.canvas
+    # The map in another CRS than the images: their extents are shown in the map's.
+    mercator = QgsCoordinateReferenceSystem("EPSG:3857")
+    canvas.setDestinationCrs(mercator)
+    to_map = QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:4326"), mercator, QgsProject.instance())
+
+    def shown(west, south, east, north):
+        box = to_map.transformBoundingBox(QgsRectangle(west, south, east, north))
+        extent = canvas.extent()
+        # The whole box in view, and the view not much larger than it (a small margin around).
+        assert extent.contains(box), (extent.toString(), box.toString())
+        assert extent.width() < box.width() * 1.6 or extent.height() < box.height() * 1.6, (extent.toString(), box.toString())
+
+    far = QgsRectangle(-1e6, -1e6, -9e5, -9e5)
+    canvas.setExtent(far)
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: str(folder))
+    assert dock.zoom_opened.isChecked() and not dock.zoom_opened.isHidden() and settings.zoom_to_opened()
+    # One image (A.TIF: 139.6–139.8, 35.5–35.7).
+    a = next(r for r in dock.records if r.id == "A")
+    [layer] = dock.open_records([a])
+    shown(139.6, 35.5, 139.8, 35.7)
+    # A folder record of files in different places: the box around all of those opened.
+    catalog = dock._shown_catalog
+    scene = folder / "2026" / "Scene_Z"
+    (scene / "PAN").mkdir(parents=True)
+    geotiff(scene / "PAN" / "a_P.tif", west=140.0)
+    geotiff(scene / "PAN" / "b_P.tif", west=140.5)
+    geotiff(scene / "PAN" / "c_P.tif", west=141.5)
+    z = record_of({"attributes": {"IMG_ID": "Z", "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\scene_z"}}, catalog.fields)
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files[:2])
+    assert len(dock.open_records([z])) == 2
+    shown(140.0, 35.5, 140.7, 35.7)
+    # Several records at once: around all of them.
+    canvas.setExtent(far)
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files[2:])
+    assert len(dock.open_records([a, z])) == 2
+    shown(139.6, 35.5, 141.7, 35.7)
+    # Nothing opened: the map stays where it is.
+    canvas.setExtent(far)
+    before = canvas.extent()
+    assert dock.open_records([r for r in dock.records if r.id == "C"]) == []
+    assert canvas.extent() == before
+    # Off (kept for the PC): the map is not moved.
+    dock.zoom_opened.setChecked(False)
+    assert not settings.zoom_to_opened()
+    assert len(dock.open_records([a])) == 1
+    assert canvas.extent() == before
+    dock.zoom_opened.setChecked(True)
+    assert settings.zoom_to_opened()
+    # A catalog without image files has no 開く, so no such option either.
+    catalog.image_files = False
+    dock._show_file_buttons()
+    assert dock.zoom_opened.isHidden()
+    catalog.image_files = True
+    dock._show_file_buttons()
+
+
+def test_layers_extent_takes_each_layer_from_its_own_crs(tmp_path):
+    """catalog_io.layers_extent: the box around layers in the map's CRS; a layer without a CRS as it is; None for none."""
+    from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsRasterLayer, QgsRectangle
+    from osgeo import gdal
+
+    from skywatch.qgis_io.catalog_io import layers_extent
+
+    wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
+    mercator = QgsCoordinateReferenceSystem("EPSG:3857")
+    a = QgsRasterLayer(geotiff(tmp_path / "a.tif"), "a", "gdal")
+    b = QgsRasterLayer(geotiff(tmp_path / "b.tif", west=140.0), "b", "gdal")
+    assert a.isValid() and b.isValid()
+    assert layers_extent([], wgs84) is None
+    box = layers_extent([a, b], wgs84)
+    assert [round(v, 6) for v in (box.xMinimum(), box.yMinimum(), box.xMaximum(), box.yMaximum())] == [139.6, 35.5, 140.2, 35.7]
+    expected = QgsCoordinateTransform(wgs84, mercator, QgsProject.instance()).transformBoundingBox(QgsRectangle(139.6, 35.5, 140.2, 35.7))
+    box = layers_extent([a, b], mercator)
+    assert abs(box.xMinimum() - expected.xMinimum()) < 1 and abs(box.yMaximum() - expected.yMaximum()) < 1
+    # An image without a georeference: in its pixels, as QGIS draws it.
+    plain = tmp_path / "plain.tif"
+    ds = gdal.GetDriverByName("GTiff").Create(str(plain), 30, 10, 1, gdal.GDT_Byte)
+    ds = None
+    c = QgsRasterLayer(str(plain), "c", "gdal")
+    assert c.isValid()
+    box = layers_extent([c], mercator)
+    assert (box.width(), box.height()) == (30, 10)
+
+
 def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_otherwise(tmp_path):
     """`pathMappings` `pattern` / `to`: //(host)/(any folders)/(image ID) → (drive):/(image ID), else the path as written."""
     from skywatch.core.catalog import catalog_of
