@@ -951,7 +951,8 @@ class ObservationDock(PluginDock):
                 fences = load_geofences(client, s.geofences, token(s.geofences.url, s.geofences.token)) if s.geofences else []
             done = reported_ids(client, s, token(s.table.url, s.table.token), ids=[o.id for o in records]) if s.table else set()
             named = load_named_areas(client, s.named_areas, token(s.named_areas.url, s.named_areas.token)) if s.named_areas else []
-            return rules, fences, select(records, s, rules, fences, levels, done, history=history, named=named)
+            countries = load_named_areas(client, s.countries, token(s.countries.url, s.countries.token)) if s.countries else []
+            return rules, fences, select(records, s, rules, fences, levels, done, history=history, named=named, countries=countries)
 
         def finished(result) -> None:
             rules, fences, items = result

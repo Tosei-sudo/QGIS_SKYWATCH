@@ -475,17 +475,18 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 **注目の条件は Esri に置く**（増えたり変わったりするため）。設定ファイルには URL と属性名だけ。
 
 - 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`GEOFENCE_NAME`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない。2026-11-10 より前の既定は `AREA`。`GEOFENCE_NAME` がなく `AREA` だけのテーブルはそのまま読む）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
-- ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。記録が入っているジオフェンスの名前は項目 `area`
-- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略）。地名は 10 分間覚えておき（保存時のお知らせ・手動の追加）、「抽出」では毎回読み直す
+- ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）、`NAME_EN`（英語の名前。なくてもよい）。記録が入っているジオフェンスの名前は項目 `area`（英語は `area.en`）
+- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略、`fallback` で座標など別の項目）。`NAME_EN`・`KIND_EN`（英語の地名・種類。なくてもよい）は項目 `place.en`・`placeKind.en`・`places.en`。地名は 10 分間覚えておき（保存時のお知らせ・手動の追加）、「抽出」では毎回読み直す
+- 国（`countries`。なくてもよい）: 国のポリゴンのレイヤー。`COUNTRY_CODE`（国コード。ISO 3166 の `JP`・`JPN` など、レイヤーにあるもの）、`COUNTRY_NAME`（国名）、`COUNTRY_NAME_EN`（英語の国名。なくてもよい）、`ACTIVE`。記録を含む国（重なればいちばん小さいもの）の国コードが項目 `country`、国名が `countryName`（英語は `countryName.en`）。陸地だけのレイヤーなら海上の記録には付かない（領海・EEZ を含めた範囲にするか、`empty`・`fallback` で）。ほかのシステムの国境レイヤーでもよく、属性名が違えば `fields` で合わせる（`{ "url": …, "fields": { "code": "ISO_A3", "name": "NAME_JA", "nameEn": "NAME_EN" } }`）。読み直しは地名と同じ
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
-- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`／`name`・`kind`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
+- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`・`nameEn`／`name`・`kind`・`active`・`nameEn`・`kindEn`／`code`・`name`・`nameEn`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
 
 **フォーマット**（`formats`。名前を付けて複数）:
 
 | キー | 中身 | 既定 |
 | --- | --- | --- |
 | `name` | フォーマットの名前（必須。通報テーブルの `REPORT_NAME`） | — |
-| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "timeZone", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty" }`、固定の文字は `{ "text": "…" }`。日時の項目は `format` でその項目だけの書式（`"%Y/%m/%d"` で日付だけ、`"%H:%M"` で時刻だけ）、`timeZone` でその項目だけのタイムゾーン（`{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }` で UTC の時刻。ゾーン名は `%z`（`+0900`）か `suffix` で付ける）。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く） | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
+| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "timeZone", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty", "join", "fallback" }`、固定の文字は `{ "text": "…" }`。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目英語)」も。日時の項目は `format` でその項目だけの書式（`"%Y/%m/%d"` で日付だけ、`"%H:%M"` で時刻だけ）、`timeZone` でその項目だけのタイムゾーン（`{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }` で UTC の時刻。ゾーン名は `%z`（`+0900`）か `suffix` で付ける）。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く）。`fallback` は値が空のときに代わりに書く項目、`join` は 1 つの項目に並べる値の間の文字 | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
 | `delimiter` | 区切り文字（タブは `"\t"`） | `\|` |
 | `escape` | 値の中の区切り文字・改行の置き換え | 空白 |
 | `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}`。`@` のあとにタイムゾーンを書くとそのゾーンで（`{now:%H:%M@UTC}`・`{date@UTC}`） | なし |
@@ -494,9 +495,16 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `newline` | `crlf`・`lf` | `crlf` |
 | `clipboard` | 「通報」でクリップボードへコピー | `true` |
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可）。その文字コードで書けない文字（cp932 の —・é・絵文字など）はファイルだけ ? にして画面に出す | なし |
-| `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }` | なし |
+| `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }`（項目は `fields` と同じ書き方。属性が文字列でなければ、使った項目の値そのもの） | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "不在" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`。
+
+#### 通報の項目の書き方（度分秒・複数の値・代わりの項目・英語）
+
+- **緯度経度の度分秒**: `lat`・`lon` の `format` に `"dms"`（`35°26'31"N`・`139°38'30"E`）、`"dm"`（`35°26.51'N`）、または書式。書式の `{d}`・`{m}`・`{s}` は度・分・秒、`{dd}`・`{mm}`・`{ss}` はゼロ埋め（度は緯度 2 桁・経度 3 桁）、`{h}` は `N`・`S`・`E`・`W`、`{hj}` は `北緯`・`南緯`・`東経`・`西経`、`{sign}` は南緯・西経のとき `-`。例: `"{hj}{d}度{m}分{s}秒"` → `北緯35度26分31秒`、`"{dd}{mm}{ss}{h}"` → `352631N`、`"{d}{h}"` → `35.4418N`。`digits` は書式のいちばん小さい単位の小数の桁（既定は秒 0・分 2・度 4）。丸めは 1 回だけなので 59.6 秒は次の分に繰り上がる。`format` がなければ今までどおり 10 進の度（`digits` で小数の桁）
+- **1 つの項目に複数の値**: `source` を配列にする（`{ "source": ["lat", "lon"], "format": "dms" }` → `35°26'31"N 139°38'30"E`）。間は `join`（既定は空白 1 つ）。項目名で書いたものには、外側の `format`・`timeZone`・`digits`・`level`・`map` のうちその項目に合うものが効く（日時の書式は日時に、度分秒の書式は緯度経度に）。それぞれ別の書き方にするなら `{ "source": … }` で書く（`{ "source": [{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }, { "source": "lat", "format": "dm" }], "join": " " }`）。空の値は飛ばす（間の文字も付かない）。`prefix`・`suffix`・`empty`・`omitEmpty` はまとめた値に効く。項目そのものを配列にしても同じ（`["lat", "lon"]`）
+- **代わりの項目**（`fallback`）: 値が空のときだけ別の項目を書く。`{ "source": "place", "fallback": { "source": ["lat", "lon"], "format": "dms" } }` で、地名に入っていない記録は座標。`fallback` にも `fallback` を書ける（`place` → `places` → 座標 など）。代わりの項目の `prefix`・`suffix` はその項目のもの。どれも空のときに `empty`、`omitEmpty`。`fallback` を配列で書くと「複数の値を 1 つに」（`"fallback": ["lat", "lon"]` は緯度と経度の両方）
+- **英語**: 項目名に `.en`。`confidence.en` は確度の英語名（[`observationVocabulary.confidences`](#設定ファイルの書き方) の `{ "label": "確定", "en": "Confirmed" }`。既定の確定・推定・不明は `Confirmed`・`Probable`・`Unknown`）、`area.en` はジオフェンスの `NAME_EN`、`place.en`・`places.en`・`placeKind.en` は地名の `NAME_EN`・`KIND_EN`、`countryName.en` は国の `COUNTRY_NAME_EN`。英語名のないものは空（ジオフェンス・地名を並べる `area.en`・`places.en` では、英語名のあるものだけ）。日本語で書くなら `{ "source": "place.en", "fallback": "place" }`。並べる項目の間は日本語が「・」、英語が「, 」（`join` で変えられる。`area`・`rule`・`places` と英語のものだけ）
 
 **重要度スコア**（`score`。書かなければ既定の重みで付ける）:
 
@@ -514,6 +522,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   "geofences": "https://…/Alerts/FeatureServer/1",
   "table": "https://…/Alerts/FeatureServer/2",
   "namedAreas": "https://…/Alerts/FeatureServer/3",
+  "countries": "https://…/Alerts/FeatureServer/4",
   "minConfidence": "推定",
   "score": { "weights": { "confidence": 1, "area": 2, "rule": 1, "rarity": 1 }, "rarity": { "days": 14, "radiusKm": 30, "level": 1 } },
   "default": "速報",
@@ -524,6 +533,10 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
                  { "source": "kind", "level": 1 }, "objectName", "activity",
                  { "source": "place", "omitEmpty": true }, { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
       "header": "【注目】{date} JST（{now:%H%M@UTC}Z） {count}件", "footer": "以上" },
+    { "name": "English", "delimiter": "/", "timeZone": "UTC", "dateFormat": "%d%H%MZ %b %y",
+      "fields": ["imageTime", "objectName", "confidence.en", { "source": "country", "empty": "--" },
+                 { "source": "place.en", "fallback": { "source": ["lat", "lon"], "format": "{dd}{mm}{ss}{h}" } },
+                 { "source": ["lat", "lon"], "format": "dms" }, { "source": "area.en", "omitEmpty": true }] },
     { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
       "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
   ]
@@ -1359,8 +1372,8 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
-| `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note" }`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
-| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en" }`。`en` は英語の名前で通報の `confidence.en`）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
@@ -1473,6 +1486,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | [`TBL_AI_RESULT`](#tbl_ai_result外部-ai-の結果) | ポリゴンかポイント | 読み | 外部 AI の結果 | `aiResultSources[].url` |
 | [`TBL_DETECTION`](#tbl_detection検出結果の転記先) | ポリゴンかポイント | 書き込み | プラグインの物体検出の転記先（「AI結果」でも読む） | `detectionOutputs[].url` |
 | [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
+| [`TBL_COUNTRY`](#tbl_country国) | ポリゴン | 読み | 国（通報の国コード・国名） | `alertReports.countries` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -1699,6 +1713,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `NAME` | 名前 | `String(255)` | ジオフェンスの名前（条件の `GEOFENCE_NAME`） | `name` |
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
 | `WEIGHT` | 重み | `Double` | 重要度スコアの場所の重み（空欄は 1） | `weight` |
+| `NAME_EN` | 英語名 | `String(255)` | 英語の名前（通報の `area.en`。なくてもよい） | `nameEn` |
 
 ### `TBL_NAMED_AREA`（地名のポリゴン）
 
@@ -1709,6 +1724,8 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `NAME` | 地名 | `String(255)` | 地名・施設名 | `name` |
 | `KIND` | 種類 | `String(64)` | 港・施設など | `kind` |
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
+| `NAME_EN` | 英語名 | `String(255)` | 英語の地名（通報の `place.en`・`places.en`。なくてもよい） | `nameEn` |
+| `KIND_EN` | 種類（英語） | `String(64)` | 英語の種類（通報の `placeKind.en`。なくてもよい） | `kindEn` |
 
 ### `TBL_ALERT_LOG`（通報記録）
 
@@ -1834,6 +1851,17 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `PLACE_NAME_KANA` | 読み | `String(255)` | 読み（ひらがなかカタカナ。なくてもよい） | `field`（2 番目以降） |
 | `PLACE_ALIAS` | 別名 | `String(255)` | 別名・略称（複数なら「,」区切りで 1 つの値に。なくてもよい） | `field`（2 番目以降） |
 
+### `TBL_COUNTRY`（国）
+
+国のポリゴン（記録を含むものが通報の `country`・`countryName`。重なるときはいちばん小さいもの）。領海・EEZ を含めた範囲にしておけば海上の記録にも国が付く。ほかのシステムの国境レイヤーでもよく、属性名が違えば `alertReports.countries.fields` で合わせる（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `COUNTRY_CODE` | 国コード | `String(8)` | 国コード（ISO 3166 の `JP`・`JPN` など。通報の `country`） | `code` |
+| `COUNTRY_NAME` | 国名 | `String(255)` | 国名（通報の `countryName`） | `name` |
+| `COUNTRY_NAME_EN` | 国名（英語） | `String(255)` | 英語の国名（通報の `countryName.en`。なくてもよい） | `nameEn` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -1875,6 +1903,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
     "geofences": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/10",                    // TBL_ALERT_GEOFENCE
     "namedAreas": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/11",                   // TBL_NAMED_AREA
     "table": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/12",                        // TBL_ALERT_LOG
+    "countries": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/20",                    // TBL_COUNTRY
     "formats": [{ "name": "既定" }]
   },
   "assignments": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/13",                    // TBL_ASSIGNMENT

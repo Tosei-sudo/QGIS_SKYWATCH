@@ -16,7 +16,7 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
-    from skywatch.core import ai_results, basemaps, config, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
+    from skywatch.core import ai_results, basemaps, config, coords, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
     from skywatch.core.ai import model_config, transfer
     from skywatch.core.catalog import config as catalog_config
     from skywatch.core.enhance import pipeline
@@ -43,6 +43,7 @@ def plugin_constants() -> dict:
             "alertRules": dict(alerts.DEFAULT_RULE_FIELDS),
             "alertGeofences": dict(alerts.DEFAULT_FENCE_FIELDS),
             "alertPlaces": dict(alerts.DEFAULT_PLACE_FIELDS),
+            "alertCountries": dict(alerts.DEFAULT_COUNTRY_FIELDS),
             "alertLog": dict(alerts.DEFAULT_LOG_FIELDS),
             "assignments": dict(assignments.DEFAULT_ASSIGNMENT_FIELDS),
             "handoverMemos": dict(handover.DEFAULT_HANDOVER_FIELDS),
@@ -51,6 +52,10 @@ def plugin_constants() -> dict:
         },
         "alertSources": list(alerts.SOURCES),
         "alertTimeSources": list(alerts.TIME_SOURCES),
+        "alertAngleSources": list(alerts.ANGLE_SOURCES),
+        "alertListSources": list(alerts.LIST_SOURCES),
+        "anglePresets": dict(coords.ANGLE_PRESETS),
+        "anglePlaces": list(coords.ANGLE_PLACES),
         "obsExportSources": list(obs_export.SOURCES),
         "obsExportFileSources": list(obs_export.FILE_SOURCES),
         "obsGeometries": list(obs_export.GEOMETRIES),

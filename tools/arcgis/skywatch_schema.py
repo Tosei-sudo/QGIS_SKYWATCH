@@ -211,11 +211,14 @@ TABLES = (
         F("NAME", "名前", "TEXT", 255, "name"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("WEIGHT", "重み", "DOUBLE", None, "weight"),
+        F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
     )),
     Table("TBL_NAMED_AREA", "地名のポリゴン", "POLYGON", writable=False, setting="alertReports.namedAreas", fields=(
         F("NAME", "地名", "TEXT", 255, "name"),
         F("KIND", "種類", "TEXT", 64, "kind"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
+        F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
+        F("KIND_EN", "種類（英語）", "TEXT", 64, "kindEn"),
     )),
     Table("TBL_ALERT_LOG", "通報記録", None, writable=True, setting="alertReports.table", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "obsId"),
@@ -300,6 +303,12 @@ TABLES = (
         F("PLACE_NAME", "地名", "TEXT", 255, ""),
         F("PLACE_NAME_KANA", "読み", "TEXT", 255, ""),
         F("PLACE_ALIAS", "別名", "TEXT", 255, ""),
+    )),
+    Table("TBL_COUNTRY", "国", "POLYGON", writable=False, setting="alertReports.countries", fields=(
+        F("COUNTRY_CODE", "国コード", "TEXT", 8, "code"),
+        F("COUNTRY_NAME", "国名", "TEXT", 255, "name"),
+        F("COUNTRY_NAME_EN", "国名（英語）", "TEXT", 255, "nameEn"),
+        F("ACTIVE", "有効", "SHORT", None, "active"),
     )),
 )
 
@@ -389,7 +398,8 @@ def plugin_config(urls: dict) -> dict:
             store["taxonomyTable"] = urls["TBL_TAXONOMY"]
         config["observationStores"] = [store]
     alerts = {key: urls[t] for key, t in (("rules", "TBL_ALERT_RULE"), ("geofences", "TBL_ALERT_GEOFENCE"),
-                                          ("namedAreas", "TBL_NAMED_AREA"), ("table", "TBL_ALERT_LOG")) if t in urls}
+                                          ("namedAreas", "TBL_NAMED_AREA"), ("table", "TBL_ALERT_LOG"),
+                                          ("countries", "TBL_COUNTRY")) if t in urls}
     if alerts:
         alerts["formats"] = [{"name": "既定"}]
         config["alertReports"] = alerts
