@@ -9,9 +9,11 @@ from __future__ import annotations
 import csv
 import io
 import json
+from datetime import datetime
 
 from skywatch.core.request.daily import HELD, TAKEN, allocate, gather
 from skywatch.core.request.export import Context, csv_text, geometry_value, json_text, printf, render
+from skywatch.core.request.model import JST
 from skywatch.core.request.rows import field_roles, request_of_row, row_of
 from skywatch.core.request.store import DEFAULT_REQUEST_FIELDS, attributes_of, request_of
 from skywatch.core.request.systems import export_systems_of
@@ -229,3 +231,39 @@ def test_the_docs_samples_hold():
     assert [t["satellites"] for t in tasks] == [[""], ["CONST-Z1", "CONST-Z2"]]
     assert tasks[1]["controlNo"] == "K-2026-0012" and tasks[0]["controlNo"] == "" and tasks[0]["options"] == ["On"]
     assert tasks[1]["center"] == {"type": "Point", "coordinates": [139.85, 35.5]}
+
+
+def test_the_docs_result_file_samples_hold():
+    """docs/request-samples: A's result file (CSV) and C's (JSON by its schema) are read as the settings say."""
+    import os
+
+    from skywatch.core.config import parse_config_text
+    from skywatch.core.request.result_file import read_answers
+
+    root = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "request-samples")
+    with open(os.path.join(root, "config.sample.jsonc"), encoding="utf-8") as f:
+        config, problems = parse_config_text(f.read())
+    a = next(s for s in config.request_exports if s.system == "SYS-A")
+    with open(os.path.join(root, "sys-a.result.csv.example"), encoding="utf-8") as f:
+        answers, problems = read_answers(f.read().encode("cp932"), a.result_file)
+    # (the cancelled row skipped by its 状態)
+    assert problems == ["only・skip で 1 行を読み飛ばし"]
+    assert [(x.line, x.key, x.answer, x.satellite, x.external_id) for x in answers] == [
+        (3, "00000123", "採用", "OPT-X 2", "P-1101"), (4, "00000124", "不採用", "", ""), (5, "00000125", "不明", "", ""),
+        (6, "", "採用", "OPT-X 1", "P-1102")]
+    assert answers[0].planned_at == datetime(2026, 11, 8, 10, 32, tzinfo=JST).timestamp() * 1000
+    assert answers[1].reason == "雲量予報 80%" and answers[3].name == "定常 相模湾" and answers[3].rings
+    c = next(s for s in config.request_exports if s.system == "SYS-C")
+
+    def load(path):
+        with open(os.path.join(root, path), encoding="utf-8") as f:
+            return json.load(f)
+
+    with open(os.path.join(root, "sys-c.result.json.example"), "rb") as f:
+        answers, problems = read_answers(f.read(), c.result_file, load)
+    assert problems == []
+    assert [(x.keys, x.answer, x.external_id, x.satellite, x.day, x.system) for x in answers] == [
+        ({"id": "R-0001", "managementNo": "K-2026-0012"}, "採用", "88001", "CONST-Z2", "2026-11-08", "SYS-C"),
+        ({"id": "R-0005"}, "不採用", "", "", "2026-11-08", "SYS-C"),
+        ({}, "採用", "88002", "CONST-Z1", "2026-11-08", "SYS-C")]
+    assert answers[2].name == "定常 房総沖" and answers[2].rings[0][0] == [140.0, 34.8]

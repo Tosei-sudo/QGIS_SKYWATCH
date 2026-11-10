@@ -219,7 +219,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         columns=columns,
         schema=schema if is_record(schema) or isinstance(schema, str) else None,
         digits=int(digits) if is_number(digits) and 0 <= digits <= 12 else 6,
-        result_file=result_file_of(value.get("resultFile"), f"{at}.resultFile", problems, zone),
+        result_file=result_file_of(value.get("resultFile"), f"{at}.resultFile", problems, zone, values),
     )
 
 

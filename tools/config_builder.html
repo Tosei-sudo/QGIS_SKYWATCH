@@ -661,6 +661,85 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "csv",
   "json"
  ],
+ "resultTargets": [
+  "id",
+  "managementNo",
+  "identificationNo",
+  "result",
+  "reason",
+  "plannedAt",
+  "satellite",
+  "name",
+  "externalId",
+  "geometry",
+  "centerLat",
+  "centerLon",
+  "bboxWest",
+  "bboxSouth",
+  "bboxEast",
+  "bboxNorth",
+  "day",
+  "system"
+ ],
+ "resultKeySources": [
+  "id",
+  "managementNo",
+  "identificationNo"
+ ],
+ "resultGeometries": [
+  "wkt",
+  "geojson",
+  "bbox",
+  "center",
+  "centerRadius",
+  "vertices",
+  "centerGeojson"
+ ],
+ "resultEncodings": [
+  "cp932",
+  "euc-jp",
+  "utf-16",
+  "utf-8",
+  "utf-8-sig"
+ ],
+ "resultWords": {
+  "採用": [
+   "採用",
+   "OK",
+   "○",
+   "〇",
+   "1",
+   "TRUE",
+   "YES",
+   "Y",
+   "ACCEPTED",
+   "ADOPTED",
+   "PLANNED"
+  ],
+  "不採用": [
+   "不採用",
+   "NG",
+   "×",
+   "✕",
+   "0",
+   "FALSE",
+   "NO",
+   "N",
+   "REJECTED",
+   "DECLINED"
+  ],
+  "不明": [
+   "不明",
+   "未定",
+   "保留",
+   "回答待ち",
+   "PENDING",
+   "WAITING",
+   "UNKNOWN",
+   "TBD",
+   "HOLD"
+  ]
+ },
  "encodings": [
   "cp932",
   "utf-8",
@@ -834,6 +913,16 @@ const OBS_SOURCE_LABELS = {
   periodBasis: "期間の基準", areaName: "場所の名前", format: "フォーマット名",
 };
 const OBS_GEOMETRY_LABELS = { geojson: "GeoJSON の Point", wkt: "WKT の POINT", latlon: "緯度,経度" };
+const RESULT_LABELS = {
+  id: "依頼 ID", managementNo: "管理番号", identificationNo: "識別番号", result: "採否（採用・不採用・不明）", reason: "理由・メモ",
+  plannedAt: "撮像予定日時", satellite: "衛星", name: "名称（要求外）", externalId: "システム側の番号", geometry: "範囲（要求外）",
+  centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "西端の経度", bboxSouth: "南端の緯度", bboxEast: "東端の経度", bboxNorth: "北端の緯度",
+  day: "対象日（違う日の行は読まない）", system: "システム（ほかのシステムの行は読まない）",
+};
+const RESULT_GEOMETRY_LABELS = { ...GEOMETRY_LABELS, wkt: "WKT（POLYGON・POINT）", geojson: "GeoJSON（Polygon・Point）", center: "緯度,経度（点）",
+  centerRadius: "緯度,経度,半径km", centerGeojson: "GeoJSON の Point" };
+/** 結果ファイル（resultFile）の持ち主のシステム。 */
+const systemOfResult = (rf) => (Array.isArray(state.requestExports) ? state.requestExports : []).find((x) => isObj(x) && x.resultFile === rf) || {};
 /** 列・スキーマの編集の違い（撮像依頼の日次出力・観測記録のエクスポート）。 */
 const PROFILES = {
   request: {
@@ -853,6 +942,18 @@ const PROFILES = {
     legend: "列（columns）。CSV は上から順に左の列、JSON（スキーマなし）は記録ごとのオブジェクトのキー", note: "受け取り側が求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が records の配列が記録の一覧になり、その items の中は記録 1 件ごとの値。固定値は const。",
     inside: "記録ごとの値は x-source: records の配列の items の中に置く（外に置くと出ない）", name: (o) => o.name || "observations",
     template: () => obsSchemaTemplate(), allowed: false, listSources: () => [], defaults: false,
+  },
+  /** 結果ファイルの読み方（読む向き: 列・プロパティが何かを target / x-target で）。 */
+  result: {
+    sk: "target", xk: "x-target", reading: true,
+    sources: () => K.resultTargets, labels: RESULT_LABELS, geometries: () => K.resultGeometries, geometryLabels: RESULT_GEOMETRY_LABELS,
+    array: "records", arrayLabel: "records（結果の一覧）", fileSources: ["day", "system", "satellite", "result", "reason", "plannedAt", "records"],
+    timeSources: ["plannedAt", "day"], digitSources: [],
+    common: ["id", "result", "reason", "plannedAt", "satellite", "externalId"],
+    legend: "列（columns）。見出しのある CSV は見出しの名前、見出しのない CSV は上から順に左の列（何列目かも書ける）、JSON（スキーマなし）は記録の中の場所（request.id のようにドット区切り）",
+    note: "システムの JSON Schema に、各プロパティが何か（x-target）を書き添える。x-target が records の配列が結果の一覧で、その items の中は結果 1 件ごとの値。外のプロパティ（対象日・システムなど）は全件に効く。ファイルはこのスキーマで検証もする。",
+    inside: "依頼を表す値（id・管理番号・識別番号）は x-target: records の配列の items の中に置く", name: (o) => (systemOfResult(o).system || "system") + ".result",
+    template: () => resultSchemaTemplate(), allowed: false, listSources: () => [], defaults: true,
   },
 };
 const DATE_FORMATS = ["iso", "iso-date", "unix", "unixms", "%Y%m%d", "%Y/%m/%d %H:%M", "%Y-%m-%dT%H:%M:%S"];
@@ -1028,6 +1129,20 @@ const PRIORITY = { k: "priority", t: "priority", l: "優先度の書き方" };
 const COLUMNS = { k: "columns", t: "columns", l: "CSV の列", showIf: (it) => (it.format || "csv") === "csv" };
 const SCHEMA = { k: "schema", t: "schema", l: "JSON Schema", showIf: (it) => it.format === "json" };
 const SAMPLE = { k: "", t: "sample", l: "見本" };
+const RESULT_FILE = O("resultFile", "採否の結果ファイル", [
+  S("format", "形式", [["csv", "CSV（区切りのテキスト）"], ["json", "JSON"]], { ph: "csv", rerender: true }),
+  S("encoding", "文字コード", K.resultEncodings, { ph: "utf-8" }),
+  S("delimiter", "区切り文字", [[",", ",（カンマ）"], ["tab", "タブ"], ["\t", "タブ（\\t）"], [";", ";"], ["|", "|"], ["space", "空白"]], { ph: ",", showIf: (it) => (it.format || "csv") === "csv" }),
+  B("header", "見出しの行", { showIf: (it) => (it.format || "csv") === "csv", help: "既定 true。false: 見出しなし（列は上から順に左から。何列目かを書いてもよい）" }),
+  N("skipLines", "はじめに飛ばす行数", { min: 0, ph: "0", showIf: (it) => (it.format || "csv") === "csv", help: "見出しの前のタイトルなどの行" }),
+  T("records", "結果の配列の場所（records）", { ph: "data.results", showIf: (it) => it.format === "json" && it.schema === undefined, help: "ドット区切り。空ならファイルそのものが配列" }),
+  S("missing", "出したのにファイルにない依頼", [["不採用", "不採用"], ["不明", "不明（そのまま）"]], { ph: "採否の列があれば 不明、なければ 不採用" }),
+  N("sizeKm", "点のときの範囲の一辺（km）", { ph: "10", help: "要求外の行が点（中心）だけのとき、この大きさの正方形にする" }),
+  { k: "", t: "resultLegacy", l: "はじめの形" },
+  { k: "columns", t: "columns", l: "列", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && ((it.format || "csv") === "csv" || it.schema === undefined) },
+  { k: "schema", t: "schema", l: "JSON Schema", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && it.format === "json" },
+  { k: "", t: "resultSample", l: "試し読み" },
+], { check: (rf, at, p) => checkResultFile(rf, at, p) });
 
 const SPEC = [
   { group: "画像カタログ・通知・画像", keys: [
@@ -1114,8 +1229,7 @@ const SPEC = [
         T("dateFormat", "日時の書式", { ph: "iso", list: () => DATE_FORMATS, help: "iso・iso-date・unix・unixms か strftime（%Y%m%d など）" }),
         N("digits", "座標の小数の桁", { min: 0, max: 12, ph: "6" }), PRIORITY,
         J("values", "値の読み替え（values）", { ph: '{ "lookSide": { "右": "R", "左": "L", "任意": "B" } }', help: "項目ごとに { 値: 書き方 }。全部の列・プロパティに効く" }),
-        J("resultFile", "採否の結果ファイル（resultFile）", { ph: '{ "key": "REQ_ID", "keySource": "id", "result": "STATUS", "adopted": ["OK"], "rejected": ["NG"], "plannedAt": "PLAN_TIME" }',
-          help: "システムから返る採否のファイルの読み方（「撮像予定」ドックで取り込む）。key（依頼の列）は必須。format（csv・json）・encoding・records・missing（不採用・不明）・reason・satellite・name・externalId・timeFormat・geometry。docs/imaging-requests.md §20" }),
+        RESULT_FILE,
         COLUMNS, SCHEMA, SAMPLE,
       ], { title: (it) => it.label || it.system, check: checkExport, unique: "system" }) },
   ] },
@@ -1343,6 +1457,8 @@ function field(f, obj, commit, item) {
   };
   const v = obj[f.k];
   if (f.t === "sample") return sampleBox(obj);
+  if (f.t === "resultSample") return resultSampleBox(obj);
+  if (f.t === "resultLegacy") return resultLegacyBox(obj, commit);
   if (f.t === "priority") return priorityField(f, obj, commit);
   if (f.t === "columns") return columnsField(f, obj, commit);
   if (f.t === "schema") return schemaField(f, obj, commit);
@@ -1606,65 +1722,98 @@ function priorityField(f, obj, commit) {
 
 const sourceOptions = (extra = [], prof = PROFILES.request) => [...extra, ...prof.sources().map((s) => [s, `${s}（${prof.labels[s] || s}）`])];
 
+/** 「OK=採用, NG=不採用」の読み替え（reading は =不明 のように空の値のキーも）。 */
+function mapOfText(text, reading) {
+  const m = {};
+  for (const part of text.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0 || (reading && at === 0)) m[part.slice(0, at).trim()] = reading ? part.slice(at + 1).trim() : autoValue(part.slice(at + 1)) ?? ""; }
+  return m;
+}
+const mapText = (m) => (isObj(m) ? Object.entries(m).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "");
+const listText = (a) => (Array.isArray(a) ? a.map(showAuto).join(", ") : a === undefined ? "" : showAuto(a));
+const listOfText = (t) => t.split(/[,、]/).map((x) => x.trim()).filter(Boolean);
+
 function columnsField(f, obj, commit) {
   const prof = f.profile || PROFILES.request;
+  const sk = prof.sk || "source";
+  const reading = !!prof.reading;
+  const NONE = "\u0000none", VALUE = "\u0000value";
   const cols = Array.isArray(obj.columns) ? obj.columns : [];
   const save = () => { if (!cols.length) delete obj.columns; else obj.columns = cols; commit(); changed(); };
   const box = el("fieldset", {}, el("legend", { text: prof.legend }));
-  const table = el("table", { class: "cols" }, el("tr", {}, ...["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", prof.allowed ? "許す値（allowed）・空のとき（default）" : "空のとき・前後（empty・prefix・suffix）", ""].map((h) => el("th", { text: h }))));
+  const heads = reading ? ["列（key・何列目）", "何の値（target）", "書式・座標・抜き出し", "読み替え（map）", "空のとき・読む行（default・only・skip）", ""]
+    : ["列名（key）", "入れる値（source）", "書式・座標", "読み替え（map）", prof.allowed ? "許す値（allowed）・空のとき（default）" : "空のとき・前後（empty・prefix・suffix）", ""];
+  const table = el("table", { class: "cols" }, el("tr", {}, ...heads.map((h) => el("th", { text: h }))));
   cols.forEach((c, i) => {
     if (!isObj(c)) { table.append(el("tr", {}, el("td", { colspan: 6 }, jsonArea(c, (x) => { cols[i] = x; save(); })))); return; }
     const upd = (k, v) => { if (v === undefined || v === "") delete c[k]; else c[k] = v; save(); };
+    const cur = c[sk] !== undefined ? c[sk] : "value" in c || !reading ? VALUE : NONE;
+    const extra = reading ? [[NONE, "読まない（並びの穴埋め・行の絞り込み）"], [VALUE, "固定値（全行）"]] : [[VALUE, "固定値"]];
     const src = el("select", { onchange: (e) => {
       const s = e.target.value;
-      if (s === "\u0000value") { delete c.source; if (!("value" in c)) c.value = ""; } else { c.source = s; delete c.value; }
-      if (c.source !== "geometry") delete c.geometry;
+      if (s === VALUE) { delete c[sk]; if (!("value" in c)) c.value = ""; } else if (s === NONE) { delete c[sk]; delete c.value; } else { c[sk] = s; delete c.value; }
+      if (c[sk] !== "geometry") delete c.geometry;
       save(); render();
-    } }, ...sourceOptions([["\u0000value", "固定値"]], prof).map(([v, l]) => el("option", { value: v, text: l, selected: c.source === undefined ? v === "\u0000value" : c.source === v })));
+    } }, ...sourceOptions(extra, prof).map(([v, l]) => el("option", { value: v, text: l, selected: cur === v })));
     const fmtCell = el("td", {});
-    if (c.source === undefined) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", title: prof.defaults ? "固定値（value）。書いたとおりの文字を出す（001 も 001 のまま）" : "固定値（value）",
+    if (cur === VALUE) fmtCell.append(el("input", { type: "text", value: showAuto(c.value), placeholder: "固定値", title: prof.defaults ? "固定値（value）。書いたとおりの文字（001 も 001 のまま）" : "固定値（value）",
       oninput: (e) => { c.value = prof.defaults ? e.target.value : autoValue(e.target.value) ?? ""; save(); } }));
-    else if (c.source === "geometry") {
-      fmtCell.append(el("select", { onchange: (e) => upd("geometry", e.target.value) }, ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (c.geometry || "wkt") === g }))),
-        el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
+    else if (cur === NONE) fmtCell.append(el("span", { class: "note", text: "—" }));
+    else if (c[sk] === "geometry") {
+      fmtCell.append(el("select", { title: reading ? "geometry: 範囲の書き方（WKT・GeoJSON は中身で分かる）" : "", onchange: (e) => upd("geometry", e.target.value) },
+        ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (c.geometry || "wkt") === g }))));
+      if (!reading) fmtCell.append(el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
     } else {
-      fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: prof.timeSources.includes(c.source) ? "日時の書式（既定はフォーマットの）" : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
-      if (prof.digitSources.includes(c.source))
+      const timePh = reading ? "日時の書式（iso・unix・%Y%m%d %H%M）" : "日時の書式（既定はフォーマットの）";
+      if (!reading || prof.timeSources.includes(c[sk]))
+        fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: prof.timeSources.includes(c[sk]) ? timePh : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
+      if (prof.digitSources.includes(c[sk]))
         fmtCell.append(el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
-      if (!prof.allowed && c.source === "kind")
+      if (!prof.allowed && !reading && c[sk] === "kind")
         fmtCell.append(el("input", { type: "number", value: c.level ?? "", placeholder: "階層（1・-1）", title: "level: 1 が最上位、-1 が最下位。空で分類全体", oninput: (e) => upd("level", e.target.value === "" || Number(e.target.value) === 0 ? undefined : Number(e.target.value)) }));
     }
-    const mapText = isObj(c.map) ? Object.entries(c.map).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "";
-    table.append(el("tr", {},
-      el("td", {}, el("input", { type: "text", value: c.key ?? "", class: c.key ? "" : "invalid", oninput: (e) => { e.target.classList.toggle("invalid", !e.target.value); upd("key", e.target.value); } })),
-      el("td", {}, src), fmtCell,
-      el("td", {}, el("input", { type: "text", value: mapText, placeholder: "右=R, 左=L", oninput: (e) => {
-        const m = {};
-        for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
-        upd("map", isEmpty(m) ? undefined : m);
-      } })),
-      prof.allowed ? el("td", {}, el("input", { type: "text", class: "short", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", title: "許す値（allowed）: これ以外の値が出たら警告", oninput: (e) => {
+    if (reading && cur !== VALUE)
+      fmtCell.append(el("input", { type: "text", class: "mono", value: c.pattern ?? "", placeholder: "抜き出し ^REQ-(\\d+)", title: "pattern: 正規表現。最初の ( ) の中（なければ合った部分）を値にする",
+        oninput: (e) => { let ok = true; try { new RegExp(e.target.value); } catch (err) { ok = false; } e.target.classList.toggle("invalid", !ok); upd("pattern", e.target.value); } }));
+    const keyOk = () => !!(c.key || c.column !== undefined || "value" in c);
+    const keyCell = el("td", {}, el("input", { type: "text", value: c.key ?? "", class: (reading ? keyOk() : c.key) ? "" : "invalid", placeholder: reading ? (prof === PROFILES.result ? "見出し・場所" : "") : "",
+      oninput: (e) => { upd("key", e.target.value); e.target.classList.toggle("invalid", reading ? !keyOk() : !e.target.value); } }));
+    if (reading && cur !== VALUE) keyCell.append(el("input", { type: "number", class: "short", min: 1, value: c.column ?? "", placeholder: "何列目", title: "column: 何列目か（1 が左）。見出しの名前の代わり",
+      oninput: (e) => upd("column", e.target.value === "" ? undefined : Number(e.target.value)) }));
+    let last;
+    if (reading) last = el("td", {},
+      cur === VALUE ? null : el("input", { type: "text", class: "short", value: c.default === undefined ? "" : showAuto(c.default), placeholder: "空のとき", title: "default: 値が空のときに使う値（採否なら 不明 など）", oninput: (e) => upd("default", e.target.value === "" ? undefined : e.target.value) }),
+      cur === VALUE ? null : el("input", { type: "text", class: "short", value: listText(c.only), placeholder: "only", title: "only: この列の（ファイルの）値がこのどれかの行だけ読む（カンマ区切り）", oninput: (e) => { const a = listOfText(e.target.value); upd("only", a.length ? a : undefined); } }),
+      cur === VALUE ? null : el("input", { type: "text", class: "short", value: listText(c.skip), placeholder: "skip", title: "skip: この列の（ファイルの）値がこのどれかの行は読まない（カンマ区切り）", oninput: (e) => { const a = listOfText(e.target.value); upd("skip", a.length ? a : undefined); } }));
+    else if (prof.allowed) last = el("td", {}, el("input", { type: "text", class: "short", value: Array.isArray(c.allowed) ? c.allowed.map(showAuto).join(", ") : "", placeholder: "High, Middle, Low", title: "許す値（allowed）: これ以外の値が出たら警告", oninput: (e) => {
         const a = e.target.value.split(/[,、]/).map((s) => s.trim()).filter(Boolean).map(autoValue);
         upd("allowed", a.length ? a : undefined);
-      } }), c.source === undefined ? null : el("input", { type: "text", class: "short", value: c.default === undefined ? "" : showAuto(c.default), placeholder: "空のとき", title: "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く文字", oninput: (e) => upd("default", e.target.value === "" ? undefined : e.target.value) })) : el("td", {},
+      } }), cur === VALUE ? null : el("input", { type: "text", class: "short", value: c.default === undefined ? "" : showAuto(c.default), placeholder: "空のとき", title: "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く文字", oninput: (e) => upd("default", e.target.value === "" ? undefined : e.target.value) }));
+    else last = el("td", {},
         el("input", { type: "text", class: "short", value: c.empty === undefined ? "" : showAuto(c.empty), placeholder: "空のとき", title: "empty: 値が空のときに書く", oninput: (e) => upd("empty", e.target.value === "" ? undefined : e.target.value) }),
         el("input", { type: "text", class: "short", value: c.prefix ?? "", placeholder: "前", title: "prefix: 値があるときだけ前に", oninput: (e) => upd("prefix", e.target.value) }),
-        el("input", { type: "text", class: "short", value: c.suffix ?? "", placeholder: "後", title: "suffix: 値があるときだけ後に", oninput: (e) => upd("suffix", e.target.value) })),
+        el("input", { type: "text", class: "short", value: c.suffix ?? "", placeholder: "後", title: "suffix: 値があるときだけ後に", oninput: (e) => upd("suffix", e.target.value) }));
+    table.append(el("tr", {},
+      keyCell, el("td", {}, src), fmtCell,
+      el("td", {}, cur === VALUE && reading ? null : el("input", { type: "text", value: mapText(c.map), placeholder: reading ? "OK=採用, NG=不採用, =不明" : "右=R, 左=L",
+        title: reading ? "map: ファイルの値=プラグインの値（大文字小文字は問わない）。=不明 は空の値、*=… はほかの値すべて" : "読み替え（map）",
+        oninput: (e) => { const m = mapOfText(e.target.value, reading); upd("map", isEmpty(m) ? undefined : m); } })),
+      last,
       el("td", {}, el("span", { class: "tools" },
         i > 0 ? el("button", { type: "button", class: "small", text: "↑", onclick: () => { cols.splice(i - 1, 0, cols.splice(i, 1)[0]); save(); render(); } }) : null,
         el("button", { type: "button", class: "small danger", text: "×", onclick: () => { cols.splice(i, 1); save(); render(); } })))));
   });
   box.append(table, el("div", { class: "bar" },
-    el("button", { type: "button", class: "small", text: "＋ 列", onclick: () => { cols.push({ key: "", source: "id" }); save(); render(); } }),
+    el("button", { type: "button", class: "small", text: "＋ 列", onclick: () => { cols.push({ key: "", [sk]: "id" }); save(); render(); } }),
     el("button", { type: "button", class: "small", text: "よく使う列をまとめて追加", onclick: () => {
-      for (const s of prof.common) if (!cols.some((c) => c && c.source === s)) cols.push(s === "geometry" ? { key: "AOI", source: s, geometry: "wkt", digits: 5 } : { key: s.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase(), source: s });
+      for (const s of prof.common) if (!cols.some((c) => c && c[sk] === s)) cols.push(s === "geometry" ? { key: "AOI", [sk]: s, geometry: "wkt", ...(reading ? {} : { digits: 5 }) } : { key: s.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase(), [sk]: s });
       save(); render();
     } })));
+  if (reading) box.append(el("small", { class: "note", text: "同じ値（target）の列が 2 つ以上あれば空白でつなぐ（日付と時刻の列 → plannedAt を 2 つ、書式 %Y%m%d %H%M）。依頼を表す列（id・managementNo・identificationNo）は 1 つ以上、複数あれば id から順に台帳を引く。数の番号は先頭の 0 を問わない（000123 = 123）" }));
   return box;
 }
 
 const SCHEMA_TYPES = ["string", "integer", "number", "boolean", "object", "array", "null"];
-const NODE_KEYS = new Set(["type", "properties", "required", "items", "x-source", "x-format", "x-map", "x-geometry", "x-digits", "const", "default", "format", "enum", "title", "description"]);
+const NODE_KEYS = new Set(["type", "properties", "required", "items", "x-source", "x-target", "x-format", "x-map", "x-geometry", "x-digits", "x-pattern", "const", "default", "format", "enum", "title", "description"]);
 
 function schemaTemplate() {
   return {
@@ -1678,6 +1827,24 @@ function schemaTemplate() {
         end: { type: "string", format: "date-time", "x-source": "end" },
         aoi: { type: "object", "x-source": "geometry", "x-geometry": "geojson" },
         priority: { type: "integer", "x-source": "priority" },
+      } } },
+    },
+  };
+}
+
+function resultSchemaTemplate() {
+  return {
+    type: "object", required: ["results"],
+    properties: {
+      planDate: { type: "string", format: "date", "x-target": "day" },
+      results: { type: "array", "x-target": "records", items: { type: "object", required: ["requestId", "status"], properties: {
+        requestId: { type: "string", "x-target": "id" },
+        status: { type: "string", enum: ["ACCEPTED", "REJECTED", "PENDING"], "x-target": "result", "x-map": { ACCEPTED: "採用", REJECTED: "不採用", PENDING: "不明" } },
+        reason: { type: "string", "x-target": "reason" },
+        plannedAt: { type: "string", format: "date-time", "x-target": "plannedAt" },
+        satellite: { type: "string", "x-target": "satellite" },
+        taskId: { type: "string", "x-target": "externalId" },
+        footprint: { type: "object", "x-target": "geometry", "x-geometry": "geojson" },
       } } },
     },
   };
@@ -1746,13 +1913,15 @@ function schemaField(f, obj, commit) {
 }
 
 /** 配列の値（衛星シリーズなど）の配列の items を文字列にする（まだ組んでいない items のとき）。 */
-function listItems(node) {
+function listItems(node, xk = "x-source") {
   const it = node.items;
-  if (!isObj(it) || (it.type === "object" && !it["x-source"] && (!isObj(it.properties) || !Object.keys(it.properties).length))) node.items = { type: "string" };
+  if (!isObj(it) || (it.type === "object" && !it[xk] && (!isObj(it.properties) || !Object.keys(it.properties).length))) node.items = { type: "string" };
 }
 
 /** スキーマの 1 節（name は親の properties での名前、parent はその親の節。valueItems は値の配列の items で、型だけ選ぶ）。 */
 function schemaNode(node, name, parent, root, save, inRequests = false, prof = PROFILES.request, valueItems = false) {
+  const xk = prof.xk || "x-source";
+  const reading = !!prof.reading;
   const wrap = el("div", { class: "node" });
   if (!isObj(node)) { wrap.append(el("span", { class: "err", text: `${name}: オブジェクト以外（JSON で直す）` })); return wrap; }
   if (typeof node.$ref === "string") {
@@ -1780,9 +1949,9 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
   } else if (name === null) head.append(el("span", { class: "tag", text: parent ? "items（配列の 1 要素）" : "いちばん外" }));
   head.append(el("select", { title: "型", onchange: (e) => {
     if (e.target.value) node.type = e.target.value; else delete node.type;
-    if (node.type === "object" && !isObj(node.properties) && !node["x-source"]) node.properties = {};
+    if (node.type === "object" && !isObj(node.properties) && !node[xk]) node.properties = {};
     if (node.type === "array" && !isObj(node.items)) node.items = { type: "object", properties: {} };
-    if (node.type === "array" && prof.listSources().includes(node["x-source"])) listItems(node);
+    if (node.type === "array" && prof.listSources().includes(node[xk])) listItems(node, xk);
     redraw();
   } }, el("option", { value: "", text: "型なし" }), ...SCHEMA_TYPES.map((t) => el("option", { value: t, text: t, selected: type === t }))));
   if (valueItems) {
@@ -1790,18 +1959,19 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
     return wrap;
   }
   // 入れる値
-  const src = node["x-source"];
-  const what = "const" in node ? "\u0000const" : typeof src === "string" ? src : "";
-  const srcOpts = [["", type === "object" ? "（中のプロパティで組む）" : "なし（default か空）"], ["\u0000const", "固定値（const）"]];
+  const src = node[xk];
+  const what = "const" in node && !reading ? "\u0000const" : typeof src === "string" ? src : "";
+  const srcOpts = reading ? [["", type === "object" ? "（中のプロパティを読む）" : "読まない"]]
+    : [["", type === "object" ? "（中のプロパティで組む）" : "なし（default か空）"], ["\u0000const", "固定値（const）"]];
   if (type === "array") srcOpts.push([prof.array, prof.arrayLabel]);
-  head.append(el("select", { title: "入れる値（x-source）", onchange: (e) => {
+  head.append(el("select", { title: reading ? "何の値（x-target）" : "入れる値（x-source）", onchange: (e) => {
     const v = e.target.value;
-    delete node["x-source"];
-    if (v !== "\u0000const") delete node.const;
+    delete node[xk];
+    if (v !== "\u0000const" && !reading) delete node.const;
     if (v === "\u0000const") node.const = node.const ?? "";
-    else if (v) node["x-source"] = v;
+    else if (v) node[xk] = v;
     if (v === prof.array && !isObj(node.items)) node.items = { type: "object", properties: {} };
-    if (node.type === "array" && prof.listSources().includes(v)) listItems(node);
+    if (node.type === "array" && prof.listSources().includes(v)) listItems(node, xk);
     if (v !== "geometry") delete node["x-geometry"];
     redraw();
   } }, ...[...srcOpts, ...sourceOptions([], prof)].map(([v, l]) => el("option", { value: v, text: l, selected: what === v }))));
@@ -1810,24 +1980,27 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
   if (src === "geometry") {
     head.append(el("select", { title: "座標の書き方（x-geometry）", onchange: (e) => { node["x-geometry"] = e.target.value; save(); } },
       ...prof.geometries().map((g) => el("option", { value: g, text: `${g}（${prof.geometryLabels[g]}）`, selected: (node["x-geometry"] || "geojson") === g }))));
-    head.append(el("input", { type: "number", class: "short", min: 0, max: 12, value: node["x-digits"] ?? "", placeholder: "小数の桁", oninput: (e) => { if (e.target.value === "") delete node["x-digits"]; else node["x-digits"] = Number(e.target.value); save(); } }));
+    if (!reading) head.append(el("input", { type: "number", class: "short", min: 0, max: 12, value: node["x-digits"] ?? "", placeholder: "小数の桁", oninput: (e) => { if (e.target.value === "") delete node["x-digits"]; else node["x-digits"] = Number(e.target.value); save(); } }));
   }
   if (type === "string") {
     head.append(el("select", { title: "format", onchange: (e) => { if (e.target.value) node.format = e.target.value; else delete node.format; save(); } },
       ...["", "date", "date-time"].map((x) => el("option", { value: x, text: x || "format なし", selected: (node.format || "") === x }))));
   }
   if (typeof src === "string" && src !== prof.array && src !== "geometry") {
-    head.append(el("input", { type: "text", class: "short mono", value: node["x-format"] ?? "", placeholder: "x-format", title: "書式（x-format）: 日時なら iso・unix・%Y%m%d、数なら %02d", oninput: (e) => { if (e.target.value) node["x-format"] = e.target.value; else delete node["x-format"]; save(); } }));
-    head.append(el("input", { type: "text", class: "short", value: isObj(node["x-map"]) ? Object.entries(node["x-map"]).map(([a, b]) => `${a}=${showAuto(b)}`).join(", ") : "", placeholder: "x-map 右=R", title: "読み替え（x-map）", oninput: (e) => {
-      const m = {};
-      for (const part of e.target.value.split(/[,、]/)) { const at = part.indexOf("="); if (at > 0) m[part.slice(0, at).trim()] = autoValue(part.slice(at + 1)) ?? ""; }
+    head.append(el("input", { type: "text", class: "short mono", value: node["x-format"] ?? "", placeholder: "x-format",
+      title: reading ? "書式（x-format）: 日時の読み方 iso・unix・unixms・%Y%m%d %H%M" : "書式（x-format）: 日時なら iso・unix・%Y%m%d、数なら %02d", oninput: (e) => { if (e.target.value) node["x-format"] = e.target.value; else delete node["x-format"]; save(); } }));
+    head.append(el("input", { type: "text", class: "short", value: mapText(node["x-map"]), placeholder: reading ? "x-map OK=採用" : "x-map 右=R",
+      title: reading ? "読み替え（x-map）: ファイルの値=プラグインの値。=不明 は空の値、*=… はほかの値すべて" : "読み替え（x-map）", oninput: (e) => {
+      const m = mapOfText(e.target.value, reading);
       if (isEmpty(m)) delete node["x-map"]; else node["x-map"] = m;
       save();
     } }));
+    if (reading) head.append(el("input", { type: "text", class: "short mono", value: node["x-pattern"] ?? "", placeholder: "x-pattern", title: "抜き出し（x-pattern）: 正規表現。最初の ( ) の中を値にする",
+      oninput: (e) => { if (e.target.value) node["x-pattern"] = e.target.value; else delete node["x-pattern"]; save(); } }));
   }
-  if (prof.defaults && parent && what !== "\u0000const" && src !== prof.array && !(type === "object" && !src)) {
+  if (prof.defaults && parent && what !== "\u0000const" && src !== prof.array && !(type === "object" && !src) && !(reading && !src)) {
     const req = name !== null && Array.isArray(parent.required) && parent.required.includes(name);
-    const tip = (src ? "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く。必須の項目に。" : "既定値（default）: x-source がないので、いつもこの値。")
+    const tip = reading ? "既定値（default）: ファイルの値が空のときに使う値（採否なら 不明 など）。" : (src ? "既定値（default）: 値が空（なし・空文字・空の配列）のときに書く。必須の項目に。" : "既定値（default）: x-source がないので、いつもこの値。")
       + "配列は JSON で（[]・[\"\"]・[\"On\"]）。空欄で指定なし";
     head.append(el("label", { title: tip }, "既定値", el("input", { type: "text", class: "short" + (req && typeof src === "string" && !("default" in node) ? " hint" : ""),
       value: "default" in node ? showAuto(node.default) : "", placeholder: type === "array" ? "[]" : "なし", title: tip, oninput: (e) => {
@@ -1862,9 +2035,9 @@ function schemaNode(node, name, parent, root, save, inRequests = false, prof = P
       redraw();
     } }));
   }
-  // 依頼の一覧（requests）でない配列は、値（x-source・const・default）の配列: items は 1 要素の型だけ。
+  // 依頼の一覧（requests）でない配列は、値（x-source・const・default）の配列: items は 1 要素の型だけ。読む向きでは中を読む（最初の要素）。
   if (type === "array" && isObj(node.items) && src !== "geometry")
-    wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === prof.array, prof, src !== prof.array));
+    wrap.append(schemaNode(node.items, null, node, root, save, inRequests || src === prof.array, prof, reading ? false : src !== prof.array));
   return wrap;
 }
 
@@ -2206,6 +2379,444 @@ function checkExport(it, at, p) {
   if (it.timeZone && zoneOffset(it.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(it.timeZone) && !isIana(it.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${it.timeZone}」をこのブラウザで確かめられない` });
 }
 function isIana(z) { try { new Intl.DateTimeFormat("en-US", { timeZone: z }); return true; } catch (e) { return false; } }
+
+// ---------------------------------------------------------------- 結果ファイル（採否）: はじめの形・確認・試し読み
+// 読み方はプラグインの core/request/result_file.py と同じ（試し読み用の写し）。
+
+const RF_LEGACY = ["key", "keySource", "result", "adopted", "rejected", "reason", "plannedAt", "timeFormat", "satellite", "name", "externalId", "geometry"];
+const RF_DELIMITERS = { ",": ",", "\t": "\t", tab: "\t", "\\t": "\t", ";": ";", "|": "|", " ": " ", space: " " };
+const RF_JOINED = ["plannedAt", "day", "reason", "name"];
+const RF_NUMBERS = ["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"];
+const RF_ANSWERS = ["採用", "不採用", "不明"];
+
+/** はじめの形（key・result・adopted … を 1 つずつ書く）か。 */
+function isLegacyResult(rf) {
+  return isObj(rf) && !("columns" in rf) && rf.schema === undefined && RF_LEGACY.some((k) => k in rf);
+}
+function rfText(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v).trim();
+}
+const rfWord = (v) => rfText(v).toUpperCase();
+const rfEmpty = (v) => v === null || v === undefined || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && !v.length) || (typeof v === "number" && !isFinite(v));
+function rfWords(v) {
+  if (Array.isArray(v)) return v.filter((x) => ["string", "number", "boolean"].includes(typeof x)).map(rfWord);
+  return ["string", "number", "boolean"].includes(typeof v) ? [rfWord(v)] : null;
+}
+function rfMap(m) {
+  const o = {};
+  if (isObj(m)) for (const [k, x] of Object.entries(m)) o[String(k).trim().toUpperCase()] = x;
+  return o;
+}
+
+/** はじめの形を列（columns）に直したもの。 */
+function legacyResultColumns(rf) {
+  const name = (v) => (typeof v === "string" ? v.trim() : "");
+  const key = name(rf.key);
+  if (!key) return [];
+  const cols = [{ key, target: K.resultKeySources.includes(rf.keySource) ? rf.keySource : "id" }];
+  if (name(rf.result)) {
+    const vals = (v, d) => {
+      const w = (Array.isArray(v) ? v : [v]).filter((x) => ["string", "number"].includes(typeof x) && rfText(x)).map(rfWord);
+      return w.length ? w : d;
+    };
+    const map = {};
+    for (const w of vals(rf.rejected, K.resultWords["不採用"])) map[w] = "不採用";
+    for (const w of vals(rf.adopted, K.resultWords["採用"])) map[w] = "採用";
+    cols.push({ key: name(rf.result), target: "result", map });
+  }
+  for (const k of ["reason", "plannedAt", "satellite", "name"])
+    if (name(rf[k])) cols.push(k === "plannedAt" && name(rf.timeFormat) ? { key: name(rf[k]), target: k, format: name(rf.timeFormat) } : { key: name(rf[k]), target: k });
+  cols.push({ key: name(rf.externalId) || key, target: "externalId" });
+  const g = isObj(rf.geometry) ? rf.geometry : {};
+  if (g.wkt || g.geojson) cols.push({ key: name(g.wkt || g.geojson), target: "geometry", geometry: g.wkt ? "wkt" : "geojson" });
+  else if (g.lon && g.lat) cols.push({ key: name(g.lon), target: "centerLon" }, { key: name(g.lat), target: "centerLat" });
+  else if (Array.isArray(g.bbox) && g.bbox.length === 4) g.bbox.forEach((c, i) => cols.push({ key: name(c), target: ["bboxWest", "bboxSouth", "bboxEast", "bboxNorth"][i] }));
+  return cols;
+}
+/** はじめの形を新しい形（columns）に書き換える。 */
+function legacyToColumns(rf) {
+  const cols = legacyResultColumns(rf);
+  const g = isObj(rf.geometry) ? rf.geometry : {};
+  if (typeof g.sizeKm === "number" && g.sizeKm > 0 && rf.sizeKm === undefined) rf.sizeKm = g.sizeKm;
+  for (const k of RF_LEGACY) delete rf[k];
+  if (cols.length) rf.columns = cols;
+}
+function resultLegacyBox(rf, commit) {
+  if (!isLegacyResult(rf)) return null;
+  return el("fieldset", {}, el("legend", { text: "はじめの形（key・result などを 1 つずつ）" }),
+    el("div", { class: "note", text: "この形のままでもプラグインは読む（中では下の列と同じ）。列（columns）の形に直すと、列ごとの読み替え・書式・抜き出し・何列目・読む行の絞り込み、JSON Schema が使える。" }),
+    el("pre", { class: "sample", text: JSON.stringify(Object.fromEntries(RF_LEGACY.filter((k) => k in rf).map((k) => [k, rf[k]])), null, 2) }),
+    el("div", { class: "bar" }, el("button", { type: "button", class: "small", text: "列（columns）の形に直す", onclick: () => { legacyToColumns(rf); commit(); changed(); render(); } })));
+}
+
+/** スキーマの x-target のある節（key はその場所）。 */
+function rfSchemaNodes(node, root, path = "", depth = 0, out = []) {
+  if (depth > 30) return out;
+  const n = resolveRef(node, root);
+  if (!isObj(n)) return out;
+  if (typeof n["x-target"] === "string") {
+    out.push(rfSchemaColumn(n, path));
+    if (n["x-target"] === "records") rfSchemaNodes(n.items, root, path + "[]", depth + 1, out);
+    return out;
+  }
+  if (isObj(n.properties)) for (const [k, sub] of Object.entries(n.properties)) rfSchemaNodes(sub, root, path ? `${path}.${k}` : k, depth + 1, out);
+  if (isObj(n.items)) rfSchemaNodes(n.items, root, path + "[]", depth + 1, out);
+  for (const k of ["allOf", "anyOf", "oneOf"]) for (const sub of n[k] || []) rfSchemaNodes(sub, root, path, depth + 1, out);
+  return out;
+}
+function rfSchemaColumn(n, path) {
+  return { key: path, target: n["x-target"], format: typeof n["x-format"] === "string" ? n["x-format"] : "", map: n["x-map"], pattern: n["x-pattern"],
+    geometry: K.resultGeometries.includes(n["x-geometry"]) ? n["x-geometry"] : "geojson", default: n["x-default"] === false ? undefined : n.default, only: n["x-only"], skip: n["x-skip"] };
+}
+
+function checkResultFile(rf, at, p) {
+  const fmt = rf.format || "csv";
+  if (isLegacyResult(rf)) { if (!rf.key) p.push(`${at}: key（依頼を表す列）がない`); return; }
+  if (rf.schema !== undefined && fmt !== "json") p.push(`${at}.schema: 形式が JSON のときだけ`);
+  const keyTargets = K.resultKeySources;
+  if (fmt === "json" && isObj(rf.schema)) {
+    const nodes = rfSchemaNodes(rf.schema, rf.schema);
+    if (!nodes.some((c) => c.target === "records")) p.push(`${at}.schema: x-target が records の配列（結果の一覧）がない`);
+    if (!nodes.some((c) => keyTargets.includes(c.target))) p.push(`${at}.schema: 依頼を表すプロパティ（x-target が id・managementNo・identificationNo）がない`);
+    for (const c of nodes) if (c.target !== "records" && !K.resultTargets.includes(c.target)) p.push(`${at}.schema: x-target「${c.target}」は使えない`);
+    return;
+  }
+  if (fmt === "json" && typeof rf.schema === "string") return;
+  const cols = Array.isArray(rf.columns) ? rf.columns : [];
+  if (!cols.some((c) => isObj(c) && keyTargets.includes(c.target))) p.push(`${at}.columns: 依頼を表す列（target が id・managementNo・identificationNo）がない`);
+  cols.forEach((c, i) => {
+    const a = `${at}.columns[${i}]`;
+    if (!isObj(c)) { p.push(`${a}: オブジェクトで指定`); return; }
+    if (!c.key && c.column === undefined && !("value" in c)) p.push(`${a}: key（列名）・column（何列目）・value（固定値）のどれもない`);
+    if (c.target !== undefined && !K.resultTargets.includes(c.target)) p.push(`${a}: target「${c.target}」は使えない`);
+    if (c.column !== undefined && !(Number.isInteger(c.column) && c.column >= 1)) p.push(`${a}.column: 1 からの列の番号`);
+    if (c.pattern !== undefined) { try { new RegExp(c.pattern); } catch (e) { p.push(`${a}.pattern: 正規表現として読めない`); } }
+  });
+}
+
+// --- 読み方の写し
+
+function rfDate(t) {
+  const m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$|^(\d{4})(\d{2})(\d{2})$/.exec(t.trim());
+  if (!m) return null;
+  const [y, mo, d] = m[1] ? [m[1], m[2], m[3]] : [m[4], m[5], m[6]];
+  const dt = new Date(Date.UTC(+y, +mo - 1, +d));
+  if (dt.getUTCMonth() !== +mo - 1 || dt.getUTCDate() !== +d) return null;
+  return `${y}-${String(+mo).padStart(2, "0")}-${String(+d).padStart(2, "0")}`;
+}
+/** 時計の時刻（UTC として数えた ms）をそのゾーンの時刻として ms に。 */
+function rfInstant(clock, zone) {
+  let ms = clock - zoneOffset(zone, clock);
+  ms = clock - zoneOffset(zone, ms);
+  return ms;
+}
+function rfNaive(t, zone) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?\s*(Z|z|[+-]\d{2}(?::?\d{2})?)?$/.exec(t.trim());
+  if (!m) return null;
+  const clock = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0), m[7] ? Math.round(Number("0." + m[7]) * 1000) : 0);
+  return rfInstant(clock, zone);
+}
+function rfStrptime(t, fmt, zone) {
+  const parts = [];
+  let re = "^";
+  for (let i = 0; i < fmt.length; i++) {
+    const ch = fmt[i];
+    if (ch === "%" && i + 1 < fmt.length) {
+      const d = fmt[++i];
+      const spec = { Y: "(\\d{4})", y: "(\\d{2})", m: "(\\d{1,2})", d: "(\\d{1,2})", H: "(\\d{1,2})", I: "(\\d{1,2})", M: "(\\d{1,2})", S: "(\\d{1,2})", f: "(\\d{1,6})", p: "(AM|PM|am|pm)", z: "(Z|[+-]\\d{2}:?\\d{2})", j: "(\\d{1,3})" }[d];
+      if (d === "%") re += "%";
+      else if (spec) { re += spec; parts.push(d); } else return null;
+    } else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  const m = new RegExp(re + "$").exec(t);
+  if (!m) return null;
+  const v = { Y: 1900, m: 1, d: 1, H: 0, M: 0, S: 0, f: 0 };
+  let pm = null, zone2 = null;
+  parts.forEach((p, i) => {
+    const x = m[i + 1];
+    if (p === "y") v.Y = +x < 69 ? 2000 + +x : 1900 + +x;
+    else if (p === "I") v.H = +x % 12;
+    else if (p === "p") pm = x.toUpperCase() === "PM";
+    else if (p === "f") v.f = Number(("0." + x)) * 1000;
+    else if (p === "z") zone2 = x === "Z" ? "+00:00" : x;
+    else if (p === "j") { v.m = 1; v.d = +x; }
+    else v[p] = +x;
+  });
+  if (pm !== null && v.H < 12 && pm) v.H += 12;
+  const clock = Date.UTC(v.Y, v.m - 1, v.d, v.H, v.M, v.S, v.f);
+  return zone2 ? clock - zoneOffset(zone2, clock) : rfInstant(clock, zone);
+}
+function rfCompact(t, zone) {
+  if (t.length === 10) return Number(t) * 1000;
+  if (t.length === 13) return Number(t);
+  if ([8, 12, 14].includes(t.length)) return rfNaive(`${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}T${t.slice(8, 10) || "00"}:${t.slice(10, 12) || "00"}:${t.slice(12, 14) || "00"}`, zone);
+  return null;
+}
+/** ファイルの時刻（ms）: 書式 iso（既定）・iso-date・unix・unixms・strptime。ゾーンのない時刻はシステムの timeZone。 */
+function rfTime(v, fmt, zone) {
+  fmt = (fmt || "").trim();
+  const lenient = fmt === "" || fmt === "iso";
+  if (fmt === "unix" || fmt === "unixms" || (lenient && typeof v === "number")) {
+    const n = typeof v === "number" ? v : Number(rfText(v));
+    if (!isFinite(n) || rfText(v) === "") return null;
+    return fmt === "unix" || (lenient && Math.abs(n) < 1e11) ? n * 1000 : n;
+  }
+  let t = rfText(v);
+  if (!t) return null;
+  if (fmt === "iso-date") { const d = rfDate(t); return d ? rfNaive(d + "T00:00", zone) : null; }
+  if (!lenient) return rfStrptime(t, fmt, zone);
+  if (/^\d+$/.test(t)) return rfCompact(t, zone);
+  t = t.replace(/^(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/, (m, y, mo, d) => `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`).replace(/^(\d{4}-\d{2}-\d{2})([T ])(\d):/, (m, d, sep, h) => `${d}${sep}0${h}:`);
+  if (/\d{2}:\d{2}(:\d{2}(\.\d+)?)?\s*(Z|z|[+-]\d{2}:?\d{2})$/.test(t)) {
+    const iso = t.replace(" ", "T").replace(/\s+(?=[Zz+-]\d*:?\d*$)/, "").replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+    const ms = Date.parse(iso);
+    if (isFinite(ms)) return ms;
+  }
+  const naive = rfNaive(t, zone);
+  if (naive !== null) return naive;
+  const d = rfDate(t);
+  return d ? rfNaive(d + "T00:00", zone) : null;
+}
+function rfDay(v, fmt, zone) {
+  const t = rfText(v);
+  if (!t) return null;
+  if (!fmt || fmt === "iso" || fmt === "iso-date") { const d = rfDate(t); if (d) return d; }
+  else if (!/%[HI]/.test(fmt) && fmt !== "unix" && fmt !== "unixms") { const ms = rfStrptime(t, fmt, "+00:00"); return ms === null ? null : new Date(ms).toISOString().slice(0, 10); }
+  const ms = rfTime(v, fmt, zone);
+  return ms === null ? null : new Date(ms + 9 * 3600000).toISOString().slice(0, 10);
+}
+function rfHasArea(v, kind) {
+  if (isObj(v)) return ["Polygon", "MultiPolygon", "Point", "Feature"].includes(v.type);
+  const t = Array.isArray(v) ? v.join(",") : rfText(v);
+  if (!t) return false;
+  if (t.startsWith("{")) { try { return rfHasArea(JSON.parse(t), kind); } catch (e) { return false; } }
+  if (/^\s*(MULTI)?(POLYGON|POINT)/i.test(t)) return true;
+  const n = t.split(/[,\s;]+/).filter(Boolean).map(Number);
+  if (n.some((x) => !isFinite(x))) return false;
+  return (kind === "bbox" && n.length === 4 && n[0] < n[2] && n[1] < n[3]) || (kind === "center" && n.length >= 2) || (kind === "centerRadius" && n.length >= 3 && n[2] > 0)
+    || (kind === "vertices" && n.length >= 6 && n.length % 2 === 0);
+}
+function rfGet(rec, key) {
+  if (!key || !isObj(rec) && !Array.isArray(rec)) return undefined;
+  if (isObj(rec) && key in rec) return rec[key];
+  let v = rec;
+  for (const part of key.split(".")) {
+    if (isObj(v) && part in v) v = v[part];
+    else if (isObj(v)) { const lower = part.toLowerCase(); const k = Object.keys(v).find((x) => x.trim().toLowerCase() === lower); if (k === undefined) return undefined; v = v[k]; }
+    else if (Array.isArray(v) && /^\d+$/.test(part) && +part < v.length) v = v[+part];
+    else return undefined;
+  }
+  return v;
+}
+function parseDelimited(text, d) {
+  const rows = [];
+  let row = [], cell = "", q = false, started = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch;
+    } else if (ch === '"' && cell === "") { q = true; started = true; }
+    else if (ch === d) { row.push(cell); cell = ""; started = true; }
+    else if (ch === "\n" || ch === "\r") { if (ch === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; started = false; }
+    else { cell += ch; started = true; }
+  }
+  if (started || cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function rfShaped(c, raw, reverse) {
+  let v = raw;
+  if (c.pattern && !rfEmpty(v)) {
+    let m = null;
+    try { m = new RegExp(c.pattern).exec(rfText(v)); } catch (e) { m = null; }
+    v = m ? (m.length > 1 ? m[1] ?? "" : m[0]) : "";
+  }
+  let named = false;
+  const map = rfMap(c.map);
+  if (Object.keys(map).length) {
+    const w = rfEmpty(v) ? "" : rfWord(v);
+    if (w in map) { v = map[w]; named = true; } else if (w && "*" in map) { v = map["*"]; named = true; }
+  }
+  const back = reverse[c.target];
+  if (!named && back && !rfEmpty(v) && rfWord(v) in back) v = back[rfWord(v)];
+  if (rfEmpty(v) && c.default !== undefined && c.default !== null) { v = c.default; named = true; }
+  return [v, named];
+}
+/** 結果ファイルの文字を読む（プラグインと同じ読み方。試し読み用）: { rows, problems }。 */
+function readResultText(text, rf, sys) {
+  const problems = [];
+  const zone = sys.timeZone || "UTC";
+  const fmt = rf.format || "csv";
+  const reverse = {};
+  if (isObj(sys.values)) for (const [t, m] of Object.entries(sys.values)) if (K.resultTargets.includes(t) && isObj(m)) {
+    reverse[t] = {};
+    for (const [k, w] of Object.entries(m)) if (["string", "number"].includes(typeof w)) reverse[t][String(w).trim().toUpperCase()] = k;
+  }
+  text = text.replace(/^﻿/, "");
+  let rows = [];
+  let cols = isLegacyResult(rf) ? legacyResultColumns(rf) : (Array.isArray(rf.columns) ? rf.columns.filter(isObj) : []);
+  const isFixed = (c) => "value" in c;
+  if (fmt === "json") {
+    let value;
+    try { value = JSON.parse(text); } catch (e) { return { rows: [], problems: [`JSON として読めない（${e.message}）`] }; }
+    if (isObj(rf.schema)) {
+      const schema = rf.schema;
+      const errs = validate(value, schema, schema);
+      problems.push(...errs.slice(0, 20).map((e) => "スキーマ: " + e));
+      cols = rfSchemaNodes(schema, schema).filter((c) => c.target !== "records");
+      const walk = (node, v, pairs, recs, path, depth) => {
+        if (depth > 30) return;
+        const n = resolveRef(node, schema);
+        if (!isObj(n)) return;
+        const t = n["x-target"];
+        if (t === "records") { const items = isObj(n.items) ? n.items : {}; if (Array.isArray(v)) v.forEach((r) => recs.push([items, r])); else if (isObj(v)) Object.values(v).forEach((r) => recs.push([items, r])); return; }
+        if (typeof t === "string") { pairs.push([rfSchemaColumn(n, path), v]); return; }
+        if (isObj(v) && isObj(n.properties)) for (const [k, sub] of Object.entries(n.properties)) walk(sub, k in v ? v[k] : rfGet(v, k), pairs, recs, path ? `${path}.${k}` : k, depth + 1);
+        else if (Array.isArray(v) && isObj(n.items) && v.length) walk(n.items, v[0], pairs, recs, path + "[0]", depth + 1);
+        for (const k of ["allOf", "anyOf", "oneOf"]) for (const sub of n[k] || []) walk(sub, v, pairs, recs, path, depth + 1);
+      };
+      const common = [], recs = [];
+      walk(schema, value, common, recs, "", 0);
+      rows = recs.map(([items, r], i) => { const pairs = []; walk(items, r, pairs, [], "", 0); return [i + 1, [...pairs, ...common]]; });
+    } else if (typeof rf.schema === "string") {
+      return { rows: [], problems: ["スキーマがファイル（" + rf.schema + "）なので、ここでは試せない（「ここで組む」にすると試せる）"] };
+    } else {
+      if (rf.records) for (const part of rf.records.split(".")) value = isObj(value) || Array.isArray(value) ? rfGet(value, part) : undefined;
+      if (isObj(value) && !rf.records) value = [value];
+      if (!Array.isArray(value)) return { rows: [], problems: [`${rf.records || "ファイル"} が配列でない`] };
+      const seen = new Set();
+      value.forEach((r, i) => {
+        if (!isObj(r)) return;
+        rows.push([i + 1, cols.map((c) => { const v = isFixed(c) ? c.value : rfGet(r, c.key); if (v !== undefined && v !== null) seen.add(c); return [c, v]; })]);
+      });
+      if (rows.length) for (const c of cols) if (!isFixed(c) && !seen.has(c)) problems.push(`項目「${c.key}」がどの記録にもない`);
+    }
+  } else {
+    const d = RF_DELIMITERS[rf.delimiter === undefined ? "," : rf.delimiter] || ",";
+    let rest = text;
+    for (let i = 0; i < (rf.skipLines || 0); i++) { const at = rest.search(/\r\n|\n|\r/); if (at < 0) { rest = ""; break; } rest = rest.slice(at + (rest.slice(at, at + 2) === "\r\n" ? 2 : 1)); }
+    const all = parseDelimited(rest, d);
+    let first = (rf.skipLines || 0) + 1, names = [];
+    const header = rf.header !== false;
+    if (header) {
+      const head = all.shift();
+      if (!head || !head.some((h) => h.trim())) return { rows: [], problems: ["見出しの行なし"] };
+      names = head.map((h) => h.trim());
+      first += 1;
+    }
+    let order = 0;
+    const places = cols.map((c) => {
+      let at = null;
+      if (isFixed(c)) at = null;
+      else if (c.column !== undefined) at = c.column - 1;
+      else if (header) {
+        at = names.indexOf(c.key);
+        if (at < 0) at = names.findIndex((n) => n.toLowerCase() === String(c.key || "").toLowerCase());
+        if (at < 0) { problems.push(`列「${c.key}」が見出しにない`); at = null; }
+      } else at = order;
+      if (!isFixed(c) && c.column === undefined) order++;
+      return at;
+    });
+    all.forEach((row, n) => {
+      if (!row.some((x) => x.trim())) return;
+      rows.push([first + n, cols.map((c, i) => [c, isFixed(c) ? c.value : places[i] !== null && places[i] < row.length ? row[places[i]] : undefined])]);
+    });
+  }
+  const says = cols.some((c) => c.target === "result" && !isFixed(c));
+  const out = [];
+  let dropped = 0;
+  for (const [line, pairs] of rows) {
+    const kept = pairs.every(([c, raw]) => {
+      const w = rfWord(isFixed(c) ? c.value : raw);
+      const only = rfWords(c.only), skip = rfWords(c.skip);
+      return !(only && !only.includes(w)) && !(skip && skip.includes(w));
+    });
+    if (!kept) { dropped++; continue; }
+    const g = {};
+    for (const [c, raw] of pairs) {
+      if (!c.target) continue;
+      const [v, named] = isFixed(c) ? [c.value, true] : rfShaped(c, raw, reverse);
+      if (!rfEmpty(v)) (g[c.target] = g[c.target] || []).push([c, v, named]);
+    }
+    const first = (t) => (g[t] ? g[t][0][1] : undefined);
+    const joined = (t) => { const f = g[t] || []; return [f.length === 1 ? f[0][1] : f.map(([, v]) => rfText(v)).join(" "), (f.find(([c]) => c.format) || [{}])[0].format || ""]; };
+    const keys = {};
+    for (const k of K.resultKeySources) if (rfText(first(k))) keys[k] = rfText(first(k));
+    let answer = "採用";
+    if (g.result) {
+      answer = null;
+      for (const [c, v, named] of g.result) {
+        if (typeof v === "boolean") { answer = v ? "採用" : "不採用"; break; }
+        if (RF_ANSWERS.includes(rfText(v))) { answer = rfText(v); break; }
+        if (named || !Object.keys(rfMap(c.map)).length) {
+          const w = rfWord(v);
+          answer = RF_ANSWERS.find((a) => K.resultWords[a].includes(w)) || null;
+          if (answer) break;
+        }
+      }
+      if (!answer) { const raw = rfText(g.result[0][1]); problems.push(`${line} 行目: 採否「${raw}」が不明（列の読み替え map に ${raw || '""'}=採用 のように書く）`); continue; }
+    } else if (says) { problems.push(`${line} 行目: 採否が空（列の読み替え map に ""=不明 のように書くか default）`); continue; }
+    let planned = null;
+    if (g.plannedAt) {
+      const [raw, f] = joined("plannedAt");
+      planned = rfTime(raw, f, zone);
+      if (planned === null) problems.push(`${line} 行目: 撮像予定「${rfText(raw)}」を日時として読めない`);
+    }
+    let day = "";
+    if (g.day) {
+      const [raw, f] = joined("day");
+      day = rfDay(raw, f, zone) || "";
+      if (!day) problems.push(`${line} 行目: 対象日「${rfText(raw)}」を日付として読めない（この行は日を問わず読む）`);
+    }
+    const nums = Object.fromEntries(RF_NUMBERS.map((t) => [t, first(t) === undefined ? null : Number(rfText(first(t)))]));
+    const area = (g.geometry || []).some(([c, v]) => rfHasArea(v, c.geometry || "wkt"))
+      || (["bboxWest", "bboxSouth", "bboxEast", "bboxNorth"].every((t) => nums[t] !== null && isFinite(nums[t])) && nums.bboxWest < nums.bboxEast && nums.bboxSouth < nums.bboxNorth)
+      || (nums.centerLat !== null && nums.centerLon !== null && isFinite(nums.centerLat) && isFinite(nums.centerLon));
+    out.push({ line, keys, answer, reason: rfText(joined("reason")[0]).slice(0, 1000), planned, satellite: rfText(first("satellite")), name: rfText(joined("name")[0]),
+      externalId: rfText(first("externalId")), area, day, system: rfText(first("system")) });
+  }
+  if (dropped) problems.push(`only・skip で ${dropped} 行を読み飛ばし`);
+  return { rows: out, problems };
+}
+
+const RESULT_SAMPLE_TEXT = new WeakMap(); // 結果ファイル → 試し読みに貼った文字
+function resultSampleBox(rf) {
+  const sys = systemOfResult(rf);
+  const ta = el("textarea", { class: "mono", rows: 6, placeholder: "システムから返ってきたファイルの中身を貼るか、「ファイルを開く…」", value: RESULT_SAMPLE_TEXT.get(rf) || "" });
+  const out = el("div", {});
+  const jstText = (ms) => { if (ms === null || ms === undefined) return ""; const d = new Date(ms + 9 * 3600000); return d.toISOString().slice(0, 16).replace("T", " "); };
+  const draw = () => {
+    RESULT_SAMPLE_TEXT.set(rf, ta.value);
+    if (!ta.value.trim()) { out.replaceChildren(el("small", { class: "note", text: "中身を貼ると、プラグインと同じ読み方で読んだ結果を出す" })); return; }
+    const { rows, problems } = readResultText(ta.value, rf, sys);
+    const keyText = (k) => Object.entries(k).map(([a, b]) => `${{ id: "", managementNo: "管理 ", identificationNo: "識別 " }[a] ?? a}${b}`).join(" / ");
+    const table = el("table", { class: "cols" }, el("tr", {}, ...["行", "依頼のキー", "採否", "撮像予定（日本時間）", "衛星", "名称", "システム側の番号", "対象日", "システム", "範囲", "理由"].map((h) => el("th", { text: h }))),
+      ...rows.slice(0, 200).map((r) => el("tr", {}, ...[r.line, keyText(r.keys), r.answer, jstText(r.planned), r.satellite, r.name, r.externalId, r.day, r.system, r.area ? "あり" : "", r.reason].map((x) => el("td", { text: String(x) })))));
+    out.replaceChildren(el("small", { class: "note", text: `${rows.length} 行を読んだ（タイムゾーン ${sys.timeZone || "UTC"}）` + (rows.length > 200 ? "。表は最初の 200 行" : "") }), table,
+      problems.length ? el("div", { class: "err", text: "読めなかった行など: " + problems.slice(0, 12).join(" / ") + (problems.length > 12 ? " …" : "") }) : null);
+  };
+  ta.addEventListener("input", draw);
+  const enc = { "utf-8": "utf-8", "utf-8-sig": "utf-8", cp932: "shift_jis", "shift_jis": "shift_jis", sjis: "shift_jis", "euc-jp": "euc-jp", "utf-16": "utf-16le" };
+  const box = el("fieldset", {}, el("legend", { text: "試し読み（結果ファイルを貼る）" }),
+    el("div", { class: "bar" },
+      el("label", { class: "button small" }, "ファイルを開く…", el("input", { type: "file", class: "hidden", accept: ".csv,.tsv,.txt,.json", onchange: async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let label = enc[String(rf.encoding || "utf-8").toLowerCase()] || "utf-8";
+        if (label === "utf-16le" && bytes[0] === 0xfe && bytes[1] === 0xff) label = "utf-16be";
+        try { ta.value = new TextDecoder(label, { fatal: true }).decode(bytes); } catch (err) { ta.value = ""; out.replaceChildren(el("div", { class: "err", text: `文字コード ${rf.encoding || "utf-8"} で読めない` })); return; }
+        draw();
+      } })),
+      el("button", { type: "button", class: "small", text: "読み直す", onclick: draw })), ta, out,
+    el("small", { class: "note", text: "このツールでの試し読み（台帳との突き合わせはしない）。本番は「撮像予定」ドックの「結果ファイルの取り込み…」で、取り込む前に件数と読めなかった行が出る" }));
+  draw();
+  sampleRefreshers.add(draw);
+  return box;
+}
 
 // ---------------------------------------------------------------- 確認
 

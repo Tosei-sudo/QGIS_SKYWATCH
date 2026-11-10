@@ -337,7 +337,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 未撮像の依頼は次回の「計算」に持ち越す（曜日・N 日ごとの定点も、その日が繰り返しの日でなくても候補に入る。期間内に限る）。繰り上げの候補にもなる
   - カタログへの登録が遅れたときなどは、照合の一覧で「撮像済みにする」「未撮像にする」で直せる（台帳の繰り上げ・完了も合わせて直る）
 - 「撮像予定」ドック: カレンダーで日を選ぶと、その日の計画（出力履歴の行）を一覧と地図に出す。状態は 採用・不明・不採用・見送り・要求外（システム側の定常の撮像など、依頼していない計画）。カレンダーは計画のある日が太字（計画に入ったものがあれば緑、採否不明だけなら青）
-  - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用を記録する。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
+  - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用（・不明）を記録する。ファイルの様式はオーダーファイルと同じく自由に決められる（CSV は列ごとに何の値か・読み替え・書式・抜き出し、JSON は記録の中の場所かシステムの JSON Schema に `x-target`。設定ファイル作成ツールで組んで試し読みできる。[docs/imaging-requests.md](docs/imaging-requests.md) §20）。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
   - 「採用」「不採用」「不明に戻す」で手入力（理由も書ける）。「要求外を追加…」で依頼していない計画を手で足す（名称・システム・衛星・日時・範囲）。要求外は「削除」で消せる
   - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする
   - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
@@ -1361,7 +1361,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系

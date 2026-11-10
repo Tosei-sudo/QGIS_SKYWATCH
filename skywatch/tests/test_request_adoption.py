@@ -96,20 +96,23 @@ def test_result_file_settings():
     zone = parse_time_zone("Asia/Tokyo")
     spec = result_file_of({"key": "REQ", "result": "STATUS", "adopted": ["ok", "済"], "rejected": "ng", "plannedAt": "WHEN"}, "x", problems, zone)
     assert problems == []
-    assert (spec.key_source, spec.adopted, spec.rejected, spec.missing, spec.external_id) == ("id", ("OK", "済"), ("NG",), WAITING, "REQ")
+    # The first form (one name per item) is read as columns.
+    assert [(c.key, c.target) for c in spec.columns] == [("REQ", "id"), ("STATUS", "result"), ("WHEN", "plannedAt"), ("REQ", "externalId")]
+    assert spec.columns[1].map == {"OK": ADOPTED, "済": ADOPTED, "NG": REJECTED} and spec.missing == WAITING
     # Without a result column: every row listed is 採用, the others 不採用.
     assert result_file_of({"key": "REQ"}, "x", problems).missing == REJECTED
     assert result_file_of({"result": "S"}, "x", problems) is None
     assert result_file_of({"key": "K", "format": "xml"}, "y", problems) is None
     assert result_file_of({"key": "K", "keySource": "name", "missing": "保留", "encoding": "euc", "geometry": {"x": 1}}, "z", problems)
-    assert problems == ["x に key（依頼を表す列）なし", "y.format は csv・json のどちらかで指定", "z.encoding は utf-8・utf-8-sig・cp932 のどれかで指定",
-                        "z.keySource は id・managementNo・identificationNo のどれかで指定", "z.missing は 不採用・不明 のどちらかで指定",
-                        "z.geometry は wkt・geojson・lon と lat・bbox のどれかで指定"]
+    assert problems == ["x に key（依頼を表す列）なし", "y.format は csv・json のどちらかで指定",
+                        "z.encoding は utf-8・utf-8-sig・cp932・euc-jp・utf-16 のどれかで指定",
+                        "z.keySource は id・managementNo・identificationNo のどれかで指定",
+                        "z.geometry は wkt・geojson・lon と lat・bbox のどれかで指定", "z.missing は 不採用・不明 のどちらかで指定"]
     # In the settings file: a system's `resultFile`, its times in the system's zone.
     problems = []
     value = [dict(SYSTEMS_JSON[0], resultFile={"key": "ID", "plannedAt": "T"}), SYSTEMS_JSON[1]]
     a, b = export_systems_of(value, problems)
-    assert problems == [] and a.result_file.key == "ID" and b.result_file is None
+    assert problems == [] and a.result_file.columns[0].key == "ID" and b.result_file is None
     assert time_value("2026-11-08 10:30", a.result_file) == datetime(2026, 11, 8, 10, 30, tzinfo=JST).timestamp() * 1000
     assert export_systems_of([dict(SYSTEMS_JSON[0], resultFile=[])], problems)[0].result_file is None
     assert problems == ["requestExports[0].resultFile はオブジェクトで指定"]
@@ -125,8 +128,11 @@ def test_times_in_a_result_file():
     assert time_value("2026-11-08 01:30:00Z", tokyo) == at
     assert time_value(at / 1000, tokyo) == at and time_value(at, tokyo) == at
     assert time_value("2026-11-08", tokyo) == datetime(2026, 11, 8, tzinfo=JST).timestamp() * 1000
-    stamp = result_file_of({"key": "K", "timeFormat": "%Y%m%d%H%M"}, "x", problems, tokyo.time_zone)
-    assert time_value("202611081030", stamp) == at and time_value("2026-11-08", stamp) is None
+    assert time_value("202611081030", tokyo, "%Y%m%d%H%M") == at and time_value("2026-11-08", tokyo, "%Y%m%d%H%M") is None
+    # Digits alone: epoch seconds (10) or ms (13), or a compact date and time.
+    assert time_value("202611081030", tokyo) == at and time_value(str(int(at / 1000)), tokyo) == at and time_value(str(int(at)), tokyo) == at
+    assert time_value(at / 1000, tokyo, "unix") == at and time_value(str(int(at)), tokyo, "unixms") == at
+    assert time_value("2026/11/08", tokyo, "iso-date") == datetime(2026, 11, 8, tzinfo=JST).timestamp() * 1000
     assert time_value("", tokyo) is None and time_value("あした", tokyo) is None
     assert problems == []
 
@@ -144,7 +150,7 @@ def test_reading_csv_and_json_files():
             "R-0004,OK,,明日,,,,\n")
     answers, problems = read_answers(text.encode("cp932"), spec)
     assert [(a.line, a.key, a.answer) for a in answers] == [(2, "R-0001", ADOPTED), (3, "R-0002", REJECTED), (4, "", ADOPTED), (6, "R-0004", ADOPTED)]
-    assert problems == ["5 行目: 採否「保留」が不明（adopted・rejected に書く）", "6 行目: 撮像予定「明日」を日時として読めない"]
+    assert problems == ["5 行目: 採否「保留」が不明（列の読み替え map に 保留=採用 のように書く）", "6 行目: 撮像予定「明日」を日時として読めない"]
     assert answers[0].planned_at == datetime(2026, 11, 8, 10, 30, tzinfo=JST).timestamp() * 1000 and answers[0].external_id == "T-1"
     assert answers[1].reason == "雲" and answers[2].name == "定常 横須賀" and answers[2].rings == [[[139.6, 35.2], [139.7, 35.2], [139.7, 35.3], [139.6, 35.2]]]
     # A BOM (Excel's UTF-8) and names with other case are read.
@@ -187,7 +193,7 @@ def test_a_file_answers_the_day_of_one_system():
     assert [r.request_id for r in handed_rows(day, "SYS-A")] == ["R-0001"]
     reading = match_answers(answers, day, requests, "SYS-A", DAY.isoformat(), spec, "a_result.csv")
     assert reading.problems == ["4 行目: 不採用の 「横浜」 はこの日このシステムに出力していないため読み飛ばし"]
-    assert reading.tally() == {ADOPTED: 1, REJECTED: 0, UNREQUESTED: 2, NOT_IN_FILE: 0}
+    assert reading.tally() == {ADOPTED: 1, REJECTED: 0, WAITING: 0, UNREQUESTED: 2, NOT_IN_FILE: 0}
     changes = answer_changes(reading)
     assert [v for _, v in changes] == [{"adoption": ADOPTED, "adoptionReason": None, "plannedAt": datetime(2026, 11, 8, 10, 30, tzinfo=JST).timestamp() * 1000,
                                         "externalId": "A-1", "adoptionSource": "a_result.csv", "satellite": "OPT-X 2"}]

@@ -9,20 +9,24 @@ tsudo, 2026-11-09: 「依頼した結果、その日の計画を見たい。採�
 出力されるだけじゃだめ」; answers by a result file per system and by hand;
 要求外 plans too; in the history, not the ledger (「台帳は日々の計画立案の素材でしかない」).
 
-A file's rows are matched to the requests by their key (id, 管理番号 or
-識別番号, `resultFile.keySource`). A row of a request handed to that system
-that day answers its history row(s). A row of a request not handed to it
-that day, or of no request at all, is 要求外 (planned by the system itself).
-A request handed out and not in the file is `missing` (不採用, or left 不明).
+A file's rows are matched to the requests by their keys (id, 管理番号,
+識別番号: the columns of those targets, tried in that order; numbers match
+without their leading zeros, `000123` = `123`). Rows for another day or
+another system (by `day` / `system` columns) are skipped. A row of a request
+handed to that system that day answers its history row(s). A row of a request
+not handed to it that day, or of no request at all, is 要求外 (planned by the
+system itself) when it is 採用. A request handed out and not in the file is
+`missing` (不採用, or left 不明).
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .model import ImagingRequest
-from .result_file import ADOPTED, REJECTED, WAITING, Answer, ResultFile
+from .result_file import ADOPTED, KEY_SOURCES, REJECTED, WAITING, Answer, ResultFile
 from .store import MANUAL, UNREQUESTED, HistoryRow
 
 #: Why a request handed out is 不採用 when the file leaves it out.
@@ -59,8 +63,8 @@ class Reading:
     problems: list = field(default_factory=list)
 
     def tally(self) -> dict:
-        """{採用: n, 不採用: n, 要求外: n, ファイルになし: n}."""
-        out = {ADOPTED: 0, REJECTED: 0, UNREQUESTED: 0, NOT_IN_FILE: len(self.missing)}
+        """{採用: n, 不採用: n, 不明: n, 要求外: n, ファイルになし: n}."""
+        out = {ADOPTED: 0, REJECTED: 0, WAITING: 0, UNREQUESTED: 0, NOT_IN_FILE: len(self.missing)}
         for m in self.matches:
             if m.unrequested:
                 out[UNREQUESTED] += 1
@@ -78,35 +82,61 @@ def key_of(req: ImagingRequest, source: str) -> str:
     return req.id.strip()
 
 
+def same_key(key: str) -> str:
+    """A key as compared: trimmed, upper case, without braces; a number without its leading zeros (000123 → 123)."""
+    t = key.strip().strip("{}").strip().upper()
+    if re.fullmatch(r"[+-]?\d+", t):
+        return str(int(t))
+    return t
+
+
 def handed_rows(day_rows: Sequence[HistoryRow], system: str) -> list[HistoryRow]:
     """The day's rows of requests handed out to `system` (its answers are awaited or given)."""
     return [r for r in day_rows if r.system == system and r.result == "採用" and r.request_id]
 
 
 def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], requests: Sequence[ImagingRequest],
-                  system: str, day: str, spec: ResultFile, source: str) -> Reading:
+                  system: str, day: str, spec: ResultFile, source: str, label: str = "") -> Reading:
     """A file's rows matched to the day's rows of `system` (`day_rows`: load_day) and the ledger."""
-    reading = Reading(system, day, source, missing_as=spec.missing)
-    by_key: dict[str, ImagingRequest] = {}
-    doubled: set = set()
-    for req in requests:
-        k = key_of(req, spec.key_source)
-        if not k:
+    missing = spec.missing_value or (WAITING if spec.says_result() or any(a.stated for a in answers) else REJECTED)
+    reading = Reading(system, day, source, missing_as=missing)
+    by_key: dict = {}
+    doubled: dict = {}
+    for k_source in KEY_SOURCES:
+        if not any(k_source in a.keys for a in answers):
             continue
-        if k in by_key and by_key[k].id != req.id:
-            doubled.add(k)
-        by_key.setdefault(k, req)
+        found, twice = by_key.setdefault(k_source, {}), doubled.setdefault(k_source, set())
+        for req in requests:
+            k = same_key(key_of(req, k_source))
+            if not k:
+                continue
+            if k in found and found[k].id != req.id:
+                twice.add(k)
+            found.setdefault(k, req)
+    names = {same_key(system)} | ({same_key(label)} if label else set())
+    other_days, other_systems = 0, set()
     handed = handed_rows(day_rows, system)
     answered: set = set()
     for a in answers:
-        req = by_key.get(a.key) if a.key else None
-        if a.key in doubled:
+        if a.day and a.day != day:
+            other_days += 1
+            continue
+        if a.system and same_key(a.system) not in names:
+            other_systems.add(a.system)
+            continue
+        req, twice = None, False
+        for k_source in KEY_SOURCES:
+            k = same_key(a.keys.get(k_source, ""))
+            if k and k in by_key.get(k_source, {}):
+                req, twice = by_key[k_source][k], k in doubled[k_source]
+                break
+        if twice:
             reading.problems.append(f"{a.line} 行目: {a.key} は複数の依頼にあるため「{req.name}」とした")
         rows = [r for r in handed if req is not None and r.request_id == req.id]
-        if not rows and a.answer == REJECTED:
+        if not rows and a.answer != ADOPTED:
             # Not ours, or not handed to it this day: nothing to answer, and not in its plan.
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
-            reading.problems.append(f"{a.line} 行目: 不採用の {what} はこの日このシステムに出力していないため読み飛ばし")
+            reading.problems.append(f"{a.line} 行目: {a.answer}の {what} はこの日このシステムに出力していないため読み飛ばし")
             continue
         if req is not None and req.id in answered:
             reading.problems.append(f"{a.line} 行目: 「{req.name}」が重複（後の行を使う）")
@@ -114,6 +144,10 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
         if req is not None:
             answered.add(req.id)
         reading.matches.append(Match(a, req, rows))
+    if other_days:
+        reading.problems.append(f"対象日が {day} 以外の {other_days} 行を読み飛ばし")
+    if other_systems:
+        reading.problems.append(f"ほかのシステム（{'・'.join(sorted(other_systems))}）の行を読み飛ばし")
     reading.missing = [r for r in handed if r.request_id not in answered]
     return reading
 
@@ -150,7 +184,8 @@ def unrequested_rows(reading: Reading, now: float, run_id: Optional[str] = None)
         out.append(HistoryRow(
             run_id=run_id, run_date=now, day=reading.day, request_id=req.id if req else "", system=reading.system,
             satellite=a.satellite, result=UNREQUESTED, reason=NOT_HANDED if req else "", captured="",
-            name=(a.name or (req.name if req else "") or a.external_id or a.key), management_no=req.management_no if req else "",
+            name=(a.name or (req.name if req else "") or a.external_id or a.key),
+            management_no=req.management_no if req else a.keys.get("managementNo", ""),
             requester=req.requester if req else "", adoption=ADOPTED, adoption_reason=a.reason, planned_at=a.planned_at,
             external_id=a.external_id or a.key, adoption_source=reading.source,
             rings=a.rings or ([[list(p[:2]) for p in r] for r in req.rings] if req else [])))

@@ -54,7 +54,26 @@
         { "key": "雲量予報", "source": "cloudForecast", "format": "%d" },
         { "key": "最大ONA",  "source": "offNadirMax" },
         { "key": "備考",     "source": "warnings" }
-      ]
+      ],
+      // A システムから返る採否のファイル（§20、例: sys-a.result.csv.example）。
+      // タイトル行のあと見出し。識別番号は REQ-00000123 の形、日付と時刻は別の列、取消の行は読まない。
+      "resultFile": {
+        "format": "csv", "encoding": "cp932", "skipLines": 1,
+        "columns": [
+          { "key": "要求番号", "target": "identificationNo", "pattern": "^REQ-(\\d+)$" },
+          { "key": "判定",     "target": "result", "map": { "○": "採用", "×": "不採用", "△": "不明" } },
+          { "key": "不可理由", "target": "reason" },
+          { "key": "撮像日",   "target": "plannedAt" },
+          { "key": "撮像時刻", "target": "plannedAt", "format": "%Y/%m/%d %H:%M" },
+          { "key": "号機",     "target": "satellite", "map": { "2": "OPT-X 2", "1": "OPT-X 1" } },
+          { "key": "計画番号", "target": "externalId" },
+          { "key": "件名",     "target": "name" },
+          { "key": "中心緯度", "target": "centerLat" },
+          { "key": "中心経度", "target": "centerLon" },
+          { "key": "状態",     "skip": ["取消"] }
+        ],
+        "missing": "不採用"
+      }
     },
     {
       // ---- B システム: CSV / UTF-8 / UTC / unix 時刻 / 優先度は 00〜99（大きいほど高い） ----
@@ -102,6 +121,8 @@
       "limit": { "scenes": 100 },
       "format": "json",
       "schema": "schemas/sys-c.schema.json",
+      // C システムの採否は JSON。システムの JSON Schema に x-target を書き添えたもの（例: sys-c.result.json.example）。
+      "resultFile": { "format": "json", "schema": "schemas/sys-c.result.schema.json" },
       "folder": "D:/requests/SYS-C",
       "fileName": "tasking_{date:%Y%m%d}.json",
       "encoding": "utf-8",
