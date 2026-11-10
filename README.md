@@ -516,6 +516,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   | `confidence` | 記録の確度（設定の `confidences`） | `confidence.en`・`confidence.code`（`{ "label": "確定", "code": "A" }` のように書いたキー）・`confidence.note` |
 
   属性名は、まずその設定の `fields` の役割（国は `code`・`name`・`nameEn`、地名は `name`・`kind`・`nameEn`・`kindEn`、ジオフェンスは `name`・`nameEn`・`weight`、条件は `kind`・`note`・`area`・`minConfidence`・`weight` など）、なければレイヤーの属性名そのもの（大文字小文字は問わない。`fields` に書かなくてよい）。`.en` は役割 `nameEn`（確度は `en`）。ないもの・当てはまらないときは空（`fallback`・`empty` で補う）。`places`・`area`・`rule` は値が複数なら `join`（既定「・」、英語の属性（`.en`・`…En`・`…_EN`）は「, 」）でつなぎ、`digits` はそれぞれの数に効く。値が 1 つの数なら、通報テーブルの数の属性（`columns`）には数のまま書く
+- **属性名の確かめ**: 設定を読むとき、読むレイヤーの設定がない `対象.属性名`（`alertReports.countries` なしの `country.code` など）と、どの確度にもないキーの `confidence.キー` は、常に空なので設定の問題として知らせる。レイヤーにある属性はファイルからはわからないので、「抽出」のときにそのレイヤーの属性の一覧を読んで照らし、ない属性（打ち間違い・まだ足していない属性。`place.en` の `NAME_EN` のような役割の属性も）を抽出の結果の欄とメッセージバーで知らせる（その値は空のまま書く）。[設定ファイル作成ツール](#設定ファイル作成ツールtoolsconfig_builderhtml) も同じ設定の問題を出し、役割でも設定に書いた属性名でもない名前は「確かめて」の注意にする（レイヤーは読まない）
 - **英語**: 項目名に `.en`（上の属性の書き方の 1 つ）。`confidence.en` は確度の英語名（[`observationVocabulary.confidences`](#設定ファイルの書き方) の `{ "label": "確定", "en": "Confirmed" }`。既定の確定・推定・不明は `Confirmed`・`Probable`・`Unknown`）、`area.en` はジオフェンスの `NAME_EN`、`place.en`・`places.en`・`placeKind.en` は地名の `NAME_EN`・`KIND_EN`、`countryName.en` は国の `COUNTRY_NAME_EN`。英語名のないものは空（ジオフェンス・地名を並べる `area.en`・`places.en` では、英語名のあるものだけ）。日本語で書くなら `{ "source": "place.en", "fallback": "place" }`。並べる項目の間は日本語が「・」、英語が「, 」（`join` で変えられる。`area`・`rule`・`places` と英語のものだけ）
 
 **重要度スコア**（`score`。書かなければ既定の重みで付ける）:
