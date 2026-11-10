@@ -28,6 +28,9 @@ TYPES = {"Date": ("DATE", None), "Double": ("DOUBLE", None), "Integer": ("LONG",
 #: Oracle・SQL Server・PostgreSQL の予約語のうち、属性名になりそうなもの。
 RESERVED = {"MODE", "FILE", "DATE", "LEVEL", "SIZE", "USER", "COMMENT", "ORDER", "GROUP", "TABLE", "INDEX", "NUMBER",
             "UID", "ROWID", "SESSION", "ACCESS", "ROW", "ROWS", "START", "VALUE", "SHAPE", "OBJECTID", "PUBLIC"}
+#: ArcSDE が形状（ST_Geometry）の中身に使う名前（Esri 「Words by reservation only」）。Oracle の予約語ではないが避ける。
+ARCSDE_NAMES = {"FID", "AREA", "LEN", "POINTS", "NUMOFPTS", "ENTITY", "EMINX", "EMINY", "EMAXX", "EMAXY", "EMINZ", "EMAXZ",
+                "MIN_MEASURE", "MAX_MEASURE"}
 
 
 def _readme_overview() -> dict:
@@ -86,12 +89,25 @@ def test_names_follow_the_naming_rule():
         assert len(names) == len(set(names)), table.name
         for name in names:
             assert NAME.match(name), f"{table.name}.{name}"
-            assert name not in RESERVED, f"{table.name}.{name}"
+            assert name not in RESERVED | ARCSDE_NAMES, f"{table.name}.{name}"
         for field in table.indexes:
             assert field in names, f"{table.name} のインデックス {field}"
     index_names = [schema.index_name(t.name, f) for t in schema.TABLES for f in t.indexes]
     assert len(index_names) == len(set(index_names))
     assert all(NAME.match(n) for n in index_names)
+
+
+def test_renamed_fields_are_the_plugin_legacy_names():
+    from skywatch.core.obs.alerts import DEFAULT_RULE_FIELDS, LEGACY_RULE_FIELDS
+    from skywatch.core.request.store import DEFAULT_HISTORY_FIELDS, LEGACY_HISTORY_FIELDS
+    plugin = {
+        "TBL_ALERT_RULE": {DEFAULT_RULE_FIELDS[r]: old for r, old in LEGACY_RULE_FIELDS.items()},
+        "TBL_REQUEST_HISTORY": {DEFAULT_HISTORY_FIELDS[r]: old for r, old in LEGACY_HISTORY_FIELDS.items()},
+    }
+    assert schema.LEGACY_FIELDS == plugin
+    for table, renamed in schema.LEGACY_FIELDS.items():
+        names = {f.name for f in schema.BY_NAME[table].fields}
+        assert set(renamed) <= names and not set(renamed.values()) & names, table
 
 
 def test_plugin_config_is_the_readme_example():
@@ -127,7 +143,9 @@ class FakeArcpy:
         self.tables: dict = {}
         self.calls: list = []
         m = SimpleNamespace(CreateFeatureclass=self._create_fc, CreateTable=self._create_table, AddField=self._add_field,
-                            AlterField=self._alter_field, AddIndex=self._add_index, ChangePrivileges=self._privileges)
+                            AlterField=self._alter_field, AddIndex=self._add_index, ChangePrivileges=self._privileges,
+                            CalculateField=self._calculate)
+        self.rows: dict = {}
         self.management = m
 
     def _name(self, path):
@@ -158,6 +176,12 @@ class FakeArcpy:
         for f in self.tables[self._name(path)]["fields"]:
             if f.name == field:
                 f.aliasName = new_field_alias
+
+    def _calculate(self, path, field, expression, expression_type="PYTHON3"):
+        self.calls.append(("CalculateField", self._name(path), field, expression))
+        source = re.fullmatch(r"!(\w+)!", expression).group(1)
+        for row in self.rows.get(self._name(path), []):
+            row[field] = row.get(source)
 
     def _add_index(self, path, fields, name, unique, ascending):
         self.calls.append(("AddIndex", self._name(path), name))
@@ -226,6 +250,48 @@ def test_create_tables_adds_missing_fields_and_leaves_different_ones():
     assert ("AlterField", obs.name, "NOTE") in arcpy.calls
     assert any("NOTE" in w for w in report.warnings) and any("PRESENT" in w for w in report.warnings)
     assert "EXTRA" in {f.name for f in arcpy.tables[obs.name]["fields"]}
+
+
+def test_create_tables_copies_a_renamed_field():
+    arcpy = FakeArcpy("C:/gis/owner.sde")
+    rule = schema.BY_NAME["TBL_ALERT_RULE"]
+    arcpy._create_table(arcpy.workspace, rule.name)
+    for name in ("KIND", "ACTIVITIES", "AREA"):
+        arcpy._add_field(arcpy.workspace + "/" + rule.name, name, "TEXT", 255, "")
+    arcpy.rows[rule.name] = [{"KIND": "船舶", "AREA": "東京湾"}, {"KIND": "航空機", "AREA": None}]
+    arcpy.calls.clear()
+    report = _run_all(arcpy, [rule])
+    assert ("CalculateField", rule.name, "GEOFENCE_NAME", "!AREA!") in arcpy.calls
+    assert [r["GEOFENCE_NAME"] for r in arcpy.rows[rule.name]] == ["東京湾", None]
+    assert any("AREA" in w and "消してよい" in w for w in report.warnings)
+    assert "AREA" in {f.name for f in arcpy.tables[rule.name]["fields"]}  # the old one is left
+    arcpy.calls.clear()
+    report = _run_all(arcpy, [rule])
+    assert not any(c[0] == "CalculateField" for c in arcpy.calls)  # copied only when the new one is added
+
+
+def test_create_tables_warns_when_the_copy_fails():
+    arcpy = FakeArcpy("C:/gis/owner.sde")
+    rule = schema.BY_NAME["TBL_ALERT_RULE"]
+    arcpy._create_table(arcpy.workspace, rule.name)
+    arcpy._add_field(arcpy.workspace + "/" + rule.name, "AREA", "TEXT", 255, "")
+
+    def fail(*a, **kw):
+        raise RuntimeError("ERROR 000539")
+    arcpy.management.CalculateField = fail
+    report = _run_all(arcpy, [rule])
+    assert "GEOFENCE_NAME" in {f.name for f in arcpy.tables[rule.name]["fields"]}
+    assert any("写せない" in w and "000539" in w for w in report.warnings)
+
+
+def test_dry_run_tells_the_copy():
+    arcpy = FakeArcpy("C:/gis/owner.sde")
+    rule = schema.BY_NAME["TBL_ALERT_RULE"]
+    arcpy._create_table(arcpy.workspace, rule.name)
+    arcpy._add_field(arcpy.workspace + "/" + rule.name, "AREA", "TEXT", 255, "")
+    arcpy.calls.clear()
+    report = _run_all(arcpy, [rule], dry_run=True)
+    assert "AREA の値を GEOFENCE_NAME に写す" in report.done and arcpy.calls == []
 
 
 def test_create_tables_warns_about_a_different_geometry():

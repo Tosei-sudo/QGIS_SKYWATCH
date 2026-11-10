@@ -52,6 +52,74 @@ def format_dms(lon_lat: LonLat) -> str:
     return f"{part(lat, 'N', 'S', 2)} {part(lon, 'E', 'W', 3)}"
 
 
+#: Named patterns of one angle (`format_angle`): degrees, minutes and seconds; degrees and minutes.
+ANGLE_PRESETS = {"dms": "{d}°{mm}'{ss}\"{h}", "dm": "{d}°{mm}'{h}"}
+#: The places of an angle pattern: degrees, minutes, seconds (`dd`, `mm`, `ss` padded with zeros:
+#: degrees to 2 for a latitude, 3 for a longitude), the hemisphere (N S E W; 北緯 南緯 東経 西経) and a minus sign.
+ANGLE_PLACES = ("d", "dd", "m", "mm", "s", "ss", "h", "hj", "sign")
+#: The decimals of the smallest unit written when none are given (about 10–30 m each).
+ANGLE_DIGITS = {"d": 4, "m": 2, "s": 0}
+_ANGLE_PLACE = re.compile(r"\{(\w+)\}")
+
+
+def angle_pattern(pattern: str) -> Optional[str]:
+    """The pattern of a preset name or of a pattern with at least one of d・m・s; None when it is neither."""
+    pattern = ANGLE_PRESETS.get(pattern.strip().lower(), pattern) if isinstance(pattern, str) else ""
+    places = _ANGLE_PLACE.findall(pattern)
+    if not any(p in ("d", "dd", "m", "mm", "s", "ss") for p in places) or any(p not in ANGLE_PLACES for p in places):
+        return None
+    return pattern
+
+
+def format_angle(value: float, axis: str, pattern: str = "dms", digits: Optional[int] = None) -> str:
+    """
+    One latitude (`axis` "lat") or longitude ("lon") in degrees, minutes and
+    seconds by a pattern: `dms` 35°26'30"N, `dm` 35°26.51'N, or one's own
+    (`{hj}{d}度{m}分{s}秒` 北緯35度26分30秒, `{dd}{mm}{ss}{h}` 352630N,
+    `{d}{h}` 35.4417N). The smallest unit in it takes `digits` decimals
+    (seconds 0, minutes 2, degrees 4 when None); it is rounded once, so
+    59.6″ carries into the minute. A pattern not known is written as decimal degrees.
+    """
+    full = angle_pattern(pattern)
+    if full is None:
+        return _fixed(value, 6)
+    places = set(_ANGLE_PLACE.findall(full))
+    unit = "s" if places & {"s", "ss"} else "m" if places & {"m", "mm"} else "d"
+    k = ANGLE_DIGITS[unit] if digits is None else max(0, min(12, int(digits)))
+    scale = 10 ** k
+    per_degree = {"d": 1, "m": 60, "s": 3600}[unit] * scale
+    total = _js_round(abs(value) * per_degree)
+    negative = value < 0 and total > 0
+    whole, rest = divmod(total, per_degree)
+
+    def number(units: int, pad: int) -> str:
+        """A count of the smallest unit's 1/10^k as a decimal (its whole part padded)."""
+        text = str(units // scale).zfill(pad)
+        return text + (f".{units % scale:0{k}d}" if k else "")
+
+    if unit == "d":
+        d, m, s = number(total, 0), "0", "0"
+        dd = number(total, 3 if axis == "lon" else 2)
+    else:
+        d = str(whole)
+        dd = d.zfill(3 if axis == "lon" else 2)
+        per_minute = per_degree // 60
+        if unit == "m":
+            m, mm, s, ss = number(rest, 0), number(rest, 2), "0", "00"
+        else:
+            m = str(rest // per_minute)
+            mm = m.zfill(2)
+            s, ss = number(rest % per_minute, 0), number(rest % per_minute, 2)
+    if unit == "d":
+        mm, ss = "00", "00"
+    if axis == "lon":
+        h, hj = ("W", "西経") if negative else ("E", "東経")
+    else:
+        h, hj = ("S", "南緯") if negative else ("N", "北緯")
+    values = {"d": d, "dd": dd, "m": m, "mm": mm, "s": s, "ss": ss, "h": h, "hj": hj, "sign": "-" if negative else ""}
+    return _ANGLE_PLACE.sub(lambda match: values[match.group(1)], full)
+
+
 def format_mgrs(lon_lat: LonLat) -> Optional[str]:
     """`54S UE 88433 49290` (1 m precision); None outside the MGRS area (the poles)."""
     try:

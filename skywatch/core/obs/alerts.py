@@ -28,7 +28,15 @@ named areas (`namedAreas`: place and facility names, maybe a kind). The
 smallest area holding the record is its place (`place`, `placeKind`; all of
 them smallest first `places`); a field can say what to write when it is in
 none (`empty`), or leave itself out (`omitEmpty`), and add text around a
-value only when there is one (`prefix`, `suffix`).
+value only when there is one (`prefix`, `suffix`). Likewise a polygon layer
+of countries (`countries`) gives a record's country code and name.
+
+A field can hold several values (`source` as an array, joined by `join`:
+the latitude and longitude together), take another field when its own value
+is empty (`fallback`: the coordinates when the record is in no named area),
+write a latitude or longitude in degrees, minutes and seconds (`format`
+`dms`, `dm` or a pattern), and take a name in English (`confidence.en`,
+`area.en`, `place.en`…: the levels' `en`, the layers' NAME_EN).
 """
 from __future__ import annotations
 
@@ -41,9 +49,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+from ..coords import angle_pattern, format_angle
 from ..esri import EsriClient, EsriError, fit_value, quote
 from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, utc_text
+from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, use_legacy_names, utc_text
 from ..request.export import format_time
 from .geo import get_distance, to_fixed
 from .model import ConfidenceLevel, Observation
@@ -54,10 +63,17 @@ SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated",
     "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
-    "place", "placeKind", "places",
+    "place", "placeKind", "places", "country", "countryName",
+    "confidence.en", "area.en", "place.en", "placeKind.en", "places.en", "countryName.en",
 )
 TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
 NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
+#: Written in degrees, minutes and seconds by a `format` (dms, dm, or a pattern of coords.format_angle).
+ANGLE_SOURCES = ("lat", "lon")
+#: Several names in one value, between them `join` (else ・, or ", " in English).
+LIST_SOURCES = ("area", "rule", "places", "area.en", "places.en")
+#: Between the values of a field of several (`source` as an array) when `join` is not given.
+DEFAULT_JOIN = " "
 #: The fields written when the settings give none.
 DEFAULT_FIELDS = ("imageTime", "kind", "objectName", "activity", "confidence", "lat", "lon", "area", "note")
 DEFAULT_DATE_FORMAT = "%Y-%m-%d %H:%M"
@@ -68,13 +84,18 @@ NEWLINES = {"crlf": "\r\n", "lf": "\n"}
 
 #: The rules table's attributes by role.
 DEFAULT_RULE_FIELDS = {
-    "kind": "KIND", "activities": "ACTIVITIES", "minConfidence": "MIN_CONFIDENCE", "area": "AREA",
+    "kind": "KIND", "activities": "ACTIVITIES", "minConfidence": "MIN_CONFIDENCE", "area": "GEOFENCE_NAME",
     "active": "ACTIVE", "note": "NOTE", "weight": "WEIGHT",
 }
+#: Default names before 2026-11-10 (AREA is a name ArcSDE uses inside a shape (ST_Geometry) and did
+#: not work in an Oracle enterprise geodatabase), still read from a table that has only them.
+LEGACY_RULE_FIELDS: dict[str, str] = {"area": "AREA"}
 #: The geofence layer's attributes by role.
-DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT"}
+DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT", "nameEn": "NAME_EN"}
 #: The named area layer's attributes by role (place and facility names).
-DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE"}
+DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE", "nameEn": "NAME_EN", "kindEn": "KIND_EN"}
+#: The country layer's attributes by role (`country`, `countryName`).
+DEFAULT_COUNTRY_FIELDS = {"code": "COUNTRY_CODE", "name": "COUNTRY_NAME", "nameEn": "COUNTRY_NAME_EN", "active": "ACTIVE"}
 #: How long the named areas read are kept (seconds).
 PLACE_CACHE_SECONDS = 600
 #: The parts of the score and their weights when the settings give none.
@@ -114,6 +135,12 @@ class AlertField:
     suffix: str = ""
     #: In a line, left out (with its delimiter) when empty.
     omit_empty: bool = False
+    #: Several values in one (`source` as an array): the fields, written between them `join`.
+    parts: list["AlertField"] = field(default_factory=list)
+    #: Between the parts, or between the names of a list (area, places…); the default when None.
+    join: Optional[str] = None
+    #: Written instead when the value is empty (before `empty`).
+    fallback: Optional["AlertField"] = None
 
 
 @dataclass
@@ -190,6 +217,8 @@ class AlertSettings:
     geofences: Optional[EsriSource] = None
     #: Place and facility names (polygons): a record's place is the smallest one it is in.
     named_areas: Optional[EsriSource] = None
+    #: Countries (polygons, a code and names): a record's country is the smallest one it is in.
+    countries: Optional[EsriSource] = None
     #: The Esri log table (the main output; also what was reported).
     table: Optional[EsriSource] = None
     #: A record saved that meets the conditions (and is not reported yet) is said in QGIS's message bar.
@@ -226,6 +255,8 @@ class Geofence:
     rings: list
     #: How much being inside weighs (0–1, the WEIGHT column; 1 when empty).
     weight: float = 1.0
+    #: Its name in English (NAME_EN).
+    name_en: str = ""
 
 
 @dataclass
@@ -238,6 +269,10 @@ class NamedArea:
     size: float = 0.0
     #: The rings' extent (west, south, east, north), to skip the far ones fast.
     box: tuple = (0.0, 0.0, 0.0, 0.0)
+    #: In English (NAME_EN, KIND_EN), and a code (a country's).
+    name_en: str = ""
+    kind_en: str = ""
+    code: str = ""
 
 
 @dataclass
@@ -258,20 +293,27 @@ class AlertItem:
     rule_weight: Optional[float] = None
     #: The named areas it is in, smallest first (the first is its place).
     places: list[NamedArea] = field(default_factory=list)
+    #: The geofences' names in English (those that have one).
+    areas_en: list[str] = field(default_factory=list)
+    #: The countries it is in, smallest first (the first is its country).
+    countries: list[NamedArea] = field(default_factory=list)
+    #: Its 確度 in English (the level's `en`).
+    confidence_en: str = ""
 
 
 def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = (), settings: Optional[AlertSettings] = None,
                  levels: Sequence[ConfidenceLevel] = (), history: Iterable[Observation] = (),
-                 named: Sequence["NamedArea"] = ()) -> list[AlertItem]:
-    """Records chosen by hand: reported whatever the conditions say (their geofences and places still named; scored by `settings`)."""
+                 named: Sequence["NamedArea"] = (), countries: Sequence["NamedArea"] = ()) -> list[AlertItem]:
+    """Records chosen by hand: reported whatever the conditions say (their geofences, places and country still named; scored by `settings`)."""
     out = []
     for o in records:
         if o.deleted_at is not None:
             continue
         inside = [g for g in fences if inside_rings(o.lon, o.lat, g.rings)]
         out.append(AlertItem(o, list(dict.fromkeys(g.name for g in inside)), [MANUAL_RULE], True,
-                             area_weight=max((g.weight for g in inside), default=0.0) if fences else None, rule_weight=1.0))
-    name_places(out, named)
+                             area_weight=max((g.weight for g in inside), default=0.0) if fences else None, rule_weight=1.0,
+                             areas_en=_names_en(inside)))
+    name_places(out, named, countries, levels)
     if settings is not None and settings.score is not None:
         score_items(out, settings.score, levels, history)
     return out
@@ -280,8 +322,30 @@ def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()
 # ---- the settings file ------------------------------------------------------------
 
 
+#: What a part of a field of several (`source` as an array) takes from the field when the part is a name.
+_INHERITED = ("format", "timeZone", "digits", "level", "map")
+
+
+def _applies(key: str, source: str, value: Any) -> bool:
+    """Whether a field's option (inherited by a part named `source`) means anything for it."""
+    if key == "format":
+        angle = isinstance(value, str) and angle_pattern(value) is not None
+        return source in ANGLE_SOURCES if angle else source in TIME_SOURCES
+    if key == "timeZone":
+        return source in TIME_SOURCES
+    if key == "digits":
+        return source in NUMBER_SOURCES
+    if key == "level":
+        return source == "kind"
+    return True
+
+
 def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
-    if isinstance(v, str):
+    """
+    A field: a source's name, `{ source, … }`, `{ text }`, or several values
+    in one (an array, or `source` as an array: names or fields, `join` between).
+    """
+    if isinstance(v, (str, list)):
         v = {"source": v}
     if not is_record(v):
         problems.append(f"{at} は項目名か {{ source, … }} で指定")
@@ -289,6 +353,8 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
     if "text" in v and "source" not in v:
         return AlertField(text=js_string(v["text"]))
     source = v.get("source")
+    if isinstance(source, list):
+        return _parts_of(v, at, problems)
     if source not in SOURCES:
         problems.append(f"{at} の source「{js_string(source)}」は使用不可（{'・'.join(SOURCES)}、または text）")
         return None
@@ -298,6 +364,18 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
     if "level" in v and not (is_number(level) and int(level) == level and level != 0):
         problems.append(f"{at} の level は 1（最上位）からの階層、または -1（最下位）で指定")
     fmt = v.get("format")
+    if "format" in v and fmt not in (None, ""):
+        if not isinstance(fmt, str):
+            problems.append(f"{at} の format は文字列で指定")
+            fmt = None
+        elif source in ANGLE_SOURCES:
+            if angle_pattern(fmt) is None:
+                problems.append(f"{at} の format は dms・dm か {{d}}・{{m}}・{{s}} を含む書式で指定"
+                                "（ほかに {dd}・{mm}・{ss}・{h}・{hj}・{sign}）")
+                fmt = None
+        elif source not in TIME_SOURCES:
+            problems.append(f"{at} の format は日時の項目（{'・'.join(TIME_SOURCES)}）と lat・lon だけに指定")
+            fmt = None
     mapping = v.get("map")
     if "map" in v and not is_record(mapping):
         problems.append(f"{at} の map はオブジェクトで指定")
@@ -309,6 +387,10 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         elif source not in TIME_SOURCES:
             problems.append(f"{at} の timeZone は日時の項目（{'・'.join(TIME_SOURCES)}）だけに指定")
             zone = None
+    join = _affix(v, "join", at, problems) if "join" in v and v["join"] is not None else None
+    if join is not None and source not in LIST_SOURCES:
+        problems.append(f"{at} の join は source が配列のときか、名前を並べる項目（{'・'.join(LIST_SOURCES)}）だけに指定")
+        join = None
     return AlertField(
         source=source,
         format=fmt if isinstance(fmt, str) and fmt else None,
@@ -320,7 +402,52 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         prefix=_affix(v, "prefix", at, problems),
         suffix=_affix(v, "suffix", at, problems),
         omit_empty=_bool(v, "omitEmpty", at, problems, False),
+        join=join,
+        fallback=_fallback_of(v, at, problems),
     )
+
+
+def _parts_of(v: dict, at: str, problems: list[str]) -> Optional[AlertField]:
+    """
+    A field of several values (`source` as an array): a name takes the
+    field's `format`, `timeZone`, `digits`, `level` and `map` where they
+    mean something for it; a field (`{ source, … }`, `{ text }`) its own.
+    """
+    raw = v["source"]
+    if not raw:
+        problems.append(f"{at} の source の配列が空")
+        return None
+    parts: list[AlertField] = []
+    used: set[str] = set()
+    for i, p in enumerate(raw):
+        if isinstance(p, str):
+            given = {k: v[k] for k in _INHERITED if k in v and v[k] not in (None, "") and _applies(k, p, v[k])}
+            used |= set(given)
+            p = {"source": p, **given}
+        part = _field_of(p, f"{at}.source[{i}]", problems)
+        if part is not None:
+            parts.append(part)
+    for key in _INHERITED:
+        if key in v and v[key] not in (None, "") and key not in used:
+            problems.append(f"{at} の {key} は source のどの項目にも使われない")
+    if not parts:
+        return None
+    return AlertField(
+        parts=parts,
+        join=_affix(v, "join", at, problems) if "join" in v and v["join"] is not None else None,
+        empty=js_string(v["empty"]) if "empty" in v and v["empty"] is not None else "",
+        prefix=_affix(v, "prefix", at, problems),
+        suffix=_affix(v, "suffix", at, problems),
+        omit_empty=_bool(v, "omitEmpty", at, problems, False),
+        fallback=_fallback_of(v, at, problems),
+    )
+
+
+def _fallback_of(v: dict, at: str, problems: list[str]) -> Optional[AlertField]:
+    """`fallback`: the field written when the value is empty (a name, a field, or an array: several in one)."""
+    if v.get("fallback") in (None, ""):
+        return None
+    return _field_of(v["fallback"], f"{at}.fallback", problems)
 
 
 def _affix(v: dict, key: str, at: str, problems: list[str]) -> str:
@@ -571,6 +698,8 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
         settings.geofences = _source_of(value["geofences"], f"{at}.geofences", DEFAULT_FENCE_FIELDS, problems)
     if "namedAreas" in value and value["namedAreas"] not in (None, False, ""):
         settings.named_areas = _source_of(value["namedAreas"], f"{at}.namedAreas", DEFAULT_PLACE_FIELDS, problems)
+    if "countries" in value and value["countries"] not in (None, False, ""):
+        settings.countries = _source_of(value["countries"], f"{at}.countries", DEFAULT_COUNTRY_FIELDS, problems)
     if "table" in value:
         settings.table = _source_of(value["table"], f"{at}.table", DEFAULT_LOG_FIELDS, problems, editable=True)
     return settings
@@ -612,6 +741,9 @@ def weight_of(v: Any) -> float:
 
 def rules_of_rows(rows: Iterable[dict[str, Any]], fields: dict[str, str]) -> list[AlertRule]:
     """The active rules of the table's rows (attributes)."""
+    rows = list(rows)
+    fields = dict(fields)
+    use_legacy_names(fields, {k for a in rows for k in a}, DEFAULT_RULE_FIELDS, LEGACY_RULE_FIELDS)
     out = []
     for a in rows:
         if fields["active"] in a and not _active(a.get(fields["active"])):
@@ -643,7 +775,8 @@ def load_geofences(client: EsriClient, source: EsriSource, token: Optional[str] 
         rings = (feature.get("geometry") or {}).get("rings") or []
         if not rings or (f["active"] in a and not _active(a.get(f["active"]))):
             continue
-        out.append(Geofence(name=_text(a.get(f["name"])), rings=rings, weight=weight_of(a.get(f["weight"]))))
+        out.append(Geofence(name=_text(a.get(f["name"])), rings=rings, weight=weight_of(a.get(f["weight"])),
+                            name_en=_text(a.get(f["nameEn"])) if "nameEn" in f else ""))
     return out
 
 
@@ -665,18 +798,25 @@ def ring_size(rings: Sequence) -> float:
 
 
 def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) -> list[NamedArea]:
-    """The active named areas of the layer's features (polygons, WGS 84); those without a name or rings left out."""
+    """
+    The active named areas (or countries) of the layer's features (polygons,
+    WGS 84); those without rings, or without a name (nor a code), left out.
+    """
     out = []
     for feature in features:
         a = feature.get("attributes") or {}
+
+        def text(role: str) -> str:
+            return _text(a.get(fields[role])) if role in fields else ""
+
         rings = (feature.get("geometry") or {}).get("rings") or []
-        name = _text(a.get(fields["name"]))
-        if not rings or not name or (fields["active"] in a and not _active(a.get(fields["active"]))):
+        name, code = text("name"), text("code")
+        if not rings or not (name or code) or ("active" in fields and fields["active"] in a and not _active(a.get(fields["active"]))):
             continue
         xs = [p[0] for ring in rings for p in ring]
         ys = [p[1] for ring in rings for p in ring]
-        out.append(NamedArea(name=name, rings=rings, kind=_text(a.get(fields["kind"])), size=ring_size(rings),
-                             box=(min(xs), min(ys), max(xs), max(ys))))
+        out.append(NamedArea(name=name, rings=rings, kind=text("kind"), size=ring_size(rings),
+                             box=(min(xs), min(ys), max(xs), max(ys)), name_en=text("nameEn"), kind_en=text("kindEn"), code=code))
     return out
 
 
@@ -718,10 +858,19 @@ def places_of(lon: float, lat: float, areas: Sequence[NamedArea]) -> list[NamedA
     return sorted(inside, key=lambda a: a.size)
 
 
-def name_places(items: Iterable[AlertItem], areas: Sequence[NamedArea]) -> None:
-    """Sets each item's places (the named areas it is in, smallest first)."""
+def name_places(items: Iterable[AlertItem], areas: Sequence[NamedArea], countries: Sequence[NamedArea] = (),
+                levels: Sequence[ConfidenceLevel] = ()) -> None:
+    """Sets each item's places and countries (those it is in, smallest first) and its 確度 in English."""
+    english = {c.label: c.en for c in levels if c.en}
     for item in items:
         item.places = places_of(item.record.lon, item.record.lat, areas) if areas else []
+        item.countries = places_of(item.record.lon, item.record.lat, countries) if countries else []
+        item.confidence_en = english.get(item.record.confidence, "")
+
+
+def _names_en(fences: Iterable[Geofence]) -> list[str]:
+    """The geofences' names in English (those that have one, each once)."""
+    return list(dict.fromkeys(g.name_en for g in fences if g.name_en))
 
 
 def _log_types(client: EsriClient, settings: AlertSettings, token: Optional[str]) -> dict[str, str]:
@@ -913,6 +1062,7 @@ def select(
     by: str = "created",
     history: Optional[Iterable[Observation]] = None,
     named: Sequence[NamedArea] = (),
+    countries: Sequence[NamedArea] = (),
 ) -> list[AlertItem]:
     """
     The notable records: living ones of the period (`by` 登録日時 `created`
@@ -920,7 +1070,8 @@ def select(
     of the rules (every record when there is no rules table: `rules` None),
     and not reported yet; highest score first (`settings.score`; the rarity
     counted among `history`, the records themselves when None), else in
-    image time order. Each is given its places among the named areas `named`.
+    image time order. Each is given its places among the named areas `named`
+    and its country among `countries`.
     """
     records = list(records)
     done = set(reported)
@@ -941,14 +1092,14 @@ def select(
         areas = list(dict.fromkeys(g.name for g in inside))
         area_weight = max((g.weight for g in inside), default=0.0) if fences else None
         if rules is None:
-            out.append(AlertItem(o, areas, [], area_weight=area_weight))
+            out.append(AlertItem(o, areas, [], area_weight=area_weight, areas_en=_names_en(inside)))
             continue
         met = [r for r in rules if rule_matches(r, o, areas, levels)]
         if met:
             out.append(AlertItem(o, areas, list(dict.fromkeys(r.note for r in met if r.note)), area_weight=area_weight,
-                                 rule_weight=max(r.weight for r in met)))
+                                 rule_weight=max(r.weight for r in met), areas_en=_names_en(inside)))
     out.sort(key=_time_key)
-    name_places(out, named)
+    name_places(out, named, countries, levels)
     if settings.score is None:
         return out
     score_items(out, settings.score, levels, records if history is None else history)
@@ -1048,7 +1199,7 @@ class Moment:
 
 
 def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> Any:
-    """A field's value before it is written (times ms, numbers float)."""
+    """A field's value before it is written (times ms, numbers float; the names of a list joined)."""
     o = item.record
     s = f.source
     if s == "kind":
@@ -1057,26 +1208,41 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
             return kind_of(path)
         i = f.level - 1 if f.level > 0 else len(path) + f.level
         return path[i] if 0 <= i < len(path) else ""
+
+    def joined(names: Iterable[str]) -> str:
+        sep = f.join if f.join is not None else ", " if (s or "").endswith(".en") else "・"
+        return sep.join(dict.fromkeys(n for n in names if n))
+
+    place = item.places[0] if item.places else None
+    country = item.countries[0] if item.countries else None
     return {
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": o.image_time, "objectId": o.object_id,
         "objectName": o.object_name, "activity": o.activity, "present": o.present, "confidence": o.confidence,
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width,
         "recordedBy": o.recorded_by, "updatedBy": o.updated_by, "created": o.created_at, "updated": o.updated_at,
-        "area": "・".join(item.areas), "rule": "・".join(item.rules), "report": report.name, "reportedAt": at.now,
+        "area": joined(item.areas), "rule": joined(item.rules), "report": report.name, "reportedAt": at.now,
         "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
         "similar": item.similar if item.score is not None else None,
-        "place": item.places[0].name if item.places else "", "placeKind": item.places[0].kind if item.places else "",
-        "places": "・".join(dict.fromkeys(a.name for a in item.places)),
+        "place": place.name if place else "", "placeKind": place.kind if place else "",
+        "places": joined(a.name for a in item.places),
+        "country": country.code if country else "", "countryName": country.name if country else "",
+        "confidence.en": item.confidence_en, "area.en": joined(item.areas_en),
+        "place.en": place.name_en if place else "", "placeKind.en": place.kind_en if place else "",
+        "places.en": joined(a.name_en for a in item.places), "countryName.en": country.name_en if country else "",
     }.get(s or "")
 
 
-def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> str:
-    """A field as text."""
-    if f.source is None:
-        return f.text or ""
+def _own_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> tuple[Any, str]:
+    """A field's value and its text (`prefix`, `suffix` around it), before its `fallback` and `empty`."""
+    if f.parts:
+        texts = [t for t in (written(p, item, index, report, at) for p in f.parts) if t != ""]
+        text = (DEFAULT_JOIN if f.join is None else f.join).join(texts)
+        return text, f.prefix + text + f.suffix if text != "" else ""
     v = raw_value(f, item, index, report, at)
     if f.source in TIME_SOURCES:
         text = "" if v is None else js_string(format_time(v, f.format or report.date_format, f.time_zone or report.time_zone))
+    elif f.source in ANGLE_SOURCES and f.format:
+        text = "" if v is None or not math.isfinite(v) else format_angle(v, f.source, f.format, f.digits)
     elif f.source in NUMBER_SOURCES:
         text = "" if v is None or not math.isfinite(v) else (to_fixed(v, f.digits) if f.digits is not None else js_string(v))
     elif f.source == "present":
@@ -1088,7 +1254,29 @@ def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at:
     if f.map:
         key = js_string(v).lower() if isinstance(v, bool) else text
         text = f.map.get(key, f.map.get(text, text))
-    return f.prefix + text + f.suffix if text != "" else f.empty
+    return v, f.prefix + text + f.suffix if text != "" else ""
+
+
+def value_of(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> tuple[Any, str]:
+    """
+    A field's value (for an attribute that is not text) and its text: its
+    own, else its `fallback`'s (and so on), else its `empty` text.
+    """
+    if f.source is None and not f.parts:
+        return f.text, f.text or ""
+    v, text = _own_value(f, item, index, report, at)
+    if text != "":
+        return v, text
+    if f.fallback is not None:
+        fv, fallback = value_of(f.fallback, item, index, report, at)
+        if fallback != "":
+            return fv, fallback
+    return v, f.empty
+
+
+def written(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> str:
+    """A field as text."""
+    return value_of(f, item, index, report, at)[1]
 
 
 def escaped(text: str, report: AlertFormat) -> str:
@@ -1173,8 +1361,8 @@ def write_log(client: EsriClient, settings: AlertSettings, report: AlertFormat, 
             f["reportedBy"]: at.user, f["batch"]: batch, f["manual"]: 1 if item.manual else 0,
         }
         for attr, col in report.columns.items():
-            raw = raw_value(col, item, i, report, at) if col.source else col.text
-            values[attr] = written(col, item, i, report, at) if types.get(attr) == "esriFieldTypeString" else raw
+            raw, text = value_of(col, item, i, report, at)
+            values[attr] = text if types.get(attr) == "esriFieldTypeString" else raw
         adds.append({"attributes": {k: fit_value(v, types[k]) for k, v in values.items() if k in types}})
     added = 0
     failures: list[str] = []

@@ -304,24 +304,26 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
                   "ADOPTION_SOURCE": {"type": S, "length": 1000}}
 
-ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "AREA": S,
+ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "GEOFENCE_NAME": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
 ALERT_LOG_FIELDS = {"OBS_ID": {"type": S, "length": 64}, "REPORT_NAME": S, "TEXT": {"type": S, "length": 4000}, "REPORTED_AT": T,
                     "REPORTED_BY": S, "BATCH_ID": {"type": S, "length": 64}, "MANUAL": F, "KIND": S}
 #: 通報条件 (alertReports.rules): ships moving in the 横須賀 geofence, and every aircraft.
 ALERT_RULES = [
-    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "AREA": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き",
+    {"KIND": "船舶", "ACTIVITIES": "航行,入港,出港", "MIN_CONFIDENCE": "推定", "GEOFENCE_NAME": "横須賀", "ACTIVE": 1, "NOTE": "港内の船舶の動き",
      "WEIGHT": 1.0},
-    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "AREA": "", "ACTIVE": 1, "NOTE": "航空機", "WEIGHT": 0.6},
-    {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "AREA": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
+    {"KIND": "航空機", "ACTIVITIES": "*", "MIN_CONFIDENCE": "", "GEOFENCE_NAME": "", "ACTIVE": 1, "NOTE": "航空機", "WEIGHT": 0.6},
+    {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "GEOFENCE_NAME": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
 #: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place).
 NAMED_AREAS = [
-    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70)),
-    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34)),
-    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315)),
+    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70), "Tokyo Bay", "bay"),
+    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34), "Port of Yokosuka", "port"),
+    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315), "Yokosuka Main Port", "facility"),
 ]
+#: The countries (a rough box around Japan's islands and seas): code, name, English name, box.
+COUNTRIES = [("JP", "日本", "Japan", (122.9, 24.0, 146.0, 45.6))]
 
 ASSIGNMENT_FIELDS = {"IMAGE_ID": {"type": S, "length": 255}, "IMAGE_NAME": S, "IMAGE_TIME": T, "ASSIGNEE": S, "STATUS": S,
                      "NOTE": {"type": S, "length": 2000}, "TAKEN_AT": T, "DONE_AT": T}
@@ -441,12 +443,17 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 1, "name": "出力履歴", "geometryType": "polygon", "fields": HISTORY_FIELDS, "features": []}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
-            {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D},
-             "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0}, "geometry": {"rings": [_box_ring(AREA)]}}])},
+            {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D, "NAME_EN": S},
+             "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0, "NAME_EN": "Yokosuka"},
+                                 "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []},
-            {"id": 3, "name": "地名", "geometryType": "polygon", "fields": {"NAME": S, "KIND": S, "ACTIVE": F},
-             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1}, "geometry": {"rings": [_box_ring(b)]}}
-                                for n, k, b in NAMED_AREAS])}]},
+            {"id": 3, "name": "地名", "geometryType": "polygon", "fields": {"NAME": S, "KIND": S, "ACTIVE": F, "NAME_EN": S, "KIND_EN": S},
+             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1, "NAME_EN": ne, "KIND_EN": ke}, "geometry": {"rings": [_box_ring(b)]}}
+                                for n, k, b, ne, ke in NAMED_AREAS])},
+            {"id": 4, "name": "国", "geometryType": "polygon",
+             "fields": {"COUNTRY_CODE": S, "COUNTRY_NAME": S, "COUNTRY_NAME_EN": S, "ACTIVE": F},
+             "features": feats([{"attributes": {"COUNTRY_CODE": c, "COUNTRY_NAME": n, "COUNTRY_NAME_EN": ne, "ACTIVE": 1},
+                                 "geometry": {"rings": [_box_ring(b)]}} for c, n, ne, b in COUNTRIES])}]},
         {"name": "Work", "layers": [
             {"id": 0, "name": "分担", "fields": ASSIGNMENT_FIELDS, "features": []},
             {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []}]},
@@ -563,13 +570,18 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   // 注目の記録の通報（条件・ジオフェンス・通報記録は Esri。フォーマットは名前付きで複数、default が最初に選ばれる）
   "alertReports": {{
     "rules": "{rest}/Alerts/FeatureServer/0", "geofences": "{rest}/Alerts/FeatureServer/1", "table": "{rest}/Alerts/FeatureServer/2",
-    "namedAreas": "{rest}/Alerts/FeatureServer/3",
+    "namedAreas": "{rest}/Alerts/FeatureServer/3", "countries": "{rest}/Alerts/FeatureServer/4",
     "minConfidence": "推定", "default": "速報",
     "formats": [
       {{ "name": "速報", "delimiter": "|", "timeZone": "Asia/Tokyo", "dateFormat": "%m/%d %H:%M",
         "fields": ["imageTime", {{ "source": "kind", "level": 1 }}, "objectName", "activity", "confidence",
                    {{ "source": "place", "empty": "（地名なし）" }}, {{ "source": "lat", "digits": 4 }}, {{ "source": "lon", "digits": 4 }}, "area", "rule"],
         "header": "【注目】{{date}} {{count}}件", "footer": "以上", "columns": {{ "KIND": "kind" }} }},
+      // 英語・国コード・度分秒（地名がなければ座標）
+      {{ "name": "English", "delimiter": "/", "timeZone": "UTC", "dateFormat": "%d%H%MZ %b %y",
+        "fields": ["imageTime", "objectName", "confidence.en", {{ "source": "country", "empty": "--" }},
+                   {{ "source": "place.en", "fallback": {{ "source": ["lat", "lon"], "format": "{{dd}}{{mm}}{{ss}}{{h}}" }} }},
+                   {{ "source": ["lat", "lon"], "format": "dms" }}, {{ "source": "area.en", "omitEmpty": true }}] }},
       {{ "name": "ファイル（タブ区切り）", "delimiter": "\\t", "dateFormat": "%Y-%m-%d %H:%M:%S", "timeZone": "UTC", "clipboard": false,
         "fields": ["id", "imageTime", "kind", "objectName", "activity", "lat", "lon", "note"],
         "file": {{ "path": {alert_file}, "encoding": "cp932", "append": true }} }}

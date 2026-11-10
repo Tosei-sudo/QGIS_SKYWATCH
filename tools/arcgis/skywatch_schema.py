@@ -202,7 +202,7 @@ TABLES = (
         F("KIND", "分類", "TEXT", 1000, "kind"),
         F("ACTIVITIES", "活動", "TEXT", 2000, "activities"),
         F("MIN_CONFIDENCE", "確度の下限", "TEXT", 64, "minConfidence"),
-        F("AREA", "ジオフェンス", "TEXT", 255, "area"),
+        F("GEOFENCE_NAME", "ジオフェンス", "TEXT", 255, "area"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("NOTE", "備考", "TEXT", 1000, "note"),
         F("WEIGHT", "重み", "DOUBLE", None, "weight"),
@@ -211,11 +211,14 @@ TABLES = (
         F("NAME", "名前", "TEXT", 255, "name"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("WEIGHT", "重み", "DOUBLE", None, "weight"),
+        F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
     )),
     Table("TBL_NAMED_AREA", "地名のポリゴン", "POLYGON", writable=False, setting="alertReports.namedAreas", fields=(
         F("NAME", "地名", "TEXT", 255, "name"),
         F("KIND", "種類", "TEXT", 64, "kind"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
+        F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
+        F("KIND_EN", "種類（英語）", "TEXT", 64, "kindEn"),
     )),
     Table("TBL_ALERT_LOG", "通報記録", None, writable=True, setting="alertReports.table", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "obsId"),
@@ -301,6 +304,12 @@ TABLES = (
         F("PLACE_NAME_KANA", "読み", "TEXT", 255, ""),
         F("PLACE_ALIAS", "別名", "TEXT", 255, ""),
     )),
+    Table("TBL_COUNTRY", "国", "POLYGON", writable=False, setting="alertReports.countries", fields=(
+        F("COUNTRY_CODE", "国コード", "TEXT", 8, "code"),
+        F("COUNTRY_NAME", "国名", "TEXT", 255, "name"),
+        F("COUNTRY_NAME_EN", "国名（英語）", "TEXT", 255, "nameEn"),
+        F("ACTIVE", "有効", "SHORT", None, "active"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -323,6 +332,14 @@ INDEXES = {
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
 BY_NAME = {t.name: t for t in TABLES}
+
+#: 名前を変えた既定の属性: テーブル → {今の名前: 前の名前}。前の名前だけがあるテーブルに今の名前を足すときは値を写す
+#: （プラグインは今の名前があればそちらを読むので、空のままだと前の値が使われなくなる）。
+#: FILE は Oracle・SQL Server の予約語（2026-11-08）。AREA は ArcSDE（ST_Geometry）が形状の面積に使う名前（2026-11-10）。
+LEGACY_FIELDS = {
+    "TBL_REQUEST_HISTORY": {"OUTPUT_FILE": "FILE"},
+    "TBL_ALERT_RULE": {"GEOFENCE_NAME": "AREA"},
+}
 
 
 def all_fields(table: Table, edit_tracking: bool = True) -> tuple:
@@ -381,7 +398,8 @@ def plugin_config(urls: dict) -> dict:
             store["taxonomyTable"] = urls["TBL_TAXONOMY"]
         config["observationStores"] = [store]
     alerts = {key: urls[t] for key, t in (("rules", "TBL_ALERT_RULE"), ("geofences", "TBL_ALERT_GEOFENCE"),
-                                          ("namedAreas", "TBL_NAMED_AREA"), ("table", "TBL_ALERT_LOG")) if t in urls}
+                                          ("namedAreas", "TBL_NAMED_AREA"), ("table", "TBL_ALERT_LOG"),
+                                          ("countries", "TBL_COUNTRY")) if t in urls}
     if alerts:
         alerts["formats"] = [{"name": "既定"}]
         config["alertReports"] = alerts

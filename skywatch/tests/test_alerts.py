@@ -75,9 +75,9 @@ def test_plugin_config_reads_the_key():
 
 def test_rules_rows_activities_and_inactive():
     rules = rules_of_rows([
-        {"KIND": "船舶 > 支援船", "ACTIVITIES": "航行、入港", "MIN_CONFIDENCE": "確定", "AREA": "", "ACTIVE": 1, "NOTE": "支援船の航行"},
+        {"KIND": "船舶 > 支援船", "ACTIVITIES": "航行、入港", "MIN_CONFIDENCE": "確定", "GEOFENCE_NAME": "", "ACTIVE": 1, "NOTE": "支援船の航行"},
         {"KIND": "航空機", "ACTIVITIES": "*", "ACTIVE": 0},
-        {"KIND": "", "ACTIVITIES": "", "AREA": "*"},
+        {"KIND": "", "ACTIVITIES": "", "GEOFENCE_NAME": "*"},
     ], settings().rules.fields)
     assert len(rules) == 2
     assert rules[0].kind == ["船舶", "支援船"] and rules[0].activities == ["航行", "入港"]
@@ -189,7 +189,7 @@ def test_write_file_appends_in_its_encoding(tmp_path):
 
 def esri():
     fake = FakeEsri()
-    rules = fake.add_layer(RULES_URL, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "AREA", "NOTE")} | {"ACTIVE": "esriFieldTypeSmallInteger"}, ""))
+    rules = fake.add_layer(RULES_URL, FakeLayer({n: "esriFieldTypeString" for n in ("KIND", "ACTIVITIES", "MIN_CONFIDENCE", "GEOFENCE_NAME", "NOTE")} | {"ACTIVE": "esriFieldTypeSmallInteger"}, ""))
     rules.add({"KIND": "船舶", "ACTIVITIES": "*", "ACTIVE": 1, "NOTE": "船"})
     rules.add({"KIND": "航空機", "ACTIVE": 0})
     fences = fake.add_layer(FENCE_URL, FakeLayer({"NAME": "esriFieldTypeString"}, "esriGeometryPolygon"))
@@ -402,3 +402,176 @@ def test_named_areas_smallest_place_cache_and_field_options():
     problems = []
     alert_settings_of({"formats": [{"name": "a", "fields": [{"source": "place", "prefix": 1, "omitEmpty": "yes"}]}]}, problems)
     assert any("prefix" in p for p in problems) and any("omitEmpty" in p for p in problems)
+
+
+def _one(fields, problems=None, **extra):
+    """A format of these fields (the settings' problems in `problems`)."""
+    p = [] if problems is None else problems
+    s = alert_settings_of({"formats": [{"name": "a", "fields": fields, **extra}]}, p)
+    return s.format() if s else None
+
+
+def test_latitude_and_longitude_in_degrees_minutes_and_seconds():
+    from skywatch.core.coords import format_angle
+
+    # 35.441806°N 139.641667°E (横浜付近); 9.0841°W; rounding carries 59.99″ into the minute and the degree.
+    assert format_angle(35.441806, "lat") == "35°26'31\"N"
+    assert format_angle(139.641667, "lon") == "139°38'30\"E"
+    assert format_angle(-9.0841, "lon") == "9°05'03\"W"
+    assert format_angle(-33.5, "lat", "dms", 1) == "33°30'00.0\"S"
+    assert format_angle(35.441806, "lat", "dm") == "35°26.51'N"
+    assert format_angle(35.441806, "lat", "DM", 3) == "35°26.508'N"
+    assert format_angle(35.441806, "lat", "{hj}{d}度{m}分{s}秒") == "北緯35度26分31秒"
+    assert format_angle(-139.641667, "lon", "{hj}{d}度{m}分{s}秒") == "西経139度38分30秒"
+    assert format_angle(35.441806, "lat", "{dd}{mm}{ss}{h}") == "352631N"
+    assert format_angle(9.0841, "lon", "{dd}{mm}{ss}{h}") == "0090503E"
+    assert format_angle(5.5, "lon", "{dd}{mm}{h}", 1) == "00530.0E"
+    assert format_angle(35.441806, "lat", "{d}{h}") == "35.4418N"
+    assert format_angle(-35.441806, "lat", "{sign}{d}", 2) == "-35.44"
+    assert format_angle(35.9999999, "lat") == "36°00'00\"N"
+    assert format_angle(-0.0000001, "lat") == "0°00'00\"N"  # rounded to 0: no minus, the north
+
+    problems = []
+    fmt = _one([{"source": "lat", "format": "dms"}, {"source": "lon", "format": "dms", "digits": 1},
+                {"source": "lat", "format": "dm"}, {"source": "lon", "format": "{dd}{mm}{ss}{h}"},
+                {"source": "lat", "format": "{hj}{d}度{m}分{s}秒"}, {"source": "lat", "digits": 3}], problems)
+    assert problems == []
+    rec = AlertItem(obs(lat=35.441806, lon=139.641667), [], [])
+    assert build_lines([rec], fmt, Moment(now=T0)) == ["35°26'31\"N|139°38'30.0\"E|35°26.51'N|1393830E|北緯35度26分31秒|35.442"]
+
+    problems = []
+    _one([{"source": "lat", "format": "%Y"}, {"source": "lon", "format": "{d}{x}"}, {"source": "kind", "format": "dms"},
+          {"source": "imageTime", "format": "%Y"}], problems)
+    assert any("fields[0] の format は dms・dm" in p for p in problems)
+    assert any("fields[1] の format は dms・dm" in p for p in problems)
+    assert any("fields[2] の format は日時の項目" in p for p in problems)
+    assert len(problems) == 3
+
+
+def test_several_values_in_one_field():
+    problems = []
+    fmt = _one([
+        {"source": ["lat", "lon"], "format": "dms"},
+        {"source": ["lat", "lon"], "digits": 3, "join": ", "},
+        ["lat", "lon"],
+        {"source": ["place", "lat"], "join": "/", "digits": 1},  # no place: only the latitude, no dangling join
+        {"source": [{"source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z"}, {"text": "@"}, {"source": "lat", "format": "dm"}],
+         "join": "", "prefix": "[", "suffix": "]"},
+        {"source": ["imageTime", "lat"], "format": "%m/%d", "timeZone": "UTC"},  # the time takes the format, the latitude not
+        {"source": ["note", "place"], "empty": "-"},
+        {"source": ["note", "place"], "omitEmpty": True},
+        "activity",
+    ], problems, delimiter="|")
+    assert problems == []
+    rec = AlertItem(obs(lat=35.441806, lon=139.641667), [], [])
+    assert build_lines([rec], fmt, Moment(now=T0)) == [
+        "35°26'31\"N 139°38'30\"E|35.442, 139.642|35.441806 139.641667|35.4|[0720Z@35°26.51'N]|11/07 35.441806|-|航行"]
+
+    problems = []
+    _one([{"source": []}, {"source": ["lat", "x"]}, {"source": ["lat", "lon"], "timeZone": "UTC", "level": 1},
+          {"source": "kind", "join": "/"}], problems)
+    assert any("fields[0] の source の配列が空" in p for p in problems)
+    assert any("fields[1].source[1] の source「x」" in p for p in problems)
+    assert any("fields[2] の timeZone は source のどの項目にも使われない" in p for p in problems)
+    assert any("fields[2] の level は source のどの項目にも使われない" in p for p in problems)
+    assert any("fields[3] の join は" in p for p in problems)
+    assert len(problems) == 5
+
+
+def test_fallback_when_the_value_is_empty():
+    problems = []
+    fmt = _one([
+        {"source": "place", "fallback": {"source": ["lat", "lon"], "format": "dms"}},
+        {"source": "place", "prefix": "（", "suffix": "）", "fallback": ["lat", "lon"]},
+        {"source": "place", "fallback": {"source": "places", "fallback": {"text": "不明"}}},
+        {"source": "note", "fallback": "objectName"},
+        {"source": "note", "fallback": "place", "empty": "なし"},
+        {"source": "note", "fallback": "place", "omitEmpty": True},
+        "activity",
+    ], problems, columns={"PLACE": {"source": "place", "fallback": "lat"}, "WHERE": {"source": "place", "fallback": "lat"}})
+    assert problems == []
+    at = Moment(now=T0)
+    from skywatch.core.obs.alerts import NamedArea, value_of
+
+    out = AlertItem(obs(lat=35.441806, lon=139.641667, note=""), [], [])
+    port = AlertItem(obs(id="r2", note="岸壁"), [], [], places=[NamedArea("横須賀港", [], "港")])
+    assert build_lines([out, port], fmt, at) == [
+        "35°26'31\"N 139°38'30\"E|35.441806 139.641667|不明|船A|なし|航行",
+        "横須賀港|（横須賀港）|横須賀港|岸壁|岸壁|岸壁|航行",
+    ]
+    # The value of the field used: a number for an attribute that is not text.
+    assert value_of(fmt.columns["PLACE"], out, 0, fmt, at) == (35.441806, "35.441806")
+    assert value_of(fmt.columns["PLACE"], port, 0, fmt, at) == ("横須賀港", "横須賀港")
+
+    problems = []
+    _one([{"source": "place", "fallback": {"source": "nope"}}, {"source": "place", "fallback": 3}], problems)
+    assert any("fields[0].fallback の source「nope」" in p for p in problems)
+    assert any("fields[1].fallback は項目名か" in p for p in problems)
+
+
+def test_names_in_english_and_the_country():
+    from skywatch.core.obs.alerts import DEFAULT_COUNTRY_FIELDS, NamedArea, forget_named_areas, load_named_areas
+    from skywatch.core.obs.model import confidences_of
+
+    # 確度: the default levels have English names; the settings' levels take `en`.
+    assert [c.en for c in DEFAULT_CONFIDENCES] == ["Confirmed", "Probable", "Unknown"]
+    problems = []
+    levels = confidences_of(["確実", {"label": "推定", "en": " Likely "}, {"label": "要確認", "en": 5}], problems, "c")
+    assert [c.en for c in levels] == [None, "Likely", None] and len(problems) == 1 and "c[2] の en" in problems[0]
+
+    country_url = "https://x/FeatureServer/14"
+    fake = FakeEsri()
+    fences = fake.add_layer(FENCE_URL, FakeLayer({"NAME": "esriFieldTypeString", "NAME_EN": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    fences.add({"NAME": "舞鶴", "NAME_EN": "Maizuru"}, {"rings": SQUARE})
+    fences.add({"NAME": "若狭", "NAME_EN": "Wakasa"}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    fences.add({"NAME": "近畿"}, {"rings": _box(130.0, 30.0, 140.0, 40.0)})  # no English name
+    places = fake.add_layer(PLACE_URL, FakeLayer({n: "esriFieldTypeString" for n in ("NAME", "KIND", "NAME_EN", "KIND_EN")}, "esriGeometryPolygon"))
+    places.add({"NAME": "若狭湾", "KIND": "湾", "NAME_EN": "Wakasa Bay", "KIND_EN": "bay"}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    places.add({"NAME": "舞鶴港", "KIND": "港", "NAME_EN": "Port of Maizuru"}, {"rings": _box(134.8, 34.8, 135.2, 35.2)})
+    countries = fake.add_layer(country_url, FakeLayer({n: "esriFieldTypeString" for n in DEFAULT_COUNTRY_FIELDS.values()} | {"ACTIVE": "esriFieldTypeSmallInteger"},
+                                                      "esriGeometryPolygon"))
+    countries.add({"COUNTRY_CODE": "JP", "COUNTRY_NAME": "日本", "COUNTRY_NAME_EN": "Japan"}, {"rings": _box(128.0, 30.0, 146.0, 46.0)})
+    countries.add({"COUNTRY_CODE": "KR", "COUNTRY_NAME": "韓国", "ACTIVE": 1}, {"rings": _box(124.0, 33.0, 130.0, 39.0)})
+    countries.add({"COUNTRY_CODE": "XX", "COUNTRY_NAME": "停止中", "ACTIVE": 0}, {"rings": _box(134.0, 34.0, 136.0, 36.0)})
+    countries.add({"COUNTRY_CODE": "ZZ"}, {"rings": _box(150.0, 0.0, 160.0, 10.0)})  # a code only: still a country
+    client = EsriClient(fake)
+
+    problems = []
+    s = settings({"namedAreas": PLACE_URL, "countries": country_url, "minConfidence": ""}, problems)
+    assert problems == [] and s.countries.fields == DEFAULT_COUNTRY_FIELDS
+    assert settings({"countries": False}).countries is None and settings().countries is None
+    custom = settings({"countries": {"url": country_url, "fields": {"code": "ISO_A3", "nameEn": "NAME_EN"}}})
+    assert custom.countries.fields["code"] == "ISO_A3" and custom.countries.fields["name"] == "COUNTRY_NAME"
+
+    forget_named_areas()
+    named = load_named_areas(client, s.named_areas)
+    found = load_named_areas(client, s.countries)
+    assert [(c.code, c.name, c.name_en) for c in found] == [("JP", "日本", "Japan"), ("KR", "韓国", ""), ("ZZ", "", "")]
+    fence_list = load_geofences(client, s.geofences)
+    assert [g.name_en for g in fence_list] == ["Maizuru", "Wakasa", ""]
+
+    fmt = alert_settings_of({"formats": [{"name": "en", "fields": [
+        "confidence.en", "area.en", {"source": "area.en", "join": "/"}, "area", "place.en", "placeKind.en", "places.en",
+        {"source": "places.en", "join": " < "}, "country", "countryName", "countryName.en",
+        {"source": "countryName.en", "fallback": "countryName"}, {"source": "place.en", "fallback": "place"},
+        {"source": "placeKind.en", "fallback": "placeKind"},
+    ]}]}, []).format()
+    at = Moment(now=T0)
+    items = select([obs(id="maizuru"), obs(id="korea", lon=126.0, lat=36.0, confidence="推定"), obs(id="sea", lon=170.0, lat=36.0, confidence="不明"),
+                    obs(id="zz", lon=155.0, lat=5.0, confidence="??")],
+                   s, None, fence_list, DEFAULT_CONFIDENCES, named=named, countries=found)
+    by = dict(zip([i.record.id for i in items], build_lines(items, fmt, at)))
+    assert by["maizuru"] == ("Confirmed|Maizuru, Wakasa|Maizuru/Wakasa|舞鶴・若狭・近畿|Port of Maizuru||Port of Maizuru, Wakasa Bay|"
+                             "Port of Maizuru < Wakasa Bay|JP|日本|Japan|Japan|Port of Maizuru|港")
+    assert by["korea"] == "Probable||||||||KR|韓国||韓国||"
+    assert by["sea"] == "Unknown" + "|" * 13
+    assert by["zz"] == "||||||||ZZ|||||"
+    # The same for records added by hand, and when the settings' levels have no English.
+    manual = manual_items([obs(id="m")], fence_list, s, DEFAULT_CONFIDENCES, (), named, found)
+    assert manual[0].confidence_en == "Confirmed" and manual[0].areas_en == ["Maizuru", "Wakasa"] and manual[0].countries[0].code == "JP"
+    assert manual_items([obs(id="m")], (), s, levels, (), named, found)[0].confidence_en == ""
+    # The smallest country holding the record, as the places.
+    nested = [NamedArea("大", _box(0, 0, 10, 10), code="A", size=100.0, box=(0, 0, 10, 10)),
+              NamedArea("小", _box(4, 4, 6, 6), code="B", size=4.0, box=(4, 4, 6, 6))]
+    item = select([obs(lon=5.0, lat=5.0)], s, None, (), DEFAULT_CONFIDENCES, countries=nested)[0]
+    assert written(AlertField(source="country"), item, 0, fmt, at) == "B"

@@ -275,7 +275,7 @@ def test_alerts_rules_geofence_and_log_over_http(server):
     _, _, _, path = server
     config, _ = read_config_file(path)
     s = config.alert_reports
-    assert [f.name for f in s.formats] == ["速報", "ファイル（タブ区切り）"] and s.default == "速報"
+    assert [f.name for f in s.formats] == ["速報", "English", "ファイル（タブ区切り）"] and s.default == "速報"
     assert s.format("ファイル（タブ区切り）").delimiter == "\t"
     client = EsriClient(transport)
     rules, fences = load_rules(client, s.rules), load_geofences(client, s.geofences)
@@ -293,6 +293,15 @@ def test_alerts_rules_geofence_and_log_over_http(server):
     assert reported_ids(client, s) == {"mock-a"}
     rows = load_log(client, s, start=now - 60_000)
     assert [(r.obs_id, r.format) for r in rows] == [("mock-a", "速報")] and rows[0].text.split("|")[2] == "船X" and rows[0].text.split("|")[5] == "横須賀本港"
+    # The countries and the English names; the coordinates where no place has an English name.
+    countries = load_named_areas(client, s.countries, max_age=0)
+    assert [(c.code, c.name_en) for c in countries] == [("JP", "Japan")]
+    english = s.format("English")
+    items = select([ship, replace(ship, id="mock-c", lon=150.0, lat=30.0)], s, None, fences, DEFAULT_CONFIDENCES, named=named,
+                   countries=countries)
+    by = {i.record.id: line.split("/")[1:] for i, line in zip(items, build_lines(items, english, at))}
+    assert by["mock-a"] == ["船X", "Confirmed", "JP", "Yokosuka Main Port", "35°18'00\"N 139°45'00\"E", "Yokosuka"]
+    assert by["mock-c"] == ["船X", "Confirmed", "--", "300000N 1500000E", "30°00'00\"N 150°00'00\"E"]
 
 
 def test_assignments_and_handover_memos_over_http(server):

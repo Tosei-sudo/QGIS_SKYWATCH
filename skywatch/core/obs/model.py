@@ -86,13 +86,15 @@ class ConfidenceLevel:
     label: str
     color: Optional[str] = None
     note: Optional[str] = None
+    #: Its name in English (the 通報's `confidence.en`).
+    en: Optional[str] = None
 
 
 #: The levels offered when the settings give none.
 DEFAULT_CONFIDENCES = [
-    ConfidenceLevel("確定", "#15803d", "識別済み"),
-    ConfidenceLevel("推定", "#d97706", "特徴からの推定"),
-    ConfidenceLevel("不明", "#6b7280", "識別不可"),
+    ConfidenceLevel("確定", "#15803d", "識別済み", "Confirmed"),
+    ConfidenceLevel("推定", "#d97706", "特徴からの推定", "Probable"),
+    ConfidenceLevel("不明", "#6b7280", "識別不可", "Unknown"),
 ]
 #: Things farther than this (m) are not offered as the same one.
 MATCH_METRES = 2000.0
@@ -154,7 +156,7 @@ _NAME = re.compile(r"^[\w.]+$", re.ASCII)
 
 
 def confidences_of(value: Any, problems: list[str], at: str) -> Optional[list[ConfidenceLevel]]:
-    """The levels of 確度 (`["確定", …]` or `[{label, color, note}, …]`); None when none can be used."""
+    """The levels of 確度 (`["確定", …]` or `[{label, color, note, en}, …]`); None when none can be used."""
     if not isinstance(value, list):
         problems.append(f"{at} は配列で指定")
         return None
@@ -172,8 +174,11 @@ def confidences_of(value: Any, problems: list[str], at: str) -> Optional[list[Co
         color = raw.strip() if isinstance(raw, str) and _COLOR.match(raw.strip()) else None
         if "color" in item and not color:
             problems.append(f"{at}[{i}] の color は CSS の色で指定")
-        note = item.get("note")
-        out.append(ConfidenceLevel(label, color, note.strip() if isinstance(note, str) and note.strip() else None))
+        note, en = item.get("note"), item.get("en")
+        if "en" in item and en is not None and not isinstance(en, str):
+            problems.append(f"{at}[{i}] の en（英語の名前）は文字列で指定")
+        out.append(ConfidenceLevel(label, color, note.strip() if isinstance(note, str) and note.strip() else None,
+                                   en.strip() if isinstance(en, str) and en.strip() else None))
     return out or None
 
 
