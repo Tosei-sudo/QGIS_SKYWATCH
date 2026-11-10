@@ -49,17 +49,6 @@ def count_pixels(rgba: np.ndarray, mode: str) -> Histogram:
     return h
 
 
-def merge_histograms(histograms: Sequence[Histogram]) -> Histogram:
-    mode = "gray" if histograms and all(h.mode == "gray" for h in histograms) else "rgb"
-    out = empty_histogram(mode)
-    for h in histograms:
-        bins = h.bins if mode == "gray" or h.mode == "rgb" else [h.bins[0]] * 3
-        for c in range(len(out.bins)):
-            out.bins[c] = out.bins[c] + bins[c]
-        out.count += h.count
-    return out
-
-
 def range_of(values: np.ndarray, counts: np.ndarray, o: dict) -> Optional[tuple]:
     """[black, white] for a distribution (values ascending, their counts), or None when nothing can be stretched."""
     keep = counts > 0

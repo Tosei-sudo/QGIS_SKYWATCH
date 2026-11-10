@@ -24,7 +24,7 @@ import csv
 import io
 import time
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from typing import Any, Iterable, Optional, Sequence
 
 from . import edit_stamp

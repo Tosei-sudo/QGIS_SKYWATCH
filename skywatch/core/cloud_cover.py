@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Callable, Iterable, Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from .plan.weather import GRID, CloudSeries, cloud_at, key_of
 
@@ -110,6 +110,3 @@ def map_grid(west: float, south: float, east: float, north: float, side: int = 2
     return step, lons, lats
 
 
-def series_times(series: Iterable[CloudSeries]) -> list[float]:
-    """Every time of the series, in order, once."""
-    return sorted({t for s in series for t in s.times})

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
 from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
@@ -38,7 +37,7 @@ from ..core.obs.book import FormValues, ObservationBook, ObservedImage
 from ..core.obs.drafts import OutboxDrafts
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
 from ..core.obs.flows import (
-    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, living, now_ms, outline_of, side_points, time_key, two_point,
+    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, now_ms, outline_of, side_points, time_key, two_point,
 )
 from ..core.obs.geo import get_distance, js_round, km_text
 from ..core.obs.model import Observation

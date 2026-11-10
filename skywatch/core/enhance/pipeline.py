@@ -55,10 +55,6 @@ class Pipeline:
         """Pixels of context each side a tile needs (sharpen)."""
         return margin_of(self.ops)
 
-    @property
-    def needs_stats(self) -> bool:
-        return any(op["op"] == "autoStretch" for op in self.ops)
-
     def scaled(self, factor: float) -> "Pipeline":
         """The same correction for the image shrunk by `factor`: the sharpen radius scales with it."""
         if not factor > 0 or factor == 1:

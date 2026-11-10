@@ -254,7 +254,6 @@ class LayerShift(QObject):
         bar = self.iface.statusBarIface() if hasattr(self.iface, "statusBarIface") else None
         if bar is not None:
             bar.showMessage(text, 10000)
-        self.last_readout = text
 
     def say(self, text: str) -> None:
         self.iface.messageBar().pushInfo(self.tr("位置ずらし"), text)

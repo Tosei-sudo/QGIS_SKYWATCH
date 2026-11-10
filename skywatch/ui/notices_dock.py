@@ -12,7 +12,7 @@ import time
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsProject, QgsRectangle
+from qgis.core import QgsRectangle
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import (

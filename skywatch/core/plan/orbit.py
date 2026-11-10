@@ -30,15 +30,9 @@ try:  # The installed sgp4 (C++ accelerated when its wheel has it), else the Win
     _windows_sgp4()
     from sgp4.api import Satrec  # type: ignore
     from sgp4.api import accelerated as SGP4_ACCELERATED  # type: ignore
-
-    SGP4_SOURCE = "sgp4"
 except ImportError:  # The bundled pure-Python copy.
     from ...ext.sgp4.api import Satrec  # type: ignore
     from ...ext.sgp4.api import accelerated as SGP4_ACCELERATED  # type: ignore
-
-    SGP4_SOURCE = "bundled"
-
-Vec = tuple  # (x, y, z)
 
 DEG = 180 / math.pi
 RAD = math.pi / 180

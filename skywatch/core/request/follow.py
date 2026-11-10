@@ -133,11 +133,6 @@ def missed_ids(rows: Sequence[HistoryRow]) -> set:
     return {r.request_id for r in rows if r.captured == "未撮像" and not r.boost_done}
 
 
-def taken_ids(rows: Sequence[HistoryRow]) -> set:
-    """Requests found taken at least once."""
-    return {r.request_id for r in rows if r.captured == "撮像済み"}
-
-
 def marked(rows: Sequence[HistoryRow], captured: str, image_id: str = "") -> list[Finding]:
     """Findings set by hand (「撮像済みにする」・「未撮像にする」) for 採用 rows whose outcome differs."""
     return [Finding(r, captured, image_id if captured == "撮像済み" else "") for r in rows

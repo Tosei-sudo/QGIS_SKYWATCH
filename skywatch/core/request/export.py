@@ -31,7 +31,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Sequence
 
 from ..time_zone import TimeZone, clock_of
-from .daily import TAKEN, Candidate, satellite_name
+from .daily import TAKEN, Candidate
 from .model import bbox_of, center_of, day_bounds
 from .schema import resolve, validate
 from .systems import Column, ExportSystem, PriorityRule

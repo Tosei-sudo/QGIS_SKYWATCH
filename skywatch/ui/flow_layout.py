@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from qgis.PyQt.QtCore import QPoint, QRect, QSize, Qt
-from qgis.PyQt.QtWidgets import QLayout, QSizePolicy
+from qgis.PyQt.QtWidgets import QLayout
 
 
 class FlowLayout(QLayout):
@@ -70,7 +70,3 @@ class FlowLayout(QLayout):
                 item.setGeometry(QRect(QPoint(x, y), hint))
             x, line = nxt, max(line, hint.height())
         return y + line - rect.y()
-
-
-def chip_policy() -> QSizePolicy:
-    return QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)

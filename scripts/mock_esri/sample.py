@@ -15,7 +15,7 @@ import struct
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 DAY = 86_400_000
 HOUR = 3_600_000

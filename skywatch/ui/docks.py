@@ -125,13 +125,3 @@ class PluginDock(QDockWidget):
         x = min(max(frame.x(), screen.x()), screen.right() + 1 - (w + extra_w))
         y = min(max(frame.y(), screen.y()), screen.bottom() + 1 - (h + extra_h))
         self.setGeometry(x + (self.geometry().x() - frame.x()), y + (self.geometry().y() - frame.y()), w, h)
-
-
-class StubDock(PluginDock):
-    """A dock whose work area comes in a later stage."""
-
-    def __init__(self, object_name: str, title: str, stage: str, context: PluginContext, open_settings: Callable[[], None], parent: QWidget | None = None):
-        super().__init__(object_name, title, context, open_settings, parent)
-        note = QLabel(self.tr("準備中（{stage}）").format(stage=stage))
-        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.body.addWidget(note, 1)

@@ -202,7 +202,6 @@ class AlertFormat:
     footer: str = ""
     date_format: str = DEFAULT_DATE_FORMAT
     time_zone: TimeZone = field(default_factory=lambda: parse_time_zone(DEFAULT_TIME_ZONE) or UTC)
-    time_zone_name: str = DEFAULT_TIME_ZONE
     newline: str = "\r\n"
     #: The log table's own columns for this format: attribute name → field (a source as `fields` takes).
     columns: dict[str, AlertField] = field(default_factory=dict)
@@ -609,7 +608,7 @@ def alert_format_of(value: Any, problems: list[str], at: str) -> Optional[AlertF
         if zone is None:
             problems.append(f"{at}.timeZone は Asia/Tokyo・+09:00・UTC のように指定")
         else:
-            fmt.time_zone, fmt.time_zone_name = zone, str(value["timeZone"]).strip()
+            fmt.time_zone = zone
     if "newline" in value:
         nl = NEWLINES.get(str(value["newline"]).lower())
         if nl is None:

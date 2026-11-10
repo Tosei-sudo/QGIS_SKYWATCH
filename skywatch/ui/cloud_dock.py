@@ -270,11 +270,6 @@ class CloudDock(PluginDock):
         base = layer.name().split("（")[0]
         layer.setName(f"{base}（{datetime.fromtimestamp(t / 1000, timezone.utc).strftime('%m-%d %H:%M')} UTC）")
 
-    def current_time(self) -> Optional[float]:
-        if self.file is None or not self.file.bands:
-            return None
-        return self.file.bands[self.slider.value()][0]
-
     def to_now(self) -> None:
         if self.file is not None:
             self.slider.setValue(self.file.nearest(datetime.now(timezone.utc).timestamp() * 1000))

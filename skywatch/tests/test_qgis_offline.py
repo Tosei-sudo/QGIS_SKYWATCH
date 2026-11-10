@@ -95,6 +95,30 @@ def test_waiting_work_is_thrown_away_when_asked(setup, monkeypatch):
     assert work.total() == 0 and reloaded and fake.layers[URL].rows == []
 
 
+def test_the_question_at_the_start_stops_with_the_plugin(setup, monkeypatch):
+    """
+    Work left from an earlier session is asked about a little after the start, but not by a plugin unloaded
+    meanwhile: the question is a modal box, and asked by the controller of an earlier test it held the whole run.
+    """
+    context, controller, switch, fake, reloaded, iface = setup
+    work = context.offline
+    controller.act_forced.setChecked(True)
+    store = OfflineObservationStore(EsriObservationStore(observation_store_of({"label": "共有", "url": URL}, [], 0), context.esri()), work)
+    store.save([obs(id="n4")])
+    asked = []
+    monkeypatch.setattr(offline_status, "ask_upload", lambda parent, w, back: asked.append(back) or "later")
+    controller.act_forced.setChecked(False)
+    APP.processEvents()
+    assert asked == [True] and work.sendable() == 1
+    assert controller.start_timer.isActive() and controller.start_timer.isSingleShot()  # started with the settings file
+    controller._ask_left_over()
+    assert asked == [True, False]
+    controller.unload()
+    assert not controller.start_timer.isActive()
+    controller._ask_left_over()
+    assert asked == [True, False]
+
+
 def test_one_list_of_what_waits_sends_the_chosen_opens_and_drops(setup, monkeypatch):
     """「送信待ち」: the offline changes and the records not saved in one list, each with why it waits."""
     from qgis.PyQt.QtCore import Qt

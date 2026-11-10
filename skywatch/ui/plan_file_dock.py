@@ -27,7 +27,6 @@ writes every system's file, as before.
 from __future__ import annotations
 
 import dataclasses
-import math
 import os
 import time
 from datetime import date
@@ -45,7 +44,7 @@ from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
 from ..core.request.follow import follow_and_save, found_text
-from ..core.request.model import JST, jst_day, priority_text
+from ..core.request.model import jst_day, priority_text
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
     RequestStoreConfig, add_history, count_history, delete_history_rows, handed_where, history_where, load_history, load_requests,

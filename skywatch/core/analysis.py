@@ -286,10 +286,6 @@ def quote_name(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def sql_text(value: str) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
-
-
 # ---- values -------------------------------------------------------------------------------------
 
 def local_time(ms: Any) -> Optional[str]:

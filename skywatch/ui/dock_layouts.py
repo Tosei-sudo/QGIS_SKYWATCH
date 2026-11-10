@@ -21,11 +21,6 @@ from qgis.PyQt.QtCore import QCoreApplication, QRect, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QInputDialog, QMainWindow, QMenu, QMessageBox, QWidget
 
-try:  # Qt6
-    from qgis.PyQt.QtGui import QAction
-except ImportError:  # Qt5
-    from qgis.PyQt.QtWidgets import QAction
-
 KEY = "skywatch/dockLayouts"
 LAST_KEY = "skywatch/dockLayoutLast"
 FILE_KIND = "skywatch.dockLayouts"
