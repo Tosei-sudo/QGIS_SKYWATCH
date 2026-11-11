@@ -953,6 +953,7 @@ class SkywatchPlugin:
         """The image catalog with the notices, the imaging plan's reminders and the layers' right-click menu."""
         catalog, notices = self.docks["SatObsImageCatalog"], self.docks["SatObsNotices"]
         catalog.watch_requested = notices.watch_conditions
+        notices.drawn_area = lambda: catalog.drawn
         notices.choose_folder = catalog.choose_folder
         notices.choose_images = catalog.choose_images
         self.notices_action = notices.toggleViewAction()

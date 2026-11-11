@@ -522,6 +522,104 @@ def test_searching_over_a_layers_geometry_as_it_is(plugin):
     assert dock.layer_row.isHidden()
 
 
+def test_a_watch_over_a_layers_shape_keeps_a_copy_taken_again_on_request(plugin, monkeypatch):
+    from qgis.core import QgsFeature, QgsGeometry
+
+    from skywatch.ui import notices_dock, watch_dialog
+
+    p, iface, folder, fake, images = plugin
+    notices, dock = p.api.notices, p.api.image_catalog
+    dock.show()
+    harbor = _layer("Polygon", "EPSG:4326", ["POLYGON((10 10, 11 10, 11 11, 10 10))", "POLYGON((10.5 10, 11.5 10, 11.5 10.5, 10.5 10))"])
+    harbor.setName("港湾")
+
+    class Auto:
+        """The dialog as it is, OK pressed."""
+
+        def __init__(self, cls):
+            self.cls, self.shown = cls, []
+
+        def __call__(self, *args, **kwargs):
+            dialog = self.cls(*args, **kwargs)
+            dialog.exec = lambda: (dialog.accept(), dialog.result())[1]
+            self.shown.append(dialog)
+            return dialog
+
+    watching = Auto(watch_dialog.WatchDialog)
+    monkeypatch.setattr(notices_dock, "WatchDialog", watching)
+    # Searching over the layer, 「この条件で監視…」 offers it (with 選択地物のみ as searched).
+    dock.use_layer(harbor)
+    dock._watch()
+    assert wait_for(lambda: notices.store().watches() and notices.store().watches()[0].last_checked is not None)
+    dialog = watching.shown[0]
+    assert dialog.area.currentData() == "layer" and dialog.choice.layer.currentLayer() is harbor and not dialog.choice.selected_only.isChecked()
+    assert "今の地物 2 件の形を監視に写して保存" in dialog.choice.note.text()
+    [watch] = notices.store().watches()
+    # The two polygons joined into one ring, copied; the layer it came from by name and id (no source).
+    assert [a["kind"] for a in watch.areas] == ["polygon"] and len(watch.areas[0]["rings"]) == 1
+    assert watch.area_layer == {"name": "港湾", "id": harbor.id(), "kind": "polygon", "features": 2, "selectedOnly": False}
+    assert watch.seen == []
+    assert "レイヤー「港湾」（2 地物）" in notices.watches.topLevelItem(0).text(1)
+
+    # The layer edited later: the watch keeps the shape it had.
+    far = QgsFeature(harbor.fields())
+    far.setGeometry(QgsGeometry.fromWkt("POLYGON((30 30, 31 30, 31 31, 30 30))"))
+    harbor.dataProvider().addFeatures([far])
+    now = time.time() * 1000
+    images.add({"IMG_ID": "D", "ACQ": now - DAY, "SENSOR": "S1", "PATH": None}, ring(10.2, 10.1, 10.4, 10.3))
+    images.add({"IMG_ID": "E", "ACQ": now - DAY, "SENSOR": "S1", "PATH": None}, ring(30.2, 30.1, 30.4, 30.3))
+    fake.asked.clear()
+    notices.check(force=True)
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
+    assert notices.notices.topLevelItem(0).text(2) == "D"
+    _, shape = _asked_shape(fake)
+    assert len(shape["rings"]) == 1
+    assert notices.store().watch(watch.id).area_layer["name"] == "港湾"
+
+    # 「範囲の変更…」: the layer's shape taken again (the same layer offered); what is there already is not notified.
+    changing = Auto(watch_dialog.WatchAreaDialog)
+    monkeypatch.setattr(notices_dock, "WatchAreaDialog", changing)
+    notices.watches.setCurrentItem(notices.watches.topLevelItem(0))
+    notices.change_chosen_area()
+    assert wait_for(lambda: len(notices.store().watch(watch.id).areas[0]["rings"]) == 2)
+    dialog = changing.shown[0]
+    assert dialog.area.currentData() == "layer" and dialog.choice.layer.currentLayer() is harbor
+    assert "E" in notices.store().watch(watch.id).seen and notices.store().watch(watch.id).area_layer["features"] == 3
+    images.add({"IMG_ID": "F", "ACQ": now - DAY, "SENSOR": "S1", "PATH": None}, ring(30.5, 30.1, 30.6, 30.2))
+    notices.check(force=True)
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 2)
+    assert {notices.notices.topLevelItem(i).text(2) for i in range(2)} == {"D", "F"}
+
+    # Only the chosen features with none chosen: not accepted, and the dialog says why.
+    catalog = p.api.config.image_catalogs[0]
+    dialog = watch_dialog.WatchDialog(catalog, EMPTY_SEARCH, iface.canvas, harbor, None, None, "layer", True)
+    dialog.accept()
+    assert dialog.result() != dialog.DialogCode.Accepted and dialog.choice.note.text() == "「港湾」に選択地物なし"
+    harbor.selectByIds([next(harbor.getFeatures()).id()])
+    dialog.accept()
+    areas, origin = dialog.chosen()
+    assert dialog.result() == dialog.DialogCode.Accepted and origin["selectedOnly"] and origin["features"] == 1
+    # The active layer with chosen features: offered with 選択地物のみ (as 「選択中の地物」 was).
+    dialog = watch_dialog.WatchDialog(catalog, EMPTY_SEARCH, iface.canvas, harbor, None)
+    assert dialog.area.currentData() == "extent" and dialog.choice.selected_only.isChecked()
+    assert [dialog.area.itemData(i) for i in range(dialog.area.count())] == ["extent", "layer", "none"]
+    # A line layer: lines.
+    lines = _layer("LineString", "EPSG:4326", ["LINESTRING(20 20, 21 21)"])
+    dialog.choice.layer.setLayer(lines)
+    dialog.area.setCurrentIndex(dialog.area.findData("layer"))
+    assert not dialog.choice.selected_only.isChecked()
+    areas, origin = dialog.choice.chosen()
+    assert areas == [{"kind": "lines", "paths": [[[20.0, 20.0], [21.0, 21.0]]]}] and origin["kind"] == "lines"
+
+    # The layer gone from the project: 「範囲の変更…」 says so and asks for another.
+    QgsProject.instance().removeMapLayer(harbor.id())
+    dialog = watch_dialog.WatchAreaDialog(notices.store().watch(watch.id), iface.canvas)
+    assert dialog.area.currentData() == "layer" and dialog.choice.layer.currentLayer() is None
+    assert dialog.choice.note.text() == "元のレイヤー「港湾」がプロジェクトになし。取り直すレイヤーを選択"
+    dialog.accept()
+    assert dialog.result() != dialog.DialogCode.Accepted and dialog.choice.note.text() == "範囲のレイヤーが未選択"
+
+
 def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -1007,7 +1105,7 @@ def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
     dock.views.apply(state)
     assert dock.keyword.text() == "臨時"
     asked = []
-    dock.watch_requested = lambda catalog, types, conditions, drawn: asked.append(conditions)
+    dock.watch_requested = lambda catalog, types, conditions, drawn, **where: asked.append(conditions)
     dock._watch()
     assert asked and asked[0].keyword == "臨時"
     # Another settings file without keyword fields: the box goes, and the word is not asked.
