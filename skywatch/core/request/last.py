@@ -23,9 +23,9 @@ CHOICES = {
 #: Fields that are lists of names.
 LISTS = ("series", "satellites", "modes", "systems")
 #: Fields that are a number or None (not given).
-NUMBERS = ("off_nadir_min", "off_nadir_max", "incidence_min", "incidence_max", "resolution", "cloud_no_go")
+NUMBERS = ("off_nadir_min", "off_nadir_max", "incidence_min", "incidence_max", "resolution", "cloud_no_go", "times_max", "times_gap")
 #: Every field remembered.
-FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "requester", "group")
+FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "times_min", "requester", "group")
 
 
 def remembered(r: ImagingRequest) -> dict:
@@ -54,6 +54,10 @@ def with_remembered(r: ImagingRequest, last: Mapping) -> ImagingRequest:
     for f in NUMBERS:
         if f in last and (last[f] is None or _number(last[f])):
             changes[f] = None if last[f] is None else float(last[f])
+    if "times_max" in changes and changes["times_max"] is not None:
+        changes["times_max"] = max(1, int(changes["times_max"]))
+    if _number(last.get("times_min")) and last["times_min"] >= 1:
+        changes["times_min"] = int(last["times_min"])
     for f in ("requester", "group"):
         if isinstance(last.get(f), str):
             changes[f] = last[f]

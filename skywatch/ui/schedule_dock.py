@@ -476,9 +476,14 @@ class ScheduleDock(PluginDock):
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in COLUMNS])
         chosen_row = -1
+        # Requests taken several times a day (1 日の回数): each row tells which time it is.
+        several = {(r.request_id, r.day) for r in self.rows if r.request_id and r.occurrence > 1}
         for i, r in enumerate(self.shown):
             state = row_state(r)
-            items = [QStandardItem(t) for t in (state, r.name or r.external_id or r.request_id, self.group_of(r), r.management_no,
+            name = r.name or r.external_id or r.request_id
+            if (r.request_id, r.day) in several:
+                name += self.tr("（{n} 回目）").format(n=r.occurrence)
+            items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
                                                 captured_text(r), r.requester, row_note(r))]
             tip = shot_tip(self.shots.get(r.shot_id)) if r.shot_id else ""
