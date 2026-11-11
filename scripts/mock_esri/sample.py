@@ -33,6 +33,9 @@ SATELLITES = [
     ("SAR-Y2", 99012, "SAR-Y", "SAR", "right", 35, 30, 225.0),
 ]
 
+#: Other names of the sample satellites (satellite, alias as written in the table: one, or several with commas).
+SATELLITE_ALIASES = [("OPT-X1", "OX1, OPTX-01"), ("OPT-X2", "OX2"), ("SAR-Y1", "SY1")]
+
 
 # --- TLEs -------------------------------------------------------------------------------------------------
 
@@ -429,7 +432,9 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
              "features": feats(sats)},
             {"id": 1, "name": "センサーモード", "fields": {"SENSOR": S, "SENSOR_MODE": S, "MIN_OFF_NADIR": D, "MAX_OFF_NADIR": D, "SWATH": D,
                                                        "SCENE_LENGTH": D, "SCENES_PER_PASS": I, "RESOLUTION_M": D, "IS_DEFAULT": F},
-             "features": feats(sensors)}]},
+             "features": feats(sensors)},
+            {"id": 2, "name": "衛星名の対応表", "fields": {"SAT_NAME": S, "ALIAS": {"type": S, "length": 1000}},
+             "features": feats([{"attributes": {"SAT_NAME": n, "ALIAS": a}} for n, a in SATELLITE_ALIASES])}]},
         {"name": "Observations", "layers": [
             {"id": 0, "name": "観測記録", "geometryType": "point", "fields": OBSERVATION_FIELDS, "features": feats(observations)},
             {"id": 1, "name": "分類体系", "fields": TAXONOMY_FIELDS, "features": feats(taxonomy)},
@@ -535,6 +540,8 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
                   "length": "SCENE_LENGTH", "scenesPerPass": "SCENES_PER_PASS", "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" }},
       "swathUnit": "km" }}
   ],
+  "satelliteAliases": {{ "label": "モック衛星名の対応表", "url": "{rest}/Satellites/FeatureServer/2"{tk},
+                        "fields": {{ "satellite": "SAT_NAME", "alias": "ALIAS" }} }},
   // 閉じたネットワークでも動くよう雲量予報は使わない（使うなら {{ "url": "https://api.open-meteo.com/v1/forecast" }}）
   "cloudForecast": false,
   "groundStations": [{{ "name": "勝浦", "lon": 140.3, "lat": 35.15, "minElevation": 5 }}],

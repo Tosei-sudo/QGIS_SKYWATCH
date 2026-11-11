@@ -41,6 +41,7 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Catalog | 0 | 画像カタログ（ポリゴン、6 件。東京湾の 512×512 の GeoTIFF、`FILE_PATH` と `COG_URL`。`NOTE` は「横須賀港 定期観測」か「横須賀港 臨時観測（ＥＶ０１）」で、`IMG_ID` とともにフリーワードの対象） | `imageCatalogs` |
 | Satellites | 0 | 衛星（OPT-X1・X2 光学、SAR-Y1・Y2 SAR。TLE は起動日の前日元期で生成） | `satelliteCatalogs` |
 | Satellites | 1 | SAR-Y のセンサーモード（ストリップマップ・スポットライト・スキャンSAR） | `sensorCatalogs` |
+| Satellites | 2 | 衛星名の対応表（OPT-X1 → `OX1, OPTX-01` など 3 行） | `satelliteAliases` |
 | Observations | 0 | 観測記録（ポイント、2 件） | `observationStores` |
 | Observations | 1 | 分類体系テーブル（`ACTIVITIES` 付き。船舶・航空機・車両・建物に活動） | `observationStores[].taxonomyTable` |
 | Observations | 2 | 確認範囲（空） | `observationStores[].areas` |

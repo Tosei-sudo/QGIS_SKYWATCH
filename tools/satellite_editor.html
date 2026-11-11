@@ -1,0 +1,2061 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>衛星・センサー編集ツール</title>
+<!--
+  SKYWATCH の衛星カタログ（satelliteCatalogs）・センサーモード（sensorCatalogs）・衛星名の対応表
+  （satelliteAliases）を、ArcGIS（ポータル・サーバー）のテーブルの上で直接編集するツール。
+  ブラウザでこのファイルを開き、プラグインの設定ファイル（config.json）を読み込ませる。どのテーブルの
+  どの属性を使うかは設定ファイルの url・fields・where のとおり（プラグインと同じ読み方）。
+  ライブラリ・インストール不要（閉じたネットワークでも動く）。使うのは ArcGIS REST の query と applyEdits だけ。
+  衛星とセンサーモードのつながり・別名のつながりはプラグインと同じ決まり（skywatch/core/plan/modes.py with_modes、
+  names.py）。下の plugin-constants はプラグインの定数の写し: skywatch/tests/test_satellite_editor.py が一致を確かめる。
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel2: #f0f2f5; --text: #1d2433; --muted: #5d6677; --line: #d8dce3;
+  --accent: #2257c9; --accent-bg: #e7eefc; --bad: #c62828; --bad-bg: #fdecec; --warn: #9a6200; --warn-bg: #fff4dc; --ok: #1b7f3b;
+  --on-accent: #fff; --code: #eef1f5; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15181e; --panel: #1d2129; --panel2: #252a33; --text: #e4e7ec; --muted: #9aa3b2; --line: #343a46;
+    --accent: #7ea6ff; --accent-bg: #23314f; --bad: #ff7b7b; --bad-bg: #3a2224; --warn: #f0b75a; --warn-bg: #3a3020; --ok: #6fd28f; --code: #262b35; --on-accent: #0d1a33;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15181e; --panel: #1d2129; --panel2: #252a33; --text: #e4e7ec; --muted: #9aa3b2; --line: #343a46;
+  --accent: #7ea6ff; --accent-bg: #23314f; --bad: #ff7b7b; --bad-bg: #3a2224; --warn: #f0b75a; --warn-bg: #3a3020; --ok: #6fd28f; --code: #262b35; --on-accent: #0d1a33;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif; display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0 12px 0 0; }
+header .file { color: var(--muted); font-size: 12px; }
+header .spacer { flex: 1; }
+header label.user { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+header label.user input { width: 150px; }
+#signState { font-size: 12px; color: var(--muted); }
+button, .button { font: inherit; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel2); color: var(--text); cursor: pointer; white-space: nowrap; }
+button:hover, .button:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+button.small { padding: 1px 8px; font-size: 12px; }
+button.danger { color: var(--bad); }
+button.danger:hover { border-color: var(--bad); }
+button.danger.solid { background: var(--bad); border-color: var(--bad); color: var(--on-accent); }
+button.current { border-color: var(--accent); color: var(--accent); }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+.layout { flex: 1; display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 0; }
+nav { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+nav .top { padding: 10px 12px 6px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--line); }
+nav .top .bar { margin: 0; }
+#satList { flex: 1; overflow: auto; padding: 4px 0 16px; }
+#satList h2 { font-size: 12px; color: var(--muted); margin: 10px 12px 2px; font-weight: 600; }
+.item { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: 6px 12px; border-left: 3px solid transparent; }
+.item:hover { background: var(--panel2); border-color: transparent; border-left-color: var(--line); }
+.item.current { background: var(--accent-bg); border-left-color: var(--accent); }
+.item .nm { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; }
+.item .nm small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+.item .sub { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badges { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.tag { font-size: 11px; padding: 0 6px; border-radius: 9px; background: var(--panel2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.tag.on { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
+.tag.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.tag.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+#main { overflow: auto; padding: 16px 20px 80px; }
+.page { max-width: 1040px; }
+h2.title { font-size: 19px; margin: 0 0 2px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+h2.title small { font-size: 12px; color: var(--muted); font-weight: 400; }
+p.help { color: var(--muted); margin: 4px 0 12px; }
+.card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 12px 0; }
+.card > .head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 12px; background: var(--panel2); border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; }
+.card > .head h3 { font-size: 14px; margin: 0; }
+.card > .head .sub { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; }
+.card > .body { padding: 8px 12px 12px; }
+fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px 8px; margin: 8px 0; min-width: 0; }
+legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 14px; }
+.grid .wide { grid-column: 1 / -1; }
+.fld { padding: 4px 0; min-width: 0; }
+.fld > .lab { font-size: 12px; display: flex; gap: 6px; align-items: baseline; }
+.fld > .lab code { color: var(--muted); font-size: 11px; }
+.fld > .lab .unit { color: var(--muted); }
+.fld small { display: block; color: var(--muted); font-size: 12px; }
+.fld .err { color: var(--bad); font-size: 12px; }
+.fld .warn { color: var(--warn); font-size: 12px; }
+input[type=text], input[type=password], input[type=datetime-local], select, textarea { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); }
+input:disabled, select:disabled, textarea:disabled { opacity: .65; }
+textarea { min-height: 60px; resize: vertical; }
+textarea.tle { font-family: var(--mono); font-size: 12px; min-height: 66px; white-space: pre; overflow-x: auto; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.changed { border-color: var(--accent) !important; background: var(--accent-bg) !important; }
+.invalid { border-color: var(--bad) !important; background: var(--bad-bg) !important; }
+.check { display: inline-flex; align-items: center; gap: 6px; padding-top: 4px; }
+.bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 0; }
+.bar .spacer { flex: 1; }
+.bar.end { justify-content: flex-end; }
+table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.list th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.list td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.list tr:last-child td { border-bottom: 0; }
+table.list td.tools { white-space: nowrap; text-align: right; }
+table.list tr.match td:first-child { font-weight: 600; }
+.note { font-size: 12px; color: var(--muted); }
+.box { border-radius: 6px; padding: 8px 10px; margin: 8px 0; font-size: 13px; }
+.box.warn { background: var(--warn-bg); color: var(--warn); }
+.box.bad { background: var(--bad-bg); color: var(--bad); }
+.box.info { background: var(--accent-bg); color: var(--text); }
+.box ul { margin: 4px 0 0; padding-left: 18px; }
+.meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.empty { color: var(--muted); padding: 8px 0; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px; text-align: center; color: var(--muted); margin: 16px 0; }
+body.dragging .drop { border-color: var(--accent); color: var(--accent); }
+ol.steps { padding-left: 20px; }
+ol.steps li { margin: 4px 0; }
+code { font-family: var(--mono); font-size: 12px; background: var(--code); padding: 0 4px; border-radius: 3px; }
+#status { position: fixed; left: 16px; bottom: 16px; max-width: min(640px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 6px; z-index: 5; }
+#status .msg { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ok); border-radius: 6px; padding: 8px 32px 8px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.12); position: relative; white-space: pre-wrap; }
+#status .msg.warn { border-left-color: var(--warn); }
+#status .msg.bad { border-left-color: var(--bad); }
+#status .msg button { position: absolute; right: 4px; top: 4px; padding: 0 6px; border: 0; background: none; color: var(--muted); }
+dialog.modal { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); padding: 14px 18px; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow: auto; }
+dialog.modal::backdrop { background: rgba(10, 14, 22, .45); }
+dialog.modal h3 { margin: 0 0 8px; font-size: 16px; }
+dialog.modal p { margin: 6px 0; }
+dialog.modal ul { margin: 4px 0; padding-left: 20px; }
+dialog.modal .err { color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+dialog.modal.busy { cursor: progress; }
+dialog.modal.busy button { pointer-events: none; opacity: .6; }
+.choices { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0; }
+.choices label { display: inline-flex; gap: 4px; align-items: center; }
+.hidden { display: none !important; }
+.spin::after { content: " …"; }
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  nav { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+  #main { padding: 12px 16px 70px; }
+  header label.user input { width: 120px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>衛星・センサー編集ツール</h1>
+  <span class="file" id="fileName">設定ファイル未選択</span>
+  <span class="spacer"></span>
+  <label class="user" title="作成者・更新者の属性（editTracking）に入る名前。プラグインでは Windows のユーザー名（環境変数 USERNAME）が入る">作業者 <input id="userName" type="text" placeholder="ユーザー名" autocomplete="off"></label>
+  <span id="signState"></span>
+  <button id="btnSignIn" type="button">サインイン…</button>
+  <button id="btnReload" type="button" disabled>読み直す</button>
+  <label class="button primary" for="configInput">設定ファイルを開く…</label>
+  <input id="configInput" type="file" accept=".json,.jsonc,application/json" class="hidden">
+</header>
+<div class="layout">
+  <nav>
+    <div class="top">
+      <input id="search" type="text" placeholder="衛星名・ID・シリーズ・センサー・別名で絞り込み" autocomplete="off">
+      <div class="bar"><button id="btnAdd" type="button" disabled>＋ 衛星を追加</button><span class="spacer"></span><button id="btnOrphans" type="button" class="small" disabled>つながりのない行</button></div>
+    </div>
+    <div id="satList"></div>
+  </nav>
+  <main id="main"></main>
+</div>
+<div id="status"></div>
+<div id="lists" class="hidden"></div>
+
+<script type="application/json" id="plugin-constants">
+{
+ "satelliteRoles": [
+  "name",
+  "id",
+  "tle",
+  "tle1",
+  "tle2",
+  "maxOffNadir",
+  "minOffNadir",
+  "swath",
+  "length",
+  "lookSide",
+  "kind",
+  "scenesPerPass",
+  "minInterval",
+  "maxPerDay",
+  "series",
+  "leadTime",
+  "sensor",
+  "mode",
+  "resolution",
+  "system"
+ ],
+ "satelliteDefaultKeys": [
+  "maxOffNadir",
+  "minOffNadir",
+  "swath",
+  "scenesPerPass",
+  "minInterval",
+  "maxPerDay",
+  "leadTime"
+ ],
+ "satelliteDefaults": {
+  "maxOffNadir": 30,
+  "minOffNadir": 0,
+  "swath": 10,
+  "scenesPerPass": 1,
+  "minInterval": 0,
+  "maxPerDay": 0,
+  "leadTime": 0
+ },
+ "sensorRoles": [
+  "sensor",
+  "mode",
+  "kind",
+  "maxOffNadir",
+  "minOffNadir",
+  "swath",
+  "length",
+  "lookSide",
+  "scenesPerPass",
+  "minInterval",
+  "maxPerDay",
+  "leadTime",
+  "resolution",
+  "primary"
+ ],
+ "sensorNumberRoles": [
+  "maxOffNadir",
+  "minOffNadir",
+  "swath",
+  "length",
+  "scenesPerPass",
+  "minInterval",
+  "maxPerDay",
+  "leadTime",
+  "resolution"
+ ],
+ "aliasRoles": [
+  "satellite",
+  "alias"
+ ],
+ "editTrackingFields": {
+  "createdAt": "CREATED_DATE",
+  "createdBy": "CREATED_USER",
+  "updatedAt": "UPDATED_DATE",
+  "updatedBy": "UPDATED_USER"
+ },
+ "editTrackingUpdateRoles": [
+  "updatedAt",
+  "updatedBy"
+ ],
+ "timeZoneSources": [
+  "layers",
+  "imageCatalogs",
+  "observationStores",
+  "detectionOutputs",
+  "aiResultSources",
+  "satelliteCatalogs",
+  "sensorCatalogs",
+  "movingFeeds",
+  "stacCatalogs",
+  "gpServices"
+ ]
+}
+</script>
+<script>
+"use strict";
+const PC = JSON.parse(document.getElementById("plugin-constants").textContent);
+const STORE_USER = "skywatch.satelliteEditor.user";
+const STORE_LAST = "skywatch.satelliteEditor.lastConfig";
+const STORE_LOGIN = "skywatch.satelliteEditor.login";
+
+/** 役割の見出し・単位・入力の候補（list は候補の datalist の名前）。 */
+const SAT_INFO = {
+  name: { label: "衛星名", hint: "空なら TLE の名前" },
+  id: { label: "衛星 ID", hint: "NORAD 番号など。空なら衛星名" },
+  tle: { label: "TLE" }, tle1: { label: "TLE 1 行目" }, tle2: { label: "TLE 2 行目" },
+  maxOffNadir: { label: "最大オフナディア角", unit: "度", num: true },
+  minOffNadir: { label: "最小オフナディア角", unit: "度", num: true },
+  swath: { label: "観測幅", unit: "swath", num: true },
+  length: { label: "シーン長", unit: "swath", num: true, hint: "空なら観測幅と同じ" },
+  lookSide: { label: "観測方向", list: "lookSides", hint: "右・左・両方（空なら両方）" },
+  kind: { label: "センサー種別", list: "kinds", hint: "光学・SAR など（sarPattern に合えば SAR）" },
+  scenesPerPass: { label: "1 パスのシーン数", num: true, int: true },
+  minInterval: { label: "最小撮像間隔", unit: "分", num: true },
+  maxPerDay: { label: "1 日の上限", num: true, int: true, hint: "0 で制限なし" },
+  series: { label: "シリーズ", list: "series", hint: "空なら名前の末尾の番号を除いたもの" },
+  leadTime: { label: "発注リードタイム", unit: "時間", num: true },
+  sensor: { label: "センサー", list: "sensors", hint: "センサーモードのセンサー名。空ならシリーズ・衛星名で探す" },
+  mode: { label: "センサーモード", list: "modes", hint: "モードごとに行を分けるときだけ" },
+  resolution: { label: "分解能", unit: "m", num: true },
+  system: { label: "衛星システム", list: "systems", hint: "発注するシステム（requestExports の system）" },
+};
+const SENSOR_INFO = {
+  sensor: { label: "センサー名", list: "sensors" },
+  mode: { label: "モード名", list: "modes", hint: "ストリップマップ・スポットライトなど" },
+  kind: { label: "センサー種別", list: "kinds" },
+  maxOffNadir: { label: "最大オフナディア角", unit: "度", num: true },
+  minOffNadir: { label: "最小オフナディア角", unit: "度", num: true },
+  swath: { label: "観測幅", unit: "swath", num: true },
+  length: { label: "シーン長", unit: "swath", num: true },
+  lookSide: { label: "観測方向", list: "lookSides" },
+  scenesPerPass: { label: "1 パスのシーン数", num: true, int: true },
+  minInterval: { label: "最小撮像間隔", unit: "分", num: true },
+  maxPerDay: { label: "1 日の上限", num: true, int: true },
+  leadTime: { label: "発注リードタイム", unit: "時間", num: true },
+  resolution: { label: "分解能", unit: "m", num: true },
+  primary: { label: "既定モード", bool: true, hint: "そのセンサーのふだんのモード（1 つだけ）" },
+};
+const ALIAS_INFO = {
+  satellite: { label: "衛星名", list: "satNames", hint: "衛星カタログの名前か ID" },
+  alias: { label: "別名", hint: "画像カタログでの名前。カンマ区切りで複数も可（WV03, WV3）" },
+};
+const SAT_GROUPS = [
+  ["基本", ["name", "id", "series", "kind", "sensor", "mode", "system"]],
+  ["TLE", ["tle"]],
+  ["撮像の諸元", ["maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "resolution"]],
+  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "leadTime"]],
+];
+const SENSOR_GROUPS = [
+  ["基本", ["sensor", "mode", "kind", "primary"]],
+  ["撮像の諸元", ["maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "resolution"]],
+  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "leadTime"]],
+];
+const DATE_TYPES = new Set(["esriFieldTypeDate", "esriFieldTypeTimestampOffset", "esriFieldTypeDateOnly"]);
+const TEXT_TYPES = new Set(["esriFieldTypeString", "esriFieldTypeGUID", "esriFieldTypeGlobalID"]);
+const INT_TYPES = new Set(["esriFieldTypeInteger", "esriFieldTypeSmallInteger", "esriFieldTypeBigInteger", "esriFieldTypeOID"]);
+const REAL_TYPES = new Set(["esriFieldTypeDouble", "esriFieldTypeSingle"]);
+const SYSTEM_TYPES = new Set(["esriFieldTypeOID", "esriFieldTypeGlobalID", "esriFieldTypeGeometry", "esriFieldTypeRaster", "esriFieldTypeBlob", "esriFieldTypeXML"]);
+const LAYER_URL = /\/(FeatureServer|MapServer)\/\d+\/?$/i;
+const YES = /^(1|true|yes|y|はい|既定|標準)$/i;
+const TLE_OLD_DAYS = 14;
+
+// ---------------------------------------------------------------- 小道具
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k in e && typeof v !== "string") e[k] = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) e.append(c instanceof Node ? c : String(c));
+  return e;
+}
+const $ = (id) => document.getElementById(id);
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const isName = (v) => typeof v === "string" && /^[A-Za-z0-9_.]+$/.test(v);
+const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+/** JavaScript の String(v)（null・undefined は空）。プラグインの js_string と同じ。 */
+const jsString = (v) => (v === null || v === undefined ? "" : String(v));
+const text = (v) => jsString(v).trim();
+/** センサー名の比べ方（前後の空白を除いて小文字）: modes.py の _key。 */
+const keyOf = (v) => text(v).toLowerCase();
+/** 英数字だけ、小文字（WorldView-3 → worldview3）: names.py の plain。 */
+const plain = (v) => [...jsString(v || "").toLowerCase()].filter((c) => /[\p{L}\p{N}]/u.test(c)).join("");
+const yes = (v) => v === true || (v === 1) || YES.test(text(v));
+const natural = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+function localTime(ms) {
+  if (!isNum(ms)) return "";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function utcTime(ms) {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}
+/** 名前のない属性の値を、大文字・小文字を区別せずに。 */
+function attr(a, name) {
+  if (!name || !a) return undefined;
+  if (name in a) return a[name];
+  const low = name.toLowerCase();
+  for (const k of Object.keys(a)) if (k.toLowerCase() === low) return a[k];
+  return undefined;
+}
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* 残せなくても動く */ } },
+};
+
+/** JSONC（コメント・末尾のカンマつき）の JSON（プラグインの strip_jsonc と同じ扱い）。 */
+function stripJsonc(src) {
+  let out = "", i = 0, inStr = false;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (inStr) {
+      out += c;
+      if (c === "\\" && i + 1 < n) { out += src[i + 1]; i += 2; continue; }
+      if (c === '"') inStr = false;
+      i++;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; i++; }
+    else if (src.startsWith("//", i)) { const e = src.indexOf("\n", i); i = e < 0 ? n : e; }
+    else if (src.startsWith("/*", i)) {
+      const e = src.indexOf("*/", i + 2);
+      if (e < 0) throw new Error("閉じていないコメント");
+      out += "\n".repeat((src.slice(i, e).match(/\n/g) || []).length);
+      i = e + 2;
+    } else { out += c; i++; }
+  }
+  let res = "";
+  inStr = false;
+  for (let j = 0; j < out.length; j++) {
+    const c = out[j];
+    if (inStr) {
+      res += c;
+      if (c === "\\" && j + 1 < out.length) { res += out[++j]; continue; }
+      if (c === '"') inStr = false;
+    } else if (c === '"') { inStr = true; res += c; }
+    else if (c === ",") {
+      let k = j + 1;
+      while (k < out.length && " \t\r\n".includes(out[k])) k++;
+      if (k < out.length && "}]".includes(out[k])) continue;
+      res += c;
+    } else res += c;
+  }
+  return res;
+}
+function loadJsonc(src) {
+  if (src.charCodeAt(0) === 0xfeff) src = src.slice(1);
+  try {
+    return JSON.parse(stripJsonc(src));
+  } catch (e) {
+    throw new Error(`JSON として読み込み不可（${e.message}）`);
+  }
+}
+/** token を除いた写し（ブラウザに控えるとき）。 */
+function withoutTokens(v) {
+  if (Array.isArray(v)) return v.map(withoutTokens);
+  if (!isObj(v)) return v;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) if (k !== "token") out[k] = withoutTokens(x);
+  return out;
+}
+
+// ---------------------------------------------------------------- TLE・名前（プラグインと同じ読み方）
+
+/** 2 行の TLE（と前の名前の行）: satellites.py の tle_lines。 */
+function tleLines(src) {
+  const lines = jsString(src).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith("1 ") && i + 1 < lines.length && lines[i + 1].startsWith("2 ")) {
+      return { name: i > 0 ? lines[i - 1].replace(/^0 /, "") : "", tle1: lines[i], tle2: lines[i + 1] };
+    }
+  }
+  return null;
+}
+function tleChecksum(line) {
+  let sum = 0;
+  for (const c of line.slice(0, 68)) sum += c === "-" ? 1 : /\d/.test(c) ? +c : 0;
+  return String(sum % 10);
+}
+/** TLE の検査と中身（衛星番号・元期・傾斜角・周期）。 */
+function tleCheck(src) {
+  const lines = jsString(src).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return { empty: true, errors: [], warns: [] };
+  const t = tleLines(src);
+  if (!t) return { errors: ["「1 」で始まる 1 行目と「2 」で始まる 2 行目が続いていない"], warns: [] };
+  const errors = [], warns = [];
+  [t.tle1, t.tle2].forEach((l, i) => {
+    if (l.length !== 69) warns.push(`${i + 1} 行目が ${l.length} 文字（ふつうは 69 文字）`);
+    else if (tleChecksum(l) !== l[68]) warns.push(`${i + 1} 行目のチェックサムが合わない（最後の数字は ${tleChecksum(l)} のはず）`);
+  });
+  const n1 = t.tle1.slice(2, 7).trim(), n2 = t.tle2.slice(2, 7).trim();
+  if (n1 !== n2) errors.push(`1 行目と 2 行目の衛星番号が違う（${n1} と ${n2}）`);
+  const yy = Number(t.tle1.slice(18, 20)), day = Number(t.tle1.slice(20, 32));
+  let epoch = NaN;
+  if (Number.isFinite(yy) && Number.isFinite(day) && day >= 1) epoch = Date.UTC(yy < 57 ? 2000 + yy : 1900 + yy, 0, 1) + (day - 1) * 86400000;
+  else warns.push("1 行目の元期（19〜32 文字目）が読めない");
+  const inc = Number(t.tle2.slice(8, 16)), mm = Number(t.tle2.slice(52, 63));
+  return { tle: t, norad: n1, epoch, inclination: inc, period: mm > 0 ? 1440 / mm : NaN, errors, warns };
+}
+function tleSummary(c) {
+  const parts = [`衛星番号 ${c.norad}`];
+  if (isNum(c.epoch)) {
+    const days = Math.floor((Date.now() - c.epoch) / 86400000);
+    parts.push(`元期 ${utcTime(c.epoch)}（${days <= 0 ? "今日" : `${days} 日前`}）`);
+  }
+  if (Number.isFinite(c.inclination)) parts.push(`傾斜角 ${c.inclination.toFixed(2)}°`);
+  if (Number.isFinite(c.period)) parts.push(`周期 ${c.period.toFixed(1)} 分`);
+  return parts.join(" · ");
+}
+/** 名前の示すシリーズ（末尾の番号を除いた名前）: satellites.py の series_of。 */
+function seriesOf(name) {
+  let base = jsString(name).replace(/\s*\(.*\)\s*$/, "");
+  base = base.replace(/[\s\-_]*[A-Za-z]?\d+[A-Za-z]?$/, "");
+  base = base.replace(/[\s\-_]+$/, "").trim();
+  return base || jsString(name).trim() || "—";
+}
+/** 別名の属性の名前（カンマ・、・; 区切り）: names.py の aliases_of。 */
+function aliasesOf(v) {
+  if (v === null || v === undefined || typeof v === "boolean" || isObj(v)) return [];
+  const items = Array.isArray(v) ? v : jsString(v).split(/[,、，;；\r\n]+/);
+  const out = [];
+  for (const it of items) { const s = jsString(it).trim(); if (s && !out.includes(s)) out.push(s); }
+  return out;
+}
+
+// ---------------------------------------------------------------- タイムゾーン（time_zone.py の書き込みの換算）
+
+const WINDOWS_ZONES = {
+  "utc": "UTC", "coordinated universal time": "UTC", "gmt standard time": "Europe/London", "greenwich standard time": "Atlantic/Reykjavik",
+  "tokyo standard time": "Asia/Tokyo", "korea standard time": "Asia/Seoul", "china standard time": "Asia/Shanghai", "taipei standard time": "Asia/Taipei",
+  "singapore standard time": "Asia/Singapore", "se asia standard time": "Asia/Bangkok", "india standard time": "Asia/Kolkata", "arabian standard time": "Asia/Dubai",
+  "w. europe standard time": "Europe/Berlin", "romance standard time": "Europe/Paris", "central europe standard time": "Europe/Budapest",
+  "central european standard time": "Europe/Warsaw", "e. europe standard time": "Europe/Chisinau", "russian standard time": "Europe/Moscow",
+  "aus eastern standard time": "Australia/Sydney", "new zealand standard time": "Pacific/Auckland", "hawaiian standard time": "Pacific/Honolulu",
+  "alaskan standard time": "America/Anchorage", "pacific standard time": "America/Los_Angeles", "mountain standard time": "America/Denver",
+  "central standard time": "America/Chicago", "eastern standard time": "America/New_York",
+};
+const UTC_ZONE = { name: "UTC", offset: () => 0 };
+function fixedZone(minutes) {
+  const a = Math.abs(minutes);
+  return { name: minutes === 0 ? "UTC" : `UTC${minutes < 0 ? "-" : "+"}${pad(Math.floor(a / 60))}:${pad(a % 60)}`, offset: () => minutes * 60000 };
+}
+function ianaZone(name) {
+  let f;
+  try {
+    f = new Intl.DateTimeFormat("en-US", { timeZone: name, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch (e) { return null; }
+  return {
+    name: f.resolvedOptions().timeZone,
+    offset(t) {
+      if (!isNum(t)) return 0;
+      const at = Math.floor(t / 1000) * 1000;
+      const p = Object.fromEntries(f.formatToParts(new Date(at)).map((x) => [x.type, x.value]));
+      return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - at;
+    },
+  };
+}
+function parseZone(v) {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const s = v.trim();
+  if (/^(utc|gmt|z)$/i.test(s)) return UTC_ZONE;
+  const m = s.match(/^(?:utc|gmt)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$/i);
+  if (m) {
+    const minutes = Number(m[2]) * 60 + Number(m[3] || 0);
+    return minutes > 14 * 60 ? null : fixedZone(m[1] === "-" ? -minutes : minutes);
+  }
+  const w = WINDOWS_ZONES[s.toLowerCase()];
+  if (w) return w === "UTC" ? UTC_ZONE : ianaZone(w);
+  return /^[A-Za-z][\w+-]*(\/[\w+-]+)*$/.test(s) ? ianaZone(s) : null;
+}
+const instantOf = (clock, zone) => {
+  const first = clock - zone.offset(clock), second = clock - zone.offset(first);
+  return first === second ? first : clock - zone.offset(second);
+};
+const clockOf = (instant, zone) => instant + zone.offset(instant);
+function urlsIn(v, depth = 0, out = []) {
+  if (depth > 3) return out;
+  if (typeof v === "string") { const s = v.trim(); if (/^(https?|wss?):\/\/./i.test(s) || /^\.{0,2}\/[^/]/.test(s)) out.push(s); }
+  else if (Array.isArray(v)) v.forEach((x) => urlsIn(x, depth + 1, out));
+  else if (isObj(v)) for (const [k, x] of Object.entries(v)) if (k !== "token") urlsIn(x, depth + 1, out);
+  return out;
+}
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** 設定ファイルの timeZone・timeZones の決まり（time_zone.py の time_zones_of）。 */
+function timeZoneRules(v, problems) {
+  const out = [];
+  for (const key of PC.timeZoneSources) {
+    if (!Array.isArray(v[key])) continue;
+    v[key].forEach((entry, i) => {
+      if (!isObj(entry) || !("timeZone" in entry)) return;
+      const zone = parseZone(entry.timeZone), service = parseZone(entry.serviceTimeZone);
+      if (!zone) { if (entry.timeZone) problems.push(warnP(`${key}[${i}].timeZone の「${entry.timeZone}」はタイムゾーンとして読み込み不可`)); return; }
+      for (const u of new Set(urlsIn(entry))) {
+        const clean = u.replace(/[?#].*$/, "").replace(/\/+$/, "");
+        out.push({ match: new RegExp(`^${escapeRe(clean)}(?:[/?#]|$)`, "i"), zone, service });
+      }
+    });
+  }
+  if (Array.isArray(v.timeZones)) {
+    v.timeZones.forEach((entry, i) => {
+      if (!isObj(entry) || typeof entry.match !== "string" || !entry.match) return;
+      let match;
+      try { match = new RegExp(entry.match, "i"); } catch (e) { problems.push(warnP(`timeZones[${i}] の match は正規表現として読み込み不可`)); return; }
+      const zone = parseZone(entry.timeZone);
+      if (zone) out.push({ match, zone, service: parseZone(entry.serviceTimeZone) });
+    });
+  }
+  return out;
+}
+/** そのテーブルの日時の換算（決まりがなければ null）。 */
+function shiftOf(src) {
+  const rule = (S.cfg ? S.cfg.timeZones : []).find((r) => r.match.test(src.url) || r.match.test(src.shownUrl));
+  if (!rule) return null;
+  let service = rule.service;
+  const ref = src.info && src.info.dateFieldsTimeReference;
+  if (!service && isObj(ref)) service = parseZone(ref.timeZoneIANA) || parseZone(ref.timeZone);
+  return { data: rule.zone, service: service || UTC_ZONE };
+}
+const writeInstant = (src, t) => { const s = shiftOf(src); return s && isNum(t) ? instantOf(clockOf(t, s.data), s.service) : t; };
+const readInstant = (src, raw) => { const s = shiftOf(src); return s && isNum(raw) ? instantOf(clockOf(raw, s.service), s.data) : raw; };
+
+// ---------------------------------------------------------------- 設定ファイル
+
+const badP = (t) => ({ text: t, level: "bad" });
+const warnP = (t) => ({ text: t, level: "warn" });
+
+function mappedFields(fields, roles, at, problems) {
+  const out = {};
+  for (const role of roles) {
+    const name = fields[role];
+    if (name === undefined || name === null || name === "") continue;
+    if (isName(name)) out[role] = name;
+    else problems.push(warnP(`${at} の fields.${role} は属性名（英数字と _）で指定（無視）`));
+  }
+  return out;
+}
+function editUrlOf(url, at, problems) {
+  const clean = url.split("?")[0].replace(/\/+$/, "");
+  if (/\/MapServer\/\d+$/i.test(clean)) {
+    problems.push(warnP(`${at} は MapServer の URL。編集は同じサービスの FeatureServer に行う`));
+    return clean.replace(/\/MapServer\/(\d+)$/i, "/FeatureServer/$1");
+  }
+  return clean;
+}
+function sourceOf(kind, entry, i, at, fields, problems) {
+  const url = entry.url;
+  const token = typeof entry.token === "string" && entry.token ? entry.token : null;
+  const where = typeof entry.where === "string" && entry.where.trim() ? entry.where.trim() : null;
+  return {
+    kind, id: `${kind}${i}`, at, fields, token, where,
+    shownUrl: url.split("?")[0].replace(/\/+$/, ""), url: editUrlOf(url, at, problems),
+    label: typeof entry.label === "string" && entry.label ? entry.label : "",
+    swathUnit: entry.swathUnit === "m" ? "m" : "km",
+    info: null, byLower: new Map(), problems: [], error: null, records: [],
+  };
+}
+/** 設定ファイルのうち、このツールが使う項目（config.py と同じ読み方）。 */
+function parseConfig(v) {
+  const problems = [];
+  const out = { sats: [], sensors: [], inline: [], aliases: [], tracking: null, systems: [], timeZones: [], problems };
+  if (!isObj(v)) { problems.push(badP("設定はオブジェクトで指定")); return out; }
+  const listed = (key) => {
+    if (!(key in v)) return [];
+    if (!Array.isArray(v[key])) { problems.push(badP(`${key} は配列で指定`)); return []; }
+    return v[key];
+  };
+  listed("satelliteCatalogs").forEach((e, i) => {
+    const at = `satelliteCatalogs[${i}]`;
+    if (!isObj(e)) return problems.push(badP(`${at} はオブジェクトで指定`));
+    if (typeof e.url !== "string" || !/^https?:\/\//i.test(e.url) || !LAYER_URL.test(e.url.split("?")[0])) return problems.push(badP(`${at} の url は …/FeatureServer/0 のようなレイヤー（テーブル）の URL で指定`));
+    if (!isObj(e.fields)) return problems.push(badP(`${at} に fields（属性名の対応）なし`));
+    const fields = mappedFields(e.fields, PC.satelliteRoles, at, problems);
+    if (!fields.tle && !(fields.tle1 && fields.tle2)) return problems.push(badP(`${at} に fields.tle（または tle1 と tle2）なし（プラグインはこのカタログを使わない）`));
+    const src = sourceOf("sat", e, i, at, fields, problems);
+    src.label = src.label || `衛星カタログ ${i + 1}`;
+    const defaults = { ...PC.satelliteDefaults };
+    if (isObj(e.defaults)) for (const k of PC.satelliteDefaultKeys) if (isNum(e.defaults[k]) && e.defaults[k] >= 0) defaults[k] = e.defaults[k];
+    src.defaults = defaults;
+    out.sats.push(src);
+  });
+  listed("sensorCatalogs").forEach((e, i) => {
+    const at = `sensorCatalogs[${i}]`;
+    if (!isObj(e)) return problems.push(badP(`${at} はオブジェクトで指定`));
+    const label = typeof e.label === "string" && e.label ? e.label : `センサーカタログ ${i + 1}`;
+    if (Array.isArray(e.sensors)) {
+      // 設定ファイルに書かれたモード: 見せるだけ（直すのは設定ファイル作成ツールで）。
+      e.sensors.forEach((s) => {
+        if (!isObj(s) || typeof s.sensor !== "string" || !s.sensor.trim()) return;
+        const modes = Array.isArray(s.modes) && s.modes.length ? s.modes : [{}];
+        for (const m of modes) if (isObj(m)) out.inline.push({ label, sensor: s.sensor, mode: text(m.mode !== undefined && m.mode !== null ? m.mode : m.name), values: { ...s, ...m } });
+      });
+      return;
+    }
+    if (typeof e.url !== "string" || !/^https?:\/\//i.test(e.url) || !LAYER_URL.test(e.url.split("?")[0])) return problems.push(badP(`${at} は sensors（モードの一覧）か、…/FeatureServer/1 のようなテーブルの url を記述`));
+    if (!isObj(e.fields)) return problems.push(badP(`${at} に fields（属性名の対応）なし`));
+    const fields = mappedFields(e.fields, PC.sensorRoles, at, problems);
+    if (!fields.sensor) return problems.push(badP(`${at} に fields.sensor（センサー名の属性）なし`));
+    const src = sourceOf("sensor", e, i, at, fields, problems);
+    src.label = src.label || label;
+    out.sensors.push(src);
+  });
+  if ("satelliteAliases" in v) {
+    const items = Array.isArray(v.satelliteAliases) ? v.satelliteAliases : [v.satelliteAliases];
+    items.forEach((e, i) => {
+      const at = Array.isArray(v.satelliteAliases) ? `satelliteAliases[${i}]` : "satelliteAliases";
+      if (!isObj(e)) return problems.push(badP(`${at} はオブジェクトで指定`));
+      if (typeof e.url !== "string" || !/^https?:\/\//i.test(e.url) || !LAYER_URL.test(e.url.split("?")[0])) return problems.push(badP(`${at} の url は …/FeatureServer/2 のようなテーブルの URL で指定`));
+      if (!isObj(e.fields)) return problems.push(badP(`${at} に fields（属性名の対応）なし`));
+      const fields = mappedFields(e.fields, PC.aliasRoles, at, problems);
+      const missing = PC.aliasRoles.filter((r) => !fields[r]);
+      if (missing.length) return problems.push(badP(`${at} に fields.${missing.join("・fields.")} なし`));
+      const src = sourceOf("alias", e, i, at, fields, problems);
+      src.label = src.label || `衛星名の対応表 ${i + 1}`;
+      out.aliases.push(src);
+    });
+  }
+  out.tracking = trackingOf(v.editTracking, problems);
+  for (const e of Array.isArray(v.requestExports) ? v.requestExports : []) if (isObj(e) && typeof e.system === "string" && e.system.trim()) out.systems.push(e.system.trim());
+  out.timeZones = timeZoneRules(v, problems);
+  if (!out.sats.length) problems.push(badP("設定ファイルに使える satelliteCatalogs（衛星カタログ）なし"));
+  if (!out.sensors.length && !out.inline.length) problems.push(warnP("sensorCatalogs（センサーモード）なし: センサーは編集できない"));
+  if (!out.aliases.length) problems.push(warnP("satelliteAliases（衛星名の対応表）なし: 別名は編集できない"));
+  return out;
+}
+/** editTracking（edit_stamp.py の edit_tracking_of）。 */
+function trackingOf(v, problems) {
+  const t = { enabled: true, user: "", userVariable: "USERNAME", fields: { ...PC.editTrackingFields } };
+  if (v === false) return { ...t, enabled: false };
+  if (v === undefined || v === null || v === true) return t;
+  if (!isObj(v)) { problems.push(warnP("editTracking は false かオブジェクトで指定")); return t; }
+  if (typeof v.enabled === "boolean") t.enabled = v.enabled;
+  if (typeof v.userVariable === "string" && v.userVariable.trim()) t.userVariable = v.userVariable.trim();
+  if (typeof v.user === "string") t.user = v.user.trim();
+  if (isObj(v.fields)) for (const [role, name] of Object.entries(v.fields)) {
+    if (!(role in t.fields)) continue;
+    t.fields[role] = typeof name === "string" ? name.trim() : "";
+  }
+  return t;
+}
+
+// ---------------------------------------------------------------- ArcGIS REST
+
+class EsriError extends Error {
+  constructor(message, code = 0) { super(message); this.code = code; }
+}
+/** サインインで得たトークン（サーバーの根元の URL ごと）。ページを閉じれば消える。 */
+const tokens = new Map();
+let sendCredentials = false;
+/** サービスの URL の根元: https://gis.example/arcgis/rest/services/… → https://gis.example/arcgis。 */
+function serverRoot(url) {
+  const m = url.match(/^(.*?)\/rest\/services(\/|$)/i);
+  if (m) return m[1];
+  try { return new URL(url).origin; } catch (e) { return url; }
+}
+const pendingSignIns = new Map();
+/**
+ * ArcGIS REST への要求（いつも POST の form: 単純な要求なので CORS の事前確認が要らない）。
+ * トークンがない・切れた（499・498）ときはサインインを出して 1 度だけやり直す。
+ */
+async function esri(url, params = {}, opt = {}) {
+  const root = serverRoot(url);
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries({ ...params, f: "json" })) if (v !== undefined && v !== null) form.set(k, typeof v === "string" ? v : JSON.stringify(v));
+  const signed = tokens.get(root);
+  const token = opt.noToken ? null : (signed && (!signed.expires || signed.expires > Date.now() + 30000) ? signed.token : opt.token);
+  if (token) form.set("token", token);
+  let res, body;
+  try {
+    res = await fetch(url, { method: "POST", body: form, credentials: sendCredentials ? "include" : "same-origin", cache: "no-store" });
+    body = await res.text();
+  } catch (e) {
+    throw new EsriError(`サーバーに届かない（${url}）。URL・ネットワーク、またはサーバーの CORS の設定（このページからの要求を許しているか）を確かめる`);
+  }
+  let json;
+  try { json = JSON.parse(body); } catch (e) {
+    throw new EsriError(`応答が JSON でない（HTTP ${res.status}${res.status === 401 || res.status === 403 ? "。サインインが要るかもしれない（「ブラウザの資格情報」を試す）" : ""}）`, res.status);
+  }
+  if (json && json.error) {
+    const code = Number(json.error.code) || res.status;
+    const details = Array.isArray(json.error.details) ? json.error.details.filter(Boolean) : [];
+    const message = `${json.error.message || "エラー"}${details.length ? `（${details.join(" / ")}）` : ""}`;
+    if ((code === 498 || code === 499) && opt.retry !== false && !opt.noToken) {
+      if (await signIn(root, code === 498 ? "トークンが無効か期限切れ" : "トークンが必要")) return esri(url, params, { ...opt, retry: false });
+    }
+    throw new EsriError(message, code);
+  }
+  return json;
+}
+async function layerInfo(src) {
+  const info = await esri(src.url, {}, { token: src.token });
+  if (!Array.isArray(info.fields)) throw new EsriError("レイヤーの情報に fields がない（テーブルの URL か確かめる）");
+  src.info = info;
+  src.byLower = new Map(info.fields.map((f) => [f.name.toLowerCase(), f]));
+  src.oidField = info.objectIdField || (info.fields.find((f) => f.type === "esriFieldTypeOID") || {}).name;
+  if (!src.oidField) throw new EsriError("ObjectID の属性がない");
+  return info;
+}
+const fieldOf = (src, name) => (name ? src.byLower.get(name.toLowerCase()) || null : null);
+const roleField = (src, role) => fieldOf(src, src.fields[role]);
+/** where に合う行すべて（ページに分けて。ページできないレイヤーは ID から）: esri.py の query_all。 */
+async function queryAll(src, where) {
+  const info = src.info;
+  const size = Math.max(1, Math.min(2000, info.maxRecordCount || 1000));
+  const base = { where: where || "1=1", outFields: "*", returnGeometry: "false" };
+  const out = [];
+  if (info.advancedQueryCapabilities && info.advancedQueryCapabilities.supportsPagination) {
+    for (let offset = 0; offset < 1e6;) {
+      const r = await esri(`${src.url}/query`, { ...base, orderByFields: src.oidField, resultOffset: String(offset), resultRecordCount: String(size) }, { token: src.token });
+      const feats = r.features || [];
+      out.push(...feats);
+      if (!feats.length || !(r.exceededTransferLimit || feats.length >= size)) break;
+      offset += feats.length;
+    }
+  } else {
+    const ids = await queryIds(src, where);
+    for (let i = 0; i < ids.length; i += size) {
+      const r = await esri(`${src.url}/query`, { objectIds: ids.slice(i, i + size).join(","), outFields: "*", returnGeometry: "false" }, { token: src.token });
+      out.push(...(r.features || []));
+    }
+  }
+  return out.map((f) => f.attributes || {});
+}
+async function queryIds(src, where) {
+  const r = await esri(`${src.url}/query`, { where: where || "1=1", returnIdsOnly: "true" }, { token: src.token });
+  return (r.objectIds || []).slice().sort((a, b) => a - b);
+}
+/** 1 行の今の値（なければ null）。 */
+async function fetchRow(src, oid) {
+  const r = await esri(`${src.url}/query`, { objectIds: String(oid), outFields: "*", returnGeometry: "false" }, { token: src.token });
+  return r.features && r.features.length ? r.features[0].attributes || {} : null;
+}
+
+// ---- 作成者・更新者（edit_stamp.py と同じ: レイヤーにある属性だけ）
+
+function currentUser() {
+  const t = S.cfg && S.cfg.tracking;
+  return (t && t.user) || $("userName").value.trim();
+}
+function trackedFields(src) {
+  const t = S.cfg && S.cfg.tracking;
+  if (!t || !t.enabled) return {};
+  const out = {};
+  for (const [role, name] of Object.entries(t.fields)) { const f = fieldOf(src, name); if (f) out[role] = f; }
+  return out;
+}
+function needsUser(src) {
+  const f = trackedFields(src);
+  return Boolean(f.createdBy || f.updatedBy);
+}
+function stampValues(src, adding, when) {
+  const fields = trackedFields(src), user = currentUser(), out = {};
+  for (const role of adding ? Object.keys(PC.editTrackingFields) : PC.editTrackingUpdateRoles) {
+    const f = fields[role];
+    if (!f) continue;
+    if (role.endsWith("By")) { if (user && (TEXT_TYPES.has(f.type) || !f.type)) out[f.name] = user; }
+    else if (DATE_TYPES.has(f.type) || !f.type) out[f.name] = writeInstant(src, when);
+    else if (TEXT_TYPES.has(f.type)) out[f.name] = new Date(when).toISOString();
+    else if (INT_TYPES.has(f.type) || REAL_TYPES.has(f.type)) out[f.name] = when;
+  }
+  return out;
+}
+/** 名前の要る属性があるのに作業者が空なら止める。 */
+function requireUser(srcs) {
+  if (srcs.some(needsUser) && !currentUser()) {
+    $("userName").classList.add("invalid");
+    $("userName").focus();
+    throw new EsriError("右上の「作業者」に名前を入れる（作成者・更新者の属性に入る。プラグインでは Windows のユーザー名）");
+  }
+}
+/** applyEdits（1 テーブルの追加・更新・削除をまとめて。失敗が 1 つでもあれば全部取り消す）。 */
+async function applyEdits(src, { adds = [], updates = [], deletes = [] }) {
+  if (!adds.length && !updates.length && !deletes.length) return null;
+  const when = Date.now();
+  const params = { rollbackOnFailure: src.info.supportsRollbackOnFailureParameter === false ? "false" : "true" };
+  if (adds.length) params.adds = JSON.stringify(adds.map((a) => ({ attributes: { ...a, ...stampValues(src, true, when) } })));
+  if (updates.length) params.updates = JSON.stringify(updates.map((a) => ({ attributes: { ...a, ...stampValues(src, false, when) } })));
+  if (deletes.length) params.deletes = deletes.join(",");
+  const r = await esri(`${src.url}/applyEdits`, params, { token: src.token });
+  const results = [...(r.addResults || []), ...(r.updateResults || []), ...(r.deleteResults || [])];
+  const failed = results.filter((x) => !x.success);
+  if (failed.length) {
+    const reason = failed.map((x) => (x.error && x.error.description) || "").find(Boolean);
+    throw new EsriError(`${src.label}: ${failed.length} 件の書き込みに失敗${reason ? `（${reason}）` : ""}`);
+  }
+  if (results.length < adds.length + updates.length + deletes.length) throw new EsriError(`${src.label}: 書き込みの結果が足りない（サーバーの応答を確かめる）`);
+  return r;
+}
+
+// ---------------------------------------------------------------- サインイン
+
+function signInRoots() {
+  const roots = new Set();
+  if (S.cfg) for (const s of [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases]) roots.add(serverRoot(s.url));
+  return [...roots];
+}
+function signIn(root, reason) {
+  if (pendingSignIns.has(root)) return pendingSignIns.get(root);
+  const p = signInDialog(root, reason).finally(() => pendingSignIns.delete(root));
+  pendingSignIns.set(root, p);
+  return p;
+}
+async function signInDialog(root, reason) {
+  const remembered = store.get(STORE_LOGIN) || "";
+  const user = el("input", { type: "text", value: remembered, autocomplete: "username" });
+  const pass = el("input", { type: "password", autocomplete: "current-password" });
+  const pasted = el("textarea", { rows: 3, placeholder: "ポータルなどで発行したトークン" });
+  const how = el("div", { class: "choices" });
+  const panes = {
+    password: el("div", {}, field2("ユーザー名", user), field2("パスワード", pass),
+      el("p", { class: "note", text: "サーバー（かポータル）の generateToken でトークンを発行する。パスワードは控えない。トークンはこのページを閉じれば消える" })),
+    token: el("div", { class: "hidden" }, field2("トークン", pasted)),
+    browser: el("div", { class: "hidden" }, el("p", { class: "note", text: "ブラウザがサーバーにサインイン済みの資格情報（統合 Windows 認証・Cookie）を要求に付ける。サーバーの CORS の設定でこのページが許されている必要がある" })),
+  };
+  let mode = "password";
+  for (const [k, label] of [["password", "ユーザー名とパスワード"], ["token", "トークンを貼り付け"], ["browser", "ブラウザの資格情報（統合 Windows 認証など）"]]) {
+    how.append(el("label", {}, el("input", { type: "radio", name: "how", value: k, checked: k === mode, onchange: () => { mode = k; for (const [n, p] of Object.entries(panes)) p.classList.toggle("hidden", n !== k); } }), label));
+  }
+  setTimeout(() => (remembered ? pass : user).focus(), 30);
+  const ok = await modal("サインイン", [
+    el("p", {}, el("b", { text: root }), reason ? el("span", { class: "note", text: `（${reason}）` }) : null),
+    how, panes.password, panes.token, panes.browser,
+  ], [{ label: "やめる", value: null }, { label: "サインイン", value: true, cls: "primary" }], async () => {
+    if (mode === "token") {
+      if (!pasted.value.trim()) throw new Error("トークンを貼り付ける");
+      tokens.set(root, { token: pasted.value.trim(), user: "（トークン）", expires: 0 });
+      return true;
+    }
+    if (mode === "browser") { sendCredentials = true; tokens.delete(root); return true; }
+    if (!user.value.trim() || !pass.value) throw new Error("ユーザー名とパスワードを入れる");
+    const info = await esri(`${root}/rest/info`, {}, { noToken: true });
+    const auth = info.authInfo || {};
+    if (!auth.tokenServicesUrl) throw new Error(auth.isTokenBasedSecurity === false ? "このサーバーはトークンでのサインインを使わない設定（「ブラウザの資格情報」を試す）" : "サーバーの情報にトークンの発行先（tokenServicesUrl）がない");
+    const tokenUrl = new URL(auth.tokenServicesUrl, `${root}/`).href;
+    const r = await esri(tokenUrl, { username: user.value.trim(), password: pass.value, client: "requestip", expiration: "240" }, { noToken: true });
+    if (!r.token) throw new Error("トークンが発行されなかった");
+    tokens.set(root, { token: r.token, user: user.value.trim(), expires: isNum(r.expires) ? r.expires : 0 });
+    store.set(STORE_LOGIN, user.value.trim());
+    return true;
+  });
+  showSignState();
+  return Boolean(ok);
+}
+function field2(label, input) {
+  return el("div", { class: "fld" }, el("div", { class: "lab", text: label }), input);
+}
+function showSignState() {
+  const parts = [...tokens.entries()].map(([root, t]) => `${t.user}（${root.replace(/^https?:\/\//, "")}）`);
+  if (sendCredentials) parts.push("ブラウザの資格情報");
+  $("signState").textContent = parts.length ? `サインイン: ${parts.join("・")}` : "";
+}
+
+// ---------------------------------------------------------------- 状態と読み込み
+
+const S = {
+  cfg: null, fileName: "", loading: false,
+  sats: [], modes: [], aliases: [],
+  /** { kind: "sat", rec } | { kind: "new", src, start } | { kind: "orphans" } | null */
+  sel: null,
+  form: null,
+  filter: "",
+};
+
+async function openConfigText(src, name, remember = true) {
+  if (S.form && S.form.dirty() && !(await discardChanges())) return;
+  let value;
+  try { value = loadJsonc(src); } catch (e) { return status(`${name}: ${e.message}`, "bad"); }
+  S.cfg = parseConfig(value);
+  S.fileName = name;
+  S.sel = null;
+  S.form = null;
+  $("fileName").textContent = name;
+  if (remember) store.set(STORE_LAST, JSON.stringify({ name, at: Date.now(), config: withoutTokens(value) }));
+  if (!$("userName").value.trim() && S.cfg.tracking.user) $("userName").value = S.cfg.tracking.user;
+  await loadAll();
+}
+async function loadAll(keep) {
+  if (!S.cfg) return;
+  S.loading = true;
+  renderSide();
+  if (!keep) renderMain();
+  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases];
+  await Promise.all(all.map(loadSource));
+  S.sats = S.cfg.sats.flatMap((s) => s.records);
+  S.modes = S.cfg.sensors.flatMap((s) => s.records);
+  S.aliases = S.cfg.aliases.flatMap((s) => s.records);
+  S.loading = false;
+  relink();
+  if (keep) S.sel = keep();
+  else if (S.sel && S.sel.kind === "sat") S.sel = findSel(S.sel.rec);
+  S.form = null;
+  buildLists();
+  renderSide();
+  renderMain();
+  const failed = all.filter((s) => s.error);
+  if (failed.length) status(failed.map((s) => `${s.label}: ${s.error}`).join("\n"), "bad", true);
+}
+async function loadSource(src) {
+  src.error = null;
+  src.records = [];
+  src.problems = [];
+  try {
+    await layerInfo(src);
+    for (const [role, name] of Object.entries(src.fields)) if (!fieldOf(src, name)) src.problems.push(warnP(`fields.${role} の「${name}」がテーブルにない（この項目は編集できない）`));
+    if (src.info.capabilities && !/\b(Update|Editing)\b/i.test(src.info.capabilities)) src.problems.push(badP(`このテーブルは編集できない設定（capabilities: ${src.info.capabilities}）。サービスで「作成・更新・削除」を許す`));
+    const rows = await queryAll(src, "1=1");
+    let inWhere = null;
+    if (src.where) {
+      try { inWhere = new Set(await queryIds(src, src.where)); }
+      catch (e) { src.problems.push(warnP(`where「${src.where}」で絞り込めない（${e.message}）`)); }
+    }
+    src.records = rows.map((a) => ({ src, oid: attr(a, src.oidField), a, out: inWhere ? !inWhere.has(attr(a, src.oidField)) : false }));
+  } catch (e) {
+    src.error = e.message;
+  }
+}
+function findSel(rec) {
+  if (!rec) return null;
+  const r = S.sats.find((x) => x.src === rec.src && x.oid === rec.oid);
+  return r ? { kind: "sat", rec: r } : null;
+}
+const get = (rec, role) => (rec.src.fields[role] ? attr(rec.a, rec.src.fields[role]) : undefined);
+
+/** 衛星 1 行の読み方（satellites.py の satellite_of と同じ名前・ID・シリーズ）。 */
+function satView(rec) {
+  const src = rec.src;
+  const tleText = src.fields.tle ? jsString(get(rec, "tle")) : `${jsString(get(rec, "tle1"))}\n${jsString(get(rec, "tle2"))}`;
+  const tle = tleLines(tleText);
+  const raw = get(rec, "name");
+  let name = (raw !== undefined && raw !== null ? jsString(raw) : tle ? tle.name : "").trim();
+  if (!name && tle) name = `NORAD ${tle.tle1.slice(2, 7).trim()}`;
+  return {
+    name, id: text(get(rec, "id")) || name, series: text(get(rec, "series")) || seriesOf(name),
+    sensor: text(get(rec, "sensor")), mode: text(get(rec, "mode")), kind: text(get(rec, "kind")),
+    tleText, tle, check: tleCheck(tleText),
+  };
+}
+function modeSensor(m) { return text(attr(m.a, m.src.fields.sensor)); }
+function modeName(m) { return text(attr(m.a, m.src.fields.mode)); }
+function aliasSat(r) { return text(attr(r.a, r.src.fields.satellite)); }
+function aliasText(r) { return text(attr(r.a, r.src.fields.alias)); }
+
+/** センサーモードのセンサー名（小文字）ごとの行。 */
+let byKey = new Map();
+/** 衛星が使うセンサー: センサー名、なければシリーズ、なければ衛星名（modes.py の with_modes）。 */
+function sensorKeyOf(v, keys = byKey) {
+  for (const k of [v.sensor, v.series, v.name].map(keyOf)) if (k && keys.has(k)) return k;
+  return null;
+}
+function relink() {
+  byKey = new Map();
+  for (const m of S.modes) { const k = keyOf(modeSensor(m)); if (k) (byKey.get(k) || byKey.set(k, []).get(k)).push(m); }
+  for (const m of S.cfg ? S.cfg.inline : []) { const k = keyOf(m.sensor); if (k) (byKey.get(k) || byKey.set(k, []).get(k)).push({ inline: m }); }
+  for (const r of S.sats) {
+    r.v = satView(r);
+    r.v.sensorKey = sensorKeyOf(r.v);
+    r.v.modes = r.v.sensorKey ? byKey.get(r.v.sensorKey) : [];
+    const names = new Set([plain(r.v.name), plain(r.v.id)].filter(Boolean));
+    r.v.aliases = S.aliases.filter((a) => names.has(plain(aliasSat(a))));
+  }
+}
+/** 衛星が使うセンサーの名前（書かれたとおり）。 */
+function sensorShown(v) {
+  const t = v.modes.find((m) => !m.inline), f = v.modes.find((m) => m.inline);
+  return t ? modeSensor(t) : f ? f.inline.sensor : v.sensorKey || "";
+}
+/** そのセンサー名を使う衛星（rec 以外）。 */
+const sensorUsers = (key, except) => S.sats.filter((r) => r !== except && r.v.sensorKey === key);
+/** その名前（plain）を名前か ID に持つ衛星（rec 以外）。 */
+const nameOwners = (p, except) => S.sats.filter((r) => r !== except && p && (plain(r.v.name) === p || plain(r.v.id) === p));
+
+function buildLists() {
+  const box = $("lists");
+  box.replaceChildren();
+  const uniq = (xs) => [...new Set(xs.filter(Boolean))].sort(natural.compare);
+  const lists = {
+    kinds: uniq(["光学", "SAR", ...S.sats.map((r) => r.v.kind), ...S.modes.map((m) => text(attr(m.a, m.src.fields.kind)))]),
+    lookSides: ["右", "左", "両方"],
+    series: uniq(S.sats.map((r) => text(get(r, "series")) || r.v.series)),
+    sensors: uniq([...S.modes.map(modeSensor), ...S.sats.map((r) => r.v.sensor)]),
+    modes: uniq(S.modes.map(modeName)),
+    systems: uniq([...(S.cfg ? S.cfg.systems : []), ...S.sats.map((r) => text(get(r, "system")))]),
+    satNames: uniq(S.sats.map((r) => r.v.name)),
+  };
+  for (const [id, values] of Object.entries(lists)) box.append(el("datalist", { id: `list-${id}` }, values.map((v) => el("option", { value: v }))));
+}
+
+// ---------------------------------------------------------------- 画面の部品
+
+function status(msg, level = "ok", sticky = false) {
+  const box = el("div", { class: `msg ${level}`, text: msg });
+  box.append(el("button", { type: "button", text: "×", title: "閉じる", onclick: () => box.remove() }));
+  $("status").append(box);
+  while ($("status").children.length > 4) $("status").firstChild.remove();
+  if (!sticky && level !== "bad") setTimeout(() => box.remove(), level === "warn" ? 9000 : 4500);
+}
+/** 待つダイアログ（ボタンの値を返す。act があれば押したときに実行し、失敗すれば開いたまま理由を出す）。 */
+function modal(title, content, buttons, act) {
+  return new Promise((resolve) => {
+    const d = el("dialog", { class: "modal" });
+    const msg = el("div", { class: "err" });
+    const bar = el("div", { class: "bar end" });
+    let busy = false;
+    const finish = (v) => { d.close(); d.remove(); resolve(v); };
+    for (const b of buttons) {
+      bar.append(el("button", {
+        type: "button", class: b.cls, text: b.label,
+        onclick: async () => {
+          if (busy) return;
+          if (b.value === null || !act) return finish(b.value);
+          busy = true;
+          msg.textContent = "";
+          d.classList.add("busy");
+          try {
+            const r = await act(b.value, msg);
+            if (r !== false) finish(r === undefined ? b.value : r);
+          } catch (e) {
+            msg.textContent = e.message;
+          } finally {
+            busy = false;
+            d.classList.remove("busy");
+          }
+        },
+      }));
+    }
+    d.addEventListener("cancel", (e) => { e.preventDefault(); if (!busy) finish(null); });
+    d.append(el("h3", { text: title }), ...content.filter(Boolean), msg, bar);
+    document.body.append(d);
+    d.showModal();
+  });
+}
+async function confirmBox(title, content, okLabel, danger = false) {
+  return (await modal(title, content, [{ label: "やめる", value: null }, { label: okLabel, value: true, cls: danger ? "danger solid" : "primary" }])) === true;
+}
+async function discardChanges() {
+  return confirmBox("保存していない変更", [el("p", { text: "衛星のフォームに保存していない変更がある。捨てて移る？" })], "変更を捨てる", true);
+}
+const unitOf = (info, src) => (info.unit === "swath" ? src.swathUnit : info.unit);
+
+/**
+ * 1 つの属性の入力欄: { node, input, dirty(), read() → { value } | { error } }。
+ * 元の値の文字のまま触らなければ「変更なし」（書き込まない）。
+ */
+function fieldInput(src, f, value, opt = {}) {
+  const coded = f.domain && f.domain.type === "codedValue" && Array.isArray(f.domain.codedValues) ? f.domain.codedValues : null;
+  const numeric = INT_TYPES.has(f.type) || REAL_TYPES.has(f.type);
+  let input, initial, current, read;
+  if (opt.bool) {
+    input = el("input", { type: "checkbox" });
+    input.checked = yes(value);
+    current = () => String(input.checked);
+    read = () => ({ value: input.checked ? (numeric ? 1 : "1") : (numeric ? 0 : null) });
+  } else if (coded) {
+    input = el("select", {}, el("option", { value: "", text: "（空）" }), coded.map((c) => el("option", { value: jsString(c.code), text: `${c.name}${jsString(c.code) !== c.name ? `（${c.code}）` : ""}` })));
+    if (value !== null && value !== undefined && !coded.some((c) => jsString(c.code) === jsString(value))) input.append(el("option", { value: jsString(value), text: `${value}（一覧にない値）` }));
+    input.value = jsString(value);
+    current = () => input.value;
+    read = () => {
+      if (input.value === "") return { value: null };
+      const c = coded.find((x) => jsString(x.code) === input.value);
+      return { value: c ? c.code : numeric ? Number(input.value) : input.value };
+    };
+  } else if (DATE_TYPES.has(f.type)) {
+    input = el("input", { type: "datetime-local" });
+    const shown = readInstant(src, value);
+    if (isNum(shown)) { const d = new Date(shown); input.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+    current = () => input.value;
+    read = () => {
+      if (!input.value) return { value: null };
+      const t = new Date(input.value).getTime();
+      return Number.isFinite(t) ? { value: writeInstant(src, t) } : { error: "日時が読めない" };
+    };
+  } else {
+    const long = opt.textarea || (opt.textarea !== false && f.length && f.length > 400);
+    input = long ? el("textarea", { rows: opt.rows || 3 }) : el("input", { type: "text", inputmode: numeric || opt.num ? "decimal" : undefined });
+    if (f.length && TEXT_TYPES.has(f.type)) input.maxLength = f.length;
+    input.value = jsString(value);
+    current = () => input.value;
+    read = () => {
+      const s = input.value.normalize("NFKC").trim();
+      if (s === "") return { value: f.nullable === false && TEXT_TYPES.has(f.type) ? "" : null };
+      if (numeric) {
+        const n = Number(s);
+        if (!Number.isFinite(n)) return { error: "数で入れる" };
+        if (INT_TYPES.has(f.type) && !Number.isInteger(n)) return { error: "整数で入れる" };
+        return { value: n };
+      }
+      if (f.length && input.value.trim().length > f.length) return { error: `${f.length} 文字まで` };
+      return { value: input.value.trim() };
+    };
+  }
+  initial = current();
+  if (f.editable === false) input.disabled = true;
+  if (opt.placeholder && "placeholder" in input) input.placeholder = opt.placeholder;
+  if (opt.list) input.setAttribute("list", `list-${opt.list}`);
+  const err = el("div", { class: "err" });
+  const lab = el("div", { class: "lab" }, el("span", { text: opt.label || f.alias || f.name }), opt.unit ? el("span", { class: "unit", text: `（${opt.unit}）` }) : null, el("code", { text: f.name }));
+  const node = el("div", { class: `fld${opt.wide ? " wide" : ""}` }, lab, opt.bool ? el("label", { class: "check" }, input, opt.boolText || "はい") : input, opt.hint ? el("small", { text: opt.hint }) : null, err);
+  const self = {
+    node, input, field: f, err,
+    dirty: () => current() !== initial,
+    read,
+    mark() { input.classList.toggle("changed", self.dirty()); },
+  };
+  input.addEventListener(opt.bool || coded ? "change" : "input", () => { self.mark(); err.textContent = ""; input.classList.remove("invalid"); if (opt.onchange) opt.onchange(); });
+  return self;
+}
+/** 役割の値の検査（数・0 以上・整数）。 */
+function checkRole(info, value) {
+  if (!info.num || value === null || value === undefined || value === "") return null;
+  const n = Number(jsString(value).normalize("NFKC"));
+  if (!Number.isFinite(n)) return "数で入れる";
+  if (n < 0) return "0 以上の数で入れる";
+  if (info.int && !Number.isInteger(n)) return "整数で入れる";
+  return null;
+}
+/** 役割でも仕組みの属性でもない、編集できる属性（その他の属性）。 */
+function otherFields(src) {
+  const used = new Set(Object.values(src.fields).map((n) => n.toLowerCase()));
+  const sys = new Set([src.oidField, src.info.globalIdField, ...Object.values(trackedFields(src)).map((f) => f.name)].filter(Boolean).map((n) => n.toLowerCase()));
+  const efi = src.info.editFieldsInfo;
+  if (isObj(efi)) for (const k of ["creationDateField", "creatorField", "editDateField", "editorField"]) if (efi[k]) sys.add(efi[k].toLowerCase());
+  return src.info.fields.filter((f) => !used.has(f.name.toLowerCase()) && !sys.has(f.name.toLowerCase()) && !SYSTEM_TYPES.has(f.type) && !/^shape[._]/i.test(f.name) && f.editable !== false);
+}
+/** where の「属性 = 値」（AND でつないだもの）から、新しい行に入れる値。 */
+function whereDefaults(src) {
+  const out = {};
+  if (!src.where) return out;
+  for (const part of src.where.split(/\s+AND\s+/i)) {
+    const m = part.trim().replace(/^\((.*)\)$/, "$1").match(/^([A-Za-z_][\w.]*)\s*=\s*(?:N?'((?:[^']|'')*)'|(-?\d+(?:\.\d+)?))$/i);
+    if (!m) continue;
+    const f = fieldOf(src, m[1]);
+    if (f) out[f.name] = m[2] !== undefined ? m[2].replace(/''/g, "'") : Number(m[3]);
+  }
+  return out;
+}
+/** 作成・更新の日時と人（あれば）。 */
+function recordMeta(rec) {
+  const src = rec.src, f = trackedFields(src), efi = isObj(src.info.editFieldsInfo) ? src.info.editFieldsInfo : {};
+  const pick = (mine, esriName) => (mine ? attr(rec.a, mine.name) : esriName ? attr(rec.a, esriName) : undefined);
+  const parts = [];
+  const created = pick(f.createdAt, efi.creationDateField), creator = pick(f.createdBy, efi.creatorField);
+  const updated = pick(f.updatedAt, efi.editDateField), editor = pick(f.updatedBy, efi.editorField);
+  if (created || creator) parts.push(`作成 ${isNum(created) ? localTime(readInstant(src, created)) : jsString(created)} ${jsString(creator)}`.trim());
+  if (updated || editor) parts.push(`更新 ${isNum(updated) ? localTime(readInstant(src, updated)) : jsString(updated)} ${jsString(editor)}`.trim());
+  parts.push(`${src.oidField} ${rec.oid}`);
+  return parts.join(" · ");
+}
+function srcProblems(src) {
+  const all = [...src.problems];
+  if (src.error) all.unshift(badP(src.error));
+  if (!all.length) return null;
+  const bad = all.some((p) => p.level === "bad");
+  return el("div", { class: `box ${bad ? "bad" : "warn"}` }, el("b", { text: `${src.label}（${src.shownUrl}）` }), el("ul", {}, all.map((p) => el("li", { text: p.text }))));
+}
+
+// ---------------------------------------------------------------- 一覧（左）
+
+function renderSide() {
+  const list = $("satList");
+  list.replaceChildren();
+  const ready = S.cfg && !S.loading;
+  $("btnReload").disabled = !S.cfg || S.loading;
+  $("btnAdd").disabled = !ready || !S.cfg.sats.some((s) => s.info && !s.error);
+  $("btnOrphans").disabled = !ready;
+  if (!S.cfg) return list.append(el("p", { class: "empty", style: "padding: 8px 12px", text: "設定ファイルを開くと衛星の一覧が出る" }));
+  if (S.loading) return list.append(el("p", { class: "empty spin", style: "padding: 8px 12px", text: "読み込み中" }));
+  const words = S.filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (r) => {
+    if (!words.length) return true;
+    const hay = [r.v.name, r.v.id, r.v.series, r.v.sensor, r.v.mode, r.v.kind, ...r.v.aliases.map(aliasText)].join(" ").toLowerCase();
+    return words.every((w) => hay.includes(w));
+  };
+  const orphans = orphanRows();
+  const n = orphans.modes.length + orphans.aliases.length;
+  $("btnOrphans").textContent = n ? `つながりのない行（${n}）` : "つながりのない行";
+  $("btnOrphans").classList.toggle("current", Boolean(S.sel && S.sel.kind === "orphans"));
+  for (const src of S.cfg.sats) {
+    const recs = src.records.filter(hit).sort((a, b) => natural.compare(a.v.name, b.v.name) || natural.compare(a.v.mode, b.v.mode));
+    if (S.cfg.sats.length > 1 || src.error) list.append(el("h2", { text: `${src.label}（${src.records.length}）` }));
+    if (src.error) { list.append(el("p", { class: "empty", style: "padding: 0 12px; color: var(--bad)", text: "読み込めない（右に理由）" })); continue; }
+    if (!recs.length) list.append(el("p", { class: "empty", style: "padding: 0 12px", text: words.length ? "合う衛星なし" : "衛星なし" }));
+    for (const r of recs) list.append(satItem(r));
+  }
+}
+function satItem(r) {
+  const v = r.v;
+  const tags = [];
+  const nModes = v.modes.length;
+  if (nModes) tags.push(el("span", { class: "tag on", text: `モード ${nModes}` }));
+  if (v.aliases.length) tags.push(el("span", { class: "tag on", text: `別名 ${v.aliases.reduce((s, a) => s + aliasesOf(aliasText(a)).length, 0)}` }));
+  if (v.check.empty) tags.push(el("span", { class: "tag bad", text: "TLE なし" }));
+  else if (v.check.errors.length) tags.push(el("span", { class: "tag bad", text: "TLE 不正" }));
+  else if (isNum(v.check.epoch)) {
+    const days = Math.floor((Date.now() - v.check.epoch) / 86400000);
+    if (days >= TLE_OLD_DAYS) tags.push(el("span", { class: "tag warn", text: `TLE ${days} 日前` }));
+  }
+  if (r.out) tags.push(el("span", { class: "tag warn", text: "where 外" }));
+  const sub = [v.id !== v.name ? v.id : "", v.series, v.kind, v.sensorKey && v.sensorKey !== keyOf(v.series) ? `センサー ${sensorShown(v)}` : ""].filter(Boolean).join(" · ");
+  const current = S.sel && S.sel.kind === "sat" && S.sel.rec === r;
+  return el("button", { type: "button", class: `item${current ? " current" : ""}`, onclick: () => select({ kind: "sat", rec: r }) },
+    el("span", { class: "nm" }, v.name || "（名前なし）", v.mode ? el("small", { text: v.mode }) : null),
+    el("span", { class: "sub", text: sub || "—" }),
+    tags.length ? el("span", { class: "badges" }, tags) : null);
+}
+async function select(sel) {
+  if (S.form && S.form.dirty() && !(await discardChanges())) return;
+  S.sel = sel;
+  S.form = null;
+  renderSide();
+  renderMain();
+  $("main").scrollTop = 0;
+}
+
+// ---------------------------------------------------------------- 右の画面
+
+function renderMain() {
+  const main = $("main");
+  main.replaceChildren();
+  const page = el("div", { class: "page" });
+  main.append(page);
+  if (!S.cfg) return page.append(welcome());
+  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases];
+  if (S.loading) return page.append(el("p", { class: "empty spin", text: "テーブルを読み込み中" }));
+  if (!S.sel) return page.append(overview(all));
+  if (S.sel.kind === "sat") return page.append(...satPage(S.sel.rec));
+  if (S.sel.kind === "new") return page.append(...newSatPage(S.sel.src, S.sel.start));
+  if (S.sel.kind === "orphans") return page.append(...orphansPage());
+}
+function welcome() {
+  const last = (() => { try { return JSON.parse(store.get(STORE_LAST) || "null"); } catch (e) { return null; } })();
+  return el("div", {},
+    el("h2", { class: "title", text: "衛星・センサー・別名をテーブルの上で直す" }),
+    el("p", { class: "help", text: "プラグインの設定ファイル（config.json）の satelliteCatalogs・sensorCatalogs・satelliteAliases のテーブルを読み、衛星ごとにセンサーモードと別名をまとめて編集する。書き込みはすぐ ArcGIS のテーブルに入る（プラグインは次に読んだときから使う）。" }),
+    el("ol", { class: "steps" },
+      el("li", {}, "右上の「設定ファイルを開く…」でプラグインの設定ファイルを選ぶ（ここに落としてもよい）"),
+      el("li", {}, "サインインを求められたら、ポータル（サーバー）のアカウントで入る"),
+      el("li", {}, "右上の「作業者」に自分のユーザー名（Windows のユーザー名）を入れる。作成者・更新者の属性に入る"),
+      el("li", {}, "左の一覧から衛星を選んで直す。「＋ 衛星を追加」で新しい衛星")),
+    el("div", { class: "drop", text: "設定ファイル（.json・.jsonc）をここに落とす" }),
+    last && last.config ? el("p", {}, el("button", { type: "button", onclick: () => openConfigText(JSON.stringify(last.config), last.name, false) }, `前回の設定ファイル（${last.name}、${localTime(last.at)}）で開く`),
+      el("span", { class: "note", text: " token はブラウザに控えないので、要ればサインインする" })) : null);
+}
+function overview(all) {
+  const box = el("div", {});
+  box.append(el("h2", { class: "title", text: S.fileName }), el("p", { class: "help", text: "左の一覧から衛星を選ぶ。" }));
+  const cfgProblems = S.cfg.problems;
+  if (cfgProblems.length) box.append(el("div", { class: `box ${cfgProblems.some((p) => p.level === "bad") ? "bad" : "warn"}` }, el("b", { text: "設定ファイル" }), el("ul", {}, cfgProblems.map((p) => el("li", { text: p.text })))));
+  for (const src of all) { const p = srcProblems(src); if (p) box.append(p); }
+  const rows = all.map((src) => el("tr", {},
+    el("td", { text: { sat: "衛星", sensor: "センサーモード", alias: "別名" }[src.kind] }),
+    el("td", { text: src.label }),
+    el("td", { text: src.error ? "読み込めない" : `${src.records.length} 行${src.where ? `（where に合うのは ${src.records.filter((r) => !r.out).length}）` : ""}` }),
+    el("td", {}, el("code", { text: src.shownUrl }))));
+  if (S.cfg.inline.length) rows.push(el("tr", {}, el("td", { text: "センサーモード" }), el("td", { text: "設定ファイルに書かれたモード" }), el("td", { text: `${S.cfg.inline.length} 行（ここでは直せない）` }), el("td", { text: "sensorCatalogs[].sensors" })));
+  box.append(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: "テーブル" })),
+    el("div", { class: "body" }, el("table", { class: "list" }, el("tr", {}, ["種類", "名前", "行", "URL"].map((t) => el("th", { text: t }))), rows))));
+  const t = S.cfg.tracking;
+  box.append(el("p", { class: "note", text: t.enabled ? `作成者・更新者: ${Object.values(t.fields).filter(Boolean).join("・")}（テーブルにある属性だけ書く）${t.user ? `。名前は設定ファイルの「${t.user}」` : "。名前は右上の「作業者」"}` : "作成者・更新者の記録なし（editTracking: false）" }));
+  return box;
+}
+
+// ---- 衛星のフォーム
+
+/** 衛星のフォーム（rec: 直す行。なければ start の値で新しい行）。 */
+function satForm(src, rec, start) {
+  const a = rec ? rec.a : start || {};
+  const items = [];
+  const box = el("div", {});
+  const scale = src.swathUnit === "m" ? 0.001 : 1;
+  const d = src.defaults;
+  const placeholders = {
+    maxOffNadir: `空なら ${d.maxOffNadir}`, minOffNadir: `空なら ${d.minOffNadir}`, swath: `空なら ${+(d.swath / scale).toPrecision(6)}`,
+    scenesPerPass: `空なら ${d.scenesPerPass}`, minInterval: `空なら ${d.minInterval}`, maxPerDay: `空なら ${d.maxPerDay}`, leadTime: `空なら ${d.leadTime}`,
+  };
+  let tleBox = null, tleInfo = null, tleTargets = [];
+  const byRole = {};
+  for (const [legend, roles] of SAT_GROUPS) {
+    const grid = el("div", { class: "grid" });
+    for (const role of roles) {
+      if (role === "tle") {
+        tleTargets = src.fields.tle ? ["tle"] : ["tle1", "tle2"];
+        const fs = tleTargets.map((r) => roleField(src, r));
+        if (fs.some((f) => !f)) continue;
+        const initial = src.fields.tle ? jsString(attr(a, src.fields.tle)) : [attr(a, src.fields.tle1), attr(a, src.fields.tle2)].map(jsString).filter((s) => s.trim()).join("\n");
+        tleBox = el("textarea", { class: "tle", rows: 3, spellcheck: false, placeholder: "1 99001U 26900A   26315.50000000  .00000100  00000-0  40000-4 0  9990\n2 99001  97.8000 300.0000 0001300  90.0000 ... （名前の行つき 3 行も可）" });
+        tleBox.value = initial;
+        tleInfo = el("div", { class: "note" });
+        const err = el("div", { class: "err" }), warn = el("div", { class: "warn" });
+        const update = () => {
+          const c = tleCheck(tleBox.value);
+          tleInfo.textContent = c.tle ? tleSummary(c) : "";
+          err.textContent = c.errors.join(" / ");
+          warn.textContent = c.warns.join(" / ");
+          tleBox.classList.toggle("changed", tleBox.value !== initial);
+          tleBox.classList.toggle("invalid", c.errors.length > 0);
+        };
+        tleBox.addEventListener("input", () => {
+          update();
+          // 名前の行・衛星番号を、空の衛星名・ID に入れる。
+          const c = tleCheck(tleBox.value);
+          if (c.tle) {
+            if (byRole.name && !byRole.name.input.value.trim() && c.tle.name) { byRole.name.input.value = c.tle.name; byRole.name.mark(); }
+            if (byRole.id && !byRole.id.input.value.trim() && c.norad) { byRole.id.input.value = c.norad; byRole.id.mark(); }
+          }
+        });
+        update();
+        const names = fs.map((f) => f.name).join("・");
+        grid.append(el("div", { class: "fld wide" }, el("div", { class: "lab" }, el("span", { text: "TLE（2 行、名前の行つき 3 行も可）" }), el("code", { text: names })), tleBox, tleInfo, err, warn));
+        items.push({
+          role: "tle", dirty: () => tleBox.value !== initial,
+          read() {
+            const c = tleCheck(tleBox.value);
+            if (c.errors.length) return { error: c.errors.join(" / ") };
+            const warns = [...c.warns];
+            if (c.empty) warns.push("TLE がない（撮像計画では使われない）");
+            if (src.fields.tle) return { values: { [fs[0].name]: c.empty ? null : tleBox.value.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).join("\n") }, warns };
+            const values = {};
+            const next = c.empty ? [null, null] : [c.tle.tle1, c.tle.tle2];
+            fs.forEach((f, i) => { if (jsString(attr(a, f.name)).trim() !== jsString(next[i])) values[f.name] = next[i]; });
+            return { values, warns };
+          },
+          mark: update,
+        });
+        continue;
+      }
+      const f = roleField(src, role);
+      if (!f) continue;
+      const info = SAT_INFO[role];
+      const fi = fieldInput(src, f, attr(a, f.name), { label: info.label, unit: unitOf(info, src), list: info.list, num: info.num, hint: info.hint, placeholder: placeholders[role] });
+      byRole[role] = fi;
+      grid.append(fi.node);
+      items.push({ role, info, fi });
+    }
+    if (grid.children.length) box.append(el("fieldset", {}, el("legend", { text: legend }), grid));
+  }
+  const others = otherFields(src);
+  if (others.length) {
+    const grid = el("div", { class: "grid" });
+    for (const f of others) {
+      const fi = fieldInput(src, f, attr(a, f.name), {});
+      grid.append(fi.node);
+      items.push({ role: null, fi });
+    }
+    box.append(el("fieldset", {}, el("legend", { text: "その他の属性（設定ファイルの fields にない属性）" }), grid));
+  }
+  return {
+    node: box, src, rec, byRole,
+    dirty: () => items.some((it) => (it.fi ? it.fi.dirty() : it.dirty())),
+    /** { changes: 属性名 → 値（変えたものだけ。新しい行はすべて）, errors, warns } */
+    read() {
+      const changes = {}, errors = [], warns = [];
+      for (const it of items) {
+        if (it.role === "tle") {
+          const r = it.read();
+          if (r.error) errors.push(`TLE: ${r.error}`);
+          else { if (!rec || it.dirty()) Object.assign(changes, r.values); warns.push(...r.warns); }
+          continue;
+        }
+        const fi = it.fi;
+        if (rec && !fi.dirty()) continue;
+        const r = fi.read();
+        const bad = r.error || (it.info ? checkRole(it.info, r.value) : null);
+        fi.err.textContent = bad || "";
+        fi.input.classList.toggle("invalid", Boolean(bad));
+        if (bad) { errors.push(`${it.info ? it.info.label : fi.field.alias || fi.field.name}: ${bad}`); continue; }
+        if (!rec && (r.value === null || r.value === "")) continue;
+        changes[fi.field.name] = r.value;
+      }
+      return { changes, errors, warns };
+    },
+  };
+}
+function satPage(rec) {
+  const src = rec.src, v = rec.v;
+  const form = satForm(src, rec);
+  S.form = form;
+  const head = el("h2", { class: "title" }, v.name || "（名前なし）", v.mode ? el("small", { text: `モード ${v.mode}` }) : null, el("small", { text: `${src.label}` }));
+  const out = [head];
+  const p = srcProblems(src);
+  if (p) out.push(p);
+  if (rec.out) out.push(el("div", { class: "box warn", text: `この行は設定ファイルの where（${src.where}）に合わないので、プラグインは使わない。使うなら where に合うように属性を直す。` }));
+  const save = el("button", { type: "button", class: "primary", text: "保存", title: "Ctrl+S", onclick: () => saveSatellite(form) });
+  const undo = el("button", { type: "button", text: "元に戻す", onclick: () => { S.form = null; renderMain(); } });
+  out.push(el("div", { class: "card" },
+    el("div", { class: "head" }, el("h3", { text: "衛星" }), el("span", { class: "sub", text: recordMeta(rec) })),
+    el("div", { class: "body" }, form.node, el("div", { class: "bar" }, save, undo,
+      el("button", { type: "button", text: "複製して追加…", title: "名前・ID・TLE のほかを写した新しい衛星", onclick: () => duplicate(rec) }),
+      el("span", { class: "spacer" }),
+      el("button", { type: "button", class: "danger", text: "この衛星を削除…", onclick: () => deleteSatellite(rec) })))));
+  out.push(sensorCard(rec), aliasCard(rec));
+  return out;
+}
+function newSatPage(src, start) {
+  const out = [el("h2", { class: "title" }, "新しい衛星", el("small", { text: src.label }))];
+  if (S.cfg.sats.filter((s) => s.info).length > 1) {
+    const pick = el("select", { onchange: () => { const s = S.cfg.sats.find((x) => x.id === pick.value); S.sel = { kind: "new", src: s, start: { ...whereDefaults(s) } }; renderMain(); } },
+      S.cfg.sats.filter((s) => s.info).map((s) => el("option", { value: s.id, text: s.label, selected: s === src })));
+    out.push(el("div", { class: "fld", style: "max-width: 360px" }, el("div", { class: "lab", text: "追加する衛星カタログ" }), pick));
+  }
+  const p = srcProblems(src);
+  if (p) out.push(p);
+  const form = satForm(src, null, start);
+  S.form = form;
+  out.push(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: "衛星" }), el("span", { class: "sub", text: "保存するとセンサーモードと別名も足せる" })),
+    el("div", { class: "body" }, form.node, src.where ? el("p", { class: "note", text: `where（${src.where}）の値は最初から入れてある（プラグインが使う行になるように）` }) : null,
+      el("div", { class: "bar" }, el("button", { type: "button", class: "primary", text: "追加", onclick: () => saveSatellite(form) }),
+        el("button", { type: "button", text: "やめる", onclick: () => { S.form = null; select(null); } })))));
+  return out;
+}
+function startNew(src) {
+  select({ kind: "new", src, start: { ...whereDefaults(src) } });
+}
+function duplicate(rec) {
+  const src = rec.src, start = { ...rec.a };
+  for (const role of ["name", "id", "tle", "tle1", "tle2"]) { const f = roleField(src, role); if (f) delete start[f.name]; }
+  delete start[src.oidField];
+  for (const f of Object.values(trackedFields(src))) delete start[f.name];
+  if (src.info.globalIdField) delete start[src.info.globalIdField];
+  select({ kind: "new", src, start });
+}
+
+/** 衛星を保存（新しい行なら追加）。名前・ID を変えたら別名の衛星名も合わせる。 */
+async function saveSatellite(form) {
+  const { src, rec } = form;
+  const { changes, errors, warns } = form.read();
+  if (errors.length) return status(`直すところがある:\n${errors.join("\n")}`, "bad");
+  if (rec && !Object.keys(changes).length) return status("変更なし");
+  try { requireUser([src]); } catch (e) { return status(e.message, "bad"); }
+  const notes = [...warns];
+  const follow = [];   // { src, updates, text }
+  if (rec) {
+    const before = rec.v;
+    const after = satView({ src, a: { ...rec.a, ...changes } });
+    for (const [what, old, neu] of [["衛星名", before.name, after.name], ["ID", before.id, after.id]]) {
+      const p = plain(old);
+      if (!p || p === plain(neu) || nameOwners(p, rec).length) continue;
+      const rows = S.aliases.filter((r) => plain(aliasSat(r)) === p);
+      if (rows.length) follow.push({ what, rows, neu, text: `別名 ${rows.length} 行の衛星名「${rows.map(aliasSat).filter((x, i, xs) => xs.indexOf(x) === i).join("・")}」を「${neu}」に変える（${what}を変えたので）` });
+    }
+    const key = sensorKeyOf(after);
+    if (before.sensorKey && key !== before.sensorKey) {
+      notes.push(key ? `センサーが「${before.sensorKey}」から「${key}」に変わる（モード ${byKey.get(key).length} 件）` : `センサー「${before.sensorKey}」のモード ${before.modes.length} 件とつながらなくなる（センサー名・シリーズ・衛星名のどれもセンサーモードにない）`);
+    }
+  } else {
+    const after = satView({ src, a: changes });
+    const dup = S.sats.filter((r) => r.src === src && plain(r.v.name) === plain(after.name) && keyOf(r.v.mode) === keyOf(after.mode));
+    if (dup.length && plain(after.name)) notes.push(`同じ名前の衛星「${after.name}」がもうある`);
+  }
+  const checks = follow.map(() => el("input", { type: "checkbox", checked: true }));
+  if (notes.length || follow.length) {
+    const ok = await confirmBox(rec ? "保存の確認" : "追加の確認", [
+      notes.length ? el("div", { class: "box warn" }, el("b", { text: "注意" }), el("ul", {}, notes.map((n) => el("li", { text: n })))) : null,
+      ...follow.map((f, i) => el("label", { class: "check" }, checks[i], f.text)),
+    ], rec ? "保存する" : "追加する");
+    if (!ok) return;
+  }
+  const chosen = follow.filter((f, i) => checks[i].checked);
+  try { requireUser([src, ...chosen.flatMap((f) => f.rows.map((r) => r.src))]); } catch (e) { return status(e.message, "bad"); }
+  let wrote = false, select_ = () => (rec ? findSel(rec) : null);
+  try {
+    if (rec) {
+      const latest = await fetchRow(src, rec.oid);
+      if (!latest) { status("この衛星はほかの人が削除した。読み直す", "warn"); S.form = null; return loadAll(); }
+      if ((await resolveConflict(src, rec.a, latest)) !== true) return;
+      await applyEdits(src, { updates: [{ [src.oidField]: rec.oid, ...changes }] });
+      wrote = true;
+      const done = [`保存した（${satView({ src, a: { ...rec.a, ...changes } }).name}）`];
+      for (const f of chosen) {
+        for (const t of new Set(f.rows.map((r) => r.src))) {
+          const sf = roleField(t, "satellite");
+          if (sf) await applyEdits(t, { updates: f.rows.filter((r) => r.src === t).map((r) => ({ [t.oidField]: r.oid, [sf.name]: f.neu })) });
+        }
+        done.push(`別名 ${f.rows.length} 行の衛星名を「${f.neu}」に`);
+      }
+      status(done.join("、"));
+    } else {
+      const r = await applyEdits(src, { adds: [changes] });
+      wrote = true;
+      const oid = r.addResults[0].objectId;
+      select_ = () => findSel({ src, oid });
+      status(`追加した（${satView({ src, a: changes }).name || "名前なし"}）`);
+    }
+  } catch (e) {
+    status(e.message, "bad");
+  }
+  if (wrote) {
+    S.form = null;
+    await loadAll(select_);
+  }
+}
+/**
+ * 読み込んでからほかの人が変えていたら、どうするか聞く。
+ * true: 書き込んでよい、false: やめる、"reload": 読み直した（やめる）。
+ */
+async function resolveConflict(src, loaded, latest) {
+  const skip = new Set(Object.values(trackedFields(src)).map((f) => f.name.toLowerCase()));
+  const efi = isObj(src.info.editFieldsInfo) ? src.info.editFieldsInfo : {};
+  for (const k of ["creationDateField", "creatorField", "editDateField", "editorField"]) if (efi[k]) skip.add(efi[k].toLowerCase());
+  const differ = [];
+  for (const f of src.info.fields) {
+    const k = f.name;
+    const a = attr(loaded, k), b = attr(latest, k);
+    if (jsString(a) === jsString(b)) continue;
+    if (skip.has(k.toLowerCase())) continue;
+    differ.push(el("li", { text: `${f.alias || k}: 読み込んだとき「${jsString(a)}」→ いま「${jsString(b)}」` }));
+  }
+  if (!differ.length) return true;
+  const by = attr(latest, (trackedFields(src).updatedBy || {}).name);
+  const choice = await modal("ほかの人が変更している", [
+    el("p", { text: `読み込んでから${by ? `「${by}」が` : "ほかの人が"}この行を変えた。` }), el("ul", {}, differ),
+    el("p", { text: "上書きすると、上の属性のうち自分が変えたものは自分の値になる（変えていない属性はいまの値のまま）。" }),
+  ], [{ label: "やめる", value: null }, { label: "最新を読み直す", value: "reload" }, { label: "上書きする", value: "write", cls: "danger solid" }]);
+  if (choice === "reload") {
+    S.form = null;
+    await loadAll(() => (S.sel && S.sel.kind === "sat" ? findSel(S.sel.rec) : S.sel));
+    return "reload";
+  }
+  return choice === "write";
+}
+
+/** 衛星を削除: ほかの衛星が使わないセンサーモードと別名も消す。 */
+async function deleteSatellite(rec) {
+  const v = rec.v;
+  const tableModes = v.modes.filter((m) => !m.inline);
+  const users = v.sensorKey ? sensorUsers(v.sensorKey, rec) : [];
+  const modes = users.length ? [] : tableModes;
+  const delAliases = [], keepAliases = [];
+  for (const r of v.aliases) (nameOwners(plain(aliasSat(r)), rec).length ? keepAliases : delAliases).push(r);
+  const lines = [el("li", {}, el("b", { text: `衛星「${v.name}」` }), v.mode ? `（モード ${v.mode}）` : "", `（${rec.src.label}）`)];
+  if (v.sensorKey) {
+    if (modes.length) lines.push(el("li", { text: `センサーモード ${modes.length} 件（センサー「${modeSensor(modes[0])}」: ${modes.map((m) => modeName(m) || "モード名なし").join("・")}）` }));
+    if (users.length) lines.push(el("li", { class: "note", text: `センサー「${sensorShown(v)}」はほかの衛星（${users.map((r) => r.v.name).join("・")}）も使うので残す` }));
+    if (!users.length && v.modes.some((m) => m.inline)) lines.push(el("li", { class: "note", text: "設定ファイルに書かれたモードは消さない（設定ファイルで）" }));
+  }
+  if (delAliases.length) lines.push(el("li", { text: `別名 ${delAliases.length} 行（${delAliases.map(aliasText).join("・")}）` }));
+  if (keepAliases.length) lines.push(el("li", { class: "note", text: `別名 ${keepAliases.length} 行は同じ名前のほかの行（${nameOwners(plain(aliasSat(keepAliases[0])), rec).map((r) => r.v.name + (r.v.mode ? `・${r.v.mode}` : "")).join("、")}）も使うので残す` }));
+  const ok = await confirmBox("衛星の削除", [el("p", { text: "次を削除する。元に戻せない。" }), el("ul", {}, lines)], "削除する", true);
+  if (!ok) return;
+  const done = [];
+  try {
+    await applyEdits(rec.src, { deletes: [rec.oid] });
+    done.push(`衛星「${v.name}」`);
+    for (const t of new Set(modes.map((m) => m.src))) {
+      const ids = modes.filter((m) => m.src === t).map((m) => m.oid);
+      await applyEdits(t, { deletes: ids });
+      done.push(`センサーモード ${ids.length} 件`);
+    }
+    for (const t of new Set(delAliases.map((r) => r.src))) {
+      const ids = delAliases.filter((r) => r.src === t).map((r) => r.oid);
+      await applyEdits(t, { deletes: ids });
+      done.push(`別名 ${ids.length} 行`);
+    }
+    status(`削除した: ${done.join("・")}`);
+  } catch (e) {
+    status(`${done.length ? `削除できたのは ${done.join("・")} まで。` : ""}${e.message}${done.length ? "\n残った行は「つながりのない行」から消せる" : ""}`, "bad");
+  }
+  S.form = null;
+  S.sel = null;
+  await loadAll();
+}
+
+// ---- センサーモード
+
+function sensorTables() { return S.cfg.sensors.filter((s) => s.info && !s.error); }
+function sensorCard(rec) {
+  const v = rec.v;
+  const tables = sensorTables();
+  const body = el("div", { class: "body" });
+  const card = el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: "センサー（撮像モード）" }),
+    el("span", { class: "sub", text: v.sensorKey ? sensorHow(v) : "" })), body);
+  if (!S.cfg.sensors.length && !S.cfg.inline.length) { body.append(el("p", { class: "empty", text: "設定ファイルに sensorCatalogs（センサーモードのテーブル）がない" })); return card; }
+  for (const t of S.cfg.sensors) { const p = srcProblems(t); if (p && (t.error || t.problems.some((x) => x.level === "bad"))) body.append(p); }
+  const users = v.sensorKey ? sensorUsers(v.sensorKey, rec) : [];
+  if (users.length) body.append(el("p", { class: "note", text: `このセンサーはほかに ${users.length} 機（${users.map((r) => r.v.name).join("・")}）が使う。モードの変更はそれらの衛星にも効く` }));
+  if (!v.modes.length) {
+    body.append(el("p", { class: "empty", text: `センサーモードなし（センサー名${v.sensor ? `「${v.sensor}」` : ""}・シリーズ「${v.series}」・衛星名「${v.name}」のどれもセンサーモードにない）。衛星の値だけで撮像計画を立てる。` }));
+  } else {
+    const t0 = v.modes.find((m) => !m.inline);
+    const fieldsOf = t0 ? t0.src.fields : {};
+    const cols = ["mode", "kind", "offNadir", "swath", "length", "resolution", "primary"].filter((c) => c === "offNadir" ? fieldsOf.minOffNadir || fieldsOf.maxOffNadir : c === "mode" || fieldsOf[c]);
+    const headers = { mode: "モード", kind: "種別", offNadir: "オフナディア角（度）", swath: "観測幅", length: "シーン長", resolution: "分解能（m）", primary: "既定" };
+    const table = el("table", { class: "list" }, el("tr", {}, cols.map((c) => el("th", { text: headers[c] })), el("th", {})));
+    for (const m of v.modes) {
+      if (m.inline) {
+        table.append(el("tr", {}, el("td", { text: m.inline.mode || "（モード名なし）" }), el("td", { colspan: cols.length, class: "note", text: `設定ファイルに書かれたモード（${m.inline.label}）。ここでは直せない` })));
+        continue;
+      }
+      const val = (role) => attr(m.a, m.src.fields[role]);
+      const cell = (c) => {
+        if (c === "mode") return modeName(m) || "（モード名なし）";
+        if (c === "offNadir") return `${jsString(val("minOffNadir")) || "—"} 〜 ${jsString(val("maxOffNadir")) || "—"}`;
+        if (c === "primary") return yes(val("primary")) ? "●" : "";
+        if (c === "swath" || c === "length") return jsString(val(c)) ? `${val(c)} ${m.src.swathUnit}` : "";
+        return jsString(val(c));
+      };
+      const match = v.mode && keyOf(modeName(m)) === keyOf(v.mode);
+      table.append(el("tr", { class: match ? "match" : "" }, cols.map((c) => el("td", { text: cell(c) })),
+        el("td", { class: "tools" }, m.out ? el("span", { class: "tag warn", text: "where 外", title: m.src.where }) : null, " ",
+          el("button", { type: "button", class: "small", text: "編集", onclick: () => editMode(rec, m) }), " ",
+          el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteMode(rec, m) }))));
+    }
+    body.append(table);
+    if (v.mode) body.append(el("p", { class: "note", text: `この行はモード「${v.mode}」の行なので、太字のモードの値を使う` }));
+  }
+  if (tables.length) body.append(el("div", { class: "bar" }, el("button", { type: "button", text: "＋ モードを追加", onclick: () => editMode(rec, null) })));
+  return card;
+}
+function sensorHow(v) {
+  const k = v.sensorKey;
+  const by = keyOf(v.sensor) === k ? "センサー名" : keyOf(v.series) === k ? "シリーズ" : "衛星名";
+  return `センサー「${sensorShown(v)}」（衛星の${by}で一致）`;
+}
+/** センサー名を書いたとき、そのモードを使うことになる衛星。 */
+function wouldUse(sensorName) {
+  const k = keyOf(sensorName);
+  if (!k) return [];
+  const keys = new Set([...byKey.keys(), k]);
+  return S.sats.filter((r) => sensorKeyOf(r.v, keys) === k);
+}
+async function editMode(rec, m) {
+  const tables = sensorTables();
+  let src = m ? m.src : tables[0];
+  if (!src) return status("センサーモードのテーブルを読み込めていない", "bad");
+  const v = rec ? rec.v : null;
+  const container = el("div", {});
+  let form;
+  const build = () => {
+    const start = m ? m.a : { ...whereDefaults(src) };
+    const f = roleField(src, "sensor");
+    if (!m && f && v) {
+      // いまつながっているセンサー名、なければ衛星の「センサー」、なければ衛星名。
+      start[f.name] = v.sensorKey ? sensorShown(v) : v.sensor || v.name;
+    }
+    form = modeForm(src, m, start);
+    container.replaceChildren(form.node);
+  };
+  const pick = !m && tables.length > 1 ? el("select", { onchange: () => { src = tables.find((t) => t.id === pick.value); build(); } }, tables.map((t) => el("option", { value: t.id, text: t.label }))) : null;
+  build();
+  const done = await modal(m ? "センサーモードの編集" : "センサーモードの追加", [
+    pick ? el("div", { class: "fld", style: "max-width: 360px" }, el("div", { class: "lab", text: "追加するテーブル" }), pick) : null,
+    container,
+  ], [{ label: "やめる", value: null }, { label: m ? "保存" : "追加", value: true, cls: "primary" }], async () => {
+    const { changes, errors, sensorName } = form.read();
+    if (errors.length) throw new Error(errors.join("\n"));
+    if (m && !Object.keys(changes).length) return true;
+    if (!sensorName) throw new Error("センサー名を入れる");
+    // センサー名を変えたら、同じセンサーのほかのモードと、そのセンサーを使う衛星の「センサー」も変えるか。
+    let siblings = [], sats = [];
+    const oldName = m ? modeSensor(m) : "";
+    if (m && keyOf(oldName) !== keyOf(sensorName)) {
+      const sameSensor = S.modes.filter((x) => x !== m && keyOf(modeSensor(x)) === keyOf(oldName));
+      const users = S.sats.filter((r) => r.v.sensorKey === keyOf(oldName));
+      const settable = users.filter((r) => roleField(r.src, "sensor"));
+      const lost = users.filter((r) => !roleField(r.src, "sensor"));
+      if (sameSensor.length || users.length) {
+        const choice = await modal("センサー名の変更", [
+          el("p", { text: `センサー名を「${oldName}」から「${sensorName}」に変える。` }),
+          el("ul", {},
+            sameSensor.length ? el("li", { text: `「${oldName}」のほかのモード ${sameSensor.length} 件（${sameSensor.map((x) => modeName(x) || "モード名なし").join("・")}）` }) : null,
+            settable.length ? el("li", { text: `「${oldName}」を使う衛星 ${settable.length} 機（${settable.map((r) => r.v.name).join("・")}）の「センサー」` }) : null),
+          lost.length ? el("p", { class: "note", text: `${lost.map((r) => r.v.name).join("・")} はシリーズか衛星名でこのセンサーとつながっている（衛星カタログの fields に sensor がないので衛星の側は変えられない）。センサー名を変えるとつながらなくなる` }) : null,
+          el("p", { text: "「まとめて変える」で上もいっしょに変える。「このモードだけ」なら、このモードは別のセンサーになる。" }),
+        ], [{ label: "戻る", value: null }, { label: "このモードだけ", value: "one" }, { label: "まとめて変える", value: "all", cls: "primary" }]);
+        if (choice === null) return false;
+        if (choice === "all") { siblings = sameSensor; sats = settable; }
+      }
+    }
+    requireUser([src, ...siblings.map((x) => x.src), ...sats.map((r) => r.src)]);
+    if (m) {
+      const latest = await fetchRow(src, m.oid);
+      if (!latest) throw new Error("このモードはほかの人が削除した（閉じて読み直す）");
+      const c = await resolveConflict(src, m.a, latest);
+      if (c === "reload") return null;
+      if (c !== true) return false;
+    }
+    const pf = roleField(src, "primary");
+    const cleared = [];
+    if (pf && pf.name in changes && yes(changes[pf.name])) {
+      // 既定モードはセンサーに 1 つ: ほかのモードの印を外す。
+      for (const o of S.modes) if (o.src === src && o !== m && keyOf(modeSensor(o)) === keyOf(sensorName) && yes(attr(o.a, pf.name))) cleared.push({ [src.oidField]: o.oid, [pf.name]: INT_TYPES.has(pf.type) || REAL_TYPES.has(pf.type) ? 0 : null });
+    }
+    const updates = [...(m ? [{ [src.oidField]: m.oid, ...changes }] : []), ...cleared];
+    await applyEdits(src, { adds: m ? [] : [changes], updates });
+    const extra = [];
+    try {
+      for (const t of new Set(siblings.map((x) => x.src))) {
+        const sf = roleField(t, "sensor");
+        await applyEdits(t, { updates: siblings.filter((x) => x.src === t).map((x) => ({ [t.oidField]: x.oid, [sf.name]: sensorName })) });
+      }
+      if (siblings.length) extra.push(`ほかのモード ${siblings.length} 件のセンサー名`);
+      for (const t of new Set(sats.map((r) => r.src))) {
+        const sf = roleField(t, "sensor");
+        await applyEdits(t, { updates: sats.filter((r) => r.src === t).map((r) => ({ [t.oidField]: r.oid, [sf.name]: sensorName })) });
+      }
+      if (sats.length) extra.push(`衛星 ${sats.length} 機の「センサー」`);
+    } catch (e) {
+      status(`モードは${m ? "保存" : "追加"}したが、${extra.length ? `${extra.join("・")}を変えたあと、` : ""}${e.message}`, "bad");
+      return true;
+    }
+    const mf = roleField(src, "mode");
+    const label = text(mf && mf.name in changes ? changes[mf.name] : m ? modeName(m) : "");
+    status(`${m ? "保存" : "追加"}した（センサー「${sensorName}」${label ? `のモード「${label}」` : ""}）${cleared.length ? "。ほかのモードの既定の印を外した" : ""}${extra.length ? `。${extra.join("・")}も「${sensorName}」に` : ""}`);
+    return true;
+  });
+  if (done) await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+function modeForm(src, m, start) {
+  const items = [];
+  const box = el("div", {});
+  const byRole = {};
+  const usersNote = el("p", { class: "note" });
+  for (const [legend, roles] of SENSOR_GROUPS) {
+    const grid = el("div", { class: "grid" });
+    for (const role of roles) {
+      const f = roleField(src, role);
+      if (!f) continue;
+      const info = SENSOR_INFO[role];
+      const fi = fieldInput(src, f, attr(start, f.name), {
+        label: info.label, unit: unitOf(info, src), list: info.list, num: info.num, bool: info.bool, hint: info.hint,
+        placeholder: role === "sensor" ? "" : info.bool ? undefined : "空なら衛星の値",
+        onchange: role === "sensor" ? () => showUsers() : undefined,
+      });
+      byRole[role] = fi;
+      grid.append(fi.node);
+      items.push({ role, info, fi });
+    }
+    if (grid.children.length) box.append(el("fieldset", {}, el("legend", { text: legend }), grid));
+    if (legend === "基本") box.append(usersNote);
+  }
+  const showUsers = () => {
+    const name = byRole.sensor ? byRole.sensor.input.value.trim() : "";
+    const users = wouldUse(name);
+    usersNote.textContent = name ? (users.length ? `センサー「${name}」のモードを使う衛星: ${users.map((r) => r.v.name).join("・")}` : `センサー「${name}」を使う衛星はまだない（衛星の「センサー」かシリーズ・衛星名をこの名前にするとつながる）`) : "";
+  };
+  showUsers();
+  const others = otherFields(src);
+  if (others.length) {
+    const grid = el("div", { class: "grid" });
+    for (const f of others) { const fi = fieldInput(src, f, attr(start, f.name), {}); grid.append(fi.node); items.push({ role: null, fi }); }
+    box.append(el("fieldset", {}, el("legend", { text: "その他の属性" }), grid));
+  }
+  return {
+    node: box,
+    read() {
+      const changes = {}, errors = [];
+      for (const it of items) {
+        const fi = it.fi;
+        if (m && !fi.dirty()) continue;
+        const r = fi.read();
+        const bad = r.error || (it.info ? checkRole(it.info, r.value) : null);
+        fi.err.textContent = bad || "";
+        fi.input.classList.toggle("invalid", Boolean(bad));
+        if (bad) { errors.push(`${it.info ? it.info.label : fi.field.alias || fi.field.name}: ${bad}`); continue; }
+        if (!m && (r.value === null || r.value === "")) continue;
+        changes[fi.field.name] = r.value;
+      }
+      const sf = roleField(src, "sensor");
+      const sensorName = sf ? text(sf.name in changes ? changes[sf.name] : attr(start, sf.name)) : "";
+      return { changes, errors, sensorName };
+    },
+  };
+}
+async function deleteMode(rec, m) {
+  const k = keyOf(modeSensor(m));
+  const users = S.sats.filter((r) => r.v.sensorKey === k);
+  const rest = (byKey.get(k) || []).filter((x) => x !== m);
+  const ok = await confirmBox("センサーモードの削除", [
+    el("p", { text: `センサー「${modeSensor(m)}」のモード「${modeName(m) || "モード名なし"}」を削除する。元に戻せない。` }),
+    users.length > 1 ? el("p", { class: "note", text: `このセンサーを使う衛星: ${users.map((r) => r.v.name).join("・")}` }) : null,
+    !rest.length ? el("p", { class: "note", text: "最後のモードなので、消すとこのセンサーを使う衛星は衛星の値だけで撮像計画を立てる" }) : null,
+  ], "削除する", true);
+  if (!ok) return;
+  try {
+    await applyEdits(m.src, { deletes: [m.oid] });
+    status(`削除した（モード「${modeName(m) || "モード名なし"}」）`);
+  } catch (e) { status(e.message, "bad"); }
+  await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+
+// ---- 別名
+
+function aliasTables() { return S.cfg.aliases.filter((s) => s.info && !s.error); }
+function aliasCard(rec) {
+  const v = rec.v;
+  const body = el("div", { class: "body" });
+  const card = el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: "別名" }),
+    el("span", { class: "sub", text: "画像カタログでの名前（WV03 など）。衛星名か ID で表とつながる" })), body);
+  if (!S.cfg.aliases.length) { body.append(el("p", { class: "empty", text: "設定ファイルに satelliteAliases（衛星名の対応表）がない" })); return card; }
+  for (const t of S.cfg.aliases) { const p = srcProblems(t); if (p && (t.error || t.problems.some((x) => x.level === "bad"))) body.append(p); }
+  if (!v.aliases.length) body.append(el("p", { class: "empty", text: "別名なし" }));
+  else {
+    const table = el("table", { class: "list" }, el("tr", {}, el("th", { text: "別名" }), el("th", { text: "表の衛星名" }), el("th", {})));
+    for (const r of v.aliases) {
+      const shared = nameOwners(plain(aliasSat(r)), rec);
+      table.append(el("tr", {}, el("td", { text: aliasText(r) || "（空）" }),
+        el("td", {}, aliasSat(r), shared.length ? el("span", { class: "note", text: `（${shared.map((x) => x.v.name + (x.v.mode ? `・${x.v.mode}` : "")).join("、")} とも共通）` }) : null),
+        el("td", { class: "tools" }, r.out ? el("span", { class: "tag warn", text: "where 外", title: r.src.where }) : null, " ",
+          el("button", { type: "button", class: "small", text: "編集", onclick: () => editAlias(rec, r) }), " ",
+          el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteAlias(rec, r) }))));
+    }
+    body.append(table);
+  }
+  if (aliasTables().some((t) => roleField(t, "satellite") && roleField(t, "alias"))) body.append(el("div", { class: "bar" }, el("button", { type: "button", text: "＋ 別名を追加", onclick: () => editAlias(rec, null) })));
+  return card;
+}
+async function editAlias(rec, r) {
+  const tables = aliasTables().filter((t) => roleField(t, "satellite") && roleField(t, "alias"));
+  let src = r ? r.src : tables[0];
+  if (!src) return status("衛星名の対応表を読み込めていない（か、fields の属性がテーブルにない）", "bad");
+  if (!roleField(src, "satellite") || !roleField(src, "alias")) return status(`${src.label} に fields の属性（${src.fields.satellite}・${src.fields.alias}）がない`, "bad");
+  const v = rec ? rec.v : null;
+  const container = el("div", {});
+  const note = el("div", {});
+  let items = [];
+  const build = () => {
+    const start = r ? r.a : { ...whereDefaults(src) };
+    if (!r && v) start[fieldOf(src, src.fields.satellite).name] = v.name;
+    items = [];
+    const grid = el("div", { class: "grid" });
+    for (const role of PC.aliasRoles) {
+      const f = roleField(src, role);
+      if (!f) continue;
+      const info = ALIAS_INFO[role];
+      const fi = fieldInput(src, f, attr(start, f.name), { label: info.label, list: info.list, hint: info.hint, wide: role === "alias", textarea: false, onchange: check });
+      grid.append(fi.node);
+      items.push({ role, fi });
+    }
+    for (const f of otherFields(src)) { const fi = fieldInput(src, f, attr(start, f.name), {}); grid.append(fi.node); items.push({ role: null, fi }); }
+    container.replaceChildren(grid);
+    check();
+    setTimeout(() => { const a = items.find((x) => x.role === "alias"); if (a) a.fi.input.focus(); }, 30);
+  };
+  const value = (role) => { const it = items.find((x) => x.role === role); return it ? it.fi.input.value.trim() : ""; };
+  function check() {
+    const sat = value("satellite"), names = aliasesOf(value("alias"));
+    const msgs = [];
+    const owners = S.sats.filter((x) => plain(sat) && (plain(x.v.name) === plain(sat) || plain(x.v.id) === plain(sat)));
+    if (sat && !owners.length) msgs.push(`衛星名「${sat}」の衛星がカタログにない（つながらない）`);
+    for (const n of names) {
+      if (owners.some((o) => plain(o.v.name) === plain(n) || plain(o.v.id) === plain(n))) msgs.push(`「${n}」は衛星自身の名前（別名に入れなくても合う）`);
+      const others = S.sats.filter((x) => !owners.includes(x) && (plain(x.v.name) === plain(n) || x.v.aliases.some((a) => a !== r && aliasesOf(aliasText(a)).some((y) => plain(y) === plain(n)))));
+      if (others.length) msgs.push(`「${n}」はほかの衛星（${others.map((x) => x.v.name).join("・")}）の名前か別名にもある（両方の衛星の画像として合う）`);
+    }
+    note.replaceChildren(...(msgs.length ? [el("div", { class: "box warn" }, el("ul", {}, msgs.map((x) => el("li", { text: x }))))] : []));
+  }
+  const pick = !r && tables.length > 1 ? el("select", { onchange: () => { src = tables.find((t) => t.id === pick.value); build(); } }, tables.map((t) => el("option", { value: t.id, text: t.label }))) : null;
+  build();
+  const done = await modal(r ? "別名の編集" : "別名の追加", [
+    pick ? el("div", { class: "fld", style: "max-width: 360px" }, el("div", { class: "lab", text: "追加するテーブル" }), pick) : null,
+    container, note,
+  ], [{ label: "やめる", value: null }, { label: r ? "保存" : "追加", value: true, cls: "primary" }], async () => {
+    const changes = {}, errors = [];
+    for (const it of items) {
+      if (r && !it.fi.dirty()) continue;
+      const x = it.fi.read();
+      if (x.error) { errors.push(`${it.fi.field.alias || it.fi.field.name}: ${x.error}`); continue; }
+      if (!r && (x.value === null || x.value === "")) continue;
+      changes[it.fi.field.name] = x.value;
+    }
+    if (!value("satellite")) errors.push("衛星名を入れる");
+    if (!value("alias")) errors.push("別名を入れる");
+    if (errors.length) throw new Error(errors.join("\n"));
+    if (r && !Object.keys(changes).length) return true;
+    requireUser([src]);
+    if (r) {
+      const latest = await fetchRow(src, r.oid);
+      if (!latest) throw new Error("この行はほかの人が削除した（閉じて読み直す）");
+      const c = await resolveConflict(src, r.a, latest);
+      if (c === "reload") return null;
+      if (c !== true) return false;
+      await applyEdits(src, { updates: [{ [src.oidField]: r.oid, ...changes }] });
+    } else await applyEdits(src, { adds: [changes] });
+    status(`${r ? "保存" : "追加"}した（別名「${value("alias")}」）`);
+    return true;
+  });
+  if (done) await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+async function deleteAlias(rec, r) {
+  const ok = await confirmBox("別名の削除", [el("p", { text: `衛星「${aliasSat(r)}」の別名「${aliasText(r)}」の行を削除する。元に戻せない。` })], "削除する", true);
+  if (!ok) return;
+  try {
+    await applyEdits(r.src, { deletes: [r.oid] });
+    status(`削除した（別名「${aliasText(r)}」）`);
+  } catch (e) { status(e.message, "bad"); }
+  await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+
+// ---- つながりのない行
+
+function orphanRows() {
+  const used = new Set(S.sats.map((r) => r.v.sensorKey).filter(Boolean));
+  const modes = S.modes.filter((m) => !used.has(keyOf(modeSensor(m))));
+  const names = new Set(S.sats.flatMap((r) => [plain(r.v.name), plain(r.v.id)]).filter(Boolean));
+  const aliases = S.aliases.filter((r) => !names.has(plain(aliasSat(r))));
+  return { modes, aliases };
+}
+function orphansPage() {
+  const { modes, aliases } = orphanRows();
+  const out = [el("h2", { class: "title", text: "つながりのない行" }),
+    el("p", { class: "help", text: "どの衛星にも使われないセンサーモードと、カタログにない衛星名の別名。衛星を消した残り・名前の打ち間違いなど。衛星の名前・センサー名を直すか、ここで消す。" })];
+  const sbody = el("div", { class: "body" });
+  out.push(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: `センサーモード（${modes.length}）` })), sbody));
+  if (!modes.length) sbody.append(el("p", { class: "empty", text: "なし" }));
+  const groups = new Map();
+  for (const m of modes) { const k = `${m.src.id}\n${keyOf(modeSensor(m))}`; (groups.get(k) || groups.set(k, []).get(k)).push(m); }
+  for (const list of groups.values()) {
+    const name = modeSensor(list[0]) || "（センサー名なし）";
+    sbody.append(el("div", { class: "bar" }, el("b", { text: `センサー「${name}」` }), el("span", { class: "note", text: `${list[0].src.label}・${list.length} 件` }), el("span", { class: "spacer" }),
+      el("button", { type: "button", class: "small danger", text: "このセンサーのモードを全部削除", onclick: () => deleteRows(list, `センサー「${name}」のモード ${list.length} 件`) })));
+    const t = el("table", { class: "list" });
+    for (const m of list) t.append(el("tr", {}, el("td", { text: modeName(m) || "（モード名なし）" }), el("td", { class: "note", text: recordMeta(m) }),
+      el("td", { class: "tools" }, el("button", { type: "button", class: "small", text: "編集", onclick: () => editMode(null, m) }), " ",
+        el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteMode(null, m) }))));
+    sbody.append(t);
+  }
+  const abody = el("div", { class: "body" });
+  out.push(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: `別名（${aliases.length}）` })), abody));
+  if (!aliases.length) abody.append(el("p", { class: "empty", text: "なし" }));
+  else {
+    const t = el("table", { class: "list" }, el("tr", {}, el("th", { text: "表の衛星名" }), el("th", { text: "別名" }), el("th", {})));
+    for (const r of aliases) t.append(el("tr", {}, el("td", { text: aliasSat(r) || "（空）" }), el("td", { text: aliasText(r) }),
+      el("td", { class: "tools" }, el("button", { type: "button", class: "small", text: "編集", onclick: () => editAlias(null, r) }), " ",
+        el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteAlias(null, r) }))));
+    abody.append(t, el("div", { class: "bar" }, el("button", { type: "button", class: "small danger", text: "別名を全部削除", onclick: () => deleteRows(aliases, `別名 ${aliases.length} 行`) })));
+  }
+  return out;
+}
+async function deleteRows(rows, what) {
+  if (!(await confirmBox("削除", [el("p", { text: `${what}を削除する。元に戻せない。` })], "削除する", true))) return;
+  try {
+    for (const t of new Set(rows.map((r) => r.src))) await applyEdits(t, { deletes: rows.filter((r) => r.src === t).map((r) => r.oid) });
+    status(`削除した（${what}）`);
+  } catch (e) { status(e.message, "bad"); }
+  await loadAll(() => S.sel);
+}
+
+// ---------------------------------------------------------------- はじめ
+
+$("configInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) await openConfigText(await file.text(), file.name);
+});
+$("btnReload").addEventListener("click", async () => {
+  if (S.form && S.form.dirty() && !(await discardChanges())) return;
+  S.form = null;
+  await loadAll(() => (S.sel && S.sel.kind === "sat" ? findSel(S.sel.rec) : S.sel && S.sel.kind === "orphans" ? S.sel : null));
+});
+$("btnAdd").addEventListener("click", () => { const s = S.cfg.sats.find((x) => x.info && !x.error); if (s) startNew(s); });
+$("btnOrphans").addEventListener("click", () => select({ kind: "orphans" }));
+$("btnSignIn").addEventListener("click", async () => {
+  const roots = signInRoots();
+  if (!roots.length) return status("先に設定ファイルを開く（サインイン先は設定ファイルのサービスのサーバー）", "warn");
+  let root = roots[0];
+  if (roots.length > 1) {
+    const pick = el("select", {}, roots.map((r) => el("option", { value: r, text: r })));
+    if (!(await modal("サインインするサーバー", [pick], [{ label: "やめる", value: null }, { label: "次へ", value: true, cls: "primary" }]))) return;
+    root = pick.value;
+  }
+  if (await signIn(root, "")) await loadAll(() => (S.sel && S.sel.kind === "sat" ? findSel(S.sel.rec) : S.sel));
+});
+$("search").addEventListener("input", (e) => { S.filter = e.target.value; renderSide(); });
+$("userName").value = store.get(STORE_USER) || "";
+$("userName").addEventListener("input", (e) => { e.target.classList.remove("invalid"); store.set(STORE_USER, e.target.value.trim()); });
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && S.form && !document.querySelector("dialog[open]")) { e.preventDefault(); saveSatellite(S.form); }
+});
+window.addEventListener("beforeunload", (e) => { if (S.form && S.form.dirty()) { e.preventDefault(); e.returnValue = ""; } });
+document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  document.body.classList.remove("dragging");
+  const file = e.dataTransfer.files[0];
+  if (file) await openConfigText(await file.text(), file.name);
+});
+renderSide();
+renderMain();
+</script>
+</body>
+</html>

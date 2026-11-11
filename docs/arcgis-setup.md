@@ -30,7 +30,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 | `--tables` / `--skip` | 作るテーブルだけ / 作らないテーブル（ほかのシステムが作る `TBL_IMAGE_CATALOG` など） |
 | `--geometry` | 形状を変える: `TBL_AI_RESULT=POINT`・`TBL_DETECTION=POINT`（既定はポリゴン）、`TBL_EVENT=NONE`・`TBL_REQUEST_HISTORY=NONE`（範囲なしのテーブル）、`TBL_PLACE_NAME=POLYGON` |
 | `--no-edit-tracking` | 作成者・更新者の 4 属性（`CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`）を足さない |
-| `--grant-view` / `--grant-edit` | データベースのユーザー・ロールに権限を付ける。編集は書き込みのテーブル（観測記録・撮像依頼など）だけで、読みのテーブル（衛星カタログなど）は閲覧だけ |
+| `--grant-view` / `--grant-edit` | データベースのユーザー・ロールに権限を付ける。編集は書き込みのテーブル（観測記録・撮像依頼など。衛星カタログ・センサーモード・衛星名の対応表も `tools/satellite_editor.html` で直すので書き込み）だけで、読みのテーブル（画像カタログなど）は閲覧だけ |
 | `--dry-run` | 何をするかだけ出す |
 
 **何度実行してもよい。** 2 回目からは、ないテーブル・属性・インデックスだけを足す。既にある属性の型・長さが表と違っていても変えず（データを壊さないため）、最後に「表と違うところ」として出す。表にない属性は消さない。プラグインを新しくして属性が増えたら、もう一度実行すれば足りない属性だけ足される。

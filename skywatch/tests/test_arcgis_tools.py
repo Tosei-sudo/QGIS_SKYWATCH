@@ -47,7 +47,7 @@ def test_tables_are_the_readme_tables_in_order():
     overview = _readme_overview()
     for table in schema.TABLES:
         shape, rw = overview[table.name]
-        assert table.writable == (rw == "書き込み"), table.name
+        assert table.writable == rw.startswith("書き込み"), table.name
         expected = "POLYGON" if shape.startswith("ポリゴン") else "POINT" if shape.startswith("ポイント") else None
         assert table.geometry == expected, table.name
         assert table.title in _section().split(f"### `{table.name}`", 1)[1].splitlines()[0], table.name
@@ -324,10 +324,12 @@ def test_plan_tables_options():
 def test_grant_gives_edit_only_on_writable_tables():
     arcpy = FakeArcpy("C:/gis/owner.sde")
     _run_all(arcpy)
-    for name in ("TBL_OBSERVATION", "TBL_SATELLITE"):
+    for name in ("TBL_OBSERVATION", "TBL_SATELLITE", "TBL_IMAGE_CATALOG"):
         create_tables.grant(arcpy, arcpy.workspace + "/" + name, schema.BY_NAME[name], ["VIEWER"], ["EDITOR"])
     assert arcpy.tables["TBL_OBSERVATION"]["grants"] == {"VIEWER": ("GRANT", "AS_IS"), "EDITOR": ("GRANT", "GRANT")}
-    assert arcpy.tables["TBL_SATELLITE"]["grants"] == {"VIEWER": ("GRANT", "AS_IS"), "EDITOR": ("GRANT", "AS_IS")}
+    # The satellite tables are written by tools/satellite_editor.html.
+    assert arcpy.tables["TBL_SATELLITE"]["grants"] == {"VIEWER": ("GRANT", "AS_IS"), "EDITOR": ("GRANT", "GRANT")}
+    assert arcpy.tables["TBL_IMAGE_CATALOG"]["grants"] == {"VIEWER": ("GRANT", "AS_IS"), "EDITOR": ("GRANT", "AS_IS")}
 
 
 def test_main_runs_with_the_stand_in(monkeypatch, tmp_path):
