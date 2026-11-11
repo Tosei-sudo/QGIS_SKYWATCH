@@ -94,6 +94,8 @@ class GroupFilter(QComboBox):
             self._kept = value
             self._filled = False
             self.set_groups(self.groups, self._seen or ())
+            # Told as a choice would be (kept, and the dock's list shown again).
+            self.currentIndexChanged.emit(self.currentIndex())
             return
         self.setCurrentIndex(index)
 
