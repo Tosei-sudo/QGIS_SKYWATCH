@@ -246,7 +246,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "offNadirMin": req.off_nadir_min, "offNadirMax": req.off_nadir_max,
         "incidenceMin": req.incidence_min, "incidenceMax": req.incidence_max,
         "lookSide": req.look_side, "orbitDir": req.orbit_dir, "resolution": req.resolution, "timeOfDay": req.time_of_day,
-        "cloudMax": req.cloud_no_go, "cloudForecast": None if c.cloud is None else int(math.floor(c.cloud + 0.5)),
+        "cloudMax": req.cloud_no_go, "cloudForecast": None if c.forecast is None else int(math.floor(c.forecast + 0.5)),
         "weatherFlag": c.weather_flag or "", "scenes": c.scenes,
         "centerLat": _round(mid[1], digits) if mid else None, "centerLon": _round(mid[0], digits) if mid else None,
         "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,

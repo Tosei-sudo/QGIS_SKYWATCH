@@ -27,7 +27,7 @@ from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
-from .daily import BUSY, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
+from .daily import BUSY, CLOUDY, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids
 from .model import ImagingRequest, day_bounds, days_left, jst_day
 from .passes import Passes, find_passes
@@ -199,7 +199,7 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 result.no_system += 1
             elif c.reason == NO_PASS:
                 result.no_pass += 1
-            elif c.held and c.reason == c.held:
+            elif c.held and c.reason == c.held or c.reason == CLOUDY:
                 result.cloud += 1
             if req.achieve == "期間内1回":
                 if days_left(req, day) <= 0:
