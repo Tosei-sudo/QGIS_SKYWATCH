@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.plan.weather import fetch_clouds
+from ..core.request.follow import missed_ids
 from ..core.request.model import CATEGORIES, priority_text
 from ..core.request.simulate import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
@@ -213,7 +214,10 @@ class LimitSimDialog(QDialog):
                 requests, history = old[0], old[1]
             forecasts = {}
             if forecast is not None:
-                places = list(dict.fromkeys(p for d in horizon_days(start, days) for p in forecast_places(requests, d, sats)))
+                # The first day also takes the requests missed and carried over to it (simulate does the same).
+                missed = missed_ids(history)
+                places = list(dict.fromkeys(p for i, d in enumerate(horizon_days(start, days))
+                                            for p in forecast_places(requests, d, sats, missed if i == 0 else ())))
                 if places:
                     try:
                         forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)

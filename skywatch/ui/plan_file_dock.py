@@ -53,7 +53,7 @@ from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, occurrence_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
-from ..core.request.follow import follow_and_save, found_text
+from ..core.request.follow import follow_and_save, found_text, missed_ids
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
@@ -72,6 +72,7 @@ from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
@@ -136,7 +137,9 @@ class PlanFileDock(PluginDock):
         self.store_choice.setToolTip(self.tr("依頼の保存先"))
         self.store_choice.currentIndexChanged.connect(self._store_chosen)
         layout.addWidget(self.store_choice)
-        top = QHBoxLayout()
+        # Rows of buttons and filters wrap, so that a dock at its usual width shows them all (and 「書き出し」)
+        # without scrolling sideways.
+        top = FlowLayout()
         top.addWidget(QLabel(self.tr("対象日（日本時間）")))
         self.day = QDateEdit()
         self.day.setCalendarPopup(True)
@@ -156,14 +159,13 @@ class PlanFileDock(PluginDock):
         self.results_button.setToolTip(self.tr("出力した依頼が撮像されたかを画像カタログと照合（計画と実績の照合）"))
         self.results_button.clicked.connect(lambda: self.show_results())
         top.addWidget(self.results_button)
-        top.addStretch(1)
         layout.addLayout(top)
         # Request names and the services' messages: shown as written, never as HTML.
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.status)
-        filters = QHBoxLayout()
+        filters = FlowLayout()
         self.system_filter = QComboBox()
         self.system_filter.setToolTip(self.tr("このシステムの依頼だけを表示（見送りは、そのシステムで撮れるものも）。次回も同じ選択"))
         self.series_filter = QComboBox()
@@ -178,15 +180,15 @@ class PlanFileDock(PluginDock):
         self.search.setClearButtonEnabled(True)
         self.search.setPlaceholderText(self.tr("名称・ID・番号・衛星"))
         self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・依頼グループ・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
-        self.search.setMinimumWidth(90)
+        self.search.setMinimumWidth(160)
         for w in (self.system_filter, self.series_filter, self.group_filter, self.result_filter):
             # Long system or series names do not widen the dock.
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            w.setMinimumContentsLength(8)
+            w.setMinimumContentsLength(14)
             filters.addWidget(w)
             w.currentIndexChanged.connect(self._filter_changed)
         self.search.textChanged.connect(lambda _text: self.render())
-        filters.addWidget(self.search, 1)
+        filters.addWidget(self.search)
         layout.addLayout(filters)
         self.model = QStandardItemModel(self)
         self.model.itemChanged.connect(self._item_changed)
@@ -201,7 +203,7 @@ class PlanFileDock(PluginDock):
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("plan-files", self.table, self)
-        moves = QHBoxLayout()
+        moves = FlowLayout()
         self.up_button = QPushButton(self.tr("上へ"))
         self.up_button.clicked.connect(lambda: self.move(-1))
         self.down_button = QPushButton(self.tr("下へ"))
@@ -216,11 +218,12 @@ class PlanFileDock(PluginDock):
                                        "行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す"))
         self.on_map.toggled.connect(lambda _on: self.draw())
         moves.addWidget(self.on_map)
-        moves.addStretch(1)
+        layout.addLayout(moves)
+        # What each system has left of its day: a line of its own (beside the buttons it was squeezed to a
+        # column one character wide).
         self.room = QLabel()
         self.room.setWordWrap(True)
-        moves.addWidget(self.room)
-        layout.addLayout(moves)
+        layout.addWidget(self.room)
         out = QHBoxLayout()
         out.addWidget(QLabel(self.tr("出力先")))
         self.folder = QLineEdit(settings.request_export_folder())
@@ -431,7 +434,8 @@ class PlanFileDock(PluginDock):
                 notes.append("画像カタログがないため撮像済みの確認なし")
             task.progress(60)
             forecasts = {}
-            places = forecast_places(requests, day, sats)
+            # Also for the requests missed and carried over to this day (they are candidates too).
+            places = forecast_places(requests, day, sats, missed_ids(history))
             if places and forecast is not None:
                 try:
                     forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
@@ -745,12 +749,17 @@ class PlanFileDock(PluginDock):
         return True if clicked is replace else False if clicked is keep else None
 
     @staticmethod
-    def _leftovers(plan: DayPlan, run: float, targets: list) -> list:
+    def _leftovers(plan: DayPlan, run: float, targets: list, fallback: str = "") -> list:
         """
         (system, folder, name) of the files in the folders named as a system's
         files of the day with another number (`maxPerFile`): left from an
-        earlier writing split otherwise, they are deleted once its files are written.
+        earlier writing split otherwise, they are deleted once its files are
+        written. Never a file that could be another system's of the same
+        folder (`fallback`: the folder of the systems that name none).
         """
+        def same(a: str, b: str) -> bool:
+            return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
         out = []
         for system in {w.system.system: w.system for w, _ in targets}.values():
             if system.max_per_file <= 0:
@@ -761,7 +770,9 @@ class PlanFileDock(PluginDock):
                 except OSError:
                     continue
                 names = [w.file_name for w, f in targets if w.system is system and f == folder]
-                out += [(system.system, folder, n) for n in leftover_files(system, plan.day, run, names, listed)]
+                others = [s for s in plan.systems if s.system != system.system and (s.folder or fallback)
+                          and same(s.folder or fallback, folder)]
+                out += [(system.system, folder, n) for n in leftover_files(system, plan.day, run, names, listed, others)]
         return out
 
     @staticmethod
@@ -780,7 +791,7 @@ class PlanFileDock(PluginDock):
             return
         targets = [(w, w.system.folder or fallback) for w in good]
         existing = [os.path.join(f, w.file_name) for w, f in targets if os.path.exists(os.path.join(f, w.file_name))]
-        leftovers = self._leftovers(plan, run, targets)
+        leftovers = self._leftovers(plan, run, targets, fallback)
         replace = bool(earlier)
         target = plan.target
         label = next((s.label for s in plan.systems if s.system == target), target or "")

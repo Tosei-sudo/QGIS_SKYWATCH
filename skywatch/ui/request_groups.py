@@ -36,7 +36,7 @@ class GroupFilter(QComboBox):
         self._seen: Optional[frozenset] = None
         self.setToolTip(self.tr("依頼グループで絞り込み（自分のグループ: 依頼グループのテーブルでメンバーに自分のユーザー名があるもの）。次回も同じ選択"))
         self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.setMinimumContentsLength(8)
+        self.setMinimumContentsLength(14)
         self.currentIndexChanged.connect(self._chosen)
         self.set_groups([], ())
 
