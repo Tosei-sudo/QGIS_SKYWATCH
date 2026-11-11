@@ -338,8 +338,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 光学の依頼は撮像時刻の雲量予報を見る（2026-11-11）。予報は 1〜3 時間おきなので、撮像時刻の前後の予報を時刻の近さで按分する。その日いちばん雲の少ないパスの雲量の 10% ごとの段階を優先度の 1 の位に入れ、どのパスも実施しない雲量以上なら見送り（期間内1回で期限まで 2 日以内なら警告付きで出す）。実施しない雲量以上のパスは使わず、雲の少ないパス（衛星を指定していなければ衛星も）から試す。比べるのは 10% の段階だけで、同じ段階なら今までどおり。書き出す雲量（`cloudForecast`・出力履歴の `CLOUD`）は採用したパスの値。軌道で詰めない衛星（TLE なし・`orbit: false`）は日中（地方時 9〜15 時）の平均
   - 優先度順に、システムの 1 日の件数・枚数の上限、区分ごとの枠、衛星ごとの 1 日の上限（`maxPerDay`）に詰める。衛星を指定した依頼はその衛星に、指定がなければ分解能の細かい衛星から。入らなければ次のシステムへ
   - 衛星の軌道（衛星カタログの TLE）から、その日に依頼の上を通るパスを出して割り当てる（2026-11-11）。依頼の角度・観測方向・軌道方向・時間帯に合うパスがなければ「撮像機会なし」。衛星ごとの撮像間隔（`minInterval`、分）と 1 日の撮像回数（`maxPerDay`）を守り、空きがなければ「衛星の空きなし」
-  - 同じパスで近い依頼は、1 回の撮像（幅 `swath` の中で、長さ `length` のシーンを `scenesPerPass` 枚まで連続）に収まればまとめる。別々なら撮像間隔に引っかかる依頼も、まとめれば入る。まとめた依頼はファイルでは 1 行（優先度のいちばん高い依頼の行。範囲は撮像するシーンの外形、`mergedIds` でまとめた依頼の ID）になり、件数の上限も 1 件分。一覧の「結果・理由」に「まとめ」と出し、「撮像時刻」にパスの時刻（日本時間）を出す。出力履歴・撮像予定は依頼ごとの行のまま（範囲も依頼のもの。`MERGED_INTO` にまとめ先）で、システムの採否はまとめた依頼すべてに付く
-  - 「地図に表示」で、表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と書き出す撮像の範囲（シーンの外形。まとめた行はまとめた範囲。破線）を書き出す前に地図に重ねる。行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す
+  - 同じパスで近い依頼は、1 回の撮像（幅 `swath` の中で、長さ `length` のシーンを `scenesPerPass` 枚まで連続）に収まればまとめる。別々なら撮像間隔に引っかかる依頼も、まとめれば入る。まとめた依頼はファイルでは 1 行（優先度のいちばん高い依頼の行。範囲はまとめた依頼の範囲をぴったり囲む、パスに平行な四角（辺は軌道に沿う）。`mergedIds` でまとめた依頼の ID）になり、件数の上限も 1 件分。システム側が自分の軌道・シーン割りで計画しても 1 回に収まるよう、その四角が撮像の枠の内側に `mergeMargin`（メートル、既定 500）以上の余裕を残すときだけまとめる（2026-11-11）。一覧の「結果・理由」に「まとめ」と出し、「撮像時刻」にパスの時刻（日本時間）を出す。出力履歴・撮像予定は依頼ごとの行のまま（範囲も依頼のもの。`MERGED_INTO` にまとめ先）で、システムの採否はまとめた依頼すべてに付く
+  - 「地図に表示」で、表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と書き出す撮像の範囲（シーンの外形。まとめた行は書き出す四角。破線）を書き出す前に地図に重ねる。行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す
   - 撮像の範囲のレイヤー（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)、`requestStores[].shots`）があれば、書き出したファイルの 1 行ごとに撮像の範囲・時刻・角度・まとめた依頼を記録する（2026-11-11）。出力履歴は依頼ごとの行・依頼の範囲のままで、`SHOT_ID` でどの撮像で撮るかをたどれる。置き換えて書き出すと、その日（そのシステム）の前回の撮像の範囲も置き換わる
   - 軌道を使わずに件数・枚数だけで詰めるシステムは `orbit: false`、まとめないシステムは `merge: false`。TLE を読めない衛星は件数だけで詰める。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「24. 軌道のパスへの割り当てとまとめ」
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
@@ -1404,7 +1404,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系
@@ -1531,7 +1531,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
 | [`TBL_COUNTRY`](#tbl_country国) | ポリゴン | 読み | 国（通報の国コード・国名） | `alertReports.countries` |
 | [`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ) | なし | 読み | 撮像依頼の依頼グループとメンバー（2026-11-11 に追加。レイヤー番号を変えないよう一覧の最後） | `requestStores[].groups` |
-| [`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) | ポリゴン | 書き込み | 書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼はまとめた範囲。2026-11-11 に追加） | `requestStores[].shots` |
+| [`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) | ポリゴン | 書き込み | 書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼は書き出す四角。2026-11-11 に追加） | `requestStores[].shots` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -1927,7 +1927,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 ### `TBL_REQUEST_SHOT`（撮像の範囲）
 
-書き出したシステム向けファイルの 1 行ごとの撮像（2026-11-11 に追加。tsudo「マージした結果、どの範囲になったかも見たい。他方、要求にどう呼応したかも知りたい」）。ポリゴンは撮像するシーンの外形（まとめた行はまとめた範囲、1 回の撮像に収まらない大きな範囲は撮像ごとのポリゴン）。依頼ごとの記録は [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴)（依頼の範囲）のまま、その `SHOT_ID` でこの表の行をたどる。軌道を使わずに詰めた行（`orbit: false`・TLE なし）は記録しない。「置き換えて書き出し」では、その日（システムごとに書き出したときはそのシステム）の前回の行を消してから入れ直す（採否ごと残した出力履歴の行の撮像は残す）。テーブルがなくても動く（撮像予定ドックは `MERGED_INTO` でまとめを表示し、範囲は出さない）。`requestStores[].shotFields`（既定は下の名前）。
+書き出したシステム向けファイルの 1 行ごとの撮像（2026-11-11 に追加。tsudo「マージした結果、どの範囲になったかも見たい。他方、要求にどう呼応したかも知りたい」）。ポリゴンは撮像するシーンの外形（まとめた行はファイルに書いた四角＝まとめた依頼を囲むパスに平行な四角、1 回の撮像に収まらない大きな範囲は撮像ごとのポリゴン）。依頼ごとの記録は [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴)（依頼の範囲）のまま、その `SHOT_ID` でこの表の行をたどる。軌道を使わずに詰めた行（`orbit: false`・TLE なし）は記録しない。「置き換えて書き出し」では、その日（システムごとに書き出したときはそのシステム）の前回の行を消してから入れ直す（採否ごと残した出力履歴の行の撮像は残す）。テーブルがなくても動く（撮像予定ドックは `MERGED_INTO` でまとめを表示し、範囲は出さない）。`requestStores[].shotFields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |

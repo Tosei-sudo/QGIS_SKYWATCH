@@ -574,7 +574,7 @@ class PlanFileDock(PluginDock):
             fellow = taken and bool(mine) and any(id(s) in mine for s in c.shots)
             out.append(([[list(p[:2]) for p in r] for r in c.request.rings], color, 3 if c is chosen else 2 if fellow else 1,
                         (c.request.name or c.request.id) if c is chosen else ""))
-        out += [([s.ring()], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s in dict.fromkeys(shots)]
+        out += [([s.area_ring()], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s in dict.fromkeys(shots)]
         return out
 
     def draw(self) -> None:
@@ -590,7 +590,7 @@ class PlanFileDock(PluginDock):
         c = self.chosen
         if c is None:
             return
-        points = [p[:2] for r in c.request.rings for p in r] + [p for s in c.shots for p in s.ring()]
+        points = [p[:2] for r in c.request.rings for p in r] + [p for s in c.shots for p in s.area_ring()]
         if not points:
             return
         xs, ys = [p[0] for p in points], [p[1] for p in points]

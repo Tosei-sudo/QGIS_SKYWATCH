@@ -237,7 +237,7 @@ class ScheduleDock(PluginDock):
         self.on_map.toggled.connect(lambda _on: self.draw())
         self.shots_on_map = QCheckBox(self.tr("撮像の範囲"))
         self.shots_on_map.setChecked(True)
-        self.shots_on_map.setToolTip(self.tr("書き出したときの撮像の範囲（まとめた依頼はまとめた範囲）を破線で重ねる。"
+        self.shots_on_map.setToolTip(self.tr("書き出したときの撮像の範囲（まとめた依頼は書き出した四角）を破線で重ねる。"
                                              "依頼の範囲はそれぞれの依頼のまま"))
         self.shots_on_map.toggled.connect(lambda _on: self.draw())
         self.layer_button = QPushButton(self.tr("レイヤーに出す"))

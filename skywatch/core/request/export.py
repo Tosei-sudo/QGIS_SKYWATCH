@@ -226,8 +226,9 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     digits = ctx.system.digits if digits is None else digits
     shot = c.shots[0] if c.shots else None
     together = c.together
-    # Requests put into one shot are handed out as one, its area the outline of the shot's scenes (tsudo, 2026-11-11).
-    rings = [shot.ring()] if together and shot is not None else req.rings
+    # Requests put into one shot are handed out as one (tsudo, 2026-11-11), its area the tightest box along the
+    # track around theirs (shots.Shot.area_ring: not the scenes' outline, which the system may not find them inside).
+    rings = [shot.area_ring()] if together and shot is not None else req.rings
     box = bbox_of(rings)
     mid = center_of(rings)
     look = shot.look if shot is not None else None

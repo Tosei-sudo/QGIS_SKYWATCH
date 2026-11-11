@@ -389,7 +389,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             if not ops:
                 why.add(CLOUDY)
                 return False
-        options = book.joins(c, i, ops, system.merge) + book.new_shots(c, i, ops, forced)
+        options = book.joins(c, i, ops, system.merge, system.merge_margin) + book.new_shots(c, i, ops, forced)
         clouds = {id(p): _placement_cloud(p, told) for p in options} if c.weather else {}
         if c.weather:
             # The less cloudy first, by tenths; within a tenth as before (into a shot planned, then the smaller angle).
