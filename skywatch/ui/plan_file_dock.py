@@ -4,8 +4,7 @@ files from the request ledger (`requestStores`, `requestExports`). It is a
 dock of its own, apart from 「撮像依頼」, since those writing the files are
 not those registering requests (tsudo, 2026-11-07).
 
-「計算」 follows up what was handed out before (the image catalog asked
-whether those requests were taken), reads the ledger again, asks the cloud
+「計算」 reads the ledger and the history rows still open, asks the cloud
 forecast for the optical requests, works out the satellites' passes over
 them from their orbits (core/request/passes.py) and fits the day's
 requests into the passes and the systems' limits. Requests put into one
@@ -53,7 +52,7 @@ from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, occurrence_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
-from ..core.request.follow import follow_and_save, found_text, missed_ids, with_settled_times
+from ..core.request.follow import missed_ids
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
@@ -429,14 +428,12 @@ class PlanFileDock(PluginDock):
         config = self.context.config
         systems = config.request_exports
         day = self.chosen_day()
-        catalog = self.catalog()
         client = self.context.esri()
         token = self.token()
-        catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
         forecast = config.cloud_forecast
         authcfg = settings.auth_for(forecast.url) if forecast else None
         now = _now_ms()
-        self.status.setText(self.tr("撮像済みの確認・依頼の読み込み・雲量予報を問い合わせ中…"))
+        self.status.setText(self.tr("依頼の読み込み・雲量予報を問い合わせ中…"))
 
         def work(task):
             notes = []
@@ -444,26 +441,11 @@ class PlanFileDock(PluginDock):
             groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
             if note:
                 notes.append(note)
-            # Only the rows still to be followed up or raised for, not the whole (ever growing) table.
+            # Only the rows still to be followed up or raised for, not the whole (ever growing) table. They are not
+            # followed up here (tsudo, 2026-11-11: 「その照合、計算時の照合なくして」): as 照合 (「照合…」, the
+            # scheduled scheduled_follow.py) left them.
             history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
                        if store.history else [])
-            task.progress(30)
-            if history and catalog is not None:
-                by_id = {r.id: r for r in requests}
-                names = self.context.satellite_names(client, task.isCanceled)
-                problems = []
-                # With the times of the day already taken of a request taken several times a day.
-                rows = with_settled_times(client, store, token, history, by_id, task.isCanceled)
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
-                                                 problems)
-                if found:
-                    notes.append(found_text(found))
-                if problems:
-                    notes.append("照合結果の保存に一部失敗（" + "、".join(problems[:3]) + "）")
-                if changed:
-                    requests = load_requests(client, store, token, task.isCanceled)
-            elif store.history and catalog is None:
-                notes.append("画像カタログがないため撮像済みの確認なし")
             task.progress(60)
             forecasts = {}
             # Also for the requests missed and carried over to this day (they are candidates too).
@@ -483,7 +465,7 @@ class PlanFileDock(PluginDock):
                 notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
             quotas = QuotaData()
             if store.quotas:
-                # What the yearly quotas have left (年間撮像上限): the shots of their years, read after the follow-up above.
+                # What the yearly quotas have left (年間撮像上限): the shots of their years, as 照合 left them.
                 try:
                     quotas = read_quota_data(client, store, token, [day], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
