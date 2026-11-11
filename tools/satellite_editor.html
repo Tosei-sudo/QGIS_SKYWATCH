@@ -6,12 +6,13 @@
 <title>衛星・センサー編集ツール</title>
 <!--
   SKYWATCH の衛星カタログ（satelliteCatalogs）・センサーモード（sensorCatalogs）・衛星名の対応表
-  （satelliteAliases）を、ArcGIS（ポータル・サーバー）のテーブルの上で直接編集するツール。
+  （satelliteAliases）・年間撮像上限（requestStores[].quotas）を、ArcGIS（ポータル・サーバー）のテーブルの上で
+  直接編集するツール。
   ブラウザでこのファイルを開き、プラグインの設定ファイル（config.json）を読み込ませる。どのテーブルの
   どの属性を使うかは設定ファイルの url・fields・where のとおり（プラグインと同じ読み方）。
   ライブラリ・インストール不要（閉じたネットワークでも動く）。使うのは ArcGIS REST の query と applyEdits だけ。
   衛星とセンサーモードのつながり・別名のつながりはプラグインと同じ決まり（skywatch/core/plan/modes.py with_modes、
-  names.py）。下の plugin-constants はプラグインの定数の写し: skywatch/tests/test_satellite_editor.py が一致を確かめる。
+  names.py、年間撮像上限は core/request/quota.py）。下の plugin-constants はプラグインの定数の写し: skywatch/tests/test_satellite_editor.py が一致を確かめる。
 -->
 <style>
 :root {
@@ -240,6 +241,24 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "satellite",
   "alias"
  ],
+ "quotaRoles": [
+  "sensor",
+  "mode",
+  "limit",
+  "startMonth",
+  "initialUsed",
+  "countFrom",
+  "note"
+ ],
+ "quotaFields": {
+  "sensor": "SENSOR",
+  "mode": "SENSOR_MODE",
+  "limit": "ANNUAL_LIMIT",
+  "startMonth": "YEAR_START_MONTH",
+  "initialUsed": "INITIAL_USED",
+  "countFrom": "COUNT_FROM",
+  "note": "NOTE"
+ },
  "editTrackingFields": {
   "createdAt": "CREATED_DATE",
   "createdBy": "CREATED_USER",
@@ -311,6 +330,15 @@ const SENSOR_INFO = {
 const ALIAS_INFO = {
   satellite: { label: "衛星名", list: "satNames", hint: "衛星カタログの名前か ID" },
   alias: { label: "別名", hint: "画像カタログでの名前。カンマ区切りで複数も可（WV03, WV3）" },
+};
+const QUOTA_INFO = {
+  sensor: { label: "センサー", list: "sensors", hint: "センサーモードのセンサー名（センサーがなければ衛星名か ID）" },
+  mode: { label: "モード", list: "modes", hint: "空ならそのセンサーの全モードの合計" },
+  limit: { label: "年間上限", unit: "枚", num: true, int: true, hint: "1 年に撮れるシーン数。空なら数えるだけ（割り当ては止めない）" },
+  startMonth: { label: "年の始まりの月", num: true, int: true, hint: "1〜12。空なら 1 月（9 なら 9 月〜翌年 8 月）" },
+  initialUsed: { label: "当初の消費枚数", unit: "枚", num: true, int: true, hint: "途中から使い始めた年に、それまでに使った枚数" },
+  countFrom: { label: "数え始める日", day: true, hint: "当初の消費枚数の時点。この日からの撮像をプラグインが数える" },
+  note: { label: "備考" },
 };
 const SAT_GROUPS = [
   ["基本", ["name", "id", "series", "kind", "sensor", "mode", "system"]],
@@ -637,7 +665,7 @@ function sourceOf(kind, entry, i, at, fields, problems) {
 /** 設定ファイルのうち、このツールが使う項目（config.py と同じ読み方）。 */
 function parseConfig(v) {
   const problems = [];
-  const out = { sats: [], sensors: [], inline: [], aliases: [], tracking: null, systems: [], timeZones: [], problems };
+  const out = { sats: [], sensors: [], inline: [], aliases: [], quotas: [], tracking: null, systems: [], timeZones: [], problems };
   if (!isObj(v)) { problems.push(badP("設定はオブジェクトで指定")); return out; }
   const listed = (key) => {
     if (!(key in v)) return [];
@@ -694,6 +722,26 @@ function parseConfig(v) {
       out.aliases.push(src);
     });
   }
+  // 年間撮像上限（requestStores[].quotas: store.py の request_store_of）。台帳が同じテーブルを指せば 1 つ。
+  const quotaUrls = new Set();
+  listed("requestStores").forEach((e, i) => {
+    if (!isObj(e) || e.quotas === undefined || e.quotas === null || e.quotas === "") return;
+    const at = `requestStores[${i}].quotas`;
+    if (typeof e.quotas !== "string" || !/^https?:\/\//i.test(e.quotas) || !LAYER_URL.test(e.quotas.split("?")[0])) return problems.push(badP(`${at} は …/FeatureServer/23 のような年間撮像上限のテーブルの URL で指定`));
+    const key = e.quotas.split("?")[0].replace(/\/+$/, "").toLowerCase();
+    if (quotaUrls.has(key)) return;
+    quotaUrls.add(key);
+    const fields = { ...PC.quotaFields };
+    if (isObj(e.quotaFields)) for (const role of PC.quotaRoles) {
+      const name = e.quotaFields[role];
+      if (name === undefined || name === null || name === "") continue;
+      if (isName(name)) fields[role] = name;
+      else problems.push(warnP(`requestStores[${i}].quotaFields.${role} は属性名（英数字と _）で指定（無視）`));
+    }
+    const src = sourceOf("quota", { url: e.quotas, token: e.token }, i, at, fields, problems);
+    src.label = typeof e.label === "string" && e.label ? `年間撮像上限（${e.label}）` : "年間撮像上限";
+    out.quotas.push(src);
+  });
   out.tracking = trackingOf(v.editTracking, problems);
   for (const e of Array.isArray(v.requestExports) ? v.requestExports : []) if (isObj(e) && typeof e.system === "string" && e.system.trim()) out.systems.push(e.system.trim());
   out.timeZones = timeZoneRules(v, problems);
@@ -933,7 +981,7 @@ function showSignState() {
 
 const S = {
   cfg: null, fileName: "", loading: false,
-  sats: [], modes: [], aliases: [],
+  sats: [], modes: [], aliases: [], quotas: [],
   /** { kind: "sat", rec } | { kind: "new", src, start } | { kind: "orphans" } | null */
   sel: null,
   form: null,
@@ -958,11 +1006,12 @@ async function loadAll(keep) {
   S.loading = true;
   renderSide();
   if (!keep) renderMain();
-  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases];
+  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases, ...S.cfg.quotas];
   await Promise.all(all.map(loadSource));
   S.sats = S.cfg.sats.flatMap((s) => s.records);
   S.modes = S.cfg.sensors.flatMap((s) => s.records);
   S.aliases = S.cfg.aliases.flatMap((s) => s.records);
+  S.quotas = S.cfg.quotas.flatMap((s) => s.records);
   S.loading = false;
   relink();
   if (keep) S.sel = keep();
@@ -1036,6 +1085,7 @@ function relink() {
     r.v.modes = r.v.sensorKey ? byKey.get(r.v.sensorKey) : [];
     const names = new Set([plain(r.v.name), plain(r.v.id)].filter(Boolean));
     r.v.aliases = S.aliases.filter((a) => names.has(plain(aliasSat(a))));
+    r.v.quotas = quotasOf(r.v);
   }
 }
 /** 衛星が使うセンサーの名前（書かれたとおり）。 */
@@ -1139,6 +1189,11 @@ function fieldInput(src, f, value, opt = {}) {
       const c = coded.find((x) => jsString(x.code) === input.value);
       return { value: c ? c.code : numeric ? Number(input.value) : input.value };
     };
+  } else if (opt.day && (DATE_TYPES.has(f.type) || TEXT_TYPES.has(f.type))) {
+    input = el("input", { type: "date" });
+    input.value = dayText(src, f, value);
+    current = () => input.value;
+    read = () => ({ value: input.value ? dayValue(src, f, input.value) : null });
   } else if (DATE_TYPES.has(f.type)) {
     input = el("input", { type: "datetime-local" });
     const shown = readInstant(src, value);
@@ -1183,6 +1238,20 @@ function fieldInput(src, f, value, opt = {}) {
   };
   input.addEventListener(opt.bool || coded ? "change" : "input", () => { self.mark(); err.textContent = ""; input.classList.remove("invalid"); if (opt.onchange) opt.onchange(); });
   return self;
+}
+/** 日付の属性の日（プラグインと同じく日本時間の日: quota.py の _day）。 */
+const JST_MS = 9 * 3600000;
+const todayJst = () => new Date(Date.now() + JST_MS).toISOString().slice(0, 10);
+function dayText(src, f, value) {
+  if (value === null || value === undefined || value === "") return "";
+  if (isNum(value) && !(f && f.type === "esriFieldTypeDateOnly")) return new Date(readInstant(src, value) + JST_MS).toISOString().slice(0, 10);
+  const m = jsString(value).trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  return m ? `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}` : "";
+}
+/** その日（YYYY-MM-DD）を書く値: 日時の属性は日本時間のその日の 0 時、日付だけ・文字の属性は「2026-11-12」。 */
+function dayValue(src, f, day) {
+  if (f.type === "esriFieldTypeDateOnly" || TEXT_TYPES.has(f.type)) return day;
+  return writeInstant(src, Date.parse(`${day}T00:00:00+09:00`));
 }
 /** 役割の値の検査（数・0 以上・整数）。 */
 function checkRole(info, value) {
@@ -1251,7 +1320,7 @@ function renderSide() {
     return words.every((w) => hay.includes(w));
   };
   const orphans = orphanRows();
-  const n = orphans.modes.length + orphans.aliases.length;
+  const n = orphans.modes.length + orphans.aliases.length + orphans.quotas.length;
   $("btnOrphans").textContent = n ? `つながりのない行（${n}）` : "つながりのない行";
   $("btnOrphans").classList.toggle("current", Boolean(S.sel && S.sel.kind === "orphans"));
   for (const src of S.cfg.sats) {
@@ -1268,6 +1337,7 @@ function satItem(r) {
   const nModes = v.modes.length;
   if (nModes) tags.push(el("span", { class: "tag on", text: `モード ${nModes}` }));
   if (v.aliases.length) tags.push(el("span", { class: "tag on", text: `別名 ${v.aliases.reduce((s, a) => s + aliasesOf(aliasText(a)).length, 0)}` }));
+  if (v.quotas.length) tags.push(el("span", { class: "tag on", text: `年間上限 ${v.quotas.length}` }));
   if (v.check.empty) tags.push(el("span", { class: "tag bad", text: "TLE なし" }));
   else if (v.check.errors.length) tags.push(el("span", { class: "tag bad", text: "TLE 不正" }));
   else if (isNum(v.check.epoch)) {
@@ -1299,7 +1369,7 @@ function renderMain() {
   const page = el("div", { class: "page" });
   main.append(page);
   if (!S.cfg) return page.append(welcome());
-  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases];
+  const all = [...S.cfg.sats, ...S.cfg.sensors, ...S.cfg.aliases, ...S.cfg.quotas];
   if (S.loading) return page.append(el("p", { class: "empty spin", text: "テーブルを読み込み中" }));
   if (!S.sel) return page.append(overview(all));
   if (S.sel.kind === "sat") return page.append(...satPage(S.sel.rec));
@@ -1327,7 +1397,7 @@ function overview(all) {
   if (cfgProblems.length) box.append(el("div", { class: `box ${cfgProblems.some((p) => p.level === "bad") ? "bad" : "warn"}` }, el("b", { text: "設定ファイル" }), el("ul", {}, cfgProblems.map((p) => el("li", { text: p.text })))));
   for (const src of all) { const p = srcProblems(src); if (p) box.append(p); }
   const rows = all.map((src) => el("tr", {},
-    el("td", { text: { sat: "衛星", sensor: "センサーモード", alias: "別名" }[src.kind] }),
+    el("td", { text: { sat: "衛星", sensor: "センサーモード", alias: "別名", quota: "年間撮像上限" }[src.kind] }),
     el("td", { text: src.label }),
     el("td", { text: src.error ? "読み込めない" : `${src.records.length} 行${src.where ? `（where に合うのは ${src.records.filter((r) => !r.out).length}）` : ""}` }),
     el("td", {}, el("code", { text: src.shownUrl }))));
@@ -1468,6 +1538,7 @@ function satPage(rec) {
       el("span", { class: "spacer" }),
       el("button", { type: "button", class: "danger", text: "この衛星を削除…", onclick: () => deleteSatellite(rec) })))));
   out.push(sensorCard(rec), aliasCard(rec));
+  if (S.cfg.quotas.length) out.push(quotaCard(rec));
   return out;
 }
 function newSatPage(src, start) {
@@ -1499,7 +1570,7 @@ function duplicate(rec) {
   select({ kind: "new", src, start });
 }
 
-/** 衛星を保存（新しい行なら追加）。名前・ID を変えたら別名の衛星名も合わせる。 */
+/** 衛星を保存（新しい行なら追加）。名前・ID を変えたら別名の衛星名（と衛星名で書いた年間撮像上限のセンサー）も合わせる。 */
 async function saveSatellite(form) {
   const { src, rec } = form;
   const { changes, errors, warns } = form.read();
@@ -1507,7 +1578,7 @@ async function saveSatellite(form) {
   if (rec && !Object.keys(changes).length) return status("変更なし");
   try { requireUser([src]); } catch (e) { return status(e.message, "bad"); }
   const notes = [...warns];
-  const follow = [];   // { src, updates, text }
+  const follow = [];   // { role, rows, neu, text, done }
   if (rec) {
     const before = rec.v;
     const after = satView({ src, a: { ...rec.a, ...changes } });
@@ -1515,7 +1586,10 @@ async function saveSatellite(form) {
       const p = plain(old);
       if (!p || p === plain(neu) || nameOwners(p, rec).length) continue;
       const rows = S.aliases.filter((r) => plain(aliasSat(r)) === p);
-      if (rows.length) follow.push({ what, rows, neu, text: `別名 ${rows.length} 行の衛星名「${rows.map(aliasSat).filter((x, i, xs) => xs.indexOf(x) === i).join("・")}」を「${neu}」に変える（${what}を変えたので）` });
+      if (rows.length) follow.push({ role: "satellite", rows, neu, text: `別名 ${rows.length} 行の衛星名「${rows.map(aliasSat).filter((x, i, xs) => xs.indexOf(x) === i).join("・")}」を「${neu}」に変える（${what}を変えたので）`, done: `別名 ${rows.length} 行の衛星名を「${neu}」に` });
+      // 衛星名・ID をセンサーとして書いた年間撮像上限（センサー名で書いた上限はそのまま）。
+      const quotas = plain(before.sensor || sensorShown(before)) === p ? [] : S.quotas.filter((q) => plain(quotaSensor(q)) === p);
+      if (quotas.length) follow.push({ role: "sensor", rows: quotas, neu, text: `年間撮像上限 ${quotas.length} 行のセンサー「${quotaSensor(quotas[0])}」を「${neu}」に変える（${what}を変えたので）`, done: `年間撮像上限 ${quotas.length} 行のセンサーを「${neu}」に` });
     }
     const key = sensorKeyOf(after);
     if (before.sensorKey && key !== before.sensorKey) {
@@ -1547,10 +1621,10 @@ async function saveSatellite(form) {
       const done = [`保存した（${satView({ src, a: { ...rec.a, ...changes } }).name}）`];
       for (const f of chosen) {
         for (const t of new Set(f.rows.map((r) => r.src))) {
-          const sf = roleField(t, "satellite");
+          const sf = roleField(t, f.role);
           if (sf) await applyEdits(t, { updates: f.rows.filter((r) => r.src === t).map((r) => ({ [t.oidField]: r.oid, [sf.name]: f.neu })) });
         }
-        done.push(`別名 ${f.rows.length} 行の衛星名を「${f.neu}」に`);
+        done.push(f.done);
       }
       status(done.join("、"));
     } else {
@@ -1725,27 +1799,29 @@ async function editMode(rec, m) {
     if (m && !Object.keys(changes).length) return true;
     if (!sensorName) throw new Error("センサー名を入れる");
     // センサー名を変えたら、同じセンサーのほかのモードと、そのセンサーを使う衛星の「センサー」も変えるか。
-    let siblings = [], sats = [];
+    let siblings = [], sats = [], quotas = [];
     const oldName = m ? modeSensor(m) : "";
     if (m && keyOf(oldName) !== keyOf(sensorName)) {
       const sameSensor = S.modes.filter((x) => x !== m && keyOf(modeSensor(x)) === keyOf(oldName));
+      const quotaRows = S.quotas.filter((q) => roleField(q.src, "sensor") && plain(quotaSensor(q)) === plain(oldName));
       const users = S.sats.filter((r) => r.v.sensorKey === keyOf(oldName));
       const settable = users.filter((r) => roleField(r.src, "sensor"));
       const lost = users.filter((r) => !roleField(r.src, "sensor"));
-      if (sameSensor.length || users.length) {
+      if (sameSensor.length || users.length || quotaRows.length) {
         const choice = await modal("センサー名の変更", [
           el("p", { text: `センサー名を「${oldName}」から「${sensorName}」に変える。` }),
           el("ul", {},
             sameSensor.length ? el("li", { text: `「${oldName}」のほかのモード ${sameSensor.length} 件（${sameSensor.map((x) => modeName(x) || "モード名なし").join("・")}）` }) : null,
-            settable.length ? el("li", { text: `「${oldName}」を使う衛星 ${settable.length} 機（${settable.map((r) => r.v.name).join("・")}）の「センサー」` }) : null),
+            settable.length ? el("li", { text: `「${oldName}」を使う衛星 ${settable.length} 機（${settable.map((r) => r.v.name).join("・")}）の「センサー」` }) : null,
+            quotaRows.length ? el("li", { text: `「${oldName}」の年間撮像上限 ${quotaRows.length} 行（${quotaRows.map(quotaLabel).join("・")}）` }) : null),
           lost.length ? el("p", { class: "note", text: `${lost.map((r) => r.v.name).join("・")} はシリーズか衛星名でこのセンサーとつながっている（衛星カタログの fields に sensor がないので衛星の側は変えられない）。センサー名を変えるとつながらなくなる` }) : null,
           el("p", { text: "「まとめて変える」で上もいっしょに変える。「このモードだけ」なら、このモードは別のセンサーになる。" }),
         ], [{ label: "戻る", value: null }, { label: "このモードだけ", value: "one" }, { label: "まとめて変える", value: "all", cls: "primary" }]);
         if (choice === null) return false;
-        if (choice === "all") { siblings = sameSensor; sats = settable; }
+        if (choice === "all") { siblings = sameSensor; sats = settable; quotas = quotaRows; }
       }
     }
-    requireUser([src, ...siblings.map((x) => x.src), ...sats.map((r) => r.src)]);
+    requireUser([src, ...siblings.map((x) => x.src), ...sats.map((r) => r.src), ...quotas.map((q) => q.src)]);
     if (m) {
       const latest = await fetchRow(src, m.oid);
       if (!latest) throw new Error("このモードはほかの人が削除した（閉じて読み直す）");
@@ -1773,6 +1849,11 @@ async function editMode(rec, m) {
         await applyEdits(t, { updates: sats.filter((r) => r.src === t).map((r) => ({ [t.oidField]: r.oid, [sf.name]: sensorName })) });
       }
       if (sats.length) extra.push(`衛星 ${sats.length} 機の「センサー」`);
+      for (const t of new Set(quotas.map((q) => q.src))) {
+        const sf = roleField(t, "sensor");
+        await applyEdits(t, { updates: quotas.filter((q) => q.src === t).map((q) => ({ [t.oidField]: q.oid, [sf.name]: sensorName })) });
+      }
+      if (quotas.length) extra.push(`年間撮像上限 ${quotas.length} 行のセンサー`);
     } catch (e) {
       status(`モードは${m ? "保存" : "追加"}したが、${extra.length ? `${extra.join("・")}を変えたあと、` : ""}${e.message}`, "bad");
       return true;
@@ -1965,6 +2046,164 @@ async function deleteAlias(rec, r) {
   await loadAll(() => (rec ? findSel(rec) : S.sel));
 }
 
+// ---- 年間撮像上限
+
+function quotaTables() { return S.cfg.quotas.filter((s) => s.info && !s.error); }
+const quotaGet = (q, role) => (q.src.fields[role] ? attr(q.a, q.src.fields[role]) : undefined);
+const quotaSensor = (q) => text(quotaGet(q, "sensor"));
+const quotaMode = (q) => text(quotaGet(q, "mode"));
+const quotaLabel = (q) => `${quotaSensor(q) || "（センサーなし）"}（${quotaMode(q) || "全モード"}）`;
+/** その衛星の撮像を数える名前（quota.py の matches_satellite: 衛星のセンサー、なければセンサーモードのセンサー名、衛星名・ID。英数字だけで比べる）。 */
+function quotaKeys(v) { return new Set([v.sensor || sensorShown(v), v.name, v.id].map(plain).filter(Boolean)); }
+/** 衛星のモード名（モードの行ならそのモード、なければセンサーのモード）。 */
+function satModes(v) { return (v.mode ? [v.mode] : v.modes.map((m) => (m.inline ? m.inline.mode : modeName(m)))).filter(Boolean); }
+function quotasOf(v) { const keys = quotaKeys(v); return S.quotas.filter((q) => keys.has(plain(quotaSensor(q)))); }
+/** 上限の行の数の値（0 以上の整数でなければ bad）。 */
+function quotaNumber(q, role) {
+  const raw = text(quotaGet(q, role)).normalize("NFKC");
+  if (!raw) return { value: null };
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? { value: Math.floor(n + 0.5) } : { value: null, bad: raw };
+}
+/** 同じセンサー・モードのほかの行。 */
+const quotaTwins = (sensor, mode, except) => S.quotas.filter((x) => x !== except && plain(sensor) && plain(quotaSensor(x)) === plain(sensor) && plain(quotaMode(x)) === plain(mode));
+function quotaCard(rec) {
+  const v = rec.v;
+  const body = el("div", { class: "body" });
+  const card = el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: "年間撮像上限" }),
+    el("span", { class: "sub", text: "センサー・モードごとの 1 年の撮像枚数。センサー名（センサーがなければ衛星名・ID）でつながる。モードが空ならセンサーの全モード" })), body);
+  for (const t of S.cfg.quotas) { const p = srcProblems(t); if (p && (t.error || t.problems.some((x) => x.level === "bad"))) body.append(p); }
+  const modes = new Set(satModes(v).map(plain));
+  if (!v.quotas.length) body.append(el("p", { class: "empty", text: "上限なし（この衛星のセンサー・モードの行がない）" }));
+  else {
+    const table = el("table", { class: "list" }, el("tr", {}, ["センサー", "モード", "年間上限", "1 年", "当初の消費", "備考", ""].map((t) => el("th", { text: t }))));
+    for (const q of v.quotas) {
+      const mode = quotaMode(q), limit = quotaNumber(q, "limit"), month = quotaNumber(q, "startMonth"), initial = quotaNumber(q, "initialUsed");
+      const from = dayText(q.src, roleField(q.src, "countFrom"), quotaGet(q, "countFrom"));
+      const m = month.value !== null && month.value >= 1 && month.value <= 12 ? month.value : 1;
+      const shared = S.sats.filter((x) => x !== rec && x.v.quotas.includes(q));
+      const tags = [];
+      if (mode && modes.size && !modes.has(plain(mode))) tags.push(el("span", { class: "tag warn", text: "この衛星にないモード", title: `モード: ${satModes(v).join("・")}` }));
+      if (month.bad || (month.value !== null && (month.value < 1 || month.value > 12))) tags.push(el("span", { class: "tag warn", text: "月が 1〜12 でない（1 月から数える）" }));
+      if (limit.bad || initial.bad) tags.push(el("span", { class: "tag bad", text: "数でない値" }));
+      if (initial.value && !from) tags.push(el("span", { class: "tag warn", text: "数え始める日なし（当初の消費を数えない）" }));
+      if (quotaTwins(quotaSensor(q), mode, q).length) tags.push(el("span", { class: "tag warn", text: "同じセンサー・モードの行が 2 つ以上" }));
+      if (q.out) tags.push(el("span", { class: "tag warn", text: "where 外", title: q.src.where }));
+      table.append(el("tr", {},
+        el("td", {}, quotaSensor(q), shared.length ? el("span", { class: "note", text: `（${shared.map((x) => x.v.name + (x.v.mode ? `・${x.v.mode}` : "")).join("、")} とも共通）` }) : null),
+        el("td", { text: mode || "全モード" }),
+        el("td", { text: limit.value !== null ? `${limit.value} 枚` : "（なし: 数えるだけ）" }),
+        el("td", { text: m === 1 ? "1 月〜12 月" : `${m} 月〜翌年 ${m - 1} 月` }),
+        el("td", { text: initial.value ? `${initial.value} 枚${from ? `（${from} の時点）` : ""}` : "" }),
+        el("td", { text: text(quotaGet(q, "note")) }),
+        el("td", { class: "tools" }, ...tags.flatMap((t) => [t, " "]),
+          el("button", { type: "button", class: "small", text: "編集", onclick: () => editQuota(rec, q) }), " ",
+          el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteQuota(rec, q) }))));
+    }
+    body.append(table);
+  }
+  body.append(el("p", { class: "note", text: "消費の枚数・残り・数えない画像（ノイズ・ジャミングなど）はプラグインの「年間撮像上限…」で見る・付ける。" }));
+  if (quotaTables().some((t) => roleField(t, "sensor"))) body.append(el("div", { class: "bar" }, el("button", { type: "button", text: "＋ 上限を追加", onclick: () => editQuota(rec, null) })));
+  return card;
+}
+async function editQuota(rec, q) {
+  const tables = quotaTables().filter((t) => roleField(t, "sensor"));
+  let src = q ? q.src : tables[0];
+  if (!src) return status("年間撮像上限のテーブルを読み込めていない（か、センサーの属性がテーブルにない）", "bad");
+  if (!roleField(src, "sensor")) return status(`${src.label} にセンサーの属性（${src.fields.sensor}）がない`, "bad");
+  const v = rec ? rec.v : null;
+  const container = el("div", {});
+  const note = el("div", {});
+  let items = [];
+  const item = (role) => items.find((x) => x.role === role);
+  const value = (role) => { const it = item(role); return it ? it.fi.input.value.normalize("NFKC").trim() : ""; };
+  const build = () => {
+    const start = q ? q.a : { ...whereDefaults(src) };
+    if (!q && v) start[roleField(src, "sensor").name] = v.sensor || sensorShown(v) || v.name;
+    items = [];
+    const grid = el("div", { class: "grid" });
+    for (const role of PC.quotaRoles) {
+      const f = roleField(src, role);
+      if (!f) continue;
+      const info = QUOTA_INFO[role];
+      const fi = fieldInput(src, f, attr(start, f.name), { label: info.label, unit: info.unit, list: info.list, hint: info.hint, day: info.day, wide: role === "note", textarea: false, onchange: () => changed(role) });
+      grid.append(fi.node);
+      items.push({ role, fi, info });
+    }
+    for (const f of otherFields(src)) { const fi = fieldInput(src, f, attr(start, f.name), {}); grid.append(fi.node); items.push({ role: null, fi }); }
+    container.replaceChildren(grid);
+    check();
+    setTimeout(() => { const a = item(q ? "limit" : v ? "mode" : "sensor"); if (a) a.fi.input.focus(); }, 30);
+  };
+  function changed(role) {
+    // 当初の消費枚数を入れたら、数え始める日（空なら今日）も。
+    const from = item("countFrom");
+    if (role === "initialUsed" && from && !from.fi.input.value && Number(value("initialUsed")) > 0) { from.fi.input.value = todayJst(); from.fi.mark(); }
+    check();
+  }
+  function check() {
+    const sensor = value("sensor"), mode = value("mode");
+    const msgs = [], infos = [];
+    const users = plain(sensor) ? S.sats.filter((r) => quotaKeys(r.v).has(plain(sensor))) : [];
+    if (sensor && !users.length) msgs.push(`「${sensor}」を使う衛星がない（センサーモードのセンサー名・衛星の「センサー」・衛星名・ID のどれとも合わない。プラグインはどの撮像も数えない）`);
+    if (users.length) {
+      const names = [...new Set(users.flatMap((r) => satModes(r.v)))];
+      if (mode && names.length && !names.some((x) => plain(x) === plain(mode))) msgs.push(`モード「${mode}」は「${sensor}」のモード（${names.join("・")}）にない（どの撮像も数えない）`);
+      infos.push(`数える衛星: ${users.map((r) => r.v.name + (r.v.mode ? `・${r.v.mode}` : "")).join("、")}${mode ? `（モード「${mode}」の撮像だけ）` : "（全モードの撮像）"}`);
+    }
+    const twins = quotaTwins(sensor, mode, q);
+    if (twins.length) msgs.push(`同じセンサー・モードの行がもうある（${twins.map(recordMeta).join("・")}）。1 行にまとめる`);
+    note.replaceChildren(...(msgs.length ? [el("div", { class: "box warn" }, el("ul", {}, msgs.map((x) => el("li", { text: x }))))] : []),
+      ...infos.map((x) => el("p", { class: "note", text: x })));
+  }
+  const pick = !q && tables.length > 1 ? el("select", { onchange: () => { src = tables.find((t) => t.id === pick.value); build(); } }, tables.map((t) => el("option", { value: t.id, text: t.label }))) : null;
+  build();
+  const done = await modal(q ? "年間撮像上限の編集" : "年間撮像上限の追加", [
+    pick ? el("div", { class: "fld", style: "max-width: 360px" }, el("div", { class: "lab", text: "追加するテーブル" }), pick) : null,
+    container, note,
+  ], [{ label: "やめる", value: null }, { label: q ? "保存" : "追加", value: true, cls: "primary" }], async () => {
+    const changes = {}, errors = [];
+    for (const it of items) {
+      const x = it.fi.read();
+      const bad = x.error || (it.info ? checkRole(it.info, x.value) : null);
+      it.fi.err.textContent = bad || "";
+      it.fi.input.classList.toggle("invalid", Boolean(bad));
+      if (bad) { errors.push(`${it.info ? it.info.label : it.fi.field.alias || it.fi.field.name}: ${bad}`); continue; }
+      if (q && !it.fi.dirty()) continue;
+      if (!q && (x.value === null || x.value === "")) continue;
+      changes[it.fi.field.name] = x.value;
+    }
+    const sensor = value("sensor"), month = value("startMonth");
+    if (!sensor) errors.push("センサーを入れる");
+    if (month && !(Number(month) >= 1 && Number(month) <= 12)) errors.push("年の始まりの月は 1〜12");
+    if (Number(value("initialUsed")) > 0 && item("countFrom") && !value("countFrom")) errors.push("当初の消費枚数を入れたら、数え始める日（その枚数の時点）も入れる");
+    if (quotaTwins(sensor, value("mode"), q).length) errors.push("同じセンサー・モードの行がもうある（その行を直す）");
+    if (errors.length) throw new Error(errors.join("\n"));
+    if (q && !Object.keys(changes).length) return true;
+    requireUser([src]);
+    if (q) {
+      const latest = await fetchRow(src, q.oid);
+      if (!latest) throw new Error("この行はほかの人が削除した（閉じて読み直す）");
+      const c = await resolveConflict(src, q.a, latest);
+      if (c === "reload") return null;
+      if (c !== true) return false;
+      await applyEdits(src, { updates: [{ [src.oidField]: q.oid, ...changes }] });
+    } else await applyEdits(src, { adds: [changes] });
+    status(`${q ? "保存" : "追加"}した（年間撮像上限「${sensor}（${value("mode") || "全モード"}）」）`);
+    return true;
+  });
+  if (done) await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+async function deleteQuota(rec, q) {
+  const ok = await confirmBox("年間撮像上限の削除", [el("p", { text: `年間撮像上限「${quotaLabel(q)}」の行を削除する。元に戻せない（プラグインはこのセンサー・モードの割り当てを上限で止めなくなる）。` })], "削除する", true);
+  if (!ok) return;
+  try {
+    await applyEdits(q.src, { deletes: [q.oid] });
+    status(`削除した（年間撮像上限「${quotaLabel(q)}」）`);
+  } catch (e) { status(e.message, "bad"); }
+  await loadAll(() => (rec ? findSel(rec) : S.sel));
+}
+
 // ---- つながりのない行
 
 function orphanRows() {
@@ -1972,12 +2211,14 @@ function orphanRows() {
   const modes = S.modes.filter((m) => !used.has(keyOf(modeSensor(m))));
   const names = new Set(S.sats.flatMap((r) => [plain(r.v.name), plain(r.v.id)]).filter(Boolean));
   const aliases = S.aliases.filter((r) => !names.has(plain(aliasSat(r))));
-  return { modes, aliases };
+  const linked = new Set(S.sats.flatMap((r) => r.v.quotas));
+  const quotas = S.quotas.filter((q) => !linked.has(q));
+  return { modes, aliases, quotas };
 }
 function orphansPage() {
-  const { modes, aliases } = orphanRows();
+  const { modes, aliases, quotas } = orphanRows();
   const out = [el("h2", { class: "title", text: "つながりのない行" }),
-    el("p", { class: "help", text: "どの衛星にも使われないセンサーモードと、カタログにない衛星名の別名。衛星を消した残り・名前の打ち間違いなど。衛星の名前・センサー名を直すか、ここで消す。" })];
+    el("p", { class: "help", text: "どの衛星にも使われないセンサーモード、カタログにない衛星名の別名、どの衛星のセンサーにも合わない年間撮像上限。衛星を消した残り・名前の打ち間違いなど。衛星の名前・センサー名を直すか、ここで消す。" })];
   const sbody = el("div", { class: "body" });
   out.push(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: `センサーモード（${modes.length}）` })), sbody));
   if (!modes.length) sbody.append(el("p", { class: "empty", text: "なし" }));
@@ -2002,6 +2243,18 @@ function orphansPage() {
       el("td", { class: "tools" }, el("button", { type: "button", class: "small", text: "編集", onclick: () => editAlias(null, r) }), " ",
         el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteAlias(null, r) }))));
     abody.append(t, el("div", { class: "bar" }, el("button", { type: "button", class: "small danger", text: "別名を全部削除", onclick: () => deleteRows(aliases, `別名 ${aliases.length} 行`) })));
+  }
+  if (S.cfg.quotas.length) {
+    const qbody = el("div", { class: "body" });
+    out.push(el("div", { class: "card" }, el("div", { class: "head" }, el("h3", { text: `年間撮像上限（${quotas.length}）` })), qbody));
+    if (!quotas.length) qbody.append(el("p", { class: "empty", text: "なし" }));
+    else {
+      const t = el("table", { class: "list" }, el("tr", {}, el("th", { text: "センサー" }), el("th", { text: "モード" }), el("th", { text: "年間上限" }), el("th", {})));
+      for (const q of quotas) t.append(el("tr", {}, el("td", { text: quotaSensor(q) || "（空）" }), el("td", { text: quotaMode(q) || "全モード" }), el("td", { text: text(quotaGet(q, "limit")) }),
+        el("td", { class: "tools" }, el("button", { type: "button", class: "small", text: "編集", onclick: () => editQuota(null, q) }), " ",
+          el("button", { type: "button", class: "small danger", text: "削除", onclick: () => deleteQuota(null, q) }))));
+      qbody.append(t);
+    }
   }
   return out;
 }

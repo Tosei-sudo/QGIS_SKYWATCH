@@ -71,7 +71,7 @@ MENU = "SKYWATCH"
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
-    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定"]),
+    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "年間撮像上限…"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
@@ -477,6 +477,12 @@ class SkywatchPlugin:
         # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
         self.docks["SatObsImagingPlan"].make_requests = self._requests_from_plan
         self._wire_catalog()
+        # 「年間撮像上限」: what each sensor's (mode's) yearly quota has used and left, and shots not counted (tsudo, 2026-11-11).
+        quotas = QAction(icon("quotas"), tr("年間撮像上限…"), self.iface.mainWindow())
+        quotas.setObjectName("SatObsQuotas")
+        quotas.triggered.connect(lambda _on=False: self.open_quotas())
+        self._add_to_menu(quotas)
+        self.actions.append(quotas)
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
         self._add_to_menu(moving)
@@ -1047,6 +1053,14 @@ class SkywatchPlugin:
         dock.raise_()
         if hasattr(dock, "select"):
             dock.select(path)
+
+    def open_quotas(self):
+        """Opens 「年間撮像上限」 (from the 「撮像計画ファイル出力」 dock's store, today's year)."""
+        dock = self.docks["SatObsPlanFiles"]
+        if dock.store is None:
+            self.iface.messageBar().pushInfo("SKYWATCH", tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            return None
+        return dock.show_quotas()
 
     def open_moving_targets(self, layer=None) -> MovingTargetDialog:
         """Opens 「移動目標撮像計画」 (once; kept while the plugin is loaded)."""
