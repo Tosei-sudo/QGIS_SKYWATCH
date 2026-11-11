@@ -19,7 +19,8 @@ written before, with the place names when there are named areas) and
 
 Besides a record's own values a column can take what is found from where it
 is: its place (the smallest named area holding it, as the 通報: `place`,
-`placeKind`, all of them smallest first `places`), the geofences it is in
+`placeKind`, all of them smallest first `places`; among the areas of some
+kinds only with `placeKinds`, schema `x-placeKinds`), the geofences it is in
 (`geofences`), its coordinate in MGRS, UTM or degrees-minutes-seconds, and
 of the file: when and by whom it was written, the period and place asked.
 """
@@ -40,7 +41,8 @@ from ..util import formula_safe, is_number, is_record, js_string
 from ..request.export import _coerce, format_time, printf
 from ..request.schema import resolve, validate
 from .alerts import (
-    DEFAULT_FENCE_FIELDS, DEFAULT_PLACE_FIELDS, EsriSource, Geofence, NamedArea, at_least, esri_source_of, inside_rings, places_of,
+    DEFAULT_FENCE_FIELDS, DEFAULT_PLACE_FIELDS, EsriSource, Geofence, NamedArea, at_least, esri_source_of, inside_rings, of_kinds,
+    place_kinds_of, places_of,
 )
 from .csv import observations_csv
 from .flows import time_key
@@ -94,6 +96,8 @@ class ExportColumn:
     empty: Any = None
     prefix: str = ""
     suffix: str = ""
+    #: `place`, `placeKind`, `places`: only the named areas of these kinds (KIND, any case); all when empty.
+    place_kinds: tuple[str, ...] = ()
 
 
 @dataclass
@@ -203,6 +207,10 @@ def _column_of(v: Any, at: str, problems: list[str]) -> Optional[ExportColumn]:
     for key in ("prefix", "suffix"):
         if key in v and not isinstance(v[key], str):
             problems.append(f"{at}.{key} は文字列で指定")
+    kinds = place_kinds_of(v.get("placeKinds"), at, problems)
+    if kinds and source not in PLACE_SOURCES:
+        problems.append(f"{at} の placeKinds は地名の項目（{'・'.join(PLACE_SOURCES)}）だけに指定")
+        kinds = ()
     return ExportColumn(
         key=v["key"].strip(), source=source, value=v.get("value"),
         format=v["format"] if isinstance(v.get("format"), str) and v["format"] else None,
@@ -213,6 +221,7 @@ def _column_of(v: Any, at: str, problems: list[str]) -> Optional[ExportColumn]:
         empty=v.get("empty"),
         prefix=v["prefix"] if isinstance(v.get("prefix"), str) else "",
         suffix=v["suffix"] if isinstance(v.get("suffix"), str) else "",
+        place_kinds=kinds,
     )
 
 
@@ -470,14 +479,15 @@ def raw_value(item: Optional[ExportItem], col: ExportColumn, index: int, ctx: Ex
             return f"{to_fixed(o.lat, digits)},{to_fixed(o.lon, digits)}"
         return f"POINT ({to_fixed(o.lon, digits)} {to_fixed(o.lat, digits)})"
     point = (o.lon, o.lat)
+    places = of_kinds(item.places, col.place_kinds) if col.place_kinds else item.places
     return {
         "id": o.id, "objectId": o.object_id, "objectName": o.object_name, "activity": o.activity, "present": o.present,
         "confidence": o.confidence or "", "imageTime": o.image_time, "imageId": o.image_id, "imageName": o.image_name,
         "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "note": o.note,
         "recordedBy": o.recorded_by or "", "updatedBy": o.updated_by or "", "created": o.created_at, "updated": o.updated_at,
         "deleted": o.deleted_at,
-        "place": item.places[0].name if item.places else "", "placeKind": item.places[0].kind if item.places else "",
-        "places": "・".join(dict.fromkeys(a.name for a in item.places)), "geofences": "・".join(item.fences),
+        "place": places[0].name if places else "", "placeKind": places[0].kind if places else "",
+        "places": "・".join(dict.fromkeys(a.name for a in places)), "geofences": "・".join(item.fences),
         "latLon": format_lat_lon(point), "dms": format_dms(point), "mgrs": format_mgrs(point) or "", "utm": format_utm(point) or "",
         "index": index + 1,
     }.get(s or "", _MISSING)
@@ -557,6 +567,7 @@ def build(schema: Any, root: dict, item: Optional[ExportItem], index: int, items
             level=schema.get("x-level") if isinstance(schema.get("x-level"), int) and schema.get("x-level") else None,
             geometry=schema.get("x-geometry") if schema.get("x-geometry") in GEOMETRIES else None,
             empty=schema.get("x-empty"),
+            place_kinds=place_kinds_of(schema.get("x-placeKinds"), "", [], "x-placeKinds") if source in PLACE_SOURCES else (),
         )
         types = schema.get("type")
         types = types if isinstance(types, list) else [types] if types else []

@@ -53,7 +53,7 @@ from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, occurrence_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
-from ..core.request.follow import follow_and_save, found_text, missed_ids
+from ..core.request.follow import follow_and_save, found_text, missed_ids, with_settled_times
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
@@ -422,7 +422,9 @@ class PlanFileDock(PluginDock):
                 by_id = {r.id: r for r in requests}
                 names = self.context.satellite_names(client, task.isCanceled)
                 problems = []
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled,
+                # With the times of the day already taken of a request taken several times a day.
+                rows = with_settled_times(client, store, token, history, by_id, task.isCanceled)
+                found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
                                                  problems)
                 if found:
                     notes.append(found_text(found))

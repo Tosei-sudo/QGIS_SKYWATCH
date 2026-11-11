@@ -20,7 +20,7 @@ from ..time_query import between_condition, text_sample
 from ..time_zone import read_text_instant
 from .model import ImagingRequest
 from .model import day_bounds
-from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests
+from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, history_where, load_history, update_history, update_requests
 
 
 @dataclass
@@ -374,3 +374,30 @@ def save_marked(client: EsriClient, store: RequestStoreConfig, token: Optional[s
 def found_text(found: Sequence[Finding]) -> str:
     taken = sum(1 for f in found if f.captured == "撮像済み")
     return f"撮像済み {taken} 件・未撮像 {len(found) - taken} 件を確認"
+
+
+def with_settled_times(client: EsriClient, store: RequestStoreConfig, token: Optional[str], history: Sequence[HistoryRow],
+                       requests: dict, cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """
+    The rows to follow up: `history` (the rows still open) and, for a request
+    taken several times a day (1 日の回数) with a time of a day still open,
+    that day's rows already 撮像済み. Without them a time settled by an
+    earlier follow-up was not known: its image was taken again by the next
+    time, and the day never counted n (the follow-up run every few minutes,
+    core/request/follow_job.py, settles the times one by one).
+    """
+    pairs = set()
+    for r in history:
+        req = requests.get(r.request_id)
+        if r.result == "採用" and r.captured == "未判定" and (r.occurrence > 1 or (req is not None and req.times[1] > 1)):
+            pairs.add((r.request_id, r.day))
+    if not pairs or not store.history:
+        return list(history)
+    captured = store.history_fields["captured"]
+    days = sorted(day for _, day in pairs)
+    where = (f"({history_where(store, first=days[0], last=days[-1], request_ids=sorted({rid for rid, _ in pairs}))})"
+             f" AND {captured} = '撮像済み'")
+    known = {r.object_id for r in history if r.object_id is not None}
+    extra = [r for r in load_history(client, store, token, where, cancelled=cancelled)
+             if (r.request_id, r.day) in pairs and r.object_id not in known]
+    return [*history, *extra]

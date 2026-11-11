@@ -352,12 +352,59 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 「照合…」で計画と実績の照合。対象日の範囲を選び、出力した依頼が撮れたかを画像カタログと突き合わせて、システムごとの撮像済み・未撮像・未判定と撮像率を出す。衛星を指定した依頼は、その衛星（衛星名の対応表 `satelliteAliases` の別名も）の画像だけを撮像済みとする。指定のない依頼はどの衛星の画像でもよい
   - 未撮像の依頼は次回の「計算」に持ち越す（曜日・N 日ごとの定点も、その日が繰り返しの日でなくても候補に入る。期間内に限る）。繰り上げの候補にもなる
   - カタログへの登録が遅れたときなどは、照合の一覧で「撮像済みにする」「未撮像にする」で直せる（台帳の繰り上げ・完了も合わせて直る）
+  - 照合は QGIS なしでも定期的に実行できる（2026-11-11）。プラグインに入っている `scheduled_follow.py` を Windows のタスクスケジューラに登録する（[定期照合（タスクスケジューラ）](#定期照合タスクスケジューラ)）
 - 「撮像予定」ドック: カレンダーで日を選ぶと、その日の計画（出力履歴の行）を一覧と地図に出す。状態は 採用・不明・不採用・見送り・要求外（システム側の定常の撮像など、依頼していない計画）。カレンダーは計画のある日が太字（計画に入ったものがあれば緑、採否不明だけなら青）
   - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用（・不明）を記録する。ファイルの様式はオーダーファイルと同じく自由に決められる（CSV は列ごとに何の値か・読み替え・書式・抜き出し、JSON は記録の中の場所かシステムの JSON Schema に `x-target`。設定ファイル作成ツールで組んで試し読みできる。[docs/imaging-requests.md](docs/imaging-requests.md) §20）。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
   - 「採用」「不採用」「不明に戻す」で手入力（理由も書ける）。「要求外を追加…」で依頼していない計画を手で足す（名称・システム・衛星・日時・範囲）。要求外は「削除」で消せる
   - 一覧の「まとめ」に、依頼ごとにどう撮るか（「22:00 単独」「22:00 まとめ 3 件（B・C と）」「22:00 同乗（「A」の撮像）」）を出す（吹き出しに撮像の時刻・衛星・角度・シーン数・まとめた依頼）。地図は依頼の範囲を状態の色で塗り、撮像の範囲（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)）があれば破線で重ねる（「撮像の範囲」で出し入れ）。依頼を選ぶと、その撮像と同じ撮像の依頼も太く出す
   - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする（撮像の範囲があれば、もう 1 つの一時レイヤー「撮像の範囲」も）
   - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
+
+### 定期照合（タスクスケジューラ）
+
+出力した依頼が撮れたかの照合（撮像済み・未撮像の判定、台帳の繰り上げの戻しと期間内1回の完了、画像の入着による採用）を、QGIS を起動せずに定期的に実行する（tsudo、2026-11-11）。「計算」「照合…」の最初にしている照合と同じ処理（`core/request/follow.py`）で、ほかは何もしない（ファイルは書かない。繰り上げの候補は次の「計算」で出る）。
+
+- 実行するもの: プラグインのフォルダの `scheduled_follow.py`（中身は `skywatch/core/request/follow_job.py`）。QGIS の Python で動かす（QGIS 自体は起動しない。NumPy の入った Python なら QGIS の Python でなくてもよい）。プラグインを更新すればツールも同じ版になる
+- 対象: `requestStores` のうち出力履歴（`history`）のある台帳すべて（`--store ラベル` で絞れる）。照合に使う画像カタログは「撮像計画ファイル出力」と同じ（`requestStores[].catalog`、なければ最初のカタログ）
+- 読むもの: 判定待ちの出力履歴（採用・未判定）と、その依頼だけの台帳（台帳全体は読まない）。対象日が始まった判定待ちの (依頼, 日) ごとに画像カタログへ 1 回問い合わせる。判定待ちがなければ画像カタログにも台帳にも問い合わせない
+- 1 日に何回も撮る依頼（1 日の回数）は、先の回で撮像済みになった画像を次の回に数えない（数分おきの照合で回が 1 つずつ撮像済みになっても、回ごとに別の画像を結び付ける）。「計算」「照合…」の照合も同じ
+- サインイン: 設定ファイルの `token`。または `--user` か `--credential` で、サーバー（ポータル）の generateToken でトークンを取る（サーバーごとに実行のたびに 1 回。パスワードは https のときだけ送る）。パスワードは Windows の資格情報マネージャー（`--credential 名前`）か環境変数 `SKYWATCH_PASSWORD`（`--user ユーザー名` と一緒に）。QGIS の認証設定（`authcfg`）と統合 Windows 認証はこのツールでは使えない
+- 通信: Windows のプロキシの設定と証明書ストアを使う。社内の認証局の証明書がストアにない場合は `--ca-file 証明書.pem`。読み込み 60 秒・書き込み 180 秒で応答がなければ失敗
+- 更新者: 台帳・出力履歴の `UPDATED_USER` など（[`editTracking`](#作成者更新者の記録edittracking)）と監査ログの user は、タスクを実行するアカウント（`USERNAME`）。`--editor 定期照合` のように決めた名前にもできる
+- 監査ログ（[`auditLog`](#監査ログauditlog)）: 書き込みをした回だけ、その回の書き込みを 1 セッションとして記録する（何も変えなかった回は書かない）。送信先フォルダへは `sendMinutes`（既定 10 分）に 1 回まで送り、それまでは PC に控える
+- 多重起動しない: 前の回がまだ動いていれば、その回は何もせずに終わる（ロックはプロセスが終われば外れる）。1 回の上限は `--time-limit`（既定 15 分）で、過ぎたら残りは次の回
+- ログ: `%LOCALAPPDATA%\SKYWATCH\scheduled_follow\follow-YYYYMMDD.log`（`--folder` で変更、`--keep-days` 日（既定 30 日）で消す）。1 回ごとに台帳ごとの結果（「12 行を照合、撮像済み 2 件・未撮像 0 件を確認（台帳を更新）」「照合する行なし」）と失敗の理由
+- 終了コード: 0 は完了（照合するものがない・前の回が実行中も 0）、1 は読めない・保存できない台帳があった（次の回にもう一度）、2 は設定ファイルやオプションの誤り
+
+**実行の間隔**: 5 分おきで問題ない。1 回の問い合わせは、判定待ちの (依頼, 日) の数 ＋ 数回（出力履歴・台帳・レイヤーの情報）で、判定待ちが 50 件なら 5 分に 60 回ほど（1 秒に 0.2 回）。どれも範囲と日付で絞った軽い問い合わせ。画像カタログへの登録が 1 時間おきなどなら、それより短くしても速くはならないので 15〜30 分でよい。
+
+**登録の手順**（QGIS 3.34 の例。パスは環境に合わせる）:
+
+1. 実行するコマンドをバッチファイルにする（タスクスケジューラのコマンド欄は 261 文字までで、引用符も入れにくいため）。例 `C:\SKYWATCH\follow.bat`:
+
+   ```bat
+   @echo off
+   call "C:\Program Files\QGIS 3.34.12\bin\python-qgis-ltr.bat" "%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\skywatch\scheduled_follow.py" --config "\\fileserver\gis\skywatch\config.json" --quiet
+   exit /b %ERRORLEVEL%
+   ```
+
+   LTR でない QGIS は `python-qgis.bat`。`--config` を省くとプラグインのフォルダの `config.json`（配布用 zip に同梱したもの）。設定ファイルの URL も指定できる。タスクを実行するアカウントで一度コマンドプロンプトから実行し（`--quiet` を外すと画面にも出る）、ログの結果を確かめる
+2. サインインが要るときは、同じアカウントでパスワードを資格情報マネージャーに入れ（パスワードは聞かれたときに入力）、バッチファイルのコマンドに `--credential SKYWATCH` を足す:
+
+   ```bat
+   cmdkey /generic:SKYWATCH /user:svc_skywatch /pass
+   ```
+
+3. タスクスケジューラに 5 分おきで登録する（コマンドプロンプトで。`/RU` は実行するアカウント、パスワードを聞かれる。パスワードを保存するので、ログオンしていなくても動き、ウィンドウも出ない）:
+
+   ```bat
+   schtasks /Create /TN "SKYWATCH\scheduled_follow" /SC MINUTE /MO 5 /TR "C:\SKYWATCH\follow.bat" /RU %USERDOMAIN%\%USERNAME% /RP
+   ```
+
+   画面で登録するなら「タスクの作成」で、「全般」は「ユーザーがログオンしているかどうかにかかわらず実行する」（「パスワードを保存しない」にはしない: 資格情報マネージャーとネットワークのフォルダが使えなくなる）、「トリガー」は 1 回・「繰り返し間隔: 5 分間」・「継続時間: 無期限」、「操作」はプログラムの開始で `C:\SKYWATCH\follow.bat`、「設定」の「タスクが既に実行中の場合」は「新しいインスタンスを開始しない」（既定）
+4. 動いているかは、ログ（`%LOCALAPPDATA%\SKYWATCH\scheduled_follow\`）とタスクスケジューラの「前回の実行結果」（0x0 が完了、0x1 は一部失敗、0x2 は設定の誤り）で確かめる
+
+注意: 同じ時刻に「計算」で照合が走っても同じ結果を書くだけで、壊れない。照合の直後に「置き換えて書き出し」で消えた行への保存は失敗としてログに出るだけ（次の回は新しい行を照合する）。
 
 ## 移動目標撮像計画
 
@@ -496,7 +543,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`GEOFENCE_NAME`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない。2026-11-10 より前の既定は `AREA`。`GEOFENCE_NAME` がなく `AREA` だけのテーブルはそのまま読む）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
 - ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）、`NAME_EN`（英語の名前。なくてもよい）。記録が入っているジオフェンスの名前は項目 `area`（英語は `area.en`）
-- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略、`fallback` で座標など別の項目）。`NAME_EN`・`KIND_EN`（英語の地名・種類。なくてもよい）は項目 `place.en`・`placeKind.en`・`places.en`。レイヤー全体は読まず、記録のある場所の分だけ読んで PC に控える（下の「[地名・国の控え](#地名国の控え)」）
+- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略、`fallback` で座標など別の項目）。`NAME_EN`・`KIND_EN`（英語の地名・種類。なくてもよい）は項目 `place.en`・`placeKind.en`・`places.en`。項目ごとに種類で選べる（`placeKinds`。港と桟橋を別の項目に、など。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。レイヤー全体は読まず、記録のある場所の分だけ読んで PC に控える（下の「[地名・国の控え](#地名国の控え)」）
 - 国（`countries`。なくてもよい）: 国のポリゴンのレイヤー。`COUNTRY_CODE`（国コード。ISO 3166 の `JP`・`JPN` など、レイヤーにあるもの）、`COUNTRY_NAME`（国名）、`COUNTRY_NAME_EN`（英語の国名。なくてもよい）、`ACTIVE`。記録を含む国（重なればいちばん小さいもの）の国コードが項目 `country`、国名が `countryName`（英語は `countryName.en`）。陸地だけのレイヤーなら海上の記録には付かない（領海・EEZ を含めた範囲にするか、`empty`・`fallback` で）。ほかのシステムの国境レイヤーでもよく、属性名が違えば `fields` で合わせる（`{ "url": …, "fields": { "code": "ISO_A3", "name": "NAME_JA", "nameEn": "NAME_EN" } }`）。読み方と控えは地名と同じ（国境の細かい大きなポリゴンも、使った国だけを一度読む）
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
 - 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`・`nameEn`／`name`・`kind`・`active`・`nameEn`・`kindEn`／`code`・`name`・`nameEn`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
@@ -506,7 +553,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | キー | 中身 | 既定 |
 | --- | --- | --- |
 | `name` | フォーマットの名前（必須。通報テーブルの `REPORT_NAME`） | — |
-| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "timeZone", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty", "join", "fallback" }`、固定の文字は `{ "text": "…" }`。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」も。日時の項目は `format` でその項目だけの書式（`"%Y/%m/%d"` で日付だけ、`"%H:%M"` で時刻だけ）、`timeZone` でその項目だけのタイムゾーン（`{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }` で UTC の時刻。ゾーン名は `%z`（`+0900`）か `suffix` で付ける）。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く）。`fallback` は値が空のときに代わりに書く項目、`join` は 1 つの項目に並べる値の間の文字 | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
+| `fields` | 行の項目と順番。項目名、または `{ "source", "format", "timeZone", "digits", "level", "map", "empty", "prefix", "suffix", "omitEmpty", "join", "fallback", "placeKinds" }`、固定の文字は `{ "text": "…" }`。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」も。日時の項目は `format` でその項目だけの書式（`"%Y/%m/%d"` で日付だけ、`"%H:%M"` で時刻だけ）、`timeZone` でその項目だけのタイムゾーン（`{ "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" }` で UTC の時刻。ゾーン名は `%z`（`+0900`）か `suffix` で付ける）。`empty` は値が空のときに書く文字、`prefix`・`suffix` は値があるときだけ前後に付ける文字（`{ "source": "place", "prefix": "（", "suffix": "付近）" }`）、`omitEmpty: true` は空のときその項目を区切り文字ごと省く（`empty` があればそちらを書く）。`fallback` は値が空のときに代わりに書く項目、`join` は 1 つの項目に並べる値の間の文字、`placeKinds` は地名の項目をその種類（`KIND`）の地名だけから選ぶ（`{ "source": "place", "placeKinds": "港" }`） | `imageTime`・`kind`・`objectName`・`activity`・`confidence`・`lat`・`lon`・`area`・`note` |
 | `delimiter` | 区切り文字（タブは `"\t"`） | `\|` |
 | `escape` | 値の中の区切り文字・改行の置き換え | 空白 |
 | `header`・`footer` | 文字列か行の配列。`{date}`（今を `dateFormat` で）・`{now:%Y%m%d}`（今を書式で）・`{count}`・`{name}`・`{user}`。`@` のあとにタイムゾーンを書くとそのゾーンで（`{now:%H:%M@UTC}`・`{date@UTC}`） | なし |
@@ -536,6 +583,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   | `confidence` | 記録の確度（設定の `confidences`） | `confidence.en`・`confidence.code`（`{ "label": "確定", "code": "A" }` のように書いたキー）・`confidence.note` |
 
   属性名は、まずその設定の `fields` の役割（国は `code`・`name`・`nameEn`、地名は `name`・`kind`・`nameEn`・`kindEn`、ジオフェンスは `name`・`nameEn`・`weight`、条件は `kind`・`note`・`area`・`minConfidence`・`weight` など）、なければレイヤーの属性名そのもの（大文字小文字は問わない。`fields` に書かなくてよい）。`.en` は役割 `nameEn`（確度は `en`）。ないもの・当てはまらないときは空（`fallback`・`empty` で補う）。`places`・`area`・`rule` は値が複数なら `join`（既定「・」、英語の属性（`.en`・`…En`・`…_EN`）は「, 」）でつなぎ、`digits` はそれぞれの数に効く。値が 1 つの数なら、通報テーブルの数の属性（`columns`）には数のまま書く
+- **地名を種類で選ぶ**（`placeKinds`）: 地名の項目（`place`・`placeKind`・`places`・`place.en`・`placeKind.en`・`places.en`・`place.属性名`・`places.属性名`）に `placeKinds` を書くと、その種類（地名の `KIND` の値。文字列か配列、大文字小文字は問わない）の地名だけから選ぶ。記録を含むその種類の地名のうち、いちばん小さいものがその項目の地名。たとえば「舞鶴港」（`KIND` が 港）の中に「北吸桟橋」（`KIND` が 桟橋、属性 `PIER_NO` が 3）があれば、`{ "source": "place", "placeKinds": "港" }` は `舞鶴港`、`{ "source": "place", "placeKinds": "桟橋" }` は `北吸桟橋`、`{ "source": "place.PIER_NO", "placeKinds": "桟橋", "prefix": "No." }` は `No.3`（1 行に港と桟橋の両方を書ける）。`placeKinds` のない項目は今までどおり種類を問わずいちばん小さいもの。その種類の地名に入っていなければ空（`empty`・`omitEmpty`、別の種類なら `"fallback": { "source": "place", "placeKinds": "湾" }`）。`source` が配列のときは、地名の項目にだけ効く。地名のレイヤーに種類の属性（`namedAreas` の `fields.kind`、既定 `KIND`）がなければ、「抽出」のときに知らせる
 - **属性名の確かめ**: 設定を読むとき、読むレイヤーの設定がない `対象.属性名`（`alertReports.countries` なしの `country.code` など）と、どの確度にもないキーの `confidence.キー` は、常に空なので設定の問題として知らせる。レイヤーにある属性はファイルからはわからないので、「抽出」のときにそのレイヤーの属性の一覧を読んで照らし、ない属性（打ち間違い・まだ足していない属性。`place.en` の `NAME_EN` のような役割の属性も）を抽出の結果の欄とメッセージバーで知らせる（その値は空のまま書く）。[設定ファイル作成ツール](#設定ファイル作成ツールtoolsconfig_builderhtml) も同じ設定の問題を出し、役割でも設定に書いた属性名でもない名前は「確かめて」の注意にする（レイヤーは読まない）
 - **英語**: 項目名に `.en`（上の属性の書き方の 1 つ）。`confidence.en` は確度の英語名（[`observationVocabulary.confidences`](#設定ファイルの書き方) の `{ "label": "確定", "en": "Confirmed" }`。既定の確定・推定・不明は `Confirmed`・`Probable`・`Unknown`）、`area.en` はジオフェンスの `NAME_EN`、`place.en`・`places.en`・`placeKind.en` は地名の `NAME_EN`・`KIND_EN`、`countryName.en` は国の `COUNTRY_NAME_EN`。英語名のないものは空（ジオフェンス・地名を並べる `area.en`・`places.en` では、英語名のあるものだけ）。日本語で書くなら `{ "source": "place.en", "fallback": "place" }`。並べる項目の間は日本語が「・」、英語が「, 」（`join` で変えられる。`area`・`rule`・`places` と英語のものだけ）
 
@@ -564,7 +612,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
       "fields": [{ "source": "imageTime", "format": "%Y/%m/%d" }, { "source": "imageTime", "format": "%H:%M", "suffix": "JST" },
                  { "source": "imageTime", "format": "%H%M", "timeZone": "UTC", "suffix": "Z" },
                  { "source": "kind", "level": 1 }, "objectName", "activity",
-                 { "source": "place", "omitEmpty": true }, { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
+                 { "source": "place", "placeKinds": "港", "omitEmpty": true }, { "source": "place", "placeKinds": "桟橋", "omitEmpty": true },
+                 { "source": "lat", "digits": 4 }, { "source": "lon", "digits": 4 }, "area", "rule"],
       "header": "【注目】{date} JST（{now:%H%M@UTC}Z） {count}件", "footer": "以上" },
     { "name": "English", "delimiter": "/", "timeZone": "UTC", "dateFormat": "%d%H%MZ %b %y",
       "fields": ["imageTime", "objectName", "confidence.en", { "source": "country", "empty": "--" },
@@ -596,7 +645,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - **場所**: すべての場所／地図の表示範囲（保存するときの範囲）／地図上に描いた範囲（「地図上に描く」でクリックして頂点、ダブルクリックか右クリックで閉じる。描いた範囲は紫で表示）／レイヤーの地物（ポリゴンレイヤー。「選択した地物のみ」も可）／地名（`namedAreas` の地名を選ぶ。同じ名前のポリゴンはどれに入っていてもよい）。記録の位置（点）が範囲の中にあるものだけ
 - **大分類**: 「すべての大分類」（既定。一覧の大分類の絞り込みに関わらずすべて）か、チェックした大分類だけ。確度（〜以上）、有無（ありのみ・なしのみ）、「削除済みの記録も含める」
 - 該当件数がすぐ出る。「保存…」でファイル名（フォーマットの `fileName`）を確かめて保存。地名・ジオフェンスを書くフォーマットなら保存のときに Esri から読む（地名は記録のある場所の分だけ、[控え](#地名国の控え)から。ジオフェンスは 10 分間覚えておく）。「地名で絞る」の選択肢だけは名前の一覧が要るので、地名のレイヤー全体を読む
-- **付加できる値**: 通報と同じ地名（`place`・`placeKind`・`places`）、ジオフェンス（`geofences`）、座標の表記（`latLon`・`dms`・`mgrs`・`utm`）、点の形（`geometry`）、ファイル全体の値（`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`）。地名・ジオフェンスのレイヤーは `observationExports.namedAreas`・`geofences`、なければ [`alertReports`](#通報注目の記録alertreports) の `namedAreas`・`geofences` を使う。どちらかがあれば組み込みのフォーマットにも列が付く（CSV は「地名」「地名の種別」「含まれる地名」「ジオフェンス」、JSON は `PLACE`・`PLACE_KIND`・`PLACES`・`GEOFENCES`）
+- **付加できる値**: 通報と同じ地名（`place`・`placeKind`・`places`。列の `placeKinds`、スキーマの `x-placeKinds` で通報と同じく種類で選ぶ）、ジオフェンス（`geofences`）、座標の表記（`latLon`・`dms`・`mgrs`・`utm`）、点の形（`geometry`）、ファイル全体の値（`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`）。地名・ジオフェンスのレイヤーは `observationExports.namedAreas`・`geofences`、なければ [`alertReports`](#通報注目の記録alertreports) の `namedAreas`・`geofences` を使う。どちらかがあれば組み込みのフォーマットにも列が付く（CSV は「地名」「地名の種別」「含まれる地名」「ジオフェンス」、JSON は `PLACE`・`PLACE_KIND`・`PLACES`・`GEOFENCES`）
 
 **フォーマット**（`formats`。撮像依頼の [`requestExports`](docs/imaging-requests.md) と同じく、CSV は列のキー、JSON は列か JSON Schema）:
 
@@ -604,8 +653,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | --- | --- | --- |
 | `name` | フォーマットの名前（必須。「標準（CSV）」「標準（JSON）」は使えない） | — |
 | `format` | `csv`・`json` | `csv` |
-| `columns` | 列（JSON ではプロパティ）の配列。`{ "key", "source", "value", "format", "map", "digits", "level", "geometry", "empty", "prefix", "suffix" }`、または項目名だけ（キーも同じ名前）。`value` は固定の値、`format` は日時の書式（`iso`・`iso-date`・`unix`・`unixms`・strftime）か数の書式（`%.3f`）、`map` は値の置き換え（`{ "true": "在", "false": "不在" }`）、`level` は `kind` の階層（1 が最上位、-1 が最下位）、`geometry` は `geojson`・`wkt`・`latlon`、`empty` は空のとき、`prefix`・`suffix` は値があるときだけ前後に付ける文字 | — |
-| `schema` | JSON のみ。JSON Schema（オブジェクトかファイルのパス）。プロパティの `x-source` が項目、記録の配列は `"x-source": "records"` と `items`。`x-format`・`x-map`・`x-digits`・`x-level`・`x-geometry`・`x-empty`。書いたあとスキーマで検査し、合わないところを画面に出す | なし（`columns` の配列） |
+| `columns` | 列（JSON ではプロパティ）の配列。`{ "key", "source", "value", "format", "map", "digits", "level", "geometry", "empty", "prefix", "suffix", "placeKinds" }`、または項目名だけ（キーも同じ名前）。`value` は固定の値、`format` は日時の書式（`iso`・`iso-date`・`unix`・`unixms`・strftime）か数の書式（`%.3f`）、`map` は値の置き換え（`{ "true": "在", "false": "不在" }`）、`level` は `kind` の階層（1 が最上位、-1 が最下位）、`geometry` は `geojson`・`wkt`・`latlon`、`empty` は空のとき、`prefix`・`suffix` は値があるときだけ前後に付ける文字、`placeKinds` は `place`・`placeKind`・`places` をその種類（`KIND`）の地名だけから選ぶ（`"港"`・`["港", "桟橋"]`） | — |
+| `schema` | JSON のみ。JSON Schema（オブジェクトかファイルのパス）。プロパティの `x-source` が項目、記録の配列は `"x-source": "records"` と `items`。`x-format`・`x-map`・`x-digits`・`x-level`・`x-geometry`・`x-empty`・`x-placeKinds`。書いたあとスキーマで検査し、合わないところを画面に出す | なし（`columns` の配列） |
 | `fileName` | 保存するファイル名。`{now:%Y%m%d_%H%M}`（今、`timeZone` で）・`{name}`・`{ext}` | `observations_{now:%Y%m%d_%H%M}.{ext}` |
 | `encoding` | `utf-8`・`utf-8-sig`・`cp932`（書けない文字は ? にして画面に出す） | CSV は `utf-8-sig`、JSON は `utf-8` |
 | `header` | CSV の見出し行 | `true` |
@@ -1349,6 +1398,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | URL で指定した AI のモデル | ユーザープロファイルの `ai_models/` |
 | `pathMappings` で選んだフォルダ、類似画像の許容差、カーソル位置の表記、担当とドックの開き方（最初の設定）、新規スクラッチレイヤーの保存済みテンプレート、Web マップのポータル | `QgsSettings` |
 | 入力の初期値（前回の入力） | `QgsSettings`（`skywatch/last_inputs/…`） |
+| 定期照合（`scheduled_follow.py`）のログ・ロック・監査ログの控え | `%LOCALAPPDATA%\SKYWATCH\scheduled_follow`（`--folder` で変更） |
 | 送信待ち（オフライン作業の変更・保存できなかった観測記録）とサーバーの控え | ユーザープロファイルの `skywatch/offline_work.sqlite` |
 | 地名・国のポリゴンの控え（通報・エクスポート・式の関数で使った場所の分） | ユーザープロファイルの `skywatch/place_cache.sqlite` |
 | 監査ログ（日ごとのファイルと、送り先に送った位置 `sent.json`） | ユーザープロファイルの `skywatch/audit/`（`auditLog.localFolder` で変更） |

@@ -28,8 +28,10 @@ named areas (`namedAreas`: place and facility names, maybe a kind). The
 smallest area holding the record is its place (`place`, `placeKind`; all of
 them smallest first `places`); a field can say what to write when it is in
 none (`empty`), or leave itself out (`omitEmpty`), and add text around a
-value only when there is one (`prefix`, `suffix`). Likewise a polygon layer
-of countries (`countries`) gives a record's country code and name.
+value only when there is one (`prefix`, `suffix`). A field can take its
+place among the areas of some kinds only (`placeKinds`, KIND: the 港 and
+the 桟橋 holding a record in two fields, 2026-11-11). Likewise a polygon
+layer of countries (`countries`) gives a record's country code and name.
 
 A field can hold several values (`source` as an array, joined by `join`:
 the latitude and longitude together), take another field when its own value
@@ -92,6 +94,9 @@ OBJECT_LAYERS = {
     "area": ("geofences", "alertReports.geofences（ジオフェンス）"),
     "rule": ("rules", "alertReports.rules（条件テーブル）"),
 }
+#: The fixed sources that name the record's named areas; with `place.<key>` and `places.<key>`, those that take `placeKinds`.
+PLACE_FIELD_SOURCES = ("place", "placeKind", "places", "place.en", "placeKind.en", "places.en")
+PLACE_OBJECTS = ("place", "places")
 #: The fixed sources that are a role of those layers' (`place.en` the named area's nameEn…), as `object.role`.
 FIXED_ROLES = {
     "country": ("country", "code"), "countryName": ("country", "name"), "countryName.en": ("country", "nameEn"),
@@ -170,6 +175,9 @@ class AlertField:
     join: Optional[str] = None
     #: Written instead when the value is empty (before `empty`).
     fallback: Optional["AlertField"] = None
+    #: A field of the named areas (`place`, `places`, `place.<key>`…): only the areas of these kinds
+    #: (KIND, any case) are the record's places for it — the smallest of them its place; all when empty.
+    place_kinds: tuple[str, ...] = ()
 
 
 @dataclass
@@ -385,7 +393,7 @@ def manual_items(records: Iterable[Observation], fences: Sequence[Geofence] = ()
 
 
 #: What a part of a field of several (`source` as an array) takes from the field when the part is a name.
-_INHERITED = ("format", "timeZone", "digits", "level", "map")
+_INHERITED = ("format", "timeZone", "digits", "level", "map", "placeKinds")
 
 
 def _applies(key: str, source: str, value: Any) -> bool:
@@ -399,7 +407,39 @@ def _applies(key: str, source: str, value: Any) -> bool:
         return source in NUMBER_SOURCES or (source not in SOURCES and _OBJECT_KEY.match(source) is not None)
     if key == "level":
         return source == "kind"
+    if key == "placeKinds":
+        return names_places(source)
     return True
+
+
+def names_places(source: Any) -> bool:
+    """Whether a source names the record's named areas (`place`, `places.en`, `place.PIER_NO`…): one that takes `placeKinds`."""
+    if not isinstance(source, str):
+        return False
+    if source in PLACE_FIELD_SOURCES:
+        return True
+    keyed = _OBJECT_KEY.match(source) if source not in SOURCES else None
+    return bool(keyed and keyed.group(1) in PLACE_OBJECTS)
+
+
+def place_kinds_of(raw: Any, at: str, problems: list[str], key: str = "placeKinds") -> tuple[str, ...]:
+    """`placeKinds`: the kinds (KIND values) of the named areas a field takes, a text or an array; () for any."""
+    if raw in (None, "", []):
+        return ()
+    items = raw if isinstance(raw, list) else [raw]
+    kinds = [js_string(k).strip() for k in items if isinstance(k, str) or (is_number(k) and not isinstance(k, bool))]
+    if len(kinds) != len(items) or not any(kinds):
+        problems.append(f"{at} の {key} は地名の種類（KIND の値）の文字列か配列で指定（\"港\"・[\"港\", \"泊地\"]）")
+        return ()
+    return tuple(dict.fromkeys(k for k in kinds if k))
+
+
+def of_kinds(areas: Sequence[NamedArea], kinds: Sequence[str]) -> list[NamedArea]:
+    """The named areas of some kinds (KIND, any case; the order kept); all of them when `kinds` is empty."""
+    if not kinds:
+        return list(areas)
+    wanted = {k.casefold() for k in kinds}
+    return [a for a in areas if a.kind.casefold() in wanted]
 
 
 def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
@@ -456,6 +496,11 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         problems.append(f"{at} の join は source が配列のときか、名前を並べる項目（{'・'.join(LIST_SOURCES)}・"
                         f"{'・'.join(o + '.属性名' for o in LIST_OBJECTS)}）だけに指定")
         join = None
+    kinds = place_kinds_of(v.get("placeKinds"), at, problems)
+    if kinds and not names_places(source):
+        problems.append(f"{at} の placeKinds は地名の項目（{'・'.join(PLACE_FIELD_SOURCES)}・"
+                        f"{'・'.join(o + '.属性名' for o in PLACE_OBJECTS)}）だけに指定")
+        kinds = ()
     return AlertField(
         source=source,
         format=fmt if isinstance(fmt, str) and fmt else None,
@@ -469,6 +514,7 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         omit_empty=_bool(v, "omitEmpty", at, problems, False),
         join=join,
         fallback=_fallback_of(v, at, problems),
+        place_kinds=kinds,
     )
 
 
@@ -802,6 +848,18 @@ def object_keys(settings: AlertSettings, fixed: bool = False) -> list[tuple[str,
     return list(out.values())
 
 
+def place_kind_uses(settings: AlertSettings) -> list[tuple[str, str]]:
+    """The fields that take their places by kind (`placeKinds`), each once a format (or a column): (where, source)."""
+    out: dict[tuple[str, str], None] = {}
+    for fmt in settings.formats:
+        tops = [(f"「{fmt.name}」", f) for f in fmt.fields] + [(f"「{fmt.name}」の columns.{a}", f) for a, f in fmt.columns.items()]
+        for where, top in tops:
+            for f in _fields_in(top):
+                if f.place_kinds:
+                    out.setdefault((where, f.source or ""), None)
+    return list(out)
+
+
 def level_key_problems(settings: AlertSettings, levels: Iterable[ConfidenceLevel]) -> list[str]:
     """`confidence.<key>` no 確度 level of the settings has (always written empty)."""
     extra = {k.lower() for level in levels for k in level.extra}
@@ -837,6 +895,13 @@ def layer_key_problems(settings: AlertSettings, layer_fields: dict[str, Iterable
         elif not any(n.lower() == key.lower() for n in names):
             shown = "・".join(names[:12]) + ("…" if len(names) > 12 else "")
             out.append(f"通報フォーマット{where}: {source} は {label}に属性「{key}」がないので空（属性: {shown or 'なし'}）")
+    named = settings.named_areas
+    if named is not None and "named_areas" in layer_fields:
+        kind = named.fields.get("kind", "")
+        if kind not in layer_fields["named_areas"]:
+            label = OBJECT_LAYERS["place"][1]
+            out.extend(f"通報フォーマット{where}: {source} の placeKinds は {label}に kind（種類）の属性「{kind}」がないので常に空"
+                       for where, source in place_kind_uses(settings))
     return out
 
 
@@ -1404,10 +1469,11 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         sep = f.join if f.join is not None else ", " if _english(s or "") else "・"
         return sep.join(dict.fromkeys(n for n in names if n))
 
+    places = of_kinds(item.places, f.place_kinds) if f.place_kinds else item.places
     keyed = _OBJECT_KEY.match(s or "") if s not in SOURCES else None
     if keyed:
         what, key = keyed.groups()
-        found = {"country": item.countries[:1], "place": item.places[:1], "places": item.places, "area": item.fences,
+        found = {"country": item.countries[:1], "place": places[:1], "places": places, "area": item.fences,
                  "rule": item.met, "confidence": [item.level] if item.level else []}[what]
         if what not in LIST_OBJECTS:
             return attribute_of(found[0], key) if found else None
@@ -1416,7 +1482,7 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
             return values[0]  # one: as it is (a number stays a number)
         return joined(to_fixed(v, f.digits) if f.digits is not None and is_number(v) and not isinstance(v, bool) and math.isfinite(v)
                       else js_string(v).strip() for v in values)
-    place = item.places[0] if item.places else None
+    place = places[0] if places else None
     country = item.countries[0] if item.countries else None
     return {
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": o.image_time, "objectId": o.object_id,
@@ -1427,11 +1493,11 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
         "similar": item.similar if item.score is not None else None,
         "place": place.name if place else "", "placeKind": place.kind if place else "",
-        "places": joined(a.name for a in item.places),
+        "places": joined(a.name for a in places),
         "country": country.code if country else "", "countryName": country.name if country else "",
         "confidence.en": item.confidence_en, "area.en": joined(item.areas_en),
         "place.en": place.name_en if place else "", "placeKind.en": place.kind_en if place else "",
-        "places.en": joined(a.name_en for a in item.places), "countryName.en": country.name_en if country else "",
+        "places.en": joined(a.name_en for a in places), "countryName.en": country.name_en if country else "",
     }.get(s or "")
 
 

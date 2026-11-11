@@ -404,6 +404,69 @@ def test_named_areas_smallest_place_cache_and_field_options():
     assert any("prefix" in p for p in problems) and any("omitEmpty" in p for p in problems)
 
 
+def test_place_fields_by_kind():
+    """
+    placeKinds (tsudo, 2026-11-11): a field takes its place among the named
+    areas of some kinds only, so one line can hold the 港 and the 桟橋 (and
+    its number) of the same record, whichever is the smallest.
+    """
+    from skywatch.core.obs.alerts import DEFAULT_PLACE_FIELDS, layer_key_problems, named_areas_of_features
+
+    def area(name, kind, box, **extra):
+        return {"attributes": {"NAME": name, "KIND": kind, **extra}, "geometry": {"rings": _box(*box)}}
+
+    areas = named_areas_of_features([
+        area("舞鶴湾", "湾", (134.8, 34.8, 135.6, 35.6)),
+        area("舞鶴港", "港", (134.9, 34.9, 135.3, 35.3)),
+        area("北吸桟橋", "桟橋", (134.99, 34.99, 135.01, 35.01), PIER_NO="3"),
+        area("前島桟橋", "桟橋", (135.2, 35.2, 135.22, 35.22), PIER_NO="5"),
+    ], DEFAULT_PLACE_FIELDS)
+    problems = []
+    s = alert_settings_of({"namedAreas": PLACE_URL, "minConfidence": "", "formats": [{"name": "a", "fields": [
+        "place",
+        {"source": "place", "placeKinds": "港"},
+        {"source": "place", "placeKinds": ["桟橋"], "empty": "-"},
+        {"source": "place.PIER_NO", "placeKinds": "桟橋", "prefix": "No."},
+        {"source": "places", "placeKinds": ["港", "湾"]},
+        {"source": "placeKind", "placeKinds": ["湾"]},
+        # Any case; one of a field of several takes it when it names places; a fallback its own.
+        {"source": "place", "placeKinds": "PIER", "fallback": {"source": "place", "placeKinds": "湾"}},
+        {"source": ["place", "lat"], "placeKinds": "港", "digits": 1, "join": " "},
+    ]}]}, problems)
+    assert problems == []
+    fmt = s.format()
+    assert fmt.fields[1].place_kinds == ("港",) and fmt.fields[7].parts[0].place_kinds == ("港",) and fmt.fields[7].parts[1].place_kinds == ()
+    items = select([obs(id="pier"), obs(id="port", lon=135.1, lat=35.1), obs(id="bay", lon=135.5, lat=35.5)], s, None, (),
+                   DEFAULT_CONFIDENCES, named=areas)
+    by = dict(zip([i.record.id for i in items], build_lines(items, fmt, Moment(now=T0))))
+    assert by["pier"] == "北吸桟橋|舞鶴港|北吸桟橋|No.3|舞鶴港・舞鶴湾|湾|舞鶴湾|舞鶴港 35.0"
+    assert by["port"] == "舞鶴港|舞鶴港|-||舞鶴港・舞鶴湾|湾|舞鶴湾|舞鶴港 35.1"
+    assert by["bay"] == "舞鶴湾||-||舞鶴湾|湾|舞鶴湾|35.5"
+    areas[2].kind = "Pier"
+    pier = [i for i in items if i.record.id == "pier"]
+    assert build_lines(pier, fmt, Moment(now=T0))[0].split("|")[6] == "北吸桟橋"
+
+    # Bad ones are said: not a kind, not a field of places, used by no part.
+    for fields, said in (
+        ([{"source": "place", "placeKinds": {"a": 1}}], "placeKinds は地名の種類"),
+        ([{"source": "place", "placeKinds": [True]}], "placeKinds は地名の種類"),
+        ([{"source": "objectName", "placeKinds": "港"}], "placeKinds は地名の項目"),
+        ([{"source": "area.name", "placeKinds": "港"}], "placeKinds は地名の項目"),
+        ([{"source": ["lat", "lon"], "placeKinds": "港"}], "placeKinds は source のどの項目にも使われない"),
+    ):
+        problems = []
+        f = _one(fields, problems)
+        assert any(said in p for p in problems), (fields, problems)
+        assert all(not x.place_kinds for x in f.fields)
+    # A layer without the kind's attribute: always empty (told at 抽出).
+    assert layer_key_problems(s, {"named_areas": ["NAME", "PIER_NO"]}) == [
+        "通報フォーマット「a」: placeKind は alertReports.namedAreas（地名）に kind の属性「KIND」がないので空",
+        *(f"通報フォーマット「a」: {src} の placeKinds は alertReports.namedAreas（地名）に kind（種類）の属性「KIND」がないので常に空"
+          for src in ("place", "place.PIER_NO", "places", "placeKind")),
+    ]
+    assert layer_key_problems(s, {"named_areas": ["NAME", "KIND", "PIER_NO"]}) == []
+
+
 def _one(fields, problems=None, **extra):
     """A format of these fields (the settings' problems in `problems`)."""
     p = [] if problems is None else problems
