@@ -932,3 +932,17 @@ tsudo「センサー、モードごとに、年間撮像枚数の上限がある
 - **選んだこと**: 上限を超える配置は「見送り」にする（警告だけにしない。手で採用すれば出せる）。見込みは残りから引く（出したのに撮れなかった分は、照合で未撮像になれば戻る）。モードが空の行はセンサー全体。
 
 実装: `core/request/quota.py`（`Quota`・`Window`・`usage_of`・`QuotaData`・`read_quota_data`・`QuotaBook`）、`core/request/store.py`（`DEFAULT_QUOTA_FIELDS`・`ShotRow` の `sensor`・`mode`・`captured`・`image_id`・`uncounted`・`sync_shots`・`update_shots`・`followed_where`）、`core/request/daily.py`（`allocate` の `quotas`、`QUOTA`）、`core/request/workflow.py`（`shots_of`）、`core/request/follow.py`（`save_shots`）、`core/request/simulate.py`、`ui/quota_dialog.py`・`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`、`tools/satellite_editor.html`（上限の行の編集）。テスト: `tests/test_request_quota.py`。
+
+## 28. 画像とショットの手動関連付け（2026-11-11 追加）
+
+tsudo「手の照合は、今の方法に加えて、この画像カタログのレコードがこのショットという本当の手動関連付け画面がほしい」。それまでの手の照合（§16 の「撮像済みにする」）は依頼の行を選んで画像 ID を打ち込むだけで、どの画像がどの撮像に当たるかを画像カタログと地図で見比べられなかった。
+
+- **開き方**: 「照合…」の一覧の「画像と関連付け…」。選んだ行のショットを選んだ状態で、その対象日を開く（行を選んでいなければ期間の最後の日）。対象日はそこで変えられる。
+- **ショット**: その日の出力履歴の採用の行を `SHOT_ID` でまとめたもの（§24.7）。撮像の範囲（`requestStores[].shots`）の行があれば、その範囲・パスの時刻・センサー・モードを使う。`SHOT_ID` のない行（撮像の範囲のない設定、それより前に書き出した行）は、依頼とそれに同乗した依頼（`MERGED_INTO`）を 1 つのショットとし、1 日の回数（§25）の回ごとに分ける（撮像予定ドックの「まとめ」と同じ）。範囲は撮像の範囲 → 行の範囲 → 台帳の範囲の順。撮像（撮像済み・画像 ID）は行から（`shot_outcome`）。
+- **画像**: 画像カタログ（台帳の `catalog`、なければ最初のもの）から、ショットの範囲に重なり（`esriSpatialRelIntersects`）、撮像日時が対象日の前後 N 日（0〜7、既定 1。日本時間の日の区切り）に入るもの。カタログの `where` も付ける。読むのは 300 件まで（超えたら画面にそう出す。どれが残るかはカタログの順なので、前後の日数を減らして絞る）。並びは依頼の衛星に合うもの（§7 と同じ `fitting_images`。衛星名の対応表の別名も）を先に、パスの時刻（ないショットは対象日の真ん中）に近い順。「依頼の衛星だけ」を外すとほかの衛星の画像も灰色で出す。
+- **関連付け済み**: 画像の一覧に出した画像 ID で出力履歴の撮像済みの行を引き（200 件ずつ）、ほかのショットの行に使われていれば「対象日 システム 依頼」を出す。同じ画像を 2 つのショットに付けることは止めない（1 枚の画像に 2 つの撮像が写ることはある）が、先に確かめる。
+- **関連付け**: ショットの採用の行すべてを撮像済み・その画像 ID にする（`linking.link_findings`）。保存は「撮像済みにする」と同じ `follow.save_marked`（出力履歴の行、`ADOPTION` の画像の入着、台帳の `BOOST` 0・期間内1回の完了、撮像の範囲の `CAPTURED`・`IMAGE_ID`）。ほかの画像が付いているショット・ほかのショットに付いている画像・依頼の衛星でない画像は、はい・いいえで確かめる（既定はいいえ）。
+- **外す**: 「関連付けを外す（未判定に戻す）」はショットの行を未判定・画像 ID なしにする（次の照合・定期照合でまた画像を探す）。「未撮像にする」は未撮像（繰り上げの候補に戻す）。どちらも、完了にした期間内1回の依頼は、ほかの日が撮像済みでなければ有効に戻す（`follow.undone_changes` を未判定にも広げた。それまでは未撮像だけ）。画像の入着で採用にした `ADOPTION` は不明に戻す。
+- **選んだこと**: 関連付けはショットの全部の依頼に付ける（1 枚の画像で 1 回の撮像。依頼ごとに別の画像を付けたいときは従来の「撮像済みにする」）。照合の自動の判定は変えない。画像カタログには書き込まない。
+
+実装: `core/request/linking.py`（`ShotUnit`・`unit_key`・`units_of`・`find_images`・`links_of`・`with_links`・`link_findings`・`unlink_findings`・`search_span`・`gap_text`）、`core/request/follow.py`（`undone_changes`）、`ui/shot_link_dialog.py`、`ui/plan_results_dialog.py`（「画像と関連付け…」）。テスト: `tests/test_request_linking.py`・`tests/test_qgis_shot_link.py`。

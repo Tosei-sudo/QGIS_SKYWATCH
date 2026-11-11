@@ -209,16 +209,17 @@ def marked(rows: Sequence[HistoryRow], captured: str, image_id: str = "") -> lis
 
 def undone_changes(findings: Sequence[Finding], requests: dict, history: Sequence[HistoryRow]) -> list[tuple[int, dict]]:
     """
-    A 期間内1回 request marked 未撮像 by hand after it was 完了 goes back to
-    有効, unless another of its days is still taken (撮像済み rows, n of them
-    for a request taken several times a day).
+    A 期間内1回 request marked 未撮像 (or put back to 未判定, 画像とショットの
+    関連付けを外す) by hand after it was 完了 goes back to 有効, unless another
+    of its days is still taken (撮像済み rows, n of them for a request taken
+    several times a day).
     """
     counts = captured_times(findings, history)
     still = {rid for (rid, _day), n in counts.items() if n >= (requests[rid].times[0] if rid in requests else 1)}
     out: dict[int, dict] = {}
     for f in findings:
         req = requests.get(f.row.request_id)
-        if (f.captured != "未撮像" or req is None or req.object_id is None or req.achieve != "期間内1回"
+        if (f.captured == "撮像済み" or req is None or req.object_id is None or req.achieve != "期間内1回"
                 or req.status != "完了" or req.id in still):
             continue
         out[req.object_id] = {"status": "有効"}

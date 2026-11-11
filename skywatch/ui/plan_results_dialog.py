@@ -5,7 +5,9 @@ asks the catalog about the rows not yet settled (as 「計算」 does) and shows
 every row: 撮像済み with the image, 未撮像 (carried over and offered a
 raise at the next 「計算」), or 未判定 (still waiting). A row can be set by
 hand when the catalog is late or wrong; the ledger follows (raise undone,
-期間内1回 完了, or back to 有効).
+期間内1回 完了, or back to 有効). 「画像と関連付け…」 opens the shots of a
+day with the catalog's images over each, to link one by hand
+(shot_link_dialog.py).
 """
 from __future__ import annotations
 
@@ -21,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.follow import follow_and_save, found_text, in_days, marked, next_step, save_marked, tally, with_settled_times
+from ..core.request.linking import unit_key
 from ..core.request.model import jst_day
 from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
@@ -52,6 +55,8 @@ class PlanResultsDialog(QDialog):
         self.history: list = []
         self.requests: dict = {}
         self.rows: list = []
+        #: 「画像とショットの関連付け」, while open.
+        self.linking = None
         #: The target days whose history was read (first, last), once read.
         self.loaded: Optional[tuple] = None
         self._build()
@@ -106,7 +111,10 @@ class PlanResultsDialog(QDialog):
         self.missed_button = QPushButton(self.tr("未撮像にする"))
         self.missed_button.setToolTip(self.tr("選んだ依頼を未撮像に（次回の計算で持ち越し・繰り上げ候補）"))
         self.missed_button.clicked.connect(lambda: self.mark("未撮像"))
-        for b in (self.taken_button, self.missed_button):
+        self.link_button = QPushButton(self.tr("画像と関連付け…"))
+        self.link_button.setToolTip(self.tr("画像カタログのレコードを選んで、ショットに手で関連付ける（選んだ行のショットを開く）"))
+        self.link_button.clicked.connect(lambda: self.link_images())
+        for b in (self.taken_button, self.missed_button, self.link_button):
             hand.addWidget(b)
         hand.addStretch(1)
         close = QPushButton(self.tr("閉じる"))
@@ -221,8 +229,33 @@ class PlanResultsDialog(QDialog):
         any_ = bool(self.selected()) if self.rows else False
         self.taken_button.setEnabled(not busy and any_)
         self.missed_button.setEnabled(not busy and any_)
+        self.link_button.setEnabled(self.dock.store is not None and bool(self.dock.store.history))
 
     # --- By hand --------------------------------------------------------------------------------
+
+    def link_images(self):
+        """Opens 「画像とショットの関連付け」 on the selected row's shot (else on the span's last day)."""
+        from .shot_link_dialog import ShotLinkDialog
+        rows = self.selected()
+        row = rows[0] if rows else None
+        if self.linking is None:
+            self.linking = ShotLinkDialog(self.dock, self, saved=self._linked)
+        self.linking.show()
+        self.linking.raise_()
+        self.linking.open_at(date.fromisoformat(row.day) if row else self.span()[1], unit_key(row) if row else None)
+        return self.linking
+
+    def _linked(self) -> None:
+        """Something was linked by hand: the rows are read again (without following up)."""
+        if self.task is None and self.isVisible():
+            self.run(follow=False)
+        else:
+            self.loaded = None
+
+    def closeEvent(self, event) -> None:
+        if self.linking is not None:
+            self.linking.close()
+        super().closeEvent(event)
 
     def mark(self, captured: str, image_id: Optional[str] = None) -> None:
         """Sets the selected rows' outcome by hand (asking for the image id when made 撮像済み)."""
