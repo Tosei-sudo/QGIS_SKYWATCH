@@ -877,6 +877,7 @@ class PlanFileDock(PluginDock):
             except OSError as error:
                 reason = error.strerror or str(error)
                 problems.append(f"{self._label(w)}: {reason}")
+                audit.error("file-save", getattr(error, "filename", None) or folder, reason, detail={"what": "plan-file", "system": w.system.system})
                 failures.setdefault(w.system.system, reason)
                 continue
             _, notes = encoded(w)

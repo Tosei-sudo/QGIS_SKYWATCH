@@ -1199,7 +1199,7 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 
 ## 監査ログ（`auditLog`）
 
-SKYWATCH での操作を「いつ・だれが（どの PC で）・何をしたか」1 行ずつ記録し、設定ファイルで指定したフォルダ（共有フォルダなど）に自動で送る。監査・査証のための記録で、作業の画面には何も出ない。
+SKYWATCH での操作と起きたエラーを「いつ・だれが（どの PC で）・何をしたか・何が起きたか」1 行ずつ記録し、設定ファイルで指定したフォルダ（共有フォルダなど）に自動で送る。監査・査証のための記録で、作業の画面には何も出ない。
 
 - **記録するもの**（`events` の名前）:
   - `edit` Esri への書き込みすべて（観測記録・確認範囲・分類体系・撮像依頼と出力履歴・分担・引き継ぎメモ・通報記録・イベント・検出結果の転記など。applyEdits・addFeatures・updateFeatures・deleteFeatures）: レイヤーの URL と名前、追加・更新・削除、オブジェクト ID、結果（成功・一部失敗・失敗・エラー）と理由。QGIS で直接編集した ArcGIS のレイヤーの保存も（追加・変更・削除の件数）。`values: true` で書き込んだ属性の値も（形状は除く、1 回 1000 件まで）
@@ -1209,7 +1209,16 @@ SKYWATCH での操作を「いつ・だれが（どの PC で）・何をした�
   - `copy` クリップボードへのコピー: 通報文・通報記録、引き継ぎメモ、データ分析の結果、イベントの概要、画像のパス。件数と文字数と SHA-256（中身は書かない）
   - `config` 設定ファイルの読み込み（場所・SHA-256・問題の件数）
   - `session` プラグインの起動・終了（プラグインと QGIS の版）
-- **書かないもの**: トークン・パスワード（URL の `?` 以降と `user:pass@` は落とし、`token=…` などは伏せる）。設定ファイルは中身でなくハッシュだけ。Esri からの読み取り（一覧の表示など）は記録しない
+  - `error` エラー（`action` で種類）:
+    - `log` QGIS のログメッセージパネルに出た SKYWATCH の警告・エラー（タブ「SKYWATCH」「撮像計画」「観測記録」。裏の処理の失敗は Python のトレースバック付き）
+    - `python` SKYWATCH のコードの中で起きた Python の未処理のエラー（QGIS の「Python error」。トレースバック付き）
+    - `task` 裏の処理（検索・読み込み・書き込みなど）での Esri のエラー（つながらない・拒否された。処理の名前と理由）
+    - `message` メッセージバーに出た警告・エラー（見出しと文。SKYWATCH 以外の QGIS や他のプラグインのものも、画面に出たものは記録）
+    - `file-save` ファイルに保存できなかったとき（パスと理由。CSV を Excel で開いたまま・書けないフォルダなど）
+    - `config` 設定ファイルの問題（件数と内容、最大 50 件）
+
+    トレースバックは `detail.traceback`（長いときは後ろの 8000 文字）。同じエラー（種類・対象・文が同じ）が 60 秒以内に続いたときは最初の 1 行だけ書き、あとで「さらに何回あったか」を 1 行（`detail.repeated`、時刻は最後の 1 回）書く。情報のメッセージ（青）や成功（緑）は書かない
+- **書かないもの**: トークン・パスワード（URL の `?` 以降と `user:pass@` は落とし、`token=…`・`password=…`・`Bearer …` などはエラーの文の中でも伏せる）。設定ファイルは中身でなくハッシュだけ。Esri からの読み取り（一覧の表示など）は記録しない
 - **だれが**: [`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名（既定は環境変数 `USERNAME`）と PC 名（`COMPUTERNAME`）
 - **形式**: 1 行 1 件。既定は JSON Lines（`format: "jsonl"`、UTF-8）、`"csv"` で CSV（既定 UTF-8 の BOM 付きで Excel でそのまま開ける、`encoding` で `utf-8`・`cp932` も）。項目は `time`（端末の時刻・タイムゾーン付き）・`user`・`computer`・`session`・`seq`・`kind`・`action`・`target`・`result`・`count`・`ids`・`detail`・`error`・`prev`
 - **改ざんの検知**: 行には QGIS の起動ごとの番号（`session`・`seq`）と、同じセッションの 1 つ前の行の SHA-256（`prev`）が入る。行を消す・書き換えると番号か連なりが合わなくなる。メニュー「監査ログ…」の「送信先を点検」、または `python -m skywatch.core.audit <フォルダ>`（プラグインのフォルダの 1 つ上で。`tools/audit_check.py` も同じ）で、送信先のログの欠け・書き換えを確かめられる
@@ -1225,7 +1234,7 @@ SKYWATCH での操作を「いつ・だれが（どの PC で）・何をした�
   "sendMinutes": 10,        // 送る間隔（分、1 以上）
   "format": "jsonl",        // "jsonl" か "csv"
   "encoding": "",           // 既定 jsonl は utf-8・csv は utf-8-sig。"cp932" も
-  "events": ["session", "config", "edit", "offline", "open", "export", "copy"],  // 記録するもの（既定すべて）
+  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "error"],  // 記録するもの（既定すべて）
   "values": false,          // true で書き込んだ属性の値も記録
   "keepDays": 90,           // この PC に残す日数（送り終えたもの）
   "localFolder": ""         // この PC の保存先（既定 プロファイルの skywatch/audit）
@@ -1559,7 +1568,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
 | `editTracking` | オブジェクトか `false` | 書き込む Esri のレイヤー・テーブルの作成日時・作成者・更新日時・更新者。`userVariable`（ユーザー名の環境変数、既定 `USERNAME`）、`user`（固定のユーザー名）、`fields`（`createdAt`・`createdBy`・`updatedAt`・`updatedBy`。既定 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`）、`enabled`。`false` で書かない | 既定の属性名があるレイヤーに書く | [作成者・更新者の記録](#作成者更新者の記録edittracking) |
-| `auditLog` | オブジェクト・文字列（送り先）か `false` | 操作の監査ログと自動送信。`folder`（送り先、`{user}`・`{computer}`・`{yyyy}`・`{mm}`・`{dd}`）、`sendMinutes`（既定 10）、`format`（`jsonl`・`csv`）、`encoding`、`events`（`session`・`config`・`edit`・`offline`・`open`・`export`・`copy`）、`values`、`keepDays`（既定 90）、`localFolder`、`enabled`。`false` で記録しない | この PC にだけ記録（送らない） | [監査ログ](#監査ログauditlog) |
+| `auditLog` | オブジェクト・文字列（送り先）か `false` | 操作の監査ログと自動送信。`folder`（送り先、`{user}`・`{computer}`・`{yyyy}`・`{mm}`・`{dd}`）、`sendMinutes`（既定 10）、`format`（`jsonl`・`csv`）、`encoding`、`events`（`session`・`config`・`edit`・`offline`・`open`・`export`・`copy`・`error`）、`values`、`keepDays`（既定 90）、`localFolder`、`enabled`。`false` で記録しない | この PC にだけ記録（送らない） | [監査ログ](#監査ログauditlog) |
 
 #### 日時
 

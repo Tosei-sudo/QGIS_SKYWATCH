@@ -5,6 +5,13 @@ each settings file read recorded, a message when the folder cannot be
 written to (once per run of failures), and 「監査ログ…」 (plugin menu): what
 is recorded where, what was sent, 「今すぐ送信」 and 「送信先を点検」.
 
+Errors (kind `error`, 2026-11-11): the plugin's warnings and errors in
+QGIS's log (its tags), Python errors whose traceback goes through the
+plugin's files (QGIS logs them as 「Python error」), warnings and errors
+shown in the main window's message bar (QGIS's and other plugins' too: what
+the person saw), and the settings file's problems. Each is one queue put on
+the main thread: what the message holds is worked out by the log's writer.
+
 Nothing here writes or sends: the log's own threads do. The screen only
 reads the log's status (a timer every 30 s) and puts lines in its queue.
 """
@@ -17,6 +24,8 @@ from datetime import datetime
 from typing import Optional
 
 from qgis.core import Qgis, QgsApplication, QgsMessageLog
+from qgis.gui import QgsMessageBarItem
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QTimer, QUrl
 from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
@@ -47,6 +56,16 @@ def plugin_version() -> str:
     return m.group(1).strip() if m else ""
 
 
+#: The levels recorded as errors (Info and Success are not).
+ERROR_LEVELS = {Qgis.MessageLevel.Warning: "warning", Qgis.MessageLevel.Critical: "critical"}
+
+
+def plugin_tags() -> set:
+    """The log's tags that are the plugin's: its own and the docks' (as they are shown, translated or not)."""
+    names = (LOG_TAG, "撮像計画", "観測記録")
+    return set(names) | {QCoreApplication.translate("SatelliteObservation", n) for n in names}
+
+
 def _size(n: int) -> str:
     return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
 
@@ -68,6 +87,11 @@ class AuditKeeper(QObject):
         audit.record("session", "start", detail={"plugin": plugin_version(), "qgis": Qgis.version()})
         # First of all who hear it (after the context's own rules): what is recorded and where.
         context.configChanged.connect(self._config_read)
+        # Errors: the log (any thread's message reaches this slot on the main thread, queued) and the message bar.
+        self._tags = plugin_tags()
+        self._bar = iface.messageBar()
+        QgsApplication.messageLog().messageReceived[str, str, Qgis.MessageLevel].connect(self._logged)
+        self._bar.widgetAdded.connect(self._shown)
         self._told: dict[str, str] = {}
         self.timer = QTimer(self)
         self.timer.setInterval(30_000)
@@ -87,6 +111,30 @@ class AuditKeeper(QObject):
         result = "ok" if source and (local or text is not None) else ("cached" if source else "default")
         audit.record("config", "read", source, result=result, detail=detail,
                      file=source if local else None, text=text if not local else None)
+        if c.problems:
+            audit.error("config", source, tr("設定ファイルの問題 {n} 件").format(n=len(c.problems)), detail={"problems": list(c.problems)[:50]})
+
+    def _logged(self, message: str, tag: str, level) -> None:
+        """A message of QGIS's log: the plugin's warnings and errors, and Python errors in the plugin's code."""
+        name = ERROR_LEVELS.get(level)
+        if name is None:
+            return
+        if tag in self._tags:
+            audit.error("log", tag, message, detail={"level": name})
+        elif audit.TRACEBACK in message and HERE in message:
+            audit.error("python", tag, message, detail={"level": name})
+
+    def _shown(self, widget) -> None:
+        """A message shown in the main window's message bar: its warnings and errors."""
+        try:
+            item = sip.cast(widget, QgsMessageBarItem)
+            name = ERROR_LEVELS.get(item.level())
+            # QGIS's own 「Python error」 item: its traceback is in the log (above).
+            if name is None or item.property("Error") is not None:
+                return
+            audit.error("message", item.title(), item.text(), markup=True, detail={"level": name})
+        except (TypeError, RuntimeError, AttributeError):
+            pass
 
     def check(self) -> None:
         """A message when sending or writing starts to fail (once per run of failures; the details in the log panel)."""
@@ -118,10 +166,13 @@ class AuditKeeper(QObject):
 
     def unload(self) -> None:
         self.timer.stop()
-        try:
-            self.context.configChanged.disconnect(self._config_read)
-        except (TypeError, RuntimeError):
-            pass
+        for signal, slot in ((self.context.configChanged, self._config_read),
+                             (QgsApplication.messageLog().messageReceived[str, str, Qgis.MessageLevel], self._logged),
+                             (self._bar.widgetAdded, self._shown)):
+            try:
+                signal.disconnect(slot)
+            except (TypeError, RuntimeError):
+                pass
         if self.dialog is not None:
             self.dialog.close()
             self.dialog.deleteLater()
@@ -142,7 +193,7 @@ class AuditDialog(QDialog):
         self.setWindowTitle(tr("監査ログ"))
         self.resize(640, 460)
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("SKYWATCH での操作（Esri への書き込み・画像を開く・ファイル出力・コピーなど）を 1 行ずつ記録し、"
+        intro = QLabel(tr("SKYWATCH での操作（Esri への書き込み・画像を開く・ファイル出力・コピーなど）とエラーを 1 行ずつ記録し、"
                           "設定ファイルの送信先フォルダに一定の間隔で送ります。"))
         intro.setWordWrap(True)
         layout.addWidget(intro)

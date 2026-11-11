@@ -913,6 +913,7 @@ class AnalysisDock(PluginDock):
                 f.write(self.csv_text())
         except OSError as error:
             self.say(self.tr("保存できない: {m}").format(m=error))
+            audit.error("file-save", path, error.strerror or str(error), detail={"what": "analysis-csv"})
             return None
         audit.record("export", "analysis-csv", path, count=len(self.result.rows), detail={"analysis": self.current or ""}, file=path)
         self.say(self.tr("{n:,} 行を保存: {p}").format(n=len(self.result.rows), p=path))

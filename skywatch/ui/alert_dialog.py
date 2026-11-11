@@ -488,6 +488,8 @@ class AlertDialog(QDialog):
                         said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
                 except (OSError, ValueError) as error:
                     said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
+                    audit.error("file-save", getattr(error, "filename", None) or "", str(getattr(error, "strerror", None) or error),
+                                detail={"what": "alert-text"})
             sent = {i.record.id for i in items}
             if s.table and logged:
                 self.dock.mark_reported(sent)
