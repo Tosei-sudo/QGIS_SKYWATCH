@@ -22,7 +22,10 @@ from skywatch.core.catalog.search import (
     source_of,
 )
 from skywatch.core.catalog.similar import DEFAULT_TOLERANCE, SimilarTolerance, azimuth_difference, rank_similar, similar_search
-from skywatch.core.catalog.watch import add_areas, areas_of, check_watch, conditions_text, join_areas, new_watch, since_condition, watch_query
+from skywatch.core.catalog.watch import (
+    CatalogWatch, add_areas, areas_of, areas_of_shape, check_watch, conditions_text, join_areas, layer_origin, new_watch, replace_areas,
+    since_condition, watch_query,
+)
 from skywatch.core.catalog.watch_store import WatchStore, check_due
 from skywatch.core.config import parse_config
 from skywatch.core.esri import EsriClient, EsriError, UnreachableError
@@ -514,6 +517,61 @@ def test_areas_join_points_and_polygons_outer_rings_clockwise():
         return sum(r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1] for i in range(len(r) - 1))
 
     assert len(rings) == 3 and signed(rings[0]) < 0 and signed(rings[1]) < 0 and signed(rings[2]) > 0
+
+
+def test_a_layers_shape_as_watch_areas_lines_asked_as_a_polyline():
+    rings = [[[0, 0], [0, 2], [2, 2], [0, 0]]]
+    paths = [[[0, 0], [1, 1]], [[2, 2], [3, 3]]]
+    assert areas_of_shape({"rings": rings}) == [{"kind": "polygon", "rings": rings}]
+    assert areas_of_shape({"paths": paths}) == [{"kind": "lines", "paths": paths}]
+    assert areas_of_shape({"points": [[1, 1]]}) == [{"kind": "points", "points": [[1, 1]]}]
+    assert areas_of_shape(None) == [] and areas_of_shape({"paths": []}) == []
+    params = watch_query(watch(areas=areas_of_shape({"paths": paths})), CREATED)
+    assert params["geometryType"] == "esriGeometryPolyline" and json.loads(params["geometry"]) == {"paths": paths, "spatialReference": {"wkid": 4326}}
+    # Lines join lines, after the points and the polygon.
+    joined = join_areas([{"kind": "lines", "paths": paths[:1]}, {"kind": "points", "points": [[1, 1]]}],
+                        [{"kind": "lines", "paths": paths[1:]}, {"kind": "polygon", "rings": rings}])
+    assert joined == [{"kind": "points", "points": [[1, 1]]}, {"kind": "polygon", "rings": rings}, {"kind": "lines", "paths": paths}]
+
+
+def test_a_watch_keeps_the_layer_its_area_was_copied_from():
+    origin = layer_origin("港湾", "ports_1", "polygon", 12, False)
+    w = new_watch("港", WATCHED, {}, EMPTY_SEARCH, [{"kind": "polygon", "rings": [[[0, 0], [0, 2], [2, 2], [0, 0]]]}], now=CREATED, area_layer=origin)
+    again = CatalogWatch.from_json(json.loads(json.dumps(w.to_json())))
+    assert again.area_layer == origin == {"name": "港湾", "id": "ports_1", "kind": "polygon", "features": 12, "selectedOnly": False}
+    assert conditions_text(w.catalog, w.conditions, w.areas, area_layer=w.area_layer) == "カタログ ・ レイヤー「港湾」（12 地物）"
+    # A point added later is told apart; the chosen features say so.
+    chosen = layer_origin("港湾", "ports_1", "polygon", 3, True)
+    areas = w.areas + [{"kind": "points", "points": [[1, 1], [2, 2]]}]
+    assert conditions_text(w.catalog, w.conditions, areas, area_layer=chosen) == "カタログ ・ レイヤー「港湾」の選択地物（3 件） ・ 地点 2 か所"
+    assert conditions_text(w.catalog, w.conditions, [{"kind": "lines", "paths": [[[0, 0], [1, 1]]]}]) == "カタログ ・ 線 1 本"
+    # Watches kept before it have none (and it is not written for them); nowhere in particular has no layer.
+    assert "areaLayer" not in watch().to_json() and CatalogWatch.from_json(watch().to_json()).area_layer is None
+    assert new_watch("x", WATCHED, {}, EMPTY_SEARCH, [], area_layer=origin).area_layer is None
+
+
+def test_the_area_replaced_notes_the_images_already_over_it():
+    origin = layer_origin("港湾", "ports_1", "polygon", 2, False)
+    square = [{"kind": "polygon", "rings": [[[0, 0], [0, 2], [2, 2], [0, 0]]]}]
+    calls = []
+    before = watch(last_checked=CREATED, seen=["A"])
+    after = replace_areas(before, square, answering(["A", "X"], calls), CREATED + 1, area_layer=origin)
+    assert after.areas == square and after.area_layer == origin and after.seen == ["A", "X"] and after.last_checked == CREATED
+    assert [c["geometryType"] for c in calls] == ["esriGeometryPolygon"]
+    # Only images new to the area come next.
+    assert [n.image_id for n in check_watch(after, answering(["A", "X", "Y"]), CREATED + 2).notices] == ["Y"]
+    # Back to an area drawn: the layer is forgotten.
+    assert replace_areas(after, square, answering([]), CREATED + 3).area_layer is None
+    # Not yet checked: taken as it is (its first check notes what is there).
+    fresh = watch()
+    assert replace_areas(fresh, square, lambda url, params: pytest.fail("asked"), area_layer=origin).areas == square
+    # The catalog not answering: an error, the watch unchanged.
+
+    def down(url, params):
+        raise RuntimeError("接続できない")
+
+    with pytest.raises(RuntimeError, match="接続できない"):
+        replace_areas(before, square, down, CREATED + 1)
 
 
 def test_conditions_text():

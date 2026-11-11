@@ -118,7 +118,8 @@ def check_due(store: WatchStore, ask_for: Callable[[CatalogWatch], tuple[Catalog
         if current is None:
             continue
         after = replace(result.watch, catalog=watch.catalog, name=current.name, enabled=current.enabled, conditions=current.conditions,
-                        areas=current.areas, seen=list(dict.fromkeys(current.seen + result.watch.seen))[-MAX_SEEN:])
+                        areas=current.areas, area_layer=current.area_layer,
+                        seen=list(dict.fromkeys(current.seen + result.watch.seen))[-MAX_SEEN:])
         store.put_watch(after)
         store.add_notices([replace(n, watch_name=current.name) for n in result.notices])
         added += len(result.notices)

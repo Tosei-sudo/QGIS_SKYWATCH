@@ -9,6 +9,11 @@ closed) and every `watchInterval` minutes. Watches and notices are kept in
 the local GeoPackage (watch_store.py). A watch keeps its catalog without the
 token: the settings file's catalog of the same URL (and its token) is used
 to ask.
+
+A watch keeps its areas as copies (WGS 84), also those taken from a layer's
+features: it goes on being checked with the project closed or the layer
+gone, and a layer edited later changes nothing until the area is taken
+again (`replace_areas`, 「範囲の変更…」).
 """
 from __future__ import annotations
 
@@ -61,7 +66,8 @@ class CatalogWatch:
     #: The catalog layer's field types, for the date condition.
     types: FieldTypes
     conditions: CatalogSearch
-    #: `{"kind": "points", "points": [[lon, lat], …]}` or `{"kind": "polygon", "rings": […]}`, asked one after another; empty: anywhere.
+    #: `{"kind": "points", "points": [[lon, lat], …]}`, `{"kind": "polygon", "rings": […]}` or `{"kind": "lines", "paths": […]}`,
+    #: asked one after another; empty: anywhere.
     areas: list[dict[str, Any]]
     enabled: bool
     created: float
@@ -73,6 +79,8 @@ class CatalogWatch:
     last_error: Optional[str] = None
     #: The keys of the images already seen, oldest first.
     seen: list[str] = field(default_factory=list)
+    #: The layer the areas were taken from (a copy of its features' shapes when taken), see `layer_origin`; None otherwise.
+    area_layer: Optional[dict[str, Any]] = None
 
     def to_json(self) -> dict[str, Any]:
         c = self.conditions
@@ -82,6 +90,7 @@ class CatalogWatch:
                            **({"keyword": c.keyword} if c.keyword else {})},
             "areas": self.areas, "enabled": self.enabled, "created": self.created, "lastChecked": self.last_checked,
             "lastTried": self.last_tried, "lastError": self.last_error, "seen": self.seen,
+            **({"areaLayer": self.area_layer} if self.area_layer else {}),
         }
 
     @staticmethod
@@ -91,7 +100,24 @@ class CatalogWatch:
             types=dict(d.get("types") or {}), conditions=_conditions_from(d.get("conditions")), areas=list(d.get("areas") or []),
             enabled=d.get("enabled") is not False, created=float(d.get("created") or 0), last_checked=d.get("lastChecked"),
             last_tried=d.get("lastTried"), last_error=d.get("lastError"), seen=[str(s) for s in d.get("seen") or []],
+            area_layer=d.get("areaLayer") if isinstance(d.get("areaLayer"), dict) else None,
         )
+
+
+#: The watch area kinds by the key of their coordinates, with the Esri geometry type of more than one point.
+_KINDS = (("points", "points", "esriGeometryMultipoint"), ("polygon", "rings", "esriGeometryPolygon"), ("lines", "paths", "esriGeometryPolyline"))
+
+
+def areas_of_shape(shape: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+    """An Esri shape (`{"rings": …}`, `{"paths": …}` or `{"points": …}`, WGS 84; a layer's geometry) as watch areas."""
+    if not isinstance(shape, dict):
+        return []
+    return [{"kind": kind, key: shape[key]} for kind, key, _ in _KINDS if shape.get(key)]
+
+
+def layer_origin(name: str, layer_id: str, kind: str, features: Optional[int], selected_only: bool) -> dict[str, Any]:
+    """Where areas were taken from: the layer's name and id (not its source, which can hold a password), its shapes' kind and how many features."""
+    return {"name": name, "id": layer_id, "kind": kind, "features": features, "selectedOnly": selected_only}
 
 
 @dataclass
@@ -160,18 +186,13 @@ def watch_query(watch: CatalogWatch, since: Optional[float], area: Any = "first"
         parts.append(since_condition(newness[0], watch.types.get(newness[0]), since - newness[1]))
     params = {"where": " AND ".join(parts) if parts else "1=1", "outFields": "*", "returnGeometry": "true", "outSR": "4326"}
     if area:
-        one = area["kind"] == "points" and len(area["points"]) == 1
-        if one:
+        if area["kind"] == "points" and len(area["points"]) == 1:
             geometry = {"x": area["points"][0][0], "y": area["points"][0][1], "spatialReference": {"wkid": 4326}}
-        elif area["kind"] == "points":
-            geometry = {"points": area["points"], "spatialReference": {"wkid": 4326}}
+            kind = "esriGeometryPoint"
         else:
-            geometry = {"rings": area["rings"], "spatialReference": {"wkid": 4326}}
-        params.update(
-            geometry=json.dumps(geometry),
-            geometryType="esriGeometryPoint" if one else "esriGeometryMultipoint" if area["kind"] == "points" else "esriGeometryPolygon",
-            inSR="4326", spatialRel="esriSpatialRelIntersects",
-        )
+            key, kind = next((k, t) for name, k, t in _KINDS if name == area["kind"])
+            geometry = {key: area[key], "spatialReference": {"wkid": 4326}}
+        params.update(geometry=json.dumps(geometry), geometryType=kind, inSR="4326", spatialRel="esriSpatialRelIntersects")
     return params
 
 
@@ -252,22 +273,46 @@ def check_watch(watch: CatalogWatch, ask: EsriAsk, now: Optional[float] = None) 
 
 
 def join_areas(areas: Sequence[dict], more: Sequence[dict]) -> list[dict[str, Any]]:
-    """`areas` and `more` as one list: points joined into one set of points, rings into one polygon."""
+    """`areas` and `more` as one list: points joined into one set of points, rings into one polygon, paths into one polyline."""
     both = [*areas, *more]
-    points = [p for a in both if a["kind"] == "points" for p in a["points"]]
-    rings = [r for a in both if a["kind"] == "polygon" for r in a["rings"]]
-    return ([{"kind": "points", "points": points}] if points else []) + ([{"kind": "polygon", "rings": rings}] if rings else [])
+    out = []
+    for kind, key, _ in _KINDS:
+        joined = [c for a in both if a["kind"] == kind for c in a[key]]
+        if joined:
+            out.append({"kind": kind, key: joined})
+    return out
+
+
+def _noted_over(watch: CatalogWatch, areas: Sequence[dict], ask: EsriAsk, now: Optional[float]) -> list[str]:
+    """The keys of the images already over `areas` (since the watch's last check, as its first check would note them); raises when the catalog cannot be asked."""
+    first = check_watch(replace(watch, areas=list(areas), last_checked=None,
+                                created=watch.last_checked if watch.last_checked is not None else watch.created), ask, now)
+    if first.watch.last_error:
+        raise RuntimeError(first.watch.last_error)
+    return first.watch.seen
 
 
 def add_areas(watch: CatalogWatch, more: Sequence[dict], ask: EsriAsk, now: Optional[float] = None) -> CatalogWatch:
     """`watch` with `more` areas: the images already over them are noted first, so only images new to them are notified."""
     if not watch.areas:
         return watch
-    first = check_watch(replace(watch, areas=list(more), last_checked=None,
-                                created=watch.last_checked if watch.last_checked is not None else watch.created), ask, now)
-    if first.watch.last_error:
-        raise RuntimeError(first.watch.last_error)
-    return replace(watch, areas=join_areas(watch.areas, more), seen=list(dict.fromkeys(watch.seen + first.watch.seen))[-MAX_SEEN:])
+    noted = _noted_over(watch, more, ask, now)
+    return replace(watch, areas=join_areas(watch.areas, more), seen=list(dict.fromkeys(watch.seen + noted))[-MAX_SEEN:])
+
+
+def replace_areas(watch: CatalogWatch, areas: Sequence[dict], ask: EsriAsk, now: Optional[float] = None,
+                  area_layer: Optional[dict[str, Any]] = None) -> CatalogWatch:
+    """
+    `watch` over `areas` instead of its own (empty: anywhere; `area_layer`:
+    the layer they were taken from). The images already over them are noted
+    first, so that only images new to them are notified; a watch not yet
+    checked just takes them (its first check notes what is there).
+    """
+    areas = [dict(a) for a in areas]
+    if watch.last_checked is None:
+        return replace(watch, areas=areas, area_layer=area_layer)
+    noted = _noted_over(watch, areas, ask, now)
+    return replace(watch, areas=areas, area_layer=area_layer, seen=list(dict.fromkeys(watch.seen + noted))[-MAX_SEEN:])
 
 
 def _signed_area(ring: Sequence[Sequence[float]]) -> float:
@@ -292,13 +337,28 @@ def areas_of(points: Sequence[Sequence[float]], polygons: Sequence[Sequence[Sequ
     return ([{"kind": "points", "points": pts}] if pts else []) + ([{"kind": "polygon", "rings": rings}] if rings else [])
 
 
-def conditions_text(catalog: CatalogConfig, conditions: CatalogSearch, areas: Sequence[dict], with_areas: bool = True) -> str:
-    """A short description of a watch's conditions."""
+def layer_text(origin: dict[str, Any]) -> str:
+    """Where a watch's areas were taken from, in words: 「レイヤー「港」（12 地物）」, 「レイヤー「港」の選択地物（3 件）」."""
+    name, n = origin.get("name") or "", origin.get("features")
+    count = f"{n} 件" if origin.get("selectedOnly") else f"{n} 地物"
+    return f"レイヤー「{name}」" + (("の選択地物" if origin.get("selectedOnly") else "") + (f"（{count}）" if isinstance(n, int) else ""))
+
+
+def conditions_text(catalog: CatalogConfig, conditions: CatalogSearch, areas: Sequence[dict], with_areas: bool = True,
+                    area_layer: Optional[dict[str, Any]] = None) -> str:
+    """A short description of a watch's conditions (`area_layer`: the layer its areas were taken from)."""
     parts = [catalog.label]
     if with_areas:
+        from_layer = area_layer.get("kind") if area_layer and areas else None
+        if from_layer:
+            parts.append(layer_text(area_layer))
         for area in areas:
+            if area["kind"] == from_layer:
+                continue
             if area["kind"] == "polygon":
                 parts.append("範囲")
+            elif area["kind"] == "lines":
+                parts.append(f"線 {len(area['paths'])} 本")
             elif len(area["points"]) == 1:
                 lon, lat = area["points"][0][:2]
                 parts.append(f"地点 {lat:.4f}, {lon:.4f}")
@@ -323,6 +383,7 @@ def conditions_text(catalog: CatalogConfig, conditions: CatalogSearch, areas: Se
 
 
 def new_watch(name: str, catalog: CatalogConfig, types: FieldTypes, conditions: CatalogSearch, areas: list[dict],
-              now: Optional[float] = None) -> CatalogWatch:
+              now: Optional[float] = None, area_layer: Optional[dict[str, Any]] = None) -> CatalogWatch:
     return CatalogWatch(id=new_id(), name=name, catalog=catalog, types=dict(types), conditions=conditions_of(conditions),
-                        areas=areas, enabled=True, created=time.time() * 1000 if now is None else now)
+                        areas=areas, enabled=True, created=time.time() * 1000 if now is None else now,
+                        area_layer=area_layer if areas else None)
