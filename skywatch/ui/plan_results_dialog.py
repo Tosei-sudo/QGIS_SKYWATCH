@@ -20,7 +20,7 @@ from qgis.PyQt.QtWidgets import (
     QTableView, QVBoxLayout,
 )
 
-from ..core.request.follow import follow_and_save, found_text, in_days, marked, next_step, save_marked, tally
+from ..core.request.follow import follow_and_save, found_text, in_days, marked, next_step, save_marked, tally, with_settled_times
 from ..core.request.model import jst_day
 from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
@@ -146,7 +146,9 @@ class PlanResultsDialog(QDialog):
             if catalog is not None:
                 names = self.context.satellite_names(client, task.isCanceled)
                 problems = []
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, history, by_id, now, names, task.isCanceled,
+                # With the times of the day already taken of a request taken several times a day.
+                rows = with_settled_times(client, store, token, history, by_id, task.isCanceled)
+                found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
                                                  problems)
                 notes.append(found_text(found) if found else "新たに判定できた依頼なし")
                 if problems:

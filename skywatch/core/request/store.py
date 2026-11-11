@@ -292,14 +292,17 @@ def _only(attributes: dict, names: set) -> dict:
 
 
 def load_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str],
-                  cancelled: Optional[Callable[[], bool]] = None) -> list[ImagingRequest]:
-    """Every request of the ledger, by name."""
+                  cancelled: Optional[Callable[[], bool]] = None, where: str = "1=1") -> list[ImagingRequest]:
+    """
+    Every request of the ledger, by name; only those matching `where` (by
+    the layer's names; then without the requests waiting to be sent).
+    """
     f = store.fields
     _, oid = _layer(client, store.url, token, store.label, (f["id"],))
-    rows = client.query_all(store.url, "1=1", token, limit=50000, cancelled=cancelled)
+    rows = client.query_all(store.url, where or "1=1", token, limit=50000, cancelled=cancelled)
     out = [r for r in (request_of(row.get("attributes") or {}, row.get("geometry"), f, oid) for row in rows) if r]
     work = offline_of(client)
-    if work is not None:
+    if work is not None and (where or "1=1") == "1=1":
         out = _with_waiting(work, store, out)
     return sorted(out, key=lambda r: (r.name, r.id))
 

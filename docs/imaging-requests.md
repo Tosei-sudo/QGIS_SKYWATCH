@@ -895,3 +895,19 @@ tsudo「撮像依頼の頻度について、今、毎日と1回があると思�
 - **上限シミュレーション**: n 回とも出せた日を撮れた日とする。足りない日は「回数不足（1 日の回数に届かず）」に数え、期間内1回は次の日へ持ち越し、毎回はその日を欠測。n を超える回は、置けたときだけ採用に数える。
 
 実装: `core/request/model.py`（`times`・`gap_ms`）、`core/request/daily.py`（`Candidate.occurrence`・`key`・`extra`、`occurrence_key`・`occurrence_text`、`gather`・`ordered`・`allocate` の `GAP`・`FEW`）、`core/request/shots.py`（同じ依頼の撮像にはまとめない）、`core/request/export.py`（`occurrence`・`occurrenceId`）、`core/request/workflow.py`（回ごとのファイル・撮像 ID・固定・採否の引き継ぎ）、`core/request/adoption.py`（回つきの ID）、`core/request/follow.py`（`captured_times`）、`core/request/simulate.py`（`short`）、`ui/request_form.py`。
+
+## 26. 定期照合（QGIS なし、2026-11-11 追加）
+
+tsudo「とりあえず定期的に照合したいので、QGISに依存せず、照合を実行するPythonツールを入れてほしい。Windowsのタスクスケジューラに入れる 実行間隔は5分ぐらいでどうかな？」。照合（§7 の撮像済みの判定）は「計算」「照合…」を押したときだけだったため、画像が入っても次に誰かが押すまで出力履歴・台帳に反映されなかった。
+
+- **何をするか**: `follow.follow_and_save` を `requestStores` の出力履歴のある台帳ごとに実行するだけ（撮像済み・未撮像、`ADOPTION` の画像の入着、台帳の `BOOST` 0・期間内1回の完了）。繰り上げの候補・未撮像の持ち越し・ファイルは「計算」のまま。
+- **どこにあるか**: `skywatch/scheduled_follow.py`（プラグインのフォルダ。zip に入るのでプラグインと同じ版になる）→ `core/request/follow_job.py`。`core` だけを使い、Qt・QGIS は読み込まない（NumPy は `core` の import に要る。QGIS の Python にある）。
+- **読む量**: 出力履歴は判定待ちの行（`history_where(open_rows=True)`）、台帳はその行の依頼だけ（`load_requests` の `where`、200 件ずつ）。対象日が始まった判定待ちがなければ台帳・画像カタログに問い合わせない。画像カタログへは判定待ちの (依頼, 日) ごとに 1 回（§7 と同じ）。
+- **1 日の回数（§25）との関係**: 照合は判定待ちの行しか読まないので、数分おきに照合すると、先に撮像済みになった回が次の照合で見えず、同じ画像を次の回にも結び付けてしまっていた（その日の撮像済みも n に数えられない）。`follow.with_settled_times` で、判定待ちの回のある (依頼, 日) の撮像済みの行も読み足す。「計算」「照合…」も同じ。
+- **通信**: urllib の form POST（プラグインと同じ要求。Windows のプロキシ設定と証明書ストア、`--ca-file`）。POST の転送（301/302）は送り先を直すよう失敗にする（urllib は GET に変えて中身を落とすため）。401 で統合 Windows 認証を求められたらそう出す。
+- **サインイン**: 設定ファイルの `token`、または `--user`/`--credential` で generateToken（サーバーの `rest/info` の `tokenServicesUrl`、`client=requestip`、60 分）。サーバーごとに実行のたびに 1 回取り、無効と言われたら取り直す。https 以外の発行先にはパスワードを送らない。`authcfg` は QGIS の外では使えない。
+- **多重起動・時間**: ロックファイル（`msvcrt.locking`/`flock`。プロセスが終われば外れる）で 1 回ずつ。1 回の上限 `--time-limit`（既定 15 分）を過ぎたら、その時点までの判定を保存して残りは次の回。
+- **ログ・監査ログ**: 日ごとのログファイル（`--keep-days`）。監査ログは書き込みをした回だけ 1 セッション（`session` start/end と `edit`）を書き、送信先には `sendMinutes` に 1 回まで送る（5 分おきの実行で送信先のファイルが増えすぎないよう）。
+- **間隔**: 5 分で問題ない（README の「定期照合（タスクスケジューラ）」）。画像カタログの登録がそれより遅い間隔なら、間隔を延ばしても遅れは変わらない。
+
+実装: `core/request/follow_job.py`（`url_transport`・`SignIn`・`RunLock`・`RunAudit`・`follow_store`・`main`）、`core/request/follow.py`（`with_settled_times`）、`core/request/store.py`（`load_requests` の `where`）、`scheduled_follow.py`。テスト: `tests/test_follow_job.py`。
