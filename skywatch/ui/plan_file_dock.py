@@ -6,8 +6,11 @@ not those registering requests (tsudo, 2026-11-07).
 
 「計算」 follows up what was handed out before (the image catalog asked
 whether those requests were taken), reads the ledger again, asks the cloud
-forecast for the optical requests and fits the day's requests into the
-systems' limits. The table shows every candidate: ticking 採用 or not,
+forecast for the optical requests, works out the satellites' passes over
+them from their orbits (core/request/passes.py) and fits the day's
+requests into the passes and the systems' limits. Requests put into one
+shot (まとめ) say so in 結果・理由 (tsudo, 2026-11-11), and the time of the
+pass is in 撮像時刻. The table shows every candidate: ticking 採用 or not,
 moving rows up and down and ticking a raise are kept and the fitting is
 done again. 「書き出し」 writes one file per system (CSV, or JSON checked
 against its schema), then the history and the raises taken.
@@ -42,11 +45,12 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.catalog import CatalogConfig
 from ..core.plan.weather import fetch_clouds
-from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
+from ..core.request.daily import HELD, TAKEN, merge_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
+from ..core.request.passes import day_passes
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
     RequestStoreConfig, add_history, count_history, delete_history_rows, handed_where, history_where, load_history, load_requests,
@@ -64,8 +68,9 @@ from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
 from .request_groups import GroupFilter
 
-COLUMNS = ("採用", "システム", "衛星", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
-_RESULT = COLUMNS.index("結果・理由")
+COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+#: The column of 結果・理由.
+RESULT_COLUMN = COLUMNS.index("結果・理由")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
 _NO_SYSTEM_KEPT = "*none*"
 
@@ -404,17 +409,23 @@ class PlanFileDock(PluginDock):
                     notes.append(f"雲量予報の取得失敗（{error}）")
             elif places:
                 notes.append("雲量予報なし（cloudForecast: false）")
-            return requests, history, forecasts, notes, groups
+            task.progress(70)
+            # The satellites' passes over the day's requests, from their orbits (once; the hand's changes fit again on them).
+            passes = day_passes(requests, day, sats, now, task.isCanceled)
+            task.check()
+            if passes.problems:
+                notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
+            return requests, history, forecasts, passes, notes, groups
 
         def done(result):
             self.task = None
-            requests, history, forecasts, notes, groups = result
+            requests, history, forecasts, passes, notes, groups = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
-            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target())
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes)
             self._fill_series()
             self.render()
             taken = sum(1 for c in self.plan.candidates if c.result == TAKEN)
@@ -423,6 +434,7 @@ class PlanFileDock(PluginDock):
             pinned = sum(1 for c in self.plan.candidates if c.pinned)
             if pinned:
                 text += self.tr("（うち ほかのシステムで書き出し済み {n} 件）").format(n=pinned)
+            text += self.merged_text()
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
             self.status.setText("。".join([text, *notes]))
@@ -434,6 +446,15 @@ class PlanFileDock(PluginDock):
             self._update_buttons()
 
         self.task = run_task(self.tr("本日分の計算"), work, done, failed)
+
+    def merged_text(self) -> str:
+        """「・まとめ 2 組（5 件）」: requests put into one shot, after a calculation."""
+        if self.plan is None:
+            return ""
+        leads = [c for c in self.plan.candidates if c.result == TAKEN and c.merged and not c.member]
+        if not leads:
+            return ""
+        return self.tr("・まとめ {n} 組（{m} 件を {n} 回の撮像に）").format(n=len(leads), m=sum(len(c.together) for c in leads))
 
     # --- The table ------------------------------------------------------------------------------
 
@@ -455,19 +476,32 @@ class PlanFileDock(PluginDock):
                 prio += f"（{convert_priority(c.priority, c.system.priority)}）"
             cloud = "" if not c.weather else ("—" if c.cloud is None else f"{round(c.cloud)}%")
             reason = c.reason if c.result == HELD else ""
-            note = "・".join(x for x in (reason, *c.warnings) if x)
+            merged = merge_text(c) if c.result == TAKEN else ""
+            note = "・".join(x for x in (reason, merged, *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)
                 boost.setCheckState(Qt.CheckState.Checked if c.boost_taken else Qt.CheckState.Unchecked)
                 boost.setToolTip(self.tr("チェックで優先度を 100 繰り上げ（書き出しのときに台帳へ保存）"))
+            taken = c.result == TAKEN
+            scenes = (self.tr("同乗") if c.member else str(c.scenes)) if taken else ""
             items = [take, *(QStandardItem(t) for t in (
-                c.system.label if c.system else "", satellite_name(c), r.name, r.group, r.category, prio, cloud,
-                str(c.scenes) if c.result == TAKEN else "", (c.result + ("：" + note if note else "")))), boost]
-            color = QColor("#16a34a" if c.result == TAKEN else "#6b7280")
-            items[_RESULT].setForeground(QBrush(color))
+                c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "", r.name, r.group,
+                r.category, prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost]
+            result = items[RESULT_COLUMN]
+            color = QColor("#16a34a" if taken else "#6b7280")
+            if taken and merged:
+                # Put together with others (まとめ): told apart from the rest.
+                color = QColor("#2563eb")
+            result.setForeground(QBrush(color))
             if c.warnings:
-                items[_RESULT].setForeground(QBrush(QColor("#b45309")))
+                result.setForeground(QBrush(QColor("#b45309")))
+            tip = pass_text(c) if taken else ""
+            if tip:
+                for item in items[2:4]:
+                    item.setToolTip(plain_tip(tip))
+            if merged:
+                result.setToolTip(plain_tip(merged))
             self.model.appendRow(items)
         self._rendering = False
         rooms = room_text(plan.candidates, plan.systems) if plan else {}

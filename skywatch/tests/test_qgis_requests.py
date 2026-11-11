@@ -25,7 +25,9 @@ from skywatch.qgis_io import settings  # noqa: E402
 from skywatch.qgis_io.context import PluginContext  # noqa: E402
 from skywatch.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from skywatch.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
-from skywatch.tests.test_plan import LINE1, LINE2  # noqa: E402
+from skywatch.tests.test_plan import BELOW, LINE1, LINE2, T  # noqa: E402
+from skywatch.ui.limit_sim_dialog import DAY_COLUMNS  # noqa: E402
+from skywatch.ui.plan_file_dock import COLUMNS  # noqa: E402
 
 SATS = "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
@@ -40,13 +42,15 @@ CONFIG = {
                                                                     "resolution": "RES", "maxPerDay": "PERDAY", "system": "SYSTEM"}}],
     "imageCatalogs": [{"label": "画像", "url": IMAGES, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}],
     "requestStores": [{"label": "撮像依頼", "url": LEDGER, "history": HISTORY}],
+    # The tests here run on today's date with satellites of a fixed TLE: fitted by counting (`orbit: false`), as
+    # whatever passes there are today would change them. The passes: test_plan_files_on_the_passes, test_request_passes.py.
     "requestExports": [
-        {"system": "SYS-A", "label": "A", "kind": "光学", "series": ["OPT"], "limit": {"count": 1}, "format": "csv", "encoding": "cp932",
+        {"system": "SYS-A", "label": "A", "kind": "光学", "series": ["OPT"], "limit": {"count": 1}, "orbit": False, "format": "csv", "encoding": "cp932",
          "timeZone": "Asia/Tokyo", "dateFormat": "%Y%m%d",
          "priority": {"table": [{"max": 200, "value": "High"}, {"max": 600, "value": "Middle"}, {"max": 1000, "value": "Low"}]},
          "columns": [{"key": "ID", "source": "id"}, {"key": "名称", "source": "name"}, {"key": "日", "source": "start"},
                      {"key": "優先度", "source": "priority"}]},
-        {"system": "SYS-B", "label": "B", "kind": "SAR", "format": "json", "schema": "sys-b.schema.json", "timeZone": "UTC"},
+        {"system": "SYS-B", "label": "B", "kind": "SAR", "orbit": False, "format": "json", "schema": "sys-b.schema.json", "timeZone": "UTC"},
     ],
 }
 SCHEMA = {"type": "object", "required": ["tasks"], "properties": {
@@ -215,7 +219,7 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     # Filters (each system's file is written by its own person, 2026-11-09): a system shows what it took and what it
     # could still take (呉, held back); the system chosen is kept for next time.
     def listed():
-        return [daily.model.item(r, 3).text() for r in range(daily.model.rowCount())]
+        return [daily.model.item(r, COLUMNS.index("依頼")).text() for r in range(daily.model.rowCount())]
 
     daily.system_filter.setCurrentIndex(daily.system_filter.findData("SYS-A"))
     assert listed() == ["横須賀", "呉"] and daily.room.text() == "表示 2/3 件　A 1/1 件・1 枚"
@@ -249,7 +253,7 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     summary = {sim.summary.item(r, 0).text(): (sim.summary.item(r, 1).text(), sim.summary.item(r, 2).text(), sim.summary.item(r, 3).text())
                for r in range(sim.summary.rowCount())}
     assert summary["枠超過で見送り"] == ("2", "0", "-2")
-    assert sim.daily.rowCount() == 2 and "A 2/2 件" in sim.daily.item(0, 11).text()
+    assert sim.daily.rowCount() == 2 and "A 2/2 件" in sim.daily.item(0, DAY_COLUMNS.index("使用")).text()
     # Back to the settings' values: the same as the base, without reading the ledger again.
     sim.fill_systems()
     sim.run()
@@ -513,3 +517,57 @@ def test_the_form_picks_satellites_in_the_imaging_plan_tree(plugin):
     form.tree.check_all(False)
     assert form.satellites.text() == "GONE-1"
     form.close()
+
+
+def test_plan_files_on_the_passes(plugin):
+    """
+    「計算」 on the satellites' passes (tsudo, 2026-11-11): two places 17 km apart on one pass of OPT 1 go in one shot
+    of 2 scenes in a row (apart, the minute between shots would hold one back), so SYS-A's one request a day takes
+    both; the table says so, the file has one row with the outline of the shot, the history one row per request.
+    """
+    from skywatch.core.plan.scene import sub_satellite_point
+    from skywatch.core.plan.satellites import satellites_from_text
+    from skywatch.core.request.model import ImagingRequest, square_rings
+    from skywatch.core.request.store import request_store_of, save_request
+
+    p, iface, fake, tmp_path = plugin
+    config = json.loads(json.dumps(CONFIG))
+    for system in config["requestExports"]:
+        system.pop("orbit")
+    config["requestExports"][0]["columns"] += [{"key": "IDS", "source": "mergedIds"}, {"key": "AREA", "source": "geometry"}]
+    config["satelliteCatalogs"][0]["defaults"] = {"swath": 12, "scenesPerPass": 4, "minInterval": 1}
+    (tmp_path / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.api.reload_config()
+    assert p.api.problems == [], p.api.problems
+    opt = satellites_from_text(f"OPT 1\n{LINE1}\n{LINE2}", 45, 0, 12)[0]
+    client = EsriClient(fake)
+    store = request_store_of({"url": LEDGER, "history": HISTORY}, [], 0)
+    for i, (name, where) in enumerate((("北", BELOW), ("南", sub_satellite_point(opt, T + 2500)))):
+        save_request(client, store, None, ImagingRequest(id=f"P-{i}", name=name, priority=300 + i, kind="光学", start=T - 6 * 3600000,
+                                                         end=T + 6 * 3600000, shape_kind="点", rings=square_rings(*where, 0.1)), T - 86400000)
+    daily = p.api.plan_files
+    daily.show()
+    day = jst_day(T)
+    daily.day.setDate(QDate(day.year, day.month, day.day))
+    daily.folder.setText(str(tmp_path / "out"))
+    daily.run()
+    assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
+    got = {c.request.name: (c.result, c.member, c.scenes) for c in daily.plan.candidates}
+    assert got == {"北": ("採用", False, 2), "南": ("採用", True, 0)}, [(c.request.name, c.reason) for c in daily.plan.candidates]
+    assert "まとめ 1 組（2 件を 1 回の撮像に）" in daily.status.text()
+    rows = {daily.model.item(r, COLUMNS.index("依頼")).text(): [daily.model.item(r, c).text() for c in range(len(COLUMNS))]
+            for r in range(daily.model.rowCount())}
+    assert "まとめ 2 件（南 と 1 回の撮像）" in rows["北"][COLUMNS.index("結果・理由")]
+    assert "まとめ（「北」の撮像に同乗）" in rows["南"][COLUMNS.index("結果・理由")]
+    assert rows["南"][COLUMNS.index("枚数")] == "同乗" and rows["北"][COLUMNS.index("枚数")] == "2"
+    assert rows["北"][COLUMNS.index("撮像時刻")] == rows["南"][COLUMNS.index("撮像時刻")] == "22:00"
+    assert daily.room.text().startswith("A 1/1 件・2 枚")
+
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(fake.layers[HISTORY].rows) == 2), daily.status.text()
+    [path] = daily.paths
+    lines = list(csv.reader(io.StringIO(open(path, encoding="cp932").read())))
+    assert len(lines) == 2 and lines[1][0] == "P-0" and lines[1][4] == "P-0,P-1" and lines[1][5].startswith("POLYGON ((")
+    history = {r["attributes"]["REQ_NAME"]: r["attributes"] for r in fake.layers[HISTORY].rows}
+    assert (history["北"]["MERGED_INTO"], history["北"]["SCENES"]) == (None, 2)
+    assert (history["南"]["MERGED_INTO"], history["南"]["SCENES"], history["南"]["RESULT"]) == ("P-0", 0, "採用")

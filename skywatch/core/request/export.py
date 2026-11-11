@@ -13,6 +13,13 @@ column's `format`): `iso` (default), `iso-date`, `unix`, `unixms`, or a
 strftime pattern (`%Y%m%d`). Numbers (and text that is a number) take a
 printf format (`%03d`, `%.1f`), see `printf`.
 
+Requests put into one shot (まとめ, core/request/shots.py) are one row:
+the first one's (the most important), its `geometry` and box the outline
+of the shot's scenes, `mergedIds` / `mergedNames` / `mergedCount` the
+requests in it. `passTime` (the shot's middle), `passOffNadir`,
+`passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
+are the pass the orbits gave; empty when fitted by counting.
+
 Some sources are lists (LIST_SOURCES): an array in JSON where the schema
 says `type: array`, otherwise (CSV, or a string property) joined by commas.
 A value that is empty (none, "" or []) is written as the column's or
@@ -52,10 +59,11 @@ SOURCES = (
     "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
+    "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
 )
-TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate")
+TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
 #: Sources whose value is a list of names.
-LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds")
+LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds", "mergedIds", "mergedNames")
 GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")
 _MISSING = object()
 #: Text that is a plain number (a printf number format is applied to it as to a number).
@@ -216,8 +224,13 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     req = c.request
     first, last = day_bounds(ctx.day)
     digits = ctx.system.digits if digits is None else digits
-    box = bbox_of(req.rings)
-    mid = center_of(req.rings)
+    shot = c.shots[0] if c.shots else None
+    together = c.together
+    # Requests put into one shot are handed out as one, its area the outline of the shot's scenes (tsudo, 2026-11-11).
+    rings = [shot.ring()] if together and shot is not None else req.rings
+    box = bbox_of(rings)
+    mid = center_of(rings)
+    look = shot.look if shot is not None else None
     values = {
         "id": req.id, "name": req.name, "managementNo": req.management_no, "identificationNo": req.identification_no,
         "category": req.category, "achieve": req.achieve,
@@ -239,9 +252,15 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,
         "bboxEast": _round(box[2], digits) if box else None, "bboxNorth": _round(box[3], digits) if box else None,
         "requester": req.requester, "group": req.group, "note": req.note, "warnings": "・".join(c.warnings),
+        "passTime": shot.middle if shot is not None else None,
+        "passOffNadir": round(look["offNadir"], 2) if look else None, "passIncidence": round(look["incidence"], 2) if look else None,
+        "passDirection": ("昇交" if shot.ascending else "降交") if shot is not None else "",
+        "passLookSide": shot.side if shot is not None else "",
+        "mergedIds": [m.request.id for m in together], "mergedNames": [m.request.name for m in together],
+        "mergedCount": len(together) or 1,
     }
     if source == "geometry":
-        return geometry_value(req.rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
+        return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
     return values.get(source, _MISSING)
 
 
@@ -495,6 +514,14 @@ def split(cands: Sequence[Candidate], most: int) -> list[list[Candidate]]:
     return [list(cands[i:i + most]) for i in range(0, len(cands), most)]
 
 
+def ids_of(rows: Sequence[Candidate]) -> tuple:
+    """The requests in a file's rows: each row's, and those put into its shot (まとめ) with it."""
+    out: list = []
+    for c in rows:
+        out.extend(m.request.id for m in (c.together or [c]))
+    return tuple(out)
+
+
 def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: date, run: float,
            load_schema: Optional[SchemaLoader] = None) -> list[Written]:
     """
@@ -503,7 +530,8 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
     """
     out = []
     for system in systems:
-        mine = [c for c in cands if c.result == TAKEN and c.system is system]
+        # A request put into another's shot goes in that one's row (mergedIds), not a row of its own.
+        mine = [c for c in cands if c.result == TAKEN and c.system is system and not c.member]
         if not mine:
             continue
         schema = system.schema
@@ -517,13 +545,13 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
             if problem is None and not isinstance(schema, dict):
                 problem = "JSON Schema なし"
             if problem:
-                out.append(Written(system, file_name_of(system, day, run), "", len(mine), [problem], ids=tuple(c.request.id for c in mine)))
+                out.append(Written(system, file_name_of(system, day, run), "", len(mine), [problem], ids=ids_of(mine)))
                 continue
         runs = split(mine, system.max_per_file)
         for part, some in enumerate(runs, 1):
             ctx = Context(system, day, run, len(some), part, len(runs))
             name = file_name_of(system, day, run, part, len(runs))
-            ids = tuple(c.request.id for c in some)
+            ids = ids_of(some)
             if system.format == "json":
                 text, errors = json_text(some, schema, ctx)
                 out.append(Written(system, name, text, len(some), errors, part=part, parts=len(runs), ids=ids))

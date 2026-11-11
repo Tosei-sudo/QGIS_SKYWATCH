@@ -26,6 +26,7 @@ from .daily import HELD, TAKEN, Candidate, allocate, gather, wants_weather
 from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
+from .passes import Passes
 from .store import HistoryRow
 from .systems import ExportSystem
 from .view import systems_of
@@ -63,13 +64,15 @@ class DayPlan:
     handed: frozenset = frozenset()
     #: The system whose file is written from here; None for all of them.
     target: Optional[str] = None
+    #: The satellites' passes over the day's requests (worked out once; None: fitted by counting).
+    passes: Optional[Passes] = None
 
     def refit(self) -> list[Candidate]:
         """Fits again (after a change by hand), those written for a system other than the target pinned there."""
         for c in self.candidates:
             w = self.written.get(c.request.id)
             c.pinned = w if self.target and w and w[0] != self.target else None
-        self.candidates = allocate(self.candidates, self.systems, self.sats)
+        self.candidates = allocate(self.candidates, self.systems, self.sats, self.passes, self.day)
         return self.candidates
 
     def others_handed(self) -> frozenset:
@@ -84,11 +87,13 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 
 
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
-             clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None) -> DayPlan:
-    """The candidates of a day, gathered and fitted (`target`: the one system written from here)."""
+             clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
+             passes: Optional[Passes] = None) -> DayPlan:
+    """The candidates of a day, gathered and fitted (`target`: the one system written from here; `passes`: the orbits')."""
     missed = missed_ids(history)
     cands = gather(requests, day, sats, clouds, missed)
-    plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done])
+    plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
+                   passes=passes)
     today = handed_today(history, day)
     plan.written = {r.request_id: (r.system, r.satellite) for r in today}
     plan.handed = frozenset((r.request_id, r.system) for r in today)
@@ -123,6 +128,10 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
 
     With `system`, only that system's candidates (of_system), those held
     back named with it, so that writing it again replaces only its rows.
+
+    A request put into another's shot (まとめ) keeps its own row, its own
+    area (the schedule shows requests as asked), with the request whose row
+    in the file carries it (`merged_into`) and no scenes of its own.
     """
     run_id = run_id or str(uuid.uuid4()).upper()
     failures = failures or {}
@@ -144,6 +153,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
+            merged_into=c.lead.request.id if taken and c.member else "",
             result=result, reason=reason, file=(file or "") if taken else "",
             captured="未判定" if taken else "", boost_done=0,
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.

@@ -156,6 +156,7 @@ TABLES = (
         F("PLANNED_AT", "撮像予定日時", "DATE", None, "plannedAt"),
         F("EXTERNAL_ID", "システム側の番号", "TEXT", 255, "externalId"),
         F("ADOPTION_SOURCE", "採否の入力元", "TEXT", 1000, "adoptionSource"),
+        F("MERGED_INTO", "まとめ先の依頼ID", "TEXT", 255, "mergedInto"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),

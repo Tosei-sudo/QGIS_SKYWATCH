@@ -152,6 +152,8 @@ class ImagingPlanDock(PluginDock):
         self.catalog_sats: list[SatelliteSpec] = []
         self.catalog_index = 0
         self.loading_task = None
+        #: Counts the settings read (a catalog read under earlier settings is read again).
+        self._settings_read = 0
         #: Who waits for the catalog being read.
         self._waiting: list = []
         #: Told when the catalog cannot be read (those waiting get their buttons back).
@@ -515,6 +517,8 @@ class ImagingPlanDock(PluginDock):
         self.catalog_index = 0
         self.catalog_sats = []
         self._loaded = False
+        # A read still running is of the settings before: it reads again when done.
+        self._settings_read += 1
         forecast = config.cloud_forecast
         self._hide_rows()
         if forecast is not None:
@@ -567,6 +571,7 @@ class ImagingPlanDock(PluginDock):
         sensors = config.sensor_catalogs
         token_for = self.context.token_for
         client = self.context.esri()
+        read = self._settings_read
         self.status.setText(self.tr("衛星カタログを読み込み中…"))
 
         def work(task):
@@ -580,6 +585,10 @@ class ImagingPlanDock(PluginDock):
 
         def done(result):
             self.loading_task = None
+            if read != self._settings_read:
+                # The settings changed meanwhile (their satellites, defaults): read again; whoever waits is told then.
+                self.load_catalog(then, failed)
+                return
             sats, modes, problems = result
             self.catalog_sats = with_modes(sats, modes)
             self._loaded = True
