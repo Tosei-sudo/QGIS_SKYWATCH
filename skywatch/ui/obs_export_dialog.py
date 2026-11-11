@@ -21,7 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from ..core import edit_stamp
+from ..core import audit, edit_stamp
 from ..core.obs.alerts import load_geofences, load_named_areas
 from ..core.obs.export import (
     BASES, FENCE_SOURCES, PLACE_SOURCES, ExportContext, ExportFilter, ExportSettings, items_of, render, select_records, settings_for,
@@ -492,6 +492,7 @@ class ExportDialog(QDialog):
                 self._say(self.tr("保存できず: {e}").format(e="；".join(out.errors)))
                 return
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
+            audit.record("export", "observations", path, count=out.count, detail={"format": getattr(f, "name", "") or ""}, file=path)
             self._say(self.tr("{n} 件を保存: {p}{note}").format(n=out.count, p=path, note=note))
             self.dock._say(self.tr("観測記録をエクスポート: {p}").format(p=path))
 

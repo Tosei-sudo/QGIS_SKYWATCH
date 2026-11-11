@@ -17,6 +17,7 @@ from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
 from .ai_results import AiResultSource, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
+from .audit import DEFAULT_AUDIT, AuditSettings, audit_log_of
 from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
@@ -50,7 +51,7 @@ KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking",
+    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "preload", "offlineWork", "columnDrag",
 )
 
@@ -109,6 +110,8 @@ class PluginConfig:
     request_exports: list[ExportSystem] = field(default_factory=list)
     #: `editTracking`: the fields every Esri layer written gets (when and who added / updated), and where the user name comes from.
     edit_tracking: EditTracking = DEFAULT_EDIT_TRACKING
+    #: `auditLog`: the audit log of operations (監査ログ) and the folder it is sent to.
+    audit_log: AuditSettings = DEFAULT_AUDIT
     #: `alertReports`: notable records as delimited text (通報); None hides it.
     alert_reports: Optional[AlertSettings] = None
     #: `observationExports`: the named formats (CSV / JSON) of 観測記録のエクスポート, besides the built-in ones.
@@ -320,6 +323,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.request_exports = export_systems_of(value["requestExports"], problems)
     if "editTracking" in value:
         config.edit_tracking = edit_tracking_of(value["editTracking"], problems)
+    if "auditLog" in value:
+        config.audit_log = audit_log_of(value["auditLog"], problems)
     if "alertReports" in value:
         config.alert_reports = alert_settings_of(value["alertReports"], problems)
     if "observationExports" in value:

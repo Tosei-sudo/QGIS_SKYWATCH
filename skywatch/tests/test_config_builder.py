@@ -16,7 +16,7 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
-    from skywatch.core import ai_results, basemaps, config, coords, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
+    from skywatch.core import ai_results, audit, basemaps, config, coords, edit_stamp, events, geocode, layer_templates, moving, overviews, startup_layers
     from skywatch.core.ai import model_config, transfer
     from skywatch.core.catalog import config as catalog_config
     from skywatch.core.enhance import pipeline
@@ -78,6 +78,8 @@ def plugin_constants() -> dict:
         "resultWords": {result_file.ADOPTED: list(result_file.DEFAULT_ADOPTED), result_file.REJECTED: list(result_file.DEFAULT_REJECTED),
                         result_file.WAITING: list(result_file.DEFAULT_WAITING)},
         "encodings": sorted(set(systems.ENCODINGS.values())),
+        "auditKinds": {k: v for k, v in audit.KINDS.items()},
+        "auditFormats": list(audit.FORMATS),
         "layerTypes": list(startup_layers.TYPES),
         "baseMapTypes": list(basemaps.TYPES),
         "defaultBaseMaps": [b.id for b in basemaps.DEFAULT_BASE_MAPS],

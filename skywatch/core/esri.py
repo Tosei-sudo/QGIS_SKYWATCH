@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
-from . import edit_stamp, time_zone
+from . import audit, edit_stamp, time_zone
 from .util import iso_text, is_number
 
 
@@ -48,6 +48,9 @@ class Transport(Protocol):
         """POSTs `form` (x-www-form-urlencoded) to `url` and returns the body; raises EsriError when it cannot."""
         ...
 
+
+#: The parts of an edit's answer the audit log reads.
+_RESULTS = ("addResults", "updateResults", "deleteResults", "success")
 
 #: Asks for a fresh token after the server refused one (OAuth2 renewal); None when none can be had.
 Renew = Callable[[str], Optional[str]]
@@ -82,7 +85,22 @@ class EsriClient:
         times = self.layer_times(op[0], rule, token) if rule else None
         if times:
             params = time_zone.to_service(params, op[1], times)
+        if audit.is_edit(url):
+            return self._ask_edit(url, params, token, times)
         value = self._ask_renewing(url, params, token)
+        if times:
+            time_zone.from_service(value, times)
+        return value
+
+    def _ask_edit(self, url: str, params: dict[str, str], token: Optional[str], times) -> dict[str, Any]:
+        """An edit request, recorded in the audit log with its answer (core/audit.py: only queued here)."""
+        layer = (self._layers.get(url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[0]) or {}).get("name") or ""
+        try:
+            value = self._ask_renewing(url, params, token)
+        except EsriError as error:
+            audit.esri_request(url, dict(params), None, str(error) or type(error).__name__, layer)
+            raise
+        audit.esri_request(url, dict(params), {k: value[k] for k in _RESULTS if k in value}, "", layer)
         if times:
             time_zone.from_service(value, times)
         return value

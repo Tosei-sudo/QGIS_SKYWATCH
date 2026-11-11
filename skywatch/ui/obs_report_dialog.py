@@ -266,7 +266,7 @@ class ReportDialog(QDialog):
         if not path:
             self._say("")
             return
-        failed = save_text(path, html)
+        failed = save_text(path, html, what="observation-report")
         if failed:
             self._say(self.tr("報告書を保存できない: {m}").format(m=failed))
             return

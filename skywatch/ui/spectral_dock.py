@@ -476,7 +476,7 @@ class SpectralDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, _tr("CSV 保存"), f"{base}_spectrum.csv", "CSV (*.csv)")
             if not path:
                 return None
-        failed = save_text(path, self.csv_text(), "utf-8-sig", "")
+        failed = save_text(path, self.csv_text(), "utf-8-sig", "", what="spectrum-csv")
         if failed:
             self.iface.messageBar().pushWarning(_tr("スペクトル"), _tr("CSV を保存できない: {m}").format(m=failed))
             return None

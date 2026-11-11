@@ -33,6 +33,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
 )
 
+from ..core import audit
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError, PathMapping
 from ..core.catalog.query import CatalogSearch
@@ -1144,6 +1145,7 @@ class CatalogDock(PluginDock):
             self.status.setText(self.tr("画像の場所なし"))
             return
         QApplication.clipboard().setText("\n".join(paths))
+        audit.record("copy", "image-paths", count=len(paths), ids=[r.id for r in self.chosen() if r.source])
         self.status.setText(self.tr("パス {n} 件をコピー").format(n=len(paths)))
 
     def clear_folders(self) -> None:

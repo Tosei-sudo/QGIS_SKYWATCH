@@ -261,7 +261,7 @@ class WebMapSaveDialog(QDialog):
             path, _ = QFileDialog.getSaveFileName(self, _tr("Web マップの JSON ファイル"), suggested, _tr("JSON (*.json)"))
             if not path:
                 return None
-        failed = save_text(path, json.dumps(result.json, ensure_ascii=False))
+        failed = save_text(path, json.dumps(result.json, ensure_ascii=False), what="webmap-json")
         if failed:
             self.status.setText(_tr("保存に失敗: {m}").format(m=failed))
             return None

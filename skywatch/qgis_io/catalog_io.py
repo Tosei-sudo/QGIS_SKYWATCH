@@ -35,6 +35,7 @@ from qgis.core import (
     QgsProject, QgsRasterLayer, QgsRectangle, QgsVectorLayer, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
 
+from ..core import audit
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.images import FolderImages, find_images, patterns_for
 from ..core.catalog.paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
@@ -394,6 +395,8 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
 def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> None:
     """Adds a record's layers to the project: one as it is, several in a group of the record's id at the top of the layer tree."""
     project = project or QgsProject.instance()
+    if layers:
+        audit.record("open", "image", record.id or layers[0].name(), count=len(layers), detail={"files": [layer.source() for layer in layers]})
     if len(layers) <= 1:
         for layer in layers:
             project.addMapLayer(layer)

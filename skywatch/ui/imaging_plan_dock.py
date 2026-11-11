@@ -1757,7 +1757,8 @@ class ImagingPlanDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("予定表 (.ics)"), self.default_ics_name(), self.tr("iCalendar (*.ics)"))
         if not path:
             return
-        failed = save_text(path, plan_ics(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), _now_ms()), newline="")
+        failed = save_text(path, plan_ics(self.shown, plan["sats"], plan["targets"], self.remind_minutes.value(), _now_ms()), newline="",
+                           what="imaging-plan-ics")
         if failed:
             self.iface.messageBar().pushWarning(self.tr("撮像計画"), self.tr("予定表を保存できない: {m}").format(m=failed))
             return
@@ -1806,7 +1807,7 @@ class ImagingPlanDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), self.default_file_name(), self.tr("CSV (*.csv)"))
         if not path:
             return
-        failed = save_text(path, self.csv_text(), newline="")
+        failed = save_text(path, self.csv_text(), newline="", what="imaging-plan-csv")
         if failed:
             self.iface.messageBar().pushWarning(self.tr("撮像計画"), self.tr("CSV を保存できない: {m}").format(m=failed))
             return

@@ -32,6 +32,7 @@ from qgis.PyQt.QtWidgets import (
     QTableWidgetItem, QTabWidget, QWidget,
 )
 
+from ..core import audit
 from ..core.catalog.search import record_of
 from ..core.esri import quote
 from ..core.events import (
@@ -1073,6 +1074,7 @@ class EventsDock(PluginDock):
         except OSError as error:
             self.say(self.tr("保存に失敗: {m}").format(m=error.strerror or error))
             return None
+        audit.record("export", "event-csv", path, count=len(self.links_of(e)), detail={"event": e.name}, file=path)
         self.say(self.tr("{n} 件を保存: {p}").format(n=len(self.links_of(e)), p=path))
         return path
 
@@ -1082,6 +1084,7 @@ class EventsDock(PluginDock):
             return ""
         text = summary_text(e, self.links)
         QApplication.clipboard().setText(text)
+        audit.record("copy", "event-summary", detail={"event": e.name}, text=text)
         self.say(self.tr("概要をコピー"))
         return text
 

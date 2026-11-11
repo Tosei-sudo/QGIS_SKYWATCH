@@ -45,6 +45,7 @@ from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
 from .ui.notices_dock import NoticesDock
 from .ui.offline_status import OfflineController
+from .ui.audit_status import AuditKeeper
 from .ui.observation_dock import ObservationDock
 from .ui.satellite_pass_dock import SatellitePassDock
 from .ui.segment_tool import SegmentTool
@@ -81,7 +82,7 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
+MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
@@ -303,6 +304,8 @@ class SkywatchPlugin:
         self.segment: Optional[SegmentTool] = None
         self.transfer_dialog: Optional[TransferDialog] = None
         self.offline: Optional[OfflineController] = None
+        #: 監査ログ: the log of operations kept and sent to the settings file's folder (ui/audit_status.py, core/audit.py).
+        self.audit: Optional[AuditKeeper] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -325,6 +328,8 @@ class SkywatchPlugin:
         tasks.share_gil_faster()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
+        # 監査ログ before anything that records (its writing and sending run in threads of their own).
+        self.audit = AuditKeeper(self.iface, self.context, self.iface.mainWindow())
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
         self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
@@ -646,6 +651,11 @@ class SkywatchPlugin:
         health.triggered.connect(lambda: self.open_health_check())
         self._add_to_menu(health)
         self.actions.append(health)
+        # 「監査ログ」: what is recorded where and what was sent (ui/audit_status.py).
+        audit_action = QAction(icon("audit_log"), tr("監査ログ…"), self.iface.mainWindow())
+        audit_action.triggered.connect(lambda: self.open_audit_log())
+        self._add_to_menu(audit_action)
+        self.actions.append(audit_action)
         # 「使い方（ヘルプ）」: the help for everyday users, bundled HTML (help/index.html, ui/help_dialog.py).
         help_action = QAction(icon("help"), tr("使い方（ヘルプ）…"), self.iface.mainWindow())
         help_action.setObjectName("SatObsHelp")
@@ -799,6 +809,10 @@ class SkywatchPlugin:
         self.api_reference.show()
         self.api_reference.raise_()
         return self.api_reference
+
+    def open_audit_log(self):
+        """「監査ログ…」: what is recorded where, what was sent, sending now and checking the folder."""
+        return self.audit.open_dialog() if self.audit is not None else None
 
     def open_health_check(self):
         """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
@@ -1470,6 +1484,9 @@ class SkywatchPlugin:
             self.coordinates.close()
             self.coordinates.deleteLater()
             self.coordinates = None
+        if self.audit is not None:
+            self.audit.unload()
+            self.audit = None
         if self.context is not None:
             self.context.close()
             self.context.deleteLater()

@@ -175,6 +175,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "requestStores",
   "requestExports",
   "editTracking",
+  "auditLog",
   "alertReports",
   "observationExports",
   "assignments",
@@ -846,6 +847,19 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "cp932",
   "utf-8",
   "utf-8-sig"
+ ],
+ "auditKinds": {
+  "session": "起動・終了",
+  "config": "設定ファイルの読み込み",
+  "edit": "Esri への書き込み",
+  "offline": "送信待ち・破棄",
+  "open": "画像を開く",
+  "export": "ファイル出力",
+  "copy": "クリップボードへコピー"
+ },
+ "auditFormats": [
+  "jsonl",
+  "csv"
  ],
  "layerTypes": [
   "cog",
@@ -1561,6 +1575,18 @@ const SPEC = [
         T("userVariable", "ユーザー名の環境変数", { ph: "USERNAME", help: "この環境変数の値を作成者・更新者に入れる" }),
         T("user", "固定のユーザー名", { help: "書くと環境変数より優先（任意）" }),
         R("fields", "属性名", K.roles.editTracking),
+      ]) },
+    { key: "auditLog", label: "監査ログ", doc: "監査ログauditlog", help: "SKYWATCH での操作（Esri への書き込み・送信待ち・画像を開く・ファイル出力・コピー・設定の読み込み・起動と終了）を 1 行ずつこの PC に記録し、送り先フォルダに一定の間隔で新しいファイルとして送る（送ったファイルは上書きしない）。行は前の行のハッシュで連なり、削除・書き換えが分かる。書かなければこの PC にだけ記録。false で記録しない。",
+      field: O("auditLog", "記録", [
+        B("enabled", "記録する", { help: "既定 true（false で記録しない）" }),
+        T("folder", "送り先フォルダ", { ph: "\\\\fileserver\\audit\\{yyyy}{mm}", help: "共有フォルダなど。{user}・{computer}・{yyyy}・{mm}・{dd} で分けられる。なしでこの PC だけ" }),
+        N("sendMinutes", "送る間隔（分）", { min: 1, ph: "10", help: "QGIS を閉じるときにも送る（1 秒以内に送れたとき）" }),
+        S("format", "形式", K.auditFormats.map((f) => [f, f === "jsonl" ? "JSON Lines（既定）" : "CSV"])),
+        S("encoding", "文字コード", K.encodings, { ph: "jsonl は utf-8、csv は utf-8-sig" }),
+        L("events", "記録するもの", { help: "既定すべて: " + Object.entries(K.auditKinds).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        B("values", "書き込んだ属性の値も記録", { help: "既定 false（ID と件数・結果だけ）" }),
+        N("keepDays", "この PC に残す日数", { min: 1, ph: "90", help: "送り終えたものだけ消す" }),
+        T("localFolder", "この PC の保存先", { help: "既定は QGIS のプロファイルの skywatch/audit" }),
       ]) },
   ] },
   { group: "日時", keys: [
@@ -3106,7 +3132,8 @@ function render() {
     ed.replaceChildren(el("h2", { class: "key" }, spec.label, el("code", { text: spec.key })),
       el("p", { class: "help" }, spec.help, docLink ? " 詳しく: " : "", docLink),
       field(spec.field, state, () => {}, state),
-      spec.key in state ? el("div", { class: "bar" }, el("button", { type: "button", class: "small danger", text: "この項目を消す", onclick: () => { delete state[spec.key]; changed(); render(); } })) : null);
+      // replaceChildren writes a null as the text "null": the bar only when there is something to delete.
+      ...(spec.key in state ? [el("div", { class: "bar" }, el("button", { type: "button", class: "small danger", text: "この項目を消す", onclick: () => { delete state[spec.key]; changed(); render(); } }))] : []));
   }
   ed.scrollTop = scroll;
   changed();

@@ -2406,7 +2406,7 @@ class ObservationDock(PluginDock):
         path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系の JSON 保存"), "observation-taxonomy.json", "JSON (*.json)")
         if not path:
             return
-        failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n")
+        failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n", what="taxonomy-json")
         if failed:
             self._say(self.tr("分類体系を保存できない: {m}").format(m=failed))
             return
@@ -2444,7 +2444,7 @@ class ObservationDock(PluginDock):
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), csv_file_name(now_ms()), "CSV (*.csv)")
         if not path:
             return None
-        failed = save_text(path, observations_csv(rows), newline="")
+        failed = save_text(path, observations_csv(rows), newline="", what="observations-csv", count=len(rows))
         if failed:
             self._say(self.tr("CSV を保存できない: {m}").format(m=failed))
             return None

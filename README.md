@@ -1144,6 +1144,42 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 // "editTracking": false で何も書かない
 ```
 
+## 監査ログ（`auditLog`）
+
+SKYWATCH での操作を「いつ・だれが（どの PC で）・何をしたか」1 行ずつ記録し、設定ファイルで指定したフォルダ（共有フォルダなど）に自動で送る。監査・査証のための記録で、作業の画面には何も出ない。
+
+- **記録するもの**（`events` の名前）:
+  - `edit` Esri への書き込みすべて（観測記録・確認範囲・分類体系・撮像依頼と出力履歴・分担・引き継ぎメモ・通報記録・イベント・検出結果の転記など。applyEdits・addFeatures・updateFeatures・deleteFeatures）: レイヤーの URL と名前、追加・更新・削除、オブジェクト ID、結果（成功・一部失敗・失敗・エラー）と理由。QGIS で直接編集した ArcGIS のレイヤーの保存も（追加・変更・削除の件数）。`values: true` で書き込んだ属性の値も（形状は除く、1 回 1000 件まで）
+  - `offline` 送信待ちに残した変更（オフライン中・保存できなかった記録）と、送信待ちの破棄
+  - `open` 画像カタログ・通知・イベントから開いた画像（画像 ID とファイル）
+  - `export` ファイル出力: 観測記録のエクスポート・CSV、通報文のファイル、撮像計画ファイル（と消した古いファイル）、引き継ぎメモ、イベント・データ分析・スペクトルの CSV、報告書、分類体系の JSON、予定表、Web マップの JSON。パスと大きさと SHA-256
+  - `copy` クリップボードへのコピー: 通報文・通報記録、引き継ぎメモ、データ分析の結果、イベントの概要、画像のパス。件数と文字数と SHA-256（中身は書かない）
+  - `config` 設定ファイルの読み込み（場所・SHA-256・問題の件数）
+  - `session` プラグインの起動・終了（プラグインと QGIS の版）
+- **書かないもの**: トークン・パスワード（URL の `?` 以降と `user:pass@` は落とし、`token=…` などは伏せる）。設定ファイルは中身でなくハッシュだけ。Esri からの読み取り（一覧の表示など）は記録しない
+- **だれが**: [`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名（既定は環境変数 `USERNAME`）と PC 名（`COMPUTERNAME`）
+- **形式**: 1 行 1 件。既定は JSON Lines（`format: "jsonl"`、UTF-8）、`"csv"` で CSV（既定 UTF-8 の BOM 付きで Excel でそのまま開ける、`encoding` で `utf-8`・`cp932` も）。項目は `time`（端末の時刻・タイムゾーン付き）・`user`・`computer`・`session`・`seq`・`kind`・`action`・`target`・`result`・`count`・`ids`・`detail`・`error`・`prev`
+- **改ざんの検知**: 行には QGIS の起動ごとの番号（`session`・`seq`）と、同じセッションの 1 つ前の行の SHA-256（`prev`）が入る。行を消す・書き換えると番号か連なりが合わなくなる。メニュー「監査ログ…」の「送信先を点検」、または `python -m skywatch.core.audit <フォルダ>`（プラグインのフォルダの 1 つ上で。`tools/audit_check.py` も同じ）で、送信先のログの欠け・書き換えを確かめられる
+- **この PC の保存先**: QGIS のプロファイルの `skywatch/audit/audit-YYYYMMDD.jsonl`（日ごと、`localFolder` で変更）。送り終えたものは `keepDays`（既定 90 日）を過ぎたら消す。送り先があるのに送れていないものは消さない
+- **自動送信**: `folder` を書くと、QGIS の起動の 1 分後から `sendMinutes`（既定 10 分）ごとと、QGIS を閉じるとき（1 秒以内に送れたとき）に、まだ送っていない行を送り先に**新しいファイル**として置く（`skywatch-audit_PC名_ユーザー名_記録の日_送った日時.jsonl`）。同じ行は二度送らず、送ったファイルを上書き・削除しない。このため送り先は「ファイルの作成はできるが変更・削除はできない」権限の共有フォルダにでき、送った後に PC 側で手を加えても送り先の記録は残る。`{user}`・`{computer}`・`{yyyy}`・`{mm}`・`{dd}` で送り先を分けられる（例 `\\server\audit\{yyyy}{mm}`）
+- **送れないとき**: 送り先につながらない・書けないときは PC に残し、次の間隔で送り直す（メッセージバーに 1 回だけ「送信先フォルダに送れません」）。同じプロファイルで QGIS を 2 つ開いていても、送るのは片方ずつ
+- **操作感への影響**: 記録の呼び出しはメモリの列に積むだけで、ファイルの書き込み・ハッシュ・送信はプラグインの裏のスレッドが行う（画面の処理で待つことはない）。QGIS を閉じるときだけ、最後の行の書き込みと送信を最大 1 秒待つ
+- メニュー「監査ログ…」: 記録の有無・この PC の保存先・送り先・最後の送信・未送信の量・エラーを表示し、「今すぐ送信」「送信先を点検」「この PC のフォルダ」
+
+```jsonc
+"auditLog": {
+  "folder": "\\\\fileserver\\audit\\skywatch\\{yyyy}{mm}",  // 送り先（なし・"" でこの PC だけ）
+  "sendMinutes": 10,        // 送る間隔（分、1 以上）
+  "format": "jsonl",        // "jsonl" か "csv"
+  "encoding": "",           // 既定 jsonl は utf-8・csv は utf-8-sig。"cp932" も
+  "events": ["session", "config", "edit", "offline", "open", "export", "copy"],  // 記録するもの（既定すべて）
+  "values": false,          // true で書き込んだ属性の値も記録
+  "keepDays": 90,           // この PC に残す日数（送り終えたもの）
+  "localFolder": ""         // この PC の保存先（既定 プロファイルの skywatch/audit）
+}
+// "auditLog": "\\\\fileserver\\audit" だけでも可。"auditLog": false で記録しない。項目がなければ記録はこの PC だけ
+```
+
 ## Python API
 
 Python コンソールから `plugin = qgis.utils.plugins["skywatch"]` で取り、`plugin.api` を使う。メニューの「Python API リファレンス…」で、ここにあるものを日本語の説明・引数（コードから読む）・例つきで引ける（例はコピーしてコンソールに貼る。プロセシングのツール・式の関数の使い方も）。観測記録はビューアのスクリプトと同じ関数を snake_case で持つ（観測記録ドックで選んだ保存先が対象）。
@@ -1306,6 +1342,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | 入力の初期値（前回の入力） | `QgsSettings`（`skywatch/last_inputs/…`） |
 | 送信待ち（オフライン作業の変更・保存できなかった観測記録）とサーバーの控え | ユーザープロファイルの `skywatch/offline_work.sqlite` |
 | 地名・国のポリゴンの控え（通報・エクスポート・式の関数で使った場所の分） | ユーザープロファイルの `skywatch/place_cache.sqlite` |
+| 監査ログ（日ごとのファイルと、送り先に送った位置 `sent.json`） | ユーザープロファイルの `skywatch/audit/`（`auditLog.localFolder` で変更） |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可、ほかの項目は無視）。読む項目と書き方は[設定ファイルの書き方](#設定ファイルの書き方)。
 
@@ -1467,6 +1504,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
 | `editTracking` | オブジェクトか `false` | 書き込む Esri のレイヤー・テーブルの作成日時・作成者・更新日時・更新者。`userVariable`（ユーザー名の環境変数、既定 `USERNAME`）、`user`（固定のユーザー名）、`fields`（`createdAt`・`createdBy`・`updatedAt`・`updatedBy`。既定 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER`）、`enabled`。`false` で書かない | 既定の属性名があるレイヤーに書く | [作成者・更新者の記録](#作成者更新者の記録edittracking) |
+| `auditLog` | オブジェクト・文字列（送り先）か `false` | 操作の監査ログと自動送信。`folder`（送り先、`{user}`・`{computer}`・`{yyyy}`・`{mm}`・`{dd}`）、`sendMinutes`（既定 10）、`format`（`jsonl`・`csv`）、`encoding`、`events`（`session`・`config`・`edit`・`offline`・`open`・`export`・`copy`）、`values`、`keepDays`（既定 90）、`localFolder`、`enabled`。`false` で記録しない | この PC にだけ記録（送らない） | [監査ログ](#監査ログauditlog) |
 
 #### 日時
 
@@ -2060,6 +2098,7 @@ tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
   satellite_editor.html  衛星・センサー・別名のテーブルの編集ツール（ブラウザで開く。設定ファイルを読み込む）
   arcgis/              ArcGIS でテーブルを作り、ポータルに公開するスクリプト（docs/arcgis-setup.md）
+  audit_check.py       監査ログの送り先のフォルダの欠け・書き換えの点検（python tools/audit_check.py <フォルダ>）
 scripts/
   build_zip.py         配布用の zip を作る（導入）
   make_plugin_repo.py  社内のプラグインリポジトリ（plugins.xml）を作る

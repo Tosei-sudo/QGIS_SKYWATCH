@@ -17,6 +17,7 @@ from typing import Callable, Optional
 from qgis.PyQt.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal
 from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox, QToolButton, QWidget
 
+from ..core import audit
 from ..core.obs.drafts import OutboxDrafts
 from ..core.obs.stores import LOCAL_LABEL
 from ..core.offline import KINDS, OfflineWork, UploadReport
@@ -255,7 +256,12 @@ class OfflineController(QObject):
         by: dict[tuple[str, str], list[str]] = {}
         for kind, store, item_id in keys:
             by.setdefault((kind, store), []).append(item_id)
-        n = sum(self.work.drop(kind, store, ids) for (kind, store), ids in by.items())
+        n = 0
+        for (kind, store), ids in by.items():
+            dropped = self.work.drop(kind, store, ids)
+            n += dropped
+            if dropped:
+                audit.record("offline", "discard", store, count=dropped, ids=ids, detail={"kind": kind})
         if n:
             self.finished.emit()
         self._update()
@@ -278,6 +284,7 @@ class OfflineController(QObject):
         if not self.work.total() or not ask_discard(self.iface.mainWindow(), self.work):
             return
         n = self.work.discard()
+        audit.record("offline", "discard", count=n, detail={"kind": "all"})
         self.iface.messageBar().pushInfo(tr("オフライン作業"), tr("送信待ち {n} 件を破棄しました。").format(n=n))
         self.finished.emit()
 
