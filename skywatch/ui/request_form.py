@@ -282,7 +282,8 @@ class RequestForm(QDialog):
         self.resolution = _optional(0.01, 1000, " m", 2)
         self.resolution.setToolTip(self.tr("これより細かい分解能の衛星のみ"))
         self.cloud = _optional(0, 100, " %", 0)
-        self.cloud.setToolTip(self.tr("光学: 日中の雲量予報がこの値以上なら出力しない（期間内1回で期限まで 2 日以内は警告付きで出力）"))
+        self.cloud.setToolTip(self.tr("光学: 撮像時刻の雲量予報（軌道で詰めない衛星は日中の平均）がどのパスもこの値以上なら出力しない。"
+                                 "この値以上のパスは使わない（期間内1回で期限まで 2 日以内は警告付きで出力）"))
         for w, label in ((self.resolution, "分解能"), (self.cloud, "実施しない雲量")):
             more.addWidget(QLabel(self.tr(label)))
             more.addWidget(w)

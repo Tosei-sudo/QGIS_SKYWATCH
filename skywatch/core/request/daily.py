@@ -6,7 +6,9 @@ in order of priority.
 
 1. Candidates: requests 有効 on the day (period, repeat); a 期間内1回 request
    already taken is 完了 and so left out.
-2. Weather (optical): the day's cover over the area. At or above the
+2. Weather (optical): the cover over the area, at the moment of each of
+   the day's passes with the orbits (weather.cloud_when; the least cloudy
+   one counts), otherwise the daylight hours' mean. At or above the
    request's 「実施しない雲量」 it is held back (雲量), unless it is
    期間内1回 with 2 days or less left: then it goes, with a warning.
    The cover's tenth becomes the priority's ones digit.
@@ -19,7 +21,9 @@ in order of priority.
    order, then `requestExports`') with a satellite that can take it and room
    left: the system's `limit` (count, scenes), its `quota` by category, and
    the satellite's `maxPerDay`. A request naming satellites tries them in
-   that order; otherwise the finest resolution with room comes first.
+   that order; otherwise the finest resolution with room comes first (for
+   an optical one, after the less cloudy: by the tenth of the cover of
+   each satellite's least cloudy pass).
    Requests that fit nowhere are held back (枠超過, or 該当システムなし).
 
    With the satellites' orbits (passes.Passes, tsudo 2026-11-11) a request
@@ -28,7 +32,12 @@ in order of priority.
    (まとめ, shots.py; it then adds no row to the system's file and uses
    neither the satellite's interval nor its day), or into a new shot where
    the satellite has time (`minInterval` between shots, `maxPerDay` shots
-   a day; 衛星の空きなし when it has none). A satellite without a readable
+   a day; 衛星の空きなし when it has none). An optical request leaves out
+   the passes whose cover at their moment is at or above its 「実施しない
+   雲量」 (unless near its deadline or taken by hand) and tries the less
+   cloudy first, by tenths (a few percent between two passes tell nothing
+   of forecasts three hours apart); its cover is then that of the pass it
+   is taken on (`shot_cloud`). A satellite without a readable
    TLE, or a system with `orbit: false`, is fitted by counting as before:
    `maxPerDay` requests a day, scenes from a grid over the area.
 
@@ -53,7 +62,7 @@ from .passes import Passes
 from .route import fitting, scenes_of, system_of_satellite, why_not
 from .shots import GOAL, Book, Placement
 from .systems import ExportSystem
-from .weather import with_cloud
+from .weather import cloud_step, with_cloud
 
 #: Days before the deadline from which a 期間内1回 request goes whatever the weather (and is offered a raise).
 DEADLINE_DAYS = 2
@@ -61,18 +70,27 @@ DEADLINE_DAYS = 2
 TAKEN, HELD = "採用", "見送り"
 #: Why a request is held back in the fitting.
 NO_SYSTEM, OVER, NO_PASS, BUSY = "該当システムなし", "枠超過", "撮像機会なし", "衛星の空きなし（撮像間隔・1 日の回数）"
+#: Held back as the passes the satellites have room for are all too cloudy at their moment.
+CLOUDY = "雲量（空いている撮像機会は撮像時刻の予報で実施しない雲量以上）"
 #: The start of the warning of an area the day's passes take only part of.
 PART = "この日の撮像機会で範囲の約 "
+#: The start of the warning of a pass too cloudy at its moment taken all the same (near the deadline, by hand).
+SHOT_CLOUD = "撮像時刻の雲量 "
 
 
 @dataclass
 class Candidate:
     """One request on the day, and what became of it."""
     request: ImagingRequest
-    #: The day's cover over the area (percent); None when not asked (SAR) or not forecast.
+    #: The day's cover over the area (percent): at its least cloudy pass (`timed`) or the daylight hours' mean;
+    #: None when not asked (SAR) or not forecast. It sets the order and the priority's ones digit.
     cloud: Optional[float] = None
     #: Whether the weather was asked for this request (optical).
     weather: bool = False
+    #: Whether `cloud` is at the moment of a pass (from the orbits), not the daylight hours' mean.
+    timed: bool = False
+    #: 期間内1回 with DEADLINE_DAYS or less left: it goes whatever the weather.
+    near: bool = False
     #: The raise offered (the boost it would have), and why; None when none.
     boost_offer: Optional[int] = None
     boost_reason: str = ""
@@ -102,6 +120,13 @@ class Candidate:
     shots: list = field(default_factory=list)
     #: The share of an area the day's shots take; None for all of it (or not worked out).
     coverage: Optional[float] = None
+    #: The cover over the area at the moment of the pass it is taken on (percent); None when fitted by counting.
+    shot_cloud: Optional[float] = None
+
+    @property
+    def forecast(self) -> Optional[float]:
+        """The cover written out (cloudForecast, the history): at its pass when the orbits placed it, else the day's."""
+        return self.shot_cloud if self.shot_cloud is not None else self.cloud
 
     @property
     def lead(self) -> Optional["Candidate"]:
@@ -152,10 +177,11 @@ class Candidate:
     def weather_flag(self) -> str:
         if not self.weather:
             return ""
-        if self.cloud is None:
+        cloud = self.forecast
+        if cloud is None:
             return "予報なし"
         no_go = self.request.cloud_no_go
-        return "雲多" if no_go is not None and self.cloud >= no_go else "OK"
+        return "雲多" if no_go is not None and cloud >= no_go else "OK"
 
 
 def carries_over(req: ImagingRequest, day: date) -> bool:
@@ -184,9 +210,11 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
            clouds: dict, missed: set) -> list[Candidate]:
     """
     The candidates of a day: requests that occur on it, with their cover
-    (`clouds`: request id → percent or None), holds for the weather, and
-    raises offered (`missed`: ids of requests found 未撮像 and not yet raised for it).
+    (`clouds`: request id → percent or None, weather.Clouds telling those at
+    a pass's moment), holds for the weather, and raises offered (`missed`:
+    ids of requests found 未撮像 and not yet raised for it).
     """
+    timed = getattr(clouds, "timed", ())
     out = []
     for req in requests:
         carried = not occurs_on(req, day) and req.id in missed and carries_over(req, day)
@@ -197,16 +225,20 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             c.warnings.append("未撮像の持ち越し")
         left = days_left(req, day)
         near = req.achieve == "期間内1回" and left <= DEADLINE_DAYS
+        c.near = near
         if wants_weather(req, sats):
             c.weather = True
             c.cloud = clouds.get(req.id)
+            c.timed = c.cloud is not None and req.id in timed
+            # At the passes' moments: the least cloudy is still too cloudy, so every pass is.
+            every = "撮像時刻の予報でどのパスも " if c.timed else ""
             if c.cloud is None:
                 c.warnings.append("予報なし")
             elif req.cloud_no_go is not None and c.cloud >= req.cloud_no_go:
                 if near:
-                    c.warnings.append(f"雲量 {round(c.cloud)}%（実施しない雲量 {round(req.cloud_no_go)}% 以上・期限間近のため出力）")
+                    c.warnings.append(f"雲量 {round(c.cloud)}%（{every}実施しない雲量 {round(req.cloud_no_go)}% 以上・期限間近のため出力）")
                 else:
-                    c.held = f"雲量 {round(c.cloud)}%（{round(req.cloud_no_go)}% 以上）"
+                    c.held = f"雲量 {round(c.cloud)}%（{every}{round(req.cloud_no_go)}% 以上）"
         reasons = []
         if req.id in missed:
             reasons.append("未撮像")
@@ -249,13 +281,31 @@ class Room:
 
 def _manual_warning(w: str) -> bool:
     """A warning the fitting itself adds (made again by each fitting)."""
-    return w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART)
+    return w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
 
 
 def _room_fits(system: ExportSystem, room: Room, category: str, rows: int, scenes: int) -> bool:
     return (("count" not in system.limit or room.count + rows <= system.limit["count"])
             and ("scenes" not in system.limit or room.scenes + scenes <= system.limit["scenes"])
             and (not rows or category not in system.quota or room.by_category.get(category, 0) + rows <= system.quota[category]))
+
+
+def _cloud_near(ops: Sequence, ms: float) -> Optional[float]:
+    """The cover told the pass nearest a moment (its own request's area); None when none was told."""
+    known = [o for o in ops if o.cloud is not None]
+    return min(known, key=lambda o: abs(o.time - ms)).cloud if known else None
+
+
+def _placement_cloud(p: Placement, ops: Sequence) -> Optional[float]:
+    """The cover over a request's area at the moment of a placement's pass (the mean over its shots for a big area)."""
+    times = [p.into.time] if p.into is not None else [s.time for s in p.shots]
+    values = [v for v in (_cloud_near(ops, t) for t in times) if v is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _tenth(cloud: Optional[float]) -> int:
+    """How passes are told apart by the weather: the cover's tenth (no forecast after every tenth)."""
+    return 10 if cloud is None else cloud_step(cloud)
 
 
 def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
@@ -297,17 +347,32 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if sat is not None:
             per_sat[platform_key(sat)] = per_sat.get(platform_key(sat), 0) + 1
 
-    def placed(c: Candidate, system: ExportSystem, sat: SatelliteSpec, p: Placement) -> None:
+    def placed(c: Candidate, system: ExportSystem, sat: SatelliteSpec, p: Placement, cloud: Optional[float]) -> None:
         room = rooms[system.system]
         c.result, c.system, c.satellite = TAKEN, system, sat
         c.shots = book.take(c, p)
         c.coverage = p.coverage
+        c.shot_cloud = cloud
+        no_go = c.request.cloud_no_go
+        if cloud is not None and no_go is not None and cloud >= no_go and (c.cloud is None or c.cloud < no_go):
+            # Only too cloudy passes had room, and it goes all the same (the day's own cover was said in gather otherwise).
+            why = "期限間近" if c.near else "手動で採用" if c.manual == TAKEN else "書き出し済み"
+            c.warnings.append(f"{SHOT_CLOUD}{round(cloud)}%（実施しない雲量 {round(no_go)}% 以上・{why}のため出力）")
         if p.new:
             room.count += 1
             room.by_category[c.request.category] = room.by_category.get(c.request.category, 0) + 1
         room.scenes += p.scenes
         if p.coverage is not None and p.coverage < GOAL:
             c.warnings.append(f"{PART}{round(p.coverage * 100)}%")
+
+    def sky(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> int:
+        """The tenth of the cover of a satellite's least cloudy pass over a request (the day's for one fitted by counting)."""
+        if not c.weather:
+            return 0
+        if not orbits(system, sat):
+            return _tenth(c.cloud)
+        told = [o.cloud for o in passes.of(c.request, day, index[id(sat)]) if o.cloud is not None]
+        return _tenth(min(told)) if told else 10
 
     def by_orbit(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool = False) -> bool:
         """Puts a candidate on a pass of the satellite; whether it went (`why` told what stopped it)."""
@@ -316,7 +381,19 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if not ops:
             why.add(NO_PASS)
             return False
+        told = ops
+        no_go = c.request.cloud_no_go
+        if c.weather and no_go is not None and not (forced or c.near or c.manual == TAKEN):
+            # Passes too cloudy at their moment are not used (those the forecast does not reach are).
+            ops = [o for o in ops if o.cloud is None or o.cloud < no_go]
+            if not ops:
+                why.add(CLOUDY)
+                return False
         options = book.joins(c, i, ops, system.merge) + book.new_shots(c, i, ops, forced)
+        clouds = {id(p): _placement_cloud(p, told) for p in options} if c.weather else {}
+        if c.weather:
+            # The less cloudy first, by tenths; within a tenth as before (into a shot planned, then the smaller angle).
+            options.sort(key=lambda p: (p.busy, _tenth(clouds[id(p)])))
         room = rooms[system.system]
         for p in options:
             if p.busy and not forced:
@@ -326,7 +403,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             if not fits and not forced:
                 why.add(OVER)
                 continue
-            placed(c, system, sat, p)
+            placed(c, system, sat, p, clouds.get(id(p)))
             if p.busy:
                 c.warnings.append(f"{BUSY}（手動で採用）")
             elif not fits:
@@ -341,7 +418,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     pinned = [c for c in out if c.pinned and c.pinned[0] in by_name]
     for c in pinned + [c for c in out if not (c.pinned and c.pinned[0] in by_name)]:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
-        c.shots, c.coverage = [], None
+        c.shots, c.coverage, c.shot_cloud = [], None, None
         c.warnings = [w for w in c.warnings if not _manual_warning(w)]
         req = c.request
         c.able = {}
@@ -377,7 +454,8 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 order = {n: i for i, n in enumerate(req.satellites)}
                 able.sort(key=lambda s: min(order.get(s.name, 99), order.get(s.id, 99)))
             else:
-                able.sort(key=lambda s: (s.resolution if s.resolution is not None else math.inf, -left(system, s)))
+                # Optical: the satellite with the less cloudy pass first (by tenths), then the finest resolution.
+                able.sort(key=lambda s: (sky(c, system, s), s.resolution if s.resolution is not None else math.inf, -left(system, s)))
             room = rooms[system.system]
             for sat in able:
                 if orbits(system, sat):
@@ -402,7 +480,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             break
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else OVER if OVER in why else BUSY if BUSY in why
-                        else NO_PASS if NO_PASS in why else OVER)
+                        else CLOUDY if CLOUDY in why else NO_PASS if NO_PASS in why else OVER)
     for c in out:
         if c.result == TAKEN and c.shots:
             c.scenes = 0 if c.member else sum(s.frames for s in c.shots)
@@ -444,6 +522,23 @@ def time_text(ms: Optional[float]) -> str:
     if ms is None or not math.isfinite(ms):
         return ""
     return datetime.fromtimestamp(ms / 1000, tz=JST).strftime("%H:%M")
+
+
+def cloud_tip(c: Candidate) -> str:
+    """Where a candidate's cover comes from (the calculation's tooltip)."""
+    if not c.weather:
+        return ""
+    if c.forecast is None:
+        return "雲量予報なし"
+    how = "前後の予報を時刻の近さで按分、範囲の格子点の平均"
+    if c.shot_cloud is not None and c.planned is not None:
+        text = f"撮像時刻 {time_text(c.planned)} の予報（{how}）"
+        if c.timed and c.cloud is not None and round(c.cloud) != round(c.shot_cloud):
+            text += f"。この日いちばん雲の少ないパスは {round(c.cloud)}%（優先度の 1 の位はこちら）"
+        return text
+    if c.timed:
+        return f"この日いちばん雲の少ないパスの撮像時刻の予報（{how}）"
+    return "日中（地方時 9〜15 時）の平均（軌道で詰めない衛星）"
 
 
 def pass_text(c: Candidate) -> str:

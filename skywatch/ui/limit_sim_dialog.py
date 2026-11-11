@@ -27,7 +27,7 @@ from ..core.request.simulate import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
 from ..core.request.store import history_where, load_history, load_requests
-from ..core.request.workflow import clouds_of, forecast_places
+from ..core.request.workflow import clouds_of, forecast_places, orbiting
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task
@@ -243,8 +243,10 @@ class LimitSimDialog(QDialog):
         start, days = self.chosen_start(), self.days.value()
         forecasts = self.forecasts if self.weather.isChecked() else {}
 
-        def clouds(day):
-            return clouds_of(requests, day, forecasts) if forecasts else {}
+        def clouds_for(systems_, passes):
+            """A day's cover by request: at the moment of each pass of the satellites fitted on the orbits, else the daylight mean."""
+            used = orbiting(systems_, sats)
+            return lambda day: clouds_of(requests, day, forecasts, passes=passes, sats=used) if forecasts else {}
 
         systems = self.context.config.request_exports
         tried = changed_systems(systems, self.changes())
@@ -256,10 +258,10 @@ class LimitSimDialog(QDialog):
             passes = run_passes(requests, start, days, sats, time.time() * 1000, task.isCanceled)
             task.check()
             task.progress(30)
-            base = simulate(requests, start, days, systems, sats, clouds, history, task.isCanceled, passes)
+            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes)
             task.check()
             task.progress(65)
-            trial = simulate(requests, start, days, tried, sats, clouds, history, task.isCanceled, passes)
+            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes)
             task.check()
             return base, trial
 

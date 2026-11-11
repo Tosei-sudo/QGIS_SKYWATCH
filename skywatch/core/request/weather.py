@@ -1,11 +1,17 @@
 """
 The weather of a request's day (optical only): the forecast cloud cover over
-its area in the day's daylight hours, and what it does to the priority.
+its area, and what it does to the priority.
 
-Cover is the mean of the hourly forecasts at the grid points (0.25°, as the
-imaging plan's forecasts) inside the area, from `hours[0]` to `hours[1]`
-local solar time (longitude / 15). Pass times are not used: satellites
-that pass often (constellations) make them no more telling.
+Cover is the mean of the forecasts at the grid points (0.25°, as the
+imaging plan's forecasts) inside the area. With the satellites' orbits it
+is taken at each pass's moment (tsudo, 2026-11-11: 「撮像時刻の予報に。3時間
+間隔とかだから、バランス取ってね」): the forecast comes every hour or three,
+so a moment between two of them takes both, weighted by how near it is to
+each (plan/weather.cloud_at), and passes are told apart by the tenth of
+their cover only (the priority's ones digit), not by a few percent. A
+request whose satellites' orbits are not known (no TLE, `orbit: false`) is
+weighed by the day's daylight hours as before: from `hours[0]` to
+`hours[1]` local solar time (longitude / 15).
 """
 from __future__ import annotations
 
@@ -67,6 +73,31 @@ def daytime_cloud(req: ImagingRequest, forecasts: dict[str, CloudSeries], day: d
     if not values:
         return None
     return sum(values) / len(values)
+
+
+def cloud_when(req: ImagingRequest, forecasts: dict[str, CloudSeries], ms: float) -> Optional[float]:
+    """The mean cover (percent) over a request's area at a moment, between the forecast's steps by time; None without forecasts."""
+    values = []
+    for place in places_of(req):
+        series = forecasts.get(key_of(place))
+        v = cloud_at(series, ms) if series is not None else None
+        if v is not None and math.isfinite(v):
+            values.append(v)
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+class Clouds(dict):
+    """
+    request id → the day's cover (percent; None where not forecast), and
+    `timed`: the ids whose cover is that of their least cloudy pass (the
+    others' is the daylight hours' mean).
+    """
+
+    def __init__(self, *args, timed=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timed = set(timed)
 
 
 def cloud_step(cover: float) -> int:

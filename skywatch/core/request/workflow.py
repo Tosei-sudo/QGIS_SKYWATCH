@@ -27,10 +27,11 @@ from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
 from .passes import Passes
+from .route import system_of_satellite
 from .store import HistoryRow, ShotRow
 from .systems import ExportSystem
 from .view import systems_of
-from .weather import DAYLIGHT, daytime_cloud, places_of
+from .weather import DAYLIGHT, Clouds, cloud_when, daytime_cloud, places_of
 
 
 def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec]) -> list[tuple]:
@@ -43,10 +44,43 @@ def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequenc
     return list(seen)
 
 
+def orbiting(systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec]) -> set:
+    """The indices of the satellites fitted on their passes: those of a system fitted by the orbits (`orbit`, not false)."""
+    out = set()
+    for i, sat in enumerate(sats):
+        own = system_of_satellite(sat, systems)
+        if own is not None and own.orbit:
+            out.add(i)
+    return out
+
+
 def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str, CloudSeries],
-              hours: Sequence[float] = DAYLIGHT) -> dict:
-    """Each request's daytime cover (None where not forecast)."""
-    return {r.id: daytime_cloud(r, forecasts, day, hours) for r in requests}
+              hours: Sequence[float] = DAYLIGHT, passes: Optional[Passes] = None,
+              sats: Optional[set] = None) -> Clouds:
+    """
+    Each request's cover of the day (None where not forecast). With the
+    orbits (`passes`; `sats`: the indices of the satellites fitted on them,
+    None for all known), each of an optical request's passes that day is
+    told its own (`cloud`, at its moment) and the request's is that of its
+    least cloudy pass; without passes (or forecasts at their moments), the
+    daylight hours' mean.
+    """
+    out = Clouds()
+    for r in requests:
+        timed = []
+        if passes is not None:
+            for op in passes.of(r, day):
+                if sats is not None and op.satellite not in sats:
+                    continue
+                op.cloud = cloud_when(r, forecasts, op.time) if forecasts else None
+                if op.cloud is not None:
+                    timed.append(op.cloud)
+        if timed:
+            out[r.id] = min(timed)
+            out.timed.add(r.id)
+        else:
+            out[r.id] = daytime_cloud(r, forecasts, day, hours)
+    return out
 
 
 @dataclass
@@ -199,7 +233,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             system=name,
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
-            cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
+            cloud=None if c.forecast is None else round(c.forecast, 1), scenes=c.scenes if taken else None,
             merged_into=c.lead.request.id if taken and c.member else "",
             shot_id=shot_ids.get(c.request.id, "") if taken else "",
             result=result, reason=reason, file=(file or "") if taken else "",

@@ -50,7 +50,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
-from ..core.request.daily import HELD, TAKEN, merge_text, pass_text, room_text, satellite_name, time_text
+from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.groups import read_groups
@@ -62,7 +62,7 @@ from ..core.request.store import (
     load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written,
+    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
     plan_day, shots_of, written_summary,
 )
 from ..qgis_io import settings
@@ -453,7 +453,8 @@ class PlanFileDock(PluginDock):
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
-            clouds = clouds_of(requests, day, forecasts)
+            # At each pass's moment for the satellites fitted on the orbits; the daylight hours' mean for the others.
+            clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats))
             self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes)
             self._fill_series()
             self.render()
@@ -503,7 +504,7 @@ class PlanFileDock(PluginDock):
             prio = f"{priority_text(r.priority)} → {c.priority}"
             if c.system:
                 prio += f"（{convert_priority(c.priority, c.system.priority)}）"
-            cloud = "" if not c.weather else ("—" if c.cloud is None else f"{round(c.cloud)}%")
+            cloud = "" if not c.weather else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
             note = "・".join(x for x in (reason, merged, *c.warnings) if x)
@@ -531,6 +532,8 @@ class PlanFileDock(PluginDock):
                     item.setToolTip(plain_tip(tip))
             if merged:
                 result.setToolTip(plain_tip(merged))
+            if c.weather:
+                items[COLUMNS.index("雲量")].setToolTip(plain_tip(cloud_tip(c)))
             self.model.appendRow(items)
         self._rendering = False
         rooms = room_text(plan.candidates, plan.systems) if plan else {}
