@@ -198,9 +198,9 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     assert (zoned["佐世保"].management_no, zoned["佐世保"].identification_no) == ("K-共通", "12")
     # Both numbers are columns of the list too.
     heads = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
-    assert heads[:3] == ["名称", "管理番号", "識別番号"] and heads[-1] == "状態"
+    assert heads[:4] == ["名称", "依頼グループ", "管理番号", "識別番号"] and heads[-1] == "状態"
     row = next(i for i, x in enumerate(dock.shown) if x.name == "舞鶴")
-    assert [dock.model.item(row, c).text() for c in (1, 2)] == ["K-0011", "11"]
+    assert [dock.model.item(row, c).text() for c in (2, 3)] == ["K-0011", "11"]
     # Out of the day's work below.
     fake.layers[LEDGER].rows[:] = [row for row in fake.layers[LEDGER].rows if row["attributes"]["REQ_NAME"] not in ("舞鶴", "佐世保")]
     dock.reload()

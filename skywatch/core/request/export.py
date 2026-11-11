@@ -24,6 +24,13 @@ Some sources are lists (LIST_SOURCES): an array in JSON where the schema
 says `type: array`, otherwise (CSV, or a string property) joined by commas.
 A value that is empty (none, "" or []) is written as the column's or
 property's `default` when it has one (`[]`, `[""]`, `["On"]` …).
+
+A system that takes at most so many requests in one file (`maxPerFile`,
+tsudo 2026-11-11) gets the day's requests in several files of that many
+(in the order they were fitted), each a whole file (the CSV's header, the
+JSON's file-level properties; `count` is that file's): `{part}` (1, 2 …)
+and `{parts}` in the file name number them, or `_1`, `_2` … go before the
+extension when the name has no `{part}` (one file keeps its plain name).
 """
 from __future__ import annotations
 
@@ -50,7 +57,8 @@ SOURCES = (
     "seriesSatelliteIds", "satellite", "satelliteId", "mode", "sensor",
     "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
     "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
-    "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "note", "system", "runDate", "day", "count", "warnings",
+    "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
+    "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
@@ -191,6 +199,9 @@ class Context:
     day: date
     run: float
     count: int = 0
+    #: Which of the system's files of the day this is (1 …), of how many (`maxPerFile`).
+    part: int = 1
+    parts: int = 1
 
 
 def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str = "wkt", digits: Optional[int] = None,
@@ -204,6 +215,10 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         return ctx.day.isoformat()
     if source == "count":
         return ctx.count
+    if source == "part":
+        return ctx.part
+    if source == "parts":
+        return ctx.parts
     if c is None:
         return _MISSING
     req = c.request
@@ -236,7 +251,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "centerLat": _round(mid[1], digits) if mid else None, "centerLon": _round(mid[0], digits) if mid else None,
         "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,
         "bboxEast": _round(box[2], digits) if box else None, "bboxNorth": _round(box[3], digits) if box else None,
-        "requester": req.requester, "note": req.note, "warnings": "・".join(c.warnings),
+        "requester": req.requester, "group": req.group, "note": req.note, "warnings": "・".join(c.warnings),
         "passTime": shot.middle if shot is not None else None,
         "passOffNadir": round(look["offNadir"], 2) if look else None, "passIncidence": round(look["incidence"], 2) if look else None,
         "passDirection": ("昇交" if shot.ascending else "降交") if shot is not None else "",
@@ -291,13 +306,17 @@ def cell_text(v: Any) -> Any:
 
 @dataclass
 class Written:
-    """One system's file: its text, and what was found wrong."""
+    """One system's file (one of its files, when split by `maxPerFile`): its text, and what was found wrong."""
     system: ExportSystem
     file_name: str
     text: str
     count: int
     errors: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
+    #: Which of the system's files this is (1 …), of how many; the ids of the requests in it.
+    part: int = 1
+    parts: int = 1
+    ids: tuple = ()
 
 
 def csv_text(cands: Sequence[Candidate], ctx: Context) -> tuple[str, list[str]]:
@@ -403,14 +422,37 @@ def json_text(cands: Sequence[Candidate], schema: dict, ctx: Context) -> tuple[s
     return json.dumps(value, ensure_ascii=False, indent=2) + "\n", errors
 
 
-def file_name_of(system: ExportSystem, day: date, run: float) -> str:
-    """The file's name: `{system}`, `{date}` / `{date:%Y%m%d}` (the day), `{run:%H%M}` (when written, JST), `{ext}`."""
+_PLACE = re.compile(r"\{(\w+)(?::([^}]*))?\}")
+_PART = re.compile(r"\{part(?::[^}]*)?\}")
+_UNSAFE = re.compile(r'[\\/:*?"<>|]')
+
+
+def _numbered(text: str, part: int) -> str:
+    """`_{part}` before a name's extension (`a.csv` → `a_2.csv`)."""
+    root, ext = os.path.splitext(text)
+    return f"{root}_{part}{ext}"
+
+
+def file_name_of(system: ExportSystem, day: date, run: float, part: int = 1, parts: int = 1) -> str:
+    """
+    The file's name: `{system}`, `{date}` / `{date:%Y%m%d}` (the day),
+    `{run:%H%M}` (when written, JST), `{ext}`, and for a day split into
+    files (`maxPerFile`) `{part}` / `{part:%02d}` (1, 2 …) and `{parts}`;
+    a split name without `{part}` takes `_1`, `_2` … before its extension.
+    """
+    name = "".join(_UNSAFE.sub("_", p) for p in _pieces(system, day, run, part, parts))
+    if parts > 1 and not _PART.search(system.file_name):
+        name = _numbered(name, part)
+    return name
+
+
+def _pieces(system: ExportSystem, day: date, run: float, part: Optional[int], parts: Optional[int]) -> list:
+    """The name in pieces: text, and the values of its `{…}`; `{part}` / `{parts}` None (left as None) when not given."""
     from .model import JST
 
     ran = datetime.fromtimestamp(run / 1000, tz=JST)
 
-    def sub(m: re.Match) -> str:
-        key, fmt = m.group(1), m.group(2)
+    def value(key: str, fmt: Optional[str], whole: str) -> Any:
         if key == "system":
             return system.system
         if key == "ext":
@@ -419,42 +461,120 @@ def file_name_of(system: ExportSystem, day: date, run: float) -> str:
             return day.strftime(fmt or "%Y%m%d")
         if key == "run":
             return ran.strftime(fmt or "%Y%m%d%H%M")
-        return m.group(0)
+        if key in ("part", "parts"):
+            n = part if key == "part" else parts
+            return None if n is None else str(printf(fmt, n)) if fmt else str(n)
+        return whole
 
-    name = re.sub(r"\{(\w+)(?::([^}]*))?\}", sub, system.file_name)
-    return re.sub(r'[\\/:*?"<>|]', "_", name)
+    out: list = []
+    at = 0
+    for m in _PLACE.finditer(system.file_name):
+        out.append(system.file_name[at:m.start()])
+        out.append(value(m.group(1), m.group(2), m.group(0)))
+        at = m.end()
+    out.append(system.file_name[at:])
+    return out
+
+
+def leftover_files(system: ExportSystem, day: date, run: float, names: Sequence[str], listed: Sequence[str]) -> list[str]:
+    """
+    Files of `listed` (a folder's names) named as this system's files of the
+    day with another number, which this writing (`names`) does not replace:
+    those of an earlier writing split into more files (or not split, or
+    split when this one is not). Left in the folder, they would be handed
+    to the system again.
+    """
+    merged: list = []
+    for p in _pieces(system, day, run, None, None):
+        p = None if p is None else _UNSAFE.sub("_", p)
+        if p is not None and merged and merged[-1] is not None:
+            merged[-1] += p
+        else:
+            merged.append(p)
+    tail = ""
+    if not _PART.search(system.file_name):
+        # Numbered by `_1`, `_2` … before the extension, or not numbered at all.
+        last = merged[-1] if merged[-1] is not None else ""
+        ext = os.path.splitext(last)[1]
+        if ext:
+            merged[-1] = last[:-len(ext)]
+        tail = r"(_\d+)?" + re.escape(ext)
+    found = re.compile("".join(r"\d+" if p is None else re.escape(p) for p in merged) + tail, re.IGNORECASE)
+    mine = {n.casefold() for n in names}
+    return sorted(n for n in listed if found.fullmatch(n) and n.casefold() not in mine)
 
 
 SchemaLoader = Callable[[str], dict]
 
 
+def split(cands: Sequence[Candidate], most: int) -> list[list[Candidate]]:
+    """Requests in runs of at most `most` (in their order); all in one when `most` is 0."""
+    if most <= 0 or len(cands) <= most:
+        return [list(cands)]
+    return [list(cands[i:i + most]) for i in range(0, len(cands), most)]
+
+
+def ids_of(rows: Sequence[Candidate]) -> tuple:
+    """The requests in a file's rows: each row's, and those put into its shot (まとめ) with it."""
+    out: list = []
+    for c in rows:
+        out.extend(m.request.id for m in (c.together or [c]))
+    return tuple(out)
+
+
 def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: date, run: float,
            load_schema: Optional[SchemaLoader] = None) -> list[Written]:
-    """The files of the day: one per system with requests taken (in the candidates' order)."""
+    """
+    The files of the day: one per system with requests taken (in the
+    candidates' order), or several of at most `maxPerFile` requests each.
+    """
     out = []
     for system in systems:
         # A request put into another's shot goes in that one's row (mergedIds), not a row of its own.
         mine = [c for c in cands if c.result == TAKEN and c.system is system and not c.member]
         if not mine:
             continue
-        ctx = Context(system, day, run, len(mine))
-        name = file_name_of(system, day, run)
+        schema = system.schema
         if system.format == "json":
-            schema = system.schema
+            problem = None
             if isinstance(schema, str):
                 try:
                     schema = load_schema(schema) if load_schema else None
                 except (OSError, ValueError) as error:
-                    out.append(Written(system, name, "", len(mine), [f"スキーマ {system.schema} の読み込み不可（{error}）"]))
-                    continue
-            if not isinstance(schema, dict):
-                out.append(Written(system, name, "", len(mine), ["JSON Schema なし"]))
+                    problem = f"スキーマ {system.schema} の読み込み不可（{error}）"
+            if problem is None and not isinstance(schema, dict):
+                problem = "JSON Schema なし"
+            if problem:
+                out.append(Written(system, file_name_of(system, day, run), "", len(mine), [problem], ids=ids_of(mine)))
                 continue
-            text, errors = json_text(mine, schema, ctx)
-            out.append(Written(system, name, text, len(mine), errors))
+        runs = split(mine, system.max_per_file)
+        for part, some in enumerate(runs, 1):
+            ctx = Context(system, day, run, len(some), part, len(runs))
+            name = file_name_of(system, day, run, part, len(runs))
+            ids = ids_of(some)
+            if system.format == "json":
+                text, errors = json_text(some, schema, ctx)
+                out.append(Written(system, name, text, len(some), errors, part=part, parts=len(runs), ids=ids))
+            else:
+                text, warnings = csv_text(some, ctx)
+                out.append(Written(system, name, text, len(some), [], warnings, part=part, parts=len(runs), ids=ids))
+    return out
+
+
+def files_of(written: Sequence[Written]) -> dict:
+    """
+    What was written, for the history (workflow.history_of): system name →
+    its file's name, or for a system split into files {request id: the
+    name of the file it is in}.
+    """
+    out: dict = {}
+    for w in written:
+        if w.parts <= 1:
+            out[w.system.system] = w.file_name
         else:
-            text, warnings = csv_text(mine, ctx)
-            out.append(Written(system, name, text, len(mine), [], warnings))
+            names = out.setdefault(w.system.system, {})
+            if isinstance(names, dict):
+                names.update((i, w.file_name) for i in w.ids)
     return out
 
 

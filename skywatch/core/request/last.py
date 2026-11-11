@@ -2,7 +2,7 @@
 入力の初期値の記憶 for imaging requests: the conditions of the request last
 saved from the form (category, how it is achieved, the repeat, priority,
 the satellites, series, modes, systems, angles, resolution, cloud, the
-requester) become a new request's starting values. Its name, period, area,
+requester and the 依頼グループ) become a new request's starting values. Its name, period, area,
 status and note are always the new request's own.
 
 Pure: the values are JSON (kept in QgsSettings by the dock).
@@ -25,7 +25,7 @@ LISTS = ("series", "satellites", "modes", "systems")
 #: Fields that are a number or None (not given).
 NUMBERS = ("off_nadir_min", "off_nadir_max", "incidence_min", "incidence_max", "resolution", "cloud_no_go")
 #: Every field remembered.
-FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "requester")
+FIELDS = (*CHOICES, "repeat", "priority", *LISTS, *NUMBERS, "requester", "group")
 
 
 def remembered(r: ImagingRequest) -> dict:
@@ -54,6 +54,7 @@ def with_remembered(r: ImagingRequest, last: Mapping) -> ImagingRequest:
     for f in NUMBERS:
         if f in last and (last[f] is None or _number(last[f])):
             changes[f] = None if last[f] is None else float(last[f])
-    if isinstance(last.get("requester"), str):
-        changes["requester"] = last["requester"]
+    for f in ("requester", "group"):
+        if isinstance(last.get(f), str):
+            changes[f] = last[f]
     return replace(r, **changes)

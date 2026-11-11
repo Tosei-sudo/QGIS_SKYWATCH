@@ -7,6 +7,7 @@ Everything is made here without GDAL or NumPy, so it runs on any Python 3.9+.
 """
 from __future__ import annotations
 
+import getpass
 import json
 import math
 import os
@@ -292,17 +293,26 @@ TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL
                    "SPECS": {"type": S, "length": 16000}, "PHOTOS": {"type": S, "length": 8000}, "ACTIVITIES": {"type": S, "length": 2000},
                    "SORT_ORDER": I}
 REQUEST_FIELDS = {
-    "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
+    "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "REQUEST_GROUP": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
     "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
 }
 HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T, "REQ_ID": {"type": S, "length": 64},
-                  "REQ_NAME": S, "MANAGEMENT_NO": S, "REQUESTER": S, "SYSTEM": S,
+                  "REQ_NAME": S, "MANAGEMENT_NO": S, "REQUESTER": S, "REQUEST_GROUP": S, "SYSTEM": S,
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
                   "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I,
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
                   "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S}
+GROUP_FIELDS = {"GROUP_NAME": S, "MEMBERS": {"type": S, "length": 4000}, "SORT_ORDER": I, "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
+
+
+def _user() -> str:
+    """The user name the plugin goes by (USERNAME, as editTracking), so that 「自分のグループ」 has a group in the mock."""
+    try:
+        return os.environ.get("USERNAME") or getpass.getuser()
+    except Exception:  # noqa: BLE001
+        return "mock"
 
 ALERT_RULE_FIELDS = {"KIND": {"type": S, "length": 1000}, "ACTIVITIES": {"type": S, "length": 2000}, "MIN_CONFIDENCE": S, "GEOFENCE_NAME": S,
                      "ACTIVE": F, "NOTE": {"type": S, "length": 1000}, "WEIGHT": D}
@@ -390,12 +400,13 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
               ("千葉港", "ちばこう", "", 140.080, 35.580), ("木更津港", "きさらづこう", "", 139.890, 35.375),
               ("羽田空港", "はねだくうこう", "東京国際空港,HND", 139.781, 35.549), ("浦賀水道", "うらがすいどう", "", 139.750, 35.230)]
     requests = []
-    for k, (name, cat, achieve, lon, lat, priority, kind) in enumerate([
-            ("横須賀 定点", "定点", "毎回", 139.672, 35.284, 120, "光学"), ("木更津 臨時", "臨時", "期間内1回", 139.890, 35.375, 450, "任意"),
-            ("浦賀水道 夜間", "定点", "毎回", 139.750, 35.230, 700, "SAR")]):
+    for k, (name, cat, achieve, lon, lat, priority, kind, group) in enumerate([
+            ("横須賀 定点", "定点", "毎回", 139.672, 35.284, 120, "光学", "第1班"),
+            ("木更津 臨時", "臨時", "期間内1回", 139.890, 35.375, 450, "任意", "第2班"),
+            ("浦賀水道 夜間", "定点", "毎回", 139.750, 35.230, 700, "SAR", None)]):
         d = 0.02
         requests.append({"attributes": {
-            "REQ_ID": str(uuid.UUID(int=5000 + k)), "REQ_NAME": name, "MANAGEMENT_NO": f"M-{k + 1:04d}",
+            "REQ_ID": str(uuid.UUID(int=5000 + k)), "REQ_NAME": name, "MANAGEMENT_NO": f"M-{k + 1:04d}", "REQUEST_GROUP": group,
             "IDENTIFICATION_NO": f"{20261100 + k + 1}", "CATEGORY": cat, "ACHIEVE": achieve, "START_AT": _day_start(now) - 2 * DAY,
             "END_AT": _day_start(now) + 14 * DAY, "REPEAT": "毎日" if cat == "定点" else "", "STATUS": "有効", "PRIORITY": priority, "BOOST": 0,
             "KIND": kind, "SERIES": "", "LOOK_SIDE": "任意", "ORBIT_DIR": "任意", "TIME_OF_DAY": "夜" if kind == "SAR" else "任意",
@@ -440,7 +451,11 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                           for n, k, a, x, y in places])}]},
         {"name": "Requests", "layers": [
             {"id": 0, "name": "撮像依頼台帳", "geometryType": "polygon", "fields": REQUEST_FIELDS, "features": feats(requests)},
-            {"id": 1, "name": "出力履歴", "geometryType": "polygon", "fields": HISTORY_FIELDS, "features": []}]},
+            {"id": 1, "name": "出力履歴", "geometryType": "polygon", "fields": HISTORY_FIELDS, "features": []},
+            {"id": 2, "name": "依頼グループ", "fields": GROUP_FIELDS, "features": feats([{"attributes": a} for a in (
+                {"GROUP_NAME": "第1班", "MEMBERS": f"{_user()}, yamada", "SORT_ORDER": 1, "ACTIVE": 1, "NOTE": "港湾の定点"},
+                {"GROUP_NAME": "第2班", "MEMBERS": "sato", "SORT_ORDER": 2, "ACTIVE": 1, "NOTE": "臨時の依頼"},
+                {"GROUP_NAME": "旧体制", "MEMBERS": "", "SORT_ORDER": 9, "ACTIVE": 0, "NOTE": "使用停止（古い依頼のため残す）"})])}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D, "NAME_EN": S},
@@ -548,7 +563,7 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）
   "requestStores": [
     {{ "label": "モック撮像依頼", "url": "{rest}/Requests/FeatureServer/0", "history": "{rest}/Requests/FeatureServer/1",
-      "catalog": "モック画像カタログ", "fields": {{}}{tk} }}
+      "groups": "{rest}/Requests/FeatureServer/2", "catalog": "モック画像カタログ", "fields": {{}}{tk} }}
   ],
   "requestExports": [
     {{ "system": "MOCK-OPT", "label": "モック光学システム", "kind": "光学", "series": ["OPT-X"], "limit": {{ "count": 10 }},

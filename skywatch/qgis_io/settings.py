@@ -383,3 +383,13 @@ def plan_file_filter() -> dict:
 def set_plan_file_filter(system: str, series: str) -> None:
     _set("plan_files/system", system)
     _set("plan_files/series", series)
+
+
+def group_filter(where: str) -> str:
+    """The 依頼グループ filter last chosen in a dock (`requests`, `plan_files`, `schedule`): a group's name,
+    *mine* (自分のグループ), *none* (グループなし), or "" for all (core/request/groups.py)."""
+    return _get(f"request_groups/{where}")
+
+
+def set_group_filter(where: str, value: str) -> None:
+    _set(f"request_groups/{where}", value or "")

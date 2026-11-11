@@ -1,7 +1,8 @@
 """
 Which of the day's candidates the 「撮像計画ファイル出力」 table shows: by
-system, by satellite series, by result and by words (tsudo, 2026-11-09:
-the files of each system are written by different people).
+system, by satellite series, by result, by 依頼グループ and by words
+(tsudo, 2026-11-09: the files of each system are written by different
+people; 2026-11-11: the groups, to find one's own requests).
 
 A candidate belongs to the system it was taken for; one held back belongs
 to every system with a satellite that can take it (so the person of that
@@ -11,10 +12,11 @@ chosen system), or else the series the request names.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .daily import HELD, TAKEN, Candidate
+from .groups import matches as in_group
 from .systems import ExportSystem
 
 #: The system filter's value for candidates no system can take (該当システムなし).
@@ -32,8 +34,11 @@ class CandidateFilter:
     series: Optional[str] = None
     #: TAKEN, HELD or BOOST.
     result: Optional[str] = None
-    #: Words all found in the name, request id, 管理番号, 識別番号 or satellite (any case).
+    #: Words all found in the name, request id, 管理番号, 識別番号, 依頼グループ or satellite (any case).
     text: str = ""
+    #: A group's name, groups.MINE, groups.NO_GROUP, or None for all; `mine`: the user's groups (for MINE).
+    group: Optional[str] = None
+    mine: tuple = field(default_factory=tuple)
 
 
 def systems_of(c: Candidate) -> list[str]:
@@ -67,10 +72,12 @@ def matches(c: Candidate, f: CandidateFilter) -> bool:
             return False
     elif f.result and c.result != f.result:
         return False
+    if not in_group(c.request.group, f.group, f.mine):
+        return False
     words = f.text.lower().split()
     if words:
         r = c.request
-        hay = " ".join((r.name, r.id, r.management_no, r.identification_no, c.satellite.name if c.satellite else "")).lower()
+        hay = " ".join((r.name, r.id, r.management_no, r.identification_no, r.group, c.satellite.name if c.satellite else "")).lower()
         if not all(w in hay for w in words):
             return False
     return True

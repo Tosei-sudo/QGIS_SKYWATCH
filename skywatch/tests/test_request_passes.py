@@ -13,7 +13,7 @@ from dataclasses import replace
 from skywatch.core.plan.scene import sub_satellite_point
 from skywatch.core.request.adoption import answer_changes, match_answers
 from skywatch.core.request.daily import BUSY, NO_PASS, OVER, PART, TAKEN, allocate, gather, merge_text, pass_text, room_text
-from skywatch.core.request.export import Context, csv_text, raw_value, render
+from skywatch.core.request.export import Context, csv_text, files_of, raw_value, render
 from skywatch.core.request.model import ImagingRequest, in_rings, jst_day, square_rings
 from skywatch.core.request.passes import day_passes, size_km, target_of
 from skywatch.core.request.result_file import ADOPTED, Answer, result_file_of
@@ -174,6 +174,14 @@ def test_history_keeps_a_row_per_request():
     assert (rows["R2"].merged_into, rows["R2"].scenes, rows["R2"].file, rows["R2"].result) == ("R1", 0, "SYS.csv", TAKEN)
     # Each with its own area (the schedule shows the requests as asked).
     assert rows["R2"].rings == [[list(p[:2]) for p in b.rings[0]]]
+    # Split into files of one row each (maxPerFile): the request put into the shot is in its lead's file.
+    four = point(4, along(120))
+    split = [system(max_per_file=1)]
+    two = plan_day([a, b, four], DAY, split, [SAT], {}, passes=day_passes([a, b, four], DAY, [SAT]))
+    written = render(two.candidates, split, DAY, T)
+    assert [(w.part, w.ids) for w in written] == [(1, ("R1", "R2")), (2, ("R4",))]
+    rows = {r.request_id: r for r in history_of(two, T, files_of(written))}
+    assert rows["R2"].result == TAKEN and rows["R2"].file == rows["R1"].file != rows["R4"].file
     # Fitting again after a change by hand keeps the passes.
     plan.candidates[0].manual = "見送り"
     plan.refit()

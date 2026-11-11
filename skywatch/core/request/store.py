@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional, Sequence
 from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
 from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
+from .groups import DEFAULT_GROUP_FIELDS
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
     day_bounds,
@@ -23,7 +24,7 @@ from .model import (
 #: The attribute names used when the settings do not map a role.
 DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "id": "REQ_ID", "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "identificationNo": "IDENTIFICATION_NO",
-    "category": "CATEGORY", "achieve": "ACHIEVE",
+    "group": "REQUEST_GROUP", "category": "CATEGORY", "achieve": "ACHIEVE",
     "start": "START_AT", "end": "END_AT", "repeat": "REPEAT", "status": "STATUS",
     "priority": "PRIORITY", "boost": "BOOST", "kind": "KIND", "series": "SERIES", "satellites": "SATELLITES",
     "modes": "SENSOR_MODES", "offNadirMin": "OFF_NADIR_MIN", "offNadirMax": "OFF_NADIR_MAX",
@@ -33,7 +34,7 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
 }
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "targetDate": "TARGET_DATE", "requestId": "REQ_ID",
-    "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "requester": "REQUESTER", "system": "SYSTEM",
+    "name": "REQ_NAME", "managementNo": "MANAGEMENT_NO", "requester": "REQUESTER", "group": "REQUEST_GROUP", "system": "SYSTEM",
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
@@ -53,6 +54,8 @@ LEGACY_HISTORY_FIELDS: dict[str, str] = {"file": "FILE"}
 #: What a history row says about whether the request was taken.
 CAPTURED = ("未判定", "撮像済み", "未撮像")
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+/?$", re.IGNORECASE)
+#: A table only read (the groups): a feature service's or a map service's.
+_READ_TABLE = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 _NAME = re.compile(r"^[\w.]+$", re.ASCII)
 
 
@@ -71,6 +74,9 @@ class RequestStoreConfig:
     #: Days after its day a request handed out and not found in the catalog is 「未撮像」.
     miss_after_days: float = 3
     authcfg: Optional[str] = None
+    #: The 依頼グループ table (core/request/groups.py; None: groups are typed freely).
+    groups: Optional[str] = None
+    group_fields: dict = field(default_factory=lambda: dict(DEFAULT_GROUP_FIELDS))
 
 
 def _fields(value: Any, defaults: dict, at: str, problems: list[str]) -> dict:
@@ -99,6 +105,10 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
     if history is not None and (not isinstance(history, str) or not _FEATURE_LAYER.search(history.split("?", 1)[0])):
         problems.append(f"{at} の history は …/FeatureServer/1 のようなテーブルの URL で指定")
         history = None
+    groups = value.get("groups")
+    if groups is not None and (not isinstance(groups, str) or not _READ_TABLE.search(groups.split("?", 1)[0])):
+        problems.append(f"{at} の groups は依頼グループのテーブルの URL（…/FeatureServer/2 など）で指定")
+        groups = None
     label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
     miss = value.get("missAfterDays")
     return RequestStoreConfig(
@@ -110,6 +120,8 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         token=token if isinstance(token, str) and token else None,
         catalog=catalog if isinstance(catalog, str) and catalog else None,
         miss_after_days=float(miss) if is_number(miss) and miss > 0 else 3,
+        groups=layer_url(groups) if groups else None,
+        group_fields=_fields(value.get("groupFields"), DEFAULT_GROUP_FIELDS, f"{at}.groupFields", problems),
     )
 
 
@@ -180,7 +192,8 @@ def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
 
     return {
         f["id"]: req.id, f["name"]: req.name[:250], f["managementNo"]: req.management_no[:250] or None,
-        f["identificationNo"]: req.identification_no[:250] or None, f["category"]: req.category, f["achieve"]: req.achieve,
+        f["identificationNo"]: req.identification_no[:250] or None, f["group"]: req.group[:250] or None,
+        f["category"]: req.category, f["achieve"]: req.achieve,
         f["start"]: req.start if math.isfinite(req.start) else None, f["end"]: req.end if math.isfinite(req.end) else None,
         f["repeat"]: req.repeat, f["status"]: req.status, f["priority"]: clamp_priority(req.priority), f["boost"]: int(req.boost),
         f["kind"]: req.kind, f["series"]: join(req.series), f["satellites"]: join(req.satellites), f["modes"]: join(req.modes),
@@ -204,6 +217,7 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
     return ImagingRequest(
         id=rid, name=_text(a.get(f["name"])) or rid,
         management_no=_code(a.get(f["managementNo"])), identification_no=_code(a.get(f["identificationNo"])),
+        group=_text(a.get(f["group"])),
         category=_choice(a.get(f["category"]), CATEGORIES, "臨時"),
         achieve=_choice(a.get(f["achieve"]), ACHIEVES, "期間内1回"),
         start=time_of(a.get(f["start"])), end=time_of(a.get(f["end"])),
@@ -577,10 +591,12 @@ class HistoryRow:
     image_id: str = ""
     boost_done: int = 0
     object_id: Optional[int] = None
-    #: The request's 名称・管理番号・依頼者 when written (so a dashboard lists them without joining the ledger).
+    #: The request's 名称・管理番号・依頼者・依頼グループ when written (so a dashboard lists and filters them without
+    #: joining the ledger).
     name: str = ""
     management_no: str = ""
     requester: str = ""
+    group: str = ""
     #: The system's answer (採否): 不明 / 採用 / 不採用 for one handed out ("" for one held back); 採用 for 要求外.
     adoption: str = ""
     adoption_reason: str = ""
@@ -599,7 +615,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
     return {
         f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day, f["targetDate"]: day_start_ms(row.day),
         f["requestId"]: row.request_id, f["name"]: row.name[:250] or None, f["managementNo"]: row.management_no[:250] or None,
-        f["requester"]: row.requester[:250] or None, f["system"]: row.system, f["satellite"]: row.satellite,
+        f["requester"]: row.requester[:250] or None, f["group"]: row.group[:250] or None, f["system"]: row.system, f["satellite"]: row.satellite,
         f["priority"]: row.priority, f["cloud"]: row.cloud, f["scenes"]: row.scenes, f["result"]: row.result,
         f["reason"]: row.reason[:250], f["file"]: row.file[:250], f["captured"]: row.captured, f["imageId"]: row.image_id,
         f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
@@ -703,7 +719,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
     return HistoryRow(
         run_id=_text(a.get(hf["runId"])), run_date=time_of(a.get(hf["runDate"])), day=_text(a.get(hf["day"]))[:10],
         request_id=_text(a.get(hf["requestId"])), name=_text(a.get(hf["name"])), management_no=_code(a.get(hf["managementNo"])),
-        requester=_text(a.get(hf["requester"])), system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
+        requester=_text(a.get(hf["requester"])), group=_text(a.get(hf["group"])), system=_text(a.get(hf["system"])), satellite=_text(a.get(hf["satellite"])),
         priority=_text(a.get(hf["priority"])), cloud=cloud, scenes=int(scenes) if scenes is not None else None,
         result=_text(a.get(hf["result"])) or "採用", reason=_text(a.get(hf["reason"])), file=_text(a.get(hf["file"])),
         captured=_choice(a.get(hf["captured"]), CAPTURED, "未判定"), image_id=_text(a.get(hf["imageId"])),

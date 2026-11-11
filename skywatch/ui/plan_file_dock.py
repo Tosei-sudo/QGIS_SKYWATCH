@@ -17,9 +17,10 @@ against its schema), then the history and the raises taken.
 「上限シミュレーション…」 tries other daily limits over the coming days
 without writing anything (limit_sim_dialog.py).
 
-The table can be narrowed to a system, a satellite series, a result and
-words (core/request/view.py): the files of each system are written by
-different people, so the system and series chosen are kept (per user).
+The table can be narrowed to a system, a satellite series, a 依頼グループ, a
+result and words (core/request/view.py): the files of each system are
+written by different people, so the system, series and group chosen are
+kept (per user). The group only narrows what is shown.
 With a system chosen, 「書き出し」 writes that system's file only, with its
 history rows and raises (tsudo, 2026-11-09); the requests another system's
 person wrote earlier that day stay in that system (pinned, counted in the
@@ -45,8 +46,9 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog import CatalogConfig
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, merge_text, pass_text, room_text, satellite_name, time_text
-from ..core.request.export import convert_priority, encoded, render, write
+from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
 from ..core.request.follow import follow_and_save, found_text
+from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
@@ -64,8 +66,9 @@ from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
+from .request_groups import GroupFilter
 
-COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
 #: The column of 結果・理由.
 RESULT_COLUMN = COLUMNS.index("結果・理由")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
@@ -98,6 +101,8 @@ class PlanFileDock(PluginDock):
         self._kept_filter = settings.plan_file_filter()
         #: The files last written.
         self.paths: list = []
+        #: The 依頼グループ of the store's table, as last read (core/request/groups.py).
+        self.groups: list = []
         #: The 「計画と実績の照合」 dialog, once opened.
         self.results = None
         self._build()
@@ -142,15 +147,18 @@ class PlanFileDock(PluginDock):
         self.system_filter.setToolTip(self.tr("このシステムの依頼だけを表示（見送りは、そのシステムで撮れるものも）。次回も同じ選択"))
         self.series_filter = QComboBox()
         self.series_filter.setToolTip(self.tr("この衛星シリーズの依頼だけを表示（採用は割り当てた衛星、見送りは撮れる衛星のシリーズ）。次回も同じ選択"))
+        # 依頼グループ: only what is shown (the files are written per system, whoever's the requests are).
+        self.group_filter = GroupFilter("plan_files")
+        self.group_filter.setToolTip(self.tr("依頼グループで絞り込み（表示だけ。書き出しはシステム単位）。次回も同じ選択"))
         self.result_filter = QComboBox()
         for text, value in ((self.tr("すべての結果"), None), (TAKEN, TAKEN), (HELD, HELD), (self.tr("繰り上げ候補"), BOOST)):
             self.result_filter.addItem(text, value)
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
         self.search.setPlaceholderText(self.tr("名称・ID・番号・衛星"))
-        self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
+        self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・依頼グループ・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
         self.search.setMinimumWidth(90)
-        for w in (self.system_filter, self.series_filter, self.result_filter):
+        for w in (self.system_filter, self.series_filter, self.group_filter, self.result_filter):
             # Long system or series names do not widen the dock.
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(8)
@@ -222,6 +230,8 @@ class PlanFileDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.plan = None
+        self.groups = []
+        self.group_filter.set_groups([], ())
         self._fill_systems()
         self._fill_series()
         if self.results is not None:
@@ -234,6 +244,8 @@ class PlanFileDock(PluginDock):
         stores = self.context.config.request_stores
         self.store = stores[index] if 0 <= index < len(stores) else None
         self.plan = None
+        self.groups = []
+        self.group_filter.set_groups([], ())
         self.render()
 
     # --- Filters --------------------------------------------------------------------------------
@@ -280,7 +292,8 @@ class PlanFileDock(PluginDock):
     def candidate_filter(self) -> CandidateFilter:
         """The filters as chosen."""
         return CandidateFilter(system=self.system_filter.currentData(), series=self.series_filter.currentData(),
-                               result=self.result_filter.currentData(), text=self.search.text())
+                               result=self.result_filter.currentData(), text=self.search.text(),
+                               group=self.group_filter.value(), mine=self.group_filter.my)
 
     def _filter_changed(self, _index: int = 0) -> None:
         system, series = self.system_filter.currentData(), self.series_filter.currentData()
@@ -365,6 +378,9 @@ class PlanFileDock(PluginDock):
         def work(task):
             notes = []
             requests = load_requests(client, store, token, task.isCanceled)
+            groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            if note:
+                notes.append(note)
             # Only the rows still to be followed up or raised for, not the whole (ever growing) table.
             history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
                        if store.history else [])
@@ -399,11 +415,14 @@ class PlanFileDock(PluginDock):
             task.check()
             if passes.problems:
                 notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
-            return requests, history, forecasts, passes, notes
+            return requests, history, forecasts, passes, notes, groups
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes = result
+            requests, history, forecasts, passes, notes, groups = result
+            if groups is not None:
+                self.groups = groups
+            self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
             self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes)
@@ -467,8 +486,8 @@ class PlanFileDock(PluginDock):
             taken = c.result == TAKEN
             scenes = (self.tr("同乗") if c.member else str(c.scenes)) if taken else ""
             items = [take, *(QStandardItem(t) for t in (
-                c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "", r.name, r.category,
-                prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost]
+                c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "", r.name, r.group,
+                r.category, prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost]
             result = items[RESULT_COLUMN]
             color = QColor("#16a34a" if taken else "#6b7280")
             if taken and merged:
@@ -634,45 +653,91 @@ class PlanFileDock(PluginDock):
         clicked = box.clickedButton()
         return True if clicked is replace else False if clicked is keep else None
 
+    @staticmethod
+    def _leftovers(plan: DayPlan, run: float, targets: list) -> list:
+        """
+        (system, folder, name) of the files in the folders named as a system's
+        files of the day with another number (`maxPerFile`): left from an
+        earlier writing split otherwise, they are deleted once its files are written.
+        """
+        out = []
+        for system in {w.system.system: w.system for w, _ in targets}.values():
+            if system.max_per_file <= 0:
+                continue
+            for folder in dict.fromkeys(f for w, f in targets if w.system is system):
+                try:
+                    listed = os.listdir(folder)
+                except OSError:
+                    continue
+                names = [w.file_name for w, f in targets if w.system is system and f == folder]
+                out += [(system.system, folder, n) for n in leftover_files(system, plan.day, run, names, listed)]
+        return out
+
+    @staticmethod
+    def _label(w) -> str:
+        """「A システム」, one of a system's files 「A システム（2/3）」."""
+        return f"{w.system.label}（{w.part}/{w.parts}）" if w.parts > 1 else w.system.label
+
     def _write_files(self, plan: DayPlan, run: float, files: list, ask: bool, earlier: int = 0) -> None:
+        # A system split into files (maxPerFile) writes all of them or, when one is not fit (schema …), none.
         broken = [w for w in files if w.errors]
-        good = [w for w in files if not w.errors]
+        unfit = {w.system.system for w in broken}
+        good = [w for w in files if w.system.system not in unfit]
         fallback = self.folder.text().strip()
         if any(not w.system.folder for w in good) and not fallback:
             self.status.setText(self.tr("出力先のフォルダを指定"))
             return
         targets = [(w, w.system.folder or fallback) for w in good]
         existing = [os.path.join(f, w.file_name) for w, f in targets if os.path.exists(os.path.join(f, w.file_name))]
+        leftovers = self._leftovers(plan, run, targets)
         replace = bool(earlier)
         target = plan.target
         label = next((s.label for s in plan.systems if s.system == target), target or "")
         if ask:
-            lines = [f"{w.system.label}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
+            lines = [f"{self._label(w)}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
             if target:
                 lines.append(self.tr("{system} の分だけ書き出します（ほかのシステムのファイル・出力履歴はそのまま）").format(system=label))
             if broken:
-                lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{w.system.label}: {'、'.join(w.errors[:3])}" for w in broken]
+                lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{self._label(w)}: {'、'.join(w.errors[:3])}" for w in broken]
+                if any(w.parts > 1 for w in broken):
+                    lines.append(self.tr("（分けたファイルのどれかが合わないシステムは、全部のファイルを書き出しません）"))
             if existing:
                 lines.append(self.tr("上書きするファイル {n} 件").format(n=len(existing)))
+            if leftovers:
+                lines.append(self.tr("前の書き出しで残っている番号違いのファイル {n} 件を削除: {list}").format(
+                    n=len(leftovers), list="、".join(n for _, _, n in leftovers[:5]) + (" …" if len(leftovers) > 5 else "")))
             choice = self._confirm(lines, earlier, label)
             if choice is None:
                 self.status.setText(self.tr("書き出しを取りやめ"))
                 return
             replace = choice
         paths, problems = [], []
-        written: dict = {}
-        failures = {w.system.system: "、".join(w.errors[:2]) for w in broken}
+        done_files = []
+        failures: dict = {}
+        for w in broken:
+            failures.setdefault(w.system.system, "、".join(w.errors[:2]))
         for w, folder in targets:
             try:
                 paths.append(write(w, folder))
-                written[w.system.system] = w.file_name
+                done_files.append(w)
             except OSError as error:
                 reason = error.strerror or str(error)
-                problems.append(f"{w.system.label}: {reason}")
-                failures[w.system.system] = reason
+                problems.append(f"{self._label(w)}: {reason}")
+                failures.setdefault(w.system.system, reason)
                 continue
             _, notes = encoded(w)
-            problems += [f"{w.system.label}: {n}" for n in notes + w.warnings[:3]]
+            problems += [f"{self._label(w)}: {n}" for n in notes + w.warnings[:3]]
+        # A request is 採用 with the file it is in; those of a file not written are kept as 見送り.
+        written = files_of(done_files)
+        cleared = 0
+        for system, folder, name in leftovers:
+            if system in failures:
+                continue
+            try:
+                os.remove(os.path.join(folder, name))
+                cleared += 1
+            except OSError as error:
+                problems.append(self.tr("{name} を削除できず: {m}").format(name=name, m=error.strerror or str(error)))
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
@@ -701,7 +766,9 @@ class PlanFileDock(PluginDock):
         def done(result):
             self.task = None
             saved, raised, _, removed, rewrite, failed_saves = result
-            text = self.tr("書き出し: {s}").format(s=written_summary([w for w, _ in targets if w.system.system in written]))
+            text = self.tr("書き出し: {s}").format(s=written_summary(done_files))
+            if cleared:
+                text += self.tr("・残っていた番号違いのファイル {n} 件を削除").format(n=cleared)
             if store.history:
                 text += (self.tr("・出力履歴 {n} 件").format(n=saved) if saved == len(rows)
                          else self.tr("・出力履歴 {n}/{m} 件").format(n=saved, m=len(rows)))
@@ -714,7 +781,7 @@ class PlanFileDock(PluginDock):
             if raised:
                 text += self.tr("・繰り上げ {n} 件").format(n=raised)
             if broken:
-                text += self.tr("・書き出さなかったシステム {n}（{list}）").format(n=len(broken), list="、".join(f"{w.system.label}: {w.errors[0]}" for w in broken))
+                text += self.tr("・書き出さなかったシステム {n}（{list}）").format(n=len(unfit), list="、".join(f"{self._label(w)}: {w.errors[0]}" for w in broken))
             if problems:
                 text += "・" + "、".join(problems)
             if failed_saves:
