@@ -186,15 +186,30 @@ def observed_image(layer: QgsRasterLayer) -> ObservedImage:
     return ObservedImage(id=image_id, name=image_id, time=t, box=_box(layer), layer_id=layer.id(), origin=origin)
 
 
+#: Providers of maps a server draws (background maps: XYZ tiles, WMS・WMTS, ArcGIS map services): not images.
+MAP_PROVIDERS = ("wms", "arcgismapserver", "xyz")
+
+
+def is_image_layer(layer: QgsMapLayer) -> bool:
+    """
+    Whether a raster layer is an image to record on: one opened from the
+    catalog, or any other but a background map (tiles, WMS, a map service).
+    A background map was listed as 「日時不明  {y}.png」 (tsudo 2026-11-11),
+    chosen as the image when nothing else was open.
+    """
+    return bool(layer.customProperty(IMAGE_ID)) or layer.providerType() not in MAP_PROVIDERS
+
+
 def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
     """
-    The project's raster layers as images to record on: the layers of one
-    catalog image id (a record's images in its folder) as one image (top of
-    the layer tree first).
+    The project's raster layers as images to record on (not the background
+    maps): the layers of one catalog image id (a record's images in its
+    folder) as one image (top of the layer tree first).
     """
     project = project or QgsProject.instance()
     order = {layer_id: i for i, layer_id in enumerate(project.layerTreeRoot().findLayerIds())}
-    rasters = [layer for layer in project.mapLayers().values() if isinstance(layer, QgsRasterLayer) and layer.isValid()]
+    rasters = [layer for layer in project.mapLayers().values()
+               if isinstance(layer, QgsRasterLayer) and layer.isValid() and is_image_layer(layer)]
     rasters.sort(key=lambda layer: order.get(layer.id(), len(order)))
     out: list = []
     by_id: dict[str, list] = {}
