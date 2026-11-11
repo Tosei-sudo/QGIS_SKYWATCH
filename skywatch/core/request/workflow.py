@@ -27,7 +27,7 @@ from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
 from .passes import Passes
-from .store import HistoryRow
+from .store import HistoryRow, ShotRow
 from .systems import ExportSystem
 from .view import systems_of
 from .weather import DAYLIGHT, daytime_cloud, places_of
@@ -117,6 +117,50 @@ def file_of(files: dict, system: str, request_id: str) -> Optional[str]:
     return f.get(request_id) if isinstance(f, dict) else f
 
 
+def new_run_id() -> str:
+    """The id of one writing out (its history rows and shots share it)."""
+    return str(uuid.uuid4()).upper()
+
+
+def _rows_with_shots(plan: DayPlan, files: dict, system: Optional[str]) -> list[Candidate]:
+    """The rows of the files written that the orbits placed (each a shot, or the shots of a big area), in order."""
+    return [c for c in plan.candidates
+            if c.result == TAKEN and c.shots and not c.member and of_system(c, system) and c.system is not None
+            and file_of(files, c.system.system, c.request.id) is not None]
+
+
+def shot_ids_of(plan: DayPlan, files: dict, run_id: str, system: Optional[str] = None) -> dict:
+    """request id → the id of the shot that takes it (the row's and those put into its shot)."""
+    out: dict = {}
+    for n, c in enumerate(_rows_with_shots(plan, files, system), 1):
+        for m in (c.together or [c]):
+            out[m.request.id] = f"{run_id}-{n}"
+    return out
+
+
+def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Optional[str] = None) -> list[ShotRow]:
+    """
+    The shots of the files written, one a row of a file (tsudo, 2026-11-11:
+    「マージした結果、どの範囲になったかも見たい」): the outline of the scenes
+    taken (each shot's, for an area too big for one), the pass, and the
+    requests in it. Requests fitted without the orbits have none.
+    """
+    out = []
+    for n, c in enumerate(_rows_with_shots(plan, files, system), 1):
+        first = c.shots[0]
+        look = first.look
+        members = c.together or [c]
+        out.append(ShotRow(
+            shot_id=f"{run_id}-{n}", run_id=run_id, run_date=run, day=plan.day.isoformat(), system=c.system.system,
+            satellite=c.satellite.name if c.satellite else "", pass_time=first.middle,
+            off_nadir=round(look["offNadir"], 2), incidence=round(look["incidence"], 2),
+            orbit_dir="昇交" if first.ascending else "降交", look_side=first.side, scenes=c.scenes, shots=len(c.shots),
+            coverage=c.coverage, request_id=c.request.id, request_ids=[m.request.id for m in members],
+            names=[m.request.name or m.request.id for m in members],
+            file=file_of(files, c.system.system, c.request.id) or "", rings=[s.ring() for s in c.shots]))
+    return out
+
+
 def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = None,
                failures: Optional[dict] = None, system: Optional[str] = None) -> list[HistoryRow]:
     """
@@ -131,10 +175,13 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
 
     A request put into another's shot (まとめ) keeps its own row, its own
     area (the schedule shows requests as asked), with the request whose row
-    in the file carries it (`merged_into`) and no scenes of its own.
+    in the file carries it (`merged_into`) and no scenes of its own. Each
+    row placed on the orbits names its shot (`shot_id`, shots_of with the
+    same `run_id`).
     """
-    run_id = run_id or str(uuid.uuid4()).upper()
+    run_id = run_id or new_run_id()
     failures = failures or {}
+    shot_ids = shot_ids_of(plan, files, run_id, system)
     rows = []
     for c in plan.candidates:
         if not of_system(c, system):
@@ -154,6 +201,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
             merged_into=c.lead.request.id if taken and c.member else "",
+            shot_id=shot_ids.get(c.request.id, "") if taken else "",
             result=result, reason=reason, file=(file or "") if taken else "",
             captured="未判定" if taken else "", boost_done=0,
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.

@@ -336,6 +336,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 優先度順に、システムの 1 日の件数・枚数の上限、区分ごとの枠、衛星ごとの 1 日の上限（`maxPerDay`）に詰める。衛星を指定した依頼はその衛星に、指定がなければ分解能の細かい衛星から。入らなければ次のシステムへ
   - 衛星の軌道（衛星カタログの TLE）から、その日に依頼の上を通るパスを出して割り当てる（2026-11-11）。依頼の角度・観測方向・軌道方向・時間帯に合うパスがなければ「撮像機会なし」。衛星ごとの撮像間隔（`minInterval`、分）と 1 日の撮像回数（`maxPerDay`）を守り、空きがなければ「衛星の空きなし」
   - 同じパスで近い依頼は、1 回の撮像（幅 `swath` の中で、長さ `length` のシーンを `scenesPerPass` 枚まで連続）に収まればまとめる。別々なら撮像間隔に引っかかる依頼も、まとめれば入る。まとめた依頼はファイルでは 1 行（優先度のいちばん高い依頼の行。範囲は撮像するシーンの外形、`mergedIds` でまとめた依頼の ID）になり、件数の上限も 1 件分。一覧の「結果・理由」に「まとめ」と出し、「撮像時刻」にパスの時刻（日本時間）を出す。出力履歴・撮像予定は依頼ごとの行のまま（範囲も依頼のもの。`MERGED_INTO` にまとめ先）で、システムの採否はまとめた依頼すべてに付く
+  - 「地図に表示」で、表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と書き出す撮像の範囲（シーンの外形。まとめた行はまとめた範囲。破線）を書き出す前に地図に重ねる。行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す
+  - 撮像の範囲のレイヤー（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)、`requestStores[].shots`）があれば、書き出したファイルの 1 行ごとに撮像の範囲・時刻・角度・まとめた依頼を記録する（2026-11-11）。出力履歴は依頼ごとの行・依頼の範囲のままで、`SHOT_ID` でどの撮像で撮るかをたどれる。置き換えて書き出すと、その日（そのシステム）の前回の撮像の範囲も置き換わる
   - 軌道を使わずに件数・枚数だけで詰めるシステムは `orbit: false`、まとめないシステムは `merge: false`。TLE を読めない衛星は件数だけで詰める。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「24. 軌道のパスへの割り当てとまとめ」
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
@@ -349,7 +351,8 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 「撮像予定」ドック: カレンダーで日を選ぶと、その日の計画（出力履歴の行）を一覧と地図に出す。状態は 採用・不明・不採用・見送り・要求外（システム側の定常の撮像など、依頼していない計画）。カレンダーは計画のある日が太字（計画に入ったものがあれば緑、採否不明だけなら青）
   - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用（・不明）を記録する。ファイルの様式はオーダーファイルと同じく自由に決められる（CSV は列ごとに何の値か・読み替え・書式・抜き出し、JSON は記録の中の場所かシステムの JSON Schema に `x-target`。設定ファイル作成ツールで組んで試し読みできる。[docs/imaging-requests.md](docs/imaging-requests.md) §20）。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
   - 「採用」「不採用」「不明に戻す」で手入力（理由も書ける）。「要求外を追加…」で依頼していない計画を手で足す（名称・システム・衛星・日時・範囲）。要求外は「削除」で消せる
-  - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする
+  - 一覧の「まとめ」に、依頼ごとにどう撮るか（「22:00 単独」「22:00 まとめ 3 件（B・C と）」「22:00 同乗（「A」の撮像）」）を出す（吹き出しに撮像の時刻・衛星・角度・シーン数・まとめた依頼）。地図は依頼の範囲を状態の色で塗り、撮像の範囲（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)）があれば破線で重ねる（「撮像の範囲」で出し入れ）。依頼を選ぶと、その撮像と同じ撮像の依頼も太く出す
+  - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする（撮像の範囲があれば、もう 1 つの一時レイヤー「撮像の範囲」も）
   - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
 
 ## 移動目標撮像計画
@@ -1397,7 +1400,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `satelliteAliases` | オブジェクトか配列 | 衛星名の対応表（Esri のテーブル）の `url`（必須）、`fields`（`satellite` 衛星カタログの名前か ID・`alias` 画像カタログでの名前、ともに必須）、`label`・`where`・`token` | なし（名前の英数字の部分一致のみ） | [衛星名の対応表](#衛星名の対応表satellitealiases) |
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
-| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 | `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
@@ -1525,6 +1528,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
 | [`TBL_COUNTRY`](#tbl_country国) | ポリゴン | 読み | 国（通報の国コード・国名） | `alertReports.countries` |
 | [`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ) | なし | 読み | 撮像依頼の依頼グループとメンバー（2026-11-11 に追加。レイヤー番号を変えないよう一覧の最後） | `requestStores[].groups` |
+| [`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) | ポリゴン | 書き込み | 書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼はまとめた範囲。2026-11-11 に追加） | `requestStores[].shots` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -1672,6 +1676,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `EXTERNAL_ID` | システム側の番号 | `String(255)` | システムが付けた番号 | `externalId` |
 | `ADOPTION_SOURCE` | 採否の入力元 | `String(1000)` | 結果ファイルの名前・`手入力`・`画像の入着` | `adoptionSource` |
 | `MERGED_INTO` | まとめ先の依頼ID | `String(255)` | ほかの依頼と 1 回の撮像にまとめて出力したとき、ファイルでその行になった依頼の `REQ_ID`（自分の行で出したものは空）。システムの採否はまとめた依頼すべてに付く。無くても動く | `mergedInto` |
+| `SHOT_ID` | 撮像ID | `String(64)` | その依頼を撮る撮像（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) の `SHOT_ID`。まとめた依頼は同じ値）。軌道を使わずに詰めた依頼・見送りは空。無くても動く | `shotId` |
 
 ### `TBL_OBSERVATION`（観測記録）
 
@@ -1917,6 +1922,33 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 グループの名前を変えるときは、台帳の `REQUEST_GROUP` も同じ名前に直す（「撮像依頼」ドックで古いグループで絞り込み、全件を選んで「一括編集…」）。出力履歴の過去の行は書き出したときの名前のまま。
 
+### `TBL_REQUEST_SHOT`（撮像の範囲）
+
+書き出したシステム向けファイルの 1 行ごとの撮像（2026-11-11 に追加。tsudo「マージした結果、どの範囲になったかも見たい。他方、要求にどう呼応したかも知りたい」）。ポリゴンは撮像するシーンの外形（まとめた行はまとめた範囲、1 回の撮像に収まらない大きな範囲は撮像ごとのポリゴン）。依頼ごとの記録は [`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴)（依頼の範囲）のまま、その `SHOT_ID` でこの表の行をたどる。軌道を使わずに詰めた行（`orbit: false`・TLE なし）は記録しない。「置き換えて書き出し」では、その日（システムごとに書き出したときはそのシステム）の前回の行を消してから入れ直す（採否ごと残した出力履歴の行の撮像は残す）。テーブルがなくても動く（撮像予定ドックは `MERGED_INTO` でまとめを表示し、範囲は出さない）。`requestStores[].shotFields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `SHOT_ID` | 撮像ID | `String(64)` | 撮像の ID（出力 ID と番号）。**必須** | `shotId` |
+| `RUN_ID` | 出力ID | `String(64)` | 出力 1 回の ID（出力履歴の `RUN_ID` と同じ） | `runId` |
+| `RUN_DATE` | 出力日時 | `Date` | 出力した日時 | `runDate` |
+| `TARGET_DAY` | 対象日 | `String(16)` | 対象の日（`2026-11-11`）。**必須** | `day` |
+| `TARGET_DATE` | 対象日（日付） | `Date` | 対象の日の日本時間 0 時（ダッシュボードの日付の絞り込み用） | `targetDate` |
+| `SYSTEM` | システム | `String(255)` | 書き出した衛星システム | `system` |
+| `SATELLITE` | 衛星 | `String(255)` | 撮る衛星 | `satellite` |
+| `PASS_TIME` | 撮像時刻 | `Date` | 撮像の真ん中の時刻（軌道から。大きな範囲は最初の撮像） | `passTime` |
+| `OFF_NADIR` | オフナディア角 | `Double` | 撮像のオフナディア角（°） | `offNadir` |
+| `INCIDENCE` | 入射角 | `Double` | 撮像の入射角（°） | `incidence` |
+| `ORBIT_DIR` | 軌道方向 | `String(16)` | `昇交`・`降交` | `orbitDir` |
+| `LOOK_SIDE` | 観測方向 | `String(16)` | `右`・`左` | `lookSide` |
+| `SCENES` | シーン数 | `Integer` | 連続シーン数（大きな範囲は撮像すべての合計） | `scenes` |
+| `SHOT_COUNT` | 撮像回数 | `Integer` | 撮像の回数（1 回に収まらない大きな範囲だけ 2 以上） | `shots` |
+| `COVERAGE` | 範囲の割合 | `Double` | 大きな範囲で撮れる割合（%。1 回に収まる行は空） | `coverage` |
+| `REQ_ID` | 依頼ID | `String(64)` | ファイルでその行になった依頼の `REQ_ID` | `requestId` |
+| `REQ_IDS` | まとめた依頼ID | `String(4000)` | この撮像で撮る依頼の `REQ_ID`（カンマ区切り、行の依頼が先頭） | `requestIds` |
+| `REQ_NAMES` | まとめた依頼の名称 | `String(4000)` | 同じ依頼の名称（読点 `、` 区切り） | `names` |
+| `REQ_COUNT` | 依頼件数 | `Integer` | この撮像で撮る依頼の件数（まとめていなければ 1） | `count` |
+| `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル | `file` |
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -1947,7 +1979,8 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
   "requestStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4",                         // TBL_IMAGING_REQUEST
       "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5",                     // TBL_REQUEST_HISTORY
-      "groups": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/21" }                    // TBL_REQUEST_GROUP
+      "groups": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/21",                     // TBL_REQUEST_GROUP
+      "shots": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/22" }                     // TBL_REQUEST_SHOT
   ],
   "observationStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6",                         // TBL_OBSERVATION

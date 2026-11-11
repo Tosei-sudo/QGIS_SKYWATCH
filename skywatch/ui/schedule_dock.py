@@ -7,7 +7,11 @@ A day's rows are those of the history table (TBL_REQUEST_HISTORY) for that
 target day: the requests handed out (採用 / 不採用 by the system, or
 不明), those held back (見送り), and the plans the systems made without
 being asked (要求外), narrowed by system, state, 依頼グループ (the group the
-history row was written with, else the ledger's) and words. Answers come from each system's result file
+history row was written with, else the ledger's) and words. Each request is
+drawn with its own area; with the shot layer (`requestStores[].shots`) the
+shots written are drawn over them dashed, and 「まとめ」 tells which request
+was taken alone, carried others or went in another's shot (tsudo,
+2026-11-11, core/request/shot_view.py). Answers come from each system's result file
 (`requestExports[].resultFile`) or by hand; 要求外 plans from the file or
 by hand. core/request/adoption.py does the matching.
 """
@@ -21,7 +25,7 @@ from typing import Optional
 
 from qgis.core import (
     QgsCategorizedSymbolRenderer, QgsFeature, QgsField, QgsFillSymbol, QgsGeometry, QgsProject, QgsRectangle, QgsRendererCategory,
-    QgsVectorLayer,
+    QgsSingleSymbolRenderer, QgsVectorLayer,
 )
 from qgis.gui import QgsMapToolExtent
 from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, Qt, QTime, QTimer, QVariant
@@ -34,14 +38,16 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.adoption import (
     NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, unrequested_rows,
 )
+from ..core.esri import EsriError
 from ..core.request.groups import read_groups
 from ..core.request.model import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
 from ..core.request.store import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, add_history,
-    day_counts, delete_history, delete_history_rows, history_has, load_day, load_requests, state_of, unrequested_where,
+    day_counts, delete_history, delete_history_rows, history_has, load_day, load_requests, load_shots, state_of, unrequested_where,
     update_history,
 )
+from ..core.request.shot_view import companions, shot_text, shot_tip
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
@@ -50,8 +56,10 @@ from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
 
-COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由・メモ")
-_TAKEN, _NOTE = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ")
+COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由・メモ")
+_TAKEN, _NOTE, _SHOT = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ")
+#: The shots' outlines on the map (dashed over the requests' areas).
+SHOT_COLOR = "#7c3aed"
 #: Each state's colour, on the list and the map.
 STATE_COLORS = {PLANNED: "#16a34a", UNREQUESTED: "#7c3aed", AWAITING: "#2563eb", DECLINED: "#dc2626", HELD_BACK: "#9ca3af"}
 #: The rows 「計画に入ったもの」 (what will be taken).
@@ -118,6 +126,11 @@ class ScheduleDock(PluginDock):
         self.groups_read = False
         #: The history's 採否 fields it lacks (answers cannot be kept without them).
         self.missing_fields: list = []
+        #: The day's shots (撮像の範囲, the shot layer's rows) by SHOT_ID, and why they could not be read.
+        self.shots: dict = {}
+        self.shot_problem = ""
+        #: The shots' scratch layer last made by 「レイヤーに出す」.
+        self.shot_layer: Optional[QgsVectorLayer] = None
         self.task = None
         self._loaded = False
         self._month: tuple = ()
@@ -222,12 +235,19 @@ class ScheduleDock(PluginDock):
         self.on_map = QCheckBox(self.tr("地図に表示"))
         self.on_map.setChecked(True)
         self.on_map.toggled.connect(lambda _on: self.draw())
+        self.shots_on_map = QCheckBox(self.tr("撮像の範囲"))
+        self.shots_on_map.setChecked(True)
+        self.shots_on_map.setToolTip(self.tr("書き出したときの撮像の範囲（まとめた依頼はまとめた範囲）を破線で重ねる。"
+                                             "依頼の範囲はそれぞれの依頼のまま"))
+        self.shots_on_map.toggled.connect(lambda _on: self.draw())
         self.layer_button = QPushButton(self.tr("レイヤーに出す"))
-        self.layer_button.setToolTip(self.tr("表示中の計画を一時レイヤー（状態で色分け）にする"))
+        self.layer_button.setToolTip(self.tr("表示中の計画を一時レイヤー（依頼の範囲を状態で色分け）にする。"
+                                             "撮像の範囲があれば、もう 1 つのレイヤー（破線）にする"))
         self.layer_button.clicked.connect(lambda: self.to_layer())
         self.reload_button = QPushButton(self.tr("再読み込み"))
         self.reload_button.clicked.connect(lambda: self.reload(refresh=True))
         bottom.addWidget(self.on_map)
+        bottom.addWidget(self.shots_on_map)
         bottom.addStretch(1)
         bottom.addWidget(self.layer_button)
         bottom.addWidget(self.reload_button)
@@ -263,7 +283,9 @@ class ScheduleDock(PluginDock):
     def _forget(self) -> None:
         self.rows, self.shown, self.chosen, self.day, self._areas, self._month = [], [], None, "", {}, ()
         self._ledger_groups, self.groups, self.groups_read = {}, [], False
+        self.shots, self.shot_problem = {}, ""
         self.group_filter.set_groups([], ())
+        self.shots_on_map.setVisible(bool(self.store and self.store.shots))
         self._loaded = False
         self.render()
 
@@ -346,6 +368,13 @@ class ScheduleDock(PluginDock):
 
         def work(task):
             rows = load_day(client, store, token, day, task.isCanceled)
+            shots, problem = [], ""
+            if store.shots:
+                try:
+                    shots = load_shots(client, store, token, day, task.isCanceled)
+                except EsriError as error:
+                    # The requests' rows matter most: shown without the shots.
+                    problem = str(error)
             missing = history_has(client, store, token, ADOPTION_ROLES) if refresh or areas is None else None
             found, groups_of = areas, ledger_groups
             if (found is None or any(r.request_id and not r.rings and r.request_id not in found for r in rows)
@@ -357,11 +386,12 @@ class ScheduleDock(PluginDock):
                 groups_of = {q.id: q.group for q in requests}
                 groups_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in groups_of})
             groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled) if read_table else None
-            return rows, missing, found, groups_of, groups
+            return rows, missing, found, groups_of, groups, shots, problem
 
         def done(result):
-            rows, missing, found, groups_of, groups = result
+            rows, missing, found, groups_of, groups, shots, problem = result
             self.rows, self._areas, self._ledger_groups, self.day = rows, found, groups_of, day
+            self.shots, self.shot_problem = {s.shot_id: s for s in shots if s.shot_id}, problem
             if groups is not None and groups[0] is not None:
                 self.groups, self.groups_read = groups[0], True
             self.group_filter.set_groups(self.groups, (self.group_of(r) for r in rows))
@@ -449,7 +479,11 @@ class ScheduleDock(PluginDock):
         for i, r in enumerate(self.shown):
             state = row_state(r)
             items = [QStandardItem(t) for t in (state, r.name or r.external_id or r.request_id, self.group_of(r), r.management_no,
-                                                r.system, r.satellite, _when(r.planned_at), captured_text(r), r.requester, row_note(r))]
+                                                r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
+                                                captured_text(r), r.requester, row_note(r))]
+            tip = shot_tip(self.shots.get(r.shot_id)) if r.shot_id else ""
+            if tip:
+                items[_SHOT].setToolTip(plain_tip(tip))
             items[0].setForeground(QBrush(QColor(STATE_COLORS[state])))
             source = IMAGE_ARRIVED if r.captured == "撮像済み" and r.result == "採用" and not r.adoption_source else r.adoption_source
             if source:
@@ -474,6 +508,8 @@ class ScheduleDock(PluginDock):
             if self.missing_fields:
                 text += self.tr("。出力履歴に属性 {f} がないため採否は記録できない（tools/arcgis/create_tables.py で足す）").format(
                     f="・".join(self.missing_fields))
+            if self.shot_problem:
+                text += self.tr("。撮像の範囲を読めず（{m}）").format(m=self.shot_problem)
             self.status.setText(text)
         self.draw()
         self._update_buttons()
@@ -497,24 +533,39 @@ class ScheduleDock(PluginDock):
             self.canvas.refresh()
             return
         polygons = []
+        # Those taken in the same shot as the chosen one stand out with it.
+        fellows = {id(r) for r in companions(self.chosen, self.rows)} if self.chosen is not None else set()
         # The chosen one last, so it is on top.
         for r in sorted(self.shown, key=lambda r: self.chosen is not None and r.object_id == self.chosen.object_id):
             rings = self.rings_of(r)
             if rings:
                 chosen = self.chosen is not None and r.object_id == self.chosen.object_id
-                polygons.append((rings, STATE_COLORS[row_state(r)], 3 if chosen else 1, (r.name or r.external_id) if chosen else ""))
+                polygons.append((rings, STATE_COLORS[row_state(r)], 3 if chosen else 2 if id(r) in fellows else 1,
+                                 (r.name or r.external_id) if chosen else ""))
+        mine = self.chosen.shot_id if self.chosen is not None else ""
+        for shot in self.shown_shots():
+            polygons.append((shot.rings, SHOT_COLOR, 3 if shot.shot_id == mine else 1, "", True))
         self.overlay.paint(polygons)
         self.canvas.refresh()
 
+    def shown_shots(self) -> list:
+        """The shots of the rows shown (their outlines on the map), when 「撮像の範囲」 is ticked."""
+        if not self.shots or not self.shots_on_map.isChecked() or not self.shots_on_map.isVisibleTo(self):
+            return []
+        ids = dict.fromkeys(r.shot_id for r in self.shown if r.shot_id)
+        return [self.shots[i] for i in ids if i in self.shots and self.shots[i].rings]
+
     def zoom(self) -> None:
         box: Optional[QgsRectangle] = None
-        for r in ([self.chosen] if self.chosen else self.shown):
-            for ring in self.rings_of(r):
-                for x, y in ring:
-                    if box is None:
-                        box = QgsRectangle(x, y, x, y)
-                    else:
-                        box.combineExtentWith(x, y)
+        rows = [self.chosen] if self.chosen else self.shown
+        shot = self.shots.get(self.chosen.shot_id) if self.chosen is not None and self.chosen.shot_id else None
+        rings = [ring for r in rows for ring in self.rings_of(r)] + (shot.rings if shot else [])
+        for ring in rings:
+            for x, y in ring:
+                if box is None:
+                    box = QgsRectangle(x, y, x, y)
+                else:
+                    box.combineExtentWith(x, y)
         if box is None:
             return
         box = box.buffered(max(box.width(), box.height()) * 0.2 + 0.01)
@@ -687,20 +738,25 @@ class ScheduleDock(PluginDock):
     # --- A layer --------------------------------------------------------------------------------
 
     def to_layer(self) -> Optional[QgsVectorLayer]:
-        """The rows shown as a scratch layer (WGS 84 polygons), coloured by state."""
+        """
+        The rows shown as a scratch layer (WGS 84 polygons, each request's own
+        area), coloured by state; with the shot layer, their shots as a second
+        layer (`shot_layer`, dashed outlines) above it.
+        """
         if not self.shown:
             return None
         layer = QgsVectorLayer("Polygon?crs=EPSG:4326", self.tr("撮像予定 {d}").format(d=self.day), "memory")
-        names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID", "外部ID",
-                 "入力元")
+        names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID",
+                 "外部ID", "入力元", "撮像ID", "まとめ先の依頼ID")
         provider = layer.dataProvider()
         provider.addAttributes([QgsField(n, QVariant.String) for n in names])
         layer.updateFields()
         features = []
         for r in self.shown:
             f = QgsFeature(layer.fields())
-            f.setAttributes([row_state(r), r.name, self.group_of(r), r.management_no, r.system, r.satellite, _when(r.planned_at),
-                             captured_text(r), r.requester, row_note(r), r.day, r.request_id, r.external_id, r.adoption_source])
+            f.setAttributes([row_state(r), r.name, self.group_of(r), r.management_no, r.system, r.satellite,
+                             shot_text(r, self.rows, self.shots), _when(r.planned_at), captured_text(r), r.requester, row_note(r), r.day,
+                             r.request_id, r.external_id, r.adoption_source, r.shot_id, r.merged_into])
             rings = [[tuple(p[:2]) for p in ring] for ring in self.rings_of(r)]
             if rings:
                 # One ring a polygon; more, a polygon each (as the map shows them).
@@ -717,6 +773,38 @@ class ScheduleDock(PluginDock):
                                                  "outline_color": color.name(), "outline_width": "0.6"})
             categories.append(QgsRendererCategory(state, symbol, state))
         layer.setRenderer(QgsCategorizedSymbolRenderer("状態", categories))
+        QgsProject.instance().addMapLayer(layer)
+        self.shot_layer = self._shots_layer()
+        return layer
+
+    def _shots_layer(self) -> Optional[QgsVectorLayer]:
+        """The shots of the rows shown (撮像の範囲): one feature a row of a file, dashed outlines; None without any."""
+        ids = dict.fromkeys(r.shot_id for r in self.shown if r.shot_id)
+        shots = [self.shots[i] for i in ids if i in self.shots and self.shots[i].rings]
+        if not shots:
+            return None
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", self.tr("撮像の範囲 {d}").format(d=self.day), "memory")
+        names = ("撮像ID", "システム", "衛星", "撮像時刻", "オフナディア角", "入射角", "軌道方向", "観測方向", "シーン数", "撮像回数",
+                 "範囲の割合", "依頼件数", "依頼ID", "名称", "出力ファイル")
+        provider = layer.dataProvider()
+        provider.addAttributes([QgsField(n, QVariant.String) for n in names])
+        layer.updateFields()
+        features = []
+        for s in shots:
+            f = QgsFeature(layer.fields())
+
+            def text(v):
+                return "" if v is None else str(v)
+            f.setAttributes([s.shot_id, s.system, s.satellite, _when(s.pass_time), text(s.off_nadir), text(s.incidence), s.orbit_dir,
+                             s.look_side, text(s.scenes), str(s.shots), "" if s.coverage is None else f"{round(s.coverage * 100)}%",
+                             str(s.count), ",".join(s.request_ids), "・".join(s.names), s.file])
+            rings = [[tuple(p[:2]) for p in ring] for ring in s.rings]
+            f.setGeometry(polygon_of(rings) if len(rings) == 1 else multipolygon_of(rings))
+            features.append(f)
+        provider.addFeatures(features)
+        layer.updateExtents()
+        layer.setRenderer(QgsSingleSymbolRenderer(QgsFillSymbol.createSimple({
+            "color": "0,0,0,0", "outline_color": SHOT_COLOR, "outline_width": "0.6", "outline_style": "dash"})))
         QgsProject.instance().addMapLayer(layer)
         return layer
 
