@@ -113,7 +113,7 @@ def _like(pattern: str, escape: Optional[str]) -> "re.Pattern[str]":
 
 def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     """
-    `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A IN ('x', 'y')`, `A >= 'x'`,
+    `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A [NOT] IN ('x', 'y')`, `A >= 'x'`,
     `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, joined by
     AND / OR with parentheses. Parts not understood match (as before).
     """
@@ -137,10 +137,10 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
     if m:
         return a.get(m.group(1)) is None
-    m = re.fullmatch(r"(\w+)\s+IN\s*\((.*)\)", part, re.IGNORECASE | re.DOTALL)
+    m = re.fullmatch(r"(\w+)\s+(NOT\s+)?IN\s*\((.*)\)", part, re.IGNORECASE | re.DOTALL)
     if m:
-        values = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(2))]
-        return str(a.get(m.group(1))) in values
+        values = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(3))]
+        return (str(a.get(m.group(1))) in values) != bool(m.group(2))
     m = re.fullmatch(r"(\w+)\s*(>=|<=|<>|=|>|<)\s*TIMESTAMP\s*'(.+)'", part)
     if m:
         t = datetime.fromisoformat(m.group(3).replace(" ", "T")).replace(tzinfo=timezone.utc).timestamp() * 1000

@@ -157,6 +157,7 @@ TABLES = (
         F("EXTERNAL_ID", "システム側の番号", "TEXT", 255, "externalId"),
         F("ADOPTION_SOURCE", "採否の入力元", "TEXT", 1000, "adoptionSource"),
         F("MERGED_INTO", "まとめ先の依頼ID", "TEXT", 255, "mergedInto"),
+        F("SHOT_ID", "撮像ID", "TEXT", 64, "shotId"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),
@@ -321,6 +322,29 @@ TABLES = (
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("NOTE", "メモ", "TEXT", 1000, "note"),
     )),
+    # 2026-11-11 に追加（一覧の最後: 既に公開したサービスのレイヤー番号を変えないため）。
+    Table("TBL_REQUEST_SHOT", "撮像の範囲", "POLYGON", writable=True, setting="requestStores[].shots", fields=(
+        F("SHOT_ID", "撮像ID", "TEXT", 64, "shotId"),
+        F("RUN_ID", "出力ID", "TEXT", 64, "runId"),
+        F("RUN_DATE", "出力日時", "DATE", None, "runDate"),
+        F("TARGET_DAY", "対象日", "TEXT", 16, "day"),
+        F("TARGET_DATE", "対象日（日付）", "DATE", None, "targetDate"),
+        F("SYSTEM", "システム", "TEXT", 255, "system"),
+        F("SATELLITE", "衛星", "TEXT", 255, "satellite"),
+        F("PASS_TIME", "撮像時刻", "DATE", None, "passTime"),
+        F("OFF_NADIR", "オフナディア角", "DOUBLE", None, "offNadir"),
+        F("INCIDENCE", "入射角", "DOUBLE", None, "incidence"),
+        F("ORBIT_DIR", "軌道方向", "TEXT", 16, "orbitDir"),
+        F("LOOK_SIDE", "観測方向", "TEXT", 16, "lookSide"),
+        F("SCENES", "シーン数", "LONG", None, "scenes"),
+        F("SHOT_COUNT", "撮像回数", "LONG", None, "shots"),
+        F("COVERAGE", "範囲の割合", "DOUBLE", None, "coverage"),
+        F("REQ_ID", "依頼ID", "TEXT", 64, "requestId"),
+        F("REQ_IDS", "まとめた依頼ID", "TEXT", 4000, "requestIds"),
+        F("REQ_NAMES", "まとめた依頼の名称", "TEXT", 4000, "names"),
+        F("REQ_COUNT", "依頼件数", "LONG", None, "count"),
+        F("OUTPUT_FILE", "出力ファイル", "TEXT", 1000, "file"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -330,6 +354,7 @@ INDEXES = {
     "TBL_SATELLITE_ALIAS": ("SAT_NAME",),
     "TBL_IMAGING_REQUEST": ("REQ_ID",),
     "TBL_REQUEST_HISTORY": ("REQ_ID", "TARGET_DAY", "TARGET_DATE"),
+    "TBL_REQUEST_SHOT": ("SHOT_ID", "TARGET_DAY"),
     "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID"),
     "TBL_OBSERVATION_AREA": ("AREA_ID", "IMAGE_ID"),
     "TBL_ALERT_LOG": ("OBS_ID",),
@@ -402,6 +427,8 @@ def plugin_config(urls: dict) -> dict:
             store["history"] = urls["TBL_REQUEST_HISTORY"]
         if has("TBL_REQUEST_GROUP"):
             store["groups"] = urls["TBL_REQUEST_GROUP"]
+        if has("TBL_REQUEST_SHOT"):
+            store["shots"] = urls["TBL_REQUEST_SHOT"]
         config["requestStores"] = [store]
     if has("TBL_OBSERVATION"):
         store = {"url": urls["TBL_OBSERVATION"]}

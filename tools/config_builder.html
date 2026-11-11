@@ -298,7 +298,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "plannedAt": "PLANNED_AT",
    "externalId": "EXTERNAL_ID",
    "adoptionSource": "ADOPTION_SOURCE",
-   "mergedInto": "MERGED_INTO"
+   "mergedInto": "MERGED_INTO",
+   "shotId": "SHOT_ID"
   },
   "requestGroups": {
    "name": "GROUP_NAME",
@@ -306,6 +307,28 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "order": "SORT_ORDER",
    "active": "ACTIVE",
    "note": "NOTE"
+  },
+  "requestShots": {
+   "shotId": "SHOT_ID",
+   "runId": "RUN_ID",
+   "runDate": "RUN_DATE",
+   "day": "TARGET_DAY",
+   "targetDate": "TARGET_DATE",
+   "system": "SYSTEM",
+   "satellite": "SATELLITE",
+   "passTime": "PASS_TIME",
+   "offNadir": "OFF_NADIR",
+   "incidence": "INCIDENCE",
+   "orbitDir": "ORBIT_DIR",
+   "lookSide": "LOOK_SIDE",
+   "scenes": "SCENES",
+   "shots": "SHOT_COUNT",
+   "coverage": "COVERAGE",
+   "requestId": "REQ_ID",
+   "requestIds": "REQ_IDS",
+   "names": "REQ_NAMES",
+   "count": "REQ_COUNT",
+   "file": "OUTPUT_FILE"
   },
   "observationStores": {
    "id": "OBS_ID",
@@ -958,6 +981,8 @@ const ROLE_LABELS = {
   lon: "経度", course: "針路（COG）", speed: "速度", fileName: "ファイル名", detectedAt: "検出日時", sentAt: "転記日時",
   class: "クラス", classId: "クラス番号", score: "確信度", model: "モデル", area: "面積（m²）", angleDeg: "向き（°）",
   createdAt: "作成日時", createdBy: "作成者", updatedAt: "更新日時",
+  shotId: "撮像 ID（撮像の範囲）", passTime: "撮像時刻", shots: "撮像回数", coverage: "範囲の割合（%）", requestIds: "依頼 ID（カンマ区切り）",
+  names: "名称（読点区切り）", count: "依頼件数", mergedInto: "まとめ先の依頼 ID",
 };
 const SOURCE_LABELS = {
   id: "依頼 ID", name: "名称", managementNo: "管理番号", identificationNo: "識別番号", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
@@ -1321,7 +1346,9 @@ const SPEC = [
       field: I("requestStores", "台帳", [LABEL, URL_("依頼台帳のレイヤー"), T("history", "出力履歴のテーブル", { ph: "https://…/FeatureServer/1" }),
         R("fields", "台帳の属性名", K.roles.requestStores), R("historyFields", "履歴の属性名", K.roles.requestHistory),
         T("groups", "依頼グループのテーブル", { ph: "https://…/FeatureServer/21", help: "TBL_REQUEST_GROUP。グループ名とメンバー（ユーザー名）。グループは Esri のテーブルで管理し、ここには URL だけ" }),
-        R("groupFields", "依頼グループの属性名", K.roles.requestGroups), CATALOG,
+        R("groupFields", "依頼グループの属性名", K.roles.requestGroups),
+        T("shots", "撮像の範囲のレイヤー", { ph: "https://…/FeatureServer/22", help: "TBL_REQUEST_SHOT（ポリゴン）。書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼はまとめた範囲）。撮像予定ドックで依頼の範囲に重ねて表示。なくても動く" }),
+        R("shotFields", "撮像の範囲の属性名", K.roles.requestShots), CATALOG,
         N("missAfterDays", "未撮像とする日数"), TOKEN]) },
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [

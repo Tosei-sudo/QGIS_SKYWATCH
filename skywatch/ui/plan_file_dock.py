@@ -10,7 +10,10 @@ forecast for the optical requests, works out the satellites' passes over
 them from their orbits (core/request/passes.py) and fits the day's
 requests into the passes and the systems' limits. Requests put into one
 shot (まとめ) say so in 結果・理由 (tsudo, 2026-11-11), and the time of the
-pass is in 撮像時刻. The table shows every candidate: ticking 採用 or not,
+pass is in 撮像時刻. 「地図に表示」 draws the requests shown with their own
+areas and, dashed, the shots the files are written with (the outline of
+the scenes, a merged row's area), before anything is written. The table
+shows every candidate: ticking 採用 or not,
 moving rows up and down and ticking a raise are kept and the fitting is
 done again. 「書き出し」 writes one file per system (CSV, or JSON checked
 against its schema), then the history and the raises taken.
@@ -36,14 +39,16 @@ import time
 from datetime import date
 from typing import Optional
 
+from qgis.core import QgsRectangle
 from qgis.PyQt.QtCore import QCoreApplication, QDate, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
     QTableView,
 )
 
 from ..core.catalog import CatalogConfig
+from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, merge_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
@@ -53,19 +58,21 @@ from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
-    RequestStoreConfig, add_history, count_history, delete_history_rows, handed_where, history_where, load_history, load_requests,
-    replaced_where, update_history, update_requests,
+    RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, handed_where, history_where,
+    load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, not_written, plan_day,
-    written_summary,
+    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written,
+    plan_day, shots_of, written_summary,
 )
 from ..qgis_io import settings
+from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
+from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
 
 COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
@@ -85,6 +92,11 @@ class PlanFileDock(PluginDock):
     def __init__(self, iface, context, open_settings, satellites, requests_changed=None, parent=None):
         super().__init__("SatObsPlanFiles", QCoreApplication.translate("PlanFileDock", "撮像計画ファイル出力"), context, open_settings, parent)
         self.iface = iface
+        self.canvas = iface.mapCanvas()
+        #: The requests' areas and the shots on the map (「地図に表示」).
+        self.overlay = PlanOverlay(self.canvas)
+        #: The candidate chosen in the table (drawn thick, its shot's requests too).
+        self.chosen = None
         #: Calls back with the satellites to plan with (the imaging plan's catalog), once they are read.
         self.satellites = satellites
         #: Told when the ledger was read or changed here (the 「撮像依頼」 dock shows it again).
@@ -107,7 +119,15 @@ class PlanFileDock(PluginDock):
         self.results = None
         self._build()
         context.configChanged.connect(self._config_changed)
+        self.visibilityChanged.connect(self._visibility)
         self._config_changed()
+
+    def _visibility(self, visible: bool) -> None:
+        if visible:
+            self.draw()
+        else:
+            self.overlay.unpaint()
+            self.canvas.refresh()
 
     def _build(self) -> None:
         layout = self.body
@@ -176,6 +196,7 @@ class PlanFileDock(PluginDock):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row(current.row()))
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("plan-files", self.table, self)
@@ -188,6 +209,12 @@ class PlanFileDock(PluginDock):
         self.reset_button.clicked.connect(self.reset)
         for b in (self.up_button, self.down_button, self.reset_button):
             moves.addWidget(b)
+        self.on_map = QCheckBox(self.tr("地図に表示"))
+        self.on_map.setChecked(True)
+        self.on_map.setToolTip(self.tr("表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と、書き出す撮像の範囲（破線）を地図に重ねる。"
+                                       "行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す"))
+        self.on_map.toggled.connect(lambda _on: self.draw())
+        moves.addWidget(self.on_map)
         moves.addStretch(1)
         self.room = QLabel()
         self.room.setWordWrap(True)
@@ -322,6 +349,8 @@ class PlanFileDock(PluginDock):
     def close_all(self) -> None:
         """Stops nothing running but forgets the day (when the plugin is unloaded)."""
         self.plan = None
+        self.chosen = None
+        self.overlay.unpaint()
         if self.simulation is not None:
             self.simulation.close()
             self.simulation = None
@@ -509,7 +538,63 @@ class PlanFileDock(PluginDock):
         total = len(plan.candidates) if plan else 0
         parts = [self.tr("表示 {n}/{m} 件").format(n=len(self.shown), m=total)] if len(self.shown) != total else []
         self.room.setText("　".join(parts + [f"{s.label} {rooms[s.system]}" for s in listed]))
+        if self.chosen is not None and not any(c is self.chosen for c in self.shown):
+            self.chosen = None
+        self.draw()
         self._update_buttons()
+
+    # --- The map --------------------------------------------------------------------------------
+
+    def _row(self, row: int) -> None:
+        if 0 <= row < len(self.shown):
+            self.chosen = self.shown[row]
+            self.draw()
+            self.zoom()
+
+    def map_polygons(self) -> list:
+        """
+        What 「地図に表示」 draws: each request shown with its own area (taken
+        green, put together blue, held back grey), and the shots of the rows
+        taken (the outline of the scenes, dashed; the area a merged row is
+        written with). The chosen one, its shot and the requests in it stand out.
+        """
+        chosen = self.chosen
+        mine = set(map(id, chosen.shots)) if chosen is not None else set()
+        out, shots = [], []
+        for c in sorted(self.shown, key=lambda c: c is chosen):
+            taken = c.result == TAKEN
+            if taken and not c.member:
+                shots += c.shots
+            if not c.request.rings:
+                continue
+            color = ("#2563eb" if c.merged else "#16a34a") if taken else "#9ca3af"
+            fellow = taken and bool(mine) and any(id(s) in mine for s in c.shots)
+            out.append(([[list(p[:2]) for p in r] for r in c.request.rings], color, 3 if c is chosen else 2 if fellow else 1,
+                        (c.request.name or c.request.id) if c is chosen else ""))
+        out += [([s.ring()], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s in dict.fromkeys(shots)]
+        return out
+
+    def draw(self) -> None:
+        if not self.on_map.isChecked() or not self.isVisible() or self.plan is None:
+            self.overlay.unpaint()
+            self.canvas.refresh()
+            return
+        self.overlay.paint(self.map_polygons())
+        self.canvas.refresh()
+
+    def zoom(self) -> None:
+        """To the chosen request and its shot."""
+        c = self.chosen
+        if c is None:
+            return
+        points = [p[:2] for r in c.request.rings for p in r] + [p for s in c.shots for p in s.ring()]
+        if not points:
+            return
+        xs, ys = [p[0] for p in points], [p[1] for p in points]
+        box = QgsRectangle(min(xs), min(ys), max(xs), max(ys))
+        box = box.buffered(max(box.width(), box.height()) * 0.2 + 0.01)
+        self.canvas.setExtent(from_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(box))
+        self.canvas.refresh()
 
     def _item_changed(self, item: QStandardItem) -> None:
         if self.plan is None or self._rendering:
@@ -743,7 +828,10 @@ class PlanFileDock(PluginDock):
             settings.set_request_export_folder(fallback)
         store, client, token = self.store, self.context.esri(), self.token()
         # A request taken for a system whose file was not written is kept as 見送り, its raise left for later.
-        rows = history_of(plan, run, written, failures=failures, system=target)
+        run_id = new_run_id()
+        rows = history_of(plan, run, written, run_id, failures=failures, system=target)
+        # The shots of the rows written (撮像の範囲), each request's history row naming its own (SHOT_ID).
+        shots = shots_of(plan, run, written, run_id, target) if store and store.shots else []
         skip = not_written(plan, written, target)
         boosts = boost_changes(plan, skip, target)
         done_rows = missed_done(plan, skip, target)
@@ -755,17 +843,31 @@ class PlanFileDock(PluginDock):
             rewrite = Rewrite(rows=list(rows))
             if replace and earlier and store.history:
                 # The systems' answers already read in are carried to the new rows, or kept (tsudo, 2026-11-09).
-                rewrite = keep_answers(load_history(client, store, token, replaced_where(store, day, target)), rows)
+                before = load_history(client, store, token, replaced_where(store, day, target))
+                rewrite = keep_answers(before, rows)
                 gone = delete_history_rows(client, store, token, rewrite.gone)
                 removed, notes = int(gone), notes + gone.problems
+                if store.shots:
+                    # The earlier shots go with their rows; those of rows kept as they were stay.
+                    left = {r.shot_id for r in before if r.object_id not in set(rewrite.gone)}
+                    try:
+                        notes += delete_shots(client, store, token, shots_replaced_where(store, day, target, sorted(left))).problems
+                    except EsriError as error:
+                        notes.append(f"前回の撮像の範囲を消せず（{error}）")
             saved = add_history(client, store, token, rewrite.rows)
+            try:
+                kept_shots = add_shots(client, store, token, shots)
+            except EsriError as error:
+                # The history (what each request was) matters more: kept even when the shots cannot be.
+                kept_shots = Saved(0, [f"撮像の範囲を保存できず（{error}）"])
+            notes += kept_shots.problems
             raised = update_requests(client, store, token, boosts, run)
             marked = update_history(client, store, token, done_rows)
-            return saved, raised, marked, removed, rewrite, notes + saved.problems + raised.problems + marked.problems
+            return saved, raised, marked, removed, rewrite, notes + saved.problems + raised.problems + marked.problems, int(kept_shots)
 
         def done(result):
             self.task = None
-            saved, raised, _, removed, rewrite, failed_saves = result
+            saved, raised, _, removed, rewrite, failed_saves, shot_count = result
             text = self.tr("書き出し: {s}").format(s=written_summary(done_files))
             if cleared:
                 text += self.tr("・残っていた番号違いのファイル {n} 件を削除").format(n=cleared)
@@ -778,6 +880,9 @@ class PlanFileDock(PluginDock):
                     text += self.tr("・採否を引き継いだ行 {n} 件").format(n=rewrite.carried)
                 if rewrite.kept:
                     text += self.tr("・採否ごと残した前回の行 {n} 件").format(n=rewrite.kept)
+            if shots:
+                text += (self.tr("・撮像の範囲 {n} 件").format(n=shot_count) if shot_count == len(shots)
+                         else self.tr("・撮像の範囲 {n}/{m} 件").format(n=shot_count, m=len(shots)))
             if raised:
                 text += self.tr("・繰り上げ {n} 件").format(n=raised)
             if broken:
