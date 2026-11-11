@@ -37,7 +37,7 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
-    "adoptionSource": "ADOPTION_SOURCE",
+    "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO",
 }
 #: The history's 採否 (the system's own answer to what was handed out; core/request/adoption.py).
 ADOPTION_ROLES = ("adoption", "adoptionReason", "plannedAt", "externalId", "adoptionSource")
@@ -591,6 +591,8 @@ class HistoryRow:
     adoption_source: str = ""
     #: The area (longitude / latitude rings), kept when the table has polygons (the request's, or the file's for 要求外).
     rings: list = field(default_factory=list)
+    #: The request whose row in the file carried this one, put into its shot (まとめ); "" for its own row.
+    merged_into: str = ""
 
 
 def history_attributes(row: HistoryRow, f: dict) -> dict:
@@ -602,7 +604,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["reason"]: row.reason[:250], f["file"]: row.file[:250], f["captured"]: row.captured, f["imageId"]: row.image_id,
         f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
-        f["adoptionSource"]: row.adoption_source[:1000] or None,
+        f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
     }
 
 
@@ -708,7 +710,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         boost_done=int(done or 0), object_id=int(a[oid]) if is_number(a.get(oid)) else None,
         adoption=_text(a.get(hf["adoption"])), adoption_reason=_text(a.get(hf["adoptionReason"])),
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
-        adoption_source=_text(a.get(hf["adoptionSource"])),
+        adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 

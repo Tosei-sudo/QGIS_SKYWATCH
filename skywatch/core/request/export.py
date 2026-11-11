@@ -13,6 +13,13 @@ column's `format`): `iso` (default), `iso-date`, `unix`, `unixms`, or a
 strftime pattern (`%Y%m%d`). Numbers (and text that is a number) take a
 printf format (`%03d`, `%.1f`), see `printf`.
 
+Requests put into one shot (まとめ, core/request/shots.py) are one row:
+the first one's (the most important), its `geometry` and box the outline
+of the shot's scenes, `mergedIds` / `mergedNames` / `mergedCount` the
+requests in it. `passTime` (the shot's middle), `passOffNadir`,
+`passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
+are the pass the orbits gave; empty when fitted by counting.
+
 Some sources are lists (LIST_SOURCES): an array in JSON where the schema
 says `type: array`, otherwise (CSV, or a string property) joined by commas.
 A value that is empty (none, "" or []) is written as the column's or
@@ -44,10 +51,11 @@ SOURCES = (
     "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
     "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "note", "system", "runDate", "day", "count", "warnings",
+    "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
 )
-TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate")
+TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
 #: Sources whose value is a list of names.
-LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds")
+LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds", "mergedIds", "mergedNames")
 GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")
 _MISSING = object()
 #: Text that is a plain number (a printf number format is applied to it as to a number).
@@ -201,8 +209,13 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     req = c.request
     first, last = day_bounds(ctx.day)
     digits = ctx.system.digits if digits is None else digits
-    box = bbox_of(req.rings)
-    mid = center_of(req.rings)
+    shot = c.shots[0] if c.shots else None
+    together = c.together
+    # Requests put into one shot are handed out as one, its area the outline of the shot's scenes (tsudo, 2026-11-11).
+    rings = [shot.ring()] if together and shot is not None else req.rings
+    box = bbox_of(rings)
+    mid = center_of(rings)
+    look = shot.look if shot is not None else None
     values = {
         "id": req.id, "name": req.name, "managementNo": req.management_no, "identificationNo": req.identification_no,
         "category": req.category, "achieve": req.achieve,
@@ -224,9 +237,15 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,
         "bboxEast": _round(box[2], digits) if box else None, "bboxNorth": _round(box[3], digits) if box else None,
         "requester": req.requester, "note": req.note, "warnings": "・".join(c.warnings),
+        "passTime": shot.middle if shot is not None else None,
+        "passOffNadir": round(look["offNadir"], 2) if look else None, "passIncidence": round(look["incidence"], 2) if look else None,
+        "passDirection": ("昇交" if shot.ascending else "降交") if shot is not None else "",
+        "passLookSide": shot.side if shot is not None else "",
+        "mergedIds": [m.request.id for m in together], "mergedNames": [m.request.name for m in together],
+        "mergedCount": len(together) or 1,
     }
     if source == "geometry":
-        return geometry_value(req.rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
+        return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
     return values.get(source, _MISSING)
 
 
@@ -414,7 +433,8 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
     """The files of the day: one per system with requests taken (in the candidates' order)."""
     out = []
     for system in systems:
-        mine = [c for c in cands if c.result == TAKEN and c.system is system]
+        # A request put into another's shot goes in that one's row (mergedIds), not a row of its own.
+        mine = [c for c in cands if c.result == TAKEN and c.system is system and not c.member]
         if not mine:
             continue
         ctx = Context(system, day, run, len(mine))

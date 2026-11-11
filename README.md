@@ -331,6 +331,9 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - システムを選ぶと「（システム名）を書き出し」で、そのシステムのファイル・出力履歴・繰り上げだけを書き出す（ほかのシステムの分はそのまま）。その日にほかの人が書き出した依頼はそのシステムに固定し、計算のあとにほかの人が書き出していたら計算し直しを求める。「すべてのシステム」なら従来どおり全システム分。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「19. システムごとの書き出し」
   - 光学の依頼は日中（地方時 9〜15 時）の雲量予報を見て、10% ごとの段階を優先度の 1 の位に入れる。実施しない雲量以上なら見送り（期間内1回で期限まで 2 日以内なら警告付きで出す）
   - 優先度順に、システムの 1 日の件数・枚数の上限、区分ごとの枠、衛星ごとの 1 日の上限（`maxPerDay`）に詰める。衛星を指定した依頼はその衛星に、指定がなければ分解能の細かい衛星から。入らなければ次のシステムへ
+  - 衛星の軌道（衛星カタログの TLE）から、その日に依頼の上を通るパスを出して割り当てる（2026-11-11）。依頼の角度・観測方向・軌道方向・時間帯に合うパスがなければ「撮像機会なし」。衛星ごとの撮像間隔（`minInterval`、分）と 1 日の撮像回数（`maxPerDay`）を守り、空きがなければ「衛星の空きなし」
+  - 同じパスで近い依頼は、1 回の撮像（幅 `swath` の中で、長さ `length` のシーンを `scenesPerPass` 枚まで連続）に収まればまとめる。別々なら撮像間隔に引っかかる依頼も、まとめれば入る。まとめた依頼はファイルでは 1 行（優先度のいちばん高い依頼の行。範囲は撮像するシーンの外形、`mergedIds` でまとめた依頼の ID）になり、件数の上限も 1 件分。一覧の「結果・理由」に「まとめ」と出し、「撮像時刻」にパスの時刻（日本時間）を出す。出力履歴・撮像予定は依頼ごとの行のまま（範囲も依頼のもの。`MERGED_INTO` にまとめ先）で、システムの採否はまとめた依頼すべてに付く
+  - 軌道を使わずに件数・枚数だけで詰めるシステムは `orbit: false`、まとめないシステムは `merge: false`。TLE を読めない衛星は件数だけで詰める。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「22. 軌道のパスへの割り当てとまとめ」
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
@@ -1318,7 +1321,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 - 必須の項目・属性名の形・数の範囲・重複などを「確認」に出す（最後はプラグインの「設定…」の問題の一覧で確かめる）
 - 撮像依頼の日次出力（`requestExports`、オーダー用ファイル）: CSV の列（`columns`）を表で、JSON の JSON Schema（`x-source` など）を木で組める。システムから受け取ったスキーマを読み込んで `x-source` を書き添え、`.schema.json` として保存もできる。架空の依頼 2 件での出力の見本と、スキーマでの検査結果を出す
   - 項目ごとに「既定値」（`default`。値が空のときに書く。必須の項目に）と固定値（`const`）を指定できる。配列は JSON で書く（`[]`・`[""]`・`["On"]`）。型が `string` の固定値・既定値は書いたとおりの文字（`001` も `001`）
-  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
+  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）、軌道から出した撮像（`passTime`・`passOffNadir`・`passIncidence`・`passDirection`・`passLookSide`）、まとめた依頼（`mergedIds`・`mergedNames`・`mergedCount`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
 - 入力途中の内容はブラウザに残り、次に開いたとき続きから
 - 項目の役割・選択肢はプラグインの定数の写し。プラグインを変えたら `python3 -m skywatch.tests.test_config_builder` で更新する（テストが食い違いを見つける）
 
@@ -1391,7 +1394,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系
@@ -1649,7 +1652,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `SATELLITE` | 衛星 | `String(255)` | 割り当てた衛星 | `satellite` |
 | `PRIORITY_OUT` | 出力優先度 | `String(64)` | システムに渡した優先度（`High` など） | `priority` |
 | `CLOUD` | 雲量予報 | `Double` | 出力時の雲量予報（%） | `cloud` |
-| `SCENES` | シーン数 | `Integer` | 見積もったシーン数 | `scenes` |
+| `SCENES` | シーン数 | `Integer` | 見積もったシーン数（まとめた撮像は、その行になった依頼に全部。同乗した依頼は 0） | `scenes` |
 | `RESULT` | 結果 | `String(64)` | `採用`（出力した）・`見送り`・`要求外`（システムが依頼なしで計画したもの） | `result` |
 | `REASON` | 理由 | `String(1000)` | 見送り・警告の理由 | `reason` |
 | `OUTPUT_FILE` | 出力ファイル | `String(1000)` | 書き出したファイル（古い既定の `FILE` だけがあるテーブルはそれを使う） | `file` |
@@ -1661,6 +1664,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `PLANNED_AT` | 撮像予定日時 | `Date` | システムの撮像予定の日時（結果ファイルか手入力） | `plannedAt` |
 | `EXTERNAL_ID` | システム側の番号 | `String(255)` | システムが付けた番号 | `externalId` |
 | `ADOPTION_SOURCE` | 採否の入力元 | `String(1000)` | 結果ファイルの名前・`手入力`・`画像の入着` | `adoptionSource` |
+| `MERGED_INTO` | まとめ先の依頼ID | `String(255)` | ほかの依頼と 1 回の撮像にまとめて出力したとき、ファイルでその行になった依頼の `REQ_ID`（自分の行で出したものは空）。システムの採否はまとめた依頼すべてに付く。無くても動く | `mergedInto` |
 
 ### `TBL_OBSERVATION`（観測記録）
 

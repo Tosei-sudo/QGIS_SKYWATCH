@@ -295,7 +295,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "adoptionReason": "ADOPTION_REASON",
    "plannedAt": "PLANNED_AT",
    "externalId": "EXTERNAL_ID",
-   "adoptionSource": "ADOPTION_SOURCE"
+   "adoptionSource": "ADOPTION_SOURCE",
+   "mergedInto": "MERGED_INTO"
   },
   "observationStores": {
    "id": "OBS_ID",
@@ -687,14 +688,24 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "runDate",
   "day",
   "count",
-  "warnings"
+  "warnings",
+  "passTime",
+  "passOffNadir",
+  "passIncidence",
+  "passDirection",
+  "passLookSide",
+  "mergedIds",
+  "mergedNames",
+  "mergedCount"
  ],
  "exportListSources": [
   "series",
   "satellites",
   "modes",
   "seriesSatellites",
-  "seriesSatelliteIds"
+  "seriesSatelliteIds",
+  "mergedIds",
+  "mergedNames"
  ],
  "geometries": [
   "wkt",
@@ -948,6 +959,9 @@ const SOURCE_LABELS = {
   scenes: "シーン数", geometry: "範囲（座標）", centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "範囲の西端",
   bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", note: "メモ",
   system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
+  passTime: "撮像予定時刻（軌道から）", passOffNadir: "撮像のオフナディア角", passIncidence: "撮像の入射角",
+  passDirection: "撮像の軌道方向（昇交・降交）", passLookSide: "撮像の観測方向（右・左）",
+  mergedIds: "まとめた依頼の ID（配列・自分を含む）", mergedNames: "まとめた依頼の名称（配列）", mergedCount: "まとめた依頼の件数（まとめていなければ 1）",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
   centerGeojson: "中央の GeoJSON（Point）" };
@@ -976,7 +990,7 @@ const PROFILES = {
   request: {
     sources: () => K.exportSources, labels: SOURCE_LABELS, geometries: () => K.geometries, geometryLabels: GEOMETRY_LABELS,
     array: "requests", arrayLabel: "requests（依頼の一覧）", fileSources: ["system", "runDate", "day", "count", "requests"],
-    timeSources: ["start", "end", "periodStart", "periodEnd", "runDate"], digitSources: ["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"],
+    timeSources: ["start", "end", "periodStart", "periodEnd", "runDate", "passTime"], digitSources: ["centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth"],
     common: ["id", "name", "category", "satellite", "start", "end", "geometry", "priority", "cloudForecast", "warnings"],
     legend: "CSV の列（columns）。上から順に左の列", note: "システムが求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が requests の配列が依頼の一覧になり、その items の中は依頼 1 件ごとの値。固定値は const。",
     inside: "依頼ごとの値は x-source: requests の配列の items の中に置く（外に置くと出ない）", name: (o) => o.system || "system",
@@ -1302,7 +1316,9 @@ const SPEC = [
         N("order", "試す順番", { help: "小さいほど先" }),
         O("limit", "1 日の上限", [N("count", "依頼件数", { min: 0 }), N("scenes", "シーン数", { min: 0 })]),
         M("quota", "区分ごとの上限", { keys: ["定点", "臨時"], value: "number" }),
-        L("sceneKm", "シーンの大きさ（km、幅, 長さ）", { numbers: true, ph: "10, 10" }),
+        L("sceneKm", "シーンの大きさ（km、幅, 長さ）", { numbers: true, ph: "10, 10", help: "軌道で計算しない衛星（TLE なし・orbit: false）の枚数の見積もりに使う" }),
+        B("orbit", "衛星の軌道で詰める（orbit）", { help: "既定 true: その日のパスに割り当て、衛星の撮像間隔（minInterval）・1 日の回数（maxPerDay）を守る。false で件数・枚数だけで詰める" }),
+        B("merge", "近い依頼を 1 回の撮像にまとめる（merge）", { help: "既定 true: 同じパスで連続シーン（scenesPerPass）に収まる依頼は 1 行にまとめ、範囲はシーンの外形" }),
         S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
         T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}" }),
         S("encoding", "文字コード", K.encodings, { ph: "utf-8" }), B("header", "見出し行（CSV）", { showIf: (it) => (it.format || "csv") === "csv" }),
@@ -2132,14 +2148,18 @@ const SAMPLE_REQS = [
     repeat: "毎日", priorityRaw: 120, priorityBase: 2, boost: 0, kind: "光学", series: ["OPT-X"], satellites: [], modes: [],
     seriesSatellites: ["OPT-X1", "OPT-X2"], seriesSatelliteIds: ["40001", "40002"], satellite: "OPT-X1", satelliteId: "40001", mode: "", sensor: "PAN",
     offNadirMin: null, offNadirMax: 25, incidenceMin: null, incidenceMax: null, lookSide: "任意", orbitDir: "任意", resolution: 1, timeOfDay: "", cloudMax: 60, cloudForecast: 20, weatherFlag: "",
-    scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", note: "", warnings: "" },
+    scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", note: "", warnings: "",
+    passTime: DAY + 10.5 * 3600000, passOffNadir: 12.3, passIncidence: 13.6, passDirection: "降交", passLookSide: "右",
+    mergedIds: ["R-0001", "R-0003"], mergedNames: ["東京湾 定点", "東京湾 奥"], mergedCount: 2 },
   { id: "R-0002", name: "臨時 舞鶴", managementNo: "", identificationNo: "", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
     repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: [], satellites: ["SAR-Y2"], modes: ["Spotlight"],
     seriesSatellites: [], seriesSatelliteIds: [], satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
     offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
-    scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", note: "至急", warnings: "シーン数が多い" },
+    scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", note: "至急", warnings: "シーン数が多い",
+    passTime: DAY + 21.2 * 3600000, passOffNadir: 31.5, passIncidence: 35.1, passDirection: "昇交", passLookSide: "右",
+    mergedIds: [], mergedNames: [], mergedCount: 1 },
 ];
-const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate"];
+const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate", "passTime"];
 
 function zoneOffset(zone, ms) {
   if (!zone || /^(utc|z|gmt)$/i.test(zone)) return 0;

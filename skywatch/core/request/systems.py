@@ -57,6 +57,10 @@ class ExportSystem:
     quota: dict = field(default_factory=dict)
     #: The scene (km, across and along) used to count a request's scenes when no mode says.
     scene_km: tuple = (10.0, 10.0)
+    #: Whether requests go to the passes of its satellites' orbits (`orbit`; false: counted as before 2026-11-11).
+    orbit: bool = True
+    #: Whether requests close together on a pass are put into one shot, one row of its file (`merge`).
+    merge: bool = True
     format: str = "csv"
     folder: str = ""
     file_name: str = "{system}_{date:%Y%m%d}.{ext}"
@@ -175,6 +179,12 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         scene_km = (float(scene), float(scene))
     elif scene is not None:
         problems.append(f"{at} の sceneKm は [幅, 長さ]（km）で指定")
+    flags = {}
+    for key in ("orbit", "merge"):
+        flags[key] = value.get(key, True)
+        if not isinstance(flags[key], bool):
+            problems.append(f"{at} の {key} は true か false で指定")
+            flags[key] = True
     zone = UTC
     if "timeZone" in value:
         zone = parse_time_zone(value["timeZone"]) or UTC
@@ -207,6 +217,8 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         limit=limit,
         quota=quota,
         scene_km=scene_km,
+        orbit=flags["orbit"],
+        merge=flags["merge"],
         format=fmt,
         folder=value["folder"] if isinstance(value.get("folder"), str) else "",
         file_name=value["fileName"] if isinstance(value.get("fileName"), str) and value["fileName"] else f"{{system}}_{{date:%Y%m%d}}.{fmt}",

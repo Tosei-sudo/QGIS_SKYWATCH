@@ -10,6 +10,7 @@ limits are run alongside, so each figure can be set against them.
 """
 from __future__ import annotations
 
+import time
 from datetime import date
 from typing import Optional
 
@@ -23,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.plan.weather import fetch_clouds
 from ..core.request.model import CATEGORIES, priority_text
 from ..core.request.simulate import (
-    MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, simulate,
+    MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
 from ..core.request.store import history_where, load_history, load_requests
 from ..core.request.workflow import clouds_of, forecast_places
@@ -33,7 +34,7 @@ from ..qgis_io.tasks import run_task
 
 #: The columns of the systems' table.
 SYSTEM_COLUMNS = ("使う", "システム", "件数上限", "枚数上限", *(f"{c}枠" for c in CATEGORIES))
-DAY_COLUMNS = ("日", "候補", "採用", "枠超過", "回送", "雲量", "該当なし", "繰り上げ", "持ち越し", "欠測", "期限切れ", "使用")
+DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ", "使用")
 EXPIRED_COLUMNS = ("期限", "依頼", "区分", "優先度", "最終日の理由")
 
 
@@ -251,10 +252,14 @@ class LimitSimDialog(QDialog):
         self.status.setText(self.tr("試算中…"))
 
         def work(task):
-            base = simulate(requests, start, days, systems, sats, clouds, history, task.isCanceled)
+            # The satellites' passes over the days, once for both runs.
+            passes = run_passes(requests, start, days, sats, time.time() * 1000, task.isCanceled)
             task.check()
-            task.progress(50)
-            trial = simulate(requests, start, days, tried, sats, clouds, history, task.isCanceled)
+            task.progress(30)
+            base = simulate(requests, start, days, systems, sats, clouds, history, task.isCanceled, passes)
+            task.check()
+            task.progress(65)
+            trial = simulate(requests, start, days, tried, sats, clouds, history, task.isCanceled, passes)
             task.check()
             return base, trial
 
@@ -300,11 +305,11 @@ class LimitSimDialog(QDialog):
                 count = f"{n}/{s.limit['count']}" if s and "count" in s.limit else str(n)
                 sc = f"{scenes}/{s.limit['scenes']}" if s and "scenes" in s.limit else str(scenes)
                 used.append(f"{labels.get(name, name)} {count} 件・{sc} 枚")
-            cells = [d.day.isoformat(), d.candidates, d.taken, d.over, d.spilled, d.cloud, d.no_system, d.raised, d.carried,
-                     d.lost, len(d.expired), "　".join(used)]
+            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
+                     d.carried, d.lost, len(d.expired), "　".join(used)]
             for col, v in enumerate(cells):
                 item = QTableWidgetItem(str(v))
-                if col == 10 and d.expired:
+                if col == DAY_COLUMNS.index("期限切れ") and d.expired:
                     item.setForeground(QBrush(QColor("#b91c1c")))
                 self.daily.setItem(row, col, item)
         expired = trial.expired

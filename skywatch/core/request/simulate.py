@@ -13,6 +13,11 @@ handed out as captured: its raise is undone and, 期間内1回, it is 完了.
 A 期間内1回 request still not handed out on its last day has missed its
 deadline (期限切れ); before that it is carried to the next day (持ち越し).
 A 毎回 request not handed out on its day loses that day (欠測).
+
+With the satellites' orbits (`passes`, passes.find_passes over the whole
+run) each day goes to the passes of that day as the real day does: no pass
+(撮像機会なし), the satellites' interval and shots a day (counted as 枠超過),
+and requests put into one shot (まとめ: no row of their own).
 """
 from __future__ import annotations
 
@@ -22,9 +27,10 @@ from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
-from .daily import TAKEN, Candidate, _systems_for, allocate, gather
+from .daily import BUSY, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids
-from .model import ImagingRequest, days_left, jst_day
+from .model import ImagingRequest, day_bounds, days_left, jst_day
+from .passes import Passes, find_passes
 from .route import system_of_satellite, why_not
 from .store import HistoryRow
 from .systems import ExportSystem
@@ -87,6 +93,10 @@ class DayResult:
     cloud: int = 0
     #: Held back as no system has a satellite for it.
     no_system: int = 0
+    #: Held back as no satellite that can take it passes over it that day (from the orbits).
+    no_pass: int = 0
+    #: Taken in another request's shot (まとめ: no row of their own).
+    merged: int = 0
     #: Raises offered (and taken) on the day.
     raised: int = 0
     #: 期間内1回 requests not handed out, with days still left.
@@ -129,13 +139,23 @@ def _first_system(req: ImagingRequest, systems: Sequence[ExportSystem], members:
     return None
 
 
+def run_passes(requests: Sequence[ImagingRequest], start: date, days: int, sats: Sequence[SatelliteSpec],
+               now: Optional[float] = None, cancelled: Optional[Callable[[], bool]] = None) -> Passes:
+    """The passes over the days of a run (worked out once for the settings' limits and those tried)."""
+    first = day_bounds(start)[0]
+    last = day_bounds(horizon_days(start, days)[-1])[1]
+    return find_passes(requests, first, last, sats, now, cancelled)
+
+
 def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems: Sequence[ExportSystem],
              sats: Sequence[SatelliteSpec], clouds: Optional[Callable[[date], dict]] = None,
-             history: Sequence[HistoryRow] = (), cancelled: Optional[Callable[[], bool]] = None) -> Simulation:
+             history: Sequence[HistoryRow] = (), cancelled: Optional[Callable[[], bool]] = None,
+             passes: Optional[Passes] = None) -> Simulation:
     """
     Runs the day's work from `start` for `days` days on a copy of `requests`.
     `clouds` gives a day's cover by request id (None where not forecast);
-    `history` tells which requests were found 未撮像 (offered a raise on the first day).
+    `history` tells which requests were found 未撮像 (offered a raise on the first day);
+    `passes` the satellites' passes over the run (run_passes; None: fitted by counting).
     """
     ledger = [dataclasses.replace(r) for r in requests]
     systems = list(systems)
@@ -151,7 +171,7 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
             break
         day = start + timedelta(days=i)
         cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set())
-        cands = allocate(cands, systems, sats)
+        cands = allocate(cands, systems, sats, passes, day)
         result = DayResult(day, candidates=len(cands))
         for c in cands:
             req = c.request
@@ -162,7 +182,10 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 result.taken += 1
                 name = c.system.system
                 n, scenes = result.used.get(name, (0, 0))
-                result.used[name] = (n + 1, scenes + c.scenes)
+                # One put into another's shot is in that one's row.
+                result.used[name] = (n + (0 if c.member else 1), scenes + c.scenes)
+                if c.member:
+                    result.merged += 1
                 if _first_system(req, systems, members) not in (None, name):
                     result.spilled += 1
                 # Handed out, so taken as captured: the follow-up undoes the raise and ends a 期間内1回 request.
@@ -170,10 +193,12 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 if req.achieve == "期間内1回":
                     req.status = "完了"
                 continue
-            if c.reason == "枠超過":
+            if c.reason in (OVER, BUSY):
                 result.over += 1
-            elif c.reason == "該当システムなし":
+            elif c.reason == NO_SYSTEM:
                 result.no_system += 1
+            elif c.reason == NO_PASS:
+                result.no_pass += 1
             elif c.held and c.reason == c.held:
                 result.cloud += 1
             if req.achieve == "期間内1回":
@@ -207,6 +232,8 @@ SUMMARY = (
     ("次のシステムへ回送", lambda s: s.total("spilled")),
     ("雲量で見送り", lambda s: s.total("cloud")),
     ("該当システムなし", lambda s: s.total("no_system")),
+    ("撮像機会なし", lambda s: s.total("no_pass")),
+    ("まとめて採用（ほかの依頼の撮像に同乗）", lambda s: s.total("merged")),
     ("繰り上げ", lambda s: s.total("raised")),
     ("欠測（毎回）", lambda s: s.total("lost")),
     ("期限切れ（期間内1回）", lambda s: s.total("expired")),

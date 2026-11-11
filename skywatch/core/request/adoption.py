@@ -132,7 +132,8 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
                 break
         if twice:
             reading.problems.append(f"{a.line} 行目: {a.key} は複数の依頼にあるため「{req.name}」とした")
-        rows = [r for r in handed if req is not None and r.request_id == req.id]
+        # A request put into another's shot (まとめ) was in that one's row: its answer is theirs too.
+        rows = [r for r in handed if req is not None and (r.request_id == req.id or r.merged_into == req.id)]
         if not rows and a.answer != ADOPTED:
             # Not ours, or not handed to it this day: nothing to answer, and not in its plan.
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
@@ -148,7 +149,12 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
         reading.problems.append(f"対象日が {day} 以外の {other_days} 行を読み飛ばし")
     if other_systems:
         reading.problems.append(f"ほかのシステム（{'・'.join(sorted(other_systems))}）の行を読み飛ばし")
-    reading.missing = [r for r in handed if r.request_id not in answered]
+    # A request put into another's shot answered by its own row too: its own answer counts for it.
+    for m in reading.matches:
+        if m.request is not None:
+            m.rows = [r for r in m.rows if r.request_id == m.request.id or r.request_id not in answered]
+    covered = answered | {r.request_id for m in reading.matches for r in m.rows}
+    reading.missing = [r for r in handed if r.request_id not in covered]
     return reading
 
 
