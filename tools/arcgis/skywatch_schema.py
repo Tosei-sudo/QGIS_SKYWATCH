@@ -26,7 +26,7 @@ class Table(NamedTuple):
     title: str
     #: "POLYGON"・"POINT"、形状なしのテーブルは None。
     geometry: Optional[str]
-    #: プラグインが書き込むテーブル（作成者・更新者の 4 属性を足す）。
+    #: プラグイン（か tools/satellite_editor.html）が書き込むテーブル（作成者・更新者の 4 属性を足す）。
     writable: bool
     #: README の「設定ファイルの項目」。
     setting: str
@@ -55,7 +55,7 @@ TABLES = (
         F("FILE_PATH", "ファイルパス", "TEXT", 1000, "source"),
         F("COG_URL", "画像URL", "TEXT", 1000, "source"),
     )),
-    Table("TBL_SATELLITE", "衛星カタログ", None, writable=False, setting="satelliteCatalogs[].url", fields=(
+    Table("TBL_SATELLITE", "衛星カタログ", None, writable=True, setting="satelliteCatalogs[].url", fields=(
         F("SAT_NAME", "衛星名", "TEXT", 255, "name"),
         F("NORAD_ID", "NORAD番号", "TEXT", 64, "id"),
         F("TLE_LINE1", "TLE1行目", "TEXT", 255, "tle1"),
@@ -76,7 +76,7 @@ TABLES = (
         F("RESOLUTION_M", "分解能", "DOUBLE", None, "resolution"),
         F("SAT_SYSTEM", "衛星システム", "TEXT", 255, "system"),
     )),
-    Table("TBL_SENSOR_MODE", "センサーモード", None, writable=False, setting="sensorCatalogs[].url", fields=(
+    Table("TBL_SENSOR_MODE", "センサーモード", None, writable=True, setting="sensorCatalogs[].url", fields=(
         F("SENSOR", "センサー", "TEXT", 255, "sensor"),
         F("SENSOR_MODE", "センサーモード", "TEXT", 255, "mode"),
         F("SENSOR_TYPE", "センサー種別", "TEXT", 64, "kind"),
@@ -92,7 +92,7 @@ TABLES = (
         F("RESOLUTION_M", "分解能", "DOUBLE", None, "resolution"),
         F("IS_DEFAULT", "既定モード", "SHORT", None, "primary"),
     )),
-    Table("TBL_SATELLITE_ALIAS", "衛星名の対応表", None, writable=False, setting="satelliteAliases.url", fields=(
+    Table("TBL_SATELLITE_ALIAS", "衛星名の対応表", None, writable=True, setting="satelliteAliases.url", fields=(
         F("SAT_NAME", "衛星名", "TEXT", 255, "satellite"),
         F("ALIAS", "別名", "TEXT", 1000, "alias"),
     )),
