@@ -102,14 +102,24 @@ def of_system(c: Candidate, system: Optional[str]) -> bool:
     return system is None or system in systems_of(c)
 
 
+def file_of(files: dict, system: str, request_id: str) -> Optional[str]:
+    """
+    The file a request was written in, None when not written: `files` maps
+    a system to its file's name, or (split by `maxPerFile`, export.files_of)
+    to {request id: file name}.
+    """
+    f = files.get(system)
+    return f.get(request_id) if isinstance(f, dict) else f
+
+
 def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = None,
                failures: Optional[dict] = None, system: Optional[str] = None) -> list[HistoryRow]:
     """
     The history rows of a day written out: every candidate, taken or held
-    back (`files`: system name → file name). A candidate taken for a system
-    whose file was not written (`failures`: system name → why; or simply
-    absent from `files`) is kept as 見送り with the reason, never as 採用:
-    it was not handed to anyone, so it is neither followed up nor 完了.
+    back (`files`: system name → file name, see file_of). A candidate taken
+    for a system whose file was not written (`failures`: system name → why;
+    or simply absent from `files`) is kept as 見送り with the reason, never
+    as 採用: it was not handed to anyone, so it is neither followed up nor 完了.
 
     With `system`, only that system's candidates (of_system), those held
     back named with it, so that writing it again replaces only its rows.
@@ -123,7 +133,8 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
         # Held back: named with the system written, when only one is (its rows are replaced when it is written again).
         name = c.system.system if c.system else (system or "")
         result, reason = c.result, c.reason or "・".join(c.warnings)
-        if result == TAKEN and name not in files:
+        file = file_of(files, name, c.request.id)
+        if result == TAKEN and file is None:
             result, reason = HELD, f"書き出し失敗（{failures.get(name) or 'ファイルなし'}）"
         taken = result == TAKEN
         rows.append(HistoryRow(
@@ -132,7 +143,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.cloud is None else round(c.cloud, 1), scenes=c.scenes if taken else None,
-            result=result, reason=reason, file=files.get(name, "") if taken else "",
+            result=result, reason=reason, file=(file or "") if taken else "",
             captured="未判定" if taken else "", boost_done=0,
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.
             adoption="不明" if taken else "", rings=[[list(p[:2]) for p in r] for r in c.request.rings]))
@@ -197,7 +208,7 @@ def keep_answers(earlier: Sequence[HistoryRow], rows: Sequence[HistoryRow]) -> R
 def not_written(plan: DayPlan, files: dict, system: Optional[str] = None) -> set:
     """The requests taken for a system whose file was not written (of `system` only, when given)."""
     return {c.request.id for c in plan.candidates
-            if c.result == TAKEN and of_system(c, system) and (c.system.system if c.system else "") not in files}
+            if c.result == TAKEN and of_system(c, system) and file_of(files, c.system.system if c.system else "", c.request.id) is None}
 
 
 def boost_changes(plan: DayPlan, skip: Optional[set] = None, system: Optional[str] = None) -> list[tuple[int, dict]]:
@@ -222,5 +233,9 @@ def missed_done(plan: DayPlan, skip: Optional[set] = None, system: Optional[str]
 
 
 def written_summary(files: Sequence[Written]) -> str:
-    """「SYS-A 12 件・SYS-C 3 件」."""
-    return "・".join(f"{w.system.label} {w.count} 件" for w in files) or "出力なし"
+    """「SYS-A 12 件・SYS-C 3 件」, a system split into files 「SYS-B 250 件（3 ファイル）」."""
+    by: dict = {}
+    for w in files:
+        n, k = by.get(w.system.system, (w.system.label, 0, 0))[1:]
+        by[w.system.system] = (w.system.label, n + w.count, k + 1)
+    return "・".join(f"{label} {n} 件" + (f"（{k} ファイル）" if k > 1 else "") for label, n, k in by.values()) or "出力なし"

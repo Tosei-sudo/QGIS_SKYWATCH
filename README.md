@@ -334,6 +334,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼は画像カタログで撮像済みか確かめ、撮れていなければ（または期間内1回で期限まで 2 日以内なら）優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
+  - 1 ファイルに入れられる件数に上限のあるシステムは `requestExports` の `maxPerFile` に件数を書くと、超えた日はその件数ずつのファイルに分けて書き出す（`SYS-A_20261111_1.csv`・`_2.csv` …、`fileName` の `{part}`・`{parts}` で番号の付け方も決められる）。前の書き出しで残った番号違いのファイルは削除する。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「22. 1 ファイルの件数の上限」
   - 出力した依頼は、システムが実際にその日の計画に入れたか（採否）を待つ。採否は「撮像予定」ドックで、システムから返ってきた結果ファイル（`requestExports` の `resultFile`）を取り込むか手で入れる。採否の分からないシステムもあるので、分からないものは「不明」のまま扱い、画像が入って撮像済みになれば「採用」になる
   - 「上限シミュレーション…」で、システムごとの 1 日の件数・枚数・区分の上限や使うシステムを変えた場合に、今後の日数（1〜60 日）で何件が枠超過・次のシステムへ回送・欠測（毎回）・期限切れ（期間内1回）になるかを、設定の値と並べて試算する。台帳・出力履歴には書き込まない（採用した依頼は撮像できたものとして計算）
   - 「照合…」で計画と実績の照合。対象日の範囲を選び、出力した依頼が撮れたかを画像カタログと突き合わせて、システムごとの撮像済み・未撮像・未判定と撮像率を出す。衛星を指定した依頼は、その衛星（衛星名の対応表 `satelliteAliases` の別名も）の画像だけを撮像済みとする。指定のない依頼はどの衛星の画像でもよい
@@ -1391,7 +1392,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系

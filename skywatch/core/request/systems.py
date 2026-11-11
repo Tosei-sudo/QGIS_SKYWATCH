@@ -60,6 +60,8 @@ class ExportSystem:
     format: str = "csv"
     folder: str = ""
     file_name: str = "{system}_{date:%Y%m%d}.{ext}"
+    #: The most requests one file may hold (`maxPerFile`); more are split into numbered files. 0: no limit.
+    max_per_file: int = 0
     encoding: str = "utf-8"
     header: bool = True
     time_zone: TimeZone = UTC
@@ -180,6 +182,10 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         zone = parse_time_zone(value["timeZone"]) or UTC
         if parse_time_zone(value["timeZone"]) is None:
             problems.append(f"{at} の timeZone は Asia/Tokyo・UTC・+09:00 のように指定")
+    per_file = value.get("maxPerFile")
+    if per_file is not None and not (is_number(per_file) and per_file >= 1 and float(per_file).is_integer()):
+        problems.append(f"{at} の maxPerFile は 1 以上の整数で指定")
+        per_file = None
     encoding = ENCODINGS.get(str(value.get("encoding", "utf-8")).lower())
     if encoding is None:
         problems.append(f"{at} の encoding は utf-8・utf-8-sig・cp932 のどれかで指定")
@@ -210,6 +216,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         format=fmt,
         folder=value["folder"] if isinstance(value.get("folder"), str) else "",
         file_name=value["fileName"] if isinstance(value.get("fileName"), str) and value["fileName"] else f"{{system}}_{{date:%Y%m%d}}.{fmt}",
+        max_per_file=int(per_file) if per_file is not None else 0,
         encoding=encoding,
         header=value.get("header") is not False,
         time_zone=zone,
