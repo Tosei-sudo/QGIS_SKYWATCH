@@ -57,10 +57,11 @@ from ..core.request.follow import follow_and_save, found_text, missed_ids, with_
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes
+from ..core.request.quota import QuotaData, read_quota_data
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
-    RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, handed_where, history_where,
-    load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
+    RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, followed_where, handed_where,
+    history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
     DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
@@ -119,6 +120,8 @@ class PlanFileDock(PluginDock):
         self.groups: list = []
         #: The 「計画と実績の照合」 dialog, once opened.
         self.results = None
+        #: The 「年間撮像上限」 dialog, while open.
+        self.quota_window = None
         self._build()
         context.configChanged.connect(self._config_changed)
         self.visibilityChanged.connect(self._visibility)
@@ -159,6 +162,10 @@ class PlanFileDock(PluginDock):
         self.results_button.setToolTip(self.tr("出力した依頼が撮像されたかを画像カタログと照合（計画と実績の照合）"))
         self.results_button.clicked.connect(lambda: self.show_results())
         top.addWidget(self.results_button)
+        self.quota_button = QPushButton(self.tr("年間上限…"))
+        self.quota_button.setToolTip(self.tr("センサー・モードごとの年間撮像上限の消費と残り、撮像ごとの「数えない」（ノイズ・ジャミングなど）"))
+        self.quota_button.clicked.connect(lambda: self.show_quotas())
+        top.addWidget(self.quota_button)
         layout.addLayout(top)
         # Request names and the services' messages: shown as written, never as HTML.
         self.status = plain_label(QLabel())
@@ -224,6 +231,11 @@ class PlanFileDock(PluginDock):
         self.room = QLabel()
         self.room.setWordWrap(True)
         layout.addWidget(self.room)
+        # What the yearly quotas of the day's satellites have left (年間撮像上限), after the day's fitting.
+        self.quota_text = plain_label(QLabel())
+        self.quota_text.setWordWrap(True)
+        self.quota_text.hide()
+        layout.addWidget(self.quota_text)
         out = QHBoxLayout()
         out.addWidget(QLabel(self.tr("出力先")))
         self.folder = QLineEdit(settings.request_export_folder())
@@ -239,6 +251,18 @@ class PlanFileDock(PluginDock):
         out.addWidget(self.write_button)
         layout.addLayout(out)
         self._update_buttons()
+
+    def show_quotas(self):
+        """Opens 「年間撮像上限」 for the chosen store, on the year of the chosen day."""
+        if self.store is None:
+            return None
+        from .quota_dialog import QuotaDialog
+        if self.quota_window is not None:
+            self.quota_window.close()
+        self.quota_window = QuotaDialog(self.context, self.store, self.chosen_day(), self)
+        self.quota_window.show()
+        self.quota_window.run()
+        return self.quota_window
 
     def show_results(self, run: bool = True):
         """Opens 「計画と実績の照合」 (and follows the history up)."""
@@ -268,6 +292,9 @@ class PlanFileDock(PluginDock):
         if self.results is not None:
             self.results.close()
             self.results = None
+        if self.quota_window is not None:
+            self.quota_window.close()
+            self.quota_window = None
         self.render()
         self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし") if self.store is None else "")
 
@@ -361,6 +388,9 @@ class PlanFileDock(PluginDock):
         if self.results is not None:
             self.results.close()
             self.results = None
+        if self.quota_window is not None:
+            self.quota_window.close()
+            self.quota_window = None
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, self.tr("出力先"), self.folder.text())
@@ -451,18 +481,27 @@ class PlanFileDock(PluginDock):
             task.check()
             if passes.problems:
                 notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
-            return requests, history, forecasts, passes, notes, groups
+            quotas = QuotaData()
+            if store.quotas:
+                # What the yearly quotas have left (年間撮像上限): the shots of their years, read after the follow-up above.
+                try:
+                    quotas = read_quota_data(client, store, token, [day], task.isCanceled)
+                except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
+                    notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
+                notes += quotas.problems[:3]
+            return requests, history, forecasts, passes, notes, groups, quotas
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups = result
+            requests, history, forecasts, passes, notes, groups, quotas = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             # At each pass's moment for the satellites fitted on the orbits; the daylight hours' mean for the others.
             clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats))
-            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes)
+            book = quotas.book(day) if quotas.quotas else None
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book)
             self._fill_series()
             self.render()
             taken = sum(1 for c in self.plan.candidates if c.result == TAKEN)
@@ -550,6 +589,15 @@ class PlanFileDock(PluginDock):
         total = len(plan.candidates) if plan else 0
         parts = [self.tr("表示 {n}/{m} 件").format(n=len(self.shown), m=total)] if len(self.shown) != total else []
         self.room.setText("　".join(parts + [f"{s.label} {rooms[s.system]}" for s in listed]))
+        self.quota_text.setText("")
+        if plan is not None and plan.quotas is not None and plan.quotas.usages:
+            able = {id(s): s for c in plan.candidates for group in c.able.values() for s in group}
+            texts = plan.quotas.texts(able.values())
+            if texts:
+                low = [t for t, warn in texts if warn]
+                self.quota_text.setText("\n".join(self.tr("年間上限 ") + t + (self.tr("　※残りわずか") if warn else "") for t, warn in texts))
+                self.quota_text.setStyleSheet("color: #b45309;" if low else "")
+        self.quota_text.setVisible(bool(self.quota_text.text()))
         if self.chosen is not None and not any(c is self.chosen for c in self.shown):
             self.chosen = None
         self.draw()
@@ -871,9 +919,11 @@ class PlanFileDock(PluginDock):
                 gone = delete_history_rows(client, store, token, rewrite.gone)
                 removed, notes = int(gone), notes + gone.problems
                 if store.shots:
-                    # The earlier shots go with their rows; those of rows kept as they were stay.
+                    # The earlier shots go with their rows; those of rows kept as they were stay, and those of rows
+                    # already followed up (not replaced: what they were taken in, and its 「数えない」).
                     left = {r.shot_id for r in before if r.object_id not in set(rewrite.gone)}
                     try:
+                        left |= {r.shot_id for r in load_history(client, store, token, followed_where(store, day, target))}
                         notes += delete_shots(client, store, token, shots_replaced_where(store, day, target, sorted(left))).problems
                     except EsriError as error:
                         notes.append(f"前回の撮像の範囲を消せず（{error}）")

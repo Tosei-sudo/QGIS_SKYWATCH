@@ -333,7 +333,22 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "requestIds": "REQ_IDS",
    "names": "REQ_NAMES",
    "count": "REQ_COUNT",
-   "file": "OUTPUT_FILE"
+   "file": "OUTPUT_FILE",
+   "sensor": "SENSOR",
+   "mode": "SENSOR_MODE",
+   "captured": "CAPTURED",
+   "imageId": "IMAGE_ID",
+   "uncounted": "UNCOUNTED_SCENES",
+   "uncountedReason": "UNCOUNTED_REASON"
+  },
+  "requestQuotas": {
+   "sensor": "SENSOR",
+   "mode": "SENSOR_MODE",
+   "limit": "ANNUAL_LIMIT",
+   "startMonth": "YEAR_START_MONTH",
+   "initialUsed": "INITIAL_USED",
+   "countFrom": "COUNT_FROM",
+   "note": "NOTE"
   },
   "observationStores": {
    "id": "OBS_ID",
@@ -1023,6 +1038,8 @@ const ROLE_LABELS = {
   createdAt: "作成日時", createdBy: "作成者", updatedAt: "更新日時",
   shotId: "撮像 ID（撮像の範囲）", passTime: "撮像時刻", shots: "撮像回数", coverage: "範囲の割合（%）", requestIds: "依頼 ID（カンマ区切り）",
   names: "名称（読点区切り）", count: "依頼件数", mergedInto: "まとめ先の依頼 ID",
+  uncounted: "数えない枚数", uncountedReason: "数えない理由", limit: "年間上限",
+  startMonth: "年の始まりの月", initialUsed: "当初の消費枚数", countFrom: "数え始める日",
   timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限", timesGap: "回の間隔（時間）", occurrence: "その日の何回目か",
 };
 const SOURCE_LABELS = {
@@ -1409,7 +1426,9 @@ const SPEC = [
         T("groups", "依頼グループのテーブル", { ph: "https://…/FeatureServer/21", help: "TBL_REQUEST_GROUP。グループ名とメンバー（ユーザー名）。グループは Esri のテーブルで管理し、ここには URL だけ" }),
         R("groupFields", "依頼グループの属性名", K.roles.requestGroups),
         T("shots", "撮像の範囲のレイヤー", { ph: "https://…/FeatureServer/22", help: "TBL_REQUEST_SHOT（ポリゴン）。書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼は書き出す四角）。撮像予定ドックで依頼の範囲に重ねて表示。なくても動く" }),
-        R("shotFields", "撮像の範囲の属性名", K.roles.requestShots), CATALOG,
+        R("shotFields", "撮像の範囲の属性名", K.roles.requestShots),
+        T("quotas", "年間撮像上限のテーブル", { ph: "https://…/FeatureServer/23", help: "TBL_IMAGING_QUOTA。センサー・モードごとの年間撮像枚数の上限（年の始まりの月・当初の消費枚数）。行のないセンサー・モードは上限なし。撮像ごとに数えるので撮像の範囲のレイヤーも要る。値は衛星・センサー編集ツールで" }),
+        R("quotaFields", "年間撮像上限の属性名", K.roles.requestQuotas), CATALOG,
         N("missAfterDays", "未撮像とする日数"), TOKEN]) },
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [

@@ -1,5 +1,5 @@
 """
-tools/satellite_editor.html (the satellite, sensor and alias table editor)
+tools/satellite_editor.html (the satellite, sensor, alias and annual quota table editor)
 carries a copy of the plugin's field roles and defaults, and reads the tables
 the way the plugin does. This checks the copy is current and that every role
 has an input.
@@ -20,6 +20,7 @@ def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from skywatch.core import edit_stamp, time_zone
     from skywatch.core.plan import modes, names, satellites
+    from skywatch.core.request import store
 
     return {
         "satelliteRoles": list(satellites.SATELLITE_ROLES),
@@ -28,6 +29,8 @@ def plugin_constants() -> dict:
         "sensorRoles": list(modes.SENSOR_ROLES),
         "sensorNumberRoles": list(modes.NUMBER_ROLES),
         "aliasRoles": list(names.ALIAS_ROLES),
+        "quotaRoles": list(store.DEFAULT_QUOTA_FIELDS),
+        "quotaFields": dict(store.DEFAULT_QUOTA_FIELDS),
         "editTrackingFields": dict(edit_stamp.DEFAULT_FIELDS),
         "editTrackingUpdateRoles": list(edit_stamp.UPDATE_ROLES),
         "timeZoneSources": list(time_zone.TIME_ZONE_SOURCES),
@@ -54,9 +57,11 @@ def test_constants_match_the_plugin():
 
 def test_every_role_has_an_input():
     from skywatch.core.plan import modes, names, satellites
+    from skywatch.core.request.store import DEFAULT_QUOTA_FIELDS
 
     text = _read()
-    for table, roles in (("SAT_INFO", satellites.SATELLITE_ROLES), ("SENSOR_INFO", modes.SENSOR_ROLES), ("ALIAS_INFO", names.ALIAS_ROLES)):
+    for table, roles in (("SAT_INFO", satellites.SATELLITE_ROLES), ("SENSOR_INFO", modes.SENSOR_ROLES), ("ALIAS_INFO", names.ALIAS_ROLES),
+                         ("QUOTA_INFO", DEFAULT_QUOTA_FIELDS)):
         block = _object(text, table)
         for role in roles:
             assert re.search(rf"\b{role}: \{{ label: ", block), f"{table} に {role} がない"
@@ -79,6 +84,10 @@ def test_the_number_roles_are_checked_as_numbers():
         for role in numbers:
             m = re.search(rf"\b{role}: \{{[^}}]*\}}", block)
             assert m and "num: true" in m.group(0), f"{table}.{role} が数の入力でない"
+    block = _object(text, "QUOTA_INFO")
+    for role in ("limit", "startMonth", "initialUsed"):
+        m = re.search(rf"\b{role}: \{{[^}}]*\}}", block)
+        assert m and "num: true" in m.group(0) and "int: true" in m.group(0), f"QUOTA_INFO.{role} が整数の入力でない"
 
 
 def test_the_page_loads_nothing_from_outside():

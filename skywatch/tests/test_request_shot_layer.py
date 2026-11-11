@@ -43,12 +43,18 @@ def test_one_shot_a_row_of_the_file_and_each_request_names_it():
     assert rows["R2"].rings == [[list(p[:2]) for p in b.rings[0]]]
 
 
-def test_no_shot_without_the_orbits_or_a_file():
-    plan, systems = _plan([point(1, BELOW, 300), point(2, along(2.5))], [system(orbit=False)])
+def test_a_shot_also_without_the_orbits_but_none_without_a_file():
+    # Fitted by counting (tsudo, 2026-11-11: 「個の画像に関して管理する情報はショットのほうがいい」): a shot a row of the
+    # file all the same, with the request's area and no pass; each request names its own.
+    a, b = point(1, BELOW, 300), point(2, along(2.5))
+    plan, systems = _plan([a, b], [system(orbit=False)])
     written = files_of(render(plan.candidates, systems, DAY, T))
-    assert shots_of(plan, T, written, "X") == []
-    assert {r.shot_id for r in history_of(plan, T, written, "X")} == {""}
-    # A system whose file was not written has no shots either.
+    shots = shots_of(plan, T, written, "X")
+    assert [(s.shot_id, s.request_ids, s.pass_time, s.orbit_dir, s.shots, s.captured) for s in shots] == [
+        ("X-1", ["R1"], None, "", 1, "未判定"), ("X-2", ["R2"], None, "", 1, "未判定")]
+    assert shots[0].rings == [[list(p[:2]) for p in a.rings[0]]] and shots[0].satellite == "ISS"
+    assert {r.request_id: r.shot_id for r in history_of(plan, T, written, "X")} == {"R1": "X-1", "R2": "X-2"}
+    # A system whose file was not written has no shots.
     plan, systems = _plan([point(1, BELOW, 300)])
     assert shots_of(plan, T, {}, "X") == [] and history_of(plan, T, {}, "X")[0].shot_id == ""
 

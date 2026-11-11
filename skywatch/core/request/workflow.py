@@ -27,6 +27,7 @@ from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
 from .passes import Passes
+from .quota import QuotaBook
 from .route import system_of_satellite
 from .store import HistoryRow, ShotRow
 from .systems import ExportSystem
@@ -107,13 +108,15 @@ class DayPlan:
     target: Optional[str] = None
     #: The satellites' passes over the day's requests (worked out once; None: fitted by counting).
     passes: Optional[Passes] = None
+    #: What the yearly quotas have left on the day (年間撮像上限, quota.QuotaData.book); None: none is kept.
+    quotas: Optional[QuotaBook] = None
 
     def refit(self) -> list[Candidate]:
         """Fits again (after a change by hand), those written for a system other than the target pinned there."""
         for c in self.candidates:
             w = self.written.get(c.key)
             c.pinned = w if self.target and w and w[0] != self.target else None
-        self.candidates = allocate(self.candidates, self.systems, self.sats, self.passes, self.day)
+        self.candidates = allocate(self.candidates, self.systems, self.sats, self.passes, self.day, self.quotas)
         return self.candidates
 
     def others_handed(self) -> frozenset:
@@ -129,12 +132,16 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
              clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
-             passes: Optional[Passes] = None) -> DayPlan:
-    """The candidates of a day, gathered and fitted (`target`: the one system written from here; `passes`: the orbits')."""
+             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None) -> DayPlan:
+    """
+    The candidates of a day, gathered and fitted (`target`: the one system
+    written from here; `passes`: the orbits'; `quotas`: what the yearly
+    quotas have left).
+    """
     missed = missed_ids(history)
     cands = gather(requests, day, sats, clouds, missed)
     plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
-                   passes=passes)
+                   passes=passes, quotas=quotas)
     today = handed_today(history, day)
     plan.written = {occurrence_key(r.request_id, r.occurrence): (r.system, r.satellite) for r in today}
     plan.handed = frozenset((r.request_id, r.system) for r in today)
@@ -164,17 +171,17 @@ def new_run_id() -> str:
     return str(uuid.uuid4()).upper()
 
 
-def _rows_with_shots(plan: DayPlan, files: dict, system: Optional[str]) -> list[Candidate]:
-    """The rows of the files written that the orbits placed (each a shot, or the shots of a big area), in order."""
+def _file_rows(plan: DayPlan, files: dict, system: Optional[str]) -> list[Candidate]:
+    """The rows of the files written (each a shot, or the shots of a big area), in order."""
     return [c for c in plan.candidates
-            if c.result == TAKEN and c.shots and not c.member and of_system(c, system) and c.system is not None
+            if c.result == TAKEN and not c.member and of_system(c, system) and c.system is not None
             and file_of(files, c.system.system, c.key) is not None]
 
 
 def shot_ids_of(plan: DayPlan, files: dict, run_id: str, system: Optional[str] = None) -> dict:
     """request id (with its time, Candidate.key) → the id of the shot that takes it (the row's and those put into its shot)."""
     out: dict = {}
-    for n, c in enumerate(_rows_with_shots(plan, files, system), 1):
+    for n, c in enumerate(_file_rows(plan, files, system), 1):
         for m in (c.together or [c]):
             out[m.key] = f"{run_id}-{n}"
     return out
@@ -187,21 +194,28 @@ def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Option
     written with for requests put together (the box along the track around
     them, Shot.area_ring), otherwise the outline of the scenes taken (each
     shot's, for an area too big for one); the pass, and the requests in it.
-    Requests fitted without the orbits have none.
+
+    A request fitted without the orbits has one too (tsudo: 「個の画像に関して
+    管理する情報はショットのほうがいい」): its area, no pass. Each names the
+    sensor and mode it is taken with, what its scenes count against
+    (年間撮像上限), and starts 未判定.
     """
     out = []
-    for n, c in enumerate(_rows_with_shots(plan, files, system), 1):
-        first = c.shots[0]
-        look = first.look
+    for n, c in enumerate(_file_rows(plan, files, system), 1):
         members = c.together or [c]
-        out.append(ShotRow(
+        sat = c.satellite
+        row = ShotRow(
             shot_id=f"{run_id}-{n}", run_id=run_id, run_date=run, day=plan.day.isoformat(), system=c.system.system,
-            satellite=c.satellite.name if c.satellite else "", pass_time=first.middle,
-            off_nadir=round(look["offNadir"], 2), incidence=round(look["incidence"], 2),
-            orbit_dir="昇交" if first.ascending else "降交", look_side=first.side, scenes=c.scenes, shots=len(c.shots),
-            coverage=c.coverage, request_id=c.request.id, request_ids=[m.request.id for m in members],
-            names=[m.request.name or m.request.id for m in members],
-            file=file_of(files, c.system.system, c.key) or "", rings=[s.area_ring() for s in c.shots]))
+            satellite=sat.name if sat else "", scenes=c.scenes, shots=max(1, len(c.shots)), coverage=c.coverage,
+            request_id=c.request.id, request_ids=[m.request.id for m in members], names=[m.request.name or m.request.id for m in members],
+            file=file_of(files, c.system.system, c.key) or "", sensor=(sat.sensor or "") if sat else "", mode=(sat.mode or "") if sat else "",
+            rings=[s.area_ring() for s in c.shots] if c.shots else [[list(p[:2]) for p in r] for r in c.request.rings])
+        if c.shots:
+            first = c.shots[0]
+            look = first.look
+            row.pass_time, row.off_nadir, row.incidence = first.middle, round(look["offNadir"], 2), round(look["incidence"], 2)
+            row.orbit_dir, row.look_side = "昇交" if first.ascending else "降交", first.side
+        out.append(row)
     return out
 
 

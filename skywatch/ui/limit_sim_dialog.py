@@ -24,6 +24,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.plan.weather import fetch_clouds
 from ..core.request.follow import missed_ids
 from ..core.request.model import CATEGORIES, priority_text
+from ..core.request.quota import QuotaData, read_quota_data
 from ..core.request.simulate import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
@@ -35,7 +36,8 @@ from ..qgis_io.tasks import run_task
 
 #: The columns of the systems' table.
 SYSTEM_COLUMNS = ("使う", "システム", "件数上限", "枚数上限", *(f"{c}枠" for c in CATEGORIES))
-DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ", "使用")
+DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "年間上限", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ",
+               "使用")
 EXPIRED_COLUMNS = ("期限", "依頼", "区分", "優先度", "最終日の理由")
 
 
@@ -63,6 +65,9 @@ class LimitSimDialog(QDialog):
         self.task = None
         #: What was read: (requests, history, sats); forecasts by (start, days).
         self.data = None
+        #: The yearly quotas and the shots of their years (年間撮像上限), and the first and last day they were read for.
+        self.quotas: QuotaData = QuotaData()
+        self.quota_days: Optional[tuple] = None
         self.forecasts: dict = {}
         self.forecast_key = None
         self.base = None
@@ -184,12 +189,19 @@ class LimitSimDialog(QDialog):
             return
         start, days = self.chosen_start(), self.days.value()
         key = (start, days) if self.weather.isChecked() else None
-        if self.data is not None and not reload and key == self.forecast_key:
+        if self.data is not None and not reload and key == self.forecast_key and self._quotas_cover(start, days):
             self._simulate()
             return
         self.run_button.setEnabled(False)
         self.status.setText(self.tr("衛星カタログを読み込み中…"))
         self.satellites(lambda sats: self._load(sats, start, days, key, reload or self.data is None), self._satellites_failed)
+
+    def _quotas_cover(self, start: date, days: int) -> bool:
+        """Whether the yearly quotas read cover the days of a run (their years were read for them)."""
+        if self.store is None or not self.store.quotas:
+            return True
+        run = horizon_days(start, days)
+        return self.quota_days is not None and self.quota_days[0] <= run[0] and run[-1] <= self.quota_days[1]
 
     def _satellites_failed(self, message: str) -> None:
         """The satellite catalog could not be read: says why and gives 「試算」 back (#70)."""
@@ -212,6 +224,14 @@ class LimitSimDialog(QDialog):
                            if store.history else [])
             else:
                 requests, history = old[0], old[1]
+            quotas = QuotaData()
+            if store.quotas:
+                run = horizon_days(start, days)
+                try:
+                    quotas = read_quota_data(client, store, token, [run[0], run[-1]], task.isCanceled)
+                except Exception as error:  # noqa: BLE001 (the run goes on without the quotas)
+                    notes.append(f"年間撮像上限を読めず（{error}）")
+                notes += quotas.problems[:3]
             forecasts = {}
             if forecast is not None:
                 # The first day also takes the requests missed and carried over to it (simulate does the same).
@@ -223,12 +243,15 @@ class LimitSimDialog(QDialog):
                         forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
                     except Exception as error:  # noqa: BLE001 (the run goes on without the weather)
                         notes.append(f"雲量予報の取得失敗（{error}）")
-            return requests, history, forecasts, notes
+            return requests, history, forecasts, notes, quotas
 
         def done(result):
             self.task = None
-            requests, history, forecasts, notes = result
+            requests, history, forecasts, notes, quotas = result
             self.data = (requests, history, list(sats))
+            self.quotas = quotas
+            run = horizon_days(start, days)
+            self.quota_days = (run[0], run[-1])
             self.forecasts, self.forecast_key = forecasts, key
             self._simulate(notes)
 
@@ -244,6 +267,7 @@ class LimitSimDialog(QDialog):
         if self.task is not None:
             return
         requests, history, sats = self.data
+        quotas = self.quotas
         start, days = self.chosen_start(), self.days.value()
         forecasts = self.forecasts if self.weather.isChecked() else {}
 
@@ -262,10 +286,10 @@ class LimitSimDialog(QDialog):
             passes = run_passes(requests, start, days, sats, time.time() * 1000, task.isCanceled)
             task.check()
             task.progress(30)
-            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes)
+            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes, quotas)
             task.check()
             task.progress(65)
-            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes)
+            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes, quotas)
             task.check()
             return base, trial
 
@@ -311,7 +335,7 @@ class LimitSimDialog(QDialog):
                 count = f"{n}/{s.limit['count']}" if s and "count" in s.limit else str(n)
                 sc = f"{scenes}/{s.limit['scenes']}" if s and "scenes" in s.limit else str(scenes)
                 used.append(f"{labels.get(name, name)} {count} 件・{sc} 枚")
-            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
+            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.quota, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
                      d.carried, d.lost, len(d.expired), "　".join(used)]
             for col, v in enumerate(cells):
                 item = QTableWidgetItem(str(v))

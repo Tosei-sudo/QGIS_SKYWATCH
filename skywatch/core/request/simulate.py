@@ -19,6 +19,10 @@ run) each day goes to the passes of that day as the real day does: no pass
 (撮像機会なし), the satellites' interval and shots a day (counted as 枠超過),
 and requests put into one shot (まとめ: no row of their own).
 
+The yearly quotas (年間撮像上限, `quotas`) are kept day by day: what the
+earlier days of the run handed out is taken off what is left (handed out =
+captured), and a year starting within the run starts afresh.
+
 A request taken several times a day (1 日の回数) counts as taken on a day
 when its n times are handed out; taken fewer times (回数不足) the day does
 not count: 期間内1回 goes on to the next day, 毎回 loses it. Its times past
@@ -36,6 +40,7 @@ from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate
 from .follow import missed_ids
 from .model import ImagingRequest, day_bounds, days_left, jst_day
 from .passes import Passes, find_passes
+from .quota import QUOTA, QuotaData
 from .route import system_of_satellite, why_not
 from .store import HistoryRow
 from .systems import ExportSystem
@@ -110,6 +115,8 @@ class DayResult:
     lost: int = 0
     #: Requests handed out fewer times than their 1 日の回数 asks (the day does not count for them).
     short: int = 0
+    #: Held back as every mode that could take them had used its year's scenes (年間撮像上限).
+    quota: int = 0
     expired: list = field(default_factory=list)
     #: system name → (requests, scenes) taken.
     used: dict = field(default_factory=dict)
@@ -157,12 +164,13 @@ def run_passes(requests: Sequence[ImagingRequest], start: date, days: int, sats:
 def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems: Sequence[ExportSystem],
              sats: Sequence[SatelliteSpec], clouds: Optional[Callable[[date], dict]] = None,
              history: Sequence[HistoryRow] = (), cancelled: Optional[Callable[[], bool]] = None,
-             passes: Optional[Passes] = None) -> Simulation:
+             passes: Optional[Passes] = None, quotas: Optional[QuotaData] = None) -> Simulation:
     """
     Runs the day's work from `start` for `days` days on a copy of `requests`.
     `clouds` gives a day's cover by request id (None where not forecast);
     `history` tells which requests were found 未撮像 (offered a raise on the first day);
-    `passes` the satellites' passes over the run (run_passes; None: fitted by counting).
+    `passes` the satellites' passes over the run (run_passes; None: fitted by counting);
+    `quotas` the yearly quotas and the shots of their years (quota.read_quota_data).
     """
     ledger = [dataclasses.replace(r) for r in requests]
     systems = list(systems)
@@ -173,12 +181,22 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
             members[own.system].append(sat)
     missed = missed_ids(history)
     out = Simulation(start, systems)
+    run_days = horizon_days(start, days)
+    # The days of the run are planned again: what was handed out for them is not 見込み.
+    replanned = (run_days[0].isoformat(), run_days[-1].isoformat())
+    #: (quota index, year's first day) → scenes handed out by the run's earlier days.
+    handed: dict = {}
     for i in range(max(1, min(MOST_DAYS, days))):
         if cancelled and cancelled():
             break
         day = start + timedelta(days=i)
         cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set())
-        cands = allocate(cands, systems, sats, passes, day)
+        book = quotas.book(day, replanned, handed) if quotas is not None and quotas.quotas else None
+        cands = allocate(cands, systems, sats, passes, day, book)
+        if book is not None:
+            for index, u in zip(book.indices, book.usages):
+                key = (index, u.window.first)
+                handed[key] = handed.get(key, 0) + book.spent.get(id(u), 0)
         result = DayResult(day, candidates=sum(1 for c in cands if not c.extra))
         times: dict = {}
         for c in cands:
@@ -200,7 +218,9 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
             if c.extra:
                 # A time past the n it needs, tried only in the room left.
                 continue
-            if c.reason in (OVER, BUSY):
+            if c.reason == QUOTA:
+                result.quota += 1
+            elif c.reason in (OVER, BUSY):
                 result.over += 1
             elif c.reason == NO_SYSTEM:
                 result.no_system += 1
@@ -250,6 +270,7 @@ def deadline_text(req: ImagingRequest) -> str:
 SUMMARY = (
     ("採用", lambda s: s.total("taken")),
     ("枠超過で見送り", lambda s: s.total("over")),
+    ("年間上限で見送り", lambda s: s.total("quota")),
     ("次のシステムへ回送", lambda s: s.total("spilled")),
     ("雲量で見送り", lambda s: s.total("cloud")),
     ("該当システムなし", lambda s: s.total("no_system")),

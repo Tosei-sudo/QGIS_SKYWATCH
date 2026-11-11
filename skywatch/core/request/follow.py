@@ -20,7 +20,9 @@ from ..time_query import between_condition, text_sample
 from ..time_zone import read_text_instant
 from .model import ImagingRequest
 from .model import day_bounds
-from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, history_where, load_history, update_history, update_requests
+from .store import (
+    IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, history_where, load_history, sync_shots, update_history, update_requests,
+)
 
 
 @dataclass
@@ -331,15 +333,32 @@ def _saved_only(findings: Sequence[Finding], saved) -> list[Finding]:
     return [f for f in findings if f.row.object_id is not None and f.row.object_id in saved.ok]
 
 
+def save_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], findings: Sequence[Finding],
+               problems: list) -> None:
+    """
+    Puts the outcome of the shots of the rows saved on the shot layer
+    (store.sync_shots: 撮像済み when any request of the shot is); what fails
+    goes to `problems` and never stops the follow-up (the history is what
+    counts for the requests).
+    """
+    ids = [f.row.shot_id for f in findings if f.row.shot_id]
+    if not ids:
+        return
+    try:
+        problems += sync_shots(client, store, token, ids).problems
+    except EsriError as error:
+        problems.append(f"撮像の範囲の撮像結果を更新できず（{error}）")
+
+
 def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Optional[str], catalog: CatalogConfig, catalog_token: Optional[str],
                     history: Sequence[HistoryRow], requests: dict, now: float, names: SatelliteNames = NO_NAMES,
                     cancelled: Optional[Callable[[], bool]] = None, problems: Optional[list] = None) -> tuple[list[Finding], bool]:
     """
     Follows the history up against the catalog and saves what was found:
-    the rows' outcome, and on the ledger the raises undone and 完了. The
-    findings saved, and whether the ledger was changed. Rows that could not
-    be saved keep their outcome (they are followed up again next time) and
-    the reasons go to `problems`.
+    the rows' outcome, their shots' (save_shots), and on the ledger the
+    raises undone and 完了. The findings saved, and whether the ledger was
+    changed. Rows that could not be saved keep their outcome (they are
+    followed up again next time) and the reasons go to `problems`.
     """
     problems = problems if problems is not None else []
     found = follow_up(client, catalog, catalog_token, history, requests, now, store.miss_after_days, cancelled, names)
@@ -349,6 +368,7 @@ def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Option
     problems += saved.problems
     found = _saved_only(found, saved)
     settle(found)
+    save_shots(client, store, token, found, problems)
     changes = request_changes(found, requests, history)
     if changes:
         problems += update_requests(client, store, token, changes, now).problems
@@ -366,6 +386,7 @@ def save_marked(client: EsriClient, store: RequestStoreConfig, token: Optional[s
     findings = _saved_only(findings, saved)
     changes = request_changes(findings, requests, history) + undone_changes(findings, requests, history)
     settle(findings)
+    save_shots(client, store, token, findings, problems)
     if changes:
         problems += update_requests(client, store, token, changes, now).problems
     return bool(changes)

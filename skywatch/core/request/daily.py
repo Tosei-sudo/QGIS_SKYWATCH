@@ -56,6 +56,12 @@ times are simply more requests on the satellites.
 Hand changes (taking in, leaving out, moving up or down) are kept on the
 candidates and the fitting is done again.
 
+A sensor or mode with a yearly quota (年間撮像上限, quota.py; tsudo
+2026-11-11) takes no more scenes than its year has left, what the shots
+handed out and not settled yet will use taken off: a request then tries the
+next satellite or mode, and is held back (年間上限) when none has room. One
+taken by hand (or pinned) goes past it, with a warning.
+
 A request already in the file another system's person wrote today is
 pinned there (`Candidate.pinned`): it is fitted first, to that system and
 satellite, whatever the limits or the hand say, since that file is not
@@ -71,6 +77,7 @@ from typing import Optional, Sequence
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
+from .quota import QUOTA, QUOTA_OVER, QuotaBook
 from .route import fitting, scenes_of, system_of_satellite, why_not
 from .shots import GOAL, Book, Placement
 from .systems import ExportSystem
@@ -328,7 +335,7 @@ class Room:
 def _manual_warning(w: str) -> bool:
     """A warning the fitting itself adds (made again by each fitting)."""
     return (w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
-            or w.startswith(FEW))
+            or w.startswith(FEW) or w.startswith(QUOTA_OVER))
 
 
 def times_of(c: Candidate) -> list[float]:
@@ -371,12 +378,17 @@ def _tenth(cloud: Optional[float]) -> int:
 
 
 def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
-             passes: Optional[Passes] = None, day: Optional[date] = None) -> list[Candidate]:
+             passes: Optional[Passes] = None, day: Optional[date] = None,
+             quotas: Optional[QuotaBook] = None) -> list[Candidate]:
     """
     Fits the candidates into the systems' limits (in place); the candidates in
     their order. With `passes` (the satellites' orbits) and `day`, to the
-    passes of the day, put together where they fit in one shot.
+    passes of the day, put together where they fit in one shot. With
+    `quotas`, within what the yearly quotas have left (what each is given is
+    kept on it, `QuotaBook.spent`).
     """
+    book_quota = quotas if quotas is not None else QuotaBook()
+    book_quota.reset()
     rooms = {s.system: Room() for s in systems}
     #: Requests a day of the satellites fitted by counting (platform → n).
     per_sat: dict[str, int] = {}
@@ -413,6 +425,14 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         room.by_category[c.request.category] = room.by_category.get(c.request.category, 0) + 1
         if sat is not None:
             per_sat[platform_key(sat)] = per_sat.get(platform_key(sat), 0) + 1
+        quota_check(c, sat, scenes)
+        book_quota.take(sat, scenes)
+
+    def quota_check(c: Candidate, sat: Optional[SatelliteSpec], scenes: int) -> None:
+        """Warns of a request taken past a quota's year (by hand, or pinned)."""
+        over = book_quota.over(sat, scenes)
+        if over is not None:
+            c.warnings.append(book_quota.over_text(over))
 
     def placed(c: Candidate, system: ExportSystem, sat: SatelliteSpec, p: Placement, cloud: Optional[float]) -> None:
         room = rooms[system.system]
@@ -429,6 +449,8 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             room.count += 1
             room.by_category[c.request.category] = room.by_category.get(c.request.category, 0) + 1
         room.scenes += p.scenes
+        quota_check(c, sat, p.scenes)
+        book_quota.take(sat, p.scenes)
         if p.coverage is not None and p.coverage < GOAL:
             c.warnings.append(f"{PART}{round(p.coverage * 100)}%")
 
@@ -478,6 +500,9 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             fits = _room_fits(system, room, c.request.category, 1 if p.new else 0, p.scenes)
             if not fits and not forced:
                 why.add(OVER)
+                continue
+            if not forced and book_quota.over(sat, p.scenes) is not None:
+                why.add(QUOTA)
                 continue
             placed(c, system, sat, p, clouds.get(id(p)))
             if p.busy:
@@ -541,8 +566,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 scenes = scenes_of(req, *(((sat.swath, sat.length) if req.modes or req.satellites else system.scene_km)))
                 used = per_sat.get(platform_key(sat), 0)
                 if (not sat.maxPerDay or used + 1 <= sat.maxPerDay) and _room_fits(system, room, req.category, 1, scenes):
-                    counted(c, system, sat, scenes)
-                    break
+                    if book_quota.over(sat, scenes) is None:
+                        counted(c, system, sat, scenes)
+                        break
+                    why.add(QUOTA)
+                    continue
                 why.add(OVER)
             if c.result != TAKEN and forced and able:
                 sat = able[0]
@@ -555,7 +583,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 c.warnings.append(f"{c.held}（手動で採用）")
             break
         if c.result != TAKEN:
-            c.reason = (NO_SYSTEM if not tried_any else OVER if OVER in why else BUSY if BUSY in why
+            c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else OVER if OVER in why else BUSY if BUSY in why
                         else CLOUDY if CLOUDY in why else GAP if GAP in why else NO_PASS if NO_PASS in why else OVER)
     for c in out:
         if c.result == TAKEN and c.shots:

@@ -348,6 +348,21 @@ TABLES = (
         F("REQ_NAMES", "まとめた依頼の名称", "TEXT", 4000, "names"),
         F("REQ_COUNT", "依頼件数", "LONG", None, "count"),
         F("OUTPUT_FILE", "出力ファイル", "TEXT", 1000, "file"),
+        F("SENSOR", "センサー", "TEXT", 255, "sensor"),
+        F("SENSOR_MODE", "センサーモード", "TEXT", 255, "mode"),
+        F("CAPTURED", "撮像結果", "TEXT", 16, "captured"),
+        F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
+        F("UNCOUNTED_SCENES", "数えない枚数", "LONG", None, "uncounted"),
+        F("UNCOUNTED_REASON", "数えない理由", "TEXT", 1000, "uncountedReason"),
+    )),
+    Table("TBL_IMAGING_QUOTA", "年間撮像上限", None, writable=True, setting="requestStores[].quotas", fields=(
+        F("SENSOR", "センサー", "TEXT", 255, "sensor"),
+        F("SENSOR_MODE", "センサーモード", "TEXT", 255, "mode"),
+        F("ANNUAL_LIMIT", "年間上限", "LONG", None, "limit"),
+        F("YEAR_START_MONTH", "年の始まりの月", "SHORT", None, "startMonth"),
+        F("INITIAL_USED", "当初の消費枚数", "LONG", None, "initialUsed"),
+        F("COUNT_FROM", "数え始める日", "DATE", None, "countFrom"),
+        F("NOTE", "メモ", "TEXT", 1000, "note"),
     )),
 )
 
@@ -357,7 +372,7 @@ INDEXES = {
     "TBL_SATELLITE": ("SAT_NAME",),
     "TBL_SATELLITE_ALIAS": ("SAT_NAME",),
     "TBL_IMAGING_REQUEST": ("REQ_ID",),
-    "TBL_REQUEST_HISTORY": ("REQ_ID", "TARGET_DAY", "TARGET_DATE"),
+    "TBL_REQUEST_HISTORY": ("REQ_ID", "TARGET_DAY", "TARGET_DATE", "SHOT_ID"),
     "TBL_REQUEST_SHOT": ("SHOT_ID", "TARGET_DAY"),
     "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID"),
     "TBL_OBSERVATION_AREA": ("AREA_ID", "IMAGE_ID"),
@@ -433,6 +448,8 @@ def plugin_config(urls: dict) -> dict:
             store["groups"] = urls["TBL_REQUEST_GROUP"]
         if has("TBL_REQUEST_SHOT"):
             store["shots"] = urls["TBL_REQUEST_SHOT"]
+        if has("TBL_IMAGING_QUOTA"):
+            store["quotas"] = urls["TBL_IMAGING_QUOTA"]
         config["requestStores"] = [store]
     if has("TBL_OBSERVATION"):
         store = {"url": urls["TBL_OBSERVATION"]}

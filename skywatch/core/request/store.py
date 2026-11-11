@@ -47,6 +47,13 @@ DEFAULT_SHOT_FIELDS: dict[str, str] = {
     "system": "SYSTEM", "satellite": "SATELLITE", "passTime": "PASS_TIME", "offNadir": "OFF_NADIR", "incidence": "INCIDENCE",
     "orbitDir": "ORBIT_DIR", "lookSide": "LOOK_SIDE", "scenes": "SCENES", "shots": "SHOT_COUNT", "coverage": "COVERAGE",
     "requestId": "REQ_ID", "requestIds": "REQ_IDS", "names": "REQ_NAMES", "count": "REQ_COUNT", "file": "OUTPUT_FILE",
+    "sensor": "SENSOR", "mode": "SENSOR_MODE", "captured": "CAPTURED", "imageId": "IMAGE_ID",
+    "uncounted": "UNCOUNTED_SCENES", "uncountedReason": "UNCOUNTED_REASON",
+}
+#: The yearly quotas' names (TBL_IMAGING_QUOTA: one row a sensor, or a mode of it; core/request/quota.py).
+DEFAULT_QUOTA_FIELDS: dict[str, str] = {
+    "sensor": "SENSOR", "mode": "SENSOR_MODE", "limit": "ANNUAL_LIMIT", "startMonth": "YEAR_START_MONTH",
+    "initialUsed": "INITIAL_USED", "countFrom": "COUNT_FROM", "note": "NOTE",
 }
 #: The history's 採否 (the system's own answer to what was handed out; core/request/adoption.py).
 ADOPTION_ROLES = ("adoption", "adoptionReason", "plannedAt", "externalId", "adoptionSource")
@@ -88,6 +95,9 @@ class RequestStoreConfig:
     #: The shot layer (撮像の範囲; None: the shots are not kept, the history alone tells what was put together).
     shots: Optional[str] = None
     shot_fields: dict = field(default_factory=lambda: dict(DEFAULT_SHOT_FIELDS))
+    #: The yearly quotas table (年間撮像上限, core/request/quota.py; None: no quota is kept).
+    quotas: Optional[str] = None
+    quota_fields: dict = field(default_factory=lambda: dict(DEFAULT_QUOTA_FIELDS))
 
 
 def _fields(value: Any, defaults: dict, at: str, problems: list[str]) -> dict:
@@ -124,6 +134,12 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
     if shots is not None and (not isinstance(shots, str) or not _FEATURE_LAYER.search(shots.split("?", 1)[0])):
         problems.append(f"{at} の shots は撮像の範囲のポリゴンレイヤーの URL（…/FeatureServer/22 など）で指定")
         shots = None
+    quotas = value.get("quotas")
+    if quotas is not None and (not isinstance(quotas, str) or not _READ_TABLE.search(quotas.split("?", 1)[0])):
+        problems.append(f"{at} の quotas は年間撮像上限のテーブルの URL（…/FeatureServer/23 など）で指定")
+        quotas = None
+    if quotas and not shots:
+        problems.append(f"{at} の quotas（年間撮像上限）は撮像ごとに数えるので shots（撮像の範囲）も指定")
     label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
     miss = value.get("missAfterDays")
     return RequestStoreConfig(
@@ -139,6 +155,8 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         group_fields=_fields(value.get("groupFields"), DEFAULT_GROUP_FIELDS, f"{at}.groupFields", problems),
         shots=layer_url(shots) if shots else None,
         shot_fields=_fields(value.get("shotFields"), DEFAULT_SHOT_FIELDS, f"{at}.shotFields", problems),
+        quotas=layer_url(quotas) if quotas else None,
+        quota_fields=_fields(value.get("quotaFields"), DEFAULT_QUOTA_FIELDS, f"{at}.quotaFields", problems),
     )
 
 
@@ -739,6 +757,16 @@ def replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = 
     return where + (f" AND {hf['system']} = {quote(system)}" if system else "")
 
 
+def followed_where(store: RequestStoreConfig, day: str, system: Optional[str] = None) -> str:
+    """
+    The rows of a target day already followed up (撮像済み・未撮像), of
+    `system` when given: writing the day again keeps them, and their shots.
+    """
+    hf = store.history_fields
+    where = f"{hf['day']} = {quote(day)} AND {hf['captured']} IN ('撮像済み', '未撮像')"
+    return where + (f" AND {hf['system']} = {quote(system)}" if system else "")
+
+
 def handed_where(store: RequestStoreConfig, day: str) -> str:
     """The rows of a target day handed out (採用) and not yet followed up: what each system's file holds."""
     hf = store.history_fields
@@ -925,6 +953,17 @@ class ShotRow:
     #: The outlines (longitude / latitude rings), one a shot.
     rings: list = field(default_factory=list)
     object_id: Optional[int] = None
+    #: The sensor and mode it is taken with (the satellite's, after its modes; core/plan/modes.py): what its scenes
+    #: count against (年間撮像上限, core/request/quota.py).
+    sensor: str = ""
+    mode: str = ""
+    #: Whether it was taken, from the history rows of its requests (sync_shots): 未判定 / 撮像済み / 未撮像, and the image.
+    captured: str = "未判定"
+    image_id: str = ""
+    #: Scenes taken that the system does not count against the yearly quota (noise, jamming …), and why
+    #: (tsudo, 2026-11-11: 「撮ってもノイズとかジャミングでカウントされない場合もある」).
+    uncounted: Optional[int] = None
+    uncounted_reason: str = ""
 
     @property
     def count(self) -> int:
@@ -939,7 +978,9 @@ def shot_attributes(row: ShotRow, f: dict) -> dict:
         f["lookSide"]: row.look_side or None, f["scenes"]: row.scenes, f["shots"]: row.shots,
         f["coverage"]: None if row.coverage is None else round(row.coverage * 100, 1), f["requestId"]: row.request_id,
         f["requestIds"]: ",".join(row.request_ids)[:4000] or None, f["names"]: "、".join(row.names)[:4000] or None,
-        f["count"]: row.count, f["file"]: row.file[:1000] or None,
+        f["count"]: row.count, f["file"]: row.file[:1000] or None, f["sensor"]: row.sensor[:250] or None,
+        f["mode"]: row.mode[:250] or None, f["captured"]: row.captured or None, f["imageId"]: row.image_id[:250] or None,
+        f["uncounted"]: row.uncounted, f["uncountedReason"]: row.uncounted_reason[:1000] or None,
     }
 
 
@@ -947,6 +988,7 @@ def shot_row_of(a: dict, geometry: Any, f: dict, oid: str) -> ShotRow:
     """A shot row of a feature's attributes (by the layer's names)."""
     rings = geometry.get("rings") if isinstance(geometry, dict) else None
     scenes, shots, coverage = _number(a.get(f["scenes"])), _number(a.get(f["shots"])), _number(a.get(f["coverage"]))
+    uncounted = _number(a.get(f["uncounted"]))
     names = _text(a.get(f["names"]))
     return ShotRow(
         shot_id=_text(a.get(f["shotId"])), run_id=_text(a.get(f["runId"])), run_date=time_of(a.get(f["runDate"])),
@@ -959,7 +1001,10 @@ def shot_row_of(a: dict, geometry: Any, f: dict, oid: str) -> ShotRow:
         request_ids=[i.strip() for i in _text(a.get(f["requestIds"])).split(",") if i.strip()],
         names=[n for n in names.split("、") if n] if names else [], file=_text(a.get(f["file"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [],
-        object_id=int(a[oid]) if is_number(a.get(oid)) else None)
+        object_id=int(a[oid]) if is_number(a.get(oid)) else None,
+        sensor=_text(a.get(f["sensor"])), mode=_text(a.get(f["mode"])), captured=_choice(a.get(f["captured"]), CAPTURED, "未判定"),
+        image_id=_code(a.get(f["imageId"])), uncounted=max(0, int(uncounted)) if uncounted is not None else None,
+        uncounted_reason=_text(a.get(f["uncountedReason"])))
 
 
 def _shot_layer(client: EsriClient, store: RequestStoreConfig, token: Optional[str]) -> tuple[set, str]:
@@ -992,6 +1037,97 @@ def load_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[st
     rows = client.query_all(store.shots, f"{sf['day']} = {quote(day)}", token, geometry=True, limit=100000, cancelled=cancelled)
     out = [shot_row_of(row.get("attributes") or {}, row.get("geometry"), sf, oid) for row in rows]
     return sorted(out, key=lambda r: (r.system, r.pass_time or 0, r.shot_id))
+
+
+def load_shots_where(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str, geometry: bool = False,
+                     cancelled: Optional[Callable[[], bool]] = None) -> list[ShotRow]:
+    """The shots matching a condition (by the layer's names), without their outlines unless `geometry` ([] without a shot layer)."""
+    if not store.shots:
+        return []
+    _, oid = _shot_layer(client, store, token)
+    rows = client.query_all(store.shots, where, token, geometry=geometry, limit=200000, cancelled=cancelled)
+    return [shot_row_of(row.get("attributes") or {}, row.get("geometry"), store.shot_fields, oid) for row in rows]
+
+
+def shot_days_where(store: RequestStoreConfig, first: str, last: str) -> str:
+    """The shots of the target days from `first` to `last` (`2026-09-01`, both included)."""
+    sf = store.shot_fields
+    return f"{sf['day']} >= {quote(first)} AND {sf['day']} <= {quote(last)}"
+
+
+def update_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], changes: Sequence[tuple[int, dict]]) -> Saved:
+    """Changes shot rows (object id, {role: value}); how many were changed, which (`ok`), and why the others were not."""
+    if not store.shots or not changes:
+        return Saved()
+    sf = store.shot_fields
+    names, oid = _shot_layer(client, store, token)
+    missing = sorted({sf[k] for _, values in changes for k in values if sf[k] not in names})
+    if missing:
+        raise EsriError(f"{store.label} の撮像の範囲に属性 {'・'.join(missing)} なし")
+    updates = [{"attributes": {oid: o, **{sf[k]: v for k, v in values.items()}}} for o, values in changes]
+    return _batches(lambda batch: client.apply_edits(store.shots, updates=batch, token=token), updates,
+                    lambda r: r.update_results, "撮像の範囲の更新")
+
+
+def shot_outcome(rows: Sequence[HistoryRow]) -> tuple[str, str]:
+    """
+    Whether a shot was taken, from the history rows of the requests in it
+    (tsudo, 2026-11-11: 「撮像済みは、ショット側にも持たせたら」): 撮像済み
+    when any of them is (the image: the row's of the file first), 未撮像
+    when all of them are, else 未判定.
+    """
+    taken = [r for r in rows if r.result == "採用"]
+    done = sorted((r for r in taken if r.captured == "撮像済み"), key=lambda r: bool(r.merged_into))
+    if done:
+        return "撮像済み", next((r.image_id for r in done if r.image_id), "")
+    if taken and all(r.captured == "未撮像" for r in taken):
+        return "未撮像", ""
+    return "未判定", ""
+
+
+def _in(name: str, values: Sequence[str]) -> str:
+    return f"{name} IN ({','.join(quote(v) for v in values)})"
+
+
+def sync_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], shot_ids: Sequence[str]) -> Saved:
+    """
+    Puts on the shots (SHOT_ID) whether they were taken (CAPTURED, IMAGE_ID),
+    from the history rows that name them as they are now (shot_outcome):
+    called once rows were followed up or marked by hand (follow.py), so the
+    shot layer tells per shot what the history tells per request. Shots no
+    history row names are left as they are; nothing is done without a shot
+    layer, or one without those attributes.
+    """
+    ids = sorted({i for i in shot_ids if i})
+    if not store.shots or not store.history or not ids:
+        return Saved()
+    sf, hf = store.shot_fields, store.history_fields
+    names, oid = _shot_layer(client, store, token)
+    roles = [r for r in ("captured", "imageId") if sf[r] in names]
+    if not roles:
+        return Saved()
+    rows: dict = {}
+    features: list = []
+    for i in range(0, len(ids), 200):
+        batch = ids[i:i + 200]
+        for r in load_history(client, store, token, _in(hf["shotId"], batch)):
+            rows.setdefault(r.shot_id, []).append(r)
+        features += client.query_all(store.shots, _in(sf["shotId"], batch), token, geometry=False, limit=100000)
+    changes = []
+    for feature in features:
+        a = feature.get("attributes") or {}
+        shot_id = _text(a.get(sf["shotId"]))
+        if shot_id not in rows or not is_number(a.get(oid)):
+            continue
+        captured, image = shot_outcome(rows[shot_id])
+        values = {}
+        if "captured" in roles and _choice(a.get(sf["captured"]), CAPTURED, "") != captured:
+            values["captured"] = captured
+        if "imageId" in roles and _code(a.get(sf["imageId"])) != image:
+            values["imageId"] = image or None
+        if values:
+            changes.append((int(a[oid]), values))
+    return update_shots(client, store, token, changes)
 
 
 def shots_replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = None, keep: Sequence[str] = ()) -> str:
