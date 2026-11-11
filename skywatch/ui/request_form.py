@@ -1,5 +1,5 @@
 """
-The form of one imaging request (撮像依頼の登録・編集): name, category,
+The form of one imaging request (撮像依頼の登録・編集): name, 依頼グループ, category,
 period and repeat, priority (five levels, or 1–1000 behind 「詳細」),
 the conditions on satellites, and the area: drawn on the map as a box,
 clicked as a point with a size, or taken from the selected feature.
@@ -33,6 +33,7 @@ from ..qgis_io.geometry import shape_of, to_wgs84
 from .docks import plain_label
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
+from .request_groups import NO_GROUP_TEXT
 from .satellite_tree import SatelliteTree
 
 _WEEKDAYS = "月火水木金土日"
@@ -130,6 +131,26 @@ class RequestForm(QDialog):
         numbers.addWidget(QLabel(self.tr("識別番号")))
         numbers.addWidget(self.identification_no, 1)
         form.addRow(self.tr("管理番号"), numbers)
+        # 依頼グループ: one of the table's groups in use (known["groupTable"]), or typed when there is no table.
+        self.group = QComboBox()
+        self.group.setToolTip(self.tr("だれの依頼か（依頼グループ）。撮像依頼・撮像計画ファイル出力・撮像予定の一覧をグループで絞り込める"))
+        self._group_table = bool(known.get("groupTable"))
+        if self._group_table:
+            self.group.addItem(self.tr(NO_GROUP_TEXT), "")
+            for name in known.get("groups", []):
+                self.group.addItem(name, name)
+        else:
+            self.group.setEditable(True)
+            self.group.addItem("", "")
+            for name in known.get("groups", []):
+                self.group.addItem(name, name)
+            self.group.lineEdit().setPlaceholderText(self.tr("グループなし（依頼グループのテーブルがないので入力）"))
+        self.group.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.group.setMinimumContentsLength(16)
+        group_row = QHBoxLayout()
+        group_row.addWidget(self.group)
+        group_row.addStretch(1)
+        form.addRow(self.tr("依頼グループ"), group_row)
         row = QHBoxLayout()
         self.category = QComboBox()
         self.category.addItems(CATEGORIES)
@@ -352,6 +373,7 @@ class RequestForm(QDialog):
         self.systems.setText(",".join(r.systems))
         self.management_no.setText(r.management_no)
         self.identification_no.setText(r.identification_no)
+        self._set_group(r.group)
         self.requester.setText(r.requester)
         self.note.setPlainText(r.note)
         self.shape_kind = r.shape_kind
@@ -360,6 +382,24 @@ class RequestForm(QDialog):
         self._repeat_changed(rep.kind)
         self._priority_changed(r.priority)
         self._area_changed()
+
+    def _set_group(self, group: str) -> None:
+        """Shows a request's group (one no longer in use, or not in the table, is listed for it)."""
+        group = (group or "").strip()
+        if not self._group_table:
+            self.group.setEditText(group)
+            return
+        index = next((i for i in range(self.group.count()) if str(self.group.itemData(i) or "").casefold() == group.casefold()), -1)
+        if index < 0:
+            self.group.addItem(self.tr("{g}（使用停止・テーブルにない）").format(g=group), group)
+            index = self.group.count() - 1
+        self.group.setCurrentIndex(index)
+
+    def group_value(self) -> str:
+        """The group chosen ("" for none)."""
+        if self._group_table:
+            return str(self.group.currentData() or "").strip()
+        return self.group.currentText().strip()
 
     def _fit(self) -> None:
         """As tall as the fields, but no taller than the screen (the rest scrolls)."""
@@ -554,6 +594,7 @@ class RequestForm(QDialog):
         out.resolution, out.cloud_no_go = _get(self.resolution), _get(self.cloud)
         out.systems = _words(self.systems.text())
         out.management_no, out.identification_no = self.management_no.text().strip(), self.identification_no.text().strip()
+        out.group = self.group_value()
         out.requester, out.note = self.requester.text().strip(), self.note.toPlainText().strip()
         out.rings, out.shape_kind = [list(r) for r in self.rings], self.shape_kind
         return out

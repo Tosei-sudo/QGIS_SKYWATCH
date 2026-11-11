@@ -12,6 +12,7 @@ from skywatch.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
 from skywatch.core.obs.handover import DEFAULT_HANDOVER_FIELDS
 from skywatch.core.obs.model import DEFAULT_OBSERVATION_FIELDS
 from skywatch.core.obs.taxonomy import DEFAULT_TAXONOMY_FIELDS
+from skywatch.core.request.groups import DEFAULT_GROUP_FIELDS
 from skywatch.core.request.store import DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS
 
 README = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
@@ -20,6 +21,7 @@ README = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
 DEFAULTS = {
     "TBL_IMAGING_REQUEST": DEFAULT_REQUEST_FIELDS,
     "TBL_REQUEST_HISTORY": DEFAULT_HISTORY_FIELDS,
+    "TBL_REQUEST_GROUP": DEFAULT_GROUP_FIELDS,
     "TBL_OBSERVATION": DEFAULT_OBSERVATION_FIELDS,
     "TBL_OBSERVATION_AREA": DEFAULT_AREA_FIELDS,
     "TBL_TAXONOMY": DEFAULT_TAXONOMY_FIELDS,

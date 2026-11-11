@@ -1,6 +1,7 @@
 """
 Changing several imaging requests at once (一括編集): the priority, the
-status and the kind (種別) of the requests chosen in the 「撮像依頼」 dock.
+status, the kind (種別) and the 依頼グループ of the requests chosen in the
+「撮像依頼」 dock.
 
 Each request is saved on its own through `save_request`, so the ledger's
 checks hold for every one of them: a request someone else changed (or
@@ -24,6 +25,8 @@ class RequestChange:
     priority: Optional[int] = None
     status: Optional[str] = None
     kind: Optional[str] = None
+    #: The 依頼グループ ("" takes the requests out of their group).
+    group: Optional[str] = None
     #: Also takes back the raises (繰り上げ) when the priority is set.
     reset_boost: bool = False
 
@@ -37,7 +40,7 @@ class RequestChange:
 
     @property
     def empty(self) -> bool:
-        return self.priority is None and self.status is None and self.kind is None
+        return self.priority is None and self.status is None and self.kind is None and self.group is None
 
     def text(self) -> str:
         """「優先度 300・状態 停止」."""
@@ -48,6 +51,8 @@ class RequestChange:
             parts.append(f"状態 {self.status}")
         if self.kind is not None:
             parts.append(f"種別 {self.kind}")
+        if self.group is not None:
+            parts.append(f"依頼グループ {self.group.strip() or 'なし'}")
         return "・".join(parts)
 
 
@@ -64,6 +69,8 @@ def changed(req: ImagingRequest, change: RequestChange) -> Optional[ImagingReque
         values["status"] = change.status
     if change.kind is not None and change.kind != req.kind:
         values["kind"] = change.kind
+    if change.group is not None and change.group.strip() != req.group:
+        values["group"] = change.group.strip()
     return replace(req, **values) if values else None
 
 

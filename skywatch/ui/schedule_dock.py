@@ -6,7 +6,8 @@ it, picked on a calendar, listed and drawn on the map (tsudo, 2026-11-09:
 A day's rows are those of the history table (TBL_REQUEST_HISTORY) for that
 target day: the requests handed out (採用 / 不採用 by the system, or
 不明), those held back (見送り), and the plans the systems made without
-being asked (要求外). Answers come from each system's result file
+being asked (要求外), narrowed by system, state, 依頼グループ (the group the
+history row was written with, else the ledger's) and words. Answers come from each system's result file
 (`requestExports[].resultFile`) or by hand; 要求外 plans from the file or
 by hand. core/request/adoption.py does the matching.
 """
@@ -33,6 +34,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.adoption import (
     NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, unrequested_rows,
 )
+from ..core.request.groups import read_groups
 from ..core.request.model import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
 from ..core.request.store import (
@@ -46,8 +48,10 @@ from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
+from .request_groups import GroupFilter
 
-COLUMNS = ("状態", "名称", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由・メモ")
+COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由・メモ")
+_TAKEN, _NOTE = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ")
 #: Each state's colour, on the list and the map.
 STATE_COLORS = {PLANNED: "#16a34a", UNREQUESTED: "#7c3aed", AWAITING: "#2563eb", DECLINED: "#dc2626", HELD_BACK: "#9ca3af"}
 #: The rows 「計画に入ったもの」 (what will be taken).
@@ -107,6 +111,11 @@ class ScheduleDock(PluginDock):
         self.day: str = ""
         #: The ledger's areas by request id, for a history table without shapes.
         self._areas: dict = {}
+        #: The ledger's 依頼グループ by request id, for rows written without one (before groups, or put in a group since).
+        self._ledger_groups: dict = {}
+        #: The groups of the store's table (core/request/groups.py), and whether it was read.
+        self.groups: list = []
+        self.groups_read = False
         #: The history's 採否 fields it lacks (answers cannot be kept without them).
         self.missing_fields: list = []
         self.task = None
@@ -150,8 +159,9 @@ class ScheduleDock(PluginDock):
             self.state_filter.addItem(s, s)
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
-        self.search.setPlaceholderText(self.tr("名称・番号・依頼者・衛星"))
-        for w in (self.system_filter, self.state_filter):
+        self.search.setPlaceholderText(self.tr("名称・番号・依頼者・グループ・衛星"))
+        self.group_filter = GroupFilter("schedule")
+        for w in (self.system_filter, self.state_filter, self.group_filter):
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(8)
             w.currentIndexChanged.connect(lambda _i: self.render())
@@ -252,6 +262,8 @@ class ScheduleDock(PluginDock):
 
     def _forget(self) -> None:
         self.rows, self.shown, self.chosen, self.day, self._areas, self._month = [], [], None, "", {}, ()
+        self._ledger_groups, self.groups, self.groups_read = {}, [], False
+        self.group_filter.set_groups([], ())
         self._loaded = False
         self.render()
 
@@ -328,20 +340,31 @@ class ScheduleDock(PluginDock):
         store, client, token = self.store, self.context.esri(), self.token()
         day = self.chosen_day().isoformat()
         areas = None if refresh or not self._areas else self._areas
+        ledger_groups = dict(self._ledger_groups) if areas is not None else {}
+        read_table = refresh or not self.groups_read
         self.status.setText(self.tr("{d} の計画を読み込み中…").format(d=day))
 
         def work(task):
             rows = load_day(client, store, token, day, task.isCanceled)
             missing = history_has(client, store, token, ADOPTION_ROLES) if refresh or areas is None else None
-            found = areas
-            if found is None or any(r.request_id and not r.rings and r.request_id not in found for r in rows):
-                # A table without shapes (or rows written before it had them): the ledger's areas.
-                found = {q.id: q.rings for q in load_requests(client, store, token, task.isCanceled)}
-            return rows, missing, found
+            found, groups_of = areas, ledger_groups
+            if (found is None or any(r.request_id and not r.rings and r.request_id not in found for r in rows)
+                    or any(r.request_id and not r.group and r.request_id not in groups_of for r in rows)):
+                # A table without shapes (or rows written before it had them): the ledger's areas. Rows written
+                # without a group: the ledger's group (a request gone from the ledger: none, not asked again).
+                requests = load_requests(client, store, token, task.isCanceled)
+                found = {q.id: q.rings for q in requests}
+                groups_of = {q.id: q.group for q in requests}
+                groups_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in groups_of})
+            groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled) if read_table else None
+            return rows, missing, found, groups_of, groups
 
         def done(result):
-            rows, missing, found = result
-            self.rows, self._areas, self.day = rows, found, day
+            rows, missing, found, groups_of, groups = result
+            self.rows, self._areas, self._ledger_groups, self.day = rows, found, groups_of, day
+            if groups is not None and groups[0] is not None:
+                self.groups, self.groups_read = groups[0], True
+            self.group_filter.set_groups(self.groups, (self.group_of(r) for r in rows))
             if missing is not None:
                 self.missing_fields = missing
             self._loaded = True
@@ -395,9 +418,15 @@ class ScheduleDock(PluginDock):
 
     # --- The list -------------------------------------------------------------------------------
 
+    def group_of(self, row: HistoryRow) -> str:
+        """A row's 依頼グループ: the one it was written with, else the request's in the ledger."""
+        return row.group or self._ledger_groups.get(row.request_id, "")
+
     def _passes(self, row: HistoryRow) -> bool:
         system, state = self.system_filter.currentData(), self.state_filter.currentData()
         if system and row.system != system:
+            return False
+        if not self.group_filter.passes(self.group_of(row)):
             return False
         s = row_state(row)
         if state == "plan" and s not in IN_PLAN:
@@ -406,7 +435,8 @@ class ScheduleDock(PluginDock):
             return False
         words = self.search.text().lower().split()
         if words:
-            text = " ".join((row.name, row.management_no, row.requester, row.satellite, row.request_id, row.external_id)).lower()
+            text = " ".join((row.name, row.management_no, row.requester, self.group_of(row), row.satellite, row.request_id,
+                             row.external_id)).lower()
             if not all(w in text for w in words):
                 return False
         return True
@@ -418,8 +448,8 @@ class ScheduleDock(PluginDock):
         chosen_row = -1
         for i, r in enumerate(self.shown):
             state = row_state(r)
-            items = [QStandardItem(t) for t in (state, r.name or r.external_id or r.request_id, r.management_no, r.system,
-                                                r.satellite, _when(r.planned_at), captured_text(r), r.requester, row_note(r))]
+            items = [QStandardItem(t) for t in (state, r.name or r.external_id or r.request_id, self.group_of(r), r.management_no,
+                                                r.system, r.satellite, _when(r.planned_at), captured_text(r), r.requester, row_note(r))]
             items[0].setForeground(QBrush(QColor(STATE_COLORS[state])))
             source = IMAGE_ARRIVED if r.captured == "撮像済み" and r.result == "採用" and not r.adoption_source else r.adoption_source
             if source:
@@ -427,9 +457,9 @@ class ScheduleDock(PluginDock):
             elif state == AWAITING:
                 items[0].setToolTip(self.tr("システムの採否が分からない（画像が入れば採用になる）"))
             if r.image_id:
-                items[6].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
+                items[_TAKEN].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
             if row_note(r):
-                items[8].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
+                items[_NOTE].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
             self.model.appendRow(items)
             if self.chosen is not None and r.object_id == self.chosen.object_id:
                 chosen_row = i
@@ -661,15 +691,16 @@ class ScheduleDock(PluginDock):
         if not self.shown:
             return None
         layer = QgsVectorLayer("Polygon?crs=EPSG:4326", self.tr("撮像予定 {d}").format(d=self.day), "memory")
-        names = ("状態", "名称", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID", "外部ID", "入力元")
+        names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID", "外部ID",
+                 "入力元")
         provider = layer.dataProvider()
         provider.addAttributes([QgsField(n, QVariant.String) for n in names])
         layer.updateFields()
         features = []
         for r in self.shown:
             f = QgsFeature(layer.fields())
-            f.setAttributes([row_state(r), r.name, r.management_no, r.system, r.satellite, _when(r.planned_at), captured_text(r), r.requester,
-                             row_note(r), r.day, r.request_id, r.external_id, r.adoption_source])
+            f.setAttributes([row_state(r), r.name, self.group_of(r), r.management_no, r.system, r.satellite, _when(r.planned_at),
+                             captured_text(r), r.requester, row_note(r), r.day, r.request_id, r.external_id, r.adoption_source])
             rings = [[tuple(p[:2]) for p in ring] for ring in self.rings_of(r)]
             if rings:
                 # One ring a polygon; more, a polygon each (as the map shows them).

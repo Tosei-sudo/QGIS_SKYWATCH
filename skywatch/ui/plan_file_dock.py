@@ -14,9 +14,10 @@ against its schema), then the history and the raises taken.
 「上限シミュレーション…」 tries other daily limits over the coming days
 without writing anything (limit_sim_dialog.py).
 
-The table can be narrowed to a system, a satellite series, a result and
-words (core/request/view.py): the files of each system are written by
-different people, so the system and series chosen are kept (per user).
+The table can be narrowed to a system, a satellite series, a 依頼グループ, a
+result and words (core/request/view.py): the files of each system are
+written by different people, so the system, series and group chosen are
+kept (per user). The group only narrows what is shown.
 With a system chosen, 「書き出し」 writes that system's file only, with its
 history rows and raises (tsudo, 2026-11-09); the requests another system's
 person wrote earlier that day stay in that system (pinned, counted in the
@@ -44,6 +45,7 @@ from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
 from ..core.request.export import convert_priority, encoded, render, write
 from ..core.request.follow import follow_and_save, found_text
+from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
@@ -60,8 +62,10 @@ from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import column_menus
+from .request_groups import GroupFilter
 
-COLUMNS = ("採用", "システム", "衛星", "依頼", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+COLUMNS = ("採用", "システム", "衛星", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+_RESULT = COLUMNS.index("結果・理由")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
 _NO_SYSTEM_KEPT = "*none*"
 
@@ -92,6 +96,8 @@ class PlanFileDock(PluginDock):
         self._kept_filter = settings.plan_file_filter()
         #: The files last written.
         self.paths: list = []
+        #: The 依頼グループ of the store's table, as last read (core/request/groups.py).
+        self.groups: list = []
         #: The 「計画と実績の照合」 dialog, once opened.
         self.results = None
         self._build()
@@ -136,15 +142,18 @@ class PlanFileDock(PluginDock):
         self.system_filter.setToolTip(self.tr("このシステムの依頼だけを表示（見送りは、そのシステムで撮れるものも）。次回も同じ選択"))
         self.series_filter = QComboBox()
         self.series_filter.setToolTip(self.tr("この衛星シリーズの依頼だけを表示（採用は割り当てた衛星、見送りは撮れる衛星のシリーズ）。次回も同じ選択"))
+        # 依頼グループ: only what is shown (the files are written per system, whoever's the requests are).
+        self.group_filter = GroupFilter("plan_files")
+        self.group_filter.setToolTip(self.tr("依頼グループで絞り込み（表示だけ。書き出しはシステム単位）。次回も同じ選択"))
         self.result_filter = QComboBox()
         for text, value in ((self.tr("すべての結果"), None), (TAKEN, TAKEN), (HELD, HELD), (self.tr("繰り上げ候補"), BOOST)):
             self.result_filter.addItem(text, value)
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
         self.search.setPlaceholderText(self.tr("名称・ID・番号・衛星"))
-        self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
+        self.search.setToolTip(self.tr("名称・依頼ID・管理番号・識別番号・依頼グループ・割り当てた衛星で絞り込み（空白で区切るとすべてを含むもの）"))
         self.search.setMinimumWidth(90)
-        for w in (self.system_filter, self.series_filter, self.result_filter):
+        for w in (self.system_filter, self.series_filter, self.group_filter, self.result_filter):
             # Long system or series names do not widen the dock.
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(8)
@@ -216,6 +225,8 @@ class PlanFileDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.plan = None
+        self.groups = []
+        self.group_filter.set_groups([], ())
         self._fill_systems()
         self._fill_series()
         if self.results is not None:
@@ -228,6 +239,8 @@ class PlanFileDock(PluginDock):
         stores = self.context.config.request_stores
         self.store = stores[index] if 0 <= index < len(stores) else None
         self.plan = None
+        self.groups = []
+        self.group_filter.set_groups([], ())
         self.render()
 
     # --- Filters --------------------------------------------------------------------------------
@@ -274,7 +287,8 @@ class PlanFileDock(PluginDock):
     def candidate_filter(self) -> CandidateFilter:
         """The filters as chosen."""
         return CandidateFilter(system=self.system_filter.currentData(), series=self.series_filter.currentData(),
-                               result=self.result_filter.currentData(), text=self.search.text())
+                               result=self.result_filter.currentData(), text=self.search.text(),
+                               group=self.group_filter.value(), mine=self.group_filter.my)
 
     def _filter_changed(self, _index: int = 0) -> None:
         system, series = self.system_filter.currentData(), self.series_filter.currentData()
@@ -359,6 +373,9 @@ class PlanFileDock(PluginDock):
         def work(task):
             notes = []
             requests = load_requests(client, store, token, task.isCanceled)
+            groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            if note:
+                notes.append(note)
             # Only the rows still to be followed up or raised for, not the whole (ever growing) table.
             history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
                        if store.history else [])
@@ -387,11 +404,14 @@ class PlanFileDock(PluginDock):
                     notes.append(f"雲量予報の取得失敗（{error}）")
             elif places:
                 notes.append("雲量予報なし（cloudForecast: false）")
-            return requests, history, forecasts, notes
+            return requests, history, forecasts, notes, groups
 
         def done(result):
             self.task = None
-            requests, history, forecasts, notes = result
+            requests, history, forecasts, notes, groups = result
+            if groups is not None:
+                self.groups = groups
+            self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             clouds = clouds_of(requests, day, forecasts)
             self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target())
@@ -442,12 +462,12 @@ class PlanFileDock(PluginDock):
                 boost.setCheckState(Qt.CheckState.Checked if c.boost_taken else Qt.CheckState.Unchecked)
                 boost.setToolTip(self.tr("チェックで優先度を 100 繰り上げ（書き出しのときに台帳へ保存）"))
             items = [take, *(QStandardItem(t) for t in (
-                c.system.label if c.system else "", satellite_name(c), r.name, r.category, prio, cloud,
+                c.system.label if c.system else "", satellite_name(c), r.name, r.group, r.category, prio, cloud,
                 str(c.scenes) if c.result == TAKEN else "", (c.result + ("：" + note if note else "")))), boost]
             color = QColor("#16a34a" if c.result == TAKEN else "#6b7280")
-            items[8].setForeground(QBrush(color))
+            items[_RESULT].setForeground(QBrush(color))
             if c.warnings:
-                items[8].setForeground(QBrush(QColor("#b45309")))
+                items[_RESULT].setForeground(QBrush(QColor("#b45309")))
             self.model.appendRow(items)
         self._rendering = False
         rooms = room_text(plan.candidates, plan.systems) if plan else {}

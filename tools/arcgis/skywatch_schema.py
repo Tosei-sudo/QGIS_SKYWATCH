@@ -101,6 +101,7 @@ TABLES = (
         F("REQ_NAME", "名称", "TEXT", 255, "name"),
         F("MANAGEMENT_NO", "管理番号", "TEXT", 255, "managementNo"),
         F("IDENTIFICATION_NO", "識別番号", "TEXT", 255, "identificationNo"),
+        F("REQUEST_GROUP", "依頼グループ", "TEXT", 255, "group"),
         F("CATEGORY", "区分", "TEXT", 16, "category"),
         F("ACHIEVE", "達成条件", "TEXT", 16, "achieve"),
         F("START_AT", "開始", "DATE", None, "start"),
@@ -138,6 +139,7 @@ TABLES = (
         F("REQ_NAME", "名称", "TEXT", 255, "name"),
         F("MANAGEMENT_NO", "管理番号", "TEXT", 255, "managementNo"),
         F("REQUESTER", "依頼者", "TEXT", 255, "requester"),
+        F("REQUEST_GROUP", "依頼グループ", "TEXT", 255, "group"),
         F("SYSTEM", "システム", "TEXT", 255, "system"),
         F("SATELLITE", "衛星", "TEXT", 255, "satellite"),
         F("PRIORITY_OUT", "出力優先度", "TEXT", 64, "priority"),
@@ -310,6 +312,14 @@ TABLES = (
         F("COUNTRY_NAME_EN", "国名（英語）", "TEXT", 255, "nameEn"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
     )),
+    # 一覧の最後に足した（既に公開したサービスのレイヤー番号を変えないため）。
+    Table("TBL_REQUEST_GROUP", "依頼グループ", None, writable=False, setting="requestStores[].groups", fields=(
+        F("GROUP_NAME", "グループ名", "TEXT", 255, "name"),
+        F("MEMBERS", "メンバー", "TEXT", 4000, "users"),
+        F("SORT_ORDER", "表示順", "LONG", None, "order"),
+        F("ACTIVE", "有効", "SHORT", None, "active"),
+        F("NOTE", "メモ", "TEXT", 1000, "note"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -389,6 +399,8 @@ def plugin_config(urls: dict) -> dict:
         store = {"url": urls["TBL_IMAGING_REQUEST"]}
         if has("TBL_REQUEST_HISTORY"):
             store["history"] = urls["TBL_REQUEST_HISTORY"]
+        if has("TBL_REQUEST_GROUP"):
+            store["groups"] = urls["TBL_REQUEST_GROUP"]
         config["requestStores"] = [store]
     if has("TBL_OBSERVATION"):
         store = {"url": urls["TBL_OBSERVATION"]}

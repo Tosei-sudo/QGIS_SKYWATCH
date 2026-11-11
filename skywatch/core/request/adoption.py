@@ -186,7 +186,7 @@ def unrequested_rows(reading: Reading, now: float, run_id: Optional[str] = None)
             satellite=a.satellite, result=UNREQUESTED, reason=NOT_HANDED if req else "", captured="",
             name=(a.name or (req.name if req else "") or a.external_id or a.key),
             management_no=req.management_no if req else a.keys.get("managementNo", ""),
-            requester=req.requester if req else "", adoption=ADOPTED, adoption_reason=a.reason, planned_at=a.planned_at,
+            requester=req.requester if req else "", group=req.group if req else "", adoption=ADOPTED, adoption_reason=a.reason, planned_at=a.planned_at,
             external_id=a.external_id or a.key, adoption_source=reading.source,
             rings=a.rings or ([[list(p[:2]) for p in r] for r in req.rings] if req else [])))
     return out

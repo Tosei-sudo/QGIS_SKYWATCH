@@ -319,6 +319,9 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - 優先度は 5 段階（最優先〜最低）から選ぶ。「詳細」で 1〜1000 を直接指定（1 ほど高い）
 - 条件: 種別（光学・SAR）、衛星シリーズ、衛星、センサー・モード、オフナディア角・入射角の範囲、観測方向、軌道方向、分解能、時間帯、実施しない雲量、優先するシステム。空欄は問わない
 - 管理番号・識別番号（別々の項目、任意の文字）を入力でき、システム向けファイルの項目 `managementNo`・`identificationNo` として出せる。依頼の一覧にも列として出る
+- 依頼グループ（だれの依頼か）を選べる（2026-11-11。件数が増えると自分の依頼が分からなくなるため）。グループは Esri のテーブル [`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ)（`requestStores[].groups`）で管理し、入力画面ではテーブルの有効なグループから選ぶ（テーブルがなければ自由に入力）。新しい依頼は前回保存したグループ（使われなくなっていれば、自分がメンバーのグループ）から始まる。「一括編集…」でもまとめて変えられる。システム向けファイルの項目 `group` としても出せる
+  - 「撮像依頼」「撮像計画ファイル出力」「撮像予定」ドックの一覧を依頼グループで絞り込める（すべてのグループ・自分のグループ・各グループ・グループなし。ドックごとに次回も同じ選択）。自分のグループは、テーブルの `MEMBERS` に自分のユーザー名（環境変数 `USERNAME`。`editTracking.user` があればそれ）があるグループ。撮像計画ファイル出力の絞り込みは表示だけ（書き出しはシステム単位のまま）
+  - 出力履歴にも書き出したときのグループ（`REQUEST_GROUP`）を残すので、撮像予定ドックと ArcGIS Enterprise のダッシュボードもグループで絞れる（[docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。グループのない前からの行は、撮像予定ドックでは台帳の今のグループで絞る
   - 衛星シリーズ・衛星・センサーモードは撮像計画と同じ階層選択（種別 → シリーズ → 衛星 → モード、撮像モードのまとめ選択と絞り込み）で選ぶ。チェックなしは衛星を問わない。シリーズ全体のチェックは衛星シリーズ、一部なら衛星（台帳にあった順、続けて新しくチェックした順に優先）、衛星のモードの一部だけならセンサーモードとして保存。保存する条件はツリーの下に表示
   - 台帳の名前（別名 `satelliteAliases` を含む）はチェックとして表示し、触らなければそのまま保存。衛星カタログにない名前もそのまま残る。「手入力」で名前を直接入力（衛星カタログを読めないときは手入力のみ）
 - 範囲は地図で矩形・点（一辺の長さ指定）、または選択中の地物から
@@ -1389,7 +1392,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `satelliteAliases` | オブジェクトか配列 | 衛星名の対応表（Esri のテーブル）の `url`（必須）、`fields`（`satellite` 衛星カタログの名前か ID・`alias` 画像カタログでの名前、ともに必須）、`label`・`where`・`token` | なし（名前の英数字の部分一致のみ） | [衛星名の対応表](#衛星名の対応表satellitealiases) |
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
-| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 | `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`priority`・`columns`・`folder`・`fileName`・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
@@ -1516,6 +1519,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | [`TBL_DETECTION`](#tbl_detection検出結果の転記先) | ポリゴンかポイント | 書き込み | プラグインの物体検出の転記先（「AI結果」でも読む） | `detectionOutputs[].url` |
 | [`TBL_PLACE_NAME`](#tbl_place_name地名検索) | ポイント（何でも可） | 読み | 地名検索（閉域） | `geocoders[]`（`type: "features"`） |
 | [`TBL_COUNTRY`](#tbl_country国) | ポリゴン | 読み | 国（通報の国コード・国名） | `alertReports.countries` |
+| [`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ) | なし | 読み | 撮像依頼の依頼グループとメンバー（2026-11-11 に追加。レイヤー番号を変えないよう一覧の最後） | `requestStores[].groups` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -1602,6 +1606,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `REQ_NAME` | 名称 | `String(255)` | 依頼の名前 | `name` |
 | `MANAGEMENT_NO` | 管理番号 | `String(255)` | 依頼の管理番号（文字列。システム向けファイルの項目 `managementNo`） | `managementNo` |
 | `IDENTIFICATION_NO` | 識別番号 | `String(255)` | 依頼の識別番号（文字列。項目 `identificationNo`） | `identificationNo` |
+| `REQUEST_GROUP` | 依頼グループ | `String(255)` | 依頼グループの名前（[`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ) の `GROUP_NAME`。空はグループなし。項目 `group`） | `group` |
 | `CATEGORY` | 区分 | `String(16)` | `定点`・`臨時` | `category` |
 | `ACHIEVE` | 達成条件 | `String(16)` | `毎回`・`期間内1回` | `achieve` |
 | `START_AT` | 開始 | `Date` | 期間の始まり | `start` |
@@ -1644,6 +1649,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `REQ_NAME` | 名称 | `String(255)` | 出力したときの依頼の名称（要求外は計画の名称） | `name` |
 | `MANAGEMENT_NO` | 管理番号 | `String(255)` | 出力したときの管理番号 | `managementNo` |
 | `REQUESTER` | 依頼者 | `String(255)` | 出力したときの依頼者 | `requester` |
+| `REQUEST_GROUP` | 依頼グループ | `String(255)` | 出力したときの依頼グループ（ダッシュボード・撮像予定ドックの絞り込み用。要求外は名前の依頼のグループ） | `group` |
 | `SYSTEM` | システム | `String(255)` | 出力した衛星システム（見送りは空。システムごとに書き出したときは、そのシステム） | `system` |
 | `SATELLITE` | 衛星 | `String(255)` | 割り当てた衛星 | `satellite` |
 | `PRIORITY_OUT` | 出力優先度 | `String(64)` | システムに渡した優先度（`High` など） | `priority` |
@@ -1891,6 +1897,20 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `COUNTRY_NAME_EN` | 国名（英語） | `String(255)` | 英語の国名（通報の `countryName.en`。なくてもよい） | `nameEn` |
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
 
+### `TBL_REQUEST_GROUP`（依頼グループ）
+
+撮像依頼の依頼グループ（だれの依頼か）の一覧。1 行 1 グループ。グループは人や業務とともに変わるので、設定ファイルではなくこのテーブルに置く（設定ファイルにはテーブルの URL `requestStores[].groups` だけ。属性名が違えば `requestStores[].groupFields` で合わせる）。プラグインは読むだけで、行の追加・変更は ArcGIS Pro か Portal で行う。テーブルを読めないときは、依頼に付いているグループで絞り込める（入力は自由入力になる）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `GROUP_NAME` | グループ名 | `String(255)` | グループの名前。台帳・出力履歴の `REQUEST_GROUP` にこの名前が入る（大文字・小文字と前後の空白は区別しない）。**必須** | `name` |
+| `MEMBERS` | メンバー | `String(4000)` | メンバーのユーザー名（環境変数 `USERNAME` と同じ。`editTracking.user` を使っていればその名前）。カンマ・読点・空白・改行で区切る。「自分のグループ」の絞り込みと、新しい依頼の最初のグループに使う | `users` |
+| `SORT_ORDER` | 表示順 | `Integer` | 一覧に出す順（小さいほど先。空は後ろで名前順） | `order` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 なら新しい依頼には選べない（そのグループの依頼は絞り込みで「（使用停止）」として残る）。空・1 は使う | `active` |
+| `NOTE` | メモ | `String(1000)` | グループの説明（絞り込みの吹き出し） | `note` |
+
+グループの名前を変えるときは、台帳の `REQUEST_GROUP` も同じ名前に直す（「撮像依頼」ドックで古いグループで絞り込み、全件を選んで「一括編集…」）。出力履歴の過去の行は書き出したときの名前のまま。
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -1920,7 +1940,8 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
                         "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },
   "requestStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/4",                         // TBL_IMAGING_REQUEST
-      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5" }                    // TBL_REQUEST_HISTORY
+      "history": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/5",                     // TBL_REQUEST_HISTORY
+      "groups": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/21" }                    // TBL_REQUEST_GROUP
   ],
   "observationStores": [
     { "url": "https://gis.example/arcgis/rest/services/SKYWATCH/FeatureServer/6",                         // TBL_OBSERVATION

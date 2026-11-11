@@ -243,6 +243,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "name": "REQ_NAME",
    "managementNo": "MANAGEMENT_NO",
    "identificationNo": "IDENTIFICATION_NO",
+   "group": "REQUEST_GROUP",
    "category": "CATEGORY",
    "achieve": "ACHIEVE",
    "start": "START_AT",
@@ -280,6 +281,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "name": "REQ_NAME",
    "managementNo": "MANAGEMENT_NO",
    "requester": "REQUESTER",
+   "group": "REQUEST_GROUP",
    "system": "SYSTEM",
    "satellite": "SATELLITE",
    "priority": "PRIORITY_OUT",
@@ -296,6 +298,13 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "plannedAt": "PLANNED_AT",
    "externalId": "EXTERNAL_ID",
    "adoptionSource": "ADOPTION_SOURCE"
+  },
+  "requestGroups": {
+   "name": "GROUP_NAME",
+   "users": "MEMBERS",
+   "order": "SORT_ORDER",
+   "active": "ACTIVE",
+   "note": "NOTE"
   },
   "observationStores": {
    "id": "OBS_ID",
@@ -682,6 +691,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "bboxEast",
   "bboxNorth",
   "requester",
+  "group",
   "note",
   "system",
   "runDate",
@@ -923,7 +933,7 @@ const ROLE_LABELS = {
   target: "目標", offNadir: "オフナディア角", incidence: "入射角", pass: "軌道方向", side: "観測方向", status: "状態",
   imageId: "画像 ID", created: "作成日時", updated: "更新日時", category: "区分", achieve: "達成条件", start: "開始",
   end: "終了", repeat: "繰り返し", priority: "優先度", boost: "繰り上げ量", satellites: "衛星", modes: "センサーモード",
-  managementNo: "管理番号", identificationNo: "識別番号",
+  managementNo: "管理番号", identificationNo: "識別番号", group: "依頼グループ", users: "メンバー（ユーザー名）", active: "有効（0 で使わない）",
   offNadirMin: "オフナディア角下限", offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限",
   orbitDir: "軌道方向", timeOfDay: "時間帯", cloudNoGo: "実施しない雲量", systems: "優先システム", shapeKind: "範囲の種類",
   requester: "依頼者", note: "備考", runId: "出力 ID", runDate: "出力日時", day: "対象日", requestId: "依頼 ID",
@@ -946,7 +956,7 @@ const SOURCE_LABELS = {
   offNadirMax: "オフナディア角上限", incidenceMin: "入射角下限", incidenceMax: "入射角上限", lookSide: "観測方向", orbitDir: "軌道方向",
   resolution: "分解能", timeOfDay: "時間帯", cloudMax: "実施しない雲量", cloudForecast: "雲量予報（%）", weatherFlag: "気象の注意",
   scenes: "シーン数", geometry: "範囲（座標）", centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "範囲の西端",
-  bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", note: "メモ",
+  bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", group: "依頼グループ", note: "メモ",
   system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
@@ -1292,7 +1302,9 @@ const SPEC = [
         { allowFalse: "出さない（false）", check: (o, at, p) => { const n = ["url", "file", "folder"].filter((k) => o[k]).length; if (n > 1) p.push(`${at}: url・file・folder は 1 つだけ`); } }) },
     { key: "requestStores", label: "撮像依頼台帳", doc: "", ext: "docs/imaging-requests.md", help: "撮像依頼（定点・臨時）の台帳と出力履歴のテーブル。属性名は書かなければ既定名。",
       field: I("requestStores", "台帳", [LABEL, URL_("依頼台帳のレイヤー"), T("history", "出力履歴のテーブル", { ph: "https://…/FeatureServer/1" }),
-        R("fields", "台帳の属性名", K.roles.requestStores), R("historyFields", "履歴の属性名", K.roles.requestHistory), CATALOG,
+        R("fields", "台帳の属性名", K.roles.requestStores), R("historyFields", "履歴の属性名", K.roles.requestHistory),
+        T("groups", "依頼グループのテーブル", { ph: "https://…/FeatureServer/21", help: "TBL_REQUEST_GROUP。グループ名とメンバー（ユーザー名）。グループは Esri のテーブルで管理し、ここには URL だけ" }),
+        R("groupFields", "依頼グループの属性名", K.roles.requestGroups), CATALOG,
         N("missAfterDays", "未撮像とする日数"), TOKEN]) },
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [
@@ -2132,12 +2144,12 @@ const SAMPLE_REQS = [
     repeat: "毎日", priorityRaw: 120, priorityBase: 2, boost: 0, kind: "光学", series: ["OPT-X"], satellites: [], modes: [],
     seriesSatellites: ["OPT-X1", "OPT-X2"], seriesSatelliteIds: ["40001", "40002"], satellite: "OPT-X1", satelliteId: "40001", mode: "", sensor: "PAN",
     offNadirMin: null, offNadirMax: 25, incidenceMin: null, incidenceMax: null, lookSide: "任意", orbitDir: "任意", resolution: 1, timeOfDay: "", cloudMax: 60, cloudForecast: 20, weatherFlag: "",
-    scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", note: "", warnings: "" },
+    scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", group: "第1班", note: "", warnings: "" },
   { id: "R-0002", name: "臨時 舞鶴", managementNo: "", identificationNo: "", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
     repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: [], satellites: ["SAR-Y2"], modes: ["Spotlight"],
     seriesSatellites: [], seriesSatelliteIds: [], satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
     offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
-    scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", note: "至急", warnings: "シーン数が多い" },
+    scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", group: "", note: "至急", warnings: "シーン数が多い" },
 ];
 const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate"];
 
