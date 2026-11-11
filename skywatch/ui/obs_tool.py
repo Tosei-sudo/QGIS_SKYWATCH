@@ -64,8 +64,9 @@ class ObservationTool(QgsMapTool):
         return to_wgs84(self.canvas().mapSettings().destinationCrs()).transform(event.mapPoint())
 
     def _hit(self, x: float, y: float) -> Optional[Mark]:
-        # A record or carried-over thing first, then what is being put down (its places).
-        return self.overlay.hit(x, y) or self.overlay.hit(x, y, ("slot",))
+        # A record or carried-over thing first, then what is being put down (its places; not the corners'
+        # marks over the first and last of a row, nor the one following the pointer while 連続).
+        return self.overlay.hit(x, y) or self.overlay.hit(x, y, ("slot",), keyed=True)
 
     def _stamps(self) -> bool:
         return self._stamping is not None and self._stamping()
