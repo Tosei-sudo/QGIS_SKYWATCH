@@ -58,7 +58,9 @@ def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[s
         with open(path, "w", encoding=encoding, newline=newline) as f:
             f.write(text)
     except OSError as error:
-        return error.strerror or str(error)
+        reason = error.strerror or str(error)
+        audit.error("file-save", path, reason, detail={"what": what})
+        return reason
     audit.record("export", what, path, count=count, file=path)
     return None
 

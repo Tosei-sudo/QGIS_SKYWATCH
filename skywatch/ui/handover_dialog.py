@@ -428,6 +428,8 @@ class HandoverDialog(QDialog):
                     said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=s.file.encoding))
             except (OSError, ValueError) as error:
                 said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
+                audit.error("file-save", getattr(error, "filename", None) or "", str(getattr(error, "strerror", None) or error),
+                            detail={"what": "handover-memo"})
         if s.table is None:
             self._say("・".join(said))
             return
