@@ -304,7 +304,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "adoptionSource": "ADOPTION_SOURCE",
    "mergedInto": "MERGED_INTO",
    "shotId": "SHOT_ID",
-   "occurrence": "OCCURRENCE"
+   "occurrence": "OCCURRENCE",
+   "linkId": "LINK_ID"
   },
   "requestGroups": {
    "name": "GROUP_NAME",
@@ -772,7 +773,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "occurrence",
   "occurrenceId",
   "timesMin",
-  "timesMax"
+  "timesMax",
+  "linkId"
  ],
  "exportListSources": [
   "series",
@@ -800,6 +802,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "id",
   "managementNo",
   "identificationNo",
+  "linkId",
   "result",
   "reason",
   "plannedAt",
@@ -820,6 +823,22 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "id",
   "managementNo",
   "identificationNo"
+ ],
+ "resultMatchKeys": [
+  "linkId",
+  "id",
+  "managementNo",
+  "identificationNo"
+ ],
+ "linkIdChars": {
+  "base32": "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
+  "digits": "0123456789",
+  "hex": "0123456789ABCDEF"
+ },
+ "linkIdLength": [
+  6,
+  32,
+  12
  ],
  "resultGeometries": [
   "wkt",
@@ -1060,6 +1079,7 @@ const SOURCE_LABELS = {
   mergedIds: "まとめた依頼の ID（配列・自分を含む）", mergedNames: "まとめた依頼の名称（配列）", mergedCount: "まとめた依頼の件数（まとめていなければ 1）",
   occurrence: "その日の何回目か（1 日の回数。1 回の依頼は 1）", occurrenceId: "回つきの依頼 ID（R-0001-2。1 回の依頼は ID のまま）",
   timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限",
+  linkId: "外部連携ID（出力の行の短い ID。結果ファイルの linkId で照合）",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
   centerGeojson: "中央の GeoJSON（Point）" };
@@ -1074,7 +1094,8 @@ const OBS_SOURCE_LABELS = {
 };
 const OBS_GEOMETRY_LABELS = { geojson: "GeoJSON の Point", wkt: "WKT の POINT", latlon: "緯度,経度" };
 const RESULT_LABELS = {
-  id: "依頼 ID", managementNo: "管理番号", identificationNo: "識別番号", result: "採否（採用・不採用・不明）", reason: "理由・メモ",
+  id: "依頼 ID", managementNo: "管理番号", identificationNo: "識別番号", linkId: "外部連携ID（オーダーの linkId。まずこれで出力の行を探す）",
+  result: "採否（採用・不採用・不明）", reason: "理由・メモ",
   plannedAt: "撮像予定日時", satellite: "衛星", name: "名称（要求外）", externalId: "システム側の番号", geometry: "範囲（要求外）",
   centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "西端の経度", bboxSouth: "南端の緯度", bboxEast: "東端の経度", bboxNorth: "北端の緯度",
   day: "対象日（違う日の行は読まない）", system: "システム（ほかのシステムの行は読まない）",
@@ -1109,10 +1130,10 @@ const PROFILES = {
     sources: () => K.resultTargets, labels: RESULT_LABELS, geometries: () => K.resultGeometries, geometryLabels: RESULT_GEOMETRY_LABELS,
     array: "records", arrayLabel: "records（結果の一覧）", fileSources: ["day", "system", "satellite", "result", "reason", "plannedAt", "records"],
     timeSources: ["plannedAt", "day"], digitSources: [],
-    common: ["id", "result", "reason", "plannedAt", "satellite", "externalId"],
+    common: ["id", "linkId", "result", "reason", "plannedAt", "satellite", "externalId"],
     legend: "列（columns）。見出しのある CSV は見出しの名前、見出しのない CSV は上から順に左の列（何列目かも書ける）、JSON（スキーマなし）は記録の中の場所（request.id のようにドット区切り）",
     note: "システムの JSON Schema に、各プロパティが何か（x-target）を書き添える。x-target が records の配列が結果の一覧で、その items の中は結果 1 件ごとの値。外のプロパティ（対象日・システムなど）は全件に効く。ファイルはこのスキーマで検証もする。",
-    inside: "依頼を表す値（id・管理番号・識別番号）は x-target: records の配列の items の中に置く", name: (o) => (systemOfResult(o).system || "system") + ".result",
+    inside: "依頼を表す値（id・管理番号・識別番号・外部連携ID）は x-target: records の配列の items の中に置く", name: (o) => (systemOfResult(o).system || "system") + ".result",
     template: () => resultSchemaTemplate(), allowed: false, listSources: () => [], defaults: true,
   },
 };
@@ -1349,6 +1370,7 @@ const RESULT_FILE = O("resultFile", "採否の結果ファイル", [
   T("records", "結果の配列の場所（records）", { ph: "data.results", showIf: (it) => it.format === "json" && it.schema === undefined, help: "ドット区切り。空ならファイルそのものが配列" }),
   S("missing", "出したのにファイルにない依頼", [["不採用", "不採用"], ["不明", "不明（そのまま）"]], { ph: "採否の列があれば 不明、なければ 不採用" }),
   N("sizeKm", "点のときの範囲の一辺（km）", { ph: "10", help: "要求外の行が点（中心）だけのとき、この大きさの正方形にする" }),
+  N("linkDays", "外部連携ID を探す日数", { min: 0, max: 60, ph: "7", help: "linkId の列の ID を、取り込む日とその何日前（と翌日）までの出力の行から探すか。近い日の行を使う（前の日に出した依頼への答えはその日の行に付く）" }),
   { k: "", t: "resultLegacy", l: "はじめの形" },
   { k: "columns", t: "columns", l: "列", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && ((it.format || "csv") === "csv" || it.schema === undefined) },
   { k: "schema", t: "schema", l: "JSON Schema", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && it.format === "json" },
@@ -1445,6 +1467,8 @@ const SPEC = [
         S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
         T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}。分けるときの番号 {part}・{part:%02d}・{parts}（ファイルの数）" }),
         N("maxPerFile", "1 ファイルの最大件数", { min: 1, ph: "上限なし", help: "これより多い日は、この件数ずつのファイルに分けて書き出す（優先度順）。ファイル名に {part} がなければ _1・_2 … を拡張子の前に付ける（1 ファイルで収まる日は付けない）" }),
+        N("linkIdLength", "外部連携ID の文字数", { min: K.linkIdLength[0], max: K.linkIdLength[1], ph: String(K.linkIdLength[2]), help: "項目 linkId（出力の行の短い ID。出力履歴の LINK_ID）の文字数。名前・ID の欄に UUID（36 文字）が入らないシステム向け。依頼・対象日・システム・その日の回から決まるので、書き出し直しても同じ" }),
+        S("linkIdChars", "外部連携ID の文字", [["base32", "数字と英大文字（I・L・O・U なし）"], ["digits", "数字だけ"], ["hex", "16 進（0-9・A-F）"]], { ph: "base32" }),
         S("encoding", "文字コード", K.encodings, { ph: "utf-8" }), B("header", "見出し行（CSV）", { showIf: (it) => (it.format || "csv") === "csv" }),
         T("timeZone", "出力のタイムゾーン", { ph: "UTC・Asia/Tokyo・+09:00" }),
         T("dateFormat", "日時の書式", { ph: "iso", list: () => DATE_FORMATS, help: "iso・iso-date・unix・unixms か strftime（%Y%m%d など）" }),
@@ -2046,7 +2070,7 @@ function columnsField(f, obj, commit) {
       for (const s of prof.common) if (!cols.some((c) => c && c[sk] === s)) cols.push(s === "geometry" ? { key: "AOI", [sk]: s, geometry: "wkt", ...(reading ? {} : { digits: 5 }) } : { key: s.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase(), [sk]: s });
       save(); render();
     } })));
-  if (reading) box.append(el("small", { class: "note", text: "同じ値（target）の列が 2 つ以上あれば空白でつなぐ（日付と時刻の列 → plannedAt を 2 つ、書式 %Y%m%d %H%M）。依頼を表す列（id・managementNo・identificationNo）は 1 つ以上、複数あれば id から順に台帳を引く。数の番号は先頭の 0 を問わない（000123 = 123）" }));
+  if (reading) box.append(el("small", { class: "note", text: "同じ値（target）の列が 2 つ以上あれば空白でつなぐ（日付と時刻の列 → plannedAt を 2 つ、書式 %Y%m%d %H%M）。依頼を表す列（id・managementNo・identificationNo か linkId）は 1 つ以上、複数あれば id から順に台帳を引く（linkId があればまずその ID の出力の行）。数の番号は先頭の 0 を問わない（000123 = 123）" }));
   return box;
 }
 
@@ -2404,6 +2428,44 @@ function geometryValue(ring, kind, d, asObject) {
   if (kind === "vertices") return r.map((p) => `${p[1]},${p[0]}`).join(",");
   return "POLYGON ((" + r.map((p) => `${p[0].toFixed(d)} ${p[1].toFixed(d)}`).join(", ") + "))";
 }
+/** SHA-256（外部連携ID の見本用。プラグインの core/request/link_id.py と同じ値を出す）。 */
+const SHA_K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+const SHA_H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+function sha256Words(text) {
+  const bytes = Array.from(new TextEncoder().encode(text));
+  const bits = bytes.length * 8, hi = Math.floor(bits / 0x100000000), lo = bits >>> 0;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) bytes.push(0);
+  bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+  const h = SHA_H.slice(), w = new Array(64);
+  for (let off = 0; off < bytes.length; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = ((bytes[off + 4 * i] << 24) | (bytes[off + 4 * i + 1] << 16) | (bytes[off + 4 * i + 2] << 8) | bytes[off + 4 * i + 3]) >>> 0;
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, k] = h;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (k + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) >>> 0;
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      k = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    [a, b, c, d, e, f, g, k].forEach((v, i) => { h[i] = (h[i] + v) >>> 0; });
+  }
+  return h;
+}
+/** 外部連携ID（link_id.link_id と同じ: 依頼 ID・対象日・システム・その日の回の SHA-256 を、その文字で何文字か）。 */
+function linkIdOf(requestId, day, system, occurrence, length, chars) {
+  const alphabet = K.linkIdChars[chars] || K.linkIdChars.base32;
+  const [low, high, fallback] = K.linkIdLength;
+  const len = Number.isInteger(length) ? Math.min(Math.max(length, low), high) : fallback;
+  let n = sha256Words([requestId, day, system, String(Math.max(1, occurrence || 1))].join("\x1f")).reduce((acc, x) => (acc << 32n) | BigInt(x), 0n);
+  const base = BigInt(alphabet.length);
+  let out = "";
+  for (let i = 0; i < len; i++) { out += alphabet[Number(n % base)]; n /= base; }
+  return out;
+}
 const MISSING = Symbol("missing");
 function rawValue(req, source, sys, n, geometry, digits, asObject) {
   const d = typeof digits === "number" ? digits : typeof sys.digits === "number" ? sys.digits : 6;
@@ -2416,6 +2478,7 @@ function rawValue(req, source, sys, n, geometry, digits, asObject) {
   if (!req) return MISSING;
   if (source === "geometry") return geometryValue(req.ring, K.geometries.includes(geometry) ? geometry : "wkt", d, asObject);
   if (source === "priority") return convertPriority(req.priorityRaw, sys.priority);
+  if (source === "linkId") return linkIdOf(req.id, "2026-11-08", sys.system || "", req.occurrence, sys.linkIdLength, sys.linkIdChars);
   const xs = req.ring.map((p) => p[0]), ys = req.ring.map((p) => p[1]);
   const box = { bboxWest: Math.min(...xs), bboxSouth: Math.min(...ys), bboxEast: Math.max(...xs), bboxNorth: Math.max(...ys) };
   if (source in box) return round(box[source], d);
@@ -2655,6 +2718,7 @@ function checkExport(it, at, p) {
   if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"requests"')) p.push({ warn: true, text: `${at}: スキーマに x-source: requests の配列がない（依頼が出ない）` });
   if (it.kind !== undefined && !["光学", "SAR", "両方"].includes(it.kind)) p.push(`${at}: kind は 光学・SAR・両方`);
   if (it.maxPerFile !== undefined && !(Number.isInteger(it.maxPerFile) && it.maxPerFile >= 1)) p.push(`${at}: maxPerFile は 1 以上の整数`);
+  if (typeof it.linkIdLength === "number" && !Number.isInteger(it.linkIdLength)) p.push(`${at}: linkIdLength は整数（外部連携ID の文字数）`);
   if (it.timeZone && zoneOffset(it.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(it.timeZone) && !isIana(it.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${it.timeZone}」をこのブラウザで確かめられない` });
 }
 function isIana(z) { try { new Intl.DateTimeFormat("en-US", { timeZone: z }); return true; } catch (e) { return false; } }
@@ -2696,7 +2760,7 @@ function legacyResultColumns(rf) {
   const name = (v) => (typeof v === "string" ? v.trim() : "");
   const key = name(rf.key);
   if (!key) return [];
-  const cols = [{ key, target: K.resultKeySources.includes(rf.keySource) ? rf.keySource : "id" }];
+  const cols = [{ key, target: K.resultMatchKeys.includes(rf.keySource) ? rf.keySource : "id" }];
   if (name(rf.result)) {
     const vals = (v, d) => {
       const w = (Array.isArray(v) ? v : [v]).filter((x) => ["string", "number"].includes(typeof x) && rfText(x)).map(rfWord);
@@ -2756,17 +2820,18 @@ function checkResultFile(rf, at, p) {
   const fmt = rf.format || "csv";
   if (isLegacyResult(rf)) { if (!rf.key) p.push(`${at}: key（依頼を表す列）がない`); return; }
   if (rf.schema !== undefined && fmt !== "json") p.push(`${at}.schema: 形式が JSON のときだけ`);
-  const keyTargets = K.resultKeySources;
+  const keyTargets = K.resultMatchKeys;
+  if (typeof rf.linkDays === "number" && !Number.isInteger(rf.linkDays)) p.push(`${at}.linkDays: 整数（日）`);
   if (fmt === "json" && isObj(rf.schema)) {
     const nodes = rfSchemaNodes(rf.schema, rf.schema);
     if (!nodes.some((c) => c.target === "records")) p.push(`${at}.schema: x-target が records の配列（結果の一覧）がない`);
-    if (!nodes.some((c) => keyTargets.includes(c.target))) p.push(`${at}.schema: 依頼を表すプロパティ（x-target が id・managementNo・identificationNo）がない`);
+    if (!nodes.some((c) => keyTargets.includes(c.target))) p.push(`${at}.schema: 依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）がない`);
     for (const c of nodes) if (c.target !== "records" && !K.resultTargets.includes(c.target)) p.push(`${at}.schema: x-target「${c.target}」は使えない`);
     return;
   }
   if (fmt === "json" && typeof rf.schema === "string") return;
   const cols = Array.isArray(rf.columns) ? rf.columns : [];
-  if (!cols.some((c) => isObj(c) && keyTargets.includes(c.target))) p.push(`${at}.columns: 依頼を表す列（target が id・managementNo・identificationNo）がない`);
+  if (!cols.some((c) => isObj(c) && keyTargets.includes(c.target))) p.push(`${at}.columns: 依頼を表す列（target が id・managementNo・identificationNo・linkId）がない`);
   cols.forEach((c, i) => {
     const a = `${at}.columns[${i}]`;
     if (!isObj(c)) { p.push(`${a}: オブジェクトで指定`); return; }
@@ -3023,7 +3088,7 @@ function readResultText(text, rf, sys) {
     const first = (t) => (g[t] ? g[t][0][1] : undefined);
     const joined = (t) => { const f = g[t] || []; return [f.length === 1 ? f[0][1] : f.map(([, v]) => rfText(v)).join(" "), (f.find(([c]) => c.format) || [{}])[0].format || ""]; };
     const keys = {};
-    for (const k of K.resultKeySources) if (rfText(first(k))) keys[k] = rfText(first(k));
+    for (const k of K.resultMatchKeys) if (rfText(first(k))) keys[k] = rfText(first(k));
     let answer = "採用";
     if (g.result) {
       answer = null;
@@ -3071,7 +3136,7 @@ function resultSampleBox(rf) {
     RESULT_SAMPLE_TEXT.set(rf, ta.value);
     if (!ta.value.trim()) { out.replaceChildren(el("small", { class: "note", text: "中身を貼ると、プラグインと同じ読み方で読んだ結果を出す" })); return; }
     const { rows, problems } = readResultText(ta.value, rf, sys);
-    const keyText = (k) => Object.entries(k).map(([a, b]) => `${{ id: "", managementNo: "管理 ", identificationNo: "識別 " }[a] ?? a}${b}`).join(" / ");
+    const keyText = (k) => Object.entries(k).map(([a, b]) => `${{ id: "", managementNo: "管理 ", identificationNo: "識別 ", linkId: "連携 " }[a] ?? a}${b}`).join(" / ");
     const table = el("table", { class: "cols" }, el("tr", {}, ...["行", "依頼のキー", "採否", "撮像予定（日本時間）", "衛星", "名称", "システム側の番号", "対象日", "システム", "範囲", "理由"].map((h) => el("th", { text: h }))),
       ...rows.slice(0, 200).map((r) => el("tr", {}, ...[r.line, keyText(r.keys), r.answer, jstText(r.planned), r.satellite, r.name, r.externalId, r.day, r.system, r.area ? "あり" : "", r.reason].map((x) => el("td", { text: String(x) })))));
     out.replaceChildren(el("small", { class: "note", text: `${rows.length} 行を読んだ（タイムゾーン ${sys.timeZone || "UTC"}）` + (rows.length > 200 ? "。表は最初の 200 行" : "") }), table,

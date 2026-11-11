@@ -60,7 +60,7 @@ from ..core.request.quota import QuotaData, read_quota_data
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
     RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, followed_where, handed_where,
-    history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
+    history_has, history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
     DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
@@ -890,8 +890,15 @@ class PlanFileDock(PluginDock):
         done_rows = missed_done(plan, skip, target)
         day = plan.day.isoformat()
 
+        linked = any(w.links for w in done_files)
+
         def work(task):
             notes = []
+            if linked and store is not None and store.history:
+                # A file naming its rows by 外部連携ID, and a table that cannot keep them: the answers cannot be matched by them.
+                lacking = history_has(client, store, token, ("linkId",))
+                if lacking:
+                    notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDを保存できず（tools/arcgis/create_tables.py で足す）")
             removed = 0
             rewrite = Rewrite(rows=list(rows))
             if replace and earlier and store.history:

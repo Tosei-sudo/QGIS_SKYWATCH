@@ -310,6 +310,7 @@ flowchart TD
 | `passTime` / `passOffNadir` / `passIncidence` / `passDirection` / `passLookSide` | 撮像の時刻・オフナディア角・入射角・軌道方向（昇交・降交）・観測方向（右・左）（§24。軌道なしで詰めた依頼は空） |
 | `mergedIds` / `mergedNames` / `mergedCount` | 1 回の撮像にまとめた依頼の ID・名称（配列）・件数（§24） |
 | `occurrence` / `occurrenceId` / `timesMin` / `timesMax` | その日の何回目か（1, 2 …）・回つきの ID（`R-0001-2`。1 日 1 回の依頼は ID のまま）・1 日の回数の下限と上限（§25） |
+| `linkId` | 外部連携ID: 出力の行の短い ID（既定 12 文字、`linkIdLength`・`linkIdChars`）。出力履歴の `LINK_ID` と同じ値で、結果ファイルの `linkId` でこの行と照合する（§29） |
 | `geometry` | 範囲（§8.4 の書き方。まとめた撮像の行はまとめた依頼を囲むパスに平行な四角、§24.3） |
 | `centerLat` / `centerLon` / `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth` | 中心・外接矩形の数値 |
 | `requester` / `note` / `warnings` | 依頼者 / メモ / 警告 |
@@ -514,7 +515,7 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 ## 16. 実装メモ
 
-- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`TARGET_DATE`・`REQ_ID`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`OUTPUT_FILE`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`（名前は `historyFields` で変えられる）。ポリゴン（依頼の範囲）か形状なし。
+- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`TARGET_DATE`・`REQ_ID`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`OUTPUT_FILE`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`・`LINK_ID`（外部連携ID、§29）（名前は `historyFields` で変えられる）。ポリゴン（依頼の範囲）か形状なし。
 - 出力履歴は全件を読まず、用途の条件で読む（#69）: 「計算」と上限シミュレーションは判定待ち（採用・未判定）と繰り上げ待ち（未撮像・`BOOST_DONE` 0）の行だけ、「照合…」はそれに加えて表示する対象日の範囲。Esri から読む件数が上限を超えたら、一部だけを使わずに読み込みを止めて理由を出す（ページは OBJECTID 順）。
 - 撮像済みの判定（照合）は「撮像計画ファイル出力」ドックの「照合…」と定期照合（§26）で行う。「計算」は照合しない（tsudo、2026-11-11「その照合、計算時の照合なくして」。それまでは「計算」のたびに照合していた）。「計算」は出力履歴の撮像済み・未撮像をそのまま使う（未撮像の繰り上げ・持ち越し、期間内1回の撮像済みを外す）。対象日の範囲（日本時間の 1 日）に、依頼の範囲と重なる画像がカタログにあれば撮像済み。`missAfterDays`（既定 3 日）を過ぎても無ければ未撮像。
   - 台帳に依頼が無い（削除された）行や範囲の無い依頼の行は問い合わせず、未判定のまま「台帳に依頼なし」と出す（その日のどこかの画像で撮像済みにしない、#77）。
@@ -674,7 +675,8 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 | 値 | 中身 |
 |---|---|
-| `id` / `managementNo` / `identificationNo` | 依頼を表すキー（依頼ID・管理番号・識別番号）。1 つ以上は必須。複数あれば `id` → `managementNo` → `identificationNo` の順に台帳を引く。前後の空白・大文字小文字・`{}` は問わず、数だけの番号は先頭の 0 を問わない（`000123` = `123`。オーダーで `%08d` にした識別番号がそのまま返ってきても合う） |
+| `linkId` | 外部連携ID（オーダーの項目 `linkId` で渡した出力の行の ID、§29）。あればまずこれで出力の行を探す（その行と、まとめた依頼）。名前などに埋め込まれて返ってくるなら `pattern` で抜き出す（`"pattern": "SW-(\\w+)"`）。これだけでもよい |
+| `id` / `managementNo` / `identificationNo` | 依頼を表すキー（依頼ID・管理番号・識別番号）。これか `linkId` の 1 つ以上は必須。複数あれば `id` → `managementNo` → `identificationNo` の順に台帳を引く。前後の空白・大文字小文字・`{}` は問わず、数だけの番号は先頭の 0 を問わない（`000123` = `123`。オーダーで `%08d` にした識別番号がそのまま返ってきても合う） |
 | `result` | 採否。`採用`・`不採用`・`不明` に読み替える（下の「採否の読み方」）。列がなければ、載っている行はすべて採用 |
 | `reason` | 理由・メモ（不採用の理由、要求外のメモ） |
 | `plannedAt` | 撮像予定日時（下の「日時」） |
@@ -728,7 +730,8 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 突き合わせ（`core/request/adoption.py`）:
 
 1. 対象日（`day`）・システム（`system`）の列があれば、取り込む日・システムと違う行を読み飛ばす（件数を知らせる）。
-1. ファイルの行のキーで台帳の依頼を引く（`id` → `managementNo` → `identificationNo`、数の番号は先頭の 0 を問わない）。
+1. 外部連携ID（`linkId`）の列があれば、まずその ID の出力の行を探す（§29）。取り込む日とその前 `linkDays` 日・翌日の、そのシステムに出した行のうち、いちばん近い日の行。見つかればその行（とまとめた依頼）の採否にする（前の日の行なら、その日の行に書く）。
+1. ID がない・見つからない行は、ファイルの行のキーで台帳の依頼を引く（`id` → `managementNo` → `identificationNo`、数の番号は先頭の 0 を問わない）。
 2. その日・そのシステムに出した依頼（`RESULT` = 採用）なら、その行の採否を書く（`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE` = ファイル名、衛星があれば `SATELLITE` も）。
 3. 出していない依頼や依頼にない行で採用のものは要求外として足す（出していない依頼なら名称・管理番号・依頼者・範囲はその依頼から、理由「この日・このシステムには出力していない依頼」）。不採用・不明のものは読み飛ばす（何も答えることがない）。
 4. 出したのにファイルにない依頼は `missing`（不採用なら理由「結果ファイルになし」、不明ならそのまま）。
@@ -946,3 +949,52 @@ tsudo「手の照合は、今の方法に加えて、この画像カタログの
 - **選んだこと**: 関連付けはショットの全部の依頼に付ける（1 枚の画像で 1 回の撮像。依頼ごとに別の画像を付けたいときは従来の「撮像済みにする」）。照合の自動の判定は変えない。画像カタログには書き込まない。
 
 実装: `core/request/linking.py`（`ShotUnit`・`unit_key`・`units_of`・`find_images`・`links_of`・`with_links`・`link_findings`・`unlink_findings`・`search_span`・`gap_text`）、`core/request/follow.py`（`undone_changes`）、`ui/shot_link_dialog.py`、`ui/plan_results_dialog.py`（「画像と関連付け…」）。テスト: `tests/test_request_linking.py`・`tests/test_qgis_shot_link.py`。
+
+## 29. 外部連携ID（2026-11-12 追加）
+
+一部のシステムは名前・ID の欄に UUID の長さ（36 文字）が入らない。12 文字くらいで、完全に一意でなくてよいので識別できる番号を出力履歴に付け、結果ファイルの取り込みで日付の確からしさとその ID から特定の依頼（出力の行）と照合したい（tsudo、2026-11-12）。
+
+### 29.1 ID（`core/request/link_id.py`）
+
+- 出力履歴の行（1 依頼・1 日・1 システム・その日の回）ごとに 1 つ。`TBL_REQUEST_HISTORY` の `LINK_ID`（`String(32)`）に残す。見送りの行は空。
+- 既定は 12 文字の数字と英大文字（Crockford の base32: `0-9` と `I`・`L`・`O`・`U` を除く英字。読み違えやすい字を使わない、大文字小文字を問わない）。60 ビットなので、同じシステムの 2 行が同じ値になることはまずない。
+- システムごとに変えられる（`requestExports[]`）: `linkIdLength`（6〜32、既定 12）、`linkIdChars`（`base32`（既定）・`digits`（数字だけ。12 桁で 10^12 通り）・`hex`（16 進））。
+- 乱数ではなく、依頼ID・対象日・システム・その日の回から決める（SHA-256 の先頭）。同じ日を書き出し直しても（置き換え・追加）、同じシステムに出す同じ依頼は同じ ID なので、前に渡したファイルへの答えも今の行に合う。
+- 1 日・1 システムの中で同じ値が出たら（短い・数字だけのときに起こりうる）、依頼ID の順で後の依頼の ID を作り直す。日をまたいでは一意を約束しない（取り込みで日付から選ぶ）。
+
+### 29.2 オーダーファイル
+
+- 項目 `linkId`（CSV の `source`、JSON Schema の `x-source`）。まとめた依頼の行は、その行になった依頼（まとめ先）の ID。
+- 前後に文字を付けるときは printf の書式（`"format": "SW-%s"` → `SW-7K3QX9M2PA4T`）。
+- ファイルに `linkId` を書くシステムで、出力履歴に `LINK_ID` がないと、書き出しの結果に「出力履歴に属性 LINK_ID がないため外部連携IDを保存できず」と出す（`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。
+
+例（名前の欄に ID を入れて渡し、結果ファイルの同じ欄から抜き出して照合する）:
+
+```jsonc
+{
+  "system": "SYS-D", "format": "csv", "linkIdLength": 12,
+  "columns": [
+    { "key": "ORDER_NAME", "source": "linkId", "format": "SW-%s" },   // SW-7K3QX9M2PA4T（15 文字）
+    { "key": "AOI", "source": "geometry", "geometry": "wkt" }
+  ],
+  "resultFile": {
+    "format": "csv",
+    "columns": [
+      { "key": "ORDER_NAME", "target": "linkId", "pattern": "^SW-(.+)$" },
+      { "key": "STATUS", "target": "result", "map": { "ACCEPTED": "採用", "REJECTED": "不採用" } },
+      { "key": "PLANNED", "target": "plannedAt" }
+    ],
+    "linkDays": 7
+  }
+}
+```
+
+### 29.3 結果ファイルの取り込み
+
+- 列（`target`）・プロパティ（`x-target`）の `linkId`。依頼のキー（`id` など）の代わりにこれだけでもよい。名前などに埋め込まれて返ってくるなら `pattern` で抜き出す。
+- 照合（`adoption.match_answers`）: ID が同じ（前後の空白・大文字小文字は問わない。数字だけなら先頭の 0 も）そのシステムの出力の行を、取り込む日（ドックで選んだ日）とその前 `resultFile.linkDays` 日（0〜60、既定 7）と翌日（日の区切りのずれ）から探し、取り込む日 → 前の日（近い順）→ 翌日の順で最初に見つかった日の行を使う。その行と、その撮像にまとめた依頼の行に採否を書く。
+- 前の日の行に合った行は、その日の行の採否として書く（前の日に出した依頼をシステムが後の日に計画した）。確かめる画面に「外部連携IDで 2026-11-11 の出力の行に照合した n 行」と出す。
+- 同じ日に同じ ID の依頼が 2 つあれば、ファイルの依頼のキーで選ぶ。選べなければ ID は使わず依頼のキーで照合する（そう知らせる）。ID と依頼のキーが別の依頼を指すときは ID の行にして知らせる。
+- ID が見つからない行は、依頼のキーで今までどおり照合する。キーもなく採用なら要求外（ID が範囲の出力履歴にない件数を知らせる）。
+- 1 日に何回も撮る依頼は回ごとに ID が違うので、ID の行はその回だけに付く（`occurrenceId` と同じ）。
+- 「撮像予定」ドックの文字の絞り込みは外部連携ID でも引ける（名称の吹き出しにも出す）。「レイヤーに出す」の属性「外部連携ID」。

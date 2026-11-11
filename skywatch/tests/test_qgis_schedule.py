@@ -288,3 +288,46 @@ def test_set_day_reads_the_day(plugin):
     assert wait_for(lambda: dock.task is None and dock.day == day.isoformat())
     assert {r.name for r in dock.rows} == {"東京湾", "大阪湾", "横浜"}
     dock.close_all()
+
+
+def test_a_result_file_naming_rows_by_their_link_id(plugin):
+    # 外部連携ID (2026-11-12): the file names the rows by the ids its order file was given; one of the day before is
+    # that day's row (the system planned late a request handed out earlier).
+    from skywatch.core.request.store import history_attributes
+    from skywatch.core.request.systems import export_systems_of
+
+    p, iface, fake, history, tmp_path = plugin
+    today = jst_day(time.time() * 1000)
+    yesterday = (today - timedelta(days=1)).isoformat()
+    written(history, today.isoformat())
+    for r in history.rows:
+        if r["attributes"]["REQ_ID"] == "R-1":
+            r["attributes"]["LINK_ID"] = "TOKYO0000001"
+    row = HistoryRow("RUN0", time.time() * 1000 - 86400000, yesterday, "R-3", system="SYS-A", name="横浜", adoption="不明",
+                     link_id="YOKOHAMA0001", rings=TOKYO)
+    history.add({k: v for k, v in history_attributes(row, DEFAULT_HISTORY_FIELDS).items() if v is not None},
+                {"rings": TOKYO, "spatialReference": {"wkid": 4326}})
+    problems: list = []
+    [system] = export_systems_of([{"system": "SYS-A", "label": "A", "columns": [{"key": "ID", "source": "id"}], "resultFile": {
+        "columns": [{"key": "REF", "target": "linkId", "pattern": "^SW-(.+)$"},
+                    {"key": "ST", "target": "result", "map": {"OK": "採用", "NG": "不採用"}}]}}], problems)
+    assert problems == []
+    dock = p.api.schedule
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    tokyo = next(i for i, r in enumerate(dock.shown) if r.name == "東京湾")
+    assert dock.model.item(tokyo, 1).toolTip() == "外部連携ID: TOKYO0000001"
+    dock.search.setText("tokyo0000001")
+    assert [r.name for r in dock.shown] == ["東京湾"]
+    dock.search.clear()
+    path = tmp_path / "a_link.csv"
+    path.write_text("REF,ST\nSW-TOKYO0000001,OK\nSW-yokohama0001,OK\n", encoding="utf-8")
+    dock.import_file(str(path), system=system, ask=False)
+    assert wait_for(lambda: dock.task is None and "a_link.csv: " in dock.status.text()), dock.status.text()
+    assert states(dock)[("東京湾", "SYS-A")] == "採用"
+    assert f"外部連携IDで {yesterday} の出力の行に照合した 1 行" in dock.status.text()
+    earlier = next(r["attributes"] for r in history.rows if r["attributes"].get("LINK_ID") == "YOKOHAMA0001")
+    assert (earlier["ADOPTION"], earlier["ADOPTION_SOURCE"]) == ("採用", "a_link.csv")
+    # Neither is a plan of the system's own (要求外).
+    assert not any(r["attributes"]["RESULT"] == "要求外" for r in history.rows)
+    dock.close_all()

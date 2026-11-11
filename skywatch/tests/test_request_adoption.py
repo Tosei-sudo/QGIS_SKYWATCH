@@ -106,7 +106,7 @@ def test_result_file_settings():
     assert result_file_of({"key": "K", "keySource": "name", "missing": "保留", "encoding": "euc", "geometry": {"x": 1}}, "z", problems)
     assert problems == ["x に key（依頼を表す列）なし", "y.format は csv・json のどちらかで指定",
                         "z.encoding は utf-8・utf-8-sig・cp932・euc-jp・utf-16 のどれかで指定",
-                        "z.keySource は id・managementNo・identificationNo のどれかで指定",
+                        "z.keySource は id・managementNo・identificationNo・linkId のどれかで指定",
                         "z.geometry は wkt・geojson・lon と lat・bbox のどれかで指定", "z.missing は 不採用・不明 のどちらかで指定"]
     # In the settings file: a system's `resultFile`, its times in the system's zone.
     problems = []

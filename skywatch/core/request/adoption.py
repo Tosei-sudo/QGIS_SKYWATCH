@@ -22,16 +22,28 @@ A request taken several times a day (1 日の回数) has a history row per
 time: a file row naming the request answers them all, one naming a time
 (its `occurrenceId`, `R1-2`: the id, a hyphen and the time) answers that
 time only (and the requests put into its shot).
+
+A file row giving the 外部連携ID its order file wrote (`linkId`,
+core/request/link_id.py) answers the very row of that id (and the requests
+put into its shot), tried before the request's keys (tsudo, 2026-11-12:
+「日付の蓋然性とそのIDから特定の依頼と照合できるように」). As an id is short
+and not unique for ever, it is looked for among the system's rows of the day
+read and of the `linkDays` days before it (and the day after: a day cut
+otherwise), the nearest day first; the same id on two requests of that day
+is not used (the request's keys decide, when the file has them). So an
+answer about a request handed out the day before (planned late by the
+system) finds that day's row.
 """
 from __future__ import annotations
 
 import re
 import uuid
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Optional, Sequence
 
 from .model import ImagingRequest
-from .result_file import ADOPTED, KEY_SOURCES, REJECTED, WAITING, Answer, ResultFile
+from .result_file import ADOPTED, KEY_SOURCES, LINK_ID, REJECTED, WAITING, Answer, ResultFile
 from .store import MANUAL, UNREQUESTED, HistoryRow
 
 #: Why a request handed out is 不採用 when the file leaves it out.
@@ -50,6 +62,8 @@ class Match:
     rows: list = field(default_factory=list)
     #: The time it names of a request taken several times a day (`R1-2`); None for every time.
     time: Optional[int] = None
+    #: The target day of the rows it answers: the day read, or the one its 外部連携ID was found on ("": the day read).
+    day: str = ""
 
     @property
     def unrequested(self) -> bool:
@@ -102,9 +116,45 @@ def handed_rows(day_rows: Sequence[HistoryRow], system: str) -> list[HistoryRow]
     return [r for r in day_rows if r.system == system and r.result == "採用" and r.request_id]
 
 
+def link_window(day: str, link_days: int) -> tuple[str, str]:
+    """The target days (first, last) whose rows a result file of `day` looks its 外部連携ID up in."""
+    d = date.fromisoformat(day)
+    return (d - timedelta(days=max(0, link_days))).isoformat(), (d + timedelta(days=1)).isoformat()
+
+
+def _days_before(day: str, row_day: str) -> Optional[int]:
+    """How many days `row_day` is before `day` (−1: the day after); None when one is not a day."""
+    try:
+        return (date.fromisoformat(day) - date.fromisoformat(row_day[:10])).days
+    except ValueError:
+        return None
+
+
+def nearest_linked(rows: Sequence[HistoryRow], day: str, link_days: int) -> list[HistoryRow]:
+    """
+    Rows sharing one 外部連携ID: those of the nearest target day to `day` in
+    the window (the day itself, then the days before it, then the day after).
+    """
+    placed = []
+    for r in rows:
+        n = _days_before(day, r.day)
+        if n is not None and -1 <= n <= link_days:
+            placed.append(((abs(n), n < 0), r))
+    if not placed:
+        return []
+    best = min(p for p, _ in placed)
+    return [r for p, r in placed if p == best]
+
+
 def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], requests: Sequence[ImagingRequest],
-                  system: str, day: str, spec: ResultFile, source: str, label: str = "") -> Reading:
-    """A file's rows matched to the day's rows of `system` (`day_rows`: load_day) and the ledger."""
+                  system: str, day: str, spec: ResultFile, source: str, label: str = "",
+                  nearby: Sequence[HistoryRow] = ()) -> Reading:
+    """
+    A file's rows matched to the day's rows of `system` (`day_rows`:
+    load_day) and the ledger; `nearby`: the system's rows of the days round
+    the day (store.load_linked over link_window), where a file row's
+    外部連携ID is looked for too.
+    """
     missing = spec.missing_value or (WAITING if spec.says_result() or any(a.stated for a in answers) else REJECTED)
     reading = Reading(system, day, source, missing_as=missing)
     by_key: dict = {}
@@ -123,6 +173,15 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
     names = {same_key(system)} | ({same_key(label)} if label else set())
     other_days, other_systems = 0, set()
     handed = handed_rows(day_rows, system)
+    # The rows a 外部連携ID can name: the day's, and those of the days round it.
+    window = handed + [r for r in handed_rows(nearby, system) if r.day != day]
+    linked: dict = {}
+    for r in window:
+        if r.link_id:
+            linked.setdefault(same_key(r.link_id), []).append(r)
+    ledger = {q.id: q for q in requests}
+    by_link_days: dict = {}
+    unknown_links = 0
     answered: set = set()
     for a in answers:
         if a.day and a.day != day:
@@ -139,39 +198,66 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
                 break
         if req is None:
             req, time = _occurrence_of(a, by_key.get("id", {}))
+        at, own = day, None
+        link = a.keys.get(LINK_ID, "")
+        if link:
+            found = nearest_linked(linked.get(same_key(link), ()), day, spec.link_days)
+            if req is not None and len({r.request_id for r in found}) > 1:
+                found = [r for r in found if r.request_id == req.id] or found
+            if len({r.request_id for r in found}) > 1:
+                reading.problems.append(f"{a.line} 行目: 外部連携ID {link} が {found[0].day} の複数の依頼にあるため依頼の番号で照合")
+            elif found:
+                lead = found[0]
+                if req is not None and req.id != lead.request_id:
+                    reading.problems.append(f"{a.line} 行目: 外部連携ID {link} は「{lead.name or lead.request_id}」の行"
+                                            f"（依頼の番号の「{req.name or req.id}」でなく ID の行とした）")
+                req = ledger.get(lead.request_id) or ImagingRequest(lead.request_id, name=lead.name)
+                twice, time, at, own = False, lead.occurrence, lead.day, found
+                if at != day:
+                    by_link_days[at] = by_link_days.get(at, 0) + 1
+            elif req is None:
+                unknown_links += 1
         if twice:
             reading.problems.append(f"{a.line} 行目: {a.key} は複数の依頼にあるため「{req.name}」とした")
-        own = [r for r in handed if req is not None and r.request_id == req.id and (time is None or r.occurrence == time)]
+        if own is None:
+            own = [r for r in handed if req is not None and r.request_id == req.id and (time is None or r.occurrence == time)]
+        pool = handed if at == day else [r for r in window if r.day == at]
         # A request put into another's shot (まとめ) was in that one's row: its answer is theirs too.
         shots = {r.shot_id for r in own if r.shot_id}
-        rows = own + [r for r in handed if req is not None and r.merged_into == req.id and r.request_id != req.id
+        rows = own + [r for r in pool if req is not None and r.merged_into == req.id and r.request_id != req.id
                       and (time is None or r.shot_id in shots)]
         if not rows and a.answer != ADOPTED:
             # Not ours, or not handed to it this day: nothing to answer, and not in its plan.
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
             reading.problems.append(f"{a.line} 行目: {a.answer}の {what} はこの日このシステムに出力していないため読み飛ばし")
             continue
-        if req is not None and (req.id, time) in answered:
+        if req is not None and (req.id, time, at) in answered:
             reading.problems.append(f"{a.line} 行目: 「{req.name}」が重複（後の行を使う）")
-            reading.matches = [m for m in reading.matches if not (m.request is not None and (m.request.id, m.time) == (req.id, time))]
+            reading.matches = [m for m in reading.matches
+                               if not (m.request is not None and (m.request.id, m.time, m.day) == (req.id, time, at))]
         if req is not None:
-            answered.add((req.id, time))
-        reading.matches.append(Match(a, req, rows, time))
+            answered.add((req.id, time, at))
+        reading.matches.append(Match(a, req, rows, time, at))
     if other_days:
         reading.problems.append(f"対象日が {day} 以外の {other_days} 行を読み飛ばし")
     if other_systems:
         reading.problems.append(f"ほかのシステム（{'・'.join(sorted(other_systems))}）の行を読み飛ばし")
+    for d, n in sorted(by_link_days.items()):
+        reading.problems.append(f"外部連携IDで {d} の出力の行に照合した {n} 行（その日の採否として記録）")
+    if unknown_links:
+        first, last = link_window(day, spec.link_days)
+        reading.problems.append(f"外部連携IDが {first}〜{last} の出力履歴にない {unknown_links} 行（依頼の番号もなし）")
     # A request put into another's shot answered by its own row too: its own answer counts for it.
-    named = {rid for rid, _ in answered}
+    named = {(rid, d) for rid, _, d in answered}
     for m in reading.matches:
         if m.request is not None:
-            m.rows = [r for r in m.rows if r.request_id == m.request.id or r.request_id not in named]
+            m.rows = [r for r in m.rows if r.request_id == m.request.id or (r.request_id, r.day) not in named]
     # A time answered on its own row wins over the row naming the whole request.
-    timed = {(m.request.id, r.occurrence) for m in reading.matches if m.request is not None and m.time is not None for r in m.rows
-             if r.request_id == m.request.id}
+    timed = {(m.request.id, r.occurrence, r.day) for m in reading.matches if m.request is not None and m.time is not None
+             for r in m.rows if r.request_id == m.request.id}
     for m in reading.matches:
         if m.request is not None and m.time is None:
-            m.rows = [r for r in m.rows if r.request_id != m.request.id or (r.request_id, r.occurrence) not in timed]
+            m.rows = [r for r in m.rows if r.request_id != m.request.id or (r.request_id, r.occurrence, r.day) not in timed]
     covered = {id(r) for m in reading.matches for r in m.rows}
     reading.missing = [r for r in handed if id(r) not in covered]
     return reading

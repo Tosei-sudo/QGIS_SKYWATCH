@@ -36,7 +36,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.adoption import (
-    NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, unrequested_rows,
+    NOT_IN_FILE, Reading, answer_changes, link_window, manual_changes, manual_unrequested, match_answers, unrequested_rows,
 )
 from ..core.esri import EsriError
 from ..core.request.groups import read_groups
@@ -44,7 +44,8 @@ from ..core.request.model import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
 from ..core.request.store import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, add_history,
-    day_counts, delete_history, delete_history_rows, history_has, load_day, load_requests, load_shots, state_of, unrequested_where,
+    day_counts, delete_history, delete_history_rows, history_has, load_day, load_linked, load_requests, load_shots, state_of,
+    unrequested_where,
     update_history,
 )
 from ..core.request.shot_view import companions, shot_text, shot_tip
@@ -58,7 +59,7 @@ from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
 
 COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由・メモ")
-_TAKEN, _NOTE, _SHOT = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ")
+_TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
 #: The shots' outlines on the map (dashed over the requests' areas).
 SHOT_COLOR = "#7c3aed"
 #: Each state's colour, on the list and the map.
@@ -468,7 +469,7 @@ class ScheduleDock(PluginDock):
         words = self.search.text().lower().split()
         if words:
             text = " ".join((row.name, row.management_no, row.requester, self.group_of(row), row.satellite, row.request_id,
-                             row.external_id)).lower()
+                             row.external_id, row.link_id)).lower()
             if not all(w in text for w in words):
                 return False
         return True
@@ -491,6 +492,8 @@ class ScheduleDock(PluginDock):
             tip = shot_tip(self.shots.get(r.shot_id)) if r.shot_id else ""
             if tip:
                 items[_SHOT].setToolTip(plain_tip(tip))
+            if r.link_id:
+                items[_NAME].setToolTip(plain_tip(self.tr("外部連携ID: {i}").format(i=r.link_id)))
             items[0].setForeground(QBrush(QColor(STATE_COLORS[state])))
             source = IMAGE_ARRIVED if r.captured == "撮像済み" and r.result == "採用" and not r.adoption_source else r.adoption_source
             if source:
@@ -660,7 +663,10 @@ class ScheduleDock(PluginDock):
             answers, problems = read_answers(data, spec, load_schema)
             rows = load_day(client, store, token, day, task.isCanceled)
             requests = load_requests(client, store, token, task.isCanceled)
-            reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label)
+            # The rows of the days round it, where the file's 外部連携ID are looked for too (a request handed out earlier).
+            nearby = (load_linked(client, store, token, system.system, *link_window(day, spec.link_days), task.isCanceled)
+                      if any(a.keys.get("linkId") for a in answers) else [])
+            reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label, nearby)
             reading.problems = problems + reading.problems
             return reading
 
@@ -754,7 +760,7 @@ class ScheduleDock(PluginDock):
             return None
         layer = QgsVectorLayer("Polygon?crs=EPSG:4326", self.tr("撮像予定 {d}").format(d=self.day), "memory")
         names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID",
-                 "外部ID", "入力元", "撮像ID", "まとめ先の依頼ID")
+                 "外部ID", "入力元", "撮像ID", "まとめ先の依頼ID", "外部連携ID")
         provider = layer.dataProvider()
         provider.addAttributes([QgsField(n, QVariant.String) for n in names])
         layer.updateFields()
@@ -763,7 +769,7 @@ class ScheduleDock(PluginDock):
             f = QgsFeature(layer.fields())
             f.setAttributes([row_state(r), r.name, self.group_of(r), r.management_no, r.system, r.satellite,
                              shot_text(r, self.rows, self.shots), _when(r.planned_at), captured_text(r), r.requester, row_note(r), r.day,
-                             r.request_id, r.external_id, r.adoption_source, r.shot_id, r.merged_into])
+                             r.request_id, r.external_id, r.adoption_source, r.shot_id, r.merged_into, r.link_id])
             rings = [[tuple(p[:2]) for p in ring] for ring in self.rings_of(r)]
             if rings:
                 # One ring a polygon; more, a polygon each (as the map shows them).
