@@ -50,7 +50,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
-from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, pass_text, room_text, satellite_name, time_text
+from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, occurrence_text, pass_text, room_text, satellite_name, time_text
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.groups import read_groups
@@ -515,8 +515,10 @@ class PlanFileDock(PluginDock):
                 boost.setToolTip(self.tr("チェックで優先度を 100 繰り上げ（書き出しのときに台帳へ保存）"))
             taken = c.result == TAKEN
             scenes = (self.tr("同乗") if c.member else str(c.scenes)) if taken else ""
+            times = occurrence_text(c)
             items = [take, *(QStandardItem(t) for t in (
-                c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "", r.name, r.group,
+                c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "",
+                f"{r.name}（{times}）" if times else r.name, r.group,
                 r.category, prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost]
             result = items[RESULT_COLUMN]
             color = QColor("#16a34a" if taken else "#6b7280")

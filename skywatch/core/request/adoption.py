@@ -17,6 +17,11 @@ handed to that system that day answers its history row(s). A row of a request
 not handed to it that day, or of no request at all, is 要求外 (planned by the
 system itself) when it is 採用. A request handed out and not in the file is
 `missing` (不採用, or left 不明).
+
+A request taken several times a day (1 日の回数) has a history row per
+time: a file row naming the request answers them all, one naming a time
+(its `occurrenceId`, `R1-2`: the id, a hyphen and the time) answers that
+time only (and the requests put into its shot).
 """
 from __future__ import annotations
 
@@ -43,6 +48,8 @@ class Match:
     request: Optional[ImagingRequest] = None
     #: The day's history rows of that request handed to the system ([]: 要求外).
     rows: list = field(default_factory=list)
+    #: The time it names of a request taken several times a day (`R1-2`); None for every time.
+    time: Optional[int] = None
 
     @property
     def unrequested(self) -> bool:
@@ -124,38 +131,61 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
         if a.system and same_key(a.system) not in names:
             other_systems.add(a.system)
             continue
-        req, twice = None, False
+        req, twice, time = None, False, None
         for k_source in KEY_SOURCES:
             k = same_key(a.keys.get(k_source, ""))
             if k and k in by_key.get(k_source, {}):
                 req, twice = by_key[k_source][k], k in doubled[k_source]
                 break
+        if req is None:
+            req, time = _occurrence_of(a, by_key.get("id", {}))
         if twice:
             reading.problems.append(f"{a.line} 行目: {a.key} は複数の依頼にあるため「{req.name}」とした")
+        own = [r for r in handed if req is not None and r.request_id == req.id and (time is None or r.occurrence == time)]
         # A request put into another's shot (まとめ) was in that one's row: its answer is theirs too.
-        rows = [r for r in handed if req is not None and (r.request_id == req.id or r.merged_into == req.id)]
+        shots = {r.shot_id for r in own if r.shot_id}
+        rows = own + [r for r in handed if req is not None and r.merged_into == req.id and r.request_id != req.id
+                      and (time is None or r.shot_id in shots)]
         if not rows and a.answer != ADOPTED:
             # Not ours, or not handed to it this day: nothing to answer, and not in its plan.
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
             reading.problems.append(f"{a.line} 行目: {a.answer}の {what} はこの日このシステムに出力していないため読み飛ばし")
             continue
-        if req is not None and req.id in answered:
+        if req is not None and (req.id, time) in answered:
             reading.problems.append(f"{a.line} 行目: 「{req.name}」が重複（後の行を使う）")
-            reading.matches = [m for m in reading.matches if not (m.request is not None and m.request.id == req.id)]
+            reading.matches = [m for m in reading.matches if not (m.request is not None and (m.request.id, m.time) == (req.id, time))]
         if req is not None:
-            answered.add(req.id)
-        reading.matches.append(Match(a, req, rows))
+            answered.add((req.id, time))
+        reading.matches.append(Match(a, req, rows, time))
     if other_days:
         reading.problems.append(f"対象日が {day} 以外の {other_days} 行を読み飛ばし")
     if other_systems:
         reading.problems.append(f"ほかのシステム（{'・'.join(sorted(other_systems))}）の行を読み飛ばし")
     # A request put into another's shot answered by its own row too: its own answer counts for it.
+    named = {rid for rid, _ in answered}
     for m in reading.matches:
         if m.request is not None:
-            m.rows = [r for r in m.rows if r.request_id == m.request.id or r.request_id not in answered]
-    covered = answered | {r.request_id for m in reading.matches for r in m.rows}
-    reading.missing = [r for r in handed if r.request_id not in covered]
+            m.rows = [r for r in m.rows if r.request_id == m.request.id or r.request_id not in named]
+    # A time answered on its own row wins over the row naming the whole request.
+    timed = {(m.request.id, r.occurrence) for m in reading.matches if m.request is not None and m.time is not None for r in m.rows
+             if r.request_id == m.request.id}
+    for m in reading.matches:
+        if m.request is not None and m.time is None:
+            m.rows = [r for r in m.rows if r.request_id != m.request.id or (r.request_id, r.occurrence) not in timed]
+    covered = {id(r) for m in reading.matches for r in m.rows}
+    reading.missing = [r for r in handed if id(r) not in covered]
     return reading
+
+
+def _occurrence_of(a: Answer, by_id: dict) -> tuple:
+    """(request, time) of a row naming one time of a request taken several times a day (`R1-2`); (None, None) otherwise."""
+    found = re.fullmatch(r"(.+)-(\d+)", (a.keys.get("id") or "").strip())
+    if not found:
+        return None, None
+    req = by_id.get(same_key(found.group(1)))
+    if req is None or req.times[1] <= 1 or int(found.group(2)) < 1:
+        return None, None
+    return req, int(found.group(2))
 
 
 def answer_changes(reading: Reading) -> list[tuple[int, dict]]:

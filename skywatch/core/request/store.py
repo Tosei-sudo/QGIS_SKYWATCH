@@ -29,7 +29,8 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "priority": "PRIORITY", "boost": "BOOST", "kind": "KIND", "series": "SERIES", "satellites": "SATELLITES",
     "modes": "SENSOR_MODES", "offNadirMin": "OFF_NADIR_MIN", "offNadirMax": "OFF_NADIR_MAX",
     "incidenceMin": "INCIDENCE_MIN", "incidenceMax": "INCIDENCE_MAX", "lookSide": "LOOK_SIDE", "orbitDir": "ORBIT_DIR",
-    "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "cloudNoGo": "CLOUD_NO_GO", "systems": "SYSTEMS",
+    "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "cloudNoGo": "CLOUD_NO_GO",
+    "timesMin": "TIMES_MIN", "timesMax": "TIMES_MAX", "timesGap": "TIMES_GAP", "systems": "SYSTEMS",
     "shapeKind": "SHAPE_KIND", "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
 }
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
@@ -38,7 +39,7 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
-    "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID",
+    "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID", "occurrence": "OCCURRENCE",
 }
 #: The shot layer's names (TBL_REQUEST_SHOT: one row a row of a file, its polygon the outline of the scenes taken).
 DEFAULT_SHOT_FIELDS: dict[str, str] = {
@@ -216,10 +217,23 @@ def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
         f["offNadirMin"]: req.off_nadir_min, f["offNadirMax"]: req.off_nadir_max,
         f["incidenceMin"]: req.incidence_min, f["incidenceMax"]: req.incidence_max,
         f["lookSide"]: req.look_side, f["orbitDir"]: req.orbit_dir, f["resolution"]: req.resolution,
-        f["timeOfDay"]: req.time_of_day, f["cloudNoGo"]: req.cloud_no_go, f["systems"]: join(req.systems),
+        f["timeOfDay"]: req.time_of_day, f["cloudNoGo"]: req.cloud_no_go,
+        f["timesMin"]: req.times_min if req.times_min and req.times_min > 1 else None, f["timesMax"]: req.times_max,
+        f["timesGap"]: req.times_gap, f["systems"]: join(req.systems),
         f["shapeKind"]: req.shape_kind, f["requester"]: req.requester[:250], f["note"]: req.note[:1000],
         f["created"]: req.created, f["updated"]: req.updated,
     }
+
+
+def _times(v: Any) -> Optional[int]:
+    """A count of shots a day (1 or more); None when not given or not a count."""
+    n = _number(v)
+    return int(n) if n is not None and n >= 1 else None
+
+
+def _hours(v: Any) -> Optional[float]:
+    n = _number(v)
+    return float(n) if n is not None and n >= 0 else None
 
 
 def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingRequest]:
@@ -249,6 +263,8 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
         resolution=_number(a.get(f["resolution"])),
         time_of_day=_choice(a.get(f["timeOfDay"]), TIMES_OF_DAY, "任意"),
         cloud_no_go=_number(a.get(f["cloudNoGo"])), systems=_list(a.get(f["systems"])),
+        times_min=_times(a.get(f["timesMin"])) or 1, times_max=_times(a.get(f["timesMax"])),
+        times_gap=_hours(a.get(f["timesGap"])),
         shape_kind=_choice(a.get(f["shapeKind"]), SHAPE_KINDS, "範囲"),
         requester=_text(a.get(f["requester"])), note=_text(a.get(f["note"])),
         created=_number(a.get(f["created"])), updated=_number(a.get(f["updated"])),
@@ -627,6 +643,13 @@ class HistoryRow:
     merged_into: str = ""
     #: The shot it is taken in (the shot layer's SHOT_ID; "" when fitted without the orbits).
     shot_id: str = ""
+    #: Which of the request's shots of the day (1 …), for a request taken several times a day (1 日の回数).
+    occurrence: int = 1
+
+    @property
+    def key(self) -> tuple:
+        """(request id, occurrence): one row of a day's file."""
+        return self.request_id, self.occurrence
 
 
 def history_attributes(row: HistoryRow, f: dict) -> dict:
@@ -639,7 +662,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
         f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
-        f["shotId"]: row.shot_id[:64] or None,
+        f["shotId"]: row.shot_id[:64] or None, f["occurrence"]: row.occurrence,
     }
 
 
@@ -746,7 +769,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         adoption=_text(a.get(hf["adoption"])), adoption_reason=_text(a.get(hf["adoptionReason"])),
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
         adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
-        shot_id=_text(a.get(hf["shotId"])),
+        shot_id=_text(a.get(hf["shotId"])), occurrence=_times(a.get(hf["occurrence"])) or 1,
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 

@@ -299,14 +299,15 @@ REQUEST_FIELDS = {
     "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S, "MANAGEMENT_NO": S, "IDENTIFICATION_NO": S, "REQUEST_GROUP": S, "CATEGORY": S, "ACHIEVE": S, "START_AT": T, "END_AT": T, "REPEAT": S, "STATUS": S,
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
-    "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
+    "TIMES_MIN": I, "TIMES_MAX": I, "TIMES_GAP": D, "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
 }
 HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T, "REQ_ID": {"type": S, "length": 64},
                   "REQ_NAME": S, "MANAGEMENT_NO": S, "REQUESTER": S, "REQUEST_GROUP": S, "SYSTEM": S,
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
                   "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I,
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
-                  "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S, "SHOT_ID": {"type": S, "length": 64}}
+                  "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S, "SHOT_ID": {"type": S, "length": 64},
+                  "OCCURRENCE": I}
 SHOT_FIELDS = {"SHOT_ID": {"type": S, "length": 64}, "RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T,
                "SYSTEM": S, "SATELLITE": S, "PASS_TIME": T, "OFF_NADIR": D, "INCIDENCE": D, "ORBIT_DIR": S, "LOOK_SIDE": S, "SCENES": I,
                "SHOT_COUNT": I, "COVERAGE": D, "REQ_ID": {"type": S, "length": 64}, "REQ_IDS": {"type": S, "length": 4000},

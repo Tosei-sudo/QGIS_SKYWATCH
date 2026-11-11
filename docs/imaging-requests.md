@@ -110,6 +110,7 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。点で指�
 | resolution | `RESOLUTION_MAX` | これより細かい分解能（m） |
 | timeOfDay | `TIME_OF_DAY` | 昼 / 夜 / 任意（主に SAR） |
 | cloudMax | `CLOUD_NO_GO` | この雲量（%）以上なら実施しない（光学） |
+| timesMin / timesMax / timesGap | `TIMES_MIN` / `TIMES_MAX` / `TIMES_GAP` | 1 日の回数: n 回以上・m 回以下、回と回の間隔（時間）。空なら 1 回・下限と同じ・1 時間（§25） |
 | systems | `SYSTEMS` | 優先するシステムの順番（任意） |
 | shapeKind | `SHAPE_KIND` | 点 / 範囲 |
 | requester / note | `REQUESTER` / `NOTE` | 依頼者・メモ |
@@ -307,6 +308,7 @@ flowchart TD
 | `scenes` | シーン数（軌道のパスで詰めたときは撮像の連続シーン数、§24） |
 | `passTime` / `passOffNadir` / `passIncidence` / `passDirection` / `passLookSide` | 撮像の時刻・オフナディア角・入射角・軌道方向（昇交・降交）・観測方向（右・左）（§24。軌道なしで詰めた依頼は空） |
 | `mergedIds` / `mergedNames` / `mergedCount` | 1 回の撮像にまとめた依頼の ID・名称（配列）・件数（§24） |
+| `occurrence` / `occurrenceId` / `timesMin` / `timesMax` | その日の何回目か（1, 2 …）・回つきの ID（`R-0001-2`。1 日 1 回の依頼は ID のまま）・1 日の回数の下限と上限（§25） |
 | `geometry` | 範囲（§8.4 の書き方。まとめた撮像の行はまとめた依頼を囲むパスに平行な四角、§24.3） |
 | `centerLat` / `centerLon` / `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth` | 中心・外接矩形の数値 |
 | `requester` / `note` / `warnings` | 依頼者 / メモ / 警告 |
@@ -874,3 +876,22 @@ tsudo「マージした結果、どの範囲になったかも見たいときも
 - **ダッシュボード**: Web マップに出力履歴（依頼の範囲）と撮像の範囲の両方を入れる（docs/arcgis-setup.md の「3. 撮像予定（採否）のダッシュボード」）。
 
 実装: `core/request/store.py`（`ShotRow`・`add_shots`・`load_shots`・`shots_replaced_where`・`delete_shots`）、`core/request/workflow.py`（`new_run_id`・`shots_of`・`shot_ids_of`）、`core/request/shot_view.py`（一覧の文字・吹き出し）、`ui/plan_file_dock.py`・`ui/schedule_dock.py`。
+
+## 25. 1 日の回数（2026-11-11 追加）
+
+tsudo「撮像依頼の頻度について、今、毎日と1回があると思うんだけど、1日2回とか設定できるんだっけ」→ できなかった（1 日が単位で、1 依頼 1 日 1 回）。「n回以上、m回以下って指定はどうかな。n回を超えたら合格って感じ？」「最大が未指定の場合は、n回？」、n 回に届かない日は「取れる分だけ出す」。
+
+- **依頼の項目**: 「1 日の回数」の下限 n（`TIMES_MIN`、既定 1）・上限 m（`TIMES_MAX`、空なら n）・回と回の最短の間隔（`TIMES_GAP`、時間。空なら 1 時間＝別のパス）。フォームの「繰り返し」の下。台帳にこの属性がなければ今までどおり 1 日 1 回。
+- **計算**: 依頼の回ごとに候補を作る（一覧では名称に「（2/3 回目）」、n を超える回は「（4 回目・追加）」）。
+  - 1〜n 回目は依頼の優先度で詰める。n+1 回目からは、全部の依頼の n 回目までを詰めたあと、空いた枠で詰める（回ごとに順番: どの依頼の n+1 回目も、どの依頼の n+2 回目より先）。手で順番を入れ替えればそれに従う。
+  - それぞれの回はほかの回と別のパス（同じ衛星なら 1 分以上、どの衛星でも `TIMES_GAP` 時間以上離れた時刻）で撮る。空いたパスがなければ「撮像機会なし（ほかの回との間隔）」。同じ依頼のほかの回の撮像にはまとめない（ほかの依頼とのまとめは今までどおり）。雲量・撮像間隔・1 日の撮像回数・件数の上限も回ごとに今までどおり。
+  - n 回に届かない日は、置けた回だけ出して、その回に警告「回数が足りない（2/3 回）」を付ける。その日は達成にならない。
+  - 軌道を使わずに詰めるシステム（`orbit: false`・TLE なし）では、回は件数の 1 件ずつ（時刻の間隔は見ない）。
+  - 繰り上げ（§9）は依頼に 1 つで、1 回目の行に出る（チェックはすべての回に効く）。
+- **書き出し**: 回ごとに 1 行。`occurrence`（何回目か）・`occurrenceId`（`R-0001-2`。行ごとに違う ID が欲しいシステム向け。1 日 1 回の依頼は ID のまま）・`timesMin`・`timesMax` を列や `x-source` に使える。`maxPerFile` で分けるときも回ごとの行。
+- **出力履歴**: 回ごとに 1 行（`OCCURRENCE` に何回目か。属性がなくても動くが、回の区別が残らない）。n を超える回で置けなかったものは行を作らない（n 回目までの見送りは今までどおり行を作る）。その日ほかのシステムで書き出した回は、回ごとにそのシステムに固定する。置き換えて書き出すとき、システムの採否は回ごとに引き継ぐ。
+- **採否（結果ファイル）**: 依頼の ID の行はその依頼のすべての回に、`R-0001-2` のような回つきの ID の行はその回（と、その回の撮像にまとめた依頼）にだけ付く。両方あれば回つきの行が優先。ID にハイフンを含む 1 日 1 回の依頼は今までどおり。
+- **撮像済みの判定**: 同じ依頼・同じ日の回は、回ごとに別の画像（`TIMES_GAP` 時間以上離れて撮ったもの。同じパスの画像は 1 回分）が入ったら撮像済み。足りない回は、待つ日数を過ぎたら未撮像。依頼が「撮像済み」（繰り上げを戻し、期間内1回なら完了）になるのは、その日の撮像済みが n 回以上になったとき。撮像予定ドックの名称には「（2 回目）」。
+- **上限シミュレーション**: n 回とも出せた日を撮れた日とする。足りない日は「回数不足（1 日の回数に届かず）」に数え、期間内1回は次の日へ持ち越し、毎回はその日を欠測。n を超える回は、置けたときだけ採用に数える。
+
+実装: `core/request/model.py`（`times`・`gap_ms`）、`core/request/daily.py`（`Candidate.occurrence`・`key`・`extra`、`occurrence_key`・`occurrence_text`、`gather`・`ordered`・`allocate` の `GAP`・`FEW`）、`core/request/shots.py`（同じ依頼の撮像にはまとめない）、`core/request/export.py`（`occurrence`・`occurrenceId`）、`core/request/workflow.py`（回ごとのファイル・撮像 ID・固定・採否の引き継ぎ）、`core/request/adoption.py`（回つきの ID）、`core/request/follow.py`（`captured_times`）、`core/request/simulate.py`（`short`）、`ui/request_form.py`。

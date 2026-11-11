@@ -41,6 +41,18 @@ in order of priority.
    TLE, or a system with `orbit: false`, is fitted by counting as before:
    `maxPerDay` requests a day, scenes from a grid over the area.
 
+A request taken several times a day (1 日の回数: n 回以上・m 回以下, tsudo
+2026-11-11) is one candidate per time (`occurrence` 1 … m, each a row of
+the file and of the history). The first n go at the request's priority;
+the times past n only after every request's own (the extra rounds in
+order: every request's n+1-th before any n+2-th), in the room left. Each
+time goes on its own pass, `times_gap` hours (1) or more from the others
+of the same request (「撮像機会なし（ほかの回との間隔）」), never into a
+shot that already takes the request. When fewer than n are taken, those
+taken still go, with 「回数が足りない（2/3 回）」 (tsudo: 「取れる分だけ出
+す」); the day then does not count. Fitted by counting (no orbits), the
+times are simply more requests on the satellites.
+
 Hand changes (taking in, leaving out, moving up or down) are kept on the
 candidates and the fitting is done again.
 
@@ -76,6 +88,15 @@ CLOUDY = "雲量（空いている撮像機会は撮像時刻の予報で実施�
 PART = "この日の撮像機会で範囲の約 "
 #: The start of the warning of a pass too cloudy at its moment taken all the same (near the deadline, by hand).
 SHOT_CLOUD = "撮像時刻の雲量 "
+#: Held back as the passes left are too close to the request's other times that day (1 日の回数).
+GAP = "撮像機会なし（ほかの回との間隔）"
+#: The start of the warning of a request taken fewer times than its 1 日の回数 asks (the day does not count).
+FEW = "回数が足りない（"
+
+
+def occurrence_key(request_id: str, occurrence: int = 1) -> str:
+    """One time of a request on a day, as the files and history tell them apart: its id, 「R1#2」 from the second time."""
+    return request_id if occurrence <= 1 else f"{request_id}#{occurrence}"
 
 
 @dataclass
@@ -122,6 +143,19 @@ class Candidate:
     coverage: Optional[float] = None
     #: The cover over the area at the moment of the pass it is taken on (percent); None when fitted by counting.
     shot_cloud: Optional[float] = None
+    #: Which of the request's times on the day (1 日の回数): 1 …; the first carries the raise for them all.
+    occurrence: int = 1
+    first: Optional["Candidate"] = field(default=None, repr=False, compare=False)
+
+    @property
+    def key(self) -> str:
+        """The request's id, with the time from the second on (occurrence_key)."""
+        return occurrence_key(self.request.id, self.occurrence)
+
+    @property
+    def extra(self) -> bool:
+        """A time past the n the request needs (taken only in the room left)."""
+        return self.occurrence > self.request.times[0]
 
     @property
     def forecast(self) -> Optional[float]:
@@ -144,7 +178,7 @@ class Candidate:
     def member(self) -> bool:
         """Carried by another request's row (put into its shot): no row of its own in the file."""
         lead = self.lead
-        return lead is not None and lead.request.id != self.request.id
+        return lead is not None and lead.key != self.key
 
     @property
     def together(self) -> list:
@@ -158,7 +192,9 @@ class Candidate:
 
     @property
     def boost(self) -> int:
-        """The raise that counts now."""
+        """The raise that counts now (the first time's, for the request's other times)."""
+        if self.first is not None:
+            return self.first.boost
         if self.boost_offer is not None and self.boost_taken:
             return self.boost_offer
         return self.request.boost
@@ -249,6 +285,9 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             c.boost_offer = offer
             c.boost_reason = "・".join(reasons)
         out.append(c)
+        for k in range(2, req.times[1] + 1):
+            out.append(Candidate(req, cloud=c.cloud, weather=c.weather, timed=c.timed, near=c.near, carried=carried,
+                                 held=c.held, warnings=list(c.warnings), occurrence=k, first=c))
     return out
 
 
@@ -259,8 +298,15 @@ def _order_key(c: Candidate):
 
 
 def ordered(cands: Sequence[Candidate]) -> list[Candidate]:
-    """Candidates in the order they are fitted: by hand where set, otherwise by priority, deadline and age."""
-    by_priority = sorted(cands, key=_order_key)
+    """
+    Candidates in the order they are fitted: by hand where set, otherwise by
+    priority, deadline and age; a request's times past the n it needs after
+    every request's own, round by round.
+    """
+    def key(c: Candidate):
+        return (c.occurrence - c.request.times[0], _order_key(c)) if c.extra else (0, _order_key(c))
+
+    by_priority = sorted(cands, key=key)
     ranked = {id(c): (c.rank if c.rank is not None else float(i)) for i, c in enumerate(by_priority)}
     return sorted(by_priority, key=lambda c: ranked[id(c)])
 
@@ -281,7 +327,23 @@ class Room:
 
 def _manual_warning(w: str) -> bool:
     """A warning the fitting itself adds (made again by each fitting)."""
-    return w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
+    return (w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
+            or w.startswith(FEW))
+
+
+def times_of(c: Candidate) -> list[float]:
+    """The moments a candidate is taken at (ms; each shot of a big area), from the orbits; [] when fitted by counting."""
+    return [s.member_time(c) for s in c.shots]
+
+
+def occurrence_text(c: Candidate) -> str:
+    """Which time of a request taken several times a day: 「2/3 回目」, past the n it needs 「4 回目・追加」."""
+    n, m = c.request.times
+    if m <= 1:
+        return ""
+    if c.occurrence <= n:
+        return f"{c.occurrence}/{n} 回目"
+    return f"{c.occurrence} 回目・追加"
 
 
 def _room_fits(system: ExportSystem, room: Room, category: str, rows: int, scenes: int) -> bool:
@@ -327,6 +389,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     book = Book(sats, passes) if passes is not None and day is not None else None
     out = ordered(cands)
     by_name = {s.system: s for s in systems}
+    #: Each request's times on the day (1 日の回数), to keep them apart.
+    times: dict = {}
+    for c in out:
+        times.setdefault(c.request.id, []).append(c)
+        c.result, c.shots = HELD, []
 
     def orbits(system: ExportSystem, sat: SatelliteSpec) -> bool:
         return book is not None and system.orbit and book.known(index.get(id(sat), -1))
@@ -382,6 +449,15 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             why.add(NO_PASS)
             return False
         told = ops
+        # The request's other times that day: on other passes, `times_gap` hours or more away.
+        taken = [t for o in times[c.request.id] if o is not c and o.result == TAKEN for t in times_of(o)]
+        if taken:
+            # A minute at least: two shots of one satellite that close are on one pass.
+            gap = max(c.request.gap_ms, 60000.0)
+            ops = [o for o in ops if all(abs(o.time - t) >= gap for t in taken)]
+            if not ops:
+                why.add(GAP)
+                return False
         no_go = c.request.cloud_no_go
         if c.weather and no_go is not None and not (forced or c.near or c.manual == TAKEN):
             # Passes too cloudy at their moment are not used (those the forecast does not reach are).
@@ -480,10 +556,17 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             break
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else OVER if OVER in why else BUSY if BUSY in why
-                        else CLOUDY if CLOUDY in why else NO_PASS if NO_PASS in why else OVER)
+                        else CLOUDY if CLOUDY in why else GAP if GAP in why else NO_PASS if NO_PASS in why else OVER)
     for c in out:
         if c.result == TAKEN and c.shots:
             c.scenes = 0 if c.member else sum(s.frames for s in c.shots)
+    for same in times.values():
+        need = same[0].request.times[0]
+        got = [c for c in same if c.result == TAKEN]
+        if got and len(got) < need:
+            # Taken fewer times than the day needs: what fits goes all the same (tsudo: 「取れる分だけ出す」).
+            for c in got:
+                c.warnings.append(f"{FEW}{len(got)}/{need} 回）")
     return out
 
 
@@ -510,7 +593,7 @@ def merge_text(c: Candidate) -> str:
     lead = c.lead
     if c.member:
         return f"まとめ（「{lead.request.name or lead.request.id}」の撮像に同乗）"
-    others = [m.request.name or m.request.id for m in c.together if m.request.id != c.request.id]
+    others = [m.request.name or m.request.id for m in c.together if m.key != c.key]
     return f"まとめ {len(c.together)} 件（{'・'.join(others)} と 1 回の撮像）"
 
 

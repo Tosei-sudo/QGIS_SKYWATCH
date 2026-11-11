@@ -92,7 +92,7 @@ class Shot:
     def member_time(self, c) -> float:
         """The moment a member is taken (over the middle of its reach)."""
         for m, (_, _, y0, y1) in zip(self.members, self.extents):
-            if m.request.id == c.request.id:
+            if m.key == c.key:
                 return self.moment((y0 + y1) / 2)
         return self.middle
 
@@ -290,6 +290,9 @@ class Book:
         out = []
         for shot in self.shots:
             if shot.sat != sat or shot.gain is not None or not any(abs(o.time - shot.time) <= span / shot.rate * 1000 + 60000 for o in ops):
+                continue
+            if any(m.request.id == c.request.id for m in shot.members):
+                # Another time of the same request (1 日の回数): its own pass.
                 continue
             extent = self._extent(c.request, shot.frame)
             if extent is None:

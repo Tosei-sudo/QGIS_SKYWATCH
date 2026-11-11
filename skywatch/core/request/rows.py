@@ -29,11 +29,12 @@ HEADINGS = {
     "series": "衛星シリーズ", "satellites": "衛星", "modes": "センサーモード", "offNadirMin": "オフナディア角下限",
     "offNadirMax": "オフナディア角上限", "incidenceMin": "入射角下限", "incidenceMax": "入射角上限", "lookSide": "観測方向",
     "orbitDir": "軌道方向", "resolution": "分解能", "timeOfDay": "時間帯", "cloudNoGo": "実施しない雲量",
-    "systems": "優先システム", "shapeKind": "範囲の種類", "requester": "依頼者", "note": "メモ",
+    "timesMin": "1日の回数下限", "timesMax": "1日の回数上限", "timesGap": "回の間隔", "systems": "優先システム", "shapeKind": "範囲の種類", "requester": "依頼者", "note": "メモ",
 }
 #: The items written out (the ledger's own times left out).
 WRITTEN = [k for k in DEFAULT_REQUEST_FIELDS if k not in ("created", "updated")]
-NUMBERS = ("priority", "boost", "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "resolution", "cloudNoGo")
+NUMBERS = ("priority", "boost", "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "resolution", "cloudNoGo",
+           "timesMin", "timesMax", "timesGap")
 
 
 def _key(s: str) -> str:
@@ -95,6 +96,12 @@ def _choice(v: Any, choices, fallback: str) -> str:
     return t if t in choices else fallback
 
 
+def _count(v: Any) -> Optional[int]:
+    """A count of shots a day (1 or more); None when not given."""
+    n = _number(v)
+    return int(n) if n is not None and n >= 1 else None
+
+
 def _list(v: Any) -> list:
     return [s.strip() for s in re.split(r"[,、]", _text(v)) if s.strip()]
 
@@ -130,6 +137,8 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         look_side=_choice(get("lookSide"), LOOK_SIDES, "任意"), orbit_dir=_choice(get("orbitDir"), ORBIT_DIRS, "任意"),
         resolution=_number(get("resolution")), time_of_day=_choice(get("timeOfDay"), TIMES_OF_DAY, "任意"),
         cloud_no_go=_number(get("cloudNoGo")), systems=_list(get("systems")),
+        times_min=_count(get("timesMin")) or 1, times_max=_count(get("timesMax")),
+        times_gap=_number(get("timesGap")) if (_number(get("timesGap")) or 0) >= 0 else None,
         shape_kind=_choice(get("shapeKind"), SHAPE_KINDS, shape_kind),
         requester=_text(get("requester")), note=_text(get("note")),
         rings=rings,
@@ -163,7 +172,9 @@ def row_of(r: ImagingRequest) -> dict:
         "series": ",".join(r.series), "satellites": ",".join(r.satellites), "modes": ",".join(r.modes),
         "offNadirMin": r.off_nadir_min, "offNadirMax": r.off_nadir_max, "incidenceMin": r.incidence_min,
         "incidenceMax": r.incidence_max, "lookSide": r.look_side, "orbitDir": r.orbit_dir, "resolution": r.resolution,
-        "timeOfDay": r.time_of_day, "cloudNoGo": r.cloud_no_go, "systems": ",".join(r.systems), "shapeKind": r.shape_kind,
+        "timeOfDay": r.time_of_day, "cloudNoGo": r.cloud_no_go,
+        "timesMin": r.times_min if r.times_min > 1 else None, "timesMax": r.times_max, "timesGap": r.times_gap,
+        "systems": ",".join(r.systems), "shapeKind": r.shape_kind,
         "requester": r.requester, "note": r.note,
     }
     return {f[k]: values[k] for k in WRITTEN}

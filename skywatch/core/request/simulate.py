@@ -18,6 +18,11 @@ With the satellites' orbits (`passes`, passes.find_passes over the whole
 run) each day goes to the passes of that day as the real day does: no pass
 (撮像機会なし), the satellites' interval and shots a day (counted as 枠超過),
 and requests put into one shot (まとめ: no row of their own).
+
+A request taken several times a day (1 日の回数) counts as taken on a day
+when its n times are handed out; taken fewer times (回数不足) the day does
+not count: 期間内1回 goes on to the next day, 毎回 loses it. Its times past
+n count when taken and are not counted when they found no room.
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
-from .daily import BUSY, CLOUDY, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
+from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids
 from .model import ImagingRequest, day_bounds, days_left, jst_day
 from .passes import Passes, find_passes
@@ -103,6 +108,8 @@ class DayResult:
     carried: int = 0
     #: 毎回 requests not handed out on their day.
     lost: int = 0
+    #: Requests handed out fewer times than their 1 日の回数 asks (the day does not count for them).
+    short: int = 0
     expired: list = field(default_factory=list)
     #: system name → (requests, scenes) taken.
     used: dict = field(default_factory=dict)
@@ -172,12 +179,13 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
         day = start + timedelta(days=i)
         cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set())
         cands = allocate(cands, systems, sats, passes, day)
-        result = DayResult(day, candidates=len(cands))
+        result = DayResult(day, candidates=sum(1 for c in cands if not c.extra))
+        times: dict = {}
         for c in cands:
+            times.setdefault(c.request.id, []).append(c)
             req = c.request
             if c.boost_offer is not None:
                 result.raised += 1
-                req.boost = c.boost_offer
             if c.result == TAKEN:
                 result.taken += 1
                 name = c.system.system
@@ -188,22 +196,35 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                     result.merged += 1
                 if _first_system(req, systems, members) not in (None, name):
                     result.spilled += 1
-                # Handed out, so taken as captured: the follow-up undoes the raise and ends a 期間内1回 request.
-                req.boost = 0
-                if req.achieve == "期間内1回":
-                    req.status = "完了"
+                continue
+            if c.extra:
+                # A time past the n it needs, tried only in the room left.
                 continue
             if c.reason in (OVER, BUSY):
                 result.over += 1
             elif c.reason == NO_SYSTEM:
                 result.no_system += 1
-            elif c.reason == NO_PASS:
+            elif c.reason in (NO_PASS, GAP):
                 result.no_pass += 1
             elif c.held and c.reason == c.held or c.reason == CLOUDY:
                 result.cloud += 1
+        for same in times.values():
+            req = same[0].request
+            if same[0].boost_offer is not None:
+                req.boost = same[0].boost_offer
+            got = sum(1 for c in same if c.result == TAKEN)
+            if got >= req.times[0]:
+                # Handed out, so taken as captured: the follow-up undoes the raise and ends a 期間内1回 request.
+                req.boost = 0
+                if req.achieve == "期間内1回":
+                    req.status = "完了"
+                continue
+            if got:
+                result.short += 1
             if req.achieve == "期間内1回":
                 if days_left(req, day) <= 0:
-                    result.expired.append(Expired(req, day, c.reason))
+                    first = next((c for c in same if c.result != TAKEN and not c.extra), same[0])
+                    result.expired.append(Expired(req, day, first.reason or f"回数不足（{got}/{req.times[0]} 回）"))
                 else:
                     result.carried += 1
             else:
@@ -235,6 +256,7 @@ SUMMARY = (
     ("撮像機会なし", lambda s: s.total("no_pass")),
     ("まとめて採用（ほかの依頼の撮像に同乗）", lambda s: s.total("merged")),
     ("繰り上げ", lambda s: s.total("raised")),
+    ("回数不足（1 日の回数に届かず）", lambda s: s.total("short")),
     ("欠測（毎回）", lambda s: s.total("lost")),
     ("期限切れ（期間内1回）", lambda s: s.total("expired")),
     ("最終日の持ち越し", lambda s: s.carried_at_end),

@@ -123,6 +123,9 @@ TABLES = (
         F("RESOLUTION_MAX", "分解能", "DOUBLE", None, "resolution"),
         F("TIME_OF_DAY", "時間帯", "TEXT", 16, "timeOfDay"),
         F("CLOUD_NO_GO", "実施しない雲量", "LONG", None, "cloudNoGo"),
+        F("TIMES_MIN", "1日の回数下限", "LONG", None, "timesMin"),
+        F("TIMES_MAX", "1日の回数上限", "LONG", None, "timesMax"),
+        F("TIMES_GAP", "回の間隔", "DOUBLE", None, "timesGap"),
         F("SYSTEMS", "優先システム", "TEXT", 1000, "systems"),
         F("SHAPE_KIND", "範囲の種類", "TEXT", 16, "shapeKind"),
         F("REQUESTER", "依頼者", "TEXT", 255, "requester"),
@@ -158,6 +161,7 @@ TABLES = (
         F("ADOPTION_SOURCE", "採否の入力元", "TEXT", 1000, "adoptionSource"),
         F("MERGED_INTO", "まとめ先の依頼ID", "TEXT", 255, "mergedInto"),
         F("SHOT_ID", "撮像ID", "TEXT", 64, "shotId"),
+        F("OCCURRENCE", "その日の回", "LONG", None, "occurrence"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),

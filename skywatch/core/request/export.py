@@ -20,6 +20,11 @@ requests in it. `passTime` (the shot's middle), `passOffNadir`,
 `passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
 are the pass the orbits gave; empty when fitted by counting.
 
+A request taken several times a day (1 日の回数) has a row for each time:
+`occurrence` (1, 2 …) tells which, `occurrenceId` is its id with the time
+(`R1-2`; the plain id for a request taken once a day) for a system that
+wants each row's id its own, `timesMin` / `timesMax` the times it asks.
+
 Some sources are lists (LIST_SOURCES): an array in JSON where the schema
 says `type: array`, otherwise (CSV, or a string property) joined by commas.
 A value that is empty (none, "" or []) is written as the column's or
@@ -60,6 +65,7 @@ SOURCES = (
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
+    "occurrence", "occurrenceId", "timesMin", "timesMax",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
 #: Sources whose value is a list of names.
@@ -204,6 +210,11 @@ class Context:
     parts: int = 1
 
 
+def occurrence_id(c: Candidate) -> str:
+    """A row's id with its time, for a request taken several times a day (`R1-1`, `R1-2`); the plain id otherwise."""
+    return c.request.id if c.request.times[1] <= 1 else f"{c.request.id}-{c.occurrence}"
+
+
 def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str = "wkt", digits: Optional[int] = None,
               as_object: bool = False) -> Any:
     """The value of a source for one candidate (or the file, `c` None), before maps and formats."""
@@ -259,6 +270,8 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "passLookSide": shot.side if shot is not None else "",
         "mergedIds": [m.request.id for m in together], "mergedNames": [m.request.name for m in together],
         "mergedCount": len(together) or 1,
+        "occurrence": c.occurrence, "occurrenceId": occurrence_id(c),
+        "timesMin": req.times[0], "timesMax": req.times[1],
     }
     if source == "geometry":
         return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
@@ -516,10 +529,10 @@ def split(cands: Sequence[Candidate], most: int) -> list[list[Candidate]]:
 
 
 def ids_of(rows: Sequence[Candidate]) -> tuple:
-    """The requests in a file's rows: each row's, and those put into its shot (まとめ) with it."""
+    """The requests in a file's rows (each time's key, daily.occurrence_key): each row's, and those put into its shot (まとめ)."""
     out: list = []
     for c in rows:
-        out.extend(m.request.id for m in (c.together or [c]))
+        out.extend(m.key for m in (c.together or [c]))
     return tuple(out)
 
 
@@ -565,8 +578,8 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
 def files_of(written: Sequence[Written]) -> dict:
     """
     What was written, for the history (workflow.history_of): system name →
-    its file's name, or for a system split into files {request id: the
-    name of the file it is in}.
+    its file's name, or for a system split into files {request id (with
+    its time, daily.occurrence_key): the name of the file it is in}.
     """
     out: dict = {}
     for w in written:

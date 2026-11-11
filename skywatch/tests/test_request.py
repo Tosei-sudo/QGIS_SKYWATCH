@@ -347,11 +347,13 @@ def ledger_layers(fake: FakeEsri, ledger: str = LEDGER, history: str = HISTORY) 
     types = {name: "esriFieldTypeString" for name in DEFAULT_REQUEST_FIELDS.values()}
     for n in ("START_AT", "END_AT", "CREATED_AT", "UPDATED_AT"):
         types[n] = "esriFieldTypeDate"
-    for n in ("PRIORITY", "BOOST", "OFF_NADIR_MIN", "OFF_NADIR_MAX", "INCIDENCE_MIN", "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO"):
+    for n in ("PRIORITY", "BOOST", "OFF_NADIR_MIN", "OFF_NADIR_MAX", "INCIDENCE_MIN", "INCIDENCE_MAX", "RESOLUTION_MAX", "CLOUD_NO_GO",
+              "TIMES_MIN", "TIMES_MAX", "TIMES_GAP"):
         types[n] = "esriFieldTypeDouble"
     fake.add_layer(ledger, FakeLayer(types, "esriGeometryPolygon"))
     htypes = {name: "esriFieldTypeString" for name in DEFAULT_HISTORY_FIELDS.values()}
-    htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
+    htypes.update(RUN_DATE="esriFieldTypeDate", CLOUD="esriFieldTypeDouble", SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger",
+                  OCCURRENCE="esriFieldTypeInteger")
     fake.add_layer(history, FakeLayer(htypes, "esriGeometryNone"))
     return fake
 

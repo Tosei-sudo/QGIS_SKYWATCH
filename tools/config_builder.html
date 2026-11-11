@@ -265,6 +265,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "resolution": "RESOLUTION_MAX",
    "timeOfDay": "TIME_OF_DAY",
    "cloudNoGo": "CLOUD_NO_GO",
+   "timesMin": "TIMES_MIN",
+   "timesMax": "TIMES_MAX",
+   "timesGap": "TIMES_GAP",
    "systems": "SYSTEMS",
    "shapeKind": "SHAPE_KIND",
    "requester": "REQUESTER",
@@ -299,7 +302,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "externalId": "EXTERNAL_ID",
    "adoptionSource": "ADOPTION_SOURCE",
    "mergedInto": "MERGED_INTO",
-   "shotId": "SHOT_ID"
+   "shotId": "SHOT_ID",
+   "occurrence": "OCCURRENCE"
   },
   "requestGroups": {
    "name": "GROUP_NAME",
@@ -731,7 +735,11 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "passLookSide",
   "mergedIds",
   "mergedNames",
-  "mergedCount"
+  "mergedCount",
+  "occurrence",
+  "occurrenceId",
+  "timesMin",
+  "timesMax"
  ],
  "exportListSources": [
   "series",
@@ -983,6 +991,7 @@ const ROLE_LABELS = {
   createdAt: "作成日時", createdBy: "作成者", updatedAt: "更新日時",
   shotId: "撮像 ID（撮像の範囲）", passTime: "撮像時刻", shots: "撮像回数", coverage: "範囲の割合（%）", requestIds: "依頼 ID（カンマ区切り）",
   names: "名称（読点区切り）", count: "依頼件数", mergedInto: "まとめ先の依頼 ID",
+  timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限", timesGap: "回の間隔（時間）", occurrence: "その日の何回目か",
 };
 const SOURCE_LABELS = {
   id: "依頼 ID", name: "名称", managementNo: "管理番号", identificationNo: "識別番号", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
@@ -1000,6 +1009,8 @@ const SOURCE_LABELS = {
   passTime: "撮像予定時刻（軌道から）", passOffNadir: "撮像のオフナディア角", passIncidence: "撮像の入射角",
   passDirection: "撮像の軌道方向（昇交・降交）", passLookSide: "撮像の観測方向（右・左）",
   mergedIds: "まとめた依頼の ID（配列・自分を含む）", mergedNames: "まとめた依頼の名称（配列）", mergedCount: "まとめた依頼の件数（まとめていなければ 1）",
+  occurrence: "その日の何回目か（1 日の回数。1 回の依頼は 1）", occurrenceId: "回つきの依頼 ID（R-0001-2。1 回の依頼は ID のまま）",
+  timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
   centerGeojson: "中央の GeoJSON（Point）" };
@@ -2194,14 +2205,15 @@ const SAMPLE_REQS = [
     offNadirMin: null, offNadirMax: 25, incidenceMin: null, incidenceMax: null, lookSide: "任意", orbitDir: "任意", resolution: 1, timeOfDay: "", cloudMax: 60, cloudForecast: 20, weatherFlag: "",
     scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", group: "第1班", note: "", warnings: "",
     passTime: DAY + 10.5 * 3600000, passOffNadir: 12.3, passIncidence: 13.6, passDirection: "降交", passLookSide: "右",
-    mergedIds: ["R-0001", "R-0003"], mergedNames: ["東京湾 定点", "東京湾 奥"], mergedCount: 2 },
+    mergedIds: ["R-0001", "R-0003"], mergedNames: ["東京湾 定点", "東京湾 奥"], mergedCount: 2,
+    occurrence: 1, occurrenceId: "R-0001-1", timesMin: 2, timesMax: 3 },
   { id: "R-0002", name: "臨時 舞鶴", managementNo: "", identificationNo: "", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
     repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: [], satellites: ["SAR-Y2"], modes: ["Spotlight"],
     seriesSatellites: [], seriesSatelliteIds: [], satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
     offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
     scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", group: "", note: "至急", warnings: "シーン数が多い",
     passTime: DAY + 21.2 * 3600000, passOffNadir: 31.5, passIncidence: 35.1, passDirection: "昇交", passLookSide: "右",
-    mergedIds: [], mergedNames: [], mergedCount: 1 },
+    mergedIds: [], mergedNames: [], mergedCount: 1, occurrence: 1, occurrenceId: "R-0002", timesMin: 1, timesMax: 1 },
 ];
 const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate", "passTime"];
 /** 見本の今のファイル: その依頼と、何番目か（maxPerFile で分けたとき）。 */

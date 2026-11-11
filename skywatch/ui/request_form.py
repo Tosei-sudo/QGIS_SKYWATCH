@@ -197,6 +197,26 @@ class RequestForm(QDialog):
         repeat.addWidget(self.every)
         repeat.addStretch(1)
         form.addRow(self.tr("繰り返し"), self.repeat_row)
+        # 1 日の回数 (tsudo, 2026-11-11: 「n回以上、m回以下」): n shots make the day count, up to m where there is room.
+        times = QHBoxLayout()
+        self.times_min = QSpinBox()
+        self.times_min.setRange(1, 24)
+        self.times_min.setSuffix(self.tr(" 回以上"))
+        self.times_min.setToolTip(self.tr("その日にこの回数撮れたら達成（別々のパスで）"))
+        self.times_max = QSpinBox()
+        self.times_max.setRange(0, 24)
+        self.times_max.setSpecialValueText(self.tr("下限と同じ"))
+        self.times_max.setSuffix(self.tr(" 回以下"))
+        self.times_max.setToolTip(self.tr("下限を超える回は、ほかの依頼を置いたあとの空いた枠で出す。空欄（0）なら下限と同じ回数だけ"))
+        self.times_gap = _optional(0, 24, self.tr(" 時間"), 1)
+        self.times_gap.setSpecialValueText(self.tr("間隔 1 時間"))
+        self.times_gap.setToolTip(self.tr("同じ日の回と回の間の最短の間隔（既定 1 時間: 別のパスになる）"))
+        for w, label in ((self.times_min, ""), (self.times_max, "〜"), (self.times_gap, "間隔")):
+            if label:
+                times.addWidget(QLabel(self.tr(label)))
+            times.addWidget(w)
+        times.addStretch(1)
+        form.addRow(self.tr("1 日の回数"), times)
 
         prio = QHBoxLayout()
         self.level = QComboBox()
@@ -354,6 +374,9 @@ class RequestForm(QDialog):
         for i, box in enumerate(self.weekdays):
             box.setChecked(i in rep.weekdays)
         self.every.setValue(max(2, rep.every))
+        self.times_min.setValue(max(1, int(r.times_min or 1)))
+        self.times_max.setValue(int(r.times_max or 0))
+        _set(self.times_gap, r.times_gap)
         self.priority.setValue(r.priority)
         detailed = r.priority not in [v for *_, v in PRIORITY_LEVELS]
         self.detail.setChecked(detailed)
@@ -587,6 +610,9 @@ class RequestForm(QDialog):
         out.start, out.end = first, last
         out.repeat = repeat_text(rep) if out.category == "定点" else "毎日"
         out.priority = self.priority.value()
+        out.times_min = self.times_min.value()
+        out.times_max = max(self.times_max.value(), out.times_min) if self.times_max.value() > 0 else None
+        out.times_gap = _get(self.times_gap)
         out.kind, out.look_side, out.orbit_dir, out.time_of_day = (self.kind.currentText(), self.look.currentText(),
                                                                     self.orbit.currentText(), self.time_of_day.currentText())
         out.series, out.satellites, out.modes = _words(self.series.text()), _words(self.satellites.text()), _words(self.modes.text())

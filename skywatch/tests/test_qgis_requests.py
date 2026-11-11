@@ -571,3 +571,39 @@ def test_plan_files_on_the_passes(plugin):
     history = {r["attributes"]["REQ_NAME"]: r["attributes"] for r in fake.layers[HISTORY].rows}
     assert (history["北"]["MERGED_INTO"], history["北"]["SCENES"]) == (None, 2)
     assert (history["南"]["MERGED_INTO"], history["南"]["SCENES"], history["南"]["RESULT"]) == ("P-0", 0, "採用")
+
+
+def test_a_request_taken_several_times_a_day(plugin):
+    # 1 日の回数 (tsudo, 2026-11-11: 「n回以上、m回以下」): in the form, the ledger and the day's list, a row per time.
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+    dock.edit(new=True)
+    form = dock.form
+    assert (form.times_min.value(), form.times_max.text(), form.times_gap.text()) == (1, "下限と同じ", "間隔 1 時間")
+    form.name.setText("大阪湾")
+    form.kind.setCurrentText("SAR")
+    form.category.setCurrentText("臨時")
+    form.times_min.setValue(2)
+    form.times_max.setValue(3)
+    form.times_gap.setValue(2)
+    form._point_clicked(QgsPointXY(135.3, 34.6))
+    form._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 1)
+    r = dock.requests[0]
+    assert (r.times_min, r.times_max, r.times_gap, r.times) == (2, 3, 2, (2, 3))
+    a = fake.layers[LEDGER].rows[0]["attributes"]
+    assert (a["TIMES_MIN"], a["TIMES_MAX"], a["TIMES_GAP"]) == (2, 3, 2)
+    dock.edit(request=r)
+    assert (dock.form.times_min.value(), dock.form.times_max.value(), dock.form.times_gap.value()) == (2, 3, 2)
+    dock.form.close()
+
+    daily = p.api.plan_files
+    daily.show()
+    daily.folder.setText(str(tmp_path / "out"))
+    daily.run()
+    assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
+    assert [(c.key, c.result) for c in daily.plan.candidates] == [(r.id, "採用"), (f"{r.id}#2", "採用"), (f"{r.id}#3", "採用")]
+    names = [daily.model.item(i, COLUMNS.index("依頼")).text() for i in range(daily.model.rowCount())]
+    assert names == ["大阪湾（1/2 回目）", "大阪湾（2/2 回目）", "大阪湾（3 回目・追加）"]

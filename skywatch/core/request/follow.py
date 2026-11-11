@@ -17,6 +17,7 @@ from ..esri import EsriClient, EsriError
 from ..plan.names import NO_NAMES, SatelliteNames, best_named, names_satellite
 from .. import time_zone
 from ..time_query import between_condition, text_sample
+from ..time_zone import read_text_instant
 from .model import ImagingRequest
 from .model import day_bounds
 from .store import IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, update_history, update_requests
@@ -38,6 +39,12 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
     images found, one whose sensor names the row's satellite (or an alias of
     `names`) is preferred. A row whose request is not in the ledger (or has
     no area) is left 未判定: the day's images anywhere do not settle it (#77).
+
+    The times of a request taken several times a day (1 日の回数) are
+    followed up together: each takes an image of its own, `times_gap` hours
+    (1) or more from the others' (images of one pass are one time), in the
+    order of the times; an image already taken by one of its rows (in
+    `rows`, 撮像済み) is not counted again.
     """
     acquired = catalog.fields.get("acquired")
     if not acquired:
@@ -46,19 +53,26 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
     zone = time_zone.zone_for(catalog.url)
     like: Optional[str] = None
     out: list[Finding] = []
+    groups: dict = {}
+    settled: dict = {}
     for row in rows:
+        if row.result != "採用":
+            continue
+        if row.captured == "未判定":
+            groups.setdefault((row.request_id, row.day), []).append(row)
+        elif row.captured == "撮像済み":
+            settled.setdefault((row.request_id, row.day), []).append(row)
+    for (request_id, day_text), group in groups.items():
         if cancelled and cancelled():
             break
-        if row.result != "採用" or row.captured != "未判定":
-            continue
         try:
-            day = date.fromisoformat(row.day)
+            day = date.fromisoformat(day_text)
         except ValueError:
             continue
         first, last = day_bounds(day)
         if now < first:
             continue
-        req: Optional[ImagingRequest] = requests.get(row.request_id)
+        req: Optional[ImagingRequest] = requests.get(request_id)
         if req is None or not req.rings:
             # No area to ask about (the request left the ledger): any image of the day would do, so none is asked (#77).
             continue
@@ -71,20 +85,49 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
                   "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
         found = client.ask(f"{catalog.url}/query", params, token).get("features") or []
         sensor = catalog.fields.get("sensor")
-        if found and sensor:
-            found = fitting_images(found, sensor, row, req, names)
-        if found:
-            wanted = names.expand(row.satellite) if sensor else set()
-            best = best_named(found, lambda x: (x.get("attributes") or {}).get(sensor), wanted)
-            a = best.get("attributes") or {}
-            id_field = catalog.fields.get("id")
-            value = a.get(id_field) if id_field else None
-            if value is None:
-                value = next((a[k] for k in ("OBJECTID", "objectid", "FID") if a.get(k) is not None), "")
-            out.append(Finding(row, "撮像済み", str(value)))
-        elif now - last > miss_after_days * 86400000:
-            out.append(Finding(row, "未撮像"))
+        # Taken several times that day (rows of more than one time; rows of one time written twice are each their own).
+        several = req.times[1] > 1 or any(r.occurrence > 1 for r in (*group, *settled.get((request_id, day_text), ())))
+        # Images taken by the request's other times (already settled): neither they nor their pass count again.
+        used = {r.image_id for r in settled.get((request_id, day_text), ()) if r.image_id}
+        moments = [t for t in (_moment(f, acquired, zone) for f in found if _image_id(f, catalog) in used) if t is not None]
+        for row in sorted(group, key=lambda r: r.occurrence):
+            mine = fitting_images(found, sensor, row, req, names) if found and sensor else list(found)
+            if several:
+                gap = req.gap_ms
+                mine = [f for f in mine if _image_id(f, catalog) not in used
+                        and (gap <= 0 or (t := _moment(f, acquired, zone)) is None or all(abs(t - u) >= gap for u in moments))]
+            if mine:
+                wanted = names.expand(row.satellite) if sensor else set()
+                best = best_named(mine, lambda x: (x.get("attributes") or {}).get(sensor), wanted)
+                value = _image_id(best, catalog)
+                used.add(value)
+                t = _moment(best, acquired, zone)
+                if t is not None:
+                    moments.append(t)
+                out.append(Finding(row, "撮像済み", value))
+            elif now - last > miss_after_days * 86400000:
+                out.append(Finding(row, "未撮像"))
     return out
+
+
+def _image_id(feature: dict, catalog: CatalogConfig) -> str:
+    """An image's id in the catalog (its id field, else its object id)."""
+    a = feature.get("attributes") or {}
+    id_field = catalog.fields.get("id")
+    value = a.get(id_field) if id_field else None
+    if value is None:
+        value = next((a[k] for k in ("OBJECTID", "objectid", "FID") if a.get(k) is not None), "")
+    return str(value)
+
+
+def _moment(feature: dict, acquired: str, zone) -> Optional[float]:
+    """When an image was taken (ms), None when its time cannot be read."""
+    v = (feature.get("attributes") or {}).get(acquired)
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+        return float(v)
+    if isinstance(v, str):
+        return read_text_instant(v, zone or time_zone.UTC)
+    return None
 
 
 def accepted_names(row: HistoryRow, req: Optional[ImagingRequest], names: SatelliteNames = NO_NAMES) -> set:
@@ -114,12 +157,35 @@ def fitting_images(found: Sequence[dict], sensor: str, row: HistoryRow, req: Opt
     return [f for f in found if names_satellite((f.get("attributes") or {}).get(sensor), wanted, written)]
 
 
-def request_changes(findings: Sequence[Finding], requests: dict) -> list[tuple[int, dict]]:
-    """What the ledger takes from findings: a request taken loses its raise and, 期間内1回, is 完了."""
+def _row_key(r: HistoryRow):
+    return r.object_id if r.object_id is not None else id(r)
+
+
+def captured_times(findings: Sequence[Finding], history: Sequence[HistoryRow] = ()) -> dict:
+    """(request id, day) → the rows 撮像済み (`history` as `findings` leave it): how many times the day was taken."""
+    state = {_row_key(r): (r, r.captured) for r in history}
+    state.update((_row_key(f.row), (f.row, f.captured)) for f in findings)
+    out: dict = {}
+    for r, captured in state.values():
+        if r.result == "採用" and captured == "撮像済み":
+            out[(r.request_id, r.day)] = out.get((r.request_id, r.day), 0) + 1
+    return out
+
+
+def request_changes(findings: Sequence[Finding], requests: dict, history: Sequence[HistoryRow] = ()) -> list[tuple[int, dict]]:
+    """
+    What the ledger takes from findings: a request taken loses its raise
+    and, 期間内1回, is 完了. A request taken several times a day (1 日の回数)
+    counts as taken when n of its rows of the day are 撮像済み (with those of
+    `history`).
+    """
     out: dict[int, dict] = {}
+    counts = captured_times(findings, history)
     for f in findings:
         req = requests.get(f.row.request_id)
         if f.captured != "撮像済み" or req is None or req.object_id is None:
+            continue
+        if counts.get((f.row.request_id, f.row.day), 0) < req.times[0]:
             continue
         change = {"boost": 0}
         if req.achieve == "期間内1回":
@@ -142,13 +208,11 @@ def marked(rows: Sequence[HistoryRow], captured: str, image_id: str = "") -> lis
 def undone_changes(findings: Sequence[Finding], requests: dict, history: Sequence[HistoryRow]) -> list[tuple[int, dict]]:
     """
     A 期間内1回 request marked 未撮像 by hand after it was 完了 goes back to
-    有効, unless another of its rows is still 撮像済み.
+    有効, unless another of its days is still taken (撮像済み rows, n of them
+    for a request taken several times a day).
     """
-    def key(r):
-        return r.object_id if r.object_id is not None else id(r)
-
-    changed = {key(f.row) for f in findings}
-    still = {r.request_id for r in history if r.captured == "撮像済み" and key(r) not in changed}
+    counts = captured_times(findings, history)
+    still = {rid for (rid, _day), n in counts.items() if n >= (requests[rid].times[0] if rid in requests else 1)}
     out: dict[int, dict] = {}
     for f in findings:
         req = requests.get(f.row.request_id)
@@ -285,7 +349,7 @@ def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Option
     problems += saved.problems
     found = _saved_only(found, saved)
     settle(found)
-    changes = request_changes(found, requests)
+    changes = request_changes(found, requests, history)
     if changes:
         problems += update_requests(client, store, token, changes, now).problems
     return found, bool(changes)
@@ -300,7 +364,7 @@ def save_marked(client: EsriClient, store: RequestStoreConfig, token: Optional[s
     saved = update_history(client, store, token, history_changes(findings))
     problems += saved.problems
     findings = _saved_only(findings, saved)
-    changes = request_changes(findings, requests) + undone_changes(findings, requests, history)
+    changes = request_changes(findings, requests, history) + undone_changes(findings, requests, history)
     settle(findings)
     if changes:
         problems += update_requests(client, store, token, changes, now).problems

@@ -29,8 +29,9 @@ def companions(row: HistoryRow, rows: Sequence[HistoryRow]) -> list[HistoryRow]:
         same = [r for r in rows if r.shot_id == row.shot_id and r.result == "採用"]
     else:
         lead = row.merged_into or row.request_id
+        # Not the request's other times of the day (1 日の回数): each is its own shot.
         same = [r for r in rows if r.result == "採用" and r.system == row.system
-                and (r.request_id == lead or r.merged_into == lead)]
+                and (r.request_id == lead or r.merged_into == lead) and (r is row or r.request_id != row.request_id)]
     same.sort(key=lambda r: bool(r.merged_into))
     return same if len(same) > 1 else []
 

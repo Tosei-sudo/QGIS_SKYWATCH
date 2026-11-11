@@ -7,6 +7,11 @@ A request is 定点 (taken again and again, on the days its repeat names) or
 臨時 (once or every day of its period). Its 達成条件 says whether every day
 counts (毎回) or one image in the period is enough (期間内1回).
 
+A request may be taken several times a day (1 日の回数, tsudo 2026-11-11:
+「n回以上、m回以下」): at least `times_min` (n) shots on different passes,
+`times_gap` hours apart, up to `times_max` (m; n when not given) where
+there is room; a day counts when n of them are taken.
+
 Priorities run 1 (highest) … 1000; five named levels are bands of 200.
 Days are JST days.
 """
@@ -20,6 +25,9 @@ from typing import Optional, Sequence
 
 #: Days are cut in Japan Standard Time.
 JST = timezone(timedelta(hours=9))
+#: Hours between two shots of a request taken several times a day, when it does not say (so that they are on
+#: different passes: a satellite passes again after about 1.5 hours).
+DEFAULT_TIMES_GAP = 1.0
 
 CATEGORIES = ("定点", "臨時")
 ACHIEVES = ("毎回", "期間内1回")
@@ -133,6 +141,11 @@ class ImagingRequest:
     time_of_day: str = "任意"
     #: 「この雲量以上なら実施しない」 (optical); None for no limit.
     cloud_no_go: Optional[float] = None
+    #: 1 日の回数: at least `times_min` shots a day (the day counts with them), up to `times_max` (None: times_min)
+    #: where there is room, `times_gap` hours apart at least (None: DEFAULT_TIMES_GAP).
+    times_min: int = 1
+    times_max: Optional[int] = None
+    times_gap: Optional[float] = None
     #: Systems to try first, in order.
     systems: list = field(default_factory=list)
     shape_kind: str = "範囲"
@@ -151,6 +164,18 @@ class ImagingRequest:
     def effective(self) -> int:
         """The priority after raises (繰り上げ)."""
         return clamp_priority(self.priority - self.boost)
+
+    @property
+    def times(self) -> tuple[int, int]:
+        """(n, m): the shots a day that make the day count, and the most taken where there is room."""
+        n = max(1, int(self.times_min or 1))
+        return n, max(n, int(self.times_max)) if self.times_max else n
+
+    @property
+    def gap_ms(self) -> float:
+        """The least time between two of its shots on one day (ms)."""
+        hours = self.times_gap if self.times_gap is not None and self.times_gap >= 0 else DEFAULT_TIMES_GAP
+        return hours * 3600000
 
 
 def day_bounds(day: date) -> tuple[float, float]:
