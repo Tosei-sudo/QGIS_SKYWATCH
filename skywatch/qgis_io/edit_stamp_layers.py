@@ -3,7 +3,8 @@ Esri layers QGIS edits itself (ArcGIS feature service layers opened from the
 settings file's `layers`, a web map, or the data source manager): when an
 edit is saved, the features added get every tracking field and the features
 changed the "updated" ones (core/edit_stamp.py), as the plugin's own
-writes do.
+writes do. A save that went through is recorded in the audit log (how many
+features were added, changed and deleted: core/audit.py).
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from typing import Any, Optional
 from qgis.core import QgsMapLayer, QgsVectorLayer
 from qgis.PyQt.QtCore import QDateTime, Qt, QVariant
 
-from ..core import edit_stamp
+from ..core import audit, edit_stamp
 from ..core.time_zone import UTC, TimeShift, rule_for, write_instant
 from .time_zone_fields import layer_url
 
@@ -44,6 +45,16 @@ def _qt_value(value: Any, kind: str, url: Optional[str]) -> Any:
         ms = write_instant(value, TimeShift(rule.zone, rule.service or UTC)) if rule else value
         return QDateTime.fromMSecsSinceEpoch(int(round(ms)), Qt.TimeSpec.UTC)
     return value
+
+
+def buffer_counts(layer: QgsVectorLayer) -> dict[str, int]:
+    """How many features the edit buffer adds, changes and deletes (counted, nothing read)."""
+    buffer = layer.editBuffer()
+    if buffer is None:
+        return {}
+    added = set(buffer.addedFeatures().keys())
+    changed = (set(buffer.changedAttributeValues().keys()) | set(buffer.changedGeometries().keys())) - added
+    return {"added": len(added), "changed": len(changed), "deleted": len(buffer.deletedFeatureIds())}
 
 
 def stamp_buffer(layer: QgsVectorLayer, when: Optional[int] = None, user: Optional[str] = None) -> int:
@@ -81,6 +92,8 @@ class EditStampLayers:
         self.watched: set[str] = set()
         #: False once the plugin is unloaded (the layers' connections stay, doing nothing).
         self.active = True
+        #: Layer id → what its save being committed changes (recorded once it went through).
+        self._saving: dict[str, dict[str, int]] = {}
 
     def layers_added(self, layers) -> None:
         for layer in layers:
@@ -88,15 +101,33 @@ class EditStampLayers:
                 continue
             self.watched.add(layer.id())
             layer.beforeCommitChanges.connect(lambda *_, lay=layer: self._before_commit(lay))
+            layer.afterCommitChanges.connect(lambda *_, lay=layer: self._after_commit(lay))
 
     def layers_removed(self, ids) -> None:
         self.watched.difference_update(ids)
+        for i in ids:
+            self._saving.pop(i, None)
 
     def _before_commit(self, layer: QgsVectorLayer) -> None:
         if not self.active:
             return
         try:
+            counts = buffer_counts(layer)
+            if counts:
+                self._saving[layer.id()] = counts
             stamp_buffer(layer)
         except RuntimeError:
             # The layer was deleted under the signal.
+            pass
+
+    def _after_commit(self, layer: QgsVectorLayer) -> None:
+        """The save went through: recorded in the audit log (QGIS's own edit of an Esri layer)."""
+        if not self.active:
+            return
+        try:
+            counts = self._saving.pop(layer.id(), None)
+            if counts and any(counts.values()):
+                audit.record("edit", "save", layer_url(layer) or "", count=sum(counts.values()),
+                             detail={"layer": layer.name(), "by": "qgis", **counts})
+        except RuntimeError:
             pass

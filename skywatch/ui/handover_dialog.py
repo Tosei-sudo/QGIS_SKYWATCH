@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ..core import edit_stamp
+from ..core import audit, edit_stamp
 from ..core.obs.assignments import STATUSES, Assignment, progress_of, progress_text, same_person, update, with_status
 from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
 from ..core.request.export import format_time
@@ -402,7 +402,9 @@ class HandoverDialog(QDialog):
         if not self.text_edit.toPlainText().strip():
             self._say(self.tr("メモなし（「作成」で作る）"))
             return
-        QApplication.clipboard().setText(self._text())
+        text = self._text()
+        QApplication.clipboard().setText(text)
+        audit.record("copy", "handover-memo", text=text)
         self._say(self.tr("クリップボードへコピー"))
 
     def save(self) -> None:
@@ -415,10 +417,12 @@ class HandoverDialog(QDialog):
         data.memo = self.memo_edit.toPlainText()
         said = []
         QApplication.clipboard().setText(text)
+        audit.record("copy", "handover-memo", text=text)
         said.append(self.tr("クリップボードへコピー"))
         if s.file:
             try:
                 path, replaced = write_file(text, s, data.now)
+                audit.record("export", "handover-memo", path, file=path)
                 said.append(self.tr("ファイル {p}").format(p=path))
                 if replaced:
                     said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=s.file.encoding))

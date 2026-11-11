@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ..core import edit_stamp
+from ..core import audit, edit_stamp
 from ..core.esri import EsriError
 from ..core.obs.alerts import (
     OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_rules,
@@ -467,6 +467,7 @@ class AlertDialog(QDialog):
         text = report_text(lines, fmt, at)
         if not record:
             QApplication.clipboard().setText(text)
+            audit.record("copy", "alert-text", count=len(items), text=text)
             self._say(self.tr("{n} 件をクリップボードへコピー（通報テーブルには記録せず）").format(n=len(items)))
             return
 
@@ -476,10 +477,12 @@ class AlertDialog(QDialog):
             said = [self.tr("通報テーブルに {n} 件").format(n=logged)] if s.table else []
             if fmt.clipboard:
                 QApplication.clipboard().setText(text)
+                audit.record("copy", "alert-text", count=len(items), text=text)
                 said.append(self.tr("クリップボードへコピー"))
             if fmt.file:
                 try:
                     path, replaced = write_file(text, fmt, at)
+                    audit.record("export", "alert-text", path, count=len(items), file=path)
                     said.append(self.tr("ファイル {p}").format(p=path))
                     if replaced:
                         said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
@@ -551,7 +554,9 @@ class AlertDialog(QDialog):
 
     def copy_log(self) -> None:
         rows = self._selected_log() or self._shown_log()
-        QApplication.clipboard().setText("".join(r.text + "\r\n" for r in rows))
+        text = "".join(r.text + "\r\n" for r in rows)
+        QApplication.clipboard().setText(text)
+        audit.record("copy", "alert-log", count=len(rows), text=text)
         self._say(self.tr("{n} 行をクリップボードへコピー").format(n=len(rows)))
 
     def remove_log(self, confirm: bool = True) -> None:

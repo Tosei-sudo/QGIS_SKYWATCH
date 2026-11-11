@@ -19,6 +19,7 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..core import audit
 from ..core.obs.alerts import AlertSettings, LogRow, poll_log
 from ..core.request.export import format_time
 from ..core.time_zone import UTC
@@ -250,7 +251,9 @@ class AlertFeed(QWidget):
         rows = self.shown()
         picked = sorted({i.row() for i in self.table.selectedIndexes()})
         chosen = [rows[r] for r in picked if r < len(rows)] or rows
-        QApplication.clipboard().setText("".join(r.text + "\r\n" for r in chosen))
+        text = "".join(r.text + "\r\n" for r in chosen)
+        QApplication.clipboard().setText(text)
+        audit.record("copy", "alert-feed", count=len(chosen), text=text)
         self.status.setText(self.tr("{n} 行をクリップボードへコピー").format(n=len(chosen)))
 
     def close_down(self) -> None:

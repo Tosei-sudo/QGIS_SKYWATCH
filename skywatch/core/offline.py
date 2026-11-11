@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional
 from urllib.parse import urlsplit
 
+from . import audit
 from .esri import Transport, UnreachableError
 
 #: The kinds of work kept, in the order they are counted and sent, with their names on screen.
@@ -423,6 +424,7 @@ class OfflineWork:
                            (op, text, self.clock(), title, note, before.seq))
             db.commit()
             kept = self.item(kind, store, item_id)
+        audit.record("offline", "keep", store, ids=[item_id], detail={"kind": kind, "op": op, "title": title, "note": note})
         self._changed()
         return kept
 

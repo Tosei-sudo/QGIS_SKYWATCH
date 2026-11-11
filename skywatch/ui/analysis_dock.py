@@ -42,6 +42,7 @@ try:
 except ImportError:  # Qt 5
     from qgis.PyQt.QtWidgets import QShortcut
 
+from ..core import audit
 from ..core.analysis import (
     AGGREGATES, DEFAULT_TABLE_LIMIT, JOIN_TYPES, PROJECT_KEY, PROJECT_SCOPE, AnalysisError, Analysis, Builder, Column, Figure, Join,
     Result, Table, aliases, analyses_of, analyses_text, build_sql, cell_text, csv_text, esri_tables, esri_type, examples, parameters,
@@ -913,12 +914,15 @@ class AnalysisDock(PluginDock):
         except OSError as error:
             self.say(self.tr("保存できない: {m}").format(m=error))
             return None
+        audit.record("export", "analysis-csv", path, count=len(self.result.rows), detail={"analysis": self.current or ""}, file=path)
         self.say(self.tr("{n:,} 行を保存: {p}").format(n=len(self.result.rows), p=path))
         return path
 
     def copy(self) -> None:
         if self.result:
-            QApplication.clipboard().setText(tsv_text(self.result))
+            text = tsv_text(self.result)
+            QApplication.clipboard().setText(text)
+            audit.record("copy", "analysis-result", count=len(self.result.rows), detail={"analysis": self.current or ""}, text=text)
             self.say(self.tr("{n:,} 行をコピー").format(n=len(self.result.rows)))
 
     def add_layer(self, name: Optional[str] = None) -> Optional[QgsVectorLayer]:

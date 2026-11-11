@@ -114,6 +114,21 @@ def own_place_cache(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def own_audit_folder(monkeypatch, tmp_path):
+    """Each test's audit log (監査ログ) is written in its own folder, never the profile's; none is left set after it."""
+    from skywatch.core import audit
+
+    try:
+        from skywatch.ui import audit_status
+    except ImportError:  # no QGIS
+        audit_status = None
+    if audit_status is not None:
+        monkeypatch.setattr(audit_status, "default_folder", lambda: str(tmp_path / "audit"))
+    yield
+    audit.set_log(None)
+
+
+@pytest.fixture(autouse=True)
 def no_time_zone_rules():
     """Each test starts with no settings file's time zones (they are module state, as in the viewer)."""
     from skywatch.core import time_zone

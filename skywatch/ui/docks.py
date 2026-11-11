@@ -19,6 +19,7 @@ from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
+from ..core import audit
 from ..qgis_io.context import PluginContext
 
 
@@ -45,17 +46,20 @@ def plain_label(label: QLabel) -> QLabel:
     return label
 
 
-def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[str] = None) -> Optional[str]:
+def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[str] = None, what: str = "file",
+              count: Optional[int] = None) -> Optional[str]:
     """
     Writes a file the user chose to save: None when it worked, else why not
     (the CSV still open in Excel, a folder that can't be written), to be told
-    in the dock instead of a Python error.
+    in the dock instead of a Python error. Recorded in the audit log as
+    `what` (an export, with how many rows when `count`).
     """
     try:
         with open(path, "w", encoding=encoding, newline=newline) as f:
             f.write(text)
     except OSError as error:
         return error.strerror or str(error)
+    audit.record("export", what, path, count=count, file=path)
     return None
 
 

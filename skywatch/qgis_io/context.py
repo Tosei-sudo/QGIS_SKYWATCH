@@ -57,6 +57,8 @@ class PluginContext(QObject):
         #: Only the shipped settings file is read (a file chosen in the settings dialog is ignored).
         self.locked = False
         self.loading = False
+        #: The text of a settings file read from a URL (None: a local file, or none read; the audit log's hash of it).
+        self.config_text: Optional[str] = None
         #: Counts reloads: only the latest one's answer is taken.
         self._generation = 0
         self._gpkg: Optional[GeoPackage] = None
@@ -84,6 +86,7 @@ class PluginContext(QObject):
         self.source = source
         self.bundled = bundled
         self.locked = bundled and settings.config_locked()
+        self.config_text = None
         if not source:
             self.config, self.problems = PluginConfig(), []
             self.configChanged.emit()
@@ -100,6 +103,7 @@ class PluginContext(QObject):
                 if generation != self._generation:
                     return  # An older answer: a later reload is the one that counts (#85).
                 self.loading = False
+                self.config_text = text
                 self.config, self.problems = parse_config_text(text)
                 try:
                     settings.set_cached_config(source, load_jsonc(text), time.strftime("%Y-%m-%d %H:%M"))

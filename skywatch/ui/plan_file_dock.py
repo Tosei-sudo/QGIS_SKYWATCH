@@ -47,6 +47,7 @@ from qgis.PyQt.QtWidgets import (
     QTableView,
 )
 
+from ..core import audit
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
@@ -808,8 +809,10 @@ class PlanFileDock(PluginDock):
             failures.setdefault(w.system.system, "、".join(w.errors[:2]))
         for w, folder in targets:
             try:
-                paths.append(write(w, folder))
+                path = write(w, folder)
+                paths.append(path)
                 done_files.append(w)
+                audit.record("export", "plan-file", path, count=w.count, detail={"system": w.system.system, "day": plan.day.isoformat()}, file=path)
             except OSError as error:
                 reason = error.strerror or str(error)
                 problems.append(f"{self._label(w)}: {reason}")
@@ -826,6 +829,7 @@ class PlanFileDock(PluginDock):
             try:
                 os.remove(os.path.join(folder, name))
                 cleared += 1
+                audit.record("export", "plan-file-removed", os.path.join(folder, name), detail={"system": system})
             except OSError as error:
                 problems.append(self.tr("{name} を削除できず: {m}").format(name=name, m=error.strerror or str(error)))
         self.paths = paths
