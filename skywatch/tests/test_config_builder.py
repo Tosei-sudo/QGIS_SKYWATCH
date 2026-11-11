@@ -23,7 +23,7 @@ def plugin_constants() -> dict:
     from skywatch.core.obs import export as obs_export
     from skywatch.core.obs import alerts, assignments, handover, model as obs_model, stores as obs_stores
     from skywatch.core.plan import modes, names, satellites
-    from skywatch.core.request import export, groups as request_groups, result_file, store as request_store, systems
+    from skywatch.core.request import export, groups as request_groups, link_id, result_file, store as request_store, systems
 
     return {
         "keys": list(config.KEYS),
@@ -77,6 +77,9 @@ def plugin_constants() -> dict:
         "exportFormats": list(systems.FORMATS),
         "resultTargets": list(result_file.TARGETS),
         "resultKeySources": list(result_file.KEY_SOURCES),
+        "resultMatchKeys": list(result_file.MATCH_KEYS),
+        "linkIdChars": dict(link_id.ALPHABETS),
+        "linkIdLength": [link_id.MIN_LENGTH, link_id.MAX_LENGTH, link_id.DEFAULT_LENGTH],
         "resultGeometries": list(result_file.GEOMETRIES),
         "resultEncodings": sorted(set(result_file.ENCODINGS.values())),
         "resultWords": {result_file.ADOPTED: list(result_file.DEFAULT_ADOPTED), result_file.REJECTED: list(result_file.DEFAULT_REJECTED),

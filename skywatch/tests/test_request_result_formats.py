@@ -167,7 +167,7 @@ def test_a_schema_in_a_file_is_read_with_the_file():
 
     assert read_answers(body, spec, gone) == ([], ["スキーマ schemas/sys-a.result.schema.json の読み込み不可（ない）"])
     assert read_answers(body, spec, lambda p: {"type": "object", "properties": {"r": {"x-target": "records"}}})[1] == [
-        "スキーマ schemas/sys-a.result.schema.json に依頼を表すプロパティ（x-target が id・managementNo・identificationNo）なし"]
+        "スキーマ schemas/sys-a.result.schema.json に依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）なし"]
 
 
 def test_settings_problems():
@@ -180,7 +180,7 @@ def test_settings_problems():
     assert result_file_of({"format": "json", "schema": {"type": "array", "items": {"x-target": "id"}}}, "j", problems) is None
     assert result_file_of({"format": "json", "schema": 3}, "k", problems) is None
     assert problems == [
-        "r.columns に依頼を表す列（target が id・managementNo・identificationNo）なし",
+        "r.columns に依頼を表す列（target が id・managementNo・identificationNo・linkId）なし",
         "s.delimiter は ,・tab・;・|・space のどれかで指定", "s.skipLines は 0 以上の整数で指定", "s.sizeKm は正の数（km）で指定",
         "s の key は columns か schema があるときは使わない（列に書く）",
         "s.columns[1].target「colour」は使えない（" + "・".join(TARGETS) + "）",

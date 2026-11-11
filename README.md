@@ -351,6 +351,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
   - 1 ファイルに入れられる件数に上限のあるシステムは `requestExports` の `maxPerFile` に件数を書くと、超えた日はその件数ずつのファイルに分けて書き出す（`SYS-A_20261111_1.csv`・`_2.csv` …、`fileName` の `{part}`・`{parts}` で番号の付け方も決められる）。前の書き出しで残った番号違いのファイルは削除する。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「22. 1 ファイルの件数の上限」
   - 出力した依頼は、システムが実際にその日の計画に入れたか（採否）を待つ。採否は「撮像予定」ドックで、システムから返ってきた結果ファイル（`requestExports` の `resultFile`）を取り込むか手で入れる。採否の分からないシステムもあるので、分からないものは「不明」のまま扱い、画像が入って撮像済みになれば「採用」になる
+  - 外部連携ID（2026-11-12）: 出力履歴の行ごとに短い ID（既定 12 文字、数字と英大文字。I・L・O・U は使わない）を付けて `LINK_ID` に残し、ファイルの項目 `linkId` で渡せる。名前・ID の欄に UUID の長さ（36 文字）が入らないシステム向け。`%s` の書式で前後に文字も付けられる（`"format": "SW-%s"`）。文字数・文字の種類はシステムごとに `linkIdLength`（6〜32、既定 12）・`linkIdChars`（`base32`（既定）・`digits`（数字だけ）・`hex`）。依頼・対象日・システム・その日の回から決まるので、書き出し直しても同じ依頼は同じ ID。結果ファイルに `linkId` の列があれば、その ID の出力の行（とまとめた依頼）に採否を付ける。ID はずっと一意ではないので、取り込む日とその前 `linkDays` 日（既定 7）・翌日の、そのシステムの出力の中で探し、近い日の行を使う（前の日に出した依頼をシステムが後の日に計画した、という答えもその日の行に付く）。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「29. 外部連携ID」
   - 「上限シミュレーション…」で、システムごとの 1 日の件数・枚数・区分の上限や使うシステムを変えた場合に、今後の日数（1〜60 日）で何件が枠超過・次のシステムへ回送・欠測（毎回）・期限切れ（期間内1回）になるかを、設定の値と並べて試算する。台帳・出力履歴には書き込まない（採用した依頼は撮像できたものとして計算）
   - 「照合…」で計画と実績の照合。対象日の範囲を選び、出力した依頼が撮れたかを画像カタログと突き合わせて、システムごとの撮像済み・未撮像・未判定と撮像率を出す。衛星を指定した依頼は、その衛星（衛星名の対応表 `satelliteAliases` の別名も）の画像だけを撮像済みとする。指定のない依頼はどの衛星の画像でもよい
   - 未撮像の依頼は次回の「計算」に持ち越す（曜日・N 日ごとの定点も、その日が繰り返しの日でなくても候補に入る。期間内に限る）。繰り上げの候補にもなる
@@ -358,11 +359,11 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 「画像と関連付け…」（2026-11-11）: どの画像カタログのレコードがどのショット（撮像）かを手で結び付ける画面。照合の一覧で選んだ行のショットを開く。左にその日のショット（時刻・システム・衛星・センサー・モード・依頼・撮像・画像ID。システムと撮像の状態で絞れる）、右に選んだショットの範囲に重なる画像（対象日の前後 0〜7 日、既定 1 日。依頼の衛星のものを先に、パスの時刻に近い順。撮像日時・衛星・センサー・画像ID・時刻の差・ほかのショットに関連付け済みか）。地図にショットの範囲（紫の破線）・画像の範囲（青の破線）・選んだ画像（オレンジ）を出す。「この画像をこのショットに関連付け」でショットの依頼をすべて撮像済みにして画像IDを記録（台帳の繰り上げを戻し、期間内1回は完了。撮像の範囲 `TBL_REQUEST_SHOT` の `CAPTURED`・`IMAGE_ID` も）。ほかのショットに関連付け済みの画像・依頼の衛星でない画像・別の画像を関連付け済みのショットは先に確かめる。「関連付けを外す（未判定に戻す）」で次の照合でまた画像を探す状態に、「未撮像にする」で持ち越し・繰り上げの候補に戻す（完了にした依頼は有効に戻る）
   - 照合は QGIS なしでも定期的に実行できる（2026-11-11）。プラグインに入っている `scheduled_follow.py` を Windows のタスクスケジューラに登録する（[定期照合（タスクスケジューラ）](#定期照合タスクスケジューラ)）
 - 「撮像予定」ドック: カレンダーで日を選ぶと、その日の計画（出力履歴の行）を一覧と地図に出す。状態は 採用・不明・不採用・見送り・要求外（システム側の定常の撮像など、依頼していない計画）。カレンダーは計画のある日が太字（計画に入ったものがあれば緑、採否不明だけなら青）
-  - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用（・不明）を記録する。ファイルの様式はオーダーファイルと同じく自由に決められる（CSV は列ごとに何の値か・読み替え・書式・抜き出し、JSON は記録の中の場所かシステムの JSON Schema に `x-target`。設定ファイル作成ツールで組んで試し読みできる。[docs/imaging-requests.md](docs/imaging-requests.md) §20）。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
+  - 「結果ファイルの取り込み…」: システムの結果ファイル（CSV・JSON）を読み、外部連携ID（`linkId`）か依頼のキー（依頼ID・管理番号・識別番号）で突き合わせて採用・不採用（・不明）を記録する。ファイルの様式はオーダーファイルと同じく自由に決められる（CSV は列ごとに何の値か・読み替え・書式・抜き出し、JSON は記録の中の場所かシステムの JSON Schema に `x-target`。設定ファイル作成ツールで組んで試し読みできる。[docs/imaging-requests.md](docs/imaging-requests.md) §20）。出力していない依頼や依頼にない行は要求外として入る（範囲はファイルの列か依頼から）。取り込み直すと、そのシステム・その日の（ファイルから入れた）要求外は置き換わる
   - 「採用」「不採用」「不明に戻す」で手入力（理由も書ける）。「要求外を追加…」で依頼していない計画を手で足す（名称・システム・衛星・日時・範囲）。要求外は「削除」で消せる
   - 一覧の「まとめ」に、依頼ごとにどう撮るか（「22:00 単独」「22:00 まとめ 3 件（B・C と）」「22:00 同乗（「A」の撮像）」）を出す（吹き出しに撮像の時刻・衛星・角度・シーン数・まとめた依頼）。地図は依頼の範囲を状態の色で塗り、撮像の範囲（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)）があれば破線で重ねる（「撮像の範囲」で出し入れ）。依頼を選ぶと、その撮像と同じ撮像の依頼も太く出す
   - システム・状態・文字で絞り込み、「レイヤーに出す」で状態ごとに色分けした一時レイヤーにする（撮像の範囲があれば、もう 1 つの一時レイヤー「撮像の範囲」も）
-  - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
+  - 出力履歴に属性を足す必要がある（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴) の `TARGET_DATE`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`、外部連携IDで照合するなら `LINK_ID`。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す）。出力履歴をポリゴンで作ると範囲も残り、ArcGIS Enterprise のダッシュボードの地図にそのまま出せる（作り方は [docs/arcgis-setup.md](docs/arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」）。形状なしの表のままでも動く（地図は台帳の範囲で描く）
 
 ### 定期照合（タスクスケジューラ）
 
@@ -1434,7 +1435,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 - 必須の項目・属性名の形・数の範囲・重複などを「確認」に出す（最後はプラグインの「設定…」の問題の一覧で確かめる）
 - 撮像依頼の日次出力（`requestExports`、オーダー用ファイル）: CSV の列（`columns`）を表で、JSON の JSON Schema（`x-source` など）を木で組める。システムから受け取ったスキーマを読み込んで `x-source` を書き添え、`.schema.json` として保存もできる。架空の依頼 2 件での出力の見本と、スキーマでの検査結果を出す
   - 項目ごとに「既定値」（`default`。値が空のときに書く。必須の項目に）と固定値（`const`）を指定できる。配列は JSON で書く（`[]`・`[""]`・`["On"]`）。型が `string` の固定値・既定値は書いたとおりの文字（`001` も `001`）
-  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）、軌道から出した撮像（`passTime`・`passOffNadir`・`passIncidence`・`passDirection`・`passLookSide`）、まとめた依頼（`mergedIds`・`mergedNames`・`mergedCount`）、1 日に何回も撮る依頼の何回目か（`occurrence`・回つきの ID `occurrenceId`・`timesMin`・`timesMax`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
+  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）、軌道から出した撮像（`passTime`・`passOffNadir`・`passIncidence`・`passDirection`・`passLookSide`）、まとめた依頼（`mergedIds`・`mergedNames`・`mergedCount`）、1 日に何回も撮る依頼の何回目か（`occurrence`・回つきの ID `occurrenceId`・`timesMin`・`timesMax`）、出力の行の外部連携ID（`linkId`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
 - 入力途中の内容はブラウザに残り、次に開いたとき続きから
 - 項目の役割・選択肢はプラグインの定数の写し。プラグインを変えたら `python3 -m skywatch.tests.test_config_builder` で更新する（テストが食い違いを見つける）
 
@@ -1525,7 +1526,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`quotas`（年間撮像上限のテーブル。`shots` も要る）・`quotaFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`）など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`linkIdLength`（外部連携ID の文字数、6〜32。既定 `12`）・`linkIdChars`（その文字: `base32`（既定）・`digits`・`hex`）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`（外部連携ID は `linkId`）・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`・`linkDays`（外部連携ID を取り込む日の何日前の出力まで探すか。既定 `7`））など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系
@@ -1807,6 +1808,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `MERGED_INTO` | まとめ先の依頼ID | `String(255)` | ほかの依頼と 1 回の撮像にまとめて出力したとき、ファイルでその行になった依頼の `REQ_ID`（自分の行で出したものは空）。システムの採否はまとめた依頼すべてに付く。無くても動く | `mergedInto` |
 | `SHOT_ID` | 撮像ID | `String(64)` | その依頼を撮る撮像（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) の `SHOT_ID`。まとめた依頼は同じ値）。軌道を使わずに詰めた依頼・見送りは空。無くても動く | `shotId` |
 | `OCCURRENCE` | その日の回 | `Integer` | 1 日に何回も撮る依頼（`TIMES_MIN`・`TIMES_MAX`）の何回目か（1, 2 …。1 回の依頼は 1）。無くても動く（何回も撮る依頼は回の区別が残らない） | `occurrence` |
+| `LINK_ID` | 外部連携ID | `String(32)` | 出力した行の短い ID（既定 12 文字の英数字。システムごとに `linkIdLength`・`linkIdChars`）。ファイルの項目 `linkId` で渡し、結果ファイルの `linkId` の列でこの行と照合する。同じ依頼・同じ日・同じシステム・同じ回なら書き出し直しても同じ値。見送りは空。無くても動く（ID では照合できない） | `linkId` |
 
 ### `TBL_OBSERVATION`（観測記録）
 

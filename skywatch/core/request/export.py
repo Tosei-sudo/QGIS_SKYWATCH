@@ -21,6 +21,13 @@ not the outline of the shot's scenes), `mergedIds` / `mergedNames` /
 `passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
 are the pass the orbits gave; empty when fitted by counting.
 
+`linkId` is the row's 外部連携ID (core/request/link_id.py; 12 characters
+unless the system's `linkIdLength` / `linkIdChars` say otherwise), kept in
+its history row (LINK_ID): a system whose names or ids cannot hold a UUID
+takes it (with text round it by a printf format, `SW-%s`) and gives it back
+in its result file (target `linkId`), which then finds that very row. A row
+of requests put into one shot carries the first one's.
+
 A request taken several times a day (1 日の回数) has a row for each time:
 `occurrence` (1, 2 …) tells which, `occurrenceId` is its id with the time
 (`R1-2`; the plain id for a request taken once a day) for a system that
@@ -52,6 +59,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from ..time_zone import TimeZone, clock_of
 from .daily import TAKEN, Candidate
+from .link_id import link_id, link_ids
 from .model import bbox_of, center_of, day_bounds
 from .schema import resolve, validate
 from .systems import Column, ExportSystem, PriorityRule
@@ -66,7 +74,7 @@ SOURCES = (
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
-    "occurrence", "occurrenceId", "timesMin", "timesMax",
+    "occurrence", "occurrenceId", "timesMin", "timesMax", "linkId",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
 #: Sources whose value is a list of names.
@@ -209,6 +217,16 @@ class Context:
     #: Which of the system's files of the day this is (1 …), of how many (`maxPerFile`).
     part: int = 1
     parts: int = 1
+    #: The rows' 外部連携ID (link_id.link_ids of the day's requests taken for the system); worked out alone when absent.
+    links: dict = field(default_factory=dict)
+
+
+def row_link_id(c: Candidate, ctx: Context) -> str:
+    """A row's 外部連携ID (that of the system's history row of it)."""
+    found = ctx.links.get(c.key)
+    if found:
+        return found
+    return link_id(c.request.id, ctx.day.isoformat(), ctx.system.system, c.occurrence, ctx.system.link_length, ctx.system.link_chars)
 
 
 def occurrence_id(c: Candidate) -> str:
@@ -272,7 +290,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "mergedIds": [m.request.id for m in together], "mergedNames": [m.request.name for m in together],
         "mergedCount": len(together) or 1,
         "occurrence": c.occurrence, "occurrenceId": occurrence_id(c),
-        "timesMin": req.times[0], "timesMax": req.times[1],
+        "timesMin": req.times[0], "timesMax": req.times[1], "linkId": row_link_id(c, ctx),
     }
     if source == "geometry":
         return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)
@@ -332,6 +350,8 @@ class Written:
     part: int = 1
     parts: int = 1
     ids: tuple = ()
+    #: Whether the file holds the rows' 外部連携ID (a column or property of source `linkId`).
+    links: bool = False
 
 
 def csv_text(cands: Sequence[Candidate], ctx: Context) -> tuple[str, list[str]]:
@@ -589,17 +609,35 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
                 out.append(Written(system, file_name_of(system, day, run), "", len(mine), [problem], ids=ids_of(mine)))
                 continue
         runs = split(mine, system.max_per_file)
+        # Every request taken for the system (those put into a shot too), as the history works them out.
+        links = link_ids(cands, day.isoformat(), system)
+        linked = uses_link_id(system, schema)
         for part, some in enumerate(runs, 1):
-            ctx = Context(system, day, run, len(some), part, len(runs))
+            ctx = Context(system, day, run, len(some), part, len(runs), links)
             name = file_name_of(system, day, run, part, len(runs))
             ids = ids_of(some)
             if system.format == "json":
                 text, errors = json_text(some, schema, ctx)
-                out.append(Written(system, name, text, len(some), errors, part=part, parts=len(runs), ids=ids))
+                out.append(Written(system, name, text, len(some), errors, part=part, parts=len(runs), ids=ids, links=linked))
             else:
                 text, warnings = csv_text(some, ctx)
-                out.append(Written(system, name, text, len(some), [], warnings, part=part, parts=len(runs), ids=ids))
+                out.append(Written(system, name, text, len(some), [], warnings, part=part, parts=len(runs), ids=ids, links=linked))
     return out
+
+
+def uses_link_id(system: ExportSystem, schema: Any = None) -> bool:
+    """Whether a system's file holds the 外部連携ID: a CSV column, or a property of its (read) schema, of source `linkId`."""
+    if system.format != "json":
+        return any(c.source == "linkId" for c in system.columns)
+
+    def found(node: Any) -> bool:
+        if isinstance(node, dict):
+            return node.get("x-source") == "linkId" or any(found(v) for v in node.values())
+        if isinstance(node, list):
+            return any(found(v) for v in node)
+        return False
+
+    return found(schema if schema is not None else system.schema)
 
 
 def files_of(written: Sequence[Written]) -> dict:

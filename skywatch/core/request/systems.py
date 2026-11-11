@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from ..time_zone import UTC, TimeZone, parse_time_zone
 from ..util import is_number, is_record
+from .link_id import ALPHABETS, DEFAULT_CHARS, DEFAULT_LENGTH, MAX_LENGTH, MIN_LENGTH
 from .result_file import ResultFile, result_file_of
 
 FORMATS = ("csv", "json")
@@ -83,6 +84,9 @@ class ExportSystem:
     digits: int = 6
     #: How the system's answer file (採否) is read; None when it sends none (answers by hand only).
     result_file: Optional[ResultFile] = None
+    #: The 外部連携ID of its rows (core/request/link_id.py): how many characters (`linkIdLength`), of which (`linkIdChars`).
+    link_length: int = DEFAULT_LENGTH
+    link_chars: str = DEFAULT_CHARS
 
 
 def _texts(v: Any) -> list:
@@ -203,6 +207,14 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
     if per_file is not None and not (is_number(per_file) and per_file >= 1 and float(per_file).is_integer()):
         problems.append(f"{at} の maxPerFile は 1 以上の整数で指定")
         per_file = None
+    link_length = value.get("linkIdLength", DEFAULT_LENGTH)
+    if not (is_number(link_length) and MIN_LENGTH <= link_length <= MAX_LENGTH and float(link_length).is_integer()):
+        problems.append(f"{at} の linkIdLength は {MIN_LENGTH} から {MAX_LENGTH} の整数（外部連携IDの文字数）で指定")
+        link_length = DEFAULT_LENGTH
+    link_chars = value.get("linkIdChars", DEFAULT_CHARS)
+    if not isinstance(link_chars, str) or link_chars not in ALPHABETS:
+        problems.append(f"{at} の linkIdChars は {'・'.join(ALPHABETS)} のどれかで指定")
+        link_chars = DEFAULT_CHARS
     encoding = ENCODINGS.get(str(value.get("encoding", "utf-8")).lower())
     if encoding is None:
         problems.append(f"{at} の encoding は utf-8・utf-8-sig・cp932 のどれかで指定")
@@ -247,6 +259,8 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         schema=schema if is_record(schema) or isinstance(schema, str) else None,
         digits=int(digits) if is_number(digits) and 0 <= digits <= 12 else 6,
         result_file=result_file_of(value.get("resultFile"), f"{at}.resultFile", problems, zone, values),
+        link_length=int(link_length),
+        link_chars=link_chars,
     )
 
 

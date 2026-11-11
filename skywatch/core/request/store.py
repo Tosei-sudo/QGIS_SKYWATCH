@@ -40,6 +40,7 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
     "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID", "occurrence": "OCCURRENCE",
+    "linkId": "LINK_ID",
 }
 #: The shot layer's names (TBL_REQUEST_SHOT: one row a row of a file, its polygon the outline of the scenes taken).
 DEFAULT_SHOT_FIELDS: dict[str, str] = {
@@ -666,6 +667,8 @@ class HistoryRow:
     shot_id: str = ""
     #: Which of the request's shots of the day (1 …), for a request taken several times a day (1 日の回数).
     occurrence: int = 1
+    #: The 外部連携ID its system's file names it by (`linkId`, core/request/link_id.py); "" for one not handed out.
+    link_id: str = ""
 
     @property
     def key(self) -> tuple:
@@ -683,7 +686,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
         f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
-        f["shotId"]: row.shot_id[:64] or None, f["occurrence"]: row.occurrence,
+        f["shotId"]: row.shot_id[:64] or None, f["occurrence"]: row.occurrence, f["linkId"]: row.link_id[:32] or None,
     }
 
 
@@ -800,7 +803,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         adoption=_text(a.get(hf["adoption"])), adoption_reason=_text(a.get(hf["adoptionReason"])),
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
         adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
-        shot_id=_text(a.get(hf["shotId"])), occurrence=_times(a.get(hf["occurrence"])) or 1,
+        shot_id=_text(a.get(hf["shotId"])), occurrence=_times(a.get(hf["occurrence"])) or 1, link_id=_code(a.get(hf["linkId"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 
@@ -833,6 +836,31 @@ def load_day(client: EsriClient, store: RequestStoreConfig, token: Optional[str]
     rows = client.query_all(store.history, f"{hf['day']} = {quote(day)}", token, geometry=shapes, limit=100000, cancelled=cancelled)
     out = [history_row_of(row.get("attributes") or {}, row.get("geometry"), hf, oid) for row in rows]
     return sorted(out, key=lambda r: (r.system, r.planned_at or 0, r.name, r.run_date if math.isfinite(r.run_date) else 0))
+
+
+def linked_where(store: RequestStoreConfig, system: str, first: str, last: str) -> str:
+    """The rows handed out (採用) to `system` for the target days `first` … `last`: where a 外部連携ID is looked for."""
+    hf = store.history_fields
+    return (f"{hf['day']} >= {quote(first)} AND {hf['day']} <= {quote(last)} AND {hf['system']} = {quote(system)}"
+            f" AND {hf['result']} = '採用'")
+
+
+def load_linked(client: EsriClient, store: RequestStoreConfig, token: Optional[str], system: str, first: str, last: str,
+                cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """
+    The rows handed out to `system` for the target days `first` … `last`
+    that have a 外部連携ID (LINK_ID), without their areas: a result file's
+    ids are looked for in them (adoption.match_answers). None when the table
+    has no LINK_ID (made before 2026-11-12: create_tables.py adds it).
+    """
+    if not store.history or history_has(client, store, token, ("linkId",)):
+        return []
+    hf = store.history_fields
+    _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
+    rows = client.query_all(store.history, linked_where(store, system, first, last), token, geometry=False, limit=100000,
+                            cancelled=cancelled)
+    out = [history_row_of(row.get("attributes") or {}, None, hf, oid) for row in rows]
+    return [r for r in out if r.link_id and r.request_id]
 
 
 def day_counts(client: EsriClient, store: RequestStoreConfig, token: Optional[str], first: str, last: str) -> dict[str, dict]:

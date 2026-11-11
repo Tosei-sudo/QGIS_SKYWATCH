@@ -162,6 +162,7 @@ TABLES = (
         F("MERGED_INTO", "まとめ先の依頼ID", "TEXT", 255, "mergedInto"),
         F("SHOT_ID", "撮像ID", "TEXT", 64, "shotId"),
         F("OCCURRENCE", "その日の回", "LONG", None, "occurrence"),
+        F("LINK_ID", "外部連携ID", "TEXT", 32, "linkId"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),

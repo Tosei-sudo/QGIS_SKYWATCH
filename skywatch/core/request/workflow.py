@@ -25,6 +25,7 @@ from ..plan.weather import CloudSeries
 from .daily import HELD, TAKEN, Candidate, allocate, carries_over, gather, occurrence_key, wants_weather
 from .export import Written, convert_priority
 from .follow import missed_ids
+from .link_id import link_ids
 from .model import ImagingRequest, occurs_on
 from .passes import Passes
 from .quota import QuotaBook
@@ -240,10 +241,15 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
     A request taken several times a day has a row per time (`occurrence`);
     a time past the n it needs that found no room has none (it was only
     tried in the room left).
+
+    Each row handed out has its 外部連携ID (`link_id`, the one its file
+    writes as `linkId`, link_id.link_ids); a row held back has none.
     """
     run_id = run_id or new_run_id()
     failures = failures or {}
     shot_ids = shot_ids_of(plan, files, run_id, system)
+    day = plan.day.isoformat()
+    links: dict = {}
     rows = []
     for c in plan.candidates:
         if not of_system(c, system) or c.extra and c.result != TAKEN:
@@ -255,8 +261,10 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
         if result == TAKEN and file is None:
             result, reason = HELD, f"書き出し失敗（{failures.get(name) or 'ファイルなし'}）"
         taken = result == TAKEN
+        if taken and name not in links:
+            links[name] = link_ids(plan.candidates, day, c.system)
         rows.append(HistoryRow(
-            run_id=run_id, run_date=run, day=plan.day.isoformat(), request_id=c.request.id,
+            run_id=run_id, run_date=run, day=day, request_id=c.request.id,
             name=c.request.name, management_no=c.request.management_no, requester=c.request.requester, group=c.request.group,
             system=name,
             satellite=c.satellite.name if c.satellite else "",
@@ -264,6 +272,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             cloud=None if c.forecast is None else round(c.forecast, 1), scenes=c.scenes if taken else None,
             merged_into=c.lead.request.id if taken and c.member else "",
             shot_id=shot_ids.get(c.key, "") if taken else "", occurrence=c.occurrence,
+            link_id=links[name].get(c.key, "") if taken else "",
             result=result, reason=reason, file=(file or "") if taken else "",
             captured="未判定" if taken else "", boost_done=0,
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.

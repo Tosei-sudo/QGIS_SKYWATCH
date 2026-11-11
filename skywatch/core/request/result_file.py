@@ -40,6 +40,15 @@ The first (2026-11-09) form of one name per item (`key`, `keySource`,
 `result`, `adopted`, `rejected`, `reason`, `plannedAt`, `timeFormat`,
 `satellite`, `name`, `externalId`, `geometry`) is read as those columns.
 
+A column of target `linkId` holds the 外部連携ID the order file gave the row
+(export source `linkId`, core/request/link_id.py; through a `pattern` when
+the system writes it inside a name, `SW-7K3Q…`): such a row answers the very
+history row of that id, found among the system's rows of the day read and of
+the `linkDays` days before it (default 7; and the day after), the nearest
+day first (an id is not unique for ever). A row whose id is not found is
+matched by its request's keys as before. A file may name its rows by the id
+alone.
+
 Without a `result` column every row listed is 採用 (and, unless `missing`
 says otherwise, a request handed out but not listed is 不採用; with one, it
 is left 不明). Times without a zone are the system's `timeZone`.
@@ -57,15 +66,21 @@ from typing import Any, Callable, Optional, Sequence
 
 from ..time_zone import UTC, TimeZone, instant_of, read_text_instant
 from ..util import is_number, is_record, parse_iso
+from .link_id import DEFAULT_LINK_DAYS
 from .schema import resolve, validate
 
 ADOPTED, REJECTED, WAITING = "採用", "不採用", "不明"
 ANSWERS = (ADOPTED, REJECTED, WAITING)
 #: What a request's key in the file is: its id, 管理番号 or 識別番号 (tried in this order).
 KEY_SOURCES = ("id", "managementNo", "identificationNo")
+#: What a file's row is matched by: the 外部連携ID of the row it answers (tried first), or its request's keys.
+LINK_ID = "linkId"
+MATCH_KEYS = (LINK_ID,) + KEY_SOURCES
+#: The most days before the day read that an id is looked for in (`linkDays`).
+MAX_LINK_DAYS = 60
 #: What a column (or a schema's property, `x-target`) can be.
 TARGETS = (
-    "id", "managementNo", "identificationNo", "result", "reason", "plannedAt", "satellite", "name", "externalId",
+    "id", "managementNo", "identificationNo", "linkId", "result", "reason", "plannedAt", "satellite", "name", "externalId",
     "geometry", "centerLat", "centerLon", "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "day", "system",
 )
 #: Targets whose columns are joined by a space (a date and a time in two columns).
@@ -133,6 +148,8 @@ class ResultFile:
     time_zone: TimeZone = UTC
     #: The system's `values` turned round ({target: {written: plugin's}}), for values a column's map does not name.
     reverse: dict = field(default_factory=dict)
+    #: Days before the day read whose rows a 外部連携ID is looked for in (`linkDays`).
+    link_days: int = DEFAULT_LINK_DAYS
 
     @property
     def missing(self) -> str:
@@ -170,7 +187,7 @@ class Answer:
     external_id: str = ""
     #: Longitude / latitude rings (WGS 84), [] when the file gives none.
     rings: list = field(default_factory=list)
-    #: {id | managementNo | identificationNo: the file's value}.
+    #: {linkId | id | managementNo | identificationNo: the file's value}.
     keys: dict = field(default_factory=dict)
     #: The JST day (`2026-11-10`) and the system the row is for, when the file says ("" for any).
     day: str = ""
@@ -257,8 +274,8 @@ def _legacy_columns(value: dict, at: str, problems: list[str]) -> Optional[list[
         problems.append(f"{at} に key（依頼を表す列）なし")
         return None
     source = value.get("keySource", "id")
-    if source not in KEY_SOURCES:
-        problems.append(f"{at}.keySource は id・managementNo・identificationNo のどれかで指定")
+    if source not in MATCH_KEYS:
+        problems.append(f"{at}.keySource は id・managementNo・identificationNo・linkId のどれかで指定")
         source = "id"
     cols = [ResultColumn(key=key, target=source)]
     result = _column(value.get("result"))
@@ -288,7 +305,7 @@ def _legacy_columns(value: dict, at: str, problems: list[str]) -> Optional[list[
 
 
 def _has_key(cols: Sequence[ResultColumn]) -> bool:
-    return any(c.target in KEY_SOURCES for c in cols)
+    return any(c.target in MATCH_KEYS for c in cols)
 
 
 def result_file_of(value: Any, at: str, problems: list[str], zone: TimeZone = UTC,
@@ -343,16 +360,20 @@ def result_file_of(value: Any, at: str, problems: list[str], zone: TimeZone = UT
                 problems.append(f"{at}.schema に x-target: records の配列（結果の一覧）なし")
                 return None
             if not _has_key(schema_columns(schema)):
-                problems.append(f"{at}.schema に依頼を表すプロパティ（x-target が id・managementNo・identificationNo）なし")
+                problems.append(f"{at}.schema に依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）なし")
                 return None
         elif schema is None and not _has_key(columns):
-            problems.append(f"{at}.columns に依頼を表す列（target が id・managementNo・identificationNo）なし")
+            problems.append(f"{at}.columns に依頼を表す列（target が id・managementNo・identificationNo・linkId）なし")
             return None
     else:
         legacy = _legacy_columns(value, at, problems)
         if legacy is None:
             return None
         columns = legacy
+    link_days = value.get("linkDays", DEFAULT_LINK_DAYS)
+    if not (is_number(link_days) and 0 <= link_days <= MAX_LINK_DAYS and float(link_days).is_integer()):
+        problems.append(f"{at}.linkDays は 0 から {MAX_LINK_DAYS} の整数（日）で指定")
+        link_days = DEFAULT_LINK_DAYS
     missing = value.get("missing")
     if missing is not None and missing not in MISSING:
         problems.append(f"{at}.missing は 不採用・不明 のどちらかで指定")
@@ -365,7 +386,7 @@ def result_file_of(value: Any, at: str, problems: list[str], zone: TimeZone = UT
     return ResultFile(
         format=fmt, encoding=encoding, records=_column(value.get("records")), header=value.get("header") is not False,
         delimiter=delimiter, skip_lines=int(skip), columns=columns, schema=schema, missing_value=missing, size_km=size_km,
-        time_zone=zone, reverse=reverse)
+        time_zone=zone, reverse=reverse, link_days=int(link_days))
 
 
 # --- Values ------------------------------------------------------------------------------------
@@ -900,7 +921,7 @@ def read_answers(data: bytes, spec: ResultFile, load_schema: Optional[SchemaLoad
         if not isinstance(schema, dict):
             return [], [f"スキーマ {spec.schema} の読み込み不可"]
         if not _has_key(schema_columns(schema)):
-            return [], [f"スキーマ {spec.schema} に依頼を表すプロパティ（x-target が id・managementNo・identificationNo）なし"]
+            return [], [f"スキーマ {spec.schema} に依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）なし"]
     rows = _json_rows(text, spec, schema, problems) if spec.format == "json" else _csv_rows(text, spec, problems)
     says = any(c.target == "result" and not c.fixed for c in (schema_columns(schema) if schema else spec.columns))
     out = []
@@ -910,8 +931,9 @@ def read_answers(data: bytes, spec: ResultFile, load_schema: Optional[SchemaLoad
             dropped += 1
             continue
         group = _grouped(pairs, spec)
-        keys = {k: _text(_first(group, k)) for k in KEY_SOURCES if _text(_first(group, k))}
-        key = next(iter(keys.values()), "")
+        keys = {k: _text(_first(group, k)) for k in MATCH_KEYS if _text(_first(group, k))}
+        # For messages: the request's key, else the row's id.
+        key = next((keys[k] for k in KEY_SOURCES if k in keys), keys.get(LINK_ID, ""))
         if "result" in group:
             answer, raw = _answer_of(group)
             if answer is None:
