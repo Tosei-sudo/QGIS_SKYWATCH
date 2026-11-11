@@ -50,7 +50,7 @@ SOURCES = (
     "seriesSatelliteIds", "satellite", "satelliteId", "mode", "sensor",
     "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "lookSide", "orbitDir", "resolution", "timeOfDay",
     "cloudMax", "cloudForecast", "weatherFlag", "scenes", "geometry", "centerLat", "centerLon",
-    "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "note", "system", "runDate", "day", "count", "warnings",
+    "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate")
@@ -238,7 +238,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "centerLat": _round(mid[1], digits) if mid else None, "centerLon": _round(mid[0], digits) if mid else None,
         "bboxWest": _round(box[0], digits) if box else None, "bboxSouth": _round(box[1], digits) if box else None,
         "bboxEast": _round(box[2], digits) if box else None, "bboxNorth": _round(box[3], digits) if box else None,
-        "requester": req.requester, "note": req.note, "warnings": "・".join(c.warnings),
+        "requester": req.requester, "group": req.group, "note": req.note, "warnings": "・".join(c.warnings),
     }
     if source == "geometry":
         return geometry_value(req.rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)

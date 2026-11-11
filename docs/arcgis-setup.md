@@ -73,7 +73,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 すること:
 
-1. 地図 `SKYWATCH_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、README の設定の例と同じ番号）に固定する（「一意の数値 ID の割り当てを許可」）
+1. 地図 `SKYWATCH_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
 2. マップ イメージ レイヤーとして共有するドラフトを作り、フィーチャ アクセスを有効にして、機能を `Query,Create,Update,Delete,Uploads,Editing` にする（プラグインは追加・更新・削除をする）。データは参照（コピーしない）
 3. 同じ名前のサービスがあれば上書きして公開する（何度実行してもよい）
 4. 公開したサービスを ArcGIS API for Python で読み、レイヤー名と番号からプラグインの設定ファイル（README 「上の表の名前で作ったときの設定」と同じ形）を書く
@@ -99,6 +99,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 | `RESULT` | `採用`（システムに出した）・`見送り`・`要求外`（システムが依頼なしで計画したもの） | 出したか・要求外か |
 | `ADOPTION` | システムの採否: `採用`・`不採用`・`不明`（要求外は `採用`） | 計画に入ったか。`不明` は採否の分からないもの（画像が入れば `採用` になる） |
 | `CAPTURED` | `未判定`・`撮像済み`・`未撮像` | 撮れたか |
+| `REQUEST_GROUP` | 書き出したときの依頼グループ（2026-11-11 に追加。空はグループなし） | カテゴリ セレクターで自分のグループだけを見る |
 | `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PLANNED_AT`・`ADOPTION_REASON`・`REASON` | 名称・番号・依頼者・システム・衛星・撮像予定日時・理由 | 一覧・ポップアップ |
 | 形状（ポリゴン） | 依頼の範囲（要求外は結果ファイルか手で描いた範囲） | 地図 |
 
@@ -118,7 +119,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(hours=9)
 ```
 
-古い行の `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER` も要るなら、`REQ_ID` で台帳をテーブル結合してからフィールド演算で写す。`ADOPTION` が空の古い行（`RESULT` が `採用`）は `不明` と同じに扱う。
+古い行の `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`REQUEST_GROUP` も要るなら、`REQ_ID` で台帳をテーブル結合してからフィールド演算で写す（`REQUEST_GROUP` は台帳・出力履歴とも、プラグインを新しくして `create_tables.py` をもう一度実行すれば足される。依頼グループのテーブル `TBL_REQUEST_GROUP` も作られる）。`ADOPTION` が空の古い行（`RESULT` が `採用`）は `不明` と同じに扱う。
 
 ### 作り方（例）
 
@@ -134,6 +135,7 @@ datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(h
 | テーブル（または リスト）「その日の計画」 | `TBL_REQUEST_HISTORY` | 列 `ADOPTION`・`REQ_NAME`・`MANAGEMENT_NO`・`SYSTEM`・`SATELLITE`・`PLANNED_AT`・`REQUESTER`・`ADOPTION_REASON`・`CAPTURED`。並べ替え `PLANNED_AT` |
 | マップ | 1. の Web マップ | 日付セレクターで絞る |
 | 系列グラフ「日ごとの採否」 | `TBL_REQUEST_HISTORY` | カテゴリ `TARGET_DATE`（日単位）、系列を `ADOPTION` で分ける、フィルター `TARGET_DATE` が過去 30 日 |
+| カテゴリ セレクター「依頼グループ」 | `TBL_REQUEST_HISTORY` の `REQUEST_GROUP`（グループの一覧を `TBL_REQUEST_GROUP` の `GROUP_NAME` から出してもよい） | 自分のグループの依頼だけを見る。「なし」を許可、既定は「すべて」。アクションで上の要素と地図を `REQUEST_GROUP` で絞る |
 | カテゴリ セレクター「依頼者」（任意） | `TBL_REQUEST_HISTORY` の `REQUESTER` | 自分の依頼だけを見る |
 
 - 採否はプラグインの「撮像予定」ドックで入れる（システムの結果ファイルの取り込みか手入力）。分からないものは `不明` のままで、画像が入って撮像済みになったら `採用` になる（`ADOPTION_SOURCE` = `画像の入着`）。

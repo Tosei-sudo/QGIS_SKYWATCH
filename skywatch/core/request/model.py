@@ -109,6 +109,8 @@ class ImagingRequest:
     #: 管理番号 and 識別番号: the requester's own numbers (text), handed to the systems as written.
     management_no: str = ""
     identification_no: str = ""
+    #: 依頼グループ: whose request it is (a name of the groups table, core/request/groups.py); "" for none.
+    group: str = ""
     category: str = "臨時"
     achieve: str = "期間内1回"
     start: float = math.nan

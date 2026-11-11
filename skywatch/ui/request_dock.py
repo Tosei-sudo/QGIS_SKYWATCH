@@ -1,6 +1,6 @@
 """
 The 「撮像依頼」 dock: the imaging request ledger (`requestStores`). It lists
-the requests (filtered by category and status) and shows them on the map;
+the requests (filtered by category, status and 依頼グループ) and shows them on the map;
 requests are added and changed in a form; 「レイヤーから取り込み…」 takes the
 areas and names of a layer's features and asks the rest once in the form
 (or reads every item from a layer written out by 「レイヤーへ書き出し」) (docs/imaging-requests.md). The day's files are
@@ -20,8 +20,10 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
 )
 
+from ..core import edit_stamp
 from ..core.request.bulk import RequestChange, apply_change
 from ..core.request.from_plan import requests_of_plan
+from ..core.request.groups import first_group, offered, read_groups
 from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
@@ -33,6 +35,7 @@ from . import last_inputs
 from .docks import PluginDock, plain_label, plain_tip
 from .list_views import ListViews
 from .plan_overlay import PlanOverlay
+from .request_groups import NO_GROUP_TEXT, GroupFilter
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
 
@@ -46,6 +49,13 @@ def _period(r: ImagingRequest) -> str:
         return ""
     a, b = jst_day(r.start), jst_day(r.end)
     return f"{a.isoformat()}〜{b.isoformat()[5:] if a.year == b.year else b.isoformat()}"
+
+
+def group_value(values: dict) -> dict:
+    """The bulk edit's values, 「（グループなし）」 as no group."""
+    if values.get("group") == NO_GROUP_TEXT:
+        values = {**values, "group": ""}
+    return values
 
 
 class RequestDock(PluginDock):
@@ -65,6 +75,9 @@ class RequestDock(PluginDock):
         self.task = None
         self.form = None
         self._loaded = False
+        #: The 依頼グループ of the store's table (core/request/groups.py), and whether the table was read.
+        self.groups: list = []
+        self.groups_read = False
         self._build()
         context.configChanged.connect(self._config_changed)
         self.visibilityChanged.connect(self._visibility)
@@ -80,7 +93,8 @@ class RequestDock(PluginDock):
         self.category_filter.addItems([self.tr("すべての区分"), "定点", "臨時"])
         self.status_filter = QComboBox()
         self.status_filter.addItems([self.tr("すべての状態"), "有効", "停止", "完了"])
-        for c in (self.category_filter, self.status_filter):
+        self.group_filter = GroupFilter("requests")
+        for c in (self.category_filter, self.status_filter, self.group_filter):
             c.currentIndexChanged.connect(lambda _: self.render())
             top.addWidget(c)
         self.body.addLayout(top)
@@ -103,7 +117,8 @@ class RequestDock(PluginDock):
         self.table.doubleClicked.connect(lambda _: self.edit())
         self.body.addWidget(self.table, 1)
         # 「ビュー」: the columns and the filters kept under a name (per user).
-        self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter}, None, self)
+        self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter,
+                                                        "group": self.group_filter}, None, self)
         top.addWidget(self.views.button)
 
         edit = QHBoxLayout()
@@ -155,6 +170,7 @@ class RequestDock(PluginDock):
         self.store_choice.setVisible(len(stores) > 1)
         self.store = stores[0] if stores else None
         self.requests, self.chosen, self._loaded = [], None, False
+        self.groups, self.groups_read = [], False
         self.render()
         if self.store is None:
             self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
@@ -175,6 +191,7 @@ class RequestDock(PluginDock):
         stores = self.context.config.request_stores
         self.store = stores[index] if 0 <= index < len(stores) else None
         self.chosen, self._loaded = None, False
+        self.groups, self.groups_read = [], False
         self.reload()
 
     def _start(self, what: str, work, done, failed=None) -> bool:
@@ -206,16 +223,26 @@ class RequestDock(PluginDock):
         self.status.setText(self.tr("{label} を読み込み中…").format(label=store.label))
         client, token = self.context.esri(), self.token()
 
-        def done(requests):
+        def work(task):
+            requests = load_requests(client, store, token, task.isCanceled)
+            groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            return requests, groups, note
+
+        def done(result):
             if store is not self.store:
                 return
+            requests, groups, note = result
             self.requests, self._loaded = requests, True
+            if groups is not None:
+                self.groups, self.groups_read = groups, True
+            self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self._update_buttons()
             chosen = self.chosen.id if self.chosen else None
             self.chosen = next((r for r in requests if r.id == chosen), None)
             self.render()
             active = sum(1 for r in requests if r.status == "有効")
-            self.status.setText(self.tr("{label}: {n} 件（有効 {a} 件）").format(label=store.label, n=len(requests), a=active))
+            text = self.tr("{label}: {n} 件（有効 {a} 件）").format(label=store.label, n=len(requests), a=active)
+            self.status.setText(text + (f"。{note}" if note else ""))
             if then:
                 then()
 
@@ -224,18 +251,21 @@ class RequestDock(PluginDock):
             if failed:
                 failed(m)
 
-        if not self._start(self.tr("撮像依頼の読み込み"), lambda task: load_requests(client, store, token, task.isCanceled), done, not_read):
+        if not self._start(self.tr("撮像依頼の読み込み"), work, done, not_read):
             QTimer.singleShot(300, lambda: self.reload(then, failed))
 
     # --- The list -------------------------------------------------------------------------------
 
     def render(self) -> None:
+        # Requests put in from elsewhere (the 「撮像計画ファイル出力」 dock's read): their groups listed too.
+        self.group_filter.set_groups(self.groups, (r.group for r in self.requests), force=False)
         cat = self.category_filter.currentText()
         st = self.status_filter.currentText()
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
-                      and (self.status_filter.currentIndex() == 0 or r.status == st)]
+                      and (self.status_filter.currentIndex() == 0 or r.status == st) and self.group_filter.passes(r.group)]
         self.model.clear()
-        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態")])
+        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間",
+                                                                   "優先度", "種別", "状態")])
         chosen_row = -1
         try:
             # Saved while the ledger could not be reached, waiting to be sent (core/offline.py): marked blue.
@@ -245,7 +275,7 @@ class RequestDock(PluginDock):
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
             items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
-                                                r.management_no, r.identification_no,
+                                                r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
                                                 r.achieve, _period(r), prio, r.kind, r.status)]
             items[-1].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
@@ -319,12 +349,30 @@ class RequestDock(PluginDock):
     # --- Adding, changing, deleting -------------------------------------------------------------
 
     def known(self) -> dict:
-        """Names the form offers as hints: the systems, and the series and modes of the requests."""
+        """
+        Names the form offers as hints: the systems, and the series and modes
+        of the requests; the 依頼グループ to choose from (those of the table in
+        use: `groupTable`), or else those of the requests (typed freely).
+        """
+        table = self.groups_read and self.store is not None and self.store.groups is not None
         return {
             "systems": [s.system for s in self.context.config.request_exports],
             "series": sorted({s for r in self.requests for s in r.series}),
             "modes": sorted({m for r in self.requests for m in r.modes}),
+            "groups": offered(self.groups) if table else sorted({r.group for r in self.requests if r.group}, key=str.casefold),
+            "groupTable": table,
         }
+
+    def new_request(self) -> ImagingRequest:
+        """
+        A new request started from the conditions last saved (入力の初期値の記憶);
+        its 依頼グループ the one last saved while it is in use, else the user's
+        own group.
+        """
+        base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+        table = self.groups_read and self.store is not None and self.store.groups is not None
+        base.group = first_group(self.groups, edit_stamp.user_name(), base.group, table)
+        return base
 
     def edit(self, new: bool = False, request: Optional[ImagingRequest] = None) -> None:
         """Opens the form for a new request, or the chosen one."""
@@ -336,7 +384,7 @@ class RequestDock(PluginDock):
             self.form.close()
         if new or (request is None and self.chosen is None):
             # A new request starts from the conditions last saved (入力の初期値の記憶).
-            base = request or with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+            base = request or self.new_request()
         else:
             base = request or self.chosen
         self.form = RequestForm(self.iface, base, self._save, self.known(), self, self.satellites)
@@ -420,8 +468,15 @@ class RequestDock(PluginDock):
             BulkField("status", self.tr("状態"), choices=STATUSES, value=first.status),
             BulkField("kind", self.tr("種別"), choices=KINDS, value=first.kind),
         ]
+        known = self.known()
+        if known["groupTable"]:
+            fields.append(BulkField("group", self.tr("依頼グループ"), choices=(NO_GROUP_TEXT, *offered(self.groups, first.group)),
+                                    value=first.group or NO_GROUP_TEXT))
+        else:
+            fields.append(BulkField("group", self.tr("依頼グループ"), words=known["groups"], value=first.group,
+                                    tip=self.tr("空欄でグループなし")))
         dialog = BulkEditDialog(self.tr("撮像依頼の一括編集"), self.tr("選んだ依頼 {n} 件").format(n=len(chosen)), fields, self)
-        dialog.accepted.connect(lambda: self.apply_bulk(chosen, RequestChange(**dialog.values())))
+        dialog.accepted.connect(lambda: self.apply_bulk(chosen, RequestChange(**group_value(dialog.values()))))
         dialog.finished.connect(lambda _r: dialog.deleteLater())
         dialog.open()
         return dialog
@@ -509,7 +564,7 @@ class RequestDock(PluginDock):
             return None
         if self.form is not None:
             self.form.close()
-        base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+        base = self.new_request()
         base.category, base.achieve = "定点", "毎回"
         names = "、".join(n for n, *_rest in items[:3]) + ("…" if len(items) > 3 else "")
         text = self.tr("レイヤー「{layer}」の地物 {n} 件（名称: {field}").format(
@@ -539,7 +594,7 @@ class RequestDock(PluginDock):
         if self.store is None:
             self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
             return None
-        base = with_remembered(ImagingRequest(id=new_request_id()), last_inputs.read("request"))
+        base = self.new_request()
         made = requests_of_plan(ops, sats, targets, new_request_id, self.point_km, base)
         if not made:
             return None
