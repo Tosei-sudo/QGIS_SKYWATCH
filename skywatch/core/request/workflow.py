@@ -22,7 +22,7 @@ from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
 from ..plan.weather import CloudSeries
-from .daily import HELD, TAKEN, Candidate, allocate, gather, occurrence_key, wants_weather
+from .daily import HELD, TAKEN, Candidate, allocate, carries_over, gather, occurrence_key, wants_weather
 from .export import Written, convert_priority
 from .follow import missed_ids
 from .model import ImagingRequest, occurs_on
@@ -34,11 +34,18 @@ from .view import systems_of
 from .weather import DAYLIGHT, Clouds, cloud_when, daytime_cloud, places_of
 
 
-def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec]) -> list[tuple]:
-    """The places whose forecasts the day's optical requests need."""
+def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec],
+                    missed: Sequence[str] = ()) -> list[tuple]:
+    """
+    The places whose forecasts the day's optical requests need: those of the
+    day, and those missed (`missed`: the ids found 未撮像, follow.missed_ids)
+    carried over to it (daily.gather takes them too, so their weather counts
+    as any other's).
+    """
     seen: dict = {}
+    missed = set(missed)
     for req in requests:
-        if occurs_on(req, day) and wants_weather(req, sats):
+        if (occurs_on(req, day) or req.id in missed and carries_over(req, day)) and wants_weather(req, sats):
             for p in places_of(req):
                 seen[p] = None
     return list(seen)

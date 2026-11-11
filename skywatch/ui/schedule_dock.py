@@ -52,6 +52,7 @@ from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
@@ -162,7 +163,8 @@ class ScheduleDock(PluginDock):
         self.calendar.selectionChanged.connect(lambda: self.reload())
         self.calendar.currentPageChanged.connect(lambda _y, _m: self._mark_month())
         layout.addWidget(self.calendar)
-        filters = QHBoxLayout()
+        # Rows of filters and buttons wrap, so that a dock at its usual width shows them all without scrolling sideways.
+        filters = FlowLayout()
         self.system_filter = QComboBox()
         self.system_filter.setToolTip(self.tr("このシステムの計画だけを表示"))
         self.state_filter = QComboBox()
@@ -176,11 +178,12 @@ class ScheduleDock(PluginDock):
         self.group_filter = GroupFilter("schedule")
         for w in (self.system_filter, self.state_filter, self.group_filter):
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            w.setMinimumContentsLength(8)
+            w.setMinimumContentsLength(14)
             w.currentIndexChanged.connect(lambda _i: self.render())
             filters.addWidget(w)
         self.search.textChanged.connect(lambda _t: self.render())
-        filters.addWidget(self.search, 1)
+        self.search.setMinimumWidth(200)
+        filters.addWidget(self.search)
         layout.addLayout(filters)
         # Names and keys from the ledger and the systems' result files: shown as written, never as HTML.
         self.status = plain_label(QLabel())
@@ -200,7 +203,7 @@ class ScheduleDock(PluginDock):
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("schedule", self.table, self)
-        answer = QHBoxLayout()
+        answer = FlowLayout()
         answer.addWidget(QLabel(self.tr("採否")))
         self.adopt_button = QPushButton(self.tr("採用"))
         self.adopt_button.setToolTip(self.tr("選んだ依頼（出力したもの）をシステムが採用したとして記録（手入力）"))
@@ -214,9 +217,10 @@ class ScheduleDock(PluginDock):
         self.reason.setPlaceholderText(self.tr("理由（任意）"))
         for w in (self.adopt_button, self.reject_button, self.wait_button):
             answer.addWidget(w)
-        answer.addWidget(self.reason, 1)
+        self.reason.setMinimumWidth(160)
+        answer.addWidget(self.reason)
         layout.addLayout(answer)
-        more = QHBoxLayout()
+        more = FlowLayout()
         self.import_button = QPushButton(self.tr("結果ファイルの取り込み…"))
         self.import_button.setToolTip(self.tr("システムから返ってきた採否のファイル（requestExports の resultFile）を読み、"
                                               "この日の採用・不採用と要求外の計画を記録"))
@@ -229,9 +233,8 @@ class ScheduleDock(PluginDock):
         self.delete_button.clicked.connect(lambda: self.delete_unrequested())
         for w in (self.import_button, self.add_button, self.delete_button):
             more.addWidget(w)
-        more.addStretch(1)
         layout.addLayout(more)
-        bottom = QHBoxLayout()
+        bottom = FlowLayout()
         self.on_map = QCheckBox(self.tr("地図に表示"))
         self.on_map.setChecked(True)
         self.on_map.toggled.connect(lambda _on: self.draw())
@@ -248,7 +251,6 @@ class ScheduleDock(PluginDock):
         self.reload_button.clicked.connect(lambda: self.reload(refresh=True))
         bottom.addWidget(self.on_map)
         bottom.addWidget(self.shots_on_map)
-        bottom.addStretch(1)
         bottom.addWidget(self.layer_button)
         bottom.addWidget(self.reload_button)
         layout.addLayout(bottom)

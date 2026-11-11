@@ -17,7 +17,7 @@ from qgis.core import QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
+    QAbstractItemView, QComboBox, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
 )
 
 from ..core import edit_stamp
@@ -33,6 +33,7 @@ from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .docks import PluginDock, plain_label, plain_tip
+from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT, GroupFilter
@@ -84,11 +85,12 @@ class RequestDock(PluginDock):
         self._config_changed()
 
     def _build(self) -> None:
-        top = QHBoxLayout()
+        # Rows of filters and buttons wrap, so that a dock at its usual width shows them all without scrolling sideways.
+        top = FlowLayout()
         self.store_choice = QComboBox()
         self.store_choice.setToolTip(self.tr("依頼の保存先"))
         self.store_choice.currentIndexChanged.connect(self._store_chosen)
-        top.addWidget(self.store_choice, 1)
+        top.addWidget(self.store_choice)
         self.category_filter = QComboBox()
         self.category_filter.addItems([self.tr("すべての区分"), "定点", "臨時"])
         self.status_filter = QComboBox()
@@ -121,7 +123,7 @@ class RequestDock(PluginDock):
                                                         "group": self.group_filter}, None, self)
         top.addWidget(self.views.button)
 
-        edit = QHBoxLayout()
+        edit = FlowLayout()
         self.new_button = QPushButton(self.tr("新規…"))
         self.new_button.clicked.connect(lambda: self.edit(new=True))
         self.edit_button = QPushButton(self.tr("編集…"))
@@ -141,7 +143,7 @@ class RequestDock(PluginDock):
             edit.addWidget(b)
         self.body.addLayout(edit)
 
-        layers = QHBoxLayout()
+        layers = FlowLayout()
         self.import_button = QPushButton(self.tr("レイヤーから取り込み…"))
         self.import_button.setToolTip(self.tr("レイヤーと名称・管理番号・識別番号の属性を選び、地物の範囲と名称・番号で依頼を登録。"
                                               "期間・優先度・衛星などは入力画面でまとめて指定"))
@@ -153,7 +155,6 @@ class RequestDock(PluginDock):
         self.export_button.clicked.connect(lambda: self.export_layer())
         layers.addWidget(self.import_button)
         layers.addWidget(self.export_button)
-        layers.addStretch(1)
         self.body.addLayout(layers)
 
         self._update_buttons()

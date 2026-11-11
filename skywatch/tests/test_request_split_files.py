@@ -135,3 +135,31 @@ def test_files_left_from_an_earlier_writing_split_otherwise():
     assert file_name_of(odd, DAY, FIRST, 1, 2) == "SYS-T_2026_11_08_1.csv"
     assert leftover_files(odd, DAY, FIRST, ["SYS-T_2026_11_08_1.csv"], ["SYS-T_2026_11_08_1.csv", "SYS-T_2026_11_08_2.csv"]) == [
         "SYS-T_2026_11_08_2.csv"]
+
+
+def test_another_systems_file_of_the_same_folder_is_never_a_leftover():
+    """
+    A system named as another's with a number (「ALOS」 and 「ALOS_2」) and a
+    file name ending in the system's: the day's file of 「ALOS_2」 reads as
+    the 2nd file of 「ALOS」, and was deleted with its leftovers.
+    """
+    def named(system, **kw):
+        [out] = export_systems_of([{"system": system, "kind": "光学", "series": ["OPT-X"], "timeZone": "UTC", "columns": COLUMNS,
+                                    "fileName": "{date:%Y%m%d}_{system}.{ext}", **kw}], [])
+        return out
+
+    alos, alos2 = named("ALOS", maxPerFile=2), named("ALOS_2")
+    folder = ["20261108_ALOS_1.csv", "20261108_ALOS_2.csv", "20261108_ALOS_3.csv", "20261108_ALOS_2_1.csv"]
+    mine = ["20261108_ALOS.csv"]
+    assert leftover_files(alos, DAY, FIRST, mine, folder) == ["20261108_ALOS_1.csv", "20261108_ALOS_2.csv", "20261108_ALOS_3.csv"]
+    # With 「ALOS_2」 writing into the same folder, its file (and its numbered ones) stay.
+    assert leftover_files(alos, DAY, FIRST, mine, folder, [alos, alos2]) == ["20261108_ALOS_1.csv", "20261108_ALOS_3.csv"]
+    # The other way round nothing of 「ALOS」 is taken for 「ALOS_2」's.
+    split2 = named("ALOS_2", maxPerFile=2)
+    assert leftover_files(split2, DAY, FIRST, ["20261108_ALOS_2.csv"], folder, [alos]) == ["20261108_ALOS_2_1.csv"]
+    # The other's name with the time of its writing ({run}, a moment not known): any text there.
+    timed = named("ALOS", fileName="{date:%Y%m%d}_{system}_{run:%H%M}.{ext}")
+    fixed = named("A", maxPerFile=2, fileName="{date:%Y%m%d}_ALOS.{ext}")
+    folder = ["20261108_ALOS_0915.csv", "20261108_ALOS_3.csv"]
+    assert leftover_files(fixed, DAY, FIRST, ["20261108_ALOS.csv"], folder) == folder
+    assert leftover_files(fixed, DAY, FIRST, ["20261108_ALOS.csv"], folder, [timed]) == []

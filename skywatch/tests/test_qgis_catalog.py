@@ -90,6 +90,24 @@ def searched(dock):
     assert wait_for(lambda: dock.search_button.isEnabled() and dock.model.rowCount() > 0)
 
 
+def test_the_dock_open_at_start_does_not_say_there_is_no_catalog(plugin):
+    """
+    The docks are made before the settings file is read: 「設定ファイルに画像カタログなし」
+    stayed beside the filled list of catalogs until the first search.
+    """
+    p, *_ = plugin
+    dock = p.docks["SatObsImageCatalog"]
+    assert dock.catalog_box.count() == 1 and dock.status.text() == ""
+    # Said when there is none, and taken away again once there is one.
+    kept = p.api.config.image_catalogs
+    p.api.config.image_catalogs = []
+    dock._config_changed()
+    assert dock.status.text() == "設定ファイルに画像カタログなし"
+    p.api.config.image_catalogs = kept
+    dock._config_changed()
+    assert dock.status.text() == ""
+
+
 def test_search_list_footprints_and_sorting(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog

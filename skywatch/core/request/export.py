@@ -14,9 +14,10 @@ strftime pattern (`%Y%m%d`). Numbers (and text that is a number) take a
 printf format (`%03d`, `%.1f`), see `printf`.
 
 Requests put into one shot (まとめ, core/request/shots.py) are one row:
-the first one's (the most important), its `geometry` and box the outline
-of the shot's scenes, `mergedIds` / `mergedNames` / `mergedCount` the
-requests in it. `passTime` (the shot's middle), `passOffNadir`,
+the first one's (the most important), its `geometry` and box the tightest
+box along the track around the requests' own areas (shots.Shot.area_ring;
+not the outline of the shot's scenes), `mergedIds` / `mergedNames` /
+`mergedCount` the requests in it. `passTime` (the shot's middle), `passOffNadir`,
 `passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
 are the pass the orbits gave; empty when fitted by counting.
 
@@ -460,8 +461,15 @@ def file_name_of(system: ExportSystem, day: date, run: float, part: int = 1, par
     return name
 
 
-def _pieces(system: ExportSystem, day: date, run: float, part: Optional[int], parts: Optional[int]) -> list:
-    """The name in pieces: text, and the values of its `{…}`; `{part}` / `{parts}` None (left as None) when not given."""
+#: In a name's pieces: a `{run}` whose moment is not known (another writing's).
+_ANY_RUN = object()
+
+
+def _pieces(system: ExportSystem, day: date, run: float, part: Optional[int], parts: Optional[int], any_run: bool = False) -> list:
+    """
+    The name in pieces: text, and the values of its `{…}`; `{part}` / `{parts}` None (left as None) when not given,
+    `{run}` _ANY_RUN with `any_run` (a file written at a moment not known).
+    """
     from .model import JST
 
     ran = datetime.fromtimestamp(run / 1000, tz=JST)
@@ -474,7 +482,7 @@ def _pieces(system: ExportSystem, day: date, run: float, part: Optional[int], pa
         if key == "date":
             return day.strftime(fmt or "%Y%m%d")
         if key == "run":
-            return ran.strftime(fmt or "%Y%m%d%H%M")
+            return _ANY_RUN if any_run else ran.strftime(fmt or "%Y%m%d%H%M")
         if key in ("part", "parts"):
             n = part if key == "part" else parts
             return None if n is None else str(printf(fmt, n)) if fmt else str(n)
@@ -490,32 +498,51 @@ def _pieces(system: ExportSystem, day: date, run: float, part: Optional[int], pa
     return out
 
 
-def leftover_files(system: ExportSystem, day: date, run: float, names: Sequence[str], listed: Sequence[str]) -> list[str]:
+def _named(system: ExportSystem, day: date, run: float, any_run: bool = False) -> "re.Pattern":
     """
-    Files of `listed` (a folder's names) named as this system's files of the
-    day with another number, which this writing (`names`) does not replace:
-    those of an earlier writing split into more files (or not split, or
-    split when this one is not). Left in the folder, they would be handed
-    to the system again.
+    The names of a system's files of the day, whatever their number (`{part}`
+    / `{parts}`, or `_1`, `_2` … before the extension, or none); with
+    `any_run`, whenever they were written (`{run}`).
     """
     merged: list = []
-    for p in _pieces(system, day, run, None, None):
-        p = None if p is None else _UNSAFE.sub("_", p)
-        if p is not None and merged and merged[-1] is not None:
+    for p in _pieces(system, day, run, None, None, any_run):
+        if p is None or p is _ANY_RUN:
+            merged.append(p)
+            continue
+        p = _UNSAFE.sub("_", p)
+        if merged and isinstance(merged[-1], str):
             merged[-1] += p
         else:
             merged.append(p)
     tail = ""
     if not _PART.search(system.file_name):
         # Numbered by `_1`, `_2` … before the extension, or not numbered at all.
-        last = merged[-1] if merged[-1] is not None else ""
+        last = merged[-1] if isinstance(merged[-1], str) else ""
         ext = os.path.splitext(last)[1]
         if ext:
             merged[-1] = last[:-len(ext)]
         tail = r"(_\d+)?" + re.escape(ext)
-    found = re.compile("".join(r"\d+" if p is None else re.escape(p) for p in merged) + tail, re.IGNORECASE)
+    return re.compile("".join(r"\d+" if p is None else ".+" if p is _ANY_RUN else re.escape(p) for p in merged) + tail, re.IGNORECASE)
+
+
+def leftover_files(system: ExportSystem, day: date, run: float, names: Sequence[str], listed: Sequence[str],
+                   others: Sequence[ExportSystem] = ()) -> list[str]:
+    """
+    Files of `listed` (a folder's names) named as this system's files of the
+    day with another number, which this writing (`names`) does not replace:
+    those of an earlier writing split into more files (or not split, or
+    split when this one is not). Left in the folder, they would be handed
+    to the system again.
+
+    A name that could as well be a file of one of `others` (the systems
+    writing into the same folder) is never one of them: 「ALOS」 split into
+    files writes `…_ALOS_2.csv`, which is also the day's file of a system
+    named 「ALOS_2」, and that system's order must not be deleted.
+    """
+    found = _named(system, day, run)
+    theirs = [_named(o, day, run, any_run=True) for o in others if o is not system and o.system != system.system]
     mine = {n.casefold() for n in names}
-    return sorted(n for n in listed if found.fullmatch(n) and n.casefold() not in mine)
+    return sorted(n for n in listed if found.fullmatch(n) and n.casefold() not in mine and not any(t.fullmatch(n) for t in theirs))
 
 
 SchemaLoader = Callable[[str], dict]

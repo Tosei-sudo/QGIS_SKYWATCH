@@ -490,6 +490,12 @@ def test_missed_requests_carry_over_to_the_next_plan():
     plan = plan_day([weekly], nxt, systems(), SATS, {"R-W": 10}, [row])
     assert [(c.request.id, c.result) for c in plan.candidates] == [("R-W", TAKEN)]
     assert boost_changes(plan) == [(5, {"boost": 100})] and missed_done(plan) == [(3, {"boostDone": 1})]
+    # Its cloud forecast is asked for the day it is carried to as well (before, 「予報なし」 and never held for its 実施しない雲量).
+    assert forecast_places([weekly], nxt, SATS) == []
+    assert forecast_places([weekly], nxt, SATS, {"R-W"}) == places_of(weekly)
+    assert forecast_places([weekly], nxt, SATS, missed_ids([row])) == places_of(weekly)
+    assert forecast_places([weekly], date(2026, 11, 30), SATS, {"R-W"}) == []
+    assert forecast_places([replace(weekly, kind="SAR")], nxt, SATS, {"R-W"}) == []
 
 
 def test_tally_and_what_comes_next():

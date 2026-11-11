@@ -431,8 +431,12 @@ class CatalogDock(PluginDock):
         if self.context.config.assignments is None:
             self.unworked_only.setChecked(False)
         self.search_button.setEnabled(bool(self.catalogs()))
+        none = self.tr("設定ファイルに画像カタログなし")
         if not self.catalogs():
-            self.status.setText(self.tr("設定ファイルに画像カタログなし"))
+            self.status.setText(none)
+        elif self.status.text() == none:
+            # Said while the settings file was not read yet (the dock is made before it is): no longer so.
+            self.status.setText("")
         if self._shown_catalog is not None:
             # The list's catalog as the settings file says now (`imageFiles` changed, say).
             self._shown_catalog = next((c for c in self.catalogs() if c.url == self._shown_catalog.url and c.label == self._shown_catalog.label),

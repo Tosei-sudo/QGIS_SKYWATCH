@@ -60,13 +60,26 @@ class FlowLayout(QLayout):
     def _place(self, rect: QRect, test: bool) -> int:
         x, y, line = rect.x(), rect.y(), 0
         space = self.spacing()
+        row: list = []
+
+        def put() -> None:
+            # Each widget at the middle of its line's height (a label beside a taller box or button).
+            for item, at, hint in row:
+                item.setGeometry(QRect(QPoint(at, y + (line - hint.height()) // 2), hint))
+
         for item in self._items:
+            if item.isEmpty():
+                # A hidden widget takes no place (nor the space after it).
+                continue
             hint = item.sizeHint()
             nxt = x + hint.width() + space
             if nxt - space > rect.right() and line > 0:
+                if not test:
+                    put()
                 x, y = rect.x(), y + line + space
-                nxt, line = x + hint.width() + space, 0
-            if not test:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+                nxt, line, row = x + hint.width() + space, 0, []
+            row.append((item, x, hint))
             x, line = nxt, max(line, hint.height())
+        if not test:
+            put()
         return y + line - rect.y()
