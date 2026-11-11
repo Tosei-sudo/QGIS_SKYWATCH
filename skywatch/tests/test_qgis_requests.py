@@ -402,6 +402,14 @@ def test_plan_results_against_the_catalog(plugin):
     images.add({"IMAGE_ID": "IMG-Y", "ACQ": first + 3 * 3600000, "SENSOR": "OTHER 9"}, square(139.67))
     images.add({"IMAGE_ID": "IMG-K", "ACQ": first + 3 * 3600000, "SENSOR": "OTHER 9"}, square(132.55))
 
+    # 「計算」 does not follow up (tsudo, 2026-11-11: 「その照合、計算時の照合なくして」): the rows stay 未判定 until 照合.
+    asked = len(fake.asked)
+    daily.run()
+    assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
+    assert not any(url.startswith(IMAGES) for url, _ in fake.asked[asked:])
+    assert {f["attributes"]["CAPTURED"] for f in history.rows if f["attributes"]["RESULT"] == "採用"} == {"未判定"}
+    assert "撮像済み" not in daily.status.text()
+
     dialog = daily.show_results()
     assert wait_for(lambda: dialog.task is None and dialog.history), dialog.status.text()
     # 横須賀 takes any satellite; 呉 named OPT 1, so another satellite's image does not count.
