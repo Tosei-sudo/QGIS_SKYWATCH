@@ -1345,3 +1345,34 @@ def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
     assert taxonomy.isVisible() and (taxonomy.note.text() == "観測記録を読み込み中…") == (taxonomy.tree.topLevelItemCount() == 0)
     assert wait_for(lambda: dock.book.loaded) and wait_for(lambda: taxonomy.tree.topLevelItemCount() > 0)
     assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類")
+
+
+def test_a_background_map_is_not_an_image(bare):
+    """
+    tsudo 2026-11-11: with only a background map (tiles) in the project the
+    dock listed it as 「日時不明  {y}.png」, chose it, showed the lists and read
+    every record. Tiles, WMS and map services are not images; the note stays.
+    """
+    from skywatch.qgis_io.obs_images import open_images
+
+    p, iface, dock, tmp_path = bare
+    project = QgsProject.instance()
+    tiles = QgsRasterLayer("type=xyz&url=https://example.com/xyz/std/%7Bz%7D/%7Bx%7D/%7By%7D.png&zmax=18&zmin=2", "地理院地図", "wms")
+    assert tiles.isValid()
+    project.addMapLayer(tiles)
+    dock.refresh_images()
+    assert open_images() == [] and dock.book.images == [] and dock.image_select.count() == 0
+    assert _idle(dock) and not dock.book.loaded
+    # The background map chosen in the layers panel: still no image.
+    iface.setActiveLayer(tiles)
+    assert dock.book.current is None and _idle(dock)
+    # An image opened over it: that one only.
+    image = QgsRasterLayer(geotiff(tmp_path / "d1.tif", "2026-10-01T01:00:00Z"), "d1")
+    project.addMapLayer(image)
+    assert [i.name for i in dock.book.images] == ["d1.tif"] and dock.book.current.layer_id == image.id()
+    assert dock.work_area.isVisible() and dock.book.loaded
+    # A catalog image that a server draws (its id set when opened) is still one.
+    served = QgsRasterLayer("type=xyz&url=https://example.com/img/%7Bz%7D/%7Bx%7D/%7By%7D.png", "S1", "wms")
+    served.setCustomProperty(IMAGE_ID, "S1")
+    project.addMapLayer(served)
+    assert sorted(i.id for i in dock.book.images) == ["S1", "d1.tif"]

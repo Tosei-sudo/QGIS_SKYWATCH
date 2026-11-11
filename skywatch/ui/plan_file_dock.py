@@ -43,7 +43,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.catalog import CatalogConfig
 from ..core.plan.weather import fetch_clouds
 from ..core.request.daily import HELD, TAKEN, room_text, satellite_name
-from ..core.request.export import convert_priority, encoded, render, write
+from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
 from ..core.request.follow import follow_and_save, found_text
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
@@ -619,45 +619,91 @@ class PlanFileDock(PluginDock):
         clicked = box.clickedButton()
         return True if clicked is replace else False if clicked is keep else None
 
+    @staticmethod
+    def _leftovers(plan: DayPlan, run: float, targets: list) -> list:
+        """
+        (system, folder, name) of the files in the folders named as a system's
+        files of the day with another number (`maxPerFile`): left from an
+        earlier writing split otherwise, they are deleted once its files are written.
+        """
+        out = []
+        for system in {w.system.system: w.system for w, _ in targets}.values():
+            if system.max_per_file <= 0:
+                continue
+            for folder in dict.fromkeys(f for w, f in targets if w.system is system):
+                try:
+                    listed = os.listdir(folder)
+                except OSError:
+                    continue
+                names = [w.file_name for w, f in targets if w.system is system and f == folder]
+                out += [(system.system, folder, n) for n in leftover_files(system, plan.day, run, names, listed)]
+        return out
+
+    @staticmethod
+    def _label(w) -> str:
+        """「A システム」, one of a system's files 「A システム（2/3）」."""
+        return f"{w.system.label}（{w.part}/{w.parts}）" if w.parts > 1 else w.system.label
+
     def _write_files(self, plan: DayPlan, run: float, files: list, ask: bool, earlier: int = 0) -> None:
+        # A system split into files (maxPerFile) writes all of them or, when one is not fit (schema …), none.
         broken = [w for w in files if w.errors]
-        good = [w for w in files if not w.errors]
+        unfit = {w.system.system for w in broken}
+        good = [w for w in files if w.system.system not in unfit]
         fallback = self.folder.text().strip()
         if any(not w.system.folder for w in good) and not fallback:
             self.status.setText(self.tr("出力先のフォルダを指定"))
             return
         targets = [(w, w.system.folder or fallback) for w in good]
         existing = [os.path.join(f, w.file_name) for w, f in targets if os.path.exists(os.path.join(f, w.file_name))]
+        leftovers = self._leftovers(plan, run, targets)
         replace = bool(earlier)
         target = plan.target
         label = next((s.label for s in plan.systems if s.system == target), target or "")
         if ask:
-            lines = [f"{w.system.label}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
+            lines = [f"{self._label(w)}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
             if target:
                 lines.append(self.tr("{system} の分だけ書き出します（ほかのシステムのファイル・出力履歴はそのまま）").format(system=label))
             if broken:
-                lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{w.system.label}: {'、'.join(w.errors[:3])}" for w in broken]
+                lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{self._label(w)}: {'、'.join(w.errors[:3])}" for w in broken]
+                if any(w.parts > 1 for w in broken):
+                    lines.append(self.tr("（分けたファイルのどれかが合わないシステムは、全部のファイルを書き出しません）"))
             if existing:
                 lines.append(self.tr("上書きするファイル {n} 件").format(n=len(existing)))
+            if leftovers:
+                lines.append(self.tr("前の書き出しで残っている番号違いのファイル {n} 件を削除: {list}").format(
+                    n=len(leftovers), list="、".join(n for _, _, n in leftovers[:5]) + (" …" if len(leftovers) > 5 else "")))
             choice = self._confirm(lines, earlier, label)
             if choice is None:
                 self.status.setText(self.tr("書き出しを取りやめ"))
                 return
             replace = choice
         paths, problems = [], []
-        written: dict = {}
-        failures = {w.system.system: "、".join(w.errors[:2]) for w in broken}
+        done_files = []
+        failures: dict = {}
+        for w in broken:
+            failures.setdefault(w.system.system, "、".join(w.errors[:2]))
         for w, folder in targets:
             try:
                 paths.append(write(w, folder))
-                written[w.system.system] = w.file_name
+                done_files.append(w)
             except OSError as error:
                 reason = error.strerror or str(error)
-                problems.append(f"{w.system.label}: {reason}")
-                failures[w.system.system] = reason
+                problems.append(f"{self._label(w)}: {reason}")
+                failures.setdefault(w.system.system, reason)
                 continue
             _, notes = encoded(w)
-            problems += [f"{w.system.label}: {n}" for n in notes + w.warnings[:3]]
+            problems += [f"{self._label(w)}: {n}" for n in notes + w.warnings[:3]]
+        # A request is 採用 with the file it is in; those of a file not written are kept as 見送り.
+        written = files_of(done_files)
+        cleared = 0
+        for system, folder, name in leftovers:
+            if system in failures:
+                continue
+            try:
+                os.remove(os.path.join(folder, name))
+                cleared += 1
+            except OSError as error:
+                problems.append(self.tr("{name} を削除できず: {m}").format(name=name, m=error.strerror or str(error)))
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
@@ -686,7 +732,9 @@ class PlanFileDock(PluginDock):
         def done(result):
             self.task = None
             saved, raised, _, removed, rewrite, failed_saves = result
-            text = self.tr("書き出し: {s}").format(s=written_summary([w for w, _ in targets if w.system.system in written]))
+            text = self.tr("書き出し: {s}").format(s=written_summary(done_files))
+            if cleared:
+                text += self.tr("・残っていた番号違いのファイル {n} 件を削除").format(n=cleared)
             if store.history:
                 text += (self.tr("・出力履歴 {n} 件").format(n=saved) if saved == len(rows)
                          else self.tr("・出力履歴 {n}/{m} 件").format(n=saved, m=len(rows)))
@@ -699,7 +747,7 @@ class PlanFileDock(PluginDock):
             if raised:
                 text += self.tr("・繰り上げ {n} 件").format(n=raised)
             if broken:
-                text += self.tr("・書き出さなかったシステム {n}（{list}）").format(n=len(broken), list="、".join(f"{w.system.label}: {w.errors[0]}" for w in broken))
+                text += self.tr("・書き出さなかったシステム {n}（{list}）").format(n=len(unfit), list="、".join(f"{self._label(w)}: {w.errors[0]}" for w in broken))
             if problems:
                 text += "・" + "、".join(problems)
             if failed_saves:

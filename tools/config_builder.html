@@ -697,7 +697,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "runDate",
   "day",
   "count",
-  "warnings"
+  "warnings",
+  "part",
+  "parts"
  ],
  "exportListSources": [
   "series",
@@ -958,6 +960,7 @@ const SOURCE_LABELS = {
   scenes: "シーン数", geometry: "範囲（座標）", centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "範囲の西端",
   bboxSouth: "範囲の南端", bboxEast: "範囲の東端", bboxNorth: "範囲の北端", requester: "依頼者", group: "依頼グループ", note: "メモ",
   system: "システム名", runDate: "出力日時", day: "対象日", count: "ファイルの依頼件数", warnings: "警告",
+  part: "何番目のファイル（maxPerFile で分けたとき。1 から）", parts: "その日のファイルの数",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
   centerGeojson: "中央の GeoJSON（Point）" };
@@ -1316,7 +1319,8 @@ const SPEC = [
         M("quota", "区分ごとの上限", { keys: ["定点", "臨時"], value: "number" }),
         L("sceneKm", "シーンの大きさ（km、幅, 長さ）", { numbers: true, ph: "10, 10" }),
         S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
-        T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}" }),
+        T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}。分けるときの番号 {part}・{part:%02d}・{parts}（ファイルの数）" }),
+        N("maxPerFile", "1 ファイルの最大件数", { min: 1, ph: "上限なし", help: "これより多い日は、この件数ずつのファイルに分けて書き出す（優先度順）。ファイル名に {part} がなければ _1・_2 … を拡張子の前に付ける（1 ファイルで収まる日は付けない）" }),
         S("encoding", "文字コード", K.encodings, { ph: "utf-8" }), B("header", "見出し行（CSV）", { showIf: (it) => (it.format || "csv") === "csv" }),
         T("timeZone", "出力のタイムゾーン", { ph: "UTC・Asia/Tokyo・+09:00" }),
         T("dateFormat", "日時の書式", { ph: "iso", list: () => DATE_FORMATS, help: "iso・iso-date・unix・unixms か strftime（%Y%m%d など）" }),
@@ -2152,6 +2156,8 @@ const SAMPLE_REQS = [
     scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", group: "", note: "至急", warnings: "シーン数が多い" },
 ];
 const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate"];
+/** 見本の今のファイル: その依頼と、何番目か（maxPerFile で分けたとき）。 */
+let SAMPLE_FILE = { reqs: SAMPLE_REQS, part: 1, parts: 1 };
 
 function zoneOffset(zone, ms) {
   if (!zone || /^(utc|z|gmt)$/i.test(zone)) return 0;
@@ -2261,6 +2267,8 @@ function rawValue(req, source, sys, n, geometry, digits, asObject) {
   if (source === "runDate") return DAY - 6 * 3600000;
   if (source === "day") return "2026-11-08";
   if (source === "count") return n;
+  if (source === "part") return SAMPLE_FILE.part;
+  if (source === "parts") return SAMPLE_FILE.parts;
   if (!req) return MISSING;
   if (source === "geometry") return geometryValue(req.ring, K.geometries.includes(geometry) ? geometry : "wkt", d, asObject);
   if (source === "priority") return convertPriority(req.priorityRaw, sys.priority);
@@ -2321,9 +2329,9 @@ function build(s, root, req, sys) {
   s = resolveRef(s, root);
   if (!isObj(s)) return MISSING;
   const src = s["x-source"];
-  if (src === "requests") return SAMPLE_REQS.map((r) => build(s.items || {}, root, r, sys)).filter((v) => v !== MISSING);
+  if (src === "requests") return SAMPLE_FILE.reqs.map((r) => build(s.items || {}, root, r, sys)).filter((v) => v !== MISSING);
   if (typeof src === "string") {
-    let v = rawValue(req, src, sys, SAMPLE_REQS.length, s["x-geometry"] || "geojson", s["x-digits"], true);
+    let v = rawValue(req, src, sys, SAMPLE_FILE.reqs.length, s["x-geometry"] || "geojson", s["x-digits"], true);
     v = shaped(v, src, sys, s["x-format"], s["x-map"]);
     if (v === MISSING) return v;
     if (emptyValue(v) && writesDefault(s)) return s.default;
@@ -2398,11 +2406,37 @@ function validate(v, s, root, path = "$") {
   return errs;
 }
 
-function sampleText(sys) {
+/** ファイル名（プラグインの export.file_name_of と同じ）。分けたとき {part} がなければ _1・_2 … を拡張子の前に。 */
+function sampleFileName(sys, part, parts) {
   const fmt = sys.format || "csv";
-  const fileName = (sys.fileName || "{system}_{date:%Y%m%d}.{ext}").replace(/\{(\w+)(?::([^}]*))?\}/g, (m, k, f) =>
-    k === "system" ? sys.system || "" : k === "ext" ? fmt : k === "date" ? formatTime(DAY, f || "%Y%m%d", "+09:00") : k === "run" ? formatTime(DAY - 6 * 3600000, f || "%Y%m%d%H%M", "+09:00") : m);
-  const head = `ファイル名: ${fileName.replace(/[\\/:*?"<>|]/g, "_")}　文字コード: ${sys.encoding || "utf-8"}\n`;
+  const template = sys.fileName || "{system}_{date:%Y%m%d}.{ext}";
+  const number = (k, f) => { const n = k === "part" ? part : parts; return String(f ? printf(f, n) : n); };
+  let name = template.replace(/\{(\w+)(?::([^}]*))?\}/g, (m, k, f) =>
+    k === "system" ? sys.system || "" : k === "ext" ? fmt : k === "date" ? formatTime(DAY, f || "%Y%m%d", "+09:00") : k === "run" ? formatTime(DAY - 6 * 3600000, f || "%Y%m%d%H%M", "+09:00")
+      : k === "part" || k === "parts" ? number(k, f) : m).replace(/[\\/:*?"<>|]/g, "_");
+  if (parts > 1 && !/\{part(:[^}]*)?\}/.test(template)) {
+    const dot = name.lastIndexOf(".");
+    name = dot > 0 ? `${name.slice(0, dot)}_${part}${name.slice(dot)}` : `${name}_${part}`;
+  }
+  return name;
+}
+
+/** 見本: 架空の依頼を、maxPerFile があればその件数ずつのファイルに分けて。 */
+function sampleText(sys) {
+  const most = Number.isInteger(sys.maxPerFile) && sys.maxPerFile >= 1 ? sys.maxPerFile : 0;
+  const runs = [];
+  for (let i = 0; i < SAMPLE_REQS.length; i += most || SAMPLE_REQS.length) runs.push(SAMPLE_REQS.slice(i, i + (most || SAMPLE_REQS.length)));
+  const out = runs.map((reqs, i) => {
+    SAMPLE_FILE = { reqs, part: i + 1, parts: runs.length };
+    try { return sampleFile(sys); } finally { SAMPLE_FILE = { reqs: SAMPLE_REQS, part: 1, parts: 1 }; }
+  });
+  return { text: out.map((o) => o.text).join("\n\n"), errors: [...new Set(out.flatMap((o) => o.errors))] };
+}
+
+function sampleFile(sys) {
+  const fmt = sys.format || "csv";
+  const fileName = sampleFileName(sys, SAMPLE_FILE.part, SAMPLE_FILE.parts);
+  const head = `ファイル名: ${fileName}${SAMPLE_FILE.parts > 1 ? `（${SAMPLE_FILE.part}/${SAMPLE_FILE.parts}、${SAMPLE_FILE.reqs.length} 件）` : ""}　文字コード: ${sys.encoding || "utf-8"}\n`;
   if (fmt === "json") {
     if (typeof sys.schema === "string") return { text: head + "スキーマはファイル（" + sys.schema + "）。見本は「ここで組む」のときだけ", errors: [] };
     if (!isObj(sys.schema)) return { text: head + "JSON Schema がまだない", errors: [] };
@@ -2415,9 +2449,9 @@ function sampleText(sys) {
   const lines = [];
   if (sys.header !== false) lines.push(cols.map((c) => csvCell(c.key)).join(","));
   const warns = [];
-  for (const r of SAMPLE_REQS) {
+  for (const r of SAMPLE_FILE.reqs) {
     lines.push(cols.map((c) => {
-      let v = c.source === undefined ? c.value : shaped(rawValue(r, c.source, sys, SAMPLE_REQS.length, c.geometry || "wkt", c.digits, false), c.source, sys, c.format, c.map);
+      let v = c.source === undefined ? c.value : shaped(rawValue(r, c.source, sys, SAMPLE_FILE.reqs.length, c.geometry || "wkt", c.digits, false), c.source, sys, c.format, c.map);
       if (v === MISSING) { warns.push(`${c.key}: 項目 ${c.source} なし`); v = ""; }
       else if (c.source !== undefined && c.default !== undefined && c.default !== null && emptyValue(v)) v = c.default;
       v = cellText(v);
@@ -2471,6 +2505,7 @@ function checkExport(it, at, p) {
   if (fmt === "json" && !(isObj(it.schema) || (typeof it.schema === "string" && it.schema))) p.push(`${at}: JSON Schema（schema）がない`);
   if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"requests"')) p.push({ warn: true, text: `${at}: スキーマに x-source: requests の配列がない（依頼が出ない）` });
   if (it.kind !== undefined && !["光学", "SAR", "両方"].includes(it.kind)) p.push(`${at}: kind は 光学・SAR・両方`);
+  if (it.maxPerFile !== undefined && !(Number.isInteger(it.maxPerFile) && it.maxPerFile >= 1)) p.push(`${at}: maxPerFile は 1 以上の整数`);
   if (it.timeZone && zoneOffset(it.timeZone, DAY) === 0 && !/^(utc|z|gmt|[+-]00:?00)$/i.test(it.timeZone) && !isIana(it.timeZone)) p.push({ warn: true, text: `${at}: timeZone「${it.timeZone}」をこのブラウザで確かめられない` });
 }
 function isIana(z) { try { new Intl.DateTimeFormat("en-US", { timeZone: z }); return true; } catch (e) { return false; } }
