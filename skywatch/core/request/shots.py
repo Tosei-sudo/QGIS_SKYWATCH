@@ -12,6 +12,13 @@ request, with the outline of its scenes as its area, while each request
 keeps its own history row (the schedule shows the requests as they were
 asked).
 
+The row of requests put together is written with the tightest box along
+the track around their own areas (tsudo, 2026-11-11: 「ぴったしだと完全含有
+判定されなくて 2 オーダーされる可能性」→「パス並行に」), not the outline of
+the scenes; and they are put together only when that box leaves the
+system's `mergeMargin` (500 m) inside the shot on every side, so that the
+system, framing with its own orbit and scenes, still finds them in one.
+
 A satellite (all its modes) keeps `minInterval` minutes between its shots
 and takes at most `maxPerDay` shots a day; putting a request into a shot
 already planned uses neither. An area too big for one shot takes the day's
@@ -28,7 +35,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from ..plan.access import Opportunity, best_scene, framed, look_at, reach_of
-from ..plan.orbit import Frame, R, frame_of, lon_lat_of, norm, point_at, track_angles, track_rate
+from ..plan.orbit import Frame, R, ecef_of, frame_of, lon_lat_of, norm, point_at, track_angles, track_rate, unit
 from ..plan.satellites import SatelliteSpec, platform_key
 from .model import ImagingRequest
 from .passes import Passes
@@ -59,6 +66,7 @@ class Shot:
     #: For a shot of an area too big for one: the share of it taken; None for a shot taking its requests whole.
     gain: Optional[float] = None
     _ring: Optional[tuple] = field(default=None, repr=False)
+    _area: Optional[tuple] = field(default=None, repr=False)
 
     @property
     def rate(self) -> float:
@@ -101,19 +109,41 @@ class Shot:
     def merged(self) -> bool:
         return len(self.members) > 1
 
+    def _ring_of(self, window: tuple, along: tuple) -> list:
+        """A box across and along the track as a ring ([longitude, latitude] …, closed), its long edges in pieces."""
+        a, b = window
+        y0, y1 = along
+        pieces = max(4, 4 * self.frames)
+        ring = []
+        for x, p, q in ((a, y0, y1), (b, y1, y0)):
+            ring.extend(list(lon_lat_of(point_at(self.frame, x, p + (q - p) * i / pieces))) for i in range(pieces + 1))
+        ring.append(list(ring[0]))
+        return ring
+
     def ring(self) -> list:
         """The outline of its scenes ([longitude, latitude] …, closed), each edge in pieces so it follows the track."""
         key = (self.window, self.along, self.frames)
         if self._ring is None or self._ring[0] != key:
-            a, b = self.window
-            y0, y1 = self.along
-            pieces = max(4, 4 * self.frames)
-            ring = []
-            for x, p, q in ((a, y0, y1), (b, y1, y0)):
-                ring.extend(list(lon_lat_of(point_at(self.frame, x, p + (q - p) * i / pieces))) for i in range(pieces + 1))
-            ring.append(list(ring[0]))
-            self._ring = (key, ring)
+            self._ring = (key, self._ring_of(self.window, self.along))
         return [list(p) for p in self._ring[1]]
+
+    def box(self) -> tuple:
+        """Across and along (x0, x1, y0, y1) of its requests' own areas (and the points they are planned as)."""
+        return union([area_box(m.request, self.frame) for m in self.members] + list(self.extents))
+
+    def area_ring(self) -> list:
+        """
+        The polygon its row is written with: for requests put together, the
+        tightest box along the track around their own areas; otherwise the
+        outline of its scenes.
+        """
+        if not self.merged:
+            return self.ring()
+        key = (self.window, self.along, self.frames, len(self.members))
+        if self._area is None or self._area[0] != key:
+            x0, x1, y0, y1 = self.box()
+            self._area = (key, self._ring_of((x0, x1), (y0, y1)))
+        return [list(p) for p in self._area[1]]
 
 
 @dataclass
@@ -138,6 +168,21 @@ class Placement:
     @property
     def new(self) -> bool:
         return self.into is None
+
+
+def area_box(req: ImagingRequest, frame: Frame) -> Optional[tuple]:
+    """Across and along (x0, x1, y0, y1) of a request's own area (its rings' vertices) in a shot's frame; None without."""
+    angles = [track_angles(unit(ecef_of(p[:2])), frame) for r in req.rings for p in r]
+    if not angles:
+        return None
+    xs, ys = [a[0] for a in angles], [a[1] for a in angles]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def union(boxes: Sequence[Optional[tuple]]) -> tuple:
+    """The box (x0, x1, y0, y1) around boxes (those None left out)."""
+    boxes = [b for b in boxes if b is not None]
+    return min(b[0] for b in boxes), max(b[1] for b in boxes), min(b[2] for b in boxes), max(b[3] for b in boxes)
 
 
 def _side_ok(side: str, mid: float) -> bool:
@@ -207,14 +252,18 @@ class Book:
 
     # --- Where a request can go ------------------------------------------------------------------
 
-    def _fit(self, sat: int, reqs: Sequence[ImagingRequest], extents: Sequence[tuple], radius: float, ascending: bool):
-        """The window, along, frames and look of one shot taking every extent; None when they do not fit in one."""
+    def _fit(self, sat: int, reqs: Sequence[ImagingRequest], extents: Sequence[tuple], radius: float, ascending: bool,
+             margin: float = 0.0):
+        """
+        The window, along and frames of one shot taking every extent, `margin`
+        (radians) left inside it on every side; None when they do not fit in one.
+        """
         spec = self.sats[sat]
         sw, sl = spec.swath / R, spec.length / R
         most = max(1, spec.scenesPerPass)
-        x0, x1 = min(e[0] for e in extents), max(e[1] for e in extents)
-        y0, y1 = min(e[2] for e in extents), max(e[3] for e in extents)
-        if x1 - x0 > sw + _EPS or y1 - y0 > most * sl + _EPS:
+        x0, x1, y0, y1 = union(extents)
+        y0, y1 = y0 - margin, y1 + margin
+        if x1 - x0 + 2 * margin > sw + _EPS or y1 - y0 > most * sl + _EPS:
             return None
         mid = (x0 + x1) / 2
         near, far = reach_of(spec, spec.maxOffNadir, radius, None, None)
@@ -227,12 +276,17 @@ class Book:
         frames = max(1, math.floor((along[1] - along[0]) / sl + 0.5))
         return (mid - sw / 2, mid + sw / 2), along, frames
 
-    def joins(self, c, sat: int, ops: Sequence[Opportunity], merge: bool) -> list[Placement]:
-        """Shots of this satellite (mode) already planned that the candidate fits into, fewest scenes added first."""
+    def joins(self, c, sat: int, ops: Sequence[Opportunity], merge: bool, margin_m: float = 0.0) -> list[Placement]:
+        """
+        Shots of this satellite (mode) already planned that the candidate fits
+        into, fewest scenes added first: with every request's own area and
+        `margin_m` metres left inside the shot on every side.
+        """
         if not merge:
             return []
         spec = self.sats[sat]
         span = max(1, spec.scenesPerPass) * spec.length / R
+        margin = max(0.0, margin_m) / 1000 / R
         out = []
         for shot in self.shots:
             if shot.sat != sat or shot.gain is not None or not any(abs(o.time - shot.time) <= span / shot.rate * 1000 + 60000 for o in ops):
@@ -240,7 +294,9 @@ class Book:
             extent = self._extent(c.request, shot.frame)
             if extent is None:
                 continue
-            fit = self._fit(sat, [m.request for m in shot.members] + [c.request], shot.extents + [extent], shot.radius, shot.ascending)
+            reqs = [m.request for m in shot.members] + [c.request]
+            areas = [area_box(r, shot.frame) for r in reqs]
+            fit = self._fit(sat, reqs, shot.extents + [extent] + [a for a in areas if a is not None], shot.radius, shot.ascending, margin)
             if fit is None:
                 continue
             window, along, frames = fit

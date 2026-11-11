@@ -104,7 +104,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 | 形状（ポリゴン） | 依頼の範囲（要求外は結果ファイルか手で描いた範囲） | 地図 |
 | `SHOT_ID` | その依頼を撮る撮像（`TBL_REQUEST_SHOT` の `SHOT_ID`。まとめた依頼は同じ値。2026-11-11 に追加） | 撮像の範囲と結び付ける |
 
-撮像の範囲（`TBL_REQUEST_SHOT`、2026-11-11 に追加）は、書き出したファイルの 1 行ごとのポリゴン（撮るシーンの外形。まとめた行はまとめた範囲）。依頼の範囲（出力履歴）と別のレイヤーなので、Web マップに両方を入れ、撮像の範囲は塗りなしの破線にすると、依頼ごとの範囲とまとめて撮る範囲を重ねて見られる。属性は `TARGET_DAY`・`TARGET_DATE`・`SYSTEM`・`SATELLITE`・`PASS_TIME`（撮像時刻）・`REQ_IDS`（まとめた依頼）・`REQ_COUNT` など（README 「`TBL_REQUEST_SHOT`」）。
+撮像の範囲（`TBL_REQUEST_SHOT`、2026-11-11 に追加）は、書き出したファイルの 1 行ごとのポリゴン（撮るシーンの外形。まとめた行はファイルに書いた、まとめた依頼を囲むパスに平行な四角）。依頼の範囲（出力履歴）と別のレイヤーなので、Web マップに両方を入れ、撮像の範囲は塗りなしの破線にすると、依頼ごとの範囲とまとめて撮る範囲を重ねて見られる。属性は `TARGET_DAY`・`TARGET_DATE`・`SYSTEM`・`SATELLITE`・`PASS_TIME`（撮像時刻）・`REQ_IDS`（まとめた依頼）・`REQ_COUNT` など（README 「`TBL_REQUEST_SHOT`」）。
 
 「その日の計画に入ったもの」は `ADOPTION` = `採用`（要求外を含む）。依頼だけなら、さらに `RESULT` = `採用`。
 

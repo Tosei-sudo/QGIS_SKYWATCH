@@ -61,6 +61,9 @@ class ExportSystem:
     orbit: bool = True
     #: Whether requests close together on a pass are put into one shot, one row of its file (`merge`).
     merge: bool = True
+    #: The room (metres) requests put into one shot leave inside it on every side (`mergeMargin`), so that the
+    #: system, framing with its own orbit and scenes, still finds them inside one (tsudo, 2026-11-11: 「規定500m」).
+    merge_margin: float = 500.0
     format: str = "csv"
     folder: str = ""
     file_name: str = "{system}_{date:%Y%m%d}.{ext}"
@@ -187,6 +190,10 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         if not isinstance(flags[key], bool):
             problems.append(f"{at} の {key} は true か false で指定")
             flags[key] = True
+    margin = value.get("mergeMargin", 500)
+    if not (is_number(margin) and margin >= 0):
+        problems.append(f"{at} の mergeMargin は 0 以上の数（メートル）で指定")
+        margin = 500
     zone = UTC
     if "timeZone" in value:
         zone = parse_time_zone(value["timeZone"]) or UTC
@@ -225,6 +232,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         scene_km=scene_km,
         orbit=flags["orbit"],
         merge=flags["merge"],
+        merge_margin=float(margin),
         format=fmt,
         folder=value["folder"] if isinstance(value.get("folder"), str) else "",
         file_name=value["fileName"] if isinstance(value.get("fileName"), str) and value["fileName"] else f"{{system}}_{{date:%Y%m%d}}.{fmt}",

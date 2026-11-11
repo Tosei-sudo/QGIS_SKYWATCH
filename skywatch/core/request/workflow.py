@@ -175,9 +175,11 @@ def shot_ids_of(plan: DayPlan, files: dict, run_id: str, system: Optional[str] =
 def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Optional[str] = None) -> list[ShotRow]:
     """
     The shots of the files written, one a row of a file (tsudo, 2026-11-11:
-    「マージした結果、どの範囲になったかも見たい」): the outline of the scenes
-    taken (each shot's, for an area too big for one), the pass, and the
-    requests in it. Requests fitted without the orbits have none.
+    「マージした結果、どの範囲になったかも見たい」): the polygon the row is
+    written with for requests put together (the box along the track around
+    them, Shot.area_ring), otherwise the outline of the scenes taken (each
+    shot's, for an area too big for one); the pass, and the requests in it.
+    Requests fitted without the orbits have none.
     """
     out = []
     for n, c in enumerate(_rows_with_shots(plan, files, system), 1):
@@ -191,7 +193,7 @@ def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Option
             orbit_dir="昇交" if first.ascending else "降交", look_side=first.side, scenes=c.scenes, shots=len(c.shots),
             coverage=c.coverage, request_id=c.request.id, request_ids=[m.request.id for m in members],
             names=[m.request.name or m.request.id for m in members],
-            file=file_of(files, c.system.system, c.request.id) or "", rings=[s.ring() for s in c.shots]))
+            file=file_of(files, c.system.system, c.request.id) or "", rings=[s.area_ring() for s in c.shots]))
     return out
 
 
