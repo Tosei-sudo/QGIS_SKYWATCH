@@ -341,11 +341,12 @@ class ObservationOverlay(QgsMapCanvasItem):
             return QPointF(-1e6, -1e6)
         return self.toCanvasCoordinates(p)
 
-    def hit(self, x: float, y: float, roles: Sequence[str] = ("obs", "ghost"), tolerance: float = 8) -> Optional[Mark]:
-        """The mark painted nearest a pixel, within `tolerance`."""
+    def hit(self, x: float, y: float, roles: Sequence[str] = ("obs", "ghost"), tolerance: float = 8,
+            keyed: bool = False) -> Optional[Mark]:
+        """The mark painted nearest a pixel, within `tolerance` (with `keyed`, only marks with a key)."""
         best, best_d = None, tolerance
         for p, mark in self.painted:
-            if mark.role not in roles:
+            if mark.role not in roles or (keyed and not mark.key):
                 continue
             d = math.hypot(p.x() - x, p.y() - y)
             if d <= best_d:

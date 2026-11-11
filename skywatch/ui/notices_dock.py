@@ -1,7 +1,7 @@
 """
 通知: the new images the watches found (and the imaging plan's reminders),
 newest first, with 開く・移動・既読・削除, and the watches themselves (on or
-off, renamed, deleted, when last checked and why a check failed). The
+off, renamed, their area changed, deleted, when last checked and why a check failed). The
 watches are checked when QGIS starts and every `watchInterval` minutes, in
 a task; a check finding new images says so in the message bar. The tab
 通報 lists the 通報 log table, polled while the dock is shown (alert_feed).
@@ -24,7 +24,9 @@ from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError
 from ..core.catalog.query import CatalogSearch, time_text
 from ..core.catalog.search import listed_image, read_catalog_layer, record_of
-from ..core.catalog.watch import CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch
+from ..core.catalog.watch import (
+    MAX_SEEN, CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch, replace_areas,
+)
 from ..core.catalog.watch_store import WatchStore, check_due
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
@@ -33,7 +35,7 @@ from ..qgis_io.tasks import run_task
 from .alert_feed import AlertFeed
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .list_views import column_menus
-from .watch_dialog import PointWatchDialog, WatchDialog
+from .watch_dialog import PointWatchDialog, WatchAreaDialog, WatchDialog
 
 TITLE = "通知"
 PLAN = "plan"
@@ -59,6 +61,8 @@ class NoticesDock(PluginDock):
         self.choose_folder = None
         #: Which of a record's images to open (the image catalog dock's); all without it.
         self.choose_images = None
+        #: The area drawn in the image catalog dock (its ring, WGS 84; set by the plugin), offered by 「範囲の変更…」.
+        self.drawn_area: Optional[Callable[[], Optional[list]]] = None
         self._tasks: list = []
 
         tabs = QTabWidget()
@@ -97,9 +101,15 @@ class NoticesDock(PluginDock):
         v.addWidget(self.watches, 1)
         self.watches_columns = column_menus("notice-watches", self.watches, self)
         row = QHBoxLayout()
-        for text, slot in [(self.tr("名前の変更"), self.rename_chosen), (self.tr("削除"), self.delete_chosen_watch),
-                           (self.tr("今すぐ確認"), lambda: self.check(force=True))]:
+        for text, tip, slot in [
+                (self.tr("名前の変更"), "", self.rename_chosen),
+                (self.tr("範囲の変更…"), self.tr("選んだ監視の範囲を、レイヤーの今の形（取り直し）・表示範囲などで置き換える。新しい範囲に今ある画像は通知しない"),
+                 self.change_chosen_area),
+                (self.tr("削除"), "", self.delete_chosen_watch),
+                (self.tr("今すぐ確認"), "", lambda: self.check(force=True))]:
             button = QPushButton(text)
+            if tip:
+                button.setToolTip(tip)
             button.clicked.connect(slot)
             row.addWidget(button)
         v.addLayout(row)
@@ -248,11 +258,12 @@ class NoticesDock(PluginDock):
         self.watches.clear()
         for w in watches:
             last = time_text(w.last_checked) if w.last_checked is not None else self.tr("未確認")
-            item = QTreeWidgetItem([w.name, conditions_text(w.catalog, w.conditions, w.areas), last, w.last_error or ""])
+            item = QTreeWidgetItem([w.name, conditions_text(w.catalog, w.conditions, w.areas, area_layer=w.area_layer), last, w.last_error or ""])
             item.setData(0, Qt.ItemDataRole.UserRole, w.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked if w.enabled else Qt.CheckState.Unchecked)
-            item.setToolTip(1, item.text(1))
+            # Layer names and SQL conditions shown as they are (a tooltip reads text that looks like HTML as HTML).
+            item.setToolTip(1, plain_tip(item.text(1)))
             self.watches.addTopLevelItem(item)
         self.watches.blockSignals(False)
         for c in range(4):
@@ -363,6 +374,41 @@ class NoticesDock(PluginDock):
             self.store().put_watch(replace(watch, name=name.strip()))
             self.refresh()
 
+    def change_chosen_area(self) -> None:
+        """
+        「範囲の変更…」: the chosen watch over another area (a layer's shape as
+        it is now, the map's extent, …). The images already over it are noted
+        first, in a task; the area stays as it was when the catalog cannot be asked.
+        """
+        watch = self.store().watch(self._chosen_watch_id() or "")
+        if watch is None:
+            self.status.setText(self.tr("範囲を変える監視を一覧で選択"))
+            return
+        dialog = WatchAreaDialog(watch, self.canvas, self.drawn_area() if self.drawn_area else None, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        areas, origin = dialog.chosen()
+        client = self.context.esri()
+        asked, ask = self._ask_for(client)(watch)
+        store = self.store()
+
+        def work(task):
+            changed = replace_areas(asked, areas, ask, area_layer=origin)
+            current = store.watch(watch.id)
+            if current is None:
+                return False
+            # A check may have run meanwhile: what it saw is kept too.
+            store.put_watch(replace(current, areas=changed.areas, area_layer=changed.area_layer,
+                                    seen=list(dict.fromkeys(current.seen + changed.seen))[-MAX_SEEN:]))
+            return True
+
+        def done(kept) -> None:
+            self.refresh()
+            if kept:
+                self.status.setText(self.tr("監視「{name}」の範囲を変更").format(name=watch.name))
+
+        self._start(self.tr("監視の範囲の変更"), work, done)
+
     def delete_chosen_watch(self) -> None:
         watch_id = self._chosen_watch_id()
         watch = self.store().watch(watch_id or "")
@@ -375,9 +421,10 @@ class NoticesDock(PluginDock):
 
     # --- New watches ------------------------------------------------------------------------------
 
-    def add_watch(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, areas: list, name: str) -> CatalogWatch:
-        """Keeps a new watch and checks it once (noting the images already there) in a task."""
-        watch = new_watch(name, CatalogConfig.from_json(catalog.to_json()), types, conditions, areas)
+    def add_watch(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, areas: list, name: str,
+                  area_layer: Optional[dict] = None) -> CatalogWatch:
+        """Keeps a new watch (`area_layer`: the layer its areas were copied from) and checks it once (noting the images already there) in a task."""
+        watch = new_watch(name, CatalogConfig.from_json(catalog.to_json()), types, conditions, areas, area_layer=area_layer)
         self.store().put_watch(watch)
         self.refresh()
         client = self.context.esri()
@@ -400,12 +447,21 @@ class NoticesDock(PluginDock):
         self._start(self.tr("新着画像の監視の追加"), work, done)
         return watch
 
-    def watch_conditions(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, drawn: Optional[list] = None) -> None:
-        """「この条件で監視…」 of the image catalog (`drawn`: the area drawn there, offered first)."""
-        dialog = WatchDialog(catalog, conditions, self.canvas, self.iface.activeLayer(), self, drawn)
+    def watch_conditions(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, drawn: Optional[list] = None,
+                         area: Optional[str] = None, layer=None, selected_only: Optional[bool] = None) -> None:
+        """
+        「この条件で監視…」 of the image catalog: `drawn` the area drawn there,
+        `area` the kind of area searched (offered first; the area drawn when
+        not told), `layer` / `selected_only` the layer searched over (the
+        active layer and its chosen features otherwise).
+        """
+        if layer is None:
+            layer, selected_only = self.iface.activeLayer(), None
+        dialog = WatchDialog(catalog, conditions, self.canvas, layer, self, drawn, area, selected_only)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        self.add_watch(catalog, types, conditions, dialog.areas(), dialog.name.text().strip() or catalog.label)
+        areas, origin = dialog.chosen()
+        self.add_watch(catalog, types, conditions, areas, dialog.name.text().strip() or catalog.label, area_layer=origin)
         self.show()
         self.raise_()
 

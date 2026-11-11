@@ -38,7 +38,14 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "satellite": "SATELLITE", "priority": "PRIORITY_OUT", "cloud": "CLOUD", "scenes": "SCENES", "result": "RESULT",
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
-    "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO",
+    "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID",
+}
+#: The shot layer's names (TBL_REQUEST_SHOT: one row a row of a file, its polygon the outline of the scenes taken).
+DEFAULT_SHOT_FIELDS: dict[str, str] = {
+    "shotId": "SHOT_ID", "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "targetDate": "TARGET_DATE",
+    "system": "SYSTEM", "satellite": "SATELLITE", "passTime": "PASS_TIME", "offNadir": "OFF_NADIR", "incidence": "INCIDENCE",
+    "orbitDir": "ORBIT_DIR", "lookSide": "LOOK_SIDE", "scenes": "SCENES", "shots": "SHOT_COUNT", "coverage": "COVERAGE",
+    "requestId": "REQ_ID", "requestIds": "REQ_IDS", "names": "REQ_NAMES", "count": "REQ_COUNT", "file": "OUTPUT_FILE",
 }
 #: The history's 採否 (the system's own answer to what was handed out; core/request/adoption.py).
 ADOPTION_ROLES = ("adoption", "adoptionReason", "plannedAt", "externalId", "adoptionSource")
@@ -77,6 +84,9 @@ class RequestStoreConfig:
     #: The 依頼グループ table (core/request/groups.py; None: groups are typed freely).
     groups: Optional[str] = None
     group_fields: dict = field(default_factory=lambda: dict(DEFAULT_GROUP_FIELDS))
+    #: The shot layer (撮像の範囲; None: the shots are not kept, the history alone tells what was put together).
+    shots: Optional[str] = None
+    shot_fields: dict = field(default_factory=lambda: dict(DEFAULT_SHOT_FIELDS))
 
 
 def _fields(value: Any, defaults: dict, at: str, problems: list[str]) -> dict:
@@ -109,6 +119,10 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
     if groups is not None and (not isinstance(groups, str) or not _READ_TABLE.search(groups.split("?", 1)[0])):
         problems.append(f"{at} の groups は依頼グループのテーブルの URL（…/FeatureServer/2 など）で指定")
         groups = None
+    shots = value.get("shots")
+    if shots is not None and (not isinstance(shots, str) or not _FEATURE_LAYER.search(shots.split("?", 1)[0])):
+        problems.append(f"{at} の shots は撮像の範囲のポリゴンレイヤーの URL（…/FeatureServer/22 など）で指定")
+        shots = None
     label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
     miss = value.get("missAfterDays")
     return RequestStoreConfig(
@@ -122,6 +136,8 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         miss_after_days=float(miss) if is_number(miss) and miss > 0 else 3,
         groups=layer_url(groups) if groups else None,
         group_fields=_fields(value.get("groupFields"), DEFAULT_GROUP_FIELDS, f"{at}.groupFields", problems),
+        shots=layer_url(shots) if shots else None,
+        shot_fields=_fields(value.get("shotFields"), DEFAULT_SHOT_FIELDS, f"{at}.shotFields", problems),
     )
 
 
@@ -609,6 +625,8 @@ class HistoryRow:
     rings: list = field(default_factory=list)
     #: The request whose row in the file carried this one, put into its shot (まとめ); "" for its own row.
     merged_into: str = ""
+    #: The shot it is taken in (the shot layer's SHOT_ID; "" when fitted without the orbits).
+    shot_id: str = ""
 
 
 def history_attributes(row: HistoryRow, f: dict) -> dict:
@@ -621,6 +639,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["boostDone"]: row.boost_done, f["adoption"]: row.adoption or None, f["adoptionReason"]: row.adoption_reason[:1000] or None,
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
         f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
+        f["shotId"]: row.shot_id[:64] or None,
     }
 
 
@@ -727,6 +746,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         adoption=_text(a.get(hf["adoption"])), adoption_reason=_text(a.get(hf["adoptionReason"])),
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
         adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
+        shot_id=_text(a.get(hf["shotId"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 
@@ -840,3 +860,138 @@ def update_history(client: EsriClient, store: RequestStoreConfig, token: Optiona
     updates = [{"attributes": _only({oid: o, **{hf[k]: v for k, v in values.items()}}, names | {oid})} for o, values in changes]
     return _batches(lambda batch: client.apply_edits(store.history, updates=batch, token=token), updates,
                     lambda r: r.update_results, "出力履歴の更新")
+
+
+# --- Shots (撮像の範囲) ---------------------------------------------------------------------------
+
+@dataclass
+class ShotRow:
+    """
+    One row of a system's file as the satellite takes it (tsudo, 2026-11-11:
+    「マージした結果、どの範囲になったかも見たい」): its shots' outline, when,
+    how, and the requests in it (the first is the one whose row it is). The
+    history keeps each request's own row and area; its SHOT_ID says which
+    shot takes it.
+    """
+    shot_id: str
+    run_id: str
+    run_date: float
+    #: The JST day, `2026-11-08`.
+    day: str
+    system: str = ""
+    satellite: str = ""
+    #: The middle of its (first) shot (ms).
+    pass_time: Optional[float] = None
+    off_nadir: Optional[float] = None
+    incidence: Optional[float] = None
+    #: 昇交 / 降交, 右 / 左.
+    orbit_dir: str = ""
+    look_side: str = ""
+    scenes: Optional[int] = None
+    #: How many shots (passes): more than 1 only for an area too big for one.
+    shots: int = 1
+    #: The share of the request's area its shots take (an area too big for one shot); None when whole.
+    coverage: Optional[float] = None
+    request_id: str = ""
+    request_ids: list = field(default_factory=list)
+    names: list = field(default_factory=list)
+    file: str = ""
+    #: The outlines (longitude / latitude rings), one a shot.
+    rings: list = field(default_factory=list)
+    object_id: Optional[int] = None
+
+    @property
+    def count(self) -> int:
+        return len(self.request_ids) or 1
+
+
+def shot_attributes(row: ShotRow, f: dict) -> dict:
+    return {
+        f["shotId"]: row.shot_id, f["runId"]: row.run_id, f["runDate"]: row.run_date, f["day"]: row.day,
+        f["targetDate"]: day_start_ms(row.day), f["system"]: row.system[:250] or None, f["satellite"]: row.satellite[:250] or None,
+        f["passTime"]: row.pass_time, f["offNadir"]: row.off_nadir, f["incidence"]: row.incidence, f["orbitDir"]: row.orbit_dir or None,
+        f["lookSide"]: row.look_side or None, f["scenes"]: row.scenes, f["shots"]: row.shots,
+        f["coverage"]: None if row.coverage is None else round(row.coverage * 100, 1), f["requestId"]: row.request_id,
+        f["requestIds"]: ",".join(row.request_ids)[:4000] or None, f["names"]: "、".join(row.names)[:4000] or None,
+        f["count"]: row.count, f["file"]: row.file[:1000] or None,
+    }
+
+
+def shot_row_of(a: dict, geometry: Any, f: dict, oid: str) -> ShotRow:
+    """A shot row of a feature's attributes (by the layer's names)."""
+    rings = geometry.get("rings") if isinstance(geometry, dict) else None
+    scenes, shots, coverage = _number(a.get(f["scenes"])), _number(a.get(f["shots"])), _number(a.get(f["coverage"]))
+    names = _text(a.get(f["names"]))
+    return ShotRow(
+        shot_id=_text(a.get(f["shotId"])), run_id=_text(a.get(f["runId"])), run_date=time_of(a.get(f["runDate"])),
+        day=_text(a.get(f["day"]))[:10], system=_text(a.get(f["system"])), satellite=_text(a.get(f["satellite"])),
+        pass_time=time_of(a.get(f["passTime"])) if a.get(f["passTime"]) is not None else None,
+        off_nadir=_number(a.get(f["offNadir"])), incidence=_number(a.get(f["incidence"])),
+        orbit_dir=_text(a.get(f["orbitDir"])), look_side=_text(a.get(f["lookSide"])),
+        scenes=int(scenes) if scenes is not None else None, shots=int(shots) if shots else 1,
+        coverage=None if coverage is None else coverage / 100, request_id=_text(a.get(f["requestId"])),
+        request_ids=[i.strip() for i in _text(a.get(f["requestIds"])).split(",") if i.strip()],
+        names=[n for n in names.split("、") if n] if names else [], file=_text(a.get(f["file"])),
+        rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [],
+        object_id=int(a[oid]) if is_number(a.get(oid)) else None)
+
+
+def _shot_layer(client: EsriClient, store: RequestStoreConfig, token: Optional[str]) -> tuple[set, str]:
+    sf = store.shot_fields
+    return _layer(client, store.shots, token, f"{store.label} の撮像の範囲", (sf["shotId"], sf["day"]))
+
+
+def add_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], rows: Sequence[ShotRow]) -> Saved:
+    """Adds shot rows with their outlines; how many were saved, and why the others were not (none without a shot layer)."""
+    if not store.shots or not rows:
+        return Saved()
+    names, _ = _shot_layer(client, store, token)
+    adds = []
+    for r in rows:
+        feature: dict = {"attributes": _only(shot_attributes(r, store.shot_fields), names)}
+        if r.rings:
+            feature["geometry"] = {"rings": esri_rings(r.rings), "spatialReference": {"wkid": 4326}}
+        adds.append(feature)
+    return _batches(lambda batch: client.apply_edits(store.shots, adds=batch, token=token), adds,
+                    lambda r: r.add_results, "撮像の範囲の追加")
+
+
+def load_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], day: str,
+               cancelled: Optional[Callable[[], bool]] = None) -> list[ShotRow]:
+    """The shots of a target day (`2026-11-10`), with their outlines ([] without a shot layer)."""
+    if not store.shots:
+        return []
+    sf = store.shot_fields
+    _, oid = _shot_layer(client, store, token)
+    rows = client.query_all(store.shots, f"{sf['day']} = {quote(day)}", token, geometry=True, limit=100000, cancelled=cancelled)
+    out = [shot_row_of(row.get("attributes") or {}, row.get("geometry"), sf, oid) for row in rows]
+    return sorted(out, key=lambda r: (r.system, r.pass_time or 0, r.shot_id))
+
+
+def shots_replaced_where(store: RequestStoreConfig, day: str, system: Optional[str] = None, keep: Sequence[str] = ()) -> str:
+    """
+    The shots that writing a day again replaces: the day's (of `system` when
+    one system is written), but those that history rows kept as they were
+    (answered by the system, workflow.keep_answers) still name.
+    """
+    sf = store.shot_fields
+    where = f"{sf['day']} = {quote(day)}"
+    if system:
+        where += f" AND {sf['system']} = {quote(system)}"
+    kept = [k for k in dict.fromkeys(keep) if k]
+    if kept:
+        where += f" AND {sf['shotId']} NOT IN ({','.join(quote(k) for k in kept)})"
+    return where
+
+
+def delete_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str) -> Saved:
+    """Deletes the shot rows matching `where`; how many were deleted (and why not)."""
+    if not store.shots:
+        return Saved()
+    value = client.ask(f"{store.shots}/deleteFeatures", {"where": where}, token)
+    results = value.get("deleteResults")
+    if results is None:
+        return Saved(1 if value.get("success") else 0, [] if value.get("success", True) else ["撮像の範囲の削除失敗"])
+    ok = [r for r in results if r.get("success")]
+    return Saved(len(ok), [f"撮像の範囲の削除: {(r.get('error') or {}).get('description') or '削除失敗'}"
+                           for r in results if not r.get("success")])

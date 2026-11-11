@@ -39,7 +39,7 @@ from ..core.catalog.config import CatalogConfig
 from ..core.catalog.images import FolderImages, find_images, patterns_for
 from ..core.catalog.paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
-from ..core.catalog.watch import areas_of
+from ..core.catalog.watch import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, image_layer
@@ -114,6 +114,25 @@ def layer_area(layer: Optional[QgsMapLayer], selected_only: bool = False) -> Opt
     polygons = [[[_xy(p) for p in ring] for ring in polygon] for polygon in parts if polygon]
     areas = areas_of([], polygons)
     return {"rings": areas[0]["rings"]} if areas else None
+
+
+#: The watch area kind of a layer's geometry type.
+_WATCH_KINDS = {QgsWkbTypes.GeometryType.PolygonGeometry: "polygon", QgsWkbTypes.GeometryType.LineGeometry: "lines",
+                QgsWkbTypes.GeometryType.PointGeometry: "points"}
+
+
+def layer_watch_areas(layer: Optional[QgsMapLayer], selected_only: bool = False) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+    """
+    A vector layer's geometry as it is now (see `layer_area`) as the areas of
+    a watch, copied, and where they came from (core.catalog.watch.layer_origin);
+    ([], None) without a feature with a geometry.
+    """
+    areas = areas_of_shape(layer_area(layer, selected_only))
+    if not areas:
+        return [], None
+    count = int(layer.selectedFeatureCount() if selected_only else layer.featureCount())
+    # A provider that cannot count (-1): no number.
+    return areas, layer_origin(layer.name(), layer.id(), _WATCH_KINDS[layer.geometryType()], count if count >= 0 else None, selected_only)
 
 
 def _signed_area(ring: Sequence[Sequence[float]]) -> float:

@@ -138,8 +138,9 @@ class CatalogDock(PluginDock):
         self.layers: dict[str, CatalogLayerInfo] = {}
         #: The image compared with in 「類似画像の検索」 (with its catalog); None for the usual search.
         self.reference: Optional[tuple[CatalogRecord, CatalogConfig]] = None
-        #: Opens the watch dialog of the 通知 dock (set by the plugin): (catalog, types, conditions, area drawn).
-        self.watch_requested: Optional[Callable[[CatalogConfig, dict, CatalogSearch, Optional[list]], None]] = None
+        #: Opens the watch dialog of the 通知 dock (set by the plugin): (catalog, types, conditions, area drawn), with the
+        #: keywords `area` (the kind of area searched), `layer` and `selected_only` (the layer searched over, for 「レイヤー」).
+        self.watch_requested: Optional[Callable[..., None]] = None
         self._shown_catalog: Optional[CatalogConfig] = None
         #: The search listed (「続きを読む」); None for a list that is not a search (an event's images).
         self._listed: Optional[_Listed] = None
@@ -1172,14 +1173,18 @@ class CatalogDock(PluginDock):
         if problem:
             self.status.setText(problem)
             return
+        # The area searched is offered first (a layer's shape is copied into the watch when it is set).
+        kind = self.area_box.currentData()
+        where = {"area": kind, **({"layer": self.area_layer.currentLayer(), "selected_only": self.selected_only.isChecked()}
+                                  if kind == "layer" and self.area_layer.currentLayer() is not None else {})}
         info = self.layers.get(catalog.url)
         if info is None:
             client = self.context.esri()
             token = self.context.token_for(catalog.url, catalog.token)
             self._start(self.tr("画像カタログの確認"), lambda task: self._layer_of(client, catalog, token),
-                        lambda info: self.watch_requested(catalog, info.types, self.conditions(), self.drawn))
+                        lambda info: self.watch_requested(catalog, info.types, self.conditions(), self.drawn, **where))
             return
-        self.watch_requested(catalog, info.types, self.conditions(), self.drawn)
+        self.watch_requested(catalog, info.types, self.conditions(), self.drawn, **where)
 
     def close_down(self) -> None:
         # Tasks left running (a request waiting on the network) stop with the dock.

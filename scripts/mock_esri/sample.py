@@ -306,7 +306,11 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "SATELLITE": S, "PRIORITY_OUT": S, "CLOUD": D, "SCENES": I, "RESULT": S, "REASON": {"type": S, "length": 1000},
                   "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I,
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
-                  "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S}
+                  "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S, "SHOT_ID": {"type": S, "length": 64}}
+SHOT_FIELDS = {"SHOT_ID": {"type": S, "length": 64}, "RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T,
+               "SYSTEM": S, "SATELLITE": S, "PASS_TIME": T, "OFF_NADIR": D, "INCIDENCE": D, "ORBIT_DIR": S, "LOOK_SIDE": S, "SCENES": I,
+               "SHOT_COUNT": I, "COVERAGE": D, "REQ_ID": {"type": S, "length": 64}, "REQ_IDS": {"type": S, "length": 4000},
+               "REQ_NAMES": {"type": S, "length": 4000}, "REQ_COUNT": I, "OUTPUT_FILE": {"type": S, "length": 1000}}
 GROUP_FIELDS = {"GROUP_NAME": S, "MEMBERS": {"type": S, "length": 4000}, "SORT_ORDER": I, "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
 
 
@@ -460,7 +464,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 2, "name": "依頼グループ", "fields": GROUP_FIELDS, "features": feats([{"attributes": a} for a in (
                 {"GROUP_NAME": "第1班", "MEMBERS": f"{_user()}, yamada", "SORT_ORDER": 1, "ACTIVE": 1, "NOTE": "港湾の定点"},
                 {"GROUP_NAME": "第2班", "MEMBERS": "sato", "SORT_ORDER": 2, "ACTIVE": 1, "NOTE": "臨時の依頼"},
-                {"GROUP_NAME": "旧体制", "MEMBERS": "", "SORT_ORDER": 9, "ACTIVE": 0, "NOTE": "使用停止（古い依頼のため残す）"})])}]},
+                {"GROUP_NAME": "旧体制", "MEMBERS": "", "SORT_ORDER": 9, "ACTIVE": 0, "NOTE": "使用停止（古い依頼のため残す）"})])},
+            {"id": 3, "name": "撮像の範囲", "geometryType": "polygon", "fields": SHOT_FIELDS, "features": []}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D, "NAME_EN": S},
@@ -570,7 +575,8 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）
   "requestStores": [
     {{ "label": "モック撮像依頼", "url": "{rest}/Requests/FeatureServer/0", "history": "{rest}/Requests/FeatureServer/1",
-      "groups": "{rest}/Requests/FeatureServer/2", "catalog": "モック画像カタログ", "fields": {{}}{tk} }}
+      "groups": "{rest}/Requests/FeatureServer/2", "shots": "{rest}/Requests/FeatureServer/3", "catalog": "モック画像カタログ",
+      "fields": {{}}{tk} }}
   ],
   "requestExports": [
     {{ "system": "MOCK-OPT", "label": "モック光学システム", "kind": "光学", "series": ["OPT-X"], "limit": {{ "count": 10 }},

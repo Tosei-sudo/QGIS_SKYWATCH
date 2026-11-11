@@ -73,7 +73,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 すること:
 
-1. 地図 `SKYWATCH_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
+1. 地図 `SKYWATCH_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、22 = `TBL_REQUEST_SHOT`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
 2. マップ イメージ レイヤーとして共有するドラフトを作り、フィーチャ アクセスを有効にして、機能を `Query,Create,Update,Delete,Uploads,Editing` にする（プラグインは追加・更新・削除をする）。データは参照（コピーしない）
 3. 同じ名前のサービスがあれば上書きして公開する（何度実行してもよい）
 4. 公開したサービスを ArcGIS API for Python で読み、レイヤー名と番号からプラグインの設定ファイル（README 「上の表の名前で作ったときの設定」と同じ形）を書く
@@ -102,6 +102,9 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 | `REQUEST_GROUP` | 書き出したときの依頼グループ（2026-11-11 に追加。空はグループなし） | カテゴリ セレクターで自分のグループだけを見る |
 | `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PLANNED_AT`・`ADOPTION_REASON`・`REASON` | 名称・番号・依頼者・システム・衛星・撮像予定日時・理由 | 一覧・ポップアップ |
 | 形状（ポリゴン） | 依頼の範囲（要求外は結果ファイルか手で描いた範囲） | 地図 |
+| `SHOT_ID` | その依頼を撮る撮像（`TBL_REQUEST_SHOT` の `SHOT_ID`。まとめた依頼は同じ値。2026-11-11 に追加） | 撮像の範囲と結び付ける |
+
+撮像の範囲（`TBL_REQUEST_SHOT`、2026-11-11 に追加）は、書き出したファイルの 1 行ごとのポリゴン（撮るシーンの外形。まとめた行はまとめた範囲）。依頼の範囲（出力履歴）と別のレイヤーなので、Web マップに両方を入れ、撮像の範囲は塗りなしの破線にすると、依頼ごとの範囲とまとめて撮る範囲を重ねて見られる。属性は `TARGET_DAY`・`TARGET_DATE`・`SYSTEM`・`SATELLITE`・`PASS_TIME`（撮像時刻）・`REQ_IDS`（まとめた依頼）・`REQ_COUNT` など（README 「`TBL_REQUEST_SHOT`」）。
 
 「その日の計画に入ったもの」は `ADOPTION` = `採用`（要求外を含む）。依頼だけなら、さらに `RESULT` = `採用`。
 
@@ -119,7 +122,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(hours=9)
 ```
 
-古い行の `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`REQUEST_GROUP` も要るなら、`REQ_ID` で台帳をテーブル結合してからフィールド演算で写す（`REQUEST_GROUP` は台帳・出力履歴とも、プラグインを新しくして `create_tables.py` をもう一度実行すれば足される。依頼グループのテーブル `TBL_REQUEST_GROUP` も作られる）。`ADOPTION` が空の古い行（`RESULT` が `採用`）は `不明` と同じに扱う。
+古い行の `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`REQUEST_GROUP` も要るなら、`REQ_ID` で台帳をテーブル結合してからフィールド演算で写す（`REQUEST_GROUP` は台帳・出力履歴とも、プラグインを新しくして `create_tables.py` をもう一度実行すれば足される。依頼グループのテーブル `TBL_REQUEST_GROUP`・撮像の範囲 `TBL_REQUEST_SHOT` と出力履歴の `SHOT_ID` も作られる）。`ADOPTION` が空の古い行（`RESULT` が `採用`）は `不明` と同じに扱う。
 
 ### 作り方（例）
 
@@ -133,7 +136,7 @@ datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(h
 | インジケーター「うち要求外」 | `TBL_REQUEST_HISTORY` | フィルター `RESULT` = `要求外` |
 | 円グラフ「システム別」 | `TBL_REQUEST_HISTORY` | カテゴリ `SYSTEM`、フィルター `ADOPTION` = `採用` |
 | テーブル（または リスト）「その日の計画」 | `TBL_REQUEST_HISTORY` | 列 `ADOPTION`・`REQ_NAME`・`MANAGEMENT_NO`・`SYSTEM`・`SATELLITE`・`PLANNED_AT`・`REQUESTER`・`ADOPTION_REASON`・`CAPTURED`。並べ替え `PLANNED_AT` |
-| マップ | 1. の Web マップ | 日付セレクターで絞る |
+| マップ | 1. の Web マップ | 日付セレクターで絞る（撮像の範囲 `TBL_REQUEST_SHOT` も `TARGET_DATE` で同じように絞る） |
 | 系列グラフ「日ごとの採否」 | `TBL_REQUEST_HISTORY` | カテゴリ `TARGET_DATE`（日単位）、系列を `ADOPTION` で分ける、フィルター `TARGET_DATE` が過去 30 日 |
 | カテゴリ セレクター「依頼グループ」 | `TBL_REQUEST_HISTORY` の `REQUEST_GROUP`（グループの一覧を `TBL_REQUEST_GROUP` の `GROUP_NAME` から出してもよい） | 自分のグループの依頼だけを見る。「なし」を許可、既定は「すべて」。アクションで上の要素と地図を `REQUEST_GROUP` で絞る |
 | カテゴリ セレクター「依頼者」（任意） | `TBL_REQUEST_HISTORY` の `REQUESTER` | 自分の依頼だけを見る |

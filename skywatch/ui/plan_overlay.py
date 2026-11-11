@@ -119,19 +119,25 @@ class PlanOverlay:
     def paint(self, polygons: Sequence[tuple], z: float = 900) -> None:
         """
         Polygons each in its own colour: (rings, colour, width, label) with
-        rings in WGS84 and the label (or '') at the middle of the first ring.
-        Replaces what was painted before.
+        rings in WGS84 and the label (or '') at the middle of the first ring;
+        a fifth item true draws only a dashed outline (the shots over the
+        requests' areas in the request docks). Replaces what was painted before.
         """
         self.unpaint()
-        for rings, color, width, label in polygons:
+        for polygon in polygons:
+            rings, color, width, label = polygon[:4]
+            outline = len(polygon) > 4 and bool(polygon[4])
             band = QgsRubberBand(self.canvas, QgsWkbTypes.GeometryType.PolygonGeometry)
             c = QColor(color)
             band.setStrokeColor(c)
             fill = QColor(c)
-            fill.setAlpha(80)
+            fill.setAlpha(0 if outline else 80)
             band.setFillColor(fill)
             band.setWidth(int(width))
-            band.setZValue(z)
+            if outline:
+                band.setLineStyle(Qt.PenStyle.DashLine)
+            # Outlines over the filled areas.
+            band.setZValue(z + 1 if outline else z)
             geometry = polygon_of(rings[:1]) if len(rings) == 1 else multipolygon_of(rings)
             band.addGeometry(geometry, WGS84)
             self._painted.append(band)
