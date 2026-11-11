@@ -1556,6 +1556,10 @@ class ObservationDock(PluginDock):
                 self.set_area_mode(False)
             self._clear_points()
             self.cursor = None
+            # A new record being made is let go, so what the clicks do now is plain (tsudo 2026-11-11); a record
+            # (or a thing carried over) open in the form stays, for 「開いている記録を見本に」.
+            if self.pending is not None and self.pending[2] is None and self.pending[3] is None:
+                self.close_form()
         self.many.set_mode(mode)
         if mode and not self.active:
             self.set_active(True, quiet=True)

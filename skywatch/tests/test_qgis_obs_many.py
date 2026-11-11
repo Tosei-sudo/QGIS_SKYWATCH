@@ -239,6 +239,72 @@ def test_rows_and_grids_are_laid_out_left_out_and_recorded_in_one(plugin):
     assert dock.many.mode == "" and not dock.row_button.isChecked()
 
 
+def painted_slot_at(dock, lon, lat):
+    """Whether the map has painted a place of the row under that point (what a click there hits)."""
+    at = dock.overlay.to_pixel(lon, lat)
+    return wait_for(lambda: dock.overlay.hit(at.x(), at.y(), ("slot",), keyed=True) is not None, 3000)
+
+
+def test_the_last_corner_is_put_down_by_a_click_on_the_map(plugin):
+    # tsudo 2026-11-11: 「列作成のほうが、最後のポイントを打てない」. Before the last corner the last place
+    # follows the pointer, so the click that puts the corner down is on it: it must not leave it out.
+    p, iface, dock, layers, _ = plugin
+    measured_sample(dock)
+    dock.row_button.setChecked(True)
+    a, b, c = (139.62, 35.62), (139.66, 35.62), (139.62, 35.60)
+    click(dock, *a)
+    dock.tool.canvasMoveEvent(mouse(dock, QEvent.Type.MouseMove, *b))
+    assert painted_slot_at(dock, *b)
+    click(dock, *b)
+    L = dock.many.layout_
+    assert L.ready and len(L.corners) == 2 and L.skipped == frozenset()
+    assert dock.status.text().startswith("数を合わせ")
+    # Once laid out, a click on a place still leaves it out: the two ends too (under the corners' marks).
+    dock.many.columns_input.setValue(5)
+    assert painted_slot_at(dock, *b)
+    click(dock, *b)
+    assert L.skipped == {4} and L.ready
+    click(dock, *a)
+    assert L.skipped == {0, 4} and L.ready
+    assert dock.map_entered()
+    # A grid: the third corner too.
+    dock.many.shape_select.setCurrentIndex(dock.many.shape_select.findData("grid"))
+    click(dock, *a)
+    click(dock, *b)
+    assert not L.ready
+    dock.tool.canvasMoveEvent(mouse(dock, QEvent.Type.MouseMove, *c))
+    assert painted_slot_at(dock, *c)
+    click(dock, *c)
+    assert L.ready and len(L.corners) == 3 and L.skipped == frozenset()
+
+
+def test_turning_a_mode_on_lets_a_new_record_being_made_go(plugin):
+    # tsudo 2026-11-11: 「元が作成中だとどの状態がわからなくなるので、連続ボタン押したら、作成中は外してほしい」.
+    p, iface, dock, layers, _ = plugin
+    car = measured_sample(dock)
+    dock.set_points(1)
+    for button in (dock.stamp_button, dock.row_button):
+        dock.map_clicked(139.65, 35.63, None)
+        assert dock.form.isVisible() and dock.pending[2] is None
+        dock.object_input.setText("作りかけ")
+        button.setChecked(True)
+        assert not dock.form.isVisible() and dock.pending is None and dock.many.mode
+        dock.set_many_mode("")
+    # Points clicked for a measured one are let go too.
+    dock.set_points(2)
+    dock.map_clicked(139.65, 35.63, None)
+    assert dock.rear is not None
+    dock.row_button.setChecked(True)
+    assert dock.rear is None and dock.many.mode == "row"
+    dock.set_many_mode("")
+    # A record open in the form stays (it can be made the 見本).
+    dock.set_points(1)
+    dock.open_form(car.lon, car.lat, editing=car)
+    dock.stamp_button.setChecked(True)
+    assert dock.form.isVisible() and dock.pending[2].id == car.id and dock.many.pick_button.isVisibleTo(dock)
+    assert [o.id for o in living(dock.book.records)] == [car.id]
+
+
 def esri_store(p, tmp_path, fake):
     layer = fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS + ["WIDTH_M"]}))
     config = tmp_path / "config.json"

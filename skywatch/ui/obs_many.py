@@ -18,6 +18,9 @@ lined up): one thing recorded is the 見本, and the rest are put down as it
   the 見本 (core.obs.similar, no model), as a layer the dock 「AI結果」 lists
   for checking (正・誤検出) and recording.
 
+Turning either on lets go of a new record being made in the form (tsudo,
+2026-11-11: 「作成中だとどの状態かわからなくなる」); a record open in it stays.
+
 The 見本 is the last record saved from the form (or the one open in it,
 with 「開いている記録を見本に」); without one, the form's last 種別・活動・確度 at a
 point. Backspace takes the last made back (a row as one). What is put down
@@ -337,7 +340,9 @@ class ManyPanel(QGroupBox):
     def clicked(self, lon: float, lat: float, mark: Optional[Mark]) -> bool:
         """A click while 連続 or 並べる is on: whether it was taken here (else the dock does as without them)."""
         if self.rowing:
-            if mark is not None and mark.role == "slot" and mark.key:
+            # A place left out (or back in) only once all are clicked: before that the last place follows the
+            # pointer, so it is always under the click that puts the last corner down (tsudo 2026-11-11).
+            if self.layout_.ready and mark is not None and mark.role == "slot" and mark.key:
                 i = int(mark.key.split(":", 1)[1])
                 skipped = set(self.layout_.skipped)
                 skipped.symmetric_difference_update({i})
