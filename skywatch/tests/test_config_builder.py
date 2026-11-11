@@ -58,6 +58,8 @@ def plugin_constants() -> dict:
         "alertListSources": list(alerts.LIST_SOURCES),
         "alertObjectSources": list(alerts.OBJECT_SOURCES),
         "alertListObjects": list(alerts.LIST_OBJECTS),
+        "alertPlaceSources": list(alerts.PLACE_FIELD_SOURCES),
+        "alertPlaceObjects": list(alerts.PLACE_OBJECTS),
         "alertObjectLayers": {what: {"key": LAYER_KEYS[name][0], "label": label, "roles": LAYER_KEYS[name][1]}
                               for what, (name, label) in alerts.OBJECT_LAYERS.items()},
         "alertLevelKeys": list(alerts.LEVEL_KEYS),
@@ -66,6 +68,7 @@ def plugin_constants() -> dict:
         "obsExportSources": list(obs_export.SOURCES),
         "obsExportFileSources": list(obs_export.FILE_SOURCES),
         "obsGeometries": list(obs_export.GEOMETRIES),
+        "obsPlaceSources": list(obs_export.PLACE_SOURCES),
         "obsBuiltinFormats": [obs_export.BUILTIN_CSV, obs_export.BUILTIN_JSON],
         "exportSources": list(export.SOURCES),
         "exportListSources": list(export.LIST_SOURCES),

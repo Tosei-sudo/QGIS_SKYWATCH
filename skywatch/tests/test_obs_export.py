@@ -172,6 +172,30 @@ class TestWrite:
         out = render(items_of(self.records(), [BAY, PORT]), ExportContext(s.formats[0], ExportFilter(), day(20), places=True))
         assert out.errors == ["$.records[1].place: 1 文字未満"]
 
+    def test_place_columns_by_kind(self):
+        """placeKinds (as the 通報's, 2026-11-11): a column takes its place among the named areas of some kinds only."""
+        s, problems = settings({"formats": [
+            {"name": "港", "columns": ["id", "place", {"key": "PORT", "source": "place", "placeKinds": "港", "empty": "なし"},
+                                       {"key": "SEA", "source": "placeKind", "placeKinds": ["海域"]},
+                                       {"key": "ALL", "source": "places", "placeKinds": ["港", "海域"]}]},
+            {"name": "連携", "format": "json", "schema": {"type": "array", "x-source": "records", "items": {"type": "object", "properties": {
+                "port": {"type": "string", "x-source": "place", "x-placeKinds": ["港"]},
+                "id": {"type": "string", "x-source": "id", "x-placeKinds": "港"},
+            }}}},
+        ]})
+        assert problems == []
+        out = render(items_of(self.records(), [BAY, PORT]), ExportContext(s.formats[0], ExportFilter(), day(20), places=True))
+        assert out.text.strip().split("\r\n") == ["id,place,PORT,SEA,ALL", "a,横須賀港,横須賀港,海域,横須賀港・東京湾", "c,,なし,,"]
+        inner = obs(id="b", lon=139.55, lat=35.05)  # in the bay only
+        out = render(items_of([inner], [BAY, PORT]), ExportContext(s.formats[0], ExportFilter(), day(20), places=True))
+        assert out.text.strip().split("\r\n")[1] == "b,東京湾,なし,海域,東京湾"
+        out = render(items_of(self.records(), [BAY, PORT]), ExportContext(s.formats[1], ExportFilter(), day(20), places=True))
+        assert json.loads(out.text) == [{"port": "横須賀港", "id": "a"}, {"port": "", "id": "c"}]
+        for column, said in (({"key": "X", "source": "id", "placeKinds": "港"}, "placeKinds は地名の項目"),
+                             ({"key": "X", "source": "place", "placeKinds": [{}]}, "placeKinds は地名の種類")):
+            s, problems = settings({"formats": [{"name": "a", "columns": [column]}]})
+            assert any(said in p for p in problems) and s.formats[0].columns[0].place_kinds == ()
+
     def test_a_schema_file_that_cannot_be_read(self):
         s, _ = settings({"formats": [{"name": "連携", "format": "json", "schema": "nowhere.json"}]})
 

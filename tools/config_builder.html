@@ -564,6 +564,18 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "area",
   "rule"
  ],
+ "alertPlaceSources": [
+  "place",
+  "placeKind",
+  "places",
+  "place.en",
+  "placeKind.en",
+  "places.en"
+ ],
+ "alertPlaceObjects": [
+  "place",
+  "places"
+ ],
  "alertObjectLayers": {
   "country": {
    "key": "countries",
@@ -669,6 +681,11 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "geojson",
   "wkt",
   "latlon"
+ ],
+ "obsPlaceSources": [
+  "place",
+  "placeKind",
+  "places"
  ],
  "obsBuiltinFormats": [
   "標準（CSV）",
@@ -1112,7 +1129,21 @@ function alertOptionApplies(key, src, value) {
   if (key === "timeZone") return K.alertTimeSources.includes(src);
   if (key === "digits") return ["lon", "lat", "length", "heading", "width", "score"].includes(src) || !!objectKey(src);
   if (key === "level") return src === "kind";
+  if (key === "placeKinds") return namesPlaces(src);
   return true;
+}
+/** Whether a source names the record's named areas (place, places.en, place.PIER_NO…): one that takes placeKinds (as alerts.names_places). */
+function namesPlaces(src) {
+  if (K.alertPlaceSources.includes(src)) return true;
+  const key = objectKey(src);
+  return !!key && K.alertPlaceObjects.includes(key[0]);
+}
+/** placeKinds: a text or an array of texts (numbers too), as alerts.place_kinds_of; the problem, or "" when it can be used. */
+function placeKindsProblem(v, key = "placeKinds") {
+  if (v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)) return "";
+  const items = Array.isArray(v) ? v : [v];
+  const ok = items.every((k) => typeof k === "string" || (typeof k === "number" && Number.isFinite(k))) && items.some((k) => String(k).trim());
+  return ok ? "" : `${key} は地名の種類（KIND の値）の文字列か配列（"港"・["港", "泊地"]）`;
 }
 /** `country.code`, `place.PREF_NAME`…: [object, key] of a value of what a record was matched to (not a fixed source), else null. */
 function objectKey(src) {
@@ -1155,7 +1186,7 @@ function checkAlertField(x, at, p) {
     if (!src.length) p.push(`${at}: source の配列が空`);
     for (const [i, part] of src.entries()) {
       const own = typeof part === "string"
-        ? { source: part, ...Object.fromEntries(["format", "timeZone", "digits", "level", "map"].filter((k) => x[k] !== undefined && x[k] !== "" && alertOptionApplies(k, part, x[k])).map((k) => [k, x[k]])) }
+        ? { source: part, ...Object.fromEntries(["format", "timeZone", "digits", "level", "map", "placeKinds"].filter((k) => x[k] !== undefined && x[k] !== "" && alertOptionApplies(k, part, x[k])).map((k) => [k, x[k]])) }
         : part;
       checkAlertField(own, `${at}.source[${i}]`, p);
     }
@@ -1169,6 +1200,10 @@ function checkAlertField(x, at, p) {
     if (x.format && !K.alertAngleSources.includes(src) && !K.alertTimeSources.includes(src)) p.push(`${at}: format は日時の項目（${K.alertTimeSources.join("・")}）と lat・lon だけ`);
     const listed = K.alertListSources.includes(src) || (objectKey(src) && K.alertListObjects.includes(objectKey(src)[0]));
     if (x.join !== undefined && x.join !== null && !listed) p.push(`${at}: join は source が配列のときか ${[...K.alertListSources, ...K.alertListObjects.map((o) => o + ".属性名")].join("・")} だけ`);
+    const kinds = placeKindsProblem(x.placeKinds);
+    if (kinds) p.push(`${at}: ${kinds}`);
+    else if (x.placeKinds !== undefined && x.placeKinds !== null && x.placeKinds !== "" && !namesPlaces(src))
+      p.push(`${at}: placeKinds は地名の項目（${[...K.alertPlaceSources, ...K.alertPlaceObjects.map((o) => o + ".属性名")].join("・")}）だけ`);
   }
   if (x.fallback !== undefined && x.fallback !== null && x.fallback !== "") checkAlertField(x.fallback, `${at}.fallback`, p);
 }
@@ -1456,7 +1491,7 @@ const SPEC = [
         I("formats", "フォーマット", [
           T("name", "名前", { req: true, help: "メニューに出す名前（通報テーブルの REPORT_NAME）" }),
           J("fields", "項目と順番", { ph: '["imageTime", { "source": "kind", "level": 1 }, "objectName", { "source": ["lat", "lon"], "format": "dms" }, { "source": "place", "fallback": ["lat", "lon"] }, { "text": "固定" }]',
-            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。当てはまったものの属性: country.属性名（国）・place.属性名（いちばん小さい地名）・places.属性名（含む地名すべて）・area.属性名（ジオフェンス）・rule.属性名（合った条件）・confidence.キー（確度。設定の確度に書いたキー）。属性名は fields の役割（country.code・country.name・place.kind など）か、レイヤーの属性名そのもの（country.ISO_A3。大文字小文字は問わない）。.en は英語名（nameEn の役割）、confidence.en は確度の en。ないものは空。読むレイヤーの設定がないもの・どの確度にもないキーはここでも問題に、役割でも設定の属性名でもない名前は注意に（レイヤーの属性はここでは読めない。プラグインが「抽出」のときにレイヤーの属性と照らして知らせる）。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。項目: " + K.alertSources.join("・") }),
+            help: "項目名か { source, format, timeZone, digits, level, map, empty, prefix, suffix, omitEmpty, join, fallback, placeKinds }、固定の文字は { text }。日時の項目は format でその項目だけの書式（%Y/%m/%d で日付だけ、%H:%M で時刻だけ）、timeZone でその項目だけのタイムゾーン（UTC など）。lat・lon は format で度分秒: dms（35°26'31\"N）・dm（35°26.51'N）か {d}・{dd}・{m}・{mm}・{s}・{ss}・{h}（N S E W）・{hj}（北緯・東経…）・{sign} の書式（{dd}{mm}{ss}{h} で 352631N）、digits はいちばん小さい単位の小数の桁。1 つの項目に複数の値: source を配列に（[\"lat\", \"lon\"]、間は join、既定は空白。名前には format・digits などが合うものだけ効く）、項目そのものを配列にしても同じ。fallback は値が空のときに代わりに書く項目（{ \"source\": \"place\", \"fallback\": [\"lat\", \"lon\"] } で地名がなければ座標。fallback の中にも fallback 可）。当てはまったものの属性: country.属性名（国）・place.属性名（いちばん小さい地名）・places.属性名（含む地名すべて）・area.属性名（ジオフェンス）・rule.属性名（合った条件）・confidence.キー（確度。設定の確度に書いたキー）。属性名は fields の役割（country.code・country.name・place.kind など）か、レイヤーの属性名そのもの（country.ISO_A3。大文字小文字は問わない）。.en は英語名（nameEn の役割）、confidence.en は確度の en。ないものは空。読むレイヤーの設定がないもの・どの確度にもないキーはここでも問題に、役割でも設定の属性名でもない名前は注意に（レイヤーの属性はここでは読めない。プラグインが「抽出」のときにレイヤーの属性と照らして知らせる）。empty は値が空のとき（fallback も空のとき）の文字、prefix・suffix は値があるときだけ前後に付ける、omitEmpty: true で空なら区切りごと省く、join は複数の値・名前の並び（" + K.alertListSources.join("・") + "）の間の文字。placeKinds は地名の項目（place・placeKind・places・.en・place.属性名・places.属性名）をその種類（地名の KIND の値）の地名だけから選ぶ: { \"source\": \"place\", \"placeKinds\": \"港\" } と { \"source\": \"place\", \"placeKinds\": \"桟橋\" } で港と桟橋を別の項目に（重なっていても、それぞれの種類でいちばん小さいもの）。項目: " + K.alertSources.join("・") }),
           T("delimiter", "区切り文字", { ph: "|", help: "タブは \\t（JSON の \"\\t\"）" }), T("escape", "値の中の区切り文字・改行の置き換え", { ph: "空白" }),
           TJ("header", "ヘッダー", { ph: "【注目】{date} {count}件", help: "文字列か行の配列。{date}・{now:%Y%m%d}・{count}・{name}・{user}。@ のあとにタイムゾーンでそのゾーン（{now:%H:%M@UTC}・{date@UTC}）" }),
           TJ("footer", "フッター", { ph: "以上" }),
@@ -1948,6 +1983,9 @@ function columnsField(f, obj, commit) {
         fmtCell.append(el("input", { type: "text", class: "mono", value: c.format ?? "", placeholder: prof.timeSources.includes(c[sk]) ? timePh : "%d・%.1f", oninput: (e) => upd("format", e.target.value) }));
       if (prof.digitSources.includes(c[sk]))
         fmtCell.append(el("input", { type: "number", min: 0, max: 12, value: c.digits ?? "", placeholder: "小数の桁", oninput: (e) => upd("digits", e.target.value === "" ? undefined : Number(e.target.value)) }));
+      if (prof === PROFILES.observation && (K.obsPlaceSources || []).includes(c[sk]))
+        fmtCell.append(el("input", { type: "text", value: listText(c.placeKinds), placeholder: "地名の種類（港, 桟橋）", title: "placeKinds: この種類（地名の KIND の値、カンマ区切り）の地名だけから選ぶ。空で種類を問わない",
+          oninput: (e) => { const a = listOfText(e.target.value); upd("placeKinds", a.length ? (a.length === 1 ? a[0] : a) : undefined); } }));
       if (!prof.allowed && !reading && c[sk] === "kind")
         fmtCell.append(el("input", { type: "number", value: c.level ?? "", placeholder: "階層（1・-1）", title: "level: 1 が最上位、-1 が最下位。空で分類全体", oninput: (e) => upd("level", e.target.value === "" || Number(e.target.value) === 0 ? undefined : Number(e.target.value)) }));
     }
@@ -2576,6 +2614,11 @@ function checkObsExport(it, at, p) {
     if (!isObj(c) || !c.key) p.push(`${at}.columns[${i}]: 列名（key）がない`);
     else if (c.source === undefined && !("value" in c)) p.push(`${at}.columns[${i}]: source か value がない`);
     else if (c.source !== undefined && !K.obsExportSources.includes(c.source)) p.push(`${at}.columns[${i}]: 項目「${c.source}」は使用不可`);
+    if (!isObj(c)) return;
+    const kinds = placeKindsProblem(c.placeKinds);
+    if (kinds) p.push(`${at}.columns[${i}]: ${kinds}`);
+    else if (c.placeKinds !== undefined && c.placeKinds !== null && c.placeKinds !== "" && !K.obsPlaceSources.includes(c.source))
+      p.push(`${at}.columns[${i}]: placeKinds は地名の項目（${K.obsPlaceSources.join("・")}）だけ`);
   });
   if (fmt !== "json" && it.schema !== undefined) p.push(`${at}: schema は形式が JSON のときのみ`);
   if (fmt === "json" && isObj(it.schema) && !JSON.stringify(it.schema).includes('"x-source":"records"')) p.push({ warn: true, text: `${at}: スキーマに x-source: records の配列がない（記録が出ない）` });
