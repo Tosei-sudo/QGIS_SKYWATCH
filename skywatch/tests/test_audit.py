@@ -356,3 +356,86 @@ def test_long_edits_are_not_read_back(tmp_path, monkeypatch):
     ok, failed = (json.loads(x) for x in lines_of(day_file(log)))
     assert (ok["count"], ok["ids"], "values" in ok["detail"]) == (3, [100, 101, 102], False) and ok["detail"]["bytes"] > 100
     assert failed["result"] == "error" and "count" not in failed and failed["detail"]["bytes"] > 100
+
+
+# ---------------------------------------------------------------- errors (kind "error", 2026-11-11)
+
+def test_errors_with_their_traceback_and_without_secrets(tmp_path, monkeypatch):
+    monkeypatch.setattr(audit, "MAX_TRACE", 200)
+    log = make_log(tmp_path)
+    frames = "".join(f'  File "/plugins/skywatch/ui/dock_{i}.py", line {i}, in f\n' for i in range(20))
+    audit.error("log", "SKYWATCH", f"画像カタログの検索: 失敗 token=SECRET123\nTraceback (most recent call last):\n{frames}ValueError: bad")
+    audit.error("python", "Python error", f"Traceback (most recent call last):\n{frames}KeyError: 'NAME'")
+    audit.error("message", "観測記録", '<b>保存できず</b>: <a href="https://user:pw@gis.example/x">サーバー</a> &amp; Authorization: Bearer abcdefghijkl',
+                markup=True, detail={"level": "critical"})
+    audit.error("file-save", r"D:\out\obs.csv", "Permission denied", detail={"what": "observations-csv"})
+    log.write_queued()
+    text = open(day_file(log), encoding="utf-8").read()
+    assert "SECRET123" not in text and "user:pw" not in text and "abcdefghijkl" not in text
+    logged, python, shown, saved = (json.loads(x) for x in lines_of(day_file(log)))
+    assert (logged["kind"], logged["action"], logged["target"], logged["result"]) == ("error", "log", "SKYWATCH", "error")
+    # What was written before the traceback is the error; the traceback is kept (its end: where it went wrong).
+    assert logged["error"] == "画像カタログの検索: 失敗 token=…"
+    trace = logged["detail"]["traceback"]
+    assert trace.startswith("…") and trace.endswith("ValueError: bad") and len(trace) == 201
+    assert python["error"] == "KeyError: 'NAME'" and python["detail"]["traceback"].endswith("KeyError: 'NAME'")
+    # A message bar's text without its HTML, as it was read.
+    assert shown["error"] == "保存できず : サーバー & Authorization: Bearer …" and shown["detail"] == {"level": "critical"}
+    assert (saved["target"], saved["error"], saved["detail"]) == (r"D:\out\obs.csv", "Permission denied", {"what": "observations-csv"})
+    [chain], bad = verify((f"a:{i}", x) for i, x in enumerate(lines_of(day_file(log))))
+    assert not chain.problems and chain.lines == 4 and bad == []
+
+
+def test_the_same_error_again_is_counted_not_written(tmp_path, monkeypatch):
+    log = make_log(tmp_path)
+    clock = [NOW]
+    monkeypatch.setattr(audit.time, "time", lambda: clock[0])
+    for _ in range(5):
+        audit.error("task", "画像カタログの検索", "サーバーに接続できません")
+    audit.error("task", "画像カタログの検索", "タイムアウト")  # another error: written
+    log.write_queued()
+    assert [json.loads(x)["error"] for x in lines_of(day_file(log))] == ["サーバーに接続できません", "タイムアウト"]
+    # Once ERROR_REPEAT has passed: one line tells how many more there were (at the time of the last).
+    clock[0] = NOW + audit.ERROR_REPEAT + 1
+    audit.record("open", "image", "IMG-1")
+    audit.error("task", "画像カタログの検索", "サーバーに接続できません")  # a new run: written again
+    log.write_queued()
+    recs = [json.loads(x) for x in lines_of(day_file(log))]
+    assert [(r["kind"], r.get("error"), (r.get("detail") or {}).get("repeated")) for r in recs[2:]] == [
+        ("error", "サーバーに接続できません", 4), ("open", None, None), ("error", "サーバーに接続できません", None)]
+    assert recs[2]["action"] == "task" and recs[2]["target"] == "画像カタログの検索"
+    # The plugin stops: the counts not told yet are written with the last lines.
+    audit.error("task", "画像カタログの検索", "サーバーに接続できません")
+    audit.error("task", "画像カタログの検索", "サーバーに接続できません")
+    log.write_queued()
+    log.write([], final=True)
+    last = json.loads(lines_of(day_file(log))[-1])
+    assert (last["error"], last["detail"]["repeated"]) == ("サーバーに接続できません", 2)
+    [chain], bad = verify((f"a:{i}", x) for i, x in enumerate(lines_of(day_file(log))))
+    assert not chain.problems and bad == []
+
+
+def test_errors_can_be_left_out(tmp_path):
+    config, problems = parse_config({"auditLog": {"events": ["edit", "export"]}})
+    assert problems == [] and "error" not in config.audit_log.events and "error" in AuditSettings().events
+    log = make_log(tmp_path, events=("edit",))
+    audit.error("log", "SKYWATCH", "x")
+    log.write_queued()
+    assert not os.path.isdir(log.folder) or not os.listdir(log.folder)
+
+
+def test_esri_failures_in_tasks_are_errors(tmp_path):
+    """A task whose request fails (EsriError) is in the audit log; QGIS logs it as a note only."""
+    pytest.importorskip("qgis.core")
+    from skywatch.qgis_io.tasks import FunctionTask
+
+    log = make_log(tmp_path)
+
+    def work(_task):
+        raise EsriError("サーバーに接続できません")
+
+    task = FunctionTask("撮像依頼の読み込み", work)
+    assert task.run() is False
+    log.write_queued()
+    [rec] = [json.loads(x) for x in lines_of(day_file(log))]
+    assert (rec["kind"], rec["action"], rec["target"], rec["error"]) == ("error", "task", "撮像依頼の読み込み", "サーバーに接続できません")

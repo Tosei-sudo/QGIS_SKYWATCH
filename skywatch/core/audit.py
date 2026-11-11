@@ -17,6 +17,13 @@ What is recorded (KINDS):
 - open: an image opened from the catalog (its image id and files)
 - export: a file written (its path, size and SHA-256)
 - copy: text put on the clipboard (通報文, 分析の結果…: how much, its SHA-256)
+- error (2026-11-11, tsudo 「エラーログって取れる？」): what went wrong — the
+  plugin's warnings and errors in QGIS's log (with their traceback), tasks
+  that failed, Python errors raised in the plugin's code, warnings and errors
+  in the message bar, the settings file's problems, files that could not be
+  saved. The same error again within ERROR_REPEAT seconds of its line is
+  counted, not written: one line after (detail `repeated`: how many more,
+  at the time of the last) tells them.
 
 Never a token or a password: URLs lose their query and user, `token=`-like
 text is masked, the settings file is known by its hash only.
@@ -40,6 +47,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import io
 import json
 import os
@@ -66,6 +74,7 @@ KINDS: dict[str, str] = {
     "open": "画像を開く",
     "export": "ファイル出力",
     "copy": "クリップボードへコピー",
+    "error": "エラー",
 }
 FORMATS = ("jsonl", "csv")
 #: A line's items, in this order (the CSV's columns).
@@ -90,12 +99,21 @@ MAX_VALUES = 1000
 #: An edit's features longer than this (characters) are not read back (json.loads holds Python's lock all along):
 #: their count comes from the answer, their values are left out.
 MAX_PARSE = 2_000_000
+#: The same error (action, target, message) again within this many seconds is counted, not written.
+ERROR_REPEAT = 60.0
+#: A traceback is cut to its last this many characters (where it went wrong), an error's message to its first.
+MAX_TRACE = 8000
+MAX_MESSAGE = 4000
 #: The folder's placeholders.
 PLACEHOLDERS = ("user", "computer", "yyyy", "mm", "dd")
 
 _EDIT = re.compile(r"/(applyEdits|addFeatures|updateFeatures|deleteFeatures|calculate|append)/?$", re.IGNORECASE)
+_TAG = re.compile(r"<[^>]*>")
 _SECRET = re.compile(r"(?i)\b(token|access_token|refresh_token|password|passwd|pwd|secret|api[_-]?key|apikey)=([^&\s\"',;]+)")
 _USERINFO = re.compile(r"^([a-z][a-z0-9+.-]*://)[^/@\s]*@", re.IGNORECASE)
+#: A user (and password) in a URL anywhere in a text (an error message), and an Authorization header's value.
+_USERINFO_ANY = re.compile(r"\b([a-z][a-z0-9+.-]*://)[^/@\s\"'<>]+@", re.IGNORECASE)
+_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
 _OID = ("objectid", "oid", "fid", "objectid_1")
 _UNSAFE = re.compile(r"[\\/:*?\"<>|\s]+")
 
@@ -224,6 +242,45 @@ def record(kind: str, action: str, target: str = "", *, result: str = "ok", coun
                                "error": error, "file": file, "text": text})
 
 
+def error(action: str, target: str = "", message: str = "", *, detail: Optional[dict] = None, trace: Optional[str] = None,
+          markup: bool = False) -> None:
+    """
+    Records something that went wrong (any thread; a queue put): `trace`,
+    its traceback (else one in `message` is found by the writer); `markup`,
+    the message is a message bar's HTML.
+    """
+    log = _log
+    if log is not None:
+        log.put("error", action, {"target": target, "result": "error", "error": message, "detail": detail, "trace": trace,
+                                  "html": markup})
+
+
+TRACEBACK = "Traceback (most recent call last)"
+
+
+def split_trace(message: str) -> tuple[str, Optional[str]]:
+    """
+    A logged message holding a Python traceback: what is written before it
+    (else the traceback's last line, the error) and the traceback; else the
+    message alone.
+    """
+    at = message.find(TRACEBACK)
+    if at < 0:
+        return message, None
+    head = message[:at].strip()
+    if not head:
+        lines = [line for line in message[at:].splitlines() if line.strip()]
+        head = lines[-1].strip() if lines else ""
+    return head, message[at:]
+
+
+def plain_text(text: str) -> str:
+    """A message bar's text without its HTML (links, bold): what was read on the screen."""
+    if "<" not in text and "&" not in text:
+        return text
+    return " ".join(html.unescape(_TAG.sub(" ", text)).split())
+
+
 def is_edit(url: str) -> bool:
     return bool(_EDIT.search(url.split("?", 1)[0]))
 
@@ -246,8 +303,14 @@ def clean_url(url: str) -> str:
 
 
 def mask(text: str) -> str:
-    """`token=…`, `password=…` and the like masked."""
-    return _SECRET.sub(lambda m: f"{m.group(1)}=…", text) if "=" in text else text
+    """`token=…`, `password=…` and the like masked (and a URL's user, an Authorization header's value)."""
+    if "=" in text:
+        text = _SECRET.sub(lambda m: f"{m.group(1)}=…", text)
+    if "@" in text:
+        text = _USERINFO_ANY.sub(r"\1", text)
+    if "earer" in text or "asic" in text:
+        text = _BEARER.sub(lambda m: f"{m.group(1)} …", text)
+    return text
 
 
 def _clean(value: Any, depth: int = 0) -> Any:
@@ -487,6 +550,8 @@ class AuditLog:
         self._sender: Optional[threading.Thread] = None
         self._first_send = 0.0
         self._tidied = ""
+        #: (action, target, message) of an error written → [when, how many alike since, the last's time, its fields].
+        self._recent_errors: dict[tuple, list] = {}
         if settings is not None:
             self._configured.set()
 
@@ -552,7 +617,7 @@ class AuditLog:
                     break
             records = [i for i in items if i is not _STOP and i is not _SEND]
             try:
-                self.write(records)
+                self.write(records, final=any(i is _STOP for i in items))
             except Exception as error:  # noqa: BLE001 (the log never stops the plugin)
                 self.status.write_error = str(error)
             if any(i is _STOP for i in items):
@@ -601,22 +666,32 @@ class AuditLog:
         if text is not None:
             detail["chars"] = len(text)
             detail["sha256"] = sha256_text(text)
+        trace = fields.get("trace")
+        if trace:
+            trace = mask(str(trace))
+            detail["traceback"] = trace if len(trace) <= MAX_TRACE else "…" + trace[-MAX_TRACE:]
         ids = fields.get("ids")
         rec = {"kind": kind, "action": action, "target": clean_url(fields.get("target") or ""), "result": fields.get("result") or "ok",
                "count": fields.get("count"), "ids": [i for i in ids] if ids is not None else None, "detail": detail,
                "error": mask(str(fields.get("error") or ""))}
         return [rec]
 
-    def write(self, items: list) -> None:
-        """Appends the lines of `items` ((time, kind, action, fields)) to the day's files."""
+    def write(self, items: list, final: bool = False) -> None:
+        """Appends the lines of `items` ((time, kind, action, fields)) to the day's files; `final`, the last write."""
         s = self.settings
         lines: list[tuple[str, str, str]] = list(self._unwritten)
         self._unwritten = []
+        if self._recent_errors:
+            items = self._repeats(time.time(), final) + list(items)
         if s.enabled:
             user, computer = self.user(), self.computer()
             for when, kind, action, fields in items:
                 if kind not in s.events:
                     continue
+                if kind == "error" and not fields.get("repeated"):
+                    fields = self._unless_repeated(when, action, fields)
+                    if fields is None:
+                        continue
                 for rec in self.records_of(kind, action, fields):
                     self.seq += 1
                     rec.update(time=local_time(when), user=user, computer=computer, session=self.session, seq=self.seq, prev=self.prev)
@@ -644,6 +719,38 @@ class AuditLog:
             failed = failed[-MAX_UNWRITTEN:]
         self._unwritten = failed
         self.status.write_error = error
+
+    def _unless_repeated(self, when: float, action: str, fields: dict) -> Optional[dict]:
+        """The error's fields to write (with how many alike were left out before it), or None for one met just now."""
+        message = str(fields.get("error") or "")
+        if fields.get("html"):
+            message = plain_text(message)
+        if not fields.get("trace") and TRACEBACK in message:
+            message, trace = split_trace(message)
+            fields = {**fields, "trace": trace}
+        if len(message) > MAX_MESSAGE:
+            message = message[:MAX_MESSAGE] + "…"
+        fields = {**fields, "error": message}
+        key = (action, str(fields.get("target") or ""), message[:300])
+        seen = self._recent_errors.get(key)
+        if seen is not None and when - seen[0] < ERROR_REPEAT:
+            seen[1] += 1
+            seen[2] = when
+            return None
+        if len(self._recent_errors) >= 1000:
+            return fields  # a storm of different errors: each written
+        self._recent_errors[key] = [when, 0, when, {"target": fields.get("target"), "result": "error", "error": message}]
+        return fields
+
+    def _repeats(self, now: float, final: bool) -> list:
+        """The lines telling how many more of an error were left out, for those whose ERROR_REPEAT has passed (all when `final`)."""
+        out = []
+        for key, (first, skipped, last, fields) in list(self._recent_errors.items()):
+            if final or now - first >= ERROR_REPEAT:
+                del self._recent_errors[key]
+                if skipped:
+                    out.append((last, "error", key[0], {**fields, "repeated": True, "detail": {"repeated": skipped}}))
+        return out
 
     # ------------------------------------------------ sending (the sender thread, or a test)
 

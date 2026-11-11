@@ -99,7 +99,7 @@ def test_exports_opened_images_and_qgis_edits_are_recorded(tmp_path):
     log = AuditLog(str(tmp_path / "here"), AuditSettings(), session="t", computer="PC", user="u")
     audit.set_log(log)
     assert save_text(str(tmp_path / "out.csv"), "a,b\n", what="observations-csv", count=1) is None
-    assert save_text(str(tmp_path / "missing" / "x.csv"), "a") is not None  # not written: not recorded
+    assert save_text(str(tmp_path / "missing" / "x.csv"), "a") is not None  # not written: an error, not an export
     layer = QgsRasterLayer(geotiff(tmp_path / "img.tif", "2026-10-01T01:00:00Z"), "img")
     add_record_layers([layer], SimpleNamespace(id="IMG-1"), QgsProject.instance())
     # QGIS's own edit of a layer (an Esri one in use; a memory layer here): counted once the save went through.
@@ -113,8 +113,10 @@ def test_exports_opened_images_and_qgis_edits_are_recorded(tmp_path):
     assert edits.commitChanges()
     watcher._after_commit(edits)
     log.write_queued()
-    export, opened, saved = records(tmp_path / "here")
+    export, failed, opened, saved = records(tmp_path / "here")
     assert (export["kind"], export["action"], export["count"], export["detail"]["bytes"]) == ("export", "observations-csv", 1, 4)
+    assert (failed["kind"], failed["action"], failed["target"], failed["detail"]) == (
+        "error", "file-save", str(tmp_path / "missing" / "x.csv"), {"what": "file"}) and failed["error"]
     assert (opened["kind"], opened["target"], opened["detail"]["files"]) == ("open", "IMG-1", [str(tmp_path / "img.tif")])
     assert (saved["kind"], saved["action"], saved["detail"]["added"], saved["detail"]["by"]) == ("edit", "save", 1, "qgis")
     QgsProject.instance().removeAllMapLayers()
@@ -132,3 +134,65 @@ def test_work_kept_offline_and_thrown_away_is_recorded(tmp_path):
     [kept] = records(tmp_path / "here")
     assert (kept["kind"], kept["action"], kept["target"], kept["ids"], kept["detail"]["kind"]) == ("offline", "keep", "共有", ["OBS-1"], "observation")
     work.close()
+
+
+def test_errors_of_the_log_the_message_bar_and_python_are_recorded(plugin):
+    import threading
+
+    from qgis.core import Qgis, QgsMessageLog
+
+    from skywatch.ui import audit_status
+
+    p, iface, tmp_path = plugin
+    log = p.audit.log
+    QgsMessageLog.logMessage("読み込みの記録", "SKYWATCH", Qgis.MessageLevel.Info)  # a note: not an error
+    QgsMessageLog.logMessage("通報の条件の確認に失敗: タイムアウト", "観測記録", Qgis.MessageLevel.Warning)
+    QgsMessageLog.logMessage("タイルを読めず", "Network", Qgis.MessageLevel.Critical)  # not the plugin's
+    ours = os.path.join(audit_status.HERE, "ui", "catalog_dock.py")
+    QgsMessageLog.logMessage(f'Traceback (most recent call last):\n  File "{ours}", line 10, in search\nKeyError: \'NAME\'',
+                             "Python error", Qgis.MessageLevel.Warning)
+    QgsMessageLog.logMessage('Traceback (most recent call last):\n  File "/plugins/other/x.py", line 1\nValueError', "Python error",
+                             Qgis.MessageLevel.Warning)  # another plugin's
+    worker = threading.Thread(target=lambda: QgsMessageLog.logMessage("ピラミッドを作れず", "SKYWATCH", Qgis.MessageLevel.Warning))
+    worker.start()
+    worker.join()
+    iface.messageBar().pushMessage("画像カタログ", "<b>画像を開けません</b>", Qgis.MessageLevel.Critical, 3)
+    iface.messageBar().pushMessage("画像カタログ", "3 件", Qgis.MessageLevel.Info, 3)
+
+    def errors():
+        return [r for r in records(tmp_path / "here") if r["kind"] == "error"]
+
+    assert wait_for(lambda: len(errors()) >= 4)
+    APP.processEvents()
+    log.write_queued()
+    got = sorted((r["action"], r["target"], r["error"]) for r in errors())
+    assert got == [("log", "SKYWATCH", "ピラミッドを作れず"), ("log", "観測記録", "通報の条件の確認に失敗: タイムアウト"),
+                   ("message", "画像カタログ", "画像を開けません"), ("python", "Python error", "KeyError: 'NAME'")]
+    p.unload()
+    QgsMessageLog.logMessage("止めた後", "SKYWATCH", Qgis.MessageLevel.Critical)
+    APP.processEvents()
+    assert not any("止めた後" in str(r.get("error")) for r in records(tmp_path / "here"))
+
+
+def test_settings_file_problems_are_an_error(tmp_path):
+    from skywatch.tests.qgis_fakes import FakeIface
+    from skywatch.ui import audit_status
+
+    QgsSettings().remove("skywatch")
+    settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"auditLog": {"localFolder": str(tmp_path / "here"), "format": "xml"}}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    settings.set_startup_layers_on(False)
+    from skywatch import classFactory
+
+    p = classFactory(FakeIface())
+    p.initGui()
+    try:
+        assert wait_for(lambda: any(r["kind"] == "error" for r in records(tmp_path / "here")))
+        [problem] = [r for r in records(tmp_path / "here") if r["kind"] == "error" and r["action"] == "config"]
+        assert problem["target"] == str(config) and problem["detail"]["problems"] and "auditLog.format" in problem["detail"]["problems"][0]
+        assert audit_status.plugin_tags() >= {"SKYWATCH", "撮像計画", "観測記録"}
+    finally:
+        p.unload()
+        QgsSettings().remove("skywatch")

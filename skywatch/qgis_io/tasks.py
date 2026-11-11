@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
 
+from ..core import audit
 from ..core.esri import EsriError
 
 LOG_TAG = "SKYWATCH"
@@ -88,10 +89,12 @@ class FunctionTask(QgsTask):
             # A service that cannot be reached or refuses: shown where it was asked, logged as a line (not a warning).
             self.error = str(error) or type(error).__name__
             QgsMessageLog.logMessage(f"{self.description()}: {self.error}", LOG_TAG, Qgis.MessageLevel.Info)
+            audit.error("task", self.description(), self.error)
             return False
         except Exception as error:  # noqa: BLE001 (any failure is shown, not raised)
             self.error = str(error) or type(error).__name__
-            QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Warning)
+            # (A warning of the plugin's: in the audit log too, with its traceback.)
+            QgsMessageLog.logMessage(f"{self.description()}: {self.error}\n{traceback.format_exc()}", LOG_TAG, Qgis.MessageLevel.Warning)
             return False
         finally:
             _current.task = None
@@ -120,12 +123,12 @@ class FunctionTask(QgsTask):
                 self._failed(self.error or ("取消" if self.isCanceled() else "失敗"))
         except RuntimeError as error:
             if "has been deleted" not in str(error):
-                QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Critical)
+                QgsMessageLog.logMessage(f"{self.description()}: 結果の表示で失敗\n{traceback.format_exc()}", LOG_TAG, Qgis.MessageLevel.Critical)
             else:
                 # The window that asked was closed meanwhile: nothing to show the answer in (#88).
                 QgsMessageLog.logMessage(f"{self.description()}: 結果の表示先が閉じられていたため表示せず", LOG_TAG, Qgis.MessageLevel.Info)
         except Exception:  # noqa: BLE001 (a failing callback is logged, never taken down with QGIS)
-            QgsMessageLog.logMessage(traceback.format_exc(), LOG_TAG, Qgis.MessageLevel.Critical)
+            QgsMessageLog.logMessage(f"{self.description()}: 結果の表示で失敗\n{traceback.format_exc()}", LOG_TAG, Qgis.MessageLevel.Critical)
 
 
 #: A task's result shown on the main thread for at least this long (ms) is told in the log (the screen stops meanwhile).

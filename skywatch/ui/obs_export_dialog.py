@@ -490,6 +490,7 @@ class ExportDialog(QDialog):
             self.save_button.setEnabled(True)
             if not out.data:
                 self._say(self.tr("保存できず: {e}").format(e="；".join(out.errors)))
+                audit.error("file-save", path, "；".join(out.errors[:5]), detail={"what": "observations"})
                 return
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
             audit.record("export", "observations", path, count=out.count, detail={"format": getattr(f, "name", "") or ""}, file=path)
