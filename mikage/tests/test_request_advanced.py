@@ -10,9 +10,12 @@
    ahead puts it last there.
 5. A 定点 request is taken as its last image was where it can be: that
    satellite first, then the same direction and side, the incidence closest.
+6. A yearly quota ahead of its pace: a low priority request tries the other
+   modes first; the quotas dialog shows the pace.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from datetime import timedelta
 
@@ -344,3 +347,54 @@ def test_same_geometry_in_the_config():
     assert problems == []
     request_store_of({"url": "https://x/FeatureServer/0", "sameGeometry": "no"}, problems, 0)
     assert problems and "sameGeometry" in problems[0]
+
+
+# --- 6. Yearly quotas: the pace ---------------------------------------------------------------------------
+
+def _usage(limit=100, used=0, pending=0, sensor="ISS", day=None):
+    from mikage.core.request.quota import Quota, Usage, window_of
+
+    q = Quota(sensor=sensor, limit=limit)
+    return Usage(q, window_of(day or DAY), used=used, pending=pending)
+
+
+def test_the_pace_is_the_share_used_over_the_share_of_the_year_gone():
+    from datetime import date
+
+    u = _usage(limit=365, used=100)
+    mid = date(DAY.year, 7, 2)  # day 183 of 365
+    assert u.elapsed(mid) == pytest.approx(183 / 365)
+    assert u.pace(mid) == pytest.approx((100 / 365) / (183 / 365))
+    assert not u.ahead(mid) and u.ahead(mid, spent=120)
+    # The first month tells no pace: it counts as a month gone.
+    assert u.pace(date(DAY.year, 1, 2)) == pytest.approx((100 / 365) * 12)
+    # 100 in 183 days: the 365 reached in 668 days, past the year (none said).
+    assert u.runs_out(mid) is None
+    assert u.runs_out(mid, spent=150) == date(DAY.year, 1, 1) + timedelta(days=math.ceil(365 / (250 / 183)) - 1)
+    assert u.pace_text(mid, 150).startswith("年の 50% が過ぎて上限の 68% を使用（見込み込み）・このままだと ")
+    assert _usage(limit=None).pace(mid) is None and _usage(limit=None).pace_text(mid) == ""
+
+
+def test_a_low_priority_request_tries_the_modes_on_their_pace_first():
+    from mikage.core.request.daily import pace_text
+    from mikage.core.request.quota import QuotaBook
+
+    req = fixed(category="臨時")
+    passes = day_passes([req], DAY, [A, B])
+    # ISS has used 90 of 100 by October: ahead of its pace.
+    usage = _usage(limit=100, used=90)
+    assert usage.ahead(DAY)
+
+    def plan(priority, day=DAY):
+        book = QuotaBook([usage], indices=[0], day=day)
+        p = plan_day([replace(req, priority=priority)], DAY, [system(merge=False)], [A, B], {}, passes=passes, quotas=book)
+        return p.candidates[0]
+
+    low = plan(700)
+    assert low.result == TAKEN and low.satellite.name == "ISS 2"
+    assert pace_text(low) == "ISS（全モード）は年間上限のペースより先行のため後回し"
+    # 中 and above: as before (the finer, or here the first, still has room).
+    high = plan(500)
+    assert high.satellite.name == "ISS" and pace_text(high) == ""
+    # Without the day (a book of the limits only): no pace.
+    assert plan(700, day=None).satellite.name == "ISS"

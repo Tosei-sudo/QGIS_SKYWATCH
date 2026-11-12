@@ -53,7 +53,7 @@ from ..core.plan.weather import fetch_clouds
 from ..core.request.chances import ahead_span, chances_of, wanted
 from ..core.request.covered import read_covered
 from ..core.request.daily import (
-    HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, part_text, pass_text, room_text,
+    HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, pace_text, part_text, pass_text, room_text,
     satellite_name, time_text,
 )
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
@@ -596,7 +596,7 @@ class PlanFileDock(PluginDock):
             cloud = "" if not (c.weather or c.mixed) else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
-            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), chance_text(c), look_text(c), *c.warnings) if x)
+            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), chance_text(c), look_text(c), pace_text(c), *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)

@@ -68,6 +68,11 @@ weather on its optical passes only: those at or above its 「実施しない雲�
 goes to a SAR satellite; a SAR pass is never too cloudy. Its priority and
 its holding back are not touched by the weather (a SAR pass may take it).
 
+A request of a low priority (output priority above quota.PACE_FROM: 低・
+最低) tries the modes whose yearly quota is ahead of its pace (quota.py,
+改修案 6) after the others, after the clouds, so that a year's scenes last
+the year; said in its note when that moved it (pace_text).
+
 A 定点 request is best taken as its last image was, so that the two compare
 (改修案 5, geometry.py, tsudo 2026-11-12): its last image's satellite (mode)
 is tried first among those it does not name, and the passes of the same
@@ -99,7 +104,7 @@ from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
 from .geometry import look_of, mismatch, pass_look, satellite_rank
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
-from .quota import QUOTA, QUOTA_OVER, QuotaBook
+from .quota import PACE_FROM, QUOTA, QUOTA_OVER, QuotaBook
 from .route import fitting, scenes_of, system_of_satellite, why_not
 from .shots import GOAL, Book, Placement
 from .systems import ExportSystem
@@ -165,6 +170,8 @@ class Candidate:
     later: bool = False
     #: How a 定点 request's last image was taken (geometry.LastLook): the passes like it go first; None when not known.
     last_look: Optional[object] = field(default=None, repr=False, compare=False)
+    #: A low priority request's first choice passed over as its quota is ahead of its pace: (quota label, satellite); None.
+    paced: Optional[tuple] = field(default=None, repr=False, compare=False)
     #: The raise offered (the boost it would have), and why; None when none.
     boost_offer: Optional[int] = None
     boost_reason: str = ""
@@ -493,6 +500,17 @@ def kind_text(c: Candidate) -> str:
     return f"光学は雲量 {round(c.optical_cloud)}% のため SAR"
 
 
+def pace_text(c: Candidate) -> str:
+    """
+    A low priority request taken on another mode than its first choice, whose
+    yearly quota is ahead of its pace: 「WV110（パン）は年間上限のペースより先行の
+    ため後回し」 ("" otherwise).
+    """
+    if c.paced is None or c.result != TAKEN or c.satellite is None or c.satellite is c.paced[1]:
+        return ""
+    return f"{c.paced[0]}は年間上限のペースより先行のため後回し"
+
+
 def part_text(c: Candidate) -> str:
     """Which of the shots of an area shared out a candidate is: 「分担 2/3」 ("" for one handing out the whole area)."""
     if c.part <= 0 or c.parts <= 1:
@@ -812,8 +830,20 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             # Either kind: as before, but an optical satellite under clouds after the SAR ones (改修案 1).
             # 定点: the satellite (mode) of its last image before the others, then those with a pass taking it the same
             # way, after the clouds (改修案 5).
-            able.sort(key=lambda s: (sky(c, system, s), overcast(c, system, s), satellite_rank(c.last_look, s), alike(c, system, s),
-                                     s.resolution if s.resolution is not None else math.inf, -left(system, s)))
+            # A low priority: the modes whose yearly quota is ahead of its pace after the others, after the clouds (改修案 6).
+            def key(s, paced=False):
+                return (sky(c, system, s), overcast(c, system, s), paced and book_quota.ahead(s) is not None,
+                        satellite_rank(c.last_look, s), alike(c, system, s),
+                        s.resolution if s.resolution is not None else math.inf, -left(system, s))
+
+            if c.priority > PACE_FROM and book_quota.day is not None:
+                first = min(able, key=key, default=None)
+                able.sort(key=lambda s: key(s, True))
+                ahead = book_quota.ahead(first) if first is not None and able[0] is not first else None
+                if ahead is not None and c.paced is None:
+                    c.paced = (ahead.quota.label, first)
+            else:
+                able.sort(key=key)
         return able
 
     def start_of(c: Candidate) -> Optional[bytearray]:
@@ -828,6 +858,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
 
     def fit(c: Candidate) -> None:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
+        c.paced = None
         c.shots, c.coverage, c.shot_cloud, c.optical_cloud = [], None, None, None
         c.warnings = [w for w in c.warnings if not _manual_warning(w)]
         req = c.request

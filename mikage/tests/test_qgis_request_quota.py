@@ -62,6 +62,10 @@ def test_the_day_kept_within_the_quota_and_scenes_marked_not_counted(plugin, mon
     assert window.quota_model.rowCount() == 1
     cell = lambda col: window.quota_model.item(0, QUOTA_COLUMNS.index(col)).text()  # noqa: E731
     assert (cell("年間上限"), cell("見込み"), cell("残り")) == ("1", "1", "0")
+    # ペース (改修案 6): the whole limit handed out early in its year, far ahead (told how in its tip).
+    pace = window.quota_model.item(0, QUOTA_COLUMNS.index("ペース"))
+    assert pace.text().endswith("%") and int(pace.text()[:-1]) > 110
+    assert pace.toolTip().startswith("年の ") and "優先度「低」「最低」" in pace.toolTip()
     assert window.shot_model.rowCount() == 1
     assert window.shot_model.item(0, SHOT_COLUMNS.index("状態")).text() == "見込み"
     assert window.shot_model.item(0, SHOT_COLUMNS.index("対象日")).text() == jst_day(T).isoformat()
