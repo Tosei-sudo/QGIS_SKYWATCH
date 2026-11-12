@@ -1,16 +1,16 @@
-"""SKYWATCH が使う Esri のテーブル・フィーチャクラスをジオデータベースに作る（ArcGIS Pro の ArcPy）。
+"""MIKAGE が使う Esri のテーブル・フィーチャクラスをジオデータベースに作る（ArcGIS Pro の ArcPy）。
 
 使い方（ArcGIS Pro の Python で。データ所有者のユーザーで接続した .sde を渡す）:
 
     "C:\\Program Files\\ArcGIS\\Pro\\bin\\Python\\scripts\\propy.bat" create_tables.py ^
-        --workspace C:\\gis\\connections\\skywatch_owner.sde --sr 6668 --grant-edit SKYWATCH_EDITOR
+        --workspace C:\\gis\\connections\\mikage_owner.sde --sr 6668 --grant-edit MIKAGE_EDITOR
 
 何度実行してもよい（冪等）:
 - ないテーブル・フィーチャクラスを作り、ない属性を足し、エイリアスを表のとおりにし、ない属性インデックスを張る
 - 既にある属性の型・長さが表と違っても変えない（データを壊さないため。違いは最後に一覧で出す）
 - 表にない属性は消さない
 
-テーブル・属性の定義は `skywatch_schema.py`（README 「Esri 側のテーブル定義」と同じ）。
+テーブル・属性の定義は `mikage_schema.py`（README 「Esri 側のテーブル定義」と同じ）。
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import skywatch_schema as schema  # noqa: E402
+import mikage_schema as schema  # noqa: E402
 
 #: ArcPy の ListFields の型（Field.type）と AddField の型の対応。
 FIELD_TYPES = {
@@ -180,7 +180,7 @@ def grant(arcpy, path: str, table, view_users=(), edit_users=(), report: Report 
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="SKYWATCH の Esri テーブルを作る（何度実行してもよい）")
+    parser = argparse.ArgumentParser(description="MIKAGE の Esri テーブルを作る（何度実行してもよい）")
     parser.add_argument("--workspace", required=True, help="データ所有者で接続した .sde（試すならファイル ジオデータベース .gdb も可）")
     parser.add_argument("--sr", type=int, default=4326, help="フィーチャクラスの座標系の EPSG（既定 4326。JGD2011 なら 6668）")
     parser.add_argument("--tables", nargs="*", default=[], help="作るテーブルだけ（既定はすべて）")

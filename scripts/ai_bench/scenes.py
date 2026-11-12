@@ -9,7 +9,7 @@ import math
 
 import numpy as np
 
-from skywatch.core.ai.train.trainer import Window
+from mikage.core.ai.train.trainer import Window
 
 CLASSES = ["ship", "aircraft", "vehicle"]
 

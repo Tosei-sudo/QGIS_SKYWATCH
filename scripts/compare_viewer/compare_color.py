@@ -21,9 +21,9 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from skywatch.core.enhance.color_classes import class_palette, class_range, class_shares, color_classes  # noqa: E402
-from skywatch.core.enhance.color_scale import COLOR_SCALES, apply_palette, color_scale_palette  # noqa: E402
-from skywatch.core.enhance.raster import RasterHistogram, sample_raster_histogram, valid_mask  # noqa: E402
+from mikage.core.enhance.color_classes import class_palette, class_range, class_shares, color_classes  # noqa: E402
+from mikage.core.enhance.color_scale import COLOR_SCALES, apply_palette, color_scale_palette  # noqa: E402
+from mikage.core.enhance.raster import RasterHistogram, sample_raster_histogram, valid_mask  # noqa: E402
 
 
 def cases() -> dict:

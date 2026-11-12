@@ -24,13 +24,13 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from skywatch.core.plan.access import PlanOptions, PlanTarget, plan_access  # noqa: E402
-from skywatch.core.plan.cover import cover_plan  # noqa: E402
-from skywatch.core.plan.moving import ShipState, refine_shots, sample_targets, ship_window  # noqa: E402
-from skywatch.core.plan.track import satellite_track  # noqa: E402
-from skywatch.core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs  # noqa: E402
-from skywatch.core.plan.revisit import box_of, cell_targets, grid_cells, revisit_stats  # noqa: E402
-from skywatch.core.plan.satellites import GroundStation, satellites_from_text  # noqa: E402
+from mikage.core.plan.access import PlanOptions, PlanTarget, plan_access  # noqa: E402
+from mikage.core.plan.cover import cover_plan  # noqa: E402
+from mikage.core.plan.moving import ShipState, refine_shots, sample_targets, ship_window  # noqa: E402
+from mikage.core.plan.track import satellite_track  # noqa: E402
+from mikage.core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs  # noqa: E402
+from mikage.core.plan.revisit import box_of, cell_targets, grid_cells, revisit_stats  # noqa: E402
+from mikage.core.plan.satellites import GroundStation, satellites_from_text  # noqa: E402
 
 ISS = "ISS\n1 25544U 98067A   26280.50000000  .00016717  00000-0  10270-3 0  9994\n2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49815399432717"
 ISS2 = ISS.replace("325.0288", "145.0288").replace("ISS\n", "ISS-2\n")

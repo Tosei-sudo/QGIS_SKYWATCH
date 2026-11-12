@@ -23,7 +23,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from skywatch.core.enhance.pansharpen import PanSharpenModel, pan_sharpen  # noqa: E402
+from mikage.core.enhance.pansharpen import PanSharpenModel, pan_sharpen  # noqa: E402
 
 H, W = 90, 110
 

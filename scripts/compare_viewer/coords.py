@@ -21,7 +21,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from skywatch.core import coords  # noqa: E402
+from mikage.core import coords  # noqa: E402
 
 #: The viewer's own test cases (coordinate-notation test/unit/coordinates.test.ts) and more.
 TEXTS = [

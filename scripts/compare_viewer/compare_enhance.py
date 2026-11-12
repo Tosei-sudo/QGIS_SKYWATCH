@@ -21,8 +21,8 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 
-from skywatch.core.enhance import PRESETS, Pipeline, process  # noqa: E402
-from skywatch.core.enhance.raster import compute_raster_stretch, sample_raster_histogram, valid_mask  # noqa: E402
+from mikage.core.enhance import PRESETS, Pipeline, process  # noqa: E402
+from mikage.core.enhance.raster import compute_raster_stretch, sample_raster_histogram, valid_mask  # noqa: E402
 
 W, H = 97, 83
 

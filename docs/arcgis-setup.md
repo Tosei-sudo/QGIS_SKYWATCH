@@ -1,10 +1,10 @@
 # ArcGIS 側の準備（テーブルの作成とサービスの公開）
 
-SKYWATCH が読み書きする Esri のテーブル・フィーチャクラス（README 「[Esri 側のテーブル定義](../README.md#esri-側のテーブル定義)」の 21 個）をエンタープライズ ジオデータベースに作り、ポータル（ArcGIS Enterprise）にフィーチャサービスとして公開して、プラグインの設定ファイルまで作るスクリプト。`tools/arcgis/` にある。
+MIKAGE が読み書きする Esri のテーブル・フィーチャクラス（README 「[Esri 側のテーブル定義](../README.md#esri-側のテーブル定義)」の 21 個）をエンタープライズ ジオデータベースに作り、ポータル（ArcGIS Enterprise）にフィーチャサービスとして公開して、プラグインの設定ファイルまで作るスクリプト。`tools/arcgis/` にある。
 
 | ファイル | 中身 | 使うもの |
 | --- | --- | --- |
-| `skywatch_schema.py` | テーブル・属性の定義（README の表と同じ。テストで照合） | 標準ライブラリだけ |
+| `mikage_schema.py` | テーブル・属性の定義（README の表と同じ。テストで照合） | 標準ライブラリだけ |
 | `create_tables.py` | テーブル・フィーチャクラスを作る・足りない属性を足す・インデックス・権限 | ArcGIS Pro の ArcPy |
 | `publish_service.py` | フィーチャサービスとして公開し、プラグインの設定ファイルを書き出す | ArcPy（公開）、ArcGIS API for Python（サービスの確認） |
 
@@ -16,11 +16,11 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 ## 1. テーブルを作る（`create_tables.py`）
 
-データ所有者（テーブルを持つユーザー、例 `SKYWATCH`）で接続した `.sde` を ArcGIS Pro で作っておき（「データベース接続の作成」）、それを渡す。
+データ所有者（テーブルを持つユーザー、例 `MIKAGE`）で接続した `.sde` を ArcGIS Pro で作っておき（「データベース接続の作成」）、それを渡す。
 
 ```bat
-%PROPY% create_tables.py --workspace C:\gis\connections\skywatch_owner.sde --sr 6668 ^
-    --grant-view SKYWATCH_VIEWER --grant-edit SKYWATCH_EDITOR
+%PROPY% create_tables.py --workspace C:\gis\connections\mikage_owner.sde --sr 6668 ^
+    --grant-view MIKAGE_VIEWER --grant-edit MIKAGE_EDITOR
 ```
 
 | オプション | 中身 |
@@ -49,22 +49,22 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 1. ジオデータベースが、ポータルとフェデレーションしたサーバーの**データストアに登録**してある（参照で公開する。データはコピーしない）。ArcGIS Pro の「共有」→「データストアの管理」か、Server Manager で登録する
 2. 公開に使う `.sde`（登録したものと同じデータベース。公開用ユーザーで接続し、そのユーザーに `--grant-edit` で権限を付けておく）
-3. 空の ArcGIS Pro プロジェクト（「新しいプロジェクト」→「マップ」で作って保存したもの）。スクリプトは中に地図 `SKYWATCH_SERVICE` を作り直して使い、ほかの地図には触れない
+3. 空の ArcGIS Pro プロジェクト（「新しいプロジェクト」→「マップ」で作って保存したもの）。スクリプトは中に地図 `MIKAGE_SERVICE` を作り直して使い、ほかの地図には触れない
 4. 公開の権限のあるポータルのアカウント
 
 ```bat
 %PROPY% publish_service.py publish ^
-    --workspace C:\gis\connections\skywatch_publisher.sde ^
-    --aprx C:\gis\skywatch_publish\skywatch_publish.aprx ^
+    --workspace C:\gis\connections\mikage_publisher.sde ^
+    --aprx C:\gis\mikage_publish\mikage_publish.aprx ^
     --portal https://gis.example/portal --server https://gis.example/server ^
-    --service SKYWATCH --groups SKYWATCH利用者 --config C:\gis\skywatch.config.json
+    --service MIKAGE --groups MIKAGE利用者 --config C:\gis\mikage.config.json
 ```
 
 | オプション | 中身 |
 | --- | --- |
 | `--portal` / `--server` | ポータルの URL / フェデレーションしたサーバーの URL |
-| `--user` / `--password` | ポータルのアカウント。`--user` を省くと ArcGIS Pro でサインインしているアカウント。パスワードは省くと環境変数 `SKYWATCH_PORTAL_PASSWORD` か入力 |
-| `--service` / `--folder` | サービス名（既定 `SKYWATCH`）/ サーバー・ポータルのフォルダー |
+| `--user` / `--password` | ポータルのアカウント。`--user` を省くと ArcGIS Pro でサインインしているアカウント。パスワードは省くと環境変数 `MIKAGE_PORTAL_PASSWORD` か入力 |
+| `--service` / `--folder` | サービス名（既定 `MIKAGE`）/ サーバー・ポータルのフォルダー |
 | `--tables` / `--skip` | 公開するテーブルだけ / 公開しないテーブル |
 | `--groups` / `--share-org` | 共有するグループ / 組織に共有する |
 | `--max-records` | 1 回の問い合わせで返す上限（既定はサーバーの既定 2000） |
@@ -73,7 +73,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 すること:
 
-1. 地図 `SKYWATCH_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、22 = `TBL_REQUEST_SHOT`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
+1. 地図 `MIKAGE_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、22 = `TBL_REQUEST_SHOT`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
 2. マップ イメージ レイヤーとして共有するドラフトを作り、フィーチャ アクセスを有効にして、機能を `Query,Create,Update,Delete,Uploads,Editing` にする（プラグインは追加・更新・削除をする）。データは参照（コピーしない）
 3. 同じ名前のサービスがあれば上書きして公開する（何度実行してもよい）
 4. 公開したサービスを ArcGIS API for Python で読み、レイヤー名と番号からプラグインの設定ファイル（README 「上の表の名前で作ったときの設定」と同じ形）を書く
@@ -85,8 +85,8 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 サービスを手で公開したときや、番号を確かめたいとき。レイヤー名が `TBL_…`（`所有者.TBL_…` も可）のレイヤーを拾う。
 
 ```bat
-%PROPY% publish_service.py config --url https://gis.example/server/rest/services/SKYWATCH/FeatureServer ^
-    --portal https://gis.example/portal --config C:\gis\skywatch.config.json
+%PROPY% publish_service.py config --url https://gis.example/server/rest/services/MIKAGE/FeatureServer ^
+    --portal https://gis.example/portal --config C:\gis\mikage.config.json
 ```
 
 ## 3. 撮像予定（採否）のダッシュボード
@@ -158,4 +158,4 @@ datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(h
 | `! レイヤー番号を固定できない` | 古い ArcGIS Pro。公開はでき、設定ファイルは実際の番号で書くので、そのまま使える |
 | 設定ファイルに書かれない項目がある | そのテーブルを公開していない（`--skip` など）。出力の「サービスにないテーブル」を見る |
 
-テーブル・属性の定義を変えたら（プラグインに機能を足したときなど）、README の表と `tools/arcgis/skywatch_schema.py` の両方を直す。`skywatch/tests/test_arcgis_tools.py` が食い違いを見つける。
+テーブル・属性の定義を変えたら（プラグインに機能を足したときなど）、README の表と `tools/arcgis/mikage_schema.py` の両方を直す。`mikage/tests/test_arcgis_tools.py` が食い違いを見つける。

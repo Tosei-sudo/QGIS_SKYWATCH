@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>衛星・センサー編集ツール</title>
 <!--
-  SKYWATCH の衛星カタログ（satelliteCatalogs）・センサーモード（sensorCatalogs）・衛星名の対応表
+  MIKAGE の衛星カタログ（satelliteCatalogs）・センサーモード（sensorCatalogs）・衛星名の対応表
   （satelliteAliases）・年間撮像上限（requestStores[].quotas）を、ArcGIS（ポータル・サーバー）のテーブルの上で
   直接編集するツール。
   ブラウザでこのファイルを開き、プラグインの設定ファイル（config.json）を読み込ませる。どのテーブルの
   どの属性を使うかは設定ファイルの url・fields・where のとおり（プラグインと同じ読み方）。
   ライブラリ・インストール不要（閉じたネットワークでも動く）。使うのは ArcGIS REST の query と applyEdits だけ。
-  衛星とセンサーモードのつながり・別名のつながりはプラグインと同じ決まり（skywatch/core/plan/modes.py with_modes、
-  names.py、年間撮像上限は core/request/quota.py）。下の plugin-constants はプラグインの定数の写し: skywatch/tests/test_satellite_editor.py が一致を確かめる。
+  衛星とセンサーモードのつながり・別名のつながりはプラグインと同じ決まり（mikage/core/plan/modes.py with_modes、
+  names.py、年間撮像上限は core/request/quota.py）。下の plugin-constants はプラグインの定数の写し: mikage/tests/test_satellite_editor.py が一致を確かめる。
 -->
 <style>
 :root {
@@ -286,9 +286,9 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
 <script>
 "use strict";
 const PC = JSON.parse(document.getElementById("plugin-constants").textContent);
-const STORE_USER = "skywatch.satelliteEditor.user";
-const STORE_LAST = "skywatch.satelliteEditor.lastConfig";
-const STORE_LOGIN = "skywatch.satelliteEditor.login";
+const STORE_USER = "mikage.satelliteEditor.user";
+const STORE_LAST = "mikage.satelliteEditor.lastConfig";
+const STORE_LOGIN = "mikage.satelliteEditor.login";
 
 /** 役割の見出し・単位・入力の候補（list は候補の datalist の名前）。 */
 const SAT_INFO = {
