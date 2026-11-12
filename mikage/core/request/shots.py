@@ -19,9 +19,10 @@ the scenes; and they are put together only when that box leaves the
 system's `mergeMargin` (500 m) inside the shot on every side, so that the
 system, framing with its own orbit and scenes, still finds them in one.
 
-A satellite (all its modes) keeps `minInterval` minutes between its shots
-and takes at most `maxPerDay` shots a day; putting a request into a shot
-already planned uses neither. An area too big for one shot takes the day's
+A satellite (all its modes) keeps `minInterval` minutes between its shots,
+takes at most `maxPerDay` shots a day and, when it has one, `shotsPerPass`
+shots a pass (half a revolution of one orbit direction; 改修案 10, G13);
+putting a request into a shot already planned uses none of them. An area too big for one shot takes the day's
 passes one after another (as the imaging plan's 組み合わせ) until 95% of
 it is taken, or the passes run out; it is not put together with others.
 Its points already taken (`start`: 撮像済み, 撮像待ち, or the shots of
@@ -277,6 +278,20 @@ class Book:
             return True
         return bool(spec.maxPerDay) and leave is None and len(others) + 1 > spec.maxPerDay
 
+    def pass_full(self, sat: int, shot: Shot, more: Sequence[Shot] = ()) -> bool:
+        """
+        Whether a new shot would go past its satellite's `shotsPerPass` (1 パス
+        の撮像回数; 改修案 10, G13): the satellite's shots (all its modes, and
+        `more` not yet planned) on the same pass, half a revolution of the same
+        orbit direction (the same direction, less than half the period apart).
+        """
+        most = self.sats[sat].shotsPerPass
+        if not most:
+            return False
+        half = math.pi / shot.rate * 1000
+        on = [s for s in (*self.of_platform(sat), *more) if s.ascending == shot.ascending and abs(s.time - shot.time) < half]
+        return len(on) + 1 > most
+
     # --- Where a request can go ------------------------------------------------------------------
 
     def _fit(self, sat: int, reqs: Sequence[ImagingRequest], extents: Sequence[tuple], radius: float, ascending: bool,
@@ -363,7 +378,7 @@ class Book:
                 continue
             window, along, frames = fit
             shot = Shot(sat, op.time, frame, radius, ascending, [c], [extent], window, along, frames)
-            busy = self.busy(sat, shot.start, shot.end)
+            busy = self.busy(sat, shot.start, shot.end) or self.pass_full(sat, shot)
             if busy and not forced:
                 self.saw_busy = True
                 continue
@@ -411,7 +426,7 @@ class Book:
             shot = Shot(sat, op.time, frame, radius, ascending, [c], [(best.window[0], best.window[1], best.along[0], best.along[1])],
                         best.window, best.along, max(1, math.floor((best.along[1] - best.along[0]) / sl + 0.5)))
             gap = spec.minInterval * 60000
-            busy = (self.busy(sat, shot.start, shot.end)
+            busy = (self.busy(sat, shot.start, shot.end) or self.pass_full(sat, shot, taken)
                     or any(t.start - gap < shot.end and shot.start < t.end + gap for t in taken)
                     or bool(spec.maxPerDay) and len(self.of_platform(sat)) + len(taken) + 1 > spec.maxPerDay)
             if busy and not forced:

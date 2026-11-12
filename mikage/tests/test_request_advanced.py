@@ -479,3 +479,33 @@ def test_the_follow_up_looks_on_the_day_the_system_plans():
     later = replace(row, planned_at=LAST + 2 * D)
     assert follow_up(client, catalog, None, [later], far, LAST + 3 * D, 3) == []
     assert [f.captured for f in follow_up(client, catalog, None, [later], far, LAST + 6 * D, 3)] == ["未撮像"]
+
+
+def test_shots_a_pass():
+    # 1 パスの撮像回数 (G13): two requests 2 minutes apart on one pass are two shots; with 1 a pass only the first goes.
+    from mikage.core.request.daily import BUSY
+    from mikage.tests.test_request_passes import SAT, along, fit, point
+
+    reqs = [point(1, BELOW, 300), point(4, along(120))]
+    assert all(c.result == TAKEN for c in fit(reqs)[0])
+    one = {c.request.id: c for c in fit(reqs, sats=[replace(SAT, shotsPerPass=1)])[0]}
+    assert one["R1"].result == TAKEN and (one["R4"].result, one["R4"].reason) == (HELD, BUSY)
+    # Put into the shot planned, a request uses no shot of the pass.
+    close = [point(1, BELOW, 300), point(2, along(2.5))]
+    assert all(c.result == TAKEN for c in fit(close, sats=[replace(SAT, shotsPerPass=1)])[0])
+
+
+def test_shots_a_pass_is_read_from_the_catalog_and_the_modes():
+    from mikage.core.plan.modes import SensorMode, with_modes
+    from mikage.core.plan.satellites import satellite_catalog_of, satellite_of
+    from mikage.tests.test_plan import LINE1, LINE2
+
+    problems: list = []
+    catalog = satellite_catalog_of({"url": "https://x/FeatureServer/0", "fields": {"name": "N", "tle": "TLE", "shotsPerPass": "SPP",
+                                                                                   "sensor": "S"}}, problems, 0)
+    assert problems == []
+    sat = satellite_of({"N": "SAR-1", "TLE": f"{LINE1}\n{LINE2}", "SPP": 2, "S": "SAR-X"}, catalog)
+    assert sat.shotsPerPass == 2
+    assert satellite_of({"N": "SAR-2", "TLE": f"{LINE1}\n{LINE2}", "S": "SAR-X"}, catalog).shotsPerPass == 0
+    [moded] = with_modes([sat], [SensorMode("SAR-X", "スポット", shotsPerPass=1)])
+    assert moded.shotsPerPass == 1

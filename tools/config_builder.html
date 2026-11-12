@@ -217,7 +217,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "sensor",
    "mode",
    "resolution",
-   "system"
+   "system",
+   "shotsPerPass"
   ],
   "sensorCatalogs": [
    "sensor",
@@ -233,7 +234,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "maxPerDay",
    "leadTime",
    "resolution",
-   "primary"
+   "primary",
+   "shotsPerPass"
   ],
   "satelliteAliases": [
    "satellite",
@@ -1042,7 +1044,7 @@ const ROLE_LABELS = {
   keywords: "フリーワード検索の属性（文字列。複数はカンマ区切り）", name: "名前",
   tle: "TLE（2 行まとめて）", tle1: "TLE 1 行目", tle2: "TLE 2 行目", maxOffNadir: "最大オフナディア角", minOffNadir: "最小オフナディア角",
   swath: "観測幅", length: "シーンの長さ", lookSide: "観測方向", kind: "種別", scenesPerPass: "1 パスのシーン数",
-  minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
+  minInterval: "撮像の最小間隔（分）", maxPerDay: "1 日の上限", shotsPerPass: "1 パスの撮像回数", series: "シリーズ", leadTime: "リードタイム", mode: "モード",
   resolution: "分解能", system: "システム", primary: "既定のモード", satellite: "衛星（衛星カタログの名前か ID）",
   alias: "別名（画像カタログでの名前）", planId: "計画 ID", planName: "計画名", shotTime: "撮像時刻", satelliteId: "衛星 ID",
   target: "目標", offNadir: "オフナディア角", incidence: "入射角", pass: "軌道方向", side: "観測方向", status: "状態",
@@ -1459,7 +1461,10 @@ const SPEC = [
         R("shotFields", "撮像の範囲の属性名", K.roles.requestShots),
         T("quotas", "年間撮像上限のテーブル", { ph: "https://…/FeatureServer/23", help: "TBL_IMAGING_QUOTA。センサー・モードごとの年間撮像枚数の上限（年の始まりの月・当初の消費枚数）。行のないセンサー・モードは上限なし。撮像ごとに数えるので撮像の範囲のレイヤーも要る。値は衛星・センサー編集ツールで" }),
         R("quotaFields", "年間撮像上限の属性名", K.roles.requestQuotas), CATALOG,
-        N("missAfterDays", "未撮像とする日数"), TOKEN]) },
+        N("missAfterDays", "未撮像とする日数"),
+        N("lookAheadDays", "残りの撮像機会を見る日数", { ph: "7", help: "期間内1回の依頼の締め切りまでの撮像機会を、計算の日のあと何日分のパスと雲量予報で数えるか（0〜16、0 で見ない）。残り 1 回なら先に、あとのほうが晴れるなら後に置く" }),
+        B("sameGeometry", "定点は前回と同じ撮り方を優先", { help: "既定 true: 定点の依頼は前回の撮像と同じ衛星・軌道方向・観測方向・入射角のパスを先に試す（順番だけ。撮像の範囲のレイヤーが要る）" }),
+        TOKEN]) },
     { key: "requestExports", label: "日次出力（オーダー用ファイル）", doc: "", ext: "docs/imaging-requests.md", help: "衛星システムごとに、その日の依頼をどう書き出すか。CSV は列（キー）を、JSON は JSON Schema（x-source で中身を指定）を組む。下の見本で出力を確かめられる。",
       field: I("requestExports", "システム", [
         T("system", "システム名", { req: true, ph: "SYS-A" }), LABEL,
