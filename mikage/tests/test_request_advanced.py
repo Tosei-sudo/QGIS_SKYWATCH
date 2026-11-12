@@ -14,7 +14,8 @@
    modes first; the quotas dialog shows the pace.
 7. The request form's one line: how often the satellites can take it.
 10. The base: an old TLE said after the calculation; the follow-up looks on
-    the day the system plans the shot for (PLANNED_AT).
+    the day the system plans the shot for (PLANNED_AT); a satellite's shots
+    a pass (shotsPerPass).
 """
 from __future__ import annotations
 
