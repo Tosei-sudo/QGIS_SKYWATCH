@@ -17,6 +17,11 @@ in order of priority.
    missed on a day of its repeat (weekday, interval) is carried over to the
    next day planned, even when that is not one of its days (持ち越し).
 4. Order: output priority, then the nearer deadline, then the older request.
+   Within the same hundred of the output priority (101–200, 201–300 …; a
+   raise moves a request up one) those near their deadline or with few
+   chances left (chances.py: 「今日を逃すと残り 1 回」) come first, and an
+   optical request whose day is cloudy and that has a much clearer pass in
+   the next days comes last (改修案 4, tsudo 2026-11-12).
 5. Fitting: in that order, each request goes to the first system (its own
    order, then `requestExports`') with a satellite that can take it and room
    left: the system's `limit` (count, scenes), its `quota` by category, and
@@ -56,6 +61,25 @@ times are simply more requests on the satellites.
 Hand changes (taking in, leaving out, moving up or down) are kept on the
 candidates and the fitting is done again.
 
+A request of either kind (任意) that both optical and SAR satellites can
+take (`Candidate.mixed`, 改修案 1, tsudo 2026-11-12) is weighed by the
+weather on its optical passes only: those at or above its 「実施しない雲量」
+(ANY_KIND_NO_GO when it names none) are not used, so that a cloudy day
+goes to a SAR satellite; a SAR pass is never too cloudy. Its priority and
+its holding back are not touched by the weather (a SAR pass may take it).
+
+A request of a low priority (output priority above quota.PACE_FROM: 低・
+最低) tries the modes whose yearly quota is ahead of its pace (quota.py,
+改修案 6) after the others, after the clouds, so that a year's scenes last
+the year; said in its note when that moved it (pace_text).
+
+A 定点 request is best taken as its last image was, so that the two compare
+(改修案 5, geometry.py, tsudo 2026-11-12): its last image's satellite (mode)
+is tried first among those it does not name, and the passes of the same
+direction and look side first, then the incidence closest, each after the
+clouds (by tenths). Only an order: with no such pass it goes on another,
+said so in its note.
+
 A sensor or mode with a yearly quota (年間撮像上限, quota.py; tsudo
 2026-11-11) takes no more scenes than its year has left, what the shots
 handed out and not settled yet will use taken off: a request then tries the
@@ -75,10 +99,12 @@ from datetime import date
 from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
+from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
+from .geometry import look_of, mismatch, pass_look, satellite_rank
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
-from .quota import QUOTA, QUOTA_OVER, QuotaBook
+from .quota import PACE_FROM, QUOTA, QUOTA_OVER, QuotaBook
 from .route import fitting, scenes_of, system_of_satellite, why_not
 from .shots import GOAL, Book, Placement
 from .systems import ExportSystem
@@ -86,6 +112,9 @@ from .weather import cloud_step, with_cloud
 
 #: Days before the deadline from which a 期間内1回 request goes whatever the weather (and is offered a raise).
 DEADLINE_DAYS = 2
+#: The cover (percent) from which an optical pass is not used for a request of either kind (任意, both optical and SAR
+#: satellites can take it) that names no 「実施しない雲量」: a cloudy day goes to SAR (改修案 1, tsudo 2026-11-12).
+ANY_KIND_NO_GO = 50.0
 
 TAKEN, HELD = "採用", "見送り"
 #: Why a request is held back in the fitting.
@@ -124,10 +153,25 @@ class Candidate:
     cloud: Optional[float] = None
     #: Whether the weather was asked for this request (optical).
     weather: bool = False
+    #: Either kind (任意) with both optical and SAR satellites able to take it: the weather counts on its optical passes
+    #: only (`cloud` is that of its least cloudy optical pass); its priority and holding back do not take it.
+    mixed: bool = False
+    #: Set by fitting, for one `mixed`: the cover of the optical passes it was kept off (too cloudy); None when none.
+    optical_cloud: Optional[float] = None
     #: Whether `cloud` is at the moment of a pass (from the orbits), not the daylight hours' mean.
     timed: bool = False
-    #: 期間内1回 with DEADLINE_DAYS or less left: it goes whatever the weather.
+    #: 期間内1回 with DEADLINE_DAYS or less left (or few chances left, `scarce`): it goes whatever the weather.
     near: bool = False
+    #: Its chances on the day and after it (chances.Chances); None when not worked out.
+    chances: Optional[Chances] = field(default=None, repr=False, compare=False)
+    #: Near as it has SCARCE chances or fewer left after the day (not by days): it comes first in its band.
+    scarce: bool = False
+    #: An optical request whose day is cloudy, with a much clearer pass in the next days: it comes last in its band.
+    later: bool = False
+    #: How a 定点 request's last image was taken (geometry.LastLook): the passes like it go first; None when not known.
+    last_look: Optional[object] = field(default=None, repr=False, compare=False)
+    #: A low priority request's first choice passed over as its quota is ahead of its pace: (quota label, satellite); None.
+    paced: Optional[tuple] = field(default=None, repr=False, compare=False)
     #: The raise offered (the boost it would have), and why; None when none.
     boost_offer: Optional[int] = None
     boost_reason: str = ""
@@ -195,7 +239,19 @@ class Candidate:
     @property
     def forecast(self) -> Optional[float]:
         """The cover written out (cloudForecast, the history): at its pass when the orbits placed it, else the day's."""
+        if self.mixed and self.satellite is not None and self.satellite.sar:
+            # Either kind taken by a SAR satellite: the clouds do not matter to it.
+            return None
         return self.shot_cloud if self.shot_cloud is not None else self.cloud
+
+    @property
+    def no_go(self) -> Optional[float]:
+        """The cover from which a pass is too cloudy for it: its 「実施しない雲量」 (optical), or for either kind ANY_KIND_NO_GO."""
+        if self.weather:
+            return self.request.cloud_no_go
+        if self.mixed:
+            return optical_no_go(self.request)
+        return None
 
     @property
     def lead(self) -> Optional["Candidate"]:
@@ -248,12 +304,12 @@ class Candidate:
 
     @property
     def weather_flag(self) -> str:
-        if not self.weather:
+        if not self.weather and not (self.mixed and self.forecast is not None):
             return ""
         cloud = self.forecast
         if cloud is None:
             return "予報なし"
-        no_go = self.request.cloud_no_go
+        no_go = self.no_go
         return "雲多" if no_go is not None and cloud >= no_go else "OK"
 
 
@@ -279,8 +335,29 @@ def wants_weather(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
     return bool(able) and all(not s.sar for s in able)
 
 
+def mixed_kinds(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
+    """
+    Either kind (任意) that optical and SAR satellites can both take: the
+    weather picks between them, on its optical passes only (改修案 1).
+    """
+    if req.kind != "任意":
+        return False
+    able = fitting(req, sats)
+    return any(s.sar for s in able) and any(not s.sar for s in able)
+
+
+def asks_weather(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
+    """Whether a request's forecast is asked for: optical (wants_weather), or either kind with optical satellites too."""
+    return wants_weather(req, sats) or mixed_kinds(req, sats)
+
+
+def optical_no_go(req: ImagingRequest) -> float:
+    """The cover from which an optical pass is not used for a request of either kind: its own, else ANY_KIND_NO_GO."""
+    return req.cloud_no_go if req.cloud_no_go is not None else ANY_KIND_NO_GO
+
+
 def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec],
-           clouds: dict, missed: set, covered: Optional[dict] = None) -> list[Candidate]:
+           clouds: dict, missed: set, covered: Optional[dict] = None, chances: Optional[dict] = None) -> list[Candidate]:
     """
     The candidates of a day: requests that occur on it, with their cover
     (`clouds`: request id → percent or None, weather.Clouds telling those at
@@ -289,6 +366,9 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
     (request id → covered.Covered): what of a 期間内1回 area is taken
     already or handed out on earlier days; one taken (or about to be) to
     GOAL is held back (撮像済み, 撮像待ち: unless near its deadline).
+    `chances` (request id → chances.Chances): one with few chances left is
+    near its deadline whatever the days; one with a much clearer pass later
+    comes last in its priority band.
     """
     timed = getattr(clouds, "timed", ())
     out = []
@@ -301,6 +381,11 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             c.warnings.append("未撮像の持ち越し")
         left = days_left(req, day)
         near = req.achieve == "期間内1回" and left <= DEADLINE_DAYS
+        ch = (chances or {}).get(req.id)
+        c.chances = ch
+        if not near and req.achieve == "期間内1回" and ch is not None and ch.scarce:
+            # 「今日を逃すと残り 1 回」: the day is its chance, whatever the days left.
+            near = c.scarce = True
         c.near = near
         if wants_weather(req, sats):
             c.weather = True
@@ -315,6 +400,13 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
                     c.warnings.append(f"雲量 {round(c.cloud)}%（{every}実施しない雲量 {round(req.cloud_no_go)}% 以上・期限間近のため出力）")
                 else:
                     c.held = f"雲量 {round(c.cloud)}%（{every}{round(req.cloud_no_go)}% 以上）"
+        elif mixed_kinds(req, sats):
+            # Either kind: its optical passes are weighed (in the fitting), never the request itself.
+            c.mixed = True
+            c.cloud = clouds.get(req.id)
+            c.timed = c.cloud is not None and req.id in timed
+        if c.weather and not near and ch is not None and ch.yields(c.cloud):
+            c.later = True
         got = (covered or {}).get(req.id)
         if got is not None and subtracts(req):
             c.covered = got
@@ -328,15 +420,16 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
         if req.id in missed:
             reasons.append("未撮像")
         if near:
-            reasons.append(f"期限まで {max(0, left)} 日")
+            reasons.append(scarce_text(ch) if c.scarce else f"期限まで {max(0, left)} 日")
         offer = next_boost(req)
         if reasons and offer is not None:
             c.boost_offer = offer
             c.boost_reason = "・".join(reasons)
         out.append(c)
         for k in range(2, req.times[1] + 1):
-            out.append(Candidate(req, cloud=c.cloud, weather=c.weather, timed=c.timed, near=c.near, carried=carried,
-                                 held=c.held, warnings=list(c.warnings), occurrence=k, first=c))
+            out.append(Candidate(req, cloud=c.cloud, weather=c.weather, mixed=c.mixed, timed=c.timed, near=c.near, carried=carried,
+                                 held=c.held, warnings=list(c.warnings), occurrence=k, first=c, chances=ch, scarce=c.scarce,
+                                 later=c.later))
     return out
 
 
@@ -387,6 +480,37 @@ def cover_text(c: Candidate) -> str:
     return "・".join(parts) + (" を除く" if c.gain is not None else "（範囲全体を出力）")
 
 
+def chance_text(c: Candidate) -> str:
+    """
+    What the chances did: 「残りの撮像機会 1 回（11/14 まで）」 for one put
+    first, 「11/14 のほうが晴れる見込み（雲 10%）」 for one put last and left
+    out for want of room ("" otherwise).
+    """
+    if c.scarce and c.chances is not None and c.main is None:
+        return scarce_text(c.chances)
+    if c.later and c.result == HELD and c.reason in (OVER, BUSY) and c.chances is not None and c.chances.clearer:
+        return clearer_text(c.chances)
+    return ""
+
+
+def kind_text(c: Candidate) -> str:
+    """Either kind taken by SAR as its optical passes were too cloudy: 「光学は雲量 80% のため SAR」 ("" otherwise)."""
+    if not c.mixed or c.result != TAKEN or c.satellite is None or not c.satellite.sar or c.optical_cloud is None:
+        return ""
+    return f"光学は雲量 {round(c.optical_cloud)}% のため SAR"
+
+
+def pace_text(c: Candidate) -> str:
+    """
+    A low priority request taken on another mode than its first choice, whose
+    yearly quota is ahead of its pace: 「WV110（パン）は年間上限のペースより先行の
+    ため後回し」 ("" otherwise).
+    """
+    if c.paced is None or c.result != TAKEN or c.satellite is None or c.satellite is c.paced[1]:
+        return ""
+    return f"{c.paced[0]}は年間上限のペースより先行のため後回し"
+
+
 def part_text(c: Candidate) -> str:
     """Which of the shots of an area shared out a candidate is: 「分担 2/3」 ("" for one handing out the whole area)."""
     if c.part <= 0 or c.parts <= 1:
@@ -394,10 +518,17 @@ def part_text(c: Candidate) -> str:
     return f"分担 {c.part}/{c.parts}"
 
 
+#: The width of the steps of the output priority within which the chances weigh the order (改修案 4): the hundreds, as a
+#: raise (繰り上げ) moves a request up one of them and leaves its last two digits (its place among the others there).
+BAND = 100
+
+
 def _order_key(c: Candidate):
     end = c.request.end if math.isfinite(c.request.end) else math.inf
     created = c.request.created if c.request.created is not None else math.inf
-    return (c.priority, end, created, c.request.name)
+    # Within its hundred: near its deadline or few chances left first, a clearer day ahead last.
+    urgency = 0 if c.near else 2 if c.later else 1
+    return ((c.priority - 1) // BAND, urgency, c.priority, end, created, c.request.name)
 
 
 def ordered(cands: Sequence[Candidate]) -> list[Candidate]:
@@ -548,8 +679,8 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         c.shots = book.take(c, p)
         c.coverage = p.coverage
         c.shot_cloud = cloud
-        no_go = c.request.cloud_no_go
-        if cloud is not None and no_go is not None and cloud >= no_go and (c.cloud is None or c.cloud < no_go):
+        no_go = c.no_go
+        if cloud is not None and no_go is not None and cloud >= no_go and (c.cloud is None or c.cloud < no_go or c.mixed):
             # Only too cloudy passes had room, and it goes all the same (the day's own cover was said in gather otherwise).
             why = "期限間近" if c.near else "手動で採用" if c.manual == TAKEN else "書き出し済み"
             c.warnings.append(f"{SHOT_CLOUD}{round(cloud)}%（実施しない雲量 {round(no_go)}% 以上・{why}のため出力）")
@@ -576,6 +707,35 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         told = [o.cloud for o in passes.of(c.request, day, index[id(sat)]) if o.cloud is not None]
         return _tenth(min(told)) if told else 10
 
+    def weighed(c: Candidate, sat: SatelliteSpec) -> bool:
+        """Whether the weather weighs a satellite's passes for a candidate: optical, or either kind's optical satellites."""
+        return c.weather or c.mixed and not sat.sar
+
+    def clearest(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> Optional[float]:
+        """The cover of an optical satellite's least cloudy pass over a candidate (the day's when counted); None when not told."""
+        if not orbits(system, sat):
+            return c.cloud
+        told = [o.cloud for o in passes.of(c.request, day, index[id(sat)]) if o.cloud is not None]
+        return min(told) if told else None
+
+    def overcast(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> bool:
+        """
+        For either kind (mixed): an optical satellite whose passes over it are
+        all too cloudy (its least cloudy at or above the 「実施しない雲量」; the
+        day's cover when fitted by counting). Never a SAR one, nor without a forecast.
+        """
+        if not c.mixed or sat.sar:
+            return False
+        cloud = clearest(c, system, sat)
+        return cloud is not None and cloud >= optical_no_go(c.request)
+
+    def alike(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> tuple:
+        """For a 定点 request with a last look: how close the satellite's closest pass over it comes to it ((0, 0) otherwise)."""
+        if c.last_look is None or not orbits(system, sat):
+            return 0, 0
+        ops = passes.of(c.request, day, index[id(sat)])
+        return min((mismatch(c.last_look, pass_look(o)) for o in ops), default=(9, 0))
+
     def options_of(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool) -> Optional[list]:
         """The passes of the satellite a candidate may go on (its times apart, the weather, those left out by hand); None: none."""
         i = index[id(sat)]
@@ -594,13 +754,17 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             if not ops:
                 why.add(GAP)
                 return None
-        no_go = c.request.cloud_no_go
-        if c.weather and no_go is not None and not (forced or c.near or c.manual == TAKEN):
+        no_go = c.no_go
+        if weighed(c, sat) and no_go is not None and not (forced or c.near or c.manual == TAKEN):
             # Passes too cloudy at their moment are not used (those the forecast does not reach are).
-            ops = [o for o in ops if o.cloud is None or o.cloud < no_go]
-            if not ops:
+            clear = [o for o in ops if o.cloud is None or o.cloud < no_go]
+            if not clear:
+                if c.mixed:
+                    told = [o.cloud for o in ops if o.cloud is not None]
+                    c.optical_cloud = min(told) if told else None
                 why.add(CLOUDY)
                 return None
+            ops = clear
         return ops
 
     def fits_of(c: Candidate, system: ExportSystem, sat: SatelliteSpec):
@@ -623,10 +787,14 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         told = passes.of(c.request, day, i)
         joins = book.joins(c, i, ops, system.merge, system.merge_margin) if start is None else []
         options = joins + book.new_shots(c, i, ops, forced, start, fits_of(c, system, sat))
-        clouds = {id(p): _placement_cloud(p, told) for p in options} if c.weather else {}
-        if c.weather:
-            # The less cloudy first, by tenths; within a tenth as before (into a shot planned, then the smaller angle).
-            options.sort(key=lambda p: (p.busy, _tenth(clouds[id(p)])))
+        clouds = {id(p): _placement_cloud(p, told) for p in options} if weighed(c, sat) else {}
+        last = c.last_look
+        if weighed(c, sat) or last is not None:
+            # The less cloudy first, by tenths; within a tenth, a 定点 request's passes taken as its last image first
+            # (the same direction and side, then the incidence closest; 改修案 5, geometry.py); then as before (into a
+            # shot planned, then the smaller angle).
+            looks = {id(p): mismatch(last, look_of(p)) for p in options} if last is not None else {}
+            options.sort(key=lambda p: (p.busy, _tenth(clouds[id(p)]) if clouds else 0, looks.get(id(p), (0, 0))))
         room = rooms[system.system]
         for p in options:
             if p.busy and not forced:
@@ -655,10 +823,27 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         able = list(able)
         if c.request.satellites:
             order = {n: i for i, n in enumerate(c.request.satellites)}
-            able.sort(key=lambda s: min(order.get(s.name, 99), order.get(s.id, 99)))
+            # Either kind: an optical satellite under clouds after the others (a SAR one named next takes it).
+            able.sort(key=lambda s: (overcast(c, system, s), min(order.get(s.name, 99), order.get(s.id, 99))))
         else:
             # Optical: the satellite with the less cloudy pass first (by tenths), then the finest resolution.
-            able.sort(key=lambda s: (sky(c, system, s), s.resolution if s.resolution is not None else math.inf, -left(system, s)))
+            # Either kind: as before, but an optical satellite under clouds after the SAR ones (改修案 1).
+            # 定点: the satellite (mode) of its last image before the others, then those with a pass taking it the same
+            # way, after the clouds (改修案 5).
+            # A low priority: the modes whose yearly quota is ahead of its pace after the others, after the clouds (改修案 6).
+            def key(s, paced=False):
+                return (sky(c, system, s), overcast(c, system, s), paced and book_quota.ahead(s) is not None,
+                        satellite_rank(c.last_look, s), alike(c, system, s),
+                        s.resolution if s.resolution is not None else math.inf, -left(system, s))
+
+            if c.priority > PACE_FROM and book_quota.day is not None:
+                first = min(able, key=key, default=None)
+                able.sort(key=lambda s: key(s, True))
+                ahead = book_quota.ahead(first) if first is not None and able[0] is not first else None
+                if ahead is not None and c.paced is None:
+                    c.paced = (ahead.quota.label, first)
+            else:
+                able.sort(key=key)
         return able
 
     def start_of(c: Candidate) -> Optional[bytearray]:
@@ -673,7 +858,8 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
 
     def fit(c: Candidate) -> None:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
-        c.shots, c.coverage, c.shot_cloud = [], None, None
+        c.paced = None
+        c.shots, c.coverage, c.shot_cloud, c.optical_cloud = [], None, None, None
         c.warnings = [w for w in c.warnings if not _manual_warning(w)]
         req = c.request
         c.able = {}
@@ -713,6 +899,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                     if by_orbit(c, system, sat, why, start=start):
                         break
                     continue
+                if overcast(c, system, sat) and not (c.near or forced):
+                    # Either kind, counted: an optical satellite on a cloudy day is left for a SAR one.
+                    c.optical_cloud = c.cloud
+                    why.add(CLOUDY)
+                    continue
                 scenes = scenes_of(req, *(((sat.swath, sat.length) if req.modes or req.satellites else system.scene_km)))
                 used = per_sat.get(platform_key(sat), 0)
                 if (not sat.maxPerDay or used + 1 <= sat.maxPerDay) and _room_fits(system, room, req.category, 1, scenes):
@@ -731,6 +922,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 continue
             if c.held:
                 c.warnings.append(f"{c.held}（手動で採用）")
+            if c.mixed and c.satellite is not None and c.satellite.sar:
+                # Either kind gone to SAR: the optical satellites it passed over for the clouds (kind_text).
+                told = [clearest(c, system, s) for s in able if overcast(c, system, s)]
+                told = [t for t in told if t is not None]
+                c.optical_cloud = min(told) if told else c.optical_cloud
             break
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else OVER if OVER in why else BUSY if BUSY in why
@@ -783,18 +979,18 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         rest = sorted((s for s in c.shots if s is not head), key=lambda s: s.time)
         c.part, c.parts = 1, 1 + len(rest)
         c.shots, c.gain = [head], head.gain
-        if c.weather:
+        if weighed(c, c.satellite):
             c.shot_cloud = _cloud_near(passes.of(c.request, day, head.sat), head.time)
         parts = []
         for n, shot in enumerate(rest, 2):
             sat = sats[shot.sat]
-            p = Candidate(c.request, cloud=c.cloud, weather=c.weather, timed=c.timed, near=c.near, carried=c.carried,
+            p = Candidate(c.request, cloud=c.cloud, weather=c.weather, mixed=c.mixed, timed=c.timed, near=c.near, carried=c.carried,
                           occurrence=c.occurrence, first=c.first, main=c, covered=c.covered, shares=c.shares)
             p.result, p.system, p.satellite, p.able = TAKEN, c.system, sat, c.able
             p.shots, p.part, p.parts, p.gain, p.coverage = [shot], n, c.parts, shot.gain, c.coverage
             p.pass_key = (platform_key(sat), round(shot.time / 1000))
             p.warnings = [w for w in c.warnings if not _manual_warning(w)]
-            if c.weather:
+            if weighed(c, sat):
                 p.shot_cloud = _cloud_near(passes.of(c.request, day, shot.sat), shot.time)
             shot.members = [p]
             parts.append(p)
@@ -878,6 +1074,13 @@ def time_text(ms: Optional[float]) -> str:
 
 def cloud_tip(c: Candidate) -> str:
     """Where a candidate's cover comes from (the calculation's tooltip)."""
+    if c.mixed:
+        no_go = round(optical_no_go(c.request))
+        head = f"種別「任意」: 雲量は光学のパスだけに効き、{no_go}% 以上の光学のパスは使わない（SAR には効かない）"
+        if c.forecast is None:
+            return head if c.satellite is not None and c.satellite.sar else head + "。雲量予報なし"
+        return head + "。" + ("撮像時刻の予報" if c.shot_cloud is not None else "いちばん雲の少ない光学のパスの予報" if c.timed
+                             else "日中（地方時 9〜15 時）の平均")
     if not c.weather:
         return ""
     if c.forecast is None:

@@ -15,9 +15,10 @@ from .satellites import DEFAULT_SAR, compile_pattern, look_side_of
 
 SENSOR_ROLES = (
     "sensor", "mode", "kind", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide",
-    "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution", "primary",
+    "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution", "primary", "shotsPerPass",
 )
-NUMBER_ROLES = ("maxOffNadir", "minOffNadir", "swath", "length", "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution")
+NUMBER_ROLES = ("maxOffNadir", "minOffNadir", "swath", "length", "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "resolution",
+                "shotsPerPass")
 _TABLE = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 _YES = re.compile(r"^(1|true|yes|y|はい|既定|標準)$", re.IGNORECASE)
 
@@ -41,6 +42,8 @@ class SensorMode:
     leadTime: Optional[float] = None
     resolution: Optional[float] = None
     primary: Optional[bool] = None
+    #: 1 パスの撮像回数 (satellites.SatelliteSpec.shotsPerPass).
+    shotsPerPass: Optional[float] = None
 
     def values(self) -> dict[str, Any]:
         """The values it gives (as the viewer's object, without the absent ones)."""
@@ -212,6 +215,7 @@ def with_modes(sats: list, modes: list[SensorMode]) -> list:
             minInterval=m.minInterval if m.minInterval is not None else sat.minInterval,
             maxPerDay=math.floor(m.maxPerDay + 0.5) if m.maxPerDay is not None else sat.maxPerDay,
             leadTime=m.leadTime if m.leadTime is not None else sat.leadTime,
+            shotsPerPass=max(0, math.floor(m.shotsPerPass + 0.5)) if m.shotsPerPass is not None else sat.shotsPerPass,
         )
         if m.mode:
             changes["mode"] = m.mode

@@ -1,7 +1,8 @@
 """
 Following up requests handed out (出力履歴): whether the image catalog has
 an image of the request's area taken on its day (撮像済み), or still none
-`miss_after_days` after it (未撮像). A request taken has its raise undone
+`miss_after_days` after it (未撮像). The day is widened to the one its
+system says it takes it on (PLANNED_AT, follow_window). A request taken has its raise undone
 (and, 期間内1回, becomes 完了); one missed is offered a raise the next day.
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from .. import time_zone
 from ..time_query import between_condition, text_sample
 from ..time_zone import read_text_instant
 from .model import ImagingRequest
-from .model import day_bounds
+from .model import day_bounds, jst_day
 from .store import (
     IMAGE_ARRIVED, HistoryRow, RequestStoreConfig, esri_rings, history_where, load_history, sync_shots, update_history, update_requests,
 )
@@ -73,7 +74,7 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
             day = date.fromisoformat(day_text)
         except ValueError:
             continue
-        first, last = day_bounds(day)
+        first, last = follow_window(day, group)
         if now < first:
             continue
         req: Optional[ImagingRequest] = requests.get(request_id)
@@ -129,6 +130,21 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
             elif now - last > miss_after_days * 86400000:
                 out.append(Finding(row, "未撮像"))
     return out
+
+
+def follow_window(day: date, rows: Sequence[HistoryRow]) -> tuple[float, float]:
+    """
+    The span (ms) a day's rows are looked for in the catalog: the target day,
+    widened to the JST day each row's system says it takes it (PLANNED_AT,
+    採否; 改修案 10, G6: a system that moves a shot to the next day). A row
+    is 未撮像 only `miss_after_days` after the end of it.
+    """
+    first, last = day_bounds(day)
+    for r in rows:
+        if r.planned_at is not None and math.isfinite(r.planned_at):
+            a, b = day_bounds(jst_day(r.planned_at))
+            first, last = min(first, a), max(last, b)
+    return first, last
 
 
 def image_id_of(feature: dict, catalog: CatalogConfig) -> str:

@@ -1,7 +1,9 @@
 """
 「年間撮像上限」: what each sensor's (or mode's) yearly quota has used and
 has left (core/request/quota.py), and the shots of its year, one a row of a
-system's file (the requests put together in it on the same row). A shot
+system's file (the requests put together in it on the same row), and its
+pace (「ペース」: the share of the limit used over the share of the year
+gone, 100% on pace; 改修案 6). A shot
 taken that the system does not count (noise, jamming …) is marked here
 (「数えない」, on the shot layer: the image catalogs are not ours to write;
 tsudo, 2026-11-11), with how many of its scenes and why.
@@ -23,7 +25,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.quota import (
-    MISSED, NO_ROWS, PENDING, REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage, read_quota_data,
+    MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage, read_quota_data,
 )
 from ..core.request.shot_view import _time
 from ..core.request.store import RequestStoreConfig, update_shots
@@ -31,7 +33,7 @@ from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .list_views import column_menus
 
-QUOTA_COLUMNS = ("センサー", "モード", "年間上限", "年の始まり", "期間", "当初", "撮像済み", "数えない", "見込み", "残り", "メモ")
+QUOTA_COLUMNS = ("センサー", "モード", "年間上限", "年の始まり", "期間", "当初", "撮像済み", "数えない", "見込み", "残り", "ペース", "メモ")
 SHOT_COLUMNS = ("対象日", "撮像時刻", "システム", "衛星", "モード", "依頼", "枚数", "状態", "数えない", "理由", "画像ID")
 #: How far back the years go (0: the year of the day chosen).
 YEARS_BACK = 3
@@ -205,15 +207,25 @@ class QuotaDialog(QDialog):
         was = self.quota_table.currentIndex().row()
         self.quota_model.clear()
         self.quota_model.setHorizontalHeaderLabels([self.tr(c) for c in QUOTA_COLUMNS])
+        day = self.chosen_day()
         for u in self.usages:
             q = u.quota
             left = u.remaining
+            # ペース (改修案 6): the share of the limit used over the share of the year gone (100% on pace).
+            pace = u.pace(min(day, u.window.last))
             cells = [q.sensor, q.mode or self.tr("（全モード）"), "" if q.limit is None else str(q.limit), self.tr("{m} 月から").format(m=q.start_month),
                      u.window.text, str(u.initial) if u.initial else "", str(u.used), str(u.uncounted) if u.uncounted else "",
-                     str(u.pending) if u.pending else "", self.tr("上限なし") if left is None else str(left), q.note]
+                     str(u.pending) if u.pending else "", self.tr("上限なし") if left is None else str(left),
+                     "" if pace is None else f"{round(pace * 100)}%", q.note]
             items = [QStandardItem(c) for c in cells]
             if left is not None and u.low():
                 items[QUOTA_COLUMNS.index("残り")].setForeground(QBrush(QColor("#b91c1c" if left <= 0 else "#b45309")))
+            if pace is not None:
+                cell = items[QUOTA_COLUMNS.index("ペース")]
+                cell.setToolTip(plain_tip(u.pace_text(min(day, u.window.last)) + self.tr(
+                    "。{p}% を超えると、優先度「低」「最低」の依頼はほかのモードを先に試す").format(p=round(PACE_AHEAD * 100))))
+                if u.ahead(min(day, u.window.last)):
+                    cell.setForeground(QBrush(QColor("#b45309")))
             items[0].setToolTip(plain_tip(u.text()))
             if q.count_from is not None:
                 items[QUOTA_COLUMNS.index("当初")].setToolTip(self.tr("{d} より前の消費枚数（{d} から撮像の範囲で数える）").format(d=q.count_from.isoformat()))

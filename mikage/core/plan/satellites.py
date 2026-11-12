@@ -15,13 +15,14 @@ from ..util import is_name, is_number, is_record, is_url, layer_url
 #: Roles of the satellite catalog's attributes.
 SATELLITE_ROLES = (
     "name", "id", "tle", "tle1", "tle2", "maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "kind",
-    "scenesPerPass", "minInterval", "maxPerDay", "series", "leadTime", "sensor", "mode", "resolution", "system",
+    "scenesPerPass", "minInterval", "maxPerDay", "series", "leadTime", "sensor", "mode", "resolution", "system", "shotsPerPass",
 )
-DEFAULT_KEYS = ("maxOffNadir", "minOffNadir", "swath", "scenesPerPass", "minInterval", "maxPerDay", "leadTime")
+DEFAULT_KEYS = ("maxOffNadir", "minOffNadir", "swath", "scenesPerPass", "minInterval", "maxPerDay", "leadTime", "shotsPerPass")
 
 #: Specifications used when neither the catalog nor the settings give them.
 BUILT_IN_DEFAULTS: dict[str, float] = {
     "maxOffNadir": 30, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0,
+    "shotsPerPass": 0,
 }
 DEFAULT_SAR = re.compile(r"SAR|radar|レーダ", re.IGNORECASE)
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
@@ -178,6 +179,9 @@ class SatelliteSpec:
     system: Optional[str] = None
     #: Its other names (`satelliteAliases`), matched like its name and id.
     aliases: tuple = ()
+    #: 1 パスの撮像回数: the most shots of the satellite on one pass (half a revolution of one orbit direction;
+    #: 改修案 10, G13); 0: not limited (only `minInterval` keeps them apart).
+    shotsPerPass: int = 0
 
 
 def platform_key(sat: SatelliteSpec) -> str:
@@ -285,6 +289,7 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         mode=_text(get("mode")) or None,
         resolution=resolution,
         system=_text(get("system")) or None,
+        shotsPerPass=max(0, _js_round(num("shotsPerPass", defaults.get("shotsPerPass", 0)))),
     )
 
 

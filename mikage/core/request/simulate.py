@@ -173,13 +173,15 @@ def run_passes(requests: Sequence[ImagingRequest], start: date, days: int, sats:
 def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems: Sequence[ExportSystem],
              sats: Sequence[SatelliteSpec], clouds: Optional[Callable[[date], dict]] = None,
              history: Sequence[HistoryRow] = (), cancelled: Optional[Callable[[], bool]] = None,
-             passes: Optional[Passes] = None, quotas: Optional[QuotaData] = None) -> Simulation:
+             passes: Optional[Passes] = None, quotas: Optional[QuotaData] = None,
+             chances: Optional[Callable[[Sequence[ImagingRequest], date, dict], dict]] = None) -> Simulation:
     """
     Runs the day's work from `start` for `days` days on a copy of `requests`.
     `clouds` gives a day's cover by request id (None where not forecast);
     `history` tells which requests were found 未撮像 (offered a raise on the first day);
     `passes` the satellites' passes over the run (run_passes; None: fitted by counting);
-    `quotas` the yearly quotas and the shots of their years (quota.read_quota_data).
+    `quotas` the yearly quotas and the shots of their years (quota.read_quota_data);
+    `chances(ledger, day, the day's clouds)` the 期間内1回 requests' chances left (chances.chances_of, within the run).
     """
     ledger = [dataclasses.replace(r) for r in requests]
     systems = list(systems)
@@ -201,7 +203,9 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
         if cancelled and cancelled():
             break
         day = start + timedelta(days=i)
-        cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set(), covered)
+        day_clouds = clouds(day) if clouds else {}
+        left = chances(ledger, day, day_clouds) if chances else None
+        cands: list[Candidate] = gather(ledger, day, sats, day_clouds, missed if i == 0 else set(), covered, left)
         book = quotas.book(day, replanned, handed) if quotas is not None and quotas.quotas else None
         cands = allocate(cands, systems, sats, passes, day, book)
         if book is not None:

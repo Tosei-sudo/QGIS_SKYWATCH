@@ -190,7 +190,8 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "sensor",
   "mode",
   "resolution",
-  "system"
+  "system",
+  "shotsPerPass"
  ],
  "satelliteDefaultKeys": [
   "maxOffNadir",
@@ -199,7 +200,8 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "scenesPerPass",
   "minInterval",
   "maxPerDay",
-  "leadTime"
+  "leadTime",
+  "shotsPerPass"
  ],
  "satelliteDefaults": {
   "maxOffNadir": 30,
@@ -208,7 +210,8 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "scenesPerPass": 1,
   "minInterval": 0,
   "maxPerDay": 0,
-  "leadTime": 0
+  "leadTime": 0,
+  "shotsPerPass": 0
  },
  "sensorRoles": [
   "sensor",
@@ -224,7 +227,8 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "maxPerDay",
   "leadTime",
   "resolution",
-  "primary"
+  "primary",
+  "shotsPerPass"
  ],
  "sensorNumberRoles": [
   "maxOffNadir",
@@ -235,7 +239,8 @@ dialog.modal.busy button { pointer-events: none; opacity: .6; }
   "minInterval",
   "maxPerDay",
   "leadTime",
-  "resolution"
+  "resolution",
+  "shotsPerPass"
  ],
  "aliasRoles": [
   "satellite",
@@ -304,6 +309,7 @@ const SAT_INFO = {
   scenesPerPass: { label: "1 パスのシーン数", num: true, int: true },
   minInterval: { label: "最小撮像間隔", unit: "分", num: true },
   maxPerDay: { label: "1 日の上限", num: true, int: true, hint: "0 で制限なし" },
+  shotsPerPass: { label: "1 パスの撮像回数", num: true, int: true, hint: "1 回のパス（同じ軌道方向の半周）で撮れる回数。空・0 で制限なし" },
   series: { label: "シリーズ", list: "series", hint: "空なら名前の末尾の番号を除いたもの" },
   leadTime: { label: "発注リードタイム", unit: "時間", num: true },
   sensor: { label: "センサー", list: "sensors", hint: "センサーモードのセンサー名。空ならシリーズ・衛星名で探す" },
@@ -323,6 +329,7 @@ const SENSOR_INFO = {
   scenesPerPass: { label: "1 パスのシーン数", num: true, int: true },
   minInterval: { label: "最小撮像間隔", unit: "分", num: true },
   maxPerDay: { label: "1 日の上限", num: true, int: true },
+  shotsPerPass: { label: "1 パスの撮像回数", num: true, int: true, hint: "空なら衛星の値" },
   leadTime: { label: "発注リードタイム", unit: "時間", num: true },
   resolution: { label: "分解能", unit: "m", num: true },
   primary: { label: "既定モード", bool: true, hint: "そのセンサーのふだんのモード（1 つだけ）" },
@@ -344,12 +351,12 @@ const SAT_GROUPS = [
   ["基本", ["name", "id", "series", "kind", "sensor", "mode", "system"]],
   ["TLE", ["tle"]],
   ["撮像の諸元", ["maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "resolution"]],
-  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "leadTime"]],
+  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "shotsPerPass", "leadTime"]],
 ];
 const SENSOR_GROUPS = [
   ["基本", ["sensor", "mode", "kind", "primary"]],
   ["撮像の諸元", ["maxOffNadir", "minOffNadir", "swath", "length", "lookSide", "resolution"]],
-  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "leadTime"]],
+  ["撮像の制約", ["scenesPerPass", "minInterval", "maxPerDay", "shotsPerPass", "leadTime"]],
 ];
 const DATE_TYPES = new Set(["esriFieldTypeDate", "esriFieldTypeTimestampOffset", "esriFieldTypeDateOnly"]);
 const TEXT_TYPES = new Set(["esriFieldTypeString", "esriFieldTypeGUID", "esriFieldTypeGlobalID"]);
@@ -1420,7 +1427,7 @@ function satForm(src, rec, start) {
   const d = src.defaults;
   const placeholders = {
     maxOffNadir: `空なら ${d.maxOffNadir}`, minOffNadir: `空なら ${d.minOffNadir}`, swath: `空なら ${+(d.swath / scale).toPrecision(6)}`,
-    scenesPerPass: `空なら ${d.scenesPerPass}`, minInterval: `空なら ${d.minInterval}`, maxPerDay: `空なら ${d.maxPerDay}`, leadTime: `空なら ${d.leadTime}`,
+    scenesPerPass: `空なら ${d.scenesPerPass}`, minInterval: `空なら ${d.minInterval}`, maxPerDay: `空なら ${d.maxPerDay}`, shotsPerPass: `空なら ${d.shotsPerPass}`, leadTime: `空なら ${d.leadTime}`,
   };
   let tleBox = null, tleInfo = null, tleTargets = [];
   const byRole = {};

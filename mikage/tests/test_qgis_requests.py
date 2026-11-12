@@ -615,3 +615,31 @@ def test_a_request_taken_several_times_a_day(plugin):
     assert [(c.key, c.result) for c in daily.plan.candidates] == [(r.id, "採用"), (f"{r.id}#2", "採用"), (f"{r.id}#3", "採用")]
     names = [daily.model.item(i, COLUMNS.index("依頼")).text() for i in range(daily.model.rowCount())]
     assert names == ["大阪湾（1/2 回目）", "大阪湾（2/2 回目）", "大阪湾（3 回目・追加）"]
+
+
+def test_the_form_tells_how_often_the_satellites_can_take_it(plugin):
+    # 撮像機会 (改修案 7): one line under the area, counted in the background a moment after a change; red when never.
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+    dock.edit(new=True)
+    form = dock.form
+    assert wait_for(lambda: form._sats), "the satellite catalog"
+    # No area yet: nothing said.
+    assert form.chances_label.isHidden()
+    form.name.setText("大阪湾")
+    form.kind.setCurrentText("SAR")
+    form.category.setCurrentText("臨時")
+    form._point_clicked(QgsPointXY(135.3, 34.6))
+    form.end.setDate(form.start.date().addDays(10))
+    done = lambda: form._chance_task is None and not form._chance_timer.isActive()  # noqa: E731
+    assert wait_for(lambda: done() and form.chances_label.text().startswith("撮像機会")), form.chances_label.text()
+    assert not form.chances_label.isHidden()
+    # Finer than any satellite resolves: none can take it, said in red.
+    form.kind.setCurrentText("光学")
+    form.resolution.setValue(0.01)
+    assert wait_for(lambda: done() and form.chances_label.text() == "撮像機会なし（この条件で撮れる衛星なし）"), form.chances_label.text()
+    assert "#b91c1c" in form.chances_label.styleSheet()
+    form.close()
+    assert form._closing

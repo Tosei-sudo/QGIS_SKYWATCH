@@ -339,7 +339,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - システムを選ぶと「（システム名）を書き出し」で、そのシステムのファイル・出力履歴・繰り上げだけを書き出す（ほかのシステムの分はそのまま）。その日にほかの人が書き出した依頼はそのシステムに固定し、計算のあとにほかの人が書き出していたら計算し直しを求める。「すべてのシステム」なら従来どおり全システム分。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「19. システムごとの書き出し」
   - 光学の依頼は撮像時刻の雲量予報を見る（2026-11-11）。予報は 1〜3 時間おきなので、撮像時刻の前後の予報を時刻の近さで按分する。その日いちばん雲の少ないパスの雲量の 10% ごとの段階を優先度の 1 の位に入れ、どのパスも実施しない雲量以上なら見送り（期間内1回で期限まで 2 日以内なら警告付きで出す）。実施しない雲量以上のパスは使わず、雲の少ないパス（衛星を指定していなければ衛星も）から試す。比べるのは 10% の段階だけで、同じ段階なら今までどおり。書き出す雲量（`cloudForecast`・出力履歴の `CLOUD`）は採用したパスの値。軌道で詰めない衛星（TLE なし・`orbit: false`）は日中（地方時 9〜15 時）の平均
   - 優先度順に、システムの 1 日の件数・枚数の上限、区分ごとの枠、衛星ごとの 1 日の上限（`maxPerDay`）に詰める。衛星を指定した依頼はその衛星に、指定がなければ分解能の細かい衛星から。入らなければ次のシステムへ
-  - 衛星の軌道（衛星カタログの TLE）から、その日に依頼の上を通るパスを出して割り当てる（2026-11-11）。依頼の角度・観測方向・軌道方向・時間帯に合うパスがなければ「撮像機会なし」。衛星ごとの撮像間隔（`minInterval`、分）と 1 日の撮像回数（`maxPerDay`）を守り、空きがなければ「衛星の空きなし」
+  - 衛星の軌道（衛星カタログの TLE）から、その日に依頼の上を通るパスを出して割り当てる（2026-11-11）。依頼の角度・観測方向・軌道方向・時間帯に合うパスがなければ「撮像機会なし」。衛星ごとの撮像間隔（`minInterval`、分）と 1 日の撮像回数（`maxPerDay`）、あれば 1 パスの撮像回数（`shotsPerPass`）を守り、空きがなければ「衛星の空きなし」
   - 同じパスで近い依頼は、1 回の撮像（幅 `swath` の中で、長さ `length` のシーンを `scenesPerPass` 枚まで連続）に収まればまとめる。別々なら撮像間隔に引っかかる依頼も、まとめれば入る。まとめた依頼はファイルでは 1 行（優先度のいちばん高い依頼の行。範囲はまとめた依頼の範囲をぴったり囲む、パスに平行な四角（辺は軌道に沿う）。`mergedIds` でまとめた依頼の ID）になり、件数の上限も 1 件分。システム側が自分の軌道・シーン割りで計画しても 1 回に収まるよう、その四角が撮像の枠の内側に `mergeMargin`（メートル、既定 500）以上の余裕を残すときだけまとめる（2026-11-11）。一覧の「結果・理由」に「まとめ」と出し、「撮像時刻」にパスの時刻（日本時間）を出す。出力履歴・撮像予定は依頼ごとの行のまま（範囲も依頼のもの。`MERGED_INTO` にまとめ先）で、システムの採否はまとめた依頼すべてに付く
   - 「地図に表示」で、表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と書き出す撮像の範囲（シーンの外形。まとめた行は書き出す四角。破線）を書き出す前に地図に重ねる。行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す
   - 撮像の範囲のレイヤー（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲)、`requestStores[].shots`）があれば、書き出したファイルの 1 行ごとに撮像の範囲・時刻・角度・まとめた依頼・センサーとモードを記録する（2026-11-11。軌道を使わずに詰めた行も、依頼の範囲で記録）。出力履歴は依頼ごとの行・依頼の範囲のままで、`SHOT_ID` でどの撮像で撮るかをたどれる。照合で依頼の行が撮像済みになると、その撮像（ショット）も撮像済み（`CAPTURED`・`IMAGE_ID`。まとめた依頼のどれかが撮像済みなら撮像済み）になる。置き換えて書き出すと、その日（そのシステム）の前回の撮像の範囲も置き換わる（照合済みの行の撮像は残す）
@@ -1525,12 +1525,12 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `satelliteCatalogs` | 配列 | `url`（必須）、`fields`（`tle` か `tle1`＋`tle2` が必須。ほかに `name`・`id`・`maxOffNadir`・`minOffNadir`・`swath`・`length`・`lookSide`・`kind`・`scenesPerPass`・`minInterval`・`maxPerDay`・`series`・`leadTime`・`sensor`・`mode`・`resolution`・`system`）、`defaults`（属性がないときの値）、`swathUnit`（`km` か `m`）、`sarPattern`（SAR とみなす衛星名の正規表現）、`where`、`token` | なし | [撮像計画](#撮像計画) |
+| `satelliteCatalogs` | 配列 | `url`（必須）、`fields`（`tle` か `tle1`＋`tle2` が必須。ほかに `name`・`id`・`maxOffNadir`・`minOffNadir`・`swath`・`length`・`lookSide`・`kind`・`scenesPerPass`・`minInterval`・`maxPerDay`・`shotsPerPass`・`series`・`leadTime`・`sensor`・`mode`・`resolution`・`system`）、`defaults`（属性がないときの値）、`swathUnit`（`km` か `m`）、`sarPattern`（SAR とみなす衛星名の正規表現）、`where`、`token` | なし | [撮像計画](#撮像計画) |
 | `sensorCatalogs` | 配列 | 設定ファイルに書くなら `sensors`（`[{ "sensor", "modes": [{ "mode", "swath", … }] }]`）、テーブルなら `url` と `fields`（`sensor` 必須。`mode`・`kind`・`swath`・`primary` など）。`swathUnit`・`sarPattern` | なし | [撮像計画](#撮像計画) |
 | `satelliteAliases` | オブジェクトか配列 | 衛星名の対応表（Esri のテーブル）の `url`（必須）、`fields`（`satellite` 衛星カタログの名前か ID・`alias` 画像カタログでの名前、ともに必須）、`label`・`where`・`token` | なし（名前の英数字の部分一致のみ） | [衛星名の対応表](#衛星名の対応表satellitealiases) |
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
-| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`quotas`（年間撮像上限のテーブル。`shots` も要る）・`quotaFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`quotas`（年間撮像上限のテーブル。`shots` も要る）・`quotaFields`・`catalog`・`missAfterDays`・`lookAheadDays`（残りの撮像機会を見る日数。既定 `7`、`0` で見ない）・`sameGeometry`（既定 `true`: 定点は前回と同じ撮り方を優先）・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 | `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`。分担の行の範囲にも使う）・`share`（既定 `true`: 1 ショットに収まらない範囲を、そのシステムのほかの衛星のパスで分担する）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`linkIdLength`（外部連携ID の文字数、6〜32。既定 `12`）・`linkIdChars`（その文字: `base32`（既定）・`digits`・`hex`）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`（外部連携ID は `linkId`）・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`・`linkDays`（外部連携ID を取り込む日の何日前の出力まで探すか。既定 `7`））など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
@@ -1700,6 +1700,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `SCENES_PER_PASS` | 1パスのシーン数 | `Integer` | 1 回のパスで撮れるシーン数（既定 1） | `scenesPerPass` |
 | `MIN_INTERVAL_MIN` | 最小撮像間隔 | `Double` | 撮像と撮像の間隔の下限（分、既定 0） | `minInterval` |
 | `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の撮像数の上限（0 で制限なし） | `maxPerDay` |
+| `SHOTS_PER_PASS` | 1パスの撮像回数 | `Integer` | 1 回のパス（同じ軌道方向の半周）で撮れる回数の上限（空・0 で制限なし。撮像間隔だけで離す） | `shotsPerPass` |
 | `SERIES` | シリーズ | `String(255)` | 衛星シリーズ（空なら名前の末尾の番号を除いたもの） | `series` |
 | `LEAD_TIME_H` | 発注リードタイム | `Double` | 撮像の何時間前までに発注するか（時間、既定 0） | `leadTime` |
 | `SENSOR` | センサー | `String(255)` | 使うセンサー（`TBL_SENSOR_MODE` の `SENSOR`） | `sensor` |
@@ -1724,6 +1725,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `SCENES_PER_PASS` | 1パスのシーン数 | `Integer` | 1 パスのシーン数 | `scenesPerPass` |
 | `MIN_INTERVAL_MIN` | 最小撮像間隔 | `Double` | 撮像間隔の下限（分） | `minInterval` |
 | `MAX_PER_DAY` | 1日の上限 | `Integer` | 1 日の上限 | `maxPerDay` |
+| `SHOTS_PER_PASS` | 1パスの撮像回数 | `Integer` | 1 パスの撮像回数の上限 | `shotsPerPass` |
 | `LEAD_TIME_H` | 発注リードタイム | `Double` | 発注の期限（時間前） | `leadTime` |
 | `RESOLUTION_M` | 分解能 | `Double` | 分解能（m） | `resolution` |
 | `IS_DEFAULT` | 既定モード | `SmallInteger` | そのセンサーのふだんのモードなら 1（`はい`・`true` などの文字も可） | `primary` |
@@ -2127,15 +2129,16 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
     { "label": "衛星", "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/1",       // TBL_SATELLITE
       "fields": { "name": "SAT_NAME", "id": "NORAD_ID", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2", "maxOffNadir": "MAX_OFF_NADIR",
                   "minOffNadir": "MIN_OFF_NADIR", "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "kind": "SENSOR_TYPE",
-                  "scenesPerPass": "SCENES_PER_PASS", "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "series": "SERIES",
-                  "leadTime": "LEAD_TIME_H", "sensor": "SENSOR", "mode": "SENSOR_MODE", "resolution": "RESOLUTION_M", "system": "SAT_SYSTEM" } }
+                  "scenesPerPass": "SCENES_PER_PASS", "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY",
+                  "shotsPerPass": "SHOTS_PER_PASS", "series": "SERIES", "leadTime": "LEAD_TIME_H", "sensor": "SENSOR", "mode": "SENSOR_MODE",
+                  "resolution": "RESOLUTION_M", "system": "SAT_SYSTEM" } }
   ],
   "sensorCatalogs": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/2",                         // TBL_SENSOR_MODE
       "fields": { "sensor": "SENSOR", "mode": "SENSOR_MODE", "kind": "SENSOR_TYPE", "maxOffNadir": "MAX_OFF_NADIR", "minOffNadir": "MIN_OFF_NADIR",
                   "swath": "SWATH", "length": "SCENE_LENGTH", "lookSide": "LOOK_SIDE", "scenesPerPass": "SCENES_PER_PASS",
-                  "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "leadTime": "LEAD_TIME_H", "resolution": "RESOLUTION_M",
-                  "primary": "IS_DEFAULT" } }
+                  "minInterval": "MIN_INTERVAL_MIN", "maxPerDay": "MAX_PER_DAY", "shotsPerPass": "SHOTS_PER_PASS", "leadTime": "LEAD_TIME_H",
+                  "resolution": "RESOLUTION_M", "primary": "IS_DEFAULT" } }
   ],
   "satelliteAliases": { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/3",       // TBL_SATELLITE_ALIAS
                         "fields": { "satellite": "SAT_NAME", "alias": "ALIAS" } },

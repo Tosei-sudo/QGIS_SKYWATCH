@@ -72,7 +72,7 @@ class TestSatelliteCatalogs:
         )
         assert problems == []
         assert catalog.url == "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
-        assert catalog.defaults == {"maxOffNadir": 25, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0}
+        assert catalog.defaults == {"maxOffNadir": 25, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0, "shotsPerPass": 0}
         assert catalog.swath_unit == "m"
 
     def test_refuses_catalogs_it_cannot_use(self):

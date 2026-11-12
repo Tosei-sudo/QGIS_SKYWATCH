@@ -78,7 +78,7 @@ def test_catalog_attributes_by_role():
     }, problems, 0)
     assert problems == []
     assert catalog.url == "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
-    assert catalog.defaults == {"maxOffNadir": 25, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0}
+    assert catalog.defaults == {"maxOffNadir": 25, "minOffNadir": 0, "swath": 10, "scenesPerPass": 1, "minInterval": 0, "maxPerDay": 0, "leadTime": 0, "shotsPerPass": 0}
     sat = satellite_of({"SAT_NAME": "SAR-1", "L1": LINE1, "L2": LINE2, "MAX_ANGLE": 40, "SWATH_M": 30000, "LOOK": "R", "SENSOR": "SAR", "GAP_MIN": 15,
                         "PER_DAY": 4, "SERIES": "SAR-X", "LEAD_H": 24}, catalog)
     assert (sat.name, sat.maxOffNadir, sat.swath, sat.length, sat.lookSide, sat.sar, sat.minInterval, sat.maxPerDay, sat.series, sat.leadTime) == \

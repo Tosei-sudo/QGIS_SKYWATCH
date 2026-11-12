@@ -50,15 +50,18 @@ from ..core import audit
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
+from ..core.request.chances import ahead_span, chances_of, wanted
 from ..core.request.covered import read_covered
 from ..core.request.daily import (
-    HELD, TAKEN, cloud_tip, cover_text, merge_text, occurrence_text, part_text, pass_text, room_text, satellite_name, time_text,
+    HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, pace_text, part_text, pass_text, room_text,
+    satellite_name, time_text,
 )
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.follow import missed_ids
+from ..core.request.geometry import look_text, read_last_looks
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
-from ..core.request.passes import day_passes
+from ..core.request.passes import day_passes, find_passes
 from ..core.request.quota import QuotaData, read_quota_data
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
@@ -66,8 +69,8 @@ from ..core.request.store import (
     history_has, history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
-    plan_day, shots_of, written_summary,
+    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, old_tle_text,
+    orbiting, plan_day, radar_of, shots_of, written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.geometry import from_wgs84
@@ -479,6 +482,20 @@ class PlanFileDock(PluginDock):
             task.check()
             if passes.problems:
                 notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
+            # The passes of the next days over the 期間内1回 requests: their chances left (改修案 4, chances.py).
+            ahead = None
+            looked = wanted(requests, day, missed_ids(history)) if store.look_ahead_days > 0 else []
+            if looked:
+                first, last = ahead_span(day, store.look_ahead_days)
+                ahead = find_passes(looked, first, last, sats, now, task.isCanceled)
+                task.check()
+            # How each 定点 request's last image was taken: the passes like it first (改修案 5, geometry.py).
+            last_looks = {}
+            if store.same_geometry:
+                try:
+                    last_looks = read_last_looks(client, store, token, requests, day, task.isCanceled)
+                except Exception as error:  # noqa: BLE001 (the day goes on without it, said so)
+                    notes.append(f"前回の撮り方を読めず、それなしで計算（{error}）")
             quotas = QuotaData()
             if store.quotas:
                 # What the yearly quotas have left (年間撮像上限): the shots of their years, as 照合 left them.
@@ -487,19 +504,22 @@ class PlanFileDock(PluginDock):
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
                     notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
                 notes += quotas.problems[:3]
-            return requests, history, forecasts, passes, notes, groups, quotas, covered
+            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups, quotas, covered = result
+            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             # At each pass's moment for the satellites fitted on the orbits; the daylight hours' mean for the others.
-            clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats))
+            used = orbiting(systems, sats)
+            clouds = clouds_of(requests, day, forecasts, passes=passes, sats=used, radar=radar_of(sats))
             book = quotas.book(day) if quotas.quotas else None
-            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered)
+            chances = chances_of(looked, day, passes, ahead, sats, forecasts, used, clouds, store.look_ahead_days) if ahead else None
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered, chances,
+                                 last_looks)
             self._fill_series()
             self.render()
             # The shots of an area shared out past its first are rows of it, not requests of their own.
@@ -510,10 +530,12 @@ class PlanFileDock(PluginDock):
             pinned = sum(1 for c in self.plan.candidates if c.pinned)
             if pinned:
                 text += self.tr("（うち ほかのシステムで書き出し済み {n} 件）").format(n=pinned)
-            text += self.merged_text() + self.shared_text()
+            text += self.merged_text() + self.shared_text() + self.chances_text()
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
-            self.status.setText("。".join([text, *notes]))
+            # The orbits it was placed on from TLEs far from the day (改修案 10).
+            old = old_tle_text(self.plan)
+            self.status.setText("。".join([text, *notes, *([old] if old else [])]))
             self._update_buttons()
 
         def failed(message):
@@ -531,6 +553,20 @@ class PlanFileDock(PluginDock):
         if not leads:
             return ""
         return self.tr("・まとめ {n} 組（{m} 件を {n} 回の撮像に）").format(n=len(leads), m=sum(len(c.together) for c in leads))
+
+    def chances_text(self) -> str:
+        """「・残りの撮像機会が少なく先に置いた依頼 2 件・晴れる日を待つ依頼 1 件」: what the chances did, after a calculation."""
+        if self.plan is None:
+            return ""
+        own = [c for c in self.plan.candidates if c.main is None and not c.extra]
+        scarce = sum(1 for c in own if c.scarce)
+        later = sum(1 for c in own if chance_text(c) and c.later)
+        parts = []
+        if scarce:
+            parts.append(self.tr("残りの撮像機会が少なく先に置いた依頼 {n} 件").format(n=scarce))
+        if later:
+            parts.append(self.tr("晴れる日を待つ依頼 {n} 件").format(n=later))
+        return "・" + "・".join(parts) if parts else ""
 
     def shared_text(self) -> str:
         """「・分担 2 件（5 回の撮像に）」: areas too big for one shot handed out in shots of several satellites or passes."""
@@ -559,10 +595,10 @@ class PlanFileDock(PluginDock):
             prio = f"{priority_text(r.priority)} → {c.priority}"
             if c.system:
                 prio += f"（{convert_priority(c.priority, c.system.priority)}）"
-            cloud = "" if not c.weather else ("—" if c.forecast is None else f"{round(c.forecast)}%")
+            cloud = "" if not (c.weather or c.mixed) else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
-            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), *c.warnings) if x)
+            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), chance_text(c), look_text(c), pace_text(c), *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)
@@ -589,7 +625,7 @@ class PlanFileDock(PluginDock):
                     item.setToolTip(plain_tip(tip))
             if merged:
                 result.setToolTip(plain_tip(merged))
-            if c.weather:
+            if c.weather or c.mixed:
                 items[COLUMNS.index("雲量")].setToolTip(plain_tip(cloud_tip(c)))
             self.model.appendRow(items)
         self._rendering = False

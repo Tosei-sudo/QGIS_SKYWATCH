@@ -22,7 +22,7 @@ from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
 from ..plan.weather import CloudSeries
-from .daily import HELD, TAKEN, Candidate, allocate, carries_over, gather, occurrence_key, wants_weather
+from .daily import HELD, TAKEN, Candidate, allocate, asks_weather, carries_over, gather, occurrence_key
 from .export import Written, convert_priority, row_rings
 from .follow import missed_ids
 from .link_id import link_ids
@@ -42,12 +42,13 @@ def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequenc
     The places whose forecasts the day's optical requests need: those of the
     day, and those missed (`missed`: the ids found 未撮像, follow.missed_ids)
     carried over to it (daily.gather takes them too, so their weather counts
-    as any other's).
+    as any other's). Those of either kind (任意) that optical satellites can
+    take too are asked for (their optical passes are weighed, daily.mixed_kinds).
     """
     seen: dict = {}
     missed = set(missed)
     for req in requests:
-        if (occurs_on(req, day) or req.id in missed and carries_over(req, day)) and wants_weather(req, sats):
+        if (occurs_on(req, day) or req.id in missed and carries_over(req, day)) and asks_weather(req, sats):
             for p in places_of(req):
                 seen[p] = None
     return list(seen)
@@ -63,16 +64,23 @@ def orbiting(systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec]) -> 
     return out
 
 
+def radar_of(sats: Sequence[SatelliteSpec]) -> frozenset:
+    """The indices of the SAR satellites (modes): the clouds never matter to their passes."""
+    return frozenset(i for i, s in enumerate(sats) if s.sar)
+
+
 def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str, CloudSeries],
               hours: Sequence[float] = DAYLIGHT, passes: Optional[Passes] = None,
-              sats: Optional[set] = None) -> Clouds:
+              sats: Optional[set] = None, radar: frozenset = frozenset()) -> Clouds:
     """
     Each request's cover of the day (None where not forecast). With the
     orbits (`passes`; `sats`: the indices of the satellites fitted on them,
     None for all known), each of an optical request's passes that day is
     told its own (`cloud`, at its moment) and the request's is that of its
     least cloudy pass; without passes (or forecasts at their moments), the
-    daylight hours' mean.
+    daylight hours' mean. The passes of `radar` (SAR satellites, radar_of)
+    are told none and do not count (a request of either kind: its least
+    cloudy optical pass).
     """
     out = Clouds()
     for r in requests:
@@ -80,6 +88,9 @@ def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str
         if passes is not None:
             for op in passes.of(r, day):
                 if sats is not None and op.satellite not in sats:
+                    continue
+                if op.satellite in radar:
+                    op.cloud = None
                     continue
                 op.cloud = cloud_when(r, forecasts, op.time) if forecasts else None
                 if op.cloud is not None:
@@ -133,15 +144,21 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
              clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
-             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None) -> DayPlan:
+             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None,
+             chances: Optional[dict] = None, last_looks: Optional[dict] = None) -> DayPlan:
     """
     The candidates of a day, gathered and fitted (`target`: the one system
     written from here; `passes`: the orbits'; `quotas`: what the yearly
     quotas have left; `covered`: what of the 期間内1回 areas is taken or
-    handed out on earlier days, covered.read_covered).
+    handed out on earlier days, covered.read_covered; `chances`: the
+    chances left of the 期間内1回 requests, chances.chances_of;
+    `last_looks`: how each 定点 request's last image was taken,
+    geometry.read_last_looks).
     """
     missed = missed_ids(history)
-    cands = gather(requests, day, sats, clouds, missed, covered)
+    cands = gather(requests, day, sats, clouds, missed, covered, chances)
+    for c in cands:
+        c.last_look = (last_looks or {}).get(c.request.id)
     plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
                    passes=passes, quotas=quotas)
     today = handed_today(history, day)
@@ -365,6 +382,34 @@ def missed_done(plan: DayPlan, skip: Optional[set] = None, system: Optional[str]
     if system is not None:
         skip |= {c.request.id for c in plan.candidates if not of_system(c, system)}
     return [(r.object_id, {"boostDone": 1}) for r in plan.missed_rows if r.object_id is not None and r.request_id not in skip]
+
+
+def old_tle_text(plan: DayPlan) -> str:
+    """
+    The satellites the day's shots were placed with on an orbit whose TLE is
+    more than OLD_TLE days from the day (改修案 10: the imaging plan says so,
+    the day's calculation did not): 「TLE が古い衛星（14 日超）: ISS（20 日前）。
+    撮像時刻・範囲がずれることがある」 ("" when none).
+    """
+    from ..plan.output import OLD_TLE
+    from ..plan.satellites import SAMPLE_SOURCE, platform_key
+    from ..plan.tree import tle_age_days
+    from .model import day_bounds
+
+    first, last = day_bounds(plan.day)
+    mid = (first + last) / 2
+    seen: dict = {}
+    for c in plan.candidates:
+        sat = c.satellite
+        if c.result != TAKEN or sat is None or not c.shots or sat.source == SAMPLE_SOURCE:
+            continue
+        age = tle_age_days(sat, mid)
+        if age == age and abs(age) > OLD_TLE:
+            seen.setdefault(platform_key(sat), (sat.name, age))
+    if not seen:
+        return ""
+    names = "・".join(f"{name}（{round(age)} 日{'前' if age > 0 else '後'}）" for name, age in seen.values())
+    return f"TLE が古い衛星（{OLD_TLE} 日超）: {names}。撮像時刻・範囲がずれることがある"
 
 
 def written_summary(files: Sequence[Written]) -> str:

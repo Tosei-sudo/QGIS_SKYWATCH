@@ -30,6 +30,13 @@ COUNT_FROM on. The day's calculation (daily.allocate) gives a mode no more
 scenes than its quotas have left (年間上限), but for requests taken by
 hand (warned); the shots of the day planned are worked out again, so they
 are not 見込み for it.
+
+ペース配分 (改修案 6, tsudo 2026-11-12): a quota that has used more of its
+limit than PACE_AHEAD times the share of its year gone is ahead of its pace
+(Usage.pace; the 「ペース」 column of the quotas dialog). A request of a low
+priority (output priority above PACE_FROM: 低・最低) then tries the modes on
+their pace first, after the clouds (said in its note); it is never held
+back for the pace, only for the limit itself.
 """
 from __future__ import annotations
 
@@ -56,6 +63,13 @@ USED, PENDING, MISSED, REJECTED, NO_ROWS = "撮像済み", "見込み", "未撮�
 UNCOUNTED_REASONS = ("ノイズ", "ジャミング", "システム側の不具合", "その他")
 #: What is left under this share of the limit is told as running low.
 LOW_SHARE = 0.1
+#: ペース配分 (改修案 6, tsudo 2026-11-12): a quota whose year has used more than this many times the share of the
+#: year gone (見込み counted) is ahead of its pace, and a request of a low priority tries its other modes first.
+PACE_AHEAD = 1.1
+#: The share of the year counted as gone at least (the first month), so that its first days tell no pace.
+PACE_FLOOR = 1 / 12
+#: Requests whose output priority is above this (低・最低) go to the modes on their pace first.
+PACE_FROM = 600
 
 
 def _text(v: Any) -> str:
@@ -290,6 +304,50 @@ class Usage:
             return None
         return self.quota.limit - self.consumed - self.pending
 
+    def elapsed(self, day: date) -> float:
+        """The share of its year gone by the end of `day` (0 … 1)."""
+        days = (self.window.end - self.window.first).days
+        gone = (day - self.window.first).days + 1
+        return min(1.0, max(0.0, gone / days)) if days > 0 else 1.0
+
+    def pace(self, day: date, spent: int = 0) -> Optional[float]:
+        """
+        How fast the year is being used (ペース): the share of the limit used
+        (見込み and `spent` too) over the share of the year gone (at least
+        PACE_FLOOR); 1.0 is on pace. None when not limited.
+        """
+        if not self.quota.limit:
+            return None
+        used = (self.consumed + self.pending + spent) / self.quota.limit
+        return used / max(self.elapsed(day), PACE_FLOOR)
+
+    def ahead(self, day: date, spent: int = 0) -> bool:
+        """Whether it is ahead of its pace (PACE_AHEAD)."""
+        pace = self.pace(day, spent)
+        return pace is not None and pace > PACE_AHEAD
+
+    def runs_out(self, day: date, spent: int = 0) -> Optional[date]:
+        """At the pace so far (from the start of its year to `day`), the day its limit is reached; None when not inside its year."""
+        if not self.quota.limit:
+            return None
+        used = self.consumed + self.pending + spent
+        gone = max(1, (day - self.window.first).days + 1)
+        if used <= 0:
+            return None
+        at = self.window.first + timedelta(days=math.ceil(self.quota.limit / (used / gone)) - 1)
+        return at if at < self.window.end else None
+
+    def pace_text(self, day: date, spent: int = 0) -> str:
+        """「年の 40% が過ぎて上限の 52% を使用（見込み込み）・このままだと 2027/6/12 ごろ上限」 ("" when not limited)."""
+        if not self.quota.limit:
+            return ""
+        used = (self.consumed + self.pending + spent) / self.quota.limit
+        text = f"年の {round(self.elapsed(day) * 100)}% が過ぎて上限の {round(used * 100)}% を使用（見込み込み）"
+        out = self.runs_out(day, spent)
+        if out is not None and used < 1:
+            text += f"・このままだと {out.year}/{out.month}/{out.day} ごろ上限"
+        return text
+
     def low(self, spent: int = 0) -> bool:
         """Whether what is left after `spent` more is under LOW_SHARE of the limit."""
         left = self.remaining
@@ -376,7 +434,7 @@ class QuotaData:
         """What the limited quotas have left on `day`, for the fitting (the day itself planned again unless said)."""
         days = replanned or (day.isoformat(), day.isoformat())
         return QuotaBook(self.usages(day, days, extra, limited=True), indices=[
-            i for i, q in enumerate(self.quotas) if q.limit is not None])
+            i for i, q in enumerate(self.quotas) if q.limit is not None], day=day)
 
 
 def read_quota_data(client: EsriClient, store: RequestStoreConfig, token: Optional[str], days: Sequence[date],
@@ -422,6 +480,8 @@ class QuotaBook:
     indices: list = field(default_factory=list)
     #: id(usage) → scenes given by the fitting (reset by each fitting).
     spent: dict = field(default_factory=dict)
+    #: The day planned (for the pace; None: no pace).
+    day: Optional[date] = None
 
     def reset(self) -> None:
         self.spent = {}
@@ -438,6 +498,12 @@ class QuotaBook:
         if sat is None or scenes <= 0:
             return None
         return next((u for u in self.of(sat) if scenes > self.left(u)), None)
+
+    def ahead(self, sat) -> Optional[Usage]:
+        """The first quota a satellite counts against that is ahead of its pace (what the fitting gave counted); None otherwise."""
+        if sat is None or self.day is None:
+            return None
+        return next((u for u in self.of(sat) if u.ahead(self.day, self.spent.get(id(u), 0))), None)
 
     def take(self, sat, scenes: int) -> None:
         if sat is None or scenes <= 0:
