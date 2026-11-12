@@ -3,11 +3,12 @@ Changing several imaging requests at once (一括編集): the priority, the
 status, the kind (種別) and the 依頼グループ of the requests chosen in the
 「撮像依頼」 dock.
 
-Each request is saved on its own through `save_request`, so the ledger's
-checks hold for every one of them: a request someone else changed (or
-deleted) since it was read is not overwritten (#74), and a save whose
-answer was lost is not added twice (#73). The ones that could not be saved
-are told by name with the reason; the others are saved.
+The requests are saved together through `save_requests` (a few requests to
+the ledger, not three for each, 2026-11-12), and the ledger's checks still
+hold for every one of them: a request someone else changed (or deleted)
+since it was read is not overwritten (#74), and a save whose answer was
+lost is not added twice (#73). The ones that could not be saved are told by
+name with the reason; the others are saved.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from typing import Callable, Optional, Sequence
 
 from ..esri import ConflictError, EsriClient
 from .model import KINDS, STATUSES, ImagingRequest, clamp_priority
-from .store import RequestStoreConfig, save_request
+from .store import RequestStoreConfig, save_requests
 
 
 @dataclass
@@ -100,7 +101,7 @@ class BulkResult:
 def apply_change(client: EsriClient, store: RequestStoreConfig, token: Optional[str], requests: Sequence[ImagingRequest],
                  change: RequestChange, now: Callable[[], float], canceled: Callable[[], bool] = lambda: False,
                  progress: Callable[[float], None] = lambda _p: None) -> BulkResult:
-    """Saves the change on each request; one that fails does not stop the others."""
+    """Saves the change on the requests (together); one that fails does not stop the others."""
     result = BulkResult()
     todo = []
     for r in requests:
@@ -109,16 +110,12 @@ def apply_change(client: EsriClient, store: RequestStoreConfig, token: Optional[
             result.unchanged += 1
         else:
             todo.append(c)
-    for i, r in enumerate(todo):
-        if canceled():
-            result.canceled = True
-            break
-        try:
-            result.saved.append(save_request(client, store, token, r, now()))
-        except ConflictError:
-            result.conflicts += 1
-            result.failed.append((r.name or r.id, "ほかの人が読み込み後に更新・削除"))
-        except Exception as error:  # noqa: BLE001 (each one told)
-            result.failed.append((r.name or r.id, str(error)))
-        progress(100 * (i + 1) / len(todo))
+    if not todo:
+        return result
+    saved = save_requests(client, store, token, todo, now(), canceled, progress)
+    result.saved = list(saved.saved)
+    result.conflicts = saved.conflicts
+    result.canceled = saved.canceled
+    for r, error in saved.failed:
+        result.failed.append((r.name or r.id, "ほかの人が読み込み後に更新・削除" if isinstance(error, ConflictError) else str(error)))
     return result

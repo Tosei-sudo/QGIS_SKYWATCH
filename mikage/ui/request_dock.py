@@ -27,7 +27,8 @@ from ..core.request.groups import first_group, offered, read_groups
 from ..core.request.last import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
-from ..core.request.store import RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, waiting_ids
+from ..core.request.store import (RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, save_requests,
+                                  waiting_ids)
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
@@ -647,17 +648,9 @@ class RequestDock(PluginDock):
             todo.append(r)
 
         def work(task):
-            saved, failed = 0, []
-            for k, r in enumerate(todo):
-                if task.isCanceled():
-                    break
-                try:
-                    save_request(client, store, token, r, _now_ms())
-                    saved += 1
-                except Exception as error:  # noqa: BLE001 (each one reported)
-                    failed.append(f"{r.name}: {error}")
-                task.progress(100 * (k + 1) / len(todo))
-            return saved, failed
+            # Together (a few requests to the ledger), each one checked and reported on its own.
+            out = save_requests(client, store, token, todo, _now_ms(), task.isCanceled, task.progress)
+            return len(out.saved), [f"{r.name}: {error}" for r, error in out.failed]
 
         def done(result):
             saved, failed = result
@@ -730,17 +723,8 @@ class RequestDock(PluginDock):
                 if existing is not None:
                     r.updated = existing.updated
                 todo.append(r)
-            saved, failed = 0, []
-            for k, r in enumerate(todo):
-                if task.isCanceled():
-                    break
-                try:
-                    save_request(client, store, token, r, _now_ms())
-                    saved += 1
-                except Exception as error:  # noqa: BLE001 (each one reported)
-                    failed.append(f"{r.name}: {error}")
-                task.progress(100 * (k + 1) / len(todo))
-            return saved, failed
+            out = save_requests(client, store, token, todo, _now_ms(), task.isCanceled, task.progress)
+            return len(out.saved), [f"{r.name}: {error}" for r, error in out.failed]
 
         def done(result):
             saved, failed = result

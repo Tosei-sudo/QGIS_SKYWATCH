@@ -16,7 +16,7 @@ import uuid
 from dataclasses import replace
 from typing import Any, Iterable, Optional, Protocol
 
-from ..esri import ConflictError, EsriClient, EsriError, fit_value, point_geometry, ring_geometry
+from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, fit_value, point_geometry, ring_geometry
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
@@ -493,23 +493,27 @@ class EsriObservationStore:
                 self.last_marked = [o for o in marked if o.id in self.last_saved]
             return marked
         self.last_removed = {o.id for o in records if o.id not in self.oids}
-        ids = [self.oids[o.id] for o in records if o.id in self.oids]
-        if ids:
-            results = self.client.delete_features(self.config.url, ids, token=self.token)
+        known = [o for o in records if o.id in self.oids]
+        failed: set[int] = set()
+        reason = ""
+        # DELETE_BATCH to a request; a request that fails leaves what the earlier ones deleted told (last_removed).
+        for start in range(0, len(known), DELETE_BATCH):
+            part = known[start:start + DELETE_BATCH]
+            results = self.client.delete_features(self.config.url, [self.oids[o.id] for o in part], token=self.token)
             # Each record is deleted or not on its own: the ones the server kept stay known, and the person is told.
-            failed: set[int] = set()
-            reason = ""
+            kept: set[int] = set()
             for r in results:
                 if r.get("success") or not is_number(r.get("objectId")):
                     continue
-                failed.add(int(r["objectId"]))
+                kept.add(int(r["objectId"]))
                 reason = reason or (r.get("error") or {}).get("description") or ""
-            for o in records:
-                if self.oids.get(o.id, -1) not in failed:
+            for o in part:
+                if self.oids.get(o.id, -1) not in kept:
                     self.oids.pop(o.id, None)
                     self.last_removed.add(o.id)
-            if failed:
-                raise EsriError(f"{len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
+            failed |= kept
+        if failed:
+            raise EsriError(f"{len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
         return []
 
 
