@@ -481,11 +481,19 @@ class ScheduleDock(PluginDock):
         chosen_row = -1
         # Requests taken several times a day (1 日の回数): each row tells which time it is.
         several = {(r.request_id, r.day) for r in self.rows if r.request_id and r.occurrence > 1}
+        # Areas too big for one shot handed out in several shots (分担): each row tells which shot it is.
+        shares: dict = {}
+        for r in self.rows:
+            if r.request_id and r.part > 0 and r.result == "採用":
+                key = (r.request_id, r.day, r.occurrence)
+                shares[key] = max(shares.get(key, 0), r.part)
         for i, r in enumerate(self.shown):
             state = row_state(r)
             name = r.name or r.external_id or r.request_id
             if (r.request_id, r.day) in several:
                 name += self.tr("（{n} 回目）").format(n=r.occurrence)
+            if shares.get((r.request_id, r.day, r.occurrence), 0) > 1:
+                name += self.tr("（分担 {k}/{n}）").format(k=r.part, n=shares[(r.request_id, r.day, r.occurrence)])
             items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
                                                 captured_text(r), r.requester, row_note(r))]

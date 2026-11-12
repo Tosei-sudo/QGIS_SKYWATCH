@@ -163,6 +163,7 @@ TABLES = (
         F("SHOT_ID", "撮像ID", "TEXT", 64, "shotId"),
         F("OCCURRENCE", "その日の回", "LONG", None, "occurrence"),
         F("LINK_ID", "外部連携ID", "TEXT", 32, "linkId"),
+        F("PART_NO", "分担の番号", "LONG", None, "part"),
     )),
     Table("TBL_OBSERVATION", "観測記録", "POINT", writable=True, setting="observationStores[].url", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "id"),

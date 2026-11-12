@@ -77,7 +77,7 @@ def window_of(req: ImagingRequest, day: date) -> tuple[float, float]:
     return start, end
 
 
-def _cells(rings: Sequence, most: int) -> list:
+def grid_cells(rings: Sequence, most: int) -> list:
     """About `most` points spread evenly inside rings (even-odd), square on the ground; finer while too few fall inside."""
     box = bbox_of(rings)
     if box is None:
@@ -122,7 +122,7 @@ def target_of(req: ImagingRequest, shot_km: float = math.inf) -> Optional[PlanTa
     rings = [[list(p[:2]) for p in r] for r in req.rings]
     if size_km(req) <= shot_km:
         return PlanTarget(req.id, tuple(mid), outline, None, rings=rings)
-    cells = _cells(req.rings, AREA_CELLS) or [tuple(mid)]
+    cells = grid_cells(req.rings, AREA_CELLS) or [tuple(mid)]
     center = tuple(mid) if in_rings(req.rings, *mid) else cells[len(cells) // 2]
     return PlanTarget(req.id, center, outline, cells, rings=rings)
 

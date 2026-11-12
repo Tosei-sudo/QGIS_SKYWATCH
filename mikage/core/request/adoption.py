@@ -64,6 +64,8 @@ class Match:
     time: Optional[int] = None
     #: The target day of the rows it answers: the day read, or the one its 外部連携ID was found on ("": the day read).
     day: str = ""
+    #: The shot it names of an area shared out (分担, by its 外部連携ID); None for every shot.
+    part: Optional[int] = None
 
     @property
     def unrequested(self) -> bool:
@@ -190,7 +192,7 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
         if a.system and same_key(a.system) not in names:
             other_systems.add(a.system)
             continue
-        req, twice, time = None, False, None
+        req, twice, time, part = None, False, None, None
         for k_source in KEY_SOURCES:
             k = same_key(a.keys.get(k_source, ""))
             if k and k in by_key.get(k_source, {}):
@@ -213,6 +215,8 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
                                             f"（依頼の番号の「{req.name or req.id}」でなく ID の行とした）")
                 req = ledger.get(lead.request_id) or ImagingRequest(lead.request_id, name=lead.name)
                 twice, time, at, own = False, lead.occurrence, lead.day, found
+                # One shot of an area shared out (分担) answers for itself.
+                part = lead.part if lead.part > 0 else None
                 if at != day:
                     by_link_days[at] = by_link_days.get(at, 0) + 1
             elif req is None:
@@ -231,13 +235,13 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
             reading.problems.append(f"{a.line} 行目: {a.answer}の {what} はこの日このシステムに出力していないため読み飛ばし")
             continue
-        if req is not None and (req.id, time, at) in answered:
+        if req is not None and (req.id, time, at, part) in answered:
             reading.problems.append(f"{a.line} 行目: 「{req.name}」が重複（後の行を使う）")
             reading.matches = [m for m in reading.matches
-                               if not (m.request is not None and (m.request.id, m.time, m.day) == (req.id, time, at))]
+                               if not (m.request is not None and (m.request.id, m.time, m.day, m.part) == (req.id, time, at, part))]
         if req is not None:
-            answered.add((req.id, time, at))
-        reading.matches.append(Match(a, req, rows, time, at))
+            answered.add((req.id, time, at, part))
+        reading.matches.append(Match(a, req, rows, time, at, part))
     if other_days:
         reading.problems.append(f"対象日が {day} 以外の {other_days} 行を読み飛ばし")
     if other_systems:
@@ -248,16 +252,21 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
         first, last = link_window(day, spec.link_days)
         reading.problems.append(f"外部連携IDが {first}〜{last} の出力履歴にない {unknown_links} 行（依頼の番号もなし）")
     # A request put into another's shot answered by its own row too: its own answer counts for it.
-    named = {(rid, d) for rid, _, d in answered}
+    named = {(rid, d) for rid, _, d, _ in answered}
     for m in reading.matches:
         if m.request is not None:
             m.rows = [r for r in m.rows if r.request_id == m.request.id or (r.request_id, r.day) not in named]
     # A time answered on its own row wins over the row naming the whole request.
     timed = {(m.request.id, r.occurrence, r.day) for m in reading.matches if m.request is not None and m.time is not None
-             for r in m.rows if r.request_id == m.request.id}
+             and m.part is None for r in m.rows if r.request_id == m.request.id}
     for m in reading.matches:
         if m.request is not None and m.time is None:
             m.rows = [r for r in m.rows if r.request_id != m.request.id or (r.request_id, r.occurrence, r.day) not in timed]
+    # A shot of an area shared out answered on its own row (its 外部連携ID) wins over the rows naming its time or request.
+    shot_rows = {id(r) for m in reading.matches if m.part is not None for r in m.rows}
+    for m in reading.matches:
+        if m.part is None:
+            m.rows = [r for r in m.rows if id(r) not in shot_rows]
     covered = {id(r) for m in reading.matches for r in m.rows}
     reading.missing = [r for r in handed if id(r) not in covered]
     return reading

@@ -75,6 +75,7 @@ from datetime import date
 from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
+from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
 from .quota import QUOTA, QUOTA_OVER, QuotaBook
@@ -99,11 +100,19 @@ SHOT_CLOUD = "撮像時刻の雲量 "
 GAP = "撮像機会なし（ほかの回との間隔）"
 #: The start of the warning of a request taken fewer times than its 1 日の回数 asks (the day does not count).
 FEW = "回数が足りない（"
+#: Held back as its area is taken already (撮像済み), or about to be by what was handed out on earlier days (撮像待ち).
+TAKEN_ALREADY = "撮像済み（範囲の約 "
+WAITING = "撮像待ち（"
 
 
-def occurrence_key(request_id: str, occurrence: int = 1) -> str:
-    """One time of a request on a day, as the files and history tell them apart: its id, 「R1#2」 from the second time."""
-    return request_id if occurrence <= 1 else f"{request_id}#{occurrence}"
+def occurrence_key(request_id: str, occurrence: int = 1, part: int = 0) -> str:
+    """
+    One time of a request on a day, as the files and history tell them
+    apart: its id, 「R1#2」 from the second time; a shot of an area too big
+    for one past its first (分担) 「R1/2」, 「R1#2/3」.
+    """
+    key = request_id if occurrence <= 1 else f"{request_id}#{occurrence}"
+    return key if part <= 1 else f"{key}/{part}"
 
 
 @dataclass
@@ -153,11 +162,30 @@ class Candidate:
     #: Which of the request's times on the day (1 日の回数): 1 …; the first carries the raise for them all.
     occurrence: int = 1
     first: Optional["Candidate"] = field(default=None, repr=False, compare=False)
+    #: What of its area is taken already and handed out on earlier days (covered.py; 期間内1回 areas), and their shares.
+    covered: Optional[Covered] = field(default=None, repr=False, compare=False)
+    shares: Shares = field(default_factory=Shares)
+    # --- set by fitting, for an area too big for one shot (分担, tsudo 2026-11-12) ---
+    #: Which of the time's shots it hands out (1 …, each a row of the file with that shot's part of the area); 0 for a
+    #: candidate handing out the whole area.
+    part: int = 0
+    #: How many shots the time is handed out in (its rows; 0 when not shared out).
+    parts: int = 0
+    #: The share of the area its own shot adds (None for one handing out the whole area).
+    gain: Optional[float] = None
+    #: For the time's shots past the first (part 2 …): the candidate of its first shot, which carries the time.
+    main: Optional["Candidate"] = field(default=None, repr=False, compare=False)
+    #: For a part: (satellite platform, the pass's moment in seconds), so that a part left out by hand stays out.
+    pass_key: Optional[tuple] = None
+    #: For the first shot: the passes left out by hand (pass_key of its parts held back).
+    skip: set = field(default_factory=set, repr=False, compare=False)
+    #: The points of its area taken once its shots are in (Placement.cells), for the satellites sharing it.
+    cells: Optional[bytearray] = field(default=None, repr=False, compare=False)
 
     @property
     def key(self) -> str:
-        """The request's id, with the time from the second on (occurrence_key)."""
-        return occurrence_key(self.request.id, self.occurrence)
+        """The request's id, with the time from the second on and the shot from the second on (occurrence_key)."""
+        return occurrence_key(self.request.id, self.occurrence, self.part)
 
     @property
     def extra(self) -> bool:
@@ -199,7 +227,9 @@ class Candidate:
 
     @property
     def boost(self) -> int:
-        """The raise that counts now (the first time's, for the request's other times)."""
+        """The raise that counts now (the first time's, for the request's other times; the first shot's, for a part)."""
+        if self.main is not None:
+            return self.main.boost
         if self.first is not None:
             return self.first.boost
         if self.boost_offer is not None and self.boost_taken:
@@ -250,12 +280,15 @@ def wants_weather(req: ImagingRequest, sats: Sequence[SatelliteSpec]) -> bool:
 
 
 def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec],
-           clouds: dict, missed: set) -> list[Candidate]:
+           clouds: dict, missed: set, covered: Optional[dict] = None) -> list[Candidate]:
     """
     The candidates of a day: requests that occur on it, with their cover
     (`clouds`: request id → percent or None, weather.Clouds telling those at
     a pass's moment), holds for the weather, and raises offered (`missed`:
-    ids of requests found 未撮像 and not yet raised for it).
+    ids of requests found 未撮像 and not yet raised for it). `covered`
+    (request id → covered.Covered): what of a 期間内1回 area is taken
+    already or handed out on earlier days; one taken (or about to be) to
+    GOAL is held back (撮像済み, 撮像待ち: unless near its deadline).
     """
     timed = getattr(clouds, "timed", ())
     out = []
@@ -282,6 +315,15 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
                     c.warnings.append(f"雲量 {round(c.cloud)}%（{every}実施しない雲量 {round(req.cloud_no_go)}% 以上・期限間近のため出力）")
                 else:
                     c.held = f"雲量 {round(c.cloud)}%（{every}{round(req.cloud_no_go)}% 以上）"
+        got = (covered or {}).get(req.id)
+        if got is not None and subtracts(req):
+            c.covered = got
+            c.shares = shares_of(req, got)
+            hold = cover_hold(c)
+            if hold:
+                c.held = hold
+            elif c.shares.both >= GOAL and c.shares.taken < GOAL:
+                c.warnings.append(f"{waiting_text(c)}・期限間近のため出力")
         reasons = []
         if req.id in missed:
             reasons.append("未撮像")
@@ -296,6 +338,60 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             out.append(Candidate(req, cloud=c.cloud, weather=c.weather, timed=c.timed, near=c.near, carried=carried,
                                  held=c.held, warnings=list(c.warnings), occurrence=k, first=c))
     return out
+
+
+def waiting_text(c: Candidate) -> str:
+    """「撮像待ち（11/10・11/11 の出力で範囲の約 98%）」."""
+    days = "・".join(short_day(d) for d in sorted(c.covered.waiting_days)) if c.covered else ""
+    return f"{WAITING}{days + ' の' if days else ''}出力で範囲の約 {percent(c.shares.both)}%）"
+
+
+def cover_hold(c: Candidate) -> str:
+    """Why a candidate is held back for what of its area is taken or waiting ("" when it goes)."""
+    if c.covered is None:
+        return ""
+    if c.shares.taken >= GOAL:
+        return f"{TAKEN_ALREADY}{percent(c.shares.taken)}%）"
+    if c.shares.both >= GOAL and not c.near:
+        return waiting_text(c)
+    return ""
+
+
+def outlines_for(c: Candidate) -> list:
+    """
+    What of a candidate's area its shots leave out (covered.Covered): the
+    taken and the waiting; only the taken near its deadline or taken by hand
+    (and nothing when it is taken by hand although taken whole).
+    """
+    got = c.covered
+    if got is None:
+        return []
+    taken = list(got.taken) if c.shares.taken < GOAL else []
+    if c.manual == TAKEN or c.near:
+        return taken
+    return taken + list(got.waiting)
+
+
+def cover_text(c: Candidate) -> str:
+    """What of its area a candidate leaves out: 「撮像済み 約 40%・撮像待ち 約 20% を除く」 ("" when none)."""
+    if c.covered is None or c.result != TAKEN or c.main is not None:
+        return ""
+    sh = c.shares
+    parts = []
+    if 0 < sh.taken < GOAL:
+        parts.append(f"撮像済み 約 {percent(sh.taken)}%")
+    if sh.waiting > 0 and not (c.manual == TAKEN or c.near):
+        parts.append(f"撮像待ち 約 {percent(sh.waiting)}%")
+    if not parts:
+        return ""
+    return "・".join(parts) + (" を除く" if c.gain is not None else "（範囲全体を出力）")
+
+
+def part_text(c: Candidate) -> str:
+    """Which of the shots of an area shared out a candidate is: 「分担 2/3」 ("" for one handing out the whole area)."""
+    if c.part <= 0 or c.parts <= 1:
+        return ""
+    return f"分担 {c.part}/{c.parts}"
 
 
 def _order_key(c: Candidate):
@@ -330,6 +426,13 @@ class Room:
     count: int = 0
     scenes: int = 0
     by_category: dict = field(default_factory=dict)
+
+
+def placement_rows(p: Placement) -> int:
+    """The rows of a system's file a placement adds: none to join a shot, one a shot of an area too big for one, else one."""
+    if not p.new:
+        return 0
+    return len(p.shots) if p.coverage is not None else 1
 
 
 def _manual_warning(w: str) -> bool:
@@ -399,13 +502,19 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             members[sys_.system].append(sat)
     index = {id(s): i for i, s in enumerate(sats)}
     book = Book(sats, passes) if passes is not None and day is not None else None
-    out = ordered(cands)
+    # The shots of an area shared out are worked out again; those left out by hand stay out (and are shown).
+    held_parts = [c for c in cands if c.main is not None and c.manual == HELD]
+    out = ordered([c for c in cands if c.main is None])
     by_name = {s.system: s for s in systems}
-    #: Each request's times on the day (1 日の回数), to keep them apart.
+    #: Each request's times on the day (1 日の回数), to keep them apart (and the shots of each, once shared out).
     times: dict = {}
+    #: The shots past the first of each candidate (分担), by id of that candidate.
+    parts_of: dict = {}
     for c in out:
         times.setdefault(c.request.id, []).append(c)
         c.result, c.shots = HELD, []
+        c.part, c.parts, c.gain, c.cells = 0, 0, None, None
+        c.skip = {p.pass_key for p in held_parts if p.main is c and p.pass_key}
 
     def orbits(system: ExportSystem, sat: SatelliteSpec) -> bool:
         return book is not None and system.orbit and book.known(index.get(id(sat), -1))
@@ -435,7 +544,6 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             c.warnings.append(book_quota.over_text(over))
 
     def placed(c: Candidate, system: ExportSystem, sat: SatelliteSpec, p: Placement, cloud: Optional[float]) -> None:
-        room = rooms[system.system]
         c.result, c.system, c.satellite = TAKEN, system, sat
         c.shots = book.take(c, p)
         c.coverage = p.coverage
@@ -445,14 +553,19 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             # Only too cloudy passes had room, and it goes all the same (the day's own cover was said in gather otherwise).
             why = "期限間近" if c.near else "手動で採用" if c.manual == TAKEN else "書き出し済み"
             c.warnings.append(f"{SHOT_CLOUD}{round(cloud)}%（実施しない雲量 {round(no_go)}% 以上・{why}のため出力）")
-        if p.new:
-            room.count += 1
-            room.by_category[c.request.category] = room.by_category.get(c.request.category, 0) + 1
+        c.gain, c.cells = p.gain, p.cells
+        spend(c, system, sat, p)
+
+    def spend(c: Candidate, system: ExportSystem, sat: SatelliteSpec, p: Placement) -> None:
+        """A placement's rows (one a shot of an area too big for one), scenes and quota off the system's day."""
+        room = rooms[system.system]
+        rows = placement_rows(p)
+        if rows:
+            room.count += rows
+            room.by_category[c.request.category] = room.by_category.get(c.request.category, 0) + rows
         room.scenes += p.scenes
         quota_check(c, sat, p.scenes)
         book_quota.take(sat, p.scenes)
-        if p.coverage is not None and p.coverage < GOAL:
-            c.warnings.append(f"{PART}{round(p.coverage * 100)}%")
 
     def sky(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> int:
         """The tenth of the cover of a satellite's least cloudy pass over a request (the day's for one fitted by counting)."""
@@ -463,31 +576,53 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         told = [o.cloud for o in passes.of(c.request, day, index[id(sat)]) if o.cloud is not None]
         return _tenth(min(told)) if told else 10
 
-    def by_orbit(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool = False) -> bool:
-        """Puts a candidate on a pass of the satellite; whether it went (`why` told what stopped it)."""
+    def options_of(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool) -> Optional[list]:
+        """The passes of the satellite a candidate may go on (its times apart, the weather, those left out by hand); None: none."""
         i = index[id(sat)]
         ops = passes.of(c.request, day, i)
+        if c.skip:
+            ops = [o for o in ops if (platform_key(sat), round(o.time / 1000)) not in c.skip]
         if not ops:
             why.add(NO_PASS)
-            return False
-        told = ops
+            return None
         # The request's other times that day: on other passes, `times_gap` hours or more away.
-        taken = [t for o in times[c.request.id] if o is not c and o.result == TAKEN for t in times_of(o)]
+        taken = [t for o in times[c.request.id] if o.occurrence != c.occurrence and o.result == TAKEN for t in times_of(o)]
         if taken:
             # A minute at least: two shots of one satellite that close are on one pass.
             gap = max(c.request.gap_ms, 60000.0)
             ops = [o for o in ops if all(abs(o.time - t) >= gap for t in taken)]
             if not ops:
                 why.add(GAP)
-                return False
+                return None
         no_go = c.request.cloud_no_go
         if c.weather and no_go is not None and not (forced or c.near or c.manual == TAKEN):
             # Passes too cloudy at their moment are not used (those the forecast does not reach are).
             ops = [o for o in ops if o.cloud is None or o.cloud < no_go]
             if not ops:
                 why.add(CLOUDY)
-                return False
-        options = book.joins(c, i, ops, system.merge, system.merge_margin) + book.new_shots(c, i, ops, forced)
+                return None
+        return ops
+
+    def fits_of(c: Candidate, system: ExportSystem, sat: SatelliteSpec):
+        """Whether an area's shots (how many, their scenes) still fit the system's day and the satellite's quota."""
+        room = rooms[system.system]
+        return lambda shots, scenes: (_room_fits(system, room, c.request.category, shots, scenes)
+                                      and book_quota.over(sat, scenes) is None)
+
+    def by_orbit(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool = False,
+                 start: Optional[bytearray] = None) -> bool:
+        """
+        Puts a candidate on a pass of the satellite; whether it went (`why`
+        told what stopped it). `start`: the points of an area too big for one
+        shot taken already (撮像済み・撮像待ち), left out by its shots.
+        """
+        i = index[id(sat)]
+        ops = options_of(c, system, sat, why, forced)
+        if ops is None:
+            return False
+        told = passes.of(c.request, day, i)
+        joins = book.joins(c, i, ops, system.merge, system.merge_margin) if start is None else []
+        options = joins + book.new_shots(c, i, ops, forced, start, fits_of(c, system, sat))
         clouds = {id(p): _placement_cloud(p, told) for p in options} if c.weather else {}
         if c.weather:
             # The less cloudy first, by tenths; within a tenth as before (into a shot planned, then the smaller angle).
@@ -497,7 +632,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             if p.busy and not forced:
                 why.add(BUSY)
                 continue
-            fits = _room_fits(system, room, c.request.category, 1 if p.new else 0, p.scenes)
+            fits = _room_fits(system, room, c.request.category, placement_rows(p), p.scenes)
             if not fits and not forced:
                 why.add(OVER)
                 continue
@@ -515,9 +650,28 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             why.add(BUSY if book.saw_busy else NO_PASS)
         return False
 
-    # Those already written for another system first: they hold their room there, whatever comes before them.
-    pinned = [c for c in out if c.pinned and c.pinned[0] in by_name]
-    for c in pinned + [c for c in out if not (c.pinned and c.pinned[0] in by_name)]:
+    def sorted_able(c: Candidate, system: ExportSystem, able: Sequence[SatelliteSpec]) -> list[SatelliteSpec]:
+        """The satellites (modes) of a system a candidate tries, in order: those it names, else the less cloudy and finer first."""
+        able = list(able)
+        if c.request.satellites:
+            order = {n: i for i, n in enumerate(c.request.satellites)}
+            able.sort(key=lambda s: min(order.get(s.name, 99), order.get(s.id, 99)))
+        else:
+            # Optical: the satellite with the less cloudy pass first (by tenths), then the finest resolution.
+            able.sort(key=lambda s: (sky(c, system, s), s.resolution if s.resolution is not None else math.inf, -left(system, s)))
+        return able
+
+    def start_of(c: Candidate) -> Optional[bytearray]:
+        """The points of an area too big for one shot that its shots leave out (撮像済み・撮像待ち); None for none."""
+        if book is None:
+            return None
+        outlines = outlines_for(c)
+        if not outlines:
+            return None
+        cells = book.cells_of(c.request, outlines)
+        return cells if cells is not None and any(cells) else None
+
+    def fit(c: Candidate) -> None:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
         c.shots, c.coverage, c.shot_cloud = [], None, None
         c.warnings = [w for w in c.warnings if not _manual_warning(w)]
@@ -527,22 +681,23 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             able = [s for s in members[system.system] if why_not(req, s) is None]
             if able:
                 c.able[system.system] = able
+        start = start_of(c)
         if c.pinned and c.pinned[0] in by_name:
             system = by_name[c.pinned[0]]
             choices = c.able.get(system.system) or members[system.system]
             sat = next((s for s in choices if c.pinned[1] in (s.name, s.id)), choices[0] if choices else None)
-            if sat is not None and orbits(system, sat) and by_orbit(c, system, sat, set(), forced=True):
+            if sat is not None and orbits(system, sat) and by_orbit(c, system, sat, set(), forced=True, start=start):
                 c.warnings = [w for w in c.warnings if not _manual_warning(w)]
-                continue
+                return
             scenes = scenes_of(req, *(((sat.swath, sat.length) if sat is not None and (req.modes or req.satellites) else system.scene_km)))
             counted(c, system, sat, scenes)
-            continue
+            return
         if c.manual == HELD:
             c.reason = "手動で見送り"
-            continue
+            return
         if c.held and c.manual != TAKEN:
             c.reason = c.held
-            continue
+            return
         forced = c.manual == TAKEN
         tried_any = False
         why: set = set()
@@ -551,16 +706,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
             if not able:
                 continue
             tried_any = True
-            if req.satellites:
-                order = {n: i for i, n in enumerate(req.satellites)}
-                able.sort(key=lambda s: min(order.get(s.name, 99), order.get(s.id, 99)))
-            else:
-                # Optical: the satellite with the less cloudy pass first (by tenths), then the finest resolution.
-                able.sort(key=lambda s: (sky(c, system, s), s.resolution if s.resolution is not None else math.inf, -left(system, s)))
+            able = sorted_able(c, system, able)
             room = rooms[system.system]
             for sat in able:
                 if orbits(system, sat):
-                    if by_orbit(c, system, sat, why):
+                    if by_orbit(c, system, sat, why, start=start):
                         break
                     continue
                 scenes = scenes_of(req, *(((sat.swath, sat.length) if req.modes or req.satellites else system.scene_km)))
@@ -574,7 +724,7 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                 why.add(OVER)
             if c.result != TAKEN and forced and able:
                 sat = able[0]
-                if not (orbits(system, sat) and by_orbit(c, system, sat, set(), forced=True)):
+                if not (orbits(system, sat) and by_orbit(c, system, sat, set(), forced=True, start=start)):
                     counted(c, system, sat, scenes_of(req, *system.scene_km))
                     c.warnings.append(f"{NO_PASS}（手動で採用）" if orbits(system, sat) else "枠超過（手動で採用）")
             if c.result != TAKEN:
@@ -585,17 +735,108 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else OVER if OVER in why else BUSY if BUSY in why
                         else CLOUDY if CLOUDY in why else GAP if GAP in why else NO_PASS if NO_PASS in why else OVER)
+
+    def share(c: Candidate) -> None:
+        """
+        An area too big for one shot that its satellite takes only part of:
+        the system's other satellites (one mode a platform, in the order the
+        candidate tries them) add their passes, on what is still open, until
+        GOAL of it is taken (分担; tsudo, 2026-11-12: 「1日1回にしておいても、
+        分担して、カバレッジを高めようとしてくれるんだよね？」). Each keeps its
+        interval and day, the system its day, the quota its year.
+        """
+        system = c.system
+        if (book is None or system is None or not system.share or c.cells is None or c.coverage is None
+                or c.coverage >= GOAL or c.satellite is None):
+            return
+        used = {platform_key(c.satellite)}
+        for sat in sorted_able(c, system, c.able.get(system.system, ())):
+            if c.coverage >= GOAL:
+                break
+            key = platform_key(sat)
+            if key in used or not orbits(system, sat):
+                continue
+            ops = options_of(c, system, sat, set(), False)
+            if not ops:
+                continue
+            got = [p for p in book.new_shots(c, index[id(sat)], ops, False, c.cells, fits_of(c, system, sat)) if not p.busy]
+            if not got or not got[0].shots:
+                continue
+            p = got[0]
+            used.add(key)
+            c.shots.extend(book.take(c, p))
+            c.cells, c.coverage = p.cells, p.coverage
+            spend(c, system, sat, p)
+
+    def explode(c: Candidate) -> None:
+        """
+        The shots of an area too big for one, each a row of its own (tsudo,
+        2026-11-12: 撮る部分だけをファイルに): the first of its own satellite
+        stays with the candidate (part 1), the others become parts 2 … in
+        time order, each on its satellite with its own pass.
+        """
+        if c.result != TAKEN or c.gain is None or not c.shots:
+            return
+        mine = index.get(id(c.satellite), -1)
+        own = [s for s in c.shots if s.sat == mine]
+        head = min(own or c.shots, key=lambda s: s.time)
+        rest = sorted((s for s in c.shots if s is not head), key=lambda s: s.time)
+        c.part, c.parts = 1, 1 + len(rest)
+        c.shots, c.gain = [head], head.gain
+        if c.weather:
+            c.shot_cloud = _cloud_near(passes.of(c.request, day, head.sat), head.time)
+        parts = []
+        for n, shot in enumerate(rest, 2):
+            sat = sats[shot.sat]
+            p = Candidate(c.request, cloud=c.cloud, weather=c.weather, timed=c.timed, near=c.near, carried=c.carried,
+                          occurrence=c.occurrence, first=c.first, main=c, covered=c.covered, shares=c.shares)
+            p.result, p.system, p.satellite, p.able = TAKEN, c.system, sat, c.able
+            p.shots, p.part, p.parts, p.gain, p.coverage = [shot], n, c.parts, shot.gain, c.coverage
+            p.pass_key = (platform_key(sat), round(shot.time / 1000))
+            p.warnings = [w for w in c.warnings if not _manual_warning(w)]
+            if c.weather:
+                p.shot_cloud = _cloud_near(passes.of(c.request, day, shot.sat), shot.time)
+            shot.members = [p]
+            parts.append(p)
+        parts_of[id(c)] = parts
+        times[c.request.id].extend(parts)
+        if c.coverage is not None and c.coverage < GOAL:
+            # Short of the goal with every satellite that had room (what was taken before counts).
+            before = "（撮像済み・撮像待ちを含む）" if outlines_for(c) else ""
+            for x in (c, *parts):
+                x.warnings.append(f"{PART}{percent(c.coverage)}%{before}")
+
+    # Those already written for another system first: they hold their room there, whatever comes before them.
+    pinned = [c for c in out if c.pinned and c.pinned[0] in by_name]
+    for c in pinned + [c for c in out if not (c.pinned and c.pinned[0] in by_name)]:
+        fit(c)
+        if c.result == TAKEN:
+            share(c)
+            explode(c)
     for c in out:
         if c.result == TAKEN and c.shots:
             c.scenes = 0 if c.member else sum(s.frames for s in c.shots)
     for same in times.values():
         need = same[0].request.times[0]
         got = [c for c in same if c.result == TAKEN]
-        if got and len(got) < need:
+        n = len({c.occurrence for c in got})
+        if got and n < need:
             # Taken fewer times than the day needs: what fits goes all the same (tsudo: 「取れる分だけ出す」).
             for c in got:
-                c.warnings.append(f"{FEW}{len(got)}/{need} 回）")
-    return out
+                c.warnings.append(f"{FEW}{n}/{need} 回）")
+    result: list[Candidate] = []
+    for c in out:
+        result.append(c)
+        for p in parts_of.get(id(c), ()):
+            p.scenes = sum(s.frames for s in p.shots)
+            result.append(p)
+        if c.result == TAKEN:
+            # Shots left out by hand: shown, so that they can be taken again.
+            for p in held_parts:
+                if p.main is c:
+                    p.result, p.reason, p.shots = HELD, "手動で見送り", []
+                    result.append(p)
+    return result
 
 
 def room_text(cands: Sequence[Candidate], systems: Sequence[ExportSystem]) -> dict[str, str]:

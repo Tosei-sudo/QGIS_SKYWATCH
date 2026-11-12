@@ -28,6 +28,14 @@ takes it (with text round it by a printf format, `SW-%s`) and gives it back
 in its result file (target `linkId`), which then finds that very row. A row
 of requests put into one shot carries the first one's.
 
+An area too big for one shot (分担, tsudo 2026-11-12) has a row for each
+shot, maybe of several satellites of the system: its `geometry` and box the
+part of the area that shot takes, a box along the track inside its scenes
+by the system's `mergeMargin` (shots.Shot.part_ring), not the whole area;
+`shareNo` (1, 2 …) and `shareCount` tell which, `shareCoverage` the
+percent of the area it takes, `coverage` the percent all of the time's
+shots take (with what was taken before).
+
 A request taken several times a day (1 日の回数) has a row for each time:
 `occurrence` (1, 2 …) tells which, `occurrenceId` is its id with the time
 (`R1-2`; the plain id for a request taken once a day) for a system that
@@ -57,6 +65,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Optional, Sequence
 
+from ..plan.orbit import R
 from ..time_zone import TimeZone, clock_of
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids
@@ -74,7 +83,7 @@ SOURCES = (
     "bboxWest", "bboxSouth", "bboxEast", "bboxNorth", "requester", "group", "note", "system", "runDate", "day", "count", "warnings",
     "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
-    "occurrence", "occurrenceId", "timesMin", "timesMax", "linkId",
+    "occurrence", "occurrenceId", "timesMin", "timesMax", "linkId", "shareNo", "shareCount", "shareCoverage", "coverage",
 )
 TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
 #: Sources whose value is a list of names.
@@ -226,7 +235,23 @@ def row_link_id(c: Candidate, ctx: Context) -> str:
     found = ctx.links.get(c.key)
     if found:
         return found
-    return link_id(c.request.id, ctx.day.isoformat(), ctx.system.system, c.occurrence, ctx.system.link_length, ctx.system.link_chars)
+    return link_id(c.request.id, ctx.day.isoformat(), ctx.system.system, c.occurrence, ctx.system.link_length, ctx.system.link_chars,
+                   part=c.part)
+
+
+def _percent(share: Optional[float]) -> Optional[float]:
+    """A share (0 … 1) as a percent with one decimal; None for none."""
+    return None if share is None else round(share * 100, 1)
+
+
+def row_rings(c: Candidate, margin_m: float) -> list:
+    """The area a candidate's row is written with (as raw_value's `geometry`): a shot's box, a share's part, or the request's."""
+    shot = c.shots[0] if c.shots else None
+    if c.together and shot is not None:
+        return [shot.area_ring()]
+    if c.part >= 1 and shot is not None:
+        return [shot.part_ring(max(0.0, margin_m) / 1000 / R)]
+    return [[list(p[:2]) for p in r] for r in c.request.rings]
 
 
 def occurrence_id(c: Candidate) -> str:
@@ -257,8 +282,9 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     shot = c.shots[0] if c.shots else None
     together = c.together
     # Requests put into one shot are handed out as one (tsudo, 2026-11-11), its area the tightest box along the
-    # track around theirs (shots.Shot.area_ring: not the scenes' outline, which the system may not find them inside).
-    rings = [shot.area_ring()] if together and shot is not None else req.rings
+    # track around theirs (shots.Shot.area_ring: not the scenes' outline, which the system may not find them inside);
+    # one shot of an area too big for one (分担) the part it takes, inside its scenes by the system's margin.
+    rings = row_rings(c, ctx.system.merge_margin)
     box = bbox_of(rings)
     mid = center_of(rings)
     look = shot.look if shot is not None else None
@@ -291,6 +317,8 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "mergedCount": len(together) or 1,
         "occurrence": c.occurrence, "occurrenceId": occurrence_id(c),
         "timesMin": req.times[0], "timesMax": req.times[1], "linkId": row_link_id(c, ctx),
+        "shareNo": c.part or None, "shareCount": (c.parts or 1) if c.part else None,
+        "shareCoverage": _percent(c.gain), "coverage": _percent(c.coverage),
     }
     if source == "geometry":
         return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)

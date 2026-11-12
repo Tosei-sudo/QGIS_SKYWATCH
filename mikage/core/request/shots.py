@@ -24,6 +24,12 @@ and takes at most `maxPerDay` shots a day; putting a request into a shot
 already planned uses neither. An area too big for one shot takes the day's
 passes one after another (as the imaging plan's 組み合わせ) until 95% of
 it is taken, or the passes run out; it is not put together with others.
+Its points already taken (`start`: 撮像済み, 撮像待ち, or the shots of
+another satellite sharing it, daily.allocate) are left out: each shot has
+to add MIN_GAIN of what is still open (tsudo, 2026-11-12: 「相互に分担すべき
+でしょ？」). Such a shot is handed out on a row of its own with the part of
+the area it takes (`part_ring`), a box along the track inside its scenes
+by the system's `mergeMargin`.
 
 Track angles are radians in the orbit's frame at the shot's moment: across
 the track (left positive) and along it (forward positive).
@@ -32,16 +38,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from ..plan.access import Opportunity, best_scene, framed, look_at, reach_of
 from ..plan.orbit import Frame, R, ecef_of, frame_of, lon_lat_of, norm, point_at, track_angles, track_rate, unit
 from ..plan.satellites import SatelliteSpec, platform_key
+from .covered import GOAL
 from .model import ImagingRequest
 from .passes import Passes
 
-#: The share of an area that counts as taken (as the imaging plan's goal).
-GOAL = 0.95
 #: The least share of an area one more shot has to add.
 MIN_GAIN = 0.02
 _EPS = 1e-9
@@ -145,6 +150,24 @@ class Shot:
             self._area = (key, self._ring_of((x0, x1), (y0, y1)))
         return [list(p) for p in self._area[1]]
 
+    def part_ring(self, margin: float = 0.0) -> list:
+        """
+        The polygon the row of one shot of an area too big for one is written
+        with (分担, tsudo 2026-11-12: 「撮る部分だけをファイルに」): the part of
+        the area's box along the track inside its scenes, `margin` (radians,
+        the system's mergeMargin) left inside them on every side, so that the
+        system finds it in one shot of its own; the scenes' outline when that
+        leaves nothing.
+        """
+        box = area_box(self.members[0].request, self.frame) if self.members else None
+        x0, x1 = self.window[0] + margin, self.window[1] - margin
+        y0, y1 = self.along[0] + margin, self.along[1] - margin
+        if box is not None:
+            x0, x1, y0, y1 = max(x0, box[0]), min(x1, box[1]), max(y0, box[2]), min(y1, box[3])
+        if x1 - x0 <= _EPS or y1 - y0 <= _EPS:
+            return self.ring()
+        return self._ring_of((x0, x1), (y0, y1))
+
 
 @dataclass
 class Placement:
@@ -160,8 +183,12 @@ class Placement:
     frames: int = 0
     #: Scenes it adds to the system's day.
     scenes: int = 0
-    #: For an area: the share of it taken (None: whole).
+    #: For an area: the share of it taken (None: whole), with what was taken before (`start`).
     coverage: Optional[float] = None
+    #: For an area: the share its own shots add.
+    gain: Optional[float] = None
+    #: For an area: its points taken once it is in (those taken before too), for the next satellite sharing it.
+    cells: Optional[bytearray] = None
     #: Whether a satellite's interval or day is overstepped (only when forced).
     busy: bool = False
 
@@ -309,15 +336,21 @@ class Book:
         out.sort(key=lambda p: (p.busy, p.scenes, p.into.time))
         return out
 
-    def new_shots(self, c, sat: int, ops: Sequence[Opportunity], forced: bool = False) -> list[Placement]:
+    def new_shots(self, c, sat: int, ops: Sequence[Opportunity], forced: bool = False, start: Optional[bytearray] = None,
+                  fits: Optional[Callable[[int, int], bool]] = None) -> list[Placement]:
         """
         New shots for the candidate on this satellite (mode)'s passes: one per pass for a request that fits in one
         (the smallest off-nadir angle first), or the passes one after another for an area too big for one.
         Passes the satellite has no time for are left out, unless `forced` (then they come last, marked busy).
+        With `start` (the area's points already taken, `Passes.targets` cells), only the latter, on what is
+        still open; `fits(shots, scenes)` says whether an area's shots still fit the system's day.
         """
         out = []
         big = []
         self.saw_busy = False
+        if start is not None:
+            area = self._area(c, sat, ops, forced, start, fits)
+            return [area] if area is not None else []
         for op in sorted(ops, key=lambda o: (o.offNadir, o.time)):
             got = self._frame(sat, op.time)
             if got is None:
@@ -336,26 +369,35 @@ class Book:
                 continue
             out.append(Placement(shots=[shot], scenes=frames, busy=busy))
         if not out and big:
-            area = self._area(c, sat, big, forced)
+            area = self._area(c, sat, big, forced, None, fits)
             if area is not None:
                 out.append(area)
         out.sort(key=lambda p: p.busy)
         return out
 
-    def _area(self, c, sat: int, ops: Sequence[Opportunity], forced: bool) -> Optional[Placement]:
-        """An area too big for one shot: the passes in time order while each adds enough, until GOAL of it is taken."""
+    def _area(self, c, sat: int, ops: Sequence[Opportunity], forced: bool, start: Optional[bytearray] = None,
+              fits: Optional[Callable[[int, int], bool]] = None) -> Optional[Placement]:
+        """
+        An area too big for one shot: the passes in time order while each adds
+        enough of what is still open (`start`: the points taken before), until
+        GOAL of it is taken (and while `fits` the system's day).
+        """
         spec = self.sats[sat]
         sw, sl, most = spec.swath / R, spec.length / R, max(1, spec.scenesPerPass)
-        cells = None
+        cells = bytearray(start) if start is not None else None
+        before = sum(cells) if cells is not None else 0
         taken: list[Shot] = []
         busy_any = False
         share = 0.0
+        if cells is not None and cells and before / len(cells) >= GOAL:
+            return None
         for op in sorted(ops, key=lambda o: o.time):
             if op.cells is None or op.cellsAlong is None:
                 continue
             across, along = op.cells.tolist(), op.cellsAlong.tolist()
-            if cells is None:
+            if cells is None or len(cells) != len(across):
                 cells = bytearray(len(across))
+                before = 0
             best = best_scene(across, along, sw, sl, most, lambda i: not cells[i])
             if best is None or best.count / len(across) < MIN_GAIN:
                 continue
@@ -375,6 +417,8 @@ class Book:
             if busy and not forced:
                 self.saw_busy = True
                 continue
+            if fits is not None and not forced and not fits(len(taken) + 1, sum(s.frames for s in taken) + shot.frames):
+                continue
             busy_any = busy_any or busy
             for k in best.members:
                 cells[k] = 1
@@ -385,7 +429,17 @@ class Book:
                 break
         if not taken:
             return None
-        return Placement(shots=taken, scenes=sum(s.frames for s in taken), coverage=share, busy=busy_any)
+        return Placement(shots=taken, scenes=sum(s.frames for s in taken), coverage=share,
+                         gain=(sum(cells) - before) / len(cells), cells=cells, busy=busy_any)
+
+    def cells_of(self, req: ImagingRequest, outlines: Sequence) -> Optional[bytearray]:
+        """The points of an area too big for one shot (`Passes.targets` cells) inside outlines; None for one planned whole."""
+        from .covered import mask_of
+
+        target = self.passes.targets.get(req.id)
+        if target is None or not target.cells:
+            return None
+        return mask_of(target.cells, outlines)
 
     # --- Taking a placement ----------------------------------------------------------------------
 
