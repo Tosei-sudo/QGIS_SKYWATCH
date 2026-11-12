@@ -384,6 +384,34 @@ def missed_done(plan: DayPlan, skip: Optional[set] = None, system: Optional[str]
     return [(r.object_id, {"boostDone": 1}) for r in plan.missed_rows if r.object_id is not None and r.request_id not in skip]
 
 
+def old_tle_text(plan: DayPlan) -> str:
+    """
+    The satellites the day's shots were placed with on an orbit whose TLE is
+    more than OLD_TLE days from the day (改修案 10: the imaging plan says so,
+    the day's calculation did not): 「TLE が古い衛星（14 日超）: ISS（20 日前）。
+    撮像時刻・範囲がずれることがある」 ("" when none).
+    """
+    from ..plan.output import OLD_TLE
+    from ..plan.satellites import SAMPLE_SOURCE, platform_key
+    from ..plan.tree import tle_age_days
+    from .model import day_bounds
+
+    first, last = day_bounds(plan.day)
+    mid = (first + last) / 2
+    seen: dict = {}
+    for c in plan.candidates:
+        sat = c.satellite
+        if c.result != TAKEN or sat is None or not c.shots or sat.source == SAMPLE_SOURCE:
+            continue
+        age = tle_age_days(sat, mid)
+        if age == age and abs(age) > OLD_TLE:
+            seen.setdefault(platform_key(sat), (sat.name, age))
+    if not seen:
+        return ""
+    names = "・".join(f"{name}（{round(age)} 日{'前' if age > 0 else '後'}）" for name, age in seen.values())
+    return f"TLE が古い衛星（{OLD_TLE} 日超）: {names}。撮像時刻・範囲がずれることがある"
+
+
 def written_summary(files: Sequence[Written]) -> str:
     """「SYS-A 12 件・SYS-C 3 件」, a system split into files 「SYS-B 250 件（3 ファイル）」."""
     by: dict = {}

@@ -13,6 +13,8 @@
 6. A yearly quota ahead of its pace: a low priority request tries the other
    modes first; the quotas dialog shows the pace.
 7. The request form's one line: how often the satellites can take it.
+10. The base: an old TLE said after the calculation; the follow-up looks on
+    the day the system plans the shot for (PLANNED_AT).
 """
 from __future__ import annotations
 
@@ -434,3 +436,46 @@ def test_the_form_line_counts_the_passes_ahead():
     # Its period over, or no orbit known.
     assert form_text(req, None, [A, B], form_span(req, req.end + 1)) == ("撮像機会: 期間が終わっている", False)
     assert form_text(req, Passes(), [A, B], span)[1] is False
+
+
+# --- 10. The base: old TLEs, the day planned by the system ---------------------------------------------------
+
+def test_an_old_tle_is_said_after_the_calculation():
+    from mikage.core.request.workflow import old_tle_text
+
+    for n, text in ((0, ""), (20, "TLE が古い衛星（14 日超）: ISS 2（20 日前）。撮像時刻・範囲がずれることがある")):
+        d = DAY + timedelta(days=n)
+        first, last = day_bounds(d)
+        req = replace(fixed(category="臨時"), start=first, end=last)
+        passes = day_passes([req], d, [A, B])
+        plan = plan_day([req], d, [system()], [A, B], {}, passes=passes)
+        assert plan.candidates[0].result == TAKEN and plan.candidates[0].shots
+        assert old_tle_text(plan) == text
+
+
+def test_the_follow_up_looks_on_the_day_the_system_plans():
+    from mikage.core.catalog import catalog_of
+    from mikage.core.esri import EsriClient
+    from mikage.core.request.follow import follow_up, follow_window
+    from mikage.core.request.store import HistoryRow
+    from mikage.tests.test_request import CATALOG, D, DAY as REQ_DAY, FIRST, LAST, request, server
+
+    client = EsriClient(server())
+    catalog = catalog_of({"label": "画像", "url": CATALOG, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR",
+                                                                    "source": "URL"}}, [], 0)
+    by_id = {"R-0001": request("R-0001")}
+    # Handed out for the day before; the system answered it takes it on the day of IMG-1 (10:00).
+    before = (REQ_DAY - timedelta(days=1)).isoformat()
+    row = HistoryRow(run_id="RUN", run_date=FIRST - D, day=before, request_id="R-0001", system="SYS-A", object_id=1)
+    planned = replace(row, planned_at=FIRST + 10 * H)
+    assert follow_window(REQ_DAY - timedelta(days=1), [planned]) == (FIRST - D, LAST)
+    assert follow_window(REQ_DAY - timedelta(days=1), [row]) == (FIRST - D, LAST - D)
+    found = follow_up(client, catalog, None, [planned], by_id, LAST + D, 3)
+    assert [(f.captured, f.image_id) for f in found] == [("撮像済み", "IMG-1")]
+    # Not before: only its own day, where there is none, so missed in time.
+    assert [f.captured for f in follow_up(client, catalog, None, [row], by_id, LAST + 3 * D, 3)] == ["未撮像"]
+    # Planned later than the day (and no image anywhere): not missed until that day's wait is over.
+    far = {"R-0001": request("R-0001", rings=[[[135.4, 34.6], [135.5, 34.6], [135.5, 34.7], [135.4, 34.7], [135.4, 34.6]]])}
+    later = replace(row, planned_at=LAST + 2 * D)
+    assert follow_up(client, catalog, None, [later], far, LAST + 3 * D, 3) == []
+    assert [f.captured for f in follow_up(client, catalog, None, [later], far, LAST + 6 * D, 3)] == ["未撮像"]

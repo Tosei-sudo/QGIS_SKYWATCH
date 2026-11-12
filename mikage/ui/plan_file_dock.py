@@ -69,8 +69,8 @@ from ..core.request.store import (
     history_has, history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
 )
 from ..core.request.workflow import (
-    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
-    plan_day, radar_of, shots_of, written_summary,
+    DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, old_tle_text,
+    orbiting, plan_day, radar_of, shots_of, written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.geometry import from_wgs84
@@ -533,7 +533,9 @@ class PlanFileDock(PluginDock):
             text += self.merged_text() + self.shared_text() + self.chances_text()
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
-            self.status.setText("。".join([text, *notes]))
+            # The orbits it was placed on from TLEs far from the day (改修案 10).
+            old = old_tle_text(self.plan)
+            self.status.setText("。".join([text, *notes, *([old] if old else [])]))
             self._update_buttons()
 
         def failed(message):
