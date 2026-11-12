@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from ..esri import EDIT_BATCH
+
 #: What a feature's attribute can be written as, by role.
 TRANSFER_ROLES = {
     "imageId": "画像ID",
@@ -43,8 +45,9 @@ TRANSFER_ROLES = {
 STATUSES = ("ai", "corrected", "manual")
 STATUS_LABELS = {"ai": "AI", "corrected": "修正", "manual": "手動"}
 
-#: Features per applyEdits request.
-BATCH = 250
+#: Features per applyEdits request (no more than the client sends in one, so that a request that fails
+#: never leaves a part saved unknown: core/esri.py EDIT_BATCH).
+BATCH = EDIT_BATCH
 
 
 @dataclass

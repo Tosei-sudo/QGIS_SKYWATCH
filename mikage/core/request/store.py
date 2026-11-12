@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Optional, Sequence
 
-from ..esri import ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
+from ..esri import EDIT_BATCH, ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
 from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .groups import DEFAULT_GROUP_FIELDS
@@ -382,13 +382,15 @@ def upload_requests(client: EsriClient, store: RequestStoreConfig, token: Option
                     now: float, only: Optional[set] = None) -> None:
     """
     Sends the requests of this ledger kept while it could not be reached (all,
-    or those in `only`: (kind, store, item id)). One someone else changed (or
-    deleted) meanwhile is not saved over: it stays waiting, with why (to be
-    thrown away, or changed again after a read).
+    or those in `only`: (kind, store, item id)); the saves together, as
+    `save_requests` sends them. One someone else changed (or deleted)
+    meanwhile is not saved over: it stays waiting, with why (to be thrown
+    away, or changed again after a read).
     """
     work = offline_of(client)
     if work is None:
         return
+    saves: list = []
     for p in work.pending(KIND, store.label):
         if only is not None and (p.kind, p.store, p.item_id) not in only:
             continue
@@ -396,25 +398,39 @@ def upload_requests(client: EsriClient, store: RequestStoreConfig, token: Option
         if req is None:
             work.drop(KIND, store.label, [p.item_id])
             continue
+        if p.op != "remove":
+            # Checked against what it was before the change made offline (#74).
+            req.updated = p.base if p.known else None
+            req.pending_update = None
+            saves.append((p, req))
+            continue
         try:
-            if p.op == "remove":
-                _send_removal(client, store, token, req, p)
-            else:
-                # Checked against what it was before the change made offline (#74).
-                req.updated = p.base if p.known else None
-                req.pending_update = None
-                _save_online(client, store, token, req, now, tried_of(p))
+            _send_removal(client, store, token, req, p)
         except UnreachableError as error:
-            work.add_tried(KIND, store.label, p.item_id, [req.pending_update])
             report.kept.append(f"撮像依頼（{store.label}）: {error}")
             return
         except EsriError as error:
-            work.add_tried(KIND, store.label, p.item_id, [req.pending_update])
             work.note(p, str(error))
             report.kept.append(f"撮像依頼「{req.name}」: {error}")
             continue
         work.drop(KIND, store.label, [p.item_id])
         report.add(KIND)
+    if not saves:
+        return
+    waiting = {req.id: p for p, req in saves}
+    sent = _send_requests(client, store, token, [req for _p, req in saves], now, {req.id: tried_of(p) for p, req in saves},
+                          lambda: work.down(store.url), lambda: False, lambda _p: None)
+    if sent.saved:
+        work.drop(KIND, store.label, [req.id for req in sent.saved])
+        report.add(KIND, len(sent.saved))
+    for req, error in sent.failed:
+        work.add_tried(KIND, store.label, req.id, [req.pending_update])
+        work.note(waiting[req.id], str(error))
+        report.kept.append(f"撮像依頼「{req.name}」: {error}")
+    if sent.left:
+        for req in sent.left:
+            work.add_tried(KIND, store.label, req.id, [req.pending_update])
+        report.kept.append(f"撮像依頼（{store.label}）: {sent.stop}")
 
 
 def _send_removal(client: EsriClient, store: RequestStoreConfig, token: Optional[str], req: ImagingRequest, p: Pending) -> None:
@@ -519,6 +535,204 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
         raise
     req.pending_update = None
     return req
+
+
+# --- Several requests at once (一括編集, 取り込み, 送信待ち) ------------------------------------------
+
+@dataclass
+class SavedRequests:
+    """What became of saving several requests (`save_requests`)."""
+    #: As saved (their object ids set); those kept to send later while the ledger cannot be reached among them.
+    saved: list = field(default_factory=list)
+    #: (request, error) of those not saved: a ConflictError when someone else changed (or deleted) it first.
+    failed: list = field(default_factory=list)
+    #: Stopped by `canceled` (the rest neither saved nor failed).
+    canceled: bool = False
+
+    @property
+    def conflicts(self) -> int:
+        return sum(1 for _r, error in self.failed if isinstance(error, ConflictError))
+
+
+@dataclass
+class _Sent:
+    saved: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+    #: Not sent: the ledger could not be reached on the way (`stop`), or `canceled`.
+    left: list = field(default_factory=list)
+    stop: Optional[EsriError] = None
+    canceled: bool = False
+
+
+def _chunks(reqs: Sequence[ImagingRequest], size: int):
+    """`size` at a time in order; a request whose id is already in the chunk starts the next (saved after the first)."""
+    chunk: list = []
+    ids: set = set()
+    for r in reqs:
+        if len(chunk) >= size or r.id in ids:
+            yield chunk
+            chunk, ids = [], set()
+        chunk.append(r)
+        ids.add(r.id)
+    if chunk:
+        yield chunk
+
+
+def _send_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str], reqs: Sequence[ImagingRequest],
+                   now: float, tried: dict, down: Callable[[], bool], canceled: Callable[[], bool],
+                   progress: Callable[[float], None]) -> _Sent:
+    """
+    `_save_online` for several requests, EDIT_BATCH to a round: the ledger
+    asked once for all of a round's ids, then one applyEdits for them. Each
+    request is still checked on its own (an id already there is changed, not
+    added again, #73; one someone else changed or deleted since it was read
+    is not overwritten, #74) and goes through or not on its own
+    (rollbackOnFailure=false). A round that cannot be sent fails alone; one
+    cut off from the ledger (`down`, or no answer) leaves it and the rest
+    unsent (`left`).
+    """
+    sent = _Sent()
+    reqs = list(reqs)
+    f = store.fields
+    try:
+        names, oid = _layer(client, store.url, token, store.label, (f["id"],))
+    except EsriError as error:
+        sent.left, sent.stop = reqs, error
+        return sent
+    tracked = f["updated"] in names
+    out_fields = ",".join(dict.fromkeys(n for n in (f["id"], oid, f["updated"] if tracked else "") if n))
+    chunks = list(_chunks(reqs, EDIT_BATCH))
+    done = 0
+    for k, chunk in enumerate(chunks):
+        rest = [r for c in chunks[k + 1:] for r in c]
+        if canceled():
+            sent.left, sent.canceled = chunk + rest, True
+            break
+        if down():
+            sent.left, sent.stop = chunk + rest, UnreachableError(f"{store.label} に届かず")
+            break
+        try:
+            found = client.find(store.url, f["id"], [r.id for r in chunk], token, out_fields=out_fields)
+        except EsriError as error:
+            if isinstance(error, UnreachableError) or down():
+                sent.left, sent.stop = chunk + rest, error
+                break
+            sent.failed += [(r, error) for r in chunk]
+            done += len(chunk)
+            progress(100 * done / len(reqs))
+            continue
+        if down():
+            # Read from the cache: kept to send later (as save_request keeps one).
+            sent.left, sent.stop = chunk + rest, UnreachableError(f"{store.label} に届かず")
+            break
+        ready: list = []
+        for req in chunk:
+            a = found.get(req.id)
+            if a is not None:
+                server_oid = int(a[oid]) if is_number(a.get(oid)) else None
+                server_stamp = _number(a.get(f["updated"])) if tracked else None
+                if req.object_id is None:
+                    req.object_id = server_oid
+                    if req.pending_update is None and req.updated is None:
+                        req.updated = server_stamp
+                elif server_oid is not None and server_oid != req.object_id:
+                    req.object_id = server_oid
+                if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
+                        and not any(_same_stamp(server_stamp, s) for s in (req.pending_update, *tried.get(req.id, ())))):
+                    sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が読み込み後に更新したため保存を中止（読み込み直してから変更）")))
+                    continue
+            elif req.object_id is not None:
+                sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が台帳から削除済み（読み込み直して確認）")))
+                continue
+            baseline = req.updated
+            if req.created is None:
+                req.created = now
+            req.updated = now
+            feature = {"attributes": _only(attributes_of(req, f), names),
+                       "geometry": {"rings": esri_rings(req.rings), "spatialReference": {"wkid": 4326}}}
+            if req.object_id is not None:
+                feature["attributes"][oid] = req.object_id
+            ready.append((req, feature, baseline))
+        adds = [x for x in ready if x[0].object_id is None]
+        updates = [x for x in ready if x[0].object_id is not None]
+
+        def unsure(items) -> None:
+            # Kept as read: saving again checks the ledger, which may or may not hold this attempt.
+            for req, _feature, baseline in items:
+                req.updated, req.pending_update = baseline, now
+
+        if ready:
+            try:
+                result = client.apply_edits(store.url, adds=[x[1] for x in adds], updates=[x[1] for x in updates], token=token)
+            except EsriError as error:
+                unsure(ready)
+                if isinstance(error, UnreachableError) or down():
+                    sent.left, sent.stop = [x[0] for x in ready] + rest, error
+                    break
+                sent.failed += [(x[0], error) for x in ready]
+                done += len(chunk)
+                progress(100 * done / len(reqs))
+                continue
+            for items, results in ((adds, result.add_results), (updates, result.update_results)):
+                for i, item in enumerate(items):
+                    req = item[0]
+                    r = results[i] if i < len(results) else {}
+                    if r.get("success") and (req.object_id is not None or is_number(r.get("objectId"))):
+                        if req.object_id is None:
+                            req.object_id = int(r["objectId"])
+                        req.pending_update = None
+                        sent.saved.append(req)
+                    else:
+                        unsure([item])
+                        sent.failed.append((req, EsriError((r.get("error") or {}).get("description") or ("保存失敗" if r else "保存の結果なし"))))
+        done += len(chunk)
+        progress(100 * done / len(reqs))
+    return sent
+
+
+def save_requests(client: EsriClient, store: RequestStoreConfig, token: Optional[str], reqs: Sequence[ImagingRequest], now: float,
+                  canceled: Callable[[], bool] = lambda: False, progress: Callable[[float], None] = lambda _p: None) -> SavedRequests:
+    """
+    Saves several requests as `save_request` saves each, in a few requests
+    to the ledger (EDIT_BATCH to an applyEdits, not three requests each):
+    the same checks per request, each saved or failed on its own (with
+    why). While the ledger cannot be reached (from the start, or cut off on
+    the way) the rest are kept to send once it answers (core/offline.py).
+    """
+    out = SavedRequests()
+    reqs = list(reqs)
+    if not reqs:
+        return out
+    work = offline_of(client)
+
+    def down() -> bool:
+        return work is not None and work.down(store.url)
+
+    if down():
+        out.saved = [_keep_request(work, store, r, now) for r in reqs]
+        return out
+    waiting: set = set()
+    tried: dict = {}
+    if work is not None:
+        for r in reqs:
+            w = work.item(KIND, store.label, r.id)
+            if w is not None:
+                # Changed offline and not sent yet: checked against the ledger as it was before that change (#74).
+                r.updated = w.base if w.known else None
+                r.pending_update = None
+                tried[r.id] = tried_of(w)
+                waiting.add(r.id)
+    sent = _send_requests(client, store, token, reqs, now, tried, down, canceled, progress)
+    out.saved, out.failed, out.canceled = sent.saved, sent.failed, sent.canceled
+    if sent.left and not sent.canceled:
+        if down():
+            out.saved += [_keep_request(work, store, r, now) for r in sent.left]
+        else:
+            out.failed += [(r, sent.stop) for r in sent.left]
+    gone = [r.id for r in sent.saved if r.id in waiting]
+    if gone:
+        work.drop(KIND, store.label, gone)
+    return out
 
 
 class Saved(int):

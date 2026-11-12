@@ -49,6 +49,11 @@ class Transport(Protocol):
         ...
 
 
+#: Adds and updates per applyEdits request, and object ids per deleteFeatures (or applyEdits deletes)
+#: request: more are sent as several requests (a large bulk change stays within what servers take in one).
+EDIT_BATCH = 200
+DELETE_BATCH = 500
+
 #: The parts of an edit's answer the audit log reads.
 _RESULTS = ("addResults", "updateResults", "deleteResults", "success")
 
@@ -256,11 +261,12 @@ class EsriClient:
         token: Optional[str] = None,
     ) -> "EditResults":
         """
-        Adds, updates and deletes features in one request
-        (`rollbackOnFailure=false`). Adds and updates get the layer's
-        tracking fields (who and when, core/edit_stamp.py).
+        Adds, updates and deletes features (`rollbackOnFailure=false`, so
+        each one goes through or not on its own), EDIT_BATCH adds and updates
+        and DELETE_BATCH deletes to a request: a large change is several
+        requests, its results one list in the order given. Adds and updates
+        get the layer's tracking fields (who and when, core/edit_stamp.py).
         """
-        params = {"rollbackOnFailure": "false"}
         adds, updates, deletes = list(adds), list(updates), list(deletes)
         if (adds or updates) and edit_stamp.tracking().enabled:
             try:
@@ -270,19 +276,33 @@ class EsriClient:
             when, user = edit_stamp.now_ms(), edit_stamp.user_name()
             adds = edit_stamp.stamp(adds, types, True, when, user=user)
             updates = edit_stamp.stamp(updates, types, False, when, user=user)
-        if adds:
-            params["adds"] = json.dumps(adds, ensure_ascii=False)
-        if updates:
-            params["updates"] = json.dumps(updates, ensure_ascii=False)
-        if deletes:
-            params["deletes"] = ",".join(str(int(d)) for d in deletes)
-        value = self.ask(f"{url}/applyEdits", params, token)
-        return EditResults(value)
+        rounds = max(1, -(-len(adds) // EDIT_BATCH), -(-len(updates) // EDIT_BATCH), -(-len(deletes) // DELETE_BATCH))
+        merged: dict[str, list] = {"addResults": [], "updateResults": [], "deleteResults": []}
+        for k in range(rounds):
+            params = {"rollbackOnFailure": "false"}
+            part_adds, part_updates = adds[k * EDIT_BATCH:(k + 1) * EDIT_BATCH], updates[k * EDIT_BATCH:(k + 1) * EDIT_BATCH]
+            part_deletes = deletes[k * DELETE_BATCH:(k + 1) * DELETE_BATCH]
+            if part_adds:
+                params["adds"] = json.dumps(part_adds, ensure_ascii=False)
+            if part_updates:
+                params["updates"] = json.dumps(part_updates, ensure_ascii=False)
+            if part_deletes:
+                params["deletes"] = ",".join(str(int(d)) for d in part_deletes)
+            value = self.ask(f"{url}/applyEdits", params, token)
+            if rounds == 1:
+                return EditResults(value)
+            for key in merged:
+                merged[key] += value.get(key) or []
+        return EditResults(merged)
 
     def delete_features(self, url: str, object_ids: Iterable[int], token: Optional[str] = None) -> list[dict[str, Any]]:
-        """Deletes features by object id; the results one by one."""
-        value = self.ask(f"{url}/deleteFeatures", {"objectIds": ",".join(str(int(i)) for i in object_ids)}, token)
-        return value.get("deleteResults") or []
+        """Deletes features by object id, DELETE_BATCH to a request; the results one by one."""
+        ids = [str(int(i)) for i in object_ids]
+        out: list[dict[str, Any]] = []
+        for start in range(0, max(1, len(ids)), DELETE_BATCH):
+            value = self.ask(f"{url}/deleteFeatures", {"objectIds": ",".join(ids[start:start + DELETE_BATCH])}, token)
+            out += value.get("deleteResults") or []
+        return out
 
 
 def deleted_count(value: dict[str, Any], what: str = "削除") -> int:
