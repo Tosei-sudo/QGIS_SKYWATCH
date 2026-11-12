@@ -345,7 +345,9 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 「計算」は、残りの枚数を超えるモードには依頼を割り当てない（別の衛星・モードを試し、どれもなければ「年間上限（残りの枚数なし）」で見送り。手で採用すると警告付きで出す）。一覧の下に、その日の候補の衛星にかかる上限の消費・見込み・今回・残りを出す（残りが上限の 1 割以下なら色付き）。「上限シミュレーション…」も上限を日ごとに守る（採用した分は撮れたものとして引いていく）
   - 「年間上限…」（メニューの「撮像依頼」→「年間撮像上限…」でも）で、上限ごとの消費・見込み・残りと、その年の撮像の一覧（まとめた依頼は 1 行）を見る。ノイズやジャミングなどでシステムが数えない撮像は、選んで「数えない…」で枚数と理由を記録する（撮像の範囲のレイヤーに書く。外の画像カタログには書かない）
   - 1 日に何回も撮る依頼は「1 日の回数」に n 回以上・m 回以下（空なら n 回）と回の間隔（既定 1 時間）を入れる（台帳の `TIMES_MIN`・`TIMES_MAX`・`TIMES_GAP`、2026-11-11）。回ごとに別のパスで、1〜n 回目は依頼の優先度で、n を超える回はほかの依頼を詰めたあとの空いた枠で出す。ファイル・出力履歴は回ごとに 1 行（`occurrence`・`occurrenceId`、出力履歴の `OCCURRENCE`）。n 回に届かない日は置けた回だけ「回数が足りない（2/3 回）」の警告付きで出し、その日は達成にしない。画像が n 回分（間隔をあけて）入ればその日は撮像済み。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「25. 1 日の回数」
-  - 軌道を使わずに件数・枚数だけで詰めるシステムは `orbit: false`、まとめないシステムは `merge: false`。TLE を読めない衛星は件数だけで詰める。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「24. 軌道のパスへの割り当てとまとめ」
+  - **広い範囲の分担**（2026-11-12）: 1 ショットに収まらない範囲の 1 回分は、選んだ衛星のパスで 95% に届かなければ、同じシステムのほかの衛星（依頼の条件に合うもの）のパスで残りを分けて撮る（撮像間隔・1 日の回数・システムの上限・年間上限は守る）。ファイル・出力履歴はショットごとに 1 行で、範囲はそのショットが撮る部分（シーンの内側に `mergeMargin` を残した四角。項目 `shareNo`・`shareCount`・`shareCoverage`・`coverage`、出力履歴の `PART_NO`、外部連携ID もショットごと）。1 日の回数の 2 回目以降は、前の回のショットから回の間隔以上離れたパスで撮る。分けないシステムは `share: false`
+  - **撮像済み・撮像待ちを除く**（2026-11-12）: 期間内1回で 1 日 1 回の範囲の依頼は、照合で撮像済みになった画像（画像カタログのフットプリント）が撮った部分と、前の日までに出して照合待ちのショットの部分（撮像待ち。不採用は除く）を除いて、残りだけを割り振る。95% 以上撮れていれば「撮像済み（範囲の約 xx%）」「撮像待ち（… の出力で範囲の約 xx%）」で見送り（期限まで 2 日以内なら撮像待ちは除かずにもう一度出す）。照合は撮像済みの画像が範囲の 95% 以上を撮るまで完了にせず、残りを次の日以降の出力へ回す（手で撮像済みにしたもの・画像と関連付けたものは今までどおり完了）。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「30. 広い範囲の分担と、撮像済み・撮像待ちの差し引き」
+  - 軌道を使わずに件数・枚数だけで詰めるシステムは `orbit: false`、まとめないシステムは `merge: false`、広い範囲をほかの衛星と分担しないシステムは `share: false`。TLE を読めない衛星は件数だけで詰める。詳しくは [docs/imaging-requests.md](docs/imaging-requests.md) の「24. 軌道のパスへの割り当てとまとめ」
   - 衛星とシステムの対応は、衛星カタログの `system` 属性（`fields.system`）があればそれ、なければ `requestExports` の `series`・`satellites`
   - 前回までに出した依頼のうち照合で未撮像になったもの（または期間内1回で期限まで 2 日以内のもの）は、優先度を 100 繰り上げる候補として出す（最優先の帯に入ったら止まる）。「計算」は画像カタログとの照合をしない（2026-11-11）。照合は「照合…」か[定期照合](#定期照合タスクスケジューラ)で行い、「計算」はその結果（出力履歴の撮像済み・未撮像）をそのまま使う
   - 確認画面で採用・見送りの切り替え、順番の入れ替え、繰り上げの取り消しをしてから書き出す。出力した内容は出力履歴（`requestStores` の `history`）に残る
@@ -1435,7 +1437,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 - 必須の項目・属性名の形・数の範囲・重複などを「確認」に出す（最後はプラグインの「設定…」の問題の一覧で確かめる）
 - 撮像依頼の日次出力（`requestExports`、オーダー用ファイル）: CSV の列（`columns`）を表で、JSON の JSON Schema（`x-source` など）を木で組める。システムから受け取ったスキーマを読み込んで `x-source` を書き添え、`.schema.json` として保存もできる。架空の依頼 2 件での出力の見本と、スキーマでの検査結果を出す
   - 項目ごとに「既定値」（`default`。値が空のときに書く。必須の項目に）と固定値（`const`）を指定できる。配列は JSON で書く（`[]`・`[""]`・`["On"]`）。型が `string` の固定値・既定値は書いたとおりの文字（`001` も `001`）
-  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）、軌道から出した撮像（`passTime`・`passOffNadir`・`passIncidence`・`passDirection`・`passLookSide`）、まとめた依頼（`mergedIds`・`mergedNames`・`mergedCount`）、1 日に何回も撮る依頼の何回目か（`occurrence`・回つきの ID `occurrenceId`・`timesMin`・`timesMax`）、出力の行の外部連携ID（`linkId`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
+  - 管理番号・識別番号（`managementNo`・`identificationNo`）、衛星シリーズ配下の衛星の配列（`seriesSatellites`）、範囲の中央の GeoJSON（`centerGeojson`）、軌道から出した撮像（`passTime`・`passOffNadir`・`passIncidence`・`passDirection`・`passLookSide`）、まとめた依頼（`mergedIds`・`mergedNames`・`mergedCount`）、1 日に何回も撮る依頼の何回目か（`occurrence`・回つきの ID `occurrenceId`・`timesMin`・`timesMax`）、出力の行の外部連携ID（`linkId`）、広い範囲を分担したショットの番号・数・割合（`shareNo`・`shareCount`・`shareCoverage`）とその回で撮れる範囲の割合（`coverage`）。数値の書式（`%03d`・`%.1f` など）の書き方は [docs/imaging-requests.md](docs/imaging-requests.md) の「8.6 数値の書式」
 - 入力途中の内容はブラウザに残り、次に開いたとき続きから
 - 項目の役割・選択肢はプラグインの定数の写し。プラグインを変えたら `python3 -m skywatch.tests.test_config_builder` で更新する（テストが食い違いを見つける）
 
@@ -1526,7 +1528,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `groundStations` | 配列 | `name`・`lon`・`lat`（必須）、`minElevation`（既定 5°） | なし | [撮像計画](#撮像計画) |
 | `cloudForecast` | オブジェクトか `false` | `url`（Open-Meteo 形式の API）・`file`（予報ファイル）・`folder`（いちばん新しいファイルを読む）のどれか 1 つと `label`。`false` で雲量予報を出さない | Open-Meteo | [docs/cloud-forecast-file.md](docs/cloud-forecast-file.md) |
 | `requestStores` | 配列 | 撮像依頼台帳の `url`・`fields`・`history`（履歴テーブル）・`historyFields`・`groups`（依頼グループのテーブル）・`groupFields`・`shots`（撮像の範囲のレイヤー）・`shotFields`・`quotas`（年間撮像上限のテーブル。`shots` も要る）・`quotaFields`・`catalog`・`missAfterDays`・`token` | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
-| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`linkIdLength`（外部連携ID の文字数、6〜32。既定 `12`）・`linkIdChars`（その文字: `base32`（既定）・`digits`・`hex`）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`（外部連携ID は `linkId`）・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`・`linkDays`（外部連携ID を取り込む日の何日前の出力まで探すか。既定 `7`））など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
+| `requestExports` | 配列 | 日次出力の衛星システムごとの `system`・`format`（`csv` など）・`satellites`・`series`・`limit`・`quota`・`orbit`（既定 `true`: 衛星の軌道でその日のパスに割り当て、撮像間隔・1 日の回数を守る）・`merge`（既定 `true`: 同じパスの連続シーンに収まる依頼を 1 行にまとめる）・`mergeMargin`（まとめるとき撮像の枠の内側に残す余裕、メートル。既定 `500`。分担の行の範囲にも使う）・`share`（既定 `true`: 1 ショットに収まらない範囲を、そのシステムのほかの衛星のパスで分担する）・`priority`・`columns`・`folder`・`fileName`・`maxPerFile`（1 ファイルの依頼件数の上限。超えた日は分けて書き出す）・`linkIdLength`（外部連携ID の文字数、6〜32。既定 `12`）・`linkIdChars`（その文字: `base32`（既定）・`digits`・`hex`）・`timeZone`・`encoding`・`resultFile`（採否の結果ファイルの読み方: `format`・`encoding`・`delimiter`・`header`・`skipLines`・`columns`（`key`・`column`・`target`（外部連携ID は `linkId`）・`map`・`pattern`・`format`・`default`・`only`・`skip`）か JSON の `schema`（`x-target`）・`missing`・`sizeKm`・`linkDays`（外部連携ID を取り込む日の何日前の出力まで探すか。既定 `7`））など | なし | [docs/imaging-requests.md](docs/imaging-requests.md) |
 
 
 #### 観測記録・分類体系
@@ -1776,7 +1778,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 ### `TBL_REQUEST_HISTORY`（撮像依頼の出力履歴）
 
-日次出力の 1 依頼・1 日 1 行（1 日に何回も撮る依頼は 1 回 1 行）と、システムが依頼なしで計画したもの（要求外）の 1 計画 1 行。その日の撮像予定（「撮像予定」ドック・ダッシュボード）はこの表の対象日の行。ポリゴン（依頼の範囲、要求外は結果ファイルか手で描いた範囲）。形状なしのテーブルでもよい（範囲は残らず、ドックは台帳の範囲で描く。`create_tables.py` は既にある表の形状を変えないので、ポリゴンにするなら作り直す）。`requestStores[].historyFields`（既定は下の名前）。
+日次出力の 1 依頼・1 日 1 行（1 日に何回も撮る依頼は 1 回 1 行、広い範囲を衛星で分担した依頼はショットごとに 1 行で範囲はそのショットの部分）と、システムが依頼なしで計画したもの（要求外）の 1 計画 1 行。その日の撮像予定（「撮像予定」ドック・ダッシュボード）はこの表の対象日の行。ポリゴン（依頼の範囲、要求外は結果ファイルか手で描いた範囲）。形状なしのテーブルでもよい（範囲は残らず、ドックは台帳の範囲で描く。`create_tables.py` は既にある表の形状を変えないので、ポリゴンにするなら作り直す）。`requestStores[].historyFields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
@@ -1809,6 +1811,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `SHOT_ID` | 撮像ID | `String(64)` | その依頼を撮る撮像（[`TBL_REQUEST_SHOT`](#tbl_request_shot撮像の範囲) の `SHOT_ID`。まとめた依頼は同じ値）。軌道を使わずに詰めた依頼・見送りは空。無くても動く | `shotId` |
 | `OCCURRENCE` | その日の回 | `Integer` | 1 日に何回も撮る依頼（`TIMES_MIN`・`TIMES_MAX`）の何回目か（1, 2 …。1 回の依頼は 1）。無くても動く（何回も撮る依頼は回の区別が残らない） | `occurrence` |
 | `LINK_ID` | 外部連携ID | `String(32)` | 出力した行の短い ID（既定 12 文字の英数字。システムごとに `linkIdLength`・`linkIdChars`）。ファイルの項目 `linkId` で渡し、結果ファイルの `linkId` の列でこの行と照合する。同じ依頼・同じ日・同じシステム・同じ回なら書き出し直しても同じ値。見送りは空。無くても動く（ID では照合できない） | `linkId` |
+| `PART_NO` | 分担の番号 | `Integer` | 1 ショットに収まらない広い範囲をその日の衛星で分けて撮るとき（分担）の何番目のショットか（1, 2 …）。行の範囲はそのショットが撮る部分。範囲をまるごと出した行は空。無くても動く（分担の行の区別が残らず、照合は依頼の範囲で見る） | `part` |
 
 ### `TBL_OBSERVATION`（観測記録）
 
@@ -2074,7 +2077,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `LOOK_SIDE` | 観測方向 | `String(16)` | `右`・`左` | `lookSide` |
 | `SCENES` | シーン数 | `Integer` | 連続シーン数（大きな範囲は撮像すべての合計） | `scenes` |
 | `SHOT_COUNT` | 撮像回数 | `Integer` | 撮像の回数（1 回に収まらない大きな範囲だけ 2 以上） | `shots` |
-| `COVERAGE` | 範囲の割合 | `Double` | 大きな範囲で撮れる割合（%。1 回に収まる行は空） | `coverage` |
+| `COVERAGE` | 範囲の割合 | `Double` | 大きな範囲で撮れる割合（%。1 回に収まる行は空。衛星で分担した行はそのショットが撮る分） | `coverage` |
 | `REQ_ID` | 依頼ID | `String(64)` | ファイルでその行になった依頼の `REQ_ID` | `requestId` |
 | `REQ_IDS` | まとめた依頼ID | `String(4000)` | この撮像で撮る依頼の `REQ_ID`（カンマ区切り、行の依頼が先頭） | `requestIds` |
 | `REQ_NAMES` | まとめた依頼の名称 | `String(4000)` | 同じ依頼の名称（読点 `、` 区切り） | `names` |

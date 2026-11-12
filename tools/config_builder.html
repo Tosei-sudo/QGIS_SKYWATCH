@@ -305,7 +305,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "mergedInto": "MERGED_INTO",
    "shotId": "SHOT_ID",
    "occurrence": "OCCURRENCE",
-   "linkId": "LINK_ID"
+   "linkId": "LINK_ID",
+   "part": "PART_NO"
   },
   "requestGroups": {
    "name": "GROUP_NAME",
@@ -774,7 +775,11 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "occurrenceId",
   "timesMin",
   "timesMax",
-  "linkId"
+  "linkId",
+  "shareNo",
+  "shareCount",
+  "shareCoverage",
+  "coverage"
  ],
  "exportListSources": [
   "series",
@@ -1060,6 +1065,7 @@ const ROLE_LABELS = {
   uncounted: "数えない枚数", uncountedReason: "数えない理由", limit: "年間上限",
   startMonth: "年の始まりの月", initialUsed: "当初の消費枚数", countFrom: "数え始める日",
   timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限", timesGap: "回の間隔（時間）", occurrence: "その日の何回目か",
+  part: "分担の何番目か（広い範囲を衛星で分けたとき。1 から）",
 };
 const SOURCE_LABELS = {
   id: "依頼 ID", name: "名称", managementNo: "管理番号", identificationNo: "識別番号", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
@@ -1080,6 +1086,8 @@ const SOURCE_LABELS = {
   occurrence: "その日の何回目か（1 日の回数。1 回の依頼は 1）", occurrenceId: "回つきの依頼 ID（R-0001-2。1 回の依頼は ID のまま）",
   timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限",
   linkId: "外部連携ID（出力の行の短い ID。結果ファイルの linkId で照合）",
+  shareNo: "分担の何番目か（広い範囲を衛星で分けたとき。分けないと空）", shareCount: "分担の数（その日のその回のショット数）",
+  shareCoverage: "このショットが撮る範囲の割合（%、分担のとき）", coverage: "その回で撮れる範囲の割合（%、撮像済み・撮像待ちを含む。1 ショットに収まる依頼は空）",
 };
 const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北", center: "緯度,経度", centerRadius: "緯度,経度,半径km", vertices: "頂点の緯度経度",
   centerGeojson: "中央の GeoJSON（Point）" };
@@ -1463,7 +1471,8 @@ const SPEC = [
         L("sceneKm", "シーンの大きさ（km、幅, 長さ）", { numbers: true, ph: "10, 10", help: "軌道で計算しない衛星（TLE なし・orbit: false）の枚数の見積もりに使う" }),
         B("orbit", "衛星の軌道で詰める（orbit）", { help: "既定 true: その日のパスに割り当て、衛星の撮像間隔（minInterval）・1 日の回数（maxPerDay）を守る。false で件数・枚数だけで詰める" }),
         B("merge", "近い依頼を 1 回の撮像にまとめる（merge）", { help: "既定 true: 同じパスで連続シーン（scenesPerPass）に収まる依頼は 1 行にまとめ、範囲はまとめた依頼を囲むパスに平行な四角" }),
-        N("mergeMargin", "まとめるときの余裕（m）", { min: 0, ph: "500", help: "まとめた依頼を囲む四角が、撮像の枠（幅・連続シーンの長さ）の内側にこれだけ残るときだけまとめる。システム側の計画で 1 回に収まらず 2 オーダーにならないように" }),
+        N("mergeMargin", "まとめるときの余裕（m）", { min: 0, ph: "500", help: "まとめた依頼を囲む四角が、撮像の枠（幅・連続シーンの長さ）の内側にこれだけ残るときだけまとめる。システム側の計画で 1 回に収まらず 2 オーダーにならないように。分担の行の範囲（ショットの枠の内側）にも使う" }),
+        B("share", "広い範囲を衛星で分担する（share）", { help: "既定 true: 1 ショットに収まらない広い範囲は、そのシステムの条件に合う衛星のパスで分けて撮る（1 回分を 95% まで）。ファイルはショットごとに 1 行で、範囲はそのショットが撮る部分（項目 shareNo・shareCount・shareCoverage・coverage）。false で 1 つの衛星だけ" }),
         S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
         T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}。分けるときの番号 {part}・{part:%02d}・{parts}（ファイルの数）" }),
         N("maxPerFile", "1 ファイルの最大件数", { min: 1, ph: "上限なし", help: "これより多い日は、この件数ずつのファイルに分けて書き出す（優先度順）。ファイル名に {part} がなければ _1・_2 … を拡張子の前に付ける（1 ファイルで収まる日は付けない）" }),
@@ -2314,14 +2323,15 @@ const SAMPLE_REQS = [
     scenes: 1, ring: [[139.70, 35.40], [139.95, 35.40], [139.95, 35.65], [139.70, 35.65], [139.70, 35.40]], requester: "運用", group: "第1班", note: "", warnings: "",
     passTime: DAY + 10.5 * 3600000, passOffNadir: 12.3, passIncidence: 13.6, passDirection: "降交", passLookSide: "右",
     mergedIds: ["R-0001", "R-0003"], mergedNames: ["東京湾 定点", "東京湾 奥"], mergedCount: 2,
-    occurrence: 1, occurrenceId: "R-0001-1", timesMin: 2, timesMax: 3 },
+    occurrence: 1, occurrenceId: "R-0001-1", timesMin: 2, timesMax: 3, shareNo: null, shareCount: null, shareCoverage: null, coverage: null },
   { id: "R-0002", name: "臨時 舞鶴", managementNo: "", identificationNo: "", category: "臨時", achieve: "期間内1回", start: DAY + 3 * 3600000, end: DAY + 3 * 86400000, periodStart: DAY + 3 * 3600000, periodEnd: DAY + 3 * 86400000,
     repeat: "", priorityRaw: 640, priorityBase: 5, boost: 1, kind: "SAR", series: [], satellites: ["SAR-Y2"], modes: ["Spotlight"],
     seriesSatellites: [], seriesSatelliteIds: [], satellite: "SAR-Y2", satelliteId: "50002", mode: "Spotlight", sensor: "SAR",
     offNadirMin: null, offNadirMax: null, incidenceMin: 20, incidenceMax: 45, lookSide: "右", orbitDir: "降交", resolution: 1, timeOfDay: "夜", cloudMax: null, cloudForecast: null, weatherFlag: "",
     scenes: 2, ring: [[135.30, 35.45], [135.42, 35.45], [135.42, 35.55], [135.30, 35.55], [135.30, 35.45]], requester: "分析", group: "", note: "至急", warnings: "シーン数が多い",
     passTime: DAY + 21.2 * 3600000, passOffNadir: 31.5, passIncidence: 35.1, passDirection: "昇交", passLookSide: "右",
-    mergedIds: [], mergedNames: [], mergedCount: 1, occurrence: 1, occurrenceId: "R-0002", timesMin: 1, timesMax: 1 },
+    mergedIds: [], mergedNames: [], mergedCount: 1, occurrence: 1, occurrenceId: "R-0002", timesMin: 1, timesMax: 1,
+    shareNo: 1, shareCount: 2, shareCoverage: 34.4, coverage: 61.2 },
 ];
 const TIME_SOURCES = ["start", "end", "periodStart", "periodEnd", "runDate", "passTime"];
 /** 見本の今のファイル: その依頼と、何番目か（maxPerFile で分けたとき）。 */

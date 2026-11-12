@@ -23,7 +23,7 @@ from typing import Optional, Sequence
 from ..plan.satellites import SatelliteSpec
 from ..plan.weather import CloudSeries
 from .daily import HELD, TAKEN, Candidate, allocate, carries_over, gather, occurrence_key, wants_weather
-from .export import Written, convert_priority
+from .export import Written, convert_priority, row_rings
 from .follow import missed_ids
 from .link_id import link_ids
 from .model import ImagingRequest, occurs_on
@@ -133,18 +133,19 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
              clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
-             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None) -> DayPlan:
+             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None) -> DayPlan:
     """
     The candidates of a day, gathered and fitted (`target`: the one system
     written from here; `passes`: the orbits'; `quotas`: what the yearly
-    quotas have left).
+    quotas have left; `covered`: what of the 期間内1回 areas is taken or
+    handed out on earlier days, covered.read_covered).
     """
     missed = missed_ids(history)
-    cands = gather(requests, day, sats, clouds, missed)
+    cands = gather(requests, day, sats, clouds, missed, covered)
     plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
                    passes=passes, quotas=quotas)
     today = handed_today(history, day)
-    plan.written = {occurrence_key(r.request_id, r.occurrence): (r.system, r.satellite) for r in today}
+    plan.written = {occurrence_key(r.request_id, r.occurrence, r.part): (r.system, r.satellite) for r in today}
     plan.handed = frozenset((r.request_id, r.system) for r in today)
     plan.target = target or None
     plan.refit()
@@ -207,7 +208,8 @@ def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Option
         sat = c.satellite
         row = ShotRow(
             shot_id=f"{run_id}-{n}", run_id=run_id, run_date=run, day=plan.day.isoformat(), system=c.system.system,
-            satellite=sat.name if sat else "", scenes=c.scenes, shots=max(1, len(c.shots)), coverage=c.coverage,
+            satellite=sat.name if sat else "", scenes=c.scenes, shots=max(1, len(c.shots)),
+            coverage=c.gain if c.part else c.coverage,
             request_id=c.request.id, request_ids=[m.request.id for m in members], names=[m.request.name or m.request.id for m in members],
             file=file_of(files, c.system.system, c.key) or "", sensor=(sat.sensor or "") if sat else "", mode=(sat.mode or "") if sat else "",
             rings=[s.area_ring() for s in c.shots] if c.shots else [[list(p[:2]) for p in r] for r in c.request.rings])
@@ -240,7 +242,9 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
 
     A request taken several times a day has a row per time (`occurrence`);
     a time past the n it needs that found no room has none (it was only
-    tried in the room left).
+    tried in the room left). An area too big for one shot has a row per
+    shot (`part` 1 …, 分担), its area the part that shot takes (as its file
+    row); a shot left out by hand has none (the time's first row tells).
 
     Each row handed out has its 外部連携ID (`link_id`, the one its file
     writes as `linkId`, link_id.link_ids); a row held back has none.
@@ -252,7 +256,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
     links: dict = {}
     rows = []
     for c in plan.candidates:
-        if not of_system(c, system) or c.extra and c.result != TAKEN:
+        if not of_system(c, system) or c.extra and c.result != TAKEN or c.main is not None and c.result != TAKEN:
             continue
         # Held back: named with the system written, when only one is (its rows are replaced when it is written again).
         name = c.system.system if c.system else (system or "")
@@ -271,12 +275,13 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.forecast is None else round(c.forecast, 1), scenes=c.scenes if taken else None,
             merged_into=c.lead.request.id if taken and c.member else "",
-            shot_id=shot_ids.get(c.key, "") if taken else "", occurrence=c.occurrence,
+            shot_id=shot_ids.get(c.key, "") if taken else "", occurrence=c.occurrence, part=c.part if taken else 0,
             link_id=links[name].get(c.key, "") if taken else "",
             result=result, reason=reason, file=(file or "") if taken else "",
             captured="未判定" if taken else "", boost_done=0,
             # Handed out: the system's answer is awaited (core/request/adoption.py). The area, for maps of the day's plan.
-            adoption="不明" if taken else "", rings=[[list(p[:2]) for p in r] for r in c.request.rings]))
+            adoption="不明" if taken else "",
+            rings=row_rings(c, c.system.merge_margin) if taken and c.part and c.system else [[list(p[:2]) for p in r] for r in c.request.rings]))
     return rows
 
 
@@ -315,20 +320,20 @@ def keep_answers(earlier: Sequence[HistoryRow], rows: Sequence[HistoryRow]) -> R
     answers: dict = {}
     for r in sorted(earlier, key=lambda r: r.run_date if math.isfinite(r.run_date) else 0):
         if answered(r):
-            answers[(r.request_id, r.occurrence, r.system)] = r
+            answers[(r.request_id, r.occurrence, r.part, r.system)] = r
     taken: set = set()
     for row in rows:
-        old = answers.get((row.request_id, row.occurrence, row.system)) if row.result == TAKEN else None
+        old = answers.get((row.request_id, row.occurrence, row.part, row.system)) if row.result == TAKEN else None
         if old is not None:
             row = dataclasses.replace(row, adoption=old.adoption, adoption_reason=old.adoption_reason, planned_at=old.planned_at,
                                       external_id=old.external_id, adoption_source=old.adoption_source)
-            taken.add((row.request_id, row.occurrence, row.system))
+            taken.add((row.request_id, row.occurrence, row.part, row.system))
             out.carried += 1
         out.rows.append(row)
     for r in earlier:
         if r.object_id is None:
             continue
-        if answered(r) and (r.request_id, r.occurrence, r.system) not in taken:
+        if answered(r) and (r.request_id, r.occurrence, r.part, r.system) not in taken:
             out.kept += 1
         else:
             out.gone.append(r.object_id)

@@ -149,7 +149,7 @@ class PlanResultsDialog(QDialog):
         def work(task):
             notes = []
             requests = load_requests(client, store, token, task.isCanceled)
-            history = load_history(client, store, token, where, cancelled=task.isCanceled)
+            history = load_history(client, store, token, where, cancelled=task.isCanceled, shapes=follow)
             by_id = {r.id: r for r in requests}
             if catalog is not None:
                 names = self.context.satellite_names(client, task.isCanceled)
@@ -208,9 +208,18 @@ class PlanResultsDialog(QDialog):
         shown = SHOWN[self.shown.currentIndex()] if self.shown.currentIndex() >= 0 else SHOWN[0]
         today = jst_day(_now_ms())
         self.rows = [r for r in reversed(handed) if shown == "すべて" or r.captured == shown]
+        # Areas too big for one shot handed out in several shots (分担): each row tells which shot it is.
+        shares: dict = {}
+        for r in handed:
+            if r.part > 0:
+                shares[(r.request_id, r.day, r.occurrence)] = max(shares.get((r.request_id, r.day, r.occurrence), 0), r.part)
         for r in self.rows:
             req = self.requests.get(r.request_id)
-            items = [QStandardItem(t) for t in (r.day, r.system, r.satellite, r.request_id, req.name if req else "",
+            name = req.name if req else ""
+            n = shares.get((r.request_id, r.day, r.occurrence), 0)
+            if n > 1:
+                name += self.tr("（分担 {k}/{n}）").format(k=r.part, n=n)
+            items = [QStandardItem(t) for t in (r.day, r.system, r.satellite, r.request_id, name,
                                                  r.captured, r.image_id, next_step(r, req, today))]
             items[5].setForeground(QBrush(QColor(COLORS.get(r.captured, "#6b7280"))))
             self.model.appendRow(items)

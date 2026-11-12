@@ -65,6 +65,9 @@ class ExportSystem:
     #: The room (metres) requests put into one shot leave inside it on every side (`mergeMargin`), so that the
     #: system, framing with its own orbit and scenes, still finds them inside one (tsudo, 2026-11-11: 「規定500m」).
     merge_margin: float = 500.0
+    #: Whether an area too big for one shot that a satellite takes only part of is shared out to the system's other
+    #: satellites (`share`; tsudo, 2026-11-12: 「効率を考えたら、相互に分担すべきでしょ？」).
+    share: bool = True
     format: str = "csv"
     folder: str = ""
     file_name: str = "{system}_{date:%Y%m%d}.{ext}"
@@ -189,7 +192,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
     elif scene is not None:
         problems.append(f"{at} の sceneKm は [幅, 長さ]（km）で指定")
     flags = {}
-    for key in ("orbit", "merge"):
+    for key in ("orbit", "merge", "share"):
         flags[key] = value.get(key, True)
         if not isinstance(flags[key], bool):
             problems.append(f"{at} の {key} は true か false で指定")
@@ -245,6 +248,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         orbit=flags["orbit"],
         merge=flags["merge"],
         merge_margin=float(margin),
+        share=flags["share"],
         format=fmt,
         folder=value["folder"] if isinstance(value.get("folder"), str) else "",
         file_name=value["fileName"] if isinstance(value.get("fileName"), str) and value["fileName"] else f"{{system}}_{{date:%Y%m%d}}.{fmt}",

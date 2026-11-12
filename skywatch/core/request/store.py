@@ -40,7 +40,7 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
     "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID", "occurrence": "OCCURRENCE",
-    "linkId": "LINK_ID",
+    "linkId": "LINK_ID", "part": "PART_NO",
 }
 #: The shot layer's names (TBL_REQUEST_SHOT: one row a row of a file, its polygon the outline of the scenes taken).
 DEFAULT_SHOT_FIELDS: dict[str, str] = {
@@ -669,10 +669,13 @@ class HistoryRow:
     occurrence: int = 1
     #: The 外部連携ID its system's file names it by (`linkId`, core/request/link_id.py); "" for one not handed out.
     link_id: str = ""
+    #: For an area too big for one shot (分担): which of the time's shots this row hands out (1 …), its area that
+    #: shot's part (`rings`); 0 for a row handing out the request's whole area.
+    part: int = 0
 
     @property
     def key(self) -> tuple:
-        """(request id, occurrence): one row of a day's file."""
+        """(request id, occurrence): one time of a request on a day (each of its shots a row, `part`, when shared out)."""
         return self.request_id, self.occurrence
 
 
@@ -687,6 +690,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
         f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
         f["shotId"]: row.shot_id[:64] or None, f["occurrence"]: row.occurrence, f["linkId"]: row.link_id[:32] or None,
+        f["part"]: row.part or None,
     }
 
 
@@ -804,24 +808,32 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
         adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
         shot_id=_text(a.get(hf["shotId"])), occurrence=_times(a.get(hf["occurrence"])) or 1, link_id=_code(a.get(hf["linkId"])),
+        part=_times(a.get(hf["part"])) or 0,
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 
 def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str = "1=1",
-                 cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
-    """History rows of requests (a condition by the table's names; 要求外 rows left out), oldest day first."""
+                 cancelled: Optional[Callable[[], bool]] = None, shapes: bool = False) -> list[HistoryRow]:
+    """
+    History rows of requests (a condition by the table's names; 要求外 rows
+    left out), oldest day first. With `shapes`, their areas too when the
+    table keeps them (the part of an area each shot of it takes, 分担: for
+    照合, which asks the catalog about that part; only for the few rows still
+    open, not the whole table).
+    """
     if not store.history:
         return []
     hf = store.history_fields
     _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
-    rows = client.query_all(store.history, where, token, geometry=False, limit=100000, cancelled=cancelled)
+    shapes = shapes and _polygons(client, store.history, token)
+    rows = client.query_all(store.history, where, token, geometry=shapes, limit=100000, cancelled=cancelled)
     out = []
     for row in rows:
         a = row.get("attributes") or {}
         # 要求外 rows are the systems' own plans, not requests handed out: never followed up or raised.
         if not _text(a.get(hf["requestId"])) or _text(a.get(hf["result"])) == UNREQUESTED:
             continue
-        out.append(history_row_of(a, None, hf, oid))
+        out.append(history_row_of(a, row.get("geometry") if shapes else None, hf, oid))
     return sorted(out, key=lambda r: (r.day, r.run_date if math.isfinite(r.run_date) else 0))
 
 

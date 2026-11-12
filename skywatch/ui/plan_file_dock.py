@@ -50,8 +50,11 @@ from ..core import audit
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
-from ..core.request.daily import HELD, TAKEN, cloud_tip, merge_text, occurrence_text, pass_text, room_text, satellite_name, time_text
-from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, write
+from ..core.request.covered import read_covered
+from ..core.request.daily import (
+    HELD, TAKEN, cloud_tip, cover_text, merge_text, occurrence_text, part_text, pass_text, room_text, satellite_name, time_text,
+)
+from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.follow import missed_ids
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
@@ -433,6 +436,8 @@ class PlanFileDock(PluginDock):
         forecast = config.cloud_forecast
         authcfg = settings.auth_for(forecast.url) if forecast else None
         now = _now_ms()
+        catalog = self.catalog()
+        catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
         self.status.setText(self.tr("依頼の読み込み・雲量予報を問い合わせ中…"))
 
         def work(task):
@@ -444,8 +449,19 @@ class PlanFileDock(PluginDock):
             # Only the rows still to be followed up or raised for, not the whole (ever growing) table. They are not
             # followed up here (tsudo, 2026-11-11: 「その照合、計算時の照合なくして」): as 照合 (「照合…」, the
             # scheduled scheduled_follow.py) left them.
-            history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
+            history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled, shapes=True)
                        if store.history else [])
+            task.progress(50)
+            # What of the 期間内1回 areas is taken already (the catalog's images of their 撮像済み rows) or handed out on
+            # earlier days and not followed up yet (撮像待ち): left out of the day's shots (covered.py).
+            covered = {}
+            if store.history:
+                try:
+                    covered, more = read_covered(client, store, token, catalog, catalog_token, requests, day, history,
+                                                 self.context.satellite_names(client, task.isCanceled), task.isCanceled)
+                    notes += more
+                except Exception as error:  # noqa: BLE001 (the day goes on with the whole areas, said so)
+                    notes.append(f"撮像済み・撮像待ちの範囲を読めず、範囲全体で計算（{error}）")
             task.progress(60)
             forecasts = {}
             # Also for the requests missed and carried over to this day (they are candidates too).
@@ -471,11 +487,11 @@ class PlanFileDock(PluginDock):
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
                     notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
                 notes += quotas.problems[:3]
-            return requests, history, forecasts, passes, notes, groups, quotas
+            return requests, history, forecasts, passes, notes, groups, quotas, covered
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups, quotas = result
+            requests, history, forecasts, passes, notes, groups, quotas, covered = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
@@ -483,16 +499,18 @@ class PlanFileDock(PluginDock):
             # At each pass's moment for the satellites fitted on the orbits; the daylight hours' mean for the others.
             clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats))
             book = quotas.book(day) if quotas.quotas else None
-            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book)
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered)
             self._fill_series()
             self.render()
-            taken = sum(1 for c in self.plan.candidates if c.result == TAKEN)
-            text = self.tr("{day}: 候補 {n} 件・採用 {t} 件・見送り {h} 件").format(day=day.isoformat(), n=len(self.plan.candidates), t=taken,
-                                                                         h=len(self.plan.candidates) - taken)
+            # The shots of an area shared out past its first are rows of it, not requests of their own.
+            own = [c for c in self.plan.candidates if c.main is None]
+            taken = sum(1 for c in own if c.result == TAKEN)
+            text = self.tr("{day}: 候補 {n} 件・採用 {t} 件・見送り {h} 件").format(day=day.isoformat(), n=len(own), t=taken,
+                                                                         h=len(own) - taken)
             pinned = sum(1 for c in self.plan.candidates if c.pinned)
             if pinned:
                 text += self.tr("（うち ほかのシステムで書き出し済み {n} 件）").format(n=pinned)
-            text += self.merged_text()
+            text += self.merged_text() + self.shared_text()
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
             self.status.setText("。".join([text, *notes]))
@@ -513,6 +531,15 @@ class PlanFileDock(PluginDock):
         if not leads:
             return ""
         return self.tr("・まとめ {n} 組（{m} 件を {n} 回の撮像に）").format(n=len(leads), m=sum(len(c.together) for c in leads))
+
+    def shared_text(self) -> str:
+        """「・分担 2 件（5 回の撮像に）」: areas too big for one shot handed out in shots of several satellites or passes."""
+        if self.plan is None:
+            return ""
+        heads = [c for c in self.plan.candidates if c.result == TAKEN and c.part == 1 and c.parts > 1]
+        if not heads:
+            return ""
+        return self.tr("・分担 {n} 件（{m} 回の撮像に）").format(n=len(heads), m=sum(c.parts for c in heads))
 
     # --- The table ------------------------------------------------------------------------------
 
@@ -535,7 +562,7 @@ class PlanFileDock(PluginDock):
             cloud = "" if not c.weather else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
-            note = "・".join(x for x in (reason, merged, *c.warnings) if x)
+            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)
@@ -602,18 +629,22 @@ class PlanFileDock(PluginDock):
         """
         chosen = self.chosen
         mine = set(map(id, chosen.shots)) if chosen is not None else set()
-        out, shots = [], []
-        for c in sorted(self.shown, key=lambda c: c is chosen):
+        # The shots of an area shared out (分担) stand out together: the request's area is drawn once.
+        head = (chosen.main or chosen) if chosen is not None else None
+        out, shots = [], {}
+        for c in sorted(self.shown, key=lambda c: c is chosen or c is head):
             taken = c.result == TAKEN
             if taken and not c.member:
-                shots += c.shots
-            if not c.request.rings:
+                for s in c.shots:
+                    # A shot of an area shared out: the part its row is written with.
+                    shots[id(s)] = (s, row_rings(c, c.system.merge_margin)[0] if c.part and c.system else s.area_ring())
+            if not c.request.rings or c.main is not None:
                 continue
             color = ("#2563eb" if c.merged else "#16a34a") if taken else "#9ca3af"
             fellow = taken and bool(mine) and any(id(s) in mine for s in c.shots)
-            out.append(([[list(p[:2]) for p in r] for r in c.request.rings], color, 3 if c is chosen else 2 if fellow else 1,
-                        (c.request.name or c.request.id) if c is chosen else ""))
-        out += [([s.area_ring()], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s in dict.fromkeys(shots)]
+            out.append(([[list(p[:2]) for p in r] for r in c.request.rings], color, 3 if c is head else 2 if fellow else 1,
+                        (c.request.name or c.request.id) if c is head else ""))
+        out += [([ring], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s, ring in shots.values()]
         return out
 
     def draw(self) -> None:

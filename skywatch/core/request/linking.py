@@ -29,7 +29,7 @@ from ..catalog import CatalogConfig
 from ..esri import EsriClient, EsriError, quote
 from ..plan.names import NO_NAMES, SatelliteNames
 from ..time_query import between_condition, text_sample
-from .follow import Finding, _image_id, _moment, fitting_images
+from .follow import Finding, _moment, fitting_images, image_id_of
 from .model import JST, ImagingRequest, day_bounds
 from .store import HistoryRow, RequestStoreConfig, ShotRow, esri_rings, load_history, shot_outcome
 
@@ -89,9 +89,10 @@ def unit_key(r: HistoryRow) -> str:
     The shot a history row is taken in: its SHOT_ID; without one (no shot
     layer, or written before it) a request and those put into it (MERGED_INTO)
     are one shot, each time of the day (1 日の回数) its own, as the 撮像予定
-    dock tells (shot_view.companions).
+    dock tells (shot_view.companions), each shot of an area shared out (分担,
+    `part`) its own.
     """
-    return r.shot_id or f"{r.system}|{r.merged_into or r.request_id}|{r.occurrence}"
+    return r.shot_id or f"{r.system}|{r.merged_into or r.request_id}|{r.occurrence}" + (f"|{r.part}" if r.part > 1 else "")
 
 
 def units_of(rows: Sequence[HistoryRow], shots: Sequence[ShotRow], requests: dict) -> list[ShotUnit]:
@@ -193,7 +194,7 @@ def find_images(client: EsriClient, catalog: CatalogConfig, token: Optional[str]
     for f in found:
         a = f.get("attributes") or {}
         rings = [_ring(r) for r in (f.get("geometry") or {}).get("rings") or []]
-        out.append(ImageCandidate(_image_id(f, catalog), _moment(f, acquired, zone), str(a.get(sensor) or "") if sensor else "",
+        out.append(ImageCandidate(image_id_of(f, catalog), _moment(f, acquired, zone), str(a.get(sensor) or "") if sensor else "",
                                   rings, not sensor or id(f) in fitting, a))
     out.sort(key=lambda c: (not c.matches, abs(c.acquired - target) if c.acquired is not None else math.inf, c.image_id))
     return out

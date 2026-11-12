@@ -23,6 +23,12 @@ The yearly quotas (年間撮像上限, `quotas`) are kept day by day: what the
 earlier days of the run handed out is taken off what is left (handed out =
 captured), and a year starting within the run starts afresh.
 
+An area too big for one shot shared out among satellites (分担) is one
+request taken, its shots rows of their systems. A 期間内1回 area whose
+day's shots take less than 95% of it (with what earlier days took) stays
+on: the next days hand out only the rest (範囲の一部だけ), as the
+follow-up and the day's work would (covered.py).
+
 A request taken several times a day (1 日の回数) counts as taken on a day
 when its n times are handed out; taken fewer times (回数不足) the day does
 not count: 期間内1回 goes on to the next day, 毎回 loses it. Its times past
@@ -36,6 +42,7 @@ from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
+from .covered import GOAL, Covered, subtracts
 from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids
 from .model import ImagingRequest, day_bounds, days_left, jst_day
@@ -117,6 +124,8 @@ class DayResult:
     short: int = 0
     #: Held back as every mode that could take them had used its year's scenes (年間撮像上限).
     quota: int = 0
+    #: 期間内1回 areas handed out with less than 95% of them taken so far (the rest goes on to the next days).
+    partial: int = 0
     expired: list = field(default_factory=list)
     #: system name → (requests, scenes) taken.
     used: dict = field(default_factory=dict)
@@ -186,18 +195,20 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
     replanned = (run_days[0].isoformat(), run_days[-1].isoformat())
     #: (quota index, year's first day) → scenes handed out by the run's earlier days.
     handed: dict = {}
+    #: request id → what of its area the run's earlier days handed out (taken as captured).
+    covered: dict = {}
     for i in range(max(1, min(MOST_DAYS, days))):
         if cancelled and cancelled():
             break
         day = start + timedelta(days=i)
-        cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set())
+        cands: list[Candidate] = gather(ledger, day, sats, clouds(day) if clouds else {}, missed if i == 0 else set(), covered)
         book = quotas.book(day, replanned, handed) if quotas is not None and quotas.quotas else None
         cands = allocate(cands, systems, sats, passes, day, book)
         if book is not None:
             for index, u in zip(book.indices, book.usages):
                 key = (index, u.window.first)
                 handed[key] = handed.get(key, 0) + book.spent.get(id(u), 0)
-        result = DayResult(day, candidates=sum(1 for c in cands if not c.extra))
+        result = DayResult(day, candidates=sum(1 for c in cands if not c.extra and c.main is None))
         times: dict = {}
         for c in cands:
             times.setdefault(c.request.id, []).append(c)
@@ -205,7 +216,8 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
             if c.boost_offer is not None:
                 result.raised += 1
             if c.result == TAKEN:
-                result.taken += 1
+                # The shots of an area shared out past its first are rows, not requests.
+                result.taken += 0 if c.main is not None else 1
                 name = c.system.system
                 n, scenes = result.used.get(name, (0, 0))
                 # One put into another's shot is in that one's row.
@@ -232,10 +244,17 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
             req = same[0].request
             if same[0].boost_offer is not None:
                 req.boost = same[0].boost_offer
-            got = sum(1 for c in same if c.result == TAKEN)
+            got = len({c.occurrence for c in same if c.result == TAKEN})
             if got >= req.times[0]:
                 # Handed out, so taken as captured: the follow-up undoes the raise and ends a 期間内1回 request.
                 req.boost = 0
+                share = next((c.coverage for c in same if c.result == TAKEN and c.main is None and c.coverage is not None), None)
+                if req.achieve == "期間内1回" and subtracts(req) and share is not None and share < GOAL:
+                    # Only part of its area: what was handed out counts as taken, the rest goes on.
+                    got_area = covered.setdefault(req.id, Covered())
+                    got_area.taken.extend([s.ring()] for c in same if c.result == TAKEN for s in c.shots)
+                    result.partial += 1
+                    continue
                 if req.achieve == "期間内1回":
                     req.status = "完了"
                 continue
@@ -278,6 +297,7 @@ SUMMARY = (
     ("まとめて採用（ほかの依頼の撮像に同乗）", lambda s: s.total("merged")),
     ("繰り上げ", lambda s: s.total("raised")),
     ("回数不足（1 日の回数に届かず）", lambda s: s.total("short")),
+    ("範囲の一部だけ（残りを翌日以降へ）", lambda s: s.total("partial")),
     ("欠測（毎回）", lambda s: s.total("lost")),
     ("期限切れ（期間内1回）", lambda s: s.total("expired")),
     ("最終日の持ち越し", lambda s: s.carried_at_end),

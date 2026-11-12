@@ -487,7 +487,7 @@ def follow_store(client: EsriClient, config: PluginConfig, store: RequestStoreCo
     if catalog is None:
         raise EsriError(f"照合に使う画像カタログ「{store.catalog}」が imageCatalogs にない" if store.catalog else "画像カタログ（imageCatalogs）がない")
     token = token_for(store.url, store.token)
-    history = load_history(client, store, token, history_where(store, open_rows=True), cancelled=cancelled)
+    history = load_history(client, store, token, history_where(store, open_rows=True), cancelled=cancelled, shapes=True)
     due = due_rows(history, now)
     if not due:
         return "照合する行なし", []

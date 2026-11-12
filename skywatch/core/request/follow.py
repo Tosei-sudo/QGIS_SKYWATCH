@@ -31,6 +31,8 @@ class Finding:
     row: HistoryRow
     captured: str
     image_id: str = ""
+    #: For a 期間内1回 area found taken: the share of the request's area its images take so far (covered.py).
+    coverage: Optional[float] = None
 
 
 def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], rows: Sequence[HistoryRow],
@@ -82,37 +84,54 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
             like = text_sample(client, catalog.url, acquired, types.get(acquired), token, catalog.where)
         where = " AND ".join([between_condition(acquired, types.get(acquired), first, last, like, zone),
                               *([f"({catalog.where})"] if catalog.where else [])])
-        params = {"where": where, "outFields": "*", "returnGeometry": "false",
-                  "geometry": json.dumps({"rings": esri_rings(req.rings), "spatialReference": {"wkid": 4326}}),
-                  "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
-        found = client.ask(f"{catalog.url}/query", params, token).get("features") or []
+        asked: dict = {}
+
+        def images(rings: Sequence) -> list:
+            """The day's images over an area (asked once an area)."""
+            key = json.dumps(rings)
+            if key not in asked:
+                params = {"where": where, "outFields": "*", "returnGeometry": "false",
+                          "geometry": json.dumps({"rings": esri_rings(rings), "spatialReference": {"wkid": 4326}}),
+                          "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
+                asked[key] = client.ask(f"{catalog.url}/query", params, token).get("features") or []
+            return asked[key]
+
+        found = images(req.rings)
         sensor = catalog.fields.get("sensor")
+        done = settled.get((request_id, day_text), ())
         # Taken several times that day (rows of more than one time; rows of one time written twice are each their own).
-        several = req.times[1] > 1 or any(r.occurrence > 1 for r in (*group, *settled.get((request_id, day_text), ())))
+        several = req.times[1] > 1 or any(r.occurrence > 1 for r in (*group, *done))
+        # The shots of an area shared out (分担): each row asks about its own part, and takes an image of its own.
+        shared = any(r.part > 0 for r in (*group, *done))
         # Images taken by the request's other times (already settled): neither they nor their pass count again.
-        used = {r.image_id for r in settled.get((request_id, day_text), ()) if r.image_id}
-        moments = [t for t in (_moment(f, acquired, zone) for f in found if _image_id(f, catalog) in used) if t is not None]
-        for row in sorted(group, key=lambda r: r.occurrence):
-            mine = fitting_images(found, sensor, row, req, names) if found and sensor else list(found)
-            if several:
-                gap = req.gap_ms
-                mine = [f for f in mine if _image_id(f, catalog) not in used
-                        and (gap <= 0 or (t := _moment(f, acquired, zone)) is None or all(abs(t - u) >= gap for u in moments))]
+        used = {r.image_id for r in done if r.image_id}
+        time_of_image = {r.image_id: r.occurrence for r in done if r.image_id}
+        moments = [(time_of_image[image_id_of(f, catalog)], t) for f in found if image_id_of(f, catalog) in used
+                   for t in [_moment(f, acquired, zone)] if t is not None]
+        for row in sorted(group, key=lambda r: (r.occurrence, r.part)):
+            own = images(row.rings) if row.part and row.rings else found
+            mine = fitting_images(own, sensor, row, req, names) if own and sensor else list(own)
+            if several or shared:
+                gap = req.gap_ms if several else 0
+                # The shots of one time shared out are not kept apart (they are that time).
+                mine = [f for f in mine if image_id_of(f, catalog) not in used
+                        and (gap <= 0 or (t := _moment(f, acquired, zone)) is None
+                             or all(abs(t - u) >= gap for o, u in moments if not (row.part and o == row.occurrence)))]
             if mine:
                 wanted = names.expand(row.satellite) if sensor else set()
                 best = best_named(mine, lambda x: (x.get("attributes") or {}).get(sensor), wanted)
-                value = _image_id(best, catalog)
+                value = image_id_of(best, catalog)
                 used.add(value)
                 t = _moment(best, acquired, zone)
                 if t is not None:
-                    moments.append(t)
+                    moments.append((row.occurrence, t))
                 out.append(Finding(row, "撮像済み", value))
             elif now - last > miss_after_days * 86400000:
                 out.append(Finding(row, "未撮像"))
     return out
 
 
-def _image_id(feature: dict, catalog: CatalogConfig) -> str:
+def image_id_of(feature: dict, catalog: CatalogConfig) -> str:
     """An image's id in the catalog (its id field, else its object id)."""
     a = feature.get("attributes") or {}
     id_field = catalog.fields.get("id")
@@ -174,12 +193,15 @@ def captured_times(findings: Sequence[Finding], history: Sequence[HistoryRow] = 
     return out
 
 
-def request_changes(findings: Sequence[Finding], requests: dict, history: Sequence[HistoryRow] = ()) -> list[tuple[int, dict]]:
+def request_changes(findings: Sequence[Finding], requests: dict, history: Sequence[HistoryRow] = (),
+                    partial: Optional[set] = None) -> list[tuple[int, dict]]:
     """
     What the ledger takes from findings: a request taken loses its raise
-    and, 期間内1回, is 完了. A request taken several times a day (1 日の回数)
-    counts as taken when n of its rows of the day are 撮像済み (with those of
-    `history`).
+    and, 期間内1回, is 完了 — unless it is one of `partial` (an area whose
+    images take less than covered.GOAL of it so far, shortfall: it stays
+    有効 and its rest is handed out on the next days). A request taken
+    several times a day (1 日の回数) counts as taken when n of its rows of
+    the day are 撮像済み (with those of `history`).
     """
     out: dict[int, dict] = {}
     counts = captured_times(findings, history)
@@ -190,10 +212,59 @@ def request_changes(findings: Sequence[Finding], requests: dict, history: Sequen
         if counts.get((f.row.request_id, f.row.day), 0) < req.times[0]:
             continue
         change = {"boost": 0}
-        if req.achieve == "期間内1回":
+        if req.achieve == "期間内1回" and req.id not in (partial or ()):
             change["status"] = "完了"
         out[req.object_id] = change
     return list(out.items())
+
+
+def shortfall(client: EsriClient, store: RequestStoreConfig, token: Optional[str], catalog: CatalogConfig,
+              catalog_token: Optional[str], findings: Sequence[Finding], requests: dict, names: SatelliteNames = NO_NAMES,
+              cancelled: Optional[Callable[[], bool]] = None, problems: Optional[list] = None) -> set:
+    """
+    The 期間内1回 areas found taken (covered.subtracts) whose images so far
+    (those of all their 撮像済み rows, covered.taken_outlines) take less than
+    GOAL of them (tsudo, 2026-11-12: 「照合で撮れた割合を見て、95% に届くまで
+    は完了にしない」): their ids; each finding of them is told the share. One
+    whose images cannot be read is 完了 as before (said in `problems`).
+    """
+    from .covered import GOAL, IDS_PER_QUERY, samples_of, share_of, subtracts, taken_outlines
+
+    mine = {f.row.request_id for f in findings if f.captured == "撮像済み"
+            and (req := requests.get(f.row.request_id)) is not None and subtracts(req) and req.achieve == "期間内1回"}
+    if not mine:
+        return set()
+    hf = store.history_fields
+    keys = sorted(mine)
+    rows: dict = {}
+    try:
+        for i in range(0, len(keys), IDS_PER_QUERY):
+            where = f"({history_where(store, request_ids=keys[i:i + IDS_PER_QUERY])}) AND {hf['captured']} = '撮像済み'"
+            for r in load_history(client, store, token, where, cancelled=cancelled):
+                rows.setdefault(r.request_id, {})[r.object_id if r.object_id is not None else id(r)] = r
+    except EsriError as error:
+        if problems is not None:
+            problems.append(f"撮像済みの範囲の割合を確かめられず完了とした（{error}）")
+        return set()
+    for f in findings:
+        if f.captured == "撮像済み" and f.row.request_id in mine:
+            rows.setdefault(f.row.request_id, {})[f.row.object_id if f.row.object_id is not None else id(f.row)] = f.row
+    out: set = set()
+    for rid in keys:
+        req = requests[rid]
+        try:
+            outlines = taken_outlines(client, catalog, catalog_token, req, list(rows.get(rid, {}).values()), names, cancelled)
+        except EsriError as error:
+            if problems is not None:
+                problems.append(f"「{req.name or rid}」の撮像済みの範囲を読めず完了とした（{error}）")
+            continue
+        share = share_of(samples_of(req), outlines)
+        for f in findings:
+            if f.row.request_id == rid and f.captured == "撮像済み":
+                f.coverage = share
+        if share < GOAL:
+            out.add(rid)
+    return out
 
 
 def missed_ids(rows: Sequence[HistoryRow]) -> set:
@@ -313,7 +384,14 @@ def next_step(row: HistoryRow, req: Optional[ImagingRequest], day: date) -> str:
     if req is None:
         return "台帳に依頼なし"
     if row.captured == "撮像済み":
-        return "完了" if req.status == "完了" else "撮像済み"
+        if req.status == "完了":
+            return "完了"
+        from .covered import subtracts
+
+        if req.status == "有効" and subtracts(req):
+            # Its images take only part of its area (shortfall): the rest goes out on the next days.
+            return "撮像済み（範囲の残りは次の出力へ）"
+        return "撮像済み"
     if row.captured == "未撮像":
         if req.status != "有効":
             return f"依頼は{req.status}"
@@ -370,7 +448,9 @@ def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Option
     found = _saved_only(found, saved)
     settle(found)
     save_shots(client, store, token, found, problems)
-    changes = request_changes(found, requests, history)
+    # An area whose images take only part of it stays 有効, its rest handed out on the next days.
+    partial = shortfall(client, store, token, catalog, catalog_token, found, requests, names, cancelled, problems)
+    changes = request_changes(found, requests, history, partial)
     if changes:
         problems += update_requests(client, store, token, changes, now).problems
     return found, bool(changes)
@@ -394,8 +474,14 @@ def save_marked(client: EsriClient, store: RequestStoreConfig, token: Optional[s
 
 
 def found_text(found: Sequence[Finding]) -> str:
+    from .covered import GOAL
+
     taken = sum(1 for f in found if f.captured == "撮像済み")
-    return f"撮像済み {taken} 件・未撮像 {len(found) - taken} 件を確認"
+    text = f"撮像済み {taken} 件・未撮像 {len(found) - taken} 件を確認"
+    part = len({f.row.request_id for f in found if f.coverage is not None and f.coverage < GOAL})
+    if part:
+        text += f"（範囲の一部だけ撮像済みの依頼 {part} 件は完了にせず、残りを次の出力へ）"
+    return text
 
 
 def with_settled_times(client: EsriClient, store: RequestStoreConfig, token: Optional[str], history: Sequence[HistoryRow],

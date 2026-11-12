@@ -103,6 +103,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 | `REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PLANNED_AT`・`ADOPTION_REASON`・`REASON` | 名称・番号・依頼者・システム・衛星・撮像予定日時・理由 | 一覧・ポップアップ |
 | 形状（ポリゴン） | 依頼の範囲（要求外は結果ファイルか手で描いた範囲） | 地図 |
 | `SHOT_ID` | その依頼を撮る撮像（`TBL_REQUEST_SHOT` の `SHOT_ID`。まとめた依頼は同じ値。2026-11-11 に追加） | 撮像の範囲と結び付ける |
+| `PART_NO` | 広い範囲を衛星で分担したときの何番目のショットか（1, 2 …。範囲全体の行は空。2026-11-12 に追加）。行の範囲はそのショットの部分 | 一覧・ポップアップでショットを分ける。依頼ごとに数えるときは `REQ_ID` と `TARGET_DATE` でまとめる |
 | `OCCURRENCE` | 1 日に何回も撮る依頼の何回目か（1, 2 …。1 日 1 回の依頼は 1。2026-11-11 に追加） | 一覧・ポップアップで回を分ける。依頼ごとに数えるときは `REQ_ID` と `TARGET_DATE` でまとめる |
 
 撮像の範囲（`TBL_REQUEST_SHOT`、2026-11-11 に追加）は、書き出したファイルの 1 行ごとのポリゴン（撮るシーンの外形。まとめた行はファイルに書いた、まとめた依頼を囲むパスに平行な四角）。依頼の範囲（出力履歴）と別のレイヤーなので、Web マップに両方を入れ、撮像の範囲は塗りなしの破線にすると、依頼ごとの範囲とまとめて撮る範囲を重ねて見られる。属性は `TARGET_DAY`・`TARGET_DATE`・`SYSTEM`・`SATELLITE`・`PASS_TIME`（撮像時刻）・`REQ_IDS`（まとめた依頼）・`REQ_COUNT` など（README 「`TBL_REQUEST_SHOT`」）。
