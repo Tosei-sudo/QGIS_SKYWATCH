@@ -17,8 +17,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from scenes import CLASSES, dataset  # noqa: E402
 
-from skywatch.core.ai.train.metrics import evaluate  # noqa: E402
-from skywatch.core.ai.train.trainer import InputSpec, TrainOptions, detect_window, new_model, train  # noqa: E402
+from mikage.core.ai.train.metrics import evaluate  # noqa: E402
+from mikage.core.ai.train.trainer import InputSpec, TrainOptions, detect_window, new_model, train  # noqa: E402
 
 
 def measure(model, windows):

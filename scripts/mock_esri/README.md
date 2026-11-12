@@ -98,4 +98,4 @@ QGIS の「ArcGIS REST サーバー」接続に `http://127.0.0.1:8765/arcgis/re
 
 ## テスト
 
-`skywatch/tests/test_mock_esri.py`（QGIS なし）と `test_qgis_mock_esri.py`（QGIS の通信で、カタログ検索・画像表示・外部AI結果・観測記録と分類・撮像計画・QGIS の ArcGIS プロバイダー）。
+`mikage/tests/test_mock_esri.py`（QGIS なし）と `test_qgis_mock_esri.py`（QGIS の通信で、カタログ検索・画像表示・外部AI結果・観測記録と分類・撮像計画・QGIS の ArcGIS プロバイダー）。

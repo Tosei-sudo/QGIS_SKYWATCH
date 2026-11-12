@@ -3,9 +3,9 @@ __pycache__/
 .pytest_cache/
 dist/
 node_modules/
-skywatch/config.json
-skywatch/config.jsonc
-skywatch/ext/win64/
-skywatch/config.lock
+mikage/config.json
+mikage/config.jsonc
+mikage/ext/win64/
+mikage/config.lock
 xView
 scripts/mock_esri/data/

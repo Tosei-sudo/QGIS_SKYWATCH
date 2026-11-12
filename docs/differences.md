@@ -15,7 +15,7 @@
 | `token` と認証設定 | `token` があればそれ、なければサインインのトークン | 認証設定を選んだサービスは `token` を送らない | 二重送信を避けるため |
 | 全件読み込み | `resultOffset` で `exceededTransferLimit` が立つ間 | 同じ。加えて、ページが満杯なら次も読む。ページングできないレイヤーは ID を先に読み `maxRecordCount` ずつ取得 | 指示書「`maxRecordCount` を超える件数はページングで全件読む」 |
 | 通信 | `fetch`（GET か POST） | すべて form POST（`f=json`）、`QgsBlockingNetworkRequest`（QgsTask 内のみ） | トークンを URL に出さない・QGIS のプロキシと認証に従う |
-| ローカル保存 | IndexedDB・localStorage | ユーザープロファイルの `skywatch/observations.gpkg`（`observations`・`checked_areas`・`taxonomy`・`taxon_photos`） | 指示書どおり。属性名は Esri と同じ |
+| ローカル保存 | IndexedDB・localStorage | ユーザープロファイルの `mikage/observations.gpkg`（`observations`・`checked_areas`・`taxonomy`・`taxon_photos`） | 指示書どおり。属性名は Esri と同じ |
 | ローカルの分類体系 | localStorage に保存先ごと | `taxonomy` テーブルに `STORE`（保存先の label）と `ROW_KEY` の列を追加 | 1 つのテーブルで保存先ごとに持つため |
 | 日時（ローカル） | ms の数値 | GeoPackage の DATETIME（UTC の ISO 8601） | QGIS・ArcGIS Pro で日時として扱えるように |
 
@@ -250,7 +250,7 @@
 
 ### 読み込み時の黄色い表示（同時に直した点）
 
-設定ファイルのサービス（衛星カタログ・計画の保存先など）に届かないと、起動時の読み込みの失敗が「SKYWATCH」のログ（当時は「衛星撮像計画・観測記録」）に Python のトレースバック付きの警告（黄色）として残っていた。接続できない・サービスが拒んだ（`EsriError`）ときは、ドックに理由を出したうえでログには 1 行の情報として残すように変えた。想定外の例外は今までどおり警告とトレースバック。QGIS 3.34（Linux）で起動して確かめた。ほかに出ていた黄色は QGIS 自身の「Open Sans font installation failed」（閉域でフォントを取りに行けない）と「Network」の「Host … not found」で、プラグインからは消せない。
+設定ファイルのサービス（衛星カタログ・計画の保存先など）に届かないと、起動時の読み込みの失敗が「MIKAGE」のログ（当時は「衛星撮像計画・観測記録」）に Python のトレースバック付きの警告（黄色）として残っていた。接続できない・サービスが拒んだ（`EsriError`）ときは、ドックに理由を出したうえでログには 1 行の情報として残すように変えた。想定外の例外は今までどおり警告とトレースバック。QGIS 3.34（Linux）で起動して確かめた。ほかに出ていた黄色は QGIS 自身の「Open Sans font installation failed」（閉域でフォントを取りに行けない）と「Network」の「Host … not found」で、プラグインからは消せない。
 
 ## 新規スクラッチレイヤーのテンプレート
 
@@ -264,7 +264,7 @@
 | 候補値・範囲・必須 | ビューアの属性テーブルで選択・検査 | QGIS の「値マップ」「範囲」ウィジェットと、非 NULL 制約・式の制約（強制） | QGIS の属性フォームで同じ働き |
 | 日付型 | 日時（ms） | 日時（QDateTime）。既定値は `2026-10-17`（UTC の 0 時）・`2026-10-17 09:30`（端末の時刻）・時差付きを読む | ビューアの `new Date()` に近い読み方 |
 | 座標系 | 「詳細設定」の書き出しの既定（初期値 WGS84） | レイヤーの座標系（初期値はプロジェクトの座標系、なければ WGS84） | QGIS のメモリレイヤーは座標系を持つため |
-| 保存したテンプレート | ブラウザ（localStorage） | ユーザープロファイルの `QgsSettings`（`skywatch/layer_templates`、`layerTemplates` と同じ JSON） | — |
+| 保存したテンプレート | ブラウザ（localStorage） | ユーザープロファイルの `QgsSettings`（`mikage/layer_templates`、`layerTemplates` と同じ JSON） | — |
 | 作った層の保存 | ブラウザ・プロジェクト（.ivproj） | QGIS のメモリレイヤー（プロジェクトを閉じると地物は消える。残すときは「エクスポート」か「レイヤーを固定化」） | QGIS 標準のスクラッチレイヤーと同じ扱い |
 
 ## ダッシュボード（2026-10-28 に追加）
@@ -551,7 +551,7 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 ## 参照実装側で見つけた点
 
 - 衛星パスの一覧で、左右に見られて最小オフナディア角が 0 の衛星（1 本の帯）の撮像可能範囲が「20〜20°・左右」になる（`offNadir.min` が帯の内側の端の絶対値 = 最大角になるため。テストもこの値を期待している）。「20° 以下・左右」が意図と思われる。プラグインは直した（2026-10-27 に決定）
-- README の `config.json` の例（設定ファイルの節）は `detectionOutputs` の後ろの `],` が抜けていて JSON として読めない。テスト用の写し（`skywatch/tests/data/viewer-config.jsonc`）では補った
+- README の `config.json` の例（設定ファイルの節）は `detectionOutputs` の後ろの `],` が抜けていて JSON として読めない。テスト用の写し（`mikage/tests/data/viewer-config.jsonc`）では補った
 
 ## 撮像依頼台帳と日次出力（2026-11-07）
 
@@ -606,8 +606,8 @@ tsudo の依頼（サービスの設定とデータの日時がずれている�
 | --- | --- | --- | --- |
 | 雲量の地図 | なし（撮像機会ごとの雲量のみ） | ドック「雲量マップ」。GFS のファイルはそのまま、サービスは表示範囲を最大 20 × 20 点で取得して GeoTIFF にし、スライダー・再生・QGIS の時系列コントローラー連動で予報時刻を切り替え | tsudo の依頼（2026-11-08）。QGIS 3.34 にはラスターのバンドごとの時刻がない（3.38〜）ので、描画するバンドを切り替える |
 | 地物への雲量の付与 | なし | 処理ツール「雲量を属性に付与」: 任意のレイヤーの時刻の属性とジオメトリ（ポリゴンは 0.25° 格子の平均）で雲量（％）を属性に書き込む。GFS のフォルダは全ファイルをつないで過去分も、サービスは最大 92 日前から | tsudo の依頼（2026-11-08） |
-| 保存した分析のツール | なし | 「データ分析」でプロジェクトに保存した分析が処理ツールボックスの「SKYWATCH ▸ 保存した分析」のツール（バッチ処理・モデラー・processing.run） | tsudo の依頼（2026-11-08、高度利用者向け） |
-| 式の関数 | なし | QGIS の式のグループ「SKYWATCH」: skywatch_record_count・skywatch_object_names・skywatch_last_seen・skywatch_last_activity・skywatch_kind_level・skywatch_place・skywatch_places | tsudo の依頼（2026-11-08）。ビューアには QGIS の式がない |
+| 保存した分析のツール | なし | 「データ分析」でプロジェクトに保存した分析が処理ツールボックスの「MIKAGE ▸ 保存した分析」のツール（バッチ処理・モデラー・processing.run） | tsudo の依頼（2026-11-08、高度利用者向け） |
+| 式の関数 | なし | QGIS の式のグループ「MIKAGE」: mikage_record_count・mikage_object_names・mikage_last_seen・mikage_last_activity・mikage_kind_level・mikage_place・mikage_places | tsudo の依頼（2026-11-08）。ビューアには QGIS の式がない |
 | 観測記録の一括取込み | なし（スクリプトの addObservation のみ） | メニュー「観測記録の一括取込み…」: CSV・レイヤーから、列の対応・試行（新規・更新・重複・エラー）・一度に保存 | tsudo の依頼（2026-11-08） |
 | 一覧のビュー | なし | 画像カタログ・観測記録・撮像依頼の列の表示・並び・並べ替え・絞り込みを名前を付けて保存（個人の設定） | tsudo の依頼（2026-11-08） |
 | 一覧の列の表示・順番 | なし | ドックの一覧すべてで、見出しの右クリック（この列を左へ・右へ・先頭へ・末尾へ、列のチェック）と「列の表示と順番…」で列の表示・順番を変え、一覧ごとに覚える（個人の設定） | tsudo の依頼（2026-11-09、順番はメニューから） |
