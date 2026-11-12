@@ -9,27 +9,37 @@ It stays open beside the map (not modal) so the area can be drawn.
 Given `batch` (「レイヤーから取り込み」), the names and areas (and the
 管理番号・識別番号 when attributes give them) are the layer's features: the
 form then asks only the rest, once for all of them.
+
+Under the area, one line says how often the satellites can take the request
+as written (「撮像機会: 今後 14 日で 9 回（最初 11/13 10:32 ISS）」, red when
+never; 改修案 7, chances.form_text), counted in the background a moment after
+the area, period or conditions change (not for a batch).
 """
 from __future__ import annotations
 
 import math
+import time
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
-from qgis.PyQt.QtCore import QDate, Qt
+from qgis.PyQt.QtCore import QDate, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from ..core.request.chances import FORM_DAYS, form_span, form_text
+from ..core.request.passes import find_passes
 from ..core.request.pick import Picked, checks_of, picked, summary, unknown
 from ..core.request.model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest, bbox_of,
     day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, square_rings,
 )
 from ..qgis_io.geometry import shape_of, to_wgs84
+from ..qgis_io.tasks import run_task
 from .docks import plain_label
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
@@ -37,6 +47,8 @@ from .request_groups import NO_GROUP_TEXT
 from .satellite_tree import SatelliteTree
 
 _WEEKDAYS = "月火水木金土日"
+#: How long after the last change the chances are counted again (ms).
+CHANCE_DELAY_MS = 700
 
 
 def _optional(low: float, high: float, suffix: str, decimals: int = 1) -> QDoubleSpinBox:
@@ -92,6 +104,20 @@ class RequestForm(QDialog):
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
         self.point_tool.canvasClicked.connect(self._point_clicked)
         self.finished.connect(self._closed)
+        # 撮像機会 (改修案 7): worked out again a moment after the area, period or conditions change.
+        self._sats: list = []
+        self._chance_task = None
+        self._chance_again = False
+        self._chance_timer = QTimer(self)
+        self._chance_timer.setSingleShot(True)
+        self._chance_timer.setInterval(CHANCE_DELAY_MS)
+        self._chance_timer.timeout.connect(self._count_chances)
+        for signal in (self.start.dateChanged, self.end.dateChanged, self.category.currentTextChanged,
+                       self.repeat_kind.currentTextChanged, self.every.valueChanged, self.kind.currentTextChanged,
+                       self.look.currentTextChanged, self.orbit.currentTextChanged, self.time_of_day.currentTextChanged,
+                       self.ona_min.valueChanged, self.ona_max.valueChanged, self.inc_min.valueChanged, self.inc_max.valueChanged,
+                       self.resolution.valueChanged, *(b.toggled for b in self.weekdays)):
+            signal.connect(self._chances_changed)
         #: The size of a clicked point's area last used (入力の初期値の記憶).
         self.memory = InputMemory("request_form", {"size": self.size})
         self.memory.restore()
@@ -338,6 +364,13 @@ class RequestForm(QDialog):
         # The names of the layer's features (or the plan's targets) in a batch: shown as written, never as HTML.
         self.area_label = plain_label(QLabel())
         al.addWidget(self.area_label)
+        # 撮像機会 (改修案 7): how often the satellites can take it as written, counted in the background; red when never.
+        self.chances_label = plain_label(QLabel())
+        self.chances_label.setWordWrap(True)
+        self.chances_label.setToolTip(self.tr("いまの範囲・期間・条件で通る衛星のパス（今後 {d} 日まで、雲は見ない）。"
+                                              "定点は繰り返しの日だけ数える").format(d=FORM_DAYS))
+        self.chances_label.setVisible(False)
+        al.addWidget(self.chances_label)
         layout.addWidget(area)
 
         people = QFormLayout()
@@ -443,8 +476,10 @@ class RequestForm(QDialog):
         if not self.tree.items():
             self._no_catalog(self.tr("衛星カタログに衛星なし。名前で入力"))
             return
+        self._sats = list(sats)
         self._note = ""
         self._names_typed()
+        self._chances_changed()
 
     def _no_catalog(self, text: str) -> None:
         """No satellites to pick from: the names are typed."""
@@ -478,6 +513,7 @@ class RequestForm(QDialog):
             if odd_names:
                 lines.append(self.tr("衛星カタログにない名前（そのまま保存）: {n}").format(n="、".join(odd_names)))
         self.picked_label.setText("\n".join(lines))
+        self._chances_changed()
 
     def _tree_changed(self) -> None:
         """The checks written as the request's series, satellites and modes."""
@@ -589,6 +625,63 @@ class RequestForm(QDialog):
             self.area_label.setText(self.tr("{kind}: 経度 {w:.4f}〜{e:.4f}・緯度 {s:.4f}〜{n:.4f}").format(kind=self.shape_kind, w=w, e=e, s=s, n=n))
             self.overlay.paint([(self.rings, "#f59e0b", 2, self.name.text())])
         self.canvas.refresh()
+        self._chances_changed()
+
+    # --- 撮像機会 (改修案 7) ------------------------------------------------------------------------
+
+    def _chances_changed(self, *_args) -> None:
+        """Something the chances hang on changed: counted again a moment later (not on every key)."""
+        timer = getattr(self, "_chance_timer", None)
+        if timer is not None and not self._closing and self.batch is None:
+            timer.start()
+
+    def _show_chances(self, text: str, red: bool = False) -> None:
+        self.chances_label.setText(text)
+        self.chances_label.setStyleSheet("color: #b91c1c" if red else "color: #4b5563")
+        self.chances_label.setVisible(bool(text))
+
+    def _count_chances(self) -> None:
+        """The request as the form has it: its passes over the next days, in the background (one at a time)."""
+        if self._closing or self.batch is not None or not self._sats:
+            return
+        if self._chance_task is not None:
+            self._chance_again = True
+            return
+        r = self.value()
+        if not r.rings:
+            self._show_chances("")
+            return
+        # Counted whatever its state (a request 中止 for now is asked how often it could be taken).
+        r = replace(r, status="有効", id=r.id or "form")
+        now = time.time() * 1000
+        span = form_span(r, now)
+        if span is None:
+            self._show_chances(*form_text(r, None, self._sats, None))
+            return
+        sats = list(self._sats)
+        self._show_chances(self.tr("撮像機会を数え中…"))
+
+        def work(task):
+            return find_passes([r], span[0], span[1], sats, now, task.isCanceled)
+
+        def finish() -> bool:
+            self._chance_task = None
+            if self._closing:
+                return False
+            if self._chance_again:
+                self._chance_again = False
+                self._chance_timer.start()
+            return True
+
+        def done(passes):
+            if finish():
+                self._show_chances(*form_text(r, passes, sats, span))
+
+        def failed(message):
+            if finish():
+                self._show_chances(self.tr("撮像機会を数えられず（{m}）").format(m=message))
+
+        self._chance_task = run_task(self.tr("撮像機会の計算"), work, done, failed, hidden=True)
 
     # --- Saving -------------------------------------------------------------------------------
 
@@ -653,6 +746,9 @@ class RequestForm(QDialog):
 
     def _closed(self, _result=None) -> None:
         self._closing = True
+        self._chance_timer.stop()
+        if self._chance_task is not None:
+            self._chance_task.cancel()
         for tool in (self.extent_tool, self.point_tool):
             if self.canvas.mapTool() is tool:
                 self.canvas.unsetMapTool(tool)

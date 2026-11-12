@@ -12,6 +12,7 @@
    satellite first, then the same direction and side, the incidence closest.
 6. A yearly quota ahead of its pace: a low priority request tries the other
    modes first; the quotas dialog shows the pace.
+7. The request form's one line: how often the satellites can take it.
 """
 from __future__ import annotations
 
@@ -398,3 +399,38 @@ def test_a_low_priority_request_tries_the_modes_on_their_pace_first():
     assert high.satellite.name == "ISS" and pace_text(high) == ""
     # Without the day (a book of the limits only): no pace.
     assert plan(700, day=None).satellite.name == "ISS"
+
+
+# --- 7. The request form's chances --------------------------------------------------------------------------
+
+def test_the_form_line_counts_the_passes_ahead():
+    from mikage.core.request.chances import FORM_DAYS, form_span, form_text
+    from mikage.core.request.passes import find_passes
+
+    first, _ = day_bounds(DAY)
+    req = replace(fixed(category="臨時", achieve="期間内1回"), start=first, end=first + 3 * 86400000)
+    now = first
+    span = form_span(req, now)
+    assert span == (first, req.end, True)
+    passes = find_passes([req], span[0], span[1], [A, B], now)
+    n = len({(o.satellite, round(o.time / 60000)) for o in passes.ops["R1"]})
+    text, red = form_text(req, passes, [A, B], span)
+    assert n >= 2 and not red
+    assert text.startswith(f"撮像機会: {(DAY + timedelta(days=3)).month}/{(DAY + timedelta(days=3)).day} までに {n} 回（最初 ")
+    assert text.endswith(" ISS）") or text.endswith(" ISS 2）")
+    # A long period: the next FORM_DAYS days only.
+    long = replace(req, end=first + 60 * 86400000)
+    assert form_span(long, now) == (first, first + FORM_DAYS * 86400000, False)
+    # No satellite can take it as written, or no pass over it: red.
+    fine = replace(req, kind="SAR")
+    assert form_text(fine, find_passes([fine], *span[:2], [A, B], now), [A, B], span) == ("撮像機会なし（この条件で撮れる衛星なし）", True)
+    empty = Passes(known=frozenset({0, 1}), ops={"R1": []})
+    assert form_text(req, empty, [A, B], span) == (f"撮像機会なし（{(DAY + timedelta(days=3)).month}/{(DAY + timedelta(days=3)).day} まで、"
+                                                   "範囲の上を通るパスなし）", True)
+    # A 定点 request counts the days of its repeat only.
+    weekly = replace(req, category="定点", repeat="曜日:" + "月火水木金土日"[(DAY + timedelta(days=5)).weekday()], end=first + 4 * 86400000)
+    text, red = form_text(weekly, find_passes([weekly], first, weekly.end, [A, B], now), [A, B], form_span(weekly, now))
+    assert text.startswith("撮像機会なし") and red
+    # Its period over, or no orbit known.
+    assert form_text(req, None, [A, B], form_span(req, req.end + 1)) == ("撮像機会: 期間が終わっている", False)
+    assert form_text(req, Passes(), [A, B], span)[1] is False

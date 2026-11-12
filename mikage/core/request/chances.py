@@ -165,3 +165,63 @@ def clearer_text(ch: Chances) -> str:
     """「11/14 のほうが晴れる見込み（雲 10%）」."""
     d, cloud = ch.clearer
     return f"{short_day(d)} のほうが晴れる見込み（雲 {round(cloud)}%）"
+
+
+# --- 依頼フォームの撮像機会 (改修案 7) ---------------------------------------------------------------
+
+#: The days ahead the request form counts a request's chances over.
+FORM_DAYS = 14
+
+
+def form_span(req: ImagingRequest, now: float, days: int = FORM_DAYS) -> Optional[tuple]:
+    """(first, last, whole) ms: its period from now on, `days` days at most (`whole`: to its end); None when it is over."""
+    if not math.isfinite(req.start) or not math.isfinite(req.end):
+        return None
+    first = max(req.start, now)
+    last = min(req.end, first + days * 86400000)
+    if last <= first:
+        return None
+    return first, last, last >= req.end
+
+
+def _when(ms: float) -> str:
+    from datetime import datetime
+
+    from .model import JST
+
+    t = datetime.fromtimestamp(ms / 1000, tz=JST)
+    return f"{t.month}/{t.day} {t.hour:02d}:{t.minute:02d}"
+
+
+def form_text(req: ImagingRequest, passes: Optional[Passes], sats: Sequence[SatelliteSpec], span: Optional[tuple],
+              days: int = FORM_DAYS) -> tuple[str, bool]:
+    """
+    The request form's line on how often the satellites can take the request
+    as written (tsudo 2026-11-12, 改修案 7: one line, nothing to set): its
+    passes (find_passes over `span`, form_span) counted once per satellite and
+    minute, and the first; whether it has none (shown red). Clouds are not
+    weighed (no forecast that far).
+
+    「撮像機会: 今後 14 日で 9 回（最初 11/13 10:32 ISS）」,
+    「撮像機会なし（この条件で撮れる衛星なし）」.
+    """
+    from .route import why_not
+
+    if span is None:
+        return "撮像機会: 期間が終わっている", False
+    if passes is None:
+        return "", False
+    first, last, whole = span
+    able = [i for i in sorted(passes.known) if why_not(req, sats[i]) is None]
+    if not passes.known:
+        return "撮像機会: 衛星の軌道（TLE）が分からず数えられない", False
+    if not able:
+        return "撮像機会なし（この条件で撮れる衛星なし）", True
+    # Only the days it is asked for (定点: those of its repeat).
+    ops = [o for o in passes.ops.get(req.id, ()) if first <= o.time <= last and occurs_on(req, jst_day(o.time))]
+    span_text = f"{short_day(jst_day(last))} まで" if whole else f"今後 {days} 日"
+    if not ops:
+        return f"撮像機会なし（{span_text}、範囲の上を通るパスなし）", True
+    o = min(ops, key=lambda x: x.time)
+    until = f"{span_text}に" if whole else f"{span_text}で"
+    return f"撮像機会: {until} {_distinct(ops, sats)} 回（最初 {_when(o.time)} {sats[o.satellite].name}）", False
