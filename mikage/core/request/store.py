@@ -99,6 +99,10 @@ class RequestStoreConfig:
     #: The yearly quotas table (年間撮像上限, core/request/quota.py; None: no quota is kept).
     quotas: Optional[str] = None
     quota_fields: dict = field(default_factory=lambda: dict(DEFAULT_QUOTA_FIELDS))
+    #: Days after the day planned whose passes tell a 期間内1回 request's chances left (chances.py; 0: not looked at).
+    look_ahead_days: int = 7
+    #: Whether a 定点 request prefers the way its last image was taken (satellite, direction, side, incidence; geometry.py).
+    same_geometry: bool = True
 
 
 def _fields(value: Any, defaults: dict, at: str, problems: list[str]) -> dict:
@@ -143,6 +147,14 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         problems.append(f"{at} の quotas（年間撮像上限）は撮像ごとに数えるので shots（撮像の範囲）も指定")
     label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
     miss = value.get("missAfterDays")
+    from .chances import MOST_DAYS, look_ahead_days
+
+    ahead = value.get("lookAheadDays")
+    if ahead is not None and (isinstance(ahead, bool) or not is_number(ahead) or not 0 <= ahead <= MOST_DAYS):
+        problems.append(f"{at} の lookAheadDays は 0〜{MOST_DAYS} の日数で指定（既定 7）")
+    same = value.get("sameGeometry")
+    if same is not None and not isinstance(same, bool):
+        problems.append(f"{at} の sameGeometry は true か false で指定（既定 true）")
     return RequestStoreConfig(
         label=label if isinstance(label, str) and label else f"撮像依頼 {index + 1}",
         url=layer_url(url),
@@ -158,6 +170,8 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         shot_fields=_fields(value.get("shotFields"), DEFAULT_SHOT_FIELDS, f"{at}.shotFields", problems),
         quotas=layer_url(quotas) if quotas else None,
         quota_fields=_fields(value.get("quotaFields"), DEFAULT_QUOTA_FIELDS, f"{at}.quotaFields", problems),
+        look_ahead_days=look_ahead_days(ahead),
+        same_geometry=same if isinstance(same, bool) else True,
     )
 
 

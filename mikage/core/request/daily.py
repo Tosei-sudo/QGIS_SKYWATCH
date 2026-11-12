@@ -17,6 +17,11 @@ in order of priority.
    missed on a day of its repeat (weekday, interval) is carried over to the
    next day planned, even when that is not one of its days (持ち越し).
 4. Order: output priority, then the nearer deadline, then the older request.
+   Within the same hundred of the output priority (101–200, 201–300 …; a
+   raise moves a request up one) those near their deadline or with few
+   chances left (chances.py: 「今日を逃すと残り 1 回」) come first, and an
+   optical request whose day is cloudy and that has a much clearer pass in
+   the next days comes last (改修案 4, tsudo 2026-11-12).
 5. Fitting: in that order, each request goes to the first system (its own
    order, then `requestExports`') with a satellite that can take it and room
    left: the system's `limit` (count, scenes), its `quota` by category, and
@@ -82,6 +87,7 @@ from datetime import date
 from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
+from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
@@ -141,8 +147,16 @@ class Candidate:
     optical_cloud: Optional[float] = None
     #: Whether `cloud` is at the moment of a pass (from the orbits), not the daylight hours' mean.
     timed: bool = False
-    #: 期間内1回 with DEADLINE_DAYS or less left: it goes whatever the weather.
+    #: 期間内1回 with DEADLINE_DAYS or less left (or few chances left, `scarce`): it goes whatever the weather.
     near: bool = False
+    #: Its chances on the day and after it (chances.Chances); None when not worked out.
+    chances: Optional[Chances] = field(default=None, repr=False, compare=False)
+    #: Near as it has SCARCE chances or fewer left after the day (not by days): it comes first in its band.
+    scarce: bool = False
+    #: An optical request whose day is cloudy, with a much clearer pass in the next days: it comes last in its band.
+    later: bool = False
+    #: How a 定点 request's last image was taken (geometry.LastLook): the passes like it go first; None when not known.
+    last_look: Optional[object] = field(default=None, repr=False, compare=False)
     #: The raise offered (the boost it would have), and why; None when none.
     boost_offer: Optional[int] = None
     boost_reason: str = ""
@@ -328,7 +342,7 @@ def optical_no_go(req: ImagingRequest) -> float:
 
 
 def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[SatelliteSpec],
-           clouds: dict, missed: set, covered: Optional[dict] = None) -> list[Candidate]:
+           clouds: dict, missed: set, covered: Optional[dict] = None, chances: Optional[dict] = None) -> list[Candidate]:
     """
     The candidates of a day: requests that occur on it, with their cover
     (`clouds`: request id → percent or None, weather.Clouds telling those at
@@ -337,6 +351,9 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
     (request id → covered.Covered): what of a 期間内1回 area is taken
     already or handed out on earlier days; one taken (or about to be) to
     GOAL is held back (撮像済み, 撮像待ち: unless near its deadline).
+    `chances` (request id → chances.Chances): one with few chances left is
+    near its deadline whatever the days; one with a much clearer pass later
+    comes last in its priority band.
     """
     timed = getattr(clouds, "timed", ())
     out = []
@@ -349,6 +366,11 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             c.warnings.append("未撮像の持ち越し")
         left = days_left(req, day)
         near = req.achieve == "期間内1回" and left <= DEADLINE_DAYS
+        ch = (chances or {}).get(req.id)
+        c.chances = ch
+        if not near and req.achieve == "期間内1回" and ch is not None and ch.scarce:
+            # 「今日を逃すと残り 1 回」: the day is its chance, whatever the days left.
+            near = c.scarce = True
         c.near = near
         if wants_weather(req, sats):
             c.weather = True
@@ -368,6 +390,8 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
             c.mixed = True
             c.cloud = clouds.get(req.id)
             c.timed = c.cloud is not None and req.id in timed
+        if c.weather and not near and ch is not None and ch.yields(c.cloud):
+            c.later = True
         got = (covered or {}).get(req.id)
         if got is not None and subtracts(req):
             c.covered = got
@@ -381,7 +405,7 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
         if req.id in missed:
             reasons.append("未撮像")
         if near:
-            reasons.append(f"期限まで {max(0, left)} 日")
+            reasons.append(scarce_text(ch) if c.scarce else f"期限まで {max(0, left)} 日")
         offer = next_boost(req)
         if reasons and offer is not None:
             c.boost_offer = offer
@@ -389,7 +413,8 @@ def gather(requests: Sequence[ImagingRequest], day: date, sats: Sequence[Satelli
         out.append(c)
         for k in range(2, req.times[1] + 1):
             out.append(Candidate(req, cloud=c.cloud, weather=c.weather, mixed=c.mixed, timed=c.timed, near=c.near, carried=carried,
-                                 held=c.held, warnings=list(c.warnings), occurrence=k, first=c))
+                                 held=c.held, warnings=list(c.warnings), occurrence=k, first=c, chances=ch, scarce=c.scarce,
+                                 later=c.later))
     return out
 
 
@@ -440,6 +465,19 @@ def cover_text(c: Candidate) -> str:
     return "・".join(parts) + (" を除く" if c.gain is not None else "（範囲全体を出力）")
 
 
+def chance_text(c: Candidate) -> str:
+    """
+    What the chances did: 「残りの撮像機会 1 回（11/14 まで）」 for one put
+    first, 「11/14 のほうが晴れる見込み（雲 10%）」 for one put last and left
+    out for want of room ("" otherwise).
+    """
+    if c.scarce and c.chances is not None and c.main is None:
+        return scarce_text(c.chances)
+    if c.later and c.result == HELD and c.reason in (OVER, BUSY) and c.chances is not None and c.chances.clearer:
+        return clearer_text(c.chances)
+    return ""
+
+
 def kind_text(c: Candidate) -> str:
     """Either kind taken by SAR as its optical passes were too cloudy: 「光学は雲量 80% のため SAR」 ("" otherwise)."""
     if not c.mixed or c.result != TAKEN or c.satellite is None or not c.satellite.sar or c.optical_cloud is None:
@@ -454,10 +492,17 @@ def part_text(c: Candidate) -> str:
     return f"分担 {c.part}/{c.parts}"
 
 
+#: The width of the steps of the output priority within which the chances weigh the order (改修案 4): the hundreds, as a
+#: raise (繰り上げ) moves a request up one of them and leaves its last two digits (its place among the others there).
+BAND = 100
+
+
 def _order_key(c: Candidate):
     end = c.request.end if math.isfinite(c.request.end) else math.inf
     created = c.request.created if c.request.created is not None else math.inf
-    return (c.priority, end, created, c.request.name)
+    # Within its hundred: near its deadline or few chances left first, a clearer day ahead last.
+    urgency = 0 if c.near else 2 if c.later else 1
+    return ((c.priority - 1) // BAND, urgency, c.priority, end, created, c.request.name)
 
 
 def ordered(cands: Sequence[Candidate]) -> list[Candidate]:

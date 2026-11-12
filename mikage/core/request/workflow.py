@@ -144,15 +144,21 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
              clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
-             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None) -> DayPlan:
+             passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None,
+             chances: Optional[dict] = None, last_looks: Optional[dict] = None) -> DayPlan:
     """
     The candidates of a day, gathered and fitted (`target`: the one system
     written from here; `passes`: the orbits'; `quotas`: what the yearly
     quotas have left; `covered`: what of the 期間内1回 areas is taken or
-    handed out on earlier days, covered.read_covered).
+    handed out on earlier days, covered.read_covered; `chances`: the
+    chances left of the 期間内1回 requests, chances.chances_of;
+    `last_looks`: how each 定点 request's last image was taken,
+    geometry.read_last_looks).
     """
     missed = missed_ids(history)
-    cands = gather(requests, day, sats, clouds, missed, covered)
+    cands = gather(requests, day, sats, clouds, missed, covered, chances)
+    for c in cands:
+        c.last_look = (last_looks or {}).get(c.request.id)
     plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
                    passes=passes, quotas=quotas)
     today = handed_today(history, day)

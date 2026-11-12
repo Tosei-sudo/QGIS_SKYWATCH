@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.plan.weather import fetch_clouds
+from ..core.request.chances import chances_of, wanted
 from ..core.request.follow import missed_ids
 from ..core.request.model import CATEGORIES, priority_text
 from ..core.request.quota import QuotaData, read_quota_data
@@ -277,6 +278,22 @@ class LimitSimDialog(QDialog):
             radar = radar_of(sats)
             return lambda day: clouds_of(requests, day, forecasts, passes=passes, sats=used, radar=radar) if forecasts else {}
 
+        look = self.store.look_ahead_days if self.store is not None else 0
+        missed = missed_ids(history)
+        last_day = horizon_days(start, days)[-1]
+
+        def chances_for(systems_, passes):
+            """The 期間内1回 requests' chances left on a day (chances.py), within the run's passes (改修案 4)."""
+            if look <= 0 or passes is None:
+                return None
+            used = orbiting(systems_, sats)
+
+            def of(ledger, day, day_clouds):
+                n = min(look, (last_day - day).days)
+                return chances_of(wanted(ledger, day, missed if day == start else ()), day, passes, passes, sats, forecasts, used,
+                                  day_clouds, n)
+            return of
+
         systems = self.context.config.request_exports
         tried = changed_systems(systems, self.changes())
         self.run_button.setEnabled(False)
@@ -287,10 +304,12 @@ class LimitSimDialog(QDialog):
             passes = run_passes(requests, start, days, sats, time.time() * 1000, task.isCanceled)
             task.check()
             task.progress(30)
-            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes, quotas)
+            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes, quotas,
+                            chances_for(systems, passes))
             task.check()
             task.progress(65)
-            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes, quotas)
+            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes, quotas,
+                             chances_for(tried, passes))
             task.check()
             return base, trial
 

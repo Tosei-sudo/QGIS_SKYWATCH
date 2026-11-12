@@ -4,17 +4,27 @@
 
 1. A request of either kind (任意) that optical and SAR satellites can both
    take weighs the clouds on its optical passes only: a cloudy day goes to SAR.
+4. A 期間内1回 request's chances left (the passes of the next days, the
+   clouds at their moments): with one left it is near its deadline whatever
+   the days, first in its hundred; a cloudy day with a much clearer pass
+   ahead puts it last there.
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import timedelta
 
 import pytest
 
-from mikage.core.request.daily import ANY_KIND_NO_GO, HELD, TAKEN, allocate, cloud_tip, gather, kind_text, mixed_kinds
+from mikage.core.plan.weather import CloudSeries, key_of
+from mikage.core.request.chances import Chances, chances_of, look_ahead_days, wanted
+from mikage.core.request.daily import (
+    ANY_KIND_NO_GO, HELD, OVER, TAKEN, allocate, chance_text, cloud_tip, gather, kind_text, mixed_kinds, ordered,
+)
 from mikage.core.request.export import Context, raw_value
-from mikage.core.request.model import ImagingRequest, square_rings
-from mikage.core.request.passes import day_passes
+from mikage.core.request.model import ImagingRequest, day_bounds, square_rings
+from mikage.core.request.passes import Passes, day_passes
+from mikage.core.request.store import request_store_of
 from mikage.core.request.weather import places_of
 from mikage.core.request.workflow import clouds_of, forecast_places, orbiting, plan_day, radar_of
 from mikage.tests.test_plan import BELOW, T
@@ -117,3 +127,127 @@ def test_either_kind_counted_without_orbits_goes_by_the_days_cover():
     cands = allocate(gather([req], DAY, MIXED, clouds, set()), [flat], MIXED)
     [c] = cands
     assert c.mixed and c.result == TAKEN and c.satellite.name == "ISS 2" and kind_text(c) == "光学は雲量 75% のため SAR"
+
+
+# --- 4. Chances left ----------------------------------------------------------------------------------
+
+D = 86400000
+
+
+@dataclass
+class Op:
+    """Just what the chances look at of a pass."""
+    satellite: int
+    time: float
+
+
+def once(i: int = 1, days: int = 4, **kw) -> ImagingRequest:
+    """An optical 期間内1回 point request from T's day, `days` days on."""
+    first, _ = day_bounds(DAY)
+    _, last = day_bounds(DAY + timedelta(days=days))
+    req = ImagingRequest(id=f"R{i}", name=f"点{i}", priority=350, kind="光学", achieve="期間内1回", start=first, end=last,
+                         shape_kind="点", rings=square_rings(BELOW[0], BELOW[1], 0.1))
+    return replace(req, **kw)
+
+
+def md(d) -> str:
+    return f"{d.month}/{d.day}"
+
+
+def passes_of(req, times) -> Passes:
+    """Passes of the request at `times` [(satellite index, ms)]."""
+    return Passes(ops={req.id: [Op(i, t) for i, t in times]}, targets={req.id: object()})
+
+
+def test_chances_are_the_passes_after_the_day_to_the_deadline():
+    req = once(days=3)
+    two = [OPT, replace(OPT, mode="モード 2")]
+    got = passes_of(req, [(0, T), (0, T + D), (1, T + D), (0, T + 5 * D)])
+    ch = chances_of([req], DAY, got, got, two)["R1"]
+    # The day's pass; after it one (two modes of one satellite at one moment), the one after the deadline not counted.
+    assert ch == Chances(today=1, left=1, until=DAY + timedelta(days=3), whole=True)
+    assert ch.scarce
+    # A deadline past the days looked at: not all its chances are known, so never scarce.
+    far = once(days=10)
+    ch = chances_of([far], DAY, passes_of(far, [(0, T), (0, T + D)]), passes_of(far, [(0, T), (0, T + D)]), two, days=7)["R1"]
+    assert not ch.whole and not ch.scarce and ch.until == DAY + timedelta(days=7)
+    # No pass on the day: nothing to put first.
+    assert not chances_of([req], DAY, passes_of(req, [(0, T + D)]), passes_of(req, [(0, T + D)]), two)["R1"].scarce
+    # Satellites without known orbits: no chances worked out (the days count as before).
+    assert chances_of([req], DAY, Passes(), Passes(), two) == {}
+
+
+def test_too_cloudy_passes_ahead_are_no_chance_and_a_clearer_one_is_told():
+    req = once(days=3, cloud_no_go=50)
+    got = passes_of(req, [(0, T), (0, T + D), (0, T + 2 * D)])
+    forecasts = {key_of(p): CloudSeries([T - D, T + 1.5 * D, T + 1.6 * D, T + 3 * D], [70.0, 80.0, 10.0, 10.0]) for p in places_of(req)}
+    ch = chances_of([req], DAY, got, got, [OPT], forecasts, clouds={"R1": 70.0})["R1"]
+    # The next day's pass is at 80 % (no chance); the one after at 10 %: one chance, 6 tenths clearer than today.
+    assert ch.left == 1 and ch.scarce
+    assert ch.clearer[0] == DAY + timedelta(days=2) and ch.clearer[1] == pytest.approx(10)
+    # SAR passes are chances whatever the clouds.
+    either_ = once(days=3, kind="任意")
+    sar = passes_of(either_, [(0, T), (1, T + D), (1, T + 2 * D)])
+    assert chances_of([either_], DAY, sar, sar, MIXED, forecasts)["R1"].left == 2
+
+
+def test_only_the_requests_that_need_it_are_looked_at():
+    reqs = [once(1), once(2, achieve="毎回"), once(3, status="停止"), once(4, days=0)]
+    assert [r.id for r in wanted(reqs, DAY)] == ["R1"]
+    problems = []
+    store = request_store_of({"url": "https://h/arcgis/rest/services/x/FeatureServer/0"}, problems, 0)
+    assert store.look_ahead_days == 7 and store.same_geometry and problems == []
+    store = request_store_of({"url": "https://h/arcgis/rest/services/x/FeatureServer/0", "lookAheadDays": 0, "sameGeometry": False},
+                             problems, 0)
+    assert store.look_ahead_days == 0 and not store.same_geometry and problems == []
+    request_store_of({"url": "https://h/arcgis/rest/services/x/FeatureServer/0", "lookAheadDays": 40, "sameGeometry": "yes"}, problems, 0)
+    assert len(problems) == 2 and look_ahead_days(40) == 16
+
+
+def test_scarce_is_near_its_deadline_and_first_in_its_hundred():
+    reqs = [once(1, priority=350), once(2, priority=360, cloud_no_go=50), once(3, priority=340), once(4, priority=250)]
+    left = {"R2": Chances(1, 1, DAY + timedelta(days=4), True),
+            "R3": Chances(1, 5, DAY + timedelta(days=4), True, (DAY + timedelta(days=1), 5.0)),
+            "R4": Chances(1, 5, DAY + timedelta(days=4), True, (DAY + timedelta(days=1), 5.0))}
+    cands = gather(reqs, DAY, [OPT], {"R1": 40.0, "R2": 75.0, "R3": 70.0, "R4": 70.0}, set(), chances=left)
+    got = {c.request.id: c for c in cands}
+    # One chance left: near its deadline (4 days away): goes whatever the clouds (75 % over its 50 %), raise offered.
+    assert got["R2"].scarce and got["R2"].near and not got["R2"].held
+    assert got["R2"].boost_offer == 100 and got["R2"].boost_reason == f"残りの撮像機会 1 回（{md(DAY + timedelta(days=4))} まで）"
+    assert any("期限間近のため出力" in w for w in got["R2"].warnings)
+    # Cloudy today with a much clearer pass ahead: last in its hundred.
+    assert got["R3"].later and not got["R1"].later
+    for c in cands:
+        c.boost_taken = False
+    # R4 is in the hundred above: it stays first whatever its chances; then R2 (scarce), R1, R3 (clearer later).
+    assert [c.request.id for c in ordered(cands)] == ["R4", "R2", "R1", "R3"]
+
+
+def test_one_waiting_for_a_clearer_day_gives_way_when_room_is_short():
+    reqs = [once(1, priority=340), once(2, priority=350)]
+    left = {"R1": Chances(1, 5, DAY + timedelta(days=4), True, (DAY + timedelta(days=1), 5.0))}
+    flat = system(orbit=False, limit={"count": 1})
+    cands = allocate(gather(reqs, DAY, [OPT], {"R1": 70.0, "R2": 40.0}, set(), chances=left), [flat], [OPT])
+    got = {c.request.id: c for c in cands}
+    assert got["R2"].result == TAKEN and got["R1"].result == HELD and got["R1"].reason == OVER
+    assert chance_text(got["R1"]) == f"{md(DAY + timedelta(days=1))} のほうが晴れる見込み（雲 5%）"
+    # With room for both, it goes today all the same.
+    cands = allocate(gather(reqs, DAY, [OPT], {"R1": 70.0, "R2": 40.0}, set(), chances=left), [system(orbit=False)], [OPT])
+    assert all(c.result == TAKEN for c in cands) and chance_text(cands[-1]) == ""
+
+
+def test_the_day_planned_with_the_passes_ahead():
+    # End to end on the orbits: the chances of the next days worked out from the satellites' passes.
+    from mikage.core.request.chances import ahead_span
+    from mikage.core.request.passes import find_passes
+
+    req = once(days=3)
+    sats = [OPT]
+    today = day_passes([req], DAY, sats)
+    first, last = ahead_span(DAY, 7)
+    ahead = find_passes([req], first, last, sats)
+    ch = chances_of([req], DAY, today, ahead, sats)["R1"]
+    assert ch.today >= 1 and ch.whole and ch.until == DAY + timedelta(days=3)
+    assert ch.left == len({round(o.time / 60000) for o in ahead.ops["R1"] if o.time <= req.end})
+    plan = plan_day([req], DAY, [system()], sats, {}, passes=today, chances={"R1": ch})
+    assert plan.candidates[0].chances is ch
