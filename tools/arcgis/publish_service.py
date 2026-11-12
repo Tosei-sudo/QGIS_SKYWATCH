@@ -1,22 +1,22 @@
-"""SKYWATCH のテーブルをポータル（ArcGIS Enterprise）にフィーチャサービスとして公開し、プラグインの設定ファイルを書き出す。
+"""MIKAGE のテーブルをポータル（ArcGIS Enterprise）にフィーチャサービスとして公開し、プラグインの設定ファイルを書き出す。
 
 ArcGIS Pro の Python で実行する（ArcPy で公開し、ArcGIS API for Python でサービスを確かめる）。
 `create_tables.py` でテーブルを作ったあとに使う。
 
     "C:\\Program Files\\ArcGIS\\Pro\\bin\\Python\\scripts\\propy.bat" publish_service.py publish ^
-        --workspace C:\\gis\\connections\\skywatch_publisher.sde ^
-        --aprx C:\\gis\\skywatch_publish\\skywatch_publish.aprx ^
+        --workspace C:\\gis\\connections\\mikage_publisher.sde ^
+        --aprx C:\\gis\\mikage_publish\\mikage_publish.aprx ^
         --portal https://gis.example/portal --server https://gis.example/server ^
-        --service SKYWATCH --groups SKYWATCH利用者 --config C:\\gis\\skywatch.config.json
+        --service MIKAGE --groups MIKAGE利用者 --config C:\\gis\\mikage.config.json
 
     rem 公開済みのサービスから設定ファイルだけ作る
-    propy.bat publish_service.py config --url https://gis.example/server/rest/services/SKYWATCH/FeatureServer ^
-        --portal https://gis.example/portal --config C:\\gis\\skywatch.config.json
+    propy.bat publish_service.py config --url https://gis.example/server/rest/services/MIKAGE/FeatureServer ^
+        --portal https://gis.example/portal --config C:\\gis\\mikage.config.json
 
 前提:
 - ジオデータベースがフェデレーションしたサーバーにデータストアとして登録してある（参照で公開するため。データはコピーしない）
 - `--aprx` は空のプロジェクト（ArcGIS Pro で「新しいプロジェクト」→ 保存したもの）。スクリプトは中に地図
-  `SKYWATCH_SERVICE` を作り直して使う（ほかの地図には触れない）
+  `MIKAGE_SERVICE` を作り直して使う（ほかの地図には触れない）
 - `--user` を書かなければ ArcGIS Pro でサインインしているポータル・アカウントを使う
 
 何度実行してもよい: 同じ名前のサービスは上書きする。レイヤー番号はテーブルの一覧の順（0 = TBL_IMAGE_CATALOG …）に固定する。
@@ -33,9 +33,9 @@ from xml.dom import minidom
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import skywatch_schema as schema  # noqa: E402
+import mikage_schema as schema  # noqa: E402
 
-MAP_NAME = "SKYWATCH_SERVICE"
+MAP_NAME = "MIKAGE_SERVICE"
 #: フィーチャ アクセスの機能（プラグインは追加・更新・削除をする）。
 CAPABILITIES = "Query,Create,Update,Delete,Uploads,Editing"
 
@@ -136,7 +136,7 @@ def write_config(path: str, urls: dict) -> dict:
 def _gis(args):
     from arcgis.gis import GIS  # ArcGIS Pro の Python にある ArcGIS API for Python
     if args.user:
-        password = args.password or os.environ.get("SKYWATCH_PORTAL_PASSWORD") or getpass.getpass(f"{args.user} のパスワード: ")
+        password = args.password or os.environ.get("MIKAGE_PORTAL_PASSWORD") or getpass.getpass(f"{args.user} のパスワード: ")
         return GIS(args.portal, args.user, password, verify_cert=not args.no_verify)
     return GIS("pro")
 
@@ -195,7 +195,7 @@ def publish(args) -> int:
 
     tables = [schema.BY_NAME[n] for n in args.tables] if args.tables else [t for t in schema.TABLES if t.name not in args.skip]
     if args.user:
-        password = args.password or os.environ.get("SKYWATCH_PORTAL_PASSWORD") or getpass.getpass(f"{args.user} のパスワード: ")
+        password = args.password or os.environ.get("MIKAGE_PORTAL_PASSWORD") or getpass.getpass(f"{args.user} のパスワード: ")
         arcpy.SignInToPortal(args.portal, args.user, password)
         args.password = password
     aprx = arcpy.mp.ArcGISProject(args.aprx)
@@ -203,7 +203,7 @@ def publish(args) -> int:
     m = _build_map(arcpy, aprx, args.workspace, tables)
     aprx.save()
 
-    work = tempfile.mkdtemp(prefix="skywatch_publish_")
+    work = tempfile.mkdtemp(prefix="mikage_publish_")
     sddraft = os.path.join(work, args.service + ".sddraft")
     sd = os.path.join(work, args.service + ".sd")
     draft = m.getWebLayerSharingDraft("FEDERATED_SERVER", "MAP_IMAGE", args.service)
@@ -213,8 +213,8 @@ def publish(args) -> int:
     if args.folder:
         draft.serverFolder = args.folder
         draft.portalFolder = args.folder
-    draft.summary = "SKYWATCH（衛星画像の観測）のテーブル"
-    draft.tags = "SKYWATCH"
+    draft.summary = "MIKAGE（衛星画像の観測）のテーブル"
+    draft.tags = "MIKAGE"
     draft.exportToSDDraft(sddraft)
     with open(sddraft, encoding="utf-8") as f:
         xml_text = f.read()
@@ -256,14 +256,14 @@ def write_config_from_service(args) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="SKYWATCH のフィーチャサービスを公開し、プラグインの設定ファイルを作る")
+    parser = argparse.ArgumentParser(description="MIKAGE のフィーチャサービスを公開し、プラグインの設定ファイルを作る")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def common(p):
         p.add_argument("--portal", required=True, help="ポータルの URL（https://gis.example/portal）")
         p.add_argument("--user", default="", help="ポータルのユーザー（省略すると ArcGIS Pro のサインインを使う）")
         p.add_argument("--password", default="", help="パスワード（非推奨: コマンドの履歴・プロセスの一覧に残る。"
-                                                   "省略すると環境変数 SKYWATCH_PORTAL_PASSWORD か入力）")
+                                                   "省略すると環境変数 MIKAGE_PORTAL_PASSWORD か入力）")
         p.add_argument("--no-verify", action="store_true", help="証明書を確かめない（社内の自己署名証明書のとき）")
         p.add_argument("--config", default="", help="書き出すプラグインの設定ファイル（省略すると画面に出す）")
 
@@ -272,7 +272,7 @@ def main(argv=None) -> int:
     p.add_argument("--workspace", required=True, help="公開に使う .sde（サーバーに登録したものと同じデータベース）")
     p.add_argument("--aprx", required=True, help="公開に使う ArcGIS Pro のプロジェクト（空のもの）")
     p.add_argument("--server", required=True, help="フェデレーションしたサーバーの URL（https://gis.example/server）")
-    p.add_argument("--service", default="SKYWATCH", help="サービス名（既定 SKYWATCH）")
+    p.add_argument("--service", default="MIKAGE", help="サービス名（既定 MIKAGE）")
     p.add_argument("--folder", default="", help="サーバー・ポータルのフォルダー")
     p.add_argument("--tables", nargs="*", default=[], help="公開するテーブルだけ（既定はすべて）")
     p.add_argument("--skip", nargs="*", default=[], help="公開しないテーブル")
@@ -286,7 +286,7 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
     if args.password:
-        print("  ! --password のパスワードはコマンドの履歴・プロセスの一覧に残る（環境変数 SKYWATCH_PORTAL_PASSWORD か入力を推奨）",
+        print("  ! --password のパスワードはコマンドの履歴・プロセスの一覧に残る（環境変数 MIKAGE_PORTAL_PASSWORD か入力を推奨）",
               file=sys.stderr)
     for name in getattr(args, "tables", []) + getattr(args, "skip", []):
         if name not in schema.BY_NAME:
