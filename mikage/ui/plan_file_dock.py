@@ -58,6 +58,7 @@ from ..core.request.daily import (
 )
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.follow import missed_ids
+from ..core.request.geometry import look_text, read_last_looks
 from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes, find_passes
@@ -488,6 +489,13 @@ class PlanFileDock(PluginDock):
                 first, last = ahead_span(day, store.look_ahead_days)
                 ahead = find_passes(looked, first, last, sats, now, task.isCanceled)
                 task.check()
+            # How each 定点 request's last image was taken: the passes like it first (改修案 5, geometry.py).
+            last_looks = {}
+            if store.same_geometry:
+                try:
+                    last_looks = read_last_looks(client, store, token, requests, day, task.isCanceled)
+                except Exception as error:  # noqa: BLE001 (the day goes on without it, said so)
+                    notes.append(f"前回の撮り方を読めず、それなしで計算（{error}）")
             quotas = QuotaData()
             if store.quotas:
                 # What the yearly quotas have left (年間撮像上限): the shots of their years, as 照合 left them.
@@ -496,11 +504,11 @@ class PlanFileDock(PluginDock):
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
                     notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
                 notes += quotas.problems[:3]
-            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead)
+            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead) = result
+            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
@@ -510,7 +518,8 @@ class PlanFileDock(PluginDock):
             clouds = clouds_of(requests, day, forecasts, passes=passes, sats=used, radar=radar_of(sats))
             book = quotas.book(day) if quotas.quotas else None
             chances = chances_of(looked, day, passes, ahead, sats, forecasts, used, clouds, store.look_ahead_days) if ahead else None
-            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered, chances)
+            self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered, chances,
+                                 last_looks)
             self._fill_series()
             self.render()
             # The shots of an area shared out past its first are rows of it, not requests of their own.
@@ -587,7 +596,7 @@ class PlanFileDock(PluginDock):
             cloud = "" if not (c.weather or c.mixed) else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
-            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), chance_text(c), *c.warnings) if x)
+            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), chance_text(c), look_text(c), *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)

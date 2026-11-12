@@ -8,6 +8,8 @@
    clouds at their moments): with one left it is near its deadline whatever
    the days, first in its hundred; a cloudy day with a much clearer pass
    ahead puts it last there.
+5. A 定点 request is taken as its last image was where it can be: that
+   satellite first, then the same direction and side, the incidence closest.
 """
 from __future__ import annotations
 
@@ -251,3 +253,94 @@ def test_the_day_planned_with_the_passes_ahead():
     assert ch.left == len({round(o.time / 60000) for o in ahead.ops["R1"] if o.time <= req.end})
     plan = plan_day([req], DAY, [system()], sats, {}, passes=today, chances={"R1": ch})
     assert plan.candidates[0].chances is ch
+
+
+# --- 5. 定点: as the last image was taken ----------------------------------------------------------------
+
+def fixed(i: int = 1, **kw) -> ImagingRequest:
+    """A 定点 point request below the satellites, all day."""
+    first, last = day_bounds(DAY)
+    req = ImagingRequest(id=f"R{i}", name=f"点{i}", priority=300, kind="光学", category="定点", achieve="毎回", start=first, end=last,
+                         shape_kind="点", rings=square_rings(BELOW[0], BELOW[1], 0.1))
+    return replace(req, **kw)
+
+
+def looked(req, look, sats=(A, B)):
+    sats = list(sats)
+    passes = day_passes([req], DAY, sats)
+    plan = plan_day([req], DAY, [system(merge=False)], sats, {}, passes=passes, last_looks={req.id: look} if look else None)
+    return plan.candidates[0]
+
+
+def test_the_last_satellite_goes_first_then_a_pass_taken_the_same_way():
+    from mikage.core.request.geometry import LastLook, look_text
+
+    req = fixed()
+    # As before: ISS (the first of two alike), its pass looking left.
+    c = looked(req, None)
+    assert c.satellite.name == "ISS" and c.shots[0].side == "左" and look_text(c) == ""
+    # Last taken by ISS 2: ISS 2 first, and the note says nothing (taken the same way).
+    c = looked(req, LastLook("2026-10-01", "ISS 2", "", "昇交", "右", 0.5))
+    assert c.result == TAKEN and c.satellite.name == "ISS 2" and look_text(c) == ""
+    # Its satellite gone: the one with a pass looking the same way (右) before the other.
+    c = looked(req, LastLook("2026-10-01", "OLD-1", "", "昇交", "右", 0.5))
+    assert c.satellite.name == "ISS 2" and look_text(c) == "前回（10/1）と違う撮り方（OLD-1 → ISS 2）"
+    # The satellite named first by the request keeps its place (the hand's order wins).
+    c = looked(replace(req, satellites=["ISS", "ISS 2"]), LastLook("2026-10-01", "ISS 2"))
+    assert c.satellite.name == "ISS"
+    # No pass of the day taken that way: taken all the same, the difference said.
+    c = looked(req, LastLook("2026-10-01", "ISS", "", "降交", "左", 30.0))
+    assert c.result == TAKEN and c.satellite.name == "ISS"
+    assert look_text(c) == "前回（10/1）と違う撮り方（降交・入射角 30° → 昇交・入射角 0°）"
+
+
+def test_mismatch_and_satellite_rank():
+    from mikage.core.request.geometry import LastLook, Look, mismatch, same, satellite_rank
+
+    last = LastLook("2026-11-01", "SAR-1", "ストリップ", "降交", "右", 35.0)
+    assert mismatch(last, Look(False, "右", 37.0)) == (0, 0)
+    assert mismatch(last, Look(False, "右", 39.2)) == (0, 5)
+    assert mismatch(last, Look(True, "左", 35.0)) == (2, 0)
+    assert mismatch(None, Look(True, "左", 35.0)) == (0, 0)
+    # What the last shot does not tell is not compared.
+    assert mismatch(LastLook("2026-11-01", "SAR-1"), Look(True, "左", 60.0)) == (0, 0)
+    sar = replace(SAR, name="SAR-1", mode="ストリップ")
+    assert [satellite_rank(last, s) for s in (sar, replace(sar, mode="スポット"), SAR)] == [0, 1, 2]
+    assert satellite_rank(None, sar) == 2 and satellite_rank(LastLook("2026-11-01", "SAR-1"), replace(sar, mode="スポット")) == 0
+    assert same(last, sar, Look(False, "右", 33.0)) and not same(last, SAR, Look(False, "右", 35.0))
+
+
+def test_the_last_looks_are_read_from_the_history_and_the_shots():
+    from mikage.core.esri import EsriClient
+    from mikage.core.request.geometry import LastLook, read_last_looks
+    from mikage.tests.test_request_quota import SHOTS, _history, _services
+
+    fake, store = _services()
+    fake.layers[SHOTS].types.update(INCIDENCE="esriFieldTypeDouble", RUN_DATE="esriFieldTypeDate")
+    before = [(DAY - timedelta(days=n)).isoformat() for n in (1, 3, 200)]
+    _history(fake, "R1", "S1", captured="撮像済み", day=before[1])
+    _history(fake, "R1", "S2", captured="撮像済み", day=before[0])
+    # Not taken, from too long ago, or of a 臨時 request: not looked at.
+    _history(fake, "R1", "S3", captured="未撮像", day=before[0])
+    _history(fake, "R2", "S4", captured="撮像済み", day=before[2])
+    _history(fake, "R3", "S1", captured="撮像済み", day=before[1])
+    for sid, day, sat, d, side, inc in (("S1", before[1], "ISS", "昇交", "左", 12.5), ("S2", before[0], "ISS 2", "降交", "右", 30.0),
+                                        ("S3", before[0], "ISS", "昇交", "右", 1.0), ("S4", before[2], "ISS", "昇交", "右", 1.0)):
+        fake.layers[SHOTS].add({"SHOT_ID": sid, "RUN_ID": "RUN", "TARGET_DAY": day, "SATELLITE": sat, "ORBIT_DIR": d, "LOOK_SIDE": side,
+                                "INCIDENCE": inc, "SENSOR_MODE": ""})
+    reqs = [fixed(1), fixed(2), fixed(3, category="臨時", achieve="期間内1回")]
+    client = EsriClient(fake)
+    looks = read_last_looks(client, store, None, reqs, DAY)
+    assert looks == {"R1": LastLook(before[0], "ISS 2", "", "降交", "右", 30.0)}
+    # Off, or without a shot layer: nothing is asked.
+    assert read_last_looks(client, replace(store, same_geometry=False), None, reqs, DAY) == {}
+    assert read_last_looks(client, replace(store, shots=None), None, reqs, DAY) == {}
+
+
+def test_same_geometry_in_the_config():
+    problems: list = []
+    assert request_store_of({"url": "https://x/FeatureServer/0"}, problems, 0).same_geometry is True
+    assert request_store_of({"url": "https://x/FeatureServer/0", "sameGeometry": False}, problems, 0).same_geometry is False
+    assert problems == []
+    request_store_of({"url": "https://x/FeatureServer/0", "sameGeometry": "no"}, problems, 0)
+    assert problems and "sameGeometry" in problems[0]

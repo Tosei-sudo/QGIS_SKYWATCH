@@ -68,6 +68,13 @@ weather on its optical passes only: those at or above its 「実施しない雲�
 goes to a SAR satellite; a SAR pass is never too cloudy. Its priority and
 its holding back are not touched by the weather (a SAR pass may take it).
 
+A 定点 request is best taken as its last image was, so that the two compare
+(改修案 5, geometry.py, tsudo 2026-11-12): its last image's satellite (mode)
+is tried first among those it does not name, and the passes of the same
+direction and look side first, then the incidence closest, each after the
+clouds (by tenths). Only an order: with no such pass it goes on another,
+said so in its note.
+
 A sensor or mode with a yearly quota (年間撮像上限, quota.py; tsudo
 2026-11-11) takes no more scenes than its year has left, what the shots
 handed out and not settled yet will use taken off: a request then tries the
@@ -89,6 +96,7 @@ from typing import Optional, Sequence
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
 from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
+from .geometry import look_of, mismatch, pass_look, satellite_rank
 from .model import ImagingRequest, clamp_priority, day_bounds, days_left, next_boost, occurs_on
 from .passes import Passes
 from .quota import QUOTA, QUOTA_OVER, QuotaBook
@@ -703,6 +711,13 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         cloud = clearest(c, system, sat)
         return cloud is not None and cloud >= optical_no_go(c.request)
 
+    def alike(c: Candidate, system: ExportSystem, sat: SatelliteSpec) -> tuple:
+        """For a 定点 request with a last look: how close the satellite's closest pass over it comes to it ((0, 0) otherwise)."""
+        if c.last_look is None or not orbits(system, sat):
+            return 0, 0
+        ops = passes.of(c.request, day, index[id(sat)])
+        return min((mismatch(c.last_look, pass_look(o)) for o in ops), default=(9, 0))
+
     def options_of(c: Candidate, system: ExportSystem, sat: SatelliteSpec, why: set, forced: bool) -> Optional[list]:
         """The passes of the satellite a candidate may go on (its times apart, the weather, those left out by hand); None: none."""
         i = index[id(sat)]
@@ -755,9 +770,13 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         joins = book.joins(c, i, ops, system.merge, system.merge_margin) if start is None else []
         options = joins + book.new_shots(c, i, ops, forced, start, fits_of(c, system, sat))
         clouds = {id(p): _placement_cloud(p, told) for p in options} if weighed(c, sat) else {}
-        if weighed(c, sat):
-            # The less cloudy first, by tenths; within a tenth as before (into a shot planned, then the smaller angle).
-            options.sort(key=lambda p: (p.busy, _tenth(clouds[id(p)])))
+        last = c.last_look
+        if weighed(c, sat) or last is not None:
+            # The less cloudy first, by tenths; within a tenth, a 定点 request's passes taken as its last image first
+            # (the same direction and side, then the incidence closest; 改修案 5, geometry.py); then as before (into a
+            # shot planned, then the smaller angle).
+            looks = {id(p): mismatch(last, look_of(p)) for p in options} if last is not None else {}
+            options.sort(key=lambda p: (p.busy, _tenth(clouds[id(p)]) if clouds else 0, looks.get(id(p), (0, 0))))
         room = rooms[system.system]
         for p in options:
             if p.busy and not forced:
@@ -791,8 +810,10 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         else:
             # Optical: the satellite with the less cloudy pass first (by tenths), then the finest resolution.
             # Either kind: as before, but an optical satellite under clouds after the SAR ones (改修案 1).
-            able.sort(key=lambda s: (sky(c, system, s), overcast(c, system, s), s.resolution if s.resolution is not None else math.inf,
-                                     -left(system, s)))
+            # 定点: the satellite (mode) of its last image before the others, then those with a pass taking it the same
+            # way, after the clouds (改修案 5).
+            able.sort(key=lambda s: (sky(c, system, s), overcast(c, system, s), satellite_rank(c.last_look, s), alike(c, system, s),
+                                     s.resolution if s.resolution is not None else math.inf, -left(system, s)))
         return able
 
     def start_of(c: Candidate) -> Optional[bytearray]:
