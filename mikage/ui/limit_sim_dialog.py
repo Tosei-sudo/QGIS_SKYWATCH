@@ -29,7 +29,7 @@ from ..core.request.simulate import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
 from ..core.request.store import history_where, load_history, load_requests
-from ..core.request.workflow import clouds_of, forecast_places, orbiting
+from ..core.request.workflow import clouds_of, forecast_places, orbiting, radar_of
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task
@@ -274,7 +274,8 @@ class LimitSimDialog(QDialog):
         def clouds_for(systems_, passes):
             """A day's cover by request: at the moment of each pass of the satellites fitted on the orbits, else the daylight mean."""
             used = orbiting(systems_, sats)
-            return lambda day: clouds_of(requests, day, forecasts, passes=passes, sats=used) if forecasts else {}
+            radar = radar_of(sats)
+            return lambda day: clouds_of(requests, day, forecasts, passes=passes, sats=used, radar=radar) if forecasts else {}
 
         systems = self.context.config.request_exports
         tried = changed_systems(systems, self.changes())

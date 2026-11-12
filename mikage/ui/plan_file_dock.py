@@ -52,7 +52,7 @@ from ..core.esri import EsriError
 from ..core.plan.weather import fetch_clouds
 from ..core.request.covered import read_covered
 from ..core.request.daily import (
-    HELD, TAKEN, cloud_tip, cover_text, merge_text, occurrence_text, part_text, pass_text, room_text, satellite_name, time_text,
+    HELD, TAKEN, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, part_text, pass_text, room_text, satellite_name, time_text,
 )
 from ..core.request.export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.follow import missed_ids
@@ -67,7 +67,7 @@ from ..core.request.store import (
 )
 from ..core.request.workflow import (
     DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, orbiting,
-    plan_day, shots_of, written_summary,
+    plan_day, radar_of, shots_of, written_summary,
 )
 from ..qgis_io import settings
 from ..qgis_io.geometry import from_wgs84
@@ -497,7 +497,7 @@ class PlanFileDock(PluginDock):
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
             self.requests_changed(requests)
             # At each pass's moment for the satellites fitted on the orbits; the daylight hours' mean for the others.
-            clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats))
+            clouds = clouds_of(requests, day, forecasts, passes=passes, sats=orbiting(systems, sats), radar=radar_of(sats))
             book = quotas.book(day) if quotas.quotas else None
             self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered)
             self._fill_series()
@@ -559,10 +559,10 @@ class PlanFileDock(PluginDock):
             prio = f"{priority_text(r.priority)} → {c.priority}"
             if c.system:
                 prio += f"（{convert_priority(c.priority, c.system.priority)}）"
-            cloud = "" if not c.weather else ("—" if c.forecast is None else f"{round(c.forecast)}%")
+            cloud = "" if not (c.weather or c.mixed) else ("—" if c.forecast is None else f"{round(c.forecast)}%")
             reason = c.reason if c.result == HELD else ""
             merged = merge_text(c) if c.result == TAKEN else ""
-            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), *c.warnings) if x)
+            note = "・".join(x for x in (reason, merged, part_text(c), cover_text(c), kind_text(c), *c.warnings) if x)
             boost = QStandardItem(f"+{c.boost_offer - r.boost}（{c.boost_reason}）" if c.boost_offer is not None else "")
             if c.boost_offer is not None:
                 boost.setCheckable(True)
@@ -589,7 +589,7 @@ class PlanFileDock(PluginDock):
                     item.setToolTip(plain_tip(tip))
             if merged:
                 result.setToolTip(plain_tip(merged))
-            if c.weather:
+            if c.weather or c.mixed:
                 items[COLUMNS.index("雲量")].setToolTip(plain_tip(cloud_tip(c)))
             self.model.appendRow(items)
         self._rendering = False

@@ -22,7 +22,7 @@ from typing import Optional, Sequence
 
 from ..plan.satellites import SatelliteSpec
 from ..plan.weather import CloudSeries
-from .daily import HELD, TAKEN, Candidate, allocate, carries_over, gather, occurrence_key, wants_weather
+from .daily import HELD, TAKEN, Candidate, allocate, asks_weather, carries_over, gather, occurrence_key
 from .export import Written, convert_priority, row_rings
 from .follow import missed_ids
 from .link_id import link_ids
@@ -42,12 +42,13 @@ def forecast_places(requests: Sequence[ImagingRequest], day: date, sats: Sequenc
     The places whose forecasts the day's optical requests need: those of the
     day, and those missed (`missed`: the ids found 未撮像, follow.missed_ids)
     carried over to it (daily.gather takes them too, so their weather counts
-    as any other's).
+    as any other's). Those of either kind (任意) that optical satellites can
+    take too are asked for (their optical passes are weighed, daily.mixed_kinds).
     """
     seen: dict = {}
     missed = set(missed)
     for req in requests:
-        if (occurs_on(req, day) or req.id in missed and carries_over(req, day)) and wants_weather(req, sats):
+        if (occurs_on(req, day) or req.id in missed and carries_over(req, day)) and asks_weather(req, sats):
             for p in places_of(req):
                 seen[p] = None
     return list(seen)
@@ -63,16 +64,23 @@ def orbiting(systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec]) -> 
     return out
 
 
+def radar_of(sats: Sequence[SatelliteSpec]) -> frozenset:
+    """The indices of the SAR satellites (modes): the clouds never matter to their passes."""
+    return frozenset(i for i, s in enumerate(sats) if s.sar)
+
+
 def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str, CloudSeries],
               hours: Sequence[float] = DAYLIGHT, passes: Optional[Passes] = None,
-              sats: Optional[set] = None) -> Clouds:
+              sats: Optional[set] = None, radar: frozenset = frozenset()) -> Clouds:
     """
     Each request's cover of the day (None where not forecast). With the
     orbits (`passes`; `sats`: the indices of the satellites fitted on them,
     None for all known), each of an optical request's passes that day is
     told its own (`cloud`, at its moment) and the request's is that of its
     least cloudy pass; without passes (or forecasts at their moments), the
-    daylight hours' mean.
+    daylight hours' mean. The passes of `radar` (SAR satellites, radar_of)
+    are told none and do not count (a request of either kind: its least
+    cloudy optical pass).
     """
     out = Clouds()
     for r in requests:
@@ -80,6 +88,9 @@ def clouds_of(requests: Sequence[ImagingRequest], day: date, forecasts: dict[str
         if passes is not None:
             for op in passes.of(r, day):
                 if sats is not None and op.satellite not in sats:
+                    continue
+                if op.satellite in radar:
+                    op.cloud = None
                     continue
                 op.cloud = cloud_when(r, forecasts, op.time) if forecasts else None
                 if op.cloud is not None:
