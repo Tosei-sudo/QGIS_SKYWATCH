@@ -37,7 +37,7 @@ from ..qgis_io.tasks import run_task
 
 #: The columns of the systems' table.
 SYSTEM_COLUMNS = ("使う", "システム", "件数上限", "枚数上限", *(f"{c}枠" for c in CATEGORIES))
-DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "年間上限", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ",
+DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "年間上限", "使用時間", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ",
                "使用")
 EXPIRED_COLUMNS = ("期限", "依頼", "区分", "優先度", "最終日の理由")
 
@@ -355,7 +355,7 @@ class LimitSimDialog(QDialog):
                 count = f"{n}/{s.limit['count']}" if s and "count" in s.limit else str(n)
                 sc = f"{scenes}/{s.limit['scenes']}" if s and "scenes" in s.limit else str(scenes)
                 used.append(f"{labels.get(name, name)} {count} 件・{sc} 枚")
-            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.quota, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
+            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.quota, d.use_time, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
                      d.carried, d.lost, len(d.expired), "　".join(used)]
             for col, v in enumerate(cells):
                 item = QTableWidgetItem(str(v))

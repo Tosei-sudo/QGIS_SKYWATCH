@@ -313,6 +313,7 @@ flowchart TD
 | `linkId` | 外部連携ID: 出力の行の短い ID（既定 12 文字、`linkIdLength`・`linkIdChars`）。出力履歴の `LINK_ID` と同じ値で、結果ファイルの `linkId` でこの行と照合する（§29） |
 | `shareNo` / `shareCount` | 広い範囲を衛星で分担したときの何番目のショットか（1 から）/ その回のショットの数（分担しない行は空、§30） |
 | `shareCoverage` / `coverage` | このショットが撮る範囲の割合（%、分担の行）/ その回で撮れる範囲の割合（%、撮像済み・撮像待ちを含む。1 ショットに収まる依頼は空、§30） |
+| `useStart` / `useEnd` / `useSeconds` / `passId` | 衛星の使用開始（撮像の始まり − システムの準備秒 `useTime.setupSeconds`）・使用終了（撮像の終わり）・使用秒数・パス番号（周回番号と向き `45123昇`）（§33。軌道なしで詰めた依頼は空） |
 | `geometry` | 範囲（§8.4 の書き方。依頼の範囲の形のまま。システムの `areaShape` が `rotatedBox` なら範囲を囲む回転した最小の矩形、§32。まとめた撮像の行はまとめた依頼を囲むパスに平行な四角、§24.3） |
 | `centerLat` / `centerLon` / `bboxWest` / `bboxSouth` / `bboxEast` / `bboxNorth` | 中心・外接矩形の数値 |
 | `requester` / `note` / `warnings` | 依頼者 / メモ / 警告 |
@@ -1115,3 +1116,51 @@ tsudo「撮像依頼、今の矩形、点の他に、普通のポリゴンでも
 - 日次の計算（パス・シーン数・まとめ・分担）は依頼の範囲そのもので計算し、`areaShape` では変わらない（書き方だけ）。
 
 実装: `core/request/model.py`（`polygons_of`・`shape_text`・`rotated_box`）、`core/request/store.py`（`esri_rings`）、`core/request/export.py`（`geometry_value`・`row_rings`）、`core/request/systems.py`（`AREA_SHAPES`・`ExportSystem.area_shape`）、`qgis_io/geometry.py`（`rings_geometry`・`shape_rings`）、`qgis_io/request_layers.py`、`ui/request_form.py`（「地図で多角形」）、`ui/plan_overlay.py`、`ui/plan_file_dock.py`。テスト: `mikage/tests/test_request_polygons.py`。
+
+## 33. 軌道の使用時間の上限（2026-11-14 追加）
+
+tsudo「システムによっては、軌道の使用時間で上限管理してるらしいんだけど、これも管理できる設計を考えてほしい」→ 設計の相談で「上限は、衛星ごとで、準備なども入る」「この衛星をいつからいつまで使ったって感じで記録する」「見積もりは、そのパス(半周)で最初に取るところから最後のところまでの差分秒数」→「準備秒は足すだけでよい。定数はシステムのコンフィグに。上限は1パスあたりでとりあえず実装して」「1日の上限も欲しいな」。
+
+### 33.1 設定（`requestExports[].useTime`）
+
+```json
+"useTime": { "setupSeconds": 30, "perPass": 300, "perDay": 1200 }
+```
+
+- `setupSeconds`: 準備秒（0 以上、既定 0）。パスで最初に撮る撮像の前に足す（準備・姿勢変更など）。
+- `perPass`: 1 パス（半周）で 1 つの衛星を使える秒数。書かなければ上限なし。
+- `perDay`: 1 日（日本時間）で 1 つの衛星を使える秒数。書かなければ上限なし。パスは使い始めの日に数える。
+- 上限は衛星ごと（衛星のモードは合わせて数える。`platform_key`）。システムの衛星それぞれに同じ値がかかる。契約の値なので設定ファイルに置く（tsudo の指示。年間撮像上限のような Esri のテーブルは使わない）。
+- 書き方の間違い（負の準備秒、0 以下の上限、数でない値）は設定の問題に出し、その値はないものとして動く。
+
+### 33.2 使用時間の数え方
+
+- 撮像ごとの使用区間 = 撮像の始まり − 準備秒 〜 撮像の終わり（`Shot.start`・`Shot.end`、連続シーンの長さから）。
+- パス = 同じ軌道方向の半周（`shotsPerPass` と同じ。同じ向きで、パスの最初の撮像から半周期未満）。パスの使用時間 = そのパスの撮像の使用区間のうち、いちばん早い始まりからいちばん遅い終わりまで（撮像の間の空き時間も入る）。準備秒はパスの最初の撮像の前に 1 回だけ効く（後の撮像の準備秒はパスの使用時間の中に入る）。
+- 1 日の使用時間 = その日に使い始めるパスの使用時間の合計。
+- 前後の日に出した撮像（[`TBL_REQUEST_SHOT`](../README.md#tbl_request_shot撮像の範囲) の `USE_START`・`USE_END` がある行。未撮像・不採用・出力履歴から外れた撮像は除く。`quota.shot_state` が `USED`・`PENDING`）が同じパスにあれば、そのパスの使用時間に入る（日付をまたぐパス）。衛星は名前（衛星カタログの名前・ID・別名）で合わせる。
+- 軌道を使わずに詰める衛星（TLE なし・`orbit: false`）はパスが分からないので、1 行を 1 パスとみなし、準備秒 ＋ シーン数 × シーンの長さ ÷ 7 km/秒（`GROUND_SPEED`）で見積もる。
+
+### 33.3 計算（`daily.allocate`）
+
+- 割り当て先（既存の撮像へのまとめ・新しい撮像・大きな範囲の撮像の並び）ごとに、システムの上限・年間上限を見たあと、その衛星のパスの使用時間（`perPass`）とその日の使用時間（`perDay`）を見る。超える（しかも今より長くなる）割り当ては使わない。次のパス・衛星・システムを試し、どれもなければ見送りの理由を「使用時間の上限（1 パス）」「使用時間の上限（1 日）」にする（年間上限の次、枠超過より先）。
+- 上限のある衛星は、雲量の 1 割の中で、パスの使用時間の延びが少ない割り当てを先に試す（秒の整数で。すでに撮るパスの使用時間の中に入る割り当ては延び 0）。その次に、定点の前回と同じ撮り方（§31.3）、今までどおりの順（まとめ、小さい角度）。
+- 1 ショットに収まらない範囲（§30）は、撮像を 1 つ足すごとに使用時間も見る（分担でほかの衛星が足す撮像も）。
+- 手で採用した依頼・ほかのシステムの人がすでに書き出した依頼（固定）は上限を超えても出し、「使用時間の上限を超える（ICEYE-X27 1 パス 300 秒まで・このパスで 320 秒・手動で採用）」の警告を付ける。
+- 一覧の下（年間上限の行の下）に、上限のある衛星ごとに「使用時間 ICEYE-X27: 1 パス 300 秒まで（いちばん長いパス 45123昇 280 秒）・1 日 1,200 秒のうち 760 秒（残り 440 秒）」。上限の 9 割を超えたパス、残りが 1 割以下の日は「※残りわずか」で色付き。
+- 一覧の吹き出し（撮像時刻・衛星）に「使用 10:02:01〜10:02:34（33 秒・パス 45123昇 で計 120 秒）」。
+- 上限シミュレーションは、日ごとに同じく上限を守り、「使用時間の上限で見送り」の行と日ごとの「使用時間」の列に数える（前の日の撮像は、日付をまたぐパスで次の日に数える。シミュレーションの前に出した撮像は数えない）。
+
+### 33.4 記録とファイル
+
+- [`TBL_REQUEST_SHOT`](../README.md#tbl_request_shot撮像の範囲) に `USE_START`（Date）・`USE_END`（Date）・`PASS_ID`（String(20)）を足す。書き出した撮像ごとに、使用開始（撮像の始まり − 準備秒）・使用終了・パス番号を入れる（上限のないシステムも。準備秒は 0）。ない表でも書き出しは動く（ない属性は書かない）。`tools/arcgis/create_tables.py` を実行し直せば足りない属性だけ足す。
+- パス番号 = TLE の周回番号（`revnum`）から、昇交点を通るごとに 1 つ進めた周回番号と向き（`45123昇`・`45123降`）。昇交のパスは昇交点を含む周回、降交のパスはその周回の後半（`use_time.pass_id`）。
+- ファイルの項目 `useStart`・`useEnd`（日時。システムの `dateFormat`・`timeZone` で書く）・`useSeconds`（秒の整数）・`passId`。
+
+### 33.5 まだしていないこと
+
+- システムから返ってくる実際の使用時間（結果ファイル）の取り込み。
+- 月・年・期間ごとの上限、衛星ごとに違う上限（今はシステムの衛星すべてに同じ値）。
+- 前の日のパスを延ばしたとき、前の日の 1 日の上限を見直すこと（パスは使い始めの日に数えるため）。
+
+実装: `core/request/use_time.py`（`UseBook`・`passes_of`・`seconds`・`pass_id`・`read_other_uses`・`USE_PASS`・`USE_DAY`・`USE_OVER`）、`core/request/systems.py`（`UseTime`・`use_time_of`・`ExportSystem.use_time`）、`core/request/daily.py`（`allocate` の `uses`、`Candidate.use_text`・`pass_id`、`pass_text`）、`core/request/shots.py`（`_area` の `fits` に撮像）、`core/request/workflow.py`（`DayPlan.uses`・`plan_day`・`shots_of`）、`core/request/store.py`（`ShotRow.use_start`・`use_end`・`pass_id`）、`core/request/export.py`（`useStart`・`useEnd`・`useSeconds`・`passId`）、`core/request/simulate.py`（`DayResult.use_time`）、`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`。テスト: `tests/test_request_use_time.py`。

@@ -32,6 +32,7 @@ from .quota import QuotaBook
 from .route import system_of_satellite
 from .store import HistoryRow, ShotRow
 from .systems import ExportSystem
+from .use_time import UseBook
 from .view import systems_of
 from .weather import DAYLIGHT, Clouds, cloud_when, daytime_cloud, places_of
 
@@ -122,13 +123,16 @@ class DayPlan:
     passes: Optional[Passes] = None
     #: What the yearly quotas have left on the day (年間撮像上限, quota.QuotaData.book); None: none is kept.
     quotas: Optional[QuotaBook] = None
+    #: How long the day's shots use their satellites, with the other days' on the same passes (軌道の使用時間,
+    #: use_time.py; bound to the shots by each fitting).
+    uses: UseBook = field(default_factory=UseBook)
 
     def refit(self) -> list[Candidate]:
         """Fits again (after a change by hand), those written for a system other than the target pinned there."""
         for c in self.candidates:
             w = self.written.get(c.key)
             c.pinned = w if self.target and w and w[0] != self.target else None
-        self.candidates = allocate(self.candidates, self.systems, self.sats, self.passes, self.day, self.quotas)
+        self.candidates = allocate(self.candidates, self.systems, self.sats, self.passes, self.day, self.quotas, self.uses)
         return self.candidates
 
     def others_handed(self) -> frozenset:
@@ -145,7 +149,7 @@ def handed_today(history: Sequence[HistoryRow], day: date) -> list[HistoryRow]:
 def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec],
              clouds: dict, history: Sequence[HistoryRow] = (), target: Optional[str] = None,
              passes: Optional[Passes] = None, quotas: Optional[QuotaBook] = None, covered: Optional[dict] = None,
-             chances: Optional[dict] = None, last_looks: Optional[dict] = None) -> DayPlan:
+             chances: Optional[dict] = None, last_looks: Optional[dict] = None, uses: Optional[UseBook] = None) -> DayPlan:
     """
     The candidates of a day, gathered and fitted (`target`: the one system
     written from here; `passes`: the orbits'; `quotas`: what the yearly
@@ -153,14 +157,15 @@ def plan_day(requests: Sequence[ImagingRequest], day: date, systems: Sequence[Ex
     handed out on earlier days, covered.read_covered; `chances`: the
     chances left of the 期間内1回 requests, chances.chances_of;
     `last_looks`: how each 定点 request's last image was taken,
-    geometry.read_last_looks).
+    geometry.read_last_looks; `uses`: the other days' shots on the day's
+    passes, for the use time limits, use_time.read_other_uses).
     """
     missed = missed_ids(history)
     cands = gather(requests, day, sats, clouds, missed, covered, chances)
     for c in cands:
         c.last_look = (last_looks or {}).get(c.request.id)
     plan = DayPlan(day, cands, list(systems), list(sats), [r for r in history if r.request_id in missed and r.captured == "未撮像" and not r.boost_done],
-                   passes=passes, quotas=quotas)
+                   passes=passes, quotas=quotas, uses=uses if uses is not None else UseBook())
     today = handed_today(history, day)
     plan.written = {occurrence_key(r.request_id, r.occurrence, r.part): (r.system, r.satellite) for r in today}
     plan.handed = frozenset((r.request_id, r.system) for r in today)
@@ -217,7 +222,9 @@ def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Option
     A request fitted without the orbits has one too (tsudo: 「個の画像に関して
     管理する情報はショットのほうがいい」): its area, no pass. Each names the
     sensor and mode it is taken with, what its scenes count against
-    (年間撮像上限), and starts 未判定.
+    (年間撮像上限), and starts 未判定. With the orbits, when it uses its
+    satellite (軌道の使用時間: from its shots' start less the system's setup
+    seconds to their end) and its pass's number.
     """
     out = []
     for n, c in enumerate(_file_rows(plan, files, system), 1):
@@ -235,6 +242,9 @@ def shots_of(plan: DayPlan, run: float, files: dict, run_id: str, system: Option
             look = first.look
             row.pass_time, row.off_nadir, row.incidence = first.middle, round(look["offNadir"], 2), round(look["incidence"], 2)
             row.orbit_dir, row.look_side = "昇交" if first.ascending else "降交", first.side
+            row.use_start = min(s.start for s in c.shots) - c.system.use_time.setup * 1000
+            row.use_end = max(s.end for s in c.shots)
+            row.pass_id = c.pass_id
         out.append(row)
     return out
 
