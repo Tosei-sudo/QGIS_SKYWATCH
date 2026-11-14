@@ -2,7 +2,8 @@
 The settings file's `layers` in QGIS: each entry opened as a layer in a
 task (WMS capabilities, WFS and Esri service information are read without
 holding up the map), then added to the project in order, the first entry
-at the bottom. Entries that cannot be opened say why; the rest are added.
+at the bottom; those with `visible: false` unchecked. Entries that cannot
+be opened say why; the rest are added.
 """
 from __future__ import annotations
 
@@ -28,9 +29,12 @@ def make_layer(source: LayerSource) -> QgsMapLayer:
 
 
 def open_layers(entries: Sequence[StartupLayer], config_source: str, check: Optional[Callable[[], None]] = None,
-                ) -> tuple[list[QgsMapLayer], list[str]]:
-    """The layers of `entries` (in the calling thread, moved to the main thread) and why the others could not be opened."""
-    layers: list[QgsMapLayer] = []
+                ) -> tuple[list[tuple[QgsMapLayer, StartupLayer]], list[str]]:
+    """
+    The layers of `entries` (in the calling thread, moved to the main thread),
+    each with its entry, and why the others could not be opened.
+    """
+    layers: list[tuple[QgsMapLayer, StartupLayer]] = []
     problems: list[str] = []
     main = QCoreApplication.instance().thread()
     for entry in entries:
@@ -46,7 +50,7 @@ def open_layers(entries: Sequence[StartupLayer], config_source: str, check: Opti
         if source.notes:
             problems.append(f"{source.name}: " + "・".join(source.notes))
         layer.moveToThread(main)
-        layers.append(layer)
+        layers.append((layer, entry))
     return layers, problems
 
 
@@ -59,15 +63,19 @@ def add_startup_layers(entries: Sequence[StartupLayer], config_source: str,
     added when `still_wanted` says no by then (a project opened meanwhile).
     """
     def done(result) -> None:
-        layers, problems = result
+        opened, problems = result
         if not still_wanted():
             finished([], [])
             return
         project = QgsProject.instance()
-        for layer in layers:
+        root = project.layerTreeRoot()
+        for layer, entry in opened:
             # Each added on top of the ones before: the first entry ends at the bottom, as in the viewer.
             project.addMapLayer(layer)
-        finished(layers, problems)
+            node = root.findLayer(layer.id()) if not entry.visible else None
+            if node is not None:
+                node.setItemVisibilityChecked(False)
+        finished([layer for layer, _ in opened], problems)
 
     run_task("設定ファイルのレイヤーの読み込み", lambda task: open_layers(entries, config_source, task.check), done,
              lambda message: finished([], [f"設定ファイルのレイヤーの読み込みに失敗: {message}"]))

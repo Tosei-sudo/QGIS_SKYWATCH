@@ -35,6 +35,21 @@ def test_wrong_entries_say_why_as_the_viewer_does():
     assert parse_config({"layers": {}})[1] == ["layers は配列で指定"]
 
 
+def test_visible_false_adds_the_layer_hidden():
+    problems = []
+    layers = startup_layers_of([
+        {"type": "cog", "url": "./a.tif", "visible": False},
+        {"type": "xyz", "url": "https://t/{z}/{x}/{y}.png", "visible": False},
+        {"type": "wms", "url": "https://x/wms", "layer": "roads", "visible": False},
+        {"type": "file", "url": "./b.geojson"},
+        {"type": "file", "url": "./c.geojson", "visible": True},
+        {"type": "file", "url": "./d.geojson", "visible": "no"},
+    ], problems)
+    # Not written (or written wrong): shown, as before.
+    assert [l.visible for l in layers] == [False, False, False, True, True, True]
+    assert problems == ["layers[5].visible は true か false で指定"]
+
+
 def test_relative_urls_follow_the_settings_file():
     assert resolve_url("./data/a.geojson", "https://web/viewer/config.json") == "https://web/viewer/data/a.geojson"
     assert resolve_url("../a.tif", "/srv/viewer/conf/config.json") == "/srv/viewer/a.tif"

@@ -62,6 +62,22 @@ def test_added_to_an_empty_project_the_first_at_the_bottom(config):
     plugin.unload()
 
 
+def test_visible_false_is_added_unchecked(config):
+    entries = json.loads(config.read_text(encoding="utf-8"))
+    entries["layers"][1]["visible"] = False
+    config.write_text(json.dumps(entries), encoding="utf-8")
+    plugin, iface = start()
+    assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)
+    shown = {l.layer().name(): l.isVisible() for l in QgsProject.instance().layerTreeRoot().findLayers()}
+    assert shown == {"stations.geojson": False, "ortho.tif": True}
+    # 「設定ファイルのレイヤーを追加」 adds it unchecked too.
+    plugin.startup_layers.add()
+    assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 4)
+    assert [(l.layer().name(), l.isVisible()) for l in QgsProject.instance().layerTreeRoot().findLayers()] == [
+        ("stations.geojson", False), ("ortho.tif", True), ("stations.geojson", False), ("ortho.tif", True)]
+    plugin.unload()
+
+
 def test_added_to_each_new_project(config):
     plugin, iface = start()
     assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)

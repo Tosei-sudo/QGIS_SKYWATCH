@@ -1306,6 +1306,16 @@ QGIS の起動が終わって設定ファイルを読んだら、ドックを初
 | `wcs`・`ogc-coverage` | WCS プロバイダー・GDAL の OGCAPI ドライバー |
 | `ogc-tiles` | XYZ のタイル（ベクタータイルはベクタータイルレイヤー） |
 
+最初は非表示にしたいレイヤーには `"visible": false` を書く（このプラグインだけが読む項目。ビューアは読まない）。レイヤーは追加されるが、レイヤーパネルのチェックが外れた状態になり、チェックを入れるまで地図に描かない。書かないか `true` なら今までどおり表示する。「設定ファイルのレイヤーを追加」で追加したときも同じ。
+
+```jsonc
+"layers": [
+  { "type": "xyz", "url": "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg#name=写真" },
+  // 追加はするが、最初はチェックを外しておく
+  { "type": "esri", "url": "https://gis.example/arcgis/rest/services/Ports/FeatureServer", "layer": "0", "visible": false }
+]
+```
+
 読み込みは QgsTask の中で行い、開けないレイヤーはメッセージバーに理由を出して残りを追加する。サービスの認証は「設定…」で選んだ認証設定を使う。
 
 ## 導入
@@ -1555,7 +1565,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | --- | --- | --- | --- | --- |
 | `baseMaps` | 配列 | `id`・`label`・`url`・`type`（`xyz`・`mvt`・`style`・`esri`。省略時は URL から判断）・`style`・`maxZoom`・`attributions`・`token`。書くと一覧をこれで置き換え | 地理院・OSM | [背景地図](#背景地図) |
 | `defaultBaseMap` | 文字列 | 起動時の背景地図の `id` | なし | [背景地図](#背景地図) |
-| `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`） | なし | [起動時のレイヤー](#起動時のレイヤー) |
+| `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`）、`visible`（`false` で最初は非表示。既定 `true`） | なし | [起動時のレイヤー](#起動時のレイヤー) |
 | `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須。`features` は属性名の配列で複数可、先頭が地名）、`token` | なし（地名は検索しない） | [座標・地名へ移動](#座標地名へ移動) |
 | `layerTemplates` | 配列 | `name`（必須）・`geometryType`・`fields`（`[{ "name", "type", "alias", "required", "length", "min", "max", "defaultValue", "codes" }]`）・`title`・`description` | 組み込みのテンプレートだけ | [新規スクラッチレイヤー](#新規スクラッチレイヤーテンプレート) |
 | `arcgisPortals` | 配列 | `url`（ポータルの https）・`clientId`（必須）・`label` | なし | [ArcGIS Web マップ](#arcgis-web-マップ) |
