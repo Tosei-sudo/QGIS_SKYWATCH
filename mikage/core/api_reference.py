@@ -90,6 +90,8 @@ ENTRIES: list[Entry] = [
           ["figures", "categories", "click_value", "click_bin", "click_step", "set_heatmap", "clear_filter", "set_trend", "trends", "surge_regions"]),
     Entry("moving", "ドックと道具", "移動体（AIS・ADS-B）", "移動体のフィードと履歴。", "api.moving.go_live()", ["connect_feed", "open_history", "layers", "align_to_image", "go_live"]),
     Entry("events", "ドックと道具", "イベント", "イベントと画像・記録・依頼の紐付け。", "api.events.reload()", ["events", "links", "reload", "link_items", "choose", "export"]),
+    Entry("interests", "ドックと道具", "関心地域・地点", "自分の関心地点・関心地域（Esri。設定ファイルの interests）。book.items が一覧、book.over(フットプリント) が画像に入るもの。",
+          "for item in api.interests.book.items or []:\n    print(item.name, item.kind, item.color)", ["book", "chosen", "choose", "save", "delete", "zoom"]),
     Entry("analysis", "ドックと道具", "データ分析", "Esri の表とプロジェクトのレイヤーを SQL で集計。保存した分析はプロセシングのツールにもなる（algorithm_id）。",
           'a = api.analysis\na.load("モデル別")\na.set_value("model", "yolo")\na.run(lambda result: print(result.rows[:5]))',
           ["tables", "set_sql", "set_value", "run", "result", "save", "load", "add_layer", "csv_text", "algorithm_id", "open_processing"]),

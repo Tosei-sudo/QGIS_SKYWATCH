@@ -371,6 +371,20 @@ TABLES = (
         F("COUNT_FROM", "数え始める日", "DATE", None, "countFrom"),
         F("NOTE", "メモ", "TEXT", 1000, "note"),
     )),
+    Table("TBL_INTEREST_POINT", "関心地点", "POINT", writable=True, setting="interests.points", fields=(
+        F("INTEREST_ID", "関心ID", "TEXT", 64, "id"),
+        F("INTEREST_NAME", "名前", "TEXT", 255, "name"),
+        F("OWNER_USER", "持ち主", "TEXT", 255, "owner"),
+        F("COLOR", "色", "TEXT", 32, "color"),
+        F("NOTE", "メモ", "TEXT", 4000, "note"),
+    )),
+    Table("TBL_INTEREST_AREA", "関心地域", "POLYGON", writable=True, setting="interests.areas", fields=(
+        F("INTEREST_ID", "関心ID", "TEXT", 64, "id"),
+        F("INTEREST_NAME", "名前", "TEXT", 255, "name"),
+        F("OWNER_USER", "持ち主", "TEXT", 255, "owner"),
+        F("COLOR", "色", "TEXT", 32, "color"),
+        F("NOTE", "メモ", "TEXT", 4000, "note"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -390,6 +404,8 @@ INDEXES = {
     "TBL_AI_RESULT": ("IMAGE_ID",),
     "TBL_DETECTION": ("IMAGE_ID",),
     "TBL_PLACE_NAME": ("PLACE_NAME",),
+    "TBL_INTEREST_POINT": ("OWNER_USER",),
+    "TBL_INTEREST_AREA": ("OWNER_USER",),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -480,6 +496,9 @@ def plugin_config(urls: dict) -> dict:
         if has("TBL_EVENT_LINK"):
             events["links"] = urls["TBL_EVENT_LINK"]
         config["events"] = events
+    interests = {key: urls[t] for key, t in (("points", "TBL_INTEREST_POINT"), ("areas", "TBL_INTEREST_AREA")) if t in urls}
+    if interests:
+        config["interests"] = interests
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

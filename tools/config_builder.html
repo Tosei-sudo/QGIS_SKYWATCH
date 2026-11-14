@@ -181,6 +181,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "assignments",
   "handover",
   "events",
+  "interests",
   "preload",
   "offlineWork",
   "columnDrag"
@@ -510,6 +511,13 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "label": "ITEM_LABEL",
    "time": "ITEM_TIME",
    "source": "SOURCE",
+   "note": "NOTE"
+  },
+  "interests": {
+   "id": "INTEREST_ID",
+   "name": "INTEREST_NAME",
+   "owner": "OWNER_USER",
+   "color": "COLOR",
    "note": "NOTE"
   }
  },
@@ -1639,6 +1647,15 @@ const SPEC = [
       ], { check: (it, at, p) => {
         if (!it.layer) p.push(`${at}.layer: イベントのレイヤーが必要`);
         if (!it.links) p.push(`${at}.links: 紐付けテーブルが必要`);
+      } }) },
+    { key: "interests", label: "個人の関心地域・地点", doc: "個人の関心地域地点interests", help: "一人ひとりが自分の関心地点・関心地域を決め、新着画像のカードの「写っている地物」のいちばん上に出す（ドック「関心地域・地点」で編集）。footprintLayers とは別にここに 1 回だけ書き、すべてのカタログのカードに出る。属性はプラグインが知っているので fields・format は不要（名前を変えたときだけ）。",
+      field: O("interests", "関心地域・地点", [
+        TJ("points", "関心地点のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_INTEREST_POINT。役割: " + Object.entries(K.roles.interests).map(([k, v]) => `${k}（${v}）`).join("・") + "。持ち主（owner）は editTracking のユーザー名（既定は環境変数 USERNAME）で、自分の行だけ読み書きする" }),
+        TJ("areas", "関心地域のレイヤー（ポリゴン、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_INTEREST_AREA。役割は points と同じ" }),
+        T("label", "カードの見出し", { ph: "関心地域・地点" }),
+        T("color", "新しく作るときの色", { ph: "#f97316", help: "#rrggbb か色の名前" }),
+      ], { check: (it, at, p) => {
+        if (!it.points && !it.areas) p.push(`${at}: points か areas のどちらかが必要`);
       } }) },
   ] },
   { group: "地図・レイヤー・場所", keys: [

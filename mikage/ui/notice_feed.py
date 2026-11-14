@@ -10,11 +10,13 @@ work of looking at what came in, one after another.
 * A card shows everything, as long as it gets (「略さずすべて」): the
   thumbnail (`imageCatalogs[].thumbnail`; the footprint's shape without
   one), the catalog's columns, the watch, when it was found, and 「写っている地物」:
-  the features of the catalog's `footprintLayers` over the image, all of
-  them, kept with the notice once read.
+  the person's own points and areas of interest it covers (`interests`,
+  worked out here: an edit in their dock shows at once), then the features
+  of the catalog's `footprintLayers` over the image, all of them, kept with
+  the notice once read.
 * 「開く」 opens the image, goes to the map and zooms to it (read);
-  「地図で見る」 goes to its footprint; 「既読」「削除」 as in the 通知 dock,
-  whose list this is (the same notices).
+  「地図で見る」 goes to its footprint; 「既読」 as in the 通知 dock, whose
+  list this is (the same notices; deleting only there).
 
 Only the newest PAGE cards are made at first (「さらに前の n 件」 above them);
 thumbnails and features are fetched for the cards in view only.
@@ -41,6 +43,7 @@ from ..core.catalog.thumbnail import (
     DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, contents_lines, contents_of, footprint_of, thumbnail_address,
 )
 from ..core.catalog.watch import WatchNotice
+from ..core.interests import section_lines
 from ..qgis_io import settings
 from ..core.catalog.paths import PathError
 from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
@@ -400,14 +403,19 @@ class NoticeCard(QFrame):
             self._show_source()  # another layout may fit now
 
     def show_contents(self) -> None:
-        """「写っている地物」: per layer of the catalog its heading, then its features' names one to a line, or why not yet."""
+        """
+        「写っている地物」: the person's own points and areas of interest it covers first (`interests`), then per
+        layer of the catalog its heading, then its features' names one to a line, or why not yet.
+        """
         catalog = self.feed.catalog_of(self.notice)
         layers = catalog.footprint_layers if catalog is not None and self.notice.kind != PLAN else []
-        self._set_shown(self.contents_box, bool(layers))
-        if not layers:
+        book = self.feed.interests
+        personal = book is not None and book.settings is not None and self.notice.kind != PLAN
+        self._set_shown(self.contents_box, bool(layers) or personal)
+        if not layers and not personal:
             return
         kept = self.notice.extra.get("contents") if isinstance(self.notice.extra.get("contents"), dict) else {}
-        sections = []
+        sections = [self._interest_section(book)] if personal else []
         for layer in layers:
             found = Contents.from_json(kept.get(layer.key()))
             if found is not None:
@@ -422,6 +430,15 @@ class NoticeCard(QFrame):
             failed = self.feed.work.failure(self.feed.contents_key(self.notice))
             sections.append((layer.label, [self.tr("照合できず: {m}").format(m=failed) if failed else self.tr("照合中…")]))
         self.contents.setText(_sections_html(sections))
+
+    def _interest_section(self, book) -> tuple:
+        """The heading and lines of the person's items over the image (each in its colour), or why not yet."""
+        label = book.settings.label
+        if book.items is None:
+            return label, [self.tr("読み込めず: {m}").format(m=book.failure) if book.failure and not book.loading else self.tr("読み込み中…")]
+        found = book.over(self.notice.feature.get("geometry"))
+        lines: list = section_lines(found) or [self.tr("なし")]
+        return self.tr("{label}（{n} 件）").format(label=label, n=len(found)), lines
 
     def show_files(self) -> None:
         """「画像ファイル」: the files of the record that can be opened, a checkable row each, or why not yet."""
@@ -578,6 +595,8 @@ class NoticeFeed(QWidget):
         self.files: dict[str, RecordImages] = {}
         #: The files unchecked on each notice's card (all are checked at first).
         self.unchecked: dict[str, set[str]] = {}
+        #: 個人の関心地域・地点 (qgis_io/interests_io.InterestBook, set by the plugin): named first in 「写っている地物」.
+        self.interests = None
         self._written = 0
 
         layout = QVBoxLayout(self)
@@ -920,6 +939,8 @@ class NoticeFeed(QWidget):
     def _want_work(self) -> None:
         if not self.isVisible():
             return
+        if self.interests is not None and self.cards:
+            self.interests.want()
         jobs = []
         for card in self._visible_cards():
             n = card.notice
@@ -1097,9 +1118,23 @@ class NoticeFeed(QWidget):
             canvas = self.iface.mapCanvas()
             QTimer.singleShot(200, lambda: canvas.flashGeometries([shape], QgsCoordinateReferenceSystem("EPSG:4326")))
 
+    def set_interests(self, book) -> None:
+        """The person's points and areas of interest, named on every card they are in (and again whenever they change)."""
+        self.interests = book
+        book.changed.connect(self._interests_changed)
+
+    def _interests_changed(self) -> None:
+        for card in self.cards.values():
+            card.show_contents()
+
     def close_down(self) -> None:
         self.work.close_down()
         self._work_timer.stop()
+        if self.interests is not None:
+            try:
+                self.interests.changed.disconnect(self._interests_changed)
+            except (TypeError, RuntimeError):
+                pass
         try:
             self.dock.refreshed.remove(self.set_notices)
         except ValueError:
