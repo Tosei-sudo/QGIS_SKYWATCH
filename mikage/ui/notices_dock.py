@@ -29,7 +29,7 @@ from ..core.catalog.watch import (
 )
 from ..core.catalog.watch_store import WatchStore, check_due
 from ..qgis_io.overviews_io import queue as overview_queue
-from ..qgis_io.catalog_io import Cancelled, add_record_layers, footprint, open_record
+from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .alert_feed import AlertFeed
@@ -352,9 +352,7 @@ class NoticesDock(PluginDock):
         for n in notices:
             if n.kind == PLAN:
                 continue
-            watch = self.store().watch(n.watch_id)
-            catalog = (self.catalog_for(watch) if watch else None) or next(
-                (c for c in self.context.config.image_catalogs if c.label == n.catalog_label), None)
+            catalog = self.catalog_of_notice(n)
             if catalog is None:
                 problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=n.image_id))
                 continue
@@ -385,6 +383,36 @@ class NoticesDock(PluginDock):
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
         return layers
+
+    def catalog_of_notice(self, notice) -> Optional[CatalogConfig]:
+        """The settings file's catalog of a notice: its watch's, else the one of the same name."""
+        watch = self.store().watch(notice.watch_id)
+        return (self.catalog_for(watch) if watch else None) or next(
+            (c for c in self.context.config.image_catalogs if c.label == notice.catalog_label), None)
+
+    def open_notice_files(self, notice, where: RecordImages, files: Optional[list[str]] = None) -> list:
+        """
+        Some files of a notice's image, found already (新着画像のカードの「画像ファイル」):
+        opened as raster layers like 「開く」 (read; why not in the message bar).
+        """
+        catalog = self.catalog_of_notice(notice)
+        problems: list[str] = []
+        opened: list = []
+        if catalog is None:
+            problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=notice.image_id))
+        else:
+            record = record_of(notice.feature, catalog.fields)
+            try:
+                opened = open_located(record, catalog, where, files, problems)
+            except PathError as error:
+                problems.append(str(error))
+            if opened:
+                add_record_layers(opened, record)
+                overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
+        self._mark([notice.id])
+        if problems:
+            self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
+        return opened
 
     def _chosen_watch_id(self) -> Optional[str]:
         item = self.watches.currentItem()

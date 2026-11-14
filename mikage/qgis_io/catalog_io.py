@@ -268,7 +268,8 @@ def scan_folder(folder: str, patterns: Sequence[str], find: Callable[..., Folder
 
 
 def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
-                  choose_folder: Callable[[PathMapping], Optional[str]], names=None) -> RecordImages:
+                  choose_folder: Callable[[PathMapping], Optional[str]], names=None,
+                  scan: Callable[[str, Sequence[str]], FolderImages] = scan_folder) -> RecordImages:
     """
     Where a record's images are: a URL, a local path as it is, under a
     mapping's URL, or in the folder chosen for its prefix (asked through
@@ -277,7 +278,8 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     (or for another name of it in `names`, the satellite name tables).
     Before all that, where the rewrites of `pathMappings` (`pattern` / `to`)
     take the path: the first place that is there (a folder: with images)
-    wins; when none is, the path goes on as written.
+    wins; when none is, the path goes on as written. `scan` looks through a
+    folder (scan_folder: with a progress window after a moment).
     Raises PathError with the reason, Cancelled when no folder was chosen.
     """
     source = record.source
@@ -289,11 +291,11 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
             tried.append(f"{target} なし")
             continue
         try:
-            return _local_images(record, catalog, target, target, names)
+            return _local_images(record, catalog, target, target, names, scan)
         except PathError:
             tried.append(f"{target} に画像なし")
     try:
-        return _as_written(record, catalog, mappings, choose_folder, names)
+        return _as_written(record, catalog, mappings, choose_folder, names, scan)
     except PathError as e:
         if not tried:
             raise
@@ -301,7 +303,7 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
 
 
 def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
-                choose_folder: Callable[[PathMapping], Optional[str]], names) -> RecordImages:
+                choose_folder: Callable[[PathMapping], Optional[str]], names, scan) -> RecordImages:
     """Where a record's images are by its path as the catalog writes it (see locate_record)."""
     source = record.source
     if source.kind == "url":
@@ -320,15 +322,15 @@ def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
         if re.split(r"[?#]", url)[0].endswith("/"):
             raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できず。フォルダはローカルパスか pathMappings の url なしで指定）")
         return RecordImages(url, True, given=source.value)
-    return _local_images(record, catalog, url, source.value, names)
+    return _local_images(record, catalog, url, source.value, names, scan)
 
 
-def _local_images(record: CatalogRecord, catalog: CatalogConfig, path: str, given: str, names) -> RecordImages:
+def _local_images(record: CatalogRecord, catalog: CatalogConfig, path: str, given: str, names, scan=scan_folder) -> RecordImages:
     """The image at `path` here, or the images below it when it is a folder (PathError when it has none)."""
     if not os.path.isdir(path):
         return RecordImages(path, False, given=given)
     patterns = patterns_for(catalog.image_patterns, record.sensor, names)
-    found = scan_folder(path, patterns)
+    found = scan(path, patterns)
     if not found.files:
         why = [f"{' / '.join(patterns)} に合うファイルなし。imagePatterns を確認"]
         if found.stopped:
@@ -353,6 +355,34 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     folder or image was chosen.
     """
     where = locate_record(record, catalog, mappings, choose_folder, names)
+    files = where.files
+    if choose_images is not None and (len(files) > 1 or where.more):
+        chosen = choose_images(record, list(files), where.more)
+        if not chosen:
+            raise Cancelled()
+        files = [f for f in files if f in set(chosen)]
+    return open_located(record, catalog, where, files, problems)
+
+
+def record_files(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite], names=None,
+                 cancelled: Optional[Callable[[], bool]] = None) -> RecordImages:
+    """
+    Where a record's images are, for a worker thread (新着画像のカードの「画像ファイル」):
+    no window, a folder not chosen yet for its path's prefix is a PathError.
+    """
+    def no_folder(mapping: PathMapping) -> Optional[str]:
+        raise PathError(f"{mapping.prefix} の読み替え先のフォルダが未設定（「開く」で選ぶ）")
+
+    return locate_record(record, catalog, mappings, no_folder, names,
+                         scan=lambda folder, patterns: find_images(folder, patterns, cancelled=cancelled))
+
+
+def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordImages, files: Optional[Sequence[str]] = None,
+                 problems: Optional[list[str]] = None) -> list[QgsRasterLayer]:
+    """
+    The images of a record found already (locate_record) as raster layers:
+    the image itself, or `files` of its folder (all when None). See open_record.
+    """
     time = ms_of(record.acquired)
     if not where.files:
         url = where.place
@@ -365,12 +395,7 @@ def open_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
             raise PathError(f"{record.id or url} の画像を開けず（{url if where.is_url else where.given}）")
         remember(layer, record, catalog)
         return [layer]
-    files = where.files
-    if choose_images is not None and (len(files) > 1 or where.more):
-        chosen = choose_images(record, list(files), where.more)
-        if not chosen:
-            raise Cancelled()
-        files = [f for f in files if f in set(chosen)]
+    files = list(where.files) if files is None else list(files)
     layers, failed = [], []
     for rel in files:
         path = os.path.join(where.place, *rel.split("/"))

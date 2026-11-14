@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import html
 import math
+import re
 from typing import Any, Callable, Optional
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsProject
@@ -41,7 +42,8 @@ from ..core.catalog.thumbnail import (
 )
 from ..core.catalog.watch import WatchNotice
 from ..qgis_io import settings
-from ..qgis_io.catalog_io import close_layers, footprint, layers_extent
+from ..core.catalog.paths import PathError
+from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
 from ..qgis_io.thumbnails import CardWork, cached, fetch, prune
 
 TITLE = "新着画像"
@@ -54,8 +56,14 @@ CARD_WIDTH = 1200
 MIN_PICTURE = 160
 #: The room the card keeps for its attributes and buttons beside the thumbnail (and its margins).
 TEXT_ROOM = 360
-#: The room the attributes and the features need beside the thumbnail to be columns of their own.
-WIDE_ROOM = 700
+#: The room 「写っている地物」 needs as a column of its own (else under the attributes, tsudo 2026-11-14: サムネ、メタ、ファイル、地物).
+FEATURES_ROOM = 200
+#: The room 「画像ファイル」 needs as a column of its own (else above the features).
+FILES_ROOM = 160
+#: The card's frame around the grid: the unread mark, the spacing after it and the right margin.
+CARD_FRAME = 21
+#: Room between the columns.
+COLUMN_GAP = 16
 #: The attributes' column is as wide as its lines (each on one line), up to this.
 ATTRIBUTES_WIDTH = 440
 UNREAD = "#2563eb"
@@ -81,25 +89,42 @@ def _line_html(text: str, background: Optional[QColor]) -> str:
     return f"<tr><td bgcolor='{background.name()}' style='color:{'#111111' if light else '#ffffff'}'>{_escape(text)}</td></tr>"
 
 
-def _rows_html(rows: list[tuple[str, Any]]) -> str:
-    """
-    Label / value rows as a table (every value escaped: other people's text is never markup);
-    a list value one item to a line (an item may be `(text, background colour)`).
-    """
-    def value_html(value) -> str:
-        if not isinstance(value, list):
-            return _escape(value)
-        lines = [v if isinstance(v, tuple) else (v, None) for v in value]
-        if not any(_background(c) for _t, c in lines):
-            return "<br>".join(_escape(t) for t, _c in lines)
-        rows = "".join(_line_html(t, _background(c)) for t, c in lines)
-        return f"<table cellspacing='0' cellpadding='1' width='100%'>{rows}</table>"
-
+def _rows_html(rows: list[tuple[str, str]]) -> str:
+    """Label / value rows as a table (every value escaped: other people's text is never markup)."""
     cells = "".join(
         f"<tr><td style='color:#64748b; padding-right:12px; white-space:nowrap; vertical-align:top'>{_escape(label)}</td>"
-        f"<td style='vertical-align:top'>{value_html(value)}</td></tr>"
+        f"<td style='vertical-align:top'>{_escape(value)}</td></tr>"
         for label, value in rows)
     return f"<table cellspacing='0' cellpadding='1'>{cells}</table>"
+
+
+def _sections_html(sections: list[tuple[str, list[Any]]]) -> str:
+    """
+    Lists one under another, each under its heading (tsudo 2026-11-14: 見出しは一覧の上に、幅の節約),
+    one item to a line; an item may be `(text, background colour)`.
+    """
+    rows = []
+    for i, (heading, items) in enumerate(sections):
+        space = " padding-top:6px;" if i else ""
+        rows.append(f"<tr><td style='color:#64748b;{space}'>{_escape(heading)}</td></tr>")
+        for item in items:
+            text, colour = item if isinstance(item, tuple) else (item, None)
+            rows.append(_line_html(text, _background(colour)))
+    return f"<table cellspacing='0' cellpadding='1' width='100%'>{''.join(rows)}</table>"
+
+
+#: Where a long file path may go on to the next line (a zero-width space after these).
+_BREAK_AFTER = re.compile(r"([/\\_\-.])")
+
+
+def _breakable(text: str) -> str:
+    """A path escaped, able to wrap after / _ - . (a long name never makes the card wider)."""
+    return _BREAK_AFTER.sub("\\1\u200b", _escape(text))
+
+
+def file_label(where: RecordImages) -> str:
+    """The name of a record's image that is not in a folder: the last part of its path or URL."""
+    return re.split(r"[?#]", where.place)[0].replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or where.place
 
 
 def shape_picture(geometry: Optional[dict], width: int, height: int, text: str) -> QPixmap:
@@ -184,8 +209,9 @@ class NoticeCard(QFrame):
         head.addWidget(self.found)
         body.addLayout(head)
 
-        # Side by side: the thumbnail, the image's attributes and 「写っている地物」 (tsudo, 2026-11-14: 3 列);
-        # the features under the attributes when the map area is narrow. The buttons below.
+        # Side by side: the thumbnail, the image's attributes, its files and 「写っている地物」
+        # (tsudo, 2026-11-14: サムネ、メタ、ファイル、地物); with less room the files above the features,
+        # then all under the attributes. The buttons below.
         self.grid = QGridLayout()
         self.grid.setHorizontalSpacing(16)
         self.grid.setVerticalSpacing(6)
@@ -209,7 +235,18 @@ class NoticeCard(QFrame):
         self.contents.setWordWrap(True)
         self.contents.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         box.addWidget(self.contents)
-        box.addStretch(1)
+        self.files_box = QWidget()
+        box = QVBoxLayout(self.files_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        self.files_title = QLabel(self.tr("画像ファイル"))
+        self.files_title.setFont(bold)
+        box.addWidget(self.files_title)
+        self.files = QLabel()
+        self.files.setTextFormat(Qt.TextFormat.RichText)
+        self.files.setWordWrap(True)
+        self.files.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        self.files.linkActivated.connect(self._file_clicked)
+        box.addWidget(self.files)
         self.button_box = QWidget()
         buttons = QHBoxLayout(self.button_box)
         buttons.setContentsMargins(0, 0, 0, 0)
@@ -226,10 +263,21 @@ class NoticeCard(QFrame):
             buttons.addWidget(button)
             self.buttons[key] = button
         buttons.addStretch(1)
-        self.grid.addWidget(self.picture, 0, 0, 3, 1, Qt.AlignmentFlag.AlignTop)
-        #: Whether the features are a column of their own (else under the attributes).
-        self.wide: Optional[bool] = None
-        self._arrange(True)
+        self.grid.addWidget(self.picture, 0, 0, 2, 1, Qt.AlignmentFlag.AlignTop)
+        #: The columns beside the thumbnail (filled by `_arrange`).
+        self._columns: list[QWidget] = []
+        for i in range(3):
+            column = QWidget()
+            lay = QVBoxLayout(column)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(8)
+            self.grid.addWidget(column, 0, 1 + i)
+            self._columns.append(column)
+        self.grid.addWidget(self.button_box, 1, 1, 1, 3)
+        self.grid.setRowStretch(1, 1)
+        #: How the boxes are laid out (`_arrange`): 4 a column each, 3 the files above the features, 2 all under the attributes.
+        self.mode = 0
+        self._arrange(4)
         body.addLayout(self.grid)
         self.update_notice(notice)
 
@@ -271,6 +319,7 @@ class NoticeCard(QFrame):
         doc.setHtml(text)
         self._attributes_width = min(ATTRIBUTES_WIDTH, math.ceil(doc.idealWidth()) + 4)
         self._attributes_min()
+        self.show_files()
         self.show_contents()
         self.show_picture()
 
@@ -282,30 +331,79 @@ class NoticeCard(QFrame):
         if width != self.attributes_column:
             self.attributes_column = width
             self._attributes_min()
+            self._show_source()  # every card laid out alike
+
+    @property
+    def wide(self) -> bool:
+        """Whether the attributes are a column of their own (the features or files beside them)."""
+        return self.mode >= 3
+
+    def column_of(self, widget: QWidget) -> int:
+        """Which column beside the thumbnail a box is in (0: the attributes')."""
+        return next((i for i, c in enumerate(self._columns) if widget.parent() is c), -1)
+
+    def _set_shown(self, box: QWidget, on: bool) -> None:
+        if box.isHidden() == on:
+            box.setVisible(on)
+            self._show_source()  # another layout may fit now
 
     def show_contents(self) -> None:
-        """「写っている地物」: per layer of the catalog its features' names one to a line, or why not yet."""
+        """「写っている地物」: per layer of the catalog its heading, then its features' names one to a line, or why not yet."""
         catalog = self.feed.catalog_of(self.notice)
         layers = catalog.footprint_layers if catalog is not None and self.notice.kind != PLAN else []
-        self.contents_box.setVisible(bool(layers))
+        self._set_shown(self.contents_box, bool(layers))
         if not layers:
             return
         kept = self.notice.extra.get("contents") if isinstance(self.notice.extra.get("contents"), dict) else {}
-        rows = []
+        sections = []
         for layer in layers:
             found = Contents.from_json(kept.get(layer.key()))
             if found is not None:
-                label = self.tr("{label}（{n} 件）").format(label=layer.label, n=found.count)
+                heading = self.tr("{label}（{n} 件）").format(label=layer.label, n=found.count)
                 lines: list = contents_lines(found)
                 if layer.background is not None and found.texts:
                     lines = [(text, layer.background.color_for(found.value_at(i))) for i, text in enumerate(found.texts)]
                 if found.cut:
                     lines.append(self.tr("（先頭の {read} 件まで）").format(read=found.read))
-                rows.append((label, lines))
+                sections.append((heading, lines))
                 continue
             failed = self.feed.work.failure(self.feed.contents_key(self.notice))
-            rows.append((layer.label, self.tr("照合できず: {m}").format(m=failed) if failed else self.tr("照合中…")))
-        self.contents.setText(_rows_html(rows))
+            sections.append((layer.label, [self.tr("照合できず: {m}").format(m=failed) if failed else self.tr("照合中…")]))
+        self.contents.setText(_sections_html(sections))
+
+    def show_files(self) -> None:
+        """「画像ファイル」: the files of the record that can be opened (a click opens that one), or why not yet."""
+        feed = self.feed
+        catalog = feed.catalog_of(self.notice)
+        on = catalog is not None and catalog.image_files and self.notice.kind != PLAN
+        self._set_shown(self.files_box, on)
+        if not on:
+            return
+        where = feed.files.get(self.notice.id)
+        if where is None:
+            failed = feed.work.failure(feed.files_key(self.notice))
+            self.files_title.setText(self.tr("画像ファイル"))
+            self.files.setText(_escape(self.tr("見つからず: {m}").format(m=failed) if failed else self.tr("探しています…")))
+            self.files.setToolTip("")
+            return
+        names = list(where.files) or [file_label(where)]
+        self.files_title.setText(self.tr("画像ファイル（{n}）").format(n=len(names)) if len(names) > 1 else self.tr("画像ファイル"))
+        # A little room between the files (a long name takes two lines).
+        lines = [f"<p style='margin:0 0 4px 0'><a href='{i}'>{_breakable(name)}</a></p>" for i, name in enumerate(names)]
+        if where.more:
+            lines.append(f"<p style='margin:0'>{_escape(self.tr('（ほかにもあり。すべては「開く」で選ぶ）'))}</p>")
+        self.files.setText("".join(lines))
+        self.files.setToolTip(self.tr("{place}\n押すとその画像だけ開く").format(place=where.place))
+
+    def _file_clicked(self, link: str) -> None:
+        where = self.feed.files.get(self.notice.id)
+        if where is None or not link.isdigit():
+            return
+        index = int(link)
+        if where.files and index < len(where.files):
+            self.feed.open_files(self.notice, [where.files[index]])
+        elif not where.files:
+            self.feed.open_files(self.notice, None)
 
     def show_picture(self) -> None:
         """The thumbnail, or the footprint's shape (with why there is no thumbnail, or that it is being fetched)."""
@@ -349,31 +447,43 @@ class NoticeCard(QFrame):
         self._source = picture
         self._show_source()
 
-    def _arrange(self, wide: bool) -> None:
-        """Three columns (thumbnail, attributes, features), or the features under the attributes."""
-        if wide == self.wide:
+    def _arrange(self, mode: int) -> None:
+        """4: thumbnail | attributes | files | features; 3: the files above the features; 2: all under the attributes."""
+        if mode == self.mode:
             return
-        self.wide = wide
-        grid = self.grid
-        for widget in (self.attributes, self.contents_box, self.button_box):
-            grid.removeWidget(widget)
-        grid.addWidget(self.attributes, 0, 1, Qt.AlignmentFlag.AlignTop)
-        if wide:
-            grid.addWidget(self.contents_box, 0, 2)
-            grid.addWidget(self.button_box, 2, 1, 1, 2)
-        else:
-            grid.addWidget(self.contents_box, 1, 1)
-            grid.addWidget(self.button_box, 2, 1)
+        self.mode = mode
+        boxes = {4: [[self.attributes], [self.files_box], [self.contents_box]],
+                 3: [[self.attributes], [self.files_box, self.contents_box], []],
+                 2: [[self.attributes, self.files_box, self.contents_box], [], []]}[mode]
+        for column, widgets in zip(self._columns, boxes):
+            lay = column.layout()
+            while lay.count():
+                lay.takeAt(0)  # the widgets are put back below (or in another column), the stretch dropped
+            for widget in widgets:
+                lay.addWidget(widget)
+            lay.addStretch(1)
+            column.setVisible(bool(widgets))
         self._attributes_min()
-        grid.setColumnStretch(1, 0 if wide else 1)
-        grid.setColumnStretch(2, 1 if wide else 0)
-        grid.setRowStretch(1, 1)
+        for i, stretch in enumerate({4: (0, 2, 3), 3: (0, 1, 0), 2: (1, 0, 0)}[mode]):
+            self.grid.setColumnStretch(1 + i, stretch)
+
+    def _mode_for(self, room: int, picture: int) -> int:
+        """The layout the card has room for, with the thumbnail as asked (the boxes it does not show need none)."""
+        beside = [w for box, w in ((self.files_box, FILES_ROOM), (self.contents_box, FEATURES_ROOM)) if not box.isHidden()]
+        if room <= 0:
+            return 4
+        attributes = max(self._attributes_width, self.attributes_column) or 300
+        base = picture + COLUMN_GAP + attributes + CARD_FRAME
+        if len(beside) == 2 and room >= base + sum(COLUMN_GAP + w for w in beside):
+            return 4
+        if room >= base + (COLUMN_GAP + max(beside) if beside else 0):
+            return 3
+        return 2
 
     def _show_source(self) -> None:
         full_w, full_h = self._full
         width = full_w
-        # Three columns when the card has room for them beside the thumbnail as asked.
-        self._arrange(self._room <= 0 or self._room >= full_w + WIDE_ROOM)
+        self._arrange(self._mode_for(self._room, full_w))
         if self._room > 0 and not self.wide:
             # What the card needs beside the thumbnail (the buttons in a row at least).
             beside = self.layout().minimumSize().width() - self.picture.width()
@@ -412,6 +522,8 @@ class NoticeFeed(QWidget):
         self._positioned = False
         #: The layers opened last with 「前の画像を閉じる」 on (their ids).
         self.last_opened: list[str] = []
+        #: Where each notice's image files are (「画像ファイル」, looked for once a session).
+        self.files: dict[str, RecordImages] = {}
         self._written = 0
 
         layout = QVBoxLayout(self)
@@ -507,6 +619,9 @@ class NoticeFeed(QWidget):
         if catalog is None or catalog.thumbnail is None or notice.kind == PLAN:
             return None
         return thumbnail_address(catalog.thumbnail, notice.feature, catalog.fields, self.context.token_for(catalog.url, catalog.token))
+
+    def files_key(self, notice: WatchNotice) -> str:
+        return "files|" + notice.id
 
     def contents_key(self, notice: WatchNotice) -> str:
         catalog = self.catalog_of(notice)
@@ -740,6 +855,8 @@ class NoticeFeed(QWidget):
             if address and not cached(self.thumbnail_folder, address):
                 jobs.append(self._thumbnail_job(address))
             catalog = self.catalog_of(n)
+            if catalog is not None and catalog.image_files and n.kind != PLAN and n.id not in self.files:
+                jobs.append(self._files_job(n, catalog))
             if catalog is not None and catalog.footprint_layers and n.kind != PLAN:
                 kept = n.extra.get("contents") if isinstance(n.extra.get("contents"), dict) else {}
                 missing = [layer for layer in catalog.footprint_layers if layer.key() not in kept]
@@ -766,6 +883,31 @@ class NoticeFeed(QWidget):
                     card.show_picture()
 
         return ("thumb|" + address, lambda task: fetch(folder, address, authcfg), done, failed)
+
+    def _files_job(self, notice: WatchNotice, catalog: CatalogConfig):
+        record = record_of(notice.feature, catalog.fields)
+        mappings = list(self.context.config.path_mappings)
+        names = self.context.known_names()
+        notice_id = notice.id
+
+        def work(task):
+            try:
+                return record_files(record, catalog, mappings, names, task.isCanceled)
+            except PathError as error:
+                raise ValueError(str(error)) from None  # told on the card (looked for again a while later)
+
+        def done(where: RecordImages) -> None:
+            self.files[notice_id] = where
+            card = self.cards.get(notice_id)
+            if card is not None:
+                card.show_files()
+
+        def failed(_message: str) -> None:
+            card = self.cards.get(notice_id)
+            if card is not None:
+                card.show_files()
+
+        return (self.files_key(notice), work, done, failed)
 
     def _contents_job(self, notice: WatchNotice, catalog: CatalogConfig, layers):
         client = self.context.esri()
@@ -804,6 +946,7 @@ class NoticeFeed(QWidget):
     def _config_changed(self) -> None:
         """Another settings file (or one changed): the cards with the catalogs as they are now."""
         self.work.failures.clear()
+        self.files.clear()  # pathMappings or imagePatterns may be others now
         for card in self.cards.values():
             card.update_notice(card.notice)
         self._work_timer.start()
@@ -834,6 +977,20 @@ class NoticeFeed(QWidget):
             self.see_on_map(notice)
             return []
         layers = self.dock.open_notices([notice])
+        # A folder chosen just now: its files can be listed on the card.
+        if self.work.failures.pop(self.files_key(notice), None) is not None:
+            self._work_timer.start()
+        return self._show_opened(layers)
+
+    def open_files(self, notice: WatchNotice, files: Optional[list[str]]) -> list:
+        """A file of 「画像ファイル」 pressed: that image alone opened, like 「開く」 (all the record's files when None)."""
+        where = self.files.get(notice.id)
+        if where is None:
+            return []
+        return self._show_opened(self.dock.open_notice_files(notice, where, files))
+
+    def _show_opened(self, layers: list) -> list:
+        """Images opened from the page: those opened before closed (「前の画像を閉じる」), the map in front at them."""
         if not layers:
             return []
         ids = [layer.id() for layer in layers]
