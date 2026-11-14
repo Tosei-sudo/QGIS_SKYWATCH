@@ -280,6 +280,39 @@ def test_a_narrow_map_area(plugin):
     assert wait_for(lambda: card.picture.width() == 200 and feed._top.indexOf(feed.controls) >= 0 and card.mode == 4, 2000)
 
 
+def test_a_long_column_makes_the_card_taller(plugin):
+    # tsudo 2026-11-14: 「別の列がサムネイルの高さを超えたら、スクロールじゃなくて、カード自体の高さを大きくしてほしい」.
+    p, iface, fake, tmp_path = plugin
+    feed = p.notice_feed
+    places = fake.layers[PLACES]
+    for i in range(40):
+        places.add({"NAME": f"岸壁{i:02d}", "NAME_EN": f"Berth {i:02d}"}, {"x": 139.61 + i * 0.004, "y": 35.6})
+    folder = tmp_path / "img" / "A_PRODUCT"
+    folder.mkdir()
+    for i in range(12):
+        geotiff(folder / f"A_P{i:03d}_PSH_ORTHO_LONG_SEGMENT_NAME.tif")
+    store = p.api.notices.store()
+    a = next(n for n in store.notices() if n.id == "w|A")
+    a.feature["attributes"]["PATH"] = str(folder)
+    store.delete_notices(["w|A"])
+    store.add_notices([a])
+    p.api.notices.refresh()
+    p.toggle_notice_feed()
+    assert loaded(feed) and wait_for(lambda: len(feed.cards["w|A"].file_rows) == 12, 5000)
+    feed.go_to("w|A")
+    wait_for(lambda: False, 200)
+    card = feed.cards["w|A"]
+    assert card.mode == 4
+    # Each column as tall as its whole text (nothing cut off, nothing to scroll inside), the card around them.
+    assert card.contents.height() >= card.contents.heightForWidth(card.contents.width()) > 3 * card.picture.height()
+    for row in card.file_rows:
+        assert row.label.height() >= row.label.heightForWidth(row.label.width())
+    for box in (card.contents, card.file_rows[-1], card.buttons["open"]):
+        bottom = box.mapTo(card, box.rect().bottomLeft()).y()
+        assert bottom < card.height(), (box, bottom, card.height())
+    assert card.height() > card.contents.height() > card.picture.height()
+
+
 def test_the_features_are_asked_again_when_the_layers_change(plugin):
     p, iface, fake, tmp_path = plugin
     feed = p.notice_feed
