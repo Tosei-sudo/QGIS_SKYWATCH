@@ -114,7 +114,7 @@ def _like(pattern: str, escape: Optional[str]) -> "re.Pattern[str]":
 def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     """
     `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A [NOT] IN ('x', 'y')`, `A >= 'x'`,
-    `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, joined by
+    `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, `UPPER(A) = 'X'`, joined by
     AND / OR with parentheses. Parts not understood match (as before).
     """
     if not where or where.strip() == "1=1":
@@ -134,6 +134,10 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
             return False
         text_value = str(v).upper() if m.group(1) else str(v)
         return bool(_like(m.group(3).replace("''", "'"), m.group(4)).fullmatch(text_value))
+    m = re.fullmatch(r"UPPER\((\w+)\)\s*=\s*'((?:[^']|'')*)'", part, re.IGNORECASE | re.DOTALL)
+    if m:
+        v = a.get(m.group(1))
+        return v is not None and str(v).upper() == m.group(2).replace("''", "'")
     m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
     if m:
         return a.get(m.group(1)) is None

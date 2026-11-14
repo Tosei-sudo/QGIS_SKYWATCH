@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 関心地域・地点: a dashed area of one's own with a pin in it, a star on the pin -->
+  <path d="M4 20l6-9 9 2 9 7-6 8H8z" fill="#fed7aa" stroke="#c2410c" stroke-width="1.6" stroke-dasharray="3 2" stroke-linejoin="round"/>
+  <path d="M16 3a7 7 0 0 1 7 7c0 5-7 12-7 12s-7-7-7-12a7 7 0 0 1 7-7z" fill="#f97316" stroke="#9a3412" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M16 6.2l1.2 2.5 2.7.4-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.4z" fill="#fff"/>
+</svg>

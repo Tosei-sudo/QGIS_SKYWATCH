@@ -5,7 +5,7 @@ import os
 import re
 import unicodedata
 
-from mikage.core import edit_stamp, events
+from mikage.core import edit_stamp, events, interests
 from mikage.core.obs import alerts
 from mikage.core.obs.areas import DEFAULT_AREA_FIELDS
 from mikage.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
@@ -36,6 +36,8 @@ DEFAULTS = {
     "TBL_HANDOVER_MEMO": DEFAULT_HANDOVER_FIELDS,
     "TBL_EVENT": events.DEFAULT_EVENT_FIELDS,
     "TBL_EVENT_LINK": events.DEFAULT_LINK_FIELDS,
+    "TBL_INTEREST_POINT": interests.DEFAULT_INTEREST_FIELDS,
+    "TBL_INTEREST_AREA": interests.DEFAULT_INTEREST_FIELDS,
 }
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,29}$")
 

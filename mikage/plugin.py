@@ -38,6 +38,8 @@ from .ui import first_setup
 from .ui.gp_dialog import RemoteProcessingDialog
 from .ui.enhance_dock import EnhanceDock
 from .ui.events_dock import EventsDock
+from .ui.interests_dock import InterestsDock
+from .qgis_io.interests_io import InterestBook
 from .ui.analysis_dock import AnalysisDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.list_views import set_column_drag
@@ -76,7 +78,7 @@ MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
-    ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
+    ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", "関心地域・地点", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
     ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…",
@@ -92,7 +94,8 @@ NOTICE_FEED = "notices"
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
                                              "SatObsSchedule", "SatObsCloud"]),
-    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard", "SatObsAnalysis"]),
+    (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsInterests", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral",
+                                            "SatObsDashboard", "SatObsAnalysis"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
     # A timeline: under the map, as wide as it (tsudo, 2026-11-14: 「複数地点は縦に並べ、横に時間が伸びる」).
     (Qt.DockWidgetArea.BottomDockWidgetArea, ["SatObsPlaceSchedule"]),
@@ -240,6 +243,11 @@ class PluginApi:
         return self._plugin.docks["SatObsEvents"]
 
     @property
+    def interests(self) -> "InterestsDock":
+        """The dock 「関心地域・地点」 (its `book` (`items`, `load()`, `over(geometry)`), `chosen()`, `choose(id)`, `save()`, `delete()`, `zoom()`)."""
+        return self._plugin.docks["SatObsInterests"]
+
+    @property
     def analysis(self) -> "AnalysisDock":
         """The dock 「データ分析」 (its `tables`, `set_sql(text)`, `set_value(name, v)`, `run(then)`, `result`, `save(name)`, `load(name)`, `add_layer()`)."""
         return self._plugin.docks["SatObsAnalysis"]
@@ -332,6 +340,8 @@ class MikagePlugin:
         self.clock = StartupClock()
         #: 「先読み」: the Esri tables read in the background once QGIS has started (qgis_io/preload.py).
         self.preloader: Optional[Preloader] = None
+        #: 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
+        self.interests: Optional[InterestBook] = None
         self._qgis_started = False
         self._startup_told = False
 
@@ -354,6 +364,7 @@ class MikagePlugin:
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
         self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
+        self.interests = InterestBook(self.context, self.iface.mainWindow())
         self.context.configChanged.connect(self._overviews_changed)
         # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
         self.context.configChanged.connect(self._column_drag_changed)
@@ -380,7 +391,7 @@ class MikagePlugin:
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
                  "SatObsPlanFiles": "plan_files", "SatObsSchedule": "schedule", "SatObsPlaceSchedule": "place_schedule",
-                 "SatObsEvents": "events", "SatObsCloud": "cloud_map",
+                 "SatObsEvents": "events", "SatObsCloud": "cloud_map", "SatObsInterests": "interests",
                  "SatObsAnalysis": "analysis"}
 
         specs = [
@@ -395,6 +406,7 @@ class MikagePlugin:
             ("SatObsObservations", tr("観測記録")),
             ("SatObsTaxonomy", tr("分類体系の編集")),
             ("SatObsNotices", tr("通知")),
+            ("SatObsInterests", tr("関心地域・地点")),
             ("SatObsEnhance", tr("画像補正")),
             ("SatObsShadowHeight", tr("影から高さ")),
             ("SatObsSpectral", tr("スペクトル")),
@@ -435,6 +447,8 @@ class MikagePlugin:
             elif name == "SatObsAiResults":
                 dock = AiResultsDock(self.iface, self.context, self.open_settings, lambda: self.docks.get("SatObsObservations"),
                                      self.iface.mainWindow())
+            elif name == "SatObsInterests":
+                dock = InterestsDock(self.iface, self.context, self.open_settings, self.interests, self.iface.mainWindow())
             elif name == "SatObsEvents":
                 dock = EventsDock(self.iface, self.context, self.open_settings, lambda: self.docks, self.iface.mainWindow())
             elif name == "SatObsAnalysis":
@@ -1051,6 +1065,7 @@ class MikagePlugin:
         self.central = CentralViews(self.iface)
         self.notice_feed = NoticeFeed(self.iface, self.context, notices)
         self.notice_feed.show_map = self.central.show_map
+        self.notice_feed.set_interests(self.interests)
         feed_icon = QIcon(os.path.join(HERE, "resources", "notice_feed.svg"))
         self.central.add_view(NOTICE_FEED, tr("新着画像"), feed_icon, self.notice_feed)
         notices.show_feed = self.show_notice_feed
@@ -1593,6 +1608,9 @@ class MikagePlugin:
             self.iface.removeDockWidget(dock)
             dock.deleteLater()
         self.docks = {}
+        if self.interests is not None:
+            self.interests.deleteLater()
+            self.interests = None
         if self.moving_targets is not None:
             self.moving_targets.close()
             self.moving_targets.deleteLater()

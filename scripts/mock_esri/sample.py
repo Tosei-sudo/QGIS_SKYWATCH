@@ -353,6 +353,9 @@ EVENT_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "EVENT_NAME": S, "EVENT_K
 EVENT_LINK_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "ITEM_TYPE": S, "ITEM_ID": {"type": S, "length": 128},
                      "ITEM_LABEL": {"type": S, "length": 1000}, "ITEM_TIME": T, "SOURCE": {"type": S, "length": 1000},
                      "NOTE": {"type": S, "length": 4000}}
+#: 関心地域・地点 (both layers alike; the owner is the plugin's user name).
+INTEREST_FIELDS = {"INTEREST_ID": {"type": S, "length": 64}, "INTEREST_NAME": S, "OWNER_USER": S, "COLOR": {"type": S, "length": 32},
+                   "NOTE": {"type": S, "length": 4000}}
 
 #: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
 EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
@@ -490,6 +493,12 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                 "STATUS": "対応中", "START_AT": now - 2 * DAY, "NOTE": "モックのイベント。画像・記録は「イベントに追加」で"},
                                  "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 1, "name": "イベントの紐付け", "fields": EVENT_LINK_FIELDS, "features": []}]},
+        {"name": "Interests", "layers": [
+            {"id": 0, "name": "関心地点", "geometryType": "point", "fields": INTEREST_FIELDS,
+             "features": feats([{"attributes": {"INTEREST_ID": str(uuid.UUID(int=9100)), "INTEREST_NAME": "サンプルの岸壁", "OWNER_USER": _user(),
+                                                "COLOR": "#1d4ed8", "NOTE": "モックの関心地点"},
+                                 "geometry": {"x": (AREA[0] + AREA[2]) / 2, "y": (AREA[1] + AREA[3]) / 2}}])},
+            {"id": 1, "name": "関心地域", "geometryType": "polygon", "fields": INTEREST_FIELDS, "features": []}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
@@ -622,6 +631,8 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   "handover": {{ "table": "{rest}/Work/FeatureServer/1", "hours": 12, "timeZone": "Asia/Tokyo" }},
   // イベント（地震対応など）: イベントのレイヤーと紐付けテーブル
   "events": {{ "layer": "{rest}/Events/FeatureServer/0", "links": "{rest}/Events/FeatureServer/1" }},
+  // 個人の関心地域・地点（持ち主の列で一人ずつ。新着画像のカードの「写っている地物」のいちばん上に）
+  "interests": {{ "points": "{rest}/Interests/FeatureServer/0", "areas": "{rest}/Interests/FeatureServer/1" }},
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}
