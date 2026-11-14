@@ -1,7 +1,8 @@
 """
 The settings file's `layers`: the layers opened at start, as the viewer
 reads them (config.ts `layerOf`), and what each is in QGIS (its provider and
-data source). The first entry is the bottom layer.
+data source). The first entry is the bottom layer. `visible: false` (the
+plugin's own; the viewer does not read it) adds the layer unchecked.
 """
 from __future__ import annotations
 
@@ -30,6 +31,8 @@ class StartupLayer:
     filter: str = ""
     #: Esri image and map services: the display rule (as serviceRules), kept as written.
     settings: dict[str, Any] = field(default_factory=dict)
+    #: False: added unchecked in the layer tree (hidden until checked).
+    visible: bool = True
 
 
 def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[StartupLayer]:
@@ -41,10 +44,14 @@ def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[St
     if not isinstance(url, str) or not _URL.search(url):
         problems.append(f"layers[{index}] に url（http(s) か相対パス）なし")
         return None
+    shown = value.get("visible", True)
+    if not isinstance(shown, bool):
+        problems.append(f"layers[{index}].visible は true か false で指定")
+        shown = True
     if kind in ("cog", "file"):
-        return StartupLayer(kind, url)
+        return StartupLayer(kind, url, visible=shown)
     if kind == "xyz":
-        return StartupLayer(kind, url, "tiles")
+        return StartupLayer(kind, url, "tiles", visible=shown)
     if isinstance(kind, str) and kind in _SERVICES:
         bbox = value.get("bbox")
         box = None
@@ -64,6 +71,7 @@ def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[St
             bbox=box,
             filter=value["filter"].strip() if isinstance(value.get("filter"), str) else "",
             settings=settings if kind == "esri" and isinstance(settings, dict) else {},
+            visible=shown,
         )
     problems.append(f"layers[{index}] の type「{kind}」は cog・file・wms・wmts・wfs・esri・ogc-features・ogc-tiles・wcs・ogc-coverage・xyz のいずれかで指定")
     return None
