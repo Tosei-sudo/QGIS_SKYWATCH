@@ -1,7 +1,7 @@
 """A stand-in for QGIS's interface (just what the plugin uses), for qgis.testing tests."""
 from qgis.gui import QgsMapCanvas, QgsMessageBar
 from qgis.PyQt.QtCore import QEventLoop, QObject, QTimer, pyqtSignal
-from qgis.PyQt.QtWidgets import QMainWindow, QMenu, QStatusBar
+from qgis.PyQt.QtWidgets import QFrame, QGridLayout, QMainWindow, QMenu, QStackedWidget, QStatusBar, QWidget
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
@@ -16,9 +16,25 @@ class FakeIface(QObject):
     def __init__(self):
         super().__init__()
         self.window = QMainWindow()
-        self.canvas = QgsMapCanvas(self.window)
+        # As QGIS 3.34 builds its map area: a widget whose grid has the message bar's frame over a stack
+        # of pages (the map canvas, the welcome page shown with no project open).
+        central = QWidget()
+        central.setObjectName("centralwidget")
+        grid = QGridLayout(central)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.stack = QStackedWidget()
+        self.canvas = QgsMapCanvas()
         self.canvas.resize(800, 600)
-        self.window.setCentralWidget(self.canvas)
+        self.stack.addWidget(self.canvas)
+        self.welcome = QWidget()
+        self.stack.addWidget(self.welcome)
+        self.bar_frame = QFrame()
+        self.bar_frame.setFixedHeight(0)
+        grid.addWidget(self.bar_frame, 0, 0, 1, 1)
+        grid.addWidget(self.stack, 0, 0, 2, 1)
+        self.window.setCentralWidget(central)
+        # The size the window had before the map area was built so (tests measure on the map in pixels).
+        self.window.resize(200, 100)
         self.bar = QgsMessageBar(self.window)
         self.status = FakeStatusBar()
         self.window.setStatusBar(self.status)

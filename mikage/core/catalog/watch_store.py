@@ -76,6 +76,23 @@ class WatchStore:
         if extra:
             self.delete_notices([n.id for n in extra])
 
+    def put_extra(self, notice_id: str, key: str, value) -> bool:
+        """
+        Keeps what was found out about a notice's image under `key` of its
+        `extra` (its read state as it is now kept); False when the notice is gone.
+        """
+        rows = self.gpkg.rows(NOTICES, '"NOTICE_ID" = ?', (notice_id,))
+        if not rows:
+            return False
+        try:
+            data = json.loads(rows[0]["DATA"])
+        except (ValueError, TypeError):
+            return False
+        extra = data.get("extra") if isinstance(data.get("extra"), dict) else {}
+        data["extra"] = {**extra, key: value}
+        self.gpkg.update(NOTICES, {"DATA": json.dumps(data, ensure_ascii=False)}, '"NOTICE_ID" = ?', (notice_id,))
+        return True
+
     def mark_read(self, ids: Optional[Sequence[str]] = None) -> None:
         """Marks notices read (all when `ids` is not given)."""
         if ids is None:

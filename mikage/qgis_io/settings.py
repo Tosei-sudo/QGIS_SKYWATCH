@@ -192,6 +192,38 @@ def place_cache_path() -> str:
     return os.path.join(profile_folder(), "place_cache.sqlite")
 
 
+def thumbnail_folder() -> str:
+    """Where the 新着画像 cards keep the thumbnails they fetched (qgis_io/thumbnails.py)."""
+    return os.path.join(profile_folder(), "thumbnails")
+
+
+def central_views() -> list[str]:
+    """The plugin's pages beside the map (ui/central_views.py) open when QGIS was last closed, in tab order."""
+    return [k for k in _get("centralViews").split(",") if k]
+
+
+def set_central_views(keys: list[str]) -> None:
+    _set("centralViews", ",".join(keys))
+
+
+def feed_close_previous() -> bool:
+    """「前の画像を閉じる」 of the 新着画像 page (its own, not the catalog's); off unless turned on."""
+    return _get("noticeFeed/closePrevious") == "1"
+
+
+def set_feed_close_previous(on: bool) -> None:
+    _set("noticeFeed/closePrevious", "1" if on else "0")
+
+
+def feed_unread_only() -> bool:
+    """「未読のみ」 of the 新着画像 page; off unless turned on."""
+    return _get("noticeFeed/unreadOnly") == "1"
+
+
+def set_feed_unread_only(on: bool) -> None:
+    _set("noticeFeed/unreadOnly", "1" if on else "0")
+
+
 class SettingsPrefs:
     """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
 

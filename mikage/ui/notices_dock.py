@@ -12,7 +12,7 @@ import time
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsRectangle
+from qgis.core import Qgis, QgsRectangle
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import (
@@ -63,6 +63,10 @@ class NoticesDock(PluginDock):
         self.choose_images = None
         #: The area drawn in the image catalog dock (its ring, WGS 84; set by the plugin), offered by 「範囲の変更…」.
         self.drawn_area: Optional[Callable[[], Optional[list]]] = None
+        #: Told the notices (newest first) whenever the lists are read again (the 新着画像 page beside the map).
+        self.refreshed: list[Callable[[list], None]] = []
+        #: Shows the 新着画像 page (set by the plugin): the message bar's 「見る」 when new images came.
+        self.show_feed: Optional[Callable[[], None]] = None
         self._tasks: list = []
 
         tabs = QTabWidget()
@@ -218,7 +222,7 @@ class NoticesDock(PluginDock):
             self._checking = False
             self.refresh()
             if added:
-                self.iface.messageBar().pushInfo(TITLE, self.tr("新着画像 {n} 件").format(n=added))
+                self._say_new(added)
             self.status.setText(self.tr("確認済み（{t}）").format(t=time_text(_now())))
             self._check_again()
 
@@ -229,6 +233,28 @@ class NoticesDock(PluginDock):
             self._check_again()
 
         self._start(self.tr("新着画像の確認"), work, done, failed)
+
+    def _say_new(self, n: int) -> None:
+        """「新着画像 n 件」 in the message bar, with 「見る」 (the 新着画像 page) when the plugin has it."""
+        bar = self.iface.messageBar()
+        text = self.tr("新着画像 {n} 件").format(n=n)
+        if self.show_feed is None:
+            bar.pushInfo(TITLE, text)
+            return
+        widget = bar.createMessage(TITLE, text)
+        button = QPushButton(self.tr("見る"))
+        button.setToolTip(self.tr("新着画像を地図の場所の大きな画面（カード）で見る"))
+
+        def look() -> None:
+            self.show_feed()
+            try:
+                bar.popWidget(widget)
+            except RuntimeError:  # closed meanwhile
+                pass
+
+        button.clicked.connect(look)
+        widget.layout().addWidget(button)
+        bar.pushWidget(widget, Qgis.MessageLevel.Info, 10)
 
     def _check_again(self) -> None:
         again, self._again = self._again, None
@@ -270,6 +296,8 @@ class NoticesDock(PluginDock):
             self.notices.resizeColumnToContents(c)
         if self.unread_changed:
             self.unread_changed(sum(1 for n in notices if not n.read))
+        for told in list(self.refreshed):
+            told(notices)
 
     def chosen_notices(self) -> list[WatchNotice]:
         return [i.data(0, Qt.ItemDataRole.UserRole) for i in self.notices.selectedItems()]
@@ -290,8 +318,13 @@ class NoticesDock(PluginDock):
             self.refresh()
 
     def zoom_to_chosen(self) -> None:
+        if self.zoom_to_notices(self.chosen_notices()):
+            self.mark_chosen_read()
+
+    def zoom_to_notices(self, notices) -> bool:
+        """The map moved to the footprints of `notices` (a margin around them); False when none has one."""
         box: Optional[QgsRectangle] = None
-        for n in self.chosen_notices():
+        for n in notices:
             g = footprint(n.feature.get("geometry"))
             if g is None:
                 continue
@@ -300,11 +333,11 @@ class NoticesDock(PluginDock):
             else:
                 box.combineExtentWith(g.boundingBox())
         if box is None:
-            return
+            return False
         extent = from_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(box.buffered(max(box.width(), box.height()) * 0.2 + 0.001))
         self.canvas.setExtent(extent)
         self.canvas.refresh()
-        self.mark_chosen_read()
+        return True
 
     #: The 「観測記録」 dock (plugin.py sets it): the images of a catalog without image files go there.
     observations: Optional[Callable[[], object]] = None
@@ -347,7 +380,7 @@ class NoticesDock(PluginDock):
             if not listed or dock is None or dock.list_catalog_images(listed) is None:
                 problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
         if any(n.kind == PLAN for n in notices):
-            self.zoom_to_chosen()
+            self.zoom_to_notices([n for n in notices if n.kind == PLAN])
         self._mark([n.id for n in notices])
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))

@@ -105,6 +105,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><td><span class="ui">メニュー</span></td><td>QGIS のメニュー「プラグイン」→「MIKAGE」。分野ごとのサブメニュー（撮像計画・撮像依頼・観測記録・画像・解析・処理・AI・地図・レイヤー）と、その下に「イベント」「担当と個人設定…」「設定…」など。すべての機能はここから開けます</td></tr>
 <tr><td><span class="ui">ツールバー</span></td><td>ツールバー「MIKAGE」。担当ごとによく使うボタンだけが並びます。足りないボタンは <a class="open" href="mikage:open/ツールバーのボタン…">ツールバーのボタン…</a> で足せます</td></tr>
 <tr><td><span class="ui">ドック</span></td><td>地図の左右に出る作業用のパネル（画像カタログ・撮像計画・観測記録など）。タブで重なっているので、下のタブで切り替えます</td></tr>
+<tr><td><span class="ui">地図の上のタブ</span></td><td>「新着画像」を開いている間だけ、地図の上に「地図｜新着画像」のタブが出ます。地図の場所を大きな画面に切り替えるためのもので、<span class="ui">地図</span> のタブで地図に戻ります</td></tr>
 <tr><td><span class="ui">メッセージバー</span></td><td>地図の上に出る帯。保存できなかった・読み込めなかったなどのお知らせと、その場で押せるボタンが出ます</td></tr>
 <tr><td><span class="ui">ステータスバー</span></td><td>画面のいちばん下。右のほうにカーソル位置の緯度経度（または MGRS・UTM）が出ます</td></tr>
 </table>
@@ -139,6 +140,17 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <li>分担を使っている職場では、一覧の最後の列に「未着手」「作業中（名前）」などが出ます。<span class="ui">未着手のみ</span> で、まだ誰も手を付けていない画像だけにできます</li>
 <li>同じ条件で新しい画像を待ちたいときは <span class="ui">この条件で監視…</span>。新着は <a class="open" href="mikage:open/通知">通知</a> ドックに出て、ツールバーの「通知」に未読数が付きます。地図の右クリック「この地点の新着画像を監視…」でも作れます</li>
 <li>港や基地など、決まった場所の形で見張りたいときは、監視の範囲で <span class="ui">レイヤー</span> を選び、その場所のレイヤーを選びます（一部だけなら地物を選んで <span class="ui">選択地物のみ</span>）。監視はそのときの形を写して覚えるので、あとでレイヤーを直したら、通知ドックの「監視条件」タブで監視を選んで <span class="ui">範囲の変更…</span> を押し、取り直します</li>
+</ul>
+
+<h3 id="feed">入ってきた画像を順に見る（新着画像）</h3>
+<p>監視で見つかった画像は、地図の場所いっぱいの <a class="open" href="mikage:open/新着画像（大きな画面）">新着画像（大きな画面）</a>（<span class="key">Ctrl+Alt+N</span>、メッセージバーの「新着画像 n 件」の <span class="ui">見る</span> でも）で、カードにして順に見られます。地図の上に「地図｜新着画像」のタブが出るので、タブで地図と行き来します。</p>
+<ul>
+<li>カードは見つかった順に上から並び、いちばん下がいちばん新しい画像です。最初は、まだ見ていない（未読の）いちばん古いカードが出ます</li>
+<li>見ている間に新しい画像が来ても画面は動きません。右下に <span class="ui">↓ 新着 n 件</span> が出るので、押すとそのカードへ移ります</li>
+<li>カードにはサムネイル、撮像日時・センサーなどの属性、<span class="ui">写っている地物</span>（その画像の範囲にある港や施設などの名前。すべて出します）が出ます。サムネイルや地物は設定ファイルにあるときだけです</li>
+<li><span class="ui">開く</span>（カードのダブルクリックでも）で画像が地図に入り、地図に切り替わってその画像へ移ります。<span class="ui">地図で見る</span> は画像を開かずに範囲へ移ります。どちらも既読になります。見終わったら <span class="ui">新着画像</span> のタブで戻ります</li>
+<li>順に見ていくときは上の <span class="ui">前の画像を閉じる</span> にチェック。次を開くと、前にここから開いた画像は地図から外れます。<span class="ui">未読のみ</span> でまだ見ていないカードだけに、監視の欄で 1 つの監視だけにできます</li>
+<li>タブの × で閉じても、通知ドックはそのまま使えます（既読や削除はどちらにも効きます）</li>
 </ul>
 
 <h3 id="goto">場所へ移動する</h3>
@@ -363,6 +375,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><td><span class="key">Ctrl+Alt+I</span></td><td>画像カタログを開く</td></tr>
 <tr><td><span class="key">Ctrl+Alt+K</span></td><td>撮像計画ドックを開く</td></tr>
 <tr><td><span class="key">Ctrl+Alt+Q</span></td><td>撮像依頼ドックを開く</td></tr>
+<tr><td><span class="key">Ctrl+Alt+N</span></td><td>新着画像（大きな画面）と地図の切り替え</td></tr>
 <tr><td><span class="key">Ctrl+Alt+PageDown</span> ／ <span class="key">Ctrl+Alt+PageUp</span></td><td>観測記録: 次の画像 ／ 前の画像</td></tr>
 <tr><td><span class="key">Ctrl+Alt+E</span></td><td>観測記録: クリック記録の開始・終了</td></tr>
 <tr><td><span class="key">Ctrl+Alt+D</span></td><td>観測記録: 地図の印を隠す・戻す</td></tr>
