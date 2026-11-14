@@ -43,13 +43,13 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
-    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "撮像依頼", "撮像計画ファイル出力", "撮像予定", "衛星パス", "雲量マップ", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果", "イベント", "データ分析"]
+    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "衛星パス", "雲量マップ", "観測記録", "分類体系の編集", "通知", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果", "イベント", "データ分析"]
     # By area (tsudo, 2026-11-07): a submenu each, then the dock layout and 「設定…」 in the menu itself.
     # (「通知」 shows its unread count, 「通知（1）」, when an earlier test left a notice.)
     tree = [(e[0], [re.sub(r"^通知（\d+）$", "通知", t) for t in e[1]]) if isinstance(e, tuple) else e for e in iface.menu_tree()]
     assert tree == [
         ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", "-", "雲量マップ", "雲量を属性に付与…"]),
-        ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "年間撮像上限…"]),
+        ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…"]),
         ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
         ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", "-", "画像補正", "影から高さ", "スペクトル", "-", "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
         ("解析・処理", ["データ分析", "-", "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", "-",
@@ -328,7 +328,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 61
+    assert len(set(drawn)) == len(plugin.actions) == 62
     plugin.unload()
 
 

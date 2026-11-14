@@ -181,6 +181,14 @@ class PlanOverlay:
         self.clear(["target", "target_point"])
         self._band("target_point").addGeometry(QgsGeometry.fromPointXY(QgsPointXY(lon, lat)), WGS84)
 
+    def numbered_points(self, points: Sequence[tuple], color: str) -> None:
+        """Points (longitude, latitude, text) as markers with their text beside them; replaces those shown before."""
+        self.clear(["label"])
+        for lon, lat, text in points:
+            self._marker(lon, lat, color)
+            if text:
+                self._label(lon, lat, text, color, True, 0, True)
+
     def _marker(self, lon: float, lat: float, color: str) -> QgsVertexMarker:
         marker = QgsVertexMarker(self.canvas)
         p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(QgsPointXY(lon, lat))

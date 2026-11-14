@@ -1071,17 +1071,36 @@ def load_history(client: EsriClient, store: RequestStoreConfig, token: Optional[
     return sorted(out, key=lambda r: (r.day, r.run_date if math.isfinite(r.run_date) else 0))
 
 
-def load_day(client: EsriClient, store: RequestStoreConfig, token: Optional[str], day: str,
-             cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
-    """Every row of a target day (`2026-11-10`): requests handed out or held back and 要求外, with their areas."""
+def _load_rows(client: EsriClient, store: RequestStoreConfig, token: Optional[str], where: str,
+               cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """Every row matching `where` (by the table's names), 要求外 too, with their areas when the table keeps them."""
     if not store.history:
         return []
     hf = store.history_fields
     _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
     shapes = _polygons(client, store.history, token)
-    rows = client.query_all(store.history, f"{hf['day']} = {quote(day)}", token, geometry=shapes, limit=100000, cancelled=cancelled)
+    rows = client.query_all(store.history, where, token, geometry=shapes, limit=100000, cancelled=cancelled)
     out = [history_row_of(row.get("attributes") or {}, row.get("geometry"), hf, oid) for row in rows]
     return sorted(out, key=lambda r: (r.system, r.planned_at or 0, r.name, r.run_date if math.isfinite(r.run_date) else 0))
+
+
+def load_day(client: EsriClient, store: RequestStoreConfig, token: Optional[str], day: str,
+             cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """Every row of a target day (`2026-11-10`): requests handed out or held back and 要求外, with their areas."""
+    if not store.history:
+        return []
+    return _load_rows(client, store, token, f"{store.history_fields['day']} = {quote(day)}", cancelled)
+
+
+def load_days(client: EsriClient, store: RequestStoreConfig, token: Optional[str], first: str, last: str,
+              cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+    """
+    Every row of the target days `first` … `last` (`2026-11-14`, both
+    included), as load_day: the plans ahead of 「地点ごとの撮像予定」.
+    """
+    if not store.history:
+        return []
+    return _load_rows(client, store, token, history_where(store, first=first, last=last), cancelled)
 
 
 def linked_where(store: RequestStoreConfig, system: str, first: str, last: str) -> str:

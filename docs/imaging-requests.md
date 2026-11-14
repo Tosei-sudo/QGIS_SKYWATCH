@@ -1164,3 +1164,17 @@ tsudo「システムによっては、軌道の使用時間で上限管理して
 - 前の日のパスを延ばしたとき、前の日の 1 日の上限を見直すこと（パスは使い始めの日に数えるため）。
 
 実装: `core/request/use_time.py`（`UseBook`・`passes_of`・`seconds`・`pass_id`・`read_other_uses`・`USE_PASS`・`USE_DAY`・`USE_OVER`）、`core/request/systems.py`（`UseTime`・`use_time_of`・`ExportSystem.use_time`）、`core/request/daily.py`（`allocate` の `uses`、`Candidate.use_text`・`pass_id`、`pass_text`）、`core/request/shots.py`（`_area` の `fits` に撮像）、`core/request/workflow.py`（`DayPlan.uses`・`plan_day`・`shots_of`）、`core/request/store.py`（`ShotRow.use_start`・`use_end`・`pass_id`）、`core/request/export.py`（`useStart`・`useEnd`・`useSeconds`・`passId`）、`core/request/simulate.py`（`DayResult.use_time`）、`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`。テスト: `tests/test_request_use_time.py`。
+
+## 34. 地点ごとの撮像予定（2026-11-14 追加）
+
+tsudo「撮像計画カレンダーとは別に、この地点を次いつ取る計画があるかを可視化したい」「レイヤー（ポリゴン、ポイント等）もしくはクリックした地点の、この先の撮像計画を、タイムラインで可視化する」「読み専用の画面」「複数地点は縦に並べ、横に時間が伸びる」。
+
+- **ドック「地点ごとの撮像予定」**（`SatObsPlaceSchedule`）を地図の下に置く（タイムラインは横に長いほど見やすいため。撮像予定のドックと同じく地図を見ながら使う）。読むだけで、出力履歴・台帳・撮像の範囲には書き込まない。
+- **地点**: レイヤーの地物（全部か選択中だけ、名前は選んだ属性。最初の 500 件まで）と、地図をクリックした地点（「地図で地点を追加」、地図の右クリック「この地点の撮像予定」）。クリックした地点はその QGIS の間だけ。
+- **期間**: 今日（JST）から 3・7・14（既定）・30・60・90 日。選んだ日数は人ごとに残る。
+- **計画**: 出力履歴のその期間の行（`store.load_days`）のうち、範囲が地点にかかるもの。範囲は行の範囲（分担の行はその分の範囲）、形状なしの表なら台帳の依頼の範囲。かからなくても、その行の撮像（`SHOT_ID` → `TBL_REQUEST_SHOT` の範囲）にかかれば入れる（衛星はその範囲を撮るため。まとめた撮像は 1 つの印。吹き出しに「依頼の範囲の外、撮像の範囲の中」）。時刻はシステムの回答（`PLANNED_AT`）、なければ撮像のパスの時刻、どちらもなければその日いっぱい（時刻未定）。不採用・見送りは「不採用・見送りも」のときだけ出す。
+- **依頼の日**: 有効な依頼で範囲が地点にかかるものの、その依頼の行がまだない日のうち `model.occurs_on` の日（期間内、定点は繰り返しの日）。1 日 1 つの印に、その日の依頼をまとめる。
+- **次**: 今から後の最初の計画（採用・要求外・不明。時刻未定はその日の終わりまで「次」に数える）。なければ最初の依頼の日、なければ「予定なし」。「次が早い順」は 計画のある地点（早い順）→ 依頼だけの地点 → 予定なし。1 分ごとに「次」と今の線を進め、日が変わったら読み直す。
+- **かかるかどうか**: ドックでは QGIS のジオメトリで判定し、ポリゴンの地点はかかる面積の割合を吹き出しに出す（`GeometryShares`）。コアの `share_of` は同じことを点の並びで測る（テスト用・QGIS なし）。
+
+実装: `core/request/place_plans.py`（`Place`・`Mark`・`Lane`・`lanes_of`・`next_of`・`sort_by_next`・`layout`・`marks_at`・`mark_tip`）、`core/request/store.py`（`load_days`）、`ui/place_schedule_dock.py`、`ui/place_timeline.py`、`ui/plan_overlay.py`（`numbered_points`）。テスト: `tests/test_request_place_plans.py`・`tests/test_qgis_place_schedule.py`。
