@@ -28,14 +28,14 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import quote
 
 from ..util import is_number, is_record, js_string, time_of
 
-#: The size asked for (and shown on the card) when the settings file does not say: large, one card a row (tsudo, 2026-11-14).
-DEFAULT_WIDTH, DEFAULT_HEIGHT = 480, 360
+#: The size asked for (and shown on the card) when the settings file does not say: 200 pixels high (tsudo, 2026-11-14: 「縦200pixelぐらいでいいよ」).
+DEFAULT_WIDTH, DEFAULT_HEIGHT = 270, 200
 _SIZE = (16, 2048)
 _PLACEHOLDER = re.compile(r"\{\{|\}\}|\{([^{}]*)\}")
 _ROLES = ("id", "sensor", "angle", "azimuth")
@@ -370,6 +370,66 @@ HARD_LIMIT = 10_000
 _EMPTY_BRACKETS = re.compile(r"\s*(\(\s*\)|（\s*）|\[\s*\]|［\s*］|「\s*」|【\s*】|<\s*>|〈\s*〉)")
 
 
+#: A line's background as the settings file or an attribute may write it: #rgb, #rrggbb, #aarrggbb or a colour's name.
+_COLOR = re.compile(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})|[A-Za-z]{3,30}")
+
+
+def is_color(value: Any) -> bool:
+    return isinstance(value, str) and bool(_COLOR.fullmatch(value.strip()))
+
+
+@dataclass(frozen=True)
+class RowColors:
+    """
+    `background` of a footprint layer (tsudo, 2026-11-14: 「その行の背景色を属性から変えたい」):
+    each feature's line coloured by one attribute, through `colors` (value → colour),
+    else the value itself as the colour; `default` for the rest (none: no background).
+    """
+    field: str
+    colors: tuple[tuple[str, str], ...] = ()
+    default: Optional[str] = None
+
+    def color_for(self, value: Optional[str]) -> Optional[str]:
+        if value is not None and value != "":
+            if self.colors:
+                found = next((c for v, c in self.colors if v == value), None)
+                if found is not None:
+                    return found
+            elif is_color(value):
+                return value.strip()
+        return self.default
+
+
+def row_colors_of(value: Any, problems: list[str], at: str) -> Optional[RowColors]:
+    """`background`: an attribute's name (its values are colours) or `{ "field", "colors": { value: colour }, "default" }`."""
+    from ..util import is_name
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if is_name(value.strip()):
+            return RowColors(value.strip())
+        problems.append(f"{at} は属性名（英数字と _）か {{ \"field\", \"colors\", \"default\" }} で指定")
+        return None
+    if not is_record(value) or not (isinstance(value.get("field"), str) and is_name(value["field"].strip())):
+        problems.append(f"{at} は属性名（英数字と _）か {{ \"field\", \"colors\", \"default\" }} で指定（field は属性名）")
+        return None
+    colors: list[tuple[str, str]] = []
+    given = value.get("colors")
+    if given is not None and not is_record(given):
+        problems.append(f"{at}.colors は {{ \"属性の値\": \"#rrggbb\" }} で指定")
+    for v, c in (given.items() if is_record(given) else []):
+        if is_color(c):
+            colors.append((str(v).strip(), c.strip()))
+        else:
+            problems.append(f"{at}.colors の「{v}」の色は #rrggbb か色の名前（pink など）で指定")
+    default = value.get("default")
+    if default is not None and default != "" and not is_color(default):
+        problems.append(f"{at}.default は #rrggbb か色の名前（pink など）で指定")
+        default = None
+    return RowColors(value["field"].strip(), tuple(colors), default.strip() if isinstance(default, str) and default.strip() else None)
+
+
 @dataclass(frozen=True)
 class FootprintLayer:
     """
@@ -384,14 +444,20 @@ class FootprintLayer:
     where: Optional[str] = None
     max: Optional[int] = None
     token: Optional[str] = None
+    #: Each line's background from an attribute (`background`).
+    background: Optional[RowColors] = None
 
     def key(self) -> str:
-        """What a kept answer was asked with (asked again when the settings file changes it)."""
-        return "|".join([self.url, ",".join(self.fields), self.format, self.where or "", str(self.max or "")])
+        """What a kept answer was asked with (asked again when the settings file changes it; not for its colours)."""
+        key = "|".join([self.url, ",".join(self.fields), self.format, self.where or "", str(self.max or "")])
+        return key + ("|background=" + self.background.field if self.background else "")
+
+    def out_fields(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.fields + ((self.background.field,) if self.background else ())))
 
 
 def footprint_layers_of(value: Any, problems: list[str], at: str) -> list[FootprintLayer]:
-    """`footprintLayers` of a catalog: an array of `{ "label", "url", "fields", "format", "where", "max", "token" }`."""
+    """`footprintLayers` of a catalog: an array of `{ "label", "url", "fields", "format", "where", "max", "token", "background" }`."""
     from ..esri import condition_problem
     from ..util import is_name, is_url, layer_url
 
@@ -435,10 +501,12 @@ def footprint_layers_of(value: Any, problems: list[str], at: str) -> list[Footpr
             most = None
         label = entry.get("label")
         token = entry.get("token")
+        background = row_colors_of(entry.get("background"), problems, f"{where}.background")
         out.append(FootprintLayer(
             label=label.strip() if isinstance(label, str) and label.strip() else f"レイヤー {i + 1}", url=layer_url(url),
             fields=tuple(dict.fromkeys(names)), format=fmt, where=condition.strip() if isinstance(condition, str) and condition.strip() else None,
-            max=int(most) if most is not None else None, token=token if isinstance(token, str) and token else None))
+            max=int(most) if most is not None else None, token=token if isinstance(token, str) and token else None,
+            background=background))
     return out
 
 
@@ -476,28 +544,41 @@ class Contents:
     texts: list[str]
     count: int
     read: Optional[int] = None
+    #: Each line's value of the layer's `background` attribute (empty: no background asked).
+    values: list[Optional[str]] = field(default_factory=list)
 
     @property
     def cut(self) -> bool:
         return self.read is not None and self.count > self.read
 
+    def value_at(self, i: int) -> Optional[str]:
+        return self.values[i] if i < len(self.values) else None
+
     def to_json(self) -> dict[str, Any]:
-        return {"texts": self.texts, "count": self.count, **({"read": self.read} if self.read is not None else {})}
+        return {"texts": self.texts, "count": self.count, **({"read": self.read} if self.read is not None else {}),
+                **({"values": self.values} if any(v is not None for v in self.values) else {})}
 
     @staticmethod
     def from_json(value: Any) -> Optional["Contents"]:
         if not is_record(value) or not isinstance(value.get("texts"), list) or not is_number(value.get("count")):
             return None
         read = value.get("read")
-        return Contents([str(t) for t in value["texts"]], int(value["count"]), int(read) if is_number(read) else None)
+        texts = [str(t) for t in value["texts"]]
+        values = value.get("values")
+        values = [None if v is None else str(v) for v in values] if isinstance(values, list) and len(values) == len(texts) else []
+        return Contents(texts, int(value["count"]), int(read) if is_number(read) else None, values)
 
 
-def _named(names: Sequence[str]) -> list[str]:
-    """Each name once, in order; one several features have gets ×n."""
-    counts: dict[str, int] = {}
-    for n in names:
-        counts[n] = counts.get(n, 0) + 1
-    return [n if c == 1 else f"{n} ×{c}" for n, c in counts.items()]
+def _named(lines: Sequence[tuple[str, Optional[str]]]) -> tuple[list[str], list[Optional[str]]]:
+    """
+    Each name (with its `background` value) once, in order; one several features have gets ×n;
+    the features without a name last, 「（名前なし ×n）」. The names and their values.
+    """
+    counts: dict[tuple[str, Optional[str]], int] = {}
+    for line in sorted(lines, key=lambda x: not x[0]):  # stable: the named ones in order, then the unnamed
+        counts[line] = counts.get(line, 0) + 1
+    texts = [(n if c == 1 else f"{n} ×{c}") if n else ("（名前なし）" if c == 1 else f"（名前なし ×{c}）") for (n, _v), c in counts.items()]
+    return texts, [v for _n, v in counts]
 
 
 def contents_of(client, layer: FootprintLayer, geometry: Optional[dict[str, Any]], token: Optional[str] = None,
@@ -513,13 +594,18 @@ def contents_of(client, layer: FootprintLayer, geometry: Optional[dict[str, Any]
     limit = layer.max or HARD_LIMIT
     spatial = _geometry_params(geometry)
     where = own_condition(layer.where) if layer.where else "1=1"
-    features = client.query_all(layer.url, where, token, out_fields=",".join(layer.fields), geometry=False, extra=spatial,
+    features = client.query_all(layer.url, where, token, out_fields=",".join(layer.out_fields()), geometry=False, extra=spatial,
                                 limit=limit, cancelled=cancelled, cut=True)
-    names = [t for t in (feature_text(layer, f.get("attributes") or {}) for f in features if is_record(f)) if t]
-    unnamed = len(features) - len(names)
-    texts = _named(names) + ([f"（名前なし ×{unnamed}）" if unnamed > 1 else "（名前なし）"] if unnamed else [])
+
+    def colour_value(attributes: dict[str, Any]) -> Optional[str]:
+        v = attributes.get(layer.background.field) if layer.background else None
+        return None if v is None or js_string(v).strip() == "" else js_string(v).strip()
+
+    lines = [(feature_text(layer, f.get("attributes") or {}), colour_value(f.get("attributes") or {})) for f in features if is_record(f)]
+    texts, values = _named(lines)
+    values = values if layer.background else []
     if len(features) < limit:
-        return Contents(texts, len(features))
+        return Contents(texts, len(features), values=values)
     # Cut at the limit: how many there are in all.
     count = len(features)
     try:
@@ -527,12 +613,12 @@ def contents_of(client, layer: FootprintLayer, geometry: Optional[dict[str, Any]
         count = max(count, int(total)) if is_number(total) else count
     except Exception:  # noqa: BLE001 (an old service: the names read are enough)
         pass
-    return Contents(texts, count, len(features))
+    return Contents(texts, count, len(features), values)
 
 
-def contents_line(contents: Contents) -> str:
-    """The names one after another (「横須賀本港、長浦港 ×2」); 「なし」 for none."""
-    return "、".join(contents.texts) if contents.texts else "なし"
+def contents_lines(contents: Contents) -> list[str]:
+    """The names one to a line (「横須賀本港」「長浦港 ×2」, tsudo 2026-11-14: 箇条書きみたいに、点はなし); 「なし」 for none."""
+    return list(contents.texts) if contents.texts else ["なし"]
 
 
 def layers_key(layers: Sequence[FootprintLayer]) -> str:

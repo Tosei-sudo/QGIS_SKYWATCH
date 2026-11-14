@@ -23,20 +23,21 @@ from __future__ import annotations
 
 import html
 import math
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsProject
 from qgis.PyQt.QtCore import QPointF, QRectF, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from qgis.PyQt.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QTextDocument
 from qgis.PyQt.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStyle,
+    QVBoxLayout, QWidget,
 )
 
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.query import time_text
 from ..core.catalog.search import cell_text, list_columns, record_of
 from ..core.catalog.thumbnail import (
-    DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, contents_line, contents_of, footprint_of, thumbnail_address,
+    DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, contents_lines, contents_of, footprint_of, thumbnail_address,
 )
 from ..core.catalog.watch import WatchNotice
 from ..qgis_io import settings
@@ -53,6 +54,10 @@ CARD_WIDTH = 1200
 MIN_PICTURE = 160
 #: The room the card keeps for its attributes and buttons beside the thumbnail (and its margins).
 TEXT_ROOM = 360
+#: The room the attributes and the features need beside the thumbnail to be columns of their own.
+WIDE_ROOM = 700
+#: The attributes' column is as wide as its lines (each on one line), up to this.
+ATTRIBUTES_WIDTH = 440
 UNREAD = "#2563eb"
 
 
@@ -60,11 +65,39 @@ def _escape(text: str) -> str:
     return html.escape(text or "", quote=True).replace("\n", "<br>")
 
 
-def _rows_html(rows: list[tuple[str, str]]) -> str:
-    """Label / value rows as a table (every value escaped: other people's text is never markup)."""
+def _background(color: Optional[str]) -> Optional[QColor]:
+    """A line's background as Qt reads it (None: none or not a colour)."""
+    if not color:
+        return None
+    found = QColor(color.strip())
+    return found if found.isValid() else None
+
+
+def _line_html(text: str, background: Optional[QColor]) -> str:
+    if background is None:
+        return f"<tr><td>{_escape(text)}</td></tr>"
+    # The text black or white, whichever reads on the colour (only Qt's own #rrggbb goes into the markup).
+    light = 0.299 * background.red() + 0.587 * background.green() + 0.114 * background.blue() >= 140
+    return f"<tr><td bgcolor='{background.name()}' style='color:{'#111111' if light else '#ffffff'}'>{_escape(text)}</td></tr>"
+
+
+def _rows_html(rows: list[tuple[str, Any]]) -> str:
+    """
+    Label / value rows as a table (every value escaped: other people's text is never markup);
+    a list value one item to a line (an item may be `(text, background colour)`).
+    """
+    def value_html(value) -> str:
+        if not isinstance(value, list):
+            return _escape(value)
+        lines = [v if isinstance(v, tuple) else (v, None) for v in value]
+        if not any(_background(c) for _t, c in lines):
+            return "<br>".join(_escape(t) for t, _c in lines)
+        rows = "".join(_line_html(t, _background(c)) for t, c in lines)
+        return f"<table cellspacing='0' cellpadding='1' width='100%'>{rows}</table>"
+
     cells = "".join(
         f"<tr><td style='color:#64748b; padding-right:12px; white-space:nowrap; vertical-align:top'>{_escape(label)}</td>"
-        f"<td style='vertical-align:top'>{_escape(value)}</td></tr>"
+        f"<td style='vertical-align:top'>{value_html(value)}</td></tr>"
         for label, value in rows)
     return f"<table cellspacing='0' cellpadding='1'>{cells}</table>"
 
@@ -115,6 +148,9 @@ class NoticeCard(QFrame):
         self._full = (DEFAULT_WIDTH, DEFAULT_HEIGHT)
         #: The card's width the page has room for (0: not known yet, the full size).
         self._room = 0
+        self._attributes_width = 0
+        #: The attributes' column of every card as wide as the widest one's (set by the page): the columns line up.
+        self.attributes_column = 0
         self.setObjectName("MikageNoticeCard")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMaximumWidth(CARD_WIDTH)
@@ -148,30 +184,35 @@ class NoticeCard(QFrame):
         head.addWidget(self.found)
         body.addLayout(head)
 
-        row = QHBoxLayout()
-        row.setSpacing(12)
+        # Side by side: the thumbnail, the image's attributes and 「写っている地物」 (tsudo, 2026-11-14: 3 列);
+        # the features under the attributes when the map area is narrow. The buttons below.
+        self.grid = QGridLayout()
+        self.grid.setHorizontalSpacing(16)
+        self.grid.setVerticalSpacing(6)
         self.picture = QLabel()
         self.picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.picture.setToolTip(self.tr("ダブルクリックで開く"))
-        row.addWidget(self.picture, 0, Qt.AlignmentFlag.AlignTop)
-        right = QVBoxLayout()
         self.attributes = QLabel()
         self.attributes.setTextFormat(Qt.TextFormat.RichText)
         self.attributes.setWordWrap(True)
         self.attributes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        right.addWidget(self.attributes)
+        self.contents_box = QWidget()
+        box = QVBoxLayout(self.contents_box)
+        box.setContentsMargins(0, 0, 0, 0)
         self.contents_title = QLabel(self.tr("写っている地物"))
         bold = QFont(self.contents_title.font())
         bold.setBold(True)
         self.contents_title.setFont(bold)
-        right.addWidget(self.contents_title)
+        box.addWidget(self.contents_title)
         self.contents = QLabel()
         self.contents.setTextFormat(Qt.TextFormat.RichText)
         self.contents.setWordWrap(True)
         self.contents.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        right.addWidget(self.contents)
-        right.addStretch(1)
-        buttons = QHBoxLayout()
+        box.addWidget(self.contents)
+        box.addStretch(1)
+        self.button_box = QWidget()
+        buttons = QHBoxLayout(self.button_box)
+        buttons.setContentsMargins(0, 0, 0, 0)
         self.buttons: dict[str, QPushButton] = {}
         for key, text, tip in [
                 ("open", self.tr("開く"), self.tr("画像をレイヤーとして開き、地図に切り替えて画像へ移動（既読に）。ダブルクリックでも")),
@@ -185,9 +226,11 @@ class NoticeCard(QFrame):
             buttons.addWidget(button)
             self.buttons[key] = button
         buttons.addStretch(1)
-        right.addLayout(buttons)
-        row.addLayout(right, 1)
-        body.addLayout(row)
+        self.grid.addWidget(self.picture, 0, 0, 3, 1, Qt.AlignmentFlag.AlignTop)
+        #: Whether the features are a column of their own (else under the attributes).
+        self.wide: Optional[bool] = None
+        self._arrange(True)
+        body.addLayout(self.grid)
         self.update_notice(notice)
 
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt's name)
@@ -220,16 +263,31 @@ class NoticeCard(QFrame):
         else:
             rows += [(self.tr("カタログ"), notice.catalog_label + self.tr("（設定ファイルになし）")),
                      (self.tr("撮像日時"), time_text(notice.acquired)), (self.tr("センサー"), notice.sensor)]
-        self.attributes.setText(_rows_html([(label, value) for label, value in rows if value]))
+        text = _rows_html([(label, value) for label, value in rows if value])
+        self.attributes.setText(text)
+        # Its lines unwrapped (up to ATTRIBUTES_WIDTH) when the features are a column beside.
+        doc = QTextDocument()
+        doc.setDefaultFont(self.attributes.font())
+        doc.setHtml(text)
+        self._attributes_width = min(ATTRIBUTES_WIDTH, math.ceil(doc.idealWidth()) + 4)
+        self._attributes_min()
         self.show_contents()
         self.show_picture()
 
+    def _attributes_min(self) -> None:
+        self.attributes.setMinimumWidth(max(self._attributes_width, self.attributes_column) if self.wide else 0)
+
+    def line_up(self, width: int) -> None:
+        """The attributes' column as wide as the page's widest (`NoticeFeed._line_up`)."""
+        if width != self.attributes_column:
+            self.attributes_column = width
+            self._attributes_min()
+
     def show_contents(self) -> None:
-        """「写っている地物」: one line per layer of the catalog (all the features' names), or why not yet."""
+        """「写っている地物」: per layer of the catalog its features' names one to a line, or why not yet."""
         catalog = self.feed.catalog_of(self.notice)
         layers = catalog.footprint_layers if catalog is not None and self.notice.kind != PLAN else []
-        self.contents_title.setVisible(bool(layers))
-        self.contents.setVisible(bool(layers))
+        self.contents_box.setVisible(bool(layers))
         if not layers:
             return
         kept = self.notice.extra.get("contents") if isinstance(self.notice.extra.get("contents"), dict) else {}
@@ -238,10 +296,12 @@ class NoticeCard(QFrame):
             found = Contents.from_json(kept.get(layer.key()))
             if found is not None:
                 label = self.tr("{label}（{n} 件）").format(label=layer.label, n=found.count)
-                text = contents_line(found)
+                lines: list = contents_lines(found)
+                if layer.background is not None and found.texts:
+                    lines = [(text, layer.background.color_for(found.value_at(i))) for i, text in enumerate(found.texts)]
                 if found.cut:
-                    text += self.tr("（先頭の {read} 件まで）").format(read=found.read)
-                rows.append((label, text))
+                    lines.append(self.tr("（先頭の {read} 件まで）").format(read=found.read))
+                rows.append((label, lines))
                 continue
             failed = self.feed.work.failure(self.feed.contents_key(self.notice))
             rows.append((layer.label, self.tr("照合できず: {m}").format(m=failed) if failed else self.tr("照合中…")))
@@ -277,16 +337,44 @@ class NoticeCard(QFrame):
         """The card as wide as the page has room for: the thumbnail smaller when it is narrow."""
         if room != self._room:
             self._room = room
+            # Every card as wide as the page has room for: the columns line up from card to card.
+            if room > 0:
+                self.setFixedWidth(room)
+            else:
+                self.setMinimumWidth(0)
+                self.setMaximumWidth(CARD_WIDTH)
             self._show_source()
 
     def _set_source(self, picture: QPixmap) -> None:
         self._source = picture
         self._show_source()
 
+    def _arrange(self, wide: bool) -> None:
+        """Three columns (thumbnail, attributes, features), or the features under the attributes."""
+        if wide == self.wide:
+            return
+        self.wide = wide
+        grid = self.grid
+        for widget in (self.attributes, self.contents_box, self.button_box):
+            grid.removeWidget(widget)
+        grid.addWidget(self.attributes, 0, 1, Qt.AlignmentFlag.AlignTop)
+        if wide:
+            grid.addWidget(self.contents_box, 0, 2)
+            grid.addWidget(self.button_box, 2, 1, 1, 2)
+        else:
+            grid.addWidget(self.contents_box, 1, 1)
+            grid.addWidget(self.button_box, 2, 1)
+        self._attributes_min()
+        grid.setColumnStretch(1, 0 if wide else 1)
+        grid.setColumnStretch(2, 1 if wide else 0)
+        grid.setRowStretch(1, 1)
+
     def _show_source(self) -> None:
         full_w, full_h = self._full
         width = full_w
-        if self._room > 0:
+        # Three columns when the card has room for them beside the thumbnail as asked.
+        self._arrange(self._room <= 0 or self._room >= full_w + WIDE_ROOM)
+        if self._room > 0 and not self.wide:
             # What the card needs beside the thumbnail (the buttons in a row at least).
             beside = self.layout().minimumSize().width() - self.picture.width()
             width = max(MIN_PICTURE, min(full_w, self._room - max(TEXT_ROOM, beside)))
@@ -549,7 +637,14 @@ class NoticeFeed(QWidget):
         self.older.setVisible(older > 0)
         self.empty.setVisible(not self.notices)
         self._filter()
+        self._line_up()
         self._work_timer.start()
+
+    def _line_up(self) -> None:
+        """Every card's attributes' column as wide as the widest: the features start at the same place on each."""
+        width = max((c._attributes_width for c in self.cards.values()), default=0)
+        for card in self.cards.values():
+            card.line_up(width)
 
     def show_older(self) -> None:
         """「さらに前の n 件」: older cards above, the page kept where it was."""
@@ -601,6 +696,7 @@ class NoticeFeed(QWidget):
                 self._show_arrived()
 
     def _in_view(self) -> list[NoticeCard]:
+        self.column.activate()  # a card just put in has its place
         top = self.scroll.verticalScrollBar().value()
         bottom = top + self.scroll.viewport().height()
         return [c for c in self.cards.values() if not c.isHidden() and c.y() < bottom and c.y() + c.height() > top]

@@ -9,8 +9,8 @@ import pytest
 
 from mikage.core.catalog.config import catalog_of
 from mikage.core.catalog.thumbnail import (
-    DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, FootprintLayer, ThumbnailPattern, contents_line, contents_of, feature_text,
-    fill, footprint_layers_of, footprint_of, pattern_problems, thumbnail_address, thumbnail_of,
+    DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, FootprintLayer, RowColors, ThumbnailPattern, contents_lines, contents_of, feature_text,
+    fill, footprint_layers_of, footprint_of, pattern_problems, row_colors_of, thumbnail_address, thumbnail_of,
 )
 from mikage.core.esri import EsriClient
 from mikage.tests.fake_esri import FakeEsri, FakeLayer
@@ -170,13 +170,58 @@ def test_contents_names_every_feature_over_the_footprint():
     contents = contents_of(client, layer, SQUARE)
     assert contents.texts == ["横須賀本港（Yokosuka Port）", "長浦港 ×2", "（名前なし）"]
     assert (contents.count, contents.read, contents.cut) == (4, None, False)
-    assert contents_line(contents) == "横須賀本港（Yokosuka Port）、長浦港 ×2、（名前なし）"
-    assert contents_line(Contents([], 0)) == "なし"
+    assert contents_lines(contents) == ["横須賀本港（Yokosuka Port）", "長浦港 ×2", "（名前なし）"]
+    assert contents_lines(Contents([], 0)) == ["なし"]
     # A where: only those.
     ports = FootprintLayer("港", PLACES, ("NAME",), where="KIND = 'port'")
     assert contents_of(client, ports, SQUARE).texts == ["横須賀本港", "長浦港 ×2"]
     # No footprint: nothing asked.
     assert contents_of(client, layer, None) == Contents([], 0)
+
+
+def test_line_backgrounds_from_an_attribute():
+    # tsudo 2026-11-14: 「その行の背景色を属性から変えたい」. By value (colors), else the value is the colour.
+    problems = []
+    kinds = row_colors_of({"field": "KIND", "colors": {"port": "#e0f2fe", "pier": "pink", 3: "#abc"}, "default": "#eeeeee"}, problems, "x")
+    assert problems == [] and kinds == RowColors("KIND", (("port", "#e0f2fe"), ("pier", "pink"), ("3", "#abc")), "#eeeeee")
+    assert kinds.color_for("port") == "#e0f2fe" and kinds.color_for("3") == "#abc"
+    assert kinds.color_for("airport") == "#eeeeee" and kinds.color_for(None) == "#eeeeee"
+    own = row_colors_of("COLOR", problems, "x")
+    assert own == RowColors("COLOR") and own.color_for(" #ff0000 ") == "#ff0000" and own.color_for("red") == "red"
+    # Never markup from an attribute: only #hex or a colour's name.
+    assert own.color_for("red' onmouseover='x") is None and own.color_for("rgb(1,2,3)") is None and own.color_for("") is None
+    assert problems == []
+    for bad in (1, "K-1", {"colors": {}}, {"field": "KIND", "colors": {"port": "url(x)"}}, {"field": "KIND", "colors": [], "default": "?"}):
+        problems = []
+        row_colors_of(bad, problems, "x")
+        assert problems, bad
+    # In footprintLayers: the field read with the others, the key only changes with the field (not the colours).
+    problems = []
+    layers = footprint_layers_of([{"label": "施設", "url": PLACES, "fields": ["NAME"], "background": {"field": "KIND", "colors": {"port": "#e0f2fe"}}},
+                                  {"label": "施設", "url": PLACES, "fields": ["NAME"], "background": {"field": "KIND", "colors": {"port": "#000"}}},
+                                  {"label": "施設", "url": PLACES, "fields": ["NAME"]}], problems, "f")
+    assert problems == []
+    assert layers[0].out_fields() == ("NAME", "KIND") and layers[2].out_fields() == ("NAME",)
+    assert layers[0].key() == layers[1].key() != layers[2].key()
+    assert layers[2].key() == "|".join([PLACES, "NAME", "", "", ""])  # as before: kept answers still used
+
+
+def test_contents_keep_each_lines_value():
+    _, client = _places()
+    layer = FootprintLayer("施設", PLACES, ("NAME",), background=RowColors("KIND", (("port", "#e0f2fe"),)))
+    contents = contents_of(client, layer, SQUARE)
+    assert contents.texts == ["横須賀本港", "長浦港 ×2", "（名前なし）"]
+    assert contents.values == ["port", "port", "pier"]
+    assert [layer.background.color_for(contents.value_at(i)) for i in range(3)] == ["#e0f2fe", "#e0f2fe", None]
+    assert Contents.from_json(json.loads(json.dumps(contents.to_json()))) == contents
+    # Same name, other values: a line each.
+    fake, client = _places()
+    fake.layers[PLACES].add({"NAME": "長浦港", "NAME_EN": None, "KIND": "berth"}, {"x": 139.66, "y": 35.62})
+    assert contents_of(client, layer, SQUARE).texts == ["横須賀本港", "長浦港 ×2", "長浦港", "（名前なし）"]
+    # Kept before backgrounds (no values): no colours, nothing asked again.
+    old = Contents.from_json({"texts": ["a", "b"], "count": 2})
+    assert old.values == [] and old.value_at(1) is None
+    assert "values" not in contents_of(client, FootprintLayer("施設", PLACES, ("NAME",)), SQUARE).to_json()
 
 
 def test_contents_read_every_page():

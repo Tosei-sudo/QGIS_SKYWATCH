@@ -281,7 +281,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - 1 行に 1 枚のカードを、見つかった順に上から並べる。いちばん下がいちばん新しい。最初に開いたときは最も古い未読のカード（未読がなければいちばん下）を出す
 - 新しい画像が来てもスクロールはしない（見ている所が動かない）。画面の右下に「↓ 新着 n 件」が出て、押すとそのカードへ。画面に入ったカードは数から外れる
-- カード: 画像 ID、未読の印、見つけた日時、サムネイル（下記。ないときはフットプリントの形）、監視の名前・カタログ・カタログの一覧と同じ列（撮像日時・センサー・`columns` など）、「写っている地物」（下記）。ボタンは「開く」（画像を開いて地図に切り替え、画像の範囲へ移動。既読に。カードのダブルクリックでも）・「地図で見る」（地図に切り替えてフットプリントへ移動して点滅。既読に）・「既読」・「削除」。画像ファイルのないカタログ（`imageFiles: false`）は「開く」の代わりに「ファイルなしで記録」
+- カード: 画像 ID、未読の印、見つけた日時、サムネイル（下記。ないときはフットプリントの形）、監視の名前・カタログ・カタログの一覧と同じ列（撮像日時・センサー・`columns` など）、「写っている地物」（下記）。広いときは「サムネイル｜属性｜写っている地物」の 3 列（カードの幅はそろえる）、地図の場所が狭いときは写っている地物を属性の下にして、サムネイルも小さく。ボタンは「開く」（画像を開いて地図に切り替え、画像の範囲へ移動。既読に。カードのダブルクリックでも）・「地図で見る」（地図に切り替えてフットプリントへ移動して点滅。既読に）・「既読」・「削除」。画像ファイルのないカタログ（`imageFiles: false`）は「開く」の代わりに「ファイルなしで記録」
 - 上の欄: 監視の絞り込み・「未読のみ」（その間に既読にしたカードは次に切り替えるまで残る）・「前の画像を閉じる」（「開く」のたびに、前にこの画面から開いた画像を閉じる）・「すべて既読」・「今すぐ確認」。「未読のみ」「前の画像を閉じる」は PC ごとに記憶
 - カードは新しい 100 件まで作り、それより前は「さらに前の n 件を表示」で 100 件ずつ足す。サムネイルと写っている地物は画面に見えているカードの分だけ、裏で 1 件ずつ読む（QGIS の操作は止まらない）
 
@@ -293,9 +293,9 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 "imageCatalogs": [
   { "label": "衛星画像", "url": "https://gis.example/arcgis/rest/services/Catalog/FeatureServer/0",
     "fields": { "id": "IMG_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "PATH" },
-    // 文字列だけでも可（大きさは 480×360）
+    // 文字列だけでも可（大きさは 270×200）
     "thumbnail": { "url": "https://ql.example/{sensor}/{acquired:%Y/%m/%d}/{id}.jpg?bbox={bbox}&ur={ur.lat:.6f},{ur.lon:.6f}&w={width}",
-                   "width": 480, "height": 360 } }
+                   "width": 270, "height": 200 } }
 ]
 ```
 
@@ -308,7 +308,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `{center.lon}` `{center.lat}`（`{lon}` `{lat}`） | 外接矩形の中心 |
 | `{ul.lon}` `{ul.lat}` `{ur.…}` `{lr.…}` `{ll.…}`（`{ulx}` `{uly}` …） | 左上・右上・右下・左下の角。外接矩形の角にいちばん近いフットプリントの頂点（斜めに撮った画像でも画像の本当の角） |
 | 座標の書式・座標系 | `{ur.lat:.6f}` で桁数、`@3857` で Web メルカトルのメートル（`{bbox@3857}`） |
-| `{width}` `{height}` | `thumbnail` の `width`・`height`（16〜2048、既定 480・360。カードに出す大きさ） |
+| `{width}` `{height}` | `thumbnail` の `width`・`height`（16〜2048、既定 270・200。カードに出す大きさ） |
 | `{token}` | カタログの `token` |
 | `{{` `}}` | 文字としての `{` `}` |
 
@@ -325,7 +325,9 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   { "label": "施設", "url": "https://gis.example/arcgis/rest/services/Places/FeatureServer/0",
     "fields": ["NAME", "NAME_EN"], "format": "{NAME}（{NAME_EN}）" },
   { "label": "港", "url": "https://gis.example/arcgis/rest/services/Ports/FeatureServer/0", "fields": "PORT_NAME",
-    "where": "KIND = 'port'" }
+    "where": "KIND = 'port'",
+    // 行の背景色を属性から（値ごとの色。当たらない行は default、なければ背景なし）
+    "background": { "field": "KIND", "colors": { "fort": "#fde2e2", "port": "#e0f2fe" }, "default": "#f1f5f9" } }
 ]
 ```
 
@@ -338,9 +340,11 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `where` | 絞り込みの条件式（任意） |
 | `max` | カードに出す件数の上限（任意。書かなければすべて。書いたときはそれを超えると「（先頭の n 件まで）」と全体の件数） |
 | `token` | このレイヤーのトークン（なければカタログの `token`） |
+| `background` | 1 件ごとの行の背景色を属性から（任意）。`{ "field", "colors", "default" }`。`colors` は属性の値 → 色（`#rrggbb`・`#rgb`・`pink` などの色の名前）。`colors` を書かないか属性名だけ（`"background": "COLOR"`）なら、属性の値そのものを色として使う（色でない値は背景なし）。どれにも当たらない行は `default`（なければ背景なし）。文字は背景に合わせて黒か白 |
 
-- 略さずにすべて出す（カードは縦に長くなってよい）。サービスの 1 回の上限（`maxRecordCount`）より多ければ何回かに分けて読む。同じ名前の地物は「長浦港 ×2」、名前のない地物は「（名前なし ×n）」
-- 1 枚につき 1 回だけ問い合わせ、結果は通知と一緒にローカルの `observations.gpkg` に残す（次に開いたときは問い合わせない）。設定ファイルでレイヤー・`fields`・`format`・`where`・`max` を変えると、変わったレイヤーだけ問い合わせ直す
+- 1 件を 1 行に出す（点などの記号は付けない）。カードが広いときは「サムネイル｜属性｜写っている地物」の 3 列、狭いときは写っている地物を属性の下に
+- 略さずにすべて出す（カードは縦に長くなってよい）。サービスの 1 回の上限（`maxRecordCount`）より多ければ何回かに分けて読む。同じ名前の地物は「長浦港 ×2」（`background` の値が違えば別の行）、名前のない地物は「（名前なし ×n）」
+- 1 枚につき 1 回だけ問い合わせ、結果は通知と一緒にローカルの `observations.gpkg` に残す（次に開いたときは問い合わせない）。設定ファイルでレイヤー・`fields`・`format`・`where`・`max`・`background.field` を変えると、変わったレイヤーだけ問い合わせ直す（`colors`・`default` を変えただけなら問い合わせない）
 - 問い合わせに失敗すると「照合できず: 理由」。10 分たつと問い合わせ直す
 
 ## 撮像計画
@@ -1597,7 +1601,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `imageCatalogs` | 配列 | `url`（必須）、`imageFiles`（`false` で画像ファイルのないカタログ: 「開く」の代わりに「ファイルなしで記録」、`source` 不要。既定 `true`）、`fields`（`source` 必須。ほかに `id`・`acquired`・`registered`・`systemRegistered`・`sensor`・`angle`・`azimuth`・`keywords`（フリーワード検索の属性）。`source`・`keywords` は配列で複数可）、`labels`（役割ごとの列見出し）、`columns`（追加の列。属性名か `{ "field", "label" }`）、`where`、`maxResults`（検索と「続きを読む」で 1 回に読む件数。既定 500、最大 5000）、`angleKind`（`offNadir`・`incidence`・`elevation`）、`orbitHeight`（km、既定 600）、`imagePatterns`、`thumbnail`（新着画像のカードのサムネイルのアドレスのパターン）、`footprintLayers`（カードに出す写っている地物のレイヤー）、`token`、`timeZone` | なし | [画像カタログ](#画像カタログ) |
 | `imagePatterns`（`imageCatalogs` の中） | オブジェクト・文字列・配列 | `{ "センサー名": "正規表現" か [ … ], "*": … }`。フォルダのレコードから開く画像を選ぶ | ふつうの画像ファイル | [フォルダのレコードの画像](#フォルダのレコードの画像imagepatterns) |
 | `thumbnail`（`imageCatalogs` の中） | 文字列かオブジェクト | サムネイルのアドレスのパターン（`{id}`・`{acquired:%Y%m%d}`・`{attr.属性名}`・`{bbox}`・`{ur.lat}` など）か `{ "url", "width", "height" }` | なし（フットプリントの形） | [サムネイル](#サムネイルimagecatalogsthumbnail) |
-| `footprintLayers`（`imageCatalogs` の中） | 配列 | `{ "label", "url", "fields", "format", "where", "max", "token" }`。フットプリントと重なる地物の名前をカードに | なし | [写っている地物](#写っている地物imagecatalogsfootprintlayers) |
+| `footprintLayers`（`imageCatalogs` の中） | 配列 | `{ "label", "url", "fields", "format", "where", "max", "token", "background" }`。フットプリントと重なる地物の名前をカードに（1 件 1 行、`background` で行の背景色を属性から） | なし | [写っている地物](#写っている地物imagecatalogsfootprintlayers) |
 | `watchInterval` | 数 | 新着画像を確かめる間隔（分、1〜1440） | 10 | [通知](#通知) |
 | `pathMappings` | 配列 | `prefix`（レコードのパスの先頭）、`label`、`url`（同じフォルダの http(s)。なければ各自が PC のフォルダを選ぶ）。または `pattern`（正規表現）・`to`（読み替え先。`$1` などがグループ）で先に試す読み替え（なければ元のパス） | なし | [パスの読み替え](#パスの読み替えpathmappings) |
 | `overviews` | `false` かオブジェクト | `enabled`、`resampling`（`AVERAGE` など）、`minSize`、`compress`（`DEFLATE` など）、`location`（`auto`: 書ければ画像の隣、`cache`: キャッシュのフォルダ）、`scope`（`all`: QGIS に追加したローカル画像すべて、`catalog`: カタログなどから開いたものだけ）、`cacheFolder`（空ならプロファイルの中）、`threads`（作成に使うコア数。0 = 半分） | 作る（`auto`・`all`） | [ピラミッドの自動作成](#ピラミッドovrの自動作成overviews) |

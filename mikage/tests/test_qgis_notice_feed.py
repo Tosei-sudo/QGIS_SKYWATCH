@@ -209,8 +209,13 @@ def test_open_again_only_once_qgis_has_started(plugin):
     try:
         assert not again.central.is_open(FEED) and again.central.bar is None
         assert grid.getItemPosition(grid.indexOf(starting.stack)) == (0, 0, 2, 1)
+        # The plugin's tasks wait while QGIS starts (another plugin being imported while one ran crashed QGIS).
+        from mikage.qgis_io import tasks
+
+        assert tasks._holding
         starting.window.show()
         starting.initializationCompleted.emit()
+        assert not tasks._holding
         assert wait_for(lambda: again.central.is_open(FEED), 2000)
         assert again.central.current() == MAP and tabs(again) == ["地図", "新着画像（2）"]
     finally:
@@ -228,7 +233,7 @@ def test_cards_newest_at_the_bottom_with_everything_on_them(plugin):
     assert not a.badge.isVisibleTo(a) and b.badge.isVisibleTo(b)
     assert "横須賀の新着" in b.attributes.text() and "雲量" in b.attributes.text() and "衛星画像" in b.attributes.text()
     # 写っている地物: every feature over the footprint, in Japanese and English (empty brackets dropped).
-    assert "施設（2 件）" in a.contents.text() and "横須賀本港（Yokosuka Port）、長浦港" in a.contents.text()
+    assert "施設（2 件）" in a.contents.text() and "横須賀本港（Yokosuka Port）<br>長浦港" in a.contents.text()
     assert "施設（1 件）" in b.contents.text() and "館山（Tateyama）" in b.contents.text()
     assert "施設（0 件）" in c.contents.text() and "なし" in c.contents.text()
     # Kept with the notice: not asked again next time.
@@ -256,14 +261,18 @@ def test_a_narrow_map_area(plugin):
     card = feed.cards["w|B"]  # unread: its 既読 button too
     assert wait_for(lambda: card.picture.width() == 200)
     assert feed._top.indexOf(feed.controls) >= 0
-    iface.window.resize(640, 800)
+    # Wide: the thumbnail, the attributes and the features side by side (3 列).
+    assert card.wide and card.grid.getItemPosition(card.grid.indexOf(card.contents_box))[:2] == (0, 2)
+    iface.window.resize(600, 800)
     assert wait_for(lambda: feed._second.indexOf(feed.controls) >= 0, 2000)
+    # Narrow: the features under the attributes.
+    assert not card.wide and card.grid.getItemPosition(card.grid.indexOf(card.contents_box))[:2] == (1, 1)
     assert notice_feed.MIN_PICTURE <= card.picture.width() < 200
     assert card.picture.height() == round(150 * card.picture.width() / 200)
     assert wait_for(lambda: feed.scroll.horizontalScrollBar().maximum() == 0, 2000), (card.width(), feed.scroll.viewport().width())
     assert feed.minimumSizeHint().width() < 300
     iface.window.resize(1300, 900)
-    assert wait_for(lambda: card.picture.width() == 200 and feed._top.indexOf(feed.controls) >= 0, 2000)
+    assert wait_for(lambda: card.picture.width() == 200 and feed._top.indexOf(feed.controls) >= 0 and card.wide, 2000)
 
 
 def test_the_features_are_asked_again_when_the_layers_change(plugin):
@@ -276,11 +285,32 @@ def test_the_features_are_asked_again_when_the_layers_change(plugin):
         {"label": "港", "url": PLACES, "fields": ["NAME"]}]))
     p.api.reload_config()
     assert wait_for(lambda: "港（2 件）" in feed.cards["w|A"].contents.text())
-    assert "横須賀本港、長浦港" in feed.cards["w|A"].contents.text()
+    assert "横須賀本港<br>長浦港" in feed.cards["w|A"].contents.text()
     assert [u for u, _ in fake.asked[asked:] if "Places" in u]
     # Only the layers the settings file has now are kept.
     kept = {n.id: n.extra for n in p.api.notices.store().notices()}["w|A"]["contents"]
     assert list(kept) == [p.api.config.image_catalogs[0].footprint_layers[0].key()]
+
+
+def test_one_feature_a_line_with_a_background_from_an_attribute(plugin):
+    # tsudo 2026-11-14: 「箇条書きみたいな（点はいらない）」 and 「その行の背景色を属性から変えたい」.
+    p, iface, fake, tmp_path = plugin
+    feed = p.notice_feed
+    write_config(tmp_path, config_of(tmp_path, footprintLayers=[
+        {"label": "施設", "url": PLACES, "fields": ["NAME"], "background": {"field": "NAME", "colors": {"横須賀本港": "#1e3a8a"}, "default": "pink"}},
+        {"label": "英名", "url": PLACES, "fields": ["NAME"], "background": "NAME_EN"}]))
+    p.api.reload_config()
+    assert p.api.problems == []
+    p.toggle_notice_feed()
+    assert loaded(feed)
+    text = feed.cards["w|A"].contents.text()
+    # A row each, coloured: dark → white text, light → black; the default for the rest.
+    assert "<td bgcolor='#1e3a8a' style='color:#ffffff'>横須賀本港</td>" in text
+    assert "<td bgcolor='#ffc0cb' style='color:#111111'>長浦港</td>" in text
+    # The value as the colour: 「Yokosuka Port」 is not one, so no background (and no markup from the attribute).
+    assert "英名（2 件）" in text and "Yokosuka Port" not in text
+    assert text.count("bgcolor") == 2
+    assert "横須賀本港<br>長浦港" in text.split("英名")[1]
 
 
 def test_the_page_never_moves_by_itself(plugin):
@@ -426,7 +456,7 @@ def test_settings_file_problems(plugin):
     # Without a thumbnail: the footprint drawn.
     p.toggle_notice_feed()
     card = p.notice_feed.cards["w|A"]
-    assert card.picture.width() == 480 and not card.picture.pixmap().isNull()
+    assert (card.picture.width(), card.picture.height()) == (270, 200) and not card.picture.pixmap().isNull()
 
 
 def test_menu_shortcut_and_toolbar(plugin):
