@@ -114,12 +114,12 @@ def _sections_html(sections: list[tuple[str, list[Any]]]) -> str:
 
 
 #: Where a long file path may go on to the next line (a zero-width space after these).
-_BREAK_AFTER = re.compile(r"([/\\_\-.])")
+_BREAK_AFTER = re.compile(r"([/\\_\-])")
 
 
 def _breakable(text: str) -> str:
-    """A path escaped, able to wrap after / _ - . (a long name never makes the card wider)."""
-    return _BREAK_AFTER.sub("\\1\u200b", _escape(text))
+    """A path able to wrap after / _ - (a long name never makes the card wider; the extension kept with its name): plain text."""
+    return _BREAK_AFTER.sub("\\1\u200b", text)
 
 
 def file_label(where: RecordImages) -> str:
@@ -159,6 +159,54 @@ def shape_picture(geometry: Optional[dict], width: int, height: int, text: str) 
     painter.drawText(QRectF(4, height - 20, width - 8, 18), int(Qt.AlignmentFlag.AlignCenter), text)
     painter.end()
     return pixmap
+
+
+class FileRow(QWidget):
+    """
+    One file of a card's 「画像ファイル」 (tsudo, 2026-11-14): a click checks it or not
+    (「開く」 opens the checked), a double click opens it alone, as in 「開く画像の選択」.
+    """
+
+    def __init__(self, card: "NoticeCard", name: str, checked: bool):
+        super().__init__()
+        self.card = card
+        self.name = name
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 2)
+        lay.setSpacing(4)
+        self.box = QCheckBox()
+        self.box.setChecked(checked)
+        # The row takes the clicks (on the box too): one click one change, a double click none.
+        self.box.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.box.toggled.connect(lambda on: card.file_checked(name, on))
+        lay.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
+        self.label = QLabel(_breakable(name))
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        self.label.setWordWrap(True)
+        lay.addWidget(self.label, 1)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._double = False
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._double = False
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        if event.button() == Qt.MouseButton.LeftButton and not self._double and self.rect().contains(event.pos()):
+            self.box.setChecked(not self.box.isChecked())
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        # The click before it changed the check: put back (a double click only opens).
+        if not self._double:
+            self._double = True
+            self.box.setChecked(not self.box.isChecked())
+        self.card.open_only(self.name)
+        event.accept()
 
 
 class NoticeCard(QFrame):
@@ -225,11 +273,7 @@ class NoticeCard(QFrame):
         self.contents_box = QWidget()
         box = QVBoxLayout(self.contents_box)
         box.setContentsMargins(0, 0, 0, 0)
-        self.contents_title = QLabel(self.tr("写っている地物"))
-        bold = QFont(self.contents_title.font())
-        bold.setBold(True)
-        self.contents_title.setFont(bold)
-        box.addWidget(self.contents_title)
+        # No heading of its own (tsudo, 2026-11-14: 「写ってる地物っていう文字はけしていい」): each layer's is enough.
         self.contents = QLabel()
         self.contents.setTextFormat(Qt.TextFormat.RichText)
         self.contents.setWordWrap(True)
@@ -239,24 +283,32 @@ class NoticeCard(QFrame):
         box = QVBoxLayout(self.files_box)
         box.setContentsMargins(0, 0, 0, 0)
         self.files_title = QLabel(self.tr("画像ファイル"))
+        bold = QFont(self.files_title.font())
+        bold.setBold(True)
         self.files_title.setFont(bold)
         box.addWidget(self.files_title)
+        #: The files, a row each (FileRow).
+        self.file_rows: list[FileRow] = []
+        self._file_list = QVBoxLayout()
+        self._file_list.setContentsMargins(0, 0, 0, 0)
+        self._file_list.setSpacing(0)
+        box.addLayout(self._file_list)
+        #: While they are looked for, why none, or that there are more.
         self.files = QLabel()
-        self.files.setTextFormat(Qt.TextFormat.RichText)
+        self.files.setTextFormat(Qt.TextFormat.PlainText)
         self.files.setWordWrap(True)
-        self.files.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse)
-        self.files.linkActivated.connect(self._file_clicked)
         box.addWidget(self.files)
         self.button_box = QWidget()
         buttons = QHBoxLayout(self.button_box)
         buttons.setContentsMargins(0, 0, 0, 0)
         self.buttons: dict[str, QPushButton] = {}
         for key, text, tip in [
-                ("open", self.tr("開く"), self.tr("画像をレイヤーとして開き、地図に切り替えて画像へ移動（既読に）。ダブルクリックでも")),
+                ("open", self.tr("開く"), self.tr("画像をレイヤーとして開き、地図に切り替えて画像へ移動（既読に）。"
+                                                 "画像ファイルの一覧があればチェックしたものを。カードのダブルクリックでも")),
                 ("record", self.tr("ファイルなしで記録"), self.tr("画像ファイルなしのカタログの画像を観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから）")),
                 ("map", self.tr("地図で見る"), self.tr("地図に切り替えて画像の範囲へ移動（既読に）")),
-                ("read", self.tr("既読"), self.tr("既読にする")),
-                ("delete", self.tr("削除"), self.tr("この新着画像を一覧から消す（画像そのものは消えない）"))]:
+                ("read", self.tr("既読"), self.tr("既読にする"))]:
+            # No 「削除」 on the card (tsudo, 2026-11-14: 用語が混乱する); the 通知 dock still has it.
             button = QPushButton(text)
             button.setToolTip(tip)
             button.clicked.connect(lambda _on=False, k=key: self.feed.act(k, self.notice))
@@ -372,7 +424,7 @@ class NoticeCard(QFrame):
         self.contents.setText(_sections_html(sections))
 
     def show_files(self) -> None:
-        """「画像ファイル」: the files of the record that can be opened (a click opens that one), or why not yet."""
+        """「画像ファイル」: the files of the record that can be opened, a checkable row each, or why not yet."""
         feed = self.feed
         catalog = feed.catalog_of(self.notice)
         on = catalog is not None and catalog.image_files and self.notice.kind != PLAN
@@ -380,30 +432,30 @@ class NoticeCard(QFrame):
         if not on:
             return
         where = feed.files.get(self.notice.id)
+        names = feed.file_names(self.notice)
+        if [r.name for r in self.file_rows] != names:
+            for row in self.file_rows:
+                self._file_list.removeWidget(row)
+                row.deleteLater()
+            unchecked = feed.unchecked.get(self.notice.id, set())
+            self.file_rows = [FileRow(self, name, name not in unchecked) for name in names]
+            for row in self.file_rows:
+                row.setToolTip(self.tr("{place}\nクリックでチェック（「開く」でチェックしたものを開く）、ダブルクリックでその画像だけ開く")
+                               .format(place=where.place if where else ""))
+                self._file_list.addWidget(row)
+        self.files_title.setText(self.tr("画像ファイル（{n}）").format(n=len(names)) if len(names) > 1 else self.tr("画像ファイル"))
         if where is None:
             failed = feed.work.failure(feed.files_key(self.notice))
-            self.files_title.setText(self.tr("画像ファイル"))
-            self.files.setText(_escape(self.tr("見つからず: {m}").format(m=failed) if failed else self.tr("探しています…")))
-            self.files.setToolTip("")
-            return
-        names = list(where.files) or [file_label(where)]
-        self.files_title.setText(self.tr("画像ファイル（{n}）").format(n=len(names)) if len(names) > 1 else self.tr("画像ファイル"))
-        # A little room between the files (a long name takes two lines).
-        lines = [f"<p style='margin:0 0 4px 0'><a href='{i}'>{_breakable(name)}</a></p>" for i, name in enumerate(names)]
-        if where.more:
-            lines.append(f"<p style='margin:0'>{_escape(self.tr('（ほかにもあり。すべては「開く」で選ぶ）'))}</p>")
-        self.files.setText("".join(lines))
-        self.files.setToolTip(self.tr("{place}\n押すとその画像だけ開く").format(place=where.place))
+            self.files.setText(self.tr("見つからず: {m}").format(m=failed) if failed else self.tr("探しています…"))
+        else:
+            self.files.setText(self.tr("（ほかにもあり。すべては通知ドックの「開く」で選ぶ）") if where.more else "")
+        self.files.setVisible(bool(self.files.text()))
 
-    def _file_clicked(self, link: str) -> None:
-        where = self.feed.files.get(self.notice.id)
-        if where is None or not link.isdigit():
-            return
-        index = int(link)
-        if where.files and index < len(where.files):
-            self.feed.open_files(self.notice, [where.files[index]])
-        elif not where.files:
-            self.feed.open_files(self.notice, None)
+    def file_checked(self, name: str, on: bool) -> None:
+        self.feed.set_checked(self.notice.id, name, on)
+
+    def open_only(self, name: str) -> None:
+        self.feed.open_files(self.notice, [name] if self.feed.files.get(self.notice.id) and self.feed.files[self.notice.id].files else None)
 
     def show_picture(self) -> None:
         """The thumbnail, or the footprint's shape (with why there is no thumbnail, or that it is being fetched)."""
@@ -524,6 +576,8 @@ class NoticeFeed(QWidget):
         self.last_opened: list[str] = []
         #: Where each notice's image files are (「画像ファイル」, looked for once a session).
         self.files: dict[str, RecordImages] = {}
+        #: The files unchecked on each notice's card (all are checked at first).
+        self.unchecked: dict[str, set[str]] = {}
         self._written = 0
 
         layout = QVBoxLayout(self)
@@ -622,6 +676,24 @@ class NoticeFeed(QWidget):
 
     def files_key(self, notice: WatchNotice) -> str:
         return "files|" + notice.id
+
+    def file_names(self, notice: WatchNotice) -> list[str]:
+        """The names on a card's 「画像ファイル」 (a folder's files, else the image's own name; none until found)."""
+        where = self.files.get(notice.id)
+        if where is None:
+            return []
+        return list(where.files) or [file_label(where)]
+
+    def set_checked(self, notice_id: str, name: str, on: bool) -> None:
+        unchecked = self.unchecked.setdefault(notice_id, set())
+        if on:
+            unchecked.discard(name)
+        else:
+            unchecked.add(name)
+
+    def checked_files(self, notice: WatchNotice) -> list[str]:
+        unchecked = self.unchecked.get(notice.id, set())
+        return [n for n in self.file_names(notice) if n not in unchecked]
 
     def contents_key(self, notice: WatchNotice) -> str:
         catalog = self.catalog_of(notice)
@@ -963,9 +1035,6 @@ class NoticeFeed(QWidget):
             self.see_on_map(notice)
         elif key == "read":
             self.dock._mark([notice.id])
-        elif key == "delete":
-            self.dock.store().delete_notices([notice.id])
-            self.dock.refresh()
 
     def open_image(self, notice: WatchNotice) -> list:
         """
@@ -976,6 +1045,14 @@ class NoticeFeed(QWidget):
         if notice.kind == PLAN:
             self.see_on_map(notice)
             return []
+        where = self.files.get(notice.id)
+        if where is not None:
+            # The files listed on the card: those checked (tsudo, 2026-11-14), without asking.
+            chosen = self.checked_files(notice)
+            if not chosen:
+                self.iface.messageBar().pushInfo(self.tr(TITLE), self.tr("{id}: 開く画像ファイルにチェックなし").format(id=notice.image_id))
+                return []
+            return self.open_files(notice, chosen if where.files else None)
         layers = self.dock.open_notices([notice])
         # A folder chosen just now: its files can be listed on the card.
         if self.work.failures.pop(self.files_key(notice), None) is not None:
