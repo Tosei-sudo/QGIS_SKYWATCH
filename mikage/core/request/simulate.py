@@ -23,6 +23,10 @@ The yearly quotas (年間撮像上限, `quotas`) are kept day by day: what the
 earlier days of the run handed out is taken off what is left (handed out =
 captured), and a year starting within the run starts afresh.
 
+The systems' use time limits (軌道の使用時間, `useTime`, use_time.py) are
+kept on each day's passes, a pass crossing midnight with the shots the day
+before handed out on it (not those handed out before the run).
+
 An area too big for one shot shared out among satellites (分担) is one
 request taken, its shots rows of their systems. A 期間内1回 area whose
 day's shots take less than 95% of it (with what earlier days took) stays
@@ -51,6 +55,7 @@ from .quota import QUOTA, QuotaData
 from .route import system_of_satellite, why_not
 from .store import HistoryRow
 from .systems import ExportSystem
+from .use_time import USE_DAY, USE_PASS, UseBook
 
 #: The most days a run covers.
 MOST_DAYS = 60
@@ -124,6 +129,8 @@ class DayResult:
     short: int = 0
     #: Held back as every mode that could take them had used its year's scenes (年間撮像上限).
     quota: int = 0
+    #: Held back as the satellites that could take them would be used past their seconds a pass or a day (軌道の使用時間).
+    use_time: int = 0
     #: 期間内1回 areas handed out with less than 95% of them taken so far (the rest goes on to the next days).
     partial: int = 0
     expired: list = field(default_factory=list)
@@ -199,6 +206,8 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
     handed: dict = {}
     #: request id → what of its area the run's earlier days handed out (taken as captured).
     covered: dict = {}
+    #: The uses of the day before's shots (a pass crossing midnight counts them).
+    before: list = []
     for i in range(max(1, min(MOST_DAYS, days))):
         if cancelled and cancelled():
             break
@@ -207,7 +216,9 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
         left = chances(ledger, day, day_clouds) if chances else None
         cands: list[Candidate] = gather(ledger, day, sats, day_clouds, missed if i == 0 else set(), covered, left)
         book = quotas.book(day, replanned, handed) if quotas is not None and quotas.quotas else None
-        cands = allocate(cands, systems, sats, passes, day, book)
+        uses = UseBook(before)
+        cands = allocate(cands, systems, sats, passes, day, book, uses)
+        before = uses.own()
         if book is not None:
             for index, u in zip(book.indices, book.usages):
                 key = (index, u.window.first)
@@ -236,6 +247,8 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 continue
             if c.reason == QUOTA:
                 result.quota += 1
+            elif c.reason in (USE_PASS, USE_DAY):
+                result.use_time += 1
             elif c.reason in (OVER, BUSY):
                 result.over += 1
             elif c.reason == NO_SYSTEM:
@@ -294,6 +307,7 @@ SUMMARY = (
     ("採用", lambda s: s.total("taken")),
     ("枠超過で見送り", lambda s: s.total("over")),
     ("年間上限で見送り", lambda s: s.total("quota")),
+    ("使用時間の上限で見送り", lambda s: s.total("use_time")),
     ("次のシステムへ回送", lambda s: s.total("spilled")),
     ("雲量で見送り", lambda s: s.total("cloud")),
     ("該当システムなし", lambda s: s.total("no_system")),

@@ -311,7 +311,8 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
 SHOT_FIELDS = {"SHOT_ID": {"type": S, "length": 64}, "RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T,
                "SYSTEM": S, "SATELLITE": S, "PASS_TIME": T, "OFF_NADIR": D, "INCIDENCE": D, "ORBIT_DIR": S, "LOOK_SIDE": S, "SCENES": I,
                "SHOT_COUNT": I, "COVERAGE": D, "REQ_ID": {"type": S, "length": 64}, "REQ_IDS": {"type": S, "length": 4000},
-               "REQ_NAMES": {"type": S, "length": 4000}, "REQ_COUNT": I, "OUTPUT_FILE": {"type": S, "length": 1000}}
+               "REQ_NAMES": {"type": S, "length": 4000}, "REQ_COUNT": I, "OUTPUT_FILE": {"type": S, "length": 1000},
+               "USE_START": T, "USE_END": T, "PASS_ID": {"type": S, "length": 20}}
 GROUP_FIELDS = {"GROUP_NAME": S, "MEMBERS": {"type": S, "length": 4000}, "SORT_ORDER": I, "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
 
 

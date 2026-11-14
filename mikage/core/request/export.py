@@ -24,7 +24,11 @@ box along the track around the requests' own areas (shots.Shot.area_ring;
 not the outline of the shot's scenes), `mergedIds` / `mergedNames` /
 `mergedCount` the requests in it. `passTime` (the shot's middle), `passOffNadir`,
 `passIncidence`, `passDirection` (昇交 / 降交) and `passLookSide` (右 / 左)
-are the pass the orbits gave; empty when fitted by counting.
+are the pass the orbits gave; empty when fitted by counting. `useStart` /
+`useEnd` are when the row uses its satellite (its shots' start less the
+system's `useTime.setupSeconds`, their end; 軌道の使用時間, use_time.py),
+`useSeconds` how long (whole seconds) and `passId` its pass's number
+(「45123昇」: the revolution number and direction).
 
 `linkId` is the row's 外部連携ID (core/request/link_id.py; 12 characters
 unless the system's `linkIdLength` / `linkIdChars` say otherwise), kept in
@@ -89,8 +93,9 @@ SOURCES = (
     "part", "parts",
     "passTime", "passOffNadir", "passIncidence", "passDirection", "passLookSide", "mergedIds", "mergedNames", "mergedCount",
     "occurrence", "occurrenceId", "timesMin", "timesMax", "linkId", "shareNo", "shareCount", "shareCoverage", "coverage",
+    "useStart", "useEnd", "useSeconds", "passId",
 )
-TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime")
+TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime", "useStart", "useEnd")
 #: Sources whose value is a list of names.
 LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds", "mergedIds", "mergedNames")
 GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")
@@ -316,6 +321,9 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     box = bbox_of(rings)
     mid = center_of(rings)
     look = shot.look if shot is not None else None
+    # When the row uses its satellite (軌道の使用時間): from its shots' start less the system's setup to their end.
+    use = ((min(s.start for s in c.shots) - ctx.system.use_time.setup * 1000, max(s.end for s in c.shots))
+           if c.shots else None)
     values = {
         "id": req.id, "name": req.name, "managementNo": req.management_no, "identificationNo": req.identification_no,
         "category": req.category, "achieve": req.achieve,
@@ -347,6 +355,8 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
         "timesMin": req.times[0], "timesMax": req.times[1], "linkId": row_link_id(c, ctx),
         "shareNo": c.part or None, "shareCount": (c.parts or 1) if c.part else None,
         "shareCoverage": _percent(c.gain), "coverage": _percent(c.coverage),
+        "useStart": use[0] if use else None, "useEnd": use[1] if use else None,
+        "useSeconds": round((use[1] - use[0]) / 1000) if use else None, "passId": c.pass_id,
     }
     if source == "geometry":
         return geometry_value(rings, geometry if geometry in GEOMETRIES else "wkt", digits, as_object)

@@ -63,6 +63,7 @@ from ..core.request.groups import read_groups
 from ..core.request.model import jst_day, priority_text
 from ..core.request.passes import day_passes, find_passes
 from ..core.request.quota import QuotaData, read_quota_data
+from ..core.request.use_time import UseBook, read_other_uses
 from ..core.request.view import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.store import (
     RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, followed_where, handed_where,
@@ -236,7 +237,8 @@ class PlanFileDock(PluginDock):
         self.room = QLabel()
         self.room.setWordWrap(True)
         layout.addWidget(self.room)
-        # What the yearly quotas of the day's satellites have left (年間撮像上限), after the day's fitting.
+        # What the yearly quotas of the day's satellites have left (年間撮像上限) and how long the satellites with use time
+        # limits are used (軌道の使用時間), after the day's fitting.
         self.quota_text = plain_label(QLabel())
         self.quota_text.setWordWrap(True)
         self.quota_text.hide()
@@ -504,11 +506,18 @@ class PlanFileDock(PluginDock):
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
                     notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
                 notes += quotas.problems[:3]
-            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks
+            others = []
+            if store.shots and any(s.use_time.limited for s in systems):
+                # 軌道の使用時間: the shots of the days before and after handed out on the day's passes count too.
+                try:
+                    others = read_other_uses(client, store, token, day, task.isCanceled)
+                except Exception as error:  # noqa: BLE001 (the day goes on with its own shots only, said so)
+                    notes.append(f"前後の日の撮像の使用時間を読めず、この日の撮像だけで計算（{error}）")
+            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks = result
+            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others = result
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
@@ -519,7 +528,7 @@ class PlanFileDock(PluginDock):
             book = quotas.book(day) if quotas.quotas else None
             chances = chances_of(looked, day, passes, ahead, sats, forecasts, used, clouds, store.look_ahead_days) if ahead else None
             self.plan = plan_day(requests, day, systems, sats, clouds, history, self.target(), passes, book, covered, chances,
-                                 last_looks)
+                                 last_looks, UseBook(others))
             self._fill_series()
             self.render()
             # The shots of an area shared out past its first are rows of it, not requests of their own.
@@ -635,13 +644,19 @@ class PlanFileDock(PluginDock):
         parts = [self.tr("表示 {n}/{m} 件").format(n=len(self.shown), m=total)] if len(self.shown) != total else []
         self.room.setText("　".join(parts + [f"{s.label} {rooms[s.system]}" for s in listed]))
         self.quota_text.setText("")
+        lines, low = [], False
         if plan is not None and plan.quotas is not None and plan.quotas.usages:
             able = {id(s): s for c in plan.candidates for group in c.able.values() for s in group}
             texts = plan.quotas.texts(able.values())
-            if texts:
-                low = [t for t, warn in texts if warn]
-                self.quota_text.setText("\n".join(self.tr("年間上限 ") + t + (self.tr("　※残りわずか") if warn else "") for t, warn in texts))
-                self.quota_text.setStyleSheet("color: #b45309;" if low else "")
+            lines += [self.tr("年間上限 ") + t + (self.tr("　※残りわずか") if warn else "") for t, warn in texts]
+            low = any(warn for _, warn in texts)
+        if plan is not None:
+            # 軌道の使用時間: each satellite with limits used on the day (its longest pass, its day).
+            texts = plan.uses.texts()
+            lines += [self.tr("使用時間 ") + t + (self.tr("　※残りわずか") if warn else "") for t, warn in texts]
+            low = low or any(warn for _, warn in texts)
+        self.quota_text.setText("\n".join(lines))
+        self.quota_text.setStyleSheet("color: #b45309;" if low else "")
         self.quota_text.setVisible(bool(self.quota_text.text()))
         if self.chosen is not None and not any(c is self.chosen for c in self.shown):
             self.chosen = None
