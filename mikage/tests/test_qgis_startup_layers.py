@@ -78,6 +78,43 @@ def test_visible_false_is_added_unchecked(config):
     plugin.unload()
 
 
+def test_added_on_its_own_leaves_the_project_unchanged(config):
+    """QGIS does not ask 「現在のプロジェクトを保存しますか」 because of what the plugin added on its own."""
+    from qgis.PyQt.QtCore import QTimer
+
+    entries = json.loads(config.read_text(encoding="utf-8"))
+    entries.update({"baseMaps": [{"id": "t", "label": "T", "url": "./tiles/{z}/{x}/{y}.png"}], "defaultBaseMap": "t"})
+    config.write_text(json.dumps(entries), encoding="utf-8")
+    project = QgsProject.instance()
+
+    # As the QGIS window does: changed at once when the layer panel gets a layer (QgisApp::markDirty), and again a
+    # moment later when the map bridge sets the project's CRS from the first layer.
+    def mark(*_):
+        project.setDirty(True)
+        QTimer.singleShot(0, lambda: project.setDirty(True))
+
+    project.layerTreeRoot().addedChildren.connect(mark)
+    try:
+        plugin, iface = start()
+        assert wait_for(lambda: len(project.mapLayers()) == 3)
+        wait_for(lambda: False, 300)
+        assert not project.isDirty()
+        # In a new project too.
+        project.clear()
+        iface.newProjectCreated.emit()
+        assert wait_for(lambda: len(project.mapLayers()) == 3)
+        wait_for(lambda: False, 300)
+        assert not project.isDirty()
+        # 「設定ファイルのレイヤーを追加」 is the person's change: QGIS asks to save it.
+        plugin.startup_layers.add()
+        assert wait_for(lambda: len(project.mapLayers()) == 5)
+        wait_for(lambda: False, 300)
+        assert project.isDirty()
+        plugin.unload()
+    finally:
+        project.layerTreeRoot().addedChildren.disconnect(mark)
+
+
 def test_added_to_each_new_project(config):
     plugin, iface = start()
     assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)

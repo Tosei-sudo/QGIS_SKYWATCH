@@ -60,8 +60,8 @@ class BaseMapSwitch(QObject):
             group.addAction(entry)
             entry.triggered.connect(lambda _=False, i=base_id: self.choose(i))
 
-    def choose(self, base_id: str) -> None:
-        """Shows the base map of that id ("" for none)."""
+    def choose(self, base_id: str, unchanged: bool = False) -> None:
+        """Shows the base map of that id ("" for none); `unchanged`: the plugin's own choice (the project stays not changed)."""
         base = next((b for b in self.context.config.base_maps if b.id == base_id), None)
         if base_id and base is None:
             self.iface.messageBar().pushWarning(TITLE, self.tr("「{id}」は設定ファイルの baseMaps になし").format(id=base_id))
@@ -71,7 +71,7 @@ class BaseMapSwitch(QObject):
         self.serial += 1
         serial = self.serial
         self.opening = base_id
-        self.task = switch_base_map(base, self.context.source, lambda shown, problems: self._finished(serial, problems))
+        self.task = switch_base_map(base, self.context.source, lambda shown, problems: self._finished(serial, problems), unchanged)
 
     def _finished(self, serial: int, problems: list[str]) -> None:
         if serial != self.serial:
@@ -88,11 +88,11 @@ class BaseMapSwitch(QObject):
             return
         self.pending = False
         if self.context.config.default_base_map and _empty():
-            self.choose(self.context.config.default_base_map)
+            self.choose(self.context.config.default_base_map, unchanged=True)
 
     def _new_project(self) -> None:
         if not self.pending and self.context.config.default_base_map and _empty():
-            self.choose(self.context.config.default_base_map)
+            self.choose(self.context.config.default_base_map, unchanged=True)
 
     def close(self) -> None:
         try:

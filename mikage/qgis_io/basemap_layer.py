@@ -15,6 +15,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from ..core.basemaps import BaseMapConfig, attribution_text, raster_source, resolve_url, style_tiles, vector_tile_source
 from . import settings
 from .network import get_bytes
+from .startup_layers import leave_unchanged
 from .tasks import run_task
 
 #: The custom property marking the base map layer (its value: the base map's id).
@@ -103,10 +104,13 @@ def put_base_map(layer: Optional[QgsMapLayer], project: Optional[QgsProject] = N
     root.insertLayer(len(root.children()), layer)
 
 
-def switch_base_map(base: Optional[BaseMapConfig], config_source: str, finished: Callable[[str, list[str]], None]):
+def switch_base_map(base: Optional[BaseMapConfig], config_source: str, finished: Callable[[str, list[str]], None],
+                    unchanged: bool = False):
     """
     Shows `base` (None: no base map). `finished(id, problems)` hears what is
     shown afterwards and what went wrong; the task is returned (None when there was none to run).
+    `unchanged`: shown by the plugin on its own (`defaultBaseMap`), so a project
+    not changed before stays not changed.
     """
     if base is None:
         put_base_map(None)
@@ -115,7 +119,11 @@ def switch_base_map(base: Optional[BaseMapConfig], config_source: str, finished:
 
     def done(result) -> None:
         layer, notes = result
+        project = QgsProject.instance()
+        clean = unchanged and not project.isDirty()
         put_base_map(layer)
+        if clean and layer is not None:
+            leave_unchanged()
         finished(base.id, [f"{base.label}: {n}" for n in notes])
 
     return run_task(f"背景地図「{base.label}」の読み込み", lambda task: open_base_map(base, config_source), done,
