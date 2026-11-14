@@ -54,6 +54,7 @@ from .ui.segment_tool import SegmentTool
 from .ui.transfer_dialog import TransferDialog
 from .ui.plan_file_dock import PlanFileDock
 from .ui.request_dock import RequestDock
+from .ui.place_schedule_dock import PlaceScheduleDock
 from .ui.schedule_dock import ScheduleDock
 from .ui.settings_dialog import SettingsDialog
 from .ui.shadow_dock import ShadowHeightDock
@@ -73,7 +74,7 @@ MENU = "MIKAGE"
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
-    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "年間撮像上限…"]),
+    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
@@ -93,6 +94,8 @@ DOCK_GROUPS = [
                                              "SatObsSchedule", "SatObsCloud"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsDashboard", "SatObsAnalysis"]),
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
+    # A timeline: under the map, as wide as it (tsudo, 2026-11-14: 「複数地点は縦に並べ、横に時間が伸びる」).
+    (Qt.DockWidgetArea.BottomDockWidgetArea, ["SatObsPlaceSchedule"]),
 ]
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
 INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
@@ -185,6 +188,11 @@ class PluginApi:
         """The imaging schedule dock: a day's plan as the systems answered (its `rows`, `set_day()`, `reload()`, `answer()`,
         `import_file()`, `to_layer()`)."""
         return self._plugin.docks["SatObsSchedule"]
+
+    @property
+    def place_schedule(self) -> "PlaceScheduleDock":
+        """The plans ahead of each place on a timeline (its `lanes`, `add_point()`, `set_layer()`, `clear_points()`, `reload()`)."""
+        return self._plugin.docks["SatObsPlaceSchedule"]
 
     @property
     def image_catalog(self) -> "CatalogDock":
@@ -371,7 +379,8 @@ class MikagePlugin:
                  "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
                  "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
                  "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files", "SatObsSchedule": "schedule", "SatObsEvents": "events", "SatObsCloud": "cloud_map",
+                 "SatObsPlanFiles": "plan_files", "SatObsSchedule": "schedule", "SatObsPlaceSchedule": "place_schedule",
+                 "SatObsEvents": "events", "SatObsCloud": "cloud_map",
                  "SatObsAnalysis": "analysis"}
 
         specs = [
@@ -380,6 +389,7 @@ class MikagePlugin:
             ("SatObsRequests", tr("撮像依頼")),
             ("SatObsPlanFiles", tr("撮像計画ファイル出力")),
             ("SatObsSchedule", tr("撮像予定")),
+            ("SatObsPlaceSchedule", tr("地点ごとの撮像予定")),
             ("SatObsSatellitePass", tr("衛星パス")),
             ("SatObsCloud", tr("雲量マップ")),
             ("SatObsObservations", tr("観測記録")),
@@ -440,6 +450,8 @@ class MikagePlugin:
                 dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
             elif name == "SatObsSchedule":
                 dock = ScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+            elif name == "SatObsPlaceSchedule":
+                dock = PlaceScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsPlanFiles":
                 plan_dock, request_dock = self.docks["SatObsImagingPlan"], self.docks["SatObsRequests"]
 
@@ -1006,6 +1018,16 @@ class MikagePlugin:
             self.docks["SatObsNotices"].watch_point(p.x(), p.y())
 
         watch.triggered.connect(watch_here)
+        ahead = menu.addAction(tr("この地点の撮像予定"))
+
+        def plans_here() -> None:
+            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
+            dock = self.docks["SatObsPlaceSchedule"]
+            dock.show()
+            dock.raise_()
+            dock.add_point(p.x(), p.y())
+
+        ahead.triggered.connect(plans_here)
 
     def _wire_catalog(self) -> None:
         """The image catalog with the notices, the imaging plan's reminders and the layers' right-click menu."""
@@ -1426,7 +1448,7 @@ class MikagePlugin:
             self.docks["SatObsDashboard"].close_all()
         if "SatObsAnalysis" in self.docks:
             self.docks["SatObsAnalysis"].close_all()
-        for name in ("SatObsRequests", "SatObsPlanFiles", "SatObsSchedule"):
+        for name in ("SatObsRequests", "SatObsPlanFiles", "SatObsSchedule", "SatObsPlaceSchedule"):
             if name in self.docks:
                 self.docks[name].close_all()
         try:
