@@ -16,7 +16,8 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsProject, QgsSettings  # noqa: E402
-from qgis.PyQt.QtCore import pyqtSignal  # noqa: E402
+from qgis.PyQt.QtCore import Qt, pyqtSignal  # noqa: E402
+from qgis.PyQt.QtTest import QTest  # noqa: E402
 from qgis.PyQt.QtGui import QColor, QImage  # noqa: E402
 from qgis.PyQt.QtWidgets import QPushButton, QTabBar  # noqa: E402
 
@@ -384,8 +385,9 @@ def test_open_goes_to_the_image_on_the_map(plugin):
     assert settings.feed_close_previous()
 
 
-def test_image_files_on_the_card_open_one_by_one(plugin):
-    # tsudo 2026-11-14: 「その画像カタログレコードから開ける画像ファイルの一覧リスト出して、そこから簡単に開けるように」.
+def test_image_files_on_the_card_checked_or_opened_alone(plugin):
+    # tsudo 2026-11-14: 「その画像カタログレコードから開ける画像ファイルの一覧リスト出して、そこから簡単に開けるように」,
+    # then 「チェックボックスにして、クリックでチェック、ダブルクリックでそれだけ開く」.
     p, iface, fake, tmp_path = plugin
     feed = p.notice_feed
     store = p.api.notices.store()
@@ -393,6 +395,7 @@ def test_image_files_on_the_card_open_one_by_one(plugin):
     (folder / "PAN").mkdir(parents=True)
     geotiff(folder / "PAN" / "D_pan.tif")
     geotiff(folder / "D_ms.tif", west=139.9)
+    geotiff(folder / "D_psh.tif", west=139.7)
     (folder / "D_meta.xml").write_text("<x/>", encoding="utf-8")
     d = notice(tmp_path, "D", 5, ring(139.6, 35.5, 140.1, 35.7))
     d.feature["attributes"]["PATH"] = str(folder)
@@ -400,28 +403,60 @@ def test_image_files_on_the_card_open_one_by_one(plugin):
     p.api.notices.refresh()
     p.toggle_notice_feed()
     assert loaded(feed) and wait_for(lambda: {"w|A", "w|D"} <= set(feed.files) and feed.work.failure("files|w|C"), 5000)
-    # A file record: its file; a folder record: each image below it (the patterns of the catalog), a link each.
+    # A file record: its file; a folder record: each image below it (the patterns of the catalog), all checked.
     a, c, card = feed.cards["w|A"], feed.cards["w|C"], feed.cards["w|D"]
-    assert "A.\u200btif</a>" in a.files.text() and a.files_title.text() == "画像ファイル"
-    assert card.files_title.text() == "画像ファイル（2）"
-    assert "D_\u200bms" in card.files.text() and "PAN/\u200bD_\u200bpan" in card.files.text()
-    assert "meta" not in card.files.text()
-    assert str(folder) in card.files.toolTip()
+    assert [r.name for r in a.file_rows] == ["A.tif"] and a.files_title.text() == "画像ファイル"
+    assert card.files_title.text() == "画像ファイル（3）"
+    assert sorted(r.name for r in card.file_rows) == ["D_ms.tif", "D_psh.tif", "PAN/D_pan.tif"]
+    assert all(r.box.isChecked() for r in card.file_rows)
+    pan = next(r for r in card.file_rows if r.name == "PAN/D_pan.tif")
+    assert pan.label.text() == "PAN/\u200bD_\u200bpan.tif"  # may wrap, never widens the card
+    assert str(folder) in pan.toolTip()
     # No file: why, on the card (not a fault).
-    assert "見つからず" in c.files.text()
-    # One pressed: only that one opened, the map in front at it, read.
+    assert not c.file_rows and "見つからず" in c.files.text()
+    # A click: unchecked (on the box or the name), again: checked; 「開く」 opens those checked, no window.
+    ms = next(r for r in card.file_rows if r.name == "D_ms.tif")
+    psh = next(r for r in card.file_rows if r.name == "D_psh.tif")
+    QTest.mouseClick(ms, Qt.MouseButton.LeftButton, pos=ms.box.geometry().center())  # on the box
+    QTest.mouseClick(psh.label, Qt.MouseButton.LeftButton)
+    assert not ms.box.isChecked() and not psh.box.isChecked() and pan.box.isChecked()
     before = set(QgsProject.instance().mapLayers())
-    index = feed.files["w|D"].files.index("PAN/D_pan.tif")
-    card.files.linkActivated.emit(str(index))
+    card.buttons["open"].click()
     opened = [QgsProject.instance().mapLayer(i) for i in set(QgsProject.instance().mapLayers()) - before]
-    assert [layer.source().replace("\\", "/").endswith("PAN/D_pan.tif") for layer in opened] == [True]
+    assert [layer.source().replace("\\", "/").endswith("PAN/D_pan.tif") for layer in opened] == [True], [(x.name(), x.source()) for x in opened]
     assert p.central.current() == MAP and iface.canvas.extent().contains(opened[0].extent())
     assert {n.id: n.read for n in store.notices()}["w|D"]
-    # The file of a file record: the record (as 「開く」).
+    # The checks stay when the card is made again.
     p.toggle_notice_feed()
+    feed._config_changed()
+    assert wait_for(lambda: "w|D" in feed.files and len(feed.cards["w|D"].file_rows) == 3, 5000)
+    card = feed.cards["w|D"]
+    assert {r.name: r.box.isChecked() for r in card.file_rows} == {"D_ms.tif": False, "D_psh.tif": False, "PAN/D_pan.tif": True}
+    # A double click: that one alone, whatever is checked (its check as it was).
+    ms = next(r for r in card.file_rows if r.name == "D_ms.tif")
     before = set(QgsProject.instance().mapLayers())
-    feed.cards["w|A"].files.linkActivated.emit("0")
+    QTest.mouseClick(ms.label, Qt.MouseButton.LeftButton)  # a real double click starts with a click
+    QTest.mouseDClick(ms.label, Qt.MouseButton.LeftButton)
+    opened = [QgsProject.instance().mapLayer(i) for i in set(QgsProject.instance().mapLayers()) - before]
+    assert [layer.source().endswith("D_ms.tif") for layer in opened] == [True]
+    assert not ms.box.isChecked()
+    # Nothing checked: nothing opened, said so.
+    p.toggle_notice_feed()
+    for row in feed.cards["w|D"].file_rows:
+        if row.box.isChecked():
+            QTest.mouseClick(row.label, Qt.MouseButton.LeftButton)
+    before = set(QgsProject.instance().mapLayers())
+    feed.cards["w|D"].buttons["open"].click()
+    assert set(QgsProject.instance().mapLayers()) == before and p.central.current() == FEED
+    # A file record's double click: the record (as 「開く」). Its files looked for again once in view.
+    feed.go_to("w|A")
+    assert wait_for(lambda: feed.cards["w|A"].file_rows, 5000)
+    before = set(QgsProject.instance().mapLayers())
+    row = feed.cards["w|A"].file_rows[0]
+    QTest.mouseClick(row.label, Qt.MouseButton.LeftButton)
+    QTest.mouseDClick(row.label, Qt.MouseButton.LeftButton)
     assert [QgsProject.instance().mapLayer(i).source().endswith("A.tif") for i in set(QgsProject.instance().mapLayers()) - before] == [True]
+    assert row.box.isChecked()
 
 
 def test_see_on_the_map_and_the_buttons(plugin):
@@ -439,9 +474,9 @@ def test_see_on_the_map_and_the_buttons(plugin):
     b.buttons["read"].click()
     assert not feed.cards["w|B"].badge.isVisibleTo(b)
     assert feed.count.text() == "未読 0 件・全 3 件"
-    feed.cards["w|A"].buttons["delete"].click()
-    assert order(feed) == ["B", "C"]
-    assert [n.id for n in p.api.notices.store().notices()] == ["w|C", "w|B"]
+    # No 「削除」 on the cards (tsudo: 用語が混乱する).
+    assert "delete" not in feed.cards["w|A"].buttons
+    assert not [b for b in feed.cards["w|A"].findChildren(QPushButton) if b.text() == "削除"]
 
 
 def test_filters(plugin):
