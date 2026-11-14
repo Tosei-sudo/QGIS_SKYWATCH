@@ -245,6 +245,133 @@ def square_rings(lon: float, lat: float, size_km: float) -> list:
     return [[[w, s], [e, s], [e, n], [w, n], [w, s]]]
 
 
+def ring_area(ring: Sequence) -> float:
+    """A ring's signed area (degrees², anticlockwise positive)."""
+    return sum(ring[i - 1][0] * ring[i][1] - ring[i][0] * ring[i - 1][1] for i in range(len(ring))) / 2
+
+
+def polygons_of(rings: Sequence) -> list[list]:
+    """
+    Rings grouped into polygons, each its outer ring first and then its
+    holes, by how they lie in one another (whichever way they turn): a ring
+    inside an even number of others is an outer ring, one inside an odd
+    number a hole of the smallest outer ring holding it. Rings of fewer than
+    three points are left out; the order of the rings is kept otherwise.
+    """
+    rs = [r for r in rings if len(r) >= 3]
+    areas = [abs(ring_area(r)) for r in rs]
+    holders = []
+    for i, r in enumerate(rs):
+        # A point of the ring not on another ring's edge (the first vertex mostly is not).
+        x, y = r[0][0], r[0][1]
+        holders.append([j for j, other in enumerate(rs) if j != i and in_rings([other], x, y)])
+    depth = [len(h) for h in holders]
+    out: dict = {}
+    order = []
+    for i, r in enumerate(rs):
+        if depth[i] % 2 == 0:
+            out[i] = [r]
+            order.append(i)
+    for i, r in enumerate(rs):
+        if depth[i] % 2 == 1:
+            outer = [j for j in holders[i] if depth[j] == depth[i] - 1]
+            if outer:
+                out[min(outer, key=lambda j: areas[j])].append(r)
+            else:
+                out[i] = [r]
+                order.append(i)
+    return [out[i] for i in sorted(order)]
+
+
+def _hull(points: Sequence[tuple]) -> list:
+    """The convex hull of points (x, y), anticlockwise (monotone chain)."""
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return pts
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def rotated_box(rings: Sequence) -> list:
+    """
+    The smallest rectangle on the ground, turned any way, that holds rings
+    (requestExports[].areaShape `rotatedBox`, tsudo 2026-11-14: 凹みの多い
+    ポリゴンも「矩形回転させれば収まる」): a closed ring of its four corners
+    [longitude, latitude], anticlockwise; [] without points. Worked out in a
+    plane true to scale around the area (longitudes by the cosine of its
+    middle latitude), so that the box is the smallest in metres, not degrees.
+    One side of the rectangle always lies along an edge of the area's hull.
+    """
+    pts = [(float(p[0]), float(p[1])) for r in rings for p in r]
+    if not pts:
+        return []
+    lon0 = pts[0][0]
+    # Longitudes made continuous across 180° around the first point.
+    pts = [((x - lon0 + 180) % 360 - 180 + lon0, y) for x, y in pts]
+    ys = [y for _, y in pts]
+    lat0 = (min(ys) + max(ys)) / 2
+    k = max(0.01, math.cos(math.radians(lat0)))
+    hull = _hull([((x - lon0) * k, y - lat0) for x, y in pts])
+    best = None
+    if len(hull) >= 3:
+        for i in range(len(hull)):
+            (x1, y1), (x2, y2) = hull[i], hull[(i + 1) % len(hull)]
+            length = math.hypot(x2 - x1, y2 - y1)
+            if length == 0:
+                continue
+            ux, uy = (x2 - x1) / length, (y2 - y1) / length
+            us = [x * ux + y * uy for x, y in hull]
+            vs = [y * ux - x * uy for x, y in hull]
+            area = (max(us) - min(us)) * (max(vs) - min(vs))
+            if best is None or area < best[0] * (1 - 1e-12):
+                best = (area, ux, uy, min(us), max(us), min(vs), max(vs))
+    if best is None:
+        # A line or a point: its box along the meridians.
+        box = bbox_of([pts])
+        w, s, e, n = box
+        return [[w, s], [e, s], [e, n], [w, n], [w, s]]
+    _, ux, uy, u0, u1, v0, v1 = best
+    corners = []
+    for u, v in ((u0, v0), (u1, v0), (u1, v1), (u0, v1)):
+        x, y = u * ux - v * uy, u * uy + v * ux
+        corners.append([x / k + lon0, y + lat0])
+    return corners + [list(corners[0])]
+
+
+def shape_text(rings: Sequence, kind: str = "範囲") -> str:
+    """
+    What an area is, in words: 「点」, 「矩形」 (a box along the meridians),
+    「多角形（頂点 12）」, 「多角形（2 部分・頂点 30・穴 1）」; "" without rings.
+    """
+    polygons = polygons_of(rings)
+    if not polygons:
+        return ""
+    if kind == "点":
+        return "点"
+    corners = {(p[0], p[1]) for p in polygons[0][0]}
+    box = bbox_of(polygons[0][:1])
+    if len(polygons) == 1 and len(polygons[0]) == 1 and box is not None and len(corners) == 4 and corners == {
+            (box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3])}:
+        return "矩形"
+    vertices = sum(len(r) - (1 if r[0] == r[-1] else 0) for p in polygons for r in p)
+    holes = sum(len(p) - 1 for p in polygons)
+    parts = ([f"{len(polygons)} 部分"] if len(polygons) > 1 else []) + [f"頂点 {vertices}"] + ([f"穴 {holes}"] if holes else [])
+    return f"多角形（{'・'.join(parts)}）"
+
+
 def in_rings(rings: Sequence, x: float, y: float) -> bool:
     """Whether a point is inside rings (even-odd)."""
     inside = False

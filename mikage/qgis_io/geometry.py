@@ -8,6 +8,7 @@ from qgis.core import (
 )
 
 from ..core.plan.targets import Shape
+from ..core.request.model import polygons_of
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
@@ -52,6 +53,25 @@ def polygon_of(rings: Sequence[Sequence[tuple]]) -> QgsGeometry:
 def multipolygon_of(polygons: Sequence[Sequence[tuple]]) -> QgsGeometry:
     """A multipolygon (WGS84) of single-ring polygons."""
     return QgsGeometry.fromMultiPolygonXY([[[QgsPointXY(x, y) for x, y in ring]] for ring in polygons])
+
+
+def rings_geometry(rings: Sequence[Sequence[Sequence[float]]]) -> QgsGeometry:
+    """
+    A polygon (WGS84) of an area's rings as the core keeps them (a request's:
+    outer rings and holes in one list, model.polygons_of): a polygon with its
+    holes, or a multipolygon when it has several parts.
+    """
+    polygons = [[[QgsPointXY(p[0], p[1]) for p in ring] for ring in polygon] for polygon in polygons_of(rings)]
+    if len(polygons) == 1:
+        return QgsGeometry.fromPolygonXY(polygons[0])
+    return QgsGeometry.fromMultiPolygonXY(polygons)
+
+
+def shape_rings(shape: Optional[Shape]) -> list:
+    """Every ring of a Shape's polygons (all parts, holes too) as one list of [longitude, latitude] rings."""
+    if shape is None:
+        return []
+    return [[list(p) for p in ring] for polygon in shape.polygons for ring in polygon]
 
 
 def line_of(coords: Sequence[tuple]) -> QgsGeometry:

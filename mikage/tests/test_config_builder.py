@@ -85,6 +85,7 @@ def plugin_constants() -> dict:
         "resultWords": {result_file.ADOPTED: list(result_file.DEFAULT_ADOPTED), result_file.REJECTED: list(result_file.DEFAULT_REJECTED),
                         result_file.WAITING: list(result_file.DEFAULT_WAITING)},
         "encodings": sorted(set(systems.ENCODINGS.values())),
+        "areaShapes": dict(systems.AREA_SHAPES),
         "auditKinds": {k: v for k, v in audit.KINDS.items()},
         "auditFormats": list(audit.FORMATS),
         "layerTypes": list(startup_layers.TYPES),

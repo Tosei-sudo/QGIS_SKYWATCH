@@ -1,8 +1,9 @@
 """
 The form of one imaging request (撮像依頼の登録・編集): name, 依頼グループ, category,
 period and repeat, priority (five levels, or 1–1000 behind 「詳細」),
-the conditions on satellites, and the area: drawn on the map as a box,
-clicked as a point with a size, or taken from the selected feature.
+the conditions on satellites, and the area: drawn on the map as a box or
+a polygon (any shape, concave too), clicked as a point with a size, or
+taken from the selected feature (a polygon as it is: every part, its holes).
 
 It stays open beside the map (not modal) so the area can be drawn.
 
@@ -36,10 +37,11 @@ from ..core.request.passes import find_passes
 from ..core.request.pick import Picked, checks_of, picked, summary, unknown
 from ..core.request.model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest, bbox_of,
-    day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, square_rings,
+    day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
 )
-from ..qgis_io.geometry import shape_of, to_wgs84
+from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
 from ..qgis_io.tasks import run_task
+from .catalog_overlay import DrawTool
 from .docks import plain_label
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
@@ -103,6 +105,8 @@ class RequestForm(QDialog):
         self.extent_tool.extentChanged.connect(self._extent_drawn)
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
         self.point_tool.canvasClicked.connect(self._point_clicked)
+        # 地図で多角形: a click adds a corner, a double or right click closes it, Esc starts again.
+        self.draw_tool = DrawTool(self.canvas, self._polygon_drawn)
         self.finished.connect(self._closed)
         # 撮像機会 (改修案 7): worked out again a moment after the area, period or conditions change.
         self._sats: list = []
@@ -346,6 +350,10 @@ class RequestForm(QDialog):
         self.box_button = QPushButton(self.tr("地図で矩形"))
         self.box_button.setCheckable(True)
         self.box_button.toggled.connect(lambda on: self._tool(self.extent_tool, on))
+        self.polygon_button = QPushButton(self.tr("地図で多角形"))
+        self.polygon_button.setCheckable(True)
+        self.polygon_button.setToolTip(self.tr("クリックで頂点、ダブルクリックか右クリックで確定、Esc でやり直し。凹んだ形もそのまま範囲に"))
+        self.polygon_button.toggled.connect(lambda on: self._tool(self.draw_tool, on))
         self.point_button = QPushButton(self.tr("地図で点"))
         self.point_button.setCheckable(True)
         self.point_button.toggled.connect(lambda on: self._tool(self.point_tool, on))
@@ -355,9 +363,9 @@ class RequestForm(QDialog):
         self.size.setSuffix(" km")
         self.size.setToolTip(self.tr("点で指定するときの範囲の一辺"))
         self.selected_button = QPushButton(self.tr("選択中の地物"))
-        self.selected_button.setToolTip(self.tr("作業中のレイヤーで選択している地物（最初の 1 つ）を範囲に"))
+        self.selected_button.setToolTip(self.tr("作業中のレイヤーで選択している地物（最初の 1 つ）を範囲に。ポリゴンはその形のまま（すべての部分・穴も）"))
         self.selected_button.clicked.connect(self._from_selection)
-        for w in (self.box_button, self.point_button, self.size, self.selected_button):
+        for w in (self.box_button, self.polygon_button, self.point_button, self.size, self.selected_button):
             buttons.addWidget(w)
         buttons.addStretch(1)
         al.addLayout(buttons)
@@ -545,8 +553,8 @@ class RequestForm(QDialog):
 
     def _tool(self, tool, on: bool) -> None:
         if on:
-            for b in (self.box_button, self.point_button):
-                if (b is self.box_button) != (tool is self.extent_tool):
+            for b, t in ((self.box_button, self.extent_tool), (self.polygon_button, self.draw_tool), (self.point_button, self.point_tool)):
+                if t is not tool:
                     b.setChecked(False)
             self.canvas.setMapTool(tool)
         elif self.canvas.mapTool() is tool:
@@ -567,6 +575,13 @@ class RequestForm(QDialog):
         self.box_button.setChecked(False)
         self._area_changed()
 
+    def _polygon_drawn(self, corners: list) -> None:
+        """A polygon drawn on the map (WGS 84 corners): the area as drawn."""
+        self.rings = [[list(p) for p in corners] + [list(corners[0])]]
+        self.shape_kind = "範囲"
+        self.polygon_button.setChecked(False)
+        self._area_changed()
+
     def _point_clicked(self, point: QgsPointXY, _button=None) -> None:
         p = self._to_wgs().transform(point)
         self.rings = square_rings(p.x(), p.y(), self.size.value())
@@ -584,7 +599,7 @@ class RequestForm(QDialog):
         if shape is None:
             return
         if shape.polygons:
-            self.rings = [[list(p) for p in ring] for ring in shape.polygons[0]]
+            self.rings = shape_rings(shape)
             self.shape_kind = "範囲"
         else:
             xs = [v[0] for v in shape.vertices]
@@ -603,7 +618,7 @@ class RequestForm(QDialog):
         """Names and areas from the layer's features: shown, not asked."""
         self.name.setEnabled(False)
         self.name.setText(batch.get("names", ""))
-        for w in (self.box_button, self.point_button, self.size, self.selected_button):
+        for w in (self.box_button, self.polygon_button, self.point_button, self.size, self.selected_button):
             w.hide()
         self.area_label.setText(batch.get("text", ""))
         self.overlay.paint([(rings, "#f59e0b", 2, name) for name, rings, *_rest in batch["items"]])
@@ -618,11 +633,13 @@ class RequestForm(QDialog):
     def _area_changed(self) -> None:
         box = bbox_of(self.rings)
         if box is None:
-            self.area_label.setText(self.tr("範囲なし（地図で矩形・点、または選択中の地物で指定）"))
+            self.area_label.setText(self.tr("範囲なし（地図で矩形・多角形・点、または選択中の地物で指定）"))
             self.overlay.unpaint()
         else:
             w, s, e, n = box
-            self.area_label.setText(self.tr("{kind}: 経度 {w:.4f}〜{e:.4f}・緯度 {s:.4f}〜{n:.4f}").format(kind=self.shape_kind, w=w, e=e, s=s, n=n))
+            # What it is (矩形 / 多角形（頂点 n）/ 点), so that a polygon is not taken for its box.
+            self.area_label.setText(self.tr("{kind}: 経度 {w:.4f}〜{e:.4f}・緯度 {s:.4f}〜{n:.4f}").format(
+                kind=shape_text(self.rings, self.shape_kind) or self.shape_kind, w=w, e=e, s=s, n=n))
             self.overlay.paint([(self.rings, "#f59e0b", 2, self.name.text())])
         self.canvas.refresh()
         self._chances_changed()
@@ -749,8 +766,9 @@ class RequestForm(QDialog):
         self._chance_timer.stop()
         if self._chance_task is not None:
             self._chance_task.cancel()
-        for tool in (self.extent_tool, self.point_tool):
+        for tool in (self.extent_tool, self.point_tool, self.draw_tool):
             if self.canvas.mapTool() is tool:
                 self.canvas.unsetMapTool(tool)
+        self.draw_tool.remove()
         self.overlay.unpaint()
         self.canvas.refresh()

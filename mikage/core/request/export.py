@@ -13,6 +13,11 @@ column's `format`): `iso` (default), `iso-date`, `unix`, `unixms`, or a
 strftime pattern (`%Y%m%d`). Numbers (and text that is a number) take a
 printf format (`%03d`, `%.1f`), see `printf`.
 
+A request's own area is written as it is (any polygon: concave, with
+holes, of several parts as a MULTIPOLYGON), or, for a system whose
+`areaShape` is `rotatedBox`, as the smallest rectangle turned any way that
+holds it (model.rotated_box; tsudo 2026-11-14). The ledger keeps the polygon.
+
 Requests put into one shot (まとめ, core/request/shots.py) are one row:
 the first one's (the most important), its `geometry` and box the tightest
 box along the track around the requests' own areas (shots.Shot.area_ring;
@@ -69,7 +74,7 @@ from ..plan.orbit import R
 from ..time_zone import TimeZone, clock_of
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids
-from .model import bbox_of, center_of, day_bounds
+from .model import bbox_of, center_of, day_bounds, polygons_of, rotated_box
 from .schema import resolve, validate
 from .systems import Column, ExportSystem, PriorityRule
 
@@ -125,15 +130,24 @@ def _round(v: float, digits: int) -> float:
 
 
 def geometry_value(rings: Sequence, kind: str, digits: int, as_object: bool = False) -> Any:
-    """Rings (longitude, latitude) written as WKT, GeoJSON, a box, a centre (with a radius) or a vertex list."""
+    """
+    Rings (longitude, latitude) written as WKT, GeoJSON, a box, a centre
+    (with a radius) or a vertex list. An area of several parts (outer rings
+    side by side, model.polygons_of) is a MULTIPOLYGON / MultiPolygon, each
+    part its outer ring then its holes; `vertices` is the first part's outer ring.
+    """
     if not rings:
         return None
-    r = [[[_round(p[0], digits), _round(p[1], digits)] for p in ring] for ring in rings]
+    def rounded(ring):
+        return [[_round(p[0], digits), _round(p[1], digits)] for p in ring]
+
+    polygons = [[rounded(ring) for ring in polygon] for polygon in polygons_of(rings)] or [[rounded(ring) for ring in rings]]
+    r = polygons[0]
     box = bbox_of(rings)
     mid = center_of(rings)
     if kind in ("geojson", "centerGeojson"):
         if kind == "geojson":
-            value = {"type": "Polygon", "coordinates": r}
+            value = {"type": "Polygon", "coordinates": r} if len(polygons) == 1 else {"type": "MultiPolygon", "coordinates": polygons}
         else:
             # The middle of the area's box, as for `center` and centerLat / centerLon.
             value = {"type": "Point", "coordinates": [_round(mid[0], digits), _round(mid[1], digits)]}
@@ -152,7 +166,12 @@ def geometry_value(rings: Sequence, kind: str, digits: int, as_object: bool = Fa
         return ",".join(f"{p[1]},{p[0]}" for p in r[0])
     def ring_text(ring):
         return "(" + ", ".join(f"{p[0]:.{digits}f} {p[1]:.{digits}f}" for p in ring) + ")"
-    return "POLYGON (" + ", ".join(ring_text(ring) for ring in r) + ")"
+
+    def polygon_text(polygon):
+        return "(" + ", ".join(ring_text(ring) for ring in polygon) + ")"
+    if len(polygons) > 1:
+        return "MULTIPOLYGON (" + ", ".join(polygon_text(p) for p in polygons) + ")"
+    return "POLYGON " + polygon_text(r)
 
 
 def convert_priority(p: int, rule: PriorityRule) -> Any:
@@ -244,14 +263,23 @@ def _percent(share: Optional[float]) -> Optional[float]:
     return None if share is None else round(share * 100, 1)
 
 
-def row_rings(c: Candidate, margin_m: float) -> list:
-    """The area a candidate's row is written with (as raw_value's `geometry`): a shot's box, a share's part, or the request's."""
+def row_rings(c: Candidate, margin_m: float, shape: str = "polygon") -> list:
+    """
+    The area a candidate's row is written with (as raw_value's `geometry`): a
+    shot's box, a share's part, or the request's own area: as it is, or with
+    `shape` "rotatedBox" (the system's `areaShape`) the smallest rectangle
+    turned any way that holds it (all its parts; a point's square as it is).
+    """
     shot = c.shots[0] if c.shots else None
     if c.together and shot is not None:
         return [shot.area_ring()]
     if c.part >= 1 and shot is not None:
         return [shot.part_ring(max(0.0, margin_m) / 1000 / R)]
-    return [[list(p[:2]) for p in r] for r in c.request.rings]
+    rings = [[list(p[:2]) for p in r] for r in c.request.rings]
+    if shape == "rotatedBox" and c.request.shape_kind != "点" and rings:
+        box = rotated_box(rings)
+        return [box] if box else rings
+    return rings
 
 
 def occurrence_id(c: Candidate) -> str:
@@ -284,7 +312,7 @@ def raw_value(c: Optional[Candidate], source: str, ctx: Context, geometry: str =
     # Requests put into one shot are handed out as one (tsudo, 2026-11-11), its area the tightest box along the
     # track around theirs (shots.Shot.area_ring: not the scenes' outline, which the system may not find them inside);
     # one shot of an area too big for one (分担) the part it takes, inside its scenes by the system's margin.
-    rings = row_rings(c, ctx.system.merge_margin)
+    rings = row_rings(c, ctx.system.merge_margin, ctx.system.area_shape)
     box = bbox_of(rings)
     mid = center_of(rings)
     look = shot.look if shot is not None else None

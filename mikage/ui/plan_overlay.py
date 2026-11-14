@@ -14,7 +14,7 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QFont, QFontMetricsF, QPainterPath, QPen
 
 from ..core.plan.output import split_antimeridian
-from ..qgis_io.geometry import WGS84, from_wgs84, line_of, multipolygon_of, polygon_of
+from ..qgis_io.geometry import WGS84, from_wgs84, line_of, polygon_of, rings_geometry
 
 STYLES = {
     # kind: (stroke, width, dash, fill)
@@ -119,7 +119,7 @@ class PlanOverlay:
     def paint(self, polygons: Sequence[tuple], z: float = 900) -> None:
         """
         Polygons each in its own colour: (rings, colour, width, label) with
-        rings in WGS84 and the label (or '') at the middle of the first ring;
+        rings in WGS84 (rings in one another are holes) and the label (or '') on the area;
         a fifth item true draws only a dashed outline (the shots over the
         requests' areas in the request docks). Replaces what was painted before.
         """
@@ -127,6 +127,10 @@ class PlanOverlay:
         for polygon in polygons:
             rings, color, width, label = polygon[:4]
             outline = len(polygon) > 4 and bool(polygon[4])
+            # Rings in one another are holes (a request's area keeps its holes and parts in one list of rings).
+            geometry = rings_geometry(rings)
+            if geometry.isEmpty():
+                continue
             band = QgsRubberBand(self.canvas, QgsWkbTypes.GeometryType.PolygonGeometry)
             c = QColor(color)
             band.setStrokeColor(c)
@@ -138,13 +142,12 @@ class PlanOverlay:
                 band.setLineStyle(Qt.PenStyle.DashLine)
             # Outlines over the filled areas.
             band.setZValue(z + 1 if outline else z)
-            geometry = polygon_of(rings[:1]) if len(rings) == 1 else multipolygon_of(rings)
             band.addGeometry(geometry, WGS84)
             self._painted.append(band)
             box = geometry.boundingBox()
             self._extent.setdefault("painted", QgsRectangle(box)).combineExtentWith(box)
             if label:
-                c = polygon_of(rings[:1]).pointOnSurface().asPoint()
+                c = geometry.pointOnSurface().asPoint()
                 p = from_wgs84(self.canvas.mapSettings().destinationCrs()).transform(c)
                 self._painted_items.append(LabelItem(self.canvas, p, label, "#111111", False))
 
