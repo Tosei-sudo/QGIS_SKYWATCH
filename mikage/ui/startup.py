@@ -2,7 +2,9 @@
 The settings file's `layers` at start: added when the settings file has
 been read and the project is still empty (QGIS started without a project),
 and to each new project (「新規プロジェクト」), as the viewer opens them at
-start. 「設定ファイルのレイヤーを追加」 adds them at any time.
+start. 「設定ファイルのレイヤーを追加」 adds them at any time. Added at start
+or in a new project, they leave the project not changed (no 「保存しますか」
+when another project is opened right after).
 """
 from __future__ import annotations
 
@@ -56,7 +58,9 @@ class StartupLayers(QObject):
         if not entries:
             self.iface.messageBar().pushInfo(TITLE, self.tr("設定ファイルに layers なし"))
             return
-        add_startup_layers(entries, self.context.source, self._finished, _empty if only_if_empty else (lambda: True))
+        # At start and in a new project the plugin adds them on its own: the project is still not changed.
+        add_startup_layers(entries, self.context.source, self._finished, _empty if only_if_empty else (lambda: True),
+                           unchanged=only_if_empty)
 
     def _finished(self, layers, problems) -> None:
         if layers:

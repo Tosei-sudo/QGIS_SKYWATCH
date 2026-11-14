@@ -233,7 +233,7 @@ def test_cards_newest_at_the_bottom_with_everything_on_them(plugin):
     assert not a.badge.isVisibleTo(a) and b.badge.isVisibleTo(b)
     assert "横須賀の新着" in b.attributes.text() and "雲量" in b.attributes.text() and "衛星画像" in b.attributes.text()
     # 写っている地物: every feature over the footprint, in Japanese and English (empty brackets dropped).
-    assert "施設（2 件）" in a.contents.text() and "横須賀本港（Yokosuka Port）<br>長浦港" in a.contents.text()
+    assert "施設（2 件）" in a.contents.text() and "<tr><td>横須賀本港（Yokosuka Port）</td></tr><tr><td>長浦港</td></tr>" in a.contents.text()
     assert "施設（1 件）" in b.contents.text() and "館山（Tateyama）" in b.contents.text()
     assert "施設（0 件）" in c.contents.text() and "なし" in c.contents.text()
     # Kept with the notice: not asked again next time.
@@ -261,18 +261,22 @@ def test_a_narrow_map_area(plugin):
     card = feed.cards["w|B"]  # unread: its 既読 button too
     assert wait_for(lambda: card.picture.width() == 200)
     assert feed._top.indexOf(feed.controls) >= 0
-    # Wide: the thumbnail, the attributes and the features side by side (3 列).
-    assert card.wide and card.grid.getItemPosition(card.grid.indexOf(card.contents_box))[:2] == (0, 2)
+    # Wide: the thumbnail, the attributes, the files and the features side by side (サムネ、メタ、ファイル、地物).
+    assert card.mode == 4 and (card.column_of(card.files_box), card.column_of(card.contents_box)) == (1, 2)
+    iface.window.resize(850, 800)
+    # Less room: the files above the features.
+    assert wait_for(lambda: card.mode == 3, 2000), card.mode
+    assert (card.column_of(card.files_box), card.column_of(card.contents_box)) == (1, 1)
     iface.window.resize(600, 800)
     assert wait_for(lambda: feed._second.indexOf(feed.controls) >= 0, 2000)
-    # Narrow: the features under the attributes.
-    assert not card.wide and card.grid.getItemPosition(card.grid.indexOf(card.contents_box))[:2] == (1, 1)
+    # Narrow: all under the attributes.
+    assert not card.wide and (card.column_of(card.files_box), card.column_of(card.contents_box)) == (0, 0)
     assert notice_feed.MIN_PICTURE <= card.picture.width() < 200
     assert card.picture.height() == round(150 * card.picture.width() / 200)
     assert wait_for(lambda: feed.scroll.horizontalScrollBar().maximum() == 0, 2000), (card.width(), feed.scroll.viewport().width())
     assert feed.minimumSizeHint().width() < 300
     iface.window.resize(1300, 900)
-    assert wait_for(lambda: card.picture.width() == 200 and feed._top.indexOf(feed.controls) >= 0 and card.wide, 2000)
+    assert wait_for(lambda: card.picture.width() == 200 and feed._top.indexOf(feed.controls) >= 0 and card.mode == 4, 2000)
 
 
 def test_the_features_are_asked_again_when_the_layers_change(plugin):
@@ -285,7 +289,7 @@ def test_the_features_are_asked_again_when_the_layers_change(plugin):
         {"label": "港", "url": PLACES, "fields": ["NAME"]}]))
     p.api.reload_config()
     assert wait_for(lambda: "港（2 件）" in feed.cards["w|A"].contents.text())
-    assert "横須賀本港<br>長浦港" in feed.cards["w|A"].contents.text()
+    assert "<tr><td>横須賀本港</td></tr><tr><td>長浦港</td></tr>" in feed.cards["w|A"].contents.text()
     assert [u for u, _ in fake.asked[asked:] if "Places" in u]
     # Only the layers the settings file has now are kept.
     kept = {n.id: n.extra for n in p.api.notices.store().notices()}["w|A"]["contents"]
@@ -310,7 +314,7 @@ def test_one_feature_a_line_with_a_background_from_an_attribute(plugin):
     # The value as the colour: 「Yokosuka Port」 is not one, so no background (and no markup from the attribute).
     assert "英名（2 件）" in text and "Yokosuka Port" not in text
     assert text.count("bgcolor") == 2
-    assert "横須賀本港<br>長浦港" in text.split("英名")[1]
+    assert "<tr><td>横須賀本港</td></tr><tr><td>長浦港</td></tr>" in text.split("英名")[1]
 
 
 def test_the_page_never_moves_by_itself(plugin):
@@ -378,6 +382,46 @@ def test_open_goes_to_the_image_on_the_map(plugin):
     assert not second & left and before <= left
     assert any(layer.source().endswith("A.tif") for layer in QgsProject.instance().mapLayers().values())
     assert settings.feed_close_previous()
+
+
+def test_image_files_on_the_card_open_one_by_one(plugin):
+    # tsudo 2026-11-14: 「その画像カタログレコードから開ける画像ファイルの一覧リスト出して、そこから簡単に開けるように」.
+    p, iface, fake, tmp_path = plugin
+    feed = p.notice_feed
+    store = p.api.notices.store()
+    folder = tmp_path / "img" / "D_PRODUCT"
+    (folder / "PAN").mkdir(parents=True)
+    geotiff(folder / "PAN" / "D_pan.tif")
+    geotiff(folder / "D_ms.tif", west=139.9)
+    (folder / "D_meta.xml").write_text("<x/>", encoding="utf-8")
+    d = notice(tmp_path, "D", 5, ring(139.6, 35.5, 140.1, 35.7))
+    d.feature["attributes"]["PATH"] = str(folder)
+    store.add_notices([d])
+    p.api.notices.refresh()
+    p.toggle_notice_feed()
+    assert loaded(feed) and wait_for(lambda: {"w|A", "w|D"} <= set(feed.files) and feed.work.failure("files|w|C"), 5000)
+    # A file record: its file; a folder record: each image below it (the patterns of the catalog), a link each.
+    a, c, card = feed.cards["w|A"], feed.cards["w|C"], feed.cards["w|D"]
+    assert "A.\u200btif</a>" in a.files.text() and a.files_title.text() == "画像ファイル"
+    assert card.files_title.text() == "画像ファイル（2）"
+    assert "D_\u200bms" in card.files.text() and "PAN/\u200bD_\u200bpan" in card.files.text()
+    assert "meta" not in card.files.text()
+    assert str(folder) in card.files.toolTip()
+    # No file: why, on the card (not a fault).
+    assert "見つからず" in c.files.text()
+    # One pressed: only that one opened, the map in front at it, read.
+    before = set(QgsProject.instance().mapLayers())
+    index = feed.files["w|D"].files.index("PAN/D_pan.tif")
+    card.files.linkActivated.emit(str(index))
+    opened = [QgsProject.instance().mapLayer(i) for i in set(QgsProject.instance().mapLayers()) - before]
+    assert [layer.source().replace("\\", "/").endswith("PAN/D_pan.tif") for layer in opened] == [True]
+    assert p.central.current() == MAP and iface.canvas.extent().contains(opened[0].extent())
+    assert {n.id: n.read for n in store.notices()}["w|D"]
+    # The file of a file record: the record (as 「開く」).
+    p.toggle_notice_feed()
+    before = set(QgsProject.instance().mapLayers())
+    feed.cards["w|A"].files.linkActivated.emit("0")
+    assert [QgsProject.instance().mapLayer(i).source().endswith("A.tif") for i in set(QgsProject.instance().mapLayers()) - before] == [True]
 
 
 def test_see_on_the_map_and_the_buttons(plugin):
