@@ -50,6 +50,7 @@ DEFAULT_SHOT_FIELDS: dict[str, str] = {
     "requestId": "REQ_ID", "requestIds": "REQ_IDS", "names": "REQ_NAMES", "count": "REQ_COUNT", "file": "OUTPUT_FILE",
     "sensor": "SENSOR", "mode": "SENSOR_MODE", "captured": "CAPTURED", "imageId": "IMAGE_ID",
     "uncounted": "UNCOUNTED_SCENES", "uncountedReason": "UNCOUNTED_REASON",
+    "useStart": "USE_START", "useEnd": "USE_END", "passId": "PASS_ID",
 }
 #: The yearly quotas' names (TBL_IMAGING_QUOTA: one row a sensor, or a mode of it; core/request/quota.py).
 DEFAULT_QUOTA_FIELDS: dict[str, str] = {
@@ -1237,6 +1238,11 @@ class ShotRow:
     #: (tsudo, 2026-11-11: 「撮ってもノイズとかジャミングでカウントされない場合もある」).
     uncounted: Optional[int] = None
     uncounted_reason: str = ""
+    #: When it uses its satellite (ms; 軌道の使用時間, core/request/use_time.py): from its start less the system's
+    #: setup seconds to its end; and its pass, 「45123昇」 (the revolution number and direction).
+    use_start: Optional[float] = None
+    use_end: Optional[float] = None
+    pass_id: str = ""
 
     @property
     def count(self) -> int:
@@ -1254,7 +1260,14 @@ def shot_attributes(row: ShotRow, f: dict) -> dict:
         f["count"]: row.count, f["file"]: row.file[:1000] or None, f["sensor"]: row.sensor[:250] or None,
         f["mode"]: row.mode[:250] or None, f["captured"]: row.captured or None, f["imageId"]: row.image_id[:250] or None,
         f["uncounted"]: row.uncounted, f["uncountedReason"]: row.uncounted_reason[:1000] or None,
+        f["useStart"]: row.use_start, f["useEnd"]: row.use_end, f["passId"]: row.pass_id[:20] or None,
     }
+
+
+def _moment(value: Any) -> Optional[float]:
+    """ms of a date value; None when empty or not one."""
+    t = time_of(value) if value is not None else math.nan
+    return t if math.isfinite(t) else None
 
 
 def shot_row_of(a: dict, geometry: Any, f: dict, oid: str) -> ShotRow:
@@ -1277,7 +1290,8 @@ def shot_row_of(a: dict, geometry: Any, f: dict, oid: str) -> ShotRow:
         object_id=int(a[oid]) if is_number(a.get(oid)) else None,
         sensor=_text(a.get(f["sensor"])), mode=_text(a.get(f["mode"])), captured=_choice(a.get(f["captured"]), CAPTURED, "未判定"),
         image_id=_code(a.get(f["imageId"])), uncounted=max(0, int(uncounted)) if uncounted is not None else None,
-        uncounted_reason=_text(a.get(f["uncountedReason"])))
+        uncounted_reason=_text(a.get(f["uncountedReason"])),
+        use_start=_moment(a.get(f["useStart"])), use_end=_moment(a.get(f["useEnd"])), pass_id=_text(a.get(f["passId"]))[:20])
 
 
 def _shot_layer(client: EsriClient, store: RequestStoreConfig, token: Optional[str]) -> tuple[set, str]:

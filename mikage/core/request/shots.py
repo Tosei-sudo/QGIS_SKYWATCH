@@ -352,13 +352,13 @@ class Book:
         return out
 
     def new_shots(self, c, sat: int, ops: Sequence[Opportunity], forced: bool = False, start: Optional[bytearray] = None,
-                  fits: Optional[Callable[[int, int], bool]] = None) -> list[Placement]:
+                  fits: Optional[Callable[[int, int, list], bool]] = None) -> list[Placement]:
         """
         New shots for the candidate on this satellite (mode)'s passes: one per pass for a request that fits in one
         (the smallest off-nadir angle first), or the passes one after another for an area too big for one.
         Passes the satellite has no time for are left out, unless `forced` (then they come last, marked busy).
         With `start` (the area's points already taken, `Passes.targets` cells), only the latter, on what is
-        still open; `fits(shots, scenes)` says whether an area's shots still fit the system's day.
+        still open; `fits(shots, scenes, the shots)` says whether an area's shots still fit the system's day.
         """
         out = []
         big = []
@@ -391,7 +391,7 @@ class Book:
         return out
 
     def _area(self, c, sat: int, ops: Sequence[Opportunity], forced: bool, start: Optional[bytearray] = None,
-              fits: Optional[Callable[[int, int], bool]] = None) -> Optional[Placement]:
+              fits: Optional[Callable[[int, int, list], bool]] = None) -> Optional[Placement]:
         """
         An area too big for one shot: the passes in time order while each adds
         enough of what is still open (`start`: the points taken before), until
@@ -432,7 +432,7 @@ class Book:
             if busy and not forced:
                 self.saw_busy = True
                 continue
-            if fits is not None and not forced and not fits(len(taken) + 1, sum(s.frames for s in taken) + shot.frames):
+            if fits is not None and not forced and not fits(len(taken) + 1, sum(s.frames for s in taken) + shot.frames, taken + [shot]):
                 continue
             busy_any = busy_any or busy
             for k in best.members:

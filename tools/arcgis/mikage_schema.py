@@ -358,6 +358,9 @@ TABLES = (
         F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
         F("UNCOUNTED_SCENES", "数えない枚数", "LONG", None, "uncounted"),
         F("UNCOUNTED_REASON", "数えない理由", "TEXT", 1000, "uncountedReason"),
+        F("USE_START", "使用開始", "DATE", None, "useStart"),
+        F("USE_END", "使用終了", "DATE", None, "useEnd"),
+        F("PASS_ID", "パス番号", "TEXT", 20, "passId"),
     )),
     Table("TBL_IMAGING_QUOTA", "年間撮像上限", None, writable=True, setting="requestStores[].quotas", fields=(
         F("SENSOR", "センサー", "TEXT", 255, "sensor"),

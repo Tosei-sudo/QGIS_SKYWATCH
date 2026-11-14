@@ -46,6 +46,50 @@ class PriorityRule:
     format: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class UseTime:
+    """
+    衛星の使用時間 (`useTime`, tsudo 2026-11-14: 「システムによっては、軌道の
+    使用時間で上限管理してる」「準備秒は足すだけでよい。定数はシステムのコン
+    フィグに」「上限は1パスあたり」「1日の上限も欲しい」): seconds, each of the
+    system's satellites on its own (all its modes together). core/request/use_time.py.
+    """
+    #: Added before the first shot of a pass (`setupSeconds`).
+    setup: float = 0.0
+    #: The most a satellite may be used on one pass (`perPass`); None: not limited.
+    per_pass: Optional[float] = None
+    #: The most a satellite may be used on one JST day (`perDay`); None: not limited.
+    per_day: Optional[float] = None
+
+    @property
+    def limited(self) -> bool:
+        return self.per_pass is not None or self.per_day is not None
+
+
+def use_time_of(value: Any, at: str, problems: list[str]) -> UseTime:
+    """`useTime`: {"setupSeconds": 秒, "perPass": 秒, "perDay": 秒} (each optional)."""
+    if value is None:
+        return UseTime()
+    if not is_record(value):
+        problems.append(f'{at} は {{"setupSeconds": 秒, "perPass": 秒, "perDay": 秒}} で指定')
+        return UseTime()
+    setup = value.get("setupSeconds", 0)
+    if not (is_number(setup) and setup >= 0):
+        problems.append(f"{at}.setupSeconds は 0 以上の数（秒）で指定")
+        setup = 0
+    limits = {}
+    for key in ("perPass", "perDay"):
+        n = value.get(key)
+        if n is None:
+            limits[key] = None
+        elif is_number(n) and n > 0:
+            limits[key] = float(n)
+        else:
+            problems.append(f"{at}.{key} は 0 より大きい数（秒）で指定（上限なしは書かない）")
+            limits[key] = None
+    return UseTime(float(setup), limits["perPass"], limits["perDay"])
+
+
 @dataclass
 class ExportSystem:
     """One entry of `requestExports`."""
@@ -96,6 +140,8 @@ class ExportSystem:
     #: The 外部連携ID of its rows (core/request/link_id.py): how many characters (`linkIdLength`), of which (`linkIdChars`).
     link_length: int = DEFAULT_LENGTH
     link_chars: str = DEFAULT_CHARS
+    #: 衛星の使用時間 (`useTime`): the setup seconds and the limits a pass and a day of each of its satellites.
+    use_time: UseTime = field(default_factory=UseTime)
 
 
 def _texts(v: Any) -> list:
@@ -276,6 +322,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         result_file=result_file_of(value.get("resultFile"), f"{at}.resultFile", problems, zone, values),
         link_length=int(link_length),
         link_chars=link_chars,
+        use_time=use_time_of(value.get("useTime"), f"{at}.useTime", problems),
     )
 
 
