@@ -268,3 +268,43 @@ def test_a_request_that_takes_too_long_gives_up(silent_server, monkeypatch):
 def test_an_authentication_that_cannot_be_used_is_told(http):
     kind, message = in_task(lambda: get_bytes(http + "/ok", "nosuchcfg"))
     assert (kind, message) == ("failed", f"認証設定（nosuchcfg）を使えず（{http}/ok）")
+
+
+def test_tasks_wait_while_qgis_starts():
+    """
+    2026-11-14: a task's Python running while QGIS still imported another plugin crashed QGIS (signal 11 in sip):
+    the plugin's tasks made while QGIS starts wait until it has.
+    """
+    from mikage.qgis_io import tasks
+
+    ran, cancelled_ran = [], []
+    tasks.hold_tasks()
+    try:
+        task = run_task("起動中", lambda t: ran.append(1) or 1, lambda r: ran.append(r))
+        cancelled = run_task("起動中に取り消し", lambda t: cancelled_ran.append(1))
+        wait_for(lambda: False, 300)
+        assert ran == [] and task in tasks._held
+        cancelled.cancel()
+    finally:
+        tasks.release_tasks()
+    assert wait_for(lambda: ran == [1, 1])
+    wait_for(lambda: False, 200)
+    assert cancelled_ran == [] and tasks._held == []
+    # Not holding any more: started at once.
+    after = []
+    run_task("起動後", lambda t: 2, after.append)
+    assert wait_for(lambda: after == [2])
+
+
+def test_unloading_drops_the_tasks_held():
+    from mikage.qgis_io import tasks
+
+    ran = []
+    tasks.hold_tasks()
+    run_task("起動中", lambda t: ran.append(1))
+    started = time.monotonic()
+    tasks.cancel_all()
+    tasks.release_tasks()
+    assert time.monotonic() - started < 1
+    wait_for(lambda: False, 300)
+    assert ran == [] and tasks._held == [] and not tasks._holding

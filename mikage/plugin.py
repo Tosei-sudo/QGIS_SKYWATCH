@@ -332,6 +332,13 @@ class MikagePlugin:
         self.clock.lap()
         # The tasks' Python hands the GIL to QGIS's main thread sooner (qgis_io/tasks.py): the map and docks keep moving.
         tasks.share_gil_faster()
+        # Loaded as QGIS starts: the tasks wait until QGIS has (another plugin still being imported while a task's
+        # Python ran crashed QGIS). At most a minute, should QGIS never say so.
+        started = getattr(self.iface, "initializationCompleted", None)
+        if started is not None and not self.iface.mainWindow().isVisible():
+            tasks.hold_tasks()
+            started.connect(self._release_tasks)
+            QTimer.singleShot(60000, tasks.release_tasks)
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         # 監査ログ before anything that records (its writing and sending run in threads of their own).
@@ -703,8 +710,8 @@ class MikagePlugin:
         self.context.configChanged.connect(self._config_read_for_preload)
         self._config_asked = self.clock.now()
         self.context.reload()
-        # The pages beside the map open when QGIS was last closed (behind the map): once QGIS has started.
-        # Changing its map area while it is still being built (plugins load before) made QGIS crash.
+        # The pages beside the map open when QGIS was last closed (behind the map): once QGIS has started
+        # and put back its own window and map area (plugins load before).
         started = getattr(self.iface, "initializationCompleted", None)
         if self.central is not None:
             if self.iface.mainWindow().isVisible() or started is None:
@@ -755,6 +762,13 @@ class MikagePlugin:
             self.preloader.add(key, PRELOAD_ITEMS[key], start)
         self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
         self.preloader.finished.connect(self._preload_finished)
+
+    def _release_tasks(self) -> None:
+        try:
+            self.iface.initializationCompleted.disconnect(self._release_tasks)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        tasks.release_tasks()
 
     def _restore_views(self) -> None:
         try:
@@ -1396,6 +1410,11 @@ class MikagePlugin:
         overviews_io.queue.cancel_all()
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
+        tasks.release_tasks()  # nothing held any more (cancelled above): only no longer holding
+        try:
+            self.iface.initializationCompleted.disconnect(self._release_tasks)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
         tasks.restore_gil_sharing()
         try:
             QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)

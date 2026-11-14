@@ -161,6 +161,32 @@ def restore_gil_sharing() -> None:
 
 #: Running tasks are kept here so Python does not collect them early.
 _running: set[FunctionTask] = set()
+#: Tasks made while QGIS is still starting, started once it has (hold_tasks / release_tasks).
+_held: list[FunctionTask] = []
+_holding = False
+
+
+def hold_tasks() -> None:
+    """
+    QGIS is starting (the plugin loads before the other plugins): tasks wait
+    until release_tasks. A task's Python running while another plugin's
+    modules are still being imported crashed QGIS (signal 11 in sip, seen
+    with the catalog's 「センサーの取得」 at start, 2026-11-14).
+    """
+    global _holding
+    _holding = True
+
+
+def release_tasks() -> None:
+    """QGIS has started: the tasks held start now (those cancelled meanwhile not)."""
+    global _holding
+    _holding = False
+    held, _held[:] = list(_held), []
+    for task in held:
+        if task.discarded or task.status() not in (QgsTask.TaskStatus.Queued, QgsTask.TaskStatus.OnHold):
+            _running.discard(task)
+            continue
+        QgsApplication.taskManager().addTask(task)
 
 
 def run_task(description: str, work: Callable[[FunctionTask], Any], done: Optional[Callable[[Any], None]] = None,
@@ -180,7 +206,10 @@ def run_task(description: str, work: Callable[[FunctionTask], Any], done: Option
     _running.add(task)
     task.taskCompleted.connect(lambda: _running.discard(task))
     task.taskTerminated.connect(lambda: _running.discard(task))
-    QgsApplication.taskManager().addTask(task)
+    if _holding:
+        _held.append(task)
+    else:
+        QgsApplication.taskManager().addTask(task)
     return task
 
 
@@ -190,6 +219,11 @@ def cancel_all(wait_ms: int = 5000) -> int:
     `wait_ms` in all for them to stop (the plugin is unloaded: its docks and
     the local store go next, #88). The number cancelled.
     """
+    held = set(_held)
+    _held.clear()
+    for task in held:
+        task.discarded = True
+        _running.discard(task)
     tasks = list(_running)
     for task in tasks:
         task.discarded = True
