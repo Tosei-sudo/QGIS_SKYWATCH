@@ -15,6 +15,9 @@ from .link_id import ALPHABETS, DEFAULT_CHARS, DEFAULT_LENGTH, MAX_LENGTH, MIN_L
 from .result_file import ResultFile, result_file_of
 
 FORMATS = ("csv", "json")
+#: How a request's own area is written in a system's file (`areaShape`, tsudo 2026-11-14): as it is (a polygon,
+#: concave too), or the smallest rectangle turned any way that holds it (model.rotated_box).
+AREA_SHAPES = {"polygon": "依頼の範囲のまま", "rotatedBox": "範囲を囲む回転した最小の矩形"}
 ENCODINGS = {"utf-8": "utf-8", "utf8": "utf-8", "utf-8-sig": "utf-8-sig", "utf-8-bom": "utf-8-sig",
              "cp932": "cp932", "shift_jis": "cp932", "sjis": "cp932", "shift-jis": "cp932"}
 
@@ -68,6 +71,9 @@ class ExportSystem:
     #: Whether an area too big for one shot that a satellite takes only part of is shared out to the system's other
     #: satellites (`share`; tsudo, 2026-11-12: 「効率を考えたら、相互に分担すべきでしょ？」).
     share: bool = True
+    #: How a request's own area is written (`areaShape`, AREA_SHAPES): "polygon" as it is, "rotatedBox" the smallest
+    #: rectangle turned any way holding it. Rows of requests put together or shared out are boxes already.
+    area_shape: str = "polygon"
     format: str = "csv"
     folder: str = ""
     file_name: str = "{system}_{date:%Y%m%d}.{ext}"
@@ -201,6 +207,10 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
     if not (is_number(margin) and margin >= 0):
         problems.append(f"{at} の mergeMargin は 0 以上の数（メートル）で指定")
         margin = 500
+    area_shape = value.get("areaShape", "polygon")
+    if area_shape not in AREA_SHAPES:
+        problems.append(f"{at} の areaShape は {'・'.join(AREA_SHAPES)} のどれかで指定")
+        area_shape = "polygon"
     zone = UTC
     if "timeZone" in value:
         zone = parse_time_zone(value["timeZone"]) or UTC
@@ -249,6 +259,7 @@ def export_system_of(value: Any, problems: list[str], index: int) -> Optional[Ex
         merge=flags["merge"],
         merge_margin=float(margin),
         share=flags["share"],
+        area_shape=area_shape,
         format=fmt,
         folder=value["folder"] if isinstance(value.get("folder"), str) else "",
         file_name=value["fileName"] if isinstance(value.get("fileName"), str) and value["fileName"] else f"{{system}}_{{date:%Y%m%d}}.{fmt}",

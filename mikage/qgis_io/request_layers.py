@@ -13,7 +13,7 @@ from qgis.PyQt.QtCore import QDate, QDateTime, QVariant
 from ..core.request.model import ImagingRequest, square_rings
 from ..core.request.rows import NUMBERS, WRITTEN, row_of
 from ..core.request.store import DEFAULT_REQUEST_FIELDS
-from .geometry import polygon_of, shape_of, to_wgs84
+from .geometry import rings_geometry, shape_of, shape_rings, to_wgs84
 
 
 def requests_layer(requests: Sequence[ImagingRequest], name: str) -> QgsVectorLayer:
@@ -32,7 +32,7 @@ def requests_layer(requests: Sequence[ImagingRequest], name: str) -> QgsVectorLa
         row = row_of(r)
         f.setAttributes([row.get(DEFAULT_REQUEST_FIELDS[role]) for role in WRITTEN])
         if r.rings:
-            f.setGeometry(polygon_of([[tuple(p) for p in ring] for ring in r.rings]))
+            f.setGeometry(rings_geometry(r.rings))
         features.append(f)
     provider.addFeatures(features)
     layer.updateExtents()
@@ -51,7 +51,12 @@ def _plain(v):
 
 
 def layer_rows(layer: QgsVectorLayer, selected_only: bool, point_km: float) -> list[tuple[dict, list, str]]:
-    """The features of a layer as (values by field name, WGS 84 rings, 範囲 / 点); points become squares of `point_km`."""
+    """
+    The features of a layer as (values by field name, WGS 84 rings, 範囲 / 点):
+    a polygon its own shape (concave, with its holes and every part of a
+    multipart one), a point a square of `point_km`, a line or several points
+    the box around them.
+    """
     transform = to_wgs84(layer.crs())
     names = [f.name() for f in layer.fields()]
     feats = layer.getSelectedFeatures() if selected_only and layer.selectedFeatureCount() else layer.getFeatures()
@@ -62,7 +67,7 @@ def layer_rows(layer: QgsVectorLayer, selected_only: bool, point_km: float) -> l
         rings, kind = [], "範囲"
         if shape is not None:
             if shape.polygons:
-                rings = [[list(p) for p in ring] for ring in shape.polygons[0]]
+                rings = shape_rings(shape)
             elif len(shape.vertices) == 1:
                 rings, kind = square_rings(shape.vertices[0][0], shape.vertices[0][1], point_km), "点"
             else:

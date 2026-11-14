@@ -643,3 +643,65 @@ def test_the_form_tells_how_often_the_satellites_can_take_it(plugin):
     assert "#b91c1c" in form.chances_label.styleSheet()
     form.close()
     assert form._closing
+
+
+def test_polygons_of_any_shape_drawn_taken_and_saved(plugin):
+    """2026-11-14: a polygon drawn on the map, a multipart feature with a hole taken whole, and the ledger's rings."""
+    from mikage.core.request.model import polygons_of, ring_area
+    from mikage.qgis_io.request_layers import layer_rows, requests_layer
+
+    p, iface, fake, tmp_path = plugin
+    dock = p.api.requests
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None)
+
+    # 「地図で多角形」: the draw tool on the map, the area as drawn (concave), said to be a polygon.
+    dock.edit(new=True)
+    form = dock.form
+    form.polygon_button.setChecked(True)
+    assert iface.mapCanvas().mapTool() is form.draw_tool and not form.box_button.isChecked()
+    form.box_button.setChecked(True)
+    assert not form.polygon_button.isChecked()
+    form.polygon_button.setChecked(True)
+    corners = [[139.0, 35.0], [139.3, 35.2], [139.25, 35.27], [139.1, 35.17], [139.05, 35.25], [139.2, 35.35], [139.15, 35.42]]
+    form._polygon_drawn(corners)
+    assert form.rings == [corners + [corners[0]]] and form.shape_kind == "範囲"
+    assert not form.polygon_button.isChecked() and iface.mapCanvas().mapTool() is not form.draw_tool
+    assert form.area_label.text().startswith("多角形（頂点 7）: 経度 139.0000〜139.3000")
+    form.name.setText("U 字")
+    form._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 1), form.message.text()
+    # Back from the ledger clockwise (as Esri keeps outer rings): the same corners.
+    saved, = dock.requests[0].rings
+    assert saved == list(reversed(corners + [corners[0]]))
+
+    # A multipart feature with a hole: every part and the hole come in (before: the first part only).
+    layer = QgsVectorLayer("MultiPolygon?crs=EPSG:4326&field=名称:string", "区域", "memory")
+    f = QgsFeature(layer.fields())
+    f.setAttributes(["湾と島"])
+    f.setGeometry(QgsGeometry.fromWkt("MULTIPOLYGON(((135 34, 135.2 34, 135.2 34.2, 135 34.2, 135 34),"
+                                      "(135.05 34.05, 135.05 34.1, 135.1 34.1, 135.1 34.05, 135.05 34.05)),"
+                                      "((135.3 34, 135.4 34, 135.4 34.1, 135.3 34)))"))
+    layer.dataProvider().addFeatures([f])
+    QgsProject.instance().addMapLayer(layer)
+    (values, rings, kind), = layer_rows(layer, False, 10)
+    assert kind == "範囲" and [len(r) for r in rings] == [5, 5, 4]
+    assert [len(x) for x in polygons_of(rings)] == [2, 1]
+    # 「選択中の地物」 in the form: the same, said with its parts and hole.
+    layer.selectAll()
+    iface.setActiveLayer(layer)
+    dock.edit(new=True)
+    form = dock.form
+    form._from_selection()
+    assert len(form.rings) == 3 and form.area_label.text().startswith("多角形（2 部分・頂点 11・穴 1）")
+    form.name.setText("湾と島")
+    form._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 2), form.message.text()
+    # The ledger: outer rings clockwise, the hole anticlockwise.
+    row = next(r for r in fake.layers[LEDGER].rows if r["attributes"]["REQ_NAME"] == "湾と島")
+    assert [ring_area(r) > 0 for r in row["geometry"]["rings"]] == [False, True, False]
+    # 「レイヤーへ書き出し」: a multipolygon keeping the hole.
+    out = requests_layer([r for r in dock.requests if r.name == "湾と島"], "書き出し")
+    g = next(out.getFeatures()).geometry()
+    assert g.isMultipart() and len(g.asMultiPolygon()) == 2 and len(g.asMultiPolygon()[0]) == 2
+    assert abs(g.area() - (0.04 - 0.0025 + 0.005)) < 1e-9

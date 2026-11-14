@@ -906,6 +906,10 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "utf-8",
   "utf-8-sig"
  ],
+ "areaShapes": {
+  "polygon": "依頼の範囲のまま",
+  "rotatedBox": "範囲を囲む回転した最小の矩形"
+ },
  "auditKinds": {
   "session": "起動・終了",
   "config": "設定ファイルの読み込み",
@@ -1478,6 +1482,7 @@ const SPEC = [
         B("merge", "近い依頼を 1 回の撮像にまとめる（merge）", { help: "既定 true: 同じパスで連続シーン（scenesPerPass）に収まる依頼は 1 行にまとめ、範囲はまとめた依頼を囲むパスに平行な四角" }),
         N("mergeMargin", "まとめるときの余裕（m）", { min: 0, ph: "500", help: "まとめた依頼を囲む四角が、撮像の枠（幅・連続シーンの長さ）の内側にこれだけ残るときだけまとめる。システム側の計画で 1 回に収まらず 2 オーダーにならないように。分担の行の範囲（ショットの枠の内側）にも使う" }),
         B("share", "広い範囲を衛星で分担する（share）", { help: "既定 true: 1 ショットに収まらない広い範囲は、そのシステムの条件に合う衛星のパスで分けて撮る（1 回分を 95% まで）。ファイルはショットごとに 1 行で、範囲はそのショットが撮る部分（項目 shareNo・shareCount・shareCoverage・coverage）。false で 1 つの衛星だけ" }),
+        S("areaShape", "依頼の範囲の書き方（areaShape）", Object.entries(K.areaShapes), { ph: "polygon", help: "既定 polygon: 依頼の範囲の形のまま（凹んだ形・穴・複数の部分も）。rotatedBox: 範囲を囲む、どの向きにも回せる最小の矩形（4 隅）。台帳はポリゴンのまま。まとめた行・分担の行・点の依頼は今までどおり" }),
         S("format", "形式", [["csv", "CSV（列を指定）"], ["json", "JSON（JSON Schema）"]], { ph: "csv", rerender: true }),
         T("folder", "出力フォルダ", { ph: "D:/requests/SYS-A" }), T("fileName", "ファイル名", { ph: "{system}_{date:%Y%m%d}.{ext}", help: "{system}・{date}・{date:%Y%m%d}・{run:%H%M}・{ext}。分けるときの番号 {part}・{part:%02d}・{parts}（ファイルの数）" }),
         N("maxPerFile", "1 ファイルの最大件数", { min: 1, ph: "上限なし", help: "これより多い日は、この件数ずつのファイルに分けて書き出す（優先度順）。ファイル名に {part} がなければ _1・_2 … を拡張子の前に付ける（1 ファイルで収まる日は付けない）" }),

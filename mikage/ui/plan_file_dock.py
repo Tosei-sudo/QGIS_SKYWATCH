@@ -661,19 +661,23 @@ class PlanFileDock(PluginDock):
         What 「地図に表示」 draws: each request shown with its own area (taken
         green, put together blue, held back grey), and the shots of the rows
         taken (the outline of the scenes, dashed; the area a merged row is
-        written with). The chosen one, its shot and the requests in it stand out.
+        written with). A row a system writes as the rectangle round its area
+        (`areaShape` rotatedBox) has that rectangle dashed in amber. The chosen
+        one, its shot and the requests in it stand out.
         """
         chosen = self.chosen
         mine = set(map(id, chosen.shots)) if chosen is not None else set()
         # The shots of an area shared out (分担) stand out together: the request's area is drawn once.
         head = (chosen.main or chosen) if chosen is not None else None
-        out, shots = [], {}
+        out, shots, boxes = [], {}, []
         for c in sorted(self.shown, key=lambda c: c is chosen or c is head):
             taken = c.result == TAKEN
             if taken and not c.member:
                 for s in c.shots:
                     # A shot of an area shared out: the part its row is written with.
                     shots[id(s)] = (s, row_rings(c, c.system.merge_margin)[0] if c.part and c.system else s.area_ring())
+                if c.system is not None and c.system.area_shape == "rotatedBox" and not c.part and not c.together and c.request.rings:
+                    boxes.append((row_rings(c, c.system.merge_margin, c.system.area_shape), "#d97706", 3 if c is head else 1, "", True))
             if not c.request.rings or c.main is not None:
                 continue
             color = ("#2563eb" if c.merged else "#16a34a") if taken else "#9ca3af"
@@ -681,7 +685,7 @@ class PlanFileDock(PluginDock):
             out.append(([[list(p[:2]) for p in r] for r in c.request.rings], color, 3 if c is head else 2 if fellow else 1,
                         (c.request.name or c.request.id) if c is head else ""))
         out += [([ring], "#7c3aed", 3 if id(s) in mine else 1, "", True) for s, ring in shots.values()]
-        return out
+        return out + boxes
 
     def draw(self) -> None:
         if not self.on_map.isChecked() or not self.isVisible() or self.plan is None:

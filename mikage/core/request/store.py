@@ -18,7 +18,7 @@ from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .groups import DEFAULT_GROUP_FIELDS
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
-    day_bounds,
+    day_bounds, polygons_of,
 )
 
 #: The attribute names used when the settings do not map a role.
@@ -231,8 +231,13 @@ def _signed_area(ring: Sequence[Sequence[float]]) -> float:
 
 
 def esri_rings(rings: Sequence) -> list:
-    """Rings with outer rings clockwise, as Esri wants them."""
-    return [list(reversed(r)) if _signed_area(r) > 0 else [list(p) for p in r] for r in rings]
+    """Rings as Esri wants them: outer rings clockwise, holes anticlockwise (model.polygons_of tells which is which)."""
+    out = []
+    for polygon in polygons_of(rings):
+        for i, r in enumerate(polygon):
+            clockwise = _signed_area(r) < 0
+            out.append([list(p) for p in r] if clockwise == (i == 0) else list(reversed(r)))
+    return out
 
 
 def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
