@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 新着画像（大きな画面）: cards one under another, each with a picture, the newest (bottom) marked -->
+  <rect x="3" y="3" width="26" height="11" rx="2" fill="#f8fafc" stroke="#475569" stroke-width="1.6"/>
+  <rect x="5.5" y="5.5" width="8" height="6" rx="1" fill="#93c5fd"/>
+  <path d="M16 7h10M16 10.5h7" stroke="#64748b" stroke-width="1.6" stroke-linecap="round"/>
+  <rect x="3" y="17" width="26" height="12" rx="2" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.6"/>
+  <rect x="3" y="17" width="3" height="12" rx="1" fill="#2563eb"/>
+  <rect x="8" y="19.5" width="8" height="7" rx="1" fill="#60a5fa"/>
+  <path d="M18.5 21.5h8M18.5 25h5.5" stroke="#1d4ed8" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

@@ -43,6 +43,8 @@ from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.list_views import set_column_drag
 from .ui.moving_target_dialog import MovingTargetDialog
 from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
+from .ui.central_views import CentralViews
+from .ui.notice_feed import NoticeFeed
 from .ui.notices_dock import NoticesDock
 from .ui.offline_status import OfflineController
 from .ui.audit_status import AuditKeeper
@@ -73,7 +75,7 @@ MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "年間撮像上限…"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
-    ("画像", ["画像カタログ", "通知", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
+    ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
     ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…",
@@ -83,6 +85,8 @@ MENU_GROUPS = [
 ]
 #: In the menu itself, after the groups (behind a separator).
 MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
+#: The 新着画像 page's key beside the map (ui/central_views.py).
+NOTICE_FEED = "notices"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
@@ -290,6 +294,8 @@ class MikagePlugin:
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
+        self.central: Optional[CentralViews] = None
+        self.notice_feed: Optional[NoticeFeed] = None
         self.startup_layers: Optional[StartupLayers] = None
         self.base_maps: Optional[BaseMapSwitch] = None
         self.webmaps: Optional[WebMapDialogs] = None
@@ -691,13 +697,20 @@ class MikagePlugin:
         self.toolbar_buttons = ToolbarButtons(self.toolbar, self._entries_in_menu_order(), first_setup.role)
         self.toolbar_buttons.apply()
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
-        self.shortcuts = Shortcuts(self.iface, self.docks)
+        self.shortcuts = Shortcuts(self.iface, self.docks, toggle_feed=self.toggle_notice_feed)
         self.clock.step("メニュー・ツールバー")
         self._add_preload_items()
         self.context.configChanged.connect(self._config_read_for_preload)
         self._config_asked = self.clock.now()
         self.context.reload()
+        # The pages beside the map open when QGIS was last closed (behind the map): once QGIS has started.
+        # Changing its map area while it is still being built (plugins load before) made QGIS crash.
         started = getattr(self.iface, "initializationCompleted", None)
+        if self.central is not None:
+            if self.iface.mainWindow().isVisible() or started is None:
+                self.central.restore()
+            else:
+                started.connect(self._restore_views)
         if self.iface.mainWindow().isVisible() or started is None:
             # Installed or turned on while QGIS runs (or no such signal): started already.
             self._qgis_ready()
@@ -742,6 +755,14 @@ class MikagePlugin:
             self.preloader.add(key, PRELOAD_ITEMS[key], start)
         self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
         self.preloader.finished.connect(self._preload_finished)
+
+    def _restore_views(self) -> None:
+        try:
+            self.iface.initializationCompleted.disconnect(self._restore_views)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        # A moment later: QGIS has put back its own window layout and map area by then.
+        QTimer.singleShot(0, lambda: self.central.restore() if self.central is not None else None)
 
     def _qgis_ready(self) -> None:
         """QGIS has started (its window shown): the reads ahead begin once the settings file is read."""
@@ -802,6 +823,9 @@ class MikagePlugin:
             return True
         if action.menu() is not None:  # a submenu (背景地図): shown where the mouse is
             action.menu().popup(QCursor.pos())
+            return True
+        if action.objectName() == "SatObsNoticeFeed":  # the page, not back to the map when it is in front
+            self.show_notice_feed()
             return True
         action.trigger()
         return True
@@ -983,7 +1007,23 @@ class MikagePlugin:
         def unread(n: int) -> None:
             self.notices_action.setText(tr("通知") + (f"（{n}）" if n else ""))
             self.notices_action.setIcon(badged(bell, n))
+            if self.central is not None:
+                self.central.set_title(NOTICE_FEED, tr("新着画像") + (f"（{n}）" if n else ""))
 
+        # 「新着画像」 (tsudo, 2026-11-14): the notices as cards on a large page in the place of the map, switched
+        # with it by tabs over the map area (ui/central_views.py, ui/notice_feed.py).
+        self.central = CentralViews(self.iface)
+        self.notice_feed = NoticeFeed(self.iface, self.context, notices)
+        self.notice_feed.show_map = self.central.show_map
+        feed_icon = QIcon(os.path.join(HERE, "resources", "notice_feed.svg"))
+        self.central.add_view(NOTICE_FEED, tr("新着画像"), feed_icon, self.notice_feed)
+        notices.show_feed = self.show_notice_feed
+        feed_action = QAction(feed_icon, tr("新着画像（大きな画面）"), self.iface.mainWindow())
+        feed_action.setObjectName("SatObsNoticeFeed")
+        feed_action.setToolTip(tr("新着画像をカードで並べた大きな画面と地図を切り替え（地図の上のタブでも）"))
+        feed_action.triggered.connect(lambda _on=False: self.toggle_notice_feed())
+        self._add_to_menu(feed_action)
+        self.actions.append(feed_action)
         notices.unread_changed = unread
         self.docks["SatObsImagingPlan"].on_reminder = notices.add_plan_notice
         # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
@@ -1034,6 +1074,22 @@ class MikagePlugin:
         QgsProject.instance().layersAdded.connect(self.edit_stamp_layers.layers_added)
         QgsProject.instance().layersRemoved.connect(self.edit_stamp_layers.layers_removed)
         self.edit_stamp_layers.layers_added(QgsProject.instance().mapLayers().values())
+
+    def show_notice_feed(self) -> None:
+        """The 新着画像 page in front (opened when it was not); the 通知 dock where QGIS's map area can't hold it."""
+        if self.central is not None and self.central.open(NOTICE_FEED):
+            return
+        dock = self.docks.get("SatObsNotices")
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+
+    def toggle_notice_feed(self) -> None:
+        """The 新着画像 page and the map in turn (the menu, toolbar and Ctrl+Alt+N)."""
+        if self.central is not None and self.central.available:
+            self.central.toggle(NOTICE_FEED)
+        else:
+            self.show_notice_feed()
 
     def _time_zones_changed(self) -> None:
         if getattr(self, "time_zone_fields", None) is not None:
@@ -1328,6 +1384,10 @@ class MikagePlugin:
                 self.iface.initializationCompleted.disconnect(self._qgis_ready)
             except (TypeError, RuntimeError, AttributeError):
                 pass
+            try:
+                self.iface.initializationCompleted.disconnect(self._restore_views)
+            except (TypeError, RuntimeError, AttributeError):
+                pass
             self.preloader.deleteLater()
             self.preloader = None
         if getattr(self, "shortcuts", None) is not None:
@@ -1477,6 +1537,15 @@ class MikagePlugin:
             self.dock_layouts.deleteLater()
             self.dock_layouts = None
         self.actions = []
+        if self.notice_feed is not None:
+            self.notice_feed.close_down()
+        if self.central is not None:
+            self.central.unload()
+            self.central = None
+        if self.notice_feed is not None:
+            self.notice_feed.setParent(None)
+            self.notice_feed.deleteLater()
+            self.notice_feed = None
         for dock in self.docks.values():
             if hasattr(dock, "close_down"):
                 dock.close_down()

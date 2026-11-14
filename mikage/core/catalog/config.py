@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from ..util import is_name, is_number, is_record, is_url, layer_url
 from .images import image_patterns_of
+from .thumbnail import FootprintLayer, ThumbnailPattern, footprint_layers_of, thumbnail_of
 
 ROLE_LABELS = {"id": "画像ID", "acquired": "撮像日時", "registered": "登録日時", "systemRegistered": "システム登録日時", "sensor": "センサー", "angle": "角度", "azimuth": "方位角"}
 #: Every role of `fields` (`source` and `keywords` may be several names).
@@ -39,6 +40,10 @@ class CatalogConfig:
     #: `imageFiles: false`: the catalog lists images whose files are elsewhere only (another system's raw data):
     #: no 「開く」, their observations recorded without the file (「ファイルなしで記録」); `fields.source` not needed.
     image_files: bool = True
+    #: 「新着画像」 cards (tsudo, 2026-11-14): where an image's thumbnail is (a pattern, thumbnail.py); None: its footprint drawn instead.
+    thumbnail: Optional["ThumbnailPattern"] = None
+    #: The layers whose features over an image its card names (「写っている地物」).
+    footprint_layers: list["FootprintLayer"] = field(default_factory=list)
 
     def label_of(self, role: str) -> str:
         """The heading of a role: the settings file's `labels`, else the viewer's default."""
@@ -150,6 +155,8 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
     if "orbitHeight" in value and not (is_number(height) and height > 0):
         problems.append(f"{at} の orbitHeight は衛星の高度（km）で指定")
     patterns = image_patterns_of(value["imagePatterns"], problems, f"{at}.imagePatterns") if "imagePatterns" in value else {}
+    thumbnail = thumbnail_of(value.get("thumbnail"), problems, f"{at}.thumbnail")
+    footprint_layers = footprint_layers_of(value.get("footprintLayers"), problems, f"{at}.footprintLayers")
     label, token, where, most = value.get("label"), value.get("token"), value.get("where"), value.get("maxResults")
     return CatalogConfig(
         label=label if isinstance(label, str) and label else f"カタログ {index + 1}",
@@ -164,6 +171,8 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         orbit_height=height if is_number(height) and height > 0 else 600,
         image_patterns=patterns,
         image_files=files,
+        thumbnail=thumbnail,
+        footprint_layers=footprint_layers,
     )
 
 

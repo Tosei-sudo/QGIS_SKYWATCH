@@ -137,11 +137,14 @@ class WatchNotice:
     #: The image as an Esri feature (WGS 84).
     feature: dict[str, Any]
     kind: Optional[str] = None
+    #: What was found out about the image later and kept with it: `contents`, the features of the catalog's
+    #: `footprintLayers` over it by layer key (「写っている地物」 of the 新着画像 cards).
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return {"id": self.id, "watchId": self.watch_id, "watchName": self.watch_name, "catalogLabel": self.catalog_label,
                 "found": self.found, "read": self.read, "imageId": self.image_id, "acquired": self.acquired,
-                "sensor": self.sensor, "feature": self.feature, "kind": self.kind}
+                "sensor": self.sensor, "feature": self.feature, "kind": self.kind, **({"extra": self.extra} if self.extra else {})}
 
     @staticmethod
     def from_json(d: dict[str, Any]) -> "WatchNotice":
@@ -149,7 +152,7 @@ class WatchNotice:
             id=str(d["id"]), watch_id=str(d.get("watchId") or ""), watch_name=str(d.get("watchName") or ""),
             catalog_label=str(d.get("catalogLabel") or ""), found=float(d.get("found") or 0), read=bool(d.get("read")),
             image_id=str(d.get("imageId") or ""), acquired=d.get("acquired"), sensor=str(d.get("sensor") or ""),
-            feature=d.get("feature") or {}, kind=d.get("kind"),
+            feature=d.get("feature") or {}, kind=d.get("kind"), extra=d.get("extra") if isinstance(d.get("extra"), dict) else {},
         )
 
 

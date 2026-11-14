@@ -13,7 +13,7 @@ Two kinds:
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtGui import QKeySequence
@@ -32,6 +32,7 @@ GLOBAL = [
     ("ShowCatalog", "画像カタログを開く", "Ctrl+Alt+I"),
     ("ShowImagingPlan", "撮像計画ドックを開く", "Ctrl+Alt+K"),
     ("ShowRequests", "撮像依頼ドックを開く", "Ctrl+Alt+Q"),
+    ("ToggleNoticeFeed", "新着画像（大きな画面）と地図の切り替え", "Ctrl+Alt+N"),
     ("NextImage", "観測記録: 次の画像", "Ctrl+Alt+PgDown"),
     ("PreviousImage", "観測記録: 前の画像", "Ctrl+Alt+PgUp"),
     ("ToggleRecording", "観測記録: 記録の開始・終了", "Ctrl+Alt+E"),
@@ -75,7 +76,7 @@ def dock_key(parent, name: str, label: str, default: str, slot: Callable, widget
 class Shortcuts:
     """The plugin's main-window actions with keys (`plugin.shortcuts`)."""
 
-    def __init__(self, iface, docks: dict):
+    def __init__(self, iface, docks: dict, toggle_feed: Optional[Callable[[], None]] = None):
         self.iface = iface
         self.docks = docks
         self.actions: dict[str, QAction] = {}
@@ -84,6 +85,7 @@ class Shortcuts:
             "ShowCatalog": lambda: self.show_dock("SatObsImageCatalog"),
             "ShowImagingPlan": lambda: self.show_dock("SatObsImagingPlan"),
             "ShowRequests": lambda: self.show_dock("SatObsRequests"),
+            "ToggleNoticeFeed": lambda: toggle_feed() if toggle_feed else self.show_dock("SatObsNotices"),
             "NextImage": lambda: self._observations("step", 1),
             "PreviousImage": lambda: self._observations("step", -1),
             "ToggleRecording": lambda: self._observations("toggle_recording"),
