@@ -33,6 +33,7 @@ from qgis.PyQt.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, 
 from ..core import audit
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
+from .fit import fit_text
 
 LOG_TAG = "MIKAGE"
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -188,6 +189,7 @@ class AuditDialog(QDialog):
 
     def __init__(self, keeper: AuditKeeper, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.keeper = keeper
         self._task = None
         self.setWindowTitle(tr("監査ログ"))

@@ -2427,7 +2427,7 @@ scripts/
   build_zip.py         配布用の zip を作る（導入）
   make_plugin_repo.py  社内のプラグインリポジトリ（plugins.xml）を作る
   mock_esri/           Esri なしで試すモックサーバー
-  help_shots/          ヘルプの「画面つきの手順書」の写真を撮り直す（QGIS を仮想画面で動かす）
+  help_shots/          ヘルプの「画面つきの手順書」の写真を撮り直す・画面の重なりを点検する（QGIS を仮想画面で動かす）
   compare_viewer/      ビューアとの数値比較
   ai_bench/            AI 学習のネットワークの精度比較（合成の場面）
 docs/                  ビューアとの違い・撮像依頼の設計書・雲量ファイルの仕様・ArcGIS 側の準備
@@ -2449,6 +2449,15 @@ MIKAGE_SGP4=bundled python3 -m pytest        # 同梱の純 Python 版 SGP4 で
 - `-n auto` は pytest-xdist の並列実行。NumPy の BLAS は 1 プロセス 1 スレッド（`tests/conftest.py`）。並列でなくても動く（高速版で約 1 分 45 秒）
 - pytest-timeout があれば、1 件 5 分を超えたテストは全スレッドのスタックを出して止める（固まったまま待たない）
 - NumPy 2 では QGIS / GDAL の `gdal_array` が読めず約 200 件が落ちるので、テストは始まる前に止まる。`pip uninstall numpy` でシステムの 1.x に戻す
+
+### 画面の重なりの点検（本物の QGIS で）
+
+```
+python3.12 scripts/help_shots/check_layout.py --out /tmp/layout            # 約 10 分
+python3.12 scripts/help_shots/check_layout.py --out /tmp/layout --font 12  # 文字を大きくして
+```
+
+ヘルプの写真と同じしくみ（Xvfb・モックサーバー）で本物の QGIS を起動し、担当をすべて選んだ状態で、すべてのドック（タブごと・幅 440 / 300 ピクセル）、メニューから開く画面（開いたときと一番小さくしたとき）、撮像依頼・イベントのフォーム、新着画像（大きな画面）、データを入れた状態（カタログの検索結果・観測記録のフォーム・計画の計算結果など）を撮って `--out` に PNG で書き、`mikage/tests/layout_probe.py` で文字や部品の重なり・切れを調べて `problems.json` に画面ごとに書く（問題がなければ `"problems": []`）。`--parts docks,dialogs,forms,feed,filled` で一部だけ、`--only <名前の一部>` で絞る、`--widths 440,300` でドックの幅を変える。画面を足したり並びを変えたりしたら流して、問題の出た写真を目で見る。テスト（`tests/test_qgis_layout_overlap.py`）は、すべてのドックの重なり、`ui/` のすべてのダイアログが `fit_text`（`ui/fit.py`: 折り返す文字のある画面が行の要る高さより小さくならない）を使っていることなどを確かめる
 
 ### Esri なしで試す（モックサーバー）
 

@@ -24,6 +24,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.obs.drafts import KIND as DRAFT
 from ..core.offline import CHECK, KINDS, Pending
 from .docks import ask_no, plain_label, plain_tip
+from .fit import fit_text
 from .list_views import column_menus
 
 #: Rows that need the person (someone else changed the record): orange.
@@ -54,6 +55,7 @@ def state_text(p: Pending) -> str:
 class OutboxDialog(QDialog):
     def __init__(self, controller, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.controller = controller
         self.setWindowTitle(tr("送信待ち"))
         self.resize(820, 400)

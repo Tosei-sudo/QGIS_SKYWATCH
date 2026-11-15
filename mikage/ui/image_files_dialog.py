@@ -13,6 +13,8 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
+from .fit import fit_text
+
 
 def _tr(text: str) -> str:
     return QCoreApplication.translate("ImageFilesDialog", text)
@@ -23,6 +25,7 @@ class ImageFilesDialog(QDialog):
 
     def __init__(self, record_id: str, files: list[str], more: bool = False, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        fit_text(self)
         self._only: Optional[str] = None
         self.setWindowTitle(_tr("開く画像の選択"))
         self.resize(520, 420)

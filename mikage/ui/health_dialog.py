@@ -17,6 +17,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.health import NOTE, OK, PROBLEM, Result, check_all, report_text
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
+from .fit import fit_text
 
 COLORS = {PROBLEM: "#b91c1c", NOTE: "#b45309", OK: "#15803d"}
 
@@ -28,6 +29,7 @@ def tr(text: str) -> str:
 class HealthDialog(QDialog):
     def __init__(self, context, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.results: list[Result] = []
         self.checked_at = ""

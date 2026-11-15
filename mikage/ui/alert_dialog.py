@@ -34,6 +34,7 @@ from ..core.obs.place_cache import areas_at, points_of
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
+from .fit import fit_text
 from .list_views import column_menus
 
 DAY_MS = 86_400_000
@@ -69,6 +70,7 @@ class AlertDialog(QDialog):
 
     def __init__(self, dock, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock = dock
         self.setWindowTitle(self.tr("通報"))
         self.resize(900, 600)

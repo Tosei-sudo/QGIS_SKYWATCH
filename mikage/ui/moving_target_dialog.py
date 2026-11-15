@@ -25,6 +25,7 @@ from ..core.plan.output import local_text
 from ..qgis_io.geometry import to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from .last_inputs import InputMemory
+from .fit import fit_text
 
 #: The attributes of a target: role, label, what it does.
 ROLES = [
@@ -52,6 +53,7 @@ class MovingTargetDialog(QDialog):
 
     def __init__(self, iface, plan: Callable[[list, str], None], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.iface = iface
         self.plan_targets = plan
         self.setWindowTitle(self.tr("移動目標撮像計画"))

@@ -31,6 +31,7 @@ from ..core.obs.place_cache import areas_at, points_of
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
+from .fit import fit_text
 from .last_inputs import InputMemory
 
 #: The place choices (their data, their label).
@@ -51,6 +52,7 @@ class ExportDialog(QDialog):
 
     def __init__(self, dock, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock = dock
         self.canvas = dock.canvas
         self.setWindowTitle(self.tr("観測記録のエクスポート"))

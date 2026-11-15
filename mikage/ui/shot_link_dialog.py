@@ -32,6 +32,7 @@ from ..core.request.store import history_where, load_day, load_history, load_sho
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import ask_no
+from .fit import fit_text
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 
@@ -56,6 +57,7 @@ class ShotLinkDialog(QDialog):
 
     def __init__(self, dock, parent=None, saved: Optional[Callable[[], None]] = None):
         super().__init__(parent or dock)
+        fit_text(self)
         self.dock = dock
         self.context = dock.context
         #: Told when something was saved (the 「計画と実績の照合」 list reads the rows again).

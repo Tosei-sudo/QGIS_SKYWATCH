@@ -8,7 +8,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,6 +25,7 @@ from ..core.obs import place_cache
 from ..qgis_io import overviews_io, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs
+from .fit import fit_text
 
 
 class SettingsDialog(QDialog):
@@ -34,6 +35,7 @@ class SettingsDialog(QDialog):
         core/roles.py); without it the settings file can be chosen only while none is.
         """
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.setWindowTitle(self.tr("MIKAGE の設定"))
         self.resize(760, 560)
@@ -63,49 +65,51 @@ class SettingsDialog(QDialog):
             self.source.setToolTip(self.tr("設定ファイルの切り替えは担当「管理者」の機能です（メニュー「担当と個人設定…」）"))
             browse.setEnabled(False)
             load.setToolTip(self.tr("今の設定ファイルを読み直す"))
-        row = QHBoxLayout()
-        row.addWidget(self.source, 1)
-        row.addWidget(browse)
-        row.addWidget(load)
+        buttons_row = QHBoxLayout()
+        buttons_row.addWidget(browse)
+        buttons_row.addWidget(load)
 
         self.recorder = QLineEdit(settings.recorder_setting())
         self.recorder.setPlaceholderText(self.tr("空欄なら認証設定のユーザー名"))
 
-        form = QFormLayout()
-        form.addRow(self.tr("設定ファイル"), row)
-        form.addRow(self.tr("記録者"), self.recorder)
+        # A grid, not a form: a form row of a wrapped text and a button was given one line's height where the text
+        # needed two (drawn over the next row; found 2026-11-15 in a real QGIS).
+        form = QGridLayout()
+        form.setColumnStretch(1, 1)
+        form.addWidget(QLabel(self.tr("設定ファイル")), 0, 0)
+        form.addWidget(self.source, 0, 1)
+        form.addLayout(buttons_row, 0, 2)
+        form.addWidget(QLabel(self.tr("記録者")), 1, 0)
+        form.addWidget(self.recorder, 1, 1, 1, 2)
         self.startup_layers = QCheckBox(self.tr("起動時と新規プロジェクトで、設定ファイルのレイヤー（layers）を追加"))
         self.startup_layers.setChecked(settings.startup_layers_on())
-        form.addRow("", self.startup_layers)
+        form.addWidget(self.startup_layers, 2, 1, 1, 2)
         self.cache = QLabel()
         self.cache.setWordWrap(True)
         self.clear_cache = QPushButton(self.tr("キャッシュを消去"))
         self.clear_cache.setToolTip(self.tr("書き込めないフォルダの画像のピラミッド（.ovr）を消す。使用中のことがあるので、次に QGIS を起動したときに消去"))
         self.clear_cache.clicked.connect(self._clear_cache)
-        cache_row = QHBoxLayout()
-        cache_row.addWidget(self.cache, 1)
-        cache_row.addWidget(self.clear_cache)
-        form.addRow(self.tr("ピラミッドのキャッシュ"), cache_row)
+        form.addWidget(QLabel(self.tr("ピラミッドのキャッシュ")), 3, 0)
+        form.addWidget(self.cache, 3, 1)
+        form.addWidget(self.clear_cache, 3, 2)
         self._show_cache()
         self.places = QLabel()
         self.places.setWordWrap(True)
         self.clear_places = QPushButton(self.tr("控えを消去"))
         self.clear_places.setToolTip(self.tr("通報・エクスポート・式の関数で読んだ地名・国のポリゴンの控えを消す（次に使うときサーバーから読み直す）"))
         self.clear_places.clicked.connect(self._clear_places)
-        places_row = QHBoxLayout()
-        places_row.addWidget(self.places, 1)
-        places_row.addWidget(self.clear_places)
-        form.addRow(self.tr("地名・国の控え"), places_row)
+        form.addWidget(QLabel(self.tr("地名・国の控え")), 4, 0)
+        form.addWidget(self.places, 4, 1)
+        form.addWidget(self.clear_places, 4, 2)
         self._show_places()
         self.last_inputs = QLabel(self.tr("前回の入力を次の入力の初期値に使用（このユーザープロファイルに保存）"))
         self.last_inputs.setWordWrap(True)
         self.forget_inputs = QPushButton(self.tr("覚えた値を消去"))
         self.forget_inputs.setToolTip(self.tr("撮像依頼・撮像計画の衛星と条件・観測記録の種別などで覚えた前回の入力を消し、各フォームの既定値に戻す"))
         self.forget_inputs.clicked.connect(self._forget_inputs)
-        inputs_row = QHBoxLayout()
-        inputs_row.addWidget(self.last_inputs, 1)
-        inputs_row.addWidget(self.forget_inputs)
-        form.addRow(self.tr("入力の初期値"), inputs_row)
+        form.addWidget(QLabel(self.tr("入力の初期値")), 5, 0)
+        form.addWidget(self.last_inputs, 5, 1)
+        form.addWidget(self.forget_inputs, 5, 2)
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -206,6 +210,10 @@ class SettingsDialog(QDialog):
                 select.setToolTip(self.tr("設定ファイルに token あり（認証設定を選ぶと token は不使用）"))
             self.services.setCellWidget(i, 3, select)
             self._selects[s.url] = select
+        # The 認証設定 column as wide as its choice and buttons (narrower, they were drawn over one another).
+        self.services.resizeColumnToContents(0)
+        if self._selects:
+            self.services.setColumnWidth(3, max(s.sizeHint().width() for s in self._selects.values()))
         self.services.resizeRowsToContents()
         self.problems.clear()
         self.problems.addItems(self.context.problems)

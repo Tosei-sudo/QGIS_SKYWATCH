@@ -21,6 +21,7 @@ from ..core.ai.transfer import TRANSFER_ROLES, DetectionOutput, Plan, Target, mi
 from ..qgis_io import ai_transfer_io
 from ..qgis_io.tasks import run_task
 from . import last_inputs
+from .fit import fit_text
 
 
 def _tr(text: str) -> str:
@@ -30,6 +31,7 @@ def _tr(text: str) -> str:
 class TransferDialog(QDialog):
     def __init__(self, context, say: Callable[[str], None], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.say = say
         #: The target layers' descriptions, read once each (by URL).

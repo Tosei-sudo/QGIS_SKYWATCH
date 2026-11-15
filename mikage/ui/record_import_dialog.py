@@ -18,6 +18,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.obs import record_import as ri
 from ..qgis_io import record_import_io
 from .docks import ask_no, plain_label
+from .fit import fit_text
 
 try:
     VECTOR_LAYERS = QgsMapLayerProxyModel.Filter.VectorLayer
@@ -32,6 +33,7 @@ SHOWN_ROWS = 2000
 class RecordImportDialog(QDialog):
     def __init__(self, dock, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock = dock
         self.setWindowTitle(self.tr("観測記録の一括取込み"))
         self.resize(820, 720)

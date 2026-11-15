@@ -26,6 +26,7 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QToolBar,
     QToolButton, QVBoxLayout, QWidget,
 )
+from .fit import fit_text
 
 KEY = "mikage/toolbarButtons"
 
@@ -161,6 +162,7 @@ class ToolbarButtonsDialog(QDialog):
 
     def __init__(self, buttons: ToolbarButtons, parent: QWidget | None = None):
         super().__init__(parent)
+        fit_text(self)
         self.setObjectName("SatObsToolbarButtons")
         self.buttons = buttons
         self.role_name = buttons.role()

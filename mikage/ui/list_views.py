@@ -28,11 +28,12 @@ import json
 from typing import Any, Callable, Optional, Union
 
 from qgis.core import QgsSettings
-from qgis.PyQt.QtCore import QObject, Qt, QTimer
+from qgis.PyQt.QtCore import QObject, QSize, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QToolButton, QTreeView, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton, QSpinBox, QStyle, QToolButton, QTreeView, QVBoxLayout, QWidget,
 )
+from .fit import fit_text
 
 try:
     from qgis.PyQt.QtWidgets import QDoubleSpinBox
@@ -96,6 +97,21 @@ def widget_filter(widget: QWidget) -> Filter:
     raise TypeError(f"ビューで扱えない部品: {type(widget).__name__}")
 
 
+class MenuToolButton(QToolButton):
+    """
+    A text button that opens its menu: wide enough for the menu's small arrow
+    in its corner too (Qt leaves no room for it, so it was drawn over the
+    text's last letter).
+    """
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt's name)
+        hint = super().sizeHint()
+        return QSize(hint.width() + self.style().pixelMetric(QStyle.PixelMetric.PM_MenuButtonIndicator, None, self), hint.height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt's name)
+        return self.sizeHint()
+
+
 class ListViews(QObject):
     """The views of one list (a table view or widget): its 「ビュー」 button, the header's menu, the arrangement kept."""
 
@@ -131,7 +147,7 @@ class ListViews(QObject):
         #: The 「ビュー」 button (lists with named views; the others only have the header's menu).
         self.button: Optional[QToolButton] = None
         if button:
-            self.button = QToolButton()
+            self.button = MenuToolButton()
             self.button.setText(self.tr("ビュー"))
             self.button.setToolTip(self.tr("一覧の見え方（列の表示・順番、並べ替え、絞り込み）を名前を付けて保存・切り替え。"
                                            "列の表示・順番は見出しの右クリックでも"))
@@ -438,6 +454,7 @@ class ColumnsDialog(QDialog):
 
     def __init__(self, views: ListViews, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        fit_text(self)
         self.views = views
         self.setWindowTitle(self.tr("列の表示と順番"))
         layout = QVBoxLayout(self)

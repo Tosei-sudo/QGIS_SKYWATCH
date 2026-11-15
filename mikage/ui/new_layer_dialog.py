@@ -29,6 +29,7 @@ from ..core.layer_templates import (
 from ..qgis_io import scratch_layer as store
 from ..qgis_io.scratch_layer import field_design_of, geometry_of, scratch_layer
 from . import last_inputs
+from .fit import fit_text
 
 #: The table's columns: key, heading, tooltip.
 COLUMNS = [
@@ -64,6 +65,7 @@ class NewLayerDialog(QDialog):
 
     def __init__(self, iface, templates: Callable[[], list], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.iface = iface
         #: The organisation's templates (the settings file's), asked for each time the list is filled.
         self.config_templates = templates

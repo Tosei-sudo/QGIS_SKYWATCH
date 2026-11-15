@@ -16,6 +16,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.api_reference import ENTRIES, GROUPS, HOW_TO, Entry, entry
+from .fit import fit_text
 
 
 def _escape(text: str) -> str:
@@ -52,6 +53,7 @@ def _summary(value: Any) -> str:
 class ApiReferenceDialog(QDialog):
     def __init__(self, api, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.api = api
         self.setWindowTitle(self.tr("Python API リファレンス"))
         self.resize(900, 620)

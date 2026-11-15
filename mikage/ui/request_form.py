@@ -29,7 +29,7 @@ from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
 from qgis.PyQt.QtCore import QDate, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from ..core.request.chances import FORM_DAYS, form_span, form_text
@@ -43,6 +43,7 @@ from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_overlay import DrawTool
 from .docks import plain_label
+from .fit import VerticalScroll, fit_text
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT
@@ -83,6 +84,7 @@ class RequestForm(QDialog):
                  known: Optional[dict] = None, parent=None, satellites: Optional[Callable] = None,
                  batch: Optional[dict] = None):
         super().__init__(parent or iface.mainWindow())
+        fit_text(self)
         #: 「レイヤーから取り込み」: {"items": [(name, rings, 範囲 / 点)], "text": what they are}; None for one request.
         self.batch = batch
         self.iface = iface
@@ -142,10 +144,9 @@ class RequestForm(QDialog):
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
+        # As wide as the fields (the satellite tree and the rows of choices widen them after the window opens).
+        scroll = VerticalScroll()
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         self._body = body
