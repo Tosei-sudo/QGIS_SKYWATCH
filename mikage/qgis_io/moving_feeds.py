@@ -195,7 +195,7 @@ class MiniWebSocket(QObject):
 
 def new_websocket(parent: QObject):
     """Qt's QWebSocket when PyQt has it, else MiniWebSocket."""
-    if QWebSocket is not None and not os.environ.get("SATOBS_MINI_WEBSOCKET"):
+    if QWebSocket is not None and not os.environ.get("MIKAGE_MINI_WEBSOCKET"):
         return QWebSocket("", 13, parent)
     return MiniWebSocket(parent)
 

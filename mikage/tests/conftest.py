@@ -20,7 +20,7 @@ socketserver.BaseServer.serve_forever.__defaults__ = (0.05,)
 
 def pytest_addoption(parser):
     parser.addoption("--full", action="store_true", default=False,
-                     help="also the slow tests (AI training until it learns); SATOBS_FULL_TESTS=1 does the same")
+                     help="also the slow tests (AI training until it learns); MIKAGE_FULL_TESTS=1 does the same")
 
 
 def pytest_configure(config):
@@ -47,7 +47,7 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--full") or os.environ.get("SATOBS_FULL_TESTS") == "1":
+    if config.getoption("--full") or os.environ.get("MIKAGE_FULL_TESTS") == "1":
         return
     skip = pytest.mark.skip(reason="遅いテスト（--full で実行）")
     for item in items:

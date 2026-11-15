@@ -15,4 +15,4 @@ category=Plugins
 icon=resources/icon.svg
 experimental=True
 deprecated=False
-hasProcessingProvider=no
+hasProcessingProvider=yes

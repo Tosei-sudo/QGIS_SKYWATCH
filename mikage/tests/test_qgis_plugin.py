@@ -34,6 +34,33 @@ def clean_settings():
     QgsSettings().remove("mikage")
 
 
+def test_qgis_process_starts_only_the_processing_provider(tmp_path):
+    """qgis_process (metadata.txt hasProcessingProvider=yes) calls initProcessing() alone: no window, no docks."""
+    import configparser
+
+    from mikage import classFactory
+
+    meta = configparser.ConfigParser()
+    meta.read(os.path.join(os.path.dirname(HERE), "metadata.txt"), encoding="utf-8")
+    assert meta["general"]["hasProcessingProvider"] == "yes"
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"aiModels": [{"label": "船", "url": "./ships.onnx"}]}), encoding="utf-8")
+    settings.set_config_source(str(path))
+    plugin = classFactory(None)
+    plugin.initProcessing()
+    try:
+        registry = QgsApplication.processingRegistry()
+        assert registry.providerById("mikage") is plugin.provider
+        assert registry.algorithmById("mikage:geodesic_buffer") is not None
+        # The settings file is read for the algorithms (the AI models for 物体検出).
+        assert [m.label for m in plugin.context.config.ai_models] == ["船"]
+        assert plugin.docks == {}
+        plugin.initProcessing()  # once only (initGui calls it too)
+        assert len([p for p in registry.providers() if p.id() == "mikage"]) == 1
+    finally:
+        registry.removeProvider(plugin.provider)
+
+
 def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     from mikage import classFactory
 
