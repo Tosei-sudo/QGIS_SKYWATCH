@@ -11,6 +11,7 @@ from qgis.PyQt.QtCore import QRect  # noqa: E402
 from qgis.PyQt.QtGui import QGuiApplication  # noqa: E402
 
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
+from mikage.ui.dock_layouts import PRESETS  # noqa: E402
 
 
 @pytest.fixture
@@ -33,7 +34,7 @@ def test_every_dock_open_still_fits_a_small_window(plugin):
     for dock in plugin.docks.values():
         dock.show()
     plugin.place_docks()
-    for name in ("撮像計画の担当", "観測記録の担当", "画像判読"):
+    for name in (n for n, _groups in PRESETS):
         assert plugin.dock_layouts.use(name)
         window.resize(1280, 720)
         APP.processEvents()

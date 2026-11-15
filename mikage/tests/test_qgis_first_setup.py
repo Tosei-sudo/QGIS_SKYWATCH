@@ -43,7 +43,7 @@ def test_the_page_comes_on_the_first_start_only():
     page = plugin.setup_dialog
     assert page.windowTitle() == "最初の設定" and page.first
     # The examples of 「ドックのレイアウト」 to choose from, the first chosen, and none.
-    assert list(page.role_buttons) == ["撮像計画の担当", "観測記録の担当", "画像判読", ""]
+    assert list(page.role_buttons) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", ""]
     assert page.chosen_role() == "撮像計画の担当"
     page.reject()  # 「あとで」 also counts: not again
     plugin.unload()

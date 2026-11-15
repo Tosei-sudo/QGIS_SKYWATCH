@@ -70,6 +70,23 @@ def test_choosing_a_role_changes_the_buttons(plugin):
     assert shown(plugin) == toolbar_buttons.DEFAULT
 
 
+def test_the_requester_role_asks_and_looks_and_does_not_plan(plugin):
+    page = plugin.open_first_setup()
+    page.role_buttons["撮像を依頼する人"].setChecked(True)
+    page.accept()
+    APP.processEvents()
+    # The ledger and the day's plan at the right, the places' timeline below; nothing to calculate or write files with.
+    window, docks = plugin.iface.window, plugin.docks
+    opened = sorted(name for name, d in docks.items() if not d.isHidden())
+    assert opened == ["SatObsPlaceSchedule", "SatObsRequests", "SatObsSchedule"]
+    assert window.dockWidgetArea(docks["SatObsRequests"]) == Qt.DockWidgetArea.RightDockWidgetArea
+    assert window.dockWidgetArea(docks["SatObsPlaceSchedule"]) == Qt.DockWidgetArea.BottomDockWidgetArea
+    buttons = shown(plugin)
+    assert buttons == toolbar_buttons.ROLE_SETS["撮像を依頼する人"]
+    assert {"撮像依頼", "撮像予定", "地点ごとの撮像予定"} <= set(buttons)
+    assert not {"撮像計画", "撮像計画ファイル出力", "衛星パス"} & set(buttons)
+
+
 def test_own_buttons_are_kept_per_role(plugin):
     first_setup.set_role("画像判読")
     plugin.toolbar_buttons.apply()
