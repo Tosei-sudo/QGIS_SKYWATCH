@@ -3,7 +3,7 @@ Takes the screenshots of the help's 「画面つきの手順書」 (mikage/help/
 section #howto) again, in a real QGIS on a virtual screen against the Esri
 mock (scripts/mock_esri), and writes them to mikage/help/images/.
 
-    python3.12 scripts/help_shots/make_shots.py [--flows obs,request,plan,check] [--raw フォルダ] [--keep]
+    python3.12 scripts/help_shots/make_shots.py [--flows obs,request,plan,check,layer] [--raw フォルダ] [--keep]
 
 Run it with the Python QGIS uses (it needs qgis.PyQt and GDAL's osgeo).
 
@@ -97,7 +97,7 @@ def shrink(raw: str, out: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--flows", default="obs,request,plan,check", help="撮る手順（obs・request・plan・check のカンマ区切り、この順で）")
+    parser.add_argument("--flows", default="obs,request,plan,check,layer", help="撮る手順（obs・request・plan・check・layer のカンマ区切り、この順で）")
     parser.add_argument("--raw", help="加工前の画像を置くフォルダ（既定は一時フォルダ）")
     parser.add_argument("--out", default=IMAGES, help=f"画像の出力先（既定 {IMAGES}）")
     parser.add_argument("--keep", action="store_true", help="一時フォルダを消さない")
