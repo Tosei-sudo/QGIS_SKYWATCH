@@ -48,6 +48,14 @@ def test_the_page_comes_on_the_first_start_only():
     assert page.chosen_roles() == []
     assert "観測記録" in page.role_checks["観測記録の担当"].toolTip()  # the docks it opens
     assert page.where.text().startswith("この PC だけに保存")  # no table of roles in the settings file
+    # Nothing drawn over anything else: no text cut to fewer lines than it needs, nothing squeezed sideways.
+    from qgis.PyQt.QtWidgets import QLabel
+
+    APP.processEvents()
+    assert page.width() >= page.minimumSizeHint().width()
+    short = [lab.text() for lab in page.findChildren(QLabel)
+             if lab.isVisible() and lab.wordWrap() and lab.height() < lab.heightForWidth(lab.width())]
+    assert short == []
     page.reject()  # 「あとで」 also counts: not again
     plugin.unload()
     assert QgsSettings().value(first_setup.DONE_KEY) == "1"
