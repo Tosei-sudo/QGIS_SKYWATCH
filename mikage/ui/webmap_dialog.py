@@ -276,6 +276,11 @@ class WebMapSaveDialog(QDialog):
         return box.clickedButton() is yes
 
     def save_portal(self) -> None:
+        if not self.owner.allows("webmap.portal"):
+            from ..core.roles import refusal
+
+            self.status.setText(refusal("webmap.portal"))
+            return
         portal = self.portal.portal()
         if not portal:
             self.status.setText(_tr("ポータルの URL を入力"))
@@ -328,6 +333,8 @@ class WebMapDialogs(QObject):
         self.open_dialog = WebMapOpenDialog(self, iface.mainWindow())
         self.save_dialog = WebMapSaveDialog(self, iface.mainWindow())
         self.task = None
+        #: Whether the roles in use (core/roles.py) have a feature: saving to the portal is the administrators'.
+        self.allows: Callable[[str], bool] = lambda _feature: True
 
     def show_open(self) -> None:
         self.open_dialog.prepare()
@@ -336,6 +343,8 @@ class WebMapDialogs(QObject):
         self.open_dialog.item.setFocus()
 
     def show_save(self) -> None:
+        # Into the portal (an item others see) for the administrators; the JSON file for everyone.
+        self.save_dialog.portal_box.setVisible(self.allows("webmap.portal"))
         self.save_dialog.prepare()
         self.save_dialog.show()
         self.save_dialog.raise_()

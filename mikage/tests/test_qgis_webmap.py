@@ -380,6 +380,10 @@ def test_the_dialogs_open_an_item_and_save_over_it(server, plugin, monkeypatch, 
 
     dialogs.show_save()
     save = dialogs.save_dialog
+    # Into the portal: the administrators' (担当「管理者」); the JSON file for everyone.
+    assert not save.portal_box.isVisibleTo(save)
+    p.role_keeper.choose(["ADMIN"])
+    dialogs.show_save()
     assert save.title.text() == "テスト地図" and save.update.isVisibleTo(save)
     assert save.summary.text().startswith("5 レイヤーを書き込み")
     # Without a sign-in, nothing is sent.

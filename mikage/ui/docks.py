@@ -19,7 +19,7 @@ from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
-from ..core import audit
+from ..core import audit, roles
 from ..qgis_io.context import PluginContext
 
 
@@ -93,6 +93,28 @@ class PluginDock(QDockWidget):
         self.setWidget(scroll)
         self.scroll = scroll
         self.topLevelChanged.connect(lambda _: QTimer.singleShot(0, self.keep_on_screen))
+
+    #: Whether the person's roles (担当, core/roles.py) use a feature: the plugin sets it (`set_allows`).
+    allows: Callable[[str], bool] = staticmethod(lambda _feature: True)
+
+    def set_allows(self, allows: Callable[[str], bool]) -> None:
+        self.allows = allows
+        self.roles_changed()
+
+    def roles_changed(self) -> None:
+        """The roles in use changed: a dock shows only the buttons of the features they use (each dock its own)."""
+
+    def denied(self, feature: str) -> bool:
+        """
+        True when the roles in use do not have `feature` (its buttons are not
+        shown, but a double click or a script may still ask): why, in the dock's status.
+        """
+        if self.allows(feature):
+            return False
+        status = getattr(self, "status", None)
+        if isinstance(status, QLabel):
+            status.setText(roles.refusal(feature))
+        return True
 
     def reveal(self, widget: QWidget) -> None:
         """Scrolls the dock so that a part just shown (as a form under a list) is in view, once it is laid out."""

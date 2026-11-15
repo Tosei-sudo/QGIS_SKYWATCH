@@ -1,4 +1,4 @@
-"""「最初の設定」: shown only on the first start in a profile, the role's docks, docks in windows of their own, own settings."""
+"""「最初の設定」: shown only on the first start in a profile, the roles' docks, docks in windows of their own, own settings."""
 import pytest
 
 qgis_core = pytest.importorskip("qgis.core")
@@ -7,8 +7,9 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.core import QgsSettings  # noqa: E402
+from qgis.PyQt.QtCore import Qt  # noqa: E402
 
-from mikage.qgis_io import settings  # noqa: E402
+from mikage.qgis_io import roles_io, settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
 from mikage.ui import first_setup  # noqa: E402
 
@@ -42,9 +43,11 @@ def test_the_page_comes_on_the_first_start_only():
     wait_for(lambda: plugin.setup_dialog is not None and plugin.setup_dialog.isVisible(), ms=5000)
     page = plugin.setup_dialog
     assert page.windowTitle() == "最初の設定" and page.first
-    # The examples of 「ドックのレイアウト」 to choose from, the first chosen, and none.
-    assert list(page.role_buttons) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", ""]
-    assert page.chosen_role() == "撮像計画の担当"
+    # The roles to tick, as many as the person likes; none ticked at first.
+    assert list(page.role_checks) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "管理者"]
+    assert page.chosen_roles() == []
+    assert "観測記録" in page.role_checks["観測記録の担当"].toolTip()  # the docks it opens
+    assert page.where.text().startswith("この PC だけに保存")  # no table of roles in the settings file
     page.reject()  # 「あとで」 also counts: not again
     plugin.unload()
     assert QgsSettings().value(first_setup.DONE_KEY) == "1"
@@ -65,7 +68,7 @@ def test_a_role_with_docks_in_windows_of_their_own_and_own_settings():
     plugin = start()
     wait_for(lambda: plugin.setup_dialog is not None, ms=5000)
     page = plugin.setup_dialog
-    page.role_buttons["観測記録の担当"].setChecked(True)
+    page.role_checks["観測記録の担当"].setChecked(True)
     page.floating.setChecked(True)
     page.recorder.setText("  佐藤 ")
     page.points.setCurrentIndex(1)
@@ -77,7 +80,7 @@ def test_a_role_with_docks_in_windows_of_their_own_and_own_settings():
     assert all(d.isFloating() for d in plugin.docks.values())
     shown = [plugin.docks[n].geometry().topLeft() for n in open_names(plugin)]
     assert len(set((p.x(), p.y()) for p in shown)) == len(shown)  # cascaded, not on top of each other
-    assert first_setup.docks_floating() and first_setup.role() == "観測記録の担当"
+    assert first_setup.docks_floating() and first_setup.roles() == ["観測記録の担当"]
     assert plugin.dock_layouts.store.last == "観測記録の担当"
     obs = plugin.docks["SatObsObservations"]
     assert settings.recorder_setting() == "佐藤" and obs.observer_input.text() == "佐藤"
@@ -93,9 +96,10 @@ def test_a_role_with_docks_in_windows_of_their_own_and_own_settings():
 
     # From the menu again: back to joined to the main window.
     page = plugin.open_first_setup()
-    assert page.windowTitle() == "担当と個人設定" and page.floating.isChecked() and page.chosen_role() == "観測記録の担当"
+    assert page.windowTitle() == "担当と個人設定" and page.floating.isChecked() and page.chosen_roles() == ["観測記録の担当"]
     assert page.recorder.text() == "佐藤"
-    page.role_buttons["撮像計画の担当"].setChecked(True)
+    page.role_checks["観測記録の担当"].setChecked(False)
+    page.role_checks["撮像計画の担当"].setChecked(True)
     page.joined.setChecked(True)
     page.accept()
     APP.processEvents()
@@ -110,9 +114,53 @@ def test_no_role_keeps_the_docks():
     wait_for(lambda: plugin.setup_dialog is not None, ms=5000)
     before = open_names(plugin)
     page = plugin.setup_dialog
-    page.role_buttons[""].setChecked(True)
     page.accept()
     APP.processEvents()
     assert open_names(plugin) == before and not any(d.isFloating() for d in plugin.docks.values())
-    assert first_setup.role() == ""
+    assert first_setup.roles() == [] and roles_io.chosen_before()
+    plugin.unload()
+
+
+def test_two_roles_open_their_docks_together():
+    plugin = start()
+    wait_for(lambda: plugin.setup_dialog is not None, ms=5000)
+    page = plugin.setup_dialog
+    page.role_checks["撮像を依頼する人"].setChecked(True)
+    page.role_checks["画像判読"].setChecked(True)
+    page.accept()
+    APP.processEvents()
+    # 撮像を依頼する人: 撮像依頼・撮像予定・地点ごとの撮像予定; 画像判読: カタログ・観測記録・画像補正・影から高さ・スペクトル.
+    opened = open_names(plugin)
+    assert {"SatObsRequests", "SatObsSchedule", "SatObsPlaceSchedule", "SatObsImageCatalog", "SatObsObservations"} <= set(opened)
+    assert first_setup.roles() == ["撮像を依頼する人", "画像判読"]
+    assert plugin.dock_layouts.store.last == ""  # no one layout of these
+    # Each side of the window: the first role's group in front, the other's docks as tabs with it.
+    window = plugin.iface.window
+    right = [n for n in opened if window.dockWidgetArea(plugin.docks[n]) == Qt.DockWidgetArea.RightDockWidgetArea]
+    assert "SatObsRequests" in right and len(right) >= 2
+    plugin.unload()
+
+
+def test_the_docks_stay_where_they_are_when_asked():
+    plugin = start()
+    wait_for(lambda: plugin.setup_dialog is not None, ms=5000)
+    before = open_names(plugin)
+    page = plugin.setup_dialog
+    page.role_checks["撮像計画の担当"].setChecked(True)
+    page.relayout.setChecked(False)
+    page.accept()
+    APP.processEvents()
+    # Only the docks of features the roles do not have went away (観測記録 is the observers').
+    assert open_names(plugin) == [n for n in before if plugin.allows(plugin._dock_features.get(n, ""))]
+    plugin.unload()
+
+
+def test_the_one_role_chosen_before_becomes_the_ticked_one():
+    QgsSettings().setValue(first_setup.DONE_KEY, "1")
+    QgsSettings().setValue("mikage/role", "画像判読")
+    plugin = start(fresh=False)
+    assert plugin.role_keeper.names == ["画像判読"] and first_setup.roles() == ["画像判読"]
+    page = plugin.open_first_setup()
+    assert page.chosen_roles() == ["画像判読"]
+    page.reject()
     plugin.unload()

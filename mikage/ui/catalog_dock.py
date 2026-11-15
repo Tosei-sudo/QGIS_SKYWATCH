@@ -476,7 +476,11 @@ class CatalogDock(PluginDock):
             self.buttons[key].setVisible(files)
         self.close_previous.setVisible(files)
         self.zoom_opened.setVisible(files)
-        self.buttons["record"].setVisible(not files)
+        self.buttons["record"].setVisible(not files and self.allows("catalog.record"))
+
+    def roles_changed(self) -> None:
+        """「ファイルなしで記録」: for those who record observations (core/roles.py)."""
+        self._show_file_buttons()
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
         """「フリーワード」 only for a catalog with `fields.keywords`, its hint naming them."""
@@ -1026,6 +1030,8 @@ class CatalogDock(PluginDock):
         first one is recorded on (the map moved to it). Its entry, None when
         none could be.
         """
+        if self.denied("catalog.record"):
+            return None
         records = self.chosen() if records is None else list(records)
         images = [i for i in (listed_image(r) for r in records) if i is not None]
         if not images:

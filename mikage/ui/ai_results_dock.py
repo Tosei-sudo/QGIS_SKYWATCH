@@ -718,6 +718,13 @@ class AiResultsDock(PluginDock):
 
     # ---- recording -----------------------------------------------------------
 
+    def roles_changed(self) -> None:
+        """Recording the results (取り込み・正・誤検出) for observers, 追加学習 for those who train (core/roles.py)."""
+        recording = self.allows("ai_results.import")
+        for b in (self.import_button, self.import_all_button, self.accept_button, self.reject_button):
+            b.setVisible(recording)
+        self.train_button.setVisible(self.allows("ai_results.train"))
+
     def import_all(self, confirm: bool = True) -> list:
         """「未取込をすべて取り込み」: every result not recorded nor rejected; more than ASK_OVER asked first."""
         self._refresh_imported()
@@ -733,6 +740,8 @@ class AiResultsDock(PluginDock):
 
     def import_rows(self, rows: list[int], then: Optional[Callable[[], None]] = None) -> list:
         """Records the results of these rows (those not recorded yet, with a place) as observations of the image; `then` after."""
+        if self.denied("ai_results.import"):
+            return []
         dock = self.observations()
         book = self._book()
         if dock is None or book is None:
@@ -858,6 +867,8 @@ class AiResultsDock(PluginDock):
         Records the chosen results as wrong: a checked area (every kind) around
         each, its note naming the result, then goes to the next one to look at.
         """
+        if self.denied("ai_results.import"):
+            return []
         dock = self.observations()
         book = self._book()
         if dock is None or book is None:
@@ -927,6 +938,8 @@ class AiResultsDock(PluginDock):
     def open_training(self) -> None:
         import processing
 
+        if self.denied("ai_results.train"):
+            return
         processing.execAlgorithmDialog("mikage:train_detector", self.training_inputs())
 
     def close_down(self) -> None:

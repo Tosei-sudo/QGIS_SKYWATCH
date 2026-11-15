@@ -385,6 +385,10 @@ TABLES = (
         F("COLOR", "色", "TEXT", 32, "color"),
         F("NOTE", "メモ", "TEXT", 4000, "note"),
     )),
+    Table("TBL_USER_ROLE", "担当", None, writable=True, setting="userRoles", fields=(
+        F("USER_NAME", "利用者名", "TEXT", 255, "user"),
+        F("ROLE_NAME", "担当", "TEXT", 32, "role"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -406,6 +410,7 @@ INDEXES = {
     "TBL_PLACE_NAME": ("PLACE_NAME",),
     "TBL_INTEREST_POINT": ("OWNER_USER",),
     "TBL_INTEREST_AREA": ("OWNER_USER",),
+    "TBL_USER_ROLE": ("USER_NAME",),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -499,6 +504,8 @@ def plugin_config(urls: dict) -> dict:
     interests = {key: urls[t] for key, t in (("points", "TBL_INTEREST_POINT"), ("areas", "TBL_INTEREST_AREA")) if t in urls}
     if interests:
         config["interests"] = interests
+    if has("TBL_USER_ROLE"):
+        config["userRoles"] = urls["TBL_USER_ROLE"]
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

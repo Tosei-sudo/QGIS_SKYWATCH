@@ -40,6 +40,8 @@ from .ui.enhance_dock import EnhanceDock
 from .ui.events_dock import EventsDock
 from .ui.interests_dock import InterestsDock
 from .qgis_io.interests_io import InterestBook
+from .qgis_io.roles_io import RoleKeeper
+from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
 from .ui.analysis_dock import AnalysisDock
 from .ui.imaging_plan_dock import ImagingPlanDock
 from .ui.list_views import set_column_drag
@@ -342,6 +344,11 @@ class MikagePlugin:
         self.preloader: Optional[Preloader] = None
         #: 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
         self.interests: Optional[InterestBook] = None
+        #: 担当: the roles the person ticked, which decide the features shown (core/roles.py, qgis_io/roles_io.py).
+        self.role_keeper: Optional[RoleKeeper] = None
+        #: Each dock's feature: its menu entry's text (core/roles.FEATURES).
+        self._dock_features: dict[str, str] = {}
+        self._algorithms_allowed: Optional[tuple] = None
         self._qgis_started = False
         self._startup_told = False
 
@@ -387,6 +394,9 @@ class MikagePlugin:
         self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.interests = InterestBook(self.context, self.iface.mainWindow())
+        # 担当: what the roles ticked do not use is not shown; kept in this profile and in the settings file's `userRoles`.
+        self.role_keeper = RoleKeeper(self.context, self.iface.mainWindow())
+        self.role_keeper.said.connect(lambda text: self.iface.messageBar().pushWarning(tr("担当"), text))
         self.context.configChanged.connect(self._overviews_changed)
         # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
         self.context.configChanged.connect(self._column_drag_changed)
@@ -518,6 +528,9 @@ class MikagePlugin:
             dock.setVisible(name in INITIAL_DOCKS)
             dock.blockSignals(False)
             self.docks[name] = dock
+            self._dock_features[name] = title
+            # Shown although the roles in use do not have it (QGIS putting back its layout, its Panels menu): put away again.
+            dock.visibilityChanged.connect(lambda on, name=name: self._keep_away(name) if on else None)
             action = dock.toggleViewAction()
             action.setText(title)
             action.setIcon(icon(icons[name]))
@@ -531,7 +544,7 @@ class MikagePlugin:
             self.docks[name].event_linker = lambda: self.docks.get("SatObsEvents")
         # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
         for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
-            self.docks[name].observations = lambda: self.docks.get("SatObsObservations")
+            self.docks[name].observations = lambda: self.docks.get("SatObsObservations") if self.allows(tr("観測記録")) else None
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)
@@ -687,7 +700,7 @@ class MikagePlugin:
         self._add_to_menu(home)
         self.actions.append(home)
         # 「ドックのレイアウト」: named layouts per kind of work (ui/dock_layouts.py).
-        self.dock_layouts = DockLayoutMenu(self.iface.mainWindow(), lambda: self.docks,
+        self.dock_layouts = DockLayoutMenu(self.iface.mainWindow(), lambda: self.allowed_docks(),
                                            lambda text: self.iface.messageBar().pushSuccess(tr("ドックのレイアウト"), text), self.iface.mainWindow(),
                                            floating=first_setup.docks_floating)
         layouts = self.dock_layouts.menuAction()
@@ -740,11 +753,15 @@ class MikagePlugin:
         # 「ここを撮像計画」 in the map's right-click menu.
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self._build_menu()
-        # The toolbar: the role's buttons (or the person's own), from the entries in menu order.
-        self.toolbar_buttons = ToolbarButtons(self.toolbar, self._entries_in_menu_order(), first_setup.role)
-        self.toolbar_buttons.apply()
+        # The toolbar: the roles' buttons (or the person's own), from the entries in menu order.
+        self.toolbar_buttons = ToolbarButtons(self.toolbar, self._entries_in_menu_order(),
+                                              lambda: self.role_keeper.key if self.role_keeper is not None else "", self.allows)
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks, toggle_feed=self.toggle_notice_feed)
+        # What the roles in use do not use put away (and again whenever they change: chosen, or read from `userRoles`).
+        self.webmaps.allows = self.allows
+        self.role_keeper.changed.connect(self.apply_roles)
+        self.apply_roles()
         self.clock.step("メニュー・ツールバー")
         self._add_preload_items()
         self.context.configChanged.connect(self._config_read_for_preload)
@@ -776,6 +793,8 @@ class MikagePlugin:
     def _add_preload_items(self) -> None:
         """The reads ahead (core/preload.ITEMS), each through its dock's own read."""
         docks, config = self.docks, lambda: self.context.config
+        # 担当 first: the menus follow what the table holds for the person (or it is sent what was chosen here).
+        self.preloader.add("userRoles", tr("担当"), lambda then, failed: self.role_keeper.load(then, failed), always=True)
 
         def satellites(then, failed) -> bool:
             dock = docks.get("SatObsImagingPlan")
@@ -853,6 +872,56 @@ class MikagePlugin:
             pass
         QTimer.singleShot(300, lambda: self.open_first_setup(first=True))
 
+    # ---- 担当: the features of the roles in use --------------------------------------------------------
+
+    def allows(self, feature: str) -> bool:
+        """Whether the roles in use (担当) have `feature` (a menu entry's text or a dock's key, core/roles.FEATURES)."""
+        return self.role_keeper is None or self.role_keeper.allows(feature)
+
+    def allowed_docks(self) -> dict:
+        """The docks the roles in use have (the layouts and 「担当と個人設定」 open only these)."""
+        return {n: d for n, d in self.docks.items() if self.allows(self._dock_features.get(n, ""))}
+
+    def apply_roles(self) -> None:
+        """
+        The roles in use changed: the menu entries, toolbar buttons, keys,
+        docks, their buttons and the Processing tools of features they do not
+        have are put away; the others come back.
+        """
+        if self.context is None:
+            return
+        for action in self._menu_entries:
+            text = tr("通知") if action is self.notices_action else action.text()
+            action.setVisible(self.allows(text))
+        for menu in self._submenus:
+            menu.menuAction().setVisible(any(a.isVisible() and not a.isSeparator() for a in menu.actions()))
+        for name, dock in self.docks.items():
+            if not self.allows(self._dock_features.get(name, "")):
+                dock.hide()
+            if hasattr(dock, "set_allows"):
+                dock.set_allows(self.allows)
+        if self.toolbar_buttons is not None:
+            self.toolbar_buttons.apply()
+        if getattr(self, "shortcuts", None) is not None:
+            self.shortcuts.apply(self.allows)
+        if self.provider is not None:
+            self.provider.allowed = self.allows
+            allowed = tuple(self.allows(f) for f in (*ALGORITHM_FEATURES.values(), "サーバ処理…"))
+            # (Loaded first with every tool, before the roles were known.)
+            if allowed != self._algorithms_allowed and (self._algorithms_allowed is not None or not all(allowed)):
+                self.provider.refreshAlgorithms()
+            self._algorithms_allowed = allowed
+        # Opened before, of a feature now put away.
+        for name, feature in (("health_dialog", "接続と表の点検…"), ("api_reference", "Python API リファレンス…")):
+            dialog = getattr(self, name, None)
+            if dialog is not None and not self.allows(tr(feature)):
+                dialog.close()
+
+    def _keep_away(self, name: str) -> None:
+        if self.role_keeper is not None and not self.allows(self._dock_features.get(name, "")):
+            dock = self.docks.get(name)
+            QTimer.singleShot(0, lambda: dock.hide() if dock is not None and name in self.docks else None)
+
     def open_help(self, section: Optional[str] = None):
         """「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given."""
         from .ui.help_dialog import HelpDialog
@@ -869,6 +938,10 @@ class MikagePlugin:
         """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""
         action = self._entries_in_menu_order().get(tr(text))
         if action is None:
+            return False
+        if not self.allows(tr(text)):
+            # The help links to every feature: one the roles in use do not have says how to get it.
+            self.iface.messageBar().pushInfo(tr(text), tr(role_refusal(tr(text))))
             return False
         dock = next((d for d in self.docks.values() if d.toggleViewAction() is action), None)
         if dock is not None:
@@ -918,10 +991,10 @@ class MikagePlugin:
         if self.setup_dialog is not None:
             self.setup_dialog.deleteLater()
         self.setup_dialog = first_setup.FirstSetupDialog(
-            self.iface.mainWindow(), lambda: self.docks, first=first,
+            self.iface.mainWindow(), lambda: self.allowed_docks(), first=first,
             observation_dock=lambda: self.docks.get("SatObsObservations"), coordinates=lambda: self.coordinates,
-            open_settings=self.open_settings)
-        # A new role: its toolbar buttons too.
+            open_settings=self.open_settings, keeper=self.role_keeper, all_docks=lambda: self.docks)
+        # The roles' toolbar buttons (the same roles again: the person's own buttons of them).
         self.setup_dialog.accepted.connect(lambda: self.toolbar_buttons.apply() if self.context is not None else None)
         self.setup_dialog.open()
         return self.setup_dialog
@@ -1319,7 +1392,8 @@ class MikagePlugin:
         self.remote_dialog.raise_()
 
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self.context, self.iface.mainWindow())
+        # Another settings file than the one in use: the administrators' (the first one: anyone's).
+        dialog = SettingsDialog(self.context, self.iface.mainWindow(), may_change_source=self.allows("settings.config"))
         try:
             dialog.exec()
         finally:
@@ -1625,6 +1699,9 @@ class MikagePlugin:
         if self.interests is not None:
             self.interests.deleteLater()
             self.interests = None
+        if self.role_keeper is not None:
+            self.role_keeper.deleteLater()
+            self.role_keeper = None
         if self.moving_targets is not None:
             self.moving_targets.close()
             self.moving_targets.deleteLater()

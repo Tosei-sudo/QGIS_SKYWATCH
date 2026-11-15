@@ -205,7 +205,8 @@ class ScheduleDock(PluginDock):
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("schedule", self.table, self)
         answer = FlowLayout()
-        answer.addWidget(QLabel(self.tr("採否")))
+        self.answer_label = QLabel(self.tr("採否"))
+        answer.addWidget(self.answer_label)
         self.adopt_button = QPushButton(self.tr("採用"))
         self.adopt_button.setToolTip(self.tr("選んだ依頼（出力したもの）をシステムが採用したとして記録（手入力）"))
         self.adopt_button.clicked.connect(lambda: self.answer(ADOPTED))
@@ -603,10 +604,24 @@ class ScheduleDock(PluginDock):
         self.layer_button.setEnabled(bool(self.shown))
         self.reload_button.setEnabled(self.store is not None and self.task is None)
 
+    def roles_changed(self) -> None:
+        """The answers (採否 by hand, the result files, 要求外): for those who plan (core/roles.py); the rows for everyone."""
+        answering = self.allows("schedule.answer")
+        for w in (self.answer_label, self.adopt_button, self.reject_button, self.wait_button, self.reason,
+                  self.import_button, self.add_button, self.delete_button):
+            w.setVisible(answering)
+        if not answering and self.unrequested_dialog is not None:
+            try:
+                self.unrequested_dialog.close()
+            except RuntimeError:
+                pass
+
     # --- Answers by hand ------------------------------------------------------------------------
 
     def answer(self, answer: str, rows: Optional[list] = None) -> None:
         """Records the systems' answer to the rows chosen (handed out): 採用 / 不採用, or 不明 again."""
+        if self.denied("schedule.answer"):
+            return
         rows = self.selected() if rows is None else rows
         changes = manual_changes(rows, answer, self.reason.text().strip())
         if not changes:
@@ -648,6 +663,8 @@ class ScheduleDock(PluginDock):
 
     def import_file(self, path: Optional[str] = None, system=None, ask: bool = True) -> None:
         """Reads a system's result file for the day shown, tells what it says, and records it."""
+        if self.denied("schedule.answer"):
+            return
         system = system or self._file_system()
         if system is None or not self.day:
             return
@@ -726,12 +743,16 @@ class ScheduleDock(PluginDock):
     # --- 要求外 by hand ---------------------------------------------------------------------------
 
     def open_unrequested(self) -> None:
+        if self.denied("schedule.answer"):
+            return
         if self.unrequested_dialog is not None:
             self.unrequested_dialog.close()
         self.unrequested_dialog = UnrequestedDialog(self)
         self.unrequested_dialog.show()
 
     def add_unrequested(self, row: HistoryRow) -> None:
+        if self.denied("schedule.answer"):
+            return
         store, client, token = self.store, self.context.esri(), self.token()
 
         def done(saved):
@@ -742,7 +763,7 @@ class ScheduleDock(PluginDock):
 
     def delete_unrequested(self, rows: Optional[list] = None, ask: bool = True) -> None:
         rows = [r for r in (self.selected() if rows is None else rows) if r.result == UNREQUESTED and r.object_id is not None]
-        if not rows:
+        if not rows or self.denied("schedule.answer"):
             return
         if ask and QMessageBox.question(self, self.tr("削除"), self.tr("要求外の計画 {n} 件を消しますか").format(n=len(rows))) \
                 != QMessageBox.StandardButton.Yes:

@@ -356,6 +356,8 @@ EVENT_LINK_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "ITEM_TYPE": S, "ITE
 #: 関心地域・地点 (both layers alike; the owner is the plugin's user name).
 INTEREST_FIELDS = {"INTEREST_ID": {"type": S, "length": 64}, "INTEREST_NAME": S, "OWNER_USER": S, "COLOR": {"type": S, "length": 32},
                    "NOTE": {"type": S, "length": 4000}}
+#: 担当 (one row per role of a person; empty: each person's ticks on 「担当と個人設定」 write theirs).
+USER_ROLE_FIELDS = {"USER_NAME": S, "ROLE_NAME": {"type": S, "length": 32}}
 
 #: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
 EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
@@ -499,6 +501,7 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                 "COLOR": "#1d4ed8", "NOTE": "モックの関心地点"},
                                  "geometry": {"x": (AREA[0] + AREA[2]) / 2, "y": (AREA[1] + AREA[3]) / 2}}])},
             {"id": 1, "name": "関心地域", "geometryType": "polygon", "fields": INTEREST_FIELDS, "features": []}]},
+        {"name": "Roles", "layers": [{"id": 0, "name": "担当", "fields": USER_ROLE_FIELDS, "features": []}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
@@ -633,6 +636,8 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   "events": {{ "layer": "{rest}/Events/FeatureServer/0", "links": "{rest}/Events/FeatureServer/1" }},
   // 個人の関心地域・地点（持ち主の列で一人ずつ。新着画像のカードの「写っている地物」のいちばん上に）
   "interests": {{ "points": "{rest}/Interests/FeatureServer/0", "areas": "{rest}/Interests/FeatureServer/1" }},
+  // 担当（「担当と個人設定…」でチェックしたものを利用者名ごとに。別の PC でも同じ担当）
+  "userRoles": "{rest}/Roles/FeatureServer/0",
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}

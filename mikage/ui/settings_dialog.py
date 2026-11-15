@@ -28,7 +28,11 @@ from . import last_inputs
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, context: PluginContext, parent: QWidget | None = None):
+    def __init__(self, context: PluginContext, parent: QWidget | None = None, may_change_source: bool = True):
+        """
+        `may_change_source`: the roles in use have 「設定ファイルの切り替え」 (管理者,
+        core/roles.py); without it the settings file can be chosen only while none is.
+        """
         super().__init__(parent)
         self.context = context
         self.setWindowTitle(self.tr("MIKAGE の設定"))
@@ -52,6 +56,13 @@ class SettingsDialog(QDialog):
             self.source.setToolTip(self.tr("同梱の設定ファイルに固定（ほかの設定ファイルは指定不可）: {path}").format(path=shipped))
             browse.setEnabled(False)
             load.setToolTip(self.tr("同梱の設定ファイルを読み直す"))
+        elif not may_change_source and (settings.config_source() or shipped):
+            self.locked = True
+            self.source.setText(settings.config_source() or shipped)
+            self.source.setReadOnly(True)
+            self.source.setToolTip(self.tr("設定ファイルの切り替えは担当「管理者」の機能です（メニュー「担当と個人設定…」）"))
+            browse.setEnabled(False)
+            load.setToolTip(self.tr("今の設定ファイルを読み直す"))
         row = QHBoxLayout()
         row.addWidget(self.source, 1)
         row.addWidget(browse)

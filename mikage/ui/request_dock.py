@@ -348,6 +348,17 @@ class RequestDock(PluginDock):
         self.event_button.setEnabled(bool(self.selected()))
         self.export_button.setEnabled(bool(self.shown))
 
+    def roles_changed(self) -> None:
+        """Adding, changing and deleting requests: for those who ask for images or plan (core/roles.py)."""
+        editing = self.allows("requests.edit")
+        for b in (self.new_button, self.edit_button, self.delete_button, self.bulk_button, self.import_button):
+            b.setVisible(editing)
+        if not editing and self.form is not None:
+            try:
+                self.form.close()
+            except RuntimeError:  # closed and deleted already
+                pass
+
     # --- Adding, changing, deleting -------------------------------------------------------------
 
     def known(self) -> dict:
@@ -380,7 +391,7 @@ class RequestDock(PluginDock):
         """Opens the form for a new request, or the chosen one."""
         from .request_form import RequestForm
 
-        if self.store is None:
+        if self.store is None or self.denied("requests.edit"):
             return
         if self.form is not None:
             self.form.close()
@@ -410,7 +421,7 @@ class RequestDock(PluginDock):
 
     def _delete_clicked(self) -> None:
         r = self.chosen
-        if r is None:
+        if r is None or self.denied("requests.edit"):
             return
         answer = QMessageBox.question(self, self.tr("撮像依頼の削除"), plain_tip(self.tr("「{name}」を保存先から削除しますか？ほかの人の一覧からも消え、元に戻せません。").format(name=r.name)),
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
@@ -461,7 +472,7 @@ class RequestDock(PluginDock):
         from .bulk_edit_dialog import BulkEditDialog, BulkField
 
         chosen = self.selected()
-        if not chosen or self.store is None:
+        if not chosen or self.store is None or self.denied("requests.edit"):
             return None
         first = chosen[0]
         fields = [
@@ -519,6 +530,8 @@ class RequestDock(PluginDock):
         """Asks which layer and which attribute names the requests (「レイヤーから取り込み…」), then opens the form for the rest."""
         from .layer_import_dialog import LayerImportDialog
 
+        if self.denied("requests.edit"):
+            return None
         if not self._loaded or self.store is None:
             self.status.setText(self.tr("台帳を読み込んでから取り込み"))
             return None
@@ -547,6 +560,9 @@ class RequestDock(PluginDock):
         """Opens the form for the features of a layer: their areas, names (`name_field`) and 管理番号・識別番号 (the
         attributes named) as they are, the rest asked once (a number a feature lacks: the one typed in the form)."""
         from .request_form import RequestForm
+
+        if self.denied("requests.edit"):
+            return None
 
         if self.store is None:
             return None
@@ -592,6 +608,9 @@ class RequestDock(PluginDock):
         to look over and save; several targets in one form, saved one each.
         """
         from .request_form import RequestForm
+
+        if self.denied("requests.edit"):
+            return None
 
         if self.store is None:
             self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
@@ -669,6 +688,8 @@ class RequestDock(PluginDock):
     def import_rows(self, layer: Optional[QgsVectorLayer] = None, ask: bool = True, selected: Optional[bool] = None) -> None:
         """Takes in the features of a layer with every item from its attributes (as 「レイヤーへ書き出し」 writes them):
         new ones added, those with a known 依頼ID changed."""
+        if self.denied("requests.edit"):
+            return
         layer = layer or self.iface.activeLayer()
         if not isinstance(layer, QgsVectorLayer) or not layer.isSpatial():
             self.status.setText(self.tr("取り込むレイヤー（ポリゴンか点）を作業中のレイヤーに選択"))
