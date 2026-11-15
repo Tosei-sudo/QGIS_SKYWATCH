@@ -2,7 +2,7 @@
 The screenshots of the help's 「画面つきの手順書」, taken in a real QGIS
 against scripts/mock_esri (started by make_shots.py, which runs this with
 `qgis --code`). Environment: SHOTS (folder for the pictures), FLOWS (which
-flows, comma-separated: obs, request, plan; default all), WORK (a folder
+flows, comma-separated: obs, request, plan, check, layer; default all), WORK (a folder
 for files written on the way).
 """
 import json
@@ -11,8 +11,21 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
-from qgis.PyQt.QtCore import QDate, QRect, Qt
+from qgis.core import (
+    QgsFeature,
+    QgsField,
+    QgsGeometry,
+    QgsPalLayerSettings,
+    QgsPointXY,
+    QgsProject,
+    QgsRasterLayer,
+    QgsRectangle,
+    QgsTextFormat,
+    QgsVectorLayer,
+    QgsVectorLayerSimpleLabeling,
+)
+from qgis.PyQt.QtCore import QDate, QRect, Qt, QVariant
+from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QApplication,
     QDialogButtonBox,
@@ -35,7 +48,7 @@ from shots_lib import (
 
 OUT = os.environ["SHOTS"]
 WORK = os.environ.get("WORK", OUT)
-FLOWS = [f for f in os.environ.get("FLOWS", "obs,request,plan,check").split(",") if f]
+FLOWS = [f for f in os.environ.get("FLOWS", "obs,request,plan,check,layer").split(",") if f]
 LOG = open(os.path.join(OUT, "scenario.log"), "w", encoding="utf-8")
 #: The width of the pictures of the whole window, as shown in the help.
 WIDE = 720
@@ -46,7 +59,7 @@ OBS_MAP = 300
 #: The part of the map shown beside the docks of the imaging plan.
 PLAN_MAP = 260
 #: The main window for each flow (the plan's docks shorter: less empty list below their rows).
-WINDOW = {"obs": (1600, 1000), "request": (1600, 800), "plan": (1600, 800), "check": (1600, 820)}
+WINDOW = {"obs": (1600, 1000), "request": (1600, 800), "plan": (1600, 800), "check": (1600, 820), "layer": (1600, 800)}
 #: The name of the background map added for the pictures.
 BASEMAP_NAME = "背景（見本）"
 
@@ -533,7 +546,101 @@ def flow_check():
     log("check done")
 
 
-SCENARIOS = {"obs": flow_obs, "request": flow_request, "plan": flow_plan, "check": flow_check}
+# --- 2'. たくさんの場所をまとめて依頼する（レイヤーから取り込み）. Last: its requests would change the plan's pictures. ---------
+
+#: The places of the requester's layer: name, 管理番号, outline (lon, lat).
+PLACES = [
+    ("北の岸壁", "K-101", [(139.736, 35.331), (139.757, 35.329), (139.760, 35.341), (139.744, 35.346), (139.734, 35.340)]),
+    ("中の岸壁", "K-102", [(139.768, 35.300), (139.790, 35.298), (139.792, 35.314), (139.771, 35.316)]),
+    ("南の錨地", "K-103", [(139.735, 35.262), (139.761, 35.258), (139.766, 35.276), (139.748, 35.284), (139.733, 35.276)]),
+]
+
+
+def places_layer() -> QgsVectorLayer:
+    """The requester's own layer of places to watch (a scratch layer with a name and a number)."""
+    layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "見たい岸壁", "memory")
+    provider = layer.dataProvider()
+    provider.addAttributes([QgsField("名称", QVariant.String), QgsField("管理番号", QVariant.String)])
+    layer.updateFields()
+    for name, number, ring in PLACES:
+        f = QgsFeature(layer.fields())
+        f.setAttributes([name, number])
+        f.setGeometry(QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for x, y in ring + ring[:1]]]))
+        provider.addFeature(f)
+    layer.updateExtents()
+    symbol = layer.renderer().symbol()
+    symbol.setColor(QColor(124, 58, 237, 60))
+    symbol.symbolLayer(0).setStrokeColor(QColor("#7c3aed"))
+    symbol.symbolLayer(0).setStrokeWidth(0.6)
+    label = QgsPalLayerSettings()
+    label.fieldName = "名称"
+    text = QgsTextFormat()
+    text.setSize(9)
+    text.buffer().setEnabled(True)
+    label.setFormat(text)
+    layer.setLabeling(QgsVectorLayerSimpleLabeling(label))
+    layer.setLabelsEnabled(True)
+    QgsProject.instance().addMapLayer(layer)
+    return layer
+
+
+def flow_layer():
+    requests = dock("SatObsRequests")
+    layout(right=[requests], widths=(620,))
+    yield lambda: requests.store is not None and requests.task is None and bool(requests.requests)
+    layer = places_layer()
+    iface.setActiveLayer(layer)
+    xs = [x for _n, _k, ring in PLACES for x, _y in ring]
+    ys = [y for _n, _k, ring in PLACES for _x, y in ring]
+    yield 500
+    fit_right(canvas, min(xs), min(ys), max(xs), max(ys), strip=PLAN_MAP, border=40)
+    yield 1500
+    quiet_bar()
+    shoot(path("imp-01-layer"), win, marks=[(requests.import_button, "1", "top")],
+          crop=dock_and_map(requests, PLAN_MAP, top=requests.mapTo(win, requests.rect().topLeft()).y() - 4), width=WIDE)
+    dialog = requests.import_layer(layer)
+    yield lambda: dialog.isVisible()
+    dialog.point_km.setValue(1.0)
+    yield 500
+    shoot(path("imp-02-choose"), dialog, marks=[(dialog.layer, "1"), (dialog.name_field, "2"), (dialog.management_field, "3"),
+                                                (dialog.simple, "4"), (dialog.ok, "5")])
+    dialog.ok.click()
+    yield lambda: requests.form is not None and requests.form.isVisible() and requests.form.batch is not None
+    form = requests.form
+    form.resize(600, 1040)
+    form.move(win.x() + 150, 5)
+    if form.group.findText("第1班") >= 0:
+        form.group.setCurrentIndex(form.group.findText("第1班"))
+    form.start.setDate(QDate.currentDate())
+    form.end.setDate(QDate.currentDate().addDays(30))
+    middle = form.level.findText("中", Qt.MatchFlag.MatchStartsWith)
+    if middle >= 0:
+        form.level.setCurrentIndex(middle)
+        form.priority.setValue(form.level.itemData(middle))
+    form.kind.setCurrentText("光学")
+    form.requester.setText("田中（第1班）")
+    yield 1500
+    save = form.findChildren(QDialogButtonBox)[0].button(QDialogButtonBox.StandardButton.Save)
+    shoot(path("imp-03-form"), form, marks=[(form.name, "1"), (form.area_label, "2"), (form.category, "3"), (form.start, "4"),
+                                            (form.level, "5"), (save, "6")])
+    save.click()
+    yield lambda: not form.isVisible()
+    yield lambda: requests.task is None and sum(r.name in [p[0] for p in PLACES] for r in requests.shown) == len(PLACES)
+    yield 1500
+    rows = [i for i, r in enumerate(requests.shown) if r.name in [p[0] for p in PLACES]]
+    requests.table.clearSelection()
+    for i in rows:
+        requests.table.selectionModel().select(requests.model.index(i, 0), requests.table.selectionModel().SelectionFlag.Select
+                                                | requests.table.selectionModel().SelectionFlag.Rows)
+    hide_columns(requests.table, [requests.model.headerData(c, Qt.Orientation.Horizontal) for c in range(requests.model.columnCount())],
+                 ("識別番号",))
+    yield 800
+    shoot(path("imp-04-saved"), requests, marks=[(table_row(requests.table, i, requests), "") for i in rows],
+          crop=[requests.status, table_rows(requests.table, requests)], margin=4)
+    log(f"imported: {requests.status.text()}")
+
+
+SCENARIOS = {"obs": flow_obs, "request": flow_request, "plan": flow_plan, "check": flow_check, "layer": flow_layer}
 
 
 def set_role(name: str) -> None:
@@ -544,7 +651,7 @@ def set_role(name: str) -> None:
     settle(5)
 
 
-ROLES = {"obs": "観測記録の担当", "request": "撮像を依頼する人", "plan": "撮像計画の担当", "check": "撮像を依頼する人"}
+ROLES = {"obs": "観測記録の担当", "request": "撮像を依頼する人", "plan": "撮像計画の担当", "check": "撮像を依頼する人", "layer": "撮像を依頼する人"}
 
 
 def add_basemap() -> None:
