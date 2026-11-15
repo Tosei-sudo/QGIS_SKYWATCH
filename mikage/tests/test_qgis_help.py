@@ -1,4 +1,5 @@
 """「使い方（ヘルプ）」: the bundled page holds together (links, menu entries, keys), opens from the menu, searches, follows its links."""
+import os
 import re
 
 import pytest
@@ -9,6 +10,7 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from qgis.PyQt.QtCore import QUrl  # noqa: E402
+from qgis.PyQt.QtGui import QImage, QTextDocument  # noqa: E402
 
 from mikage.plugin import MENU_GROUPS, MENU_TOP  # noqa: E402
 from mikage.ui import help_dialog, shortcuts  # noqa: E402
@@ -33,6 +35,28 @@ def test_the_page_stands_alone_and_its_links_lead_somewhere():
     texts = sections(PAGE)
     assert [a for level, a, _t in headings(PAGE) if level == 3 and len(texts[a]) < 40] == []
     assert "TBL_" not in PAGE and "config.json" in PAGE
+
+
+def test_the_pictures_of_the_steps_are_there_and_show_in_the_help_window():
+    folder = os.path.join(os.path.dirname(help_dialog.PAGE), "images")
+    shown = re.findall(r'<img src="([^"]+)"', PAGE)
+    # Every picture named is in the plugin, none left unused, each small and narrow enough for the window.
+    assert shown and all(src.startswith("images/") and src.endswith(".png") for src in shown)
+    on_disk = sorted(os.listdir(folder))
+    assert sorted(src[len("images/"):] for src in set(shown)) == on_disk
+    assert all(f'alt="' in tag for tag in re.findall(r"<img [^>]+>", PAGE))
+    dialog = help_dialog.HelpDialog()
+    doc = dialog.page.document()
+    for src in sorted(set(shown)):
+        image = QImage(os.path.join(folder, src[len("images/"):]))
+        assert 0 < image.width() <= 760 and os.path.getsize(os.path.join(folder, src[len("images/"):])) < 200_000, src
+        # The window finds it (the page is given as text, the pictures beside it).
+        loaded = doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(src))
+        assert loaded is not None and not QImage(loaded).isNull(), (src, loaded)
+    # Wide enough for the pictures beside the contents (the page's margins and scroll bar too).
+    dialog.show()
+    assert dialog.page.viewport().width() >= 760 + 2 * 12
+    dialog.close()
 
 
 def test_every_key_that_works_everywhere_is_in_the_help():

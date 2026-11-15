@@ -9,6 +9,7 @@
   外部のファイル・フォント・スクリプトは使わない（閉域でも同じに見える）。QGIS の中では QTextBrowser が
   表示するので、HTML と CSS は簡単なものだけ（h2・h3 の id が目次、表・箇条書き・code・b）。
   リンク「mikage:open/<メニューの文字>」はヘルプ画面の中でだけ、その項目を開く（ブラウザでは何もしない）。
+  「画面つきの手順書」の写真は images/ にあり、scripts/help_shots/make_shots.py で撮り直せる（画面が変わったら撮り直す）。
   設定ファイルの書き方・テーブル定義など管理者向けの内容は README に書き、ここには書かない。
 -->
 <style>
@@ -29,6 +30,7 @@ code { font-family: "Consolas", "Menlo", monospace; background-color: #f1f5f9; }
 .lead { color: #475569; }
 a { color: #1d5fbf; }
 a.open { color: #0b7a3e; font-weight: bold; }
+img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 @media (prefers-color-scheme: dark) {
   body { background-color: #111827; color: #e5e7eb; }
   h1, h2 { color: #93c5fd; border-color: #334155; }
@@ -42,6 +44,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
   .lead { color: #9ca3af; }
   a { color: #93c5fd; }
   a.open { color: #6ee7b7; }
+  img { border-color: #374151; }
 }
 </style>
 </head>
@@ -54,6 +57,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><th>知りたいこと</th><th>見る所</th></tr>
 <tr><td>まず何をすればよいか</td><td><a href="#start">はじめに</a>・<a href="#first">最初にすること</a></td></tr>
 <tr><td>画面の見方・ドックの出し方</td><td><a href="#screen">画面のつくり</a>・<a href="#common">どの担当でも使う操作</a></td></tr>
+<tr><td>よくある作業の流れを画面の写真で追う</td><td><a href="#howto">画面つきの手順書</a>（画像の記録と分担の完了・撮像の依頼と確認・撮像計画の計算と採否）</td></tr>
 <tr><td>撮像計画・撮像依頼を作る</td><td><a href="#plan">撮像計画の担当</a></td></tr>
 <tr><td>画像に写ったものを記録する</td><td><a href="#obs">観測記録の担当</a></td></tr>
 <tr><td>画像を見やすくする・比べる・測る</td><td><a href="#reading">画像判読</a></td></tr>
@@ -110,6 +114,97 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <tr><td><span class="ui">ステータスバー</span></td><td>画面のいちばん下。右のほうにカーソル位置の緯度経度（または MGRS・UTM）が出ます</td></tr>
 </table>
 <p>このヘルプで「メニュー <span class="ui">画像 ▸ スワイプ比較</span>」と書くのは、MIKAGE のメニューの「画像」の下の「スワイプ比較」のことです。</p>
+
+<h2 id="howto">画面つきの手順書</h2>
+<p>よくある 3 つの作業を、画面の写真で順に追います。写真の<span class="ui">赤い枠と番号</span>（①②…）が、押す所・見る所です。写真は練習用の見本データで撮ったもので、名称・日付・件数はお使いの環境とは違います。ボタンがツールバーにないときは、<a href="#first-setup">担当と個人設定</a> で担当を選ぶか、<a class="open" href="mikage:open/ツールバーのボタン…">ツールバーのボタン…</a> で足してください。</p>
+<table>
+<tr><th>手順</th><th>だれが</th><th>流れ</th></tr>
+<tr><td><a href="#howto-obs">画像を探して記録し、担当を完了する</a></td><td>観測記録の担当</td><td>画像カタログで検索 → 画像を開く → クリック記録 → 前の画像のモノを継続・不在 → 分担を完了</td></tr>
+<tr><td><a href="#howto-request">撮像を依頼して、計画に入ったか確かめる</a></td><td>撮像を依頼する人</td><td>撮像依頼を登録 → 撮像予定で採否を見る → 地点ごとの撮像予定で次の撮像を見る</td></tr>
+<tr><td><a href="#howto-plan">撮像計画を計算して出し、採否を入れる</a></td><td>撮像計画の担当</td><td>撮像計画ファイル出力で計算 → 調整システムに渡すファイルを書き出す → 返ってきた採否を入れる</td></tr>
+</table>
+
+<h3 id="howto-obs">画像を探して記録し、担当を完了する（観測記録の担当）</h3>
+<p>届いた画像を 1 枚選んで、写っている船を記録し、見終わったら分担を「完了」にするまでです。くわしい説明は <a href="#images">画像を探して開く</a>・<a href="#obs-flow">1 枚の画像の流れ</a>・<a href="#obs-assign">分担</a> にあります。</p>
+<p><b>1. 画像を探す。</b>ツールバーの <span class="ui">画像カタログ</span>（①）でドックを出し、<span class="ui">範囲</span>（②。既定は今の地図の表示範囲）と <span class="ui">撮像日時</span>（③）を入れて <span class="ui">検索</span>（④）。一覧は新しい順で、<span class="ui">分担</span> の列に「未着手」「作業中（名前）」などが出ます。</p>
+<p><img src="images/obs-01-search.png" alt="画像カタログで範囲と撮像日時を入れて検索"></p>
+<p><b>2. 画像を開く。</b>見る画像の行を選び（①）、<span class="ui">開く</span>（②）かダブルクリック。画像が地図に入り、地図がその画像へ移ります。</p>
+<p><img src="images/obs-02-open.png" alt="一覧で画像を選んで開く"></p>
+<p><b>3. 観測記録ドックで確かめる。</b>ツールバーの <span class="ui">観測記録</span> でドックを出します。<span class="ui">保存先</span>（①）、いま開いた画像（②）、その画像の分担の行（③。まだ誰も担当していなければ「担当者なし」）を確かめます。前の画像で記録したモノは、地図に白抜きの印、一覧に灰色の行で出ます。</p>
+<p><img src="images/obs-03-image.png" alt="観測記録ドックの保存先・画像・分担の行"></p>
+<p><b>4. クリック記録を始める。</b><span class="ui">クリック記録</span>（①、<span class="key">R</span>）を押します。記録を始めると、この画像は自動で自分の担当になります（②「分担: 自分が担当中」）。</p>
+<p><img src="images/obs-04-record.png" alt="クリック記録を押すと自分の担当になる"></p>
+<p><b>5. 地図でモノをクリックする。</b>拡大して、記録するモノ（①）をクリックします。</p>
+<p><img src="images/obs-05-click.png" alt="地図で船をクリック"></p>
+<p><b>6. 種別・活動を入れて記録する。</b>フォームの <span class="ui">大分類 ▸ 種別 ▸ 級</span> のボタンで種別をたどり（①）、活動（②。ボタンか数字キー <span class="key">1</span>〜<span class="key">9</span>）、確度（③）、必要なら備考を入れて <span class="ui">記録</span>（④、<span class="key">Enter</span>）。記録はその場で保存先に保存されます。保存できなかったときは、入れた内容のままフォームが戻ります。</p>
+<p><img src="images/obs-06-form.png" alt="新規の記録のフォーム"></p>
+<p><b>7. 前の画像にいたモノを確かめる。</b>白抜きの印（①）は、前の画像で記録したモノです。クリックするとそのモノのフォームが出るので、まだいれば <span class="ui">継続</span>（②、<span class="key">Enter</span>）、いなければ <span class="ui">不在</span>（③）。全部まだいるなら、ドックの <span class="ui">すべて継続</span> でまとめて継続にできます。</p>
+<p><img src="images/obs-07-ghost.png" alt="前の画像のモノの白抜きの印"></p>
+<p><img src="images/obs-08-carry.png" alt="前の画像のモノを継続または不在にする"></p>
+<p><b>8. 記録を確かめる。</b>記録したモノは一覧（①）と地図に出ます。灰色の行は、前の画像のモノでこの画像ではまだ確かめていないものです。残っていれば 7. と同じように継続か不在にします。</p>
+<p><img src="images/obs-09-saved.png" alt="記録の一覧"></p>
+<p><b>9. 分担を完了にする。</b>見終わったら、分担の行の <span class="ui">完了</span>（①）。行が「担当者なし（○○ さんが完了済み）」に変わります。</p>
+<p><img src="images/obs-10-done-before.png" alt="分担の行の完了"></p>
+<p><img src="images/obs-11-done-after.png" alt="完了済みになった分担の行"></p>
+<p>画像カタログの <span class="ui">分担</span> の列も「完了（名前）」になり、ほかの人にも見終わった画像だと分かります。次の画像は、観測記録ドックの ▶（<span class="key">PageDown</span>）か画像カタログから開きます。</p>
+<p><img src="images/obs-12-catalog-done.png" alt="画像カタログの分担の列が完了になる"></p>
+
+<h3 id="howto-request">撮像を依頼して、計画に入ったか確かめる（撮像を依頼する人）</h3>
+<p>撮りたい場所と期間を依頼として登録し、その依頼がどの日の計画に入ったかを確かめるまでです。依頼を集めて計算し、各システムにファイルを出して採否を入れるのは撮像計画の担当です（<a href="#howto-plan">撮像計画を計算して出し、採否を入れる</a>）。依頼する人は、ここにある画面だけを使います。担当は「撮像計画の担当」を選ぶと、使うボタン（撮像依頼・撮像予定・地点ごとの撮像予定）がツールバーにそろいます。くわしい説明は <a href="#request">撮像依頼を登録する</a>・<a href="#schedule">その日の撮像予定を見る</a> にあります。</p>
+<p><b>1. 撮像依頼ドックを出す。</b>ツールバーの <span class="ui">撮像依頼</span>（①）。グループの欄で <span class="ui">自分のグループ</span>（②）を選ぶと、自分のグループの依頼だけになります。<span class="ui">新規…</span>（③）で依頼のフォームを開きます。</p>
+<p><img src="images/req-01-dock.png" alt="撮像依頼ドックと新規ボタン"></p>
+<p><b>2. 依頼の内容を入れる。</b></p>
+<ul>
+<li><span class="ui">名称</span>（①）: あとで一覧や撮像予定で見分けられる名前</li>
+<li><span class="ui">依頼グループ</span>（②）: 自分のグループ</li>
+<li><span class="ui">区分</span>（③）: 期間中に 1 回撮ればよいなら <span class="ui">臨時</span>（達成条件「期間内1回」）、毎日・曜日ごとに撮るなら <span class="ui">定点</span></li>
+<li><span class="ui">期間</span>（④）: 撮ってほしい最初と最後の日（日本時間）</li>
+<li><span class="ui">優先度</span>（⑤）: 5 段階から選ぶ</li>
+<li>種別（⑥）: <span class="ui">光学</span>・<span class="ui">SAR</span>・<span class="ui">任意</span>。衛星にチェックを入れなければ、どの衛星でもよい依頼になります</li>
+<li><span class="ui">地図で矩形</span>（⑦）を押して、地図をドラッグして範囲を囲む（多角形・点・選択中の地物でも可）</li>
+<li>範囲の下（⑧）に、期間内に衛星が撮れる回数が出ます。赤で「撮像機会なし」のときは、期間・種別・範囲を見直します</li>
+<li>依頼者・メモを入れて <span class="ui">保存</span>（⑨）</li>
+</ul>
+<p><img src="images/req-02-form.png" alt="撮像依頼のフォーム"></p>
+<p>囲んだ範囲は地図に出ます。</p>
+<p><img src="images/req-03-area.png" alt="地図に出た依頼の範囲"></p>
+<p><b>3. 一覧で確かめる。</b>保存した依頼が一覧に入ります。これで依頼は終わりです。直すときは行を選んで <span class="ui">編集…</span>。</p>
+<p><img src="images/req-04-saved.png" alt="一覧に入った依頼"></p>
+<p><b>4. 計画に入ったかを見る。</b>撮像計画の担当が計算・書き出しをしたあと、ツールバーの <span class="ui">撮像予定</span>（①）を開き、カレンダーで日を選びます（②。太字が計画のある日、緑は計画に入ったものがある日）。グループの欄を <span class="ui">自分のグループ</span>（③）にすると、自分の依頼（④）が見つけやすくなります。</p>
+<p><img src="images/check-01-schedule.png" alt="撮像予定ドックで日を選んで自分の依頼を見る"></p>
+<p><b>5. 状態を読む。</b></p>
+<ul>
+<li><span class="ui">状態</span>: 採用（システムの計画に入った）・不採用・不明（まだシステムの返事がない）・見送り（その日はシステムに出さなかった）</li>
+<li><span class="ui">まとめ</span>: 撮り方。「10:21 まとめ 2 件（… と）」は近くの依頼と 1 回の撮像でまとめて撮ること、「同乗」はほかの依頼の撮像で一緒に撮ること、「単独」はこの依頼だけの撮像</li>
+<li><span class="ui">撮像予定</span>: システムが返してきた撮像の日時。<span class="ui">理由・メモ</span>: 見送り・不採用の理由など</li>
+</ul>
+<p><img src="images/check-02-row.png" alt="撮像予定の一覧の自分の依頼の行"></p>
+<p>見送り・不採用のままなら、次の日以降の計算でまた候補になります（期間内 1 回の依頼）。画像が入って撮像済みになると、状態は自動で「採用」になり、画像は <a href="#howto-obs">画像カタログ</a> で探せます。</p>
+<p><b>6. 次にいつ撮るかを見る。</b><a class="open" href="mikage:open/地点ごとの撮像予定">地点ごとの撮像予定</a> で <span class="ui">地図で地点を追加</span>（①）を押し、地図で依頼した場所をクリックします。その地点の計画がタイムライン（②）に並び、名前の下に「次」の撮像（日時・状態・衛星）が出ます。水色の帯は、依頼がまだ計画前の日です。</p>
+<p><img src="images/check-03-places.png" alt="地点ごとの撮像予定のタイムライン"></p>
+
+<h3 id="howto-plan">撮像計画を計算して出し、採否を入れる（撮像計画の担当）</h3>
+<p>依頼台帳から対象日の計画を計算し、調整システム（各衛星システム）に渡すファイルを書き出し、返ってきた採否を入れるまでです。くわしい説明は <a href="#request-export">毎日の撮像計画ファイルを出力する</a>・<a href="#schedule">その日の撮像予定を見る</a> にあります。</p>
+<p><b>1. 計算する。</b>ツールバーの <span class="ui">撮像計画ファイル出力</span>（①）を開き、<span class="ui">対象日</span>（②）を選んで <span class="ui">計算</span>（③）。依頼が一覧（④）に並び、システムごとの上限と優先度に合わせて採用・見送りが決まります。</p>
+<p><img src="images/plan-01-calc.png" alt="撮像計画ファイル出力で対象日を選んで計算"></p>
+<p><b>2. 一覧を確かめる。</b><span class="ui">採用</span> のチェックが入った行がファイルに出ます。チェックを外すと見送り、入れると枠を超えても採用です。<span class="ui">撮像時刻</span> は衛星が上を通る時刻、<span class="ui">優先度</span> は依頼の優先度と、この日の計算での優先度（矢印の右）です。<span class="ui">結果・理由</span> に「まとめ 2 件（… と 1 回の撮像）」「見送り：撮像機会なし」などが出ます。</p>
+<p><img src="images/plan-02-table.png" alt="計算結果の一覧"></p>
+<p><span class="ui">地図に表示</span> にチェックを入れると、依頼の範囲（採用は緑、まとめは青、見送りは灰）と撮像の範囲（紫の破線）を地図で確かめられます。</p>
+<p><img src="images/plan-03-map.png" alt="地図に出た依頼の範囲と撮像の範囲"></p>
+<p><b>3. 書き出す。</b><span class="ui">出力先</span>（①）を確かめて <span class="ui">書き出し</span>（②）。出力先が設定ファイルで決まっているシステムは、そちらに書きます。</p>
+<p><img src="images/plan-04-write.png" alt="出力先と書き出しボタン"></p>
+<p>システムごとのファイル名と件数を確かめて <span class="ui">はい</span>。</p>
+<p><img src="images/plan-05-confirm.png" alt="書き出しの確認"></p>
+<p>書き出すと、状況欄に件数が出て、出した内容が出力履歴に残ります。書き出したファイルを調整システムに渡します。</p>
+<p><img src="images/plan-06-written.png" alt="書き出したあとの状況欄"></p>
+<p><b>4. 返ってきた採否を入れる。</b>ツールバーの <span class="ui">撮像予定</span>（①）を開き、カレンダーで対象日（②）を選びます。書き出したばかりの依頼は「不明」です。システムから採否のファイルが返ってきたら <span class="ui">結果ファイルの取り込み…</span>（③）でそのファイルを選びます。</p>
+<p><img src="images/plan-07-schedule.png" alt="撮像予定ドックで結果ファイルの取り込み"></p>
+<p>読み取った採用・不採用の件数を確かめて <span class="ui">はい</span>。ファイルにない依頼は「不明」のままです。まとめて撮る依頼は、同じ撮像のほかの依頼にも同じ採否が付きます。</p>
+<p><img src="images/plan-08-import.png" alt="結果ファイルの取り込みの確認"></p>
+<p><b>5. 電話などで聞いた採否を入れる。</b>行を選び（①）、理由（③。任意）を入れて <span class="ui">不採用</span>（②）か <span class="ui">採用</span>。間違えたときは <span class="ui">不明に戻す</span>。</p>
+<p><img src="images/plan-09-by-hand.png" alt="行を選んで採否を手で入れる"></p>
+<p>これで、その日の計画が採用・不採用・見送りに分かれました。依頼した人は同じ <span class="ui">撮像予定</span> で確かめます（<a href="#howto-request">撮像を依頼して、計画に入ったか確かめる</a>）。画像が届いたら、<span class="ui">照合…</span> で撮れたかを画像カタログと突き合わせます。</p>
+<p><img src="images/plan-10-answered.png" alt="採否を入れたあとの撮像予定"></p>
 
 <h2 id="common">どの担当でも使う操作</h2>
 
@@ -203,7 +298,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 </ul>
 
 <h3 id="request">撮像依頼を登録する</h3>
-<p><a class="open" href="mikage:open/撮像依頼">撮像依頼</a> ドック（<span class="key">Ctrl+Alt+Q</span>）で、いつからいつまで・どこを・どの条件で撮るかを依頼台帳に登録します。</p>
+<p><a class="open" href="mikage:open/撮像依頼">撮像依頼</a> ドック（<span class="key">Ctrl+Alt+Q</span>）で、いつからいつまで・どこを・どの条件で撮るかを依頼台帳に登録します。登録から計画の確認までを画面の写真で追うなら <a href="#howto-request">撮像を依頼して、計画に入ったか確かめる</a>。</p>
 <ul>
 <li>区分は <span class="ui">定点</span>（毎日・曜日・N 日ごと）か <span class="ui">臨時</span>。達成条件は「毎回」か「期間内 1 回」</li>
 <li>優先度は 5 段階から選ぶ（<span class="ui">詳細</span> で 1〜1000 を直接。1 ほど高い）</li>
@@ -220,6 +315,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 
 <h3 id="request-export">毎日の撮像計画ファイルを出力する</h3>
 <p><a class="open" href="mikage:open/撮像計画ファイル出力">撮像計画ファイル出力</a> ドックで、対象日を選んで <span class="ui">計算</span>。依頼台帳から、衛星システムごとの上限と優先度に合わせて依頼を割り振ります。</p>
+<p>計算・書き出し・採否の入力を画面の写真で追うなら <a href="#howto-plan">撮像計画を計算して出し、採否を入れる</a>。</p>
 <ol>
 <li>確認画面で、採用・見送りの切り替え、順番の入れ替え、優先度の繰り上げの取り消しをする</li>
 <li>書き出す。出した内容は出力履歴に残ります</li>
@@ -278,6 +374,7 @@ a.open { color: #0b7a3e; font-weight: bold; }
 <li>見終わった範囲を残すときは <span class="ui">確認範囲</span>（<span class="key">A</span>）。範囲内で記録のないモノを <span class="ui">確認範囲内 n 件を不在</span> でまとめて不在にできます</li>
 <li>終わったら、分担の行の <span class="ui">完了</span></li>
 </ol>
+<p>画面の写真つきの手順は <a href="#howto-obs">画像を探して記録し、担当を完了する</a> にあります。</p>
 <div class="tip">新しく記録したモノの近くに前からいるモノがあると「同一候補」が出ます。<span class="key">Alt+1</span>〜<span class="key">Alt+5</span> で選ぶと、そのモノの続きとして記録されます。</div>
 
 <h3 id="obs-points">長さ・向き・幅も測る（2〜4 点）</h3>
