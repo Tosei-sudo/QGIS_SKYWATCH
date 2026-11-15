@@ -185,7 +185,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "userRoles",
   "preload",
   "offlineWork",
-  "columnDrag"
+  "columnDrag",
+  "shapeReceiver"
  ],
  "roles": {
   "imageCatalogs": [
@@ -964,6 +965,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "open": "画像を開く",
   "export": "ファイル出力",
   "copy": "クリップボードへコピー",
+  "receive": "外部からの図形",
   "error": "エラー"
  },
  "auditFormats": [
@@ -1704,6 +1706,12 @@ const SPEC = [
         J("settings", "設定（esri）"), N("zmin", "最小ズーム"), N("zmax", "最大ズーム"),
         B("visible", "最初から表示（visible）", { help: "既定 true。false: 追加はするがレイヤーパネルのチェックを外しておく（チェックを入れるまで描かない）" }), TZ, STZ],
         { title: (it) => `${it.type || "?"} ${it.layer || it.url || ""}`, check: (it, at, p) => { if (it.type && it.type !== "cog" && it.type !== "file" && it.type !== "xyz" && !it.layer) p.push(`${at}: ${it.type} は layer が必要`); } }) },
+    { key: "shapeReceiver", label: "外部から図形を受け取る（AutoMap など）", doc: "外部から図形を受け取るautomap-などshapereceiver", help: "AutoMap の「MIKAGE に送る」・リンク・この PC のプログラムから送られた図形を、レイヤーグループ「受け取った図形」に追加して地図を移動する。この PC の中（127.0.0.1）だけで待ち受ける。書かなければ有効（ポート 47631、ブラウザ拡張機能から受け取る）。",
+      field: O("shapeReceiver", "受け取り", [
+        B("enabled", "待ち受ける", { help: "既定 true" }),
+        N("port", "ポート", { min: 1024, ph: "47631", help: "1024〜65535。AutoMap の設定「MIKAGE」の送信先と合わせる" }),
+        L("origins", "受け取る送信元", { ph: "chrome-extension://*, https://intra.example.jp", help: "既定 chrome-extension://*（ブラウザ拡張機能）。社内のページから送るならその https://… を足す（*.example.jp も可。* だけは不可）。拡張機能を AutoMap だけにするなら chrome-extension://<ID>" }),
+      ], { allowFalse: "待ち受けない（false）" }) },
     { key: "geocoders", label: "地名検索", doc: "座標地名へ移動", help: "「座標・地名へ移動」の地名検索。書かなければ地名は検索しない。",
       field: I("geocoders", "地名検索", [S("type", "種類", K.geocoderTypes, { req: true }), T("url", "URL"), LABEL, L("field", "名前の属性", { single: true, ph: "NAME, NAME_KANA, ALIAS",
           help: "features: 検索する属性（カンマ区切りで複数可。先頭が地名、ほかは読み・別名など。どれかに含まれれば見つかり、合ったものを横に出す）。csv: 名前の列（1 つ）" }), TOKEN],

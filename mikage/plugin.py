@@ -61,6 +61,7 @@ from .ui.request_dock import RequestDock
 from .ui.place_schedule_dock import PlaceScheduleDock
 from .ui.schedule_dock import ScheduleDock
 from .ui.settings_dialog import SettingsDialog
+from .ui.shape_receiver import ShapeReceiver
 from .ui.shadow_dock import ShadowHeightDock
 from .ui.spectral_dock import SpectralDock
 from .ui.startup import StartupLayers
@@ -225,6 +226,11 @@ class PluginApi:
         return self._plugin.coordinates
 
     @property
+    def shape_receiver(self) -> "ShapeReceiver":
+        """「外部から図形を受け取る」 (its `listening`, `url`, `problem`, `show_link(text)`: the shapes of `geom=…&label=…` shown as if sent)."""
+        return self._plugin.shape_receiver
+
+    @property
     def spectral(self) -> "SpectralDock":
         """The dock 「スペクトル」 (its `series`, `labels`, `add_point(point)`, `add_box(rect)`, `csv_text()`, `save_csv(path)`, `clear()`)."""
         return self._plugin.docks["SatObsSpectral"]
@@ -330,6 +336,8 @@ class MikagePlugin:
         self.offline: Optional[OfflineController] = None
         #: 監査ログ: the log of operations kept and sent to the settings file's folder (ui/audit_status.py, core/audit.py).
         self.audit: Optional[AuditKeeper] = None
+        #: 外部から図形を受け取る: AutoMap's (and links', programs') shapes, at 127.0.0.1 (ui/shape_receiver.py).
+        self.shape_receiver: Optional[ShapeReceiver] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -410,6 +418,8 @@ class MikagePlugin:
         QgsProject.instance().layersAdded.connect(self._overview_layers_added)
         # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
         self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
+        # 「外部から図形を受け取る」: listens once the settings file is read (`shapeReceiver`).
+        self.shape_receiver = ShapeReceiver(self.iface, self.context, self.iface.mainWindow())
         self.toolbar = self.iface.addToolBar(tr("MIKAGE"))
         self.toolbar.setObjectName("MikageToolbar")
 
@@ -1717,6 +1727,10 @@ class MikagePlugin:
             self.coordinates.close()
             self.coordinates.deleteLater()
             self.coordinates = None
+        if self.shape_receiver is not None:
+            self.shape_receiver.close()
+            self.shape_receiver.deleteLater()
+            self.shape_receiver = None
         if self.audit is not None:
             self.audit.unload()
             self.audit = None

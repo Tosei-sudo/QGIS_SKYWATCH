@@ -164,3 +164,13 @@ def no_preload(monkeypatch):
     except ImportError:  # no QGIS
         return
     monkeypatch.setattr(preload.Preloader, "DELAY_MS", 24 * 3600 * 1000)
+
+
+@pytest.fixture(autouse=True)
+def no_shape_receiver(monkeypatch):
+    """「外部から図形を受け取る」 does not listen in every plugin test (tests/test_qgis_shape_receiver.py turns it on)."""
+    try:
+        from mikage.ui import shape_receiver
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(shape_receiver.ShapeReceiver, "LISTEN", False)
