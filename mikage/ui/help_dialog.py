@@ -70,7 +70,8 @@ class HelpDialog(QDialog):
         self.run = run
         self.path = path
         self.setWindowTitle(self.tr("MIKAGE の使い方"))
-        self.resize(1000, 700)
+        # Wide enough for the pictures of 「画面つきの手順書」 (at most 760 pixels) beside the contents.
+        self.resize(1120, 760)
         page = read_page(path)
         self.texts = sections(page)
         main = QVBoxLayout(self)
@@ -109,7 +110,7 @@ class HelpDialog(QDialog):
         self.page.setHtml(page)
         split.addWidget(self.page)
         split.setStretchFactor(1, 3)
-        split.setSizes([240, 760])
+        split.setSizes([250, 870])
         main.addWidget(split, 1)
         self.hits: list[QTextCursor] = []
         self.current = -1
