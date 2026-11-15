@@ -47,6 +47,7 @@ from .roles import user_roles_settings_of
 from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
 from .preload import ITEMS as PRELOAD_ITEMS, preload_of
+from .shape_receiver import DEFAULT_RECEIVER, ReceiverSettings, receiver_settings_of
 
 #: The keys this plugin reads.
 KEYS = (
@@ -55,6 +56,7 @@ KEYS = (
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
+    "shapeReceiver",
 )
 
 
@@ -132,6 +134,8 @@ class PluginConfig:
     offline_work: OfflineSettings = field(default_factory=lambda: OfflineSettings())
     #: `columnDrag`: whether a list's columns may be dragged by their header (false: only from the header's menu).
     column_drag: bool = True
+    #: `shapeReceiver`: shapes taken from AutoMap, links and programs on this computer (127.0.0.1) and shown on the map.
+    shape_receiver: ReceiverSettings = DEFAULT_RECEIVER
 
 
 @dataclass
@@ -296,6 +300,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             problems.append("columnDrag は true か false で指定")
     if "preload" in value:
         config.preload = preload_of(value["preload"], problems)
+    if "shapeReceiver" in value:
+        config.shape_receiver = receiver_settings_of(value["shapeReceiver"], problems)
     if "observationVocabulary" in value:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
     if "arcgisPortals" in value:

@@ -84,6 +84,11 @@ ENTRIES: list[Entry] = [
     Entry("shadow_height", "ドックと道具", "影から高さ", "影の長さと太陽の高さから高さを測る。", "api.shadow_height.set_sun(45, 180)",
           ["measurements", "measure", "set_sun", "set_time", "clear", "add_layer"]),
     Entry("coordinates", "ドックと道具", "座標・地名へ移動", "座標や地名を入れて地図を移動。", 'api.coordinates.jump("35.6, 139.7")', ["jump", "search", "go_to_place", "set_notation"]),
+    Entry("shape_receiver", "ドックと道具", "外部から図形を受け取る",
+          "AutoMap・リンク・プログラムから 127.0.0.1 に送られた図形をレイヤー「受け取った図形」に追加して移動。"
+          "show_link は同じパラメーター（geom・line・polygon・geojson・label・name・color・zoom）を直接表示。",
+          'r = api.shape_receiver\nprint(r.listening, r.url, r.problem)\nr.show_link("geom=35.6812,139.7671&label=東京駅")',
+          ["listening", "url", "port", "problem", "show_link"]),
     Entry("spectral", "ドックと道具", "スペクトル", "点・範囲のバンドの値。", "api.spectral.save_csv('/tmp/spectral.csv')",
           ["series", "labels", "add_point", "add_box", "csv_text", "save_csv", "clear"]),
     Entry("dashboard", "ドックと道具", "ダッシュボード", "レイヤーの集計と絞り込み。", "api.dashboard.click_value('船舶')\napi.dashboard.clear_filter()",

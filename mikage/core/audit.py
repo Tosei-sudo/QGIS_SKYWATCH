@@ -17,6 +17,8 @@ What is recorded (KINDS):
 - open: an image opened from the catalog (its image id and files)
 - export: a file written (its path, size and SHA-256)
 - copy: text put on the clipboard (通報文, 分析の結果…: how much, its SHA-256)
+- receive (2026-11-15): shapes received from outside (AutoMap, a link, a
+  program; ui/shape_receiver.py): who sent, how many, the layer
 - error (2026-11-11, tsudo 「エラーログって取れる？」): what went wrong — the
   plugin's warnings and errors in QGIS's log (with their traceback), tasks
   that failed, Python errors raised in the plugin's code, warnings and errors
@@ -74,6 +76,7 @@ KINDS: dict[str, str] = {
     "open": "画像を開く",
     "export": "ファイル出力",
     "copy": "クリップボードへコピー",
+    "receive": "外部からの図形",
     "error": "エラー",
 }
 FORMATS = ("jsonl", "csv")

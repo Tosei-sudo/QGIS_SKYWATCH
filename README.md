@@ -1158,6 +1158,29 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 - カーソル位置の WGS 84 座標をステータスバーの右に表示。表記（10進・度分秒・MGRS・UTM）は地図の右クリックの「ステータスバーの表示」か、表示の右クリックで切り替え
 - 地図の右クリック「緯度経度・MGRS・UTM のコピー」で、その地点の座標をコピー
 
+## 外部から図形を受け取る（AutoMap など・`shapeReceiver`）
+
+ブラウザ拡張機能 AutoMap の「MIKAGE に送る」、リンク、この PC のプログラムから送られた点・線・面を、レイヤーグループ「受け取った図形」の一番上に一時レイヤーとして追加し、地図をそこへ移動する。レジストリに書き込めない環境でも使えるよう、URL スキームではなく QGIS の中の小さな HTTP サーバーで受け取る（新しいライブラリは使わない）。
+
+- **待ち受け**: この PC の中だけ（`127.0.0.1`、既定のポート `47631`）。ほかの PC からは届かず、Windows ファイアウォールの確認も出ない。QGIS が起動していないとき・ポートがふさがっているとき（MIKAGE の入った QGIS をもう 1 つ開いている、ほかのプログラムが使用中）は受け取れず、AutoMap が「MIKAGE に接続できない」と表示する（理由は QGIS のログのタブ「MIKAGE」）
+- **表示**: 1 回の送信ごとに、点・線・面の種類ごとのメモリレイヤー（名前は送信元が付けた `name`、種類が混ざるときは「…（点）」「…（線）」「…（面）」）。ラベル（`label`）があれば地図に表示し、GeoJSON の属性（文字・数）は属性テーブルに残る。点 1 つならその点を中心に `zoom`（既定 14、ビューアと同じ）、点だけならその範囲（`zoom` より寄らない）、線・面ならその範囲へ移動。QGIS のウィンドウを前に出し（Windows ではタスクバーの点滅になることがある）、メッセージバーに「〇〇 から図形 n 個を受け取り…」と送信元を表示。監査ログには `receive` として送信元・個数・レイヤー名を記録
+- **送り方**（パラメーターはビューアのリンクと同じ `geom`・`line`・`polygon`・`geojson`・`label`・`name`・`color`・`zoom`。座標は緯度経度・度分秒・MGRS・UTM、WKT（`SRID=3857;` も）、GeoJSON）:
+  - `POST http://127.0.0.1:47631/show` に JSON（`{"geojson": {…FeatureCollection…}, "name": "…"}`、`geojson` はオブジェクトのままでよい）かフォーム（`geom=35.68,139.77&label=東京駅`）。答えは JSON（`{"ok": true, "count": 2, "layer": "…", "errors": []}`）。AutoMap はこの方法
+  - `GET http://127.0.0.1:47631/show?geom=35.6812,139.7671&label=東京駅`（ブラウザで開く・ほかのプログラムからリンクを開く）。結果は短いページで表示
+  - `GET /status` で待ち受けているか（`{"app": "MIKAGE", "ok": true}`）
+- **受け取る相手**（ほかは 403 で何もしない）: `origins` に合う送信元（既定 `chrome-extension://*` = ブラウザ拡張機能。Web ページは拡張機能の送信元を名乗れない）、この PC のプログラム（`Origin` も `Sec-Fetch-*` もない要求: curl・PowerShell・Python など）、人が開いたリンク（アドレスバー・ブックマーク・ほかのアプリから開いたリンク）、`origins` にあるサイトのページのリンク。Web ページの画像・スクリプト・フレーム・fetch からの要求は受け取らない（開いたページが勝手に地図へ図形を置けないように）。`Host` が `127.0.0.1`・`localhost` 以外の要求（DNS リバインディング）も受け取らない
+- **中身の点検**: 値はデータとしてだけ読み、ファイルや URL を開くことはない。1 つの値は 20 万文字まで（POST の本文は 8 MB まで）、図形は 1 回 1000 個まで、頂点は合わせて 10 万点まで、緯度経度の範囲外は読まない（ビューアと同じ）。読めなかった値は理由をメッセージバーと答えに出し、読めたものだけ表示
+- **社内の Web ページから送るとき**: そのページの送信元を `origins` に足す（`"origins": ["chrome-extension://*", "https://intra.example.jp"]`。`*.example.jp` も可。`*` だけ・`https://*` は不可）。Chrome 142 以降はページから `127.0.0.1` への fetch に「ローカル ネットワークへのアクセス」の確認が出るので、管理者がポリシー `LocalNetworkAccessAllowedForUrls` にそのサイトを入れておく。拡張機能（AutoMap）は `host_permissions` があるので確認は出ない（Chrome 142〜143 の一部では拡張機能でも止まる不具合があり、そのときは同じポリシーに `chrome-extension://<拡張機能の ID>` を入れる）
+- **1 台の Windows に複数人がログインする（リモートデスクトップのサーバー）とき**: `127.0.0.1` は全員で共有なので、最初に QGIS を開いた人のポートになる。こうした PC では `"shapeReceiver": false` にするか、利用者ごとに設定ファイルを分けて `port` を変える
+
+```jsonc
+"shapeReceiver": {
+  "enabled": true,                       // false で待ち受けない（"shapeReceiver": false だけでも可）
+  "port": 47631,                         // 1024〜65535。AutoMap の設定「MIKAGE」の送信先と合わせる
+  "origins": ["chrome-extension://*"]    // 受け取る送信元。拡張機能を AutoMap だけにするなら "chrome-extension://<ID>"
+}
+```
+
 ## AI（物体検出・クリック抽出）
 
 ビューアと同じ ONNX のモデルで、画像から物を見つけてポリゴンにする。QGIS 本体にはない。モデルはプラグインに入っていない（設定ファイルの `aiModels` か、ONNX ファイルを指定）。
@@ -1375,6 +1398,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   - `open` 画像カタログ・通知・イベントから開いた画像（画像 ID とファイル）
   - `export` ファイル出力: 観測記録のエクスポート・CSV、通報文のファイル、撮像計画ファイル（と消した古いファイル）、引き継ぎメモ、イベント・データ分析・スペクトルの CSV、報告書、分類体系の JSON、予定表、Web マップの JSON。パスと大きさと SHA-256
   - `copy` クリップボードへのコピー: 通報文・通報記録、引き継ぎメモ、データ分析の結果、イベントの概要、画像のパス。件数と文字数と SHA-256（中身は書かない）
+  - `receive` 外部から受け取った図形（AutoMap・リンク・プログラム）: 送信元・個数・レイヤー名・読めなかった値
   - `config` 設定ファイルの読み込み（場所・SHA-256・問題の件数）
   - `session` プラグインの起動・終了（プラグインと QGIS の版）
   - `error` エラー（`action` で種類）:
@@ -1402,7 +1426,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   "sendMinutes": 10,        // 送る間隔（分、1 以上）
   "format": "jsonl",        // "jsonl" か "csv"
   "encoding": "",           // 既定 jsonl は utf-8・csv は utf-8-sig。"cp932" も
-  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "error"],  // 記録するもの（既定すべて）
+  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "receive", "error"],  // 記録するもの（既定すべて）
   "values": false,          // true で書き込んだ属性の値も記録
   "keepDays": 90,           // この PC に残す日数（送り終えたもの）
   "localFolder": ""         // この PC の保存先（既定 プロファイルの mikage/audit）
@@ -1734,6 +1758,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `defaultBaseMap` | 文字列 | 起動時の背景地図の `id` | なし | [背景地図](#背景地図) |
 | `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`）、`visible`（`false` で最初は非表示。既定 `true`） | なし | [起動時のレイヤー](#起動時のレイヤー) |
 | `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須。`features` は属性名の配列で複数可、先頭が地名）、`token` | なし（地名は検索しない） | [座標・地名へ移動](#座標地名へ移動) |
+| `shapeReceiver` | `true`・`false`・オブジェクト | AutoMap・リンク・この PC のプログラムから図形を受け取って地図に表示（`127.0.0.1` だけで待ち受け）。`enabled`、`port`（既定 `47631`）、`origins`（受け取る送信元。既定 `["chrome-extension://*"]`） | 有効 | [外部から図形を受け取る](#外部から図形を受け取るautomap-などshapereceiver) |
 | `layerTemplates` | 配列 | `name`（必須）・`geometryType`・`fields`（`[{ "name", "type", "alias", "required", "length", "min", "max", "defaultValue", "codes" }]`）・`title`・`description` | 組み込みのテンプレートだけ | [新規スクラッチレイヤー](#新規スクラッチレイヤーテンプレート) |
 | `arcgisPortals` | 配列 | `url`（ポータルの https）・`clientId`（必須）・`label` | なし | [ArcGIS Web マップ](#arcgis-web-マップ) |
 | `movingFeeds` | 配列 | `type`（`websocket`・`sse`・`poll`）、`url`、`label`、`interval`（秒）、`fields`（`id`・`time`・`lat`・`lon` など）、`kind`（`ship`・`aircraft`） | なし | [移動体](#移動体aisads-b) |
