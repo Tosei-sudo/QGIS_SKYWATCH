@@ -545,7 +545,7 @@ def set_role(name: str) -> None:
     settle(5)
 
 
-ROLES = {"obs": "観測記録の担当", "request": "撮像計画の担当", "plan": "撮像計画の担当", "check": "撮像計画の担当"}
+ROLES = {"obs": "観測記録の担当", "request": "撮像を依頼する人", "plan": "撮像計画の担当", "check": "撮像を依頼する人"}
 
 
 def add_basemap() -> None:

@@ -42,6 +42,11 @@ PRESETS = [
         ("right", ["SatObsRequests", "SatObsPlanFiles", "SatObsSchedule"]),
         ("left", ["SatObsImageCatalog"]),
     ]),
+    # Those who only ask for images (tsudo, 2026-11-15): register requests and see whether they got in, no calculating or writing.
+    ("撮像を依頼する人", [
+        ("right", ["SatObsRequests", "SatObsSchedule"]),
+        ("bottom", ["SatObsPlaceSchedule"]),
+    ]),
     ("観測記録の担当", [
         ("left", ["SatObsImageCatalog", "SatObsEnhance"]),
         ("right", ["SatObsObservations", "SatObsAiResults", "SatObsTaxonomy"]),
