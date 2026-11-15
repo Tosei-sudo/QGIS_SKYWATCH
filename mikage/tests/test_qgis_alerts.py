@@ -516,3 +516,65 @@ def test_other_peoples_text_is_never_read_as_html(plugin):
     feed.open_record(trap)
     texts = [w.text() for w in iface.bar.items()]
     assert any("&lt;img" in t for t in texts) and not any("<img" in t for t in texts)
+
+
+def test_notices_tab_makes_a_mail_of_the_rows(plugin, monkeypatch):
+    import time as _time
+    from urllib.parse import parse_qs, unquote, urlsplit
+
+    from mikage.core import audit
+    from mikage.ui import alert_feed
+
+    p, iface, dock, tmp_path = plugin
+    opened = []
+    monkeypatch.setattr(alert_feed.QDesktopServices, "openUrl", lambda url: opened.append(url.toString(url.FullyEncoded)) or True)
+    recorded = []
+    monkeypatch.setattr(audit, "record", lambda kind, action, target="", **kw: recorded.append((kind, action, target, kw)))
+    notices = p.docks["SatObsNotices"]
+    feed = notices.alerts
+    # Without alertReports.mail: no button.
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False, "live": False})
+    assert feed.mail_button.isHidden()
+    fake, log = _setup(p, tmp_path, {"notifyOnSave": False, "live": False,
+                                     "mail": {"to": ["a@x.jp", "b@x.jp"], "subject": "【通報】{now:%Y/%m/%d} {count}件 {first:%H:%M}", "footer": "以上"}})
+    assert not feed.mail_button.isHidden()
+    log.types["REPORTED_AT"] = "esriFieldTypeDate"
+    now = int(_time.time() * 1000)
+    log.add({"OBS_ID": "a", "REPORT_NAME": "速報", "TEXT": "船A|停泊", "REPORTED_AT": now - 60_000})
+    log.add({"OBS_ID": "b", "REPORT_NAME": "速報", "TEXT": "船B|航行", "REPORTED_AT": now})
+    long_text = "船C|航行|" + "備考" * 40
+    log.add({"OBS_ID": "c", "REPORT_NAME": "速報", "TEXT": long_text, "REPORTED_AT": now})
+    p.context.configChanged.emit()
+    notices.show()
+    assert wait_for(lambda: feed.table.rowCount() == 3)
+    # Nothing selected: all the rows, as reported (the oldest first).
+    feed.mail_button.click()
+    to, fields = unquote(urlsplit(opened[-1]).path), {k: v[0] for k, v in parse_qs(urlsplit(opened[-1]).query).items()}
+    assert to == "a@x.jp,b@x.jp"
+    assert fields["subject"].startswith("【通報】") and fields["subject"].split()[1] == "3件"
+    assert fields["body"] == f"船A|停泊\r\n船B|航行\r\n{long_text}\r\n以上"
+    assert "3 件のメールを作成" in feed.status.text()
+    kind, action, target, kw = recorded[-1]
+    assert (kind, action, target, kw["count"], kw["result"]) == ("mail", "alert-feed", "a@x.jp, b@x.jp", 3, "ok")
+    # The rows selected only.
+    feed.table.selectRow(0)
+    feed.mail_button.click()
+    assert parse_qs(urlsplit(opened[-1]).query)["body"] == [f"{long_text}\r\n以上"]
+    # Too long: some rows in the mail, the whole text on the clipboard, said in the message bar.
+    feed.table.clearSelection()
+    s = p.context.config.alert_reports
+    s.mail.max_length = 700
+    QApplication.clipboard().clear()
+    feed.mail_button.click()
+    body = parse_qs(urlsplit(opened[-1]).query)["body"][0]
+    assert len(opened[-1]) <= 700 and body == "船A|停泊\r\n船B|航行\r\n（ほか 1 件省略。全文はクリップボードから貼り付けてください）\r\n以上"
+    assert QApplication.clipboard().text() == f"船A|停泊\r\n船B|航行\r\n{long_text}\r\n以上"
+    assert "3 件のうち 2 件だけ" in iface.bar.currentItem().text()
+    # The mail program not opened: the text on the clipboard, a warning.
+    s.mail.max_length = 2000
+    monkeypatch.setattr(alert_feed.QDesktopServices, "openUrl", lambda url: False)
+    QApplication.clipboard().clear()
+    feed.mail_button.click()
+    assert QApplication.clipboard().text().startswith("船A|停泊")
+    assert "開けなかった" in feed.status.text() and recorded[-1][3]["result"] == "error"
+    assert "開けなかった" in iface.bar.currentItem().text()

@@ -700,7 +700,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - **通報済みのハイライト**: 通報テーブルにある記録は、「観測記録」ドックの一覧（「この画像」「モノ」）で行が黄色、地図では印の後ろにオレンジ色の円（行にマウスを乗せると「通報済み」）。記録の読み込み（「再読込」・設定ファイルの読み直し）のときに通報テーブルを読み、「通報」した記録はすぐ、「通報記録」で行を削除した記録は読み直して消える。ほかの人の通報は次の読み込みで反映
 - 対象は削除されていない記録。`presentOnly`（既定 `true`）で不在を除き、`minConfidence` で確度の下限
 - **手動の通報**: 条件に合わない記録も、記録のフォームの「通報」、または一覧で選んだ行（Ctrl・Shift + クリックで複数）の「通報に追加」で通報文の先頭に入る（「手動」と表示。抽出し直しても残る）。項目 `rule` は「手動」、項目 `manual` は「手動」か空欄、通報テーブルの `MANUAL` は 1
-- **通知ドックの「通報」タブ**: 通報テーブルの直近 `live.days` 日（既定 7 日）の行を新しい順に一覧し、`live.seconds` 秒ごと（既定 10 秒）に読み直す。ほかの人の通報も間隔ごとに入り、タブに件数（例:「通報（2）」）、新しい行は太字、「観測記録」ドックの通報済みのハイライトにもすぐ反映（削除された行は消える）。読み直しは変わった分だけ（行の ID の一覧 1 回と、新しい行だけ）で、ドックが表示されていない間（ほかのタブの裏も）は止まり、表示したときにすぐ読む。失敗が続くと間隔を延ばす（最長 5 分）。ダブルクリック・「記録へ移動」でその記録へ、「選択をコピー」、「今すぐ更新」、「通報記録の確認…」。Esri の REST は変更を知らせないため、リアルタイムではなく間隔ごとの更新。`"live": false` で自動更新なし（「今すぐ更新」のみ）、`"live": 30` で 30 秒ごと、`{ "seconds": 10, "days": 3 }`
+- **通知ドックの「通報」タブ**: 通報テーブルの直近 `live.days` 日（既定 7 日）の行を新しい順に一覧し、`live.seconds` 秒ごと（既定 10 秒）に読み直す。ほかの人の通報も間隔ごとに入り、タブに件数（例:「通報（2）」）、新しい行は太字、「観測記録」ドックの通報済みのハイライトにもすぐ反映（削除された行は消える）。読み直しは変わった分だけ（行の ID の一覧 1 回と、新しい行だけ）で、ドックが表示されていない間（ほかのタブの裏も）は止まり、表示したときにすぐ読む。失敗が続くと間隔を延ばす（最長 5 分）。ダブルクリック・「記録へ移動」でその記録へ、「選択をコピー」、「メールを作成」（`mail` があるとき。下の「[メールで送る](#通報をメールで送るmail)」）、「今すぐ更新」、「通報記録の確認…」。Esri の REST は変更を知らせないため、リアルタイムではなく間隔ごとの更新。`"live": false` で自動更新なし（「今すぐ更新」のみ）、`"live": 30` で 30 秒ごと、`{ "seconds": 10, "days": 3 }`
 - **保存時のお知らせ**: 記録を保存（記録・継続・位置の修正・復元・一括編集）したとき、条件に合い通報済みでない記録があれば、メッセージバーに「注目の記録」と「通報文を作成」ボタン（その記録を入れて「通報」を開く）。条件・ジオフェンスは 10 分ごとに読み直す。`"notifyOnSave": false` で出さない
 - **重要度スコア**（`score`）: 抽出した記録に 0〜100 点を付け、高い順に並べる（手動で追加した記録は先頭のまま）。一覧の左の列に点数、マウスを乗せると内訳。項目 `score`（点数。`digits` で小数の桁）・`similar`（珍しさで数えた似た記録の件数）で行や通報テーブルに書ける。点数は次の 4 つ（それぞれ 0〜1）の重み付き平均 × 100:
   - 確度: 確度の並びで一番上が 1、一番下が 0
@@ -776,6 +776,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   "countries": "https://…/Alerts/FeatureServer/4",
   "minConfidence": "推定",
   "score": { "weights": { "confidence": 1, "area": 2, "rule": 1, "rarity": 1 }, "rarity": { "days": 14, "radiusKm": 30, "level": 1 } },
+  "mail": { "to": "duty@example.jp", "subject": "【通報】{now:%Y/%m/%d %H:%M} {count}件", "footer": "以上" },
   "default": "速報",
   "formats": [
     { "name": "速報", "delimiter": "|", "dateFormat": "%m/%d %H:%M",
@@ -792,6 +793,32 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
     { "name": "連携ファイル", "delimiter": "\t", "timeZone": "UTC", "dateFormat": "iso", "clipboard": false,
       "file": { "path": "D:/alerts/alert_{now:%Y%m%d}.txt", "encoding": "cp932", "append": true } }
   ]
+}
+```
+
+#### 通報をメールで送る（`mail`）
+
+通知ドックの「通報」タブの「メールを作成」で、選んだ行（Ctrl・Shift + クリックで複数。選んでいなければ一覧すべて）の通報文を本文にした新しいメールを、既定のメールソフト（Outlook など）で開く（`mailto:` のリンク）。送信はメールソフトで（宛先・本文を確かめてから送る）。本文の行は通報した順（古い通報から、1 回の通報の中は通報文の行の順）。`mail` がなければボタンは出ない。
+
+| キー | 中身 | 既定 |
+| --- | --- | --- |
+| `to`・`cc`・`bcc` | メールアドレスの文字列（`,`・`;`・空白で区切って複数）か配列 | なし（メールソフトで入れる） |
+| `subject` | 件名。`{now:%Y/%m/%d}`（今を書式で）・`{date}`（今を既定のフォーマットの `dateFormat` で）・`{count}`（件数）・`{name}`（行のフォーマットの名前、複数なら「・」区切り）・`{user}`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）・`{first:%H:%M}`・`{last:%H:%M}`（いちばん古い・新しい行の通報日時）。`@` のあとにタイムゾーンでそのゾーン（`{now:%H%M@UTC}`）、なければ既定のフォーマット（`default`）の `timeZone`。ほかの `{…}` は設定の問題として知らせる | `通報 {now:%Y/%m/%d %H:%M} {count}件` |
+| `header`・`footer` | 本文の前・後の文。文字列か行の配列（件名と同じ埋め込み） | なし |
+| `encoding` | リンクの文字コード。`utf-8`、または `cp932`（Outlook で件名・本文が文字化けするとき。Outlook のオプションの詳細設定にある mailto: の UTF-8 サポートを切ってある環境など） | `utf-8` |
+| `maxLength` | リンクの長さの上限（文字。200 以上） | `2000` |
+
+- **長さの上限**: `mailto:` のリンクは、Windows・Outlook で約 2,000 文字を超えると開かない・切れることがある。日本語はリンクの中で 1 文字が 9 文字（`cp932` では 6 文字）になるため、上限 2,000 で本文はおよそ日本語 200 文字（通報文 10 行ほど）。入らないときは、入るだけの行と「（ほか n 件省略。全文はクリップボードから貼り付けてください）」を本文にし、全文（ヘッダー・すべての行・フッター）をクリップボードへコピーしてメッセージバーで知らせる。使っているメールソフトで長いリンクも開けるなら `maxLength` を増やしてよい
+- 添付ファイルは付けられない（`mailto:` の仕組み）。メールソフトが開けなかったとき（既定のメールソフトがない・リンクが長すぎる）は本文をクリップボードへコピーしてメッセージバーで知らせる。`cp932` で書けない文字（絵文字・é など）は `?` にして知らせる
+- `"mail": true` で宛先なし・既定の件名。[監査ログ](#監査ログauditlog)には `mail` として宛先・件名・件数・本文の SHA-256 を記録
+
+```jsonc
+"mail": {
+  "to": ["duty@example.jp", "watch@example.jp"],
+  "cc": "chief@example.jp",
+  "subject": "【通報】{now:%Y/%m/%d %H:%M} {count}件（{first:%H:%M}〜{last:%H:%M}）",
+  "header": ["各位", "", "通報は以下のとおり。"],
+  "footer": ["", "以上"]
 }
 ```
 
@@ -1398,6 +1425,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   - `open` 画像カタログ・通知・イベントから開いた画像（画像 ID とファイル）
   - `export` ファイル出力: 観測記録のエクスポート・CSV、通報文のファイル、撮像計画ファイル（と消した古いファイル）、引き継ぎメモ、イベント・データ分析・スペクトルの CSV、報告書、分類体系の JSON、予定表、Web マップの JSON。パスと大きさと SHA-256
   - `copy` クリップボードへのコピー: 通報文・通報記録、引き継ぎメモ、データ分析の結果、イベントの概要、画像のパス。件数と文字数と SHA-256（中身は書かない）
+  - `mail` 通報のメールの作成（通知ドックの「通報」タブの「メールを作成」）: 宛先・CC・BCC・件名・件数・本文に入れた件数・リンクの長さ、本文の文字数と SHA-256（中身は書かない）。メールソフトが開けなかったときは結果がエラー
   - `receive` 外部から受け取った図形（AutoMap・リンク・プログラム）: 送信元・個数・レイヤー名・読めなかった値
   - `config` 設定ファイルの読み込み（場所・SHA-256・問題の件数）
   - `session` プラグインの起動・終了（プラグインと QGIS の版）
@@ -1426,7 +1454,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   "sendMinutes": 10,        // 送る間隔（分、1 以上）
   "format": "jsonl",        // "jsonl" か "csv"
   "encoding": "",           // 既定 jsonl は utf-8・csv は utf-8-sig。"cp932" も
-  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "receive", "error"],  // 記録するもの（既定すべて）
+  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "mail", "receive", "error"],  // 記録するもの（既定すべて）
   "values": false,          // true で書き込んだ属性の値も記録
   "keepDays": 90,           // この PC に残す日数（送り終えたもの）
   "localFolder": ""         // この PC の保存先（既定 プロファイルの mikage/audit）
@@ -1742,7 +1770,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en", … }`。`en` は英語の名前で通報の `confidence.en`、ほかのキー（`code` など）は通報の `confidence.code` など）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
-| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |

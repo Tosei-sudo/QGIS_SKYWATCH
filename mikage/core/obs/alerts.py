@@ -240,6 +240,35 @@ class LiveSettings:
     days: float = 7.0
 
 
+#: The places a mail's subject, header and footer can hold (`{first}`, `{last}`: the oldest, newest row's 通報日時).
+MAIL_PLACES = ("name", "count", "user", "date", "now", "first", "last")
+MAIL_TIMES = ("now", "date", "first", "last")
+DEFAULT_MAIL_SUBJECT = "通報 {now:%Y/%m/%d %H:%M} {count}件"
+#: The longest mailto: link (percent-encoded characters): Windows (ShellExecute) and Outlook stop
+#: opening, or cut, links longer than about 2,000 characters.
+DEFAULT_MAIL_LENGTH = 2000
+MIN_MAIL_LENGTH = 200
+MAIL_ENCODINGS = {"utf-8": "utf-8", "utf8": "utf-8", "cp932": "cp932", "shift_jis": "cp932", "shift-jis": "cp932", "sjis": "cp932"}
+_ADDRESS = re.compile(r'^[^@\s,;<>()\[\]"]+@[^@\s,;<>()\[\]"]+$')
+
+
+@dataclass
+class MailSettings:
+    """`alertReports.mail`: a mail made from rows of 通知 ▸ 通報 (a mailto: link the mail program opens)."""
+    to: list[str] = field(default_factory=list)
+    cc: list[str] = field(default_factory=list)
+    bcc: list[str] = field(default_factory=list)
+    #: May hold `{now:%Y/%m/%d}`, `{date}`, `{count}`, `{name}`, `{user}`, `{first:…}`, `{last:…}` (zone after `@`).
+    subject: str = DEFAULT_MAIL_SUBJECT
+    #: Lines before and after the rows (the same places).
+    header: str = ""
+    footer: str = ""
+    #: How the link's text is percent-encoded: utf-8 (RFC 6068), or cp932 for an Outlook not reading mailto: as UTF-8.
+    encoding: str = "utf-8"
+    #: The longest link; a longer body is cut by rows (the whole text then goes to the clipboard).
+    max_length: int = DEFAULT_MAIL_LENGTH
+
+
 @dataclass
 class AlertSettings:
     """`alertReports`: which records are notable, the log, and the named formats (one the default)."""
@@ -263,6 +292,8 @@ class AlertSettings:
     score: Optional[ScoreSettings] = field(default_factory=ScoreSettings)
     #: The 通報 tab of 通知 (polled while the dock is shown).
     live: LiveSettings = field(default_factory=LiveSettings)
+    #: A mail of the 通報 tab's rows (None: no 「メールを作成」).
+    mail: Optional[MailSettings] = None
 
     def format(self, name: str = "") -> Optional[AlertFormat]:
         """The format of a name, else the default one, else the first."""
@@ -687,11 +718,17 @@ def alert_format_of(value: Any, problems: list[str], at: str) -> Optional[AlertF
     return fmt
 
 
-def _check_places(template: str, at: str, problems: list[str]) -> None:
-    """The time zones of a header's, footer's or path's `{now:…@zone}` places."""
+def _check_places(template: str, at: str, problems: list[str], times: Sequence[str] = ("now", "date"),
+                  known: Optional[Sequence[str]] = None) -> None:
+    """
+    The time zones of a header's, footer's or path's `{now:…@zone}` places
+    (and, given the `known` places, the names that are none of them).
+    """
     for m in _PLACE.finditer(template):
         _, zone = _place_parts(m.group(2))
-        if m.group(1) in ("now", "date") and zone is not None and parse_time_zone(zone) is None:
+        if known is not None and m.group(1) not in known:
+            problems.append(f"{at} の {m.group(0)} は使えない（{'・'.join('{' + k + '}' for k in known)}）")
+        elif m.group(1) in times and zone is not None and parse_time_zone(zone) is None:
             problems.append(f"{at} の {m.group(0)} のタイムゾーン「{zone}」は Asia/Tokyo・+09:00・UTC のように指定")
 
 
@@ -764,6 +801,54 @@ def live_settings_of(value: Any, at: str, problems: list[str]) -> LiveSettings:
     return live
 
 
+def _addresses_of(value: Any, at: str, problems: list[str]) -> list[str]:
+    """Mail addresses: a string (several split by , ; or spaces) or an array of them."""
+    if value is None or value == "":
+        return []
+    items = [value] if isinstance(value, str) else value if isinstance(value, list) and all(isinstance(x, str) for x in value) else None
+    if items is None:
+        problems.append(f"{at} はメールアドレスの文字列か配列で指定")
+        return []
+    out = []
+    for item in items:
+        for a in re.split(r"[,;、\s]+", item):
+            if not a:
+                continue
+            if _ADDRESS.match(a):
+                out.append(a)
+            else:
+                problems.append(f"{at} の「{a}」はメールアドレス（name@example.jp の形）で指定")
+    return list(dict.fromkeys(out))
+
+
+def mail_settings_of(value: Any, at: str, problems: list[str]) -> Optional[MailSettings]:
+    """`alertReports.mail`: true (no address, the default subject) or { to, cc, bcc, subject, header, footer, encoding, maxLength }."""
+    if value is True:
+        return MailSettings()
+    if not is_record(value):
+        problems.append(f"{at} は true か {{ to, cc, bcc, subject, header, footer, encoding, maxLength }} で指定")
+        return None
+    mail = MailSettings(to=_addresses_of(value.get("to"), f"{at}.to", problems), cc=_addresses_of(value.get("cc"), f"{at}.cc", problems),
+                        bcc=_addresses_of(value.get("bcc"), f"{at}.bcc", problems))
+    if "subject" in value:
+        if isinstance(value["subject"], str):
+            mail.subject = value["subject"]
+        else:
+            problems.append(f"{at}.subject は文字列で指定")
+    mail.header = _lines_of(value.get("header"), f"{at}.header", problems)
+    mail.footer = _lines_of(value.get("footer"), f"{at}.footer", problems)
+    for key in ("subject", "header", "footer"):
+        _check_places(getattr(mail, key), f"{at}.{key}", problems, MAIL_TIMES, MAIL_PLACES)
+    if "encoding" in value:
+        encoding = MAIL_ENCODINGS.get(str(value["encoding"]).lower())
+        if encoding is None:
+            problems.append(f"{at}.encoding は utf-8 か cp932（shift_jis）で指定")
+        else:
+            mail.encoding = encoding
+    mail.max_length = int(_number(value, "maxLength", at, problems, DEFAULT_MAIL_LENGTH, MIN_MAIL_LENGTH))
+    return mail
+
+
 def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings]:
     """`alertReports`; None when it cannot be used (no format)."""
     at = "alertReports"
@@ -801,6 +886,8 @@ def alert_settings_of(value: Any, problems: list[str]) -> Optional[AlertSettings
     settings.notify_on_save = _bool(value, "notifyOnSave", at, problems, True)
     if "live" in value:
         settings.live = live_settings_of(value["live"], f"{at}.live", problems)
+    if "mail" in value and value["mail"] not in (None, False):
+        settings.mail = mail_settings_of(value["mail"], f"{at}.mail", problems)
     if "score" in value:
         settings.score = score_settings_of(value["score"], f"{at}.score", problems)
     if "rules" in value:
@@ -1609,21 +1696,26 @@ def _place_parts(rest: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     return body or None, None
 
 
-def fill(template: str, report: AlertFormat, at: Moment, extra: Optional[dict[str, str]] = None) -> str:
+def fill(template: str, report: AlertFormat, at: Moment, extra: Optional[dict[str, str]] = None,
+         times: Optional[dict[str, Optional[float]]] = None) -> str:
     """
     A header, footer or file path with its places filled: `{name}`,
     `{count}`, `{user}`, `{date}` (now by dateFormat), `{now:%Y%m%d}` (now
     by its own format), in the report's time zone or the one after `@`
     (`{now:%H:%M@UTC}`, `{date@+09:00}`); unknown places stay as written.
+    `times`: more places written as times (ms; None writes nothing).
     """
+    times = times or {}
+
     def one(m: re.Match) -> str:
         key = m.group(1)
         fmt, zone_text = _place_parts(m.group(2))
-        if key in ("now", "date"):
+        if key in ("now", "date") or key in times:
             zone = report.time_zone if zone_text is None else parse_time_zone(zone_text)
             if zone is None:
                 return m.group(0)
-            return js_string(format_time(at.now, fmt or report.date_format, zone))
+            when = at.now if key in ("now", "date") else times[key]
+            return "" if when is None else js_string(format_time(when, fmt or report.date_format, zone))
         values = {"name": report.name, "count": str(at.count), "user": at.user, **(extra or {})}
         return values[key] if key in values and not (m.group(2) or "").startswith("@") else m.group(0)
 

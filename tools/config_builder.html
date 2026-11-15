@@ -613,6 +613,23 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "area.en",
   "places.en"
  ],
+ "alertMailPlaces": [
+  "name",
+  "count",
+  "user",
+  "date",
+  "now",
+  "first",
+  "last"
+ ],
+ "alertMailEncodings": [
+  "utf-8",
+  "cp932"
+ ],
+ "alertMailLength": [
+  2000,
+  200
+ ],
  "alertObjectSources": [
   "country",
   "place",
@@ -965,6 +982,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "open": "画像を開く",
   "export": "ファイル出力",
   "copy": "クリップボードへコピー",
+  "mail": "メールの作成",
   "receive": "外部からの図形",
   "error": "エラー"
  },
@@ -1605,6 +1623,28 @@ const SPEC = [
           N("seconds", "更新の間隔（秒。0 で手動のみ、2 秒未満は 2 秒）", { min: 0, ph: "10" }),
           N("days", "表示する日数（通報日時で。0 で期間なし）", { min: 0, ph: "7" }),
         ], { allowFalse: "自動更新しない（「今すぐ更新」のみ）", help: "通報テーブルを一定間隔で読み直して一覧（ドックが表示されている間だけ）。変わった行だけ読む。Esri は更新を知らせないので、リアルタイムでなく間隔ごと" }),
+        O("mail", "メールで送る（通知ドックの「通報」タブの「メールを作成」）", [
+          L("to", "宛先（To）", { single: true, ph: "duty@example.jp, watch@example.jp" }),
+          L("cc", "CC", { single: true }), L("bcc", "BCC", { single: true }),
+          T("subject", "件名", { ph: "通報 {now:%Y/%m/%d %H:%M} {count}件", help: "{now:%Y/%m/%d}（今を書式で）・{date}（今を既定のフォーマットの dateFormat で）・{count}（件数）・{name}（行のフォーマットの名前）・{user}・{first:%H:%M}・{last:%H:%M}（いちばん古い・新しい行の通報日時）。@ のあとにタイムゾーンでそのゾーン（{now:%H%M@UTC}）、なければ既定のフォーマットの timeZone" }),
+          TJ("header", "本文の前の文", { ph: '["各位", "", "通報は以下のとおり。"]', help: "文字列か行の配列。件名と同じ埋め込み" }),
+          TJ("footer", "本文の後の文", { ph: "以上" }),
+          S("encoding", "リンクの文字コード", [["utf-8", "UTF-8"], ["cp932", "cp932（Outlook で文字化けするとき）"]], { ph: "utf-8" }),
+          N("maxLength", "リンクの長さの上限（文字）", { min: K.alertMailLength[1], ph: String(K.alertMailLength[0]), help: "Windows・Outlook は約 2,000 文字を超えるリンクを開かない・切ることがある。日本語はリンクで 1 文字 9 文字（cp932 は 6 文字）。入らない行は省き、全文をクリップボードへ" }),
+        ], { help: "選んだ行（選んでいなければ一覧すべて）の通報文を本文に、既定のメールソフトで新しいメールを開く（mailto:）。送信はメールソフトで。添付は付けられない。true で宛先なし・既定の件名",
+          check: (it, at, p) => {
+            for (const k of ["to", "cc", "bcc"]) {
+              for (const a of [].concat(it[k] ?? []).flatMap((x) => String(x).split(/[,;、\s]+/)).filter(Boolean)) {
+                if (!/^[^@\s,;<>()\[\]"]+@[^@\s,;<>()\[\]"]+$/.test(a)) p.push(`${at}.${k}: 「${a}」はメールアドレス（name@example.jp の形）で指定`);
+              }
+            }
+            for (const k of ["subject", "header", "footer"]) {
+              const v = Array.isArray(it[k]) ? it[k].join("\n") : typeof it[k] === "string" ? it[k] : "";
+              for (const m of v.matchAll(/\{(\w+)([:@][^}]*)?\}/g)) {
+                if (!K.alertMailPlaces.includes(m[1])) p.push(`${at}.${k}: ${m[0]} は使えない（${K.alertMailPlaces.map((x) => "{" + x + "}").join("・")}）`);
+              }
+            }
+          } }),
         O("score", "重要度スコア", [
           O("weights", "重み（0 でその要素を使わない。既定はどれも 1）", [
             N("confidence", "確度", { min: 0 }), N("area", "場所（ジオフェンスの WEIGHT）", { min: 0 }),
