@@ -345,6 +345,28 @@ class MikagePlugin:
         self._qgis_started = False
         self._startup_told = False
 
+    def initProcessing(self) -> None:  # noqa: N802 (QGIS's name)
+        """
+        The Processing provider 「MIKAGE」 and what its algorithms read (the settings file's AI models and cloud
+        forecast, the project's saved analyses). QGIS calls it alone for `qgis_process` (metadata.txt
+        hasProcessingProvider=yes: no window, no docks, the settings file read here); initGui calls it too.
+        """
+        if self.provider is not None:
+            return
+        if self.context is None:
+            # qgis_process: only the settings file, as the plugin reads it (a URL is read in a task, so a local file is surer).
+            self.context = PluginContext()
+            self.context.reload()
+        context = self.context
+        detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
+        cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
+        # 保存した分析 (the project's analyses of 「データ分析」) as algorithms, following the project.
+        analysis_algorithm.set_context(lambda: context)
+        self.provider = SatObsProvider()
+        QgsApplication.processingRegistry().addProvider(self.provider)
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            signal.connect(self._analyses_changed)
+
     def initGui(self) -> None:  # noqa: N802 (QGIS's name)
         # 「最初の設定」 only the first time in this profile (asked before anything is written; not after an update).
         self.clock.lap()
@@ -554,16 +576,8 @@ class MikagePlugin:
             self._add_to_menu(action)
             self.actions.append(action)
         # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
-        context = self.context
-        detect_algorithm.set_models(lambda: (context.config.ai_models, context.source))
-        cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
         train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
-        # 保存した分析 (the project's analyses of 「データ分析」) as algorithms, following the project.
-        analysis_algorithm.set_context(lambda: context)
-        self.provider = SatObsProvider()
-        QgsApplication.processingRegistry().addProvider(self.provider)
-        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
-            signal.connect(self._analyses_changed)
+        self.initProcessing()
         pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
         pansharpen.triggered.connect(lambda: self.open_pansharpen())
         self._add_to_menu(pansharpen)

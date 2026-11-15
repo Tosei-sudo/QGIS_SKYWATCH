@@ -73,7 +73,7 @@ def websocket_server(messages):
 
 
 def test_websocket_feed_with_the_modules_own_client(monkeypatch):
-    monkeypatch.setenv("SATOBS_MINI_WEBSOCKET", "1")
+    monkeypatch.setenv("MIKAGE_MINI_WEBSOCKET", "1")
     url = websocket_server([json.dumps({"mmsi": 1, "lat": 35, "lon": 139}), "not json", json.dumps([{"mmsi": 2, "lat": 35.1, "lon": 139.1}])])
     got, states = [], []
     connection = FeedConnection(FeedConfig("ws", "websocket", url))

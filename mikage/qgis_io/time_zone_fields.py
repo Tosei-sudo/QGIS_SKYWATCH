@@ -4,7 +4,7 @@ the settings file's `layers`, or added in the data source manager) whose
 dates are in another zone than the service says (the settings file's
 `timeZone` / `timeZones`): their providers read the dates, so each date field
 gets a virtual field beside it with the date as the instant it stands for
-(`SEEN（Asia/Tokyo）`), by the expression function `satobs_time_zone`.
+(`SEEN（Asia/Tokyo）`), by the expression function `mikage_time_zone`.
 The plugin's own requests (catalogs, stores, AI results …) are converted
 where they are made (core/esri.py), so their layers need none.
 """
@@ -27,13 +27,13 @@ from ..core.esri import EsriClient, EsriError
 from ..core.time_zone import UTC, TimeShift, TimeZoneRule, parse_time_zone, read_instant, read_text_instant, rule_for, service_zone_of, shift_text
 from .tasks import run_task
 
-FUNCTION = "satobs_time_zone"
+FUNCTION = "mikage_time_zone"
 #: The layer's shift (`Asia/Tokyo（サービス側: UTC）`), once its fields are added.
 PROPERTY = "satobs/timeZone"
 #: The providers whose layers get the fields, and whether the zone the service reads dates in is asked of it (Esri).
 PROVIDERS = {"arcgisfeatureserver": True, "WFS": False, "OAPIF": False}
 
-_HELP = """<h3>satobs_time_zone(値, データのタイムゾーン, サービスのタイムゾーン)</h3>
+_HELP = """<h3>mikage_time_zone(値, データのタイムゾーン, サービスのタイムゾーン)</h3>
 サービスが別のタイムゾーンで読んでいる日時を、データのタイムゾーンの時計の時刻として読んだ日時。
 文字列はそのタイムゾーンの時刻として読む（末尾の Z・+09:00 は無視）。"""
 
@@ -59,14 +59,14 @@ def corrected(value, data: str, service: str):
     return QDateTime.fromMSecsSinceEpoch(int(round(t)), Qt.TimeSpec.UTC)
 
 
-@qgsfunction(args="auto", group="衛星観測", register=False, helpText=_HELP)
-def satobs_time_zone(value, data, service, feature, parent):  # noqa: ARG001 (QGIS's arguments)
+@qgsfunction(args="auto", group="MIKAGE", register=False, helpText=_HELP)
+def mikage_time_zone(value, data, service, feature, parent):  # noqa: ARG001 (QGIS's arguments)
     return corrected(value, data, service)
 
 
 def register() -> None:
     if not QgsExpression.isFunctionName(FUNCTION):
-        QgsExpression.registerFunction(satobs_time_zone)
+        QgsExpression.registerFunction(mikage_time_zone)
 
 
 def unregister() -> None:

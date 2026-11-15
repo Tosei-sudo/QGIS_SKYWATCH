@@ -1223,7 +1223,7 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 - 書ける項目: `layers`・`imageCatalogs`・`observationStores`（`areas`・`taxonomyTable` も含む）・`detectionOutputs`・`aiResultSources`・`satelliteCatalogs`・`sensorCatalogs`・`movingFeeds`・`gpServices`（ビューアの `stacCatalogs` も読むが、このプラグインに STAC はない）。項目の中の URL すべてと、その下の URL（`…/FeatureServer` なら `…/FeatureServer/0` も）が対象
 - 優先順位: 各項目の `timeZone` → `timeZones` の上から最初に合うもの。`serviceTimeZone` は同じ項目・規則のものだけを使い、なければレイヤーの説明 → UTC
 - 変換する範囲: プラグインが送る Esri の要求すべて（画像カタログ・新着の監視・衛星カタログ・撮像依頼の台帳と出力履歴・観測記録の保存先・確認範囲・分類体系・DB へ転記・外部AI結果など）の日付型（`esriFieldTypeDate`）の属性の読み込み、保存（`applyEdits` の追加・更新）、検索条件の `TIMESTAMP '…'`。移動体のフィードは時刻、サーバ処理（`gpServices`）は日時の入力
-- QGIS が自分で開くレイヤー（`layers` の `esri`・`wfs`・`ogc-features`、データソースマネージャーで追加したもの）: 日時は QGIS が読むので値は変えず、日時型の属性ごとに補正した仮想フィールド「〈属性名〉（Asia/Tokyo）」を足す（式は `satobs_time_zone("属性", 'Asia/Tokyo', 'UTC')`、関数は式ビルダーの「衛星観測」）。プロジェクトに保存され、開き直しても二重には足さない。Esri のレイヤーで `serviceTimeZone` がないときはレイヤーの説明を読んでから足す
+- QGIS が自分で開くレイヤー（`layers` の `esri`・`wfs`・`ogc-features`、データソースマネージャーで追加したもの）: 日時は QGIS が読むので値は変えず、日時型の属性ごとに補正した仮想フィールド「〈属性名〉（Asia/Tokyo）」を足す（式は `mikage_time_zone("属性", 'Asia/Tokyo', 'UTC')`、関数は式ビルダーの「MIKAGE」）。プロジェクトに保存され、開き直しても二重には足さない。Esri のレイヤーで `serviceTimeZone` がないときはレイヤーの説明を読んでから足す
 - 対象外: 日付だけの型（`esriFieldTypeDateOnly`）・時刻だけの型・時差を持つ型（`esriFieldTypeTimestampOffset`）、日時を文字列型に入れた Esri の属性、検索条件の `DATE '…'`、QGIS が開くレイヤーの文字列型の属性
 - 読み込めないタイムゾーン・正規表現は「設定…」の問題の一覧に出して無視する
 - 閉域でも動く: IANA 名は Python の zoneinfo（OS のデータベース）で読む。Windows には OS のデータベースがないため Windows 版の zip に `tzdata` を同梱。どちらもないときも、夏時間のないタイムゾーン（`Asia/Tokyo`・`Asia/Seoul`・`Asia/Shanghai`・`Asia/Singapore`・`Asia/Kolkata` など）と時差の書き方は読める
@@ -2386,7 +2386,7 @@ python3 -m pytest                                           # core だけ（QGIS
 MIKAGE_SGP4=bundled python3 -m pytest        # 同梱の純 Python 版 SGP4 で
 ```
 
-- 遅いテストには `@pytest.mark.slow`。高速版では飛ばし、`--full`（または環境変数 `SATOBS_FULL_TESTS=1`）で実行。AI 学習のテストは高速版でも 1 エポックで読み込み・学習・書き出し・検出まで通す（精度だけ完全版）
+- 遅いテストには `@pytest.mark.slow`。高速版では飛ばし、`--full`（または環境変数 `MIKAGE_FULL_TESTS=1`）で実行。AI 学習のテストは高速版でも 1 エポックで読み込み・学習・書き出し・検出まで通す（精度だけ完全版）
 - マージ前は高速版。AI（`core/ai`・`processing_provider` の学習・検出・データセット）を変えたときは完全版も
 - `-n auto` は pytest-xdist の並列実行。NumPy の BLAS は 1 プロセス 1 スレッド（`tests/conftest.py`）。並列でなくても動く（高速版で約 1 分 45 秒）
 - pytest-timeout があれば、1 件 5 分を超えたテストは全スレッドのスタックを出して止める（固まったまま待たない）

@@ -46,7 +46,7 @@ def test_the_function_reads_dates_and_text_in_the_data_zone():
     assert time_zone_fields.corrected("2026-10-28T09:00:00Z", "Asia/Tokyo", "UTC").toMSecsSinceEpoch() == ms(2026, 10, 28, 0)
     assert time_zone_fields.corrected(None, "Asia/Tokyo", "UTC") is None
     assert time_zone_fields.corrected(QDateTime(), "Asia/Tokyo", "UTC") is None
-    expression = QgsExpression("satobs_time_zone(to_datetime('2026-10-28T09:00:00Z'), 'Asia/Tokyo', 'UTC')")
+    expression = QgsExpression("mikage_time_zone(to_datetime('2026-10-28T09:00:00Z'), 'Asia/Tokyo', 'UTC')")
     assert not expression.hasParserError(), expression.parserErrorString()
     value = expression.evaluate()
     assert not expression.hasEvalError(), expression.evalErrorString()
