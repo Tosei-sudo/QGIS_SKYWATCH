@@ -31,6 +31,7 @@ from ..core import roles as role_list
 from ..core.coords import NOTATIONS
 from ..qgis_io import roles_io, settings
 from .dock_layouts import DockLayoutStore, apply as apply_layout, float_docks, merged  # noqa: F401 (float_docks also from here)
+from .fit import fit_text
 
 GROUP = "mikage"
 DONE_KEY = GROUP + "/firstSetupDone"
@@ -129,6 +130,7 @@ class FirstSetupDialog(QDialog):
                  open_settings: Optional[Callable[[], None]] = None, keeper: Optional[roles_io.RoleKeeper] = None,
                  all_docks: Optional[Callable[[], dict]] = None, parent: QWidget | None = None):
         super().__init__(parent or window)
+        fit_text(self)
         self.setObjectName("SatObsFirstSetup")
         self.window_ = window
         self.docks = docks

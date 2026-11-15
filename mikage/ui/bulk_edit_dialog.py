@@ -15,6 +15,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.model import PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN, level_of
+from .fit import fit_text
 
 
 @dataclass
@@ -59,6 +60,7 @@ class BulkEditDialog(QDialog):
 
     def __init__(self, title: str, what: str, fields: Sequence[BulkField], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(title)
         self.fields = list(fields)
         lay = QVBoxLayout(self)

@@ -28,6 +28,7 @@ from ..core.obs.report import ReportOptions, ReportSelection, report_file_name
 from ..core.obs.taxonomy import kind_of, path_of
 from ..qgis_io.geometry import from_wgs84
 from .docks import save_text
+from .fit import fit_text
 from .last_inputs import InputMemory
 from .obs_overlay import Mark, Scene, ScenePainter, color_of
 
@@ -134,6 +135,7 @@ class ReportDialog(QDialog):
 
     def __init__(self, dock, book: ObservationBook, canvas, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock, self.book, self.canvas = dock, book, canvas
         self.setWindowTitle(self.tr("報告書"))
         self._map: Optional[ReportMap] = None

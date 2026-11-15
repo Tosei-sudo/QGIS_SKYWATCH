@@ -32,7 +32,7 @@ from qgis.core import (
     QgsField, QgsFields, QgsFillSymbol, QgsGeometry, QgsHeatmapRenderer, QgsRectangle, QgsSingleSymbolRenderer, QgsSpatialIndex, QgsMapLayer, QgsProject, QgsProviderRegistry, QgsReadWriteContext, QgsStyle,
     QgsTemporalNavigationObject, QgsUnitTypes, QgsVectorLayer, QgsVectorLayerTemporalContext, QgsVectorLayerTemporalProperties, QgsWkbTypes,
 )
-from qgis.PyQt.QtCore import QDate, QDateTime, QRectF, QSize, Qt, QTimer, QVariant, pyqtSignal
+from qgis.PyQt.QtCore import QDate, QDateTime, QRect, QRectF, QSize, Qt, QTimer, QVariant, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter, QPalette
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDockWidget, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider,
@@ -105,6 +105,19 @@ def time_ms(value) -> Optional[float]:
     return None
 
 
+def note_height(widget: QWidget, note: str, least: int) -> int:
+    """The height a chart's note (shown instead of an empty chart) needs at the chart's width, wrapped."""
+    if not note:
+        return least
+    rect = widget.fontMetrics().boundingRect(QRect(0, 0, max(40, widget.width()), 10000), int(Qt.TextFlag.TextWordWrap), note)
+    return max(least, rect.height() + 4)
+
+
+def draw_note(p: QPainter, widget: QWidget, note: str) -> None:
+    """A chart's note, wrapped (a long one was cut off at the right of a narrow dock)."""
+    p.drawText(widget.rect(), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap), note)
+
+
 class BarChart(QWidget):
     """Rows of a label, a bar and a figure; a click says which row and with which keys."""
 
@@ -121,8 +134,17 @@ class BarChart(QWidget):
 
     def set_rows(self, rows: list, note: str = "") -> None:
         self.rows, self.note = rows, note
-        self.setFixedHeight(max(1, len(rows)) * self.ROW + 4)
+        self._fit()
         self.update()
+
+    def _fit(self) -> None:
+        height = max(1, len(self.rows)) * self.ROW + 4
+        self.setFixedHeight(height if self.rows else note_height(self, self.note, height))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().resizeEvent(event)
+        if not self.rows and event.size().width() != event.oldSize().width():
+            self._fit()
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt's name)
         return QSize(240, max(1, len(self.rows)) * self.ROW + 4)
@@ -137,7 +159,7 @@ class BarChart(QWidget):
         text = self.palette().color(QPalette.ColorRole.WindowText)
         if not self.rows:
             p.setPen(text)
-            p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.note)
+            draw_note(p, self, self.note)
             return
         w = self.width()
         label_w, value_w = int(w * 0.36), 56
@@ -205,7 +227,7 @@ class ColumnChart(QWidget):
         text = self.palette().color(QPalette.ColorRole.WindowText)
         p.setPen(text)
         if not self.columns:
-            p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.note)
+            draw_note(p, self, self.note)
             return
         axis = 16
         h = self.height() - axis - 2
@@ -248,8 +270,17 @@ class TrendChart(QWidget):
 
     def set_rows(self, rows: list, note: str = "") -> None:
         self.rows, self.note = rows, note
-        self.setFixedHeight(max(1, len(rows)) * self.ROW + 4)
+        self._fit()
         self.update()
+
+    def _fit(self) -> None:
+        height = max(1, len(self.rows)) * self.ROW + 4
+        self.setFixedHeight(height if self.rows else note_height(self, self.note, height))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        super().resizeEvent(event)
+        if not self.rows and event.size().width() != event.oldSize().width():
+            self._fit()
 
     def sizeHint(self) -> QSize:  # noqa: N802 (Qt's name)
         return QSize(240, max(1, len(self.rows)) * self.ROW + 4)
@@ -263,7 +294,7 @@ class TrendChart(QWidget):
         text = self.palette().color(QPalette.ColorRole.WindowText)
         p.setPen(text)
         if not self.rows:
-            p.drawText(self.rect(), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), self.note)
+            draw_note(p, self, self.note)
             return
         w = self.width()
         line = (self.ROW - 4) / 2

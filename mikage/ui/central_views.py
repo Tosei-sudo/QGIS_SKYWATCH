@@ -13,6 +13,11 @@ the tabs follow whatever page is in front.
 
 Which pages were open is kept per user (`settings.central_views`): they are
 open again (the map in front) when QGIS starts next.
+
+QGIS's message bar lies over the top of the map area (over the map, as QGIS
+has it). A page of the plugin makes room for it while it is shown, so the
+bar never covers the page's buttons (the 新着画像 page's top row was hidden
+under it, found 2026-11-15).
 """
 from __future__ import annotations
 
@@ -20,7 +25,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from qgis.core import QgsApplication
-from qgis.PyQt.QtCore import QCoreApplication, QObject, Qt, pyqtSignal
+from qgis.PyQt.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QBoxLayout, QGridLayout, QStackedWidget, QTabBar, QWidget
 
@@ -67,9 +72,15 @@ class CentralViews(QObject):
         #: The page shown when going back to the map: QGIS's own one that was in front before (the map or the welcome page).
         self._back = 0
         self._syncing = False
+        #: QGIS's message bar (over the top of the map area): the pages make room for it.
+        self.message_bar = iface.messageBar() if hasattr(iface, "messageBar") else None
+        #: Each page's own top margin (before the room for the message bar).
+        self._tops: dict[str, int] = {}
         if self.stack is not None:
             self._back = max(0, self.stack.indexOf(canvas))
             self.stack.currentChanged.connect(self._stack_changed)
+            if isinstance(self.message_bar, QWidget):
+                self.message_bar.installEventFilter(self)
 
     @property
     def available(self) -> bool:
@@ -79,6 +90,34 @@ class CentralViews(QObject):
     def add_view(self, key: str, title: str, icon: QIcon, widget: QWidget) -> None:
         """Makes a page known (not yet open)."""
         self.views[key] = _View(key, title, icon, widget)
+        self._tops[key] = widget.contentsMargins().top()
+        self.make_room()
+
+    # --- Room for QGIS's message bar ----------------------------------------------------------------
+
+    def bar_room(self) -> int:
+        """How far QGIS's message bar now reaches down over the map area (0: not shown, or not over it)."""
+        bar = self.message_bar
+        if not isinstance(bar, QWidget) or self.stack is None or not bar.isVisible():
+            return 0
+        over = QRect(bar.mapToGlobal(QPoint(0, 0)), bar.size())
+        area = QRect(self.stack.mapToGlobal(QPoint(0, 0)), self.stack.size())
+        common = over.intersected(area)
+        return common.bottom() - area.top() + 1 if not common.isEmpty() and common.top() <= area.top() + 2 else 0
+
+    def make_room(self) -> None:
+        """Each page's top kept clear of the message bar."""
+        room = self.bar_room()
+        for key, view in self.views.items():
+            margins = view.widget.contentsMargins()
+            top = self._tops.get(key, 0) + room
+            if margins.top() != top:
+                view.widget.setContentsMargins(margins.left(), top, margins.right(), margins.bottom())
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt's name)
+        if obj is self.message_bar and event.type() in (QEvent.Type.Show, QEvent.Type.Hide, QEvent.Type.Resize, QEvent.Type.Move):
+            self.make_room()
+        return False
 
     # --- Opening and closing ----------------------------------------------------------------------
 
@@ -287,6 +326,11 @@ class CentralViews(QObject):
         """The plugin unloads: the map in front, its pages and the tabs gone (what was open is kept for next time)."""
         if self.stack is None:
             return
+        try:
+            if isinstance(self.message_bar, QWidget):
+                self.message_bar.removeEventFilter(self)
+        except RuntimeError:  # QGIS closing
+            pass
         try:
             self.stack.currentChanged.disconnect(self._stack_changed)
         except (TypeError, RuntimeError):

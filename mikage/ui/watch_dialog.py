@@ -24,6 +24,7 @@ from ..core.catalog.watch import CatalogWatch, areas_of, conditions_text
 from ..qgis_io.catalog_io import layer_watch_areas
 from ..qgis_io.geometry import to_wgs84
 from .docks import plain_label
+from .fit import fit_text
 from .last_inputs import InputMemory
 
 try:
@@ -218,6 +219,7 @@ class WatchDialog(_AreaDialog):
     def __init__(self, catalog: CatalogConfig, conditions: CatalogSearch, canvas, layer: Optional[QgsMapLayer], parent=None,
                  drawn: Optional[list] = None, start: Optional[str] = None, selected_only: Optional[bool] = None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(self.tr("新着画像の監視"))
         self.catalog = catalog
         self.conditions = conditions
@@ -246,6 +248,7 @@ class WatchAreaDialog(_AreaDialog):
 
     def __init__(self, watch: CatalogWatch, canvas, drawn: Optional[list] = None, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(self.tr("監視の範囲の変更"))
         layout = QVBoxLayout(self)
         now = plain_label(QLabel(self.tr("監視「{name}」の今の範囲: {text}").format(
@@ -276,6 +279,7 @@ class PointWatchDialog(QDialog):
 
     def __init__(self, lon: float, lat: float, catalogs: Sequence[CatalogConfig], watches: Sequence[CatalogWatch], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(self.tr("この地点の新着画像の監視"))
         self.catalogs = list(catalogs)
         #: Only watches over areas can take a point (one over nowhere in particular already sees it).

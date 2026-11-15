@@ -45,6 +45,7 @@ from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_tip
+from .fit import fit_text
 from .list_views import column_menus
 from .flow_layout import FlowLayout
 
@@ -76,6 +77,7 @@ class EventForm(QDialog):
 
     def __init__(self, dock: "EventsDock", event: Optional[Event], kinds: Sequence[str], parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock = dock
         self.event = event
         self.rings = [list(r) for r in event.rings] if event and event.rings else None

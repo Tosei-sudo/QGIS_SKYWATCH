@@ -27,6 +27,8 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter, QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
+from .fit import fit_text
+
 PAGE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help", "index.html")
 #: Links that run an entry of the plugin's menu.
 OPEN = "mikage:open/"
@@ -67,6 +69,7 @@ def links(page: str) -> list[str]:
 class HelpDialog(QDialog):
     def __init__(self, run: Optional[Callable[[str], bool]] = None, parent=None, path: str = PAGE):
         super().__init__(parent)
+        fit_text(self)
         self.run = run
         self.path = path
         self.setWindowTitle(self.tr("MIKAGE の使い方"))

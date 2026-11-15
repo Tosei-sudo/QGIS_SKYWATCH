@@ -34,6 +34,7 @@ from ..core.request.workflow import clouds_of, forecast_places, orbiting, radar_
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task
+from .fit import fit_text
 
 #: The columns of the systems' table.
 SYSTEM_COLUMNS = ("使う", "システム", "件数上限", "枚数上限", *(f"{c}枠" for c in CATEGORIES))
@@ -59,6 +60,7 @@ class LimitSimDialog(QDialog):
 
     def __init__(self, context, store, satellites, day: date, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.store = store
         #: Calls back with the satellites (the imaging plan's catalog).

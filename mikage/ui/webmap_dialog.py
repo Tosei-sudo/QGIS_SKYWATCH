@@ -32,6 +32,7 @@ from ..qgis_io.webmap_io import (
     add_opened, auth_with_portal, fetch_web_map, open_plan, project_web_map, save_to_portal, view_in_degrees,
 )
 from .docks import save_text
+from .fit import fit_text
 
 TITLE = "ArcGIS Web マップ"
 PORTAL_KEY = "mikage/webmap_portal"
@@ -95,6 +96,7 @@ def _list_item(text: str, problem: bool) -> QListWidgetItem:
 class WebMapOpenDialog(QDialog):
     def __init__(self, owner: "WebMapDialogs", parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.owner = owner
         self.setWindowTitle(_tr("ArcGIS Web マップを開く"))
         layout = QVBoxLayout(self)
@@ -173,6 +175,7 @@ class WebMapOpenDialog(QDialog):
 class WebMapSaveDialog(QDialog):
     def __init__(self, owner: "WebMapDialogs", parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.owner = owner
         self.setWindowTitle(_tr("ArcGIS Web マップとして保存"))
         layout = QVBoxLayout(self)

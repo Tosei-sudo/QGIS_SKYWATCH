@@ -31,6 +31,7 @@ from ..core.request.shot_view import _time
 from ..core.request.store import RequestStoreConfig, update_shots
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
+from .fit import fit_text
 from .list_views import column_menus
 
 QUOTA_COLUMNS = ("センサー", "モード", "年間上限", "年の始まり", "期間", "当初", "撮像済み", "数えない", "見込み", "残り", "ペース", "メモ")
@@ -50,6 +51,7 @@ class UncountedDialog(QDialog):
 
     def __init__(self, shots: list, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(self.tr("数えない"))
         form = QFormLayout(self)
         self.count = QSpinBox()
@@ -81,6 +83,7 @@ class QuotaDialog(QDialog):
 
     def __init__(self, context, store: RequestStoreConfig, day: date, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.store = store
         self.day = day

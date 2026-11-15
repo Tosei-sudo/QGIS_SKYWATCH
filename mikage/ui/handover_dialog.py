@@ -30,6 +30,7 @@ from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo,
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
+from .fit import fit_text
 
 DAY_MS = 86_400_000
 
@@ -44,6 +45,7 @@ def _time_edit(ms: float) -> QDateTimeEdit:
 class HandoverDialog(QDialog):
     def __init__(self, dock, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.dock = dock
         self.setWindowTitle(self.tr("分担と引き継ぎ"))
         self.resize(900, 620)

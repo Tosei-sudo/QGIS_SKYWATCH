@@ -53,6 +53,7 @@ from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_label, plain_tip
+from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
@@ -864,6 +865,7 @@ class UnrequestedDialog(QDialog):
 
     def __init__(self, dock: ScheduleDock):
         super().__init__(dock)
+        fit_text(self)
         self.dock = dock
         self.canvas = dock.canvas
         self.rings: list = []

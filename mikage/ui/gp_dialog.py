@@ -22,6 +22,7 @@ from ..core.gp import GpClient, GpError, GpService, GpTask, safe_url, service_ro
 from ..processing_provider import gp_algorithm
 from ..qgis_io import gp_io, settings
 from ..qgis_io.tasks import run_task
+from .fit import fit_text
 
 RECENT_KEY = "mikage/gp_recent"
 MAX_RECENT = 10
@@ -40,6 +41,7 @@ def _open_dialog(algorithm_id: str) -> None:
 class RemoteProcessingDialog(QDialog):
     def __init__(self, context, parent=None, open_algorithm: Callable[[str], None] = _open_dialog):
         super().__init__(parent)
+        fit_text(self)
         self.context = context
         self.open_algorithm = open_algorithm
         self.task = None

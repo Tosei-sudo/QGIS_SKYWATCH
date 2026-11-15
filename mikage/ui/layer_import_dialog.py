@@ -19,6 +19,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.rows import field_roles
+from .fit import fit_text
 
 #: Vector layers with geometries (polygons, points, lines).
 try:
@@ -34,6 +35,7 @@ class LayerImportDialog(QDialog):
 
     def __init__(self, layer: Optional[QgsVectorLayer], point_km: float, parent=None):
         super().__init__(parent)
+        fit_text(self)
         self.setWindowTitle(self.tr("レイヤーから取り込み"))
         layout = QVBoxLayout(self)
         form = QFormLayout()

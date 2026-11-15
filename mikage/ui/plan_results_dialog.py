@@ -28,6 +28,7 @@ from ..core.request.model import jst_day
 from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
+from .fit import fit_text
 
 COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先")
 SHOWN = ("すべて", "未撮像", "撮像済み", "未判定")
@@ -47,6 +48,7 @@ class PlanResultsDialog(QDialog):
 
     def __init__(self, dock, parent=None):
         super().__init__(parent or dock)
+        fit_text(self)
         self.dock = dock
         self.context = dock.context
         self.setWindowTitle(self.tr("計画と実績の照合"))
