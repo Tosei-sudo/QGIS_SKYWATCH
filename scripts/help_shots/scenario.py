@@ -537,11 +537,10 @@ SCENARIOS = {"obs": flow_obs, "request": flow_request, "plan": flow_plan, "check
 
 
 def set_role(name: str) -> None:
-    """The role (担当) chosen, as in 「担当と個人設定」: its toolbar buttons."""
-    from mikage.ui import first_setup
+    """The role (担当) ticked alone, as in 「担当と個人設定」: its menus and toolbar buttons (and the mock's table)."""
+    from mikage.core import roles
 
-    first_setup.set_role(name)
-    plugin().toolbar_buttons.apply()
+    plugin().role_keeper.choose(roles.codes_of([name]))
     settle(5)
 
 

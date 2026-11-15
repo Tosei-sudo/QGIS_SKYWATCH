@@ -39,6 +39,12 @@ GLOBAL = [
     ("ToggleMarks", "観測記録: 地図の印の表示・非表示", "Ctrl+Alt+D"),
 ]
 
+#: The keys of a feature some roles only use (core/roles.FEATURES): off while the roles in use do not have it.
+FEATURES = {
+    "ShowObservations": "観測記録", "NextImage": "観測記録", "PreviousImage": "観測記録", "ToggleRecording": "観測記録",
+    "ToggleMarks": "観測記録",
+}
+
 #: Every shortcut registered (to be taken off QGIS's list when the plugin unloads).
 _registered: list = []
 
@@ -105,6 +111,12 @@ class Shortcuts:
                 # As iface.registerMainWindowAction does; sets the key the user chose, if any.
                 manager.registerAction(action, default)
             self.actions[name] = action
+
+    def apply(self, allows: Callable[[str], bool]) -> None:
+        """The keys of the features the roles in use do not have do nothing (they stay listed, to be set up)."""
+        for name, action in self.actions.items():
+            feature = FEATURES.get(name)
+            action.setEnabled(feature is None or allows(feature))
 
     def show_dock(self, name: str) -> None:
         """Shows the dock in front and gives it the focus."""

@@ -735,7 +735,7 @@ class ObservationDock(PluginDock):
         self.clear_button = self._button(tr("ローカル記録の消去…"), tr("ローカル GeoPackage の記録・確認範囲の完全な消去（削除済みのみも可。復元不可）"),
                                          lambda: self.clear_local())
         mf.addRow(self.clear_button)
-        self.more.toggled.connect(lambda on: [w.setVisible(on) for w in self.more.findChildren(QWidget)])
+        self.more.toggled.connect(self._more_toggled)
         for w in self.more.findChildren(QWidget):
             w.setVisible(False)
         b.addWidget(self.more)
@@ -2171,8 +2171,20 @@ class ObservationDock(PluginDock):
         clicked = box.clickedButton()
         return False if clicked is everything else True if clicked is deleted else None
 
+    def _more_toggled(self, on: bool) -> None:
+        """「詳細」 opened or closed: its parts with it (less what the roles in use do not have)."""
+        for w in self.more.findChildren(QWidget):
+            w.setVisible(on)
+        self.roles_changed()
+
+    def roles_changed(self) -> None:
+        """「ローカル記録の消去…」 (cannot be undone): the administrators' (core/roles.py)."""
+        self.clear_button.setVisible(self.more.isChecked() and self.allows("observations.clear"))
+
     def clear_local(self, deleted_only: Optional[bool] = None) -> Optional[tuple[int, int]]:
         """Removes the local records for good, after asking (`deleted_only` given: without asking)."""
+        if self.denied("observations.clear"):
+            return None
         book = self.book
         if book is None or self.store_set is None or self.store_set.remote or not book.can_clear():
             return None

@@ -224,7 +224,13 @@ def test_clears_the_local_records_after_asking(plugin, monkeypatch):
         dock.submit()
     dock.remove([o for o in book.living() if o.object_name == "しらせ"])
     dock.more.setChecked(True)
+    # Cannot be undone: the administrators' only (担当「管理者」 with the records'), not shown otherwise.
+    assert not dock.clear_button.isVisible()
+    p.role_keeper.choose(["OBSERVER", "ADMIN"])
     assert dock.clear_button.isVisible() and dock.clear_button.isEnabled()
+    dock.more.setChecked(False)
+    dock.more.setChecked(True)
+    assert dock.clear_button.isVisible()
     answers = [None, True, False]
     asked = []
     monkeypatch.setattr(dock, "ask_clear", lambda b: asked.append(len(b.records)) or answers.pop(0))

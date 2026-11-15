@@ -1,7 +1,9 @@
 """
 「最初の設定」 (tsudo, 2026-11-08): the first time the plugin starts in a QGIS
-user profile (not after an update), a page asks for the person's role (担当),
-which docks a layout of 「ドックのレイアウト」 opens, and the things each person
+user profile (not after an update), a page asks for the person's roles (担当,
+as many as they like: 2026-11-15), which decide the features shown in the
+menus, the toolbar and the docks (core/roles.py) and which docks open (the
+roles' examples of 「ドックのレイアウト」 together), and the things each person
 may set for themselves:
 
 * how the docks open: joined to the main window (as tabs) or each in its own
@@ -21,18 +23,18 @@ from typing import Callable, Optional
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGroupBox, QLabel, QLineEdit, QMainWindow,
-    QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGroupBox, QLabel, QLineEdit,
+    QMainWindow, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
+from ..core import roles as role_list
 from ..core.coords import NOTATIONS
-from ..qgis_io import settings
-from .dock_layouts import PRESETS, DockLayoutStore, apply as apply_layout, float_docks  # noqa: F401 (float_docks also from here)
+from ..qgis_io import roles_io, settings
+from .dock_layouts import DockLayoutStore, apply as apply_layout, float_docks, merged  # noqa: F401 (float_docks also from here)
 
 GROUP = "mikage"
 DONE_KEY = GROUP + "/firstSetupDone"
 FLOATING_KEY = GROUP + "/docksFloating"
-ROLE_KEY = GROUP + "/role"
 #: Off in the tests (conftest), where a page popping up in every plugin test would get in the way.
 ENABLED = True
 
@@ -76,32 +78,41 @@ def set_docks_floating(on: bool) -> None:
     QgsSettings().setValue(FLOATING_KEY, "1" if on else "0")
 
 
-def role() -> str:
-    """The role (a layout's name) last chosen here ('' for none)."""
-    value = QgsSettings().value(ROLE_KEY, "")
-    return value if isinstance(value, str) else ""
+def roles() -> list[str]:
+    """The roles (担当) ticked here last, by name ([] for none)."""
+    return role_list.names_of(roles_io.stored_codes())
 
 
-def set_role(name: str) -> None:
-    QgsSettings().setValue(ROLE_KEY, name)
+def set_roles(names: list[str]) -> None:
+    """Keeps roles in this profile only (scripts and tests; the page sends them to the table too)."""
+    roles_io.store_codes(role_list.codes_of(names))
 
 
 # ---- the docks -----------------------------------------------------------
 
-def use_role(window: QMainWindow, docks: dict[str, QDockWidget], name: str, floating: bool) -> bool:
+def use_roles(window: QMainWindow, docks: dict[str, QDockWidget], names: list[str], floating: bool) -> bool:
     """
-    Opens the docks of the layout `name` (「ドックのレイアウト」); with `floating`,
-    each in a window of its own unless the layout is one saved with its own
-    floating windows. Without a layout of that name, only `floating` applies.
+    Opens the docks of the roles' layouts (「ドックのレイアウト」 of their names,
+    together: dock_layouts.merged); with `floating`, each in a window of its
+    own unless the layout is one saved with its own floating windows. Without
+    any layout (管理者 only, or none), only `floating` applies.
     """
     store = DockLayoutStore()
-    layout = store.all().get(name) if name else None
+    layouts = store.all()
+    found = [n for n in names if n in layouts]
+    layout = merged([layouts[n] for n in found]) if found else None
     if layout is not None:
         apply_layout(window, docks, layout)
-        store.last = name
+        store.last = found[0] if len(found) == 1 else ""
     if floating and not (layout and layout.get("floating")):
         float_docks(window, docks)
     return layout is not None
+
+
+def _saved_floating(names: list[str]) -> bool:
+    """Whether a layout of the roles is one saved with its own floating windows (kept as saved)."""
+    layouts = DockLayoutStore().all()
+    return any((layouts.get(n) or {}).get("floating") for n in names)
 
 
 # ---- the page ------------------------------------------------------------
@@ -115,57 +126,66 @@ class FirstSetupDialog(QDialog):
     def __init__(self, window: QMainWindow, docks: Callable[[], dict], first: bool = False,
                  observation_dock: Callable[[], Optional[QWidget]] = lambda: None,
                  coordinates: Callable[[], Optional[object]] = lambda: None,
-                 open_settings: Optional[Callable[[], None]] = None, parent: QWidget | None = None):
+                 open_settings: Optional[Callable[[], None]] = None, keeper: Optional[roles_io.RoleKeeper] = None,
+                 all_docks: Optional[Callable[[], dict]] = None, parent: QWidget | None = None):
         super().__init__(parent or window)
         self.setObjectName("SatObsFirstSetup")
         self.window_ = window
         self.docks = docks
+        #: Every dock, the ones of features put away too (`docks`: those the roles have; the same by default).
+        self.all_docks = all_docks or docks
         self.first = first
         self.observation_dock = observation_dock
         self.coordinates = coordinates
+        #: The roles in use and their table (None: kept in this profile only).
+        self.keeper = keeper
         self.setWindowTitle(tr("最初の設定") if first else tr("担当と個人設定"))
         self.setMinimumWidth(580)
         layout = QVBoxLayout(self)
         intro = QLabel(tr("MIKAGE へようこそ。担当と使い方を選んでください。\n"
                           "あとでメニュー「担当と個人設定…」から変えられます。") if first else
-                       tr("担当を選ぶと、そのドックのレイアウトで開き直します。"))
+                       tr("担当を変えると、メニュー・ツールバー・ドックに出る機能が変わります。"))
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        # 担当: a layout of 「ドックのレイアウト」 (the examples and the person's own), or none.
-        roles_box = QGroupBox(tr("担当（開くドック）"))
-        roles = QVBoxLayout(roles_box)
-        self.role_group = QButtonGroup(self)
-        self.role_buttons: dict[str, QRadioButton] = {}
-        store = DockLayoutStore()
-        titles = {n: d.windowTitle() for n, d in docks().items()}
-        # First: the last layout used, else the first example; later: the role chosen here last (none too).
-        if first or not QgsSettings().contains(ROLE_KEY):
-            current = store.last or ("" if not first else PRESETS[0][0])
-        else:
-            current = role()
-        for name, entry in store.all().items():
-            button = QRadioButton(name)
+        # 担当: as many as the person works in (core/roles.ROLES).
+        roles_box = QGroupBox(tr("担当（いくつでも）"))
+        box = QVBoxLayout(roles_box)
+        self.role_checks: dict[str, QCheckBox] = {}
+        layouts = DockLayoutStore().all()
+        titles = {n: d.windowTitle() for n, d in self.all_docks().items()}
+        for role in role_list.ROLES:
+            check = QCheckBox(role.name)
+            entry = layouts.get(role.name) or {}
             opened = [titles[e["name"]] for g in entry.get("groups", []) for e in g.get("docks", []) if e.get("name") in titles and e.get("visible", True)]
             opened += [titles[e["name"]] for e in entry.get("floating", []) if e.get("name") in titles and e.get("visible", True)]
-            button.setToolTip("、".join(opened))
-            roles.addWidget(button)
-            hint = QLabel("、".join(opened))
-            hint.setWordWrap(False)
+            check.setToolTip(tr("開くドック: {0}").format("、".join(opened)) if opened else "")
+            check.toggled.connect(self._touched)
+            box.addWidget(check)
+            hint = QLabel(tr(role.hint))
+            hint.setWordWrap(True)
             hint.setIndent(22)
             hint.setStyleSheet("color: palette(mid);")
-            roles.addWidget(hint)
-            self.role_group.addButton(button)
-            self.role_buttons[name] = button
-        keep = QRadioButton(tr("選ばない（ドックは今のまま）") if not first else tr("選ばない（画像カタログと撮像計画だけ開く）"))
-        roles.addWidget(keep)
-        self.role_group.addButton(keep)
-        self.role_buttons[""] = keep
-        (self.role_buttons.get(current) or keep).setChecked(True)
-        toolbar_hint = QLabel(tr("ツールバーのボタンも担当に合わせて変わります（メニュー「ツールバーのボタン…」で自分用に選べる）。"))
-        toolbar_hint.setWordWrap(True)
-        roles.addWidget(toolbar_hint)
+            box.addWidget(hint)
+            self.role_checks[role.name] = check
+        self._show_roles(self._current_names())
+        self.touched = False
+        rule = QLabel(tr("チェックした担当で使う機能だけを、メニュー・ツールバー・ドックのボタンに出します。"
+                         "どれも選ばないときは、管理者の機能のほかはすべて出します。"))
+        rule.setWordWrap(True)
+        box.addWidget(rule)
+        self.where = QLabel()
+        self.where.setWordWrap(True)
+        self.where.setStyleSheet("color: palette(mid);")
+        box.addWidget(self.where)
+        self.relayout = QCheckBox(tr("チェックした担当のドックで開き直す（ツールバーのボタンは担当に合わせて変わる）"))
+        self.relayout.setChecked(True)
+        box.addWidget(self.relayout)
         layout.addWidget(roles_box)
+        if keeper is not None:
+            # Read from the table while the page is open (another PC's choice): shown unless already changed here.
+            keeper.changed.connect(self._roles_read)
+        self._show_where()
 
         # How the docks open.
         docks_box = QGroupBox(tr("ドックの開き方"))
@@ -214,8 +234,33 @@ class FirstSetupDialog(QDialog):
         layout.addWidget(buttons)
         self.finished.connect(lambda _r: mark_done())
 
-    def chosen_role(self) -> str:
-        return next((n for n, b in self.role_buttons.items() if b.isChecked()), "")
+    def _current_names(self) -> list[str]:
+        return self.keeper.names if self.keeper is not None else roles()
+
+    def _show_roles(self, names: list[str]) -> None:
+        for name, check in self.role_checks.items():
+            check.blockSignals(True)
+            check.setChecked(name in names)
+            check.blockSignals(False)
+
+    def _touched(self, *_args) -> None:
+        self.touched = True
+
+    def _roles_read(self) -> None:
+        if not self.touched:
+            self._show_roles(self._current_names())
+        self._show_where()
+
+    def _show_where(self) -> None:
+        if self.keeper is not None:
+            self.where.setText(tr(self.keeper.where_kept()))
+            self.where.setVisible(True)
+        else:
+            self.where.setVisible(False)
+
+    def chosen_roles(self) -> list[str]:
+        """The roles ticked, by name, in the order offered."""
+        return [n for n, b in self.role_checks.items() if b.isChecked()]
 
     def accept(self) -> None:
         self.save()
@@ -223,20 +268,24 @@ class FirstSetupDialog(QDialog):
 
     def save(self) -> None:
         """Keeps the choices and applies them: the docks, the recorder, the clicks and the notation."""
-        name = self.chosen_role()
+        names = self.chosen_roles()
         floating = self.floating.isChecked()
         was_floating = docks_floating()
-        set_role(name)
+        # The roles first: the docks they do not use are put away before the others are laid out.
+        if self.keeper is not None:
+            self.keeper.choose(role_list.codes_of(names))
+        else:
+            set_roles(names)
         set_docks_floating(floating)
-        docks = self.docks()
+        every = self.all_docks()
         if was_floating and not floating:
             # Back from windows: each joined to the main window again (where it was docked last).
-            for dock in docks.values():
+            for dock in every.values():
                 dock.setFloating(False)
-        if name:
-            use_role(self.window_, docks, name, floating)
-        elif floating:
-            float_docks(self.window_, docks)
+        laid_out = self.relayout.isChecked() and names and use_roles(self.window_, self.docks(), names, False)
+        if floating and not (laid_out and _saved_floating(names)):
+            # Every dock (the ones put away too, so they open as windows when the roles have them again).
+            float_docks(self.window_, every)
         # The recorder and the clicks, also in an open 「観測記録」.
         obs = self.observation_dock()
         recorder = self.recorder.text().strip()

@@ -526,7 +526,7 @@ class ImagingPlanDock(PluginDock):
             self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。"
                                           "取り込んだ予報ファイルから読む（どこにも送信しない）") if forecast.local else
                                   self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。対象の位置を予報サービスへ送信"))
-        self.request_button.setVisible(bool(config.request_stores))
+        self.request_button.setVisible(bool(config.request_stores) and self.allows("requests.edit"))
         if not config.satellite_catalogs:
             # Without a catalog, two fixed sample satellites stand in (the SAR one with three made-up modes, unless the settings have sensors).
             self.catalog_sats = with_modes(sample_satellites(), [] if config.sensor_catalogs else sample_sensor_modes())
@@ -1766,13 +1766,17 @@ class ImagingPlanDock(PluginDock):
 
     # --- Saving to a plan store -------------------------------------------------------------
 
+    def roles_changed(self) -> None:
+        """「臨時依頼にする」: for those who ask for images or plan (core/roles.py)."""
+        self.request_button.setVisible(bool(self.context.config.request_stores) and self.allows("requests.edit"))
+
     def to_requests(self, all_shown: bool = False):
         """
         Opens the 「撮像依頼」 form with 臨時 requests of the chosen opportunity
         (or of every one listed, one request per target); the form, or None.
         """
         plan = self.plan
-        if not plan or self.make_requests is None:
+        if not plan or self.make_requests is None or self.denied("requests.edit"):
             return None
         ops = list(self.shown) if all_shown or self.chosen is None else [self.chosen]
         if not ops:

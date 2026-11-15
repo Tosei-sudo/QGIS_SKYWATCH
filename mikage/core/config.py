@@ -43,6 +43,7 @@ from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .events import EventSettings, events_settings_of
 from .interests import InterestSettings, interests_settings_of
+from .roles import user_roles_settings_of
 from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
 from .preload import ITEMS as PRELOAD_ITEMS, preload_of
@@ -53,7 +54,7 @@ KEYS = (
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
-    "alertReports", "observationExports", "assignments", "handover", "events", "interests", "preload", "offlineWork", "columnDrag",
+    "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
 )
 
 
@@ -125,6 +126,8 @@ class PluginConfig:
     events: Optional[EventSettings] = None
     #: `interests`: each person's own points and areas of interest (関心地域・地点), on the cards and in their dock.
     interests: Optional[InterestSettings] = None
+    #: `userRoles`: the table of each person's roles (担当), which the menus and buttons shown follow (core/roles.py).
+    user_roles: Optional[EsriSource] = None
     #: `offlineWork`: working on through a server outage (cache of reads, changes kept to send later).
     offline_work: OfflineSettings = field(default_factory=lambda: OfflineSettings())
     #: `columnDrag`: whether a list's columns may be dragged by their header (false: only from the header's menu).
@@ -340,6 +343,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.events = events_settings_of(value["events"], problems)
     if "interests" in value:
         config.interests = interests_settings_of(value["interests"], problems)
+    if "userRoles" in value:
+        config.user_roles = user_roles_settings_of(value["userRoles"], problems)
     if config.alert_reports is not None:
         # confidence.<key>: a key some 確度 level has (the vocabulary's or a store's own).
         levels = [*config.observation_vocabulary.confidences, *(c for st in config.observation_stores for c in st.confidences or [])]

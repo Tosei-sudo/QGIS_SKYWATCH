@@ -56,6 +56,10 @@ PRESETS = [
         ("right", ["SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral"]),
         ("right", ["SatObsObservations"]),
     ]),
+    ("AI 学習の担当", [
+        ("left", ["SatObsImageCatalog"]),
+        ("right", ["SatObsAiResults"]),
+    ]),
 ]
 
 
@@ -72,6 +76,45 @@ def preset_layout(groups: list) -> dict:
     return {"groups": [{"area": side, "docks": [{"name": n, "visible": True} for n in names], "front": names[0]}
                        for side, names in groups],
             "floating": []}
+
+
+def merged(layouts: list) -> Optional[dict]:
+    """
+    Several roles' layouts as one (担当 ticked together, 2026-11-15): the n-th
+    group of a side of each joined as tabs of one group (the first role's
+    front tab in front), each dock once (where it comes first). None when
+    no dock is named at all.
+    """
+    groups: list[dict] = []
+    by_place: dict = {}
+    seen: set = set()
+    floating: list[dict] = []
+    for layout in layouts:
+        if not isinstance(layout, dict):
+            continue
+        counts: dict = {}
+        for g in layout.get("groups") or []:
+            side = g.get("area", "right")
+            n = counts.get(side, 0)
+            counts[side] = n + 1
+            members = [dict(e) for e in g.get("docks") or [] if e.get("name") not in seen]
+            if not members:
+                continue
+            seen.update(e["name"] for e in members)
+            group = by_place.get((side, n))
+            if group is None:
+                names = [e["name"] for e in members]
+                front = g.get("front") if g.get("front") in names else names[0]
+                group = {"area": side, "docks": members, "front": front, "size": g.get("size")}
+                by_place[(side, n)] = group
+                groups.append(group)
+            else:
+                group["docks"].extend(members)
+        for e in layout.get("floating") or []:
+            if e.get("name") not in seen:
+                seen.add(e["name"])
+                floating.append(dict(e))
+    return {"groups": groups, "floating": floating} if groups or floating else None
 
 
 def capture(window: QMainWindow, docks: dict[str, QDockWidget]) -> dict:
