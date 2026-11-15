@@ -124,6 +124,7 @@ class NoticesDock(PluginDock):
 
         # 通報: the 通報 log table, read again every alertReports.live.seconds while the dock is shown.
         self.alerts = AlertFeed(context)
+        self.alerts.message_bar = lambda: self.iface.messageBar()
         self.alerts_tab = tabs.addTab(self.alerts, self.tr("通報"))
         self.tabs = tabs
         self.alerts.unseen_changed.connect(self._alerts_unseen)

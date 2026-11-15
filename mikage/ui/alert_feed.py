@@ -7,24 +7,29 @@ Esri's REST services push nothing, so this is polling, not real time: each
 poll is one small request for the object ids (then the new rows by their
 ids), in a task kept out of the status bar. A poll that fails waits longer
 before the next (up to 5 minutes); one that works goes back to the interval.
+
+「メールを作成」 (with `alertReports.mail`): the rows chosen as a new mail in
+the default mail program (core/obs/alert_mail.py); sent from there.
 """
 from __future__ import annotations
 
 import time
 from typing import Callable, Optional
 
-from qgis.PyQt.QtCore import Qt, QTimer, pyqtSignal
-from qgis.PyQt.QtGui import QFont
+from qgis.PyQt.QtCore import Qt, QTimer, QUrl, pyqtSignal
+from qgis.PyQt.QtGui import QDesktopServices, QFont
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QApplication, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core import audit
-from ..core.obs.alerts import AlertSettings, LogRow, poll_log
+from ..core import audit, edit_stamp
+from ..core.obs.alert_mail import build_mail
+from ..core.obs.alerts import AlertSettings, LogRow, Moment, poll_log
 from ..core.request.export import format_time
 from ..core.time_zone import UTC
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
+from .flow_layout import FlowLayout
 from .list_views import column_menus
 
 DAY_MS = 86_400_000
@@ -54,6 +59,8 @@ class AlertFeed(QWidget):
         self.open_record: Optional[Callable[[str], None]] = None
         #: Opens 「通報記録」 of the alert dialog (set by the plugin).
         self.open_log: Optional[Callable[[], None]] = None
+        #: QGIS's message bar (set by the dock): what 「メールを作成」 has to say outlives the next poll's status.
+        self.message_bar: Optional[Callable[[], object]] = None
         self.active = False
         self._closed = False
         self._polling = False
@@ -75,17 +82,25 @@ class AlertFeed(QWidget):
         v.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("alert-feed", self.table, self)
-        row = QHBoxLayout()
-        for text, tip, slot in [
-                (self.tr("今すぐ更新"), self.tr("通報テーブルを今すぐ読み直す"), lambda: self.poll(force=True)),
-                (self.tr("記録へ移動"), self.tr("選んだ行の観測記録を開く（ダブルクリックでも）"), lambda: self.go(self.table.currentRow())),
-                (self.tr("選択をコピー"), self.tr("選んだ行の通報文をクリップボードへ（選んでいなければ一覧すべて）"), self.copy),
-                (self.tr("通報記録の確認…"), self.tr("期間・フォーマットで絞って一覧、削除（再通報可に）"), lambda: self.open_log and self.open_log())]:
+        # Wraps onto a second line in a narrow dock (five buttons).
+        row = FlowLayout()
+        buttons = {}
+        for key, text, tip, slot in [
+                ("poll", self.tr("今すぐ更新"), self.tr("通報テーブルを今すぐ読み直す"), lambda: self.poll(force=True)),
+                ("go", self.tr("記録へ移動"), self.tr("選んだ行の観測記録を開く（ダブルクリックでも）"), lambda: self.go(self.table.currentRow())),
+                ("copy", self.tr("選択をコピー"), self.tr("選んだ行の通報文をクリップボードへ（選んでいなければ一覧すべて）"), self.copy),
+                ("mail", self.tr("メールを作成"),
+                 self.tr("選んだ行の通報文（選んでいなければ一覧すべて）で、既定のメールソフトに新しいメールを作る。"
+                         "宛先・件名は設定ファイルの alertReports.mail。送信はメールソフトで（添付はできない）"), lambda: self.mail()),
+                ("log", self.tr("通報記録の確認…"), self.tr("期間・フォーマットで絞って一覧、削除（再通報可に）"), lambda: self.open_log and self.open_log())]:
             button = QPushButton(text)
             button.setToolTip(tip)
             button.clicked.connect(slot)
             row.addWidget(button)
-        row.addStretch(1)
+            buttons[key] = button
+        # Only with alertReports.mail (the addresses and the subject are the settings').
+        self.mail_button = buttons["mail"]
+        self.mail_button.setVisible(self._mail_settings() is not None)
         v.addLayout(row)
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
@@ -101,6 +116,10 @@ class AlertFeed(QWidget):
         s = self.context.config.alert_reports
         return s if s is not None and s.table is not None else None
 
+    def _mail_settings(self):
+        s = self.settings()
+        return s.mail if s is not None else None
+
     def interval_ms(self) -> int:
         s = self.settings()
         return int(s.live.seconds * 1000) if s else 0
@@ -115,6 +134,7 @@ class AlertFeed(QWidget):
         self.timer.stop()
         self._render()
         s = self.settings()
+        self.mail_button.setVisible(self._mail_settings() is not None)
         if s is None:
             self.status.setText(self.tr("設定ファイルの alertReports.table（通報テーブル）がないため使用不可"))
         elif s.live.seconds <= 0:
@@ -247,14 +267,59 @@ class AlertFeed(QWidget):
         if 0 <= r < len(rows) and rows[r].obs_id and self.open_record:
             self.open_record(rows[r].obs_id)
 
-    def copy(self) -> None:
+    def chosen(self) -> list[LogRow]:
+        """The rows selected, else all the list (as shown)."""
         rows = self.shown()
         picked = sorted({i.row() for i in self.table.selectedIndexes()})
-        chosen = [rows[r] for r in picked if r < len(rows)] or rows
+        return [rows[r] for r in picked if r < len(rows)] or rows
+
+    def copy(self) -> None:
+        chosen = self.chosen()
         text = "".join(r.text + "\r\n" for r in chosen)
         QApplication.clipboard().setText(text)
         audit.record("copy", "alert-feed", count=len(chosen), text=text)
         self.status.setText(self.tr("{n} 行をクリップボードへコピー").format(n=len(chosen)))
+
+    def mail(self) -> None:
+        """A new mail of the rows chosen in the default mail program (the whole text on the clipboard when cut)."""
+        s = self.settings()
+        if s is None or s.mail is None:
+            return
+        rows = self.chosen()
+        if not rows:
+            self.status.setText(self.tr("メールにする通報がない"))
+            return
+        draft = build_mail(s, rows, Moment(now=_now(), user=edit_stamp.user_name()))
+        opened = bool(QDesktopServices.openUrl(QUrl.fromEncoded(draft.url.encode("ascii"))))
+        if draft.cut or not opened:
+            QApplication.clipboard().setText(draft.text)
+        m = s.mail
+        audit.record("mail", "alert-feed", ", ".join(m.to), result="ok" if opened else "error", count=len(rows),
+                     detail={"cc": ", ".join(m.cc), "bcc": ", ".join(m.bcc), "subject": draft.subject, "inBody": draft.shown,
+                             "linkLength": len(draft.url)},
+                     error="" if opened else "メールソフトを開けなかった", text=draft.text)
+        notes = []
+        if not opened:
+            notes.append(self.tr("メールソフトを開けなかった（既定のメールソフトが未設定か、リンクが長すぎる）。"
+                                 "本文 {n} 件をクリップボードへコピーしたので、メールに貼り付けて").format(n=draft.total))
+        elif draft.cut:
+            notes.append(self.tr("本文が長いため {n} 件のうち {k} 件だけ入れた。全文をクリップボードへコピーしたので、"
+                                 "メールの本文に貼り付けて（長さの上限は alertReports.mail.maxLength）").format(n=draft.total, k=draft.shown))
+        if draft.too_long:
+            notes.append(self.tr("件名・宛先だけで alertReports.mail.maxLength（{n} 文字）を超えている").format(n=m.max_length))
+        if draft.replaced:
+            notes.append(self.tr("{e} で書けない文字は ? にした").format(e=m.encoding))
+        if not notes:
+            self.status.setText(self.tr("メールソフトに {n} 件のメールを作成（送信はメールソフトで）").format(n=draft.total))
+            return
+        text = " / ".join(notes)
+        self.status.setText(text)
+        bar = self.message_bar() if self.message_bar else None
+        if bar is not None:
+            if opened and not draft.too_long:
+                bar.pushInfo(self.tr("通報のメール"), plain_tip(text))
+            else:
+                bar.pushWarning(self.tr("通報のメール"), plain_tip(text))
 
     def close_down(self) -> None:
         self._closed = True
