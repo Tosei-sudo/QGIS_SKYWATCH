@@ -119,8 +119,7 @@ class RoleKeeper(QObject):
             return "この PC だけに保存（設定ファイルに担当の表 userRoles がないため）"
         user = self.user() or "（利用者名なし）"
         if pending():
-            why = f"。前回は送れず: {self.failure}" if self.failure else ""
-            return f"Esri の担当の表に「{user}」として保存（未送信。次の起動か「適用」で送る{why}）"
+            return f"Esri の担当の表に「{user}」として保存（未送信。次の起動か「適用」で送る）"
         return f"Esri の担当の表に「{user}」として保存（別の PC でも同じ担当）"
 
     def _use(self, codes: Sequence[str]) -> None:

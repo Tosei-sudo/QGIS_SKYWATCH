@@ -23,7 +23,7 @@ from typing import Callable, Optional
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGroupBox, QLabel, QLineEdit,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGridLayout, QGroupBox, QLabel, QLineEdit,
     QMainWindow, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
@@ -140,17 +140,22 @@ class FirstSetupDialog(QDialog):
         #: The roles in use and their table (None: kept in this profile only).
         self.keeper = keeper
         self.setWindowTitle(tr("最初の設定") if first else tr("担当と個人設定"))
-        self.setMinimumWidth(580)
         layout = QVBoxLayout(self)
         intro = QLabel(tr("MIKAGE へようこそ。担当と使い方を選んでください。\n"
                           "あとでメニュー「担当と個人設定…」から変えられます。") if first else
                        tr("担当を変えると、メニュー・ツールバー・ドックに出る機能が変わります。"))
-        intro.setWordWrap(True)
+        # (Its lines broken by hand: see the roles below.)
         layout.addWidget(intro)
 
         # 担当: as many as the person works in (core/roles.ROLES).
         roles_box = QGroupBox(tr("担当（いくつでも）"))
         box = QVBoxLayout(roles_box)
+        # One row a role: the box, and what the role is for beside it. No text here wraps: a dialog
+        # (a window of its own) is not made taller for wrapped lines, which then draw over one another.
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(4)
+        box.addLayout(grid)
         self.role_checks: dict[str, QCheckBox] = {}
         layouts = DockLayoutStore().all()
         titles = {n: d.windowTitle() for n, d in self.all_docks().items()}
@@ -161,22 +166,19 @@ class FirstSetupDialog(QDialog):
             opened += [titles[e["name"]] for e in entry.get("floating", []) if e.get("name") in titles and e.get("visible", True)]
             check.setToolTip(tr("開くドック: {0}").format("、".join(opened)) if opened else "")
             check.toggled.connect(self._touched)
-            box.addWidget(check)
             hint = QLabel(tr(role.hint))
-            hint.setWordWrap(True)
-            hint.setIndent(22)
-            hint.setStyleSheet("color: palette(mid);")
-            box.addWidget(hint)
+            hint.setToolTip(check.toolTip())
+            row = len(self.role_checks)
+            grid.addWidget(check, row, 0)
+            grid.addWidget(hint, row, 1)
             self.role_checks[role.name] = check
         self._show_roles(self._current_names())
         self.touched = False
-        rule = QLabel(tr("チェックした担当で使う機能だけを、メニュー・ツールバー・ドックのボタンに出します。"
+        rule = QLabel(tr("チェックした担当で使う機能だけを、メニュー・ツールバー・ドックのボタンに出します。\n"
                          "どれも選ばないときは、管理者の機能のほかはすべて出します。"))
-        rule.setWordWrap(True)
+        box.addSpacing(6)
         box.addWidget(rule)
         self.where = QLabel()
-        self.where.setWordWrap(True)
-        self.where.setStyleSheet("color: palette(mid);")
         box.addWidget(self.where)
         self.relayout = QCheckBox(tr("チェックした担当のドックで開き直す（ツールバーのボタンは担当に合わせて変わる）"))
         self.relayout.setChecked(True)
@@ -254,6 +256,8 @@ class FirstSetupDialog(QDialog):
     def _show_where(self) -> None:
         if self.keeper is not None:
             self.where.setText(tr(self.keeper.where_kept()))
+            # Why it could not be sent (a server's message can be long): on the mouse.
+            self.where.setToolTip(tr("前回送れなかった理由: {0}").format(self.keeper.failure) if self.keeper.failure else "")
             self.where.setVisible(True)
         else:
             self.where.setVisible(False)
