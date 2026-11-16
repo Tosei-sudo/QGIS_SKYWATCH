@@ -21,7 +21,8 @@ What each place's line shows, from the start of today (JST) for `days` days:
   them.
 
 「次」 is the first plan from now on that is in a system's plan (採用・要求外)
-or not answered yet (不明); else the first day of a request; else none.
+or not answered yet (不明), and not taken already (撮像済み: its tooltip
+names the image's id); else the first day of a request; else none.
 不採用 and 見送り are shown only when asked (they will not be taken).
 
 Pure Python (no Qt): the shares of the places' areas are measured on points
@@ -326,8 +327,12 @@ def lanes_of(places: Sequence[Place], rows: Sequence[HistoryRow], shots: dict, r
 
 
 def next_of(marks: Sequence[Mark], now: float) -> Optional[Mark]:
-    """The first coming plan from now on (one without a time counts all its day); else the first request's day still ahead."""
-    plans = [m for m in marks if m.is_plan and m.state in COMING and m.end >= now]
+    """
+    The first coming plan from now on (one without a time counts all its
+    day; one taken already, 撮像済み, does not count); else the first
+    request's day still ahead.
+    """
+    plans = [m for m in marks if m.is_plan and m.state in COMING and m.end >= now and not taken_text(m.row)]
     if plans:
         return min(plans, key=lambda m: (m.start if m.timed else max(m.start, now), not m.timed))
     asked = [m for m in marks if m.state == REQUEST and m.end >= now]
@@ -370,6 +375,13 @@ def mark_name(m: Mark) -> str:
     return "、".join(q.name or q.id for q in m.requests)
 
 
+def taken_text(row: Optional[HistoryRow]) -> str:
+    """「撮像済み 画像 IMG-12」 of a plan taken (its image's id, when known), "" for the others."""
+    if row is None or row.captured != "撮像済み":
+        return ""
+    return f"撮像済み 画像 {row.image_id}" if row.image_id else "撮像済み"
+
+
 def next_text(lane: Lane) -> str:
     """What the line says next to the place's name: 「次 11/15(土) 10:32 採用・ASNARO-2」, 「依頼あり 11/16(日)〜」, 「予定なし」."""
     m = lane.next
@@ -402,7 +414,7 @@ def mark_tip(m: Mark, place: Place) -> str:
             lines.append(f"ほか {len(m.requests) - 8} 件")
     else:
         r = m.row
-        lines.append(f"{mark_name(m)}: {m.state}")
+        lines.append(f"{mark_name(m)}: {m.state}" + (f"（{taken_text(r)}）" if taken_text(r) else ""))
         lines.append(when_text(m) + ("（システムの回答）" if r.planned_at is not None else "（撮像の範囲のパスの時刻）" if m.timed else ""))
         parts = [p for p in (r.system, r.satellite) if p]
         if parts:

@@ -188,6 +188,11 @@ def test_the_plans_ahead_of_points_clicked_and_a_layer_s_features(plugin):
     dock.timeline.click((x0 + x1) / 2, (y0 + y1) / 2)
     assert dock.timeline.chosen is mark and dock.overlay.painted()
     assert dock.chosen_label.text().startswith("地点 1")
+    # A plan taken names its image (tsudo 2026-11-16: 「せめて画像IDは表示してほしい」).
+    from dataclasses import replace
+    taken = replace(mark, row=replace(mark.row, captured="撮像済み", image_id="IMG-42"))
+    dock._picked(taken, 0)
+    assert dock.chosen_label.text().endswith("東京湾（採用・撮像済み 画像 IMG-42）")
     # A click on Osaka's name: the map goes there.
     dock.timeline.click(20, HEAD + 2 * ROW + 5)
     assert dock.canvas.extent().contains(QgsPointXY(135.44, 34.64))

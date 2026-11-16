@@ -290,6 +290,42 @@ def test_set_day_reads_the_day(plugin):
     dock.close_all()
 
 
+def test_the_image_of_a_plan_taken_is_shown(plugin):
+    # tsudo 2026-11-16: 「撮像済みになってるやつ、画像直接は開けなくていいけど、せめて画像IDは表示してほしい」.
+    from mikage.ui.schedule_dock import COLUMNS
+
+    p, iface, fake, history, tmp_path = plugin
+    today = jst_day(time.time() * 1000)
+    written(history, today.isoformat())
+    for r in history.rows:
+        a = r["attributes"]
+        if a["REQ_ID"] == "R-1":
+            a.update(CAPTURED="撮像済み", IMAGE_ID="IMG-42", ADOPTION="採用", ADOPTION_SOURCE="画像の入着")
+        elif a["REQ_ID"] == "R-2":
+            # Marked 未撮像 by hand once it had an image: the id left behind is not that of an image taken.
+            a.update(CAPTURED="未撮像", IMAGE_ID="IMG-OLD")
+    dock = p.api.schedule
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    column = COLUMNS.index("画像ID")
+    images = {r.name: dock.model.item(i, column).text() for i, r in enumerate(dock.shown)}
+    assert images == {"東京湾": "IMG-42", "大阪湾": "", "横浜": ""}
+    assert dock.model.horizontalHeaderItem(column).text() == "画像ID"
+    tokyo = next(i for i, r in enumerate(dock.shown) if r.name == "東京湾")
+    assert dock.model.item(tokyo, COLUMNS.index("撮像")).text() == "撮像済み"
+    # Found by its image's id too.
+    dock.search.setText("img-42")
+    assert [r.name for r in dock.shown] == ["東京湾"]
+    dock.search.setText("img-old")
+    assert dock.shown == []
+    dock.search.clear()
+    # And on the layer.
+    layer = dock.to_layer()
+    got = {f["名称"]: f["画像ID"] for f in layer.getFeatures()}
+    assert got == {"東京湾": "IMG-42", "大阪湾": "", "横浜": ""}
+    dock.close_all()
+
+
 def test_a_result_file_naming_rows_by_their_link_id(plugin):
     # 外部連携ID (2026-11-12): the file names the rows by the ids its order file was given; one of the day before is
     # that day's row (the system planned late a request handed out earlier).
