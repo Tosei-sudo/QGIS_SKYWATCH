@@ -443,8 +443,10 @@ def test_image_files_on_the_card_checked_or_opened_alone(plugin):
     assert sorted(r.name for r in card.file_rows) == ["D_ms.tif", "D_psh.tif", "PAN/D_pan.tif"]
     assert all(r.box.isChecked() for r in card.file_rows)
     pan = next(r for r in card.file_rows if r.name == "PAN/D_pan.tif")
-    assert pan.label.text() == "PAN/\u200bD_\u200bpan.tif"  # may wrap, never widens the card
-    assert str(folder) in pan.toolTip()
+    # The file's name only (2026-11-16), able to wrap (never widens the card); its whole path in the tip.
+    assert pan.label.text() == "D_\u200bpan.tif"
+    assert {r.label.text().replace("\u200b", "") for r in card.file_rows} == {"D_ms.tif", "D_psh.tif", "D_pan.tif"}
+    assert str(folder / "PAN" / "D_pan.tif").replace("\\", "/") in pan.toolTip().replace("\\", "/")
     # No file: why, on the card (not a fault).
     assert not c.file_rows and "見つからず" in c.files.text()
     # A click: unchecked (on the box or the name), again: checked; 「開く」 opens those checked, no window.

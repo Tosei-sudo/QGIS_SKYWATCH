@@ -48,6 +48,7 @@ from ..qgis_io import settings
 from ..core.catalog.paths import PathError
 from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
 from ..qgis_io.thumbnails import CardWork, cached, fetch, prune
+from .image_files_dialog import file_name
 
 TITLE = "新着画像"
 PLAN = "plan"
@@ -168,6 +169,8 @@ class FileRow(QWidget):
     """
     One file of a card's 「画像ファイル」 (tsudo, 2026-11-14): a click checks it or not
     (「開く」 opens the checked), a double click opens it alone, as in 「開く画像の選択」.
+    Only the file's name is shown (tsudo, 2026-11-16: 「新着の方は、ファイル名だけの表示で」);
+    its path below the record's folder is `name` (what is checked and opened) and in the tip.
     """
 
     def __init__(self, card: "NoticeCard", name: str, checked: bool):
@@ -184,7 +187,7 @@ class FileRow(QWidget):
         self.box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.box.toggled.connect(lambda on: card.file_checked(name, on))
         lay.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
-        self.label = QLabel(_breakable(name))
+        self.label = QLabel(_breakable(file_name(name)))
         self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setWordWrap(True)
         lay.addWidget(self.label, 1)
@@ -457,8 +460,12 @@ class NoticeCard(QFrame):
             unchecked = feed.unchecked.get(self.notice.id, set())
             self.file_rows = [FileRow(self, name, name not in unchecked) for name in names]
             for row in self.file_rows:
+                place = where.place if where else ""
+                if where is not None and where.files:  # the file's whole path (the row shows its name only)
+                    sep = "\\" if "\\" in place else "/"
+                    place = place.rstrip("/\\") + sep + row.name.replace("/", sep)
                 row.setToolTip(self.tr("{place}\nクリックでチェック（「開く」でチェックしたものを開く）、ダブルクリックでその画像だけ開く")
-                               .format(place=where.place if where else ""))
+                               .format(place=place))
                 self._file_list.addWidget(row)
         self.files_title.setText(self.tr("画像ファイル（{n}）").format(n=len(names)) if len(names) > 1 else self.tr("画像ファイル"))
         if where is None:
