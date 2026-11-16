@@ -79,7 +79,7 @@ MENU = "MIKAGE"
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
-    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…"]),
+    ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…", "衛星の障害情報…"]),
     ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", "関心地域・地点", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
@@ -315,6 +315,8 @@ class MikagePlugin:
         self.docks: dict[str, QDockWidget] = {}
         self.toolbar = None
         self.moving_targets: Optional[MovingTargetDialog] = None
+        #: 「衛星の障害情報」 (ui/outage_dialog.py), once opened.
+        self.outage_dialog = None
         self.api = PluginApi(self)
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
@@ -506,6 +508,8 @@ class MikagePlugin:
                 dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
             elif name == "SatObsSchedule":
                 dock = ScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
+                # The satellites' other names and series, for the outages that name them (衛星の障害情報).
+                dock.satellites_known = lambda plan_dock=self.docks["SatObsImagingPlan"]: plan_dock.catalog_sats
             elif name == "SatObsPlaceSchedule":
                 dock = PlaceScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
             elif name == "SatObsPlanFiles":
@@ -567,6 +571,12 @@ class MikagePlugin:
         quotas.triggered.connect(lambda _on=False: self.open_quotas())
         self._add_to_menu(quotas)
         self.actions.append(quotas)
+        # 「衛星の障害情報」: the satellites' outages (reason, when, impacts) that the calculations leave passes out for (tsudo, 2026-11-16).
+        outages = QAction(icon("outages"), tr("衛星の障害情報…"), self.iface.mainWindow())
+        outages.setObjectName("SatObsOutages")
+        outages.triggered.connect(lambda _on=False: self.open_outages())
+        self._add_to_menu(outages)
+        self.actions.append(outages)
         moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
         moving.triggered.connect(lambda: self.open_moving_targets())
         self._add_to_menu(moving)
@@ -1266,6 +1276,21 @@ class MikagePlugin:
             return None
         return dock.show_quotas()
 
+    def open_outages(self):
+        """Opens 「衛星の障害情報」 (once; read again each time it is opened)."""
+        if self.context.config.satellite_outages is None:
+            self.iface.messageBar().pushInfo("MIKAGE", tr("設定ファイルに衛星の障害情報の表（satelliteOutages）なし"))
+            return None
+        if self.outage_dialog is None:
+            from .ui.outage_dialog import OutageDialog
+
+            plan = self.docks["SatObsImagingPlan"]
+            self.outage_dialog = OutageDialog(self.context, lambda: plan.catalog_sats, self.allows, self.iface.mainWindow())
+        self.outage_dialog.show()
+        self.outage_dialog.raise_()
+        self.outage_dialog.run()
+        return self.outage_dialog
+
     def open_moving_targets(self, layer=None) -> MovingTargetDialog:
         """Opens 「移動目標撮像計画」 (once; kept while the plugin is loaded)."""
         if self.moving_targets is None:
@@ -1716,6 +1741,10 @@ class MikagePlugin:
             self.moving_targets.close()
             self.moving_targets.deleteLater()
             self.moving_targets = None
+        if self.outage_dialog is not None:
+            self.outage_dialog.close()
+            self.outage_dialog.deleteLater()
+            self.outage_dialog = None
         if self.toolbar is not None:
             self.toolbar.deleteLater()
             self.toolbar = None

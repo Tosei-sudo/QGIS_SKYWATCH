@@ -12,6 +12,7 @@ from mikage.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
 from mikage.core.obs.handover import DEFAULT_HANDOVER_FIELDS
 from mikage.core.obs.model import DEFAULT_OBSERVATION_FIELDS
 from mikage.core.obs.taxonomy import DEFAULT_TAXONOMY_FIELDS
+from mikage.core.plan.outages import DEFAULT_OUTAGE_FIELDS
 from mikage.core.request.groups import DEFAULT_GROUP_FIELDS
 from mikage.core.request.store import DEFAULT_HISTORY_FIELDS, DEFAULT_QUOTA_FIELDS, DEFAULT_REQUEST_FIELDS, DEFAULT_SHOT_FIELDS
 
@@ -39,6 +40,7 @@ DEFAULTS = {
     "TBL_INTEREST_POINT": interests.DEFAULT_INTEREST_FIELDS,
     "TBL_INTEREST_AREA": interests.DEFAULT_INTEREST_FIELDS,
     "TBL_USER_ROLE": roles.DEFAULT_USER_ROLE_FIELDS,
+    "TBL_SATELLITE_OUTAGE": DEFAULT_OUTAGE_FIELDS,
 }
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,29}$")
 

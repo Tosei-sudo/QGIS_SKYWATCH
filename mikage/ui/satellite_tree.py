@@ -15,6 +15,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..core.plan.outages import ONGOING, OVERDUE, PLANNED
 from ..core.plan.satellites import SatelliteSpec
 from ..core.plan.tree import Group, Listed, SatelliteChoice, facts_of, is_old, label_of, source_text, tle_age_days
 from ..core.plan.output import js_round
@@ -22,6 +23,8 @@ from .last_inputs import checked_satellites, keep_checked_satellites
 
 ROLE = Qt.ItemDataRole.UserRole
 OLD_COLOR = QColor("#b45309")
+#: A satellite with an outage now (衛星の障害情報).
+OUTAGE_COLOR = QColor("#c2410c")
 
 
 class SatelliteTree(QWidget):
@@ -111,6 +114,14 @@ class SatelliteTree(QWidget):
                     item.setForeground(0, QBrush(OLD_COLOR))
                     item.setToolTip(0, f"{source_text(node.sat, now)}\n{facts}\n"
                                     + self.tr("TLE の元期が {days} 日前。予測がずれる場合あり").format(days=js_round(tle_age_days(node.sat, now), 0)))
+                # 衛星の障害情報: one now (or past its expected end) marked, one planned told; recovered ones not.
+                outages = [o for o in getattr(node.sat, "outages", ()) or () if o.status(now) in (ONGOING, OVERDUE, PLANNED)]
+                if outages:
+                    now_on = any(o.status(now) != PLANNED for o in outages)
+                    item.setText(0, item.text(0) + (self.tr("（障害）") if now_on else self.tr("（障害予定）")))
+                    item.setForeground(0, QBrush(OUTAGE_COLOR))
+                    item.setToolTip(0, item.toolTip(0) + "\n" + "\n".join(
+                        self.tr("衛星の障害（{s}）: {t}").format(s=o.status(now), t=o.short_text(now)) for o in outages))
                 parent.addChild(item)
                 self._items.append((item, node))
 

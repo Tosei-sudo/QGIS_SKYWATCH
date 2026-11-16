@@ -46,6 +46,15 @@ in order of priority.
    TLE, or a system with `orbit: false`, is fitted by counting as before:
    `maxPerDay` requests a day, scenes from a grid over the area.
 
+Satellite outages (衛星の障害情報, core/plan/outages.py; tsudo 2026-11-16):
+the passes they hit are not among the passes (passes.find_passes); a
+request with no pass left but for them is held back as 「衛星の障害（衛星:
+理由、復旧見込み …）」. A satellite fitted by counting is left out on a day
+an outage stops it (撮像停止) at some moment. One taken on a satellite with
+an outage on the day carries 「衛星の障害あり（…）」. Taken by hand, it goes
+all the same. The day's stricter values (回数・シーン数・間隔・角度) come in
+with the satellites (outages.on_day).
+
 A request taken several times a day (1 日の回数: n 回以上・m 回以下, tsudo
 2026-11-11) is one candidate per time (`occurrence` 1 … m, each a row of
 the file and of the history). The first n go at the request's priority;
@@ -103,10 +112,12 @@ written again by whoever writes another system (tsudo, 2026-11-09).
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
+from ..plan.outages import OUTAGE, OUTAGE_WARNING, outage_reason, stopped, warning_of
 from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
 from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
@@ -583,7 +594,7 @@ def placement_rows(p: Placement) -> int:
 def _manual_warning(w: str) -> bool:
     """A warning the fitting itself adds (made again by each fitting)."""
     return (w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
-            or w.startswith(FEW) or w.startswith(QUOTA_OVER) or w.startswith(USE_OVER))
+            or w.startswith(FEW) or w.startswith(QUOTA_OVER) or w.startswith(USE_OVER) or w.startswith(OUTAGE_WARNING))
 
 
 def times_of(c: Candidate) -> list[float]:
@@ -659,6 +670,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     times: dict = {}
     #: The shots past the first of each candidate (分担), by id of that candidate.
     parts_of: dict = {}
+    #: 衛星の障害: the day's span (for the satellites' outages), the moment they are judged at, and the outages that
+    #: left a candidate without a pass (by id of the candidate).
+    day_span = day_bounds(day) if day is not None else None
+    clock = passes.now if passes is not None and passes.now is not None else time.time() * 1000
+    hits: dict = {}
     for c in out:
         times.setdefault(c.request.id, []).append(c)
         c.result, c.shots = HELD, []
@@ -765,7 +781,11 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if c.skip:
             ops = [o for o in ops if (platform_key(sat), round(o.time / 1000)) not in c.skip]
         if not ops:
-            why.add(NO_PASS)
+            # No pass but those an outage left out (衛星の障害): said as such.
+            blocked = passes.blocked_on(c.request, day, i)
+            if blocked:
+                hits.setdefault(id(c), []).extend(blocked)
+            why.add(OUTAGE if blocked else NO_PASS)
             return None
         # The request's other times that day: on other passes, `times_gap` hours or more away.
         taken = [t for o in times[c.request.id] if o.occurrence != c.occurrence and o.result == TAKEN for t in times_of(o)]
@@ -890,6 +910,17 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         return cells if cells is not None and any(cells) else None
 
     def fit(c: Candidate) -> None:
+        hits.pop(id(c), None)
+        _fit(c)
+        if c.reason == OUTAGE:
+            c.reason = outage_reason(hits.get(id(c), ()), clock)
+        if c.result == TAKEN and c.satellite is not None and day_span is not None:
+            # On a satellite with an outage on the day (outside its passes, or one the calculation does not use): told.
+            warning = warning_of(c.satellite, day_span[0], day_span[1], clock)
+            if warning:
+                c.warnings.append(warning)
+
+    def _fit(c: Candidate) -> None:
         c.result, c.reason, c.system, c.satellite = HELD, "", None, None
         c.paced = None
         c.shots, c.coverage, c.shot_cloud, c.optical_cloud = [], None, None, None
@@ -932,6 +963,12 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
                     if by_orbit(c, system, sat, why, start=start):
                         break
                     continue
+                stop = stopped(sat, *day_span, clock) if day_span is not None else None
+                if stop is not None:
+                    # Counted (no orbits): a satellite an outage stops at some moment of the day is not used.
+                    hits.setdefault(id(c), []).append(stop)
+                    why.add(OUTAGE)
+                    continue
                 if overcast(c, system, sat) and not (c.near or forced):
                     # Either kind, counted: an optical satellite on a cloudy day is left for a SAR one.
                     c.optical_cloud = c.cloud
@@ -968,7 +1005,8 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
         if c.result != TAKEN:
             c.reason = (NO_SYSTEM if not tried_any else QUOTA if QUOTA in why else USE_DAY if USE_DAY in why
                         else USE_PASS if USE_PASS in why else OVER if OVER in why else BUSY if BUSY in why
-                        else CLOUDY if CLOUDY in why else GAP if GAP in why else NO_PASS if NO_PASS in why else OVER)
+                        else CLOUDY if CLOUDY in why else GAP if GAP in why else OUTAGE if OUTAGE in why
+                        else NO_PASS if NO_PASS in why else OVER)
 
     def share(c: Candidate) -> None:
         """

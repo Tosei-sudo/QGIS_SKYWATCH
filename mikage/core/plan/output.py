@@ -324,9 +324,10 @@ def is_old_tle(op: Opportunity, sat: SatelliteSpec) -> bool:
     return sat.source != SAMPLE_SOURCE and abs(op.tleAge) > OLD_TLE
 
 
-def describe_problems(problems: Sequence[str], too_soon: int) -> str:
+def describe_problems(problems: Sequence[str], too_soon: int, outaged: int = 0) -> str:
     return (f"（計算できなかった衛星: {'、'.join(problems)}）" if problems else "") + \
-           (f"（発注リードタイムに間に合わない機会 {too_soon} 回を除外）" if too_soon else "")
+           (f"（発注リードタイムに間に合わない機会 {too_soon} 回を除外）" if too_soon else "") + \
+           (f"（衛星の障害で使えない機会 {outaged} 回を除外）" if outaged else "")
 
 
 def summary_all(ops: Sequence[Opportunity], sats, problems_text: str) -> str:

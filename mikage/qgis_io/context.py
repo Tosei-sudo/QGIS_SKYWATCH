@@ -20,6 +20,7 @@ from ..core.obs import place_cache
 from ..core.offline import OfflineWork
 from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
 from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
+from ..core.plan.outages import Outage, load_outages
 from ..core.edit_stamp import set_tracking
 from ..core.time_zone import set_rules
 from . import settings
@@ -46,6 +47,8 @@ class PluginContext(QObject):
 
     #: The settings file was read again.
     configChanged = pyqtSignal()
+    #: The satellite outages read differ from those read before (set_outages).
+    outagesChanged = pyqtSignal()
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -66,6 +69,9 @@ class PluginContext(QObject):
         self._names: Optional[SatelliteNames] = None
         self._names_lock = threading.Lock()
         self.configChanged.connect(self._forget_names)
+        #: 衛星の障害情報 (`satelliteOutages`) as last read (read again for each calculation; outagesChanged when they change).
+        self._outages: tuple = ()
+        self.configChanged.connect(lambda: self.set_outages(()))
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
         self.configChanged.connect(lambda: set_rules(self.config.time_zones))
         self.configChanged.connect(lambda: set_tracking(self.config.edit_tracking))
@@ -208,6 +214,32 @@ class PluginContext(QObject):
                 self._names = names
         return names
 
+    def read_outages(self, client: Optional[EsriClient] = None, cancelled=None) -> tuple[list[Outage], str]:
+        """
+        The satellite outages of `satelliteOutages` (use inside a task; the
+        table is small and read each time, so that one just entered counts),
+        and why they could not be read ("" when they were, or none is set).
+        Unreadable: those read last time.
+        """
+        source = self.config.satellite_outages
+        if source is None:
+            return [], ""
+        try:
+            return load_outages(client or self.esri(), source, self.token_for(source.url, source.token), cancelled), ""
+        except Exception as error:  # noqa: BLE001 (the calculation goes on with those known, said so)
+            return list(self._outages), f"衛星の障害情報を読めず、前に読んだ {len(self._outages)} 件で計算（{error}）"
+
+    def known_outages(self) -> list[Outage]:
+        """The outages last read (for the main thread, which does not wait for the table)."""
+        return list(self._outages)
+
+    def set_outages(self, outages) -> None:
+        """Keeps the outages read (main thread); `outagesChanged` when they differ from those kept."""
+        outages = tuple(outages)
+        if outages != self._outages:
+            self._outages = outages
+            self.outagesChanged.emit()
+
     def known_names(self) -> SatelliteNames:
         """The other names already read (for the main thread, which does not wait for the tables)."""
         with self._names_lock:
@@ -234,6 +266,8 @@ class PluginContext(QObject):
         out += [Service("衛星カタログ", x.label, x.url, bool(x.token)) for x in c.satellite_catalogs]
         out += [Service("センサーカタログ", x.label, x.url, bool(x.token)) for x in c.sensor_catalogs if x.url]
         out += [Service("衛星名の対応表", x.label, x.url, bool(x.token)) for x in c.satellite_aliases]
+        if c.satellite_outages is not None:
+            out.append(Service("衛星の障害情報", "衛星の障害情報", c.satellite_outages.url, bool(c.satellite_outages.token)))
         for x in c.observation_stores:
             out.append(Service("観測記録の保存先", x.label, x.url, bool(x.token)))
             if x.areas:

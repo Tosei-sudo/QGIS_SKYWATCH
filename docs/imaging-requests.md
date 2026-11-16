@@ -46,6 +46,7 @@ flowchart LR
 | `core/request/result_file.py` / `core/request/adoption.py` | システムの結果ファイルの読み方（列・JSON Schema の `x-target`）・依頼との突き合わせ、採否の手入力・要求外（§20） |
 | `ui/schedule_dock.py` | 「撮像予定」ドック（日ごとの計画: カレンダー・一覧・地図・採否・要求外、§20） |
 | `core/request/quota.py` / `ui/quota_dialog.py` | 年間撮像上限（消費・見込み・残り、日次の計算での残りの確認、数えない撮像、§27） |
+| `core/plan/outages.py` / `ui/outage_dialog.py` | 衛星の障害情報（撮像機会から外す・その日の値を厳しく・注意、登録画面、§35） |
 
 ## 3. 設定（config.json）
 
@@ -1178,3 +1179,19 @@ tsudo「撮像計画カレンダーとは別に、この地点を次いつ取る
 - **かかるかどうか**: ドックでは QGIS のジオメトリで判定し、ポリゴンの地点はかかる面積の割合を吹き出しに出す（`GeometryShares`）。コアの `share_of` は同じことを点の並びで測る（テスト用・QGIS なし）。
 
 実装: `core/request/place_plans.py`（`Place`・`Mark`・`Lane`・`lanes_of`・`next_of`・`sort_by_next`・`layout`・`marks_at`・`mark_tip`）、`core/request/store.py`（`load_days`）、`ui/place_schedule_dock.py`、`ui/place_timeline.py`、`ui/plan_overlay.py`（`numbered_points`）。テスト: `tests/test_request_place_plans.py`・`tests/test_qgis_place_schedule.py`。
+
+## 35. 衛星の障害情報（2026-11-16 追加）
+
+tsudo「衛星の障害情報を登録できるようにしてほしい 理由や、発生時刻、復旧見込み、影響などで、影響は選択式とかで、昇降や、オフナディア制限とかかな？」「昇交の左のみしか取れないとかは指定できるの？」。方針案（Claude Docs「衛星の障害情報の登録 方針案」）の推奨どおり、方向は 4 つのチェックに。
+
+- **表**: `satelliteOutages`（`TBL_SATELLITE_OUTAGE`、障害 1 件 1 行、復旧しても消さない）。衛星（名前・ID・別名・シリーズ名）、センサー・モード（空は全部）、理由、発生日時、復旧見込み、復旧日時、影響の列。変わるデータなので設定ファイルには持たない。
+- **影響**: 撮像停止／使えない方向（昇交・右／昇交・左／降交・右／降交・左、`DIRECTIONS`）／オフナディア角の上限／1 日の撮像回数の上限／1 パスのシーン数の上限／撮像間隔の下限／夜間の撮像不可／その他の影響（文、計算には使わず注意だけ）。
+- **いつ効くか**（`Outage.end`・`status`）: 発生日時から復旧日時まで、なければ復旧見込みまで、それもなければずっと。見込みを過ぎて復旧日時がないものは効いたまま（「見込み超過」、決定 2 の A）。
+- **撮像機会**（`blocking`・`passes._search`・`leave_out`）: 撮像停止・方向・角度・夜間はその撮像機会の時刻で見て外す。外した機会は `Passes.blocked` に残し、機会がそれしかない依頼は「衛星の障害（衛星: 理由、影響、復旧見込み …）」で見送る（`daily.allocate`、理由の順は空きなし・雲・間隔の次、撮像機会なしの前）。
+- **その日の値**（`on_day`）: 回数・シーン数・間隔・角度の上限は、障害がその日（JST）に少しでもかかれば 1 日中、衛星の値より厳しいときだけ。衛星の並びは変えない（撮像機会の番号のため）。
+- **TLE のない衛星**（件数で詰める）: その日に撮像停止がかかれば使わない。1 日の回数は `on_day` で効く。方向・角度・夜間は分からないので注意だけ。
+- **注意**: 障害のある衛星に割り振った依頼に「衛星の障害あり（…）」（詰め直しで重ねない、`_manual_warning`）。日の注意の先頭に「障害中の衛星: …」（`summary_text`）。手動の採用はそのまま通す。
+- **出した予定**（決定 4）: 変えない。撮像予定で、出力した撮像（不採用・撮像済みを除く）に障害がかかれば衛星と理由・メモを橙色にし「衛星の障害の影響あり（…）」（`handed_hit`。撮像の向き・角度・中心が分かればそれで判定、分からなければ撮像停止だけを確かめ、ほかは「障害中（撮り方が分からず確かめられない）」）。
+- **登録**（決定 3）: メニュー「撮像依頼 ▸ 衛星の障害情報…」。一覧（状態・衛星・センサー・モード・発生・復旧見込み・復旧・影響・理由・メモ、既定は復旧していないものだけ）と 新規・編集・復旧・削除。編集は撮像計画の担当（`outages.edit`）、見るのは撮像を依頼する人も。保存のあと読み直して `PluginContext.set_outages` → `outagesChanged` で撮像計画の衛星の木と撮像予定がすぐ変わる。計算はそのたびに表を読む（読めなければ前に読んだ障害で計算し、理由を出す）。
+
+実装: `core/plan/outages.py`（`Outage`・`attach`・`blocking`・`leave_out`・`on_day`・`stopped`・`handed_hit`・`load_outages`・`save_outage`・`delete_outages`）、`core/plan/satellites.py`（`SatelliteSpec.outages`）、`core/request/passes.py`（`Passes.blocked`・`blocked_on`）、`core/request/daily.py`、`core/request/simulate.py`（`DayResult.outage`）、`qgis_io/context.py`（`read_outages`・`set_outages`・`outagesChanged`）、`ui/outage_dialog.py`、`ui/imaging_plan_dock.py`・`ui/satellite_tree.py`・`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`・`ui/schedule_dock.py`。テスト: `tests/test_satellite_outages.py`・`tests/test_qgis_outages.py`。

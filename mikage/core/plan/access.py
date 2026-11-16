@@ -123,6 +123,8 @@ class PlanResult:
     problems: list
     #: Opportunities left out because they are too soon to order.
     tooSoon: int = 0
+    #: Opportunities left out by the satellites' outages (衛星の障害情報, outages.leave_out).
+    outaged: int = 0
 
 
 def satrec_of(sat: SatelliteSpec):

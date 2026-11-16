@@ -21,6 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QTableWidgetItem, QTabWidget, QVBoxLayout,
 )
 
+from ..core.plan.outages import attach
 from ..core.plan.weather import fetch_clouds
 from ..core.request.chances import chances_of, wanted
 from ..core.request.follow import missed_ids
@@ -38,7 +39,7 @@ from .fit import fit_text
 
 #: The columns of the systems' table.
 SYSTEM_COLUMNS = ("使う", "システム", "件数上限", "枚数上限", *(f"{c}枠" for c in CATEGORIES))
-DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "年間上限", "使用時間", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ",
+DAY_COLUMNS = ("日", "候補", "採用", "まとめ", "枠超過", "年間上限", "使用時間", "障害", "回送", "雲量", "該当なし", "機会なし", "繰り上げ", "持ち越し", "欠測", "期限切れ",
                "使用")
 EXPIRED_COLUMNS = ("期限", "依頼", "区分", "優先度", "最終日の理由")
 
@@ -301,29 +302,35 @@ class LimitSimDialog(QDialog):
         self.run_button.setEnabled(False)
         self.status.setText(self.tr("試算中…"))
 
+        client = self.context.esri()
+
         def work(task):
+            # 衛星の障害情報 as they are now: their passes left out, the days their stricter values (simulate).
+            outages, problem = self.context.read_outages(client, task.isCanceled)
+            hit = attach(sats, outages)
             # The satellites' passes over the days, once for both runs.
-            passes = run_passes(requests, start, days, sats, time.time() * 1000, task.isCanceled)
+            passes = run_passes(requests, start, days, hit, time.time() * 1000, task.isCanceled)
             task.check()
             task.progress(30)
-            base = simulate(requests, start, days, systems, sats, clouds_for(systems, passes), history, task.isCanceled, passes, quotas,
+            base = simulate(requests, start, days, systems, hit, clouds_for(systems, passes), history, task.isCanceled, passes, quotas,
                             chances_for(systems, passes))
             task.check()
             task.progress(65)
-            trial = simulate(requests, start, days, tried, sats, clouds_for(tried, passes), history, task.isCanceled, passes, quotas,
+            trial = simulate(requests, start, days, tried, hit, clouds_for(tried, passes), history, task.isCanceled, passes, quotas,
                              chances_for(tried, passes))
             task.check()
-            return base, trial
+            return base, trial, problem
 
         def done(result):
             self.task = None
-            self.base, self.trial = result
+            self.base, self.trial, problem = result
+            told = [*notes, *([problem] if problem else [])]
             self.render()
             text = self.tr("{start} から {n} 日・依頼 {r} 件で試算（台帳への書き込みなし）").format(
                 start=start.isoformat(), n=days, r=len(requests))
             if not systems:
                 text += self.tr("（設定ファイルに requestExports なし）")
-            self.status.setText("。".join([text, *notes]))
+            self.status.setText("。".join([text, *told]))
             self.run_button.setEnabled(True)
 
         def failed(message):
@@ -357,7 +364,7 @@ class LimitSimDialog(QDialog):
                 count = f"{n}/{s.limit['count']}" if s and "count" in s.limit else str(n)
                 sc = f"{scenes}/{s.limit['scenes']}" if s and "scenes" in s.limit else str(scenes)
                 used.append(f"{labels.get(name, name)} {count} 件・{sc} 枚")
-            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.quota, d.use_time, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
+            cells = [d.day.isoformat(), d.candidates, d.taken, d.merged, d.over, d.quota, d.use_time, d.outage, d.spilled, d.cloud, d.no_system, d.no_pass, d.raised,
                      d.carried, d.lost, len(d.expired), "　".join(used)]
             for col, v in enumerate(cells):
                 item = QTableWidgetItem(str(v))
