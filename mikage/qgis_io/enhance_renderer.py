@@ -13,6 +13,9 @@ what the screen costs (QGIS reads the overview that fits).
   (QGIS's default), 8-bit images are shown as they are.
 - Sharpen reads `margin` pixels more around the area drawn, so there are no
   seams between parts.
+- 「グループで範囲を共通にする」: layers whose settings name the same `share`
+  (a layer-tree group's key) take DRA and the whole-image stretch from all
+  of them together (`GroupShare`), so tiles of one scene meet without seams.
 
 The renderer keeps its settings in the layer's custom property
 `satobs/enhance` (JSON) and writes itself into the project as QGIS's own
@@ -91,6 +94,8 @@ class EnhanceSettings:
     no_data: tuple = ()
     #: The colour scale, the viewer's LayerColorScale: {"scale": name or stops, "reverse", "fade", "classes"}; None for none.
     color: Optional[dict] = None
+    #: The key of the layer-tree group whose rasters share one range (「グループで範囲を共通にする」); "" for the layer's own.
+    share: str = ""
 
     def to_json(self) -> str:
         d = asdict(self)
@@ -107,7 +112,8 @@ class EnhanceSettings:
             bands = bands[:1]
         color = d.get("color")
         return EnhanceSettings(bands, p.to_json(), bool(d.get("locked", False)),
-                               tuple(float(v) for v in d.get("no_data") or ()), color if isinstance(color, dict) else None)
+                               tuple(float(v) for v in d.get("no_data") or ()), color if isinstance(color, dict) else None,
+                               str(d.get("share") or ""))
 
     @property
     def correction(self) -> Pipeline:
@@ -166,6 +172,78 @@ class EnhanceState:
         with self.lock:
             self.cache.clear()
             self.generation += 1
+
+
+class GroupShare:
+    """
+    The range the rasters of one layer-tree group share (「グループで範囲を共通
+    にする」): DRA and the whole-image stretch are taken over all of them
+    together, each read at the same ground size, so tiles meet without seams.
+    """
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        #: Layer id -> (its own provider clone, read only under the lock; the layer's renderer state, for its view).
+        self.members: dict = {}
+        #: Statistics by what they were taken for.
+        self.cache: dict = {}
+        #: The last DRA result, kept while locked.
+        self.kept: Optional[tuple] = None
+
+
+#: The shares by key (a group's `satobs/enhanceShare`).
+_shares: dict = {}
+
+
+def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer") -> None:
+    """Puts the layer into the share its settings name (and out of any other)."""
+    key = renderer.settings.share
+    for k in [k for k, share in _shares.items() if k != key and layer.id() in share.members]:
+        _leave(k, layer.id())
+    if not key:
+        return
+    share = _shares.setdefault(key, GroupShare())
+    current = share.members.get(layer.id())
+    if current is None or current[1] is not renderer.state:
+        provider = layer.dataProvider().clone()
+        with share.lock:
+            share.members[layer.id()] = (provider, renderer.state)
+            share.cache.clear()
+
+
+def _leave(key: str, layer_id: str) -> None:
+    share = _shares.get(key)
+    if share is None:
+        return
+    with share.lock:
+        share.members.pop(layer_id, None)
+        share.cache.clear()
+    if not share.members:
+        _shares.pop(key, None)
+
+
+def forget(layer_ids) -> None:
+    """Layers leaving the project leave their share."""
+    for layer_id in list(layer_ids):
+        for key in [k for k, share in _shares.items() if layer_id in share.members]:
+            _leave(key, layer_id)
+
+
+def share_members(key: str) -> list:
+    """The ids of the layers sharing `key`'s range."""
+    share = _shares.get(key)
+    return list(share.members) if share is not None else []
+
+
+def _flat(reads: list) -> Optional[tuple]:
+    """Several reads (bands, valid) as one 1×N read."""
+    reads = [r for r in reads if r is not None and r[1].any()]
+    if not reads:
+        return None
+    n = len(reads[0][0])
+    bands = [np.concatenate([np.asarray(r[0][c]).ravel() for r in reads]).reshape(1, -1) for c in range(n)]
+    valid = np.concatenate([r[1].ravel() for r in reads]).reshape(1, -1)
+    return bands, valid
 
 
 def default_settings(layer: QgsRasterLayer) -> EnhanceSettings:
@@ -323,18 +401,79 @@ class EnhanceRenderer(QgsRasterRenderer):
     def _key(self) -> tuple:
         return (tuple(self.settings.bands), tuple(self.settings.no_data))
 
-    def _coarse(self, area: QgsRectangle):
-        p = self.input()
+    def _coarse(self, area: QgsRectangle, provider=None, ground: float = 0.0):
+        """
+        The picture bands of `area` read coarsely: at most STATS_SIZE a side, or
+        (`ground` > 0) at that size of a pixel on the ground, never finer than
+        the image. `provider` is another layer's (a share's member).
+        """
+        p = provider if provider is not None else self.input()
+        if any(b > p.bandCount() for b in self.settings.bands):
+            return None
         layer_extent = p.extent()
         area = area.intersect(layer_extent)
         if area.isEmpty():
             return None
         xres = layer_extent.width() / max(1, p.xSize()) if p.capabilities() & p.Size else 0
         yres = layer_extent.height() / max(1, p.ySize()) if p.capabilities() & p.Size else 0
-        w, h = _coarse_size(area, layer_extent, xres, yres)
+        if ground > 0:
+            w = max(1, min(STATS_SIZE, int(round(area.width() / max(ground, xres)))))
+            h = max(1, min(STATS_SIZE, int(round(area.height() / max(ground, yres)))))
+        else:
+            w, h = _coarse_size(area, layer_extent, xres, yres)
         return read_bands(p, self.settings.bands, area, w, h, self.settings.no_data)
 
+    def _share(self) -> Optional[GroupShare]:
+        key = self.settings.share
+        share = _shares.get(key) if key else None
+        return share if share is not None and share.members else None
+
+    def _shared_stats(self, share: GroupShare, eight: bool, options: Optional[dict], whole: bool):
+        """
+        The statistics over every member of `share` (as `_view_stats` and
+        `_whole_stretch` take them for one layer): each member's view (the
+        canvas's, in its CRS) read at one ground size, or (`whole`, or no view
+        known) each whole image at most STATS_SIZE a side.
+        """
+        opts = json.dumps(options, sort_keys=True) if options else ""
+        with share.lock:
+            members = list(share.members.items())
+            views = [None if whole else st.view for _id, (_p, st) in members]
+            if not any(v is not None and not v.isEmpty() for v in views):
+                whole = True
+            areas = tuple((i, "" if whole else (v.toString(6) if v is not None else "-")) for (i, _m), v in zip(members, views))
+            what = ("whole" if whole else "view", eight, opts) + self._key()
+            key = what + (areas,)
+            if not whole and self.settings.locked and share.kept is not None and share.kept[0] == what:
+                return share.kept[1]
+            if key not in share.cache:
+                reads = []
+                for (_id, (provider, _st)), view in zip(members, views):
+                    if whole:
+                        reads.append(self._coarse(provider.extent(), provider))
+                    elif view is not None and not view.isEmpty():
+                        reads.append(self._coarse(view, provider, max(view.width(), view.height()) / STATS_SIZE))
+                read = _flat(reads)
+                if read is None:
+                    result = None
+                elif eight:
+                    bands, valid = read
+                    rgba = stretch_to_rgba(bands, valid, [0.0] * len(bands), [255.0] * len(bands))
+                    result = count_pixels(rgba, "gray" if len(bands) == 1 else "rgb")
+                else:
+                    stats = sample_raster_histogram(*read)
+                    result = compute_raster_stretch(stats, options) if stats else None
+                for old in [k for k in share.cache if k[0] == "view"][:-8]:
+                    del share.cache[old]
+                share.cache[key] = result
+            if not whole:
+                share.kept = (what, share.cache[key])
+            return share.cache[key]
+
     def _whole_stretch(self) -> Optional[dict]:
+        share = self._share()
+        if share is not None:
+            return self._shared_stats(share, False, WHOLE_STRETCH, whole=True)
         key = ("whole",) + self._key()
         st = self.state
         with st.lock:
@@ -346,6 +485,9 @@ class EnhanceRenderer(QgsRasterRenderer):
 
     def _view_stats(self, extent: QgsRectangle, eight: bool, options: Optional[dict] = None):
         """The DRA statistics of the view: a histogram of 8-bit codes, or the raw stretch."""
+        share = self._share()
+        if share is not None:
+            return self._shared_stats(share, eight, options, whole=False)
         st = self.state
         area = st.view if st.view is not None and not st.view.isEmpty() else extent
         opts = json.dumps(options, sort_keys=True) if options else ""
@@ -485,6 +627,7 @@ def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
             renderer.copyCommonProperties(old, True)
         layer.setRenderer(renderer)
         _keep(renderer)
+    _join(layer, renderer)
     layer.setCustomProperty(PROPERTY, settings.to_json())
     layer.triggerRepaint()
     return renderer
@@ -498,6 +641,7 @@ def remove(layer: QgsRasterLayer) -> None:
         if fallback is not None:
             layer.setRenderer(fallback)
         _kept.discard(current)
+    forget([layer.id()])
     layer.removeCustomProperty(PROPERTY)
     layer.triggerRepaint()
 
@@ -541,6 +685,24 @@ def view_histograms(provider, settings: EnhanceSettings, state: EnhanceState, vi
         return {"before": channel_bins(before, gray), "after": channel_bins(after, gray)}
     shown = count_pixels(apply_palette(after, palette), "gray" if gray else "rgb").bins
     return {"before": channel_bins(before, gray), "after": [b.astype(np.int64) for b in shown]}
+
+
+def sum_histograms(parts: list) -> dict:
+    """
+    The histograms of several layers (`view_histograms`' results) added up:
+    those counted as the first one with pixels is (gray or RGB).
+    """
+    out: dict = {"before": [], "after": []}
+    for part in parts:
+        for which in ("before", "after"):
+            channels = part.get(which) or []
+            if not channels:
+                continue
+            if not out[which]:
+                out[which] = [np.asarray(c, dtype=np.int64).copy() for c in channels]
+            elif len(channels) == len(out[which]):
+                out[which] = [a + np.asarray(c, dtype=np.int64) for a, c in zip(out[which], channels)]
+    return out
 
 
 def value_histogram(provider, settings: EnhanceSettings) -> Optional[RasterHistogram]:

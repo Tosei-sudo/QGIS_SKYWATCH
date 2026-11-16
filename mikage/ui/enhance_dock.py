@@ -10,15 +10,27 @@ step per kind in the order of its first slider, neutral steps left out, then
 the tone curve (トーンカーブ, edited on its own plot). Steps that have no
 control (white balance or a stretch from `imageRules` or a saved correction)
 are kept after them.
+
+With a group chosen in the layer panel (no active layer), the dock works on
+every raster under it (nested groups and hidden layers too, not background
+maps): it shows the top one's correction and any change writes the whole
+correction to all of them. The band assignment is shared only when their
+bands are alike (`enhance_group.alike`), else each keeps its own; a colour
+scale goes to the layers shown as the top one is (one band or three); two
+dates stay a one-layer tool. 「グループで範囲を共通にする」 (on by default for
+alike rasters) has DRA and the 16-bit stretch taken over all of them
+together, so tiles meet without seams.
 """
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import replace
 from typing import Callable, Optional
 
-from qgis.core import QgsCoordinateTransform, QgsMapLayerType, QgsProject, QgsProviderRegistry, QgsRasterLayer
+from qgis.core import QgsCoordinateTransform, QgsLayerTreeGroup, QgsMapLayerType, QgsProject, QgsProviderRegistry, QgsRasterLayer
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSlider,
@@ -28,10 +40,11 @@ from qgis.PyQt.QtWidgets import (
 from ..core.enhance.ops import OP_INFO
 from ..core.enhance.pipeline import PRESET_NAMES, PRESETS, Pipeline
 from ..core.enhance.rules import image_rule_for, resolve_bands
+from ..qgis_io import enhance_group as eg
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io import complex_sar
 from ..qgis_io.tasks import run_task
-from .colorize_box import ColorizeBox, set_blend
+from .colorize_box import ColorizeBox, paired_with, set_blend
 from .curve_editor import CurveEditor
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
@@ -61,6 +74,8 @@ METHODS = [("percentClip", "パーセントクリップ"), ("minMax", "最小〜
 DELAY = 150
 #: The pause after the view or correction changes before the histogram is taken again, ms.
 HISTOGRAM_DELAY = 300
+#: The pause after the layer tree changes before the group's rasters and shared ranges are looked at again, ms.
+TREE_DELAY = 300
 
 
 def source_name(layer) -> str:
@@ -142,7 +157,14 @@ class EnhanceDock(PluginDock):
         super().__init__("SatObsEnhance", TITLE, context, open_settings, parent)
         self.iface = iface
         self.canvas = iface.mapCanvas()
+        #: The layer whose correction the dock shows (with a group, its top raster).
         self.layer: Optional[QgsRasterLayer] = None
+        #: The layer panel's group the dock works on, or None (the active layer).
+        self.group: Optional[QgsLayerTreeGroup] = None
+        #: The layers changes go to: the group's rasters, or the layer.
+        self.targets: list = []
+        #: Whether the targets' bands are alike (one band assignment fits all).
+        self._same = True
         self._loading = False
         #: Steps without a slider, kept after the sliders' steps.
         self._extra: list = []
@@ -175,6 +197,12 @@ class EnhanceDock(PluginDock):
         self.preset.activated.connect(lambda _i: self.use_preset(self.preset.currentData()))
         top.addWidget(self.preset, 1)
         v.addLayout(top)
+        self.share = QCheckBox(self.tr("グループで範囲を共通にする"))
+        self.share.setToolTip(self.tr("グループ内の画像を合わせて明るさの範囲（DRA・16 bit 画像の引き伸ばし）を決め、"
+                                      "タイルの境目などで明るさが変わらないように表示"))
+        self.share.toggled.connect(self._share_toggled)
+        self.share.hide()
+        v.addWidget(self.share)
 
         dra = QGroupBox(self.tr("DRA（表示範囲で自動レンジ）"))
         form = QFormLayout(dra)
@@ -238,7 +266,7 @@ class EnhanceDock(PluginDock):
 
         self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
         self.colorize_box.changed.connect(self._colorize_changed)
-        self.colorize_box.colored.connect(lambda: self.follow_layer(self.layer))
+        self.colorize_box.colored.connect(self.refresh)
         v.addWidget(self.colorize_box)
 
         buttons = QHBoxLayout()
@@ -285,6 +313,8 @@ class EnhanceDock(PluginDock):
         #: The last histograms ({"before", "after"}, 256 counts per channel), and the number of the request whose answer is still wanted.
         self.histograms: Optional[dict] = None
         self._histogram_corrected = False
+        #: The number of a group's rasters the histogram counts (0: one layer).
+        self._histogram_layers = 0
         self._histogram_request = 0
         self._histogram_timer = QTimer(self)
         self._histogram_timer.setSingleShot(True)
@@ -292,6 +322,18 @@ class EnhanceDock(PluginDock):
         self._histogram_timer.timeout.connect(self.take_histogram)
 
         iface.currentLayerChanged.connect(self.follow_layer)
+        #: The layer panel, for a group chosen there (QGIS's; tests may have none).
+        self.view = iface.layerTreeView() if hasattr(iface, "layerTreeView") else None
+        selection = self.view.selectionModel() if self.view is not None else None
+        if selection is not None:
+            selection.currentChanged.connect(self._tree_current_changed)
+        self._tree_timer = QTimer(self)
+        self._tree_timer.setSingleShot(True)
+        self._tree_timer.setInterval(TREE_DELAY)
+        self._tree_timer.timeout.connect(self._tree_changed)
+        root = QgsProject.instance().layerTreeRoot()
+        root.addedChildren.connect(self._tree_later)
+        root.removedChildren.connect(self._tree_later)
         self.canvas.extentsChanged.connect(self.update_views)
         self.canvas.destinationCrsChanged.connect(self.update_views)
         self.canvas.mapCanvasRefreshed.connect(self.histogram_later)
@@ -308,8 +350,13 @@ class EnhanceDock(PluginDock):
     def close_down(self) -> None:
         self._timer.stop()
         self._histogram_timer.stop()
+        self._tree_timer.stop()
         self._histogram_request += 1
+        selection = self.view.selectionModel() if self.view is not None and not sip.isdeleted(self.view) else None
+        root = QgsProject.instance().layerTreeRoot()
         for signal, slot in [(self.canvas.mapCanvasRefreshed, self.histogram_later),
+                             (root.addedChildren, self._tree_later), (root.removedChildren, self._tree_later),
+                             *([(selection.currentChanged, self._tree_current_changed)] if selection is not None else []),
                              (self.iface.currentLayerChanged, self.follow_layer), (self.canvas.extentsChanged, self.update_views),
                              (self.canvas.destinationCrsChanged, self.update_views),
                              (QgsProject.instance().layersAdded, self.layers_added),
@@ -329,6 +376,7 @@ class EnhanceDock(PluginDock):
     def _project_read(self, *_args) -> None:
         self._reading = False
         self.restore_layers(QgsProject.instance().mapLayers().values())
+        eg.sync_shares()
 
     def layers_added(self, layers) -> None:
         """Layers from a project get their correction back; images opened now get their `imageRules`."""
@@ -341,8 +389,49 @@ class EnhanceDock(PluginDock):
                 self.apply_rule(layer)
 
     def layers_removed(self, ids) -> None:
-        if self.layer is not None and self.layer.id() in ids:
+        ids = set(ids)
+        er.forget(ids)
+        if self.group is not None:
+            if any(layer.id() in ids for layer in self.targets if not sip.isdeleted(layer)):
+                self.show_target(None, self.group if not sip.isdeleted(self.group) else None, skip=ids)
+        elif self.layer is not None and self.layer.id() in ids:
             self.follow_layer(None)
+
+    def _tree_later(self, *_args) -> None:
+        self._tree_timer.start()
+
+    def _tree_changed(self) -> None:
+        """The layer tree changed: layers moved out of a group leave its shared range; the group's rasters again."""
+        if self._reading:
+            return
+        eg.sync_shares()
+        if self.group is None:
+            return
+        if sip.isdeleted(self.group):
+            self.follow_layer(self.iface.activeLayer())
+        elif [layer.id() for layer in eg.group_rasters(self.group)] != [layer.id() for layer in self.targets]:
+            self.refresh()
+
+    def _tree_current_changed(self, *_args) -> None:
+        """A node chosen in the layer panel: a group is followed here (a layer comes as the active layer)."""
+        group = self.chosen_group()
+        if group is not None and group is not self.group:
+            self.show_target(None, group)
+        elif group is None and self.group is not None:
+            self.follow_layer(self.iface.activeLayer())
+
+    def chosen_group(self) -> Optional[QgsLayerTreeGroup]:
+        """The layer panel's current node when it is a group (not the root), else None."""
+        view = self.view
+        if view is None or sip.isdeleted(view):
+            return None
+        group = view.currentGroupNode()
+        if isinstance(group, QgsLayerTreeGroup) and group.parent() is not None and view.currentNode() is group:
+            return group
+        return None
+
+    def _is_target(self, layer) -> bool:
+        return any(t is layer or (not sip.isdeleted(t) and t.id() == layer.id()) for t in self.targets)
 
     def apply_rule(self, layer: QgsRasterLayer):
         """Opens `layer` with the first of `imageRules` matching its file name; the rule, or None."""
@@ -375,8 +464,8 @@ class EnhanceDock(PluginDock):
         bar.pushInfo(TITLE, self.tr("{name}: 設定「{label}」を適用").format(name=layer.name(), label=rule.label))
         if problem:
             bar.pushWarning(TITLE, problem)
-        if layer is self.layer:
-            self.follow_layer(layer)
+        if self._is_target(layer):
+            self.refresh()
         return rule
 
     def restore_layers(self, layers) -> None:
@@ -384,8 +473,8 @@ class EnhanceDock(PluginDock):
         for layer in list(layers):
             if er.restore_layer(layer):
                 self.set_view(layer)
-        if self.layer is not None:
-            self.follow_layer(self.layer)
+        if self.layer is not None or self.group is not None:
+            self.refresh()
 
     def update_views(self) -> None:
         for layer in QgsProject.instance().mapLayers().values():
@@ -406,14 +495,42 @@ class EnhanceDock(PluginDock):
         er.set_view(layer, self.view_of(layer))
 
     def follow_layer(self, layer) -> None:
-        """Shows the active raster layer's correction."""
+        """Shows the active raster layer's correction; with no active layer, that of the group chosen in the layer panel."""
         if layer is not None and getattr(layer, "type", lambda: None)() != QgsMapLayerType.RasterLayer:
             layer = None
+        self.show_target(layer, self.chosen_group() if layer is None else None)
+
+    def follow_group(self, group: QgsLayerTreeGroup) -> None:
+        """Works on every raster under `group` (as when it is chosen in the layer panel)."""
+        self.show_target(None, group)
+
+    def refresh(self) -> None:
+        """Shows the current target's correction again (after it changed elsewhere)."""
+        if self.group is not None:
+            if sip.isdeleted(self.group):
+                self.follow_layer(self.iface.activeLayer())
+            else:
+                self.show_target(None, self.group)
+        else:
+            self.show_target(self.layer if self.layer is not None and not sip.isdeleted(self.layer) else None, None)
+
+    def show_target(self, layer, group: Optional[QgsLayerTreeGroup], skip=()) -> None:
+        """Shows the correction of `layer`, or of `group`'s top raster for all its rasters (but those in `skip`, ids)."""
+        if self._timer.isActive():
+            # A change still waiting goes to what it was made on.
+            self.apply()
+        self.group = group
+        if group is not None:
+            self.targets = [lay for lay in eg.group_rasters(group) if lay.id() not in skip]
+            layer = self.targets[0] if self.targets else None
+        else:
+            self.targets = [layer] if layer is not None else []
         self.layer = layer
+        self._same = group is None or eg.alike(self.targets)
         self._loading = True
         try:
             has = layer is not None
-            self.layer_label.setText(self.tr("対象: {name}").format(name=layer.name()) if has else self.tr("ラスターレイヤーの選択なし"))
+            self.layer_label.setText(self._target_text())
             self.enabled.setEnabled(has)
             r = er.enhance_renderer(layer) if has else None
             settings = r.settings if r else (er.default_settings(layer) if has else er.EnhanceSettings())
@@ -422,11 +539,37 @@ class EnhanceDock(PluginDock):
             self.dra_locked.setChecked(settings.locked)
             self.opacity.setValue(round((layer.renderer().opacity() if has and layer.renderer() else 1.0) * 100))
             self.set_pipeline(settings.correction)
+            self.share.setVisible(group is not None and has)
+            self.share.setEnabled(self._same)
+            self.share.setChecked(eg.share_wanted(group, self.targets) if group is not None else False)
+            self.colorize_box.set_targets(self.targets, group is not None)
             self.colorize_box.show_layer(layer, settings.color if r else None)
         finally:
             self._loading = False
         self._show_color_rows()
         self.histogram_later()
+
+    def _target_text(self) -> str:
+        layer, group = self.layer, self.group
+        if group is None:
+            return self.tr("対象: {name}").format(name=layer.name()) if layer is not None else self.tr("ラスターレイヤーの選択なし")
+        if layer is None:
+            return self.tr("グループ「{name}」にラスターなし").format(name=group.name())
+        lines = [self.tr("対象: グループ「{name}」のラスター {n} 枚").format(name=group.name(), n=len(self.targets))]
+        if len({self._look(t) for t in self.targets}) > 1:
+            lines.append(self.tr("補正の違うレイヤーあり。変更すると全部この補正にそろう"))
+        if not self._same:
+            lines.append(self.tr("バンド構成の違う画像あり。バンド割当と範囲の共通化は使用不可（バンド割当は各レイヤーのまま）"))
+        return "\n".join(lines)
+
+    def _look(self, layer) -> tuple:
+        """What a change in the dock sets the same on every layer of a group: compared to tell when they differ."""
+        r = er.enhance_renderer(layer)
+        if r is None:
+            return ("off",)
+        s = r.settings
+        return (json.dumps(s.pipeline, sort_keys=True), s.locked, round(r.opacity(), 2),
+                tuple(s.bands) if self._same else len(s.bands), json.dumps(s.color, sort_keys=True))
 
     def _fill_bands(self, layer, bands) -> None:
         n = layer.bandCount() if layer is not None else 0
@@ -437,7 +580,7 @@ class EnhanceDock(PluginDock):
                 name = layer.dataProvider().bandDescription(b) if layer is not None else ""
                 combo.addItem(self.tr("バンド {n} ({name})").format(n=b, name=name) if name else self.tr("バンド {n}").format(n=b), b)
             combo.setCurrentIndex(max(0, min(n, shown[i] if i < len(shown) else 1) - 1))
-        self.bands_box.setVisible(n >= 2)
+        self.bands_box.setVisible(n >= 2 and self._same)
 
     # ---- the correction ----
 
@@ -526,7 +669,30 @@ class EnhanceDock(PluginDock):
     def settings(self) -> er.EnhanceSettings:
         current = er.enhance_renderer(self.layer) if self.layer is not None else None
         return er.EnhanceSettings(bands=self.bands(), pipeline=self.pipeline().to_json(), locked=self.dra_locked.isChecked(),
-                                  no_data=current.settings.no_data if current else (), color=self.colorize_box.color())
+                                  no_data=current.settings.no_data if current else (), color=self.colorize_box.color(),
+                                  share=current.settings.share if current else "")
+
+    def settings_for(self, layer: QgsRasterLayer, share: str) -> er.EnhanceSettings:
+        """
+        The dock's correction for one raster of the group: its own bands when
+        the group's are not alike, the colour scale when it is shown as the top
+        one is (else its own; a layer of two dates keeps its colours).
+        """
+        current = er.enhance_renderer(layer)
+        base = current.settings if current else er.default_settings(layer)
+        bands = self.bands() if self._same else base.bands
+        same_kind = (len(bands) == 1) == (len(self.bands()) == 1)
+        color = self.colorize_box.color() if same_kind and paired_with(layer) is None else base.color
+        return er.EnhanceSettings(bands=tuple(bands), pipeline=self.pipeline().to_json(), locked=self.dra_locked.isChecked(),
+                                  no_data=base.no_data, color=color, share=share)
+
+    def _share_toggled(self, on: bool) -> None:
+        """A shared range needs the plugin's renderer: 補正 turns on with it."""
+        if self._loading:
+            return
+        if on and not self.enabled.isChecked():
+            self.enabled.setChecked(True)
+        self.changed()
 
     def _colorize_changed(self) -> None:
         """A colour scale needs the plugin's renderer: 補正 turns on with it."""
@@ -535,8 +701,11 @@ class EnhanceDock(PluginDock):
         self.changed()
 
     def apply(self) -> None:
-        """Draws the active layer with the dock's correction (or QGIS's own renderer when 補正 is off)."""
+        """Draws the active layer (the group's rasters) with the dock's correction (or QGIS's own renderer when 補正 is off)."""
         self._timer.stop()
+        if self.group is not None:
+            self._apply_group()
+            return
         layer = self.layer
         if layer is None:
             return
@@ -548,6 +717,24 @@ class EnhanceDock(PluginDock):
         renderer.setOpacity(self.opacity.value() / 100)
         self.set_view(layer)
         layer.triggerRepaint()
+
+    def _apply_group(self) -> None:
+        targets = [layer for layer in self.targets if not sip.isdeleted(layer)]
+        if not targets or sip.isdeleted(self.group):
+            return
+        if not self.enabled.isChecked():
+            for layer in targets:
+                if er.enhance_renderer(layer) is not None:
+                    er.remove(layer)
+            return
+        share = eg.set_share(self.group, self.share.isChecked()) if self._same else ""
+        opacity = self.opacity.value() / 100
+        for layer in targets:
+            renderer = er.apply(layer, self.settings_for(layer, share))
+            renderer.setOpacity(opacity)
+            self.set_view(layer)
+            layer.triggerRepaint()
+        self.layer_label.setText(self._target_text())
 
     # ---- histogram ----
 
@@ -563,35 +750,61 @@ class EnhanceDock(PluginDock):
             self._histogram_timer.start()
 
     def take_histogram(self):
-        """Starts a task reading the view coarsely (at most 512 px a side) for the histogram; the task, or None."""
+        """
+        Starts a task reading the view coarsely (at most 512 px a side) for the
+        histogram (a group's rasters shown in the view added up); the task, or None.
+        """
         self._histogram_timer.stop()
         self._histogram_request += 1
         request = self._histogram_request
-        layer = self.layer
-        view = self.view_of(layer) if layer is not None and layer.isValid() else None
-        if view is None or view.isEmpty():
+        items, corrected = self._histogram_items()
+        if not items:
             self.histograms = None
             self.show_histogram()
-            self.histogram_note.setText(self.tr("レイヤーを選ぶと、表示範囲のヒストグラムを表示") if layer is None
+            self.histogram_note.setText(self.tr("レイヤーを選ぶと、表示範囲のヒストグラムを表示") if self.layer is None
+                                        else self.tr("表示範囲に表示中の画像なし") if self.group is not None
                                         else self.tr("表示範囲の取得不可"))
             return None
-        r = er.enhance_renderer(layer)
-        settings = r.settings if r else er.default_settings(layer)
-        state = r.state if r else er.EnhanceState()
-        provider = layer.dataProvider().clone()
+        layers = len(items) if self.group is not None else 0
 
         def done(result: dict) -> None:
             if request != self._histogram_request:
                 return
             self.histograms = result
-            self._histogram_corrected = r is not None
+            self._histogram_corrected = corrected
+            self._histogram_layers = layers
             self.show_histogram()
 
         def failed(message: str) -> None:
             if request == self._histogram_request and message != "取消":
                 self.histogram_note.setText(self.tr("ヒストグラムの取得に失敗（{why}）").format(why=message))
 
-        return run_task(self.tr("ヒストグラム"), lambda _task: er.view_histograms(provider, settings, state, view), done, failed)
+        if len(items) == 1:
+            return run_task(self.tr("ヒストグラム"), lambda _task: er.view_histograms(*items[0]), done, failed)
+        return run_task(self.tr("ヒストグラム"), lambda _task: er.sum_histograms([er.view_histograms(*item) for item in items]),
+                        done, failed)
+
+    def _histogram_items(self) -> tuple:
+        """What each histogram read needs ((provider clone, settings, state, view) a layer), and whether any is corrected."""
+        if self.group is not None:
+            root = QgsProject.instance().layerTreeRoot()
+            layers = []
+            for layer in self.targets:
+                node = root.findLayer(layer.id()) if not sip.isdeleted(layer) else None
+                if node is not None and node.isVisible():
+                    layers.append(layer)
+        else:
+            layers = [self.layer] if self.layer is not None else []
+        items, corrected = [], False
+        for layer in layers:
+            view = self.view_of(layer) if layer.isValid() else None
+            if view is None or view.isEmpty() or (self.group is not None and not view.intersects(layer.extent())):
+                continue
+            r = er.enhance_renderer(layer)
+            corrected = corrected or r is not None
+            items.append((layer.dataProvider().clone(), r.settings if r else er.default_settings(layer),
+                          r.state if r else er.EnhanceState(), view))
+        return items, corrected
 
     def show_histogram(self, *_args) -> None:
         after = bool(self.histogram_after.currentData())
@@ -610,7 +823,11 @@ class EnhanceDock(PluginDock):
             self.histogram_note.setText(self.tr("表示範囲に画素なし"))
         else:
             which = self.tr("補正前（補正なし）") if after and not self._histogram_corrected else self.histogram_after.currentText()
-            self.histogram_note.setText(self.tr("表示範囲の {count} 画素・{which}").format(count=f"{count:,}", which=which))
+            if self._histogram_layers:
+                self.histogram_note.setText(self.tr("表示範囲の {n} 枚の {count} 画素・{which}").format(
+                    n=self._histogram_layers, count=f"{count:,}", which=which))
+            else:
+                self.histogram_note.setText(self.tr("表示範囲の {count} 画素・{which}").format(count=f"{count:,}", which=which))
 
     # ---- for scripts ----
 
@@ -624,11 +841,11 @@ class EnhanceDock(PluginDock):
         base = current.settings if current else er.default_settings(layer)
         settings = er.EnhanceSettings(bands=tuple(bands) if bands else base.bands,
                                       pipeline=(correction or base.correction).to_json(), locked=base.locked, no_data=base.no_data,
-                                      color=base.color)
+                                      color=base.color, share=base.share)
         er.apply(layer, settings)
         self.set_view(layer)
-        if layer is self.layer:
-            self.follow_layer(layer)
+        if self._is_target(layer):
+            self.refresh()
 
     def colorize(self, layer: QgsRasterLayer, scale=None, blend: Optional[str] = None, reverse: bool = False, fade: bool = False,
                  classes: Optional[dict] = None) -> None:
@@ -648,5 +865,5 @@ class EnhanceDock(PluginDock):
         if blend is not None:
             set_blend(layer, blend)
         self.set_view(layer)
-        if layer is self.layer:
-            self.follow_layer(layer)
+        if self._is_target(layer):
+            self.refresh()
