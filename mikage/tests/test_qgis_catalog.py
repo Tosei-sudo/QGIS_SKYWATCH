@@ -981,7 +981,12 @@ def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_oth
 def test_the_dialog_choosing_a_records_images():
     from mikage.ui.image_files_dialog import ImageFilesDialog
 
-    dialog = ImageFilesDialog("D", ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"], more=True)
+    dialog = ImageFilesDialog("D", ["PAN/a.tif", "PAN/b.tif", "MS/a.tif", "c.tif"], more=True)
+    # The file's name first, then its path below the folder (2026-11-16).
+    assert [dialog.list.headerItem().text(i) for i in range(2)] == ["ファイル名", "パス"]
+    rows = [dialog.list.topLevelItem(i) for i in range(4)]
+    assert [(r.text(0), r.text(1)) for r in rows] == [("a.tif", "PAN/a.tif"), ("b.tif", "PAN/b.tif"), ("a.tif", "MS/a.tif"), ("c.tif", "c.tif")]
+    rows[3].setCheckState(0, Qt.CheckState.Unchecked)
     assert dialog.chosen() == ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"]
     dialog.filter.setText("ms/")
     dialog._set_shown(Qt.CheckState.Unchecked)
@@ -998,10 +1003,10 @@ def test_a_double_click_in_the_dialog_opens_that_image_alone():
     from mikage.ui.image_files_dialog import ImageFilesDialog
 
     dialog = ImageFilesDialog("D", ["PAN/a.tif", "PAN/b.tif", "MS/a.tif"])
-    dialog.list.item(2).setCheckState(Qt.CheckState.Unchecked)  # whatever is checked
+    dialog.list.topLevelItem(2).setCheckState(0, Qt.CheckState.Unchecked)  # whatever is checked
     dialog.show()
     QTest.qWaitForWindowExposed(dialog)
-    at = dialog.list.visualItemRect(dialog.list.item(2)).center()
+    at = dialog.list.visualItemRect(dialog.list.topLevelItem(2)).center()
     # What a window system sends for a double click: press, release, then the double click.
     QTest.mouseClick(dialog.list.viewport(), Qt.MouseButton.LeftButton, pos=at)
     QTest.mouseDClick(dialog.list.viewport(), Qt.MouseButton.LeftButton, pos=at)
