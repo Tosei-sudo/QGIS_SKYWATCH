@@ -66,7 +66,7 @@ from .list_views import column_menus
 from .plan_overlay import PlanOverlay
 from .request_groups import GroupFilter
 
-COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由・メモ")
+COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由・メモ")
 _TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
 _SATELLITE = COLUMNS.index("衛星")
 #: A row a satellite outage hits (衛星の障害情報).
@@ -98,6 +98,11 @@ def row_state(row: HistoryRow) -> str:
 def captured_text(row: HistoryRow) -> str:
     """「撮像済み」・「未撮像」・「未判定」 of a request handed out ("" for the others)."""
     return row.captured if row.result == "採用" and row.request_id else ""
+
+
+def image_text(row: HistoryRow) -> str:
+    """The id of the image a row was taken in (撮像済み; tsudo 2026-11-16: 「せめて画像IDは表示してほしい」), "" for the others."""
+    return row.image_id if row.captured == "撮像済み" else ""
 
 
 def row_note(row: HistoryRow) -> str:
@@ -191,7 +196,7 @@ class ScheduleDock(PluginDock):
             self.state_filter.addItem(s, s)
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
-        self.search.setPlaceholderText(self.tr("名称・番号・依頼者・グループ・衛星"))
+        self.search.setPlaceholderText(self.tr("名称・番号・依頼者・グループ・衛星・画像ID"))
         self.group_filter = GroupFilter("schedule")
         for w in (self.system_filter, self.state_filter, self.group_filter):
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -489,7 +494,7 @@ class ScheduleDock(PluginDock):
         words = self.search.text().lower().split()
         if words:
             text = " ".join((row.name, row.management_no, row.requester, self.group_of(row), row.satellite, row.request_id,
-                             row.external_id, row.link_id)).lower()
+                             row.external_id, row.link_id, image_text(row))).lower()
             if not all(w in text for w in words):
                 return False
         return True
@@ -550,7 +555,7 @@ class ScheduleDock(PluginDock):
                 note = self.tr("衛星の障害の影響あり（{w}）").format(w=hit[1]) + (f"。{note}" if note else "")
             items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
-                                                captured_text(r), r.requester, note)]
+                                                captured_text(r), image_text(r), r.requester, note)]
             if hit is not None:
                 tip = self.tr("衛星の障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）").format(
                     s=hit[0].status(_now_ms()), t=hit[0].short_text(_now_ms()))
@@ -568,7 +573,7 @@ class ScheduleDock(PluginDock):
                 items[0].setToolTip(plain_tip(self.tr("採否の入力元: {s}").format(s=source)))
             elif state == AWAITING:
                 items[0].setToolTip(self.tr("システムの採否が分からない（画像が入れば採用になる）"))
-            if r.image_id:
+            if image_text(r):
                 items[_TAKEN].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
             if row_note(r) and hit is None:
                 items[_NOTE].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
@@ -849,7 +854,7 @@ class ScheduleDock(PluginDock):
         if not self.shown:
             return None
         layer = QgsVectorLayer("Polygon?crs=EPSG:4326", self.tr("撮像予定 {d}").format(d=self.day), "memory")
-        names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由", "対象日", "依頼ID",
+        names = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由", "対象日", "依頼ID",
                  "外部ID", "入力元", "撮像ID", "まとめ先の依頼ID", "外部連携ID")
         provider = layer.dataProvider()
         provider.addAttributes([QgsField(n, QVariant.String) for n in names])
@@ -858,8 +863,8 @@ class ScheduleDock(PluginDock):
         for r in self.shown:
             f = QgsFeature(layer.fields())
             f.setAttributes([row_state(r), r.name, self.group_of(r), r.management_no, r.system, r.satellite,
-                             shot_text(r, self.rows, self.shots), _when(r.planned_at), captured_text(r), r.requester, row_note(r), r.day,
-                             r.request_id, r.external_id, r.adoption_source, r.shot_id, r.merged_into, r.link_id])
+                             shot_text(r, self.rows, self.shots), _when(r.planned_at), captured_text(r), image_text(r), r.requester,
+                             row_note(r), r.day, r.request_id, r.external_id, r.adoption_source, r.shot_id, r.merged_into, r.link_id])
             rings = [[tuple(p[:2]) for p in ring] for ring in self.rings_of(r)]
             if rings:
                 # One ring a polygon; more, a polygon each (as the map shows them).

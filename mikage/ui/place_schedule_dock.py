@@ -28,7 +28,7 @@ from ..core.esri import EsriError
 from ..core.request.model import bbox_of, jst_day
 from ..core.request.place_plans import (
     DAY_CHOICES, DAYS, MOST_PLACES, REQUEST, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next, span_of,
-    tally_text,
+    taken_text, tally_text,
 )
 from ..core.request.store import RequestStoreConfig, load_days, load_requests, load_shots_where, shot_days_where
 from ..qgis_io.geometry import from_wgs84, rings_geometry, to_wgs84
@@ -578,7 +578,8 @@ class PlaceScheduleDock(PluginDock):
         if not 0 <= index < len(self.lanes):
             return
         place = self.lanes[index].place
-        self.chosen_label.setText(f"{place.name}: {mark_name(mark)}（{mark.state}）")
+        taken = taken_text(mark.row)
+        self.chosen_label.setText(f"{place.name}: {mark_name(mark)}（{mark.state}" + (f"・{taken}" if taken else "") + "）")
         self.draw(mark, place)
 
     def draw(self, mark: Mark, place: Place) -> None:

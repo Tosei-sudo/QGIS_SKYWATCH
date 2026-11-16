@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from mikage.core.request.model import JST, ImagingRequest, day_bounds
 from mikage.core.request.place_plans import (
     HEAD, LABEL, REQUEST, ROW, Lane, Place, day_text, lanes_of, layout, mark_tip, marks_at, next_of, next_text, share_of,
-    sort_by_next, span_of, tally_text,
+    sort_by_next, span_of, taken_text, tally_text,
 )
 from mikage.core.request.store import HistoryRow, ShotRow
 
@@ -148,6 +148,27 @@ def test_next_and_the_order_by_it():
     asked = lanes_of([Place("c", points=[[139.85, 35.5]])], [], {}, [request("Q", TOKYO)], DAY, 3, now)[0]
     assert later.next.is_plan and not asked.next.is_plan
     assert [lane.place.name for lane in sort_by_next([a, asked, later, lanes[0]])] == ["x", "b", "c", "a"]
+
+
+def test_a_plan_taken_names_its_image_and_is_not_next():
+    # tsudo 2026-11-16: 「撮像済みになってるやつ、…せめて画像IDは表示してほしい」.
+    now = at(DAY, 12)
+    rows = [row("R-1", DAY, name="撮った", captured="撮像済み", image_id="IMG-42", adoption="採用"),
+            row("R-2", DAY, name="撮った（ID なし）", captured="撮像済み", adoption="採用"),
+            row("R-3", DAY, name="まだ", captured="未判定")]
+    areas = {"R-1": TOKYO, "R-2": TOKYO, "R-3": TOKYO}
+    place = Place("x", points=[[139.85, 35.5]])
+    [lane] = lanes_of([place], rows, {}, [], DAY, 3, now, areas=areas)
+    by_name = {m.row.name: m for m in lane.marks}
+    assert taken_text(by_name["撮った"].row) == "撮像済み 画像 IMG-42"
+    assert taken_text(by_name["撮った（ID なし）"].row) == "撮像済み"
+    assert taken_text(by_name["まだ"].row) == "" and taken_text(None) == ""
+    assert mark_tip(by_name["撮った"], place).splitlines()[0] == "撮った: 採用（撮像済み 画像 IMG-42）"
+    assert mark_tip(by_name["まだ"], place).splitlines()[0] == "まだ: 不明"
+    # Taken already: not what is next (of today's, without a time, the one still to be taken is).
+    assert lane.next.row.name == "まだ"
+    [done] = lanes_of([place], rows[:2], {}, [], DAY, 3, now, areas=areas)
+    assert done.next is None and next_text(done) == "予定なし"
 
 
 def test_where_the_marks_go_and_what_is_at_a_pixel():
