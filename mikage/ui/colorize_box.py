@@ -25,6 +25,7 @@ from qgis.core import QgsLayerTreeLayer, QgsProject, QgsRasterLayer
 from qgis.gui import QgsColorButton
 import json
 
+from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QRectF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter
 from qgis.PyQt.QtWidgets import (
@@ -127,6 +128,8 @@ class ColorizeBox(QGroupBox):
         self.setTitle(self.tr("着色（単バンド画像）"))
         self.say = say
         self.layer: Optional[QgsRasterLayer] = None
+        #: The layers the blend goes to (a group's rasters; else the layer).
+        self.layers: list = []
         #: The classes the form shows (None: a smooth scale).
         self.classes: Optional[dict] = None
         #: The value histogram of the layer, for the classes and their shares: (layer id, histogram).
@@ -261,6 +264,11 @@ class ColorizeBox(QGroupBox):
 
     # ---- the form ----
 
+    def set_targets(self, layers: list, group: bool) -> None:
+        """The layers the dock works on; for a group, two dates (a one-layer tool) are hidden."""
+        self.layers = list(layers)
+        self.pair_box.setVisible(not group)
+
     def show_layer(self, layer: Optional[QgsRasterLayer], color: Optional[dict]) -> None:
         """Shows the layer's colouring."""
         self.layer = layer
@@ -331,8 +339,11 @@ class ColorizeBox(QGroupBox):
         self.changed.emit()
 
     def _blend_changed(self, *_args) -> None:
-        if not self._loading and self.layer is not None:
-            set_blend(self.layer, self.blend.currentData())
+        if self._loading or self.layer is None:
+            return
+        for layer in self.layers or [self.layer]:
+            if not sip.isdeleted(layer) and paired_with(layer) is None:
+                set_blend(layer, self.blend.currentData())
 
     def _recolor(self, *_args) -> None:
         """A new scale or direction: classes take their colours from it again."""
@@ -376,8 +387,9 @@ class ColorizeBox(QGroupBox):
         self.blend.setCurrentIndex(0)
         self._loading = False
         self.classes = None
-        if self.layer is not None:
-            set_blend(self.layer, "normal")
+        for layer in self.layers or ([self.layer] if self.layer is not None else []):
+            if not sip.isdeleted(layer) and (layer is self.layer or paired_with(layer) is None):
+                set_blend(layer, "normal")
         self._apply()
         self.show_legend()
         self._show_lock()
