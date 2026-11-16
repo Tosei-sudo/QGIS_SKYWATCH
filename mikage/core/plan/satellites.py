@@ -182,6 +182,8 @@ class SatelliteSpec:
     #: 1 パスの撮像回数: the most shots of the satellite on one pass (half a revolution of one orbit direction;
     #: 改修案 10, G13); 0: not limited (only `minInterval` keeps them apart).
     shotsPerPass: int = 0
+    #: The outages that hit it (衛星の障害情報, core/plan/outages.py; set with outages.attach), whatever their time.
+    outages: tuple = ()
 
 
 def platform_key(sat: SatelliteSpec) -> str:

@@ -27,6 +27,11 @@ The systems' use time limits (軌道の使用時間, `useTime`, use_time.py) are
 kept on each day's passes, a pass crossing midnight with the shots the day
 before handed out on it (not those handed out before the run).
 
+Satellite outages (衛星の障害情報) attached to the satellites
+(outages.attach) leave out their passes (passes.find_passes) and give each
+day its stricter values (outages.on_day); requests held back for them are
+衛星の障害で見送り.
+
 An area too big for one shot shared out among satellites (分担) is one
 request taken, its shots rows of their systems. A 期間内1回 area whose
 day's shots take less than 95% of it (with what earlier days took) stays
@@ -41,10 +46,12 @@ n count when taken and are not counted when they found no room.
 from __future__ import annotations
 
 import dataclasses
+import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
+from ..plan.outages import OUTAGE, on_day
 from ..plan.satellites import SatelliteSpec
 from .covered import GOAL, Covered, subtracts
 from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
@@ -131,6 +138,8 @@ class DayResult:
     quota: int = 0
     #: Held back as the satellites that could take them would be used past their seconds a pass or a day (軌道の使用時間).
     use_time: int = 0
+    #: Held back as every satellite that could take them is hit by an outage then (衛星の障害).
+    outage: int = 0
     #: 期間内1回 areas handed out with less than 95% of them taken so far (the rest goes on to the next days).
     partial: int = 0
     expired: list = field(default_factory=list)
@@ -208,10 +217,14 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
     covered: dict = {}
     #: The uses of the day before's shots (a pass crossing midnight counts them).
     before: list = []
+    clock = passes.now if passes is not None and passes.now is not None else time.time() * 1000
+    every_sat = sats
     for i in range(max(1, min(MOST_DAYS, days))):
         if cancelled and cancelled():
             break
         day = start + timedelta(days=i)
+        # The satellites as they are that day (outages' stricter values; the same order, the passes' indices).
+        sats = on_day(every_sat, day, clock)
         day_clouds = clouds(day) if clouds else {}
         left = chances(ledger, day, day_clouds) if chances else None
         cands: list[Candidate] = gather(ledger, day, sats, day_clouds, missed if i == 0 else set(), covered, left)
@@ -255,6 +268,8 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 result.no_system += 1
             elif c.reason in (NO_PASS, GAP):
                 result.no_pass += 1
+            elif c.reason.startswith(OUTAGE):
+                result.outage += 1
             elif c.held and c.reason == c.held or c.reason == CLOUDY:
                 result.cloud += 1
         for same in times.values():
@@ -308,6 +323,7 @@ SUMMARY = (
     ("枠超過で見送り", lambda s: s.total("over")),
     ("年間上限で見送り", lambda s: s.total("quota")),
     ("使用時間の上限で見送り", lambda s: s.total("use_time")),
+    ("衛星の障害で見送り", lambda s: s.total("outage")),
     ("次のシステムへ回送", lambda s: s.total("spilled")),
     ("雲量で見送り", lambda s: s.total("cloud")),
     ("該当システムなし", lambda s: s.total("no_system")),

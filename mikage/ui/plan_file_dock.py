@@ -49,6 +49,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core import audit
 from ..core.catalog import CatalogConfig
 from ..core.esri import EsriError
+from ..core.plan.outages import attach, on_day, summary_text
 from ..core.plan.weather import fetch_clouds
 from ..core.request.chances import ahead_span, chances_of, wanted
 from ..core.request.covered import read_covered
@@ -60,7 +61,7 @@ from ..core.request.export import convert_priority, encoded, files_of, leftover_
 from ..core.request.follow import missed_ids
 from ..core.request.geometry import look_text, read_last_looks
 from ..core.request.groups import read_groups
-from ..core.request.model import jst_day, priority_text
+from ..core.request.model import day_bounds, jst_day, priority_text
 from ..core.request.passes import day_passes, find_passes
 from ..core.request.quota import QuotaData, read_quota_data
 from ..core.request.use_time import UseBook, read_other_uses
@@ -447,6 +448,13 @@ class PlanFileDock(PluginDock):
 
         def work(task):
             notes = []
+            # 衛星の障害情報 as they are now: each satellite (mode) carries those that hit it (their passes are left out),
+            # and the day's satellites their stricter values (outages.on_day; the same order, the passes' indices).
+            outages, problem = self.context.read_outages(client, task.isCanceled)
+            if problem:
+                notes.append(problem)
+            hit = attach(sats, outages)
+            day_sats = on_day(hit, day, now)
             requests = load_requests(client, store, token, task.isCanceled)
             groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
             if note:
@@ -470,7 +478,7 @@ class PlanFileDock(PluginDock):
             task.progress(60)
             forecasts = {}
             # Also for the requests missed and carried over to this day (they are candidates too).
-            places = forecast_places(requests, day, sats, missed_ids(history))
+            places = forecast_places(requests, day, day_sats, missed_ids(history))
             if places and forecast is not None:
                 try:
                     forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
@@ -480,7 +488,7 @@ class PlanFileDock(PluginDock):
                 notes.append("雲量予報なし（cloudForecast: false）")
             task.progress(70)
             # The satellites' passes over the day's requests, from their orbits (once; the hand's changes fit again on them).
-            passes = day_passes(requests, day, sats, now, task.isCanceled)
+            passes = day_passes(requests, day, hit, now, task.isCanceled)
             task.check()
             if passes.problems:
                 notes.append("TLE を読めない衛星は軌道なしで件数だけで詰める（" + "、".join(passes.problems[:3]) + "）")
@@ -489,7 +497,7 @@ class PlanFileDock(PluginDock):
             looked = wanted(requests, day, missed_ids(history)) if store.look_ahead_days > 0 else []
             if looked:
                 first, last = ahead_span(day, store.look_ahead_days)
-                ahead = find_passes(looked, first, last, sats, now, task.isCanceled)
+                ahead = find_passes(looked, first, last, hit, now, task.isCanceled)
                 task.check()
             # How each 定点 request's last image was taken: the passes like it first (改修案 5, geometry.py).
             last_looks = {}
@@ -513,11 +521,17 @@ class PlanFileDock(PluginDock):
                     others = read_other_uses(client, store, token, day, task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on with its own shots only, said so)
                     notes.append(f"前後の日の撮像の使用時間を読めず、この日の撮像だけで計算（{error}）")
-            return requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others
+            outage_line = summary_text(day_sats, *day_bounds(day), now)
+            if outage_line:
+                notes.insert(0, outage_line)
+            return (requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others,
+                    (day_sats, outages))
 
         def done(result):
             self.task = None
-            requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others = result
+            (requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others,
+             (sats, outages)) = result
+            self.context.set_outages(outages)
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))

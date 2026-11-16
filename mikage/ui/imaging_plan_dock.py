@@ -39,6 +39,7 @@ from ..core.plan.output import (
     natural_key, percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
 )
 from ..core.plan.moving import MAX_HORIZON, MAX_SHIPS, ShipState, plan_ships
+from ..core.plan.outages import attach, leave_out
 from ..core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs
 from ..core.plan.remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
 from ..core.plan.revisit import (
@@ -182,6 +183,8 @@ class ImagingPlanDock(PluginDock):
         self.on_reminder: Optional[Callable] = None
         self._build()
         context.configChanged.connect(self._config_changed)
+        # 衛星の障害情報 entered or read again: the satellites' marks (and their next plan) follow.
+        context.outagesChanged.connect(self._outages_changed)
         project = QgsProject.instance()
         project.layersAdded.connect(self._layers_changed)
         project.layersRemoved.connect(self._layers_changed)
@@ -581,7 +584,8 @@ class ImagingPlanDock(PluginDock):
                 sats = [replace(s, aliases=tuple(sorted(names.expand(s.name, s.id)))) for s in sats]
             task.progress(70)
             modes, more = load_sensor_modes(client, sensors, token_for, task.isCanceled)
-            return sats, modes, problems + more
+            outages, problem = self.context.read_outages(client, task.isCanceled)
+            return sats, modes, problems + more + ([problem] if problem else []), outages
 
         def done(result):
             self.loading_task = None
@@ -589,9 +593,11 @@ class ImagingPlanDock(PluginDock):
                 # The settings changed meanwhile (their satellites, defaults): read again; whoever waits is told then.
                 self.load_catalog(then, failed)
                 return
-            sats, modes, problems = result
-            self.catalog_sats = with_modes(sats, modes)
+            sats, modes, problems, outages = result
+            # Each mode with the outages that hit it (衛星の障害情報): marked in the list, its passes left out.
+            self.catalog_sats = attach(with_modes(sats, modes), outages)
             self._loaded = True
+            self.context.set_outages(outages)
             self.list_sats()
             n_modes = len(self.tree.choice.mode_names())
             text = self.tr("{label}: {n} 機").format(label=catalog.label, n=len(sats))
@@ -612,6 +618,15 @@ class ImagingPlanDock(PluginDock):
                 f(message)
 
         self.loading_task = run_task(self.tr("衛星カタログの読み込み"), work, done, not_read)
+
+    def _outages_changed(self) -> None:
+        """The outages known changed (entered, read again): the satellites carry them and the list shows them."""
+        if not self.catalog_sats:
+            return
+        attached = attach(self.catalog_sats, self.context.known_outages())
+        if any(a is not b for a, b in zip(attached, self.catalog_sats)):
+            self.catalog_sats = attached
+            self.list_sats()
 
     def pasted(self) -> list[SatelliteSpec]:
         return satellites_from_text(
@@ -949,13 +964,19 @@ class ImagingPlanDock(PluginDock):
         self.cancel()
         what = self.tr("{s} 機 × {t} 対象を計算中…").format(s=len(sats), t=len(targets))
         self.status.setText(what)
+        client = self.context.esri()
 
         def work(task):
             def progress(done: float) -> None:
                 task.check()
                 task.progress(done * 100)
 
-            return plan_access(sats, targets, options, progress)
+            # The outages as they are now (one just entered counts): their passes left out (衛星の障害情報).
+            outages, _problem = self.context.read_outages(client, task.isCanceled)
+            planned = attach(sats, outages)
+            result = plan_access(planned, targets, options, progress)
+            leave_out(result, planned, time.time() * 1000)
+            return result
 
         def done(result: PlanResult):
             if self.plan_task is not task:
@@ -1021,7 +1042,10 @@ class ImagingPlanDock(PluginDock):
                 task.check()
                 task.progress(done * 100)
 
-            return plan_ships(sats, ships, options, progress, task.isCanceled)
+            out = plan_ships(sats, ships, options, progress, task.isCanceled)
+            if not isinstance(out, str):
+                leave_out(out[1], sats, time.time() * 1000)
+            return out
 
         def done(out):
             if self.plan_task is not task:
@@ -1114,7 +1138,7 @@ class ImagingPlanDock(PluginDock):
             self.sort = ("time", False)
         self.render()
         result, sats, targets = plan["result"], plan["sats"], plan["targets"]
-        problems = describe_problems(result.problems, result.tooSoon)
+        problems = describe_problems(result.problems, result.tooSoon, result.outaged)
         if not result.opportunities:
             self.status.setText(self.tr(NO_OPPORTUNITY) + problems)
         elif pairing:

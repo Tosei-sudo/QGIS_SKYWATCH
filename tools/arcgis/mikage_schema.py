@@ -389,6 +389,28 @@ TABLES = (
         F("USER_NAME", "利用者名", "TEXT", 255, "user"),
         F("ROLE_NAME", "担当", "TEXT", 32, "role"),
     )),
+    Table("TBL_SATELLITE_OUTAGE", "衛星の障害情報", None, writable=True, setting="satelliteOutages", fields=(
+        F("OUTAGE_ID", "障害ID", "TEXT", 64, "id"),
+        F("SAT_NAME", "衛星名", "TEXT", 255, "satellite"),
+        F("SENSOR", "センサー", "TEXT", 255, "sensor"),
+        F("SENSOR_MODE", "センサーモード", "TEXT", 255, "mode"),
+        F("OUTAGE_REASON", "理由", "TEXT", 1000, "reason"),
+        F("START_TIME", "発生日時", "DATE", None, "start"),
+        F("EXPECTED_END", "復旧見込み", "DATE", None, "expected"),
+        F("RECOVERED_AT", "復旧日時", "DATE", None, "recovered"),
+        F("STOP_IMAGING", "撮像停止", "SHORT", None, "stop"),
+        F("NO_ASC_RIGHT", "昇交右不可", "SHORT", None, "noAscRight"),
+        F("NO_ASC_LEFT", "昇交左不可", "SHORT", None, "noAscLeft"),
+        F("NO_DESC_RIGHT", "降交右不可", "SHORT", None, "noDescRight"),
+        F("NO_DESC_LEFT", "降交左不可", "SHORT", None, "noDescLeft"),
+        F("LIMIT_OFF_NADIR", "オフナディア角の上限", "DOUBLE", None, "maxOffNadir"),
+        F("LIMIT_PER_DAY", "1日の撮像回数の上限", "LONG", None, "maxPerDay"),
+        F("LIMIT_SCENES_PER_PASS", "1パスのシーン数の上限", "LONG", None, "scenesPerPass"),
+        F("LIMIT_INTERVAL_MIN", "撮像間隔の下限", "DOUBLE", None, "minInterval"),
+        F("NO_NIGHT", "夜間不可", "SHORT", None, "noNight"),
+        F("OTHER_IMPACT", "その他の影響", "TEXT", 1000, "other"),
+        F("NOTE", "メモ", "TEXT", 4000, "note"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -411,6 +433,7 @@ INDEXES = {
     "TBL_INTEREST_POINT": ("OWNER_USER",),
     "TBL_INTEREST_AREA": ("OWNER_USER",),
     "TBL_USER_ROLE": ("USER_NAME",),
+    "TBL_SATELLITE_OUTAGE": ("OUTAGE_ID", "SAT_NAME"),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -506,6 +529,8 @@ def plugin_config(urls: dict) -> dict:
         config["interests"] = interests
     if has("TBL_USER_ROLE"):
         config["userRoles"] = urls["TBL_USER_ROLE"]
+    if has("TBL_SATELLITE_OUTAGE"):
+        config["satelliteOutages"] = urls["TBL_SATELLITE_OUTAGE"]
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

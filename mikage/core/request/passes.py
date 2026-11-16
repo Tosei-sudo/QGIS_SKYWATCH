@@ -16,15 +16,22 @@ day (昼: the sun at least 10° up; 夜: below the horizon; optical
 satellites only in daylight in any case) and the window of the day it is
 asked for. A satellite's `leadTime` (hours before a shot that it has to be
 ordered) leaves out the passes too soon to order, as in the imaging plan.
+
+A satellite's outages (衛星の障害情報, core/plan/outages.py: those attached to
+it) leave out the passes they hit at their moment (撮像停止, the direction, the
+angle, the night); those left out are kept (`Passes.blocked`) so that a request
+without a pass for them is told why.
 """
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable, Optional, Sequence
 
 from ..plan.access import Opportunity, PlanOptions, PlanTarget, plan_access, satrec_of
+from ..plan.outages import Outage, blocking
 from ..plan.orbit import Orbit, ecef_of, unit
 from ..plan.satellites import SatelliteSpec
 from ..plan.targets import MAX_POINTS, spread_out
@@ -62,11 +69,19 @@ class Passes:
     problems: list = field(default_factory=list)
     #: When it was worked out (ms), for lead times; None when not.
     now: Optional[float] = None
+    #: request id → the passes an outage left out: (satellite index, moment ms, the outage), in time order.
+    blocked: dict = field(default_factory=dict)
 
     def of(self, req: ImagingRequest, day: date, sat: Optional[int] = None) -> list[Opportunity]:
         """A request's opportunities on a day (within its window that day), of one satellite when given."""
         first, last = window_of(req, day)
         return [o for o in self.ops.get(req.id, ()) if first <= o.time <= last and (sat is None or o.satellite == sat)]
+
+    def blocked_on(self, req: ImagingRequest, day: date, sat: Optional[int] = None) -> list[Outage]:
+        """The outages that left out passes of a request on a day (of one satellite when given), each once."""
+        first, last = window_of(req, day)
+        found = [o for i, t, o in self.blocked.get(req.id, ()) if first <= t <= last and (sat is None or i == sat)]
+        return list(dict.fromkeys(found))
 
 
 def window_of(req: ImagingRequest, day: date) -> tuple[float, float]:
@@ -217,10 +232,15 @@ def _search(out: Passes, key: tuple, members: list, start: float, end: float, sa
                           pass_=pass_, side=side)
     result = plan_access(local, [out.targets[r.id] for r in reqs], options, progress)
     ables = [set(able) for _, able in members]
+    clock = now if now is not None else time.time() * 1000
     for op in result.opportunities:
         req = reqs[op.target]
         index = used[op.satellite]
         if index not in ables[op.target] or not req.start <= op.time <= req.end or not _keeps(req, sats[index], op, now):
+            continue
+        hit = blocking(sats[index], op.time, op.ascending, op.side, op.offNadir, op.sunElevation, clock)
+        if hit is not None:
+            out.blocked.setdefault(req.id, []).append((index, op.time, hit[0]))
             continue
         op.satellite = index
         out.ops[req.id].append(op)

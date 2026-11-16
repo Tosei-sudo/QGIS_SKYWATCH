@@ -14,6 +14,11 @@ was taken alone, carried others or went in another's shot (tsudo,
 2026-11-11, core/request/shot_view.py). Answers come from each system's result file
 (`requestExports[].resultFile`) or by hand; 要求外 plans from the file or
 by hand. core/request/adoption.py does the matching.
+
+A shot handed out that a satellite outage entered since hits (衛星の障害情報:
+撮像停止, its direction, angle or the night at its moment) is told in the
+list (「衛星の障害の影響あり」, the satellite in orange); nothing is changed:
+whether to hand it out again is the planner's (tsudo 2026-11-16, decision 4).
 """
 from __future__ import annotations
 
@@ -39,6 +44,8 @@ from ..core.request.adoption import (
     NOT_IN_FILE, Reading, answer_changes, link_window, manual_changes, manual_unrequested, match_answers, unrequested_rows,
 )
 from ..core.esri import EsriError
+from ..core.plan.names import plain
+from ..core.plan.outages import handed_hit
 from ..core.request.groups import read_groups
 from ..core.request.model import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
@@ -61,6 +68,9 @@ from .request_groups import GroupFilter
 
 COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "依頼者", "理由・メモ")
 _TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
+_SATELLITE = COLUMNS.index("衛星")
+#: A row a satellite outage hits (衛星の障害情報).
+OUTAGE_COLOR = "#c2410c"
 #: The shots' outlines on the map (dashed over the requests' areas).
 SHOT_COLOR = "#7c3aed"
 #: Each state's colour, on the list and the map.
@@ -145,6 +155,11 @@ class ScheduleDock(PluginDock):
         self._again.timeout.connect(self._read_again)
         self._build()
         context.configChanged.connect(self._config_changed)
+        #: 衛星の障害情報 as read with the day (and kept up to date), and the satellites known (the imaging plan's catalog,
+        #: set by the plugin) for their other names and series.
+        self.outages: list = []
+        self.satellites_known = lambda: []
+        context.outagesChanged.connect(self._outages_changed)
         self.visibilityChanged.connect(self._visibility)
         self._config_changed()
 
@@ -391,10 +406,13 @@ class ScheduleDock(PluginDock):
                 groups_of = {q.id: q.group for q in requests}
                 groups_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in groups_of})
             groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled) if read_table else None
-            return rows, missing, found, groups_of, groups, shots, problem
+            outages, _problem = self.context.read_outages(client, task.isCanceled)
+            return rows, missing, found, groups_of, groups, shots, problem, outages
 
         def done(result):
-            rows, missing, found, groups_of, groups, shots, problem = result
+            rows, missing, found, groups_of, groups, shots, problem, outages = result
+            self.outages = outages
+            self.context.set_outages(outages)
             self.rows, self._areas, self._ledger_groups, self.day = rows, found, groups_of, day
             self.shots, self.shot_problem = {s.shot_id: s for s in shots if s.shot_id}, problem
             if groups is not None and groups[0] is not None:
@@ -476,8 +494,37 @@ class ScheduleDock(PluginDock):
                 return False
         return True
 
+    def _outages_changed(self) -> None:
+        outages = self.context.known_outages()
+        if outages != self.outages:
+            self.outages = outages
+            if self._loaded:
+                self.render()
+
+    def outage_of(self, r: HistoryRow) -> Optional[tuple]:
+        """
+        The outage hitting a row handed out and not taken yet (its shot's moment, direction, angle; not one the
+        system turned down); None when none.
+        """
+        if not self.outages or r.result != "採用" or r.adoption == REJECTED or r.captured == "撮像済み" or not r.satellite:
+            return None
+        shot = self.shots.get(r.shot_id) if r.shot_id else None
+        spec = next((s for s in self.satellites_known() if plain(r.satellite) in (plain(s.name), plain(s.id))), None)
+        others = (spec.id, spec.series, *(spec.aliases or ())) if spec is not None else ()
+        center = None
+        if shot is not None and shot.rings and shot.rings[0]:
+            ring = shot.rings[0]
+            center = (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
+        sensor = shot.sensor if shot is not None else ((spec.sensor or "") if spec is not None else "")
+        mode = shot.mode if shot is not None else ((spec.mode or "") if spec is not None else "")
+        return handed_hit(self.outages, r.satellite, sensor, mode, others,
+                          (shot.pass_time if shot is not None and shot.pass_time is not None else r.planned_at),
+                          shot.orbit_dir if shot else "", shot.look_side if shot else "", shot.off_nadir if shot else None,
+                          center, _now_ms())
+
     def render(self) -> None:
         self.shown = [r for r in self.rows if self._passes(r)]
+        hit_count = 0
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in COLUMNS])
         chosen_row = -1
@@ -496,9 +543,20 @@ class ScheduleDock(PluginDock):
                 name += self.tr("（{n} 回目）").format(n=r.occurrence)
             if shares.get((r.request_id, r.day, r.occurrence), 0) > 1:
                 name += self.tr("（分担 {k}/{n}）").format(k=r.part, n=shares[(r.request_id, r.day, r.occurrence)])
+            hit = self.outage_of(r)
+            note = row_note(r)
+            if hit is not None:
+                hit_count += 1
+                note = self.tr("衛星の障害の影響あり（{w}）").format(w=hit[1]) + (f"。{note}" if note else "")
             items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
-                                                captured_text(r), r.requester, row_note(r))]
+                                                captured_text(r), r.requester, note)]
+            if hit is not None:
+                tip = self.tr("衛星の障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）").format(
+                    s=hit[0].status(_now_ms()), t=hit[0].short_text(_now_ms()))
+                for col in (_SATELLITE, _NOTE):
+                    items[col].setForeground(QBrush(QColor(OUTAGE_COLOR)))
+                    items[col].setToolTip(plain_tip(tip))
             tip = shot_tip(self.shots.get(r.shot_id)) if r.shot_id else ""
             if tip:
                 items[_SHOT].setToolTip(plain_tip(tip))
@@ -512,7 +570,7 @@ class ScheduleDock(PluginDock):
                 items[0].setToolTip(self.tr("システムの採否が分からない（画像が入れば採用になる）"))
             if r.image_id:
                 items[_TAKEN].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
-            if row_note(r):
+            if row_note(r) and hit is None:
                 items[_NOTE].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
             self.model.appendRow(items)
             if self.chosen is not None and r.object_id == self.chosen.object_id:
@@ -530,6 +588,8 @@ class ScheduleDock(PluginDock):
                     f="・".join(self.missing_fields))
             if self.shot_problem:
                 text += self.tr("。撮像の範囲を読めず（{m}）").format(m=self.shot_problem)
+            if hit_count:
+                text += self.tr("。衛星の障害の影響あり {n} 件（予定は変えない。出し直すかは担当が判断）").format(n=hit_count)
             self.status.setText(text)
         self.draw()
         self._update_buttons()

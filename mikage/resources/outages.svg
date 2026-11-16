@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 衛星の障害情報: a satellite (body and two panels) with a warning sign -->
+  <rect x="9" y="9" width="8" height="8" rx="1" fill="#e2e8f0" stroke="#1d4ed8" stroke-width="2" transform="rotate(45 13 13)"/>
+  <rect x="2" y="2" width="6" height="4" fill="#93c5fd" stroke="#1d4ed8" stroke-width="1.5" transform="rotate(45 5 4)"/>
+  <rect x="18" y="20" width="6" height="4" fill="#93c5fd" stroke="#1d4ed8" stroke-width="1.5" transform="rotate(45 21 22)"/>
+  <path d="M23 13 L31 28 L15 28 Z" fill="#f59e0b" stroke="#c2410c" stroke-width="1.5" stroke-linejoin="round"/>
+  <line x1="23" y1="18" x2="23" y2="23" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="23" cy="25.6" r="1.1" fill="#fff"/>
+</svg>

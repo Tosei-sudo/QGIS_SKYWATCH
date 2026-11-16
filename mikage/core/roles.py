@@ -45,7 +45,7 @@ class Role:
 
 #: The roles, in the order they are offered.
 ROLES: tuple[Role, ...] = (
-    Role("PLANNER", "撮像計画の担当", frozenset({REQUEST, PLAN}), "撮像計画・撮像依頼・計画ファイルの出力と採否の入力・年間撮像上限"),
+    Role("PLANNER", "撮像計画の担当", frozenset({REQUEST, PLAN}), "撮像計画・撮像依頼・計画ファイルの出力と採否の入力・年間撮像上限・衛星の障害情報"),
     Role("REQUESTER", "撮像を依頼する人", frozenset({REQUEST}), "撮像依頼の登録と、撮像予定（採否）の確認"),
     Role("OBSERVER", "観測記録の担当", frozenset({OBSERVE}), "観測記録の記録・通報・分担・引き継ぎ・分類体系の編集・AI結果の取り込み"),
     Role("INTERPRETER", "画像判読", frozenset({OBSERVE}), "画像補正・影から高さ・スペクトルで判読して観測記録へ"),
@@ -63,6 +63,9 @@ FEATURES: dict[str, frozenset] = {
     # 撮像計画・撮像依頼
     "撮像計画ファイル出力": frozenset({PLAN}),
     "年間撮像上限…": frozenset({PLAN}),
+    #: 衛星の障害情報: the list for those who ask for pictures too (why theirs wait); 新規・編集・復旧・削除 for those who plan.
+    "衛星の障害情報…": frozenset({REQUEST, PLAN}),
+    "outages.edit": frozenset({PLAN}),
     #: 撮像予定: 採用・不採用・不明に戻す・結果ファイルの取り込み・要求外を追加・削除.
     "schedule.answer": frozenset({PLAN}),
     #: 撮像依頼: 新規・編集・削除・一括編集・レイヤーから取り込み, and 「臨時依頼にする」 of the plans.

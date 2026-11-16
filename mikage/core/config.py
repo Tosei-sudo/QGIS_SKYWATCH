@@ -33,6 +33,7 @@ from .obs.assignments import assignment_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.names import AliasTableConfig, alias_tables_of
+from .plan.outages import satellite_outages_of
 from .plan.modes import SensorCatalogConfig, sensor_catalog_of
 from .plan.satellites import GroundStation, SatelliteCatalogConfig, ground_stations_of, satellite_catalog_of
 from .plan.weather import DEFAULT_CLOUD_FORECAST, CloudForecastConfig, cloud_forecast_of
@@ -51,7 +52,7 @@ from .shape_receiver import DEFAULT_RECEIVER, ReceiverSettings, receiver_setting
 
 #: The keys this plugin reads.
 KEYS = (
-    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "groundStations", "cloudForecast",
+    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "satelliteOutages", "groundStations", "cloudForecast",
     "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
@@ -75,6 +76,8 @@ class PluginConfig:
     sensor_catalogs: list[SensorCatalogConfig] = field(default_factory=list)
     #: `satelliteAliases`: Esri tables of satellites' other names (the image catalog's 「WV03」 for 「WorldView-3」).
     satellite_aliases: list[AliasTableConfig] = field(default_factory=list)
+    #: `satelliteOutages`: the Esri table of satellite outages (衛星の障害情報, core/plan/outages.py); None for none.
+    satellite_outages: Optional[EsriSource] = None
     #: None hides the choice.
     cloud_forecast: Optional[CloudForecastConfig] = DEFAULT_CLOUD_FORECAST
     ground_stations: list[GroundStation] = field(default_factory=list)
@@ -281,6 +284,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     config.sensor_catalogs = listed("sensorCatalogs", sensor_catalog_of)
     if "satelliteAliases" in value:
         config.satellite_aliases = alias_tables_of(value["satelliteAliases"], problems)
+    if "satelliteOutages" in value:
+        config.satellite_outages = satellite_outages_of(value["satelliteOutages"], problems)
     if "cloudForecast" in value:
         config.cloud_forecast = cloud_forecast_of(value["cloudForecast"], problems)
     if "groundStations" in value:
