@@ -64,6 +64,7 @@ from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
+from .check_filter import CheckFilter
 from .request_groups import GroupFilter
 
 COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由・メモ")
@@ -77,6 +78,8 @@ SHOT_COLOR = "#7c3aed"
 STATE_COLORS = {PLANNED: "#16a34a", UNREQUESTED: "#7c3aed", AWAITING: "#2563eb", DECLINED: "#dc2626", HELD_BACK: "#9ca3af"}
 #: The rows 「計画に入ったもの」 (what will be taken).
 IN_PLAN = (PLANNED, UNREQUESTED)
+#: The states shown until others are chosen: all but 見送り (not handed out that day).
+NOT_HELD_BACK = tuple(s for s in STATES if s != HELD_BACK)
 
 
 def _now_ms() -> float:
@@ -189,11 +192,13 @@ class ScheduleDock(PluginDock):
         filters = FlowLayout()
         self.system_filter = QComboBox()
         self.system_filter.setToolTip(self.tr("このシステムの計画だけを表示"))
-        self.state_filter = QComboBox()
-        self.state_filter.addItem(self.tr("すべての状態"), None)
-        self.state_filter.addItem(self.tr("計画に入ったもの（採用・要求外）"), "plan")
-        for s in STATES:
-            self.state_filter.addItem(s, s)
+        # 状態 and 依頼グループ: check boxes, several at once (e.g. 採用 and 不採用 side by side). Unless chosen before:
+        # all but 見送り (tsudo, 2026-11-16: 「初期値を、見送り以外にしてほしい」).
+        self.state_filter = CheckFilter(
+            self.tr("すべての状態"), [(s, s, "", STATE_COLORS[s]) for s in STATES],
+            presets=[(self.tr("見送り以外"), NOT_HELD_BACK), (self.tr("計画に入ったもの（採用・要求外）"), IN_PLAN)],
+            key="schedule/states", default=NOT_HELD_BACK,
+            tip=self.tr("この状態の計画だけを表示（チェックしたもののどれか）。次回も同じ選択"))
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
         self.search.setPlaceholderText(self.tr("名称・番号・依頼者・グループ・衛星・画像ID"))
@@ -201,8 +206,10 @@ class ScheduleDock(PluginDock):
         for w in (self.system_filter, self.state_filter, self.group_filter):
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(14)
-            w.currentIndexChanged.connect(lambda _i: self.render())
             filters.addWidget(w)
+        self.system_filter.currentIndexChanged.connect(lambda _i: self.render())
+        self.state_filter.changed.connect(self.render)
+        self.group_filter.changed.connect(self.render)
         self.search.textChanged.connect(lambda _t: self.render())
         self.search.setMinimumWidth(200)
         filters.addWidget(self.search)
@@ -481,15 +488,12 @@ class ScheduleDock(PluginDock):
         return row.group or self._ledger_groups.get(row.request_id, "")
 
     def _passes(self, row: HistoryRow) -> bool:
-        system, state = self.system_filter.currentData(), self.state_filter.currentData()
+        system = self.system_filter.currentData()
         if system and row.system != system:
             return False
         if not self.group_filter.passes(self.group_of(row)):
             return False
-        s = row_state(row)
-        if state == "plan" and s not in IN_PLAN:
-            return False
-        if state and state != "plan" and s != state:
+        if not self.state_filter.passes(row_state(row)):
             return False
         words = self.search.text().lower().split()
         if words:

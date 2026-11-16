@@ -107,6 +107,10 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
     dock.show()
     assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
     assert dock.day == today.isoformat() and len(dock.rows) == 3
+    # Unless chosen otherwise, all but 見送り (tsudo, 2026-11-16: 「初期値を、見送り以外にしてほしい」).
+    assert dock.state_filter.text() == "見送り以外" and dock.state_filter.chosen() == ["採用", "不明", "不採用", "要求外"]
+    assert states(dock) == {("東京湾", "SYS-A"): "不明", ("大阪湾", "SYS-B"): "不明"}
+    dock.state_filter.choose([])
     assert states(dock) == {("横浜", ""): "見送り", ("東京湾", "SYS-A"): "不明", ("大阪湾", "SYS-B"): "不明"}
     assert dock.status.text() == f"{today.isoformat()}: 計画 0・不明 2・見送り 1"
     # Drawn on the map in the state's colour (the held one, written without an area, with the ledger's).
@@ -151,9 +155,13 @@ def test_the_days_plan_answered_by_hand_and_by_file(plugin):
 
     # The state filter, and the words.
     dock.system_filter.setCurrentIndex(0)
-    dock.state_filter.setCurrentIndex(dock.state_filter.findData("plan"))
+    plan = dock.state_filter
+    plan.choose(["採用", "要求外"])
     assert sorted(r.name for r in dock.shown) == ["定常 2", "定常 東京"]
-    dock.state_filter.setCurrentIndex(0)
+    # The preset's name in the box; kept for next time.
+    assert plan.text() == "計画に入ったもの（採用・要求外）" and json.loads(settings._get("schedule/states")) == ["採用", "要求外"]
+    plan.choose([])
+    assert plan.text() == "すべての状態" and settings._get("schedule/states") == ""
     dock.search.setText("大阪")
     assert [r.name for r in dock.shown] == ["大阪湾"]
     dock.search.clear()
@@ -251,6 +259,7 @@ def test_an_old_history_table_says_what_it_lacks(plugin, monkeypatch):
     assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
     assert "属性 ADOPTION・ADOPTION_REASON・PLANNED_AT・EXTERNAL_ID・ADOPTION_SOURCE がない" in dock.status.text()
     assert not dock.import_button.isEnabled() and not dock.add_button.isEnabled()
+    dock.state_filter.choose([])
     dock.table.selectRow(0)
     assert not dock.adopt_button.isEnabled()
     # Drawn from the ledger's areas.
@@ -307,6 +316,7 @@ def test_the_image_of_a_plan_taken_is_shown(plugin):
     dock = p.api.schedule
     dock.show()
     assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    dock.state_filter.choose([])
     column = COLUMNS.index("画像ID")
     images = {r.name: dock.model.item(i, column).text() for i, r in enumerate(dock.shown)}
     assert images == {"東京湾": "IMG-42", "大阪湾": "", "横浜": ""}

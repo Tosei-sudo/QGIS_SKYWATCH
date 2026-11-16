@@ -227,9 +227,9 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     daily.system_filter.setCurrentIndex(daily.system_filter.findData("SYS-B"))
     assert listed() == ["大阪湾"]
     daily.system_filter.setCurrentIndex(0)
-    daily.result_filter.setCurrentIndex(daily.result_filter.findData("見送り"))
+    daily.result_filter.choose("見送り")
     assert listed() == ["呉"]
-    daily.result_filter.setCurrentIndex(0)
+    daily.result_filter.choose([])
     daily.search.setText("大阪")
     assert listed() == ["大阪湾"]
     daily.search.setText("")
@@ -422,8 +422,12 @@ def test_plan_results_against_the_catalog(plugin):
     assert steps == {"R-1": "完了", "R-2": "次回の計算で持ち越し・繰り上げ候補"}
     saved = {f["attributes"]["REQ_ID"]: f["attributes"] for f in ledger.rows}
     assert (saved["R-1"]["STATUS"], saved["R-1"]["BOOST"]) == ("完了", 0)
-    dialog.shown.setCurrentText("未撮像")
+    dialog.shown.choose("未撮像")
     assert dialog.model.rowCount() == 1
+    # Several at once.
+    dialog.shown.choose(["未撮像", "撮像済み"])
+    assert dialog.model.rowCount() == 2
+    dialog.shown.choose(["未撮像"])
 
     # By hand: 呉 was in fact imaged (the catalog is late).
     dialog.table.selectRow(0)

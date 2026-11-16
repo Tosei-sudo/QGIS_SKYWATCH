@@ -18,7 +18,7 @@ from typing import Optional
 from qgis.PyQt.QtCore import QDate, Qt
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QPushButton,
+    QAbstractItemView, QDateEdit, QDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QPushButton,
     QTableView, QVBoxLayout,
 )
 
@@ -28,6 +28,7 @@ from ..core.request.model import jst_day
 from ..core.request.store import history_where, load_history, load_requests
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
+from .check_filter import CheckFilter
 from .fit import fit_text
 
 COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先")
@@ -77,9 +78,11 @@ class PlanResultsDialog(QDialog):
         top.addWidget(self.first)
         top.addWidget(QLabel("〜"))
         top.addWidget(self.last)
-        self.shown = QComboBox()
-        self.shown.addItems([self.tr(s) for s in SHOWN])
-        self.shown.currentIndexChanged.connect(lambda _=None: self.render())
+        # 撮像の状態: check boxes, several at once (e.g. 未判定 and 未撮像).
+        self.shown = CheckFilter(self.tr("すべての状態"), [(self.tr(s), s, "", COLORS[s]) for s in SHOWN[1:]],
+                                 tip=self.tr("この撮像の状態の行だけを表示（チェックしたもののどれか）"))
+        self.shown.setMinimumContentsLength(10)
+        self.shown.changed.connect(lambda: self.render())
         top.addWidget(self.shown)
         self.run_button = QPushButton(self.tr("照合"))
         self.run_button.setToolTip(self.tr("未判定の依頼を画像カタログと照合し、出力履歴と台帳に保存"))
@@ -207,9 +210,8 @@ class PlanResultsDialog(QDialog):
         self.model.setHorizontalHeaderLabels([self.tr(c) for c in COLUMNS])
         first, last = self.span()
         handed = [r for r in in_days(self.history, first, last) if r.result == "採用"]
-        shown = SHOWN[self.shown.currentIndex()] if self.shown.currentIndex() >= 0 else SHOWN[0]
         today = jst_day(_now_ms())
-        self.rows = [r for r in reversed(handed) if shown == "すべて" or r.captured == shown]
+        self.rows = [r for r in reversed(handed) if self.shown.passes(r.captured)]
         # Areas too big for one shot handed out in several shots (分担): each row tells which shot it is.
         shares: dict = {}
         for r in handed:
