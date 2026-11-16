@@ -26,18 +26,24 @@ from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QFrame, QLabel, QPushButto
 
 from ..core.esri import EsriError
 from ..core.request.model import bbox_of, jst_day
+from ..core.request.groups import read_groups
 from ..core.request.place_plans import (
-    DAY_CHOICES, DAYS, MOST_PLACES, REQUEST, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next, span_of,
-    taken_text, tally_text,
+    DAY_CHOICES, DAYS, KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next,
+    span_of, taken_text, tally_text,
 )
-from ..core.request.store import RequestStoreConfig, load_days, load_requests, load_shots_where, shot_days_where
+from ..core.request.store import (
+    AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, load_days, load_requests, load_shots_where,
+    shot_days_where,
+)
 from ..qgis_io.geometry import from_wgs84, rings_geometry, to_wgs84
 from ..qgis_io.tasks import run_task
 from ..qgis_io import settings
+from .check_filter import CheckFilter
 from .docks import PluginDock, plain_label
 from .flow_layout import FlowLayout
 from .place_timeline import COLORS, PlaceTimeline
 from .plan_overlay import PlanOverlay
+from .request_groups import GroupFilter
 from .schedule_dock import SHOT_COLOR
 
 try:
@@ -158,6 +164,8 @@ class PlaceScheduleDock(PluginDock):
         self.rows: list = []
         self.shots: dict = {}
         self.requests: list = []
+        #: The 依頼グループ of the store's table (core/request/groups.py).
+        self.groups: list = []
         self.first = jst_day(_now_ms())
         self.read_days = 0
         self.shot_problem = ""
@@ -233,11 +241,23 @@ class PlaceScheduleDock(PluginDock):
         self.days_choice.setCurrentIndex(index if index >= 0 else self.days_choice.findData(DAYS))
         self.days_choice.currentIndexChanged.connect(self._days_chosen)
         options.addWidget(self.days_choice)
-        self.not_taken = QCheckBox(self.tr("不採用・見送りも"))
-        self.not_taken.setToolTip(self.tr("システムが採用しなかった計画と、出さなかった（見送った）依頼も出す"))
-        self.not_taken.setChecked(settings._get("placeSchedule/notTaken") == "1")
-        self.not_taken.toggled.connect(lambda on: (settings._set("placeSchedule/notTaken", "1" if on else "0"), self.refit()))
-        options.addWidget(self.not_taken)
+        # 状態 and 依頼グループ: check boxes, several at once. Unless chosen: all but 見送り (tsudo, 2026-11-16:
+        # 「初期値を、見送り以外にしてほしい」), or all of them when 「不採用・見送りも」 (the check box before,
+        # placeSchedule/notTaken) was ticked.
+        names = {PLANNED: "採用", UNREQUESTED: "要求外", AWAITING: "不明", DECLINED: "不採用", HELD_BACK: "見送り",
+                 REQUEST: "依頼の日（計画前）"}
+        tips = {UNREQUESTED: "システムの定常の計画", AWAITING: "採否の分からない計画", DECLINED: "システムが採用しなかった計画",
+                HELD_BACK: "出さなかった（見送った）依頼", REQUEST: "有効な依頼の、まだ計画のない日"}
+        self.state_filter = CheckFilter(
+            self.tr("すべての状態"), [(self.tr(names[k]), k, self.tr(tips.get(k, "")), COLORS[k]) for k in KINDS],
+            presets=[(self.tr("見送り以外"), NOT_HELD_BACK), (self.tr("不採用・見送りを除く"), SHOWN)], key="placeSchedule/states",
+            default=[] if settings._get("placeSchedule/notTaken") == "1" else list(NOT_HELD_BACK),
+            tip=self.tr("この状態の計画（と依頼の日）だけを出す（チェックしたもののどれか）。次回も同じ選択"))
+        self.state_filter.changed.connect(self.refit)
+        options.addWidget(self.state_filter)
+        self.group_filter = GroupFilter("place_schedule")
+        self.group_filter.changed.connect(self.refit)
+        options.addWidget(self.group_filter)
         self.by_next = QCheckBox(self.tr("次が早い順"))
         self.by_next.setToolTip(self.tr("次の計画が早い地点を上に（計画がなく依頼だけの地点、予定なしの地点はその下）"))
         self.by_next.setChecked(settings._get("placeSchedule/byNext") == "1")
@@ -304,6 +324,8 @@ class PlaceScheduleDock(PluginDock):
 
     def _forget(self) -> None:
         self.rows, self.shots, self.requests, self.read_days, self.shot_problem = [], {}, [], 0, ""
+        self.groups = []
+        self.group_filter.set_groups([], ())
         self._loaded = False
         self.refit()
 
@@ -374,12 +396,16 @@ class PlaceScheduleDock(PluginDock):
                     # The requests' rows matter most: shown without the shots.
                     problem = str(error)
             requests = load_requests(client, store, token, task.isCanceled)
-            return rows, shots, requests, problem
+            groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            return rows, shots, requests, problem, groups
 
         def done(result):
             self.task = None
-            rows, shots, requests, problem = result
+            rows, shots, requests, problem, groups = result
             self.rows, self.requests, self.shot_problem = rows, requests, problem
+            if groups[0] is not None:
+                self.groups = groups[0]
+            self.group_filter.set_groups(self.groups, [r.group for r in rows] + [q.group for q in requests])
             self.shots = {s.shot_id: s for s in shots if s.shot_id}
             self.first, self.read_days, self._loaded = first, n, True
             self._update_buttons()
@@ -519,8 +545,11 @@ class PlaceScheduleDock(PluginDock):
         n = min(self.days(), self.read_days) if self._loaded else self.days()
         if self._loaded and places:
             areas = {q.id: q.rings for q in self.requests}
+            groups = {q.id: q.group for q in self.requests}
             lanes = lanes_of(places, self.rows, self.shots, self.requests, self.first, n, now, areas=areas,
-                             not_taken=self.not_taken.isChecked(), share=GeometryShares())
+                             states=self.state_filter.chosen() or KINDS,
+                             row_ok=lambda r: self.group_filter.passes(r.group or groups.get(r.request_id, "")),
+                             request_ok=lambda q: self.group_filter.passes(q.group), share=GeometryShares())
         else:
             lanes = [Lane(p) for p in places] if self._loaded else []
         self.lanes = sort_by_next(lanes) if self.by_next.isChecked() else lanes

@@ -20,6 +20,7 @@ from qgis.PyQt.QtCore import Qt  # noqa: E402
 from qgis.PyQt.QtWidgets import QMenu  # noqa: E402
 
 from mikage.core.esri import EsriClient  # noqa: E402
+from mikage.core.request.groups import NO_GROUP  # noqa: E402
 from mikage.core.request.model import JST, jst_day  # noqa: E402
 from mikage.core.request.place_plans import HEAD, ROW, Place, share_of  # noqa: E402
 from mikage.core.request.store import DEFAULT_HISTORY_FIELDS, DEFAULT_REQUEST_FIELDS, DEFAULT_SHOT_FIELDS, HistoryRow, history_attributes  # noqa: E402
@@ -137,11 +138,29 @@ def test_the_plans_ahead_of_points_clicked_and_a_layer_s_features(plugin):
     assert lane.place.name == "地点 1" and "緯度 35.50000・経度 139.85000" in dock.timeline.tip_at(20, HEAD + 5)
     assert lane.next.row.name == "東京湾" and dock.timeline.lay.labels[0][2].endswith("10:30 採用・ASNARO-2")
     plans = [(m.state, m.row.name) for m in lane.marks if m.is_plan]
-    assert plans == [("採用", "東京湾"), ("要求外", "定常 東京")]
-    # 不採用 only when asked.
-    dock.not_taken.setChecked(True)
+    # Unless chosen otherwise, all but 見送り (tsudo, 2026-11-16): 不採用 too.
+    assert plans == [("採用", "東京湾"), ("要求外", "定常 東京"), ("不採用", "東京湾")]
+    assert dock.state_filter.text() == "見送り以外"
+    # The states ticked in the filter, several at once (a preset: those that will be taken, and the requests' days).
+    dock.state_filter.choose(dock.state_filter.presets[1][1])
+    assert dock.state_filter.text() == "不採用・見送りを除く"
+    assert [(m.state, m.row.name) for m in dock.lanes[0].marks if m.is_plan] == [("採用", "東京湾"), ("要求外", "定常 東京")]
+    dock.state_filter.choose(["採用", "不採用"])
+    assert [(m.state, m.row.name) for m in dock.lanes[0].marks if m.is_plan] == [("採用", "東京湾"), ("不採用", "東京湾")]
+    # Without 依頼の日 ticked, no request's day either.
+    assert all(m.is_plan for m in dock.lanes[0].marks)
+    assert json.loads(settings._get("placeSchedule/states")) == ["採用", "不採用"]
+    dock.state_filter.choose([])
     assert ("不採用", "東京湾") in [(m.state, m.row.name) for m in dock.lanes[0].marks if m.is_plan]
-    dock.not_taken.setChecked(False)
+    dock.state_filter.choose(dock.state_filter.presets[1][1])
+    # The 依頼グループ filter: hidden without any group; one chosen leaves out the rows and requests of none.
+    assert dock.group_filter.isHidden()
+    count = len(dock.lanes[0].marks)
+    dock.group_filter.choose("第1班")
+    assert dock.lanes[0].marks == [] and dock.group_filter.isVisibleTo(dock)
+    dock.group_filter.choose(["第1班", NO_GROUP])
+    assert len(dock.lanes[0].marks) == count
+    dock.group_filter.choose([])
     # The requests' days: R-1 (no row today) and R-3 on Mondays; R-4 is stopped.
     asked = {m.day: sorted(q.id for q in m.requests) for m in dock.lanes[0].marks if not m.is_plan}
     assert asked[today.isoformat()][0] == "R-1" and "R-4" not in {i for ids in asked.values() for i in ids}

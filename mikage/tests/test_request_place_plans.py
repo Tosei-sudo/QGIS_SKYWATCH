@@ -101,6 +101,17 @@ def test_the_plans_ahead_of_each_place():
     # Asked: 不採用 and 見送り too (not next).
     shown = lanes_of([place], rows, shots, requests, DAY, 7, now, areas=areas, not_taken=True)[0]
     assert {m.row.name for m in shown.marks if m.is_plan} >= {"東京 4", "東京 5"} and shown.next.row.name == "東京湾"
+    # The states ticked (2026-11-16): only 不採用 and 見送り, no request's day (依頼 not ticked), nothing next.
+    shown = lanes_of([place], rows, shots, requests, DAY, 7, now, areas=areas, states=("不採用", "見送り"))[0]
+    assert {m.state for m in shown.marks} == {"不採用", "見送り"} and shown.next is None
+    # The requests' days only; their days with a row (any state, shown or not) still are not 依頼.
+    shown = lanes_of([place], rows, shots, requests, DAY, 7, now, areas=areas, states=(REQUEST,))[0]
+    assert [m.state for m in shown.marks] == [REQUEST] * 7 and [q.id for q in shown.marks[4].requests] == ["R-1", "R-2", "R-3"]
+    # The rows and requests a group filter passes.
+    shown = lanes_of([place], rows, shots, requests, DAY, 7, now, areas=areas, row_ok=lambda r: r.name == "東京湾",
+                     request_ok=lambda q: q.id == "R-1")[0]
+    assert {m.row.name for m in shown.marks if m.is_plan} == {"東京湾"}
+    assert {q.id for m in shown.marks if not m.is_plan for q in m.requests} == {"R-1"}
     # The tooltips say what, when and who.
     tip = mark_tip(plans[1], place)
     assert tip.splitlines()[:3] == ["東京湾: 採用", "11/15(日) 10:32（システムの回答）", "SYS-A / ASNARO-2"]

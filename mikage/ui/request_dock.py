@@ -35,6 +35,7 @@ from ..qgis_io.tasks import run_task
 from . import last_inputs
 from .docks import PluginDock, plain_label, plain_tip
 from .flow_layout import FlowLayout
+from .check_filter import CheckFilter
 from .list_views import ListViews
 from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT, GroupFilter
@@ -94,12 +95,15 @@ class RequestDock(PluginDock):
         top.addWidget(self.store_choice)
         self.category_filter = QComboBox()
         self.category_filter.addItems([self.tr("すべての区分"), "定点", "臨時"])
-        self.status_filter = QComboBox()
-        self.status_filter.addItems([self.tr("すべての状態"), "有効", "停止", "完了"])
+        # 状態 and 依頼グループ: check boxes, several at once (rows of any of those ticked shown).
+        self.status_filter = CheckFilter(self.tr("すべての状態"), [(s, s) for s in STATUSES], key="requests/status",
+                                         tip=self.tr("この状態の依頼だけを表示（チェックしたもののどれか）。次回も同じ選択"))
         self.group_filter = GroupFilter("requests")
+        self.category_filter.currentIndexChanged.connect(lambda _: self.render())
         for c in (self.category_filter, self.status_filter, self.group_filter):
-            c.currentIndexChanged.connect(lambda _: self.render())
             top.addWidget(c)
+        for c in (self.status_filter, self.group_filter):
+            c.changed.connect(self.render)
         self.body.addLayout(top)
         # Request names (others' text) and the services' messages: shown as written, never as HTML.
         self.status = plain_label(QLabel())
@@ -262,9 +266,8 @@ class RequestDock(PluginDock):
         # Requests put in from elsewhere (the 「撮像計画ファイル出力」 dock's read): their groups listed too.
         self.group_filter.set_groups(self.groups, (r.group for r in self.requests), force=False)
         cat = self.category_filter.currentText()
-        st = self.status_filter.currentText()
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
-                      and (self.status_filter.currentIndex() == 0 or r.status == st) and self.group_filter.passes(r.group)]
+                      and self.status_filter.passes(r.status) and self.group_filter.passes(r.group)]
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間",
                                                                    "優先度", "種別", "状態")])

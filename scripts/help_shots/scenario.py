@@ -312,7 +312,7 @@ def flow_request():
     fit_right(canvas, *MINE_AREA, strip=PLAN_MAP, border=70)
     yield lambda: requests.store is not None and requests.task is None and bool(requests.requests)
     yield 1500
-    requests.group_filter.setCurrentIndex(max(0, requests.group_filter.findText("自分のグループ")))
+    requests.group_filter.choose("*mine*")  # 自分のグループ (core/request/groups.MINE)
     yield 800
     quiet_bar()
     button = toolbar_button("撮像依頼")
@@ -518,7 +518,7 @@ def flow_check():
     yield lambda: schedule.store is not None
     schedule.set_day(tomorrow().toPyDate())
     yield lambda: schedule.task is None
-    schedule.group_filter.setCurrentIndex(max(0, schedule.group_filter.findText("自分のグループ")))
+    schedule.group_filter.choose("*mine*")  # 自分のグループ (core/request/groups.MINE)
     yield 1000
     mine = [i for i, r in enumerate(schedule.shown) if r.name == MINE]
     if mine:

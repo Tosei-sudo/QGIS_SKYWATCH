@@ -89,7 +89,8 @@ def names(dock):
 
 
 def choices(box):
-    return [(box.itemText(i), box.itemData(i)) for i in range(box.count())]
+    """The filter's entries: 「すべてのグループ」 (nothing ticked), then the values to tick."""
+    return [(box.all_text, None)] + box.items()
 
 
 def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
@@ -117,7 +118,25 @@ def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
     box.choose("旧体制")
     assert names(dock) == ["呉"]
     # Kept in the list's 「ビュー」 too.
-    assert dock.views.state()["filters"]["group"] == {"data": "旧体制"}
+    assert dock.views.state()["filters"]["group"] == {"checked": ["旧体制"]}
+    # Several groups at once (2026-11-16): any of them; kept as a list, also in a view.
+    box.choose(["第2班", NO_GROUP])
+    assert names(dock) == ["大阪湾", "横浜"] and box.text() == "第2班・グループなし"
+    assert json.loads(settings.group_filter("requests")) == ["第2班", NO_GROUP]
+    assert dock.views.state()["filters"]["group"] == {"checked": ["第2班", NO_GROUP]}
+    box.toggle(MINE)
+    assert names(dock) == ["大阪湾", "東京湾", "横浜"] and box.chosen() == [MINE, "第2班", NO_GROUP]
+    # A view saved by the single-choice box (before) still applies.
+    dock.views.apply({"filters": {"group": {"data": "第1班"}, "status": {"text": "すべての状態"}}})
+    assert names(dock) == ["東京湾"]
+    dock.views.apply({"filters": {"group": {"text": "すべてのグループ"}}})
+    assert len(dock.shown) == 4
+    # The status filter too: 停止 and 完了 together.
+    dock.status_filter.choose(["停止", "完了"])
+    assert dock.shown == []
+    dock.status_filter.choose(["有効", "停止"])
+    assert len(dock.shown) == 4 and json.loads(settings._get("requests/status")) == ["有効", "停止"]
+    dock.status_filter.choose([])
     box.choose(None)
     assert len(dock.shown) == 4 and settings.group_filter("requests") == ""
 
@@ -166,12 +185,18 @@ def test_the_day_and_the_schedule_filter_by_group(plugin):
     daily = p.api.plan_files
     daily.show()
     daily.group_filter.choose(MINE)
-    assert daily.group_filter.value() == MINE and settings.group_filter("plan_files") == MINE
+    assert daily.group_filter.chosen() == [MINE] and settings.group_filter("plan_files") == MINE
     # A choice kept from last time is there when the dock opens, before the groups are read.
     from mikage.ui.request_groups import GroupFilter
     again = GroupFilter("plan_files")
-    assert again.value() == MINE and not again.isHidden() and again.passes("") is False
+    assert again.chosen() == [MINE] and not again.isHidden() and again.passes("") is False
     again.deleteLater()
+    # Several kept (a JSON list), and a single one kept by the plugin before (as it is).
+    settings.set_group_filter("plan_files", json.dumps(["第2班", NO_GROUP], ensure_ascii=False))
+    again = GroupFilter("plan_files")
+    assert again.chosen() == ["第2班", NO_GROUP] and again.passes("") and again.passes(" 第2班") and not again.passes("第1班")
+    again.deleteLater()
+    settings.set_group_filter("plan_files", MINE)
     daily.run()
     assert wait_for(lambda: daily.plan is not None and daily.task is None), daily.status.text()
     assert len(daily.plan.candidates) == 4
@@ -205,6 +230,9 @@ def test_the_day_and_the_schedule_filter_by_group(plugin):
     schedule.group_filter.choose(NO_GROUP)
     assert names(schedule) == ["横浜"]
     assert "（表示 1 件）" in schedule.status.text()
+    schedule.group_filter.choose(["第2班", NO_GROUP])
+    assert names(schedule) == ["大阪湾", "横浜"]
+    schedule.group_filter.choose(NO_GROUP)
     heads = [schedule.model.horizontalHeaderItem(c).text() for c in range(schedule.model.columnCount())]
     assert heads[:3] == ["状態", "名称", "依頼グループ"]
     layer = schedule.to_layer()

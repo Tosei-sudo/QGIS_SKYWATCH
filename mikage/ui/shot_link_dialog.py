@@ -32,6 +32,7 @@ from ..core.request.store import history_where, load_day, load_history, load_sho
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import ask_no
+from .check_filter import CheckFilter
 from .fit import fit_text
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
@@ -94,9 +95,11 @@ class ShotLinkDialog(QDialog):
         self.system = QComboBox()
         self.system.currentIndexChanged.connect(lambda _=None: self.render_shots())
         top.addWidget(self.system)
-        self.shown = QComboBox()
-        self.shown.addItems([self.tr(s) for s in SHOWN])
-        self.shown.currentIndexChanged.connect(lambda _=None: self.render_shots())
+        # 撮像の状態: check boxes, several at once (e.g. 未判定 and 未撮像).
+        self.shown = CheckFilter(self.tr("すべての状態"), [(self.tr(s), s, "", COLORS[s]) for s in SHOWN[1:]],
+                                 tip=self.tr("この撮像の状態の行だけを表示（チェックしたもののどれか）"))
+        self.shown.setMinimumContentsLength(10)
+        self.shown.changed.connect(lambda: self.render_shots())
         top.addWidget(self.shown)
         self.load_button = QPushButton(self.tr("読み込み"))
         self.load_button.setToolTip(self.tr("その日のショット（出力履歴・撮像の範囲）を読み込み直す"))
@@ -283,8 +286,7 @@ class ShotLinkDialog(QDialog):
         keep = self.wanted or (self.chosen_unit().key if self.chosen_unit() else None)
         self.wanted = None
         system = self.system.currentText() if self.system.currentIndex() > 0 else ""
-        shown = SHOWN[self.shown.currentIndex()] if self.shown.currentIndex() >= 0 else SHOWN[0]
-        self.shown_units = [u for u in self.units if (not system or u.system == system) and (shown == "すべて" or u.captured == shown)]
+        self.shown_units = [u for u in self.units if (not system or u.system == system) and self.shown.passes(u.captured)]
         if keep and not any(u.key == keep for u in self.shown_units):
             # The shot asked for is shown whatever the filters.
             self.shown_units += [u for u in self.units if u.key == keep]

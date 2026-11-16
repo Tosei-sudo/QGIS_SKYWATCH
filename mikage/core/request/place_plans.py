@@ -23,7 +23,9 @@ What each place's line shows, from the start of today (JST) for `days` days:
 「次」 is the first plan from now on that is in a system's plan (採用・要求外)
 or not answered yet (不明), and not taken already (撮像済み: its tooltip
 names the image's id); else the first day of a request; else none.
-不採用 and 見送り are shown only when asked (they will not be taken).
+不採用 and 見送り are shown only when asked (they will not be taken): the
+states shown are ticked in the dock (2026-11-16: any of them, 依頼 too),
+as are the 依頼グループ.
 
 Pure Python (no Qt): the shares of the places' areas are measured on points
 spread over them, the way the day's fitting measures an area; the dock
@@ -34,7 +36,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Callable, Optional, Sequence
+from typing import Callable, Collection, Optional, Sequence
 
 from .model import JST, ImagingRequest, bbox_of, day_bounds, in_rings, jst_day, occurs_on
 from .store import AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, HistoryRow, ShotRow, state_of
@@ -50,6 +52,11 @@ COMING = (PLANNED, UNREQUESTED, AWAITING)
 NOT_TAKEN = (DECLINED, HELD_BACK)
 #: The kind of a mark for a request's day still to be planned.
 REQUEST = "依頼"
+#: What a line may show (the dock's 状態 filter), and what it shows unless asked.
+KINDS = (PLANNED, UNREQUESTED, AWAITING, DECLINED, HELD_BACK, REQUEST)
+SHOWN = (PLANNED, UNREQUESTED, AWAITING, REQUEST)
+#: What the dock shows until others are chosen: all but 見送り (tsudo, 2026-11-16).
+NOT_HELD_BACK = (PLANNED, UNREQUESTED, AWAITING, DECLINED, REQUEST)
 #: About how many points measure the share of a place's area.
 SHARE_CELLS = 200
 _WEEKDAYS = "月火水木金土日"
@@ -244,17 +251,25 @@ def _union(*boxes: Optional[tuple]) -> Optional[tuple]:
 
 def lanes_of(places: Sequence[Place], rows: Sequence[HistoryRow], shots: dict, requests: Sequence[ImagingRequest],
              first: date, days: int, now: float, *, areas: Optional[dict] = None, not_taken: bool = False,
+             states: Optional[Collection[str]] = None, row_ok: Optional[Callable[[HistoryRow], bool]] = None,
+             request_ok: Optional[Callable[[ImagingRequest], bool]] = None,
              share: Callable[[Place, Sequence], Optional[float]] = share_of) -> list[Lane]:
     """
     Each place's line from `first` (a JST day) for `days` days: the history
     `rows` of those days (any order; `areas` the ledger's by request id, for
     rows kept without their own), `shots` by SHOT_ID, the ledger's
-    `requests`. `not_taken`: 不採用 and 見送り too. `share` says whether
-    (and how much of) a place an area takes (share_of; the dock's QGIS one).
-    Each place is tried only with the plans and requests near it (a grid of
-    whole degrees), each request once (not once a day).
+    `requests`. What is shown: `states` (of KINDS; REQUEST for the requests'
+    days), else SHOWN, with 不採用 and 見送り too when `not_taken`; and only
+    the rows `row_ok` passes and the requests `request_ok` does (the dock's
+    依頼グループ). `share` says whether (and how much of) a place an area
+    takes (share_of; the dock's QGIS one). Each place is tried only with the
+    plans and requests near it (a grid of whole degrees), each request once
+    (not once a day).
     """
     areas = areas or {}
+    if states is None:
+        states = KINDS if not_taken else SHOWN
+    states = set(states)
     the_days = days_of(first, days)
     day_texts = {d.isoformat() for d in the_days}
     rows = [r for r in rows if r.day in day_texts]
@@ -263,12 +278,11 @@ def lanes_of(places: Sequence[Place], rows: Sequence[HistoryRow], shots: dict, r
     for r in rows:
         if r.request_id:
             planned_days.setdefault(r.request_id, set()).add(r.day)
-    if not not_taken:
-        rows = [r for r in rows if row_state(r) not in NOT_TAKEN]
+    rows = [r for r in rows if row_state(r) in states and (row_ok is None or row_ok(r))]
     # Each request's days still to be planned on (its period, its repeat), worked out once.
     live = []
-    for q in requests:
-        if q.status != "有効" or not q.rings:
+    for q in requests if REQUEST in states else ():
+        if q.status != "有効" or not q.rings or (request_ok is not None and not request_ok(q)):
             continue
         open_days = [d for d in the_days if d.isoformat() not in planned_days.get(q.id, ()) and occurs_on(q, d)]
         if open_days:

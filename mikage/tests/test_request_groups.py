@@ -165,6 +165,12 @@ def test_the_day_filtered_by_group():
     assert shown(cands, CandidateFilter(group=MINE, mine=("第1班",))) == [a]
     assert shown(cands, CandidateFilter(group=MINE)) == []
     assert shown(cands, CandidateFilter(group=NO_GROUP)) == [c]
+    # Several groups ticked (2026-11-16): any of them; none ticked: all.
+    assert shown(cands, CandidateFilter(group=("第2班", NO_GROUP))) == [b, c]
+    assert shown(cands, CandidateFilter(group=(MINE, "第2班"), mine=("第1班",))) == [a, b]
+    assert shown(cands, CandidateFilter(group=())) == cands
+    assert filter_text(("第1班", NO_GROUP)) == "第1班・グループなし" and filter_text(()) == "すべてのグループ"
+    assert matches(" 第1班", ["第2班", "第1班"]) and not matches("", ["第2班", MINE], ("第2班",))
     # Words find the group too.
     assert shown(cands, CandidateFilter(text="2班")) == [b]
 

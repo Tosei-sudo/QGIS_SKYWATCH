@@ -83,6 +83,7 @@ from .docks import PluginDock, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import column_menus
 from .plan_overlay import PlanOverlay
+from .check_filter import CheckFilter
 from .request_groups import GroupFilter
 
 COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
@@ -186,10 +187,12 @@ class PlanFileDock(PluginDock):
         self.series_filter.setToolTip(self.tr("この衛星シリーズの依頼だけを表示（採用は割り当てた衛星、見送りは撮れる衛星のシリーズ）。次回も同じ選択"))
         # 依頼グループ: only what is shown (the files are written per system, whoever's the requests are).
         self.group_filter = GroupFilter("plan_files")
-        self.group_filter.setToolTip(self.tr("依頼グループで絞り込み（表示だけ。書き出しはシステム単位）。次回も同じ選択"))
-        self.result_filter = QComboBox()
-        for text, value in ((self.tr("すべての結果"), None), (TAKEN, TAKEN), (HELD, HELD), (self.tr("繰り上げ候補"), BOOST)):
-            self.result_filter.addItem(text, value)
+        self.group_filter.setToolTip(self.tr("依頼グループで絞り込み（チェックしたグループのどれか。表示だけで、書き出しはシステム単位）。次回も同じ選択"))
+        # 結果 and 依頼グループ: check boxes, several at once (rows of any of those ticked shown).
+        self.result_filter = CheckFilter(
+            self.tr("すべての結果"), [(TAKEN, TAKEN, "", "#16a34a"), (HELD, HELD, "", "#9ca3af"),
+                                    (self.tr("繰り上げ候補"), BOOST, self.tr("優先度の繰り上げを勧める依頼（未撮像になったもの・期限まで 2 日以内の期間内1回）"), "#b45309")],
+            key="plan_files/results", tip=self.tr("この結果の依頼だけを表示（チェックしたもののどれか）。次回も同じ選択"))
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
         self.search.setPlaceholderText(self.tr("名称・ID・番号・衛星"))
@@ -200,7 +203,10 @@ class PlanFileDock(PluginDock):
             w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             w.setMinimumContentsLength(14)
             filters.addWidget(w)
+        for w in (self.system_filter, self.series_filter):
             w.currentIndexChanged.connect(self._filter_changed)
+        for w in (self.group_filter, self.result_filter):
+            w.changed.connect(self._filter_changed)
         self.search.textChanged.connect(lambda _text: self.render())
         filters.addWidget(self.search)
         layout.addLayout(filters)
@@ -358,8 +364,8 @@ class PlanFileDock(PluginDock):
     def candidate_filter(self) -> CandidateFilter:
         """The filters as chosen."""
         return CandidateFilter(system=self.system_filter.currentData(), series=self.series_filter.currentData(),
-                               result=self.result_filter.currentData(), text=self.search.text(),
-                               group=self.group_filter.value(), mine=self.group_filter.my)
+                               result=tuple(self.result_filter.chosen()), text=self.search.text(),
+                               group=tuple(self.group_filter.chosen()), mine=self.group_filter.my)
 
     def _filter_changed(self, _index: int = 0) -> None:
         system, series = self.system_filter.currentData(), self.series_filter.currentData()

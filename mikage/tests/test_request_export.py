@@ -201,6 +201,8 @@ def test_filters_by_system_series_result_and_words():
     # Result, words (name, id, 管理番号, 識別番号, satellite).
     assert ids(result=HELD) == [c.request.id for c in cands if c.result == HELD]
     assert ids(result=BOOST) == []
+    # Several results at once (ticked together): any of them.
+    assert ids(result=(TAKEN, HELD)) == ids() and ids(result=(HELD, BOOST)) == ids(result=HELD) and ids(result=()) == ids()
     assert ids(text="k-7") == ["R-1"] and ids(text="id-42") == ["R-3"] and ids(text="sar-y 1") == ["R-5"]
     assert ids(system="SYS-A", text="R-2") == [] and ids(system="SYS-B", result=HELD) == ["R-6"]
 

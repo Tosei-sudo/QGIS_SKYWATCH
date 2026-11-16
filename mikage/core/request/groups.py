@@ -11,8 +11,9 @@ was written (for the dashboards). A group's MEMBERS are the user names
 (the environment variable USERNAME, as `editTracking`) of its people:
 「自分のグループ」 is every group the user is a member of.
 
-The 「撮像依頼」, 「撮像計画ファイル出力」 and 「撮像予定」 docks filter by group
-with the choices made here: all, 自分のグループ, one group, or グループなし.
+The 「撮像依頼」, 「撮像計画ファイル出力」, 「撮像予定」 and 「地点ごとの撮像予定」
+docks filter by group with the choices made here: all, or any of
+自分のグループ, the groups and グループなし ticked (2026-11-16: several at once).
 Names are compared without case or surrounding spaces.
 """
 from __future__ import annotations
@@ -20,7 +21,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence, Union
 
 from ..esri import EsriClient, EsriError
 from ..util import is_number
@@ -147,10 +148,17 @@ def mine(groups: Sequence[RequestGroup], user: str) -> list[str]:
     return [g.name for g in groups if g.has(user)]
 
 
-def matches(group: str, chosen: Optional[str], my_groups: Iterable[str] = ()) -> bool:
-    """Whether a request of `group` passes the filter `chosen` (ALL, MINE, NO_GROUP or a group's name)."""
+def matches(group: str, chosen: Union[None, str, Iterable[str]], my_groups: Iterable[str] = ()) -> bool:
+    """
+    Whether a request of `group` passes the filter `chosen`: ALL, MINE,
+    NO_GROUP or a group's name, or several of them (any; none: all).
+    """
     if chosen is ALL or chosen == "":
         return True
+    if not isinstance(chosen, str):
+        chosen = [c for c in chosen if c]
+        my_groups = tuple(my_groups)
+        return not chosen or any(matches(group, c, my_groups) for c in chosen)
     if chosen == MINE:
         return bool(group.strip()) and any(same(group, g) for g in my_groups)
     if chosen == NO_GROUP:
@@ -194,8 +202,11 @@ def first_group(groups: Sequence[RequestGroup], user: str, last: str = "", table
     return next((g.name for g in groups if g.active and g.has(user)), "")
 
 
-def filter_text(chosen: Optional[str]) -> str:
-    """The filter as words (for a status line)."""
+def filter_text(chosen: Union[None, str, Iterable[str]]) -> str:
+    """The filter as words (for a status line; several: 「第1班・グループなし」)."""
+    if chosen is not ALL and not isinstance(chosen, str):
+        chosen = [c for c in chosen if c]
+        return "・".join(filter_text(c) for c in chosen) if chosen else filter_text(ALL)
     if chosen is ALL or chosen == "":
         return "すべてのグループ"
     if chosen == MINE:

@@ -69,7 +69,13 @@ MOVES = (("left", "この列を左へ"), ("right", "この列を右へ"), ("firs
 
 
 def widget_filter(widget: QWidget) -> Filter:
-    """Reading and setting a filter widget (line edit, combo box by its data else text, check box, checkable group, spin box)."""
+    """
+    Reading and setting a filter widget (line edit, combo box by its data else
+    text, check box, checkable group, spin box, a filter of its own such as
+    the check boxes of ui/check_filter.py: view_state / set_view_state).
+    """
+    if callable(getattr(widget, "view_state", None)) and callable(getattr(widget, "set_view_state", None)):
+        return widget.view_state, widget.set_view_state
     if isinstance(widget, QLineEdit):
         return widget.text, lambda v: widget.setText("" if v is None else str(v))
     if isinstance(widget, QComboBox):

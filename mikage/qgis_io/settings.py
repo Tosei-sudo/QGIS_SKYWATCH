@@ -418,8 +418,9 @@ def set_plan_file_filter(system: str, series: str) -> None:
 
 
 def group_filter(where: str) -> str:
-    """The 依頼グループ filter last chosen in a dock (`requests`, `plan_files`, `schedule`): a group's name,
-    *mine* (自分のグループ), *none* (グループなし), or "" for all (core/request/groups.py)."""
+    """The 依頼グループ filter last chosen in a dock (`requests`, `plan_files`, `schedule`, `place_schedule`): a
+    group's name, *mine* (自分のグループ), *none* (グループなし), several of them as a JSON list (ticked together,
+    2026-11-16; ui/check_filter.py), or "" for all (core/request/groups.py)."""
     return _get(f"request_groups/{where}")
 
 
