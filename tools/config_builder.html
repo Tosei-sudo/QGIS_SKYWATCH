@@ -380,7 +380,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "updatedBy": "UPDATED_BY",
    "created": "CREATED_AT",
    "updated": "UPDATED_AT",
-   "deleted": "DELETED_AT"
+   "deleted": "DELETED_AT",
+   "namedAreaObjectId": "NAMED_AREA_OBJECTID"
   },
   "taxonomyTable": {
    "path": "PATH",
@@ -463,7 +464,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "kind": "KIND",
    "active": "ACTIVE",
    "nameEn": "NAME_EN",
-   "kindEn": "KIND_EN"
+   "kindEn": "KIND_EN",
+   "id": "NAMED_AREA_ID"
   },
   "alertCountries": {
    "code": "COUNTRY_CODE",
@@ -1162,6 +1164,7 @@ const ROLE_LABELS = {
   startMonth: "年の始まりの月", initialUsed: "当初の消費枚数", countFrom: "数え始める日",
   timesMin: "1 日の回数の下限", timesMax: "1 日の回数の上限", timesGap: "回の間隔（時間）", occurrence: "その日の何回目か",
   part: "分担の何番目か（広い範囲を衛星で分けたとき。1 から）",
+  namedAreaObjectId: "地名の OBJECTID（Esri の属性ルールが入れる。プラグインは書かない）",
 };
 const SOURCE_LABELS = {
   id: "依頼 ID", name: "名称", managementNo: "管理番号", identificationNo: "識別番号", category: "区分（定点・臨時）", achieve: "達成条件", start: "開始（その日の窓）", end: "終了（その日の窓）",
@@ -1638,7 +1641,7 @@ const SPEC = [
       field: O("alertReports", "通報", [
         TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),
         TJ("geofences", "ジオフェンス", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "ポリゴンのレイヤー。役割: " + Object.entries(K.roles.alertGeofences).map(([k, v]) => `${k}（${v}）`).join("・") }),
-        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "地名・施設名のポリゴンのレイヤー（なくてもよい）。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むいちばん小さいものが項目 place（種類 placeKind、全部 places）。10 分ごと・「抽出」で読み直す" }),
+        TJ("namedAreas", "地名（NamedArea）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "地名・施設名のポリゴンのレイヤー（なくてもよい）。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むいちばん小さいものが項目 place（種類 placeKind、全部 places、管理番号 place.id）。10 分ごと・「抽出」で読み直す" }),
         TJ("countries", "国", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "国のポリゴンのレイヤー（なくてもよい。領海・EEZ を含めれば海上の記録にも付く）。役割: " + Object.entries(K.roles.alertCountries).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むもの（重なればいちばん小さいもの）が項目 country（国コード）・countryName（国名）・countryName.en。10 分ごと・「抽出」で読み直す" }),
         TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),

@@ -285,6 +285,25 @@ class TestEsriObservationStore:
         assert marked.deleted_at == day(30)
         assert len(layer.rows) == 1 and layer.rows[0]["attributes"]["DELETED_AT"] == day(30)
 
+    def test_leaves_the_named_area_objectid_to_the_attribute_rule(self):
+        """NAMED_AREA_OBJECTID (2026-11-17) is filled by the enterprise geodatabase's attribute rule: never sent, so never cleared."""
+        fake, layer = esri_layer(ALL + ["NAMED_AREA_OBJECTID"], {**DATES, "NAMED_AREA_OBJECTID": "esriFieldTypeInteger"})
+        config = observation_store_of({"url": URL}, [], 0)
+        assert config.fields["namedAreaObjectId"] == "NAMED_AREA_OBJECTID"
+        store = EsriObservationStore(config, EsriClient(fake))
+        a = obs(id="r1")
+        store.save([a])
+        layer.rows[0]["attributes"]["NAMED_AREA_OBJECTID"] = 7  # as the rule does
+        store.save([replace(a, note="直した", lon=139.75)])
+        for _, form in (x for x in fake.asked if x[0].endswith("/applyEdits")):
+            for key in ("adds", "updates"):
+                assert all("NAMED_AREA_OBJECTID" not in f["attributes"] for f in json.loads(form.get(key) or "[]"))
+        assert layer.rows[0]["attributes"]["NAMED_AREA_OBJECTID"] == 7 and layer.rows[0]["attributes"]["NOTE"] == "直した"
+        # Another name for it in the settings is taken; a role the plugin does not know is not.
+        problems = []
+        assert observation_store_of({"url": URL, "fields": {"namedAreaObjectId": "AREA_OID"}}, problems, 0).fields["namedAreaObjectId"] == "AREA_OID"
+        assert problems == []
+
     def test_writes_only_the_fields_the_layer_has_and_deletes_features_when_it_cannot_mark_them(self):
         fake, layer = esri_layer(["OBS_ID", "OBJECT_ID", "ACTIVITY", "IMAGE_TIME"])
         store = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(fake))

@@ -126,8 +126,9 @@ DEFAULT_RULE_FIELDS = {
 LEGACY_RULE_FIELDS: dict[str, str] = {"area": "AREA"}
 #: The geofence layer's attributes by role.
 DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT", "nameEn": "NAME_EN"}
-#: The named area layer's attributes by role (place and facility names).
-DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE", "nameEn": "NAME_EN", "kindEn": "KIND_EN"}
+#: The named area layer's attributes by role (place and facility names; `id` the organisation's own management
+#: number, 2026-11-17: a field's `place.id`).
+DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE", "nameEn": "NAME_EN", "kindEn": "KIND_EN", "id": "NAMED_AREA_ID"}
 #: The country layer's attributes by role (`country`, `countryName`).
 DEFAULT_COUNTRY_FIELDS = {"code": "COUNTRY_CODE", "name": "COUNTRY_NAME", "nameEn": "COUNTRY_NAME_EN", "active": "ACTIVE"}
 #: How long the named areas read are kept (seconds).

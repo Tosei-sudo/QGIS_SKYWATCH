@@ -289,7 +289,10 @@ OBSERVATION_FIELDS = {
     "OBS_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "OBJECT_ID": {"type": S, "length": 64},
     "OBJECT_NAME": S, "KIND": S, "ACTIVITY": S, "PRESENT": F, "NOTE": {"type": S, "length": 4000}, "LENGTH_M": D, "HEADING": D,
     "WIDTH_M": D, "CONFIDENCE": S, "OBSERVER": S, "UPDATED_BY": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T, "PROJECT": S,
+    "NAMED_AREA_OBJECTID": I,
 }
+#: As the enterprise geodatabase's attribute rule does (docs/arcgis-setup.md): the OBJECTID of the smallest named area holding the record.
+OBSERVATION_RULES = [{"field": "NAMED_AREA_OBJECTID", "smallestContaining": "Alerts/3"}]
 AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "KIND": S,
                "NOTE": {"type": S, "length": 4000}, "OBSERVER": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T}
 TAXONOMY_FIELDS = {"PATH": {"type": S, "length": 1000}, "LEVELS": S, "NAME_LABEL": S, "MEMBERS": {"type": S, "length": 8000},
@@ -335,11 +338,12 @@ ALERT_RULES = [
     {"KIND": "車両", "ACTIVITIES": "集積", "MIN_CONFIDENCE": "確定", "GEOFENCE_NAME": "*", "ACTIVE": 0, "NOTE": "（停止中の条件の例）"},
 ]
 
-#: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place).
+#: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place),
+#: with the organisation's management number (NAMED_AREA_ID).
 NAMED_AREAS = [
-    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70), "Tokyo Bay", "bay"),
-    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34), "Port of Yokosuka", "port"),
-    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315), "Yokosuka Main Port", "facility"),
+    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70), "Tokyo Bay", "bay", "NA-0001"),
+    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34), "Port of Yokosuka", "port", "NA-0101"),
+    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315), "Yokosuka Main Port", "facility", "NA-0102"),
 ]
 #: The countries (a rough box around Japan's islands and seas): code, name, English name, box.
 COUNTRIES = [("JP", "日本", "Japan", (122.9, 24.0, 146.0, 45.6))]
@@ -447,7 +451,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
             {"id": 2, "name": "衛星名の対応表", "fields": {"SAT_NAME": S, "ALIAS": {"type": S, "length": 1000}},
              "features": feats([{"attributes": {"SAT_NAME": n, "ALIAS": a}} for n, a in SATELLITE_ALIASES])}]},
         {"name": "Observations", "layers": [
-            {"id": 0, "name": "観測記録", "geometryType": "point", "fields": OBSERVATION_FIELDS, "features": feats(observations)},
+            {"id": 0, "name": "観測記録", "geometryType": "point", "fields": OBSERVATION_FIELDS, "attributeRules": OBSERVATION_RULES,
+             "features": feats(observations)},
             {"id": 1, "name": "分類体系", "fields": TAXONOMY_FIELDS, "features": feats(taxonomy)},
             {"id": 2, "name": "確認範囲", "geometryType": "polygon", "fields": AREA_FIELDS, "features": []}]},
         {"name": "AI", "layers": [{
@@ -479,9 +484,10 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
              "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0, "NAME_EN": "Yokosuka"},
                                  "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []},
-            {"id": 3, "name": "地名", "geometryType": "polygon", "fields": {"NAME": S, "KIND": S, "ACTIVE": F, "NAME_EN": S, "KIND_EN": S},
-             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1, "NAME_EN": ne, "KIND_EN": ke}, "geometry": {"rings": [_box_ring(b)]}}
-                                for n, k, b, ne, ke in NAMED_AREAS])},
+            {"id": 3, "name": "地名", "geometryType": "polygon",
+             "fields": {"NAME": S, "KIND": S, "ACTIVE": F, "NAME_EN": S, "KIND_EN": S, "NAMED_AREA_ID": S},
+             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1, "NAME_EN": ne, "KIND_EN": ke, "NAMED_AREA_ID": i},
+                                 "geometry": {"rings": [_box_ring(b)]}} for n, k, b, ne, ke, i in NAMED_AREAS])},
             {"id": 4, "name": "国", "geometryType": "polygon",
              "fields": {"COUNTRY_CODE": S, "COUNTRY_NAME": S, "COUNTRY_NAME_EN": S, "ACTIVE": F},
              "features": feats([{"attributes": {"COUNTRY_CODE": c, "COUNTRY_NAME": n, "COUNTRY_NAME_EN": ne, "ACTIVE": 1},

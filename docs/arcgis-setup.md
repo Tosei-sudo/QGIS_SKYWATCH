@@ -147,6 +147,41 @@ datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(h
 - 同じ対象日・システムを書き出し直すと、そのシステムの未判定の行（採否も）は置き換わる（要求外の行は残る）。
 - 日付型は UTC で保存している（日本時間の 0 時 = 前日 15 時 UTC）。ダッシュボードはブラウザーの時刻（日本時間）で日を分けるので、そのままで日本時間の日になる。
 
+## 属性ルール（記録の地名の OBJECTID）
+
+観測記録の `NAMED_AREA_OBJECTID`（2026-11-17 に追加）は、記録の点を含む地名（`TBL_NAMED_AREA`）の `OBJECTID`。**プラグインは書かず**、エンタープライズ ジオデータベースの属性ルール（計算ルール）で入れる。組織内の管理番号は地名の側の `NAMED_AREA_ID`（同じ日に追加）に持つ。
+
+`create_tables.py` をもう一度実行すると、この 2 つの属性と属性インデックス（`IX_OBSERVATION_NAMED_AREA_OBJE`・`IX_NAMED_AREA_NAMED_AREA_ID`）が足される。属性ルールそのものは作らないので、ArcGIS Pro で足す:
+
+1. `TBL_OBSERVATION` にグローバル ID を足す（「グローバル ID の追加」。属性ルールに要る。プラグインは使わない）
+2. `TBL_OBSERVATION` の「属性ルール」で計算ルールを足す: フィールド `NAMED_AREA_OBJECTID`、トリガー「挿入」「更新」、式は下の例
+3. サービスを上書き公開する（`publish_service.py publish`。式が読む `TBL_NAMED_AREA` も同じサービスに入れておく）
+
+式の例（Arcade。記録を含む地名のうち、いちばん小さいもの。プラグインの通報の `place` と同じ選び方で、`ACTIVE` が 0 のものは使わない）:
+
+```js
+var areas = FeatureSetByName($datastore, "MIKAGE.TBL_NAMED_AREA", ["OBJECTID", "ACTIVE"], true);
+var best = null;
+var smallest = -1;
+for (var a in Intersects(areas, Geometry($feature))) {
+    if (!IsEmpty(a.ACTIVE) && a.ACTIVE == 0) {
+        continue;
+    }
+    var size = Area(a);
+    if (smallest < 0 || size < smallest) {
+        best = a.OBJECTID;
+        smallest = size;
+    }
+}
+return best;
+```
+
+- `MIKAGE.` はデータ所有者（エンタープライズ ジオデータベースでは所有者付きの名前。ファイル ジオデータベースで試すなら `TBL_NAMED_AREA`）。面積は比べるだけなので、座標系の単位のままでよい
+- プラグインは記録を保存するとき `NAMED_AREA_OBJECTID` を送らない（ほかの属性と位置だけを送る）ので、ルールが入れた値を消さない。位置を動かした記録は「更新」のトリガーで入れ直される
+- 地名のポリゴンを直しても、前からある記録の値は変わらない（記録が保存されたときに計算する）。入れ直すなら、同じ式を ArcGIS Pro の「フィールド演算」（Arcade）で `TBL_OBSERVATION` の `NAMED_AREA_OBJECTID` に一度かける
+- `OBJECTID` は地名のデータを入れ直す（消して追加し直す）と変わる。そのときも上のフィールド演算で入れ直す
+- プラグインの「データ分析」で観測記録と地名のポリゴンを結合すると、キーの候補に `NAMED_AREA_OBJECTID` = `OBJECTID` が出る（地名ごとの記録の件数などを `NAMED_AREA_ID` つきで数えられる）
+
 ## うまくいかないとき
 
 | 出たこと | すること |

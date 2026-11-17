@@ -77,6 +77,10 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "created": "CREATED_AT",
     "updated": "UPDATED_AT",
     "deleted": "DELETED_AT",
+    #: The OBJECTID of the named area (TBL_NAMED_AREA) holding the record, filled by an attribute rule of the
+    #: enterprise geodatabase (2026-11-17). The plugin never writes it (a save leaves the server's value as it is);
+    #: it is the key the data analysis joins 観測記録 to 地名のポリゴン by.
+    "namedAreaObjectId": "NAMED_AREA_OBJECTID",
 }
 
 

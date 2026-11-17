@@ -467,6 +467,31 @@ def test_place_fields_by_kind():
     assert layer_key_problems(s, {"named_areas": ["NAME", "KIND", "PIER_NO"]}) == []
 
 
+def test_the_management_number_of_a_place():
+    """NAMED_AREA_ID (tsudo, 2026-11-17: the organisation's own number of a named area) is the role id: `place.id`, `places.id`."""
+    from mikage.core.obs.alerts import DEFAULT_PLACE_FIELDS, layer_key_problems, named_areas_of_features
+
+    assert DEFAULT_PLACE_FIELDS["id"] == "NAMED_AREA_ID"
+    areas = named_areas_of_features([
+        {"attributes": {"NAME": "舞鶴港", "KIND": "港", "NAMED_AREA_ID": "NA-0101"}, "geometry": {"rings": _box(134.9, 34.9, 135.3, 35.3)}},
+        {"attributes": {"NAME": "北吸桟橋", "KIND": "桟橋", "NAMED_AREA_ID": "NA-0102"}, "geometry": {"rings": _box(134.99, 34.99, 135.01, 35.01)}},
+        # Without a number (a layer of before, or not given): empty.
+        {"attributes": {"NAME": "舞鶴湾", "KIND": "湾"}, "geometry": {"rings": _box(134.8, 34.8, 135.6, 35.6)}},
+    ], DEFAULT_PLACE_FIELDS)
+    problems = []
+    s = alert_settings_of({"namedAreas": PLACE_URL, "minConfidence": "", "formats": [{"name": "a", "fields": [
+        "place", "place.id", {"source": "place.id", "placeKinds": "港"}, "places.id", {"source": "place.id", "empty": "-"},
+    ]}]}, problems)
+    assert problems == []
+    items = select([obs(id="pier"), obs(id="bay", lon=135.5, lat=35.5)], s, None, (), DEFAULT_CONFIDENCES, named=areas)
+    by = dict(zip([i.record.id for i in items], build_lines(items, s.format(), Moment(now=T0))))
+    assert by["pier"] == "北吸桟橋|NA-0102|NA-0101|NA-0102・NA-0101|NA-0102"
+    assert by["bay"] == "舞鶴湾||||-"
+    # A layer without the attribute: told at 抽出 (always empty).
+    assert layer_key_problems(s, {"named_areas": ["NAME", "KIND", "NAMED_AREA_ID"]}) == []
+    assert any("NAMED_AREA_ID" in p for p in layer_key_problems(s, {"named_areas": ["NAME", "KIND"]}))
+
+
 def _one(fields, problems=None, **extra):
     """A format of these fields (the settings' problems in `problems`)."""
     p = [] if problems is None else problems
