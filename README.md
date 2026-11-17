@@ -732,6 +732,21 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - Esri の分類テーブル（保存先の `taxonomyTable`）では属性 `ACTIVITIES`（文字列。活動を読点かカンマ区切り。`fields.activities` で別名可）に保存し、同じテーブルを使う人と共有する。テーブルに属性がなければ活動は保存されず、変更時にその旨を表示（追加するフィールドの例: 名前 `ACTIVITIES`、文字列、長さ 1000）。他の人の変更は「更新」で読み直す
 - ローカル GeoPackage の分類体系（`taxonomy` テーブル）にも `ACTIVITIES` 列を自動で追加
 
+### 備考の単語集（`glossary`）
+
+備考に使う語を Esri のテーブル（[`TBL_GLOSSARY`](#tbl_glossary備考の単語集)）に 1 語 1 行で置くと、観測記録と確認範囲の「備考」を入力している間、打っている語の候補を欄の下に出す（2026-11-17。tsudo「観測結果の備考とか入力しているときに、単語集さえあれば、単語のサジェスチョンって出せる？使用する語彙を(できるだけ)統制したい」）。語は設定ファイルではなくテーブルに置き、設定ファイルにはテーブルだけを書く。
+
+```jsonc
+"glossary": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/28"
+```
+
+- **候補**: 日本語は語の間に空白がないので、欄全体ではなく、カーソルの前の文字から続く語を候補にする（「岸壁に入」と打つと「入港」「入港直後」）。読点・句点・空白・括弧の後から打ち始めた分の、いちばん長く語の始まりに合う部分を使う。よみ（`READING`）・表記ゆれ（`VARIANTS`）の始まりでも出す（「にゅう」で「入港」、「入航」で「入港」）。全角・半角、大文字・小文字、ひらがな・カタカナの違いは同じとみる。ひらがな 1 文字（助詞）と、ひらがなの続きの途中からは出さない
+- **選ぶ**: Tab で先頭の候補、↓・↑ で選んで Enter かクリックで、打った部分を語に置き換える（Ctrl+Z で戻せる）。何も選ばずに Enter を押すと、これまでどおり記録する。Esc で候補を閉じる
+- **大分類ごと**: `ROOT_KIND` に大分類（カンマ区切りで複数）を書いた語は、フォームの種別がその大分類のときだけ出す（確認範囲は「対象の種別」の大分類。空欄の語はいつも）。並びは `SORT_ORDER`（小さい順、空は後ろ）、次に大分類の語、短い語の順
+- **表記ゆれ**: 備考に表記ゆれ（`VARIANTS`）があると、欄の下に「表記ゆれ: 入航 → 入港（単語集の表記）」と出し、「単語集の表記に直す」ですべて書き換える（Ctrl+Z で戻せる）。全角・半角や大文字・小文字だけが違う語（「ＡＩＳ」「ais」と「AIS」）も出す。もっと長い単語集の語の一部（「停船中」の中の「停船」）、その大分類の語でもあるもの、英字の語の途中（「chairs」の「ais」）は出さない。保存は止めない（自由入力のまま）
+- **読み込み**: 設定ファイルを読んだときに裏で読み、15 分より古くなったら備考の欄に入ったときに読み直す。分類体系の「更新」でも読み直す。読めなければ欄の下にそう出し、前に読んだ語で候補を出す（オフライン作業の控えからも読む）。単語集がなければ備考はこれまでどおり
+- 単語集の語の追加・変更は ArcGIS Pro・Portal でテーブルを直す（プラグインからは書かない）
+
 ### 通報（注目の記録・`alertReports`）
 
 注目すべき記録を、値を区切り文字でつないだ 1 件 1 行のテキストにして流す。メニューの「観測記録 ▸ 通報文の作成…」（または「観測記録」ドックの「詳細」の「通報…」）と「観測記録 ▸ 通報記録の確認…」。
@@ -1826,6 +1841,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en", … }`。`en` は英語の名前で通報の `confidence.en`、ほかのキー（`code` など）は通報の `confidence.code` など）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
+| `glossary` | URL かオブジェクト | 備考の単語集の Esri のテーブル（1 語 1 行、読むだけ）。`{ "url", "fields", "where", "token" }`（既定の属性名は [`TBL_GLOSSARY`](#tbl_glossary備考の単語集)） | なし（備考に候補を出さない） | [備考の単語集](#備考の単語集glossary) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
@@ -1952,6 +1968,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | [`TBL_INTEREST_AREA`](#tbl_interest_area関心地域) | ポリゴン | 書き込み | 個人の関心地域（2026-11-14 に追加） | `interests.areas` |
 | [`TBL_USER_ROLE`](#tbl_user_role担当) | なし | 書き込み | 一人ひとりの担当（2026-11-15 に追加） | `userRoles` |
 | [`TBL_SATELLITE_OUTAGE`](#tbl_satellite_outage衛星の障害情報) | なし | 書き込み | 衛星の障害情報（理由・期間・影響。2026-11-16 に追加） | `satelliteOutages` |
+| [`TBL_GLOSSARY`](#tbl_glossary備考の単語集) | なし | 読み | 観測記録の備考の単語集（候補と表記ゆれ。2026-11-17 に追加） | `glossary` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -2470,9 +2487,22 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `OTHER_IMPACT` | その他の影響 | `String(1000)` | 計算に使わない影響（注意として出す） | `other` |
 | `NOTE` | メモ | `String(4000)` | メモ | `note` |
 
+### `TBL_GLOSSARY`（備考の単語集）
+
+備考に使う語 1 つで 1 行（2026-11-17 に追加。[備考の単語集](#備考の単語集glossary)）。プラグインは読むだけで、ArcGIS Pro・Portal で直す。同じ語が 2 行にあれば 1 語にまとめる（表記ゆれ・よみ・大分類は両方のもの）。`glossary.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `TERM` | 語 | `String(255)` | 備考に使う語（`入港`・`停泊中`）。**必須** | `term` |
+| `VARIANTS` | 表記ゆれ | `String(1000)` | この語に直す別の書き方（`入航,入湊`。カンマ・読点区切り） | `variants` |
+| `READING` | よみ | `String(255)` | よみ（ひらがな、カンマ区切りで複数）。よみを打っても候補に出す | `reading` |
+| `ROOT_KIND` | 大分類 | `String(1000)` | この語を出す大分類（`船舶`、カンマ区切りで複数）。空はすべて | `kinds` |
+| `DESCRIPTION` | 説明 | `String(1000)` | 候補の横に出す説明 | `description` |
+| `SORT_ORDER` | 並び順 | `Integer` | 候補の並び順（小さい順。空は後ろ） | `order` |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -2530,6 +2560,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
   },
   "userRoles": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/26",                     // TBL_USER_ROLE
   "satelliteOutages": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/27",              // TBL_SATELLITE_OUTAGE
+  "glossary": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/28",                      // TBL_GLOSSARY
   "aiResultSources": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/17",                        // TBL_AI_RESULT
       "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",

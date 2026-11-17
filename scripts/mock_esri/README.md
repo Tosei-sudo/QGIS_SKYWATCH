@@ -52,6 +52,7 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Alerts | 0〜4 | 通報条件（3 行、1 行は停止中）・ジオフェンス（横須賀）・通報記録（空）・地名のポリゴン（東京湾 ⊃ 横須賀港 ⊃ 横須賀本港。管理番号 `NAMED_AREA_ID` は `NA-0001`・`NA-0101`・`NA-0102`）・国（日本） | `alertReports`（`rules`・`geofences`・`table`・`namedAreas`・`countries`。フォーマット「速報」（既定）・「English」・「ファイル（タブ区切り）」） |
 | Work | 0, 1 | 分担（画像ごとの担当、空）・引き継ぎメモ（空） | `assignments`・`handover.table` |
 | Events | 0, 1 | イベント（1 件、範囲は横須賀）・イベントの紐付け（空） | `events` |
+| Glossary | 0 | 備考の単語集（13 語。船舶の入港・出港・錨泊など、航空機の駐機など、どの大分類にも出す「雲で不明瞭」など。表記ゆれ・よみ・説明つき） | `glossary` |
 
 どのレイヤーにも作成者・更新者の記録の属性 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` がある（プラグインの `editTracking` の既定の属性名。前のバージョンで作ったデータには起動時に列を足す）。
 

@@ -160,6 +160,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "observationStores",
   "localObservations",
   "observationVocabulary",
+  "glossary",
   "arcgisPortals",
   "layers",
   "baseMaps",
@@ -551,6 +552,14 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "noNight": "NO_NIGHT",
    "other": "OTHER_IMPACT",
    "note": "NOTE"
+  },
+  "glossary": {
+   "term": "TERM",
+   "variants": "VARIANTS",
+   "reading": "READING",
+   "kinds": "ROOT_KIND",
+   "description": "DESCRIPTION",
+   "order": "SORT_ORDER"
   }
  },
  "roleCodes": [
@@ -1638,6 +1647,8 @@ const SPEC = [
         J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
         N("matchRadius", "同一候補の半径（m）"),
       ]) },
+    { key: "glossary", label: "備考の単語集", doc: "備考の単語集glossary", help: "観測記録・確認範囲の備考に使う語を 1 語 1 行で置く Esri のテーブル（読むだけ）。備考を打っている間、打っている語の候補（よみ・表記ゆれからも）を出し、表記ゆれは欄の下に知らせて直せる。語はテーブルに置き、ここにはテーブルと属性名だけを書く。",
+      field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },
     { key: "alertReports", label: "通報（注目の記録）", doc: "通報注目の記録alertreports", help: "注目の記録を区切り文字の 1 件 1 行の通報文に。条件（分類・活動・確度・ジオフェンス）と通報した記録は Esri に置き、ここには URL・属性名と、名前付きのフォーマット（複数）を書く。抽出した記録は重要度スコアの高い順。",
       field: O("alertReports", "通報", [
         TJ("rules", "条件テーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "1 行 1 条件。役割: " + Object.entries(K.roles.alertRules).map(([k, v]) => `${k}（${v}）`).join("・") + "。なければ固定の条件に合う記録すべて" }),

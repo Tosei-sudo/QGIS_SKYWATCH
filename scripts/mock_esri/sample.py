@@ -363,6 +363,25 @@ INTEREST_FIELDS = {"INTEREST_ID": {"type": S, "length": 64}, "INTEREST_NAME": S,
 #: 担当 (one row per role of a person; empty: each person's ticks on 「担当と個人設定」 write theirs).
 USER_ROLE_FIELDS = {"USER_NAME": S, "ROLE_NAME": {"type": S, "length": 32}}
 
+#: 備考の単語集 (one word per row: other spellings, readings and 大分類 with commas between them).
+GLOSSARY_FIELDS = {"TERM": S, "VARIANTS": {"type": S, "length": 1000}, "READING": S, "ROOT_KIND": {"type": S, "length": 1000},
+                   "DESCRIPTION": {"type": S, "length": 1000}, "SORT_ORDER": I}
+GLOSSARY_ROWS = [
+    ("入港", "入航,入湊", "にゅうこう", "船舶", "港に入る", 1),
+    ("入港直後", "", "にゅうこうちょくご", "船舶", "入港して間もない", 2),
+    ("出港", "出航,出湊", "しゅっこう", "船舶", "港を出る", 3),
+    ("岸壁係留", "接岸,着岸", "がんぺきけいりゅう", "船舶", "岸壁に係留している", 4),
+    ("錨泊", "投錨,びょうはく", "びょうはく", "船舶", "錨を下ろして停泊", 5),
+    ("タグボート", "タグ,曳船", "たぐぼーと", "船舶", "", 6),
+    ("駐機", "", "ちゅうき", "航空機", "駐機場に止まっている", 1),
+    ("誘導路", "", "ゆうどうろ", "航空機", "", 2),
+    ("エプロン", "駐機場", "えぷろん", "航空機", "", 3),
+    ("雲で不明瞭", "雲で見えず,雲で判読不可", "くもでふめいりょう", "", "雲で一部が見えない", 10),
+    ("影で不明瞭", "", "かげでふめいりょう", "", "影で一部が見えない", 11),
+    ("前回画像と同じ位置", "", "ぜんかいがぞうとおなじいち", "", "", 12),
+    ("AIS", "ＡＩＳ信号", "えーあいえす", "", "船舶自動識別装置", 13),
+]
+
 #: Every layer's tracking fields (the plugin's editTracking defaults: when and who added / updated).
 EDIT_FIELDS = {"CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
 
@@ -508,6 +527,9 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                  "geometry": {"x": (AREA[0] + AREA[2]) / 2, "y": (AREA[1] + AREA[3]) / 2}}])},
             {"id": 1, "name": "関心地域", "geometryType": "polygon", "fields": INTEREST_FIELDS, "features": []}]},
         {"name": "Roles", "layers": [{"id": 0, "name": "担当", "fields": USER_ROLE_FIELDS, "features": []}]},
+        {"name": "Glossary", "layers": [{"id": 0, "name": "備考の単語集", "fields": GLOSSARY_FIELDS, "features": feats([
+            {"attributes": {"TERM": t, "VARIANTS": v, "READING": r, "ROOT_KIND": k, "DESCRIPTION": d, "SORT_ORDER": o}}
+            for t, v, r, k, d, o in GLOSSARY_ROWS])}]},
     ]}
     for service in out["services"]:
         for layer in service["layers"]:
@@ -644,6 +666,8 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   "interests": {{ "points": "{rest}/Interests/FeatureServer/0", "areas": "{rest}/Interests/FeatureServer/1" }},
   // 担当（「担当と個人設定…」でチェックしたものを利用者名ごとに。別の PC でも同じ担当）
   "userRoles": "{rest}/Roles/FeatureServer/0",
+  // 備考の単語集（観測記録・確認範囲の備考に語の候補を出し、表記ゆれを知らせる）
+  "glossary": "{rest}/Glossary/FeatureServer/0",
   // 書き込むレイヤーの作成日時・作成者・更新日時・更新者（既定の属性名。作成者・更新者は環境変数 USERNAME）
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}

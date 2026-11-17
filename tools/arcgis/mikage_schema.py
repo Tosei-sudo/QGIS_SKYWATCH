@@ -413,6 +413,14 @@ TABLES = (
         F("OTHER_IMPACT", "その他の影響", "TEXT", 1000, "other"),
         F("NOTE", "メモ", "TEXT", 4000, "note"),
     )),
+    Table("TBL_GLOSSARY", "備考の単語集", None, writable=False, setting="glossary", fields=(
+        F("TERM", "語", "TEXT", 255, "term"),
+        F("VARIANTS", "表記ゆれ", "TEXT", 1000, "variants"),
+        F("READING", "よみ", "TEXT", 255, "reading"),
+        F("ROOT_KIND", "大分類", "TEXT", 1000, "kinds"),
+        F("DESCRIPTION", "説明", "TEXT", 1000, "description"),
+        F("SORT_ORDER", "並び順", "LONG", None, "order"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
@@ -437,6 +445,7 @@ INDEXES = {
     "TBL_INTEREST_AREA": ("OWNER_USER",),
     "TBL_USER_ROLE": ("USER_NAME",),
     "TBL_SATELLITE_OUTAGE": ("OUTAGE_ID", "SAT_NAME"),
+    "TBL_GLOSSARY": ("TERM",),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -534,6 +543,8 @@ def plugin_config(urls: dict) -> dict:
         config["userRoles"] = urls["TBL_USER_ROLE"]
     if has("TBL_SATELLITE_OUTAGE"):
         config["satelliteOutages"] = urls["TBL_SATELLITE_OUTAGE"]
+    if has("TBL_GLOSSARY"):
+        config["glossary"] = urls["TBL_GLOSSARY"]
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):
