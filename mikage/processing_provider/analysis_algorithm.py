@@ -213,8 +213,8 @@ class AnalysisAlgorithm(QgsProcessingAlgorithm):
         a, sql, values, prepared, tokens, client, limit = self._prepared
         feedback.pushInfo(tr("読む表: {t}").format(t="、".join(t.name for t, _r in prepared)))
         try:
-            result, counts = analysis_io.run(client, prepared, sql, values, dict(a.conditions), lambda t: tokens.get(t.name), limit,
-                                             _Progress(feedback))
+            result, counts, notes = analysis_io.run(client, prepared, sql, values, dict(a.conditions), lambda t: tokens.get(t.name),
+                                                    limit, _Progress(feedback), a.builder)
         except AnalysisError as error:
             if feedback.isCanceled():
                 return {OUTPUT: None, ROWS: 0}
@@ -224,7 +224,7 @@ class AnalysisAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(tr("Esri の表を読む分析はバックグラウンドで実行する（処理ツールボックスのダイアログ・"
                                             "モデラー・バッチ処理から）: {m}").format(m=error)) from None
         for n, c in counts.items():
-            feedback.pushInfo(tr("{n}: {c:,} 行").format(n=n, c=c))
+            feedback.pushInfo(tr("{n}: {c:,} 行").format(n=n, c=c) + (f"（{notes[n]}）" if n in notes else ""))
         if result.cut:
             feedback.pushWarning(tr("結果は先頭 {n:,} 行まで").format(n=len(result.rows)))
         layer = analysis_io.result_layer(result, self._analysis_name)

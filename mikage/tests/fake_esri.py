@@ -114,8 +114,9 @@ def _like(pattern: str, escape: Optional[str]) -> "re.Pattern[str]":
 def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     """
     `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A [NOT] IN ('x', 'y')`, `A >= 'x'`,
-    `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, `UPPER(A) = 'X'`, joined by
-    AND / OR with parentheses. Parts not understood match (as before).
+    `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, `UPPER(A) = 'X'`,
+    `A [NOT] IN (1, 2)`, `A [NOT] BETWEEN 1 AND 2`, `NOT (…)`, joined by AND / OR
+    with parentheses. Parts not understood match (as before).
     """
     if not where or where.strip() == "1=1":
         return True
@@ -123,6 +124,10 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     ors = _split(text, "OR")
     if len(ors) > 1:
         return any(_matches(p, a) for p in ors)
+    m = re.fullmatch(r"(\w+)\s+(NOT\s+)?BETWEEN\s+(-?\d+(?:\.\d+)?)\s+AND\s+(-?\d+(?:\.\d+)?)", text, re.IGNORECASE)
+    if m:
+        v = a.get(m.group(1))
+        return v is not None and (float(m.group(3)) <= v <= float(m.group(4))) != bool(m.group(2))
     ands = _split(text, "AND")
     if len(ands) > 1:
         return all(_matches(p, a) for p in ands)
@@ -141,8 +146,14 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
     if m:
         return a.get(m.group(1)) is None
+    m = re.fullmatch(r"NOT\s+(.+)", part, re.IGNORECASE | re.DOTALL)
+    if m:
+        return not _matches(m.group(1), a)
     m = re.fullmatch(r"(\w+)\s+(NOT\s+)?IN\s*\((.*)\)", part, re.IGNORECASE | re.DOTALL)
     if m:
+        if re.fullmatch(r"\s*-?\d+(?:\.\d+)?(?:\s*,\s*-?\d+(?:\.\d+)?)*\s*", m.group(3)):
+            numbers = [float(v) for v in m.group(3).split(",")]
+            return a.get(m.group(1)) is not None and (a.get(m.group(1)) in numbers) != bool(m.group(2))
         values = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(3))]
         return (str(a.get(m.group(1))) in values) != bool(m.group(2))
     m = re.fullmatch(r"(\w+)\s*(>=|<=|<>|=|>|<)\s*TIMESTAMP\s*'(.+)'", part)

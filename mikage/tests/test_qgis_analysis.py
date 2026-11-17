@@ -106,13 +106,21 @@ def test_ai_results_of_one_model_counted_per_image_and_class(plugin):
     assert [(x[0], x[2], x[3]) for x in r.rows] in ([("IMG0", "ship", 2), ("IMG0", "car", 1), ("IMG1", "ship", 1)],
                                                     [("IMG0", "ship", 2), ("IMG1", "ship", 1), ("IMG0", "car", 1)])
     assert len(r.rows[0][1]) == 19  # the image's time as text
-    assert "TBL_AI_RESULT 6 行" in dock.status.text() and "TBL_IMAGE_CATALOG 3 行" in dock.status.text()
+    # The builder's condition on the model is also the server's: only that model's results come (core/analysis_plan.py).
+    assert "TBL_AI_RESULT 4 行（サーバーで絞り込み: 条件）" in dock.status.text() and "TBL_IMAGE_CATALOG 3 行" in dock.status.text()
+    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 4}, {"TBL_AI_RESULT": "サーバーで絞り込み: 条件"})
+    model_where = [f["where"] for u, f in _fake.asked if u == f"{AI}/query" and "returnCountOnly" not in f]
+    assert model_where[-1] == "(MODEL = 'yolo')"
 
     # Read with a condition (on the server): the low scores are left out.
     dock.edit_condition("TBL_AI_RESULT", "SCORE >= 0.5")
     r = ran(dock)
     assert sorted((x[0], x[2], x[3]) for x in r.rows) == [("IMG0", "car", 1), ("IMG0", "ship", 1), ("IMG1", "ship", 1)]
-    assert "TBL_AI_RESULT 5 行" in dock.status.text()
+    assert "TBL_AI_RESULT 3 行" in dock.status.text()
+    # SQL written by hand is read as before (its WHERE stays on the PC).
+    dock.set_sql(dock.sql.toPlainText().replace("ORDER BY", "ORDER BY 1,"))
+    ran(dock)
+    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 5}, {})
 
 
 def test_project_layers_join_esri_tables_in_sql_and_go_back_as_layers(plugin):

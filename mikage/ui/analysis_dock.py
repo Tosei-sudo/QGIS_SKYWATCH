@@ -119,6 +119,8 @@ class AnalysisDock(PluginDock):
         self._example = ""
         self.conditions: dict[str, str] = {}
         self.values: dict[str, str] = {}
+        #: The rows each table gave in the last run, and what the server did for each (core/analysis_plan.py).
+        self.last_reads: tuple[dict[str, int], dict[str, str]] = ({}, {})
         self._building = False
 
         # ---- 分析 ----
@@ -853,20 +855,23 @@ class AnalysisDock(PluginDock):
             return
         client = self.context.esri()
         tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared if t.source == "esri"}
+        # The SQL is the builder's (unchanged): its conditions and join keys also narrow the reading on the server.
+        builder = self.builder()
 
         def work(task):
-            return analysis_io.run(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), limit, task)
+            return analysis_io.run(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), limit, task, builder)
 
         def done(answer) -> None:
             self.task = None
             if sip.isdeleted(self):
                 return
-            result, counts = answer
+            result, counts, notes = answer
             self.show_result(result)
-            read = "、".join(f"{n} {c:,} 行" for n, c in counts.items())
+            self.last_reads = (dict(counts), dict(notes))
+            read = "、".join(f"{n} {c:,} 行" + (f"（{notes[n]}）" if n in notes else "") for n, c in counts.items())
             more = self.tr("（先頭 {n:,} 行まで）").format(n=len(result.rows)) if result.cut else ""
             shown = self.tr("、表示は先頭 {n:,} 行").format(n=SHOWN_ROWS) if len(result.rows) > SHOWN_ROWS else ""
-            self.say(self.tr("結果 {n:,} 行{more}{shown}（読んだ表: {read}）").format(n=len(result.rows), more=more, shown=shown, read=read))
+            self.say(self.tr("結果 {n:,} 行{more}{shown}。読んだ表: {read}").format(n=len(result.rows), more=more, shown=shown, read=read))
             self._update_buttons()
             if then:
                 then(result)
