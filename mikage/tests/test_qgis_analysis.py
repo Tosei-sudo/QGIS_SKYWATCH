@@ -107,20 +107,40 @@ def test_ai_results_of_one_model_counted_per_image_and_class(plugin):
                                                     [("IMG0", "ship", 2), ("IMG1", "ship", 1), ("IMG0", "car", 1)])
     assert len(r.rows[0][1]) == 19  # the image's time as text
     # The builder's condition on the model is also the server's: only that model's results come (core/analysis_plan.py).
-    assert "TBL_AI_RESULT 4 行（サーバーで絞り込み: 条件）" in dock.status.text() and "TBL_IMAGE_CATALOG 3 行" in dock.status.text()
-    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 4}, {"TBL_AI_RESULT": "サーバーで絞り込み: 条件"})
+    # The columns the SQL reads only (and the object id).
+    assert "TBL_AI_RESULT 4 行（サーバーで絞り込み: 条件・列 4/5）" in dock.status.text()
+    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 4},
+                               {"TBL_IMAGE_CATALOG": "サーバーで絞り込み: 列 3/5", "TBL_AI_RESULT": "サーバーで絞り込み: 条件・列 4/5"})
     model_where = [f["where"] for u, f in _fake.asked if u == f"{AI}/query" and "returnCountOnly" not in f]
     assert model_where[-1] == "(MODEL = 'yolo')"
 
-    # Read with a condition (on the server): the low scores are left out.
+    # Read with a condition (on the server): the low scores are left out; the catalog's answer is kept from the last run.
     dock.edit_condition("TBL_AI_RESULT", "SCORE >= 0.5")
     r = ran(dock)
     assert sorted((x[0], x[2], x[3]) for x in r.rows) == [("IMG0", "car", 1), ("IMG0", "ship", 1), ("IMG1", "ship", 1)]
     assert "TBL_AI_RESULT 3 行" in dock.status.text()
-    # SQL written by hand is read as before (its WHERE stays on the PC).
+    assert dock.last_reads[1]["TBL_IMAGE_CATALOG"] == "サーバーで絞り込み: 列 3/5、キャッシュ（1 分以内）"
+    # SQL written by hand is narrowed too; 「一覧を更新」 forgets the answers kept.
     dock.set_sql(dock.sql.toPlainText().replace("ORDER BY", "ORDER BY 1,"))
+    dock.refresh_all()
+    _fake.asked.clear()
     ran(dock)
-    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 5}, {})
+    assert dock.last_reads == ({"TBL_IMAGE_CATALOG": 3, "TBL_AI_RESULT": 3},
+                               {"TBL_IMAGE_CATALOG": "サーバーで絞り込み: 列 3/5", "TBL_AI_RESULT": "サーバーで絞り込み: 条件・列 4/5"})
+    assert len([u for u, f in _fake.asked if u.endswith("/query") and "returnCountOnly" not in f]) == 2
+
+    # 「読み込み計画」: what would go to the server, before reading (the counts are asked, no rows).
+    _fake.asked.clear()
+    out = {}
+    dock.explain(lambda text: out.setdefault("text", text))
+    assert wait_for(lambda: "text" in out, 60000)
+    text = out["text"]
+    assert all(f.get("returnCountOnly") == "true" for u, f in _fake.asked if u.endswith("/query"))
+    assert "TBL_AI_RESULT（外部 AI の結果（船舶検出））  SQL では t0" in text and "サーバーへ送る WHERE: (SCORE >= 0.5) AND (MODEL = 'yolo')" in text
+    assert "読む列: 4 / 5（OBJECTID, IMAGE_ID, CLS, MODEL）" in text and "キャッシュ: 1 分以内に読んだ答えがある" in text
+    assert "サーバーへ送る WHERE: なし（結合キーだけ）" in text
+    assert dock.plan_dialog is not None and dock.plan_dialog.isVisible() and dock.plan_dialog.text.toPlainText() == text
+    dock.plan_dialog.close()
 
 
 def test_project_layers_join_esri_tables_in_sql_and_go_back_as_layers(plugin):

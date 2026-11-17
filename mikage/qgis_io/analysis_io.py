@@ -15,8 +15,7 @@ from qgis.PyQt.QtCore import QDate, QDateTime, QMetaType, QTime, QVariant
 
 from ..core import analysis_plan
 from ..core.analysis import (
-    DEFAULT_TABLE_LIMIT, SHAPE, AnalysisError, Builder, Column, Database, Result, Table, column_type, referenced, table_name, unique_name,
-    wants_shape,
+    DEFAULT_TABLE_LIMIT, SHAPE, AnalysisError, Column, Database, Result, Table, column_type, referenced, table_name, unique_name, wants_shape,
 )
 
 WGS84 = "EPSG:4326"
@@ -147,21 +146,21 @@ def prepare(tables: Sequence[Table], sql: str, conditions: dict, limit: int = DE
 
 def run(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sql: str, values: dict, conditions: dict,
         token_for: Callable[[Table], Optional[str]], limit: int = DEFAULT_TABLE_LIMIT, task: Any = None,
-        builder: Optional[Builder] = None) -> tuple[Result, dict, dict]:
+        cache_minutes: float = 0) -> tuple[Result, dict, dict]:
     """
     Reads the tables and runs the query (in a task); the result, how many rows
     each table gave and what the server did for each (core/analysis_plan.py:
-    for the SQL of 「かんたん集計」 `builder`, its conditions and join keys).
+    the columns read, the conditions and join keys sent, answers kept).
     """
     cancelled = (lambda: task.isCanceled()) if task is not None else None
-    shape = wants_shape(sql)
-    plan = analysis_plan.plan_of(builder, sql, values)
+    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), token_for,
+                                          cache_minutes=cache_minutes)
     db = Database()
     counts: dict[str, int] = {}
     notes: dict[str, str] = {}
     try:
-        reads = analysis_plan.read_tables(client, prepared, plan, conditions, values, shape, limit, token_for, cancelled,
-                                          task.progress if task is not None else None)
+        reads = analysis_plan.read_tables(client, reading, conditions, limit, token_for, cancelled,
+                                          task.progress if task is not None else None, cache_minutes)
         for r in reads:
             db.add(r.table.name, r.columns, r.rows)
         found = {r.table.name: r for r in reads}
@@ -173,6 +172,14 @@ def run(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sq
     finally:
         db.close()
     return result, counts, notes
+
+
+def explain(client: Any, prepared: Sequence[tuple[Table, Optional[LayerReader]]], sql: str, values: dict, conditions: dict,
+            token_for: Callable[[Table], Optional[str]], cache_minutes: float = 0) -> str:
+    """「読み込み計画」: how the tables would be read (in a task: the layers' information and counts are asked)."""
+    reading = analysis_plan.prepare_reads(client, prepared, sql, values, conditions, wants_shape(sql), token_for, count_all=True,
+                                          cache_minutes=cache_minutes)
+    return analysis_plan.describe(reading, conditions, cache_minutes)
 
 
 def _field(name: str, kind: str) -> QgsField:

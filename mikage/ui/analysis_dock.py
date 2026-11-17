@@ -32,9 +32,9 @@ from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QAbstractTableModel, QModelIndex, Qt
 from qgis.PyQt.QtGui import QFontDatabase, QKeySequence
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView, QTabWidget, QToolButton,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView,
+    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView,
+    QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 try:
@@ -42,7 +42,7 @@ try:
 except ImportError:  # Qt 5
     from qgis.PyQt.QtWidgets import QShortcut
 
-from ..core import audit
+from ..core import analysis_cache, audit
 from ..core.analysis import (
     AGGREGATES, DEFAULT_TABLE_LIMIT, JOIN_TYPES, PROJECT_KEY, PROJECT_SCOPE, AnalysisError, Analysis, Builder, Column, Figure, Join,
     Result, Table, aliases, analyses_of, analyses_text, build_sql, cell_text, csv_text, esri_columns, esri_tables, examples, parameters,
@@ -121,6 +121,8 @@ class AnalysisDock(PluginDock):
         self.values: dict[str, str] = {}
         #: The rows each table gave in the last run, and what the server did for each (core/analysis_plan.py).
         self.last_reads: tuple[dict[str, int], dict[str, str]] = ({}, {})
+        #: 「読み込み計画」's dialog, while it is open.
+        self.plan_dialog: Optional[QDialog] = None
         self._building = False
 
         # ---- 分析 ----
@@ -174,8 +176,8 @@ class AnalysisDock(PluginDock):
                                                  "大きな表はここで絞ると速い"))
         self.condition_button.clicked.connect(lambda: self.edit_condition())
         self.refresh_button = QPushButton(self.tr("一覧を更新"))
-        self.refresh_button.setToolTip(self.tr("プロジェクトのレイヤーと Esri の表の列を読み直す"))
-        self.refresh_button.clicked.connect(lambda: self.refresh(read=True))
+        self.refresh_button.setToolTip(self.tr("プロジェクトのレイヤーと Esri の表の列を読み直す（覚えている読み込み結果も捨てる）"))
+        self.refresh_button.clicked.connect(self.refresh_all)
         self.limit = QSpinBox()
         self.limit.setRange(1000, 5_000_000)
         self.limit.setSingleStep(10_000)
@@ -223,8 +225,12 @@ class AnalysisDock(PluginDock):
         self.cancel_button = QPushButton(self.tr("取消"))
         self.cancel_button.clicked.connect(self.cancel)
         self.cancel_button.setEnabled(False)
+        self.plan_button = QPushButton(self.tr("読み込み計画"))
+        self.plan_button.setToolTip(self.tr("実行する前に、各表をサーバーからどう読むかを見る（送る条件・読む列・件数・結合キー・キャッシュ）"))
+        self.plan_button.clicked.connect(lambda: self.explain())
         run_row.addWidget(self.run_button)
         run_row.addWidget(self.cancel_button)
+        run_row.addWidget(self.plan_button)
         run_row.addStretch(1)
         for key, text, tip, slot in [
             ("csv", self.tr("CSV 保存…"), self.tr("結果をすべて CSV（UTF-8 BOM 付き）で保存"), lambda: self.save_csv()),
@@ -617,6 +623,11 @@ class AnalysisDock(PluginDock):
 
     # ---- tables ----------------------------------------------------------------------------------
 
+    def refresh_all(self) -> None:
+        """「一覧を更新」: the tables and their columns again, and no answer kept (core/analysis_cache.py)."""
+        analysis_cache.clear()
+        self.refresh(read=True)
+
     def refresh(self, read: bool = False) -> None:
         """Lists the tables again (the settings file's and the project's); `read`: their Esri columns too."""
         known = {t.name: t for t in self.tables}
@@ -821,45 +832,51 @@ class AnalysisDock(PluginDock):
     def say(self, text: str) -> None:
         self.status.setText(text)
 
-    def run(self, then: Optional[Callable[[Optional[Result]], None]] = None) -> None:
-        """Reads the tables the SQL names and runs it (in a task); `then(result or None)` after."""
-        if self.task is not None:
-            return
+    def _cache_minutes(self) -> float:
+        return getattr(self.context.config, "analysis_cache_minutes", 0) or 0
+
+    def _ready(self, need_values: bool = True) -> Optional[tuple]:
+        """(sql, values, conditions, limit, prepared) of what is shown, or None (the reason said)."""
         if self.tabs.currentIndex() == 0:
             try:
                 self._building = True
                 self.sql.setPlainText(build_sql(self.builder()))
             except AnalysisError as error:
                 self.say(str(error))
-                if then:
-                    then(None)
-                return
+                return None
             finally:
                 self._building = False
         sql = self.sql.toPlainText()
-        values = {n: v for n, v in self.current_values().items() if n in parameters(sql)}
+        values = {n: v for n, v in self.current_values().items() if n in parameters(sql) and v}
         empty = [n for n in parameters(sql) if not values.get(n)]
-        if empty:
+        if empty and need_values:
             self.say(self.tr("値を入力: {n}").format(n="、".join(":" + n for n in empty)))
-            if then:
-                then(None)
-            return
+            return None
         conditions = dict(self.conditions)
         limit = self.limit.value()
         try:
             prepared = analysis_io.prepare(self.tables, sql, conditions, limit, self.project)
         except AnalysisError as error:
             self.say(str(error))
+            return None
+        return sql, values, conditions, limit, prepared
+
+    def run(self, then: Optional[Callable[[Optional[Result]], None]] = None) -> None:
+        """Reads the tables the SQL names and runs it (in a task); `then(result or None)` after."""
+        if self.task is not None:
+            return
+        ready = self._ready()
+        if ready is None:
             if then:
                 then(None)
             return
+        sql, values, conditions, limit, prepared = ready
         client = self.context.esri()
         tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared if t.source == "esri"}
-        # The SQL is the builder's (unchanged): its conditions and join keys also narrow the reading on the server.
-        builder = self.builder()
+        minutes = self._cache_minutes()
 
         def work(task):
-            return analysis_io.run(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), limit, task, builder)
+            return analysis_io.run(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), limit, task, minutes)
 
         def done(answer) -> None:
             self.task = None
@@ -892,6 +909,70 @@ class AnalysisDock(PluginDock):
     def cancel(self) -> None:
         if self.task is not None:
             self.task.cancel()
+
+    def explain(self, then: Optional[Callable[[Optional[str]], None]] = None) -> None:
+        """「読み込み計画」: how each table would be read (in a task: the layers and their counts are asked), in a dialog."""
+        if self.task is not None:
+            return
+        ready = self._ready(need_values=False)
+        if ready is None:
+            if then:
+                then(None)
+            return
+        sql, values, conditions, _limit, prepared = ready
+        client = self.context.esri()
+        tokens = {t.name: self.context.token_for(t.url, t.token) for t, _r in prepared if t.source == "esri"}
+        minutes = self._cache_minutes()
+
+        def work(_task):
+            return analysis_io.explain(client, prepared, sql, values, conditions, lambda t: tokens.get(t.name), minutes)
+
+        def done(text) -> None:
+            self.task = None
+            if sip.isdeleted(self):
+                return
+            self.say(self.tr("読み込み計画を表示した"))
+            self._update_buttons()
+            self.show_plan(text)
+            if then:
+                then(text)
+
+        def failed(message: str) -> None:
+            self.task = None
+            if sip.isdeleted(self):
+                return
+            self.say(self.tr("読み込み計画を作れない: {m}").format(m=message))
+            self._update_buttons()
+            if then:
+                then(None)
+
+        self.say(self.tr("読み込み計画を作成中…"))
+        self.task = run_task(self.tr("データ分析: 読み込み計画"), work, done, failed)
+        self._update_buttons()
+
+    def show_plan(self, text: str) -> QDialog:
+        """The plan of reading in a dialog (one at a time, not modal: the dock stays usable)."""
+        if self.plan_dialog is not None and not sip.isdeleted(self.plan_dialog):
+            self.plan_dialog.close()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr("データ分析: 読み込み計画"))
+        layout = QVBoxLayout(dialog)
+        view = QPlainTextEdit(text)
+        view.setReadOnly(True)
+        view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        layout.addWidget(view, 1)
+        buttons = QDialogButtonBox()
+        copy = buttons.addButton(self.tr("コピー"), QDialogButtonBox.ButtonRole.ActionRole)
+        copy.clicked.connect(lambda: QApplication.clipboard().setText(text))
+        buttons.addButton(self.tr("閉じる"), QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.rejected.connect(dialog.close)
+        layout.addWidget(buttons)
+        dialog.resize(720, 520)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.text = view
+        dialog.show()
+        self.plan_dialog = dialog
+        return dialog
 
     def show_result(self, result: Optional[Result]) -> None:
         self.result = result
@@ -1075,6 +1156,7 @@ class AnalysisDock(PluginDock):
     def _update_buttons(self) -> None:
         running = self.task is not None
         self.run_button.setEnabled(not running)
+        self.plan_button.setEnabled(not running)
         self.cancel_button.setEnabled(running)
         has = bool(self.result and self.result.columns)
         for key in ("csv", "copy", "layer"):

@@ -187,7 +187,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "preload",
   "offlineWork",
   "columnDrag",
-  "shapeReceiver"
+  "shapeReceiver",
+  "analysisCacheMinutes"
  ],
  "roles": {
   "imageCatalogs": [
@@ -1846,6 +1847,10 @@ const SPEC = [
   { group: "一覧", keys: [
     { key: "columnDrag", label: "列の見出しのドラッグ", doc: "一覧のビュー列並べ替え絞り込みの保存", help: "ドックの一覧の列を見出しのドラッグで並べ替えられるか。false でドラッグでは動かず、見出しの右クリックのメニュー（この列を左へ・右へ・先頭へ・末尾へ、列の表示と順番…）だけで並べ替える。",
       field: B("columnDrag", "ドラッグで並べ替える", { help: "既定 true" }) },
+  ] },
+  { group: "データ分析", keys: [
+    { key: "analysisCacheMinutes", label: "読み込みのキャッシュ", doc: "データ分析", help: "データ分析で、同じ表への同じ問い合わせにメモリの答えを使う分数。サーバーが最終更新日時を返す表はそれが変われば読み直す。「一覧を更新」で捨てる。0 で使わない。",
+      field: N("analysisCacheMinutes", "分", { min: 0, max: 1440, ph: "5" }) },
   ] },
 ];
 const ALL = SPEC.flatMap((g) => g.keys.map((k) => ({ ...k, group: g.group })));
