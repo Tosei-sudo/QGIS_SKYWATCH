@@ -30,6 +30,7 @@ from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
 from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
+from .obs.glossary import glossary_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.names import AliasTableConfig, alias_tables_of
@@ -55,7 +56,7 @@ from .util import is_number
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "satelliteOutages", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "arcgisPortals", "layers",
+    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
@@ -89,6 +90,8 @@ class PluginConfig:
     #: `preload`: what is read from Esri in the background right after QGIS has started (core/preload.ITEMS; all by default).
     preload: tuple = tuple(PRELOAD_ITEMS)
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
+    #: `glossary`: the Esri table of the words the 備考 should use (備考の単語集, core/obs/glossary.py); None for none.
+    glossary: Optional[EsriSource] = None
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
     startup_layers: list[StartupLayer] = field(default_factory=list)
@@ -319,6 +322,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.shape_receiver = receiver_settings_of(value["shapeReceiver"], problems)
     if "observationVocabulary" in value:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
+    if "glossary" in value:
+        config.glossary = glossary_source_of(value["glossary"], problems)
     if "arcgisPortals" in value:
         seen: set[str] = set()
         portals = []

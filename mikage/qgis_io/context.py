@@ -80,6 +80,10 @@ class PluginContext(QObject):
         self.configChanged.connect(self._offline_settings)
         #: 地名・国の控え: the squares looked up and the polygons read, kept across sessions (core/obs/place_cache.py).
         place_cache.PLACES.use_file(settings.place_cache_path())
+        #: 備考の単語集 (`glossary`): read in a task when the settings file is read (qgis_io/glossary_io.py).
+        from .glossary_io import GlossaryKeeper
+
+        self.glossary = GlossaryKeeper(self)
 
     def reload(self) -> None:
         """
@@ -274,6 +278,8 @@ class PluginContext(QObject):
                 out.append(Service("確認範囲", x.label, x.areas.url, bool(x.areas.token)))
             if x.taxonomy_table:
                 out.append(Service("分類体系", x.label, x.taxonomy_table.url, bool(x.taxonomy_table.token)))
+        if c.glossary is not None:
+            out.append(Service("単語集", "備考の単語集", c.glossary.url, bool(c.glossary.token)))
         # Base maps on an ArcGIS server (their token is not put in the layer: an authentication configuration is).
         out += [Service("背景地図", x.label, x.url.rstrip("/"), bool(x.token)) for x in c.base_maps if x.type == "esri"]
         # Processing services, under the URL their sign-in is kept for (the GPServer, or the OGC API landing page).

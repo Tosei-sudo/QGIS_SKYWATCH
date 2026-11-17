@@ -23,7 +23,7 @@ def plugin_constants() -> dict:
     from mikage.core.catalog import config as catalog_config
     from mikage.core.enhance import pipeline
     from mikage.core.obs import export as obs_export
-    from mikage.core.obs import alerts, assignments, handover, model as obs_model, stores as obs_stores
+    from mikage.core.obs import alerts, assignments, glossary, handover, model as obs_model, stores as obs_stores
     from mikage.core.plan import modes, names, outages, satellites
     from mikage.core.request import export, groups as request_groups, link_id, result_file, store as request_store, systems
 
@@ -57,6 +57,7 @@ def plugin_constants() -> dict:
             "interests": dict(interests.DEFAULT_INTEREST_FIELDS),
             "userRoles": dict(roles.DEFAULT_USER_ROLE_FIELDS),
             "satelliteOutages": dict(outages.DEFAULT_OUTAGE_FIELDS),
+            "glossary": dict(glossary.DEFAULT_GLOSSARY_FIELDS),
         },
         "roleCodes": [[r.code, r.name] for r in roles.ROLES],
         "alertSources": list(alerts.SOURCES),
