@@ -249,8 +249,15 @@ class FakeEsri:
             return {"error": {"code": 498 if form.get("token") else 499, "message": "Invalid token."}}
         return None
 
+    def found(self, layer: FakeLayer, form: dict[str, str]) -> list[dict[str, Any]]:
+        """The rows of the query's where (a subclass may read it otherwise; an EsriError is the server's error)."""
+        return [r for r in layer.rows if _matches(form.get("where"), r["attributes"])]
+
     def _query(self, layer: FakeLayer, form: dict[str, str]) -> dict[str, Any]:
-        found = [r for r in layer.rows if _matches(form.get("where"), r["attributes"])]
+        try:
+            found = self.found(layer, form)
+        except EsriError as error:
+            return {"error": {"code": 400, "message": str(error)}}
         if form.get("objectIds"):
             ids = {int(i) for i in form["objectIds"].split(",")}
             if len(ids) > layer.max_record_count:
@@ -273,8 +280,10 @@ class FakeEsri:
         count = min(int(form.get("resultRecordCount", layer.max_record_count)), layer.max_record_count)
         page = found[offset:offset + count]
         geometry = form.get("returnGeometry") != "false"
+        wanted = {n.strip().lower() for n in (form.get("outFields") or "*").split(",")}
         return {
-            "features": [{"attributes": dict(r["attributes"]), **({"geometry": r["geometry"]} if geometry else {})} for r in page],
+            "features": [{"attributes": {k: v for k, v in r["attributes"].items() if "*" in wanted or k.lower() in wanted},
+                          **({"geometry": r["geometry"]} if geometry else {})} for r in page],
             "exceededTransferLimit": offset + count < len(found),
         }
 

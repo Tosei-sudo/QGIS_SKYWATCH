@@ -49,6 +49,8 @@ from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
 from .preload import ITEMS as PRELOAD_ITEMS, preload_of
 from .shape_receiver import DEFAULT_RECEIVER, ReceiverSettings, receiver_settings_of
+from .analysis_cache import DEFAULT_MINUTES as ANALYSIS_CACHE_MINUTES
+from .util import is_number
 
 #: The keys this plugin reads.
 KEYS = (
@@ -57,7 +59,7 @@ KEYS = (
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
-    "shapeReceiver",
+    "shapeReceiver", "analysisCacheMinutes",
 )
 
 
@@ -139,6 +141,8 @@ class PluginConfig:
     column_drag: bool = True
     #: `shapeReceiver`: shapes taken from AutoMap, links and programs on this computer (127.0.0.1) and shown on the map.
     shape_receiver: ReceiverSettings = DEFAULT_RECEIVER
+    #: `analysisCacheMinutes`: how long 「データ分析」 answers the same Esri query from memory (core/analysis_cache.py; 0: never).
+    analysis_cache_minutes: float = ANALYSIS_CACHE_MINUTES
 
 
 @dataclass
@@ -303,6 +307,12 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             config.column_drag = value["columnDrag"]
         else:
             problems.append("columnDrag は true か false で指定")
+    if "analysisCacheMinutes" in value:
+        minutes = value["analysisCacheMinutes"]
+        if is_number(minutes) and 0 <= minutes <= 24 * 60:
+            config.analysis_cache_minutes = minutes
+        else:
+            problems.append("analysisCacheMinutes はデータ分析の読み込みを覚えておく分数（0〜1440、0 で覚えない）で指定")
     if "preload" in value:
         config.preload = preload_of(value["preload"], problems)
     if "shapeReceiver" in value:

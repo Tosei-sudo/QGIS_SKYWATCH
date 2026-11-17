@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
-from . import audit, edit_stamp, time_zone
+from . import analysis_cache, audit, edit_stamp, time_zone
 from .util import iso_text, is_number
 
 
@@ -99,7 +99,10 @@ class EsriClient:
 
     def _ask_edit(self, url: str, params: dict[str, str], token: Optional[str], times) -> dict[str, Any]:
         """An edit request, recorded in the audit log with its answer (core/audit.py: only queued here)."""
-        layer = (self._layers.get(url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[0]) or {}).get("name") or ""
+        base = url.split("?", 1)[0].rstrip("/").rsplit("/", 1)[0]
+        layer = (self._layers.get(base) or {}).get("name") or ""
+        # 「データ分析」 reads the layer again (core/analysis_cache.py).
+        analysis_cache.forget(base)
         try:
             value = self._ask_renewing(url, params, token)
         except EsriError as error:

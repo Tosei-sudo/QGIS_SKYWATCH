@@ -21,8 +21,10 @@ no ATTACH, no PRAGMA, no writing).
 - 「かんたん集計」 (Builder) writes the SQL of a table, its joins (the key
   pairs suggested from the attributes' roles), a condition, the columns
   grouped by and the figures (件数, 異なる値の数, 合計, 平均, 最小, 最大).
-  Its condition and join keys also narrow what the Esri server sends
-  (core/analysis_plan.py, 2026-11-17), never the result.
+- What the Esri server sends is narrowed for any query, never its result
+  (core/analysis_plan.py, 2026-11-17): the columns it reads, its
+  conditions and join keys; answers are kept a few minutes
+  (core/analysis_cache.py).
 
 An analysis (its name, SQL, the builder's choices, the values of the
 parameters and the conditions each table is read with) is kept in the QGIS
@@ -297,6 +299,14 @@ def parameters(sql: str) -> list[str]:
     return list(dict.fromkeys(m.group(1) for m in _PARAMETER.finditer(_code(sql))))
 
 
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def fold(name: str) -> str:
+    """A name as SQLite matches it (a–z without case, other letters as they are)."""
+    return (name or "").translate(_ASCII_LOWER)
+
+
 def quote_name(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
@@ -490,13 +500,17 @@ def _sql_message(error: Exception) -> str:
 
 def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, limit: int = DEFAULT_TABLE_LIMIT,
               token: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None, pushed: Sequence[str] = (),
-              key: Optional[tuple[str, Sequence[str]]] = None, notes: Optional[list[str]] = None) -> tuple[list[Column], list[list[Any]]]:
+              key: Optional[tuple[str, Sequence[str]]] = None, notes: Optional[list[str]] = None, fields: Optional[set[str]] = None,
+              cache_minutes: float = 0) -> tuple[list[Column], list[list[Any]]]:
     """
     The columns and rows of an Esri table (the settings file's condition and
-    `where` both apply). `pushed` (Esri WHERE texts) and `key` (a field and
-    its values as Esri literals: only those rows) are what core/analysis_plan.py
-    lets the server leave out: when the server refuses them, the table is
-    read without them ("fallback" in `notes`).
+    `where` both apply). What core/analysis_plan.py lets the server leave
+    out: `pushed` (Esri WHERE texts), `key` (a field and its values as Esri
+    literals: only those rows) and `fields` (the columns read, as `fold`
+    writes them; the object id always; None for all). When the server refuses them, the
+    table is read without them ("fallback" in `notes`). Answers within
+    `cache_minutes` come from core/analysis_cache.py ("cache:<seconds>" in
+    `notes`, "read" for one asked of the server).
     """
     from .esri import EsriError, InvalidTokenError, TooManyError, UnreachableError, own_condition
     clauses = [f"({table.where})"] if table.where and table.where.strip() else []
@@ -506,52 +520,81 @@ def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, l
             clauses.append(own_condition(where))
         except EsriError as error:
             raise AnalysisError(f"{table.name} の読み込み条件: {error}") from None
+    notes = notes if notes is not None else []
     try:
         info = client.layer(table.url, token)
-        fields = [f for f in info.raw.get("fields") or [] if isinstance(f, dict) and isinstance(f.get("name"), str)]
+        layer_fields = [f for f in info.raw.get("fields") or [] if isinstance(f, dict) and isinstance(f.get("name"), str)]
         geometry = bool(info.geometry_type) and shape
+        full = esri_columns(table, layer_fields)
+        drawn = geometry and not any(c.name.upper() == SHAPE for c in full)
+        if drawn:
+            full.append(Column(SHAPE, "TEXT", "", "形状（WKT）"))
+        columns = full if fields is None else [c for c in full if fold(c.name) in fields or c.oid]
+        out = None
+        if len(columns) < len(full):
+            out = [c.name for c in columns if not (drawn and c.name == SHAPE)]
+            if info.object_id_field not in out and info.object_id_field in info.field_types:
+                out.append(info.object_id_field)
         try:
-            features = _esri_features(client, table, info, clauses + [f"({p})" for p in pushed], key, token, geometry, limit,
-                                      cancelled)
+            features = _esri_features(client, table, info, clauses + [f"({p})" for p in pushed], key, token,
+                                      drawn and any(c.name == SHAPE for c in columns), limit, cancelled, out, cache_minutes, notes)
         except (TooManyError, UnreachableError, InvalidTokenError):
             raise
         except EsriError:
-            if not (pushed or key) or (cancelled is not None and cancelled()):
+            if not (pushed or key or len(columns) < len(full)) or (cancelled is not None and cancelled()):
                 raise
-            features = client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit,
-                                        cancelled=cancelled)
-            if notes is not None:
-                notes.append("fallback")
+            columns = full
+            features = _esri_features(client, table, info, clauses, None, token, drawn, limit, cancelled, None, cache_minutes, notes)
+            notes.append("fallback")
     except TooManyError as error:
         raise AnalysisError(f"{table.name}: {error}") from None
     except EsriError as error:
         raise AnalysisError(f"{table.name} の読み込みに失敗: {error}") from None
     table.spatial = bool(info.geometry_type)
-    columns = esri_columns(table, fields)
-    if geometry and not any(c.name.upper() == SHAPE for c in columns):
-        columns.append(Column(SHAPE, "TEXT", "", "形状（WKT）"))
-    dates = {f["name"] for f in fields if str(f.get("type", "")).lower() == "esrifieldtypedate"}
+    dates = {f["name"] for f in layer_fields if str(f.get("type", "")).lower() == "esrifieldtypedate"}
     rows = []
     for f in features:
         a = f.get("attributes") or {}
         row = []
         for c in columns:
-            if c.name == SHAPE and geometry and c.name not in a:
+            if c.name == SHAPE and drawn:
                 row.append(esri_wkt(f.get("geometry")))
             elif c.name in dates:
                 row.append(local_time(a.get(c.name)))
             else:
                 row.append(a.get(c.name))
         rows.append(row)
-    table.columns = columns
+    table.columns = full
     return columns, rows
 
 
 def _esri_features(client: Any, table: Table, info: Any, clauses: Sequence[str], key: Optional[tuple[str, Sequence[str]]],
-                   token: Optional[str], geometry: bool, limit: int, cancelled: Optional[Callable[[], bool]]) -> list[dict[str, Any]]:
+                   token: Optional[str], geometry: bool, limit: int, cancelled: Optional[Callable[[], bool]],
+                   names: Optional[Sequence[str]] = None, cache_minutes: float = 0,
+                   notes: Optional[list[str]] = None) -> list[dict[str, Any]]:
+    """The features of the clauses (and of each chunk of the key's values), the attributes `names` only (None: all)."""
     from .esri import EsriError, TooManyError
+    from . import analysis_cache
+    wanted = frozenset(n.lower() for n in names) if names is not None else None
+    stamp = analysis_cache.stamp_of(info.raw)
+
+    def query(where: str) -> list[dict[str, Any]]:
+        got = analysis_cache.features(table.url, where, token, wanted, geometry, stamp, cache_minutes)
+        if got is not None:
+            if len(got[0]) > limit:
+                raise TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
+            if notes is not None:
+                notes.append(f"cache:{got[1]:.0f}")
+            return got[0]
+        found = client.query_all(table.url, where, token, out_fields=",".join(names) if names is not None else "*",
+                                 geometry=geometry, limit=limit, cancelled=cancelled)
+        analysis_cache.keep_features(table.url, where, token, wanted, geometry, stamp, found, cache_minutes)
+        if notes is not None:
+            notes.append("read")
+        return found
+
     if key is None:
-        return client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit, cancelled=cancelled)
+        return query(" AND ".join(clauses) or "1=1")
     from .analysis_plan import CHUNK
     name, values = key
     out: dict[Any, dict[str, Any]] = {}
@@ -560,14 +603,18 @@ def _esri_features(client: Any, table: Table, info: Any, clauses: Sequence[str],
         if cancelled and cancelled():
             raise EsriError("取消")
         chunk = ", ".join(values[start:start + CHUNK])
-        where = " AND ".join(list(clauses) + [f"{name} IN ({chunk})"])
-        for i, f in enumerate(client.query_all(table.url, where, token, geometry=geometry, limit=limit, cancelled=cancelled)):
+        for i, f in enumerate(query(" AND ".join(list(clauses) + [f"{name} IN ({chunk})"]))):
             a = f.get("attributes") or {}
             # A value of two requests may match the same row (a server that compares text in any case).
             out[a[oid] if a.get(oid) is not None else ("row", start, i)] = f
         if len(out) > limit:
             raise TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
-    return list(out.values())
+    found = list(out.values())
+    # In object id order, as a whole table is read (the order of a query without ORDER BY stays the same).
+    ids = [(f.get("attributes") or {}).get(oid) for f in found]
+    if all(isinstance(i, (int, float)) and not isinstance(i, bool) for i in ids):
+        found = [f for _i, f in sorted(zip(ids, found), key=lambda x: x[0])]
+    return found
 
 
 # ---- join keys ----------------------------------------------------------------------------------
