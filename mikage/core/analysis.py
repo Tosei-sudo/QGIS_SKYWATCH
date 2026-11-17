@@ -21,6 +21,8 @@ no ATTACH, no PRAGMA, no writing).
 - 「かんたん集計」 (Builder) writes the SQL of a table, its joins (the key
   pairs suggested from the attributes' roles), a condition, the columns
   grouped by and the figures (件数, 異なる値の数, 合計, 平均, 最小, 最大).
+  Its condition and join keys also narrow what the Esri server sends
+  (core/analysis_plan.py, 2026-11-17), never the result.
 
 An analysis (its name, SQL, the builder's choices, the values of the
 parameters and the conditions each table is read with) is kept in the QGIS
@@ -474,9 +476,16 @@ def _sql_message(error: Exception) -> str:
 # ---- reading an Esri table ----------------------------------------------------------------------
 
 def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, limit: int = DEFAULT_TABLE_LIMIT,
-              token: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None) -> tuple[list[Column], list[list[Any]]]:
-    """The columns and rows of an Esri table (the settings file's condition and `where` both apply)."""
-    from .esri import EsriError, TooManyError, own_condition
+              token: Optional[str] = None, cancelled: Optional[Callable[[], bool]] = None, pushed: Sequence[str] = (),
+              key: Optional[tuple[str, Sequence[str]]] = None, notes: Optional[list[str]] = None) -> tuple[list[Column], list[list[Any]]]:
+    """
+    The columns and rows of an Esri table (the settings file's condition and
+    `where` both apply). `pushed` (Esri WHERE texts) and `key` (a field and
+    its values as Esri literals: only those rows) are what core/analysis_plan.py
+    lets the server leave out: when the server refuses them, the table is
+    read without them ("fallback" in `notes`).
+    """
+    from .esri import EsriError, InvalidTokenError, TooManyError, UnreachableError, own_condition
     clauses = [f"({table.where})"] if table.where and table.where.strip() else []
     if where and where.strip():
         try:
@@ -488,8 +497,18 @@ def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, l
         info = client.layer(table.url, token)
         fields = [f for f in info.raw.get("fields") or [] if isinstance(f, dict) and isinstance(f.get("name"), str)]
         geometry = bool(info.geometry_type) and shape
-        features = client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit,
-                                    cancelled=cancelled)
+        try:
+            features = _esri_features(client, table, info, clauses + [f"({p})" for p in pushed], key, token, geometry, limit,
+                                      cancelled)
+        except (TooManyError, UnreachableError, InvalidTokenError):
+            raise
+        except EsriError:
+            if not (pushed or key) or (cancelled is not None and cancelled()):
+                raise
+            features = client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit,
+                                        cancelled=cancelled)
+            if notes is not None:
+                notes.append("fallback")
     except TooManyError as error:
         raise AnalysisError(f"{table.name}: {error}") from None
     except EsriError as error:
@@ -514,6 +533,29 @@ def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, l
         rows.append(row)
     table.columns = columns
     return columns, rows
+
+
+def _esri_features(client: Any, table: Table, info: Any, clauses: Sequence[str], key: Optional[tuple[str, Sequence[str]]],
+                   token: Optional[str], geometry: bool, limit: int, cancelled: Optional[Callable[[], bool]]) -> list[dict[str, Any]]:
+    from .esri import EsriError, TooManyError
+    if key is None:
+        return client.query_all(table.url, " AND ".join(clauses) or "1=1", token, geometry=geometry, limit=limit, cancelled=cancelled)
+    from .analysis_plan import CHUNK
+    name, values = key
+    out: dict[Any, dict[str, Any]] = {}
+    oid = info.object_id_field
+    for start in range(0, len(values), CHUNK):
+        if cancelled and cancelled():
+            raise EsriError("取消")
+        chunk = ", ".join(values[start:start + CHUNK])
+        where = " AND ".join(list(clauses) + [f"{name} IN ({chunk})"])
+        for i, f in enumerate(client.query_all(table.url, where, token, geometry=geometry, limit=limit, cancelled=cancelled)):
+            a = f.get("attributes") or {}
+            # A value of two requests may match the same row (a server that compares text in any case).
+            out[a[oid] if a.get(oid) is not None else ("row", start, i)] = f
+        if len(out) > limit:
+            raise TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
+    return list(out.values())
 
 
 # ---- join keys ----------------------------------------------------------------------------------
