@@ -137,6 +137,30 @@ def test_an_esri_table_is_read_with_its_conditions_dates_and_shapes():
         read_esri(EsriClient(fake), tables()[3], "", limit=1)
 
 
+def test_records_join_their_named_area_by_its_objectid():
+    """観測記録.NAMED_AREA_OBJECTID (an attribute rule's, 2026-11-17) = 地名のポリゴン.OBJECTID, whatever the object id is called."""
+    records_url, areas_url = "https://example.com/arcgis/rest/services/O/FeatureServer/0", "https://example.com/arcgis/rest/services/A/FeatureServer/3"
+    config, problems = parse_config({"observationStores": [{"url": records_url}],
+                                     "alertReports": {"namedAreas": areas_url, "formats": [{"name": "a"}]}})
+    assert problems == []
+    records, areas = [t for t in esri_tables(config) if t.kind in ("observation", "namedArea")]
+    assert (records.name, areas.name) == ("TBL_OBSERVATION", "TBL_NAMED_AREA") and areas.roles["id"] == "NAMED_AREA_ID"
+    # Before the columns are read.
+    assert suggest_join(records, areas) == ("NAMED_AREA_OBJECTID", "OBJECTID")
+    assert suggest_join(areas, records) == ("OBJECTID", "NAMED_AREA_OBJECTID")
+    fake = FakeEsri()
+    fake.add_layer(records_url, FakeLayer({"OBS_ID": S, "OBJECT_ID": S, "KIND": S, "NAMED_AREA_OBJECTID": "esriFieldTypeInteger"}))
+    fake.add_layer(areas_url, FakeLayer({"NAME": S, "KIND": S, "NAMED_AREA_ID": S}, "esriGeometryPolygon", oid="FID_1"))
+    for t in (records, areas):
+        read_esri(EsriClient(fake), t)
+    assert [c.name for c in areas.columns if c.oid] == ["FID_1"]
+    assert suggest_join(records, areas) == ("NAMED_AREA_OBJECTID", "FID_1")
+    # A layer without the attribute (made before 2026-11-17): not that key (the same names as before).
+    fake.add_layer(records_url, FakeLayer({"OBS_ID": S, "OBJECT_ID": S, "KIND": S}))
+    read_esri(EsriClient(fake), records)
+    assert suggest_join(records, areas) == ("KIND", "KIND")
+
+
 def test_esri_shapes_as_wkt():
     assert esri_wkt({"x": 1.5, "y": 2}) == "POINT (1.5 2.0)"
     assert esri_wkt({"x": None, "y": None}) is None and esri_wkt(None) is None

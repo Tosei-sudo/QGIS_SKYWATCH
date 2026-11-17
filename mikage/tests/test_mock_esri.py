@@ -172,6 +172,40 @@ def test_observations_areas_and_taxonomy_are_stored_and_read_back(server):
     assert EsriAreaStore("確認範囲", c.areas, client).load() == []
 
 
+def test_the_attribute_rule_gives_each_record_its_named_area(server):
+    """As the enterprise geodatabase's attribute rule (docs/arcgis-setup.md): NAMED_AREA_OBJECTID = the smallest named area's OBJECTID."""
+    _, store, _, path = server
+    config, _ = read_config_file(path)
+    c, places = config.observation_stores[0], config.alert_reports.named_areas
+    client = EsriClient(transport)
+    oid = {a["attributes"]["NAME"]: (a["attributes"]["OBJECTID"], a["attributes"]["NAMED_AREA_ID"])
+           for a in client.query_all(places.url, "1=1", None, geometry=False)}
+    assert oid["横須賀本港"][1] == "NA-0102"
+
+    def area_of(record_id):
+        [f] = client.query_all(c.url, f"OBS_ID = '{record_id}'", None, geometry=False)
+        return f["attributes"]["NAMED_AREA_OBJECTID"]
+
+    # The sample's records (added before the named areas' service): calculated once all are there.
+    assert all(f["attributes"]["NAMED_AREA_OBJECTID"] is not None for f in client.query_all(c.url, "1=1", None, geometry=False))
+    records = EsriObservationStore(c, client)
+    now = int(time.time() * 1000)
+    new = Observation(id="rule-1", image_id="X", image_name="x.tif", image_time=now, object_id="o-1", object_name="船舶-9",
+                      kind="船舶", activity="入港", present=True, note="", lon=139.75, lat=35.30, created_at=now, updated_at=now)
+    records.save([new])
+    assert area_of("rule-1") == oid["横須賀本港"][0]
+    # Moved: again on the update (the plugin sends no value of its own).
+    records.save([replace(new, lon=139.71, lat=35.27, updated_at=now + 1)])
+    assert area_of("rule-1") == oid["横須賀港"][0]
+    records.save([replace(new, lon=150.0, lat=30.0, updated_at=now + 2)])
+    assert area_of("rule-1") is None
+    # A named area put out of use is not taken.
+    layer = store.layer("Alerts", 3)
+    store.db.execute(f"UPDATE {layer.table} SET ACTIVE = 0 WHERE NAME = '横須賀本港'")
+    records.save([replace(new, updated_at=now + 3)])
+    assert area_of("rule-1") == oid["横須賀港"][0]
+
+
 def test_errors_look_like_arcgis_errors(server):
     base, _, _, _ = server
     client = EsriClient(transport)
