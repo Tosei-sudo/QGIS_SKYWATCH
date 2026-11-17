@@ -42,14 +42,14 @@ URL は `http://127.0.0.1:8765/arcgis/rest/services/<名前>/FeatureServer/<番�
 | Satellites | 0 | 衛星（OPT-X1・X2 光学、SAR-Y1・Y2 SAR。TLE は起動日の前日元期で生成） | `satelliteCatalogs` |
 | Satellites | 1 | SAR-Y のセンサーモード（ストリップマップ・スポットライト・スキャンSAR） | `sensorCatalogs` |
 | Satellites | 2 | 衛星名の対応表（OPT-X1 → `OX1, OPTX-01` など 3 行） | `satelliteAliases` |
-| Observations | 0 | 観測記録（ポイント、2 件） | `observationStores` |
+| Observations | 0 | 観測記録（ポイント、2 件）。`NAMED_AREA_OBJECTID` は属性ルール（下記）で、記録を含むいちばん小さい地名（Alerts/3）の `OBJECTID` が入る | `observationStores` |
 | Observations | 1 | 分類体系テーブル（`ACTIVITIES` 付き。船舶・航空機・車両・建物に活動） | `observationStores[].taxonomyTable` |
 | Observations | 2 | 確認範囲（空） | `observationStores[].areas` |
 | AI | 0 | 外部AIの結果（画像ごとの船と誤検出 1 件） | `aiResultSources` |
 | Detections | 0 | AI 結果の転記先（空） | `detectionOutputs` |
 | Places | 0 | 地名（横須賀港など 6 件。`NAME`・`NAME_KANA`（読み）・`ALIAS`（別名）） | `geocoders`（`type: "features"`） |
 | Requests | 0, 1, 2, 3 | 撮像依頼台帳（3 件）と出力履歴（docs/imaging-requests.md の既定の属性名）、依頼グループ（3 件。第1班のメンバーは起動したユーザー）、撮像の範囲（空。書き出すと入る） | `requestStores`（`groups`・`shots` も）。日次出力のシステムは `requestExports`（光学 CSV・SAR JSON の 2 つ） |
-| Alerts | 0〜4 | 通報条件（3 行、1 行は停止中）・ジオフェンス（横須賀）・通報記録（空）・地名のポリゴン（東京湾 ⊃ 横須賀港 ⊃ 横須賀本港）・国（日本） | `alertReports`（`rules`・`geofences`・`table`・`namedAreas`・`countries`。フォーマット「速報」（既定）・「English」・「ファイル（タブ区切り）」） |
+| Alerts | 0〜4 | 通報条件（3 行、1 行は停止中）・ジオフェンス（横須賀）・通報記録（空）・地名のポリゴン（東京湾 ⊃ 横須賀港 ⊃ 横須賀本港。管理番号 `NAMED_AREA_ID` は `NA-0001`・`NA-0101`・`NA-0102`）・国（日本） | `alertReports`（`rules`・`geofences`・`table`・`namedAreas`・`countries`。フォーマット「速報」（既定）・「English」・「ファイル（タブ区切り）」） |
 | Work | 0, 1 | 分担（画像ごとの担当、空）・引き継ぎメモ（空） | `assignments`・`handover.table` |
 | Events | 0, 1 | イベント（1 件、範囲は横須賀）・イベントの紐付け（空） | `events` |
 
@@ -82,6 +82,7 @@ QGIS の「ArcGIS REST サーバー」接続に `http://127.0.0.1:8765/arcgis/re
 ```
 
 - `geometryType`: `point`・`multipoint`・`polyline`・`polygon`（なしでテーブル）
+- `attributeRules`: エンタープライズ ジオデータベースの属性ルール（計算ルール）の代わり。`[{ "field": "NAMED_AREA_OBJECTID", "smallestContaining": "Alerts/3" }]` で、追加・更新のたびに、その点を含むいちばん小さいポリゴン（`ACTIVE` が 0 のものは除く）の `OBJECTID` を `field` に入れる（含むものがなければ空。送られた値は使わない）。起動したときにも全部の地物で計算し直す。これだけで、Arcade の式は動かない
 - 型: `string`（既定の長さ 255）・`integer`・`smallinteger`・`biginteger`・`double`・`single`・`date`・`guid`、または `esriFieldType…`
 - 座標は WGS 84（経度・緯度）で持つ。`inSR`・`outSR`・ジオメトリの `spatialReference` が 3857 / 102100 なら変換する
 

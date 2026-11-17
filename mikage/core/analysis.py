@@ -75,7 +75,10 @@ KINDS: dict[str, tuple[str, str]] = {
     "detection": ("TBL_DETECTION", "検出結果の転記先"),
 }
 
-#: Keys that join two kinds of table: (kind, role) = (kind, role), as the plugin writes them.
+#: In RELATIONS, a table's object id (OBJECTID) rather than a role.
+OBJECT_ID = "@objectId"
+#: Keys that join two kinds of table: (kind, role) = (kind, role), as the plugin writes them (or, for the named
+#: area of a record, as an attribute rule of the enterprise geodatabase does: the area's OBJECTID, 2026-11-17).
 RELATIONS: list[tuple[tuple[str, str], tuple[str, str]]] = [
     (("aiResult", "imageId"), ("catalog", "id")),
     (("observation", "imageId"), ("catalog", "id")),
@@ -91,6 +94,7 @@ RELATIONS: list[tuple[tuple[str, str], tuple[str, str]]] = [
     (("eventLink", "item"), ("request", "id")),
     (("requestHistory", "requestId"), ("request", "id")),
     (("requestHistory", "satellite"), ("satellite", "name")),
+    (("observation", "namedAreaObjectId"), ("namedArea", OBJECT_ID)),
 ]
 
 #: The figures of 「かんたん集計」: key → (label, SQL with {c} for the column).
@@ -121,6 +125,8 @@ class Column:
     #: The attribute's role in the plugin (imageId, kind …), when it has one.
     role: str = ""
     alias: str = ""
+    #: The table's object id (esriFieldTypeOID).
+    oid: bool = False
 
 
 @dataclass
@@ -237,6 +243,13 @@ def table_name(text: str) -> str:
     """A layer's name made a SQL name: letters (any script), digits and _ (a digit first: _ before it)."""
     name = re.sub(r"\W+", "_", text or "").strip("_") or "LAYER"
     return "_" + name if name[0].isdigit() else name
+
+
+def esri_columns(table: Table, fields: Iterable[dict]) -> list[Column]:
+    """A table's columns of its layer's fields (those SQLite can hold: no shape, blob, raster)."""
+    return [Column(f["name"], esri_type(f.get("type", "")), table.role_of(f["name"]), str(f.get("alias") or ""),
+                   str(f.get("type", "")).lower() == "esrifieldtypeoid")
+            for f in fields if str(f.get("type", "")).lower() not in ("esrifieldtypegeometry", "esrifieldtypeblob", "esrifieldtyperaster")]
 
 
 def esri_type(field_type: str) -> str:
@@ -514,8 +527,7 @@ def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, l
     except EsriError as error:
         raise AnalysisError(f"{table.name} の読み込みに失敗: {error}") from None
     table.spatial = bool(info.geometry_type)
-    columns = [Column(f["name"], esri_type(f.get("type", "")), table.role_of(f["name"]), str(f.get("alias") or ""))
-               for f in fields if str(f.get("type", "")).lower() not in ("esrifieldtypegeometry", "esrifieldtypeblob", "esrifieldtyperaster")]
+    columns = esri_columns(table, fields)
     if geometry and not any(c.name.upper() == SHAPE for c in columns):
         columns.append(Column(SHAPE, "TEXT", "", "形状（WKT）"))
     dates = {f["name"] for f in fields if str(f.get("type", "")).lower() == "esrifieldtypedate"}
@@ -560,12 +572,28 @@ def _esri_features(client: Any, table: Table, info: Any, clauses: Sequence[str],
 
 # ---- join keys ----------------------------------------------------------------------------------
 
+def _key_of(table: Table, role: str) -> Optional[str]:
+    """
+    The column of a table a relation names: its role's attribute, or its
+    object id (`OBJECT_ID`: OBJECTID until the columns are read). None
+    when it has neither, or the columns read lack it.
+    """
+    known = {c.name.lower() for c in table.columns}
+    if role == OBJECT_ID:
+        oid = next((c.name for c in table.columns if c.oid), None)
+        return oid or (None if known else "OBJECTID")
+    name = table.roles.get(role)
+    return name if name and (not known or name.lower() in known) else None
+
+
 def suggest_join(left: Table, right: Table) -> Optional[tuple[str, str]]:
     """The columns that join `left` to `right`: a relation of their roles, else the same attribute name (not ids)."""
     for (ka, ra), (kb, rb) in RELATIONS:
         for (k1, r1), (k2, r2) in (((ka, ra), (kb, rb)), ((kb, rb), (ka, ra))):
-            if left.kind == k1 and right.kind == k2 and left.roles.get(r1) and right.roles.get(r2):
-                return left.roles[r1], right.roles[r2]
+            if left.kind == k1 and right.kind == k2:
+                a, b = _key_of(left, r1), _key_of(right, r2)
+                if a and b:
+                    return a, b
     lefts = {c.name.lower(): c.name for c in left.columns}
     for c in right.columns:
         if c.name.lower() in lefts and c.name.lower() not in _ID_COLUMNS:

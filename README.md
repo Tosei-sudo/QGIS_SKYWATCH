@@ -755,10 +755,10 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 - 条件テーブル（`rules`）: 1 行 1 条件。どれかに合えば注目。`KIND`（分類。その分類以下。空欄ですべて）、`ACTIVITIES`（活動。読点・カンマ区切り、空欄か `*` ですべて）、`MIN_CONFIDENCE`（確度の下限）、`GEOFENCE_NAME`（ジオフェンスの名前。`*` でどれかの中、空欄で場所を問わない。2026-11-10 より前の既定は `AREA`。`GEOFENCE_NAME` がなく `AREA` だけのテーブルはそのまま読む）、`ACTIVE`（0 で停止）、`NOTE`（条件の説明。項目 `rule` で行に出せる）、`WEIGHT`（重要度スコアの条件の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）。`rules` がなければ固定の条件に合う記録すべて
 - ジオフェンス（`geofences`）: ポリゴンのレイヤー。`NAME`（名前）、`ACTIVE`、`WEIGHT`（重要度スコアの場所の重み。0〜1 か 0〜100（%）、空欄・属性なしは 1）、`NAME_EN`（英語の名前。なくてもよい）。記録が入っているジオフェンスの名前は項目 `area`（英語は `area.en`）
-- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略、`fallback` で座標など別の項目）。`NAME_EN`・`KIND_EN`（英語の地名・種類。なくてもよい）は項目 `place.en`・`placeKind.en`・`places.en`。項目ごとに種類で選べる（`placeKinds`。港と桟橋を別の項目に、など。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。レイヤー全体は読まず、記録のある場所の分だけ読んで PC に控える（下の「[地名・国の控え](#地名国の控え)」）
+- 地名（`namedAreas`。なくてもよい）: 地名・施設名のポリゴンのレイヤー。`NAME`（地名）、`KIND`（種類。港・施設など、なくてもよい）、`ACTIVE`（0 で使わない）。記録を含む地名のうち**いちばん小さいもの**（面積で比べる）が項目 `place`、その種類が `placeKind`、含むもの全部（小さい順、「・」区切り）が `places`。重なっていてよい（「東京湾」の中に「横須賀港」、その中に「横須賀本港」など）。どれにも入っていなければ空（項目の `empty` で「（地名なし）」などの文字、`omitEmpty` で区切りごと省略、`fallback` で座標など別の項目）。`NAME_EN`・`KIND_EN`（英語の地名・種類。なくてもよい）は項目 `place.en`・`placeKind.en`・`places.en`。`NAMED_AREA_ID`（組織内の管理番号。なくてもよい）は項目 `place.id`・`places.id`。項目ごとに種類で選べる（`placeKinds`。港と桟橋を別の項目に、など。下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。レイヤー全体は読まず、記録のある場所の分だけ読んで PC に控える（下の「[地名・国の控え](#地名国の控え)」）
 - 国（`countries`。なくてもよい）: 国のポリゴンのレイヤー。`COUNTRY_CODE`（国コード。ISO 3166 の `JP`・`JPN` など、レイヤーにあるもの）、`COUNTRY_NAME`（国名）、`COUNTRY_NAME_EN`（英語の国名。なくてもよい）、`ACTIVE`。記録を含む国（重なればいちばん小さいもの）の国コードが項目 `country`、国名が `countryName`（英語は `countryName.en`）。陸地だけのレイヤーなら海上の記録には付かない（領海・EEZ を含めた範囲にするか、`empty`・`fallback` で）。ほかのシステムの国境レイヤーでもよく、属性名が違えば `fields` で合わせる（`{ "url": …, "fields": { "code": "ISO_A3", "name": "NAME_JA", "nameEn": "NAME_EN" } }`）。読み方と控えは地名と同じ（国境の細かい大きなポリゴンも、使った国だけを一度読む）
 - 通報テーブル（`table`）: 1 記録 1 行。`OBS_ID`（必須）、`REPORT_NAME`（フォーマットの名前）、`TEXT`（行）、`REPORTED_AT`、`REPORTED_BY`（[`editTracking`](#作成者更新者の記録edittracking) と同じユーザー名）、`BATCH_ID`（1 回の通報ごと）、`MANUAL`（手動で追加した記録は 1）。フォーマットの `columns` で記録の値を別の属性にも書ける
-- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`・`nameEn`／`name`・`kind`・`active`・`nameEn`・`kindEn`／`code`・`name`・`nameEn`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
+- 属性名はそれぞれの `fields` で変更可（役割は上の大文字の名前の小文字のキャメルケース: `kind`・`activities`・`minConfidence`・`area`・`active`・`note`・`weight`／`name`・`active`・`weight`・`nameEn`／`name`・`kind`・`active`・`nameEn`・`kindEn`・`id`／`code`・`name`・`nameEn`・`active`／`obsId`・`report`・`text`・`reportedAt`・`reportedBy`・`batch`・`manual`）
 
 **フォーマット**（`formats`。名前を付けて複数）:
 
@@ -794,7 +794,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   | `rule` | 合った条件すべて（`rules`。手動で追加した記録はなし） | `rule.note`・`rule.NOTE_EN`・`rule.PRIORITY` |
   | `confidence` | 記録の確度（設定の `confidences`） | `confidence.en`・`confidence.code`（`{ "label": "確定", "code": "A" }` のように書いたキー）・`confidence.note` |
 
-  属性名は、まずその設定の `fields` の役割（国は `code`・`name`・`nameEn`、地名は `name`・`kind`・`nameEn`・`kindEn`、ジオフェンスは `name`・`nameEn`・`weight`、条件は `kind`・`note`・`area`・`minConfidence`・`weight` など）、なければレイヤーの属性名そのもの（大文字小文字は問わない。`fields` に書かなくてよい）。`.en` は役割 `nameEn`（確度は `en`）。ないもの・当てはまらないときは空（`fallback`・`empty` で補う）。`places`・`area`・`rule` は値が複数なら `join`（既定「・」、英語の属性（`.en`・`…En`・`…_EN`）は「, 」）でつなぎ、`digits` はそれぞれの数に効く。値が 1 つの数なら、通報テーブルの数の属性（`columns`）には数のまま書く
+  属性名は、まずその設定の `fields` の役割（国は `code`・`name`・`nameEn`、地名は `name`・`kind`・`nameEn`・`kindEn`・`id`（管理番号 `NAMED_AREA_ID`）、ジオフェンスは `name`・`nameEn`・`weight`、条件は `kind`・`note`・`area`・`minConfidence`・`weight` など）、なければレイヤーの属性名そのもの（大文字小文字は問わない。`fields` に書かなくてよい）。`.en` は役割 `nameEn`（確度は `en`）。ないもの・当てはまらないときは空（`fallback`・`empty` で補う）。`places`・`area`・`rule` は値が複数なら `join`（既定「・」、英語の属性（`.en`・`…En`・`…_EN`）は「, 」）でつなぎ、`digits` はそれぞれの数に効く。値が 1 つの数なら、通報テーブルの数の属性（`columns`）には数のまま書く
 - **地名を種類で選ぶ**（`placeKinds`）: 地名の項目（`place`・`placeKind`・`places`・`place.en`・`placeKind.en`・`places.en`・`place.属性名`・`places.属性名`）に `placeKinds` を書くと、その種類（地名の `KIND` の値。文字列か配列、大文字小文字は問わない）の地名だけから選ぶ。記録を含むその種類の地名のうち、いちばん小さいものがその項目の地名。たとえば「舞鶴港」（`KIND` が 港）の中に「北吸桟橋」（`KIND` が 桟橋、属性 `PIER_NO` が 3）があれば、`{ "source": "place", "placeKinds": "港" }` は `舞鶴港`、`{ "source": "place", "placeKinds": "桟橋" }` は `北吸桟橋`、`{ "source": "place.PIER_NO", "placeKinds": "桟橋", "prefix": "No." }` は `No.3`（1 行に港と桟橋の両方を書ける）。`placeKinds` のない項目は今までどおり種類を問わずいちばん小さいもの。その種類の地名に入っていなければ空（`empty`・`omitEmpty`、別の種類なら `"fallback": { "source": "place", "placeKinds": "湾" }`）。`source` が配列のときは、地名の項目にだけ効く。地名のレイヤーに種類の属性（`namedAreas` の `fields.kind`、既定 `KIND`）がなければ、「抽出」のときに知らせる
 - **属性名の確かめ**: 設定を読むとき、読むレイヤーの設定がない `対象.属性名`（`alertReports.countries` なしの `country.code` など）と、どの確度にもないキーの `confidence.キー` は、常に空なので設定の問題として知らせる。レイヤーにある属性はファイルからはわからないので、「抽出」のときにそのレイヤーの属性の一覧を読んで照らし、ない属性（打ち間違い・まだ足していない属性。`place.en` の `NAME_EN` のような役割の属性も）を抽出の結果の欄とメッセージバーで知らせる（その値は空のまま書く）。[設定ファイル作成ツール](#設定ファイル作成ツールtoolsconfig_builderhtml) も同じ設定の問題を出し、役割でも設定に書いた属性名でもない名前は「確かめて」の注意にする（レイヤーは読まない）
 - **英語**: 項目名に `.en`（上の属性の書き方の 1 つ）。`confidence.en` は確度の英語名（[`observationVocabulary.confidences`](#設定ファイルの書き方) の `{ "label": "確定", "en": "Confirmed" }`。既定の確定・推定・不明は `Confirmed`・`Probable`・`Unknown`）、`area.en` はジオフェンスの `NAME_EN`、`place.en`・`places.en`・`placeKind.en` は地名の `NAME_EN`・`KIND_EN`、`countryName.en` は国の `COUNTRY_NAME_EN`。英語名のないものは空（ジオフェンス・地名を並べる `area.en`・`places.en` では、英語名のあるものだけ）。日本語で書くなら `{ "source": "place.en", "fallback": "place" }`。並べる項目の間は日本語が「・」、英語が「, 」（`join` で変えられる。`area`・`rule`・`places` と英語のものだけ）
@@ -1144,7 +1144,7 @@ Python からは `api.image_enhance.enhance(layer, "satellite", bands=[4, 3, 2])
 
 - 表の一覧: Esri の表は README の「Esri 側のテーブル定義」の名前（`TBL_IMAGE_CATALOG`・`TBL_AI_RESULT` …。同じ種類が 2 つ以上あれば `TBL_AI_RESULT_2` …）、プロジェクトのレイヤーはレイヤー名（空白や記号は `_`）。列は属性名のまま。型・役割（imageId など）・エイリアスも表示する。ダブルクリックで名前を SQL に入れる。「一覧を更新」でレイヤーと列を読み直す
 - 読み込み条件…: 表を読むときの条件。Esri の表は WHERE 句（サーバー側で絞るので速い）、プロジェクトのレイヤーは QGIS の式。設定ファイルの `where` があれば両方を満たす行を読む。表ごとの上限（既定 100,000 行）を超えたら中止する（黙って切らない）
-- かんたん集計: 基にする表、結合（つなぐ表・ある行だけ／なくても残す・キー。キーは役割から候補を出す。例: AI 結果の画像 ID と画像カタログの画像 ID、紐付けとイベント、通報記録と観測記録）、条件（WHERE 句。基の表が `t0`、結合した表が `t1`…）、グループにする列、集計（件数・異なる値の数・合計・平均・最小・最大）、並び（多い順・上位 N 件）から SQL を作る
+- かんたん集計: 基にする表、結合（つなぐ表・ある行だけ／なくても残す・キー。キーは役割から候補を出す。例: AI 結果の画像 ID と画像カタログの画像 ID、紐付けとイベント、通報記録と観測記録、観測記録の `NAMED_AREA_OBJECTID` と地名のポリゴンの `OBJECTID`）、条件（WHERE 句。基の表が `t0`、結合した表が `t1`…）、グループにする列、集計（件数・異なる値の数・合計・平均・最小・最大）、並び（多い順・上位 N 件）から SQL を作る
 - SQL: SQLite の SELECT 文をそのまま書ける（WITH・JOIN・GROUP BY・CASE・ウィンドウ関数など）。`:名前` は実行時に入力する値（ドックに入力欄が出る）。日時は「YYYY-MM-DD HH:MM:SS」（この PC の時刻）の文字なので `date(ACQ)` や `ACQ >= '2026-11-01'` が使える。列 `SHAPE` で形状（WGS 84 の WKT）を読む（SQL に `SHAPE` と書いたときだけ読む）
 - サーバーでの絞り込み（かんたん集計の SQL のとき。SQL を手で書き換えたら使わない）: 読む行を減らすため、集計は PC のまま、次の 2 つを Esri にも任せる。どちらも「サーバーが残す行が SQL より多いことはあっても少ないことはない」ものだけで、結果は変わらない。サーバーが受け付けなければ、その表はこれまでどおり読み込み条件だけで読む。実行後の「読んだ表」に表ごとに何をしたかが出る（例: `TBL_AI_RESULT 320 行（サーバーで絞り込み: 条件）`、`TBL_IMAGE_CATALOG 310 行（サーバーで絞り込み: 結合キー 320 件）`）
   - 条件: かんたん集計の条件を、括弧の外の AND で分け、1 つの表の列だけを見る部分（`=`・`<>`・`<`・`>=` などの比較、`IN`・`BETWEEN`・`IS [NOT] NULL` と、その AND・OR・NOT）をその表の WHERE にも入れる（`:名前` は入力した値）。入れないもの: 日時（PC では手元の時刻の文字、サーバーではサービスの時刻）、`LIKE`（大文字小文字の扱いがデータベースで違う）、文字と数値の比較、関数・計算・副問い合わせ、結合した表どうしを比べる部分、括弧の外に OR があって分けられない条件。「なくても残す」で結合した表には、その表の行がないとき（列がすべて NULL）に成り立たない部分だけを入れる
@@ -1818,7 +1818,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
+| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`namedAreaObjectId`（地名の OBJECTID。Esri の属性ルールが入れ、プラグインは書かない）。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
@@ -2130,6 +2130,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `CREATED_AT` | 記録日時 | `Date` | 記録した日時 | `created` |
 | `UPDATED_AT` | 修正日時 | `Date` | 最後に直した日時（ほかの人の変更との食い違いの確認にも使う） | `updated` |
 | `DELETED_AT` | 削除日時 | `Date` | 削除した日時（`softDelete`。空なら有効。この属性がなければ完全に消す） | `deleted` |
+| `NAMED_AREA_OBJECTID` | 地名のOBJECTID | `Integer` | 記録の点を含む地名（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン)）の `OBJECTID`。エンタープライズ ジオデータベースの**属性ルール**で入れる（例は [docs/arcgis-setup.md](docs/arcgis-setup.md#属性ルール記録の地名の-objectid)）。プラグインは書かない（記録を直して保存しても、送るのはほかの属性だけなので値はそのまま）。データ分析で観測記録と地名を結ぶキー。無くても動く | `namedAreaObjectId` |
 
 ### `TBL_OBSERVATION_AREA`（確認範囲）
 
@@ -2199,6 +2200,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
 | `NAME_EN` | 英語名 | `String(255)` | 英語の地名（通報の `place.en`・`places.en`。なくてもよい） | `nameEn` |
 | `KIND_EN` | 種類（英語） | `String(64)` | 英語の種類（通報の `placeKind.en`。なくてもよい） | `kindEn` |
+| `NAMED_AREA_ID` | 管理番号 | `String(255)` | 組織内の管理番号（通報の項目 `place.id`・`places.id`。観測記録の `NAMED_AREA_OBJECTID` はこれではなく `OBJECTID`）。なくてもよい | `id` |
 
 ### `TBL_ALERT_LOG`（通報記録）
 

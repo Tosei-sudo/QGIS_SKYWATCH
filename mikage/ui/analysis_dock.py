@@ -45,7 +45,7 @@ except ImportError:  # Qt 5
 from ..core import audit
 from ..core.analysis import (
     AGGREGATES, DEFAULT_TABLE_LIMIT, JOIN_TYPES, PROJECT_KEY, PROJECT_SCOPE, AnalysisError, Analysis, Builder, Column, Figure, Join,
-    Result, Table, aliases, analyses_of, analyses_text, build_sql, cell_text, csv_text, esri_tables, esri_type, examples, parameters,
+    Result, Table, aliases, analyses_of, analyses_text, build_sql, cell_text, csv_text, esri_columns, esri_tables, examples, parameters,
     quote_name, suggest_join, tsv_text,
 )
 from ..core.esri import EsriError
@@ -698,8 +698,7 @@ class AnalysisDock(PluginDock):
                 try:
                     info = client.layer(t.url, token)
                     fields = [f for f in info.raw.get("fields") or [] if isinstance(f, dict) and isinstance(f.get("name"), str)]
-                    columns = [Column(f["name"], esri_type(f.get("type", "")), t.role_of(f["name"]), str(f.get("alias") or ""))
-                               for f in fields if str(f.get("type", "")).lower() not in ("esrifieldtypegeometry", "esrifieldtypeblob", "esrifieldtyperaster")]
+                    columns = esri_columns(t, fields)
                     if info.geometry_type:
                         columns.append(Column("SHAPE", "TEXT", "", "形状（WKT）"))
                     out[t.url] = (columns, bool(info.geometry_type), "")

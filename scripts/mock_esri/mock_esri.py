@@ -29,6 +29,9 @@ What it answers (as ArcGIS Server 11 does, for what the plugin and QGIS ask):
 Not a full server: geometry filters compare bounding boxes, there are no
 attachments, statistics, versions or relationships. The layers are defined
 in JSON (see sample.py and README.md); more can be added with --services.
+A layer can have the one kind of attribute rule the plugin's tables use
+(`attributeRules`: a field set to the OBJECTID of the smallest polygon of
+another layer holding the point, on every add and update).
 """
 from __future__ import annotations
 
@@ -283,6 +286,9 @@ class Layer:
         self.types = {f["name"]: f["type"] for f in self.fields}
         self.description = definition.get("description", "")
         self.table = q(f"t_{service}_{self.id}")
+        #: Calculation rules, as an enterprise geodatabase's attribute rules: [{"field", "smallestContaining": "<service>/<id>"}].
+        self.rules = [r for r in definition.get("attributeRules") or []
+                      if isinstance(r, dict) and r.get("field") in self.types and isinstance(r.get("smallestContaining"), str)]
 
     @property
     def is_table(self) -> bool:
@@ -298,6 +304,8 @@ class Layer:
              "fields": {f["name"]: {k: v for k, v in f.items() if k not in ("name", "editable", "nullable")} for f in self.fields[1:]}}
         if self.geometry_type:
             d["geometryType"] = self.geometry_type
+        if self.rules:
+            d["attributeRules"] = self.rules
         return d
 
 
@@ -458,6 +466,7 @@ class Store:
         with self.lock:
             cur = self.db.execute(f"INSERT INTO {layer.table} ({', '.join(q(c) for c in cols)}) VALUES ({', '.join('?' for _ in cols)})"
                                   if cols else f"INSERT INTO {layer.table} DEFAULT VALUES", [values[c] for c in cols])
+            self.calculate(layer, int(cur.lastrowid))
             return int(cur.lastrowid)
 
     def update(self, layer: Layer, feature: dict, in_sr: int = 4326, warn: Optional[list[str]] = None) -> int:
@@ -474,7 +483,54 @@ class Store:
             if values:
                 self.db.execute(f"UPDATE {layer.table} SET {', '.join(q(c) + ' = ?' for c in values)} WHERE oid = ?",
                                 [*values.values(), int(oid)])
+            self.calculate(layer, int(oid))
         return int(oid)
+
+    # --- attribute rules ----------------------------------------------------------------------------
+
+    def calculate(self, layer: Layer, oid: Optional[int] = None) -> None:
+        """
+        Runs the layer's attribute rules on one feature (`oid`), or on all of
+        them: each rule's field becomes the OBJECTID of the smallest active
+        polygon of its layer holding the feature's point (NULL in none, or
+        for a feature that is not a point), whatever the edit sent.
+        """
+        if not layer.rules or layer.is_table:
+            return
+        with self.lock:
+            rows = self.db.execute(f"SELECT oid, _geom FROM {layer.table}" + (" WHERE oid = ?" if oid is not None else ""),
+                                   (oid,) if oid is not None else ()).fetchall()
+            for row_oid, text in rows:
+                g = json.loads(text) if text else None
+                point = (g["x"], g["y"]) if isinstance(g, dict) and isinstance(g.get("x"), (int, float)) and isinstance(g.get("y"), (int, float)) else None
+                values = {r["field"]: self._smallest_containing(r["smallestContaining"], point) for r in layer.rules}
+                self.db.execute(f"UPDATE {layer.table} SET {', '.join(q(c) + ' = ?' for c in values)} WHERE oid = ?",
+                                [*values.values(), row_oid])
+
+    def calculate_all(self) -> None:
+        for layer in list(self.layers.values()):
+            self.calculate(layer)
+
+    def _smallest_containing(self, target: str, point: Optional[tuple[float, float]]) -> Optional[int]:
+        service, _, number = target.rpartition("/")
+        polygons = self.layers.get((service.lower(), int(number))) if number.isdigit() else None
+        if point is None or polygons is None or polygons.geometry_type != "esriGeometryPolygon":
+            return None
+        x, y = point
+        active = next((f["name"] for f in polygons.fields if f["name"].upper() == "ACTIVE"), None)
+        rows = self.db.execute(f"SELECT oid, _geom{', ' + q(active) if active else ''} FROM {polygons.table} "
+                               "WHERE _xmin <= ? AND _xmax >= ? AND _ymin <= ? AND _ymax >= ?", (x, x, y, y)).fetchall()
+        best, smallest = None, None
+        for row in rows:
+            if active and row[2] is not None and row[2] == 0:
+                continue
+            rings = (json.loads(row[1]) or {}).get("rings") or [] if row[1] else []
+            if not _inside(x, y, rings):
+                continue
+            size = abs(sum(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(r, r[1:] + r[:1])) / 2 for r in rings))
+            if smallest is None or size < smallest:
+                best, smallest = int(row[0]), size
+        return best
 
     def delete(self, layer: Layer, oid: int) -> bool:
         with self.lock:
@@ -505,6 +561,16 @@ class Store:
 
 
 # --- the service ------------------------------------------------------------------------------------------
+
+
+def _inside(x: float, y: float, rings: list) -> bool:
+    """Whether a point is inside polygon rings (even-odd: holes are rings inside rings)."""
+    inside = False
+    for ring in rings:
+        for (x1, y1, *_), (x2, y2, *_) in zip(ring, ring[1:] + ring[:1]):
+            if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                inside = not inside
+    return inside
 
 
 def _truthy(v: Optional[str]) -> bool:
@@ -994,6 +1060,8 @@ def load_services(store: Store, definition: dict, replace: bool = False, feature
                 for f in l.get("features") or []:
                     store.add(layer, f)
                     added += 1
+    # Again once every layer is there (a rule's polygons may be of a service defined after its layer).
+    store.calculate_all()
     return added
 
 
@@ -1037,13 +1105,19 @@ def main(argv: Optional[list[str]] = None) -> int:
                     store.define(s["name"], l)
                     print(f"レイヤーを追加: {s['name']}/FeatureServer/{l.get('id', 0)}")
                     continue
-                # New fields of the sample (the tracking fields …) are added as columns.
+                # New fields of the sample (the tracking fields …) are added as columns, new attribute rules kept.
                 have = {f["name"].lower() for f in old.fields}
                 missing = {n: v for n, v in l["fields"].items() if n.lower() not in have}
-                if missing:
+                rules = l.get("attributeRules") if l.get("attributeRules") and not old.rules else None
+                if missing or rules:
                     definition = old.definition()
-                    store.define(s["name"], {**definition, "fields": {**definition["fields"], **missing}})
-                    print(f"属性を追加: {s['name']}/FeatureServer/{l.get('id', 0)}（{', '.join(missing)}）")
+                    store.define(s["name"], {**definition, "fields": {**definition["fields"], **missing},
+                                             **({"attributeRules": rules} if rules else {})})
+                    if missing:
+                        print(f"属性を追加: {s['name']}/FeatureServer/{l.get('id', 0)}（{', '.join(missing)}）")
+                    if rules:
+                        print(f"属性ルールを追加: {s['name']}/FeatureServer/{l.get('id', 0)}（{', '.join(r['field'] for r in rules)}）")
+        store.calculate_all()
     for path in a.services:
         with open(path, encoding="utf-8-sig") as f:
             n = load_services(store, json.load(f))
