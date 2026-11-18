@@ -423,18 +423,19 @@ TABLES = (
     )),
 )
 
-#: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性。
+#: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
+#: 撮像日時・修正日時・記録日時・通報日時を足した）。README「推奨のインデックス」の表と同じ（test_arcgis_tools.py）。
 INDEXES = {
-    "TBL_IMAGE_CATALOG": ("IMAGE_ID", "REGISTERED_AT"),
+    "TBL_IMAGE_CATALOG": ("IMAGE_ID", "REGISTERED_AT", "ACQUIRED_AT"),
     "TBL_SATELLITE": ("SAT_NAME",),
     "TBL_SATELLITE_ALIAS": ("SAT_NAME",),
     "TBL_IMAGING_REQUEST": ("REQ_ID",),
     "TBL_REQUEST_HISTORY": ("REQ_ID", "TARGET_DAY", "TARGET_DATE", "SHOT_ID"),
     "TBL_REQUEST_SHOT": ("SHOT_ID", "TARGET_DAY"),
-    "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID", "NAMED_AREA_OBJECTID"),
-    "TBL_OBSERVATION_AREA": ("AREA_ID", "IMAGE_ID"),
+    "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID", "NAMED_AREA_OBJECTID", "UPDATED_AT", "CREATED_AT"),
+    "TBL_OBSERVATION_AREA": ("AREA_ID", "IMAGE_ID", "UPDATED_AT"),
     "TBL_NAMED_AREA": ("NAMED_AREA_ID",),
-    "TBL_ALERT_LOG": ("OBS_ID",),
+    "TBL_ALERT_LOG": ("OBS_ID", "REPORTED_AT"),
     "TBL_ASSIGNMENT": ("IMAGE_ID",),
     "TBL_EVENT": ("EVENT_ID",),
     "TBL_EVENT_LINK": ("EVENT_ID", "ITEM_ID"),

@@ -327,7 +327,8 @@ class CatalogDock(PluginDock):
         #: The 分担 of the listed images read again every minute while the dock is shown.
         self._work_asked = 0
         self._work_timer = QTimer(self)
-        self._work_timer.setInterval(60_000)
+        # Every 3 minutes (2026-11-19: every minute, with 200 people, was 2 requests a second for this column alone).
+        self._work_timer.setInterval(180_000)
         self._work_timer.timeout.connect(self.load_work)
 
         # 「前の画像を閉じる」 (tsudo, 2026-11-10): looking through images one after another, the one opened before closes.

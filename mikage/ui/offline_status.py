@@ -11,6 +11,7 @@ shown here even with `offlineWork` off).
 """
 from __future__ import annotations
 
+import random
 import time
 from typing import Callable, Optional
 
@@ -68,6 +69,11 @@ def ask_discard(parent: Optional[QWidget], work: OfflineWork) -> bool:
         QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Discard
 
 
+#: After a server comes back with nothing to send, the docks read again within this (ms), at a moment of
+#: each PC's own: everyone's PC sees it back within the same probe, and all reading at once slowed it again.
+BACK_SPREAD_MS = 30_000
+
+
 class OfflineController(QObject):
     """The status-bar button, the checks while offline and the question when a server is back."""
 
@@ -76,12 +82,15 @@ class OfflineController(QObject):
     #: The work waiting was sent or thrown away: the docks read again.
     finished = pyqtSignal()
 
-    def __init__(self, iface, context, reload_docks: Callable[[], None], parent: Optional[QObject] = None):
+    def __init__(self, iface, context, reload_docks: Callable[[], None], parent: Optional[QObject] = None,
+                 refresh_docks: Optional[Callable[[], None]] = None):
         super().__init__(parent)
         self.iface = iface
         self.context = context
         self.work: OfflineWork = context.offline
         self.reload_docks = reload_docks
+        #: A server back with nothing sent or thrown away: the docks read what changed meanwhile (else reload_docks).
+        self.refresh_docks = refresh_docks or reload_docks
         self._was_down = False
         self._probing = False
         self._uploading = False
@@ -124,6 +133,10 @@ class OfflineController(QObject):
         self.start_timer = QTimer(self)
         self.start_timer.setSingleShot(True)
         self.start_timer.timeout.connect(self._ask_left_over)
+        #: A server back, nothing to send: the docks read again a little later (BACK_SPREAD_MS).
+        self.back_timer = QTimer(self)
+        self.back_timer.setSingleShot(True)
+        self.back_timer.timeout.connect(lambda: self.refresh_docks() if not self._unloaded else None)
         self._unloaded = False
         context.configChanged.connect(self._config_changed)
         self._update()
@@ -185,7 +198,7 @@ class OfflineController(QObject):
         if self.dialog is not None and self.dialog.isVisible():
             self.dialog.render()
         if down and not work.forced and not self.timer.isActive():
-            self.timer.start(int(self.context.config.offline_work.probe_seconds * 1000))
+            self.timer.start(self._probe_ms())
         elif not down:
             self.timer.stop()
         if down and not self._was_down:
@@ -200,7 +213,7 @@ class OfflineController(QObject):
                 self.ask(back=True)
             else:
                 self.iface.messageBar().pushSuccess(tr("オフライン作業"), tr("サーバーとの接続が戻りました。"))
-                self.finished.emit()
+                self.back_timer.start(random.randint(0, BACK_SPREAD_MS))
 
     def _menu_shown(self) -> None:
         total = self.work.total()
@@ -219,7 +232,17 @@ class OfflineController(QObject):
 
     # ---- checking whether servers answer again --------------------------
 
+    def _probe_ms(self) -> int:
+        """
+        The wait before the next check: probeSeconds, more or less by half at
+        random. Servers usually stop for everyone at once, and checks started
+        then at the same pace would all find it back in the same second.
+        """
+        return int(self.context.config.offline_work.probe_seconds * 1000 * random.uniform(0.5, 1.5))
+
     def probe(self) -> None:
+        if self.timer.isActive():
+            self.timer.setInterval(self._probe_ms())
         if self._probing or not self.work.probes():
             return
         self._probing = True
@@ -319,6 +342,7 @@ class OfflineController(QObject):
         self._unloaded = True
         self.timer.stop()
         self.start_timer.stop()
+        self.back_timer.stop()
         try:
             self.work.listeners.remove(self._from_any_thread)
         except ValueError:

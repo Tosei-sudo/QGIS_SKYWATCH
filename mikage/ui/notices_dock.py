@@ -18,7 +18,7 @@ from qgis.core import Qgis, QgsRectangle
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtGui import QFont
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QDialog, QHBoxLayout, QInputDialog, QLabel, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QAbstractItemView, QApplication, QDialog, QHBoxLayout, QInputDialog, QLabel, QPushButton, QTabWidget, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -138,7 +138,11 @@ class NoticesDock(PluginDock):
         self.alerts_tab = tabs.addTab(self.alerts, self.tr("通報"))
         self.tabs = tabs
         self.alerts.unseen_changed.connect(self._alerts_unseen)
-        tabs.currentChanged.connect(lambda i: self.alerts.seen() if i == self.alerts_tab else None)
+        tabs.currentChanged.connect(lambda i: (self.alerts.seen(), self.alerts.looked_at()) if i == self.alerts_tab else None)
+        # The 通報 list polled half as often while another tab is chosen or QGIS is not in front (2026-11-19, 200 people).
+        self.alerts.watched = lambda: self.tabs.currentIndex() == self.alerts_tab and \
+            QApplication.applicationState() == Qt.ApplicationState.ApplicationActive
+        QApplication.instance().applicationStateChanged.connect(self._app_state)
         self.visibilityChanged.connect(self._shown_changed)
 
         self.timer = QTimer(self)
@@ -166,6 +170,10 @@ class NoticesDock(PluginDock):
         self.alerts.set_active(shown and not self._closed)
         if shown and self.tabs.currentIndex() == self.alerts_tab:
             self.alerts.seen()
+
+    def _app_state(self, state) -> None:
+        if state == Qt.ApplicationState.ApplicationActive and self.tabs.currentIndex() == self.alerts_tab:
+            self.alerts.looked_at()
 
     def _alerts_unseen(self, n: int) -> None:
         if n and self.isVisible() and self.tabs.currentIndex() == self.alerts_tab:
@@ -627,5 +635,9 @@ class NoticesDock(PluginDock):
             task.cancel()
         self.timer.stop()
         self.alerts.close_down()
+        try:
+            QApplication.instance().applicationStateChanged.disconnect(self._app_state)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
         # A check still waiting to start (the plugin unloaded right after showing the dock) finds the store closed.
         self._closed = True

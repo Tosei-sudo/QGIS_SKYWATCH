@@ -41,6 +41,14 @@ class UnreachableError(EsriError):
     """
 
 
+class BusyError(UnreachableError):
+    """
+    The server answered too late (a timeout) or with a 5xx: it may only be
+    busy (200 people starting their day at once), not down. A read that
+    meets one is not enough to work offline (core/offline.py).
+    """
+
+
 class InvalidTokenError(EsriError):
     """The server called the token invalid or expired (498, 499)."""
 
@@ -247,8 +255,12 @@ class EsriClient:
             return TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
 
         if info.supports_pagination:
+            oid = info.object_id_field
+            wanted = {n.strip().upper() for n in out_fields.split(",")}
+            if "orderByFields" not in params and ("*" in wanted or oid.upper() in wanted):
+                return self._pages_after(url, params, oid, size, limit, cut, token, cancelled, too_many)
             if "orderByFields" not in params:
-                params["orderByFields"] = info.object_id_field
+                params["orderByFields"] = oid
             offset = 0
             while True:
                 if cancelled and cancelled():
@@ -286,6 +298,71 @@ class EsriClient:
             chunk = ids[start:start + size]
             json_ = self.ask(f"{url}/query", {**params, "objectIds": ",".join(str(int(i)) for i in chunk)}, token)
             out.extend(json_.get("features") or [])
+        return out
+
+    def _pages_after(self, url: str, params: dict[str, str], oid: str, size: int, limit: int, cut: bool,
+                     token: Optional[str], cancelled: Optional[Callable[[], bool]], too_many) -> list[dict[str, Any]]:
+        """
+        Pages in object id order, each asked for the ids after the last one
+        read (`OBJECTID > n`) rather than by its offset (2026-11-19): the
+        database finds a page's first row through the object id's index,
+        where a page far down (`resultOffset` 180,000) had it count the rows
+        before it again, every page, so reading a large table cost about the
+        square of its rows.
+        """
+        where = params["where"]
+        params = {**params, "orderByFields": oid}
+        out: list[dict[str, Any]] = []
+        last: Optional[int] = None
+
+        def after(n: Optional[int]) -> str:
+            if n is None:
+                return where
+            return f"{oid} > {n}" if where.strip() in ("", "1=1") else f"({where}) AND {oid} > {n}"
+
+        while True:
+            if cancelled and cancelled():
+                raise EsriError("取消")
+            count = size if cut is False else max(1, min(size, limit - len(out)))
+            json_ = self.ask(f"{url}/query", {**params, "where": after(last), "resultRecordCount": str(count)}, token)
+            features = json_.get("features") or []
+            out.extend(features)
+            more = bool(json_.get("exceededTransferLimit")) or len(features) >= count
+            ids = [i for i in (_attribute(f, oid) for f in features) if is_number(i)]
+            if not features or not more:
+                break
+            if not ids or (last is not None and max(ids) <= last):
+                # No object ids to go on from (or not in order): what is left is read by its offset.
+                out.extend(self._pages_from(url, {**params, "where": where}, len(out), size, limit, cut, token, cancelled))
+                break
+            last = int(max(ids))
+            if len(out) >= limit:
+                if cut:
+                    break
+                probe = self.ask(f"{url}/query", {**params, "where": after(last), "resultRecordCount": "1"}, token)
+                if probe.get("features"):
+                    raise too_many()
+                break
+        if len(out) > limit and not cut:
+            raise too_many()
+        return out[:limit]
+
+    def _pages_from(self, url: str, params: dict[str, str], offset: int, size: int, limit: int, cut: bool,
+                    token: Optional[str], cancelled: Optional[Callable[[], bool]]) -> list[dict[str, Any]]:
+        """The rows from `offset` on, page by page (`resultOffset`), at most `limit` in all with those before."""
+        out: list[dict[str, Any]] = []
+        while offset < limit or not cut:
+            if cancelled and cancelled():
+                raise EsriError("取消")
+            count = size if cut is False else max(1, min(size, limit - offset))
+            json_ = self.ask(f"{url}/query", {**params, "resultOffset": str(offset), "resultRecordCount": str(count)}, token)
+            features = json_.get("features") or []
+            out.extend(features)
+            if not features or not (bool(json_.get("exceededTransferLimit")) or len(features) >= count):
+                break
+            offset += len(features)
+            if offset > limit:
+                break
         return out
 
     def find(self, url: str, field: str, values: Iterable[Any], token: Optional[str] = None,
@@ -357,6 +434,15 @@ class EsriClient:
             value = self.ask(f"{url}/deleteFeatures", {"objectIds": ",".join(ids[start:start + DELETE_BATCH])}, token)
             out += value.get("deleteResults") or []
         return out
+
+
+def _attribute(feature: dict[str, Any], name: str) -> Any:
+    """An attribute of a feature by its name, whatever its case in the answer."""
+    a = feature.get("attributes") or {}
+    if name in a:
+        return a[name]
+    upper = name.upper()
+    return next((v for k, v in a.items() if k.upper() == upper), None)
 
 
 def deleted_count(value: dict[str, Any], what: str = "削除") -> int:

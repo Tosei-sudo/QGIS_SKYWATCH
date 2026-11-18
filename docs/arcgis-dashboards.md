@@ -241,6 +241,6 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 注意:
 
 - 前提: Oracle 19c 以降（`LISTAGG(DISTINCT …)`・`TO_DATE(… DEFAULT NULL ON CONVERSION ERROR)` を使う）、データベースの文字コードは AL32UTF8、サービスの日付のタイムゾーンは既定の UTC
-- ビューは問い合わせのたびに計算する。使う結合キー（`REQ_ID`・`SHOT_ID`・`TARGET_DAY`・`OBJECT_ID`・`IMAGE_ID`・`OBS_ID`・`NAMED_AREA_OBJECTID`）には `create_tables.py` が属性インデックスを張ってある。記録が数十万件を超えて `VW_OBS_THING`・`VW_NAMED_AREA_STATUS` が重くなったら、マテリアライズド ビュー（夜に更新）に切り替える
+- ビューは問い合わせのたびに計算する。使う結合キー（`REQ_ID`・`SHOT_ID`・`TARGET_DAY`・`OBJECT_ID`・`IMAGE_ID`・`OBS_ID`・`NAMED_AREA_OBJECTID`）には `create_tables.py` が属性インデックスを張ってある。記録が数十万件を超えて `VW_OBS_THING`・`VW_NAMED_AREA_STATUS` が重くなったら、または閲覧する人が多い（数十人が開いたままにする）なら、マテリアライズド ビュー（10〜15 分ごとに更新）に切り替える。閲覧のたびに全件を集計しなくなる
 - `NAMED_AREA_OBJECTID` の属性は要る（`create_tables.py` をもう一度実行すると足される）。属性ルールをまだ入れていなければ値が空なので、地名の列は空、地名系のビューは「記録なし」になる
 - 元のテーブルを形状なしで作った場合（出力履歴など）は、そのビューの `SHAPE` の行を消す

@@ -235,8 +235,9 @@ class ScoreSettings:
 @dataclass
 class LiveSettings:
     """`alertReports.live`: the 通報 tab of 通知, the log table read again every `seconds`."""
-    #: How often the log table is asked for changes (0: only by hand).
-    seconds: float = 10.0
+    #: How often the log table is asked for changes (0: only by hand). 30 s (was 10 until 2026-11-19: with 200
+    #: people it was half of every request the service got); twice as long while the tab is not looked at.
+    seconds: float = 30.0
     #: The rows of the last `days` days are shown (by REPORTED_AT; the newest rows when the table has none).
     days: float = 7.0
 

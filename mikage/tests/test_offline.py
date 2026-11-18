@@ -7,7 +7,7 @@ or thrown away once it answers again, without saving over others' changes.
 from dataclasses import replace
 
 from mikage.core.config import parse_config
-from mikage.core.esri import EsriClient, UnreachableError
+from mikage.core.esri import BusyError, EsriClient, UnreachableError
 from mikage.core.gpkg import open_local
 from mikage.core.obs.book import ObservationBook, ObservedImage, Prefs
 from mikage.core.obs.drafts import OutboxDrafts
@@ -15,7 +15,7 @@ from mikage.core.obs.model import ObservationVocabulary, observation_store_of
 from mikage.core.obs.offline_stores import OfflineObservationStore
 from mikage.core.obs.setup import store_sets
 from mikage.core.obs.stores import EsriObservationStore
-from mikage.core.offline import OfflineWork, cache_key, host_of, is_edit
+from mikage.core.offline import STRIKE_MS, OfflineWork, cache_key, host_of, is_edit
 from mikage.core.offline_upload import upload_all
 from mikage.core.request.store import delete_request, load_requests, request_store_of, save_request, waiting_ids
 from mikage.tests.fake_esri import FakeEsri, FakeLayer
@@ -72,6 +72,44 @@ def test_reads_come_from_the_cache_while_the_server_is_down(tmp_path):
     assert work.probe(switch) == [] and work.offline
     switch.down = False
     assert work.probe(switch) == [host_of(URL)] and not work.offline
+
+
+def test_one_slow_read_is_not_enough_to_work_offline(tmp_path):
+    """
+    A read that times out or meets a 5xx (the server may only be busy, 200 people starting their day) is answered
+    from the cache without marking the server down; a second one within STRIKE_MS does; any answer forgets them.
+    A change that meets one keeps the old rule (down at once, the change kept to send later).
+    """
+    fake = obs_layer()
+    now = [1_000_000]
+    work = OfflineWork(str(tmp_path / "offline.sqlite"), clock=lambda: now[0])
+    busy = []
+
+    def send(url, form):
+        if busy:
+            raise BusyError(f"応答なし（タイムアウト）（{url}）")
+        return fake(url, form)
+
+    client = client_of(work, send)
+    assert client.query_all(URL, "1=1") == []
+    busy.append(1)
+    assert client.query_all(URL, "1=1") == []  # from the cache
+    assert not work.offline
+    now[0] += STRIKE_MS + 1
+    assert client.query_all(URL, "1=1") == [] and not work.offline  # the first was long ago
+    now[0] += 1000
+    assert client.query_all(URL, "1=1") == [] and work.offline  # two within STRIKE_MS
+    work.mark_up(host_of(URL))
+    busy.clear()
+    assert client.query_all(URL, "1=1") == []  # answered: strikes forgotten
+    busy.append(1)
+    assert client.query_all(URL, "1=1") == [] and not work.offline
+    try:
+        client.apply_edits(URL, adds=[{"attributes": {"OBS_ID": "x"}}])
+        raise AssertionError("a change can not be answered from the cache")
+    except UnreachableError:
+        pass
+    assert work.offline
 
 
 def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_path):

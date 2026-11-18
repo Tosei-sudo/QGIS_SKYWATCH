@@ -21,8 +21,33 @@ def test_reads_every_feature_page_by_page():
     features = EsriClient(fake).query_all(URL)
     assert [f["attributes"]["OBS_ID"] for f in features] == [f"o{i}" for i in range(2500)]
     pages = [form for url, form in fake.asked if url.endswith("/query")]
-    assert [p["resultOffset"] for p in pages] == ["0", "1000", "2000"]
+    # Each page after the last object id read (the database starts it from the id's index), not by its offset.
+    assert [p["where"] for p in pages] == ["1=1", "OBJECTID > 1000", "OBJECTID > 2000"]
+    assert all("resultOffset" not in p and p["orderByFields"] == "OBJECTID" for p in pages)
     assert all(p["outSR"] == "4326" and p["f"] == "json" for p in pages)
+
+
+def test_pages_after_the_last_id_keep_the_condition_and_the_limit():
+    fake, _ = server(2500, max_record_count=1000)
+    client = EsriClient(fake)
+    features = client.query_all(URL, where="T >= 500000 OR OBS_ID = 'o1'")
+    assert [f["attributes"]["OBS_ID"] for f in features] == ["o1"] + [f"o{i}" for i in range(500, 2500)]
+    pages = [form["where"] for url, form in fake.asked if url.endswith("/query")]
+    # o1 is object id 2, o500 is 501: the first page ends at o1498 (1499), the second at o2498 (2499).
+    assert pages[1:] == ["(T >= 500000 OR OBS_ID = 'o1') AND OBJECTID > 1499", "(T >= 500000 OR OBS_ID = 'o1') AND OBJECTID > 2499"]
+    assert len(client.query_all(URL, limit=1200, cut=True)) == 1200
+    assert len(client.query_all(URL, limit=2500)) == 2500
+    with pytest.raises(EsriError, match="上限"):
+        client.query_all(URL, limit=2499)
+
+
+def test_pages_by_offset_when_sorted_or_without_the_object_id():
+    fake, _ = server(2500, max_record_count=1000)
+    client = EsriClient(fake)
+    assert len(client.query_all(URL, extra={"orderByFields": "T DESC"})) == 2500
+    assert len(client.query_all(URL, out_fields="OBS_ID")) == 2500
+    offsets = [form.get("resultOffset") for url, form in fake.asked if url.endswith("/query")]
+    assert offsets == ["0", "1000", "2000", "0", "1000", "2000"]
 
 
 def test_reads_by_ids_when_the_layer_does_not_page():

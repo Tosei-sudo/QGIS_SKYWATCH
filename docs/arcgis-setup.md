@@ -39,7 +39,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 作るもの:
 
 - テーブル・フィーチャクラス（名前は `TBL_…`、エイリアスは日本語の名前）と、README の表のとおりの属性（名前・エイリアス・型・長さ）
-- ID で引く属性の属性インデックス（`OBS_ID`・`IMAGE_ID`・`REQ_ID`・`EVENT_ID` など。名前 `IX_<テーブル>_<属性>`）
+- ID で引く属性と日時の範囲で引く属性の属性インデックス（`OBS_ID`・`IMAGE_ID`・`UPDATED_AT`・`REPORTED_AT` など。名前 `IX_<テーブル>_<属性>`。一覧と使い道は README の[推奨のインデックス](../README.md#推奨のインデックス)）
 - バージョン対応・アーカイブ・ArcGIS の編集者トラッキングは付けない（プラグインはバージョン対応なしの編集で、作成者・更新者は自分で 4 属性に書く）
 
 4000 を超える長さの文字列（`TBL_TAXONOMY.SPECS`・`TBL_HANDOVER_MEMO.TEXT` など）は、Oracle では CLOB になる（ArcGIS が決める）。日本語を入れるので、データベースの文字コードは Unicode に。

@@ -410,3 +410,12 @@ def test_layer_urls_and_config(tmp_path):
     assert problems == []
     assert config.observation_stores[0].url.endswith("/7")
     assert config.image_catalogs[0].fields["source"] == ["COG_URL", "FILE_PATH"]
+
+
+def test_the_readme_lists_the_indexes_the_script_makes():
+    section = _section()
+    part = section[section.index("\n### 推奨のインデックス\n"):]
+    part = part[:part.index("\n### ", 1)]
+    rows = re.findall(r"^\| `(TBL_[A-Z_]+)` \| `([A-Z_]+)` \|", part, re.MULTILINE)
+    assert len(rows) == len(set(rows))
+    assert set(rows) == {(t.name, f) for t in schema.TABLES for f in t.indexes}

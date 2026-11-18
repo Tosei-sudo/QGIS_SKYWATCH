@@ -417,7 +417,8 @@ class MikagePlugin:
         # 監査ログ before anything that records (its writing and sending run in threads of their own).
         self.audit = AuditKeeper(self.iface, self.context, self.iface.mainWindow())
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
-        self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow())
+        self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow(),
+                                         refresh_docks=self._refresh_after_offline)
         self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
         self.interests = InterestBook(self.context, self.iface.mainWindow())
         # 担当: what the roles ticked do not use is not shown; kept in this profile and in the settings file's `userRoles`.
@@ -1653,6 +1654,24 @@ class MikagePlugin:
                     dock.reload()
                 except RuntimeError:
                     pass
+
+    def _refresh_after_offline(self) -> None:
+        """
+        A server is back and nothing was sent or thrown away: 観測記録 reads
+        only what others changed meanwhile (not every record again), 撮像依頼 its ledger.
+        """
+        observations = self.docks.get("SatObsObservations")
+        if observations is not None:
+            try:
+                observations.refresh(force=True)
+            except RuntimeError:
+                pass
+        requests = self.docks.get("SatObsRequests")
+        if requests is not None:
+            try:
+                requests.reload()
+            except RuntimeError:
+                pass
 
     def unload(self) -> None:
         if getattr(self, "offline", None) is not None:

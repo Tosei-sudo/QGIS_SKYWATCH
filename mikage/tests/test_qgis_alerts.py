@@ -320,7 +320,19 @@ def test_notices_tab_lists_the_log_and_polls_only_while_shown(plugin):
     notices.show()
     assert wait_for(lambda: feed.table.rowCount() == 1)
     assert feed.table.item(0, 3).text() == "船A|停泊" and feed.table.item(0, 2).text() == "佐藤"
-    assert feed.active and feed.timer.isActive() and feed.timer.interval() == 5000
+    # The interval, twice as long while the list is not looked at (another tab, QGIS not in front: as offscreen here).
+    assert feed.active and feed.timer.isActive() and feed.timer.interval() == (5000 if feed.watched() else 10000)
+    feed.watched = lambda: True
+    feed._next()
+    assert feed.timer.interval() == 5000
+    feed.watched = lambda: False
+    feed._next()
+    assert feed.timer.interval() == 10000
+    # Looked at again long enough after the last poll: polled at once.
+    feed._polled_at -= 6
+    polled = len(fake.asked)
+    feed.looked_at()
+    assert wait_for(lambda: len(fake.asked) > polled and not feed._polling)
     # A report by someone else comes in: counted on the tab, highlighted in 観測記録.
     b = book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行")
     log.add({"OBS_ID": b.id, "REPORT_NAME": "速報", "TEXT": "船B|航行", "REPORTED_AT": now, "REPORTED_BY": "佐藤"})

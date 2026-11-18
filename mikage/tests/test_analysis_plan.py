@@ -332,8 +332,9 @@ def test_keys_go_in_chunks_many_number_keys_as_a_range_and_a_project_layer_gives
     rows, reads = run(fake, tables, "SELECT COUNT(*) FROM nums JOIN TBL_IMAGE_CATALOG c ON c.N = nums.N",
                       readers={"nums": numbers})
     assert rows == [(12,)] and reads["TBL_IMAGE_CATALOG"] == (12, "サーバーで絞り込み: 結合キーの範囲 10〜21・列 2/5")
-    # 3 pages of 5 rather than 6 INs of 2.
-    assert asked(fake, CAT) == ["(N BETWEEN 10 AND 21)"] * 3
+    # 3 pages of 5 rather than 6 INs of 2 (each page after the last OBJECTID of the one before).
+    assert asked(fake, CAT) == ["(N BETWEEN 10 AND 21)", "((N BETWEEN 10 AND 21)) AND OBJECTID > 15",
+                                "((N BETWEEN 10 AND 21)) AND OBJECTID > 20"]
 
 
 def test_answers_are_kept_until_the_layer_changes_or_the_minutes_pass(monkeypatch):

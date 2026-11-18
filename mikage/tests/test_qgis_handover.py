@@ -233,7 +233,14 @@ def test_shared_recording_starts_beside_someone_else(plugin):
     dock.book.add(139.7, 35.6, object="機A", kind="航空機 > 戦闘機", activity="駐機")
     dock.book.records[-1].recorded_by = "鈴木"
     bar = dock.assignment_bar
-    assert wait_for(lambda: bar.read_at > 0)
+    assert wait_for(lambda: bar.read_at > 0 and bar._image_task is None and bar._image_after is None)
+    # The image shown again after a while: only its own rows are read (by its id), not everyone's.
+    bar.read_at, bar._image_read_at = 0.0, {}
+    asked = len(fake.asked)
+    bar.show_image(image)
+    assert wait_for(lambda: bar._image_task is None and image.id in bar._image_read_at)
+    wheres = [form.get("where", "") for url, form in fake.asked[asked:] if url.endswith("/query")]
+    assert wheres and all(f"IMAGE_ID = '{image.id}'" in w for w in wheres)
     dock.render()
     assert bar.label.text() == "分担: 鈴木 さん（航空機 1）が担当中。一緒に担当できます"
     assert bar.take_button.isVisible() and bar.take_button.text() == "一緒に担当" and not bar.done_button.isVisible()
