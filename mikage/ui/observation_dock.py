@@ -233,6 +233,8 @@ class ObservationDock(PluginDock):
         self.visibilityChanged.connect(self._visibility)
         # Others' records read quietly (another image, after a conflict, and every `refreshMinutes`).
         self._refreshing = False
+        #: A forced read asked while one was reading: read once more after it.
+        self._refresh_again = False
         self._refreshed_at = 0.0
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(lambda: self.refresh(force=True))
@@ -837,6 +839,8 @@ class ObservationDock(PluginDock):
         self.store_set = self.sets[index]
         self._observer_cache = self._observer()
         self.book = self._book_of(self.store_set)
+        # A quiet read of the store before, still reading, does not hold back this one's (it never tells it ended).
+        self._refreshing = self._refresh_again = False
         minutes = self.store_set.config.refresh_minutes if self.store_set.config is not None else None
         self._refresh_timer.stop()
         if minutes:
@@ -1173,20 +1177,34 @@ class ObservationDock(PluginDock):
         told.
         """
         book, s = self.book, self.store_set
-        if book is None or s is None or not s.remote or not book.loaded or self._refreshing:
+        if book is None or s is None or not s.remote or not book.loaded:
+            return
+        if self._refreshing:
+            # One is reading already, maybe from before what this asks for (a change saved just now, a record
+            # opened to change): read once more after it, not dropped.
+            self._refresh_again = self._refresh_again or force
             return
         if not force and time.monotonic() - self._refreshed_at < self.REFRESH_GAP:
             return
         self._refreshing = True
+        self._refresh_again = False
         self._refreshed_at = time.monotonic()
 
-        def done(said) -> None:
+        def finished() -> bool:
+            """Whether to read once more (asked while this one read)."""
             self._refreshing = False
+            again, self._refresh_again = self._refresh_again, False
+            return again and self.book is book
+
+        def done(said) -> None:
+            again = finished()
             if said and self.book is book:
-                self._editing_changed()
+                self._editing_changed()  # may read again itself (the form opened again)
+            if again and not self._refreshing:
+                self.refresh(force=True)
 
         def failed(_message: str) -> None:
-            self._refreshing = False
+            finished()  # (a later refresh tries again)
 
         self.do(self.tr("ほかの人の記録の読み込み"), lambda b: b.refresh(), after=done, failed=failed)
 

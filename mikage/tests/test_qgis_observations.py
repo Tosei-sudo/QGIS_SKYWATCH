@@ -1209,6 +1209,60 @@ def test_others_records_are_read_quietly(plugin, tmp_path):
     assert wait_for(lambda: any(o.object_name == "鈴木のモノ" for o in dock.book.records))
 
 
+def test_a_read_asked_while_one_reads_is_done_after_it(plugin, tmp_path, monkeypatch):
+    """
+    観測記録の読み直し: a read asked (a record opened to change, after a
+    conflict…) while a quiet read is still going, which read before what is
+    asked for, is done once more after it, not dropped; another store chosen
+    meanwhile is not held back by it.
+    """
+    import threading
+
+    from mikage.core.obs.flows import now_ms
+    from mikage.core.obs.model import observation_store_of
+    from mikage.core.obs.stores import EsriObservationStore
+    from mikage.tests.test_obs import obs
+
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    assert wait_for(lambda: dock.book.loaded)
+    book = dock.book
+    theirs = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(fake))
+    # The first read is slow to end (a busy computer): it has read, and ends only once let go.
+    read, let_go, real, reads = threading.Event(), threading.Event(), book.refresh, []
+
+    def slow():
+        said = real()
+        reads.append(said)
+        if len(reads) == 1:
+            read.set()
+            let_go.wait(10)
+        return said
+
+    monkeypatch.setattr(book, "refresh", slow)
+    dock.refresh(force=True)
+    assert wait_for(read.is_set)
+    theirs.save([obs(id="theirs-1", object_id="B", object_name="鈴木のモノ", updated_by="鈴木", updated_at=now_ms())])
+    dock.refresh(force=True)  # asked while the first one has not ended
+    let_go.set()
+    assert wait_for(lambda: any(o.object_name == "鈴木のモノ" for o in book.records))
+    assert wait_for(lambda: not dock._refreshing and not dock._running and not dock._queue) and len(reads) == 2
+    # Another store chosen while one reads: its own reads are not held back.
+    read.clear(), let_go.clear(), reads.clear()
+    dock.refresh(force=True)
+    assert wait_for(read.is_set) and dock._refreshing
+    dock.store_select.setCurrentIndex(1)
+    assert dock.book is not book and not dock._refreshing
+    let_go.set()
+    assert wait_for(lambda: not dock._running and not dock._queue) and not dock._refreshing
+
+
 def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypatch):
     """Records not saved: kept in 送信待ち when the save fails, even with another form open; sent again with the same id."""
     from mikage.core.obs.book import ObservationBook
