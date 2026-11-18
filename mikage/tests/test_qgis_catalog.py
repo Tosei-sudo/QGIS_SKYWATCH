@@ -331,21 +331,25 @@ def test_watches_notify_new_images_only(plugin, monkeypatch):
     notices = p.api.notices
     catalog = p.api.config.image_catalogs[0]
     watch = notices.add_watch(catalog, TYPES, EMPTY_SEARCH.with_(sensor="S1"), [], "S1 の新着")
-    assert wait_for(lambda: notices.store().watch(watch.id).last_checked is not None)
-    # The first check only notes what is there.
-    assert notices.store().notices() == [] and sorted(notices.store().watch(watch.id).seen) == ["A", "B"]
+    # The first check lists every image already there (tsudo, 2026-11-18), read: not announced as new.
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 2 and not notices.store().watch(watch.id).past)
+    listed = notices.store().notices()
+    assert sorted(n.image_id for n in listed) == ["A", "B"] and all(n.read and n.earlier for n in listed)
+    assert notices.notices.topLevelItem(0).text(0) == "設定前から" and p.notices_action.text() == "通知"
+    assert sorted(notices.store().watch(watch.id).seen) == ["A", "B"]
     assert notices.store().watch(watch.id).catalog.token is None
+    assert "条件に合う画像 2 件" in notices.status.text()
     now = time.time() * 1000
     images.add({"IMG_ID": "D", "ACQ": now - DAY, "SENSOR": "S1", "OFF_NADIR": 5, "AZ": 90, "PATH": "https://x.example/d.tif"}, ring(139, 35, 140, 36))
     images.add({"IMG_ID": "E", "ACQ": now - DAY, "SENSOR": "S2", "PATH": None}, ring(139, 35, 140, 36))
     notices.check(force=True)
-    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
-    assert notices.notices.topLevelItem(0).text(2) == "D"
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 3)
+    assert notices.notices.topLevelItem(0).text(2) == "D" and notices.notices.topLevelItem(0).text(0) != "設定前から"
     assert p.notices_action.text() == "通知（1）"
     # Checked again: nothing new.
     notices.check(force=True)
     assert wait_for(lambda: not notices._checking)
-    assert len(notices.store().notices()) == 1
+    assert len(notices.store().notices()) == 3
     # Moving to it marks it read.
     notices.notices.topLevelItem(0).setSelected(True)
     notices.zoom_to_chosen()
@@ -355,6 +359,7 @@ def test_watches_notify_new_images_only(plugin, monkeypatch):
     item.setCheckState(0, Qt.CheckState.Unchecked)
     assert not notices.store().watch(watch.id).enabled
     notices.watches.setCurrentItem(item)
+    notices.notices.clearSelection()
     from mikage.ui.docks import QMessageBox as Box
     monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.No)
     notices.delete_chosen_watch()
@@ -392,7 +397,7 @@ def test_a_check_asked_for_while_one_runs_is_not_lost(plugin, monkeypatch):
     images.add({"IMG_ID": "D", "ACQ": time.time() * 1000 - DAY, "SENSOR": "S1", "PATH": None}, ring(139, 35, 140, 36))
     notices.check(force=True)
     release.set()
-    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 3)  # A and B there before, D new
     assert notices.notices.topLevelItem(0).text(2) == "D"
 
 
@@ -594,7 +599,8 @@ def test_a_watch_over_a_layers_shape_keeps_a_copy_taken_again_on_request(plugin,
     assert len(shape["rings"]) == 1
     assert notices.store().watch(watch.id).area_layer["name"] == "港湾"
 
-    # 「範囲の変更…」: the layer's shape taken again (the same layer offered); what is there already is not notified.
+    # 「範囲の変更…」: the layer's shape taken again (the same layer offered); what is there already is not notified,
+    # but listed (read, 「設定前から」) by the check that follows.
     changing = Auto(watch_dialog.WatchAreaDialog)
     monkeypatch.setattr(notices_dock, "WatchAreaDialog", changing)
     notices.watches.setCurrentItem(notices.watches.topLevelItem(0))
@@ -603,10 +609,13 @@ def test_a_watch_over_a_layers_shape_keeps_a_copy_taken_again_on_request(plugin,
     dialog = changing.shown[0]
     assert dialog.area.currentData() == "layer" and dialog.choice.layer.currentLayer() is harbor
     assert "E" in notices.store().watch(watch.id).seen and notices.store().watch(watch.id).area_layer["features"] == 3
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 2 and not notices._checking)
+    e = next(n for n in notices.store().notices() if n.image_id == "E")
+    assert e.read and e.earlier and notices.store().watch(watch.id).past is None
     images.add({"IMG_ID": "F", "ACQ": now - DAY, "SENSOR": "S1", "PATH": None}, ring(30.5, 30.1, 30.6, 30.2))
     notices.check(force=True)
-    assert wait_for(lambda: notices.notices.topLevelItemCount() == 2)
-    assert {notices.notices.topLevelItem(i).text(2) for i in range(2)} == {"D", "F"}
+    assert wait_for(lambda: notices.notices.topLevelItemCount() == 3)
+    assert {notices.notices.topLevelItem(i).text(2) for i in range(3)} == {"D", "E", "F"}
 
     # Only the chosen features with none chosen: not accepted, and the dialog says why.
     catalog = p.api.config.image_catalogs[0]
@@ -1237,12 +1246,12 @@ def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_pa
     # A new image noticed: 「開く」 in 通知 records it without its file too.
     notices = p.api.notices
     watch = notices.add_watch(p.api.config.image_catalogs[0], TYPES, EMPTY_SEARCH, [], "新着")
-    assert wait_for(lambda: notices.store().watch(watch.id).last_checked is not None)
+    assert wait_for(lambda: notices.store().watch(watch.id).last_checked is not None and not notices._checking)
     now = time.time() * 1000
     images.add({"IMG_ID": "D", "ACQ": now - DAY, "SENSOR": "S1"}, ring(139, 35, 140, 36))
     notices.check(force=True)
-    assert wait_for(lambda: notices.notices.topLevelItemCount() == 1)
-    [notice] = notices.store().notices()
+    assert wait_for(lambda: any(n.image_id == "D" for n in notices.store().notices()))
+    notice = next(n for n in notices.store().notices() if n.image_id == "D")
     assert notices.open_notices([notice]) == []
     assert obs.book.current.id == "D" and obs.book.current.box == pytest.approx([139, 35, 140, 36])
     # Back to a catalog with files: 「開く」 again.

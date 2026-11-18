@@ -229,6 +229,57 @@ class GeoPackage:
                 out.append(row)
             return out
 
+    def select(self, spec: TableSpec, columns: Sequence[str], where: str = "", args: Sequence[Any] = (),
+               order: str = "fid") -> list[tuple]:
+        """
+        Some columns of a table's rows (as tuples, `geom` not decoded), in
+        `order` (SQL): cheaper than `rows` for big tables. A column that is not
+        a plain name (`COUNT(*)`) is written as it is.
+        """
+        self.ensure(spec)
+        names = ", ".join(f'"{c}"' if c.replace("_", "").isalnum() else c for c in columns)
+        with self._lock:
+            sql = f'SELECT {names} FROM "{spec.name}"' + (f" WHERE {where}" if where else "") + (f" ORDER BY {order}" if order else "")
+            return [tuple(r) for r in self._db.execute(sql, tuple(args))]
+
+    def ensure_index(self, spec: TableSpec, name: str, columns: str) -> None:
+        """An index on `columns` (SQL, e.g. `"A" DESC, "B"`) made when missing."""
+        self.ensure(spec)
+        with self._lock:
+            self._db.execute(f'CREATE INDEX IF NOT EXISTS "{name}" ON "{spec.name}" ({columns})')
+
+    def insert_new(self, spec: TableSpec, rows: Iterable[dict[str, Any]]) -> list[Any]:
+        """Adds the rows whose key is not there yet (those that are stay as they are; one transaction); the keys added."""
+        self.ensure(spec)
+        rows = list(rows)
+        if not rows:
+            return []
+        if not spec.key:
+            raise ValueError(f"{spec.name} にキーなし")
+        added: list[Any] = []
+        with self._lock:
+            db = self._db
+            db.execute("BEGIN")
+            try:
+                for row in rows:
+                    if db.execute(f'SELECT 1 FROM "{spec.name}" WHERE "{spec.key}" = ?', (row[spec.key],)).fetchone():
+                        continue
+                    names = [c.name for c in spec.columns if c.name in row]
+                    values = [row[n] for n in names]
+                    if spec.geometry and "geom" in row:
+                        names.append("geom")
+                        values.append(row["geom"])
+                    cols = ", ".join(f'"{n}"' for n in names)
+                    db.execute(f'INSERT INTO "{spec.name}" ({cols}) VALUES ({", ".join("?" for _ in names)})', values)
+                    added.append(row[spec.key])
+                if added:
+                    self._touch(spec)
+                db.execute("COMMIT")
+            except Exception:
+                db.execute("ROLLBACK")
+                raise
+        return added
+
     def upsert(self, spec: TableSpec, rows: Iterable[dict[str, Any]]) -> None:
         """Adds the rows, or replaces those whose key is already there (one transaction)."""
         self.ensure(spec)

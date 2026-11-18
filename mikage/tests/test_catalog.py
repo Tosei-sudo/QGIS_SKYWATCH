@@ -6,6 +6,7 @@ local-paths.test.ts, and searches against the fake Esri server.
 import json
 import math
 import os
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -23,8 +24,8 @@ from mikage.core.catalog.search import (
 )
 from mikage.core.catalog.similar import DEFAULT_TOLERANCE, SimilarTolerance, azimuth_difference, rank_similar, similar_search
 from mikage.core.catalog.watch import (
-    CatalogWatch, add_areas, areas_of, areas_of_shape, check_watch, conditions_text, join_areas, layer_origin, new_watch, replace_areas,
-    since_condition, watch_query,
+    CatalogWatch, WatchNotice, add_areas, areas_of, areas_of_shape, check_watch, conditions_text, join_areas, layer_origin, new_watch,
+    replace_areas, since_condition, watch_query,
 )
 from mikage.core.catalog.watch_store import WatchStore, check_due
 from mikage.core.config import parse_config
@@ -409,9 +410,11 @@ CREATED = utc(2026, 10, 10)
 
 
 def watch(**over):
+    """A watch whose past is read already (the checks of new images); `past=…` for one still to read it."""
     w = new_watch("東京", WATCHED, {"ACQ": "esriFieldTypeDate", "REG": "esriFieldTypeDate"}, EMPTY_SEARCH.with_(sensor="S1", max_angle=20),
                   [{"kind": "points", "points": [[139.7, 35.6]]}], now=CREATED)
     w.id = "w1"
+    w.past = None
     for k, v in over.items():
         setattr(w, k, v)
     return w
@@ -590,19 +593,19 @@ def test_the_store_keeps_watches_and_notices_and_checks_what_is_due(tmp_path):
         return watch, answering(images)
 
     # The first check notes; a later one notices.
-    assert check_due(store, ask_for, 600000, now=CREATED + 1) == 0
+    assert check_due(store, ask_for, 600000, now=CREATED + 1).new == 0
     assert store.watch("w1").seen == ["A"] and store.watch("w1").catalog.token is None
     images.append("B")
     # Not due yet.
-    assert check_due(store, ask_for, 600000, now=CREATED + 2) == 0
-    assert check_due(store, ask_for, 600000, force=True, now=CREATED + 3) == 1
+    assert check_due(store, ask_for, 600000, now=CREATED + 2).new == 0
+    assert check_due(store, ask_for, 600000, force=True, now=CREATED + 3).new == 1
     assert [(n.image_id, n.read) for n in store.notices()] == [("B", False)] and store.unread() == 1
     # Renamed meanwhile: the notice takes the new name.
     renamed = store.watch("w1")
     renamed.name = "東京湾"
     store.put_watch(renamed)
     images.append("C")
-    assert check_due(store, ask_for, 600000, now=CREATED + 700000) == 1
+    assert check_due(store, ask_for, 600000, now=CREATED + 700000).new == 1
     assert store.notices()[0].watch_name == "東京湾" and store.watch("w1").name == "東京湾"
     store.mark_read([store.notices()[0].id])
     assert store.unread() == 1
@@ -610,6 +613,183 @@ def test_the_store_keeps_watches_and_notices_and_checks_what_is_due(tmp_path):
     assert store.unread() == 0
     store.delete_watch("w1")
     assert store.watches() == [] and store.notices() == []
+
+
+DAYS = 24 * 60 * 60 * 1000
+CATALOG_URL = "https://svc/FeatureServer/0"
+CATALOG_FIELDS = {"IMG_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "REG": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
+                  "ANGLE": "esriFieldTypeDouble", "STATUS": "esriFieldTypeString", "URL": "esriFieldTypeString"}
+
+
+def catalog_service(max_record_count=2, pagination=False):
+    """A catalog of images registered over the years (asked in pieces of `max_record_count`, without paging)."""
+    fake = FakeEsri()
+    layer = fake.add_layer(CATALOG_URL, FakeLayer(dict(CATALOG_FIELDS), "esriGeometryPolygon", max_record_count=max_record_count,
+                                                  pagination=pagination))
+    square = {"rings": [[[139.6, 35.5], [139.6, 35.7], [139.8, 35.7], [139.8, 35.5], [139.6, 35.5]]]}
+    far = {"rings": [[[130.0, 33.0], [130.0, 33.1], [130.1, 33.1], [130.0, 33.0]]]}
+
+    def image(image_id, registered, sensor="S1", where=square):
+        layer.add({"IMG_ID": image_id, "ACQ": registered - DAYS, "REG": registered, "SENSOR": sensor, "ANGLE": 10, "STATUS": "OK",
+                   "URL": f"https://x/{image_id}.tif"}, where)
+
+    image("OLD", CREATED - 900 * DAYS)
+    image("LAST_YEAR", CREATED - 300 * DAYS)
+    image("LAST_WEEK", CREATED - 7 * DAYS)
+    image("YESTERDAY", CREATED - 1 * DAYS)
+    image("OTHER_SENSOR", CREATED - 10 * DAYS, sensor="S2")
+    image("ELSEWHERE", CREATED - 10 * DAYS, where=far)
+    client = EsriClient(fake)
+    return fake, layer, image, (lambda url, params: client.ask(url, params))
+
+
+def test_a_new_watch_lists_every_image_already_there_read_and_dated_when_registered():
+    fake, _layer, image, ask = catalog_service()
+    w = new_watch("東京", WATCHED, {"ACQ": "esriFieldTypeDate", "REG": "esriFieldTypeDate"}, EMPTY_SEARCH.with_(sensor="S1", max_angle=20),
+                  [{"kind": "points", "points": [[139.7, 35.6]]}], now=CREATED)
+    assert w.past == {"areas": None, "before": None}
+    first = check_watch(w, ask, CREATED + 1000)
+    # Nothing announced as new; every image matching it, whenever registered, listed as read.
+    assert first.notices == [] and first.watch.past is None and first.watch.past_left == 0 and first.watch.last_error is None
+    assert [n.image_id for n in first.earlier] == ["YESTERDAY", "LAST_WEEK", "LAST_YEAR", "OLD"]
+    assert all(n.read and n.earlier for n in first.earlier)
+    assert first.earlier[0].found == CREATED - DAYS and first.earlier[-1].found == CREATED - 900 * DAYS
+    assert first.earlier[0].feature["attributes"]["URL"] == "https://x/YESTERDAY.tif"
+    # The ids asked first, the features two at a time (the layer's maxRecordCount), nothing depending on paging.
+    assert any(f.get("returnIdsOnly") == "true" for _u, f in fake.asked)
+    assert not any("resultOffset" in f for _u, f in fake.asked)
+    # The recent ones noted (they are not new next time), the old ones before them.
+    assert first.watch.seen[-2:] == ["LAST_WEEK", "YESTERDAY"] and set(first.watch.seen) >= {"OLD", "LAST_YEAR"}
+    # Then only what comes.
+    image("TODAY", CREATED + 2000)
+    second = check_watch(first.watch, ask, CREATED + 3000)
+    assert [n.image_id for n in second.notices] == ["TODAY"] and second.earlier == [] and not second.notices[0].read
+    # Kept and read back: the past is not read again; a notice says it was there before.
+    again = CatalogWatch.from_json(json.loads(json.dumps(second.watch.to_json())))
+    assert again.past is None
+    n = first.earlier[0]
+    assert WatchNotice.from_json(json.loads(json.dumps(n.to_json()))).earlier and "earlier" not in second.notices[0].to_json()
+
+
+def test_a_watch_kept_before_lists_the_images_registered_before_it_was_set_once():
+    _fake, _layer, image, ask = catalog_service(max_record_count=1000, pagination=True)
+    image("NOTIFIED", CREATED + 2 * DAYS)
+    image("NEW", CREATED + 5 * DAYS)
+    kept = watch(last_checked=CREATED + 4 * DAYS, seen=["LAST_WEEK", "YESTERDAY", "NOTIFIED"]).to_json()
+    del kept["past"]  # as a watch was kept before
+    old = CatalogWatch.from_json(kept)
+    assert old.past == {"areas": None, "before": CREATED}
+    result = check_watch(old, ask, CREATED + 6 * DAYS)
+    # The one new since its last check announced; those there when it was set listed read; the one notified then not again.
+    assert [n.image_id for n in result.notices] == ["NEW"]
+    assert [n.image_id for n in result.earlier] == ["YESTERDAY", "LAST_WEEK", "LAST_YEAR", "OLD"]
+    assert result.watch.past is None
+
+
+def test_a_point_added_or_the_area_changed_lists_the_images_already_over_it():
+    _fake, _layer, image, ask = catalog_service()
+    image("THERE", CREATED - 50 * DAYS, where={"rings": [[[135.0, 34.0], [135.0, 34.1], [135.1, 34.1], [135.0, 34.0]]]})
+    before = watch(last_checked=CREATED, seen=["YESTERDAY"])
+    point = [{"kind": "points", "points": [[135.05, 34.05]]}]
+    after = add_areas(before, point, ask, CREATED + 1)
+    assert after.past == {"areas": point, "before": None}
+    result = check_watch(after, ask, CREATED + 2)
+    assert result.notices == [] and [n.image_id for n in result.earlier] == ["THERE"] and result.watch.past is None
+    changed = replace_areas(result.watch, point, ask, CREATED + 3)
+    assert changed.past == {"areas": None, "before": None}
+    assert [n.image_id for n in check_watch(changed, ask, CREATED + 4).earlier] == ["THERE"]
+
+
+def test_too_many_images_already_there_the_newest_kept_and_told(monkeypatch):
+    import mikage.core.catalog.watch as watch_module
+
+    monkeypatch.setattr(watch_module, "MAX_NOTICES", 2)
+    _fake, _layer, _image, ask = catalog_service()
+    result = check_watch(watch(past={"areas": None, "before": None}), ask, CREATED + 1)
+    # Object ids are in the order rows were added: the last added kept.
+    assert [n.image_id for n in result.earlier] == ["YESTERDAY", "LAST_WEEK"] and result.watch.past_left == 2
+    assert CatalogWatch.from_json(result.watch.to_json()).past_left == 2
+
+
+def test_the_past_not_read_is_read_next_time():
+    _fake, _layer, _image, ask = catalog_service()
+
+    def refusing(url, params):
+        if params.get("objectIds"):
+            raise RuntimeError("つながりません")
+        return ask(url, params)
+
+    result = check_watch(watch(past={"areas": None, "before": None}, last_checked=CREATED), refusing, CREATED + 1)
+    assert result.earlier == [] and result.watch.past is not None and "前からある画像を読めず" in result.watch.last_error
+    assert check_watch(result.watch, ask, CREATED + 2).watch.past is None
+    # A service that refuses ids: asked plainly (what one answer holds).
+
+    def no_ids(url, params):
+        if params.get("returnIdsOnly"):
+            raise RuntimeError("not supported")
+        return ask(url, params)
+
+    plain = check_watch(watch(past={"areas": None, "before": None}, last_checked=CREATED), no_ids, CREATED + 1)
+    assert len(plain.earlier) == 2 and plain.watch.past is None  # maxRecordCount 2: what one answer held
+
+
+def test_the_store_lists_notices_without_their_images_and_keeps_what_was_read(tmp_path):
+    store = WatchStore(GeoPackage(str(tmp_path / "w.gpkg")))
+    _fake, _layer, image, ask = catalog_service()
+    w = watch(past={"areas": None, "before": None})
+    store.put_watch(w)
+    checked = check_due(store, lambda x: (x, ask), 600000, now=CREATED + 1)
+    assert (checked.new, checked.earlier, checked.left) == (0, 4, 0)
+    listed = store.notices()
+    assert [n.image_id for n in listed] == ["YESTERDAY", "LAST_WEEK", "LAST_YEAR", "OLD"]
+    assert all(not n.complete and n.feature == {} and n.earlier and n.read for n in listed) and store.unread() == 0
+    full = store.complete(listed[:2])
+    assert [n.feature["attributes"]["IMG_ID"] for n in full] == ["YESTERDAY", "LAST_WEEK"] and full[0].complete
+    # Its features found out kept; added again (another check): left as it is.
+    assert store.put_extra(listed[0].id, "contents", {"k": 1})
+    store.mark_read([listed[0].id])
+    assert store.add_notices(store.complete([listed[0]])) == 0
+    assert store.complete([listed[0]])[0].extra == {"contents": {"k": 1}}
+    # Read again by the next check only when an area changes; a new image is new.
+    image("TODAY", CREATED + 100)
+    assert check_due(store, lambda x: (x, ask), 600000, force=True, now=CREATED + 200).new == 1
+    assert [n.image_id for n in store.notices()][0] == "TODAY" and store.unread() == 1
+
+
+def test_a_watch_with_its_past_to_read_is_due_at_once(tmp_path):
+    store = WatchStore(GeoPackage(str(tmp_path / "w.gpkg")))
+    _fake, _layer, _image, ask = catalog_service()
+    store.put_watch(watch(last_checked=CREATED, last_tried=CREATED, seen=["YESTERDAY"]))
+    assert check_due(store, lambda x: (x, ask), 600000, now=CREATED + 1).earlier == 0  # not due
+    store.put_watch(replace(store.watch("w1"), past={"areas": None, "before": None}))
+    assert check_due(store, lambda x: (x, ask), 600000, now=CREATED + 2).earlier == 4
+
+
+def test_notices_kept_before_get_the_lists_columns(tmp_path):
+    from mikage.core.catalog.watch_store import NOTICES
+
+    store = WatchStore(GeoPackage(str(tmp_path / "w.gpkg")))
+    old = WatchNotice(id="w1|A", watch_id="w1", watch_name="東京", catalog_label="カタログ", found=CREATED, read=False, image_id="A",
+                      acquired=CREATED - 5, sensor="S1", feature={"attributes": {"IMG_ID": "A"}, "geometry": None})
+    # As an older plugin wrote it: the first five columns only.
+    store.gpkg.upsert(NOTICES, [{"NOTICE_ID": old.id, "WATCH_ID": "w1", "FOUND": CREATED, "IS_READ": 0, "DATA": json.dumps(old.to_json())}])
+    listed = store.notices()
+    assert [(n.image_id, n.watch_name, n.acquired, n.sensor, n.read) for n in listed] == [("A", "東京", CREATED - 5, "S1", False)]
+    assert store.complete(listed)[0].feature == {"attributes": {"IMG_ID": "A"}, "geometry": None}
+
+
+def test_the_oldest_notices_go_beyond_the_most_kept(tmp_path, monkeypatch):
+    import mikage.core.catalog.watch_store as store_module
+
+    monkeypatch.setattr(store_module, "MAX_NOTICES", 3)
+    store = WatchStore(GeoPackage(str(tmp_path / "w.gpkg")))
+
+    def notice(i, found):
+        return WatchNotice(id=f"w1|{i}", watch_id="w1", watch_name="東京", catalog_label="", found=found, read=True, image_id=i,
+                           acquired=None, sensor="", feature={})
+
+    assert store.add_notices([notice("A", 5), notice("B", 1), notice("C", 3), notice("D", 4)]) == 4
+    assert [n.image_id for n in store.notices()] == ["A", "D", "C"]
 
 
 # --------------------------------------------------------------------------- local-paths.test.ts
