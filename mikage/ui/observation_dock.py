@@ -17,7 +17,9 @@ import json
 import time
 from typing import Any, Callable, Optional
 
-from qgis.core import Qgis, QgsMessageLog, QgsProject, QgsRasterLayer, QgsRectangle
+from qgis.core import (
+    Qgis, QgsCoordinateReferenceSystem, QgsGeometry, QgsMessageLog, QgsPointXY, QgsProject, QgsRasterLayer, QgsRectangle,
+)
 from qgis.PyQt.QtCore import QDateTime, QEventLoop, QItemSelection, QItemSelectionModel, QStringListModel, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
@@ -37,7 +39,8 @@ from ..core.obs.book import FormValues, ObservationBook, ObservedImage
 from ..core.obs.drafts import OutboxDrafts
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
 from ..core.obs.flows import (
-    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, now_ms, outline_of, side_points, time_key, two_point,
+    CarryOver, MatchCandidate, ObjectFlow, RecentThings, ends_of, flow_of, heading_text, now_ms, outline_of, recent_things, side_points,
+    time_key, two_point,
 )
 from ..core.obs.geo import get_distance, js_round, km_text
 from ..core.obs.model import Observation
@@ -535,6 +538,7 @@ class ObservationDock(PluginDock):
         self.tabs = QTabBar()
         for name in (tr("この画像"), tr("モノ"), tr("分類")):
             self.tabs.addTab(name)
+        self.tabs.setTabToolTip(1, tr("最終（最後に写った画像の日時）が直近 1 か月のモノ。それより前は ArcGIS ダッシュボードで"))
         self.tabs.setTabToolTip(2, tr("種別の分類体系（階層・階層名・既知の個体）"))
         self.tabs.currentChanged.connect(self._tab_changed)
         b.addWidget(self.tabs)
@@ -559,6 +563,12 @@ class ObservationDock(PluginDock):
         self.unfilter_button = unfilter
         self.class_filter_row.hide()
         b.addWidget(self.class_filter_row)
+        # 「モノ」 lists the last month only; what it leaves out (tsudo 2026-11-18: the ArcGIS dashboard has the rest).
+        self.objects_note = plain_label(QLabel())
+        self.objects_note.setWordWrap(True)
+        self.objects_note.setStyleSheet("color: #555555;")
+        self.objects_note.hide()
+        b.addWidget(self.objects_note)
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         # Ctrl / Shift + click chooses several records (or things), for 「一括編集」.
@@ -621,7 +631,9 @@ class ObservationDock(PluginDock):
         self.steps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.steps_table.horizontalHeader().setStretchLastSection(True)
+        self.steps_table.setToolTip(tr("クリックでその画像へ移動し記録の場所を表示、ダブルクリックで記録を編集（クリック記録）"))
         self.steps_table.cellClicked.connect(self._step_clicked)
+        self.steps_table.cellDoubleClicked.connect(self._step_double_clicked)
         self.steps_columns = column_menus("observation-steps", self.steps_table, self)
         fl.addWidget(self.flow_summary)
         fl.addWidget(self.flow_strip)
@@ -2353,10 +2365,10 @@ class ObservationDock(PluginDock):
             self.canvas.setCenter(at)
             self.canvas.refresh()
 
-    def open_record(self, o: Observation) -> None:
-        """Goes to a record's image and opens it in the form."""
+    def go_to_record(self, o: Observation) -> bool:
+        """Goes to a record's image and centres the map on it (False: its image is not open)."""
         if self.book is None:
-            return
+            return False
         entry = next((e for e in self.book.images if e.id == o.image_id), None)
         if entry is not None and entry is not self.book.current:
             self.book.current = entry
@@ -2364,6 +2376,12 @@ class ObservationDock(PluginDock):
         self._center(o)
         if entry is None:
             self._say(self.tr("画像（{n}）が開かれておらず移動不可").format(n=o.image_name or o.image_id))
+            return False
+        return True
+
+    def open_record(self, o: Observation) -> None:
+        """Goes to a record's image and opens it in the form."""
+        if not self.go_to_record(o):
             return
         if not self.active:
             self.set_active(True)
@@ -2894,9 +2912,10 @@ class ObservationDock(PluginDock):
         shown = book.records if self.deleted_check.isChecked() else book.living()
         here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: o.object_name)
         objects = book.flows()
+        recent = recent_things(objects)
         taxa = book.taxonomy()
         self.tabs.setTabText(0, self.tr("この画像 {n}").format(n=len([o for o in here if o.deleted_at is None])))
-        self.tabs.setTabText(1, self.tr("モノ {n}").format(n=len(objects)))
+        self.tabs.setTabText(1, self.tr("モノ {n}").format(n=len(recent.things)))
         self.tabs.setTabText(2, self.tr("分類 {n}").format(n=len(taxa)))
         # What the form offers.
         self.objects_model.setStringList(list(dict.fromkeys(f.name for f in objects if f.name)))
@@ -2917,9 +2936,10 @@ class ObservationDock(PluginDock):
         if self.tab == "image":
             self._render_image(here, carried, inside)
         elif self.tab == "objects":
-            self._render_objects(objects)
+            self._render_objects(objects, recent)
         else:
             self._render_classes(taxa, objects)
+        self._render_objects_note(recent)
         self._shown_as = shown_as
         if kept is not None:
             self._choose_rows(*kept)
@@ -3014,12 +3034,15 @@ class ObservationDock(PluginDock):
         if not self.active:
             self.set_active(True, quiet=True)
 
-    def _render_objects(self, objects: list[ObjectFlow]) -> None:
+    def _render_objects(self, objects: list[ObjectFlow], recent: RecentThings) -> None:
         tr = self.tr
         self._set_head(tr("モノ"), tr("種別"), tr("最新"), tr("初出"), tr("最終"), tr("画像"))
         q = self.filter_input.text().strip().lower()
         taxa = self.book.taxonomy()
-        listed = [f for f in objects if self._shown_kind(f.kind, taxa)] if self.class_filter else objects
+        # The last month (and the thing chosen, when older: its flow is shown below, and a click on its row closes it).
+        listed = [f for f in objects if recent.since is not None and f.last >= recent.since or f.object_id == self.chosen]
+        if self.class_filter:
+            listed = [f for f in listed if self._shown_kind(f.kind, taxa)]
         if q:
             listed = [f for f in listed if any(q in v.lower() for v in [f.name, f.object_id, f.kind, *(o.activity for o in f.observations)])]
         waiting = self.waiting_ids()
@@ -3031,6 +3054,26 @@ class ObservationDock(PluginDock):
                       waiting=any(o.id in waiting for o in f.observations), key=f"f:{f.object_id}")
         if self.table.rowCount() == 0:
             self._row([tr("該当するモノなし") if objects else tr("記録なし")])
+
+    def _render_objects_note(self, recent: RecentThings) -> None:
+        """What 「モノ」 lists: the things last seen since a month ago, the older ones left to the ArcGIS dashboard."""
+        show = self.tab == "objects" and recent.since is not None
+        self.objects_note.setVisible(show)
+        if not show:
+            return
+        tr = self.tr
+
+        def day(t: int) -> str:
+            return local_time(t)[:10]
+
+        if recent.today:
+            text = tr("最終が {since} 以降のモノ（直近 1 か月）").format(since=day(recent.since))
+        else:
+            text = tr("最終が {since} 以降のモノ（この 1 か月は記録がないため、最後の記録の {until} から 1 か月）").format(
+                since=day(recent.since), until=day(recent.until))
+        if recent.older:
+            text += tr("。それより前の {n} 件は ArcGIS ダッシュボードで").format(n=recent.older)
+        self.objects_note.setText(text)
 
     def _render_classes(self, taxa, objects: list[ObjectFlow]) -> None:
         tr = self.tr
@@ -3098,9 +3141,33 @@ class ObservationDock(PluginDock):
                 self.merge_select.addItem(f"{f.name}（{f.kind}・{local_time(f.last)}）", f.object_id)
 
     def _step_clicked(self, row: int, _col: int) -> None:
+        """
+        A row of the thing's flow clicked: its image shown and its record
+        flashed on the map, nothing more (tsudo 2026-11-18 asked why a click
+        there started 「クリック記録」 with the record in the form: a look at
+        the flow is not an edit). A double click opens the record.
+        """
+        steps = getattr(self, "_steps", [])
+        if not 0 <= row < len(steps):
+            return
+        o = steps[row].observations[0]
+        if self.go_to_record(o):
+            if 0 <= row < self.steps_table.rowCount():
+                self.steps_table.selectRow(row)  # the flow was shown anew for the other image
+            self._flash(o)
+            self._say(self.tr("{when} の画像へ移動（ダブルクリックでこの記録を編集）").format(when=local_time(time_key(o))))
+
+    def _step_double_clicked(self, row: int, _col: int) -> None:
         steps = getattr(self, "_steps", [])
         if 0 <= row < len(steps):
             self.open_record(steps[row].observations[0])
+
+    def _flash(self, o: Observation) -> None:
+        """A record's place flashed on the map."""
+        try:
+            self.canvas.flashGeometries([QgsGeometry.fromPointXY(QgsPointXY(o.lon, o.lat))], QgsCoordinateReferenceSystem("EPSG:4326"))
+        except Exception:  # noqa: BLE001 (only a hint)
+            pass
 
     def _render_taxon(self, taxa, objects: list[ObjectFlow]) -> None:
         classes = self.tab == "classes"
