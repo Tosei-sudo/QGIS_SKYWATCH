@@ -28,6 +28,11 @@ A server is marked down when a request to it fails without an answer
 (UnreachableError: no connection, a timeout, a 5xx). Its requests then go
 straight to the cache (no waiting for each to time out) until a probe
 (`probe`) gets an answer. Upload or discard is then the person's choice.
+A read that only timed out or met a 5xx (BusyError: the server may just be
+busy) is answered from the cache, but the server is marked down only when
+another does within STRIKE_MS (2026-11-19, 200 people: one slow answer at
+the start of the day put everyone offline, and everyone read everything
+again when it came back, which slowed it again).
 """
 from __future__ import annotations
 
@@ -44,7 +49,11 @@ from typing import Any, Callable, Iterable, Optional
 from urllib.parse import urlsplit
 
 from . import audit
-from .esri import Transport, UnreachableError
+from .esri import BusyError, Transport, UnreachableError
+
+#: Reads that only timed out or met a 5xx (BusyError) within STRIKE_MS before a server is marked down.
+DOWN_AFTER = 2
+STRIKE_MS = 120_000
 
 #: The kinds of work kept, in the order they are counted and sent, with their names on screen.
 KINDS: dict[str, str] = {
@@ -172,6 +181,8 @@ class OfflineWork:
         self.listeners: list[Callable[[], None]] = []
         self._db: Optional[sqlite3.Connection] = None
         self._puts = 0
+        #: Reads that met a BusyError lately: host → their times (ms).
+        self._strikes: dict[str, list[int]] = {}
 
     # ---- the file -------------------------------------------------------
 
@@ -250,6 +261,20 @@ class OfflineWork:
                 self.down_hosts[host] = (self.clock(), url, reason)
         if fresh:
             self._changed()
+
+    def strike(self, url: str) -> bool:
+        """A read of `url`'s server met a BusyError: whether that makes DOWN_AFTER within STRIKE_MS (then mark it down)."""
+        host, now = host_of(url), self.clock()
+        with self.lock:
+            times = [t for t in self._strikes.get(host, []) if now - t < STRIKE_MS] + [now]
+            self._strikes[host] = times
+            return len(times) >= DOWN_AFTER
+
+    def answered(self, url: str) -> None:
+        """The server of `url` answered: its strikes are forgotten."""
+        if self._strikes:
+            with self.lock:
+                self._strikes.pop(host_of(url), None)
 
     def mark_up(self, host: str) -> None:
         with self.lock:
@@ -371,11 +396,13 @@ class OfflineWork:
             except UnreachableError as error:
                 if not self.enabled:
                     raise
-                self.mark_down(url, str(error))
+                if not (read and isinstance(error, BusyError)) or self.strike(url):
+                    self.mark_down(url, str(error))
                 kept = self.cached(url, form) if read else None
                 if kept is not None:
                     return kept[0]
                 raise
+            self.answered(url)
             if read:
                 self.remember(url, form, body)
             return body

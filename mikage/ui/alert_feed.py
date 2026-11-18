@@ -35,6 +35,8 @@ from .list_views import column_menus
 DAY_MS = 86_400_000
 #: The longest wait after polls failing one after another (ms).
 MAX_BACKOFF_MS = 300_000
+#: Polls this many times further apart while the list is not looked at.
+UNWATCHED_FACTOR = 2
 COLUMNS = ("通報日時", "フォーマット", "通報者", "通報文", "記録ID")
 
 
@@ -61,6 +63,10 @@ class AlertFeed(QWidget):
         self.open_log: Optional[Callable[[], None]] = None
         #: QGIS's message bar (set by the dock): what 「メールを作成」 has to say outlives the next poll's status.
         self.message_bar: Optional[Callable[[], object]] = None
+        #: Whether someone looks at the list (its tab chosen, QGIS in front; set by the dock): else polls are twice as far apart.
+        self.watched: Callable[[], bool] = lambda: True
+        #: When the last poll started (time.monotonic()).
+        self._polled_at = 0.0
         self.active = False
         self._closed = False
         self._polling = False
@@ -158,9 +164,23 @@ class AlertFeed(QWidget):
         interval = self.interval_ms()
         if not self.active or self._closed or interval <= 0:
             return
+        if not self.watched():
+            # The tab not looked at (another tab, QGIS behind other windows): half as often (2026-11-19, 200 people).
+            interval *= UNWATCHED_FACTOR
         if self._failures:
             interval = min(MAX_BACKOFF_MS, max(interval, interval * 2 ** self._failures))
         self.timer.start(interval)
+
+    def looked_at(self) -> None:
+        """The tab is looked at again: polled now when the last poll is older than the interval, else at the interval."""
+        interval = self.interval_ms()
+        if not self.active or self._closed or interval <= 0 or self._polling or self._failures:
+            return
+        due = self._polled_at + interval / 1000 - time.monotonic()
+        if due <= 0:
+            self.poll()
+        elif self.timer.isActive() and self.timer.remainingTime() > due * 1000:
+            self.timer.start(int(due * 1000))
 
     def poll(self, force: bool = False) -> None:
         """Asks the log table for what changed since the last poll (in a hidden task)."""
@@ -182,6 +202,7 @@ class AlertFeed(QWidget):
         known = set(self.rows)
         since = _now() - s.live.days * DAY_MS if s.live.days > 0 else None
         self._polling = True
+        self._polled_at = time.monotonic()
 
         def done(changes) -> None:
             self._polling = False

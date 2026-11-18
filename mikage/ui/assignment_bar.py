@@ -44,6 +44,11 @@ class AssignmentBar(QWidget):
         self.error = ""
         self._task = None
         self._again = False
+        #: The rows of one image read again (another image shown): its task, and when each image's rows were read.
+        self._image_task = None
+        self._image_read_at: dict[str, float] = {}
+        #: An image shown while everyone's rows were being read: its own are read after (they may have changed since).
+        self._image_after: Optional[str] = None
         self._writing = None
         #: The image being taken because 「クリック記録」 started on it (claim()).
         self.claiming = None
@@ -85,6 +90,7 @@ class AssignmentBar(QWidget):
     def reset(self) -> None:
         """The settings changed: forget what was read."""
         self.items, self.read_at, self.error = [], 0.0, ""
+        self._image_read_at = {}
         self.setVisible(self.source is not None)
         if self.source is not None and self.dock.isVisible():
             self.reload()
@@ -117,6 +123,9 @@ class AssignmentBar(QWidget):
             self.changed.emit()
             if then:
                 then()
+            after, self._image_after = self._image_after, None
+            if after:
+                self.reload_image(after)
 
         def failed(message: str) -> None:
             self._task = None
@@ -130,11 +139,52 @@ class AssignmentBar(QWidget):
         self._task = run_task(self.tr("分担の読み込み"), lambda _t: load_assignments(client, source, token, done_since=since), done, failed)
 
     def show_image(self, image) -> None:
-        """The dock shows another image (or the same again)."""
+        """
+        The dock shows another image (or the same again): its rows are read
+        again when older than FRESH_S, only that image's (by its id: the
+        table's index), not everyone's (2026-11-19, 200 people: each change of
+        image read the whole table, which only grows).
+        """
         self.image = image
-        if self.source is not None and self.dock.isVisible() and time.monotonic() - self.read_at > FRESH_S:
-            self.reload()
+        now = time.monotonic()
+        if self.source is not None and self.dock.isVisible() and image is not None and \
+                now - max(self.read_at, self._image_read_at.get(image.id, 0.0)) > FRESH_S:
+            self.reload_image(image.id)
         self.render()
+
+    def reload_image(self, image_id: str) -> None:
+        """Reads the rows of one image again (in a task) and puts them in place of those read before."""
+        source = self.source
+        if source is None or not image_id or self._image_task is not None:
+            return
+        if self._task is not None:
+            self._image_after = image_id
+            return
+        from ..core.obs.assignments import load_assignments
+        from ..core.esri import quote
+
+        client, token = self.dock.context.esri(), self.token()
+        since = time.time() * 1000 - DONE_DAYS * 86_400_000
+        where = f"{source.fields['imageId']} = {quote(image_id)}"
+
+        def done(rows) -> None:
+            self._image_task = None
+            if source is not self.source:
+                return
+            self._image_read_at[image_id] = time.monotonic()
+            items = [x for x in self.items if x.image_id != image_id] + list(rows)
+            self.items = sorted(items, key=lambda x: (x.done, -(x.taken_at or 0), -(x.oid or 0)))
+            self.error = ""
+            self.render()
+            self.changed.emit()
+
+        def failed(message: str) -> None:
+            self._image_task = None
+            self.error = message
+            self.render()
+
+        self._image_task = run_task(self.tr("分担の読み込み"),
+                                    lambda _t: load_assignments(client, source, token, where, done_since=since), done, failed)
 
     def needs_claim(self, image) -> bool:
         """

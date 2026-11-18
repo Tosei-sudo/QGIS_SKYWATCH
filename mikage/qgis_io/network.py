@@ -19,7 +19,7 @@ from qgis.PyQt.QtCore import QByteArray, QThread, QUrl
 from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest
 from qgis.PyQt.QtWidgets import QApplication
 
-from ..core.esri import EsriError, UnreachableError, form_body
+from ..core.esri import BusyError, EsriError, UnreachableError, form_body
 from .tasks import Cancelled, current_feedback
 
 #: The authcfg for a URL (the plugin settings' choice for the service it belongs to).
@@ -229,7 +229,7 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
             _retire(line, quit_request=True)
             if cancelled:
                 raise Cancelled()
-            raise UnreachableError(f"応答なし（タイムアウト）（{_address(url)}）")
+            raise BusyError(f"応答なし（タイムアウト）（{_address(url)}）")
     _give_back(line)
     if feedback is not None and feedback.isCanceled():
         raise Cancelled()
@@ -254,7 +254,9 @@ def _answer(reply, url: str, authcfg: Optional[str]) -> bytes:
         # Not reached (or the server is down): the plugin works offline until it answers (core/offline.py).
         # A 4xx answer is the server's refusal, not an outage.
         unreachable = not isinstance(status, int) or status <= 0 or status >= 500
-        raise (UnreachableError if unreachable else EsriError)(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
+        # A 5xx (and a timeout, above) may be a server only busy: BusyError (core/offline.py waits for a second one).
+        kind = BusyError if isinstance(status, int) and status >= 500 else UnreachableError if unreachable else EsriError
+        raise kind(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
     return bytes(reply.content())
 
 

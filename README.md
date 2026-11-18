@@ -828,7 +828,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - **通報済みのハイライト**: 通報テーブルにある記録は、「観測記録」ドックの一覧で行が黄色、地図では印の後ろにオレンジ色の円（行にマウスを乗せると「通報済み」）。記録の読み込み（「再読込」・設定ファイルの読み直し）のときに通報テーブルを読み、「通報」した記録はすぐ、「通報記録」で行を削除した記録は読み直して消える。ほかの人の通報は次の読み込みで反映
 - 対象は削除されていない記録。`presentOnly`（既定 `true`）で不在を除き、`minConfidence` で確度の下限
 - **手動の通報**: 条件に合わない記録も、記録のフォームの「通報」、または一覧で選んだ行（Ctrl・Shift + クリックで複数）の「通報に追加」で通報文の先頭に入る（「手動」と表示。抽出し直しても残る）。項目 `rule` は「手動」、項目 `manual` は「手動」か空欄、通報テーブルの `MANUAL` は 1
-- **通知ドックの「通報」タブ**: 通報テーブルの直近 `live.days` 日（既定 7 日）の行を新しい順に一覧し、`live.seconds` 秒ごと（既定 10 秒）に読み直す。ほかの人の通報も間隔ごとに入り、タブに件数（例:「通報（2）」）、新しい行は太字、「観測記録」ドックの通報済みのハイライトにもすぐ反映（削除された行は消える）。読み直しは変わった分だけ（行の ID の一覧 1 回と、新しい行だけ）で、ドックが表示されていない間（ほかのタブの裏も）は止まり、表示したときにすぐ読む。失敗が続くと間隔を延ばす（最長 5 分）。ダブルクリック・「記録へ移動」でその記録へ、「選択をコピー」、「メールを作成」（`mail` があるとき。下の「[メールで送る](#通報をメールで送るmail)」）、「今すぐ更新」、「通報記録の確認…」。Esri の REST は変更を知らせないため、リアルタイムではなく間隔ごとの更新。`"live": false` で自動更新なし（「今すぐ更新」のみ）、`"live": 30` で 30 秒ごと、`{ "seconds": 10, "days": 3 }`
+- **通知ドックの「通報」タブ**: 通報テーブルの直近 `live.days` 日（既定 7 日）の行を新しい順に一覧し、`live.seconds` 秒ごと（既定 30 秒。「通報」タブ以外を見ているときと QGIS が前面にないときは 2 倍）に読み直す。ほかの人の通報も間隔ごとに入り、タブに件数（例:「通報（2）」）、新しい行は太字、「観測記録」ドックの通報済みのハイライトにもすぐ反映（削除された行は消える）。読み直しは変わった分だけ（行の ID の一覧 1 回と、新しい行だけ）で、ドックが表示されていない間（ほかのタブの裏も）は止まり、表示したときにすぐ読む。失敗が続くと間隔を延ばす（最長 5 分）。ダブルクリック・「記録へ移動」でその記録へ、「選択をコピー」、「メールを作成」（`mail` があるとき。下の「[メールで送る](#通報をメールで送るmail)」）、「今すぐ更新」、「通報記録の確認…」。Esri の REST は変更を知らせないため、リアルタイムではなく間隔ごとの更新。`"live": false` で自動更新なし（「今すぐ更新」のみ）、`"live": 30` で 30 秒ごと、`{ "seconds": 10, "days": 3 }`
 - **保存時のお知らせ**: 記録を保存（記録・継続・位置の修正・復元・一括編集）したとき、条件に合い通報済みでない記録があれば、メッセージバーに「注目の記録」と「通報文を作成」ボタン（その記録を入れて「通報」を開く）。条件・ジオフェンスは 10 分ごとに読み直す。`"notifyOnSave": false` で出さない
 - **重要度スコア**（`score`）: 抽出した記録に 0〜100 点を付け、高い順に並べる（手動で追加した記録は先頭のまま）。一覧の左の列に点数、マウスを乗せると内訳。項目 `score`（点数。`digits` で小数の桁）・`similar`（珍しさで数えた似た記録の件数）で行や通報テーブルに書ける。点数は次の 4 つ（それぞれ 0〜1）の重み付き平均 × 100:
   - 確度: 確度の並びで一番上が 1、一番下が 0
@@ -1926,7 +1926,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en", … }`。`en` は英語の名前で通報の `confidence.en`、ほかのキー（`code` など）は通報の `confidence.code` など）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `glossary` | URL かオブジェクト | 備考の単語集の Esri のテーブル（1 語 1 行、読むだけ）。`{ "url", "fields", "where", "token" }`（既定の属性名は [`TBL_GLOSSARY`](#tbl_glossary備考の単語集)） | なし（備考に候補を出さない） | [備考の単語集](#備考の単語集glossary) |
-| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 10, "days": 7 }`・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
+| `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 30, "days": 7 }`（既定）・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
 | `handover` | オブジェクト | 引き継ぎメモ。`table`（保存先、編集可）・`hours`・`dueHours`・`limit`・`dateFormat`・`timeZone`・`newline`・`file` | 保存先なしで作成・コピーのみ | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
@@ -2057,6 +2057,64 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_GLOSSARY`](#tbl_glossary備考の単語集) | なし | 読み | 観測記録の備考の単語集（候補と表記ゆれ。2026-11-17 に追加） | `glossary` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
+
+### 推奨のインデックス
+
+プラグインが条件を付けて読む属性の属性インデックス。`tools/arcgis/create_tables.py` が下の表のとおりに張る（名前は `IX_<TBL_ を除いたテーブル名>_<属性>`、30 文字で切る）。既にあるテーブルにも、もう一度実行すれば足りないものだけ張る。手で作るなら ArcGIS Pro の「属性インデックスの追加」で。
+
+利用者が多いほど効く。200 人規模では、画像を替えるたびの「ほかの人の変更」（`UPDATED_AT`）と、30 秒ごとの通報の新着（`REPORTED_AT`）がインデックスなしだとテーブル全体を読むことになる。2026-11-18 の点検で日時の 5 つ（下の表で「追加」）を足した。
+
+| テーブル | 属性 | 使う問い合わせ |
+| --- | --- | --- |
+| `TBL_IMAGE_CATALOG` | `IMAGE_ID` | 画像 ID で画像を引く（記録・依頼から開く） |
+| `TBL_IMAGE_CATALOG` | `REGISTERED_AT` | 新着画像、登録日での検索 |
+| `TBL_IMAGE_CATALOG` | `ACQUIRED_AT` | 撮像日での検索（追加） |
+| `TBL_SATELLITE` | `SAT_NAME` | 衛星名で引く |
+| `TBL_SATELLITE_ALIAS` | `SAT_NAME` | 衛星名で引く |
+| `TBL_IMAGING_REQUEST` | `REQ_ID` | 依頼 ID で引く・更新する |
+| `TBL_REQUEST_HISTORY` | `REQ_ID` | 依頼ごとの出力履歴 |
+| `TBL_REQUEST_HISTORY` | `TARGET_DAY` | 対象日の範囲（出力履歴、年間上限の集計） |
+| `TBL_REQUEST_HISTORY` | `TARGET_DATE` | 対象日での絞り込み（ダッシュボード） |
+| `TBL_REQUEST_HISTORY` | `SHOT_ID` | 撮像の範囲との紐付け |
+| `TBL_REQUEST_SHOT` | `SHOT_ID` | 撮像の範囲を ID で引く |
+| `TBL_REQUEST_SHOT` | `TARGET_DAY` | 対象日の範囲 |
+| `TBL_OBSERVATION` | `OBS_ID` | 保存前の確認、通報との照合 |
+| `TBL_OBSERVATION` | `OBJECT_ID` | モノごとの記録（継続・候補、ダッシュボード） |
+| `TBL_OBSERVATION` | `IMAGE_ID` | 画像ごとの記録 |
+| `TBL_OBSERVATION` | `NAMED_AREA_OBJECTID` | 地名ごとの集計（ダッシュボード） |
+| `TBL_OBSERVATION` | `UPDATED_AT` | ほかの人の変更（画像を替えるたび。追加） |
+| `TBL_OBSERVATION` | `CREATED_AT` | 自分の記録（記録日時の範囲。追加） |
+| `TBL_OBSERVATION_AREA` | `AREA_ID` | 保存前の確認 |
+| `TBL_OBSERVATION_AREA` | `IMAGE_ID` | 画像ごとの確認範囲 |
+| `TBL_OBSERVATION_AREA` | `UPDATED_AT` | ほかの人の変更（追加） |
+| `TBL_NAMED_AREA` | `NAMED_AREA_ID` | 地名 ID で引く |
+| `TBL_ALERT_LOG` | `OBS_ID` | 記録ごとの通報済み |
+| `TBL_ALERT_LOG` | `REPORTED_AT` | 通報の新着（30 秒ごと）、期間での通報記録（追加） |
+| `TBL_ASSIGNMENT` | `IMAGE_ID` | 画像ごとの分担（画像を開くたび） |
+| `TBL_EVENT` | `EVENT_ID` | イベント ID で引く |
+| `TBL_EVENT_LINK` | `EVENT_ID` | イベントの紐付け |
+| `TBL_EVENT_LINK` | `ITEM_ID` | 記録・画像から見たイベント |
+| `TBL_AI_RESULT` | `IMAGE_ID` | 画像ごとの結果 |
+| `TBL_DETECTION` | `IMAGE_ID` | 画像ごとの検出結果 |
+| `TBL_PLACE_NAME` | `PLACE_NAME` | 地名で引く（部分一致の検索には効かない） |
+| `TBL_INTEREST_POINT` | `OWNER_USER` | 持ち主ごとの関心地点 |
+| `TBL_INTEREST_AREA` | `OWNER_USER` | 持ち主ごとの関心地域 |
+| `TBL_USER_ROLE` | `USER_NAME` | 本人の担当 |
+| `TBL_SATELLITE_OUTAGE` | `OUTAGE_ID` | 障害 ID で引く・更新する |
+| `TBL_SATELLITE_OUTAGE` | `SAT_NAME` | 衛星ごとの障害 |
+| `TBL_GLOSSARY` | `TERM` | 語で引く |
+
+ほかに:
+
+- **空間インデックス**: 形状のあるテーブル（画像カタログ、観測記録、確認範囲、地名のポリゴンなど）には ArcGIS がフィーチャクラスを作るときに張る。範囲での問い合わせ（カタログの範囲検索など）はこれを使う
+- **記録者の大文字・小文字を区別しない検索**（任意）: 「自分の記録」は `UPPER(OBSERVER)` で比べる。記録日時を付けずに全期間を見ることが多いなら、Oracle で関数インデックスを作る（ArcGIS の「属性インデックスの追加」では作れない）
+
+  ```sql
+  CREATE INDEX IX_OBSERVATION_UPPER_OBSERVER ON TBL_OBSERVATION (UPPER(OBSERVER));
+  ```
+
+- **統計情報**: まとめて取り込んだ後や、件数が大きく増えた後は統計情報を更新する（ArcGIS Pro の「データセットの分析」、Oracle なら `DBMS_STATS.GATHER_TABLE_STATS`）。古いままだと、インデックスがあっても使われないことがある
+- **ダッシュボードのビュー**は問い合わせのたびに全件を集計する。閲覧する人が多いならマテリアライズド ビューに（[docs/arcgis-dashboards.md](docs/arcgis-dashboards.md)）
 
 ### `TBL_IMAGE_CATALOG`（画像カタログ）
 

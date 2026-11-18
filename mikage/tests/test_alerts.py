@@ -302,11 +302,11 @@ def test_score_settings_problems_and_weight_values():
 
 
 def test_live_settings_and_polling_only_what_changed():
-    assert (settings().live.seconds, settings().live.days) == (10.0, 7.0)
+    assert (settings().live.seconds, settings().live.days) == (30.0, 7.0)
     assert settings({"live": False}).live.seconds == 0 and settings({"live": 30}).live.seconds == 30
     assert settings({"live": {"seconds": 0.1, "days": 1}}).live.seconds == 2.0  # not shorter than 2 s
     problems = []
-    assert settings({"live": "fast"}, problems).live.seconds == 10.0 and problems
+    assert settings({"live": "fast"}, problems).live.seconds == 30.0 and problems
     fake, _, _, log = esri()
     client = EsriClient(fake)
     s = settings()

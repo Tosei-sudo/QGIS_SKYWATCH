@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import secrets
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
@@ -291,9 +292,18 @@ def new_observation_id() -> str:
     return str(uuid.uuid4())
 
 
+#: Letters of a thing id (Crockford's base 32: no I, L, O, U, so none is read as another).
+_ID_LETTERS = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+#: Letters after `OBJ-`: 10 of 32 = 50 bits. With 8 hex digits (32 bits) two of 100,000 things were
+#: likely to share an id, and 10 pairs of 300,000 (2026-11-19, 200 people); with 50 bits, a pair is
+#: unlikely before tens of millions.
+_ID_LENGTH = 10
+
+
 def new_object_id() -> str:
-    """A new thing id: short, to be read and typed (`OBJ-K3F9Q2TX`)."""
-    return "OBJ-" + uuid.uuid4().hex[-8:].upper()
+    """A new thing id: short, to be read and typed (`OBJ-K3F9Q2TX7M`). Ids made before (8 hex digits) stay as they are."""
+    n = secrets.randbits(5 * _ID_LENGTH)
+    return "OBJ-" + "".join(_ID_LETTERS[(n >> (5 * i)) & 31] for i in range(_ID_LENGTH))
 
 
 #: The viewer's names of the record's values (for JSON shared with the viewer and its scripts).
