@@ -167,6 +167,16 @@ def no_preload(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_stall_watch(monkeypatch):
+    """「画面が止まった」 is not told in every plugin test (a busy test run stops the screen; tests/test_qgis_stall_watch.py turns it on)."""
+    try:
+        from mikage.qgis_io import stall_watch
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(stall_watch.StallWatch, "ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
 def no_shape_receiver(monkeypatch):
     """「外部から図形を受け取る」 does not listen in every plugin test (tests/test_qgis_shape_receiver.py turns it on)."""
     try:

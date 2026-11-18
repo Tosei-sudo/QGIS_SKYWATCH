@@ -360,3 +360,43 @@ def test_requests_lost_answers_and_saves_after_coming_back(tmp_path):
     online = {r.id: r.priority for r in load_requests(EsriClient(fake), store, None)}
     assert (online["R2"], online["R3"]) == (400, 700)
 
+
+
+def test_screens_do_not_wait_for_the_cache_being_written(tmp_path):
+    """
+    2026-11-18: an answer was written to the cache (and the cache trimmed) under the lock the screens take to ask
+    whether a server is down or what waits to be sent: a large answer, or a slow disk, held the main thread.
+    The cache writes on a connection and a lock of their own; the outbox reads beside them (WAL).
+    """
+    import threading
+    import time
+
+    work = OfflineWork(str(tmp_path / "offline.sqlite"))
+    work.remember(URL + "/query", {"where": "1=1"}, b'{"features": []}')
+    work.keep("observation", "観測", "a", "add", {"x": 1})
+    writing, release = threading.Event(), threading.Event()
+
+    def hold():
+        with work._cache_lock:  # a write (or trim) in progress
+            db = work.cache_db()
+            db.execute("INSERT OR REPLACE INTO responses (key, host, url, body, at, size) VALUES ('k', 'h', 'u', x'00', 0, 1)")
+            writing.set()
+            release.wait(5)
+            db.commit()
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    try:
+        assert writing.wait(5)
+        begun = time.monotonic()
+        assert not work.down(URL) and not work.offline
+        assert work.total() == 1 and [p.item_id for p in work.pending()] == ["a"]
+        n, _size, _at = work.cache_info()
+        assert n == 1  # the write not committed yet is not counted
+        assert time.monotonic() - begun < 1
+    finally:
+        release.set()
+        thread.join()
+    assert work.cached(URL + "/query", {"where": "1=1"})[0] == b'{"features": []}'
+    assert work.cache_info()[0] == 2
+    work.close()
