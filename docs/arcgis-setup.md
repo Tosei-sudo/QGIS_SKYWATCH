@@ -7,7 +7,7 @@ MIKAGE が読み書きする Esri のテーブル・フィーチャクラス（R
 | `mikage_schema.py` | テーブル・属性の定義（README の表と同じ。テストで照合） | 標準ライブラリだけ |
 | `create_tables.py` | テーブル・フィーチャクラスを作る・足りない属性を足す・インデックス・権限 | ArcGIS Pro の ArcPy |
 | `publish_service.py` | フィーチャサービスとして公開し、プラグインの設定ファイルを書き出す | ArcPy（公開）、ArcGIS API for Python（サービスの確認） |
-| `dashboard_views_oracle.sql` | ArcGIS ダッシュボード用の読み取り専用のビュー 9 本（Oracle。[arcgis-dashboards.md](arcgis-dashboards.md)） | SQL*Plus か SQL Developer |
+| `dashboard_views_oracle.sql` | ArcGIS ダッシュボード用の読み取り専用のビュー 13 本（Oracle。[arcgis-dashboards.md](arcgis-dashboards.md)） | SQL*Plus か SQL Developer |
 
 どれも ArcGIS Pro に付いている Python（`propy.bat`）で動く（ArcGIS Pro 3.x で書いた。2.9 以前は未確認）。3 つのファイルは同じフォルダーに置く。
 
@@ -92,7 +92,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 ## 3. 撮像予定（採否）のダッシュボード
 
-依頼した人が「その日の計画に採用されたか」を ArcGIS Enterprise のダッシュボードで見るための作り方。依頼の件数で数える・撮像済みを採用に含めるなどを足した改良版（P1）と、ほかの撮像計画・観測結果のダッシュボード・そのためのビューは [arcgis-dashboards.md](arcgis-dashboards.md)。日ごとの撮像予定は出力履歴（`TBL_REQUEST_HISTORY`）の対象日の行で、プラグインの「撮像予定」ドックと同じものを見る（[docs/imaging-requests.md](imaging-requests.md) の §20）。台帳（`TBL_IMAGING_REQUEST`）は計画立案の材料なので使わない。
+依頼した人が「その日の計画に採用されたか」を ArcGIS Enterprise のダッシュボードで見るための作り方。依頼の件数で数える・撮像済みを採用に含めるなどを足した改良版（P1）と、ほかの撮像計画・観測結果・地名のダッシュボード・そのためのビューは [arcgis-dashboards.md](arcgis-dashboards.md)。日ごとの撮像予定は出力履歴（`TBL_REQUEST_HISTORY`）の対象日の行で、プラグインの「撮像予定」ドックと同じものを見る（[docs/imaging-requests.md](imaging-requests.md) の §20）。台帳（`TBL_IMAGING_REQUEST`）は計画立案の材料なので使わない。
 
 | 属性 | 中身 | ダッシュボードでの使い方 |
 | --- | --- | --- |
@@ -182,6 +182,7 @@ return best;
 - 地名のポリゴンを直しても、前からある記録の値は変わらない（記録が保存されたときに計算する）。入れ直すなら、同じ式を ArcGIS Pro の「フィールド演算」（Arcade）で `TBL_OBSERVATION` の `NAMED_AREA_OBJECTID` に一度かける
 - `OBJECTID` は地名のデータを入れ直す（消して追加し直す）と変わる。そのときも上のフィールド演算で入れ直す
 - プラグインの「データ分析」で観測記録と地名のポリゴンを結合すると、キーの候補に `NAMED_AREA_OBJECTID` = `OBJECTID` が出る（地名ごとの記録の件数などを `NAMED_AREA_ID` つきで数えられる）
+- ArcGIS のダッシュボードで地名ごとに見るなら（いつもと違う地名・管理番号で開く地名カルテ・地名の付け方の点検）、[arcgis-dashboards.md](arcgis-dashboards.md#地名系)
 
 ## うまくいかないとき
 

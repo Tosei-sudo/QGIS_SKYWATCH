@@ -1991,7 +1991,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 この表のとおりにテーブルを作り、ポータルに公開して設定ファイルまで作るスクリプトが `tools/arcgis/` にある（ArcGIS Pro の Python で実行。手順は [docs/arcgis-setup.md](docs/arcgis-setup.md)）。何度実行してもよく、プラグインを新しくして属性が増えたら足りない属性だけ足す。
 
-ArcGIS Enterprise のダッシュボード（撮像計画・観測結果）の構成案と、そのための読み取り専用のビュー（Oracle、`tools/arcgis/dashboard_views_oracle.sql`）は [docs/arcgis-dashboards.md](docs/arcgis-dashboards.md)。
+ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地名）の構成案と、そのための読み取り専用のビュー（Oracle、`tools/arcgis/dashboard_views_oracle.sql`）は [docs/arcgis-dashboards.md](docs/arcgis-dashboards.md)。
 
 ### 命名の決まり
 
