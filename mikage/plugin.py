@@ -25,7 +25,8 @@ from .qgis_io.preload import LOG_TAG, Preloader
 from .qgis_io.stall_watch import StallWatch
 from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
 from .core.enhance.rules import image_rule_for
-from .qgis_io import complex_sar, network, overviews_io, tasks
+from .qgis_io import complex_sar, network, overviews_io, raster_speed, tasks
+from .core.raster_speed import shown as shown_option
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
@@ -364,6 +365,10 @@ class MikagePlugin:
         self._algorithms_allowed: Optional[tuple] = None
         self._qgis_started = False
         self._startup_told = False
+        #: 地図の描画を速くする設定: the settings file read once, QGIS's options looked at (once in a session).
+        self._raster_read = False
+        self._raster_tuned = False
+        self.raster_dialog = None
 
     def initProcessing(self) -> None:  # noqa: N802 (QGIS's name)
         """
@@ -417,6 +422,8 @@ class MikagePlugin:
         self.role_keeper = RoleKeeper(self.context, self.iface.mainWindow())
         self.role_keeper.said.connect(lambda text: self.iface.messageBar().pushWarning(tr("担当"), text))
         self.context.configChanged.connect(self._overviews_changed)
+        # 地図の描画を速くする設定 (`rasterSpeed`): GDAL's as the file says, QGIS's options once QGIS has started too.
+        self.context.configChanged.connect(self._raster_speed_changed)
         # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
         self.context.configChanged.connect(self._column_drag_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
@@ -886,6 +893,7 @@ class MikagePlugin:
         if self.context is None or self._qgis_started:
             return
         self._qgis_started = True
+        self._tune_qgis()
         if not self.context.loading:
             self.preloader.schedule()
 
@@ -1448,7 +1456,8 @@ class MikagePlugin:
 
     def open_settings(self) -> None:
         # Another settings file than the one in use: the administrators' (the first one: anyone's).
-        dialog = SettingsDialog(self.context, self.iface.mainWindow(), may_change_source=self.allows("settings.config"))
+        dialog = SettingsDialog(self.context, self.iface.mainWindow(), may_change_source=self.allows("settings.config"),
+                                raster_speed=self.open_raster_speed)
         try:
             dialog.exec()
         finally:
@@ -1478,6 +1487,80 @@ class MikagePlugin:
     def _column_drag_changed(self) -> None:
         if self.context is not None:
             set_column_drag(self.context.config.column_drag)
+
+    # ---- 地図の描画を速くする設定 (qgis_io/raster_speed.py) ---------------------------------------------
+
+    def _raster_speed_changed(self) -> None:
+        if self.context is None or self.context.loading:
+            return
+        options = self.context.config.raster_speed
+        raster_speed.remember_options(options)
+        raster_speed.apply_gdal(options)
+        self._raster_read = True
+        self._tune_qgis()
+
+    def _map_canvases(self) -> list:
+        try:
+            return list(self.iface.mapCanvases())
+        except (AttributeError, RuntimeError, TypeError):
+            return [self.iface.mapCanvas()]
+
+    def _tune_qgis(self) -> None:
+        """QGIS's options slower than its defaults changed once in the profile, once QGIS has started and the settings file is read."""
+        if self._raster_tuned or not (self._raster_read and self._qgis_started) or self.context is None:
+            return
+        self._raster_tuned = True
+        changes = raster_speed.apply_qgis_once(self.context.config.raster_speed, self._map_canvases())
+        QgsMessageLog.logMessage(tr("地図の描画: {s}").format(s=raster_speed.summary()), LOG_TAG, Qgis.MessageLevel.Info,
+                                 notifyUser=False)
+        if changes:
+            self._tell_qgis_changes(changes)
+
+    def _tell_qgis_changes(self, changes) -> None:
+        """The message bar: which of QGIS's options were changed, 「詳しく…」 and 「元に戻す」."""
+        bar = self.iface.messageBar()
+        item = bar.createMessage(tr("地図の描画"), tr("速く描くよう QGIS のオプションを {n} 件変えました（{names}）").format(
+            n=len(changes), names="・".join(c.short for c in changes)))
+        item.setToolTip("\n".join(f"{c.label}: {shown_option(c.key, c.before)} → {shown_option(c.key, c.after)}（{c.why}）"
+                                   for c in changes))
+        more = QPushButton(tr("詳しく…"), item)
+        more.clicked.connect(lambda _on=False: self.open_raster_speed())
+        item.layout().addWidget(more)
+        undo = QPushButton(tr("元に戻す"), item)
+
+        def put_back(_on=False) -> None:
+            back = raster_speed.revert_qgis(self._map_canvases())
+            try:
+                bar.popWidget(item)
+            except RuntimeError:
+                pass
+            bar.pushInfo(tr("地図の描画"), tr("QGIS のオプション {n} 件を元に戻しました").format(n=len(back)))
+
+        undo.clicked.connect(put_back)
+        item.layout().addWidget(undo)
+        bar.pushWidget(item, Qgis.MessageLevel.Info, 0)
+        self._raster_message = item
+
+    def open_raster_speed(self, parent=None):
+        """「地図の描画の速さ」: what is set, turning it off and on, what only a person can change (modal over `parent`)."""
+        from .ui.raster_speed_dialog import RasterSpeedDialog
+
+        if self.context is None:
+            return None
+        context = self.context
+        if parent is not None:
+            dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, parent)
+            try:
+                dialog.exec()
+            finally:
+                dialog.deleteLater()
+            return None
+        if self.raster_dialog is not None:
+            self.raster_dialog.deleteLater()
+        self.raster_dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, self.iface.mainWindow())
+        self.raster_dialog.show()
+        self.raster_dialog.raise_()
+        return self.raster_dialog
 
     def _overviews_changed(self) -> None:
         if self.context is None:
@@ -1597,6 +1680,16 @@ class MikagePlugin:
             pass
         tasks.restore_gil_sharing()
         tasks.restore_collection()
+        # GDAL as it was before the plugin (QGIS's options stay: they are QGIS's own defaults).
+        raster_speed.revert_gdal()
+        try:
+            self.context.configChanged.disconnect(self._raster_speed_changed)
+        except (TypeError, RuntimeError, AttributeError):
+            pass
+        if self.raster_dialog is not None:
+            self.raster_dialog.close()
+            self.raster_dialog.deleteLater()
+            self.raster_dialog = None
         if self.stall_watch is not None:
             self.stall_watch.stop()
             self.stall_watch.deleteLater()

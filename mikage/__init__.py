@@ -16,6 +16,13 @@ def classFactory(iface):  # noqa: N802 (QGIS's name)
         start_cache()
     except Exception:  # noqa: BLE001 (never keeps the plugin from loading)
         pass
+    # 地図の描画を速くする設定: GDAL's threads and block cache in this QGIS, before any image is opened (qgis_io/raster_speed.py).
+    try:
+        from .qgis_io import raster_speed
+
+        raster_speed.apply_gdal()
+    except Exception:  # noqa: BLE001
+        pass
     from .plugin import MikagePlugin
 
     clock.step("プラグインの読み込み")

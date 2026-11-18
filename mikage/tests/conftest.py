@@ -187,6 +187,17 @@ def no_stall_watch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_raster_speed(monkeypatch):
+    """地図の描画を速くする設定 is not used in every plugin test (each xdist worker would decode GDAL's reads on cores the
+    others use, and QGIS's options would be changed; tests/test_qgis_raster_speed.py turns it on)."""
+    try:
+        from mikage.qgis_io import raster_speed
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(raster_speed, "ENABLED", False)
+
+
+@pytest.fixture(autouse=True)
 def no_shape_receiver(monkeypatch):
     """「外部から図形を受け取る」 does not listen in every plugin test (tests/test_qgis_shape_receiver.py turns it on)."""
     try:
