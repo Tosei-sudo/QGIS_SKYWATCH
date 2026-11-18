@@ -1991,6 +1991,8 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 この表のとおりにテーブルを作り、ポータルに公開して設定ファイルまで作るスクリプトが `tools/arcgis/` にある（ArcGIS Pro の Python で実行。手順は [docs/arcgis-setup.md](docs/arcgis-setup.md)）。何度実行してもよく、プラグインを新しくして属性が増えたら足りない属性だけ足す。
 
+ArcGIS Enterprise のダッシュボード（撮像計画・観測結果）の構成案と、そのための読み取り専用のビュー（Oracle、`tools/arcgis/dashboard_views_oracle.sql`）は [docs/arcgis-dashboards.md](docs/arcgis-dashboards.md)。
+
 ### 命名の決まり
 
 - テーブル・フィーチャクラスの名前は `TBL_` で始め、すべて大文字、語は `_` で区切る（`TBL_OBSERVATION`、`TBL_EVENT_LINK`）
@@ -2677,7 +2679,7 @@ mikage/
 tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
   satellite_editor.html  衛星・センサー・別名のテーブルの編集ツール（ブラウザで開く。設定ファイルを読み込む）
-  arcgis/              ArcGIS でテーブルを作り、ポータルに公開するスクリプト（docs/arcgis-setup.md）
+  arcgis/              ArcGIS でテーブルを作り、ポータルに公開するスクリプト（docs/arcgis-setup.md）・ダッシュボード用のビュー（docs/arcgis-dashboards.md）
   audit_check.py       監査ログの送り先のフォルダの欠け・書き換えの点検（python tools/audit_check.py <フォルダ>）
 scripts/
   build_zip.py         配布用の zip を作る（導入）
@@ -2686,7 +2688,7 @@ scripts/
   help_shots/          ヘルプの「画面つきの手順書」の写真を撮り直す・画面の重なりを点検する（QGIS を仮想画面で動かす）
   compare_viewer/      ビューアとの数値比較
   ai_bench/            AI 学習のネットワークの精度比較（合成の場面）
-docs/                  ビューアとの違い・撮像依頼の設計書・雲量ファイルの仕様・ArcGIS 側の準備
+docs/                  ビューアとの違い・撮像依頼の設計書・雲量ファイルの仕様・ArcGIS 側の準備・ArcGIS ダッシュボード
 ```
 
 ## テスト
