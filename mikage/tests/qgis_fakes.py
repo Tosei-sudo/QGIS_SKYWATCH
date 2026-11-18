@@ -54,6 +54,22 @@ class FakeIface(QObject):
             self.new_layer_menu.addAction(action)
         self.add_feature = QAction("地物を追加", self.window)
         self.window.show()
+        # As QGIS's layer list: the active layer removed, another (here none) is the active one.
+        from qgis.core import QgsProject
+
+        QgsProject.instance().layersWillBeRemoved.connect(self._layers_going)
+
+    def _layers_going(self, layer_ids) -> None:
+        layer = self.layer
+        if layer is None:
+            return
+        try:
+            gone = layer.id() in layer_ids
+        except RuntimeError:  # deleted already
+            gone = True
+        if gone:
+            self.layer = None
+            self.currentLayerChanged.emit(None)
 
     def mainWindow(self):  # noqa: N802
         return self.window

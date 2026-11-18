@@ -646,17 +646,26 @@ class ObservationBook:
 
     def unlist_image(self, image_id: str) -> bool:
         """Takes an image without its file off the list (its records stay)."""
-        gone = next((i for i in self.listed if i.id == image_id), None)
-        if gone is None:
-            return False
+        return self.unlist_images([image_id]) > 0
+
+    def unlist_images(self, image_ids: Sequence[str]) -> int:
+        """
+        Takes images without their files off the list at once (their records
+        stay; one of them chosen: the first image then): how many were on it.
+        Their layers removed from the map do it (ui/observation_dock).
+        """
+        wanted = set(image_ids)
+        gone = [i for i in self.listed if i.id in wanted]
+        if not gone:
+            return 0
         with self.lock:
-            self.listed = [i for i in self.listed if i is not gone]
+            self.listed = [i for i in self.listed if i.id not in wanted]
             self._save_listed()
-            if self.current is not None and not self.current.file and self.current.id == image_id:
+            if self.current is not None and not self.current.file and self.current.id in wanted:
                 self.current = None
             self._order()
-        self._say(f"{gone.name} を一覧から除外（記録は保持）")
-        return True
+        self._say(f"{gone[0].name} を一覧から除外（記録は保持）" if len(gone) == 1 else f"{len(gone)} 件を一覧から除外（記録は保持）")
+        return len(gone)
 
     def _save_listed(self) -> None:
         self.prefs.set(self._listed_key, json.dumps([i.to_json() for i in self.listed], ensure_ascii=False))
