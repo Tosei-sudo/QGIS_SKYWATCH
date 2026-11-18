@@ -43,12 +43,14 @@ from ..core.obs.flows import (
     time_key, two_point,
 )
 from ..core.obs.geo import get_distance, js_round, km_text
+from ..core.obs.mine import is_mine, my_names
 from ..core.obs.model import Observation
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
     activities_at, children_of, class_by_name, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
+from ..core import edit_stamp
 from ..core.util import read_number
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
@@ -190,6 +192,11 @@ class ObservationDock(PluginDock):
         self._draft_id = ""
         #: Opens 「送信待ち」 (the status bar's list, ui/outbox_dialog.py); set by the plugin.
         self.open_outbox: Optional[Callable[[], Any]] = None
+        #: The image catalog dock (set by the plugin): a record's image not open is opened through it
+        #: (開いた画像の履歴, else the catalog asked by the image id), open_image.
+        self.catalog: Optional[Callable[[], Any]] = None
+        #: 「自分の記録」 (ui/my_records_dialog.py), made when first opened.
+        self._my_records = None
         self.offered: list[MatchCandidate] = []
         self.active = False
         self.points = settings.point_count_setting()
@@ -263,10 +270,18 @@ class ObservationDock(PluginDock):
     def _build(self) -> None:
         b = self.body
         tr = self.tr
+        top = QHBoxLayout()
         self.store_select = QComboBox()
         self.store_select.setToolTip(tr("記録の保存先"))
+        self.store_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.store_select.currentIndexChanged.connect(self._store_chosen)
-        b.addWidget(self.store_select)
+        top.addWidget(self.store_select, 1)
+        # 「自分の記録」 (tsudo 2026-11-18: 過去の自分がどの画像のどの観測結果を作ったのかがわかりにくい).
+        self.my_records_button = self._button(tr("自分の記録…"), tr("自分が作った記録を、画像をまたいで一覧（記録ごと・画像ごと）。ダブルクリックで画像を開いて記録を編集"),
+                                              lambda: self.open_my_records())
+        top.addStretch(0)
+        top.addWidget(self.my_records_button)
+        b.addLayout(top)
 
         # The image.
         row = QHBoxLayout()
@@ -563,6 +578,11 @@ class ObservationDock(PluginDock):
         unfilter.clicked.connect(lambda: self.filter_root(None))
         row.addWidget(unfilter)
         self.unfilter_button = unfilter
+        # 「この画像」: only one's own records (記録者 is oneself: the 「記録者」 name or the user name).
+        self.mine_only = QCheckBox(tr("自分の記録のみ"))
+        self.mine_only.setToolTip(tr("記録者が自分（「記録者」の名前かユーザー名）の記録だけを表示"))
+        self.mine_only.toggled.connect(lambda _on: self.render())
+        row.addWidget(self.mine_only)
         self.class_filter_row.hide()
         b.addWidget(self.class_filter_row)
         # 「モノ」 lists the last month only; what it leaves out (tsudo 2026-11-18: the ArcGIS dashboard has the rest).
@@ -2240,10 +2260,12 @@ class ObservationDock(PluginDock):
 
     def _carry_shown(self) -> Optional[Callable[[CarryOver], bool]]:
         """Which carried-over things the list shows (None: all), so 「すべて継続」 leaves the hidden ones alone."""
-        if not self.class_filter or self.book is None:
+        mine = self.my_names() if self.mine_only.isChecked() else None
+        if (not self.class_filter and not mine) or self.book is None:
             return None
-        taxa = self.book.taxonomy()
-        return lambda c: self._shown_kind(c.source.kind, taxa)
+        taxa = self.book.taxonomy() if self.class_filter else []
+        return lambda c: (not self.class_filter or self._shown_kind(c.source.kind, taxa)) and \
+            (not mine or is_mine(c.source.recorded_by, mine))
 
     def carry_all(self) -> None:
         only = self._carry_shown()
@@ -2383,7 +2405,7 @@ class ObservationDock(PluginDock):
             self.canvas.setCenter(at)
             self.canvas.refresh()
 
-    def go_to_record(self, o: Observation) -> bool:
+    def go_to_record(self, o: Observation, quiet: bool = False) -> bool:
         """Goes to a record's image and centres the map on it (False: its image is not open)."""
         if self.book is None:
             return False
@@ -2393,17 +2415,85 @@ class ObservationDock(PluginDock):
             self._went()
         self._center(o)
         if entry is None:
-            self._say(self.tr("画像（{n}）が開かれておらず移動不可").format(n=o.image_name or o.image_id))
+            if not quiet:
+                self._say(self.tr("画像（{n}）は開かれていません（ダブルクリックで画像を開いて記録を編集）").format(n=o.image_name or o.image_id))
             return False
         return True
 
     def open_record(self, o: Observation) -> None:
-        """Goes to a record's image and opens it in the form."""
-        if not self.go_to_record(o):
+        """
+        Goes to a record's image and opens it in the form; an image not open
+        is opened first (open_image: 開いた画像の履歴, the catalog, else listed
+        without its file), tsudo 2026-11-18.
+        """
+        def form() -> None:
+            if self.book is None or self.book.current is None or self.book.current.id != o.image_id:
+                return
+            self._center(o)
+            if not self.active:
+                self.set_active(True)
+            # The record as the book has it now (one read elsewhere, 「自分の記録」, may be older).
+            now = next((r for r in self.book.records if r.id == o.id), o)
+            self.open_form(now.lon, now.lat, editing=now)
+
+        if self.go_to_record(o, quiet=True):
+            form()
             return
-        if not self.active:
-            self.set_active(True)
-        self.open_form(o.lon, o.lat, editing=o)
+        self.open_image(o.image_id, o.image_name, o.image_time, then=form)
+
+    def open_image(self, image_id: str, name: str = "", image_time: Optional[int] = None,
+                   then: Optional[Callable[[], Any]] = None) -> bool:
+        """
+        A record's image recorded on: gone to when open; else opened (tsudo
+        2026-11-18, ダブルクリックで開く): with the files of last time when
+        this computer opened it before (after a look), else from the image
+        catalog by its id, else (no catalog has it) listed without its file
+        with its name and time. `then` runs once the image is the current
+        one. True when it was open already.
+        """
+        if self.book is None:
+            return False
+        if self.go_to(image_id):
+            if then is not None:
+                then()
+            return True
+        dock = self.catalog() if self.catalog is not None else None
+
+        def opened(_layers: list) -> None:
+            # The layers added listed the image (_layers_changed); listed again when that has not run yet.
+            if not self.go_to(image_id):
+                self.refresh_images()
+                if not self.go_to(image_id):
+                    return
+            if then is not None:
+                then()
+
+        def listed() -> None:
+            if self.book is None:
+                return
+            entry = self.book.list_image(image_id, name, image_time)
+            if entry is None:
+                return
+            self._went()
+            if then is not None:
+                then()
+            self._say(self.tr("{n} は画像カタログにないため、ファイルなしで一覧へ追加").format(n=name or image_id))
+
+        if dock is None or not hasattr(dock, "open_image_id"):
+            listed()
+            return False
+        self._say(self.tr("{n} を開いています…").format(n=name or image_id))
+        dock.open_image_id(image_id, then=opened, missing=listed)
+        return False
+
+    def open_my_records(self):
+        """「自分の記録」: the records one made, across the images (a window of its own, one per session)."""
+        from .my_records_dialog import MyRecordsDialog
+
+        if self._my_records is None:
+            self._my_records = MyRecordsDialog(self, self)
+        self._my_records.show_again()
+        return self._my_records
 
     # ---- the classification ------------------------------------------------
 
@@ -2942,12 +3032,16 @@ class ObservationDock(PluginDock):
         self.area_kinds_model.setStringList(kinds)
         self.activities_model.setStringList(book.activity_words(self.kind_input.text()))
         self.class_filter_row.setVisible(self.tab != "classes")
+        self.mine_only.setVisible(self.tab == "image")
         self._render_root_filter(taxa)
         deeper = bool(self.class_filter) and len(self.class_filter) > 1
         self.class_filter_label.setText(self.tr("分類: {k} 以下").format(k=kind_of(self.class_filter)) if deeper else "")
         self.unfilter_button.setVisible(bool(self.class_filter))
         if self.class_filter:
             here = [o for o in here if self._shown_kind(o.kind, taxa)]
+        if self.mine_only.isChecked():
+            mine = self.my_names()
+            here = [o for o in here if is_mine(o.recorded_by, mine)]
         shown_as = (self.tab, image.id if image is not None and self.tab == "image" else None)
         kept = self._chosen_rows() if shown_as == self._shown_as else None
         scrolled = self.table.verticalScrollBar().value()
@@ -3008,8 +3102,9 @@ class ObservationDock(PluginDock):
 
     def _render_image(self, here: list[Observation], carried: list[CarryOver], inside: list[CarryOver]) -> None:
         tr = self.tr
-        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("更新"), "")
+        self._set_head(tr("モノ"), tr("種別"), tr("活動"), tr("長さ（× 幅）・向き"), tr("備考"), tr("記録者"), tr("更新"), "")
         book = self.book
+        mine = self.my_names() if self.mine_only.isChecked() else None
 
         def measure(o: Observation) -> str:
             if o.length is None:
@@ -3022,7 +3117,7 @@ class ObservationDock(PluginDock):
             gone = o.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した記録の復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れの表示"), lambda o=o: self.choose(o.object_id)))
-            self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, local_time(o.updated_at), ""],
+            self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, self._made_by(o), local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
                       style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
                       waiting=o.id in waiting, key=f"o:{o.id}")
@@ -3033,20 +3128,35 @@ class ObservationDock(PluginDock):
                                  (tr("不在"), tr("この画像での不在を記録"), lambda s=s: self.carry(s.object_id, False)))
             side = tr("前") if c.side == "before" else tr("後")
             self._row([s.object_name, s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
-                       tr("確認範囲内（記録なし）") if id(c) in inside_ids else "", "", ""],
+                       tr("確認範囲内（記録なし）") if id(c) in inside_ids else "", s.recorded_by, "", ""],
                       lambda s=s: (self._ensure_active(), self.open_form(s.lon, s.lat, source=s), self._center(s)),
                       style="inside" if id(c) in inside_ids else "ghost", widget=widget, key=f"c:{s.object_id}")
         taxa = book.taxonomy() if self.class_filter else []
         for a in book.image_areas(deleted=self.deleted_check.isChecked()):
             if a.kind and not self._shown_kind(a.kind, taxa):
                 continue
+            if mine and not is_mine(a.recorded_by, mine):
+                continue
             gone = a.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した確認範囲の復元"), lambda a=a: self.restore_areas([a]))) if gone else \
                 self._small((tr("削除"), tr("この確認範囲の削除"), lambda a=a: self.remove_areas([a])))
-            self._row([area_label(a), a.kind, "", "", a.note, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
+            self._row([area_label(a), a.kind, "", "", a.note, a.recorded_by, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
                       style="deleted" if gone else "area", widget=widget, key=f"a:{a.id}")
         if self.table.rowCount() == 0:
-            self._row([tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし（「クリック記録」で地図をクリック）")])
+            self._row([tr("自分の記録なし（「自分の記録のみ」を外すと全員の記録）") if mine else
+                       tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし（「クリック記録」で地図をクリック）")])
+
+    def _made_by(self, o: Observation) -> str:
+        """「記録者」 of a row: who made the record, and who changed it last when someone else did."""
+        made = o.recorded_by.strip()
+        by = o.updated_by.strip()
+        if by and made and by.casefold() != made.casefold() and o.updated_at > o.created_at:
+            return self.tr("{made}（更新 {by}）").format(made=made, by=by)
+        return made or by
+
+    def my_names(self) -> list[str]:
+        """Oneself: the 「記録者」 name and the user name the edits are stamped with (分担 holds it too)."""
+        return my_names(self._observer(), edit_stamp.user_name())
 
     def _ensure_active(self) -> None:
         if not self.active:
@@ -3352,6 +3462,8 @@ class ObservationDock(PluginDock):
             except (TypeError, RuntimeError):
                 pass
             self._handover.close()
+        if self._my_records is not None:
+            self._my_records.close()
         scene = self.canvas.scene()
         if scene is not None:
             scene.removeItem(self.overlay)

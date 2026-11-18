@@ -124,6 +124,32 @@ def read_catalog_layer(client: EsriClient, catalog: CatalogConfig, token: Option
     return CatalogLayerInfo(info.field_types, paging, info.object_id_field, info.max_record_count)
 
 
+def records_by_ids(client: EsriClient, catalog: CatalogConfig, ids: Sequence[str], token: Optional[str]) -> list[CatalogRecord]:
+    """
+    The catalog's records of image ids (its `fields.id`, exactly; 100 at a
+    time), in the order asked; [] when the catalog has no id field. A number
+    id field is asked only the ids that are numbers.
+    """
+    from ..esri import quote
+
+    id_field = catalog.fields.get("id")
+    ids = list(dict.fromkeys(i.strip() for i in ids if i and i.strip()))
+    if not isinstance(id_field, str) or not ids:
+        return []
+    info = client.layer(catalog.url, token)
+    field_type = info.field_types.get(id_field)
+    numeric = bool(field_type and re.search(r"Integer|Double|Single|OID", field_type))
+    asked = [i for i in ids if re.fullmatch(r"-?\d+(\.\d+)?", i)] if numeric else ids
+    found: dict[str, CatalogRecord] = {}
+    for n in range(0, len(asked), 100):
+        part = asked[n:n + 100]
+        values = ",".join(part if numeric else [quote(v) for v in part])
+        for f in client.query_all(catalog.url, f"{id_field} IN ({values})", token, limit=10_000):
+            r = record_of(f, catalog.fields, info.object_id_field)
+            found.setdefault(r.id, r)
+    return [found[i] for i in ids if i in found]
+
+
 def sensors_of(client: EsriClient, catalog: CatalogConfig, token: Optional[str]) -> list[str]:
     """The values of the sensor field, for the search's choices; empty when the service cannot list them."""
     name = catalog.fields.get("sensor")

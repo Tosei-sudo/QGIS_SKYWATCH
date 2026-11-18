@@ -27,25 +27,29 @@ from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsMapLayer, QgsProject
 from qgis.gui import QgsMapLayerComboBox
-from qgis.PyQt.QtCore import Qt, QTimer
+from qgis.PyQt.QtCore import QStringListModel, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..core import audit
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError, PathMapping
 from ..core.catalog.query import CatalogSearch
-from ..core.catalog.search import CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, search_catalog, sensors_of
+from ..core.catalog.opened import OpenedImage
+from ..core.catalog.search import (
+    CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, record_of, records_by_ids, search_catalog, sensors_of,
+)
 from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.watch import areas_of
+from ..core.obs.csv import local_time
 from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
-    Cancelled, add_record_layers, close_layers, footprint, layer_area, layers_extent, open_record, overlap_measure, record_of_layer,
-    results_layer,
+    Cancelled, add_record_layers, close_layers, footprint, layer_area, layers_extent, located_again, open_located, open_record, opened_images,
+    overlap_measure, record_of_layer, results_layer,
 )
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -55,6 +59,7 @@ from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .image_files_dialog import choose_image_files
+from . import open_again_dialog
 
 TITLE = "画像カタログ"
 
@@ -149,6 +154,33 @@ class CatalogDock(PluginDock):
         self._reads = 0
         self._tasks: list = []
 
+        # 「画像 ID で開く」 and 「最近開いた画像」 (開いた画像の履歴, core/catalog/opened.py; tsudo 2026-11-18).
+        quick = QHBoxLayout()
+        self.open_id = QLineEdit()
+        self.open_id.setClearButtonEnabled(True)
+        self.open_id.setPlaceholderText(self.tr("画像 ID で開く"))
+        self.open_id.setToolTip(self.tr(
+            "画像 ID を入れて Enter で開きます。前に開いた画像は前回のファイルで（確認画面あり）、"
+            "それ以外は画像カタログを画像 ID で検索して開きます"))
+        self.open_id.returnPressed.connect(lambda: self.open_image_id(self.open_id.text()))
+        self._opened_model = QStringListModel()
+        completer = QCompleter(self._opened_model, self.open_id)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.open_id.setCompleter(completer)
+        self.open_id.textEdited.connect(lambda text: self._refresh_opened() if len(text) <= 1 else None)
+        self.recent_button = QToolButton()
+        self.recent_button.setText(self.tr("最近開いた画像"))
+        self.recent_button.setToolTip(self.tr("この PC で最近開いた画像を、前回と同じファイルで開きます（確認画面あり）"))
+        self.recent_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.recent_menu = QMenu(self.recent_button)
+        self.recent_menu.aboutToShow.connect(self._fill_recent)
+        self.recent_button.setMenu(self.recent_menu)
+        quick.addWidget(self.open_id, 1)
+        quick.addWidget(self.recent_button)
+        self.body.addLayout(quick)
+        self._refresh_opened()
+
         form = QFormLayout()
         self.catalog_box = QComboBox()
         self.catalog_box.currentIndexChanged.connect(self._catalog_changed)
@@ -188,7 +220,7 @@ class CatalogDock(PluginDock):
         self.drawn: Optional[list] = None
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
         form.addRow(self.tr("撮像日時"), self._period_row(self.acquired_from, self.acquired_to))
-        # 「フリーワード」: words looked for in the catalog's `fields.keywords` (shown only for a catalog that has them).
+        # 「フリーワード」: words looked for in the catalog's image id and `fields.keywords` (shown only for a catalog that has either).
         self.keyword = QLineEdit()
         self.keyword.setClearButtonEnabled(True)
         self.keyword.returnPressed.connect(self.search)
@@ -483,7 +515,7 @@ class CatalogDock(PluginDock):
         self._show_file_buttons()
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
-        """「フリーワード」 only for a catalog with `fields.keywords`, its hint naming them."""
+        """「フリーワード」 only for a catalog with an image id or `fields.keywords`, its hint naming them."""
         fields = catalog.keyword_fields if catalog is not None else []
         self.keyword_label.setVisible(bool(fields))
         self.keyword.setVisible(bool(fields))
@@ -1061,6 +1093,10 @@ class CatalogDock(PluginDock):
         catalog = self._shown_catalog
         if catalog is None:
             return []
+        return self.open_catalog_records(catalog, records)
+
+    def open_catalog_records(self, catalog: CatalogConfig, records) -> list:
+        """open_records for the records of any catalog (not only the one listed): an image looked up by its id."""
         if not catalog.image_files:
             self.record_without_files(records)
             return []
@@ -1081,6 +1117,14 @@ class CatalogDock(PluginDock):
             add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened
+        self._opened(layers)
+        if problems:
+            self._say_unopened(problems, [r for r in unopened if r.id])
+            self.status.setText(problems[-1])
+        return layers
+
+    def _opened(self, layers: list) -> None:
+        """After images opened: 「前の画像を閉じる」, 「開いた画像へ移動」, and the ids offered by 「画像 ID で開く」."""
         if layers:
             # Only those opened with it on close (an image opened before it was turned on stays).
             opened_ids = [layer.id() for layer in layers]
@@ -1091,10 +1135,170 @@ class CatalogDock(PluginDock):
                 self.last_opened = []
             if self.zoom_opened.isChecked():
                 self.zoom_to_layers(layers)
-        if problems:
-            self._say_unopened(problems, [r for r in unopened if r.id])
-            self.status.setText(problems[-1])
-        return layers
+        self._refresh_opened()
+
+    # --- 開いた画像の履歴・画像 ID で開く (tsudo 2026-11-18) ---------------------------------------
+
+    def _refresh_opened(self) -> None:
+        """The ids 「画像 ID で開く」 offers: the images opened on this computer."""
+        try:
+            ids = list(dict.fromkeys(e.image_id for e in opened_images().items()))
+        except Exception:  # noqa: BLE001 (the list unreadable: nothing offered)
+            ids = []
+        self._opened_model.setStringList(ids)
+
+    def _catalog_of_url(self, url: str) -> Optional[CatalogConfig]:
+        return next((c for c in self.context.config.image_catalogs if c.url == url), None)
+
+    def _fill_recent(self) -> None:
+        """「最近開いた画像」: the last images opened here (of the catalogs of the settings file)."""
+        self.recent_menu.clear()
+        entries = [e for e in opened_images().recent(30) if self._catalog_of_url(e.catalog_url) is not None][:20]
+        if not entries:
+            action = self.recent_menu.addAction(self.tr("まだありません（画像を開くとここに並びます）"))
+            action.setEnabled(False)
+            return
+        for e in entries:
+            when = local_time(e.acquired)
+            files = f"（{len(e.opened)} ファイル）" if len(e.opened) > 1 else ""
+            action = self.recent_menu.addAction(" ".join(x for x in (e.image_id, when, e.sensor) if x) + files)
+            action.setToolTip(e.place)
+            action.triggered.connect(lambda _on=False, e=e: self.open_again(e))
+
+    def open_image_id(self, text: str, then: Optional[Callable[[list], None]] = None,
+                      missing: Optional[Callable[[], None]] = None) -> None:
+        """
+        「画像 ID で開く」: an image opened before opens with the files of last
+        time (after a look, open_again); else the catalogs are asked for the id
+        (in a task) and it opens as from the list. `then` gets the layers
+        opened ([] for an image recorded without its file); `missing` is called
+        when no catalog has it.
+        """
+        words = [w for w in (text or "").replace("、", " ").replace(",", " ").split() if w]
+        if not words:
+            return
+        image_id = words[0]
+        if len(words) > 1:
+            self.status.setText(self.tr("画像 ID は 1 つずつ開きます（{id} を開きます）").format(id=image_id))
+        entry = next((e for e in opened_images().items() if e.image_id == image_id and self._catalog_of_url(e.catalog_url)), None)
+        if entry is not None:
+            self.open_again(entry, then, missing)
+            return
+        self.open_from_catalogs(image_id, then, missing)
+
+    def open_again(self, entry: OpenedImage, then: Optional[Callable[[list], None]] = None,
+                   missing: Optional[Callable[[], None]] = None) -> None:
+        """An image of 開いた画像の履歴 opened with the files of last time, after asking (or looked up again in the catalog)."""
+        catalog = self._catalog_of_url(entry.catalog_url)
+        if catalog is None:
+            self.open_from_catalogs(entry.image_id, then, missing)
+            return
+        answer = open_again_dialog.ask_open_again(self, entry)
+        if answer is None:
+            return
+        if answer == open_again_dialog.FROM_CATALOG:
+            self.open_from_catalogs(entry.image_id, then, missing)
+            return
+        files = list(answer)
+        if entry.missing(files if entry.files else None):
+            self.status.setText(self.tr("{id} の前回のファイルが見つからないため、画像カタログで探します").format(id=entry.image_id))
+            self.open_from_catalogs(entry.image_id, then, missing)
+            return
+        record = record_of(entry.feature, catalog.fields)
+        if not record.id:
+            record.id = entry.image_id
+        problems: list[str] = []
+        try:
+            layers = open_located(record, catalog, located_again(entry), files or None, problems)
+        except PathError as error:
+            self.status.setText(str(error))
+            self.iface.messageBar().pushWarning(TITLE, plain_tip(str(error)))
+            return
+        add_record_layers(layers, record)
+        overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
+        self._opened(layers)
+        self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで開きました（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
+        if then is not None:
+            then(layers)
+
+    def open_from_catalogs(self, image_id: str, then: Optional[Callable[[list], None]] = None,
+                           missing: Optional[Callable[[], None]] = None) -> None:
+        """The catalogs (the one chosen first) asked for an image id in a task, the image opened as from the list."""
+        chosen = self.catalog()
+        catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
+        if not catalogs:
+            self.status.setText(self.tr("画像 ID の属性（fields.id）がある画像カタログがありません"))
+            if missing is not None:
+                missing()
+            return
+        client = self.context.esri()
+        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+        self.status.setText(self.tr("画像カタログで {id} を検索中…").format(id=image_id))
+
+        def work(_task):
+            for c, token in asks:
+                found = records_by_ids(client, c, [image_id], token)
+                if found:
+                    return c, found[0]
+            return None
+
+        def done(result) -> None:
+            if result is None:
+                self.status.setText(self.tr("画像カタログに画像 ID「{id}」の画像がありません").format(id=image_id))
+                if missing is not None:
+                    missing()
+                return
+            catalog, record = result
+            if not catalog.image_files:
+                entry = self.record_without_files([record])
+                if then is not None and entry is not None:
+                    then([])
+                return
+            layers = self.open_catalog_records(catalog, [record])
+            if layers:
+                self.status.setText(self.tr("{id} を開きました（{n} ファイル）").format(id=image_id, n=len(layers)))
+                if then is not None:
+                    then(layers)
+
+        def failed(message: str) -> None:
+            self.status.setText(self.tr("画像カタログの検索に失敗: {m}").format(m=message))
+
+        self._start(self.tr("画像 ID の検索"), work, done, failed)
+
+    def show_image_ids(self, ids: list[str], title: str = "") -> None:
+        """「画像カタログで表示」: the images of these ids listed (from the first catalog that has any of them; in a task)."""
+        ids = [i for i in dict.fromkeys(ids) if i]
+        chosen = self.catalog()
+        catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
+        if not ids or not catalogs:
+            self.status.setText(self.tr("画像 ID の属性（fields.id）がある画像カタログがありません") if ids else "")
+            return
+        client = self.context.esri()
+        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+
+        def work(_task):
+            best = None
+            for c, token in asks:
+                found = records_by_ids(client, c, ids, token)
+                if found and (best is None or len(found) > len(best[1])):
+                    best = (c, found)
+                if best is not None and len(best[1]) == len(ids):
+                    break
+            return best
+
+        def done(result) -> None:
+            if result is None:
+                self.status.setText(self.tr("画像カタログに該当する画像がありません（{n} 件の画像 ID）").format(n=len(ids)))
+                return
+            catalog, records = result
+            self.show_records(catalog, records)
+            rest = len(ids) - len(records)
+            self.status.setText((title or self.tr("指定した画像")) + self.tr(" {n} 件").format(n=len(records)) +
+                                (self.tr("（{m} 件はカタログになし）").format(m=rest) if rest else ""))
+            self.show()
+            self.raise_()
+
+        self._start(self.tr("画像 ID の検索"), work, done)
 
     def _say_unopened(self, problems: list[str], unopened: list[CatalogRecord]) -> None:
         """Why images could not be opened, in the message bar; with 「ファイルなしで記録」 for those (their raw data elsewhere, say)."""

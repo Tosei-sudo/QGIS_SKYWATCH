@@ -51,8 +51,14 @@ class CatalogConfig:
 
     @property
     def keyword_fields(self) -> list[str]:
-        """The attributes 「フリーワード」 looks in (`fields.keywords`); empty: no free word search."""
-        return list(self.fields.get("keywords") or [])
+        """
+        The attributes 「フリーワード」 looks in: `fields.keywords` and the
+        image id (`fields.id`, always: tsudo 2026-11-18 「フリーワード検索に、
+        無条件で画像 ID を含める」); empty: no free word search.
+        """
+        image_id = self.fields.get("id")
+        named = [image_id] if isinstance(image_id, str) and image_id else []
+        return list(dict.fromkeys([*(self.fields.get("keywords") or []), *named]))
 
     def keyword_labels(self) -> list[str]:
         """The headings of `keyword_fields`: a role's or a column's heading, else the attribute name."""

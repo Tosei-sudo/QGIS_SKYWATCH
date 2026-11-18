@@ -192,6 +192,11 @@ def place_cache_path() -> str:
     return os.path.join(profile_folder(), "place_cache.sqlite")
 
 
+def opened_images_path() -> str:
+    """The file of the images opened from a catalog (開いた画像の履歴, core/catalog/opened.py): this computer's paths."""
+    return os.path.join(profile_folder(), "opened_images.json")
+
+
 def thumbnail_folder() -> str:
     """Where the 新着画像 cards keep the thumbnails they fetched (qgis_io/thumbnails.py)."""
     return os.path.join(profile_folder(), "thumbnails")

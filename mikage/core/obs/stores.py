@@ -14,9 +14,9 @@ import json
 import re
 import uuid
 from dataclasses import replace
-from typing import Any, Iterable, Optional, Protocol
+from typing import Any, Iterable, Optional, Protocol, Sequence
 
-from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, fit_value, point_geometry, ring_geometry
+from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, fit_value, point_geometry, quote, ring_geometry
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
@@ -371,6 +371,28 @@ class EsriObservationStore:
         changed = since_condition(updated, types.get(updated), since)
         where = f"({self.config.where}) AND {changed}" if self.config.where else changed
         features = self.client.query_all(self.config.url, where, self.token, limit=200_000)
+        return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
+
+    def load_made(self, names: Sequence[str], since: Optional[float]) -> list[Observation]:
+        """
+        「自分の記録」: the records made by `names` (記録者, capitals aside;
+        empty: anyone) at or after `since` (ms, the 登録日時; None: ever),
+        asked of the layer alone (not every record read). The 記録者 and
+        登録日時 not on the layer are left out of the question; the list then
+        says what to show.
+        """
+        from ..catalog.watch import since_condition
+
+        types, oid = self._layer.ready()
+        f = self.config.fields
+        parts = [f"({self.config.where})"] if self.config.where else []
+        observer = f["recordedBy"]
+        if names and observer in types:
+            parts.append(f"UPPER({observer}) IN ({', '.join(quote(n.strip().upper()) for n in names)})")
+        created = f["created"]
+        if since is not None and created in types:
+            parts.append(since_condition(created, types.get(created), since))
+        features = self.client.query_all(self.config.url, " AND ".join(parts) or "1=1", self.token, limit=200_000)
         return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
 
     def _check(self, records: list[Observation], types: dict[str, str], oid: str) -> list[str]:

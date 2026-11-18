@@ -147,6 +147,13 @@ class OfflineObservationStore(_Waiting):
         changed = self.inner.load_changed(since)
         return None if changed is None else self._overlay(changed, only={o.id for o in changed})
 
+    def load_made(self, names, since) -> Optional[list[Observation]]:
+        """「自分の記録」 (EsriObservationStore.load_made); None while offline: then read whole (the cache, with what waits)."""
+        if self.offline:
+            return None
+        made = self.inner.load_made(names, since)
+        return self._overlay(made, only={o.id for o in made})
+
     def removes_for_good(self) -> bool:
         try:
             return self.inner.removes_for_good()

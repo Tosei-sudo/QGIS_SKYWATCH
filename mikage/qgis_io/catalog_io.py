@@ -38,6 +38,7 @@ from qgis.core import (
 from ..core import audit
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.images import FolderImages, find_images, patterns_for
+from ..core.catalog.opened import OpenedImage, OpenedImages
 from ..core.catalog.paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
 from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
 from ..core.catalog.watch import areas_of, areas_of_shape, layer_origin
@@ -394,6 +395,7 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         if not layer.isValid():
             raise PathError(f"{record.id or url} の画像を開けず（{url if where.is_url else where.given}）")
         remember(layer, record, catalog)
+        keep_opened(record, catalog, where, [])
         return [layer]
     files = list(where.files) if files is None else list(files)
     layers, failed = [], []
@@ -408,6 +410,8 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
             continue
         remember(layer, record, catalog, rel)
         layers.append(layer)
+    if layers:
+        keep_opened(record, catalog, where, [f for f in files if f not in failed])
     if failed:
         message = f"{record.id or where.given} の画像を開けず（{where.place}: {'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）"
         if not layers:
@@ -415,6 +419,36 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         if problems is not None:
             problems.append(message)
     return layers
+
+
+_opened: Optional[OpenedImages] = None
+
+
+def opened_images() -> OpenedImages:
+    """開いた画像の履歴 of this computer (core/catalog/opened.py), read once."""
+    global _opened
+    path = settings.opened_images_path()
+    if _opened is None or _opened.path != path:
+        _opened = OpenedImages(path)
+    return _opened
+
+
+def keep_opened(record: CatalogRecord, catalog: CatalogConfig, where: RecordImages, files: Sequence[str]) -> None:
+    """Keeps an image opened in 開いた画像の履歴 (one with an image id only; never stops the opening)."""
+    if not record.id:
+        return
+    try:
+        opened_images().add(OpenedImage(
+            image_id=record.id, catalog_url=catalog.url, catalog_label=catalog.label, place=where.place, is_url=where.is_url,
+            given=where.given or "", files=list(where.files), opened=list(files), feature=record.feature(),
+            acquired=ms_of(record.acquired), sensor=record.sensor or ""))
+    except Exception:  # noqa: BLE001 (the list is a convenience)
+        pass
+
+
+def located_again(entry: OpenedImage) -> RecordImages:
+    """Where an image of 開いた画像の履歴 was found (its folder's files as they were then)."""
+    return RecordImages(entry.place, entry.is_url, list(entry.files), False, given=entry.given)
 
 
 def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> None:

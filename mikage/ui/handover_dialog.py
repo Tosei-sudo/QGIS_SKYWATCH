@@ -231,8 +231,11 @@ class HandoverDialog(QDialog):
         if row >= len(self.shown_items):
             return
         x = self.shown_items[row]
-        if not self.dock.go_to(x.image_id):
-            self._say(self.tr("{name} は観測記録のドックで開いていない画像").format(name=x.label))
+        if self.dock.go_to(x.image_id):
+            return
+        # Not open: opened (開いた画像の履歴, else the image catalog, else listed without its file), tsudo 2026-11-18.
+        self._say(self.tr("{name} を開きます（前回のファイルか画像カタログから）").format(name=x.label))
+        self.dock.open_image(x.image_id, x.image_name, x.image_time)
 
     def _mine_or_ask(self, x: Assignment, what: str) -> bool:
         """Whether one may change a row: one's own, or someone else's after asking."""

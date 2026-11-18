@@ -1091,12 +1091,13 @@ def test_the_list_says_who_works_each_image_and_shows_the_unworked_only(plugin, 
 
 
 def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
-    """「フリーワード」: shown only for `fields.keywords`, Enter searches, partly in any of them; views and watches keep it."""
+    """「フリーワード」: the image id and `fields.keywords`, Enter searches, partly in any of them; views and watches keep it."""
     p, iface, folder, fake, layer = plugin
     dock = p.api.image_catalog
     dock.show()
-    # The catalog of the settings file has no keyword fields: no box.
-    assert not dock.keyword.isVisibleTo(dock) and not dock.keyword_label.isVisibleTo(dock)
+    # The catalog of the settings file has no keyword fields: the box looks in the image id alone (tsudo 2026-11-18).
+    assert dock.keyword.isVisibleTo(dock) and dock.keyword_label.isVisibleTo(dock)
+    assert dock.keyword.placeholderText() == "画像ID に部分一致"
     layer.types["NOTE"] = "esriFieldTypeString"
     for row, note in zip(layer.rows, ["横須賀港 定期観測", "横須賀港 臨時観測（ＥＶ０１）", "東京港 臨時"]):
         row["attributes"]["NOTE"] = note
@@ -1140,8 +1141,15 @@ def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
     dock.watch_requested = lambda catalog, types, conditions, drawn, **where: asked.append(conditions)
     dock._watch()
     assert asked and asked[0].keyword == "臨時"
-    # Another settings file without keyword fields: the box goes, and the word is not asked.
+    # Another settings file without keyword fields: the image id alone.
     del config["imageCatalogs"][0]["fields"]["keywords"]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert dock.keyword.isVisibleTo(dock) and dock.keyword.placeholderText() == "画像ID に部分一致"
+    assert found("b") == ["B"]
+    assert asked_where() == "(UPPER(IMG_ID) LIKE '%B%' ESCAPE '\\' OR UPPER(IMG_ID) LIKE '%Ｂ%' ESCAPE '\\')"
+    # Without an image id either: the box goes, and the word is not asked.
+    del config["imageCatalogs"][0]["fields"]["id"]
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     p.context.reload()
     assert not dock.keyword.isVisibleTo(dock) and dock.conditions().keyword == ""
