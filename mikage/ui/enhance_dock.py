@@ -20,6 +20,12 @@ scale goes to the layers shown as the top one is (one band or three); two
 dates stay a one-layer tool. 「グループで範囲を共通にする」 (on by default for
 alike rasters) has DRA and the 16-bit stretch taken over all of them
 together, so tiles meet without seams.
+
+The order (tsudo, 2026-11-18: the colour scale was often changed by mistake,
+the red and cyan comparison is used often): two dates right under the
+preset, open; then DRA, bands, the sliders and the tone curve; the colour
+scale folded near the bottom, by the histogram. The wheel scrolls the dock
+and changes a choice or slider only once it was clicked (wheel_guard).
 """
 from __future__ import annotations
 
@@ -48,6 +54,7 @@ from .colorize_box import ColorizeBox, paired_with, set_blend
 from .curve_editor import CurveEditor
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
+from .wheel_guard import guard_wheel
 
 TITLE = "画像補正"
 
@@ -204,6 +211,12 @@ class EnhanceDock(PluginDock):
         self.share.hide()
         v.addWidget(self.share)
 
+        # Two dates (used often) at the top; the colour scale itself further down, folded (below).
+        self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
+        self.colorize_box.changed.connect(self._colorize_changed)
+        self.colorize_box.colored.connect(self.refresh)
+        v.addWidget(self.colorize_box.pair_box)
+
         dra = QGroupBox(self.tr("DRA（表示範囲で自動レンジ）"))
         form = QFormLayout(dra)
         self.dra_on = QCheckBox(self.tr("オン"))
@@ -264,11 +277,6 @@ class EnhanceDock(PluginDock):
         self.curve.setVisible(False)
         v.addWidget(self.curve_box)
 
-        self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
-        self.colorize_box.changed.connect(self._colorize_changed)
-        self.colorize_box.colored.connect(self.refresh)
-        v.addWidget(self.colorize_box)
-
         buttons = QHBoxLayout()
         reset = QPushButton(self.tr("リセット"))
         reset.clicked.connect(self.reset)
@@ -277,6 +285,8 @@ class EnhanceDock(PluginDock):
         self.off_button.clicked.connect(lambda: self.enabled.setChecked(False))
         buttons.addWidget(self.off_button)
         v.addLayout(buttons)
+
+        v.addWidget(self.colorize_box)
 
         self.histogram_box = QGroupBox(self.tr("ヒストグラム（表示範囲）"))
         self.histogram_box.setCheckable(True)
@@ -309,6 +319,8 @@ class EnhanceDock(PluginDock):
         self._histogram_toggled(False)
         v.addWidget(self.histogram_box)
         v.addStretch(1)
+        #: The wheel scrolls the dock; a choice or slider takes it only once clicked.
+        self.wheel_guard = guard_wheel(page)
 
         #: The last histograms ({"before", "after"}, 256 counts per channel), and the number of the request whose answer is still wanted.
         self.histograms: Optional[dict] = None
