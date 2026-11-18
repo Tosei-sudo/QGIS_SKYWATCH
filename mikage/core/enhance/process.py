@@ -74,6 +74,25 @@ def _tail(trailing: Sequence[tuple], c: int, encoded: bool) -> Quantizer:
     return Quantizer(_chain(trailing, c, decode=encoded))
 
 
+def channel_tables(ops: Union[Pipeline, Sequence[dict]], mode: str) -> Optional[list]:
+    """
+    The corrected code of every 8-bit code, one 256-entry table per channel
+    (3, or 1 for "gray"), when every step works on each channel alone (no
+    saturation, no sharpen, DRA already resolved): what `process` gives such
+    a correction is a lookup in them. None for any other correction.
+    """
+    ops = list(ops.ops if isinstance(ops, Pipeline) else ops)
+    if any(op["op"] == "autoStretch" for op in ops):
+        return None
+    stages = stages_of(ops, mode)
+    if any(s[0] != "channel" for s in stages):
+        return None
+    channels = 3 if mode == "rgb" else 1
+    if not stages:
+        return [np.arange(256, dtype=np.uint8) for _ in range(channels)]
+    return [PLAIN.quantize(_chain(stages, c)(SRGB_TO_LINEAR)) for c in range(channels)]
+
+
 def process(rgba: np.ndarray, ops: Union[Pipeline, Sequence[dict]], color_mode: str = "auto",
             stats: Optional[Histogram] = None, mode: Optional[str] = None) -> np.ndarray:
     """

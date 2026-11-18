@@ -442,9 +442,8 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         earlier = layer_of(write_tif(tmp_path / "d1.tif", [dem]))
         later = layer_of(write_tif(tmp_path / "d2.tif", [dem]))
         project.addMapLayers([earlier, later])
-        box.pair_box.setChecked(True)
         dock.follow_layer(earlier)
-        assert box.target_label.text() == earlier.name()
+        assert box.pair_box.isEnabled() and earlier.name() in box.order_label.text()
         assert box.other.findData(earlier.id()) < 0
         box.other.setCurrentIndex(box.other.findData(later.id()))
         # Without times the lower in the layer list is the earlier.
@@ -463,13 +462,20 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         assert later.blendMode() == QPainter.CompositionMode.CompositionMode_Screen
         # While laid over each other the colouring is locked, on either image, until 着色の解除 takes it off both.
         dock.follow_layer(earlier)
-        assert box.locked() and not box.scale.isEnabled() and not box.blend.isEnabled() and not box.pair_box.isEnabled()
+        assert box.locked() and not box.scale.isEnabled() and not box.blend.isEnabled()
         assert box.clear_button.isEnabled() and later.name() in box.lock_note.text()
+        # The two dates' box says which is which and offers 解除 instead of the choices.
+        assert box.other.isHidden() and box.order.isHidden() and box.pair_button.isHidden()
+        assert not box.unpair_button.isHidden() and not box.pair_legend.isHidden()
+        assert box.order_label.text() == f"重ね合わせ中\n前（赤）: {earlier.name()}\n後（シアン）: {later.name()}"
+        assert box.title() == "着色（単バンド画像）: 2 時期の重ね合わせ中"
         dock.follow_layer(later)
         assert box.locked() and not box.mode.isEnabled()
-        box.clear()
+        assert box.order_label.text() == f"重ね合わせ中\n前（赤）: {earlier.name()}\n後（シアン）: {later.name()}"
+        box.unpair_button.click()
         dock.apply()
         assert not box.locked() and box.scale.isEnabled() and box.pair_box.isEnabled()
+        assert not box.other.isHidden() and not box.pair_button.isHidden() and box.unpair_button.isHidden()
         assert er.enhance_renderer(later).settings.color is None and er.enhance_renderer(earlier).settings.color is None
         assert earlier.blendMode() == later.blendMode() == QPainter.CompositionMode.CompositionMode_SourceOver
         assert not earlier.customProperty("satobs/pair") and not later.customProperty("satobs/pair")
@@ -484,7 +490,7 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         dock.colorize(earlier, None)
         # The target follows the dock's; the other image chosen stays.
         dock.follow_layer(later)
-        assert box.target_label.text() == later.name()
+        assert later.name() in box.order_label.text()
         assert box.other.findData(later.id()) < 0
         box.other.setCurrentIndex(box.other.findData(earlier.id()))
         dock.follow_layer(later)
@@ -510,6 +516,81 @@ def test_the_dock_colors_classes_and_two_dates(tmp_path):
         dock.colorize(layer, "red", blend="screen", fade=True)
         assert er.enhance_renderer(layer).settings.color == {"scale": "red", "fade": True}
         assert box.fade.isChecked() and box.scale.currentData() == "red"
+    finally:
+        dock.close_down()
+        project.removeAllMapLayers()
+
+
+def test_two_dates_sit_at_the_top_the_colour_scale_folded_and_the_wheel_scrolls(tmp_path):
+    """tsudo 2026-11-18: the colour scale was often changed by mistake; the red and cyan comparison should be easy to reach."""
+    from qgis.PyQt.QtCore import QPoint, QPointF, Qt
+    from qgis.PyQt.QtGui import QWheelEvent
+    from qgis.PyQt.QtWidgets import QApplication
+
+    def wheel(widget, steps=-1) -> bool:
+        """A wheel turn sent to `widget`; whether it took it (else Qt hands a real turn on to its parents, the scroll area)."""
+        event = QWheelEvent(QPointF(5, 5), QPointF(widget.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, 120 * steps),
+                            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(widget, event)
+        return event.isAccepted()
+
+    dem = np.random.default_rng(7).normal(500, 100, (40, 50)).astype(np.float32)
+    iface, dock = make_dock()
+    project = QgsProject.instance()
+    try:
+        first = layer_of(write_tif(tmp_path / "t1.tif", [dem], gdal.GDT_Float32))
+        second = layer_of(write_tif(tmp_path / "t2.tif", [dem], gdal.GDT_Float32))
+        project.addMapLayers([first, second])
+        iface.setActiveLayer(first)
+        box = dock.colorize_box
+        page = box.pair_box.parentWidget()
+        layout = page.layout()
+        order = [layout.itemAt(i).widget() for i in range(layout.count())]
+        # Two dates right under DRA, open; the colour scale after the sliders, tone curve and buttons, folded, by the histogram.
+        dra = dock.dra_on.parentWidget()
+        assert order.index(dock.share) < order.index(dra) and order.index(box.pair_box) == order.index(dra) + 1
+        assert order.index(box.pair_box) < order.index(dock.bands_box) < order.index(dock.curve_box)
+        assert order.index(dock.curve_box) < order.index(box) < order.index(dock.histogram_box)
+        assert not box.pair_box.isCheckable() and box.pair_box.isEnabled() and box.other.currentData() == second.id()
+        assert box.isCollapsed() and box.title() == "着色（単バンド画像）: なし"
+        # The folded title tells the colouring in use.
+        box.scale.setCurrentIndex(box.scale.findData("inferno"))
+        assert box.title() == "着色（単バンド画像）: 熱"
+        box.scale.setCurrentIndex(box.scale.findData("custom"))
+        assert box.title() == "着色（単バンド画像）: 好きな色"
+        box.clear()
+        dock.apply()
+        assert box.title() == "着色（単バンド画像）: なし"
+
+        # The wheel leaves the choices and sliders alone until they are clicked: it is not taken, so a real turn goes on to the
+        # scroll area (Qt hands on only real turns, not one sent from here: checked by hand under Xvfb with xdotool).
+        iface.window.resize(420, 360)
+        iface.window.show()
+        dock.show()
+        QApplication.processEvents()
+        method, slider = dock.dra_method, dock.rows[0].slider
+        before = (box.scale.currentIndex(), method.currentIndex(), slider.value(), dock.dra_clip.value(), box.other.currentIndex())
+        for widget in (box.scale, method, slider, dock.dra_clip, box.other):
+            assert widget.focusPolicy() != Qt.FocusPolicy.WheelFocus
+            assert not wheel(widget), widget
+        assert (box.scale.currentIndex(), method.currentIndex(), slider.value(), dock.dra_clip.value(), box.other.currentIndex()) == before
+        dock.apply()
+        assert er.enhance_renderer(first).settings.color is None
+        # The scroll area itself scrolls with it.
+        bar = page.parentWidget().parentWidget().verticalScrollBar()
+        dock.resize(380, 300)
+        QApplication.processEvents()
+        assert bar.maximum() > 0
+        bar.setValue(0)
+        wheel(bar)
+        assert bar.value() > 0
+        # Clicked (focused), the wheel changes it as usual.
+        QApplication.setActiveWindow(iface.window)
+        method.setFocus()
+        QApplication.processEvents()
+        if method.hasFocus():
+            wheel(method)
+            assert method.currentIndex() == before[1] + 1
     finally:
         dock.close_down()
         project.removeAllMapLayers()

@@ -15,7 +15,16 @@ what the screen costs (QGIS reads the overview that fits).
   seams between parts.
 - 「グループで範囲を共通にする」: layers whose settings name the same `share`
   (a layer-tree group's key) take DRA and the whole-image stretch from all
-  of them together (`GroupShare`), so tiles of one scene meet without seams.
+  of them together (`GroupShare`, the members read in threads), so tiles of
+  one scene meet without seams.
+- A correction of per-channel steps alone (all but saturation and sharpen)
+  is drawn as one table lookup per band, from the raw value straight to the
+  premultiplied colour QGIS takes (`argb`); the tables are kept, so the
+  parts of a drawing and the tiles of a group with one range share them.
+  Others run the correction (`render`) and are packed after.
+- A drawing QGIS calls off (the view or the correction changed again before
+  it was done) stops between its steps and parts, so the next one does not
+  wait behind it — with a group, behind every one of its layers.
 
 The renderer keeps its settings in the layer's custom property
 `satobs/enhance` (JSON) and writes itself into the project as QGIS's own
@@ -27,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
@@ -44,8 +54,11 @@ from ..core.enhance.color_classes import class_palette, class_range
 from ..core.enhance.color_scale import apply_palette, color_scale_palette
 from ..core.enhance.histogram import channel_bins
 from ..core.enhance.pipeline import Pipeline
-from ..core.enhance.process import process
-from ..core.enhance.raster import RasterHistogram, compute_raster_stretch, sample_raster_histogram, stretch_to_rgba, valid_mask
+from ..core.enhance.process import channel_tables, process
+from ..core.enhance.raster import (
+    RasterHistogram, code_table, compute_raster_stretch, look_up, sample_raster_histogram, stretch_to_rgba, to_codes,
+    valid_mask,
+)
 from ..core.enhance.stats import count_pixels, resolve_ops
 
 RENDERER_TYPE = "satobsEnhance"
@@ -59,6 +72,8 @@ WHOLE_STRETCH = {"lowPercent": 2, "highPercent": 2}
 THREADS = max(1, min(8, os.cpu_count() or 1))
 STRIP = 128
 _POOL: Optional[ThreadPoolExecutor] = None
+#: Threads reading a group's members for their shared range (apart from the drawing's, which may be busy with other layers).
+_READS: Optional[ThreadPoolExecutor] = None
 
 
 def _pool() -> ThreadPoolExecutor:
@@ -66,6 +81,21 @@ def _pool() -> ThreadPoolExecutor:
     if _POOL is None:
         _POOL = ThreadPoolExecutor(THREADS, thread_name_prefix="satobs-enhance")
     return _POOL
+
+
+def _reads() -> ThreadPoolExecutor:
+    global _READS
+    if _READS is None:
+        _READS = ThreadPoolExecutor(THREADS, thread_name_prefix="satobs-enhance-read")
+    return _READS
+
+
+def canceled(feedback) -> bool:
+    """Whether QGIS called the drawing off (a newer one is on its way: the view or the correction changed)."""
+    try:
+        return feedback is not None and feedback.isCanceled()
+    except RuntimeError:  # the feedback is gone with its drawing
+        return True
 
 
 EIGHT_BIT = {Qgis.DataType.Byte}
@@ -173,6 +203,17 @@ class EnhanceState:
             self.cache.clear()
             self.generation += 1
 
+    def clear_views(self) -> None:
+        """Drops the statistics of views (the image moved: the same pixels, elsewhere); the whole image's stay."""
+        with self.lock:
+            _drop_views(self.cache)
+            self.generation += 1
+
+
+def _drop_views(cache: dict) -> None:
+    for key in [k for k in cache if k[0] != "whole"]:
+        del cache[key]
+
 
 class GroupShare:
     """
@@ -195,8 +236,12 @@ class GroupShare:
 _shares: dict = {}
 
 
-def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer") -> None:
-    """Puts the layer into the share its settings name (and out of any other)."""
+def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer", moved: bool = False) -> None:
+    """
+    Puts the layer into the share its settings name (and out of any other).
+    `moved`: the layer has a new source with the same pixels elsewhere (位置ずらし):
+    its provider is taken again, the whole images' statistics stay.
+    """
     key = renderer.settings.share
     for k in [k for k, share in _shares.items() if k != key and layer.id() in share.members]:
         _leave(k, layer.id())
@@ -204,11 +249,14 @@ def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer") -> None:
         return
     share = _shares.setdefault(key, GroupShare())
     current = share.members.get(layer.id())
-    if current is None or current[1] is not renderer.state:
+    if current is None or current[1] is not renderer.state or moved:
         provider = layer.dataProvider().clone()
         with share.lock:
             share.members[layer.id()] = (provider, renderer.state)
-            share.cache.clear()
+            if moved and current is not None:
+                _drop_views(share.cache)
+            else:
+                share.cache.clear()
 
 
 def _leave(key: str, layer_id: str) -> None:
@@ -283,6 +331,57 @@ def _coarse_size(extent: QgsRectangle, layer_extent: QgsRectangle, xres: float, 
     return max(1, int(w * scale)), max(1, int(h * scale))
 
 
+#: The tables of the drawings made lately (`EnhanceRenderer._luts`; at most 768 KB each), by what they were made from.
+_LUTS: dict = {}
+_LUTS_LOCK = threading.Lock()
+LUTS_KEPT = 32
+LITTLE_ENDIAN = sys.byteorder == "little"
+
+
+def premultiplied(rgba: np.ndarray, opacity: float = 1.0) -> np.ndarray:
+    """H×W×4 RGBA as QGIS draws it: premultiplied ARGB32 numbers 0xAARRGGBB, alpha times `opacity`."""
+    h, w = rgba.shape[:2]
+    alpha = rgba[..., 3]
+    clear = alpha == 0
+    if LITTLE_ENDIAN and opacity >= 1 and bool((clear | (alpha == 255)).all()):
+        # Opaque or transparent only: the colours as they are (0 where transparent), bytes B, G, R, A.
+        out = np.empty((h, w), dtype=np.uint32)
+        b = out.view(np.uint8).reshape(h, w, 4)
+        b[..., 0] = rgba[..., 2]
+        b[..., 1] = rgba[..., 1]
+        b[..., 2] = rgba[..., 0]
+        b[..., 3] = alpha
+        if clear.any():
+            out[clear] = 0
+        return out
+    a = alpha.astype(np.uint32)
+    if opacity < 1:
+        a = (a * opacity + 0.5).astype(np.uint32)
+    r, g, b = (rgba[..., c].astype(np.uint32) * a // 255 for c in range(3))
+    return (a << 24) | (r << 16) | (g << 8) | b
+
+
+def _argb_of(codes: np.ndarray, palette: Optional[np.ndarray], opacity: float) -> np.ndarray:
+    """The premultiplied ARGB32 of 256 corrected codes drawn opaque (gray, or through `palette` with its alpha)."""
+    if palette is None:
+        rgba = np.empty((1, 256, 4), dtype=np.uint8)
+        rgba[0, :, 0] = rgba[0, :, 1] = rgba[0, :, 2] = codes
+        rgba[0, :, 3] = 255
+    else:
+        rgba = palette[codes][None].astype(np.uint8)
+    out = premultiplied(rgba, opacity)[0]
+    out.setflags(write=False)
+    return out
+
+
+def _drawn(lut: tuple, band: np.ndarray) -> np.ndarray:
+    """A band's share of the colour drawn: its table at each raw value (or at each code)."""
+    table, offset, stretch = lut
+    if stretch is not None:
+        return table[to_codes(band, stretch[0], stretch[1])]
+    return look_up(table, offset, band)
+
+
 class EnhanceRenderer(QgsRasterRenderer):
     def __init__(self, input_=None, settings: Optional[EnhanceSettings] = None, state: Optional[EnhanceState] = None,
                  eight_bit: Optional[bool] = None):
@@ -312,22 +411,18 @@ class EnhanceRenderer(QgsRasterRenderer):
         if provider is None or width <= 0 or height <= 0:
             return out
         try:
-            rgba = self.render(extent, width, height, feedback)
+            argb = self.argb(extent, width, height, feedback)
         except Exception:  # noqa: BLE001 (a drawing error must not take QGIS down; the area stays empty)
             import traceback
 
             from qgis.core import QgsMessageLog
             QgsMessageLog.logMessage(traceback.format_exc(), "MIKAGE", Qgis.MessageLevel.Warning)
+            argb = None
+        if argb is None:
+            # Failed, or called off (QGIS throws the area away and draws again).
             out.setIsNoData()
             return out
-        alpha = rgba[..., 3].astype(np.uint32)
-        opacity = self.opacity()
-        if opacity < 1:
-            alpha = (alpha * opacity + 0.5).astype(np.uint32)
-        # Premultiplied ARGB32 in native order (0xAARRGGBB as a 32-bit number).
-        r, g, b = (rgba[..., c].astype(np.uint32) * alpha // 255 for c in range(3))
-        argb = (alpha << 24) | (r << 16) | (g << 8) | b
-        out.setData(np.ascontiguousarray(argb, dtype=np.uint32).tobytes())
+        out.setData(argb.tobytes())
         return out
 
     # ---- the picture ----
@@ -338,8 +433,12 @@ class EnhanceRenderer(QgsRasterRenderer):
             self._eight_bit = all(p.dataType(b) in EIGHT_BIT for b in self.settings.bands)
         return self._eight_bit
 
-    def render(self, extent: QgsRectangle, width: int, height: int, feedback=None) -> np.ndarray:
-        """The corrected H×W×4 uint8 RGBA of `extent`."""
+    def _drawing(self, extent: QgsRectangle, width: int, height: int, feedback=None) -> Optional[tuple]:
+        """
+        What drawing `extent` takes: the picture bands read (with the sharpen's
+        `m` pixels more each side), the mask of pixels that count, the raw
+        black and white, and the steps with DRA resolved; None when called off.
+        """
         s = self.settings
         correction = Pipeline() if s.classes else s.correction
         m = correction.margin
@@ -351,27 +450,129 @@ class EnhanceRenderer(QgsRasterRenderer):
                                        extent.xMaximum() + m * px, extent.yMaximum() + m * py)
             rw, rh = width + 2 * m, height + 2 * m
         bands, valid = read_bands(self.input(), s.bands, read_extent, rw, rh, s.no_data, feedback)
+        if canceled(feedback):
+            return None
         black, white, ops = self.ranges(extent, correction)
-        mode = "gray" if len(s.bands) == 1 else "rgb"
-        palette = s.palette
+        if canceled(feedback):
+            return None
+        return bands, valid, black, white, ops, m
+
+    def _rows(self, drawing: tuple, width: int):
+        """Output rows y0..y1 as H×W×4 RGBA: the correction on those rows and `m` more each side (what the whole would give)."""
+        bands, valid, black, white, ops, m = drawing
+        mode = "gray" if len(self.settings.bands) == 1 else "rgb"
+        palette = self.settings.palette
 
         def rows(y0: int, y1: int) -> np.ndarray:
-            """Output rows y0..y1 (of the area read), from those rows and `m` more each side."""
-            a0, a1 = max(0, y0 - m), min(rh, y1 + m)
+            a0, a1 = y0, y1 + 2 * m
             rgba = stretch_to_rgba([b[a0:a1] for b in bands], valid[a0:a1], black, white)
-            out = process(rgba, ops, mode=mode)[y0 - a0:y1 - a0]
+            out = process(rgba, ops, mode=mode)[m:m + y1 - y0, m:m + width]
             return out if palette is None else apply_palette(out, palette)
 
-        # Strips in threads (NumPy lets go of the GIL); with `m` rows of margin each is what the whole would give.
+        return rows
+
+    @staticmethod
+    def _strips(height: int, strip, feedback=None) -> None:
+        """Runs `strip(y0, y1)` over the rows in parts, in threads (NumPy lets go of the GIL); a part called off is skipped."""
+        def part(y0: int, y1: int) -> None:
+            if not canceled(feedback):
+                strip(y0, y1)
+
         parts = min(THREADS, max(1, height // STRIP))
-        cuts = [m + round(i * height / parts) for i in range(parts + 1)]
+        cuts = [round(i * height / parts) for i in range(parts + 1)]
         if parts == 1:
-            out = rows(cuts[0], cuts[1])
+            part(0, height)
         else:
-            out = np.vstack(list(_pool().map(lambda i: rows(cuts[i], cuts[i + 1]), range(parts))))
-        if m:
-            out = out[:, m:m + width]
-        return np.ascontiguousarray(out)
+            list(_pool().map(lambda i: part(cuts[i], cuts[i + 1]), range(parts)))
+
+    def render(self, extent: QgsRectangle, width: int, height: int, feedback=None) -> np.ndarray:
+        """The corrected H×W×4 uint8 RGBA of `extent` (transparent when called off)."""
+        out = np.zeros((height, width, 4), dtype=np.uint8)
+        drawing = self._drawing(extent, width, height, feedback)
+        if drawing is None:
+            return out
+        rows = self._rows(drawing, width)
+
+        def strip(y0: int, y1: int) -> None:
+            out[y0:y1] = rows(y0, y1)
+
+        self._strips(height, strip, feedback)
+        return out
+
+    def argb(self, extent: QgsRectangle, width: int, height: int, feedback=None) -> Optional[np.ndarray]:
+        """
+        What `block` draws: the H×W premultiplied ARGB32 (numbers 0xAARRGGBB)
+        of `extent` at the renderer's opacity, as `render` and then
+        premultiplying give it; None when called off. A correction of
+        per-channel steps alone (all but saturation and sharpen) is one table
+        lookup per band from the raw values to the colour drawn.
+        """
+        drawing = self._drawing(extent, width, height, feedback)
+        if drawing is None:
+            return None
+        bands, valid, black, white, ops, m = drawing
+        opacity = self.opacity()
+        out = np.empty((height, width), dtype=np.uint32)
+        luts = None if m else self._luts(bands, black, white, ops, opacity)
+        if luts is not None:
+            every = bool(valid.all())
+
+            def strip(y0: int, y1: int) -> None:
+                acc = _drawn(luts[0], bands[0][y0:y1])
+                for lut, band in zip(luts[1:], bands[1:]):
+                    acc |= _drawn(lut, band[y0:y1])
+                if not every:
+                    acc[~valid[y0:y1]] = 0
+                out[y0:y1] = acc
+        else:
+            rows = self._rows(drawing, width)
+
+            def strip(y0: int, y1: int) -> None:
+                out[y0:y1] = premultiplied(rows(y0, y1), opacity)
+
+        self._strips(height, strip, feedback)
+        return None if canceled(feedback) else out
+
+    def _luts(self, bands: list, black, white, ops: list, opacity: float) -> Optional[list]:
+        """
+        Per picture band, the premultiplied ARGB32 share of each raw value (or
+        each code, for types without a table) when the correction is per-channel
+        steps alone: one band gives the whole colour (gray, or through the colour
+        scale), three their R, G and B (alpha with R). None for any other.
+        """
+        s = self.settings
+        gray = len(s.bands) == 1
+        palette = s.palette
+        if palette is not None and not gray:
+            return None
+        key = (tuple(b.dtype.str for b in bands), tuple(float(x) for x in black), tuple(float(x) for x in white),
+               json.dumps(ops, sort_keys=True, default=str), gray, json.dumps(s.color, sort_keys=True) if s.color else "",
+               float(opacity))
+        with _LUTS_LOCK:
+            luts = _LUTS.get(key, False)
+        if luts is not False:
+            return luts
+        tables = channel_tables(ops, "gray" if gray else "rgb")
+        luts = None
+        if tables is not None:
+            if gray:
+                colours = [_argb_of(tables[0], palette, opacity)]
+            else:
+                shares = [_argb_of(t, None, opacity) for t in tables]
+                # R with alpha, G, B: OR-ed together per pixel.
+                colours = [shares[0] & np.uint32(0xFFFF0000), shares[1] & np.uint32(0x0000FF00), shares[2] & np.uint32(0x000000FF)]
+            luts = []
+            for c, colour in enumerate(colours):
+                raw = code_table(bands[c].dtype, black[c], white[c])
+                if raw is not None:
+                    luts.append((colour[raw[0]], raw[1], None))
+                else:
+                    luts.append((colour, None, (black[c], white[c])))
+        with _LUTS_LOCK:
+            while len(_LUTS) >= LUTS_KEPT:
+                _LUTS.pop(next(iter(_LUTS)))
+            _LUTS[key] = luts
+        return luts
 
     def ranges(self, extent: QgsRectangle, correction: Pipeline) -> tuple:
         """The raw black and white per band, and the steps with DRA resolved."""
@@ -447,12 +648,17 @@ class EnhanceRenderer(QgsRasterRenderer):
             if not whole and self.settings.locked and share.kept is not None and share.kept[0] == what:
                 return share.kept[1]
             if key not in share.cache:
-                reads = []
-                for (_id, (provider, _st)), view in zip(members, views):
+                def one(item):
+                    (_id, (provider, _st)), view = item
                     if whole:
-                        reads.append(self._coarse(provider.extent(), provider))
-                    elif view is not None and not view.isEmpty():
-                        reads.append(self._coarse(view, provider, max(view.width(), view.height()) / STATS_SIZE))
+                        return self._coarse(provider.extent(), provider)
+                    if view is not None and not view.isEmpty():
+                        return self._coarse(view, provider, max(view.width(), view.height()) / STATS_SIZE)
+                    return None
+
+                # Each member from its own provider, so in threads (in the members' order: the same statistics).
+                items = list(zip(members, views))
+                reads = list(_reads().map(one, items)) if len(items) > 1 else [one(item) for item in items]
                 read = _flat(reads)
                 if read is None:
                     result = None
@@ -610,8 +816,13 @@ def _keep(renderer: EnhanceRenderer) -> None:
     _kept.add(renderer)
 
 
-def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
-    """Draws the layer with the correction (or updates it) and keeps the settings on the layer."""
+def apply(layer: QgsRasterLayer, settings: EnhanceSettings, state: Optional[EnhanceState] = None) -> EnhanceRenderer:
+    """
+    Draws the layer with the correction (or updates it) and keeps the settings
+    on the layer. `state`: a new renderer's, that of the one the layer had
+    before it was moved to a new source (位置ずらし: the same pixels elsewhere),
+    so the view and a 範囲を固定 range stay; the views' statistics are dropped.
+    """
     current = enhance_renderer(layer)
     if current is not None:
         bands_changed = current.settings.bands != settings.bands or current.settings.no_data != settings.no_data
@@ -621,13 +832,15 @@ def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
             current.state.clear()
         renderer = current
     else:
-        renderer = EnhanceRenderer(layer.dataProvider(), settings)
+        if state is not None:
+            state.clear_views()
+        renderer = EnhanceRenderer(layer.dataProvider(), settings, state)
         old = layer.renderer()
         if old is not None:
             renderer.copyCommonProperties(old, True)
         layer.setRenderer(renderer)
         _keep(renderer)
-    _join(layer, renderer)
+    _join(layer, renderer, moved=state is not None)
     layer.setCustomProperty(PROPERTY, settings.to_json())
     layer.triggerRepaint()
     return renderer
@@ -646,8 +859,8 @@ def remove(layer: QgsRasterLayer) -> None:
     layer.triggerRepaint()
 
 
-def restore_layer(layer) -> bool:
-    """Puts the correction kept on a layer (opened from a project) back; True when it did."""
+def restore_layer(layer, state: Optional[EnhanceState] = None) -> bool:
+    """Puts the correction kept on a layer (opened from a project, or given a new source) back; True when it did."""
     if not isinstance(layer, QgsRasterLayer) or enhance_renderer(layer) is not None:
         return False
     text = layer.customProperty(PROPERTY)
@@ -659,7 +872,7 @@ def restore_layer(layer) -> bool:
         return False
     if any(b < 1 or b > layer.bandCount() for b in settings.bands):
         return False
-    apply(layer, settings)
+    apply(layer, settings, state)
     return True
 
 
