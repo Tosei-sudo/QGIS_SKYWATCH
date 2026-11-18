@@ -6,7 +6,14 @@ Two dates in red and cyan, the later screened over the earlier, show white
 where nothing changed and their own colour where only one is bright; one of
 the two is always the dock's target image, the other is chosen. While the
 two are laid over each other, their colouring is locked (on either image)
-until 着色の解除, which takes it off both.
+until 重ね合わせの解除 (or 着色の解除), which takes it off both.
+
+Where the parts sit (tsudo, 2026-11-18: 「カラースケールの誤操作が多い。赤青比較は
+よく使うのでアクセスしやすいところ」): the two dates (`pair_box`, its own box)
+go at the top of the dock, open; the colour scale (this box) near the bottom,
+folded until opened, its title telling the colouring in use. Scrolling down
+to the two dates no longer passes over the colour scale, and the wheel only
+scrolls the dock (wheel_guard).
 
 The image can also be shown by classes of its values: equal intervals,
 quantiles, bounds typed in, or one colour per value for a classified image
@@ -22,7 +29,7 @@ from dataclasses import replace
 from typing import Callable, Optional
 
 from qgis.core import QgsLayerTreeLayer, QgsProject, QgsRasterLayer
-from qgis.gui import QgsColorButton
+from qgis.gui import QgsCollapsibleGroupBoxBasic, QgsColorButton
 import json
 
 from qgis.PyQt import sip
@@ -64,6 +71,10 @@ PAIR_PROPERTY = "satobs/pair"
 PAIR_SCALES = {"before": "red", "after": "cyan"}
 #: Which of the two dates the target image is.
 ORDERS = [("auto", "撮像日時の順"), ("before", "対象が前（赤）"), ("after", "対象が後（シアン）")]
+#: What the colours of two dates laid over each other mean (a line of coloured squares).
+PAIR_LEGEND = [("#00e5ff", "後で明るく"), ("#ff1744", "後で暗く"), ("#9e9e9e", "変化なし（白黒）")]
+#: The box's title, with the colouring in use.
+TITLE = "着色（単バンド画像）: {state}"
 
 
 def blend_of(layer: QgsRasterLayer) -> str:
@@ -116,8 +127,12 @@ class GradientBar(QWidget):
         p.end()
 
 
-class ColorizeBox(QGroupBox):
-    """The colouring of the dock's layer; `changed` when the colour scale changes (the dock draws it)."""
+class ColorizeBox(QgsCollapsibleGroupBoxBasic):
+    """
+    The colouring of the dock's layer, folded at first; `changed` when the
+    colour scale changes (the dock draws it). `pair_box` (two dates) is a box
+    of its own, which the dock places.
+    """
 
     changed = pyqtSignal()
     #: Layers other than the dock's were coloured (two dates).
@@ -125,7 +140,7 @@ class ColorizeBox(QGroupBox):
 
     def __init__(self, say: Callable[[str], None], parent=None):
         super().__init__(parent)
-        self.setTitle(self.tr("着色（単バンド画像）"))
+        self.setTitle(self.tr(TITLE).format(state=self.tr("なし")))
         self.say = say
         self.layer: Optional[QgsRasterLayer] = None
         #: The layers the blend goes to (a group's rasters; else the layer).
@@ -212,42 +227,6 @@ class ColorizeBox(QGroupBox):
         self.scale_hint.setWordWrap(True)
         v.addWidget(self.scale_hint)
 
-        self.pair_box = QGroupBox(self.tr("2 時期の色分け重ね合わせ"))
-        self.pair_box.setCheckable(True)
-        self.pair_box.setChecked(False)
-        pv = QVBoxLayout(self.pair_box)
-        pf = QFormLayout()
-        self.target_label = QLabel()
-        self.target_label.setWordWrap(True)
-        pf.addRow(self.tr("対象の画像"), self.target_label)
-        self.other = QComboBox()
-        self.other.setToolTip(self.tr("対象の画像と重ねる別の時期の画像"))
-        self.other.currentIndexChanged.connect(self._show_order)
-        pf.addRow(self.tr("比べる画像"), self.other)
-        self.order = QComboBox()
-        for key, label in ORDERS:
-            self.order.addItem(self.tr(label), key)
-        self.order.currentIndexChanged.connect(self._show_order)
-        pf.addRow(self.tr("前後"), self.order)
-        self.order_label = QLabel()
-        self.order_label.setWordWrap(True)
-        pf.addRow("", self.order_label)
-        pv.addLayout(pf)
-        pair_hint = QLabel(self.tr("前を赤、後をシアンとし、後をスクリーンで重ね合わせ。変化なしの所は白黒、"
-                                   "後で明るくなった所はシアン、暗くなった所は赤。"))
-        pair_hint.setWordWrap(True)
-        pv.addWidget(pair_hint)
-        self.pair_button = QPushButton(self.tr("赤とシアンで重ね合わせ"))
-        self.pair_button.clicked.connect(self.pair)
-        pv.addWidget(self.pair_button)
-        self.pair_note = QLabel()
-        self.pair_note.setWordWrap(True)
-        pv.addWidget(self.pair_note)
-        self._pair_body = [w for w in self.pair_box.findChildren(QWidget) if w.parent() is self.pair_box]
-        self.pair_box.toggled.connect(self._pair_toggled)
-        self._pair_toggled(False)
-        v.addWidget(self.pair_box)
-
         self.lock_note = QLabel()
         self.lock_note.setWordWrap(True)
         self.lock_note.setStyleSheet("color: #b45309;")
@@ -256,11 +235,59 @@ class ColorizeBox(QGroupBox):
         self.clear_button = QPushButton(self.tr("着色の解除"))
         self.clear_button.clicked.connect(self.clear)
         v.addWidget(self.clear_button)
+
+        self.pair_box = self._make_pair_box()
         # Long choices must not widen the dock.
-        for combo in self.findChildren(QComboBox):
+        for combo in self.findChildren(QComboBox) + self.pair_box.findChildren(QComboBox):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(6)
         self._show_parts()
+        self.setCollapsed(True)
+
+    def _make_pair_box(self) -> QGroupBox:
+        """Two dates in red and cyan: the other image, which is first, the button; while they are laid over each other, the pair and 解除."""
+        box = QGroupBox(self.tr("2 時期の色分け重ね合わせ（赤・シアン）"))
+        box.setToolTip(self.tr("前を赤、後をシアンとし、後をスクリーンで重ね合わせ。変化なしの所は白黒、"
+                               "後で明るくなった所はシアン、暗くなった所は赤。片方はいつも補正の対象の画像"))
+        pv = QVBoxLayout(box)
+        pf = QFormLayout()
+        self.other_label = QLabel(self.tr("比べる画像"))
+        self.other = QComboBox()
+        self.other.setToolTip(self.tr("対象の画像と重ねる別の時期の画像"))
+        self.other.currentIndexChanged.connect(self._show_order)
+        pf.addRow(self.other_label, self.other)
+        self.order_name = QLabel(self.tr("前後"))
+        self.order = QComboBox()
+        for key, label in ORDERS:
+            self.order.addItem(self.tr(label), key)
+        self.order.currentIndexChanged.connect(self._show_order)
+        pf.addRow(self.order_name, self.order)
+        pv.addLayout(pf)
+        self.order_label = QLabel()
+        self.order_label.setWordWrap(True)
+        pv.addWidget(self.order_label)
+        self.pair_button = QPushButton(self.tr("赤とシアンで重ね合わせ"))
+        self.pair_button.clicked.connect(self.pair)
+        pv.addWidget(self.pair_button)
+        self.pair_legend = QLabel("　".join(f'<span style="color:{color}">■</span> {self.tr(text)}' for color, text in PAIR_LEGEND))
+        self.pair_legend.setTextFormat(Qt.TextFormat.RichText)
+        self.pair_legend.setWordWrap(True)
+        self.pair_legend.setToolTip(box.toolTip())
+        pv.addWidget(self.pair_legend)
+        self.unpair_button = QPushButton(self.tr("重ね合わせの解除"))
+        self.unpair_button.setToolTip(self.tr("両方の画像の着色を解除して、通常の重ね方に戻す"))
+        self.unpair_button.clicked.connect(self.clear)
+        pv.addWidget(self.unpair_button)
+        self.pair_note = QLabel()
+        self.pair_note.setWordWrap(True)
+        self.pair_note.hide()
+        pv.addWidget(self.pair_note)
+        return box
+
+    def _pair_say(self, text: str) -> None:
+        """A note under the two dates' button (why they could not be laid over each other); none takes no room."""
+        self.pair_note.setText(text)
+        self.pair_note.setVisible(bool(text))
 
     # ---- the form ----
 
@@ -320,6 +347,19 @@ class ColorizeBox(QGroupBox):
             out["fade"] = True
         return out
 
+    def _show_title(self) -> None:
+        """The title tells the colouring in use (the box is folded most of the time)."""
+        if self.locked():
+            state = self.tr("2 時期の重ね合わせ中")
+        elif not self.scale.currentData():
+            state = self.tr("なし")
+        else:
+            state = self.scale.currentText().split("（")[0].rstrip("…")
+            mode = self.mode.currentData()
+            if mode:
+                state += self.tr("・区分") if mode == "classes" else self.tr("・値ごと")
+        self.setTitle(self.tr(TITLE).format(state=state))
+
     def _show_parts(self) -> None:
         custom = self.scale.currentData() == "custom"
         self.custom.setVisible(custom)
@@ -331,6 +371,7 @@ class ColorizeBox(QGroupBox):
         for w in (self.method, self.method_label, self.count, self.count_label):
             w.setVisible(mode == "classes")
         self.preview.set_color(self.color() or ({"scale": self.scale_value()} if mode else None))
+        self._show_title()
 
     def _apply(self, *_args) -> None:
         if self._loading:
@@ -401,12 +442,25 @@ class ColorizeBox(QGroupBox):
     def _show_lock(self) -> None:
         partner = paired_with(self.layer) if self.layer is not None else None
         on = partner is not None
-        for w in (self.scale, self.custom, self.mode, self.classes_box, self.reverse, self.fade, self.blend, self.pair_box):
+        for w in (self.scale, self.custom, self.mode, self.classes_box, self.reverse, self.fade, self.blend):
             w.setEnabled(not on)
         self.lock_note.setVisible(on)
         if on:
-            self.lock_note.setText(self.tr("2 時期の重ね合わせ中（相手: {other}）。着色を変えるには「着色の解除」（両方の画像の着色を解除）")
-                                   .format(other=partner.name()))
+            self.lock_note.setText(self.tr("2 時期の重ね合わせ中（相手: {other}）。着色を変えるには「重ね合わせの解除」か"
+                                           "「着色の解除」（両方の画像の着色を解除）").format(other=partner.name()))
+        # Two dates: what to pick, or (laid over each other) which is which and 解除.
+        for w in (self.other_label, self.other, self.order_name, self.order, self.pair_button):
+            w.setVisible(not on)
+        self.pair_legend.setVisible(on)
+        self.unpair_button.setVisible(on)
+        if on:
+            before, after = (self.layer, partner) if pair_role(self.layer) == "before" else (partner, self.layer)
+            self.order_label.setText(self.tr("重ね合わせ中\n前（赤）: {before}\n後（シアン）: {after}")
+                                     .format(before=before.name(), after=after.name()))
+            self._pair_say("")
+        else:
+            self._show_order()
+        self._show_title()
 
     # ---- classes ----
 
@@ -551,16 +605,9 @@ class ColorizeBox(QGroupBox):
 
     # ---- two dates ----
 
-    def _pair_toggled(self, on: bool) -> None:
-        for w in self._pair_body:
-            w.setVisible(on)
-        if on:
-            self._fill_pair()
-
     def _fill_pair(self) -> None:
         """The other image: every raster layer but the target; the one-band image nearest in time to it (else the next in the layer list) unless one is already chosen."""
         target = self.layer
-        self.target_label.setText(target.name() if target is not None else self.tr("ラスターレイヤーの選択なし"))
         layers = [lay for lay in raster_layers() if target is None or lay.id() != target.id()]
         chosen = self.other.currentData()
         self.other.blockSignals(True)
@@ -597,7 +644,7 @@ class ColorizeBox(QGroupBox):
         project = QgsProject.instance()
         before, after = self.pair_layers()
         if before is None or after is None:
-            self.pair_note.setText(self.tr("対象の画像と比べる画像を選択"))
+            self._pair_say(self.tr("対象の画像と比べる画像を選択"))
             return False
         root = project.layerTreeRoot()
         # The later image goes right above the earlier one.
@@ -628,10 +675,19 @@ class ColorizeBox(QGroupBox):
             tree = root.findLayer(layer.id())
             if isinstance(tree, QgsLayerTreeLayer):
                 tree.setItemVisibilityChecked(True)
-        self.pair_note.setText("")
+        self._pair_say("")
         self.say(self.tr("{before} を赤、{after} をシアンで重ね合わせ").format(before=before.name(), after=after.name()))
         self.colored.emit()
         return True
+
+
+def pair_role(layer: QgsRasterLayer) -> Optional[str]:
+    """"before" or "after" when `layer` is marked as one of two dates, else None."""
+    try:
+        m = json.loads(layer.customProperty(PAIR_PROPERTY) or "null")
+    except (TypeError, ValueError):
+        return None
+    return m.get("role") if isinstance(m, dict) and m.get("role") in PAIR_SCALES else None
 
 
 def paired_with(layer: QgsRasterLayer) -> Optional[QgsRasterLayer]:
