@@ -24,7 +24,7 @@ from qgis.PyQt.QtCore import QDateTime, QEventLoop, QItemSelection, QItemSelecti
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTabBar, QTableWidget, QTableWidgetItem, QToolButton,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -39,7 +39,7 @@ from ..core.obs.book import FormValues, ObservationBook, ObservedImage
 from ..core.obs.drafts import OutboxDrafts
 from ..core.obs.csv import csv_file_name, local_time, observations_csv
 from ..core.obs.flows import (
-    CarryOver, MatchCandidate, ObjectFlow, RecentThings, ends_of, flow_of, heading_text, now_ms, outline_of, recent_things, side_points,
+    CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, now_ms, outline_of, side_points,
     time_key, two_point,
 )
 from ..core.obs.geo import get_distance, js_round, km_text
@@ -48,7 +48,7 @@ from ..core.obs.model import Observation
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
-    activities_at, children_of, class_by_name, depth_of, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
+    children_of, class_by_name, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
 from ..core import edit_stamp
 from ..core.util import read_number
@@ -82,12 +82,6 @@ REPORTED_ROW = "#fde68a"
 #: Records saved while their server could not be reached, waiting to be sent (core/offline.py).
 WAITING_ROW = "#dbeafe"
 ACTIVITY_COLORS = ["#2563eb", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5", "#e11d48"]
-
-
-def _split(text: str) -> list[str]:
-    import re
-
-    return [w.strip() for w in re.split(r"[,、\n]", text) if w.strip()]
 
 
 def _ms_of(edit: QDateTimeEdit) -> int:
@@ -180,9 +174,8 @@ class ObservationDock(PluginDock):
         self._alert_widget = None
         self._alert_items: list = []
         self.store_set: Optional[StoreSet] = None
-        self.tab = "image"
+        #: The thing whose flow is shown under the list (「流れ」 of a row), None for none.
         self.chosen: Optional[str] = None
-        self.taxon: Optional[list[str]] = None
         self.class_filter: Optional[list[str]] = None
         #: The form's place and what it is about: (lon, lat, the record changed, the thing carried over).
         self.pending: Optional[tuple] = None
@@ -551,22 +544,20 @@ class ObservationDock(PluginDock):
         self.drafts_button.hide()
         b.addWidget(self.drafts_button)
 
-        # The lists.
-        self.tabs = QTabBar()
-        for name in (tr("この画像"), tr("モノ"), tr("分類")):
-            self.tabs.addTab(name)
-        self.tabs.setTabToolTip(1, tr("最終（最後に写った画像の日時）が直近 1 か月のモノ。それより前は ArcGIS ダッシュボードで"))
-        self.tabs.setTabToolTip(2, tr("種別の分類体系（階層・階層名・既知の個体）"))
-        self.tabs.currentChanged.connect(self._tab_changed)
-        b.addWidget(self.tabs)
+        # The list: this image's records only (tsudo 2026-11-18: the 「モノ」 and 「分類」 tabs went; a thing's
+        # flow opens below from its row's 「流れ」, and the classes are edited in 「分類体系の編集」).
         self.class_filter_row = QWidget()
         row = QHBoxLayout(self.class_filter_row)
         row.setContentsMargins(0, 0, 0, 0)
-        # 大分類 (a root of the classification) the lists 「この画像」「モノ」 show.
+        #: How many records the list shows (「この画像 4 件」, of how many when some are left out).
+        self.count_label = plain_label(QLabel())
+        self.count_label.setStyleSheet("font-weight: bold;")
+        row.addWidget(self.count_label)
+        # 大分類 (a root of the classification) the list shows.
         self.root_filter_label = QLabel(tr("大分類"))
         row.addWidget(self.root_filter_label)
         self.root_filter = QComboBox()
-        self.root_filter.setToolTip(tr("一覧（この画像・モノ）に表示する大分類"))
+        self.root_filter.setToolTip(tr("一覧に表示する大分類"))
         self.root_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.root_filter.activated.connect(lambda _i: self.filter_root(self.root_filter.currentData() or None))
         row.addWidget(self.root_filter)
@@ -583,17 +574,10 @@ class ObservationDock(PluginDock):
         self.mine_only.setToolTip(tr("記録者が自分（「記録者」の名前かユーザー名）の記録だけを表示"))
         self.mine_only.toggled.connect(lambda _on: self.render())
         row.addWidget(self.mine_only)
-        self.class_filter_row.hide()
         b.addWidget(self.class_filter_row)
-        # 「モノ」 lists the last month only; what it leaves out (tsudo 2026-11-18: the ArcGIS dashboard has the rest).
-        self.objects_note = plain_label(QLabel())
-        self.objects_note.setWordWrap(True)
-        self.objects_note.setStyleSheet("color: #555555;")
-        self.objects_note.hide()
-        b.addWidget(self.objects_note)
         self.table = QTableWidget()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        # Ctrl / Shift + click chooses several records (or things), for 「一括編集」.
+        # Ctrl / Shift + click chooses several records, for 「一括編集」.
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().hide()
@@ -603,13 +587,12 @@ class ObservationDock(PluginDock):
         self.table.cellDoubleClicked.connect(self._row_double_clicked)
         b.addWidget(self.table, 1)
         self._row_actions: list[tuple[Callable, Optional[Callable]]] = []
-        #: The records each row stands for (a record, or a thing's records), for 「一括編集」.
+        #: The record each row stands for (none for a thing carried over or an area), for 「一括編集」.
         self._row_records: list[list[Observation]] = []
-        #: What each row stands for (`o:` a record, `c:` a thing carried over, `a:` a checked area, `f:` a thing),
-        #: so the rows chosen stay chosen when the list is shown again (a read in a task, a refresh). 「分類」 rows
-        #: have none: there the row chosen is the class shown below, nothing else.
+        #: What each row stands for (`o:` a record, `c:` a thing carried over, `a:` a checked area),
+        #: so the rows chosen stay chosen when the list is shown again (a read in a task, a refresh).
         self._row_keys: list[str] = []
-        #: The list shown last (the tab and the image), whose chosen rows are chosen again.
+        #: The list shown last (the image), whose chosen rows are chosen again.
         self._shown_as: Optional[tuple] = None
         self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
                                         lambda: self.bulk_edit())
@@ -633,19 +616,27 @@ class ObservationDock(PluginDock):
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
         chosen.addStretch(1)
-        # 「ビュー」: the columns of each list (この画像・モノ・分類) and the 大分類 shown, kept under a name (per user).
-        self.views = ListViews(lambda: f"observations-{self.tabs.currentIndex()}", self.table, {
+        # 「ビュー」: the list's columns and the 大分類 shown, kept under a name (per user). The key is the one
+        # 「この画像」 had while there were tabs, so the views saved then still apply.
+        self.views = ListViews("observations-0", self.table, {
             "classes": (lambda: list(self.class_filter) if self.class_filter else None, self._set_class_filter),
         }, None, self)
         chosen.addWidget(self.views.button)
         b.addLayout(chosen)
         b.addWidget(self.form)
 
-        # The chosen thing's flow.
+        # The flow of the thing whose 「流れ」 was pressed (pressed again, or ×, it closes).
         self.flow_box = QGroupBox()
         fl = QVBoxLayout(self.flow_box)
+        head = QHBoxLayout()
         self.flow_summary = plain_label(QLabel())
         self.flow_summary.setWordWrap(True)
+        head.addWidget(self.flow_summary, 1)
+        self.flow_close = QToolButton()
+        self.flow_close.setText("×")
+        self.flow_close.setToolTip(tr("流れを閉じる"))
+        self.flow_close.clicked.connect(lambda: self.choose(None))
+        head.addWidget(self.flow_close, 0, Qt.AlignmentFlag.AlignTop)
         self.flow_strip = FlowStrip()
         self.steps_table = QTableWidget(0, 4)
         self.steps_table.setHorizontalHeaderLabels([tr("期間"), tr("活動"), tr("画像"), tr("移動")])
@@ -657,7 +648,7 @@ class ObservationDock(PluginDock):
         self.steps_table.cellClicked.connect(self._step_clicked)
         self.steps_table.cellDoubleClicked.connect(self._step_double_clicked)
         self.steps_columns = column_menus("observation-steps", self.steps_table, self)
-        fl.addWidget(self.flow_summary)
+        fl.addLayout(head)
         fl.addWidget(self.flow_strip)
         fl.addWidget(self.steps_table)
         self.flow_more = QGroupBox(tr("このモノの詳細"))
@@ -686,80 +677,16 @@ class ObservationDock(PluginDock):
         self.flow_box.hide()
         b.addWidget(self.flow_box)
 
-        # The chosen class (「分類」).
-        self.taxon_box = QGroupBox()
-        tf = QFormLayout(self.taxon_box)
-        self.taxon_name = QLineEdit()
-        self.taxon_parent = QComboBox()
-        self.taxon_levels = QLineEdit()
-        self.taxon_levels.setPlaceholderText("大分類、種別、級")
-        self.taxon_levels.setToolTip(tr("大分類から順に、読点区切り。この分類より下の枝はここが優先"))
-        self.taxon_label = QLineEdit()
-        self.taxon_label.setPlaceholderText("艦名・機番")
-        self.taxon_label.setToolTip(tr("最下位の個体（実名）の呼び方"))
-        self.taxon_members = QLineEdit()
-        self.taxon_members.setToolTip(tr("この分類の既知の個体（実名）、読点区切り。記録時にモノ欄へ入力で分類も自動入力"))
-        tf.addRow(tr("名前"), self.taxon_name)
-        tf.addRow(tr("上位"), self.taxon_parent)
-        tf.addRow(tr("この枝の階層名"), self.taxon_levels)
-        tf.addRow(tr("個体名の呼称"), self.taxon_label)
-        tf.addRow(tr("既知の個体"), self.taxon_members)
-        self.taxon_activities = QLineEdit()
-        self.taxon_activities.setToolTip(tr("この分類以下で選べる活動、読点区切り（大分類に設定すれば大分類ごとに切り替え）。空なら上位の分類、なければ既定の活動"))
-        tf.addRow(tr("活動"), self.taxon_activities)
-        actions = QHBoxLayout()
-        actions.addWidget(self._button(tr("変更"), "", self._apply_taxon))
-        actions.addWidget(self._button(tr("モノ一覧"), "", lambda: self.filter_class(self.taxon)))
-        self.taxon_delete = self._button(tr("削除"), tr("この分類と下位分類の削除（記録の種別は上位の分類に）"), self._delete_taxon)
-        actions.addWidget(self.taxon_delete)
-        tf.addRow(actions)
-        child = QHBoxLayout()
-        self.taxon_child = QLineEdit()
-        self.taxon_child.returnPressed.connect(self._add_child)
-        child.addWidget(self.taxon_child, 1)
-        child.addWidget(self._button(tr("追加"), "", self._add_child))
-        tf.addRow(tr("下位分類の追加"), child)
-        self.taxon_box.hide()
-        b.addWidget(self.taxon_box)
-        self.taxa_box = QWidget()
-        gl = QFormLayout(self.taxa_box)
-        gl.setContentsMargins(0, 0, 0, 0)
-        root = QHBoxLayout()
-        self.taxon_root = QLineEdit()
-        self.taxon_root.setPlaceholderText("船舶・航空機…（「船舶 > 支援船」で階層ごと）")
-        self.taxon_root.returnPressed.connect(self._add_root)
-        root.addWidget(self.taxon_root, 1)
-        root.addWidget(self._button(tr("追加"), "", self._add_root))
-        gl.addRow(tr("大分類の追加"), root)
-        actions = QHBoxLayout()
-        self.editor_button = self._button(tr("編集ツール"), tr("分類体系の編集ツール（ツリーのドラッグで移動・並べ替え、名前の直接編集）"),
-                                          lambda: self.edit_taxonomy and self.edit_taxonomy(self.taxon))
-        self.editor_button.setVisible(self.edit_taxonomy is not None)
-        actions.addWidget(self.editor_button)
-        actions.addWidget(self._button(tr("JSON 保存"), tr("分類体系の JSON 保存（config.json の observationVocabulary.taxonomy に記載可）"), self.save_taxonomy_file))
-        actions.addWidget(self._button(tr("JSON 読み込み"), tr("分類体系の JSON 読み込み（現在の分類と置き換え）"), self.load_taxonomy_file))
-        actions.addWidget(self._button(tr("更新"), tr("保存先から分類体系を読み直し（他の人の編集を反映）"), self.reload_taxonomy))
-        gl.addRow(actions)
-        self.taxa_note = QLabel()
-        self.taxa_note.setWordWrap(True)
-        gl.addRow(self.taxa_note)
-        self.taxa_box.hide()
-        b.addWidget(self.taxa_box)
-
         # 詳細.
         self.more = QGroupBox(tr("詳細"))
         self.more.setCheckable(True)
         self.more.setChecked(False)
         mf = QFormLayout(self.more)
-        self.filter_input = QLineEdit()
-        self.filter_input.setPlaceholderText(tr("名前・ID・種別・活動"))
-        self.filter_input.textChanged.connect(lambda _t: self.render())
         self.deleted_check = QCheckBox(tr("削除済みも表示"))
         self.deleted_check.toggled.connect(lambda _on: self.render())
         self.observer_input = QLineEdit(settings.recorder_setting())
         self.observer_input.setToolTip(tr("記録・更新に付く名前（空欄で認証設定のユーザー名）"))
         self.observer_input.editingFinished.connect(self._observer_typed)
-        mf.addRow(tr("モノの絞り込み"), self.filter_input)
         mf.addRow(self.deleted_check)
         mf.addRow(tr("記録者"), self.observer_input)
         actions = QHBoxLayout()
@@ -767,6 +694,9 @@ class ObservationDock(PluginDock):
         actions.addWidget(self._button(tr("通報…"), tr("注目の記録を区切り文字の 1 行ずつの通報文に（設定ファイルの alertReports）"),
                                        lambda: self.open_alerts()))
         actions.addWidget(self._button(tr("再読み込み"), tr("保存先から記録を再読み込み"), self.reload))
+        self.taxonomy_button = self._button(tr("分類体系の編集…"), tr("分類体系の編集ツール（ツリーのドラッグで移動・並べ替え、名前の直接編集、JSON の保存・読み込み）"),
+                                            lambda: self.edit_taxonomy and self.edit_taxonomy(self.class_filter))
+        actions.addWidget(self.taxonomy_button)
         actions.addWidget(self._button(tr("エクスポート…"), tr("期間・場所・大分類を指定して CSV・JSON に保存（地名なども付加、フォーマットは設定ファイルの observationExports）"),
                                        lambda: self.open_export()))
         actions.addWidget(self._button(tr("レイヤー化"), tr("記録をポイント、モノの流れをラインとして一時レイヤー化（属性テーブル・タイムライン・書き出しで利用可）"),
@@ -2235,8 +2165,9 @@ class ObservationDock(PluginDock):
         self.roles_changed()
 
     def roles_changed(self) -> None:
-        """「ローカル記録の消去…」 (cannot be undone): the administrators' (core/roles.py)."""
+        """「ローカル記録の消去…」 (cannot be undone): the administrators' (core/roles.py); 「分類体系の編集…」 as its dock."""
         self.clear_button.setVisible(self.more.isChecked() and self.allows("observations.clear"))
+        self.taxonomy_button.setVisible(self.more.isChecked() and self.edit_taxonomy is not None and self.allows("分類体系の編集"))
 
     def clear_local(self, deleted_only: Optional[bool] = None) -> Optional[tuple[int, int]]:
         """Removes the local records for good, after asking (`deleted_only` given: without asking)."""
@@ -2288,28 +2219,27 @@ class ObservationDock(PluginDock):
         self.do(self.tr("確認範囲の復元"), lambda b: b.restore_areas(rows))
 
     def choose(self, object_id: Optional[str]) -> None:
-        """Shows a thing's flow under 「モノ」 (None: none)."""
-        self.chosen = object_id
-        self.flow_more.setChecked(False)
-        if object_id and self.tab != "objects":
-            self.tabs.setCurrentIndex(1)
-        else:
-            self.render()
+        """Shows a thing's flow under the list, and its track on the map (None: closes it)."""
+        if object_id != self.chosen:
+            self.flow_more.setChecked(False)
+        self.chosen = object_id or None
+        self.render()
+
+    def toggle_flow(self, object_id: str) -> None:
+        """A row's 「流れ」: its thing's flow shown, or closed when it was shown already."""
+        self.choose(None if self.chosen == object_id else object_id)
 
     def filter_class(self, path: Optional[list[str]]) -> None:
-        """Limits 「モノ」 to a class and below (None: all)."""
+        """Limits the list to a class and below (None: all): 「分類体系の編集」's 「この画像で絞り込み」."""
         self.class_filter = list(path) if path else None
-        if self.class_filter and self.tab != "objects":
-            self.tabs.setCurrentIndex(1)
-        else:
-            self.render()
+        self.render()
 
     def _set_class_filter(self, path) -> None:
         self.class_filter = [str(p) for p in path] if isinstance(path, list) and path else None
         self.render()
 
     def filter_root(self, root: Optional[str]) -> None:
-        """Limits 「この画像」「モノ」 to a 大分類 (None: all), staying on the tab."""
+        """Limits the list to a 大分類 (None: all)."""
         self.class_filter = [root] if root else None
         self.render()
 
@@ -2497,53 +2427,6 @@ class ObservationDock(PluginDock):
 
     # ---- the classification ------------------------------------------------
 
-    def _apply_taxon(self) -> None:
-        path = self.taxon
-        if not path:
-            return
-        parent = path_of(self.taxon_parent.currentData() or "")
-        own = {"levels": _split(self.taxon_levels.text()), "name_label": self.taxon_label.text().strip(),
-               "members": _split(self.taxon_members.text()), "activities": _split(self.taxon_activities.text())}
-        name = self.taxon_name.text()
-
-        def after(to) -> None:
-            if to:
-                self.taxon = to
-                if self.class_filter and within(kind_of(self.class_filter), path):
-                    self.class_filter = None
-
-        self.do(self.tr("分類の変更"), lambda b: b.update_class(path, name=name, parent=parent, **own), after)
-
-    def _delete_taxon(self) -> None:
-        path = self.taxon
-        if not path:
-            return
-        if not self.taxon_delete.property("armed"):
-            self.taxon_delete.setProperty("armed", True)
-            self.taxon_delete.setText(self.tr("再度押すと削除"))
-            return
-        self.taxon = path[:-1] or None
-        if self.class_filter and within(kind_of(self.class_filter), path):
-            self.class_filter = None
-        self.do(self.tr("分類の削除"), lambda b: b.remove_class(path))
-
-    def _add_child(self) -> None:
-        name = self.taxon_child.text().strip()
-        if not name or not self.taxon:
-            return
-        path = [*self.taxon, *path_of(name)]
-        self.taxon = path
-        self.taxon_child.clear()
-        self.do(self.tr("分類の追加"), lambda b: b.add_class(path))
-
-    def _add_root(self) -> None:
-        path = path_of(self.taxon_root.text())
-        if not path:
-            return
-        self.taxon = path
-        self.taxon_root.clear()
-        self.do(self.tr("分類の追加"), lambda b: b.add_class(path))
-
     def save_taxonomy_file(self) -> None:
         """The classification as `config.json`'s `observationVocabulary.taxonomy` writes it."""
         if self.book is None:
@@ -2725,10 +2608,6 @@ class ObservationDock(PluginDock):
 
     # ---- showing ---------------------------------------------------------------
 
-    def _tab_changed(self, index: int) -> None:
-        self.tab = ("image", "objects", "classes")[index]
-        self.render()
-
     def _set_head(self, *names: str) -> None:
         self.table.clear()
         self.table.setColumnCount(len(names))
@@ -2887,10 +2766,15 @@ class ObservationDock(PluginDock):
         box = QWidget()
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
-        for text, tip, slot in buttons:
+        for text, tip, slot, *on in buttons:
             b = QToolButton()
             b.setText(text)
             b.setToolTip(tip)
+            if on:
+                # A toggle (「流れ」): pressed while what it shows is shown.
+                b.setCheckable(True)
+                b.setChecked(bool(on[0]))
+                b.setStyleSheet("QToolButton:checked { background: #dbeafe; border: 1px solid #2563eb; color: #1e3a8a; font-weight: bold; }")
             b.clicked.connect(lambda _on=False, slot=slot: slot())
             lay.addWidget(b)
         return box
@@ -3020,19 +2904,14 @@ class ObservationDock(PluginDock):
         shown = book.records if self.deleted_check.isChecked() else book.living()
         here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: o.object_name)
         objects = book.flows()
-        recent = recent_things(objects)
         taxa = book.taxonomy()
-        self.tabs.setTabText(0, self.tr("この画像 {n}").format(n=len([o for o in here if o.deleted_at is None])))
-        self.tabs.setTabText(1, self.tr("モノ {n}").format(n=len(recent.things)))
-        self.tabs.setTabText(2, self.tr("分類 {n}").format(n=len(taxa)))
+        every = len([o for o in here if o.deleted_at is None])
         # What the form offers.
         self.objects_model.setStringList(list(dict.fromkeys(f.name for f in objects if f.name)))
         kinds = list(dict.fromkeys(k for k in [*book.vocabulary.kinds, *(kind_of(t.path) for t in taxa), *(f.kind for f in objects)] if k))
         self.kinds_model.setStringList(kinds)
         self.area_kinds_model.setStringList(kinds)
         self.activities_model.setStringList(book.activity_words(self.kind_input.text()))
-        self.class_filter_row.setVisible(self.tab != "classes")
-        self.mine_only.setVisible(self.tab == "image")
         self._render_root_filter(taxa)
         deeper = bool(self.class_filter) and len(self.class_filter) > 1
         self.class_filter_label.setText(self.tr("分類: {k} 以下").format(k=kind_of(self.class_filter)) if deeper else "")
@@ -3042,16 +2921,14 @@ class ObservationDock(PluginDock):
         if self.mine_only.isChecked():
             mine = self.my_names()
             here = [o for o in here if is_mine(o.recorded_by, mine)]
-        shown_as = (self.tab, image.id if image is not None and self.tab == "image" else None)
+        listed = len([o for o in here if o.deleted_at is None])
+        self.count_label.setText(self.tr("この画像 {n} 件").format(n=every) if listed == every else
+                                 self.tr("この画像 {n} / {all} 件").format(n=listed, all=every))
+        self.count_label.setToolTip(self.tr("この画像の記録の件数（大分類・「自分の記録のみ」で絞り込み中は 表示 / 全体）"))
+        shown_as = ("image", image.id if image is not None else None)
         kept = self._chosen_rows() if shown_as == self._shown_as else None
         scrolled = self.table.verticalScrollBar().value()
-        if self.tab == "image":
-            self._render_image(here, carried, inside)
-        elif self.tab == "objects":
-            self._render_objects(objects, recent)
-        else:
-            self._render_classes(taxa, objects)
-        self._render_objects_note(recent)
+        self._render_image(here, carried, inside)
         self._shown_as = shown_as
         if kept is not None:
             self._choose_rows(*kept)
@@ -3059,7 +2936,6 @@ class ObservationDock(PluginDock):
             self.table.updateGeometries()
             self.table.verticalScrollBar().setValue(scrolled)
         self._render_flow()
-        self._render_taxon(taxa, objects)
         self.many.follow_book()
         self._show_offline()
         self.changed.emit()
@@ -3116,7 +2992,8 @@ class ObservationDock(PluginDock):
         for o in here:
             gone = o.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した記録の復元"), lambda o=o: self.restore([o]))) if gone else \
-                self._small((tr("流れ"), tr("このモノの流れの表示"), lambda o=o: self.choose(o.object_id)))
+                self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
+                             lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, self._made_by(o), local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
                       style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
@@ -3162,79 +3039,10 @@ class ObservationDock(PluginDock):
         if not self.active:
             self.set_active(True, quiet=True)
 
-    def _render_objects(self, objects: list[ObjectFlow], recent: RecentThings) -> None:
-        tr = self.tr
-        self._set_head(tr("モノ"), tr("種別"), tr("最新"), tr("初出"), tr("最終"), tr("画像"))
-        q = self.filter_input.text().strip().lower()
-        taxa = self.book.taxonomy()
-        # The last month (and the thing chosen, when older: its flow is shown below, and a click on its row closes it).
-        listed = [f for f in objects if recent.since is not None and f.last >= recent.since or f.object_id == self.chosen]
-        if self.class_filter:
-            listed = [f for f in listed if self._shown_kind(f.kind, taxa)]
-        if q:
-            listed = [f for f in listed if any(q in v.lower() for v in [f.name, f.object_id, f.kind, *(o.activity for o in f.observations)])]
-        waiting = self.waiting_ids()
-        for f in listed:
-            self._row([f.name, f.kind, f.activity if f.present else tr("不在"), local_time(f.first), local_time(f.last), f.seen],
-                      lambda f=f: self._thing_clicked(f.object_id), lambda f=f: self._fit_flow(f),
-                      selected=f.object_id == self.chosen, records=f.observations,
-                      reported=any(o.id in self.reported for o in f.observations if o.deleted_at is None),
-                      waiting=any(o.id in waiting for o in f.observations), key=f"f:{f.object_id}")
-        if self.table.rowCount() == 0:
-            self._row([tr("該当するモノなし") if objects else tr("記録なし")])
-
-    def _render_objects_note(self, recent: RecentThings) -> None:
-        """What 「モノ」 lists: the things last seen since a month ago, the older ones left to the ArcGIS dashboard."""
-        show = self.tab == "objects" and recent.since is not None
-        self.objects_note.setVisible(show)
-        if not show:
-            return
-        tr = self.tr
-
-        def day(t: int) -> str:
-            return local_time(t)[:10]
-
-        if recent.today:
-            text = tr("最終が {since} 以降のモノ（直近 1 か月）").format(since=day(recent.since))
-        else:
-            text = tr("最終が {since} 以降のモノ（この 1 か月は記録がないため、最後の記録の {until} から 1 か月）").format(
-                since=day(recent.since), until=day(recent.until))
-        if recent.older:
-            text += tr("。それより前の {n} 件は ArcGIS ダッシュボードで").format(n=recent.older)
-        self.objects_note.setText(text)
-
-    def _render_classes(self, taxa, objects: list[ObjectFlow]) -> None:
-        tr = self.tr
-        self._set_head(tr("分類"), tr("階層"), tr("モノ"), tr("記録"))
-        records = self.book.living()
-        for t in taxa:
-            depth = len(t.path) - 1
-            name = f"{'　' * depth}{'└ ' if depth else ''}{t.path[depth]}"
-            things = sum(1 for f in objects if within(f.kind, t.path))
-            count = sum(1 for o in records if within(o.kind, t.path))
-            same = bool(self.taxon) and kind_of(self.taxon) == kind_of(t.path)
-            self._row([name, level_name(taxa, t.path, depth), things, count],
-                      lambda t=t: self._choose_taxon(None if self.taxon and kind_of(self.taxon) == kind_of(t.path) else list(t.path)),
-                      lambda t=t: self.filter_class(list(t.path)), selected=same)
-        if self.table.rowCount() == 0:
-            self._row([tr("分類なし（下の「大分類の追加」から）")])
-
-    def _thing_clicked(self, object_id: str) -> None:
-        """A thing's row clicked under 「モノ」: its flow shown, or closed (and the row let go) when it was shown already."""
-        if self.chosen == object_id:
-            self.table.clearSelection()
-            self.choose(None)
-        else:
-            self.choose(object_id)
-
-    def _choose_taxon(self, path: Optional[list[str]]) -> None:
-        self.taxon = path
-        self.render()
-
     def _render_flow(self) -> None:
         book = self.book
         rows = [o for o in book.living() if o.object_id == self.chosen] if self.chosen else []
-        show = self.tab == "objects" and bool(rows)
+        show = bool(rows)
         self.flow_box.setVisible(show)
         if not show:
             return
@@ -3297,40 +3105,6 @@ class ObservationDock(PluginDock):
         except Exception:  # noqa: BLE001 (only a hint)
             pass
 
-    def _render_taxon(self, taxa, objects: list[ObjectFlow]) -> None:
-        classes = self.tab == "classes"
-        self.taxa_box.setVisible(classes)
-        path = self.taxon if self.taxon and find(taxa, self.taxon) else None
-        self.taxon_box.setVisible(classes and path is not None)
-        if not classes:
-            return
-        self.taxa_note.setText(self.tr("保存先: {s}・最大 {d} 階層（行のダブルクリックでその分類のモノ一覧）").format(
-            s=self.book.taxonomy_store.label, d=depth_of(taxa)))
-        if path is None:
-            return
-        t = find(taxa, path)
-        things = sum(1 for f in objects if within(f.kind, path))
-        self.taxon_box.setTitle(f"{kind_of(path)}（{level_name(taxa, path, len(path) - 1) or f'第 {len(path)} 階層'}・モノ {things}）")
-        if self.taxon_box.property("path") != kind_of(path):
-            self.taxon_box.setProperty("path", kind_of(path))
-            self.taxon_name.setText(path[-1])
-            self.taxon_levels.setText("、".join(t.levels or []))
-            self.taxon_label.setText(t.name_label or "")
-            self.taxon_members.setText("、".join(t.members or []))
-            self.taxon_activities.setText("、".join(t.activities or []))
-            self.taxon_child.clear()
-            self.taxon_delete.setProperty("armed", False)
-            self.taxon_delete.setText(self.tr("削除"))
-        self.taxon_child.setPlaceholderText(f"{level_name(taxa, path, len(path)) or '下位分類'}の名前")
-        above, at = activities_at(taxa, path[:-1])
-        self.taxon_activities.setPlaceholderText(f"{'、'.join(above)}（{at[-1]}）" if above else "、".join(self.book.vocabulary.activities) + "（既定）")
-        self.taxon_parent.clear()
-        self.taxon_parent.addItem(self.tr("（なし: 大分類）"), "")
-        for x in taxa:
-            if not within(kind_of(x.path), path):
-                self.taxon_parent.addItem(kind_of(x.path), kind_of(x.path))
-        self.taxon_parent.setCurrentIndex(max(0, self.taxon_parent.findData(kind_of(path[:-1]))))
-
     # ---- the overlay ---------------------------------------------------------
 
     def scene(self) -> Scene:
@@ -3348,7 +3122,7 @@ class ObservationDock(PluginDock):
         def color(kind: str) -> str:
             return color_of((path_of(kind) or [""])[0], kinds)
 
-        if self.chosen and self.tab == "objects":
+        if self.chosen:
             rows = [o for o in book.living() if o.object_id == self.chosen]
             if rows:
                 flow = flow_of(rows)

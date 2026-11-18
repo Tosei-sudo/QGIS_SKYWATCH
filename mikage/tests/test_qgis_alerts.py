@@ -285,10 +285,6 @@ def test_reported_records_are_highlighted_in_the_table_and_on_the_map(plugin):
     assert colored() == {"船A": False, "船B": True}
     assert halos() == {a.id: False, b.id: True}
     assert "通報済み" in dock.table.item(1, 0).toolTip()
-    # A thing's row (モノ) too.
-    dock.tabs.setCurrentIndex(1)
-    assert colored() == {"船A": False, "船B": True}
-    dock.tabs.setCurrentIndex(0)
     # Reported from 「通報」: highlighted at once.
     dialog = dock.add_to_alerts([a])
     assert wait_for(lambda: dialog.lines_table.rowCount() == 1)

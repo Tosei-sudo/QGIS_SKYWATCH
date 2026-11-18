@@ -218,7 +218,7 @@ def test_every_list_of_the_docks_has_the_menu(plugin):  # noqa: F811
     assert kept[-1]["title"] == first
 
 
-def test_each_list_of_the_observations_dock_keeps_its_own(plugin):  # noqa: F811
+def test_the_observations_list_keeps_its_views(plugin):  # noqa: F811
     p, _iface, dock, _ = plugin
     book = dock.book
     book.add(139.7, 35.3, object="船A", kind="船舶 > 支援船", activity="航行")
@@ -226,13 +226,10 @@ def test_each_list_of_the_observations_dock_keeps_its_own(plugin):  # noqa: F811
     dock.render()
     settle()
     views = dock.views
+    # The key 「この画像」 had while the dock had tabs (until 2026-11-18), so the views saved then still apply.
     assert views.key == "observations-0"
     first = [c["title"] for c in views.columns()]
     assert views.set_hidden(first[1], True)
-    dock.tabs.setCurrentIndex(1)
-    settle()
-    assert views.key == "observations-1" and not any(c["hidden"] for c in views.columns())
-    dock.tabs.setCurrentIndex(0)
     dock.render()
     settle()
     assert [c["hidden"] for c in views.columns()][:2] == [False, True]
