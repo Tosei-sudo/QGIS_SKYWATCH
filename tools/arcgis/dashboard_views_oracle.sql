@@ -2,8 +2,12 @@
 -- MIKAGE ダッシュボード用のビュー（Oracle 19c 以降・ArcSDE（エンタープライズ ジオデータベース）・ST_Geometry）
 --
 -- ArcGIS Dashboards だけでは数えられないもの（依頼単位の件数・撮像の年間上限の残り・定点の
--- 未撮像の日数・モノごとの最新の記録・分担ごとの記録の件数）を、プラグインが書くテーブルから作る。
--- 作り方・ダッシュボードの構成は docs/arcgis-dashboards.md。
+-- 未撮像の日数・モノごとの最新の記録・分担ごとの記録の件数・地名ごとの平常との差）を、
+-- プラグインが書くテーブルから作る。作り方・ダッシュボードの構成は docs/arcgis-dashboards.md。
+--
+-- 地名（7 の地名の列と 10〜13）は、観測記録の NAMED_AREA_OBJECTID（属性ルールが入れる、記録を含む
+-- いちばん小さい地名の OBJECTID。docs/arcgis-setup.md「属性ルール」）で TBL_NAMED_AREA を引く。
+-- 空間の結合はしない。ルールを入れる前の記録は地名なし（地名のビューでは数えない）。
 --
 -- 実行: データ所有者（create_tables.py でテーブルを作ったユーザー、例 MIKAGE）で接続し、
 --       SQL*Plus か SQL Developer でこのファイルを流す（何度流してもよい: CREATE OR REPLACE）。
@@ -28,8 +32,10 @@
 -- create_tables.py をもう一度実行して属性を足してから流す。
 --
 -- 権限（閲覧用のロール・ユーザーに）:
---   GRANT SELECT ON VW_PLAN_HISTORY TO MIKAGE_VIEWER;  ... 下の 9 本すべて
+--   GRANT SELECT ON VW_PLAN_HISTORY TO MIKAGE_VIEWER;  ... 下の 13 本すべて
 -- 消すとき:
+--   DROP VIEW VW_NAMED_AREA_STATUS; DROP VIEW VW_NAMED_AREA_THING; DROP VIEW VW_NAMED_AREA_WEEK;
+--   DROP VIEW VW_ALERT_LOG;
 --   DROP VIEW VW_OBS_IMAGE_WORK; DROP VIEW VW_OBS_THING; DROP VIEW VW_OBS_RECORD;
 --   DROP VIEW VW_PLAN_FIXED_POINT; DROP VIEW VW_PLAN_QUOTA_MONTH; DROP VIEW VW_PLAN_QUOTA_USAGE;
 --   DROP VIEW VW_PLAN_SHOT; DROP VIEW VW_PLAN_REQUEST_DAY; DROP VIEW VW_PLAN_HISTORY;
@@ -530,7 +536,8 @@ FROM g;
 --    分類のパス（船舶 > 貨物船 > コンテナ船）を大分類・2 段目・いちばん下に分け、
 --    見た日（画像の撮像日時、なければ記録した日時。プラグインの「流れ」と同じ）と地名を付ける。
 --    地名は観測記録の NAMED_AREA_OBJECTID（属性ルールで入れる）で TBL_NAMED_AREA を引く。
---    属性ルールを入れていないなら、LEFT JOIN と a. の 4 列を消す（PLACE_LABEL は '（地名なし）' に）。
+--    PLACE_STATE（地名の点検用）: 地名あり・地名なし（値が空: どの地名にも入らないか、ルールを入れる前の記録）・
+--    地名が見つからない（値の OBJECTID の地名がない: 地名を入れ直した）・無効な地名（後から ACTIVE を 0 にした）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_RECORD AS
 WITH clock AS (
@@ -569,7 +576,13 @@ SELECT
     a.NAME                                                             AS PLACE_NAME,
     a.KIND                                                             AS PLACE_KIND,
     a.NAMED_AREA_ID,
-    NVL(a.NAME, '（地名なし）')                                        AS PLACE_LABEL
+    NVL(a.NAME, '（地名なし）')                                        AS PLACE_LABEL,
+    CASE
+        WHEN o.NAMED_AREA_OBJECTID IS NULL THEN '地名なし'
+        WHEN a.OBJECTID IS NULL            THEN '地名が見つからない'
+        WHEN a.ACTIVE = 0                  THEN '無効な地名'
+        ELSE '地名あり'
+    END                                                                AS PLACE_STATE
 FROM (
     SELECT x.*,
            CAST(NVL(x.IMAGE_TIME, x.CREATED_AT) AS DATE)                    AS SEEN_AT,
@@ -588,6 +601,7 @@ LEFT JOIN TBL_NAMED_AREA a ON a.OBJECTID = o.NAMED_AREA_OBJECTID;
 --    最後の記録 = 見た日時の新しい順（同じなら記録した日時・OBJECTID）。名前・分類は最後に書かれたもの
 --    （プラグインは同じ系統でより細かい分類があればそれを使う。ここは最後に書かれたものだけ）。
 --    IN_LAST_MONTH: 直近 1 か月（今日の 1 か月前の同じ日から）に見ていれば 1。
+--    LAST_NAMED_AREA_OBJECTID: 最後の記録の地名（地名の台帳 VW_NAMED_AREA_THING・VW_NAMED_AREA_STATUS が使う）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_THING AS
 WITH clock AS (
@@ -609,6 +623,8 @@ r AS (
         v.PRESENT_LABEL,
         v.PLACE_NAME,
         v.PLACE_LABEL,
+        v.NAMED_AREA_OBJECTID,
+        v.NAMED_AREA_ID,
         v.IMAGE_ID,
         v.IMAGE_NAME,
         v.OBSERVER,
@@ -647,6 +663,8 @@ SELECT
     r.IMAGE_COUNT,
     r.PLACE_NAME                                                       AS LAST_PLACE_NAME,
     r.PLACE_LABEL                                                      AS LAST_PLACE_LABEL,
+    r.NAMED_AREA_OBJECTID                                              AS LAST_NAMED_AREA_OBJECTID,
+    r.NAMED_AREA_ID                                                    AS LAST_NAMED_AREA_ID,
     r.IMAGE_ID                                                         AS LAST_IMAGE_ID,
     r.IMAGE_NAME                                                       AS LAST_IMAGE_NAME,
     r.OBSERVER                                                         AS LAST_OBSERVER,
@@ -720,3 +738,302 @@ CROSS JOIN clock c
 LEFT JOIN img  ON img.IMAGE_ID = a.IMAGE_ID
 LEFT JOIN area ON area.IMAGE_ID = a.IMAGE_ID
 LEFT JOIN mine ON mine.OBJECTID = a.OBJECTID;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 10. VW_ALERT_LOG（通報記録）: 通報記録 1 行 = 1 行・形状なし
+--     通報した記録（OBS_ID）の地名・モノ・分類を付ける。記録を後で消したものは地名なし。
+--     1 つの記録は通報記録に 1 回だけ入る（プラグインは通報済みの記録を選び直さない）ので、
+--     件数 = 通報した記録の数。BATCH_ID は 1 回の送信（まとめて送った記録は同じ）。
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW VW_ALERT_LOG AS
+WITH clock AS (
+    SELECT TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) + 9 / 24) AS TODAY FROM DUAL
+)
+SELECT
+    l.OBJECTID,
+    l.OBS_ID,
+    l.REPORT_NAME,
+    l.TEXT                                                             AS REPORT_TEXT,
+    l.REPORTED_AT,
+    TRUNC(CAST(l.REPORTED_AT AS DATE) + 9 / 24) - 9 / 24               AS REPORTED_DATE,
+    c.TODAY - TRUNC(CAST(l.REPORTED_AT AS DATE) + 9 / 24)              AS DAYS_AGO,
+    l.REPORTED_BY,
+    l.BATCH_ID,
+    l.MANUAL,
+    CASE WHEN l.MANUAL = 1 THEN '手動' ELSE '条件' END                 AS MANUAL_LABEL,
+    v.OBJECT_ID,
+    v.OBJECT_NAME,
+    v.ROOT_KIND,
+    v.LEAF_KIND,
+    v.ACTIVITY,
+    v.CONFIDENCE,
+    v.SEEN_AT,
+    v.IMAGE_NAME,
+    v.NAMED_AREA_OBJECTID,
+    v.NAMED_AREA_ID,
+    v.PLACE_NAME,
+    v.PLACE_KIND,
+    NVL(v.PLACE_LABEL, '（記録なし）')                                 AS PLACE_LABEL
+FROM TBL_ALERT_LOG l
+CROSS JOIN clock c
+LEFT JOIN VW_OBS_RECORD v ON v.OBS_ID = l.OBS_ID;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 11. VW_NAMED_AREA_WEEK（地名 × 週）: 地名 1 つ・7 日 1 区間 = 1 行（直近 26 区間）・形状なし
+--     区間は今日で終わる 7 日ずつ（WEEKS_AGO 0 = 今日までの 7 日、1 = その前の 7 日 …）。暦の週にしないのは、
+--     月曜の朝に「今週」が少なく見えないようにするため。
+--     数えるのは「不在」以外の記録（RECORDS）と、その中のモノの数（THINGS）。記録は 1 つの地名
+--     （含むうちいちばん小さいもの）にだけ数える: 湾の中の港の記録は港に数え、湾には足さない。
+--     平常との差はプラグインの「活動の推移」（core/dashboard.py の trends）と同じ決め方:
+--       NORMAL = 前の 8 区間の平均、ばらつき = 標準偏差（平均の平方根・1 より小さければそちら）、
+--       SCORE = (RECORDS - NORMAL) / ばらつき、急に増えた = SCORE が 2 以上・3 件以上・平常より多い。
+--     急に減った（SCORE が -2 以下・平常が 3 件以上）はダッシュボード用に足したもの（プラグインにはない）。
+--     UPPER_LINE: これを超えると「急に増えた」になる目安（NORMAL + 2 × ばらつき。系列グラフの線用）。
+--     USUAL_RECORDS・SURGE_RECORDS: RECORDS を「急に増えた」区間とそれ以外に分けたもの（積み上げると、
+--     急に増えた区間の棒だけ別の色になる）。
+--     OBJECTID = 地名の OBJECTID × 100 + WEEKS_AGO。
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW VW_NAMED_AREA_WEEK AS
+WITH clock AS (
+    SELECT TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) + 9 / 24) AS TODAY FROM DUAL
+),
+weeks AS (
+    SELECT LEVEL - 1 AS WEEKS_AGO FROM DUAL CONNECT BY LEVEL <= 26 + 8
+),
+n AS (
+    SELECT
+        v.NAMED_AREA_OBJECTID,
+        FLOOR(v.DAYS_AGO / 7)                                          AS WEEKS_AGO,
+        COUNT(*)                                                       AS RECORDS,
+        COUNT(DISTINCT v.OBJECT_ID)                                    AS THINGS
+    FROM VW_OBS_RECORD v
+    WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
+      AND NVL(v.PRESENT, 1) <> 0
+      AND v.DAYS_AGO BETWEEN 0 AND (26 + 8) * 7 - 1
+    GROUP BY v.NAMED_AREA_OBJECTID, FLOOR(v.DAYS_AGO / 7)
+),
+g AS (
+    SELECT
+        a.OBJECTID                                                     AS AREA_OBJECTID,
+        a.NAMED_AREA_ID,
+        a.NAME,
+        a.KIND,
+        a.ACTIVE,
+        w.WEEKS_AGO,
+        c.TODAY - 7 * w.WEEKS_AGO                                      AS LAST_DAY,
+        NVL(n.RECORDS, 0)                                              AS RECORDS,
+        NVL(n.THINGS, 0)                                               AS THINGS,
+        AVG(NVL(n.RECORDS, 0)) OVER (
+            PARTITION BY a.OBJECTID ORDER BY w.WEEKS_AGO DESC ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS NORMAL,
+        VARIANCE(NVL(n.RECORDS, 0)) OVER (
+            PARTITION BY a.OBJECTID ORDER BY w.WEEKS_AGO DESC ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS VAR
+    FROM TBL_NAMED_AREA a
+    CROSS JOIN weeks w
+    CROSS JOIN clock c
+    LEFT JOIN n ON n.NAMED_AREA_OBJECTID = a.OBJECTID AND n.WEEKS_AGO = w.WEEKS_AGO
+),
+s AS (
+    SELECT
+        g.AREA_OBJECTID,
+        g.NAMED_AREA_ID,
+        g.NAME,
+        g.KIND,
+        g.ACTIVE,
+        g.WEEKS_AGO,
+        g.LAST_DAY,
+        g.RECORDS,
+        g.THINGS,
+        g.NORMAL,
+        SQRT(GREATEST(NVL(g.VAR, 0), g.NORMAL, 1))                     AS SPREAD
+    FROM g
+    WHERE g.WEEKS_AGO < 26
+),
+t AS (
+    SELECT
+        s.*,
+        (s.RECORDS - s.NORMAL) / s.SPREAD                              AS SCORE,
+        CASE WHEN s.RECORDS >= 3 AND s.RECORDS > s.NORMAL
+                  AND (s.RECORDS - s.NORMAL) / s.SPREAD >= 2 THEN 1 ELSE 0 END AS IS_SURGE
+    FROM s
+)
+SELECT
+    CAST(t.AREA_OBJECTID * 100 + t.WEEKS_AGO AS NUMBER(38))            AS OBJECTID,
+    t.AREA_OBJECTID                                                    AS NAMED_AREA_OBJECTID,
+    t.NAMED_AREA_ID,
+    t.NAME                                                             AS PLACE_NAME,
+    t.KIND                                                             AS PLACE_KIND,
+    t.ACTIVE,
+    t.WEEKS_AGO,
+    t.LAST_DAY - 6 - 9 / 24                                            AS WEEK_START_DATE,
+    t.LAST_DAY - 9 / 24                                                AS WEEK_END_DATE,
+    TO_CHAR(t.LAST_DAY - 6, 'MM/DD') || '〜' || TO_CHAR(t.LAST_DAY, 'MM/DD') AS WEEK_TEXT,
+    t.RECORDS,
+    t.THINGS,
+    CASE WHEN t.IS_SURGE = 1 THEN 0 ELSE t.RECORDS END                 AS USUAL_RECORDS,
+    CASE WHEN t.IS_SURGE = 1 THEN t.RECORDS ELSE 0 END                 AS SURGE_RECORDS,
+    ROUND(t.NORMAL, 1)                                                 AS NORMAL,
+    ROUND(t.NORMAL + 2 * t.SPREAD, 1)                                  AS UPPER_LINE,
+    ROUND(t.RECORDS - t.NORMAL, 1)                                     AS CHANGE,
+    ROUND(t.SCORE, 2)                                                  AS SCORE,
+    CASE
+        WHEN t.RECORDS = 0 AND t.NORMAL = 0          THEN '記録なし'
+        WHEN t.IS_SURGE = 1                          THEN '急に増えた'
+        WHEN t.NORMAL >= 3 AND t.SCORE <= -2         THEN '急に減った'
+        ELSE '平常'
+    END                                                                AS TREND_CLASS
+FROM t;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 12. VW_NAMED_AREA_THING（地名 × モノ）: 地名 1 つ・モノ 1 つ = 1 行・ポイント（その地名での最後の記録）
+--     その地名で見たモノを、そこで最初・最後に見た日時と回数で並べる。モノの名前・分類は VW_OBS_THING
+--     （最後に書かれたもの）。WHERE_NOW: モノの最後の記録（どの地名でも）がこの地名か。
+--       ここ（1 か月以内）・ここ（1 か月より前）・不在を確認（最後の記録がここの「不在」）・その後ほかで見た
+--     （「ほか」には地名の外も入る）。
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW VW_NAMED_AREA_THING AS
+WITH clock AS (
+    SELECT TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) + 9 / 24) AS TODAY FROM DUAL
+),
+r AS (
+    SELECT
+        v.OBJECTID,
+        v.SHAPE,
+        v.NAMED_AREA_OBJECTID,
+        v.OBJECT_ID,
+        v.SEEN_AT,
+        v.SEEN_DATE,
+        v.ACTIVITY,
+        v.PRESENT_LABEL,
+        ROW_NUMBER() OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID
+                           ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC)        AS RN,
+        MIN(v.SEEN_AT) OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                 AS FIRST_SEEN_AT,
+        COUNT(*) OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                       AS RECORD_COUNT,
+        SUM(CASE WHEN v.PRESENT = 1 THEN 1 ELSE 0 END)
+            OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                            AS SEEN_COUNT,
+        COUNT(DISTINCT CASE WHEN v.PRESENT = 1 THEN v.SEEN_DATE END)
+            OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                            AS SEEN_DAYS
+    FROM VW_OBS_RECORD v
+    WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
+      AND v.OBJECT_ID IS NOT NULL
+)
+SELECT
+    r.OBJECTID,
+    r.SHAPE,
+    r.NAMED_AREA_OBJECTID,
+    a.NAMED_AREA_ID,
+    a.NAME                                                             AS PLACE_NAME,
+    a.KIND                                                             AS PLACE_KIND,
+    r.OBJECT_ID,
+    t.THING_NAME,
+    t.ROOT_KIND,
+    t.LEAF_KIND,
+    r.FIRST_SEEN_AT,
+    TRUNC(r.FIRST_SEEN_AT + 9 / 24) - 9 / 24                           AS FIRST_SEEN_DATE,
+    r.SEEN_AT                                                          AS LAST_SEEN_AT,
+    r.SEEN_DATE                                                        AS LAST_SEEN_DATE,
+    c.TODAY - (r.SEEN_DATE + 9 / 24)                                   AS DAYS_SINCE_SEEN,
+    r.RECORD_COUNT,
+    r.SEEN_COUNT,
+    r.SEEN_DAYS,
+    r.ACTIVITY                                                         AS LAST_ACTIVITY,
+    r.PRESENT_LABEL                                                    AS LAST_PRESENT_LABEL,
+    t.LAST_SEEN_AT                                                     AS THING_LAST_SEEN_AT,
+    t.LAST_PLACE_LABEL                                                 AS THING_LAST_PLACE,
+    CASE WHEN t.LAST_NAMED_AREA_OBJECTID = r.NAMED_AREA_OBJECTID THEN 1 ELSE 0 END AS IS_LAST_PLACE,
+    CASE
+        WHEN NVL(t.LAST_NAMED_AREA_OBJECTID, -1) <> r.NAMED_AREA_OBJECTID THEN 'その後ほかで見た'
+        WHEN t.LAST_PRESENT = 0                                            THEN '不在を確認'
+        WHEN t.IN_LAST_MONTH = 1                                           THEN 'ここ（1 か月以内）'
+        ELSE 'ここ（1 か月より前）'
+    END                                                                AS WHERE_NOW
+FROM r
+JOIN TBL_NAMED_AREA a ON a.OBJECTID = r.NAMED_AREA_OBJECTID
+JOIN VW_OBS_THING t ON t.OBJECT_ID = r.OBJECT_ID
+CROSS JOIN clock c
+WHERE r.RN = 1;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 13. VW_NAMED_AREA_STATUS（地名の様子）: 地名 1 つ = 1 行・ポリゴン（TBL_NAMED_AREA の範囲）
+--     直近 7 日と平常との差（VW_NAMED_AREA_WEEK の WEEKS_AGO = 0）、30 日の件数・モノの数・多い大分類、
+--     最後に見た日、いまいそうなモノの数（THINGS_LAST_HERE: 最後に見たのがここで 1 か月以内・不在でない）、
+--     30 日の通報（通報した記録の数）。無効の地名（ACTIVE = 0）も出す（ACTIVE_LABEL で絞る）。
+--     PLACE_LABEL は「地名（管理番号）」: 同じ名前の地名があっても選び分けられるように。
+-- ---------------------------------------------------------------------------------------------
+CREATE OR REPLACE VIEW VW_NAMED_AREA_STATUS AS
+WITH clock AS (
+    SELECT TRUNC(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) + 9 / 24) AS TODAY FROM DUAL
+),
+rec AS (
+    SELECT
+        v.NAMED_AREA_OBJECTID,
+        COUNT(*)                                                       AS RECORDS_TOTAL,
+        SUM(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN 1 ELSE 0 END) AS RECORDS_30D,
+        COUNT(DISTINCT CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN v.OBJECT_ID END) AS THINGS_30D,
+        STATS_MODE(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN v.ROOT_KIND END) AS TOP_KIND_30D,
+        MIN(v.SEEN_AT)                                                 AS FIRST_SEEN_AT,
+        MAX(v.SEEN_AT)                                                 AS LAST_SEEN_AT
+    FROM VW_OBS_RECORD v
+    WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
+    GROUP BY v.NAMED_AREA_OBJECTID
+),
+here AS (
+    SELECT t.LAST_NAMED_AREA_OBJECTID AS NAMED_AREA_OBJECTID, COUNT(*) AS THINGS_LAST_HERE
+    FROM VW_OBS_THING t
+    WHERE t.LAST_NAMED_AREA_OBJECTID IS NOT NULL
+      AND t.IN_LAST_MONTH = 1
+      AND NVL(t.LAST_PRESENT, 1) <> 0
+    GROUP BY t.LAST_NAMED_AREA_OBJECTID
+),
+alert AS (
+    SELECT
+        l.NAMED_AREA_OBJECTID,
+        COUNT(DISTINCT CASE WHEN l.DAYS_AGO BETWEEN 0 AND 29 THEN l.OBS_ID END) AS ALERTS_30D,
+        MAX(l.REPORTED_AT)                                             AS LAST_ALERT_AT
+    FROM VW_ALERT_LOG l
+    WHERE l.NAMED_AREA_OBJECTID IS NOT NULL
+    GROUP BY l.NAMED_AREA_OBJECTID
+),
+wk AS (
+    SELECT w.NAMED_AREA_OBJECTID, w.RECORDS, w.THINGS, w.NORMAL, w.UPPER_LINE, w.CHANGE, w.SCORE, w.TREND_CLASS
+    FROM VW_NAMED_AREA_WEEK w
+    WHERE w.WEEKS_AGO = 0
+)
+SELECT
+    a.OBJECTID,
+    a.SHAPE,
+    a.NAMED_AREA_ID,
+    a.NAME                                                             AS PLACE_NAME,
+    a.NAME_EN,
+    a.KIND                                                             AS PLACE_KIND,
+    TO_CHAR(a.NAME) || CASE WHEN a.NAMED_AREA_ID IS NOT NULL
+                            THEN '（' || TO_CHAR(a.NAMED_AREA_ID) || '）' END AS PLACE_LABEL,
+    a.ACTIVE,
+    CASE WHEN a.ACTIVE = 0 THEN '無効' ELSE '有効' END                 AS ACTIVE_LABEL,
+    NVL(wk.RECORDS, 0)                                                 AS LAST_7D,
+    NVL(wk.THINGS, 0)                                                  AS THINGS_7D,
+    NVL(wk.NORMAL, 0)                                                  AS NORMAL_7D,
+    wk.UPPER_LINE                                                      AS UPPER_7D,
+    NVL(wk.CHANGE, 0)                                                  AS CHANGE_7D,
+    NVL(wk.SCORE, 0)                                                   AS TREND_SCORE,
+    NVL(wk.TREND_CLASS, '記録なし')                                    AS TREND_CLASS,
+    NVL(rec.RECORDS_TOTAL, 0)                                          AS RECORDS_TOTAL,
+    NVL(rec.RECORDS_30D, 0)                                            AS RECORDS_30D,
+    NVL(rec.THINGS_30D, 0)                                             AS THINGS_30D,
+    rec.TOP_KIND_30D,
+    NVL(here.THINGS_LAST_HERE, 0)                                      AS THINGS_LAST_HERE,
+    rec.FIRST_SEEN_AT,
+    rec.LAST_SEEN_AT,
+    TRUNC(rec.LAST_SEEN_AT + 9 / 24) - 9 / 24                          AS LAST_SEEN_DATE,
+    c.TODAY - TRUNC(rec.LAST_SEEN_AT + 9 / 24)                         AS DAYS_SINCE_SEEN,
+    NVL(alert.ALERTS_30D, 0)                                           AS ALERTS_30D,
+    alert.LAST_ALERT_AT
+FROM TBL_NAMED_AREA a
+CROSS JOIN clock c
+LEFT JOIN wk    ON wk.NAMED_AREA_OBJECTID = a.OBJECTID
+LEFT JOIN rec   ON rec.NAMED_AREA_OBJECTID = a.OBJECTID
+LEFT JOIN here  ON here.NAMED_AREA_OBJECTID = a.OBJECTID
+LEFT JOIN alert ON alert.NAMED_AREA_OBJECTID = a.OBJECTID;
