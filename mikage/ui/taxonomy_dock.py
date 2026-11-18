@@ -197,7 +197,7 @@ class TaxonomyDock(PluginDock):
         f.addRow(self.photos_box)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("変更"), "", self.apply))
-        actions.addWidget(self._button(tr("モノ一覧"), tr("この分類以下のモノを観測記録の一覧に表示"), self._things))
+        actions.addWidget(self._button(tr("この画像で絞り込み"), tr("観測記録の一覧（この画像）を、この分類以下の記録だけに"), self._filter_obs))
         actions.addWidget(self._button(tr("下位分類の追加"), tr("下位分類の追加（Insert）"), self._add_below))
         self.delete_button = self._button(tr("削除"), "", self._delete_key)
         actions.addWidget(self.delete_button)
@@ -390,7 +390,8 @@ class TaxonomyDock(PluginDock):
         self._armed = None
         self.delete_button.setText(self.tr("削除"))
 
-    def _things(self) -> None:
+    def _filter_obs(self) -> None:
+        """「この画像で絞り込み」: 観測記録's list limited to this class and below."""
         if self.selected:
             self.obs.show()
             self.obs.raise_()

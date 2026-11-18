@@ -729,6 +729,12 @@ def _chosen_rows(dock) -> list[int]:
     return sorted({i.row() for i in dock.table.selectionModel().selectedRows()})
 
 
+def _flow_button(table, row: int):
+    """The 「流れ」 button of a row of 「この画像」."""
+    [button] = [b for b in table.cellWidget(row, table.columnCount() - 1).findChildren(QToolButton) if b.text() == "流れ"]
+    return button
+
+
 def test_a_record_clicked_stays_chosen_after_the_read_in_a_task(plugin, tmp_path):
     # 2026-11-09 tsudo: one row clicked in the list was chosen for a moment, then let go. The record opened in the form is
     # read again (an Esri store, in a task), and the list shown anew forgot which row was chosen (and where it was scrolled).
@@ -789,63 +795,57 @@ def test_the_rows_chosen_and_the_scroll_stay_while_the_same_list_is_shown_again(
     assert _chosen_rows(dock) == [] and bar.value() == 0
     dock.step(-1)
     assert _chosen_rows(dock) == []
-    # 「モノ」: a thing clicked is chosen (its flow below) and stays so; clicked again, its flow closes and the row is let go.
-    dock.tabs.setCurrentIndex(1)
-    APP.processEvents()
+    # 「流れ」 of a row: its thing's flow below the list, the button pressed; the rows chosen stay. Pressed again, it closes.
     _click_row(table, 3)
+    _flow_button(table, 3).click()
     chosen = dock.chosen
-    assert chosen and _chosen_rows(dock) == [3] and dock.flow_box.isVisible()
+    assert chosen and dock.flow_box.isVisible() and _flow_button(table, 3).isChecked() and not _flow_button(table, 4).isChecked()
     dock.render()
-    assert _chosen_rows(dock) == [3]
-    _click_row(table, 3)
-    assert dock.chosen is None and _chosen_rows(dock) == [] and not dock.flow_box.isVisible()
+    assert dock.chosen == chosen and _flow_button(table, 3).isChecked() and _chosen_rows(dock) == [3]
+    _flow_button(table, 3).click()
+    assert dock.chosen is None and not dock.flow_box.isVisible() and not _flow_button(table, 3).isChecked()
 
 
-def test_things_lists_the_last_month_and_a_flow_row_clicked_only_goes_to_its_image(plugin, monkeypatch):
-    # tsudo 2026-11-18: 「モノタブ、すべて出すと多いので、1ヶ月以内表示にして、あとはArcGISダッシュボードに任せよう」, and
-    # 「ものタブを選んで、下のテーブルで行を選択したら、入力モードになるんだけど、これは仕様？」 (a look at a flow is not an edit).
-    from mikage.core.obs import flows as flows_module
-
+def test_a_things_flow_opens_below_the_list_and_a_row_of_it_clicked_only_goes_to_its_image(plugin):
+    # tsudo 2026-11-18: 「モノタブは流れボタンを押したときにそれだけ見れれば十分じゃない？」 (no 「モノ」 tab: a row's 「流れ」
+    # shows the flow below the list and the track on the map), and 「ものタブを選んで、下のテーブルで行を選択したら、
+    # 入力モードになるんだけど、これは仕様？」 (a look at a flow is not an edit).
     p, iface, dock, layers, _ = plugin
     book = dock.book
-    # Today is a month after d2 (2026-10-02): what was last seen on d1 is older.
-    monkeypatch.setattr(flows_module, "now_ms", lambda: int(datetime(2026, 11, 2, 12).timestamp() * 1000))
     assert book.current.name == "d1.tif"
-    old = book.add(139.65, 35.65, object="古いモノ", kind="船舶", activity="停泊")
     first = book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")
     dock.step(2)
     assert book.current.name == "d3.tif"
-    book.add(139.7, 35.6, object="船A", kind="船舶", activity="航行")
-    book.add(139.75, 35.55, object="新しいモノ", kind="船舶", activity="停泊")
-    dock.tabs.setCurrentIndex(1)
+    book.add(139.72, 35.6, object="船A", kind="船舶", activity="航行")
+    book.add(139.75, 35.55, object="船B", kind="船舶", activity="停泊")
+    dock.render()
     APP.processEvents()
     table = dock.table
-    assert sorted(table.item(r, 0).text() for r in range(table.rowCount())) == ["新しいモノ", "船A"]
-    assert dock.tabs.tabText(1) == "モノ 2"
-    assert dock.objects_note.isVisible()
-    assert dock.objects_note.text() == "最終が 2026-10-02 以降のモノ（直近 1 か月）。それより前の 1 件は ArcGIS ダッシュボードで"
-    # A thing chosen elsewhere (「流れ」 of a record on an old image) is listed with its flow, so a click on its row closes it.
-    dock.choose(old.object_id)
-    assert "古いモノ" in [table.item(r, 0).text() for r in range(table.rowCount())] and dock.flow_box.isVisible()
-    dock.choose(None)
-    # A thing's flow: a row of it clicked goes to that image and shows the record; recording and the form stay off.
-    row = [table.item(r, 0).text() for r in range(table.rowCount())].index("船A")
-    _click_row(table, row)
-    assert dock.flow_box.isVisible() and dock.steps_table.rowCount() == 2
+    assert not dock.flow_box.isVisible() and not dock.scene().track
+    names = [table.item(r, 0).text() for r in range(table.rowCount())]
+    _flow_button(table, names.index("船A")).click()
+    assert dock.flow_box.isVisible() and dock.flow_box.title().startswith("船A") and dock.steps_table.rowCount() == 2
+    # Its track on the map, and where it was in each image.
+    assert dock.scene().track == [(139.7, 35.6), (139.72, 35.6)] and len([m for m in dock.scene().marks if m.role == "step"]) == 2
+    # Another row's 「流れ」: that thing's flow instead.
+    _flow_button(table, names.index("船B")).click()
+    assert dock.flow_box.title().startswith("船B") and dock.steps_table.rowCount() == 1 and not dock.scene().track
+    _flow_button(table, names.index("船A")).click()
+    # A row of the flow clicked goes to that image and shows the record; recording and the form stay off.
     steps = dock.steps_table
     QTest.mouseClick(steps.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, steps.visualRect(steps.model().index(0, 1)).center())
     assert book.current.name == "d1.tif"
     assert not dock.active and not dock.form.isVisible() and not dock.record_button.isChecked()
-    assert dock.tab == "objects" and dock.flow_box.isVisible() and dock.chosen == first.object_id
+    assert dock.flow_box.isVisible() and dock.chosen == first.object_id
     assert {i.row() for i in steps.selectionModel().selectedRows()} == {0}
     assert "の画像へ移動（ダブルクリックでこの記録を編集）" in dock.status.text()
     # A double click opens the record in the form (and recording, to move it), as before.
     steps.cellDoubleClicked.emit(0, 0)
     assert dock.active and dock.form.isVisible() and dock.pending[2] is not None and dock.pending[2].id == first.id
     dock.set_active(False)
-    # The other tabs have no note.
-    dock.tabs.setCurrentIndex(0)
-    assert not dock.objects_note.isVisible()
+    # × closes it, and its track.
+    dock.flow_close.click()
+    assert not dock.flow_box.isVisible() and dock.chosen is None and not dock.scene().track
 
 
 def test_records_saved_offline_are_told_and_the_dock_keeps_drawing(plugin, tmp_path):
@@ -1088,8 +1088,8 @@ def test_the_record_chosen_in_the_list_opens_below_the_list(plugin):
     dock.parentWidget().resize(400, 300)
     dock.resize(400, 300)
     APP.processEvents()
-    # 「この画像」 tab: its row opens the record's form, under the table (as a thing's and a class's details).
-    assert dock.tabs.currentIndex() == 0 and dock.table.rowCount() == 1
+    # Its row opens the record's form, under the table (above a thing's flow).
+    assert dock.table.rowCount() == 1
     dock._row_clicked(0, 0)
     assert dock.form.isVisible() and dock.form.title() == "あおば"
     work = dock.work_area.layout()
@@ -1115,32 +1115,37 @@ def test_the_lists_are_filtered_by_a_top_class(plugin):
     def names():
         return sorted(dock.table.item(r, 0).text() for r in range(dock.table.rowCount()))
 
-    assert dock.tabs.currentIndex() == 0 and dock.class_filter_row.isVisible()
+    # The count where the tab said it (tsudo 2026-11-18: no tabs).
+    assert dock.class_filter_row.isVisible() and dock.count_label.text() == "この画像 3 件"
     combo = dock.root_filter
     roots = [combo.itemData(i) for i in range(combo.count())]
     assert roots[0] == "" and {"船舶", "航空機", "車両"} <= set(roots)
     assert names() == ["あおば", "はやて", "みずほ"]
-    # 「この画像」: only the ships, and it stays on the tab.
+    # Only the ships, of how many.
     combo.setCurrentIndex(combo.findData("船舶"))
     combo.activated.emit(combo.currentIndex())
-    assert dock.tabs.currentIndex() == 0 and names() == ["あおば", "みずほ"]
-    # 「モノ」 keeps the same filter.
-    dock.tabs.setCurrentIndex(1)
-    assert names() == ["あおば", "みずほ"] and combo.currentData() == "船舶"
+    assert names() == ["あおば", "みずほ"] and dock.count_label.text() == "この画像 2 / 3 件"
     dock.filter_root("航空機")
     assert names() == ["はやて"]
-    # A class below (分類 tab's double click) shows its top class and the path.
-    dock.filter_class(["船舶", "護衛艦"])
+    # A class below (「分類体系の編集」's 「この画像で絞り込み」) shows its top class and the path.
+    editor = p.docks["SatObsTaxonomy"]
+    editor.select(["船舶", "護衛艦"])
+    [narrow] = [b for b in editor.findChildren(QPushButton) if b.text() == "この画像で絞り込み"]
+    narrow.click()
+    assert dock.class_filter == ["船舶", "護衛艦"]
     assert names() == ["あおば"] and combo.currentData() == "船舶" and "護衛艦" in dock.class_filter_label.text()
     # Nothing of a top class: says so; × shows all again.
-    dock.tabs.setCurrentIndex(0)
     dock.filter_root("車両")
-    assert dock.table.rowCount() == 1 and "絞り込み" in dock.table.item(0, 0).text()
+    assert dock.table.rowCount() == 1 and "絞り込み" in dock.table.item(0, 0).text() and dock.count_label.text() == "この画像 0 / 3 件"
     dock.unfilter_button.click()
-    assert names() == ["あおば", "はやて", "みずほ"] and combo.currentData() == ""
-    # Not offered in 「分類」.
-    dock.tabs.setCurrentIndex(2)
-    assert not dock.class_filter_row.isVisible()
+    assert names() == ["あおば", "はやて", "みずほ"] and combo.currentData() == "" and dock.count_label.text() == "この画像 3 件"
+    # The classes are edited in 「分類体系の編集」, opened from 「詳細」 (at the class shown).
+    dock.filter_root("船舶")
+    dock.more.setChecked(True)
+    assert dock.taxonomy_button.isVisible() and dock.taxonomy_button.text() == "分類体系の編集…"
+    editor.hide()
+    dock.taxonomy_button.click()
+    assert editor.isVisible() and editor.selected == "船舶"
 
 
 def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
@@ -1348,7 +1353,7 @@ def _listed(image_id: str, day: int):
 
 def _idle(dock) -> bool:
     """Only the note shown: no list, no form, no recording (the image row and ＋ stay)."""
-    return (dock.idle_note.isVisible() and not dock.work_area.isVisible() and not dock.table.isVisible() and not dock.tabs.isVisible()
+    return (dock.idle_note.isVisible() and not dock.work_area.isVisible() and not dock.table.isVisible() and not dock.class_filter_row.isVisible()
             and not dock.form.isVisible() and not dock.record_button.isVisible() and not dock.more.isVisible()
             and dock.list_button.isVisible() and not dock.active)
 

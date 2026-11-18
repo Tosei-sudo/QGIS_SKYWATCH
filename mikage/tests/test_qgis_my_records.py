@@ -172,9 +172,6 @@ def test_this_images_list_shows_who_recorded_and_only_ones_own(plugin):
     dock.set_observer("田中")
     dock.mine_only.setChecked(False)
     assert len(_texts(table, 0)) == 2
-    # Not on 「モノ」.
-    dock.tabs.setCurrentIndex(1)
-    assert not dock.mine_only.isVisible()
 
 
 def test_chosen_records_are_changed_without_opening_their_images(plugin, monkeypatch):

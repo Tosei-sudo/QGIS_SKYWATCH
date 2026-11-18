@@ -6,11 +6,9 @@ and a thing measured by its front and rear (2 点).
 """
 from __future__ import annotations
 
-import calendar
 import math
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from .geo import bearing, get_distance, js_round, offset, to_fixed
@@ -126,48 +124,6 @@ def flows(records: Iterable[Observation]) -> list[ObjectFlow]:
     """Every thing's flow (from living records), the most recently seen first."""
     out = [flow_of(g) for g in _groups(living(records)).values()]
     return sorted(out, key=lambda f: (-f.last, f.name))
-
-
-def month_before(t: int) -> int:
-    """Local midnight a calendar month before the day of `t` (ms): 11-18 → 10-18 00:00, 03-31 → 02-28 (or 29)."""
-    d = datetime.fromtimestamp(t / 1000)
-    year, month = (d.year, d.month - 1) if d.month > 1 else (d.year - 1, 12)
-    day = min(d.day, calendar.monthrange(year, month)[1])
-    return int(datetime(year, month, day).timestamp() * 1000)
-
-
-@dataclass
-class RecentThings:
-    """「モノ」 as listed: the things last seen within a month, and where that month starts."""
-    things: list[ObjectFlow]
-    #: Local midnight a month before `until` (None: no things at all).
-    since: Optional[int]
-    #: The day the month is counted back from: today, or the latest record's when none is that recent.
-    until: Optional[int]
-    #: Whether `until` is today (not the latest record's day).
-    today: bool
-    #: The things last seen before `since` (left to the ArcGIS dashboard).
-    older: int
-
-
-def recent_things(objects: Sequence[ObjectFlow], now: Optional[int] = None) -> RecentThings:
-    """
-    The things 「モノ」 lists (tsudo 2026-11-18: 「すべて出すと多いので、1ヶ月以内表示にして、
-    あとはArcGISダッシュボードに任せよう」): those whose latest record (by image time, the 「最終」
-    column) is on or after the same day a month ago. The month counts back from today, or from the
-    latest record when nothing was recorded that recently (a store not used for a while, a sample),
-    so the list is not empty only because no one has recorded lately; never from ahead of today
-    (a record dated ahead by mistake). `objects`: the most recently seen first, as flows() gives.
-    """
-    if not objects:
-        return RecentThings([], None, None, True, 0)
-    now = now_ms() if now is None else now
-    latest = max(f.last for f in objects)
-    today = latest >= month_before(now)
-    until = now if today else latest
-    since = month_before(until)
-    things = [f for f in objects if f.last >= since]
-    return RecentThings(things, since, until, today, len(objects) - len(things))
 
 
 @dataclass
