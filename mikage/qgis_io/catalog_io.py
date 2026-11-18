@@ -310,20 +310,79 @@ def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     if source.kind == "url":
         url = source.value if not source.value.startswith("//") else "https:" + source.value
     else:
-        resolved = resolve_path(source.value, mappings, settings.path_folder)
-        if resolved.kind == "folder":
-            folder = choose_folder(resolved.mapping)
-            if not folder:
-                raise Cancelled()
-            settings.set_path_folder(resolved.mapping.prefix, folder)
-            resolved = resolve_path(source.value, mappings, settings.path_folder)
-        url = resolved.value
+        url = _resolved(source.value, mappings, choose_folder).value
     is_url = url.lower().startswith(("http://", "https://"))
     if is_url:
         if re.split(r"[?#]", url)[0].endswith("/"):
             raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できず。フォルダはローカルパスか pathMappings の url なしで指定）")
         return RecordImages(url, True, given=source.value)
     return _local_images(record, catalog, url, source.value, names, scan)
+
+
+def _resolved(path: str, mappings: Sequence[PathMapping | PathRewrite], choose_folder: Callable[[PathMapping], Optional[str]]):
+    """resolve_path, the folder of its prefix asked through `choose_folder` (and kept) when none was chosen on this computer yet."""
+    resolved = resolve_path(path, mappings, settings.path_folder)
+    if resolved.kind == "folder":
+        folder = choose_folder(resolved.mapping)
+        if not folder:
+            raise Cancelled()
+        settings.set_path_folder(resolved.mapping.prefix, folder)
+        resolved = resolve_path(path, mappings, settings.path_folder)
+    return resolved
+
+
+@dataclass(frozen=True)
+class RecordFolder:
+    """
+    Where 「フォルダを開く」 takes a record: `folder` here, and `file` the image
+    in it to show selected (None when the record's path is the folder itself).
+    """
+    folder: str
+    file: Optional[str] = None
+    #: Found through a rewrite of `pathMappings` (`pattern` / `to`).
+    rewritten: bool = False
+
+
+def record_folder(record: CatalogRecord, mappings: Sequence[PathMapping | PathRewrite],
+                  choose_folder: Callable[[PathMapping], Optional[str]]) -> RecordFolder:
+    """
+    The folder of a record's image on this computer (「フォルダを開く」): where
+    the first rewrite of `pathMappings` (`pattern` / `to`) takes its path when
+    that is there, else the path as written (under the folder chosen for its
+    prefix, asked through `choose_folder` the first time, as 「開く」). A path
+    that is a folder is that folder; a file, the folder it is in. Nothing is
+    looked through: a rewritten folder only has to be there (「開く」 also
+    wants images in it). `//host/…` (a URL to 「開く」 when no rewrite takes
+    it) is a share here. Raises PathError (an image at a URL, nothing there),
+    Cancelled (no folder chosen).
+    """
+    source = record.source
+    if source is None:
+        raise PathError(f"{record.id or '画像'} に画像の場所なし")
+    tried: list[str] = []
+    for _, target in rewrites_of(mappings, source.value):
+        if os.path.exists(target):
+            return _folder_of(target, True)
+        tried.append(f"{target} なし")
+    try:
+        if source.kind == "url":
+            if source.value.startswith("//") and os.path.exists(source.value):
+                return _folder_of(source.value, False)
+            raise PathError(f"{record.id or source.value} の画像は URL（{source.value}）。開けるフォルダなし")
+        resolved = _resolved(source.value, mappings, choose_folder)
+        if resolved.kind == "url":
+            raise PathError(f"{record.id or source.value} の画像は URL（{resolved.value}、pathMappings の url）。開けるフォルダなし")
+        return _folder_of(resolved.value, False)
+    except PathError as e:
+        if not tried:
+            raise
+        raise PathError(f"{e}（読み替え先も: {'、'.join(tried)}）") from None
+
+
+def _folder_of(path: str, rewritten: bool) -> RecordFolder:
+    if os.path.isdir(path):
+        return RecordFolder(path, None, rewritten)
+    return RecordFolder(os.path.dirname(path.rstrip("/\\")) or path, path, rewritten)
 
 
 def _local_images(record: CatalogRecord, catalog: CatalogConfig, path: str, given: str, names, scan=scan_folder) -> RecordImages:

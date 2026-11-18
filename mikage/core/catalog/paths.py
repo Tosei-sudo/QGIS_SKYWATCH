@@ -268,5 +268,5 @@ def resolve_path(path: str, mappings: Sequence[PathMapping | PathRewrite], folde
         return Resolved("folder", mapping=mapping)
     hit = find_file(folder, rest)
     if not hit:
-        raise PathError(f"「{mapping.label}」に選んだフォルダ「{folder}」の中に {'/'.join(rest)} なし（選び直すには「フォルダの対応を消去」）")
+        raise PathError(f"「{mapping.label}」に選んだフォルダ「{folder}」の中に {'/'.join(rest)} なし（選び直すにはメニュー「設定…」の「画像のフォルダの対応」で消去）")
     return Resolved("file", hit)

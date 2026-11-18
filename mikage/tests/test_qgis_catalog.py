@@ -274,15 +274,16 @@ def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(
     assert settings.similar_tolerance()["angle"] == 5
     dock.normal_search()
     assert wait_for(lambda: dock.status.text() == "3 件") and dock.similar.isHidden()
-    # Forgetting the folders: asked first, いいえ keeps them.
-    from mikage.ui.docks import QMessageBox as Box
-    answers = []
-    monkeypatch.setattr(Box, "question", lambda *a: answers.append(a) or a[4])
-    dock.clear_folders()
-    assert settings.path_folder("\\\\nas\\images") is not None and answers[0][4] == Box.StandardButton.No
-    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
-    dock.clear_folders()
+    # Forgetting the folders: in 「設定…」 (tsudo 2026-11-19: the dock's button became 「フォルダを開く」).
+    from mikage.ui.settings_dialog import SettingsDialog
+
+    assert "folders" not in dock.buttons
+    dialog = SettingsDialog(p.context)
+    assert f"//nas/images → {folder}" in dialog.folders.text() and dialog.clear_folders.isEnabled()
+    dialog.clear_folders.click()
     assert settings.path_folder("\\\\nas\\images") is None
+    assert dialog.folders.text().startswith("なし") and not dialog.clear_folders.isEnabled()
+    dialog.close()
 
 
 def test_the_extent_by_default_and_an_area_drawn_on_the_map(plugin, monkeypatch):
@@ -987,6 +988,102 @@ def test_a_rewritten_path_is_opened_when_it_is_there_and_the_path_as_written_oth
         where("\\\\nas\\images\\SCENE_Z")
 
 
+def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_first(plugin, tmp_path, monkeypatch):
+    """
+    「フォルダを開く」 (tsudo 2026-11-19, instead of 「フォルダの対応を消去」): the
+    folder of the image in Explorer (a file selected in it), where the
+    rewrite of `pathMappings` takes it when that is there, else as written.
+    """
+    from mikage.core.catalog.search import record_of
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    searched(dock)
+    button = dock.buttons["folder"]
+    assert button.text() == "フォルダを開く" and not button.isEnabled()
+    assert [k for k in dock.buttons][:5] == ["open", "record", "zoom", "copy", "folder"]
+    shown = []
+    monkeypatch.setattr(dock, "show_folder", lambda f, file=None: shown.append((f, file)) or True)
+    asked = []
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: asked.append(mapping.prefix) or str(folder))
+    a = next(r for r in dock.records if r.id == "A")
+    dock.choose([a])
+    assert button.isEnabled()
+    button.click()
+    # A file as written: its folder, the file selected; the NAS prefix's folder chosen first (as 「開く」) and kept.
+    assert asked == ["\\\\nas\\images"] and settings.path_folder("\\\\nas\\images") == str(folder)
+    assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))]
+    assert dock.status.text() == f"フォルダを開く: {folder / '2026'}"
+    # A URL or no place: why; the others still open (each folder once).
+    shown.clear()
+    assert len(dock.open_folders(dock.records)) == 1
+    assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))]
+    assert "2 件は開けず" in dock.status.text() and "C に画像の場所なし" in dock.status.text()
+    shown.clear()
+    dock.open_folders([next(r for r in dock.records if r.id == "B")])
+    assert shown == [] and dock.status.text() == "B の画像は URL（https://x.example/b.tif）。開けるフォルダなし"
+
+    # A rewrite (//(host)/…/(id) → a copy here): its place when it is there (a folder: itself, no images needed).
+    local = tmp_path / "local"
+    (local / "SCENE_D").mkdir(parents=True)
+    geotiff(local / "e.tif")
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["pathMappings"].insert(0, {"pattern": "^//nas/images/(?:[^/]+/)*([^/]+)$", "to": local.as_posix() + "/$1", "label": "手元の複製"})
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    assert p.api.problems == []
+    catalog = dock._shown_catalog
+
+    def record(i, at):
+        return record_of({"attributes": {"IMG_ID": i, "SENSOR": "S1", "PATH": at}}, catalog.fields)
+
+    shown.clear()
+    found = dock.open_folders([record("D", "\\\\nas\\images\\2026\\SCENE_D"), record("E", "//nas/images/2026/11/e.tif")])
+    assert shown == [((local / "SCENE_D").as_posix(), None), (local.as_posix(), (local / "e.tif").as_posix())]
+    assert [f.rewritten for f in found] == [True, True] and dock.status.text() == "フォルダ 2 件を開く"
+    shown.clear()
+    dock.open_folders([record("D", "\\\\nas\\images\\2026\\SCENE_D")])
+    assert dock.status.text() == f"フォルダを開く: {(local / 'SCENE_D').as_posix()}（読み替え先）"
+    # Not there: the path as written (A's file in the NAS folder chosen).
+    shown.clear()
+    dock.open_folders([a])
+    assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))] and "読み替え先" not in dock.status.text()
+    # Nowhere: both in the reason.
+    shown.clear()
+    dock.open_folders([record("W", "\\\\nas\\images\\2026\\scene_w")])
+    assert shown == [] and "2026/scene_w なし" in dock.status.text() and f"読み替え先も: {(local / 'scene_w').as_posix()} なし" in dock.status.text()
+    # Many folders: the first five windows only.
+    for i in range(7):
+        (local / f"S{i}").mkdir()
+    shown.clear()
+    dock.open_folders([record(f"S{i}", f"//nas/images/S{i}") for i in range(7)])
+    assert len(shown) == 5 and dock.status.text() == "フォルダ 5 件を開く（先頭の 5 件）"
+    # No folder chosen for the prefix: nothing opens.
+    settings.clear_path_folders()
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: None)
+    shown.clear()
+    assert dock.open_folders([a]) == [] and shown == []
+
+
+def test_show_folder_asks_explorer_to_select_the_file(monkeypatch):
+    """Windows: `explorer /select,"file"` (a file), `explorer folder` (a folder); elsewhere the desktop opens the folder."""
+    from mikage.qgis_io import file_manager
+
+    ran, opened = [], []
+    monkeypatch.setattr(file_manager.subprocess, "Popen", lambda args, **kw: ran.append(args))
+    monkeypatch.setattr(file_manager.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()) or True)
+    monkeypatch.setattr(file_manager.sys, "platform", "win32")
+    monkeypatch.setattr(file_manager.os.path, "normpath", lambda p: p.replace("/", "\\"))
+    assert file_manager.show_folder("D:/ID", "D:/ID/a b.tif")
+    assert file_manager.show_folder("//nas/x/ID")
+    assert ran == ['explorer /select,"D:\\ID\\a b.tif"', ["explorer", "\\\\nas\\x\\ID"]] and opened == []
+    monkeypatch.setattr(file_manager.sys, "platform", "linux")
+    ran.clear()
+    assert file_manager.show_folder("/data/ID", "/data/ID/a.tif")
+    assert ran == [] and opened == ["/data/ID"]
+
+
 def test_the_dialog_choosing_a_records_images():
     from mikage.ui.image_files_dialog import ImageFilesDialog
 
@@ -1237,7 +1334,7 @@ def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_pa
     searched(dock)
     headings = [dock.model.headerData(i, Qt.Orientation.Horizontal) for i in range(dock.model.columnCount())]
     assert headings == ["画像ID", "撮像日時", "センサー", "角度", "方位角"]
-    for key in ("open", "copy", "folders"):
+    for key in ("open", "copy", "folder"):
         assert not dock.buttons[key].isVisibleTo(dock), key
     assert dock.buttons["record"].isVisibleTo(dock)
     a = next(r for r in dock.records if r.id == "A")
