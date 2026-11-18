@@ -16,12 +16,13 @@ import uuid
 from dataclasses import replace
 from typing import Any, Iterable, Optional, Protocol, Sequence
 
-from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, fit_value, point_geometry, quote, ring_geometry
+from ..esri import DELETE_BATCH, ConflictError, EsriClient, EsriError, TooManyError, fit_value, point_geometry, quote, ring_geometry
 from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_ms, datetime_text, encode_point, encode_polygon
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
-from .flows import now_ms
+from .flows import now_ms, time_key
 from .model import Observation, ObservationStoreConfig
+from .scope import RecordQuery, envelope, merged, time_condition
 from .taxonomy import (
     FIELDS_ROW, SpecField, Taxon, TaxonomyTableConfig, kind_of, normalize, path_of, spec_fields_of, specs_of, taxa_from_json,
 )
@@ -124,6 +125,10 @@ class LocalObservationStore:
         """Removes the records for good (only the deleted ones when asked); how many."""
         return self.gpkg.delete(OBSERVATIONS, '"DELETED_AT" IS NOT NULL' if deleted_only else "1")
 
+    def find(self, query: RecordQuery) -> list[Observation]:
+        """The records of a query (read from the file on this computer, so every record may be read)."""
+        return [o for o in self.load() if query.matches(o)]
+
 
 class LocalAreaStore:
     """Checked areas in the local GeoPackage (`checked_areas`), one set per observation store."""
@@ -165,6 +170,18 @@ class LocalAreaStore:
     def clear(self, deleted_only: bool = False) -> int:
         """Removes this store's checked areas for good (only the deleted ones when asked); how many."""
         return self.gpkg.delete(AREAS, '"STORE" = ?' + (' AND "DELETED_AT" IS NOT NULL' if deleted_only else ""), [self.of])
+
+    def find(self, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
+        """The checked areas of some images, or of a period (area_in)."""
+        return [a for a in self.load() if area_in(a, image_ids, start, end)]
+
+
+def area_in(a: CheckedArea, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> bool:
+    """Whether a checked area is of one of the images (none given: any) and in the period (its image's time, else when made)."""
+    if image_ids and a.image_id not in image_ids:
+        return False
+    t = a.image_time if a.image_time is not None else a.created_at
+    return (start is None or (t is not None and t >= start)) and (end is None or (t is not None and t <= end))
 
 
 def _row_key(store: str, path: str) -> str:
@@ -288,6 +305,11 @@ class _EsriLayer:
 
 #: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
 _STAMP_SLACK_MS = 1000
+#: The most records one question may bring (TooManyError past it: a narrower period or condition then).
+FIND_LIMIT = 200_000
+#: How many records near an image's footprint are read, at or before its time and after it (load_around).
+AROUND_BEFORE = 2000
+AROUND_AFTER = 500
 
 
 class EsriObservationStore:
@@ -350,10 +372,84 @@ class EsriObservationStore:
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
 
+    #: Read only as asked (scope.py): what a feature needs, never every record (EsriObservationStore.find).
+    scoped = True
+
     def load(self) -> list[Observation]:
+        """Every record. Not used by the plugin (a shared layer may hold millions): see find and load_around."""
         _, oid = self._layer.ready()
         features = self.client.query_all(self.config.url, self.config.where or "1=1", self.token, limit=200_000)
         return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
+
+    def _read(self, where: str, extra: Optional[dict] = None, limit: int = FIND_LIMIT, cut: bool = False) -> list[Observation]:
+        _, oid = self._layer.ready()
+        features = self.client.query_all(self.config.url, where, self.token, extra=extra, limit=limit, cut=cut)
+        return [o for o in (self._record_of(f, oid) for f in features) if o is not None]
+
+    def find(self, query: RecordQuery, limit: int = FIND_LIMIT) -> list[Observation]:
+        """
+        The records of a query (scope.RecordQuery): asked of the layer, in
+        parts when a list is long. A query without any condition is refused
+        (every record of a shared layer). More than `limit` records is an
+        error (TooManyError: a period or condition narrower then).
+        """
+        if query.everything():
+            raise EsriError("条件なしで全件は読まない（期間・画像・範囲などを指定）")
+        types, _ = self._layer.ready()
+        extra = envelope(query.box) if query.box else None
+        out: list[Observation] = []
+        for where in query.wheres(self.config.fields, types, self.config.where):
+            out = merged(out, self._read(where, extra, limit))
+            if len(out) > limit:
+                raise TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（期間や条件で絞る）")
+        # What the layer could not be asked (an attribute it lacks) is tested here.
+        return [o for o in out if query.matches(o)]
+
+    def load_around(self, images: Sequence[tuple], before: int = AROUND_BEFORE, after: int = AROUND_AFTER) -> list[Observation]:
+        """
+        What recording on some images needs (each `(id, box or None, time or
+        None)`): every record of the images (the deleted too), and for each
+        with a footprint the latest `before` records near it at or before its
+        time and the first `after` after it, with their things' records of
+        that stretch of time anywhere. That is enough for 「前後の画像のモノ」
+        and 「同一候補」 (each thing's record nearest in time to the image):
+        a thing's nearest record is never older than its latest one near the
+        image. The stretch follows how often the place is imaged (a busy port:
+        days; a place imaged twice a year: years).
+        """
+        types, _ = self._layer.ready()
+        f = self.config.fields
+        base = [f"({self.config.where})"] if self.config.where else []
+        living = [f"{f['deleted']} IS NULL"] if f["deleted"] in types else []
+        timed = f["imageTime"] if f["imageTime"] in types else None
+        out = self.find(RecordQuery(image_ids=tuple(dict.fromkeys(i for i, _, _ in images if i)))) if images else []
+        spans: dict[str, list[float]] = {}
+        for _, box, t in images:
+            if not box:
+                continue
+            near: list[Observation] = []
+            for op, order, count in (("<=", "DESC", before), (">", "ASC", after)):
+                if op == ">" and (t is None or not timed or count <= 0):
+                    continue
+                when = [time_condition(timed, types.get(timed), op, t)] if timed and t is not None else []
+                where = " AND ".join([*base, *living, *when]) or "1=1"
+                order_by = {"orderByFields": f"{timed} {order}"} if timed else {}
+                near += self._read(where, {**envelope(box), **order_by}, limit=count, cut=True)
+            times = [time_key(o) for o in near]
+            low = min([*times, *([t] if t is not None else [])], default=None)
+            high = max([*times, *([t] if t is not None else [])], default=None)
+            for o in near:
+                span = spans.setdefault(o.object_id, [low, high])
+                span[0] = None if span[0] is None or low is None else min(span[0], low)
+                span[1] = None if span[1] is None or high is None else max(span[1], high)
+            out = merged(out, near)
+        # Each thing's records of that stretch (things of the same stretch asked together).
+        groups: dict[tuple, list[str]] = {}
+        for object_id, (low, high) in spans.items():
+            groups.setdefault((low, high), []).append(object_id)
+        for (low, high), ids in groups.items():
+            out = merged(out, self.find(RecordQuery(object_ids=tuple(ids), start=low, end=high, living=True)))
+        return out
 
     def load_changed(self, since: float) -> Optional[list[Observation]]:
         """
@@ -562,11 +658,36 @@ class EsriAreaStore:
             attributes[oid] = self.oids[a.id]
         return {"attributes": attributes, "geometry": ring_geometry([a.ring])}
 
+    scoped = True
+
     def load(self) -> list[CheckedArea]:
+        """Every checked area. Not used by the plugin (find)."""
+        return self._read("1=1")
+
+    def find(self, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
+        """The checked areas of some images (none given: any), or of a period (their image's time, else when made)."""
+        types, _ = self._layer.ready()
+        f = self.config.fields
+        ands = []
+        if start is not None or end is not None:
+            ands += RecordQuery(start=start, end=end).wheres(f, types)
+        ids = [i for i in dict.fromkeys(image_ids) if i]
+        if not ids:
+            if not ands:
+                raise EsriError("条件なしで全件は読まない（画像・期間を指定）")
+            return [a for a in self._read(" AND ".join(ands)) if area_in(a, (), start, end)]
+        out: dict[str, CheckedArea] = {}
+        for i in range(0, len(ids), 100):
+            listed = f"{f['imageId']} IN ({','.join(quote(x) for x in ids[i:i + 100])})"
+            for a in self._read(" AND ".join([*ands, listed])):
+                out[a.id] = a
+        return [a for a in out.values() if area_in(a, ids, start, end)]
+
+    def _read(self, where: str) -> list[CheckedArea]:
         _, oid = self._layer.ready()
         f = self.config.fields
         out = []
-        for feature in self.client.query_all(self.config.url, "1=1", self.token, limit=100_000):
+        for feature in self.client.query_all(self.config.url, where, self.token, limit=100_000):
             a = feature.get("attributes") or {}
             rings = (feature.get("geometry") or {}).get("rings") or []
             area_id = _text(a.get(f["id"]))

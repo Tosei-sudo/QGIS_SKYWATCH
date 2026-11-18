@@ -44,12 +44,14 @@ def test_the_dry_run_tells_new_duplicates_errors_and_continues_known_things():
         {"img": "d2", "name": "z", "kind": "船舶", "conf": "", "p": "", "len": ""},
         {"img": "d2", "name": "", "kind": "船舶", "conf": "", "p": "", "len": ""},
         points=points)
-    planned = ri.plan(source, mapping, there, ["確定", "推定"], [Taxon(["船舶"]), Taxon(["船舶", "護衛艦"])], image_times={"d2": day(2)})
+    # 護衛艦 are individuals (艦名): a name links to its thing (other names do not, 2026-11-18).
+    planned = ri.plan(source, mapping, there, ["確定", "推定"], [Taxon(["船舶"]), Taxon(["船舶", "護衛艦"], name_label="艦名")],
+                      image_times={"d2": day(2)})
     assert [p.action for p in planned] == ["new", "duplicate", "new", "new", "new", "error", "error", "error", "duplicate"]
     first = planned[0].record
     assert (first.object_id, first.object_name, first.image_time, first.length) == ("T1", "あおば", day(2), 120.0)
     third = planned[2].record
-    assert third.object_name == "船舶-1" and not third.present and third.activity == "" and third.confidence == "確定"
+    assert third.object_name == "船舶" and not third.present and third.activity == "" and third.confidence == "確定"
     assert planned[3].warnings == ["分類体系にない種別「未知」"] and planned[3].record.object_id == planned[4].record.object_id
     assert planned[5].reason == "画像IDが空"
     assert planned[6].reason == "長さ（m）が数でない、有無が読めない（?）、確度「ほぼ」なし（確定・推定）"
@@ -127,5 +129,5 @@ def test_a_local_store_takes_the_import(tmp_path):
     book, _db = _book(LocalObservationStore(db), tmp_path, said)
     planned = ri.plan(rows({"IMG": "d1", "K": "船舶"}, points=[(139.7, 35.6)]), {"image_id": "IMG", "kind": "K"}, book.records)
     out = ri.apply(book, planned)
-    assert out.added == 1 and book.records[0].object_name == "船舶-1"
+    assert out.added == 1 and book.records[0].object_name == "船舶"
     assert ri.apply(book, []).added == 0

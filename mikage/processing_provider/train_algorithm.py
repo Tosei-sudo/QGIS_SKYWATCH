@@ -45,6 +45,7 @@ from ..core.ai.train.trainer import (
 )
 from ..qgis_io.ai_io import band_values, check_bands, grid_of, render_rgba
 from ..core.ai.train.dataset import DatasetError
+from ..core.obs.scope import RecordQuery
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.dataset_io import DatasetImage, dataset_labels, image_grid, open_image, pixel_rows, read_datasets, whole_image
 from ..qgis_io.train_io import Gathered, area_geometries, labels_from_book, labels_from_features, pixel_boxes, thin, windows_of
@@ -226,7 +227,12 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         elif source == "book":
             if book is None:
                 raise QgsProcessingException(tr("観測記録が開かれていない（観測記録パネルで保存先を選択、またはベクタレイヤーを指定）"))
-            self._gathered = labels_from_book(list(book.records), list(book.areas), taxonomy, depth, kinds, default_size)
+            if getattr(book, "scoped", False):
+                # A shared store: the records and checked areas of the images are asked of it in the run (off the main thread).
+                self._gathered = None
+                self._label_book = book
+            else:
+                self._gathered = labels_from_book(list(book.records), list(book.areas), taxonomy, depth, kinds, default_size)
             self._source_label = tr("観測記録（{label}）").format(label=book.label)
         else:
             features = self.parameterAsSource(parameters, self.LABELS, context)
@@ -258,6 +264,14 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
 
     def _process(self, parameters, context, feedback) -> dict:
         started = time.monotonic()
+        if self._gathered is None:
+            book, ids = self._label_book, tuple(dict.fromkeys(i["id"] for i in self._images if i["id"]))
+            try:
+                records = book.fetch(RecordQuery(image_ids=ids)) if ids else []
+                areas = book.fetch_areas(image_ids=ids) if ids else []
+            except Exception as error:  # noqa: BLE001
+                raise QgsProcessingException(tr("観測記録の読み込みに失敗: {e}").format(e=error))
+            self._gathered = labels_from_book(records, areas, *self._label_options)
         gathered: Gathered = self._gathered
         bands = parse_bands(self.parameterAsString(parameters, self.BANDS, context))
         options = TrainOptions(

@@ -27,6 +27,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core import audit, edit_stamp
 from ..core.obs.assignments import STATUSES, Assignment, progress_of, progress_text, same_person, update, with_status
 from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
+from ..core.obs.scope import RecordQuery, merged
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
@@ -189,10 +190,14 @@ class HandoverDialog(QDialog):
 
     def render_assignments(self) -> None:
         user = edit_stamp.user_name()
-        # The progress is counted from the records: not read yet (no image chosen), shown again once they are.
-        if self.isVisible():
-            self.dock.records_ready(self.render_assignments)
         book = self.dock.book
+        if book is not None and book.scoped:
+            # The progress is counted from the records of the images shown: a shared store is asked for those not read yet.
+            if self.isVisible():
+                self._read_progress(book)
+        elif self.isVisible():
+            # Not read yet (no image chosen): shown again once they are.
+            self.dock.records_ready(self.render_assignments)
         records = list(book.records) if book else []
         items = [x for x in self.bar.items if (self.done_check.isChecked() or not x.done)
                  and (not self.mine_check.isChecked() or same_person(x.assignee, user))]
@@ -344,12 +349,13 @@ class HandoverDialog(QDialog):
         if end <= start:
             self._say(self.tr("期間の終わりが始まりより前"))
             return
-        if not self.dock.records_ready(self.make):
+        book = self.dock.book
+        scoped = book is not None and book.scoped
+        if not scoped and not self.dock.records_ready(self.make):
             # Not read yet (no image chosen in 「観測記録」): made once they are.
             self._say(self.tr("観測記録を読み込み中…（読み終えたら作成）"))
             return
         config, client = self.dock.context.config, self.dock.context.esri()
-        book = self.dock.book
         records = list(book.records) if book else []
         images = [(i.id, i.name) for i in book.images] if book else []
         stores = [(s, self._token(s)) for s in config.request_stores]
@@ -363,6 +369,13 @@ class HandoverDialog(QDialog):
 
         def work(task):
             problems = []
+            if scoped:
+                # A shared store: the records made or changed (or deleted) in the period, asked of it.
+                try:
+                    found = book.fetch(RecordQuery(basis="created", start=start, end=end))
+                    data.records = merged(found, book.fetch(RecordQuery(basis="updated", start=start, end=end)))
+                except Exception as error:  # noqa: BLE001 (the other parts still go in)
+                    problems.append(f"観測記録: {error}")
             if alerts:
                 try:
                     data.alerts = load_log(client, alerts, start, end, alert_token)
@@ -378,6 +391,10 @@ class HandoverDialog(QDialog):
             if source:
                 try:
                     data.assignments = load_assignments(client, source, assign_token, done_since=start)
+                    if scoped and data.assignments:
+                        # Their images' records too (how far each has gone).
+                        ids = tuple(dict.fromkeys(x.image_id for x in data.assignments if x.image_id))
+                        data.records = merged(data.records, book.fetch(RecordQuery(image_ids=ids))) if ids else data.records
                 except Exception as error:  # noqa: BLE001
                     problems.append(f"分担: {error}")
             data.problems = problems
@@ -399,6 +416,18 @@ class HandoverDialog(QDialog):
         self.make_button.setEnabled(False)
         self._say(self.tr("作成中…"))
         run_task(self.tr("引き継ぎメモの作成"), work, finished, failed)
+
+    def _read_progress(self, book) -> None:
+        """Asks a shared store for the records of the assignments' images not asked yet (shown again once read)."""
+        asked = getattr(self, "_progress_asked", None)
+        if asked is None or asked[0] is not book:
+            asked = self._progress_asked = (book, set())
+        ids = tuple(dict.fromkeys(x.image_id for x in self.bar.items if x.image_id and x.image_id not in asked[1]))
+        if not ids:
+            return
+        asked[1].update(ids)
+        self.dock.fetch(self.tr("分担の画像の記録の読み込み"), lambda b: b.fetch(RecordQuery(image_ids=ids)),
+                        lambda _r: self.render_assignments(), lambda _m: asked[1].difference_update(ids))
 
     def _text(self) -> str:
         return self.text_edit.toPlainText().replace("\n", self.settings.newline)

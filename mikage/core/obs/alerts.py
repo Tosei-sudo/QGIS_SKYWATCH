@@ -1503,6 +1503,25 @@ def similar_count(o: Observation, history: Sequence[Observation], score: ScoreSe
     return n
 
 
+def history_query(records: Sequence[Observation], score: Optional[ScoreSettings]):
+    """
+    What a shared store is asked for the rarity of some records (similar_count):
+    the living records of the `days` before them, around them (`radius_km`);
+    None when the rarity is not counted or there is nothing to count it for.
+    """
+    from .scope import RecordQuery, grown
+
+    times = [o.image_time if o.image_time is not None else o.created_at for o in records]
+    times = [t for t in times if t is not None]
+    if score is None or score.weights.get("rarity", 0) <= 0 or not times:
+        return None
+    box = None
+    if score.radius_km > 0:
+        box = grown((min(o.lon for o in records), min(o.lat for o in records), max(o.lon for o in records), max(o.lat for o in records)),
+                    score.radius_km * 1000)
+    return RecordQuery(start=min(times) - score.days * 86_400_000, end=max(times), box=box, living=True)
+
+
 def score_items(items: Sequence[AlertItem], score: ScoreSettings, levels: Sequence[ConfidenceLevel] = (),
                 history: Iterable[Observation] = ()) -> None:
     """

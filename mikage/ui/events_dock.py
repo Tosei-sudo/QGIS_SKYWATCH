@@ -881,11 +881,15 @@ class EventsDock(PluginDock):
         dock = self._observation_dock()
         if dock is None:
             return
-        if not dock.records_ready(lambda: self._open_observations(links)):
-            # Not read yet (no image chosen in 「観測記録」): opened once they are.
+        if not dock.with_records([x.item_id for x in links], lambda: self._open_read(links)):
+            # Not read yet (asked of a shared store, or no image chosen in 「観測記録」): opened once they are.
             self.say(self.tr("観測記録を読み込み中…"))
             return
-        book = dock.book
+        self._open_read(links)
+
+    def _open_read(self, links: Sequence[EventLink]) -> None:
+        dock = self._observation_dock()
+        book = dock.book if dock is not None else None
         found = [book.record(x.item_id) for x in links] if book else []
         found = [o for o in found if o is not None]
         if not found:
@@ -937,10 +941,14 @@ class EventsDock(PluginDock):
         if e is None:
             return
         dock = self._observation_dock()
-        if dock is not None and self.links_of(e, "observation") and not dock.records_ready(self.show_on_map):
-            # The records' points come from 「観測記録」, not read yet (no image chosen there): shown once they are.
+        observations = self.links_of(e, "observation")
+        if dock is not None and observations and not dock.with_records([x.item_id for x in observations], lambda: self._show_read(e)):
+            # The records' points come from 「観測記録」 (asked of a shared store, or no image chosen there yet): shown once read.
             self.say(self.tr("観測記録を読み込み中…"))
             return
+        self._show_read(e)
+
+    def _show_read(self, e: Event) -> None:
         images = self.links_of(e, "image")
         if images:
             self._fetch_images(images, lambda result: self._add_layers(e, result))

@@ -10,6 +10,10 @@ the viewer's scripts see them.
 for the local GeoPackage, in a task for an Esri store, waiting for it). The
 viewer asks once a run before a script writes; here the person runs the
 code in their own console, so it does not.
+
+A shared (Esri) store is not read whole (scope.py, 2026-11-18): what a
+function needs is asked of it (the records of an image, a thing, a class or
+a period); `observations()` with nothing to limit it is refused there.
 """
 from __future__ import annotations
 
@@ -24,7 +28,8 @@ from .geo import js_round
 from .image_time import parse_time
 from .model import Observation
 from .report import ReportOptions
-from .taxonomy import path_of, within
+from .scope import RecordQuery
+from .taxonomy import kind_of, path_of, within
 
 
 def _iso(t: Optional[float]) -> Optional[str]:
@@ -133,9 +138,17 @@ class ObservationApi:
             raise RuntimeError("観測記録は使用不可")
         if not b.loaded:
             self._run("観測記録の読み込み", lambda x: x.reload())
+        if b.needs_around():
+            self._run("観測記録の読み込み", lambda x: x.read_around())
         return b
 
+    def _fetch(self, b: ObservationBook, query: RecordQuery) -> list[Observation]:
+        """The records of a query: asked of a shared store (raising what it raised), among those read for a local one."""
+        return self._run("観測記録の読み込み", lambda x: x.fetch(query))
+
     def _record(self, b: ObservationBook, record_id: Any) -> Observation:
+        if b.scoped and not any(o.id == record_id for o in b.records):
+            self._fetch(b, RecordQuery(ids=(str(record_id),)))
         found = next((o for o in b.records if o.id == record_id and o.deleted_at is None), None)
         if found is None:
             raise LookupError(f"観測記録「{record_id}」なし")
@@ -157,20 +170,35 @@ class ObservationApi:
 
     def observations(self, image: Optional[str] = None, object: Optional[str] = None, kind: Optional[str] = None,
                      start: Any = None, end: Any = None, deleted: bool = False) -> list[dict[str, Any]]:
-        """The records (of an image, a thing by id or name, a class and below, a period)."""
+        """The records (of an image, a thing by id or name, a class and below, a period; a shared store: at least one of them)."""
         b = self._b()
         path = path_of(kind) if kind is not None else None
         t0 = _time(start, "start") if start is not None else None
         t1 = _time(end, "end") if end is not None else None
-        rows = b.records if deleted else living(b.records)
+        if b.scoped:
+            query = RecordQuery(image_ids=(str(image),) if image is not None else (),
+                                object_ids=(str(object),) if object is not None else (), names=(str(object),) if object is not None else (),
+                                kinds=(kind_of(path),) if path else (), start=t0, end=t1, living=not deleted)
+            if query.everything():
+                raise ValueError(f"{b.label} の記録は全件は読まない（image・object・kind・start・end のどれかを指定）")
+            rows = self._fetch(b, query)
+        else:
+            rows = b.records
+        rows = rows if deleted else living(rows)
         return [record_out(o) for o in rows
                 if (image is None or o.image_id == image) and (object is None or object in (o.object_id, o.object_name))
                 and (not path or within(o.kind, path)) and (t0 is None or time_key(o) >= t0) and (t1 is None or time_key(o) <= t1)]
 
     def observed_things(self, kind: Optional[str] = None) -> list[dict[str, Any]]:
-        """The things and their flows (first, last, how their activity went, how far they moved)."""
+        """
+        The things and their flows (first, last, how their activity went, how far they moved). A shared store:
+        those of a class (`kind`, every one asked of it), else those of the records read (around the images opened).
+        """
         b = self._b()
         path = path_of(kind) if kind is not None else None
+        if b.scoped and path:
+            of_kind = self._fetch(b, RecordQuery(kinds=(kind_of(path),), living=True))
+            self._run("観測記録の読み込み", lambda x: x.fetch_things(o.object_id for o in of_kind))
         return [flow_out(f) for f in b.flows() if not path or within(f.kind, path)]
 
     def observation_images(self) -> list[dict[str, Any]]:
@@ -193,12 +221,17 @@ class ObservationApi:
         x, y = _num(lon, "lon", -180, 180), _num(lat, "lat", -90, 90)
         if image is not None:
             self._image(b, image)
+            if b.needs_around(image):
+                self._run("観測記録の読み込み", lambda x: x.read_around(image))
         found = b.candidates(x, y, _str(kind, "kind") or "", _maybe_num(length, "length", 0), _maybe_num(heading, "heading", -360, 360), image)
         return [{"objectId": c.object_id, "name": c.name, "kind": c.kind, "distance": js_round(c.distance),
                  "score": js_round(c.score * 1000) / 1000, "reasons": list(c.reasons), "record": record_out(c.source)} for c in found]
 
     def checked_areas(self, image: Optional[str] = None, deleted: bool = False) -> list[dict[str, Any]]:
+        """The checked areas (of an image; a shared store without one: those read, of the images opened)."""
         b = self._b()
+        if b.scoped and image is not None:
+            self._run("確認範囲の読み込み", lambda x: x.fetch_areas(image_ids=[str(image)]))
         return [area_out(a) for a in b.areas if (deleted or a.deleted_at is None) and (image is None or a.image_id == image)]
 
     # ---- writing -------------------------------------------------------
@@ -254,13 +287,19 @@ class ObservationApi:
         n = (_str(name, "name") or "").strip()
         if not n:
             raise TypeError("name を指定")
+        if b.scoped and not any(o.object_id == object_id for o in b.records):
+            self._run("観測記録の読み込み", lambda x: x.fetch_things([str(object_id)]))
         if not any(o.object_id == object_id for o in b.records):
             raise LookupError(f"モノ「{object_id}」なし")
         return self._said(b, self._run("モノの名前の変更", lambda bk: bk.rename(object_id, n)), "名前")
 
     def delete_observations(self, ids: Any) -> int:
         b = self._b()
-        rows = [self._record(b, i) for i in (ids if isinstance(ids, (list, tuple)) else [ids])]
+        wanted = list(ids if isinstance(ids, (list, tuple)) else [ids])
+        known = {o.id for o in b.records}
+        if b.scoped and any(i not in known for i in wanted):
+            self._fetch(b, RecordQuery(ids=tuple(str(i) for i in wanted if i not in known)))
+        rows = [self._record(b, i) for i in wanted]
         self._said(b, self._run("観測記録の削除", lambda bk: bk.remove(rows)), "削除")
         return len(rows)
 
@@ -282,6 +321,7 @@ class ObservationApi:
         return area_out(self._said(b, area, "確認範囲"))
 
     def delete_checked_areas(self, ids: Any) -> int:
+        """Deletes checked areas (a shared store: of those read, checked_areas(image) first for an image not opened)."""
         b = self._b()
         want = {str(i) for i in (ids if isinstance(ids, (list, tuple)) else [ids])}
         rows = [a for a in b.areas if a.id in want and a.deleted_at is None]
@@ -300,6 +340,7 @@ class ObservationApi:
             start=_time(start, "start") if start is not None else None, end=_time(end, "end") if end is not None else None,
             kind=str(kind or ""), confidence=str(confidence or ""), map=bool(map), flows=bool(flows), areas=bool(areas), records=bool(records),
         )
+        self._run("報告書の記録の読み込み", lambda x: x.read_for_report(options))
         selection = b.report_selection(options)
         # The QGIS side draws the map; without it, none.
         html = self._report(options) if self._report is not None else b.report(options)

@@ -35,6 +35,10 @@ class RecordImportDialog(QDialog):
         super().__init__(parent)
         fit_text(self)
         self.dock = dock
+        #: A shared store's records asked for the rows (the question they answer), and the question being asked.
+        self._read_for = None
+        self._read_rows: list = []
+        self._asking = None
         self.setWindowTitle(self.tr("観測記録の一括取込み"))
         self.resize(820, 720)
         self.columns: list[str] = []
@@ -214,11 +218,32 @@ class RecordImportDialog(QDialog):
         if not mapping.get("image_id") and not mapping.get("id"):
             self.status.setText(self.tr("画像ID の列を選ぶ"))
             return []
-        if not self.dock.records_ready(self.try_run):
+        if book.scoped:
+            # A shared store: the records of the rows' ids, images and names asked of it first (what is there already matters).
+            query = ri.query_for(self.rows, mapping, book.kept_taxonomy())
+            if self._read_for != query:
+                if self._asking != query:
+                    self._asking = query
+
+                    def done(rows) -> None:
+                        self._asking = None
+                        self._read_for, self._read_rows = query, list(rows or [])
+                        self.try_run()
+
+                    def failed(message: str) -> None:
+                        self._asking = None
+                        self.status.setText(self.tr("観測記録の読み込みの失敗: {m}").format(m=message))
+
+                    self.dock.fetch(self.tr("取り込む記録の読み込み"), lambda b: b.fetch(query) if not query.everything() else [], done, failed)
+                self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試し読み）"))
+                return []
+            records = list(self._read_rows)
+        elif not self.dock.records_ready(self.try_run):
             # Not read yet (no image chosen in 「観測記録」): tried once they are (what is there already matters).
             self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試し読み）"))
             return []
-        records = list(book.records)
+        else:
+            records = list(book.records)
         times = {o.image_id: o.image_time for o in records if o.image_time is not None}
         names = {o.image_id: o.image_name for o in records if o.image_name}
         for image in book.images:
@@ -285,6 +310,7 @@ class RecordImportDialog(QDialog):
 
     def _finish(self, text: str) -> None:
         self._running = False
+        self._read_for = None  # what is there has changed: asked again before the next dry run
         self.try_button.setEnabled(True)
         self.planned = []
         self.import_button.setEnabled(False)

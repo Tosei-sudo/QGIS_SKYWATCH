@@ -870,7 +870,7 @@ class MikagePlugin:
 
         for key, start in (("satellites", satellites), ("requests", requests), ("events", events)):
             self.preloader.add(key, PRELOAD_ITEMS[key], start)
-        self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の保存先）"), self._warm_offline_cache, always=True)
+        self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の分類体系）"), self._warm_offline_cache, always=True)
         self.preloader.finished.connect(self._preload_finished)
 
     def _release_tasks(self) -> None:
@@ -1226,8 +1226,11 @@ class MikagePlugin:
         feed.on_removed = observations.refresh_reported
 
         def open_reported(record_id: str) -> None:
-            if not observations.records_ready(lambda: open_reported(record_id)):
-                return  # opened once read (no image chosen in 「観測記録」 yet)
+            if not observations.with_records([record_id], lambda: open_read(record_id)):
+                return  # opened once read (asked of a shared store, or no image chosen in 「観測記録」 yet)
+            open_read(record_id)
+
+        def open_read(record_id: str) -> None:
             o = observations.book.record(record_id) if observations.book else None
             if o is None:
                 self.iface.messageBar().pushWarning(tr("通報"), plain_tip(tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id)))
@@ -1608,8 +1611,9 @@ class MikagePlugin:
 
     def _warm_offline_cache(self, then, failed) -> bool:
         """
-        With the reads ahead (unless `preload` is false): every observation store's records, checked areas and
-        classification are read once, so they are in the offline cache even for a store not chosen today.
+        With the reads ahead (unless `preload` is false): every observation store's classification is read once, so
+        it is in the offline cache even for a store not chosen today. The records and checked areas are not (2026-11-18,
+        200 people: none reads a whole table; those of the images opened are kept as they are read).
         """
         context = self.context
         config = context.config
@@ -1622,9 +1626,8 @@ class MikagePlugin:
                               context.token_for, local=False)
             n = 0
             for s in sets:
-                # Only the server's tables (an area or classification kept in the GeoPackage is not read from this thread).
-                reads = [s.records.load] + ([s.areas.load] if s.config.areas else []) + \
-                    ([s.taxonomy.load, s.taxonomy.load_fields] if s.config.taxonomy_table else [])
+                # Only the server's classification (one kept in the GeoPackage is not read from this thread).
+                reads = [s.taxonomy.load, s.taxonomy.load_fields] if s.config.taxonomy_table else []
                 for read in reads:
                     if task.isCanceled():
                         return n

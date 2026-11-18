@@ -125,8 +125,8 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     prefs = Prefs()
     book = ObservationBook(store, LocalAreaStore(db, "共有"), LocalTaxonomyStore(db, "共有"), ObservationVocabulary(),
                            observer=lambda: "田中", prefs=prefs)
-    book.reload()
     book.set_open_images([ObservedImage("img", "img.tif", day(1), None, "L1")], "L1")
+    book.reload()
     assert len(book.living()) == 2
 
     switch.down = True

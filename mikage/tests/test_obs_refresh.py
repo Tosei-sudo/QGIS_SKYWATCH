@@ -30,8 +30,9 @@ def book_of(store, tmp_path, said=None):
     db = open_local(str(tmp_path / "o.gpkg"))
     b = ObservationBook(store, LocalAreaStore(db, "x"), LocalTaxonomyStore(db, "x"), ObservationVocabulary(), observer=lambda: "田中",
                         prefs=Prefs(), say=(said if said is not None else []).append)
-    b.reload()
+    # The image first: a shared store's records are read around the image recorded on.
     b.set_open_images([ObservedImage("img", "img.tif", day(1), None, "L1")], "L1")
+    b.reload()
     return b, db
 
 

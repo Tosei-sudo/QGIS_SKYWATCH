@@ -14,7 +14,7 @@ from typing import Optional
 
 from qgis.core import QgsFeatureRequest, QgsMapLayerProxyModel, QgsPointXY, QgsRectangle, QgsWkbTypes
 from qgis.gui import QgsMapLayerComboBox, QgsRubberBand
-from qgis.PyQt.QtCore import QDateTime, Qt, QTime
+from qgis.PyQt.QtCore import QDateTime, Qt, QTime, QTimer
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -28,6 +28,7 @@ from ..core.obs.export import (
 )
 from ..core.obs.flows import now_ms
 from ..core.obs.place_cache import areas_at, points_of
+from ..core.obs.scope import RecordQuery
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
@@ -186,8 +187,21 @@ class ExportDialog(QDialog):
             "format": self.format_select, "basis": self.basis_select, "place": self.place_select, "presence": self.presence_select,
             "confidence": self.confidence_select,
         })
+        #: A shared store's records are asked of it for the period and place (never every record): those read,
+        #: for which question, and the question waiting to be asked (once the form has stopped changing).
+        self._read: tuple = (None, [])
+        self._wanted: Optional[RecordQuery] = None
+        self._asking: Optional[RecordQuery] = None
+        self._ask_timer = QTimer(self)
+        self._ask_timer.setSingleShot(True)
+        self._ask_timer.setInterval(500)
+        self._ask_timer.timeout.connect(self._ask)
         self.reset()
         self.memory.restore()
+        book = dock.book
+        if book is not None and book.scoped and not self.start_check.isChecked() and not self.end_check.isChecked():
+            # A shared store: from today, unless another period is chosen.
+            self.start_check.setChecked(True)
         self._place_changed()
         self.count()
 
@@ -424,18 +438,63 @@ class ExportDialog(QDialog):
             deleted=self.deleted_check.isChecked(),
         ), ""
 
+    @staticmethod
+    def query_of(flt: ExportFilter) -> RecordQuery:
+        """What a shared store is asked for a filter: its period, the box around its place (the rest is tested here)."""
+        box = None
+        if flt.polygons:
+            points = [p for rings in flt.polygons for ring in rings for p in ring]
+            if points:
+                box = (min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points))
+        return RecordQuery(basis=flt.basis, start=flt.start, end=flt.end, box=box, living=not flt.deleted)
+
     def records(self) -> tuple[list, str]:
         book = self.dock.book
         if book is None:
             return [], self.tr("観測記録の保存先なし")
-        if not self.dock.records_ready(self._records_read):
-            # Not read yet (no image chosen in 「観測記録」): counted again once they are.
-            return [], self.tr("観測記録を読み込み中…")
         flt, why = self.options()
         if flt is None:
             return [], why
+        if book.scoped:
+            query = self.query_of(flt)
+            if query.everything():
+                return [], self.tr("期間か場所を指定（共有の保存先の全件は読み込まない）")
+            if self._read[0] != query:
+                self._wanted = query
+                self._ask_timer.start()
+                return [], self.tr("観測記録を読み込み中…")
+            rows = self._read[1]
+        elif not self.dock.records_ready(self._records_read):
+            # Not read yet (no image chosen in 「観測記録」): counted again once they are.
+            return [], self.tr("観測記録を読み込み中…")
+        else:
+            rows = book.records
         taxa = book.taxonomy()
-        return select_records(book.records, flt, book.confidences(), lambda kind: self.dock._kind_path(kind, taxa)), ""
+        return select_records(rows, flt, book.confidences(), lambda kind: self.dock._kind_path(kind, taxa)), ""
+
+    def _ask(self) -> None:
+        """Asks the shared store for the records of the form's period and place (one question at a time)."""
+        query = self._wanted
+        if query is None or self._asking is not None or self._read[0] == query:
+            return
+        self._asking = query
+
+        def done(rows) -> None:
+            self._asking = None
+            self._read = (query, list(rows or []))
+            if self._wanted == query:
+                self._records_read()
+            else:
+                self._ask()
+
+        def failed(message: str) -> None:
+            self._asking = None
+            if self._wanted == query:
+                self.count_label.setText(self.tr("読み込みの失敗: {m}").format(m=message))
+            else:
+                self._ask()
+
+        self.dock.fetch(self.tr("エクスポートする記録の読み込み"), lambda b: b.fetch(query), done, failed)
 
     def _records_read(self) -> None:
         """The records just read: the 大分類 they use listed, and those that match counted."""

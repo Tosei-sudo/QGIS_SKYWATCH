@@ -13,7 +13,7 @@ import re
 from typing import Callable, Optional
 
 from qgis.core import QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY, QgsRectangle
-from qgis.PyQt.QtCore import QBuffer, QByteArray, QDate, QDateTime, QIODevice, QPointF, QSize, Qt, QTime, QUrl
+from qgis.PyQt.QtCore import QBuffer, QByteArray, QDate, QDateTime, QIODevice, QPointF, QSize, Qt, QTime, QTimer, QUrl
 from qgis.PyQt.QtGui import QImage, QPainter, QTextDocument
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -208,7 +208,59 @@ class ReportDialog(QDialog):
             "map": self.map_check, "flows": self.flows_check, "areas": self.areas_check, "records": self.records_check,
         })
         self.memory.restore()
+        #: A shared store's records are asked of it for the period and class (never every record): for which options
+        #: they were read, the options waiting to be asked for, and what to do once read.
+        self._read_for: Optional[tuple] = None
+        self._asking: Optional[tuple] = None
+        self._then: Optional[Callable[[], None]] = None
+        self._ask_timer = QTimer(self)
+        self._ask_timer.setSingleShot(True)
+        self._ask_timer.setInterval(500)
+        self._ask_timer.timeout.connect(self._ask)
+        if book.scoped and not self.start_check.isChecked() and not self.end_check.isChecked():
+            # A shared store: from today, unless another period is chosen.
+            self.start_check.setChecked(True)
         self.count()
+
+    @staticmethod
+    def _key(o: ReportOptions) -> tuple:
+        return (o.start, o.end, o.kind)
+
+    def _ready(self, o: ReportOptions) -> Optional[str]:
+        """None when what the report holds is here; else why not (a shared store is asked meanwhile)."""
+        if not self.book.scoped:
+            return None
+        if self.book.report_query(o).everything():
+            return self.tr("期間か分類を指定（共有の保存先の全件は読み込まない）")
+        if self._read_for != self._key(o):
+            self._ask_timer.start()
+            return self.tr("観測記録を読み込み中…")
+        return None
+
+    def _ask(self) -> None:
+        o = self.options()
+        key = self._key(o)
+        if self._asking is not None or self._read_for == key or self.book.report_query(o).everything():
+            return
+        self._asking = key
+
+        def done(_r) -> None:
+            self._asking = None
+            self._read_for = key
+            if self._key(self.options()) != key:
+                self._ask()
+                return
+            self.count()
+            then, self._then = self._then, None
+            if then is not None:
+                then()
+
+        def failed(message: str) -> None:
+            self._asking = None
+            self._then = None
+            self.count_label.setText(self.tr("読み込みの失敗: {m}").format(m=message))
+
+        self.dock.fetch(self.tr("報告書の記録の読み込み"), lambda b: b.read_for_report(o), done, failed)
 
     def options(self) -> ReportOptions:
         """What the form says."""
@@ -227,6 +279,10 @@ class ReportDialog(QDialog):
 
     def count(self) -> None:
         o = self.options()
+        why = self._ready(o)
+        if why:
+            self.count_label.setText(why)
+            return
         s = self.book.report_selection(o)
         self.count_label.setText(f"モノ {len(s.flows)}・記録 {len(s.records)}・画像 {len(s.images)}{f'・確認範囲 {len(s.areas)}' if o.areas else ''}")
 
@@ -237,6 +293,12 @@ class ReportDialog(QDialog):
         """Makes the report (its map first, when asked), then saves or prints it."""
         self.memory.save()
         o = self.options()
+        why = self._ready(o)
+        if why:
+            # Made once read.
+            self._then = lambda: self.make(then)
+            self._say(why)
+            return
         selection: ReportSelection = self.book.report_selection(o)
         if not selection.records and not self.book.areas:
             self._say(self.tr("該当する記録なし"))

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsGeometry, QgsMessageLog, QgsPointXY, QgsProject, QgsRasterLayer, QgsRectangle,
@@ -45,6 +45,7 @@ from ..core.obs.flows import (
 from ..core.obs.geo import get_distance, js_round, km_text
 from ..core.obs.mine import is_mine, my_names
 from ..core.obs.model import Observation
+from ..core.obs.scope import RecordQuery
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
 from ..core.obs.taxonomy import (
@@ -210,6 +211,9 @@ class ObservationDock(PluginDock):
         #: The books whose records are being read, and what waits for them (by id(book)). The records are read only
         #: once needed (tsudo 2026-11-10): an image chosen here, or something that uses them all (通報, エクスポート…).
         self._reading: set[int] = set()
+        #: Books reading the records around their image (one read at a time each), and things whose whole flow is read.
+        self._reading_around: set[int] = set()
+        self._whole_flows: set[tuple[int, str]] = set()
         self._after_read: dict[int, list] = {}
         #: Whether the dock shows only its note (no image chosen, or no store): None before the first render.
         self._idle: Optional[bool] = None
@@ -1025,6 +1029,8 @@ class ObservationDock(PluginDock):
         from .obs_report_dialog import ReportMap
 
         book = self.book
+        # What the report holds (a shared store: asked of it for the period and class).
+        self.run_now(self.tr("報告書の記録の読み込み"), lambda b: b.read_for_report(options))
         selection = book.report_selection(options)
         url: dict[str, Optional[str]] = {}
         if options.map and (selection.records or selection.areas):
@@ -1089,12 +1095,57 @@ class ObservationDock(PluginDock):
 
         self.do(self.tr("観測記録の読み込み"), work, after=after, failed=failed)
 
+    def _read_around(self) -> None:
+        """The records around the image recorded now (a shared store), read in a task when not read yet."""
+        book = self.book
+        if book is None or not book.needs_around() or id(book) in self._reading_around:
+            return
+        key = id(book)
+        reading = self._reading_around
+        reading.add(key)
+
+        def work(b: ObservationBook):
+            try:
+                return b.read_around()
+            finally:
+                reading.discard(key)
+
+        self.do(self.tr("まわりの記録の読み込み"), work, failed=lambda _m: reading.discard(key))
+
+    def fetch(self, description: str, work: Callable[[ObservationBook], Any], then: Callable[[Any], None],
+              failed: Optional[Callable[[str], None]] = None) -> None:
+        """
+        Reads what a feature needs of the records (`work(book)`: book.fetch and the like, scope.py) and
+        gives it to `then`: at once for the local store, else in a task (`failed` gets the reason when it fails).
+        """
+        if self.book is None:
+            if failed is not None:
+                failed(self.tr("観測記録の保存先なし"))
+            return
+        self.do(description, work, after=then, failed=failed)
+
+    def with_records(self, ids: Sequence[str], then: Callable[[], Any]) -> bool:
+        """
+        Whether the records of `ids` are here to be used now (book.record): a
+        shared store's are asked of it first, as they are now (then `then`
+        runs, and False is returned); a local store's once read.
+        """
+        book = self.book
+        ids = tuple(dict.fromkeys(i for i in ids if i))
+        if book is None or not ids:
+            return True
+        if not book.scoped:
+            return self.records_ready(then)
+        self.fetch(self.tr("観測記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=ids)), lambda _r: then(), lambda _m: None)
+        return False
+
     def records_ready(self, again: Optional[Callable[[], Any]] = None) -> bool:
         """
-        Whether the records are read, for what uses them all (通報, エクスポート,
-        取込み, 引き継ぎ, イベント, 分類体系…): they are read only once needed,
-        so the first time they are read now. True at once for the local store
-        (read at once); else False, and `again` runs once they are read.
+        Whether the book is read (the classification, and the records: all of
+        the local store's; a shared store's around the image recorded on, the
+        rest asked per feature with `fetch`): read only once needed, so the
+        first time it is read now. True at once for the local store (read at
+        once); else False, and `again` runs once it is read.
         """
         book, s = self.book, self.store_set
         if book is None or s is None or book.loaded:
@@ -2219,10 +2270,20 @@ class ObservationDock(PluginDock):
         self.do(self.tr("確認範囲の復元"), lambda b: b.restore_areas(rows))
 
     def choose(self, object_id: Optional[str]) -> None:
-        """Shows a thing's flow under the list, and its track on the map (None: closes it)."""
+        """
+        Shows a thing's flow under the list, and its track on the map (None:
+        closes it). A shared store's thing: its whole flow is read first (only
+        the records around the images were).
+        """
         if object_id != self.chosen:
             self.flow_more.setChecked(False)
         self.chosen = object_id or None
+        book = self.book
+        if book is not None and book.scoped and self.chosen and (id(book), self.chosen) not in self._whole_flows:
+            self._whole_flows.add((id(book), self.chosen))
+            chosen = self.chosen
+            self.do(self.tr("モノの記録の読み込み"), lambda b: b.fetch_things([chosen]),
+                    failed=lambda _m: self._whole_flows.discard((id(book), chosen)))
         self.render()
 
     def toggle_flow(self, object_id: str) -> None:
@@ -2300,7 +2361,16 @@ class ObservationDock(PluginDock):
             self.remove_all_button.setProperty("armed", True)
             self.remove_all_button.setText(self.tr("再度押すと削除"))
             return
-        self.remove(list(flow.observations))
+        object_id = flow.object_id
+
+        def every(b: ObservationBook):
+            # Every record of the thing (a shared store holds more than those read here).
+            if not b.read_whole([object_id]):
+                return False
+            whole = b.flow(object_id)
+            return b.remove(list(whole.observations)) if whole else True
+
+        self.do(self.tr("記録の削除"), every)
 
     def _fit(self, points: list, buffer_m: float = 200) -> None:
         if not points:
@@ -2891,6 +2961,9 @@ class ObservationDock(PluginDock):
             self._read_records()
             if book.loaded:
                 return  # the local store: read and shown at once
+        elif book.needs_around():
+            # Another image of a shared store: its records and those around it are read now (shown once read).
+            self._read_around()
         if not self.status.text() and book.status:
             self.status.setText(book.status)
         # Only what the list shows (大分類), which is all 「すべて継続」 and 「確認範囲内…を不在」 record.
@@ -2928,7 +3001,14 @@ class ObservationDock(PluginDock):
         shown_as = ("image", image.id if image is not None else None)
         kept = self._chosen_rows() if shown_as == self._shown_as else None
         scrolled = self.table.verticalScrollBar().value()
-        self._render_image(here, carried, inside)
+        # The columns sized once when filled: sized to the contents as each cell is set, a list of a few hundred
+        # rows (a car park: 2026-11-18, 300 rows took 20 s) costs a pass over every row per cell.
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        try:
+            self._render_image(here, carried, inside)
+        finally:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._shown_as = shown_as
         if kept is not None:
             self._choose_rows(*kept)

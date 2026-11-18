@@ -23,11 +23,11 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Optional, Sequence
 
-from .flows import flows, living, next_name, now_ms
+from .flows import flows, living, now_ms
 from .geo import get_distance
 from .image_time import parse_time
 from .model import Observation, new_object_id, new_observation_id
-from .taxonomy import find, kind_of, path_of
+from .taxonomy import find, kind_of, name_label_of, path_of
 
 #: The items a column can be: key → (label, names a column is guessed by (any case)).
 TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
@@ -169,6 +169,32 @@ def _get(row: SourceRow, mapping: dict[str, str], key: str) -> Any:
     return row.values.get(column) if column else None
 
 
+def _individual(taxonomy: Sequence[Any], name: str, kind: str) -> bool:
+    """Whether a name names one thing of a kind: an individual's (its class has a `nameLabel`), not a class's name."""
+    return bool(name) and name not in path_of(kind) and name != "モノ" and bool(name_label_of(list(taxonomy), path_of(kind)))
+
+
+def query_for(rows: Iterable[SourceRow], mapping: dict[str, str], taxonomy: Sequence[Any] = ()):
+    """
+    What a shared store is asked before planning (scope.RecordQuery): the
+    records of the rows' 観測ID, images and individuals' names (the records
+    there already are left out or changed; a name links to its thing).
+    """
+    from .scope import RecordQuery
+
+    ids, images, names = [], [], []
+    for row in rows:
+        record_id, image_id = _text(_get(row, mapping, "id")), _text(_get(row, mapping, "image_id"))
+        name, kind = _text(_get(row, mapping, "object")), kind_of(path_of(_text(_get(row, mapping, "kind"))))
+        if record_id:
+            ids.append(record_id)
+        if image_id:
+            images.append(image_id)
+        if _individual(taxonomy, name, kind):
+            names.append(name)
+    return RecordQuery(ids=tuple(dict.fromkeys(ids)), image_ids=tuple(dict.fromkeys(images)), names=tuple(dict.fromkeys(names)))
+
+
 def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[Observation], confidences: Sequence[str] = (),
          taxonomy: Sequence[Any] = (), update_existing: bool = False, image_times: Optional[dict[str, int]] = None,
          image_names: Optional[dict[str, str]] = None) -> list[Planned]:
@@ -184,9 +210,9 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
     image_times = dict(image_times or {})
     image_names = dict(image_names or {})
     levels = [c for c in confidences if c]
-    names = {f.name: f for f in flows(records)}
+    # Only individuals are told apart by name (tsudo 2026-11-18): a name links to a thing of a class with a `nameLabel`.
+    names = {f.name: f for f in flows(records) if _individual(taxonomy, f.name, f.kind)}
     made: dict[str, tuple[str, str]] = {}
-    taken = set(names)
     out: list[Planned] = []
     planned_new: list[Observation] = []
     for row in rows:
@@ -296,15 +322,17 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
         if twin is not None:
             out.append(Planned(row.number, DUPLICATE, f"同じ画像・種別・場所に記録あり（{twin.object_name}）", warnings, twin))
             continue
-        if name and name in names:
+        default = not name or name in path_of(kind) or name == "モノ"
+        if name and name in names and _individual(taxonomy, name, kind):
             object_id, object_name = names[name].object_id, names[name].name
-        elif name and name in made:
+        elif not default and name in made:
+            # The same name twice in the file: one thing (but a class's name, given when none is typed).
             object_id, object_name = made[name]
         else:
             object_id = new_object_id()
-            object_name = name or next_name(kind, taken)
-            made[object_name] = (object_id, object_name)
-        taken.add(object_name)
+            object_name = name or (path_of(kind)[-1] if path_of(kind) else "モノ")
+            if not default:
+                made[object_name] = (object_id, object_name)
         if any(o.image_id == image_id and o.object_id == object_id for o in alive) or any(
                 o.image_id == image_id and o.object_id == object_id for o in planned_new):
             out.append(Planned(row.number, DUPLICATE, f"{object_name} はこの画像に記録済み", warnings))

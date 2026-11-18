@@ -41,7 +41,7 @@ from ..core.obs.mine import (
     DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, is_mine, observer_names, root_of, roots_text, select, since_of,
 )
 from ..core.obs.model import Observation
-from ..qgis_io.tasks import run_task
+from ..core.obs.scope import RecordQuery
 from .docks import plain_label
 from .fit import fit_text
 from .list_views import column_menus
@@ -309,9 +309,10 @@ class MyRecordsDialog(QDialog):
 
     def reload(self, force: bool = False) -> None:
         """
-        The records again: the dock's when it has read them (or reads them at
-        once: the local store); else one's own of the period, asked of the
-        layer in a task; everyone's: the dock reads them all first.
+        The records again: a local store's, all read (at once); a shared
+        store's made by the people chosen (anyone: everyone's) in the period,
+        asked of the layer in a task (never every record: everyone's of all
+        time is not read).
         """
         dock = self.dock
         book = dock.book
@@ -321,25 +322,28 @@ class MyRecordsDialog(QDialog):
         if book is None:
             self._take([], "", self.tr("保存先なし（設定ファイルの observationStores）"))
             return
-        s = dock.store_set
-        if force and book.loaded and s is not None and s.remote:
-            dock.refresh(force=True)
-        if book.loaded:
-            self._take(list(book.records), "book")
-            return
-        names = self.names()
-        since, _until = self.period_range()
-        load = getattr(s.records, "load_made", None) if s is not None and s.remote else None
-        if load is None or not names:
+        if not book.scoped:
             if dock.records_ready(lambda: self.reload()):
                 self._take(list(book.records) if book.loaded else [], "book")
             else:
                 self._say(self.tr("記録を読み込み中…"))
             return
+        names = self.names()
+        since, _until = self.period_range()
+        query = RecordQuery(observers=tuple(names), start=since, basis="created")
+        if query.everything():
+            self._made_key = None
+            self._take([], "made", self.tr("全員の全期間は読み込まない（期間を選ぶ）"))
+            return
         key = (tuple(n.casefold() for n in names), since)
         if not force and self.source == "made" and self._made_key == key:
+            # The same people and period: the copies kept by the dock (changed there since) shown.
+            known = {o.id: o for o in book.records}
+            self.records = [known.get(o.id, o) for o in self.records]
             self.render()
             return
+        if force and book.loaded:
+            dock.refresh(force=True)
         self._asked += 1
         asked = self._asked
         self._say(self.tr("記録を読み込み中…"))
@@ -347,19 +351,14 @@ class MyRecordsDialog(QDialog):
         def done(made) -> None:
             if asked != self._asked or self.dock.book is not book:
                 return
-            if made is None:
-                # Offline: the store read whole (its copy on this computer, with what waits to be sent).
-                if dock.records_ready(lambda: self.reload()):
-                    self._take(list(book.records), "book")
-                return
             self._made_key = key
-            self._take(list(made), "made")
+            self._take(list(made or []), "made")
 
         def failed(message: str) -> None:
             if asked == self._asked:
                 self._say(self.tr("記録の読み込みに失敗: {m}").format(m=message))
 
-        run_task(self.tr("自分の記録の読み込み"), lambda _t: load(names, since), done, failed)
+        dock.fetch(self.tr("自分の記録の読み込み"), lambda b: b.fetch(query), done, failed)
 
     def _take(self, records: list[Observation], source: str, note: str = "") -> None:
         self.records = records
@@ -520,7 +519,7 @@ class MyRecordsDialog(QDialog):
         """`act` on the dock's own records of `ids`, once it has read them (the list may hold an older copy)."""
         dock = self.dock
 
-        def go() -> None:
+        def go(_read=None) -> None:
             book = dock.book
             if book is None:
                 return
@@ -531,7 +530,13 @@ class MyRecordsDialog(QDialog):
                 return
             act(found)
 
-        if dock.records_ready(go):
+        book = dock.book
+        if book is not None and book.scoped:
+            # As they are on the server now (the list may hold an older copy).
+            self._say(self.tr("記録を読み込み中…（読み込み後に{what}）").format(what=what))
+            dock.fetch(self.tr("記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=tuple(ids))), go,
+                       lambda m: self._say(self.tr("記録の読み込みに失敗: {m}").format(m=m)))
+        elif dock.records_ready(go):
             go()
         else:
             self._say(self.tr("記録を読み込み中…（読み込み後に{what}）").format(what=what))
