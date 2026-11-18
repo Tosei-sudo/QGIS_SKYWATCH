@@ -216,3 +216,60 @@ def test_color_classes_and_editing_them():
     assert [c["value"] for c in resize_classes(equal, 2)["classes"]] == [10, 40]
     assert recolor(equal, "red")["classes"][0]["color"] == [0, 0, 0, 255]
     assert format_class_value(0.125, 0.1) == "0.125" and format_class_value(2.5, 100) == "3" and format_class_value(-2.5, 100) == "-3"
+
+
+def test_per_channel_corrections_are_one_lookup_as_process_gives_them():
+    from mikage.core.enhance.process import channel_tables
+
+    img = image(30, 40, seed=4)
+    gray = img.copy()
+    gray[..., 1] = gray[..., 2] = gray[..., 0]
+    per_channel = [
+        Pipeline(),
+        Pipeline().add("contrast", 0.3).add("gamma", 1.4),
+        Pipeline().add("exposure", -0.6).add("levels", {"inBlack": 0.1, "inWhite": 0.8, "gamma": 1.2}).add("temperature", 0.4),
+        Pipeline().add("shadows", 0.5).add("highlights", -0.4).add("tint", -0.3).add("brightness", 0.1),
+        Pipeline().add("curve", {"points": [[0, 0], [0.4, 0.6], [1, 1]]}),
+        Pipeline().add("stretch", {"black": [10, 20, 30], "white": [200, 210, 220]}),
+    ]
+    for p in per_channel:
+        for mode, picture in (("rgb", img), ("gray", gray)):
+            tables = channel_tables(p, mode)
+            assert tables is not None and all(t.dtype == np.uint8 and t.shape == (256,) for t in tables)
+            got = picture.copy()
+            for c in range(3):
+                got[..., c] = tables[c if mode == "rgb" else 0][picture[..., c]]
+            assert np.array_equal(got, process(picture, p, mode=mode)), (p.ops, mode)
+    # Steps mixing channels or pixels, and DRA not resolved yet: no tables.
+    for p in (Pipeline().add("saturation", 0.2), Pipeline().add("sharpen", {"amount": 1, "radius": 1}),
+              Pipeline().add("autoStretch", {})):
+        assert channel_tables(p, "rgb") is None
+    # Gray drops the colour-only steps, as process does.
+    assert channel_tables(Pipeline().add("saturation", 0.2), "gray") is not None
+
+
+def test_integer_values_are_counted_once_for_the_same_raw_histogram():
+    rng = np.random.default_rng(11)
+    for dtype, lo, hi in ((np.uint16, 0, 65535), (np.int16, -32768, 32767), (np.uint8, 0, 255)):
+        bands = [np.clip(rng.normal((hi + lo) / 2 + 40 * c, (hi - lo) / 40, (70, 60)), lo, hi).astype(dtype) for c in range(3)]
+        bands[0][0, :20] = hi  # an untagged fill value far from the rest
+        bands[1][3, :5] = lo
+        valid = valid_mask(bands)
+        valid[10:14] = False
+        got = sample_raster_histogram(bands, valid)
+        want = sample_raster_histogram([b.astype(np.float64) for b in bands], valid)
+        assert got.range == want.range and got.count == want.count
+        assert all(np.array_equal(a, b) for a, b in zip(got.bins, want.bins))
+        assert compute_raster_stretch(got, {"lowPercent": 1, "highPercent": 1}) == \
+            compute_raster_stretch(want, {"lowPercent": 1, "highPercent": 1})
+
+
+def test_raw_codes_come_from_a_kept_table_for_8_and_16_bit():
+    from mikage.core.enhance.raster import code_table, to_codes
+
+    v = np.array([[0, 999, 1000, 1500, 2000, 65535]], dtype=np.uint16)
+    assert to_codes(v, 1000, 2000).tolist() == [[0, 0, 0, 128, 255, 255]]
+    assert code_table(np.uint16, 1000, 2000)[0] is code_table(np.uint16, 1000.0, 2000.0)[0]
+    s = np.array([[-32768, -100, 0, 100]], dtype=np.int16)
+    assert to_codes(s, -100, 100).tolist() == to_codes(s.astype(np.float64), -100, 100).tolist() == [[0, 0, 127, 255]]
+    assert code_table(np.float32, 0, 1) is None

@@ -7,6 +7,7 @@ pixels that count (not no data, not NaN, not transparent).
 """
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -45,13 +46,42 @@ def _bin_of(v: np.ndarray, rng: tuple, n: int) -> np.ndarray:
     return np.clip(k, 0, n - 1).astype(np.int64)
 
 
-def _histogram(values: Sequence[np.ndarray], rng: tuple, n: int, skip: Sequence[Sequence[float]]) -> list:
+def _histogram(values: Sequence[np.ndarray], rng: tuple, n: int, skip: Sequence[Sequence[float]],
+               weights: Optional[Sequence[Optional[np.ndarray]]] = None) -> list:
     out = []
     for c, v in enumerate(values):
+        w = weights[c] if weights is not None else None
         if skip[c]:
-            v = v[~np.isin(v, skip[c])]
-        out.append(np.bincount(_bin_of(v, rng, n), minlength=n).astype(np.float64))
+            keep = ~np.isin(v, skip[c])
+            v = v[keep]
+            w = w[keep] if w is not None else None
+        out.append(np.bincount(_bin_of(v, rng, n), weights=w, minlength=n).astype(np.float64))
     return out
+
+
+#: Integer types whose values are counted once each (a table of at most 65536) before the bins are made.
+_COUNTED = (np.uint8, np.uint16, np.int8, np.int16)
+
+
+def _counted(band, valid: np.ndarray) -> tuple:
+    """
+    A band's values that count, as floats: for 8- and 16-bit integers each
+    value once with how many pixels have it (the same bins, from a table
+    instead of every pixel), for other types every value (weights None).
+    """
+    a = np.asarray(band)
+    v = a[valid]
+    if a.dtype not in _COUNTED or v.size == 0:
+        return v.astype(np.float64), None
+    lowest = int(np.iinfo(a.dtype).min)
+    counts = np.bincount(v.astype(np.int32) - lowest if lowest else v)
+    seen = np.nonzero(counts)[0]
+    return (seen + lowest).astype(np.float64), counts[seen].astype(np.float64)
+
+
+def _count(v: np.ndarray, w: Optional[np.ndarray], x: float) -> float:
+    """How many pixels have the value `x`."""
+    return float(w[v == x].sum()) if w is not None else float(np.count_nonzero(v == x))
 
 
 def _quantile(bins: np.ndarray, q: float, rng: tuple) -> Optional[float]:
@@ -72,20 +102,22 @@ def sample_raster_histogram(bands: Sequence[np.ndarray], valid: np.ndarray, bins
     the 1–99 % range while a few outliers spread them thin.
     """
     n = max(2, int(bins))
-    values = [np.asarray(b, dtype=np.float64)[valid] for b in bands]
+    counted = [_counted(b, valid) for b in bands]
+    values = [v for v, _w in counted]
+    weights = [w for _v, w in counted]
     if not values or values[0].size == 0:
         return None
     lo = [float(v.min()) for v in values]
     hi = [float(v.max()) for v in values]
     rng = (min(lo), max(hi))
     none: list = [[] for _ in values]
-    coarse = _histogram(values, rng, n, none)
+    coarse = _histogram(values, rng, n, none, weights)
     skip: list = []
     for c, h in enumerate(coarse):
         rest = h.copy()
-        rest[_bin_of(np.array([lo[c]]), rng, n)[0]] -= np.count_nonzero(values[c] == lo[c])
+        rest[_bin_of(np.array([lo[c]]), rng, n)[0]] -= _count(values[c], weights[c], lo[c])
         if hi[c] != lo[c]:
-            rest[_bin_of(np.array([hi[c]]), rng, n)[0]] -= np.count_nonzero(values[c] == hi[c])
+            rest[_bin_of(np.array([hi[c]]), rng, n)[0]] -= _count(values[c], weights[c], hi[c])
         p1 = _quantile(rest, 0.01, rng)
         p99 = _quantile(rest, 0.99, rng)
         out: list = []
@@ -96,7 +128,7 @@ def sample_raster_histogram(bands: Sequence[np.ndarray], valid: np.ndarray, bins
             if hi[c] - p99 > spread and hi[c] > p99:
                 out.append(hi[c])
         skip.append(out)
-    first = _histogram(values, rng, n, skip) if any(skip) else coarse
+    first = _histogram(values, rng, n, skip, weights) if any(skip) else coarse
     current = rng
     for _ in range(16):
         q1, q99 = np.inf, -np.inf
@@ -112,7 +144,7 @@ def sample_raster_histogram(bands: Sequence[np.ndarray], valid: np.ndarray, bins
         if (narrow[1] - narrow[0]) * 16 >= current[1] - current[0]:
             break
         current = narrow
-        first = _histogram(values, current, n, skip)
+        first = _histogram(values, current, n, skip, weights)
     return RasterHistogram(current, first, int(valid.sum()))
 
 
@@ -140,22 +172,47 @@ def compute_raster_stretch(stats: RasterHistogram, options: Optional[dict] = Non
     return {"black": [r[0] for r in ranges], "white": [r[1] for r in ranges]}
 
 
-def _codes(band: np.ndarray, black: float, white: float) -> np.ndarray:
-    """Raw values -> 0..255 (rounded half to even, clipped; NaN 0). 8- and 16-bit integers go through a table."""
+def _convert(v: np.ndarray, black: float, white: float) -> np.ndarray:
+    """Raw values -> 0..255 (rounded half to even, clipped; NaN 0)."""
     span = white - black
     scale = 255.0 / span if span > 0 else 0.0
+    with np.errstate(invalid="ignore", over="ignore"):
+        x = np.rint(np.clip((np.asarray(v, dtype=np.float64) - black) * scale, 0, 255))
+    return np.nan_to_num(x).astype(np.uint8)
 
-    def convert(v: np.ndarray) -> np.ndarray:
-        with np.errstate(invalid="ignore", over="ignore"):
-            x = np.rint(np.clip((np.asarray(v, dtype=np.float64) - black) * scale, 0, 255))
-        return np.nan_to_num(x).astype(np.uint8)
 
-    if band.dtype in (np.uint8, np.uint16):
-        return convert(np.arange(np.iinfo(band.dtype).max + 1))[band]
-    if band.dtype in (np.int8, np.int16):
-        info = np.iinfo(band.dtype)
-        return convert(np.arange(info.min, info.max + 1))[band.astype(np.int32) - info.min]
-    return convert(band)
+@functools.lru_cache(maxsize=64)
+def _table(kind: str, black: float, white: float) -> np.ndarray:
+    info = np.iinfo(np.dtype(kind))
+    table = _convert(np.arange(info.min, info.max + 1), black, white)
+    table.setflags(write=False)
+    return table
+
+
+def code_table(dtype, black: float, white: float) -> Optional[tuple]:
+    """
+    The code of every raw value of an 8- or 16-bit integer type, and the
+    lowest value (the table's first entry): (table, offset). Kept for the
+    ranges drawn lately, so the parts of a drawing and the tiles of a group
+    with one range share it. None for other types.
+    """
+    dtype = np.dtype(dtype)
+    if dtype not in (np.uint8, np.uint16, np.int8, np.int16):
+        return None
+    return _table(dtype.str, float(black), float(white)), int(np.iinfo(dtype).min)
+
+
+def look_up(table: np.ndarray, offset: int, band: np.ndarray) -> np.ndarray:
+    """`table` at each raw value of `band` (offset by the type's lowest value)."""
+    return table[band] if offset == 0 else table[band.astype(np.int32) - offset]
+
+
+def to_codes(band: np.ndarray, black: float, white: float) -> np.ndarray:
+    """Raw values -> 0..255 (rounded half to even, clipped; NaN 0). 8- and 16-bit integers go through a table."""
+    table = code_table(band.dtype, black, white)
+    if table is not None:
+        return look_up(table[0], table[1], band)
+    return _convert(band, black, white)
 
 
 def stretch_to_rgba(bands: Sequence[np.ndarray], valid: np.ndarray, black: Sequence[float], white: Sequence[float]) -> np.ndarray:
@@ -167,10 +224,10 @@ def stretch_to_rgba(bands: Sequence[np.ndarray], valid: np.ndarray, black: Seque
     out = np.zeros((h, w, 4), dtype=np.uint8)
     all_valid = bool(valid.all())
     for c in range(3 if len(bands) == 3 else 1):
-        codes = _codes(bands[c], black[c], white[c])
+        codes = to_codes(bands[c], black[c], white[c])
         out[..., c] = codes if all_valid else np.where(valid, codes, 0)
     if len(bands) == 1:
         out[..., 1] = out[..., 0]
         out[..., 2] = out[..., 0]
-    out[..., 3] = np.where(valid, 255, 0)
+    out[..., 3] = np.asarray(valid, dtype=bool).view(np.uint8) * np.uint8(255)
     return out
