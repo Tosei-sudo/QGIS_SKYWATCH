@@ -7,10 +7,13 @@ The tasks' Python shares Python's GIL with QGIS's main thread, which calls
 into Python for the plugin's map items, lists and events: while the plugin
 is loaded, a thread hands the GIL on after 1 ms instead of Python's 5 ms
 (share_gil_faster), and a result whose showing holds the main thread long
-is told in the log (SLOW_MS), so what still stutters can be found.
+is told in the log (SLOW_MS), so what still stutters can be found; and
+Python's garbage collection, which stops every thread, runs less often
+(collect_less_often).
 """
 from __future__ import annotations
 
+import gc
 import sys
 import threading
 import time
@@ -60,10 +63,26 @@ class FunctionTask(QgsTask):
         self.feedback = QgsFeedback()
         #: The plugin is going (unloaded): the answer is dropped, its docks are gone (#88).
         self.discarded = False
+        #: The progress last shown, and when (PROGRESS_EVERY).
+        self._shown = -1.0
+        self._shown_at = 0.0
 
     # Called by the work.
     def progress(self, percent: float) -> None:
-        self.setProgress(max(0.0, min(100.0, percent)))
+        """
+        How far the work is (0–100). Shown when it moved by a whole point or
+        PROGRESS_EVERY has passed: each change is a message to the main
+        thread (the status bar's bar), and work that tells its progress for
+        every row or line (GDAL does) sent thousands a second.
+        """
+        percent = max(0.0, min(100.0, percent))
+        now = time.monotonic()
+        if abs(percent - self._shown) < 1.0 and percent not in (0.0, 100.0) and now - self._shown_at < PROGRESS_EVERY:
+            return
+        if percent == self._shown:
+            return
+        self._shown, self._shown_at = percent, now
+        self.setProgress(percent)
 
     def check(self) -> None:
         """Raises Cancelled when the person cancelled."""
@@ -133,6 +152,8 @@ class FunctionTask(QgsTask):
 
 #: A task's result shown on the main thread for at least this long (ms) is told in the log (the screen stops meanwhile).
 SLOW_MS = 200
+#: A task's progress moving by less than a point is shown at most this often (s).
+PROGRESS_EVERY = 0.25
 
 #: How long a thread may keep Python's GIL while another waits for it (s), while the plugin is loaded. Python's own 0.005
 #: let one task's Python work hold each of the main thread's calls into Python up to 5 ms (with four, about 25 ms).
@@ -157,6 +178,34 @@ def restore_gil_sharing() -> None:
         if abs(sys.getswitchinterval() - SWITCH_INTERVAL) < 1e-9:
             sys.setswitchinterval(_switch_before)
         _switch_before = None
+
+
+#: While the plugin is loaded, Python's garbage collection runs after this many new objects (Python's own: 700).
+#: A collection stops every thread, the main one too; reading a large answer makes hundreds of thousands of objects,
+#: and with 700 Python walked through all it holds again and again meanwhile (each walk tens to hundreds of ms of a
+#: still screen). Measured (two reads of 20,000 features at once): the screen's longest stops a third as long with
+#: the answers read in pieces (core/json_pieces.py) and this, neither alone helping much (2026-11-18).
+COLLECT_AFTER = 10_000
+#: Python's thresholds before the plugin changed them (None: not changed).
+_collect_before: Optional[tuple[int, ...]] = None
+
+
+def collect_less_often() -> None:
+    """While the plugin is loaded: garbage collected after COLLECT_AFTER new objects (never more often than it was)."""
+    global _collect_before
+    now = gc.get_threshold()
+    if _collect_before is None and 0 < now[0] < COLLECT_AFTER:
+        _collect_before = now
+        gc.set_threshold(COLLECT_AFTER, *now[1:])
+
+
+def restore_collection() -> None:
+    """The plugin is unloaded: Python's thresholds as they were (unless someone else changed them since)."""
+    global _collect_before
+    if _collect_before is not None:
+        if gc.get_threshold()[0] == COLLECT_AFTER:
+            gc.set_threshold(*_collect_before)
+        _collect_before = None
 
 
 #: Running tasks are kept here so Python does not collect them early.

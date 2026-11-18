@@ -158,7 +158,12 @@ class OfflineWork:
         self.enabled = enabled
         self.cache_bytes = int(max(cache_mb, 0) * 1024 * 1024)
         self.clock = clock
+        #: The servers' state and the outbox (quick: the screens ask on the main thread).
         self.lock = threading.RLock()
+        #: The cache's reads and writes (on a connection of their own): a large answer being written (or the cache
+        #: being trimmed) never holds up the screens asking whether a server is down or what waits to be sent.
+        self._cache_lock = threading.Lock()
+        self._cache_db: Optional[sqlite3.Connection] = None
         #: Servers down: host → (since when, the URL that failed, why).
         self.down_hosts: dict[str, tuple[int, str, str]] = {}
         #: Worked offline by choice (every server treated as down until switched back).
@@ -188,7 +193,26 @@ class OfflineWork:
                 self._db = db
             return self._db
 
+    def cache_db(self) -> sqlite3.Connection:
+        """
+        The connection for the cache (use with _cache_lock held). The file is
+        in WAL mode, so the outbox's connection reads it meanwhile without
+        waiting. A cache write is not forced to the disk at each commit
+        (synchronous NORMAL: only the last answers kept could be lost if the
+        PC lost power; the outbox's own connection still forces each change).
+        """
+        if self._cache_db is None:
+            self.db()  # the file and its tables
+            db = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
+            db.execute("PRAGMA synchronous=NORMAL")
+            self._cache_db = db
+        return self._cache_db
+
     def close(self) -> None:
+        with self._cache_lock:
+            if self._cache_db is not None:
+                self._cache_db.close()
+                self._cache_db = None
         with self.lock:
             if self._db is not None:
                 self._db.close()
@@ -277,8 +301,8 @@ class OfflineWork:
     def cached(self, url: str, form: dict) -> Optional[tuple[bytes, int]]:
         """The answer kept for this read and when it was read; None when none is kept."""
         try:
-            with self.lock:
-                row = self.db().execute("SELECT body, at FROM responses WHERE key = ?", (cache_key(url, form),)).fetchone()
+            with self._cache_lock:
+                row = self.cache_db().execute("SELECT body, at FROM responses WHERE key = ?", (cache_key(url, form),)).fetchone()
         except sqlite3.Error:
             return None
         return (bytes(row[0]), int(row[1])) if row else None
@@ -289,8 +313,8 @@ class OfflineWork:
         if body[:64].lstrip().startswith(b'{"error"'):
             return  # an error answer never replaces a good one
         try:
-            with self.lock:
-                db = self.db()
+            with self._cache_lock:
+                db = self.cache_db()
                 db.execute("INSERT OR REPLACE INTO responses (key, host, url, body, at, size) VALUES (?, ?, ?, ?, ?, ?)",
                            (cache_key(url, form), host_of(url), url.split("?", 1)[0], sqlite3.Binary(body), self.clock(), len(body)))
                 self._puts += 1
@@ -305,14 +329,16 @@ class OfflineWork:
         if total <= self.cache_bytes:
             return
         target = int(self.cache_bytes * 0.8)
+        gone = []
         for key, size in db.execute("SELECT key, size FROM responses ORDER BY at").fetchall():
             if total <= target:
                 break
-            db.execute("DELETE FROM responses WHERE key = ?", (key,))
+            gone.append((key,))
             total -= size or 0
+        db.executemany("DELETE FROM responses WHERE key = ?", gone)
 
     def cache_info(self) -> tuple[int, int, Optional[int]]:
-        """How many answers are kept, their size (bytes) and when the newest was read."""
+        """How many answers are kept, their size (bytes) and when the newest was read (read beside the writes: WAL)."""
         try:
             with self.lock:
                 n, size, at = self.db().execute("SELECT COUNT(*), COALESCE(SUM(size), 0), MAX(at) FROM responses").fetchone()
@@ -321,8 +347,8 @@ class OfflineWork:
         return int(n), int(size), at
 
     def clear_cache(self) -> None:
-        with self.lock:
-            db = self.db()
+        with self._cache_lock:
+            db = self.cache_db()
             db.execute("DELETE FROM responses")
             db.commit()
 

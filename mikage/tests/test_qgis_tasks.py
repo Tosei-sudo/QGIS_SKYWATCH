@@ -308,3 +308,114 @@ def test_unloading_drops_the_tasks_held():
     assert time.monotonic() - started < 1
     wait_for(lambda: False, 300)
     assert ran == [] and tasks._held == [] and not tasks._holding
+
+
+class KeepAlive(Handler):
+    """HTTP/1.1: the connection stays open between requests (as ArcGIS Server's, IIS's)."""
+
+    protocol_version = "HTTP/1.1"
+    connections = 0
+
+    def setup(self):
+        type(self).connections += 1
+        super().setup()
+
+
+@pytest.fixture
+def keep_alive():
+    from mikage.qgis_io import network
+
+    # As while the plugin is loaded (an earlier test's plugin, unloaded, stopped keeping lines).
+    network.open_lines()
+    KeepAlive.connections = 0
+    server = ThreadingHTTPServer(("127.0.0.1", 0), KeepAlive)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+    server.server_close()
+
+
+def test_requests_keep_their_connection(keep_alive):
+    """
+    2026-11-18: each request had a thread, and so a connection, of its own (a new TCP connection, TLS handshake
+    and Windows sign-in each time on a far or busy server). They now go on the connection the last one opened.
+    """
+    from mikage.qgis_io import network
+
+    def many():
+        return [get_bytes(f"{keep_alive}/ok?n={n}") for n in range(8)] + [qgis_transport()(keep_alive + "/ok", {"n": "x"})]
+
+    kind, answers = in_task(many)
+    assert kind == "ok" and answers == [f"got /ok?n={n}".encode() for n in range(8)] + [b"posted n=x"]
+    assert KeepAlive.connections == 1
+    # Another task later: the same connection still.
+    assert in_task(lambda: get_bytes(keep_alive + "/ok")) == ("ok", b"got /ok")
+    assert KeepAlive.connections == 1
+    assert network._idle
+
+
+def test_a_request_given_up_on_does_not_take_its_line_again(silent_server, keep_alive, monkeypatch):
+    from mikage.qgis_io import network
+
+    url, _connections = silent_server
+    monkeypatch.setattr(network, "_time_limit_ms", lambda url: 300)
+    assert in_task(lambda: get_bytes(url))[0] == "failed"
+    # Its line (whose event loops were quit) is let go; the next request works on another.
+    assert wait_for(lambda: all(e.wait(0) for e in network._ending), 5000)
+    assert in_task(lambda: get_bytes(keep_alive + "/ok")) == ("ok", b"got /ok")
+
+
+def test_lines_end_when_the_plugin_is_unloaded(keep_alive):
+    from mikage.qgis_io import network
+
+    assert in_task(lambda: get_bytes(keep_alive + "/ok"))[0] == "ok"
+    kept = list(network._idle)
+    assert kept
+    network.close_lines()
+    try:
+        assert network._idle == [] and all(line.wait(0) for line in kept)
+        # Unloaded: a request still works (a task ending late), its line is not kept.
+        assert in_task(lambda: get_bytes(keep_alive + "/ok"))[0] == "ok"
+        assert network._idle == []
+    finally:
+        network.open_lines()
+
+
+def test_progress_is_not_sent_for_every_row(monkeypatch):
+    """Work telling its progress for each row (GDAL does) sent a message to the main thread each time."""
+    from mikage.qgis_io.tasks import FunctionTask
+
+    shown = []
+    monkeypatch.setattr(FunctionTask, "setProgress", lambda self, p: shown.append(p))
+    task = FunctionTask("行ごと", lambda t: None)
+    for i in range(10001):
+        task.progress(i / 100)
+    assert shown[0] == 0.0 and shown[-1] == 100.0
+    assert 100 <= len(shown) <= 110
+    assert shown == sorted(shown)
+
+
+def test_garbage_collected_less_often_while_loaded(monkeypatch):
+    import gc
+
+    from mikage.qgis_io import tasks
+
+    monkeypatch.setattr(tasks, "_collect_before", None)
+    before = gc.get_threshold()
+    try:
+        gc.set_threshold(700, 10, 10)
+        tasks.collect_less_often()
+        assert gc.get_threshold() == (tasks.COLLECT_AFTER, 10, 10)
+        tasks.collect_less_often()  # loaded again: the one from before the plugin is kept
+        tasks.restore_collection()
+        assert gc.get_threshold() == (700, 10, 10)
+        # Rarer already (someone else's), or turned off: left as it is.
+        for kept in ((50_000, 10, 10), (0, 10, 10)):
+            gc.set_threshold(*kept)
+            tasks.collect_less_often()
+            assert gc.get_threshold() == kept
+            tasks.restore_collection()
+            assert gc.get_threshold() == kept
+    finally:
+        gc.set_threshold(*before)

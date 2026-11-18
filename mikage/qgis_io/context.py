@@ -13,7 +13,7 @@ from typing import Optional
 from qgis.PyQt.QtCore import QObject, pyqtSignal
 
 from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_text, read_config_file
-from ..core.esri import EsriClient
+from ..core.esri import EsriClient, LayerInfos
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
 from ..core.obs import place_cache
@@ -75,6 +75,9 @@ class PluginContext(QObject):
         # First of all who hear it: every request after a reload reads dates by the new file's time zones.
         self.configChanged.connect(lambda: set_rules(self.config.time_zones))
         self.configChanged.connect(lambda: set_tracking(self.config.edit_tracking))
+        #: The layers' information, kept across the clients (esri()) for ten minutes, and forgotten with the settings.
+        self.layer_infos = LayerInfos()
+        self.configChanged.connect(self.layer_infos.clear)
         #: 一時的なオフライン作業: the cache of reads and the changes waiting for a server down (core/offline.py).
         self.offline = OfflineWork(settings.offline_path())
         self.configChanged.connect(self._offline_settings)
@@ -145,9 +148,10 @@ class PluginContext(QObject):
         """
         An Esri client whose requests follow QGIS's proxy and the authcfg chosen
         per service (use inside a task). Its reads are kept for offline work and
-        answered from there while their server is down (core/offline.py).
+        answered from there while their server is down (core/offline.py). The
+        layers' information it asks is kept for the next clients (LayerInfos).
         """
-        client = EsriClient(self.offline.transport(qgis_transport(settings.auth_for)))
+        client = EsriClient(self.offline.transport(qgis_transport(settings.auth_for)), layers=self.layer_infos)
         client.offline = self.offline
         return client
 

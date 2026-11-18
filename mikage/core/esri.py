@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
-from . import analysis_cache, audit, edit_stamp, time_zone
+from . import analysis_cache, audit, edit_stamp, json_pieces, time_zone
 from .util import iso_text, is_number
 
 
@@ -70,13 +72,59 @@ def _redact(text: str, token: Optional[str]) -> str:
     return text.replace(token, "…") if token else text
 
 
+class LayerInfos:
+    """
+    Layers' information kept across clients (the plugin's) for `seconds`:
+    a read asks for its layer's information once in that time, not before
+    each read (2026-11-18: a client is made for each task, and so each read,
+    each poll was two requests; on a slow server the first one alone could
+    take seconds). Asked again with `refresh` where fields may have been
+    added (the stores that add theirs), and all dropped when the settings
+    change.
+    """
+
+    def __init__(self, seconds: float = 600, clock: Callable[[], float] = time.monotonic):
+        self.seconds = seconds
+        self.clock = clock
+        self._kept: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._lock = threading.Lock()
+
+    def get(self, url: str, default: Any = None) -> Any:
+        with self._lock:
+            kept = self._kept.get(url)
+            if kept is None:
+                return default
+            if self.clock() - kept[0] > self.seconds:
+                del self._kept[url]
+                return default
+            return kept[1]
+
+    def __contains__(self, url: str) -> bool:
+        return self.get(url) is not None
+
+    def __getitem__(self, url: str) -> dict[str, Any]:
+        value = self.get(url)
+        if value is None:
+            raise KeyError(url)
+        return value
+
+    def __setitem__(self, url: str, value: dict[str, Any]) -> None:
+        with self._lock:
+            self._kept[url] = (self.clock(), value)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._kept.clear()
+
+
 class EsriClient:
     """Asks Esri feature layers for JSON."""
 
-    def __init__(self, transport: Transport, renew: Optional[Renew] = None):
+    def __init__(self, transport: Transport, renew: Optional[Renew] = None, layers: Optional[LayerInfos] = None):
         self.transport = transport
         self.renew = renew
-        self._layers: dict[str, dict[str, Any]] = {}
+        #: The layers' information asked so far (`layers`: kept across clients, LayerInfos).
+        self._layers: "dict[str, dict[str, Any]] | LayerInfos" = layers if layers is not None else {}
 
     def ask(self, url: str, params: Optional[dict[str, str]] = None, token: Optional[str] = None) -> dict[str, Any]:
         """
@@ -139,7 +187,8 @@ class EsriClient:
         except EsriError as error:
             raise (UnreachableError if isinstance(error, UnreachableError) else EsriError)(_redact(str(error), token)) from None
         try:
-            value = json.loads(body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body)
+            # In pieces: a page of features read off the main thread does not hold QGIS's screen (core/json_pieces.py).
+            value = json_pieces.loads(body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body)
         except (ValueError, UnicodeDecodeError):
             raise EsriError("応答が JSON 以外") from None
         if not isinstance(value, dict):
@@ -157,10 +206,12 @@ class EsriClient:
         return value
 
     def layer(self, url: str, token: Optional[str] = None, refresh: bool = False) -> "LayerInfo":
-        """The layer's information (asked once per URL)."""
-        if refresh or url not in self._layers:
-            self._layers[url] = self._ask_renewing(url, {}, token)
-        return LayerInfo(self._layers[url])
+        """The layer's information (asked once per URL; with LayerInfos, once in its time)."""
+        info = None if refresh else self._layers.get(url)
+        if info is None:
+            info = self._ask_renewing(url, {}, token)
+            self._layers[url] = info
+        return LayerInfo(info)
 
     def query_all(
         self,

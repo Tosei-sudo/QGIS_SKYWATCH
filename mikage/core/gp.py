@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Protocol
 from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
 
+from . import json_pieces
 from .time_zone import UTC, ZULU, TimeShift, TimeZone, write_instant, write_text, zone_for
 from .util import is_record
 
@@ -714,7 +715,8 @@ class GpClient:
         if len(body) > MAX_RESPONSE_BYTES:
             raise GpError("応答が大きすぎ")
         try:
-            return json.loads(body.decode("utf-8-sig"))
+            # In pieces: a large result read off the main thread does not hold QGIS's screen (core/json_pieces.py).
+            return json_pieces.loads(body.decode("utf-8-sig"))
         except (ValueError, UnicodeDecodeError):
             raise GpError("応答が JSON 以外") from None
 

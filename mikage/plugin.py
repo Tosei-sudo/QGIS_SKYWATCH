@@ -22,9 +22,10 @@ from .qgis_io.catalog_io import FEATURE
 from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
 from .qgis_io.context import PluginContext
 from .qgis_io.preload import LOG_TAG, Preloader
+from .qgis_io.stall_watch import StallWatch
 from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
 from .core.enhance.rules import image_rule_for
-from .qgis_io import complex_sar, overviews_io, tasks
+from .qgis_io import complex_sar, network, overviews_io, tasks
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
 from .ui.basemap_switch import BaseMapSwitch
@@ -318,6 +319,8 @@ class MikagePlugin:
         #: 「衛星の障害情報」 (ui/outage_dialog.py), once opened.
         self.outage_dialog = None
         self.api = PluginApi(self)
+        #: 「画面が止まった」 in the log (qgis_io/stall_watch.py), from once QGIS has started.
+        self.stall_watch: Optional[StallWatch] = None
         self.similar_action: Optional[QAction] = None
         self.notices_action: Optional[QAction] = None
         self.central: Optional[CentralViews] = None
@@ -389,13 +392,19 @@ class MikagePlugin:
         self.clock.lap()
         # The tasks' Python hands the GIL to QGIS's main thread sooner (qgis_io/tasks.py): the map and docks keep moving.
         tasks.share_gil_faster()
+        tasks.collect_less_often()
+        # Requests keep their connections to the servers between them (qgis_io/network.py).
+        network.open_lines()
         # Loaded as QGIS starts: the tasks wait until QGIS has (another plugin still being imported while a task's
         # Python ran crashed QGIS). At most a minute, should QGIS never say so.
         started = getattr(self.iface, "initializationCompleted", None)
+        self.stall_watch = StallWatch()
         if started is not None and not self.iface.mainWindow().isVisible():
             tasks.hold_tasks()
             started.connect(self._release_tasks)
             QTimer.singleShot(60000, tasks.release_tasks)
+        else:
+            self.stall_watch.start()
         self._first_start = first_setup.is_first_start()
         self.context = PluginContext(self.iface.mainWindow())
         # 監査ログ before anything that records (its writing and sending run in threads of their own).
@@ -848,6 +857,9 @@ class MikagePlugin:
         except (TypeError, RuntimeError, AttributeError):
             pass
         tasks.release_tasks()
+        # QGIS's own start (the project, the other plugins) is not a stop of the screen worth telling.
+        if self.stall_watch is not None:
+            self.stall_watch.start()
 
     def _restore_views(self) -> None:
         try:
@@ -1576,6 +1588,11 @@ class MikagePlugin:
         except (TypeError, RuntimeError, AttributeError):
             pass
         tasks.restore_gil_sharing()
+        tasks.restore_collection()
+        if self.stall_watch is not None:
+            self.stall_watch.stop()
+            self.stall_watch.deleteLater()
+            self.stall_watch = None
         try:
             QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
         except (TypeError, RuntimeError):
@@ -1767,3 +1784,5 @@ class MikagePlugin:
             self.context.close()
             self.context.deleteLater()
             self.context = None
+        # Last: the request threads kept with their connections end (the tasks that used them were cancelled above).
+        network.close_lines()

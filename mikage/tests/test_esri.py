@@ -93,3 +93,32 @@ def test_values_fit_their_fields():
     assert fit_value(1759281825000, "esriFieldTypeString") == "2025-10-01T01:23:45.000Z"
     assert fit_value(1759281825000, "esriFieldTypeDate") == 1759281825000
     assert fit_value(None, "esriFieldTypeString") is None
+
+
+def test_layer_information_is_kept_across_clients():
+    """2026-11-18: a client per task asked the layer's information before each read (two requests a read)."""
+    from mikage.core.esri import LayerInfos
+
+    fake, _ = server(3)
+    now = [0.0]
+    infos = LayerInfos(seconds=600, clock=lambda: now[0])
+
+    def info_asks():
+        return sum(1 for url, _form in fake.asked if url == URL)
+
+    for _ in range(3):
+        assert len(EsriClient(fake, layers=infos).query_all(URL)) == 3
+    assert info_asks() == 1
+    # Fields may have been added: asked again.
+    EsriClient(fake, layers=infos).layer(URL, refresh=True)
+    assert info_asks() == 2
+    now[0] += 601
+    EsriClient(fake, layers=infos).query_all(URL)
+    assert info_asks() == 3
+    infos.clear()
+    EsriClient(fake, layers=infos).query_all(URL)
+    assert info_asks() == 4
+    # Without: each client asks (as before).
+    EsriClient(fake).query_all(URL)
+    EsriClient(fake).query_all(URL)
+    assert info_asks() == 6

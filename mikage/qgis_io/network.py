@@ -7,6 +7,8 @@ thread they are refused.
 """
 from __future__ import annotations
 
+import atexit
+import queue
 import re
 import threading
 import time
@@ -34,29 +36,59 @@ def _request(url: str) -> QNetworkRequest:
     return request
 
 
-class _Exchange(QThread):
+class _Line(QThread):
     """
-    One request in a thread of its own, made and waited for by QGIS in C++
-    (QgsNetworkAccessManager.blockingGet / blockingPost, with that thread's
-    own network access manager). QGIS lets go of Python's lock (the GIL) for
-    the whole request, and no Qt object of the request is touched from Python.
+    A thread kept for the plugin's requests, one request at a time, each
+    made and waited for by QGIS in C++ (QgsNetworkAccessManager.blockingGet /
+    blockingPost). QGIS keeps a network access manager per thread, and that
+    keeps the connections it opened: the next request to the same server
+    goes on the open connection, without a new connection, TLS handshake or
+    Windows sign-in (NTLM / Kerberos) of its own (2026-11-18: each request
+    had a thread, and so a connection, of its own; on a slow or far server
+    that was a round trip or more each time, and work for the server too).
 
-    Before, the request was driven from Python here (the reply, a local event
-    loop, a timer, their connections), which held the GIL while Qt took its
-    own locks (sending, connecting, signals to the main thread). When the main
-    thread, deleting widgets, held one of those Qt locks and waited for the
-    GIL, both waited for good and QGIS froze (rare, under load). The Python
-    wrappers of these short-lived objects were also at times taken for new
-    objects made at the same address ("wrapped C/C++ object … has been
-    deleted", answers "cut off").
+    QGIS lets go of Python's lock (the GIL) for the whole request, and no Qt
+    object of the request is touched from Python. Before (2026-11-09), the
+    request was driven from Python here (the reply, a local event loop, a
+    timer, their connections), which held the GIL while Qt took its own locks
+    (sending, connecting, signals to the main thread). When the main thread,
+    deleting widgets, held one of those Qt locks and waited for the GIL, both
+    waited for good and QGIS froze (rare, under load). The Python wrappers of
+    these short-lived objects were also at times taken for new objects made
+    at the same address ("wrapped C/C++ object … has been deleted", answers
+    "cut off").
     """
+
+    def __init__(self):
+        super().__init__()
+        self._jobs: "queue.SimpleQueue[Optional[_Job]]" = queue.SimpleQueue()
+        #: When it last ended a request (time.monotonic()).
+        self.used = time.monotonic()
+
+    def hand(self, job: "_Job") -> None:
+        self._jobs.put(job)
+
+    def stop(self) -> None:
+        """It ends once its request (if any) has."""
+        self._jobs.put(None)
+
+    def run(self) -> None:
+        while True:
+            job = self._jobs.get()  # waits with the GIL let go
+            if job is None:
+                return
+            job.run()
+
+
+class _Job:
+    """One request and what came back."""
 
     def __init__(self, request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes]):
-        super().__init__()
         self.request, self.authcfg, self.body = request, authcfg or "", body
         #: QgsNetworkReplyContent: what came back (status, error, body), copied by QGIS.
         self.reply = None
         self.error: Optional[BaseException] = None
+        self.done = threading.Event()
 
     def run(self) -> None:
         try:
@@ -66,19 +98,96 @@ class _Exchange(QThread):
                 self.reply = QgsNetworkAccessManager.blockingPost(self.request, QByteArray(self.body), self.authcfg, True)
         except BaseException as error:  # noqa: BLE001 (handed to the waiting thread)
             self.error = error
+        finally:
+            self.done.set()
 
 
-#: Requests given up on (cancelled, timed out) whose thread is still ending: a running QThread must not be deleted.
-_ending: list[_Exchange] = []
+#: Lines waiting for a request (the one used last at the end): at most KEEP_LINES, each for at most IDLE_SECONDS.
+_idle: list[_Line] = []
+_lines_lock = threading.Lock()
+KEEP_LINES = 6
+#: A line idle longer ends, and its connections with it (servers close theirs after a minute or two anyway).
+IDLE_SECONDS = 100.0
+#: The plugin is unloaded: lines are not kept (close_lines; open_lines when it is loaded again).
+_closed = False
+
+#: Lines that are ending (a request given up on, a line let go): a running QThread must not be deleted.
+_ending: list[_Line] = []
 _ending_lock = threading.Lock()
 
 
-def _let_end(exchange: _Exchange) -> None:
-    """Keeps `exchange` until its thread has ended (it ends at once: its event loop was quit)."""
+def _let_end(line: _Line) -> None:
+    """Keeps `line` until its thread has ended."""
     with _ending_lock:
         _ending[:] = [e for e in _ending if not e.wait(0)]
-        if not exchange.wait(0):
-            _ending.append(exchange)
+        if not line.wait(0):
+            _ending.append(line)
+
+
+def _retire(line: _Line, quit_request: bool = False) -> None:
+    """
+    Lets a line end. `quit_request`: its request is given up on: quitting
+    the thread ends the event loop QGIS waits in (and any it starts after),
+    and the request is dropped with it; the line is never used again.
+    """
+    if quit_request:
+        line.quit()
+    line.stop()
+    _let_end(line)
+
+
+def _take() -> _Line:
+    """A line for a request: one kept (its connections open), else a new one."""
+    with _lines_lock:
+        now = time.monotonic()
+        stale = [line for line in _idle if now - line.used > IDLE_SECONDS]
+        _idle[:] = [line for line in _idle if line not in stale]
+        line = _idle.pop() if _idle else None
+    for old in stale:
+        _retire(old)
+    if line is None:
+        line = _Line()
+        line.start()
+    return line
+
+
+def _give_back(line: _Line) -> None:
+    """The request of `line` has ended: it waits for the next (unless enough wait already)."""
+    line.used = time.monotonic()
+    with _lines_lock:
+        if not _closed and len(_idle) < KEEP_LINES:
+            _idle.append(line)
+            return
+    _retire(line)
+
+
+def open_lines() -> None:
+    """The plugin is loaded: lines are kept between requests."""
+    global _closed
+    _closed = False
+
+
+def close_lines(wait_ms: int = 2000) -> None:
+    """The plugin is unloaded (or Python ends): the lines waiting end, and their connections; waits up to `wait_ms`."""
+    global _closed
+    with _lines_lock:
+        _closed = True
+        idle, _idle[:] = list(_idle), []
+    for line in idle:
+        _retire(line)
+    deadline = time.monotonic() + wait_ms / 1000
+    with _ending_lock:
+        ending = list(_ending)
+    for line in ending:
+        left = int((deadline - time.monotonic()) * 1000)
+        if left <= 0 or not line.wait(left):
+            break
+    with _ending_lock:
+        _ending[:] = [e for e in _ending if not e.wait(0)]
+
+
+# A thread still running when Python ends would take QGIS (or the tests) down with it.
+atexit.register(close_lines)
 
 
 #: Edit requests (applyEdits and the like) wait at least this long (ms).
@@ -97,11 +206,12 @@ def _time_limit_ms(url: str) -> int:
 
 def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes] = None) -> bytes:
     """
-    Makes a request and waits for its answer; it stops as soon as the task
-    running it is cancelled or it takes too long. The wait is watched from
-    here (QgsBlockingNetworkRequest's own cancel could leave it waiting for
-    good): quitting the request's thread ends the event loop QGIS waits in,
-    and the request is dropped with it.
+    Makes a request (on a line kept for requests) and waits for its answer;
+    it stops as soon as the task running it is cancelled or it takes too
+    long. The wait is watched from here (QgsBlockingNetworkRequest's own
+    cancel could leave it waiting for good): quitting the line's thread ends
+    the event loop QGIS waits in, and the request is dropped with it (the
+    line is not used again).
     """
     feedback = current_feedback()
     if feedback is not None and feedback.isCanceled():
@@ -109,22 +219,23 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
     url = request.url().toString()
     request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
     limit = _time_limit_ms(url)
-    exchange = _Exchange(request, authcfg, body)
+    job = _Job(request, authcfg, body)
+    line = _take()
     started = time.monotonic()
-    exchange.start()
-    while not exchange.wait(50):
+    line.hand(job)
+    while not job.done.wait(0.05):
         cancelled = feedback is not None and feedback.isCanceled()
         if cancelled or limit > 0 and (time.monotonic() - started) * 1000 > limit:
-            exchange.quit()
-            _let_end(exchange)
+            _retire(line, quit_request=True)
             if cancelled:
                 raise Cancelled()
             raise UnreachableError(f"応答なし（タイムアウト）（{_address(url)}）")
+    _give_back(line)
     if feedback is not None and feedback.isCanceled():
         raise Cancelled()
-    if exchange.error is not None:
-        raise exchange.error
-    return _answer(exchange.reply, url, authcfg)
+    if job.error is not None:
+        raise job.error
+    return _answer(job.reply, url, authcfg)
 
 
 def _answer(reply, url: str, authcfg: Optional[str]) -> bytes:
