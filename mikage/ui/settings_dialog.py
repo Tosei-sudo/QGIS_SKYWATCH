@@ -1,6 +1,8 @@
 """The plugin's settings: the settings file, who records, the authentication of each service, and what was wrong in the file."""
 from __future__ import annotations
 
+from typing import Callable, Optional
+
 from qgis.gui import QgsAuthConfigSelect
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
@@ -22,17 +24,19 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.obs import place_cache
-from ..qgis_io import overviews_io, settings
+from ..qgis_io import overviews_io, raster_speed, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs
 from .fit import fit_text
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, context: PluginContext, parent: QWidget | None = None, may_change_source: bool = True):
+    def __init__(self, context: PluginContext, parent: QWidget | None = None, may_change_source: bool = True,
+                 raster_speed: Optional[Callable] = None):
         """
         `may_change_source`: the roles in use have 「設定ファイルの切り替え」 (管理者,
         core/roles.py); without it the settings file can be chosen only while none is.
+        `raster_speed(parent)`: opens 「地図の描画の速さ」 (plugin.open_raster_speed) for 「地図の描画」's 「詳しく…」.
         """
         super().__init__(parent)
         fit_text(self)
@@ -110,6 +114,18 @@ class SettingsDialog(QDialog):
         form.addWidget(QLabel(self.tr("入力の初期値")), 5, 0)
         form.addWidget(self.last_inputs, 5, 1)
         form.addWidget(self.forget_inputs, 5, 2)
+        # 地図の描画を速くする設定 (qgis_io/raster_speed.py): what is in use, the details and turning it off in its own window.
+        self.raster = QLabel()
+        self.raster.setWordWrap(True)
+        self.raster_more = QPushButton(self.tr("詳しく…"))
+        self.raster_more.setToolTip(self.tr("描画を速くするために MIKAGE が使う設定、使わないようにする、手動で見直す設定"))
+        self._open_raster = raster_speed
+        self.raster_more.clicked.connect(self._raster_details)
+        self.raster_more.setEnabled(raster_speed is not None)
+        form.addWidget(QLabel(self.tr("地図の描画")), 6, 0)
+        form.addWidget(self.raster, 6, 1)
+        form.addWidget(self.raster_more, 6, 2)
+        self._show_raster()
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -143,6 +159,14 @@ class SettingsDialog(QDialog):
         except (TypeError, RuntimeError):
             pass
         super().done(result)
+
+    def _show_raster(self) -> None:
+        self.raster.setText(raster_speed.summary())
+
+    def _raster_details(self) -> None:
+        if self._open_raster is not None:
+            self._open_raster(self)
+            self._show_raster()
 
     def _show_cache(self) -> None:
         folder = overviews_io.cache_folder()

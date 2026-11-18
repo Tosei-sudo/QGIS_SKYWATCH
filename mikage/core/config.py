@@ -27,6 +27,7 @@ from .enhance.rules import ImageRule, image_rules_of
 from .geocode import GeocoderConfig, geocoder_of
 from .layer_templates import LayerTemplate, templates_of
 from .overviews import DEFAULT_OVERVIEWS, OverviewOptions, overviews_of
+from .raster_speed import DEFAULT_RASTER_SPEED, RasterSpeedOptions, raster_speed_of
 from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images_of
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
@@ -56,7 +57,7 @@ from .util import is_number
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "satelliteOutages", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "arcgisPortals", "layers",
+    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "rasterSpeed", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
@@ -73,6 +74,8 @@ class PluginConfig:
     path_mappings: list[PathMapping | PathRewrite] = field(default_factory=list)
     #: `overviews`: an image opened from the catalog without overviews gets an external .ovr built in the background.
     overviews: OverviewOptions = DEFAULT_OVERVIEWS
+    #: `rasterSpeed`: GDAL's threads and block cache in this QGIS, QGIS's slower options put right once (core/raster_speed.py).
+    raster_speed: RasterSpeedOptions = DEFAULT_RASTER_SPEED
     #: `complexImages`: complex SAR images (SICD's I/Q bands, complex pixels) shown as "dB" or "amplitude"; None as QGIS opens them.
     complex_images: Optional[str] = DEFAULT_COMPLEX_MODE
     satellite_catalogs: list[SatelliteCatalogConfig] = field(default_factory=list)
@@ -285,6 +288,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.path_mappings = path_mappings_of(value["pathMappings"], problems)
     if "overviews" in value:
         config.overviews = overviews_of(value["overviews"], problems)
+    if "rasterSpeed" in value:
+        config.raster_speed = raster_speed_of(value["rasterSpeed"], problems)
     if "complexImages" in value:
         config.complex_images = complex_images_of(value["complexImages"], problems)
     config.satellite_catalogs = listed("satelliteCatalogs", satellite_catalog_of)
