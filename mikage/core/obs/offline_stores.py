@@ -19,7 +19,8 @@ from ..offline import OfflineWork, Pending, UploadReport, now_ms, tried_of
 from .areas import CheckedArea
 from .drafts import KIND as DRAFT, Draft, OutboxDrafts
 from .model import Observation
-from .stores import EsriAreaStore, EsriObservationStore, _marked
+from .scope import RecordQuery
+from .stores import EsriAreaStore, EsriObservationStore, _marked, area_in
 
 _RECORD_FIELDS = {f.name for f in fields(Observation)}
 _AREA_FIELDS = {f.name for f in fields(CheckedArea)}
@@ -76,21 +77,30 @@ class _Waiting:
     def _item_of(self, p: Pending):
         raise NotImplementedError
 
-    def _overlay(self, items: list, only: Optional[set] = None) -> list:
-        """`items` with what waits put over them (changed ones replaced, new ones added, those deleted for good left out)."""
+    def _overlay(self, items: list, only: Optional[set] = None, test: Optional[Callable[[Any], bool]] = None) -> list:
+        """
+        `items` with what waits put over them (changed ones replaced, new ones
+        added, those deleted for good left out); with `only` (ids) or `test`
+        (what was asked for: scope.RecordQuery.matches), a waiting item not
+        among `items` is added only when it is asked for.
+        """
         waiting = self.work.pending(self.kind, self.label)
         if not waiting:
             return items
         out = {x.id: x for x in items}
         for p in waiting:
-            if only is not None and p.item_id not in only and p.item_id not in out:
-                continue
             if p.op == "remove" and p.data.get("forGood"):
                 out.pop(p.item_id, None)
                 continue
             item = self._item_of(p)
-            if item is not None:
-                out[item.id] = item
+            if item is None:
+                continue
+            if p.item_id not in out:
+                if only is not None and p.item_id not in only:
+                    continue
+                if test is not None and not test(item):
+                    continue
+            out[item.id] = item
         return list(out.values())
 
     def _keep(self, items: list, op: str, for_good: bool = False) -> None:
@@ -146,6 +156,22 @@ class OfflineObservationStore(_Waiting):
             return None  # read whole (from the cache), with what waits over it
         changed = self.inner.load_changed(since)
         return None if changed is None else self._overlay(changed, only={o.id for o in changed})
+
+    def find(self, query: RecordQuery) -> list[Observation]:
+        """The records of a query (the cache's answer while offline), with what waits that it asks for."""
+        return self._overlay(self.inner.find(query), test=query.matches)
+
+    def load_around(self, images, *args, **kwargs) -> list[Observation]:
+        """What recording on some images needs (EsriObservationStore.load_around), with what waits for them."""
+        found = self.inner.load_around(images, *args, **kwargs)
+        ids = {i for i, _, _ in images}
+        things = {o.object_id for o in found}
+        boxes = [b for _, b, _ in images if b]
+
+        def asked(o: Observation) -> bool:
+            return o.image_id in ids or o.object_id in things or any(b[0] <= o.lon <= b[2] and b[1] <= o.lat <= b[3] for b in boxes)
+
+        return self._overlay(found, test=asked)
 
     def load_made(self, names, since) -> Optional[list[Observation]]:
         """「自分の記録」 (EsriObservationStore.load_made); None while offline: then read whole (the cache, with what waits)."""
@@ -303,6 +329,10 @@ class OfflineAreaStore(_Waiting):
 
     def _item_of(self, p: Pending):
         return area_of(p)
+
+    def find(self, image_ids=(), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
+        """The checked areas of some images or a period (the cache's answer while offline), with what waits for them."""
+        return self._overlay(self.inner.find(image_ids, start, end), test=lambda a: area_in(a, image_ids, start, end))
 
     def _title(self, a: CheckedArea) -> str:
         return a.image_name

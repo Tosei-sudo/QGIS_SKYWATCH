@@ -379,7 +379,11 @@ class TaxonomyDock(PluginDock):
             self._armed = self.selected
             count = sum(1 for o in self.book.living() if within(o.kind, path))
             self.delete_button.setText(self.tr("削除?"))
-            self._say(self.tr("もう一度で「{k}」を削除（記録 {n} 件の種別は上位の分類に）").format(k=self.selected, n=count))
+            if self.book.scoped:
+                # A shared store: every record under it follows (asked of it then), not only those read here.
+                self._say(self.tr("もう一度で「{k}」を削除（その分類の記録の種別は上位の分類に）").format(k=self.selected))
+            else:
+                self._say(self.tr("もう一度で「{k}」を削除（記録 {n} 件の種別は上位の分類に）").format(k=self.selected, n=count))
             QTimer.singleShot(4000, self._disarm)
             return
         self._armed = None
@@ -648,8 +652,8 @@ class TaxonomyDock(PluginDock):
     def render(self) -> None:
         """The tree and the chosen class."""
         book = self.book
-        # The records not read yet (no image chosen in 「観測記録」): read first (the classes count them, and renaming
-        # one renames them); from an Esri store the tree is shown once they are.
+        # Not read yet (no image chosen in 「観測記録」): read first (the classification, and the records the classes
+        # count); from an Esri store the tree is shown once they are (its classes; only the records around the image).
         waiting = book is not None and not self.obs.records_ready(self.render)
         self._rendering = True
         try:
@@ -663,7 +667,8 @@ class TaxonomyDock(PluginDock):
             taxa = book.taxonomy()
             if self.selected and find(taxa, path_of(self.selected)) is None:
                 self.selected = None
-            self.note.setText(self.tr("保存先: {s}・{n} 分類").format(s=book.taxonomy_store.label, n=len(taxa)))
+            self.note.setText(self.tr("保存先: {s}・{n} 分類").format(s=book.taxonomy_store.label, n=len(taxa))
+                              + (self.tr("（モノ・記録の数は読み込んだ分: 開いた画像とそのまわり）") if book.scoped else ""))
             flows = book.flows()
             records = book.living()
             q = self.query.text().strip().lower()

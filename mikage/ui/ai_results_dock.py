@@ -402,6 +402,28 @@ class AiResultsDock(PluginDock):
         dock = self.observations()
         return getattr(dock, "book", None) if dock is not None else None
 
+    def _read_around(self, image_id: str) -> None:
+        """The records around an image read (a shared store, in a task); then what is recorded and what the rows continue shown again."""
+        dock = self.observations()
+        if dock is None or getattr(self, "_reading_around", None) == image_id:
+            return
+        self._reading_around = image_id
+
+        def done(_said) -> None:
+            self._reading_around = None
+            book = self._book()
+            if image_id != self.image_id or book is None or book.needs_around(image_id):
+                return  # another image now, or it could not be read (asked again later)
+            self._refresh_imported()
+            for row in range(len(self.rows)):
+                self._render_state(row)
+            self._match()
+
+        def failed(_message: str) -> None:
+            self._reading_around = None
+
+        dock.fetch(_tr("まわりの記録の読み込み"), lambda b: b.read_around(image_id), done, failed)
+
     def _refresh_imported(self, expand: bool = True) -> None:
         """What is recorded (and recorded as wrong) on the image; `expand`: and which rows that makes 取込済 (誤) too."""
         book = self._book()
@@ -580,6 +602,10 @@ class AiResultsDock(PluginDock):
         book = self._book()
         image_id = self.image_id
         if book is None or not book.loaded or not image_id or not any(i.id == image_id for i in book.images):
+            return
+        if book.needs_around(image_id):
+            # A shared store: the records around this image are read first (its own, and the things near it then).
+            self._read_around(image_id)
             return
         rows, found = [], []
         for row, (source, r) in enumerate(self.rows):

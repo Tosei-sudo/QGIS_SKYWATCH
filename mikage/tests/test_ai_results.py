@@ -65,12 +65,13 @@ def test_a_feature_as_a_result_and_what_it_is_recorded_as():
     assert result_tag("a]#b", "1") == "[AI:ab#1]"
 
 
-def test_several_results_recorded_at_once_are_named_in_turn(book):  # noqa: F811
+def test_several_results_recorded_at_once_are_things_of_their_class(book):  # noqa: F811
     s, _ = source()
     results = [result_of(s, {"attributes": {"OBJECTID": i, "IMAGE_ID": "d1", "CLS": "ship", "SCORE": 0.9}}, "OBJECTID") for i in (1, 2)]
     results.append(result_of(s, {"attributes": {"OBJECTID": 3, "IMAGE_ID": "d1", "CLS": "car"}}, "OBJECTID"))
     saved = book.add_many([import_entry(r, s, 139.7, 35.6) for r in results], image="d1")
-    assert [(o.object_name, o.kind, o.image_id) for o in saved] == [("支援船-1", "船舶 > 支援船", "d1"), ("支援船-2", "船舶 > 支援船", "d1"), ("car-1", "car", "d1")]
+    # Named after their class, each a thing of its own (only individuals are told apart by name, 2026-11-18).
+    assert [(o.object_name, o.kind, o.image_id) for o in saved] == [("支援船", "船舶 > 支援船", "d1"), ("支援船", "船舶 > 支援船", "d1"), ("car", "car", "d1")]
     assert len({o.object_id for o in saved}) == 3
     assert book.said[-1] == "3 件を記録"
     assert book.add_many([], image="nope") is None and book.said[-1] == "画像なし（取り込む画像を開いて）"

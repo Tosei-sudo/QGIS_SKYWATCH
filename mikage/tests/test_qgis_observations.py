@@ -17,7 +17,7 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
-from qgis.PyQt.QtCore import QItemSelectionModel, QPoint, Qt  # noqa: E402
+from qgis.PyQt.QtCore import QDateTime, QItemSelectionModel, QPoint, Qt  # noqa: E402
 from qgis.PyQt.QtTest import QTest  # noqa: E402
 from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
 
@@ -1044,7 +1044,11 @@ def test_gives_scripts_an_esri_store_waiting_for_its_tasks(plugin, tmp_path):
     dock.store_select.setCurrentIndex(0)
     a = p.api.add_observation(139.7, 35.6, object="共有A")
     assert len(layer.rows) == 1 and a["objectName"] == "共有A"
-    assert p.api.delete_observations(a["id"]) == 1 and p.api.observations() == []
+    assert p.api.delete_observations(a["id"]) == 1 and p.api.observations(object=a["objectId"]) == []
+    # A shared store is not read whole (2026-11-18): a script names what it wants.
+    with pytest.raises(ValueError, match="全件は読まない"):
+        p.api.observations()
+    assert [o["id"] for o in p.api.observations(object=a["objectId"], deleted=True)] == [a["id"]]
 
 
 def test_the_classification_editor_sets_a_classs_activities(plugin):
@@ -1444,8 +1448,9 @@ def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
     asked = queries()
     APP.processEvents()
     assert _idle(dock) and not dock.book.loaded and queries() == asked
-    # エクスポート: read in a task, counted once read.
+    # エクスポート: read in a task, counted once read (a shared store: from today by default, so this image's period here).
     export = dock.open_export()
+    export.start_edit.setDateTime(QDateTime.fromMSecsSinceEpoch(ms(1) - 3_600_000))
     assert export.count_label.text() in ("観測記録を読み込み中…", "該当する記録 1 件")
     assert wait_for(lambda: export.count_label.text() == "該当する記録 1 件")
     export.close()
@@ -1456,7 +1461,8 @@ def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
     # (Read in a task: 「観測記録を読み込み中…」 with an empty tree until then.)
     assert taxonomy.isVisible() and (taxonomy.note.text() == "観測記録を読み込み中…") == (taxonomy.tree.topLevelItemCount() == 0)
     assert wait_for(lambda: dock.book.loaded) and wait_for(lambda: taxonomy.tree.topLevelItemCount() > 0)
-    assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類")
+    # (A shared store: the counts are of the records read, around the images opened.)
+    assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類（モノ・記録の数は読み込んだ分: 開いた画像とそのまわり）")
 
 
 def test_a_background_map_is_not_an_image(bare):

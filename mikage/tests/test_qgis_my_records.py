@@ -239,13 +239,17 @@ def test_an_esri_stores_own_records_are_asked_without_reading_them_all(bare):
     assert _texts(dialog.table, 2) == ["モノ0", "モノ1"] and not dock.book.loaded
     asked = [f["where"] for u, f in fake.asked if u == URL + "/query" and "where" in f]
     assert any("UPPER(OBSERVER) IN ('田中', 'TANAKA')" in w for w in asked)
-    # Everyone: the dock reads them all once.
+    # Everyone: everyone's of the period, asked of the layer too (never every record).
+    fake.asked.clear()
     dialog.who.setCurrentIndex(dialog.who.findData("\x00all"))
     dialog.who.activated.emit(dialog.who.currentIndex())
-    assert wait_for(lambda: dock.book.loaded) and wait_for(lambda: len(_texts(dialog.table, 2)) == 3)
+    assert wait_for(lambda: len(_texts(dialog.table, 2)) == 3) and not dock.book.loaded
+    asked = [f["where"] for u, f in fake.asked if u == URL + "/query" and "where" in f]
+    assert asked and all("CREATED_AT >= TIMESTAMP" in w and "OBSERVER" not in w for w in asked)
     # A double click on an image not open: no catalog has it, listed without its file and the record opened.
     row = _texts(dialog.table, 2).index("モノ2")
     dialog.table.cellDoubleClicked.emit(row, 0)
-    assert dock.book.current is not None and dock.book.current.id == "IMG2" and dock.form.isVisible()
+    # (The record as it is on the server now, asked first.)
+    assert wait_for(lambda: dock.book.current is not None and dock.book.current.id == "IMG2" and dock.form.isVisible())
     assert dock.pending[2].id == "r2"
     dialog.close()

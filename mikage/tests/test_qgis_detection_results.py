@@ -121,7 +121,7 @@ def test_a_detection_run_is_listed_and_recorded_once(plugin):
     assert layer.selectedFeatureIds() == [3]
 
     [o] = dock.import_rows([0])
-    assert (o.image_id, o.kind, o.object_name) == ("d1.tif", "船舶", "船舶-1")
+    assert (o.image_id, o.kind, o.object_name) == ("d1.tif", "船舶", "船舶")
     ms = QDateTime.fromString("2026-11-07T01:00:00Z", "yyyy-MM-ddTHH:mm:ssZ").toMSecsSinceEpoch()
     assert o.note == f"AI検出: boat 0.90 港湾モデル [AI:検出@{ms}#1]"
     assert 95 < o.length < 105 and 15 < o.width < 22
@@ -140,7 +140,7 @@ def test_a_detection_run_is_listed_and_recorded_once(plugin):
     assert wait_for(lambda: [r.cls for _s, r in dock.rows] == ["boat", "boat"])
     assert dock.list.topLevelItem(0).text(0) == "済" and dock.list.topLevelItem(1).text(0) == ""
     saved = dock.import_rows(list(range(len(dock.rows))))
-    assert [(o.kind, o.object_name) for o in saved] == [("船舶", "船舶-2")]
+    assert [(o.kind, o.object_name) for o in saved] == [("船舶", "船舶")]  # not an individual: the class name again
 
     # The layer gone: its rows go.
     QgsProject.instance().removeMapLayer(layer.id())
@@ -161,7 +161,7 @@ def test_a_ship_detected_again_on_the_next_image_continues(plugin):
     assert wait_for(lambda: dock.image_id == "d2.tif" and len(dock.rows) == 2)
     assert list(dock.continued) == [0] and dock.continued[0].tier == "auto"
     saved = dock.import_rows([0, 1])
-    assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(True, "船舶-1"), (False, "船舶-2")]
+    assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(True, "船舶"), (False, "船舶")]
     assert saved[0].note.endswith("[自動継続]")
     assert [o.image_id for o in living(book.records) if o.object_id == ship.object_id] == ["d1.tif", "d2.tif"]
     # Choosing the image shows its detection again.

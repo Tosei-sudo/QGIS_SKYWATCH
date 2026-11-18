@@ -41,7 +41,8 @@ def test_steps_through_the_images_in_time_order_and_types_a_time(book):
     assert book.current.id == "d1"
     assert book.step(1).id == "d3" and book.step(1).id == "dx" and book.step(1).id == "dx"
     rec = book.submit(139.7, 35.6, FormValues(object="", kind="船舶"))
-    assert rec.image_time is None and rec.object_name == "船舶-1"
+    # No name typed: the class's name (only individuals are told apart by name, 2026-11-18).
+    assert rec.image_time is None and rec.object_name == "船舶"
     # The time typed goes to the image and to its records made without one.
     book.set_image_time(day(2))
     assert [i.id for i in book.images] == ["d1", "dx", "d3"]

@@ -22,23 +22,26 @@ from .areas import CheckedArea, area_label, box_ring, covering_areas, new_area_i
 from .drafts import Draft, PrefsDrafts
 from .flows import (
     CarryOver, ImageRef, MatchCandidate, ObjectFlow, carried_into, carry_overs, flow_of, flows, living, match_candidates,
-    next_name, now_ms,
+    now_ms,
 )
 from .model import (
     ConfidenceLevel, ListedImage, Observation, ObservationVocabulary, new_object_id, new_observation_id, parse_listed_images,
     recorded_images,
 )
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
+from .scope import RecordQuery, grown, merged
 from .stores import AreaStore, ObservationStore, TaxonomyStore
 from .taxonomy import (
-    SpecField, Taxon, activities_at, find, kind_of, move_taxon, normalize, path_of, place_taxon, remove_taxon, rewrite, taxonomy_of,
-    update_taxon, with_kinds, within,
+    SpecField, Taxon, activities_at, find, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon, remove_taxon, rewrite,
+    taxonomy_of, update_taxon, with_kinds, within,
 )
 from ..util import read_number
 
 _UNSET = object()
 #: How far back of the last read a refresh asks for (computers' clocks differ; what is read twice merges the same).
 REFRESH_SLACK_MS = 10 * 60 * 1000
+#: After the records around an image could not be read, how long before they are asked again (a refresh or 再読み込み asks sooner).
+AROUND_RETRY_MS = 60 * 1000
 
 
 @dataclass
@@ -224,6 +227,12 @@ class ObservationBook:
         self.last_draft_id = ""
         #: The records a refresh found changed (by someone else): a form opened on one before is not saved over it.
         self.changed_by_others: set[str] = set()
+        #: A shared store (Esri) is read only as needed (scope.py, 2026-11-18): the records around the images recorded on
+        #: (`_around`: image id → its footprint and time when read) and what features asked for. A local store is read whole.
+        self.scoped = bool(getattr(store, "scoped", False))
+        self._around: dict[str, tuple] = {}
+        #: Image id → (around key, when it could not be read): not asked again for AROUND_RETRY_MS (the screens ask on every render).
+        self._around_failed: dict[str, tuple] = {}
 
     # ---- what is said --------------------------------------------------
 
@@ -243,9 +252,15 @@ class ObservationBook:
     # ---- reading -------------------------------------------------------
 
     def reload(self) -> str:
-        """Reads the records, areas and classification again from the stores."""
+        """
+        Reads the records, areas and classification again from the stores: a
+        shared store's records around the image recorded on now (read_around),
+        a local store's every record.
+        """
         started = now_ms()
         self._say(f"{self.store.label} から読み込み中…")
+        if self.scoped:
+            return self._reload_scoped(started)
         try:
             kept = self.taxonomy_store.load()
         except Exception:  # noqa: BLE001 (as the viewer: the configured classification then)
@@ -276,6 +291,141 @@ class ObservationBook:
             self.loaded = True
         return self._say(message or text)
 
+    def _read_classes(self) -> None:
+        try:
+            kept = self.taxonomy_store.load()
+        except Exception:  # noqa: BLE001 (as the viewer: the configured classification then)
+            kept = None
+        try:
+            fields = self.taxonomy_store.load_fields()
+        except Exception:  # noqa: BLE001
+            fields = None
+        with self.lock:
+            self._taxonomy = kept if kept is not None else list(self.vocabulary.taxonomy)
+            self.spec_fields = fields if fields is not None else list(self.vocabulary.spec_fields)
+
+    def _reload_scoped(self, started: int) -> str:
+        self._read_classes()
+        image = self.current
+        wanted = [image] if image is not None else []
+        try:
+            records = self.store.load_around([self._around_key(i) for i in wanted]) if wanted else []
+        except Exception as error:  # noqa: BLE001
+            with self.lock:
+                self.records, self._around = [], {}
+                self._around_failed = {i.id: (self._around_key(i), now_ms()) for i in wanted}
+                self.loaded = True
+            return self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+        message = ""
+        try:
+            areas = self._find_areas(image_ids=[i.id for i in wanted]) if wanted else []
+        except Exception as error:  # noqa: BLE001
+            areas = []
+            message = f"{self.area_store.label} から確認範囲の読み込み失敗: {_error_text(error)}"
+        with self.lock:
+            self.records = records
+            self.areas = areas
+            self._around = {i.id: self._around_key(i) for i in wanted}
+            self._read_at = started
+            self.loaded = True
+        if message:
+            return self._say(message)
+        if image is None:
+            return self._say(f"{self.store.label}: 画像を選ぶと、その画像とまわりの記録を読み込む")
+        here = sum(1 for o in records if o.image_id == image.id and o.deleted_at is None)
+        return self._say(f"{self.store.label}: この画像 {here} 件、まわりの記録 {len(living(records)) - here} 件")
+
+    def _around_key(self, image: "ObservedImage") -> tuple:
+        """What load_around asks for an image: its id, its footprint grown by the 同一候補 radius, its time."""
+        box = tuple(grown(image.box, self.vocabulary.match_radius)) if image.box else None
+        return (image.id, box, image.time)
+
+    def _find_areas(self, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
+        find_ = getattr(self.area_store, "find", None)
+        if find_ is None:
+            from .stores import area_in
+
+            return [a for a in self.area_store.load() if area_in(a, image_ids, start, end)]
+        return find_(image_ids, start, end)
+
+    def needs_around(self, image_id: Optional[str] = None) -> bool:
+        """Whether the records around the image recorded now (or the open one of `image_id`) are still to be read (read_around)."""
+        image = self._image(image_id)
+        if not self.scoped or not self.loaded or image is None:
+            return False
+        key = self._around_key(image)
+        failed = self._around_failed.get(image.id)
+        if failed is not None and failed[0] == key and now_ms() - failed[1] < AROUND_RETRY_MS:
+            return False
+        return self._around.get(image.id) != key
+
+    def read_around(self, image_id: Optional[str] = None) -> Optional[str]:
+        """
+        Reads the records around the image recorded now (or the open one of `image_id`;
+        EsriObservationStore.load_around), and its checked areas, when not read yet;
+        merged into those read before. What is said, None when nothing was read.
+        """
+        image = self._image(image_id)
+        if not self.needs_around(image_id):
+            return None
+        try:
+            records = self.store.load_around([self._around_key(image)])
+            areas = self._find_areas(image_ids=[image.id])
+        except Exception as error:  # noqa: BLE001
+            self._around_failed[image.id] = (self._around_key(image), now_ms())
+            return self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+        self._around_failed.pop(image.id, None)
+        with self.lock:
+            self.records = merged(self.records, records)
+            self.areas = merged(self.areas, areas)
+            self._around[image.id] = self._around_key(image)
+        here = sum(1 for o in records if o.image_id == image.id and o.deleted_at is None)
+        return self._say(f"{self.store.label}: この画像 {here} 件、まわりの記録 {len(living(records)) - here} 件")
+
+    def fetch(self, query: RecordQuery) -> list[Observation]:
+        """
+        The records of a query (scope.RecordQuery), for what works on more than
+        the images recorded on (通報, エクスポート, 報告書, 引き継ぎ…): asked of a
+        shared store and kept here too; a local store's are all read already.
+        Raises what the store raises.
+        """
+        if not self.scoped:
+            if not self.loaded:
+                self.reload()
+            with self.lock:
+                return [o for o in self.records if query.matches(o)]
+        found = self.store.find(query)
+        with self.lock:
+            self.records = merged(self.records, found)
+        return found
+
+    def fetch_areas(self, image_ids: Sequence[str] = (), start: Optional[float] = None, end: Optional[float] = None) -> list[CheckedArea]:
+        """The checked areas of some images or a period (as fetch)."""
+        from .stores import area_in
+
+        if not self.scoped:
+            if not self.loaded:
+                self.reload()
+            with self.lock:
+                return [a for a in self.areas if area_in(a, image_ids, start, end)]
+        found = self._find_areas(image_ids, start, end)
+        with self.lock:
+            self.areas = merged(self.areas, found)
+        return found
+
+    def fetch_things(self, object_ids: Iterable[str]) -> list[Observation]:
+        """Every record of some things (their whole flow), as fetch."""
+        ids = tuple(dict.fromkeys(i for i in object_ids if i))
+        return self.fetch(RecordQuery(object_ids=ids)) if ids else []
+
+    def _relevant(self, changed: list[Observation]) -> list[Observation]:
+        """Of the records someone else changed, those that belong with the ones read here (a shared store)."""
+        things = {o.object_id for o in self.records}
+        known = {o.id for o in self.records}
+        boxes = [key[1] for key in self._around.values() if key[1]]
+        return [o for o in changed if o.id in known or o.image_id in self._around or o.object_id in things
+                or any(b[0] <= o.lon <= b[2] and b[1] <= o.lat <= b[3] for b in boxes)]
+
     def refresh(self) -> Optional[str]:
         """
         Reads what others saved since the last read (or this one) and merges
@@ -292,11 +442,20 @@ class ObservationBook:
         try:
             changed = load_changed(since - REFRESH_SLACK_MS) if load_changed is not None and since else None
             if changed is None:
-                records = self.store.load()
+                # A shared store that cannot tell what changed (or is not reached: its cache): the images' surroundings again.
+                records = self.store.load_around(list(self._around.values())) if self.scoped else self.store.load()
         except Exception:  # noqa: BLE001 (quiet: the next refresh tries again)
             return None
         with self.lock:
-            if changed is None:
+            if changed is not None and self.scoped:
+                changed = self._relevant(changed)
+            if changed is None and self.scoped:
+                before = {o.id: o for o in self.records}
+                news = [o for o in records if not _same(before.get(o.id), o)]
+                fresh = {o.id for o in records}
+                gone = {o.id for o in self.records if o.image_id in self._around and o.id not in fresh}
+                self.records = merged([o for o in self.records if o.id not in gone], records)
+            elif changed is None:
                 before = {o.id: o for o in self.records}
                 news = [o for o in records if not _same(before.get(o.id), o)]
                 gone = set(before) - {o.id for o in records}
@@ -589,11 +748,54 @@ class ObservationBook:
         self._say(done)
         return rows
 
-    def flow_by_name(self, name: str) -> Optional[ObjectFlow]:
+    def individual(self, kind: str) -> bool:
+        """
+        Whether things of a kind are individuals told apart by name: a class
+        on its path names what an individual's name is called (`nameLabel`:
+        艦名, 機番). Only their names are keys (tsudo 2026-11-18): other
+        things may share a name (車両), and are the same thing only by
+        「継続」 or 「同一候補」.
+        """
+        return bool(kind) and bool(name_label_of(self._taxonomy, path_of(kind)))
+
+    def names_a_thing(self, name: str, kind: str) -> bool:
+        """Whether a name typed for a kind names one thing: an individual's own name (not its class's name, given when none is typed)."""
+        return bool(name) and name not in path_of(kind) and name != "モノ" and self.individual(kind)
+
+    def flow_by_name(self, name: str, kind: str = "", ask: bool = False) -> Optional[ObjectFlow]:
+        """
+        The thing a typed name means: one whose id it is, or an individual of
+        that name (of `kind`'s classes when given). `ask`: looked for in the
+        store too when not among the records read (a shared store; in a task).
+        """
         if not name:
             return None
-        everything = flows(self.records)
-        return next((f for f in everything if f.name == name), None) or next((f for f in everything if f.object_id == name), None)
+
+        def pick(records: Iterable[Observation]) -> Optional[ObjectFlow]:
+            everything = flows(records)
+            by_id = next((f for f in everything if f.object_id == name), None)
+            if by_id is not None:
+                return by_id
+            named = [f for f in everything if f.name == name and self.names_a_thing(name, f.kind)]
+            if kind and named:
+                top = (path_of(kind) or [""])[0]
+                named = [f for f in named if (path_of(f.kind) or [""])[0] == top] or named
+            return named[0] if named else None
+
+        found = pick(self.records)
+        if found is None and ask and self.scoped and (name.startswith("OBJ-") or self.names_a_thing(name, kind)):
+            try:
+                rows = self.fetch(RecordQuery(names=(name,), object_ids=(name,), living=True))
+                if rows:
+                    found = pick(self.fetch_things({o.object_id for o in rows}))
+            except Exception:  # noqa: BLE001 (not found then: a new thing)
+                found = None
+        return found
+
+    def default_name(self, kind: str) -> str:
+        """A new thing's name when none is typed: its class's (車両; 船舶 > 護衛艦 → 護衛艦)."""
+        path = path_of(kind)
+        return path[-1] if path else "モノ"
 
     def record_from(self, image: ObservedImage, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation],
                     values: FormValues, present: bool) -> Observation:
@@ -617,20 +819,22 @@ class ObservationBook:
         activity = values.activity.strip() if present else ""
         confidence = (values.confidence or "").strip()
         if editing is not None:
-            # The same thing unless another one's name was typed.
-            other = self.flow_by_name(name) if name and name != editing.object_name else None
+            # The same thing unless another one's name (an individual's) or id was typed.
+            other = self.flow_by_name(name, kind, ask=True) if name and name != editing.object_name else None
+            other = other if other is None or other.object_id != editing.object_id else None
             return replace(editing, object_id=other.object_id if other else editing.object_id,
                            object_name=other.name if other else (name or editing.object_name), kind=kind, activity=activity,
                            present=present, confidence=confidence, note=values.note, lon=lon, lat=lat, updated_at=now, **measure)
-        if source is not None and (not name or name == source.object_name):
-            known = (source.object_id, source.object_name)
+        if source is not None and (not name or name == source.object_name or not self.names_a_thing(name, kind)):
+            # 継続・同一候補: the same thing (a name typed for a thing that is not an individual renames it here).
+            known = (source.object_id, name or source.object_name)
         else:
-            flow = self.flow_by_name(name)
+            flow = self.flow_by_name(name, kind, ask=True)
             known = (flow.object_id, flow.name) if flow else None
         return Observation(
             id=new_observation_id(), image_id=image.id, image_name=image.name, image_time=image.time,
             object_id=known[0] if known else new_object_id(),
-            object_name=known[1] if known else (name or next_name(kind, {f.name for f in flows(self.records)})),
+            object_name=known[1] if known else (name or self.default_name(kind)),
             kind=kind, activity=activity, present=present, confidence=confidence, note=values.note, lon=lon, lat=lat,
             created_at=now, updated_at=now, deleted_at=None, **measure,
         )
@@ -725,7 +929,7 @@ class ObservationBook:
         Records several new observations at once on this image (or `image`), in
         one save: each entry has lon, lat, object, kind, activity, confidence,
         note, length, heading, width (as add takes them). Entries without a name are new
-        things named in turn (船舶-1, 船舶-2…); the same new name is one thing.
+        things named after their class (船舶); the same name typed twice is one thing.
         `keep`: not saved, each is kept in 送信待ち (as the form's records are);
         `done`: what is said when saved (else 「n 件を記録」).
         """
@@ -733,7 +937,6 @@ class ObservationBook:
         if info is None:
             self._say("画像なし（取り込む画像を開いて）")
             return None
-        taken = {f.name for f in flows(self.records)}
         made: dict[str, tuple[str, str]] = {}
         rows: list[Observation] = []
         # The things already in the image, and those continued in this save: each once.
@@ -759,12 +962,11 @@ class ObservationBook:
                                 length=_text(e.length), heading=_text(e.heading), width=_text(_width_of(e)))
             record = self.record_from(info, e.lon, e.lat, None, None, values, True)
             name = e.object.strip()
-            if name and name in made:
-                record = replace(record, object_id=made[name][0], object_name=made[name][1])
-            elif not name:
-                record = replace(record, object_name=next_name(record.kind, taken))
-            made.setdefault(record.object_name, (record.object_id, record.object_name))
-            taken.add(record.object_name)
+            # The same name typed twice in one save is one thing, but a class's name (given when none is typed).
+            if name and name not in path_of(record.kind) and name != "モノ":
+                if name in made:
+                    record = replace(record, object_id=made[name][0], object_name=made[name][1])
+                made.setdefault(name, (record.object_id, record.object_name))
             rows.append(record)
         saved = self._save_records(rows, done or (f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else "")))
         if saved is None and keep:
@@ -942,8 +1144,21 @@ class ObservationBook:
         self._say(f"{self.store.label} の{what}記録 {records} 件・確認範囲 {areas} 件を消去")
         return records, areas
 
+    def read_whole(self, object_ids: Iterable[str]) -> bool:
+        """Every record of some things read (a shared store holds more than those read here); False when they could not be."""
+        if not self.scoped:
+            return True
+        try:
+            self.fetch_things(object_ids)
+            return True
+        except Exception as error:  # noqa: BLE001
+            self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+            return False
+
     def rename(self, object_id: str, name: str, kind: Optional[str] = None) -> bool:
         """Renames a thing in all its records (and changes its kind, when given)."""
+        if not self.read_whole([object_id]):
+            return False
         now = now_ms()
         rows = [replace(o, object_name=name, **({"kind": kind} if kind is not None else {}), updated_at=now)
                 for o in self.records if o.object_id == object_id]
@@ -953,6 +1168,8 @@ class ObservationBook:
         """Makes `source`'s records `into`'s (the same thing recorded as two)."""
         if source == into:
             return True
+        if not self.read_whole([source, into]):
+            return False
         target_rows = [o for o in living(self.records) if o.object_id == into]
         if not target_rows:
             return False
@@ -1186,6 +1403,8 @@ class ObservationBook:
         if before is not _UNSET:
             taxa = place_taxon(taxa, to, [*to[:-1], list(before)[-1]] if before else None)
         reordered = before is not _UNSET and not moved
+        if moved and not self._under(path):
+            return None
         now = now_ms()
         records = [replace(o, kind=rewrite(o.kind, path, to), updated_at=now) for o in self.records if within(o.kind, path)] if moved else []
         if moved:
@@ -1203,11 +1422,24 @@ class ObservationBook:
     def remove_class(self, path: Sequence[str]) -> bool:
         """Removes a class and its branch; the records under it keep the class above."""
         path = list(path)
+        if not self._under(path):
+            return False
         now = now_ms()
         up = path[:-1]
         records = [replace(o, kind=kind_of(up), updated_at=now) for o in self.records if within(o.kind, path)]
         note = f"（記録 {len(records)} 件は「{kind_of(up) or '種別なし'}」に）" if records else ""
         return self._save_taxonomy(remove_taxon(self.taxonomy(), path), records, f"分類「{kind_of(path)}」を削除{note}")
+
+    def _under(self, path: Sequence[str]) -> bool:
+        """Every record of a class (and below) read, before they follow it to another (a shared store); False when they could not be."""
+        if not self.scoped:
+            return True
+        try:
+            self.fetch(RecordQuery(kinds=(kind_of(list(path)),)))
+            return True
+        except Exception as error:  # noqa: BLE001
+            self._say(f"{self.store.label} から分類「{kind_of(list(path))}」の記録の読み込み失敗: {_error_text(error)}")
+            return False
 
     def set_spec_fields(self, fields: list[SpecField]) -> bool:
         """Changes the specification fields (the values of a field taken away stay in the classes)."""
@@ -1222,7 +1454,20 @@ class ObservationBook:
 
     # ---- the report ----------------------------------------------------
 
+    def report_query(self, options: ReportOptions) -> RecordQuery:
+        """What a report reads: the records of its period and class."""
+        return RecordQuery(kinds=(options.kind,) if options.kind else (), start=options.start, end=options.end, living=True)
+
+    def read_for_report(self, options: ReportOptions) -> None:
+        """Reads what a report holds (a shared store: the records and checked areas of its period; in a task). Raises what the store raises."""
+        if self.scoped:
+            self.fetch(self.report_query(options))
+            self.fetch_areas(start=options.start, end=options.end)
+        elif not self.loaded:
+            self.reload()
+
     def report_selection(self, options: ReportOptions) -> ReportSelection:
+        """The report's records, things and areas among those read (read_for_report first)."""
         return select_for_report(self.records, self.areas, options, self.confidences())
 
     def report(self, options: ReportOptions, map_url: Optional[str] = None) -> str:

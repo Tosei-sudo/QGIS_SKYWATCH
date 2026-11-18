@@ -126,7 +126,7 @@ def test_results_of_the_image_are_shown_and_recorded_once(plugin):
     saved = dock.import_rows(dock.selected_rows())
     assert len(saved) == 1
     o = saved[0]
-    assert (o.image_id, o.kind, o.activity, o.confidence, o.object_name) == ("IMG1", "船舶", "停泊", "推定", "船舶-1")
+    assert (o.image_id, o.kind, o.activity, o.confidence, o.object_name) == ("IMG1", "船舶", "停泊", "推定", "船舶")
     assert o.note == "外部AI 船舶検出: ship 0.90 [AI:船舶検出#d-1]"
     # The point inside the polygon, its long side (about 100 m) as the length.
     assert QgsGeometry.fromPolygonXY([[QgsPointXY(*xy) for xy in box(139.70, 35.60, 0.0011, 0.00018)["rings"][0]]]).contains(
@@ -200,12 +200,12 @@ def test_a_result_near_a_thing_of_the_image_before_is_recorded_as_it(plugin):
     # d-4 is the ship of IMG1 (sure); d-3 is far from it.
     assert list(dock.continued) == [1] and dock.continued[1].tier == "auto"
     box_widget = dock.list.itemWidget(dock.list.topLevelItem(1), 6)
-    assert box_widget.currentText().startswith("継続: 船舶-1（")
+    assert box_widget.currentText().startswith("継続: 船舶（")
     assert "継続 1 件" in dock.status.text()
     saved = dock.import_rows([0, 1])
-    assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(False, "船舶-2"), (True, "船舶-1")]
+    assert [(o.object_id == ship.object_id, o.object_name) for o in saved] == [(False, "船舶"), (True, "船舶")]
     assert saved[1].note.endswith("[AI:船舶検出#d-4] [自動継続]")
-    assert dock.list.topLevelItem(1).text(6) == "継続: 船舶-1" and dock.status.text() == "2 件を観測記録に取り込み（継続 1 件）"
+    assert dock.list.topLevelItem(1).text(6) == "継続: 船舶" and dock.status.text() == "2 件を観測記録に取り込み（継続 1 件）"
     assert [o.image_id for o in living(book.records) if o.object_id == ship.object_id] == ["IMG1", "IMG2"]
 
 
@@ -215,11 +215,11 @@ def test_the_thing_to_continue_can_be_chosen_or_left_new(plugin):
     first = open_catalog_image(tmp_path, "IMG1")
     iface.setActiveLayer(first)
     assert wait_for(lambda: len(dock.rows) == 3)
-    dock.import_rows([0])
+    [ship] = dock.import_rows([0])
     second = open_catalog_image(tmp_path, "IMG2")
     iface.setActiveLayer(second)
     assert wait_for(lambda: dock.image_id == "IMG2" and len(dock.rows) == 2)
     # Left new: chosen in the 継続 column.
     dock.list.itemWidget(dock.list.topLevelItem(1), 6).setCurrentIndex(0)
     [o] = dock.import_rows([1])
-    assert o.object_name == "船舶-2" and "継続" not in o.note
+    assert o.object_name == "船舶" and o.object_id != ship.object_id and "継続" not in o.note

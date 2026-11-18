@@ -27,10 +27,12 @@ from qgis.PyQt.QtWidgets import (
 from ..core import audit, edit_stamp
 from ..core.esri import EsriError
 from ..core.obs.alerts import (
-    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, layer_key_problems, load_geofences, load_log, load_rules,
-    manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences, load_log,
+    load_rules, manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
 )
+from ..core.obs.flows import living
 from ..core.obs.place_cache import areas_at, points_of
+from ..core.obs.scope import RecordQuery
 from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
@@ -243,11 +245,17 @@ class AlertDialog(QDialog):
     def _say(self, text: str) -> None:
         self.status.setText(text)
 
-    def _go(self, record_id: str) -> None:
-        if not self.dock.records_ready(lambda: self._go(record_id)):
+    def _go(self, record_id: str, read: bool = False) -> None:
+        book = self.dock.book
+        if book is not None and book.scoped and not read:
+            # As it is on the server now.
+            self._say(self.tr("観測記録を読み込み中…"))
+            self.dock.fetch(self.tr("観測記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=(record_id,))),
+                            lambda _r: self._go(record_id, True), lambda m: self._say(m))
+            return
+        if book is not None and not book.scoped and not self.dock.records_ready(lambda: self._go(record_id)):
             self._say(self.tr("観測記録を読み込み中…"))
             return
-        book = self.dock.book
         o = book.record(record_id) if book else None
         if o is None:
             self._say(self.tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id))
@@ -262,7 +270,7 @@ class AlertDialog(QDialog):
         if s is None or book is None:
             self._say(self.tr("観測記録の保存先なし"))
             return
-        if not self.dock.records_ready(self.pick):
+        if not book.scoped and not self.dock.records_ready(self.pick):
             # Not read yet (no image chosen in 「観測記録」): picked once they are.
             self._say(self.tr("観測記録を読み込み中…（読み終えたら抽出）"))
             return
@@ -271,12 +279,19 @@ class AlertDialog(QDialog):
         start, end, by = _ms(self.start_edit), _ms(self.end_edit), self.by_select.currentData()
         again = self.again_check.isChecked()
         tokens = {k: self._token(getattr(s, k)) for k in ("rules", "geofences", "named_areas", "countries", "table")}
+        scoped = book.scoped
 
         def work(_task):
             rules = load_rules(client, s.rules, tokens["rules"]) if s.rules else None
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = set() if again or not s.table else reported_ids(client, s, tokens["table"])
-            picked = select(records, s, rules, fences, levels, done, start, end, by, history=records)
+            period, history = records, records
+            if scoped:
+                # A shared store: the records of the period, and those before them around them (for the rarity).
+                period = book.fetch(RecordQuery(basis="image" if by == "imageTime" else "created", start=start, end=end, living=True))
+                wanted = history_query(living(period), s.score)
+                history = book.fetch(wanted) if wanted is not None else period
+            picked = select(period, s, rules, fences, levels, done, start, end, by, history=history)
             # The places and countries of the records picked: from the squares kept (place_cache), the server
             # asked only for squares not kept; 抽出 asks whether the layers changed since (`fresh`).
             points = points_of(picked)
@@ -323,8 +338,13 @@ class AlertDialog(QDialog):
         tokens = {k: self._token(getattr(s, k)) for k in ("geofences", "named_areas", "countries", "table")}
         book = self.dock.book
         history, levels = (list(book.records), book.confidences()) if book else ([], [])
+        scoped = book is not None and book.scoped
 
         def work(_task):
+            nonlocal history
+            if scoped:
+                wanted = history_query(records, s.score)
+                history = book.fetch(wanted) if wanted is not None else records
             fences = load_geofences(client, s.geofences, tokens["geofences"]) if s.geofences else []
             done = reported_ids(client, s, tokens["table"], ids=[o.id for o in records]) if s.table else set()
             points = points_of(records)

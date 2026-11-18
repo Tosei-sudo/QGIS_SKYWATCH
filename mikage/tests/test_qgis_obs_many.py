@@ -86,18 +86,20 @@ def test_stamps_by_double_click_turns_by_drag_and_takes_back(plugin):
     p, iface, dock, layers, _ = plugin
     book = dock.book
     car = measured_sample(dock)
-    assert car.object_name == "乗用車-1" and car.heading == pytest.approx(0, abs=0.01) and car.width > 10
+    assert car.object_name == "乗用車" and car.heading == pytest.approx(0, abs=0.01) and car.width > 10
     dock.stamp_button.setChecked(True)
     assert dock.many.mode == "stamp" and dock.many.isVisibleTo(dock) and dock.active
-    assert dock.many.sample_label.text().startswith("乗用車-1（乗用車・駐車・推定・")
+    assert dock.many.sample_label.text().startswith("乗用車（乗用車・駐車・推定・")
     assert dock.status.text().startswith("ダブルクリック: 見本と同じ向きで記録")
     # A double click: one more as the 見本 lies.
     double_click(dock, 139.75, 35.65)
     rows = living(book.records)
     assert len(rows) == 2
     two = next(o for o in rows if o.id != car.id)
+    # A thing of its own, named after its class (only individuals are told apart by name).
     assert (two.object_name, two.kind, two.activity, two.confidence, two.length, two.width, two.heading) == (
-        "乗用車-2", car.kind, "駐車", "推定", car.length, car.width, car.heading)
+        "乗用車", car.kind, "駐車", "推定", car.length, car.width, car.heading)
+    assert two.object_id != car.object_id
     assert get_distance((two.lon, two.lat), (139.75, 35.65)) < pixel_m(dock)
     assert dock.status.text() == "1 件を見本で記録"
     # A single click on nothing waits for a second one, then only says how.
@@ -122,11 +124,11 @@ def test_stamps_by_double_click_turns_by_drag_and_takes_back(plugin):
     assert any(m.role == "slot" and m.outline for m in dock.scene().marks)
     tool.canvasReleaseEvent(mouse(dock, QEvent.Type.MouseButtonRelease, 139.66, 35.66, dx=40))
     three = max(living(book.records), key=lambda o: o.created_at)
-    assert three.object_name == "乗用車-3" and three.heading == pytest.approx(90, abs=1)
+    assert three.object_name == "乗用車" and three.heading == pytest.approx(90, abs=1)
     assert get_distance((three.lon, three.lat), (139.66, 35.66)) < pixel_m(dock)
     # Backspace on the map: the last one taken back.
     key(dock, Qt.Key.Key_Backspace)
-    assert [o.object_name for o in living(book.records)] == ["乗用車-1", "乗用車-2"]
+    assert sorted(o.id for o in living(book.records)) == sorted([car.id, two.id])
     # A double click on a record is not recorded over it.
     double_click(dock, two.lon, two.lat)
     assert len(living(book.records)) == 2 and dock.status.text().startswith("記録の上")
@@ -134,7 +136,7 @@ def test_stamps_by_double_click_turns_by_drag_and_takes_back(plugin):
     dock.step(1)
     # (Clicks hit what the map has painted.)
     assert wait_for(lambda: any(m.role == "ghost" for _at, m in dock.overlay.painted), 3000)
-    ghost = next(m for m in dock.scene().marks if m.role == "ghost" and m.label == "乗用車-2")
+    ghost = next(m for m in dock.scene().marks if m.role == "ghost" and m.key == two.id)
     double_click(dock, ghost.lon, ghost.lat)
     [again] = book.here()
     assert again.object_id == two.object_id and again.image_id == "d2.tif"
@@ -154,21 +156,22 @@ def test_records_deleted_elsewhere_are_not_the_sample_nor_taken_back_again(plugi
     for lon in (139.72, 139.74, 139.76):
         double_click(dock, lon, 35.65)
     one, two, three = sorted((o for o in living(book.records) if o.id != car.id), key=lambda o: o.created_at)
-    assert [o.object_name for o in (one, two, three)] == ["乗用車-2", "乗用車-3", "乗用車-4"]
+    # Each a thing of its own, named after its class (only individuals are told apart by name).
+    assert [o.object_name for o in (one, two, three)] == ["乗用車"] * 3 and len({o.object_id for o in (one, two, three, car)}) == 4
     # The 見本 follows its record as it is now.
     dock.do("変更", lambda b: b.update(car.id, length=7.5))
     assert dock.many.sample.length == 7.5 and "7.5 × " in dock.many.sample_label.text()
     # The 見本 deleted from the list: no longer the 見本; this image's newest record is.
     dock.remove_selected([book.record(car.id)], ask=False)
-    assert dock.many.sample.record_id == three.id and dock.many.sample_label.text().startswith("乗用車-4（")
+    assert dock.many.sample.record_id == three.id and dock.many.sample_label.text().startswith("乗用車（")
     double_click(dock, 139.78, 35.65)
     four = max(living(book.records), key=lambda o: o.created_at)
-    assert (four.object_name, four.length) == ("乗用車-5", three.length)
-    # The last ones deleted from the list: Backspace takes back the last still there (乗用車-3), not nothing.
+    assert (four.object_name, four.length) == ("乗用車", three.length)
+    # The last ones deleted from the list: Backspace takes back the last still there (two), not nothing.
     dock.remove_selected([book.record(four.id), book.record(three.id)], ask=False)
     assert dock.many.sample.record_id == two.id
     key(dock, Qt.Key.Key_Backspace)
-    assert [o.object_name for o in living(book.records)] == ["乗用車-2"]
+    assert [o.id for o in living(book.records)] == [one.id]
     assert dock.many.sample.record_id == one.id
     # Deleted from the list too: nothing left to take back, and the button says so.
     dock.remove_selected([book.record(one.id)], ask=False)
@@ -204,7 +207,7 @@ def test_rows_and_grids_are_laid_out_left_out_and_recorded_in_one(plugin):
     assert dock.map_entered()
     made = [o for o in living(book.records) if o.id != car.id]
     assert len(made) == 4 and {o.heading for o in made} == {car.heading} and dock.status.text() == "4 件を見本で記録"
-    assert sorted(o.object_name for o in made) == ["乗用車-2", "乗用車-3", "乗用車-4", "乗用車-5"]
+    assert [o.object_name for o in made] == ["乗用車"] * 4 and len({o.object_id for o in made}) == 4
     assert min(get_distance((o.lon, o.lat), a) for o in made) < 1
     # Taken back together.
     assert dock.many.undo()
@@ -327,12 +330,12 @@ def test_on_an_esri_store_what_is_put_down_meanwhile_goes_together_and_waits_whe
     assert wait_for(lambda: len(layer.rows) == 6 and not dock.many._sending and not dock.many.waiting)
     edits = [f for u, f in fake.asked if u.endswith("/applyEdits")]
     assert 1 <= len(edits) <= 2
-    assert sorted(r["attributes"]["OBJECT_NAME"] for r in layer.rows) == sorted(f"船舶-{i}" for i in range(1, 7))
+    assert [r["attributes"]["OBJECT_NAME"] for r in layer.rows] == ["船舶"] * 6 and len({r["attributes"]["OBJECT_ID"] for r in layer.rows}) == 6
     # Not saved: kept in 送信待ち, nothing lost.
     fake.layers.pop(URL)
     double_click(dock, 139.70, 35.65)
     assert wait_for(lambda: len(dock.book.drafts()) == 1 and not dock.many._sending)
-    assert dock.book.drafts()[0].record.object_name == "船舶-7"
+    assert dock.book.drafts()[0].record.object_name == "船舶"
 
 
 def cars_image(path):
