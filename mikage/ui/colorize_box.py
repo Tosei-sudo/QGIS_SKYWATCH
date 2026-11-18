@@ -9,8 +9,8 @@ two are laid over each other, their colouring is locked (on either image)
 until 重ね合わせの解除 (or 着色の解除), which takes it off both.
 
 Where the parts sit (tsudo, 2026-11-18: 「カラースケールの誤操作が多い。赤青比較は
-よく使うのでアクセスしやすいところ」): the two dates (`pair_box`, its own box)
-go at the top of the dock, open; the colour scale (this box) near the bottom,
+よく使うのでアクセスしやすいところ」, then 「DRA の下」): the two dates (`pair_box`, its
+own box) go right under DRA, open; the colour scale (this box) near the bottom,
 folded until opened, its title telling the colouring in use. Scrolling down
 to the two dates no longer passes over the colour scale, and the wheel only
 scrolls the dock (wheel_guard).

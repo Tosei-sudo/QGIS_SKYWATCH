@@ -22,8 +22,8 @@ alike rasters) has DRA and the 16-bit stretch taken over all of them
 together, so tiles meet without seams.
 
 The order (tsudo, 2026-11-18: the colour scale was often changed by mistake,
-the red and cyan comparison is used often): two dates right under the
-preset, open; then DRA, bands, the sliders and the tone curve; the colour
+the red and cyan comparison is used often): the preset, DRA, then two dates
+(open; under DRA, tsudo the same day); then bands, the sliders and the tone curve; the colour
 scale folded near the bottom, by the histogram. The wheel scrolls the dock
 and changes a choice or slider only once it was clicked (wheel_guard).
 """
@@ -211,11 +211,6 @@ class EnhanceDock(PluginDock):
         self.share.hide()
         v.addWidget(self.share)
 
-        # Two dates (used often) at the top; the colour scale itself further down, folded (below).
-        self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
-        self.colorize_box.changed.connect(self._colorize_changed)
-        self.colorize_box.colored.connect(self.refresh)
-        v.addWidget(self.colorize_box.pair_box)
 
         dra = QGroupBox(self.tr("DRA（表示範囲で自動レンジ）"))
         form = QFormLayout(dra)
@@ -240,6 +235,12 @@ class EnhanceDock(PluginDock):
         form.addRow(self.dra_linked)
         form.addRow(self.dra_locked)
         v.addWidget(dra)
+
+        # Two dates (used often) under DRA; the colour scale itself further down, folded (below).
+        self.colorize_box = ColorizeBox(lambda text: self.iface.messageBar().pushInfo(TITLE, text))
+        self.colorize_box.changed.connect(self._colorize_changed)
+        self.colorize_box.colored.connect(self.refresh)
+        v.addWidget(self.colorize_box.pair_box)
 
         self.bands_box = QGroupBox(self.tr("バンド割当"))
         form = QFormLayout(self.bands_box)

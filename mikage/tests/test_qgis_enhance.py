@@ -546,8 +546,10 @@ def test_two_dates_sit_at_the_top_the_colour_scale_folded_and_the_wheel_scrolls(
         page = box.pair_box.parentWidget()
         layout = page.layout()
         order = [layout.itemAt(i).widget() for i in range(layout.count())]
-        # Two dates under the preset, open; the colour scale after the sliders, tone curve and buttons, folded, by the histogram.
-        assert order.index(dock.share) < order.index(box.pair_box) < order.index(dock.bands_box) < order.index(dock.curve_box)
+        # Two dates right under DRA, open; the colour scale after the sliders, tone curve and buttons, folded, by the histogram.
+        dra = dock.dra_on.parentWidget()
+        assert order.index(dock.share) < order.index(dra) and order.index(box.pair_box) == order.index(dra) + 1
+        assert order.index(box.pair_box) < order.index(dock.bands_box) < order.index(dock.curve_box)
         assert order.index(dock.curve_box) < order.index(box) < order.index(dock.histogram_box)
         assert not box.pair_box.isCheckable() and box.pair_box.isEnabled() and box.other.currentData() == second.id()
         assert box.isCollapsed() and box.title() == "着色（単バンド画像）: なし"
