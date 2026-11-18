@@ -126,6 +126,17 @@ class SettingsDialog(QDialog):
         form.addWidget(self.raster, 6, 1)
         form.addWidget(self.raster_more, 6, 2)
         self._show_raster()
+        # Moved here from 画像カタログ (tsudo, 2026-11-19: its button became 「フォルダを開く」).
+        self.folders = QLabel()
+        self.folders.setWordWrap(True)
+        self.clear_folders = QPushButton(self.tr("対応を消去"))
+        self.clear_folders.setToolTip(self.tr("画像のパスの読み替え（pathMappings の prefix）にこの PC で選んだフォルダを忘れる"
+                                              "（次に画像を開くとき、フォルダをまた選ぶ）"))
+        self.clear_folders.clicked.connect(self._clear_folders)
+        form.addWidget(QLabel(self.tr("画像のフォルダの対応")), 7, 0)
+        form.addWidget(self.folders, 7, 1)
+        form.addWidget(self.clear_folders, 7, 2)
+        self._show_folders()
 
         self.services = QTableWidget(0, 4)
         self.services.setHorizontalHeaderLabels([self.tr("用途"), self.tr("名前"), self.tr("URL"), self.tr("認証設定")])
@@ -184,6 +195,19 @@ class SettingsDialog(QDialog):
     def _clear_cache(self) -> None:
         overviews_io.clear_cache_next_start()
         self._show_cache()
+
+    def _show_folders(self) -> None:
+        folders = settings.path_folders()
+        if not folders:
+            self.folders.setText(self.tr("なし（画像を開くときに、pathMappings の prefix のフォルダを選ぶとここに）"))
+        else:
+            pairs = [f"{prefix} → {folder}" for prefix, folder in sorted(folders.items())]
+            self.folders.setText("、".join(pairs[:3]) + (self.tr(" ほか {n} 件").format(n=len(pairs) - 3) if len(pairs) > 3 else ""))
+        self.clear_folders.setEnabled(bool(folders))
+
+    def _clear_folders(self) -> None:
+        settings.clear_path_folders()
+        self._show_folders()
 
     def _show_places(self) -> None:
         squares, shapes, size = place_cache.PLACES.info()
