@@ -464,4 +464,22 @@ def listed_image(record: CatalogRecord):
 
     if not record.id:
         return None
-    return ListedImage(record.id, record.id, ms_of(record.acquired), footprint_box(record.geometry))
+    return ListedImage(record.id, record.id, ms_of(record.acquired), footprint_box(record.geometry), footprint_rings(record.geometry))
+
+
+#: The most points a footprint keeps as its shape for 「ファイルなしで記録」 (kept with the list in QgsSettings): more, its box only.
+MAX_FOOTPRINT_POINTS = 2000
+
+
+def footprint_rings(geometry: Optional[dict[str, Any]]) -> Optional[list[list[list[float]]]]:
+    """
+    The rings of an Esri polygon (WGS 84) as the footprint of an image
+    without its file (drawn on the map as its layer); None for an envelope,
+    a bad ring or more than MAX_FOOTPRINT_POINTS points (its box drawn).
+    """
+    from ..obs.model import rings_of
+
+    rings = rings_of(geometry.get("rings")) if isinstance(geometry, dict) else None
+    if rings is None or sum(len(r) for r in rings) > MAX_FOOTPRINT_POINTS:
+        return None
+    return rings

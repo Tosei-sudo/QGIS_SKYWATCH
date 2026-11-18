@@ -315,9 +315,15 @@ class ListedImage:
     time: Optional[int] = None
     #: [west, south, east, north] (WGS 84), when known.
     box: Optional[list[float]] = None
+    #: The footprint's rings ([[longitude, latitude], …] each, WGS 84) as the catalog gives it, when known: drawn as the
+    #: image's layer on the map (its extent is `box`). None for one typed with ＋ (the box alone).
+    rings: Optional[list[list[list[float]]]] = None
 
     def to_json(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "time": self.time, "box": self.box}
+        out: dict[str, Any] = {"id": self.id, "name": self.name, "time": self.time, "box": self.box}
+        if self.rings:
+            out["rings"] = self.rings
+        return out
 
 
 def recorded_images(records: list[Observation]) -> list[ListedImage]:
@@ -352,5 +358,30 @@ def parse_listed_images(text: Optional[str]) -> list[ListedImage]:
             continue
         seen.add(id_)
         ok_box = list(box) if isinstance(box, list) and len(box) == 4 and all(is_number(n) for n in box) else None
-        out.append(ListedImage(id_, name if isinstance(name, str) and name.strip() else id_, t if is_number(t) else None, ok_box))
+        out.append(ListedImage(id_, name if isinstance(name, str) and name.strip() else id_, t if is_number(t) else None, ok_box,
+                               rings_of(v.get("rings"))))
     return out
+
+
+def rings_of(value: Any) -> Optional[list[list[list[float]]]]:
+    """
+    A footprint's rings read back (or from a catalog's Esri polygon): rings
+    of at least three [longitude, latitude] points, each point's first two
+    numbers; None when there is none (or one is not such a ring).
+    """
+    if not isinstance(value, list) or not value:
+        return None
+    rings = []
+    for ring in value:
+        if not isinstance(ring, list):
+            return None
+        points = []
+        for p in ring:
+            if not (isinstance(p, (list, tuple)) and len(p) >= 2 and all(is_number(n) and not isinstance(n, bool) and math.isfinite(n)
+                                                                         for n in p[:2])):
+                return None
+            points.append([float(p[0]), float(p[1])])
+        if len(points) < 3:
+            return None
+        rings.append(points)
+    return rings

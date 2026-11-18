@@ -56,6 +56,7 @@ from ..core.util import read_number
 from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
+from ..qgis_io.listed_layers import ListedLayers, listed_image_of
 from ..qgis_io.obs_images import image_layers, open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.tasks import run_task
@@ -218,6 +219,8 @@ class ObservationDock(PluginDock):
         #: Whether the dock shows only its note (no image chosen, or no store): None before the first render.
         self._idle: Optional[bool] = None
         self.said.connect(self._show_status)
+        #: The images without their files as layers of their footprints (removing one takes its image off the list).
+        self.footprints = ListedLayers(self, self._footprints_removed)
 
         self._build()
         self.overlay = ObservationOverlay(self.canvas, self.mark_style_select.currentData())
@@ -326,12 +329,14 @@ class ObservationDock(PluginDock):
         times.addWidget(self.list_time, 1)
         f.addRow(tr("撮像日時"), times)
         f.addRow(self.list_box)
-        note = QLabel(tr("ファイルなしで記録（背景地図・他の画像の上をクリック）。保存先ごとにこの QGIS で保持"))
+        note = QLabel(tr("ファイルなしで記録（背景地図・他の画像の上をクリック）。保存先ごとにこの QGIS で保持。"
+                         "地図にはグループ「ファイルなしの画像」に範囲の枠のレイヤーが入り、そのレイヤーを削除すると一覧から除外（記録は残る）"))
         note.setWordWrap(True)
         f.addRow(note)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("追加"), "", self._list_from_form))
-        self.unlist_button = self._button(tr("一覧から除外"), tr("この画像の一覧からの除外（記録は残る）"), self._unlist)
+        self.unlist_button = self._button(tr("一覧から除外"), tr("この画像の一覧からの除外（記録は残る）。地図の枠のレイヤーを削除しても同じ"),
+                                          self._unlist)
         actions.addWidget(self.unlist_button)
         actions.addWidget(self._button(tr("取消"), "", lambda: self.list_button.setChecked(False)))
         f.addRow(actions)
@@ -1281,7 +1286,16 @@ class ObservationDock(PluginDock):
         self.refresh_images()
 
     def _layer_chosen(self, layer) -> None:
-        if self._following or self.book is None or not isinstance(layer, QgsRasterLayer):
+        if self._following or self.book is None:
+            return
+        listed = listed_image_of(layer)
+        if listed is not None and layer.id() in self.footprints.layer_ids():
+            # An image without its file chosen by its footprint's layer.
+            current = self.book.current
+            if (current is None or current.id != listed) and self.book.go_to(listed):
+                self._went()
+            return
+        if not isinstance(layer, QgsRasterLayer):
             return
         current = self.book.current
         if current is not None and layer.id() in current.layer_ids:
@@ -1302,11 +1316,14 @@ class ObservationDock(PluginDock):
         if self.active and self.assignment_bar.needs_claim(image):
             self.set_active(False)
             self.set_active(True, quiet=True)
-        layers = image_layers(image)
+        # An image without its file: its footprint's layer (made now when just listed).
+        self._show_footprints()
+        footprint = self.footprints.layer_of(image.id) if image is not None and not image.file else None
+        layers = image_layers(image) or ([footprint] if footprint is not None else [])
         if layers:
             layer = layers[0]
             active = self.iface.activeLayer()
-            if active is None or active.id() not in image.layer_ids:
+            if active is None or active.id() not in {*image.layer_ids, *(x.id() for x in layers)}:
                 self._following = True
                 try:
                     self.iface.setActiveLayer(layer)
@@ -1416,6 +1433,38 @@ class ObservationDock(PluginDock):
             self.list_button.setChecked(False)
             self._went()
 
+    def _show_footprints(self) -> None:
+        """The layers of the images without their files as the list is now (nothing done when it did not change)."""
+        book = self.book
+        image = book.current if book else None
+        self.footprints.show(book.listed if book else [], image.id if image is not None else None, book.label if book else "")
+
+    def _footprints_removed(self, image_ids: list[str]) -> None:
+        """
+        Layers of images without their files removed by hand (tsudo 2026-11-18:
+        これを消すことで、観測記録の方からも外れる): those images off the
+        list, their records kept, as 「一覧から除外」. Told while the layers
+        are being removed: the dock follows once they are gone.
+        """
+        book = self.book
+        if book is None:
+            return
+        was = book.current
+        if not book.unlist_images(image_ids):
+            return
+        now = book.current
+        moved = was is None or now is None or now.id != was.id or now.layer_ids != was.layer_ids
+        QTimer.singleShot(0, lambda: self._unlisted(book, moved))
+
+    def _unlisted(self, book: ObservationBook, moved: bool) -> None:
+        if self.book is not book:
+            return
+        if moved:
+            self.list_button.setChecked(False)
+            self._went()
+        else:
+            self.render()
+
     def _set_image_time(self) -> None:
         image = self.book.current if self.book else None
         if image is None:
@@ -1426,19 +1475,27 @@ class ObservationDock(PluginDock):
         self.do(self.tr("撮像日時の入力"), lambda b: b.set_image_time(t))
 
     def _apply_only(self, *_args) -> None:
-        """「この画像のみ」: only the current image's layers show (a record's images in its folder all); the others come back as they were."""
+        """
+        「この画像のみ」: only the current image's layers show (a record's
+        images in its folder all; an image without its file: its footprint's
+        layer, the other footprints hidden too); the others come back as they were.
+        """
         root = QgsProject.instance().layerTreeRoot()
-        rasters = [layer for layer in QgsProject.instance().mapLayers().values() if isinstance(layer, QgsRasterLayer)]
+        footprints = self.footprints.layer_ids()
+        rasters = [layer for layer in QgsProject.instance().mapLayers().values()
+                   if isinstance(layer, QgsRasterLayer) or layer.id() in footprints]
         image = self.book.current if self.book else None
         if self.only.isChecked() and image is not None and self.isVisible():
             if self._shown is None:
                 self._shown = {}
+            footprint = self.footprints.layer_of(image.id)
+            keep = {*image.layer_ids, *((footprint.id(),) if footprint is not None else ())}
             for layer in rasters:
                 node = root.findLayer(layer.id())
                 if node is None:
                     continue
                 self._shown.setdefault(layer.id(), node.itemVisibilityChecked())
-                node.setItemVisibilityChecked(layer.id() in image.layer_ids)
+                node.setItemVisibilityChecked(layer.id() in keep)
         elif self._shown is not None:
             for layer_id, visible in self._shown.items():
                 node = root.findLayer(layer_id)
@@ -2928,6 +2985,7 @@ class ObservationDock(PluginDock):
     def render(self) -> None:
         """Shows the book as it is now: with no image chosen, only a note (and the records not read)."""
         self._render_drafts()
+        self._show_footprints()
         book = self.book
         image = book.current if book else None
         # The images.
@@ -3304,6 +3362,7 @@ class ObservationDock(PluginDock):
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
+        self.footprints.close()
         if self._alerts is not None:
             try:
                 self.context.configChanged.disconnect(self._alerts.reset)
