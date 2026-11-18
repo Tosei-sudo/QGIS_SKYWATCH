@@ -7,3 +7,5 @@ pytest-xdist
 pytest-timeout
 sgp4
 onnxruntime
+# ArcGIS ダッシュボード用のビュー（tools/arcgis/dashboard_views_oracle.sql）の列の照合。なければその 1 件を飛ばす
+sqlglot
