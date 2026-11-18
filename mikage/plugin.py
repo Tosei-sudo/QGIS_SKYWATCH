@@ -25,7 +25,7 @@ from .qgis_io.preload import LOG_TAG, Preloader
 from .qgis_io.stall_watch import StallWatch
 from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
 from .core.enhance.rules import image_rule_for
-from .qgis_io import complex_sar, network, overviews_io, raster_speed, tasks
+from .qgis_io import complex_sar, fast_draw, network, overviews_io, raster_speed, tasks
 from .core.raster_speed import shown as shown_option
 from .qgis_io.geometry import to_wgs84
 from .ui.ai_results_dock import AiResultsDock
@@ -369,6 +369,8 @@ class MikagePlugin:
         self._raster_read = False
         self._raster_tuned = False
         self.raster_dialog = None
+        #: MIKAGE の速い描画（試作）: the raster layers coloured by MIKAGE while the person has it on (qgis_io/fast_draw.py).
+        self.fast_draw: Optional[fast_draw.FastDraw] = None
 
     def initProcessing(self) -> None:  # noqa: N802 (QGIS's name)
         """
@@ -424,6 +426,10 @@ class MikagePlugin:
         self.context.configChanged.connect(self._overviews_changed)
         # 地図の描画を速くする設定 (`rasterSpeed`): GDAL's as the file says, QGIS's options once QGIS has started too.
         self.context.configChanged.connect(self._raster_speed_changed)
+        # MIKAGE の速い描画（試作）: on for those who turned it on in 「地図の描画の速さ」.
+        self.fast_draw = fast_draw.FastDraw()
+        if fast_draw.on():
+            self.fast_draw.start()
         # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
         self.context.configChanged.connect(self._column_drag_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
@@ -1549,7 +1555,7 @@ class MikagePlugin:
             return None
         context = self.context
         if parent is not None:
-            dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, parent)
+            dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, parent, self.fast_draw)
             try:
                 dialog.exec()
             finally:
@@ -1557,7 +1563,8 @@ class MikagePlugin:
             return None
         if self.raster_dialog is not None:
             self.raster_dialog.deleteLater()
-        self.raster_dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, self.iface.mainWindow())
+        self.raster_dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, self.iface.mainWindow(),
+                                               self.fast_draw)
         self.raster_dialog.show()
         self.raster_dialog.raise_()
         return self.raster_dialog
@@ -1690,6 +1697,11 @@ class MikagePlugin:
             self.raster_dialog.close()
             self.raster_dialog.deleteLater()
             self.raster_dialog = None
+        # QGIS's own renderers back on the layers (the plugin's code goes with it).
+        if self.fast_draw is not None:
+            self.fast_draw.stop()
+            self.fast_draw.deleteLater()
+            self.fast_draw = None
         if self.stall_watch is not None:
             self.stall_watch.stop()
             self.stall_watch.deleteLater()

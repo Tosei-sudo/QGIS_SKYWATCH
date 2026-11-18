@@ -29,7 +29,7 @@ from ..core.raster_speed import (
     DEFAULT_RASTER_SPEED, EARLY_RESAMPLING, MAX_THREADS, PARALLEL, QGIS_KEYS, RENDER_CACHE, RasterSpeedOptions, Change,
     as_bool, as_int, cache_for, qgis_changes, shown, threads_for,
 )
-from . import settings
+from . import fast_draw, settings
 
 THREADS = "GDAL_NUM_THREADS"
 CACHE = "GDAL_CACHEMAX"
@@ -328,6 +328,7 @@ def summary() -> str:
     parts.append(f"ブロックキャッシュ {gdal.GetCacheMax() // MB:,} MB" + (f"（既定 {ours['before_' + CACHE]:,} MB）" if CACHE in ours else ""))
     changed = qgis_changed()
     parts.append(f"QGIS の設定の変更 {len(changed)} 件")
+    fast = "、MIKAGE の速い描画（試作）" if fast_draw.on() else ""
     if personal_off():
-        return "使わない（" + "、".join(parts) + "）"
-    return "、".join(parts)
+        return "使わない（" + "、".join(parts) + "）" + fast
+    return "、".join(parts) + fast
