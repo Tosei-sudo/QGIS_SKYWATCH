@@ -19,7 +19,8 @@ from mikage.core.obs.areas import (
 )
 from mikage.core.obs.csv import observations_csv
 from mikage.core.obs.flows import (
-    ImageRef, carried_into, carry_overs, ends_of, flows, heading_text, match_candidates, next_name, outline_of, side_points, two_point,
+    ImageRef, carried_into, carry_overs, ends_of, flows, heading_text, match_candidates, month_before, next_name, outline_of,
+    recent_things, side_points, two_point,
 )
 from mikage.core.obs.geo import bearing, get_distance, offset
 from mikage.core.obs.model import (
@@ -82,6 +83,58 @@ class TestFlows:
         # A later record that says another class wins.
         [moved] = flows([obs(image_time=1, kind="船舶 > 支援船 > 〇〇級"), obs(image_time=2, kind="船舶 > 護衛艦")])
         assert moved.kind == "船舶 > 護衛艦"
+
+
+def local(y: int, m: int, d: int, h: int = 0) -> int:
+    """A local time (as the lists show times), ms."""
+    return int(datetime(y, m, d, h).timestamp() * 1000)
+
+
+class TestRecentThings:
+    """「モノ」 lists the last month only (tsudo 2026-11-18), the rest left to the ArcGIS dashboard."""
+
+    def test_a_month_before_is_the_same_day_of_the_month_before_from_its_midnight(self):
+        assert month_before(local(2026, 11, 18, 18)) == local(2026, 10, 18)
+        assert month_before(local(2026, 1, 5, 9)) == local(2025, 12, 5)
+        assert month_before(local(2026, 3, 31, 23)) == local(2026, 2, 28)
+        assert month_before(local(2028, 3, 30)) == local(2028, 2, 29)
+
+    def test_lists_the_things_last_seen_within_a_month_of_today(self):
+        records = [
+            obs(object_id="A", object_name="A", image_time=local(2026, 11, 17, 10)),
+            obs(object_id="B", object_name="B", image_time=local(2026, 10, 18, 0)),
+            # Seen long ago and again lately: listed (its whole flow).
+            obs(object_id="C", object_name="C", image_time=local(2026, 6, 1)),
+            obs(object_id="C", object_name="C", image_time=local(2026, 11, 1)),
+            obs(object_id="D", object_name="D", image_time=local(2026, 10, 17, 23)),
+            obs(object_id="E", object_name="E", image_time=local(2026, 8, 1)),
+        ]
+        recent = recent_things(flows(records), now=local(2026, 11, 18, 18))
+        assert [f.object_id for f in recent.things] == ["A", "C", "B"]
+        assert (recent.since, recent.until, recent.today, recent.older) == (local(2026, 10, 18), local(2026, 11, 18, 18), True, 2)
+        assert len(recent.things[1].observations) == 2
+
+    def test_counts_back_from_the_latest_record_when_none_is_that_recent(self):
+        records = [obs(object_id="A", object_name="A", image_time=local(2026, 9, 20)),
+                   obs(object_id="B", object_name="B", image_time=local(2026, 8, 25)),
+                   obs(object_id="C", object_name="C", image_time=local(2026, 8, 10))]
+        recent = recent_things(flows(records), now=local(2026, 11, 18))
+        assert [f.object_id for f in recent.things] == ["A", "B"]
+        assert (recent.since, recent.until, recent.today, recent.older) == (local(2026, 8, 20), local(2026, 9, 20), False, 1)
+
+    def test_a_record_dated_ahead_of_today_does_not_move_the_month(self):
+        records = [obs(object_id="A", object_name="A", image_time=local(2099, 1, 1)),
+                   obs(object_id="B", object_name="B", image_time=local(2026, 11, 10)),
+                   obs(object_id="C", object_name="C", image_time=local(2026, 9, 1))]
+        recent = recent_things(flows(records), now=local(2026, 11, 18))
+        assert [f.object_id for f in recent.things] == ["A", "B"] and recent.today and recent.older == 1
+        # The time unknown: when it was recorded counts (as in the flow).
+        undated = recent_things(flows([obs(image_time=None, created_at=local(2026, 11, 15))]), now=local(2026, 11, 18))
+        assert len(undated.things) == 1 and undated.today
+
+    def test_no_things_no_month(self):
+        recent = recent_things([], now=local(2026, 11, 18))
+        assert (recent.things, recent.since, recent.older) == ([], None, 0)
 
 
 class TestCarryOvers:

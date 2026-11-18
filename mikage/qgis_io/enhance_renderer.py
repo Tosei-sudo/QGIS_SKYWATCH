@@ -203,6 +203,17 @@ class EnhanceState:
             self.cache.clear()
             self.generation += 1
 
+    def clear_views(self) -> None:
+        """Drops the statistics of views (the image moved: the same pixels, elsewhere); the whole image's stay."""
+        with self.lock:
+            _drop_views(self.cache)
+            self.generation += 1
+
+
+def _drop_views(cache: dict) -> None:
+    for key in [k for k in cache if k[0] != "whole"]:
+        del cache[key]
+
 
 class GroupShare:
     """
@@ -225,8 +236,12 @@ class GroupShare:
 _shares: dict = {}
 
 
-def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer") -> None:
-    """Puts the layer into the share its settings name (and out of any other)."""
+def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer", moved: bool = False) -> None:
+    """
+    Puts the layer into the share its settings name (and out of any other).
+    `moved`: the layer has a new source with the same pixels elsewhere (位置ずらし):
+    its provider is taken again, the whole images' statistics stay.
+    """
     key = renderer.settings.share
     for k in [k for k, share in _shares.items() if k != key and layer.id() in share.members]:
         _leave(k, layer.id())
@@ -234,11 +249,14 @@ def _join(layer: QgsRasterLayer, renderer: "EnhanceRenderer") -> None:
         return
     share = _shares.setdefault(key, GroupShare())
     current = share.members.get(layer.id())
-    if current is None or current[1] is not renderer.state:
+    if current is None or current[1] is not renderer.state or moved:
         provider = layer.dataProvider().clone()
         with share.lock:
             share.members[layer.id()] = (provider, renderer.state)
-            share.cache.clear()
+            if moved and current is not None:
+                _drop_views(share.cache)
+            else:
+                share.cache.clear()
 
 
 def _leave(key: str, layer_id: str) -> None:
@@ -798,8 +816,13 @@ def _keep(renderer: EnhanceRenderer) -> None:
     _kept.add(renderer)
 
 
-def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
-    """Draws the layer with the correction (or updates it) and keeps the settings on the layer."""
+def apply(layer: QgsRasterLayer, settings: EnhanceSettings, state: Optional[EnhanceState] = None) -> EnhanceRenderer:
+    """
+    Draws the layer with the correction (or updates it) and keeps the settings
+    on the layer. `state`: a new renderer's, that of the one the layer had
+    before it was moved to a new source (位置ずらし: the same pixels elsewhere),
+    so the view and a 範囲を固定 range stay; the views' statistics are dropped.
+    """
     current = enhance_renderer(layer)
     if current is not None:
         bands_changed = current.settings.bands != settings.bands or current.settings.no_data != settings.no_data
@@ -809,13 +832,15 @@ def apply(layer: QgsRasterLayer, settings: EnhanceSettings) -> EnhanceRenderer:
             current.state.clear()
         renderer = current
     else:
-        renderer = EnhanceRenderer(layer.dataProvider(), settings)
+        if state is not None:
+            state.clear_views()
+        renderer = EnhanceRenderer(layer.dataProvider(), settings, state)
         old = layer.renderer()
         if old is not None:
             renderer.copyCommonProperties(old, True)
         layer.setRenderer(renderer)
         _keep(renderer)
-    _join(layer, renderer)
+    _join(layer, renderer, moved=state is not None)
     layer.setCustomProperty(PROPERTY, settings.to_json())
     layer.triggerRepaint()
     return renderer
@@ -834,8 +859,8 @@ def remove(layer: QgsRasterLayer) -> None:
     layer.triggerRepaint()
 
 
-def restore_layer(layer) -> bool:
-    """Puts the correction kept on a layer (opened from a project) back; True when it did."""
+def restore_layer(layer, state: Optional[EnhanceState] = None) -> bool:
+    """Puts the correction kept on a layer (opened from a project, or given a new source) back; True when it did."""
     if not isinstance(layer, QgsRasterLayer) or enhance_renderer(layer) is not None:
         return False
     text = layer.customProperty(PROPERTY)
@@ -847,7 +872,7 @@ def restore_layer(layer) -> bool:
         return False
     if any(b < 1 or b > layer.bandCount() for b in settings.bands):
         return False
-    apply(layer, settings)
+    apply(layer, settings, state)
     return True
 
 
