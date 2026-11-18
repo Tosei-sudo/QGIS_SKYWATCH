@@ -115,7 +115,7 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     """
     `1=1`, `A = 'x'`, `A = 0`, `A IS NULL`, `A [NOT] IN ('x', 'y')`, `A >= 'x'`,
     `F >= TIMESTAMP '…'`, `[UPPER(]A[)] LIKE '…' [ESCAPE '\\']`, `UPPER(A) = 'X'`,
-    `A [NOT] IN (1, 2)`, `A [NOT] BETWEEN 1 AND 2`, `NOT (…)`, joined by AND / OR
+    `UPPER(A) [NOT] IN ('X', …)`, `A [NOT] IN (1, 2)`, `A [NOT] BETWEEN 1 AND 2`, `NOT (…)`, joined by AND / OR
     with parentheses. Parts not understood match (as before).
     """
     if not where or where.strip() == "1=1":
@@ -143,6 +143,11 @@ def _matches(where: Optional[str], a: dict[str, Any]) -> bool:
     if m:
         v = a.get(m.group(1))
         return v is not None and str(v).upper() == m.group(2).replace("''", "'")
+    m = re.fullmatch(r"UPPER\((\w+)\)\s+(NOT\s+)?IN\s*\((.*)\)", part, re.IGNORECASE | re.DOTALL)
+    if m:
+        values = [v.replace("''", "'") for v in re.findall(r"'((?:[^']|'')*)'", m.group(3))]
+        v = a.get(m.group(1))
+        return (v is not None and str(v).upper() in values) != bool(m.group(2))
     m = re.fullmatch(r"(\w+)\s+IS\s+NULL", part, re.IGNORECASE)
     if m:
         return a.get(m.group(1)) is None

@@ -72,6 +72,7 @@ FEATURES: dict[str, frozenset] = {
     "requests.edit": frozenset({REQUEST, PLAN}),
     # 観測記録
     "観測記録": frozenset({OBSERVE}),
+    "自分の記録…": frozenset({OBSERVE}),
     "通報文の作成…": frozenset({OBSERVE}),
     "通報記録の確認…": frozenset({OBSERVE}),
     "観測記録のエクスポート…": frozenset({OBSERVE}),

@@ -114,6 +114,16 @@ def own_place_cache(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def own_opened_images(monkeypatch, tmp_path):
+    """Each test has its own 開いた画像の履歴 (core/catalog/opened.py), never the profile's."""
+    try:
+        from mikage.qgis_io import settings
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(settings, "opened_images_path", lambda: str(tmp_path / "opened_images.json"))
+
+
+@pytest.fixture(autouse=True)
 def own_audit_folder(monkeypatch, tmp_path):
     """Each test's audit log (監査ログ) is written in its own folder, never the profile's; none is left set after it."""
     from mikage.core import audit

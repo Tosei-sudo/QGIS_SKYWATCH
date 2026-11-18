@@ -30,7 +30,8 @@ def test_keywords_are_one_name_or_several():
     problems = []
     assert CATALOG.keyword_fields == ["NOTE", "IMG_ID", "AREA"]
     one = catalog_of({**ENTRY, "fields": {**ENTRY["fields"], "keywords": "NOTE"}}, problems, 0)
-    assert one.keyword_fields == ["NOTE"] and problems == []
+    # The image id always (tsudo 2026-11-18: フリーワード検索に、無条件で画像 ID を含める), after those named.
+    assert one.keyword_fields == ["NOTE", "IMG_ID"] and problems == []
     # Headings: a column's, a role's, else the attribute name.
     assert CATALOG.keyword_labels() == ["備考", "画像ID", "AREA"]
     none = catalog_of({**ENTRY, "fields": {"source": "PATH"}}, problems, 0)
@@ -43,9 +44,11 @@ def test_keywords_are_one_name_or_several():
 def test_a_watch_keeps_the_keyword_fields_with_its_catalog():
     again = CatalogConfig.from_json(json.loads(json.dumps(CATALOG.to_json())))
     assert again.keyword_fields == ["NOTE", "IMG_ID", "AREA"]
-    # A watch made before 「フリーワード」 has none.
+    # A watch made before 「フリーワード」 looks in the image id alone; without an id, nowhere.
     old = CatalogConfig.from_json({**CATALOG.to_json(), "fields": {"id": "IMG_ID", "source": ["PATH"]}})
-    assert old.keyword_fields == []
+    assert old.keyword_fields == ["IMG_ID"]
+    no_id = CatalogConfig.from_json({**CATALOG.to_json(), "fields": {"source": ["PATH"]}})
+    assert no_id.keyword_fields == []
 
 
 def test_words_are_split_at_any_space_once_each():

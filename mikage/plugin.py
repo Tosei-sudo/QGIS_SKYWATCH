@@ -81,7 +81,7 @@ MENU = "MIKAGE"
 MENU_GROUPS = [
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…", "衛星の障害情報…"]),
-    ("観測記録", ["観測記録", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
+    ("観測記録", ["観測記録", "自分の記録…", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
     ("画像", ["画像カタログ", "通知", "新着画像（大きな画面）", "関心地域・地点", None, "画像補正", "影から高さ", "スペクトル", None, "スワイプ比較", "位置ずらし", "位置ずらしの解除"]),
     ("解析・処理", ["データ分析", None, "パンシャープン…", "変化抽出（2 時期）…", "自動位置合わせ…", "土地被覆分類…", "簡易オルソ補正…", None,
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
@@ -568,6 +568,8 @@ class MikagePlugin:
         # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
         for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
             self.docks[name].observations = lambda: self.docks.get("SatObsObservations") if self.allows(tr("観測記録")) else None
+        # A record's image not open opens through 「画像カタログ」 (開いた画像の履歴, else the catalog by its id).
+        self.docks["SatObsObservations"].catalog = lambda: self.docks.get("SatObsImageCatalog")
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)
@@ -598,6 +600,12 @@ class MikagePlugin:
             action.triggered.connect(lambda _on=False, tab=tab: self.docks["SatObsObservations"].open_alerts(tab))
             self._add_to_menu(action)
             self.actions.append(action)
+        # 「自分の記録」: the records one made, across the images, to look over and fix (tsudo, 2026-11-18).
+        mine = QAction(icon("my_records"), tr("自分の記録…"), self.iface.mainWindow())
+        mine.setObjectName("SatObsMyRecords")
+        mine.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_my_records())
+        self._add_to_menu(mine)
+        self.actions.append(mine)
         # 「観測記録のエクスポート」: the records of a period and a place as CSV / JSON (observationExports).
         export = QAction(icon("obs_export"), tr("観測記録のエクスポート…"), self.iface.mainWindow())
         export.setObjectName("SatObsObservationExport")
