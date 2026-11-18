@@ -343,7 +343,7 @@ def set_path_folder(prefix: str, folder: Optional[str]) -> None:
 
 
 def clear_path_folders() -> None:
-    """Forgets every folder chosen for the prefixes (「フォルダの対応を消去」)."""
+    """Forgets every folder chosen for the prefixes (「設定…」の「画像のフォルダの対応」)."""
     _set("catalog/path_folders", "{}")
 
 

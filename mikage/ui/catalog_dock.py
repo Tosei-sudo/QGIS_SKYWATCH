@@ -22,6 +22,7 @@ cannot be opened.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Optional
 
@@ -48,14 +49,15 @@ from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import (
-    Cancelled, add_record_layers, close_layers, footprint, layer_area, layers_extent, located_again, open_located, open_record, opened_images,
-    overlap_measure, record_of_layer, results_layer,
+    Cancelled, RecordFolder, add_record_layers, close_layers, footprint, layer_area, layers_extent, located_again, open_located, open_record,
+    opened_images, overlap_measure, record_folder, record_of_layer, results_layer,
 )
+from ..qgis_io.file_manager import show_folder
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
-from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .docks import PluginDock, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import ListViews
 from .image_files_dialog import choose_image_files
@@ -356,7 +358,8 @@ class CatalogDock(PluginDock):
             "similar": self.tr("選んだ画像と同じ場所を写した画像を探す"),
             "watch": self.tr("今の検索条件で新しい画像を見張る（新着画像の通知）"),
             "pick": self.tr("地図上の範囲をクリックして一覧の画像を選ぶ"),
-            "folders": self.tr("この PC で画像のパスの読み替え（pathMappings）に選んだフォルダを忘れる"),
+            "folder": self.tr("選んだ画像のフォルダをエクスプローラーで開く（パスの読み替えがあれば、読み替えた先にあるときはそちら。"
+                              "画像ファイルはそのファイルを選んだ状態で）"),
             "event": self.tr("選んだ画像をイベントに紐付ける"),
             "record": self.tr("選んだ画像を、画像ファイルを開かずに観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから。"
                               "生データが別システムにしかない画像に。ダブルクリックでも）。背景地図の上をクリックして記録"),
@@ -366,11 +369,11 @@ class CatalogDock(PluginDock):
             ("record", self.tr("ファイルなしで記録"), lambda: self.record_without_files()),
             ("zoom", self.tr("範囲へ移動"), self.zoom_to_chosen),
             ("copy", self.tr("パスをコピー"), self.copy_paths),
+            ("folder", self.tr("フォルダを開く"), lambda: self.open_folders()),
             ("layer", self.tr("レイヤーとして追加"), self.add_layer),
             ("similar", self.tr("類似画像の検索"), self._similar_of_chosen),
             ("watch", self.tr("この条件で監視…"), self._watch),
             ("pick", self.tr("地図で選択"), None),
-            ("folders", self.tr("フォルダの対応を消去"), self.clear_folders),
             ("event", self.tr("イベントに追加"), self.add_to_event),
         ]:
             button = QPushButton(text)
@@ -503,9 +506,9 @@ class CatalogDock(PluginDock):
         return catalog is None or catalog.image_files
 
     def _show_file_buttons(self) -> None:
-        """A catalog without image files: 「ファイルなしで記録」 instead of 「開く」, and no paths to copy or folders to forget."""
+        """A catalog without image files: 「ファイルなしで記録」 instead of 「開く」, and no paths to copy or folders to open."""
         files = self.has_files()
-        for key in ("open", "copy", "folders"):
+        for key in ("open", "copy", "folder"):
             self.buttons[key].setVisible(files)
         self.close_previous.setVisible(files)
         self.zoom_opened.setVisible(files)
@@ -911,7 +914,7 @@ class CatalogDock(PluginDock):
         if self.overlay is not None:
             self.overlay.choose(rows, [self.model.records[r].id for r in rows])
         has = bool(rows)
-        for key in ("open", "record", "zoom", "copy", "similar"):
+        for key in ("open", "record", "zoom", "copy", "folder", "similar"):
             self.buttons[key].setEnabled(has)
         if len(rows) == 1:
             self.table.scrollTo(self.model.index(rows[0], 0))
@@ -1363,12 +1366,59 @@ class CatalogDock(PluginDock):
         audit.record("copy", "image-paths", count=len(paths), ids=[r.id for r in self.chosen() if r.source])
         self.status.setText(self.tr("パス {n} 件をコピー").format(n=len(paths)))
 
-    def clear_folders(self) -> None:
-        if not ask_no(self, self.tr("フォルダの対応を消去"),
-                      self.tr("この PC で画像のパスの読み替えに選んだフォルダをすべて忘れますか？次に画像を開くとき、フォルダをまた選ぶことになります。")):
-            return
-        settings.clear_path_folders()
-        self.status.setText(self.tr("フォルダの対応を消去"))
+    #: Shows a folder in Explorer (qgis_io/file_manager.py; tests replace it).
+    show_folder = staticmethod(show_folder)
+    #: 「フォルダを開く」 opens at most this many windows (several images chosen).
+    MAX_FOLDERS = 5
+
+    def open_folders(self, records=None) -> list[RecordFolder]:
+        """
+        「フォルダを開く」 (tsudo, 2026-11-19, instead of 「フォルダの対応を消去」): the
+        folders of the chosen images (`records`) in Explorer, after the rewrites
+        of `pathMappings` when the rewritten place is there (else the path as
+        written; catalog_io.record_folder), an image file selected in its
+        folder. Each folder once, at most MAX_FOLDERS. The folders shown.
+        """
+        records = self.chosen() if records is None else list(records)
+        if not records:
+            self.status.setText(self.tr("一覧で画像を選択（Ctrl・Shift + クリックで複数）"))
+            return []
+        shown: list[RecordFolder] = []
+        ids: list[str] = []
+        problems: list[str] = []
+        more = False
+        for record in records:
+            try:
+                where = record_folder(record, self.context.config.path_mappings, self.choose_folder)
+            except Cancelled:
+                break
+            except PathError as error:
+                problems.append(str(error))
+                continue
+            if any(os.path.normcase(s.folder) == os.path.normcase(where.folder) for s in shown):
+                continue
+            if len(shown) == self.MAX_FOLDERS:
+                more = True
+                break
+            if not self.show_folder(where.folder, where.file):
+                problems.append(self.tr("フォルダ「{f}」を開けず").format(f=where.folder))
+                continue
+            shown.append(where)
+            ids.append(record.id)
+        if shown:
+            audit.record("open", "image-folder", count=len(shown), ids=ids, detail={"folders": [s.folder for s in shown]})
+        if len(shown) == 1:
+            text = self.tr("フォルダを開く: {f}").format(f=shown[0].folder) + (self.tr("（読み替え先）") if shown[0].rewritten else "")
+        elif shown:
+            text = self.tr("フォルダ {n} 件を開く").format(n=len(shown)) + (self.tr("（先頭の {m} 件）").format(m=self.MAX_FOLDERS) if more else "")
+        else:
+            text = ""
+        if problems:
+            text = "　".join(t for t in (text, problems[-1] if len(problems) == 1 else
+                                          self.tr("{n} 件は開けず（{p}）").format(n=len(problems), p=problems[-1])) if t)
+        if text:
+            self.status.setText(text)
+        return shown
 
     def add_layer(self):
         """The list as a layer of footprints (every attribute; the temporal controller on 撮像日時)."""
