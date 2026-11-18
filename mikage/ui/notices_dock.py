@@ -1,10 +1,12 @@
 """
-通知: the new images the watches found (and the imaging plan's reminders),
+通知: the images the watches found (and the imaging plan's reminders),
 newest first, with 開く・移動・既読・削除, and the watches themselves (on or
 off, renamed, their area changed, deleted, when last checked and why a check failed). The
 watches are checked when QGIS starts and every `watchInterval` minutes, in
-a task; a check finding new images says so in the message bar. The tab
-通報 lists the 通報 log table, polled while the dock is shown (alert_feed).
+a task; a check finding new images says so in the message bar. Every image
+matching a watch is listed, those already there when it was set too (read,
+「設定前から」; core/catalog/watch.py). The tab 通報 lists the 通報 log table,
+polled while the dock is shown (alert_feed).
 """
 from __future__ import annotations
 
@@ -25,9 +27,9 @@ from ..core.catalog.paths import PathError
 from ..core.catalog.query import CatalogSearch, time_text
 from ..core.catalog.search import listed_image, read_catalog_layer, record_of
 from ..core.catalog.watch import (
-    MAX_SEEN, CatalogWatch, WatchNotice, add_areas, areas_of, check_watch, conditions_text, new_watch, replace_areas,
+    MAX_SEEN, CatalogWatch, WatchNotice, add_areas, areas_of, conditions_text, new_watch, replace_areas,
 )
-from ..core.catalog.watch_store import WatchStore, check_due
+from ..core.catalog.watch_store import Checked, WatchStore, check_due, check_one
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84
@@ -39,6 +41,9 @@ from .watch_dialog import PointWatchDialog, WatchAreaDialog, WatchDialog
 
 TITLE = "通知"
 PLAN = "plan"
+#: The newest notices listed in the dock (all of them are on the 新着画像 page): with the images there before a
+#: watch was set there can be tens of thousands, too many for a list rebuilt each time one is read.
+DOCK_ROWS = 2000
 
 
 def _now() -> float:
@@ -80,6 +85,10 @@ class NoticesDock(PluginDock):
         self.notices.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.notices.itemDoubleClicked.connect(lambda item, column: self.open_notices([item.data(0, Qt.ItemDataRole.UserRole)]))
         v.addWidget(self.notices, 1)
+        self.more = plain_label(QLabel())
+        self.more.setWordWrap(True)
+        self.more.hide()
+        v.addWidget(self.more)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.notices_columns = column_menus("notices", self.notices, self)
         row = QHBoxLayout()
@@ -107,7 +116,8 @@ class NoticesDock(PluginDock):
         row = QHBoxLayout()
         for text, tip, slot in [
                 (self.tr("名前の変更"), "", self.rename_chosen),
-                (self.tr("範囲の変更…"), self.tr("選んだ監視の範囲を、レイヤーの今の形（取り直し）・表示範囲などで置き換える。新しい範囲に今ある画像は通知しない"),
+                (self.tr("範囲の変更…"), self.tr("選んだ監視の範囲を、レイヤーの今の形（取り直し）・表示範囲などで置き換える。"
+                                                "新しい範囲にすでにある画像も一覧とカードに（既読で。新着としては知らせない）"),
                  self.change_chosen_area),
                 (self.tr("削除"), "", self.delete_chosen_watch),
                 (self.tr("今すぐ確認"), "", lambda: self.check(force=True))]:
@@ -219,11 +229,10 @@ class NoticesDock(PluginDock):
         def work(task):
             return check_due(store, ask_for, interval, force, cancelled=task.isCanceled)
 
-        def done(added: int) -> None:
+        def done(checked: Checked) -> None:
             self._checking = False
             self.refresh()
-            if added:
-                self._say_new(added)
+            self._say_new(checked)
             self.status.setText(self.tr("確認済み（{t}）").format(t=time_text(_now())))
             self._check_again()
 
@@ -235,10 +244,22 @@ class NoticesDock(PluginDock):
 
         self._start(self.tr("新着画像の確認"), work, done, failed)
 
-    def _say_new(self, n: int) -> None:
-        """「新着画像 n 件」 in the message bar, with 「見る」 (the 新着画像 page) when the plugin has it."""
+    def _say_new(self, checked: Checked) -> None:
+        """
+        「新着画像 n 件」 in the message bar (and the images already there that
+        were listed, how many left out), with 「見る」 (the 新着画像 page) when the plugin has it.
+        """
+        parts = []
+        if checked.new:
+            parts.append(self.tr("新着画像 {n} 件").format(n=checked.new))
+        if checked.earlier:
+            parts.append(self.tr("監視の設定前からある画像 {n} 件を一覧に（既読）").format(n=checked.earlier))
+        if checked.left:
+            parts.append(self.tr("設定前からある画像のうち古い {n} 件は、多すぎるため一覧に入れず（範囲や条件で絞ると入る）").format(n=checked.left))
+        if not parts:
+            return
         bar = self.iface.messageBar()
-        text = self.tr("新着画像 {n} 件").format(n=n)
+        text = " ・ ".join(parts)
         if self.show_feed is None:
             bar.pushInfo(TITLE, text)
             return
@@ -274,17 +295,25 @@ class NoticesDock(PluginDock):
         self.notices.clear()
         bold = QFont()
         bold.setBold(True)
-        for n in notices:
-            item = QTreeWidgetItem([time_text(n.found), n.watch_name, n.image_id, time_text(n.acquired), n.sensor])
+        before = self.tr("設定前から")
+        for n in notices[:DOCK_ROWS]:
+            item = QTreeWidgetItem([before if n.earlier else time_text(n.found), n.watch_name, n.image_id, time_text(n.acquired), n.sensor])
             item.setData(0, Qt.ItemDataRole.UserRole, n)
             if not n.read:
                 for c in range(5):
                     item.setFont(c, bold)
             self.notices.addTopLevelItem(item)
+        self.more.setText(self.tr("新しい {shown} 件を表示（全 {n} 件。すべては「新着画像」の画面で）").format(
+            shown=f"{DOCK_ROWS:,}", n=f"{len(notices):,}"))
+        self.more.setVisible(len(notices) > DOCK_ROWS)
         self.watches.blockSignals(True)
         self.watches.clear()
         for w in watches:
             last = time_text(w.last_checked) if w.last_checked is not None else self.tr("未確認")
+            if w.past is not None and w.last_checked is not None:
+                last += self.tr("（設定前からある画像はまだ）")
+            elif w.past_left:
+                last += self.tr("（設定前からある古い {n} 件は多すぎて入れず）").format(n=f"{w.past_left:,}")
             item = QTreeWidgetItem([w.name, conditions_text(w.catalog, w.conditions, w.areas, area_layer=w.area_layer), last, w.last_error or ""])
             item.setData(0, Qt.ItemDataRole.UserRole, w.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -322,10 +351,17 @@ class NoticesDock(PluginDock):
         if self.zoom_to_notices(self.chosen_notices()):
             self.mark_chosen_read()
 
+    def complete(self, notices) -> list:
+        """`notices` with their images (those of the lists are without; see WatchStore.notices)."""
+        try:
+            return self.store().complete(list(notices))
+        except Exception:  # noqa: BLE001 (the GeoPackage gone: those that have them)
+            return [n for n in notices if n.complete]
+
     def zoom_to_notices(self, notices) -> bool:
         """The map moved to the footprints of `notices` (a margin around them); False when none has one."""
         box: Optional[QgsRectangle] = None
-        for n in notices:
+        for n in self.complete(notices):
             g = footprint(n.feature.get("geometry"))
             if g is None:
                 continue
@@ -350,6 +386,7 @@ class NoticesDock(PluginDock):
         (`imageFiles: false`) go to 観測記録 without their files.
         """
         layers, problems, without = [], [], []
+        notices = self.complete(notices)
         for n in notices:
             if n.kind == PLAN:
                 continue
@@ -399,6 +436,7 @@ class NoticesDock(PluginDock):
         catalog = self.catalog_of_notice(notice)
         problems: list[str] = []
         opened: list = []
+        notice = next(iter(self.complete([notice])), notice)
         if catalog is None:
             problems.append(self.tr("{id} のカタログが設定ファイルになし").format(id=notice.image_id))
         else:
@@ -439,8 +477,9 @@ class NoticesDock(PluginDock):
     def change_chosen_area(self) -> None:
         """
         「範囲の変更…」: the chosen watch over another area (a layer's shape as
-        it is now, the map's extent, …). The images already over it are noted
-        first, in a task; the area stays as it was when the catalog cannot be asked.
+        it is now, the map's extent, …). The images registered lately over it
+        are noted first, in a task (the area stays as it was when the catalog
+        cannot be asked), then those already there are listed by a check.
         """
         watch = self.store().watch(self._chosen_watch_id() or "")
         if watch is None:
@@ -460,7 +499,7 @@ class NoticesDock(PluginDock):
             if current is None:
                 return False
             # A check may have run meanwhile: what it saw is kept too.
-            store.put_watch(replace(current, areas=changed.areas, area_layer=changed.area_layer,
+            store.put_watch(replace(current, areas=changed.areas, area_layer=changed.area_layer, past=changed.past,
                                     seen=list(dict.fromkeys(current.seen + changed.seen))[-MAX_SEEN:]))
             return True
 
@@ -468,6 +507,7 @@ class NoticesDock(PluginDock):
             self.refresh()
             if kept:
                 self.status.setText(self.tr("監視「{name}」の範囲を変更").format(name=watch.name))
+                self.check()  # the images already over the new area listed
 
         self._start(self.tr("監視の範囲の変更"), work, done)
 
@@ -485,7 +525,11 @@ class NoticesDock(PluginDock):
 
     def add_watch(self, catalog: CatalogConfig, types: dict, conditions: CatalogSearch, areas: list, name: str,
                   area_layer: Optional[dict] = None) -> CatalogWatch:
-        """Keeps a new watch (`area_layer`: the layer its areas were copied from) and checks it once (noting the images already there) in a task."""
+        """
+        Keeps a new watch (`area_layer`: the layer its areas were copied from)
+        and checks it once in a task: every image matching it already there
+        listed (read, not announced), those to come notified.
+        """
         watch = new_watch(name, CatalogConfig.from_json(catalog.to_json()), types, conditions, areas, area_layer=area_layer)
         self.store().put_watch(watch)
         self.refresh()
@@ -494,17 +538,16 @@ class NoticesDock(PluginDock):
         store = self.store()
 
         def work(task):
-            asked, ask = ask_for(watch)
-            result = check_watch(asked, ask)
-            current = store.watch(watch.id)
-            if current is not None:
-                store.put_watch(replace(result.watch, catalog=watch.catalog, name=current.name, enabled=current.enabled))
-            return result.watch.last_error
+            return check_one(store, watch, ask_for, cancelled=task.isCanceled)
 
-        def done(error) -> None:
+        def done(checked: Checked) -> None:
             self.refresh()
-            self.status.setText(self.tr("監視「{name}」の初回の確認に失敗: {m}").format(name=watch.name, m=error) if error
-                                else self.tr("監視「{name}」を追加").format(name=watch.name))
+            error = (checked.failed or {}).get(watch.name)
+            if error:
+                self.status.setText(self.tr("監視「{name}」の初回の確認に失敗: {m}").format(name=watch.name, m=error))
+                return
+            self.status.setText(self.tr("監視「{name}」を追加（条件に合う画像 {n} 件）").format(name=watch.name, n=checked.earlier))
+            self._say_new(checked)
 
         self._start(self.tr("新着画像の監視の追加"), work, done)
         return watch
@@ -548,10 +591,14 @@ class NoticesDock(PluginDock):
             def work(task):
                 more = add_areas(asked, area, ask)
                 current = store.watch(watch.id) or watch
-                store.put_watch(replace(current, areas=more.areas, seen=more.seen))
+                store.put_watch(replace(current, areas=more.areas, seen=more.seen, past=more.past))
 
-            self._start(self.tr("監視への地点の追加"), work,
-                        lambda r: (self.refresh(), self.status.setText(self.tr("監視「{name}」に地点を追加").format(name=watch.name))))
+            def added(_r) -> None:
+                self.refresh()
+                self.status.setText(self.tr("監視「{name}」に地点を追加").format(name=watch.name))
+                self.check()  # the images already over the point listed
+
+            self._start(self.tr("監視への地点の追加"), work, added)
             return
         catalog = dialog.chosen_catalog()
         if catalog is None:
@@ -571,7 +618,7 @@ class NoticesDock(PluginDock):
             id=f"{PLAN}|{reminder.id}", watch_id=PLAN, watch_name=self.tr("撮像計画"), catalog_label="", found=now, read=False,
             image_id=text, acquired=reminder.time, sensor=reminder.target,
             feature={"attributes": {}, "geometry": {"rings": reminder.rings} if reminder.rings else None}, kind=PLAN,
-        )])
+        )], replace_existing=True)
         self.refresh()
 
     def close_down(self) -> None:

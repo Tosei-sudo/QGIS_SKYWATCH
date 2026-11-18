@@ -18,14 +18,21 @@ work of looking at what came in, one after another.
   「地図で見る」 goes to its footprint; 「既読」 as in the 通知 dock, whose
   list this is (the same notices; deleting only there).
 
-Only the newest PAGE cards are made at first (「さらに前の n 件」 above them);
-thumbnails and features are fetched for the cards in view only.
+Every image matching a watch is listed, those already there when it was set
+too (tsudo, 2026-11-18): read, 「監視の設定前から」, in their place in time
+(when they were registered; core/catalog/watch.py).
+
+Only the newest PAGE cards (of those the filters let through: the watch,
+「未読のみ」) are made at first (「さらに前の n 件」 above them); a card's image
+(its feature) is read when its card is made (the lists hold the notices
+without), thumbnails and features are fetched for the cards in view only.
 """
 from __future__ import annotations
 
 import html
 import math
 import re
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsProject
@@ -351,7 +358,9 @@ class NoticeCard(QFrame):
         catalog = feed.catalog_of(notice)
         plan = notice.kind == PLAN
         self.title.setText(notice.image_id or self.tr("（画像ID なし）"))
-        self.found.setText(self.tr("発見 {t}").format(t=time_text(notice.found)))
+        self.found.setText(self.tr("監視の設定前から") if notice.earlier else self.tr("発見 {t}").format(t=time_text(notice.found)))
+        self.found.setToolTip(self.tr("監視（またはその範囲）を設定したときにすでにあった画像。新着としては知らせず、既読で一覧に")
+                              if notice.earlier else "")
         unread = not notice.read
         self.badge.setVisible(unread)
         self.mark.setStyleSheet(f"background:{UNREAD if unread else 'transparent'};")
@@ -585,6 +594,8 @@ class NoticeFeed(QWidget):
         self.work = CardWork(self)
         self.thumbnail_folder = settings.thumbnail_folder()
         self.cards: dict[str, NoticeCard] = {}
+        #: Cards taken off the page by a filter, kept (hidden) for when they are wanted again: switching back is quick.
+        self._spare: dict[str, NoticeCard] = {}
         #: Every notice, the oldest first, as last told.
         self.notices: list[WatchNotice] = []
         #: How many of the newest notices have cards.
@@ -726,12 +737,15 @@ class NoticeFeed(QWidget):
         return "contents|" + notice.id + "|" + "\n".join(layer.key() for layer in (catalog.footprint_layers if catalog else []))
 
     def set_notices(self, notices: list[WatchNotice]) -> None:
-        """The notices as the 通知 dock read them (newest first): the cards follow when the page is shown."""
+        """
+        The notices as the 通知 dock read them (newest first, without their
+        images: those of the cards made are read then): the cards follow when the page is shown.
+        """
         try:
             self._watches = {w.id: w for w in self.dock.store().watches()}
         except Exception:  # noqa: BLE001 (no GeoPackage: no catalogs by watch)
             self._watches = {}
-        ordered = sorted(notices, key=lambda n: (n.found, self._taken(n)))
+        ordered = list(reversed(notices))
         ids = {n.id for n in ordered}
         unread = {n.id for n in ordered if not n.read}
         if self._known is not None and self._positioned:
@@ -747,13 +761,6 @@ class NoticeFeed(QWidget):
             QTimer.singleShot(0, self._scrolled)
         self._show_count()
 
-    @staticmethod
-    def _taken(n: WatchNotice) -> float:
-        from ..core.util import time_of
-
-        t = time_of(n.acquired)
-        return 0.0 if math.isnan(t) else t
-
     def _show_watches(self) -> None:
         current = self.watch_box.currentData()
         names: dict[str, str] = {}
@@ -767,12 +774,11 @@ class NoticeFeed(QWidget):
         self.watch_box.setCurrentIndex(max(0, self.watch_box.findData(current)))
         self.watch_box.blockSignals(False)
 
-    def _show_count(self) -> None:
+    def _show_count(self, shown: Optional[int] = None) -> None:
         unread = sum(1 for n in self.notices if not n.read)
-        shown = sum(1 for c in self.cards.values() if not c.isHidden())
         text = self.tr("未読 {u} 件・全 {n} 件").format(u=unread, n=len(self.notices))
-        if self._filtering() and self.cards:
-            text += self.tr("（表示 {s} 件）").format(s=shown)
+        if self._filtering():
+            text += self.tr("（絞り込み {s} 件）").format(s=len(self._visible()) if shown is None else shown)
         self.count.setText(text)
 
     # --- The cards ----------------------------------------------------------------------------------
@@ -819,39 +825,77 @@ class NoticeFeed(QWidget):
             self._top.removeWidget(self.controls)
             self._second.addWidget(self.controls)
 
+    def _visible(self) -> list[WatchNotice]:
+        """
+        The notices the filters let through, the oldest first: the watch chosen,
+        「未読のみ」 (one read just now stays until 未読のみ is turned again).
+        """
+        only, watch = self.unread_only.isChecked(), self.watch_box.currentData()
+        if not only and not watch:
+            return self.notices
+        return [n for n in self.notices if (not only or not n.read or n.id in self._kept) and (not watch or n.watch_id == watch)]
+
     def _render(self) -> None:
-        """Cards for the newest `shown` notices, in order (made, updated or taken away as needed)."""
-        if self.cards:
-            if self.unread_only.isChecked():
-                self._kept |= {n.id for n in self.notices if n.read and n.id in self.cards and not self.cards[n.id].notice.read}
-        wanted = self.notices[-self.shown:] if self.shown else []
+        """Cards for the newest `shown` notices the filters let through, in order (made, updated or taken away as needed)."""
+        if self.cards and self.unread_only.isChecked():
+            self._kept |= {n.id for n in self.notices if n.read and n.id in self.cards and not self.cards[n.id].notice.read}
+        visible = self._visible()
+        wanted = visible[-self.shown:] if self.shown else []
         wanted_ids = {n.id for n in wanted}
         for notice_id in [i for i in self.cards if i not in wanted_ids]:
             card = self.cards.pop(notice_id)
             self.column.removeWidget(card)
-            card.deleteLater()
+            card.hide()
+            self._spare[notice_id] = card
+        self._prune_spare()
+        for n in wanted:
+            card = self._spare.pop(n.id, None)
+            if card is not None:
+                self.cards[n.id] = card
+                card.update_notice(replace(card.notice, read=n.read, watch_name=n.watch_name, found=n.found, earlier=n.earlier))
+        # The images of the cards to make, read at once (the lists hold the notices without).
+        missing = [n for n in wanted if n.id not in self.cards]
+        complete = {n.id: n for n in self.dock.complete(missing)} if missing else {}
         index = 1  # after 「さらに前」
         for n in wanted:
             card = self.cards.get(n.id)
             if card is None:
-                card = NoticeCard(self, n)
+                full = complete.get(n.id)
+                if full is None:
+                    continue  # deleted meanwhile
+                card = NoticeCard(self, full)
                 card.fit(self._card_room())
                 self.cards[n.id] = card
                 self.column.insertWidget(index, card, 0, Qt.AlignmentFlag.AlignHCenter)
+                # Shown now (a layout shows a widget put in later): the page's height known for where it opens.
+                card.setHidden(False)
             else:
                 if self.column.indexOf(card) != index:
                     self.column.removeWidget(card)
                     self.column.insertWidget(index, card, 0, Qt.AlignmentFlag.AlignHCenter)
-                if card.notice.to_json() != n.to_json() or card.notice.read != n.read:
-                    card.update_notice(n)
+                    card.setHidden(False)
+                if card.notice.head() != n.head():
+                    # Read, its watch renamed: the card's image and what was found out kept.
+                    card.update_notice(replace(card.notice, read=n.read, watch_name=n.watch_name, found=n.found, earlier=n.earlier,
+                                               image_id=n.image_id, sensor=n.sensor, acquired=n.acquired, catalog_label=n.catalog_label))
             index += 1
-        older = len(self.notices) - len(wanted)
+        older = len(visible) - len(wanted)
         self.older.setText(self.tr("さらに前の {n} 件を表示").format(n=min(PAGE, older)))
         self.older.setVisible(older > 0)
         self.empty.setVisible(not self.notices)
-        self._filter()
+        self._show_count(len(visible))
         self._line_up()
         self._work_timer.start()
+
+    def _prune_spare(self) -> None:
+        """The cards kept aside: those of notices gone dropped, at most 2 × PAGE (the oldest kept first go)."""
+        ids = {n.id for n in self.notices}
+        extra = len(self._spare) - 2 * PAGE
+        for notice_id in list(self._spare):
+            if notice_id not in ids or extra > 0:
+                if notice_id in ids:
+                    extra -= 1
+                self._spare.pop(notice_id).deleteLater()
 
     def _line_up(self) -> None:
         """Every card's attributes' column as wide as the widest: the features start at the same place on each."""
@@ -876,14 +920,8 @@ class NoticeFeed(QWidget):
         self._filter()
 
     def _filter(self) -> None:
-        """「未読のみ」 and the watch chosen: the other cards hidden (one read just now stays until 未読のみ is turned again)."""
-        only, watch = self.unread_only.isChecked(), self.watch_box.currentData()
-        for notice_id, card in self.cards.items():
-            n = card.notice
-            hide = (only and n.read and notice_id not in self._kept) or (bool(watch) and n.watch_id != watch)
-            card.setHidden(hide)
-        self._show_count()
-        self._work_timer.start()
+        """「未読のみ」 or the watch chosen: the cards of the notices they let through (over all of them, not only those shown)."""
+        self._render()
 
     def _visible_cards(self) -> list[NoticeCard]:
         """The cards in view (and a screen above and below), the lowest (newest) first."""
@@ -1020,7 +1058,8 @@ class NoticeFeed(QWidget):
 
         def done(found: dict) -> None:
             card = self.cards.get(notice_id)
-            current = card.notice if card is not None else next((n for n in self.notices if n.id == notice_id), None)
+            current = card.notice if card is not None else next(iter(self.dock.complete(
+                [n for n in self.notices if n.id == notice_id])), None)
             if current is None:
                 return
             kept = dict(current.extra.get("contents") or {}) if isinstance(current.extra.get("contents"), dict) else {}
@@ -1045,6 +1084,9 @@ class NoticeFeed(QWidget):
 
     def _config_changed(self) -> None:
         """Another settings file (or one changed): the cards with the catalogs as they are now."""
+        for card in self._spare.values():
+            card.deleteLater()
+        self._spare.clear()
         self.work.failures.clear()
         self.files.clear()  # pathMappings or imagePatterns may be others now
         for card in self.cards.values():

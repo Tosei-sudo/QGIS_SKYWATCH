@@ -238,7 +238,8 @@ def test_cards_newest_at_the_bottom_with_everything_on_them(plugin):
     assert "施設（1 件）" in b.contents.text() and "館山（Tateyama）" in b.contents.text()
     assert "施設（0 件）" in c.contents.text() and "なし" in c.contents.text()
     # Kept with the notice: not asked again next time.
-    kept = {n.id: n.extra for n in p.api.notices.store().notices()}
+    store = p.api.notices.store()
+    kept = {n.id: n.extra for n in store.complete(store.notices())}
     layer_key = p.api.config.image_catalogs[0].footprint_layers[0].key()
     assert kept["w|A"]["contents"][layer_key]["count"] == 2
     # The thumbnails: from the file pattern, kept in the folder, shown at the size asked.
@@ -292,7 +293,7 @@ def test_a_long_column_makes_the_card_taller(plugin):
     for i in range(12):
         geotiff(folder / f"A_P{i:03d}_PSH_ORTHO_LONG_SEGMENT_NAME.tif")
     store = p.api.notices.store()
-    a = next(n for n in store.notices() if n.id == "w|A")
+    a = next(n for n in store.complete(store.notices()) if n.id == "w|A")
     a.feature["attributes"]["PATH"] = str(folder)
     store.delete_notices(["w|A"])
     store.add_notices([a])
@@ -326,7 +327,8 @@ def test_the_features_are_asked_again_when_the_layers_change(plugin):
     assert "<tr><td>横須賀本港</td></tr><tr><td>長浦港</td></tr>" in feed.cards["w|A"].contents.text()
     assert [u for u, _ in fake.asked[asked:] if "Places" in u]
     # Only the layers the settings file has now are kept.
-    kept = {n.id: n.extra for n in p.api.notices.store().notices()}["w|A"]["contents"]
+    store = p.api.notices.store()
+    kept = {n.id: n.extra for n in store.complete(store.notices())}["w|A"]["contents"]
     assert list(kept) == [p.api.config.image_catalogs[0].footprint_layers[0].key()]
 
 
@@ -520,9 +522,9 @@ def test_filters(plugin):
     p.api.notices.store().add_notices([notice(tmp_path, "D", 5, ring(139.6, 35.5, 139.8, 35.7), watch="v", watch_name="東京湾")])
     p.api.notices.refresh()
     p.toggle_notice_feed()
-    shown = lambda: [i for i in order(feed) if not feed.cards[f"{'v' if i == 'D' else 'w'}|{i}"].isHidden()]  # noqa: E731
+    shown = lambda: order(feed)  # noqa: E731 (cards are made for the notices the filters let through only)
     feed.unread_only.setChecked(True)
-    assert shown() == ["B", "C", "D"] and feed.count.text() == "未読 3 件・全 4 件（表示 3 件）"
+    assert shown() == ["B", "C", "D"] and feed.count.text() == "未読 3 件・全 4 件（絞り込み 3 件）"
     # Read while 未読のみ is on: stays until it is turned again.
     feed.cards["w|B"].buttons["read"].click()
     assert shown() == ["B", "C", "D"]
@@ -534,6 +536,45 @@ def test_filters(plugin):
     feed.watch_box.setCurrentIndex(feed.watch_box.findData("v"))
     assert shown() == ["D"]
     assert [feed.watch_box.itemText(i) for i in range(feed.watch_box.count())] == ["すべての監視", "東京湾", "横須賀の新着"]
+
+
+def test_the_filters_go_over_every_notice_not_only_the_cards_shown(plugin, monkeypatch):
+    """A watch with many images (those there before listed too): the other's cards still come when it is chosen."""
+    p, iface, fake, tmp_path = plugin
+    monkeypatch.setattr(notice_feed, "PAGE", 2)
+    feed = p.notice_feed
+    feed.shown = 2
+    store = p.api.notices.store()
+    store.add_notices([notice(tmp_path, "OLD", 60 * 24 * 400, ring(139.6, 35.5, 139.8, 35.7), watch="v", watch_name="東京湾", read=True)])
+    p.api.notices.refresh()
+    p.toggle_notice_feed()
+    assert order(feed) == ["B", "C"] and feed.older.text() == "さらに前の 2 件を表示"
+    b = feed.cards["w|B"]
+    feed.watch_box.setCurrentIndex(feed.watch_box.findData("v"))
+    assert order(feed) == ["OLD"] and not feed.older.isVisible() and "（絞り込み 1 件）" in feed.count.text()
+    # Its card made with its image (the lists hold the notices without).
+    card = feed.cards["v|OLD"]
+    assert card.notice.complete and card.notice.feature["attributes"]["IMG_ID"] == "OLD"
+    # Back to all: the cards kept aside come back (not made again), read meanwhile shown so.
+    p.api.notices._mark(["w|B"])
+    feed.watch_box.setCurrentIndex(0)
+    assert order(feed) == ["B", "C"] and feed.cards["w|B"] is b and not b.badge.isVisibleTo(b) and b.isVisibleTo(feed)
+
+
+def test_cards_of_images_there_before_the_watch(plugin):
+    p, iface, fake, tmp_path = plugin
+    feed = p.notice_feed
+    before = notice(tmp_path, "OLD", 60 * 24 * 400, ring(139.6, 35.5, 139.8, 35.7), read=True)
+    before.earlier = True
+    p.api.notices.store().add_notices([before])
+    p.api.notices.refresh()
+    p.toggle_notice_feed()
+    # In its place in time (the oldest at the top), read, said to be there before.
+    assert order(feed) == ["OLD", "A", "B", "C"]
+    card = feed.cards["w|OLD"]
+    assert card.found.text() == "監視の設定前から" and not card.badge.isVisibleTo(card)
+    assert feed.cards["w|B"].found.text().startswith("発見 ")
+    assert p.api.notices.notices.topLevelItem(3).text(0) == "設定前から"
 
 
 def test_older_cards_a_page_at_a_time(plugin, monkeypatch):
@@ -550,9 +591,11 @@ def test_older_cards_a_page_at_a_time(plugin, monkeypatch):
 
 def test_new_images_in_the_message_bar_open_the_page(plugin):
     p, iface, fake, tmp_path = plugin
-    p.api.notices._say_new(2)
+    from mikage.core.catalog.watch_store import Checked
+
+    p.api.notices._say_new(Checked(new=2, earlier=30))
     item = iface.bar.currentItem()
-    assert item is not None and "新着画像 2 件" in item.text()
+    assert item is not None and "新着画像 2 件" in item.text() and "監視の設定前からある画像 30 件を一覧に（既読）" in item.text()
     look = [b for b in item.findChildren(QPushButton) if b.text() == "見る"]
     assert look
     look[0].click()
