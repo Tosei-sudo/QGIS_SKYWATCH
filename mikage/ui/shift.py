@@ -6,6 +6,12 @@ mouse, the move is made on release) and the arrow keys move it by a screen
 pixel (Shift: 10); Esc puts the tool away. How far it has been moved shows
 in metres east and north. 「位置ずらしの解除」 puts it back where its file
 says. The move itself is qgis_io.shift_io.
+
+With a group chosen in the layer panel (no active layer then), every image
+under it (nested groups and hidden ones too, not background maps) moves by
+the same ground distance at once (tsudo 2026-11-18: 「グループ画像レイヤーを
+選んでるときは全部同じ変化量でずらせるように」), each from its own move so
+far; 「位置ずらしの解除」 puts them all back.
 """
 from __future__ import annotations
 
@@ -13,12 +19,15 @@ import math
 from typing import Optional
 
 from qgis.core import (
-    QgsCoordinateTransform, QgsDistanceArea, QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY, QgsProject, QgsRectangle,
+    QgsCoordinateTransform, QgsDistanceArea, QgsLayerTreeGroup, QgsMapRendererParallelJob, QgsMapSettings, QgsPointXY, QgsProject,
+    QgsRectangle,
 )
+from qgis.PyQt import sip
 from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsMapTool
 from qgis.PyQt.QtCore import QObject, QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPen
 
+from ..qgis_io.enhance_group import group_rasters
 from ..qgis_io.shift_io import can_shift, get_shift, set_shift
 
 
@@ -73,7 +82,7 @@ class ShiftTool(QgsMapTool):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def canvasPressEvent(self, event) -> None:  # noqa: N802 (QGIS's name)
-        if event.button() != Qt.MouseButton.LeftButton or self.shift.layer() is None:
+        if event.button() != Qt.MouseButton.LeftButton or not self.shift.targets():
             return
         self._start = event.pos()
         self.shift.begin_drag()
@@ -99,7 +108,7 @@ class ShiftTool(QgsMapTool):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.shift.set_active(False)
-        elif key in moves and self.shift.layer() is not None:
+        elif key in moves and self.shift.targets():
             self.shift.move_by_map(*moves[key])
         else:
             event.ignore()
@@ -124,11 +133,35 @@ class LayerShift(QObject):
         self._previous_tool = None
         self.canvas.mapToolSet.connect(self._tool_set)
         self.iface.currentLayerChanged.connect(self._current_changed)
+        #: The layer panel, for a group chosen there (QGIS's; tests may have none).
+        self.view = iface.layerTreeView() if hasattr(iface, "layerTreeView") else None
+        selection = self.view.selectionModel() if self.view is not None else None
+        self._selection = selection
+        if selection is not None:
+            selection.currentChanged.connect(self._current_changed)
 
     def layer(self):
-        """The image moved: the active layer when it is a file image."""
+        """The image moved: the active layer when it is a file image (None while a group is chosen)."""
+        if self.group() is not None:
+            return None
         layer = self.iface.activeLayer()
         return layer if can_shift(layer) else None
+
+    def group(self) -> Optional[QgsLayerTreeGroup]:
+        """The group chosen in the layer panel (not the root), or None."""
+        view = self.view
+        if view is None or sip.isdeleted(view):
+            return None
+        node = view.currentNode()
+        return node if isinstance(node, QgsLayerTreeGroup) and node.parent() is not None else None
+
+    def targets(self) -> list:
+        """What a move moves: the chosen group's file images (top first), else the active image; [] for none."""
+        group = self.group()
+        if group is not None:
+            return [layer for layer in group_rasters(group) if can_shift(layer)]
+        layer = self.layer()
+        return [layer] if layer is not None else []
 
     # On and off.
 
@@ -144,10 +177,14 @@ class LayerShift(QObject):
             if self.canvas.mapTool() is not self.tool:
                 self._previous_tool = self.canvas.mapTool()
                 self.canvas.setMapTool(self.tool)
-            layer = self.layer()
-            self.say(self.tr("{name} を地図のドラッグか矢印キー（Shift で 10 倍）で移動。Esc で終了。{shift}").format(
-                name=layer.name(), shift=self.readout(layer)) if layer else self.tr("ファイルの画像を選ぶと、ドラッグで位置をずらせる"))
+            targets = self.targets()
+            if not targets:
+                self.say(self.tr("ファイルの画像（またはそれを含むグループ）を選ぶと、ドラッグで位置をずらせる"))
+            else:
+                self.say(self.tr("{name} を地図のドラッグか矢印キー（Shift で 10 倍）で移動。Esc で終了。{shift}").format(
+                    name=self.target_name(targets), shift=self.readout_of(targets)))
         else:
+            self._start_reset()
             self.end_drag()
             if self.canvas.mapTool() is self.tool:
                 try:
@@ -160,17 +197,26 @@ class LayerShift(QObject):
             self.set_active(False)
 
     def _current_changed(self, *_) -> None:
-        if self.active and self.layer() is not None:
+        if self.active and self.targets():
             self.show_shift()
+
+    def _start_reset(self) -> None:
+        self.tool._start = None
 
     # The drag's copy of the image.
 
     def begin_drag(self) -> None:
-        layer = self.layer()
-        if layer is None:
+        targets = self.targets()
+        if not targets:
             return
+        if self.group() is None:
+            drawn = targets
+        else:
+            # A group's images as the map shows them (its hidden ones move too, unseen).
+            moved = {layer.id() for layer in targets}
+            drawn = [layer for layer in self.canvas.layers() if layer.id() in moved]
         settings = QgsMapSettings(self.canvas.mapSettings())
-        settings.setLayers([layer])
+        settings.setLayers(drawn)
         settings.setBackgroundColor(QColor(0, 0, 0, 0))
         job = QgsMapRendererParallelJob(settings)
         job.start()
@@ -187,25 +233,64 @@ class LayerShift(QObject):
     # The move.
 
     def move_by_map(self, dx: float, dy: float) -> None:
-        """Moves the image by dx, dy in the map's CRS (turned into the image's own CRS where it lies)."""
-        layer = self.layer()
-        if layer is None:
+        """
+        Moves the image (a chosen group's images, each by the same) by dx, dy
+        in the map's CRS, turned into each image's own CRS where it lies.
+        """
+        targets = self.targets()
+        if not targets:
             return
-        to = QgsCoordinateTransform(self.canvas.mapSettings().destinationCrs(), layer.crs(), QgsProject.instance())
-        centre = to.transform(layer.extent().center(), QgsCoordinateTransform.TransformDirection.ReverseTransform)
-        a = to.transform(centre)
-        b = to.transform(QgsPointXY(centre.x() + dx, centre.y() + dy))
-        x, y = get_shift(layer)
-        self.set_shift(layer, x + b.x() - a.x(), y + b.y() - a.y())
+        map_crs = self.canvas.mapSettings().destinationCrs()
+        project = QgsProject.instance()
+        # The move is measured in the middle of the images, once per CRS, so images in one CRS move by exactly the same.
+        area = QgsRectangle()
+        area.setNull()
+        for layer in targets:
+            try:
+                area.combineExtentWith(QgsCoordinateTransform(layer.crs(), map_crs, project).transformBoundingBox(layer.extent()))
+            except Exception:  # noqa: BLE001 (QgsCsException)
+                pass
+        centre = area.center() if not area.isNull() else self.canvas.extent().center()
+        deltas: dict = {}
+        moves = []
+        for layer in targets:
+            crs = layer.crs().toWkt()
+            if crs not in deltas:
+                deltas[crs] = self._delta(map_crs, layer.crs(), centre, dx, dy)
+            if deltas[crs] is None:
+                self.iface.messageBar().pushWarning(self.tr("位置ずらし"), self.tr("{name} は地図の座標系に変換できず、動かさない").format(
+                    name=layer.name()))
+                continue
+            x, y = get_shift(layer)
+            moves.append((layer, x + deltas[crs][0], y + deltas[crs][1]))
+        for layer, x, y in moves:
+            self._move(layer, x, y)
+        self.show_shift()
 
-    def set_shift(self, layer, dx: float, dy: float) -> None:
-        """Moves the image to dx, dy (its CRS's units) from where its file puts it."""
+    @staticmethod
+    def _delta(map_crs, layer_crs, centre: QgsPointXY, dx: float, dy: float) -> Optional[tuple]:
+        """dx, dy of the map at `centre` in the layer's CRS, or None (no transform there)."""
+        try:
+            to = QgsCoordinateTransform(map_crs, layer_crs, QgsProject.instance())
+            a = to.transform(centre)
+            b = to.transform(QgsPointXY(centre.x() + dx, centre.y() + dy))
+        except Exception:  # noqa: BLE001 (QgsCsException: no transform where the image lies)
+            return None
+        mx, my = b.x() - a.x(), b.y() - a.y()
+        return (mx, my) if math.isfinite(mx) and math.isfinite(my) else None
+
+    def _move(self, layer, dx: float, dy: float) -> bool:
         try:
             set_shift(layer, dx, dy)
         except OSError as e:
             self.iface.messageBar().pushWarning(self.tr("位置ずらし"), str(e))
-            return
-        self.show_shift()
+            return False
+        return True
+
+    def set_shift(self, layer, dx: float, dy: float) -> None:
+        """Moves the image to dx, dy (its CRS's units) from where its file puts it."""
+        if self._move(layer, dx, dy):
+            self.show_shift()
 
     def set_shift_metres(self, layer, east: float, north: float) -> None:
         """Moves the image to `east`, `north` metres from where its file puts it."""
@@ -213,14 +298,17 @@ class LayerShift(QObject):
         self.set_shift(layer, east / mx, north / my)
 
     def reset(self) -> None:
-        """Puts the active image back where its file says."""
-        layer = self.iface.activeLayer()
-        if not can_shift(layer):
+        """Puts the active image (a chosen group's images) back where its file says."""
+        targets = self.targets()
+        if not targets:
             return
-        if get_shift(layer) == (0.0, 0.0):
-            self.say(self.tr("{name} はずらしなし").format(name=layer.name()))
+        moved = [layer for layer in targets if get_shift(layer) != (0.0, 0.0)]
+        if not moved:
+            self.say(self.tr("{name} はずらしなし").format(name=self.target_name(targets)))
             return
-        self.set_shift(layer, 0, 0)
+        for layer in moved:
+            self._move(layer, 0, 0)
+        self.show_shift()
 
     def metres_per_unit(self, layer) -> tuple[float, float]:
         """Ground metres per unit of the image's CRS east and north, at its middle."""
@@ -246,11 +334,24 @@ class LayerShift(QObject):
     def readout(self, layer) -> str:
         return format_shift(*self.shift_metres(layer))
 
+    def readout_of(self, targets: list) -> str:
+        """The images' move: one readout when they have all moved alike (to 0.1 m), else a note."""
+        readouts = {self.readout(layer) for layer in targets}
+        if len(readouts) == 1:
+            return readouts.pop()
+        return self.tr("ずらし量は画像ごとに違う（どれも同じだけ動かす）")
+
+    def target_name(self, targets: list) -> str:
+        group = self.group()
+        if group is not None:
+            return self.tr("グループ「{name}」の画像 {n} 枚").format(name=group.name(), n=len(targets))
+        return targets[0].name()
+
     def show_shift(self) -> None:
-        layer = self.layer()
-        if layer is None:
+        targets = self.targets()
+        if not targets:
             return
-        text = f"{layer.name()}: {self.readout(layer)}"
+        text = f"{self.target_name(targets)}: {self.readout_of(targets)}"
         bar = self.iface.statusBarIface() if hasattr(self.iface, "statusBarIface") else None
         if bar is not None:
             bar.showMessage(text, 10000)
@@ -260,7 +361,9 @@ class LayerShift(QObject):
 
     def close(self) -> None:
         self.set_active(False)
-        for signal, slot in ((self.canvas.mapToolSet, self._tool_set), (self.iface.currentLayerChanged, self._current_changed)):
+        selection = self._selection if self._selection is not None and not sip.isdeleted(self._selection) else None
+        for signal, slot in ((self.canvas.mapToolSet, self._tool_set), (self.iface.currentLayerChanged, self._current_changed),
+                             *([(selection.currentChanged, self._current_changed)] if selection is not None else [])):
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
