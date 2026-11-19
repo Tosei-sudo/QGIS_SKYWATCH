@@ -317,6 +317,137 @@ def test_the_extent_by_default_and_an_area_drawn_on_the_map(plugin, monkeypatch)
     assert dock.area_box.currentData() == "extent" and dock.overlay.area.numberOfVertices() == 0
 
 
+def test_the_polygon_shows_while_it_is_drawn(plugin):
+    """
+    tsudo 2026-11-19: drawing the search's area showed nothing until the
+    double click. The corners clicked and the shape up to the mouse show now,
+    and the double click closes it on its last release (the map does not move).
+    """
+    from qgis.core import QgsRectangle
+    from qgis.gui import QgsMapMouseEvent
+    from qgis.PyQt.QtCore import QEvent, QPoint
+
+    p, iface, *_ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    canvas = iface.canvas
+    canvas.setExtent(QgsRectangle(139.6, 35.5, 139.9, 35.8))
+    dock.draw_button.setChecked(True)
+    tool = dock.draw_tool
+
+    def mouse(kind, x, y, button=Qt.MouseButton.LeftButton):
+        return QgsMapMouseEvent(canvas, kind, QPoint(x, y), button, button)
+
+    tool.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 200, 200))
+    assert tool.corners.isVisible() and tool.corners.numberOfVertices() == 1
+    tool.canvasMoveEvent(mouse(QEvent.Type.MouseMove, 400, 200, Qt.MouseButton.NoButton))
+    assert tool.band.isVisible() and tool.band.numberOfVertices() >= 2
+    tool.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 400, 200))
+    tool.canvasMoveEvent(mouse(QEvent.Type.MouseMove, 400, 400, Qt.MouseButton.NoButton))
+    assert tool.band.isVisible() and tool.corners.numberOfVertices() == 2
+    # The double click: its first click added the last corner; its last release closes the polygon, then the tool
+    # gives the map back (closed on the double click, that release went to the pan tool, which moved the map there).
+    tool.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 400, 400))
+    tool.canvasDoubleClickEvent(mouse(QEvent.Type.MouseButtonDblClick, 400, 400))
+    assert canvas.mapTool() is tool and dock.drawn is None
+    tool.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 400, 400))
+    assert canvas.mapTool() is not tool
+    assert dock.area_box.currentData() == "drawn" and len(dock.drawn) == 4
+    assert tool.points == [] and not tool.band.isVisible() and not tool.corners.isVisible()
+    assert dock.overlay.area.isVisible()
+
+    # A tool that stays on (as elsewhere): the double click's last release starts no new polygon.
+    from mikage.ui.catalog_overlay import DrawTool
+
+    drawn = []
+    other = DrawTool(canvas, drawn.append)
+    canvas.setMapTool(other)
+    for x, y in ((200, 200), (400, 200), (400, 400)):
+        other.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, x, y))
+    other.canvasDoubleClickEvent(mouse(QEvent.Type.MouseButtonDblClick, 400, 400))
+    other.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 400, 400))
+    assert len(drawn) == 1 and len(drawn[0]) == 3 and other.points == [] and not other.corners.isVisible()
+    other.canvasReleaseEvent(mouse(QEvent.Type.MouseButtonRelease, 300, 300))
+    assert len(other.points) == 1
+    canvas.unsetMapTool(other)
+    other.remove()
+
+
+def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
+    """tsudo 2026-11-19: the area drawn kept, and chosen from 「保存した範囲」 for later searches."""
+    from qgis.core import QgsPointXY, QgsRectangle
+    from mikage.ui import catalog_dock
+
+    p, iface, folder, fake, _ = plugin
+    dock = p.api.image_catalog
+    dock.show()
+    # 「保存…」 only beside an area drawn; no saved area yet.
+    assert not dock.save_area_button.isVisibleTo(dock) and not dock.saved_row.isVisibleTo(dock)
+    dock.area_box.setCurrentIndex(dock.area_box.findData("saved"))
+    dock._area_chosen(dock.area_box.currentIndex())
+    assert dock.saved_row.isVisibleTo(dock) and not dock.saved_box.isEnabled() and dock.area() is None
+    dock.search()
+    assert "保存した範囲なし" in dock.status.text()
+
+    dock.draw_tool.points = [QgsPointXY(139.71, 35.61), QgsPointXY(139.74, 35.61), QgsPointXY(139.74, 35.64)]
+    dock.draw_tool.finish()
+    assert dock.save_area_button.isVisibleTo(dock) and dock.save_area_button.isEnabled()
+    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("東京湾", True)))
+    dock.ask_save_area()
+    assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾"
+    assert [a.name for a in settings.saved_areas()] == ["東京湾"]
+    # The search goes over it.
+    fake.asked.clear()
+    dock.search()
+    assert wait_for(lambda: dock.search_button.isEnabled() and dock.status.text().endswith("件"))
+    form = next(f for u, f in fake.asked if u.endswith("/query") and "returnCountOnly" not in f)
+    assert form["geometryType"] == "esriGeometryPolygon" and json.loads(form["geometry"])["rings"][0][0] == [139.71, 35.61]
+
+    # Another area drawn and saved; the same name again asks before replacing.
+    dock.set_drawn([[135.1, 34.6], [135.3, 34.6], [135.3, 34.7]])
+    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("大阪湾", True)))
+    dock.ask_save_area()
+    assert [dock.saved_box.itemText(i) for i in range(dock.saved_box.count())] == ["大阪湾", "東京湾"]
+    asked = []
+    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: asked.append(text) or False)
+    dock.set_drawn([[135.0, 34.0], [135.1, 34.0], [135.1, 34.1]])
+    dock.ask_save_area()
+    assert asked and "大阪湾" in asked[0] and settings.saved_areas()[0].ring[0] == (135.1, 34.6)
+
+    # The area forgotten in the dock: a new dock (QGIS started again) still offers the saved ones.
+    dock.set_drawn(None)
+    dock._fill_saved_areas()
+    tokyo = dock.saved_box.findText("東京湾")
+    dock.area_box.setCurrentIndex(dock.area_box.findData("saved"))
+    # Choosing one far from the map's view moves the map there; it is drawn on the map.
+    iface.canvas.setExtent(QgsRectangle(0, 0, 1, 1))
+    dock.saved_box.setCurrentIndex(tokyo)
+    dock._saved_chosen(move=True)
+    assert iface.canvas.extent().contains(QgsPointXY(139.72, 35.62))
+    assert dock.overlay.area.numberOfVertices() > 0 and dock.drawn_shape()[0] == [139.71, 35.61]
+    # The watch dialog gets it as the area drawn.
+    seen = []
+    dock.watch_requested = lambda catalog, types, conditions, drawn, **where: seen.append((drawn, where))
+    dock._watch()
+    assert seen and seen[0][0][0] == [139.71, 35.61] and seen[0][1]["area"] == "drawn"
+
+    # Renamed; a name another area has is refused.
+    assert dock.rename_saved_area("大阪湾") and dock.saved_box.currentText() == "東京湾"
+    assert dock.rename_saved_area("東京湾（北）") is None and dock.saved_box.currentText() == "東京湾（北）"
+    # A view keeps the saved area chosen.
+    dock.views.save("北")
+    dock.saved_box.setCurrentIndex(dock.saved_box.findText("大阪湾"))
+    dock.area_box.setCurrentIndex(dock.area_box.findData("extent"))
+    dock.views.choose("北")
+    assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾（北）"
+    # Deleted (asked first).
+    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: True)
+    dock.ask_delete_saved_area()
+    assert [a.name for a in settings.saved_areas()] == ["大阪湾"] and dock.saved_box.currentText() == "大阪湾"
+    dock.delete_saved_area()
+    assert settings.saved_areas() == [] and not dock.saved_box.isEnabled() and dock.area() is None
+
+
 def test_the_list_as_a_layer_with_its_time(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -331,6 +462,9 @@ def test_watches_notify_new_images_only(plugin, monkeypatch):
     p, iface, folder, fake, images = plugin
     notices = p.api.notices
     catalog = p.api.config.image_catalogs[0]
+    # The check QGIS's start asks for (QTimer.singleShot(0)) done first, with no watch yet: run after the watch is
+    # added, it checked it too and its 「確認済み」 could come after the watch's own 「条件に合う画像 2 件」.
+    APP.processEvents()
     watch = notices.add_watch(catalog, TYPES, EMPTY_SEARCH.with_(sensor="S1"), [], "S1 の新着")
     # The first check lists every image already there (tsudo, 2026-11-18), read: not announced as new.
     assert wait_for(lambda: notices.notices.topLevelItemCount() == 2 and not notices.store().watch(watch.id).past)
