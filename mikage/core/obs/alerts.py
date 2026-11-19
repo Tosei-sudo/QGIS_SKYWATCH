@@ -1427,7 +1427,8 @@ def select(
     for o in records:
         if o.deleted_at is not None or o.id in done:
             continue
-        if settings.present_only and not o.present:
+        if settings.present_only and not o.present or o.unseen:
+            # 不可: nothing was seen there to report.
             continue
         if not at_least(o.confidence, settings.min_confidence, levels):
             continue

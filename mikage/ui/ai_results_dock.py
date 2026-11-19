@@ -67,7 +67,8 @@ from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_im
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
-from ..qgis_io.obs_images import IMAGE_ID, observed_image
+from ..qgis_io.obs_images import IMAGE_ID, image_layers, observed_image
+from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, run_task
 from .docks import PluginDock, plain_label
@@ -764,6 +765,15 @@ class AiResultsDock(PluginDock):
                 return []
         return self.import_rows(todo)
 
+    @staticmethod
+    def _own_placements(book, image_id: str) -> list:
+        """How the image's own files place it (before any 位置ずらし); [] when not open."""
+        try:
+            image = next((i for i in book.images if i.id == image_id), None)
+            return [p for p in (original_placement(layer) for layer in image_layers(image)) if p is not None]
+        except Exception:  # noqa: BLE001 (recorded without pixels then)
+            return []
+
     def import_rows(self, rows: list[int], then: Optional[Callable[[], None]] = None) -> list:
         """Records the results of these rows (those not recorded yet, with a place) as observations of the image; `then` after."""
         if self.denied("ai_results.import"):
@@ -783,6 +793,7 @@ class AiResultsDock(PluginDock):
         self._refresh_imported()
         levels = {c.label for c in book.confidences()}
         entries, done_rows, skipped, wrong = [], [], 0, 0
+        own = None
         for row in rows:
             if not (0 <= row < len(self.rows)):
                 continue
@@ -798,6 +809,12 @@ class AiResultsDock(PluginDock):
                 skipped += 1
                 continue
             entry = import_entry(r, source, place[0], place[1], place[2], place[3], also=self._aliases(row))
+            if not source.local:
+                # Another system's result is placed by the file's own georeferencing: its pixel too (not the image as moved now).
+                if own is None:
+                    own = self._own_placements(book, image_id)
+                found = pixel_in(own, place[0], place[1]) if own else None
+                entry.pixel = found
             if entry.confidence and entry.confidence not in levels:
                 entry.confidence = ""
             entry.carry = self.chosen_carry(row)

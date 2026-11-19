@@ -52,15 +52,15 @@ from .taxonomy import kind_of, path_of
 
 #: What a column (or a schema's `x-source`) can take.
 RECORD_SOURCES = (
-    "id", "objectId", "objectName", "kind", "activity", "present", "confidence", "imageTime", "imageId", "imageName",
-    "lon", "lat", "length", "heading", "width", "note", "recordedBy", "updatedBy", "created", "updated", "deleted",
-    "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
+    "id", "objectId", "objectName", "kind", "activity", "present", "unseen", "confidence", "imageTime", "imageId", "imageName",
+    "lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "imageFile", "note", "recordedBy", "updatedBy", "created",
+    "updated", "deleted", "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
 )
 #: Of the file, the same for every record.
 FILE_SOURCES = ("count", "exportedAt", "exportedBy", "periodStart", "periodEnd", "periodBasis", "areaName", "format")
 SOURCES = RECORD_SOURCES + FILE_SOURCES
 TIME_SOURCES = ("imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd")
-NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width")
+NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "pixelX", "pixelY")
 #: The sources that need the named areas or the geofences read.
 PLACE_SOURCES = ("place", "placeKind", "places")
 FENCE_SOURCES = ("geofences",)
@@ -160,9 +160,9 @@ class ExportSettings:
 #: The built-in JSON's properties (UPPERCASE_UNDERSCORE, as the Esri fields).
 STANDARD_COLUMNS = (
     ("OBS_ID", "id"), ("OBJECT_ID", "objectId"), ("OBJECT_NAME", "objectName"), ("KIND", "kind"), ("ACTIVITY", "activity"),
-    ("PRESENT", "present"), ("CONFIDENCE", "confidence"), ("IMAGE_TIME", "imageTime"), ("IMAGE_ID", "imageId"),
+    ("PRESENT", "present"), ("UNSEEN_REASON", "unseen"), ("CONFIDENCE", "confidence"), ("IMAGE_TIME", "imageTime"), ("IMAGE_ID", "imageId"),
     ("IMAGE_NAME", "imageName"), ("LON", "lon"), ("LAT", "lat"), ("LENGTH_M", "length"), ("HEADING_DEG", "heading"),
-    ("WIDTH_M", "width"), ("NOTE", "note"), ("RECORDED_BY", "recordedBy"), ("UPDATED_BY", "updatedBy"),
+    ("WIDTH_M", "width"), ("PIXEL_X", "pixelX"), ("PIXEL_Y", "pixelY"), ("IMAGE_FILE", "imageFile"), ("NOTE", "note"), ("RECORDED_BY", "recordedBy"), ("UPDATED_BY", "updatedBy"),
     ("CREATED_AT", "created"), ("UPDATED_AT", "updated"), ("DELETED_AT", "deleted"),
 )
 PLACE_COLUMNS = (("PLACE", "place"), ("PLACE_KIND", "placeKind"), ("PLACES", "places"))
@@ -364,7 +364,7 @@ class ExportFilter:
     roots: Optional[list[str]] = None
     #: The least 確度 ('' any).
     confidence: str = ""
-    #: "all", "present" (あり) or "absent" (なし).
+    #: "all", "present" (あり), "absent" (なし) or "unseen" (不可).
     presence: str = "all"
     deleted: bool = False
 
@@ -405,7 +405,8 @@ def select_records(records: Iterable[Observation], flt: ExportFilter, levels: Se
             continue
         if flt.confidence and not at_least(o.confidence or "", flt.confidence, levels):
             continue
-        if flt.presence == "present" and not o.present or flt.presence == "absent" and o.present:
+        if (flt.presence == "present" and not o.present or flt.presence == "absent" and (o.present or o.unseen)
+                or flt.presence == "unseen" and not o.unseen):
             continue
         if flt.polygons is not None and not in_polygons(o.lon, o.lat, flt.polygons):
             continue
@@ -481,9 +482,12 @@ def raw_value(item: Optional[ExportItem], col: ExportColumn, index: int, ctx: Ex
     point = (o.lon, o.lat)
     places = of_kinds(item.places, col.place_kinds) if col.place_kinds else item.places
     return {
-        "id": o.id, "objectId": o.object_id, "objectName": o.object_name, "activity": o.activity, "present": o.present,
+        # 不可: neither あり nor なし (empty; `unseen` says why).
+        "id": o.id, "objectId": o.object_id, "objectName": o.object_name, "activity": o.activity, "present": None if o.unseen else o.present,
+        "unseen": o.unseen,
         "confidence": o.confidence or "", "imageTime": o.image_time, "imageId": o.image_id, "imageName": o.image_name,
         "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "note": o.note,
+        "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "recordedBy": o.recorded_by or "", "updatedBy": o.updated_by or "", "created": o.created_at, "updated": o.updated_at,
         "deleted": o.deleted_at,
         "place": places[0].name if places else "", "placeKind": places[0].kind if places else "",

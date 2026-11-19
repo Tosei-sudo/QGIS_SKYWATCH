@@ -17,7 +17,7 @@ from .areas import CheckedArea, area_label
 from .csv import local_time
 from .flows import ObjectFlow, flows, living, time_key
 from .geo import km_text, to_fixed
-from .model import ConfidenceLevel, Observation
+from .model import ConfidenceLevel, Observation, state_text, unseen_label
 from .taxonomy import kind_of, path_of, within
 
 
@@ -148,7 +148,7 @@ def report_html(selection: ReportSelection, options: ReportOptions, context: Rep
                         '<dl class="meta">' + "".join(f"<dt>{_escape(k)}</dt><dd>{_escape(v)}</dd>" for k, v in meta) + "</dl>"]
     present = [f for f in things if f.present]
     parts.append(f'<section><h2>概要</h2><p class="summary">モノ {len(things)} 件（最新で所在 {len(present)}・消失 {len(things) - len(present)}）・'
-                 f'記録 {len(records)} 件・画像 {len(images)} 枚{f"・確認範囲 {len(areas)} 件" if options.areas else ""}</p>')
+                 f'記録 {len(records)} 件・画像 {len(images)} 枚{f"・確認範囲 {sum(1 for a in areas if not a.unseen)} 件" if options.areas else ""}{f"・不可範囲 {sum(1 for a in areas if a.unseen)} 件" if options.areas and any(a.unseen for a in areas) else ""}</p>')
     by_class = _counts((path_of(f.kind) or ["種別なし"])[0] for f in things)
     by_activity = _counts(f.activity or "活動の記録なし" for f in present)
     by_confidence = _counts(o.confidence or "確度なし" for o in records)
@@ -159,21 +159,28 @@ def report_html(selection: ReportSelection, options: ReportOptions, context: Rep
         parts.append("<section><h2>モノごとの流れ</h2>")
         for f in things:
             last = f.observations[-1]
-            latest = (f.activity or "活動の記録なし") if f.present else "消失"
+            latest = ((f.activity or "活動の記録なし") if f.present else "消失") + (f"（最新の画像では{unseen_label(f.unseen)}）" if f.unseen else "")
             line = f"{local_time(f.first)} 〜 {local_time(f.last)}・{f.seen} 画像で確認・移動 {km_text(f.distance)}・最新: {latest}{f'（{last.confidence}）' if last.confidence else ''}"
             steps = [[local_time(s.start) if s.start == s.end else f"{local_time(s.start)} 〜 {local_time(s.end)}",
-                      (s.activity or "—") if s.present else "消失", s.count, km_text(s.moved) if s.moved is not None and s.moved > 0 else ""]
+                      unseen_label(s.unseen) if s.unseen else (s.activity or "—") if s.present else "消失", s.count, km_text(s.moved) if s.moved is not None and s.moved > 0 else ""]
                      for s in f.steps]
             parts.append(f'<article class="thing"><h3>{_escape(f.name)} <small>{_escape(f.kind or "種別なし")}・{_escape(f.object_id)}</small></h3>'
                          f"<p>{_escape(line)}</p>" + _table(["期間", "活動", "画像", "移動"], steps) + "</article>")
         parts.append("</section>")
-    if options.areas and areas:
+    checked = [a for a in areas if not a.unseen]
+    hidden = [a for a in areas if a.unseen]
+    if options.areas and checked:
         rows = [[local_time(a.image_time), a.image_name or a.image_id, re.sub(r"^確認範囲（(.*)）$", r"\1", area_label(a)), a.note, a.recorded_by or ""]
-                for a in sorted(areas, key=lambda a: a.image_time if a.image_time is not None else a.created_at)]
+                for a in sorted(checked, key=lambda a: a.image_time if a.image_time is not None else a.created_at)]
         parts.append('<section><h2>確認範囲</h2><p class="note">範囲内の対象の種別は記録がすべて（記録のないものは消失）</p>'
                      + _table(["撮像日時", "画像", "対象", "備考", "記録者"], rows) + "</section>")
+    if options.areas and hidden:
+        rows = [[local_time(a.image_time), a.image_name or a.image_id, a.unseen, a.note, a.recorded_by or ""]
+                for a in sorted(hidden, key=lambda a: a.image_time if a.image_time is not None else a.created_at)]
+        parts.append('<section><h2>不可範囲</h2><p class="note">雲などで見えなかった範囲（中のモノは不可）</p>'
+                     + _table(["撮像日時", "画像", "理由", "備考", "記録者"], rows) + "</section>")
     if options.records and records:
-        rows = [[local_time(o.image_time), o.object_name, o.kind, o.activity if o.present else "消失", o.confidence or "",
+        rows = [[local_time(o.image_time), o.object_name, o.kind, state_text(o), o.confidence or "",
                  to_fixed(o.lon, 5), to_fixed(o.lat, 5), o.note, o.recorded_by or ""]
                 for o in sorted(records, key=lambda o: (time_key(o), o.object_name))]
         parts.append("<section><h2>記録一覧</h2>" + _table(["撮像日時", "モノ", "種別", "活動", "確度", "経度", "緯度", "備考", "記録者"], rows) + "</section>")

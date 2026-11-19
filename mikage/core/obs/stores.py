@@ -73,6 +73,21 @@ class TaxonomyStore(Protocol):
     def save_fields(self, fields: list[SpecField]) -> None: ...
 
 
+def present_value(o: Observation) -> Optional[int]:
+    """PRESENT as kept: 在 1・消失 0, empty for a 不可 record (neither)."""
+    return None if o.unseen else 1 if o.present else 0
+
+
+def unseen_supported(store: Any) -> bool:
+    """
+    Whether a store keeps 「不可」 (its layer has the 不可の理由 attribute):
+    the local ones do; an Esri one once its layer has been read (no question
+    is asked here), else not.
+    """
+    can = getattr(store, "keeps_unseen", None)
+    return bool(can()) if callable(can) else False
+
+
 def _marked(items: list, now: Optional[int]) -> list:
     now = now_ms() if now is None else now
     return [replace(x, deleted_at=now, updated_at=now) for x in items]
@@ -97,13 +112,16 @@ class LocalObservationStore:
             if not isinstance(g, tuple) or not r.get("OBS_ID") or not r.get("OBJECT_ID"):
                 continue
             created = datetime_ms(r.get("CREATED_AT")) or 0
+            unseen = (r.get("UNSEEN_REASON") or "").strip()
             out.append(Observation(
                 id=r["OBS_ID"], image_id=r.get("IMAGE_ID") or "", image_name=r.get("IMAGE_NAME") or "",
                 image_time=datetime_ms(r.get("IMAGE_TIME")), object_id=r["OBJECT_ID"], object_name=r.get("OBJECT_NAME") or "",
-                kind=r.get("KIND") or "", activity=r.get("ACTIVITY") or "", present=r.get("PRESENT") != 0, note=r.get("NOTE") or "",
+                kind=r.get("KIND") or "", activity=r.get("ACTIVITY") or "", present=not unseen and r.get("PRESENT") != 0,
+                unseen=unseen, note=r.get("NOTE") or "",
                 lon=g[0], lat=g[1], created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
+                pixel_x=r.get("PIXEL_X"), pixel_y=r.get("PIXEL_Y"), image_file=r.get("IMAGE_FILE") or "",
             ))
         return out
 
@@ -111,7 +129,8 @@ class LocalObservationStore:
         self.gpkg.upsert(OBSERVATIONS, [{
             "OBS_ID": o.id, "OBJECT_ID": o.object_id, "OBJECT_NAME": o.object_name, "IMAGE_ID": o.image_id,
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
-            "PRESENT": 1 if o.present else 0, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
+            "PRESENT": present_value(o), "UNSEEN_REASON": o.unseen or None, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
+            "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None,
             "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
@@ -120,6 +139,9 @@ class LocalObservationStore:
         marked = _marked(records, now)
         self.save(marked)
         return marked
+
+    def keeps_unseen(self) -> bool:
+        return True
 
     def clear(self, deleted_only: bool = False) -> int:
         """Removes the records for good (only the deleted ones when asked); how many."""
@@ -151,6 +173,7 @@ class LocalAreaStore:
                 image_time=datetime_ms(r.get("IMAGE_TIME")), ring=g[0], kind=r.get("KIND") or "", note=r.get("NOTE") or "",
                 created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), recorded_by=r.get("OBSERVER") or "",
+                unseen=(r.get("UNSEEN_REASON") or "").strip(),
             ))
         return out
 
@@ -159,13 +182,16 @@ class LocalAreaStore:
             "AREA_ID": a.id, "IMAGE_ID": a.image_id, "IMAGE_NAME": a.image_name, "IMAGE_TIME": datetime_text(a.image_time),
             "KIND": a.kind, "NOTE": a.note, "OBSERVER": a.recorded_by, "CREATED_AT": datetime_text(a.created_at),
             "UPDATED_AT": datetime_text(a.updated_at), "DELETED_AT": datetime_text(a.deleted_at), "STORE": self.of,
-            "geom": encode_polygon([a.ring]),
+            "UNSEEN_REASON": a.unseen or None, "geom": encode_polygon([a.ring]),
         } for a in areas])
 
     def remove(self, areas: list[CheckedArea], now: Optional[int] = None) -> list[CheckedArea]:
         marked = _marked(areas, now)
         self.save(marked)
         return marked
+
+    def keeps_unseen(self) -> bool:
+        return True
 
     def clear(self, deleted_only: bool = False) -> int:
         """Removes this store's checked areas for good (only the deleted ones when asked); how many."""
@@ -292,6 +318,10 @@ class _EsriLayer:
         self._types: Optional[dict[str, str]] = None
         self._oid = "OBJECTID"
 
+    def has(self, name: str) -> bool:
+        """Whether the layer has an attribute, as read (False before it was read: nothing is asked here)."""
+        return self._types is not None and name in self._types
+
     def ready(self) -> tuple[dict[str, str], str]:
         if self._types is None:
             info = self.client.layer(self.url, self.token, refresh=True)
@@ -301,6 +331,10 @@ class _EsriLayer:
                     raise EsriError(f"{self.label} に属性 {name} なし")
             self._types, self._oid = types, info.object_id_field
         return self._types, self._oid
+
+    def known_types(self) -> Optional[dict[str, str]]:
+        """The attributes' types when read already (None: not yet; nothing is asked)."""
+        return self._types
 
 
 #: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
@@ -340,14 +374,22 @@ class EsriObservationStore:
         values = {
             f["id"]: o.id, f["imageId"]: o.image_id, f["imageName"]: o.image_name, f["imageTime"]: o.image_time,
             f["objectId"]: o.object_id, f["objectName"]: o.object_name, f["kind"]: o.kind, f["activity"]: o.activity,
-            f["present"]: o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
+            f["present"]: None if o.unseen else o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
+            f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None,
             f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
-            f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at,
+            f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at, f["unseen"]: o.unseen or None,
         }
+        if o.unseen and f["unseen"] not in types:
+            # Without it the record would read back as 在 (PRESENT empty): not saved.
+            raise EsriError(f"{self.label} に不可の理由の属性 {f['unseen']} がないため「不可」は保存できません")
         attributes = {name: fit_value(v, types[name]) for name, v in values.items() if name in types}
         if o.id in self.oids:
             attributes[oid] = self.oids[o.id]
         return {"attributes": attributes, "geometry": point_geometry(o.lon, o.lat)}
+
+    def keeps_unseen(self) -> bool:
+        """Whether the layer (as read) has the 不可の理由 attribute."""
+        return self._layer.has(self.config.fields["unseen"])
 
     def _record_of(self, feature: dict[str, Any], oid: str) -> Optional[Observation]:
         f = self.config.fields
@@ -361,16 +403,35 @@ class EsriObservationStore:
             self.oids[record_id] = int(a[oid])
         self.stamps[record_id] = ms_of(a.get(f["updated"]))
         created = ms_of(a.get(f["created"])) or 0
+        unseen = _text(a.get(f["unseen"])).strip()
         return Observation(
             id=record_id, image_id=_text(a.get(f["imageId"])), image_name=_text(a.get(f["imageName"])),
             image_time=ms_of(a.get(f["imageTime"])), object_id=object_id, object_name=_text(a.get(f["objectName"])),
             kind=_text(a.get(f["kind"])), activity=_text(a.get(f["activity"])),
-            present=_present_of(a[f["present"]]) if f["present"] in a else True, note=_text(a.get(f["note"])),
+            present=not unseen and (_present_of(a[f["present"]]) if f["present"] in a else True), unseen=unseen,
+            note=_text(a.get(f["note"])),
             length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])),
             width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
+            pixel_x=_number_of(a.get(f["pixelX"])), pixel_y=_number_of(a.get(f["pixelY"])), image_file=_text(a.get(f["imageFile"])),
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
+
+    def as_kept(self, records: list[Observation]) -> list[Observation]:
+        """
+        The records as the layer keeps them: the values of the optional
+        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19),
+        so a record read back is the one saved (not 「ほかの人の記録」 changed since).
+        """
+        types = self._layer.known_types()
+        if types is None:
+            return records
+        f = self.config.fields
+        blank = {name: value for role, name, value in (
+            ("length", "length", None), ("heading", "heading", None), ("width", "width", None), ("pixelX", "pixel_x", None),
+            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("confidence", "confidence", ""),
+        ) if f[role] not in types}
+        return [replace(o, **blank) for o in records] if blank else records
 
     #: Read only as asked (scope.py): what a feature needs, never every record (EsriObservationStore.find).
     scoped = True
@@ -651,12 +712,19 @@ class EsriAreaStore:
         values = {
             f["id"]: a.id, f["imageId"]: a.image_id, f["imageName"]: a.image_name, f["imageTime"]: a.image_time,
             f["kind"]: a.kind, f["note"]: a.note, f["recordedBy"]: a.recorded_by or "", f["created"]: a.created_at,
-            f["updated"]: a.updated_at, f["deleted"]: a.deleted_at,
+            f["updated"]: a.updated_at, f["deleted"]: a.deleted_at, f["unseen"]: a.unseen or None,
         }
+        if a.unseen and f["unseen"] not in types:
+            # Without it the area would read back as a 確認範囲 (everything there recorded): not saved.
+            raise EsriError(f"{self.label} に不可の理由の属性 {f['unseen']} がないため不可範囲は保存できません")
         attributes = {name: fit_value(v, types[name]) for name, v in values.items() if name in types}
         if a.id in self.oids:
             attributes[oid] = self.oids[a.id]
         return {"attributes": attributes, "geometry": ring_geometry([a.ring])}
+
+    def keeps_unseen(self) -> bool:
+        """Whether the layer (as read) has the 不可の理由 attribute."""
+        return self._layer.has(self.config.fields["unseen"])
 
     scoped = True
 
@@ -700,7 +768,7 @@ class EsriAreaStore:
                 id=area_id, image_id=_text(a.get(f["imageId"])), image_name=_text(a.get(f["imageName"])),
                 image_time=ms_of(a.get(f["imageTime"])), ring=rings[0], kind=_text(a.get(f["kind"])), note=_text(a.get(f["note"])),
                 recorded_by=_text(a.get(f["recordedBy"])), created_at=created, updated_at=ms_of(a.get(f["updated"])) or created,
-                deleted_at=ms_of(a.get(f["deleted"])),
+                deleted_at=ms_of(a.get(f["deleted"])), unseen=_text(a.get(f["unseen"])).strip(),
             ))
         return out
 

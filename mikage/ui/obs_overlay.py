@@ -1,10 +1,12 @@
 """
 What the observations draw on the map while their dock is open, as the
 viewer's overlay: this image's records (filled marks, the ring in the colour
-of their 確度, a diamond for 「消失」), the things carried over from other
-images (hollow marks), records measured by two points (a line with an arrow
-at the front) and by three or four (their outline too), the chosen thing's track, the checked areas, the place
-clicked and the line to the pointer while measuring.
+of their 確度, a diamond for 「消失」, a grey dashed ring with 「?」 for
+「不可」), the things carried over from other images (hollow marks),
+records measured by two points (a line with an arrow at the front) and by
+three or four (their outline too), the chosen thing's track, the checked
+areas, the 不可範囲 (grey, hatched), the place clicked and the line to
+the pointer while measuring.
 
 One canvas item paints everything (nothing is added to the project); the
 places are WGS 84 and follow the canvas's CRS.
@@ -61,6 +63,12 @@ class Mark:
     key: Optional[str] = None
     #: Already reported (通報済み): an amber halo behind it.
     reported: bool = False
+    #: 「不可」 (a record, or a step of a flow): could not be seen (under cloud…).
+    unseen: bool = False
+
+
+#: The colour of what could not be seen (不可範囲, 不可 records).
+UNSEEN_COLOR = "#6b7280"
 
 
 @dataclass
@@ -68,12 +76,15 @@ class Scene:
     marks: list[Mark] = field(default_factory=list)
     #: (ring, label) of the checked areas of this image.
     areas: list[tuple] = field(default_factory=list)
+    #: (ring, label) of the 不可範囲 of this image (雲…).
+    unseen_areas: list[tuple] = field(default_factory=list)
     track: list[tuple] = field(default_factory=list)
     #: More tracks (the report map: every thing's).
     tracks: list[list[tuple]] = field(default_factory=list)
     pending: Optional[tuple] = None
-    #: The area being made.
+    #: The area being made (a 不可範囲: grey and hatched as it will be).
     area_pending: Optional[list] = None
+    area_pending_unseen: bool = False
     #: The first point clicked while measuring (the rear), the pointer, and the line's label.
     first: Optional[tuple] = None
     cursor: Optional[tuple] = None
@@ -122,7 +133,11 @@ class ScenePainter:
         marks = [m for m in s.marks if m.editing or m.role == "slot"] if hidden else s.marks
         for ring, label in [] if hidden else s.areas:
             self._area(painter, ring, label, "#0f766e", QColor(15, 118, 110, 18))
-        if s.area_pending:
+        for ring, label in [] if hidden else s.unseen_areas:
+            self._area(painter, ring, label, UNSEEN_COLOR, QColor(107, 114, 128, 40), hatched=True)
+        if s.area_pending and s.area_pending_unseen:
+            self._area(painter, s.area_pending, "", UNSEEN_COLOR, QColor(107, 114, 128, 40), hatched=True)
+        elif s.area_pending:
             self._area(painter, s.area_pending, "", "#e11d48", QColor(225, 29, 72, 20))
         for track in [] if hidden else [s.track, *s.tracks]:
             if len(track) < 2:
@@ -169,13 +184,20 @@ class ScenePainter:
                 mid = QPointF((first.x() + cursor.x()) / 2, (first.y() + cursor.y()) / 2 - 10 * k)
                 _halo_text(painter, mid, s.rubber_label, "#111111", self._bold)
 
-    def _area(self, painter, ring, label: str, color: str, fill: QColor) -> None:
+    def _area(self, painter, ring, label: str, color: str, fill: QColor, hatched: bool = False) -> None:
         points = [self.to_pixel(p[0], p[1]) for p in ring]
         pen = QPen(QColor(color), 2 * self.scale)
         pen.setDashPattern([4, 2])
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(fill))
         painter.drawPolygon(QPolygonF(points))
+        if hatched:
+            # Slanted lines over it (frames only too: it tells it from a checked area at a glance).
+            lines = QColor(color)
+            lines.setAlpha(110)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(lines, Qt.BrushStyle.BDiagPattern))
+            painter.drawPolygon(QPolygonF(points))
         if label:
             # Its name at its top left corner, clear of the marks inside.
             corner = QPointF(min(p.x() for p in points) + 2, min(p.y() for p in points) - 4)
@@ -237,7 +259,19 @@ class ScenePainter:
         at = self.to_pixel(mark.lon, mark.lat)
         self.painted.append((at, mark))
         color = QColor(mark.color)
-        if mark.role == "obs":
+        if mark.role == "obs" and mark.unseen:
+            # 不可: a grey dashed ring with 「?」 (nothing known of it here).
+            r = (9 if mark.editing else 7) * k
+            pen = QPen(QColor(UNSEEN_COLOR), 2 * k)
+            pen.setDashPattern([2, 1.5])
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush if self.hollow else QBrush(QColor(255, 255, 255, 170)))
+            painter.drawEllipse(at, r, r)
+            painter.setPen(QPen(QColor(UNSEEN_COLOR)))
+            painter.setFont(self._bold)
+            painter.drawText(QRectF(at.x() - r, at.y() - r, 2 * r, 2 * r), int(Qt.AlignmentFlag.AlignCenter), "?")
+            _halo_text(painter, QPointF(at.x(), at.y() - 12 * k), mark.label, "#4b5563", self._bold)
+        elif mark.role == "obs":
             if mark.reported:
                 if self.hollow:
                     painter.setPen(QPen(QColor(245, 158, 11, 220), 3 * k))
@@ -289,7 +323,7 @@ class ScenePainter:
             _halo_text(painter, QPointF(at.x(), at.y() - 10 * k), mark.label, "#111111", self._font)
         elif mark.role == "step":
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#111111" if mark.present else "#dc2626")))
+            painter.setBrush(QBrush(QColor(UNSEEN_COLOR if mark.unseen else "#111111" if mark.present else "#dc2626")))
             painter.drawEllipse(at, 3 * k, 3 * k)
             _halo_text(painter, QPointF(at.x(), at.y() + 16 * k), mark.label, "#111111", self._font)
 

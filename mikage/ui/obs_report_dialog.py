@@ -40,7 +40,8 @@ MAP_RESOURCE = "satobs-report-map"
 
 def report_scene(records: list[Observation], areas: list[CheckedArea], kinds: list[str]) -> Scene:
     """The report map's marks: the latest record of each thing named, its earlier ones as steps, its track, the areas."""
-    s = Scene(areas=[(a.ring, area_label(a)) for a in areas])
+    s = Scene(areas=[(a.ring, area_label(a)) for a in areas if not a.unseen],
+              unseen_areas=[(a.ring, area_label(a)) for a in areas if a.unseen])
     for flow in flows(records):
         seen = [o for o in flow.observations if o.present]
         if len(seen) > 1:
@@ -48,9 +49,10 @@ def report_scene(records: list[Observation], areas: list[CheckedArea], kinds: li
         last = flow.observations[-1]
         for o in flow.observations:
             if o is last:
-                s.marks.append(Mark("obs", o.lon, o.lat, color_of((path_of(o.kind) or [""])[0], kinds), o.object_name, o.present))
+                s.marks.append(Mark("obs", o.lon, o.lat, color_of((path_of(o.kind) or [""])[0], kinds), o.object_name, o.present,
+                                    unseen=bool(o.unseen)))
             else:
-                s.marks.append(Mark("step", o.lon, o.lat, present=o.present))
+                s.marks.append(Mark("step", o.lon, o.lat, present=o.present, unseen=bool(o.unseen)))
     return s
 
 
@@ -284,7 +286,8 @@ class ReportDialog(QDialog):
             self.count_label.setText(why)
             return
         s = self.book.report_selection(o)
-        self.count_label.setText(f"モノ {len(s.flows)}・記録 {len(s.records)}・画像 {len(s.images)}{f'・確認範囲 {len(s.areas)}' if o.areas else ''}")
+        self.count_label.setText(f"モノ {len(s.flows)}・記録 {len(s.records)}・画像 {len(s.images)}{f'・確認範囲 {sum(1 for a in s.areas if not a.unseen)}' if o.areas else ''}"
+                                 f"{f'・不可範囲 {sum(1 for a in s.areas if a.unseen)}' if o.areas and any(a.unseen for a in s.areas) else ''}")
 
     def _say(self, message: str) -> None:
         self.status.setText(message)

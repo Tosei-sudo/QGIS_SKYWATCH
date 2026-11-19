@@ -2,6 +2,10 @@
 Checked areas (確認範囲) of the observations, as the viewer
 (observation-areas.ts): a part of an image that was looked over, with every
 thing of a kind there recorded.
+
+The same layer keeps the parts that could not be looked at (不可範囲:
+under cloud, haze…; tsudo 2026-11-19): an area with a reason (`unseen`).
+The things that may be there are 「不可」 in that image, not 消失.
 """
 from __future__ import annotations
 
@@ -25,6 +29,8 @@ DEFAULT_AREA_FIELDS: dict[str, str] = {
     "created": "CREATED_AT",
     "updated": "UPDATED_AT",
     "deleted": "DELETED_AT",
+    #: 不可の理由: set for a 不可範囲, empty for a 確認範囲.
+    "unseen": "UNSEEN_REASON",
 }
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+$", re.IGNORECASE)
 _NAME = re.compile(r"^[\w.]+$", re.ASCII)
@@ -46,6 +52,8 @@ class CheckedArea:
     updated_at: int
     deleted_at: Optional[int] = None
     recorded_by: str = ""
+    #: A 不可範囲: why it could not be looked at (雲・霞…); '' for a checked area.
+    unseen: str = ""
 
 
 @dataclass
@@ -107,11 +115,15 @@ def covers_kind(area: CheckedArea, kind: str) -> bool:
     return not area.kind or within(kind, path_of(area.kind))
 
 
-def covering_areas(areas: list[CheckedArea], image_id: str, lon: float, lat: float, kind: str) -> list[CheckedArea]:
-    """The living areas of an image that cover a thing of `kind` at a place."""
-    return [a for a in areas if a.deleted_at is None and a.image_id == image_id and covers_kind(a, kind) and area_contains(a, lon, lat)]
+def covering_areas(areas: list[CheckedArea], image_id: str, lon: float, lat: float, kind: str, unseen: bool = False) -> list[CheckedArea]:
+    """The living checked areas of an image that cover a thing of `kind` at a place (`unseen`: its 不可範囲, of any kind, instead)."""
+    return [a for a in areas if a.deleted_at is None and a.image_id == image_id and bool(a.unseen) == unseen
+            and (unseen or covers_kind(a, kind)) and area_contains(a, lon, lat)]
 
 
 def area_label(area: CheckedArea) -> str:
-    """What an area is called in lists: 「確認範囲（船舶）」."""
+    """What an area is called in lists: 「確認範囲（船舶）」, 「不可範囲（雲）」."""
+    if area.unseen:
+        reason = area.unseen.strip()
+        return f"不可範囲（{reason}）" if reason and reason != "不可" else "不可範囲"
     return f"確認範囲（{kind_of(path_of(area.kind)) if area.kind else 'すべて'}）"
