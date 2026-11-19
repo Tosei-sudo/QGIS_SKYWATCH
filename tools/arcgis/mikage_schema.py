@@ -187,6 +187,7 @@ TABLES = (
         F("CREATED_AT", "記録日時", "DATE", None, "created"),
         F("UPDATED_AT", "修正日時", "DATE", None, "updated"),
         F("DELETED_AT", "削除日時", "DATE", None, "deleted"),
+        F("UNSEEN_REASON", "不可の理由", "TEXT", 40, "unseen"),
         F("NAMED_AREA_OBJECTID", "地名のOBJECTID", "LONG", None, "namedAreaObjectId"),
     )),
     Table("TBL_OBSERVATION_AREA", "確認範囲", "POLYGON", writable=True, setting="observationStores[].areas", fields=(
@@ -200,6 +201,7 @@ TABLES = (
         F("CREATED_AT", "記録日時", "DATE", None, "created"),
         F("UPDATED_AT", "修正日時", "DATE", None, "updated"),
         F("DELETED_AT", "削除日時", "DATE", None, "deleted"),
+        F("UNSEEN_REASON", "不可の理由", "TEXT", 40, "unseen"),
     )),
     Table("TBL_TAXONOMY", "分類体系", None, writable=True, setting="observationStores[].taxonomyTable", fields=(
         F("PATH", "分類", "TEXT", 1000, "path"),

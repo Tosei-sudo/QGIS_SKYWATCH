@@ -1,7 +1,8 @@
 """
 Observations (観測記録), as the viewer (observations.ts): one record per
 thing per image — when, where, what thing (モノ) and what it was doing
-(活動), or that it was no longer there (不在).
+(活動), that it was no longer there (不在), or that it could not be seen
+there (不可: under cloud, haze, a shadow…; tsudo 2026-11-19).
 
 This module holds the record, the vocabulary (活動・確度・分類) and the
 `observationStores` / `observationVocabulary` entries of the settings file.
@@ -55,6 +56,9 @@ class Observation:
     updated_by: str = ""
     #: m, side to side (across the heading), when measured by three or four points.
     width: Optional[float] = None
+    #: 「不可」: why the thing could not be seen in this image (雲・霞・影…); '' when it was looked at (継続 or 不在).
+    #: A 不可 record is neither: `present` is False, and the thing goes on from its last record that saw it.
+    unseen: str = ""
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -78,6 +82,8 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "created": "CREATED_AT",
     "updated": "UPDATED_AT",
     "deleted": "DELETED_AT",
+    #: 不可の理由 (2026-11-19): empty for a record that looked at the thing; PRESENT is left empty when it is set.
+    "unseen": "UNSEEN_REASON",
     #: The OBJECTID of the named area (TBL_NAMED_AREA) holding the record, filled by an attribute rule of the
     #: enterprise geodatabase (2026-11-17). The plugin never writes it (a save leaves the server's value as it is);
     #: it is the key the data analysis joins 観測記録 to 地名のポリゴン by.
@@ -106,6 +112,23 @@ DEFAULT_CONFIDENCES = [
 #: Things farther than this (m) are not offered as the same one.
 MATCH_METRES = 2000.0
 DEFAULT_ACTIVITIES = ["停泊", "航行", "駐機", "移動", "工事", "集積", "活動なし"]
+#: Why a thing (or a part of an image) could not be seen, offered when the settings give none (`unseenReasons`).
+DEFAULT_UNSEEN_REASONS = ["雲", "霞", "影", "画像の欠け", "その他"]
+#: The reason written when none is given.
+UNSEEN = "不可"
+
+
+def unseen_label(reason: str) -> str:
+    """What a 不可 record (or area) says: 「不可（雲）」, 「不可」 when no reason is known."""
+    reason = (reason or "").strip()
+    return f"不可（{reason}）" if reason and reason != UNSEEN else UNSEEN
+
+
+def state_text(o: "Observation") -> str:
+    """What a record says of its thing: its activity, 「不在」 or 「不可（雲）」."""
+    if o.unseen:
+        return unseen_label(o.unseen)
+    return o.activity if o.present else "不在"
 
 
 def default_taxonomy() -> list[Taxon]:
@@ -134,6 +157,8 @@ class ObservationVocabulary:
     match_radius: float = MATCH_METRES
     taxonomy: list[Taxon] = field(default_factory=default_taxonomy)
     spec_fields: list[SpecField] = field(default_factory=lambda: list(DEFAULT_SPEC_FIELDS))
+    #: Why a thing could not be seen (「不可」), the first offered first.
+    unseen_reasons: list[str] = field(default_factory=lambda: list(DEFAULT_UNSEEN_REASONS))
 
 
 @dataclass
@@ -275,7 +300,16 @@ def vocabulary_of(value: Any, problems: list[str]) -> ObservationVocabulary:
         spec_fields=spec_fields if spec_fields is not None else base.spec_fields,
         confidences=confidences if confidences is not None else base.confidences,
         match_radius=_match_radius_of(value.get("matchRadius"), "matchRadius" in value, problems),
+        unseen_reasons=_unseen_reasons_of(value["unseenReasons"], problems) if "unseenReasons" in value else base.unseen_reasons,
     )
+
+
+def _unseen_reasons_of(value: Any, problems: list[str]) -> list[str]:
+    reasons = [r[:40] for r in words(value) or []]
+    if not reasons:
+        problems.append("observationVocabulary.unseenReasons は不可の理由（雲・霞など）の文字列の配列で指定")
+        return list(DEFAULT_UNSEEN_REASONS)
+    return list(dict.fromkeys(reasons))
 
 
 def _match_radius_of(value: Any, given: bool, problems: list[str]) -> float:

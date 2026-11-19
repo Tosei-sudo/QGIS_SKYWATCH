@@ -538,6 +538,8 @@ FROM g;
 --    地名は観測記録の NAMED_AREA_OBJECTID（属性ルールで入れる）で TBL_NAMED_AREA を引く。
 --    PLACE_STATE（地名の点検用）: 地名あり・地名なし（値が空: どの地名にも入らないか、ルールを入れる前の記録）・
 --    地名が見つからない（値の OBJECTID の地名がない: 地名を入れ直した）・無効な地名（後から ACTIVE を 0 にした）。
+--    不可（2026-11-19）: 雲などで見えなかった記録は UNSEEN_REASON に理由が入り PRESENT は空。PRESENT_LABEL は
+--    「不可」、LOOKED は 0（見て在・不在を記録したものは 1）。TBL_OBSERVATION に UNSEEN_REASON を足してから作る。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_RECORD AS
 WITH clock AS (
@@ -555,7 +557,13 @@ SELECT
     TRIM(REGEXP_SUBSTR(o.KIND, '[^>]+$'))                              AS LEAF_KIND,
     o.ACTIVITY,
     o.PRESENT,
-    CASE o.PRESENT WHEN 1 THEN '在' WHEN 0 THEN '不在' END             AS PRESENT_LABEL,
+    CASE
+        WHEN o.UNSEEN_REASON IS NOT NULL THEN '不可'
+        WHEN o.PRESENT = 1               THEN '在'
+        WHEN o.PRESENT = 0               THEN '不在'
+    END                                                                AS PRESENT_LABEL,
+    o.UNSEEN_REASON,
+    CASE WHEN o.UNSEEN_REASON IS NULL THEN 1 ELSE 0 END               AS LOOKED,
     o.CONFIDENCE,
     o.NOTE,
     o.LENGTH_M,
@@ -602,6 +610,9 @@ LEFT JOIN TBL_NAMED_AREA a ON a.OBJECTID = o.NAMED_AREA_OBJECTID;
 --    （プラグインは同じ系統でより細かい分類があればそれを使う。ここは最後に書かれたものだけ）。
 --    IN_LAST_MONTH: 直近 1 か月（今日の 1 か月前の同じ日から）に見ていれば 1。
 --    LAST_NAMED_AREA_OBJECTID: 最後の記録の地名（地名の台帳 VW_NAMED_AREA_THING・VW_NAMED_AREA_STATUS が使う）。
+--    不可の記録（雲など、LOOKED = 0）は「最後の記録」にしない（見て記録した最後のもの。プラグインの流れの「最新」と同じ）。
+--    LAST_UNSEEN_AT・LAST_UNSEEN_REASON: それより後に見えなかった画像があれば、その最後の日時と理由（なければ空）。
+--    UNSEEN_COUNT: 不可の記録の数。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_THING AS
 WITH clock AS (
@@ -629,7 +640,12 @@ r AS (
         v.IMAGE_NAME,
         v.OBSERVER,
         ROW_NUMBER() OVER (PARTITION BY v.OBJECT_ID
-                           ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC)        AS RN,
+                           ORDER BY v.LOOKED DESC, v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC) AS RN,
+        MAX(CASE WHEN v.LOOKED = 0 THEN v.SEEN_AT END) OVER (PARTITION BY v.OBJECT_ID)         AS UNSEEN_AT,
+        FIRST_VALUE(CASE WHEN v.LOOKED = 0 THEN v.UNSEEN_REASON END IGNORE NULLS) OVER (
+            PARTITION BY v.OBJECT_ID ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)                         AS UNSEEN_REASON,
+        SUM(1 - v.LOOKED) OVER (PARTITION BY v.OBJECT_ID)                                     AS UNSEEN_COUNT,
         FIRST_VALUE(v.OBJECT_NAME IGNORE NULLS) OVER (
             PARTITION BY v.OBJECT_ID ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)                         AS LAST_NAME,
@@ -668,6 +684,9 @@ SELECT
     r.IMAGE_ID                                                         AS LAST_IMAGE_ID,
     r.IMAGE_NAME                                                       AS LAST_IMAGE_NAME,
     r.OBSERVER                                                         AS LAST_OBSERVER,
+    CASE WHEN r.UNSEEN_AT > r.SEEN_AT THEN r.UNSEEN_AT END             AS LAST_UNSEEN_AT,
+    CASE WHEN r.UNSEEN_AT > r.SEEN_AT THEN r.UNSEEN_REASON END         AS LAST_UNSEEN_REASON,
+    r.UNSEEN_COUNT,
     c.TODAY - (r.SEEN_DATE + 9 / 24)                                   AS DAYS_SINCE_SEEN,
     CASE WHEN r.SEEN_DATE + 9 / 24 >= c.MONTH_AGO THEN 1 ELSE 0 END    AS IN_LAST_MONTH,
     CASE
@@ -685,7 +704,8 @@ WHERE r.RN = 1;
 -- 9. VW_OBS_IMAGE_WORK（判読の進み具合）: 分担 1 行 = 1 行・形状なし
 --    分担（だれがどの画像を担当したか）に、その画像の記録・確認範囲の件数と、担当者が書いた記録の
 --    件数（作成者 CREATED_USER か記録者 OBSERVER が担当者と同じ名前。大文字・小文字は区別しない）を付ける。
---    DONE_EMPTY: 完了なのに記録も確認範囲も 0 件（何もなかったのか、付け忘れかの確認用）。
+--    DONE_EMPTY: 完了なのに記録も確認範囲・不可範囲も 0 件（何もなかったのか、付け忘れかの確認用）。
+--    IMAGE_AREAS は確認範囲、UNSEEN_AREAS は不可範囲（雲など。TBL_OBSERVATION_AREA の UNSEEN_REASON あり）の件数。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_IMAGE_WORK AS
 WITH clock AS (
@@ -700,7 +720,9 @@ img AS (
     GROUP BY IMAGE_ID
 ),
 area AS (
-    SELECT IMAGE_ID, COUNT(*) AS N
+    SELECT IMAGE_ID,
+           SUM(CASE WHEN UNSEEN_REASON IS NULL THEN 1 ELSE 0 END)     AS N,
+           SUM(CASE WHEN UNSEEN_REASON IS NOT NULL THEN 1 ELSE 0 END) AS UNSEEN_N
     FROM TBL_OBSERVATION_AREA
     WHERE DELETED_AT IS NULL AND IMAGE_ID IS NOT NULL
     GROUP BY IMAGE_ID
@@ -731,8 +753,9 @@ SELECT
     NVL(mine.N, 0)                                                     AS MY_RECORDS,
     NVL(img.N, 0)                                                      AS IMAGE_RECORDS,
     NVL(area.N, 0)                                                     AS IMAGE_AREAS,
+    NVL(area.UNSEEN_N, 0)                                              AS UNSEEN_AREAS,
     img.LAST_AT                                                        AS LAST_RECORD_AT,
-    CASE WHEN a.STATUS = '完了' AND NVL(img.N, 0) = 0 AND NVL(area.N, 0) = 0 THEN 1 ELSE 0 END AS DONE_EMPTY
+    CASE WHEN a.STATUS = '完了' AND NVL(img.N, 0) = 0 AND NVL(area.N, 0) + NVL(area.UNSEEN_N, 0) = 0 THEN 1 ELSE 0 END AS DONE_EMPTY
 FROM TBL_ASSIGNMENT a
 CROSS JOIN clock c
 LEFT JOIN img  ON img.IMAGE_ID = a.IMAGE_ID
@@ -811,6 +834,7 @@ n AS (
     FROM VW_OBS_RECORD v
     WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
       AND NVL(v.PRESENT, 1) <> 0
+      AND v.LOOKED = 1
       AND v.DAYS_AGO BETWEEN 0 AND (26 + 8) * 7 - 1
     GROUP BY v.NAMED_AREA_OBJECTID, FLOOR(v.DAYS_AGO / 7)
 ),
@@ -908,7 +932,7 @@ r AS (
         v.ACTIVITY,
         v.PRESENT_LABEL,
         ROW_NUMBER() OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID
-                           ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC)        AS RN,
+                           ORDER BY v.LOOKED DESC, v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC) AS RN,
         MIN(v.SEEN_AT) OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                 AS FIRST_SEEN_AT,
         COUNT(*) OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                       AS RECORD_COUNT,
         SUM(CASE WHEN v.PRESENT = 1 THEN 1 ELSE 0 END)
@@ -971,11 +995,11 @@ rec AS (
     SELECT
         v.NAMED_AREA_OBJECTID,
         COUNT(*)                                                       AS RECORDS_TOTAL,
-        SUM(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN 1 ELSE 0 END) AS RECORDS_30D,
-        COUNT(DISTINCT CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN v.OBJECT_ID END) AS THINGS_30D,
-        STATS_MODE(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 THEN v.ROOT_KIND END) AS TOP_KIND_30D,
-        MIN(v.SEEN_AT)                                                 AS FIRST_SEEN_AT,
-        MAX(v.SEEN_AT)                                                 AS LAST_SEEN_AT
+        SUM(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 AND v.LOOKED = 1 THEN 1 ELSE 0 END) AS RECORDS_30D,
+        COUNT(DISTINCT CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 AND v.LOOKED = 1 THEN v.OBJECT_ID END) AS THINGS_30D,
+        STATS_MODE(CASE WHEN v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 AND v.LOOKED = 1 THEN v.ROOT_KIND END) AS TOP_KIND_30D,
+        MIN(CASE WHEN v.LOOKED = 1 THEN v.SEEN_AT END)                 AS FIRST_SEEN_AT,
+        MAX(CASE WHEN v.LOOKED = 1 THEN v.SEEN_AT END)                 AS LAST_SEEN_AT
     FROM VW_OBS_RECORD v
     WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
     GROUP BY v.NAMED_AREA_OBJECTID

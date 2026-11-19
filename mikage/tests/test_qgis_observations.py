@@ -643,6 +643,58 @@ def test_checked_areas_carry_all_and_absent_inside(plugin):
     assert not dock.area_mode
 
 
+def test_a_cloud_and_one_thing_not_seen_are_recorded_neither_there_nor_gone(plugin):
+    # 不可 (tsudo 2026-11-19, 案A): a 不可範囲 records the things carried into it at once; the form's 「不可」 one thing.
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name, lon, lat in (("A", 139.70, 35.60), ("B", 139.75, 35.65), ("C", 139.78, 35.68)):
+        dock.map_clicked(lon, lat, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText("船舶")
+        dock._pick_activity("停泊")
+        dock.submit()
+    dock.step(1)
+    assert dock.unseen_area_button.isVisible() and not dock.unseen_inside_button.isVisible()
+    dock.set_area_mode(True, unseen=True)
+    assert dock.area_form.title() == "不可範囲（雲など）" and dock.area_submit_button.text() == "不可範囲の記録（Enter）"
+    assert dock.area_reason.isVisible() and not dock.area_kind.isVisible() and dock.area_reason.currentText() == "雲"
+    assert dock.status.text().startswith("不可範囲（雲など）:") and not dock.area_button.isChecked()
+    dock.map_clicked(139.69, 35.59, None)
+    dock.map_hovered(139.72, 35.62)
+    assert dock.scene().area_pending is not None and dock.scene().area_pending_unseen
+    dock.map_clicked(139.72, 35.62, None)
+    dock.area_reason.setCurrentText("霞")
+    dock._submit_area()
+    assert not dock.area_mode and dock.status.text() == "不可範囲（霞）を記録（中の前後の画像のモノ 1 件を不可として記録）"
+    [a] = [o for o in book.here() if o.unseen]
+    assert (a.object_name, a.unseen, a.present, a.activity) == ("A", "霞", False, "")
+    scene = dock.scene()
+    assert len(scene.unseen_areas) == 1 and scene.areas == []
+    assert [(m.label, m.unseen) for m in scene.marks if m.role == "obs"] == [("A（不可（霞））", True)]
+    # 「すべて継続」 leaves nothing in the cloud; the form's 「不可」 (▼ a reason) records one thing alone.
+    ghost = next(m for m in dock.scene().marks if m.role == "ghost" and m.lon == 139.75)
+    dock.map_clicked(ghost.lon, ghost.lat, ghost)
+    assert dock.unseen_button.isVisible() and [x.text() for x in dock.unseen_button.menu().actions()] == ["雲", "霞", "影", "画像の欠け", "その他"]
+    dock.unseen_button.menu().actions()[2].trigger()
+    assert dock.status.text() == "B（不可（影））を記録"
+    dock.carry_all()
+    assert sorted((o.object_name, o.present, o.unseen) for o in book.here()) == [("A", False, "霞"), ("B", False, "影"), ("C", True, "")]
+    # The flow says so, and the next image carries A and B from where they were last seen.
+    flow = book.flow(a.object_id)
+    assert flow.unseen == "霞" and flow.activity == "停泊"
+    # Its steps on the map: the 不可 record where A was last seen, one mark with both labels.
+    dock.chosen = a.object_id
+    assert [m.label for m in dock.scene().marks if m.role == "step"] == ["10-01 01:00・10-02 01:00（不可）"]
+    dock.chosen = None
+    dock.step(1)
+    assert sorted(c.source.object_name for c in book.carried()) == ["A", "B", "C"]
+    # Deleting the cloud deletes its 不可 record too.
+    dock.step(-1)
+    [area] = book.image_areas()
+    assert book.remove_areas([area]) and [o.object_name for o in book.here() if o.unseen] == ["B"]
+
+
 def test_lists_an_image_without_its_file_and_types_a_time(plugin):
     p, iface, dock, layers, _ = plugin
     dock.list_button.setChecked(True)

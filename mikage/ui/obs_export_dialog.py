@@ -156,7 +156,7 @@ class ExportDialog(QDialog):
         form.addRow(self.tr("確度"), self.confidence_select)
         self.confidence_select.currentIndexChanged.connect(lambda _i: self.count())
         self.presence_select = QComboBox()
-        for key, label in (("all", "すべて"), ("present", "ありのみ"), ("absent", "なしのみ")):
+        for key, label in (("all", "すべて"), ("present", "ありのみ"), ("absent", "なしのみ"), ("unseen", "不可のみ")):
             self.presence_select.addItem(self.tr(label), key)
         self.presence_select.currentIndexChanged.connect(lambda _i: self.count())
         form.addRow(self.tr("有無"), self.presence_select)

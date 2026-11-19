@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 from ..util import formula_safe, iso_text
 from .flows import time_key
 from .geo import to_fixed
-from .model import Observation
+from .model import Observation, unseen_label
 from .taxonomy import kind_of, path_of
 
 
@@ -52,7 +52,7 @@ def observations_csv(records: list[Observation], places: Optional[dict] = None, 
         path = path_of(o.kind)
         rows.append([
             o.id, o.object_id, o.object_name, kind_of(path), *(path[i] if i < len(path) else "" for i in range(len(levels))),
-            o.activity, "あり" if o.present else "なし", o.confidence or "", _iso(o.image_time), o.image_id, o.image_name,
+            o.activity, unseen_label(o.unseen) if o.unseen else "あり" if o.present else "なし", o.confidence or "", _iso(o.image_time), o.image_id, o.image_name,
             to_fixed(o.lon, 7), to_fixed(o.lat, 7), "" if o.length is None else to_fixed(o.length, 1), "" if o.heading is None else to_fixed(o.heading, 1),
             "" if o.width is None else to_fixed(o.width, 1), o.note, o.recorded_by or "", o.updated_by or "", _iso(o.created_at), _iso(o.updated_at), _iso(o.deleted_at),
         ])
