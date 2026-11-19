@@ -146,7 +146,7 @@ class BulkOutcome:
     saved: list = field(default_factory=list)
     #: Already as asked.
     unchanged: int = 0
-    #: 不在 records, whose activity was left empty.
+    #: 消失 records, whose activity was left empty.
     absent: int = 0
     #: Chosen but no longer here (deleted).
     missing: int = 0
@@ -160,7 +160,7 @@ class BulkOutcome:
         if self.unchanged:
             parts.append(f"変更不要 {self.unchanged} 件")
         if self.absent:
-            parts.append(f"不在の {self.absent} 件は活動なしのまま")
+            parts.append(f"消失の {self.absent} 件は活動なしのまま")
         if self.failed:
             why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから変更）" if self.conflicts else self.error)
             parts.append(f"保存できず {self.failed} 件（{why}）")
@@ -233,6 +233,9 @@ class ObservationBook:
         self._around: dict[str, tuple] = {}
         #: Image id → (around key, when it could not be read): not asked again for AROUND_RETRY_MS (the screens ask on every render).
         self._around_failed: dict[str, tuple] = {}
+        #: Where a place (lon, lat) is in an image's file as the image lies on the map now: (image id, lon, lat) →
+        #: (file, pixel x, pixel y), None when the image is not open (set by the plugin: qgis_io/pixel_place.py).
+        self.locate: Optional[Callable[[str, float, float], Optional[tuple[str, float, float]]]] = None
 
     # ---- what is said --------------------------------------------------
 
@@ -766,6 +769,44 @@ class ObservationBook:
 
     # ---- writing records -----------------------------------------------
 
+    def _placed(self, rows: list[Observation]) -> list[Observation]:
+        """
+        The records with where they are in their image's file (pixel_x,
+        pixel_y, image_file): found for a new record and one moved (another
+        place or image) from the image as it lies on the map now (moved by
+        位置ずらし too: the file's own pixels), none when the image is not open
+        (an old value is not kept for a new place). A record not moved keeps
+        its own (an older one without them stays so); a new one given them
+        (an AI result found in the file) keeps those.
+        """
+        before = {o.id: o for o in self.records}
+        out = []
+        for o in rows:
+            was = before.get(o.id)
+            if was is not None and (was.lon, was.lat, was.image_id) == (o.lon, o.lat, o.image_id):
+                out.append(o)
+                continue
+            if was is None and o.pixel_x is not None and o.pixel_y is not None:
+                out.append(o)
+                continue
+            found = None
+            if self.locate is not None:
+                try:
+                    found = self.locate(o.image_id, o.lon, o.lat)
+                except Exception:  # noqa: BLE001 (never stops a record: saved without its pixels)
+                    found = None
+            out.append(replace(o, image_file=found[0], pixel_x=found[1], pixel_y=found[2]) if found
+                       else replace(o, pixel_x=None, pixel_y=None, image_file=""))
+        return out
+
+    def _kept(self, rows: list[Observation]) -> list[Observation]:
+        """The records as the store keeps them (an Esri layer without some optional attributes: those left out)."""
+        as_kept = getattr(self.store, "as_kept", None)
+        try:
+            return as_kept(rows) if callable(as_kept) else rows
+        except Exception:  # noqa: BLE001 (as they are)
+            return rows
+
     def _save_records(self, rows: list[Observation], done: str) -> Optional[list[Observation]]:
         """Saves records in the store and in the list; the records as saved, None when the store refused."""
         if not rows:
@@ -774,11 +815,13 @@ class ObservationBook:
         known = {o.id for o in self.records}
         # Who made (a new record) and who changed it: the one recording now.
         rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
+        rows = self._placed(rows)
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
             self._say(f"{self.store.label} への保存失敗: {_error_text(error)}")
             return None
+        rows = self._kept(rows)
         with self.lock:
             by_id = {o.id: o for o in rows}
             self.records = [by_id.pop(o.id, o) for o in self.records] + list(by_id.values())
@@ -944,6 +987,8 @@ class ObservationBook:
         return self.shelf.get(self.store.label, draft_id)
 
     def keep_draft(self, draft: Draft, replaces: Optional[str] = None) -> None:
+        # Where it is in its image, found now (the image may be closed when it is sent).
+        draft = replace(draft, record=self._placed([draft.record])[0])
         self.shelf.keep(self.store.label, draft, replaces)
         self.last_draft_id = draft.id
 
@@ -1004,6 +1049,10 @@ class ObservationBook:
             values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
                                 length=_text(e.length), heading=_text(e.heading), width=_text(_width_of(e)))
             record = self.record_from(info, e.lon, e.lat, None, None, values, True)
+            pixel = getattr(e, "pixel", None)
+            if pixel:
+                # Where the entry is in the file, found before (an AI result of another system: by the file's own place).
+                record = replace(record, image_file=pixel[0], pixel_x=pixel[1], pixel_y=pixel[2])
             name = e.object.strip()
             # The same name typed twice in one save is one thing, but a class's name (given when none is typed).
             if name and name not in path_of(record.kind) and name != "モノ":
@@ -1050,7 +1099,7 @@ class ObservationBook:
                     confidence: Optional[str] = None) -> "BulkOutcome":
         """
         Sets the kind, the activity or the 確度 of several records at once (一括編集), in one save.
-        A 不在 record keeps no activity. The store's checks hold: records someone else changed since
+        A 消失 record keeps no activity. The store's checks hold: records someone else changed since
         they were read are not overwritten; those that went through are kept here, and the rest told.
         """
         outcome = BulkOutcome()
@@ -1240,7 +1289,7 @@ class ObservationBook:
             present = False
         record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}),
                                                                  "unseen": unseen, **changes})
-        what = unseen_label(unseen) if unseen else "継続" if present else "不在"
+        what = unseen_label(unseen) if unseen else "継続" if present else "消失"
         saved = self._save_records([record], f"{record.object_name} を{what}として記録")
         return saved[0] if saved else None
 
@@ -1265,7 +1314,7 @@ class ObservationBook:
     def absent_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """
         Records every carried-over thing as gone in this image (those in a checked area too, but
-        those in a 不可範囲: what could not be seen is not 不在); with `only`, just the ones it
+        those in a 不可範囲: what could not be seen is not 消失); with `only`, just the ones it
         keeps (those the list shows).
         """
         image = self.current
@@ -1277,7 +1326,7 @@ class ObservationBook:
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
         note = f"（不可範囲内の {len(hidden)} 件を除く）" if hidden else ""
-        return self._save_records(made, f"{len(made)} のモノを不在として記録{note}") or []
+        return self._save_records(made, f"{len(made)} のモノを消失として記録{note}") or []
 
     def absent_inside(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """Records the things carried over into a checked area as gone in this image (with `only`, just the ones it keeps)."""
@@ -1287,7 +1336,7 @@ class ObservationBook:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        return self._save_records(made, f"{len(made)} のモノを不在として記録（確認範囲内）") or []
+        return self._save_records(made, f"{len(made)} のモノを消失として記録（確認範囲内）") or []
 
     def mark_unseen(self, only: Optional[Callable[[CarryOver], bool]] = None, quiet: bool = False) -> list[Observation]:
         """

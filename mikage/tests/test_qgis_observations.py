@@ -191,7 +191,7 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     dock.step(1)
     dock.carry(a.object_id, False)
     assert book.flow(a.object_id).present is False
-    assert [m.label for m in dock.scene().marks] == ["あおば（不在）（推定）"]
+    assert [m.label for m in dock.scene().marks] == ["あおば（消失）（推定）"]
     # Dragged: its place corrected.
     [here] = book.here()
     mark = dock.scene().marks[0]
@@ -629,7 +629,7 @@ def test_checked_areas_carry_all_and_absent_inside(plugin):
     dock.area_note.setText("港内")
     dock._submit_area()
     assert not dock.area_mode and "確認範囲（船舶）を記録（範囲内で記録のない前後の画像のモノ 1 件）" == dock.status.text()
-    assert dock.absent_inside_button.text() == "確認範囲内 1 件を不在"
+    assert dock.absent_inside_button.text() == "確認範囲内 1 件を消失に"
     dock.carry_all()
     assert dock.status.text() == "1 のモノを継続として記録（確認範囲内の 1 件を除く）"
     dock.absent_inside()
@@ -1221,7 +1221,7 @@ def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
     dock._submit_area()
     dock.filter_root("船舶")
     # Only the ships count, and only they are recorded; the aircraft stay as they were.
-    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_inside_button.text() == "確認範囲内 1 件を不在"
+    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_inside_button.text() == "確認範囲内 1 件を消失に"
     dock.carry_all()
     dock.absent_inside()
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("C", True)]
@@ -1234,7 +1234,7 @@ def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
 
 
 def test_absent_all_records_every_thing_shown_as_gone(plugin):
-    """「すべて不在」: every carried-over thing the list shows is recorded as gone here (in checked areas too)."""
+    """「すべて消失」: every carried-over thing the list shows is recorded as gone here (in checked areas too)."""
     p, iface, dock, layers, _ = plugin
     book = dock.book
     dock.set_active(True)
@@ -1244,7 +1244,7 @@ def test_absent_all_records_every_thing_shown_as_gone(plugin):
         dock.kind_input.setText(kind)
         dock.submit()
     dock.step(1)
-    assert dock.absent_all_button.isVisibleTo(dock) and dock.absent_all_button.text() == "すべて不在"
+    assert dock.absent_all_button.isVisibleTo(dock) and dock.absent_all_button.text() == "すべて消失"
     # A checked area (all kinds) over A and B.
     dock.set_area_mode(True)
     dock.map_clicked(139.69, 35.59, None)
@@ -1253,14 +1253,14 @@ def test_absent_all_records_every_thing_shown_as_gone(plugin):
     dock.filter_root("船舶")
     assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_all_button.isVisibleTo(dock)
     dock.absent_all()
-    assert dock.status.text() == "2 のモノを不在として記録"
+    assert dock.status.text() == "2 のモノを消失として記録"
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("C", False)]
-    # Unfiltered again: the aircraft are still to be done; only B (in the area) left → only 「確認範囲内 1 件を不在」.
+    # Unfiltered again: the aircraft are still to be done; only B (in the area) left → only 「確認範囲内 1 件を消失に」.
     dock.filter_root(None)
     assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_all_button.isVisibleTo(dock)
     dock.carry(next(c.source.object_id for c in book.carried() if c.source.object_name == "D"))
     assert not dock.absent_all_button.isVisibleTo(dock) and not dock.carry_all_button.isVisibleTo(dock)
-    assert dock.absent_inside_button.isVisibleTo(dock) and dock.absent_inside_button.text() == "確認範囲内 1 件を不在"
+    assert dock.absent_inside_button.isVisibleTo(dock) and dock.absent_inside_button.text() == "確認範囲内 1 件を消失に"
     dock.absent_inside()
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", False), ("C", False), ("D", True)]
     assert dock.carry_label.text() == "" and not dock.absent_all_button.isVisibleTo(dock)

@@ -1,6 +1,6 @@
 """
 「不可」 (tsudo 2026-11-19, 案A): a thing that could not be seen in an
-image (under cloud, haze, a shadow…) is recorded as neither 継続 nor 不在,
+image (under cloud, haze, a shadow…) is recorded as neither 継続 nor 消失,
 alone (the form's 「不可」) or by a 不可範囲 drawn over the image.
 """
 import json
@@ -56,7 +56,7 @@ class TestRecordsAndFlows:
     def test_says_why_and_is_neither_there_nor_gone(self):
         assert unseen_label("雲") == "不可（雲）" and unseen_label("") == "不可" and unseen_label("不可") == "不可"
         assert state_text(obs(present=False, unseen="霞", activity="")) == "不可（霞）"
-        assert state_text(obs(present=False, activity="")) == "不在" and state_text(obs()) == "停泊"
+        assert state_text(obs(present=False, activity="")) == "消失" and state_text(obs()) == "停泊"
 
     def test_the_next_image_carries_the_thing_from_its_last_record_that_saw_it(self):
         seen = obs(id="s", activity="停泊", lon=139.70)
@@ -77,7 +77,7 @@ class TestRecordsAndFlows:
                 obs(id="3", image_id="d4", image_time=day(4), present=False, activity="", unseen="雲")]
         f = flow_of(rows)
         assert [(s.present, s.activity, s.unseen, s.count) for s in f.steps] == [(True, "停泊", "", 1), (False, "", "雲", 2)]
-        # The latest known: still 停泊 (not 不在); its latest image could not see it.
+        # The latest known: still 停泊 (not 消失); its latest image could not see it.
         assert (f.present, f.activity, f.unseen, f.seen, f.last) == (True, "停泊", "雲", 1, day(4))
         f = flow_of(rows + [obs(id="4", image_id="d5", image_time=day(5), present=False, activity="")])
         assert (f.present, f.unseen, f.steps[-1].unseen) == (False, "", "")
@@ -101,7 +101,7 @@ class TestBook:
         assert book.status == "不可範囲（雲）を記録（中の前後の画像のモノ 1 件を不可として記録）"
         [hidden] = [o for o in book.here() if o.object_id == a.object_id]
         assert (hidden.present, hidden.unseen, hidden.activity, hidden.lon) == (False, "雲", "", a.lon)
-        # Only B waits; 「すべて不在」 cannot reach A (not 不在: not seen).
+        # Only B waits; 「すべて消失」 cannot reach A (not 消失: not seen).
         assert [c.source.object_id for c in book.carried()] == [b.object_id]
         # Read back from the GeoPackage the same.
         book.reload()
@@ -116,7 +116,7 @@ class TestBook:
         b = book.submit(139.75, 35.65, FormValues(object="B", kind="船舶"))
         c = book.submit(139.705, 35.605, FormValues(object="C", kind="船舶"))
         book.step(1)
-        # A checked area over the cloud: the cloud wins (what could not be seen is not 不在).
+        # A checked area over the cloud: the cloud wins (what could not be seen is not 消失).
         book.add_area(box_ring([139.68, 35.58, 139.73, 35.63]), kind="")
         book.add_area(CLOUD, unseen="雲")
         book.remove([o for o in book.here() if o.unseen])  # (as if A and C came into it later)

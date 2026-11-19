@@ -379,6 +379,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "length": "LENGTH_M",
    "heading": "HEADING",
    "width": "WIDTH_M",
+   "pixelX": "PIXEL_X",
+   "pixelY": "PIXEL_Y",
+   "imageFile": "IMAGE_FILE",
    "confidence": "CONFIDENCE",
    "recordedBy": "OBSERVER",
    "updatedBy": "UPDATED_BY",
@@ -760,6 +763,9 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "length",
   "heading",
   "width",
+  "pixelX",
+  "pixelY",
+  "imageFile",
   "note",
   "recordedBy",
   "updatedBy",
@@ -1166,6 +1172,7 @@ const ROLE_LABELS = {
   cloud: "雲量", scenes: "シーン数", result: "結果", reason: "理由", file: "ファイル", captured: "撮像済みの判定",
   boostDone: "繰り上げ済み", imageName: "画像名", imageTime: "撮像日時", objectId: "モノの ID", objectName: "モノの名前",
   activity: "活動", present: "有無", heading: "向き（°）", width: "幅（m）", confidence: "確度", recordedBy: "記録者",
+  pixelX: "画素X（画像ファイルの左上から右へ）", pixelY: "画素Y（下へ）", imageFile: "画素位置の画像ファイル",
   updatedBy: "更新者", deleted: "削除日時", path: "分類のパス", levels: "階層名", nameLabel: "名前の見出し",
   members: "構成", specs: "諸元", photos: "写真", activities: "活動", order: "並び順", time: "時刻", lat: "緯度",
   lon: "経度", course: "針路（COG）", speed: "速度", fileName: "ファイル名", detectedAt: "検出日時", sentAt: "転記日時",
@@ -1209,7 +1216,8 @@ const GEOMETRY_LABELS = { wkt: "WKT", geojson: "GeoJSON", bbox: "西,南,東,北
 const OBS_SOURCE_LABELS = {
   id: "観測 ID", objectId: "モノ ID", objectName: "モノ", kind: "分類（level で階層）", activity: "活動", present: "有無", confidence: "確度",
   imageTime: "撮像日時", imageId: "画像 ID", imageName: "画像", lon: "経度", lat: "緯度", length: "長さ（m）", heading: "向き（度）",
-  width: "幅（m）", note: "備考", recordedBy: "記録者", updatedBy: "更新者", created: "登録日時", updated: "更新日時", deleted: "削除日時",
+  width: "幅（m）", pixelX: "画素X", pixelY: "画素Y", imageFile: "画像ファイル", note: "備考", recordedBy: "記録者", updatedBy: "更新者",
+  created: "登録日時", updated: "更新日時", deleted: "削除日時",
   place: "地名（いちばん小さいもの）", placeKind: "地名の種類", places: "含まれる地名すべて", geofences: "ジオフェンス",
   latLon: "緯度経度（十進）", dms: "度分秒", mgrs: "MGRS", utm: "UTM", geometry: "点（座標）", index: "何件目",
   count: "件数", exportedAt: "出力日時", exportedBy: "出力した人", periodStart: "期間の開始", periodEnd: "期間の終わり",
@@ -1241,7 +1249,7 @@ const PROFILES = {
   observation: {
     sources: () => K.obsExportSources, labels: OBS_SOURCE_LABELS, geometries: () => K.obsGeometries, geometryLabels: OBS_GEOMETRY_LABELS,
     array: "records", arrayLabel: "records（記録の一覧）", fileSources: [...(K.obsExportFileSources || []), "records"],
-    timeSources: ["imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd"], digitSources: ["lon", "lat", "length", "heading", "width"],
+    timeSources: ["imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd"], digitSources: ["lon", "lat", "length", "heading", "width", "pixelX", "pixelY"],
     common: ["id", "imageTime", "objectName", "kind", "activity", "present", "confidence", "lat", "lon", "place", "note"],
     legend: "列（columns）。CSV は上から順に左の列、JSON（スキーマなし）は記録ごとのオブジェクトのキー", note: "受け取り側が求める JSON Schema に、各プロパティへ入れる値（x-source）を書き添える。x-source が records の配列が記録の一覧になり、その items の中は記録 1 件ごとの値。固定値は const。",
     inside: "記録ごとの値は x-source: records の配列の items の中に置く（外に置くと出ない）", name: (o) => o.name || "observations",
@@ -1289,7 +1297,7 @@ function isAnglePattern(f) {
 function alertOptionApplies(key, src, value) {
   if (key === "format") return isAnglePattern(value) ? K.alertAngleSources.includes(src) : K.alertTimeSources.includes(src);
   if (key === "timeZone") return K.alertTimeSources.includes(src);
-  if (key === "digits") return ["lon", "lat", "length", "heading", "width", "score"].includes(src) || !!objectKey(src);
+  if (key === "digits") return ["lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "score"].includes(src) || !!objectKey(src);
   if (key === "level") return src === "kind";
   if (key === "placeKinds") return namesPlaces(src);
   return true;
@@ -1680,7 +1688,7 @@ const SPEC = [
         TJ("countries", "国", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "国のポリゴンのレイヤー（なくてもよい。領海・EEZ を含めれば海上の記録にも付く）。役割: " + Object.entries(K.roles.alertCountries).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むもの（重なればいちばん小さいもの）が項目 country（国コード）・countryName（国名）・countryName.en。10 分ごと・「抽出」で読み直す" }),
         TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
-        B("presentOnly", "不在を除く", { help: "既定 true" }),
+        B("presentOnly", "消失を除く", { help: "既定 true" }),
         B("notifyOnSave", "保存時に知らせる", { help: "既定 true。保存した記録が条件に合えばメッセージバーに「注目の記録」" }),
         O("live", "通知ドックの「通報」タブ", [
           N("seconds", "更新の間隔（秒。0 で手動のみ、2 秒未満は 2 秒）", { min: 0, ph: "30" }),

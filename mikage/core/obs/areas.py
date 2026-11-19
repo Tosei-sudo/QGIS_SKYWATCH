@@ -5,7 +5,7 @@ thing of a kind there recorded.
 
 The same layer keeps the parts that could not be looked at (不可範囲:
 under cloud, haze…; tsudo 2026-11-19): an area with a reason (`unseen`).
-The things that may be there are 「不可」 in that image, not 不在.
+The things that may be there are 「不可」 in that image, not 消失.
 """
 from __future__ import annotations
 

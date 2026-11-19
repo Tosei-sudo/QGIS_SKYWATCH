@@ -68,7 +68,7 @@ class Draft:
         r = self.record
         what = "変更" if self.editing else "継続" if self.source_id else "新規"
         text = f"{what} {r.kind}" + (f"（{r.activity}）" if r.activity else "") + (
-            "" if r.present else f"（{unseen_label(r.unseen)}）" if r.unseen else "（不在）")
+            "" if r.present else f"（{unseen_label(r.unseen)}）" if r.unseen else "（消失）")
         return f"{r.object_name}: {text}" if r.object_name else text
 
 

@@ -174,6 +174,41 @@ def test_trained_boxes_follow_the_records_sizes(provider, tmp_path):
     assert sizes == {"船舶 > 支援船": (10, 10), "航空機 > 輸送機": (24, 24)}
 
 
+def test_records_made_on_a_moved_image_are_trained_where_they_are_in_its_file(provider, tmp_path):
+    """
+    tsudo 2026-11-19: a record made on the image moved by 位置ずらし is where
+    the thing is on the ground, not in the file; its pixel in the file
+    (PIXEL_X・PIXEL_Y) puts the box on the thing whether the image is moved
+    when trained or not. A record without one is placed by its lon, lat.
+    """
+    from dataclasses import replace
+
+    centres = objects(5, 3)
+    layer = QgsRasterLayer(tiff(tmp_path / "train.tif", centres), "train")
+    QgsProject.instance().addMapLayer(layer)
+    # Recorded while the image was moved 30 m east and 20 m north.
+    moved = [record(i, "train.tif", x + 30, y - 20) for i, (x, y) in enumerate(centres)]
+    records = [replace(r, pixel_x=x, pixel_y=y, image_file="train.tif") for r, (x, y) in zip(moved[:2], centres[:2])] + moved[2:]
+    provider.set_book(lambda: Book(records))
+
+    def box_centres():
+        results, ok, context = run("mikage:train_detector", {
+            "IMAGES": [layer.id()], "NETWORK": 1, "EPOCHS": 1, "TILE": 0, "VALIDATION": 0, "REMEMBER": False,
+            "OUTPUT": str(tmp_path / "m.onnx"), "BOXES": "memory:"})
+        assert ok
+        boxes = context.takeResultLayer(results["BOXES"])
+        return sorted((round(f.geometry().centroid().asPoint().x() - X0), round(Y0 - f.geometry().centroid().asPoint().y()))
+                      for f in boxes.getFeatures())
+
+    on_file = sorted(centres[:2]) + [(centres[2][0] + 30, centres[2][1] - 20)]
+    assert box_centres() == sorted(on_file)
+    # Trained with the image moved the same way again: all on the things (the boxes in the moved image's place).
+    from mikage.qgis_io import shift_io
+
+    shift_io.set_shift(layer, 30, 20, folder=str(tmp_path))
+    assert box_centres() == sorted((x + 30, y - 20) for x, y in centres)
+
+
 @pytest.mark.parametrize("epochs", EPOCHS)
 @pytest.mark.parametrize("bands", ["4", "1-4"])
 def test_trained_on_band_values(provider, tmp_path, bands, epochs):

@@ -53,15 +53,16 @@ def observation_layers(records: Iterable[Observation], areas: Iterable[CheckedAr
         LayerField("kind", "string", "種別"), *levels, LayerField("activity", "string", "活動"), LayerField("present", "string", "有無"),
         LayerField("unseen", "string", "不可の理由"), LayerField("confidence", "string", "確度"), LayerField("image_time", "date", "撮像日時"), LayerField("image_id", "string", "画像ID"),
         LayerField("image", "string", "画像"), LayerField("length_m", "double", "長さ（m）"), LayerField("heading_deg", "double", "向き（度）"),
-        LayerField("width_m", "double", "幅（m）"), LayerField("note", "string", "備考"), LayerField("recorded_by", "string", "記録者"), LayerField("created_at", "date", "登録日時"),
+        LayerField("width_m", "double", "幅（m）"), LayerField("pixel_x", "double", "画素X"), LayerField("pixel_y", "double", "画素Y"),
+        LayerField("image_file", "string", "画像ファイル"), LayerField("note", "string", "備考"), LayerField("recorded_by", "string", "記録者"), LayerField("created_at", "date", "登録日時"),
         LayerField("updated_at", "date", "更新日時"),
     ], [((o.lon, o.lat), {
         **_level_values(o.kind, depth), "obs_id": o.id, "object_id": o.object_id, "object": o.object_name, "kind": o.kind,
         "activity": o.activity, "present": "不可" if o.unseen else "あり" if o.present else "なし", "unseen": o.unseen,
         "confidence": o.confidence or "",
         "recorded_by": o.recorded_by or "", "image_time": o.image_time, "image_id": o.image_id, "image": o.image_name,
-        "length_m": o.length, "heading_deg": o.heading, "width_m": o.width, "note": o.note, "created_at": o.created_at,
-        "updated_at": o.updated_at,
+        "length_m": o.length, "heading_deg": o.heading, "width_m": o.width, "pixel_x": o.pixel_x, "pixel_y": o.pixel_y,
+        "image_file": o.image_file or "", "note": o.note, "created_at": o.created_at, "updated_at": o.updated_at,
     }) for o in rows], time_field="image_time")
     out = [points]
     outlines = []

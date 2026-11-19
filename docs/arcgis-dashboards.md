@@ -146,7 +146,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 3 つとも、観測記録の `NAMED_AREA_OBJECTID`（[属性ルール](arcgis-setup.md#属性ルール記録の地名の-objectid)が入れる、記録の点を含むいちばん小さい有効な地名の `OBJECTID`）で地名（`TBL_NAMED_AREA`）を引く。空間の結合をしないので、ビューは軽く、地名の数が多くても速い。地名側の組織内の管理番号 `NAMED_AREA_ID` は、ダッシュボードのリンクと表示に使う。
 
 - 1 件の記録は 1 つの地名（含むうちいちばん小さいもの）にだけ数える。湾の中の港の記録は港に数え、湾には足さない。大きさの違う地名を比べないよう、「地名の種類」で同じ種類どうしを並べる
-- 件数は「不在」以外の記録。判読した画像の量にも左右される（画像の多い週は増える）ので、急に増えた地名は、モノの数（`THINGS`）や記録の中身と合わせて見る
+- 件数は「消失」以外の記録。判読した画像の量にも左右される（画像の多い週は増える）ので、急に増えた地名は、モノの数（`THINGS`）や記録の中身と合わせて見る
 - 属性ルールを入れる前の記録で `NAMED_AREA_OBJECTID` が空のものは、どの地名にも数えない。前からある記録には、ArcGIS Pro のフィールド演算で同じ式を一度かけておく（[N3](#n3-地名の付け方の点検) で残りを確かめられる）
 
 ### N1 いつもと違う地名
@@ -160,7 +160,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | マップ | Web マップ（`VW_NAMED_AREA_STATUS` を `TREND_CLASS` で塗る: 急に増えた = 赤、急に減った = 青、平常 = 灰、記録なし = 枠だけ） | ラベル `PLACE_NAME`。表示範囲で一覧を絞る |
 | テーブル「地名」 | `VW_NAMED_AREA_STATUS` | 並べ替え `TREND_SCORE` の高い順。列 `PLACE_LABEL`（地名（管理番号））・`PLACE_KIND`・`LAST_7D`・`NORMAL_7D`・`CHANGE_7D`・`THINGS_7D`・`ALERTS_30D`。行を選ぶと下の 2 つを `NAMED_AREA_OBJECTID`（地名側は `OBJECTID`）で絞り、地図をその地名へ |
 | 系列グラフ「7 日ごとの件数と平常」 | `VW_NAMED_AREA_WEEK` | 統計（地名を選ぶまでは全地名の合計）、カテゴリ `WEEK_START_DATE`、棒 `USUAL_RECORDS` と `SURGE_RECORDS`（赤。急に増えた地名・区間の分）の合計を積み上げ、線 `NORMAL` の合計。地名を 1 つ選ぶと、その地名の件数と平常になる |
-| テーブル「直近 7 日の記録」 | `VW_OBS_RECORD` | 固定の絞り込み `DAYS_AGO` が 0〜6・`PRESENT_LABEL` が不在以外。列 `SEEN_AT`・`LEAF_KIND`・`OBJECT_NAME`・`ACTIVITY`・`NOTE` |
+| テーブル「直近 7 日の記録」 | `VW_OBS_RECORD` | 固定の絞り込み `DAYS_AGO` が 0〜6・`PRESENT_LABEL` が消失以外。列 `SEEN_AT`・`LEAF_KIND`・`OBJECT_NAME`・`ACTIVITY`・`NOTE` |
 
 - 「急に増えた」の目安（`UPPER_LINE` = 平常 + 2 ばらつき）は地名ごとの値なので、合計のグラフには出さず、N2 で出す
 
@@ -183,7 +183,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | リスト「通報」 | `VW_ALERT_LOG` | 並べ替え `REPORTED_AT` の新しい順。行に `REPORT_NAME`・`OBJECT_NAME`・`LEAF_KIND`・`ACTIVITY`・`MANUAL_LABEL`（条件・手動）・`REPORTED_BY` |
 
 - 通報のフォーマットに管理番号（`place.id`）を入れておけば、受け取った人がその番号でカルテを開ける
-- `WHERE_NOW` は「ここ（1 か月以内）」「ここ（1 か月より前）」「不在を確認」「その後ほかで見た」。いまいそうなモノは「最後に見たのがここ」なので、見ていない間に出て行ったかは分からない
+- `WHERE_NOW` は「ここ（1 か月以内）」「ここ（1 か月より前）」「消失を確認」「その後ほかで見た」。いまいそうなモノは「最後に見たのがここ」なので、見ていない間に出て行ったかは分からない
 - 依頼者・ほかの部署に配るなら、管理番号ごとのリンクを地名の一覧（Excel など）に入れておく
 
 ### N3 地名の付け方の点検

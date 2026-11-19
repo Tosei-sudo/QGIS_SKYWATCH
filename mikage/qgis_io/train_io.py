@@ -11,7 +11,7 @@ of the image layer.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional, Sequence
 
 import numpy as np
@@ -41,6 +41,10 @@ class Label:
     image_id: Optional[str] = None
     #: Where the size came from (記録・諸元・既定・形状).
     size_from: str = "形状"
+    #: A record's place in its image's file (file, pixel x, pixel y) and the place (WGS 84) its outline is around:
+    #: the outline is moved to that pixel of the image as it lies when trained (placed_by_pixels).
+    pixel: Optional[tuple] = None
+    centre: Optional[tuple] = None
 
 
 @dataclass
@@ -67,7 +71,7 @@ class Gathered:
 def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, within_kinds: Sequence[str] = (),
                      default_size: float = 20.0) -> Gathered:
     """
-    The observation records (not 不在 or 不可, not deleted) as labels: each
+    The observation records (not 消失 or 不可, not deleted) as labels: each
     box from the record's length and heading, else the class' 全長・全幅, else
     `default_size` metres; and the checked areas that cover every class
     trained, less the parts of their image that could not be seen (不可範囲:
@@ -81,7 +85,7 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
             out.skip("不可の記録")
             continue
         if not o.present:
-            out.skip("不在の記録")
+            out.skip("消失の記録")
             continue
         cls = class_of(o.kind, taxonomy, depth, within_kinds)
         if not cls:
@@ -89,7 +93,9 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
             continue
         size = object_size(kind_path(o.kind, taxonomy), taxonomy, o.length, o.heading, default_size, o.width)
         ring = [QgsPointXY(x, y) for x, y in footprint(o.lon, o.lat, size)]
-        out.labels.append(Label(cls, QgsGeometry.fromPolygonXY([ring + ring[:1]]), WGS84, o.image_id or None, size.source))
+        pixel = (o.image_file or "", o.pixel_x, o.pixel_y) if o.pixel_x is not None and o.pixel_y is not None else None
+        out.labels.append(Label(cls, QgsGeometry.fromPolygonXY([ring + ring[:1]]), WGS84, o.image_id or None, size.source,
+                                pixel, (o.lon, o.lat)))
     classes = {l.cls for l in out.labels}
     hidden: dict[str, list] = {}
     for a in areas:
@@ -154,6 +160,33 @@ def labels_from_features(features, fields, crs: QgsCoordinateReferenceSystem, tr
         else:
             out.labels.append(Label(cls, QgsGeometry(g), crs, image))
     return out
+
+
+def placed_by_pixels(labels: Sequence[Label], image_id: Optional[str], placement) -> tuple[list[Label], int]:
+    """
+    The labels of an image with those of records that know their pixel in
+    its file (PIXEL_X・PIXEL_Y・IMAGE_FILE) moved there, as the image lies now
+    (pixel_place.Placement): a record made on the image moved by 位置ずらし is
+    where the thing is in the file, whatever the image's move when trained
+    (tsudo 2026-11-19). The others as they are; how many were moved.
+    """
+    if placement is None or image_id is None:
+        return list(labels), 0
+    out, moved = [], 0
+    for label in labels:
+        if (label.pixel is None or label.centre is None or label.image_id != image_id
+                or (label.pixel[0] and label.pixel[0] != placement.file)):
+            out.append(label)
+            continue
+        there = placement.place(label.pixel[1], label.pixel[2])
+        if there is None:
+            out.append(label)
+            continue
+        g = QgsGeometry(label.geometry)
+        g.translate(there[0] - label.centre[0], there[1] - label.centre[1])
+        out.append(replace(label, geometry=g, centre=there))
+        moved += 1
+    return out, moved
 
 
 def pixel_boxes(labels: Sequence[Label], grid: Grid, crs: QgsCoordinateReferenceSystem, transform_context, classes: Sequence[str],

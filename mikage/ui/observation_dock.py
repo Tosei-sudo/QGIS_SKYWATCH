@@ -59,6 +59,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.listed_layers import ListedLayers, listed_image_of
 from ..qgis_io.obs_images import image_layers, open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
+from ..qgis_io.pixel_place import locator as pixel_locator
 from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
@@ -104,7 +105,7 @@ class FlowStrip(QWidget):
     def set_flow(self, flow: Optional[ObjectFlow]) -> None:
         self.flow = flow
         if flow:
-            tips = [f"{unseen_label(s.unseen) if s.unseen else (s.activity or '—') if s.present else '不在'}: "
+            tips = [f"{unseen_label(s.unseen) if s.unseen else (s.activity or '—') if s.present else '消失'}: "
                     f"{local_time(s.start)}{f' 〜 {local_time(s.end)}' if s.end != s.start else ''}" for s in flow.steps]
             self.setToolTip("\n".join(tips))
         self.update()
@@ -130,7 +131,7 @@ class FlowStrip(QWidget):
             end = x(nxt.start) if nxt else max(x(s.end + gap), start + 6)
             color = QColor(ACTIVITY_COLORS[activities.index(s.activity) % len(ACTIVITY_COLORS)]) if s.present else QColor("#d4d4d8")
             if s.unseen:
-                # 不可: grey and hatched (nothing known), not the red of 不在.
+                # 不可: grey and hatched (nothing known), not the red of 消失.
                 p.setPen(QColor(UNSEEN_COLOR))
                 p.setBrush(QColor("#f3f4f6"))
                 p.drawRoundedRect(int(start), 6, int(max(6, end - start)), 14, 3, 3)
@@ -395,11 +396,11 @@ class ObservationDock(PluginDock):
                                          "4 点: さらに両側の側面で幅（中心は両側面の中間）"))
         self.points_select.setCurrentIndex(max(0, self.points - 1))
         self.points_select.currentIndexChanged.connect(lambda _i: self.set_points(self.points_select.currentData()))
-        self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは不在）（A）"),
+        self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは消失）（A）"),
                                         self.set_area_mode, checkable=True)
-        # 不可範囲 (tsudo 2026-11-19): a part of the image under cloud, haze…; the things there are 「不可」, not 不在.
+        # 不可範囲 (tsudo 2026-11-19): a part of the image under cloud, haze…; the things there are 「不可」, not 消失.
         self.unseen_area_button = self._button(tr("不可範囲"), tr("不可範囲（雲などで判読できない範囲）の記録（K）\n"
-                                                                    "中の前後の画像のモノは「不可」として記録（不在にはしない。次の画像では最後に見えた記録から続く）"),
+                                                                    "中の前後の画像のモノは「不可」として記録（消失にはしない。次の画像では最後に見えた記録から続く）"),
                                                lambda on: self.set_area_mode(on, unseen=True), checkable=True)
         # Many alike things (ui/obs_many.py): put down as the 見本.
         self.stamp_button = self._button(tr("連続"), tr("見本と同じものを続けて記録（S）\n"
@@ -432,9 +433,9 @@ class ObservationDock(PluginDock):
         self.carry_label = QLabel()
         self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録（確認範囲内・不可範囲内のものを除く）"),
                                              self.carry_all)
-        self.absent_all_button = self._button(tr("すべて不在"), tr("前後の画像のモノ（白抜きの印）を、この画像での不在（見当たらず）として一括記録（確認範囲内のものも。不可範囲内のものは除く）"),
+        self.absent_all_button = self._button(tr("すべて消失"), tr("前後の画像のモノ（白抜きの印）を、この画像での消失（見当たらず）として一括記録（確認範囲内のものも。不可範囲内のものは除く）"),
                                               self.absent_all)
-        self.absent_inside_button = self._button("", tr("確認範囲内で記録のない前後の画像のモノを、この画像での不在として一括記録"), self.absent_inside)
+        self.absent_inside_button = self._button("", tr("確認範囲内で記録のない前後の画像のモノを、この画像での消失として一括記録"), self.absent_inside)
         self.unseen_inside_button = self._button("", tr("不可範囲内で記録のない前後の画像のモノを、この画像で「不可」として一括記録"),
                                                  self.mark_unseen)
         row.addWidget(self.carry_label, 1)
@@ -556,11 +557,11 @@ class ObservationDock(PluginDock):
         f.addRow(self.note_tidy.panel)
         actions = QHBoxLayout()
         self.submit_button = self._button(tr("記録（Enter）"), "", lambda: self.submit(True))
-        self.absent_button = self._button(tr("不在"), tr("この画像での不在（見当たらず）を記録"), lambda: self.submit(False))
+        self.absent_button = self._button(tr("消失"), tr("この画像での消失（見当たらず）を記録"), lambda: self.submit(False))
         # 「不可」 (tsudo 2026-11-19): could not be seen in this image (a cloud, a shadow…); ▼ picks why.
         self.unseen_button = QToolButton()
         self.unseen_button.setText(tr("不可"))
-        self.unseen_button.setToolTip(tr("雲・影などで、この画像では判読できないこと（不可）を記録（不在にはしない。次の画像では最後に見えた記録から続く）\n"
+        self.unseen_button.setToolTip(tr("雲・影などで、この画像では判読できないこと（不可）を記録（消失にはしない。次の画像では最後に見えた記録から続く）\n"
                                          "▼ で理由を選ぶ"))
         self.unseen_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.unseen_menu = QMenu(self.unseen_button)
@@ -908,6 +909,17 @@ class ObservationDock(PluginDock):
             self.book.status = message
         self._show_status(message)
 
+    def _place_records(self, book: ObservationBook) -> None:
+        """
+        How the open images lie on the map now (read here, on the main thread),
+        for the records saved next to say where they are in their image's file
+        (PIXEL_X・PIXEL_Y・IMAGE_FILE, saved in a task for a shared store).
+        """
+        try:
+            book.locate = pixel_locator(book.images)
+        except Exception:  # noqa: BLE001 (never stops a record: saved without its pixels)
+            book.locate = None
+
     def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None,
            watch: bool = False, failed: Optional[Callable[[str], None]] = None) -> Any:
         """
@@ -918,6 +930,7 @@ class ObservationDock(PluginDock):
         book, s = self.book, self.store_set
         if book is None or s is None:
             return None
+        self._place_records(book)
         if watch and self._alert_watch() is not None:
             work, after = self._watching(work, after)
         if not s.remote:
@@ -1055,6 +1068,7 @@ class ObservationDock(PluginDock):
         book, s = self.book, self.store_set
         if book is None or s is None:
             raise RuntimeError("観測記録は使用不可")
+        self._place_records(book)
         if not s.remote:
             try:
                 return work(book)
@@ -2389,7 +2403,7 @@ class ObservationDock(PluginDock):
         self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present), watch=True)
 
     def _carry_shown(self) -> Optional[Callable[[CarryOver], bool]]:
-        """Which carried-over things the list shows (None: all), so 「すべて継続」「すべて不在」 leave the hidden ones alone."""
+        """Which carried-over things the list shows (None: all), so 「すべて継続」「すべて消失」 leave the hidden ones alone."""
         mine = self.my_names() if self.mine_only.isChecked() else None
         if (not self.class_filter and not mine) or self.book is None:
             return None
@@ -2403,14 +2417,14 @@ class ObservationDock(PluginDock):
 
     def absent_all(self) -> None:
         only = self._carry_shown()
-        self.do(self.tr("すべて不在"), lambda b: b.absent_all(only))
+        self.do(self.tr("すべて消失"), lambda b: b.absent_all(only))
 
     def absent_inside(self) -> None:
         only = self._carry_shown()
-        self.do(self.tr("確認範囲内の不在"), lambda b: b.absent_inside(only))
+        self.do(self.tr("確認範囲内の消失"), lambda b: b.absent_inside(only))
 
     def mark_unseen(self) -> None:
-        """「不可範囲内 n 件を不可」: the things carried over into a 不可範囲, recorded 不可 (those the list shows)."""
+        """「不可範囲内 n 件を不可に」: the things carried over into a 不可範囲, recorded 不可 (those the list shows)."""
         only = self._carry_shown()
         self.do(self.tr("不可範囲内の不可"), lambda b: b.mark_unseen(only))
 
@@ -2955,7 +2969,7 @@ class ObservationDock(PluginDock):
             BulkField("kind", self.tr("種別"), words=self.kinds_model.stringList(), value=first.kind,
                       tip=self.tr("「大分類 > 種別 > 級」の形")),
             BulkField("activity", self.tr("活動"), words=book.activity_words(first.kind), value=first.activity,
-                      tip=self.tr("不在の記録は活動なしのまま")),
+                      tip=self.tr("消失の記録は活動なしのまま")),
             BulkField("confidence", self.tr("確度"), choices=["", *(c.label for c in book.confidences())], value=first.confidence),
         ]
         what = self.tr("選んだ記録 {n} 件（モノ {m} 件）").format(n=len(records), m=things)
@@ -3127,20 +3141,20 @@ class ObservationDock(PluginDock):
             self._read_around()
         if not self.status.text() and book.status:
             self.status.setText(book.status)
-        # Only what the list shows (大分類), which is all 「すべて継続」「すべて不在」 and 「確認範囲内…を不在」 record.
+        # Only what the list shows (大分類), which is all 「すべて継続」「すべて消失」 and 「確認範囲内…を消失」 record.
         shown_carry = self._carry_shown()
         carried = [c for c in book.carried() if shown_carry is None or shown_carry(c)]
         inside = book.inside_carried(carried)
         hidden = book.unseen_carried(carried)
         self.carry_label.setText(self.tr("前後の画像のモノ {n} 件").format(n=len(carried)) if carried else "")
-        # Those in a 不可範囲 are left to 「不可範囲内 n 件を不可」; all in checked areas: 「確認範囲内 n 件を不在」 does the same.
+        # Those in a 不可範囲 are left to 「不可範囲内 n 件を不可に」; all in checked areas: 「確認範囲内 n 件を消失に」 does the same.
         rest = len(carried) - len(inside) - len(hidden)
         self.carry_all_button.setVisible(rest > 0)
         self.absent_all_button.setVisible(rest > 0)
         self.absent_inside_button.setVisible(bool(inside))
-        self.absent_inside_button.setText(self.tr("確認範囲内 {n} 件を不在").format(n=len(inside)))
+        self.absent_inside_button.setText(self.tr("確認範囲内 {n} 件を消失に").format(n=len(inside)))
         self.unseen_inside_button.setVisible(bool(hidden))
-        self.unseen_inside_button.setText(self.tr("不可範囲内 {n} 件を不可").format(n=len(hidden)))
+        self.unseen_inside_button.setText(self.tr("不可範囲内 {n} 件を不可に").format(n=len(hidden)))
         self.unseen_area_button.setVisible(book.keeps_unseen_areas())
         shown = book.records if self.deleted_check.isChecked() else book.living()
         here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: o.object_name)
@@ -3253,7 +3267,7 @@ class ObservationDock(PluginDock):
         for c in carried:
             s = c.source
             widget = self._small((tr("継続"), tr("この画像でも継続として記録"), lambda s=s: self.carry(s.object_id, True)),
-                                 (tr("不在"), tr("この画像での不在を記録"), lambda s=s: self.carry(s.object_id, False)))
+                                 (tr("消失"), tr("この画像での消失を記録"), lambda s=s: self.carry(s.object_id, False)))
             side = tr("前") if c.side == "before" else tr("後")
             self._row([s.object_name, s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("不可範囲内（記録なし）") if id(c) in hidden_ids else tr("確認範囲内（記録なし）") if id(c) in inside_ids else "",
@@ -3303,7 +3317,7 @@ class ObservationDock(PluginDock):
         flow = flow_of(rows)
         tr = self.tr
         self.flow_box.setTitle(f"{flow.name}（{flow.kind or tr('種別なし')}・{flow.object_id}）")
-        latest = (flow.activity or tr("活動の記録なし")) if flow.present else tr("不在")
+        latest = (flow.activity or tr("活動の記録なし")) if flow.present else tr("消失")
         if flow.unseen:
             latest += tr("（最新の画像では{u}）").format(u=unseen_label(flow.unseen))
         self.flow_summary.setText(f"{local_time(flow.first)} 〜 {local_time(flow.last)}・{flow.seen} 画像で確認・移動 {km_text(flow.distance)}・最新: {latest}")
@@ -3314,7 +3328,7 @@ class ObservationDock(PluginDock):
             r = self.steps_table.rowCount()
             self.steps_table.insertRow(r)
             cells = [local_time(s.start) if s.start == s.end else f"{local_time(s.start)} 〜 {local_time(s.end)}",
-                     tr(unseen_label(s.unseen)) if s.unseen else (s.activity or "—") if s.present else tr("不在"), str(s.count),
+                     tr(unseen_label(s.unseen)) if s.unseen else (s.activity or "—") if s.present else tr("消失"), str(s.count),
                      km_text(s.moved) if s.moved is not None and s.moved > 0 else ""]
             for i, c in enumerate(cells):
                 item = QTableWidgetItem(c)
@@ -3390,10 +3404,10 @@ class ObservationDock(PluginDock):
                     s.track = [(o.lon, o.lat) for o in seen]
                 last = None
                 for o in flow.observations:
-                    what = "" if o.present else "（不可）" if o.unseen else "（不在）"
+                    what = "" if o.present else "（不可）" if o.unseen else "（消失）"
                     label = f"{local_time(o.image_time)[5:]}{what}"
                     if last is not None and (last.lon, last.lat) == (o.lon, o.lat):
-                        # The same place (a 不可 or 不在 record stays where it was last seen): one mark, its labels joined.
+                        # The same place (a 不可 or 消失 record stays where it was last seen): one mark, its labels joined.
                         last.label += f"・{label}"
                         continue
                     last = Mark("step", o.lon, o.lat, label=label, present=o.present, unseen=bool(o.unseen))
@@ -3411,7 +3425,7 @@ class ObservationDock(PluginDock):
                 if o.image_id != image.id:
                     continue
                 lon, lat = (self.dragging[1], self.dragging[2]) if self.dragging and self.dragging[0] == o.id else (o.lon, o.lat)
-                what = (f"・{o.activity}" if o.activity else "") if o.present else f"（{unseen_label(o.unseen)}）" if o.unseen else "（不在）"
+                what = (f"・{o.activity}" if o.activity else "") if o.present else f"（{unseen_label(o.unseen)}）" if o.unseen else "（消失）"
                 sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
                 late = self.tr("（送信待ち）") if o.id in waiting else ""
                 s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}{late}", o.present, ring_of.get(o.confidence or ""),

@@ -520,7 +520,7 @@ class TestReport:
         s = select_for_report(self.records, [area(note="港内すべて")], options, self.levels)
         page = report_html(s, options, ReportContext("ローカル", "田中", day(25), self.levels, "data:image/jpeg;base64,AAAA"))
         assert "<title>週報</title>" in page
-        assert "モノ 3 件（最新で所在 3・不在 0）・記録 4 件・画像 3 枚・確認範囲 1 件" in page
+        assert "モノ 3 件（最新で所在 3・消失 0）・記録 4 件・画像 3 枚・確認範囲 1 件" in page
         assert '<img src="data:image/jpeg;base64,AAAA"' in page
         assert "タンカー&lt;A&gt;" in page and "タンカー<A>" not in page
         assert "港内すべて" in page and "<h2>記録一覧</h2>" in page and "田中" in page

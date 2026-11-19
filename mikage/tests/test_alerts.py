@@ -39,7 +39,7 @@ def settings(extra=None, problems=None):
             {"name": "速報", "delimiter": "|", "escape": "／", "timeZone": "Asia/Tokyo", "dateFormat": "%m/%d %H:%M",
              "fields": [{"source": "imageTime"}, {"source": "kind", "level": 1}, {"source": "kind", "level": -1}, "objectName",
                         "activity", {"source": "lat", "digits": 3}, {"source": "lon", "digits": 3}, "area", {"text": "SKY"},
-                        {"source": "present", "map": {"true": "在", "false": "不在"}}, {"source": "note", "empty": "-"}],
+                        {"source": "present", "map": {"true": "在", "false": "消失"}}, {"source": "note", "empty": "-"}],
              "header": ["【注目】{date} {count}件", "{name}"], "footer": "以上 {now:%Y%m%d}", "newline": "lf"},
         ],
         **(extra or {}),
@@ -101,7 +101,7 @@ def test_select_by_rules_geofence_confidence_period_and_reported():
         obs(id="c", kind="航空機 > 戦闘機", lon=135.2),                     # rule 2, inside 舞鶴
         obs(id="d", kind="航空機", lon=140.0),                             # rule 2, outside
         obs(id="e", confidence="不明"),                                   # below minConfidence 推定
-        obs(id="f", present=False),                                       # 不在
+        obs(id="f", present=False),                                       # 消失
         obs(id="g", deleted_at=T0),                                       # deleted
         obs(id="h"),                                                      # already reported
         obs(id="i", created_at=T0 - 86_400_000),                          # before the period

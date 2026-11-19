@@ -1,7 +1,7 @@
 """
 Observations (観測記録), as the viewer (observations.ts): one record per
 thing per image — when, where, what thing (モノ) and what it was doing
-(活動), that it was no longer there (不在), or that it could not be seen
+(活動), that it was no longer there (消失), or that it could not be seen
 there (不可: under cloud, haze, a shadow…; tsudo 2026-11-19).
 
 This module holds the record, the vocabulary (活動・確度・分類) and the
@@ -38,7 +38,7 @@ class Observation:
     kind: str
     #: 活動.
     activity: str
-    #: False for 「不在」.
+    #: False for 「消失」.
     present: bool
     note: str
     lon: float
@@ -56,9 +56,17 @@ class Observation:
     updated_by: str = ""
     #: m, side to side (across the heading), when measured by three or four points.
     width: Optional[float] = None
-    #: 「不可」: why the thing could not be seen in this image (雲・霞・影…); '' when it was looked at (継続 or 不在).
+    #: 「不可」: why the thing could not be seen in this image (雲・霞・影…); '' when it was looked at (継続 or 消失).
     #: A 不可 record is neither: `present` is False, and the thing goes on from its last record that saw it.
     unseen: str = ""
+    #: Where the record is in the image file, in its full-resolution pixels from the file's top-left corner (x
+    #: right, y down; outside the image: below 0 or past its size), as the image lay on the map when the record
+    #: was placed (位置ずらし too: the file's own pixel, so AI training finds it whatever the image's move then;
+    #: tsudo 2026-11-19); None when the image was not open (an older record, a move made without the image).
+    pixel_x: Optional[float] = None
+    pixel_y: Optional[float] = None
+    #: The file those pixels are of (a catalog record's image below its folder, else the file's name); '' with none.
+    image_file: str = ""
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -76,6 +84,9 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "length": "LENGTH_M",
     "heading": "HEADING",
     "width": "WIDTH_M",
+    "pixelX": "PIXEL_X",
+    "pixelY": "PIXEL_Y",
+    "imageFile": "IMAGE_FILE",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",
@@ -125,10 +136,10 @@ def unseen_label(reason: str) -> str:
 
 
 def state_text(o: "Observation") -> str:
-    """What a record says of its thing: its activity, 「不在」 or 「不可（雲）」."""
+    """What a record says of its thing: its activity, 「消失」 or 「不可（雲）」."""
     if o.unseen:
         return unseen_label(o.unseen)
-    return o.activity if o.present else "不在"
+    return o.activity if o.present else "消失"
 
 
 def default_taxonomy() -> list[Taxon]:

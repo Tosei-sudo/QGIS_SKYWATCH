@@ -337,6 +337,8 @@ class ImportEntry:
     #: The record of the thing (of the image before or after) this one continues (継続); None for a new thing.
     carry: Optional[Any] = None
     width: Optional[float] = None
+    #: Where it is in the image's file (file, pixel x, pixel y), when found before (None: found from the image as it lies now).
+    pixel: Optional[tuple] = None
 
 
 def source_head(source: AiResultSource) -> str:
