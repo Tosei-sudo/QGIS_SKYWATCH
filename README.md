@@ -841,24 +841,73 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
 ### 文章の手伝い（小さな生成 AI、`textAssist`）
 
-この PC で動く小さな生成 AI で、観測記録・確認範囲の備考を整えた案と、引き継ぎメモの申し送りの下書きを出す（2026-11-19。tsudo「本当に小さい機能でいいので、量子化されたミニ生成AI機能みたいなの同梱できないか検討してみて」→「両方（備考を先に）」「sarashina2.2-1Bで良いよ」）。どちらも案を出すだけで、押すまで欄は変わらない。サーバーには何も送らない（モデルも計算も PC の中）。
+この PC で動く小さな生成 AI で、文章の案を出す（2026-11-19。tsudo「本当に小さい機能でいいので、量子化されたミニ生成AI機能みたいなの同梱できないか検討してみて」→「両方（備考を先に）」「sarashina2.2-1Bで良いよ」。3B 向けの 4 つは「3Bに対応しつつ、コンフィグでできる範囲を規定」「モデル選択はさせたくないから、コンフィグは、タスクごとにモデルを割り当てる」→「この方針で4つとも」）。どれも案を出すだけで、押すまで欄は変わらない。サーバーには何も送らない（モデルも計算も PC の中）。
 
 ```jsonc
-"textAssist": "\\\\fileserver\\gis\\models\\sarashina-1b-int4"
-// または
-"textAssist": { "model": "models/sarashina-1b-int4.zip", "threads": 0, "keepMinutes": 10 }
+"textAssist": {
+  "models": {
+    "small": "\\\\fileserver\\gis\\models\\sarashina-1b-int4",
+    "large": { "path": "\\\\fileserver\\gis\\models\\sarashina-3b-int4", "threads": 4 }
+  },
+  "tasks": {
+    "tidyNote": "small",        // 備考を整える
+    "handoverDraft": "large",   // 申し送りの下書き
+    "noteFields": "large",      // 項目の提案
+    "searchWords": "large",     // 言葉で探す
+    "summary": { "model": "large", "maxTokens": 600 }  // まとめ（translate＝英訳は書いていないので出ない）
+  },
+  "keepMinutes": 10
+}
 ```
 
-- **備考を整える**: 観測記録と確認範囲の「備考」の右の「整える」で、備考を判読記録の文体（短く、体言止め）に直し、誤字を直し、単語集（[`glossary`](#備考の単語集glossary)）の語に寄せた案を欄の下に出す。「置き換える」で備考を案にする（Ctrl+Z で戻せる）、「閉じる」でそのまま。案は意味を変えず情報を足さないように指示し、元の備考にない数字が案にあれば「確認: 元にない数字: 3」、元より大幅に長ければそう出す。単語集の表記ゆれは案にも機械的に直してから出す。直すところがなければ「直すところなし」。案が出る前に備考を打ち直すか別の記録を開くと、その案は取り消す
+- **モデルの一覧（`models`）とタスクごとの割り当て（`tasks`）**: `models` に名前と置き場所を書き、`tasks` でタスクごとにどのモデルを使うかを決める。割り当てのないタスクはボタンを出さない。使う人がモデルを選ぶ場面はない（設定ファイルを配る側が決める）
+  - モデルの値は置き場所の文字列か `{ "path", "threads" }`（`threads` は既定 0 = コア数 − 1、最大 8）
+  - タスクの値はモデルの名前か `{ "model", "maxTokens", "prompt" }`（`maxTokens` は最大の長さ、`prompt` はモデルへの指示文の置き換え）。`tidyNote` だけは `examples`（`[{ "kind", "note", "tidy" }]`、指示の前に見せる例）も書ける
+  - `keepMinutes`（既定 10）: 使い終えてからモデルを残す分数。過ぎるとメモリーを返し、0 ですぐ外す
+  - 読んでおくモデルは一度に 1 つ（1B と 3B を両方読むとメモリーを 3.5 GB ほど使うため）。別のモデルのタスクを頼むと前のモデルを外して読み込むので、切り替えのたびに数秒かかる
+  - 以前の書き方もそのまま読む: `"textAssist": "パス"` と `{ "model", "threads", "maxTokens", "handoverMaxTokens", "keepMinutes", "notePrompt", "noteExamples", "handoverPrompt" }` は、そのモデルを `tidyNote` と `handoverDraft` に割り当てたもの
+  - 設定ビルダーでは、モデルの一覧を書いてから、タスクごとにモデルを選ぶ
+- **タスク**:
+
+  | タスク | 画面 | 目安のモデル | 最大の長さの既定 |
+  |---|---|---|---|
+  | `tidyNote`（備考を整える） | 観測記録・確認範囲の備考の右の「整える」 | 1B で可 | 160 |
+  | `handoverDraft`（申し送りの下書き） | 「引き継ぎメモ」の「申し送りの下書き」 | 1B で可（3B でよくなる） | 320 |
+  | `noteFields`（項目の提案） | 観測記録の備考の右の「項目を拾う」 | 3B 級 | 160 |
+  | `searchWords`（言葉で探す） | 「観測記録のエクスポート」のいちばん上 | 3B 級 | 160 |
+  | `summary`（まとめ） | 観測記録の一覧で選んだ記録の「まとめ…」、エクスポートの「まとめ…」 | 3B 級 | 480 |
+  | `translate`（英訳） | 「通報」の「備考を英訳」（`note.en` を使うフォーマットのとき） | 3B 級 | 240 |
+
+  3B 級向けのタスクに小さいモデル（`genai_config.json` から見積もって 2B 未満）を割り当てても動くが、案に「このモデル（約 1.2B）では精度が低いことがある（3B 級を推奨）」と添える
+- **備考を整える**: 「整える」で、備考を判読記録の文体（短く、体言止め）に直し、誤字を直し、単語集（[`glossary`](#備考の単語集glossary)）の語に寄せた案を欄の下に出す。「置き換える」で備考を案にする（Ctrl+Z で戻せる）、「閉じる」でそのまま。案は意味を変えず情報を足さないように指示し、元の備考にない数字が案にあれば「確認: 元にない数字: 3」、元より大幅に長ければそう出す。単語集の表記ゆれは案にも機械的に直してから出す。直すところがなければ「直すところなし」。案が出る前に備考を打ち直すか別の記録を開くと、その案は取り消す
 - **申し送りの下書き**: 「分担と引き継ぎ」の「引き継ぎメモ」タブの「申し送りの下書き」で、作成したメモの一覧（観測記録・通報・未処理の撮像依頼・分担。まだなら先に「作成」する）から、次の担当者への申し送りを 2〜4 文で下書きする。期限が近い依頼・終わっていない画像・通報を先に書くよう指示し、メモにない数字があれば出す。書きかけの申し送りがあればそれも生かす。「置き換える」「末尾に足す」「閉じる」
-- **速さ**: 4 コアの CPU で、1B 級のモデルの「整える」は 1 回 4〜5 秒、「申し送りの下書き」は 15〜20 秒ほど（同じ形のダミーモデルでの実測からの見込み）。初回だけモデルの読み込みに数秒。書いている途中の文が欄の下に出て、「取消」で止める。生成中も QGIS は止まらない（GIL を離して計算する）
-- **モデル**: ONNX Runtime GenAI の形式（`genai_config.json`・`model.onnx`・`model.onnx.data`・`tokenizer.json` などのフォルダー）。標準は [sarashina2.2-1B-instruct](https://huggingface.co/sbintuitions/sarashina2.2-1b-instruct-v0.1)（SB Intuitions、MIT ライセンス、日本語向け）の int4（約 0.8〜1 GB）。zip には入れない（大きく、プラグインの更新のたびに配り直しになるため）
-  - 管理者がインターネットにつながる PC で一度だけ作る: `pip install onnxruntime-genai torch transformers` のあと `python -m onnxruntime_genai.models.builder -m sbintuitions/sarashina2.2-1b-instruct-v0.1 -o sarashina-1b-int4 -p int4 -e cpu`。できたフォルダー（か、その zip）を共有フォルダーや社内の Web サーバーに置き、`model` に書く
-  - `model` はフォルダー、その `.zip`、`.zip` の URL。相対パスは設定ファイルのフォルダーから。PC の中のフォルダーはそのまま使い、共有フォルダー（`\\server\share`、ネットワークドライブ）のフォルダーは初回に QGIS のプロファイルの `text_models` にコピー、zip は展開、URL の zip はダウンロードして展開する（QGIS のネットワーク・認証設定で。中身が変わったら作り直し、古いものは消す）
+- **項目の提案**: 「項目を拾う」で、備考から種別・活動・確度・長さ・幅・向き・モノを拾い、空いている欄に入れる案を出す（「補給艦おうみが岸壁に停泊、全長120m程度」→「種別 船舶 > 補給艦・活動 停泊・長さ 120 m・モノ おうみ」）。「欄に入れる」で入れる（保存はまだしない。いつもどおり「記録」で保存）
+  - 種別は分類体系にあるものだけ（最後の名前だけでも分類から探す）、活動はその種別の活動だけ、確度は確度の候補だけ。長さ・幅・向きは備考に書いてある数字だけ、モノは備考に書いてある名前だけを使う。ほかは捨てて「確認: 幅 30 は備考にない数字」のように出す
+  - すでに入っている欄は変えない。違う値なら「活動は入力済みのため変えない（案: 停泊）」と出すだけ。ただし種別は、今の種別の下の細かい分類なら入れる（新しい記録は前の記録の種別から始まるため。「船舶」→「船舶 > 補給艦」）
+- **言葉で探す**: 「観測記録のエクスポート」のいちばん上の欄に「先週の横須賀の船舶、確度は推定以上」のように書いて「条件にする」と、期間・地名・大分類・確度・有無の案を出し、「条件に入れる」でその下の条件に入れる（ほかの条件はそのまま。件数はいつもどおり数え直す）
+  - 「今日」「昨日」「今週」「先週」「直近 7 日」「今月」「先月」「今年」などの日付はプラグインが計算してモデルに渡すので、モデルは写すだけ（週は月曜から）
+  - 地名は設定の地名（`observationExports.namedAreas`）の名前だけ（まだ読んでいなければ先に読む）、大分類・確度はその画面の候補だけ。候補にないものは捨てて「確認: 地名の候補にない「佐世保」」のように出す
+- **まとめ**: 観測記録の一覧で記録を選ぶ（Ctrl・Shift で複数）と出る「まとめ…」、またはエクスポートの「まとめ…」（条件に合う記録）で、記録を 3〜6 文にまとめた下書きを窓に出す。件数（大分類ごと・活動ごと）はプラグインが数えてモデルに渡す（小さいモデルは数えるのが苦手なため）。記録にない数字があれば「確認: 元にない数字: 5」。窓の中で直してから「コピー」、「作り直す」でもう一度。モデルに渡すのは最大 80 件・3000 字まで（件数は全件で数える）
+- **英訳**: 通報のフォーマットに項目 `note.en`（備考の英訳）を足せる。そのフォーマットで記録を一覧に出すと「備考を英訳」が出て、押すと一覧の記録の備考を 1 件ずつ英訳して行に入れる（同じ備考は 1 回だけ。QGIS を閉じるまで覚えておく）。訳していない行の `note.en` は空なので、日本語で残すなら `{ "source": "note.en", "fallback": { "source": "note" } }`。訳は記録には書き込まない。元にない数字が訳にあれば行のツールチップに出す。訳している間は「英訳を止める」で止める
+- **速さ**（4 コアの CPU での見込み。同じ形のダミーモデルでの実測、1B で毎秒 37 トークン・1.7B で 22 トークンから）:
+
+  | 大きさ | 整える | 申し送り | 英訳（1 件） | メモリー | 向くタスク |
+  |---|---|---|---|---|---|
+  | 1B（sarashina2.2-1B） | 4〜5 秒 | 15〜20 秒 | 2〜3 秒 | 約 1 GB | 整える・申し送り |
+  | 3B（sarashina2.2-3B） | 約 10 秒 | 30〜40 秒 | 3〜5 秒 | 約 2.5 GB | 全部 |
+  | 7〜8B | 20 秒超 | 1 分半超 | 10 秒超 | 5 GB〜 | CPU では実用外 |
+
+  初回とモデルの切り替えのときだけ読み込みに数秒。書いている途中の文が出て、「取消」で止める。生成中も QGIS は止まらない（GIL を離して計算する）。本物の 3B での時間と出来はまだ確かめていない（試してもらって指示文を直す）
+- **モデル**: ONNX Runtime GenAI の形式（`genai_config.json`・`model.onnx`・`model.onnx.data`・`tokenizer.json` などのフォルダー）。標準は SB Intuitions の sarashina2.2 の instruct（MIT ライセンス、日本語向け）の int4: [1B](https://huggingface.co/sbintuitions/sarashina2.2-1b-instruct-v0.1)（約 0.8〜1 GB）と [3B](https://huggingface.co/sbintuitions/sarashina2.2-3b-instruct-v0.1)（約 2〜2.5 GB）。zip には入れない（大きく、プラグインの更新のたびに配り直しになるため）
+  - 管理者がインターネットにつながる PC で一度だけ作る: `pip install onnxruntime-genai torch transformers` のあと
+    - 1B: `python -m onnxruntime_genai.models.builder -m sbintuitions/sarashina2.2-1b-instruct-v0.1 -o sarashina-1b-int4 -p int4 -e cpu`
+    - 3B: `python -m onnxruntime_genai.models.builder -m sbintuitions/sarashina2.2-3b-instruct-v0.1 -o sarashina-3b-int4 -p int4 -e cpu`（1B より変換に時間とメモリーを使う）
+
+    できたフォルダー（か、その zip）を共有フォルダーや社内の Web サーバーに置き、`models` に書く
+  - 置き場所はフォルダー、その `.zip`、`.zip` の URL。相対パスは設定ファイルのフォルダーから。PC の中のフォルダーはそのまま使い、共有フォルダー（`\\server\share`、ネットワークドライブ）のフォルダーは初回に QGIS のプロファイルの `text_models` にコピー、zip は展開、URL の zip はダウンロードして展開する（QGIS のネットワーク・認証設定で。中身が変わったら作り直し、古いものは消す）
   - 軽くしたいときは sarashina2.2-0.5B-instruct（約 0.5 GB、日本語の評価はやや下）も同じ手順で使える
-- **設定**: `threads`（既定 0 = コア数 − 1、最大 8）、`maxTokens`（整えた備考の最大の長さ、既定 160 トークン）、`handoverMaxTokens`（申し送り、既定 320）、`keepMinutes`（使い終えてからモデルを残す分数、既定 10。過ぎるとメモリーを返す、0 ですぐ外す）。モデルへの指示は `notePrompt`・`handoverPrompt`（文章）と `noteExamples`（`[{ "kind", "note", "tidy" }]`、指示の前に見せる例）で置き換えられる
-- **必要なもの**: `onnxruntime` と `onnxruntime-genai`。Windows 版の zip には同梱（下の「[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)」）。ほかは QGIS の Python に `python -m pip install onnxruntime-genai`（QGIS 側の onnxruntime の上で動く。1.29 以上で確認）。ないときは「整える」を押すとその旨を出す。ONNX Runtime GenAI のテレメトリーは読み込み時に止める（ONNX Runtime のものも、[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)の説明のとおり止めている）
-- **注意**: 小さいモデルなので、言い直しはできても事実は間違えることがある。案は必ず読んでから使う。`textAssist` がなければボタンは出ない（今までどおり）
+- **必要なもの**: `onnxruntime` と `onnxruntime-genai`。Windows 版の zip には同梱（下の「[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)」）。ほかは QGIS の Python に `python -m pip install onnxruntime-genai`（QGIS 側の onnxruntime の上で動く。1.29 以上で確認）。ないときはボタンを押すとその旨を出す。ONNX Runtime GenAI のテレメトリーは読み込み時に止める（ONNX Runtime のものも、[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)の説明のとおり止めている）
+- **注意**: 小さいモデルなので、言い直しはできても事実は間違えることがある。案は必ず読んでから使う。プラグインは選択肢・数字・名前を機械的に確かめるが、意味の取り違えまではわからない。`textAssist` がなければボタンは出ない（今までどおり）
 
 ### 通報（注目の記録・`alertReports`）
 
@@ -904,7 +953,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可）。その文字コードで書けない文字（cp932 の —・é・絵文字など）はファイルだけ ? にして画面に出す | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }`（項目は `fields` と同じ書き方。属性が文字列でなければ、使った項目の値そのもの） | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`・`note.en`（備考の英訳。[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の `translate` で、通報の画面の「備考を英訳」で作る。作るまで空）。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
 
 #### 通報の項目の書き方（度分秒・複数の値・代わりの項目・属性）
 
@@ -1968,7 +2017,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en", … }`。`en` は英語の名前で通報の `confidence.en`、ほかのキー（`code` など）は通報の `confidence.code` など）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `glossary` | URL かオブジェクト | 備考の単語集の Esri のテーブル（1 語 1 行、読むだけ）。`{ "url", "fields", "where", "token" }`（既定の属性名は [`TBL_GLOSSARY`](#tbl_glossary備考の単語集)） | なし（備考に候補を出さない） | [備考の単語集](#備考の単語集glossary) |
-| `textAssist` | 文字列かオブジェクト | 文章の手伝いの小さな生成 AI のモデル（ONNX Runtime GenAI のフォルダー・その `.zip`・`.zip` の URL）。`{ "model", "threads", "maxTokens", "handoverMaxTokens", "keepMinutes", "notePrompt", "noteExamples", "handoverPrompt" }` | なし（「整える」「申し送りの下書き」を出さない） | [文章の手伝い](#文章の手伝い小さな生成-aitextassist) |
+| `textAssist` | オブジェクト（文字列も可） | 文章の手伝いの小さな生成 AI。`{ "models": { 名前: 置き場所か { "path", "threads" } }, "tasks": { タスク: モデルの名前か { "model", "maxTokens", "prompt", "examples" } }, "keepMinutes" }`。タスクは `tidyNote`・`handoverDraft`・`noteFields`・`searchWords`・`summary`・`translate`。置き場所は ONNX Runtime GenAI のフォルダー・その `.zip`・`.zip` の URL。以前の書き方（文字列か `{ "model", … }`）はそのモデルを `tidyNote`・`handoverDraft` に割り当てたもの | なし（ボタンを出さない） | [文章の手伝い](#文章の手伝い小さな生成-aitextassist) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 30, "days": 7 }`（既定）・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |

@@ -28,7 +28,8 @@ from ..core import audit, edit_stamp
 from ..core.esri import EsriError
 from ..core.obs.alerts import (
     OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences, load_log,
-    load_rules, manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, write_file, write_log,
+    load_rules, manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, uses_source, write_file,
+    write_log,
 )
 from ..core.obs.flows import living
 from ..core.obs.place_cache import areas_at, points_of
@@ -38,6 +39,7 @@ from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
+from .text_assist_ui import NoteTranslator
 
 DAY_MS = 86_400_000
 
@@ -116,6 +118,13 @@ class AlertDialog(QDialog):
         self.pick_button.setToolTip(self.tr("Esri の通報条件・ジオフェンス・通報済みを読み、条件に合う記録を抽出"))
         self.pick_button.clicked.connect(self.pick)
         row.addWidget(self.pick_button)
+        # 英訳 (`textAssist.tasks.translate`): the 備考 in English for a format that writes `note.en` (tsudo 2026-11-19).
+        self.translator = NoteTranslator(dock.context.text_assist, self._say, self)
+        self.translate_button = QPushButton(self.tr("備考を英訳"))
+        self.translate_button.setToolTip(self.tr("一覧の記録の備考を英語に訳し、フォーマットの note.en に入れる（文章の手伝い。この PC の生成 AI。"
+                                                 "訳は行で確かめてから送る。記録には書き込まない）"))
+        self.translate_button.clicked.connect(lambda _on=False: self.translate_notes())
+        row.addWidget(self.translate_button)
         row.addStretch(1)
         self.drop_button = QPushButton(self.tr("選択を一覧から削除"))
         self.drop_button.setToolTip(self.tr("選んだ行を送らずに一覧から外す（通報テーブルには何もしない。"
@@ -417,8 +426,41 @@ class AlertDialog(QDialog):
             kept[record_id] = (check.checkState() == Qt.CheckState.Checked, edited)
         return kept
 
+    def _needs_english(self) -> bool:
+        fmt = self._format()
+        return fmt is not None and uses_source(fmt, "note.en")
+
+    def translate_notes(self) -> bool:
+        """「備考を英訳」: the 備考 of the records listed in English (`note.en`), then the lines again; 「英訳を止める」 while it runs."""
+        t = self.translator
+        if t.running:
+            t.cancel()
+            return False
+
+        def done() -> None:
+            self.translate_button.setText(self.tr("備考を英訳"))
+            self._render_lines()
+
+        def failed(message: str) -> None:
+            self.translate_button.setText(self.tr("備考を英訳"))
+            self._say(self.tr("英訳を中止") if message == "取消" else self.tr("英訳できず: {m}").format(m=message))
+
+        started = t.translate([i.record.note for i in self.items], done, failed)
+        if started and t.running:
+            self.translate_button.setText(self.tr("英訳を止める"))
+        return started
+
     def _render_lines(self) -> None:
         fmt = self._format()
+        english = self._needs_english() and self.translator.offered
+        self.translate_button.setVisible(english)
+        for item in self.items:
+            item.note_en = self.translator.known.get(item.record.note.strip(), "") if item.record.note else ""
+        missing = bool(self.translator.missing(i.record.note for i in self.items))
+        # 「英訳を止める」 while it runs; else only while some 備考 has no English yet.
+        self.translate_button.setEnabled(self.translator.running or missing)
+        if english and missing and not self.translator.running:
+            self._say(self.tr("このフォーマットは備考の英訳（note.en）を使う: 「備考を英訳」で作成（未作成の行は空）"))
         kept = self._kept_rows()
         self._filling = True
         self.lines_table.blockSignals(True)
@@ -439,6 +481,9 @@ class AlertDialog(QDialog):
             if item is not None and item.manual:
                 tips.append(self.tr("手動で追加（条件に関係なく通報）"))
                 marks.append(self.tr("手動"))
+            if item is not None and english and item.note_en:
+                check_note = self.translator.checks.get(item.record.note.strip())
+                tips.append(self.tr("備考の英訳（生成 AI）: {e}").format(e=item.note_en) + (self.tr("（確認: {c}）").format(c=check_note) if check_note else ""))
             if item is not None and item.score is not None:
                 marks.append(f"{item.score:g}")
                 tips.append(self.tr("重要度 {s}: {p}").format(s=f"{item.score:g}", p=score_note(item)))

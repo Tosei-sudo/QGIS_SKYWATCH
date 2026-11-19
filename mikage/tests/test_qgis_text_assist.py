@@ -1,7 +1,8 @@
 """
 文章の手伝い in QGIS (qgis_io/text_assist_io.py, ui/text_assist_ui.py): where
 the model is, the real ONNX Runtime GenAI on a tiny model (tests/genai_tiny.py),
-and 「整える」・「申し送りの下書き」 on the screens with a model of the test's own.
+and each task on the screens with a model of the test's own (「整える」・
+「申し送りの下書き」・「項目を拾う」・「言葉で探す」・「まとめ」・「備考を英訳」).
 """
 import json
 import os
@@ -12,6 +13,8 @@ import zipfile
 import pytest
 
 pytest.importorskip("qgis.core")
+
+from qgis.PyQt.QtCore import Qt  # noqa: E402
 
 from mikage.core.text_assist import plain_prompt  # noqa: E402
 from mikage.qgis_io import settings, text_assist_io  # noqa: E402
@@ -144,11 +147,13 @@ def test_a_folder_that_is_no_model_is_said(genai, tmp_path):
 class FakeWriter:
     """A model of the test's own: the replies in turn, letter by letter (held at `gate` until it is set)."""
 
-    def __init__(self, folder, threads, replies, gate):
+    def __init__(self, folder, threads, replies, gate, params=None):
         self.folder, self.threads = folder, threads
         self.replies = replies
         self.gate = gate
         self.asked = []
+        #: Its size (billions of parameters), as GenAiWriter reads it from genai_config.json.
+        self.params = params
 
     def write(self, messages, max_tokens, cancelled=lambda: False, wrote=lambda _t: None, one_line=False):
         self.asked.append((list(messages), max_tokens, one_line))
@@ -168,8 +173,11 @@ class FakeWriter:
         return text
 
 
-def _assist(p, tmp_path, replies, text_assist=None, glossary=False):
-    """The settings with a textAssist, and the model replaced by FakeWriter (the ones loaded listed; loaded once `gate.load` is set)."""
+def _assist(p, tmp_path, replies, text_assist=None, glossary=False, extra=None, params=None):
+    """
+    The settings with a textAssist (and `extra` keys), and the model replaced
+    by FakeWriter (the ones loaded listed; loaded once `gate.load` is set).
+    """
     gate = threading.Event()
     gate.set()
     gate.load = threading.Event()
@@ -179,22 +187,23 @@ def _assist(p, tmp_path, replies, text_assist=None, glossary=False):
 
     def writer_of(folder, threads):
         gate.load.wait(10)
-        w = FakeWriter(folder, threads, replies, gate)
+        w = FakeWriter(folder, threads, replies, gate, params)
         loaded.append(w)
         return w
 
     a._writer_of = writer_of
     a._folder_of = lambda source, base, cancelled=lambda: False: os.path.join(os.path.dirname(base), source)
-    _write_config(p, tmp_path, text_assist or {"model": "models/sarashina"})
+    _write_config(p, tmp_path, text_assist or {"model": "models/sarashina"}, extra)
     assert wait_for(lambda: a.available)
     # The map drawn first (a test this short would otherwise end while it draws: QGIS 3.34 does not survive it).
     assert wait_for(lambda: not p.iface.mapCanvas().isDrawing())
     return a, loaded, gate
 
 
-def _write_config(p, tmp_path, text_assist):
+def _write_config(p, tmp_path, text_assist, extra=None):
     config = tmp_path / "config.json"
-    config.write_text(json.dumps({"textAssist": text_assist} if text_assist is not None else {}), encoding="utf-8")
+    value = {"textAssist": text_assist} if text_assist is not None else {}
+    config.write_text(json.dumps({**value, **(extra or {})}), encoding="utf-8")
     settings.set_config_source(str(config))
     p.context.reload()
 
@@ -287,13 +296,13 @@ def test_the_model_is_let_go_after_a_while_and_when_the_settings_change(plugin, 
     assert wait_for(lambda: tidy.panel.draft is not None)
     assert a.writer is None and loaded[0].asked[0][1] == 40  # keepMinutes 0: let go at once
     _write_config(p, tmp_path, {"model": "models/a", "threads": 2})
-    assert wait_for(lambda: a.settings.threads == 2)
+    assert wait_for(lambda: a.settings.models[0].threads == 2)
     tidy.tidy()
     assert wait_for(lambda: a.writer is not None)
     assert len(loaded) == 2 and loaded[1].threads == 2
     # Another model: the one loaded is let go.
     _write_config(p, tmp_path, {"model": "models/b"})
-    assert wait_for(lambda: a.settings.model == "models/b") and a.writer is None
+    assert wait_for(lambda: a.settings.models[0].path == "models/b") and a.writer is None
     # No textAssist any more: the buttons go.
     _write_config(p, tmp_path, None)
     assert wait_for(lambda: not a.available) and not tidy.button.isVisible() and not tidy.panel.isVisible()
@@ -379,3 +388,214 @@ def test_the_real_runtime_from_the_settings_to_the_proposal(genai, plugin, tmp_p
     assert tidy.panel.draft.text == "Tidy note." and isinstance(a.writer, text_assist_io.GenAiWriter)
     assert a.writer.folder == str(tmp_path / "models" / "tiny")
     a.unload()
+
+
+# ---- a model for each task (textAssist.models / tasks; tsudo 2026-11-19) ----------------------------
+
+TWO_MODELS = {"models": {"small": "models/sarashina-1b", "large": {"path": "models/sarashina-3b", "threads": 6}},
+              "tasks": {"tidyNote": "small", "noteFields": "large"}}
+
+
+def _choose(table, rows):
+    from qgis.PyQt.QtCore import QItemSelectionModel
+
+    sel = table.selectionModel()
+    sel.clearSelection()
+    for r in rows:
+        sel.select(table.model().index(r, 0), QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows)
+
+
+def test_only_the_tasks_given_a_model_show_and_one_model_is_loaded_at_a_time(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    a, loaded, gate = _assist(p, tmp_path, ["岸壁に停泊中。", "種別: 船舶", "岸壁に停泊中。"], TWO_MODELS)
+    tidy = _record_form(dock)
+    fields = dock.note_fields
+    assert tidy.button.isVisible() and fields.button.isVisible()
+    # No model for them: no 申し送りの下書き, no まとめ.
+    dialog = dock.open_handover(0)
+    assert not dialog.memo_draft.button.isVisible()
+    dialog.close()
+    dock.note_input.setText("とまってる")
+    tidy.tidy()
+    assert wait_for(lambda: tidy.panel.draft is not None)
+    assert loaded[0].folder.endswith("sarashina-1b") and loaded[0].threads == 0 and a.writer is loaded[0]
+    # Another task, another model: the first let go before the second is loaded.
+    fields.pick()
+    assert wait_for(lambda: len(loaded) == 2 and not a.busy)
+    assert loaded[1].folder.endswith("sarashina-3b") and loaded[1].threads == 6 and a.writer is loaded[1]
+    dock.note_input.setText("とまってる。")
+    tidy.tidy()
+    assert wait_for(lambda: len(loaded) == 3 and not a.busy) and a.writer is loaded[2]
+    # The task taken from the settings: its button goes.
+    _write_config(p, tmp_path, {"models": TWO_MODELS["models"], "tasks": {"tidyNote": "small"}})
+    assert wait_for(lambda: fields.button.isHidden()) and not tidy.button.isHidden()
+    a.unload()
+
+
+def test_the_fields_read_from_the_note_fill_only_the_empty_ones(plugin, tmp_path):
+    """tsudo 2026-11-19 「この方針で4つとも」: 備考から拾い、空いている欄にだけ入れる案 (and a 種別 made finer)."""
+    p, iface, dock, layers, _ = plugin
+    a, loaded, gate = _assist(p, tmp_path, ["種別: 補給艦\n活動: 停泊\n確度: 推定\n長さ: 120\n幅: 30\n向き: なし\nモノ: おうみ"],
+                              {"models": {"large": "models/sarashina-3b"}, "tasks": {"noteFields": "large"}}, params=3.4)
+    # A class under 船舶 (from a record).
+    dock.book.add(139.7, 35.6, object="ましゅう", kind="船舶 > 補給艦", activity="停泊")
+    _record_form(dock)
+    fields = dock.note_fields
+    # 「整える」 has no model: only 「項目を拾う」 beside the 備考.
+    assert fields.button.isVisible() and not dock.note_tidy.button.isVisible() and not fields.button.isEnabled()
+    # As carried over from the record before.
+    dock.choose_kind(["船舶"])
+    dock.activity_input.setText("航行")
+    dock.confidence_select.setCurrentIndex(dock.confidence_select.findData("確定"))
+    dock.note_input.setText("補給艦おうみが岸壁に停泊、全長120m程度")
+    fields.button.click()
+    assert wait_for(lambda: fields.panel.draft is not None)
+    messages, max_tokens, one_line = loaded[0].asked[0]
+    asked = messages[1]["content"]
+    assert (max_tokens, one_line) == (160, False) and messages[0]["content"].endswith("向き: \nモノ: ")
+    assert asked.startswith("今の種別: 船舶\n種別の候補: 船舶、船舶 > 補給艦、航空機、") and "活動の候補（船舶）: 停泊、航行、入港" in asked
+    assert "確度の候補: 確定、推定、不明" in asked and asked.endswith("備考: 補給艦おうみが岸壁に停泊、全長120m程度")
+    # The 種別 made finer; the 活動 and 確度 written are kept (shown only); 幅 30 is not in the 備考. A 3B model: no caution.
+    assert fields.panel.label.text().endswith("種別 船舶 > 補給艦・長さ 120 m・モノ おうみ")
+    assert fields.panel.warning.text() == ("確認: 幅 30 は備考にない数字。活動は入力済みのため変えない（案: 停泊）。"
+                                           "確度は入力済みのため変えない（案: 推定）")
+    assert fields.panel.replace_button.text() == "欄に入れる"
+    fields.panel.replace_button.click()
+    assert dock.kind_input.text() == "船舶 > 補給艦" and dock.length_input.text() == "120" and dock.object_input.text() == "おうみ"
+    assert dock.activity_input.text() == "航行" and dock.confidence_select.currentData() == "確定" and dock.width_input.text() == ""
+    assert not fields.panel.isVisible() and dock.note_input.text() == "補給艦おうみが岸壁に停泊、全長120m程度"
+    # All there already: nothing to put in.
+    loaded[0].replies.append("種別: 補給艦\nモノ: おうみ")
+    fields.pick()
+    assert wait_for(lambda: fields.panel.label.text() == "空いている欄に入れる値なし")
+
+
+def test_a_small_model_for_a_larger_task_is_cautioned(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    a, loaded, gate = _assist(p, tmp_path, ["活動: 停泊"], {"models": {"m": "models/sarashina-1b"}, "tasks": {"noteFields": "m"}}, params=1.2)
+    _record_form(dock)
+    dock.note_input.setText("船が停泊")
+    dock.note_fields.pick()
+    assert wait_for(lambda: dock.note_fields.panel.draft is not None)
+    assert dock.note_fields.panel.warning.text() == "確認: このモデル（約 1.2B）では精度が低いことがある（3B 級を推奨）"
+
+
+PLACES = "https://x/arcgis/rest/services/Alerts/FeatureServer/3"
+
+
+def test_words_made_into_the_export_conditions(plugin, tmp_path):
+    from qgis.PyQt.QtCore import QDate, QTime
+
+    from mikage.core.esri import EsriClient
+    from mikage.core.obs.alerts import forget_named_areas
+    from mikage.tests.fake_esri import FakeEsri, FakeLayer
+
+    p, iface, dock, layers, _ = plugin
+    forget_named_areas()
+    fake = FakeEsri()
+    places = fake.add_layer(PLACES, FakeLayer({"NAME": "esriFieldTypeString", "KIND": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    places.add({"NAME": "東京湾", "KIND": "海域"}, {"rings": [[[139.5, 35.0], [140.1, 35.0], [140.1, 35.7], [139.5, 35.7], [139.5, 35.0]]]})
+    places.add({"NAME": "横須賀港", "KIND": "港"}, {"rings": [[[139.65, 35.25], [139.75, 35.25], [139.75, 35.35], [139.65, 35.35], [139.65, 35.25]]]})
+    p.context.esri = lambda: EsriClient(fake)
+    a, loaded, gate = _assist(p, tmp_path, ["期間: 2026-11-09 〜 2026-11-15\n地名: 横須賀港\n大分類: 船舶、潜水艦\n確度: 推定以上\n有無: あり"],
+                              {"models": {"large": "models/sarashina-3b"}, "tasks": {"searchWords": "large"}},
+                              extra={"observationExports": {"namedAreas": PLACES}})
+    dock.book.add(139.7, 35.3, object="船A", kind="船舶", activity="航行")
+    dock.book.add(139.9, 35.5, object="機B", kind="航空機", activity="駐機")
+    dialog = dock.open_export()
+    words = dialog.search_words
+    assert dialog.search_label.isVisible() and words.edit.isVisible() and not words.button.isEnabled()
+    assert not dialog.summary_button.isVisible()
+    words.edit.setText("先週の横須賀港の船舶、確度は推定以上")
+    words.button.click()
+    # The place names read first, then asked.
+    assert wait_for(lambda: words.panel.draft is not None)
+    asked = loaded[0].asked[0][0][1]["content"].split("\n")
+    assert asked[0].startswith("今日: ") and asked[1].startswith("日付の目安: 今日 ")
+    assert asked[2:] == ["地名の候補: 東京湾、横須賀港", "大分類の候補: 船舶、航空機、車両、建物、構造物、その他", "確度の候補: 確定、推定、不明",
+                         "依頼: 先週の横須賀港の船舶、確度は推定以上"]
+    assert words.panel.label.text().endswith("期間 2026-11-09〜2026-11-15・地名 横須賀港・大分類 船舶・確度 推定・有無 ありのみ")
+    assert words.panel.warning.text() == "確認: 大分類にない「潜水艦」" and words.panel.replace_button.text() == "条件に入れる"
+    # Nothing changed until 「条件に入れる」.
+    assert not dialog.start_check.isChecked() and dialog.place_select.currentData() != "named"
+    words.panel.replace_button.click()
+    assert dialog.start_check.isChecked() and dialog.end_check.isChecked()
+    assert dialog.start_edit.dateTime().date() == QDate(2026, 11, 9) and dialog.start_edit.dateTime().time() == QTime(0, 0)
+    assert dialog.end_edit.dateTime().date() == QDate(2026, 11, 15) and dialog.end_edit.dateTime().time().hour() == 23
+    assert dialog.place_select.currentData() == "named" and dialog.named_select.currentData() == "横須賀港"
+    checked = [dialog.root_list.item(i).text() for i in range(dialog.root_list.count())
+               if dialog.root_list.item(i).checkState() == Qt.CheckState.Checked]
+    assert checked == ["船舶"] and not dialog.all_roots.isChecked()
+    assert dialog.confidence_select.currentData() == "推定" and dialog.presence_select.currentData() == "present"
+    assert not words.panel.isVisible()
+    dialog.close()
+
+
+def test_the_summary_of_the_records_chosen_and_of_the_export(plugin, tmp_path):
+    from qgis.PyQt.QtWidgets import QApplication
+
+    p, iface, dock, layers, _ = plugin
+    a, loaded, gate = _assist(p, tmp_path, ["まとめ: 船舶 2 件が停泊、ほかに 5 隻。", "条件に合う 2 件のまとめ。"],
+                              {"models": {"large": "models/sarashina-3b"}, "tasks": {"summary": {"model": "large", "maxTokens": 500}}})
+    book = dock.book
+    for name, lon in (("あおば", 139.65), ("いぶき", 139.7)):
+        book.add(lon, 35.6, object=name, kind="船舶", activity="停泊", note="岸壁")
+    dock.render()
+    assert dock.table.rowCount() == 2 and not dock.summary_button.isVisible()
+    _choose(dock.table, [0, 1])
+    assert dock.summary_button.isVisible()
+    dialog = dock.summarize()
+    assert wait_for(lambda: dialog.copy_button.isEnabled())
+    messages, max_tokens, _one = loaded[0].asked[0]
+    assert max_tokens == 500 and messages[1]["content"].startswith("観測記録:\n記録: 2 件（あり 2・消失 0）\n船舶: 2 件（停泊 2）")
+    assert dialog.text_edit.toPlainText() == "船舶 2 件が停泊、ほかに 5 隻。" and "選んだ記録: 2 件" in dialog.head.text()
+    assert dialog.panel.warning.text() == "確認: 元にない数字: 5"
+    dialog.copy()
+    assert QApplication.clipboard().text() == "船舶 2 件が停泊、ほかに 5 隻。"
+    dialog.close()
+    # From the export: the records that meet its conditions.
+    export = dock.open_export()
+    assert export.summary_button.isVisible() and export.summary_button.isEnabled() and not export.search_label.isVisible()
+    dialog = export.summarize()
+    assert wait_for(lambda: dialog.copy_button.isEnabled())
+    assert dialog.text_edit.toPlainText() == "条件に合う 2 件のまとめ。" and "条件に合う記録: 2 件" in dialog.head.text()
+    dialog.close()
+    export.close()
+
+
+def test_the_notes_in_english_for_a_format_that_writes_them(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    a, loaded, gate = _assist(p, tmp_path, ["English: Moored at the quay.", "Two vessels sailing north, 3 tugs."],
+                              {"models": {"large": "models/sarashina-3b"}, "tasks": {"translate": "large"}},
+                              extra={"alertReports": {"default": "英文", "formats": [
+                                  {"name": "英文", "fields": ["objectName", {"source": "note.en", "fallback": {"source": "note"}}]},
+                                  {"name": "和文", "fields": ["objectName", "note"]}]}})
+    book = dock.book
+    records = [book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊", note="岸壁に停泊中"),
+               book.add(139.7, 35.6, object="船B", kind="船舶", activity="航行", note="2 隻が北上"),
+               book.add(139.7, 35.6, object="船C", kind="船舶", activity="停泊", note="岸壁に停泊中"),
+               book.add(139.7, 35.6, object="船D", kind="船舶", activity="停泊")]
+    dialog = dock.add_to_alerts(records)
+    assert wait_for(lambda: dialog.lines_table.rowCount() == 4)
+    button = dialog.translate_button
+    assert button.isVisible() and button.isEnabled()
+
+    def lines():
+        return sorted(dialog.lines_table.item(r, 1).text() for r in range(dialog.lines_table.rowCount()))
+
+    # Not translated yet: the format's fallback (the 備考).
+    assert lines() == ["船A|岸壁に停泊中", "船B|2 隻が北上", "船C|岸壁に停泊中", "船D|"]
+    button.click()
+    assert wait_for(lambda: "件の備考を英訳" in dialog.status.text())
+    # Each 備考 once, one line each.
+    assert [c[0][1]["content"] for c in loaded[0].asked] == ["Note: 岸壁に停泊中", "Note: 2 隻が北上"]
+    assert all(one_line for _m, _n, one_line in loaded[0].asked)
+    assert lines() == ["船A|Moored at the quay.", "船B|Two vessels sailing north, 3 tugs.", "船C|Moored at the quay.", "船D|"]
+    row = next(r for r in range(4) if dialog.lines_table.item(r, 1).text().startswith("船B"))
+    assert "元にない数字: 3" in dialog.lines_table.item(row, 1).toolTip()
+    # All translated: nothing more to do.
+    assert not button.isEnabled() and button.text() == "備考を英訳"
+    # A format without note.en: no button.
+    dialog.format_select.setCurrentIndex(dialog.format_select.findData("和文"))
+    assert wait_for(lambda: not button.isVisible())
+    dialog.close()

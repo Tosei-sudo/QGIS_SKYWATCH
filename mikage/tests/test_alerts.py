@@ -798,3 +798,20 @@ def test_layer_attributes_the_formats_read_are_checked_against_the_layers():
     # Read as checked: a role the layer's settings do not have is an attribute name.
     port = NamedArea(name="舞鶴港", rings=[], attributes={"NAME": "舞鶴港", "CODE": "P1"}, roles=dict(s.named_areas.fields))
     assert attribute_of(port, "code") == "P1" and attribute_of(port, "name") == "舞鶴港" and attribute_of(port, "kindEn") == ""
+
+
+def test_the_english_note_is_written_where_a_format_asks_for_it():
+    """note.en: the 備考 in English (英訳 of 文章の手伝い, made in the 通報 window)."""
+    from mikage.core.obs.alerts import uses_source
+
+    fmt = alert_settings_of({"formats": [{"name": "en", "fields": ["objectName", {"source": "note.en", "fallback": {"source": "note"}}]},
+                                         {"name": "ja", "fields": ["objectName", "note"], "columns": {"NOTE_EN": "note.en"}},
+                                         {"name": "plain", "fields": ["objectName", "note"]}]}, [])
+    assert uses_source(fmt.format("en"), "note.en") and uses_source(fmt.format("ja"), "note.en")
+    assert not uses_source(fmt.format("plain"), "note.en")
+    at = Moment(now=T0)
+    item = AlertItem(obs(note="岸壁に停泊中"))
+    # Not translated yet: the fallback (the 備考).
+    assert build_lines([item], fmt.format("en"), at) == ["船A|岸壁に停泊中"]
+    item.note_en = "Moored at the quay."
+    assert build_lines([item], fmt.format("en"), at) == ["船A|Moored at the quay."]

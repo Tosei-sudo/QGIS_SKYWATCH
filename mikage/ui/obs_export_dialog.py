@@ -10,11 +10,11 @@ are read from Esri in a task when saving; the file goes where asked.
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Callable, Optional
 
 from qgis.core import QgsFeatureRequest, QgsMapLayerProxyModel, QgsPointXY, QgsRectangle, QgsWkbTypes
 from qgis.gui import QgsMapLayerComboBox, QgsRubberBand
-from qgis.PyQt.QtCore import QDateTime, Qt, QTime, QTimer
+from qgis.PyQt.QtCore import QDate, QDateTime, Qt, QTime, QTimer
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
@@ -34,6 +34,7 @@ from ..qgis_io.tasks import run_task
 from .docks import plain_label
 from .fit import fit_text
 from .last_inputs import InputMemory
+from .text_assist_ui import SearchWords, SummaryDialog
 
 #: The place choices (their data, their label).
 PLACES = (("all", "すべての場所"), ("extent", "地図の表示範囲"), ("drawn", "地図上に描いた範囲"), ("layer", "レイヤーの地物"),
@@ -65,6 +66,13 @@ class ExportDialog(QDialog):
         self.band: Optional[QgsRubberBand] = None
         layout = QVBoxLayout(self)
         form = QFormLayout()
+
+        # 言葉で探す (`textAssist.tasks.searchWords`): a sentence made into the conditions below (tsudo 2026-11-19).
+        self.search_words = SearchWords(dock.context.text_assist, self, self)
+        self.search_label = QLabel(self.tr("言葉で探す"))
+        form.addRow(self.search_label, self.search_words.row)
+        form.addRow(self.search_words.panel)
+        self._after_named: Optional[Callable[[], None]] = None
 
         self.format_select = QComboBox()
         self.format_select.currentIndexChanged.connect(lambda _i: self._format_changed())
@@ -176,9 +184,13 @@ class ExportDialog(QDialog):
         self.save_button = QPushButton(self.tr("保存…"))
         self.save_button.setToolTip(self.tr("条件に合う記録をフォーマットのファイルに保存"))
         self.save_button.clicked.connect(lambda: self.save())
+        # まとめ (`textAssist.tasks.summary`): the records found, in a few sentences.
+        self.summary_button = QPushButton(self.tr("まとめ…"))
+        self.summary_button.setToolTip(self.tr("条件に合う記録を数文にまとめた下書き（文章の手伝い。この PC の生成 AI）"))
+        self.summary_button.clicked.connect(lambda: self.summarize())
         close = QPushButton(self.tr("閉じる"))
         close.clicked.connect(self.close)
-        for b in (self.save_button, close):
+        for b in (self.summary_button, self.save_button, close):
             b.setAutoDefault(False)
             actions.addWidget(b)
         layout.addLayout(actions)
@@ -377,10 +389,16 @@ class ExportDialog(QDialog):
             self.named_select.setCurrentIndex(max(0, self.named_select.findData(was)))
             self.named_select.blockSignals(False)
             self.count()
+            then, self._after_named = self._after_named, None
+            if then is not None:
+                then()
 
         def failed(message: str) -> None:
             self.named_button.setEnabled(True)
             self._say(self.tr("地名の読み込み失敗: {m}").format(m=message))
+            then, self._after_named = self._after_named, None
+            if then is not None:
+                then()  # 言葉で探す goes on without the place names
 
         run_task(self.tr("地名の読み込み"), lambda _t: load_named_areas(client, source, token, max_age=0 if again else 600), finished, failed)
 
@@ -505,7 +523,74 @@ class ExportDialog(QDialog):
         rows, why = self.records()
         self.count_label.setText(why or self.tr("該当する記録 {n} 件").format(n=len(rows)))
         self.save_button.setEnabled(bool(rows))
+        assist = self.dock.context.text_assist
+        self.search_label.setVisible(assist.has("searchWords"))
+        self.summary_button.setVisible(assist.has("summary"))
+        self.summary_button.setEnabled(bool(rows))
         return len(rows)
+
+    # ---- 文章の手伝い (ui/text_assist_ui.py) --------------------------------------
+
+    def summarize(self) -> Optional[SummaryDialog]:
+        """「まとめ…」: the records that meet the conditions in a few sentences."""
+        rows, why = self.records()
+        if not rows:
+            self._say(why or self.tr("該当する記録なし"))
+            return None
+        from ..core.obs.csv import local_time
+
+        dialog = SummaryDialog(self.dock.context.text_assist, rows, local_time, self.tr("条件に合う記録"), self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+        dialog.start()
+        self._summary = dialog
+        return dialog
+
+    def search_choices(self) -> tuple[list[str], list[str], list[str]]:
+        """言葉で探す's choices: the named areas (read), the 大分類 and the 確度 levels."""
+        places = [self.named_select.itemData(i) for i in range(self.named_select.count())]
+        roots = [self.root_list.item(i).text() for i in range(self.root_list.count())]
+        confidences = [self.confidence_select.itemData(i) for i in range(self.confidence_select.count()) if self.confidence_select.itemData(i)]
+        return [p for p in places if p], roots, confidences
+
+    def today(self):
+        return QDateTime.currentDateTime().date().toPyDate()
+
+    def prepare(self, then: Callable[[], None]) -> None:
+        """The named areas read first (when the settings have them and they are not), then `then`."""
+        if self.settings.named_areas is None or self.named is not None:
+            then()
+            return
+        self._after_named = then
+        self.read_named()
+
+    def apply_search(self, found) -> None:
+        """The conditions read by 言葉で探す put in the form (the rest as it was)."""
+        if found.start or found.end:
+            for check, edit, day, t in ((self.start_check, self.start_edit, found.start, QTime(0, 0)),
+                                        (self.end_check, self.end_edit, found.end, QTime(23, 59))):
+                check.setChecked(day is not None)
+                if day is not None:
+                    edit.setDateTime(QDateTime(QDate(day.year, day.month, day.day), t))
+        if found.place:
+            self.place_select.setCurrentIndex(max(0, self.place_select.findData("named")))
+            i = self.named_select.findData(found.place)
+            if i >= 0:
+                self.named_select.setCurrentIndex(i)
+        if found.roots:
+            self.all_roots.setChecked(False)
+            self.root_list.blockSignals(True)
+            for i in range(self.root_list.count()):
+                item = self.root_list.item(i)
+                item.setCheckState(Qt.CheckState.Checked if item.text() in found.roots else Qt.CheckState.Unchecked)
+            self.root_list.blockSignals(False)
+        if found.confidence:
+            i = self.confidence_select.findData(found.confidence)
+            if i >= 0:
+                self.confidence_select.setCurrentIndex(i)
+        if found.presence:
+            self.presence_select.setCurrentIndex(max(0, self.presence_select.findData(found.presence)))
+        self.count()
 
     # ---- saving ------------------------------------------------------------
 

@@ -12,41 +12,79 @@ GLOSSARY = Glossary([
 ])
 
 
-def test_the_settings_a_string_or_an_object():
+def test_one_model_is_given_the_first_two_tasks():
+    """The first settings (2026-11-19): one model, for 備考を整える and 申し送りの下書き."""
     problems = []
     s = ta.text_assist_settings_of("models/sarashina-1b-int4", problems)
-    assert s == ta.TextAssistSettings("models/sarashina-1b-int4") and not problems
-    assert (s.threads, s.max_tokens, s.handover_max_tokens, s.keep_minutes) == (0, 160, 320, 10.0)
+    assert not problems and s.models == (ta.TextModel("model", "models/sarashina-1b-int4"),)
+    assert [t.name for t in s.tasks] == ["tidyNote", "handoverDraft"] and s.keep_minutes == 10.0
+    assert s.has("tidyNote") and s.has("handoverDraft") and not s.has("noteFields")
+    tidy = s.task("tidyNote")
+    assert (tidy.max_tokens, tidy.prompt, tidy.examples) == (160, ta.NOTE_PROMPT, ta.NOTE_EXAMPLES)
+    assert s.task("handoverDraft").max_tokens == 320 and s.model_for("handoverDraft").path == "models/sarashina-1b-int4"
     s = ta.text_assist_settings_of({"model": "m.zip", "threads": 4, "maxTokens": 80, "handoverMaxTokens": 400, "keepMinutes": 0,
                                     "notePrompt": "短く", "handoverPrompt": "申し送りを", "noteExamples": [
                                         {"kind": "船舶", "note": "とまってる", "tidy": "停泊中。"}]}, problems)
     assert not problems
-    assert (s.threads, s.max_tokens, s.handover_max_tokens, s.keep_minutes, s.note_prompt, s.handover_prompt) == (
-        4, 80, 400, 0.0, "短く", "申し送りを")
-    assert s.note_examples == (("種別: 船舶\n備考: とまってる", "停泊中。"),)
+    assert s.models[0].threads == 4 and s.keep_minutes == 0.0
+    tidy, handover = s.task("tidyNote"), s.task("handoverDraft")
+    assert (tidy.max_tokens, tidy.prompt, handover.max_tokens, handover.prompt) == (80, "短く", 400, "申し送りを")
+    assert tidy.examples == (("種別: 船舶\n備考: とまってる", "停泊中。"),)
 
 
-def test_wrong_settings_are_said_and_fall_back():
+def test_models_by_name_and_a_model_for_each_task():
+    """tsudo 2026-11-19: 「モデル一覧のコンフィグと、やることに対してどのモデルをはめるか…はめがない場合機能しない」."""
+    problems = []
+    s = ta.text_assist_settings_of({
+        "models": {"small": "\\\\server\\models\\sarashina-1b-int4", "large": {"path": "models/sarashina-3b-int4", "threads": 6}},
+        "tasks": {"summary": {"model": "large", "maxTokens": 600, "prompt": "短くまとめる"}, "tidyNote": "small",
+                  "noteFields": "large", "handoverDraft": {"model": "large"}},
+        "keepMinutes": 5}, problems)
+    assert not problems
+    assert [(m.name, m.threads) for m in s.models] == [("small", 0), ("large", 6)]
+    # In the order the tasks are listed (not as written).
+    assert [(t.name, t.model) for t in s.tasks] == [("tidyNote", "small"), ("handoverDraft", "large"), ("noteFields", "large"),
+                                                   ("summary", "large")]
+    assert s.task("summary").max_tokens == 600 and s.task("summary").prompt == "短くまとめる"
+    assert s.task("noteFields").prompt == ta.FIELDS_PROMPT and s.task("noteFields").examples == ()
+    # A task given no model is not offered.
+    assert not s.has("searchWords") and not s.has("translate") and s.model_for("translate") is None
+    assert s.model_for("tidyNote").path.endswith("sarashina-1b-int4") and s.keep_minutes == 5.0
+
+
+def test_wrong_settings_are_said_and_what_is_left_works():
     problems = []
     assert ta.text_assist_settings_of({"threads": 2}, problems) is None
     assert ta.text_assist_settings_of(3, problems) is None
     s = ta.text_assist_settings_of({"model": "m", "threads": -1, "maxTokens": 1.5, "keepMinutes": "x", "notePrompt": "",
                                     "noteExamples": [{"note": 1}], "modle": "typo"}, problems)
-    assert s == ta.TextAssistSettings("m")
+    assert s.models == (ta.TextModel("model", "m"),) and s.task("tidyNote") == ta.task_of("tidyNote", "model")
     joined = "\n".join(problems)
-    for word in ("textAssist.model", "textAssist はモデル", "threads", "maxTokens", "keepMinutes", "notePrompt",
-                 "noteExamples[0]", "modle"):
+    for word in ("textAssist.model", "textAssist は", "threads", "maxTokens", "keepMinutes", "notePrompt", "noteExamples[0]", "modle"):
         assert word in joined, word
+    problems = []
+    s = ta.text_assist_settings_of({"models": {"a": "x", "b": 3, "": "y"}, "model": "z",
+                                    "tasks": {"tidyNote": "a", "summary": "nothing", "dream": "a", "translate": {"model": "a", "examples": []},
+                                              "noteFields": {"model": "a", "maxTokens": 9}}}, problems)
+    assert [m.name for m in s.models] == ["a"]
+    assert [t.name for t in s.tasks] == ["tidyNote", "noteFields", "translate"] and s.task("noteFields").max_tokens == 160
+    joined = "\n".join(problems)
+    for word in ("model と models", "models.b", "名前が空", "tasks.summary のモデル「nothing」は models にない", "tasks.dream",
+                 "tasks.translate の examples", "tasks.noteFields.maxTokens"):
+        assert word in joined, word
+    problems = []
+    s = ta.text_assist_settings_of({"models": {"a": "x"}}, problems)
+    assert s.tasks == () and "割り当てたタスクがない" in problems[0]
 
 
 def test_the_settings_file_key():
-    config, problems = parse_config({"textAssist": {"model": "\\\\server\\models\\sarashina"}})
-    assert config.text_assist.model == "\\\\server\\models\\sarashina" and not problems
+    config, problems = parse_config({"textAssist": {"models": {"large": "\\\\server\\models\\sarashina-3b"}, "tasks": {"summary": "large"}}})
+    assert config.text_assist.model_for("summary").path == "\\\\server\\models\\sarashina-3b" and not problems
     assert parse_config({})[0].text_assist is None
 
 
 def test_the_note_is_asked_with_its_kind_the_glossary_words_and_the_examples():
-    s = ta.TextAssistSettings("m")
+    s = ta.task_of("tidyNote", "m")
     terms = ta.note_terms(GLOSSARY, "岸壁に入航して停泊中", "船舶")
     # Its other spellings' words first (written as the glossary does), then the words it uses, then the 大分類's own.
     assert terms == ["入港", "停泊中", "岸壁"]
@@ -91,7 +129,7 @@ def test_the_handover_is_asked_from_the_memo_without_its_own_handover_part():
             "■ 未処理の撮像依頼: 2 件（うち 24 時間以内に期限 1 件）\n  【期限間近】横須賀\n\n■ 申し送り\n  手書きの 7 件")
     source = ta.handover_source(memo)
     assert "■ 申し送り" not in source and "手書き" not in source and "【期限間近】横須賀" in source
-    messages = ta.handover_messages(ta.TextAssistSettings("m"), memo, "横須賀を優先")
+    messages = ta.handover_messages(ta.task_of("handoverDraft", "m"), memo, "横須賀を優先")
     assert messages[0]["content"] == ta.HANDOVER_PROMPT
     assert messages[1]["content"].startswith("引き継ぎメモ:\n引き継ぎメモ 11/19") and messages[1]["content"].endswith(
         "書きかけの申し送り（生かして書く）:\n横須賀を優先")

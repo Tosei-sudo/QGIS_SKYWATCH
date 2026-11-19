@@ -308,8 +308,9 @@ class PluginContext(QObject):
             for url in (getattr(x, name, "") for name in ("url", "encoder", "decoder")):
                 if _web(url):
                     out.append(Service("AI モデル", x.label, url, False))
-        if c.text_assist is not None and _web(c.text_assist.model):
-            out.append(Service("文章の手伝い", "モデル", c.text_assist.model, False))
+        for m in c.text_assist.models if c.text_assist is not None else ():
+            if _web(m.path):
+                out.append(Service("文章の手伝い", m.name, m.path, False))
         # One row per URL: the first role that names it.
         seen: set = set()
         unique = []
