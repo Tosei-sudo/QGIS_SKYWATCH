@@ -9,7 +9,7 @@ proposal only; the screens change nothing until the person takes it.
   kinds, the kind's activities, the 確度 levels); a number not written in
   the 備考 and a name it does not contain are dropped.
 - 言葉で探す (searchWords): the export's conditions (期間・地名・大分類・確度・
-  有無) from a sentence. The model is given the dates of 「今日」「先週」… so it
+  有無: あり・消失・不可) from a sentence. The model is given the dates of 「今日」「先週」… so it
   only copies them; places, classes and levels not among the choices are
   dropped.
 - まとめ (summary): a few sentences on records (their counts given first, so
@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional, Sequence
 
+from .obs.model import unseen_label
 from .text_assist import Draft, Message, TextTask, clean_note, clean_paragraph, foreign_numbers, numbers_in
 
 #: Written by the model for a value it does not have.
@@ -225,7 +226,7 @@ class SearchDraft:
     place: Optional[str] = None
     roots: tuple[str, ...] = ()
     confidence: Optional[str] = None
-    #: "present", "absent" or None.
+    #: "present", "absent", "unseen" (不可) or None (the export's 有無).
     presence: Optional[str] = None
     dropped: tuple[str, ...] = ()
 
@@ -245,7 +246,7 @@ class SearchDraft:
         if self.confidence:
             parts.append(f"確度 {self.confidence}")
         if self.presence:
-            parts.append("有無 " + ("ありのみ" if self.presence == "present" else "なしのみ"))
+            parts.append("有無 " + {"present": "ありのみ", "absent": "なしのみ", "unseen": "不可のみ"}[self.presence])
         return "・".join(parts)
 
 
@@ -305,7 +306,10 @@ def search_draft(raw: str, places: Sequence[str], roots: Sequence[str], confiden
     presence = None
     if "有無" in got:
         word = _fold(got["有無"])
-        presence = "present" if word.startswith("あり") else "absent" if word.startswith(("なし", "消失", "不在")) else None
+        presence = ("present" if word.startswith(("あり", "在")) else "absent" if word.startswith(("消失", "不在", "いない"))
+                    else "unseen" if word.startswith(("不可", "見えない")) else None)
+        if presence is None:
+            dropped.append(f"有無にない「{got['有無']}」")
     return SearchDraft(start, end, place, tuple(dict.fromkeys(chosen)), confidence, presence, tuple(dropped))
 
 
@@ -320,7 +324,9 @@ def summary_source(records: Iterable, when: Callable[[Optional[float]], str], li
     """The records for まとめ: their counts by 大分類 and activity, then one line each (image time order), cut to `limit`."""
     rows = sorted(records, key=lambda o: (o.image_time or 0, o.created_at))
     present = [o for o in rows if o.present]
-    lines = [f"記録: {len(rows)} 件（あり {len(present)}・消失 {len(rows) - len(present)}）"]
+    unseen = [o for o in rows if getattr(o, "unseen", "")]
+    gone = len(rows) - len(present) - len(unseen)
+    lines = [f"記録: {len(rows)} 件（あり {len(present)}・消失 {gone}" + (f"・不可 {len(unseen)}" if unseen else "") + "）"]
     by_root = Counter(_root(o.kind) for o in present)
     for root, n in by_root.most_common():
         acts = Counter(o.activity or "活動なし" for o in present if _root(o.kind) == root)
@@ -331,7 +337,8 @@ def summary_source(records: Iterable, when: Callable[[Optional[float]], str], li
     lines.append("")
     for o in rows[:most]:
         cells = [when(o.image_time), o.kind or "種別なし", o.object_name, o.activity, o.confidence,
-                 "" if o.present else "消失", f"長さ {o.length:g} m" if o.length else "", o.note]
+                 "" if o.present else unseen_label(o.unseen) if getattr(o, "unseen", "") else "消失",
+                 f"長さ {o.length:g} m" if o.length else "", o.note]
         lines.append(" / ".join(c for c in cells if c))
     if len(rows) > most:
         lines.append(f"…（ほか {len(rows) - most} 件）")

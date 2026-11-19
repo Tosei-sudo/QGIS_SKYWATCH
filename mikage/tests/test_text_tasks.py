@@ -88,6 +88,10 @@ def test_only_the_conditions_among_the_choices_are_kept():
     d = tt.search_draft("期間: 2026年11月19日\n地名: 佐世保\n大分類: 潜水艦\n確度: たぶん\n有無: 消失", places, roots, CONFIDENCES)
     assert (d.start, d.end, d.place, d.roots, d.confidence, d.presence) == (date(2026, 11, 19), date(2026, 11, 19), None, (), None, "absent")
     assert d.dropped == ("地名の候補にない「佐世保」", "大分類にない「潜水艦」", "確度にない「たぶん」")
+    # 不可 (雲などで見えなかった記録); 「なし」 is no condition.
+    assert tt.search_draft("有無: 不可", [], [], []).text == "有無 不可のみ"
+    assert tt.search_draft("有無: なし", [], [], []).empty
+    assert tt.search_draft("有無: 全部", [], [], []).dropped == ("有無にない「全部」",)
     # From a day on; the two the wrong way round; nothing read.
     assert tt.search_draft("期間: 2026-11-01 〜", [], [], []).start == date(2026, 11, 1)
     d = tt.search_draft("期間: 2026-11-15 〜 2026-11-09", [], [], [])
@@ -96,10 +100,10 @@ def test_only_the_conditions_among_the_choices_are_kept():
     assert d.empty and d.dropped == ("日付として読めない期間「最近」",)
 
 
-def _obs(i, kind, activity="停泊", present=True, note="", length=None, image="d1.tif"):
+def _obs(i, kind, activity="停泊", present=True, note="", length=None, image="d1.tif", unseen=""):
     return Observation(id=f"r{i}", image_id=image, image_name=image, image_time=1_000 * i, object_id=f"o{i}", object_name=f"船{i}",
                        kind=kind, activity=activity, present=present, note=note, lon=0, lat=0, created_at=i, updated_at=i,
-                       length=length, confidence="推定")
+                       length=length, confidence="推定", unseen=unseen)
 
 
 def test_the_summary_is_asked_with_the_counts_first():
@@ -116,6 +120,9 @@ def test_the_summary_is_asked_with_the_counts_first():
     assert messages[0]["content"] == ta.SUMMARY_PROMPT and messages[1]["content"] == "観測記録:\n" + source
     d = tt.summary_draft("まとめ: 船舶 2 件と航空機 1 件。駆逐艦は全長 150 m、ほかに 7 隻。", source)
     assert d.text == "船舶 2 件と航空機 1 件。駆逐艦は全長 150 m、ほかに 7 隻。" and d.foreign == ("7",)
+    # 不可 (seen by no one: neither あり nor 消失).
+    source = tt.summary_source([*records, _obs(5, "船舶", "", present=False, unseen="雲")], lambda t: f"T{t}")
+    assert source.split("\n")[0] == "記録: 5 件（あり 3・消失 1・不可 1）" and source.endswith("T5000 / 船舶 / 船5 / 推定 / 不可（雲）")
 
 
 def test_the_english_note():
