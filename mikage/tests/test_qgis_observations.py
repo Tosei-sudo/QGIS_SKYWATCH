@@ -1181,6 +1181,39 @@ def test_carry_all_and_absent_inside_keep_to_the_top_class_shown(plugin):
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", False), ("C", True), ("D", True)]
 
 
+def test_absent_all_records_every_thing_shown_as_gone(plugin):
+    """「すべて不在」: every carried-over thing the list shows is recorded as gone here (in checked areas too)."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name, kind, lon in (("A", "船舶", 139.70), ("B", "航空機", 139.71), ("C", "船舶", 139.76), ("D", "航空機", 139.77)):
+        dock.map_clicked(lon, 35.60, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText(kind)
+        dock.submit()
+    dock.step(1)
+    assert dock.absent_all_button.isVisibleTo(dock) and dock.absent_all_button.text() == "すべて不在"
+    # A checked area (all kinds) over A and B.
+    dock.set_area_mode(True)
+    dock.map_clicked(139.69, 35.59, None)
+    dock.map_clicked(139.72, 35.62, None)
+    dock._submit_area()
+    dock.filter_root("船舶")
+    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_all_button.isVisibleTo(dock)
+    dock.absent_all()
+    assert dock.status.text() == "2 のモノを不在として記録"
+    assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("C", False)]
+    # Unfiltered again: the aircraft are still to be done; only B (in the area) left → only 「確認範囲内 1 件を不在」.
+    dock.filter_root(None)
+    assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_all_button.isVisibleTo(dock)
+    dock.carry(next(c.source.object_id for c in book.carried() if c.source.object_name == "D"))
+    assert not dock.absent_all_button.isVisibleTo(dock) and not dock.carry_all_button.isVisibleTo(dock)
+    assert dock.absent_inside_button.isVisibleTo(dock) and dock.absent_inside_button.text() == "確認範囲内 1 件を不在"
+    dock.absent_inside()
+    assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", False), ("C", False), ("D", True)]
+    assert dock.carry_label.text() == "" and not dock.absent_all_button.isVisibleTo(dock)
+
+
 def test_others_records_are_read_quietly(plugin, tmp_path):
     """観測記録の読み直し: another computer's record shows after a refresh; a form opened on a record they changed is filled again."""
     from dataclasses import replace
