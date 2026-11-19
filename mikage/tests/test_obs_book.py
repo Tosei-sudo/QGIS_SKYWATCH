@@ -125,6 +125,21 @@ def test_carries_all_but_those_in_a_checked_area_which_are_gone(book):
     assert book.restore_areas(book.image_areas(deleted=True)) and len(book.image_areas()) == 1
 
 
+def test_records_every_thing_carried_over_as_gone_those_in_a_checked_area_too(book):
+    a = book.submit(139.70, 35.60, FormValues(object="A", kind="船舶", activity="停泊"))
+    b = book.submit(139.75, 35.65, FormValues(object="B", kind="船舶", activity="航行"))
+    c = book.submit(139.71, 35.61, FormValues(object="C", kind="航空機"))
+    book.step(1)
+    book.add_area(box_ring([139.69, 35.59, 139.72, 35.62]), kind="船舶")
+    # Only the ones kept (as the list shows them).
+    made = book.absent_all(lambda x: x.source.kind == "船舶")
+    assert sorted((o.object_id, o.present, o.activity) for o in made) == sorted([(a.object_id, False, ""), (b.object_id, False, "")])
+    assert book.status == "2 のモノを不在として記録"
+    assert [x.source.object_id for x in book.carried()] == [c.object_id]
+    assert [(o.object_id, o.present) for o in book.absent_all()] == [(c.object_id, False)]
+    assert book.carried() == [] and book.absent_all() == []
+
+
 def test_offers_the_same_thing_and_names_it_by_a_known_name(book):
     a = book.submit(139.7, 35.6, FormValues(object="タンカーA", kind="船舶 > タンカー", length="180", heading="90"))
     book.step(1)

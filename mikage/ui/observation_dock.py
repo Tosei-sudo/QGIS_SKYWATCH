@@ -416,9 +416,12 @@ class ObservationDock(PluginDock):
         self.carry_label = QLabel()
         self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録（確認範囲内のものを除く）"),
                                              self.carry_all)
+        self.absent_all_button = self._button(tr("すべて不在"), tr("前後の画像のモノ（白抜きの印）を、この画像での不在（見当たらず）として一括記録（確認範囲内のものも）"),
+                                              self.absent_all)
         self.absent_inside_button = self._button("", tr("確認範囲内で記録のない前後の画像のモノを、この画像での不在として一括記録"), self.absent_inside)
         row.addWidget(self.carry_label, 1)
         row.addWidget(self.carry_all_button)
+        row.addWidget(self.absent_all_button)
         row.addWidget(self.absent_inside_button)
         b.addLayout(row)
         # 「見本で記録」: its own row (the recording row is full), the panel shown while 連続 or 並べる is on.
@@ -2298,7 +2301,7 @@ class ObservationDock(PluginDock):
         self.do(self.tr("継続の記録"), lambda b: b.carry(object_id, present), watch=True)
 
     def _carry_shown(self) -> Optional[Callable[[CarryOver], bool]]:
-        """Which carried-over things the list shows (None: all), so 「すべて継続」 leaves the hidden ones alone."""
+        """Which carried-over things the list shows (None: all), so 「すべて継続」「すべて不在」 leave the hidden ones alone."""
         mine = self.my_names() if self.mine_only.isChecked() else None
         if (not self.class_filter and not mine) or self.book is None:
             return None
@@ -2309,6 +2312,10 @@ class ObservationDock(PluginDock):
     def carry_all(self) -> None:
         only = self._carry_shown()
         self.do(self.tr("すべて継続"), lambda b: b.carry_all(only), watch=True)
+
+    def absent_all(self) -> None:
+        only = self._carry_shown()
+        self.do(self.tr("すべて不在"), lambda b: b.absent_all(only))
 
     def absent_inside(self) -> None:
         only = self._carry_shown()
@@ -3024,12 +3031,14 @@ class ObservationDock(PluginDock):
             self._read_around()
         if not self.status.text() and book.status:
             self.status.setText(book.status)
-        # Only what the list shows (大分類), which is all 「すべて継続」 and 「確認範囲内…を不在」 record.
+        # Only what the list shows (大分類), which is all 「すべて継続」「すべて不在」 and 「確認範囲内…を不在」 record.
         shown_carry = self._carry_shown()
         carried = [c for c in book.carried() if shown_carry is None or shown_carry(c)]
         inside = book.inside_carried(carried)
         self.carry_label.setText(self.tr("前後の画像のモノ {n} 件").format(n=len(carried)) if carried else "")
         self.carry_all_button.setVisible(len(carried) > len(inside))
+        # All in checked areas: 「確認範囲内 n 件を不在」 does the same.
+        self.absent_all_button.setVisible(len(carried) > len(inside))
         self.absent_inside_button.setVisible(bool(inside))
         self.absent_inside_button.setText(self.tr("確認範囲内 {n} 件を不在").format(n=len(inside)))
         shown = book.records if self.deleted_check.isChecked() else book.living()
