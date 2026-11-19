@@ -192,6 +192,16 @@ class DrawTool(QgsMapTool):
     Draws a polygon on the map: a click adds a corner, a double click or a
     right click closes it (three corners at least), Esc gives up. `drawn` is
     told its corners (WGS 84, longitude / latitude).
+
+    The polygon is shown while it is drawn (tsudo, 2026-11-19: it only
+    appeared on the double click): the corners clicked as dots and the shape
+    up to the mouse. QgsRubberBand.reset hides an empty band and addPoint only
+    shows it again when told to update, so the last point added does.
+
+    A double click closes it on its last release (Qt: press, release, double
+    click, release): closed on the double click itself, the dock gave the map
+    back to the tool before (the pan tool), which took that release for a
+    click and moved the map's centre there.
     """
 
     def __init__(self, canvas: QgsMapCanvas, drawn: Callable[[list], None]):
@@ -199,20 +209,36 @@ class DrawTool(QgsMapTool):
         self._drawn = drawn
         self.points: list[QgsPointXY] = []
         self.band = _band(canvas, "#16a34a", 2, QColor(22, 163, 74, 30), 953, Qt.PenStyle.DashLine)
+        self.corners = QgsRubberBand(canvas, QgsWkbTypes.GeometryType.PointGeometry)
+        self.corners.setIcon(QgsRubberBand.IconType.ICON_CIRCLE)
+        self.corners.setIconSize(7)
+        self.corners.setColor(QColor("#16a34a"))
+        self.corners.setFillColor(QColor("#ffffff"))
+        self.corners.setWidth(2)
+        self.corners.setZValue(954)
+        #: A double click is under way: its release closes the polygon (its last corner was added by its first click).
+        self._closing = False
         self.setCursor(Qt.CursorShape.CrossCursor)
 
     def _show(self, moving: Optional[QgsPointXY] = None) -> None:
+        shape = self.points + ([moving] if moving is not None else [])
         self.band.reset(QgsWkbTypes.GeometryType.PolygonGeometry)
-        for p in self.points + ([moving] if moving is not None else []):
-            self.band.addPoint(p, False)
-        self.band.updatePosition()
-        self.band.update()
+        for i, p in enumerate(shape):
+            self.band.addPoint(p, i == len(shape) - 1)
+        self.corners.reset(QgsWkbTypes.GeometryType.PointGeometry)
+        for i, p in enumerate(self.points):
+            self.corners.addPoint(p, i == len(self.points) - 1)
 
     def canvasMoveEvent(self, event) -> None:  # noqa: N802 (Qt's name)
         if self.points:
             self._show(event.mapPoint())
 
     def canvasReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._closing:
+            # The release ending a double click: the polygon closed (not a corner of a next one).
+            self._closing = False
+            self.finish()
+            return
         if event.button() == Qt.MouseButton.RightButton:
             self.finish()
         elif event.button() == Qt.MouseButton.LeftButton:
@@ -220,8 +246,8 @@ class DrawTool(QgsMapTool):
             self._show()
 
     def canvasDoubleClickEvent(self, event) -> None:  # noqa: N802
-        # The double click's second press already added the last corner.
-        self.finish()
+        # The double click's first click already added the last corner; closed on its release.
+        self._closing = True
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
@@ -240,8 +266,10 @@ class DrawTool(QgsMapTool):
 
     def deactivate(self) -> None:
         self.points = []
+        self._closing = False
         self._show()
         super().deactivate()
 
     def remove(self) -> None:
         self.canvas().scene().removeItem(self.band)
+        self.canvas().scene().removeItem(self.corners)

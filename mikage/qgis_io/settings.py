@@ -293,6 +293,19 @@ def set_zoom_to_opened(on: bool) -> None:
     _set("catalog/zoomToOpened", "1" if on else "0")
 
 
+def saved_areas() -> list:
+    """「保存した範囲」 of the image catalog (core/catalog/saved_areas.py), newest first; per user, like the list views."""
+    from ..core.catalog.saved_areas import read_areas
+
+    return read_areas(_get("catalog/savedAreas"))
+
+
+def set_saved_areas(areas) -> None:
+    from ..core.catalog.saved_areas import write_areas
+
+    _set("catalog/savedAreas", write_areas(areas))
+
+
 def mark_style() -> str:
     """The observations' marks on the map ('normal' unless chosen)."""
     v = _get("observations/marks")

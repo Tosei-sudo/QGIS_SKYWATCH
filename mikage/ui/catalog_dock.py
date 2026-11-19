@@ -1,6 +1,7 @@
 """
 画像カタログ: searching the image catalogs of the settings file (over the
-map's extent, an area drawn, a vector layer's geometry as it is, or anywhere, by dates, a free word, sensor, angle, azimuth and SQL), the list
+map's extent, an area drawn, an area saved before, a vector layer's geometry as it is, or anywhere, by dates, a free word, sensor, angle,
+azimuth and SQL), the list
 of images found with their footprints on the map, opening them as raster
 layers (a COG through /vsicurl/, a local path through `pathMappings`), the
 list as a layer, 「類似画像の検索」 and 「この条件で監視…」 (the watches are in
@@ -19,25 +20,31 @@ footprint, so the records are the ones the image would have if opened). A
 catalog of such images only (`imageFiles: false`) has this button instead
 of 「開く」 (a double click too); elsewhere it is offered when an image
 cannot be opened.
+
+「保存した範囲」 (tsudo, 2026-11-19): an area drawn is kept under a name
+(「保存…」 beside 「範囲を描く」) and chosen again later from 「範囲 ▸ 保存した
+範囲」, newest first (core/catalog/saved_areas.py; per user, as the views).
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Any, Callable, Optional
 
-from qgis.core import Qgis, QgsMapLayer, QgsProject
+from qgis.core import Qgis, QgsGeometry, QgsMapLayer, QgsPointXY, QgsProject, QgsRectangle
 from qgis.gui import QgsMapLayerComboBox
 from qgis.PyQt.QtCore import QStringListModel, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ..core import audit
 from ..core.catalog.config import CatalogConfig
 from ..core.catalog.paths import PathError, PathMapping
 from ..core.catalog.query import CatalogSearch
+from ..core.catalog import saved_areas as saved_area_list
 from ..core.catalog.opened import OpenedImage
 from ..core.catalog.search import (
     CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, record_of, records_by_ids, search_catalog, sensors_of,
@@ -57,9 +64,9 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_model import CatalogModel
 from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
-from .docks import PluginDock, plain_label, plain_tip
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
-from .list_views import ListViews
+from .list_views import ListViews, MenuToolButton
 from .image_files_dialog import choose_image_files
 from . import open_again_dialog
 
@@ -116,6 +123,11 @@ def _when(edit: QLineEdit, day: str = "") -> str:
         return read_day_time(edit.text(), day)
     except ValueError:
         return ""
+
+
+def local_now() -> str:
+    """Now, this PC's time, as the saved areas keep it (2026-11-19 12:43)."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
 def _is_clock(text: str) -> bool:
@@ -190,6 +202,7 @@ class CatalogDock(PluginDock):
         self.area_box = QComboBox()
         self.area_box.addItem(self.tr("表示範囲"), "extent")
         self.area_box.addItem(self.tr("描いた範囲"), "drawn")
+        self.area_box.addItem(self.tr("保存した範囲"), "saved")
         self.area_box.addItem(self.tr("レイヤー"), "layer")
         self.area_box.addItem(self.tr("指定なし"), "none")
         self.area_box.setCurrentIndex(0)
@@ -197,11 +210,37 @@ class CatalogDock(PluginDock):
         self.area_box.currentIndexChanged.connect(lambda *_: self._show_layer_row())
         self.draw_button = QPushButton(self.tr("範囲を描く"))
         self.draw_button.setCheckable(True)
-        self.draw_button.setToolTip(self.tr("クリックで頂点を追加、ダブルクリックか右クリックで確定、Esc で取消"))
+        self.draw_button.setToolTip(self.tr("クリックで頂点を追加（描いている形は地図に表示）、ダブルクリックか右クリックで確定、Esc で取消"))
         self.draw_button.toggled.connect(self._draw_toggled)
+        # 「保存…」: the area drawn kept under a name, chosen again later from 「保存した範囲」.
+        self.save_area_button = QPushButton(self.tr("保存…"))
+        self.save_area_button.setToolTip(self.tr("描いた範囲に名前を付けて保存。あとで「保存した範囲」から選べる（自分の PC に保存）"))
+        self.save_area_button.clicked.connect(self.ask_save_area)
         area_row = QHBoxLayout()
         area_row.addWidget(self.area_box, 1)
         area_row.addWidget(self.draw_button)
+        area_row.addWidget(self.save_area_button)
+        # 「保存した範囲」: the areas saved before (newest first) and what can be done with the one chosen.
+        self.saved_box = QComboBox()
+        self.saved_box.setToolTip(self.tr("前に保存した範囲（新しい順）。選ぶと地図に表示（見えない場所ならそこへ移動）"))
+        self.saved_box.activated.connect(lambda *_: self._saved_chosen(move=True))
+        self.saved_box.currentIndexChanged.connect(lambda *_: self._show_area())
+        self.saved_menu_button = MenuToolButton()
+        self.saved_menu_button.setText(self.tr("編集"))
+        self.saved_menu_button.setToolTip(self.tr("選んだ保存範囲の移動・名前の変更・削除"))
+        self.saved_menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.saved_menu = QMenu(self.saved_menu_button)
+        self.saved_menu.addAction(self.tr("範囲へ移動"), self.zoom_to_saved_area)
+        self.saved_menu.addAction(self.tr("名前の変更…"), self.ask_rename_saved_area)
+        self.saved_menu.addAction(self.tr("削除…"), self.ask_delete_saved_area)
+        self.saved_menu_button.setMenu(self.saved_menu)
+        self.saved_row = QWidget()
+        saved_row = QHBoxLayout(self.saved_row)
+        saved_row.setContentsMargins(0, 0, 0, 0)
+        saved_row.addWidget(self.saved_box, 1)
+        saved_row.addWidget(self.saved_menu_button)
+        self.saved_row.hide()
+        self._fill_saved_areas()
         # 「レイヤー」: the features of a vector layer, searched over as they are (not their extent).
         self.area_layer = QgsMapLayerComboBox()
         self.area_layer.setFilters(_GEOMETRY_LAYERS)
@@ -216,10 +255,12 @@ class CatalogDock(PluginDock):
         self.layer_row.hide()
         area_column = QVBoxLayout()
         area_column.addLayout(area_row)
+        area_column.addWidget(self.saved_row)
         area_column.addWidget(self.layer_row)
         form.addRow(self.tr("範囲"), area_column)
         #: The area drawn on the map (its corners, longitude / latitude; the ring closed); None before one is drawn.
         self.drawn: Optional[list] = None
+        self._show_layer_row()
         self.acquired_from, self.acquired_to = QLineEdit(), QLineEdit()
         form.addRow(self.tr("撮像日時"), self._period_row(self.acquired_from, self.acquired_to))
         # 「フリーワード」: words looked for in the catalog's image id and `fields.keywords` (shown only for a catalog that has either).
@@ -320,7 +361,7 @@ class CatalogDock(PluginDock):
         self.body.addWidget(self.more_button)
         # 「ビュー」: the columns, the sort and the search conditions kept under a name (per user).
         self.views = ListViews("catalog", self.table, {
-            "catalog": self.catalog_box, "area": self.area_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
+            "catalog": self.catalog_box, "area": self.area_box, "savedArea": self.saved_box, "acquiredFrom": self.acquired_from, "acquiredTo": self.acquired_to,
             "more": self.more, "registeredFrom": self.registered_from, "registeredTo": self.registered_to, "systemFrom": self.system_from,
             "systemTo": self.system_to, "sensor": self.sensor_box, "maxAngle": self.max_angle, "azimuthFrom": self.azimuth_from,
             "azimuthTo": self.azimuth_to, "where": self.where, "unworkedOnly": self.unworked_only, "keyword": self.keyword,
@@ -625,6 +666,9 @@ class CatalogDock(PluginDock):
         box = self.area()
         if self.area_box.currentData() == "drawn" and box is None:
             self.status.setText(self.tr("範囲が未作成。「範囲を描く」で地図に描画"))
+            return
+        if self.area_box.currentData() == "saved" and box is None:
+            self.status.setText(self._no_saved_area())
             return
         if self.area_box.currentData() == "layer" and box is None:
             layer = self.area_layer.currentLayer()
@@ -964,9 +1008,157 @@ class CatalogDock(PluginDock):
             if active is not None and layer_area(active) is not None:
                 self.area_layer.setLayer(active)
         self._show_layer_row()
+        if kind == "saved":
+            self._saved_chosen(move=True)
 
     def _show_layer_row(self) -> None:
-        self.layer_row.setVisible(self.area_box.currentData() == "layer")
+        kind = self.area_box.currentData()
+        self.layer_row.setVisible(kind == "layer")
+        self.saved_row.setVisible(kind == "saved")
+        self.save_area_button.setVisible(kind == "drawn")
+        self.save_area_button.setEnabled(bool(self.drawn))
+        self._show_area()
+
+    # --- 「保存した範囲」 ---------------------------------------------------------------------------
+
+    def saved_areas(self) -> list:
+        """The areas saved (newest first)."""
+        return settings.saved_areas()
+
+    def saved_area(self):
+        """The saved area chosen (a SavedArea), or None."""
+        return saved_area_list.find(self.saved_areas(), self.saved_box.currentData())
+
+    def _fill_saved_areas(self, chosen: Optional[str] = None) -> None:
+        """The list of saved areas read again, `chosen` (an id; else the one chosen before, else the newest) chosen."""
+        chosen = chosen if chosen is not None else self.saved_box.currentData()
+        areas = self.saved_areas()
+        self.saved_box.blockSignals(True)
+        self.saved_box.clear()
+        for a in areas:
+            self.saved_box.addItem(a.name, a.id)
+            self.saved_box.setItemData(self.saved_box.count() - 1, self.tr("{name}\n保存: {when}・頂点 {n}").format(
+                name=a.name, when=a.saved or "-", n=len(a.ring) - 1), Qt.ItemDataRole.ToolTipRole)
+        if not areas:
+            self.saved_box.addItem(self.tr("（保存した範囲なし）"), None)
+        i = self.saved_box.findData(chosen) if chosen else -1
+        self.saved_box.setCurrentIndex(i if i >= 0 else 0)
+        self.saved_box.setEnabled(bool(areas))
+        self.saved_box.blockSignals(False)
+        for a in self.saved_menu.actions():
+            a.setEnabled(bool(areas))
+        self._show_area()
+
+    def _no_saved_area(self) -> str:
+        return self.tr("保存した範囲なし。「描いた範囲」で描いて「保存…」で保存")
+
+    def _saved_chosen(self, move: bool = False) -> None:
+        """A saved area chosen: shown on the map, the map moved to it (`move`) when none of it is in view."""
+        area = self.saved_area()
+        self._show_area()
+        if area is None:
+            self.status.setText(self._no_saved_area())
+            return
+        if move and not self._in_view(area.ring):
+            self.zoom_to_saved_area()
+
+    def _in_view(self, ring) -> bool:
+        view = self.extent()
+        shape = QgsGeometry.fromPolygonXY([[QgsPointXY(x, y) for x, y in ring]])
+        return shape.intersects(QgsGeometry.fromRect(QgsRectangle(*view)))
+
+    def zoom_to_saved_area(self) -> None:
+        """The map moved to the saved area chosen, with a margin."""
+        area = self.saved_area()
+        if area is None:
+            return
+        xs, ys = [p[0] for p in area.ring], [p[1] for p in area.ring]
+        box = from_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(QgsRectangle(min(xs), min(ys), max(xs), max(ys)))
+        if box.isEmpty():
+            box = box.buffered(max(self.canvas.mapUnitsPerPixel() * 200, 1e-6))
+        box.scale(1.3)
+        self.canvas.setExtent(box)
+        self.canvas.refresh()
+
+    def save_area(self, name: str) -> Optional[str]:
+        """
+        The area drawn saved under `name` (one of the same name replaced) and
+        chosen in 「保存した範囲」; the reason it was not, or None.
+        """
+        if not self.drawn:
+            return self.tr("保存する範囲がない。「範囲を描く」で地図に描画")
+        try:
+            areas, area = saved_area_list.add_area(self.saved_areas(), name, self.drawn, local_now())
+        except ValueError as e:
+            return str(e)
+        settings.set_saved_areas(areas)
+        self._fill_saved_areas(area.id)
+        self.area_box.setCurrentIndex(self.area_box.findData("saved"))
+        self.status.setText(self.tr("範囲「{name}」を保存。「保存した範囲」から選べます").format(name=area.name))
+        return None
+
+    def ask_save_area(self) -> None:
+        if not self.drawn:
+            self.status.setText(self.tr("保存する範囲がない。「範囲を描く」で地図に描画"))
+            return
+        name, ok = QInputDialog.getText(self, self.tr("範囲の保存"), self.tr("範囲の名前（自分の PC に保存。「保存した範囲」から選べる）"),
+                                        QLineEdit.EchoMode.Normal, self.tr("範囲 {when}").format(when=local_now()))
+        if not ok or not name.strip():
+            return
+        if saved_area_list.by_name(self.saved_areas(), name) is not None and not ask_no(
+                self, self.tr("範囲の保存"), self.tr("「{name}」はすでにあります。今描いた範囲で置き換えますか。").format(name=name.strip())):
+            return
+        problem = self.save_area(name)
+        if problem:
+            self.status.setText(problem)
+
+    def rename_saved_area(self, name: str) -> Optional[str]:
+        area = self.saved_area()
+        if area is None:
+            return self._no_saved_area()
+        try:
+            areas = saved_area_list.rename_area(self.saved_areas(), area.id, name)
+        except ValueError as e:
+            return str(e)
+        settings.set_saved_areas(areas)
+        self._fill_saved_areas(area.id)
+        return None
+
+    def ask_rename_saved_area(self) -> None:
+        area = self.saved_area()
+        if area is None:
+            return
+        name, ok = QInputDialog.getText(self, self.tr("範囲の名前の変更"), self.tr("新しい名前"), QLineEdit.EchoMode.Normal, area.name)
+        if not ok or not name.strip() or name.strip() == area.name:
+            return
+        problem = self.rename_saved_area(name)
+        if problem:
+            self.status.setText(problem)
+
+    def delete_saved_area(self) -> None:
+        area = self.saved_area()
+        if area is None:
+            return
+        settings.set_saved_areas(saved_area_list.delete_area(self.saved_areas(), area.id))
+        self._fill_saved_areas("")
+        self.status.setText(self.tr("範囲「{name}」を削除").format(name=area.name))
+
+    def ask_delete_saved_area(self) -> None:
+        area = self.saved_area()
+        if area is not None and ask_no(self, self.tr("保存した範囲の削除"), self.tr("「{name}」を削除しますか。").format(name=area.name)):
+            self.delete_saved_area()
+
+    def drawn_shape(self) -> Optional[list]:
+        """The polygon the search is over: the saved area chosen in 「保存した範囲」, else the area drawn (None for neither)."""
+        if self.area_box.currentData() == "saved":
+            area = self.saved_area()
+            return [list(p) for p in area.ring] if area is not None else None
+        return self.drawn
+
+    def _show_area(self) -> None:
+        """The polygon of the search on the map (green, dashed): the saved area chosen, else the area drawn."""
+        if getattr(self, "overlay", None) is not None:
+            self.overlay.show_area(self.drawn_shape())
 
     def use_layer(self, layer: Optional[QgsMapLayer], selected_only: bool = False) -> None:
         """Searches over a vector layer's geometry (its chosen features only, when asked)."""
@@ -986,8 +1178,7 @@ class CatalogDock(PluginDock):
         elif self.area_box.currentData() == "drawn":
             self.area_box.setCurrentIndex(0)
         self.draw_button.setChecked(False)
-        if self.overlay is not None:
-            self.overlay.show_area(self.drawn)
+        self._show_layer_row()
 
     def area(self):
         """
@@ -1000,6 +1191,9 @@ class CatalogDock(PluginDock):
             return self.extent()
         if kind == "drawn" and self.drawn:
             return areas_of([], [[self.drawn]])[0]
+        if kind == "saved":
+            area = self.saved_area()
+            return areas_of([], [[[list(p) for p in area.ring]]])[0] if area is not None else None
         if kind == "layer":
             return layer_area(self.area_layer.currentLayer(), self.selected_only.isChecked())
         return None
@@ -1032,7 +1226,7 @@ class CatalogDock(PluginDock):
             self.load_work()
         if visible and self.overlay is None:
             self.overlay = FootprintOverlay(self.canvas, self.footprint_box.currentData())
-            self.overlay.show_area(self.drawn)
+            self.overlay.show_area(self.drawn_shape())
             self._redraw()
         elif not visible and self.overlay is not None:
             self.buttons["pick"].setChecked(False)
@@ -1442,6 +1636,9 @@ class CatalogDock(PluginDock):
             return
         # The area searched is offered first (a layer's shape is copied into the watch when it is set).
         kind = self.area_box.currentData()
+        # A saved area: watched as an area drawn (the watch keeps its own copy).
+        drawn = self.drawn_shape()
+        kind = "drawn" if kind == "saved" and drawn else kind
         where = {"area": kind, **({"layer": self.area_layer.currentLayer(), "selected_only": self.selected_only.isChecked()}
                                   if kind == "layer" and self.area_layer.currentLayer() is not None else {})}
         info = self.layers.get(catalog.url)
@@ -1449,9 +1646,9 @@ class CatalogDock(PluginDock):
             client = self.context.esri()
             token = self.context.token_for(catalog.url, catalog.token)
             self._start(self.tr("画像カタログの確認"), lambda task: self._layer_of(client, catalog, token),
-                        lambda info: self.watch_requested(catalog, info.types, self.conditions(), self.drawn, **where))
+                        lambda info: self.watch_requested(catalog, info.types, self.conditions(), drawn, **where))
             return
-        self.watch_requested(catalog, info.types, self.conditions(), self.drawn, **where)
+        self.watch_requested(catalog, info.types, self.conditions(), drawn, **where)
 
     def close_down(self) -> None:
         # Tasks left running (a request waiting on the network) stop with the dock.
