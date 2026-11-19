@@ -1,7 +1,7 @@
 """
 What the observations draw on the map while their dock is open, as the
 viewer's overlay: this image's records (filled marks, the ring in the colour
-of their 確度, a diamond for 「不在」), the things carried over from other
+of their 確度, a diamond for 「消失」), the things carried over from other
 images (hollow marks), records measured by two points (a line with an arrow
 at the front) and by three or four (their outline too), the chosen thing's track, the checked areas, the place
 clicked and the line to the pointer while measuring.

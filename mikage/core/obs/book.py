@@ -146,7 +146,7 @@ class BulkOutcome:
     saved: list = field(default_factory=list)
     #: Already as asked.
     unchanged: int = 0
-    #: 不在 records, whose activity was left empty.
+    #: 消失 records, whose activity was left empty.
     absent: int = 0
     #: Chosen but no longer here (deleted).
     missing: int = 0
@@ -160,7 +160,7 @@ class BulkOutcome:
         if self.unchanged:
             parts.append(f"変更不要 {self.unchanged} 件")
         if self.absent:
-            parts.append(f"不在の {self.absent} 件は活動なしのまま")
+            parts.append(f"消失の {self.absent} 件は活動なしのまま")
         if self.failed:
             why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから変更）" if self.conflicts else self.error)
             parts.append(f"保存できず {self.failed} 件（{why}）")
@@ -878,7 +878,7 @@ class ObservationBook:
             # The same record as the first try: one the server took meanwhile is updated, not added twice (#73).
             record = replace(record, id=kept.record.id, created_at=kept.record.created_at)
         self.last = FormValues(kind=record.kind, activity=record.activity if present else self.last.activity, confidence=record.confidence)
-        what = (f"（{record.activity}）" if record.activity else "") if present else "（不在）"
+        what = (f"（{record.activity}）" if record.activity else "") if present else "（消失）"
         saved = self._save_records([record], f"{record.object_name}{what}を{'更新' if editing else '記録'}")
         if saved:
             if kept is not None:
@@ -1009,7 +1009,7 @@ class ObservationBook:
                     confidence: Optional[str] = None) -> "BulkOutcome":
         """
         Sets the kind, the activity or the 確度 of several records at once (一括編集), in one save.
-        A 不在 record keeps no activity. The store's checks hold: records someone else changed since
+        A 消失 record keeps no activity. The store's checks hold: records someone else changed since
         they were read are not overwritten; those that went through are kept here, and the rest told.
         """
         outcome = BulkOutcome()
@@ -1195,7 +1195,7 @@ class ObservationBook:
         if image is None or c is None:
             return None
         record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}), **changes})
-        saved = self._save_records([record], f"{record.object_name} を{'継続' if present else '不在'}として記録")
+        saved = self._save_records([record], f"{record.object_name} を{'継続' if present else '消失'}として記録")
         return saved[0] if saved else None
 
     def carry_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
@@ -1225,7 +1225,7 @@ class ObservationBook:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        return self._save_records(made, f"{len(made)} のモノを不在として記録") or []
+        return self._save_records(made, f"{len(made)} のモノを消失として記録") or []
 
     def absent_inside(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """Records the things carried over into a checked area as gone in this image (with `only`, just the ones it keeps)."""
@@ -1235,7 +1235,7 @@ class ObservationBook:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        return self._save_records(made, f"{len(made)} のモノを不在として記録（確認範囲内）") or []
+        return self._save_records(made, f"{len(made)} のモノを消失として記録（確認範囲内）") or []
 
     # ---- checked areas -------------------------------------------------
 
