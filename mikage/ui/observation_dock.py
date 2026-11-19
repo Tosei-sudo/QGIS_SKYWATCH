@@ -59,6 +59,7 @@ from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.listed_layers import ListedLayers, listed_image_of
 from ..qgis_io.obs_images import image_layers, open_images, set_manual_time
 from ..qgis_io.obs_layers import observation_memory_layer
+from ..qgis_io.pixel_place import locator as pixel_locator
 from ..qgis_io.tasks import run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
@@ -869,6 +870,17 @@ class ObservationDock(PluginDock):
             self.book.status = message
         self._show_status(message)
 
+    def _place_records(self, book: ObservationBook) -> None:
+        """
+        How the open images lie on the map now (read here, on the main thread),
+        for the records saved next to say where they are in their image's file
+        (PIXEL_X・PIXEL_Y・IMAGE_FILE, saved in a task for a shared store).
+        """
+        try:
+            book.locate = pixel_locator(book.images)
+        except Exception:  # noqa: BLE001 (never stops a record: saved without its pixels)
+            book.locate = None
+
     def do(self, description: str, work: Callable[[ObservationBook], Any], after: Optional[Callable[[Any], None]] = None,
            watch: bool = False, failed: Optional[Callable[[str], None]] = None) -> Any:
         """
@@ -879,6 +891,7 @@ class ObservationDock(PluginDock):
         book, s = self.book, self.store_set
         if book is None or s is None:
             return None
+        self._place_records(book)
         if watch and self._alert_watch() is not None:
             work, after = self._watching(work, after)
         if not s.remote:
@@ -1016,6 +1029,7 @@ class ObservationDock(PluginDock):
         book, s = self.book, self.store_set
         if book is None or s is None:
             raise RuntimeError("観測記録は使用不可")
+        self._place_records(book)
         if not s.remote:
             try:
                 return work(book)

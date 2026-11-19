@@ -37,6 +37,7 @@ from ..core.obs.image_time import image_time, parse_time
 from .complex_sar import source_of
 from .geometry import to_wgs84
 from .plan_layer import qdatetime
+from .shift_io import SOURCE as SHIFT_SOURCE
 
 #: Layer properties (kept in the project): the catalog's image id, and the time typed for an image that does not say (ms).
 IMAGE_ID = "satobs/imageId"
@@ -73,13 +74,26 @@ def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Op
     return layer
 
 
+def _own_source(layer: QgsMapLayer) -> str:
+    """
+    The layer's own source: an image moved by 位置ずらし shows a VRT of it
+    (shift_io), whose name is not the image's (a record made on it went to an
+    image 「<uuid>.vrt」 without its time, 2026-11-19).
+    """
+    try:
+        moved = layer.customProperty(SHIFT_SOURCE)
+    except (AttributeError, RuntimeError):
+        moved = None
+    return str(moved or "") or layer.source()
+
+
 def image_path(layer: QgsMapLayer) -> str:
     """Where the layer's image is (its path or URL, without /vsicurl/; a complex SAR image's own, not its VRT's), '' when unknown."""
     shown = source_of(layer)
     if shown:
         return shown
     try:
-        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
+        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), _own_source(layer))
         path = parts.get("path") or parts.get("url") or ""
     except Exception:  # noqa: BLE001
         path = ""
@@ -92,7 +106,7 @@ def file_name(layer: QgsMapLayer) -> str:
     if shown:
         return os.path.basename(shown)
     try:
-        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), layer.source())
+        parts = QgsProviderRegistry.instance().decodeUri(layer.providerType(), _own_source(layer))
         path = parts.get("path") or parts.get("url") or ""
     except Exception:  # noqa: BLE001
         path = ""

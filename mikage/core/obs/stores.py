@@ -104,6 +104,7 @@ class LocalObservationStore:
                 lon=g[0], lat=g[1], created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
+                pixel_x=r.get("PIXEL_X"), pixel_y=r.get("PIXEL_Y"), image_file=r.get("IMAGE_FILE") or "",
             ))
         return out
 
@@ -112,6 +113,7 @@ class LocalObservationStore:
             "OBS_ID": o.id, "OBJECT_ID": o.object_id, "OBJECT_NAME": o.object_name, "IMAGE_ID": o.image_id,
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
             "PRESENT": 1 if o.present else 0, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
+            "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None,
             "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
@@ -302,6 +304,10 @@ class _EsriLayer:
             self._types, self._oid = types, info.object_id_field
         return self._types, self._oid
 
+    def known_types(self) -> Optional[dict[str, str]]:
+        """The attributes' types when read already (None: not yet; nothing is asked)."""
+        return self._types
+
 
 #: How far apart two 更新日時 may be and still be the same save (services that keep whole seconds).
 _STAMP_SLACK_MS = 1000
@@ -341,6 +347,7 @@ class EsriObservationStore:
             f["id"]: o.id, f["imageId"]: o.image_id, f["imageName"]: o.image_name, f["imageTime"]: o.image_time,
             f["objectId"]: o.object_id, f["objectName"]: o.object_name, f["kind"]: o.kind, f["activity"]: o.activity,
             f["present"]: o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
+            f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None,
             f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at,
         }
@@ -368,9 +375,26 @@ class EsriObservationStore:
             present=_present_of(a[f["present"]]) if f["present"] in a else True, note=_text(a.get(f["note"])),
             length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])),
             width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
+            pixel_x=_number_of(a.get(f["pixelX"])), pixel_y=_number_of(a.get(f["pixelY"])), image_file=_text(a.get(f["imageFile"])),
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
+
+    def as_kept(self, records: list[Observation]) -> list[Observation]:
+        """
+        The records as the layer keeps them: the values of the optional
+        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19),
+        so a record read back is the one saved (not 「ほかの人の記録」 changed since).
+        """
+        types = self._layer.known_types()
+        if types is None:
+            return records
+        f = self.config.fields
+        blank = {name: value for role, name, value in (
+            ("length", "length", None), ("heading", "heading", None), ("width", "width", None), ("pixelX", "pixel_x", None),
+            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("confidence", "confidence", ""),
+        ) if f[role] not in types}
+        return [replace(o, **blank) for o in records] if blank else records
 
     #: Read only as asked (scope.py): what a feature needs, never every record (EsriObservationStore.find).
     scoped = True

@@ -55,6 +55,14 @@ class Observation:
     updated_by: str = ""
     #: m, side to side (across the heading), when measured by three or four points.
     width: Optional[float] = None
+    #: Where the record is in the image file, in its full-resolution pixels from the file's top-left corner (x
+    #: right, y down; outside the image: below 0 or past its size), as the image lay on the map when the record
+    #: was placed (位置ずらし too: the file's own pixel, so AI training finds it whatever the image's move then;
+    #: tsudo 2026-11-19); None when the image was not open (an older record, a move made without the image).
+    pixel_x: Optional[float] = None
+    pixel_y: Optional[float] = None
+    #: The file those pixels are of (a catalog record's image below its folder, else the file's name); '' with none.
+    image_file: str = ""
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -72,6 +80,9 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "length": "LENGTH_M",
     "heading": "HEADING",
     "width": "WIDTH_M",
+    "pixelX": "PIXEL_X",
+    "pixelY": "PIXEL_Y",
+    "imageFile": "IMAGE_FILE",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",
