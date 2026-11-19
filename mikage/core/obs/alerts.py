@@ -161,7 +161,7 @@ class AlertField:
     digits: Optional[int] = None
     #: `kind`: the depth (1 the top, -1 the last); the whole path when None.
     level: Optional[int] = None
-    #: Values replaced (`{"true": "在", "false": "不在"}`), compared as text.
+    #: Values replaced (`{"true": "在", "false": "消失"}`), compared as text.
     map: dict[str, str] = field(default_factory=dict)
     #: Written when the value is empty.
     empty: str = ""
@@ -277,7 +277,7 @@ class AlertSettings:
     formats: list[AlertFormat] = field(default_factory=list)
     #: The format chosen first (a name of `formats`).
     default: str = ""
-    #: Fixed conditions: the least 確度 ('' any), and whether 不在 records are left out.
+    #: Fixed conditions: the least 確度 ('' any), and whether 消失 records are left out.
     min_confidence: str = ""
     present_only: bool = True
     rules: Optional[EsriSource] = None
