@@ -55,6 +55,9 @@ class Observation:
     updated_by: str = ""
     #: m, side to side (across the heading), when measured by three or four points.
     width: Optional[float] = None
+    #: 数える記録: made by someone who only counts what each image shows in its 大分類 (「数えるだけの大分類」,
+    #: tsudo 2026-11-19): not a thing followed from image to image, so never carried over nor offered as the same one.
+    count_only: bool = False
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -78,6 +81,8 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "created": "CREATED_AT",
     "updated": "UPDATED_AT",
     "deleted": "DELETED_AT",
+    #: 1 for a 数える記録 (count_only). Without it in the layer the records are not told apart (all followed).
+    "countOnly": "COUNT_ONLY",
     #: The OBJECTID of the named area (TBL_NAMED_AREA) holding the record, filled by an attribute rule of the
     #: enterprise geodatabase (2026-11-17). The plugin never writes it (a save leaves the server's value as it is);
     #: it is the key the data analysis joins 観測記録 to 地名のポリゴン by.

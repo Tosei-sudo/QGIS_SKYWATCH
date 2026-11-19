@@ -233,6 +233,10 @@ class ObservationBook:
         self._around: dict[str, tuple] = {}
         #: Image id → (around key, when it could not be read): not asked again for AROUND_RETRY_MS (the screens ask on every render).
         self._around_failed: dict[str, tuple] = {}
+        #: 「数えるだけの大分類」 of the one recording (tsudo 2026-11-19: some departments only count what each image
+        #: shows, sharing a 大分類 with those who follow the things): in these nothing is carried over or offered as the
+        #: same one, and their new records are 数える記録 (count_only). Set by the screen (a personal setting).
+        self.counted: frozenset[str] = frozenset()
 
     # ---- what is said --------------------------------------------------
 
@@ -700,20 +704,34 @@ class ObservationBook:
         w, s, e, n = box
         return lambda lon, lat: w <= lon <= e and s <= lat <= n
 
+    # ---- 数えるだけ -------------------------------------------------------
+
+    def counts(self, kind: str) -> bool:
+        """Whether the one recording only counts the things of a kind (its 大分類 is one of 「数えるだけの大分類」)."""
+        root = path_of(kind or "")
+        return bool(root) and root[0] in self.counted
+
+    def followed(self, o: Observation) -> bool:
+        """Whether a record is of a thing followed from image to image: not a 数える記録, nor of a 大分類 only counted here."""
+        return not o.count_only and not self.counts(o.kind)
+
+    def _followed_records(self) -> list[Observation]:
+        return [o for o in self.records if self.followed(o)]
+
     # ---- what may still be there ---------------------------------------
 
     def carried(self) -> list[CarryOver]:
-        """What may still be there in this image (the things of the images before and after)."""
+        """What may still be there in this image (the things of the images before and after, those followed)."""
         if self.current is None:
             return []
-        return carry_overs(self.records, self.current.ref, self.inside())
+        return carry_overs(self._followed_records(), self.current.ref, self.inside())
 
     def carried_for(self, image: Optional[str] = None) -> list[CarryOver]:
         """What may still be there in this image or the one of `image` (its id); within the footprint for this one."""
         info = self._image(image)
         if info is None:
             return []
-        return carry_overs(self.records, info.ref, self.inside() if info is self.current else None)
+        return carry_overs(self._followed_records(), info.ref, self.inside() if info is self.current else None)
 
     def inside_carried(self, carried: Optional[list[CarryOver]] = None) -> list[CarryOver]:
         """The carried-over things that lie in one of this image's checked areas (so were not there)."""
@@ -727,9 +745,10 @@ class ObservationBook:
                    image: Optional[str] = None) -> list[MatchCandidate]:
         """The things of other images that may be the one at a place in this image (同一候補), likeliest first."""
         info = self._image(image)
-        if info is None:
+        if info is None or self.counts(kind):
+            # Only counted: each record is a thing of its own.
             return []
-        return match_candidates(self.records, info.ref, lon, lat, kind, length, heading, radius=self.vocabulary.match_radius)
+        return match_candidates(self._followed_records(), info.ref, lon, lat, kind, length, heading, radius=self.vocabulary.match_radius)
 
     def _image(self, image: Optional[str]) -> Optional[ObservedImage]:
         if image:
@@ -742,10 +761,9 @@ class ObservationBook:
         """Saves records in the store and in the list; the records as saved, None when the store refused."""
         if not rows:
             return []
-        by = self.observer()
         known = {o.id for o in self.records}
         # Who made (a new record) and who changed it: the one recording now.
-        rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
+        rows = [self._as_saved(o, known) for o in rows]
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
@@ -894,10 +912,18 @@ class ObservationBook:
 
     def _by(self, record: Observation) -> Observation:
         """A record as it is saved by the one recording now (as _save_records stamps it), for a draft sent later."""
+        return self._as_saved(record, {o.id for o in self.records})
+
+    def _as_saved(self, record: Observation, known: set[str]) -> Observation:
+        """
+        A record stamped by the one recording now: who changed it, and for a
+        new one who made it and whether it is a 数える記録 (made in a 大分類 they
+        only count). A change keeps what the record was.
+        """
         by = self.observer()
-        if any(o.id == record.id for o in self.records):
+        if record.id in known:
             return replace(record, updated_by=by)
-        return replace(record, recorded_by=by, updated_by=by)
+        return replace(record, recorded_by=by, updated_by=by, count_only=record.count_only or self.counts(record.kind))
 
     # ---- 保存できなかった記録 (core/obs/drafts.py) ------------------------------------
     # Kept in the 送信待ち outbox (self.shelf) and sent from its list (core/obs/offline_stores.upload_drafts).

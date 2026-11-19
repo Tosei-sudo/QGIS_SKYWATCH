@@ -289,7 +289,7 @@ OBSERVATION_FIELDS = {
     "OBS_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "OBJECT_ID": {"type": S, "length": 64},
     "OBJECT_NAME": S, "KIND": S, "ACTIVITY": S, "PRESENT": F, "NOTE": {"type": S, "length": 4000}, "LENGTH_M": D, "HEADING": D,
     "WIDTH_M": D, "CONFIDENCE": S, "OBSERVER": S, "UPDATED_BY": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T, "PROJECT": S,
-    "NAMED_AREA_OBJECTID": I,
+    "COUNT_ONLY": F, "NAMED_AREA_OBJECTID": I,
 }
 #: As the enterprise geodatabase's attribute rule does (docs/arcgis-setup.md): the OBJECTID of the smallest named area holding the record.
 OBSERVATION_RULES = [{"field": "NAMED_AREA_OBJECTID", "smallestContaining": "Alerts/3"}]

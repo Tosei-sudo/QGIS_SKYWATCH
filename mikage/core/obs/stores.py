@@ -104,6 +104,7 @@ class LocalObservationStore:
                 lon=g[0], lat=g[1], created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
+                count_only=_flag_of(r.get("COUNT_ONLY")),
             ))
         return out
 
@@ -112,6 +113,7 @@ class LocalObservationStore:
             "OBS_ID": o.id, "OBJECT_ID": o.object_id, "OBJECT_NAME": o.object_name, "IMAGE_ID": o.image_id,
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
             "PRESENT": 1 if o.present else 0, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
+            "COUNT_ONLY": 1 if o.count_only else None,
             "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
@@ -273,6 +275,15 @@ def _present_of(v: Any) -> bool:
     return not re.fullmatch(r"(0|false|no|なし|いない|不在)", _text(v).strip(), re.IGNORECASE)
 
 
+def _flag_of(v: Any) -> bool:
+    """A 0/1 attribute (COUNT_ONLY): set only by 1 (or true); empty, 0 and anything else is not."""
+    if isinstance(v, bool):
+        return v
+    if is_number(v):
+        return v == 1
+    return _text(v).strip().lower() in ("1", "true")
+
+
 def _number_of(v: Any) -> Optional[float]:
     if v is None or v == "" or isinstance(v, bool):
         return None
@@ -343,6 +354,8 @@ class EsriObservationStore:
             f["present"]: o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
             f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at,
+            # Empty for a followed record (only 数える記録 carry 1), so a layer filled before the attribute reads the same.
+            f["countOnly"]: 1 if o.count_only else None,
         }
         attributes = {name: fit_value(v, types[name]) for name, v in values.items() if name in types}
         if o.id in self.oids:
@@ -370,6 +383,7 @@ class EsriObservationStore:
             width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
+            count_only=_flag_of(a.get(f["countOnly"])),
         )
 
     #: Read only as asked (scope.py): what a feature needs, never every record (EsriObservationStore.find).

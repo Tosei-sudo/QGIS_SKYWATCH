@@ -116,6 +116,17 @@ def _saved_floating(names: list[str]) -> bool:
     return any((layouts.get(n) or {}).get("floating") for n in names)
 
 
+def _count_root_choices(obs) -> list[str]:
+    """The 大分類 offered for 「数えるだけの大分類」: the open 観測記録's (its classification and records), else the first classes."""
+    if obs is not None and hasattr(obs, "count_root_choices"):
+        roots = obs.count_root_choices()
+        if roots:
+            return roots
+    from ..core.obs.model import default_taxonomy
+
+    return list(dict.fromkeys([*(t.path[0] for t in default_taxonomy()), *settings.count_roots()]))
+
+
 # ---- the page ------------------------------------------------------------
 
 class FirstSetupDialog(QDialog):
@@ -215,6 +226,34 @@ class FirstSetupDialog(QDialog):
             self.points.addItem(tr(label), n)
         self.points.setCurrentIndex(max(0, settings.point_count_setting() - 1))
         form.addRow(tr("観測記録のクリック数"), self.points)
+        # 「数えるだけの大分類」 (tsudo 2026-11-19): some departments only count what each image shows, in a 大分類 shared
+        # with those who follow the things; chosen per person, so each department works its own way.
+        counted = settings.count_roots()
+        roots = _count_root_choices(observation_dock())
+        self.count_checks: dict[str, QCheckBox] = {}
+        count_box = QWidget()
+        count_rows = QVBoxLayout(count_box)
+        count_rows.setContentsMargins(0, 0, 0, 0)
+        count_grid = QGridLayout()
+        count_grid.setContentsMargins(0, 0, 0, 0)
+        count_grid.setHorizontalSpacing(12)
+        tip = tr("チェックした大分類は継続を追わず、画像ごとに見えた数だけ記録する。\n"
+                 "前後の画像のモノ（白抜きの印）・同一候補・不在の印を出さず、記録は「数える記録」になる\n"
+                 "（ほかの人の画面でも次の画像に引き継がない）。同じ大分類でも、人ごとに選べる")
+        for i, root in enumerate(roots):
+            check = QCheckBox(root)
+            check.setChecked(root in counted)
+            check.setToolTip(tip)
+            count_grid.addWidget(check, i // 4, i % 4)
+            self.count_checks[root] = check
+        count_rows.addLayout(count_grid)
+        count_hint = QLabel(tr("継続を追わず、見えた数だけ記録する大分類（前後の画像のモノ・同一候補・不在を出さない）"))
+        count_hint.setStyleSheet("color: #57534e;")
+        count_hint.setToolTip(tip)
+        count_rows.addWidget(count_hint)
+        count_label = QLabel(tr("数えるだけの大分類"))
+        count_label.setToolTip(tip)
+        form.addRow(count_label, count_box)
         self.notation = QComboBox()
         for id_, label, _ in NOTATIONS:
             self.notation.addItem(tr(label), id_)
@@ -264,6 +303,10 @@ class FirstSetupDialog(QDialog):
         else:
             self.where.setVisible(False)
 
+    def counted_roots(self) -> list[str]:
+        """「数えるだけの大分類」 ticked, in the order offered."""
+        return [r for r, b in self.count_checks.items() if b.isChecked()]
+
     def chosen_roles(self) -> list[str]:
         """The roles ticked, by name, in the order offered."""
         return [n for n, b in self.role_checks.items() if b.isChecked()]
@@ -303,6 +346,12 @@ class FirstSetupDialog(QDialog):
         settings.set_point_count(n)
         if obs is not None and hasattr(obs, "use_points"):
             obs.use_points(n)
+        counted = self.counted_roots()
+        if counted != settings.count_roots():
+            if obs is not None and hasattr(obs, "set_count_roots"):
+                obs.set_count_roots(counted)
+            else:
+                settings.set_count_roots(counted)
         notation = self.notation.currentData()
         coordinates = self.coordinates()
         if coordinates is not None and hasattr(coordinates, "set_notation"):

@@ -1527,3 +1527,64 @@ def test_a_background_map_is_not_an_image(bare):
     served.setCustomProperty(IMAGE_ID, "S1")
     project.addMapLayer(served)
     assert sorted(i.id for i in dock.book.images) == ["S1", "d1.tif"]
+
+
+def test_a_counted_top_class_shows_nothing_carried_over_offered_or_gone(plugin):
+    """「数えるだけの大分類」 (tsudo 2026-11-19): chosen in 担当と個人設定, the 大分類's things are only counted, image by image."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name, kind, lon in (("A", "船舶", 139.70), ("C", "車両", 139.75)):
+        dock.map_clicked(lon, 35.60, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText(kind)
+        dock.submit()
+    assert not dock.count_button.isVisibleTo(dock)
+    # Before: the car carried over and marked gone (as the counting department did), its diamond on the map.
+    dock.step(1)
+    dock.carry(next(c.source.object_id for c in book.carried() if c.source.object_name == "C"), False)
+    assert any(m.role == "obs" and not m.present for m in dock.scene().marks)
+    # Chosen in 担当と個人設定.
+    page = p.open_first_setup()
+    assert "車両" in page.count_checks and not page.count_checks["車両"].isChecked()
+    page.count_checks["車両"].setChecked(True)
+    page.save()
+    page.close()
+    assert settings.count_roots() == ["車両"] and book.counted == frozenset({"車両"})
+    assert dock.count_button.isVisibleTo(dock) and dock.count_button.text() == "数えるだけ: 車両"
+    # The old 不在 is not drawn (still listed, to be deleted when not wanted).
+    assert not any(m.role == "obs" and not m.present for m in dock.scene().marks)
+    assert any(o.object_name == "C" and not o.present for o in book.here())
+    assert dock.count_label.text() == "この画像 1 件（うち不在 1）"
+    rows = [dock.table.item(r, 0).text() for r in range(dock.table.rowCount())]
+    assert dock.table.item(rows.index("C"), 0).foreground().color().name() == "#9ca3af"
+    dock.step(1)
+    # Only the ship is carried over to d3; a car recorded there is counted, with no 同一候補 and no 不在.
+    assert [c.source.object_name for c in book.carried()] == ["A"]
+    assert [m.label for m in dock.scene().marks if m.role == "ghost"] == ["A"]
+    dock.map_clicked(139.7501, 35.6001, None)
+    dock.kind_input.setText("車両")
+    dock._render_candidates()
+    assert dock.offered == [] and not dock.candidates_box.isVisibleTo(dock)
+    dock.submit()
+    car = next(o for o in book.here() if o.kind == "車両")
+    assert car.count_only and car.recorded_by == "田中"
+    rows = [dock.table.item(r, 0).text() for r in range(dock.table.rowCount())]
+    tag = dock.table.cellWidget(rows.index(car.object_name), dock.table.columnCount() - 1)
+    assert tag.text() == "数える記録"
+    dock.open_form(car.lon, car.lat, editing=car)
+    assert not dock.absent_button.isVisibleTo(dock)
+    dock.close_form()
+    a = next(c.source for c in book.carried() if c.source.object_name == "A")
+    dock.open_form(a.lon, a.lat, source=a)
+    assert dock.absent_button.isVisibleTo(dock)
+    dock.close_form()
+    # Changed in the dock's own menu: unticked, the old 不在 of d2 is drawn again; the counted car of d3 still never carries over.
+    dock._fill_count_menu()
+    [action] = [x for x in dock.count_button.menu().actions() if x.text() == "車両"]
+    assert action.isChecked()
+    action.setChecked(False)
+    assert settings.count_roots() == [] and not dock.count_button.isVisibleTo(dock) and book.counted == frozenset()
+    assert [c.source.object_name for c in book.carried()] == ["A"]
+    dock.step(-1)
+    assert any(m.role == "obs" and not m.present for m in dock.scene().marks)

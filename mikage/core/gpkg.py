@@ -380,6 +380,8 @@ OBSERVATIONS = TableSpec(
         Column("CREATED_AT", "DATETIME"),
         Column("UPDATED_AT", "DATETIME"),
         Column("DELETED_AT", "DATETIME"),
+        # 1 for a 数える記録 (2026-11-19; added to a file made before by GeoPackage.ensure).
+        Column("COUNT_ONLY", "SMALLINT"),
     ),
     key="OBS_ID",
     description="観測記録",

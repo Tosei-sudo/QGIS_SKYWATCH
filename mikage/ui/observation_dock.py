@@ -24,7 +24,7 @@ from qgis.PyQt.QtCore import QDateTime, QEventLoop, QItemSelection, QItemSelecti
 from qgis.PyQt.QtGui import QColor, QKeySequence, QPainter
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter, QDateTimeEdit, QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QToolButton,
+    QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -413,6 +413,14 @@ class ObservationDock(PluginDock):
         row.addWidget(self.mark_style_select)
         b.addLayout(row)
         row = QHBoxLayout()
+        # 「数えるだけの大分類」 (a personal setting, 担当と個人設定): shown only while some are chosen, to change them here too.
+        self.count_button = QToolButton()
+        self.count_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.count_button.setStyleSheet("QToolButton { background: #fef3c7; border: 1px solid #d97706; color: #78350f; padding: 1px 6px; }")
+        self.count_button.setMenu(QMenu(self.count_button))
+        self.count_button.menu().aboutToShow.connect(self._fill_count_menu)
+        self.count_button.hide()
+        row.addWidget(self.count_button)
         self.carry_label = QLabel()
         self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録（確認範囲内のものを除く）"),
                                              self.carry_all)
@@ -786,6 +794,7 @@ class ObservationDock(PluginDock):
                                    prefs=settings.SettingsPrefs(), say=self.said.emit,
                                    drafts=OutboxDrafts(self.context.offline, settings.SettingsPrefs()))
             book.drafts()  # those kept in QgsSettings before moved to the outbox, here on the main thread
+            book.counted = frozenset(settings.count_roots())
             self.books[s.label] = book
         return book
 
@@ -1881,7 +1890,8 @@ class ObservationDock(PluginDock):
         self._fill_confidence((known.confidence or "") if known else last.confidence)
         self.delete_button.setVisible(editing is not None)
         self.alert_button.setVisible(editing is not None and self.context.config.alert_reports is not None)
-        self.absent_button.setVisible(known is not None)
+        # A thing only counted is never 不在 (it is not followed to the next image): just this image's count.
+        self.absent_button.setVisible(known is not None and self.book.followed(known))
         self.submit_button.setText(self.tr("更新（Enter）") if editing else self.tr("継続（Enter）") if source else self.tr("記録（Enter）"))
         self.form.setTitle(editing.object_name if editing else source.object_name if source else self.tr("新規の記録"))
         self.form.show()
@@ -2394,6 +2404,59 @@ class ObservationDock(PluginDock):
         combo.setCurrentIndex(max(0, combo.findData(chosen)))
         combo.blockSignals(False)
 
+    # ---- 数えるだけ -------------------------------------------------------
+
+    def count_root_choices(self) -> list[str]:
+        """The 大分類 offered for 「数えるだけの大分類」: those of the classification (and of the records), and those chosen."""
+        book = self.book
+        roots = [t.path[0] for t in book.taxonomy() if len(t.path) == 1] if book else []
+        return list(dict.fromkeys([*roots, *settings.count_roots()]))
+
+    def set_count_roots(self, roots: Sequence[str]) -> None:
+        """「数えるだけの大分類」 chosen (here or in 担当と個人設定): kept, and every store's book follows it."""
+        settings.set_count_roots(roots)
+        counted = frozenset(settings.count_roots())
+        for book in self.books.values():
+            book.counted = counted
+        if self.book is not None and self.book.current is not None:
+            self.render()
+            self._render_candidates()
+
+    def _render_count_button(self) -> None:
+        counted = settings.count_roots()
+        self.count_button.setVisible(bool(counted))
+        if not counted:
+            return
+        self.count_button.setText(self.tr("数えるだけ: {roots}").format(roots="・".join(counted)))
+        self.count_button.setToolTip(self.tr("この大分類は継続を追わず、見えた数だけ記録（「担当と個人設定」の個人の設定）\n"
+                                             "前後の画像のモノ・同一候補・不在の印を出さない。記録は「数える記録」になり、\n"
+                                             "ほかの人の画面でも次の画像に引き継がない\n"
+                                             "押すと大分類を選び直せる"))
+
+    def _fill_count_menu(self) -> None:
+        menu = self.count_button.menu()
+        menu.clear()
+        counted = settings.count_roots()
+        for root in self.count_root_choices():
+            action = menu.addAction(root)
+            action.setCheckable(True)
+            action.setChecked(root in counted)
+            action.toggled.connect(lambda on, root=root: self.set_count_roots(
+                [*settings.count_roots(), root] if on else [r for r in settings.count_roots() if r != root]))
+        menu.addSeparator()
+        menu.addAction(self.tr("すべて外す（継続を追う）"), lambda: self.set_count_roots([]))
+
+    def _uncounted(self, o: Observation) -> bool:
+        """A 不在 in one of 「数えるだけの大分類」: not drawn on the map, last and faded in the list (kept, to be deleted)."""
+        return not o.present and self.book is not None and self.book.counts(o.kind)
+
+    def _counted_tag(self) -> QWidget:
+        """In a 数える記録's row, where a thing's 「流れ」 is: it is a thing of this image only."""
+        label = QLabel(self.tr("数える記録"))
+        label.setStyleSheet("QLabel { color: #78350f; background: #fef3c7; border-radius: 3px; padding: 0 4px; }")
+        label.setToolTip(self.tr("数えるだけの大分類で記録したもの（継続を追わない。次の画像に引き継がず、同一候補にも出ない）"))
+        return label
+
     def _chosen_flow(self) -> Optional[ObjectFlow]:
         return self.book.flow(self.chosen) if self.book and self.chosen else None
 
@@ -2771,6 +2834,8 @@ class ObservationDock(PluginDock):
                 font = item.font()
                 font.setItalic(True)
                 item.setFont(font)
+            elif style == "faded":
+                item.setForeground(QColor("#9ca3af"))
             elif style == "inside":
                 item.setForeground(QColor("#0f766e"))
             elif style == "area":
@@ -3035,6 +3100,7 @@ class ObservationDock(PluginDock):
         shown_carry = self._carry_shown()
         carried = [c for c in book.carried() if shown_carry is None or shown_carry(c)]
         inside = book.inside_carried(carried)
+        self._render_count_button()
         self.carry_label.setText(self.tr("前後の画像のモノ {n} 件").format(n=len(carried)) if carried else "")
         self.carry_all_button.setVisible(len(carried) > len(inside))
         # All in checked areas: 「確認範囲内 n 件を不在」 does the same.
@@ -3042,7 +3108,8 @@ class ObservationDock(PluginDock):
         self.absent_inside_button.setVisible(bool(inside))
         self.absent_inside_button.setText(self.tr("確認範囲内 {n} 件を不在").format(n=len(inside)))
         shown = book.records if self.deleted_check.isChecked() else book.living()
-        here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: o.object_name)
+        # 「数えるだけの大分類」: a 不在 of such a 大分類 (made before it was chosen) says nothing to the count: last, faded.
+        here = sorted((o for o in shown if image and o.image_id == image.id), key=lambda o: (self._uncounted(o), o.object_name))
         objects = book.flows()
         taxa = book.taxonomy()
         every = len([o for o in here if o.deleted_at is None])
@@ -3062,9 +3129,12 @@ class ObservationDock(PluginDock):
             mine = self.my_names()
             here = [o for o in here if is_mine(o.recorded_by, mine)]
         listed = len([o for o in here if o.deleted_at is None])
-        self.count_label.setText(self.tr("この画像 {n} 件").format(n=every) if listed == every else
-                                 self.tr("この画像 {n} / {all} 件").format(n=listed, all=every))
-        self.count_label.setToolTip(self.tr("この画像の記録の件数（大分類・「自分の記録のみ」で絞り込み中は 表示 / 全体）"))
+        uncounted = len([o for o in here if o.deleted_at is None and self._uncounted(o)])
+        self.count_label.setText((self.tr("この画像 {n} 件").format(n=every) if listed == every else
+                                  self.tr("この画像 {n} / {all} 件").format(n=listed, all=every))
+                                 + (self.tr("（うち不在 {n}）").format(n=uncounted) if uncounted else ""))
+        self.count_label.setToolTip(self.tr("この画像の記録の件数（大分類・「自分の記録のみ」で絞り込み中は 表示 / 全体）")
+                                    + (self.tr("\n不在: 数えるだけの大分類の不在の記録（地図に印を出さず、一覧の最後に薄く表示）") if uncounted else ""))
         shown_as = ("image", image.id if image is not None else None)
         kept = self._chosen_rows() if shown_as == self._shown_as else None
         scrolled = self.table.verticalScrollBar().value()
@@ -3139,11 +3209,13 @@ class ObservationDock(PluginDock):
         for o in here:
             gone = o.deleted_at is not None
             widget = self._small((tr("復元"), tr("削除した記録の復元"), lambda o=o: self.restore([o]))) if gone else \
+                self._counted_tag() if o.count_only else \
                 self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
             self._row([o.object_name, o.kind, o.activity if o.present else tr("不在"), measure(o), o.note, self._made_by(o), local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
-                      style="deleted" if gone else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
+                      style="deleted" if gone else "faded" if self._uncounted(o) else "", widget=widget, records=[] if gone else [o],
+                      reported=o.id in self.reported,
                       waiting=o.id in waiting, key=f"o:{o.id}")
         inside_ids = {id(c) for c in inside}
         for c in carried:
@@ -3288,6 +3360,9 @@ class ObservationDock(PluginDock):
             waiting = self.waiting_ids()
             for o in book.living():
                 if o.image_id != image.id:
+                    continue
+                if self._uncounted(o) and o.id != editing:
+                    # 「数えるだけの大分類」: a 不在 says nothing to one who only counts (tsudo 2026-11-19: the marks got in the way).
                     continue
                 lon, lat = (self.dragging[1], self.dragging[2]) if self.dragging and self.dragging[0] == o.id else (o.lon, o.lat)
                 what = (f"・{o.activity}" if o.activity else "") if o.present else "（不在）"

@@ -187,6 +187,7 @@ TABLES = (
         F("CREATED_AT", "記録日時", "DATE", None, "created"),
         F("UPDATED_AT", "修正日時", "DATE", None, "updated"),
         F("DELETED_AT", "削除日時", "DATE", None, "deleted"),
+        F("COUNT_ONLY", "数える記録", "SHORT", None, "countOnly"),
         F("NAMED_AREA_OBJECTID", "地名のOBJECTID", "LONG", None, "namedAreaObjectId"),
     )),
     Table("TBL_OBSERVATION_AREA", "確認範囲", "POLYGON", writable=True, setting="observationStores[].areas", fields=(

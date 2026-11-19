@@ -252,6 +252,24 @@ def set_point_count(n: int) -> None:
     _set("observations/points", str(n))
 
 
+def count_roots() -> list[str]:
+    """
+    「数えるだけの大分類」 (担当と個人設定, 2026-11-19): the 大分類 in which this
+    person only counts what each image shows, not following the things.
+    """
+    try:
+        value = json.loads(_get("observations/countOnly", "[]") or "[]")
+    except ValueError:
+        return []
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(v.strip() for v in value if isinstance(v, str) and v.strip()))
+
+
+def set_count_roots(roots) -> None:
+    _set("observations/countOnly", json.dumps(list(dict.fromkeys(r.strip() for r in roots if r and r.strip())), ensure_ascii=False))
+
+
 #: How the image catalog draws the listed images' footprints: filled, outlines only, or not at all.
 FOOTPRINT_STYLES = ("fill", "outline", "hidden")
 #: How the observations' marks are drawn: as they were, outlines only (no fill), or hidden (the input being made stays).
