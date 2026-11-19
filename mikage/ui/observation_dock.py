@@ -65,7 +65,7 @@ from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
 from .flow_layout import FlowLayout
 from .note_assist import NoteAssist
-from .text_assist_ui import NoteTidy
+from .text_assist_ui import NoteFields, NoteTidy, SummaryDialog
 from .list_views import ListViews, column_menus
 from .obs_many import ManyPanel
 from .obs_overlay import UNSEEN_COLOR, Mark, ObservationOverlay, Scene, color_of
@@ -551,10 +551,13 @@ class ObservationDock(PluginDock):
         self.note_input = QLineEdit()
         self.note_tidy = NoteTidy(self.note_input, self.context.text_assist, self.context.glossary, self.kind_input.text,
                                   lambda: (path_of(self.kind_input.text()) or [""])[0], self)
-        f.addRow(tr("備考"), self.note_tidy.row())
+        # 項目の提案 (`textAssist.tasks.noteFields`): the fields read from the 備考, for those still empty (tsudo 2026-11-19).
+        self.note_fields = NoteFields(self.note_input, self.context.text_assist, self, self)
+        f.addRow(tr("備考"), self.note_tidy.row(self.note_fields.button))
         self.note_assist = NoteAssist(self.note_input, self.context.glossary, lambda: (path_of(self.kind_input.text()) or [""])[0], self)
         f.addRow(self.note_assist.notice)
         f.addRow(self.note_tidy.panel)
+        f.addRow(self.note_fields.panel)
         actions = QHBoxLayout()
         self.submit_button = self._button(tr("記録（Enter）"), "", lambda: self.submit(True))
         self.absent_button = self._button(tr("消失"), tr("この画像での消失（見当たらず）を記録"), lambda: self.submit(False))
@@ -667,12 +670,17 @@ class ObservationDock(PluginDock):
         self.event_add_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベント（地震対応など）に入れる（設定ファイルの events）"),
                                              lambda: self.add_to_event())
         self.event_add_button.hide()
+        # まとめ (`textAssist.tasks.summary`): a few sentences on the records chosen (tsudo 2026-11-19).
+        self.summary_button = self._button(tr("まとめ…"), tr("選んだ記録を数文にまとめた下書き（文章の手伝い。この PC の生成 AI）"),
+                                           lambda: self.summarize())
+        self.summary_button.hide()
         self.table.itemSelectionChanged.connect(self._selection_changed)
         chosen = QHBoxLayout()
         chosen.addWidget(self.bulk_button)
         chosen.addWidget(self.remove_chosen_button)
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
+        chosen.addWidget(self.summary_button)
         chosen.addStretch(1)
         # 「ビュー」: the list's columns and the 大分類 shown, kept under a name (per user). The key is the one
         # 「この画像」 had while there were tabs, so the views saved then still apply.
@@ -2954,6 +2962,72 @@ class ObservationDock(PluginDock):
         self.remove_chosen_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
         self.alert_add_button.setVisible(bool(rows) and self.context.config.alert_reports is not None and bool(self.selected_records()))
         self.event_add_button.setVisible(bool(rows) and self.context.config.events is not None and bool(self.selected_records()))
+        self.summary_button.setVisible(bool(rows) and self.context.text_assist.has("summary") and bool(self.selected_records()))
+
+    def summarize(self, records: Optional[list[Observation]] = None) -> Optional[SummaryDialog]:
+        """「まとめ…」: the records chosen (or `records`) in a few sentences, written in a window (文章の手伝い)."""
+        records = self.selected_records() if records is None else records
+        if not records or not self.context.text_assist.has("summary"):
+            return None
+        from ..core.obs.csv import local_time
+
+        dialog = SummaryDialog(self.context.text_assist, records, local_time, self.tr("選んだ記録"), self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+        dialog.start()
+        self._summary = dialog
+        return dialog
+
+    # ---- 項目の提案 (ui/text_assist_ui.NoteFields) ----------------------------
+
+    def fields_choices(self) -> dict:
+        """What the model may choose from for the record's fields: the kinds, each 大分類's activities, the 確度 levels."""
+        from ..core.text_tasks import kinds_for
+
+        book = self.book
+        taxa = book.taxonomy() if book is not None else []
+        roots = [t.path[0] for t in taxa if len(t.path) == 1]
+
+        def resolve(text: str) -> Optional[list[str]]:
+            path = path_of(text)
+            if path and find(taxa, path):
+                return list(path)
+            return class_by_name(taxa, text) if text.strip() else None
+
+        return {
+            "kinds": kinds_for([kind_of(t.path) for t in taxa], (path_of(self.kind_input.text()) or [""])[0]),
+            "activities": {r: book.activities_for(r)[0] for r in roots} if book is not None else {},
+            "confidences": [c.label for c in book.confidences()] if book is not None else [],
+            "resolve_kind": resolve,
+            "activities_of": lambda kind: book.activity_words(kind) if book is not None else [],
+        }
+
+    def fields_values(self) -> dict:
+        """The record form's fields as they are (for 項目の提案: only the empty ones are filled)."""
+        return {"kind": self.kind_input.text().strip(), "activity": self.activity_input.text().strip(),
+                "confidence": self.confidence_select.currentData() or "", "length": self.length_input.text().strip(),
+                "width": self.width_input.text().strip(), "heading": self.heading_input.text().strip(),
+                "object": self.object_input.text().strip()}
+
+    def apply_fields(self, values: dict) -> None:
+        """Puts the values taken from 項目の提案 in the form (as if chosen; nothing saved)."""
+        if "kind" in values:
+            self.choose_kind(list(values["kind"]))
+        if "activity" in values:
+            self._pick_activity(values["activity"])
+        if "confidence" in values:
+            i = self.confidence_select.findData(values["confidence"])
+            if i >= 0:
+                self.confidence_select.setCurrentIndex(i)
+        for key, edit in (("length", self.length_input), ("width", self.width_input), ("heading", self.heading_input)):
+            if key in values:
+                edit.setText(f"{values[key]:g}")
+        if any(k in values for k in ("length", "width", "heading")):
+            self._render_measure()
+            self._render_candidates()
+        if "object" in values:
+            self.object_input.setText(values["object"])
+            self._object_typed()
 
     def bulk_edit(self, records: Optional[list[Observation]] = None):
         """Asks what to set on the chosen records (the kind, the activity, the 確度), then saves it on all of them."""

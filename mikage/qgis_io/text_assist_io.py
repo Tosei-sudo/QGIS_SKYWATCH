@@ -21,9 +21,12 @@ tokenizer's files), a .zip of one, or the URL of such a .zip:
 - a .zip (a path or a URL) is unpacked once into the profile (a URL is
   downloaded first, through QGIS's network).
 
-The model stays loaded `keepMinutes` after its last use and is then let go
-(its memory given back); the next use loads it again (a few seconds).
-Generation releases the GIL, so QGIS keeps answering while it writes.
+Each task is given one of the settings' models (`textAssist.tasks`). One
+model is loaded at a time: a task given another model lets the loaded one
+go first (a few seconds to load the other). The model stays loaded
+`keepMinutes` after its last use and is then let go (its memory given
+back). Generation releases the GIL, so QGIS keeps answering while it
+writes.
 """
 from __future__ import annotations
 
@@ -44,7 +47,7 @@ from urllib.parse import urlsplit
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 
-from ..core.text_assist import Message, TextAssistSettings, plain_prompt
+from ..core.text_assist import LARGE_MODEL, LARGE_TASKS, Message, TextAssistSettings, TextModel, plain_prompt
 from ..core.win64 import add_package
 from .ai_runtime import (VENDORED, VENDORED_PYTHON, AiError, RuntimeMissing, cache_path, download, is_remote, load_ort,
                          resolve_source, threads as default_threads)
@@ -234,6 +237,20 @@ def urlsplit_path(url: str) -> str:
 
 # ---- the model ------------------------------------------------------------------------------------
 
+def params_of(model: dict) -> Optional[float]:
+    """
+    About how many parameters (billions) a model has, from genai_config.json's
+    `model`: 12·layers·hidden² (attention and feed-forward) plus the
+    vocabulary's embeddings. Enough to tell a 1B model from a 3B one.
+    """
+    try:
+        d = model["decoder"]
+        h, layers, vocab = int(d["hidden_size"]), int(d["num_hidden_layers"]), int(model.get("vocab_size") or 0)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (12 * layers * h * h + vocab * h) / 1e9
+
+
 class GenAiWriter:
     """A GenAI model and its tokenizer (core/text_assist.Writer): writes one reply at a time."""
 
@@ -252,10 +269,14 @@ class GenAiWriter:
         except Exception as error:  # noqa: BLE001
             raise AiError(f"モデルを読み込めず（{os.path.basename(folder)}: {str(error).splitlines()[0] if str(error) else error}）") from error
         self.context_length = 4096
+        #: Its size (billions of parameters, from its settings; None when they do not say).
+        self.params: Optional[float] = None
         try:
             with open(os.path.join(folder, CONFIG_FILE), encoding="utf-8") as f:
-                self.context_length = int(json.load(f)["model"].get("context_length") or 4096)
-        except (OSError, ValueError, KeyError, TypeError):
+                model = json.load(f)["model"]
+            self.context_length = int(model.get("context_length") or 4096)
+            self.params = params_of(model)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
         self._lock = threading.Lock()
         self._og = og
@@ -320,9 +341,9 @@ class Asked:
 
 
 class TextAssistant(QObject):
-    """The settings' `textAssist` for the screens (on the context): one model, one request at a time (main thread)."""
+    """The settings' `textAssist` for the screens (on the context): one model loaded, one request at a time (main thread)."""
 
-    #: The settings changed (whether the buttons show).
+    #: The settings changed (which tasks show).
     changed = pyqtSignal()
 
     def __init__(self, context, writer_of: Optional[Callable[[str, int], Any]] = None,
@@ -346,18 +367,26 @@ class TextAssistant(QObject):
 
     @property
     def available(self) -> bool:
-        return self.settings is not None
+        """Whether any task is given a model."""
+        s = self.settings
+        return s is not None and any(s.has(t.name) for t in s.tasks)
+
+    def has(self, task: str) -> bool:
+        """Whether `task` is given a model (its button shows)."""
+        s = self.settings
+        return s is not None and s.has(task)
 
     @property
     def busy(self) -> bool:
         return self.asked is not None
 
-    def _key(self, s: TextAssistSettings) -> tuple:
-        return (s.model, self.context.source, s.threads)
+    def _key(self, m: TextModel) -> tuple:
+        return (m.path, self.context.source, m.threads)
 
     def _config_changed(self) -> None:
         s = self.settings
-        if self.writer is not None and (s is None or self._key(s) != self._writer_key):
+        keys = {self._key(m) for m in s.models} if s is not None else set()
+        if self.writer is not None and self._writer_key not in keys:
             self.unload()
         self.changed.emit()
 
@@ -366,47 +395,72 @@ class TextAssistant(QObject):
         self._idle.stop()
         self.writer, self._writer_key = None, None
 
-    def ask(self, title: str, messages: Sequence[Message], max_tokens: int, done: Callable[[str, float], None],
+    def caution(self, task: str) -> str:
+        """What to say of the loaded model for `task`: a small one for a task meant for about 3B ("" when nothing)."""
+        params = getattr(self.writer, "params", None)
+        if task in LARGE_TASKS and params is not None and params < LARGE_MODEL:
+            return self.tr("このモデル（約 {p:.1f}B）では精度が低いことがある（3B 級を推奨）").format(p=params)
+        return ""
+
+    def ask(self, task: str, title: str, messages: Sequence[Message], done: Callable[[str, float], None],
             failed: Callable[[str], None], one_line: bool = False) -> Optional[Asked]:
-        """Starts writing (in a task); None (and `failed` told) when it cannot start."""
+        """Starts writing for `task` (in a task); None (and `failed` told) when it cannot start."""
+        return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False)
+
+    def ask_each(self, task: str, title: str, conversations: Sequence[Sequence[Message]],
+                 done: Callable[[list[str], float], None], failed: Callable[[str], None], one_line: bool = True) -> Optional[Asked]:
+        """Writes for each of `conversations` in turn (英訳 of several 備考); the stage says how far it is."""
+        return self._start(task, title, list(conversations), done, failed, one_line, True)
+
+    def _start(self, task: str, title: str, conversations: list, done: Callable[[list[str], float], None],
+               failed: Callable[[str], None], one_line: bool, counted: bool) -> Optional[Asked]:
         s = self.settings
-        if s is None:
-            failed(self.tr("設定ファイルに textAssist（文章の手伝いのモデル）なし"))
+        t = s.task(task) if s is not None else None
+        model = s.model_for(task) if s is not None else None
+        if t is None or model is None:
+            failed(self.tr("設定ファイルの textAssist.tasks に {t} のモデルなし").format(t=task))
             return None
         if self.asked is not None:
             failed(self.tr("ほかの文章を作成中（終わってから）"))
             return None
-        key, base = self._key(s), self.context.source
+        key, base = self._key(model), self.context.source
         writer = self.writer if self._writer_key == key else None
-        asked = Asked(stage=self.tr("作成中…") if writer is not None else self.tr("モデルを読み込み中…（初回は数秒〜）"))
-        writer_of, folder_of = self._writer_of, self._folder_of
+        if writer is None and self.writer is not None:
+            # Another model is loaded: let it go first (one at a time, for the memory).
+            self.unload()
+        writing = self.tr("作成中…")
+        asked = Asked(stage=writing if writer is not None else self.tr("モデルを読み込み中…（初回は数秒〜）"))
+        writer_of, folder_of, max_tokens = self._writer_of, self._folder_of, t.max_tokens
 
-        def work(task):
+        def work(job):
             w = writer
             if w is None:
-                folder = folder_of(s.model, base, cancelled=task.isCanceled)
-                task.check()
-                w = writer_of(folder, s.threads)
-                asked.stage = "作成中…"
+                folder = folder_of(model.path, base, cancelled=job.isCanceled)
+                job.check()
+                w = writer_of(folder, model.threads)
             started = time.monotonic()
+            texts = []
+            for i, messages in enumerate(conversations):
+                asked.stage = f"{writing} {i + 1}/{len(conversations)}" if counted else writing
 
-            def wrote(text: str) -> None:
-                asked.text = text
+                def wrote(text: str) -> None:
+                    asked.text = text
 
-            text = w.write(messages, max_tokens, task.isCanceled, wrote, one_line)
-            return w, text, time.monotonic() - started
+                texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line))
+                job.check()
+            return w, texts, time.monotonic() - started
 
         def finished(result) -> None:
-            w, text, seconds = result
+            w, texts, seconds = result
             self.asked = None
             current = self.settings
-            if current is not None and self._key(current) == key:
+            if current is not None and key in {self._key(m) for m in current.models}:
                 self.writer, self._writer_key = w, key
                 if current.keep_minutes > 0:
                     self._idle.start(int(current.keep_minutes * 60_000))
                 else:
                     self.unload()
-            done(text, seconds)
+            done(texts, seconds)
 
         def fail(message: str) -> None:
             self.asked = None

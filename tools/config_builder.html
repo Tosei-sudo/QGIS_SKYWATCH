@@ -75,6 +75,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .roles { display: grid; grid-template-columns: minmax(130px, max-content) minmax(0, 1fr); gap: 3px 8px; align-items: center; }
 .roles span { font-size: 12px; }
 .roles span code { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.tasks { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 45%); gap: 4px 8px; align-items: center; }
+.tasks span { font-size: 12px; }
+.tasks span code, .tasks span em { color: var(--muted); font-size: 11px; margin-left: 4px; font-style: normal; }
 .pairs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 3px 6px; align-items: center; }
 .card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin: 10px 0; }
 .card > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel2); border-radius: 8px; }
@@ -635,7 +638,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "place.en",
   "placeKind.en",
   "places.en",
-  "countryName.en"
+  "countryName.en",
+  "note.en"
  ],
  "alertTimeSources": [
   "imageTime",
@@ -1476,6 +1480,8 @@ const R = (k, l, roles, o = {}) => ({ k, t: "roles", l, roles, ...o });
 const M = (k, l, o = {}) => ({ k, t: "map", l, ...o });
 const I = (k, l, fields, o = {}) => ({ k, t: "items", l, fields, ...o });
 const O = (k, l, fields, o = {}) => ({ k, t: "object", l, fields, ...o });
+/** タスクごとのモデル（textAssist.tasks）: tasks は [キー, 名前, 目安] の並び。選べるのは同じオブジェクトの models の名前。 */
+const TM = (k, l, tasks, o = {}) => ({ k, t: "taskModels", l, tasks, ...o });
 
 const LABEL = T("label", "名前", { help: "一覧・メニューに出す名前（省略すると「… 1」のような名前）" });
 const URL_ = (help, ph = "https://gis.example/arcgis/rest/services/…/FeatureServer/0") => T("url", "URL", { req: true, ph, help });
@@ -1669,16 +1675,15 @@ const SPEC = [
       ]) },
     { key: "glossary", label: "備考の単語集", doc: "備考の単語集glossary", help: "観測記録・確認範囲の備考に使う語を 1 語 1 行で置く Esri のテーブル（読むだけ）。備考を打っている間、打っている語の候補（よみ・表記ゆれからも）を出し、表記ゆれは欄の下に知らせて直せる。語はテーブルに置き、ここにはテーブルと属性名だけを書く。",
       field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },
-    { key: "textAssist", label: "文章の手伝い（小さな生成 AI）", doc: "文章の手伝い小さな生成-aitextassist", help: "この PC で動く小さな生成 AI（ONNX Runtime GenAI のモデル。標準は sarashina2.2-1B-instruct の int4）で、観測記録・確認範囲の備考の「整える」と、引き継ぎメモの「申し送りの下書き」を出す。どちらも案を出すだけで、押すまで欄は変わらない。モデルは zip に入れず、ここに置き場所を書く。書かなければボタンを出さない。",
+    { key: "textAssist", label: "文章の手伝い（この PC の生成 AI）", doc: "文章の手伝い小さな生成-aitextassist", help: "この PC で動く小さな生成 AI（ONNX Runtime GenAI のモデル。sarashina2.2 の 1B・3B の int4 など）で、文章の案を出す。モデルの一覧（models）に名前と置き場所を書き、タスクごとにどのモデルを使うかを選ぶ（tasks）。モデルを割り当てないタスクはボタンを出さない（使う人がモデルを選ぶ場面はない）。どのタスクも案を出すだけで、押すまで欄は変わらない。モデルは zip に入れず、置き場所を書く。読んでおくモデルは一度に 1 つ（別のモデルのタスクでは読み込み直しで数秒）。以前の書き方（\"textAssist\": \"パス\"、model・maxTokens など）も読め、そのモデルを「備考を整える」と「申し送りの下書き」に割り当てたものになる。",
       field: O("textAssist", "文章の手伝い", [
-        T("model", "モデル", { req: true, ph: "\\\\fileserver\\gis\\models\\sarashina-1b-int4 か …/sarashina-1b-int4.zip", help: "genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）" }),
-        N("threads", "スレッド数", { min: 0, ph: "0", help: "0 でコア数 − 1（最大 8）" }),
-        N("maxTokens", "整えた備考の最大の長さ（トークン）", { min: 16, ph: "160" }),
-        N("handoverMaxTokens", "申し送りの下書きの最大の長さ（トークン）", { min: 16, ph: "320" }),
+        M("models", "モデルの一覧", { value: "auto", keyHelp: "名前（small・large など）", valueHelp: "置き場所か { \"path\", \"threads\" }", help: "置き場所は genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）。threads はスレッド数（0 でコア数 − 1、最大 8）" }),
+        TM("tasks", "タスクごとのモデル", [
+          ["tidyNote", "備考を整える", "1B で可"], ["handoverDraft", "申し送りの下書き", "1B で可"],
+          ["noteFields", "項目の提案（備考から種別・活動などを拾う）", "3B 級向け"], ["searchWords", "言葉で探す（エクスポートの条件）", "3B 級向け"],
+          ["summary", "まとめ（選んだ記録を数文に）", "3B 級向け"], ["translate", "英訳（通報の note.en）", "3B 級向け"],
+        ], { help: "選べるのは上のモデルの一覧の名前。3B 級向けのタスクに小さいモデル（2B 未満）を割り当てると、案に「精度が低いことがある」と添える。タスクの値は { \"model\": \"large\", \"maxTokens\": 200, \"prompt\": \"…\" } とも書け（最大の長さ・指示文の置き換え。tidyNote は examples も）、ここで選び直してもほかの指定は残す" }),
         N("keepMinutes", "使い終えてからモデルを残す分数", { min: 0, ph: "10", help: "過ぎるとメモリーを返す（次は読み込み直しで数秒）。0 ですぐ外す" }),
-        T("notePrompt", "備考を整える指示", { help: "モデルへの指示文（既定を置き換える）。空なら既定" }),
-        J("noteExamples", "備考を整える例", { ph: '[{ "kind": "船舶 > 駆逐艦", "note": "岸壁に停泊してるみたい", "tidy": "岸壁に停泊中。" }]', help: "指示の前に見せる例（既定の 2 例を置き換える）" }),
-        T("handoverPrompt", "申し送りの下書きの指示", { help: "モデルへの指示文（既定を置き換える）。空なら既定" }),
       ]) },
     { key: "alertReports", label: "通報（注目の記録）", doc: "通報注目の記録alertreports", help: "注目の記録を区切り文字の 1 件 1 行の通報文に。条件（分類・活動・確度・ジオフェンス）と通報した記録は Esri に置き、ここには URL・属性名と、名前付きのフォーマット（複数）を書く。抽出した記録は重要度スコアの高い順。",
       field: O("alertReports", "通報", [
@@ -1987,6 +1992,8 @@ function field(f, obj, commit, item) {
     control = rolesField(f, obj, commit);
   } else if (t === "map") {
     control = mapField(f, obj, commit);
+  } else if (t === "taskModels") {
+    control = taskModelsField(f, obj, commit);
   } else {
     control = jsonArea(v, (x) => set(x), f.ph);
   }
@@ -2002,7 +2009,7 @@ function fits(f, v) {
     case "bool": return typeof v === "boolean";
     case "select": return typeof v === "string" || (v === null && !!f.nullLabel) || (v === false && !!f.falseLabel);
     case "list": return (f.single && typeof v === "string") || (Array.isArray(v) && v.every((x) => typeof x === (f.numbers ? "number" : "string")));
-    case "roles": case "map": return isObj(v);
+    case "roles": case "map": case "taskModels": return isObj(v);
     default: return true;
   }
 }
@@ -2080,6 +2087,46 @@ function mapField(f, obj, commit) {
   };
   draw();
   return grid;
+}
+
+/**
+ * タスクごとのモデル: タスクごとに、同じオブジェクトのモデルの一覧（models）の名前を選ぶ。
+ * 「割り当てない」はそのタスクのボタンを出さない。{ "model", … } の形は model だけ書き換える。
+ * 選択肢はモデルの一覧を書き換えたあと、開くときに読み直す。
+ */
+function taskModelsField(f, obj, commit) {
+  const get = () => (isObj(obj[f.k]) ? obj[f.k] : {});
+  const names = () => Object.keys(isObj(obj.models) ? obj.models : {}).filter((n) => n.trim() !== "");
+  const grid = el("div", { class: "tasks" });
+  for (const [task, label, size] of f.tasks) {
+    const sel = el("select", {});
+    const fill = () => {
+      const v = get()[task];
+      const now = isObj(v) ? v.model : v;
+      const opts = names();
+      sel.replaceChildren(el("option", { value: "", text: "割り当てない（出さない）" }),
+        ...opts.map((n) => el("option", { value: n, text: n, selected: n === now })),
+        typeof now === "string" && now !== "" && !opts.includes(now) ? el("option", { value: now, text: `${now}（モデルの一覧にない）`, selected: true }) : null);
+    };
+    fill();
+    sel.addEventListener("focus", fill);
+    sel.addEventListener("mousedown", fill);
+    sel.addEventListener("change", (e) => {
+      const s = e.target.value;
+      const m = { ...get() };
+      const v = m[task];
+      if (s === "") delete m[task]; else m[task] = isObj(v) ? { ...v, model: s } : s;
+      if (isEmpty(m)) delete obj[f.k]; else obj[f.k] = m;
+      commit();
+      changed();
+    });
+    grid.append(el("span", {}, label, el("code", { text: task }), el("em", { text: size })), sel);
+  }
+  const known = new Set(f.tasks.map(([task]) => task));
+  const extra = Object.keys(get()).filter((k) => !known.has(k));
+  const box = el("div", {}, grid);
+  if (extra.length) box.append(el("small", { class: "err", text: `知らないタスク（使われない）: ${extra.join("・")}` }));
+  return box;
 }
 
 function objectField(f, obj, commit) {

@@ -38,7 +38,8 @@ the latitude and longitude together), take another field when its own value
 is empty (`fallback`: the coordinates when the record is in no named area),
 write a latitude or longitude in degrees, minutes and seconds (`format`
 `dms`, `dm` or a pattern), and take a name in English (`confidence.en`,
-`area.en`, `place.en`…: the levels' `en`, the layers' NAME_EN). More
+`area.en`, `place.en`…: the levels' `en`, the layers' NAME_EN; `note.en`:
+the 備考 translated by 文章の手伝い in the 通報 window). More
 generally a field can name any value of what a record was matched to:
 `country.code`, `place.PREF_NAME`, `area.NAME_EN`, `rule.NOTE`,
 `confidence.code` — a role of the settings' `fields`, else an attribute of
@@ -72,7 +73,7 @@ SOURCES = (
     "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated",
     "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
     "place", "placeKind", "places", "country", "countryName",
-    "confidence.en", "area.en", "place.en", "placeKind.en", "places.en", "countryName.en",
+    "confidence.en", "area.en", "place.en", "placeKind.en", "places.en", "countryName.en", "note.en",
 )
 TIME_SOURCES = ("imageTime", "created", "updated", "reportedAt")
 NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "score")
@@ -398,6 +399,8 @@ class AlertItem:
     countries: list[NamedArea] = field(default_factory=list)
     #: Its 確度 in English (the level's `en`).
     confidence_en: str = ""
+    #: Its 備考 in English (英訳 of 文章の手伝い, made in the 通報 window when asked; "" until then).
+    note_en: str = ""
     #: The geofences it is in, the rules it met, its 確度 level (for `area.<key>`, `rule.<key>`, `confidence.<key>`).
     fences: list[Geofence] = field(default_factory=list)
     met: list[AlertRule] = field(default_factory=list)
@@ -1563,6 +1566,14 @@ class Moment:
     count: int = 0
 
 
+def uses_source(report: AlertFormat, source: str) -> bool:
+    """Whether a format writes `source` anywhere (its fields, their parts and fallbacks, its log columns)."""
+    def walk(f: Optional[AlertField]) -> bool:
+        return f is not None and (f.source == source or any(walk(p) for p in f.parts) or walk(f.fallback))
+
+    return any(walk(f) for f in [*report.fields, *report.columns.values()])
+
+
 def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, at: Moment) -> Any:
     """A field's value before it is written (times ms, numbers float; the names of a list joined)."""
     o = item.record
@@ -1607,6 +1618,7 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "confidence.en": item.confidence_en, "area.en": joined(item.areas_en),
         "place.en": place.name_en if place else "", "placeKind.en": place.kind_en if place else "",
         "places.en": joined(a.name_en for a in places), "countryName.en": country.name_en if country else "",
+        "note.en": item.note_en,
     }.get(s or "")
 
 
