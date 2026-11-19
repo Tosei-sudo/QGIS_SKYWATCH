@@ -148,10 +148,11 @@ def test_main_passes_the_wheels_brought_in(repo, tmp_path, monkeypatch):
     monkeypatch.setattr(repo, "build_module", lambda: type("B", (), {"main": staticmethod(fake_main)}))
     monkeypatch.setattr(repo, "publish", lambda *a, **k: [])
     repo.main([str(tmp_path / "repo"), "--no-regular", "--onnxruntime-wheel", "o.whl", "--sgp4-wheel", "s.whl",
-               "--tzdata-wheel", "t.whl", "--lock-config", "--config",
+               "--tzdata-wheel", "t.whl", "--onnxruntime-genai-wheel", "g.whl", "--lock-config", "--config",
                os.path.join(ROOT, "mikage", "tests", "data", "viewer-config.jsonc")])
     assert seen[0]["win64"] and seen[0]["lock_config"]
-    assert (seen[0]["onnxruntime_wheel"], seen[0]["sgp4_wheel"], seen[0]["tzdata_wheel"]) == ("o.whl", "s.whl", "t.whl")
+    assert (seen[0]["onnxruntime_wheel"], seen[0]["sgp4_wheel"], seen[0]["tzdata_wheel"], seen[0]["onnxruntime_genai_wheel"]) == (
+        "o.whl", "s.whl", "t.whl", "g.whl")
 
 
 def test_plain_http_is_warned_about(repo, tmp_path, monkeypatch, capsys):

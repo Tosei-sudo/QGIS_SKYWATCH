@@ -13,7 +13,7 @@
 - そのほか: 移動体（AIS・ADS-B）、座標・地名へ移動、背景地図・ArcGIS Web マップ、新規スクラッチレイヤー（テンプレート）、ドックのレイアウト、最初の設定（担当と個人設定）、社内のプラグインリポジトリでの更新配布
 
 - 対応: QGIS 3.34 LTR 以上（Qt5 / Qt6）
-- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の推論だけに必要。AI 学習は追加なし）。numpy は QGIS 付属のもの。Windows 版の zip には両方とも同梱（`timeZone` の IANA 名に使う `tzdata` も）
+- 追加の依存: `sgp4`（任意。なければ同梱の純 Python 版で動く。入れると約 15 倍速い）、`onnxruntime`（AI の推論だけに必要。AI 学習は追加なし）、`onnxruntime-genai`（文章の手伝いだけに必要）。numpy は QGIS 付属のもの。Windows 版の zip にはすべて同梱（`timeZone` の IANA 名に使う `tzdata` も）
 - 閉域ネットワークで動作（外部の暦ファイル・地図タイルを使わない）
 - 名前: 表示名は「MIKAGE」、プラグインのフォルダー名・ID は `mikage`（意味は冒頭のとおり）。2026-11-12 に「SKYWATCH」・`skywatch` から、その前は 2026-11-08 に「衛星撮像計画・観測記録」・`satellite_observation` から変更。古い版（`skywatch`・`satellite_observation`）を入れた PC は、先にそれをアンインストールしてから入れる。設定・ドックのレイアウトなどは引き継がれない
 
@@ -838,6 +838,27 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 - **表記ゆれ**: 備考に表記ゆれ（`VARIANTS`）があると、欄の下に「表記ゆれ: 入航 → 入港（単語集の表記）」と出し、「単語集の表記に直す」ですべて書き換える（Ctrl+Z で戻せる）。全角・半角や大文字・小文字だけが違う語（「ＡＩＳ」「ais」と「AIS」）も出す。もっと長い単語集の語の一部（「停船中」の中の「停船」）、その大分類の語でもあるもの、英字の語の途中（「chairs」の「ais」）は出さない。保存は止めない（自由入力のまま）
 - **読み込み**: 設定ファイルを読んだときに裏で読み、15 分より古くなったら備考の欄に入ったときに読み直す。分類体系の「更新」でも読み直す。読めなければ欄の下にそう出し、前に読んだ語で候補を出す（オフライン作業の控えからも読む）。単語集がなければ備考はこれまでどおり
 - 単語集の語の追加・変更は ArcGIS Pro・Portal でテーブルを直す（プラグインからは書かない）
+
+### 文章の手伝い（小さな生成 AI、`textAssist`）
+
+この PC で動く小さな生成 AI で、観測記録・確認範囲の備考を整えた案と、引き継ぎメモの申し送りの下書きを出す（2026-11-19。tsudo「本当に小さい機能でいいので、量子化されたミニ生成AI機能みたいなの同梱できないか検討してみて」→「両方（備考を先に）」「sarashina2.2-1Bで良いよ」）。どちらも案を出すだけで、押すまで欄は変わらない。サーバーには何も送らない（モデルも計算も PC の中）。
+
+```jsonc
+"textAssist": "\\\\fileserver\\gis\\models\\sarashina-1b-int4"
+// または
+"textAssist": { "model": "models/sarashina-1b-int4.zip", "threads": 0, "keepMinutes": 10 }
+```
+
+- **備考を整える**: 観測記録と確認範囲の「備考」の右の「整える」で、備考を判読記録の文体（短く、体言止め）に直し、誤字を直し、単語集（[`glossary`](#備考の単語集glossary)）の語に寄せた案を欄の下に出す。「置き換える」で備考を案にする（Ctrl+Z で戻せる）、「閉じる」でそのまま。案は意味を変えず情報を足さないように指示し、元の備考にない数字が案にあれば「確認: 元にない数字: 3」、元より大幅に長ければそう出す。単語集の表記ゆれは案にも機械的に直してから出す。直すところがなければ「直すところなし」。案が出る前に備考を打ち直すか別の記録を開くと、その案は取り消す
+- **申し送りの下書き**: 「分担と引き継ぎ」の「引き継ぎメモ」タブの「申し送りの下書き」で、作成したメモの一覧（観測記録・通報・未処理の撮像依頼・分担。まだなら先に「作成」する）から、次の担当者への申し送りを 2〜4 文で下書きする。期限が近い依頼・終わっていない画像・通報を先に書くよう指示し、メモにない数字があれば出す。書きかけの申し送りがあればそれも生かす。「置き換える」「末尾に足す」「閉じる」
+- **速さ**: 4 コアの CPU で、1B 級のモデルの「整える」は 1 回 4〜5 秒、「申し送りの下書き」は 15〜20 秒ほど（同じ形のダミーモデルでの実測からの見込み）。初回だけモデルの読み込みに数秒。書いている途中の文が欄の下に出て、「取消」で止める。生成中も QGIS は止まらない（GIL を離して計算する）
+- **モデル**: ONNX Runtime GenAI の形式（`genai_config.json`・`model.onnx`・`model.onnx.data`・`tokenizer.json` などのフォルダー）。標準は [sarashina2.2-1B-instruct](https://huggingface.co/sbintuitions/sarashina2.2-1b-instruct-v0.1)（SB Intuitions、MIT ライセンス、日本語向け）の int4（約 0.8〜1 GB）。zip には入れない（大きく、プラグインの更新のたびに配り直しになるため）
+  - 管理者がインターネットにつながる PC で一度だけ作る: `pip install onnxruntime-genai torch transformers` のあと `python -m onnxruntime_genai.models.builder -m sbintuitions/sarashina2.2-1b-instruct-v0.1 -o sarashina-1b-int4 -p int4 -e cpu`。できたフォルダー（か、その zip）を共有フォルダーや社内の Web サーバーに置き、`model` に書く
+  - `model` はフォルダー、その `.zip`、`.zip` の URL。相対パスは設定ファイルのフォルダーから。PC の中のフォルダーはそのまま使い、共有フォルダー（`\\server\share`、ネットワークドライブ）のフォルダーは初回に QGIS のプロファイルの `text_models` にコピー、zip は展開、URL の zip はダウンロードして展開する（QGIS のネットワーク・認証設定で。中身が変わったら作り直し、古いものは消す）
+  - 軽くしたいときは sarashina2.2-0.5B-instruct（約 0.5 GB、日本語の評価はやや下）も同じ手順で使える
+- **設定**: `threads`（既定 0 = コア数 − 1、最大 8）、`maxTokens`（整えた備考の最大の長さ、既定 160 トークン）、`handoverMaxTokens`（申し送り、既定 320）、`keepMinutes`（使い終えてからモデルを残す分数、既定 10。過ぎるとメモリーを返す、0 ですぐ外す）。モデルへの指示は `notePrompt`・`handoverPrompt`（文章）と `noteExamples`（`[{ "kind", "note", "tidy" }]`、指示の前に見せる例）で置き換えられる
+- **必要なもの**: `onnxruntime` と `onnxruntime-genai`。Windows 版の zip には同梱（下の「[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)」）。ほかは QGIS の Python に `python -m pip install onnxruntime-genai`（QGIS 側の onnxruntime の上で動く。1.29 以上で確認）。ないときは「整える」を押すとその旨を出す。ONNX Runtime GenAI のテレメトリーは読み込み時に止める（ONNX Runtime のものも、[Windows 版](#windows-版onnxruntimeonnxruntime-genaisgp4tzdata-を同梱)の説明のとおり止めている）
+- **注意**: 小さいモデルなので、言い直しはできても事実は間違えることがある。案は必ず読んでから使う。`textAssist` がなければボタンは出ない（今までどおり）
 
 ### 通報（注目の記録・`alertReports`）
 
@@ -1713,18 +1734,18 @@ QGIS の起動が終わって設定ファイルを読んだら、ドックを初
 2. QGIS の「プラグイン」→「プラグインの管理とインストール」→「ZIP からインストール」（閉域で多くの PC に配り、更新も知らせるなら下の「社内のプラグインリポジトリで更新を配る」）
 3. メニュー「プラグイン」→「MIKAGE」→「設定…」で設定ファイル（パスか URL）を指定し「読み込み」。問題があれば一覧に出る。設定ファイルの指定はこのメニューだけで、各ドックには出さない。読み込んだ設定ファイルに問題があると、QGIS のメッセージバーに「問題 n 件」と「設定…」ボタンを出す（同じファイル・同じ問題では繰り返さない）
 
-### Windows 版（onnxruntime・sgp4・tzdata を同梱）
+### Windows 版（onnxruntime・onnxruntime-genai・sgp4・tzdata を同梱）
 
 ```
 python3 scripts/build_zip.py --win64
 ```
 
-- `dist/mikage-<版>-win64.zip` を作る。中の `mikage/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
-- 3 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
-- ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱
+- `dist/mikage-<版>-win64.zip` を作る。中の `mikage/ext/win64/` に ONNX Runtime（AI の道具用、QGIS の Python 3.12 向け）と ONNX Runtime GenAI（[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の生成 AI 用、その ONNX Runtime の上で動く）と `sgp4`（C++ 版、軌道計算が約 15 倍速い）と `tzdata`（タイムゾーンのデータベース、設定ファイルの `timeZone` 用）が入り、QGIS 側に入っていなければこちらを使う。pip を入れられない閉域の Windows でもそのまま動く
+- 4 つの wheel は pip で取得して `dist/wheels` に置く（2 回目からは再利用）。閉域では `--onnxruntime-wheel onnxruntime-*-cp312-cp312-win_amd64.whl --onnxruntime-genai-wheel onnxruntime_genai-*-cp312-cp312-win_amd64.whl --sgp4-wheel sgp4-*-win_amd64.whl --tzdata-wheel tzdata-*-py2.py3-none-any.whl` で持ち込んだものを指定
+- ONNX Runtime は推論の本体（`capi`）だけを入れ、変換・量子化の道具は除く（約 15 MB）。ONNX Runtime GenAI はモデルの変換の道具（`models`）を除く（zip で約 5 MB 増える）。ライセンス文書（`LICENSE`・`ThirdPartyNotices.txt`）は同梱。生成 AI のモデル（0.5〜1 GB）は zip に入れない（[文章の手伝い](#文章の手伝い小さな生成-aitextassist)）
 - ONNX Runtime のテレメトリー（公式版は 1.31 から Microsoft へ HTTPS で送る。既定でオン）は、プラグインが読み込む前に環境変数 `ORT_DISABLE_TELEMETRY=1` を設定し、読み込み後も `disable_telemetry_events()` で止める（同梱・QGIS 側に入れたもののどちらでも）。管理者が `ORT_DISABLE_TELEMETRY` を設定済みならその値のまま
 - `--config` と併用可
-- DLL を含む onnxruntime と sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\mikage\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
+- DLL を含む onnxruntime・onnxruntime-genai・sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\mikage\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
 - この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/mikage` を消す）
 
 ### 設定ファイルを同梱して配る
@@ -1769,7 +1790,7 @@ python3 scripts/make_plugin_repo.py \\fileserver\share\qgis-plugins --config con
 - 版は `metadata.txt` の版の後ろに UTC の日時（秒まで）を付けたもの（例 `0.4.0.20261108123000`）。QGIS は掲載の版が入っている版より大きいときだけ更新と見なすため、作るたびに必ず大きくなるようにしている。`--version` で指定もできる。大きな変更では `metadata.txt` の版（`0.4.0` → `0.5.0`）を上げる
 - 掲載中の版より新しくない zip は載せない。前の版に戻すときは、残っている古い zip を `--zip 古い.zip --allow-older` で載せ直す（各 PC では「プラグインの管理」で入れ直し）。古い zip は消さずに残す
 - `--config`・`--lock-config`（同梱の設定ファイルに固定）は `build_zip.py` と同じで、通常版・Windows 版の両方に効く。`--zip a.zip a-win64.zip` で作ってある zip を載せる（中の版のまま、Windows 版かどうかは中身で判断）。`--no-win64`・`--no-regular` で片方だけ作る
-- 閉域では Windows 版の wheel（onnxruntime・sgp4・tzdata）を pip で取れないので、外で `pip download onnxruntime sgp4 tzdata --only-binary=:all: --platform win_amd64 --python-version 3.12 --no-deps -d wheels` で取ったものを持ち込み、`dist/wheels/` に置く（そのまま使われる）か `--onnxruntime-wheel`・`--sgp4-wheel`・`--tzdata-wheel` で指定する。持ち込み直すのはライブラリの版を上げるときだけ
+- 閉域では Windows 版の wheel（onnxruntime・onnxruntime-genai・sgp4・tzdata）を pip で取れないので、外で `pip download onnxruntime onnxruntime-genai sgp4 tzdata --only-binary=:all: --platform win_amd64 --python-version 3.12 --no-deps -d wheels` で取ったものを持ち込み、`dist/wheels/` に置く（そのまま使われる）か `--onnxruntime-wheel`・`--onnxruntime-genai-wheel`・`--sgp4-wheel`・`--tzdata-wheel` で指定する。持ち込み直すのはライブラリの版を上げるときだけ
 - zip を先に置いてから `plugins.xml` を差し替えるので、作っている途中に各 PC が読んでも、ない zip を指すことはない
 - `--url` を付けないと、ダウンロード先はフォルダーの `file://` アドレス（`\\fileserver\share\qgis-plugins` なら `file://fileserver/share/qgis-plugins`）。Linux でマウントした共有フォルダーに作るときは、各 PC から見えるアドレスを `--url file://fileserver/share/qgis-plugins` のように付ける
 - 掲載は「実験的でない」扱いにする（`metadata.txt` は `experimental=True` だが、そのままだと各 PC で「実験的なプラグインも表示する」を入れないと見えないため）。`--experimental` で実験版として載せることもできる
@@ -1947,6 +1968,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
 | `observationVocabulary` | オブジェクト | `taxonomy`（分類の木。`{ "name", "levels", "nameLabel", "members", "specs", "photos", "activities", "children" }`、名前だけの文字列も可）、`kinds`（`taxonomy` がないときの種別）、`activities`（既定の活動）、`confidences`（確度。文字列か `{ "label", "color", "note", "en", … }`。`en` は英語の名前で通報の `confidence.en`、ほかのキー（`code` など）は通報の `confidence.code` など）、`specFields`（諸元の項目。名前か `{ "name", "type": "text"・"number"・"list"・"url", "unit" }`）、`matchRadius`（同一候補の半径 m） | 既定の分類体系（大分類ごとの活動つき） | [活動](#活動大分類ごとの切り替え)、[分類体系の編集](#分類体系の編集) |
 | `glossary` | URL かオブジェクト | 備考の単語集の Esri のテーブル（1 語 1 行、読むだけ）。`{ "url", "fields", "where", "token" }`（既定の属性名は [`TBL_GLOSSARY`](#tbl_glossary備考の単語集)） | なし（備考に候補を出さない） | [備考の単語集](#備考の単語集glossary) |
+| `textAssist` | 文字列かオブジェクト | 文章の手伝いの小さな生成 AI のモデル（ONNX Runtime GenAI のフォルダー・その `.zip`・`.zip` の URL）。`{ "model", "threads", "maxTokens", "handoverMaxTokens", "keepMinutes", "notePrompt", "noteExamples", "handoverPrompt" }` | なし（「整える」「申し送りの下書き」を出さない） | [文章の手伝い](#文章の手伝い小さな生成-aitextassist) |
 | `alertReports` | オブジェクト | 注目の記録の通報。`rules`（条件テーブル）・`geofences`（ポリゴンレイヤー）・`namedAreas`（地名のポリゴンレイヤー、項目 `place`）・`countries`（国のポリゴンレイヤー、項目 `country`）・`table`（通報テーブル、編集可）はそれぞれ URL か `{ "url", "fields", "where", "token" }`。`minConfidence`・`presentOnly`（既定 `true`）、`notifyOnSave`（保存時のお知らせ、既定 `true`）、`live`（通知ドックの「通報」タブの自動更新: `{ "seconds": 30, "days": 7 }`（既定）・秒数・`false`）、`mail`（「通報」タブの「メールを作成」: `to`・`cc`・`bcc`・`subject`・`header`・`footer`・`encoding`・`maxLength`、`true` で宛先なし）、`score`（重要度スコア: `weights`・`rarity`・`minScore`、`false` で付けない）、`formats`（必須。名前付きのフォーマットの配列: `name`・`fields`・`delimiter`・`escape`・`header`・`footer`・`dateFormat`・`timeZone`・`newline`・`clipboard`・`file`・`columns`）、`default`（最初に選ぶフォーマットの名前） | なし（メニューはあるが使用不可） | [通報](#通報注目の記録alertreports) |
 | `observationExports` | オブジェクト | 観測記録のエクスポートのフォーマット。`formats`（名前付きの配列: `name`・`format`（`csv`・`json`）・`columns`・`schema`・`fileName`・`encoding`・`header`・`delimiter`・`newline`・`timeZone`・`dateFormat`・`digits`）、`default`、`namedAreas`・`geofences`（URL か `{ "url", "fields", "where", "token" }`。なければ `alertReports` のもの） | 組み込みの「標準（CSV）」「標準（JSON）」のみ | [観測記録のエクスポート](#観測記録のエクスポートobservationexports) |
 | `assignments` | URL かオブジェクト | 分担（画像ごとの担当）の Esri のテーブル（編集可）。`{ "url", "fields", "where", "token", "claimOnRecord", "mode" }`（`claimOnRecord: false` でクリック記録の開始時に担当を取らない。`mode`: `"shared"` 協業 = 同じ画像を何人でも（既定）、`"exclusive"` 排他 = 1 画像 1 人） | なし（分担は出ない） | [分担と引き継ぎメモ](#分担と引き継ぎメモassignmentshandover) |
@@ -2754,7 +2776,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 ```
 mikage/
   core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録・AI の前後処理（NumPy）
-  ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime と C++ 版 sgp4 と tzdata も）
+  ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime・onnxruntime-genai と C++ 版 sgp4 と tzdata も）
   qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
   processing_provider/  Processing のアルゴリズム（パンシャープン・物体検出・AI 学習・教師データセットほか）
   ui/        ドック・ダイアログ

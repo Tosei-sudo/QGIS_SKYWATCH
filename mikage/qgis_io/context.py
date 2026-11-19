@@ -87,6 +87,10 @@ class PluginContext(QObject):
         from .glossary_io import GlossaryKeeper
 
         self.glossary = GlossaryKeeper(self)
+        #: 文章の手伝い (`textAssist`): the small generative model, loaded when first asked (qgis_io/text_assist_io.py).
+        from .text_assist_io import TextAssistant
+
+        self.text_assist = TextAssistant(self)
 
     def reload(self) -> None:
         """
@@ -304,6 +308,8 @@ class PluginContext(QObject):
             for url in (getattr(x, name, "") for name in ("url", "encoder", "decoder")):
                 if _web(url):
                     out.append(Service("AI モデル", x.label, url, False))
+        if c.text_assist is not None and _web(c.text_assist.model):
+            out.append(Service("文章の手伝い", "モデル", c.text_assist.model, False))
         # One row per URL: the first role that names it.
         seen: set = set()
         unique = []

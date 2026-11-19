@@ -64,6 +64,7 @@ from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip, save_text
 from .flow_layout import FlowLayout
 from .note_assist import NoteAssist
+from .text_assist_ui import NoteTidy
 from .list_views import ListViews, column_menus
 from .obs_many import ManyPanel
 from .obs_overlay import Mark, ObservationOverlay, Scene, color_of
@@ -449,10 +450,14 @@ class ObservationDock(PluginDock):
         self.area_kinds_model = self._completer(self.area_kind)
         self.area_note = QLineEdit()
         f.addRow(tr("対象の種別"), self.area_kind)
-        f.addRow(tr("備考"), self.area_note)
+        # 文章の手伝い (`textAssist`): 「整える」 beside the field, the proposal under it (tsudo 2026-11-19).
+        self.area_note_tidy = NoteTidy(self.area_note, self.context.text_assist, self.context.glossary, self.area_kind.text,
+                                       lambda: (path_of(self.area_kind.text()) or [""])[0], self)
+        f.addRow(tr("備考"), self.area_note_tidy.row())
         # 備考の単語集 (`glossary`): suggestions while typing, and the other spellings found (tsudo 2026-11-17).
         self.area_note_assist = NoteAssist(self.area_note, self.context.glossary, lambda: (path_of(self.area_kind.text()) or [""])[0], self)
         f.addRow(self.area_note_assist.notice)
+        f.addRow(self.area_note_tidy.panel)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("確認範囲の記録（Enter）"), "", self._submit_area))
         actions.addWidget(self._button(tr("取消（Esc）"), "", lambda: self.area_button.setChecked(False)))
@@ -516,9 +521,12 @@ class ObservationDock(PluginDock):
         self.measure_note = plain_label(QLabel())
         f.addRow(self.measure_note)
         self.note_input = QLineEdit()
-        f.addRow(tr("備考"), self.note_input)
+        self.note_tidy = NoteTidy(self.note_input, self.context.text_assist, self.context.glossary, self.kind_input.text,
+                                  lambda: (path_of(self.kind_input.text()) or [""])[0], self)
+        f.addRow(tr("備考"), self.note_tidy.row())
         self.note_assist = NoteAssist(self.note_input, self.context.glossary, lambda: (path_of(self.kind_input.text()) or [""])[0], self)
         f.addRow(self.note_assist.notice)
+        f.addRow(self.note_tidy.panel)
         actions = QHBoxLayout()
         self.submit_button = self._button(tr("記録（Enter）"), "", lambda: self.submit(True))
         self.absent_button = self._button(tr("不在"), tr("この画像での不在（見当たらず）を記録"), lambda: self.submit(False))
