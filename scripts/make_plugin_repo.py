@@ -12,7 +12,7 @@ QGIS's plugin manager reads, for closed networks where plugins.qgis.org cannot b
 The folder then holds:
 
     plugins.xml            the repository for the regular zip (each PC adds this URL in QGIS)
-    plugins-win64.xml      the repository for the Windows zip (onnxruntime, sgp4 and tzdata inside)
+    plugins-win64.xml      the repository for the Windows zip (onnxruntime, onnxruntime-genai, sgp4 and tzdata inside)
     mikage.<version>.zip / mikage.<version>.win64.zip
     icon.svg
 
@@ -241,6 +241,7 @@ def main(argv=None) -> list[str]:
     parser.add_argument("--onnxruntime-wheel", default="", help="同梱する onnxruntime の wheel（build_zip.py と同じ、指定なしで dist/wheels か pip）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（同上）")
     parser.add_argument("--tzdata-wheel", default="", help="同梱する tzdata の wheel（同上）")
+    parser.add_argument("--onnxruntime-genai-wheel", default="", help="同梱する onnxruntime-genai の wheel（同上）")
     parser.add_argument("--changelog", default="", help="プラグインの管理に出す変更点")
     parser.add_argument("--experimental", action="store_true", help="実験版として載せる（各 PC で「実験的なプラグインも表示する」が要る）")
     parser.add_argument("--allow-older", action="store_true", help="掲載中より古い版でも載せる（前の版に戻すとき）")
@@ -260,7 +261,7 @@ def main(argv=None) -> list[str]:
         if not args.no_win64:
             zips.append(b.main(args.config, work, win64=True, lock_config=args.lock_config, version=version,
                                onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
-                               tzdata_wheel=args.tzdata_wheel))
+                               tzdata_wheel=args.tzdata_wheel, onnxruntime_genai_wheel=args.onnxruntime_genai_wheel))
     addresses = publish(args.out, zips, args.url, args.changelog, args.experimental, args.allow_older)
     for a in addresses:
         print(a)

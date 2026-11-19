@@ -7,5 +7,7 @@ pytest-xdist
 pytest-timeout
 sgp4
 onnxruntime
+# 文章の手伝い（textAssist）の実行。なければその試験を飛ばす（tests/genai_tiny.py の小さなモデルで動かす）
+onnxruntime-genai
 # ArcGIS ダッシュボード用のビュー（tools/arcgis/dashboard_views_oracle.sql）の列の照合。なければその 1 件を飛ばす
 sqlglot

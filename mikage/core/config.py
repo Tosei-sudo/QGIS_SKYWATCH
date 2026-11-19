@@ -51,13 +51,14 @@ from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
 from .preload import ITEMS as PRELOAD_ITEMS, preload_of
 from .shape_receiver import DEFAULT_RECEIVER, ReceiverSettings, receiver_settings_of
+from .text_assist import TextAssistSettings, text_assist_settings_of
 from .analysis_cache import DEFAULT_MINUTES as ANALYSIS_CACHE_MINUTES
 from .util import is_number
 
 #: The keys this plugin reads.
 KEYS = (
     "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "satelliteOutages", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "rasterSpeed", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "arcgisPortals", "layers",
+    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "rasterSpeed", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "textAssist", "arcgisPortals", "layers",
     "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
     "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
     "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
@@ -95,6 +96,8 @@ class PluginConfig:
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     #: `glossary`: the Esri table of the words the 備考 should use (備考の単語集, core/obs/glossary.py); None for none.
     glossary: Optional[EsriSource] = None
+    #: `textAssist`: the small generative model of 文章の手伝い (備考を整える・申し送りの下書き, core/text_assist.py); None hides it.
+    text_assist: Optional[TextAssistSettings] = None
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
     #: `layers`: added to an empty project when QGIS starts (the first entry at the bottom).
     startup_layers: list[StartupLayer] = field(default_factory=list)
@@ -329,6 +332,8 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
         config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
     if "glossary" in value:
         config.glossary = glossary_source_of(value["glossary"], problems)
+    if "textAssist" in value:
+        config.text_assist = text_assist_settings_of(value["textAssist"], problems)
     if "arcgisPortals" in value:
         seen: set[str] = set()
         portals = []

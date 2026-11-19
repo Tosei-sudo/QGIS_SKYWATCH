@@ -32,6 +32,7 @@ from ..core.request.export import format_time
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
 from .fit import fit_text
+from .text_assist_ui import HandoverDraft
 
 DAY_MS = 86_400_000
 
@@ -128,12 +129,17 @@ class HandoverDialog(QDialog):
         self.memo_edit.setPlaceholderText(self.tr("申し送り（次の担当者へ伝えること）"))
         self.memo_edit.setMaximumHeight(90)
         form.addRow(self.tr("申し送り"), self.memo_edit)
+        # 文章の手伝い (`textAssist`): a 申し送り drafted from the memo's lists, offered under it (tsudo 2026-11-19).
+        self._after_make = None
+        self.memo_draft = HandoverDraft(self.memo_edit, dock.context.text_assist, self.text_edit_text, self._make_then, self)
+        form.addRow(self.memo_draft.panel)
         h.addLayout(form)
         row = QHBoxLayout()
         self.make_button = QPushButton(self.tr("作成"))
         self.make_button.setToolTip(self.tr("期間の観測記録・通報・未処理の撮像依頼・分担を読んでメモを作成"))
-        self.make_button.clicked.connect(self.make)
+        self.make_button.clicked.connect(lambda _on=False: self.make())
         row.addWidget(self.make_button)
+        row.addWidget(self.memo_draft.button)
         row.addStretch(1)
         h.addLayout(row)
         self.text_edit = QPlainTextEdit()
@@ -348,6 +354,10 @@ class HandoverDialog(QDialog):
         end = self.end_edit.dateTime().toMSecsSinceEpoch()
         if end <= start:
             self._say(self.tr("期間の終わりが始まりより前"))
+            if self._after_make is not None:
+                self._after_make = None
+                self.memo_draft.waiting = False
+                self.memo_draft.panel.say(self.tr("期間の終わりが始まりより前のため、下書きなし"))
             return
         book = self.dock.book
         scoped = book is not None and book.scoped
@@ -406,16 +416,33 @@ class HandoverDialog(QDialog):
             self._data = data
             self._say(self.tr("引き継ぎメモを作成（編集してから保存・コピー）") if not data.problems
                       else self.tr("一部を読めずに作成: {p}").format(p="・".join(data.problems)))
+            then, self._after_make = self._after_make, None
+            if then is not None:
+                then()
 
         def failed(message: str) -> None:
             self.make_button.setEnabled(True)
             self._say(self.tr("引き継ぎメモの作成の失敗: {m}").format(m=message))
+            if self._after_make is not None:
+                self._after_make = None
+                self.memo_draft.waiting = False
+                self.memo_draft.panel.say(self.tr("引き継ぎメモを作成できず、下書きなし"))
 
         if not records and book is None:
             self._say(self.tr("観測記録の保存先なし（記録の欄は 0 件）"))
         self.make_button.setEnabled(False)
         self._say(self.tr("作成中…"))
         run_task(self.tr("引き継ぎメモの作成"), work, finished, failed)
+
+    def text_edit_text(self) -> str:
+        """The memo made (and edited) so far."""
+        return self.text_edit.toPlainText()
+
+    def _make_then(self, then) -> bool:
+        """Makes the memo, then calls `then` (the 申し送り's draft waits for the memo's lists)."""
+        self._after_make = then
+        self.make()
+        return True
 
     def _read_progress(self, book) -> None:
         """Asks a shared store for the records of the assignments' images not asked yet (shown again once read)."""
