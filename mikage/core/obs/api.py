@@ -79,6 +79,7 @@ def record_out(o: Observation) -> dict[str, Any]:
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": _iso(o.image_time), "objectId": o.object_id,
         "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "confidence": o.confidence or "",
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
+        "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
 

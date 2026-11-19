@@ -1031,7 +1031,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `dateFormat` | 日時の書式 | `iso` |
 | `digits` | 経度・緯度の小数の桁（長さ・向き・幅は 1 桁） | `7` |
 
-項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false）・`confidence`・`imageTime`・`imageId`・`imageName`・`lon`・`lat`・`length`・`heading`・`width`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
+項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false）・`confidence`・`imageTime`・`imageId`・`imageName`・`lon`・`lat`・`length`・`heading`・`width`・`pixelX`・`pixelY`（画像ファイルの画素位置）・`imageFile`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
 
 ```jsonc
 "observationExports": {
@@ -1335,6 +1335,8 @@ Python からは `api.analysis`（`tables`・`set_sql(text)`・`set_value(name, 
 - 画像のファイルは変えない。QGIS のプロファイルのフォルダーに位置情報だけ動かした小さな VRT を作り、レイヤーの参照先をそれに替える（スタイル・画像補正・手で設定した座標系・「範囲を固定」の範囲はそのまま）。ずらした画像は Processing・書き出し・このプラグインの道具でもずらした位置で扱われる
 - 動かすのはファイルが位置を持っているもの: ジオトランスフォーム、なければ GCP（SAR の L1 など四隅の点で位置が付いた画像）、なければ RPC（緯度・経度のオフセット）、何もない画像は QGIS の画素の格子。以前は GCP・RPC の画像をずらすと地図全体が 1 画素の灰色で埋まった（2026-11-18 に修正）
 - 「位置ずらしの解除」でファイルの位置に戻す（グループを選んでいればその画像すべて）
+- ずらした画像に付けた観測記録は、地図上の位置（経緯度）とは別に、元のファイルの画素位置（`PIXEL_X`・`PIXEL_Y`・`IMAGE_FILE`）も残す。AI 学習はこの画素位置に枠を置くので、学習のときに画像をずらしていてもいなくても枠が物体に合う（画素位置のない以前の記録は経緯度で置く）
+- 以前はカタログ外の画像をずらすと、その画像の記録の画像 ID が VRT のファイル名になり撮像日時も消えた（2026-11-19 に修正）
 
 ## ArcGIS Web マップ
 
@@ -2336,6 +2338,9 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `LENGTH_M` | 長さ | `Double` | 長さ（m、2 点以上で測ったとき） | `length` |
 | `HEADING` | 向き | `Double` | 向き（度、北から時計回り） | `heading` |
 | `WIDTH_M` | 幅 | `Double` | 幅（m、3・4 点で測ったとき） | `width` |
+| `PIXEL_X` | 画素X | `Double` | 記録の点の、画像ファイルの左上からの画素位置（右へ、全解像度、小数あり）。記録したとき・位置を直したときに画像が開いていれば入る。位置ずらしした画像でも元のファイルの画素。画像の外ならマイナスや幅より大きい値。AI 学習で枠をこの画素に置く。無くても動く | `pixelX` |
+| `PIXEL_Y` | 画素Y | `Double` | 同じく下へ数えた画素位置 | `pixelY` |
+| `IMAGE_FILE` | 画像ファイル | `String(255)` | その画素位置のファイル（フォルダのレコードの画像はフォルダ内のパス、ほかはファイル名） | `imageFile` |
 | `CONFIDENCE` | 確度 | `String(64)` | 確定・推定・不明など | `confidence` |
 | `OBSERVER` | 記録者 | `String(255)` | 記録した人 | `recordedBy` |
 | `UPDATED_BY` | 更新者名 | `String(255)` | 最後に直した人（記録者と同じ名前の欄） | `updatedBy` |

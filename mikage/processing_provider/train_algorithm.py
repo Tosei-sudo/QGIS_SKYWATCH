@@ -48,7 +48,10 @@ from ..core.ai.train.dataset import DatasetError
 from ..core.obs.scope import RecordQuery
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.dataset_io import DatasetImage, dataset_labels, image_grid, open_image, pixel_rows, read_datasets, whole_image
-from ..qgis_io.train_io import Gathered, area_geometries, labels_from_book, labels_from_features, pixel_boxes, thin, windows_of
+from ..qgis_io.pixel_place import cached_placement
+from ..qgis_io.train_io import (
+    Gathered, area_geometries, labels_from_book, labels_from_features, pixel_boxes, placed_by_pixels, thin, windows_of,
+)
 from .detect_algorithm import image_info
 
 HERE = os.path.dirname(os.path.dirname(__file__))
@@ -211,7 +214,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             # Read off the main thread: a copy of the layer, as QGIS's own map rendering algorithms do.
             self._layers.append(layer.clone())
             self._images.append({"name": name, "id": image_id, "crs": layer.crs(), "extent": layer.extent(),
-                                 "pixel": pixel, "bands": layer.bandCount()})
+                                 "pixel": pixel, "bands": layer.bandCount(), "placement": cached_placement(layer)})
         self._transform_context = context.transformContext()
         book = _book()
         taxonomy = list(book.taxonomy()) if book is not None else []
@@ -352,7 +355,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             if feedback.isCanceled():
                 return {}
             feedback.setProgressText(tr("画像を読み込み中… {name}").format(name=image["name"]))
-            found_here, error = self._read(self._layers[i], image, model, self._labels_of(gathered, image), rng, feedback)
+            found_here, error = self._read(self._layers[i], image, model, self._labels_of(gathered, image, feedback), rng, feedback)
             if error:
                 raise QgsProcessingException(error)
             feedback.setProgress(10 * (i + 1) / len(self._images))
@@ -447,10 +450,14 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
         feedback.setProgress(100)
         return answer
 
-    def _labels_of(self, gathered: Gathered, image: dict) -> Callable:
-        """The objects and checked areas of a map image, in a grid's pixels."""
+    def _labels_of(self, gathered: Gathered, image: dict, feedback=None) -> Callable:
+        """The objects and checked areas of a map image, in a grid's pixels (records that know their pixel in the file there)."""
+        placed, moved = placed_by_pixels(gathered.labels, image["id"], image.get("placement"))
+        if moved and feedback is not None:
+            feedback.pushInfo(tr("{name}: 記録のピクセル位置で置いた物体 {n} 件").format(name=image["name"], n=moved))
+
         def labels(grid, classes):
-            return (pixel_boxes(gathered.labels, grid, image["crs"], self._transform_context, classes, image["id"]),
+            return (pixel_boxes(placed, grid, image["crs"], self._transform_context, classes, image["id"]),
                     area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"]),
                     area_geometries(gathered.areas, grid, image["crs"], self._transform_context, image["id"], hard=True))
         return labels

@@ -423,3 +423,54 @@ def find_activities(book, path):
     from mikage.core.obs.taxonomy import find
 
     return find(book.kept_taxonomy(), path).activities
+
+
+def test_records_keep_where_they_are_in_their_images_file(book, monkeypatch):
+    """
+    tsudo 2026-11-19: a record keeps its pixel in the image's file (PIXEL_X・PIXEL_Y・IMAGE_FILE), found when it is
+    placed (made, moved, carried into another image) from the image as it lies then; kept when it is not moved.
+    """
+    from mikage.core.ai_results import ImportEntry
+
+    asked = []
+
+    def locate(image_id, lon, lat):
+        asked.append(image_id)
+        if image_id == "dx":
+            raise RuntimeError("not placed")
+        return f"{image_id}.tif", (lon - 139.6) * 1000, (35.7 - lat) * 1000
+
+    book.locate = locate
+    a = book.submit(139.7, 35.6, FormValues(object="", kind="船舶"))
+    assert (a.image_file, a.pixel_x, a.pixel_y) == ("d1.tif", pytest.approx(100), pytest.approx(100))
+    # Changed but not moved: as it was (not asked again).
+    b = book.update(a.id, note="見張り")
+    assert (b.image_file, b.pixel_x, b.pixel_y) == (a.image_file, a.pixel_x, a.pixel_y) and asked == ["d1"]
+    # Moved: found again; moved where the image is not open: none (not the old place's).
+    assert book.move(a.id, 139.71, 35.6).pixel_x == pytest.approx(110)
+    book.locate = None
+    c = book.move(a.id, 139.72, 35.6)
+    assert (c.image_file, c.pixel_x, c.pixel_y) == ("", None, None)
+    book.locate = locate
+    book.move(a.id, 139.7, 35.6)
+    # Carried into another image: that image's pixel, not the one it came from.
+    assert book.step(1).id == "d3"
+    carried = book.carry(a.object_id, True)
+    assert (carried.image_id, carried.image_file, carried.pixel_x) == ("d3", "d3.tif", pytest.approx(100))
+    # Not found (the image's model fails): saved without it.
+    book.step(1)
+    lost = book.submit(139.7, 35.6, FormValues(object="", kind="船舶"))
+    assert lost is not None and (lost.image_file, lost.pixel_x) == ("", None)
+    # An AI result of another system brings its own pixel (found by the file's own place): kept.
+    book.step(-2)
+    [ai] = book.add_many([ImportEntry(139.65, 35.65, "", "船舶", "", "", "外部AI", None, None, pixel=("d1.tif", 1.5, 2.5))])
+    assert (ai.image_file, ai.pixel_x, ai.pixel_y) == ("d1.tif", 1.5, 2.5)
+    # Kept in the GeoPackage.
+    book.reload()
+    assert (book.record(a.id).image_file, book.record(a.id).pixel_x) == ("d1.tif", pytest.approx(100))
+    assert book.record(ai.id).pixel_y == 2.5
+    # A record not saved keeps its pixel in 送信待ち (the image may be closed when it is sent).
+    monkeypatch.setattr(book.store, "save", lambda rows: (_ for _ in ()).throw(OSError("down")))
+    assert book.submit(139.75, 35.62, FormValues(object="", kind="船舶")) is None
+    kept = book.drafts()[-1].record
+    assert (kept.image_file, kept.pixel_x, kept.pixel_y) == ("d1.tif", pytest.approx(150), pytest.approx(80))

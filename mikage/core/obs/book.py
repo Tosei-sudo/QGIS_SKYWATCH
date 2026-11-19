@@ -233,6 +233,9 @@ class ObservationBook:
         self._around: dict[str, tuple] = {}
         #: Image id → (around key, when it could not be read): not asked again for AROUND_RETRY_MS (the screens ask on every render).
         self._around_failed: dict[str, tuple] = {}
+        #: Where a place (lon, lat) is in an image's file as the image lies on the map now: (image id, lon, lat) →
+        #: (file, pixel x, pixel y), None when the image is not open (set by the plugin: qgis_io/pixel_place.py).
+        self.locate: Optional[Callable[[str, float, float], Optional[tuple[str, float, float]]]] = None
 
     # ---- what is said --------------------------------------------------
 
@@ -738,6 +741,44 @@ class ObservationBook:
 
     # ---- writing records -----------------------------------------------
 
+    def _placed(self, rows: list[Observation]) -> list[Observation]:
+        """
+        The records with where they are in their image's file (pixel_x,
+        pixel_y, image_file): found for a new record and one moved (another
+        place or image) from the image as it lies on the map now (moved by
+        位置ずらし too: the file's own pixels), none when the image is not open
+        (an old value is not kept for a new place). A record not moved keeps
+        its own (an older one without them stays so); a new one given them
+        (an AI result found in the file) keeps those.
+        """
+        before = {o.id: o for o in self.records}
+        out = []
+        for o in rows:
+            was = before.get(o.id)
+            if was is not None and (was.lon, was.lat, was.image_id) == (o.lon, o.lat, o.image_id):
+                out.append(o)
+                continue
+            if was is None and o.pixel_x is not None and o.pixel_y is not None:
+                out.append(o)
+                continue
+            found = None
+            if self.locate is not None:
+                try:
+                    found = self.locate(o.image_id, o.lon, o.lat)
+                except Exception:  # noqa: BLE001 (never stops a record: saved without its pixels)
+                    found = None
+            out.append(replace(o, image_file=found[0], pixel_x=found[1], pixel_y=found[2]) if found
+                       else replace(o, pixel_x=None, pixel_y=None, image_file=""))
+        return out
+
+    def _kept(self, rows: list[Observation]) -> list[Observation]:
+        """The records as the store keeps them (an Esri layer without some optional attributes: those left out)."""
+        as_kept = getattr(self.store, "as_kept", None)
+        try:
+            return as_kept(rows) if callable(as_kept) else rows
+        except Exception:  # noqa: BLE001 (as they are)
+            return rows
+
     def _save_records(self, rows: list[Observation], done: str) -> Optional[list[Observation]]:
         """Saves records in the store and in the list; the records as saved, None when the store refused."""
         if not rows:
@@ -746,11 +787,13 @@ class ObservationBook:
         known = {o.id for o in self.records}
         # Who made (a new record) and who changed it: the one recording now.
         rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
+        rows = self._placed(rows)
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
             self._say(f"{self.store.label} への保存失敗: {_error_text(error)}")
             return None
+        rows = self._kept(rows)
         with self.lock:
             by_id = {o.id: o for o in rows}
             self.records = [by_id.pop(o.id, o) for o in self.records] + list(by_id.values())
@@ -910,6 +953,8 @@ class ObservationBook:
         return self.shelf.get(self.store.label, draft_id)
 
     def keep_draft(self, draft: Draft, replaces: Optional[str] = None) -> None:
+        # Where it is in its image, found now (the image may be closed when it is sent).
+        draft = replace(draft, record=self._placed([draft.record])[0])
         self.shelf.keep(self.store.label, draft, replaces)
         self.last_draft_id = draft.id
 
@@ -970,6 +1015,10 @@ class ObservationBook:
             values = FormValues(object=e.object, kind=e.kind, activity=e.activity, confidence=e.confidence, note=e.note,
                                 length=_text(e.length), heading=_text(e.heading), width=_text(_width_of(e)))
             record = self.record_from(info, e.lon, e.lat, None, None, values, True)
+            pixel = getattr(e, "pixel", None)
+            if pixel:
+                # Where the entry is in the file, found before (an AI result of another system: by the file's own place).
+                record = replace(record, image_file=pixel[0], pixel_x=pixel[1], pixel_y=pixel[2])
             name = e.object.strip()
             # The same name typed twice in one save is one thing, but a class's name (given when none is typed).
             if name and name not in path_of(record.kind) and name != "モノ":

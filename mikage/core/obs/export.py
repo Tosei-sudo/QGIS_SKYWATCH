@@ -53,14 +53,14 @@ from .taxonomy import kind_of, path_of
 #: What a column (or a schema's `x-source`) can take.
 RECORD_SOURCES = (
     "id", "objectId", "objectName", "kind", "activity", "present", "confidence", "imageTime", "imageId", "imageName",
-    "lon", "lat", "length", "heading", "width", "note", "recordedBy", "updatedBy", "created", "updated", "deleted",
-    "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
+    "lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "imageFile", "note", "recordedBy", "updatedBy", "created",
+    "updated", "deleted", "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
 )
 #: Of the file, the same for every record.
 FILE_SOURCES = ("count", "exportedAt", "exportedBy", "periodStart", "periodEnd", "periodBasis", "areaName", "format")
 SOURCES = RECORD_SOURCES + FILE_SOURCES
 TIME_SOURCES = ("imageTime", "created", "updated", "deleted", "exportedAt", "periodStart", "periodEnd")
-NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width")
+NUMBER_SOURCES = ("lon", "lat", "length", "heading", "width", "pixelX", "pixelY")
 #: The sources that need the named areas or the geofences read.
 PLACE_SOURCES = ("place", "placeKind", "places")
 FENCE_SOURCES = ("geofences",)
@@ -162,7 +162,7 @@ STANDARD_COLUMNS = (
     ("OBS_ID", "id"), ("OBJECT_ID", "objectId"), ("OBJECT_NAME", "objectName"), ("KIND", "kind"), ("ACTIVITY", "activity"),
     ("PRESENT", "present"), ("CONFIDENCE", "confidence"), ("IMAGE_TIME", "imageTime"), ("IMAGE_ID", "imageId"),
     ("IMAGE_NAME", "imageName"), ("LON", "lon"), ("LAT", "lat"), ("LENGTH_M", "length"), ("HEADING_DEG", "heading"),
-    ("WIDTH_M", "width"), ("NOTE", "note"), ("RECORDED_BY", "recordedBy"), ("UPDATED_BY", "updatedBy"),
+    ("WIDTH_M", "width"), ("PIXEL_X", "pixelX"), ("PIXEL_Y", "pixelY"), ("IMAGE_FILE", "imageFile"), ("NOTE", "note"), ("RECORDED_BY", "recordedBy"), ("UPDATED_BY", "updatedBy"),
     ("CREATED_AT", "created"), ("UPDATED_AT", "updated"), ("DELETED_AT", "deleted"),
 )
 PLACE_COLUMNS = (("PLACE", "place"), ("PLACE_KIND", "placeKind"), ("PLACES", "places"))
@@ -484,6 +484,7 @@ def raw_value(item: Optional[ExportItem], col: ExportColumn, index: int, ctx: Ex
         "id": o.id, "objectId": o.object_id, "objectName": o.object_name, "activity": o.activity, "present": o.present,
         "confidence": o.confidence or "", "imageTime": o.image_time, "imageId": o.image_id, "imageName": o.image_name,
         "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "note": o.note,
+        "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "recordedBy": o.recorded_by or "", "updatedBy": o.updated_by or "", "created": o.created_at, "updated": o.updated_at,
         "deleted": o.deleted_at,
         "place": places[0].name if places else "", "placeKind": places[0].kind if places else "",
