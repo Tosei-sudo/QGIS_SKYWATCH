@@ -71,7 +71,7 @@ class Gathered:
 def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, within_kinds: Sequence[str] = (),
                      default_size: float = 20.0) -> Gathered:
     """
-    The observation records (not 不在, not deleted) as labels: each box from
+    The observation records (not 消失, not deleted) as labels: each box from
     the record's length and heading, else the class' 全長・全幅, else
     `default_size` metres; and the checked areas that cover every class trained.
     """
@@ -80,7 +80,7 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         if o.deleted_at is not None:
             continue
         if not o.present:
-            out.skip("不在の記録")
+            out.skip("消失の記録")
             continue
         cls = class_of(o.kind, taxonomy, depth, within_kinds)
         if not cls:

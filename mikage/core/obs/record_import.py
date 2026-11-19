@@ -139,7 +139,7 @@ def _number(value: Any) -> tuple[Optional[float], bool]:
 
 
 _YES = {"あり", "在", "1", "true", "yes", "y", "○", "有", "present"}
-_NO = {"なし", "不在", "0", "false", "no", "n", "×", "無", "absent"}
+_NO = {"なし", "不在", "消失", "0", "false", "no", "n", "×", "無", "absent"}
 
 
 def _present(value: Any) -> Optional[bool]:

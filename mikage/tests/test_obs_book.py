@@ -134,7 +134,7 @@ def test_records_every_thing_carried_over_as_gone_those_in_a_checked_area_too(bo
     # Only the ones kept (as the list shows them).
     made = book.absent_all(lambda x: x.source.kind == "船舶")
     assert sorted((o.object_id, o.present, o.activity) for o in made) == sorted([(a.object_id, False, ""), (b.object_id, False, "")])
-    assert book.status == "2 のモノを不在として記録"
+    assert book.status == "2 のモノを消失として記録"
     assert [x.source.object_id for x in book.carried()] == [c.object_id]
     assert [(o.object_id, o.present) for o in book.absent_all()] == [(c.object_id, False)]
     assert book.carried() == [] and book.absent_all() == []

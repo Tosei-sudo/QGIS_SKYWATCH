@@ -66,6 +66,8 @@ def profile(root: str, config: str) -> None:
     os.makedirs(os.path.join(folder, "python", "plugins"))
     os.makedirs(os.path.join(folder, "QGIS"))
     os.symlink(PLUGIN, os.path.join(folder, "python", "plugins", "mikage"))
+    # QSettings reads an INI file's bytes as Latin-1: anything else is written as \xXXXX (else 田中 shows garbled).
+    recorder = "".join(c if ord(c) < 128 else f"\\x{ord(c):04x}" for c in "田中")
     with open(os.path.join(folder, "QGIS", "QGIS3.ini"), "w", encoding="utf-8") as f:
         f.write(f"""[PythonPlugins]
 mikage=true
@@ -73,7 +75,7 @@ mikage=true
 [mikage]
 firstSetupDone=1
 config_source={config}
-recorder=田中
+recorder={recorder}
 
 [qgis]
 showTips340=false

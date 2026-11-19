@@ -1,7 +1,7 @@
 """
 Observations (観測記録), as the viewer (observations.ts): one record per
 thing per image — when, where, what thing (モノ) and what it was doing
-(活動), or that it was no longer there (不在).
+(活動), or that it was no longer there (消失).
 
 This module holds the record, the vocabulary (活動・確度・分類) and the
 `observationStores` / `observationVocabulary` entries of the settings file.
@@ -37,7 +37,7 @@ class Observation:
     kind: str
     #: 活動.
     activity: str
-    #: False for 「不在」.
+    #: False for 「消失」.
     present: bool
     note: str
     lon: float

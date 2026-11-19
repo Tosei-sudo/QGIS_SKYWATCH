@@ -1685,7 +1685,7 @@ const SPEC = [
         TJ("countries", "国", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "国のポリゴンのレイヤー（なくてもよい。領海・EEZ を含めれば海上の記録にも付く）。役割: " + Object.entries(K.roles.alertCountries).map(([k, v]) => `${k}（${v}）`).join("・") + "。記録を含むもの（重なればいちばん小さいもの）が項目 country（国コード）・countryName（国名）・countryName.en。10 分ごと・「抽出」で読み直す" }),
         TJ("table", "通報テーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "通報した記録（1 記録 1 行）。役割: " + Object.entries(K.roles.alertLog).map(([k, v]) => `${k}（${v}）`).join("・") + "。ここにある記録は次から抽出しない" }),
         T("minConfidence", "確度の下限", { help: "この確度以上（確度の並びで上のもの）だけ。空ならすべて" }),
-        B("presentOnly", "不在を除く", { help: "既定 true" }),
+        B("presentOnly", "消失を除く", { help: "既定 true" }),
         B("notifyOnSave", "保存時に知らせる", { help: "既定 true。保存した記録が条件に合えばメッセージバーに「注目の記録」" }),
         O("live", "通知ドックの「通報」タブ", [
           N("seconds", "更新の間隔（秒。0 で手動のみ、2 秒未満は 2 秒）", { min: 0, ph: "30" }),
