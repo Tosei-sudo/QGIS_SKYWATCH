@@ -122,7 +122,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <p>よくある 3 つの作業を、画面の写真で順に追います。写真の<span class="ui">赤い枠と番号</span>（①②…）が、押す所・見る所です。写真は練習用の見本データで撮ったもので、名称・日付・件数はお使いの環境とは違います。ボタンがツールバーにないときは、<a href="#first-setup">担当と個人設定</a> で担当を選ぶか、<a class="open" href="mikage:open/ツールバーのボタン…">ツールバーのボタン…</a> で足してください。</p>
 <table>
 <tr><th>手順</th><th>だれが</th><th>流れ</th></tr>
-<tr><td><a href="#howto-obs">画像を探して記録し、担当を完了する</a></td><td>観測記録の担当</td><td>画像カタログで検索 → 画像を開く → クリック記録 → 前の画像のモノを継続・不在 → 分担を完了</td></tr>
+<tr><td><a href="#howto-obs">画像を探して記録し、担当を完了する</a></td><td>観測記録の担当</td><td>画像カタログで検索 → 画像を開く → クリック記録 → 前の画像のモノを継続・消失 → 分担を完了</td></tr>
 <tr><td><a href="#howto-request">撮像を依頼して、計画に入ったか確かめる</a></td><td>撮像を依頼する人</td><td>撮像依頼を登録（1 件ずつ、またはレイヤーからまとめて） → 撮像予定で採否を見る → 地点ごとの撮像予定で次の撮像を見る</td></tr>
 <tr><td><a href="#howto-plan">撮像計画を計算して出し、採否を入れる</a></td><td>撮像計画の担当</td><td>撮像計画ファイル出力で計算 → 調整システムに渡すファイルを書き出す → 返ってきた採否を入れる</td></tr>
 </table>
@@ -141,10 +141,10 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <p><img src="images/obs-05-click.png" alt="地図で船をクリック"></p>
 <p><b>6. 種別・活動を入れて記録する。</b>フォームの <span class="ui">大分類 ▸ 種別 ▸ 級</span> のボタンで種別をたどり（①）、活動（②。ボタンか数字キー <span class="key">1</span>〜<span class="key">9</span>）、確度（③）、必要なら備考を入れて <span class="ui">記録</span>（④、<span class="key">Enter</span>）。記録はその場で保存先に保存されます。保存できなかったときは、入れた内容のままフォームが戻ります。</p>
 <p><img src="images/obs-06-form.png" alt="新規の記録のフォーム"></p>
-<p><b>7. 前の画像にいたモノを確かめる。</b>白抜きの印（①）は、前の画像で記録したモノです。クリックするとそのモノのフォームが出るので、まだいれば <span class="ui">継続</span>（②、<span class="key">Enter</span>）、いなければ <span class="ui">不在</span>（③）。全部まだいるなら、ドックの <span class="ui">すべて継続</span> でまとめて継続に、全部いなくなっていれば <span class="ui">すべて不在</span> でまとめて不在にできます。</p>
+<p><b>7. 前の画像にいたモノを確かめる。</b>白抜きの印（①）は、前の画像で記録したモノです。クリックするとそのモノのフォームが出るので、まだいれば <span class="ui">継続</span>（②、<span class="key">Enter</span>）、いなければ <span class="ui">消失</span>（③）。全部まだいるなら、ドックの <span class="ui">すべて継続</span> でまとめて継続に、全部いなくなっていれば <span class="ui">すべて消失</span> でまとめて消失にできます。</p>
 <p><img src="images/obs-07-ghost.png" alt="前の画像のモノの白抜きの印"></p>
-<p><img src="images/obs-08-carry.png" alt="前の画像のモノを継続または不在にする"></p>
-<p><b>8. 記録を確かめる。</b>記録したモノは一覧（①）と地図に出ます。灰色の行は、前の画像のモノでこの画像ではまだ確かめていないものです。残っていれば 7. と同じように継続か不在にします。</p>
+<p><img src="images/obs-08-carry.png" alt="前の画像のモノを継続または消失にする"></p>
+<p><b>8. 記録を確かめる。</b>記録したモノは一覧（①）と地図に出ます。灰色の行は、前の画像のモノでこの画像ではまだ確かめていないものです。残っていれば 7. と同じように継続か消失にします。</p>
 <p><img src="images/obs-09-saved.png" alt="記録の一覧"></p>
 <p><b>9. 分担を完了にする。</b>見終わったら、分担の行の <span class="ui">完了</span>（①）。行が「担当者なし（○○ さんが完了済み）」に変わります。</p>
 <p><img src="images/obs-10-done-before.png" alt="分担の行の完了"></p>
@@ -402,14 +402,15 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <li>分担を使っている職場では、画像の下の行で <span class="ui">この画像を担当</span>（記録を始めると自動で担当になります）</li>
 <li><span class="ui">クリック記録</span>（<span class="key">R</span>）を押し、地図でモノをクリック</li>
 <li>フォームで種別（ボタンで階層をたどる）・活動（<span class="key">1</span>〜<span class="key">9</span>）・確度・備考を入れて <span class="key">Enter</span></li>
-<li>前の画像にいたモノは白抜きの印で出ます。まだいるなら印をクリックするか <span class="ui">継続</span>、いなければ <span class="ui">不在</span>。全部まだいるなら <span class="ui">すべて継続</span>、全部いなければ <span class="ui">すべて不在</span></li>
-<li>見終わった範囲を残すときは <span class="ui">確認範囲</span>（<span class="key">A</span>）。範囲内で記録のないモノを <span class="ui">確認範囲内 n 件を不在</span> でまとめて不在にできます</li>
+<li>前の画像にいたモノは白抜きの印で出ます。まだいるなら印をクリックするか <span class="ui">継続</span>、いなければ <span class="ui">消失</span>。全部まだいるなら <span class="ui">すべて継続</span>、全部いなければ <span class="ui">すべて消失</span></li>
+<li>見終わった範囲を残すときは <span class="ui">確認範囲</span>（<span class="key">A</span>）。範囲内で記録のないモノを <span class="ui">確認範囲内 n 件を消失に</span> でまとめて消失にできます</li>
 <li>終わったら、分担の行の <span class="ui">完了</span></li>
 </ol>
 <p>画面の写真つきの手順は <a href="#howto-obs">画像を探して記録し、担当を完了する</a> にあります。</p>
 <div class="tip">新しく記録したモノの近くに前からいるモノがあると「同一候補」が出ます。<span class="key">Alt+1</span>〜<span class="key">Alt+5</span> で選ぶと、そのモノの続きとして記録されます。</div>
-<div class="tip" id="obs-count-only">モノを追わず、画像ごとに見えた数だけを取る部門では、メニュー <span class="ui">担当と個人設定…</span> の <span class="ui">数えるだけの大分類</span> でその大分類（車両など）にチェックします。その大分類では前の画像のモノ（白抜きの印）・同一候補・不在の印が出なくなり、不在を付けなくてよくなります。記録は「数える記録」になり、モノを追うほかの人の画面でも次の画像に引き継がれません。同じ大分類でも、人ごとに選べます。選んでいる間はドックに <span class="ui">数えるだけ: 車両</span> と出て、押すと選び直せます。</div>
+<div class="tip" id="obs-count-only">モノを追わず、画像ごとに見えた数だけを取る部門では、メニュー <span class="ui">担当と個人設定…</span> の <span class="ui">数えるだけの大分類</span> でその大分類（車両など）にチェックします。その大分類では前の画像のモノ（白抜きの印）・同一候補・消失の印が出なくなり、消失を付けなくてよくなります。記録は「数える記録」になり、モノを追うほかの人の画面でも次の画像に引き継がれません。同じ大分類でも、人ごとに選べます。選んでいる間はドックに <span class="ui">数えるだけ: 車両</span> と出て、押すと選び直せます。</div>
 <div class="tip" id="obs-glossary">職場で単語集を用意しているときは、備考を打っている間、打っている語の候補が欄の下に出ます（「岸壁に入」で「入港」など。よみや別の書き方でも出ます）。<span class="key">Tab</span> で先頭の候補、<span class="key">↓</span> で選んで <span class="key">Enter</span>。何も選ばずに <span class="key">Enter</span> を押せばそのまま記録します。単語集と違う書き方（「入航」など）は欄の下に「表記ゆれ: 入航 → 入港」と出て、<span class="ui">単語集の表記に直す</span> で直せます（直さなくても保存できます）。</div>
+<div class="tip" id="obs-tidy">職場で「文章の手伝い」（この PC で動く小さな生成 AI）を用意しているときは、備考の右に <span class="ui">整える</span> が出ます。押すと数秒で、備考を記録の書き方（短く、体言止め）に直し単語集の語に寄せた案が欄の下に出ます。<span class="ui">置き換える</span> で備考が案になり（<span class="key">Ctrl</span>+<span class="key">Z</span> で戻せます）、<span class="ui">閉じる</span> でそのままです。小さな AI なので言い直しは得意でも、事実を間違えることがあります。元にない数字が出たときは「確認」と出るので、読んでから使ってください。</div>
 
 <h3 id="obs-points">長さ・向き・幅も測る（2〜4 点）</h3>
 <p>クリック数は <span class="key">L</span> で 1 → 2 → 3 → 4 点と切り替えます（最初の設定でも選べます）。</p>
@@ -478,6 +479,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 
 <h3 id="obs-handover">交代のとき（引き継ぎメモ）</h3>
 <p>メニュー <a class="open" href="mikage:open/引き継ぎメモ…">観測記録 ▸ 引き継ぎメモ…</a>。期間と申し送りを入れて <span class="ui">作成</span> すると、その間の記録・通報・分担の件数がまとまった文章ができます。手で直してから <span class="ui">保存</span>（次の人の画面の上に出ます）か <span class="ui">コピー</span>。</p>
+<p id="obs-handover-draft">「文章の手伝い」を用意しているときは、<span class="ui">作成</span> の右の <span class="ui">申し送りの下書き</span> で、メモの一覧から次の人への申し送りを 2〜4 文で下書きします（15〜20 秒ほど）。期限が近い依頼や終わっていない画像が先に来ます。<span class="ui">置き換える</span> か <span class="ui">末尾に足す</span> で申し送りに入ります。数字などは必ず一覧と見比べてください。</p>
 
 <h3 id="obs-out">記録を外に出す・まとめて入れる</h3>
 <ul>
@@ -627,8 +629,8 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <tr><td>種別・大分類</td><td>モノの分類（例: 船舶 ▸ 貨物船）。いちばん上の階層が大分類</td></tr>
 <tr><td>活動</td><td>モノがしていたこと（停泊・航行・駐機など）。大分類ごとに候補が変わる</td></tr>
 <tr><td>確度</td><td>その判読がどのくらい確かか</td></tr>
-<tr><td>継続・不在</td><td>前の画像にいたモノが、この画像でもいる（継続）・いない（不在）</td></tr>
-<tr><td>確認範囲</td><td>この画像で見終わった範囲。範囲内で記録のないモノは不在とみなせる</td></tr>
+<tr><td>継続・消失</td><td>前の画像にいたモノが、この画像でもいる（継続）・いない（消失）</td></tr>
+<tr><td>確認範囲</td><td>この画像で見終わった範囲。範囲内で記録のないモノは消失とみなせる</td></tr>
 <tr><td>分担</td><td>誰がどの画像を担当しているかの共有。協業（何人でも）と排他（1 人だけ）がある</td></tr>
 <tr><td>オフナディア角</td><td>衛星の真下からどれだけ斜めに見るかの角度。大きいほど広く撮れるが画像はゆがむ</td></tr>
 <tr><td>DRA</td><td>表示範囲の明るさの分布に合わせて、自動で見やすく引き伸ばすこと</td></tr>

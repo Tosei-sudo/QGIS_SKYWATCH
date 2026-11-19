@@ -272,7 +272,7 @@ def _text(v: Any) -> str:
 def _present_of(v: Any) -> bool:
     if v is False or (is_number(v) and v == 0):
         return False
-    return not re.fullmatch(r"(0|false|no|なし|いない|不在)", _text(v).strip(), re.IGNORECASE)
+    return not re.fullmatch(r"(0|false|no|なし|いない|不在|消失)", _text(v).strip(), re.IGNORECASE)
 
 
 def _flag_of(v: Any) -> bool:

@@ -4,15 +4,17 @@ Builds the plugin's zip for QGIS (Plugins → Install from ZIP): dist/mikage-<ve
     python3 scripts/build_zip.py                      # the plugin alone (or with mikage/config.json if present)
     python3 scripts/build_zip.py --config my.json     # with a settings file shipped as mikage/config.json
     python3 scripts/build_zip.py --config my.json --lock-config   # ...and the plugin reads only that file
-    python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime, sgp4 and tzdata inside
+    python3 scripts/build_zip.py --win64              # the Windows zip: -win64.zip, with onnxruntime, onnxruntime-genai, sgp4 and tzdata inside
     python3 scripts/build_zip.py --version 0.4.0.20261108123000   # the zip's metadata.txt says this version (scripts/make_plugin_repo.py)
 
 The Windows zip carries ONNX Runtime (for the AI tools, built for QGIS's
-Python 3.12), sgp4 (the C++ accelerated orbits, any Python from 3.11) and
-tzdata (the time zone database Windows lacks, for the settings file's
-timeZone) in mikage/ext/win64, used when QGIS has none of its
-own. Their wheels are downloaded with pip (from PyPI, or the index pip is set
-to) unless given with --onnxruntime-wheel / --sgp4-wheel / --tzdata-wheel.
+Python 3.12), ONNX Runtime GenAI (文章の手伝い's small generative model, on
+that ONNX Runtime; its model converter left out), sgp4 (the C++ accelerated
+orbits, any Python from 3.11) and tzdata (the time zone database Windows
+lacks, for the settings file's timeZone) in mikage/ext/win64, used when QGIS
+has none of its own. Their wheels are downloaded with pip (from PyPI, or the
+index pip is set to) unless given with --onnxruntime-wheel /
+--onnxruntime-genai-wheel / --sgp4-wheel / --tzdata-wheel.
 
 A shipped settings file is read when the person has not chosen one in the
 settings dialog. It is checked first: the zip is not made when it cannot be
@@ -42,6 +44,8 @@ LOCK_TEXT = "同梱の設定ファイル（config.json / config.jsonc）だけ�
 WIN64 = "mikage/ext/win64"
 #: What of ONNX Runtime's package is carried: its core (the converters, quantization and tools are left out).
 ONNXRUNTIME_KEEP = {"__init__.py", "capi", "LICENSE", "ThirdPartyNotices.txt", "Privacy.md"}
+#: What of ONNX Runtime GenAI's package is left out: its model converter (run once by an administrator, with PyTorch, not in QGIS).
+GENAI_DROP = {"models"}
 #: QGIS's Python on Windows, which the carried ONNX Runtime is built for.
 WIN_PYTHON = "3.12"
 
@@ -74,8 +78,8 @@ def wheel(package: str, given: str, cache: str, tag: str = "win_amd64") -> str:
     return found[-1]
 
 
-def wheel_files(path: str, package: str, keep=None, skip=()) -> list[tuple[str, bytes]]:
-    """The files of `package` in a wheel (top-level names in `keep` when given, `skip` left out), with its licence."""
+def wheel_files(path: str, package: str, keep=None, skip=(), drop=()) -> list[tuple[str, bytes]]:
+    """The files of `package` in a wheel (top-level names in `keep` when given, those in `drop` and file names in `skip` left out), with its licence."""
     out = []
     with zipfile.ZipFile(path) as w:
         for info in w.infolist():
@@ -83,7 +87,8 @@ def wheel_files(path: str, package: str, keep=None, skip=()) -> list[tuple[str, 
             if info.is_dir():
                 continue
             if parts[0] == package and len(parts) > 1:
-                if (keep is not None and parts[1] not in keep) or parts[-1] in skip or "__pycache__" in parts:
+                if ((keep is not None and parts[1] not in keep) or (len(parts) > 2 and parts[1] in drop) or parts[-1] in skip
+                        or "__pycache__" in parts):
                     continue
                 out.append((info.filename, w.read(info)))
             elif parts[0].endswith(".dist-info") and parts[-1].startswith("LICENSE"):
@@ -101,7 +106,7 @@ def stamp_version(path: str, version: str) -> str:
 
 
 def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_wheel: str = "", sgp4_wheel: str = "",
-         tzdata_wheel: str = "", lock_config: bool = False, version: str = "") -> str:
+         tzdata_wheel: str = "", lock_config: bool = False, version: str = "", onnxruntime_genai_wheel: str = "") -> str:
     """Builds the zip; `version` (when given) replaces metadata.txt's in the zip, as an internal plugin repository needs a new one for each release."""
     if version and not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
         raise SystemExit(f"版の書き方が違う: {version}（数字とピリオドだけ、例 0.4.0.20261108123000）")
@@ -123,6 +128,7 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
     if win64:
         cache = os.path.join(ROOT, "dist", "wheels")
         carried += wheel_files(wheel("onnxruntime", onnxruntime_wheel, cache), "onnxruntime", ONNXRUNTIME_KEEP)
+        carried += wheel_files(wheel("onnxruntime_genai", onnxruntime_genai_wheel, cache), "onnxruntime_genai", drop=GENAI_DROP)
         carried += wheel_files(wheel("sgp4", sgp4_wheel, cache), "sgp4", skip=("tests.py", "SGP4-VER.TLE", "tcppver.out"))
         carried += wheel_files(wheel("tzdata", tzdata_wheel, cache, "none-any"), "tzdata")
     target = os.path.join(out_dir, f"mikage-{version}{'-win64' if win64 else ''}.zip")
@@ -150,11 +156,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", default="", help="同梱する設定ファイル（config.json）")
     parser.add_argument("--lock-config", action="store_true", help="同梱の設定ファイルに固定（受け取った人はほかの設定ファイルを指定できない）")
-    parser.add_argument("--win64", action="store_true", help="Windows 版（onnxruntime・sgp4・tzdata を同梱、-win64.zip）")
+    parser.add_argument("--win64", action="store_true", help="Windows 版（onnxruntime・onnxruntime-genai・sgp4・tzdata を同梱、-win64.zip）")
     parser.add_argument("--onnxruntime-wheel", default="", help="同梱する onnxruntime の wheel（cp312 win_amd64、指定なしで pip で取得）")
     parser.add_argument("--tzdata-wheel", default="", help="同梱する tzdata の wheel（指定なしで pip で取得）")
+    parser.add_argument("--onnxruntime-genai-wheel", default="", help="同梱する onnxruntime-genai の wheel（cp312 win_amd64、指定なしで pip で取得）")
     parser.add_argument("--version", default="", help="zip の metadata.txt に書く版（指定なしで metadata.txt のまま）")
     parser.add_argument("--sgp4-wheel", default="", help="同梱する sgp4 の wheel（win_amd64、指定なしで pip で取得）")
     args = parser.parse_args()
     print(main(args.config, win64=args.win64, onnxruntime_wheel=args.onnxruntime_wheel, sgp4_wheel=args.sgp4_wheel,
-               tzdata_wheel=args.tzdata_wheel, lock_config=args.lock_config, version=args.version))
+               tzdata_wheel=args.tzdata_wheel, lock_config=args.lock_config, version=args.version,
+               onnxruntime_genai_wheel=args.onnxruntime_genai_wheel))

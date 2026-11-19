@@ -79,7 +79,7 @@ def test_a_counter_sees_nothing_carried_over_or_offered_in_a_counted_top_class(d
     assert [c.source.id for c in counter.carried_for("d2")] == [ship.id]
     assert counter.candidates(139.7001, 35.6001, "車両") == []
     assert [c.source.id for c in counter.candidates(139.7101, 35.6101, "船舶")] == [ship.id]
-    # 「すべて継続」「すべて不在」 leave the counted 大分類 alone.
+    # 「すべて継続」「すべて消失」 leave the counted 大分類 alone.
     assert [o.object_id for o in counter.absent_all()] == [ship.object_id]
     # A new car is a thing of its own (not the follower's one), and counted.
     mine = counter.submit(139.7001, 35.6001, FormValues(object="", kind="車両"))

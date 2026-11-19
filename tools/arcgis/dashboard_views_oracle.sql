@@ -555,7 +555,7 @@ SELECT
     TRIM(REGEXP_SUBSTR(o.KIND, '[^>]+$'))                              AS LEAF_KIND,
     o.ACTIVITY,
     o.PRESENT,
-    CASE o.PRESENT WHEN 1 THEN '在' WHEN 0 THEN '不在' END             AS PRESENT_LABEL,
+    CASE o.PRESENT WHEN 1 THEN '在' WHEN 0 THEN '消失' END             AS PRESENT_LABEL,
     o.CONFIDENCE,
     o.NOTE,
     o.LENGTH_M,
@@ -784,7 +784,7 @@ LEFT JOIN VW_OBS_RECORD v ON v.OBS_ID = l.OBS_ID;
 -- 11. VW_NAMED_AREA_WEEK（地名 × 週）: 地名 1 つ・7 日 1 区間 = 1 行（直近 26 区間）・形状なし
 --     区間は今日で終わる 7 日ずつ（WEEKS_AGO 0 = 今日までの 7 日、1 = その前の 7 日 …）。暦の週にしないのは、
 --     月曜の朝に「今週」が少なく見えないようにするため。
---     数えるのは「不在」以外の記録（RECORDS）と、その中のモノの数（THINGS）。記録は 1 つの地名
+--     数えるのは「消失」以外の記録（RECORDS）と、その中のモノの数（THINGS）。記録は 1 つの地名
 --     （含むうちいちばん小さいもの）にだけ数える: 湾の中の港の記録は港に数え、湾には足さない。
 --     平常との差はプラグインの「活動の推移」（core/dashboard.py の trends）と同じ決め方:
 --       NORMAL = 前の 8 区間の平均、ばらつき = 標準偏差（平均の平方根・1 より小さければそちら）、
@@ -890,7 +890,7 @@ FROM t;
 -- 12. VW_NAMED_AREA_THING（地名 × モノ）: 地名 1 つ・モノ 1 つ = 1 行・ポイント（その地名での最後の記録）
 --     その地名で見たモノを、そこで最初・最後に見た日時と回数で並べる。モノの名前・分類は VW_OBS_THING
 --     （最後に書かれたもの）。WHERE_NOW: モノの最後の記録（どの地名でも）がこの地名か。
---       ここ（1 か月以内）・ここ（1 か月より前）・不在を確認（最後の記録がここの「不在」）・その後ほかで見た
+--       ここ（1 か月以内）・ここ（1 か月より前）・消失を確認（最後の記録がここの「消失」）・その後ほかで見た
 --     （「ほか」には地名の外も入る）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_NAMED_AREA_THING AS
@@ -945,7 +945,7 @@ SELECT
     CASE WHEN t.LAST_NAMED_AREA_OBJECTID = r.NAMED_AREA_OBJECTID THEN 1 ELSE 0 END AS IS_LAST_PLACE,
     CASE
         WHEN NVL(t.LAST_NAMED_AREA_OBJECTID, -1) <> r.NAMED_AREA_OBJECTID THEN 'その後ほかで見た'
-        WHEN t.LAST_PRESENT = 0                                            THEN '不在を確認'
+        WHEN t.LAST_PRESENT = 0                                            THEN '消失を確認'
         WHEN t.IN_LAST_MONTH = 1                                           THEN 'ここ（1 か月以内）'
         ELSE 'ここ（1 か月より前）'
     END                                                                AS WHERE_NOW
@@ -959,7 +959,7 @@ WHERE r.RN = 1;
 -- ---------------------------------------------------------------------------------------------
 -- 13. VW_NAMED_AREA_STATUS（地名の様子）: 地名 1 つ = 1 行・ポリゴン（TBL_NAMED_AREA の範囲）
 --     直近 7 日と平常との差（VW_NAMED_AREA_WEEK の WEEKS_AGO = 0）、30 日の件数・モノの数・多い大分類、
---     最後に見た日、いまいそうなモノの数（THINGS_LAST_HERE: 最後に見たのがここで 1 か月以内・不在でない）、
+--     最後に見た日、いまいそうなモノの数（THINGS_LAST_HERE: 最後に見たのがここで 1 か月以内・消失でない）、
 --     30 日の通報（通報した記録の数）。無効の地名（ACTIVE = 0）も出す（ACTIVE_LABEL で絞る）。
 --     PLACE_LABEL は「地名（管理番号）」: 同じ名前の地名があっても選び分けられるように。
 -- ---------------------------------------------------------------------------------------------

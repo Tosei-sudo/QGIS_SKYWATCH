@@ -25,6 +25,19 @@ def test_ships_the_viewers_config(tmp_path):
     assert not any("/tests/" in n for n in names)
 
 
+def test_the_genai_wheel_is_carried_without_its_model_builder(tmp_path):
+    """onnxruntime-genai's models/ (the builder that converts a model, with its own Python) is not needed to run one."""
+    b = build()
+    path = tmp_path / "onnxruntime_genai-0.20.0-cp312-cp312-win_amd64.whl"
+    with zipfile.ZipFile(path, "w") as w:
+        for name in ("onnxruntime_genai/__init__.py", "onnxruntime_genai/onnxruntime-genai.dll", "onnxruntime_genai/models/builder.py",
+                     "onnxruntime_genai/models/builders/llama.py", "onnxruntime_genai-0.20.0.dist-info/LICENSE",
+                     "onnxruntime_genai-0.20.0.dist-info/RECORD"):
+            w.writestr(name, "x")
+    names = [n for n, _ in b.wheel_files(str(path), "onnxruntime_genai", drop=b.GENAI_DROP)]
+    assert names == ["onnxruntime_genai/__init__.py", "onnxruntime_genai/onnxruntime-genai.dll", "onnxruntime_genai/LICENSE"]
+
+
 def test_refuses_a_broken_config(tmp_path):
     b = build()
     broken = tmp_path / "config.json"

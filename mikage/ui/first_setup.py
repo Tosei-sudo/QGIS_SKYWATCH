@@ -238,7 +238,7 @@ class FirstSetupDialog(QDialog):
         count_grid.setContentsMargins(0, 0, 0, 0)
         count_grid.setHorizontalSpacing(12)
         tip = tr("チェックした大分類は継続を追わず、画像ごとに見えた数だけ記録する。\n"
-                 "前後の画像のモノ（白抜きの印）・同一候補・不在の印を出さず、記録は「数える記録」になる\n"
+                 "前後の画像のモノ（白抜きの印）・同一候補・消失の印を出さず、記録は「数える記録」になる\n"
                  "（ほかの人の画面でも次の画像に引き継がない）。同じ大分類でも、人ごとに選べる")
         for i, root in enumerate(roots):
             check = QCheckBox(root)
@@ -247,7 +247,7 @@ class FirstSetupDialog(QDialog):
             count_grid.addWidget(check, i // 4, i % 4)
             self.count_checks[root] = check
         count_rows.addLayout(count_grid)
-        count_hint = QLabel(tr("継続を追わず、見えた数だけ記録する大分類（前後の画像のモノ・同一候補・不在を出さない）"))
+        count_hint = QLabel(tr("継続を追わず、見えた数だけ記録する大分類（前後の画像のモノ・同一候補・消失を出さない）"))
         count_hint.setStyleSheet("color: #57534e;")
         count_hint.setToolTip(tip)
         count_rows.addWidget(count_hint)

@@ -67,7 +67,7 @@ class Draft:
         """What it is, in a line (「あおば: 変更 船舶（停泊）」)."""
         r = self.record
         what = "変更" if self.editing else "継続" if self.source_id else "新規"
-        text = f"{what} {r.kind}" + (f"（{r.activity}）" if r.activity else "") + ("" if r.present else "（不在）")
+        text = f"{what} {r.kind}" + (f"（{r.activity}）" if r.activity else "") + ("" if r.present else "（消失）")
         return f"{r.object_name}: {text}" if r.object_name else text
 
 

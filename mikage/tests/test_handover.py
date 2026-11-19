@@ -160,7 +160,7 @@ def test_the_memo_has_every_part():
     assert "\r" not in text
     lines = text.split("\n")
     assert lines[0] == "引き継ぎメモ 11/07 16:20〜11/08 00:20（作成 sato・11/08 00:20）"
-    assert "■ 観測記録: 新規 2 件（うち不在 1 件）・更新 1 件・削除 1 件" in lines
+    assert "■ 観測記録: 新規 2 件（うち消失 1 件）・更新 1 件・削除 1 件" in lines
     assert "  分類: 航空機 1・船舶 1" in lines and "  記録者: sato 1・suzuki 1" in lines
     assert "■ 通報: 1 件（速報 1）" in lines and "  11/07 19:20 11/07 17:20|船舶|船A" in lines
     i = lines.index("■ 未処理の撮像依頼: 3 件（うち 24 時間以内に期限 1 件）")
