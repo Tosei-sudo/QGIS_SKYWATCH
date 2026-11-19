@@ -21,6 +21,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 
 - 日時は UTC で保存されている。`TARGET_DATE` は対象日の日本時間 0 時。ビューが作る日付（`..._DATE`）も同じく「日本時間 0 時を UTC で」持つので、ダッシュボード（ブラウザーの日本時間）でそのまま日本の日になる
 - 観測記録・確認範囲は論理削除（`DELETED_AT` が入った行は削除済み）なので、ビューで除く
+- 雲などで見えなかった記録（「不可」、2026-11-19）は `UNSEEN_REASON` に理由が入り `PRESENT` は空。ビューでは `PRESENT_LABEL` が「不可」、`LOOKED` が 0。モノの「最後に見た」・地名の件数には数えない。不可範囲（`TBL_OBSERVATION_AREA` の `UNSEEN_REASON` あり）は判読の進み具合で確認範囲と分けて数える。ビューは両方のテーブルに `UNSEEN_REASON` を足してから作り直す（`create_tables.py` をもう一度実行すれば足りない属性だけ足される）
 - 依頼者向けのものは出力履歴を読み、台帳（`TBL_IMAGING_REQUEST`）は読まない。台帳を読むのは計画担当向けの P4 だけで、属性は足さない
 - ビューの名前は `VW_` で始め、ほかは `TBL_` の命名の決まり（大文字・`_` 区切り・30 文字以内）に合わせる。書き込めない表だと名前で分かるようにするため
 - P1 は [arcgis-setup.md](arcgis-setup.md) の「3. 撮像予定（採否）のダッシュボード」の改良
@@ -212,9 +213,9 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | `VW_PLAN_QUOTA_USAGE` | 年間上限の行（今年度） | なし | `TBL_IMAGING_QUOTA`・`VW_PLAN_SHOT` | `CONSUMED`・`PENDING_SCENES`・`REMAINING`・`USED_PCT`・`YEAR_PCT`・`PACE`・`RUNS_OUT_DATE`・`QUOTA_STATE` | P3 |
 | `VW_PLAN_QUOTA_MONTH` | 年間上限 × 今年度の月 | なし | `VW_PLAN_QUOTA_USAGE`・`VW_PLAN_SHOT` | `USED_SCENES`・`CUM_CONSUMED`（累計）・`PACE_LINE` | P3 |
 | `VW_PLAN_FIXED_POINT` | 有効な定点の依頼 | ポリゴン | `TBL_IMAGING_REQUEST`・`VW_PLAN_HISTORY` | `LAST_CAPTURED_DATE`・`EVERY_DAYS`・`LATE_TURNS`・`GAP_CLASS`・直近 30 日の日数 | P4 |
-| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE` | O1・O2・O3・N1・N2・N3 |
-| `VW_OBS_THING` | モノ（`OBJECT_ID`） | ポイント（最後の記録） | `VW_OBS_RECORD` | `THING_NAME`・`LAST_SEEN_AT`・`FIRST_SEEN_AT`・`SEEN_COUNT`・`IMAGE_COUNT`・`IN_LAST_MONTH`・`AGE_CLASS`・`LAST_NAMED_AREA_OBJECTID` | O1 |
-| `VW_OBS_IMAGE_WORK` | 分担の 1 行 | なし | `TBL_ASSIGNMENT`・`VW_OBS_RECORD`・`TBL_OBSERVATION_AREA` | `MY_RECORDS`・`IMAGE_RECORDS`・`IMAGE_AREAS`・`HOURS`・`DONE_EMPTY` | O3 |
+| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE`・`UNSEEN_REASON`・`LOOKED` | O1・O2・O3・N1・N2・N3 |
+| `VW_OBS_THING` | モノ（`OBJECT_ID`） | ポイント（最後の記録） | `VW_OBS_RECORD` | `THING_NAME`・`LAST_SEEN_AT`・`FIRST_SEEN_AT`・`SEEN_COUNT`・`IMAGE_COUNT`・`IN_LAST_MONTH`・`AGE_CLASS`・`LAST_NAMED_AREA_OBJECTID`・`LAST_UNSEEN_AT`・`LAST_UNSEEN_REASON`・`UNSEEN_COUNT` | O1 |
+| `VW_OBS_IMAGE_WORK` | 分担の 1 行 | なし | `TBL_ASSIGNMENT`・`VW_OBS_RECORD`・`TBL_OBSERVATION_AREA` | `MY_RECORDS`・`IMAGE_RECORDS`・`IMAGE_AREAS`・`UNSEEN_AREAS`・`HOURS`・`DONE_EMPTY` | O3 |
 | `VW_ALERT_LOG` | 通報記録の 1 行 | なし | `TBL_ALERT_LOG`・`VW_OBS_RECORD` | 通報した記録の地名・モノ・分類、`REPORTED_DATE`・`DAYS_AGO`・`MANUAL_LABEL` | N2 |
 | `VW_NAMED_AREA_WEEK` | 地名 × 7 日の区間（直近 26） | なし | `TBL_NAMED_AREA`・`VW_OBS_RECORD` | `RECORDS`（`USUAL_RECORDS`・`SURGE_RECORDS` に分けたものも）・`THINGS`・`NORMAL`・`UPPER_LINE`・`CHANGE`・`SCORE`・`TREND_CLASS`・`WEEK_START_DATE` | N1・N2 |
 | `VW_NAMED_AREA_THING` | 地名 × モノ | ポイント（その地名での最後の記録） | `VW_OBS_RECORD`・`VW_OBS_THING`・`TBL_NAMED_AREA` | ここで `FIRST_SEEN_AT`・`LAST_SEEN_AT`・`SEEN_COUNT`・`SEEN_DAYS`、`WHERE_NOW`・`THING_LAST_PLACE` | N2 |

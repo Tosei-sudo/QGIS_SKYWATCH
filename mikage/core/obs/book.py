@@ -18,19 +18,19 @@ import threading
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
 
-from .areas import CheckedArea, area_label, box_ring, covering_areas, new_area_id
+from .areas import CheckedArea, area_contains, area_label, box_ring, covering_areas, new_area_id
 from .drafts import Draft, PrefsDrafts
 from .flows import (
     CarryOver, ImageRef, MatchCandidate, ObjectFlow, carried_into, carry_overs, flow_of, flows, living, match_candidates,
     now_ms,
 )
 from .model import (
-    ConfidenceLevel, ListedImage, Observation, ObservationVocabulary, new_object_id, new_observation_id, parse_listed_images,
-    recorded_images,
+    UNSEEN, ConfidenceLevel, ListedImage, Observation, ObservationVocabulary, new_object_id, new_observation_id, parse_listed_images,
+    recorded_images, state_text, unseen_label,
 )
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
 from .scope import RecordQuery, grown, merged
-from .stores import AreaStore, ObservationStore, TaxonomyStore
+from .stores import AreaStore, ObservationStore, TaxonomyStore, unseen_supported
 from .taxonomy import (
     SpecField, Taxon, activities_at, find, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon, remove_taxon, rewrite,
     taxonomy_of, update_taxon, with_kinds, within,
@@ -719,12 +719,40 @@ class ObservationBook:
         return carry_overs(self.records, info.ref, self.inside() if info is self.current else None)
 
     def inside_carried(self, carried: Optional[list[CarryOver]] = None) -> list[CarryOver]:
-        """The carried-over things that lie in one of this image's checked areas (so were not there)."""
+        """
+        The carried-over things that lie in one of this image's checked areas (so were not there),
+        but in a 不可範囲 (which could not be looked at).
+        """
         image = self.current
         if image is None:
             return []
         carried = self.carried() if carried is None else carried
-        return [c for c in carried if covering_areas(self.areas, image.id, c.source.lon, c.source.lat, c.source.kind)]
+        hidden = {id(c) for c in self.unseen_carried(carried)}
+        return [c for c in carried if id(c) not in hidden and covering_areas(self.areas, image.id, c.source.lon, c.source.lat, c.source.kind)]
+
+    def unseen_carried(self, carried: Optional[list[CarryOver]] = None) -> list[CarryOver]:
+        """The carried-over things that lie in one of this image's 不可範囲 (could not be seen there)."""
+        image = self.current
+        if image is None or not any(a.unseen and a.deleted_at is None and a.image_id == image.id for a in self.areas):
+            return []
+        carried = self.carried() if carried is None else carried
+        return [c for c in carried if covering_areas(self.areas, image.id, c.source.lon, c.source.lat, c.source.kind, unseen=True)]
+
+    def unseen_reason_at(self, lon: float, lat: float, image: Optional[str] = None) -> str:
+        """Why a place could not be seen in this image (or `image`): the reason of the latest 不可範囲 over it, '' when none is."""
+        info = self._image(image)
+        if info is None:
+            return ""
+        over = covering_areas(self.areas, info.id, lon, lat, "", unseen=True)
+        return max(over, key=lambda a: a.created_at).unseen if over else ""
+
+    def keeps_unseen(self) -> bool:
+        """Whether 「不可」 records can be kept (the store's layer has the 不可の理由 attribute)."""
+        return unseen_supported(self.store)
+
+    def keeps_unseen_areas(self) -> bool:
+        """Whether 不可範囲 can be kept (both layers have the 不可の理由 attribute: the things in one are recorded 不可)."""
+        return unseen_supported(self.store) and unseen_supported(self.area_store)
 
     def candidates(self, lon: float, lat: float, kind: str = "", length: Optional[float] = None, heading: Optional[float] = None,
                    image: Optional[str] = None) -> list[MatchCandidate]:
@@ -797,7 +825,8 @@ class ObservationBook:
         with self.lock:
             by_id = {o.id: o for o in rows}
             self.records = [by_id.pop(o.id, o) for o in self.records] + list(by_id.values())
-        self._say(done)
+        if done:
+            self._say(done)
         return rows
 
     def individual(self, kind: str) -> bool:
@@ -850,9 +879,12 @@ class ObservationBook:
         return path[-1] if path else "モノ"
 
     def record_from(self, image: ObservedImage, lon: float, lat: float, editing: Optional[Observation], source: Optional[Observation],
-                    values: FormValues, present: bool) -> Observation:
-        """The record the form says."""
+                    values: FormValues, present: bool, unseen: str = "") -> Observation:
+        """The record the form says (`unseen`: 「不可」, why; then neither there nor gone)."""
         now = now_ms()
+        unseen = unseen.strip()
+        if unseen:
+            present = False
 
         def number(v: str) -> Optional[float]:
             # Full-width digits and a unit (１２０．５, 120 m, 30°) too; the dock stops on what can't be read.
@@ -876,7 +908,8 @@ class ObservationBook:
             other = other if other is None or other.object_id != editing.object_id else None
             return replace(editing, object_id=other.object_id if other else editing.object_id,
                            object_name=other.name if other else (name or editing.object_name), kind=kind, activity=activity,
-                           present=present, confidence=confidence, note=values.note, lon=lon, lat=lat, updated_at=now, **measure)
+                           present=present, unseen=unseen, confidence=confidence, note=values.note, lon=lon, lat=lat, updated_at=now,
+                           **measure)
         if source is not None and (not name or name == source.object_name or not self.names_a_thing(name, kind)):
             # 継続・同一候補: the same thing (a name typed for a thing that is not an individual renames it here).
             known = (source.object_id, name or source.object_name)
@@ -887,12 +920,12 @@ class ObservationBook:
             id=new_observation_id(), image_id=image.id, image_name=image.name, image_time=image.time,
             object_id=known[0] if known else new_object_id(),
             object_name=known[1] if known else (name or self.default_name(kind)),
-            kind=kind, activity=activity, present=present, confidence=confidence, note=values.note, lon=lon, lat=lat,
+            kind=kind, activity=activity, present=present, unseen=unseen, confidence=confidence, note=values.note, lon=lon, lat=lat,
             created_at=now, updated_at=now, deleted_at=None, **measure,
         )
 
     def submit(self, lon: float, lat: float, values: FormValues, present: bool = True, editing: Optional[Observation] = None,
-               source: Optional[Observation] = None, draft: Optional[str] = None) -> Optional[Observation]:
+               source: Optional[Observation] = None, draft: Optional[str] = None, unseen: str = "") -> Optional[Observation]:
         """
         Records what the form says on the image recorded now (a new record, a
         change, or a thing carried over). Not saved: kept as a draft (送信待ち,
@@ -910,18 +943,19 @@ class ObservationBook:
                 who = now.updated_by or now.recorded_by
                 self._say(f"{editing.object_name} は開いた後に{who + ' さんが' if who else 'ほかの人が'}更新したため保存せず（閉じて開き直してから変更）")
                 kept = self.draft(draft) if draft else None
-                self.keep_draft(Draft(self._by(self.record_from(image, lon, lat, editing, source, values, present)),
+                self.keep_draft(Draft(self._by(self.record_from(image, lon, lat, editing, source, values, present, unseen)),
                                       {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present, editing.id,
                                       editing.updated_at, source.id if source else "", now_ms(), self.status, needs_check=True),
                                 replaces=kept.id if kept else None)
                 return None
-        record = self.record_from(image, lon, lat, editing, source, values, present)
+        record = self.record_from(image, lon, lat, editing, source, values, present, unseen)
+        present = record.present
         kept = self.draft(draft) if draft else None
         if kept is not None and editing is None:
             # The same record as the first try: one the server took meanwhile is updated, not added twice (#73).
             record = replace(record, id=kept.record.id, created_at=kept.record.created_at)
         self.last = FormValues(kind=record.kind, activity=record.activity if present else self.last.activity, confidence=record.confidence)
-        what = (f"（{record.activity}）" if record.activity else "") if present else "（消失）"
+        what = (f"（{record.activity}）" if record.activity else "") if present else f"（{state_text(record)}）"
         saved = self._save_records([record], f"{record.object_name}{what}を{'更新' if editing else '記録'}")
         if saved:
             if kept is not None:
@@ -1038,16 +1072,23 @@ class ObservationBook:
         return saved
 
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
-        """Changes a record (its id): kind, activity, present, confidence, note, lon, lat, length, heading, width."""
+        """Changes a record (its id): kind, activity, present, unseen (不可, why), confidence, note, lon, lat, length, heading, width."""
         was = next((o for o in self.records if o.id == record_id and o.deleted_at is None), None)
         if was is None:
             return None
-        allowed = {"kind", "activity", "present", "confidence", "note", "lon", "lat", "length", "heading", "width", "object_name"}
+        allowed = {"kind", "activity", "present", "unseen", "confidence", "note", "lon", "lat", "length", "heading", "width", "object_name"}
         bad = set(changes) - allowed
         if bad:
             raise ValueError(f"変更不可の項目: {', '.join(sorted(bad))}")
         if "kind" in changes:
             changes["kind"] = kind_of(path_of(changes["kind"]))
+        if "unseen" in changes:
+            changes["unseen"] = str(changes["unseen"] or "").strip()
+        if changes.get("unseen"):
+            # 不可: neither there nor gone.
+            changes["present"] = False
+        elif "present" in changes:
+            changes["unseen"] = ""
         if changes.get("present") is False:
             changes["activity"] = ""
         record = replace(was, **changes, updated_at=now_ms())
@@ -1237,14 +1278,19 @@ class ObservationBook:
                 for o in self.records if o.object_id == source]
         return self._save_records(rows, f"{len(rows)} 件の記録を「{target.name}」に統合") is not None
 
-    def carry(self, object_id: str, present: bool = True, **changes: Any) -> Optional[Observation]:
-        """Records a carried-over thing in this image: still there (with changes), or gone."""
+    def carry(self, object_id: str, present: bool = True, unseen: str = "", **changes: Any) -> Optional[Observation]:
+        """Records a carried-over thing in this image: still there (with changes), gone, or 不可 (`unseen`: why)."""
         image = self.current
         c = next((x for x in self.carried() if x.source.object_id == object_id), None)
         if image is None or c is None:
             return None
-        record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}), **changes})
-        saved = self._save_records([record], f"{record.object_name} を{'継続' if present else '消失'}として記録")
+        unseen = unseen.strip()
+        if unseen:
+            present = False
+        record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}),
+                                                                 "unseen": unseen, **changes})
+        what = unseen_label(unseen) if unseen else "継続" if present else "消失"
+        saved = self._save_records([record], f"{record.object_name} を{what}として記録")
         return saved[0] if saved else None
 
     def carry_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
@@ -1255,26 +1301,32 @@ class ObservationBook:
         image = self.current
         carried = [c for c in self.carried() if only is None or only(c)]
         inside = self.inside_carried(carried)
-        rows = [c for c in carried if c not in inside]
+        hidden = self.unseen_carried(carried)
+        rows = [c for c in carried if c not in inside and c not in hidden]
         if image is None or not rows:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now) for c in rows]
-        note = f"（確認範囲内の {len(inside)} 件を除く）" if inside else ""
+        left = [f"確認範囲内の {len(inside)} 件"] * bool(inside) + [f"不可範囲内の {len(hidden)} 件"] * bool(hidden)
+        note = f"（{'・'.join(left)}を除く）" if left else ""
         return self._save_records(made, f"{len(made)} のモノを継続として記録{note}") or []
 
     def absent_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """
-        Records every carried-over thing as gone in this image (those in a checked area too);
-        with `only`, just the ones it keeps (those the list shows).
+        Records every carried-over thing as gone in this image (those in a checked area too, but
+        those in a 不可範囲: what could not be seen is not 消失); with `only`, just the ones it
+        keeps (those the list shows).
         """
         image = self.current
-        rows = [c for c in self.carried() if only is None or only(c)]
+        carried = [c for c in self.carried() if only is None or only(c)]
+        hidden = self.unseen_carried(carried)
+        rows = [c for c in carried if c not in hidden]
         if image is None or not rows:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        return self._save_records(made, f"{len(made)} のモノを消失として記録") or []
+        note = f"（不可範囲内の {len(hidden)} 件を除く）" if hidden else ""
+        return self._save_records(made, f"{len(made)} のモノを消失として記録{note}") or []
 
     def absent_inside(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """Records the things carried over into a checked area as gone in this image (with `only`, just the ones it keeps)."""
@@ -1286,10 +1338,34 @@ class ObservationBook:
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
         return self._save_records(made, f"{len(made)} のモノを消失として記録（確認範囲内）") or []
 
+    def mark_unseen(self, only: Optional[Callable[[CarryOver], bool]] = None, quiet: bool = False) -> list[Observation]:
+        """
+        Records the things carried over into a 不可範囲 as 不可 in this image, each with its
+        area's reason (with `only`, just the ones it keeps). `quiet`: nothing said when saved.
+        """
+        image = self.current
+        rows = [c for c in self.unseen_carried() if only is None or only(c)]
+        if image is None or not rows:
+            return []
+        now = now_ms()
+        made = [carried_into(c.source, image.ref, now, present=False, activity="",
+                             unseen=self.unseen_reason_at(c.source.lon, c.source.lat) or UNSEEN) for c in rows]
+        saved = self._save_records(made, "" if quiet else f"{len(made)} のモノを不可として記録（不可範囲内）")
+        return saved or []
+
     # ---- checked areas -------------------------------------------------
 
-    def add_area(self, ring: Sequence[Sequence[float]], kind: str = "", note: str = "", image: Optional[str] = None) -> Optional[CheckedArea]:
-        """Records a checked area on an image (this one unless given): its outline (longitude / latitude), the kind looked for ('' all)."""
+    def add_area(self, ring: Sequence[Sequence[float]], kind: str = "", note: str = "", image: Optional[str] = None,
+                 unseen: str = "") -> Optional[CheckedArea]:
+        """
+        Records a checked area on an image (this one unless given): its outline (longitude / latitude), the kind looked for ('' all).
+        `unseen`: a 不可範囲 instead (why: 雲・霞…), of every kind; the things carried over into it on this image are
+        recorded 不可 at once (tsudo 2026-11-19, 案A).
+        """
+        unseen = unseen.strip()
+        if unseen and not self.keeps_unseen_areas():
+            self._say("保存先に不可の理由の属性（UNSEEN_REASON）がないため、不可範囲は記録できません")
+            return None
         info = self._image(image)
         if info is None:
             return None
@@ -1300,16 +1376,24 @@ class ObservationBook:
             points.append(list(points[0]))
         now = now_ms()
         area = CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
-                           kind=kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
-                           recorded_by=self.observer())
+                           kind="" if unseen else kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
+                           recorded_by=self.observer(), unseen=unseen)
+        what = "不可範囲" if unseen else "確認範囲"
         try:
             self.area_store.save([area])
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
+            self._say(f"{self.area_store.label} への{what}の保存失敗: {_error_text(error)}")
             return None
         with self.lock:
             self.areas = [*self.areas, area]
-        missing = len(self.inside_carried()) if self.current is not None and info.id == self.current.id else 0
+        here = self.current is not None and info.id == self.current.id
+        if unseen:
+            # The things that may be there: 不可 in this image (not left waiting as 前後の画像のモノ).
+            marked = self.mark_unseen(lambda c: bool(covering_areas([area], info.id, c.source.lon, c.source.lat, "", unseen=True)),
+                                      quiet=True) if here else []
+            self._say(f"{area_label(area)}を記録{f'（中の前後の画像のモノ {len(marked)} 件を不可として記録）' if marked else ''}")
+            return area
+        missing = len(self.inside_carried()) if here else 0
         self._say(f"{area_label(area)}を記録{f'（範囲内で記録のない前後の画像のモノ {missing} 件）' if missing else ''}")
         return area
 
@@ -1345,21 +1429,41 @@ class ObservationBook:
         return self.add_area(box_ring(box), kind, note)
 
     def remove_areas(self, rows: Iterable[CheckedArea]) -> bool:
-        """Deletes checked areas (kept, marked, where the store does)."""
+        """
+        Deletes checked areas (kept, marked, where the store does). A 不可範囲 takes its 不可 records
+        with it (those of its image inside it that no other 不可範囲 covers): they were its.
+        """
         rows = list(rows)
         if not rows:
             return True
+        what = "不可範囲" if all(a.unseen for a in rows) else "確認範囲"
         try:
             marked = self.area_store.remove(rows)
         except Exception as error:  # noqa: BLE001
-            self._say(f"確認範囲の削除失敗: {_error_text(error)}")
+            self._say(f"{what}の削除失敗: {_error_text(error)}")
             return False
         with self.lock:
             ids = {a.id for a in rows}
             kept = {a.id: a for a in marked}
             self.areas = [kept.get(a.id, a) for a in self.areas if a.id not in ids or a.id in kept]
-        self._say(f"確認範囲 {len(rows)} 件を削除")
+        gone = self._unseen_records_of(rows)
+        if gone and self.remove(gone):
+            self._say(f"{what} {len(rows)} 件を削除（中の不可の記録 {len(gone)} 件も削除）")
+        else:
+            self._say(f"{what} {len(rows)} 件を削除")
         return True
+
+    def _unseen_records_of(self, areas: list[CheckedArea]) -> list[Observation]:
+        """The living 不可 records inside deleted 不可範囲 (on their image) that no living one covers."""
+        out = []
+        for a in areas:
+            if not a.unseen:
+                continue
+            for o in living(self.records):
+                if (o.unseen and o.image_id == a.image_id and area_contains(a, o.lon, o.lat)
+                        and not covering_areas(self.areas, o.image_id, o.lon, o.lat, "", unseen=True) and o not in out):
+                    out.append(o)
+        return out
 
     def restore_areas(self, rows: Iterable[CheckedArea]) -> bool:
         now = now_ms()
@@ -1372,7 +1476,12 @@ class ObservationBook:
         with self.lock:
             by_id = {a.id: a for a in back}
             self.areas = [by_id.get(a.id, a) for a in self.areas]
-        self._say(f"確認範囲 {len(back)} 件を復元")
+        image = self.current
+        hidden = [a for a in back if a.unseen and image is not None and a.image_id == image.id]
+        marked = self.mark_unseen(lambda c: bool(covering_areas(hidden, image.id, c.source.lon, c.source.lat, "", unseen=True)),
+                                  quiet=True) if hidden else []
+        what = "不可範囲" if all(a.unseen for a in back) else "確認範囲"
+        self._say(f"{what} {len(back)} 件を復元" + (f"（中の前後の画像のモノ {len(marked)} 件を不可として記録）" if marked else ""))
         return True
 
     def image_areas(self, deleted: bool = False) -> list[CheckedArea]:

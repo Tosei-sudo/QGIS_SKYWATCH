@@ -77,8 +77,8 @@ def record_out(o: Observation) -> dict[str, Any]:
     """A record as a script sees it (times as ISO text)."""
     return {
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": _iso(o.image_time), "objectId": o.object_id,
-        "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "confidence": o.confidence or "",
-        "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
+        "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "unseen": o.unseen,
+        "confidence": o.confidence or "", "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
         "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
@@ -88,9 +88,9 @@ def flow_out(f: ObjectFlow) -> dict[str, Any]:
     last = f.observations[-1]
     return {
         "objectId": f.object_id, "name": f.name, "kind": f.kind, "first": _iso(f.first), "last": _iso(f.last), "seen": f.seen,
-        "present": f.present, "activity": f.activity, "confidence": last.confidence or "", "distance": js_round(f.distance),
+        "present": f.present, "activity": f.activity, "unseen": f.unseen, "confidence": last.confidence or "", "distance": js_round(f.distance),
         "lon": last.lon, "lat": last.lat,
-        "steps": [{"from": _iso(s.start), "to": _iso(s.end), "present": s.present, "activity": s.activity, "images": s.count,
+        "steps": [{"from": _iso(s.start), "to": _iso(s.end), "present": s.present, "activity": s.activity, "unseen": s.unseen, "images": s.count,
                    "moved": None if s.moved is None else js_round(s.moved)} for s in f.steps],
     }
 
@@ -98,7 +98,7 @@ def flow_out(f: ObjectFlow) -> dict[str, Any]:
 def area_out(a: CheckedArea) -> dict[str, Any]:
     return {
         "id": a.id, "imageId": a.image_id, "imageName": a.image_name, "imageTime": _iso(a.image_time), "kind": a.kind, "note": a.note,
-        "recordedBy": a.recorded_by or "", "polygon": {"type": "Polygon", "coordinates": [a.ring]}, "createdAt": _iso(a.created_at),
+        "unseen": a.unseen, "recordedBy": a.recorded_by or "", "polygon": {"type": "Polygon", "coordinates": [a.ring]}, "createdAt": _iso(a.created_at),
         "deletedAt": _iso(a.deleted_at),
     }
 

@@ -39,7 +39,7 @@ def _distance(a: Observation, b: Observation) -> float:
 
 @dataclass
 class FlowStep:
-    """A stretch of a flow: one activity (or absence) over consecutive images."""
+    """A stretch of a flow: one activity (or absence, or 不可) over consecutive images."""
     activity: str
     present: bool
     start: int
@@ -48,6 +48,8 @@ class FlowStep:
     #: How far (m) the thing had moved since the step before, at the step's first record.
     moved: Optional[float]
     observations: list[Observation] = field(default_factory=list)
+    #: 不可: why it could not be seen in these images ('' when it was looked at).
+    unseen: str = ""
 
 
 @dataclass
@@ -61,12 +63,14 @@ class ObjectFlow:
     last: int
     #: The images it was seen in.
     seen: int
-    #: The latest record's activity, and whether it was there then.
+    #: The activity of the latest record that looked at it (not 不可), and whether it was there then.
     activity: str
     present: bool
     #: The path length (m) between the places it was seen.
     distance: float
     steps: list[FlowStep]
+    #: Why it could not be seen in the latest image, when its latest record is 不可 ('' otherwise).
+    unseen: str = ""
 
 
 def flow_of(records: Iterable[Observation]) -> ObjectFlow:
@@ -81,14 +85,15 @@ def flow_of(records: Iterable[Observation]) -> ObjectFlow:
         if moved is not None:
             path += moved
         step = steps[-1] if steps else None
-        same = (step is not None and step.present == o.present and (not o.present or step.activity == o.activity)
+        same = (step is not None and step.present == o.present and step.unseen == o.unseen and (not o.present or step.activity == o.activity)
                 and not (moved is not None and moved > MOVE_METRES))
         if same:
             step.end = time_key(o)
             step.count += 1
             step.observations.append(o)
         else:
-            steps.append(FlowStep(o.activity if o.present else "", o.present, time_key(o), time_key(o), 1, moved if steps else None, [o]))
+            steps.append(FlowStep(o.activity if o.present else "", o.present, time_key(o), time_key(o), 1, moved if steps else None, [o],
+                                  o.unseen))
         if o.present:
             previous = o
     # The name and kind as last written; the kind as deep as any record knows it below that (one image may tell only 「船舶」).
@@ -98,6 +103,8 @@ def flow_of(records: Iterable[Observation]) -> ObjectFlow:
     for o in rows:
         if within(o.kind, path_of(kind)) and len(path_of(o.kind)) > len(path_of(kind)):
             kind = o.kind
+    # What is known of it now: its latest record that looked (a 不可 one says nothing of it).
+    known = next((o for o in reversed(rows) if not o.unseen), None)
     return ObjectFlow(
         object_id=last.object_id,
         name=named.object_name or last.object_id,
@@ -106,10 +113,11 @@ def flow_of(records: Iterable[Observation]) -> ObjectFlow:
         first=time_key(rows[0]),
         last=time_key(last),
         seen=sum(1 for o in rows if o.present),
-        activity=last.activity,
-        present=last.present,
+        activity=known.activity if known else "",
+        present=known.present if known else True,
         distance=path,
         steps=steps,
+        unseen=last.unseen,
     )
 
 
@@ -148,14 +156,15 @@ def carry_overs(records: Iterable[Observation], image: ImageRef, inside: Optiona
     What may still be there in an image: each thing not yet recorded in it,
     by its nearest record in time — an earlier one first, else a later one —
     unless that record says it had gone. `inside` limits them to a place
-    (the image's footprint).
+    (the image's footprint). A 不可 record says nothing of the thing: the
+    nearest record that looked at it is the one.
     """
     here: set[str] = set()
     others: dict[str, list[Observation]] = {}
     for o in living(records):
         if o.image_id == image.id:
             here.add(o.object_id)
-        else:
+        elif not o.unseen:
             others.setdefault(o.object_id, []).append(o)
     out: list[CarryOver] = []
     for object_id, rows in others.items():
@@ -176,7 +185,7 @@ def carried_into(source: Observation, image: ImageRef, now: Optional[int] = None
     """A copy of `source` for another image (the same thing, its place and activity), stamped now."""
     now = now_ms() if now is None else now
     # Its pixels are the other image's: found again in this one when saved (book._placed).
-    return replace(source, **{"note": "", "pixel_x": None, "pixel_y": None, "image_file": "", **changes}, id=new_observation_id(),
+    return replace(source, **{"note": "", "unseen": "", "pixel_x": None, "pixel_y": None, "image_file": "", **changes}, id=new_observation_id(),
                    image_id=image.id, image_name=image.name,
                    image_time=image.time, created_at=now, updated_at=now, deleted_at=None)
 

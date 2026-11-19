@@ -388,6 +388,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "created": "CREATED_AT",
    "updated": "UPDATED_AT",
    "deleted": "DELETED_AT",
+   "unseen": "UNSEEN_REASON",
    "namedAreaObjectId": "NAMED_AREA_OBJECTID"
   },
   "taxonomyTable": {
@@ -752,6 +753,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "kind",
   "activity",
   "present",
+  "unseen",
   "confidence",
   "imageTime",
   "imageId",
@@ -1663,6 +1665,7 @@ const SPEC = [
         J("confidences", "確度", { ph: '["確実", "推定", { "label": "要確認", "color": "#dc2626", "en": "To be confirmed" }]', help: "文字列か { label, color, note, en, ほかのキー }。en は英語の名前（通報の confidence.en）、ほかのキー（code など）は通報の confidence.code など。既定の確定・推定・不明は Confirmed・Probable・Unknown" }),
         J("specFields", "諸元の項目", { ph: '["全長", { "name": "幅", "type": "number", "unit": "m" }]' }),
         N("matchRadius", "同一候補の半径（m）"),
+        L("unseenReasons", "不可の理由", { help: "雲などで判読できないとき（不可）の理由の候補（観測記録の「不可」・不可範囲）。既定は 雲・霞・影・画像の欠け・その他" }),
       ]) },
     { key: "glossary", label: "備考の単語集", doc: "備考の単語集glossary", help: "観測記録・確認範囲の備考に使う語を 1 語 1 行で置く Esri のテーブル（読むだけ）。備考を打っている間、打っている語の候補（よみ・表記ゆれからも）を出し、表記ゆれは欄の下に知らせて直せる。語はテーブルに置き、ここにはテーブルと属性名だけを書く。",
       field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },

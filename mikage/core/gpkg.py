@@ -383,6 +383,7 @@ OBSERVATIONS = TableSpec(
         Column("CREATED_AT", "DATETIME"),
         Column("UPDATED_AT", "DATETIME"),
         Column("DELETED_AT", "DATETIME"),
+        Column("UNSEEN_REASON", "TEXT(40)"),
     ),
     key="OBS_ID",
     description="観測記録",
@@ -404,6 +405,7 @@ AREAS = TableSpec(
         Column("DELETED_AT", "DATETIME"),
         # The observation store (its label) the area belongs to, as the viewer keeps local areas per store.
         Column("STORE", "TEXT(100)"),
+        Column("UNSEEN_REASON", "TEXT(40)"),
     ),
     key="AREA_ID",
     description="確認範囲",

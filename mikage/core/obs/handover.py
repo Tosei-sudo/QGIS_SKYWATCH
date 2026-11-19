@@ -169,8 +169,10 @@ def records_section(d: HandoverData, s: HandoverSettings) -> list[str]:
     made = [o for o in d.records if o.deleted_at is None and _in(o.created_at, d.start, d.end)]
     changed = [o for o in d.records if o.deleted_at is None and not _in(o.created_at, d.start, d.end) and _in(o.updated_at, d.start, d.end)]
     gone = [o for o in d.records if _in(o.deleted_at, d.start, d.end) and not _in(o.created_at, d.start, d.end)]
-    absent = sum(1 for o in made if not o.present)
-    out = [f"■ 観測記録: 新規 {len(made)} 件" + (f"（うち消失 {absent} 件）" if absent else "") + f"・更新 {len(changed)} 件・削除 {len(gone)} 件"]
+    absent = sum(1 for o in made if not o.present and not o.unseen)
+    unseen = sum(1 for o in made if o.unseen)
+    parts = [f"消失 {absent} 件"] * bool(absent) + [f"不可 {unseen} 件"] * bool(unseen)
+    out = [f"■ 観測記録: 新規 {len(made)} 件" + (f"（うち{'・'.join(parts)}）" if parts else "") + f"・更新 {len(changed)} 件・削除 {len(gone)} 件"]
     if made:
         out.append("  分類: " + _counts((path_of(o.kind) or [""])[0] for o in made))
         out.append("  記録者: " + _counts(o.recorded_by for o in made))

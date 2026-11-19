@@ -72,8 +72,8 @@ def test_every_key_is_in_qgis_shortcut_settings(plugin):
     assert manager.shortcutByName("SatObsKeyPlanRun").key().toString() == norm("Ctrl+Return")
     assert manager.shortcutByName("SatObsKeyTaxonDelete").key().toString() == norm("Del")
     names = [s.objectName() for s in manager.listShortcuts() if s.objectName().startswith(shortcuts.PREFIX)]
-    # 観測記録: 14 (S・G・Backspace・＋・− of 「見本で記録」 among them), 9 activities, 5 candidates; 撮像計画 3; 分類体系 4.
-    assert len(names) == len(set(names)) == 14 + 9 + 5 + 3 + 4
+    # 観測記録: 15 (S・G・Backspace・＋・− of 「見本で記録」 and K of 不可範囲 among them), 9 activities, 5 candidates; 撮像計画 3; 分類体系 4.
+    assert len(names) == len(set(names)) == 15 + 9 + 5 + 3 + 4
     assert manager.shortcutByName("SatObsKeyObsStamp").key().toString() == "S"
 
 

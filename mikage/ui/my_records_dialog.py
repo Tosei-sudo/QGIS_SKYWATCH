@@ -40,7 +40,7 @@ from ..core.obs.csv import local_time
 from ..core.obs.mine import (
     DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, is_mine, observer_names, root_of, roots_text, select, since_of,
 )
-from ..core.obs.model import Observation
+from ..core.obs.model import Observation, state_text
 from ..core.obs.scope import RecordQuery
 from .docks import plain_label
 from .fit import fit_text
@@ -412,7 +412,7 @@ class MyRecordsDialog(QDialog):
             for r, o in enumerate(records):
                 others = changed_by_other(o, me)
                 cells = [local_time(o.image_time) if o.image_time is not None else "", o.image_name or o.image_id,
-                         o.object_name or o.object_id, o.kind, o.activity if o.present else tr("消失"), o.note,
+                         o.object_name or o.object_id, o.kind, tr(state_text(o)) if not o.present else o.activity, o.note,
                          local_time(o.created_at), o.recorded_by, o.updated_by if o.updated_at > o.created_at else ""]
                 tip = tr("更新 {when}（{who}）").format(when=local_time(o.updated_at), who=o.updated_by or "—")
                 self._put(r, cells, o.deleted_at is not None, o.id in waiting, o.id in reported, others, tip)
