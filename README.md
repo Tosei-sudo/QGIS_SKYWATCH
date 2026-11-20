@@ -38,6 +38,7 @@
 | [導入と設定](docs/admin/install.md) | 導入、設定、接続と表の点検 |
 | [設定ファイルの書き方](docs/admin/config-file.md) | 設定ファイルの書き方 |
 | [Esri 側のテーブル定義](docs/admin/esri-tables.md) | Esri 側のテーブル定義 |
+| [構成と依存のきまり](docs/architecture.md) | 改修する人向け: 層、機能の登録票、窓口と通知、機能の api、データ窓口（リポジトリ）、設定の一覧表、構成テストの台帳 |
 
 ## Python API
 
@@ -62,12 +63,19 @@ api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（�
 
 ```
 mikage/
+  plugin.py      機能の登録票を並べて起動・終了する（plugin_api.py が plugin.api）
+  features/      機能ごとの登録票（ドック・メニュー・右クリック・先読み・つなぎ）
   core/      純 Python（Qt / QGIS に依存しない）: 設定・Esri・GeoPackage・撮像計画・観測記録・AI の前後処理（NumPy）
+    <機能>/api.py  機能（ai・catalog・enhance・obs・plan・request）の外向けの窓口。外からはここだけを import する
+    request/repository.py・obs/repository.py  Esri の表の読み書きの窓口（リポジトリ）。sql.py が SQL の日時の書き方
   ext/       同梱の純 Python 版 sgp4（Windows 版の zip では win64/ に onnxruntime・onnxruntime-genai と C++ 版 sgp4 と tzdata も）
   qgis_io/   QGIS の通信（QgsNetworkAccessManager）・QgsTask・設定・画像補正のレンダラー・パンシャープンのファイル処理
+    prefs/       機能ごとの個人設定（qsettings.py の pref / set_pref で読み書き）
   processing_provider/  Processing のアルゴリズム（パンシャープン・物体検出・AI 学習・教師データセットほか）
   ui/        ドック・ダイアログ
-  tests/     pytest
+    ports.py     機能同士の窓口と「変わった」の通知（PluginEvents）
+    obs_dock/    観測記録ドックの担当ごとの部分
+  tests/     pytest（architecture.py が依存のきまり、snapshots/screen.json が画面の写し）
 tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
   satellite_editor.html  衛星・センサー・別名のテーブルの編集ツール（ブラウザで開く。設定ファイルを読み込む）
@@ -80,7 +88,7 @@ scripts/
   help_shots/          ヘルプの「画面つきの手順書」の写真を撮り直す・画面の重なりを点検する（QGIS を仮想画面で動かす）
   compare_viewer/      ビューアとの数値比較
   ai_bench/            AI 学習のネットワークの精度比較（合成の場面）
-docs/                  ビューアとの違い・撮像依頼の設計書・雲量ファイルの仕様・ArcGIS 側の準備・ArcGIS ダッシュボード
+docs/                  ビューアとの違い・撮像依頼の設計書・雲量ファイルの仕様・ArcGIS 側の準備・ArcGIS ダッシュボード・構成と依存のきまり（architecture.md）
 ```
 
 ## テスト
