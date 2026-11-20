@@ -913,6 +913,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 
   初回とモデルの切り替えのときだけ読み込みに数秒。書いている途中の文が出て、「取消」で止める。生成中も QGIS は止まらない（GIL を離して計算する）。7〜8B は CPU では実用外（1 回 20 秒〜数分）
 - **モデル**: ONNX Runtime GenAI の形式（`genai_config.json`・`model.onnx`・`model.onnx.data`・`tokenizer.json` などのフォルダー）。標準は SB Intuitions の sarashina2.2 の instruct（MIT ライセンス、日本語向け）の int4: [1B](https://huggingface.co/sbintuitions/sarashina2.2-1b-instruct-v0.1)（約 0.85 GB）と [3B](https://huggingface.co/sbintuitions/sarashina2.2-3b-instruct-v0.1)（約 2.0 GB）。プラグインの zip には入れない（大きく、プラグインの更新のたびに配り直しになるため）
+  - 作ったもの（1B・3B）はこのリポジトリの [`models/`](models/README.md) に Git LFS で置いてある。普通の clone では落ちてこないので、clone したフォルダーで `git lfs pull -I "models/sarashina-3b-int4/**" -X ""`（両方なら `git lfs pull -X ""`）で取る。LFS のダウンロードは無料枠で月 10 GB までなので、取ったら社内の共有フォルダーから配る
   - 管理者がインターネットにつながる PC で一度だけ作る（2026-11-20 にこの手順で 1B・3B を作って確かめた）:
     1. `python -m pip install onnxruntime-genai onnx onnx_ir torch transformers sentencepiece huggingface_hub`（torch は CPU 版でよい: `--index-url https://download.pytorch.org/whl/cpu`）
     2. 元のモデルをダウンロード（1B 2.7 GB・3B 5.6 GB。builder の `-m` はアクセストークンを求めて止まるので先に落とす）: `python -c "from huggingface_hub import snapshot_download as d; d('sbintuitions/sarashina2.2-3b-instruct-v0.1', local_dir='sarashina2.2-3b')"`
