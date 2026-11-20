@@ -18,8 +18,9 @@ very row it answers (tsudo, 2026-11-12: 「一部のシステムが名前にUUID
   a system sharing one are very unlikely, but a short or digits-only id can
   repeat over months): two of one day's file are told apart (the later one by
   key order is worked out again), and a result file's id is looked for among
-  the system's rows of the day read and the days just before it, the row of
-  the nearest day first (adoption.match_answers, `resultFile.linkDays`).
+  the system's rows of the file row's day (its 対象日 or 撮像予定) and the
+  days just before it, the row of the nearest day first
+  (adoption.match_answers, `resultFile.linkDays`).
 """
 from __future__ import annotations
 

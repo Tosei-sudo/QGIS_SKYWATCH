@@ -229,16 +229,18 @@ def test_matching_by_any_key_day_and_system():
     text = ("ID,KANRI,R,SAT,DAY,SYS,AREA\n"
             "X-404,k-0001,保留,X1,20261108,a,\n"      # neither an id nor a 管理番号 of ours (K-0001 is not K-1: not a number)
             ",K-2,OK,,20261108,SYS-B,\n"              # another system's row
-            ",K-1,OK,,20261109,A,\n"                   # another day's row
+            ",K-1,OK,,20261109,A,\n"                   # another day's row (東京湾, handed out on the 8th only)
             "T-9,,OK,X1,20261108,A,\"139,35,139.1,35.1\"\n")  # its own plan (要求外)
     answers, problems = read_answers(text.encode(), spec)
     assert problems == []
     assert same_key("k-0001") != same_key("K-1") and same_key("000123") == same_key("123")
     reading = match_answers(answers, day, requests, "SYS-A", d, spec, "a.csv", "A")
-    assert reading.problems == ["2 行目: 不明の X-404 はこの日このシステムに出力していないため読み飛ばし",
-                                "対象日が 2026-11-08 以外の 1 行を読み飛ばし", "ほかのシステム（SYS-B）の行を読み飛ばし"]
-    # The first row is not ours and, being 不明, is nothing; 東京湾 is missing (left 不明: the file says 採否).
-    assert reading.tally() == {ADOPTED: 0, REJECTED: 0, WAITING: 0, UNREQUESTED: 1, NOT_IN_FILE: 1} and reading.missing_as == WAITING
+    assert reading.problems == ["2 行目: 不明の X-404 はこの日このシステムに出力していないため読み飛ばし", "ほかのシステム（SYS-B）の行を読み飛ばし",
+                                "ほかの日の 1 行（その日に出力していない依頼）を 2026-11-08 の出力の行に照合（2026-11-08 の採否として記録）"]
+    # The first row is not ours and, being 不明, is nothing; 東京湾, planned by the system for the 9th, was handed out for
+    # the 8th (the file's day) only: the 8th's row is answered (2026-11-20: rows are read for their days, none skipped).
+    assert reading.tally() == {ADOPTED: 1, REJECTED: 0, WAITING: 0, UNREQUESTED: 1, NOT_IN_FILE: 0} and reading.missing_as == WAITING
+    assert reading.day == d and reading.days == [d]
     [own] = unrequested_rows(reading, FIRST, "RUN")
     assert (own.result, own.satellite, own.external_id, own.rings[0][2]) == (UNREQUESTED, "OPT-X 1", "T-9", [139.1, 35.1])
 

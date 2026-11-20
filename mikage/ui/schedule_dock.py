@@ -41,7 +41,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.adoption import (
-    NOT_IN_FILE, Reading, answer_changes, link_window, manual_changes, manual_unrequested, match_answers, unrequested_rows,
+    NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, read_window, unrequested_rows,
 )
 from ..core.esri import EsriError
 from ..core.plan.names import plain
@@ -51,9 +51,7 @@ from ..core.request.model import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
 from ..core.request.store import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, add_history,
-    day_counts, delete_history, delete_history_rows, history_has, load_day, load_linked, load_requests, load_shots, state_of,
-    unrequested_where,
-    update_history,
+    day_counts, delete_history_rows, history_has, load_day, load_requests, load_shots, load_system_rows, state_of, update_history,
 )
 from ..core.request.shot_view import companions, shot_text, shot_tip
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
@@ -253,7 +251,8 @@ class ScheduleDock(PluginDock):
         more = FlowLayout()
         self.import_button = QPushButton(self.tr("結果ファイルの取り込み…"))
         self.import_button.setToolTip(self.tr("システムから返ってきた採否のファイル（requestExports の resultFile）を読み、"
-                                              "この日の採用・不採用と要求外の計画を記録"))
+                                              "採用・不採用と要求外の計画を記録。表示中の日でなく、ファイルの行の日"
+                                              "（対象日、なければ撮像予定の日）に記録する"))
         self.import_button.clicked.connect(lambda: self.import_file())
         self.add_button = QPushButton(self.tr("要求外を追加…"))
         self.add_button.setToolTip(self.tr("依頼していない計画（システム側の定常の撮像など）を手で追加"))
@@ -732,7 +731,12 @@ class ScheduleDock(PluginDock):
         return systems[names.index(name)] if ok else None
 
     def import_file(self, path: Optional[str] = None, system=None, ask: bool = True) -> None:
-        """Reads a system's result file for the day shown, tells what it says, and records it."""
+        """
+        Reads a system's result file, tells what it says, and records it on the
+        days its rows are for (対象日, else the 撮像予定's day; the file's day for
+        rows saying neither), whatever day is shown (tsudo, 2026-11-20); then
+        shows the file's day when the day shown is not one of them.
+        """
         if self.denied("schedule.answer"):
             return
         system = system or self._file_system()
@@ -756,12 +760,12 @@ class ScheduleDock(PluginDock):
 
         def work(task):
             answers, problems = read_answers(data, spec, load_schema)
-            rows = load_day(client, store, token, day, task.isCanceled)
+            # The system's rows of the days the file's rows say and round them (a 外部連携ID's earlier row), and round
+            # the day shown for a file without dates; not only the day shown.
+            first, last = read_window(answers, day, spec.link_days, system.system, system.label)
+            rows = load_system_rows(client, store, token, system.system, first, last, task.isCanceled)
             requests = load_requests(client, store, token, task.isCanceled)
-            # The rows of the days round it, where the file's 外部連携ID are looked for too (a request handed out earlier).
-            nearby = (load_linked(client, store, token, system.system, *link_window(day, spec.link_days), task.isCanceled)
-                      if any(a.keys.get("linkId") for a in answers) else [])
-            reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label, nearby)
+            reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label)
             reading.problems = problems + reading.problems
             return reading
 
@@ -773,15 +777,30 @@ class ScheduleDock(PluginDock):
 
         self._start(self.tr("結果ファイルの読み込み"), work, done)
 
+    def _tally_line(self, t: dict) -> str:
+        return (self.tr("採用 {a}・不採用 {r}・要求外 {u}").format(a=t[ADOPTED], r=t[REJECTED], u=t[UNREQUESTED])
+                + (self.tr("・不明 {w}").format(w=t[WAITING]) if t[WAITING] else ""))
+
     def _confirm_reading(self, reading: Reading, label: str) -> bool:
         t = reading.tally()
-        lines = [self.tr("{s}・{d}・{f}").format(s=label, d=reading.day, f=reading.source),
-                 self.tr("採用 {a}・不採用 {r}・要求外 {u}").format(a=t[ADOPTED], r=t[REJECTED], u=t[UNREQUESTED])
-                 + (self.tr("・不明 {w}").format(w=t[WAITING]) if t[WAITING] else "")]
+        days = reading.placed() or [reading.day]
+        if len(reading.touched()) > 1:
+            # Written on several days: each day's part (and what the file leaves out on it).
+            lines = [self.tr("{s}・{f}").format(s=label, f=reading.source)]
+            for d in reading.touched():
+                n = reading.tally(d)
+                lines.append(f"{d}: {self._tally_line(n)}" + (self.tr("・ファイルにない依頼 {m}").format(m=n[NOT_IN_FILE])
+                                                               if n[NOT_IN_FILE] else ""))
+        else:
+            lines = [self.tr("{s}・{d}・{f}").format(s=label, d=days[0], f=reading.source), self._tally_line(t)]
+        if reading.shown and reading.shown not in reading.touched():
+            lines.append(self.tr("表示中の {s} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録する").format(s=reading.shown))
         if t[NOT_IN_FILE]:
             lines.append(self.tr("出力したがファイルにない依頼 {n} 件: {what}").format(
                 n=t[NOT_IN_FILE], what=REJECTED if reading.missing_as == REJECTED else self.tr("不明のまま")))
-        lines.append(self.tr("この日・このシステムの要求外（前に結果ファイルから入れたもの）は置き換える"))
+        if reading.replaced:
+            lines.append(self.tr("前に結果ファイルから入れたこのシステムの要求外 {n} 件（{d} の分と、ほかの日の同じ計画）は置き換える").format(
+                n=len(reading.replaced), d="・".join(reading.days or days)))
         if reading.problems:
             lines += ["", self.tr("読めなかった行など:")] + reading.problems[:8] + (["…"] if len(reading.problems) > 8 else [])
         return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
@@ -790,9 +809,10 @@ class ScheduleDock(PluginDock):
         store, client, token = self.store, self.context.esri(), self.token()
         changes = answer_changes(reading)
         adds = unrequested_rows(reading, _now_ms())
+        gone_ids = [r.object_id for r in reading.replaced]
 
         def work(task):
-            gone = delete_history(client, store, token, unrequested_where(store, reading.day, reading.system, by_hand=False))
+            gone = delete_history_rows(client, store, token, gone_ids)
             changed = update_history(client, store, token, changes)
             added = add_history(client, store, token, adds)
             return changed, added, gone.problems + changed.problems + added.problems
@@ -800,15 +820,36 @@ class ScheduleDock(PluginDock):
         def done(result):
             changed, added, problems = result
             t = reading.tally()
+            days = reading.placed() or [reading.day]
+            source = reading.source if days == [reading.shown] else self.tr("{f}（{d}）").format(f=reading.source, d="・".join(days))
             note = self.tr("{f}: 採用 {a}・不採用 {r}・要求外 {u} を記録").format(
-                f=reading.source, a=t[ADOPTED], r=t[REJECTED] + (t[NOT_IN_FILE] if reading.missing_as == REJECTED else 0), u=int(added))
+                f=source, a=t[ADOPTED], r=t[REJECTED] + (t[NOT_IN_FILE] if reading.missing_as == REJECTED else 0), u=int(added))
             if t[WAITING]:
                 note += self.tr("（不明 {w}）").format(w=t[WAITING])
             if problems or reading.problems:
                 note += self.tr("（{m}）").format(m="、".join((problems + reading.problems)[:3]))
-            self.reload(then=lambda: self.status.setText(f"{self.status.text()}。{note}"))
+
+            def told():
+                self.status.setText(f"{self.status.text()}。{note}")
+            # The file of another day: that day is shown (the day of most of its rows), so what was recorded is seen.
+            if reading.day and self.day not in reading.touched():
+                self._show_day(reading.day, told)
+            else:
+                self.reload(then=told)
 
         self._start(self.tr("採否の記録"), work, done)
+
+    def _show_day(self, day: str, then=None) -> None:
+        """Shows a day on the calendar and reads it, then `then`."""
+        try:
+            d = date.fromisoformat(day[:10])
+        except ValueError:
+            self.reload(then=then)
+            return
+        self.calendar.blockSignals(True)
+        self.calendar.setSelectedDate(QDate(d.year, d.month, d.day))
+        self.calendar.blockSignals(False)
+        self.reload(then=then)
 
     # --- 要求外 by hand ---------------------------------------------------------------------------
 
