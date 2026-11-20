@@ -376,7 +376,7 @@ def test_the_polygon_shows_while_it_is_drawn(plugin):
 def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     """tsudo 2026-11-19: the area drawn kept, and chosen from 「保存した範囲」 for later searches."""
     from qgis.core import QgsPointXY, QgsRectangle
-    from mikage.ui import catalog_dock
+    from mikage.ui.catalog_parts import saved_areas as saved_part
 
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -392,7 +392,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.draw_tool.points = [QgsPointXY(139.71, 35.61), QgsPointXY(139.74, 35.61), QgsPointXY(139.74, 35.64)]
     dock.draw_tool.finish()
     assert dock.save_area_button.isVisibleTo(dock) and dock.save_area_button.isEnabled()
-    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("東京湾", True)))
+    monkeypatch.setattr(saved_part.QInputDialog, "getText", staticmethod(lambda *a: ("東京湾", True)))
     dock.ask_save_area()
     assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾"
     assert [a.name for a in settings.saved_areas()] == ["東京湾"]
@@ -405,11 +405,11 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
 
     # Another area drawn and saved; the same name again asks before replacing.
     dock.set_drawn([[135.1, 34.6], [135.3, 34.6], [135.3, 34.7]])
-    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("大阪湾", True)))
+    monkeypatch.setattr(saved_part.QInputDialog, "getText", staticmethod(lambda *a: ("大阪湾", True)))
     dock.ask_save_area()
     assert [dock.saved_box.itemText(i) for i in range(dock.saved_box.count())] == ["大阪湾", "東京湾"]
     asked = []
-    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: asked.append(text) or False)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: asked.append(text) or False)
     dock.set_drawn([[135.0, 34.0], [135.1, 34.0], [135.1, 34.1]])
     dock.ask_save_area()
     assert asked and "大阪湾" in asked[0] and settings.saved_areas()[0].ring[0] == (135.1, 34.6)
@@ -441,7 +441,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.views.choose("北")
     assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾（北）"
     # Deleted (asked first).
-    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: True)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: True)
     dock.ask_delete_saved_area()
     assert [a.name for a in settings.saved_areas()] == ["大阪湾"] and dock.saved_box.currentText() == "大阪湾"
     dock.delete_saved_area()

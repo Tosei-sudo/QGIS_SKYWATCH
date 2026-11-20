@@ -14,6 +14,7 @@ UI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "
 DOCKS = [
     ("observation_dock.py", "ObservationDock", "obs_dock"),
     ("imaging_plan_dock.py", "ImagingPlanDock", "plan_dock"),
+    ("catalog_dock.py", "CatalogDock", "catalog_parts"),
 ]
 
 

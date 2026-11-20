@@ -61,3 +61,8 @@ def test_no_cycle_spans_two_features(measured, baseline):
 def test_the_baseline_has_every_rule(baseline):
     assert set(baseline) == {"layers", "deep_imports", "private_access", "kernel", "feature_cycles"}
     assert baseline["layers"] == []
+
+
+def test_every_relative_import_names_a_module_of_the_plugin():
+    """Not in the baseline: a wrong one is a bug (it fails when its function runs)."""
+    assert architecture.unresolved_imports(architecture.modules()) == []

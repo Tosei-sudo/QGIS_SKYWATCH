@@ -279,6 +279,29 @@ def feature_cycles(mods: dict[str, Module]) -> list[str]:
     return sorted(out)
 
 
+def unresolved_imports(mods: dict[str, Module]) -> list[str]:
+    """
+    The relative imports (in functions too) naming a module the plugin does not have: a module moved into a folder
+    (ui/obs_dock…) whose imports were not shifted one level down fails only when that function runs.
+    """
+    out = []
+    for m in mods.values():
+        is_package = m.path.endswith("__init__.py")
+        for node in ast.walk(m.tree):
+            if not isinstance(node, ast.ImportFrom) or not node.level:
+                continue
+            base = m.name.split(".") if m.name != "__init__" else []
+            base = base if is_package else base[:-1]
+            if node.level - 1 > len(base):
+                out.append(f"{m.name}:{node.lineno} {'.' * node.level}{node.module or ''}")
+                continue
+            base = base[: len(base) - (node.level - 1)] if node.level > 1 else base
+            target = ".".join(base + ([node.module] if node.module else []))
+            if target and target not in mods and target.split(".")[0] != "ext":  # ext: the bundled libraries
+                out.append(f"{m.name}:{node.lineno} {'.' * node.level}{node.module or ''}")
+    return sorted(out)
+
+
 def measure(root: str = ROOT) -> dict:
     mods = modules(root)
     return {
