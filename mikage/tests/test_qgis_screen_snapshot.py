@@ -24,6 +24,7 @@ APP = start_app()
 
 from qgis.core import QgsPointXY, QgsSettings  # noqa: E402
 from qgis.PyQt.QtCore import QBuffer, QByteArray, QIODevice  # noqa: E402
+from qgis.PyQt.QtGui import QIcon  # noqa: E402
 from qgis.PyQt.QtWidgets import (QAbstractButton, QComboBox, QGroupBox, QLabel, QLineEdit, QMenu,  # noqa: E402
                                  QTabWidget, QWidget)
 
@@ -43,18 +44,47 @@ def clean_settings():
 
 
 def _words(text: str) -> str:
-    """Words as shown, numbers masked (counts, dates and times change from run to run)."""
-    return re.sub(r"\d+", "#", text or "")
+    """
+    Words as shown, numbers masked (counts, dates and times change from run to run). A count in brackets
+    is left out: 「通知（3）」 is 「通知」 (the unread notices earlier tests of the same process left).
+    """
+    return re.sub(r"（#）", "", re.sub(r"\d+", "#", text or ""))
 
 
-def _icon(icon) -> str:
-    if icon is None or icon.isNull():
-        return ""
+def _pixels(icon) -> str:
     data = QByteArray()
     buffer = QBuffer(data)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     icon.pixmap(16, 16).toImage().save(buffer, "PNG")
     return hashlib.sha1(bytes(data)).hexdigest()[:12]
+
+
+#: {pixels: "name.svg:<the file's hash>"} of the plugin's own icons, drawn when the screens are read (screens()).
+_RESOURCES: dict = {}
+
+
+def _resources() -> dict:
+    """
+    The plugin's own icons by their pixels as drawn now. An icon is written down by its file and the
+    file's contents, not its pixels: an icon with words in it (cloud_cover.svg's 「%」) is drawn with
+    whatever fonts earlier tests of the same process left, so its pixels change from run to run.
+    """
+    folder = os.path.join(os.path.dirname(HERE), "resources")
+    out = {}
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".svg"):
+            path = os.path.join(folder, name)
+            with open(path, "rb") as f:
+                content = hashlib.sha1(f.read()).hexdigest()[:12]
+            out.setdefault(_pixels(QIcon(path)), f"{name}:{content}")
+    return out
+
+
+def _icon(icon) -> str:
+    if icon is None or icon.isNull():
+        return ""
+    pixels = _pixels(icon)
+    return _RESOURCES.get(pixels, pixels)
 
 
 def _action(action, icons=True) -> object:
@@ -120,6 +150,8 @@ def screens(plugin, iface) -> dict:
     from mikage.core.config import KEYS
     from mikage.plugin import PluginApi
 
+    _RESOURCES.clear()
+    _RESOURCES.update(_resources())
     window = iface.mainWindow()
     docks = {}
     for dock in iface.docks:
@@ -157,6 +189,21 @@ def screens(plugin, iface) -> dict:
     }
 
 
+def _differences(found, expected, path="") -> list:
+    """Where two snapshots differ: [(path, found, expected)]."""
+    if isinstance(found, dict) and isinstance(expected, dict):
+        out = []
+        for k in sorted(set(found) | set(expected)):
+            out += _differences(found.get(k), expected.get(k), f"{path}/{k}")
+        return out
+    if isinstance(found, list) and isinstance(expected, list) and len(found) == len(expected):
+        out = []
+        for i, (a, b) in enumerate(zip(found, expected)):
+            out += _differences(a, b, f"{path}[{i}]")
+        return out
+    return [] if found == expected else [(path, found, expected)]
+
+
 def test_the_screens_are_as_they_were():
     from mikage import classFactory
 
@@ -177,5 +224,5 @@ def test_the_screens_are_as_they_were():
     with open(SNAPSHOT, encoding="utf-8") as f:
         expected = json.load(f)
     for key in expected:
-        assert found.get(key) == expected[key], f"画面が変わった: {key}"
+        assert found.get(key) == expected[key], f"画面が変わった: {key}: {_differences(found.get(key), expected[key], key)[:5]}"
     assert set(found) == set(expected)
