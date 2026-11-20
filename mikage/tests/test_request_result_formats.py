@@ -236,7 +236,7 @@ def test_matching_by_any_key_day_and_system():
     assert same_key("k-0001") != same_key("K-1") and same_key("000123") == same_key("123")
     reading = match_answers(answers, day, requests, "SYS-A", d, spec, "a.csv", "A")
     assert reading.problems == ["2 行目: 不明の X-404 はこの日このシステムに出力していないため読み飛ばし", "ほかのシステム（SYS-B）の行を読み飛ばし",
-                                "ほかの日の 1 行（その日に出力していない依頼）を 2026-11-08 の出力の行に照合（2026-11-08 の採否として記録）"]
+                                "その日に出力していない依頼の 1 行を 2026-11-08 の出力の行に照合（2026-11-08 の採否として記録）"]
     # The first row is not ours and, being 不明, is nothing; 東京湾, planned by the system for the 9th, was handed out for
     # the 8th (the file's day) only: the 8th's row is answered (2026-11-20: rows are read for their days, none skipped).
     assert reading.tally() == {ADOPTED: 1, REJECTED: 0, WAITING: 0, UNREQUESTED: 1, NOT_IN_FILE: 0} and reading.missing_as == WAITING

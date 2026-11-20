@@ -25,7 +25,7 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
-from mikage.ui.schedule_dock import _when  # noqa: E402
+from mikage.ui.schedule_dock import _when, days_text  # noqa: E402
 
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
 HISTORY = "https://example.com/arcgis/rest/services/Req/FeatureServer/1"
@@ -414,7 +414,7 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
         "A・a_tomorrow.csv",
         f"{tomorrow.isoformat()}: 採用 1・不採用 0・要求外 0", f"{later.isoformat()}: 採用 0・不採用 0・要求外 1",
         f"表示中の {today.isoformat()} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録する",
-        f"前に結果ファイルから入れたこのシステムの要求外 1 件（{tomorrow.isoformat()} の分と、ほかの日の同じ計画）は置き換える"]
+        f"前に結果ファイルから入れたこのシステムの要求外 1 件（{tomorrow.isoformat()}・{later.isoformat()} の分と、ほかの日の同じ計画）は置き換える"]
     assert dock.status.text() == "取り込みを取りやめ"
 
     dock.import_file(str(path), ask=False)
@@ -434,3 +434,6 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     assert wait_for(lambda: dock.task is None and dock.day == later.isoformat())
     assert states(dock) == {("定常 東京", "SYS-A"): "要求外"} and _when(dock.rows[0].planned_at).endswith("10:30")
     dock.close_all()
+    # A file of a week, told short (the status line, the confirmation).
+    week = [(today + timedelta(days=i)).isoformat() for i in range(7)]
+    assert days_text(week[:3]) == "・".join(week[:3]) and days_text(week) == f"{week[0]}〜{week[-1]}（7 日）"
