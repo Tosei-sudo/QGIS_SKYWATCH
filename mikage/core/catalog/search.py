@@ -459,7 +459,7 @@ def listed_image(record: CatalogRecord):
     image opened from the catalog would have), its time, its footprint's
     extent and its sensor (the records' 衛星名); None without an id.
     """
-    from ..obs.model import ListedImage
+    from ..listed_image import ListedImage
     from ..util import ms_of
 
     if not record.id:
@@ -478,7 +478,7 @@ def footprint_rings(geometry: Optional[dict[str, Any]]) -> Optional[list[list[li
     without its file (drawn on the map as its layer); None for an envelope,
     a bad ring or more than MAX_FOOTPRINT_POINTS points (its box drawn).
     """
-    from ..obs.model import rings_of
+    from ..listed_image import rings_of
 
     rings = rings_of(geometry.get("rings")) if isinstance(geometry, dict) else None
     if rings is None or sum(len(r) for r in rings) > MAX_FOOTPRINT_POINTS:

@@ -69,3 +69,22 @@ def polygons_of(rings: Sequence) -> list[list]:
                 out[i] = [r]
                 order.append(i)
     return [out[i] for i in sorted(order)]
+
+
+def _signed_area(ring: Sequence[Sequence[float]]) -> float:
+    a = 0.0
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1])
+        j = i
+    return a
+
+
+def esri_rings(rings: Sequence) -> list:
+    """Rings as Esri wants them: outer rings clockwise, holes anticlockwise (polygons_of tells which is which)."""
+    out = []
+    for polygon in polygons_of(rings):
+        for i, r in enumerate(polygon):
+            clockwise = _signed_area(r) < 0
+            out.append([list(p) for p in r] if clockwise == (i == 0) else list(reversed(r)))
+    return out

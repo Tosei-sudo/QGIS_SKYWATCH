@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
-from ...obs.taxonomy import Taxon, class_by_name, find, kind_of, path_of, specs_at, within
+from ...obs.api import Taxon, class_by_name, find, kind_of, path_of, specs_at, within
 
 #: Metres of a degree of latitude.
 METRES_PER_DEGREE = 111_320.0

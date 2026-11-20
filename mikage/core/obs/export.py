@@ -38,9 +38,9 @@ from typing import Any, Callable, Iterable, Optional, Sequence
 from ..coords import format_dms, format_lat_lon, format_mgrs, format_utm
 from ..time_zone import TimeZone, clock_of, parse_time_zone
 from ..util import formula_safe, is_number, is_record, js_string
-from ..request.export import _coerce, printf
+from ..file_values import coerce as _coerce, printf
 from ..time_zone import format_time
-from ..request.schema import resolve, validate
+from ..json_schema import resolve, validate
 from .alerts import (
     DEFAULT_FENCE_FIELDS, DEFAULT_PLACE_FIELDS, EsriSource, Geofence, NamedArea, at_least, esri_source_of, inside_rings, of_kinds,
     place_kinds_of, places_of,

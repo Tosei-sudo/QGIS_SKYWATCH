@@ -222,7 +222,7 @@ def load_satellite_choices(client: Any, image_catalogs: Sequence[Any], satellite
     satellite catalogs' names (their distinct values), with the alias table's
     `names`; and whether every table was read (else asked again next time).
     """
-    from ..catalog.search import sensors_of
+    from ..catalog.api import sensors_of
     from ..esri import EsriError
     from ..util import js_string
 

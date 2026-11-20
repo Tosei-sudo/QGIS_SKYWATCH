@@ -25,7 +25,7 @@ from typing import Any, Iterable, Optional, Sequence
 
 from . import edit_stamp
 from .esri import EsriClient, EsriError, fit_value, quote
-from .obs.alerts import EsriSource, esri_source_of
+from .sources import EsriSource, esri_source_of
 from .util import is_number, is_record, js_string, ms_of
 
 #: The two kinds, and what the plugin calls them.
@@ -95,7 +95,7 @@ class Interest:
         return f"地域（頂点 {corners}）" if parts == 1 else f"地域（{parts} 輪・頂点 {corners}）"
 
     def esri_geometry(self) -> Optional[dict[str, Any]]:
-        from .request.store import esri_rings
+        from .shapes import esri_rings
 
         if not self.has_shape:
             return None
@@ -105,7 +105,7 @@ class Interest:
 
 
 def _color_of(value: Any) -> Optional[str]:
-    from .catalog.thumbnail import is_color
+    from .util import is_color
 
     return value.strip() if is_color(value) else None
 

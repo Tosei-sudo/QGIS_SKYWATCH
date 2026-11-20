@@ -27,7 +27,7 @@ from typing import Any, Iterable, Optional
 from urllib.parse import urljoin, urlsplit
 
 from .geocode import decode_csv, parse_csv
-from .obs.image_time import parse_time
+from .time_text import parse_time
 from .time_zone import UTC, TimeShift, TimeZone, read_instant, read_text_instant
 
 ROLES = {

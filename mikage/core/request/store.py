@@ -14,11 +14,12 @@ from typing import Any, Callable, Optional, Sequence
 
 from ..esri import EDIT_BATCH, ConflictError, EsriClient, EsriError, UnreachableError, deleted_count, quote
 from ..offline import OfflineWork, Pending, UploadReport, offline_of, tried_of
+from ..shapes import esri_rings  # noqa: F401 (read from here too)
 from ..util import is_number, is_record, layer_url, time_of, use_legacy_names
 from .groups import DEFAULT_GROUP_FIELDS
 from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
-    day_bounds, polygons_of,
+    day_bounds,
 )
 
 #: The attribute names used when the settings do not map a role.
@@ -220,25 +221,6 @@ def _choice(v: Any, choices: Sequence[str], fallback: str) -> str:
 
 def _list(v: Any) -> list:
     return [s.strip() for s in re.split(r"[,、]", _text(v)) if s.strip()]
-
-
-def _signed_area(ring: Sequence[Sequence[float]]) -> float:
-    a = 0.0
-    j = len(ring) - 1
-    for i in range(len(ring)):
-        a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1])
-        j = i
-    return a
-
-
-def esri_rings(rings: Sequence) -> list:
-    """Rings as Esri wants them: outer rings clockwise, holes anticlockwise (model.polygons_of tells which is which)."""
-    out = []
-    for polygon in polygons_of(rings):
-        for i, r in enumerate(polygon):
-            clockwise = _signed_area(r) < 0
-            out.append([list(p) for p in r] if clockwise == (i == 0) else list(reversed(r)))
-    return out
 
 
 def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:

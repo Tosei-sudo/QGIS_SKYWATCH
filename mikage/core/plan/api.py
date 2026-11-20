@@ -41,6 +41,8 @@ from .weather import (
     FORECAST_DAYS, GRID, key_of, PAST_DAYS, places_for,
 )
 from .weather_file import forecast_file, read_grid
+from .output import OLD_TLE
+from .satellites import SAMPLE_SOURCE
 
 __all__ = [
     "apply_clouds", "attach", "bar_at", "best_named", "best_scene", "blocking", "box_of", "BUILT_IN_DEFAULTS", "cell_targets",
@@ -63,4 +65,5 @@ __all__ = [
     "summary_cover", "summary_text", "sun_angles", "target_of", "targets_of", "tle_age_days", "track_angles", "TRACK_COLORS",
     "track_layers", "track_place", "track_rate", "track_rows", "track_shapes", "track_ticks", "UncertaintyModel", "unit",
     "warning_of", "when_text", "with_modes",
+    "OLD_TLE", "SAMPLE_SOURCE",
 ]

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import quote
 
-from ..util import is_number, is_record, js_string, time_of
+from ..util import is_color, is_number, is_record, js_string, time_of  # noqa: F401 (is_color: read from here too)
 
 #: The size asked for (and shown on the card) when the settings file does not say: 200 pixels high (tsudo, 2026-11-14: 「縦200pixelぐらいでいいよ」).
 DEFAULT_WIDTH, DEFAULT_HEIGHT = 270, 200
@@ -368,14 +368,6 @@ def thumbnail_address(pattern: ThumbnailPattern, feature: dict[str, Any], fields
 HARD_LIMIT = 10_000
 #: Brackets left with nothing in them once a value was empty (「横須賀本港（）」 → 「横須賀本港」).
 _EMPTY_BRACKETS = re.compile(r"\s*(\(\s*\)|（\s*）|\[\s*\]|［\s*］|「\s*」|【\s*】|<\s*>|〈\s*〉)")
-
-
-#: A line's background as the settings file or an attribute may write it: #rgb, #rrggbb, #aarrggbb or a colour's name.
-_COLOR = re.compile(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})|[A-Za-z]{3,30}")
-
-
-def is_color(value: Any) -> bool:
-    return isinstance(value, str) and bool(_COLOR.fullmatch(value.strip()))
 
 
 @dataclass(frozen=True)

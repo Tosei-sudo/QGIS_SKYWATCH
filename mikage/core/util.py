@@ -254,3 +254,11 @@ def read_day_time(text: str, day: str = "") -> str:
     if day:
         return f"{day} {read_clock(t)}"
     raise ValueError(text)
+
+
+#: A line's background as the settings file or an attribute may write it: #rgb, #rrggbb, #aarrggbb or a colour's name.
+_COLOR = re.compile(r"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})|[A-Za-z]{3,30}")
+
+
+def is_color(value: Any) -> bool:
+    return isinstance(value, str) and bool(_COLOR.fullmatch(value.strip()))

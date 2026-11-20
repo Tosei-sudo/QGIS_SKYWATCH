@@ -401,9 +401,9 @@ def old_tle_text(plan: DayPlan) -> str:
     the day's calculation did not): 「TLE が古い衛星（14 日超）: ISS（20 日前）。
     撮像時刻・範囲がずれることがある」 ("" when none).
     """
-    from ..plan.output import OLD_TLE
-    from ..plan.satellites import SAMPLE_SOURCE, platform_key
-    from ..plan.tree import tle_age_days
+    from ..plan.api import OLD_TLE
+    from ..plan.api import SAMPLE_SOURCE, platform_key
+    from ..plan.api import tle_age_days
     from .model import day_bounds
 
     first, last = day_bounds(plan.day)

@@ -5,7 +5,10 @@ asked; EsriClient moves it to the source's timeZone (time_zone.to_service) where
 """
 from __future__ import annotations
 
+import math
+import re
 from datetime import date
+from typing import Optional
 
 from .util import utc_text
 
@@ -28,3 +31,14 @@ def date_text(day: str) -> str:
 def day_start(d: date) -> str:
     """`TIMESTAMP 'yyyy-mm-dd 00:00:00'`: the start of a day, as written."""
     return f"TIMESTAMP '{d.isoformat()} 00:00:00'"
+
+
+def since_condition(name: str, field_type: Optional[str], t: float) -> str:
+    """`name` at or after `t`, written for the field's type."""
+    if field_type == "esriFieldTypeDateOnly":
+        return f"{name} >= {date_of(t)}"
+    if field_type and re.search(r"Integer|Double|Single", field_type):
+        return f"{name} >= {math.floor(t)}"
+    if field_type == "esriFieldTypeString":
+        return f"{name} >= '{utc_text(t)[:10]}'"
+    return f"{name} >= {timestamp(t)}"

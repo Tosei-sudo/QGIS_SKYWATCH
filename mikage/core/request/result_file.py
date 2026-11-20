@@ -67,7 +67,7 @@ from typing import Any, Callable, Optional, Sequence
 from ..time_zone import UTC, TimeZone, instant_of, read_text_instant
 from ..util import is_number, is_record, parse_iso
 from .link_id import DEFAULT_LINK_DAYS
-from .schema import resolve, validate
+from ..json_schema import resolve, validate
 
 ADOPTED, REJECTED, WAITING = "採用", "不採用", "不明"
 ANSWERS = (ADOPTED, REJECTED, WAITING)
