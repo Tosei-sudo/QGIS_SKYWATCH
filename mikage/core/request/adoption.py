@@ -17,15 +17,18 @@ day the dock shows (tsudo, 2026-11-20: 「別の日の選択でも正しくイ�
 its 対象日 (`day` column), else the JST day of its 撮像予定 (`plannedAt`);
 a row saying neither is for the file's day (file_day: the day most of its
 rows say, else the day most of the requests it names were handed out on,
-round the day shown, else the day shown). A row of a request handed to that
-system that day answers its history row(s); one whose 撮像予定 falls on a day
-the request was not handed out on answers the file's day's row of it (planned
-off its day). A row of a request not handed to it, or of no request at all, is
+round the day shown, else the day shown). A file may hold several days. A
+row of a request handed to that system that day answers its history row(s);
+one whose day the request was not handed out on answers its row of the
+nearest other day of the file (the day before first: planned off its day,
+past midnight), unless another row answers that one. A row of a request not
+handed to it, or of no request at all, is
 要求外 (planned by the system itself) when it is 採用, put on the day of its
 撮像予定 (「計画外のやつは、選択している日付じゃなくて、その撮像予定の日付のところに出してほしい」).
-A request handed out on a day the file answers for (the file's day, the days
-it states, the days whose rows it answers) and not in the file is `missing`
-(不採用, or left 不明).
+A request handed out on a day the file answers for (the file's day and every
+day its rows are for, but a row answering another day's row) and not in the
+file is `missing` (不採用, or left 不明), day by day (tsudo, 2026-11-20: 「複数の
+日付のファイルを取り込む」).
 
 A request taken several times a day (1 日の回数) has a history row per
 time: a file row naming the request answers them all, one naming a time
@@ -103,8 +106,8 @@ class Reading:
     problems: list = field(default_factory=list)
     #: The day the dock showed when it was read ("" when not told).
     shown: str = ""
-    #: The days the file answers for (its day, the days it states and those whose rows it answers): their rows
-    #: handed out and not in the file are `missing`, their 要求外 from a file before are replaced.
+    #: The days the file answers for (its day and the days its rows are for, but a row answering another day's row):
+    #: their rows handed out and not in the file are `missing`, their 要求外 from a file before are replaced.
     days: list = field(default_factory=list)
     #: The 要求外 rows a file put in before that this reading replaces (deleted when it is saved).
     replaced: list = field(default_factory=list)
@@ -331,16 +334,17 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
     reading = Reading(system, file_day, source, missing_as=missing, shown=day)
     covered = {file_day}
     by_link_days: dict = {}
-    off_day = 0
+    off_days: dict = {}
     unknown_links = 0
     answered: set = set()
 
     def place(a: Answer, req: Optional[ImagingRequest], time: Optional[int], at: str, own: list, part: Optional[int],
               late: bool, anchor: str) -> None:
-        """Puts a file row on the rows it answers (`own` and those put into its shot), or as 要求外, or skips it."""
-        if a.day and at == anchor:
-            # The day it states is one the file answers for (not when it answers another day's row).
-            covered.add(a.day)
+        """
+        Puts a file row on the rows it answers (`own` and those put into its
+        shot), or as 要求外, or skips it. Its day is one the file answers for,
+        unless it answers another day's row (planned late or off its day).
+        """
         pool_at = on_day.get(at, ())
         # A request put into another's shot (まとめ) was in that one's row: its answer is theirs too.
         shots = {r.shot_id for r in own if r.shot_id}
@@ -351,11 +355,13 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
             what = f"「{req.name}」" if req is not None else (a.key or "（キーなし）")
             when = "この日" if anchor == file_day else f" {anchor} に"
             reading.problems.append(f"{a.line} 行目: {a.answer}の {what} は{when}このシステムに出力していないため読み飛ばし")
+            covered.add(anchor)
             return
         if not rows:
             # 要求外: on the day of its 撮像予定 (not the day shown).
+            covered.add(anchor)
             at = planned_day(a) or anchor
-        elif not late:
+        elif at == anchor and not late:
             covered.add(at)
         if req is not None and (req.id, time, at, part) in answered:
             reading.problems.append(f"{a.line} 行目: 「{req.name}」が重複（後の行を使う）")
@@ -368,7 +374,20 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
     def of_request(day_: str, req: ImagingRequest, time: Optional[int]) -> list:
         return [r for r in on_day.get(day_, ()) if r.request_id == req.id and (time is None or r.occurrence == time)]
 
-    # Rows naming a request not handed out on their day, tried on the file's day once the others are placed.
+    # The days the file's rows are for: a row naming a request not handed out on its day answers its row of the nearest
+    # of them (planned off its day), tried once the others are placed.
+    file_days = {own_day(a) or file_day for a, _req, _twice, _time in mine} | {file_day}
+    near = max(1, spec.link_days)
+
+    def off_day(req: ImagingRequest, time: Optional[int], anchor: str) -> str:
+        """The nearest other day of the file (the day before first; up to `linkDays` before, or the day after) the request was handed out on."""
+        placed = []
+        for d in file_days:
+            n = _days_before(anchor, d)
+            if d != anchor and n is not None and -1 <= n <= near and of_request(d, req, time):
+                placed.append(((abs(n), n < 0), d))
+        return min(placed)[1] if placed else ""
+
     deferred = []
     for a, req, twice, time in mine:
         anchor = own_day(a) or file_day
@@ -398,24 +417,25 @@ def match_answers(answers: Sequence[Answer], day_rows: Sequence[HistoryRow], req
             reading.problems.append(f"{a.line} 行目: {a.key} は複数の依頼にあるため「{req.name}」とした")
         if own is None:
             own = of_request(anchor, req, time) if req is not None else []
-            if not own and req is not None and anchor != file_day and of_request(file_day, req, time):
+            if not own and req is not None and off_day(req, time, anchor):
                 deferred.append((a, req, time, anchor))
                 continue
         place(a, req, time, at, own, part, late, anchor)
     for a, req, time, anchor in deferred:
-        # Planned off its day (a request handed out on the file's day, its 撮像予定 or 対象日 another day): the file's day's
-        # row, unless another row of the file answers that one (then it is a plan of the system's own on its day).
-        if any(m.request is not None and m.request.id == req.id and m.day == file_day and m.rows for m in reading.matches):
+        # Planned off its day (its 撮像予定 or 対象日 just after the day the request was handed out on, e.g. past midnight):
+        # that day's row, unless another row of the file answers that one (then it is a plan of the system's own on its day).
+        target = off_day(req, time, anchor)
+        if any(m.request is not None and m.request.id == req.id and m.day == target and m.rows for m in reading.matches):
             place(a, req, time, anchor, [], None, False, anchor)
             continue
-        off_day += 1
-        place(a, req, time, file_day, of_request(file_day, req, time), None, False, anchor)
+        off_days[target] = off_days.get(target, 0) + 1
+        place(a, req, time, target, of_request(target, req, time), None, False, anchor)
     if other_systems:
         reading.problems.append(f"ほかのシステム（{'・'.join(sorted(other_systems))}）の行を読み飛ばし")
     for d, n in sorted(by_link_days.items()):
         reading.problems.append(f"外部連携IDで {d} の出力の行に照合した {n} 行（その日の採否として記録）")
-    if off_day:
-        reading.problems.append(f"ほかの日の {off_day} 行（その日に出力していない依頼）を {file_day} の出力の行に照合（{file_day} の採否として記録）")
+    for d, n in sorted(off_days.items()):
+        reading.problems.append(f"その日に出力していない依頼の {n} 行を {d} の出力の行に照合（{d} の採否として記録）")
     if unknown_links:
         first, last = link_window(file_day, spec.link_days)
         reading.problems.append(f"外部連携IDが {first}〜{last} の出力履歴にない {unknown_links} 行（依頼の番号もなし）")

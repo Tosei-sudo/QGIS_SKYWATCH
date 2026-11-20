@@ -63,7 +63,7 @@ def test_a_file_of_another_day_answers_that_days_rows():
     assert [own_day(a) for a in answers] == [NEXT, "", AFTER] and planned_day(answers[2]) == AFTER
     reading = match_answers(answers, rows, REQUESTS, "SYS", SHOWN, spec, "a.csv")
     # The file's day: the day its rows say most (one each: the nearer to the day shown); R3 says none, so it is the 21st's.
-    assert (reading.day, reading.shown, reading.days) == (NEXT, SHOWN, [NEXT])
+    assert (reading.day, reading.shown, reading.days) == (NEXT, SHOWN, [NEXT, AFTER])
     assert [(m.request.id if m.request else m.answer.key, m.day, [r.object_id for r in m.rows]) for m in reading.matches] == [
         ("R1", NEXT, [3]), ("R3", NEXT, [4]), ("X-1", AFTER, [])]
     # The 20th's rows are left as they are (before: answered by the 21st's file, R2 missing and X-1 put on the 20th).
@@ -126,14 +126,14 @@ def test_a_request_planned_off_its_day_answers_the_files_days_row():
                             SHOWN, spec, "a.csv")
     assert reading.day == NEXT and reading.days == [NEXT] and by_oid(reading) == {1: ADOPTED, 2: ADOPTED}
     assert dict(answer_changes(reading))[1]["plannedAt"] == at(AFTER, "00:30")
-    assert reading.problems == ["ほかの日の 1 行（その日に出力していない依頼）を 2026-11-21 の出力の行に照合（2026-11-21 の採否として記録）"]
+    assert reading.problems == ["その日に出力していない依頼の 1 行を 2026-11-21 の出力の行に照合（2026-11-21 の採否として記録）"]
     # The file answering that row too, the other one is a plan of the system's own on its day (要求外).
     reading = match_answers(read(f"ID,ST,PLAN,NAME\nR1,OK,{AFTER} 10:00,\nR1,OK,{NEXT} 10:00,\nR3,OK,{NEXT} 11:00,\n", spec), rows,
                             REQUESTS, "SYS", SHOWN, spec, "a.csv")
     assert by_oid(reading) == {1: ADOPTED, 2: ADOPTED}
     [extra] = [m for m in reading.matches if m.unrequested]
     assert (extra.request.id, extra.day) == ("R1", AFTER)
-    assert unrequested_rows(reading, T)[0].reason == NOT_HANDED and reading.days == [NEXT]
+    assert unrequested_rows(reading, T)[0].reason == NOT_HANDED and reading.days == [NEXT, AFTER]
 
 
 def test_the_ids_of_a_file_are_looked_for_round_each_rows_day():
@@ -158,13 +158,16 @@ def test_reading_again_replaces_the_files_unrequested_rows():
             # Put on the day shown by a reading before 2026-11-20: the same plan (id and time), replaced wherever it is.
             HistoryRow("OLD", T, SHOWN, "", "SYS", result=UNREQUESTED, adoption="採用", external_id="X-1", planned_at=at(AFTER, "09:00"),
                        adoption_source="a.csv", object_id=11),
-            # Another plan on another day, and one added by hand: kept.
-            HistoryRow("OLD", T, AFTER, "", "SYS", result=UNREQUESTED, adoption="採用", external_id="Z-1", planned_at=at(AFTER, "12:00"),
-                       adoption_source="b.csv", object_id=12),
+            # Another plan on a day the file is not for, and one added by hand: kept.
+            HistoryRow("OLD", T, "2026-11-24", "", "SYS", result=UNREQUESTED, adoption="採用", external_id="Z-1",
+                       planned_at=at("2026-11-24", "12:00"), adoption_source="b.csv", object_id=12),
+            # One a file put on a day this one is for (the 22nd: X-1's): replaced.
+            HistoryRow("OLD", T, AFTER, "", "SYS", result=UNREQUESTED, adoption="採用", external_id="Z-2", planned_at=at(AFTER, "13:00"),
+                       adoption_source="b.csv", object_id=14),
             HistoryRow("OLD", T, NEXT, "", "SYS", result=UNREQUESTED, adoption="採用", adoption_source=MANUAL, object_id=13)]
     reading = match_answers(read(f"ID,ST,PLAN,NAME\nR1,OK,{NEXT} 10:30,\nX-1,OK,{AFTER} 09:00,定常\n", spec), rows, REQUESTS, "SYS",
                             SHOWN, spec, "a.csv")
-    assert sorted(r.object_id for r in reading.replaced) == [10, 11]
+    assert sorted(r.object_id for r in reading.replaced) == [10, 11, 14]
     [own] = unrequested_rows(reading, T)
     assert (own.day, own.external_id) == (AFTER, "X-1")
 
@@ -193,3 +196,29 @@ def test_the_systems_rows_of_the_days_are_read_without_their_areas():
     got = load_system_rows(client, s, None, "SYS-A", SHOWN, AFTER)
     assert [(r.day, r.request_id, r.result) for r in got] == [(SHOWN, "R1", "採用"), (NEXT, "R2", "採用"), (AFTER, "", UNREQUESTED)]
     assert all(r.object_id is not None and r.rings == [] for r in got)
+
+
+def test_a_file_of_several_days_by_their_planned_times():
+    # tsudo, 2026-11-20: 「複数の日付のファイルを取り込む」. No 対象日 column, no result column: listed = 採用, left out = 不採用,
+    # day by day; a day with only the system's own plans is one of the file's days too.
+    rows = [handed("R6", SHOWN, 1), handed("R1", NEXT, 2), handed("R3", NEXT, 3), handed("R5", AFTER, 4), handed("R6", AFTER, 5),
+            handed("R2", "2026-11-23", 6)]
+    spec = spec_of([{"key": "ID", "target": "id"}, {"key": "PLAN", "target": "plannedAt"}, {"key": "NAME", "target": "name"}])
+    text = ("ID,PLAN,NAME\n"
+            f"R1,{NEXT} 10:00,\nX-2,{NEXT} 09:00,定常 A\n"
+            f"R5,{AFTER} 10:00,\n"
+            "R6,2026-11-23 00:30,\n"           # handed out for the 22nd, planned just past midnight: the 22nd's row
+            "X-1,2026-11-23 09:00,定常 B\n")
+    reading = match_answers(read(text, spec), rows, REQUESTS, "SYS", SHOWN, spec, "week.csv")
+    assert reading.days == [NEXT, AFTER, "2026-11-23"] and reading.missing_as == REJECTED
+    assert [(m.answer.key, m.day, [r.object_id for r in m.rows]) for m in reading.matches] == [
+        ("R1", NEXT, [2]), ("X-2", NEXT, []), ("R5", AFTER, [4]), ("X-1", "2026-11-23", []), ("R6", AFTER, [5])]
+    # Left out, day by day: R3 on the 21st, R2 on the 23rd; the 20th (shown, not in the file) as it was.
+    assert [(r.request_id, r.day) for r in reading.missing] == [("R3", NEXT), ("R2", "2026-11-23")]
+    assert by_oid(reading) == {2: ADOPTED, 4: ADOPTED, 5: ADOPTED, 3: REJECTED, 6: REJECTED}
+    assert [(u.day, u.name) for u in unrequested_rows(reading, T)] == [(NEXT, "定常 A"), ("2026-11-23", "定常 B")]
+    assert {d: reading.tally(d) for d in reading.touched()} == {
+        NEXT: {ADOPTED: 1, REJECTED: 0, WAITING: 0, UNREQUESTED: 1, NOT_IN_FILE: 1},
+        AFTER: {ADOPTED: 2, REJECTED: 0, WAITING: 0, UNREQUESTED: 0, NOT_IN_FILE: 0},
+        "2026-11-23": {ADOPTED: 0, REJECTED: 0, WAITING: 0, UNREQUESTED: 1, NOT_IN_FILE: 1}}
+    assert reading.problems == ["その日に出力していない依頼の 1 行を 2026-11-22 の出力の行に照合（2026-11-22 の採否として記録）"]

@@ -111,6 +111,11 @@ def row_note(row: HistoryRow) -> str:
     return row.adoption_reason or row.reason
 
 
+def days_text(days: list) -> str:
+    """「2026-11-21・2026-11-22」; more than three days, 「2026-11-21〜2026-11-27（7 日）」."""
+    return "・".join(days) if len(days) <= 3 else f"{days[0]}〜{days[-1]}（{len(days)} 日）"
+
+
 def tally_text(rows: list) -> str:
     """「計画 12（要求外 3）・不明 2・不採用 1・見送り 4」."""
     n = {s: 0 for s in STATES}
@@ -800,7 +805,7 @@ class ScheduleDock(PluginDock):
                 n=t[NOT_IN_FILE], what=REJECTED if reading.missing_as == REJECTED else self.tr("不明のまま")))
         if reading.replaced:
             lines.append(self.tr("前に結果ファイルから入れたこのシステムの要求外 {n} 件（{d} の分と、ほかの日の同じ計画）は置き換える").format(
-                n=len(reading.replaced), d="・".join(reading.days or days)))
+                n=len(reading.replaced), d=days_text(reading.days or days)))
         if reading.problems:
             lines += ["", self.tr("読めなかった行など:")] + reading.problems[:8] + (["…"] if len(reading.problems) > 8 else [])
         return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
@@ -821,7 +826,7 @@ class ScheduleDock(PluginDock):
             changed, added, problems = result
             t = reading.tally()
             days = reading.placed() or [reading.day]
-            source = reading.source if days == [reading.shown] else self.tr("{f}（{d}）").format(f=reading.source, d="・".join(days))
+            source = reading.source if days == [reading.shown] else self.tr("{f}（{d}）").format(f=reading.source, d=days_text(days))
             note = self.tr("{f}: 採用 {a}・不採用 {r}・要求外 {u} を記録").format(
                 f=source, a=t[ADOPTED], r=t[REJECTED] + (t[NOT_IN_FILE] if reading.missing_as == REJECTED else 0), u=int(added))
             if t[WAITING]:
