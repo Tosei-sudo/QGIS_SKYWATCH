@@ -9,7 +9,8 @@ the list only gets shorter.
 Rules (docs/architecture.md):
 - R1 layers: `core` imports neither QGIS / Qt nor the plugin's other
   layers; `qgis_io` not `ui`, `features`, `processing_provider` or the
-  plugin; `ui` and `processing_provider` not `features` or the plugin.
+  plugin; `ui` and `processing_provider` not `features` or the plugin; a
+  module of `features` no other feature's (only `features.base`).
 - R2 a feature's door: a module outside a feature package of `core`
   (`core/plan`, `core/request`, `core/obs`, `core/catalog`, `core/enhance`,
   `core/ai`) imports it only through its `api` module.
@@ -138,10 +139,10 @@ def feature_of(name: str) -> Optional[str]:
 def layer_violations(mods: dict[str, Module]) -> list[str]:
     """R1: imports against the layers' direction."""
     forbidden = {
-        "core": ("qgis", "PyQt5", "PyQt6", "qgis_io", "ui", "features", "processing_provider", "plugin", "scheduled_follow"),
-        "qgis_io": ("ui", "features", "processing_provider", "plugin"),
-        "ui": ("features", "plugin"),
-        "processing_provider": ("ui", "features", "plugin"),
+        "core": ("qgis", "PyQt5", "PyQt6", "qgis_io", "ui", "features", "processing_provider", "plugin", "plugin_api", "scheduled_follow"),
+        "qgis_io": ("ui", "features", "processing_provider", "plugin", "plugin_api"),
+        "ui": ("features", "plugin", "plugin_api"),
+        "processing_provider": ("ui", "features", "plugin", "plugin_api"),
     }
     out = []
     for m in mods.values():
@@ -149,6 +150,8 @@ def layer_violations(mods: dict[str, Module]) -> list[str]:
         for target, _top in m.imports:
             if _layer(target) in bad or target.split(".")[0] in bad:
                 out.append(f"{m.name} -> {target}")
+            elif _layer(m.name) == "features" and _layer(target) == "features" and target not in ("features", "features.base"):
+                out.append(f"{m.name} -> {target}")  # one feature into another: through the plugin (its commands, host)
     return sorted(set(out))
 
 

@@ -87,8 +87,8 @@
   "core.roles -> core.obs.alerts",
   "core.text_tasks -> core.obs.model",
   "core.time_zone -> core.obs.image_time",
-  "plugin -> core.enhance.rules",
-  "plugin -> core.obs.setup",
+  "features.observations -> core.obs.setup",
+  "features.rendering -> core.enhance.rules",
   "processing_provider.annotation_algorithm -> core.ai.annotation_boxes",
   "processing_provider.annotation_algorithm -> core.ai.model_config",
   "processing_provider.annotation_algorithm -> core.ai.train.dataset",
@@ -382,7 +382,6 @@
  ],
  "layers": [],
  "private_access": {
-  "plugin": 5,
   "ui.analysis_dock": 1,
   "ui.check_filter": 2,
   "ui.colorize_box": 2,

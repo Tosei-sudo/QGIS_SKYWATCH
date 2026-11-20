@@ -3200,7 +3200,8 @@ class ObservationDock(PluginDock):
         others = sum(len(work.pending(kind, label)) for kind, label in labels)
         return drafts + others, drafts
 
-    def _render_drafts(self) -> None:
+    def render_drafts(self) -> None:
+        """The 送信待ち count on the dock (the status bar's list changed)."""
         try:
             n, drafts = self.waiting_count()
         except RuntimeError:  # closed
@@ -3263,7 +3264,7 @@ class ObservationDock(PluginDock):
 
     def render(self) -> None:
         """Shows the book as it is now: with no image chosen, only a note (and the records not read)."""
-        self._render_drafts()
+        self.render_drafts()
         self._show_footprints()
         book = self.book
         image = book.current if book else None

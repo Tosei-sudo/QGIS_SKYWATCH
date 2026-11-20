@@ -1,81 +1,45 @@
-"""The plugin: its menu, toolbar and docks."""
+"""
+The plugin: its menu, toolbar and docks, made of its features (mikage/features, docs/architecture.md).
+
+What the plugin itself holds: the services every feature uses (the settings file, 監査ログ,
+一時的なオフライン作業, 先読み, 担当), the layout of the screens (the menu's groups, where each
+dock starts, the map's right-click menu), the Processing provider and QGIS's start and unload.
+Each feature hands it its docks, menu entries and commands (features/base.py).
+"""
 from __future__ import annotations
 
-import os
 from typing import Optional
 
-from qgis.core import Qgis, QgsApplication, QgsMapLayerType, QgsMessageLog, QgsProject, QgsVectorLayer
-from qgis.PyQt.QtCore import QCoreApplication, QRectF, Qt, QTimer
-from qgis.PyQt.QtGui import QColor, QCursor, QIcon, QPainter
-from qgis.PyQt.QtWidgets import QDockWidget, QMenu, QPushButton
+from qgis.core import Qgis, QgsApplication, QgsMessageLog, QgsProject
+from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
+from qgis.PyQt.QtGui import QCursor
+from qgis.PyQt.QtWidgets import QDockWidget, QMenu
 
 try:  # Qt6
     from qgis.PyQt.QtGui import QAction
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
-from .core.obs.api import ObservationApi
-from .processing_provider.pansharpen_algorithm import default_inputs
-from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm, train_algorithm
-from .processing_provider.provider import SatObsProvider
-from .qgis_io.catalog_io import FEATURE
-from .qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
-from .qgis_io.context import PluginContext
-from .qgis_io.preload import LOG_TAG, Preloader
-from .qgis_io.stall_watch import StallWatch
-from .core.preload import ITEMS as PRELOAD_ITEMS, StartupClock
-from .core.enhance.rules import image_rule_for
-from .qgis_io import complex_sar, fast_draw, network, overviews_io, raster_speed, tasks
-from .core.raster_speed import shown as shown_option
-from .qgis_io.geometry import to_wgs84
-from .ui.ai_results_dock import AiResultsDock
-from .ui.basemap_switch import BaseMapSwitch
-from .ui.catalog_dock import CatalogDock
-from .ui.cloud_dock import CloudDock
-from .ui.coordinate_box import CoordinateBox
-from .ui.dashboard_dock import DashboardDock
-from .ui.docks import plain_tip
-from .ui.dock_layouts import DockLayoutMenu, float_docks
-from .ui import first_setup
-from .ui.gp_dialog import RemoteProcessingDialog
-from .ui.enhance_dock import EnhanceDock
-from .ui.events_dock import EventsDock
-from .ui.interests_dock import InterestsDock
-from .qgis_io.interests_io import InterestBook
-from .qgis_io.roles_io import RoleKeeper
+from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
-from .ui.analysis_dock import AnalysisDock
-from .ui.imaging_plan_dock import ImagingPlanDock
-from .ui.list_views import set_column_drag
-from .ui.moving_target_dialog import MovingTargetDialog
-from .ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
-from .ui.central_views import CentralViews
-from .ui.notice_feed import NoticeFeed
-from .ui.notices_dock import NoticesDock
-from .ui.offline_status import OfflineController
+from .features import ai, analysis, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests
+from .features.base import Feature, disconnect, icon
+from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
+from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm
+from .processing_provider.provider import SatObsProvider
+from .qgis_io import network, overviews_io, tasks
+from .qgis_io.context import PluginContext
+from .qgis_io.geometry import to_wgs84
+from .qgis_io.preload import LOG_TAG, Preloader
+from .qgis_io.roles_io import RoleKeeper
+from .qgis_io.stall_watch import StallWatch
+from .ui import first_setup
 from .ui.audit_status import AuditKeeper
-from .ui.observation_dock import ObservationDock
-from .ui.satellite_pass_dock import SatellitePassDock
-from .ui.segment_tool import SegmentTool
-from .ui.transfer_dialog import TransferDialog
-from .ui.plan_file_dock import PlanFileDock
-from .ui.request_dock import RequestDock
-from .ui.place_schedule_dock import PlaceScheduleDock
-from .ui.schedule_dock import ScheduleDock
-from .ui.settings_dialog import SettingsDialog
-from .ui.shape_receiver import ShapeReceiver
-from .ui.shadow_dock import ShadowHeightDock
-from .ui.spectral_dock import SpectralDock
-from .ui.startup import StartupLayers
-from .ui.moving_dock import MovingDock
-from .ui.shift import LayerShift
+from .ui.dock_layouts import float_docks
+from .ui.offline_status import OfflineController
 from .ui.shortcuts import Shortcuts
-from .ui.swipe import SwipeCompare
-from .ui.taxonomy_dock import TaxonomyDock
-from .ui.toolbar_buttons import ToolbarButtons, ToolbarButtonsDialog
-from .ui.webmap_dialog import WebMapDialogs
+from .ui.toolbar_buttons import ToolbarButtons
 
-HERE = os.path.dirname(__file__)
 MENU = "MIKAGE"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
@@ -93,8 +57,6 @@ MENU_GROUPS = [
 ]
 #: In the menu itself, after the groups (behind a separator).
 MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
-#: The 新着画像 page's key beside the map (ui/central_views.py).
-NOTICE_FEED = "notices"
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
@@ -108,205 +70,26 @@ DOCK_GROUPS = [
 #: The docks open when the plugin starts without a saved layout (the others from the menu or toolbar).
 INITIAL_DOCKS = ("SatObsImageCatalog", "SatObsImagingPlan")
 
-
-def badged(icon: QIcon, n: int) -> QIcon:
-    """The icon with the number of unread notices in a red circle (the icon as it is for none)."""
-    if n <= 0:
-        return icon
-    pixmap = icon.pixmap(64, 64)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QColor("#ffffff"))
-    painter.setBrush(QColor("#dc2626"))
-    painter.drawEllipse(QRectF(26, 0, 38, 38))
-    font = painter.font()
-    font.setBold(True)
-    font.setPixelSize(26 if n < 10 else 20)
-    painter.setFont(font)
-    painter.drawText(QRectF(26, 0, 38, 38), int(Qt.AlignmentFlag.AlignCenter), str(n) if n < 100 else "99+")
-    painter.end()
-    return QIcon(pixmap)
+#: The order the docks are made in (and QGIS's Panels menu lists them): a dock may use the ones before it.
+DOCK_ORDER = (
+    "SatObsImageCatalog", "SatObsImagingPlan", "SatObsRequests", "SatObsPlanFiles", "SatObsSchedule", "SatObsPlaceSchedule",
+    "SatObsSatellitePass", "SatObsCloud", "SatObsObservations", "SatObsTaxonomy", "SatObsNotices", "SatObsInterests",
+    "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsMoving", "SatObsDashboard", "SatObsAiResults",
+    "SatObsEvents", "SatObsAnalysis",
+)
+#: The map's right-click menu, at the point clicked (the features' entries by their text).
+MAP_MENU = ("ここを撮像計画", "この地点の新着画像を監視…", "この地点の撮像予定")
+#: The reads ahead after 担当, in this order (core/preload.ITEMS, then the features' own).
+PRELOAD_ORDER = ("satellites", "requests", "events", "offlineCache")
+#: The features (mikage/features): each phase (start, docks, wiring, entries, unload) goes through them in this order.
+FEATURES: tuple[type[Feature], ...] = (
+    rendering.Rendering, platform.Platform, images.Images, plan.Plan, observations.Observations, requests.Requests,
+    events.Events, analysis.Analysis, ai.Ai, maps.Maps, enhance.Enhance, layers.Layers,
+)
 
 
 def tr(text: str) -> str:
     return QCoreApplication.translate("Mikage", text)
-
-
-class PluginApi:
-    """The plugin's Python API (`plugin.api`), for the Python console and Processing scripts; filled stage by stage."""
-
-    def __init__(self, plugin: "MikagePlugin"):
-        self._plugin = plugin
-
-    @property
-    def config(self):
-        """The settings file as read (core.config.PluginConfig)."""
-        return self._plugin.context.config
-
-    @property
-    def problems(self) -> list[str]:
-        """What was wrong in the settings file."""
-        return list(self._plugin.context.problems)
-
-    def reload_config(self) -> None:
-        """Reads the settings file again."""
-        self._plugin.context.reload()
-
-    @property
-    def startup_times(self) -> dict:
-        """How long the startup took (`steps`, `total`) and each read ahead (`reads`), in seconds."""
-        return self._plugin.clock.times()
-
-    def preload(self) -> None:
-        """Reads ahead now what the settings file's `preload` lists (in the background)."""
-        if self._plugin.preloader is not None:
-            self._plugin.preloader.run()
-
-    @property
-    def observation_dock(self) -> "ObservationDock":
-        """The observations dock (its `book`, `save_csv(path)`, `to_layers()`, `set_observer(name)`…)."""
-        return self._plugin.docks["SatObsObservations"]
-
-    @property
-    def imaging_plan(self) -> "ImagingPlanDock":
-        """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""
-        return self._plugin.docks["SatObsImagingPlan"]
-
-    def moving_targets(self, layer=None) -> "MovingTargetDialog":
-        """Opens 「移動目標撮像計画」 for a point layer (or the active one); its `targets()`, `add_places()`, `plan()`."""
-        return self._plugin.open_moving_targets(layer)
-
-    @property
-    def satellite_pass(self) -> "SatellitePassDock":
-        """The satellite pass dock (its `tracks`, `choose()`, `set_time()`, `draw()`, `add_layer()`)."""
-        return self._plugin.docks["SatObsSatellitePass"]
-
-    @property
-    def requests(self) -> "RequestDock":
-        """The imaging requests dock (its `requests`, `reload()`, `edit()`, `import_layer()`, `export_layer()`)."""
-        return self._plugin.docks["SatObsRequests"]
-
-    @property
-    def plan_files(self) -> "PlanFileDock":
-        """The imaging plan files dock (its `run()`, `plan`, `write()`, `paths`)."""
-        return self._plugin.docks["SatObsPlanFiles"]
-
-    @property
-    def schedule(self) -> "ScheduleDock":
-        """The imaging schedule dock: a day's plan as the systems answered (its `rows`, `set_day()`, `reload()`, `answer()`,
-        `import_file()`, `to_layer()`)."""
-        return self._plugin.docks["SatObsSchedule"]
-
-    @property
-    def place_schedule(self) -> "PlaceScheduleDock":
-        """The plans ahead of each place on a timeline (its `lanes`, `add_point()`, `set_layer()`, `clear_points()`, `reload()`)."""
-        return self._plugin.docks["SatObsPlaceSchedule"]
-
-    @property
-    def image_catalog(self) -> "CatalogDock":
-        """The image catalog dock (its `search()`, `records`, `choose()`, `open_records()`, `find_similar()`, `add_layer()`)."""
-        return self._plugin.docks["SatObsImageCatalog"]
-
-    @property
-    def notices(self) -> "NoticesDock":
-        """The notices dock (its `store()`, `check()`, `watch_conditions()`, `watch_point()`, `open_notices()`)."""
-        return self._plugin.docks["SatObsNotices"]
-
-    @property
-    def image_enhance(self) -> "EnhanceDock":
-        """The image correction dock (its `enhance(layer, correction, bands)`, `pipeline()`, `set_pipeline()`, `apply()`)."""
-        return self._plugin.docks["SatObsEnhance"]
-
-    @property
-    def shadow_height(self) -> "ShadowHeightDock":
-        """The dock 「影から高さ」 (its `measurements`, `measure(foot, tip)`, `set_sun()`, `set_time()`, `clear()`, `add_layer()`)."""
-        return self._plugin.docks["SatObsShadowHeight"]
-
-    @property
-    def coordinates(self) -> "CoordinateBox":
-        """The jump field and the cursor position (its `jump(text)`, `search`, `go_to_place()`, `set_notation()`)."""
-        return self._plugin.coordinates
-
-    @property
-    def shape_receiver(self) -> "ShapeReceiver":
-        """「外部から図形を受け取る」 (its `listening`, `url`, `problem`, `show_link(text)`: the shapes of `geom=…&label=…` shown as if sent)."""
-        return self._plugin.shape_receiver
-
-    @property
-    def spectral(self) -> "SpectralDock":
-        """The dock 「スペクトル」 (its `series`, `labels`, `add_point(point)`, `add_box(rect)`, `csv_text()`, `save_csv(path)`, `clear()`)."""
-        return self._plugin.docks["SatObsSpectral"]
-
-    @property
-    def dashboard(self) -> "DashboardDock":
-        """The dock 「ダッシュボード」 (its `figures`, `categories`, `click_value(v)`, `click_bin(i)`, `click_step(i)`, `set_heatmap(on)`, `clear_filter()`)."""
-        return self._plugin.docks["SatObsDashboard"]
-
-    @property
-    def moving(self) -> "MovingDock":
-        """The dock 「移動体（AIS・ADS-B）」 (its `connect_feed(FeedConfig)`, `open_history(path)`, `layers`, `align_to_image()`, `go_live()`)."""
-        return self._plugin.docks["SatObsMoving"]
-
-    @property
-    def events(self) -> "EventsDock":
-        """The dock 「イベント」 (its `events`, `links`, `reload()`, `link_items(event_ids, items)`, `choose(id)`)."""
-        return self._plugin.docks["SatObsEvents"]
-
-    @property
-    def interests(self) -> "InterestsDock":
-        """The dock 「関心地域・地点」 (its `book` (`items`, `load()`, `over(geometry)`), `chosen()`, `choose(id)`, `save()`, `delete()`, `zoom()`)."""
-        return self._plugin.docks["SatObsInterests"]
-
-    @property
-    def analysis(self) -> "AnalysisDock":
-        """The dock 「データ分析」 (its `tables`, `set_sql(text)`, `set_value(name, v)`, `run(then)`, `result`, `save(name)`, `load(name)`, `add_layer()`)."""
-        return self._plugin.docks["SatObsAnalysis"]
-
-    @property
-    def ai_results(self) -> "AiResultsDock":
-        """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
-        return self._plugin.docks["SatObsAiResults"]
-
-    @property
-    def swipe(self) -> "SwipeCompare":
-        """「スワイプ比較」 (its `set_active()`, `set_target(layer or group)`, `set_position(0-1)`, `set_orientation()`)."""
-        return self._plugin.swipe
-
-    @property
-    def shift(self) -> "LayerShift":
-        """「位置ずらし」 (its `set_active()`, `set_shift_metres(layer, east, north)`, `shift_metres(layer)`, `reset()`)."""
-        return self._plugin.shift
-
-    @property
-    def segment(self) -> "SegmentTool":
-        """「クリック抽出（AI）」 (its `set_active()`, `add_model_files([encoder, decoder])`, `click(point)`, `undo()`, `keep()`, `outlines()`)."""
-        return self._plugin.segment
-
-    def new_scratch_layer(self, template: Optional[str] = None, source: str = "builtin") -> "NewLayerDialog":
-        """Opens 「新規スクラッチレイヤー（テンプレート）」 (with a template: `source` builtin, config or saved); its `create()`."""
-        return self._plugin.open_new_layer(source, template)
-
-
-def _observation_function(name: str):
-    """A function of the observations for scripts (core.obs.api.ObservationApi), on the dock's chosen store."""
-    def call(self, *args, **kwargs):
-        return getattr(self._plugin.docks["SatObsObservations"].api(), name)(*args, **kwargs)
-
-    call.__name__ = name
-    call.__doc__ = getattr(ObservationApi, name).__doc__
-    # Its arguments as ObservationApi has them (inspect.signature, the API reference).
-    call.__wrapped__ = getattr(ObservationApi, name)
-    return call
-
-
-#: As the viewer's scripts have them (viewer.observations → api.observations, viewer.addObservation → api.add_observation…).
-OBSERVATION_FUNCTIONS = [
-    "observations", "observed_things", "observation_images", "observe_image", "add_observation", "update_observation",
-    "rename_observed_thing", "delete_observations", "clear_observations", "observation_candidates", "confidences", "checked_areas", "add_checked_area",
-    "delete_checked_areas", "observation_report",
-]
-for _name in OBSERVATION_FUNCTIONS:
-    setattr(PluginApi, _name, _observation_function(_name))
 
 
 class MikagePlugin:
@@ -316,48 +99,26 @@ class MikagePlugin:
         self.actions: list[QAction] = []
         self.docks: dict[str, QDockWidget] = {}
         self.toolbar = None
-        self.moving_targets: Optional[MovingTargetDialog] = None
-        #: 「衛星の障害情報」 (ui/outage_dialog.py), once opened.
-        self.outage_dialog = None
         self.api = PluginApi(self)
         #: 「画面が止まった」 in the log (qgis_io/stall_watch.py), from once QGIS has started.
         self.stall_watch: Optional[StallWatch] = None
-        self.similar_action: Optional[QAction] = None
-        self.notices_action: Optional[QAction] = None
-        self.central: Optional[CentralViews] = None
-        self.notice_feed: Optional[NoticeFeed] = None
-        self.startup_layers: Optional[StartupLayers] = None
-        self.base_maps: Optional[BaseMapSwitch] = None
-        self.webmaps: Optional[WebMapDialogs] = None
-        self.remote_dialog: Optional[RemoteProcessingDialog] = None
-        self.coordinates: Optional[CoordinateBox] = None
-        self.new_layer: Optional[NewLayerDialog] = None
-        self.new_layer_action: Optional[QAction] = None
         self.provider: Optional[SatObsProvider] = None
-        self.scratch_hook: Optional[ScratchDialogHook] = None
-        self.swipe: Optional[SwipeCompare] = None
-        self.shift: Optional[LayerShift] = None
-        self.segment: Optional[SegmentTool] = None
-        self.transfer_dialog: Optional[TransferDialog] = None
         self.offline: Optional[OfflineController] = None
         #: 監査ログ: the log of operations kept and sent to the settings file's folder (ui/audit_status.py, core/audit.py).
         self.audit: Optional[AuditKeeper] = None
-        #: 外部から図形を受け取る: AutoMap's (and links', programs') shapes, at 127.0.0.1 (ui/shape_receiver.py).
-        self.shape_receiver: Optional[ShapeReceiver] = None
         #: The menu's entries as added, its submenus (MENU_GROUPS) and what sits in the menu itself.
         self._menu_entries: list[QAction] = []
         self._submenus: list[QMenu] = []
         self._menu_top: list[QAction] = []
         self._menu_separator: Optional[QAction] = None
-        self.setup_dialog: Optional[first_setup.FirstSetupDialog] = None
+        #: The docks' entries by their title (「通知」's text carries the unread count).
+        self._entry_titles: dict = {}
         self.toolbar_buttons: Optional[ToolbarButtons] = None
-        self.toolbar_dialog: Optional[ToolbarButtonsDialog] = None
+        self.shortcuts: Optional[Shortcuts] = None
         #: How long the startup took (classFactory gives the one started before the plugin was imported).
         self.clock = StartupClock()
         #: 「先読み」: the Esri tables read in the background once QGIS has started (qgis_io/preload.py).
         self.preloader: Optional[Preloader] = None
-        #: 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
-        self.interests: Optional[InterestBook] = None
         #: 担当: the roles the person ticked, which decide the features shown (core/roles.py, qgis_io/roles_io.py).
         self.role_keeper: Optional[RoleKeeper] = None
         #: Each dock's feature: its menu entry's text (core/roles.FEATURES).
@@ -365,12 +126,27 @@ class MikagePlugin:
         self._algorithms_allowed: Optional[tuple] = None
         self._qgis_started = False
         self._startup_told = False
-        #: 地図の描画を速くする設定: the settings file read once, QGIS's options looked at (once in a session).
-        self._raster_read = False
-        self._raster_tuned = False
-        self.raster_dialog = None
-        #: MIKAGE の速い描画（試作）: the raster layers coloured by MIKAGE while the person has it on (qgis_io/fast_draw.py).
-        self.fast_draw: Optional[fast_draw.FastDraw] = None
+        #: The features (FEATURES), and the commands they answer to (`plugin.open_detect()`…).
+        self.features: list[Feature] = [feature(self) for feature in FEATURES]
+        self._features_started = False
+        commands: dict = {}
+        for feature in self.features:
+            for name in feature.COMMANDS:
+                if name in commands:
+                    raise ValueError(f"two features answer to {name}")
+                commands[name] = getattr(feature, name)
+        self._commands = commands
+
+    def __getattr__(self, name: str):
+        # A feature's command (plugin.open_quotas() → features/requests.py's); only names not found otherwise.
+        commands = self.__dict__.get("_commands")
+        if commands is not None and name in commands:
+            return commands[name]
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+    def feature(self, kind: type) -> Feature:
+        """The feature of that class (features/<name>.py)."""
+        return next(f for f in self.features if isinstance(f, kind))
 
     def initProcessing(self) -> None:  # noqa: N802 (QGIS's name)
         """
@@ -413,395 +189,38 @@ class MikagePlugin:
         else:
             self.stall_watch.start()
         self._first_start = first_setup.is_first_start()
-        self.context = PluginContext(self.iface.mainWindow())
+        window = self.iface.mainWindow()
+        self.context = PluginContext(window)
         # 監査ログ before anything that records (its writing and sending run in threads of their own).
-        self.audit = AuditKeeper(self.iface, self.context, self.iface.mainWindow())
+        self.audit = AuditKeeper(self.iface, self.context, window)
         # 一時的なオフライン作業: the status-bar button, the checks while a server is down, and the question when it is back.
-        self.offline = OfflineController(self.iface, self.context, self._reload_after_offline, self.iface.mainWindow(),
-                                         refresh_docks=self._refresh_after_offline)
-        self.preloader = Preloader(self.context, self.clock, self.iface.mainWindow())
-        self.interests = InterestBook(self.context, self.iface.mainWindow())
+        self.offline = OfflineController(self.iface, self.context, lambda: self._after_offline(True), window,
+                                         refresh_docks=lambda: self._after_offline(False))
+        self.preloader = Preloader(self.context, self.clock, window)
         # 担当: what the roles ticked do not use is not shown; kept in this profile and in the settings file's `userRoles`.
-        self.role_keeper = RoleKeeper(self.context, self.iface.mainWindow())
+        self.role_keeper = RoleKeeper(self.context, window)
         self.role_keeper.said.connect(lambda text: self.iface.messageBar().pushWarning(tr("担当"), text))
-        self.context.configChanged.connect(self._overviews_changed)
-        # 地図の描画を速くする設定 (`rasterSpeed`): GDAL's as the file says, QGIS's options once QGIS has started too.
-        self.context.configChanged.connect(self._raster_speed_changed)
-        # MIKAGE の速い描画（試作）: on for those who turned it on in 「地図の描画の速さ」.
-        self.fast_draw = fast_draw.FastDraw()
-        if fast_draw.on():
-            self.fast_draw.start()
-        # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
-        self.context.configChanged.connect(self._column_drag_changed)
-        # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
-        self._problems_shown: Optional[tuple] = None
-        self.context.configChanged.connect(self._config_problems)
-        # Images added in any way get overviews too (`overviews.scope` "all"), once the settings file is read;
-        # complex SAR images are shown as amplitude first (`complexImages`). Before the docks' own layersAdded (imageRules).
-        self._overviews_ready = False
-        self._overviews_waiting: list = []
-        QgsProject.instance().layersAdded.connect(self._overview_layers_added)
-        # 「座標・地名へ移動」 on its own toolbar, the cursor position in the status bar.
-        self.coordinates = CoordinateBox(self.iface, self.context, self.iface.mainWindow())
-        # 「外部から図形を受け取る」: listens once the settings file is read (`shapeReceiver`).
-        self.shape_receiver = ShapeReceiver(self.iface, self.context, self.iface.mainWindow())
+        # What listens from the start (the settings file's options, the coordinates' toolbar…), before the plugin's toolbar.
+        self._features_started = True
+        for feature in self.features:
+            feature.start()
         self.toolbar = self.iface.addToolBar(tr("MIKAGE"))
         self.toolbar.setObjectName("MikageToolbar")
-
-        def icon(name: str) -> QIcon:
-            return QIcon(os.path.join(HERE, "resources", f"{name}.svg"))
-
-        #: Each feature's own icon (the plugin's icon.svg stays for the plugin manager).
-        icons = {"SatObsImagingPlan": "imaging_plan", "SatObsSatellitePass": "satellite_pass",
-                 "SatObsObservations": "observations", "SatObsTaxonomy": "taxonomy",
-                 "SatObsImageCatalog": "catalog", "SatObsNotices": "notices", "SatObsEnhance": "enhance",
-                 "SatObsShadowHeight": "shadow_height", "SatObsSpectral": "spectral", "SatObsMoving": "moving",
-                 "SatObsDashboard": "dashboard", "SatObsAiResults": "ai_results", "SatObsRequests": "requests",
-                 "SatObsPlanFiles": "plan_files", "SatObsSchedule": "schedule", "SatObsPlaceSchedule": "place_schedule",
-                 "SatObsEvents": "events", "SatObsCloud": "cloud_map", "SatObsInterests": "interests",
-                 "SatObsAnalysis": "analysis"}
-
-        specs = [
-            ("SatObsImageCatalog", tr("画像カタログ")),
-            ("SatObsImagingPlan", tr("撮像計画")),
-            ("SatObsRequests", tr("撮像依頼")),
-            ("SatObsPlanFiles", tr("撮像計画ファイル出力")),
-            ("SatObsSchedule", tr("撮像予定")),
-            ("SatObsPlaceSchedule", tr("地点ごとの撮像予定")),
-            ("SatObsSatellitePass", tr("衛星パス")),
-            ("SatObsCloud", tr("雲量マップ")),
-            ("SatObsObservations", tr("観測記録")),
-            ("SatObsTaxonomy", tr("分類体系の編集")),
-            ("SatObsNotices", tr("通知")),
-            ("SatObsInterests", tr("関心地域・地点")),
-            ("SatObsEnhance", tr("画像補正")),
-            ("SatObsShadowHeight", tr("影から高さ")),
-            ("SatObsSpectral", tr("スペクトル")),
-            ("SatObsMoving", tr("移動体（AIS・ADS-B）")),
-            ("SatObsDashboard", tr("ダッシュボード")),
-            ("SatObsAiResults", tr("AI結果")),
-            ("SatObsEvents", tr("イベント")),
-            ("SatObsAnalysis", tr("データ分析")),
-        ]
-        area = {name: a for a, names in DOCK_GROUPS for name in names}
-        for name, title in specs:
-            if name == "SatObsImagingPlan":
-                dock = ImagingPlanDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsObservations":
-                dock = ObservationDock(self.iface, self.context, self.open_settings, self.iface.mainWindow(), edit_taxonomy=self.edit_taxonomy)
-                # 送信待ち is one list (the status bar's); its records not saved open in this dock's form.
-                dock.open_outbox = self.offline.open_list
-                self.offline.open_form = lambda store, record_id, dock=dock: dock.open_draft(record_id, store)
-                self.offline.changed.connect(dock._render_drafts)
-            elif name == "SatObsSatellitePass":
-                dock = SatellitePassDock(self.iface, self.context, self.open_settings, self.docks["SatObsImagingPlan"], self.iface.mainWindow())
-            elif name == "SatObsTaxonomy":
-                dock = TaxonomyDock(self.iface, self.context, self.open_settings, self.docks["SatObsObservations"], self.iface.mainWindow())
-            elif name == "SatObsImageCatalog":
-                dock = CatalogDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsNotices":
-                dock = NoticesDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsEnhance":
-                dock = EnhanceDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsShadowHeight":
-                dock = ShadowHeightDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsSpectral":
-                dock = SpectralDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsMoving":
-                dock = MovingDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsDashboard":
-                dock = DashboardDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsAiResults":
-                dock = AiResultsDock(self.iface, self.context, self.open_settings, lambda: self.docks.get("SatObsObservations"),
-                                     self.iface.mainWindow())
-            elif name == "SatObsInterests":
-                dock = InterestsDock(self.iface, self.context, self.open_settings, self.interests, self.iface.mainWindow())
-            elif name == "SatObsEvents":
-                dock = EventsDock(self.iface, self.context, self.open_settings, lambda: self.docks, self.iface.mainWindow())
-            elif name == "SatObsAnalysis":
-                dock = AnalysisDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsCloud":
-                dock = CloudDock(self.iface, self.context, self.open_settings, lambda: self.open_cloud_cover(), self.iface.mainWindow())
-            elif name == "SatObsRequests":
-                plan_dock = self.docks["SatObsImagingPlan"]
-
-                def satellites(then, failed=None, plan_dock=plan_dock):
-                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
-
-                dock = RequestDock(self.iface, self.context, self.open_settings, satellites, self.iface.mainWindow())
-            elif name == "SatObsSchedule":
-                dock = ScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-                # The satellites' other names and series, for the outages that name them (衛星の障害情報).
-                dock.satellites_known = lambda plan_dock=self.docks["SatObsImagingPlan"]: plan_dock.catalog_sats
-            elif name == "SatObsPlaceSchedule":
-                dock = PlaceScheduleDock(self.iface, self.context, self.open_settings, self.iface.mainWindow())
-            elif name == "SatObsPlanFiles":
-                plan_dock, request_dock = self.docks["SatObsImagingPlan"], self.docks["SatObsRequests"]
-
-                def satellites(then, failed=None, plan_dock=plan_dock):
-                    plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
-
-                def requests_changed(requests=None, request_dock=request_dock):
-                    # The 「撮像依頼」 dock shows the ledger as read here, or reads it again when it was changed;
-                    # the 「撮像予定」 dock the day's rows again once files are written.
-                    schedule = self.docks.get("SatObsSchedule")
-                    if requests is None and schedule is not None and schedule._loaded and schedule.isVisible():
-                        schedule.reload()
-                    if request_dock.store is None or request_dock.task is not None:
-                        return
-                    if requests is not None:
-                        request_dock.requests = requests
-                        request_dock.render()
-                    elif request_dock._loaded:
-                        request_dock.reload()
-
-                dock = PlanFileDock(self.iface, self.context, self.open_settings, satellites, requests_changed, self.iface.mainWindow())
-            else:
-                raise ValueError(f"no dock for {name}")
-            # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
-            # Its signals wait meanwhile, so a dock shown only for that moment reads nothing.
-            dock.blockSignals(True)
-            self.iface.addDockWidget(area[name], dock)
-            dock.setVisible(name in INITIAL_DOCKS)
-            dock.blockSignals(False)
-            self.docks[name] = dock
-            self._dock_features[name] = title
-            # Shown although the roles in use do not have it (QGIS putting back its layout, its Panels menu): put away again.
-            dock.visibilityChanged.connect(lambda on, name=name: self._keep_away(name) if on else None)
-            action = dock.toggleViewAction()
-            action.setText(title)
-            action.setIcon(icon(icons[name]))
-            self._add_to_menu(action)
-            self.actions.append(action)
-
+        self._make_docks()
         self.clock.step("ドックの作成")
         self.place_docks()
-        # 「イベントに追加」 of the images, the records and the requests goes to 「イベント」.
-        for name in ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests"):
-            self.docks[name].event_linker = lambda: self.docks.get("SatObsEvents")
-        # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
-        for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
-            self.docks[name].observations = lambda: self.docks.get("SatObsObservations") if self.allows(tr("観測記録")) else None
-        # A record's image not open opens through 「画像カタログ」 (開いた画像の履歴, else the catalog by its id).
-        self.docks["SatObsObservations"].catalog = lambda: self.docks.get("SatObsImageCatalog")
+        # The docks with each other (「イベントに追加」, 「ファイルなしで記録」, the notices with the catalog…).
+        for feature in self.features:
+            feature.connect()
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
             self.docks[name].visibilityChanged.emit(True)
-        # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
-        self.docks["SatObsImagingPlan"].make_requests = self._requests_from_plan
-        self._wire_catalog()
-        # 「年間撮像上限」: what each sensor's (mode's) yearly quota has used and left, and shots not counted (tsudo, 2026-11-11).
-        quotas = QAction(icon("quotas"), tr("年間撮像上限…"), self.iface.mainWindow())
-        quotas.setObjectName("SatObsQuotas")
-        quotas.triggered.connect(lambda _on=False: self.open_quotas())
-        self._add_to_menu(quotas)
-        self.actions.append(quotas)
-        # 「衛星の障害情報」: the satellites' outages (reason, when, impacts) that the calculations leave passes out for (tsudo, 2026-11-16).
-        outages = QAction(icon("outages"), tr("衛星の障害情報…"), self.iface.mainWindow())
-        outages.setObjectName("SatObsOutages")
-        outages.triggered.connect(lambda _on=False: self.open_outages())
-        self._add_to_menu(outages)
-        self.actions.append(outages)
-        moving = QAction(icon("moving_targets"), tr("移動目標撮像計画…"), self.iface.mainWindow())
-        moving.triggered.connect(lambda: self.open_moving_targets())
-        self._add_to_menu(moving)
-        self.actions.append(moving)
-        self._add_new_layer(icon("new_layer"))
-        # 「通報」 (alertReports): the notable records as delimited text, and what was reported.
-        for name, text, tab in (("alert", "通報文の作成…", 0), ("alert_log", "通報記録の確認…", 1)):
-            action = QAction(icon(name), tr(text), self.iface.mainWindow())
-            action.setObjectName("SatObsAlert" if tab == 0 else "SatObsAlertLog")
-            action.triggered.connect(lambda _on=False, tab=tab: self.docks["SatObsObservations"].open_alerts(tab))
-            self._add_to_menu(action)
-            self.actions.append(action)
-        # 「自分の記録」: the records one made, across the images, to look over and fix (tsudo, 2026-11-18).
-        mine = QAction(icon("my_records"), tr("自分の記録…"), self.iface.mainWindow())
-        mine.setObjectName("SatObsMyRecords")
-        mine.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_my_records())
-        self._add_to_menu(mine)
-        self.actions.append(mine)
-        # 「観測記録のエクスポート」: the records of a period and a place as CSV / JSON (observationExports).
-        export = QAction(icon("obs_export"), tr("観測記録のエクスポート…"), self.iface.mainWindow())
-        export.setObjectName("SatObsObservationExport")
-        export.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_export())
-        self._add_to_menu(export)
-        self.actions.append(export)
-        # 「観測記録の一括取込み」: a CSV or a layer into the chosen store, after a dry run.
-        record_import = QAction(icon("obs_import"), tr("観測記録の一括取込み…"), self.iface.mainWindow())
-        record_import.setObjectName("SatObsObservationImport")
-        record_import.triggered.connect(lambda _on=False: self.docks["SatObsObservations"].open_import())
-        self._add_to_menu(record_import)
-        self.actions.append(record_import)
-        # 「分担」 (assignments: who holds which image) and 「引き継ぎメモ」 (the shift handover).
-        for name, text, tab in (("assignments", "分担…", 0), ("handover", "引き継ぎメモ…", 1)):
-            action = QAction(icon(name), tr(text), self.iface.mainWindow())
-            action.setObjectName("SatObsAssignments" if tab == 0 else "SatObsHandover")
-            action.triggered.connect(lambda _on=False, tab=tab: self.docks["SatObsObservations"].open_handover(tab))
-            self._add_to_menu(action)
-            self.actions.append(action)
-        # 「パンシャープン…」: the Processing algorithm's dialog (the algorithm also in the Processing toolbox).
-        train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
         self.initProcessing()
-        pansharpen = QAction(icon("pansharpen"), tr("パンシャープン…"), self.iface.mainWindow())
-        pansharpen.triggered.connect(lambda: self.open_pansharpen())
-        self._add_to_menu(pansharpen)
-        self.actions.append(pansharpen)
-        change = QAction(icon("change"), tr("変化抽出（2 時期）…"), self.iface.mainWindow())
-        change.triggered.connect(lambda: self.open_change())
-        self._add_to_menu(change)
-        self.actions.append(change)
-        align = QAction(icon("align"), tr("自動位置合わせ…"), self.iface.mainWindow())
-        align.triggered.connect(lambda: self.open_align())
-        self._add_to_menu(align)
-        self.actions.append(align)
-        classify = QAction(icon("classify"), tr("土地被覆分類…"), self.iface.mainWindow())
-        classify.triggered.connect(lambda: self.open_classify())
-        self._add_to_menu(classify)
-        self.actions.append(classify)
-        ortho = QAction(icon("simple_ortho"), tr("簡易オルソ補正…"), self.iface.mainWindow())
-        ortho.triggered.connect(lambda: self.open_simple_ortho())
-        self._add_to_menu(ortho)
-        self.actions.append(ortho)
-        for name, algorithm, label in (("geodesic_buffer", "mikage:geodesic_buffer", "測地線バッファ…"),
-                                       ("geodesic_centroid", "mikage:geodesic_centroids", "正距方位での重心…"),
-                                       ("moving_match", "mikage:moving_match", "移動体と検出の照合…")):
-            action = QAction(icon(name), tr(label), self.iface.mainWindow())
-            action.triggered.connect(lambda _=False, a=algorithm: self.open_vector_algorithm(a))
-            self._add_to_menu(action)
-            self.actions.append(action)
-        # 「雲量を属性に付与…」: each feature's cover at its time and place (the 「雲量マップ」 dock shows the forecast).
-        cloud_cover = QAction(icon("cloud_cover"), tr("雲量を属性に付与…"), self.iface.mainWindow())
-        cloud_cover.triggered.connect(lambda: self.open_cloud_cover())
-        self._add_to_menu(cloud_cover)
-        self.actions.append(cloud_cover)
-        # 「サーバ処理…」: a task of a geoprocessing / OGC Processes service as a Processing algorithm.
-        remote = QAction(icon("gp"), tr("サーバ処理…"), self.iface.mainWindow())
-        remote.triggered.connect(lambda: self.open_remote_processing())
-        self._add_to_menu(remote)
-        self.actions.append(remote)
-        # The AI tools: 「物体検出（AI）…」 as a Processing algorithm (its models set above), 「クリック抽出（AI）」 as a map tool.
+        # The settings file's AI models into 「物体検出（AI）」's choice.
         self.context.configChanged.connect(self._refresh_algorithms)
-        detect = QAction(icon("ai_detect"), tr("物体検出（AI）…"), self.iface.mainWindow())
-        detect.triggered.connect(lambda: self.open_detect())
-        self._add_to_menu(detect)
-        self.actions.append(detect)
-        train = QAction(icon("ai_train"), tr("AI 学習（物体検出）…"), self.iface.mainWindow())
-        train.triggered.connect(lambda: self.open_train())
-        self._add_to_menu(train)
-        self.actions.append(train)
-        dataset = QAction(icon("ai_dataset"), tr("教師データセットの作成…"), self.iface.mainWindow())
-        dataset.triggered.connect(lambda: self.open_dataset())
-        self._add_to_menu(dataset)
-        self.actions.append(dataset)
-        # 「アノテーション変換」: point annotations as boxes turned to the object (a layer, or a training dataset).
-        boxes = QAction(icon("ai_boxes"), tr("アノテーション変換（点→矩形）…"), self.iface.mainWindow())
-        boxes.triggered.connect(lambda: self.open_points_to_boxes())
-        self._add_to_menu(boxes)
-        self.actions.append(boxes)
-        dataset_boxes = QAction(icon("ai_dataset_boxes"), tr("アノテーション変換（教師データセット）…"), self.iface.mainWindow())
-        dataset_boxes.triggered.connect(lambda: self.open_dataset_points_to_boxes())
-        self._add_to_menu(dataset_boxes)
-        self.actions.append(dataset_boxes)
-        segment = QAction(icon("ai_segment"), tr("クリック抽出（AI）"), self.iface.mainWindow())
-        segment.setObjectName("SatObsSegment")
-        self.segment = SegmentTool(self.iface, self.context, segment, self.iface.mainWindow())
-        self._add_to_menu(segment)
-        self.actions.append(segment)
-        transfer = QAction(icon("ai_transfer"), tr("検出結果を DB へ転記…"), self.iface.mainWindow())
-        transfer.triggered.connect(lambda: self.open_transfer())
-        self._add_to_menu(transfer)
-        self.actions.append(transfer)
-        # The settings file's `layers`: added to an empty project at start, or from the menu.
-        self.startup_layers = StartupLayers(self.iface, self.context, self.iface.mainWindow())
-        add_layers = QAction(icon("startup_layers"), tr("設定ファイルのレイヤーを追加"), self.iface.mainWindow())
-        add_layers.triggered.connect(lambda: self.startup_layers.add())
-        self._add_to_menu(add_layers)
-        self.actions.append(add_layers)
-        # 「背景地図」: the toolbar button opens the list; in the menu, a submenu.
-        base_maps = QAction(icon("base_map"), tr("背景地図"), self.iface.mainWindow())
-        self.base_maps = BaseMapSwitch(self.iface, self.context, base_maps, self.iface.mainWindow())
-        self._add_to_menu(base_maps)
-        self.actions.append(base_maps)
-        # ArcGIS Web Maps: opened as layers, and the project saved as one.
-        self.webmaps = WebMapDialogs(self.iface, self.context, self.base_maps.choose, self.iface.mainWindow())
-        for name, label, show in (("webmap_open", "ArcGIS Web マップを開く…", self.webmaps.show_open),
-                                  ("webmap_save", "ArcGIS Web マップとして保存…", self.webmaps.show_save)):
-            action = QAction(icon(name), tr(label), self.iface.mainWindow())
-            action.triggered.connect(lambda _=False, f=show: f())
-            self._add_to_menu(action)
-            self.actions.append(action)
-        # 「スワイプ比較」: the active layer (or group) on one side of a line only.
-        swipe = QAction(icon("swipe"), tr("スワイプ比較"), self.iface.mainWindow())
-        swipe.setObjectName("SatObsSwipe")
-        self.swipe = SwipeCompare(self.iface, swipe, self.iface.mainWindow())
-        self._add_to_menu(swipe)
-        self.actions.append(swipe)
-        # 「位置ずらし」: the active image moved by hand.
-        shift = QAction(icon("shift"), tr("位置ずらし"), self.iface.mainWindow())
-        shift.setObjectName("SatObsShift")
-        self.shift = LayerShift(self.iface, shift, self.iface.mainWindow())
-        self._add_to_menu(shift)
-        self.actions.append(shift)
-        unshift = QAction(icon("unshift"), tr("位置ずらしの解除"), self.iface.mainWindow())
-        unshift.triggered.connect(lambda: self.shift.reset())
-        self._add_to_menu(unshift)
-        self.actions.append(unshift)
-        home = QAction(icon("dock_layout"), tr("ドックを初期位置に戻す"), self.iface.mainWindow())
-        home.triggered.connect(lambda: self.place_docks())
-        self._add_to_menu(home)
-        self.actions.append(home)
-        # 「ドックのレイアウト」: named layouts per kind of work (ui/dock_layouts.py).
-        self.dock_layouts = DockLayoutMenu(self.iface.mainWindow(), lambda: self.allowed_docks(),
-                                           lambda text: self.iface.messageBar().pushSuccess(tr("ドックのレイアウト"), text), self.iface.mainWindow(),
-                                           floating=first_setup.docks_floating)
-        layouts = self.dock_layouts.menuAction()
-        layouts.setIcon(icon("dock_layouts"))
-        self._add_to_menu(layouts)
-        self.actions.append(layouts)
-        # 「担当と個人設定」: the role's docks, docks in windows of their own, and the person's settings (ui/first_setup.py).
-        setup = QAction(icon("first_setup"), tr("担当と個人設定…"), self.iface.mainWindow())
-        setup.triggered.connect(lambda: self.open_first_setup())
-        self._add_to_menu(setup)
-        self.actions.append(setup)
-        # 「ツールバーのボタン…」: the toolbar's buttons for the role, and the person's own (ui/toolbar_buttons.py).
-        buttons = QAction(icon("toolbar_buttons"), tr("ツールバーのボタン…"), self.iface.mainWindow())
-        buttons.setObjectName("SatObsToolbarButtons")
-        buttons.triggered.connect(lambda: self.open_toolbar_buttons())
-        self._add_to_menu(buttons)
-        self.actions.append(buttons)
-        # 「接続と表の点検」: every ArcGIS service of the settings file asked once (ui/health_dialog.py).
-        health = QAction(icon("health_check"), tr("接続と表の点検…"), self.iface.mainWindow())
-        health.triggered.connect(lambda: self.open_health_check())
-        self._add_to_menu(health)
-        self.actions.append(health)
-        # 「監査ログ」: what is recorded where and what was sent (ui/audit_status.py).
-        audit_action = QAction(icon("audit_log"), tr("監査ログ…"), self.iface.mainWindow())
-        audit_action.triggered.connect(lambda: self.open_audit_log())
-        self._add_to_menu(audit_action)
-        self.actions.append(audit_action)
-        # 「使い方（ヘルプ）」: the help for everyday users, bundled HTML (help/index.html, ui/help_dialog.py).
-        help_action = QAction(icon("help"), tr("使い方（ヘルプ）…"), self.iface.mainWindow())
-        help_action.setObjectName("SatObsHelp")
-        help_action.triggered.connect(lambda: self.open_help())
-        self._add_to_menu(help_action)
-        self.actions.append(help_action)
-        # Also in QGIS's Help ▸ Plugins.
-        help_menu = self.iface.pluginHelpMenu() if hasattr(self.iface, "pluginHelpMenu") else None
-        if help_menu is not None:
-            help_menu.addAction(help_action)
-        self._help_menu = help_menu
-        self.help_action = help_action
-        # 「Python API リファレンス」: plugin.api in Japanese with examples (ui/api_reference_dialog.py).
-        reference = QAction(icon("api_reference"), tr("Python API リファレンス…"), self.iface.mainWindow())
-        reference.setObjectName("SatObsApiReference")
-        reference.triggered.connect(lambda: self.open_api_reference())
-        self._add_to_menu(reference)
-        self.actions.append(reference)
-        settings = QAction(icon("settings"), tr("設定…"), self.iface.mainWindow())
-        settings.triggered.connect(self.open_settings)
-        self._add_to_menu(settings)
-        self.actions.append(settings)
-        # 「ここを撮像計画」 in the map's right-click menu.
+        for feature in self.features:
+            feature.add_actions()
+        # The features' entries in the map's right-click menu (MAP_MENU).
         self.iface.mapCanvas().contextMenuAboutToShow.connect(self._canvas_menu)
         self._build_menu()
         # The toolbar: the roles' buttons (or the person's own), from the entries in menu order.
@@ -810,7 +229,6 @@ class MikagePlugin:
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
         self.shortcuts = Shortcuts(self.iface, self.docks, toggle_feed=self.toggle_notice_feed)
         # What the roles in use do not use put away (and again whenever they change: chosen, or read from `userRoles`).
-        self.webmaps.allows = self.allows
         self.role_keeper.changed.connect(self.apply_roles)
         self.apply_roles()
         self.clock.step("メニュー・ツールバー")
@@ -839,38 +257,56 @@ class MikagePlugin:
             else:
                 started.connect(self._first_setup_after_start)
 
+    def _make_docks(self) -> None:
+        """The features' docks in DOCK_ORDER, each docked where DOCK_GROUPS puts it, its entry in the menu."""
+        specs: dict = {}
+        for feature in self.features:
+            for name, spec in feature.dock_specs().items():
+                if name in specs:
+                    raise ValueError(f"two docks named {name}")
+                specs[name] = spec
+        if set(specs) != set(DOCK_ORDER):
+            raise ValueError(f"DOCK_ORDER and the features' docks differ: {sorted(set(specs) ^ set(DOCK_ORDER))}")
+        area = {name: a for a, names in DOCK_GROUPS for name in names}
+        for name in DOCK_ORDER:
+            spec = specs[name]
+            title = tr(spec.title)
+            dock = spec.create()
+            # QGIS shows a dock when it is added: only the first ones stay open (QGIS then restores the layout it saved).
+            # Its signals wait meanwhile, so a dock shown only for that moment reads nothing.
+            dock.blockSignals(True)
+            self.iface.addDockWidget(area[name], dock)
+            dock.setVisible(name in INITIAL_DOCKS)
+            dock.blockSignals(False)
+            self.docks[name] = dock
+            self._dock_features[name] = title
+            # Shown although the roles in use do not have it (QGIS putting back its layout, its Panels menu): put away again.
+            dock.visibilityChanged.connect(lambda on, name=name: self._keep_away(name) if on else None)
+            action = dock.toggleViewAction()
+            action.setText(title)
+            action.setIcon(icon(spec.icon))
+            self._entry_titles[action] = title
+            self.add_entry(action)
+
+    def add_entry(self, action: QAction) -> None:
+        """An entry of the plugin's menu (placed in its group by `_build_menu`, MENU_GROUPS) and its list of actions."""
+        self._menu_entries.append(action)
+        self.actions.append(action)
+
+    def _entry_text(self, action: QAction) -> str:
+        """An entry's text as the menu and the roles know it (a dock's title, without 「通知」's unread count)."""
+        return self._entry_titles.get(action, action.text())
+
     # ---- 「先読み」 and the startup's timings ------------------------------------------------------------
 
     def _add_preload_items(self) -> None:
-        """The reads ahead (core/preload.ITEMS), each through its dock's own read."""
-        docks, config = self.docks, lambda: self.context.config
+        """The reads ahead (core/preload.ITEMS and the features' own), each through its dock's own read."""
         # 担当 first: the menus follow what the table holds for the person (or it is sent what was chosen here).
         self.preloader.add("userRoles", tr("担当"), lambda then, failed: self.role_keeper.load(then, failed), always=True)
-
-        def satellites(then, failed) -> bool:
-            dock = docks.get("SatObsImagingPlan")
-            if dock is None or not config().satellite_catalogs or dock._loaded:
-                return False
-            dock.load_catalog(then, failed)
-            return True
-
-        def requests(then, failed) -> bool:
-            dock = docks.get("SatObsRequests")
-            if dock is None or dock.store is None or dock._loaded:
-                return False
-            dock.reload(then, failed)
-            return True
-
-        def events(then, failed) -> bool:
-            dock = docks.get("SatObsEvents")
-            if dock is None or dock.settings is None or dock.events is not None:
-                return False
-            dock.reload(then, failed=failed)
-            return True
-
-        for key, start in (("satellites", satellites), ("requests", requests), ("events", events)):
-            self.preloader.add(key, PRELOAD_ITEMS[key], start)
-        self.preloader.add("offlineCache", tr("オフライン用の控え（観測記録の分類体系）"), self._warm_offline_cache, always=True)
+        items = {item[0]: item for feature in self.features for item in feature.preload()}
+        for key in [k for k in PRELOAD_ORDER if k in items] + [k for k in items if k not in PRELOAD_ORDER]:
+            _key, label, start, always = items[key]
+            self.preloader.add(key, label, start, always=always)
         self.preloader.finished.connect(self._preload_finished)
 
     def _release_tasks(self) -> None:
@@ -900,7 +336,8 @@ class MikagePlugin:
         if self.context is None or self._qgis_started:
             return
         self._qgis_started = True
-        self._tune_qgis()
+        for feature in self.features:
+            feature.qgis_started()
         if not self.context.loading:
             self.preloader.schedule()
 
@@ -946,8 +383,7 @@ class MikagePlugin:
         if self.context is None:
             return
         for action in self._menu_entries:
-            text = tr("通知") if action is self.notices_action else action.text()
-            action.setVisible(self.allows(text))
+            action.setVisible(self.allows(self._entry_text(action)))
         for menu in self._submenus:
             menu.menuAction().setVisible(any(a.isVisible() and not a.isSeparator() for a in menu.actions()))
         for name, dock in self.docks.items():
@@ -957,7 +393,7 @@ class MikagePlugin:
                 dock.set_allows(self.allows)
         if self.toolbar_buttons is not None:
             self.toolbar_buttons.apply()
-        if getattr(self, "shortcuts", None) is not None:
+        if self.shortcuts is not None:
             self.shortcuts.apply(self.allows)
         if self.provider is not None:
             self.provider.allowed = self.allows
@@ -966,28 +402,13 @@ class MikagePlugin:
             if allowed != self._algorithms_allowed and (self._algorithms_allowed is not None or not all(allowed)):
                 self.provider.refreshAlgorithms()
             self._algorithms_allowed = allowed
-        # Opened before, of a feature now put away.
-        for name, feature in (("health_dialog", "接続と表の点検…"), ("api_reference", "Python API リファレンス…")):
-            dialog = getattr(self, name, None)
-            if dialog is not None and not self.allows(tr(feature)):
-                dialog.close()
+        for feature in self.features:
+            feature.roles_changed()
 
     def _keep_away(self, name: str) -> None:
         if self.role_keeper is not None and not self.allows(self._dock_features.get(name, "")):
             dock = self.docks.get(name)
             QTimer.singleShot(0, lambda: dock.hide() if dock is not None and name in self.docks else None)
-
-    def open_help(self, section: Optional[str] = None):
-        """「使い方（ヘルプ）…」: the help for everyday users (not blocking QGIS), at a section (its id) if given."""
-        from .ui.help_dialog import HelpDialog
-
-        if getattr(self, "help_dialog", None) is None:
-            self.help_dialog = HelpDialog(self.run_menu_entry, self.iface.mainWindow())
-        self.help_dialog.show()
-        self.help_dialog.raise_()
-        if section:
-            self.help_dialog.go(section)
-        return self.help_dialog
 
     def run_menu_entry(self, text: str) -> bool:
         """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""
@@ -1012,69 +433,15 @@ class MikagePlugin:
         action.trigger()
         return True
 
-    def open_api_reference(self):
-        """「Python API リファレンス…」: what plugin.api has, with examples (not blocking QGIS)."""
-        from .ui.api_reference_dialog import ApiReferenceDialog
-
-        if getattr(self, "api_reference", None) is None:
-            self.api_reference = ApiReferenceDialog(self.api, self.iface.mainWindow())
-        self.api_reference.show()
-        self.api_reference.raise_()
-        return self.api_reference
-
-    def open_audit_log(self):
-        """「監査ログ…」: what is recorded where, what was sent, sending now and checking the folder."""
-        return self.audit.open_dialog() if self.audit is not None else None
-
-    def open_health_check(self):
-        """「接続と表の点検…」: the dialog (not blocking QGIS), checking right away."""
-        from .ui.health_dialog import HealthDialog
-
-        if self.context is None:
-            return None
-        if getattr(self, "health_dialog", None) is None:
-            self.health_dialog = HealthDialog(self.context, self.iface.mainWindow())
-        self.health_dialog.show()
-        self.health_dialog.raise_()
-        self.health_dialog.run()
-        return self.health_dialog
-
-    def open_first_setup(self, first: bool = False) -> Optional[first_setup.FirstSetupDialog]:
-        """「最初の設定」 (first) or 「担当と個人設定」: the page, open beside the main window (not blocking it)."""
-        if self.context is None:  # unloaded meanwhile
-            return None
-        if self.setup_dialog is not None:
-            self.setup_dialog.deleteLater()
-        self.setup_dialog = first_setup.FirstSetupDialog(
-            self.iface.mainWindow(), lambda: self.allowed_docks(), first=first,
-            observation_dock=lambda: self.docks.get("SatObsObservations"), coordinates=lambda: self.coordinates,
-            open_settings=self.open_settings, keeper=self.role_keeper, all_docks=lambda: self.docks)
-        # The roles' toolbar buttons (the same roles again: the person's own buttons of them).
-        self.setup_dialog.accepted.connect(lambda: self.toolbar_buttons.apply() if self.context is not None else None)
-        self.setup_dialog.open()
-        return self.setup_dialog
-
-    def open_toolbar_buttons(self):
-        """「ツールバーのボタン…」: the buttons for the role in use (beside the main window, not blocking it)."""
-        if self.context is None:
-            return None
-        if self.toolbar_dialog is not None:
-            self.toolbar_dialog.deleteLater()
-        self.toolbar_dialog = ToolbarButtonsDialog(self.toolbar_buttons, self.iface.mainWindow())
-        self.toolbar_dialog.open()
-        return self.toolbar_dialog
+    # ---- the menu, the docks' places and the map's right-click menu --------------------------------------
 
     def _entries_in_menu_order(self) -> dict:
         """The menu's entries (text → action) in the order the menu shows them (「通知」 without its unread count)."""
-        by_text = {(tr("通知") if a is self.notices_action else a.text()): a for a in self._menu_entries}
+        by_text = {self._entry_text(a): a for a in self._menu_entries}
         order = [t for _title, texts in MENU_GROUPS for t in texts if t] + MENU_TOP
         entries = {tr(t): by_text[tr(t)] for t in order if tr(t) in by_text}
         entries.update((t, a) for t, a in by_text.items() if t not in entries)
         return entries
-
-    def _add_to_menu(self, action: QAction) -> None:
-        """An entry of the plugin's menu: placed in its group by `_build_menu` (MENU_GROUPS)."""
-        self._menu_entries.append(action)
 
     def _build_menu(self) -> None:
         """
@@ -1112,31 +479,6 @@ class MikagePlugin:
             self.iface.addPluginToMenu(MENU, action)
             self._menu_top.append(action)
 
-    def _add_new_layer(self, new_icon: QIcon) -> None:
-        """「新規スクラッチレイヤー（テンプレート）…」: in the plugin's menu, and in Layer ▸ Create Layer after QGIS's own scratch layer."""
-        action = QAction(new_icon, tr("新規スクラッチレイヤー（テンプレート）…"), self.iface.mainWindow())
-        action.setObjectName("SatObsNewScratchLayer")
-        action.triggered.connect(lambda: self.open_new_layer())
-        self._add_to_menu(action)
-        self.actions.append(action)
-        self.new_layer_action = action
-        menu = self.iface.newLayerMenu() if hasattr(self.iface, "newLayerMenu") else None
-        if menu is not None:
-            actions = menu.actions()
-            native = next((a for a in actions if a.objectName() == "mActionNewMemoryLayer"), None)
-            after = actions[actions.index(native) + 1] if native is not None and actions.index(native) + 1 < len(actions) else None
-            menu.insertAction(after, action) if after is not None else menu.addAction(action)
-        self.scratch_hook = ScratchDialogHook(self.open_new_layer, self._templates, self.iface.mainWindow())
-
-    def _templates(self) -> list:
-        return offered_templates(self.context.config.layer_templates)
-
-    def open_new_layer(self, source: str = "builtin", template: Optional[str] = None) -> NewLayerDialog:
-        """Opens 「新規スクラッチレイヤー（テンプレート）」 (once; kept while the plugin is loaded)."""
-        if self.new_layer is None:
-            self.new_layer = NewLayerDialog(self.iface, lambda: self.context.config.layer_templates, self.iface.mainWindow())
-        return self.new_layer.open_with(source, template)
-
     def place_docks(self) -> None:
         """
         Docks every dock where it starts (DOCK_GROUPS): each group on its side
@@ -1158,249 +500,22 @@ class MikagePlugin:
             float_docks(window, self.docks)
 
     def _canvas_menu(self, menu, event) -> None:
+        """The features' entries (MAP_MENU), each at the point clicked in WGS 84."""
         canvas = self.iface.mapCanvas()
         point = event.mapPoint()
-        action = menu.addAction(tr("ここを撮像計画"))
+        entries: dict = {}
+        for feature in self.features:
+            entries.update(feature.map_menu())
+        for text in [t for t in MAP_MENU if t in entries] + [t for t in entries if t not in MAP_MENU]:
+            action = menu.addAction(tr(text))
 
-        def plan() -> None:
-            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
-            self.docks["SatObsImagingPlan"].plan_at(p.x(), p.y())
+            def at_point(_on=False, run=entries[text]) -> None:
+                p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
+                run(p.x(), p.y())
 
-        action.triggered.connect(plan)
-        watch = menu.addAction(tr("この地点の新着画像を監視…"))
+            action.triggered.connect(at_point)
 
-        def watch_here() -> None:
-            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
-            self.docks["SatObsNotices"].watch_point(p.x(), p.y())
-
-        watch.triggered.connect(watch_here)
-        ahead = menu.addAction(tr("この地点の撮像予定"))
-
-        def plans_here() -> None:
-            p = to_wgs84(canvas.mapSettings().destinationCrs()).transform(point)
-            dock = self.docks["SatObsPlaceSchedule"]
-            dock.show()
-            dock.raise_()
-            dock.add_point(p.x(), p.y())
-
-        ahead.triggered.connect(plans_here)
-
-    def _wire_catalog(self) -> None:
-        """The image catalog with the notices, the imaging plan's reminders and the layers' right-click menu."""
-        catalog, notices = self.docks["SatObsImageCatalog"], self.docks["SatObsNotices"]
-        catalog.watch_requested = notices.watch_conditions
-        notices.drawn_area = catalog.drawn_shape
-        notices.choose_folder = catalog.choose_folder
-        notices.choose_images = catalog.choose_images
-        self.notices_action = notices.toggleViewAction()
-
-        bell = self.notices_action.icon()
-
-        def unread(n: int) -> None:
-            self.notices_action.setText(tr("通知") + (f"（{n}）" if n else ""))
-            self.notices_action.setIcon(badged(bell, n))
-            if self.central is not None:
-                self.central.set_title(NOTICE_FEED, tr("新着画像") + (f"（{n}）" if n else ""))
-
-        # 「新着画像」 (tsudo, 2026-11-14): the notices as cards on a large page in the place of the map, switched
-        # with it by tabs over the map area (ui/central_views.py, ui/notice_feed.py).
-        self.central = CentralViews(self.iface)
-        self.notice_feed = NoticeFeed(self.iface, self.context, notices)
-        self.notice_feed.show_map = self.central.show_map
-        self.notice_feed.set_interests(self.interests)
-        feed_icon = QIcon(os.path.join(HERE, "resources", "notice_feed.svg"))
-        self.central.add_view(NOTICE_FEED, tr("新着画像"), feed_icon, self.notice_feed)
-        notices.show_feed = self.show_notice_feed
-        feed_action = QAction(feed_icon, tr("新着画像（大きな画面）"), self.iface.mainWindow())
-        feed_action.setObjectName("SatObsNoticeFeed")
-        feed_action.setToolTip(tr("新着画像をカードで並べた大きな画面と地図を切り替え（地図の上のタブでも）"))
-        feed_action.triggered.connect(lambda _on=False: self.toggle_notice_feed())
-        self._add_to_menu(feed_action)
-        self.actions.append(feed_action)
-        notices.unread_changed = unread
-        self.docks["SatObsImagingPlan"].on_reminder = notices.add_plan_notice
-        # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
-        observations = self.docks["SatObsObservations"]
-        feed = notices.alerts
-        feed.on_reported = observations.mark_reported
-        feed.on_removed = observations.refresh_reported
-
-        def open_reported(record_id: str) -> None:
-            if not observations.with_records([record_id], lambda: open_read(record_id)):
-                return  # opened once read (asked of a shared store, or no image chosen in 「観測記録」 yet)
-            open_read(record_id)
-
-        def open_read(record_id: str) -> None:
-            o = observations.book.record(record_id) if observations.book else None
-            if o is None:
-                self.iface.messageBar().pushWarning(tr("通報"), plain_tip(tr("観測記録が見つからない（別の保存先か削除済み）: {i}").format(i=record_id)))
-                return
-            observations.show()
-            observations.raise_()
-            observations.open_record(o)
-
-        feed.open_record = open_reported
-
-        def open_log() -> None:
-            dialog = observations.open_alerts(1)
-            if dialog.log_button.isEnabled():
-                dialog.read_log()
-
-        feed.open_log = open_log
-        # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
-        self.similar_action = QAction(QIcon(os.path.join(HERE, "resources", "catalog.svg")), tr("類似画像の検索…"), self.iface.mainWindow())
-        self.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))
-        self.iface.addCustomActionForLayerType(self.similar_action, "", QgsMapLayerType.RasterLayer, False)
-        QgsProject.instance().layersAdded.connect(self._layers_added)
-        self._layers_added(QgsProject.instance().mapLayers().values())
-        # QGIS の式の関数 「MIKAGE」: the records the observation dock read and the named areas.
-        expression_functions.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
-        expression_functions.register()
-        self.place_reader = expression_functions.PlaceReader(self.context, refresh=lambda: self.iface.mapCanvas().refreshAllLayers())
-        self.place_reader.start()
-        # Layers whose dates are in another zone than the service says (the settings file's timeZone): a corrected field per date.
-        time_zone_fields.register()
-        self.time_zone_fields = time_zone_fields.TimeZoneFields(
-            self.context.esri, lambda url: self.context.token_for(url, self.context.token_of(url)),
-            lambda text: self.iface.messageBar().pushWarning(tr("タイムゾーン"), text))
-        QgsProject.instance().layersAdded.connect(self.time_zone_fields.layers_added)
-        self.context.configChanged.connect(self._time_zones_changed)
-        # Esri layers QGIS edits itself: who and when in their tracking fields (the settings file's editTracking).
-        self.edit_stamp_layers = edit_stamp_layers.EditStampLayers()
-        QgsProject.instance().layersAdded.connect(self.edit_stamp_layers.layers_added)
-        QgsProject.instance().layersRemoved.connect(self.edit_stamp_layers.layers_removed)
-        self.edit_stamp_layers.layers_added(QgsProject.instance().mapLayers().values())
-
-    def show_notice_feed(self) -> None:
-        """The 新着画像 page in front (opened when it was not); the 通知 dock where QGIS's map area can't hold it."""
-        if self.central is not None and self.central.open(NOTICE_FEED):
-            return
-        dock = self.docks.get("SatObsNotices")
-        if dock is not None:
-            dock.show()
-            dock.raise_()
-
-    def toggle_notice_feed(self) -> None:
-        """The 新着画像 page and the map in turn (the menu, toolbar and Ctrl+Alt+N)."""
-        if self.central is not None and self.central.available:
-            self.central.toggle(NOTICE_FEED)
-        else:
-            self.show_notice_feed()
-
-    def _time_zones_changed(self) -> None:
-        if getattr(self, "time_zone_fields", None) is not None:
-            self.time_zone_fields.layers_added(QgsProject.instance().mapLayers().values())
-
-    def _layers_added(self, layers) -> None:
-        for layer in layers:
-            if layer.customProperty(FEATURE):
-                self.iface.addCustomActionForLayer(self.similar_action, layer)
-
-    def edit_taxonomy(self, path=None) -> None:
-        """Opens the classification editor (at a class)."""
-        dock = self.docks.get("SatObsTaxonomy")
-        if dock is None:
-            return
-        dock.show()
-        dock.raise_()
-        if hasattr(dock, "select"):
-            dock.select(path)
-
-    def open_quotas(self):
-        """Opens 「年間撮像上限」 (from the 「撮像計画ファイル出力」 dock's store, today's year)."""
-        dock = self.docks["SatObsPlanFiles"]
-        if dock.store is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
-            return None
-        return dock.show_quotas()
-
-    def open_outages(self):
-        """Opens 「衛星の障害情報」 (once; read again each time it is opened)."""
-        if self.context.config.satellite_outages is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("設定ファイルに衛星の障害情報の表（satelliteOutages）なし"))
-            return None
-        if self.outage_dialog is None:
-            from .ui.outage_dialog import OutageDialog
-
-            plan = self.docks["SatObsImagingPlan"]
-            self.outage_dialog = OutageDialog(self.context, lambda: plan.catalog_sats, self.allows, self.iface.mainWindow())
-        self.outage_dialog.show()
-        self.outage_dialog.raise_()
-        self.outage_dialog.run()
-        return self.outage_dialog
-
-    def open_moving_targets(self, layer=None) -> MovingTargetDialog:
-        """Opens 「移動目標撮像計画」 (once; kept while the plugin is loaded)."""
-        if self.moving_targets is None:
-            self.moving_targets = MovingTargetDialog(self.iface, self.docks["SatObsImagingPlan"].plan_moving, self.iface.mainWindow())
-        self.moving_targets.open_for(layer)
-        return self.moving_targets
-
-    def open_pansharpen(self) -> None:
-        """The algorithm's dialog, with the finest one-band image as pan and a multi-band one as ms."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:pansharpen", default_inputs(layers, self.iface.activeLayer()))
-
-    def open_change(self) -> None:
-        """The algorithm's dialog, with the two earliest images (else the lowest two in the list), the earlier as before."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.change_algorithm import default_inputs as change_inputs
-        from .qgis_io.obs_images import observed_image
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:change", change_inputs(layers, lambda layer: observed_image(layer).time))
-
-    def open_align(self) -> None:
-        """The algorithm's dialog, with the active image to align and the finest other as the reference."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.align_algorithm import default_inputs as align_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:align", align_inputs(layers, self.iface.activeLayer()))
-
-    def open_classify(self) -> None:
-        """The algorithm's dialog, with the active image and a polygon layer for the training."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.classify_algorithm import default_inputs as classify_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:classify", classify_inputs(layers, self.iface.activeLayer()))
-
-    def open_simple_ortho(self) -> None:
-        """The algorithm's dialog, with the active image and a DEM-like layer."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.ortho_algorithm import default_inputs as ortho_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:simple_ortho", ortho_inputs(layers, self.iface.activeLayer()))
-
-    def open_cloud_cover(self) -> None:
-        """「雲量を属性に付与」's dialog, with the active vector layer and its date-time field."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.cloud_algorithm import default_inputs as cloud_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:cloud_cover", cloud_inputs(layers, self.iface.activeLayer()))
-
-    def open_vector_algorithm(self, algorithm: str) -> None:
-        """A vector algorithm's dialog, with the active vector layer as its input."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        layer = self.iface.activeLayer()
-        if algorithm == "mikage:moving_match":
-            from .processing_provider.moving_match_algorithm import default_inputs as match_inputs
-
-            inputs = match_inputs(list(QgsProject.instance().mapLayers().values()), layer)
-        else:
-            inputs = {"INPUT": layer.id()} if isinstance(layer, QgsVectorLayer) else {}
-        processing.execAlgorithmDialog(algorithm, inputs)
+    # ---- the Processing provider -------------------------------------------------------------------------
 
     def _analyses_changed(self, *_args) -> None:
         if self.provider is not None:
@@ -1411,292 +526,39 @@ class MikagePlugin:
         if self.provider is not None:
             self.provider.refreshAlgorithms()
 
-    def open_detect(self) -> None:
-        """The algorithm's dialog, with the active image (else the first), the map's extent and the screen's pixel size."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.detect_algorithm import default_inputs as detect_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:detect", detect_inputs(layers, self.iface.activeLayer(), self.iface.mapCanvas()))
-
-    def open_train(self) -> None:
-        """The training algorithm's dialog, with the active image (else the first)."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.train_algorithm import default_inputs as train_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:train_detector", train_inputs(layers, self.iface.activeLayer()))
-
-    def open_dataset(self) -> None:
-        """The dialog making a training dataset of images outside the catalog."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        processing.execAlgorithmDialog("mikage:make_dataset", {})
-
-    def open_points_to_boxes(self) -> None:
-        """「アノテーション変換（点→矩形）」 with the active point layer and image."""
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        from .processing_provider.annotation_algorithm import default_inputs as box_inputs
-
-        layers = list(QgsProject.instance().mapLayers().values())
-        processing.execAlgorithmDialog("mikage:points_to_boxes", box_inputs(layers, self.iface.activeLayer()))
-
-    def open_dataset_points_to_boxes(self) -> None:
-        import processing  # QGIS's Processing plugin (loaded with QGIS)
-
-        processing.execAlgorithmDialog("mikage:dataset_points_to_boxes", {})
-
-    def open_transfer(self) -> None:
-        if self.transfer_dialog is None:
-            self.transfer_dialog = TransferDialog(self.context, lambda text: self.iface.messageBar().pushInfo(tr("検出結果を DB へ転記"), text),
-                                                  self.iface.mainWindow())
-        self.transfer_dialog.prepare(self.iface.activeLayer())
-        self.transfer_dialog.show()
-        self.transfer_dialog.raise_()
-
-    def open_remote_processing(self) -> None:
-        if self.remote_dialog is None:
-            self.remote_dialog = RemoteProcessingDialog(self.context, self.iface.mainWindow())
-        self.remote_dialog.prepare()
-        self.remote_dialog.show()
-        self.remote_dialog.raise_()
-
-    def open_settings(self) -> None:
-        # Another settings file than the one in use: the administrators' (the first one: anyone's).
-        dialog = SettingsDialog(self.context, self.iface.mainWindow(), may_change_source=self.allows("settings.config"),
-                                raster_speed=self.open_raster_speed)
-        try:
-            dialog.exec()
-        finally:
-            # Made anew each time: the closed one goes, with its auth lists (#87).
-            dialog.deleteLater()
-
-    def _config_problems(self) -> None:
-        """「設定ファイルの問題 n 件」 in the message bar after a read that found any (the list is in 「設定…」)."""
-        c = self.context
-        if c is None or c.loading:
-            return
-        key = (c.source, tuple(c.problems))
-        if not c.problems:
-            self._problems_shown = None
-            return
-        if key == self._problems_shown:
-            return
-        self._problems_shown = key
-        bar = self.iface.messageBar()
-        item = bar.createMessage(tr("設定ファイル"), tr("問題 {n} 件（一覧はメニュー「設定…」）").format(n=len(c.problems)))
-        button = QPushButton(tr("設定…"), item)
-        button.clicked.connect(self.open_settings)
-        item.layout().addWidget(button)
-        item.setToolTip("\n".join(c.problems))
-        bar.pushWidget(item, Qgis.MessageLevel.Warning, 0)
-
-    def _column_drag_changed(self) -> None:
+    def _close_processing(self) -> None:
         if self.context is not None:
-            set_column_drag(self.context.config.column_drag)
+            disconnect(self.context.configChanged, self._refresh_algorithms)
+        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
+            disconnect(signal, self._analyses_changed)
+        analysis_algorithm.set_context(lambda: None)
+        if self.provider is not None:
+            QgsApplication.processingRegistry().removeProvider(self.provider)
+            self.provider = None
+        detect_algorithm.set_models(lambda: ([], ""))
+        cloud_algorithm.set_forecast(lambda: None)
 
-    # ---- 地図の描画を速くする設定 (qgis_io/raster_speed.py) ---------------------------------------------
-
-    def _raster_speed_changed(self) -> None:
-        if self.context is None or self.context.loading:
-            return
-        options = self.context.config.raster_speed
-        raster_speed.remember_options(options)
-        raster_speed.apply_gdal(options)
-        self._raster_read = True
-        self._tune_qgis()
-
-    def _map_canvases(self) -> list:
-        try:
-            return list(self.iface.mapCanvases())
-        except (AttributeError, RuntimeError, TypeError):
-            return [self.iface.mapCanvas()]
-
-    def _tune_qgis(self) -> None:
-        """QGIS's options slower than its defaults changed once in the profile, once QGIS has started and the settings file is read."""
-        if self._raster_tuned or not (self._raster_read and self._qgis_started) or self.context is None:
-            return
-        self._raster_tuned = True
-        changes = raster_speed.apply_qgis_once(self.context.config.raster_speed, self._map_canvases())
-        QgsMessageLog.logMessage(tr("地図の描画: {s}").format(s=raster_speed.summary()), LOG_TAG, Qgis.MessageLevel.Info,
-                                 notifyUser=False)
-        if changes:
-            self._tell_qgis_changes(changes)
-
-    def _tell_qgis_changes(self, changes) -> None:
-        """The message bar: which of QGIS's options were changed, 「詳しく…」 and 「元に戻す」."""
-        bar = self.iface.messageBar()
-        item = bar.createMessage(tr("地図の描画"), tr("速く描くよう QGIS のオプションを {n} 件変えました（{names}）").format(
-            n=len(changes), names="・".join(c.short for c in changes)))
-        item.setToolTip("\n".join(f"{c.label}: {shown_option(c.key, c.before)} → {shown_option(c.key, c.after)}（{c.why}）"
-                                   for c in changes))
-        more = QPushButton(tr("詳しく…"), item)
-        more.clicked.connect(lambda _on=False: self.open_raster_speed())
-        item.layout().addWidget(more)
-        undo = QPushButton(tr("元に戻す"), item)
-
-        def put_back(_on=False) -> None:
-            back = raster_speed.revert_qgis(self._map_canvases())
-            try:
-                bar.popWidget(item)
-            except RuntimeError:
-                pass
-            bar.pushInfo(tr("地図の描画"), tr("QGIS のオプション {n} 件を元に戻しました").format(n=len(back)))
-
-        undo.clicked.connect(put_back)
-        item.layout().addWidget(undo)
-        bar.pushWidget(item, Qgis.MessageLevel.Info, 0)
-        self._raster_message = item
-
-    def open_raster_speed(self, parent=None):
-        """「地図の描画の速さ」: what is set, turning it off and on, what only a person can change (modal over `parent`)."""
-        from .ui.raster_speed_dialog import RasterSpeedDialog
-
-        if self.context is None:
-            return None
-        context = self.context
-        if parent is not None:
-            dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, parent, self.fast_draw)
-            try:
-                dialog.exec()
-            finally:
-                dialog.deleteLater()
-            return None
-        if self.raster_dialog is not None:
-            self.raster_dialog.deleteLater()
-        self.raster_dialog = RasterSpeedDialog(lambda: context.config.raster_speed, self._map_canvases, self.iface.mainWindow(),
-                                               self.fast_draw)
-        self.raster_dialog.show()
-        self.raster_dialog.raise_()
-        return self.raster_dialog
-
-    def _overviews_changed(self) -> None:
-        if self.context is None:
-            return
-        overviews_io.configure_cache(self.context.config.overviews)
-        if not self._overviews_ready:
-            self._overviews_ready = True
-            # Those added before the settings file was read (a project opened at start): its `location` and `scope` apply.
-            ids = set(QgsProject.instance().mapLayers())
-            waiting = [layer for layer_id, layer in self._overviews_waiting if layer_id in ids]
-            self._overviews_waiting = []
-            if waiting:
-                self._raster_layers_added(waiting)
-
-    def _overview_layers_added(self, layers) -> None:
-        if not self._overviews_ready:
-            self._overviews_waiting += [(layer.id(), layer) for layer in layers]
-            return
-        self._raster_layers_added(layers)
-
-    def _complex_mode(self, layer):
-        """How a complex SAR image is shown: the first imageRules entry for its file name with `complexImages`, else the settings file's."""
-        config = self.context.config if self.context else None
-        if config is None:
-            return None
-        path = overviews_io.local_path(layer)
-        rule = image_rule_for(config.image_rules, path) if path and config.image_rules else None
-        if rule is not None and rule.complex_images is not None:
-            return rule.complex_images or None
-        return config.complex_images
-
-    def _raster_layers_added(self, layers) -> None:
-        """Complex SAR images first get their amplitude VRT (`complexImages`), whose overviews are then built, not those of I and Q."""
-        layers = list(layers)
-        complex_sar.layers_added(layers, self._complex_mode, self.iface.messageBar())
-        overviews_io.layers_added(layers, self.iface.messageBar())
-
-    def _warm_offline_cache(self, then, failed) -> bool:
+    def _after_offline(self, sent: bool) -> None:
         """
-        With the reads ahead (unless `preload` is false): every observation store's classification is read once, so
-        it is in the offline cache even for a store not chosen today. The records and checked areas are not (2026-11-18,
-        200 people: none reads a whole table; those of the images opened are kept as they are read).
+        The work kept offline was sent or thrown away (`sent`), or a server is back with nothing sent:
+        the docks that show it read again (観測記録 then only what others changed meanwhile).
         """
-        context = self.context
-        config = context.config
-        if not config.offline_work.enabled or not config.observation_stores or not getattr(config, "preload", True):
-            return False
-        from .core.obs.setup import store_sets
-
-        def work(task) -> int:
-            sets = store_sets(config.observation_stores, config.observation_vocabulary, context.gpkg, context.esri,
-                              context.token_for, local=False)
-            n = 0
-            for s in sets:
-                # Only the server's classification (one kept in the GeoPackage is not read from this thread).
-                reads = [s.taxonomy.load, s.taxonomy.load_fields] if s.config.taxonomy_table else []
-                for read in reads:
-                    if task.isCanceled():
-                        return n
-                    try:
-                        read()
-                        n += 1
-                    except Exception:  # noqa: BLE001 (one table unreadable: the others are still kept)
-                        pass
-            return n
-
-        tasks.run_task(tr("オフライン用の控えの更新"), work, lambda _n: then(), failed, hidden=True)
-        return True
-
-    def _requests_from_plan(self, ops: list, sats: list, targets: list):
-        """The 「撮像依頼」 dock shown, its form opened with 臨時 requests of the plan's opportunities."""
-        dock = self.docks["SatObsRequests"]
-        dock.show()
-        dock.raise_()
-        return dock.from_plan(ops, sats, targets)
-
-    def _reload_after_offline(self) -> None:
-        """The work kept offline was sent or thrown away (or a server is back): the docks that show it read again."""
-        for name in ("SatObsObservations", "SatObsRequests"):
-            dock = self.docks.get(name)
-            if dock is not None:
-                try:
-                    dock.reload()
-                except RuntimeError:
-                    pass
-
-    def _refresh_after_offline(self) -> None:
-        """
-        A server is back and nothing was sent or thrown away: 観測記録 reads
-        only what others changed meanwhile (not every record again), 撮像依頼 its ledger.
-        """
-        observations = self.docks.get("SatObsObservations")
-        if observations is not None:
-            try:
-                observations.refresh(force=True)
-            except RuntimeError:
-                pass
-        requests = self.docks.get("SatObsRequests")
-        if requests is not None:
-            try:
-                requests.reload()
-            except RuntimeError:
-                pass
+        for feature in self.features:
+            feature.after_offline(sent)
 
     def unload(self) -> None:
-        if getattr(self, "offline", None) is not None:
+        if self.offline is not None:
             self.offline.unload()
             self.offline = None
         if self.preloader is not None:
             self.preloader.close()
-            try:
-                self.context.configChanged.disconnect(self._config_read_for_preload)
-            except (TypeError, RuntimeError, AttributeError):
-                pass
-            try:
-                self.iface.initializationCompleted.disconnect(self._qgis_ready)
-            except (TypeError, RuntimeError, AttributeError):
-                pass
-            try:
-                self.iface.initializationCompleted.disconnect(self._restore_views)
-            except (TypeError, RuntimeError, AttributeError):
-                pass
+            if self.context is not None:
+                disconnect(self.context.configChanged, self._config_read_for_preload)
+            disconnect(getattr(self.iface, "initializationCompleted", None), self._qgis_ready)
+            disconnect(getattr(self.iface, "initializationCompleted", None), self._restore_views)
             self.preloader.deleteLater()
             self.preloader = None
-        if getattr(self, "shortcuts", None) is not None:
+        if self.shortcuts is not None:
             self.shortcuts.unload()
             self.shortcuts = None
         overviews_io.queue.cancel_all()
@@ -1707,145 +569,19 @@ class MikagePlugin:
         pixel_place.forget()
         obs_images.forget()
         tasks.release_tasks()  # nothing held any more (cancelled above): only no longer holding
-        try:
-            self.iface.initializationCompleted.disconnect(self._release_tasks)
-        except (TypeError, RuntimeError, AttributeError):
-            pass
+        disconnect(getattr(self.iface, "initializationCompleted", None), self._release_tasks)
         tasks.restore_gil_sharing()
         tasks.restore_collection()
-        # GDAL as it was before the plugin (QGIS's options stay: they are QGIS's own defaults).
-        raster_speed.revert_gdal()
-        try:
-            self.context.configChanged.disconnect(self._raster_speed_changed)
-        except (TypeError, RuntimeError, AttributeError):
-            pass
-        if self.raster_dialog is not None:
-            self.raster_dialog.close()
-            self.raster_dialog.deleteLater()
-            self.raster_dialog = None
-        # QGIS's own renderers back on the layers (the plugin's code goes with it).
-        if self.fast_draw is not None:
-            self.fast_draw.stop()
-            self.fast_draw.deleteLater()
-            self.fast_draw = None
         if self.stall_watch is not None:
             self.stall_watch.stop()
             self.stall_watch.deleteLater()
             self.stall_watch = None
-        try:
-            QgsProject.instance().layersAdded.disconnect(self._overview_layers_added)
-        except (TypeError, RuntimeError):
-            pass
-        if "SatObsMoving" in self.docks:
-            self.docks["SatObsMoving"].close_all()
-        if "SatObsDashboard" in self.docks:
-            self.docks["SatObsDashboard"].close_all()
-        if "SatObsAnalysis" in self.docks:
-            self.docks["SatObsAnalysis"].close_all()
-        for name in ("SatObsRequests", "SatObsPlanFiles", "SatObsSchedule", "SatObsPlaceSchedule"):
-            if name in self.docks:
-                self.docks[name].close_all()
-        try:
-            self.context.configChanged.disconnect(self._refresh_algorithms)
-        except (TypeError, RuntimeError, AttributeError):
-            pass
-        for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
-            try:
-                signal.disconnect(self._analyses_changed)
-            except (TypeError, RuntimeError):
-                pass
-        analysis_algorithm.set_context(lambda: None)
-        if self.provider is not None:
-            QgsApplication.processingRegistry().removeProvider(self.provider)
-            self.provider = None
-        detect_algorithm.set_models(lambda: ([], ""))
-        cloud_algorithm.set_forecast(lambda: None)
-        if "SatObsCloud" in self.docks:
-            self.docks["SatObsCloud"].unload()
-        train_algorithm.set_book(lambda: None)
-        if self.segment is not None:
-            self.segment.close()
-            self.segment.deleteLater()
-            self.segment = None
-        try:
-            self.iface.mapCanvas().contextMenuAboutToShow.disconnect(self._canvas_menu)
-        except (TypeError, RuntimeError):
-            pass
-        if getattr(self, "similar_action", None) is not None:
-            try:
-                QgsProject.instance().layersAdded.disconnect(self._layers_added)
-            except (TypeError, RuntimeError):
-                pass
-            self.iface.removeCustomActionForLayerType(self.similar_action)
-            self.similar_action = None
-        if getattr(self, "edit_stamp_layers", None) is not None:
-            for signal, slot in ((QgsProject.instance().layersAdded, self.edit_stamp_layers.layers_added),
-                                 (QgsProject.instance().layersRemoved, self.edit_stamp_layers.layers_removed)):
-                try:
-                    signal.disconnect(slot)
-                except (TypeError, RuntimeError):
-                    pass
-            self.edit_stamp_layers.active = False
-            self.edit_stamp_layers = None
-        if getattr(self, "time_zone_fields", None) is not None:
-            try:
-                QgsProject.instance().layersAdded.disconnect(self.time_zone_fields.layers_added)
-            except (TypeError, RuntimeError):
-                pass
-            self.time_zone_fields = None
-            time_zone_fields.unregister()
-        if getattr(self, "place_reader", None) is not None:
-            self.place_reader.stop()
-            self.place_reader = None
-        expression_functions.unregister()
-        if getattr(self, "help_dialog", None) is not None:
-            self.help_dialog.close()
-            self.help_dialog.deleteLater()
-            self.help_dialog = None
-        if getattr(self, "_help_menu", None) is not None:
-            try:
-                self._help_menu.removeAction(self.help_action)
-            except RuntimeError:
-                pass
-            self._help_menu = None
-        if getattr(self, "api_reference", None) is not None:
-            self.api_reference.close()
-            self.api_reference.deleteLater()
-            self.api_reference = None
-        if self.swipe is not None:
-            self.swipe.close()
-            self.swipe.deleteLater()
-            self.swipe = None
-        if self.shift is not None:
-            self.shift.close()
-            self.shift.deleteLater()
-            self.shift = None
-        if self.remote_dialog is not None:
-            self.remote_dialog.close()
-            self.remote_dialog.deleteLater()
-            self.remote_dialog = None
-        if self.transfer_dialog is not None:
-            self.transfer_dialog.close()
-            self.transfer_dialog.deleteLater()
-            self.transfer_dialog = None
-        if self.webmaps is not None:
-            self.webmaps.close()
-            self.webmaps.deleteLater()
-            self.webmaps = None
-        if self.base_maps is not None:
-            self.base_maps.close()
-            self.base_maps = None
-        if self.scratch_hook is not None:
-            self.scratch_hook.close_down()
-            self.scratch_hook.deleteLater()
-            self.scratch_hook = None
-        if self.new_layer_action is not None and hasattr(self.iface, "newLayerMenu") and self.iface.newLayerMenu() is not None:
-            self.iface.newLayerMenu().removeAction(self.new_layer_action)
-        self.new_layer_action = None
-        if self.new_layer is not None:
-            self.new_layer.close()
-            self.new_layer.deleteLater()
-            self.new_layer = None
+        self._close_processing()
+        disconnect(self.iface.mapCanvas().contextMenuAboutToShow, self._canvas_menu)
+        features = self.features if self._features_started else []
+        self._features_started = False
+        for feature in features:
+            feature.unload()
         for action in self._menu_top:
             self.iface.removePluginMenu(MENU, action)
         if self._menu_separator is not None:
@@ -1855,67 +591,23 @@ class MikagePlugin:
             self.iface.removePluginMenu(MENU, menu.menuAction())
             menu.deleteLater()
         self._submenus, self._menu_top, self._menu_entries = [], [], []
-        if getattr(self, "setup_dialog", None) is not None:
-            self.setup_dialog.close()
-            self.setup_dialog.deleteLater()
-            self.setup_dialog = None
-        if self.toolbar_dialog is not None:
-            self.toolbar_dialog.close()
-            self.toolbar_dialog.deleteLater()
-            self.toolbar_dialog = None
+        self._entry_titles = {}
         self.toolbar_buttons = None
-        if getattr(self, "health_dialog", None) is not None:
-            self.health_dialog.close()
-            self.health_dialog.deleteLater()
-            self.health_dialog = None
-        if getattr(self, "dock_layouts", None) is not None:
-            self.dock_layouts.deleteLater()
-            self.dock_layouts = None
         self.actions = []
-        if self.notice_feed is not None:
-            self.notice_feed.close_down()
-        if self.central is not None:
-            self.central.unload()
-            self.central = None
-        if self.notice_feed is not None:
-            self.notice_feed.setParent(None)
-            self.notice_feed.deleteLater()
-            self.notice_feed = None
         for dock in self.docks.values():
             if hasattr(dock, "close_down"):
                 dock.close_down()
             self.iface.removeDockWidget(dock)
             dock.deleteLater()
         self.docks = {}
-        if self.interests is not None:
-            self.interests.deleteLater()
-            self.interests = None
+        for feature in features:
+            feature.unload_after_docks()
         if self.role_keeper is not None:
             self.role_keeper.deleteLater()
             self.role_keeper = None
-        if self.moving_targets is not None:
-            self.moving_targets.close()
-            self.moving_targets.deleteLater()
-            self.moving_targets = None
-        if self.outage_dialog is not None:
-            self.outage_dialog.close()
-            self.outage_dialog.deleteLater()
-            self.outage_dialog = None
         if self.toolbar is not None:
             self.toolbar.deleteLater()
             self.toolbar = None
-        if self.startup_layers is not None:
-            self.startup_layers.close()
-            self.startup_layers.deleteLater()
-            self.startup_layers = None
-        if self.coordinates is not None:
-            self.coordinates.close()
-            self.coordinates.deleteLater()
-            self.coordinates = None
-        if self.shape_receiver is not None:
-            self.shape_receiver.close()
-            self.shape_receiver.deleteLater()
-            self.shape_receiver = None
         if self.audit is not None:
             self.audit.unload()
             self.audit = None

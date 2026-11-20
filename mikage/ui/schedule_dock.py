@@ -176,6 +176,11 @@ class ScheduleDock(PluginDock):
 
     # --- Building -------------------------------------------------------------------------------
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the day's rows were read (「撮像計画ファイル出力」 asks before reading them again)."""
+        return self._loaded
+
     def _build(self) -> None:
         layout = self.body
         self.store_choice = QComboBox()

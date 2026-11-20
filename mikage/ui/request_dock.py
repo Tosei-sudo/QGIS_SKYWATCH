@@ -86,6 +86,11 @@ class RequestDock(PluginDock):
         self.visibilityChanged.connect(self._visibility)
         self._config_changed()
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the ledger was read (先読み and 「撮像計画ファイル出力」 ask)."""
+        return self._loaded
+
     def _build(self) -> None:
         # Rows of filters and buttons wrap, so that a dock at its usual width shows them all without scrolling sideways.
         top = FlowLayout()

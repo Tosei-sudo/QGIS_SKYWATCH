@@ -141,7 +141,8 @@ def screens(plugin, iface) -> dict:
     toolbar = [_action(a, icons=False) if not a.isSeparator() else "-" for a in plugin.toolbar.actions()]
     return {
         "menu": [_action(a) for a in iface._menu_actions],
-        "actions": [_words(a.text()) for a in plugin.actions],
+        # Which entries the plugin has (their order is the menu's, above: the features add them in turn).
+        "actions": sorted(_words(a.text()) for a in plugin.actions),
         "toolbar": toolbar,
         "toolbar_visible": [_words(a.text()) for a in plugin.toolbar.actions() if a.isVisible() and not a.isSeparator()],
         "dock_order": [d.objectName() for d in iface.docks],

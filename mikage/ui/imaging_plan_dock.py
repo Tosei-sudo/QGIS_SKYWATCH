@@ -209,6 +209,11 @@ class ImagingPlanDock(PluginDock):
 
     # --- The form ---------------------------------------------------------------------------
 
+    @property
+    def loaded(self) -> bool:
+        """Whether the satellite catalog was read (先読み asks before reading it)."""
+        return self._loaded
+
     def _build(self) -> None:
         form = QFormLayout()
         self.catalogs = QComboBox()
