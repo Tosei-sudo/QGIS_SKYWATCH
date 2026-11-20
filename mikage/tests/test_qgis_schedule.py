@@ -377,3 +377,60 @@ def test_a_result_file_naming_rows_by_their_link_id(plugin):
     # Neither is a plan of the system's own (要求外).
     assert not any(r["attributes"]["RESULT"] == "要求外" for r in history.rows)
     dock.close_all()
+
+
+def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
+    # tsudo, 2026-11-20: 「別の日の選択でも正しくインポートしてほしい。計画外のやつは、選択している日付じゃなくて、
+    # その撮像予定の日付のところに出してほしい」.
+    from mikage.core.request.store import history_attributes
+    from mikage.ui import schedule_dock
+
+    p, iface, fake, history, tmp_path = plugin
+    today = jst_day(time.time() * 1000)
+    tomorrow, later = today + timedelta(days=1), today + timedelta(days=2)
+    written(history, today.isoformat())
+    written(history, tomorrow.isoformat())
+    # A routine plan an import before 2026-11-20 put on the day shown (today), though planned for the day after tomorrow.
+    stray = HistoryRow("OLD", time.time() * 1000, today.isoformat(), "", system="SYS-A", result="要求外", name="定常 東京", adoption="採用",
+                       external_id="X-1", adoption_source="a_tomorrow.csv",
+                       planned_at=schedule_dock.datetime.fromisoformat(f"{later.isoformat()}T10:30+09:00").timestamp() * 1000)
+    history.add({k: v for k, v in history_attributes(stray, DEFAULT_HISTORY_FIELDS).items() if v is not None}, None)
+    dock = p.api.schedule
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    assert dock.day == today.isoformat()
+    dock.system_filter.setCurrentIndex(dock.system_filter.findData("SYS-A"))
+    path = tmp_path / "a_tomorrow.csv"
+    path.write_text("ID,判定,予定,名称,W,S,E,N\n"
+                    f"R-1,OK,{tomorrow.isoformat()} 09:00,,,,,\n"
+                    f"X-1,OK,{later.isoformat()} 10:30,定常 東京,139.0,35.0,139.2,35.2\n", encoding="utf-8")
+    # What is asked first: the days it goes on, not the day shown.
+    asked = []
+    monkeypatch.setattr(schedule_dock.QMessageBox, "question",
+                        lambda parent, title, text: asked.append(text) or schedule_dock.QMessageBox.StandardButton.No)
+    dock.import_file(str(path))
+    assert wait_for(lambda: dock.task is None and asked), dock.status.text()
+    assert asked[0].splitlines() == [
+        "A・a_tomorrow.csv",
+        f"{tomorrow.isoformat()}: 採用 1・不採用 0・要求外 0", f"{later.isoformat()}: 採用 0・不採用 0・要求外 1",
+        f"表示中の {today.isoformat()} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録する",
+        f"前に結果ファイルから入れたこのシステムの要求外 1 件（{tomorrow.isoformat()} の分と、ほかの日の同じ計画）は置き換える"]
+    assert dock.status.text() == "取り込みを取りやめ"
+
+    dock.import_file(str(path), ask=False)
+    assert wait_for(lambda: dock.task is None and f"a_tomorrow.csv（{tomorrow.isoformat()}・{later.isoformat()}）: " in dock.status.text()), \
+        dock.status.text()
+    # The file's day is shown, its rows answered there; today's rows are as they were.
+    assert dock.day == tomorrow.isoformat() and dock.chosen_day() == tomorrow
+    assert states(dock) == {("東京湾", "SYS-A"): "採用"}
+    by_day = {(r["attributes"]["TARGET_DAY"], r["attributes"]["REQ_NAME"]): r["attributes"] for r in history.rows}
+    assert by_day[(today.isoformat(), "東京湾")]["ADOPTION"] == "不明"
+    assert (by_day[(tomorrow.isoformat(), "東京湾")]["ADOPTION"], by_day[(tomorrow.isoformat(), "東京湾")]["ADOPTION_SOURCE"]) == (
+        "採用", "a_tomorrow.csv")
+    # The 要求外 on the day of its 撮像予定, the one put on today replaced (not doubled).
+    own = [r["attributes"] for r in history.rows if r["attributes"]["RESULT"] == "要求外"]
+    assert [(a["TARGET_DAY"], a["REQ_NAME"]) for a in own] == [(later.isoformat(), "定常 東京")]
+    dock.set_day(later)
+    assert wait_for(lambda: dock.task is None and dock.day == later.isoformat())
+    assert states(dock) == {("定常 東京", "SYS-A"): "要求外"} and _when(dock.rows[0].planned_at).endswith("10:30")
+    dock.close_all()

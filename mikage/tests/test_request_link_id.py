@@ -19,7 +19,7 @@ from mikage.core.request.link_id import ALPHABETS, link_id, link_ids
 from mikage.core.request.model import ImagingRequest
 from mikage.core.request.result_file import LINK_ID, read_answers, result_file_of
 from mikage.core.request.store import (
-    DEFAULT_HISTORY_FIELDS, HistoryRow, add_history, history_attributes, history_row_of, load_linked, request_store_of,
+    DEFAULT_HISTORY_FIELDS, HistoryRow, add_history, history_attributes, history_row_of, load_system_rows, request_store_of,
 )
 from mikage.core.request.systems import ExportSystem, export_systems_of
 from mikage.core.request.workflow import history_of, keep_answers, plan_day
@@ -171,13 +171,15 @@ def test_the_rows_of_the_days_round_are_read_for_their_ids():
     rows = [_row("R1", "2026-11-05", "AAAA"), _row("R2", "2026-11-11", "BBBB"), _row("R3", "2026-11-11", "CCCC", system="OTHER"),
             _row("R4", "2026-11-12", ""), _row("R5", "2026-11-11", "DDDD", result="見送り")]
     assert add_history(client, store, None, rows) == 5
-    found = load_linked(client, store, None, "SYS", *link_window("2026-11-12", 3))
+    found = load_system_rows(client, store, None, "SYS", *link_window("2026-11-12", 3))
     assert link_window("2026-11-12", 3) == ("2026-11-09", "2026-11-13")
-    # Only that system's rows handed out in the window, with an id.
-    assert [(r.request_id, r.link_id) for r in found] == [("R2", "BBBB")]
-    # A table without LINK_ID (made before it): nothing to look up, and no failure.
+    # Only that system's rows handed out in the window (the one without an id too: its request's keys find it).
+    assert [(r.request_id, r.link_id) for r in found] == [("R2", "BBBB"), ("R4", "")]
+    # A table without LINK_ID (made before it): its rows without ids, and no failure.
     old = _server(with_link=False)
-    assert load_linked(EsriClient(old), store, None, "SYS", "2026-11-09", "2026-11-13") == []
+    assert add_history(EsriClient(old), store, None, rows) == 5
+    assert [(r.request_id, r.link_id) for r in load_system_rows(EsriClient(old), store, None, "SYS", "2026-11-09", "2026-11-13")] == [
+        ("R2", ""), ("R4", "")]
 
 
 # --- Matching a result file ------------------------------------------------------------------

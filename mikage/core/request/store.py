@@ -1103,29 +1103,29 @@ def load_days(client: EsriClient, store: RequestStoreConfig, token: Optional[str
     return _load_rows(client, store, token, history_where(store, first=first, last=last), cancelled)
 
 
-def linked_where(store: RequestStoreConfig, system: str, first: str, last: str) -> str:
-    """The rows handed out (採用) to `system` for the target days `first` … `last`: where a 外部連携ID is looked for."""
+def system_rows_where(store: RequestStoreConfig, system: str, first: str, last: str) -> str:
+    """The rows of `system` for the target days `first` … `last` that a result file answers or replaces: handed out (採用) and 要求外."""
     hf = store.history_fields
     return (f"{hf['day']} >= {quote(first)} AND {hf['day']} <= {quote(last)} AND {hf['system']} = {quote(system)}"
-            f" AND {hf['result']} = '採用'")
+            f" AND {hf['result']} IN ('採用', {quote(UNREQUESTED)})")
 
 
-def load_linked(client: EsriClient, store: RequestStoreConfig, token: Optional[str], system: str, first: str, last: str,
-                cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
+def load_system_rows(client: EsriClient, store: RequestStoreConfig, token: Optional[str], system: str, first: str, last: str,
+                     cancelled: Optional[Callable[[], bool]] = None) -> list[HistoryRow]:
     """
-    The rows handed out to `system` for the target days `first` … `last`
-    that have a 外部連携ID (LINK_ID), without their areas: a result file's
-    ids are looked for in them (adoption.match_answers). None when the table
-    has no LINK_ID (made before 2026-11-12: create_tables.py adds it).
+    The rows handed out to `system` and its 要求外 for the target days
+    `first` … `last` (`2026-11-14`, both included), without their areas:
+    what a result file is matched against, whatever day the dock shows
+    (adoption.match_answers over adoption.read_window).
     """
-    if not store.history or history_has(client, store, token, ("linkId",)):
+    if not store.history:
         return []
     hf = store.history_fields
     _, oid = _layer(client, store.history, token, f"{store.label} の出力履歴", (hf["requestId"], hf["day"]), history=hf)
-    rows = client.query_all(store.history, linked_where(store, system, first, last), token, geometry=False, limit=100000,
+    rows = client.query_all(store.history, system_rows_where(store, system, first, last), token, geometry=False, limit=100000,
                             cancelled=cancelled)
     out = [history_row_of(row.get("attributes") or {}, None, hf, oid) for row in rows]
-    return [r for r in out if r.link_id and r.request_id]
+    return sorted(out, key=lambda r: (r.day, r.planned_at or 0, r.name, r.run_date if math.isfinite(r.run_date) else 0))
 
 
 def day_counts(client: EsriClient, store: RequestStoreConfig, token: Optional[str], first: str, last: str) -> dict[str, dict]:

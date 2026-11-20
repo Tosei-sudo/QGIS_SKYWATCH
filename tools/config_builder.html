@@ -1233,7 +1233,7 @@ const RESULT_LABELS = {
   result: "採否（採用・不採用・不明）", reason: "理由・メモ",
   plannedAt: "撮像予定日時", satellite: "衛星", name: "名称（要求外）", externalId: "システム側の番号", geometry: "範囲（要求外）",
   centerLat: "中心の緯度", centerLon: "中心の経度", bboxWest: "西端の経度", bboxSouth: "南端の緯度", bboxEast: "東端の経度", bboxNorth: "北端の緯度",
-  day: "対象日（違う日の行は読まない）", system: "システム（ほかのシステムの行は読まない）",
+  day: "対象日（行ごとにその日の出力の行に照合。なければ撮像予定の日）", system: "システム（ほかのシステムの行は読まない）",
 };
 const RESULT_GEOMETRY_LABELS = { ...GEOMETRY_LABELS, wkt: "WKT（POLYGON・POINT）", geojson: "GeoJSON（Polygon・Point）", center: "緯度,経度（点）",
   centerRadius: "緯度,経度,半径km", centerGeojson: "GeoJSON の Point" };
@@ -1507,7 +1507,7 @@ const RESULT_FILE = O("resultFile", "採否の結果ファイル", [
   T("records", "結果の配列の場所（records）", { ph: "data.results", showIf: (it) => it.format === "json" && it.schema === undefined, help: "ドット区切り。空ならファイルそのものが配列" }),
   S("missing", "出したのにファイルにない依頼", [["不採用", "不採用"], ["不明", "不明（そのまま）"]], { ph: "採否の列があれば 不明、なければ 不採用" }),
   N("sizeKm", "点のときの範囲の一辺（km）", { ph: "10", help: "要求外の行が点（中心）だけのとき、この大きさの正方形にする" }),
-  N("linkDays", "外部連携ID を探す日数", { min: 0, max: 60, ph: "7", help: "linkId の列の ID を、取り込む日とその何日前（と翌日）までの出力の行から探すか。近い日の行を使う（前の日に出した依頼への答えはその日の行に付く）" }),
+  N("linkDays", "外部連携ID を探す日数", { min: 0, max: 60, ph: "7", help: "linkId の列の ID を、ファイルの行の日（対象日、なければ撮像予定の日）とその何日前（と翌日）までの出力の行から探すか。近い日の行を使う（前の日に出した依頼への答えはその日の行に付く）" }),
   { k: "", t: "resultLegacy", l: "はじめの形" },
   { k: "columns", t: "columns", l: "列", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && ((it.format || "csv") === "csv" || it.schema === undefined) },
   { k: "schema", t: "schema", l: "JSON Schema", profile: PROFILES.result, showIf: (it) => !isLegacyResult(it) && it.format === "json" },
