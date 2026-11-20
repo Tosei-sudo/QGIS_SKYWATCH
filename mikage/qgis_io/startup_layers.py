@@ -54,6 +54,20 @@ def open_layers(entries: Sequence[StartupLayer], config_source: str, check: Opti
     return layers, problems
 
 
+#: leave_unchanged() calls still waiting for QGIS's own marks of what the plugin added (two turns of the event loop).
+_settling = 0
+
+
+def was_unchanged(project: QgsProject) -> bool:
+    """
+    The project not changed before the plugin adds something on its own: not changed, or changed only by QGIS's
+    marks of what the plugin added on its own a moment ago (leave_unchanged() puts them back). The base map and the
+    startup layers are read in tasks of their own: when one ends while the other's marks are still coming, the
+    project looks changed, but by the plugin (it was then left changed, and QGIS asked to save it).
+    """
+    return _settling > 0 or not project.isDirty()
+
+
 def leave_unchanged() -> None:
     """
     The project as not changed, now and once QGIS has set up its first layers:
@@ -63,10 +77,14 @@ def leave_unchanged() -> None:
     QGIS does not ask to save it (at its own start, at 「新規プロジェクト」, at
     opening another project or at closing).
     """
+    global _settling
     project = QgsProject.instance()
     project.setDirty(False)
+    _settling += 1
 
     def later() -> None:
+        global _settling
+        _settling -= 1
         if not project.fileName():
             project.setDirty(False)
 
@@ -91,7 +109,7 @@ def add_startup_layers(entries: Sequence[StartupLayer], config_source: str,
             finished([], [])
             return
         project = QgsProject.instance()
-        clean = unchanged and not project.isDirty()
+        clean = unchanged and was_unchanged(project)
         root = project.layerTreeRoot()
         for layer, entry in opened:
             # Each added on top of the ones before: the first entry ends at the bottom, as in the viewer.

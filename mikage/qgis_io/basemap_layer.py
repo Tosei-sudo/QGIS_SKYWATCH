@@ -15,7 +15,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from ..core.basemaps import BaseMapConfig, attribution_text, raster_source, resolve_url, style_tiles, vector_tile_source
 from . import settings
 from .network import get_bytes
-from .startup_layers import leave_unchanged
+from .startup_layers import leave_unchanged, was_unchanged
 from .tasks import run_task
 
 #: The custom property marking the base map layer (its value: the base map's id).
@@ -120,7 +120,7 @@ def switch_base_map(base: Optional[BaseMapConfig], config_source: str, finished:
     def done(result) -> None:
         layer, notes = result
         project = QgsProject.instance()
-        clean = unchanged and not project.isDirty()
+        clean = unchanged and was_unchanged(project)
         put_base_map(layer)
         if clean and layer is not None:
             leave_unchanged()

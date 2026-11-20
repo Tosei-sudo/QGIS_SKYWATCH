@@ -115,6 +115,51 @@ def test_added_on_its_own_leaves_the_project_unchanged(config):
         project.layerTreeRoot().addedChildren.disconnect(mark)
 
 
+@pytest.mark.parametrize("turns", [0, 1, 2, 5])
+def test_the_base_map_and_the_layers_ending_close_together_leave_it_unchanged(config, monkeypatch, turns):
+    """
+    The base map's task and the startup layers' end `turns` turns of the event loop apart: the second one sees the
+    project changed by QGIS's marks of the first one's layers, and it is still the plugin's own (it was left
+    changed one turn apart, and QGIS asked to save it: seen in the full test runs, 2026-11-20).
+    """
+    from qgis.PyQt.QtCore import QCoreApplication, QTimer
+
+    from mikage.core.basemaps import BaseMapConfig
+    from mikage.qgis_io import basemap_layer, startup_layers
+
+    project = QgsProject.instance()
+
+    def mark(*_):  # as QGIS does (QgisApp::markDirty, and the map bridge a turn later)
+        project.setDirty(True)
+        QTimer.singleShot(0, lambda: project.setDirty(True))
+
+    dones = {}
+    monkeypatch.setattr(startup_layers, "run_task", lambda description, work, done, failed=None: dones.setdefault("layers", done))
+    monkeypatch.setattr(basemap_layer, "run_task", lambda description, work, done, failed=None: dones.setdefault("base", done))
+    entry = startup_layers.StartupLayer(type="file", url="./data/stations.geojson")
+    startup_layers.add_startup_layers([entry], str(config), lambda *_: None, unchanged=True)
+    base = BaseMapConfig(id="t", label="T", type="xyz", url="./tiles/{z}/{x}/{y}.png")
+    basemap_layer.switch_base_map(base, str(config), lambda *_: None, unchanged=True)
+    project.setDirty(False)
+    project.layerTreeRoot().addedChildren.connect(mark)
+    try:
+        dones["layers"](([(QgsVectorLayer("Point?crs=EPSG:4326", "stations", "memory"), entry)], []))
+
+        def base_later(n):
+            if n:
+                QTimer.singleShot(0, lambda: base_later(n - 1))
+            else:
+                dones["base"]((QgsVectorLayer("Point?crs=EPSG:4326", "T", "memory"), []))
+
+        base_later(turns)
+        for _ in range(50):
+            QCoreApplication.processEvents()
+        assert len(project.mapLayers()) == 2
+        assert not project.isDirty()
+    finally:
+        project.layerTreeRoot().addedChildren.disconnect(mark)
+
+
 def test_added_to_each_new_project(config):
     plugin, iface = start()
     assert wait_for(lambda: len(QgsProject.instance().mapLayers()) == 2)
