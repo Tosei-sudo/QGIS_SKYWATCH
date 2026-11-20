@@ -1,10 +1,10 @@
 """MIKAGE の Esri テーブル定義（ArcGIS 側で作るテーブル・フィーチャクラスの一覧）。
 
-README 「Esri 側のテーブル定義」と同じ内容をコードにしたもの。`create_tables.py`（ArcPy）と
+docs/admin/esri-tables.md 「Esri 側のテーブル定義」と同じ内容をコードにしたもの。`create_tables.py`（ArcPy）と
 `publish_service.py`（ポータルへの公開）が読む。ArcGIS Pro の Python（3.9 以降）でも、
 プラグインのテスト（`mikage/tests/test_arcgis_tools.py`）でも読めるよう、標準ライブラリだけを使う。
 
-テーブル・属性を足すときは README の表とここの両方に書く（テストが食い違いを見つける）。
+テーブル・属性を足すときは docs/admin/esri-tables.md の表とここの両方に書く（テストが食い違いを見つける）。
 """
 from __future__ import annotations
 

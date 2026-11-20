@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIKAGE の使い方</title>
+<!--
+  一般利用者向けのヘルプ（プラグインのメニュー「使い方（ヘルプ）…」で開く。ブラウザでもそのまま開ける）。
+  外部のファイル・フォント・スクリプトは使わない（閉域でも同じに見える）。QGIS の中では QTextBrowser が
+  表示するので、HTML と CSS は簡単なものだけ（h2・h3 の id が目次、表・箇条書き・code・b）。
+  リンク「mikage:open/<メニューの文字>」はヘルプ画面の中でだけ、その項目を開く（ブラウザでは何もしない）。
+  「画面つきの手順書」の写真は images/ にあり、scripts/help_shots/make_shots.py で撮り直せる（画面が変わったら撮り直す）。
+  設定ファイルの書き方・テーブル定義など管理者向けの内容は README に書き、ここには書かない。
+-->
+<style>
+body { font-family: "Yu Gothic UI", "Meiryo", "Hiragino Sans", "Noto Sans CJK JP", sans-serif; font-size: 10.5pt; line-height: 160%; color: #1f2937; background-color: #ffffff; margin: 12px; max-width: 900px; }
+h1 { font-size: 17pt; color: #0f3d73; margin-bottom: 4px; }
+h2 { font-size: 14pt; color: #0f3d73; margin-top: 26px; padding-top: 6px; border-top: 2px solid #c7d7ea; }
+h3 { font-size: 11.5pt; color: #1e4f8a; margin-top: 16px; margin-bottom: 4px; }
+p { margin-top: 4px; margin-bottom: 6px; }
+li { margin-bottom: 3px; }
+table { border-collapse: collapse; margin-top: 4px; margin-bottom: 8px; }
+th { background-color: #e8eff7; text-align: left; padding: 4px 8px; border: 1px solid #b6c6d8; }
+td { padding: 4px 8px; border: 1px solid #c9d4e0; vertical-align: top; }
+code { font-family: "Consolas", "Menlo", monospace; background-color: #f1f5f9; }
+.key { font-family: "Consolas", "Menlo", monospace; font-weight: bold; color: #0f3d73; background-color: #eef2f7; }
+.ui { font-weight: bold; color: #111827; }
+.note { background-color: #fff8e1; border-left: 4px solid #f5b400; padding: 6px 10px; margin: 6px 0; }
+.tip { background-color: #eaf6ee; border-left: 4px solid #2e9d5b; padding: 6px 10px; margin: 6px 0; }
+.lead { color: #475569; }
+a { color: #1d5fbf; }
+a.open { color: #0b7a3e; font-weight: bold; }
+img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
+@media (prefers-color-scheme: dark) {
+  body { background-color: #111827; color: #e5e7eb; }
+  h1, h2 { color: #93c5fd; border-color: #334155; }
+  h3 { color: #bfdbfe; }
+  th { background-color: #1f2937; border-color: #475569; }
+  td { border-color: #374151; }
+  code, .key { background-color: #1f2937; color: #e5e7eb; }
+  .ui { color: #f9fafb; }
+  .note { background-color: #2b2410; }
+  .tip { background-color: #10261a; }
+  .lead { color: #9ca3af; }
+  a { color: #93c5fd; }
+  a.open { color: #6ee7b7; }
+  img { border-color: #374151; }
+}
+</style>
+</head>
+<body>
+
+<h1>MIKAGE の使い方</h1>
+<p class="lead">衛星画像の撮像計画・撮像依頼から、届いた画像の判読と観測記録までを QGIS で行うプラグインの、毎日の作業の手引きです。設定ファイルの書き方やサーバー側の表の作り方は、管理者向けの説明（README）にあります。</p>
+
+<table>
+<tr><th>知りたいこと</th><th>見る所</th></tr>
+<tr><td>まず何をすればよいか</td><td><a href="#start">はじめに</a>・<a href="#first">最初にすること</a></td></tr>
+<tr><td>画面の見方・ドックの出し方</td><td><a href="#screen">画面のつくり</a>・<a href="#common">どの担当でも使う操作</a></td></tr>
+<tr><td>よくある作業の流れを画面の写真で追う</td><td><a href="#howto">画面つきの手順書</a>（画像の記録と分担の完了・撮像の依頼と確認・撮像計画の計算と採否）</td></tr>
+<tr><td>撮像計画・撮像依頼を作る</td><td><a href="#plan">撮像計画の担当</a></td></tr>
+<tr><td>画像に写ったものを記録する</td><td><a href="#obs">観測記録の担当</a></td></tr>
+<tr><td>画像を見やすくする・比べる・測る</td><td><a href="#reading">画像判読</a></td></tr>
+<tr><td>キーで速く操作したい</td><td><a href="#keys">キーボードショートカット</a></td></tr>
+<tr><td>うまく動かない</td><td><a href="#trouble">困ったとき</a>・<a href="#offline">サーバーにつながらないとき</a></td></tr>
+<tr><td>言葉の意味</td><td><a href="#words">用語</a></td></tr>
+</table>
+

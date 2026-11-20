@@ -1,10 +1,10 @@
 # ArcGIS 側の準備（テーブルの作成とサービスの公開）
 
-MIKAGE が読み書きする Esri のテーブル・フィーチャクラス（README 「[Esri 側のテーブル定義](../README.md#esri-側のテーブル定義)」の 21 個）をエンタープライズ ジオデータベースに作り、ポータル（ArcGIS Enterprise）にフィーチャサービスとして公開して、プラグインの設定ファイルまで作るスクリプト。`tools/arcgis/` にある。
+MIKAGE が読み書きする Esri のテーブル・フィーチャクラス（「[Esri 側のテーブル定義](admin/esri-tables.md#esri-側のテーブル定義)」の 21 個）をエンタープライズ ジオデータベースに作り、ポータル（ArcGIS Enterprise）にフィーチャサービスとして公開して、プラグインの設定ファイルまで作るスクリプト。`tools/arcgis/` にある。
 
 | ファイル | 中身 | 使うもの |
 | --- | --- | --- |
-| `mikage_schema.py` | テーブル・属性の定義（README の表と同じ。テストで照合） | 標準ライブラリだけ |
+| `mikage_schema.py` | テーブル・属性の定義（docs/admin/esri-tables.md の表と同じ。テストで照合） | 標準ライブラリだけ |
 | `create_tables.py` | テーブル・フィーチャクラスを作る・足りない属性を足す・インデックス・権限 | ArcGIS Pro の ArcPy |
 | `publish_service.py` | フィーチャサービスとして公開し、プラグインの設定ファイルを書き出す | ArcPy（公開）、ArcGIS API for Python（サービスの確認） |
 | `dashboard_views_oracle.sql` | ArcGIS ダッシュボード用の読み取り専用のビュー 13 本（Oracle。[arcgis-dashboards.md](arcgis-dashboards.md)） | SQL*Plus か SQL Developer |
@@ -38,8 +38,8 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 
 作るもの:
 
-- テーブル・フィーチャクラス（名前は `TBL_…`、エイリアスは日本語の名前）と、README の表のとおりの属性（名前・エイリアス・型・長さ）
-- ID で引く属性と日時の範囲で引く属性の属性インデックス（`OBS_ID`・`IMAGE_ID`・`UPDATED_AT`・`REPORTED_AT` など。名前 `IX_<テーブル>_<属性>`。一覧と使い道は README の[推奨のインデックス](../README.md#推奨のインデックス)）
+- テーブル・フィーチャクラス（名前は `TBL_…`、エイリアスは日本語の名前）と、[テーブル定義](admin/esri-tables.md)の表のとおりの属性（名前・エイリアス・型・長さ）
+- ID で引く属性と日時の範囲で引く属性の属性インデックス（`OBS_ID`・`IMAGE_ID`・`UPDATED_AT`・`REPORTED_AT` など。名前 `IX_<テーブル>_<属性>`。一覧と使い道は README の[推奨のインデックス](admin/esri-tables.md#推奨のインデックス)）
 - バージョン対応・アーカイブ・ArcGIS の編集者トラッキングは付けない（プラグインはバージョン対応なしの編集で、作成者・更新者は自分で 4 属性に書く）
 
 4000 を超える長さの文字列（`TBL_TAXONOMY.SPECS`・`TBL_HANDOVER_MEMO.TEXT` など）は、Oracle では CLOB になる（ArcGIS が決める）。日本語を入れるので、データベースの文字コードは Unicode に。
@@ -77,7 +77,7 @@ set PROPY="C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat"
 1. 地図 `MIKAGE_SERVICE` にテーブルを一覧の順に入れ、レイヤー名を `TBL_…` にする。レイヤー番号を一覧の順（0 = `TBL_IMAGE_CATALOG` … 19 = `TBL_PLACE_NAME`、20 = `TBL_COUNTRY`、21 = `TBL_REQUEST_GROUP`、22 = `TBL_REQUEST_SHOT`、README の設定の例と同じ番号。あとから足したテーブルは一覧の最後なので、前からのレイヤー番号は変わらない）に固定する（「一意の数値 ID の割り当てを許可」）
 2. マップ イメージ レイヤーとして共有するドラフトを作り、フィーチャ アクセスを有効にして、機能を `Query,Create,Update,Delete,Uploads,Editing` にする（プラグインは追加・更新・削除をする）。データは参照（コピーしない）
 3. 同じ名前のサービスがあれば上書きして公開する（何度実行してもよい）
-4. 公開したサービスを ArcGIS API for Python で読み、レイヤー名と番号からプラグインの設定ファイル（README 「上の表の名前で作ったときの設定」と同じ形）を書く
+4. 公開したサービスを ArcGIS API for Python で読み、レイヤー名と番号からプラグインの設定ファイル（docs/admin/esri-tables.md 「上の表の名前で作ったときの設定」と同じ形）を書く
 
 書き出した設定ファイルは、ほかの設定（`baseMaps`・`requestExports` など）を足してから利用者に配る。既に設定ファイルがあるなら、出てきた URL の部分だけ写せばよい。
 
@@ -219,4 +219,4 @@ COMMIT;
 | `! レイヤー番号を固定できない` | 古い ArcGIS Pro。公開はでき、設定ファイルは実際の番号で書くので、そのまま使える |
 | 設定ファイルに書かれない項目がある | そのテーブルを公開していない（`--skip` など）。出力の「サービスにないテーブル」を見る |
 
-テーブル・属性の定義を変えたら（プラグインに機能を足したときなど）、README の表と `tools/arcgis/mikage_schema.py` の両方を直す。`mikage/tests/test_arcgis_tools.py` が食い違いを見つける。
+テーブル・属性の定義を変えたら（プラグインに機能を足したときなど）、[テーブル定義](admin/esri-tables.md)の表と `tools/arcgis/mikage_schema.py` の両方を直す。`mikage/tests/test_arcgis_tools.py` が食い違いを見つける。

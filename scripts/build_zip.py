@@ -135,6 +135,8 @@ def main(config: str = "", out_dir: str = "", win64: bool = False, onnxruntime_w
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
         for folder, dirs, files in os.walk(PLUGIN):
             dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+            if folder == os.path.join(PLUGIN, "help"):
+                dirs[:] = [d for d in dirs if d != "src"]  # the help's parts: index.html is built from them (scripts/build_help.py)
             for name in sorted(files):
                 if name.endswith(".pyc") or (folder == PLUGIN and (name == LOCK or (config and name in BUNDLED))):
                     continue

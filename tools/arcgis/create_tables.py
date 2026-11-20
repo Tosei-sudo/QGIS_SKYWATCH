@@ -10,7 +10,7 @@
 - 既にある属性の型・長さが表と違っても変えない（データを壊さないため。違いは最後に一覧で出す）
 - 表にない属性は消さない
 
-テーブル・属性の定義は `mikage_schema.py`（README 「Esri 側のテーブル定義」と同じ）。
+テーブル・属性の定義は `mikage_schema.py`（docs/admin/esri-tables.md 「Esri 側のテーブル定義」と同じ）。
 """
 from __future__ import annotations
 
