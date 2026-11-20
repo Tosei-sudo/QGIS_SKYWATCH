@@ -42,8 +42,6 @@
   "core.roles -> core.obs.alerts",
   "features.observations -> core.obs.setup",
   "processing_provider.annotation_algorithm -> core.ai.annotation_boxes",
-  "qgis_io.settings -> core.catalog.paths",
-  "qgis_io.settings -> core.catalog.saved_areas",
   "qgis_io.similar_io -> core.obs.similar",
   "ui.ai_results_dock -> core.obs.continuation",
   "ui.alert_dialog -> core.obs.alerts",
@@ -73,12 +71,10 @@
  "layers": [],
  "private_access": {
   "ui.analysis_dock": 1,
-  "ui.check_filter": 2,
   "ui.colorize_box": 2,
   "ui.curve_editor": 1,
   "ui.list_views": 2,
   "ui.notice_feed": 1,
-  "ui.place_schedule_dock": 7,
   "ui.shift": 1
  }
 }

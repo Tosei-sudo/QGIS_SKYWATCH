@@ -64,11 +64,11 @@ OPAQUE = np.uint32(0xFF000000)
 
 
 def on() -> bool:
-    return settings._get(KEY) == "1"
+    return settings.pref(KEY) == "1"
 
 
 def set_on(value: bool) -> None:
-    settings._set(KEY, "1" if value else "0")
+    settings.set_pref(KEY, "1" if value else "0")
 
 
 # ---- the tables: what QGIS's contrast enhancement gives each value of a type -------------------------------

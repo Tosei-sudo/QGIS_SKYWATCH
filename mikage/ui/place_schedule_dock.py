@@ -234,7 +234,7 @@ class PlaceScheduleDock(PluginDock):
         self.days_choice = QComboBox()
         for n in DAY_CHOICES:
             self.days_choice.addItem(self.tr("今日から {n} 日").format(n=n), n)
-        saved = settings._get("placeSchedule/days", str(DAYS))
+        saved = settings.pref("placeSchedule/days", str(DAYS))
         index = self.days_choice.findData(int(saved) if saved.isdigit() else DAYS)
         self.days_choice.setCurrentIndex(index if index >= 0 else self.days_choice.findData(DAYS))
         self.days_choice.currentIndexChanged.connect(self._days_chosen)
@@ -249,7 +249,7 @@ class PlaceScheduleDock(PluginDock):
         self.state_filter = CheckFilter(
             self.tr("すべての状態"), [(self.tr(names[k]), k, self.tr(tips.get(k, "")), COLORS[k]) for k in KINDS],
             presets=[(self.tr("見送り以外"), NOT_HELD_BACK), (self.tr("不採用・見送りを除く"), SHOWN)], key="placeSchedule/states",
-            default=[] if settings._get("placeSchedule/notTaken") == "1" else list(NOT_HELD_BACK),
+            default=[] if settings.pref("placeSchedule/notTaken") == "1" else list(NOT_HELD_BACK),
             tip=self.tr("この状態の計画（と依頼の日）だけを出す（チェックしたもののどれか）。次回も同じ選択"))
         self.state_filter.changed.connect(self.refit)
         options.addWidget(self.state_filter)
@@ -258,8 +258,8 @@ class PlaceScheduleDock(PluginDock):
         options.addWidget(self.group_filter)
         self.by_next = QCheckBox(self.tr("次が早い順"))
         self.by_next.setToolTip(self.tr("次の計画が早い地点を上に（計画がなく依頼だけの地点、予定なしの地点はその下）"))
-        self.by_next.setChecked(settings._get("placeSchedule/byNext") == "1")
-        self.by_next.toggled.connect(lambda on: (settings._set("placeSchedule/byNext", "1" if on else "0"), self.refit()))
+        self.by_next.setChecked(settings.pref("placeSchedule/byNext") == "1")
+        self.by_next.toggled.connect(lambda on: (settings.set_pref("placeSchedule/byNext", "1" if on else "0"), self.refit()))
         options.addWidget(self.by_next)
         self.reload_button = QPushButton(self.tr("再読み込み"))
         self.reload_button.setToolTip(self.tr("出力履歴・撮像の範囲・依頼台帳を読み直す"))
@@ -331,7 +331,7 @@ class PlaceScheduleDock(PluginDock):
         return int(self.days_choice.currentData() or DAYS)
 
     def _days_chosen(self, _index: int) -> None:
-        settings._set("placeSchedule/days", str(self.days()))
+        settings.set_pref("placeSchedule/days", str(self.days()))
         if self._loaded and self.days() <= self.read_days and self.first == jst_day(_now_ms()):
             self.refit()
         else:
@@ -343,12 +343,12 @@ class PlaceScheduleDock(PluginDock):
         map keeps most of the window. After that QGIS keeps the size it is
         given, as for any dock.
         """
-        if settings._get("placeSchedule/sized") == "1" or self.isFloating():
+        if settings.pref("placeSchedule/sized") == "1" or self.isFloating():
             return
         window = self.iface.mainWindow()
         if window.dockWidgetArea(self) == Qt.DockWidgetArea.BottomDockWidgetArea:
             window.resizeDocks([self], [HEIGHT], Qt.Orientation.Vertical)
-            settings._set("placeSchedule/sized", "1")
+            settings.set_pref("placeSchedule/sized", "1")
 
     def _visibility(self, visible: bool) -> None:
         if visible:

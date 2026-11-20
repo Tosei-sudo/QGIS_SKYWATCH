@@ -9,8 +9,9 @@ from . import saved_areas
 from .config import CatalogConfig
 from .images import find_images, FolderImages, patterns_for
 from .opened import OpenedImage, OpenedImages
-from .paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
+from .paths import folder_key, PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
 from .query import CatalogSearch, time_text
+from .saved_areas import read_areas, write_areas
 from .search import (
     catalog_info, CatalogLayerInfo, CatalogRecord, cell_text, Column, list_columns, listed_image, place_text,
     read_catalog_layer, record_of, records_by_ids, search_catalog, sensor_view_of, sensors_of, sort_records,
@@ -26,6 +27,7 @@ from .watch import (
 from .watch_store import check_due, check_one, Checked, WatchStore
 
 __all__ = [
+    "folder_key", "read_areas", "write_areas",
     "add_areas", "areas_of", "areas_of_shape", "catalog_info", "CatalogConfig", "CatalogLayerInfo", "CatalogRecord",
     "CatalogSearch", "CatalogWatch", "cell_text", "check_due", "check_one", "Checked", "Column", "conditions_text", "Contents",
     "contents_lines", "contents_of", "DEFAULT_HEIGHT", "DEFAULT_WIDTH", "find_images", "FolderImages", "footprint_of",

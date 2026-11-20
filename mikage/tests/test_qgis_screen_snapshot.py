@@ -100,13 +100,13 @@ def _outline(widget, depth=0) -> list:
 
 
 def _settings_keys() -> list:
-    """The profile's keys the plugin reads and writes: `_get` / `_set` of qgis_io/settings and the modules' *KEY constants."""
+    """The profile's keys the plugin reads and writes: `pref` / `set_pref` (qgis_io/qsettings; `_get` / `_set` in qgis_io/settings) and the modules' *KEY constants."""
     keys = set()
     for m in architecture.modules().values():
         for node in ast.walk(m.tree):
             if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)) and node.args:
                 name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
-                if name in ("_get", "_set") and isinstance(node.args[0], (ast.Constant, ast.JoinedStr)):
+                if name in ("_get", "_set", "pref", "set_pref") and isinstance(node.args[0], (ast.Constant, ast.JoinedStr)):
                     keys.add(ast.unparse(node.args[0]))
             elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
                 target = node.targets[0].id
