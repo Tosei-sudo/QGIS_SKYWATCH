@@ -19,8 +19,9 @@ from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QSizePolicy, Q
 
 from ..core import edit_stamp
 from ..core.obs.api import AssignmentRepository
-from ..core.obs.assignments import (
-    DONE, Assignment, holder_of, holders_of, is_shared, own_row, roots_by_person, roots_text, same_person, with_status,
+from ..core.obs.api import (
+    DONE, Assignment, holder_of, holders_of, is_shared, own_row, roots_by_person, assignment_roots_text as roots_text,
+    same_person, with_status,
 )
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip

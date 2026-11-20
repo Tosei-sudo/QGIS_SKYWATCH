@@ -61,7 +61,7 @@ from ..core.ai_results import (
     AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, same_run,
     score_text,
 )
-from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
+from ..core.obs.api import AUTO, CANDIDATE, Continuation, ContinuationFound as Found, continuations
 from ..core.obs.api import living
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_imported, place_of, results_layer
 from ..qgis_io.ai_transfer_io import sent_ids

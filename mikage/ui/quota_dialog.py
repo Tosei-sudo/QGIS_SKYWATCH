@@ -24,8 +24,8 @@ from qgis.PyQt.QtWidgets import (
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
-from ..core.request.quota import (
-    MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage,
+from ..core.request.api import (
+    MISSED, NO_ROWS, PACE_AHEAD, PENDING, QUOTA_REJECTED as REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage,
 )
 from ..core.request.api import _time, ScheduleRepository
 from ..core.request.api import RequestStoreConfig

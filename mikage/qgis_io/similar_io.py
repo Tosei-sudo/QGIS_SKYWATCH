@@ -27,7 +27,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QDateTime, QVariant
 
 from ..core.obs.api import outline_of
-from ..core.obs.similar import Found, gray_of, half_sizes
+from ..core.obs.api import SimilarFound as Found, gray_of, half_sizes
 from ..core.obs.api import Sample
 from ..core.obs.api import path_of
 from .ai_io import Grid, render_rgba

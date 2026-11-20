@@ -47,7 +47,7 @@ class AlertsPart:
         reported asked each time), in a task; those notable are said in the
         message bar with 「通報文を作成」.
         """
-        from ...core.obs.alerts import load_geofences, load_rules, name_places, reported_ids, select
+        from ...core.obs.api import load_geofences, load_rules, name_places, reported_ids, alert_select as select
         from ...core.obs.api import areas_at, points_of
 
         s = self._alert_watch()

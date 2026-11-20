@@ -11,7 +11,7 @@ from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QTimer
 
 from ...core.obs.api import ObservationBook, ObservedImage
-from ...core.obs.satellites import ORIGINS as SATELLITE_ORIGINS
+from ...core.obs.api import SATELLITE_ORIGINS
 from ...qgis_io.geometry import from_wgs84, to_wgs84
 from ...qgis_io.listed_layers import listed_image_of
 from ...qgis_io.obs_images import SatelliteLookup, image_layers, open_images, set_manual_time, set_typed_satellite

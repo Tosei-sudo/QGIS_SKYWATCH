@@ -26,9 +26,9 @@ from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QFrame, QLabel, QPushButto
 
 from ..core.esri import EsriError
 from ..core.request.api import bbox_of, jst_day, ScheduleRepository
-from ..core.request.place_plans import (
-    DAY_CHOICES, DAYS, KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next,
-    span_of, taken_text, tally_text,
+from ..core.request.api import (
+    DAY_CHOICES, DAYS, PLACE_KINDS as KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name,
+    next_of, sort_by_next, span_of, taken_text, tally_text,
 )
 from ..core.request.api import (
     AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, shot_days_where,

@@ -22,8 +22,9 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.esri import EsriError
-from ..core.request.linking import (
-    MAX_IMAGES, find_images, gap_text, link_findings, link_text, time_text, units_of, unlink_findings, with_links,
+from ..core.request.api import (
+    MAX_IMAGES, find_images, gap_text, link_findings, link_text, linking_time_text as time_text, units_of, unlink_findings,
+    with_links,
 )
 from ..core.request.api import jst_day
 from ..core.request.api import history_where

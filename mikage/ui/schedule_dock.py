@@ -48,7 +48,7 @@ from ..core.plan.api import plain
 from ..core.plan.api import handed_hit
 from ..core.request.api import ScheduleRepository
 from ..core.request.api import JST, jst_day
-from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
+from ..core.request.api import ADOPTED, RESULT_REJECTED as REJECTED, WAITING, read_answers
 from ..core.request.api import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, state_of,
 )

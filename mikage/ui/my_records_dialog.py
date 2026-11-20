@@ -37,8 +37,9 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.obs.api import local_time
-from ..core.obs.mine import (
-    DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, is_mine, observer_names, root_of, roots_text, select, since_of,
+from ..core.obs.api import (
+    DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, is_mine, observer_names, root_of,
+    mine_roots_text as roots_text, mine_select as select, since_of,
 )
 from ..core.obs.api import Observation, state_text
 from ..core.obs.api import RecordQuery

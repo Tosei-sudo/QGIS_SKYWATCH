@@ -98,7 +98,7 @@ class Observations(Feature):
         config = context.config
         if not config.offline_work.enabled or not config.observation_stores or not getattr(config, "preload", True):
             return False
-        from ..core.obs.setup import store_sets
+        from ..core.obs.api import store_sets
 
         def work(task) -> int:
             sets = store_sets(config.observation_stores, config.observation_vocabulary, context.gpkg, context.esri,

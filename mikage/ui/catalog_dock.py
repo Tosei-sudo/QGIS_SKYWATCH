@@ -823,7 +823,7 @@ class CatalogDock(PluginDock):
             return
         if self.isVisible() and not self._work_timer.isActive():
             self._work_timer.start()
-        from ..core.obs.assignments import work_state
+        from ..core.obs.api import work_state
 
         self._work_asked += 1
         asked = self._work_asked
@@ -848,7 +848,7 @@ class CatalogDock(PluginDock):
 
     def _apply_work_filter(self) -> None:
         """「未着手のみ」: the rows of images someone took (or not read yet) hidden."""
-        from ..core.obs.assignments import UNWORKED
+        from ..core.obs.api import UNWORKED
 
         only = self.unworked_only.isChecked() and self.model.work is not None
         shown = 0

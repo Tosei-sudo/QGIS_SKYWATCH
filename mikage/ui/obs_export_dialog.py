@@ -537,7 +537,7 @@ class ExportDialog(QDialog):
         if not rows:
             self._say(why or self.tr("該当する記録なし"))
             return None
-        from ..core.obs.csv import local_time
+        from ..core.obs.api import local_time
 
         dialog = SummaryDialog(self.dock.context.text_assist, rows, local_time, self.tr("条件に合う記録"), self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -555,7 +555,7 @@ class ExportDialog(QDialog):
 
     def search_kinds(self) -> list[str]:
         """言葉で探す's kinds (「船舶 > 補給艦」): a class the words name gives its 大分類."""
-        from ..core.obs.taxonomy import kind_of
+        from ..core.obs.api import kind_of
 
         book = self.dock.book
         return [kind_of(t.path) for t in book.taxonomy()] if book is not None else []
@@ -613,7 +613,7 @@ class ExportDialog(QDialog):
         s = self.settings
         now = now_ms()
         if not path:
-            from ..core.obs.export import file_name_of
+            from ..core.obs.api import file_name_of
 
             kind = "JSON (*.json)" if f.format == "json" else "CSV (*.csv *.txt)"
             path, _ = QFileDialog.getSaveFileName(self, self.tr("観測記録のエクスポート"), file_name_of(f, now), kind)

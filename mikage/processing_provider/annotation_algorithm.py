@@ -113,7 +113,7 @@ class Converter:
         self.counts: dict[str, int] = {}
 
     def needs_outline(self, cls, length, width, heading) -> bool:
-        from ..core.ai.annotation_boxes import _positive, length_for
+        from ..core.ai.api import positive_or_none as _positive, length_for
 
         known_length = _positive(length) or length_for(cls, self.rules.lengths) or (self.rules.length if self.rules.length > 0 else None)
         if heading is None or not known_length:
@@ -124,7 +124,7 @@ class Converter:
         """A point (pixels of the grid, or metres round it without an image) as a box; None (counted) when left out."""
         shape = None
         if self.outliner is not None and self.needs_outline(cls, length, width, heading):
-            from ..core.ai.annotation_boxes import _positive, length_for
+            from ..core.ai.api import positive_or_none as _positive, length_for
 
             known = _positive(length) or length_for(cls, self.rules.lengths) or (self.rules.length if self.rules.length > 0 else None)
             mpp = self.mpp if self.mpp > 0 else 1.0

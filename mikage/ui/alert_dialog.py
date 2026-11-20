@@ -26,9 +26,10 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import audit, edit_stamp
 from ..core.esri import EsriError
-from ..core.obs.alerts import (
-    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences, load_rules,
-    manual_items, name_places, object_keys, report_text, reported_ids, score_note, select, uses_source, write_file,
+from ..core.obs.api import (
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences,
+    load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note, alert_select as select,
+    uses_source, alert_write_file as write_file,
 )
 from ..core.obs.api import living
 from ..core.obs.api import areas_at, points_of

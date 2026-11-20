@@ -28,7 +28,9 @@ from ..core import audit, edit_stamp
 from ..core.obs.api import (
     STATUSES, AlertLogRepository, Assignment, AssignmentRepository, progress_of, progress_text, same_person, with_status,
 )
-from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
+from ..core.obs.api import (
+    HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, handover_write_file as write_file,
+)
 from ..core.obs.api import RecordQuery, merged
 from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task

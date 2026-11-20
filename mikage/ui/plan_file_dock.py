@@ -52,9 +52,9 @@ from ..core.esri import EsriError
 from ..core.plan.api import attach, on_day, summary_text
 from ..core.plan.api import fetch_clouds
 from ..core.request.api import ahead_span, chances_of, ScheduleRepository, wanted
-from ..core.request.daily import (
-    HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, pace_text, part_text, pass_text, room_text,
-    satellite_name, time_text,
+from ..core.request.api import (
+    HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, pace_text, part_text, pass_text,
+    room_text, satellite_name, daily_time_text as time_text,
 )
 from ..core.request.api import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.api import missed_ids

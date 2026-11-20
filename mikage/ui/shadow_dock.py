@@ -28,7 +28,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QDateTimeEdit, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QListWidget, QPushButton, QWidget,
 )
 
-from ..core.obs.image_time import ORIGINS
+from ..core.obs.api import IMAGE_TIME_ORIGINS as ORIGINS
 from ..core.plan.api import sun_angles
 from ..core.shadow import (
     ShadowMeasurement, Sun, format_metres, height_from_shadow, shadow_azimuth, snap_to_ray, step_toward, sun_from_metadata,

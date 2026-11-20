@@ -25,7 +25,7 @@ from ..core.request.api import RequestChange, RequestRepository
 from ..core.request.api import requests_of_plan
 from ..core.request.api import first_group, offered
 from ..core.request.api import remembered, with_remembered
-from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
+from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
 from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
 from ..qgis_io.geometry import from_wgs84

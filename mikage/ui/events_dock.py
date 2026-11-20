@@ -846,7 +846,7 @@ class EventsDock(PluginDock):
                 opened += len(layers)
         listed = 0
         if without:
-            from ..core.catalog.search import listed_image
+            from ..core.catalog.api import listed_image
 
             images = [i for i in (listed_image(r) for r in without) if i is not None]
             dock = self.observations() if self.observations else None
