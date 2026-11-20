@@ -540,6 +540,8 @@ FROM g;
 --    地名が見つからない（値の OBJECTID の地名がない: 地名を入れ直した）・無効な地名（後から ACTIVE を 0 にした）。
 --    不可（2026-11-19）: 雲などで見えなかった記録は UNSEEN_REASON に理由が入り PRESENT は空。PRESENT_LABEL は
 --    「不可」、LOOKED は 0（見て在・消失を記録したものは 1）。TBL_OBSERVATION に UNSEEN_REASON を足してから作る。
+--    衛星名（2026-11-20）: SATELLITE は画像を撮った衛星（画像カタログのセンサーの書き方。カタログ外の画像も）。
+--    SATELLITE_LABEL は空なら「（衛星不明）」（足す前の記録。docs/arcgis-setup.md「前からある記録に衛星名を入れる」）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_RECORD AS
 WITH clock AS (
@@ -572,6 +574,8 @@ SELECT
     o.IMAGE_ID,
     o.IMAGE_NAME,
     o.IMAGE_TIME,
+    o.SATELLITE,
+    NVL(TO_CHAR(o.SATELLITE), '（衛星不明）')                          AS SATELLITE_LABEL,
     o.SEEN_AT,
     o.JST_DAY - 9 / 24                                                 AS SEEN_DATE,
     TO_CHAR(o.JST_DAY, 'YYYY-MM')                                      AS SEEN_MONTH,
@@ -706,6 +710,8 @@ WHERE r.RN = 1;
 --    件数（作成者 CREATED_USER か記録者 OBSERVER が担当者と同じ名前。大文字・小文字は区別しない）を付ける。
 --    DONE_EMPTY: 完了なのに記録も確認範囲・不可範囲も 0 件（何もなかったのか、付け忘れかの確認用）。
 --    IMAGE_AREAS は確認範囲、UNSEEN_AREAS は不可範囲（雲など。TBL_OBSERVATION_AREA の UNSEEN_REASON あり）の件数。
+--    SATELLITE: その画像の記録・確認範囲・不可範囲に書かれた衛星名（どれにもなければ空）。衛星ごとの不可範囲の
+--    割合（UNSEEN_AREAS を SATELLITE で集計）などに使う。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_IMAGE_WORK AS
 WITH clock AS (
@@ -714,7 +720,7 @@ WITH clock AS (
     FROM DUAL
 ),
 img AS (
-    SELECT IMAGE_ID, COUNT(*) AS N, MAX(CREATED_AT) AS LAST_AT
+    SELECT IMAGE_ID, COUNT(*) AS N, MAX(CREATED_AT) AS LAST_AT, MAX(TO_CHAR(SATELLITE)) AS SATELLITE
     FROM VW_OBS_RECORD
     WHERE IMAGE_ID IS NOT NULL
     GROUP BY IMAGE_ID
@@ -722,7 +728,8 @@ img AS (
 area AS (
     SELECT IMAGE_ID,
            SUM(CASE WHEN UNSEEN_REASON IS NULL THEN 1 ELSE 0 END)     AS N,
-           SUM(CASE WHEN UNSEEN_REASON IS NOT NULL THEN 1 ELSE 0 END) AS UNSEEN_N
+           SUM(CASE WHEN UNSEEN_REASON IS NOT NULL THEN 1 ELSE 0 END) AS UNSEEN_N,
+           MAX(TO_CHAR(SATELLITE))                                    AS SATELLITE
     FROM TBL_OBSERVATION_AREA
     WHERE DELETED_AT IS NULL AND IMAGE_ID IS NOT NULL
     GROUP BY IMAGE_ID
@@ -754,6 +761,7 @@ SELECT
     NVL(img.N, 0)                                                      AS IMAGE_RECORDS,
     NVL(area.N, 0)                                                     AS IMAGE_AREAS,
     NVL(area.UNSEEN_N, 0)                                              AS UNSEEN_AREAS,
+    NVL(img.SATELLITE, area.SATELLITE)                                 AS SATELLITE,
     img.LAST_AT                                                        AS LAST_RECORD_AT,
     CASE WHEN a.STATUS = '完了' AND NVL(img.N, 0) = 0 AND NVL(area.N, 0) + NVL(area.UNSEEN_N, 0) = 0 THEN 1 ELSE 0 END AS DONE_EMPTY
 FROM TBL_ASSIGNMENT a

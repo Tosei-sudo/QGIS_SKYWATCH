@@ -79,7 +79,7 @@ def record_out(o: Observation) -> dict[str, Any]:
         "id": o.id, "imageId": o.image_id, "imageName": o.image_name, "imageTime": _iso(o.image_time), "objectId": o.object_id,
         "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "unseen": o.unseen,
         "confidence": o.confidence or "", "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
-        "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
+        "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "", "satellite": o.satellite or "",
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
 
@@ -98,7 +98,7 @@ def flow_out(f: ObjectFlow) -> dict[str, Any]:
 def area_out(a: CheckedArea) -> dict[str, Any]:
     return {
         "id": a.id, "imageId": a.image_id, "imageName": a.image_name, "imageTime": _iso(a.image_time), "kind": a.kind, "note": a.note,
-        "unseen": a.unseen, "recordedBy": a.recorded_by or "", "polygon": {"type": "Polygon", "coordinates": [a.ring]}, "createdAt": _iso(a.created_at),
+        "unseen": a.unseen, "satellite": a.satellite or "", "recordedBy": a.recorded_by or "", "polygon": {"type": "Polygon", "coordinates": [a.ring]}, "createdAt": _iso(a.created_at),
         "deletedAt": _iso(a.deleted_at),
     }
 

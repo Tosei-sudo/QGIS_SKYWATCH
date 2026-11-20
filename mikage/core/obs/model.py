@@ -67,6 +67,10 @@ class Observation:
     pixel_y: Optional[float] = None
     #: The file those pixels are of (a catalog record's image below its folder, else the file's name); '' with none.
     image_file: str = ""
+    #: 衛星名: the satellite (or sensor) that took the image, as the image catalog writes it (its 「センサー」: WV03), else
+    #: as the file's metadata or name says or as typed for the image (tsudo 2026-11-20: images outside the catalog have
+    #: no catalog row to look it up by); '' when not known (an older record, an image that does not say).
+    satellite: str = ""
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -87,6 +91,8 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "pixelX": "PIXEL_X",
     "pixelY": "PIXEL_Y",
     "imageFile": "IMAGE_FILE",
+    #: 衛星名 (2026-11-20): optional, like PIXEL_X; empty for older records.
+    "satellite": "SATELLITE",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",
@@ -363,11 +369,15 @@ class ListedImage:
     #: The footprint's rings ([[longitude, latitude], …] each, WGS 84) as the catalog gives it, when known: drawn as the
     #: image's layer on the map (its extent is `box`). None for one typed with ＋ (the box alone).
     rings: Optional[list[list[list[float]]]] = None
+    #: 衛星名: the catalog's 「センサー」 (「ファイルなしで記録」), else typed for it; '' when not known.
+    satellite: str = ""
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {"id": self.id, "name": self.name, "time": self.time, "box": self.box}
         if self.rings:
             out["rings"] = self.rings
+        if self.satellite:
+            out["satellite"] = self.satellite
         return out
 
 
@@ -379,9 +389,12 @@ def recorded_images(records: list[Observation]) -> list[ListedImage]:
             continue
         known = by_id.get(o.image_id)
         if known is None:
-            by_id[o.image_id] = ListedImage(o.image_id, o.image_name or o.image_id, o.image_time, None)
-        elif known.time is None and o.image_time is not None:
-            known.time = o.image_time
+            by_id[o.image_id] = ListedImage(o.image_id, o.image_name or o.image_id, o.image_time, None, satellite=o.satellite)
+        else:
+            if known.time is None and o.image_time is not None:
+                known.time = o.image_time
+            if not known.satellite and o.satellite:
+                known.satellite = o.satellite
     return sorted(by_id.values(), key=lambda i: (-(i.time if i.time is not None else -math.inf), i.id))
 
 
@@ -403,8 +416,9 @@ def parse_listed_images(text: Optional[str]) -> list[ListedImage]:
             continue
         seen.add(id_)
         ok_box = list(box) if isinstance(box, list) and len(box) == 4 and all(is_number(n) for n in box) else None
+        satellite = v.get("satellite")
         out.append(ListedImage(id_, name if isinstance(name, str) and name.strip() else id_, t if is_number(t) else None, ok_box,
-                               rings_of(v.get("rings"))))
+                               rings_of(v.get("rings")), satellite.strip() if isinstance(satellite, str) else ""))
     return out
 
 

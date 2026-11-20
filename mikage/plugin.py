@@ -1702,9 +1702,10 @@ class MikagePlugin:
         overviews_io.queue.cancel_all()
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
-        from .qgis_io import pixel_place
+        from .qgis_io import obs_images, pixel_place
 
         pixel_place.forget()
+        obs_images.forget()
         tasks.release_tasks()  # nothing held any more (cancelled above): only no longer holding
         try:
             self.iface.initializationCompleted.disconnect(self._release_tasks)

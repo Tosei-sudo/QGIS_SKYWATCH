@@ -31,6 +31,8 @@ DEFAULT_AREA_FIELDS: dict[str, str] = {
     "deleted": "DELETED_AT",
     #: 不可の理由: set for a 不可範囲, empty for a 確認範囲.
     "unseen": "UNSEEN_REASON",
+    #: 衛星名 (2026-11-20), as the records': optional.
+    "satellite": "SATELLITE",
 }
 _FEATURE_LAYER = re.compile(r"/FeatureServer/\d+$", re.IGNORECASE)
 _NAME = re.compile(r"^[\w.]+$", re.ASCII)
@@ -54,6 +56,8 @@ class CheckedArea:
     recorded_by: str = ""
     #: A 不可範囲: why it could not be looked at (雲・霞…); '' for a checked area.
     unseen: str = ""
+    #: 衛星名 of its image, as the records' (Observation.satellite); '' when not known.
+    satellite: str = ""
 
 
 @dataclass

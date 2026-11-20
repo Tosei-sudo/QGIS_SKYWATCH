@@ -149,6 +149,8 @@ class ImageRef:
     id: str
     name: str = ""
     time: Optional[int] = None
+    #: 衛星名, '' when not known.
+    satellite: str = ""
 
 
 def carry_overs(records: Iterable[Observation], image: ImageRef, inside: Optional[Callable[[float, float], bool]] = None) -> list[CarryOver]:
@@ -184,9 +186,9 @@ def carry_overs(records: Iterable[Observation], image: ImageRef, inside: Optiona
 def carried_into(source: Observation, image: ImageRef, now: Optional[int] = None, **changes: Any) -> Observation:
     """A copy of `source` for another image (the same thing, its place and activity), stamped now."""
     now = now_ms() if now is None else now
-    # Its pixels are the other image's: found again in this one when saved (book._placed).
+    # Its pixels are the other image's: found again in this one when saved (book._placed); its 衛星名 this image's.
     return replace(source, **{"note": "", "unseen": "", "pixel_x": None, "pixel_y": None, "image_file": "", **changes}, id=new_observation_id(),
-                   image_id=image.id, image_name=image.name,
+                   image_id=image.id, image_name=image.name, satellite=image.satellite,
                    image_time=image.time, created_at=now, updated_at=now, deleted_at=None)
 
 

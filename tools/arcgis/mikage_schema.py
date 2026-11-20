@@ -184,6 +184,7 @@ TABLES = (
         F("PIXEL_X", "画素X", "DOUBLE", None, "pixelX"),
         F("PIXEL_Y", "画素Y", "DOUBLE", None, "pixelY"),
         F("IMAGE_FILE", "画像ファイル", "TEXT", 255, "imageFile"),
+        F("SATELLITE", "衛星名", "TEXT", 255, "satellite"),
         F("CONFIDENCE", "確度", "TEXT", 64, "confidence"),
         F("OBSERVER", "記録者", "TEXT", 255, "recordedBy"),
         F("UPDATED_BY", "更新者名", "TEXT", 255, "updatedBy"),
@@ -205,6 +206,7 @@ TABLES = (
         F("UPDATED_AT", "修正日時", "DATE", None, "updated"),
         F("DELETED_AT", "削除日時", "DATE", None, "deleted"),
         F("UNSEEN_REASON", "不可の理由", "TEXT", 40, "unseen"),
+        F("SATELLITE", "衛星名", "TEXT", 255, "satellite"),
     )),
     Table("TBL_TAXONOMY", "分類体系", None, writable=True, setting="observationStores[].taxonomyTable", fields=(
         F("PATH", "分類", "TEXT", 1000, "path"),

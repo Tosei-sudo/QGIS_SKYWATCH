@@ -17,6 +17,7 @@ from ..core.esri import EsriClient, LayerInfos
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
 from ..core.obs import place_cache
+from ..core.obs.satellites import SatelliteChoices, load_satellite_choices
 from ..core.offline import OfflineWork
 from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
 from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
@@ -68,6 +69,8 @@ class PluginContext(QObject):
         #: The satellite name tables (`satelliteAliases`) once read; None until then (read again after a reload).
         self._names: Optional[SatelliteNames] = None
         self._names_lock = threading.Lock()
+        #: 衛星名 known (core/obs/satellites.py: the image catalogs' sensors, the satellite catalogs' names), once read.
+        self._satellite_choices: Optional[SatelliteChoices] = None
         self.configChanged.connect(self._forget_names)
         #: 衛星の障害情報 (`satelliteOutages`) as last read (read again for each calculation; outagesChanged when they change).
         self._outages: tuple = ()
@@ -203,6 +206,41 @@ class PluginContext(QObject):
     def _forget_names(self) -> None:
         with self._names_lock:
             self._names = None
+            self._satellite_choices = None
+
+    def satellite_choices(self, client: Optional[EsriClient] = None, cancelled=None) -> SatelliteChoices:
+        """
+        The satellite names known (use inside a task: the image catalogs'
+        sensors and the satellite catalogs' names are read the first time,
+        then kept until the settings file is read again), with their other names.
+        """
+        with self._names_lock:
+            if self._satellite_choices is not None:
+                return self._satellite_choices
+        config = self.config
+        client = client or self.esri()
+        names = self.satellite_names(client, cancelled)
+        try:
+            choices, whole = load_satellite_choices(client, config.image_catalogs, config.satellite_catalogs, names, self.token_for, cancelled)
+        except Exception:  # noqa: BLE001 (names only help; the records are kept without them)
+            return SatelliteChoices(names=names)
+        with self._names_lock:
+            # Kept when every table was read (the alias tables too: satellite_names keeps them then).
+            if whole and self.config is config and (self._names is not None or not config.satellite_aliases):
+                self._satellite_choices = choices
+        return choices
+
+    def satellite_choices_read(self) -> bool:
+        """Whether the satellite names have been read for this settings file."""
+        with self._names_lock:
+            return self._satellite_choices is not None
+
+    def known_satellite_choices(self) -> SatelliteChoices:
+        """The satellite names already read (for the main thread, which does not wait for the tables)."""
+        with self._names_lock:
+            if self._satellite_choices is not None:
+                return self._satellite_choices
+            return SatelliteChoices(names=self._names or NO_NAMES)
 
     def satellite_names(self, client: Optional[EsriClient] = None, cancelled=None) -> SatelliteNames:
         """
