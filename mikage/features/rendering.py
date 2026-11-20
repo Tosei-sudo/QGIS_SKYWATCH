@@ -9,7 +9,7 @@ from typing import Optional
 from qgis.core import Qgis, QgsMessageLog, QgsProject
 from qgis.PyQt.QtWidgets import QPushButton
 
-from ..core.enhance.rules import image_rule_for
+from ..core.enhance.api import image_rule_for
 from ..core.raster_speed import shown as shown_option
 from ..qgis_io import complex_sar, fast_draw, overviews_io, raster_speed
 from ..qgis_io.preload import LOG_TAG

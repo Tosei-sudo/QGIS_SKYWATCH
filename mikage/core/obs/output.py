@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-from ..plan.output import LayerField
+from ..plan.api import LayerField
 from .areas import CheckedArea
 from .flows import flows, living, outline_of
 from .geo import js_round

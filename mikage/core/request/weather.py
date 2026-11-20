@@ -19,7 +19,7 @@ import math
 from datetime import date
 from typing import Optional, Sequence
 
-from ..plan.weather import GRID, CloudSeries, cloud_at, key_of
+from ..plan.api import GRID, CloudSeries, cloud_at, key_of
 from .model import ImagingRequest, bbox_of, center_of, clamp_priority, day_bounds, in_rings
 
 #: Local solar hours whose cover counts.

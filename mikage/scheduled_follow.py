@@ -19,7 +19,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.curdir) != _HERE]
 sys.path.insert(0, os.path.dirname(_HERE))
 
-from mikage.core.request.follow_job import main  # noqa: E402
+from mikage.core.request.api import main  # noqa: E402
 
 if __name__ == "__main__":
     sys.exit(main())

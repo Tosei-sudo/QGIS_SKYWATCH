@@ -11,8 +11,8 @@ from qgis.PyQt.QtCore import QEvent, QRectF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont, QFontMetrics, QPainter, QPalette, QPen
 from qgis.PyQt.QtWidgets import QSizePolicy, QToolTip, QWidget
 
-from ..core.request.place_plans import HEAD, LABEL, REQUEST, ROW, Lane, Layout, Mark, lane_at, layout, mark_tip, marks_at
-from ..core.request.store import AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED
+from ..core.request.api import HEAD, LABEL, REQUEST, ROW, Lane, Layout, Mark, lane_at, layout, mark_tip, marks_at
+from ..core.request.api import AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED
 from .docks import plain_tip
 
 #: Each state's colour (as the 「撮像予定」 dock's), and the requests' days still to be planned.

@@ -32,7 +32,7 @@ from urllib.parse import urljoin, urlsplit
 
 import numpy as np
 
-from ..core.ai.model_config import OnnxSignature, OnnxValue
+from ..core.ai.api import OnnxSignature, OnnxValue
 from ..core.win64 import add_package
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

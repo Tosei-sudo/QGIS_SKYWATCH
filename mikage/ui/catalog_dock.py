@@ -41,17 +41,17 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.paths import PathError, PathMapping
-from ..core.catalog.query import CatalogSearch
-from ..core.catalog import saved_areas as saved_area_list
-from ..core.catalog.opened import OpenedImage
-from ..core.catalog.search import (
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import PathError, PathMapping
+from ..core.catalog.api import CatalogSearch
+from ..core.catalog.api import saved_areas as saved_area_list
+from ..core.catalog.api import OpenedImage
+from ..core.catalog.api import (
     CatalogLayerInfo, CatalogRecord, listed_image, read_catalog_layer, record_of, records_by_ids, search_catalog, sensors_of,
 )
-from ..core.catalog.similar import SimilarTolerance, rank_similar, similar_search
-from ..core.catalog.watch import areas_of
-from ..core.obs.csv import local_time
+from ..core.catalog.api import SimilarTolerance, rank_similar, similar_search
+from ..core.catalog.api import areas_of
+from ..core.obs.api import local_time
 from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue

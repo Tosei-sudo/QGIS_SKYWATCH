@@ -50,16 +50,16 @@ from qgis.core import (
 )
 from qgis.PyQt.QtGui import QColor
 
-from ..core.enhance.color_classes import class_palette, class_range
-from ..core.enhance.color_scale import apply_palette, color_scale_palette
-from ..core.enhance.histogram import channel_bins
-from ..core.enhance.pipeline import Pipeline
-from ..core.enhance.process import channel_tables, process
-from ..core.enhance.raster import (
+from ..core.enhance.api import class_palette, class_range
+from ..core.enhance.api import apply_palette, color_scale_palette
+from ..core.enhance.api import channel_bins
+from ..core.enhance.api import Pipeline
+from ..core.enhance.api import channel_tables, process
+from ..core.enhance.api import (
     RasterHistogram, code_table, compute_raster_stretch, look_up, sample_raster_histogram, stretch_to_rgba, to_codes,
     valid_mask,
 )
-from ..core.enhance.stats import count_pixels, resolve_ops
+from ..core.enhance.api import count_pixels, resolve_ops
 
 RENDERER_TYPE = "satobsEnhance"
 PROPERTY = "satobs/enhance"

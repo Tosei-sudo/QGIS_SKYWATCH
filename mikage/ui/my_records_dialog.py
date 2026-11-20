@@ -36,12 +36,12 @@ from qgis.PyQt.QtWidgets import (
     QTabBar, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core.obs.csv import local_time
+from ..core.obs.api import local_time
 from ..core.obs.mine import (
     DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, is_mine, observer_names, root_of, roots_text, select, since_of,
 )
-from ..core.obs.model import Observation, state_text
-from ..core.obs.scope import RecordQuery
+from ..core.obs.api import Observation, state_text
+from ..core.obs.api import RecordQuery
 from .docks import plain_label
 from .fit import fit_text
 from .list_views import column_menus

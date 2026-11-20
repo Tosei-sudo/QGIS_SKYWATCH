@@ -13,7 +13,7 @@ import math
 import re
 from typing import Callable, Optional, Sequence
 
-from .plan.weather import GRID, CloudSeries, cloud_at, key_of
+from .plan.api import GRID, CloudSeries, cloud_at, key_of
 
 HOUR = 3600000
 #: A time this close before the first or after the last forecast time takes that time's cover.

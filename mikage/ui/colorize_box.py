@@ -40,7 +40,7 @@ from qgis.PyQt.QtWidgets import (
     QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core.enhance.color_classes import (
+from ..core.enhance.api import (
     auto_label, class_shares, color_classes, format_class_value, recolor, resize_classes, set_bound,
 )
 from ..qgis_io import enhance_renderer as er

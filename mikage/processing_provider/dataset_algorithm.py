@@ -18,7 +18,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.ai.train.dataset import (
+from ..core.ai.api import (
     Dataset, DatasetError, add_group, load_dataset, make_group, missing_files, parse_class_map, save_dataset,
 )
 from ..qgis_io.dataset_io import class_counts, class_field_of, vector_layer

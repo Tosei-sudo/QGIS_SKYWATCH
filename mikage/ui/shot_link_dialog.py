@@ -22,13 +22,13 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.esri import EsriError
-from ..core.request.follow import save_marked
-from ..core.request.follow_job import requests_of
+from ..core.request.api import save_marked
+from ..core.request.api import requests_of
 from ..core.request.linking import (
     MAX_IMAGES, find_images, gap_text, link_findings, link_text, links_of, time_text, units_of, unlink_findings, with_links,
 )
-from ..core.request.model import jst_day
-from ..core.request.store import history_where, load_day, load_history, load_shots
+from ..core.request.api import jst_day
+from ..core.request.api import history_where, load_day, load_history, load_shots
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import ask_no

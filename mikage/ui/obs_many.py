@@ -45,12 +45,12 @@ from qgis.PyQt.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QWidget,
 )
 
-from ..core.obs.flows import ends_of, outline_of
-from ..core.obs.geo import bearing, km_text
-from ..core.ai.review import is_rejection
-from ..core.obs.similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
-from ..core.obs.stamps import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
-from ..core.obs.taxonomy import path_of
+from ..core.obs.api import ends_of, outline_of
+from ..core.obs.api import bearing, km_text
+from ..core.ai.api import is_rejection
+from ..core.obs.api import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
+from ..core.obs.api import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
+from ..core.obs.api import path_of
 from ..qgis_io.obs_images import image_layers, layer_at
 from ..qgis_io.tasks import run_task
 from .docks import plain_label

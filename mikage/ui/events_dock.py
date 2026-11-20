@@ -33,7 +33,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit
-from ..core.catalog.search import record_of
+from ..core.catalog.api import record_of
 from ..core.esri import quote
 from ..core.events import (
     CLOSED, LISTED, OPEN, STATUSES, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,

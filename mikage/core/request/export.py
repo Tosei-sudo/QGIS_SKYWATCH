@@ -74,7 +74,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Optional, Sequence
 
-from ..plan.orbit import R
+from ..plan.api import R
 from ..time_zone import format_time  # noqa: F401 (now of the shared base: read from here too)
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids

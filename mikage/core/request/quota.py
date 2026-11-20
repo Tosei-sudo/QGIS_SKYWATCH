@@ -46,7 +46,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, quote
-from ..plan.names import plain
+from ..plan.api import plain
 from ..util import is_number
 from .model import JST
 from .store import (

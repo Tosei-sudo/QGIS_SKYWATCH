@@ -6,7 +6,7 @@ from typing import Any
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeatureRequest, QgsGeometry, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtCore import QDate, QDateTime, QVariant
 
-from ..core.obs.record_import import SourceRow
+from ..core.obs.api import SourceRow
 
 
 def _plain(value: Any) -> Any:

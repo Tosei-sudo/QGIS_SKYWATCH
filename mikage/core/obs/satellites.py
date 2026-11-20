@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
-from ..plan.names import NO_NAMES, SatelliteNames, plain
+from ..plan.api import NO_NAMES, SatelliteNames, plain
 
 #: Where an image's 衛星名 came from (shown with it).
 ORIGINS = {

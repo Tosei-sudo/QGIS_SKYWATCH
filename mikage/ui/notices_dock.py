@@ -22,14 +22,14 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.paths import PathError
-from ..core.catalog.query import CatalogSearch, time_text
-from ..core.catalog.search import listed_image, read_catalog_layer, record_of
-from ..core.catalog.watch import (
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import PathError
+from ..core.catalog.api import CatalogSearch, time_text
+from ..core.catalog.api import listed_image, read_catalog_layer, record_of
+from ..core.catalog.api import (
     MAX_SEEN, CatalogWatch, WatchNotice, add_areas, areas_of, conditions_text, new_watch, replace_areas,
 )
-from ..core.catalog.watch_store import Checked, WatchStore, check_due, check_one
+from ..core.catalog.api import Checked, WatchStore, check_due, check_one
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84

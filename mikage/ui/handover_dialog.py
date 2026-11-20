@@ -25,9 +25,9 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit, edit_stamp
-from ..core.obs.assignments import STATUSES, Assignment, progress_of, progress_text, same_person, update, with_status
+from ..core.obs.api import STATUSES, Assignment, progress_of, progress_text, same_person, update, with_status
 from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
-from ..core.obs.scope import RecordQuery, merged
+from ..core.obs.api import RecordQuery, merged
 from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus

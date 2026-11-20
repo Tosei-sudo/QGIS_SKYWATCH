@@ -55,14 +55,14 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
-from ..core.ai.model_config import DetectModelConfig
-from ..core.ai.review import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
+from ..core.ai.api import DetectModelConfig
+from ..core.ai.api import ACCEPTED, REJECTED_STATE, SURE_SCORE, TO_REVIEW, queue, rejected_tags, rejection_note, review_order, state_of
 from ..core.ai_results import (
     AiResult, AiResultSource, detected_kind, detection_runs, import_entry, kind_for, recorded_tags, result_sources, result_tag, same_run,
     score_text,
 )
 from ..core.obs.continuation import AUTO, CANDIDATE, Continuation, Found, continuations
-from ..core.obs.flows import living
+from ..core.obs.api import living
 from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_imported, place_of, results_layer
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL

@@ -24,7 +24,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QObject, QTimer
 from qgis.PyQt.QtGui import QColor
 
-from ..core.obs.model import ListedImage
+from ..core.obs.api import ListedImage
 from .geometry import rings_geometry
 from .plan_layer import make_field, qdatetime
 

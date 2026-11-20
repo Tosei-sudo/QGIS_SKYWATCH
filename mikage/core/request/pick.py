@@ -23,8 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
-from ..plan.satellites import platform_key
-from ..plan.tree import Listed
+from ..plan.api import platform_key
+from ..plan.api import Listed
 from .route import _named, _plain
 
 

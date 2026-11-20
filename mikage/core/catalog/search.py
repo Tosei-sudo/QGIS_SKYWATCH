@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, UnreachableError
-from ..plan.output import natural_key
+from ..plan.api import natural_key
 from ..time_query import text_sample
 from ..util import js_string, time_of
 from .config import CatalogConfig

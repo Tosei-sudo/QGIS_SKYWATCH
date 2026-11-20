@@ -19,10 +19,10 @@ from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsRectangle, QgsWkbTypes,
 )
 
-from ..core.ai.review import is_rejection
-from ..core.ai.train.labels import class_of, footprint, kind_path, object_size
-from ..core.ai.train.trainer import Window
-from ..core.obs.taxonomy import Taxon, path_of, within
+from ..core.ai.api import is_rejection
+from ..core.ai.api import class_of, footprint, kind_path, object_size
+from ..core.ai.api import Window
+from ..core.obs.api import Taxon, path_of, within
 from .ai_io import Grid
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")

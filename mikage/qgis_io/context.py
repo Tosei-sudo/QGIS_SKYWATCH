@@ -16,12 +16,12 @@ from ..core.config import PluginConfig, load_jsonc, parse_config, parse_config_t
 from ..core.esri import EsriClient, LayerInfos
 from ..core.gp import service_root as gp_service_root
 from ..core.gpkg import GeoPackage, open_local
-from ..core.obs import place_cache
-from ..core.obs.satellites import SatelliteChoices, load_satellite_choices
+from ..core.obs.api import place_cache
+from ..core.obs.api import SatelliteChoices, load_satellite_choices
 from ..core.offline import OfflineWork
-from ..core.plan.weather import DEFAULT_CLOUD_FORECAST
-from ..core.plan.names import NO_NAMES, SatelliteNames, load_satellite_names
-from ..core.plan.outages import Outage, load_outages
+from ..core.plan.api import DEFAULT_CLOUD_FORECAST
+from ..core.plan.api import NO_NAMES, SatelliteNames, load_satellite_names
+from ..core.plan.api import Outage, load_outages
 from ..core.edit_stamp import set_tracking
 from ..core.time_zone import set_rules
 from . import settings

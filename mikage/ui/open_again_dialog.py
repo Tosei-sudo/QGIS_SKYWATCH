@@ -19,7 +19,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.opened import OpenedImage
+from ..core.catalog.api import OpenedImage
 from .docks import plain_label
 from .fit import fit_text
 

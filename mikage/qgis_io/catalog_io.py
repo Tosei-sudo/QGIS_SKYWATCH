@@ -36,12 +36,12 @@ from qgis.core import (
 )
 
 from ..core import audit
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.images import FolderImages, find_images, patterns_for
-from ..core.catalog.opened import OpenedImage, OpenedImages
-from ..core.catalog.paths import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
-from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor_view_of
-from ..core.catalog.watch import areas_of, areas_of_shape, layer_origin
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import FolderImages, find_images, patterns_for
+from ..core.catalog.api import OpenedImage, OpenedImages
+from ..core.catalog.api import PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
+from ..core.catalog.api import CatalogRecord, catalog_info, record_of, sensor_view_of
+from ..core.catalog.api import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer

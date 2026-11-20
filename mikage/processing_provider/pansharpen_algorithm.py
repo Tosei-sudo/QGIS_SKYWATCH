@@ -17,7 +17,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.enhance.pansharpen import METHODS
+from ..core.enhance.api import METHODS
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io.pansharpen_io import RESAMPLING, PanSharpenError, pan_sharpen_files
 

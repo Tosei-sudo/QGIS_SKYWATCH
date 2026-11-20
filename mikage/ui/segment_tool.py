@@ -29,9 +29,9 @@ from qgis.PyQt.QtCore import QDateTime, QObject, Qt, QVariant
 from qgis.PyQt.QtGui import QColor, QImage
 from qgis.PyQt.QtWidgets import QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from ..core.ai.mask_outline import mask_outline, ring_area
-from ..core.ai.model_config import SamModelConfig
-from ..core.ai.sam import SAM_MEAN, SAM_STD, SamPoint, part_at, sam_hwc, sam_mask, sam_prompt, sam_scale, sam_tensor
+from ..core.ai.api import mask_outline, ring_area
+from ..core.ai.api import SamModelConfig
+from ..core.ai.api import SAM_MEAN, SAM_STD, SamPoint, part_at, sam_hwc, sam_mask, sam_prompt, sam_scale, sam_tensor
 from ..processing_provider.detect_algorithm import image_info, outline_symbol, source_fields
 from ..qgis_io.ai_io import image_rgba
 from ..qgis_io.ai_transfer_io import mark_origin

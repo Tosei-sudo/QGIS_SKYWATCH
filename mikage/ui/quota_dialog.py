@@ -27,8 +27,8 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.quota import (
     MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage, read_quota_data,
 )
-from ..core.request.shot_view import _time
-from ..core.request.store import RequestStoreConfig, update_shots
+from ..core.request.api import _time
+from ..core.request.api import RequestStoreConfig, update_shots
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .fit import fit_text

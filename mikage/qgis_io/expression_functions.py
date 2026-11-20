@@ -29,9 +29,9 @@ from typing import Any, Callable, Optional
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsExpression, QgsGeometry, QgsProject, qgsfunction
 from qgis.PyQt.QtCore import QDateTime, QObject, Qt, QTimer, pyqtSignal
 
-from ..core.obs import place_cache
-from ..core.obs.flows import living
-from ..core.obs.taxonomy import path_of, within
+from ..core.obs.api import place_cache
+from ..core.obs.api import living
+from ..core.obs.api import path_of, within
 
 GROUP = "MIKAGE"
 

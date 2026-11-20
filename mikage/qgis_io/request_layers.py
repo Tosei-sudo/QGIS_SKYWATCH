@@ -10,9 +10,9 @@ from typing import Sequence
 from qgis.core import QgsFeature, QgsField, QgsFields, QgsVectorLayer
 from qgis.PyQt.QtCore import QDate, QDateTime, QVariant
 
-from ..core.request.model import ImagingRequest, square_rings
-from ..core.request.rows import NUMBERS, WRITTEN, row_of
-from ..core.request.store import DEFAULT_REQUEST_FIELDS
+from ..core.request.api import ImagingRequest, square_rings
+from ..core.request.api import NUMBERS, WRITTEN, row_of
+from ..core.request.api import DEFAULT_REQUEST_FIELDS
 from .geometry import rings_geometry, shape_of, shape_rings, to_wgs84
 
 

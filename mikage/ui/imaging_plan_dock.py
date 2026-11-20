@@ -30,26 +30,26 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.plan.access import Opportunity, PlanOptions, PlanResult, PlanTarget, plan_access
-from ..core.plan.catalogs import load_satellites, load_sensor_modes
-from ..core.plan.cover import cover_plan
-from ..core.plan.modes import sample_sensor_modes, with_modes
-from ..core.plan.output import (
+from ..core.plan.api import Opportunity, PlanOptions, PlanResult, PlanTarget, plan_access
+from ..core.plan.api import load_satellites, load_sensor_modes
+from ..core.plan.api import cover_plan
+from ..core.plan.api import sample_sensor_modes, with_modes
+from ..core.plan.api import (
     NO_OPPORTUNITY, cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, local_text, mode_facts,
     natural_key, percent, plan_csv, plan_features, side_text, sorted_ops, summary_all, summary_cover,
 )
-from ..core.plan.moving import MAX_HORIZON, MAX_SHIPS, ShipState, plan_ships
-from ..core.plan.outages import attach, leave_out
-from ..core.plan.pairs import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs
-from ..core.plan.remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
-from ..core.plan.revisit import (
+from ..core.plan.api import MAX_HORIZON, MAX_SHIPS, ShipState, plan_ships
+from ..core.plan.api import attach, leave_out
+from ..core.plan.api import RepeatOptions, StereoOptions, repeat_pairs, stereo_pairs
+from ..core.plan.api import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
+from ..core.plan.api import (
     box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_csv, revisit_layer, revisit_stats,
 )
-from ..core.plan.satellites import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites, satellite_label, satellites_from_text
-from ..core.plan.scene import pass_shapes
-from ..core.plan.scene import shift_scene, track_place
-from ..core.plan.targets import MAX_TARGETS, name_of, priority_of, target_of
-from ..core.plan.weather import apply_clouds, fetch_clouds, places_for
+from ..core.plan.api import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites, satellite_label, satellites_from_text
+from ..core.plan.api import pass_shapes
+from ..core.plan.api import shift_scene, track_place
+from ..core.plan.api import MAX_TARGETS, name_of, priority_of, target_of
+from ..core.plan.api import apply_clouds, fetch_clouds, places_for
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.geometry import WGS84, from_wgs84, shape_of, to_wgs84

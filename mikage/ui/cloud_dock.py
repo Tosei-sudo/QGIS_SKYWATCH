@@ -21,8 +21,8 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.cloud_cover import map_grid
-from ..core.plan.weather import FORECAST_DAYS, PAST_DAYS, fetch_clouds
-from ..core.plan.weather_file import forecast_file
+from ..core.plan.api import FORECAST_DAYS, PAST_DAYS, fetch_clouds
+from ..core.plan.api import forecast_file
 from ..qgis_io import settings
 from ..qgis_io.cloud_layer import PROPERTY, STYLE_LABELS, CloudFile, cloud_file, open_layer, service_file_path, show_band, write_service_file
 from ..qgis_io.context import PluginContext

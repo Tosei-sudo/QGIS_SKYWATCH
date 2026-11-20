@@ -32,9 +32,9 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from ..core.request.chances import FORM_DAYS, form_span, form_text
-from ..core.request.passes import find_passes
-from ..core.request.pick import Picked, checks_of, picked, summary, unknown
+from ..core.request.api import FORM_DAYS, form_span, form_text
+from ..core.request.api import find_passes
+from ..core.request.api import Picked, checks_of, picked, summary, unknown
 from ..core.request.model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest, bbox_of,
     day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,

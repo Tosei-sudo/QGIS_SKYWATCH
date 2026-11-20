@@ -23,7 +23,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from ..core.obs import place_cache
+from ..core.obs.api import place_cache
 from ..qgis_io import overviews_io, raster_speed, settings
 from ..qgis_io.context import PluginContext
 from . import last_inputs

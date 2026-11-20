@@ -19,8 +19,8 @@ from qgis.PyQt.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal
 from qgis.PyQt.QtWidgets import QAction, QMenu, QMessageBox, QToolButton, QWidget
 
 from ..core import audit
-from ..core.obs.drafts import OutboxDrafts
-from ..core.obs.stores import LOCAL_LABEL
+from ..core.obs.api import OutboxDrafts
+from ..core.obs.api import LOCAL_LABEL
 from ..core.offline import KINDS, OfflineWork, UploadReport
 from ..core.offline_upload import upload_all
 from ..qgis_io import settings

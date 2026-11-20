@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from qgis.core import QgsFeature, QgsFields, QgsGeometry, QgsPointXY, QgsVectorLayer, QgsVectorLayerTemporalProperties
 
-from ..core.obs.output import ObservationLayer
+from ..core.obs.api import ObservationLayer
 from .geometry import line_of, polygon_of
 from .plan_layer import make_field, qdatetime
 

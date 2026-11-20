@@ -27,8 +27,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
-from ..plan.access import look_at
-from ..plan.satellites import SatelliteSpec
+from ..plan.api import look_at
+from ..plan.api import SatelliteSpec
 from .model import ImagingRequest, occurs_on
 
 #: How far back (days) a 定点 request's last image is looked for.

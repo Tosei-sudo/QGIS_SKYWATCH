@@ -7,9 +7,9 @@ from qgis.PyQt.QtCore import QEvent, QRectF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont, QPainter, QPalette, QPen
 from qgis.PyQt.QtWidgets import QSizePolicy, QToolTip, QWidget
 
-from ..core.plan.access import Opportunity
-from ..core.plan.satellites import SatelliteSpec
-from ..core.plan.timeline import HEAD, ROW, Layout, bar_at, layout
+from ..core.plan.api import Opportunity
+from ..core.plan.api import SatelliteSpec
+from ..core.plan.api import HEAD, ROW, Layout, bar_at, layout
 
 
 class PlanTimeline(QWidget):

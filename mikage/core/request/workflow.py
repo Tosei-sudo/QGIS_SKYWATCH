@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
-from ..plan.satellites import SatelliteSpec
-from ..plan.weather import CloudSeries
+from ..plan.api import SatelliteSpec
+from ..plan.api import CloudSeries
 from .daily import HELD, TAKEN, Candidate, allocate, asks_weather, carries_over, gather, occurrence_key
 from .export import Written, convert_priority, row_rings
 from .follow import missed_ids

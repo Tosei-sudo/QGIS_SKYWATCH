@@ -25,9 +25,9 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Optional, Sequence
 
 from .. import time_zone
-from ..catalog import CatalogConfig
+from ..catalog.api import CatalogConfig
 from ..esri import EsriClient, EsriError, quote
-from ..plan.names import NO_NAMES, SatelliteNames
+from ..plan.api import NO_NAMES, SatelliteNames
 from ..time_query import between_condition, text_sample
 from .follow import Finding, _moment, fitting_images, image_id_of
 from .model import JST, ImagingRequest, day_bounds

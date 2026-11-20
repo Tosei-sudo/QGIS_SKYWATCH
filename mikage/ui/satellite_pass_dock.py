@@ -23,9 +23,9 @@ from qgis.PyQt.QtWidgets import (
     QPlainTextEdit, QPushButton, QTableView, QWidget,
 )
 
-from ..core.plan.output import PlanLayer, local_text
-from ..core.plan.satellites import BUILT_IN_DEFAULTS, platform_key, satellite_label, satellites_from_text
-from ..core.plan.track import (
+from ..core.plan.api import PlanLayer, local_text
+from ..core.plan.api import BUILT_IN_DEFAULTS, platform_key, satellite_label, satellites_from_text
+from ..core.plan.api import (
     MAX_DAYS, TRACK_COLORS, sample_at, satellite_track, track_layers, track_rows, track_shapes, track_ticks,
 )
 from ..qgis_io.geometry import WGS84, from_wgs84, line_of, polygon_of

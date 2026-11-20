@@ -10,9 +10,9 @@ from typing import Any, Optional, Sequence
 
 from qgis.PyQt.QtCore import QAbstractTableModel, QModelIndex, Qt
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.search import CatalogRecord, Column, cell_text, list_columns, place_text, sort_records
-from ..core.obs.assignments import work_text
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import CatalogRecord, Column, cell_text, list_columns, place_text, sort_records
+from ..core.obs.api import work_text
 
 PLACE = Column("place", "場所")
 OVERLAP = Column("overlap", "重なり")

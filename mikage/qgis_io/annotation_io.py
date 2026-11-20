@@ -18,9 +18,9 @@ from typing import Callable, Optional
 import numpy as np
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsUnitTypes
 
-from ..core.ai.annotation_boxes import Shape, mask_shape, threshold_mask, window_at, window_side
-from ..core.ai.model_config import SamModelConfig
-from ..core.ai.sam import SamPoint, sam_mask, sam_prompt, sam_tensor, sam_hwc, SAM_MEAN, SAM_STD
+from ..core.ai.api import Shape, mask_shape, threshold_mask, window_at, window_side
+from ..core.ai.api import SamModelConfig
+from ..core.ai.api import SamPoint, sam_mask, sam_prompt, sam_tensor, sam_hwc, SAM_MEAN, SAM_STD
 from .ai_io import Grid, render_rgba
 from .ai_runtime import LoadedModel, local_model, model_from, name_of
 

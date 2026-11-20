@@ -20,7 +20,7 @@ from typing import Callable, Optional
 import numpy as np
 from osgeo import gdal, osr
 
-from ..core.enhance.pansharpen import PanSharpenModel, fit_model, pan_sharpen, valid_pixels
+from ..core.enhance.api import PanSharpenModel, fit_model, pan_sharpen, valid_pixels
 
 #: Output pixels made at once, and the fit on the whole overlap up to this many pixels.
 BLOCK = 2048

@@ -15,7 +15,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QDate, QDateTime
 
-from ..core.ai.transfer import (
+from ..core.ai.api import (
     BATCH, DetectionOutput, Plan, Target, action_of, bearing_text, signature_of, status_of, transfer_attributes,
 )
 from ..core.esri import EsriClient, EsriError

@@ -34,22 +34,22 @@ except ImportError:  # Qt 5
     from qgis.PyQt.QtWidgets import QShortcut
 
 from ..core.obs.api import ObservationApi
-from ..core.obs.areas import CheckedArea, area_label, box_ring
-from ..core.obs.book import FormValues, ObservationBook, ObservedImage
-from ..core.obs.drafts import OutboxDrafts
-from ..core.obs.csv import csv_file_name, local_time, observations_csv
-from ..core.obs.flows import (
+from ..core.obs.api import CheckedArea, area_label, box_ring
+from ..core.obs.api import FormValues, ObservationBook, ObservedImage
+from ..core.obs.api import OutboxDrafts
+from ..core.obs.api import csv_file_name, local_time, observations_csv
+from ..core.obs.api import (
     CarryOver, MatchCandidate, ObjectFlow, ends_of, flow_of, heading_text, now_ms, outline_of, side_points,
     time_key, two_point,
 )
-from ..core.obs.geo import get_distance, js_round, km_text
-from ..core.obs.mine import is_mine, my_names
-from ..core.obs.model import UNSEEN, Observation, state_text, unseen_label
+from ..core.obs.api import get_distance, js_round, km_text
+from ..core.obs.api import is_mine, my_names
+from ..core.obs.api import UNSEEN, Observation, state_text, unseen_label
 from ..core.obs.satellites import ORIGINS as SATELLITE_ORIGINS
-from ..core.obs.scope import RecordQuery
-from ..core.obs.output import observation_layers
-from ..core.obs.setup import StoreSet, store_sets
-from ..core.obs.taxonomy import (
+from ..core.obs.api import RecordQuery
+from ..core.obs.api import observation_layers
+from ..core.obs.api import StoreSet, store_sets
+from ..core.obs.api import (
     children_of, class_by_name, find, kind_of, level_name, member_index, name_label_of, nest, path_of, spec_text, specs_at, within,
 )
 from ..core import edit_stamp

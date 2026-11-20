@@ -17,11 +17,11 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
-from ..core.plan.moving import (
+from ..core.plan.api import (
     DEFAULT_UNCERTAINTY, MAX_HORIZON, MAX_SHIPS, SPEED_UNITS, Report, ShipState, UncertaintyModel, guess_speed_unit,
     guess_target_fields, places_layers, targets_of,
 )
-from ..core.plan.output import local_text
+from ..core.plan.api import local_text
 from ..qgis_io.geometry import to_wgs84
 from ..qgis_io.plan_layer import memory_layer
 from .last_inputs import InputMemory

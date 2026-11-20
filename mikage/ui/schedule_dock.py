@@ -40,20 +40,20 @@ from qgis.PyQt.QtWidgets import (
     QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QTableView,
 )
 
-from ..core.request.adoption import (
+from ..core.request.api import (
     NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, read_window, unrequested_rows,
 )
 from ..core.esri import EsriError
-from ..core.plan.names import plain
-from ..core.plan.outages import handed_hit
-from ..core.request.groups import read_groups
-from ..core.request.model import JST, jst_day
+from ..core.plan.api import plain
+from ..core.plan.api import handed_hit
+from ..core.request.api import read_groups
+from ..core.request.api import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
-from ..core.request.store import (
+from ..core.request.api import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, add_history,
     day_counts, delete_history_rows, history_has, load_day, load_requests, load_shots, load_system_rows, state_of, update_history,
 )
-from ..core.request.shot_view import companions, shot_text, shot_tip
+from ..core.request.api import companions, shot_text, shot_tip
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task

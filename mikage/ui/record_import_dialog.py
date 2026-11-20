@@ -15,7 +15,7 @@ from qgis.PyQt.QtWidgets import (
     QRadioButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core.obs import record_import as ri
+from ..core.obs.api import record_import as ri
 from ..qgis_io import record_import_io
 from .docks import ask_no, plain_label
 from .fit import fit_text

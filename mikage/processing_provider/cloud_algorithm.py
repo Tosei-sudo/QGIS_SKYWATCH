@@ -32,8 +32,8 @@ from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, Qt, QTime, QTim
 from qgis.PyQt.QtGui import QIcon
 
 from ..core.cloud_cover import INTERPOLATE, NEAREST, cells_in, has_zone, mean_cover
-from ..core.obs.image_time import parse_time
-from ..core.plan.weather import FORECAST_DAYS, PAST_DAYS, CloudForecastConfig, fetch_clouds
+from ..core.obs.api import parse_time
+from ..core.plan.api import FORECAST_DAYS, PAST_DAYS, CloudForecastConfig, fetch_clouds
 
 HERE = os.path.dirname(os.path.dirname(__file__))
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")

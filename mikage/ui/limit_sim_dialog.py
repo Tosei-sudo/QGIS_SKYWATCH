@@ -21,17 +21,17 @@ from qgis.PyQt.QtWidgets import (
     QTableWidgetItem, QTabWidget, QVBoxLayout,
 )
 
-from ..core.plan.outages import attach
-from ..core.plan.weather import fetch_clouds
-from ..core.request.chances import chances_of, wanted
-from ..core.request.follow import missed_ids
-from ..core.request.model import CATEGORIES, priority_text
-from ..core.request.quota import QuotaData, read_quota_data
-from ..core.request.simulate import (
+from ..core.plan.api import attach
+from ..core.plan.api import fetch_clouds
+from ..core.request.api import chances_of, wanted
+from ..core.request.api import missed_ids
+from ..core.request.api import CATEGORIES, priority_text
+from ..core.request.api import QuotaData, read_quota_data
+from ..core.request.api import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
-from ..core.request.store import history_where, load_history, load_requests
-from ..core.request.workflow import clouds_of, forecast_places, orbiting, radar_of
+from ..core.request.api import history_where, load_history, load_requests
+from ..core.request.api import clouds_of, forecast_places, orbiting, radar_of
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
 from ..qgis_io.tasks import run_task

@@ -21,13 +21,13 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import edit_stamp
-from ..core.request.bulk import RequestChange, apply_change
-from ..core.request.from_plan import requests_of_plan
-from ..core.request.groups import first_group, offered, read_groups
-from ..core.request.last import remembered, with_remembered
+from ..core.request.api import RequestChange, apply_change
+from ..core.request.api import requests_of_plan
+from ..core.request.api import first_group, offered, read_groups
+from ..core.request.api import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
-from ..core.request.rows import code_text, field_roles, request_of_row, row_problems
-from ..core.request.store import (RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, save_requests,
+from ..core.request.api import code_text, field_roles, request_of_row, row_problems
+from ..core.request.api import (RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, save_requests,
                                   waiting_ids)
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer

@@ -30,6 +30,40 @@ from .model import Observation
 from .report import ReportOptions
 from .scope import RecordQuery
 from .taxonomy import kind_of, path_of, within
+# What the rest of the plugin imports of 観測記録 (its door, docs/architecture.md R2).
+from . import place_cache, record_import
+from .alert_mail import build_mail
+from .alerts import AlertSettings, load_geofences, load_named_areas, LogRow, Moment, poll_log
+from .areas import area_label
+from .assignments import Assignment, progress_of, progress_text, same_person, STATUSES, update, with_status, work_text
+from .book import FormValues, joined_image, ObservedImage
+from .csv import csv_file_name, local_time, observations_csv
+from .drafts import KIND, OutboxDrafts
+from .export import (
+    BASES, ExportContext, ExportFilter, ExportSettings, FENCE_SOURCES, items_of, PLACE_SOURCES, render, select_records,
+    settings_for,
+)
+from .flows import CarryOver, ends_of, flow_of, flows, heading_text, MatchCandidate, now_ms, outline_of, side_points, two_point
+from .geo import bearing, get_distance, km_text
+from .glossary import Glossary, load_glossary, NO_GLOSSARY, Suggestion, Variant
+from .image_time import image_time
+from .mine import is_mine, my_names
+from .model import ListedImage, state_text, UNSEEN, unseen_label
+from .offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
+from .output import observation_layers, ObservationLayer
+from .place_cache import areas_at, points_of
+from .record_import import SourceRow
+from .report import report_file_name, ReportSelection
+from .satellites import clean, load_satellite_choices, NO_CHOICES, satellite_in_metadata, SatelliteChoices
+from .scope import merged
+from .setup import LOCAL_LABEL, store_sets, StoreSet
+from .similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
+from .stamps import default_count, entry_of, Layout, MOST, Sample, sample_of, sample_text, StampEntry
+from .stores import is_local_photo, LocalObservationStore, LocalPhotoStore, photo_url
+from .taxonomy import (
+    activities_at, children_of, class_by_name, find, level_name, member_index, name_label_of, nest, photos_at, spec_text,
+    SpecField, specs_at, Taxon,
+)
 
 
 def _iso(t: Optional[float]) -> Optional[str]:
@@ -349,3 +383,24 @@ class ObservationApi:
             with open(save, "w", encoding="utf-8") as f:
                 f.write(html)
         return {"html": html, "things": len(selection.flows), "records": len(selection.records), **({"path": save} if save else {})}
+
+
+__all__ = [
+    "activities_at", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",
+    "bearing", "box_ring", "build_mail", "Cancelled", "CarryOver", "CheckedArea", "children_of", "class_by_name", "clean",
+    "csv_file_name", "default_count", "ends_of", "entry_of", "ExportContext", "ExportFilter", "ExportSettings",
+    "FENCE_SOURCES", "find", "find_similar", "flow_of", "flow_out", "flows", "FormValues", "get_distance", "Glossary",
+    "heading_text", "image_time", "is_local_photo", "is_mine", "items_of", "joined_image", "js_round", "KIND", "kind_of",
+    "km_text", "Layout", "level_name", "ListedImage", "living", "load_geofences", "load_glossary", "load_named_areas",
+    "load_satellite_choices", "LOCAL_LABEL", "local_time", "LocalObservationStore", "LocalPhotoStore", "LogRow",
+    "MatchCandidate", "member_index", "merged", "Moment", "MOST", "my_names", "name_label_of", "nest", "NO_CHOICES",
+    "NO_GLOSSARY", "now_ms", "ObjectFlow", "Observation", "observation_layers", "ObservationApi", "ObservationBook",
+    "ObservationLayer", "observations_csv", "ObservedImage", "OfflineAreaStore", "OfflineObservationStore", "OutboxDrafts",
+    "outline_of", "parse_time", "path_of", "photo_url", "photos_at", "place_cache", "PLACE_SOURCES", "points_of", "poll_log",
+    "progress_of", "progress_text", "record_import", "record_out", "RecordQuery", "render", "report_file_name",
+    "ReportOptions", "ReportSelection", "ring_of", "same_person", "Sample", "sample_of", "sample_text",
+    "satellite_in_metadata", "SatelliteChoices", "select_records", "settings_for", "side_points", "SourceRow", "spec_text",
+    "SpecField", "specs_at", "StampEntry", "state_text", "STATUSES", "store_sets", "StoreSet", "Suggestion", "Taxon",
+    "time_key", "two_point", "UNSEEN", "unseen_label", "update", "upload_drafts", "Variant", "with_status", "within",
+    "work_text",
+]

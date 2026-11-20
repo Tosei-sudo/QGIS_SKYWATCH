@@ -30,12 +30,12 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.ai.annotation_boxes import (
+from ..core.ai.api import (
     UNKNOWN_MODES, WIDTH_MODES, Box, ConvertError, Rules, convert, dota_row, is_point_box, parse_lengths,
 )
-from ..core.ai.model_config import SamModelConfig
-from ..core.ai.train.dataset import Dataset, DatasetError, Group, Item, Reader, load_dataset, missing_files, save_dataset
-from ..core.ai.train.labels import METRES_PER_DEGREE
+from ..core.ai.api import SamModelConfig
+from ..core.ai.api import Dataset, DatasetError, Group, Item, Reader, load_dataset, missing_files, save_dataset
+from ..core.ai.api import METRES_PER_DEGREE
 from ..qgis_io.ai_io import Grid
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.annotation_io import WGS84, Outliner, SamOutliner, ThresholdOutliner, load_sam, metres_per_pixel

@@ -13,7 +13,7 @@ from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsRubberBand, QgsVertexMar
 from qgis.PyQt.QtCore import QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QFont, QFontMetricsF, QPainterPath, QPen
 
-from ..core.plan.output import split_antimeridian
+from ..core.plan.api import split_antimeridian
 from ..qgis_io.geometry import WGS84, from_wgs84, line_of, polygon_of, rings_geometry
 
 STYLES = {

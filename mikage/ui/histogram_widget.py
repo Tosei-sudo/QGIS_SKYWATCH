@@ -13,7 +13,7 @@ from qgis.PyQt.QtCore import QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QPainter
 from qgis.PyQt.QtWidgets import QHeaderView, QSizePolicy, QTableWidget, QTableWidgetItem, QWidget
 
-from ..core.enhance.histogram import bar_heights, channel_stats
+from ..core.enhance.api import bar_heights, channel_stats
 
 COLORS = [QColor("#e5484d"), QColor("#30a46c"), QColor("#3e7bfa")]
 GRAY = QColor("#9aa0a6")

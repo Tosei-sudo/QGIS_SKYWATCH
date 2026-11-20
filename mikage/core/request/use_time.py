@@ -40,8 +40,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Optional, Sequence
 
-from ..plan.names import plain
-from ..plan.satellites import SatelliteSpec, platform_key
+from ..plan.api import plain
+from ..plan.api import SatelliteSpec, platform_key
 from .model import JST
 from .shots import Placement, Shot
 

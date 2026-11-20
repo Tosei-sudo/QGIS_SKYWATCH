@@ -43,16 +43,16 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.query import time_text
-from ..core.catalog.search import cell_text, list_columns, record_of
-from ..core.catalog.thumbnail import (
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import time_text
+from ..core.catalog.api import cell_text, list_columns, record_of
+from ..core.catalog.api import (
     DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, contents_lines, contents_of, footprint_of, thumbnail_address,
 )
-from ..core.catalog.watch import WatchNotice
+from ..core.catalog.api import WatchNotice
 from ..core.interests import section_lines
 from ..qgis_io import settings
-from ..core.catalog.paths import PathError
+from ..core.catalog.api import PathError
 from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
 from ..qgis_io.thumbnails import CardWork, cached, fetch, prune
 from .image_files_dialog import file_name

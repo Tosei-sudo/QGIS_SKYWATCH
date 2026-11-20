@@ -20,12 +20,12 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..core.obs.areas import CheckedArea, area_label
-from ..core.obs.book import ObservationBook
-from ..core.obs.flows import flows, now_ms
-from ..core.obs.model import Observation
-from ..core.obs.report import ReportOptions, ReportSelection, report_file_name
-from ..core.obs.taxonomy import kind_of, path_of
+from ..core.obs.api import CheckedArea, area_label
+from ..core.obs.api import ObservationBook
+from ..core.obs.api import flows, now_ms
+from ..core.obs.api import Observation
+from ..core.obs.api import ReportOptions, ReportSelection, report_file_name
+from ..core.obs.api import kind_of, path_of
 from ..qgis_io.geometry import from_wgs84
 from .docks import save_text
 from .fit import fit_text

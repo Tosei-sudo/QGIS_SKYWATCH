@@ -31,9 +31,9 @@ from ..core.obs.alerts import (
     load_rules, manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, uses_source, write_file,
     write_log,
 )
-from ..core.obs.flows import living
-from ..core.obs.place_cache import areas_at, points_of
-from ..core.obs.scope import RecordQuery
+from ..core.obs.api import living
+from ..core.obs.api import areas_at, points_of
+from ..core.obs.api import RecordQuery
 from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip

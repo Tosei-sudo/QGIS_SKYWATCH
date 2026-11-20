@@ -30,11 +30,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable, Optional, Sequence
 
-from ..plan.access import Opportunity, PlanOptions, PlanTarget, plan_access, satrec_of
-from ..plan.outages import Outage, blocking
-from ..plan.orbit import Orbit, ecef_of, unit
-from ..plan.satellites import SatelliteSpec
-from ..plan.targets import MAX_POINTS, spread_out
+from ..plan.api import Opportunity, PlanOptions, PlanTarget, plan_access, satrec_of
+from ..plan.api import Outage, blocking
+from ..plan.api import Orbit, ecef_of, unit
+from ..plan.api import SatelliteSpec
+from ..plan.api import MAX_POINTS, spread_out
 from .model import ImagingRequest, bbox_of, center_of, day_bounds, in_rings
 from .route import why_not
 
