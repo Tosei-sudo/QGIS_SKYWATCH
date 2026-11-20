@@ -32,6 +32,12 @@ FORECAST = "https://wx.example/v1/forecast"
 DAY = 86400000
 
 
+def at_epoch(monkeypatch) -> None:
+    """The imaging plan's clock at EPOCH (the dock and its parts that read it: ui/plan_dock)."""
+    for module in ("mikage.ui.imaging_plan_dock", "mikage.ui.plan_dock.clouds", "mikage.ui.plan_dock.reminders"):
+        monkeypatch.setattr(f"{module}._now_ms", lambda: EPOCH)
+
+
 @pytest.fixture
 def plugin(tmp_path, monkeypatch):
     QgsSettings().remove("mikage")
@@ -90,8 +96,8 @@ def test_cloud_forecast_pairs_and_revisit_map(plugin, monkeypatch):
         one = {"hourly": {"time": hours, "cloud_cover": [(h * 7) % 100 for h in range(len(hours))]}}
         return json.dumps(one if n == 1 else [one] * n).encode()
 
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock.get_bytes", fake_get)
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
+    monkeypatch.setattr("mikage.ui.plan_dock.clouds.get_bytes", fake_get)
+    at_epoch(monkeypatch)
     dock = planned(p, [("東京", 139.7, 35.68)])
     dock.more.setCollapsed(False)
     assert dock.cloud_row.isVisibleTo(dock) and dock.cloud.text() == "雲量予報（社内予報）"
@@ -150,7 +156,7 @@ def test_cloud_forecast_pairs_and_revisit_map(plugin, monkeypatch):
 
 def test_reminders_and_calendar_file(plugin, monkeypatch):
     p, iface, tmp, fake = plugin
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
+    at_epoch(monkeypatch)
     dock = planned(p, [("東京", 139.7, 35.68)], 3)
     assert dock.remind_button.isEnabled()
     dock.remind_button.setChecked(True)
@@ -187,7 +193,7 @@ def test_reminders_and_calendar_file(plugin, monkeypatch):
 def test_opportunities_become_temporary_requests(plugin, monkeypatch):
     # 撮像計画と撮像依頼は同じ業務 (tsudo, 2026-11-09): what is to be taken goes to the ledger as 臨時 requests.
     p, iface, tmp, fake = plugin
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
+    at_epoch(monkeypatch)
     dock = planned(p, [("東京", 139.7, 35.68), ("大阪", 135.5, 34.7)], 3)
     assert dock.request_button.isVisibleTo(dock) and dock.request_button.isEnabled()
     assert not hasattr(dock, "store_button") and "SatObsSavedPlans" not in p.docks
@@ -249,8 +255,8 @@ def test_cloud_forecast_from_a_file(plugin, monkeypatch):
         band.WriteArray(np.full((8, 8), (h * 7) % 100, dtype=np.uint8))
         band.SetMetadata({"GRIB_VALID_TIME": str(int(EPOCH / 1000) + h * 3600)})
     ds = None
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock.get_bytes", lambda *a, **k: pytest.fail("no service asked"))
-    monkeypatch.setattr("mikage.ui.imaging_plan_dock._now_ms", lambda: EPOCH)
+    monkeypatch.setattr("mikage.ui.plan_dock.clouds.get_bytes", lambda *a, **k: pytest.fail("no service asked"))
+    at_epoch(monkeypatch)
     config = json.loads((tmp / "config.json").read_text(encoding="utf-8"))
     config["cloudForecast"] = {"folder": str(folder), "label": "GFS 雲量"}
     (tmp / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
