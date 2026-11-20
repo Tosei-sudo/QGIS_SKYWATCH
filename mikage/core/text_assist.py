@@ -49,8 +49,9 @@ from .util import is_number, is_record
 NOTE_PROMPT = (
     "あなたは衛星画像の判読記録の備考を整える係です。"
     "与えられた備考を、意味を変えず、情報を足さず、短い判読記録の文体（体言止め。です・ます調にしない）に書き直してください。"
+    "備考にないこと（様子・理由・推測）は書き足さないでください。"
     "誤字・脱字を直し、数字・固有名詞・記号はそのまま残してください。"
-    "「使う語」があれば、その表記を使ってください。"
+    "「表記」があれば、備考にある語はその表記で書いてください（備考にない語は足さない）。"
     "出力は書き直した備考の 1 行だけにしてください。"
 )
 #: Examples shown to the model before the 備考 (input → what it should write); the task's `examples` replace them.
@@ -61,18 +62,20 @@ NOTE_EXAMPLES: tuple[tuple[str, str], ...] = (
 #: The instructions for 申し送りの下書き (the task's `prompt` replaces them).
 HANDOVER_PROMPT = (
     "あなたは衛星画像の判読業務の引き継ぎを手伝います。"
-    "下の引き継ぎメモ（自動でまとめた一覧）を読み、次の担当者への申し送りを 2〜4 文で下書きしてください。"
-    "期限が近い撮像依頼、担当中で終わっていない画像、通報したものを先に書いてください。"
-    "メモにない事実や数字は書かないでください。箇条書きにせず、文章だけを出力してください。"
+    "下の引き継ぎメモ（自動でまとめた一覧）から、次の担当者への申し送りを 2〜4 文で書いてください。"
+    "書くのは、期限が近い撮像依頼、担当中で終わっていない画像と残っている作業、通報したもの、の順に 1 文ずつです（メモにないものは書かない）。"
+    "件数の一覧は繰り返さないでください。メモにない事実・数字・推測・助言（「〜してください」）は書かないでください。"
+    "宛名・あいさつ・結びの言葉や箇条書きの記号は使わず、申し送りの文章だけを出力してください。"
 )
 #: The instructions for 項目の提案 (core/text_tasks.py).
 FIELDS_PROMPT = (
     "あなたは衛星画像の判読記録の入力を手伝います。"
     "備考を読み、記録の項目に入れられる値を拾ってください。"
-    "種別・活動・確度は、示した候補の中から選んでください（合うものがなければ「なし」）。"
-    "長さ・幅・向きは、備考に書いてある数字だけを使ってください（なければ「なし」）。"
-    "モノは、備考に書いてある固有の名前（艦名・機番など）だけです（なければ「なし」）。"
-    "推測で値を作らないでください。出力は次の 7 行だけにしてください。\n"
+    "種別・活動・確度は、示した候補の中から候補の書き方のまま選んでください（合うものがなければ「なし」）。"
+    "確度は備考に「推定」「たぶん」「確実」などと書いてあるときだけです。"
+    "長さ・幅・向きは、備考に書いてある数字（長さ・幅は m、向きは度）だけを使ってください（なければ「なし」）。"
+    "モノは、備考に書いてある固有の名前（艦名・機番など）だけです。「補給艦」「戦闘機」のような種類の名前は「なし」です。"
+    "推測で値を作らないでください。値だけを書き、説明・理由・括弧書きは書かないでください。出力は次の 7 行だけにしてください。\n"
     "種別: \n活動: \n確度: \n長さ: \n幅: \n向き: \nモノ: "
 )
 #: The instructions for 言葉で探す.
@@ -82,7 +85,7 @@ SEARCH_PROMPT = (
     "期間は「日付の目安」の日付を使い、「YYYY-MM-DD 〜 YYYY-MM-DD」の形で書いてください（片方だけなら空けてよい）。"
     "地名・大分類・確度は、示した候補の中から選んでください。"
     "有無は「あり」（いた記録）「消失」（いなくなった記録）「不可」（雲などで見えなかった記録）のどれかです。"
-    "依頼にない条件は「なし」と書いてください。"
+    "依頼にない条件は「なし」と書いてください。値だけを書き、説明・理由・括弧書きは書かないでください。"
     "出力は次の 5 行だけにしてください。\n"
     "期間: \n地名: \n大分類: \n確度: \n有無: "
 )
@@ -91,13 +94,15 @@ SUMMARY_PROMPT = (
     "あなたは衛星画像の判読結果をまとめる係です。"
     "下の観測記録（1 行 1 件）を読み、何がどこにどれだけあり、何をしていたかを 3〜6 文の文章にまとめてください。"
     "多いもの・目立つ動きを先に書き、同じものはまとめてください。"
-    "記録にない事実や数字は書かないでください。箇条書きにせず、文章だけを出力してください。"
+    "記録にない事実や数字、推測・評価・意図の解釈は書かないでください（記録に書いてあることだけ）。"
+    "箇条書きにせず、まとめの文章だけを出力してください。"
 )
 #: The instructions for 英訳.
 TRANSLATE_PROMPT = (
     "You translate notes written by Japanese satellite image analysts into English for a report. "
     "Translate the note faithfully and concisely in the style of an analyst's note. "
-    "Keep numbers, names and symbols as they are, and add nothing. Output only the English translation on one line."
+    "Keep numbers, names and symbols as they are, and add nothing. Use the given terms for the words they name. "
+    "Write every word in English (no Japanese left). Output only the English translation on one line, without quotes."
 )
 #: The most a 備考 sent to the model may be (characters; longer ones are not tidied).
 NOTE_LIMIT = 400
@@ -333,7 +338,7 @@ def _note_input(note: str, kind: str = "", terms: Sequence[str] = ()) -> str:
     if kind.strip():
         lines.append(f"種別: {kind.strip()}")
     if terms:
-        lines.append("使う語: " + "、".join(terms))
+        lines.append("表記: " + "、".join(terms))
     lines.append(f"備考: {note.strip()}")
     return "\n".join(lines)
 
@@ -342,15 +347,15 @@ def note_terms(glossary, note: str, root: str = "", limit: int = TERMS_LIMIT) ->
     """
     The glossary's words named to the model with `note`: those whose other
     spellings are in it first (so it writes them as the glossary does), then
-    those it already uses, then the 大分類's own words, up to `limit`.
+    those it already uses, up to `limit`. Not the 大分類's other words: a
+    small model given 「航跡」 writes 「航跡あり」 into a 備考 that did not
+    say so (tried on sarashina2.2 1B and 3B, 2026-11-20).
     """
     if not glossary:
         return []
     out: list[str] = [v.term for v in glossary.variants_in(note, root)]
     folded = unicodedata.normalize("NFKC", note).lower()
     out += [t.text for t in glossary.terms if t.for_kind(root) and unicodedata.normalize("NFKC", t.text).lower() in folded]
-    if root:
-        out += [t.text for t in glossary._ordered(t for t in glossary.terms if root in t.kinds)]
     return list(dict.fromkeys(out))[:limit]
 
 
@@ -423,7 +428,8 @@ _QUOTES = (("「", "」"), ("『", "』"), ('"', '"'), ("“", "”"), ("'", "'"
 
 def _unquoted(text: str) -> str:
     for a, b in _QUOTES:
-        if len(text) > len(a) + len(b) and text.startswith(a) and text.endswith(b) and text.count(a) == 1 and text.count(b) == 1:
+        once = text.count(a) == 2 if a == b else text.count(a) == 1 and text.count(b) == 1
+        if len(text) > len(a) + len(b) and text.startswith(a) and text.endswith(b) and once:
             return text[len(a):-len(b)].strip()
     return text
 
@@ -436,16 +442,70 @@ def clean_note(raw: str) -> str:
     return re.sub(r"[ \t　]+", lambda m: " " if m[0].isascii() else m[0][0], line).strip()
 
 
+#: A line that only addresses or introduces (「引き継ぎ担当者様、」「申し送りは以下の通りです。」).
+_GREETING = re.compile(r"^(?:[^。]{0,24}(?<!模)(?:様|殿|各位|さんへ|様へ)[、,。]?|お疲れ様(?:です)?[。、]?"
+                       r"|.{0,60}(?:以下の(?:通り|とおり)|次の(?:通り|とおり)|をまとめ(?:ます|ました)).{0,6})$")
+#: A closing paragraph (「以上、…」「ご不明な点は…」).
+_CLOSING = re.compile(r"^以上[、。]|ご不明な点|お問い合わせ|お気軽に|よろしくお願い")
+
+
+_BULLET = re.compile(r"^\s*(?:[・•\-*]|[①-⑳]|\(?\d{1,2}[.)）、])\s*")
+
+
+def without_letter(text: str) -> str:
+    """`text` without a leading address or introduction line and without closing paragraphs (a small model writes a letter)."""
+    paragraphs = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    while paragraphs:
+        lines = paragraphs[0].split("\n")
+        while lines and _GREETING.match(lines[0].strip()):
+            lines.pop(0)
+        if lines:
+            paragraphs[0] = "\n".join(lines).strip()
+            break
+        paragraphs.pop(0)
+    while len(paragraphs) > 1 and _CLOSING.search(paragraphs[-1].strip()):
+        paragraphs.pop()
+    return "\n\n".join(paragraphs).strip()
+
+
 def clean_paragraph(raw: str) -> str:
-    """The model's 申し送り or まとめ: its text without a label, code fences or a heading, lines kept."""
+    """The model's 申し送り or まとめ: its text without a label, code fences, a heading, an address or a closing; lines kept."""
     text = re.sub(r"```\w*", "", raw.replace("\r\n", "\n"))
     lines = [line.rstrip() for line in text.split("\n")]
     while lines and (not lines[0].strip() or lines[0].lstrip().startswith("###")):
         lines.pop(0)
     if lines:
         lines[0] = _LABEL.sub("", lines[0])
-    text = "\n".join(lines).strip()
+    # A list written in spite of being asked not to: its marks taken off (its lines kept).
+    lines = [_BULLET.sub("", line) for line in lines]
+    text = without_letter("\n".join(lines))
     return re.sub(r"\n{3,}", "\n\n", text)
+
+
+_SENTENCES = re.compile(r"(\d+)\s*[〜~～ー-]\s*(\d+)\s*文")
+_SENTENCE_END = re.compile(r"[。！？]")
+
+
+def sentence_limit(prompt: str) -> Optional[int]:
+    """The most sentences an instruction asks for (「2〜4 文で」 → 4); None when it does not say."""
+    m = _SENTENCES.search(unicodedata.normalize("NFKC", prompt).replace("~", "〜"))
+    return int(m[2]) if m else None
+
+
+def sentences_done(most: Optional[int]) -> Optional[Callable[[str], bool]]:
+    """
+    Whether a paragraph has its `most` sentences (an address or
+    introduction not counted): the model stops there instead of going on
+    (a small model writes on until its token limit).
+    """
+    if not most:
+        return None
+
+    def done(text: str) -> bool:
+        body = without_letter(re.sub(r"```\w*", "", text))
+        return len(_SENTENCE_END.findall(body)) >= most
+
+    return done
 
 
 _KANJI_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
@@ -502,9 +562,13 @@ def _key(text: str) -> str:
     return re.sub(r"[\s　、。，．,.]", "", unicodedata.normalize("NFKC", text))
 
 
+#: A sentence on what was done (「表記を統一し、簡潔に書き直しました。」), written after the 備考 by a small model.
+_DONE = re.compile(r"(?<=。)[^。]*(?:書き直し|統一し|修正し|整えました|直しました|まとめました)[^。]*。?$")
+
+
 def note_draft(raw: str, note: str, glossary=None, root: str = "") -> Draft:
-    """The model's tidied 備考, written with the glossary's words, and what to check in it."""
-    text = clean_note(raw)
+    """The model's tidied 備考 (without a sentence on what it did), written with the glossary's words, and what to check in it."""
+    text = _DONE.sub("", clean_note(raw)).strip()
     if glossary:
         text = glossary.fixed(text, root)
     longer = len(text) > max(2 * len(note.strip()), len(note.strip()) + 40)
@@ -523,7 +587,11 @@ class Writer(Protocol):
     """A model that continues a conversation (qgis_io/text_assist_io.GenAiWriter; tests give their own)."""
 
     def write(self, messages: Sequence[Message], max_tokens: int, cancelled: Callable[[], bool],
-              wrote: Callable[[str], None], one_line: bool = False) -> str:
-        """The reply to `messages` (at most `max_tokens`), `wrote` called with the text so far as it grows; `one_line`: its first line."""
+              wrote: Callable[[str], None], one_line: bool = False, until: Optional[Callable[[str], bool]] = None) -> str:
+        """
+        The reply to `messages` (at most `max_tokens`), `wrote` called with
+        the text so far as it grows; `one_line`: its first line; `until`:
+        ends once it says the text so far is enough.
+        """
         ...
 

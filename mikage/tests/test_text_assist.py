@@ -86,15 +86,16 @@ def test_the_settings_file_key():
 def test_the_note_is_asked_with_its_kind_the_glossary_words_and_the_examples():
     s = ta.task_of("tidyNote", "m")
     terms = ta.note_terms(GLOSSARY, "岸壁に入航して停泊中", "船舶")
-    # Its other spellings' words first (written as the glossary does), then the words it uses, then the 大分類's own.
+    # Its other spellings' words first (written as the glossary does), then the words it uses; not the 大分類's
+    # other words (a small model writes them into the 備考).
     assert terms == ["入港", "停泊中", "岸壁"]
-    assert ta.note_terms(GLOSSARY, "入航した", "船舶") == ["入港", "岸壁"]
+    assert ta.note_terms(GLOSSARY, "入航した", "船舶") == ["入港"]
     assert ta.note_terms(GLOSSARY, "駐機場", "航空機") == ["駐機"]
     assert ta.note_terms(None, "x") == [] and ta.note_terms(Glossary(), "x") == []
     messages = ta.note_messages(s, "岸壁に入航して停泊中", "船舶 > 駆逐艦", terms)
     assert messages[0] == {"role": "system", "content": ta.NOTE_PROMPT}
     assert [m["role"] for m in messages[1:]] == ["user", "assistant"] * len(ta.NOTE_EXAMPLES) + ["user"]
-    assert messages[-1]["content"] == "種別: 船舶 > 駆逐艦\n使う語: 入港、停泊中、岸壁\n備考: 岸壁に入航して停泊中"
+    assert messages[-1]["content"] == "種別: 船舶 > 駆逐艦\n表記: 入港、停泊中、岸壁\n備考: 岸壁に入航して停泊中"
     # A very long 備考 is cut.
     assert len(ta.note_messages(s, "あ" * 1000)[-1]["content"]) == len("備考: ") + ta.NOTE_LIMIT
 
@@ -105,6 +106,26 @@ def test_what_the_model_wrote_is_cleaned():
     assert ta.clean_note("岸壁　に　停泊中。 2  隻") == "岸壁　に　停泊中。 2 隻"
     assert ta.clean_paragraph("申し送り: 期限間近の依頼が 1 件。\n\n\n\n担当中の画像あり。\n") == "期限間近の依頼が 1 件。\n\n担当中の画像あり。"
     assert ta.clean_paragraph("### 出力\n下書き本文") == "下書き本文"
+    # sarashina2.2 1B says what it did after the 備考.
+    assert ta.note_draft("エプロンに 4 機駐機。表記を統一し、備考を簡潔に書き直しました。", "エプロンに4機").text == "エプロンに 4 機駐機。"
+    assert ta.note_draft("書き直しました。", "x").text == "書き直しました。"
+    # A small model writes a letter (tried on sarashina2.2 3B): its address, introduction and closing are left out.
+    letter = ("引き継ぎ担当者様、\n\nまず、横須賀定点の期限が近い。\n\n東側が未確認の模様。\n\n"
+              "以上、引き継ぎ事項をまとめさせていただきました。ご不明な点はお問い合わせください。")
+    assert ta.clean_paragraph(letter) == "まず、横須賀定点の期限が近い。\n\n東側が未確認の模様。"
+    assert ta.clean_paragraph("申し送りは以下の通りです。\n期限間近の依頼が 1 件。") == "期限間近の依頼が 1 件。"
+    assert ta.clean_paragraph("東側は未確認の模様") == "東側は未確認の模様"
+    assert ta.clean_paragraph("以上") == "以上"
+    assert ta.clean_paragraph("・期限が近い。\n① 東側が未確認。\n2. 通報済み。\n11/20 09:00 まで") == "期限が近い。\n東側が未確認。\n通報済み。\n11/20 09:00 まで"
+
+
+def test_a_paragraph_stops_at_the_sentences_asked_for():
+    assert ta.sentence_limit(ta.HANDOVER_PROMPT) == 4 and ta.sentence_limit(ta.SUMMARY_PROMPT) == 6
+    assert ta.sentence_limit("３～５文で") == 5 and ta.sentence_limit("短く書いて") is None
+    assert ta.sentences_done(None) is None
+    done = ta.sentences_done(2)
+    assert not done("申し送りは以下の通りです。\n期限が近い。")
+    assert done("申し送りは以下の通りです。\n期限が近い。東側が未確認。")
 
 
 def test_numbers_it_made_up_are_found():

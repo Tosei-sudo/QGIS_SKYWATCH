@@ -17,6 +17,13 @@ proposal only; the screens change nothing until the person takes it.
 - 英訳 (translate): a 備考 in English (the 通報's `note.en`).
 
 The model answers in lines 「項目: 値」 (easier for a small model than JSON).
+Tried on sarashina2.2 1B and 3B (2026-11-20), a small model also writes why
+it has no value (「備考に記載がないため「なし」」), adds 「（または…）」, and
+fills in what was not asked (a 確度, an 有無, a place). So: what it says of
+a value is taken off, what the words themselves name wins (a place, a
+class, a period, how sure, 雲 → 不可), and the model's value is kept only
+where the words give it a footing. It stops once its lines are written.
+
 Pure Python; the screens are ui/text_assist_ui.py.
 """
 from __future__ import annotations
@@ -29,12 +36,12 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional, Sequence
 
 from .obs.model import unseen_label
-from .text_assist import Draft, Message, TextTask, clean_note, clean_paragraph, foreign_numbers, numbers_in
+from .text_assist import Draft, Message, TextTask, _kanji_value, _unquoted, clean_note, clean_paragraph, foreign_numbers, numbers_in
 
 #: Written by the model for a value it does not have.
 NONE_WORDS = {"", "なし", "無し", "不明", "-", "－", "ー", "—", "空", "none", "null", "n/a", "na", "未記入", "該当なし"}
-#: The most kinds named to the model as choices (the current 大分類's first).
-KINDS_LIMIT = 200
+#: The most kinds named to the model as choices (those the 備考 names first, then the current 大分類's).
+KINDS_LIMIT = 60
 #: The most of the records sent for まとめ (characters; the rest is cut, the counts come first).
 SUMMARY_LIMIT = 3000
 #: The most records listed for まとめ (the counts cover them all).
@@ -46,18 +53,80 @@ def _fold(text: str) -> str:
     return unicodedata.normalize("NFKC", text).strip().lower()
 
 
+#: Written by the model instead of a value, to say why it has none (「備考に記載がないため「なし」」).
+_EXPLAINED = re.compile(r"[「『\"](?:なし|無し|不明)[」』\"]|記載|ないため|がないので|特定の|わから|分から|判断でき|推測可能")
+_PAREN = re.compile(r"[（(](?:[^（）()]|[（(][^（）()]*[）)])*[）)]")
+_OR = re.compile(r"\s*(?:または|もしくは|あるいは|\bor\b)\s*", re.IGNORECASE)
+_KEY_LINE = re.compile(r"^([^:：]{1,12})\s*[:：]\s*(.*)$")
+
+
+def bare(value: str) -> str:
+    """A value without what the model said of it: 「補給艦（または…）」 → 補給艦, 「消失 または 不可」 → 消失."""
+    v = _OR.split(_PAREN.sub("", value))[0]
+    return v.strip(" \t　、。,.").strip("「」『』\"'").strip()
+
+
+def _key_line(line: str) -> Optional[tuple[str, str]]:
+    m = _KEY_LINE.match(re.sub(r"^[\s\-*・#]+", "", line.strip().strip("`")))
+    return (m[1].strip(), m[2].strip().strip("「」『』\"'").strip()) if m else None
+
+
 def answer_lines(raw: str, keys: Sequence[str]) -> dict[str, str]:
-    """The model's 「項目: 値」 lines for `keys` (the first of each; a value of 「なし」 left out)."""
+    """
+    The model's 「項目: 値」 lines for `keys` (the first of each, as written);
+    a value of 「なし」 and one that only says why there is none left out.
+    """
     out: dict[str, str] = {}
     for line in raw.replace("\r\n", "\n").split("\n"):
-        line = re.sub(r"^[\s\-*・#]+", "", line.strip().strip("`"))
-        m = re.match(r"^([^:：]{1,12})\s*[:：]\s*(.*)$", line)
-        if not m:
+        got = _key_line(line)
+        if got is None:
             continue
-        key, value = m[1].strip(), m[2].strip().strip("「」『』\"'").strip()
-        if key in keys and key not in out and _fold(value) not in NONE_WORDS:
+        key, value = got
+        if key in keys and key not in out and _fold(bare(value)) not in NONE_WORDS and not _EXPLAINED.search(value):
             out[key] = value
     return out
+
+
+def lines_done(keys: Sequence[str]) -> Callable[[str], bool]:
+    """
+    Whether the model has written its 「項目: 値」 lines (each of `keys`, a
+    key again, or other words after them such as an explanation): it stops
+    there instead of writing on to its token limit.
+    """
+    wanted = set(keys)
+
+    def done(text: str) -> bool:
+        seen: set[str] = set()
+        for line in text.replace("\r\n", "\n").split("\n")[:-1]:
+            got = _key_line(line)
+            if got is not None and got[0] in wanted:
+                if got[0] in seen:
+                    return True
+                seen.add(got[0])
+                if seen == wanted:
+                    return True
+            elif line.strip() and seen:
+                return True
+        return False
+
+    return done
+
+
+def _leaf(kind: str) -> str:
+    return re.split(r"\s*>\s*", kind.strip())[-1]
+
+
+def _named(word: str, folded: str) -> bool:
+    """Whether `word` (2 characters or more, not a 〇〇 placeholder) is in the folded text."""
+    w = _fold(word)
+    return len(w) >= 2 and "〇〇" not in w and "○○" not in w and w in folded
+
+
+def kinds_in(text: str, kinds: Sequence[str], root: str = "") -> list[str]:
+    """The kinds whose class name `text` contains (those of `root` first, then the finer, then the longer name)."""
+    t = _fold(text)
+    found = [k for k in dict.fromkeys(kinds) if _named(_leaf(k), t)]
+    return sorted(found, key=lambda k: (0 if root and _root(k) == root else 1, -k.count(">"), -len(_leaf(k))))
 
 
 def _number(text: str) -> Optional[str]:
@@ -90,14 +159,15 @@ class FieldsDraft:
         return "・".join(parts)
 
 
-def kinds_for(kinds: Sequence[str], root: str = "", limit: int = KINDS_LIMIT) -> list[str]:
-    """The kinds named to the model: those of `root` first (shallow before deep), up to `limit`."""
+def kinds_for(kinds: Sequence[str], root: str = "", limit: int = KINDS_LIMIT, note: str = "") -> list[str]:
+    """The kinds named to the model: those `note` names first, then those of `root` (shallow before deep), up to `limit`."""
     def depth(k: str) -> int:
         return k.count(">")
 
+    named = kinds_in(note, kinds, root) if note else []
     mine = [k for k in kinds if root and (k == root or k.startswith(root + " >"))]
     rest = [k for k in kinds if k not in mine]
-    return list(dict.fromkeys(sorted(mine, key=depth) + sorted(rest, key=depth)))[:limit]
+    return list(dict.fromkeys(named + sorted(mine, key=depth) + sorted(rest, key=depth)))[:limit]
 
 
 def fields_messages(task: TextTask, note: str, kind: str, kinds: Sequence[str], activities: dict[str, list[str]],
@@ -109,7 +179,7 @@ def fields_messages(task: TextTask, note: str, kind: str, kinds: Sequence[str], 
     lines = []
     if kind.strip():
         lines.append(f"今の種別: {kind.strip()}")
-    lines.append("種別の候補: " + "、".join(kinds))
+    lines.append("種別の候補: " + "、".join(kinds_for(kinds, _root(kind) if kind.strip() else "", note=note)))
     for root, words in activities.items():
         if words:
             lines.append(f"活動の候補（{root}）: " + "、".join(words))
@@ -119,56 +189,174 @@ def fields_messages(task: TextTask, note: str, kind: str, kinds: Sequence[str], 
     return [{"role": "system", "content": task.prompt}, {"role": "user", "content": "\n".join(lines)}]
 
 
+#: Words of a 備考 that say how sure it is, for the usual 確度 levels (a level's own name counts too).
+CONFIDENCE_CUES: dict[str, tuple[str, ...]] = {
+    "確定": ("確定", "確実", "間違いな", "断定"),
+    "推定": ("推定", "たぶん", "多分", "おそらく", "恐らく", "っぽ", "らしい", "模様", "もよう", "思われ", "可能性", "見込",
+           "推測", "かも", "みたい", "ようだ"),
+    "不明": ("判別でき", "識別でき", "判読でき", "わからな", "分からな"),
+}
+#: Names of a kind of thing rather than of one thing (not a モノ).
+GENERIC_NAMES = {"機体", "船", "艦", "艦艇", "船舶", "車", "車両", "建物", "物体", "目標", "航空機", "不明"}
+_AMOUNT = r"(\d+(?:\.\d+)?|[〇零一二三四五六七八九十百千]+)"
+_METRES = re.compile(_AMOUNT + r"\s*(?:m|メートル)(?![a-z])", re.IGNORECASE)
+_DEGREES = re.compile(_AMOUNT + r"\s*(?:度|°|゜)")
+
+
+def _amounts(pattern: re.Pattern, text: str) -> list[tuple[int, str]]:
+    """Where and what the numbers before a unit are (kanji numbers as digits)."""
+    out = []
+    for m in pattern.finditer(text):
+        n = m[1] if m[1][0].isdigit() else _kanji_value(m[1])
+        if n is not None:
+            out.append((m.start(), str(n)))
+    return out
+
+
+def _cues(level: str) -> tuple[str, ...]:
+    own = (level,) if len(level) >= 2 and level != "不明" else ()
+    return CONFIDENCE_CUES.get(level, ()) + own + (f"確度{level}", f"確度は{level}", f"確度:{level}")
+
+
+def confidence_in(text: str, confidences: Sequence[str]) -> Optional[str]:
+    """The 確度 `text` says (the level's name, or a word like 「たぶん」), the first said; None when it says none."""
+    t = _fold(text)
+    best: Optional[tuple[int, str]] = None
+    for c in confidences:
+        at = min((t.find(_fold(w)) for w in _cues(c) if _fold(w) in t), default=-1)
+        if at >= 0 and (best is None or at < best[0]):
+            best = (at, c)
+    return best[1] if best else None
+
+
+def _any_cue(text: str) -> bool:
+    t = _fold(text)
+    return any(_fold(w) in t for words in CONFIDENCE_CUES.values() for w in words)
+
+
+def _kind_words(value: str) -> list[str]:
+    """What the model's 種別 may name: 「船舶（補給艦）」 → 船舶 > 補給艦, 補給艦, 船舶; 「A > B（…）」 → A > B, B."""
+    out = [value.strip()]
+    m = re.match(r"^(.+?)[（(]([^（）()]+)[）)]$", value.strip())
+    if m:
+        out += [f"{m[1].strip()} > {m[2].strip()}", m[2].strip(), m[1].strip()]
+    b = bare(value)
+    out += [b, re.split(r"\s*[>＞]\s*", b)[-1]]
+    return [w for w in dict.fromkeys(out) if w]
+
+
+_COUNTED = re.compile(r"\d+\s*(?:隻|機|台|両|基|棟|人|名|個|本)")
+
+
+def _phrase(name: str, activities: Sequence[str]) -> bool:
+    """Whether a モノ is part of the 備考 rather than a name (「2機が滑走路端で離陸準備のもよう」)."""
+    return (len(name) > 24 or any(c in name for c in "、。，．") or bool(_COUNTED.search(name))
+            or any(_named(a, _fold(name)) for a in activities))
+
+
+def _ancestor(a: Sequence[str], b: Sequence[str]) -> bool:
+    """Whether the kind `a` is `b` or contains it (船舶 of 船舶 > 補給艦)."""
+    return len(a) <= len(b) and list(b[:len(a)]) == list(a)
+
+
 def fields_draft(raw: str, note: str, resolve_kind: Callable[[str], Optional[list[str]]],
-                 activities_of: Callable[[str], list[str]], confidences: Sequence[str], kind_now: str = "") -> FieldsDraft:
+                 activities_of: Callable[[str], list[str]], confidences: Sequence[str], kind_now: str = "",
+                 kinds: Sequence[str] = ()) -> FieldsDraft:
     """
     What is kept of the model's fields: a kind of the classification
-    (`resolve_kind`: a path, or a class's name → its path), an activity of
-    that kind (`activities_of`), a 確度 among `confidences`, numbers written
-    in `note`, and a name `note` contains.
+    (`resolve_kind`: a path, or a class's name → its path; a finer class the
+    note names among `kinds` wins), an activity of that kind
+    (`activities_of`; one the 備考 names wins), a 確度 among `confidences`
+    the 備考 gives a footing for, lengths in m and headings in degrees
+    written in `note`, and a name `note` contains that is not a class's.
     """
     got = answer_lines(raw, FIELD_KEYS)
     values: dict = {}
     dropped: list[str] = []
+    folded = _fold(note)
+    model_path = None
     if "種別" in got:
-        path = resolve_kind(got["種別"]) or resolve_kind(re.split(r"\s*[>＞]\s*", got["種別"])[-1])
-        if path:
-            values["kind"] = list(path)
-        else:
-            dropped.append(f"分類にない種別「{got['種別']}」")
+        model_path = next((p for p in (resolve_kind(w) for w in _kind_words(got["種別"])) if p), None)
+        if not model_path:
+            dropped.append(f"分類にない種別「{bare(got['種別']) or got['種別']}」")
+    named = kinds_in(note, kinds, _root(kind_now) if kind_now.strip() else "")
+    note_path = next((p for p in (resolve_kind(k) for k in named) if p), None)
+    path = model_path
+    if note_path and (not model_path or _ancestor(model_path, note_path) or not _named(model_path[-1], folded)):
+        # The class the 備考 names, rather than a coarser one or one it does not name.
+        path = note_path
+    if path:
+        values["kind"] = list(path)
     kind = " > ".join(values["kind"]) if "kind" in values else kind_now
+    words = activities_of(kind)
+    activity = None
     if "活動" in got:
-        words = activities_of(kind)
-        match = next((w for w in words if _fold(w) == _fold(got["活動"])), None)
-        if match:
-            values["activity"] = match
-        else:
-            dropped.append(f"{'この種別の' if kind else ''}活動にない「{got['活動']}」")
+        activity = next((w for w in words if _fold(w) == _fold(bare(got["活動"]))), None)
+        if activity is None:
+            dropped.append(f"{'この種別の' if kind else ''}活動にない「{bare(got['活動'])}」")
+    said = sorted((w for w in words if _named(w, folded)), key=len, reverse=True)
+    if said and (activity is None or not _named(activity, folded)):
+        activity = said[0]
+    if activity:
+        values["activity"] = activity
+    said_confidence = confidence_in(note, confidences)
+    confidence = None
     if "確度" in got:
-        match = next((c for c in confidences if _fold(c) == _fold(got["確度"])), None)
-        if match:
-            values["confidence"] = match
-        else:
-            dropped.append(f"確度にない「{got['確度']}」")
+        confidence = next((c for c in confidences if _fold(c) == _fold(bare(got["確度"]))), None)
+        if confidence is None:
+            dropped.append(f"確度にない「{bare(got['確度'])}」")
+        elif said_confidence is None and (confidence in CONFIDENCE_CUES or not _any_cue(note)):
+            dropped.append(f"確度「{confidence}」は備考に手がかりなし")
+            confidence = None
+    if said_confidence and (confidence is None or confidence in CONFIDENCE_CUES):
+        confidence = said_confidence
+    if confidence:
+        values["confidence"] = confidence
+    t = unicodedata.normalize("NFKC", note)
+    metres = [n for _, n in _amounts(_METRES, t)]
+    degrees = [n for _, n in _amounts(_DEGREES, t)]
     have = numbers_in(note)
-    for key, name, high in (("長さ", "length", 2000.0), ("幅", "width", 500.0), ("向き", "heading", 360.0)):
+    for key, name, high, units, unit in (("長さ", "length", 2000.0, metres, "m"), ("幅", "width", 500.0, metres, "m"),
+                                         ("向き", "heading", 360.0, degrees, "度")):
         if key not in got:
             continue
-        n = _number(got[key])
+        n = _number(bare(got[key]))
         if n is None:
-            dropped.append(f"{key}「{got[key]}」は数字でない")
+            dropped.append(f"{key}「{bare(got[key])}」は数字でない")
         elif not any(_same(n, h) for h in have):
             dropped.append(f"{key} {n} は備考にない数字")
+        elif not any(_same(n, u) for u in units):
+            dropped.append(f"{key} {n} は備考で{unit}の数字でない")
         elif not 0 <= float(n) <= high:
             dropped.append(f"{key} {n} は範囲外")
         else:
             values[name] = float(n)
+    for at, n in _amounts(_METRES, t):
+        # 「全長120m」「幅 20 m」: the 備考 says which it is.
+        before = t[max(0, at - 6):at]
+        name, high = ("width", 500.0) if "幅" in before else ("length", 2000.0) if "長" in before else (None, 0.0)
+        if name and name not in values and 0 <= float(n) <= high:
+            values[name] = float(n)
+    if "heading" not in values and len(set(degrees)) == 1 and 0 <= float(degrees[0]) <= 360:
+        values["heading"] = float(degrees[0])
     if "モノ" in got:
-        if _fold(got["モノ"]) and _fold(got["モノ"]) in _fold(note):
-            values["object"] = got["モノ"]
+        name = unicodedata.normalize("NFKC", bare(got["モノ"]))
+        classes = {_fold(_leaf(k)) for k in kinds} | {_fold(_root(k)) for k in kinds} | {_fold(w) for w in GENERIC_NAMES}
+        if not name or "〇〇" in name or "○○" in name or _fold(name) in classes:
+            dropped.append(f"モノ「{name}」は種類の名前（固有の名前でない）")
         else:
-            dropped.append(f"備考にない名前「{got['モノ']}」")
-    return FieldsDraft(values, tuple(dropped))
+            for c in sorted(classes, key=len, reverse=True):
+                if c and _fold(name).startswith(c) and len(name) - len(c) >= 2:
+                    name = name[len(c):].lstrip(" 　の・")
+                    break
+            if _phrase(name, words):
+                dropped.append(f"モノ「{name}」は名前でなく文")
+            elif _fold(name) in folded:
+                values["object"] = name
+            else:
+                dropped.append(f"備考にない名前「{name}」")
+    order = ("kind", "activity", "confidence", "length", "width", "heading", "object")
+    return FieldsDraft({k: values[k] for k in order if k in values}, tuple(dropped))
 
 
 def _same(a: str, b: str) -> bool:
@@ -196,7 +384,68 @@ def date_hints(today: date) -> list[tuple[str, date, date]]:
         ("直近 7 日", today - timedelta(days=6), today), ("直近 30 日", today - timedelta(days=29), today),
         ("今月", first, next_month - timedelta(days=1)), ("先月", last_month_end.replace(day=1), last_month_end),
         ("今年", today.replace(month=1, day=1), today.replace(month=12, day=31)),
+        ("去年", date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)),
     ]
+
+
+#: Other words for the periods of date_hints.
+_PERIOD_WORDS = {"本日": "今日", "おととい": "一昨日", "昨年": "去年", "前年": "去年", "今週中": "今週"}
+_RECENT = re.compile(r"(?:直近|過去|最近|ここ)\s*(\d+)\s*(日|週|か月|ヶ月|カ月|ケ月|ヵ月)")
+#: Words that a request names a period with (one not among date_hints: the model's reading is kept).
+_DATE_CUE = re.compile(r"\d|[月日週年]|まで|から|以降|以前|以来")
+
+
+#: 「11月10日」「11/10〜15日」「2026年11月10日から11月15日」 (a day, or from one to another).
+_DAYS = re.compile(r"(?:(?P<y>\d{4})[年/-])?(?P<m>\d{1,2})[月/](?P<d>\d{1,2})日?"
+                   r"(?:\s*(?:から|〜|~|-|ー)\s*(?:(?:(?P<y2>\d{4})[年/-])?(?P<m2>\d{1,2})[月/])?(?P<d2>\d{1,2})日?)?")
+#: 「10月」「2026年10月」 (the whole month).
+_MONTH = re.compile(r"(?:(?P<y>\d{4})年)?(?<![\d/])(?P<m>\d{1,2})月(?![\d日])")
+
+
+def _day_of(year: Optional[str], month: str, day: str, today: date) -> Optional[date]:
+    """A day of the request (no year: this year's, or last year's when it would be more than a week ahead)."""
+    try:
+        d = date(int(year) if year else today.year, int(month), int(day))
+    except ValueError:
+        return None
+    if not year and d > today + timedelta(days=7):
+        d = d.replace(year=d.year - 1) if not (d.month == 2 and d.day == 29) else d
+    return d
+
+
+def period_in(words: str, today: date) -> Optional[tuple[date, date]]:
+    """
+    The period a request names (「先週」, 「直近30日」, 「昨日から今日」,
+    「11月10日から15日」, 「10月」: from the first to the last); None when it
+    names none.
+    """
+    t = unicodedata.normalize("NFKC", words)
+    spans: list[tuple[date, date]] = []
+    for m in _RECENT.finditer(t):
+        n = int(m[1])
+        days = n if m[2] == "日" else 7 * n if m[2] == "週" else 30 * n
+        if 0 < days <= 3660:
+            spans.append((today - timedelta(days=days - 1), today))
+    rest = _RECENT.sub(" ", t)
+    for m in _DAYS.finditer(rest):
+        first = _day_of(m["y"], m["m"], m["d"], today)
+        last = _day_of(m["y2"] or m["y"], m["m2"] or m["m"], m["d2"], today) if m["d2"] else first
+        if first and last:
+            spans.append((min(first, last), max(first, last)))
+    rest = _DAYS.sub(" ", rest)
+    for m in _MONTH.finditer(rest):
+        first = _day_of(m["y"], m["m"], "1", today)
+        if first:
+            spans.append((first, (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)))
+    rest = _MONTH.sub(" ", rest)
+    named = {name: (a, b) for name, a, b in date_hints(today) if not name.startswith("直近")}
+    for word in sorted(list(named) + list(_PERIOD_WORDS), key=len, reverse=True):
+        if word in rest:
+            spans.append(named[_PERIOD_WORDS.get(word, word)])
+            rest = rest.replace(word, " ")
+    if not spans:
+        return None
+    return min(a for a, _ in spans), max(b for _, b in spans)
 
 
 def _day(d: date) -> str:
@@ -273,43 +522,98 @@ def _dates_of(text: str) -> list[Optional[date]]:
     return [one(sides[0]), one(sides[1])]
 
 
-def search_draft(raw: str, places: Sequence[str], roots: Sequence[str], confidences: Sequence[str]) -> SearchDraft:
-    """What is kept of the model's conditions: dates read, a place, 大分類 and 確度 among the choices."""
+_UNSEEN_CUES = ("雲", "見えな", "不可", "判読でき", "視認でき", "見られな")
+_ABSENT_CUES = ("消失", "いなくな", "居なくな", "不在", "消え", "なくな")
+_PRESENT_CUES = ("ありのみ", "有無はあり", "有無:あり", "あった", "いた", "いる", "存在", "在泊")
+
+
+def presence_in(words: str) -> Optional[str]:
+    """The 有無 a request names: 雲・見えない → "unseen", 消失・いなくなった → "absent", いた・ある → "present"."""
+    t = _fold(words)
+    for presence, cues in (("unseen", _UNSEEN_CUES), ("absent", _ABSENT_CUES), ("present", _PRESENT_CUES)):
+        if any(c in t for c in cues):
+            return presence
+    return None
+
+
+def _shares(a: str, b: str, n: int = 2) -> bool:
+    """Whether `a` and `b` have `n` characters in a row in common."""
+    return any(a[i:i + n] in b for i in range(len(a) - n + 1))
+
+
+def _shares_kanji(a: str, b: str) -> bool:
+    return any("\u4e00" <= c <= "\u9fff" and c in b for c in a)
+
+
+def _asked(word: str, folded: str, today: Optional[date], places: Sequence[str], others: Sequence[str]) -> bool:
+    """
+    Whether the person wrote `word` for this condition: in the words, and
+    not a word of another (the model puts 「消失」 in the 大分類 line too).
+    """
+    w = _fold(word)
+    return bool(w) and w in folded and presence_in(word) is None and not (today and period_in(word, today)) and not any(
+        _fold(x) == w for x in [*places, *others])
+
+
+def search_draft(raw: str, places: Sequence[str], roots: Sequence[str], confidences: Sequence[str], words: str = "",
+                 today: Optional[date] = None, kinds: Sequence[str] = ()) -> SearchDraft:
+    """
+    The conditions of a request: what `words` names itself (a period of
+    date_hints, a place among `places`, a 大分類 or a class of `kinds`, a 確度,
+    an 有無) wins; else the model's value is kept where the words give it a
+    footing (a date word, a place sharing two characters, a 大分類 sharing a
+    kanji). The model's 確度 and 有無 the words do not name are left out (a
+    small model writes 「推定」「あり」 for every request).
+    """
     got = answer_lines(raw, SEARCH_KEYS)
     dropped: list[str] = []
+    t = _fold(words)
     start = end = None
-    if "期間" in got:
+    period = period_in(words, today) if words and today else None
+    if period:
+        start, end = period
+    elif "期間" in got and (not words or _DATE_CUE.search(unicodedata.normalize("NFKC", words))):
         start, end = _dates_of(got["期間"])
         if start is None and end is None:
-            dropped.append(f"日付として読めない期間「{got['期間']}」")
+            dropped.append(f"日付として読めない期間「{bare(got['期間'])}」")
         elif start and end and start > end:
             start, end = end, start
     place = None
-    if "地名" in got:
-        place = next((p for p in places if _fold(p) == _fold(got["地名"])), None)
-        if place is None:
-            dropped.append(f"地名の候補にない「{got['地名']}」")
-    chosen: list[str] = []
-    if "大分類" in got:
-        for word in re.split(r"[、,・/\s]+", got["大分類"]):
+    said = sorted((p for p in places if _fold(p) and _fold(p) in t), key=lambda p: len(_fold(p)), reverse=True)
+    if said:
+        place = said[0]
+    elif "地名" in got:
+        value = bare(got["地名"])
+        match = next((p for p in places if _fold(p) == _fold(value)), None)
+        if match is None:
+            dropped.append(f"地名の候補にない「{value}」")
+        elif not words or _shares(_fold(match), t):
+            place = match
+    chosen = [r for r in roots if _named(r, t)] + [_root(k) for k in kinds_in(words, kinds) if _root(k) in roots]
+    if not chosen and "大分類" in got:
+        for word in re.split(r"[、,・/\s]+", bare(got["大分類"])):
             match = next((r for r in roots if _fold(r) == _fold(word)), None)
-            if match:
-                chosen.append(match)
-            elif word.strip():
+            if match is None and word.strip() and (not words or _asked(word, t, today, places, confidences)):
                 dropped.append(f"大分類にない「{word}」")
-    confidence = None
-    if "確度" in got:
-        word = re.sub(r"\s*以上$", "", got["確度"])
-        confidence = next((c for c in confidences if _fold(c) == _fold(word)), None)
-        if confidence is None:
-            dropped.append(f"確度にない「{got['確度']}」")
-    presence = None
-    if "有無" in got:
-        word = _fold(got["有無"])
+            elif match and (not words or _shares_kanji(match, t)):
+                chosen.append(match)
+    named = [c for c in confidences if (len(_fold(c)) >= 2 and _fold(c) in t) or any(
+        f"確度{a}{_fold(c)}" in t for a in ("", "は", "が", ":"))]
+    confidence = min(named, key=lambda c: t.find(_fold(c))) if named else None
+    if confidence is None and "確度" in got:
+        word = re.sub(r"\s*以上$", "", bare(got["確度"]))
+        match = next((c for c in confidences if _fold(c) == _fold(word)), None)
+        if match is None and (not words or _asked(word, t, today, places, roots)):
+            dropped.append(f"確度にない「{bare(got['確度'])}」")
+        elif match and not words:
+            confidence = match
+    presence = presence_in(words) if words else None
+    if presence is None and "有無" in got and not words:
+        word = _fold(bare(got["有無"]))
         presence = ("present" if word.startswith(("あり", "在")) else "absent" if word.startswith(("消失", "不在", "いない"))
                     else "unseen" if word.startswith(("不可", "見えない")) else None)
         if presence is None:
-            dropped.append(f"有無にない「{got['有無']}」")
+            dropped.append(f"有無にない「{bare(got['有無'])}」")
     return SearchDraft(start, end, place, tuple(dict.fromkeys(chosen)), confidence, presence, tuple(dropped))
 
 
@@ -360,14 +664,54 @@ def summary_draft(raw: str, source: str) -> Draft:
 
 # ---- 英訳 ----------------------------------------------------------------------------------------
 
+#: English for words of image notes that a small model gets wrong (「航跡」 left as it is, 「岸壁」 as 「rocky shore」):
+#: those in the 備考 are given with it.
+TRANSLATE_TERMS: dict[str, str] = {
+    "航跡": "wake", "岸壁": "quay", "停泊": "moored", "駐機": "parked", "掩体": "aircraft shelter", "エプロン": "apron",
+    "格納庫": "hangar", "滑走路": "runway", "判読不可": "not interpretable", "入港": "entering port", "出港": "leaving port",
+    "荷役": "cargo handling", "補給艦": "replenishment ship", "護衛艦": "destroyer", "潜水艦": "submarine",
+    "哨戒機": "patrol aircraft", "戦闘機": "fighter", "輸送機": "transport aircraft", "北上": "heading north",
+    "南下": "heading south", "東進": "heading east", "西進": "heading west", "港外": "outside the port",
+    "港内": "inside the port", "集積": "stockpiled", "消失": "no longer present",
+}
+_JAPANESE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]+")
+
+
+def translate_terms(note: str) -> list[tuple[str, str]]:
+    """TRANSLATE_TERMS' words in `note` (a longer one first; one inside it not repeated)."""
+    out: list[tuple[str, str]] = []
+    rest = note
+    for word in sorted(TRANSLATE_TERMS, key=len, reverse=True):
+        if word in rest:
+            out.append((word, TRANSLATE_TERMS[word]))
+            rest = rest.replace(word, " ")
+    return [(w, e) for w, e in sorted(out, key=lambda x: note.find(x[0]))]
+
+
 def translate_messages(task: TextTask, note: str) -> list[Message]:
-    return [{"role": "system", "content": task.prompt}, {"role": "user", "content": f"Note: {note.strip()[:400]}"}]
+    content = f"Note: {note.strip()[:400]}"
+    terms = translate_terms(note.strip()[:400])
+    if terms:
+        content += "\nTerms: " + "; ".join(f"{w} = {e}" for w, e in terms)
+    return [{"role": "system", "content": task.prompt}, {"role": "user", "content": content}]
 
 
 def translated(raw: str, note: str) -> Draft:
-    """The model's English (one line, without a label), and the numbers in it the 備考 does not have."""
-    text = re.sub(r"^(?:English|Translation|Note)\s*:\s*", "", clean_note(raw), flags=re.IGNORECASE).strip()
-    return Draft(text, foreign_numbers(note, text))
+    """
+    The model's English (one line, without a label or quotes), the numbers
+    in it the 備考 does not have, and the Japanese it left.
+    """
+    text = clean_note(raw)
+    for _ in range(2):
+        text = re.sub(r"^(?:English|Translation|Note|Terms)\s*:\s*", "", text, flags=re.IGNORECASE).strip()
+        text = _unquoted(text)
+    # 「The satellite image analysis notes state that there are …」 (sarashina2.2 3B): what the note says, only.
+    said = re.match(r"^(?:the\s+)?[\w\s-]{0,40}?notes?\s+(?:states?|says?|reads?|indicates?)\s+that\s+(.+)$", text, re.IGNORECASE)
+    if said:
+        text = said[1][0].upper() + said[1][1:]
+    left = list(dict.fromkeys(_JAPANESE.findall(text)))
+    notes = (f"日本語が残る「{'・'.join(left[:3])}」",) if left else ()
+    return Draft(text, foreign_numbers(note, text), notes=notes)
 
 
 def today_of(now_ms: float) -> date:

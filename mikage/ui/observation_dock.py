@@ -2982,8 +2982,6 @@ class ObservationDock(PluginDock):
 
     def fields_choices(self) -> dict:
         """What the model may choose from for the record's fields: the kinds, each 大分類's activities, the 確度 levels."""
-        from ..core.text_tasks import kinds_for
-
         book = self.book
         taxa = book.taxonomy() if book is not None else []
         roots = [t.path[0] for t in taxa if len(t.path) == 1]
@@ -2995,7 +2993,8 @@ class ObservationDock(PluginDock):
             return class_by_name(taxa, text) if text.strip() else None
 
         return {
-            "kinds": kinds_for([kind_of(t.path) for t in taxa], (path_of(self.kind_input.text()) or [""])[0]),
+            # All of them: the model is named those the 備考 names and the 大分類's first (text_tasks.kinds_for).
+            "kinds": [kind_of(t.path) for t in taxa],
             "activities": {r: book.activities_for(r)[0] for r in roots} if book is not None else {},
             "confidences": [c.label for c in book.confidences()] if book is not None else [],
             "resolve_kind": resolve,

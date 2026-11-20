@@ -553,6 +553,13 @@ class ExportDialog(QDialog):
         confidences = [self.confidence_select.itemData(i) for i in range(self.confidence_select.count()) if self.confidence_select.itemData(i)]
         return [p for p in places if p], roots, confidences
 
+    def search_kinds(self) -> list[str]:
+        """言葉で探す's kinds (「船舶 > 補給艦」): a class the words name gives its 大分類."""
+        from ..core.obs.taxonomy import kind_of
+
+        book = self.dock.book
+        return [kind_of(t.path) for t in book.taxonomy()] if book is not None else []
+
     def today(self):
         return QDateTime.currentDateTime().date().toPyDate()
 

@@ -30,10 +30,12 @@ from qgis.PyQt.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-from ..core.text_assist import Draft, handover_draft, handover_messages, note_draft, note_messages, note_terms
+from ..core.text_assist import (
+    Draft, handover_draft, handover_messages, note_draft, note_messages, note_terms, sentence_limit, sentences_done,
+)
 from ..core.text_tasks import (
-    FieldsDraft, SearchDraft, fields_draft, fields_messages, search_draft, search_messages, summary_draft, summary_messages,
-    summary_source, translate_messages, translated,
+    FIELD_KEYS, SEARCH_KEYS, FieldsDraft, SearchDraft, fields_draft, fields_messages, lines_done, search_draft, search_messages,
+    summary_draft, summary_messages, summary_source, translate_messages, translated,
 )
 from ..qgis_io.text_assist_io import SHOW_MS, Asked
 from .fit import fit_text
@@ -131,7 +133,8 @@ class _Asking(QObject):
         if self.asked is not None:
             self.panel.writing(self.asked.stage, self.asked.text)
 
-    def start(self, task: str, title: str, messages, done: Callable[[str, float], None], one_line: bool = False) -> bool:
+    def start(self, task: str, title: str, messages, done: Callable[[str, float], None], one_line: bool = False,
+              until: Optional[Callable[[str], bool]] = None) -> bool:
         def finished(text: str, seconds: float) -> None:
             self._stop()
             done(text, seconds)
@@ -143,7 +146,7 @@ class _Asking(QObject):
             else:
                 self.panel.say(self.tr("作成できず: {m}").format(m=message))
 
-        self.asked = self.assistant.ask(task, title, messages, finished, failed, one_line)
+        self.asked = self.assistant.ask(task, title, messages, finished, failed, one_line, until)
         if self.asked is None:
             return False
         self.panel.writing(self.asked.stage)
@@ -327,7 +330,7 @@ class NoteFields(_TaskButton):
 
         def done(text: str, seconds: float) -> None:
             got: FieldsDraft = fields_draft(text, note, choices["resolve_kind"], choices["activities_of"], choices["confidences"],
-                                            now.get("kind", ""))
+                                            now.get("kind", ""), choices["kinds"])
             kept, notes = {}, list(got.dropped)
             for k, v in got.values.items():
                 if _empty(now.get(k)) or (k == "kind" and _deeper(v, now.get(k, ""))):
@@ -343,7 +346,7 @@ class NoteFields(_TaskButton):
             shown = FieldsDraft(kept)
             self.panel.offer(_with_caution(self.assistant, self.task, Draft(shown.text, notes=tuple(notes))), seconds)
 
-        return self._asking.start(self.task, self.tr("項目の提案"), messages, done)
+        return self._asking.start(self.task, self.tr("項目の提案"), messages, done, until=lines_done(FIELD_KEYS))
 
     def take(self) -> None:
         if self.panel.draft is None or not self.values:
@@ -436,7 +439,8 @@ class HandoverDraft(_TaskButton):
             else:
                 self.panel.say(self.tr("案を作れず（モデルの答えが空）"))
 
-        return self._asking.start(self.task, self.tr("申し送りの下書き"), handover_messages(t, memo, written), done)
+        return self._asking.start(self.task, self.tr("申し送りの下書き"), handover_messages(t, memo, written), done,
+                                  until=sentences_done(sentence_limit(t.prompt)))
 
     def take(self, append: bool) -> None:
         draft = self.panel.draft
@@ -514,17 +518,19 @@ class SearchWords(_TaskButton):
                 return
             self.waiting = False
             places, roots, confidences = self.form.search_choices()
-            messages = search_messages(t, words, self.form.today(), places, roots, confidences)
+            kinds = self.form.search_kinds() if hasattr(self.form, "search_kinds") else []
+            today = self.form.today()
+            messages = search_messages(t, words, today, places, roots, confidences)
 
             def done(text: str, seconds: float) -> None:
-                found = search_draft(text, places, roots, confidences)
+                found = search_draft(text, places, roots, confidences, words, today, kinds)
                 self.found = found
                 if found.empty:
                     self.panel.say(self.tr("条件を読み取れず"), list(found.dropped))
                 else:
                     self.panel.offer(_with_caution(self.assistant, self.task, Draft(found.text, notes=found.dropped)), seconds)
 
-            self._asking.start(self.task, self.tr("言葉で探す"), messages, done)
+            self._asking.start(self.task, self.tr("言葉で探す"), messages, done, until=lines_done(SEARCH_KEYS))
 
         self.form.prepare(ready)
         return True
@@ -595,7 +601,8 @@ class SummaryDialog(QDialog):
             self.panel.say(took if draft.text else self.tr("案を作れず（モデルの答えが空）"), [self.tr("確認: ") + "。".join(warnings)] if warnings else [])
             self.panel.close_button.hide()
 
-        started = self._asking.start(self.task, self.tr("まとめ"), summary_messages(t, self.source), done)
+        started = self._asking.start(self.task, self.tr("まとめ"), summary_messages(t, self.source), done,
+                                     until=sentences_done(sentence_limit(t.prompt)))
         if not started:
             self.again_button.setEnabled(True)
         return started
