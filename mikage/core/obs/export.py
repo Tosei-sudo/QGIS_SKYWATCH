@@ -53,7 +53,7 @@ from .taxonomy import kind_of, path_of
 #: What a column (or a schema's `x-source`) can take.
 RECORD_SOURCES = (
     "id", "objectId", "objectName", "kind", "activity", "present", "unseen", "confidence", "imageTime", "imageId", "imageName",
-    "lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "imageFile", "note", "recordedBy", "updatedBy", "created",
+    "satellite", "lon", "lat", "length", "heading", "width", "pixelX", "pixelY", "imageFile", "note", "recordedBy", "updatedBy", "created",
     "updated", "deleted", "place", "placeKind", "places", "geofences", "latLon", "dms", "mgrs", "utm", "geometry", "index",
 )
 #: Of the file, the same for every record.
@@ -161,7 +161,7 @@ class ExportSettings:
 STANDARD_COLUMNS = (
     ("OBS_ID", "id"), ("OBJECT_ID", "objectId"), ("OBJECT_NAME", "objectName"), ("KIND", "kind"), ("ACTIVITY", "activity"),
     ("PRESENT", "present"), ("UNSEEN_REASON", "unseen"), ("CONFIDENCE", "confidence"), ("IMAGE_TIME", "imageTime"), ("IMAGE_ID", "imageId"),
-    ("IMAGE_NAME", "imageName"), ("LON", "lon"), ("LAT", "lat"), ("LENGTH_M", "length"), ("HEADING_DEG", "heading"),
+    ("IMAGE_NAME", "imageName"), ("SATELLITE", "satellite"), ("LON", "lon"), ("LAT", "lat"), ("LENGTH_M", "length"), ("HEADING_DEG", "heading"),
     ("WIDTH_M", "width"), ("PIXEL_X", "pixelX"), ("PIXEL_Y", "pixelY"), ("IMAGE_FILE", "imageFile"), ("NOTE", "note"), ("RECORDED_BY", "recordedBy"), ("UPDATED_BY", "updatedBy"),
     ("CREATED_AT", "created"), ("UPDATED_AT", "updated"), ("DELETED_AT", "deleted"),
 )
@@ -486,6 +486,7 @@ def raw_value(item: Optional[ExportItem], col: ExportColumn, index: int, ctx: Ex
         "id": o.id, "objectId": o.object_id, "objectName": o.object_name, "activity": o.activity, "present": None if o.unseen else o.present,
         "unseen": o.unseen,
         "confidence": o.confidence or "", "imageTime": o.image_time, "imageId": o.image_id, "imageName": o.image_name,
+        "satellite": o.satellite or "",
         "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "note": o.note,
         "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "",
         "recordedBy": o.recorded_by or "", "updatedBy": o.updated_by or "", "created": o.created_at, "updated": o.updated_at,

@@ -17,6 +17,11 @@ The layers of one catalog image id (a record whose folder has several
 images, or the same image opened twice) are one image to record on: what is
 recorded on any of its files is the record's.
 
+Its 衛星名 (asked for with a `SatelliteLookup`; core/obs/satellites.py): the
+catalog's 「センサー」 (kept on the layer, else read from the catalog's
+attributes kept on it), else the file's metadata, else its name, else the
+one typed for it (kept on the layer).
+
 `image_layer()` opens an image the way both docks should: a sign-in is an
 authcfg id in the layer's URI (QGIS adds the credentials when asking), so no
 token reaches the project file.
@@ -25,7 +30,9 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Optional
+import threading
+from dataclasses import dataclass
+from typing import Any, Optional, Sequence
 
 from qgis.core import (
     QgsDateTimeRange, QgsMapLayer, QgsProject, QgsProviderRegistry,
@@ -34,6 +41,7 @@ from qgis.core import (
 
 from ..core.obs.book import ObservedImage, joined_image
 from ..core.obs.image_time import image_time, parse_time
+from ..core.obs.satellites import NO_CHOICES, SatelliteChoices, clean as clean_satellite, satellite_in_metadata
 from .complex_sar import source_of
 from .geometry import to_wgs84
 from .plan_layer import qdatetime
@@ -44,6 +52,9 @@ IMAGE_ID = "satobs/imageId"
 IMAGE_TIME = "satobs/imageTime"
 #: The image's path below the record's folder, for a catalog record whose images are in a folder (catalog_io).
 IMAGE_FILE = "satobs/imageFile"
+#: 衛星名: the catalog's 「センサー」 (catalog_io), and the one typed for an image that does not say (「衛星不明（入力）」).
+SATELLITE = "satobs/satellite"
+SATELLITE_TYPED = "satobs/satelliteTyped"
 
 
 def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Optional[int] = None,
@@ -180,11 +191,111 @@ def _box(layer: QgsRasterLayer) -> Optional[list[float]]:
     return [e.xMinimum(), e.yMinimum(), e.xMaximum(), e.yMaximum()]
 
 
-def observed_image(layer: QgsRasterLayer) -> ObservedImage:
+@dataclass(frozen=True)
+class SatelliteLookup:
+    """What finding an image's 衛星名 needs: the names known (spelling, file names) and the catalogs (their sensor attribute)."""
+    choices: SatelliteChoices = NO_CHOICES
+    catalogs: Sequence[Any] = ()
+
+
+#: The satellite each file's metadata names (by path; '' none), read once (cleared by forget()).
+_metadata_names: dict[str, str] = {}
+_metadata_lock = threading.Lock()
+
+
+def forget() -> None:
+    """Forgets the files' metadata read (on the plugin's unload)."""
+    with _metadata_lock:
+        _metadata_names.clear()
+
+
+def metadata_satellite(layer: QgsMapLayer) -> str:
+    """
+    The satellite a layer's file names in its metadata (the default and
+    IMAGERY domains, a SICD's XML: satellites.satellite_in_metadata), '' when
+    none does or the file is not a GDAL one on this computer (a URL is not
+    opened again). Read once per file.
+    """
+    if not isinstance(layer, QgsRasterLayer) or layer.providerType() != "gdal":
+        return ""
+    path = source_of(layer)
+    if not path:
+        try:
+            path = QgsProviderRegistry.instance().decodeUri("gdal", _own_source(layer)).get("path") or ""
+        except Exception:  # noqa: BLE001
+            path = ""
+    path = str(path or "")
+    if not path or re.match(r"^/vsi(curl|s3|gs|az|adls|oss|swift|http)", path):
+        return ""
+    with _metadata_lock:
+        if path in _metadata_names:
+            return _metadata_names[path]
+    try:
+        from osgeo import gdal
+    except ImportError:
+        return ""
+    found = ""
+    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    try:
+        dataset = gdal.Open(path)
+        if dataset is not None:
+            items: dict[str, Any] = {}
+            for domain in ("", "IMAGERY"):
+                items.update(dataset.GetMetadata(domain) or {})
+            texts = [t for t in (dataset.GetMetadata("xml:DES") or []) if isinstance(t, str)]
+            found = satellite_in_metadata(items, texts)
+    except Exception:  # noqa: BLE001 (a file GDAL cannot read here says nothing)
+        found = ""
+    finally:
+        gdal.PopErrorHandler()
+    with _metadata_lock:
+        _metadata_names[path] = found
+    return found
+
+
+def image_satellite(layer: QgsMapLayer, lookup: Optional[SatelliteLookup] = None) -> tuple[str, str]:
+    """
+    衛星名 of a layer's image and where it came from (satellites.ORIGINS):
+    the catalog's (on the layer, else from the catalog's attributes kept on
+    it), the file's metadata, its name, or the one typed; ('', '') when none says.
+    """
+    lookup = lookup or SatelliteLookup()
+    own = clean_satellite(layer.customProperty(SATELLITE))
+    if own:
+        return own, "catalog"
+    if layer.customProperty(IMAGE_ID) and lookup.catalogs:
+        # Opened from the catalog before 衛星名 was kept on the layer (2026-11-20): its attributes are.
+        from .catalog_io import record_of_layer
+
+        try:
+            found = record_of_layer(layer, lookup.catalogs)
+        except Exception:  # noqa: BLE001
+            found = None
+        sensor = clean_satellite(found[0].sensor) if found else ""
+        if sensor:
+            return sensor, "catalog"
+    named = metadata_satellite(layer)
+    if named:
+        return lookup.choices.spelled(named), "metadata"
+    named = lookup.choices.in_file_name(file_name(layer))
+    if named:
+        return named, "name"
+    typed = clean_satellite(layer.customProperty(SATELLITE_TYPED))
+    if typed:
+        return typed, "manual"
+    return "", ""
+
+
+def set_typed_satellite(layer: QgsMapLayer, name: str) -> None:
+    """Keeps the 衛星名 typed for an image on its layer (so in the project)."""
+    layer.setCustomProperty(SATELLITE_TYPED, clean_satellite(name))
+
+
+def observed_image(layer: QgsRasterLayer, satellites: Optional[SatelliteLookup] = None) -> ObservedImage:
     """
     A layer's image: the catalog's id (else the file name) as its id and its
     name; its time from the layer, else its file (name, metadata), else the
-    one typed for it.
+    one typed for it; with `satellites`, its 衛星名 (image_satellite).
     """
     file = file_name(layer)
     image_id = str(layer.customProperty(IMAGE_ID) or "") or file
@@ -197,7 +308,9 @@ def observed_image(layer: QgsRasterLayer) -> ObservedImage:
     if t is None:
         t = manual_time(layer)
         origin = "manual" if t is not None else ""
-    return ObservedImage(id=image_id, name=image_id, time=t, box=_box(layer), layer_id=layer.id(), origin=origin)
+    satellite, satellite_origin = image_satellite(layer, satellites) if satellites is not None else ("", "")
+    return ObservedImage(id=image_id, name=image_id, time=t, box=_box(layer), layer_id=layer.id(), origin=origin,
+                         satellite=satellite, satellite_origin=satellite_origin)
 
 
 #: Providers of maps a server draws (background maps: XYZ tiles, WMS・WMTS, ArcGIS map services): not images.
@@ -214,11 +327,11 @@ def is_image_layer(layer: QgsMapLayer) -> bool:
     return bool(layer.customProperty(IMAGE_ID)) or layer.providerType() not in MAP_PROVIDERS
 
 
-def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
+def open_images(project: Optional[QgsProject] = None, satellites: Optional[SatelliteLookup] = None) -> list[ObservedImage]:
     """
     The project's raster layers as images to record on (not the background
     maps): the layers of one catalog image id (a record's images in its
-    folder) as one image (top of the layer tree first).
+    folder) as one image (top of the layer tree first); with `satellites`, their 衛星名.
     """
     project = project or QgsProject.instance()
     order = {layer_id: i for i, layer_id in enumerate(project.layerTreeRoot().findLayerIds())}
@@ -228,7 +341,7 @@ def open_images(project: Optional[QgsProject] = None) -> list[ObservedImage]:
     out: list = []
     by_id: dict[str, list] = {}
     for layer in rasters:
-        image = observed_image(layer)
+        image = observed_image(layer, satellites)
         if not layer.customProperty(IMAGE_ID):
             out.append(image)
             continue

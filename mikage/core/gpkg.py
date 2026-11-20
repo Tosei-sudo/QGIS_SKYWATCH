@@ -377,6 +377,7 @@ OBSERVATIONS = TableSpec(
         Column("PIXEL_X", "DOUBLE"),
         Column("PIXEL_Y", "DOUBLE"),
         Column("IMAGE_FILE", "TEXT(255)"),
+        Column("SATELLITE", "TEXT(255)"),
         Column("NOTE", "TEXT(1000)"),
         Column("OBSERVER", "TEXT(50)"),
         Column("UPDATED_BY", "TEXT(50)"),
@@ -406,6 +407,7 @@ AREAS = TableSpec(
         # The observation store (its label) the area belongs to, as the viewer keeps local areas per store.
         Column("STORE", "TEXT(100)"),
         Column("UNSEEN_REASON", "TEXT(40)"),
+        Column("SATELLITE", "TEXT(255)"),
     ),
     key="AREA_ID",
     description="確認範囲",

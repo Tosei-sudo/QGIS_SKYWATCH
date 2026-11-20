@@ -1423,7 +1423,7 @@ def test_images_without_their_files_are_recorded_on_from_the_catalog(plugin):
     assert (image.id, image.name, image.file, image.time) == ("C", "C", False, ms_of(c.acquired))
     assert image.box == pytest.approx([139.7, 35.6, 139.75, 35.65])
     assert obs.isVisible() and not any(w is widget for w in iface.bar.items())
-    assert obs.image_select.currentText().endswith("C（ファイルなし）")
+    assert obs.image_select.currentText().endswith("C（S2・ファイルなし）")  # its sensor: the records' 衛星名
     # The map at its footprint; recorded on the background map, with the catalog's id and time.
     assert _in_view(iface, image.box)
     rec = obs.book.submit(139.72, 35.62, FormValues(object="船 1", kind="船舶"))

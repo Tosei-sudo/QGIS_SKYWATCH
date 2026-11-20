@@ -44,7 +44,7 @@ from ..core.catalog.search import CatalogRecord, catalog_info, record_of, sensor
 from ..core.catalog.watch import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
-from .obs_images import IMAGE_FILE, IMAGE_ID, image_layer
+from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer
 from .overviews_io import before_open
 from .plan_layer import make_field, qdatetime
 
@@ -582,6 +582,9 @@ def remember(layer: QgsMapLayer, record: CatalogRecord, catalog: CatalogConfig, 
         layer.setCustomProperty(IMAGE_ID, record.id)
     if file:
         layer.setCustomProperty(IMAGE_FILE, file)
+    if (record.sensor or "").strip():
+        # The records' 衛星名 (obs_images.image_satellite).
+        layer.setCustomProperty(SATELLITE, record.sensor.strip())
     layer.setCustomProperty(CATALOG, catalog.label)
     layer.setCustomProperty(CATALOG_URL, catalog.url)
     layer.setCustomProperty(FEATURE, json.dumps(record.feature(), ensure_ascii=False))

@@ -88,6 +88,16 @@ def unseen_supported(store: Any) -> bool:
     return bool(can()) if callable(can) else False
 
 
+def satellite_supported(store: Any) -> bool:
+    """
+    Whether a store keeps 衛星名 (its layer has SATELLITE, 2026-11-20): the
+    local ones do; an Esri one once its layer has been read with it (no
+    question is asked here), else not.
+    """
+    can = getattr(store, "keeps_satellite", None)
+    return bool(can()) if callable(can) else False
+
+
 def _marked(items: list, now: Optional[int]) -> list:
     now = now_ms() if now is None else now
     return [replace(x, deleted_at=now, updated_at=now) for x in items]
@@ -122,6 +132,7 @@ class LocalObservationStore:
                 deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
                 pixel_x=r.get("PIXEL_X"), pixel_y=r.get("PIXEL_Y"), image_file=r.get("IMAGE_FILE") or "",
+                satellite=r.get("SATELLITE") or "",
             ))
         return out
 
@@ -130,7 +141,7 @@ class LocalObservationStore:
             "OBS_ID": o.id, "OBJECT_ID": o.object_id, "OBJECT_NAME": o.object_name, "IMAGE_ID": o.image_id,
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
             "PRESENT": present_value(o), "UNSEEN_REASON": o.unseen or None, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
-            "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None,
+            "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None, "SATELLITE": o.satellite or None,
             "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
@@ -141,6 +152,9 @@ class LocalObservationStore:
         return marked
 
     def keeps_unseen(self) -> bool:
+        return True
+
+    def keeps_satellite(self) -> bool:
         return True
 
     def clear(self, deleted_only: bool = False) -> int:
@@ -173,7 +187,7 @@ class LocalAreaStore:
                 image_time=datetime_ms(r.get("IMAGE_TIME")), ring=g[0], kind=r.get("KIND") or "", note=r.get("NOTE") or "",
                 created_at=created, updated_at=datetime_ms(r.get("UPDATED_AT")) or created,
                 deleted_at=datetime_ms(r.get("DELETED_AT")), recorded_by=r.get("OBSERVER") or "",
-                unseen=(r.get("UNSEEN_REASON") or "").strip(),
+                unseen=(r.get("UNSEEN_REASON") or "").strip(), satellite=r.get("SATELLITE") or "",
             ))
         return out
 
@@ -182,7 +196,7 @@ class LocalAreaStore:
             "AREA_ID": a.id, "IMAGE_ID": a.image_id, "IMAGE_NAME": a.image_name, "IMAGE_TIME": datetime_text(a.image_time),
             "KIND": a.kind, "NOTE": a.note, "OBSERVER": a.recorded_by, "CREATED_AT": datetime_text(a.created_at),
             "UPDATED_AT": datetime_text(a.updated_at), "DELETED_AT": datetime_text(a.deleted_at), "STORE": self.of,
-            "UNSEEN_REASON": a.unseen or None, "geom": encode_polygon([a.ring]),
+            "UNSEEN_REASON": a.unseen or None, "SATELLITE": a.satellite or None, "geom": encode_polygon([a.ring]),
         } for a in areas])
 
     def remove(self, areas: list[CheckedArea], now: Optional[int] = None) -> list[CheckedArea]:
@@ -191,6 +205,9 @@ class LocalAreaStore:
         return marked
 
     def keeps_unseen(self) -> bool:
+        return True
+
+    def keeps_satellite(self) -> bool:
         return True
 
     def clear(self, deleted_only: bool = False) -> int:
@@ -375,7 +392,7 @@ class EsriObservationStore:
             f["id"]: o.id, f["imageId"]: o.image_id, f["imageName"]: o.image_name, f["imageTime"]: o.image_time,
             f["objectId"]: o.object_id, f["objectName"]: o.object_name, f["kind"]: o.kind, f["activity"]: o.activity,
             f["present"]: None if o.unseen else o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
-            f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None,
+            f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None, f["satellite"]: o.satellite or None,
             f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at, f["unseen"]: o.unseen or None,
         }
@@ -390,6 +407,10 @@ class EsriObservationStore:
     def keeps_unseen(self) -> bool:
         """Whether the layer (as read) has the 不可の理由 attribute."""
         return self._layer.has(self.config.fields["unseen"])
+
+    def keeps_satellite(self) -> bool:
+        """Whether the layer (as read) has the 衛星名 attribute."""
+        return self._layer.has(self.config.fields["satellite"])
 
     def _record_of(self, feature: dict[str, Any], oid: str) -> Optional[Observation]:
         f = self.config.fields
@@ -413,6 +434,7 @@ class EsriObservationStore:
             length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])),
             width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
             pixel_x=_number_of(a.get(f["pixelX"])), pixel_y=_number_of(a.get(f["pixelY"])), image_file=_text(a.get(f["imageFile"])),
+            satellite=_text(a.get(f["satellite"])),
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
@@ -420,7 +442,7 @@ class EsriObservationStore:
     def as_kept(self, records: list[Observation]) -> list[Observation]:
         """
         The records as the layer keeps them: the values of the optional
-        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19),
+        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19, or SATELLITE, 2026-11-20),
         so a record read back is the one saved (not 「ほかの人の記録」 changed since).
         """
         types = self._layer.known_types()
@@ -429,7 +451,7 @@ class EsriObservationStore:
         f = self.config.fields
         blank = {name: value for role, name, value in (
             ("length", "length", None), ("heading", "heading", None), ("width", "width", None), ("pixelX", "pixel_x", None),
-            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("confidence", "confidence", ""),
+            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("satellite", "satellite", ""), ("confidence", "confidence", ""),
         ) if f[role] not in types}
         return [replace(o, **blank) for o in records] if blank else records
 
@@ -712,7 +734,7 @@ class EsriAreaStore:
         values = {
             f["id"]: a.id, f["imageId"]: a.image_id, f["imageName"]: a.image_name, f["imageTime"]: a.image_time,
             f["kind"]: a.kind, f["note"]: a.note, f["recordedBy"]: a.recorded_by or "", f["created"]: a.created_at,
-            f["updated"]: a.updated_at, f["deleted"]: a.deleted_at, f["unseen"]: a.unseen or None,
+            f["updated"]: a.updated_at, f["deleted"]: a.deleted_at, f["unseen"]: a.unseen or None, f["satellite"]: a.satellite or None,
         }
         if a.unseen and f["unseen"] not in types:
             # Without it the area would read back as a 確認範囲 (everything there recorded): not saved.
@@ -725,6 +747,17 @@ class EsriAreaStore:
     def keeps_unseen(self) -> bool:
         """Whether the layer (as read) has the 不可の理由 attribute."""
         return self._layer.has(self.config.fields["unseen"])
+
+    def keeps_satellite(self) -> bool:
+        """Whether the layer (as read) has the 衛星名 attribute."""
+        return self._layer.has(self.config.fields["satellite"])
+
+    def as_kept(self, areas: list[CheckedArea]) -> list[CheckedArea]:
+        """The areas as the layer keeps them: 衛星名 left out when it has no such attribute (a layer made before 2026-11-20)."""
+        types = self._layer.known_types()
+        if types is None or self.config.fields["satellite"] in types:
+            return areas
+        return [replace(a, satellite="") if a.satellite else a for a in areas]
 
     scoped = True
 
@@ -769,6 +802,7 @@ class EsriAreaStore:
                 image_time=ms_of(a.get(f["imageTime"])), ring=rings[0], kind=_text(a.get(f["kind"])), note=_text(a.get(f["note"])),
                 recorded_by=_text(a.get(f["recordedBy"])), created_at=created, updated_at=ms_of(a.get(f["updated"])) or created,
                 deleted_at=ms_of(a.get(f["deleted"])), unseen=_text(a.get(f["unseen"])).strip(),
+                satellite=_text(a.get(f["satellite"])),
             ))
         return out
 

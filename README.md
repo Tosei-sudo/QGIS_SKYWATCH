@@ -755,6 +755,16 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
   - 不可の記録を開いて「更新」すると、見えていた（継続）に直る。不可範囲を削除すると、その中の不可の記録もいっしょに削除する（ほかの不可範囲の中のものは残す）。復元すると中の前後の画像のモノをまた不可として記録
   - 不可の記録は AI の学習の教師データにせず、不可範囲は学習の背景（何もない所）にも使わない（確認範囲と重なるところは確認範囲から除く）。通報にもならない。同一候補は見えた記録だけから選ぶ
   - 保存先の属性: 観測記録・確認範囲とも `UNSEEN_REASON`（不可の理由、`fields.unseen`）。不可の記録は `PRESENT` を空にする。Esri のレイヤーにこの属性がなければ「不可」「不可範囲」のボタンを出さない（読み込んでから判断）。古い版の MIKAGE は不可範囲を確認範囲として、不可の記録を在として読むので、全員が新しい版にしてから使う
+- **衛星名**（2026-11-20）: 記録と確認範囲・不可範囲に、その画像を撮った衛星（センサー）の名前を残す（保存先の `SATELLITE`、`fields.satellite`）。カタログ外の画像は画像 ID がファイル名なので、カタログから衛星を引けないため。入る名前は、次の順で最初に分かったもの:
+  1. 画像カタログから開いた画像と「ファイルなしで記録」の画像: カタログの「センサー」（`imageCatalogs[].fields.sensor`）。前の版で開いたままのプロジェクトの画像も、レイヤーに残っているカタログの属性から読む
+  2. ファイルのメタデータ: GDAL の IMAGERY の衛星 ID（Maxar・Pleiades・SPOT・Landsat など）、NITF の画像の出どころ（ISORCE）、Sentinel の SAFE の衛星名、SICD（複素 SAR）の CollectorName など
+  3. ファイル名: 画像カタログのセンサー・衛星カタログの名前・[衛星名の対応表](#衛星名の対応表satellitealiases)の名前が、ファイル名の語（英数字のまとまり。続く 2〜3 語をつなげたものも）と同じとき（3 文字以上の名前だけ。`WV3_20241010.tif` の `WV3`、`WorldView-3_….tif`）
+  4. 手入力: 分からないときは画像の行の下に「衛星不明（入力）」が出る。候補は画像カタログのセンサーと衛星カタログの名前（設定を読んだときに裏で読む）で、直接入れてもよい。入れると、その画像の記録・確認範囲のうち衛星名が空のものにも入る（撮像日時の入力と同じ）。入れた名前はレイヤーに残る（プロジェクトに保存）
+  - 2・3 で分かった名前は、対応表で同じ衛星と分かれば画像カタログの書き方にそろえる（`WorldView-3` → `WV03`。ダッシュボードで同じ衛星が別々に数えられないように）
+  - 画像の一覧に「（WV03）」のように出し、どこから分かったか（カタログ・メタデータ・ファイル名・手入力）は一覧のツールチップに出る
+  - 入るのは新しい記録・範囲と、衛星名が空の記録を直して保存したとき（その画像が開いているか一覧にあり、衛星名が分かるとき）。前からある記録はプラグインからは埋めない（カタログの画像の記録は [docs/arcgis-setup.md](docs/arcgis-setup.md#前からある記録に衛星名を入れる任意) の手順で埋められる）。継続で作った記録はその画像の衛星名
+  - Esri のレイヤーに `SATELLITE` がなければ送らず、「衛星不明（入力）」も出さない（読み込んでから判断）。前の版の MIKAGE が記録を直しても、送らない属性なので衛星名は消えない
+  - 使い道: エクスポート・通報の項目 `satellite`、レイヤー化の「衛星名」、ダッシュボードの `VW_OBS_RECORD.SATELLITE`・`VW_OBS_IMAGE_WORK.SATELLITE`（衛星ごとの件数、雲などの不可範囲の割合）。分解能や光学・SAR の別は、衛星名で衛星カタログ（`TBL_SATELLITE`）と結べば引ける
 - 印はドラッグで場所を直せる。削除は削除日時を入れて残し、「詳細」の「削除済みも表示」から復元
 - 「クリック記録」の行の「印」で地図の記録の表示を選ぶ（PC ごとに記憶）: 「通常」（既定）・「枠だけ」（何も塗らない。点は分類の色の輪（外側に確度の色の輪）、幅のある記録は外形の枠と前端の矢印だけで中心線なし、2 点の記録は細い線、確認範囲・通報済みの円も枠だけ。下の画像が透けて見える）・「非表示」（入力中の点・外形とフォームで開いている記録だけ。印のクリック・ドラッグはできず、クリックは新しい記録になる）。H（ドック内）・Ctrl+Alt+D（どこからでも）で「非表示」と元の表示を切り替え
 - 「一括編集…」: 一覧で Ctrl・Shift + クリックで複数の記録を選ぶと出る。種別・活動・確度のうちチェックした項目をまとめて変更（消失の記録は活動なしのまま）。Esri の保存先でほかの人が先に変えた記録は保存せず件数を表示し、残りは保存
@@ -968,7 +978,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `file` | パスの文字列か `{ "path", "encoding": "utf-8"・"utf-8-sig"・"cp932", "append" }`。パスに `{name}`・`{now:%Y%m%d}`（`{now:%Y%m%d@UTC}` も可）。その文字コードで書けない文字（cp932 の —・é・絵文字など）はファイルだけ ? にして画面に出す | なし |
 | `columns` | 通報テーブルに書く記録の値 `{ "属性名": 項目 }`（項目は `fields` と同じ書き方。属性が文字列でなければ、使った項目の値そのもの） | なし |
 
-項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`・`note.en`（備考の英訳。[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の `translate` で、通報の画面の「備考を英訳」で作る。作るまで空）。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
+項目（`source`）: `id`・`imageId`・`imageName`・`imageTime`・`satellite`（衛星名）・`objectId`・`objectName`・`kind`（`level` で階層。1 が最上位、-1 が最下位）・`activity`・`present`（あり／なし。`map` で `{ "true": "在", "false": "消失" }`）・`confidence`・`note`・`lon`・`lat`・`length`・`heading`・`width`（`digits` で小数の桁）・`recordedBy`・`updatedBy`・`created`・`updated`・`area`・`rule`・`manual`・`report`（フォーマットの名前）・`reportedAt`・`reportedBy`・`index`（何件目）・`count`（件数）・`score`（重要度スコア）・`similar`（似た記録の件数）・`place`（いちばん小さい地名）・`placeKind`（その種類）・`places`（含む地名すべて、小さい順）・`country`（国コード）・`countryName`（国名）。英語: `confidence.en`・`area.en`・`place.en`・`placeKind.en`・`places.en`・`countryName.en`・`note.en`（備考の英訳。[文章の手伝い](#文章の手伝い小さな生成-aitextassist)の `translate` で、通報の画面の「備考を英訳」で作る。作るまで空）。当てはまったものの属性: `country.属性名`・`place.属性名`・`places.属性名`・`area.属性名`・`rule.属性名`・`confidence.キー`（下の「[項目の書き方](#通報の項目の書き方度分秒複数の値代わりの項目属性)」）。
 
 #### 通報の項目の書き方（度分秒・複数の値・代わりの項目・属性）
 
@@ -1095,7 +1105,7 @@ QGIS だけでは、SICD の実数部（I）と虚数部（Q）は別々のバ�
 | `dateFormat` | 日時の書式 | `iso` |
 | `digits` | 経度・緯度の小数の桁（長さ・向き・幅は 1 桁） | `7` |
 
-項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false。不可の記録は空）・`unseen`（不可の理由。見えた記録は空）・`confidence`・`imageTime`・`imageId`・`imageName`・`lon`・`lat`・`length`・`heading`・`width`・`pixelX`・`pixelY`（画像ファイルの画素位置）・`imageFile`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
+項目（`source`）: `id`・`objectId`・`objectName`・`kind`・`activity`・`present`（CSV は あり／なし、JSON は true／false。不可の記録は空）・`unseen`（不可の理由。見えた記録は空）・`confidence`・`imageTime`・`imageId`・`imageName`・`satellite`（衛星名）・`lon`・`lat`・`length`・`heading`・`width`・`pixelX`・`pixelY`（画像ファイルの画素位置）・`imageFile`・`note`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`place`・`placeKind`・`places`・`geofences`・`latLon`・`dms`・`mgrs`・`utm`・`geometry`・`index`（何件目）・`count`・`exportedAt`・`exportedBy`・`periodStart`・`periodEnd`・`periodBasis`・`areaName`・`format`。
 
 ```jsonc
 "observationExports": {
@@ -2028,7 +2038,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 
 | 項目 | 形 | 主な中身 | 既定 | 詳しく |
 | --- | --- | --- | --- | --- |
-| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`namedAreaObjectId`（地名の OBJECTID。Esri の属性ルールが入れ、プラグインは書かない）。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
+| `observationStores` | 配列 | `url`（編集できるポイントレイヤー、必須）、`fields`（`id`・`imageId`・`imageName`・`imageTime`・`objectId`・`objectName`・`kind`・`activity`・`present`・`note`・`length`・`heading`・`width`・`pixelX`・`pixelY`・`imageFile`・`satellite`（衛星名）・`unseen`・`confidence`・`recordedBy`・`updatedBy`・`created`・`updated`・`deleted`・`namedAreaObjectId`（地名の OBJECTID。Esri の属性ルールが入れ、プラグインは書かない）。既定は `OBS_ID`・`LENGTH_M`・`WIDTH_M` など）、`where`、`softDelete`（既定 `true`: 削除は印を付けるだけ）、`refreshMinutes`（ほかの人の記録を読み直す間隔（分）。なしなら画像の切り替えなどのときだけ。[読み直し](#ほかの人の記録の読み直しrefreshminutes)）、`kinds`・`activities`・`confidences`・`taxonomy`（この保存先の語彙）、`areas`（確認範囲のポリゴンレイヤー。URL か `{ "url", "fields", "softDelete", "token" }`）、`taxonomyTable`（共有の分類テーブル。URL か `{ "url", "fields", "token" }`。役割は `path`・`levels`・`nameLabel`・`members`・`specs`・`photos`・`activities`・`order`、既定の属性名は `PATH`・…・`ACTIVITIES`・`SORT_ORDER`）、`token` | なし | [観測記録](#観測記録)、[活動](#活動大分類ごとの切り替え) |
 | `localObservations` | `true`・`false` | `false` でローカルの GeoPackage を保存先にしない（`observationStores` だけ） | `true` | [観測記録](#観測記録) |
 | `offlineWork` | `true`・`false`・オブジェクト | サーバー障害時のオフライン作業。`enabled`（既定 `true`）、`cacheMB`（控えの上限、既定 500）、`probeSeconds`（復旧を確かめる間隔、既定 30） | 有効 | [オフライン作業](#サーバー障害時のオフライン作業offlinework) |
 | `preload` | `true`・`false`・配列 | 起動直後に裏で読む Esri の表。配列は `satellites`・`requests`・`events` から（前の版の `savedPlans` は読み飛ばす） | `true`（すべて） | [先読み](#先読み起動直後に-esri-の表を読む) |
@@ -2405,6 +2415,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `PIXEL_X` | 画素X | `Double` | 記録の点の、画像ファイルの左上からの画素位置（右へ、全解像度、小数あり）。記録したとき・位置を直したときに画像が開いていれば入る。位置ずらしした画像でも元のファイルの画素。画像の外ならマイナスや幅より大きい値。AI 学習で枠をこの画素に置く。無くても動く | `pixelX` |
 | `PIXEL_Y` | 画素Y | `Double` | 同じく下へ数えた画素位置 | `pixelY` |
 | `IMAGE_FILE` | 画像ファイル | `String(255)` | その画素位置のファイル（フォルダのレコードの画像はフォルダ内のパス、ほかはファイル名） | `imageFile` |
+| `SATELLITE` | 衛星名 | `String(255)` | 画像を撮った衛星（センサー）。カタログの画像はカタログの「センサー」、カタログ外の画像はメタデータ・ファイル名から、分からなければ手入力（[衛星名](#観測記録)）。書き方は画像カタログにそろえる。以前の記録は空。無くても動く（2026-11-20 に追加） | `satellite` |
 | `CONFIDENCE` | 確度 | `String(64)` | 確定・推定・不明など | `confidence` |
 | `OBSERVER` | 記録者 | `String(255)` | 記録した人 | `recordedBy` |
 | `UPDATED_BY` | 更新者名 | `String(255)` | 最後に直した人（記録者と同じ名前の欄） | `updatedBy` |
@@ -2431,6 +2442,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `UPDATED_AT` | 修正日時 | `Date` | 直した日時 | `updated` |
 | `DELETED_AT` | 削除日時 | `Date` | 削除した日時 | `deleted` |
 | `UNSEEN_REASON` | 不可の理由 | `String(40)` | 不可範囲の理由（雲・霞など）。空なら確認範囲。無ければ不可範囲は使えない（2026-11-19 に追加） | `unseen` |
+| `SATELLITE` | 衛星名 | `String(255)` | その画像の衛星名（観測記録と同じ）。以前の範囲は空。無くても動く（2026-11-20 に追加） | `satellite` |
 
 ### `TBL_TAXONOMY`（分類体系）
 

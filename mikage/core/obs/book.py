@@ -29,8 +29,9 @@ from .model import (
     recorded_images, state_text, unseen_label,
 )
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
+from .satellites import clean as clean_satellite
 from .scope import RecordQuery, grown, merged
-from .stores import AreaStore, ObservationStore, TaxonomyStore, unseen_supported
+from .stores import AreaStore, ObservationStore, TaxonomyStore, satellite_supported, unseen_supported
 from .taxonomy import (
     SpecField, Taxon, activities_at, find, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon, remove_taxon, rewrite,
     taxonomy_of, update_taxon, with_kinds, within,
@@ -58,10 +59,13 @@ class ObservedImage:
     origin: str = ""
     #: Every layer of the image when it has several (a catalog record's images in its folder), `layer_id` the first.
     layers: tuple = ()
+    #: 衛星名 (core/obs/satellites.py), '' when not known; where it came from (satellites.ORIGINS), '' when unknown.
+    satellite: str = ""
+    satellite_origin: str = ""
 
     @property
     def ref(self) -> ImageRef:
-        return ImageRef(self.id, self.name, self.time)
+        return ImageRef(self.id, self.name, self.time, self.satellite)
 
     @property
     def file(self) -> bool:
@@ -86,8 +90,10 @@ def joined_image(parts: Sequence[ObservedImage], name: str = "") -> ObservedImag
     boxes = [p.box for p in parts if p.box]
     box = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)] if boxes else None
     layers = tuple(dict.fromkeys(i for p in parts for i in p.layer_ids))
+    named = next((p for p in parts if p.satellite), None)
     return ObservedImage(id=first.id, name=name or first.name, time=earliest.time if earliest else None, box=box,
-                         layer_id=layers[0] if layers else None, origin=earliest.origin if earliest else "", layers=layers)
+                         layer_id=layers[0] if layers else None, origin=earliest.origin if earliest else "", layers=layers,
+                         satellite=named.satellite if named else "", satellite_origin=named.satellite_origin if named else "")
 
 
 class Prefs:
@@ -216,6 +222,8 @@ class ObservationBook:
         self._open: list[ObservedImage] = []
         #: Times typed for images that do not say (by image id).
         self.manual_times: dict[str, int] = {}
+        #: 衛星名 typed for images that do not say (by image id).
+        self.manual_satellites: dict[str, str] = {}
         self.listed: list[ListedImage] = parse_listed_images(self.prefs.get(self._listed_key))
         #: What the last record said (offered first next time; kept per store across sessions).
         self.last = self._read_last()
@@ -557,14 +565,20 @@ class ObservationBook:
 
     def _with_manual(self, info: ObservedImage) -> ObservedImage:
         manual = self.manual_times.get(info.id)
-        return replace(info, time=manual, origin="manual") if info.time is None and manual is not None else info
+        if info.time is None and manual is not None:
+            info = replace(info, time=manual, origin="manual")
+        satellite = self.manual_satellites.get(info.id)
+        if not info.satellite and satellite:
+            info = replace(info, satellite=satellite, satellite_origin="manual")
+        return info
 
     def _order(self, selected: Optional[str] = None) -> None:
         entries = [self._with_manual(i) for i in self._open]
         ids = {e.id for e in entries}
         for listed in self.listed:
             if listed.id not in ids:
-                entries.append(self._with_manual(ObservedImage(listed.id, listed.name, listed.time, listed.box, None, "manual" if listed.time is not None else "")))
+                entries.append(self._with_manual(ObservedImage(listed.id, listed.name, listed.time, listed.box, None,
+                                                               "manual" if listed.time is not None else "", satellite=listed.satellite)))
         entries.sort(key=lambda e: (e.time if e.time is not None else float("inf"), e.name))
         was = self.current
         keep = None
@@ -695,6 +709,45 @@ class ObservationBook:
             self._save_records(timeless, f"{len(timeless)} 件の記録に撮像日時を入力")
         return timeless
 
+    def keeps_satellite(self) -> bool:
+        """Whether the store keeps 衛星名 (its layer has SATELLITE: a local one does; an Esri one once read)."""
+        return satellite_supported(self.store)
+
+    def set_image_satellite(self, name: str) -> list[Observation]:
+        """
+        衛星名 of the image recorded now, typed (for one that does not say): its
+        records and checked areas made without it get it (as 撮像日時の入力 does).
+        """
+        entry = self.current
+        name = clean_satellite(name)
+        if entry is None or not name:
+            return []
+        with self.lock:
+            self.manual_satellites[entry.id] = name
+            if not entry.file:
+                self.listed = [replace(i, satellite=name) if i.id == entry.id and not i.satellite else i for i in self.listed]
+                self._save_listed()
+            self._order()
+        image = self.current if self.current is not None and self.current.id == entry.id else None
+        name = image.satellite if image is not None and image.satellite else name
+        now = now_ms()
+        unnamed = [replace(o, satellite=name, updated_at=now) for o in self.records if o.image_id == entry.id and not o.satellite]
+        areas = [replace(a, satellite=name, updated_at=now) for a in self.areas if a.image_id == entry.id and not a.satellite]
+        if areas:
+            try:
+                self.area_store.save(areas)
+            except Exception as error:  # noqa: BLE001 (said; the records still get it)
+                self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
+            else:
+                kept = {a.id: a for a in self._kept_areas(areas)}
+                with self.lock:
+                    self.areas = [kept.get(a.id, a) for a in self.areas]
+        if unnamed:
+            self._save_records(unnamed, f"{len(unnamed)} 件の記録に衛星名「{name}」を入力")
+        else:
+            self._say(f"衛星名「{name}」を入力" + (f"（確認範囲 {len(areas)} 件）" if areas else ""))
+        return unnamed
+
     def inside(self) -> Optional[Callable[[float, float], bool]]:
         """The current image's footprint test."""
         box = self.current.box if self.current else None
@@ -807,6 +860,31 @@ class ObservationBook:
         except Exception:  # noqa: BLE001 (as they are)
             return rows
 
+    def _kept_areas(self, areas: list[CheckedArea]) -> list[CheckedArea]:
+        """The checked areas as the store keeps them (an Esri layer without SATELLITE: none)."""
+        as_kept = getattr(self.area_store, "as_kept", None)
+        try:
+            return as_kept(areas) if callable(as_kept) else areas
+        except Exception:  # noqa: BLE001 (as they are)
+            return areas
+
+    def _satellite_of(self, image_id: str) -> str:
+        """衛星名 of an image open or listed now ('' when not known or not there)."""
+        entry = next((e for e in self.images if e.id == image_id), None)
+        return entry.satellite if entry is not None else ""
+
+    def _named(self, rows: list[Observation]) -> list[Observation]:
+        """
+        The records with their image's 衛星名 (core/obs/satellites.py): a record
+        without one gets it when its image is open or listed now and says it
+        (a new one, one changed); one that has it keeps it.
+        """
+        out = []
+        for o in rows:
+            satellite = "" if o.satellite else self._satellite_of(o.image_id)
+            out.append(replace(o, satellite=satellite) if satellite else o)
+        return out
+
     def _save_records(self, rows: list[Observation], done: str) -> Optional[list[Observation]]:
         """Saves records in the store and in the list; the records as saved, None when the store refused."""
         if not rows:
@@ -815,7 +893,7 @@ class ObservationBook:
         known = {o.id for o in self.records}
         # Who made (a new record) and who changed it: the one recording now.
         rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
-        rows = self._placed(rows)
+        rows = self._named(self._placed(rows))
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
@@ -917,7 +995,7 @@ class ObservationBook:
             flow = self.flow_by_name(name, kind, ask=True)
             known = (flow.object_id, flow.name) if flow else None
         return Observation(
-            id=new_observation_id(), image_id=image.id, image_name=image.name, image_time=image.time,
+            id=new_observation_id(), image_id=image.id, image_name=image.name, image_time=image.time, satellite=image.satellite,
             object_id=known[0] if known else new_object_id(),
             object_name=known[1] if known else (name or self.default_name(kind)),
             kind=kind, activity=activity, present=present, unseen=unseen, confidence=confidence, note=values.note, lon=lon, lat=lat,
@@ -987,8 +1065,8 @@ class ObservationBook:
         return self.shelf.get(self.store.label, draft_id)
 
     def keep_draft(self, draft: Draft, replaces: Optional[str] = None) -> None:
-        # Where it is in its image, found now (the image may be closed when it is sent).
-        draft = replace(draft, record=self._placed([draft.record])[0])
+        # Where it is in its image and its 衛星名, found now (the image may be closed when it is sent).
+        draft = replace(draft, record=self._named(self._placed([draft.record]))[0])
         self.shelf.keep(self.store.label, draft, replaces)
         self.last_draft_id = draft.id
 
@@ -1377,13 +1455,14 @@ class ObservationBook:
         now = now_ms()
         area = CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
                            kind="" if unseen else kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
-                           recorded_by=self.observer(), unseen=unseen)
+                           recorded_by=self.observer(), unseen=unseen, satellite=info.satellite)
         what = "不可範囲" if unseen else "確認範囲"
         try:
             self.area_store.save([area])
         except Exception as error:  # noqa: BLE001
             self._say(f"{self.area_store.label} への{what}の保存失敗: {_error_text(error)}")
             return None
+        area = self._kept_areas([area])[0]
         with self.lock:
             self.areas = [*self.areas, area]
         here = self.current is not None and info.id == self.current.id
@@ -1412,7 +1491,7 @@ class ObservationBook:
                 points.append(list(points[0]))
             made.append(CheckedArea(id=new_area_id(), image_id=info.id, image_name=info.name, image_time=info.time, ring=points,
                                     kind=kind_of(path_of(kind)), note=note.strip(), created_at=now, updated_at=now, deleted_at=None,
-                                    recorded_by=self.observer()))
+                                    recorded_by=self.observer(), satellite=info.satellite))
         if not made:
             return []
         try:
@@ -1420,6 +1499,7 @@ class ObservationBook:
         except Exception as error:  # noqa: BLE001
             self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
             return None
+        made = self._kept_areas(made)
         with self.lock:
             self.areas = [*self.areas, *made]
         self._say(f"確認範囲 {len(made)} 件を記録")

@@ -45,6 +45,7 @@ from ..core.obs.flows import (
 from ..core.obs.geo import get_distance, js_round, km_text
 from ..core.obs.mine import is_mine, my_names
 from ..core.obs.model import UNSEEN, Observation, state_text, unseen_label
+from ..core.obs.satellites import ORIGINS as SATELLITE_ORIGINS
 from ..core.obs.scope import RecordQuery
 from ..core.obs.output import observation_layers
 from ..core.obs.setup import StoreSet, store_sets
@@ -57,7 +58,7 @@ from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.listed_layers import ListedLayers, listed_image_of
-from ..qgis_io.obs_images import image_layers, open_images, set_manual_time
+from ..qgis_io.obs_images import SatelliteLookup, image_layers, open_images, set_manual_time, set_typed_satellite
 from ..qgis_io.obs_layers import observation_memory_layer
 from ..qgis_io.pixel_place import locator as pixel_locator
 from ..qgis_io.tasks import run_task
@@ -231,6 +232,8 @@ class ObservationDock(PluginDock):
         self._after_read: dict[int, list] = {}
         #: Whether the dock shows only its note (no image chosen, or no store): None before the first render.
         self._idle: Optional[bool] = None
+        #: The settings the satellite names were asked for (_read_satellite_choices).
+        self._satellites_asked = None
         self.said.connect(self._show_status)
         #: The images without their files as layers of their footprints (removing one takes its image off the list).
         self.footprints = ListedLayers(self, self._footprints_removed)
@@ -369,6 +372,24 @@ class ObservationDock(PluginDock):
         t.addWidget(self._button(tr("入力"), "", self._set_image_time))
         self.time_row.hide()
         b.addWidget(self.time_row)
+
+        # 衛星名 of an image that does not say (tsudo 2026-11-20: images outside the catalog).
+        self.satellite_row = QWidget()
+        t = QHBoxLayout(self.satellite_row)
+        t.setContentsMargins(0, 0, 0, 0)
+        t.addWidget(QLabel(tr("衛星不明（入力）")))
+        self.satellite_input = QComboBox()
+        self.satellite_input.setEditable(True)
+        self.satellite_input.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.satellite_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.satellite_input.setToolTip(tr("この画像を撮った衛星（センサー）。候補は画像カタログのセンサーと衛星カタログの名前。直接入力も可。"
+                                           "この画像の記録・確認範囲のうち衛星名が空のものにも入る"))
+        self.satellite_input.lineEdit().setPlaceholderText(tr("例: WV03"))
+        self.satellite_input.lineEdit().returnPressed.connect(self._set_image_satellite)
+        t.addWidget(self.satellite_input, 1)
+        t.addWidget(self._button(tr("入力"), "", self._set_image_satellite))
+        self.satellite_row.hide()
+        b.addWidget(self.satellite_row)
 
         # No image chosen (tsudo 2026-11-10): only this note. What follows (recording, the lists, the forms) waits
         # for an image, and the records are not read until then.
@@ -833,6 +854,7 @@ class ObservationDock(PluginDock):
         self.store_select.blockSignals(False)
         self.store_select.setVisible(len(self.sets) > 1)
         self._store_chosen(self.store_select.currentIndex())
+        self._fill_satellite_input()
 
     def _book_of(self, s: StoreSet) -> ObservationBook:
         book = self.books.get(s.label)
@@ -1351,8 +1373,61 @@ class ObservationDock(PluginDock):
         if self.book is None:
             return
         active = self.iface.activeLayer()
-        self.book.set_open_images(open_images(), active.id() if isinstance(active, QgsRasterLayer) else None)
+        images = open_images(satellites=self._satellite_lookup())
+        self.book.set_open_images(images, active.id() if isinstance(active, QgsRasterLayer) else None)
         self.render()
+        if any(not i.satellite or i.satellite_origin == "metadata" for i in images):
+            # Names to look for in file names and to spell by: read once they are needed (an image outside the catalog).
+            self._read_satellite_choices()
+
+    def _satellite_lookup(self) -> SatelliteLookup:
+        """What finding the images' 衛星名 needs: the names read so far and the catalogs."""
+        return SatelliteLookup(self.context.known_satellite_choices(), tuple(self.context.config.image_catalogs))
+
+    def _read_satellite_choices(self) -> None:
+        """
+        The satellite names (the image catalogs' sensors, the satellite
+        catalogs' names, the alias table) read in the background, once per
+        settings file: then the images' 衛星名 are looked for again (file names,
+        spelling) and offered in 「衛星不明（入力）」.
+        """
+        c = self.context.config
+        if self._satellites_asked is c or self.context.satellite_choices_read():
+            return
+        # Once per settings file (one that could not be read whole is not asked again on every change of layers).
+        self._satellites_asked = c
+        if not (any(x.fields.get("sensor") for x in c.image_catalogs) or c.satellite_catalogs or c.satellite_aliases):
+            return
+        config = c
+
+        def done(choices) -> None:
+            if self.context.config is not config:
+                return
+            self._fill_satellite_input()
+            if choices:
+                self.refresh_images()
+
+        run_task(self.tr("衛星名の候補の読み込み"), lambda task: self.context.satellite_choices(cancelled=task.isCanceled), done,
+                 lambda _message: None)
+
+    def _fill_satellite_input(self) -> None:
+        """The names offered in 「衛星不明（入力）」 (what is typed there is kept)."""
+        typed = self.satellite_input.currentText()
+        self.satellite_input.blockSignals(True)
+        self.satellite_input.clear()
+        self.satellite_input.addItems(self.context.known_satellite_choices().offered())
+        self.satellite_input.setCurrentIndex(-1)
+        self.satellite_input.setEditText(typed)
+        self.satellite_input.blockSignals(False)
+
+    def _image_tip(self, image: Optional[ObservedImage]) -> str:
+        """The image chooser's tip: the image, and its 衛星名 with where it came from."""
+        if image is None:
+            return self.tr("画像")
+        if not image.satellite:
+            return self.tr("画像: {n}\n衛星名: 不明").format(n=image.name)
+        origin = SATELLITE_ORIGINS.get(image.satellite_origin, "")
+        return self.tr("画像: {n}\n衛星名: {s}").format(n=image.name, s=image.satellite) + (f"（{origin}）" if origin else "")
 
     def _layers_changed(self, *_args) -> None:
         self.refresh_images()
@@ -1545,6 +1620,20 @@ class ObservationDock(PluginDock):
         for layer in image_layers(image):
             set_manual_time(layer, t)
         self.do(self.tr("撮像日時の入力"), lambda b: b.set_image_time(t))
+
+    def _set_image_satellite(self) -> None:
+        """「衛星不明（入力）」: the 衛星名 typed (or chosen) for the image recorded on; its records and areas without one get it."""
+        image = self.book.current if self.book else None
+        name = " ".join(self.satellite_input.currentText().split())
+        if image is None:
+            return
+        if not name:
+            self._show_status(self.tr("衛星名を入力（例: WV03）"))
+            return
+        for layer in image_layers(image):
+            set_typed_satellite(layer, name)
+        self.satellite_input.setEditText("")
+        self.do(self.tr("衛星名の入力"), lambda b: b.set_image_satellite(name))
 
     def _apply_only(self, *_args) -> None:
         """
@@ -3183,8 +3272,10 @@ class ObservationDock(PluginDock):
         self.image_select.clear()
         for e in book.images if book else []:
             files = len(e.layer_ids)
-            note = "（ファイルなし）" if not e.file else f"（{files} ファイル）" if files > 1 else ""
+            notes = [x for x in (e.satellite, "ファイルなし" if not e.file else f"{files} ファイル" if files > 1 else "") if x]
+            note = f"（{'・'.join(notes)}）" if notes else ""
             self.image_select.addItem(f"{local_time(e.time) if e.time is not None else '日時不明'}  {e.name}{note}")
+            self.image_select.setItemData(self.image_select.count() - 1, self._image_tip(e), Qt.ItemDataRole.ToolTipRole)
         if book and image in book.images:
             self.image_select.setCurrentIndex(book.images.index(image))
         self.image_select.blockSignals(False)
@@ -3192,6 +3283,8 @@ class ObservationDock(PluginDock):
         self.prev_button.setEnabled(many)
         self.next_button.setEnabled(many)
         self.time_row.setVisible(image is not None and image.time is None)
+        self.satellite_row.setVisible(image is not None and not image.satellite and book.keeps_satellite())
+        self.image_select.setToolTip(self._image_tip(image))
         self.assignment_bar.show_image(image)
         self.image_event_button.setVisible(image is not None and self.context.config.events is not None)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))

@@ -456,15 +456,16 @@ def listed_image(record: CatalogRecord):
     """
     「ファイルなしで記録」: a record as an image of 観測記録 without its file
     (its raw data in another system only): the catalog's id (the same as the
-    image opened from the catalog would have), its time and its footprint's
-    extent; None without an id.
+    image opened from the catalog would have), its time, its footprint's
+    extent and its sensor (the records' 衛星名); None without an id.
     """
     from ..obs.model import ListedImage
     from ..util import ms_of
 
     if not record.id:
         return None
-    return ListedImage(record.id, record.id, ms_of(record.acquired), footprint_box(record.geometry), footprint_rings(record.geometry))
+    return ListedImage(record.id, record.id, ms_of(record.acquired), footprint_box(record.geometry), footprint_rings(record.geometry),
+                       satellite=(record.sensor or "").strip())
 
 
 #: The most points a footprint keeps as its shape for 「ファイルなしで記録」 (kept with the list in QgsSettings): more, its box only.

@@ -184,6 +184,30 @@ return best;
 - プラグインの「データ分析」で観測記録と地名のポリゴンを結合すると、キーの候補に `NAMED_AREA_OBJECTID` = `OBJECTID` が出る（地名ごとの記録の件数などを `NAMED_AREA_ID` つきで数えられる）
 - ArcGIS のダッシュボードで地名ごとに見るなら（いつもと違う地名・管理番号で開く地名カルテ・地名の付け方の点検）、[arcgis-dashboards.md](arcgis-dashboards.md#地名系)
 
+## 前からある記録に衛星名を入れる（任意）
+
+観測記録・確認範囲の `SATELLITE`（衛星名、2026-11-20 に追加）は、プラグインを新しくして `create_tables.py` をもう一度実行すると 2 つのテーブルに足される（参照で公開しているなら続けて `publish_service.py publish` で上書き公開）。プラグインが入れるのは新しい記録・範囲と、直して保存した記録だけで、**前からある記録は空のまま**（ダッシュボードでは「（衛星不明）」）。画像カタログの画像の記録は、画像 ID でカタログと結べば一度に埋められる。カタログ外の画像（画像 ID がファイル名）の記録は、その画像を開いて「衛星不明（入力）」で入れると、その画像の空の記録・範囲に入る。
+
+SQL で埋める（データ所有者で接続。`create_tables.py` で作ったテーブルはバージョン対応・アーカイブなしなので、そのまま更新してよい）。`TBL_IMAGE_CATALOG`・`IMAGE_ID`・`SENSOR` は設定ファイルの `imageCatalogs[].fields`（`id`・`sensor`）に合わせ、ほかのスキーマのテーブルなら所有者を付ける:
+
+```sql
+UPDATE TBL_OBSERVATION o
+   SET o.SATELLITE = (SELECT MAX(c.SENSOR) FROM TBL_IMAGE_CATALOG c WHERE c.IMAGE_ID = o.IMAGE_ID)
+ WHERE o.SATELLITE IS NULL
+   AND EXISTS (SELECT 1 FROM TBL_IMAGE_CATALOG c WHERE c.IMAGE_ID = o.IMAGE_ID AND c.SENSOR IS NOT NULL);
+
+UPDATE TBL_OBSERVATION_AREA a
+   SET a.SATELLITE = (SELECT MAX(c.SENSOR) FROM TBL_IMAGE_CATALOG c WHERE c.IMAGE_ID = a.IMAGE_ID)
+ WHERE a.SATELLITE IS NULL
+   AND EXISTS (SELECT 1 FROM TBL_IMAGE_CATALOG c WHERE c.IMAGE_ID = a.IMAGE_ID AND c.SENSOR IS NOT NULL);
+
+COMMIT;
+```
+
+- `UPDATED_AT`（修正日時）は変えない。プラグインはこの日時でほかの人の変更を見分けるので、変えると開いている人の画面で「ほかの人が更新した」記録になる。開いている人には、画像を替えるか「再読み込み」で入る
+- テーブルをバージョン対応にした・アーカイブを付けたときは SQL で直接更新しない。ArcGIS Pro で `TBL_OBSERVATION` に `TBL_IMAGE_CATALOG` を `IMAGE_ID` で「テーブル結合」し、`SATELLITE` が空の行を選んでから「フィールド演算」で `SATELLITE` = `!TBL_IMAGE_CATALOG.SENSOR!`（確認範囲も同じ）
+- 衛星名の書き方は画像カタログのセンサーのまま（プラグインもカタログの書き方にそろえる）
+
 ## うまくいかないとき
 
 | 出たこと | すること |
