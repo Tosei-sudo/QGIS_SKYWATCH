@@ -1,0 +1,128 @@
+"""
+The ports (窓口) between features (docs/architecture.md): what one feature's dock may ask of
+another's, and the notices (PluginEvents) one sends when something changed that others show.
+
+A dock never gets another feature's dock to reach into: it gets a function giving that
+feature's port (None while there is none: not made, or not in the roles in use where the
+plugin says so), and calls only what the port's Protocol lists. The plugin's features set
+the functions in `Ports` (mikage/features); the docks are the ports' implementations today.
+"""
+from __future__ import annotations
+
+from typing import Any, Callable, Optional, Protocol, Sequence
+
+from qgis.PyQt.QtCore import QObject, pyqtSignal
+
+
+class ObservationsPort(Protocol):
+    """観測記録 (ui/observation_dock.py)."""
+
+    #: The records read (core/obs/model.ObservationBook), None before a store is chosen.
+    book: Any
+
+    def list_catalog_images(self, images: list) -> Any:
+        """Images of a catalog without their files, listed to record on (None: no store or no image id)."""
+
+    def with_records(self, ids: Sequence[str], then: Callable[[], Any]) -> bool:
+        """True when those records are read; else read first, `then` once they are."""
+
+    def open_record(self, o: Any) -> None:
+        """The record shown in the dock's form."""
+
+    def mark_reported(self, ids) -> None:
+        """Records reported (通報) highlighted."""
+
+    def refresh_reported(self) -> None:
+        """The highlights of the reported records again (one was taken back)."""
+
+    def open_alerts(self, tab: int = 0) -> Any:
+        """「通報文の作成」 (0) or 「通報記録の確認」 (1)."""
+
+    def show(self) -> None: ...
+
+    def raise_(self) -> None: ...
+
+
+class CatalogPort(Protocol):
+    """画像カタログ (ui/catalog_dock.py)."""
+
+    def choose_folder(self, mapping) -> Optional[str]: ...
+
+    def choose_images(self, record, files: list, more: bool) -> Optional[list]: ...
+
+    def drawn_shape(self) -> Optional[list]: ...
+
+    def open_image_id(self, text: str, then=None, missing=None) -> Any:
+        """An image opened by its id (開いた画像の履歴, else the catalogs)."""
+
+    def show_event_records(self, catalog, records, text: str) -> None:
+        """The records listed, with what they are in the status line, the dock in front."""
+
+    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False) -> None:
+        """Searched over a period (its days, "" open) and an area (its corners; `anywhere`: none), the dock in front."""
+
+
+class RequestsPort(Protocol):
+    """撮像依頼 (ui/request_dock.py)."""
+
+    #: Whether the ledger was read.
+    loaded: bool
+
+    def reload(self, then=None, failed=None) -> None: ...
+
+    def select(self, ids) -> None: ...
+
+    def selected(self) -> list: ...
+
+    def from_plan(self, ops: list, sats: list, targets: list) -> Any:
+        """Its form opened with 臨時 requests of the imaging plan's opportunities (「臨時依頼にする」)."""
+
+    def show(self) -> None: ...
+
+    def raise_(self) -> None: ...
+
+
+class SatellitesPort(Protocol):
+    """The satellites of the imaging plan's catalog (撮像計画)."""
+
+    def read(self, then: Callable[[list], Any], failed: Optional[Callable[[str], Any]] = None) -> None:
+        """The satellites, read once (`then(list)`), or why not (`failed(text)`)."""
+
+    def known(self) -> list:
+        """The satellites as read so far (none before)."""
+
+
+class EventsPort(Protocol):
+    """イベント (ui/events_dock.py)."""
+
+    def offer(self, anchor, items: Callable[[], Sequence]) -> Any:
+        """「イベントに追加」's menu under `anchor` for the items (images, records, requests)."""
+
+
+class NoticesPort(Protocol):
+    """通知 (ui/notices_dock.py)."""
+
+    def add_plan_notice(self, reminder, text: str, now: Optional[float] = None) -> None: ...
+
+
+def _none():
+    return None
+
+
+class Ports:
+    """Each feature's port as the plugin's features set it (a function: the port, or None)."""
+
+    def __init__(self):
+        self.observations: Callable[[], Optional[ObservationsPort]] = _none
+        self.catalog: Callable[[], Optional[CatalogPort]] = _none
+        self.requests: Callable[[], Optional[RequestsPort]] = _none
+        self.events: Callable[[], Optional[EventsPort]] = _none
+        self.notices: Callable[[], Optional[NoticesPort]] = _none
+        self.satellites: Callable[[], Optional[SatellitesPort]] = _none
+
+
+class PluginEvents(QObject):
+    """What changed, for the features that show it (Qt signals: heard at once, in the order connected)."""
+
+    #: 撮像依頼 written or changed by another dock (撮像計画ファイル出力): the requests as read there, or None (read again).
+    requests_changed = pyqtSignal(object)

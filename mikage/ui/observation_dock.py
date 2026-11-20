@@ -934,7 +934,7 @@ class ObservationDock(PluginDock):
                                          "ステータスバーの「送信待ち」から送信できます。").format(n=n))
         self.offline_note.setVisible(down or bool(n))
 
-    def _say(self, message: str) -> None:
+    def say(self, message: str) -> None:
         if self.book is not None:
             self.book.status = message
         self._show_status(message)
@@ -982,7 +982,7 @@ class ObservationDock(PluginDock):
         def finish(result=None, message: Optional[str] = None) -> None:
             self._running = False
             if message is not None:
-                self._say(self.tr("{d}の失敗: {m}").format(d=description, m=message))
+                self.say(self.tr("{d}の失敗: {m}").format(d=description, m=message))
                 if failed is not None and book is self.book:
                     failed(message)
             elif book is self.book and after is not None:
@@ -1141,7 +1141,7 @@ class ObservationDock(PluginDock):
                 loop.quit()
 
             # Kept until drawn (its job goes with it).
-            drawer = ReportMap(self.canvas, selection.records, selection.areas if options.areas else [], kinds, done, self._say)
+            drawer = ReportMap(self.canvas, selection.records, selection.areas if options.areas else [], kinds, done, self.say)
             drawer.start()
             if not url:
                 loop.exec()
@@ -1697,7 +1697,7 @@ class ObservationDock(PluginDock):
         `claimed`: the taking was tried already (no second try).
         """
         if on and (self.book is None or self.book.current is None):
-            self._say(NO_IMAGE)
+            self.say(NO_IMAGE)
             on = False
         if on and not claimed and not self.active and self.assignment_bar.needs_claim(self.book.current):
             self._claim_then_record(self.book.current, quiet)
@@ -1717,18 +1717,18 @@ class ObservationDock(PluginDock):
             if self.many.mode:
                 self.set_many_mode("")
         elif not quiet:
-            self._say(HINT_POINTS.get(self.points, HINT))
+            self.say(HINT_POINTS.get(self.points, HINT))
         self.draw()
 
     def _claim_then_record(self, image, quiet: bool) -> None:
         """Takes the image (分担), then starts 「クリック記録」 on it; refused: an error, and no recording."""
         bar = self.assignment_bar
         if bar.claiming is not None:
-            self._say(self.tr("{name} の担当を取得中…").format(name=bar.claiming.name or bar.claiming.id))
+            self.say(self.tr("{name} の担当を取得中…").format(name=bar.claiming.name or bar.claiming.id))
             return
         self.record_button.setEnabled(False)
         self.record_button.setText(self.tr("担当を取得中…"))
-        self._say(self.tr("{name} の担当を取得中…").format(name=image.name or image.id))
+        self.say(self.tr("{name} の担当を取得中…").format(name=image.name or image.id))
 
         def end() -> None:
             self.record_button.setEnabled(True)
@@ -1741,7 +1741,7 @@ class ObservationDock(PluginDock):
             if current is not None and current.id == image.id and self.isVisible():
                 self.set_active(True, quiet=True)
                 if not quiet:
-                    self._say(self.tr("{name} を担当に。").format(name=image.name or image.id) + HINT_POINTS.get(self.points, HINT))
+                    self.say(self.tr("{name} を担当に。").format(name=image.name or image.id) + HINT_POINTS.get(self.points, HINT))
 
         def failed(message: str) -> None:
             end()
@@ -1750,11 +1750,11 @@ class ObservationDock(PluginDock):
                 # 協業: nobody is kept out, so the work goes on; only the 分担 row is missing.
                 self.set_active(True, quiet=True, claimed=True)
                 text = self.tr("分担を記録できませんでした（クリック記録は続けられます）: {m}").format(m=message)
-                self._say(text)
+                self.say(text)
                 self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
                 return
             text = self.tr("クリック記録できません: {m}").format(m=message)
-            self._say(text)
+            self.say(text)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
 
         bar.claim(image, done, failed)
@@ -1778,7 +1778,7 @@ class ObservationDock(PluginDock):
             self.set_many_mode("")
         if n > 1 and not self.active:
             self.set_active(True, quiet=True)
-        self._say(HINT_POINTS.get(n, HINT))
+        self.say(HINT_POINTS.get(n, HINT))
         self.draw()
 
     def use_points(self, n: int) -> None:
@@ -1800,7 +1800,7 @@ class ObservationDock(PluginDock):
         """
         mode = mode if mode in ("stamp", "row") else ""
         if mode and (self.book is None or self.book.current is None):
-            self._say(NO_IMAGE)
+            self.say(NO_IMAGE)
             mode = ""
         for button, m in ((self.stamp_button, "stamp"), (self.row_button, "row")):
             if button.isChecked() != (mode == m):
@@ -1843,10 +1843,10 @@ class ObservationDock(PluginDock):
         `unseen`: 「不可範囲」 instead (then why: 雲・霞…).
         """
         if on and (self.book is None or self.book.current is None):
-            self._say(NO_IMAGE)
+            self.say(NO_IMAGE)
             on = False
         if on and unseen and not self.book.keeps_unseen_areas():
-            self._say(self.tr("保存先に不可の理由の属性（UNSEEN_REASON）がないため、不可範囲は記録できません"))
+            self.say(self.tr("保存先に不可の理由の属性（UNSEEN_REASON）がないため、不可範囲は記録できません"))
             on = False
         unseen = on and unseen
         for button, want in ((self.area_button, on and not unseen), (self.unseen_area_button, unseen)):
@@ -1879,7 +1879,7 @@ class ObservationDock(PluginDock):
                 self.area_reason.addItems(self.book.vocabulary.unseen_reasons)
                 self.area_reason.setCurrentIndex(0)
             self.area_image_button.setEnabled(bool(self.book.current.box))
-            self._say(self._area_hint())
+            self.say(self._area_hint())
         self._render_area_range()
         self.draw()
 
@@ -1895,17 +1895,17 @@ class ObservationDock(PluginDock):
             # A corner clicked: that goes first; then the mode.
             if self.area_corner is not None and self.area_ring is None:
                 self.area_corner = None
-                self._say(self._area_hint())
+                self.say(self._area_hint())
                 self.draw()
             else:
                 self.set_area_mode(False)
         elif self.rear is not None:
             if self.placed:
                 self.placed.pop()
-                self._say(self.tr("側面の取消") if self.placed else self.tr("前端の取消"))
+                self.say(self.tr("側面の取消") if self.placed else self.tr("前端の取消"))
             else:
                 self._clear_points()
-                self._say(self.tr("後端の取消"))
+                self.say(self.tr("後端の取消"))
             self.draw()
         elif self.form.isVisible():
             self.close_form()
@@ -1924,7 +1924,7 @@ class ObservationDock(PluginDock):
             if self.area_corner is None or self.area_ring is not None:
                 self.area_corner = (lon, lat)
                 self.area_ring = None
-                self._say(self.tr("対角をクリック（Esc で取消）"))
+                self.say(self.tr("対角をクリック（Esc で取消）"))
             else:
                 (x1, y1), (x2, y2) = self.area_corner, (lon, lat)
                 self._set_area_ring(box_ring([min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]))
@@ -1950,7 +1950,7 @@ class ObservationDock(PluginDock):
             self.close_form()
             self.rear = (lon, lat)
             self.cursor = None
-            self._say(self.tr("前端をクリック（Esc で取消）"))
+            self.say(self.tr("前端をクリック（Esc で取消）"))
             self.draw()
             return
         clicked = [*self.placed, (lon, lat)]
@@ -1958,9 +1958,9 @@ class ObservationDock(PluginDock):
             self.placed = clicked
             self.cursor = None
             if len(clicked) == 1:
-                self._say(self.tr("側面（舷側）をクリック（Esc で取消）") if self.points == 3 else self.tr("片側の側面をクリック（Esc で取消）"))
+                self.say(self.tr("側面（舷側）をクリック（Esc で取消）") if self.points == 3 else self.tr("片側の側面をクリック（Esc で取消）"))
             else:
-                self._say(self.tr("反対側の側面をクリック（Esc で取消）"))
+                self.say(self.tr("反対側の側面をクリック（Esc で取消）"))
             self.draw()
             return
         m = side_points(clicked[0], self.rear, clicked[1:])
@@ -2019,7 +2019,7 @@ class ObservationDock(PluginDock):
 
     def _submit_area(self) -> None:
         if not self.area_ring:
-            self._say(self.tr("範囲を指定（地図で 2 点クリック、または「表示範囲」「画像の範囲」）"))
+            self.say(self.tr("範囲を指定（地図で 2 点クリック、または「表示範囲」「画像の範囲」）"))
             return
         ring, kind, note = self.area_ring, self.area_kind.text(), self.area_note.text()
 
@@ -2027,7 +2027,7 @@ class ObservationDock(PluginDock):
             if area is not None:
                 message = self.status.text()
                 self.set_area_mode(False)
-                self._say(message)
+                self.say(message)
 
         if self.area_unseen:
             reason = self.area_reason.currentText().strip() or UNSEEN
@@ -2572,7 +2572,7 @@ class ObservationDock(PluginDock):
         self.class_filter = [root] if root else None
         self.render()
 
-    def _kind_path(self, kind: str, taxa) -> list[str]:
+    def kind_path(self, kind: str, taxa) -> list[str]:
         """A record's kind as a path of the classification (a class's other name → its path)."""
         path = path_of(kind)
         if len(path) == 1 and taxa and not find(taxa, path):
@@ -2581,7 +2581,7 @@ class ObservationDock(PluginDock):
 
     def _shown_kind(self, kind: str, taxa) -> bool:
         """Whether a kind is in the class the lists are limited to."""
-        return not self.class_filter or within(kind_of(self._kind_path(kind, taxa)), self.class_filter)
+        return not self.class_filter or within(kind_of(self.kind_path(kind, taxa)), self.class_filter)
 
     def _render_root_filter(self, taxa) -> None:
         # The classification shown has the kinds records use added, so its roots cover every record.
@@ -2684,7 +2684,7 @@ class ObservationDock(PluginDock):
         self._center(o)
         if entry is None:
             if not quiet:
-                self._say(self.tr("画像（{n}）は開かれていません（ダブルクリックで画像を開いて記録を編集）").format(n=o.image_name or o.image_id))
+                self.say(self.tr("画像（{n}）は開かれていません（ダブルクリックで画像を開いて記録を編集）").format(n=o.image_name or o.image_id))
             return False
         return True
 
@@ -2745,12 +2745,12 @@ class ObservationDock(PluginDock):
             self._went()
             if then is not None:
                 then()
-            self._say(self.tr("{n} は画像カタログにないため、ファイルなしで一覧へ追加").format(n=name or image_id))
+            self.say(self.tr("{n} は画像カタログにないため、ファイルなしで一覧へ追加").format(n=name or image_id))
 
         if dock is None or not hasattr(dock, "open_image_id"):
             listed()
             return False
-        self._say(self.tr("{n} を開いています…").format(n=name or image_id))
+        self.say(self.tr("{n} を開いています…").format(n=name or image_id))
         dock.open_image_id(image_id, then=opened, missing=listed)
         return False
 
@@ -2774,9 +2774,9 @@ class ObservationDock(PluginDock):
             return
         failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n", what="taxonomy-json")
         if failed:
-            self._say(self.tr("分類体系を保存できない: {m}").format(m=failed))
+            self.say(self.tr("分類体系を保存できない: {m}").format(m=failed))
             return
-        self._say(self.tr("分類体系を保存: {p}").format(p=path))
+        self.say(self.tr("分類体系を保存: {p}").format(p=path))
 
     def load_taxonomy_file(self, path: Optional[str] = None) -> None:
         if self.book is None:
@@ -2792,7 +2792,7 @@ class ObservationDock(PluginDock):
             if not isinstance(items, list):
                 raise ValueError("分類の配列なし")
         except (OSError, ValueError) as error:
-            self._say(self.tr("分類の読み込み失敗: {e}").format(e=error))
+            self.say(self.tr("分類の読み込み失敗: {e}").format(e=error))
             return
         self.do(self.tr("分類の読み込み"), lambda b: b.set_taxonomy(items))
 
@@ -2804,7 +2804,7 @@ class ObservationDock(PluginDock):
             return None
         rows = self.book.records if self.deleted_check.isChecked() else self.book.living()
         if not rows:
-            self._say(self.tr("記録なし"))
+            self.say(self.tr("記録なし"))
             return None
         if not path:
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), csv_file_name(now_ms()), "CSV (*.csv)")
@@ -2812,9 +2812,9 @@ class ObservationDock(PluginDock):
             return None
         failed = save_text(path, observations_csv(rows), newline="", what="observations-csv", count=len(rows))
         if failed:
-            self._say(self.tr("CSV を保存できない: {m}").format(m=failed))
+            self.say(self.tr("CSV を保存できない: {m}").format(m=failed))
             return None
-        self._say(self.tr("CSV を保存: {p}").format(p=path))
+        self.say(self.tr("CSV を保存: {p}").format(p=path))
         return path
 
     def to_layers(self) -> list:
@@ -2823,11 +2823,11 @@ class ObservationDock(PluginDock):
             return []
         made = observation_layers(self.book.records, self.book.areas)
         if not made:
-            self._say(self.tr("記録なし"))
+            self.say(self.tr("記録なし"))
             return []
         layers = [observation_memory_layer(m) for m in made]
         QgsProject.instance().addMapLayers(layers)
-        self._say(self.tr("{n} をレイヤーとして追加").format(n="・".join(m.title for m in made)))
+        self.say(self.tr("{n} をレイヤーとして追加").format(n="・".join(m.title for m in made)))
         return layers
 
     def open_alerts(self, tab: int = 0):
@@ -3224,7 +3224,7 @@ class ObservationDock(PluginDock):
         if store and (self.book is None or self.book.store.label != store):
             i = self.store_select.findText(store)
             if i < 0:
-                self._say(self.tr("保存先「{s}」が設定ファイルにありません").format(s=store))
+                self.say(self.tr("保存先「{s}」が設定ファイルにありません").format(s=store))
                 return False
             self.store_select.setCurrentIndex(i)
         book = self.book
@@ -3233,14 +3233,14 @@ class ObservationDock(PluginDock):
             return False
         entry = next((e for e in book.images if e.id == d.record.image_id), None)
         if entry is None:
-            self._say(self.tr("画像（{n}）を開いてからフォームで開いてください").format(n=d.record.image_name or d.record.image_id))
+            self.say(self.tr("画像（{n}）を開いてからフォームで開いてください").format(n=d.record.image_name or d.record.image_id))
             return False
         if entry is not book.current:
             book.current = entry
             self._went()
         editing = book.record(d.editing_id) if d.editing else None
         if d.editing and editing is None:
-            self._say(self.tr("{n}: 元の記録が見つかりません（削除されたか、読み込み前）").format(n=d.record.object_name))
+            self.say(self.tr("{n}: 元の記録が見つかりません（削除されたか、読み込み前）").format(n=d.record.object_name))
             return False
         source = book.record(d.source_id) if d.source_id else None
         r = d.record
@@ -3531,7 +3531,7 @@ class ObservationDock(PluginDock):
             if 0 <= row < self.steps_table.rowCount():
                 self.steps_table.selectRow(row)  # the flow was shown anew for the other image
             self._flash(o)
-            self._say(self.tr("{when} の画像へ移動（ダブルクリックでこの記録を編集）").format(when=local_time(time_key(o))))
+            self.say(self.tr("{when} の画像へ移動（ダブルクリックでこの記録を編集）").format(when=local_time(time_key(o))))
 
     def _step_double_clicked(self, row: int, _col: int) -> None:
         steps = getattr(self, "_steps", [])

@@ -27,13 +27,13 @@ class Ai(Feature):
         host.transfer_dialog = None
 
     def dock_specs(self) -> dict:
-        iface, context, settings, window, docks = self.iface, self.context, self.host.open_settings, self.window(), self.docks
+        iface, context, settings, window, ports = self.iface, self.context, self.host.open_settings, self.window(), self.ports
         return {"SatObsAiResults": DockSpec("AI結果", "ai_results", lambda: AiResultsDock(
-            iface, context, settings, lambda: docks.get("SatObsObservations"), window))}
+            iface, context, settings, lambda: ports.observations(), window))}
 
     def connect(self) -> None:
         # The training reads the records the observation dock read.
-        train_algorithm.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        train_algorithm.set_book(lambda: getattr(self.ports.observations(), "book", None))
 
     def add_actions(self) -> None:
         # The AI tools: 「物体検出（AI）…」 as a Processing algorithm (its models from the settings file), 「クリック抽出（AI）」 as a map tool.

@@ -52,3 +52,43 @@ def test_every_dock_entry_and_command_has_its_place():
         assert callable(getattr(p, name)) and not hasattr(plugin_module.MikagePlugin, name), name
     with pytest.raises(AttributeError):
         p.open_nothing  # noqa: B018 (not a command: as any other missing attribute)
+
+
+def test_a_feature_touches_only_its_own_docks():
+    """Another feature's dock only through its port (ui/ports.py): no other dock's name in a feature's module."""
+    import ast
+
+    p = plugin_module.MikagePlugin(FakeIface())
+    docks = set(plugin_module.DOCK_ORDER)
+    for feature in p.features:
+        module = inspect.getmodule(type(feature))
+        own = set(feature.dock_specs())
+        named = {n.value for n in ast.walk(ast.parse(inspect.getsource(module))) if isinstance(n, ast.Constant) and n.value in docks}
+        assert named <= own, f"{module.__name__} が他の機能のドックを直接さわる: {sorted(named - own)}"
+
+
+@pytest.mark.parametrize("port, dock", [
+    ("ObservationsPort", "mikage.ui.observation_dock.ObservationDock"),
+    ("CatalogPort", "mikage.ui.catalog_dock.CatalogDock"),
+    ("RequestsPort", "mikage.ui.request_dock.RequestDock"),
+    ("EventsPort", "mikage.ui.events_dock.EventsDock"),
+    ("NoticesPort", "mikage.ui.notices_dock.NoticesDock"),
+    ("SatellitesPort", "mikage.features.plan.PlanSatellites"),
+])
+def test_the_ports_are_kept(port, dock):
+    """Each port's dock (or adapter) has what the port lists (names, and its functions' arguments)."""
+    from mikage.ui import ports
+
+    protocol = getattr(ports, port)
+    module, name = dock.rsplit(".", 1)
+    cls = getattr(importlib.import_module(module), name)
+    for member, value in vars(protocol).items():
+        if member.startswith("_"):
+            continue
+        assert hasattr(cls, member), f"{name} に {member} がない"
+        if inspect.isfunction(value) and member not in ("show", "raise_"):
+            wanted = list(inspect.signature(value).parameters)
+            have = list(inspect.signature(getattr(cls, member)).parameters)
+            assert have[:len(wanted)] == wanted, f"{name}.{member}{have} ≠ {port}{wanted}"
+    for member in getattr(protocol, "__annotations__", {}):
+        assert member in ("book",) or hasattr(cls, member), f"{name} に {member} がない"

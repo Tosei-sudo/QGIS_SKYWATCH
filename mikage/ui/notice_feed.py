@@ -651,7 +651,7 @@ class NoticeFeed(QWidget):
         self.close_previous.toggled.connect(settings.set_feed_close_previous)
         bar.addWidget(self.close_previous)
         self.all_read = QPushButton(self.tr("すべて既読"))
-        self.all_read.clicked.connect(lambda: self.dock._mark(None))
+        self.all_read.clicked.connect(lambda: self.dock.mark(None))
         bar.addWidget(self.all_read)
         self.check_now = QPushButton(self.tr("今すぐ確認"))
         self.check_now.setToolTip(self.tr("すべての監視で新着画像を今すぐ確認"))
@@ -1104,7 +1104,7 @@ class NoticeFeed(QWidget):
         elif key == "map":
             self.see_on_map(notice)
         elif key == "read":
-            self.dock._mark([notice.id])
+            self.dock.mark([notice.id])
 
     def open_image(self, notice: WatchNotice) -> list:
         """
@@ -1161,7 +1161,7 @@ class NoticeFeed(QWidget):
         """「地図で見る」: the map in front at the image's footprint, flashed (read)."""
         self.show_map()
         moved = self.dock.zoom_to_notices([notice])
-        self.dock._mark([notice.id])
+        self.dock.mark([notice.id])
         shape = footprint(notice.feature.get("geometry"))
         if moved and shape is not None:
             canvas = self.iface.mapCanvas()

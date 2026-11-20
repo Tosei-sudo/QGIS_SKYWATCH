@@ -14,6 +14,20 @@ from ..ui.satellite_pass_dock import SatellitePassDock
 from .base import DockSpec, Feature, close
 
 
+class PlanSatellites:
+    """The satellites port (ui/ports.SatellitesPort): the imaging plan's satellite catalog."""
+
+    def __init__(self, dock: ImagingPlanDock):
+        self.dock = dock
+
+    def read(self, then, failed=None) -> None:
+        dock = self.dock
+        dock.load_catalog(lambda: then([*dock.catalog_sats]), failed)
+
+    def known(self) -> list:
+        return self.dock.catalog_sats
+
+
 class Plan(Feature):
     COMMANDS = ("open_moving_targets", "open_cloud_cover")
 
@@ -21,6 +35,8 @@ class Plan(Feature):
         super().__init__(host)
         #: 「移動目標撮像計画」, once opened (plugin.api.moving_targets).
         host.moving_targets = None
+        # Its port: the satellites (撮像依頼, 撮像計画ファイル出力, 撮像予定 and 衛星の障害情報 use them).
+        host.ports.satellites = lambda: PlanSatellites(host.docks["SatObsImagingPlan"]) if "SatObsImagingPlan" in host.docks else None
 
     def dock_specs(self) -> dict:
         iface, context, settings, window, docks = self.iface, self.context, self.host.open_settings, self.window(), self.docks
@@ -31,6 +47,22 @@ class Plan(Feature):
             "SatObsCloud": DockSpec("雲量マップ", "cloud_map",
                                     lambda: CloudDock(iface, context, settings, lambda: self.host.open_cloud_cover(), window)),
         }
+
+    def connect(self) -> None:
+        plan = self.docks["SatObsImagingPlan"]
+        # The plan's reminders as notices (通知).
+        notices = self.ports.notices()
+        if notices is not None:
+            plan.on_reminder = notices.add_plan_notice
+        # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
+        plan.make_requests = self._requests_from_plan
+
+    def _requests_from_plan(self, ops: list, sats: list, targets: list):
+        """The 「撮像依頼」 dock shown, its form opened with 臨時 requests of the plan's opportunities."""
+        dock = self.ports.requests()
+        dock.show()
+        dock.raise_()
+        return dock.from_plan(ops, sats, targets)
 
     def add_actions(self) -> None:
         self.entry("moving_targets", "移動目標撮像計画…", "open_moving_targets")

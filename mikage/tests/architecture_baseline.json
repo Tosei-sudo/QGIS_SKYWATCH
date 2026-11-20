@@ -387,9 +387,7 @@
   "ui.colorize_box": 2,
   "ui.curve_editor": 1,
   "ui.list_views": 2,
-  "ui.notice_feed": 4,
-  "ui.obs_export_dialog": 3,
-  "ui.obs_many": 21,
+  "ui.notice_feed": 1,
   "ui.place_schedule_dock": 7,
   "ui.shift": 1
  }

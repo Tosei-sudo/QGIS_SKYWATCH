@@ -276,7 +276,7 @@ class ExportDialog(QDialog):
         taxa = book.taxonomy()
         out = [t.path[0] for t in taxa if len(t.path) == 1]
         for o in book.records:
-            r = (self.dock._kind_path(o.kind, taxa) or [""])[0]
+            r = (self.dock.kind_path(o.kind, taxa) or [""])[0]
             if r and r not in out:
                 out.append(r)
         return out
@@ -488,7 +488,7 @@ class ExportDialog(QDialog):
         else:
             rows = book.records
         taxa = book.taxonomy()
-        return select_records(rows, flt, book.confidences(), lambda kind: self.dock._kind_path(kind, taxa)), ""
+        return select_records(rows, flt, book.confidences(), lambda kind: self.dock.kind_path(kind, taxa)), ""
 
     def _ask(self) -> None:
         """Asks the shared store for the records of the form's period and place (one question at a time)."""
@@ -648,7 +648,7 @@ class ExportDialog(QDialog):
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
             audit.record("export", "observations", path, count=out.count, detail={"format": getattr(f, "name", "") or ""}, file=path)
             self._say(self.tr("{n} 件を保存: {p}{note}").format(n=out.count, p=path, note=note))
-            self.dock._say(self.tr("観測記録をエクスポート: {p}").format(p=path))
+            self.dock.say(self.tr("観測記録をエクスポート: {p}").format(p=path))
 
         def failed(message: str) -> None:
             self.save_button.setEnabled(True)

@@ -165,7 +165,7 @@ def test_the_page_and_the_map_switch_by_tabs(plugin):
     iface.stack.setCurrentIndex(0)
     assert p.central.bar.currentIndex() == 0
     # The unread count in the tab's text.
-    p.api.notices._mark(["w|B"])
+    p.api.notices.mark(["w|B"])
     assert tabs(p) == ["地図", "新着画像（1）"]
     # Closed: the tabs go, QGIS's widgets back where they were.
     p.central.close(FEED)
@@ -556,7 +556,7 @@ def test_the_filters_go_over_every_notice_not_only_the_cards_shown(plugin, monke
     card = feed.cards["v|OLD"]
     assert card.notice.complete and card.notice.feature["attributes"]["IMG_ID"] == "OLD"
     # Back to all: the cards kept aside come back (not made again), read meanwhile shown so.
-    p.api.notices._mark(["w|B"])
+    p.api.notices.mark(["w|B"])
     feed.watch_box.setCurrentIndex(0)
     assert order(feed) == ["B", "C"] and feed.cards["w|B"] is b and not b.badge.isVisibleTo(b) and b.isVisibleTo(feed)
 

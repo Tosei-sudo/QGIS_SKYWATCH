@@ -37,6 +37,7 @@ from .ui import first_setup
 from .ui.audit_status import AuditKeeper
 from .ui.dock_layouts import float_docks
 from .ui.offline_status import OfflineController
+from .ui.ports import PluginEvents, Ports
 from .ui.shortcuts import Shortcuts
 from .ui.toolbar_buttons import ToolbarButtons
 
@@ -100,6 +101,9 @@ class MikagePlugin:
         self.docks: dict[str, QDockWidget] = {}
         self.toolbar = None
         self.api = PluginApi(self)
+        #: The features' ports to each other (ui/ports.py: each set by the feature that has it) and their notices.
+        self.ports = Ports()
+        self.signals = PluginEvents()
         #: 「画面が止まった」 in the log (qgis_io/stall_watch.py), from once QGIS has started.
         self.stall_watch: Optional[StallWatch] = None
         self.provider: Optional[SatObsProvider] = None

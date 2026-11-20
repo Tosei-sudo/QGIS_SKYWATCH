@@ -169,7 +169,7 @@ class Platform(Feature):
             host.setup_dialog.deleteLater()
         host.setup_dialog = first_setup.FirstSetupDialog(
             self.window(), lambda: host.allowed_docks(), first=first,
-            observation_dock=lambda: host.docks.get("SatObsObservations"), coordinates=lambda: host.coordinates,
+            observation_dock=host.ports.observations, coordinates=lambda: host.coordinates,
             open_settings=self.open_settings, keeper=host.role_keeper, all_docks=lambda: host.docks)
         # The roles' toolbar buttons (the same roles again: the person's own buttons of them).
         host.setup_dialog.accepted.connect(lambda: host.toolbar_buttons.apply() if host.context is not None else None)

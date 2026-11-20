@@ -45,6 +45,7 @@ from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock, plain_tip
+from .ports import Ports
 from .fit import fit_text
 from .list_views import column_menus
 from .flow_layout import FlowLayout
@@ -209,11 +210,14 @@ class EventForm(QDialog):
 class EventsDock(PluginDock):
     """「イベント」."""
 
-    def __init__(self, iface, context, open_settings: Callable[[], None], docks: Callable[[], dict], parent=None):
+    def __init__(self, iface, context, open_settings: Callable[[], None], ports: Ports, parent=None):
         super().__init__("SatObsEvents", "イベント", context, open_settings, parent)
         self.iface = iface
         self.canvas = iface.mapCanvas()
-        self.docks = docks
+        #: The other features' ports (ui/ports.py): 画像カタログ, 観測記録 (whatever the roles) and 撮像依頼.
+        self.catalog = ports.catalog
+        self.observation_port = ports.observations
+        self.requests = ports.requests
         #: Every event and every link, as read last (None: not read yet).
         self.events: Optional[list[Event]] = None
         self.links: list[EventLink] = []
@@ -817,7 +821,7 @@ class EventsDock(PluginDock):
     observations: Optional[Callable[[], object]] = None
 
     def _open_images(self, result) -> None:
-        catalog_dock = self.docks().get("SatObsImageCatalog")
+        catalog_dock = self.catalog()
         problems: list[str] = []
         opened = 0
         without = []
@@ -863,19 +867,17 @@ class EventsDock(PluginDock):
             return
 
         def done(result) -> None:
-            dock = self.docks().get("SatObsImageCatalog")
+            dock = self.catalog()
             if dock is None or not result:
                 return
             catalog, records = max(result, key=lambda cr: len(cr[1]))
-            dock.show_records(catalog, records)
-            dock.status.setText(self.tr("イベント「{e}」の画像 {n} 件").format(e=self.chosen().name if self.chosen() else "", n=len(records)))
-            dock.show()
-            dock.raise_()
+            dock.show_event_records(catalog, records,
+                                    self.tr("イベント「{e}」の画像 {n} 件").format(e=self.chosen().name if self.chosen() else "", n=len(records)))
 
         self._fetch_images(links, done)
 
     def _observation_dock(self):
-        return self.docks().get("SatObsObservations")
+        return self.observation_port()
 
     def _open_observations(self, links: Sequence[EventLink]) -> None:
         dock = self._observation_dock()
@@ -903,7 +905,7 @@ class EventsDock(PluginDock):
             self.say(self.tr("{n} 件はいまの保存先になし（別の保存先か削除済み）").format(n=len(links) - len(found)))
 
     def _open_requests(self, links: Sequence[EventLink]) -> None:
-        dock = self.docks().get("SatObsRequests")
+        dock = self.requests()
         if dock is None:
             return
         dock.show()
@@ -916,7 +918,7 @@ class EventsDock(PluginDock):
             if missing:
                 self.say(self.tr("{n} 件は台帳の一覧になし（別の台帳か削除済み、絞り込み中）").format(n=missing))
 
-        if not getattr(dock, "_loaded", True) and hasattr(dock, "reload"):
+        if not dock.loaded:
             dock.reload(select)
         else:
             select()
@@ -1048,24 +1050,19 @@ class EventsDock(PluginDock):
     def search_images(self) -> None:
         """The image catalog searched over the event's area (its outline, or its extent) and period."""
         e = self.chosen()
-        dock = self.docks().get("SatObsImageCatalog")
+        dock = self.catalog()
         if e is None or dock is None:
             return
         day = lambda ms: time.strftime("%Y-%m-%d", time.localtime(ms / 1000)) if ms is not None else ""  # noqa: E731
-        dock.acquired_from.setText(day(e.start))
-        dock.acquired_to.setText(day(e.end))
         if e.rings:
             ring = e.rings[0] if len(e.rings) == 1 else None
             if ring is None:
                 g = footprint({"rings": e.rings})
                 ring = _box_ring(g.boundingBox()) if g is not None else None
-            dock.set_drawn([tuple(p[:2]) for p in ring] if ring else None)
+            dock.search_area_period(day(e.start), day(e.end), [tuple(p[:2]) for p in ring] if ring else None)
         else:
             # No area: anywhere (not whatever area the catalog had before).
-            dock.area_box.setCurrentIndex(dock.area_box.findData("none"))
-        dock.show()
-        dock.raise_()
-        dock.search()
+            dock.search_area_period(day(e.start), day(e.end), anywhere=True)
 
     # ---- export --------------------------------------------------------------------------------
 

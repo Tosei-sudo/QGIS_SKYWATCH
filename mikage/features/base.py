@@ -95,8 +95,18 @@ class Feature:
     def docks(self) -> dict:
         return self.host.docks
 
+    @property
+    def ports(self):
+        """The features' ports to each other (ui/ports.py Ports)."""
+        return self.host.ports
+
     def window(self):
         return self.host.iface.mainWindow()
+
+    def observations_if_allowed(self):
+        """観測記録's port, or None while the roles in use do not have 観測記録 (「ファイルなしで記録」 of the images)."""
+        host = self.host
+        return lambda: host.ports.observations() if host.allows(tr("観測記録")) else None
 
     def entry(self, icon_name: str, text: str, triggered=None, name: Optional[str] = None) -> QAction:
         """

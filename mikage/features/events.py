@@ -7,19 +7,20 @@ from ..core.preload import ITEMS as PRELOAD_ITEMS
 from ..ui.events_dock import EventsDock
 from .base import DockSpec, Feature
 
-#: The docks whose 「イベントに追加」 goes to 「イベント」.
-LINKED = ("SatObsImageCatalog", "SatObsObservations", "SatObsRequests")
-
 
 class Events(Feature):
+    def __init__(self, host):
+        super().__init__(host)
+        # Its port: 「イベントに追加」 of the images, records and requests.
+        host.ports.events = lambda: host.docks.get("SatObsEvents")
+
     def dock_specs(self) -> dict:
-        iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
-        return {"SatObsEvents": DockSpec("イベント", "events", lambda: EventsDock(iface, context, settings, lambda: self.docks, window))}
+        iface, context, settings, window, ports = self.iface, self.context, self.host.open_settings, self.window(), self.ports
+        return {"SatObsEvents": DockSpec("イベント", "events", lambda: EventsDock(iface, context, settings, ports, window))}
 
     def connect(self) -> None:
-        docks = self.docks
-        for name in LINKED:
-            docks[name].event_linker = lambda: docks.get("SatObsEvents")
+        # 「ファイルなしで記録」 of the events' images goes to 「観測記録」.
+        self.docks["SatObsEvents"].observations = self.observations_if_allowed()
 
     def preload(self) -> list:
         docks = self.docks

@@ -22,15 +22,21 @@ class Requests(Feature):
         super().__init__(host)
         #: 「衛星の障害情報」 (ui/outage_dialog.py), once opened.
         host.outage_dialog = None
+        # Its port: 撮像依頼 (イベント chooses requests there, 撮像計画 makes 臨時 ones).
+        host.ports.requests = lambda: host.docks.get("SatObsRequests")
 
     def _satellites(self):
-        """The imaging plan's satellites, read once (then(list), failed(text))."""
-        plan_dock = self.docks["SatObsImagingPlan"]
+        """The satellites (its port, ui/ports.SatellitesPort), read once (then(list), failed(text))."""
+        port = self.ports.satellites()
 
         def satellites(then, failed=None):
-            plan_dock.load_catalog(lambda: then([*plan_dock.catalog_sats]), failed)
+            port.read(then, failed)
 
         return satellites
+
+    def _known_satellites(self) -> list:
+        port = self.ports.satellites()
+        return port.known() if port is not None else []
 
     def dock_specs(self) -> dict:
         iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
@@ -45,31 +51,36 @@ class Requests(Feature):
     def _make_schedule(self):
         dock = ScheduleDock(self.iface, self.context, self.host.open_settings, self.window())
         # The satellites' other names and series, for the outages that name them (衛星の障害情報).
-        dock.satellites_known = lambda plan_dock=self.docks["SatObsImagingPlan"]: plan_dock.catalog_sats
+        port = self.ports.satellites()
+        dock.satellites_known = (lambda: port.known()) if port is not None else self._known_satellites
         return dock
 
     def _make_plan_files(self):
-        request_dock = self.docks["SatObsRequests"]
+        changed = self.host.signals.requests_changed
+        return PlanFileDock(self.iface, self.context, self.host.open_settings, self._satellites(),
+                            lambda requests=None: changed.emit(requests), self.window())
 
-        def requests_changed(requests=None, request_dock=request_dock):
-            # The 「撮像依頼」 dock shows the ledger as read here, or reads it again when it was changed;
-            # the 「撮像予定」 dock the day's rows again once files are written.
-            schedule = self.docks.get("SatObsSchedule")
-            if requests is None and schedule is not None and schedule.loaded and schedule.isVisible():
-                schedule.reload()
-            if request_dock.store is None or request_dock.task is not None:
-                return
-            if requests is not None:
-                request_dock.requests = requests
-                request_dock.render()
-            elif request_dock.loaded:
-                request_dock.reload()
-
-        return PlanFileDock(self.iface, self.context, self.host.open_settings, self._satellites(), requests_changed, self.window())
+    def _requests_changed(self, requests=None) -> None:
+        """
+        撮像依頼 written by 「撮像計画ファイル出力」: the 「撮像依頼」 dock shows the ledger as read there, or reads it
+        again when it was changed; the 「撮像予定」 dock the day's rows again once files are written.
+        """
+        request_dock = self.docks.get("SatObsRequests")
+        schedule = self.docks.get("SatObsSchedule")
+        if requests is None and schedule is not None and schedule.loaded and schedule.isVisible():
+            schedule.reload()
+        if request_dock is None or request_dock.store is None or request_dock.task is not None:
+            return
+        if requests is not None:
+            request_dock.requests = requests
+            request_dock.render()
+        elif request_dock.loaded:
+            request_dock.reload()
 
     def connect(self) -> None:
-        # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
-        self.docks["SatObsImagingPlan"].make_requests = self._requests_from_plan
+        self.host.signals.requests_changed.connect(self._requests_changed)
+        # 「イベントに追加」 of the requests goes to 「イベント」.
+        self.docks["SatObsRequests"].event_linker = self.ports.events
 
     def add_actions(self) -> None:
         # 「年間撮像上限」: what each sensor's (mode's) yearly quota has used and left, and shots not counted (tsudo, 2026-11-11).
@@ -106,13 +117,6 @@ class Requests(Feature):
             except RuntimeError:
                 pass
 
-    def _requests_from_plan(self, ops: list, sats: list, targets: list):
-        """The 「撮像依頼」 dock shown, its form opened with 臨時 requests of the plan's opportunities."""
-        dock = self.docks["SatObsRequests"]
-        dock.show()
-        dock.raise_()
-        return dock.from_plan(ops, sats, targets)
-
     def open_quotas(self):
         """Opens 「年間撮像上限」 (from the 「撮像計画ファイル出力」 dock's store, today's year)."""
         dock = self.docks["SatObsPlanFiles"]
@@ -130,8 +134,7 @@ class Requests(Feature):
         if host.outage_dialog is None:
             from ..ui.outage_dialog import OutageDialog
 
-            plan = self.docks["SatObsImagingPlan"]
-            host.outage_dialog = OutageDialog(self.context, lambda: plan.catalog_sats, host.allows, self.window())
+            host.outage_dialog = OutageDialog(self.context, self._known_satellites, host.allows, self.window())
         host.outage_dialog.show()
         host.outage_dialog.raise_()
         host.outage_dialog.run()

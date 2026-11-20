@@ -58,6 +58,9 @@ class Images(Feature):
         host.notice_feed = None
         host.interests = None
         host.similar_action = None
+        # Its ports: 画像カタログ (to open and list images) and 通知 (the imaging plan's reminders).
+        host.ports.catalog = lambda: host.docks.get("SatObsImageCatalog")
+        host.ports.notices = lambda: host.docks.get("SatObsNotices")
 
     def start(self) -> None:
         # 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
@@ -76,8 +79,9 @@ class Images(Feature):
         """The image catalog with the notices, the imaging plan's reminders and the layers' right-click menu."""
         host, docks = self.host, self.docks
         catalog, notices = docks["SatObsImageCatalog"], docks["SatObsNotices"]
-        # A record's image not open opens through 「画像カタログ」 (開いた画像の履歴, else the catalog by its id).
-        docks["SatObsObservations"].catalog = lambda: docks.get("SatObsImageCatalog")
+        # 「イベントに追加」 of the images goes to 「イベント」; 「ファイルなしで記録」 to 「観測記録」.
+        catalog.event_linker = self.ports.events
+        catalog.observations = notices.observations = self.observations_if_allowed()
         catalog.watch_requested = notices.watch_conditions
         notices.drawn_area = catalog.drawn_shape
         notices.choose_folder = catalog.choose_folder
@@ -101,9 +105,8 @@ class Images(Feature):
         host.central.add_view(NOTICE_FEED, tr("新着画像"), icon("notice_feed"), host.notice_feed)
         notices.show_feed = self.show_notice_feed
         notices.unread_changed = unread
-        docks["SatObsImagingPlan"].on_reminder = notices.add_plan_notice
         # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
-        observations = docks["SatObsObservations"]
+        observations = self.ports.observations()
         feed = notices.alerts
         feed.on_reported = observations.mark_reported
         feed.on_removed = observations.refresh_reported

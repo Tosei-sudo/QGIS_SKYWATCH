@@ -1180,6 +1180,28 @@ class CatalogDock(PluginDock):
         self.draw_button.setChecked(False)
         self._show_layer_row()
 
+    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False) -> None:
+        """
+        Searched over a period (its first and last days, "" open) and an area (its corners in WGS 84; `anywhere`:
+        no area, not whatever area the dock had before), the dock in front (イベント's 「カタログで検索」).
+        """
+        self.acquired_from.setText(start)
+        self.acquired_to.setText(end)
+        if anywhere:
+            self.area_box.setCurrentIndex(self.area_box.findData("none"))
+        else:
+            self.set_drawn(corners)
+        self.show()
+        self.raise_()
+        self.search()
+
+    def show_event_records(self, catalog: CatalogConfig, records, text: str) -> None:
+        """The records listed with what they are in the status line, the dock in front (イベント's 「カタログに表示」)."""
+        self.show_records(catalog, records)
+        self.status.setText(text)
+        self.show()
+        self.raise_()
+
     def area(self):
         """
         Where to search: the map's extent (a box), the area drawn (an Esri

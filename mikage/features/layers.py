@@ -21,7 +21,7 @@ class Layers(Feature):
     def connect(self) -> None:
         host, project = self.host, QgsProject.instance()
         # QGIS の式の関数 「MIKAGE」: the records the observation dock read and the named areas.
-        expression_functions.set_book(lambda: getattr(self.docks.get("SatObsObservations"), "book", None))
+        expression_functions.set_book(lambda: getattr(self.ports.observations(), "book", None))
         expression_functions.register()
         host.place_reader = expression_functions.PlaceReader(self.context, refresh=lambda: self.iface.mapCanvas().refreshAllLayers())
         host.place_reader.start()

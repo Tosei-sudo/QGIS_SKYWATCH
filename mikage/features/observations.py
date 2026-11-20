@@ -16,6 +16,11 @@ from .base import DockSpec, Feature, tr
 class Observations(Feature):
     COMMANDS = ("edit_taxonomy",)
 
+    def __init__(self, host):
+        super().__init__(host)
+        # Its port: 観測記録 (the images without files, the records of events and reports, the AI's and training's records).
+        host.ports.observations = lambda: host.docks.get("SatObsObservations")
+
     def dock_specs(self) -> dict:
         iface, context, settings, window, docks = self.iface, self.context, self.host.open_settings, self.window(), self.docks
         return {
@@ -36,10 +41,11 @@ class Observations(Feature):
         return dock
 
     def connect(self) -> None:
-        # 「ファイルなしで記録」 of images whose files are elsewhere goes to 「観測記録」.
-        docks, allows = self.docks, self.host.allows
-        for name in ("SatObsImageCatalog", "SatObsNotices", "SatObsEvents"):
-            docks[name].observations = lambda: docks.get("SatObsObservations") if allows(tr("観測記録")) else None
+        dock = self.docks["SatObsObservations"]
+        # 「イベントに追加」 of the records goes to 「イベント」.
+        dock.event_linker = self.ports.events
+        # A record's image not open opens through 「画像カタログ」 (開いた画像の履歴, else the catalog by its id).
+        dock.catalog = self.ports.catalog
 
     def add_actions(self) -> None:
         dock = lambda: self.docks["SatObsObservations"]  # noqa: E731
