@@ -564,9 +564,9 @@ class AnalysisDock(PluginDock):
         for r in self.figure_rows:
             self._refill(r["column"], [("", "")] + self._alias_columns())
 
-    @staticmethod
-    def _refill(box: QComboBox, items: list[tuple[str, str]]) -> None:
-        value = AnalysisDock._combo_value(box)
+    @classmethod
+    def _refill(cls, box: QComboBox, items: list[tuple[str, str]]) -> None:
+        value = cls._combo_value(box)
         box.blockSignals(True)
         box.clear()
         for data, text in items:

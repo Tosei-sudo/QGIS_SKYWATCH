@@ -86,6 +86,10 @@ class CurvePlot(QWidget):
                 best, pick = d, i
         return pick
 
+    def forget_drag(self) -> None:
+        """No point dragged any more (the curves were replaced)."""
+        self._drag = None
+
     # ---- mouse ----
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt's name)
@@ -244,7 +248,7 @@ class CurveEditor(QWidget):
     def set_step(self, step: Optional[dict]) -> None:
         """Shows a `curve` step (None: straight lines)."""
         self.plot.curves = {key: [list(map(float, pt)) for pt in normalize_curve((step or {}).get(key))] for key, _ in CHANNELS}
-        self.plot._drag = None
+        self.plot.forget_drag()
         self.plot.update()
 
     def step(self) -> Optional[dict]:

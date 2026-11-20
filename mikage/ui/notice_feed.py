@@ -393,6 +393,11 @@ class NoticeCard(QFrame):
     def _attributes_min(self) -> None:
         self.attributes.setMinimumWidth(max(self._attributes_width, self.attributes_column) if self.wide else 0)
 
+    @property
+    def attributes_width(self) -> int:
+        """How wide its attributes want to be (the page lines the cards up on the widest)."""
+        return self._attributes_width
+
     def line_up(self, width: int) -> None:
         """The attributes' column as wide as the page's widest (`NoticeFeed._line_up`)."""
         if width != self.attributes_column:
@@ -899,7 +904,7 @@ class NoticeFeed(QWidget):
 
     def _line_up(self) -> None:
         """Every card's attributes' column as wide as the widest: the features start at the same place on each."""
-        width = max((c._attributes_width for c in self.cards.values()), default=0)
+        width = max((c.attributes_width for c in self.cards.values()), default=0)
         for card in self.cards.values():
             card.line_up(width)
 

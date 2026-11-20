@@ -726,7 +726,7 @@ class EnhanceRenderer(QgsRasterRenderer):
         classes = self.settings.classes
         if not classes:
             return []
-        return [(c.get("label") or str(c["value"]), QColor(*_rgba_of(c["color"])))
+        return [(c.get("label") or str(c["value"]), QColor(*rgba_of(c["color"])))
                 for c in sorted(classes["classes"], key=lambda c: c["value"])]
 
     def _pseudo_color(self, stretch: Optional[dict]) -> QgsSingleBandPseudoColorRenderer:
@@ -739,7 +739,7 @@ class EnhanceRenderer(QgsRasterRenderer):
             exact = classes["kind"] == "exact"
             shader.setColorRampType(QgsColorRampShader.Type.Exact if exact else QgsColorRampShader.Type.Discrete)
             ramp = [QgsColorRampShader.ColorRampItem(float("inf") if not exact and i == len(items) - 1 else c["value"],
-                                                     QColor(*_rgba_of(c["color"])), c.get("label") or str(c["value"]))
+                                                     QColor(*rgba_of(c["color"])), c.get("label") or str(c["value"]))
                     for i, c in enumerate(items)]
             lo, hi = class_range(classes)
         else:
@@ -794,7 +794,7 @@ class EnhanceRenderer(QgsRasterRenderer):
         return r
 
 
-def _rgba_of(color) -> tuple:
+def rgba_of(color) -> tuple:
     c = [int(round(float(x))) for x in list(color)[:4]]
     return tuple(c + [0] * (3 - len(c)) + ([255] if len(c) < 4 else []))[:4]
 

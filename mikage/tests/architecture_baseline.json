@@ -67,12 +67,5 @@
  "feature_cycles": [],
  "kernel": [],
  "layers": [],
- "private_access": {
-  "ui.analysis_dock": 1,
-  "ui.colorize_box": 2,
-  "ui.curve_editor": 1,
-  "ui.list_views": 2,
-  "ui.notice_feed": 1,
-  "ui.shift": 1
- }
+ "private_access": {}
 }
