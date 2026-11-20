@@ -71,11 +71,11 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import Any, Callable, Optional, Sequence
 
 from ..plan.orbit import R
-from ..time_zone import TimeZone, clock_of
+from ..time_zone import format_time  # noqa: F401 (now of the shared base: read from here too)
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids
 from .model import bbox_of, center_of, day_bounds, polygons_of, rotated_box
@@ -105,28 +105,6 @@ _NUMBER_TEXT = re.compile(r"^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$")
 #: The printf conversions that take a number (whole ones rounded half up first).
 _NUMBER_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxXeEfF]")
 _WHOLE_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxX]")
-
-
-def format_time(ms: float, fmt: str, zone: TimeZone) -> Any:
-    """A moment written by a format: iso, iso-date, unix, unixms or strftime, in `zone`."""
-    if ms is None or not math.isfinite(ms):
-        return None
-    if fmt == "unix":
-        return int(ms // 1000)
-    if fmt == "unixms":
-        return int(ms)
-    offset = zone.offset(ms)
-    clock = datetime.fromtimestamp(clock_of(ms, zone) / 1000, tz=timezone.utc).replace(tzinfo=timezone(timedelta(milliseconds=offset)))
-    if fmt == "iso-date":
-        return clock.strftime("%Y-%m-%d")
-    if fmt in ("iso", ""):
-        text = clock.strftime("%Y-%m-%dT%H:%M:%S")
-        if offset == 0:
-            return text + "Z"
-        sign = "+" if offset > 0 else "-"
-        m = int(abs(offset) // 60000)
-        return f"{text}{sign}{m // 60:02d}:{m % 60:02d}"
-    return clock.strftime(fmt)
 
 
 def _round(v: float, digits: int) -> float:

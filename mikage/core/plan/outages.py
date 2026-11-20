@@ -545,6 +545,6 @@ def delete_outages(client: EsriClient, source, outages: Sequence[Outage], token:
 
 def satellite_outages_of(value: Any, problems: list[str]):
     """`satelliteOutages`: the table of outages (URL or `{ "url", "fields", "where", "token" }`)."""
-    from ..obs.alerts import esri_source_of
+    from ..sources import esri_source_of
 
     return esri_source_of(value, "satelliteOutages", DEFAULT_OUTAGE_FIELDS, problems, editable=True)

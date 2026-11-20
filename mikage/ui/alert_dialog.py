@@ -34,7 +34,7 @@ from ..core.obs.alerts import (
 from ..core.obs.flows import living
 from ..core.obs.place_cache import areas_at, points_of
 from ..core.obs.scope import RecordQuery
-from ..core.request.export import format_time
+from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .fit import fit_text

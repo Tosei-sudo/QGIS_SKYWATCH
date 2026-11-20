@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value
-from ..request.export import format_time
+from ..time_zone import format_time
 from ..request.model import ImagingRequest
 from ..time_zone import UTC, TimeZone, parse_time_zone
 from ..util import encodable, is_number, is_record, js_string, ms_of, utc_text

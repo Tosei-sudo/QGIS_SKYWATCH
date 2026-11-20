@@ -120,7 +120,7 @@ def _is_coordinate(name: str) -> bool:
 
 
 def _part_problem(part: _Part) -> Optional[str]:
-    from ..request.export import format_time
+    from ..time_zone import format_time
     from ..time_zone import UTC, parse_time_zone
 
     name, fmt, at = part.name, part.format, part.at
@@ -299,7 +299,7 @@ def _text(value: Any, fmt: str) -> str:
 
 
 def _time(value: Any, fmt: str, at: str) -> str:
-    from ..request.export import format_time
+    from ..time_zone import format_time
     from ..time_zone import UTC, parse_time_zone
 
     ms = time_of(value)

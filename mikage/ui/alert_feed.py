@@ -25,7 +25,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core import audit, edit_stamp
 from ..core.obs.alert_mail import build_mail
 from ..core.obs.alerts import AlertSettings, LogRow, Moment, poll_log
-from ..core.request.export import format_time
+from ..core.time_zone import format_time
 from ..core.time_zone import UTC
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip

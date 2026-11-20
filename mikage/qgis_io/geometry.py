@@ -7,8 +7,7 @@ from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsGeometry, QgsPointXY, QgsProject, QgsWkbTypes,
 )
 
-from ..core.plan.targets import Shape
-from ..core.request.model import polygons_of
+from ..core.shapes import Shape, polygons_of
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 

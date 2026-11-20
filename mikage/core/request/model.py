@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Sequence
 
+from ..shapes import in_rings, polygons_of, ring_area  # noqa: F401 (read from here too)
+
 #: Days are cut in Japan Standard Time.
 JST = timezone(timedelta(hours=9))
 #: Hours between two shots of a request taken several times a day, when it does not say (so that they are on
@@ -245,44 +247,6 @@ def square_rings(lon: float, lat: float, size_km: float) -> list:
     return [[[w, s], [e, s], [e, n], [w, n], [w, s]]]
 
 
-def ring_area(ring: Sequence) -> float:
-    """A ring's signed area (degrees², anticlockwise positive)."""
-    return sum(ring[i - 1][0] * ring[i][1] - ring[i][0] * ring[i - 1][1] for i in range(len(ring))) / 2
-
-
-def polygons_of(rings: Sequence) -> list[list]:
-    """
-    Rings grouped into polygons, each its outer ring first and then its
-    holes, by how they lie in one another (whichever way they turn): a ring
-    inside an even number of others is an outer ring, one inside an odd
-    number a hole of the smallest outer ring holding it. Rings of fewer than
-    three points are left out; the order of the rings is kept otherwise.
-    """
-    rs = [r for r in rings if len(r) >= 3]
-    areas = [abs(ring_area(r)) for r in rs]
-    holders = []
-    for i, r in enumerate(rs):
-        # A point of the ring not on another ring's edge (the first vertex mostly is not).
-        x, y = r[0][0], r[0][1]
-        holders.append([j for j, other in enumerate(rs) if j != i and in_rings([other], x, y)])
-    depth = [len(h) for h in holders]
-    out: dict = {}
-    order = []
-    for i, r in enumerate(rs):
-        if depth[i] % 2 == 0:
-            out[i] = [r]
-            order.append(i)
-    for i, r in enumerate(rs):
-        if depth[i] % 2 == 1:
-            outer = [j for j in holders[i] if depth[j] == depth[i] - 1]
-            if outer:
-                out[min(outer, key=lambda j: areas[j])].append(r)
-            else:
-                out[i] = [r]
-                order.append(i)
-    return [out[i] for i in sorted(order)]
-
-
 def _hull(points: Sequence[tuple]) -> list:
     """The convex hull of points (x, y), anticlockwise (monotone chain)."""
     pts = sorted(set(points))
@@ -370,17 +334,3 @@ def shape_text(rings: Sequence, kind: str = "範囲") -> str:
     holes = sum(len(p) - 1 for p in polygons)
     parts = ([f"{len(polygons)} 部分"] if len(polygons) > 1 else []) + [f"頂点 {vertices}"] + ([f"穴 {holes}"] if holes else [])
     return f"多角形（{'・'.join(parts)}）"
-
-
-def in_rings(rings: Sequence, x: float, y: float) -> bool:
-    """Whether a point is inside rings (even-odd)."""
-    inside = False
-    for ring in rings:
-        j = len(ring) - 1
-        for i in range(len(ring)):
-            xi, yi = ring[i][0], ring[i][1]
-            xj, yj = ring[j][0], ring[j][1]
-            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-300) + xi:
-                inside = not inside
-            j = i
-    return inside

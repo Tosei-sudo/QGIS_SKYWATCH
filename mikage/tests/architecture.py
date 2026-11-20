@@ -43,8 +43,10 @@ FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core
 
 #: The shared base (共通基盤): imports no feature and nothing above it.
 KERNEL = (
-    "core.esri", "core.util", "core.time_zone", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline", "core.auth",
-    "core.json_pieces", "core.coords", "core.sql", "core.sources", "core.win64",
+    "core.esri", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
+    "core.auth", "core.json_pieces", "core.coords", "core.shapes", "core.sql", "core.sources", "core.win64",
+    # The query results kept a few minutes (データ分析 reads them; core.esri forgets a layer's on an edit).
+    "core.analysis_cache",
     "qgis_io.tasks", "qgis_io.network", "qgis_io.geometry",
     "ui.fit", "ui.flow_layout", "ui.wheel_guard",
 )

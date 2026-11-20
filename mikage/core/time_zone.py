@@ -436,7 +436,7 @@ def _attributes_to_service(text: Optional[str], times: LayerTimes) -> Optional[s
         return text
     if not isinstance(items, list):
         return text
-    from .obs.image_time import parse_time
+    from .time_text import parse_time
 
     for item in items:
         attributes = item.get("attributes") if isinstance(item, dict) else None
@@ -498,3 +498,24 @@ def from_service(answer: Any, times: LayerTimes) -> None:
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 a[name] = round(read_instant(v, times.shift))
 
+
+def format_time(ms: float, fmt: str, zone: TimeZone) -> Any:
+    """A moment written by a format: iso, iso-date, unix, unixms or strftime, in `zone`."""
+    if ms is None or not math.isfinite(ms):
+        return None
+    if fmt == "unix":
+        return int(ms // 1000)
+    if fmt == "unixms":
+        return int(ms)
+    offset = zone.offset(ms)
+    clock = datetime.fromtimestamp(clock_of(ms, zone) / 1000, tz=timezone.utc).replace(tzinfo=timezone(timedelta(milliseconds=offset)))
+    if fmt == "iso-date":
+        return clock.strftime("%Y-%m-%d")
+    if fmt in ("iso", ""):
+        text = clock.strftime("%Y-%m-%dT%H:%M:%S")
+        if offset == 0:
+            return text + "Z"
+        sign = "+" if offset > 0 else "-"
+        m = int(abs(offset) // 60000)
+        return f"{text}{sign}{m // 60:02d}:{m % 60:02d}"
+    return clock.strftime(fmt)
