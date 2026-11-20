@@ -96,8 +96,8 @@ docs/                  ビューアとの違い・撮像依頼の設計書・雲
 ```
 python3 -m pip install -r requirements-test.txt       # pytest・pytest-xdist・pytest-timeout・sgp4・onnxruntime（NumPy は 2 未満のまま）
 
-QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto         # 高速版（約 40 秒・4 コア）: 学習が「当たるまで」のテストを除く
-QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto --full  # 完全版（約 2 分半）: AI 学習が四角を見つけ直すまで学ぶテストも
+QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto         # 高速版（約 80 秒・4 コア）: 学習が「当たるまで」のテストを除く
+QT_QPA_PLATFORM=offscreen python3 -m pytest -n auto --full  # 完全版（約 3 分）: AI 学習が四角を見つけ直すまで学ぶテストも
 python3 -m pytest                                           # core だけ（QGIS なしで動く）
 MIKAGE_SGP4=bundled python3 -m pytest        # 同梱の純 Python 版 SGP4 で
 ```

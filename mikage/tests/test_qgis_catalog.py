@@ -1356,9 +1356,11 @@ def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
     assert found("ev01 横須賀") == ["B"]
     assert found("x' OR '1'='1") == []
     assert found("") == ["A", "B", "C"]
-    # The query asked: each word in either attribute, the word a value.
+    # The query asked: each word in either attribute, the word a value. (Not the sensors' list read again after
+    # the settings file, which may end after the search.)
     def asked_where():
-        return [form["where"] for url, form in fake.asked if url.endswith("/query") and "returnCountOnly" not in form][-1]
+        return [form["where"] for url, form in fake.asked
+                if url.endswith("/query") and "returnCountOnly" not in form and "returnDistinctValues" not in form][-1]
 
     found("臨時")
     assert asked_where() == "(UPPER(NOTE) LIKE '%臨時%' ESCAPE '\\' OR UPPER(IMG_ID) LIKE '%臨時%' ESCAPE '\\')"
