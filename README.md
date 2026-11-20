@@ -38,7 +38,7 @@
 | [導入と設定](docs/admin/install.md) | 導入、設定、接続と表の点検 |
 | [設定ファイルの書き方](docs/admin/config-file.md) | 設定ファイルの書き方 |
 | [Esri 側のテーブル定義](docs/admin/esri-tables.md) | Esri 側のテーブル定義 |
-| [構成と依存のきまり](docs/architecture.md) | 改修する人向け: 層、機能の登録票、窓口と通知、機能の api、データ窓口（リポジトリ）、設定の一覧表、構成テストの台帳 |
+| [構成と依存のきまり](docs/architecture.md) | 改修する人向け: 層、機能の登録票、窓口と通知、機能の api、データ窓口（リポジトリ）、設定の一覧表、大きなドックの部分、機能ごとの小さな組み立てのテスト、構成テストの台帳 |
 
 ## Python API
 
@@ -74,8 +74,8 @@ mikage/
   processing_provider/  Processing のアルゴリズム（パンシャープン・物体検出・AI 学習・教師データセットほか）
   ui/        ドック・ダイアログ
     ports.py     機能同士の窓口と「変わった」の通知（PluginEvents）
-    obs_dock/    観測記録ドックの担当ごとの部分
-  tests/     pytest（architecture.py が依存のきまり、snapshots/screen.json が画面の写し）
+    obs_dock/・plan_dock/・catalog_parts/  観測記録・撮像計画・画像カタログのドックの担当ごとの部分
+  tests/     pytest（architecture.py が依存のきまり、snapshots/screen.json が画面の写し、feature_harness.py が機能ごとの小さな組み立て）
 tools/
   config_builder.html  設定ファイル作成ツール（ブラウザで開く）
   satellite_editor.html  衛星・センサー・別名のテーブルの編集ツール（ブラウザで開く。設定ファイルを読み込む）
