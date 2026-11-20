@@ -155,8 +155,10 @@ class FakeWriter:
         #: Its size (billions of parameters), as GenAiWriter reads it from genai_config.json.
         self.params = params
 
-    def write(self, messages, max_tokens, cancelled=lambda: False, wrote=lambda _t: None, one_line=False):
+    def write(self, messages, max_tokens, cancelled=lambda: False, wrote=lambda _t: None, one_line=False, until=None):
         self.asked.append((list(messages), max_tokens, one_line))
+        #: When the screen said the answer was enough (GenAiWriter stops there).
+        self.until = until
         reply = self.replies.pop(0) if self.replies else ""
         text = ""
         for ch in reply:
@@ -169,6 +171,8 @@ class FakeWriter:
             text += ch
             wrote(text)
             if one_line and "\n" in text.lstrip():
+                break
+            if until is not None and until(text):
                 break
         return text
 
@@ -447,14 +451,17 @@ def test_the_fields_read_from_the_note_fill_only_the_empty_ones(plugin, tmp_path
     dock.choose_kind(["船舶"])
     dock.activity_input.setText("航行")
     dock.confidence_select.setCurrentIndex(dock.confidence_select.findData("確定"))
-    dock.note_input.setText("補給艦おうみが岸壁に停泊、全長120m程度")
+    dock.note_input.setText("補給艦おうみが岸壁に停泊、全長120m程度と推定")
     fields.button.click()
     assert wait_for(lambda: fields.panel.draft is not None)
     messages, max_tokens, one_line = loaded[0].asked[0]
     asked = messages[1]["content"]
     assert (max_tokens, one_line) == (160, False) and messages[0]["content"].endswith("向き: \nモノ: ")
-    assert asked.startswith("今の種別: 船舶\n種別の候補: 船舶、船舶 > 補給艦、航空機、") and "活動の候補（船舶）: 停泊、航行、入港" in asked
-    assert "確度の候補: 確定、推定、不明" in asked and asked.endswith("備考: 補給艦おうみが岸壁に停泊、全長120m程度")
+    # The class the 備考 names first.
+    assert asked.startswith("今の種別: 船舶\n種別の候補: 船舶 > 補給艦、船舶、航空機、") and "活動の候補（船舶）: 停泊、航行、入港" in asked
+    assert "確度の候補: 確定、推定、不明" in asked and asked.endswith("備考: 補給艦おうみが岸壁に停泊、全長120m程度と推定")
+    # It stops once its 7 lines are written.
+    assert loaded[0].until is not None and loaded[0].until("種別: a\n活動: b\n確度: c\n長さ: d\n幅: e\n向き: f\nモノ: g\n")
     # The 種別 made finer; the 活動 and 確度 written are kept (shown only); 幅 30 is not in the 備考. A 3B model: no caution.
     assert fields.panel.label.text().endswith("種別 船舶 > 補給艦・長さ 120 m・モノ おうみ")
     assert fields.panel.warning.text() == ("確認: 幅 30 は備考にない数字。活動は入力済みのため変えない（案: 停泊）。"
@@ -463,7 +470,7 @@ def test_the_fields_read_from_the_note_fill_only_the_empty_ones(plugin, tmp_path
     fields.panel.replace_button.click()
     assert dock.kind_input.text() == "船舶 > 補給艦" and dock.length_input.text() == "120" and dock.object_input.text() == "おうみ"
     assert dock.activity_input.text() == "航行" and dock.confidence_select.currentData() == "確定" and dock.width_input.text() == ""
-    assert not fields.panel.isVisible() and dock.note_input.text() == "補給艦おうみが岸壁に停泊、全長120m程度"
+    assert not fields.panel.isVisible() and dock.note_input.text() == "補給艦おうみが岸壁に停泊、全長120m程度と推定"
     # All there already: nothing to put in.
     loaded[0].replies.append("種別: 補給艦\nモノ: おうみ")
     fields.pick()
@@ -506,16 +513,18 @@ def test_words_made_into_the_export_conditions(plugin, tmp_path):
     words = dialog.search_words
     assert dialog.search_label.isVisible() and words.edit.isVisible() and not words.button.isEnabled()
     assert not dialog.summary_button.isVisible()
-    words.edit.setText("先週の横須賀港の船舶、確度は推定以上")
+    words.edit.setText("11月9日から15日の横須賀港の船舶、確度は推定以上でいたもの")
     words.button.click()
     # The place names read first, then asked.
     assert wait_for(lambda: words.panel.draft is not None)
     asked = loaded[0].asked[0][0][1]["content"].split("\n")
     assert asked[0].startswith("今日: ") and asked[1].startswith("日付の目安: 今日 ")
     assert asked[2:] == ["地名の候補: 東京湾、横須賀港", "大分類の候補: 船舶、航空機、車両、建物、構造物、その他", "確度の候補: 確定、推定、不明",
-                         "依頼: 先週の横須賀港の船舶、確度は推定以上"]
+                         "依頼: 11月9日から15日の横須賀港の船舶、確度は推定以上でいたもの"]
+    # The model's dates (the words name a date); the 大分類 the words name (not the model's 潜水艦).
     assert words.panel.label.text().endswith("期間 2026-11-09〜2026-11-15・地名 横須賀港・大分類 船舶・確度 推定・有無 ありのみ")
-    assert words.panel.warning.text() == "確認: 大分類にない「潜水艦」" and words.panel.replace_button.text() == "条件に入れる"
+    assert words.panel.warning.isHidden() and words.panel.replace_button.text() == "条件に入れる"
+    assert loaded[0].until is not None
     # Nothing changed until 「条件に入れる」.
     assert not dialog.start_check.isChecked() and dialog.place_select.currentData() != "named"
     words.panel.replace_button.click()
@@ -588,7 +597,8 @@ def test_the_notes_in_english_for_a_format_that_writes_them(plugin, tmp_path):
     button.click()
     assert wait_for(lambda: "件の備考を英訳" in dialog.status.text())
     # Each 備考 once, one line each.
-    assert [c[0][1]["content"] for c in loaded[0].asked] == ["Note: 岸壁に停泊中", "Note: 2 隻が北上"]
+    assert [c[0][1]["content"] for c in loaded[0].asked] == ["Note: 岸壁に停泊中\nTerms: 岸壁 = quay; 停泊 = moored",
+                                                            "Note: 2 隻が北上\nTerms: 北上 = heading north"]
     assert all(one_line for _m, _n, one_line in loaded[0].asked)
     assert lines() == ["船A|Moored at the quay.", "船B|Two vessels sailing north, 3 tugs.", "船C|Moored at the quay.", "船D|"]
     row = next(r for r in range(4) if dialog.lines_table.item(r, 1).text().startswith("船B"))

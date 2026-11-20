@@ -299,8 +299,13 @@ class GenAiWriter:
         return plain_prompt(messages)
 
     def write(self, messages: Sequence[Message], max_tokens: int, cancelled: Callable[[], bool] = lambda: False,
-              wrote: Callable[[str], None] = lambda _t: None, one_line: bool = False) -> str:
-        """The reply (greedy: the same every time); `one_line`: ends at the first line break after some text."""
+              wrote: Callable[[str], None] = lambda _t: None, one_line: bool = False,
+              until: Optional[Callable[[str], bool]] = None) -> str:
+        """
+        The reply (greedy: the same every time); `one_line`: ends at the
+        first line break after some text; `until`: ends once it says the
+        text so far is enough (all the lines asked for written …).
+        """
         og = self._og
         with self._lock:
             ids = self.tokenizer.encode(self.prompt(messages))
@@ -319,6 +324,8 @@ class GenAiWriter:
                 text += stream.decode(int(generator.get_next_tokens()[0]))
                 wrote(text)
                 if one_line and "\n" in text.lstrip():
+                    break
+                if until is not None and until(text):
                     break
             return text
 
@@ -403,9 +410,10 @@ class TextAssistant(QObject):
         return ""
 
     def ask(self, task: str, title: str, messages: Sequence[Message], done: Callable[[str, float], None],
-            failed: Callable[[str], None], one_line: bool = False) -> Optional[Asked]:
-        """Starts writing for `task` (in a task); None (and `failed` told) when it cannot start."""
-        return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False)
+            failed: Callable[[str], None], one_line: bool = False,
+            until: Optional[Callable[[str], bool]] = None) -> Optional[Asked]:
+        """Starts writing for `task` (in a task; `until`: when it has written enough); None (and `failed` told) when it cannot start."""
+        return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False, until)
 
     def ask_each(self, task: str, title: str, conversations: Sequence[Sequence[Message]],
                  done: Callable[[list[str], float], None], failed: Callable[[str], None], one_line: bool = True) -> Optional[Asked]:
@@ -413,7 +421,8 @@ class TextAssistant(QObject):
         return self._start(task, title, list(conversations), done, failed, one_line, True)
 
     def _start(self, task: str, title: str, conversations: list, done: Callable[[list[str], float], None],
-               failed: Callable[[str], None], one_line: bool, counted: bool) -> Optional[Asked]:
+               failed: Callable[[str], None], one_line: bool, counted: bool,
+               until: Optional[Callable[[str], bool]] = None) -> Optional[Asked]:
         s = self.settings
         t = s.task(task) if s is not None else None
         model = s.model_for(task) if s is not None else None
@@ -446,7 +455,10 @@ class TextAssistant(QObject):
                 def wrote(text: str) -> None:
                     asked.text = text
 
-                texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line))
+                if until is None:
+                    texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line))
+                else:
+                    texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line, until=until))
                 job.check()
             return w, texts, time.monotonic() - started
 
