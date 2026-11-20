@@ -17,7 +17,8 @@ from ..esri import EsriError, contains, own_condition
 from ..geocode import kana_variants
 from ..time_query import text_at
 from ..time_zone import TimeZone
-from ..util import is_number, time_of, utc_text
+from .. import sql
+from ..util import is_number, time_of
 from .config import CatalogConfig
 
 #: The Esri field types by name.
@@ -80,10 +81,10 @@ def day_range(field: str, field_type: Optional[str], start: str, end: str, like:
     def bound(when: str, op: str, is_end: bool) -> str:
         day = when[:10]
         if field_type == "esriFieldTypeDateOnly":
-            return f"{field} {op} DATE '{_next_day(day) if is_end else day}'"
+            return f"{field} {op} {sql.date_text(_next_day(day) if is_end else day)}"
         instant = local_time(when, is_end)
         if field_type in ("esriFieldTypeDate", "esriFieldTypeTimestampOffset"):
-            return f"{field} {op} TIMESTAMP '{utc_text(instant)}'"
+            return f"{field} {op} {sql.timestamp(instant)}"
         if field_type and re.search(r"Integer|Double|Single", field_type):
             return f"{field} {op} {instant}"
         if not has_time(when):

@@ -22,10 +22,10 @@ from qgis.PyQt.QtWidgets import (
     QTableView, QVBoxLayout,
 )
 
-from ..core.request.api import follow_and_save, found_text, in_days, marked, next_step, save_marked, tally, with_settled_times
+from ..core.request.api import found_text, in_days, marked, next_step, tally
 from ..core.request.api import unit_key
 from ..core.request.api import jst_day
-from ..core.request.api import history_where, load_history, load_requests
+from ..core.request.api import history_where
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
 from .check_filter import CheckFilter
@@ -142,7 +142,7 @@ class PlanResultsDialog(QDialog):
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
             return
         catalog = dock.catalog() if follow else None
-        client, token = self.context.esri(), dock.token()
+        repo = dock.repository()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
         now = _now_ms()
         first, last = self.span()
@@ -153,21 +153,21 @@ class PlanResultsDialog(QDialog):
 
         def work(task):
             notes = []
-            requests = load_requests(client, store, token, task.isCanceled)
-            history = load_history(client, store, token, where, cancelled=task.isCanceled, shapes=follow)
+            requests = repo.load_requests(task.isCanceled)
+            history = repo.load_history(where, cancelled=task.isCanceled, shapes=follow)
             by_id = {r.id: r for r in requests}
             if catalog is not None:
-                names = self.context.satellite_names(client, task.isCanceled)
+                names = self.context.satellite_names(repo.client, task.isCanceled)
                 problems = []
                 # With the times of the day already taken of a request taken several times a day.
-                rows = with_settled_times(client, store, token, history, by_id, task.isCanceled)
-                found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
-                                                 problems)
+                rows = repo.with_settled_times(history, by_id, task.isCanceled)
+                found, changed = repo.follow_and_save(catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
+                                                      problems)
                 notes.append(found_text(found) if found else "新たに判定できた依頼なし")
                 if problems:
                     notes.append("照合結果の保存に一部失敗（" + "、".join(problems[:3]) + "）")
                 if changed:
-                    requests = load_requests(client, store, token, task.isCanceled)
+                    requests = repo.load_requests(task.isCanceled)
             elif follow:
                 notes.append("画像カタログがないため照合なし")
             return requests, history, notes
@@ -283,16 +283,16 @@ class PlanResultsDialog(QDialog):
         if image_id:
             findings = marked(rows, captured, image_id.strip())
         dock, store = self.dock, self.dock.store
-        client, token, now = self.context.esri(), dock.token(), _now_ms()
+        repo, now = dock.repository(), _now_ms()
         requests, history = self.requests, self.history
 
         def work(task):
             # Every row of those requests (not only the span's): whether another is still 撮像済み.
-            rows = load_history(client, store, token, history_where(store, request_ids=[f.row.request_id for f in findings]),
-                                cancelled=task.isCanceled)
+            rows = repo.load_history(history_where(store, request_ids=[f.row.request_id for f in findings]),
+                                     cancelled=task.isCanceled)
             problems = []
-            changed = save_marked(client, store, token, findings, requests, rows or history, now, problems)
-            return (load_requests(client, store, token, task.isCanceled) if changed else None), problems
+            changed = repo.save_marked(findings, requests, rows or history, now, problems)
+            return (repo.load_requests(task.isCanceled) if changed else None), problems
 
         def done(result):
             self.task = None

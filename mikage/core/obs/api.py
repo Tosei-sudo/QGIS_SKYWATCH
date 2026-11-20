@@ -51,6 +51,7 @@ from .mine import is_mine, my_names
 from .model import ListedImage, state_text, UNSEEN, unseen_label
 from .offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
 from .output import observation_layers, ObservationLayer
+from .repository import AlertLogRepository, AssignmentRepository
 from .place_cache import areas_at, points_of
 from .record_import import SourceRow
 from .report import report_file_name, ReportSelection
@@ -386,6 +387,7 @@ class ObservationApi:
 
 
 __all__ = [
+    "AlertLogRepository", "AssignmentRepository",
     "activities_at", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",
     "bearing", "box_ring", "build_mail", "Cancelled", "CarryOver", "CheckedArea", "children_of", "class_by_name", "clean",
     "csv_file_name", "default_count", "ends_of", "entry_of", "ExportContext", "ExportFilter", "ExportSettings",

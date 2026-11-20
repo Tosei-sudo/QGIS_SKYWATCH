@@ -21,14 +21,13 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import edit_stamp
-from ..core.request.api import RequestChange, apply_change
+from ..core.request.api import RequestChange, RequestRepository
 from ..core.request.api import requests_of_plan
-from ..core.request.api import first_group, offered, read_groups
+from ..core.request.api import first_group, offered
 from ..core.request.api import remembered, with_remembered
 from ..core.request.model import KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
-from ..core.request.api import (RequestStoreConfig, delete_request, load_requests, new_request_id, save_request, save_requests,
-                                  waiting_ids)
+from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
@@ -226,17 +225,21 @@ class RequestDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def repository(self) -> RequestRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return RequestRepository(self.context.esri(), self.store, self.token())
+
     def reload(self, then: Optional[Callable[[], None]] = None, failed: Optional[Callable[[str], None]] = None) -> None:
         """Reads the ledger again (`then` once read, `failed` with the reason when it cannot be)."""
         store = self.store
         if store is None:
             return
         self.status.setText(self.tr("{label} を読み込み中…").format(label=store.label))
-        client, token = self.context.esri(), self.token()
+        repo = self.repository()
 
         def work(task):
-            requests = load_requests(client, store, token, task.isCanceled)
-            groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            requests = repo.load_requests(task.isCanceled)
+            groups, note = repo.read_groups(task.isCanceled)
             return requests, groups, note
 
         def done(result):
@@ -412,7 +415,7 @@ class RequestDock(PluginDock):
         self.form.show()
 
     def _save(self, request: ImagingRequest) -> None:
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         form = self.form
 
         def done(saved):
@@ -422,7 +425,7 @@ class RequestDock(PluginDock):
                 form.accept()
             self.reload()
 
-        if not self._start(self.tr("撮像依頼の保存"), lambda task: save_request(client, store, token, request, _now_ms()), done,
+        if not self._start(self.tr("撮像依頼の保存"), lambda task: repo.save_request(request, _now_ms()), done,
                            lambda m: form.message.setText(self.tr("保存失敗: {m}").format(m=m)) if form else self.status.setText(m)):
             if form is not None:
                 form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
@@ -435,14 +438,14 @@ class RequestDock(PluginDock):
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def done(count):
             self.chosen = None
             gone = self.tr("「{name}」を削除").format(name=r.name) if count else self.tr("「{name}」は台帳になし（ほかの人が削除済み）").format(name=r.name)
             self.reload(lambda: self.status.setText(gone))
 
-        self._start(self.tr("撮像依頼の削除"), lambda task: delete_request(client, store, token, r), done,
+        self._start(self.tr("撮像依頼の削除"), lambda task: repo.delete_request(r), done,
                     lambda m: self.status.setText(self.tr("削除失敗: {m}").format(m=m)))
 
     def selected(self) -> list[ImagingRequest]:
@@ -508,7 +511,7 @@ class RequestDock(PluginDock):
         if change.empty or problems:
             self.status.setText("、".join(problems) or self.tr("変更する項目なし"))
             return False
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         ids = [r.id for r in chosen]
         self.status.setText(self.tr("{n} 件を変更中（{what}）…").format(n=len(chosen), what=change.text()))
 
@@ -516,7 +519,7 @@ class RequestDock(PluginDock):
             self.reload(lambda: (self.select(ids), self.status.setText(result.text())))
 
         started = self._start(self.tr("撮像依頼の一括編集"),
-                              lambda task: apply_change(client, store, token, chosen, change, _now_ms, task.isCanceled, task.progress),
+                              lambda task: repo.apply_change(chosen, change, _now_ms, task.isCanceled, task.progress),
                               done, lambda m: self.status.setText(self.tr("一括編集の失敗: {m}").format(m=m)))
         if not started:
             self.status.setText(self.tr("ほかの処理の実行中。少し待ってから変更"))
@@ -658,7 +661,7 @@ class RequestDock(PluginDock):
         area. An item's `own` values stand where the form still has what it
         opened with (`first`); its `note` follows the form's.
         """
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         form = self.form
         todo = []
         for name, rings, kind, numbers in items:
@@ -676,7 +679,7 @@ class RequestDock(PluginDock):
 
         def work(task):
             # Together (a few requests to the ledger), each one checked and reported on its own.
-            out = save_requests(client, store, token, todo, _now_ms(), task.isCanceled, task.progress)
+            out = repo.save_requests(todo, _now_ms(), task.isCanceled, task.progress)
             return len(out.saved), [f"{r.name}: {error}" for r, error in out.failed]
 
         def done(result):
@@ -740,11 +743,11 @@ class RequestDock(PluginDock):
                 text += "\n" + self.tr("取り込まないもの: {list}").format(list="、".join(skipped[:5]))
             if QMessageBox.question(self, self.tr("レイヤーから取り込み"), text) != QMessageBox.StandardButton.Yes:
                 return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def work(task):
             # The ledger as it is now (not as the dock last read it): ids already there are changed, not added again (#72).
-            fresh = {r.id: r for r in load_requests(client, store, token, task.isCanceled)}
+            fresh = {r.id: r for r in repo.load_requests(task.isCanceled)}
             todo = []
             for values, rings, kind, key in kept:
                 existing = fresh.get(key) if key is not None else None
@@ -752,7 +755,7 @@ class RequestDock(PluginDock):
                 if existing is not None:
                     r.updated = existing.updated
                 todo.append(r)
-            out = save_requests(client, store, token, todo, _now_ms(), task.isCanceled, task.progress)
+            out = repo.save_requests(todo, _now_ms(), task.isCanceled, task.progress)
             return len(out.saved), [f"{r.name}: {error}" for r, error in out.failed]
 
         def done(result):

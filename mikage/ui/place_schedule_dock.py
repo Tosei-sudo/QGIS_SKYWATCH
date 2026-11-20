@@ -25,15 +25,13 @@ from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QFrame, QLabel, QPushButton, QScrollArea
 
 from ..core.esri import EsriError
-from ..core.request.api import bbox_of, jst_day
-from ..core.request.api import read_groups
+from ..core.request.api import bbox_of, jst_day, ScheduleRepository
 from ..core.request.place_plans import (
     DAY_CHOICES, DAYS, KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next,
     span_of, taken_text, tally_text,
 )
 from ..core.request.api import (
-    AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, load_days, load_requests, load_shots_where,
-    shot_days_where,
+    AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, shot_days_where,
 )
 from ..qgis_io.geometry import from_wgs84, rings_geometry, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -370,6 +368,10 @@ class PlaceScheduleDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     # --- Reading --------------------------------------------------------------------------------
 
     def reload(self, then=None) -> None:
@@ -379,24 +381,24 @@ class PlaceScheduleDock(PluginDock):
         if self.task is not None:
             self._again = True
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         first = jst_day(_now_ms())
         n = self.days()
         last = (first + timedelta(days=n - 1)).isoformat()
         self.status.setText(self.tr("{a}〜{b} の計画と依頼を読み込み中…").format(a=first.isoformat(), b=last))
 
         def work(task):
-            rows = load_days(client, store, token, first.isoformat(), last, task.isCanceled)
+            rows = repo.load_days(first.isoformat(), last, task.isCanceled)
             shots, problem = [], ""
-            if store.shots:
+            if repo.store.shots:
                 try:
-                    shots = load_shots_where(client, store, token, shot_days_where(store, first.isoformat(), last), geometry=True,
-                                             cancelled=task.isCanceled)
+                    shots = repo.load_shots_where(shot_days_where(repo.store, first.isoformat(), last), geometry=True,
+                                                  cancelled=task.isCanceled)
                 except EsriError as error:
                     # The requests' rows matter most: shown without the shots.
                     problem = str(error)
-            requests = load_requests(client, store, token, task.isCanceled)
-            groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            requests = repo.load_requests(task.isCanceled)
+            groups = repo.read_groups(task.isCanceled)
             return rows, shots, requests, problem, groups
 
         def done(result):

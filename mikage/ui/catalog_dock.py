@@ -51,7 +51,7 @@ from ..core.catalog.api import (
 )
 from ..core.catalog.api import SimilarTolerance, rank_similar, similar_search
 from ..core.catalog.api import areas_of
-from ..core.obs.api import local_time
+from ..core.obs.api import AssignmentRepository, local_time
 from ..core.util import read_clock, read_day_time, read_number
 from ..qgis_io import settings
 from ..qgis_io.overviews_io import queue as overview_queue
@@ -823,15 +823,15 @@ class CatalogDock(PluginDock):
             return
         if self.isVisible() and not self._work_timer.isActive():
             self._work_timer.start()
-        from ..core.obs.assignments import assignments_of_images, work_state
+        from ..core.obs.assignments import work_state
 
         self._work_asked += 1
         asked = self._work_asked
         ids = [r.id for r in self.model.records if r.id]
-        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+        repo = AssignmentRepository(self.context.esri(), source, self.context.token_for(source.url, source.token))
 
         def work(_task):
-            rows = assignments_of_images(client, source, ids, token)
+            rows = repo.assignments_of_images(ids)
             return {i: work_state(rows.get(i, [])) for i in ids}
 
         def done(states) -> None:

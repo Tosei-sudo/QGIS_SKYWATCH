@@ -46,12 +46,11 @@ from ..core.request.api import (
 from ..core.esri import EsriError
 from ..core.plan.api import plain
 from ..core.plan.api import handed_hit
-from ..core.request.api import read_groups
+from ..core.request.api import ScheduleRepository
 from ..core.request.api import JST, jst_day
 from ..core.request.result_file import ADOPTED, REJECTED, WAITING, read_answers
 from ..core.request.api import (
-    ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, add_history,
-    day_counts, delete_history_rows, history_has, load_day, load_requests, load_shots, load_system_rows, state_of, update_history,
+    ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, state_of,
 )
 from ..core.request.api import companions, shot_text, shot_tip
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
@@ -354,6 +353,10 @@ class ScheduleDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     def chosen_day(self) -> date:
         d = self.calendar.selectedDate()
         return date(d.year(), d.month(), d.day())
@@ -400,7 +403,7 @@ class ScheduleDock(PluginDock):
             self._again_args = (refresh or self._again_args[0], then or self._again_args[1])
             self._again.start(300)
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         day = self.chosen_day().isoformat()
         areas = None if refresh or not self._areas else self._areas
         ledger_groups = dict(self._ledger_groups) if areas is not None else {}
@@ -408,26 +411,26 @@ class ScheduleDock(PluginDock):
         self.status.setText(self.tr("{d} の計画を読み込み中…").format(d=day))
 
         def work(task):
-            rows = load_day(client, store, token, day, task.isCanceled)
+            rows = repo.load_day(day, task.isCanceled)
             shots, problem = [], ""
-            if store.shots:
+            if repo.store.shots:
                 try:
-                    shots = load_shots(client, store, token, day, task.isCanceled)
+                    shots = repo.load_shots(day, task.isCanceled)
                 except EsriError as error:
                     # The requests' rows matter most: shown without the shots.
                     problem = str(error)
-            missing = history_has(client, store, token, ADOPTION_ROLES) if refresh or areas is None else None
+            missing = repo.history_has(ADOPTION_ROLES) if refresh or areas is None else None
             found, groups_of = areas, ledger_groups
             if (found is None or any(r.request_id and not r.rings and r.request_id not in found for r in rows)
                     or any(r.request_id and not r.group and r.request_id not in groups_of for r in rows)):
                 # A table without shapes (or rows written before it had them): the ledger's areas. Rows written
                 # without a group: the ledger's group (a request gone from the ledger: none, not asked again).
-                requests = load_requests(client, store, token, task.isCanceled)
+                requests = repo.load_requests(task.isCanceled)
                 found = {q.id: q.rings for q in requests}
                 groups_of = {q.id: q.group for q in requests}
                 groups_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in groups_of})
-            groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled) if read_table else None
-            outages, _problem = self.context.read_outages(client, task.isCanceled)
+            groups = repo.read_groups(task.isCanceled) if read_table else None
+            outages, _problem = self.context.read_outages(repo.client, task.isCanceled)
             return rows, missing, found, groups_of, groups, shots, problem, outages
 
         def done(result):
@@ -461,7 +464,7 @@ class ScheduleDock(PluginDock):
         self._month = (year, month)
         first = date(year, month, 1)
         last = (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def done(counts):
             plain = QTextCharFormat()
@@ -487,7 +490,7 @@ class ScheduleDock(PluginDock):
         def failed(_message):
             self._month = ()
 
-        run_task(self.tr("撮像予定の日の印"), lambda task: day_counts(client, store, token, first.isoformat(), last.isoformat()),
+        run_task(self.tr("撮像予定の日の印"), lambda task: repo.day_counts(first.isoformat(), last.isoformat()),
                  done, failed)
 
     # --- The list -------------------------------------------------------------------------------
@@ -705,10 +708,10 @@ class ScheduleDock(PluginDock):
         changes = manual_changes(rows, answer, self.reason.text().strip())
         if not changes:
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def work(task):
-            return update_history(client, store, token, changes)
+            return repo.update_history(changes)
 
         def done(saved):
             self.reason.clear()
@@ -765,7 +768,7 @@ class ScheduleDock(PluginDock):
             self.status.setText(self.tr("読めない: {m}").format(m=error.strerror or error))
             return
         spec = system.result_file
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         day, name = self.day, os.path.basename(path)
 
         def work(task):
@@ -773,8 +776,8 @@ class ScheduleDock(PluginDock):
             # The system's rows of the days the file's rows say and round them (a 外部連携ID's earlier row), and round
             # the day shown for a file without dates; not only the day shown.
             first, last = read_window(answers, day, spec.link_days, system.system, system.label)
-            rows = load_system_rows(client, store, token, system.system, first, last, task.isCanceled)
-            requests = load_requests(client, store, token, task.isCanceled)
+            rows = repo.load_system_rows(system.system, first, last, task.isCanceled)
+            requests = repo.load_requests(task.isCanceled)
             reading = match_answers(answers, rows, requests, system.system, day, spec, name, system.label)
             reading.problems = problems + reading.problems
             return reading
@@ -816,15 +819,15 @@ class ScheduleDock(PluginDock):
         return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
 
     def _save_reading(self, reading: Reading) -> None:
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         changes = answer_changes(reading)
         adds = unrequested_rows(reading, _now_ms())
         gone_ids = [r.object_id for r in reading.replaced]
 
         def work(task):
-            gone = delete_history_rows(client, store, token, gone_ids)
-            changed = update_history(client, store, token, changes)
-            added = add_history(client, store, token, adds)
+            gone = repo.delete_history_rows(gone_ids)
+            changed = repo.update_history(changes)
+            added = repo.add_history(adds)
             return changed, added, gone.problems + changed.problems + added.problems
 
         def done(result):
@@ -874,13 +877,13 @@ class ScheduleDock(PluginDock):
     def add_unrequested(self, row: HistoryRow) -> None:
         if self.denied("schedule.answer"):
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def done(saved):
             note = self.tr("要求外「{n}」を追加").format(n=row.name) if saved else "、".join(saved.problems[:3])
             self.reload(then=lambda: self.status.setText(f"{self.status.text()}。{note}"))
 
-        self._start(self.tr("要求外の追加"), lambda task: add_history(client, store, token, [row]), done)
+        self._start(self.tr("要求外の追加"), lambda task: repo.add_history([row]), done)
 
     def delete_unrequested(self, rows: Optional[list] = None, ask: bool = True) -> None:
         rows = [r for r in (self.selected() if rows is None else rows) if r.result == UNREQUESTED and r.object_id is not None]
@@ -889,14 +892,14 @@ class ScheduleDock(PluginDock):
         if ask and QMessageBox.question(self, self.tr("削除"), self.tr("要求外の計画 {n} 件を消しますか").format(n=len(rows))) \
                 != QMessageBox.StandardButton.Yes:
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         ids = [r.object_id for r in rows]
 
         def done(saved):
             note = self.tr("要求外 {n} 件を削除").format(n=int(saved))
             self.reload(then=lambda: self.status.setText(f"{self.status.text()}。{note}"))
 
-        self._start(self.tr("要求外の削除"), lambda task: delete_history_rows(client, store, token, ids), done)
+        self._start(self.tr("要求外の削除"), lambda task: repo.delete_history_rows(ids), done)
 
     # --- A layer --------------------------------------------------------------------------------
 

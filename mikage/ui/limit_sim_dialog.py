@@ -26,11 +26,11 @@ from ..core.plan.api import fetch_clouds
 from ..core.request.api import chances_of, wanted
 from ..core.request.api import missed_ids
 from ..core.request.api import CATEGORIES, priority_text
-from ..core.request.api import QuotaData, read_quota_data
+from ..core.request.api import QuotaData, ScheduleRepository
 from ..core.request.api import (
     MOST_DAYS, SUMMARY, SystemChange, change_of, changed_systems, deadline_text, horizon_days, run_passes, simulate,
 )
-from ..core.request.api import history_where, load_history, load_requests
+from ..core.request.api import history_where
 from ..core.request.api import clouds_of, forecast_places, orbiting, radar_of
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
@@ -212,9 +212,15 @@ class LimitSimDialog(QDialog):
         self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=message))
         self.run_button.setEnabled(True)
 
+    def token(self) -> Optional[str]:
+        return self.context.token_for(self.store.url, self.store.token)
+
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     def _load(self, sats, start: date, days: int, key, read_ledger: bool) -> None:
-        store, client = self.store, self.context.esri()
-        token = self.context.token_for(store.url, store.token)
+        repo = self.repository()
         forecast = self.context.config.cloud_forecast if key is not None else None
         authcfg = settings.auth_for(forecast.url) if forecast else None
         old = self.data
@@ -223,16 +229,16 @@ class LimitSimDialog(QDialog):
         def work(task):
             notes = []
             if read_ledger or old is None:
-                requests = load_requests(client, store, token, task.isCanceled)
-                history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled)
-                           if store.history else [])
+                requests = repo.load_requests(task.isCanceled)
+                history = (repo.load_history(history_where(repo.store, open_rows=True), cancelled=task.isCanceled)
+                           if repo.store.history else [])
             else:
                 requests, history = old[0], old[1]
             quotas = QuotaData()
-            if store.quotas:
+            if repo.store.quotas:
                 run = horizon_days(start, days)
                 try:
-                    quotas = read_quota_data(client, store, token, [run[0], run[-1]], task.isCanceled)
+                    quotas = repo.read_quota_data([run[0], run[-1]], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the run goes on without the quotas)
                     notes.append(f"年間撮像上限を読めず（{error}）")
                 notes += quotas.problems[:3]

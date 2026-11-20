@@ -30,7 +30,8 @@ from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from typing import Any, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value, quote
-from ..util import is_number, js_string, ms_of, utc_text
+from .. import sql
+from ..util import is_number, js_string, ms_of
 from .alerts import EsriSource, esri_source_of
 from .model import Observation
 
@@ -164,7 +165,7 @@ def load_assignments(client: EsriClient, source: EsriSource, token: Optional[str
     if done_since is not None and f["status"] in types and f["doneAt"] in types:
         # UTC literal: the client shifts it for services keeping local times.
         recent = (f"{f['status']} IS NULL OR {f['status']} <> {quote(DONE)} OR {f['doneAt']} IS NULL"
-                  f" OR {f['doneAt']} >= TIMESTAMP '{utc_text(done_since)}'")
+                  f" OR {f['doneAt']} >= {sql.timestamp(done_since)}")
         where = " AND ".join(f"({c})" for c in (where, recent) if c)
     rows = client.query_all(source.url, _where(source, where), token, geometry=False, limit=100_000)
     out = [assignment_of(r.get("attributes") or {}, source.fields, oid) for r in rows]

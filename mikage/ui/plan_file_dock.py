@@ -51,24 +51,22 @@ from ..core.catalog.api import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.api import attach, on_day, summary_text
 from ..core.plan.api import fetch_clouds
-from ..core.request.api import ahead_span, chances_of, wanted
-from ..core.request.api import read_covered
+from ..core.request.api import ahead_span, chances_of, ScheduleRepository, wanted
 from ..core.request.daily import (
     HELD, TAKEN, chance_text, cloud_tip, cover_text, kind_text, merge_text, occurrence_text, pace_text, part_text, pass_text, room_text,
     satellite_name, time_text,
 )
 from ..core.request.api import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.api import missed_ids
-from ..core.request.api import look_text, read_last_looks
-from ..core.request.api import read_groups
+from ..core.request.api import look_text
 from ..core.request.api import day_bounds, jst_day, priority_text
 from ..core.request.api import day_passes, find_passes
-from ..core.request.api import QuotaData, read_quota_data
-from ..core.request.api import UseBook, read_other_uses
+from ..core.request.api import QuotaData
+from ..core.request.api import UseBook
 from ..core.request.api import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.api import (
-    RequestStoreConfig, Saved, add_history, add_shots, count_history, delete_history_rows, delete_shots, followed_where, handed_where,
-    history_has, history_where, load_history, load_requests, replaced_where, shots_replaced_where, update_history, update_requests,
+    RequestStoreConfig, Saved, followed_where, handed_where,
+    history_where, replaced_where, shots_replaced_where,
 )
 from ..core.request.api import (
     DayPlan, Rewrite, boost_changes, clouds_of, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written, old_tle_text,
@@ -391,6 +389,10 @@ class PlanFileDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     def close_all(self) -> None:
         """Stops nothing running but forgets the day (when the plugin is unloaded)."""
         self.plan = None
@@ -443,8 +445,7 @@ class PlanFileDock(PluginDock):
         config = self.context.config
         systems = config.request_exports
         day = self.chosen_day()
-        client = self.context.esri()
-        token = self.token()
+        repo = self.repository()
         forecast = config.cloud_forecast
         authcfg = settings.auth_for(forecast.url) if forecast else None
         now = _now_ms()
@@ -456,19 +457,19 @@ class PlanFileDock(PluginDock):
             notes = []
             # 衛星の障害情報 as they are now: each satellite (mode) carries those that hit it (their passes are left out),
             # and the day's satellites their stricter values (outages.on_day; the same order, the passes' indices).
-            outages, problem = self.context.read_outages(client, task.isCanceled)
+            outages, problem = self.context.read_outages(repo.client, task.isCanceled)
             if problem:
                 notes.append(problem)
             hit = attach(sats, outages)
             day_sats = on_day(hit, day, now)
-            requests = load_requests(client, store, token, task.isCanceled)
-            groups, note = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            requests = repo.load_requests(task.isCanceled)
+            groups, note = repo.read_groups(task.isCanceled)
             if note:
                 notes.append(note)
             # Only the rows still to be followed up or raised for, not the whole (ever growing) table. They are not
             # followed up here (tsudo, 2026-11-11: 「その照合、計算時の照合なくして」): as 照合 (「照合…」, the
             # scheduled scheduled_follow.py) left them.
-            history = (load_history(client, store, token, history_where(store, open_rows=True), cancelled=task.isCanceled, shapes=True)
+            history = (repo.load_history(history_where(store, open_rows=True), cancelled=task.isCanceled, shapes=True)
                        if store.history else [])
             task.progress(50)
             # What of the 期間内1回 areas is taken already (the catalog's images of their 撮像済み rows) or handed out on
@@ -476,8 +477,8 @@ class PlanFileDock(PluginDock):
             covered = {}
             if store.history:
                 try:
-                    covered, more = read_covered(client, store, token, catalog, catalog_token, requests, day, history,
-                                                 self.context.satellite_names(client, task.isCanceled), task.isCanceled)
+                    covered, more = repo.read_covered(catalog, catalog_token, requests, day, history,
+                                                      self.context.satellite_names(repo.client, task.isCanceled), task.isCanceled)
                     notes += more
                 except Exception as error:  # noqa: BLE001 (the day goes on with the whole areas, said so)
                     notes.append(f"撮像済み・撮像待ちの範囲を読めず、範囲全体で計算（{error}）")
@@ -509,14 +510,14 @@ class PlanFileDock(PluginDock):
             last_looks = {}
             if store.same_geometry:
                 try:
-                    last_looks = read_last_looks(client, store, token, requests, day, task.isCanceled)
+                    last_looks = repo.read_last_looks(requests, day, task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without it, said so)
                     notes.append(f"前回の撮り方を読めず、それなしで計算（{error}）")
             quotas = QuotaData()
             if store.quotas:
                 # What the yearly quotas have left (年間撮像上限): the shots of their years, as 照合 left them.
                 try:
-                    quotas = read_quota_data(client, store, token, [day], task.isCanceled)
+                    quotas = repo.read_quota_data([day], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
                     notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
                 notes += quotas.problems[:3]
@@ -524,7 +525,7 @@ class PlanFileDock(PluginDock):
             if store.shots and any(s.use_time.limited for s in systems):
                 # 軌道の使用時間: the shots of the days before and after handed out on the day's passes count too.
                 try:
-                    others = read_other_uses(client, store, token, day, task.isCanceled)
+                    others = repo.read_other_uses(day, task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on with its own shots only, said so)
                     notes.append(f"前後の日の撮像の使用時間を読めず、この日の撮像だけで計算（{error}）")
             outage_line = summary_text(day_sats, *day_bounds(day), now)
@@ -828,20 +829,20 @@ class PlanFileDock(PluginDock):
         plan = dataclasses.replace(live, candidates=[dataclasses.replace(c, warnings=list(c.warnings)) for c in live.candidates])
         target = plan.target
         run = _now_ms()
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         self.status.setText(self.tr("ファイルを作成中…"))
 
         def work(task):
             day = plan.day.isoformat()
-            if target and store and store.history:
+            if target and repo.store and repo.store.history:
                 # Another system written since 計算 would leave a request in two files, or in none.
-                now = frozenset((r.request_id, r.system) for r in load_history(client, store, token, handed_where(store, day))
+                now = frozenset((r.request_id, r.system) for r in repo.load_history(handed_where(repo.store, day))
                                 if r.system and r.system != target)
                 if now != plan.others_handed():
                     return None, sorted({s for _, s in now ^ plan.others_handed()})
             systems = [s for s in plan.systems if s.system == target] if target else plan.systems
             files = render(plan.candidates, systems, plan.day, run, load_schema)
-            earlier = count_history(client, store, token, replaced_where(store, day, target)) if store and store.history else 0
+            earlier = repo.count_history(replaced_where(repo.store, day, target)) if repo.store and repo.store.history else 0
             return files, earlier
 
         def done(result):
@@ -985,12 +986,12 @@ class PlanFileDock(PluginDock):
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         # A request taken for a system whose file was not written is kept as 見送り, its raise left for later.
         run_id = new_run_id()
         rows = history_of(plan, run, written, run_id, failures=failures, system=target)
         # The shots of the rows written (撮像の範囲), each request's history row naming its own (SHOT_ID).
-        shots = shots_of(plan, run, written, run_id, target) if store and store.shots else []
+        shots = shots_of(plan, run, written, run_id, target) if repo.store and repo.store.shots else []
         skip = not_written(plan, written, target)
         boosts = boost_changes(plan, skip, target)
         done_rows = missed_done(plan, skip, target)
@@ -1000,37 +1001,37 @@ class PlanFileDock(PluginDock):
 
         def work(task):
             notes = []
-            if linked and store is not None and store.history:
+            if linked and repo.store is not None and repo.store.history:
                 # A file naming its rows by 外部連携ID, and a table that cannot keep them: the answers cannot be matched by them.
-                lacking = history_has(client, store, token, ("linkId",))
+                lacking = repo.history_has(("linkId",))
                 if lacking:
                     notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDを保存できず（tools/arcgis/create_tables.py で足す）")
             removed = 0
             rewrite = Rewrite(rows=list(rows))
-            if replace and earlier and store.history:
+            if replace and earlier and repo.store.history:
                 # The systems' answers already read in are carried to the new rows, or kept (tsudo, 2026-11-09).
-                before = load_history(client, store, token, replaced_where(store, day, target))
+                before = repo.load_history(replaced_where(repo.store, day, target))
                 rewrite = keep_answers(before, rows)
-                gone = delete_history_rows(client, store, token, rewrite.gone)
+                gone = repo.delete_history_rows(rewrite.gone)
                 removed, notes = int(gone), notes + gone.problems
-                if store.shots:
+                if repo.store.shots:
                     # The earlier shots go with their rows; those of rows kept as they were stay, and those of rows
                     # already followed up (not replaced: what they were taken in, and its 「数えない」).
                     left = {r.shot_id for r in before if r.object_id not in set(rewrite.gone)}
                     try:
-                        left |= {r.shot_id for r in load_history(client, store, token, followed_where(store, day, target))}
-                        notes += delete_shots(client, store, token, shots_replaced_where(store, day, target, sorted(left))).problems
+                        left |= {r.shot_id for r in repo.load_history(followed_where(repo.store, day, target))}
+                        notes += repo.delete_shots(shots_replaced_where(repo.store, day, target, sorted(left))).problems
                     except EsriError as error:
                         notes.append(f"前回の撮像の範囲を消せず（{error}）")
-            saved = add_history(client, store, token, rewrite.rows)
+            saved = repo.add_history(rewrite.rows)
             try:
-                kept_shots = add_shots(client, store, token, shots)
+                kept_shots = repo.add_shots(shots)
             except EsriError as error:
                 # The history (what each request was) matters more: kept even when the shots cannot be.
                 kept_shots = Saved(0, [f"撮像の範囲を保存できず（{error}）"])
             notes += kept_shots.problems
-            raised = update_requests(client, store, token, boosts, run)
-            marked = update_history(client, store, token, done_rows)
+            raised = repo.update_requests(boosts, run)
+            marked = repo.update_history(done_rows)
             return saved, raised, marked, removed, rewrite, notes + saved.problems + raised.problems + marked.problems, int(kept_shots)
 
         def done(result):
@@ -1039,7 +1040,7 @@ class PlanFileDock(PluginDock):
             text = self.tr("書き出し: {s}").format(s=written_summary(done_files))
             if cleared:
                 text += self.tr("・残っていた番号違いのファイル {n} 件を削除").format(n=cleared)
-            if store.history:
+            if repo.store.history:
                 text += (self.tr("・出力履歴 {n} 件").format(n=saved) if saved == len(rows)
                          else self.tr("・出力履歴 {n}/{m} 件").format(n=saved, m=len(rows)))
                 if removed:

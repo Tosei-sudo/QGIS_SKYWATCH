@@ -27,6 +27,7 @@ from .passes import day_passes, find_passes
 from .pick import checks_of, Picked, picked, summary, unknown
 from .place_plans import HEAD, LABEL, Lane, lane_at, Layout, layout, Mark, mark_tip, marks_at, REQUEST, ROW
 from .quota import QuotaData, read_quota_data
+from .repository import RequestRepository, ScheduleRepository
 from .rows import code_text, field_roles, NUMBERS, request_of_row, row_of, row_problems, WRITTEN
 from .shot_view import _time, companions, shot_text, shot_tip
 from .simulate import (
@@ -48,6 +49,7 @@ from .workflow import (
 )
 
 __all__ = [
+    "RequestRepository", "ScheduleRepository",
     "_time", "add_history", "add_shots", "ADOPTION_ROLES", "ahead_span", "answer_changes", "apply_change", "AWAITING",
     "bbox_of", "BOOST", "boost_changes", "CandidateFilter", "CATEGORIES", "chances_of", "change_of", "changed_systems",
     "checks_of", "clouds_of", "code_text", "companions", "convert_priority", "count_history", "day_bounds", "day_counts",

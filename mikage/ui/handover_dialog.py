@@ -25,7 +25,9 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit, edit_stamp
-from ..core.obs.api import STATUSES, Assignment, progress_of, progress_text, same_person, update, with_status
+from ..core.obs.api import (
+    STATUSES, AlertLogRepository, Assignment, AssignmentRepository, progress_of, progress_text, same_person, with_status,
+)
 from ..core.obs.handover import HOUR_MS, HandoverData, handover_text, keep_memo, last_memo, open_requests, write_file
 from ..core.obs.api import RecordQuery, merged
 from ..core.time_zone import format_time
@@ -257,7 +259,7 @@ class HandoverDialog(QDialog):
         ) == QMessageBox.StandardButton.Yes
 
     def _write(self, x: Assignment, new: Assignment, done: str) -> None:
-        source, client, token = self.bar.source, self.dock.context.esri(), self.bar.token()
+        repo = self.bar.repository()
 
         def finished(_r) -> None:
             self._say(done)
@@ -268,7 +270,7 @@ class HandoverDialog(QDialog):
             self._say(message)
             self.bar.reload()
 
-        run_task(self.tr("分担の更新"), lambda _t: update(client, source, new, x, token), finished, failed)
+        run_task(self.tr("分担の更新"), lambda _t: repo.update(new, x), finished, failed)
 
     def change_status(self, confirm: bool = True) -> None:
         x = self.selected()
@@ -346,9 +348,7 @@ class HandoverDialog(QDialog):
 
     def make(self) -> None:
         """Reads what goes in (in a task) and writes the memo."""
-        from ..core.obs.alerts import load_log
-        from ..core.obs.assignments import load_assignments
-        from ..core.request.store import load_requests
+        from ..core.request.api import RequestRepository
 
         start = self.start_edit.dateTime().toMSecsSinceEpoch()
         end = self.end_edit.dateTime().toMSecsSinceEpoch()
@@ -368,10 +368,11 @@ class HandoverDialog(QDialog):
         config, client = self.dock.context.config, self.dock.context.esri()
         records = list(book.records) if book else []
         images = [(i.id, i.name) for i in book.images] if book else []
-        stores = [(s, self._token(s)) for s in config.request_stores]
+        stores = [RequestRepository(client, s, self._token(s)) for s in config.request_stores]
         alerts = config.alert_reports if config.alert_reports and config.alert_reports.table else None
-        alert_token = self._token(alerts.table) if alerts else None
-        source, assign_token = self.bar.source, self.bar.token()
+        alert_log = AlertLogRepository(client, alerts, self._token(alerts.table)) if alerts else None
+        source = self.bar.source
+        assignments = AssignmentRepository(client, source, self.bar.token())
         now = time.time() * 1000
         data = HandoverData(start=start, end=end, now=now, user=edit_stamp.user_name(), records=records, images=images,
                             memo=self.memo_edit.toPlainText())
@@ -388,19 +389,19 @@ class HandoverDialog(QDialog):
                     problems.append(f"観測記録: {error}")
             if alerts:
                 try:
-                    data.alerts = load_log(client, alerts, start, end, alert_token)
+                    data.alerts = alert_log.load_log(start, end)
                 except Exception as error:  # noqa: BLE001 (the other parts still go in)
                     problems.append(f"通報記録: {error}")
             if stores:
                 data.requests = []
-                for store, token in stores:
+                for repo in stores:
                     try:
-                        data.requests += open_requests(load_requests(client, store, token, task.isCanceled), now, store.label)
+                        data.requests += open_requests(repo.load_requests(task.isCanceled), now, repo.store.label)
                     except Exception as error:  # noqa: BLE001
-                        problems.append(f"撮像依頼（{store.label}）: {error}")
+                        problems.append(f"撮像依頼（{repo.store.label}）: {error}")
             if source:
                 try:
-                    data.assignments = load_assignments(client, source, assign_token, done_since=start)
+                    data.assignments = assignments.load_assignments(done_since=start)
                     if scoped and data.assignments:
                         # Their images' records too (how far each has gone).
                         ids = tuple(dict.fromkeys(x.image_id for x in data.assignments if x.image_id))

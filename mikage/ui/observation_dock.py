@@ -33,7 +33,7 @@ try:
 except ImportError:  # Qt 5
     from qgis.PyQt.QtWidgets import QShortcut
 
-from ..core.obs.api import ObservationApi
+from ..core.obs.api import AlertLogRepository, ObservationApi
 from ..core.obs.api import CheckedArea, area_label, box_ring
 from ..core.obs.api import FormValues, ObservationBook, ObservedImage
 from ..core.obs.api import OutboxDrafts
@@ -1337,9 +1337,7 @@ class ObservationDock(PluginDock):
                 self.reported = set()
                 self.render()
             return
-        from ..core.obs.alerts import reported_ids
-
-        client, token = self.context.esri(), self.context.token_for(s.table.url, s.table.token)
+        repo = AlertLogRepository(self.context.esri(), s, self.context.token_for(s.table.url, s.table.token))
 
         def finished(ids) -> None:
             if asked != self._reported_asked:
@@ -1352,7 +1350,7 @@ class ObservationDock(PluginDock):
             QgsMessageLog.logMessage(self.tr("通報済みの記録の読み込みに失敗: {m}").format(m=message), self.tr("観測記録"),
                                      Qgis.MessageLevel.Warning)
 
-        run_task(self.tr("通報済みの記録の読み込み"), lambda _t: reported_ids(client, s, token), finished, failed)
+        run_task(self.tr("通報済みの記録の読み込み"), lambda _t: repo.reported_ids(), finished, failed)
 
     def mark_reported(self, ids) -> None:
         """Records just put in the 通報 log table: highlighted at once (without reading the table again)."""

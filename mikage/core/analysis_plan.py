@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Callable, Optional, Sequence
 
-from . import analysis_cache
+from . import analysis_cache, sql
 from .analysis import SHAPE, AnalysisError, Column, Table, _reading_only, _sql_message, esri_columns, fold, parameters, read_esri
 
 #: Values in one `IN (…)` (Oracle takes up to 1,000).
@@ -756,7 +756,7 @@ def _day(text: str, days: int) -> Optional[str]:
         d = date(int(m.group(1)), int(m.group(2)), int(m.group(3))) + timedelta(days=days)
     except (ValueError, OverflowError):
         return None
-    return f"TIMESTAMP '{d.isoformat()} 00:00:00'"
+    return sql.day_start(d)
 
 
 def like_text(name: str, pattern: str, escape: Optional[str]) -> tuple[Optional[str], str]:
