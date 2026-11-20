@@ -22,6 +22,8 @@ from mikage.qgis_io import complex_sar  # noqa: E402
 from mikage.qgis_io.complex_sar import COMPLEX_SOURCE, Output, build_vrt, convert_layer, outputs_of  # noqa: E402
 from mikage.qgis_io.obs_images import file_name, gdal_metadata  # noqa: E402
 from mikage.ui.enhance_dock import source_name  # noqa: E402
+from mikage.features.rendering import Rendering  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 W, H = 64, 48
 
@@ -187,7 +189,6 @@ def test_settings_file_entry():
 
 def test_the_plugin_shows_a_sicd_added_in_any_way_as_db(tmp_path, monkeypatch):
     """Added like any layer (Add Layer, drag and drop): converted before the docks see it, its overviews from the dB."""
-    from mikage import classFactory
     from mikage.qgis_io import overviews_io, settings
     from mikage.tests.qgis_fakes import FakeIface
 
@@ -198,7 +199,7 @@ def test_the_plugin_shows_a_sicd_added_in_any_way_as_db(tmp_path, monkeypatch):
     config.write_text("{}", encoding="utf-8")
     settings.set_config_source(str(config))
     settings.set_startup_layers_on(False)
-    plugin = classFactory(FakeIface())
+    plugin = small_plugin(FakeIface(), Rendering)
     plugin.initGui()
     try:
         path, _, _ = sicd(tmp_path / "a.ntf")
@@ -236,7 +237,6 @@ def test_image_rules_choose_the_mode_by_file_name(tmp_path, monkeypatch):
     """imageRules[].complexImages wins over the settings file's for the images it matches (tsudo, 2026-11-08)."""
     import json
 
-    from mikage import classFactory
     from mikage.core.enhance.rules import image_rules_of
     from mikage.qgis_io import overviews_io, settings
     from mikage.tests.qgis_fakes import FakeIface
@@ -256,7 +256,7 @@ def test_image_rules_choose_the_mode_by_file_name(tmp_path, monkeypatch):
     settings.set_config_source(str(config))
     settings.set_startup_layers_on(False)
     iface = FakeIface()
-    plugin = classFactory(iface)
+    plugin = small_plugin(iface, Rendering)
     plugin.initGui()
     try:
         layers = {}

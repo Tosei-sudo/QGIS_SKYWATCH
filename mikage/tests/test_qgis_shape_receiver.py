@@ -24,6 +24,8 @@ from qgis.core import (  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.link_shapes_io import GROUP, SENDER_PROPERTY  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui import shape_receiver  # noqa: E402
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
@@ -40,16 +42,16 @@ def free_port() -> int:
 
 @pytest.fixture
 def plugin(tmp_path, monkeypatch):
-    from mikage import classFactory
-
     monkeypatch.setattr(shape_receiver.ShapeReceiver, "LISTEN", True)
     QgsSettings().remove("mikage")
     port = free_port()
     (tmp_path / "config.json").write_text(json.dumps({"shapeReceiver": {"port": port}}), encoding="utf-8")
     settings.set_config_source(str(tmp_path / "config.json"))
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Maps)
     p.initGui()
+    # The map's size fixed: the docks of the features started (tests/feature_harness.py) would change it.
+    iface.canvas.setFixedSize(200, 200)
     canvas = iface.canvas
     canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
     canvas.setExtent(QgsRectangle(-2e6, -2e6, 2e6, 2e6))

@@ -16,6 +16,9 @@ from mikage.core.esri import EsriClient  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 RULES = "https://x/arcgis/rest/services/Alerts/FeatureServer/0"
@@ -24,14 +27,13 @@ LOG = "https://x/arcgis/rest/services/Alerts/FeatureServer/2"
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Images, Observations, request=request)
     p.initGui()
     layer = QgsRasterLayer(geotiff(tmp_path / "d1.tif", "2026-10-01T01:00:00Z"), "d1")
     QgsProject.instance().addMapLayers([layer])

@@ -107,7 +107,17 @@ class Images(Feature):
         notices.unread_changed = unread
         # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
         observations = self.ports.observations()
-        feed = notices.alerts
+        if observations is not None:  # (not there in a test's small assembly without 観測記録, tests/feature_harness.py)
+            self._alerts_to_observations(notices.alerts, observations)
+        # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
+        host.similar_action = QAction(icon("catalog"), tr("類似画像の検索…"), self.window())
+        host.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))
+        self.iface.addCustomActionForLayerType(host.similar_action, "", QgsMapLayerType.RasterLayer, False)
+        QgsProject.instance().layersAdded.connect(self._layers_added)
+        self._layers_added(QgsProject.instance().mapLayers().values())
+
+    def _alerts_to_observations(self, feed, observations) -> None:
+        """通知 ▸ 通報 with 観測記録: the reports highlighted there, and opened there."""
         feed.on_reported = observations.mark_reported
         feed.on_removed = observations.refresh_reported
 
@@ -133,12 +143,6 @@ class Images(Feature):
                 dialog.read_log()
 
         feed.open_log = open_log
-        # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
-        host.similar_action = QAction(icon("catalog"), tr("類似画像の検索…"), self.window())
-        host.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))
-        self.iface.addCustomActionForLayerType(host.similar_action, "", QgsMapLayerType.RasterLayer, False)
-        QgsProject.instance().layersAdded.connect(self._layers_added)
-        self._layers_added(QgsProject.instance().mapLayers().values())
 
     def add_actions(self) -> None:
         feed_action = self.entry("notice_feed", "新着画像（大きな画面）", "toggle_notice_feed", name="SatObsNoticeFeed")

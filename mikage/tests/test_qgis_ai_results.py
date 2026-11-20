@@ -25,6 +25,9 @@ from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.qgis_io.obs_images import IMAGE_ID  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.ai import Ai  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 POLYGONS = "https://example.com/arcgis/rest/services/AI/FeatureServer/0"
@@ -63,10 +66,9 @@ def plugin(tmp_path, monkeypatch):
     points = fake.add_layer(POINTS, FakeLayer({"IMG": "esriFieldTypeString", "CLS": "esriFieldTypeString", "NAME": "esriFieldTypeString"}))
     points.add({"IMG": "IMG1", "CLS": "car", "NAME": "トラックA"}, {"x": 139.72, "y": 35.65})
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Ai, Observations)
     p.initGui()
     assert p.api.problems == [], p.api.problems
     obs = p.api.observation_dock

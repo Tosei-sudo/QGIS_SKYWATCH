@@ -22,6 +22,8 @@ from qgis.PyQt.QtWidgets import QComboBox, QWidget  # noqa: E402
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 HERE = os.path.dirname(__file__)
 
@@ -30,10 +32,9 @@ HERE = os.path.dirname(__file__)
 def plugin():
     QgsSettings().remove("mikage")
     settings.set_config_source(os.path.join(HERE, "data", "viewer-config.jsonc"))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Maps)
     p.initGui()
     assert p.api.problems == []
     yield p, iface

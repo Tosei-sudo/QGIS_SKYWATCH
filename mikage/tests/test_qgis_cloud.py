@@ -18,6 +18,8 @@ from mikage.core.plan.weather import CloudForecastConfig, CloudForecasts, CloudS
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.cloud_layer import PROPERTY, cloud_file  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.plan import Plan  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_weather_file import _write  # noqa: E402
 
 HOUR = 3600000
@@ -31,12 +33,10 @@ def qtime(ms):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Plan)
     p.initGui()
     yield p, iface, tmp_path
     p.unload()

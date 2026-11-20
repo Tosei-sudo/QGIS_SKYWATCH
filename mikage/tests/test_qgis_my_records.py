@@ -22,7 +22,12 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.obs_images import image_layer  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
 from mikage.tests.test_qgis_observations import FIELDS, TYPES, URL, _listed, bare, geotiff, ms, plugin  # noqa: E402,F401
+
+#: The features the plugin fixture starts with here (tests/feature_harness.py): the records' images opened from the catalog.
+PLUGIN_FEATURES = (Images, Observations)
 
 
 @pytest.fixture(autouse=True)

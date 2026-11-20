@@ -23,6 +23,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.requests import Requests  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_plan import LINE1, LINE2  # noqa: E402
 
 SATS = "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
@@ -69,10 +71,9 @@ def plugin(tmp_path, monkeypatch):
                                                "NOTE": "esriFieldTypeString"}, "esriGeometryNone"))
     for name, members, order, active in (("第2班", "sato", 2, 1), ("第1班", "tsudo, yamada", 1, 1), ("旧体制", "", 9, 0)):
         groups.add({"GROUP_NAME": name, "MEMBERS": members, "SORT_ORDER": order, "ACTIVE": active, "NOTE": f"{name}の依頼"})
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Requests)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
     for dock in p.docks.values():

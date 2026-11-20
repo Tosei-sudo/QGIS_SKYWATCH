@@ -26,6 +26,9 @@ from qgis.PyQt.QtCore import QDateTime, QVariant  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.ai import Ai  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 MERCATOR = QgsCoordinateReferenceSystem("EPSG:3857")
@@ -33,17 +36,16 @@ WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     config = {"aiModels": [{"label": "港湾モデル", "url": "./harbour.onnx", "kinds": {"boat": "船舶"}}]}
     path = tmp_path / "config.json"
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     settings.set_config_source(str(path))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Ai, Observations, request=request)
     p.initGui()
     assert p.api.problems == [], p.api.problems
     p.api.observation_dock.show()

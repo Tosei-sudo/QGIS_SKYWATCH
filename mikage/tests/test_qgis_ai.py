@@ -34,6 +34,8 @@ from qgis.core import (  # noqa: E402
 from mikage.core.ai.model_config import DetectModelConfig, SamModelConfig  # noqa: E402
 from mikage.qgis_io import ai_runtime, settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.ai import Ai  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 DATA = os.path.join(os.path.dirname(__file__), "data", "ai")
 SIZE = 256
@@ -144,12 +146,10 @@ def test_the_dialog_starts_from_the_view(tmp_path):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Ai)
     p.initGui()
     layer = QgsRasterLayer(square_tiff(tmp_path), "square")
     QgsProject.instance().addMapLayer(layer)

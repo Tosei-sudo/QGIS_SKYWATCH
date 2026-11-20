@@ -26,6 +26,8 @@ from qgis.PyQt.QtGui import QColor  # noqa: E402
 from mikage.qgis_io import fast_draw  # noqa: E402
 from mikage.qgis_io.fast_draw import FastGray, FastMultiBand  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.rendering import Rendering  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 CE = QgsContrastEnhancement.ContrastEnhancementAlgorithm
 ALGORITHMS = [CE.NoEnhancement, CE.StretchToMinimumMaximum, CE.StretchAndClipToMinimumMaximum, CE.ClipToMinimumMaximum]
@@ -251,13 +253,11 @@ def test_the_project_layers_are_drawn_by_mikage_and_saved_as_qgis_own(tmp_path, 
 
 
 def test_the_switch_in_the_dialog_stays_in_the_profile(tmp_path):
-    from mikage import classFactory
-
     project = QgsProject.instance()
     layer = image(tmp_path / "rgb.tif", np.uint16, gdal.GDT_UInt16, size=(60, 40))
     project.addMapLayer(layer)
     iface = FakeIface()
-    plugin = classFactory(iface)
+    plugin = small_plugin(iface, Rendering)
     plugin.initGui()
     assert not fast_draw.on() and type(layer.renderer()) is QgsMultiBandColorRenderer  # off unless the person turns it on
     dialog = plugin.open_raster_speed()
@@ -271,7 +271,7 @@ def test_the_switch_in_the_dialog_stays_in_the_profile(tmp_path):
     plugin.unload()
     assert type(layer.renderer()) is QgsMultiBandColorRenderer  # unloaded: QGIS's own again
     # On at the next start; off from the dialog puts QGIS's renderer back.
-    plugin = classFactory(iface)
+    plugin = small_plugin(iface, Rendering)
     plugin.initGui()
     assert type(layer.renderer()) is FastMultiBand
     dialog = plugin.open_raster_speed()

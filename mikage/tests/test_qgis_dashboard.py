@@ -21,6 +21,8 @@ from qgis.PyQt.QtCore import QDateTime  # noqa: E402
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 KINDS = ["公園", "公園", "公園", "学校", "学校", "病院"]
 
@@ -37,15 +39,15 @@ def survey(path):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
     # A tall, narrow map, so 「表示範囲内」's extent below stays as narrow as it is set.
     iface.window.resize(1100, 1300)
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
+    # The map's size fixed: the docks of the features started (tests/feature_harness.py) would change it.
+    iface.canvas.setFixedSize(40, 400)
     layer = survey(tmp_path / "survey.geojson")
     QgsProject.instance().addMapLayer(layer)
     iface.canvas.setDestinationCrs(layer.crs())

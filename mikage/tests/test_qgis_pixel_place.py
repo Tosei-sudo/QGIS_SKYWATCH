@@ -25,6 +25,8 @@ from qgis.core import (  # noqa: E402
 
 from mikage.qgis_io import pixel_place, settings, shift_io  # noqa: E402
 from mikage.qgis_io.obs_images import IMAGE_FILE, IMAGE_ID, file_name, observed_image  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 TO_IMAGE = QgsRasterDataProvider.TransformType.TransformLayerToImage
@@ -187,7 +189,6 @@ def small(path, day):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
     from mikage.tests.qgis_fakes import FakeIface
 
     QgsProject.instance().removeAllMapLayers()
@@ -195,7 +196,7 @@ def plugin(tmp_path):
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
     layers = [QgsRasterLayer(small(tmp_path / f"d{day}.tif", day), f"d{day}") for day in (1, 2)]
     QgsProject.instance().addMapLayers(layers)

@@ -25,6 +25,9 @@ from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.qgis_io.obs_images import IMAGE_ID  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
@@ -39,7 +42,7 @@ def ring(x0, y0, x1, y1):
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     config = {
@@ -65,11 +68,10 @@ def plugin(tmp_path, monkeypatch):
     folder = tmp_path / "nas"
     (folder / "2026").mkdir(parents=True)
     geotiff(folder / "2026" / "A.TIF")
-    from mikage import classFactory
 
     iface = FakeIface()
     iface.canvas.setDestinationCrs(QgsProject.instance().crs())
-    p = classFactory(iface)
+    p = small_plugin(iface, Images, Observations, request=request)
     # The docks open at start read their catalogs right away.
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()

@@ -19,6 +19,8 @@ from mikage.core.obs.model import ListedImage  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.listed_layers import GROUP, IMAGE_PROPERTY, listed_image_of  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 #: A footprint turned a little (not its box): the layer has the catalog's shape.
 RING = [[139.62, 35.52], [139.78, 35.50], [139.80, 35.68], [139.64, 35.70], [139.62, 35.52]]
@@ -35,10 +37,9 @@ def bare(tmp_path):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
     dock = p.api.observation_dock
     dock.show()
@@ -187,9 +188,8 @@ def test_the_images_stay_listed_when_the_project_is_cleared_or_the_plugin_reload
     # The plugin unloaded: the layers go, the list stays for the next time.
     p.unload()
     assert _group() is None
-    from mikage import classFactory
 
-    again = classFactory(iface)
+    again = small_plugin(iface, Observations)
     again.initGui()
     try:
         assert [i.id for i in again.api.observation_dock.book.listed] == ["IMG1", "IMG2"]

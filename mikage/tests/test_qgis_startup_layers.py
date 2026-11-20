@@ -12,6 +12,8 @@ from qgis.core import QgsProject, QgsSettings, QgsVectorLayer  # noqa: E402
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 
@@ -36,10 +38,8 @@ def config(tmp_path):
 
 
 def start():
-    from mikage import classFactory
-
     iface = FakeIface()
-    plugin = classFactory(iface)
+    plugin = small_plugin(iface, Maps)
     plugin.initGui()
     return plugin, iface
 

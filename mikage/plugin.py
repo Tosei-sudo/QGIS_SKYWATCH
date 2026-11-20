@@ -8,7 +8,7 @@ Each feature hands it its docks, menu entries and commands (features/base.py).
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from qgis.core import Qgis, QgsApplication, QgsMessageLog, QgsProject
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
@@ -94,7 +94,11 @@ def tr(text: str) -> str:
 
 
 class MikagePlugin:
-    def __init__(self, iface):
+    def __init__(self, iface, features: Optional[Sequence[type[Feature]]] = None):
+        """
+        `features`: only these of FEATURES (in FEATURES' order), for the tests of a feature in a small assembly
+        (tests/feature_harness.py); the others' docks, entries and ports are not there (their ports give None).
+        """
         self.iface = iface
         self.context: Optional[PluginContext] = None
         self.actions: list[QAction] = []
@@ -130,8 +134,14 @@ class MikagePlugin:
         self._algorithms_allowed: Optional[tuple] = None
         self._qgis_started = False
         self._startup_told = False
+        #: The pages beside the map (features/images.py), if that feature is there.
+        self.central = None
         #: The features (FEATURES), and the commands they answer to (`plugin.open_detect()`…).
-        self.features: list[Feature] = [feature(self) for feature in FEATURES]
+        kinds = FEATURES if features is None else [f for f in FEATURES if f in features]
+        if features is not None and set(features) - set(FEATURES):
+            raise ValueError(f"not features of the plugin: {set(features) - set(FEATURES)}")
+        self._all_features = features is None
+        self.features: list[Feature] = [feature(self) for feature in kinds]
         self._features_started = False
         commands: dict = {}
         for feature in self.features:
@@ -218,7 +228,8 @@ class MikagePlugin:
             feature.connect()
         # The docks left open now hear that they are shown (their signals waited while they were added).
         for name in INITIAL_DOCKS:
-            self.docks[name].visibilityChanged.emit(True)
+            if name in self.docks:
+                self.docks[name].visibilityChanged.emit(True)
         self.initProcessing()
         # The settings file's AI models into 「物体検出（AI）」's choice.
         self.context.configChanged.connect(self._refresh_algorithms)
@@ -231,7 +242,7 @@ class MikagePlugin:
         self.toolbar_buttons = ToolbarButtons(self.toolbar, self._entries_in_menu_order(),
                                               lambda: self.role_keeper.key if self.role_keeper is not None else "", self.allows)
         # Keys for frequent actions, in QGIS's shortcut settings (ui/shortcuts.py).
-        self.shortcuts = Shortcuts(self.iface, self.docks, toggle_feed=self.toggle_notice_feed)
+        self.shortcuts = Shortcuts(self.iface, self.docks, toggle_feed=self._commands.get("toggle_notice_feed"))
         # What the roles in use do not use put away (and again whenever they change: chosen, or read from `userRoles`).
         self.role_keeper.changed.connect(self.apply_roles)
         self.apply_roles()
@@ -269,10 +280,10 @@ class MikagePlugin:
                 if name in specs:
                     raise ValueError(f"two docks named {name}")
                 specs[name] = spec
-        if set(specs) != set(DOCK_ORDER):
+        if set(specs) != set(DOCK_ORDER) and (self._all_features or set(specs) - set(DOCK_ORDER)):
             raise ValueError(f"DOCK_ORDER and the features' docks differ: {sorted(set(specs) ^ set(DOCK_ORDER))}")
         area = {name: a for a, names in DOCK_GROUPS for name in names}
-        for name in DOCK_ORDER:
+        for name in [n for n in DOCK_ORDER if n in specs]:
             spec = specs[name]
             title = tr(spec.title)
             dock = spec.create()

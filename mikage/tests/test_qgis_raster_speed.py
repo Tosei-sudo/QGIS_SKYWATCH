@@ -23,6 +23,8 @@ from mikage.core.raster_speed import (  # noqa: E402
 from mikage.qgis_io import raster_speed, settings  # noqa: E402
 from mikage.qgis_io.raster_speed import CACHE, MB, THREADS  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.rendering import Rendering  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 CORES = raster_speed.cores()
 needs_cores = pytest.mark.skipif(CORES < 3 or raster_speed.gdal_version() < 3060000, reason="コアが 3 つ以上・GDAL 3.6 以降")
@@ -51,12 +53,10 @@ def clean(monkeypatch):
 
 
 def start(config_path=None):
-    from mikage import classFactory
-
     if config_path:
         settings.set_config_source(config_path)
     iface = FakeIface()
-    plugin = classFactory(iface)
+    plugin = small_plugin(iface, Rendering)
     plugin.initGui()
     return plugin, iface
 

@@ -30,6 +30,9 @@ class Requests(Feature):
         port = self.ports.satellites()
 
         def satellites(then, failed=None):
+            if port is None:  # (no 撮像計画 in a test's small assembly, tests/feature_harness.py): none known
+                then([])
+                return
             port.read(then, failed)
 
         return satellites

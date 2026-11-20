@@ -16,7 +16,11 @@ from qgis.PyQt.QtWidgets import QComboBox, QDialogButtonBox, QLineEdit, QTableVi
 
 from mikage.core.config import parse_config  # noqa: E402
 from mikage.ui.list_views import ROOT, ColumnsDialog, ListViews, column_drag, column_menus, set_column_drag  # noqa: E402
+from mikage.tests.feature_harness import ALL  # noqa: E402
 from mikage.tests.test_qgis_alerts import plugin  # noqa: E402,F401
+
+#: The features the plugin fixture starts with here (tests/feature_harness.py): every dock's lists.
+PLUGIN_FEATURES = ALL
 
 HEAD = ["名称", "区分", "期間", "状態"]
 

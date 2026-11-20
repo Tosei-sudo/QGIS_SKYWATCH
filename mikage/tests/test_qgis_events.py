@@ -18,6 +18,10 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.events import Events  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
@@ -49,10 +53,9 @@ def plugin(tmp_path, monkeypatch):
                                                "NOTE": S}, "esriGeometryPolygon"))
     links = fake.add_layer(LINKS, FakeLayer({"EVENT_ID": S, "ITEM_TYPE": S, "ITEM_ID": S, "ITEM_LABEL": S, "ITEM_TIME": T, "SOURCE": S,
                                              "NOTE": S, "CREATED_USER": S, "CREATED_DATE": T}, ""))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Events, Images, Observations)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
     for dock in p.docks.values():
@@ -204,10 +207,9 @@ def test_without_settings_the_dock_says_so(tmp_path):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_config_source("")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Events, Images, Observations)
     p.initGui()
     try:
         dock = p.api.events

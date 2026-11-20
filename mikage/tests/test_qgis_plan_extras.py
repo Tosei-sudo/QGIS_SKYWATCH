@@ -23,6 +23,9 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.plan import Plan  # noqa: E402
+from mikage.features.requests import Requests  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_plan import EPOCH, LINE1, LINE2  # noqa: E402
 from mikage.tests.test_qgis_imaging_plan import CATALOG, SAR1, SAR2, plan, points_layer, start_at  # noqa: E402
 from mikage.tests.test_request import HISTORY, LEDGER, ledger_layers  # noqa: E402
@@ -57,10 +60,9 @@ def plugin(tmp_path, monkeypatch):
     sats.add({"NAME": "SAR-1", "TLE": f"{SAR1}\n{SAR2}", "KIND": "SAR", "MAX": 45, "LOOK": "R", "SWATH": 50, "SCENES": 1})
     ledger_layers(fake)
     fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString", "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Plan, Requests)
     # The docks open at start read their catalogs right away.
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()

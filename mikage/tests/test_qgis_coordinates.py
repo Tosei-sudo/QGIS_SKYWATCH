@@ -21,20 +21,20 @@ from qgis.PyQt.QtWidgets import QMenu  # noqa: E402
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     (tmp_path / "places.csv").write_bytes("名称,種別,緯度,経度\n横須賀港,港,35.28,139.67\n横浜港,港,35.45,139.65\nヨコハマ駅,駅,35.46,139.62\n横浜港の灯台,,35.44,139.66\n".encode("cp932"))
     (tmp_path / "config.json").write_text(json.dumps({"geocoders": [{"type": "csv", "label": "地名表", "url": "./places.csv"}]}), encoding="utf-8")
     settings.set_config_source(str(tmp_path / "config.json"))
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Maps)
     p.initGui()
     canvas = iface.canvas
     canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))

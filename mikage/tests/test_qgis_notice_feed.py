@@ -27,6 +27,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 from mikage.ui import notice_feed  # noqa: E402
 from mikage.ui.central_views import MAP  # noqa: E402
@@ -69,9 +71,7 @@ def notice(tmp_path, image_id, minutes_ago, geometry, read=False, watch="w", wat
 
 
 def start(iface):
-    from mikage import classFactory
-
-    p = classFactory(iface)
+    p = small_plugin(iface, Images)
     p.initGui()
     for dock in p.docks.values():
         dock.hide()

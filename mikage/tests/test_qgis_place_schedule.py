@@ -28,6 +28,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.requests import Requests  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.place_schedule_dock import GeometryShares  # noqa: E402
 
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
@@ -83,10 +85,9 @@ def plugin(tmp_path):
                     {"rings": row.rings, "spatialReference": {"wkid": 4326}})
     shots.add({"SHOT_ID": "S-1", "RUN_ID": "RUN1", "TARGET_DAY": d2.isoformat(), "SYSTEM": "SYS-B", "SATELLITE": "SAR-1",
                "PASS_TIME": at(d2, 22, 15), "REQ_ID": "R-2"}, {"rings": OSAKA_SHOT, "spatialReference": {"wkid": 4326}})
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Requests)
     original = PluginContext.esri
     PluginContext.esri = lambda self: EsriClient(fake)
     p.initGui()
