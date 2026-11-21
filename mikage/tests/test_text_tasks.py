@@ -88,6 +88,30 @@ def test_what_a_small_model_adds_to_the_fields_is_taken_off():
     assert "confidence" not in tt.fields_draft("確度: 可能性", "補給艦", resolve, activities_of, CONFIDENCES).values
 
 
+def test_the_heading_in_words_the_cues_of_how_sure_and_class_names_as_names():
+    """Real 3B on the 項目を拾う button (2026-11-21)."""
+    # 「針路は南東」「北上中」「方位は北」: the heading in degrees (not 「北側」).
+    d = tt.fields_draft("種別: 船舶\n活動: 航行\n向き: 南東", "潜水艦が浮上航行、長さ約80m、針路は南東", resolve, activities_of, CONFIDENCES,
+                        "", KINDS)
+    assert d.values["heading"] == 135.0 and d.values["activity"] == "航行" and d.dropped == ()
+    assert tt.compass_in("港外を北上中、航跡あり") == (0.0, "北")
+    assert tt.compass_in("港の北側でクレーン") is None and tt.compass_in("東京湾を北上後に南下") is None
+    assert tt.compass_in("艦首は北北西") == (337.5, "艦首は北北西") and tt.compass_in("北東へ航行") == (45.0, "北東へ")
+    # Degrees written win over words.
+    assert tt.fields_draft("", "針路は南、200度", resolve, activities_of, CONFIDENCES, "船舶", KINDS).values["heading"] == 200.0
+    # 「らしき」 says 推定; 「を確認」 says 確定 (「未確認」 does not).
+    d = tt.fields_draft("種別: 船舶\n確度: 推定\nモノ: 護衛艦", "護衛艦らしき艦影2隻、港外を北上中", resolve, activities_of,
+                        ["確定", "推定", "不明"], "", KINDS)
+    assert d.values["confidence"] == "推定" and "object" not in d.values
+    assert d.dropped == ("モノ「護衛艦」は種類の名前（固有の名前でない）",)
+    assert tt.confidence_in("戦闘機4機が駐機しているのを確認", ["確定", "推定"]) == "確定"
+    assert tt.confidence_in("北側は未確認", ["確定", "推定"]) is None
+    # A class's name the classification does not have is no name either; a name is.
+    for name, kept in (("貨物船", False), ("小型船", False), ("能登丸", True), ("おうみ", True)):
+        d = tt.fields_draft(f"モノ: {name}", f"{name}が入港", resolve, activities_of, CONFIDENCES, "船舶", KINDS)
+        assert ("object" in d.values) == kept, name
+
+
 def test_the_model_stops_once_its_lines_are_written():
     done = tt.lines_done(tt.SEARCH_KEYS)
     assert not done("期間: 今週\n\n地名: 呉\n")

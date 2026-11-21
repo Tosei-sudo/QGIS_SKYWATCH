@@ -77,6 +77,10 @@ def test_how_often():
     assert o("毎週").every == 7
     assert o("毎日").kind == "毎日" and o("期間中に1回撮れれば").kind == "1回"
     assert o("1日1回") is None and o("1日2回") is None
+    # 「週1回」 is every 7 days, not 「期間中に1回」 (real 3B 2026-11-21); 「月1回」「週2回」 are not read.
+    assert o("定点観測を週1回お願いしたい") == tr.Often("間隔", every=7, words="週1回")
+    assert o("2週に1回").every == 14 and o("週に一度").every == 7 and o("週一で").every == 7 and o("毎週1回").every == 7
+    assert o("月1回") is None and o("週2回") is None
 
 
 def test_numbers_with_their_units():
@@ -175,6 +179,23 @@ def test_the_models_reading_kept_where_the_words_give_it_a_footing():
     # The model's 雲量 in other words.
     d = tr.request_draft(answer(cloud="20%まで"), "雲はせいぜい20%までで", TODAY)
     assert d.values["cloud_no_go"] == 21
+
+
+def test_what_the_model_got_wrong_on_real_mails():
+    """sarashina2.2 3B on the request form (2026-11-21)."""
+    # 「週1回」: the model's 「期間中に1回」 is not taken (the 1回 is per week).
+    d = tr.request_draft(answer(often="期間中に1回"), "年内いっぱい、横須賀港の定点観測を週1回お願いしたい", TODAY)
+    assert (d.values["category"], d.values["repeat"]) == ("定点", "間隔:7")
+    assert "期間中に1回" not in " ".join(d.text_of(k) for k in d.values)
+    d = tr.request_draft(answer(often="期間中に1回"), "月1回で", TODAY)
+    assert "achieve" not in d.values
+    # 「呉港」 for the text's 「呉」: 呉 kept.
+    d = tr.request_draft(answer(place="横須賀港、呉港"), "来週月曜から2週間、横須賀港と呉を光学で毎日撮ってください", TODAY,
+                         place_names=["横須賀港"])
+    assert d.places == ["横須賀港", "呉"] and not any("呉港" in c for c in d.checks)
+    # 「依頼者は第2分析班の佐藤です」: without 「です」.
+    d = tr.request_draft(answer(who="第2分析班の佐藤です"), "横須賀港を毎日。依頼者は第2分析班の佐藤です。", TODAY)
+    assert d.values["requester"] == "第2分析班の佐藤"
 
 
 def test_several_places_and_coordinates():
