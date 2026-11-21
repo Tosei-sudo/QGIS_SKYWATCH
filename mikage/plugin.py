@@ -22,7 +22,7 @@ except ImportError:  # Qt5
 
 from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
-from .features import ai, analysis, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests
+from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests
 from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
 from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm
@@ -86,6 +86,8 @@ PRELOAD_ORDER = ("satellites", "requests", "events", "offlineCache")
 FEATURES: tuple[type[Feature], ...] = (
     rendering.Rendering, platform.Platform, images.Images, plan.Plan, observations.Observations, requests.Requests,
     events.Events, analysis.Analysis, ai.Ai, maps.Maps, enhance.Enhance, layers.Layers,
+    # 文で操作 last: its operations open the others' docks and entries.
+    command.Command,
 )
 
 
@@ -449,6 +451,20 @@ class MikagePlugin:
         return True
 
     # ---- the menu, the docks' places and the map's right-click menu --------------------------------------
+
+    def text_operations(self) -> dict:
+        """文で操作's operations the features offer now ({key: run(reading, place)}, features/base.Feature.text_operations)."""
+        runs: dict = {}
+        for feature in self.features:
+            for key, run in feature.text_operations().items():
+                if key in runs:
+                    raise ValueError(f"two features run the operation {key}")
+                runs[key] = run
+        return runs
+
+    def menu_texts(self) -> list[str]:
+        """The menu's entries the roles in use have, by their text in the menu's order (文で操作's 「画面を開く」)."""
+        return [t for t, a in self._entries_in_menu_order().items() if self.allows(t) and a.menu() is None]
 
     def _entries_in_menu_order(self) -> dict:
         """The menu's entries (text → action) in the order the menu shows them (「通知」 without its unread count)."""

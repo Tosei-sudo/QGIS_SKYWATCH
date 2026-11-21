@@ -92,6 +92,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   - `copy` クリップボードへのコピー: 通報文・通報記録、引き継ぎメモ、データ分析の結果、イベントの概要、画像のパス。件数と文字数と SHA-256（中身は書かない）
   - `mail` 通報のメールの作成（通知ドックの「通報」タブの「メールを作成」）: 宛先・CC・BCC・件名・件数・本文に入れた件数・リンクの長さ、本文の文字数と SHA-256（中身は書かない）。メールソフトが開けなかったときは結果がエラー
   - `receive` 外部から受け取った図形（AutoMap・リンク・プログラム）: 送信元・個数・レイヤー名・読めなかった値
+  - `command` 「文で操作」でカードのボタンを押して行った操作（2026-11-21）: 書いた文（先頭 300 字）・操作・選び方（言葉から・生成 AI・選び直し）・使った値（システム・期間・場所・衛星・画面）。開けなかったときは結果がエラー
   - `config` 設定ファイルの読み込み（場所・SHA-256・問題の件数）
   - `session` プラグインの起動・終了（プラグインと QGIS の版）
   - `error` エラー（`action` で種類）:
@@ -119,7 +120,7 @@ MIKAGE での操作と起きたエラーを「いつ・だれが（どの PC で
   "sendMinutes": 10,        // 送る間隔（分、1 以上）
   "format": "jsonl",        // "jsonl" か "csv"
   "encoding": "",           // 既定 jsonl は utf-8・csv は utf-8-sig。"cp932" も
-  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "mail", "receive", "error"],  // 記録するもの（既定すべて）
+  "events": ["session", "config", "edit", "offline", "open", "export", "copy", "mail", "receive", "command", "error"],  // 記録するもの（既定すべて）
   "values": false,          // true で書き込んだ属性の値も記録
   "keepDays": 90,           // この PC に残す日数（送り終えたもの）
   "localFolder": ""         // この PC の保存先（既定 プロファイルの mikage/audit）

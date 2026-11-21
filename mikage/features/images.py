@@ -15,6 +15,7 @@ except ImportError:  # Qt5
 
 from ..qgis_io.catalog_io import FEATURE
 from ..qgis_io.interests_io import InterestBook
+from ..ui import command_runs as runs
 from ..ui.catalog_dock import CatalogDock
 from ..ui.central_views import CentralViews
 from ..ui.docks import plain_tip
@@ -150,6 +151,13 @@ class Images(Feature):
 
     def map_menu(self) -> dict:
         return {"この地点の新着画像を監視…": lambda x, y: self.docks["SatObsNotices"].watch_point(x, y)}
+
+    def text_operations(self) -> dict:
+        if not self.context.config.image_catalogs:
+            return {}
+        docks = self.docks
+        return {"catalog": lambda r, p: runs.catalog(docks["SatObsImageCatalog"], r, p),
+                "watch": lambda _r, p: runs.watch(docks["SatObsNotices"], p)}
 
     def _layers_added(self, layers) -> None:
         for layer in layers:

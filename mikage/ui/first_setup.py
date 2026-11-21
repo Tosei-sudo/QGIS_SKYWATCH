@@ -128,7 +128,8 @@ class FirstSetupDialog(QDialog):
                  observation_dock: Callable[[], Optional[QWidget]] = lambda: None,
                  coordinates: Callable[[], Optional[object]] = lambda: None,
                  open_settings: Optional[Callable[[], None]] = None, keeper: Optional[roles_io.RoleKeeper] = None,
-                 all_docks: Optional[Callable[[], dict]] = None, parent: QWidget | None = None):
+                 all_docks: Optional[Callable[[], dict]] = None, text_assist: Optional[object] = None,
+                 parent: QWidget | None = None):
         super().__init__(parent or window)
         fit_text(self)
         self.setObjectName("SatObsFirstSetup")
@@ -139,6 +140,8 @@ class FirstSetupDialog(QDialog):
         self.first = first
         self.observation_dock = observation_dock
         self.coordinates = coordinates
+        #: 生成 AI (qgis_io/text_assist_io.TextAssistant), for its switch (opt-in).
+        self.text_assist = text_assist
         #: The roles in use and their table (None: kept in this profile only).
         self.keeper = keeper
         self.setWindowTitle(tr("最初の設定") if first else tr("担当と個人設定"))
@@ -222,6 +225,14 @@ class FirstSetupDialog(QDialog):
 
         self.notation.setCurrentIndex(max(0, self.notation.findData(cursor_notation())))
         form.addRow(tr("カーソル位置の表記"), self.notation)
+        # 生成 AI (tsudo 2026-11-21: 「生成AIの機能はオプトインにしよう」): off until turned on here.
+        self.ai = QCheckBox(tr("使う（文章の手伝い・文で操作。この PC で動く生成 AI）"))
+        self.ai.setChecked(text_assist is not None and text_assist.enabled)
+        self._ai_offered()
+        if text_assist is not None:
+            # The settings file read while the page is open (the first start): offered once it has a model.
+            text_assist.changed.connect(self._ai_offered)
+        form.addRow(tr("生成 AI の機能"), self.ai)
         layout.addWidget(own_box)
 
         if open_settings is not None:
@@ -237,6 +248,13 @@ class FirstSetupDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.finished.connect(lambda _r: mark_done())
+
+    def _ai_offered(self) -> None:
+        """「生成 AI の機能」 can be turned on only when the settings give a task a model."""
+        configured = self.text_assist is not None and self.text_assist.configured
+        self.ai.setEnabled(configured)
+        self.ai.setToolTip(tr("使うと、備考を整える・依頼文から下書き・文で操作などのボタンが出る（モデルは使うときに読み込む）")
+                           if configured else tr("設定ファイルに生成 AI のモデルの割り当てなし（textAssist）"))
 
     def _current_names(self) -> list[str]:
         return self.keeper.names if self.keeper is not None else roles()
@@ -299,6 +317,8 @@ class FirstSetupDialog(QDialog):
             obs.set_observer(recorder)
         else:
             settings.set_recorder(recorder)
+        if self.text_assist is not None and self.ai.isEnabled():
+            self.text_assist.set_enabled(self.ai.isChecked())
         n = int(self.points.currentData())
         settings.set_point_count(n)
         if obs is not None and hasattr(obs, "use_points"):

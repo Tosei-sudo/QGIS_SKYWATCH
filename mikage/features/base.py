@@ -12,7 +12,7 @@ plugin's FEATURES. The plugin calls, for every feature in that order:
 3. `connect()`: once every dock is made (wiring between docks);
 4. `add_actions()`: its menu entries (`self.entry(…)`); where each sits is
    the plugin's MENU_GROUPS / MENU_TOP, by its text;
-5. `map_menu()`, `preload()`, `qgis_started()`, `roles_changed()`, `after_offline()` when asked;
+5. `map_menu()`, `text_operations()`, `preload()`, `qgis_started()`, `roles_changed()`, `after_offline()` when asked;
 6. `unload()`: closes what it made (before the menus and docks are removed),
    then `unload_after_docks()`.
 
@@ -141,6 +141,13 @@ class Feature:
 
     def map_menu(self) -> dict:
         """{text: function(x, y)}: the map's right-click entries, at a point in WGS 84 (placed by the plugin's MAP_MENU)."""
+        return {}
+
+    def text_operations(self) -> dict:
+        """
+        {operation key (core/text_command.OPERATIONS): run(reading, place) -> what was done}: 文で操作's operations on its
+        docks (ui/command_runs.py), those the settings have what they need for (asked each time a sentence is read).
+        """
         return {}
 
     def preload(self) -> list:

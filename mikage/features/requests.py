@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from ..core.preload import ITEMS as PRELOAD_ITEMS
+from ..ui import command_runs as runs
 from ..ui.place_schedule_dock import PlaceScheduleDock
 from ..ui.plan_file_dock import PlanFileDock
 from ..ui.request_dock import RequestDock
@@ -99,6 +100,25 @@ class Requests(Feature):
             dock.add_point(x, y)
 
         return {"この地点の撮像予定": plans_here}
+
+    def text_operations(self) -> dict:
+        c, docks = self.context.config, self.docks
+        if not c.request_stores:
+            return {}
+        systems = c.request_exports
+        out = {
+            "planFiles": lambda r, _p: runs.plan_files(docks["SatObsPlanFiles"], r, systems),
+            "follow": lambda r, _p: runs.follow(docks["SatObsPlanFiles"], r),
+            "quotas": lambda r, _p: runs.quotas(self.open_quotas(), r),
+            "schedule": lambda r, _p: runs.schedule(docks["SatObsSchedule"], r),
+            "placeSchedule": lambda r, p: runs.place_schedule(docks["SatObsPlaceSchedule"], r, p),
+            "newRequest": lambda r, _p: runs.new_request(docks["SatObsRequests"], r),
+        }
+        if any(s.result_file is not None for s in systems):
+            out["resultImport"] = lambda r, _p: runs.result_import(docks["SatObsSchedule"], r, systems)
+        if c.satellite_outages is not None:
+            out["outage"] = lambda r, _p: runs.outage(self.open_outages(), r)
+        return out
 
     def preload(self) -> list:
         docks = self.docks

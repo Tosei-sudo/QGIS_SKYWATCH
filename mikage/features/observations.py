@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+from ..ui import command_runs as runs
 from ..ui.dashboard_dock import DashboardDock
 from ..ui.moving_dock import MovingDock
 from ..ui.observation_dock import ObservationDock
@@ -61,6 +62,15 @@ class Observations(Feature):
         # 「分担」 (assignments: who holds which image) and 「引き継ぎメモ」 (the shift handover).
         for name, text, tab in (("assignments", "分担…", 0), ("handover", "引き継ぎメモ…", 1)):
             self.entry(name, text, lambda tab=tab: dock().open_handover(tab), name="SatObsAssignments" if tab == 0 else "SatObsHandover")
+
+    def text_operations(self) -> dict:
+        c, dock = self.context.config, lambda: self.docks["SatObsObservations"]  # noqa: E731
+        out = {"handover": lambda _r, _p: runs.handover(dock())}
+        if c.observation_exports is not None:
+            out["obsExport"] = lambda r, _p: runs.obs_export(dock(), r)
+        if c.alert_reports is not None:
+            out["alert"] = lambda _r, _p: runs.alert(dock())
+        return out
 
     def preload(self) -> list:
         return [("offlineCache", tr("オフライン用の控え（観測記録の分類体系）"), self._warm_offline_cache, True)]

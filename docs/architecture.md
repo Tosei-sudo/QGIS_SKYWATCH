@@ -44,6 +44,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 | `connect()` | ドックができたあとのつなぎ（窓口・通知の受け取り） |
 | `add_actions()` | メニューの項目（`self.entry(...)`） |
 | `map_menu()` | 地図の右クリック `{文言: fn(x, y)}`（並びは `plugin.MAP_MENU`） |
+| `text_operations()` | 「文で操作」の操作のうち自分のドックで行うもの `{操作のキー: fn(読み取り, 場所)}`（`core/text_command.OPERATIONS` のキー。中身は `ui/command_runs.py`。設定に要るものがないときは出さない） |
 | `preload()` | 先読み `[(キー, 表示名, 始め方, いつも)]`（並びは `plugin.PRELOAD_ORDER`） |
 | `COMMANDS` | `plugin.open_xxx()` などで呼べる名前（plugin.api・テスト・ヘルプのため） |
 | `start` / `qgis_started` / `roles_changed` / `after_offline` / `unload` / `unload_after_docks` | 起動・担当の変更・オフラインからの復帰・終了 |

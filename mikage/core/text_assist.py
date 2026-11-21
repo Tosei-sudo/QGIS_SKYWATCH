@@ -24,6 +24,10 @@ takes or leaves:
 - 依頼文から下書き (requestDraft; core/text_request.py, tsudo 2026-11-21): a
   request's mail or chat text made into the request form's fields (new or
   edited), the dates, numbers, satellites and choice words read by code.
+- 文で操作 (command; core/text_command.py, tsudo 2026-11-21): a sentence
+  typed in the toolbar made into one of a fixed list of operations (which
+  screen to open and what to put in it), the model only choosing the
+  operation and every value read by code.
 
 A small model writes well-formed sentences but can get facts wrong, so what
 it writes is checked here: numbers that are not in what it was given are
@@ -122,6 +126,18 @@ REQUEST_PROMPT = (
     "文にない項目は「なし」とだけ書いてください。推測で値を作らないでください。"
     "値だけを書き、説明・理由・括弧書きは書かないでください。"
 )
+#: The instructions for 文で操作 (core/text_command.py; the list of operations follows them).
+COMMAND_PROMPT = (
+    "あなたは地図ソフト MIKAGE の操作を選ぶ係です。利用者の依頼に合う操作を、下の一覧から 1 つだけ選んでください。"
+    "「操作: 名前」の 1 行だけを書き、説明は書かないこと。一覧にないときは「操作: なし」。"
+)
+#: 文で操作's operations (core/text_command.OPERATIONS: key → its name in the model's list), for the settings' `words`.
+COMMAND_NAMES = {
+    "planFiles": "計画ファイル出力", "schedule": "撮像予定", "resultImport": "結果ファイル取込", "follow": "照合", "quotas": "年間上限",
+    "catalog": "画像検索", "passes": "衛星パス", "placeSchedule": "地点の撮像予定", "imagingPlan": "撮像計画", "watch": "新着の監視",
+    "obsExport": "観測記録の書き出し", "handover": "引き継ぎメモ", "alert": "通報", "newRequest": "依頼の作成", "outage": "障害情報",
+    "jump": "移動", "openScreen": "画面を開く",
+}
 #: The most a 備考 sent to the model may be (characters; longer ones are not tidied).
 NOTE_LIMIT = 400
 #: The most of the memo sent to the model (characters; the rest is cut, the lists come first).
@@ -130,18 +146,18 @@ HANDOVER_LIMIT = 3000
 TERMS_LIMIT = 30
 
 #: What the model can be asked to do (`textAssist.tasks`), in the order they are listed.
-TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft")
+TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft", "command")
 TASK_LABELS = {"tidyNote": "備考を整える", "handoverDraft": "申し送りの下書き", "noteFields": "項目の提案", "searchWords": "言葉で探す",
-               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き"}
+               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き", "command": "文で操作"}
 #: The tasks a model of about 3B is meant for: a smaller one is said to be (not refused).
-LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate", "requestDraft"})
+LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate", "requestDraft", "command"})
 #: Smaller than this (billions of parameters) is a small model for LARGE_TASKS.
 LARGE_MODEL = 2.0
 #: Each task's own: how long it may write (tokens) and its instructions.
 TASK_DEFAULTS: dict[str, tuple[int, str]] = {
     "tidyNote": (160, NOTE_PROMPT), "handoverDraft": (320, HANDOVER_PROMPT), "noteFields": (160, FIELDS_PROMPT),
     "searchWords": (160, SEARCH_PROMPT), "summary": (480, SUMMARY_PROMPT), "translate": (240, TRANSLATE_PROMPT),
-    "requestDraft": (240, REQUEST_PROMPT),
+    "requestDraft": (240, REQUEST_PROMPT), "command": (24, COMMAND_PROMPT),
 }
 #: The name of the one model of the shorter settings (`"textAssist": "…"`, or `{ "model": … }`).
 ONE_MODEL = "model"
@@ -166,6 +182,8 @@ class TextTask:
     prompt: str
     #: Examples shown before what is asked (input, what it should write); 備考を整える, 申し送りの下書き and 依頼文から下書き only.
     examples: tuple[tuple[str, str], ...] = ()
+    #: 文で操作 only: more words naming an operation on their own ((operation key, words), core/text_command.py).
+    words: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     @property
     def label(self) -> str:
@@ -173,12 +191,13 @@ class TextTask:
 
 
 def task_of(name: str, model: str, max_tokens: Optional[int] = None, prompt: Optional[str] = None,
-            examples: Optional[tuple[tuple[str, str], ...]] = None) -> TextTask:
+            examples: Optional[tuple[tuple[str, str], ...]] = None,
+            words: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> TextTask:
     """A task with its defaults where nothing else is given."""
     tokens, text = TASK_DEFAULTS[name]
     if examples is None:
         examples = NOTE_EXAMPLES if name == "tidyNote" else HANDOVER_EXAMPLES if name == "handoverDraft" else ()
-    return TextTask(name, model, max_tokens or tokens, prompt or text, examples)
+    return TextTask(name, model, max_tokens or tokens, prompt or text, examples, words)
 
 
 @dataclass(frozen=True)
@@ -330,8 +349,12 @@ def _settings_of(value: dict, at: str, problems: list[str]) -> Optional[TextAssi
         elif name == "requestDraft":
             known.append("examples")
             examples = _request_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
+        words: tuple = ()
+        if name == "command":
+            known.append("words")
+            words = _command_words_of(t["words"], f"{where}.words", problems) if "words" in t else ()
         _unknown(t, known, where, problems)
-        tasks.append(task_of(name, model, tokens, prompt, examples))
+        tasks.append(task_of(name, model, tokens, prompt, examples, words))
     _unknown(value, ("models", "tasks", "keepMinutes", "model"), at, problems)
     return TextAssistSettings(tuple(models), tuple(tasks), _keep_minutes(value, at, problems))
 
@@ -361,6 +384,28 @@ def _request_examples_of(value: Any, at: str, problems: list[str]) -> Optional[t
             problems.append(f"{at}[{i}] は {{ \"text\", \"answer\" }} で指定")
             return None
         out.append((e["text"].strip(), e["answer"].strip()))
+    return tuple(out)
+
+
+def _command_words_of(value: Any, at: str, problems: list[str]) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """文で操作's words: { 操作（キーか名前）: [その操作だけを指す言葉…] }, added to the operation's own."""
+    names = {k: k for k in COMMAND_NAMES} | {n: k for k, n in COMMAND_NAMES.items()}
+    listed = "・".join(COMMAND_NAMES.values())
+    if not is_record(value):
+        problems.append(f"{at} は {{ \"操作\": [\"言葉\", …] }}（操作はキーか名前: {listed}）で指定")
+        return ()
+    out = []
+    for op, words in value.items():
+        key = names.get(str(op).strip())
+        if key is None:
+            problems.append(f"{at} の「{op}」は操作にない（{listed}）")
+            continue
+        if isinstance(words, str):
+            words = [words]
+        if not isinstance(words, list) or not all(isinstance(w, str) and w.strip() for w in words):
+            problems.append(f"{at}.{op} はその操作を指す言葉の配列で指定")
+            continue
+        out.append((key, tuple(w.strip() for w in words)))
     return tuple(out)
 
 

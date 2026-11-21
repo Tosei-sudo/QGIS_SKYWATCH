@@ -11,6 +11,7 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
+from ..ui import command_runs as runs
 from ..ui.basemap_switch import BaseMapSwitch
 from ..ui.coordinate_box import CoordinateBox
 from ..ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
@@ -57,6 +58,10 @@ class Maps(Feature):
         for name, label, show in (("webmap_open", "ArcGIS Web マップを開く…", host.webmaps.show_open),
                                   ("webmap_save", "ArcGIS Web マップとして保存…", host.webmaps.show_save)):
             self.entry(name, label, show)
+
+    def text_operations(self) -> dict:
+        host = self.host
+        return {"jump": lambda r, p: runs.jump(host.coordinates, r, p)} if host.coordinates is not None else {}
 
     def _add_new_layer(self) -> None:
         """「新規スクラッチレイヤー（テンプレート）…」: in the plugin's menu, and in Layer ▸ Create Layer after QGIS's own scratch layer."""

@@ -127,6 +127,26 @@ def test_one_line_cancel_and_too_long(genai, tmp_path):
         writer.write([{"role": "user", "content": "a" * 5000}], 32)
 
 
+def test_what_is_read_is_kept_for_the_next_conversation_that_begins_the_same(genai, tmp_path):
+    """文で操作: the list read once (prime, or the first sentence), then only what follows it (Generator.rewind_to)."""
+    writer = text_assist_io.GenAiWriter(write_model(str(tmp_path / "m"), "Op."), threads=1)
+    head = [{"role": "system", "content": "操作の一覧"}]
+    ask = lambda text: head + [{"role": "user", "content": f"依頼: {text}"}]  # noqa: E731
+    plain = writer.write(ask("呉"), 16)
+    writer.prime(ask(""))
+    kept = writer._kept
+    assert kept is not None and writer._held == list(writer.tokenizer.encode(writer.prompt(ask(""))))
+    for text in ("呉の画像", "横須賀へ移動して", "呉"):
+        assert writer.write(ask(text), 16, keep=True) == plain
+        # The same generator, taken back to what the conversations share.
+        assert writer._kept is kept
+    # A conversation that does not fit what was kept: a new one.
+    assert writer.write(ask("あ" * 400), 16, keep=True) == plain and writer._kept is not kept
+    # Not kept: what was kept stays as it was.
+    kept = writer._kept
+    assert writer.write(ask("呉"), 16) == plain and writer._kept is kept
+
+
 def test_a_model_without_a_chat_template_is_given_plain_text(genai, tmp_path):
     writer = text_assist_io.GenAiWriter(write_model(str(tmp_path / "m"), "Tidy.", chat_template=False), threads=1)
     assert writer.prompt(MESSAGES) == plain_prompt(MESSAGES)
@@ -152,11 +172,18 @@ class FakeWriter:
         self.replies = replies
         self.gate = gate
         self.asked = []
+        #: What it was given to read ahead (prime).
+        self.primed_with = []
         #: Its size (billions of parameters), as GenAiWriter reads it from genai_config.json.
         self.params = params
 
-    def write(self, messages, max_tokens, cancelled=lambda: False, wrote=lambda _t: None, one_line=False, until=None):
+    def prime(self, messages):
+        self.primed_with.append(list(messages))
+
+    def write(self, messages, max_tokens, cancelled=lambda: False, wrote=lambda _t: None, one_line=False, until=None, keep=False):
         self.asked.append((list(messages), max_tokens, one_line))
+        #: Whether what was read was to be kept (文で操作: GenAiWriter reads only what follows the list next time).
+        self.kept = keep
         #: When the screen said the answer was enough (GenAiWriter stops there).
         self.until = until
         reply = self.replies.pop(0) if self.replies else ""
