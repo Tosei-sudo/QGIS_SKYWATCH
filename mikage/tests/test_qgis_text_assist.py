@@ -97,6 +97,25 @@ def test_a_zipped_model_is_unpacked_once_and_a_bad_one_refused(tmp_path):
         text_assist_io.model_folder_of(str(empty), root=str(root))
 
 
+def test_a_carried_genai_that_cannot_be_copied_is_not_used_and_the_person_is_told_why(monkeypatch, tmp_path):
+    """Loaded from the plugin's folder its DLLs would keep QGIS from updating or removing the plugin (core/win64)."""
+    import sys
+
+    from mikage.core.win64 import NotCopied
+
+    def refused(package, folder, root=None, first=False):
+        raise NotCopied(f"{package} をプラグインのフォルダーの外に写せず（書き込めず）")
+
+    monkeypatch.setattr(text_assist_io, "load_ort", lambda *a: None)
+    monkeypatch.setattr(text_assist_io, "_og", None)
+    monkeypatch.setitem(sys.modules, "onnxruntime_genai", None)
+    monkeypatch.setattr(text_assist_io, "VENDORED_PYTHON", sys.version_info[:2])
+    monkeypatch.setattr(text_assist_io, "add_package", refused)
+    (tmp_path / "onnxruntime_genai").mkdir()
+    with pytest.raises(text_assist_io.RuntimeMissing, match="onnxruntime_genai をプラグインのフォルダーの外に写せず.*直接は読まない"):
+        text_assist_io.load_genai(str(tmp_path), "Windows")
+
+
 # ---- the real runtime on a tiny model -------------------------------------------------------------
 
 @pytest.fixture

@@ -8,6 +8,7 @@ Each feature hands it its docks, menu entries and commands (features/base.py).
 """
 from __future__ import annotations
 
+import gc
 from typing import Optional, Sequence
 
 from qgis.core import Qgis, QgsApplication, QgsMessageLog, QgsProject
@@ -20,6 +21,7 @@ try:  # Qt6
 except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
+from .core import win64
 from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
 from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests
@@ -93,6 +95,11 @@ FEATURES: tuple[type[Feature], ...] = (
 
 def tr(text: str) -> str:
     return QCoreApplication.translate("Mikage", text)
+
+
+def _log_library(text: str, problem: bool) -> None:
+    """A line of the Windows zip's libraries (core/win64) in the log: where one was loaded from, or why it was not."""
+    QgsMessageLog.logMessage(text, LOG_TAG, Qgis.MessageLevel.Warning if problem else Qgis.MessageLevel.Info, notifyUser=False)
 
 
 class MikagePlugin:
@@ -194,6 +201,8 @@ class MikagePlugin:
         tasks.collect_less_often()
         # Requests keep their connections to the servers between them (qgis_io/network.py).
         network.open_lines()
+        # Where the Windows zip's DLLs were loaded from (outside the plugin's folder, core/win64), in the log.
+        win64.set_reporter(_log_library)
         # Loaded as QGIS starts: the tasks wait until QGIS has (another plugin still being imported while a task's
         # Python ran crashed QGIS). At most a minute, should QGIS never say so.
         started = getattr(self.iface, "initializationCompleted", None)
@@ -599,6 +608,7 @@ class MikagePlugin:
 
         pixel_place.forget()
         obs_images.forget()
+        self._let_models_go()
         tasks.release_tasks()  # nothing held any more (cancelled above): only no longer holding
         disconnect(getattr(self.iface, "initializationCompleted", None), self._release_tasks)
         tasks.restore_gil_sharing()
@@ -648,3 +658,23 @@ class MikagePlugin:
             self.context = None
         # Last: the request threads kept with their connections end (the tasks that used them were cancelled above).
         network.close_lines()
+        win64.set_reporter(None)
+
+    def _let_models_go(self) -> None:
+        """
+        The AI models let go (the tasks using them cancelled before): QGIS
+        unloads the plugin just before it updates or removes its folder, and
+        a loaded model keeps its files open (ONNX Runtime maps a model's
+        external data, model.onnx.data, while it is loaded), which Windows
+        does not let QGIS overwrite or remove. A reloaded plugin would also
+        load them again beside the old ones (a 3B model is about 2 GB).
+        """
+        from .qgis_io import ai_runtime
+
+        released = ai_runtime.forget_models()
+        assistant = getattr(self.context, "text_assist", None) if self.context is not None else None
+        if assistant is not None and assistant.writer is not None:
+            assistant.unload()
+            released += 1
+        if released:
+            gc.collect()
