@@ -34,11 +34,12 @@ git lfs pull -I "models/sarashina-3b-int4/**" -X ""
     "large": { "path": "\\\\fileserver\\gis\\models\\sarashina-3b-int4", "threads": 4 }
   },
   "tasks": { "tidyNote": "large", "handoverDraft": "large", "noteFields": "large",
-             "searchWords": "large", "summary": "large", "translate": "large", "requestDraft": "large" }
+             "searchWords": "large", "summary": "large", "translate": "large", "requestDraft": "large",
+             "command": "large" }
 }
 ```
 
-軽い PC では `tidyNote`・`noteFields`・`searchWords` を `small` に。速さと出来の実測は README の表のとおり。
+使う人がそれぞれ「担当と個人設定…」の「生成 AI の機能」を入れると、ボタンが出る（初めは出ない）。軽い PC では `tidyNote`・`noteFields`・`searchWords` を `small` に。速さと出来の実測は README の表のとおり。
 
 ## 作り直すとき
 

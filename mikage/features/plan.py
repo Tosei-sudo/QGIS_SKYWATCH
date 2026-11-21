@@ -4,9 +4,12 @@
 """
 from __future__ import annotations
 
+import time
+
 from qgis.core import QgsProject
 
 from ..core.preload import ITEMS as PRELOAD_ITEMS
+from ..ui import command_runs as runs
 from ..ui.cloud_dock import CloudDock
 from ..ui.imaging_plan_dock import ImagingPlanDock
 from ..ui.moving_target_dialog import MovingTargetDialog
@@ -71,6 +74,17 @@ class Plan(Feature):
 
     def map_menu(self) -> dict:
         return {"ここを撮像計画": lambda x, y: self.docks["SatObsImagingPlan"].plan_at(x, y)}
+
+    def text_operations(self) -> dict:
+        if not self.context.config.satellite_catalogs:
+            return {}
+        from ..core.request.api import jst_day
+        from ..ui.plan_dock.common import DAYS
+
+        docks = self.docks
+        today = lambda: jst_day(time.time() * 1000)  # noqa: E731
+        return {"passes": lambda r, _p: runs.passes(docks["SatObsSatellitePass"], r),
+                "imagingPlan": lambda r, p: runs.imaging_plan(docks["SatObsImagingPlan"], r, p, today(), DAYS)}
 
     def preload(self) -> list:
         docks, config = self.docks, lambda: self.context.config

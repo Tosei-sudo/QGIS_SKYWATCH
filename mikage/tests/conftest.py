@@ -85,6 +85,19 @@ def own_offline_file(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def text_assist_on(monkeypatch):
+    """
+    The generative AI's features are on in the tests (opt-in: off for a new person, ui/first_setup.py's
+    「生成 AI の機能を使う」); the tests of the switch itself set it off.
+    """
+    try:
+        from mikage.qgis_io.prefs import ai
+    except ImportError:  # no QGIS
+        return
+    monkeypatch.setattr(ai, "TEXT_ASSIST_DEFAULT", "1")
+
+
+@pytest.fixture(autouse=True)
 def no_upload_question(monkeypatch):
     """
     The question about the work waiting (a modal box) never opens by itself in a test: nobody answers it, and

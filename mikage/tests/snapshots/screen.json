@@ -3235,6 +3235,7 @@
   "'recorder'",
   "'request_export_folder'",
   "'startup_layers'",
+  "'text_assist/on'",
   "'trained_models'",
   "CHANGED_KEY='rasterSpeed/qgisChanged'",
   "DONE_KEY='rasterSpeed/qgisDone'",

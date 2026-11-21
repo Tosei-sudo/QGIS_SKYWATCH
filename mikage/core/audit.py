@@ -21,6 +21,9 @@ What is recorded (KINDS):
   addresses, the subject, how many rows, the text's length and SHA-256
 - receive (2026-11-15): shapes received from outside (AutoMap, a link, a
   program; ui/shape_receiver.py): who sent, how many, the layer
+- command (2026-11-21): an operation of 文で操作 done from its card
+  (ui/text_command.py): the sentence, the operation, how it was chosen
+  (words, the model, the person) and the values it was done with
 - error (2026-11-11, tsudo 「エラーログって取れる？」): what went wrong — the
   plugin's warnings and errors in QGIS's log (with their traceback), tasks
   that failed, Python errors raised in the plugin's code, warnings and errors
@@ -80,6 +83,7 @@ KINDS: dict[str, str] = {
     "copy": "クリップボードへコピー",
     "mail": "メールの作成",
     "receive": "外部からの図形",
+    "command": "文で操作",
     "error": "エラー",
 }
 FORMATS = ("jsonl", "csv")

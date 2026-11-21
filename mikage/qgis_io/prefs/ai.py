@@ -33,3 +33,17 @@ def remember_trained_model(label: str, path: str) -> None:
     kept = [(l, p) for l, p in trained_models() if os.path.abspath(p) != path]
     items = [{"label": label, "path": path}] + [{"label": l, "path": p} for l, p in kept]
     set_pref("trained_models", json.dumps(items[:TRAINED_MAX], ensure_ascii=False))
+
+
+#: 生成 AI の機能 (文章の手伝い・文で操作; tsudo 2026-11-21: 「生成AIの機能はオプトインにしよう」): off until the person turns it on
+#: (担当と個人設定). The tests turn it on (conftest).
+TEXT_ASSIST_DEFAULT = "0"
+
+
+def text_assist_on() -> bool:
+    """Whether the person uses the generative AI's features (the settings giving them a model)."""
+    return pref("text_assist/on", TEXT_ASSIST_DEFAULT) == "1"
+
+
+def set_text_assist_on(on: bool) -> None:
+    set_pref("text_assist/on", "1" if on else "0")

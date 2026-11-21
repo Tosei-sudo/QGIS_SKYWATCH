@@ -280,6 +280,10 @@ class GenAiWriter:
             pass
         self._lock = threading.Lock()
         self._og = og
+        #: The generator kept with what it has read (文で操作: the list of operations read once), and those tokens.
+        self._kept: Any = None
+        self._held: list[int] = []
+        self._kept_length = 0
 
     def prompt(self, messages: Sequence[Message]) -> str:
         """The conversation in the model's own chat template (a model whose template has no system turn: the instructions in the first)."""
@@ -300,37 +304,105 @@ class GenAiWriter:
 
     def write(self, messages: Sequence[Message], max_tokens: int, cancelled: Callable[[], bool] = lambda: False,
               wrote: Callable[[str], None] = lambda _t: None, one_line: bool = False,
-              until: Optional[Callable[[str], bool]] = None) -> str:
+              until: Optional[Callable[[str], bool]] = None, keep: bool = False) -> str:
         """
         The reply (greedy: the same every time); `one_line`: ends at the
         first line break after some text; `until`: ends once it says the
-        text so far is enough (all the lines asked for written …).
+        text so far is enough (all the lines asked for written …); `keep`:
+        what is read is kept, and the next conversation kept that begins the
+        same reads only what follows (文で操作: the list of operations is read
+        once, about 8 s for a 3B model, then 0.5–1 s for each sentence).
         """
-        og = self._og
         with self._lock:
-            ids = self.tokenizer.encode(self.prompt(messages))
+            ids = list(self.tokenizer.encode(self.prompt(messages)))
             if len(ids) + max_tokens > self.context_length:
                 raise AiError(f"入力が長すぎる（{len(ids)} トークン、モデルは {self.context_length} まで）")
+            generator = self._read(ids, max_tokens, keep)
+            stream = self.tokenizer.create_stream()
+            text = ""
+            try:
+                for _ in range(max_tokens):
+                    if generator.is_done() or cancelled():
+                        break
+                    generator.generate_next_token()
+                    token = int(generator.get_next_tokens()[0])
+                    if keep:
+                        self._held.append(token)
+                    text += stream.decode(token)
+                    wrote(text)
+                    if one_line and "\n" in text.lstrip():
+                        break
+                    if until is not None and until(text):
+                        break
+            except Exception:
+                if keep:
+                    self._drop()
+                raise
+            if cancelled():
+                raise Cancelled()
+            return text
+
+    def prime(self, messages: Sequence[Message], room: int = 64) -> None:
+        """Reads `messages` and keeps it (as write(keep=True) does, writing nothing): the next kept conversation that begins the same is quick."""
+        with self._lock:
+            ids = list(self.tokenizer.encode(self.prompt(messages)))
+            if len(ids) + room <= self.context_length:
+                self._read(ids, room, True)
+
+    def _drop(self) -> None:
+        self._kept, self._held, self._kept_length = None, [], 0
+
+    def _read(self, ids: list[int], max_tokens: int, keep: bool) -> Any:
+        """
+        A generator that has read `ids`: a new one, or (`keep`) the one kept,
+        taken back to what it has read in common with `ids` (rewind_to) and
+        given the rest; one too short for what is asked is made again.
+        """
+        og = self._og
+        if keep and self._kept is not None and len(ids) + max_tokens <= self._kept_length:
+            same = 0
+            for a, b in zip(ids, self._held):
+                if a != b:
+                    break
+                same += 1
+            same = min(same, len(ids) - 1)
+            try:
+                self._kept.rewind_to(same)
+                self._kept.append_tokens(ids[same:])
+                self._held = ids[:]
+                if not self._kept.is_done():
+                    return self._kept
+            except Exception:  # noqa: BLE001 (a version without rewind_to, or a generator that cannot go back: a new one)
+                pass
+            self._drop()
+        if not keep:
             params = og.GeneratorParams(self.model)
             params.set_search_options(max_length=len(ids) + max_tokens, do_sample=False)
             generator = og.Generator(self.model, params)
             generator.append_tokens(ids)
-            stream = self.tokenizer.create_stream()
-            text = ""
-            while not generator.is_done():
-                if cancelled():
-                    raise Cancelled()
-                generator.generate_next_token()
-                text += stream.decode(int(generator.get_next_tokens()[0]))
-                wrote(text)
-                if one_line and "\n" in text.lstrip():
-                    break
-                if until is not None and until(text):
-                    break
-            return text
+            return generator
+        # Room for the next ones (a sentence longer than this one) without making the generator again.
+        length = min(self.context_length, max(1024, len(ids) + max_tokens + 256))
+        params = og.GeneratorParams(self.model)
+        params.set_search_options(max_length=length, do_sample=False)
+        self._drop()
+        generator = og.Generator(self.model, params)
+        generator.append_tokens(ids)
+        self._kept, self._held, self._kept_length = generator, ids[:], length
+        return generator
 
 
 # ---- for the screens ----------------------------------------------------------------------------------
+
+class _Waiting:
+    """The task of an ask waiting for the model to be made ready: cancelling it drops the ask."""
+
+    def __init__(self, asked: "Asked"):
+        self.asked = asked
+
+    def cancel(self) -> None:
+        self.asked.extra["cancelled"] = True
+
 
 @dataclass
 class Asked:
@@ -363,6 +435,8 @@ class TextAssistant(QObject):
         self.writer: Any = None
         self._writer_key: Optional[tuple] = None
         self.asked: Optional[Asked] = None
+        #: An ask made while the model is made ready (prime), started once it is.
+        self._waiting: Optional[Callable[[], None]] = None
         self._idle = QTimer(self)
         self._idle.setSingleShot(True)
         self._idle.timeout.connect(self.unload)
@@ -373,15 +447,40 @@ class TextAssistant(QObject):
         return getattr(self.context.config, "text_assist", None)
 
     @property
-    def available(self) -> bool:
-        """Whether any task is given a model."""
+    def configured(self) -> bool:
+        """Whether the settings give any task a model (the person can then turn the features on)."""
         s = self.settings
         return s is not None and any(s.has(t.name) for t in s.tasks)
 
+    @property
+    def enabled(self) -> bool:
+        """Whether the person turned the generative AI's features on (担当と個人設定; off until then: opt-in)."""
+        from .prefs import ai
+
+        return ai.text_assist_on()
+
+    def set_enabled(self, on: bool) -> None:
+        """Turns the features on or off for this person: their buttons show or go at once (off: the model let go)."""
+        from .prefs import ai
+
+        if on == self.enabled:
+            return
+        ai.set_text_assist_on(on)
+        if not on:
+            if self.asked is not None:
+                self.asked.cancel()
+            self.unload()
+        self.changed.emit()
+
+    @property
+    def available(self) -> bool:
+        """Whether any task is given a model and the person uses them."""
+        return self.configured and self.enabled
+
     def has(self, task: str) -> bool:
-        """Whether `task` is given a model (its button shows)."""
+        """Whether `task` is given a model and the person uses the features (its button shows)."""
         s = self.settings
-        return s is not None and s.has(task)
+        return s is not None and s.has(task) and self.enabled
 
     @property
     def busy(self) -> bool:
@@ -411,9 +510,67 @@ class TextAssistant(QObject):
 
     def ask(self, task: str, title: str, messages: Sequence[Message], done: Callable[[str, float], None],
             failed: Callable[[str], None], one_line: bool = False,
-            until: Optional[Callable[[str], bool]] = None) -> Optional[Asked]:
-        """Starts writing for `task` (in a task; `until`: when it has written enough); None (and `failed` told) when it cannot start."""
-        return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False, until)
+            until: Optional[Callable[[str], bool]] = None, keep: bool = False) -> Optional[Asked]:
+        """
+        Starts writing for `task` (in a task; `until`: when it has written
+        enough; `keep`: what is read is kept for the next ask that begins
+        the same, GenAiWriter.write); None (and `failed` told) when it
+        cannot start.
+        """
+        return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False,
+                           until, keep)
+
+    @property
+    def priming(self) -> bool:
+        """Whether the model is being made ready (prime): an ask made meanwhile starts once it is."""
+        return self.asked is not None and bool(self.asked.extra.get("prime"))
+
+    def prime(self, task: str, messages: Sequence[Message]) -> bool:
+        """
+        Loads `task`'s model (when it is not) and has it read `messages`
+        ahead (文で操作: the list of operations, while the sentence is typed),
+        quietly: nothing is said when it cannot. False when it does not start
+        (busy, no model, or ready already).
+        """
+        s = self.settings
+        model = s.model_for(task) if s is not None else None
+        if model is None or self.asked is not None or not self.enabled:
+            return False
+        key, base = self._key(model), self.context.source
+        writer = self.writer if self._writer_key == key else None
+        if writer is not None and getattr(writer, "primed", None) == list(messages):
+            return False
+        if writer is None and self.writer is not None:
+            self.unload()
+        writer_of, folder_of = self._writer_of, self._folder_of
+        asked = Asked(stage=self.tr("モデルを読み込み中…（初回は数秒〜）") if writer is None else self.tr("準備中…"), extra={"prime": True})
+
+        def work(job):
+            w = writer
+            if w is None:
+                folder = folder_of(model.path, base, cancelled=job.isCanceled)
+                job.check()
+                w = writer_of(folder, model.threads)
+            asked.stage = self.tr("準備中…")
+            if hasattr(w, "prime"):
+                w.prime(messages)
+            w.primed = list(messages)
+            return w
+
+        def over(w) -> None:
+            self.asked = None
+            current = self.settings
+            if w is not None and current is not None and key in {self._key(m) for m in current.models}:
+                self.writer, self._writer_key = w, key
+                if current.keep_minutes > 0:
+                    self._idle.start(int(current.keep_minutes * 60_000))
+            waiting, self._waiting = self._waiting, None
+            if waiting is not None:
+                waiting()
+
+        self.asked = asked
+        asked.task = run_task(self.tr("文章の手伝いの準備"), work, over, lambda _m: over(None))
+        return True
 
     def ask_each(self, task: str, title: str, conversations: Sequence[Sequence[Message]],
                  done: Callable[[list[str], float], None], failed: Callable[[str], None], one_line: bool = True) -> Optional[Asked]:
@@ -422,13 +579,30 @@ class TextAssistant(QObject):
 
     def _start(self, task: str, title: str, conversations: list, done: Callable[[list[str], float], None],
                failed: Callable[[str], None], one_line: bool, counted: bool,
-               until: Optional[Callable[[str], bool]] = None) -> Optional[Asked]:
+               until: Optional[Callable[[str], bool]] = None, keep: bool = False,
+               asked: Optional[Asked] = None) -> Optional[Asked]:
         s = self.settings
         t = s.task(task) if s is not None else None
         model = s.model_for(task) if s is not None else None
         if t is None or model is None:
             failed(self.tr("設定ファイルの textAssist.tasks に {t} のモデルなし").format(t=task))
             return None
+        if not self.enabled:
+            failed(self.tr("生成 AI の機能を使わない設定（「担当と個人設定…」の「個人の設定」）"))
+            return None
+        if self.priming and asked is None and self._waiting is None:
+            # Made ready meanwhile (prime): starts once it is, on the same Asked (cancelling it before then drops it).
+            waiting = Asked(stage=self.asked.stage)
+
+            def start() -> None:
+                if waiting.extra.get("cancelled"):
+                    failed("取消")
+                    return
+                self._start(task, title, conversations, done, failed, one_line, counted, until, keep, waiting)
+
+            waiting.task = _Waiting(waiting)
+            self._waiting = start
+            return waiting
         if self.asked is not None:
             failed(self.tr("ほかの文章を作成中（終わってから）"))
             return None
@@ -438,7 +612,10 @@ class TextAssistant(QObject):
             # Another model is loaded: let it go first (one at a time, for the memory).
             self.unload()
         writing = self.tr("作成中…")
-        asked = Asked(stage=writing if writer is not None else self.tr("モデルを読み込み中…（初回は数秒〜）"))
+        loading = self.tr("モデルを読み込み中…（初回は数秒〜）")
+        if asked is None:
+            asked = Asked()
+        asked.stage = writing if writer is not None else loading
         writer_of, folder_of, max_tokens = self._writer_of, self._folder_of, t.max_tokens
 
         def work(job):
@@ -455,10 +632,12 @@ class TextAssistant(QObject):
                 def wrote(text: str) -> None:
                     asked.text = text
 
-                if until is None:
-                    texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line))
-                else:
-                    texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line, until=until))
+                more = {}
+                if until is not None:
+                    more["until"] = until
+                if keep:
+                    more["keep"] = True
+                texts.append(w.write(messages, max_tokens, job.isCanceled, wrote, one_line, **more))
                 job.check()
             return w, texts, time.monotonic() - started
 

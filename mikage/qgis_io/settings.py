@@ -27,7 +27,7 @@ from .prefs.observations import (  # noqa: F401
 )
 from .prefs.plan import plan_reminders, set_plan_reminders, plan_cloud, set_plan_cloud  # noqa: F401
 from .prefs.maps import startup_layers_on, set_startup_layers_on  # noqa: F401
-from .prefs.ai import TRAINED_MAX, trained_models, remember_trained_model  # noqa: F401
+from .prefs.ai import TRAINED_MAX, trained_models, remember_trained_model, text_assist_on, set_text_assist_on  # noqa: F401
 from .prefs.requests import (  # noqa: F401
     request_export_folder, set_request_export_folder, plan_file_filter, set_plan_file_filter, group_filter, set_group_filter,
 )
