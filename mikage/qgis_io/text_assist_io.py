@@ -48,9 +48,9 @@ from urllib.parse import urlsplit
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 
 from ..core.text_assist import LARGE_MODEL, LARGE_TASKS, Message, TextAssistSettings, TextModel, plain_prompt
-from ..core.win64 import add_package
-from .ai_runtime import (VENDORED, VENDORED_PYTHON, AiError, RuntimeMissing, cache_path, download, is_remote, load_ort,
-                         resolve_source, threads as default_threads)
+from ..core.win64 import NotCopied, add_package
+from .ai_runtime import (NOT_COPIED, VENDORED, VENDORED_PYTHON, AiError, RuntimeMissing, cache_path, download, is_remote,
+                         load_ort, resolve_source, threads as default_threads)
 from .tasks import Cancelled, run_task
 
 #: The file that makes a folder a GenAI model.
@@ -86,7 +86,10 @@ def load_genai(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         if sys.version_info[:2] != VENDORED_PYTHON:
             raise RuntimeMissing(f"同梱の onnxruntime-genai は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
                                  f"（この QGIS は {sys.version_info[0]}.{sys.version_info[1]}）。{install_hint(system)}")
-        add_package("onnxruntime_genai", vendored, first=True)
+        try:
+            add_package("onnxruntime_genai", vendored, first=True)  # From a copy outside the plugin's folder (core/win64).
+        except NotCopied as error:
+            raise RuntimeMissing(f"{error}。{NOT_COPIED}") from error
         try:
             import onnxruntime_genai as og  # noqa: PLC0415
         except ImportError as error:

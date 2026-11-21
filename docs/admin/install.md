@@ -20,6 +20,9 @@ python3 scripts/build_zip.py --win64
 - ONNX Runtime のテレメトリー（公式版は 1.31 から Microsoft へ HTTPS で送る。既定でオン）は、プラグインが読み込む前に環境変数 `ORT_DISABLE_TELEMETRY=1` を設定し、読み込み後も `disable_telemetry_events()` で止める（同梱・QGIS 側に入れたもののどちらでも）。管理者が `ORT_DISABLE_TELEMETRY` を設定済みならその値のまま
 - `--config` と併用可
 - DLL を含む onnxruntime・onnxruntime-genai・sgp4 は、プラグインのフォルダーからではなく `%LOCALAPPDATA%\mikage\win64\<名前>-<内容のハッシュ>` に写したものを読み込む。Windows は読み込み中の DLL を QGIS を閉じるまで掴み続けるため、プラグインのフォルダーから読むと「ZIP からインストール」での更新（Failed to unzip the plugin package）やアンインストール（Failed to remove the directory）が失敗するため。写しは中身が変わったときだけ作り直し、使われていない古い写しは消す
+- 写しが作れないときも、プラグインのフォルダーから直接は読まない。写した直後にウイルス対策ソフトが DLL を調べていてフォルダー名の変更を拒むときは数秒やり直し、それでもだめなら写し終えた作業用のフォルダー（同じ場所の `.<名前>-…`）をそのまま使う。`%LOCALAPPDATA%` に書けない（権限・空き容量）ときは一時フォルダー（`%TEMP%\mikage\win64`）に写す。どこにも写せなければ読み込まず、AI の道具・文章の手伝いは理由を出して使えず、軌道計算は同梱の純 Python 版で動く（2026-11-21。直接読むと更新・アンインストールが QGIS を閉じるまで失敗するため）
+- どこから読み込んだか（または写せなかった理由）は QGIS のログの「MIKAGE」タブに 1 行ずつ出る。更新が失敗したらまずここを見る
+- プラグインを止めるとき（QGIS は更新・アンインストールの直前に止める）、読み込んだ AI のモデル（検出・クリック抽出・文章の手伝い）を手放す。モデルの重みが別ファイル（`model.onnx.data`）のものは、読み込み中ずっとそのファイルを掴むため
 - この修正より前の Windows 版から更新するときは一度だけ、プラグインを無効にして QGIS を再起動してから ZIP を入れる（または QGIS を閉じて `python/plugins/mikage` を消す）
 
 ### 設定ファイルを同梱して配る

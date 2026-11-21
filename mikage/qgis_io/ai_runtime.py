@@ -33,7 +33,7 @@ from urllib.parse import urljoin, urlsplit
 import numpy as np
 
 from ..core.ai.api import OnnxSignature, OnnxValue
-from ..core.win64 import add_package
+from ..core.win64 import NotCopied, add_package
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Where the Windows zip keeps its ONNX Runtime.
@@ -48,6 +48,11 @@ class AiError(Exception):
 
 class RuntimeMissing(AiError):
     """ONNX Runtime is not there."""
+
+
+#: Said when the Windows zip's runtime could not be copied out of the plugin's folder (core/win64.NotCopied).
+NOT_COPIED = ("プラグインのフォルダーから直接は読まない（QGIS を閉じるまで更新・アンインストールができなくなるため）。"
+              "%LOCALAPPDATA% か一時フォルダーの書き込み・空き容量を確認")
 
 
 def install_hint(system: Optional[str] = None) -> str:
@@ -89,7 +94,10 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         if sys.version_info[:2] != VENDORED_PYTHON:
             raise RuntimeMissing(f"同梱の onnxruntime は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
                                  f"（この QGIS は {sys.version_info[0]}.{sys.version_info[1]}）。{install_hint(system)}")
-        add_package("onnxruntime", vendored, first=True)  # From a copy outside the plugin's folder (core/win64).
+        try:
+            add_package("onnxruntime", vendored, first=True)  # From a copy outside the plugin's folder (core/win64).
+        except NotCopied as error:
+            raise RuntimeMissing(f"{error}。{NOT_COPIED}") from error
         try:
             import onnxruntime as ort  # noqa: PLC0415
         except ImportError as error:
@@ -315,6 +323,19 @@ def create_model(path: str, name: str = "", use_gpu: bool = True) -> LoadedModel
 
 
 _loaded: dict[tuple, LoadedModel] = {}
+
+
+def forget_models() -> int:
+    """
+    Lets every loaded model go (the plugin unloaded: QGIS updates or
+    removes it next): ONNX Runtime keeps a model's external data file
+    (model.onnx.data) mapped while its session lives, which on Windows locks
+    the file, and a reloaded plugin would load the models again beside the
+    old ones. How many there were.
+    """
+    n = len(_loaded)
+    _loaded.clear()
+    return n
 
 
 def model_from(path: str, name: str = "") -> LoadedModel:

@@ -303,6 +303,130 @@ def test_the_carried_onnxruntime_runs_without_its_extras(tmp_path):
     assert result.stdout.strip() == "detect (1, 6, 16)"
 
 
+def external_data_model(folder: str, n: int = 1024) -> str:
+    """A model whose weights are in a file beside it (model.onnx.data, as the generative models): x + W, W = 0, 1, 2…"""
+    from mikage.core.ai.train.onnx_io import _bytes, _int, _str, node, value_info
+
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "big.onnx.data"), "wb") as f:
+        f.write(np.arange(n, dtype="<f4").tobytes())
+
+    def entry(key: str, value: str) -> bytes:  # TensorProto.external_data
+        return _bytes(13, _str(1, key) + _str(2, value))
+
+    weights = (_int(1, n) + _int(2, 1) + _str(8, "W") + entry("location", "big.onnx.data") + entry("offset", "0")
+               + entry("length", str(4 * n)) + _int(14, 1))  # data_location: EXTERNAL
+    graph = (_bytes(1, node("Add", ["x", "W"], ["y"])) + _str(2, "g") + _bytes(5, weights)
+             + _bytes(11, value_info("x", [n])) + _bytes(12, value_info("y", [n])))
+    path = os.path.join(folder, "big.onnx")
+    with open(path, "wb") as f:
+        f.write(_int(1, 8) + _bytes(8, _str(1, "") + _int(2, 17)) + _bytes(7, graph))
+    return path
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc (Linux) to see what the process holds")
+def test_after_the_ai_tools_ran_nothing_in_the_plugin_folder_is_held(tmp_path):
+    """
+    2026-11-21 (onnxruntime を使うと更新・アンインストールできなくなる?):
+    the Windows zip's layout (ext/win64 with the real onnxruntime,
+    onnxruntime-genai and C++ sgp4) and models inside the plugin's folder.
+    After detection and the generative model ran, no file of the plugin's
+    folder is held (Linux stand-in for Windows' locks, tests/held_files.py:
+    a mapped .so is a loaded DLL), so QGIS can overwrite or remove it. Only a
+    model with its weights beside it stays mapped while loaded, and is no
+    longer once let go (as when the plugin unloads).
+    """
+    genai = pytest.importorskip("onnxruntime_genai")
+    sgp4 = pytest.importorskip("sgp4")
+    import json
+    import shutil
+
+    import onnxruntime
+
+    from mikage.tests.genai_tiny import write_model
+    from scripts.build_zip import GENAI_DROP, ONNXRUNTIME_KEEP
+
+    plugin = tmp_path / "plugins" / "mikage"
+    for module, keep, drop in ((onnxruntime, ONNXRUNTIME_KEEP, set()), (genai, None, GENAI_DROP), (sgp4, None, set())):
+        source = os.path.dirname(module.__file__)
+
+        def left_out(folder, names, source=source, keep=keep, drop=drop):
+            top = os.path.abspath(folder) == os.path.abspath(source)
+            return [n for n in names if n == "__pycache__" or (top and (n in drop or (keep is not None and n not in keep)))]
+
+        shutil.copytree(source, plugin / "ext" / "win64" / module.__name__, ignore=left_out)
+    models = plugin / "models"
+    models.mkdir()
+    shutil.copy2(os.path.join(DATA, "detect.onnx"), models / "detect.onnx")
+    tiny = write_model(str(models / "tiny"), "Tidy note.")
+    big = external_data_model(str(models / "big"))
+    cache = tmp_path / "cache"
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    result = subprocess.run([sys.executable, "-m", "mikage.tests.held_files", str(plugin), str(cache), str(models / "detect.onnx"),
+                             tiny, big], cwd=root, capture_output=True, text=True, timeout=120,
+                            env=dict(os.environ, PYTHONPATH=root, LOCALAPPDATA=str(cache)))
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout.strip().splitlines()[-1])
+    # Each loaded from its copy outside the plugin's folder (core/win64), and working.
+    assert all(path.startswith(str(cache)) for path in out["from"].values()), out["from"]
+    assert out["accelerated"] and out["reply"] == "Tidy note." and out["y"] == [1, 2, 3]
+    assert any(h.endswith((".so", ".pyd", ".dll")) or ".so." in h for h in out["copies"])
+    # The plugin's folder: only the loaded model's weights, then nothing.
+    assert out["loaded"] == ["models/big/big.onnx.data"]
+    assert out["let go"] == []
+
+
+def test_a_carried_runtime_that_cannot_be_copied_is_not_used_and_the_person_is_told_why(monkeypatch, tmp_path):
+    from mikage.core.win64 import NotCopied
+
+    def refused(package, folder, root=None, first=False):
+        raise NotCopied(f"{package} をプラグインのフォルダーの外に写せず（C:\\Users\\a\\AppData\\Local\\mikage\\win64: 空き容量なし）")
+
+    monkeypatch.setattr(ai_runtime, "_ort", None)
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
+    monkeypatch.setattr(ai_runtime, "VENDORED_PYTHON", sys.version_info[:2])
+    monkeypatch.setattr(ai_runtime, "add_package", refused)
+    (tmp_path / "onnxruntime").mkdir()
+    with pytest.raises(ai_runtime.RuntimeMissing, match="onnxruntime をプラグインのフォルダーの外に写せず.*空き容量なし.*直接は読まない"):
+        ai_runtime.load_ort(str(tmp_path), "Windows")
+
+
+def test_the_models_are_let_go_when_the_plugin_unloads(plugin, tmp_path):
+    """QGIS unloads the plugin just before it updates or removes its folder: a loaded model's files must not stay held."""
+    p, iface, layer = plugin
+    ai_runtime.model_from(external_data_model(str(tmp_path / "big")))
+    assert ai_runtime._loaded
+    p.context.text_assist.writer = object()  # 文章の手伝い's model (a GenAI model maps its model.onnx.data the same way).
+    p._let_models_go()
+    assert not ai_runtime._loaded and p.context.text_assist.writer is None
+    if os.path.isfile("/proc/self/maps"):
+        with open("/proc/self/maps") as f:
+            assert "big.onnx.data" not in f.read()
+
+
+def test_where_the_windows_libraries_were_loaded_from_goes_to_the_log(plugin, monkeypatch):
+    """A line in QGIS's log (MIKAGE) for each, to trace an update that fails (core/win64.set_reporter)."""
+    from mikage.core import win64
+
+    lines = []
+
+    def heard(text, tag, level):
+        if tag == "MIKAGE":
+            lines.append((text, level))
+
+    monkeypatch.setattr(win64, "_told", {})  # This test's lines not kept for the next plugins' logs.
+    QgsApplication.messageLog().messageReceived.connect(heard)
+    try:
+        win64._tell("onnxruntime", "onnxruntime を C:\\copy から読み込み（プラグインのフォルダーの外の写し）")
+        win64._tell("sgp4", "sgp4 をプラグインのフォルダーの外に写せず、読み込まない（…）", True)
+    finally:
+        QgsApplication.messageLog().messageReceived.disconnect(heard)
+    from qgis.core import Qgis
+
+    assert lines == [("onnxruntime を C:\\copy から読み込み（プラグインのフォルダーの外の写し）", Qgis.MessageLevel.Info),
+                     ("sgp4 をプラグインのフォルダーの外に写せず、読み込まない（…）", Qgis.MessageLevel.Warning)]
+
+
 def test_paths_are_relative_to_the_settings_file():
     r = ai_runtime.resolve_source
     assert r("./models/a.onnx", "/srv/viewer/config.json") == os.path.normpath("/srv/viewer/models/a.onnx")
