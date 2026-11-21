@@ -1221,3 +1221,16 @@ tsudo「特に撮像計画系の画面において、状態を複数（例えば
 - **ビュー**: 撮像依頼の「ビュー」は `{"checked": [...]}` で保存する。前に保存したビュー（`{"data": ...}`・`{"text": ...}`）もそのまま読める（その 1 つをチェック、「すべての〜」ならチェックなし）。
 
 実装: `ui/check_filter.py`（`CheckFilter`・`kept_values`・`keep_values`）、`ui/request_groups.py`（`GroupFilter` は `CheckFilter` を継ぐ）、`core/request/groups.py`（`matches`・`filter_text` が複数を受ける）、`core/request/view.py`（`CandidateFilter.result`・`group` に複数）、`core/request/place_plans.py`（`lanes_of` の `states`・`row_ok`・`request_ok`）、`ui/list_views.py`（`view_state` を持つ欄）。テスト: `tests/test_qgis_check_filter.py` ほか。
+
+## 37. 依頼文から下書き（2026-11-21 追加）
+
+tsudo「撮像計画系にミニ生成AIの力を使える部分はあるかな」→ 5 案のうち 1「依頼文から依頼フォームの下書き」→「1番良さそうなので、始めて」。方針案（Claude Docs「依頼文から撮像依頼を下書き 設計方針案」）は推奨どおり、決定 4 だけ「４だけ編集でも出し、「12月末まで延長」のような文で名指した項目を直すように。他は提案のまま」。
+
+- **出す場所**: `textAssist.tasks.requestDraft`（3B 級向け、`LARGE_TASKS`）があるときだけ、撮像依頼の登録・編集のフォームのいちばん上の「依頼文」（まとめて登録の画面には出さない）。
+- **分担**: 日付（今日から先の日に寄せる。「来週月曜から2週間」「12月末まで」「上旬」「期限は」）・数字（雲量・分解能・角度・1 日の回数。単位つきで文にあるものだけ）・衛星（衛星カタログの名前と別名）・選択肢の語（区分・頻度・優先度・種別・方向・時間帯）はコードが読み、モデルの答えより先にする。モデルは 12 行の「項目: 値」（名称・地名・期間・頻度・優先度・雲量・分解能・オフナディア角・入射角・時間帯・1日の回数・依頼者）を書き、コードが読めなかった項目は文に手がかりがあるときだけ使う。モデルに衛星・地名の一覧は渡さない。12 行で止める。
+- **範囲**: 文の座標 → 地名テーブル（`namedAreas`）→ 名称にその地名を含む過去の依頼 → 地名・住所検索（`geocoders`）の順の候補から人が選ぶ。座標と地名検索は点（フォームの一辺の長さの正方形）。モデルは形を作らない。
+- **複数の地名**: 新しい依頼で 2 つ以上を選ぶと、地名ごとに 1 件をまとめて登録する画面（`take_layer` と同じ `batch`）で開く。
+- **編集**: 文が名指した項目だけ（`changes`。期間は名指した側だけ、「n 日・週間・か月延長」は今の終わりから。名称・範囲・依頼者は変える語があるときだけ。状態は「中止」→ 停止、「再開」→ 有効）。今と同じ値は出さない。
+- **入れ方**: 項目ごとのチェック（既定で全部）→「欄に入れる」（`applied`、期間・角度は名指した側だけ）。入れた欄は薄い黄色（触ると戻る）。依頼文は「依頼文（日付）: …」としてメモに足す（チェックで外せる）。保存はいつもの「保存」だけ。
+
+実装: `core/text_request.py`（`period_of`・`extension_of`・`often_of`・`priority_of`・`cloud_of`・`satellites_of`・`area_choices`・`request_messages`・`request_draft`・`changes`・`applied`・`batch_names`）、`core/text_assist.py`（`REQUEST_PROMPT`・`requestDraft` の examples）、`qgis_io/place_search.py`（地名・住所検索を「座標・地名へ移動」と共有）、`ui/request_draft.py`（`DraftHost`・`DraftPanel`・`RequestDraftRow`）、`ui/request_form.py`（`take_draft`・`marked`）、`ui/request_dock.py`（`_draft_batch`）。テスト: `tests/test_text_request.py`・`tests/test_qgis_request_draft.py`。

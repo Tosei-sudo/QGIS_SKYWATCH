@@ -21,6 +21,9 @@ takes or leaves:
   (searchWords: the export's conditions from a sentence), まとめ (summary: a
   few sentences on records) and 英訳 (translate: the 備考 in English for the
   通報's `note.en`).
+- 依頼文から下書き (requestDraft; core/text_request.py, tsudo 2026-11-21): a
+  request's mail or chat text made into the request form's fields (new or
+  edited), the dates, numbers, satellites and choice words read by code.
 
 A small model writes well-formed sentences but can get facts wrong, so what
 it writes is checked here: numbers that are not in what it was given are
@@ -104,6 +107,21 @@ TRANSLATE_PROMPT = (
     "Keep numbers, names and symbols as they are, and add nothing. Use the given terms for the words they name. "
     "Write every word in English (no Japanese left). Output only the English translation on one line, without quotes."
 )
+#: The instructions for 依頼文から下書き (core/text_request.py).
+REQUEST_PROMPT = (
+    "あなたは衛星画像の撮像依頼を受け付ける係です。"
+    "依頼の文を読み、撮像依頼の項目を書き出してください。"
+    "名称は、地名と目的が分かる 20 文字ほどの短い件名にしてください。"
+    "地名は、文に書かれた地名（港・基地・空港・施設など）をそのまま写し、複数あれば「、」で区切ってください。"
+    "期間は「日付の目安」の日付を使い、「YYYY-MM-DD 〜 YYYY-MM-DD」の形で書いてください（片方だけなら空けてよい）。"
+    "頻度は「期間中に1回」「毎日」「曜日:月・木」「n日ごと」のどれかです。"
+    "優先度は 最優先・高・中・低・最低 のどれかです。"
+    "雲量・分解能・オフナディア角・入射角は、文の数字と「以下」「以上」などの言葉をそのまま写してください。"
+    "時間帯は 昼・夜 のどちらかです。1日の回数は数字だけです。依頼者は文に書かれた名前や部署を写してください。"
+    "文にない項目は「なし」と書いてください。推測で値を作らないでください。"
+    "値だけを書き、説明・理由・括弧書きは書かないでください。出力は次の 12 行だけにしてください。\n"
+    "名称: \n地名: \n期間: \n頻度: \n優先度: \n雲量: \n分解能: \nオフナディア角: \n入射角: \n時間帯: \n1日の回数: \n依頼者: "
+)
 #: The most a 備考 sent to the model may be (characters; longer ones are not tidied).
 NOTE_LIMIT = 400
 #: The most of the memo sent to the model (characters; the rest is cut, the lists come first).
@@ -112,17 +130,18 @@ HANDOVER_LIMIT = 3000
 TERMS_LIMIT = 30
 
 #: What the model can be asked to do (`textAssist.tasks`), in the order they are listed.
-TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate")
+TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft")
 TASK_LABELS = {"tidyNote": "備考を整える", "handoverDraft": "申し送りの下書き", "noteFields": "項目の提案", "searchWords": "言葉で探す",
-               "summary": "まとめ", "translate": "英訳"}
+               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き"}
 #: The tasks a model of about 3B is meant for: a smaller one is said to be (not refused).
-LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate"})
+LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate", "requestDraft"})
 #: Smaller than this (billions of parameters) is a small model for LARGE_TASKS.
 LARGE_MODEL = 2.0
 #: Each task's own: how long it may write (tokens) and its instructions.
 TASK_DEFAULTS: dict[str, tuple[int, str]] = {
     "tidyNote": (160, NOTE_PROMPT), "handoverDraft": (320, HANDOVER_PROMPT), "noteFields": (160, FIELDS_PROMPT),
     "searchWords": (160, SEARCH_PROMPT), "summary": (480, SUMMARY_PROMPT), "translate": (240, TRANSLATE_PROMPT),
+    "requestDraft": (240, REQUEST_PROMPT),
 }
 #: The name of the one model of the shorter settings (`"textAssist": "…"`, or `{ "model": … }`).
 ONE_MODEL = "model"
@@ -145,7 +164,7 @@ class TextTask:
     model: str
     max_tokens: int
     prompt: str
-    #: Examples shown before what is asked (input, what it should write); 備考を整える only.
+    #: Examples shown before what is asked (input, what it should write); 備考を整える and 依頼文から下書き only.
     examples: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -308,6 +327,9 @@ def _settings_of(value: dict, at: str, problems: list[str]) -> Optional[TextAssi
         if name == "tidyNote":
             known.append("examples")
             examples = _examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
+        elif name == "requestDraft":
+            known.append("examples")
+            examples = _request_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
         _unknown(t, known, where, problems)
         tasks.append(task_of(name, model, tokens, prompt, examples))
     _unknown(value, ("models", "tasks", "keepMinutes", "model"), at, problems)
@@ -325,6 +347,20 @@ def _examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tup
             return None
         kind = e.get("kind") if isinstance(e.get("kind"), str) else ""
         out.append((_note_input(e["note"], kind), e["tidy"].strip()))
+    return tuple(out)
+
+
+def _request_examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tuple[str, str], ...]]:
+    """依頼文から下書き's examples: [{ "text": 依頼の文, "answer": 「名称: …」の 12 行 }]."""
+    if not isinstance(value, list):
+        problems.append(f"{at} は [{{ \"text\": 依頼の文, \"answer\": 答えの行（名称: … 依頼者: …） }}] の配列で指定")
+        return None
+    out = []
+    for i, e in enumerate(value):
+        if not is_record(e) or not isinstance(e.get("text"), str) or not isinstance(e.get("answer"), str):
+            problems.append(f"{at}[{i}] は {{ \"text\", \"answer\" }} で指定")
+            return None
+        out.append((e["text"].strip(), e["answer"].strip()))
     return tuple(out)
 
 

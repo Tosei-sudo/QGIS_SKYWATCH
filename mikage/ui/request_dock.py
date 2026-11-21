@@ -80,6 +80,10 @@ class RequestDock(PluginDock):
         #: The 依頼グループ of the store's table (core/request/groups.py), and whether the table was read.
         self.groups: list = []
         self.groups_read = False
+        #: 依頼文から下書き on the form (ui/request_draft.py): the named areas, the ledger, the batch for several places.
+        from .request_draft import DraftHost
+
+        self.draft_host = DraftHost(context, lambda: self.requests, self._draft_batch)
         self._build()
         context.configChanged.connect(self._config_changed)
         self.visibilityChanged.connect(self._visibility)
@@ -411,8 +415,26 @@ class RequestDock(PluginDock):
             base = request or self.new_request()
         else:
             base = request or self.chosen
-        self.form = RequestForm(self.iface, base, self._save, self.known(), self, self.satellites)
+        self.form = RequestForm(self.iface, base, self._save, self.known(), self, self.satellites, draft_host=self.draft_host)
         self.form.show()
+
+    def _draft_batch(self, template: ImagingRequest, items: list, names: str):
+        """
+        依頼文から下書き with several places: one request per place (its name
+        and area), the rest as the form had it, looked over in the batch form.
+        """
+        from .request_form import RequestForm
+
+        if self.store is None or self.denied("requests.edit"):
+            return None
+        if self.form is not None:
+            self.form.close()
+        batch = {"items": items, "names": names, "title": self.tr("依頼文から {n} 件").format(n=len(items)),
+                 "text": self.tr("依頼文の地名 {n} 件（地名ごとに 1 件。名称と範囲は地名ごと、ほかの項目はここで全件に）").format(n=len(items))}
+        self.form = RequestForm(self.iface, template, lambda t: self._save_batch(t, items), self.known(), self,
+                                satellites=self.satellites, batch=batch)
+        self.form.show()
+        return self.form
 
     def _save(self, request: ImagingRequest) -> None:
         repo = self.repository()

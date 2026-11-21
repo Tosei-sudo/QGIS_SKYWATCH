@@ -34,7 +34,7 @@ git lfs pull -I "models/sarashina-3b-int4/**" -X ""
     "large": { "path": "\\\\fileserver\\gis\\models\\sarashina-3b-int4", "threads": 4 }
   },
   "tasks": { "tidyNote": "large", "handoverDraft": "large", "noteFields": "large",
-             "searchWords": "large", "summary": "large", "translate": "large" }
+             "searchWords": "large", "summary": "large", "translate": "large", "requestDraft": "large" }
 }
 ```
 

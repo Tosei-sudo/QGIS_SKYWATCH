@@ -14,10 +14,7 @@ cursor-position.ts, coordinate-menu.ts):
 """
 from __future__ import annotations
 
-import os
-import re
 from typing import Optional
-from urllib.parse import unquote, urljoin, urlparse
 
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject, QgsRectangle, QgsSettings
 from qgis.gui import QgsVertexMarker
@@ -32,9 +29,8 @@ except ImportError:  # Qt5
 
 from ..core.coords import NOTATIONS, LonLat, format_as, format_lat_lon, format_mgrs, format_utm, parse_coordinate, utm_epsg, utm_zone
 from ..core.geocode import Place, PlaceSearch
-from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
-from ..qgis_io.network import get_bytes
+from ..qgis_io.place_search import place_search_of
 from ..qgis_io.tasks import run_task
 from .docks import plain_tip
 
@@ -152,34 +148,8 @@ class CoordinateBox(QObject):
 
     # --- Settings ---------------------------------------------------------
 
-    def _resolve(self, url: str) -> str:
-        """A geocoder's URL as asked: a relative one against the settings file's place."""
-        source = self.context.source or ""
-        if re.match(r"^https?://", url, re.IGNORECASE):
-            return url
-        if url.startswith("//"):
-            scheme = urlparse(source).scheme if re.match(r"^https?://", source, re.IGNORECASE) else "https"
-            return f"{scheme}:{url}"
-        if re.match(r"^https?://", source, re.IGNORECASE):
-            return urljoin(source, url)
-        base = os.path.dirname(source) if source else settings.PLUGIN_DIR
-        return os.path.normpath(url if os.path.isabs(url) else os.path.join(base, url))
-
-    def _get_bytes(self, url: str) -> bytes:
-        if re.match(r"^https?://", url, re.IGNORECASE):
-            return get_bytes(url, settings.auth_for(url))
-        path = unquote(urlparse(url).path) if url.startswith("file:") else url
-        try:
-            with open(path, "rb") as f:
-                return f.read()
-        except OSError as error:
-            raise OSError(f"{path} の読み込み不可（{error.strerror or error}）") from error
-
-    def _ask_esri(self, url: str, params: dict, token: Optional[str]) -> dict:
-        return self.context.esri().ask(url, params, self.context.token_for(url, token))
-
     def _place_search(self) -> PlaceSearch:
-        return PlaceSearch(self.context.config.geocoders, self._get_bytes, self._ask_esri, self._resolve)
+        return place_search_of(self.context)
 
     def _config_changed(self) -> None:
         self.search = self._place_search()
