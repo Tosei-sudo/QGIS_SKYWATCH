@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Optional, Sequence
 
-from ..util import js_string, new_id, time_of, utc_text
+from ..sql import since_condition  # noqa: F401 (read from here too)
+from ..util import js_string, new_id, time_of
 from .config import CatalogConfig
 from .query import EMPTY_SEARCH, CatalogSearch, FieldTypes, where_of
 
@@ -221,17 +221,6 @@ def newness_of(catalog: CatalogConfig) -> Optional[tuple[str, float]]:
     if f.get("acquired"):
         return f["acquired"], 30 * DAY
     return None
-
-
-def since_condition(name: str, field_type: Optional[str], t: float) -> str:
-    """`name` at or after `t`, written for the field's type."""
-    if field_type == "esriFieldTypeDateOnly":
-        return f"{name} >= DATE '{utc_text(t)[:10]}'"
-    if field_type and re.search(r"Integer|Double|Single", field_type):
-        return f"{name} >= {math.floor(t)}"
-    if field_type == "esriFieldTypeString":
-        return f"{name} >= '{utc_text(t)[:10]}'"
-    return f"{name} >= TIMESTAMP '{utc_text(t)}'"
 
 
 def watch_query(watch: CatalogWatch, since: Optional[float], area: Any = "first") -> dict[str, str]:

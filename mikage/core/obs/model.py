@@ -17,6 +17,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
+from ..listed_image import ListedImage, rings_of  # noqa: F401 (read from here too)
 from ..util import is_number, is_record, layer_url, words
 from .areas import AreaStoreConfig, area_store_of
 from .taxonomy import DEFAULT_SPEC_FIELDS, SpecField, Taxon, TaxonomyTableConfig, from_kinds, spec_fields_of, taxonomy_of, taxonomy_table_of
@@ -357,30 +358,6 @@ def new_object_id() -> str:
     return "OBJ-" + "".join(_ID_LETTERS[(n >> (5 * i)) & 31] for i in range(_ID_LENGTH))
 
 
-#: The viewer's names of the record's values (for JSON shared with the viewer and its scripts).
-@dataclass
-class ListedImage:
-    """An image recorded on without its file: one outside the catalog, or not opened here (id, name, time, footprint typed)."""
-    id: str
-    name: str
-    time: Optional[int] = None
-    #: [west, south, east, north] (WGS 84), when known.
-    box: Optional[list[float]] = None
-    #: The footprint's rings ([[longitude, latitude], …] each, WGS 84) as the catalog gives it, when known: drawn as the
-    #: image's layer on the map (its extent is `box`). None for one typed with ＋ (the box alone).
-    rings: Optional[list[list[list[float]]]] = None
-    #: 衛星名: the catalog's 「センサー」 (「ファイルなしで記録」), else typed for it; '' when not known.
-    satellite: str = ""
-
-    def to_json(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"id": self.id, "name": self.name, "time": self.time, "box": self.box}
-        if self.rings:
-            out["rings"] = self.rings
-        if self.satellite:
-            out["satellite"] = self.satellite
-        return out
-
-
 def recorded_images(records: list[Observation]) -> list[ListedImage]:
     """The images the records name, newest first: for picking one of them again."""
     by_id: dict[str, ListedImage] = {}
@@ -422,25 +399,3 @@ def parse_listed_images(text: Optional[str]) -> list[ListedImage]:
     return out
 
 
-def rings_of(value: Any) -> Optional[list[list[list[float]]]]:
-    """
-    A footprint's rings read back (or from a catalog's Esri polygon): rings
-    of at least three [longitude, latitude] points, each point's first two
-    numbers; None when there is none (or one is not such a ring).
-    """
-    if not isinstance(value, list) or not value:
-        return None
-    rings = []
-    for ring in value:
-        if not isinstance(ring, list):
-            return None
-        points = []
-        for p in ring:
-            if not (isinstance(p, (list, tuple)) and len(p) >= 2 and all(is_number(n) and not isinstance(n, bool) and math.isfinite(n)
-                                                                         for n in p[:2])):
-                return None
-            points.append([float(p[0]), float(p[1])])
-        if len(points) < 3:
-            return None
-        rings.append(points)
-    return rings

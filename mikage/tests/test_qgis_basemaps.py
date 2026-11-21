@@ -25,6 +25,8 @@ from qgis.PyQt.QtGui import QColor  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.basemap_layer import PROPERTY, current_base_map  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 STYLE = {
     "version": 8,
@@ -113,10 +115,9 @@ def plugin(tmp_path, server):
         "defaultBaseMap": "local",
     }), encoding="utf-8")
     settings.set_config_source(str(config))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Maps)
     p.initGui()
     yield p, iface, tmp_path
     p.unload()

@@ -203,7 +203,7 @@ def taken_outlines(client, catalog, token: Optional[str], req: ImagingRequest, r
     """
     from .. import time_zone
     from ..esri import EsriError
-    from ..plan.names import NO_NAMES
+    from ..plan.api import NO_NAMES
     from ..time_query import between_condition, text_sample
     from .follow import fitting_images, image_id_of
     from .store import esri_rings

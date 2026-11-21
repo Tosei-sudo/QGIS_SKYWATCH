@@ -22,10 +22,10 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QSize, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPainter
 
-from ..core.ai.detect import (
+from ..core.ai.api import (
     Detection, band_picture, blocks_of, box_corners, class_name, crop_of, detect_tile, is_empty, nms, offset, tiles_of, wanted,
 )
-from ..core.ai.model_config import DetectorSpec
+from ..core.ai.api import DetectorSpec
 from .ai_runtime import AiError, LoadedModel
 
 #: The most pixels (width × height) one run may cover.

@@ -18,8 +18,10 @@ from qgis.PyQt.QtCore import pyqtSignal
 from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
 
 from ..core import edit_stamp
-from ..core.obs.assignments import (
-    DONE, Assignment, holder_of, holders_of, is_shared, own_row, release, roots_by_person, roots_text, same_person, take, update, with_status,
+from ..core.obs.api import AssignmentRepository
+from ..core.obs.api import (
+    DONE, Assignment, holder_of, holders_of, is_shared, own_row, roots_by_person, assignment_roots_text as roots_text,
+    same_person, with_status,
 )
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
@@ -83,6 +85,10 @@ class AssignmentBar(QWidget):
         s = self.source
         return self.dock.context.token_for(s.url, s.token) if s else None
 
+    def repository(self) -> AssignmentRepository:
+        """The assignments table's reads and writes (データ窓口), its token as it is now."""
+        return AssignmentRepository(self.dock.context.esri(), self.source, self.token())
+
     @staticmethod
     def user() -> str:
         return edit_stamp.user_name()
@@ -107,9 +113,8 @@ class AssignmentBar(QWidget):
             self._again = True
             return
         self._again = False
-        from ..core.obs.assignments import load_assignments
 
-        client, token = self.dock.context.esri(), self.token()
+        repo = self.repository()
 
         def done(items) -> None:
             self._task = None
@@ -136,7 +141,7 @@ class AssignmentBar(QWidget):
 
         # The rows done long ago are left: they only grow (a week back, as the dialog's 「完了も表示」 shows).
         since = time.time() * 1000 - DONE_DAYS * 86_400_000
-        self._task = run_task(self.tr("分担の読み込み"), lambda _t: load_assignments(client, source, token, done_since=since), done, failed)
+        self._task = run_task(self.tr("分担の読み込み"), lambda _t: repo.load_assignments(done_since=since), done, failed)
 
     def show_image(self, image) -> None:
         """
@@ -160,10 +165,9 @@ class AssignmentBar(QWidget):
         if self._task is not None:
             self._image_after = image_id
             return
-        from ..core.obs.assignments import load_assignments
         from ..core.esri import quote
 
-        client, token = self.dock.context.esri(), self.token()
+        repo = self.repository()
         since = time.time() * 1000 - DONE_DAYS * 86_400_000
         where = f"{source.fields['imageId']} = {quote(image_id)}"
 
@@ -184,7 +188,7 @@ class AssignmentBar(QWidget):
             self.render()
 
         self._image_task = run_task(self.tr("分担の読み込み"),
-                                    lambda _t: load_assignments(client, source, token, where, done_since=since), done, failed)
+                                    lambda _t: repo.load_assignments(where, done_since=since), done, failed)
 
     def needs_claim(self, image) -> bool:
         """
@@ -220,12 +224,12 @@ class AssignmentBar(QWidget):
         if not user:
             failed(self.tr("ユーザー名なし（環境変数 USERNAME か editTracking.user）: 分担を取得できない"))
             return
-        client, token = self.dock.context.esri(), self.token()
+        repo = self.repository()
         now = int(time.time() * 1000)
         self.claiming = image
 
         def work(_task):
-            return take(client, source, image.id, user, now, image.name, image.time, token=token)
+            return repo.take(image.id, user, now, image.name, image.time)
 
         def taken(x: Assignment) -> None:
             self.claiming = None
@@ -350,11 +354,11 @@ class AssignmentBar(QWidget):
         if not user:
             self.dock.status.setText(self.tr("ユーザー名なし（環境変数 USERNAME か editTracking.user）: 分担は取得不可"))
             return
-        client, token = self.dock.context.esri(), self.token()
+        repo = self.repository()
         now = int(time.time() * 1000)
 
         def work(_task):
-            return take(client, source, image.id, user, now, image.name, image.time, token=token)
+            return repo.take(image.id, user, now, image.name, image.time)
 
         self._run(self.tr("分担の取得"), work, self.tr("{name} を担当に").format(name=image.name or image.id))
 
@@ -363,9 +367,9 @@ class AssignmentBar(QWidget):
         source = self.source
         if source is None or x is None:
             return
-        client, token = self.dock.context.esri(), self.token()
+        repo = self.repository()
         new = with_status(x, status, int(time.time() * 1000))
-        self._run(self.tr("分担の更新"), lambda _t: update(client, source, new, x, token),
+        self._run(self.tr("分担の更新"), lambda _t: repo.update(new, x),
                   self.tr("{name}: {s}").format(name=x.label, s=status))
 
     def give_back(self, x: Optional[Assignment] = None, confirm: bool = True) -> None:
@@ -376,5 +380,5 @@ class AssignmentBar(QWidget):
         if confirm and QMessageBox.question(self, self.tr("分担を手放す"), plain_tip(self.tr("{name} の担当をやめます（記録は残る）。").format(name=x.label))) \
                 != QMessageBox.StandardButton.Yes:
             return
-        client, token = self.dock.context.esri(), self.token()
-        self._run(self.tr("分担の解除"), lambda _t: release(client, source, x, token), self.tr("{name} の担当を解除").format(name=x.label))
+        repo = self.repository()
+        self._run(self.tr("分担の解除"), lambda _t: repo.release(x), self.tr("{name} の担当を解除").format(name=x.label))

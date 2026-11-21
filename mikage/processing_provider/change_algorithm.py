@@ -21,7 +21,7 @@ from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QColor, QIcon
 
 from ..core.change import CHANGE_METHODS, DIRECTIONS, describe_thresholds
-from ..core.enhance.color_scale import COLOR_SCALES
+from ..core.enhance.api import COLOR_SCALES
 from ..qgis_io.change_io import MAX_POLYGONS, RESAMPLING, ChangeError, change_files
 from .pansharpen_algorithm import file_of
 

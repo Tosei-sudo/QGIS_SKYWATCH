@@ -34,7 +34,12 @@ from mikage.core.obs.geo import bearing, get_distance  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
+from mikage.features.ai import Ai  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
 from mikage.tests.test_qgis_observations import FIELDS, TYPES, URL, plugin  # noqa: E402,F401 (the fixture)
+
+#: The features the plugin fixture starts with here (tests/feature_harness.py): the AI results recorded.
+PLUGIN_FEATURES = (Ai, Observations)
 
 LEFT = Qt.MouseButton.LeftButton
 

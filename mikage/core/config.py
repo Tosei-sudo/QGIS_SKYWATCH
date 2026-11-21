@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
@@ -54,16 +54,6 @@ from .shape_receiver import DEFAULT_RECEIVER, ReceiverSettings, receiver_setting
 from .text_assist import TextAssistSettings, text_assist_settings_of
 from .analysis_cache import DEFAULT_MINUTES as ANALYSIS_CACHE_MINUTES
 from .util import is_number
-
-#: The keys this plugin reads.
-KEYS = (
-    "satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "satelliteOutages", "groundStations", "cloudForecast",
-    "imageCatalogs", "watchInterval", "pathMappings", "overviews", "rasterSpeed", "complexImages", "observationStores", "localObservations", "observationVocabulary", "glossary", "textAssist", "arcgisPortals", "layers",
-    "baseMaps", "defaultBaseMap", "geocoders", "layerTemplates", "imageRules", "movingFeeds", "gpServices",
-    "aiModels", "detectionOutputs", "aiResultSources", "timeZones", "requestStores", "requestExports", "editTracking", "auditLog",
-    "alertReports", "observationExports", "assignments", "handover", "events", "interests", "userRoles", "preload", "offlineWork", "columnDrag",
-    "shapeReceiver", "analysisCacheMinutes",
-)
 
 
 @dataclass
@@ -267,120 +257,131 @@ def load_jsonc(text: str) -> Any:
         raise JsoncError(f"JSON として読み込み不可（{error.lineno} 行 {error.colno} 列: {error.msg}）") from error
 
 
+def _flag(key: str, default: bool) -> Callable[[Any, list[str]], bool]:
+    """A true / false key (its default when it is neither)."""
+    def read(value: Any, problems: list[str]) -> bool:
+        if isinstance(value, bool):
+            return value
+        problems.append(f"{key} は true か false で指定")
+        return default
+    return read
+
+
+def _analysis_cache_minutes(minutes: Any, problems: list[str]) -> float:
+    if is_number(minutes) and 0 <= minutes <= 24 * 60:
+        return minutes
+    problems.append("analysisCacheMinutes はデータ分析の読み込みを覚えておく分数（0〜1440、0 で覚えない）で指定")
+    return ANALYSIS_CACHE_MINUTES
+
+
+def _listed(key: str, value: Any, read, problems: list[str]) -> list:
+    """The items of a list key, each read on its own (those that cannot be left out, and why)."""
+    if not isinstance(value, list):
+        problems.append(f"{key} は配列で指定")
+        return []
+    return [c for c in (read(v, problems, i) for i, v in enumerate(value)) if c is not None]
+
+
+def _arcgis_portals(value: Any, problems: list[str]) -> list[ArcgisPortalConfig]:
+    seen: set[str] = set()
+    portals = []
+    for p in _listed("arcgisPortals", value, arcgis_portal_of, problems):
+        if p.url in seen:
+            problems.append(f"arcgisPortals の url「{p.url}」が重複")
+            continue
+        seen.add(p.url)
+        portals.append(p)
+    return portals
+
+
+@dataclass(frozen=True)
+class Section:
+    """
+    A key of the settings file (設定セクション, docs/architecture.md): the PluginConfig attribute it
+    fills and how its value is read (`read(value, problems)`; a `listed` key's items one by one,
+    `read(item, problems, index)`, those it cannot read left out; `whole`: from the whole file;
+    `after`: also given the settings read before it).
+    """
+    key: str
+    attr: str
+    read: Callable
+    listed: bool = False
+    whole: bool = False
+    after: bool = False
+
+
+#: The keys this plugin reads, in the order they are read (the order of the problems told).
+#: A new key: its PluginConfig attribute above and its line here (the config builder's page too).
+SECTIONS = (
+    Section("imageCatalogs", "image_catalogs", catalog_of, listed=True),
+    Section("layers", "startup_layers", startup_layers_of),
+    Section("watchInterval", "watch_interval", watch_interval_of),
+    Section("pathMappings", "path_mappings", path_mappings_of),
+    Section("overviews", "overviews", overviews_of),
+    Section("rasterSpeed", "raster_speed", raster_speed_of),
+    Section("complexImages", "complex_images", complex_images_of),
+    Section("satelliteCatalogs", "satellite_catalogs", satellite_catalog_of, listed=True),
+    Section("sensorCatalogs", "sensor_catalogs", sensor_catalog_of, listed=True),
+    Section("satelliteAliases", "satellite_aliases", alias_tables_of),
+    Section("satelliteOutages", "satellite_outages", satellite_outages_of),
+    Section("cloudForecast", "cloud_forecast", cloud_forecast_of),
+    Section("groundStations", "ground_stations", ground_stations_of),
+    Section("observationStores", "observation_stores", observation_store_of, listed=True),
+    Section("localObservations", "local_observations", _flag("localObservations", True)),
+    Section("offlineWork", "offline_work", offline_settings_of),
+    Section("columnDrag", "column_drag", _flag("columnDrag", True)),
+    Section("analysisCacheMinutes", "analysis_cache_minutes", _analysis_cache_minutes),
+    Section("preload", "preload", preload_of),
+    Section("shapeReceiver", "shape_receiver", receiver_settings_of),
+    Section("observationVocabulary", "observation_vocabulary", vocabulary_of),
+    Section("glossary", "glossary", glossary_source_of),
+    Section("textAssist", "text_assist", text_assist_settings_of),
+    Section("arcgisPortals", "arcgis_portals", _arcgis_portals),
+    Section("baseMaps", "base_maps", base_maps_of),
+    Section("defaultBaseMap", "default_base_map", lambda v, problems, config: default_base_map_of(v, config.base_maps, problems),
+            after=True),
+    Section("geocoders", "geocoders", geocoder_of, listed=True),
+    Section("layerTemplates", "layer_templates", templates_of),
+    Section("imageRules", "image_rules", image_rules_of),
+    Section("movingFeeds", "moving_feeds", moving_feeds_of),
+    Section("gpServices", "gp_services", gp_service_of, listed=True),
+    Section("aiModels", "ai_models", ai_model_of, listed=True),
+    Section("detectionOutputs", "detection_outputs", detection_output_of, listed=True),
+    Section("aiResultSources", "ai_result_sources", ai_result_source_of, listed=True),
+    Section("timeZones", "time_zones", time_zones_of, whole=True),
+    Section("requestStores", "request_stores", request_store_of, listed=True),
+    Section("requestExports", "request_exports", export_systems_of),
+    Section("editTracking", "edit_tracking", edit_tracking_of),
+    Section("auditLog", "audit_log", audit_log_of),
+    Section("alertReports", "alert_reports", alert_settings_of),
+    Section("observationExports", "observation_exports", export_settings_of),
+    Section("assignments", "assignments", assignment_source_of),
+    Section("handover", "handover", handover_settings_of),
+    Section("events", "events", events_settings_of),
+    Section("interests", "interests", interests_settings_of),
+    Section("userRoles", "user_roles", user_roles_settings_of),
+)
+#: The keys this plugin reads.
+KEYS = tuple(s.key for s in SECTIONS)
+
+
 def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
     """The settings of a parsed file, and what was wrong in it."""
     problems: list[str] = []
     config = PluginConfig()
     if not isinstance(value, dict):
         return config, ["設定はオブジェクトで指定"]
-
-    def listed(key: str, read) -> list:
-        if key not in value:
-            return []
-        if not isinstance(value[key], list):
-            problems.append(f"{key} は配列で指定")
-            return []
-        return [c for c in (read(v, problems, i) for i, v in enumerate(value[key])) if c is not None]
-
-    config.image_catalogs = listed("imageCatalogs", catalog_of)
-    if "layers" in value:
-        config.startup_layers = startup_layers_of(value["layers"], problems)
-    if "watchInterval" in value:
-        config.watch_interval = watch_interval_of(value["watchInterval"], problems)
-    if "pathMappings" in value:
-        config.path_mappings = path_mappings_of(value["pathMappings"], problems)
-    if "overviews" in value:
-        config.overviews = overviews_of(value["overviews"], problems)
-    if "rasterSpeed" in value:
-        config.raster_speed = raster_speed_of(value["rasterSpeed"], problems)
-    if "complexImages" in value:
-        config.complex_images = complex_images_of(value["complexImages"], problems)
-    config.satellite_catalogs = listed("satelliteCatalogs", satellite_catalog_of)
-    config.sensor_catalogs = listed("sensorCatalogs", sensor_catalog_of)
-    if "satelliteAliases" in value:
-        config.satellite_aliases = alias_tables_of(value["satelliteAliases"], problems)
-    if "satelliteOutages" in value:
-        config.satellite_outages = satellite_outages_of(value["satelliteOutages"], problems)
-    if "cloudForecast" in value:
-        config.cloud_forecast = cloud_forecast_of(value["cloudForecast"], problems)
-    if "groundStations" in value:
-        config.ground_stations = ground_stations_of(value["groundStations"], problems)
-    config.observation_stores = listed("observationStores", observation_store_of)
-    if "localObservations" in value:
-        if isinstance(value["localObservations"], bool):
-            config.local_observations = value["localObservations"]
+    for s in SECTIONS:
+        if s.whole:
+            setattr(config, s.attr, s.read(value, problems))
+        elif s.key not in value:
+            continue
+        elif s.listed:
+            setattr(config, s.attr, _listed(s.key, value[s.key], s.read, problems))
+        elif s.after:
+            setattr(config, s.attr, s.read(value[s.key], problems, config))
         else:
-            problems.append("localObservations は true か false で指定")
-    if "offlineWork" in value:
-        config.offline_work = offline_settings_of(value["offlineWork"], problems)
-    if "columnDrag" in value:
-        if isinstance(value["columnDrag"], bool):
-            config.column_drag = value["columnDrag"]
-        else:
-            problems.append("columnDrag は true か false で指定")
-    if "analysisCacheMinutes" in value:
-        minutes = value["analysisCacheMinutes"]
-        if is_number(minutes) and 0 <= minutes <= 24 * 60:
-            config.analysis_cache_minutes = minutes
-        else:
-            problems.append("analysisCacheMinutes はデータ分析の読み込みを覚えておく分数（0〜1440、0 で覚えない）で指定")
-    if "preload" in value:
-        config.preload = preload_of(value["preload"], problems)
-    if "shapeReceiver" in value:
-        config.shape_receiver = receiver_settings_of(value["shapeReceiver"], problems)
-    if "observationVocabulary" in value:
-        config.observation_vocabulary = vocabulary_of(value["observationVocabulary"], problems)
-    if "glossary" in value:
-        config.glossary = glossary_source_of(value["glossary"], problems)
-    if "textAssist" in value:
-        config.text_assist = text_assist_settings_of(value["textAssist"], problems)
-    if "arcgisPortals" in value:
-        seen: set[str] = set()
-        portals = []
-        for p in listed("arcgisPortals", arcgis_portal_of):
-            if p.url in seen:
-                problems.append(f"arcgisPortals の url「{p.url}」が重複")
-                continue
-            seen.add(p.url)
-            portals.append(p)
-        config.arcgis_portals = portals
-    if "baseMaps" in value:
-        config.base_maps = base_maps_of(value["baseMaps"], problems)
-    if "defaultBaseMap" in value:
-        config.default_base_map = default_base_map_of(value["defaultBaseMap"], config.base_maps, problems)
-    config.geocoders = listed("geocoders", geocoder_of)
-    if "layerTemplates" in value:
-        config.layer_templates = templates_of(value["layerTemplates"], problems)
-    if "imageRules" in value:
-        config.image_rules = image_rules_of(value["imageRules"], problems)
-    if "movingFeeds" in value:
-        config.moving_feeds = moving_feeds_of(value["movingFeeds"], problems)
-    config.gp_services = listed("gpServices", gp_service_of)
-    config.ai_models = listed("aiModels", ai_model_of)
-    config.detection_outputs = listed("detectionOutputs", detection_output_of)
-    config.ai_result_sources = listed("aiResultSources", ai_result_source_of)
-    config.time_zones = time_zones_of(value, problems)
-    config.request_stores = listed("requestStores", request_store_of)
-    if "requestExports" in value:
-        config.request_exports = export_systems_of(value["requestExports"], problems)
-    if "editTracking" in value:
-        config.edit_tracking = edit_tracking_of(value["editTracking"], problems)
-    if "auditLog" in value:
-        config.audit_log = audit_log_of(value["auditLog"], problems)
-    if "alertReports" in value:
-        config.alert_reports = alert_settings_of(value["alertReports"], problems)
-    if "observationExports" in value:
-        config.observation_exports = export_settings_of(value["observationExports"], problems)
-    if "assignments" in value:
-        config.assignments = assignment_source_of(value["assignments"], problems)
-    if "handover" in value:
-        config.handover = handover_settings_of(value["handover"], problems)
-    if "events" in value:
-        config.events = events_settings_of(value["events"], problems)
-    if "interests" in value:
-        config.interests = interests_settings_of(value["interests"], problems)
-    if "userRoles" in value:
-        config.user_roles = user_roles_settings_of(value["userRoles"], problems)
+            setattr(config, s.attr, s.read(value[s.key], problems))
     if config.alert_reports is not None:
         # confidence.<key>: a key some 確度 level has (the vocabulary's or a store's own).
         levels = [*config.observation_vocabulary.confidences, *(c for st in config.observation_stores for c in st.confidences or [])]

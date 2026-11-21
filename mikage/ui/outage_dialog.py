@@ -24,8 +24,8 @@ from qgis.PyQt.QtWidgets import (
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QTableView, QVBoxLayout, QWidget,
 )
 
-from ..core.plan.names import plain
-from ..core.plan.outages import (
+from ..core.plan.api import plain
+from ..core.plan.api import (
     DIRECTIONS, ONGOING, OVERDUE, PLANNED, RECOVERED, Outage, check_outage, delete_outages, load_outages, new_id, save_outage,
     when_text,
 )

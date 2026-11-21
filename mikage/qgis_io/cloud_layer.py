@@ -25,8 +25,8 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QDateTime, QTimeZone
 from qgis.PyQt.QtGui import QColor
 
-from ..core.plan.weather import CloudForecasts, key_of
-from ..core.plan.weather_file import read_grid
+from ..core.plan.api import CloudForecasts, key_of
+from ..core.plan.api import read_grid
 from ..core.util import iso_text
 
 #: The layer's custom property marking it as the plugin's cloud map.

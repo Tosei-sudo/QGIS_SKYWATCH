@@ -1,4 +1,4 @@
-"""README 「Esri 側のテーブル定義」 against the code: every default attribute name, the naming rule, and the links."""
+"""「Esri 側のテーブル定義」 (docs/admin/esri-tables.md, split out of the README 2026-11-20) against the code: every default attribute name, the naming rule, and the links."""
 from __future__ import annotations
 
 import os
@@ -16,7 +16,7 @@ from mikage.core.plan.outages import DEFAULT_OUTAGE_FIELDS
 from mikage.core.request.groups import DEFAULT_GROUP_FIELDS
 from mikage.core.request.store import DEFAULT_HISTORY_FIELDS, DEFAULT_QUOTA_FIELDS, DEFAULT_REQUEST_FIELDS, DEFAULT_SHOT_FIELDS
 
-README = os.path.join(os.path.dirname(__file__), "..", "..", "README.md")
+README = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "admin", "esri-tables.md")
 
 #: Each table's section and the code's default names by role.
 DEFAULTS = {
@@ -49,7 +49,8 @@ def _section() -> str:
     with open(README, encoding="utf-8") as f:
         text = f.read()
     start = text.index("\n## Esri 側のテーブル定義\n")
-    return text[start:text.index("\n## ", start + 1)]
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
 
 
 def _tables(section: str) -> dict[str, list[list[str]]]:

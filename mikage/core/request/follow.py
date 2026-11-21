@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable, Optional, Sequence
 
-from ..catalog import CatalogConfig
+from ..catalog.api import CatalogConfig
 from ..esri import EsriClient, EsriError
-from ..plan.names import NO_NAMES, SatelliteNames, best_named, names_satellite
+from ..plan.api import NO_NAMES, SatelliteNames, best_named, names_satellite
 from .. import time_zone
 from ..time_query import between_condition, text_sample
 from ..time_zone import read_text_instant

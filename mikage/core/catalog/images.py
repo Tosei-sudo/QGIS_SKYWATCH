@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional, Sequence
 
-from ..plan.output import natural_key
+from ..plan.api import natural_key
 from ..util import is_record
 
 #: The images of a folder when the catalog gives no pattern for the record's sensor.

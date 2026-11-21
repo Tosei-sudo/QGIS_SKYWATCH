@@ -71,15 +71,16 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import Any, Callable, Optional, Sequence
 
-from ..plan.orbit import R
-from ..time_zone import TimeZone, clock_of
+from ..file_values import cell_text, coerce as _coerce, printf  # noqa: F401 (now of the shared base: read from here too)
+from ..json_schema import resolve, validate
+from ..plan.api import R
+from ..time_zone import format_time  # noqa: F401 (now of the shared base: read from here too)
 from .daily import TAKEN, Candidate
 from .link_id import link_id, link_ids
 from .model import bbox_of, center_of, day_bounds, polygons_of, rotated_box
-from .schema import resolve, validate
 from .systems import Column, ExportSystem, PriorityRule
 
 #: The sources a column or property can take.
@@ -100,33 +101,6 @@ TIME_SOURCES = ("start", "end", "periodStart", "periodEnd", "runDate", "passTime
 LIST_SOURCES = ("series", "satellites", "modes", "seriesSatellites", "seriesSatelliteIds", "mergedIds", "mergedNames")
 GEOMETRIES = ("wkt", "geojson", "bbox", "center", "centerRadius", "vertices", "centerGeojson")
 _MISSING = object()
-#: Text that is a plain number (a printf number format is applied to it as to a number).
-_NUMBER_TEXT = re.compile(r"^\s*[+-]?(\d+(\.\d*)?|\.\d+)\s*$")
-#: The printf conversions that take a number (whole ones rounded half up first).
-_NUMBER_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxXeEfF]")
-_WHOLE_FORMAT = re.compile(r"%[-+ 0#]*\d*(\.\d+)?[diouxX]")
-
-
-def format_time(ms: float, fmt: str, zone: TimeZone) -> Any:
-    """A moment written by a format: iso, iso-date, unix, unixms or strftime, in `zone`."""
-    if ms is None or not math.isfinite(ms):
-        return None
-    if fmt == "unix":
-        return int(ms // 1000)
-    if fmt == "unixms":
-        return int(ms)
-    offset = zone.offset(ms)
-    clock = datetime.fromtimestamp(clock_of(ms, zone) / 1000, tz=timezone.utc).replace(tzinfo=timezone(timedelta(milliseconds=offset)))
-    if fmt == "iso-date":
-        return clock.strftime("%Y-%m-%d")
-    if fmt in ("iso", ""):
-        text = clock.strftime("%Y-%m-%dT%H:%M:%S")
-        if offset == 0:
-            return text + "Z"
-        sign = "+" if offset > 0 else "-"
-        m = int(abs(offset) // 60000)
-        return f"{text}{sign}{m // 60:02d}:{m % 60:02d}"
-    return clock.strftime(fmt)
 
 
 def _round(v: float, digits: int) -> float:
@@ -193,26 +167,6 @@ def convert_priority(p: int, rule: PriorityRule) -> Any:
     if rule.format and (isinstance(value, (int, float)) and not isinstance(value, bool) or isinstance(value, str) and value):
         value = printf(rule.format, value)
     return value
-
-
-def printf(fmt: str, value: Any) -> Any:
-    """
-    One printf conversion (`%03d`, `%.1f`, `%+d`, `%5.1f`, `%x`, `%e`, `%s`) with
-    text around it (`P%02d`, `%d%%`) applied to a value: whole conversions
-    (d i o u x X) round half up first (12.5 → 13). Text that is a number is
-    taken as the number by a number conversion. The value as it is when the
-    format does not fit (not a number, none or two conversions).
-    """
-    try:
-        if isinstance(value, str) and _NUMBER_FORMAT.search(fmt):
-            if not _NUMBER_TEXT.match(value):
-                return value
-            value = float(value)
-        if _WHOLE_FORMAT.search(fmt):
-            return fmt % int(math.floor(float(value) + 0.5))
-        return fmt % value
-    except (TypeError, ValueError, OverflowError):
-        return value
 
 
 def _empty(value: Any) -> bool:
@@ -392,17 +346,6 @@ def cell_value(c: Candidate, col: Column, ctx: Context) -> Any:
     return v
 
 
-def cell_text(v: Any) -> Any:
-    """A value as a CSV cell: a list joined by commas, an object as JSON, none as empty."""
-    if v is None:
-        return ""
-    if isinstance(v, list):
-        return ",".join(str(cell_text(x)) for x in v)
-    if isinstance(v, dict):
-        return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
-    return v
-
-
 @dataclass
 class Written:
     """One system's file (one of its files, when split by `maxPerFile`): its text, and what was found wrong."""
@@ -441,30 +384,6 @@ def csv_text(cands: Sequence[Candidate], ctx: Context) -> tuple[str, list[str]]:
             row.append(v)
         writer.writerow(row)
     return out.getvalue(), sorted(set(warnings), key=warnings.index)
-
-
-def _coerce(value: Any, schema: dict, root: Optional[dict] = None) -> Any:
-    """A value turned to the schema's type where that is plain (text ↔ number; a list → an array, or text joined by commas)."""
-    t = schema.get("type")
-    types = t if isinstance(t, list) else [t] if t else []
-    if isinstance(value, list):
-        if "array" not in types:
-            return cell_text(value)
-        items = resolve(schema.get("items"), root or schema)
-        return [_coerce(v, items, root) for v in value] if isinstance(items, dict) else value
-    if value is None or not types:
-        return value
-    if "string" in types and isinstance(value, (int, float)) and not isinstance(value, bool) and not any(x in types for x in ("integer", "number")):
-        return str(value)
-    if isinstance(value, str) and ("integer" in types or "number" in types) and "string" not in types:
-        try:
-            n = float(value)
-        except ValueError:
-            return value
-        return int(n) if "integer" in types and n.is_integer() else n
-    if "integer" in types and isinstance(value, float) and value.is_integer() and "number" not in types:
-        return int(value)
-    return value
 
 
 def build(schema: Any, root: dict, c: Optional[Candidate], cands: Sequence[Candidate], ctx: Context) -> Any:

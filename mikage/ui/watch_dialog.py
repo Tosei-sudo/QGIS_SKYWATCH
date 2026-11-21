@@ -18,9 +18,9 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QRadioButton, QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.query import CatalogSearch
-from ..core.catalog.watch import CatalogWatch, areas_of, conditions_text
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import CatalogSearch
+from ..core.catalog.api import CatalogWatch, areas_of, conditions_text
 from ..qgis_io.catalog_io import layer_watch_areas
 from ..qgis_io.geometry import to_wgs84
 from .docks import plain_label

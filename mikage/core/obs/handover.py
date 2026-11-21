@@ -20,10 +20,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from ..esri import EsriClient, EsriError, fit_value
-from ..request.export import format_time
+from ..time_zone import format_time
 from ..request.model import ImagingRequest
 from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import encodable, is_number, is_record, js_string, ms_of, utc_text
+from .. import sql
+from ..util import encodable, is_number, is_record, js_string, ms_of
 from .alerts import ENCODINGS, NEWLINES, EsriSource, FileOutput, LogRow, esri_source_of
 from .assignments import Assignment, Progress, assignees, progress_of, progress_text, same_person
 from .model import Observation
@@ -271,7 +272,7 @@ def last_memo(client: EsriClient, table: EsriSource, token: Optional[str] = None
     f = table.fields
     clauses = [table.where] if table.where else []
     if f["writtenAt"] in types and since is not None:
-        clauses.append(f"{f['writtenAt']} >= TIMESTAMP '{utc_text(since)}'")
+        clauses.append(f"{f['writtenAt']} >= {sql.timestamp(since)}")
     rows = client.query_all(table.url, " AND ".join(f"({c})" for c in clauses) or "1=1", token, geometry=False, limit=10_000, cut=True)
     memos = []
     for r in rows:

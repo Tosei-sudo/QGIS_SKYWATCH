@@ -16,8 +16,8 @@ import math
 from datetime import datetime
 from typing import Optional, Sequence
 
-from ..plan.access import Opportunity, PlanTarget
-from ..plan.satellites import SatelliteSpec
+from ..plan.api import Opportunity, PlanTarget
+from ..plan.api import SatelliteSpec
 from .model import JST, ImagingRequest, day_bounds, jst_day, square_rings
 
 #: How many shots the note lists.

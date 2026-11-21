@@ -8,12 +8,10 @@ since the epoch.
 """
 from __future__ import annotations
 
-import math
 import re
-from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
-MIN_YEAR, MAX_YEAR = 1800, 2200
+from ..time_text import MAX_YEAR, MIN_YEAR, local_ms, number, parse_time  # noqa: F401 (parse_time: read from here too)
 
 #: Where an image's time came from, as the viewer names it.
 ORIGINS = {
@@ -24,72 +22,6 @@ ORIGINS = {
     "tiff": "TIFF の DateTime",
     "manual": "手入力",
 }
-
-
-def _local(y: int, mo: int = 1, d: int = 1, h: int = 0, mi: int = 0, s: int = 0, ms: int = 0) -> Optional[int]:
-    if y < MIN_YEAR or y > MAX_YEAR or not 1 <= mo <= 12 or not 1 <= d <= 31 or h > 24 or mi > 59 or s > 60:
-        return None
-    try:
-        base = datetime(y, mo, d)
-    except ValueError:
-        # 2024-02-31 is not a day.
-        return None
-    t = base + timedelta(hours=h, minutes=mi, seconds=s, milliseconds=ms)
-    return int(round(t.timestamp() * 1000))
-
-
-def _zoned(y: int, mo: int, d: int, h: int, mi: int, s: int, ms: int, zone: str) -> Optional[int]:
-    if _local(y, mo, d) is None:
-        return None
-    utc = datetime(y, mo, d, tzinfo=timezone.utc) + timedelta(hours=h, minutes=mi, seconds=s, milliseconds=ms)
-    t = int(round(utc.timestamp() * 1000))
-    if zone in ("Z", "z"):
-        return t
-    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})?", zone)
-    if not m:
-        return None
-    minutes = (int(m.group(2)) * 60 + int(m.group(3) or 0)) * (-1 if m.group(1) == "-" else 1)
-    return t - minutes * 60_000
-
-
-def _n(s: Optional[str]) -> int:
-    return 0 if s is None else int(s)
-
-
-def _fraction(s: Optional[str]) -> int:
-    return int(math.floor(float(f"0.{s}") * 1000 + 0.5)) if s else 0
-
-
-_ISO = re.compile(r"^(\d{4})([-/.:])(\d{1,2})\2(\d{1,2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?)?\s*(Z|z|[+-]\d{2}:?\d{2}|[+-]\d{2})?$")
-_MONTH = re.compile(r"^(\d{4})[-/](\d{1,2})$")
-_COMPACT = re.compile(r"^(\d{4})(\d{2})(\d{2})(?:[T_ ]?(\d{2})(\d{2})(\d{2})?(?:\.(\d+))?)?(Z)?$")
-_JAPANESE = re.compile(r"^(\d{4})年(\d{1,2})月(?:(\d{1,2})日)?\s*(?:(\d{1,2})[時:](?:(\d{1,2})分?)?(?:(\d{1,2})秒?)?)?$")
-
-
-def parse_time(value) -> Optional[int]:
-    """The time of a text (ISO 8601 and the like, compact, Japanese), or None (as the viewer's parseTime for text)."""
-    if value is None or not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text or re.fullmatch(r"\d{4}", text):
-        return None
-    m = _ISO.match(text)
-    if m:
-        y, _, mo, d, h, mi, s, f, zone = m.groups()
-        args = (_n(y), _n(mo), _n(d), _n(h), _n(mi), _n(s), _fraction(f))
-        return _zoned(*args, zone) if zone else _local(*args)
-    m = _MONTH.match(text)
-    if m:
-        return _local(_n(m.group(1)), _n(m.group(2)))
-    m = _COMPACT.match(text)
-    if m:
-        y, mo, d, h, mi, s, f, zone = m.groups()
-        args = (_n(y), _n(mo), _n(d), _n(h), _n(mi), _n(s), _fraction(f))
-        return _zoned(*args, zone) if zone else _local(*args)
-    m = _JAPANESE.match(text)
-    if m:
-        return _local(_n(m.group(1)), _n(m.group(2)), _n(m.group(3)) if m.group(3) else 1, _n(m.group(4)), _n(m.group(5)), _n(m.group(6)))
-    return None
 
 
 _NAME_PATTERNS = [
@@ -106,7 +38,7 @@ def time_from_name(name: str) -> Optional[int]:
         m = pattern.search(base)
         if not m:
             continue
-        t = _local(*(_n(g) for g in m.groups()))
+        t = local_ms(*(number(g) for g in m.groups()))
         if t is not None:
             return t
     return None

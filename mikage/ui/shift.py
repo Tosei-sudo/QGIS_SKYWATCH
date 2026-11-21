@@ -81,6 +81,10 @@ class ShiftTool(QgsMapTool):
         self._start = None
         self.setCursor(Qt.CursorShape.SizeAllCursor)
 
+    def forget_start(self) -> None:
+        """No drag going on any more (the shift was put back)."""
+        self._start = None
+
     def canvasPressEvent(self, event) -> None:  # noqa: N802 (QGIS's name)
         if event.button() != Qt.MouseButton.LeftButton or not self.shift.targets():
             return
@@ -201,7 +205,7 @@ class LayerShift(QObject):
             self.show_shift()
 
     def _start_reset(self) -> None:
-        self.tool._start = None
+        self.tool.forget_start()
 
     # The drag's copy of the image.
 

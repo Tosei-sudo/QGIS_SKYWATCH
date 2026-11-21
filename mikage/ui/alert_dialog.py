@@ -26,15 +26,15 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core import audit, edit_stamp
 from ..core.esri import EsriError
-from ..core.obs.alerts import (
-    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences, load_log,
-    load_rules, manual_items, name_places, object_keys, remove_log, report_text, reported_ids, score_note, select, uses_source, write_file,
-    write_log,
+from ..core.obs.api import (
+    OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences,
+    load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note, alert_select as select,
+    uses_source, alert_write_file as write_file,
 )
-from ..core.obs.flows import living
-from ..core.obs.place_cache import areas_at, points_of
-from ..core.obs.scope import RecordQuery
-from ..core.request.export import format_time
+from ..core.obs.api import living
+from ..core.obs.api import areas_at, points_of
+from ..core.obs.api import AlertLogRepository, RecordQuery
+from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .fit import fit_text
@@ -212,6 +212,10 @@ class AlertDialog(QDialog):
 
     def _token(self, source) -> Optional[str]:
         return self.dock.context.token_for(source.url, source.token) if source else None
+
+    def log_repository(self) -> AlertLogRepository:
+        """The alert log's reads and writes (データ窓口), its token as it is now."""
+        return AlertLogRepository(self.dock.context.esri(), self.settings, self._token(self.settings.table))
 
     def reset(self) -> None:
         """The formats of the settings file (again), the default chosen."""
@@ -570,7 +574,7 @@ class AlertDialog(QDialog):
         if not s.table:
             outputs(0)
             return
-        client, token = self.dock.context.esri(), self._token(s.table)
+        repo = self.log_repository()
 
         def failed(message: str) -> None:
             self.send_button.setEnabled(True)
@@ -578,7 +582,7 @@ class AlertDialog(QDialog):
             self.dock.refresh_reported()  # some rows may have gone in
 
         self.send_button.setEnabled(False)
-        run_task(self.tr("通報の記録"), lambda _t: write_log(client, s, fmt, items, lines, at, token), outputs, failed)
+        run_task(self.tr("通報の記録"), lambda _t: repo.write_log(fmt, items, lines, at), outputs, failed)
 
     # ---- the log ------------------------------------------------------------
 
@@ -586,7 +590,7 @@ class AlertDialog(QDialog):
         s = self.settings
         if s is None or s.table is None:
             return
-        client, token = self.dock.context.esri(), self._token(s.table)
+        repo = self.log_repository()
         start, end = _ms(self.log_start), _ms(self.log_end)
 
         def finished(rows) -> None:
@@ -600,7 +604,7 @@ class AlertDialog(QDialog):
             self._say(self.tr("通報記録の読み込みの失敗: {m}").format(m=message))
 
         self.log_button.setEnabled(False)
-        run_task(self.tr("通報記録の読み込み"), lambda _t: load_log(client, s, start, end, token), finished, failed)
+        run_task(self.tr("通報記録の読み込み"), lambda _t: repo.load_log(start, end), finished, failed)
 
     def _shown_log(self) -> list[LogRow]:
         name = self.log_format.currentData() or ""
@@ -637,7 +641,7 @@ class AlertDialog(QDialog):
                 self, self.tr("通報記録の削除"),
                 self.tr("選択した {n} 行を通報テーブルから削除します（その記録は再び抽出されます）。").format(n=len(rows))) != QMessageBox.StandardButton.Yes:
             return
-        client, token = self.dock.context.esri(), self._token(s.table)
+        repo = self.log_repository()
 
         def finished(n: int) -> None:
             gone = {id(r) for r in rows}
@@ -646,5 +650,5 @@ class AlertDialog(QDialog):
             self.dock.refresh_reported()  # another format's row may keep a record reported
             self._say(self.tr("通報記録 {n} 行を削除").format(n=n))
 
-        run_task(self.tr("通報記録の削除"), lambda _t: remove_log(client, s, rows, token), finished,
+        run_task(self.tr("通報記録の削除"), lambda _t: repo.remove_log(rows), finished,
                  lambda m: self._say(self.tr("通報記録の削除の失敗: {m}").format(m=m)))

@@ -9,7 +9,7 @@ from typing import Optional
 
 from qgis.core import QgsCoordinateTransform, QgsGeometry, QgsProject, QgsWkbTypes
 
-from ..core.ai.review import REJECT_POINT_M, reject_margin
+from ..core.ai.api import REJECT_POINT_M, reject_margin
 from ..core.ai_results import AiResult
 from .ai_results_io import WGS84, _local_crs, geometry_of
 

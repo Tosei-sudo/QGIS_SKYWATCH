@@ -22,6 +22,8 @@ from qgis.PyQt.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io import shift_io  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
+from mikage.features.enhance import Enhance  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.shift import format_shift  # noqa: E402
 
 
@@ -57,13 +59,11 @@ def test_set_shift_points_the_layer_at_a_moved_vrt_and_back(tmp_path):
 
 @pytest.fixture
 def plugin(tmp_path, monkeypatch):
-    from mikage import classFactory
-
     monkeypatch.setattr(shift_io, "shifts_folder", lambda: str(tmp_path))
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Enhance)
     p.initGui()
     for dock in p.docks.values():
         dock.hide()
@@ -227,7 +227,6 @@ def group_plugin(tmp_path, monkeypatch):
     from qgis.core import QgsLayerTreeModel, QgsVectorLayer
     from qgis.gui import QgsLayerTreeView
 
-    from mikage import classFactory
 
     monkeypatch.setattr(shift_io, "shifts_folder", lambda: str(tmp_path))
     QgsSettings().remove("mikage")
@@ -239,7 +238,7 @@ def group_plugin(tmp_path, monkeypatch):
     view.setModel(model)
     iface.layerTreeView = lambda: view
     iface._tree = (model, view)
-    p = classFactory(iface)
+    p = small_plugin(iface, Enhance)
     p.initGui()
     for dock in p.docks.values():
         dock.hide()

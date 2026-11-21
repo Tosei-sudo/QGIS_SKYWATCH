@@ -22,7 +22,7 @@ from qgis.PyQt.QtCore import QCoreApplication, QDateTime, QVariant
 from qgis.PyQt.QtGui import QColor, QIcon
 
 from ..core.moving import match_detections, utc_text
-from ..core.obs.image_time import parse_time
+from ..core.obs.api import parse_time
 from ..qgis_io.moving_layer import OPEN
 
 HERE = os.path.dirname(os.path.dirname(__file__))

@@ -15,6 +15,8 @@ from qgis.core import QgsPointXY, QgsProject, QgsRasterLayer, QgsRectangle, QgsS
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
+from mikage.features.enhance import Enhance  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 
 def tiff(path, nodata=None):
@@ -41,12 +43,10 @@ def tiff(path, nodata=None):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Enhance)
     p.initGui()
     layer = tiff(tmp_path / "four.tif", nodata=999)
     QgsProject.instance().addMapLayer(layer)

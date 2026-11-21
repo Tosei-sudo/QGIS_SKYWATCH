@@ -18,7 +18,13 @@ from mikage.core.obs.alerts import forget_named_areas  # noqa: E402
 from mikage.qgis_io import expression_functions, settings  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.layers import Layers  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
 from mikage.tests.test_qgis_alerts import plugin  # noqa: E402,F401
+
+#: The features the plugin fixture starts with here (tests/feature_harness.py): the expression functions (features/layers.py) over the records.
+PLUGIN_FEATURES = (Images, Layers, Observations)
 
 PLACES = "https://x/arcgis/rest/services/Alerts/FeatureServer/3"
 

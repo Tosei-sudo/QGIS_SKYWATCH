@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Optional, Sequence
 
 from .esri import EsriClient, EsriError, fit_value, quote
-from .obs.alerts import EsriSource, esri_source_of
+from .sources import EsriSource, esri_source_of
 
 #: What a role may do (a feature needs one of them).
 REQUEST, PLAN, OBSERVE, TRAIN, ADMIN = "request", "plan", "observe", "train", "admin"

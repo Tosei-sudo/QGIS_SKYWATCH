@@ -12,7 +12,7 @@ from typing import Optional
 
 from . import time_zone
 from .esri import EsriClient, EsriError
-from .util import utc_text
+from . import sql
 
 _SUFFIX = re.compile(r"([+-]\d{2}:?\d{2})$")
 
@@ -75,5 +75,5 @@ def between_condition(name: str, field_type: Optional[str], start: float, end: f
         lo = text_at(math.floor(start / 1000) * 1000, like, zone)
         hi = text_at(math.floor(end / 1000) * 1000 + 1000, like, zone)
         return f"{name} >= '{lo}' AND {name} < '{hi}'"
-    return f"{name} >= TIMESTAMP '{utc_text(start)}' AND {name} <= TIMESTAMP '{utc_text(end)}'"
+    return f"{name} >= {sql.timestamp(start)} AND {name} <= {sql.timestamp(end)}"
 

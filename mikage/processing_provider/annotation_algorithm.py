@@ -30,12 +30,12 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.ai.annotation_boxes import (
+from ..core.ai.api import (
     UNKNOWN_MODES, WIDTH_MODES, Box, ConvertError, Rules, convert, dota_row, is_point_box, parse_lengths,
 )
-from ..core.ai.model_config import SamModelConfig
-from ..core.ai.train.dataset import Dataset, DatasetError, Group, Item, Reader, load_dataset, missing_files, save_dataset
-from ..core.ai.train.labels import METRES_PER_DEGREE
+from ..core.ai.api import SamModelConfig
+from ..core.ai.api import Dataset, DatasetError, Group, Item, Reader, load_dataset, missing_files, save_dataset
+from ..core.ai.api import METRES_PER_DEGREE
 from ..qgis_io.ai_io import Grid
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.annotation_io import WGS84, Outliner, SamOutliner, ThresholdOutliner, load_sam, metres_per_pixel
@@ -113,7 +113,7 @@ class Converter:
         self.counts: dict[str, int] = {}
 
     def needs_outline(self, cls, length, width, heading) -> bool:
-        from ..core.ai.annotation_boxes import _positive, length_for
+        from ..core.ai.api import positive_or_none as _positive, length_for
 
         known_length = _positive(length) or length_for(cls, self.rules.lengths) or (self.rules.length if self.rules.length > 0 else None)
         if heading is None or not known_length:
@@ -124,7 +124,7 @@ class Converter:
         """A point (pixels of the grid, or metres round it without an image) as a box; None (counted) when left out."""
         shape = None
         if self.outliner is not None and self.needs_outline(cls, length, width, heading):
-            from ..core.ai.annotation_boxes import _positive, length_for
+            from ..core.ai.api import positive_or_none as _positive, length_for
 
             known = _positive(length) or length_for(cls, self.rules.lengths) or (self.rules.length if self.rules.length > 0 else None)
             mpp = self.mpp if self.mpp > 0 else 1.0

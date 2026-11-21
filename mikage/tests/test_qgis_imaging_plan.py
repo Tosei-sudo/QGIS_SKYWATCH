@@ -21,6 +21,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.plan import Plan  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_plan import EPOCH, LINE1, LINE2  # noqa: E402
 
 CATALOG = "https://example.com/arcgis/rest/services/Sats/FeatureServer/0"
@@ -29,7 +31,7 @@ SAR1 = "1 90002U 26902A   26280.50000000  .00000100  00000-0  40000-4 0  9992"
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     config = tmp_path / "config.json"
     config.write_text('{"satelliteCatalogs": [{"label": "テスト衛星", "url": "%s", '
@@ -41,10 +43,9 @@ def plugin(tmp_path, monkeypatch):
     layer.add({"NAME": "OPT-1", "TLE": f"{LINE1}\n{LINE2}", "KIND": "光学", "MAX": 30, "SWATH": 40, "SCENES": 4})
     layer.add({"NAME": "SAR-1", "TLE": f"{SAR1}\n{SAR2}", "KIND": "SAR", "MAX": 45, "LOOK": "R", "GAP": 10, "SWATH": 50, "SCENES": 3})
     layer.add({"NAME": "NO-TLE"})
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Plan, request=request)
     # The docks open at start read their catalogs right away.
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()

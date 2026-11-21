@@ -15,7 +15,7 @@ from typing import Iterable, Optional, Sequence
 from qgis.PyQt.QtCore import QCoreApplication
 
 from ..core import edit_stamp
-from ..core.request.groups import MINE, NO_GROUP, RequestGroup, listed, matches, mine, same
+from ..core.request.api import MINE, NO_GROUP, RequestGroup, listed, matches, mine, same
 from .check_filter import CheckFilter
 
 #: The item of the request form and the bulk edit that takes a request out of its group.

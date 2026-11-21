@@ -19,7 +19,7 @@ from qgis.PyQt.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QPainter, QPainterPath, QPen
 from qgis.PyQt.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from ..core.enhance.ops import curve_function, is_identity_curve, normalize_curve
+from ..core.enhance.api import curve_function, is_identity_curve, normalize_curve
 
 CHANNELS = [("points", "RGB（全体）"), ("red", "赤"), ("green", "緑"), ("blue", "青")]
 COLORS = {"points": QColor(40, 40, 40), "red": QColor("#e5484d"), "green": QColor("#30a46c"), "blue": QColor("#3e7bfa")}
@@ -85,6 +85,10 @@ class CurvePlot(QWidget):
             if d < best:
                 best, pick = d, i
         return pick
+
+    def forget_drag(self) -> None:
+        """No point dragged any more (the curves were replaced)."""
+        self._drag = None
 
     # ---- mouse ----
 
@@ -244,7 +248,7 @@ class CurveEditor(QWidget):
     def set_step(self, step: Optional[dict]) -> None:
         """Shows a `curve` step (None: straight lines)."""
         self.plot.curves = {key: [list(map(float, pt)) for pt in normalize_curve((step or {}).get(key))] for key, _ in CHANNELS}
-        self.plot._drag = None
+        self.plot.forget_drag()
         self.plot.update()
 
     def step(self) -> Optional[dict]:

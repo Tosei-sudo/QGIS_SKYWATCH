@@ -21,7 +21,7 @@ from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
-from ..core.obs.drafts import KIND as DRAFT
+from ..core.obs.api import KIND as DRAFT
 from ..core.offline import CHECK, KINDS, Pending
 from .docks import ask_no, plain_label, plain_tip
 from .fit import fit_text

@@ -14,7 +14,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
-from ..core.request.model import PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN, level_of
+from ..core.request.api import PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN, level_of
 from .fit import fit_text
 
 

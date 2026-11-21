@@ -32,12 +32,12 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from ..core.request.chances import FORM_DAYS, form_span, form_text
-from ..core.request.passes import find_passes
-from ..core.request.pick import Picked, checks_of, picked, summary, unknown
-from ..core.request.model import (
-    ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY, ImagingRequest, bbox_of,
-    day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
+from ..core.request.api import FORM_DAYS, form_span, form_text
+from ..core.request.api import find_passes
+from ..core.request.api import Picked, checks_of, picked, summary, unknown
+from ..core.request.api import (
+    ACHIEVES, CATEGORIES, REQUEST_KINDS as KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY,
+    ImagingRequest, bbox_of, day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
 )
 from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -712,7 +712,7 @@ class RequestForm(QDialog):
         first, _ = day_bounds(date(d0.year(), d0.month(), d0.day()))
         _, last = day_bounds(date(d1.year(), d1.month(), d1.day()))
         kind = self.repeat_kind.currentText()
-        from ..core.request.model import Repeat
+        from ..core.request.api import Repeat
 
         rep = Repeat(kind, frozenset(i for i, b in enumerate(self.weekdays) if b.isChecked()), self.every.value() if kind == "間隔" else 1)
         out = ImagingRequest(**{**r.__dict__})

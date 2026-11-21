@@ -25,15 +25,13 @@ from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QFrame, QLabel, QPushButton, QScrollArea
 
 from ..core.esri import EsriError
-from ..core.request.model import bbox_of, jst_day
-from ..core.request.groups import read_groups
-from ..core.request.place_plans import (
-    DAY_CHOICES, DAYS, KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name, next_of, sort_by_next,
-    span_of, taken_text, tally_text,
+from ..core.request.api import bbox_of, jst_day, ScheduleRepository
+from ..core.request.api import (
+    DAY_CHOICES, DAYS, PLACE_KINDS as KINDS, MOST_PLACES, NOT_HELD_BACK, REQUEST, SHOWN, Lane, Mark, Place, lanes_of, mark_name,
+    next_of, sort_by_next, span_of, taken_text, tally_text,
 )
-from ..core.request.store import (
-    AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, load_days, load_requests, load_shots_where,
-    shot_days_where,
+from ..core.request.api import (
+    AWAITING, DECLINED, HELD_BACK, PLANNED, UNREQUESTED, RequestStoreConfig, shot_days_where,
 )
 from ..qgis_io.geometry import from_wgs84, rings_geometry, to_wgs84
 from ..qgis_io.tasks import run_task
@@ -236,7 +234,7 @@ class PlaceScheduleDock(PluginDock):
         self.days_choice = QComboBox()
         for n in DAY_CHOICES:
             self.days_choice.addItem(self.tr("今日から {n} 日").format(n=n), n)
-        saved = settings._get("placeSchedule/days", str(DAYS))
+        saved = settings.pref("placeSchedule/days", str(DAYS))
         index = self.days_choice.findData(int(saved) if saved.isdigit() else DAYS)
         self.days_choice.setCurrentIndex(index if index >= 0 else self.days_choice.findData(DAYS))
         self.days_choice.currentIndexChanged.connect(self._days_chosen)
@@ -251,7 +249,7 @@ class PlaceScheduleDock(PluginDock):
         self.state_filter = CheckFilter(
             self.tr("すべての状態"), [(self.tr(names[k]), k, self.tr(tips.get(k, "")), COLORS[k]) for k in KINDS],
             presets=[(self.tr("見送り以外"), NOT_HELD_BACK), (self.tr("不採用・見送りを除く"), SHOWN)], key="placeSchedule/states",
-            default=[] if settings._get("placeSchedule/notTaken") == "1" else list(NOT_HELD_BACK),
+            default=[] if settings.pref("placeSchedule/notTaken") == "1" else list(NOT_HELD_BACK),
             tip=self.tr("この状態の計画（と依頼の日）だけを出す（チェックしたもののどれか）。次回も同じ選択"))
         self.state_filter.changed.connect(self.refit)
         options.addWidget(self.state_filter)
@@ -260,8 +258,8 @@ class PlaceScheduleDock(PluginDock):
         options.addWidget(self.group_filter)
         self.by_next = QCheckBox(self.tr("次が早い順"))
         self.by_next.setToolTip(self.tr("次の計画が早い地点を上に（計画がなく依頼だけの地点、予定なしの地点はその下）"))
-        self.by_next.setChecked(settings._get("placeSchedule/byNext") == "1")
-        self.by_next.toggled.connect(lambda on: (settings._set("placeSchedule/byNext", "1" if on else "0"), self.refit()))
+        self.by_next.setChecked(settings.pref("placeSchedule/byNext") == "1")
+        self.by_next.toggled.connect(lambda on: (settings.set_pref("placeSchedule/byNext", "1" if on else "0"), self.refit()))
         options.addWidget(self.by_next)
         self.reload_button = QPushButton(self.tr("再読み込み"))
         self.reload_button.setToolTip(self.tr("出力履歴・撮像の範囲・依頼台帳を読み直す"))
@@ -333,7 +331,7 @@ class PlaceScheduleDock(PluginDock):
         return int(self.days_choice.currentData() or DAYS)
 
     def _days_chosen(self, _index: int) -> None:
-        settings._set("placeSchedule/days", str(self.days()))
+        settings.set_pref("placeSchedule/days", str(self.days()))
         if self._loaded and self.days() <= self.read_days and self.first == jst_day(_now_ms()):
             self.refit()
         else:
@@ -345,12 +343,12 @@ class PlaceScheduleDock(PluginDock):
         map keeps most of the window. After that QGIS keeps the size it is
         given, as for any dock.
         """
-        if settings._get("placeSchedule/sized") == "1" or self.isFloating():
+        if settings.pref("placeSchedule/sized") == "1" or self.isFloating():
             return
         window = self.iface.mainWindow()
         if window.dockWidgetArea(self) == Qt.DockWidgetArea.BottomDockWidgetArea:
             window.resizeDocks([self], [HEIGHT], Qt.Orientation.Vertical)
-            settings._set("placeSchedule/sized", "1")
+            settings.set_pref("placeSchedule/sized", "1")
 
     def _visibility(self, visible: bool) -> None:
         if visible:
@@ -370,6 +368,10 @@ class PlaceScheduleDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     # --- Reading --------------------------------------------------------------------------------
 
     def reload(self, then=None) -> None:
@@ -379,24 +381,24 @@ class PlaceScheduleDock(PluginDock):
         if self.task is not None:
             self._again = True
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
         first = jst_day(_now_ms())
         n = self.days()
         last = (first + timedelta(days=n - 1)).isoformat()
         self.status.setText(self.tr("{a}〜{b} の計画と依頼を読み込み中…").format(a=first.isoformat(), b=last))
 
         def work(task):
-            rows = load_days(client, store, token, first.isoformat(), last, task.isCanceled)
+            rows = repo.load_days(first.isoformat(), last, task.isCanceled)
             shots, problem = [], ""
-            if store.shots:
+            if repo.store.shots:
                 try:
-                    shots = load_shots_where(client, store, token, shot_days_where(store, first.isoformat(), last), geometry=True,
-                                             cancelled=task.isCanceled)
+                    shots = repo.load_shots_where(shot_days_where(repo.store, first.isoformat(), last), geometry=True,
+                                                  cancelled=task.isCanceled)
                 except EsriError as error:
                     # The requests' rows matter most: shown without the shots.
                     problem = str(error)
-            requests = load_requests(client, store, token, task.isCanceled)
-            groups = read_groups(client, store.groups, store.group_fields, token, task.isCanceled)
+            requests = repo.load_requests(task.isCanceled)
+            groups = repo.read_groups(task.isCanceled)
             return rows, shots, requests, problem, groups
 
         def done(result):

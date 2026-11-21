@@ -45,12 +45,12 @@ from qgis.PyQt.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QWidget,
 )
 
-from ..core.obs.flows import ends_of, outline_of
-from ..core.obs.geo import bearing, km_text
-from ..core.ai.review import is_rejection
-from ..core.obs.similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
-from ..core.obs.stamps import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
-from ..core.obs.taxonomy import path_of
+from ..core.obs.api import ends_of, outline_of
+from ..core.obs.api import bearing, km_text
+from ..core.ai.api import is_rejection
+from ..core.obs.api import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
+from ..core.obs.api import MOST, Layout, Sample, StampEntry, default_count, entry_of, sample_of, sample_text
+from ..core.obs.api import path_of
 from ..qgis_io.obs_images import image_layers, layer_at
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
@@ -214,9 +214,9 @@ class ManyPanel(QGroupBox):
         self.row_box.setVisible(mode == "row")
         self.render()
         if mode == "stamp":
-            self.dock._say(tr(HINT_STAMP))
+            self.dock.say(tr(HINT_STAMP))
         elif mode == "row":
-            self.dock._say(tr(HINT_ROW[0]))
+            self.dock.say(tr(HINT_ROW[0]))
 
     @property
     def stamping(self) -> bool:
@@ -271,7 +271,7 @@ class ManyPanel(QGroupBox):
         record = (pending[2] or pending[3]) if pending else None
         if record is not None:
             self.use_record(record)
-            self.dock._say(tr("見本: {s}").format(s=self.sample_label.text()))
+            self.dock.say(tr("見本: {s}").format(s=self.sample_label.text()))
 
     def follow_book(self) -> None:
         """
@@ -358,7 +358,7 @@ class ManyPanel(QGroupBox):
             if mark is not None and mark.key and mark.role in ("obs", "ghost"):
                 return False
             # A single click on nothing: the person meant a double click or a drag.
-            self.dock._say(tr(HINT_STAMP))
+            self.dock.say(tr(HINT_STAMP))
             return True
         return False
 
@@ -375,7 +375,7 @@ class ManyPanel(QGroupBox):
                              lambda saved: self._made(image, [saved.id]) if saved is not None else None, watch=True)
             return
         if mark is not None and mark.role == "obs" and mark.key:
-            self.dock._say(tr("記録の上（重ねては記録しない。少し離してダブルクリック）"))
+            self.dock.say(tr("記録の上（重ねては記録しない。少し離してダブルクリック）"))
             return
         self.put([(lon, lat, None)])
 
@@ -403,7 +403,7 @@ class ManyPanel(QGroupBox):
             self.layout_.corners = self.layout_.corners[:-1]
             self.layout_.skipped = frozenset()
             self.render()
-            self.dock._say(self._row_hint())
+            self.dock.say(self._row_hint())
             self.dock.draw()
             return True
         self.dock.set_many_mode("")
@@ -435,7 +435,7 @@ class ManyPanel(QGroupBox):
             self._set_count(self.rows_input, default_count(L.corners[0], L.corners[2], sample, L.heading(sample)))
         self._sync()
         self.render()
-        self.dock._say(self._row_hint())
+        self.dock.say(self._row_hint())
         self.dock.draw()
 
     @staticmethod
@@ -458,7 +458,7 @@ class ManyPanel(QGroupBox):
         self.layout_.skipped = frozenset()
         self.render()
         if self.mode == "row":
-            self.dock._say(self._row_hint())
+            self.dock.say(self._row_hint())
         self.dock.draw()
 
     def _layout_changed(self) -> None:
@@ -475,19 +475,19 @@ class ManyPanel(QGroupBox):
         self._sync()
         self.render()
         if not quiet:
-            self.dock._say(tr(HINT_ROW[0]))
+            self.dock.say(tr(HINT_ROW[0]))
             self.dock.draw()
 
     def submit_row(self) -> None:
         L = self.layout_
         if not L.ready:
-            self.dock._say(self._row_hint())
+            self.dock.say(self._row_hint())
             return
         sample = self._sample()
         heading = L.heading(sample)
         places = L.kept()
         if not places:
-            self.dock._say(tr("すべて外しています"))
+            self.dock.say(tr("すべて外しています"))
             return
         self.restart_row(quiet=True)
         self.put([(lon, lat, heading) for lon, lat in places])
@@ -578,7 +578,7 @@ class ManyPanel(QGroupBox):
                 group = mine[-1][2]
                 self.waiting = [w for w in self.waiting if not (w[0] == image and w[2] == group)]
                 self.render()
-                self.dock._say(tr("見本で記録するところを取り消し"))
+                self.dock.say(tr("見本で記録するところを取り消し"))
                 self.dock.draw()
                 return True
         # Those deleted meanwhile (from the list, by someone else) are passed over: the last still there is taken back.
@@ -587,7 +587,7 @@ class ManyPanel(QGroupBox):
             last = next((m for m in reversed(self.made) if m[0] == image), None)
             if last is None:
                 self.render()
-                self.dock._say(tr("取り消せる記録なし（連続・並べるで記録したもので、まだあるものだけ）"))
+                self.dock.say(tr("取り消せる記録なし（連続・並べるで記録したもので、まだあるものだけ）"))
                 return False
             self.made.remove(last)
             rows = [alive[i] for i in last[1] if i in alive]
@@ -656,11 +656,11 @@ class ManyPanel(QGroupBox):
         book = self._book()
         image = book.current if book else None
         if not image_layers(image):
-            self.dock._say(tr("この画像のファイル（レイヤー）が開いていません"))
+            self.dock.say(tr("この画像のファイル（レイヤー）が開いていません"))
             return
         sample = self._search_sample()
         if sample is None:
-            self.dock._say(tr("見本なし: この画像で 1 つを 2〜4 点（長さ・向き）で記録してから"))
+            self.dock.say(tr("見本なし: この画像で 1 つを 2〜4 点（長さ・向き）で記録してから"))
             return
         self.sample = sample
         # A record's images in its folder: searched in the one the 見本 is on.
@@ -675,7 +675,7 @@ class ManyPanel(QGroupBox):
         try:
             pictures = prepare(layer, canvas.extent(), canvas.mapSettings().destinationCrs(), sample, records, alike=alike, wrong=wrong)
         except SimilarError as error:
-            self.dock._say(str(error))
+            self.dock.say(str(error))
             return
         angles = ANGLES_NEAR if self.angles_select.currentData() == "near" else ANGLES_ALL
         threshold = float(self.threshold_input.value())
@@ -697,10 +697,10 @@ class ManyPanel(QGroupBox):
             self.searching = False
             self.render()
             if found is None:
-                self.dock._say(tr("似たものを探すのを中止"))
+                self.dock.say(tr("似たものを探すのを中止"))
                 return
             if not found:
-                self.dock._say(tr("見本に似たものは見つかりませんでした（しきい値を下げる・向きを「すべて」に・地図を見本の周りへ）"))
+                self.dock.say(tr("見本に似たものは見つかりませんでした（しきい値を下げる・向きを「すべて」に・地図を見本の周りへ）"))
                 return
             places = found_places(found, pictures)
             out = found_layer(places, sample, image_id, image_name, image_time)
@@ -710,18 +710,18 @@ class ManyPanel(QGroupBox):
             if old:
                 project.removeMapLayers(old)
             project.addMapLayer(out)
-            self.dock._say(tr("見本に似たもの {n} 件（{learnt}。「AI結果」で確認して取り込み、上位を確かめたらもう一度探すと学び直し）").format(
+            self.dock.say(tr("見本に似たもの {n} 件（{learnt}。「AI結果」で確認して取り込み、上位を確かめたらもう一度探すと学び直し）").format(
                 n=len(places), learnt=_learnt(len(pictures.alike), len(pictures.wrong))))
 
         def failed(message: str) -> None:
             self.searching = False
             self.render()
-            self.dock._say(tr("似たものを探せませんでした: {m}").format(m=message))
+            self.dock.say(tr("似たものを探せませんでした: {m}").format(m=message))
 
         self.searching = True
         self.render()
         kind = (path_of(sample.kind) or [""])[-1]
-        self.dock._say(tr("{kind}に似たものを探しています…").format(kind=kind))
+        self.dock.say(tr("{kind}に似たものを探しています…").format(kind=kind))
         run_task(tr("似たものを探す"), work, done, failed)
 
 

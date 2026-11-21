@@ -39,9 +39,9 @@ from qgis.core import (
     QgsRasterLayer,
 )
 
-from ..core.obs.book import ObservedImage, joined_image
-from ..core.obs.image_time import image_time, parse_time
-from ..core.obs.satellites import NO_CHOICES, SatelliteChoices, clean as clean_satellite, satellite_in_metadata
+from ..core.obs.api import ObservedImage, joined_image
+from ..core.obs.api import image_time, parse_time
+from ..core.obs.api import NO_CHOICES, SatelliteChoices, clean as clean_satellite, satellite_in_metadata
 from .complex_sar import source_of
 from .geometry import to_wgs84
 from .plan_layer import qdatetime

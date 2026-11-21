@@ -16,9 +16,9 @@ from typing import Optional, Sequence
 import numpy as np
 from qgis.core import QgsGeometry, QgsPointXY, QgsRasterLayer, QgsVectorLayer
 
-from ..core.ai.train.dataset import Dataset, DatasetError, Group, Item, PixelBox, Reader, count_classes, load_dataset, missing_files
-from ..core.ai.train.labels import class_of
-from ..core.obs.taxonomy import Taxon
+from ..core.ai.api import Dataset, DatasetError, Group, Item, PixelBox, Reader, count_classes, load_dataset, missing_files
+from ..core.ai.api import class_of
+from ..core.obs.api import Taxon
 from .ai_io import Grid, grid_of
 from .train_io import Gathered, labels_from_features
 

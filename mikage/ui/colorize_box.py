@@ -40,7 +40,7 @@ from qgis.PyQt.QtWidgets import (
     QSizePolicy, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core.enhance.color_classes import (
+from ..core.enhance.api import (
     auto_label, class_shares, color_classes, format_class_value, recolor, resize_classes, set_bound,
 )
 from ..qgis_io import enhance_renderer as er
@@ -117,7 +117,7 @@ class GradientBar(QWidget):
             items = sorted(classes["classes"], key=lambda c: c["value"])
             step = w / len(items)
             for i, c in enumerate(items):
-                p.fillRect(QRectF(i * step, 0, step, h), QColor(*er._rgba_of(c["color"])))
+                p.fillRect(QRectF(i * step, 0, step, h), QColor(*er.rgba_of(c["color"])))
         else:
             palette = er.palette_of(color)
             for v in range(256):
@@ -541,7 +541,7 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
             button = QgsColorButton()
             button.setFixedWidth(44)
             button.setShowMenu(False)
-            button.setColor(QColor(*er._rgba_of(c["color"])))
+            button.setColor(QColor(*er.rgba_of(c["color"])))
             button.setToolTip(self.tr("クラス {n} の色").format(n=k + 1))
             button.colorChanged.connect(lambda q, i=i: self._set_class(i, color=[q.red(), q.green(), q.blue(), q.alpha()]))
             self.legend.setCellWidget(k, 0, button)

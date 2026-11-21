@@ -6,7 +6,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QDateTime, QMetaType, QTimeZone, QVariant
 
-from ..core.plan.output import PlanLayer
+from ..core.plan.api import PlanLayer
 from .geometry import multipolygon_of
 
 _META = {"date": "QDateTime", "string": "QString", "double": "Double", "integer": "Int"}

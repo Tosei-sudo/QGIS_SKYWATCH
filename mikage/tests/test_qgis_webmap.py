@@ -32,6 +32,8 @@ from mikage.qgis_io.webmap_io import (  # noqa: E402
 )
 from mikage.qgis_io.webmap_style import esri_labeling, esri_renderer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.maps import Maps  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 ID = "0123456789abcdef0123456789abcdef"
 NEW_ID = "fedcba9876543210fedcba9876543210"
@@ -352,10 +354,8 @@ def test_items_read_from_and_saved_to_a_portal(server, clean):
 
 @pytest.fixture
 def plugin(clean):
-    from mikage import classFactory
-
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Maps)
     p.initGui()
     yield p, iface
     p.unload()

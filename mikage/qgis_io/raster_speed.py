@@ -73,16 +73,16 @@ def gdal_version() -> int:
 
 
 def personal_off() -> bool:
-    return settings._get(OFF_KEY) == "1"
+    return settings.pref(OFF_KEY) == "1"
 
 
 def set_personal_off(off: bool) -> None:
-    settings._set(OFF_KEY, "1" if off else "0")
+    settings.set_pref(OFF_KEY, "1" if off else "0")
 
 
 def last_options() -> RasterSpeedOptions:
     """The settings file's `rasterSpeed` as last read (the defaults before any)."""
-    text = settings._get(OPTIONS_KEY)
+    text = settings.pref(OPTIONS_KEY)
     if not text:
         return DEFAULT_RASTER_SPEED
     try:
@@ -92,7 +92,7 @@ def last_options() -> RasterSpeedOptions:
 
 
 def remember_options(options: RasterSpeedOptions) -> None:
-    settings._set(OPTIONS_KEY, json.dumps(options.to_json()))
+    settings.set_pref(OPTIONS_KEY, json.dumps(options.to_json()))
 
 
 def in_use(options: Optional[RasterSpeedOptions] = None) -> RasterSpeedOptions:
@@ -184,7 +184,7 @@ def qgis_values() -> dict:
 def qgis_changed() -> list[Change]:
     """QGIS's options this plugin changed (and not put back)."""
     try:
-        raw = json.loads(settings._get(CHANGED_KEY) or "[]")
+        raw = json.loads(settings.pref(CHANGED_KEY) or "[]")
     except ValueError:
         return []
     return [c for c in (Change.from_json(v) for v in raw if isinstance(raw, list)) if c is not None]
@@ -221,15 +221,15 @@ def apply_qgis(canvases: Iterable = ()) -> list[Change]:
         _live(change.key, change.after, canvases)
     kept = {c.key: c for c in qgis_changed()}
     kept.update({c.key: c for c in changes})
-    settings._set(CHANGED_KEY, json.dumps([c.to_json() for c in kept.values()]))
-    settings._set(DONE_KEY, "1")
+    settings.set_pref(CHANGED_KEY, json.dumps([c.to_json() for c in kept.values()]))
+    settings.set_pref(DONE_KEY, "1")
     return changes
 
 
 def apply_qgis_once(options: Optional[RasterSpeedOptions] = None, canvases: Iterable = ()) -> list[Change]:
     """apply_qgis the first time in this profile (when `qgisSettings` and not turned off); [] after."""
     options = in_use(options)
-    if not options.enabled or not options.qgis_settings or settings._get(DONE_KEY) == "1":
+    if not options.enabled or not options.qgis_settings or settings.pref(DONE_KEY) == "1":
         return []
     try:
         return apply_qgis(canvases)
@@ -251,7 +251,7 @@ def revert_qgis(canvases: Iterable = ()) -> list[Change]:
             s.setValue(change.key, change.before)
         _live(change.key, change.before, canvases)
         back.append(change)
-    settings._set(CHANGED_KEY, "[]")
+    settings.set_pref(CHANGED_KEY, "[]")
     return back
 
 

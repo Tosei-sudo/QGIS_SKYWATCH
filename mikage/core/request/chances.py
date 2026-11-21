@@ -33,8 +33,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional, Sequence
 
-from ..plan.satellites import SatelliteSpec, platform_key
-from ..plan.weather import CloudSeries
+from ..plan.api import SatelliteSpec, platform_key
+from ..plan.api import CloudSeries
 from .model import ImagingRequest, day_bounds, jst_day, occurs_on
 from .passes import Passes
 from .weather import cloud_step, cloud_when

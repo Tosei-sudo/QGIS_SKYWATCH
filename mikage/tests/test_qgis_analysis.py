@@ -17,6 +17,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.analysis import Analysis  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
 AI = "https://example.com/arcgis/rest/services/AI/FeatureServer/0"
@@ -46,10 +48,9 @@ def plugin(tmp_path, monkeypatch):
     for image, cls, score, model in [("IMG0", "ship", 0.9, "yolo"), ("IMG0", "ship", 0.4, "yolo"), ("IMG0", "car", 0.8, "yolo"),
                                      ("IMG1", "ship", 0.7, "yolo"), ("IMG1", "ship", 0.9, "detr"), ("IMG2", "ship", 0.9, "detr")]:
         ai.add({"IMAGE_ID": image, "CLS": cls, "SCORE": score, "MODEL": model}, {"x": 140.05, "y": 37.05})
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Analysis)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
     for dock in p.docks.values():

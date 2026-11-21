@@ -25,6 +25,8 @@ from mikage.qgis_io import ai_transfer_io, settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.ai import Ai  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_ai import DATA, square_tiff  # noqa: E402
 
 URL = "https://example.com/arcgis/rest/services/Detections/FeatureServer/0"
@@ -52,10 +54,9 @@ def plugin(tmp_path, monkeypatch):
     target = fake.add_layer(URL, FakeLayer(TYPES, "esriGeometryPolygon"))
     target.name = "検出結果"
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Ai)
     p.initGui()
     assert p.api.problems == [], p.api.problems
     yield p, iface, target

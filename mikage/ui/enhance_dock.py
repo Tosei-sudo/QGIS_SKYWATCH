@@ -43,9 +43,9 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.enhance.ops import OP_INFO
-from ..core.enhance.pipeline import PRESET_NAMES, PRESETS, Pipeline
-from ..core.enhance.rules import image_rule_for, resolve_bands
+from ..core.enhance.api import OP_INFO
+from ..core.enhance.api import PRESET_NAMES, PRESETS, Pipeline
+from ..core.enhance.api import image_rule_for, resolve_bands
 from ..qgis_io import enhance_group as eg
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io import complex_sar

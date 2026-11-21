@@ -28,6 +28,8 @@ from mikage.qgis_io.obs_images import (  # noqa: E402
     IMAGE_ID, SATELLITE, SATELLITE_TYPED, SatelliteLookup, image_satellite, observed_image, open_images,
 )
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 CATALOG_URL_ = "https://example.com/arcgis/rest/services/Catalog/FeatureServer/0"
 CHOICES = SatelliteChoices(catalog=("WV03", "GE01"), satellites=("WorldView-3",),
@@ -115,10 +117,9 @@ def plugin(tmp_path):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
     yield p, iface, tmp_path
     p.unload()

@@ -39,13 +39,13 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.ai.train.labels import class_order
-from ..core.ai.train.trainer import (
+from ..core.ai.api import class_order
+from ..core.ai.api import (
     TILE_SIZES, InputSpec, TrainError, TrainOptions, add_classes, band_statistics, history_entry, load_model, new_model, normalize, split, train,
 )
 from ..qgis_io.ai_io import band_values, check_bands, grid_of, render_rgba
-from ..core.ai.train.dataset import DatasetError
-from ..core.obs.scope import RecordQuery
+from ..core.ai.api import DatasetError
+from ..core.obs.api import RecordQuery
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.dataset_io import DatasetImage, dataset_labels, image_grid, open_image, pixel_rows, read_datasets, whole_image
 from ..qgis_io.pixel_place import cached_placement

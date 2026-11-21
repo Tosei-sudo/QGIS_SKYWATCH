@@ -41,9 +41,9 @@ import math
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence
 
-from ..plan.access import Opportunity, best_scene, framed, look_at, reach_of
-from ..plan.orbit import Frame, R, ecef_of, frame_of, lon_lat_of, norm, point_at, track_angles, track_rate, unit
-from ..plan.satellites import SatelliteSpec, platform_key
+from ..plan.api import Opportunity, best_scene, framed, look_at, reach_of
+from ..plan.api import Frame, R, ecef_of, frame_of, lon_lat_of, norm, point_at, track_angles, track_rate, unit
+from ..plan.api import SatelliteSpec, platform_key
 from .covered import GOAL
 from .model import ImagingRequest
 from .passes import Passes

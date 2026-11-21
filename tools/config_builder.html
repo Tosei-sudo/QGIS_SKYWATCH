@@ -149,25 +149,30 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
 <script type="application/json" id="plugin-constants">
 {
  "keys": [
-  "satelliteCatalogs",
-  "sensorCatalogs",
-  "satelliteAliases",
-  "satelliteOutages",
-  "groundStations",
-  "cloudForecast",
   "imageCatalogs",
+  "layers",
   "watchInterval",
   "pathMappings",
   "overviews",
   "rasterSpeed",
   "complexImages",
+  "satelliteCatalogs",
+  "sensorCatalogs",
+  "satelliteAliases",
+  "satelliteOutages",
+  "cloudForecast",
+  "groundStations",
   "observationStores",
   "localObservations",
+  "offlineWork",
+  "columnDrag",
+  "analysisCacheMinutes",
+  "preload",
+  "shapeReceiver",
   "observationVocabulary",
   "glossary",
   "textAssist",
   "arcgisPortals",
-  "layers",
   "baseMaps",
   "defaultBaseMap",
   "geocoders",
@@ -189,12 +194,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "handover",
   "events",
   "interests",
-  "userRoles",
-  "preload",
-  "offlineWork",
-  "columnDrag",
-  "shapeReceiver",
-  "analysisCacheMinutes"
+  "userRoles"
  ],
  "roles": {
   "imageCatalogs": [
@@ -1903,6 +1903,46 @@ const SPEC = [
       field: N("analysisCacheMinutes", "分", { min: 0, max: 1440, ph: "5" }) },
   ] },
 ];
+// Where each key's explanation is (README.md was split into docs/features/ and docs/admin/, 2026-11-20).
+const DOC_FILES = {
+  "ai物体検出クリック抽出": "docs/features/ai.md",
+  "ai結果外部aiプラグイン内の物体検出": "docs/features/ai.md",
+  "arcgis-web-マップ": "docs/features/map.md",
+  "イベント地震対応などevents": "docs/features/observations.md",
+  "サーバー障害時のオフライン作業": "docs/admin/operations.md",
+  "サーバ処理": "docs/features/analysis.md",
+  "データ分析": "docs/features/analysis.md",
+  "パスの読み替えpathmappings": "docs/features/images.md",
+  "ピラミッドovrの自動作成overviews": "docs/features/images.md",
+  "一覧のビュー列並べ替え絞り込みの保存": "docs/features/screen.md",
+  "作成者更新者の記録edittracking": "docs/admin/operations.md",
+  "個人の関心地域地点interests": "docs/features/images.md",
+  "備考の単語集glossary": "docs/features/observations.md",
+  "先読み": "docs/admin/operations.md",
+  "分担と引き継ぎメモassignmentshandover": "docs/features/observations.md",
+  "地図の描画を速くする設定rasterspeed": "docs/features/images.md",
+  "外部から図形を受け取るautomap-などshapereceiver": "docs/features/map.md",
+  "座標地名へ移動": "docs/features/map.md",
+  "担当と使える機能userroles": "docs/features/screen.md",
+  "撮像計画": "docs/features/plan.md",
+  "文章の手伝い小さな生成-aitextassist": "docs/features/observations.md",
+  "新規スクラッチレイヤーテンプレート": "docs/features/map.md",
+  "日時のタイムゾーンtimezonetimezones": "docs/admin/operations.md",
+  "活動大分類ごとの切り替え": "docs/features/observations.md",
+  "画像カタログ": "docs/features/images.md",
+  "画像補正": "docs/features/enhance.md",
+  "監査ログauditlog": "docs/admin/operations.md",
+  "移動体aisads-b": "docs/features/observations.md",
+  "背景地図": "docs/features/map.md",
+  "衛星の障害情報satelliteoutages": "docs/features/plan.md",
+  "衛星名の対応表satellitealiases": "docs/features/plan.md",
+  "複素-sar-画像sicdの表示compleximages": "docs/features/images.md",
+  "観測記録": "docs/features/observations.md",
+  "観測記録のエクスポートobservationexports": "docs/features/observations.md",
+  "起動時のレイヤー": "docs/features/map.md",
+  "通報注目の記録alertreports": "docs/features/observations.md",
+  "通知": "docs/features/images.md"
+};
 const ALL = SPEC.flatMap((g) => g.keys.map((k) => ({ ...k, group: g.group })));
 
 // ---------------------------------------------------------------- 状態
@@ -3527,7 +3567,7 @@ function render() {
       jsonArea(state, (x) => { if (isObj(x)) { state = x; changed(); } }));
   } else {
     const spec = ALL.find((k) => k.key === current);
-    const docLink = spec.ext ? el("a", { href: "../" + spec.ext, target: "_blank", text: spec.ext }) : spec.doc ? el("a", { href: "../README.md#" + spec.doc, target: "_blank", text: "README の説明" }) : null;
+    const docLink = spec.ext ? el("a", { href: "../" + spec.ext, target: "_blank", text: spec.ext }) : spec.doc ? el("a", { href: "../" + (DOC_FILES[spec.doc] || "README.md") + "#" + spec.doc, target: "_blank", text: "README の説明" }) : null;
     ed.replaceChildren(el("h2", { class: "key" }, spec.label, el("code", { text: spec.key })),
       el("p", { class: "help" }, spec.help, docLink ? " 詳しく: " : "", docLink),
       field(spec.field, state, () => {}, state),

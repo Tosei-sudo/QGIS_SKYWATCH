@@ -541,7 +541,7 @@ class EsriObservationStore:
         or deletes for good (a removed feature cannot be seen this way): read
         everything then.
         """
-        from ..catalog.watch import since_condition
+        from ..sql import since_condition
 
         types, oid = self._layer.ready()
         updated = self.config.fields["updated"]
@@ -560,7 +560,7 @@ class EsriObservationStore:
         登録日時 not on the layer are left out of the question; the list then
         says what to show.
         """
-        from ..catalog.watch import since_condition
+        from ..sql import since_condition
 
         types, oid = self._layer.ready()
         f = self.config.fields

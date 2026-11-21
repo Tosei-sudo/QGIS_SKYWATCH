@@ -9,7 +9,7 @@ Python standard library, and the query runs there: anything SQLite does
 a new library. Only reading statements run (an authorizer refuses the rest:
 no ATTACH, no PRAGMA, no writing).
 
-- The Esri tables are named as the README's 「Esri 側のテーブル定義」
+- The Esri tables are named as the 「Esri 側のテーブル定義」 (docs/admin/esri-tables.md)
   (TBL_IMAGE_CATALOG, TBL_AI_RESULT …; a second entry of one kind
   TBL_AI_RESULT_2), the project's layers by their layer name made a name.
 - Columns are the attribute names as they are; dates are text in the
@@ -54,7 +54,7 @@ SHAPE = "SHAPE"
 #: The key in the project where the analyses are kept.
 PROJECT_SCOPE, PROJECT_KEY = "mikage", "analyses"
 
-#: Each kind of Esri table: its SQL name (README 「Esri 側のテーブル定義」) and what it is.
+#: Each kind of Esri table: its SQL name (docs/admin/esri-tables.md 「Esri 側のテーブル定義」) and what it is.
 KINDS: dict[str, tuple[str, str]] = {
     "catalog": ("TBL_IMAGE_CATALOG", "画像カタログ"),
     "satellite": ("TBL_SATELLITE", "衛星カタログ"),
@@ -170,7 +170,7 @@ def _roles(fields: Any) -> dict[str, str]:
 
 
 def esri_tables(config: Any) -> list[Table]:
-    """Every Esri table and layer of the settings file, in the order of the README, by their SQL names."""
+    """Every Esri table and layer of the settings file, in the order of docs/admin/esri-tables.md, by their SQL names."""
     found: list[tuple[str, str, Any, dict[str, str]]] = []
 
     def add(kind: str, label: str, entry: Any, fields: Any = None) -> None:

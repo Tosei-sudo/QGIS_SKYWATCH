@@ -16,7 +16,7 @@ from qgis.PyQt.QtCore import QEvent, QModelIndex, QObject, QRect, Qt, QTimer
 from qgis.PyQt.QtGui import QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import QCompleter, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QWidget
 
-from ..core.obs.glossary import Suggestion, Variant
+from ..core.obs.api import Suggestion, Variant
 
 #: How long after the last change the text is checked for other spellings (ms).
 CHECK_MS = 250

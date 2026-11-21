@@ -161,7 +161,7 @@ class ListViews(QObject):
             menu = QMenu(self.button)
             menu.aboutToShow.connect(lambda: self._fill(menu))
             self.button.setMenu(menu)
-        if self._titles():
+        if self.titles():
             # The columns are there already (a list made once): the arrangement kept put back now.
             self.reapply()
 
@@ -195,7 +195,7 @@ class ListViews(QObject):
 
     # ---- the state of the list ---------------------------------------------------------------------
 
-    def _titles(self) -> list[str]:
+    def titles(self) -> list[str]:
         model = self.view.model()
         if model is None:
             return []
@@ -203,7 +203,7 @@ class ListViews(QObject):
 
     def columns(self) -> list[dict]:
         """The columns in the order shown: their titles and whether hidden."""
-        titles = self._titles()
+        titles = self.titles()
         h = self.header
         order = sorted(range(len(titles)), key=h.visualIndex)
         return [{"title": titles[i], "hidden": h.isSectionHidden(i)} for i in order]
@@ -212,7 +212,7 @@ class ListViews(QObject):
         out: dict[str, Any] = {"columns": self.columns()}
         if self.view.isSortingEnabled() and self.header.isSortIndicatorShown():
             i = self.header.sortIndicatorSection()
-            titles = self._titles()
+            titles = self.titles()
             if 0 <= i < len(titles):
                 out["sort"] = [titles[i], "desc" if self.header.sortIndicatorOrder() == Qt.SortOrder.DescendingOrder else "asc"]
         if filters and self.filters:
@@ -221,7 +221,7 @@ class ListViews(QObject):
 
     def apply_columns(self, columns: list) -> None:
         """Shows the columns named in their order (hidden as said); the others after them in the plugin's order."""
-        titles = self._titles()
+        titles = self.titles()
         h = self.header
         self._applying = True
         try:
@@ -248,7 +248,7 @@ class ListViews(QObject):
             return
         self.apply_columns(state.get("columns") or [])
         sort = state.get("sort")
-        titles = self._titles()
+        titles = self.titles()
         if self.view.isSortingEnabled() and isinstance(sort, list) and len(sort) == 2 and sort[0] in titles:
             order = Qt.SortOrder.DescendingOrder if sort[1] == "desc" else Qt.SortOrder.AscendingOrder
             self.view.sortByColumn(titles.index(sort[0]), order)
@@ -279,7 +279,7 @@ class ListViews(QObject):
 
     def _arranged(self) -> None:
         # Not while the columns are being made again (the arrangement is put back first).
-        if self._applying or self._timer.isActive() or not self._titles():
+        if self._applying or self._timer.isActive() or not self.titles():
             return
         data = self._read()
         data["arrangement"] = self.state(filters=False)
@@ -319,7 +319,7 @@ class ListViews(QObject):
         h = self.header
         self._applying = True
         try:
-            for i in range(len(self._titles())):
+            for i in range(len(self.titles())):
                 h.moveSection(h.visualIndex(i), i)
                 h.setSectionHidden(i, False)
         finally:
@@ -328,7 +328,7 @@ class ListViews(QObject):
         self._arranged()
 
     def set_hidden(self, title: str, hidden: bool) -> bool:
-        titles = self._titles()
+        titles = self.titles()
         if title not in titles:
             return False
         i = titles.index(title)
@@ -340,11 +340,11 @@ class ListViews(QObject):
 
     def order(self) -> list[int]:
         """The columns (their places in the model) in the order shown."""
-        return sorted(range(len(self._titles())), key=self.header.visualIndex)
+        return sorted(range(len(self.titles())), key=self.header.visualIndex)
 
     def arrange(self, order: list[int], hidden: Optional[set] = None) -> None:
         """The columns put in `order` (their places in the model; the ones it leaves out after them), those in `hidden` hidden."""
-        n = len(self._titles())
+        n = len(self.titles())
         wanted = [i for i in dict.fromkeys(order) if isinstance(i, int) and 0 <= i < n]
         wanted += [i for i in range(n) if i not in wanted]
         hidden = {i for i in (hidden or set()) if 0 <= i < n}
@@ -399,7 +399,7 @@ class ListViews(QObject):
     def columns_menu(self, parent: Optional[QWidget] = None, column: int = -1) -> QMenu:
         """The columns to tick (shown or hidden); with the column right-clicked, its moves first."""
         menu = QMenu(self.tr("列の表示・順番"), parent or self.view)
-        if 0 <= column < len(self._titles()):
+        if 0 <= column < len(self.titles()):
             for where, text in MOVES:
                 a = menu.addAction(self.tr(text), lambda where=where: self.move(column, where))
                 a.setEnabled(self.can_move(column, where))
@@ -495,7 +495,7 @@ class ColumnsDialog(QDialog):
             self.list.setCurrentRow(0)
 
     def _fill(self, columns: list[tuple[int, bool]]) -> None:
-        titles = self.views._titles()
+        titles = self.views.titles()
         self.list.blockSignals(True)
         self.list.clear()
         for i, shown in columns:
@@ -528,7 +528,7 @@ class ColumnsDialog(QDialog):
         self.list.setCurrentRow(to)
 
     def standard(self) -> None:
-        self._fill([(i, True) for i in range(len(self.views._titles()))])
+        self._fill([(i, True) for i in range(len(self.views.titles()))])
         self.list.setCurrentRow(0)
 
     def _update(self) -> None:

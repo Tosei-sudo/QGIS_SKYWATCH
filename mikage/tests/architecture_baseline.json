@@ -1,0 +1,30 @@
+{
+ "deep_imports": [
+  "core.ai_results -> core.obs.continuation",
+  "core.ai_results -> core.obs.taxonomy",
+  "core.config -> core.ai.model_config",
+  "core.config -> core.ai.transfer",
+  "core.config -> core.catalog",
+  "core.config -> core.catalog.config",
+  "core.config -> core.catalog.paths",
+  "core.config -> core.enhance.rules",
+  "core.config -> core.obs.alerts",
+  "core.config -> core.obs.assignments",
+  "core.config -> core.obs.export",
+  "core.config -> core.obs.glossary",
+  "core.config -> core.obs.handover",
+  "core.config -> core.obs.model",
+  "core.config -> core.plan.modes",
+  "core.config -> core.plan.names",
+  "core.config -> core.plan.outages",
+  "core.config -> core.plan.satellites",
+  "core.config -> core.plan.weather",
+  "core.config -> core.request.store",
+  "core.config -> core.request.systems",
+  "core.obs.handover -> core.request.model"
+ ],
+ "feature_cycles": [],
+ "kernel": [],
+ "layers": [],
+ "private_access": {}
+}

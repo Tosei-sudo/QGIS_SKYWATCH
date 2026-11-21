@@ -15,10 +15,10 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from ..core.plan.outages import ONGOING, OVERDUE, PLANNED
-from ..core.plan.satellites import SatelliteSpec
-from ..core.plan.tree import Group, Listed, SatelliteChoice, facts_of, is_old, label_of, source_text, tle_age_days
-from ..core.plan.output import js_round
+from ..core.plan.api import ONGOING, OVERDUE, PLANNED
+from ..core.plan.api import SatelliteSpec
+from ..core.plan.api import Group, Listed, SatelliteChoice, facts_of, is_old, label_of, source_text, tle_age_days
+from ..core.plan.api import js_round
 from .last_inputs import checked_satellites, keep_checked_satellites
 
 ROLE = Qt.ItemDataRole.UserRole

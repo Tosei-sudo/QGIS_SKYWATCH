@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
-from ..plan.satellites import SatelliteSpec
-from ..plan.weather import CloudSeries
+from ..plan.api import SatelliteSpec
+from ..plan.api import CloudSeries
 from .daily import HELD, TAKEN, Candidate, allocate, asks_weather, carries_over, gather, occurrence_key
 from .export import Written, convert_priority, row_rings
 from .follow import missed_ids
@@ -401,9 +401,9 @@ def old_tle_text(plan: DayPlan) -> str:
     the day's calculation did not): 「TLE が古い衛星（14 日超）: ISS（20 日前）。
     撮像時刻・範囲がずれることがある」 ("" when none).
     """
-    from ..plan.output import OLD_TLE
-    from ..plan.satellites import SAMPLE_SOURCE, platform_key
-    from ..plan.tree import tle_age_days
+    from ..plan.api import OLD_TLE
+    from ..plan.api import SAMPLE_SOURCE, platform_key
+    from ..plan.api import tle_age_days
     from .model import day_bounds
 
     first, last = day_bounds(plan.day)

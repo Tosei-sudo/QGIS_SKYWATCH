@@ -32,6 +32,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.moving_feeds import FeedConnection, stream_socket  # noqa: E402
 from mikage.qgis_io.moving_layer import OPEN, MovingLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 T0 = datetime(2026, 10, 17, 9, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
 
@@ -189,12 +191,10 @@ def test_a_feed_layer_at_a_time():
 
 @pytest.fixture
 def dock(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
     yield p.api.moving, iface, tmp_path
     p.unload()

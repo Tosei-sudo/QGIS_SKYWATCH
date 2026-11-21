@@ -25,6 +25,9 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.plan import Plan  # noqa: E402
+from mikage.features.requests import Requests  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_plan import BELOW, LINE1, LINE2, T  # noqa: E402
 from mikage.ui.limit_sim_dialog import DAY_COLUMNS  # noqa: E402
 from mikage.ui.plan_file_dock import COLUMNS  # noqa: E402
@@ -60,7 +63,7 @@ SCHEMA = {"type": "object", "required": ["tasks"], "properties": {
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     config = tmp_path / "config.json"
     config.write_text(json.dumps(CONFIG, ensure_ascii=False), encoding="utf-8")
@@ -82,10 +85,9 @@ def plugin(tmp_path, monkeypatch):
     fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryNone"))
     fake.add_layer(IMAGES, FakeLayer({"IMAGE_ID": "esriFieldTypeString", "ACQ": "esriFieldTypeDate", "SENSOR": "esriFieldTypeString",
                                       "URL": "esriFieldTypeString"}, "esriGeometryPolygon"))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Plan, Requests, request=request)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
     for dock in p.docks.values():

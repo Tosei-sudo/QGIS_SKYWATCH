@@ -6,9 +6,9 @@ QGIS: qgis_io turns QgsGeometry into `Shape`.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
+from ..shapes import Shape
 from .access import PlanTarget
 
 #: The most features planned one by one.
@@ -19,17 +19,6 @@ MAX_POINTS = 256
 CELLS = 600
 
 Ring = Sequence[tuple]
-
-
-@dataclass
-class Shape:
-    """A feature's geometry in WGS84 degrees."""
-    #: Every vertex, in order (as the viewer's flat coordinates).
-    vertices: list
-    #: Its polygons, each a list of rings (outer first, then holes); empty for points and lines.
-    polygons: list = field(default_factory=list)
-    #: A point inside a single polygon (where it is aimed); None otherwise.
-    interior: Optional[tuple] = None
 
 
 def _js_round(x: float) -> int:

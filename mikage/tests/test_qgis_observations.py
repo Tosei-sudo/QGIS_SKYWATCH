@@ -28,6 +28,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.obs_images import IMAGE_ID, image_layer, observed_image  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.obs_report_dialog import ReportDialog  # noqa: E402
 
 URL = "https://example.com/arcgis/rest/services/Obs/FeatureServer/0"
@@ -57,16 +59,15 @@ def geotiff(path, when: str = "", name_only: bool = False, west: float = 139.6):
 
 
 @pytest.fixture
-def plugin(tmp_path):
+def plugin(tmp_path, request):
     # Layers another test of this process left in the project would be images here too.
     QgsProject.instance().removeAllMapLayers()
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations, request=request)
     p.initGui()
     project = QgsProject.instance()
     layers = []
@@ -1421,10 +1422,9 @@ def bare(tmp_path):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     settings.set_recorder("田中")
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Observations)
     p.initGui()
     dock = p.api.observation_dock
     dock.show()

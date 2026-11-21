@@ -43,16 +43,16 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.query import time_text
-from ..core.catalog.search import cell_text, list_columns, record_of
-from ..core.catalog.thumbnail import (
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import time_text
+from ..core.catalog.api import cell_text, list_columns, record_of
+from ..core.catalog.api import (
     DEFAULT_HEIGHT, DEFAULT_WIDTH, Contents, contents_lines, contents_of, footprint_of, thumbnail_address,
 )
-from ..core.catalog.watch import WatchNotice
+from ..core.catalog.api import WatchNotice
 from ..core.interests import section_lines
 from ..qgis_io import settings
-from ..core.catalog.paths import PathError
+from ..core.catalog.api import PathError
 from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
 from ..qgis_io.thumbnails import CardWork, cached, fetch, prune
 from .image_files_dialog import file_name
@@ -393,6 +393,11 @@ class NoticeCard(QFrame):
     def _attributes_min(self) -> None:
         self.attributes.setMinimumWidth(max(self._attributes_width, self.attributes_column) if self.wide else 0)
 
+    @property
+    def attributes_width(self) -> int:
+        """How wide its attributes want to be (the page lines the cards up on the widest)."""
+        return self._attributes_width
+
     def line_up(self, width: int) -> None:
         """The attributes' column as wide as the page's widest (`NoticeFeed._line_up`)."""
         if width != self.attributes_column:
@@ -651,7 +656,7 @@ class NoticeFeed(QWidget):
         self.close_previous.toggled.connect(settings.set_feed_close_previous)
         bar.addWidget(self.close_previous)
         self.all_read = QPushButton(self.tr("すべて既読"))
-        self.all_read.clicked.connect(lambda: self.dock._mark(None))
+        self.all_read.clicked.connect(lambda: self.dock.mark(None))
         bar.addWidget(self.all_read)
         self.check_now = QPushButton(self.tr("今すぐ確認"))
         self.check_now.setToolTip(self.tr("すべての監視で新着画像を今すぐ確認"))
@@ -899,7 +904,7 @@ class NoticeFeed(QWidget):
 
     def _line_up(self) -> None:
         """Every card's attributes' column as wide as the widest: the features start at the same place on each."""
-        width = max((c._attributes_width for c in self.cards.values()), default=0)
+        width = max((c.attributes_width for c in self.cards.values()), default=0)
         for card in self.cards.values():
             card.line_up(width)
 
@@ -1104,7 +1109,7 @@ class NoticeFeed(QWidget):
         elif key == "map":
             self.see_on_map(notice)
         elif key == "read":
-            self.dock._mark([notice.id])
+            self.dock.mark([notice.id])
 
     def open_image(self, notice: WatchNotice) -> list:
         """
@@ -1161,7 +1166,7 @@ class NoticeFeed(QWidget):
         """「地図で見る」: the map in front at the image's footprint, flashed (read)."""
         self.show_map()
         moved = self.dock.zoom_to_notices([notice])
-        self.dock._mark([notice.id])
+        self.dock.mark([notice.id])
         shape = footprint(notice.feature.get("geometry"))
         if moved and shape is not None:
             canvas = self.iface.mapCanvas()

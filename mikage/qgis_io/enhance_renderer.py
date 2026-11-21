@@ -50,16 +50,16 @@ from qgis.core import (
 )
 from qgis.PyQt.QtGui import QColor
 
-from ..core.enhance.color_classes import class_palette, class_range
-from ..core.enhance.color_scale import apply_palette, color_scale_palette
-from ..core.enhance.histogram import channel_bins
-from ..core.enhance.pipeline import Pipeline
-from ..core.enhance.process import channel_tables, process
-from ..core.enhance.raster import (
+from ..core.enhance.api import class_palette, class_range
+from ..core.enhance.api import apply_palette, color_scale_palette
+from ..core.enhance.api import channel_bins
+from ..core.enhance.api import Pipeline
+from ..core.enhance.api import channel_tables, process
+from ..core.enhance.api import (
     RasterHistogram, code_table, compute_raster_stretch, look_up, sample_raster_histogram, stretch_to_rgba, to_codes,
     valid_mask,
 )
-from ..core.enhance.stats import count_pixels, resolve_ops
+from ..core.enhance.api import count_pixels, resolve_ops
 
 RENDERER_TYPE = "satobsEnhance"
 PROPERTY = "satobs/enhance"
@@ -726,7 +726,7 @@ class EnhanceRenderer(QgsRasterRenderer):
         classes = self.settings.classes
         if not classes:
             return []
-        return [(c.get("label") or str(c["value"]), QColor(*_rgba_of(c["color"])))
+        return [(c.get("label") or str(c["value"]), QColor(*rgba_of(c["color"])))
                 for c in sorted(classes["classes"], key=lambda c: c["value"])]
 
     def _pseudo_color(self, stretch: Optional[dict]) -> QgsSingleBandPseudoColorRenderer:
@@ -739,7 +739,7 @@ class EnhanceRenderer(QgsRasterRenderer):
             exact = classes["kind"] == "exact"
             shader.setColorRampType(QgsColorRampShader.Type.Exact if exact else QgsColorRampShader.Type.Discrete)
             ramp = [QgsColorRampShader.ColorRampItem(float("inf") if not exact and i == len(items) - 1 else c["value"],
-                                                     QColor(*_rgba_of(c["color"])), c.get("label") or str(c["value"]))
+                                                     QColor(*rgba_of(c["color"])), c.get("label") or str(c["value"]))
                     for i, c in enumerate(items)]
             lo, hi = class_range(classes)
         else:
@@ -794,7 +794,7 @@ class EnhanceRenderer(QgsRasterRenderer):
         return r
 
 
-def _rgba_of(color) -> tuple:
+def rgba_of(color) -> tuple:
     c = [int(round(float(x))) for x in list(color)[:4]]
     return tuple(c + [0] * (3 - len(c)) + ([255] if len(c) < 4 else []))[:4]
 

@@ -13,7 +13,7 @@ from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 
-from ..core.obs.glossary import NO_GLOSSARY, Glossary, load_glossary
+from ..core.obs.api import NO_GLOSSARY, Glossary, load_glossary
 from .tasks import run_task
 
 #: Words older than this are read again (in the background) when a form opens.

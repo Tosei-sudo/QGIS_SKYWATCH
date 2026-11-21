@@ -18,7 +18,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel, QRadioButton, QVBoxLayout,
 )
 
-from ..core.request.rows import field_roles
+from ..core.request.api import field_roles
 from .fit import fit_text
 
 #: Vector layers with geometries (polygons, points, lines).

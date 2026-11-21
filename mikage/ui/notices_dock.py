@@ -22,14 +22,14 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.catalog.config import CatalogConfig
-from ..core.catalog.paths import PathError
-from ..core.catalog.query import CatalogSearch, time_text
-from ..core.catalog.search import listed_image, read_catalog_layer, record_of
-from ..core.catalog.watch import (
+from ..core.catalog.api import CatalogConfig
+from ..core.catalog.api import PathError
+from ..core.catalog.api import CatalogSearch, time_text
+from ..core.catalog.api import listed_image, read_catalog_layer, record_of
+from ..core.catalog.api import (
     MAX_SEEN, CatalogWatch, WatchNotice, add_areas, areas_of, conditions_text, new_watch, replace_areas,
 )
-from ..core.catalog.watch_store import Checked, WatchStore, check_due, check_one
+from ..core.catalog.api import Checked, WatchStore, check_due, check_one
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84
@@ -96,7 +96,7 @@ class NoticesDock(PluginDock):
                 (self.tr("開く"), self.tr("選んだ新着画像をレイヤーとして開く（ダブルクリックでも）。画像ファイルなしのカタログの画像は、ファイルなしで観測記録へ"), lambda: self.open_notices(self.chosen_notices())),
                 (self.tr("移動"), self.tr("選んだ新着画像の範囲へ地図を移動"), self.zoom_to_chosen),
                 (self.tr("既読"), self.tr("選んだ新着画像を既読に"), self.mark_chosen_read),
-                (self.tr("すべて既読"), self.tr("一覧の新着画像をすべて既読に"), lambda: self._mark(None)),
+                (self.tr("すべて既読"), self.tr("一覧の新着画像をすべて既読に"), lambda: self.mark(None)),
                 (self.tr("削除"), self.tr("選んだ新着画像を一覧から消す（画像そのものは消えない）"), self.delete_chosen_notices)]:
             button = QPushButton(text)
             button.setToolTip(tip)
@@ -340,14 +340,14 @@ class NoticesDock(PluginDock):
     def chosen_notices(self) -> list[WatchNotice]:
         return [i.data(0, Qt.ItemDataRole.UserRole) for i in self.notices.selectedItems()]
 
-    def _mark(self, ids) -> None:
+    def mark(self, ids) -> None:
         self.store().mark_read(ids)
         self.refresh()
 
     def mark_chosen_read(self) -> None:
         ids = [n.id for n in self.chosen_notices()]
         if ids:
-            self._mark(ids)
+            self.mark(ids)
 
     def delete_chosen_notices(self) -> None:
         ids = [n.id for n in self.chosen_notices()]
@@ -425,7 +425,7 @@ class NoticesDock(PluginDock):
                 problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
         if any(n.kind == PLAN for n in notices):
             self.zoom_to_notices([n for n in notices if n.kind == PLAN])
-        self._mark([n.id for n in notices])
+        self.mark([n.id for n in notices])
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
         return layers
@@ -456,7 +456,7 @@ class NoticesDock(PluginDock):
             if opened:
                 add_record_layers(opened, record)
                 overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
-        self._mark([notice.id])
+        self.mark([notice.id])
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
         return opened

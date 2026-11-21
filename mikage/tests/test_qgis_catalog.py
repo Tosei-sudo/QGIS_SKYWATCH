@@ -25,6 +25,9 @@ from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.qgis_io.obs_images import IMAGE_ID  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 IMAGES = "https://example.com/arcgis/rest/services/Images/FeatureServer/0"
@@ -39,7 +42,7 @@ def ring(x0, y0, x1, y1):
 
 
 @pytest.fixture
-def plugin(tmp_path, monkeypatch):
+def plugin(tmp_path, monkeypatch, request):
     QgsSettings().remove("mikage")
     settings._set("local_gpkg", str(tmp_path / "local.gpkg"))
     config = {
@@ -65,11 +68,10 @@ def plugin(tmp_path, monkeypatch):
     folder = tmp_path / "nas"
     (folder / "2026").mkdir(parents=True)
     geotiff(folder / "2026" / "A.TIF")
-    from mikage import classFactory
 
     iface = FakeIface()
     iface.canvas.setDestinationCrs(QgsProject.instance().crs())
-    p = classFactory(iface)
+    p = small_plugin(iface, Images, Observations, request=request)
     # The docks open at start read their catalogs right away.
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
@@ -376,7 +378,7 @@ def test_the_polygon_shows_while_it_is_drawn(plugin):
 def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     """tsudo 2026-11-19: the area drawn kept, and chosen from 「保存した範囲」 for later searches."""
     from qgis.core import QgsPointXY, QgsRectangle
-    from mikage.ui import catalog_dock
+    from mikage.ui.catalog_parts import saved_areas as saved_part
 
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
@@ -392,7 +394,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.draw_tool.points = [QgsPointXY(139.71, 35.61), QgsPointXY(139.74, 35.61), QgsPointXY(139.74, 35.64)]
     dock.draw_tool.finish()
     assert dock.save_area_button.isVisibleTo(dock) and dock.save_area_button.isEnabled()
-    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("東京湾", True)))
+    monkeypatch.setattr(saved_part.QInputDialog, "getText", staticmethod(lambda *a: ("東京湾", True)))
     dock.ask_save_area()
     assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾"
     assert [a.name for a in settings.saved_areas()] == ["東京湾"]
@@ -405,11 +407,11 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
 
     # Another area drawn and saved; the same name again asks before replacing.
     dock.set_drawn([[135.1, 34.6], [135.3, 34.6], [135.3, 34.7]])
-    monkeypatch.setattr(catalog_dock.QInputDialog, "getText", staticmethod(lambda *a: ("大阪湾", True)))
+    monkeypatch.setattr(saved_part.QInputDialog, "getText", staticmethod(lambda *a: ("大阪湾", True)))
     dock.ask_save_area()
     assert [dock.saved_box.itemText(i) for i in range(dock.saved_box.count())] == ["大阪湾", "東京湾"]
     asked = []
-    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: asked.append(text) or False)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: asked.append(text) or False)
     dock.set_drawn([[135.0, 34.0], [135.1, 34.0], [135.1, 34.1]])
     dock.ask_save_area()
     assert asked and "大阪湾" in asked[0] and settings.saved_areas()[0].ring[0] == (135.1, 34.6)
@@ -441,7 +443,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.views.choose("北")
     assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾（北）"
     # Deleted (asked first).
-    monkeypatch.setattr(catalog_dock, "ask_no", lambda parent, title, text: True)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: True)
     dock.ask_delete_saved_area()
     assert [a.name for a in settings.saved_areas()] == ["大阪湾"] and dock.saved_box.currentText() == "大阪湾"
     dock.delete_saved_area()
@@ -1354,9 +1356,11 @@ def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):
     assert found("ev01 横須賀") == ["B"]
     assert found("x' OR '1'='1") == []
     assert found("") == ["A", "B", "C"]
-    # The query asked: each word in either attribute, the word a value.
+    # The query asked: each word in either attribute, the word a value. (Not the sensors' list read again after
+    # the settings file, which may end after the search.)
     def asked_where():
-        return [form["where"] for url, form in fake.asked if url.endswith("/query") and "returnCountOnly" not in form][-1]
+        return [form["where"] for url, form in fake.asked
+                if url.endswith("/query") and "returnCountOnly" not in form and "returnDistinctValues" not in form][-1]
 
     found("臨時")
     assert asked_where() == "(UPPER(NOTE) LIKE '%臨時%' ESCAPE '\\' OR UPPER(IMG_ID) LIKE '%臨時%' ESCAPE '\\')"

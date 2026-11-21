@@ -117,8 +117,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
-from ..plan.outages import OUTAGE, OUTAGE_WARNING, outage_reason, stopped, warning_of
-from ..plan.satellites import SatelliteSpec, platform_key, satellite_label
+from ..plan.api import OUTAGE, OUTAGE_WARNING, outage_reason, stopped, warning_of
+from ..plan.api import SatelliteSpec, platform_key, satellite_label
 from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
 from .geometry import look_of, mismatch, pass_look, satellite_rank

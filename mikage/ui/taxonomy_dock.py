@@ -30,8 +30,8 @@ from qgis.PyQt.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ..core.obs.stores import LOCAL_LABEL, LocalPhotoStore, is_local_photo, photo_url
-from ..core.obs.taxonomy import (
+from ..core.obs.api import LOCAL_LABEL, LocalPhotoStore, is_local_photo, photo_url
+from ..core.obs.api import (
     SpecField, Taxon, activities_at, children_of, find, kind_of, level_name, name_label_of, path_of, photos_at, spec_text, specs_at, within,
 )
 from ..qgis_io.context import PluginContext

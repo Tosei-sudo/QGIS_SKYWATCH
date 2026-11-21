@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
 from ..esri import like_text, quote
+from .. import sql
 from ..util import utc_text
 from .flows import time_key
 from .model import Observation
@@ -31,12 +32,12 @@ BASES = ("image", "created", "updated")
 def time_condition(name: str, field_type: Optional[str], op: str, t: float) -> str:
     """`name op t` (op one of >= <= > <), written for the field's type (as catalog.watch.since_condition)."""
     if field_type == "esriFieldTypeDateOnly":
-        return f"{name} {op} DATE '{utc_text(t)[:10]}'"
+        return f"{name} {op} {sql.date_of(t)}"
     if field_type and re.search(r"Integer|Double|Single", field_type):
         return f"{name} {op} {int(t)}"
     if field_type == "esriFieldTypeString":
         return f"{name} {op} '{utc_text(t)[:10]}'"
-    return f"{name} {op} TIMESTAMP '{utc_text(t)}'"
+    return f"{name} {op} {sql.timestamp(t)}"
 
 
 def _between(name: str, field_type: Optional[str], start: Optional[float], end: Optional[float]) -> list[str]:

@@ -15,6 +15,8 @@ from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsP
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface  # noqa: E402
+from mikage.features.enhance import Enhance  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
 
@@ -35,12 +37,10 @@ def tiff(path, metadata=None):
 
 @pytest.fixture
 def plugin():
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Enhance)
     p.initGui()
     iface.canvas.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
     yield p, iface

@@ -18,6 +18,8 @@ from qgis.PyQt.QtGui import QColor, QKeyEvent  # noqa: E402
 
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.enhance import Enhance  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.swipe import HORIZONTAL, VERTICAL, swipe_rect  # noqa: E402
 
 
@@ -37,13 +39,13 @@ def rgb(path, color):
 
 @pytest.fixture
 def plugin(tmp_path):
-    from mikage import classFactory
-
     QgsSettings().remove("mikage")
     settings.set_config_source("")
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Enhance)
     p.initGui()
+    # The map's size fixed: the docks of the features started (tests/feature_harness.py) would change it.
+    iface.canvas.setFixedSize(200, 200)
     for dock in p.docks.values():
         dock.hide()
     red, blue = rgb(tmp_path / "red.tif", (255, 0, 0)), rgb(tmp_path / "blue.tif", (0, 0, 255))

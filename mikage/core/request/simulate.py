@@ -51,8 +51,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
-from ..plan.outages import OUTAGE, on_day
-from ..plan.satellites import SatelliteSpec
+from ..plan.api import OUTAGE, on_day
+from ..plan.api import SatelliteSpec
 from .covered import GOAL, Covered, subtracts
 from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
 from .follow import missed_ids

@@ -23,9 +23,9 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit, edit_stamp
-from ..core.obs.alert_mail import build_mail
-from ..core.obs.alerts import AlertSettings, LogRow, Moment, poll_log
-from ..core.request.export import format_time
+from ..core.obs.api import build_mail
+from ..core.obs.api import AlertLogRepository, AlertSettings, LogRow, Moment
+from ..core.time_zone import format_time
 from ..core.time_zone import UTC
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
@@ -198,7 +198,7 @@ class AlertFeed(QWidget):
         self.timer.stop()
         if self._client is None or self._settings is not s:
             self._client, self._settings = self.context.esri(), s
-        client, token = self._client, self.context.token_for(s.table.url, s.table.token)
+        repo = AlertLogRepository(self._client, s, self.context.token_for(s.table.url, s.table.token))
         known = set(self.rows)
         since = _now() - s.live.days * DAY_MS if s.live.days > 0 else None
         self._polling = True
@@ -238,7 +238,7 @@ class AlertFeed(QWidget):
             self.status.setText(self.tr("通報テーブルの読み込みに失敗: {m}").format(m=message))
             self._after()
 
-        self._task = run_task(self.tr("通報の確認"), lambda _t: poll_log(client, s, known, since, token), done, failed, hidden=True)
+        self._task = run_task(self.tr("通報の確認"), lambda _t: repo.poll_log(known, since), done, failed, hidden=True)
 
     def _after(self) -> None:
         self._task = None

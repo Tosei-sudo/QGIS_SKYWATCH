@@ -25,8 +25,8 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QDateTime, QVariant
 from qgis.PyQt.QtGui import QIcon
 
-from ..core.ai.detect import class_filter, class_name
-from ..core.ai.model_config import DetectModelConfig, detector_spec
+from ..core.ai.api import class_filter, class_name
+from ..core.ai.api import DetectModelConfig, detector_spec
 from ..qgis_io.ai_io import angle_degrees, band_values, check_bands, detect_layer, detection_rings, grid_of, render_rgba, summary
 from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, local_model, model_from

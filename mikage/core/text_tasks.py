@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional, Sequence
 
-from .obs.model import unseen_label
+from .obs.api import unseen_label
 from .text_assist import Draft, Message, TextTask, _kanji_value, _unquoted, clean_note, clean_paragraph, foreign_numbers, numbers_in
 
 #: Written by the model for a value it does not have.

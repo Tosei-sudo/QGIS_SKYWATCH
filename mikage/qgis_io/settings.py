@@ -11,18 +11,28 @@ import re
 import os
 from typing import Optional
 
-from qgis.core import QgsApplication, QgsAuthMethodConfig, QgsSettings
+from qgis.core import QgsApplication, QgsAuthMethodConfig
 
-PREFIX = "mikage/"
+from .qsettings import PREFIX, pref, set_pref  # noqa: F401 (PREFIX, pref and set_pref: read from here too)
 
+# Each feature's own (qgis_io/prefs): read through here as before.
+from .prefs.images import (  # noqa: F401
+    overview_cache_setting, set_overview_cache_setting, overview_cache_to_clear, set_overview_cache_to_clear, central_views,
+    set_central_views, feed_close_previous, set_feed_close_previous, feed_unread_only, set_feed_unread_only, FOOTPRINT_STYLES,
+    footprint_style, set_footprint_style, close_previous, set_close_previous, zoom_to_opened, set_zoom_to_opened, saved_areas,
+    set_saved_areas, path_folders, path_folder, set_path_folder, clear_path_folders, similar_tolerance, set_similar_tolerance,
+)
+from .prefs.observations import (  # noqa: F401
+    SettingsPrefs, point_count_setting, set_point_count, MARK_STYLES, mark_style, set_mark_style,
+)
+from .prefs.plan import plan_reminders, set_plan_reminders, plan_cloud, set_plan_cloud  # noqa: F401
+from .prefs.maps import startup_layers_on, set_startup_layers_on  # noqa: F401
+from .prefs.ai import TRAINED_MAX, trained_models, remember_trained_model  # noqa: F401
+from .prefs.requests import (  # noqa: F401
+    request_export_folder, set_request_export_folder, plan_file_filter, set_plan_file_filter, group_filter, set_group_filter,
+)
 
-def _get(key: str, default: str = "") -> str:
-    value = QgsSettings().value(PREFIX + key, default)
-    return value if isinstance(value, str) else default
-
-
-def _set(key: str, value: str) -> None:
-    QgsSettings().setValue(PREFIX + key, value)
+_get, _set = pref, set_pref
 
 
 #: The plugin's folder, where a settings file shipped in the zip sits.
@@ -159,24 +169,6 @@ def profile_folder() -> str:
     return folder
 
 
-def overview_cache_setting() -> str:
-    """The settings file's `overviews.cacheFolder` as last read ("" for the profile's folder), used when QGIS starts."""
-    return _get("overview_cache_folder")
-
-
-def set_overview_cache_setting(folder: str) -> None:
-    _set("overview_cache_folder", folder)
-
-
-def overview_cache_to_clear() -> str:
-    """The overview cache folder to clear when QGIS starts next ("" for none)."""
-    return _get("overview_cache_clear")
-
-
-def set_overview_cache_to_clear(folder: str) -> None:
-    _set("overview_cache_clear", folder)
-
-
 def local_gpkg_path() -> str:
     """The local GeoPackage of observations, checked areas and the classification."""
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
@@ -200,247 +192,3 @@ def opened_images_path() -> str:
 def thumbnail_folder() -> str:
     """Where the 新着画像 cards keep the thumbnails they fetched (qgis_io/thumbnails.py)."""
     return os.path.join(profile_folder(), "thumbnails")
-
-
-def central_views() -> list[str]:
-    """The plugin's pages beside the map (ui/central_views.py) open when QGIS was last closed, in tab order."""
-    return [k for k in _get("centralViews").split(",") if k]
-
-
-def set_central_views(keys: list[str]) -> None:
-    _set("centralViews", ",".join(keys))
-
-
-def feed_close_previous() -> bool:
-    """「前の画像を閉じる」 of the 新着画像 page (its own, not the catalog's); off unless turned on."""
-    return _get("noticeFeed/closePrevious") == "1"
-
-
-def set_feed_close_previous(on: bool) -> None:
-    _set("noticeFeed/closePrevious", "1" if on else "0")
-
-
-def feed_unread_only() -> bool:
-    """「未読のみ」 of the 新着画像 page; off unless turned on."""
-    return _get("noticeFeed/unreadOnly") == "1"
-
-
-def set_feed_unread_only(on: bool) -> None:
-    _set("noticeFeed/unreadOnly", "1" if on else "0")
-
-
-class SettingsPrefs:
-    """The observation book's small values (the images listed without their file, per store) in QgsSettings."""
-
-    def get(self, key: str) -> Optional[str]:
-        v = _get("observations/" + key)
-        return v or None
-
-    def set(self, key: str, value: str) -> None:
-        _set("observations/" + key, value)
-
-
-def point_count_setting() -> int:
-    """How many clicks a record takes (1 a point; 2 rear and front; 3 and 4 the sides too); 「2 点」 of before as 2."""
-    v = _get("observations/points")
-    if v in ("1", "2", "3", "4"):
-        return int(v)
-    return 2 if _get("observations/two_point") == "1" else 1
-
-
-def set_point_count(n: int) -> None:
-    _set("observations/points", str(n))
-
-
-#: How the image catalog draws the listed images' footprints: filled, outlines only, or not at all.
-FOOTPRINT_STYLES = ("fill", "outline", "hidden")
-#: How the observations' marks are drawn: as they were, outlines only (no fill), or hidden (the input being made stays).
-MARK_STYLES = ("normal", "outline", "hidden")
-
-
-def footprint_style() -> str:
-    """The catalog's footprints on the map (tsudo, 2026-11-09: filled ones hid the images); outlines unless chosen."""
-    v = _get("catalog/footprints")
-    return v if v in FOOTPRINT_STYLES else "outline"
-
-
-def set_footprint_style(style: str) -> None:
-    _set("catalog/footprints", style if style in FOOTPRINT_STYLES else "outline")
-
-
-def close_previous() -> bool:
-    """
-    「前の画像を閉じる」 (tsudo, 2026-11-10: looking through images one after
-    another): opening images from the catalog closes those it opened before.
-    Off unless turned on.
-    """
-    return _get("catalog/closePrevious") == "1"
-
-
-def set_close_previous(on: bool) -> None:
-    _set("catalog/closePrevious", "1" if on else "0")
-
-
-def zoom_to_opened() -> bool:
-    """
-    「開いた画像へ移動」 (tsudo, 2026-11-10): opening images from the catalog
-    moves the map to them (all of them when several). On unless turned off.
-    """
-    return _get("catalog/zoomToOpened") != "0"
-
-
-def set_zoom_to_opened(on: bool) -> None:
-    _set("catalog/zoomToOpened", "1" if on else "0")
-
-
-def saved_areas() -> list:
-    """「保存した範囲」 of the image catalog (core/catalog/saved_areas.py), newest first; per user, like the list views."""
-    from ..core.catalog.saved_areas import read_areas
-
-    return read_areas(_get("catalog/savedAreas"))
-
-
-def set_saved_areas(areas) -> None:
-    from ..core.catalog.saved_areas import write_areas
-
-    _set("catalog/savedAreas", write_areas(areas))
-
-
-def mark_style() -> str:
-    """The observations' marks on the map ('normal' unless chosen)."""
-    v = _get("observations/marks")
-    return v if v in MARK_STYLES else "normal"
-
-
-def set_mark_style(style: str) -> None:
-    _set("observations/marks", style if style in MARK_STYLES else "normal")
-
-
-def plan_reminders() -> list:
-    """The imaging plan's reminders (JSON objects; see core.plan.remind)."""
-    try:
-        value = json.loads(_get("plan_reminders", "[]"))
-    except ValueError:
-        return []
-    return value if isinstance(value, list) else []
-
-
-def set_plan_reminders(reminders: list) -> None:
-    _set("plan_reminders", json.dumps(reminders, ensure_ascii=False))
-
-
-def path_folders() -> dict[str, str]:
-    """The folders chosen on this computer for `pathMappings` prefixes (by core.catalog.paths.folder_key)."""
-    try:
-        value = json.loads(_get("catalog/path_folders", "{}"))
-    except ValueError:
-        return {}
-    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str) and v} if isinstance(value, dict) else {}
-
-
-def path_folder(prefix: str) -> Optional[str]:
-    from ..core.catalog.paths import folder_key
-
-    return path_folders().get(folder_key(prefix))
-
-
-def set_path_folder(prefix: str, folder: Optional[str]) -> None:
-    from ..core.catalog.paths import folder_key
-
-    folders = path_folders()
-    if folder:
-        folders[folder_key(prefix)] = folder
-    else:
-        folders.pop(folder_key(prefix), None)
-    _set("catalog/path_folders", json.dumps(folders, ensure_ascii=False))
-
-
-def clear_path_folders() -> None:
-    """Forgets every folder chosen for the prefixes (「設定…」の「画像のフォルダの対応」)."""
-    _set("catalog/path_folders", "{}")
-
-
-def similar_tolerance() -> dict:
-    """The tolerances of 「類似画像の検索」 last used (core.catalog.similar.SimilarTolerance JSON)."""
-    try:
-        value = json.loads(_get("catalog/similar_tolerance", "{}"))
-    except ValueError:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def set_similar_tolerance(value: dict) -> None:
-    _set("catalog/similar_tolerance", json.dumps(value))
-
-
-def plan_cloud() -> bool:
-    """Whether the imaging plan asks for cloud forecasts (the person turned them on)."""
-    return _get("plan_cloud") == "1"
-
-
-def set_plan_cloud(on: bool) -> None:
-    _set("plan_cloud", "1" if on else "0")
-
-
-def startup_layers_on() -> bool:
-    """Whether the settings file's `layers` are added to an empty project when QGIS starts (on unless turned off)."""
-    return _get("startup_layers", "1") != "0"
-
-
-def set_startup_layers_on(on: bool) -> None:
-    _set("startup_layers", "1" if on else "0")
-
-
-#: The most trained models remembered for 物体検出（AI）.
-TRAINED_MAX = 20
-
-
-def trained_models() -> list[tuple[str, str]]:
-    """Models trained in this profile (newest first), as (label, path), those whose file is still there."""
-    try:
-        value = json.loads(_get("trained_models", "[]"))
-    except ValueError:
-        return []
-    out = []
-    for item in value if isinstance(value, list) else []:
-        if isinstance(item, dict) and isinstance(item.get("path"), str) and os.path.isfile(item["path"]):
-            out.append((str(item.get("label") or os.path.basename(item["path"])), item["path"]))
-    return out
-
-
-def remember_trained_model(label: str, path: str) -> None:
-    """Lists a trained model first among 物体検出（AI）'s models (the same file once)."""
-    path = os.path.abspath(path)
-    kept = [(l, p) for l, p in trained_models() if os.path.abspath(p) != path]
-    items = [{"label": label, "path": path}] + [{"label": l, "path": p} for l, p in kept]
-    _set("trained_models", json.dumps(items[:TRAINED_MAX], ensure_ascii=False))
-
-
-def request_export_folder() -> str:
-    """Where the day's request files go for systems whose settings name no folder (the last one chosen)."""
-    return _get("request_export_folder")
-
-
-def set_request_export_folder(folder: str) -> None:
-    _set("request_export_folder", folder.strip())
-
-
-def plan_file_filter() -> dict:
-    """The 「撮像計画ファイル出力」 table's system and series filters last chosen (each person writes their own systems)."""
-    return {"system": _get("plan_files/system"), "series": _get("plan_files/series")}
-
-
-def set_plan_file_filter(system: str, series: str) -> None:
-    _set("plan_files/system", system)
-    _set("plan_files/series", series)
-
-
-def group_filter(where: str) -> str:
-    """The 依頼グループ filter last chosen in a dock (`requests`, `plan_files`, `schedule`, `place_schedule`): a
-    group's name, *mine* (自分のグループ), *none* (グループなし), several of them as a JSON list (ticked together,
-    2026-11-16; ui/check_filter.py), or "" for all (core/request/groups.py)."""
-    return _get(f"request_groups/{where}")
-
-
-def set_group_filter(where: str, value: str) -> None:
-    _set(f"request_groups/{where}", value or "")

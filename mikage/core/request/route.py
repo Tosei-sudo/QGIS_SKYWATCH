@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from ..plan.satellites import SatelliteSpec
+from ..plan.api import SatelliteSpec
 from .model import ImagingRequest, bbox_of, in_rings
 from .systems import ExportSystem
 

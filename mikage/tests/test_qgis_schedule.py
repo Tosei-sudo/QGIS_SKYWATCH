@@ -25,6 +25,8 @@ from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.context import PluginContext  # noqa: E402
 from mikage.tests.fake_esri import FakeEsri, FakeLayer  # noqa: E402
 from mikage.tests.qgis_fakes import FakeIface, wait_for  # noqa: E402
+from mikage.features.requests import Requests  # noqa: E402
+from mikage.tests.feature_harness import small_plugin  # noqa: E402
 from mikage.ui.schedule_dock import _when, days_text  # noqa: E402
 
 LEDGER = "https://example.com/arcgis/rest/services/Req/FeatureServer/0"
@@ -65,10 +67,9 @@ def plugin(tmp_path, monkeypatch):
     htypes.update(RUN_DATE="esriFieldTypeDate", TARGET_DATE="esriFieldTypeDate", PLANNED_AT="esriFieldTypeDate", CLOUD="esriFieldTypeDouble",
                   SCENES="esriFieldTypeInteger", BOOST_DONE="esriFieldTypeInteger")
     history = fake.add_layer(HISTORY, FakeLayer(htypes, "esriGeometryPolygon"))
-    from mikage import classFactory
 
     iface = FakeIface()
-    p = classFactory(iface)
+    p = small_plugin(iface, Requests)
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(fake))
     p.initGui()
     for dock in p.docks.values():
@@ -273,9 +274,8 @@ def test_no_history_no_plan(tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"requestStores": [{"url": LEDGER}]}), encoding="utf-8")
     settings.set_config_source(str(config))
-    from mikage import classFactory
 
-    p = classFactory(FakeIface())
+    p = small_plugin(FakeIface(), Requests)
     p.initGui()
     try:
         dock = p.api.schedule

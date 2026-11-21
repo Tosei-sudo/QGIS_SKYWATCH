@@ -13,7 +13,11 @@ from qgis.PyQt.QtWidgets import QApplication  # noqa: E402
 
 from mikage.core.api_reference import ENTRIES, GROUPS, HOW_TO  # noqa: E402
 from mikage.plugin import PluginApi  # noqa: E402
+from mikage.tests.feature_harness import ALL  # noqa: E402
 from mikage.tests.test_qgis_alerts import plugin  # noqa: E402,F401
+
+#: The features the plugin fixture starts with here (tests/feature_harness.py): every entry of plugin.api.
+PLUGIN_FEATURES = ALL
 
 
 @pytest.fixture(autouse=True)

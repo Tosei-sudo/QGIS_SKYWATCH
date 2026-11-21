@@ -17,7 +17,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
-from ..core.ai.transfer import TRANSFER_ROLES, DetectionOutput, Plan, Target, missing_fields, target_of
+from ..core.ai.api import TRANSFER_ROLES, DetectionOutput, Plan, Target, missing_fields, target_of
 from ..qgis_io import ai_transfer_io
 from ..qgis_io.tasks import run_task
 from . import last_inputs

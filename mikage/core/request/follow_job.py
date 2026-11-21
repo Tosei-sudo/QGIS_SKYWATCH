@@ -44,10 +44,10 @@ from typing import Callable, Optional, Sequence
 from urllib.parse import urljoin
 
 from .. import audit, edit_stamp, time_zone
-from ..catalog import CatalogConfig
+from ..catalog.api import CatalogConfig
 from ..config import PluginConfig, parse_config_text, read_config_file
 from ..esri import EsriClient, EsriError, UnreachableError, form_body, quote
-from ..plan.names import NO_NAMES, SatelliteNames, load_satellite_names
+from ..plan.api import NO_NAMES, SatelliteNames, load_satellite_names
 from .follow import follow_and_save, found_text, with_settled_times
 from .model import ImagingRequest, day_bounds
 from .store import HistoryRow, RequestStoreConfig, history_where, load_history, load_requests

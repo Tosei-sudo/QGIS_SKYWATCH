@@ -22,13 +22,13 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit, edit_stamp
-from ..core.obs.alerts import load_geofences, load_named_areas
-from ..core.obs.export import (
+from ..core.obs.api import load_geofences, load_named_areas
+from ..core.obs.api import (
     BASES, FENCE_SOURCES, PLACE_SOURCES, ExportContext, ExportFilter, ExportSettings, items_of, render, select_records, settings_for,
 )
-from ..core.obs.flows import now_ms
-from ..core.obs.place_cache import areas_at, points_of
-from ..core.obs.scope import RecordQuery
+from ..core.obs.api import now_ms
+from ..core.obs.api import areas_at, points_of
+from ..core.obs.api import RecordQuery
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
@@ -276,7 +276,7 @@ class ExportDialog(QDialog):
         taxa = book.taxonomy()
         out = [t.path[0] for t in taxa if len(t.path) == 1]
         for o in book.records:
-            r = (self.dock._kind_path(o.kind, taxa) or [""])[0]
+            r = (self.dock.kind_path(o.kind, taxa) or [""])[0]
             if r and r not in out:
                 out.append(r)
         return out
@@ -488,7 +488,7 @@ class ExportDialog(QDialog):
         else:
             rows = book.records
         taxa = book.taxonomy()
-        return select_records(rows, flt, book.confidences(), lambda kind: self.dock._kind_path(kind, taxa)), ""
+        return select_records(rows, flt, book.confidences(), lambda kind: self.dock.kind_path(kind, taxa)), ""
 
     def _ask(self) -> None:
         """Asks the shared store for the records of the form's period and place (one question at a time)."""
@@ -537,7 +537,7 @@ class ExportDialog(QDialog):
         if not rows:
             self._say(why or self.tr("該当する記録なし"))
             return None
-        from ..core.obs.csv import local_time
+        from ..core.obs.api import local_time
 
         dialog = SummaryDialog(self.dock.context.text_assist, rows, local_time, self.tr("条件に合う記録"), self)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -555,7 +555,7 @@ class ExportDialog(QDialog):
 
     def search_kinds(self) -> list[str]:
         """言葉で探す's kinds (「船舶 > 補給艦」): a class the words name gives its 大分類."""
-        from ..core.obs.taxonomy import kind_of
+        from ..core.obs.api import kind_of
 
         book = self.dock.book
         return [kind_of(t.path) for t in book.taxonomy()] if book is not None else []
@@ -613,7 +613,7 @@ class ExportDialog(QDialog):
         s = self.settings
         now = now_ms()
         if not path:
-            from ..core.obs.export import file_name_of
+            from ..core.obs.api import file_name_of
 
             kind = "JSON (*.json)" if f.format == "json" else "CSV (*.csv *.txt)"
             path, _ = QFileDialog.getSaveFileName(self, self.tr("観測記録のエクスポート"), file_name_of(f, now), kind)
@@ -648,7 +648,7 @@ class ExportDialog(QDialog):
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
             audit.record("export", "observations", path, count=out.count, detail={"format": getattr(f, "name", "") or ""}, file=path)
             self._say(self.tr("{n} 件を保存: {p}{note}").format(n=out.count, p=path, note=note))
-            self.dock._say(self.tr("観測記録をエクスポート: {p}").format(p=path))
+            self.dock.say(self.tr("観測記録をエクスポート: {p}").format(p=path))
 
         def failed(message: str) -> None:
             self.save_button.setEnabled(True)

@@ -29,7 +29,7 @@ from typing import Any, Iterable, Optional, Sequence
 
 from . import edit_stamp
 from .esri import EsriClient, EsriError, fit_value, quote
-from .obs.alerts import EsriSource, _source_of
+from .sources import EsriSource, esri_source_of as _source_of
 from .util import formula_safe, is_number, is_record, js_string, ms_of
 
 #: The item types, and what the plugin calls them.

@@ -17,12 +17,12 @@ from typing import Any, Callable, Optional
 
 from .esri import EsriClient
 from .gpkg import GeoPackage
-from .obs.drafts import KIND as DRAFT, OutboxDrafts
-from .obs.offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
-from .obs.setup import LOCAL_LABEL, store_sets
-from .obs.stores import LocalObservationStore
+from .obs.api import KIND as DRAFT, OutboxDrafts
+from .obs.api import OfflineAreaStore, OfflineObservationStore, upload_drafts
+from .obs.api import LOCAL_LABEL, store_sets
+from .obs.api import LocalObservationStore
 from .offline import KINDS, OfflineWork, UploadReport, now_ms
-from .request.store import upload_requests
+from .request.api import upload_requests
 
 
 def upload_all(config: Any, client: Callable[[], EsriClient], token_for: Callable[[str, Optional[str]], Optional[str]],

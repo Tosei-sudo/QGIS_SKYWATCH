@@ -24,11 +24,11 @@ from qgis.PyQt.QtWidgets import (
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
-from ..core.request.quota import (
-    MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage, read_quota_data,
+from ..core.request.api import (
+    MISSED, NO_ROWS, PACE_AHEAD, PENDING, QUOTA_REJECTED as REJECTED, UNCOUNTED_REASONS, USED, QuotaData, Usage,
 )
-from ..core.request.shot_view import _time
-from ..core.request.store import RequestStoreConfig, update_shots
+from ..core.request.api import _time, ScheduleRepository
+from ..core.request.api import RequestStoreConfig
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .fit import fit_text
@@ -167,6 +167,10 @@ class QuotaDialog(QDialog):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token)
 
+    def repository(self) -> ScheduleRepository:
+        """The store's reads and writes (データ窓口), its token as it is now."""
+        return ScheduleRepository(self.context.esri(), self.store, self.token())
+
     def chosen_day(self) -> date:
         return _back(self.day, int(self.year.currentData() or 0))
 
@@ -180,12 +184,12 @@ class QuotaDialog(QDialog):
             self.status.setText(self.tr("{s} に年間撮像上限のテーブル（quotas）なし").format(s=self.store.label))
             self.render()
             return
-        store, client, token, day = self.store, self.context.esri(), self.token(), self.chosen_day()
+        repo, day = self.repository(), self.chosen_day()
         self.status.setText(self.tr("年間撮像上限と撮像の範囲を読み込み中…"))
         self.reload_button.setEnabled(False)
 
         def work(task):
-            return read_quota_data(client, store, token, [day], task.isCanceled)
+            return repo.read_quota_data([day], task.isCanceled)
 
         def done(data):
             self.task = None
@@ -294,10 +298,10 @@ class QuotaDialog(QDialog):
     def _save(self, changes: list, what: str) -> None:
         if self.task is not None:
             return
-        store, client, token = self.store, self.context.esri(), self.token()
+        repo = self.repository()
 
         def work(task):
-            return update_shots(client, store, token, changes)
+            return repo.update_shots(changes)
 
         def done(saved):
             self.task = None

@@ -60,9 +60,10 @@ import numpy as np
 
 from ..coords import angle_pattern, format_angle
 from ..esri import EsriClient, EsriError, fit_value, quote
-from ..time_zone import UTC, TimeZone, parse_time_zone
-from ..util import encodable, is_name, is_number, is_record, js_string, layer_url, ms_of, use_legacy_names, utc_text
-from ..request.export import format_time
+from ..sources import EsriSource, esri_source_of  # noqa: F401 (EsriSource: read from here too)
+from ..time_zone import UTC, TimeZone, format_time, parse_time_zone
+from .. import sql
+from ..util import encodable, is_name, is_number, is_record, js_string, ms_of, use_legacy_names
 from .geo import get_distance, to_fixed
 from .model import ConfidenceLevel, Observation
 from .taxonomy import kind_of, path_of, within
@@ -144,8 +145,6 @@ DEFAULT_LOG_FIELDS = {
 }
 #: What `rule` says of a record added by hand (outside the conditions).
 MANUAL_RULE = "手動"
-_FEATURE_LAYER = re.compile(r"/(Feature|Map)Server/\d+/?$", re.IGNORECASE)
-_EDITABLE = re.compile(r"/FeatureServer/\d+/?$", re.IGNORECASE)
 
 
 @dataclass
@@ -180,15 +179,6 @@ class AlertField:
     #: A field of the named areas (`place`, `places`, `place.<key>`…): only the areas of these kinds
     #: (KIND, any case) are the record's places for it — the smallest of them its place; all when empty.
     place_kinds: tuple[str, ...] = ()
-
-
-@dataclass
-class EsriSource:
-    """An Esri layer or table and its attribute names by role."""
-    url: str
-    fields: dict[str, str]
-    token: Optional[str] = None
-    where: Optional[str] = None
 
 
 @dataclass
@@ -606,34 +596,8 @@ def _affix(v: dict, key: str, at: str, problems: list[str]) -> str:
     return ""
 
 
-def _source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str], editable: bool = False,
-               ) -> Optional[EsriSource]:
-    v = {"url": v} if isinstance(v, str) else v
-    pattern = _EDITABLE if editable else _FEATURE_LAYER
-    if not is_record(v) or not isinstance(v.get("url"), str) or not pattern.search(v["url"].split("?", 1)[0]):
-        what = "編集できる …/FeatureServer/0" if editable else "…/FeatureServer/0"
-        problems.append(f"{at} は {what} のようなレイヤー・テーブルの URL で指定")
-        return None
-    fields = dict(defaults)
-    if is_record(v.get("fields")):
-        for k, name in v["fields"].items():
-            if k not in defaults:
-                problems.append(f"{at}.fields.{k} は使用不可の役割（{'・'.join(defaults)}）")
-            elif is_name(name):
-                fields[k] = name
-            else:
-                problems.append(f"{at}.fields.{k} は属性名で指定")
-    token, where = v.get("token"), v.get("where")
-    return EsriSource(
-        url=layer_url(v["url"]), fields=fields,
-        token=token if isinstance(token, str) and token else None,
-        where=where.strip() if isinstance(where, str) and where.strip() else None,
-    )
-
-
-#: An Esri layer or table of the settings file (URL, or { url, fields, where, token }); also used by other settings.
-esri_source_of = _source_of
-
+#: An Esri layer or table of the settings file (core/sources.py; read from here too).
+_source_of = esri_source_of
 
 def _lines_of(v: Any, at: str, problems: list[str]) -> str:
     if v is None:
@@ -1305,7 +1269,7 @@ def poll_log(client: EsriClient, settings: AlertSettings, known: Iterable[int], 
         raise EsriError(f"通報テーブルに属性 {f['obsId']} なし")
     clauses = [table.where] if table.where else []
     if since is not None and f["reportedAt"] in types:
-        clauses.append(f"{f['reportedAt']} >= TIMESTAMP '{utc_text(since)}'")
+        clauses.append(f"{f['reportedAt']} >= {sql.timestamp(since)}")
     where = " AND ".join(f"({c})" for c in clauses) or "1=1"
     answer = client.ask(f"{table.url}/query", {"where": where, "returnIdsOnly": "true"}, token)
     ids = {int(i) for i in answer.get("objectIds") or [] if is_number(i)}
@@ -1337,9 +1301,9 @@ def load_log(client: EsriClient, settings: AlertSettings, start: Optional[float]
     if f["reportedAt"] in types:
         # UTC literals: the client shifts them for services keeping local times (time_zone.to_service).
         if start is not None:
-            clauses.append(f"{f['reportedAt']} >= TIMESTAMP '{utc_text(start)}'")
+            clauses.append(f"{f['reportedAt']} >= {sql.timestamp(start)}")
         if end is not None:
-            clauses.append(f"{f['reportedAt']} <= TIMESTAMP '{utc_text(end)}'")
+            clauses.append(f"{f['reportedAt']} <= {sql.timestamp(end)}")
     rows = client.query_all(table.url, " AND ".join(f"({c})" for c in clauses) or "1=1", token, geometry=False,
                             limit=limit, cut=True)
     out = [_log_row(r.get("attributes") or {}, f, oid) for r in rows]

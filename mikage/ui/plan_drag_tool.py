@@ -11,7 +11,7 @@ from qgis.core import QgsPointXY
 from qgis.gui import QgsMapTool
 from qgis.PyQt.QtCore import Qt
 
-from ..core.plan.targets import in_polygon
+from ..core.plan.api import in_polygon
 from ..qgis_io.geometry import to_wgs84
 
 

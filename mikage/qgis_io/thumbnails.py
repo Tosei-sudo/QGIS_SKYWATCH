@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 from qgis.PyQt.QtCore import QObject, QUrl, Qt
 from qgis.PyQt.QtGui import QImage
 
-from ..core.catalog.thumbnail import is_address
+from ..core.catalog.api import is_address
 from ..core.esri import EsriError
 from .tasks import Cancelled, run_task
 

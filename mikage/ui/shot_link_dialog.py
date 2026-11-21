@@ -22,13 +22,12 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.esri import EsriError
-from ..core.request.follow import save_marked
-from ..core.request.follow_job import requests_of
-from ..core.request.linking import (
-    MAX_IMAGES, find_images, gap_text, link_findings, link_text, links_of, time_text, units_of, unlink_findings, with_links,
+from ..core.request.api import (
+    MAX_IMAGES, find_images, gap_text, link_findings, link_text, linking_time_text as time_text, units_of, unlink_findings,
+    with_links,
 )
-from ..core.request.model import jst_day
-from ..core.request.store import history_where, load_day, load_history, load_shots
+from ..core.request.api import jst_day
+from ..core.request.api import history_where
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import ask_no
@@ -227,19 +226,19 @@ class ShotLinkDialog(QDialog):
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
             return
         day = self.chosen_day().isoformat()
-        client, token = self.context.esri(), dock.token()
+        repo = dock.repository()
         self.status.setText(self.tr("{d} のショットを読み込み中…").format(d=day))
 
         def work(task):
             notes = []
-            rows = load_day(client, store, token, day, task.isCanceled)
+            rows = repo.load_day(day, task.isCanceled)
             try:
-                shots = load_shots(client, store, token, day, task.isCanceled)
+                shots = repo.load_shots(day, task.isCanceled)
             except EsriError as error:
                 # The rows alone still make the shots (their own areas).
                 shots = []
                 notes.append(f"撮像の範囲を読めず、依頼の範囲で表示（{error}）")
-            requests = requests_of(client, store, token, [r.request_id for r in rows if r.result == "採用"], task.isCanceled)
+            requests = repo.requests_of([r.request_id for r in rows if r.result == "採用"], task.isCanceled)
             return day, rows, shots, requests, notes
 
         def done(result):
@@ -341,15 +340,15 @@ class ShotLinkDialog(QDialog):
         if not unit.rings:
             self.status.setText(self.tr("このショットには範囲がないため、画像を探せない"))
             return
-        client, token = self.context.esri(), dock.token()
+        repo = dock.repository()
         catalog_token = self.context.token_for(catalog.url, catalog.token)
         requests = self.requests
         self.status.setText(self.tr("{c} から画像を探し中…").format(c=catalog.label))
 
         def work(task):
-            names = self.context.satellite_names(client, task.isCanceled)
-            found = find_images(client, catalog, catalog_token, unit, requests, n, n, names, cancelled=task.isCanceled)
-            return found, links_of(client, store, token, [c.image_id for c in found], task.isCanceled)
+            names = self.context.satellite_names(repo.client, task.isCanceled)
+            found = find_images(repo.client, catalog, catalog_token, unit, requests, n, n, names, cancelled=task.isCanceled)
+            return found, repo.links_of([c.image_id for c in found], task.isCanceled)
 
         def done(result):
             found, links = result
@@ -487,19 +486,19 @@ class ShotLinkDialog(QDialog):
 
     def _save(self, findings: list, text: str) -> None:
         dock, store = self.dock, self.dock.store
-        client, token, now = self.context.esri(), dock.token(), _now_ms()
+        repo, now = dock.repository(), _now_ms()
         requests, unit = self.requests, self.chosen_unit()
         ids = [c.image_id for c in self.candidates]
         self.status.setText(self.tr("保存中…"))
 
         def work(task):
             # Every row of those requests (not only the day's): whether another is still 撮像済み.
-            rows = load_history(client, store, token, history_where(store, request_ids=[f.row.request_id for f in findings]),
-                                cancelled=task.isCanceled)
+            rows = repo.load_history(history_where(store, request_ids=[f.row.request_id for f in findings]),
+                                     cancelled=task.isCanceled)
             problems = []
-            changed = save_marked(client, store, token, findings, requests, rows, now, problems)
-            fresh = requests_of(client, store, token, list(requests), task.isCanceled) if changed else None
-            return changed, problems, links_of(client, store, token, ids, task.isCanceled), fresh
+            changed = repo.save_marked(findings, requests, rows, now, problems)
+            fresh = repo.requests_of(list(requests), task.isCanceled) if changed else None
+            return changed, problems, repo.links_of(ids, task.isCanceled), fresh
 
         def done(result):
             changed, problems, links, fresh = result

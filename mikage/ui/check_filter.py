@@ -60,7 +60,7 @@ def kept_values(key: str) -> Optional[list]:
     The values kept under `key` (QgsSettings): [] for all, None when nothing
     was kept. One value is kept as it is, several as a JSON list.
     """
-    text = settings._get(key, "\0")
+    text = settings.pref(key, "\0")
     if text == "\0":
         return None
     if not text:
@@ -78,7 +78,7 @@ def kept_values(key: str) -> Optional[list]:
 def keep_values(key: str, values: Sequence[str]) -> None:
     """Keeps the values ticked under `key` (none: "" for all)."""
     values = [str(v) for v in values]
-    settings._set(key, "" if not values else values[0] if len(values) == 1 else json.dumps(values, ensure_ascii=False))
+    settings.set_pref(key, "" if not values else values[0] if len(values) == 1 else json.dumps(values, ensure_ascii=False))
 
 
 class _Delegate(QStyledItemDelegate):
