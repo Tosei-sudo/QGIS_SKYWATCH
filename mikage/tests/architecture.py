@@ -45,6 +45,8 @@ FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core
 KERNEL = (
     "core.esri", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
     "core.auth", "core.json_pieces", "core.coords", "core.shapes", "core.sql", "core.sources", "core.win64",
+    # The features' doors read when asked (core/<機能>/api.py).
+    "core.door",
     # Shared by two features each: an image recorded on without its file (the catalog makes them, the observations
     # keep them) and the values of the files written for others (撮像依頼の日次出力, 観測記録のエクスポート).
     "core.listed_image", "core.json_schema", "core.file_values",

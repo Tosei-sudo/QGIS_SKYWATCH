@@ -69,6 +69,8 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 機能パッケージの外（画面・qgis_io・他の機能・plugin.py）は `core/<機能>/api.py` から import する。パッケージの中は互いに直接 import してよい。中を並べ替えても外は壊れない。
 
+窓口は名前の一覧を `if TYPE_CHECKING:` の import で書き、`__getattr__, __dir__ = lazy(__name__)`（`core/door.py`）で、使われた名前のモジュールだけをそのとき読む（窓口を import しただけでは中身を全部読まない。プラグインの起動が窓口のぶん遅くならないように）。名前を足すときはその import に足し、`__all__` にも書く（`test_doors.py` が、一覧の名前がすべて取れることを確かめる）。
+
 ## 共通基盤（`KERNEL`）
 
 `core.esri`（EsriClient・Transport）、`core.util`、`core.time_zone`・`core.time_text`（日時）、`core.sql`（SQL の日時の書き方・`since_condition`）、`core.sources`（Esri の表の指定）、`core.shapes`（図形・`esri_rings`）、`core.listed_image`（一覧の画像）、`core.json_schema`（JSON Schema の確かめ）、`core.file_values`（ファイルに書く値の形）、`core.audit`・`core.edit_stamp`・`core.offline`・`core.auth`・`core.gpkg` ほか、`qgis_io.tasks`・`qgis_io.network`・`qgis_io.geometry`、`ui.fit` など。一覧は `architecture.py` の `KERNEL`。

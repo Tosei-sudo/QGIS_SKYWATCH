@@ -5,66 +5,73 @@ everything outside imports through here, so its inside can be rearranged behind 
 """
 from __future__ import annotations
 
-from .adoption import (
-    answer_changes, manual_changes, manual_unrequested, match_answers, NOT_IN_FILE, read_window, Reading, unrequested_rows,
-)
-from .bulk import apply_change, RequestChange
-from .chances import ahead_span, chances_of, FORM_DAYS, form_span, form_text, wanted
-from .covered import read_covered
-from .export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
-from .follow import follow_and_save, found_text, in_days, marked, missed_ids, next_step, save_marked, tally, with_settled_times
-from .follow_job import main, requests_of
-from .from_plan import requests_of_plan
-from .geometry import look_text, read_last_looks
-from .groups import first_group, listed, matches, MINE, mine, NO_GROUP, offered, read_groups, RequestGroup, same
-from .last import remembered, with_remembered
-from .linking import unit_key
-from .model import (
-    bbox_of, CATEGORIES, day_bounds, ImagingRequest, JST, jst_day, level_of, PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN,
-    priority_text, square_rings,
-)
-from .passes import day_passes, find_passes
-from .pick import checks_of, Picked, picked, summary, unknown
-from .place_plans import HEAD, LABEL, Lane, lane_at, Layout, layout, Mark, mark_tip, marks_at, REQUEST, ROW
-from .quota import QuotaData, read_quota_data
-from .repository import RequestRepository, ScheduleRepository
-from .rows import code_text, field_roles, NUMBERS, request_of_row, row_of, row_problems, WRITTEN
-from .shot_view import _time, companions, shot_text, shot_tip
-from .simulate import (
-    change_of, changed_systems, deadline_text, horizon_days, MOST_DAYS, run_passes, simulate, SUMMARY, SystemChange,
-)
-from .store import (
-    add_history, add_shots, ADOPTION_ROLES, AWAITING, count_history, day_counts, DECLINED, DEFAULT_REQUEST_FIELDS,
-    delete_history_rows, delete_request, delete_shots, followed_where, handed_where, HELD_BACK, history_has, history_where,
-    HistoryRow, IMAGE_ARRIVED, load_day, load_days, load_history, load_requests, load_shots, load_shots_where,
-    load_system_rows, new_request_id, PLANNED, replaced_where, RequestStoreConfig, save_request, save_requests, Saved,
-    shot_days_where, shots_replaced_where, state_of, STATES, UNREQUESTED, update_history, update_requests, update_shots,
-    upload_requests, waiting_ids,
-)
-from .use_time import read_other_uses, UseBook
-from .view import BOOST, CandidateFilter, NO_SYSTEM, series_choices, shown
-from .workflow import (
-    boost_changes, clouds_of, DayPlan, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written,
-    old_tle_text, orbiting, plan_day, radar_of, Rewrite, shots_of, written_summary,
-)
-from .daily import (
-    HELD, TAKEN, chance_text, cloud_tip, cover_text, time_text as daily_time_text, kind_text, merge_text,
-    occurrence_text, pace_text, part_text, pass_text, room_text, satellite_name,
-)
-from .linking import (
-    MAX_IMAGES, find_images, gap_text, link_findings, link_text, time_text as linking_time_text, units_of,
-    unlink_findings, with_links,
-)
-from .model import (
-    ACHIEVES, LOOK_SIDES, ORBIT_DIRS, KINDS as REQUEST_KINDS, Repeat, STATUSES, TIMES_OF_DAY, repeat_of, repeat_text,
-    shape_text,
-)
-from .place_plans import (
-    DAYS, DAY_CHOICES, MOST_PLACES, NOT_HELD_BACK, KINDS as PLACE_KINDS, Place, SHOWN, lanes_of, mark_name, next_of,
-    sort_by_next, span_of, taken_text, tally_text,
-)
-from .quota import MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED as QUOTA_REJECTED, UNCOUNTED_REASONS, USED, Usage
-from .result_file import ADOPTED, REJECTED as RESULT_REJECTED, WAITING, read_answers
+from typing import TYPE_CHECKING
+
+from ..door import lazy
+
+if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
+    from .adoption import (
+        answer_changes, manual_changes, manual_unrequested, match_answers, NOT_IN_FILE, read_window, Reading, unrequested_rows,
+    )
+    from .bulk import apply_change, RequestChange
+    from .chances import ahead_span, chances_of, FORM_DAYS, form_span, form_text, wanted
+    from .covered import read_covered
+    from .export import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
+    from .follow import follow_and_save, found_text, in_days, marked, missed_ids, next_step, save_marked, tally, with_settled_times
+    from .follow_job import main, requests_of
+    from .from_plan import requests_of_plan
+    from .geometry import look_text, read_last_looks
+    from .groups import first_group, listed, matches, MINE, mine, NO_GROUP, offered, read_groups, RequestGroup, same
+    from .last import remembered, with_remembered
+    from .linking import unit_key
+    from .model import (
+        bbox_of, CATEGORIES, day_bounds, ImagingRequest, JST, jst_day, level_of, PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN,
+        priority_text, square_rings,
+    )
+    from .passes import day_passes, find_passes
+    from .pick import checks_of, Picked, picked, summary, unknown
+    from .place_plans import HEAD, LABEL, Lane, lane_at, Layout, layout, Mark, mark_tip, marks_at, REQUEST, ROW
+    from .quota import QuotaData, read_quota_data
+    from .repository import RequestRepository, ScheduleRepository
+    from .rows import code_text, field_roles, NUMBERS, request_of_row, row_of, row_problems, WRITTEN
+    from .shot_view import _time, companions, shot_text, shot_tip
+    from .simulate import (
+        change_of, changed_systems, deadline_text, horizon_days, MOST_DAYS, run_passes, simulate, SUMMARY, SystemChange,
+    )
+    from .store import (
+        add_history, add_shots, ADOPTION_ROLES, AWAITING, count_history, day_counts, DECLINED, DEFAULT_REQUEST_FIELDS,
+        delete_history_rows, delete_request, delete_shots, followed_where, handed_where, HELD_BACK, history_has, history_where,
+        HistoryRow, IMAGE_ARRIVED, load_day, load_days, load_history, load_requests, load_shots, load_shots_where,
+        load_system_rows, new_request_id, PLANNED, replaced_where, RequestStoreConfig, save_request, save_requests, Saved,
+        shot_days_where, shots_replaced_where, state_of, STATES, UNREQUESTED, update_history, update_requests, update_shots,
+        upload_requests, waiting_ids,
+    )
+    from .use_time import read_other_uses, UseBook
+    from .view import BOOST, CandidateFilter, NO_SYSTEM, series_choices, shown
+    from .workflow import (
+        boost_changes, clouds_of, DayPlan, forecast_places, history_of, keep_answers, missed_done, new_run_id, not_written,
+        old_tle_text, orbiting, plan_day, radar_of, Rewrite, shots_of, written_summary,
+    )
+    from .daily import (
+        HELD, TAKEN, chance_text, cloud_tip, cover_text, time_text as daily_time_text, kind_text, merge_text,
+        occurrence_text, pace_text, part_text, pass_text, room_text, satellite_name,
+    )
+    from .linking import (
+        MAX_IMAGES, find_images, gap_text, link_findings, link_text, time_text as linking_time_text, units_of,
+        unlink_findings, with_links,
+    )
+    from .model import (
+        ACHIEVES, LOOK_SIDES, ORBIT_DIRS, KINDS as REQUEST_KINDS, Repeat, STATUSES, TIMES_OF_DAY, repeat_of, repeat_text,
+        shape_text,
+    )
+    from .place_plans import (
+        DAYS, DAY_CHOICES, MOST_PLACES, NOT_HELD_BACK, KINDS as PLACE_KINDS, Place, SHOWN, lanes_of, mark_name, next_of,
+        sort_by_next, span_of, taken_text, tally_text,
+    )
+    from .quota import MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED as QUOTA_REJECTED, UNCOUNTED_REASONS, USED, Usage
+    from .result_file import ADOPTED, REJECTED as RESULT_REJECTED, WAITING, read_answers
+
+__getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
     "RequestRepository", "ScheduleRepository",

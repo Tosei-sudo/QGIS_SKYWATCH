@@ -5,44 +5,51 @@ everything outside imports through here, so its inside can be rearranged behind 
 """
 from __future__ import annotations
 
-from .access import (
-    best_scene, framed, look_at, Opportunity, plan_access, PlanOptions, PlanResult, PlanTarget, reach_of, satrec_of,
-)
-from .catalogs import load_satellites, load_sensor_modes
-from .cover import cover_plan
-from .modes import sample_sensor_modes, with_modes
-from .moving import (
-    DEFAULT_UNCERTAINTY, guess_speed_unit, guess_target_fields, MAX_HORIZON, MAX_SHIPS, places_layers, plan_ships, Report,
-    ShipState, SPEED_UNITS, targets_of, UncertaintyModel,
-)
-from .names import best_named, load_satellite_names, names_satellite, NO_NAMES, plain, SatelliteNames
-from .orbit import ecef_of, Frame, frame_of, lon_lat_of, norm, Orbit, point_at, R, sun_angles, track_angles, track_rate, unit
-from .outages import (
-    attach, blocking, check_outage, delete_outages, DIRECTIONS, handed_hit, leave_out, load_outages, new_id, on_day, ONGOING,
-    OUTAGE, Outage, outage_reason, OUTAGE_WARNING, OVERDUE, PLANNED, RECOVERED, save_outage, stopped, summary_text, warning_of,
-    when_text,
-)
-from .output import (
-    cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, LayerField, local_text, mode_facts,
-    natural_key, NO_OPPORTUNITY, percent, plan_csv, plan_features, PlanLayer, side_text, sorted_ops, split_antimeridian,
-    summary_all, summary_cover,
-)
-from .pairs import repeat_pairs, RepeatOptions, stereo_pairs, StereoOptions
-from .remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
-from .revisit import box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_csv, revisit_layer, revisit_stats
-from .satellites import BUILT_IN_DEFAULTS, platform_key, sample_satellites, satellite_label, satellites_from_text, SatelliteSpec
-from .scene import pass_shapes, shift_scene, track_place
-from .targets import in_polygon, MAX_POINTS, MAX_TARGETS, name_of, priority_of, spread_out, target_of
-from .timeline import bar_at, HEAD, Layout, layout, ROW
-from .track import MAX_DAYS, sample_at, satellite_track, TRACK_COLORS, track_layers, track_rows, track_shapes, track_ticks
-from .tree import facts_of, Group, is_old, label_of, Listed, SatelliteChoice, source_text, tle_age_days
-from .weather import (
-    apply_clouds, cloud_at, CloudForecastConfig, CloudForecasts, CloudSeries, DEFAULT_CLOUD_FORECAST, fetch_clouds,
-    FORECAST_DAYS, GRID, key_of, PAST_DAYS, places_for,
-)
-from .weather_file import forecast_file, read_grid
-from .output import OLD_TLE
-from .satellites import SAMPLE_SOURCE
+from typing import TYPE_CHECKING
+
+from ..door import lazy
+
+if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
+    from .access import (
+        best_scene, framed, look_at, Opportunity, plan_access, PlanOptions, PlanResult, PlanTarget, reach_of, satrec_of,
+    )
+    from .catalogs import load_satellites, load_sensor_modes
+    from .cover import cover_plan
+    from .modes import sample_sensor_modes, with_modes
+    from .moving import (
+        DEFAULT_UNCERTAINTY, guess_speed_unit, guess_target_fields, MAX_HORIZON, MAX_SHIPS, places_layers, plan_ships, Report,
+        ShipState, SPEED_UNITS, targets_of, UncertaintyModel,
+    )
+    from .names import best_named, load_satellite_names, names_satellite, NO_NAMES, plain, SatelliteNames
+    from .orbit import ecef_of, Frame, frame_of, lon_lat_of, norm, Orbit, point_at, R, sun_angles, track_angles, track_rate, unit
+    from .outages import (
+        attach, blocking, check_outage, delete_outages, DIRECTIONS, handed_hit, leave_out, load_outages, new_id, on_day, ONGOING,
+        OUTAGE, Outage, outage_reason, OUTAGE_WARNING, OVERDUE, PLANNED, RECOVERED, save_outage, stopped, summary_text, warning_of,
+        when_text,
+    )
+    from .output import (
+        cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, LayerField, local_text, mode_facts,
+        natural_key, NO_OPPORTUNITY, percent, plan_csv, plan_features, PlanLayer, side_text, sorted_ops, split_antimeridian,
+        summary_all, summary_cover,
+    )
+    from .pairs import repeat_pairs, RepeatOptions, stereo_pairs, StereoOptions
+    from .remind import due_reminders, merge_reminders, new_reminders, plan_ics, reminder_of, reminder_text
+    from .revisit import box_of, cell_targets, grid_cells, hours_text, revisit_color, revisit_csv, revisit_layer, revisit_stats
+    from .satellites import BUILT_IN_DEFAULTS, platform_key, sample_satellites, satellite_label, satellites_from_text, SatelliteSpec
+    from .scene import pass_shapes, shift_scene, track_place
+    from .targets import in_polygon, MAX_POINTS, MAX_TARGETS, name_of, priority_of, spread_out, target_of
+    from .timeline import bar_at, HEAD, Layout, layout, ROW
+    from .track import MAX_DAYS, sample_at, satellite_track, TRACK_COLORS, track_layers, track_rows, track_shapes, track_ticks
+    from .tree import facts_of, Group, is_old, label_of, Listed, SatelliteChoice, source_text, tle_age_days
+    from .weather import (
+        apply_clouds, cloud_at, CloudForecastConfig, CloudForecasts, CloudSeries, DEFAULT_CLOUD_FORECAST, fetch_clouds,
+        FORECAST_DAYS, GRID, key_of, PAST_DAYS, places_for,
+    )
+    from .weather_file import forecast_file, read_grid
+    from .output import OLD_TLE
+    from .satellites import SAMPLE_SOURCE
+
+__getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
     "apply_clouds", "attach", "bar_at", "best_named", "best_scene", "blocking", "box_of", "BUILT_IN_DEFAULTS", "cell_targets",

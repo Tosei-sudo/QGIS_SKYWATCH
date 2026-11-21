@@ -5,22 +5,29 @@ everything outside imports through here, so its inside can be rearranged behind 
 """
 from __future__ import annotations
 
-from .color_classes import (
-    auto_label, class_palette, class_range, class_shares, color_classes, format_class_value, recolor, resize_classes,
-    set_bound,
-)
-from .color_scale import apply_palette, color_scale_palette, COLOR_SCALES
-from .histogram import bar_heights, channel_bins, channel_stats
-from .ops import curve_function, is_identity_curve, normalize_curve, OP_INFO
-from .pansharpen import fit_model, METHODS, pan_sharpen, PanSharpenModel, valid_pixels
-from .pipeline import Pipeline, PRESET_NAMES, PRESETS
-from .process import channel_tables, process
-from .raster import (
-    code_table, compute_raster_stretch, look_up, RasterHistogram, sample_raster_histogram, stretch_to_rgba, to_codes,
-    valid_mask,
-)
-from .rules import image_rule_for, resolve_bands
-from .stats import count_pixels, resolve_ops
+from typing import TYPE_CHECKING
+
+from ..door import lazy
+
+if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
+    from .color_classes import (
+        auto_label, class_palette, class_range, class_shares, color_classes, format_class_value, recolor, resize_classes,
+        set_bound,
+    )
+    from .color_scale import apply_palette, color_scale_palette, COLOR_SCALES
+    from .histogram import bar_heights, channel_bins, channel_stats
+    from .ops import curve_function, is_identity_curve, normalize_curve, OP_INFO
+    from .pansharpen import fit_model, METHODS, pan_sharpen, PanSharpenModel, valid_pixels
+    from .pipeline import Pipeline, PRESET_NAMES, PRESETS
+    from .process import channel_tables, process
+    from .raster import (
+        code_table, compute_raster_stretch, look_up, RasterHistogram, sample_raster_histogram, stretch_to_rgba, to_codes,
+        valid_mask,
+    )
+    from .rules import image_rule_for, resolve_bands
+    from .stats import count_pixels, resolve_ops
+
+__getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
     "apply_palette", "auto_label", "bar_heights", "channel_bins", "channel_stats", "channel_tables", "class_palette",

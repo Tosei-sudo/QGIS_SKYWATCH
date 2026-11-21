@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .areas import CheckedArea, box_ring
 from .book import ObservationBook
@@ -30,62 +30,67 @@ from .model import Observation
 from .report import ReportOptions
 from .scope import RecordQuery
 from .taxonomy import kind_of, path_of, within
+from ..door import lazy
+
 # What the rest of the plugin imports of 観測記録 (its door, docs/architecture.md R2).
-from . import place_cache, record_import
-from .alert_mail import build_mail
-from .alerts import AlertSettings, load_geofences, load_named_areas, LogRow, Moment, poll_log
-from .areas import area_label
-from .assignments import Assignment, progress_of, progress_text, same_person, STATUSES, update, with_status, work_text
-from .book import FormValues, joined_image, ObservedImage
-from .csv import csv_file_name, local_time, observations_csv
-from .drafts import KIND, OutboxDrafts
-from .export import (
-    BASES, ExportContext, ExportFilter, ExportSettings, FENCE_SOURCES, items_of, PLACE_SOURCES, render, select_records,
-    settings_for,
-)
-from .flows import CarryOver, ends_of, flow_of, flows, heading_text, MatchCandidate, now_ms, outline_of, side_points, two_point
-from .geo import bearing, get_distance, km_text
-from .glossary import Glossary, load_glossary, NO_GLOSSARY, Suggestion, Variant
-from .image_time import image_time
-from .mine import is_mine, my_names
-from .model import ListedImage, state_text, UNSEEN, unseen_label
-from .offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
-from .output import observation_layers, ObservationLayer
-from .repository import AlertLogRepository, AssignmentRepository
-from .place_cache import areas_at, points_of
-from .record_import import SourceRow
-from .report import report_file_name, ReportSelection
-from .satellites import clean, load_satellite_choices, NO_CHOICES, satellite_in_metadata, SatelliteChoices
-from .scope import merged
-from .setup import LOCAL_LABEL, store_sets, StoreSet
-from .similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
-from .stamps import default_count, entry_of, Layout, MOST, Sample, sample_of, sample_text, StampEntry
-from .stores import is_local_photo, LocalObservationStore, LocalPhotoStore, photo_url
-from .taxonomy import (
-    activities_at, children_of, class_by_name, find, level_name, member_index, name_label_of, nest, photos_at, spec_text,
-    SpecField, specs_at, Taxon,
-)
-from .alerts import (
-    AlertItem, OBJECT_LAYERS, select as alert_select, write_file as alert_write_file, build_lines, history_query,
-    layer_key_problems, load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note,
-    uses_source,
-)
-from .assignments import (
-    DONE, UNWORKED, roots_text as assignment_roots_text, holder_of, holders_of, is_shared, own_row, roots_by_person,
-    work_state,
-)
-from .continuation import AUTO, CANDIDATE, Continuation, Found as ContinuationFound, continuations
-from .export import file_name_of
-from .handover import (
-    HOUR_MS, HandoverData, handover_text, write_file as handover_write_file, keep_memo, last_memo, open_requests,
-)
-from .image_time import ORIGINS as IMAGE_TIME_ORIGINS
-from .mine import (
-    DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, roots_text as mine_roots_text,
-    select as mine_select, observer_names, root_of, since_of,
-)
-from .satellites import ORIGINS as SATELLITE_ORIGINS
-from .similar import Found as SimilarFound, gray_of, half_sizes
+if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
+    from . import place_cache, record_import
+    from .alert_mail import build_mail
+    from .alerts import AlertSettings, load_geofences, load_named_areas, LogRow, Moment, poll_log
+    from .areas import area_label
+    from .assignments import Assignment, progress_of, progress_text, same_person, STATUSES, update, with_status, work_text
+    from .book import FormValues, joined_image, ObservedImage
+    from .csv import csv_file_name, local_time, observations_csv
+    from .drafts import KIND, OutboxDrafts
+    from .export import (
+        BASES, ExportContext, ExportFilter, ExportSettings, FENCE_SOURCES, items_of, PLACE_SOURCES, render, select_records,
+        settings_for,
+    )
+    from .flows import CarryOver, ends_of, flow_of, flows, heading_text, MatchCandidate, now_ms, outline_of, side_points, two_point
+    from .geo import bearing, get_distance, km_text
+    from .glossary import Glossary, load_glossary, NO_GLOSSARY, Suggestion, Variant
+    from .image_time import image_time
+    from .mine import is_mine, my_names
+    from .model import ListedImage, state_text, UNSEEN, unseen_label
+    from .offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
+    from .output import observation_layers, ObservationLayer
+    from .repository import AlertLogRepository, AssignmentRepository
+    from .place_cache import areas_at, points_of
+    from .record_import import SourceRow
+    from .report import report_file_name, ReportSelection
+    from .satellites import clean, load_satellite_choices, NO_CHOICES, satellite_in_metadata, SatelliteChoices
+    from .scope import merged
+    from .setup import LOCAL_LABEL, store_sets, StoreSet
+    from .similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
+    from .stamps import default_count, entry_of, Layout, MOST, Sample, sample_of, sample_text, StampEntry
+    from .stores import is_local_photo, LocalObservationStore, LocalPhotoStore, photo_url
+    from .taxonomy import (
+        activities_at, children_of, class_by_name, find, level_name, member_index, name_label_of, nest, photos_at, spec_text,
+        SpecField, specs_at, Taxon,
+    )
+    from .alerts import (
+        AlertItem, OBJECT_LAYERS, select as alert_select, write_file as alert_write_file, build_lines, history_query,
+        layer_key_problems, load_rules, manual_items, name_places, object_keys, report_text, reported_ids, score_note,
+        uses_source,
+    )
+    from .assignments import (
+        DONE, UNWORKED, roots_text as assignment_roots_text, holder_of, holders_of, is_shared, own_row, roots_by_person,
+        work_state,
+    )
+    from .continuation import AUTO, CANDIDATE, Continuation, Found as ContinuationFound, continuations
+    from .export import file_name_of
+    from .handover import (
+        HOUR_MS, HandoverData, handover_text, write_file as handover_write_file, keep_memo, last_memo, open_requests,
+    )
+    from .image_time import ORIGINS as IMAGE_TIME_ORIGINS
+    from .mine import (
+        DEFAULT_DAYS, ImageRow, MineFilter, by_image, changed_by_other, roots_text as mine_roots_text,
+        select as mine_select, observer_names, root_of, since_of,
+    )
+    from .satellites import ORIGINS as SATELLITE_ORIGINS
+    from .similar import Found as SimilarFound, gray_of, half_sizes
+
+__getattr__, __dir__ = lazy(__name__)
 
 
 def _iso(t: Optional[float]) -> Optional[str]:

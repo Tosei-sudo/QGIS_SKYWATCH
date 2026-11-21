@@ -17,7 +17,6 @@ from ..plan.api import NO_NAMES, SatelliteNames
 from .bulk import apply_change
 from .covered import read_covered
 from .follow import follow_and_save, save_marked, with_settled_times
-from .follow_job import requests_of
 from .geometry import read_last_looks
 from .groups import read_groups
 from .linking import links_of
@@ -37,6 +36,14 @@ if TYPE_CHECKING:
     from .quota import QuotaData
     from .store import HistoryRow, Saved, SavedRequests, ShotRow
     from .use_time import OtherUse
+
+
+def requests_of(client: EsriClient, store: RequestStoreConfig, token: Optional[str], ids: Sequence[str],
+                cancelled: Optional[Callable[[], bool]] = None) -> dict[str, ImagingRequest]:
+    """follow_job.requests_of, read when asked (with its urllib and ssl: not at the plugin's start)."""
+    from .follow_job import requests_of as read
+
+    return read(client, store, token, ids, cancelled)
 
 
 @dataclass(frozen=True)
