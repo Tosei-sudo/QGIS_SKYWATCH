@@ -31,7 +31,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.text_assist import (
-    Draft, handover_draft, handover_messages, note_draft, note_messages, note_terms, sentence_limit, sentences_done,
+    Draft, handover_draft, handover_messages, handover_topics, note_draft, note_messages, note_terms, sentence_limit, sentences_done,
 )
 from ..core.text_tasks import (
     FIELD_KEYS, SEARCH_KEYS, FieldsDraft, SearchDraft, fields_draft, fields_messages, lines_done, search_draft, search_messages,
@@ -431,11 +431,17 @@ class HandoverDraft(_TaskButton):
                 return False
             return True
         written = self.memo_edit.toPlainText()
+        if not handover_topics(memo) and not written.strip():
+            # Nothing to tell: a model asked anyway writes of what the memo does not have.
+            self.panel.say(self.tr("申し送ることがメモにない（期限が近い依頼・担当中の画像・通報がない）"))
+            return False
 
         def done(text: str, seconds: float) -> None:
             draft = handover_draft(text, memo, written)
             if draft.text:
                 self.panel.offer(draft, seconds)
+            elif draft.notes:
+                self.panel.say(self.tr("案を作れず（メモにない内容の文だけだった）"), draft.notes)
             else:
                 self.panel.say(self.tr("案を作れず（モデルの答えが空）"))
 

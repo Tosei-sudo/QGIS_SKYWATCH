@@ -345,8 +345,9 @@ def test_the_handover_draft_is_made_from_the_memo_made_first(plugin, tmp_path):
     assert dialog.text_edit.toPlainText().startswith("引き継ぎメモ")
     messages, max_tokens, one_line = loaded[0].asked[0]
     assert (max_tokens, one_line) == (320, False)
-    assert messages[1]["content"].startswith("引き継ぎメモ:\n引き継ぎメモ") and "■ 申し送り" not in messages[1]["content"]
-    assert messages[1]["content"].endswith("書きかけの申し送り（生かして書く）:\n北側は未確認")
+    assert messages[-1]["content"].startswith("引き継ぎメモ:\n引き継ぎメモ") and "■ 申し送り" not in messages[-1]["content"]
+    assert messages[-1]["content"].endswith("書きかけの申し送り（生かして書く）:\n北側は未確認\n\n"
+                                          "書くこと: 書きかけの申し送り（言い直すだけ。メモの一覧のことは書かない）")
     assert draft.panel.draft.text == "北側の 315 隻は未確認。次は港内から。"
     assert draft.panel.warning.text() == "確認: 元にない数字: 315"
     assert draft.panel.append_button.isVisible() and draft.panel.replace_button.isVisible()
@@ -357,7 +358,25 @@ def test_the_handover_draft_is_made_from_the_memo_made_first(plugin, tmp_path):
     assert wait_for(lambda: draft.panel.draft is not None)
     draft.panel.replace_button.click()
     assert dialog.memo_edit.toPlainText() == "入れ替え案。"
-    assert len(loaded[0].asked) == 2 and "北側の 315 隻は未確認" in loaded[0].asked[1][0][1]["content"]
+    assert len(loaded[0].asked) == 2 and "北側の 315 隻は未確認" in loaded[0].asked[1][0][-1]["content"]
+    dialog.close()
+
+
+def test_a_handover_draft_of_only_what_the_memo_lacks_is_no_draft(plugin, tmp_path):
+    p, iface, dock, layers, _ = plugin
+    a, loaded, _gate = _assist(p, tmp_path, ["通報したものは現時点ではありません。担当中の画像の作業を確認してください。"])
+    dialog = dock.open_handover(1)
+    draft = dialog.memo_draft
+    # Nothing in the memo to tell and nothing written: the model is not asked.
+    draft.button.click()
+    assert wait_for(lambda: dialog.text_edit.toPlainText().startswith("引き継ぎメモ"))
+    assert wait_for(lambda: draft.panel.label.text().startswith("申し送ることがメモにない"))
+    assert not loaded and draft.panel.draft is None
+    dialog.memo_edit.setPlainText("北側は未確認")
+    draft.button.click()
+    assert wait_for(lambda: draft.panel.label.text().startswith("案を作れず"))
+    assert draft.panel.label.text() == "案を作れず（メモにない内容の文だけだった）" and draft.panel.draft is None
+    assert draft.panel.warning.text().startswith("メモにない内容の文を除いた: 「通報したものは現時点ではありません。」")
     dialog.close()
 
 

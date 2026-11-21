@@ -66,10 +66,18 @@ NOTE_EXAMPLES: tuple[tuple[str, str], ...] = (
 HANDOVER_PROMPT = (
     "あなたは衛星画像の判読業務の引き継ぎを手伝います。"
     "下の引き継ぎメモ（自動でまとめた一覧）から、次の担当者への申し送りを 2〜4 文で書いてください。"
-    "書くのは、期限が近い撮像依頼、担当中で終わっていない画像と残っている作業、通報したもの、の順に 1 文ずつです（メモにないものは書かない）。"
+    "書くのは入力の「書くこと」に挙げたものだけで、挙げた順に 1 文ずつです（挙げていないものには触れない）。"
     "件数の一覧は繰り返さないでください。メモにない事実・数字・推測・助言（「〜してください」）は書かないでください。"
+    "文は判読記録の文体（体言止めか「〜である」。です・ます調にしない）で、事実だけを書き、「〜してください」「〜が必要」のような指示や助言は書かないでください。"
     "宛名・あいさつ・結びの言葉や箇条書きの記号は使わず、申し送りの文章だけを出力してください。"
 )
+#: An example shown before the memo (sarashina2.2 3B wrote 「〜してください」 and of lists the memo did not have without it, 2026-11-21).
+HANDOVER_EXAMPLES: tuple[tuple[str, str], ...] = ((
+    "引き継ぎメモ:\n■ 観測記録: 新規 5 件\n\n■ 未処理の撮像依頼: 2 件（うち 24 時間以内に期限 1 件）\n"
+    "  【期限間近】舞鶴定点（定常・光学・期限 11/10 12:00）\n  呉（臨時・SAR・期限 11/12 09:00）\n\n"
+    "■ 分担: 担当中 1 件・期間内に完了 1 件\n  佐藤: 担当中 1 件\n    maizuru_1109.tif（作業中・記録 3 件・西側未確認）\n\n"
+    "書くこと: 期限が近い撮像依頼、担当中で終わっていない画像と残っている作業",
+    "舞鶴定点の撮像依頼が 11/10 12:00 に期限。maizuru_1109.tif は佐藤が作業中で、西側が未確認。"),)
 #: The instructions for 項目の提案 (core/text_tasks.py).
 FIELDS_PROMPT = (
     "あなたは衛星画像の判読記録の入力を手伝います。"
@@ -156,7 +164,7 @@ class TextTask:
     model: str
     max_tokens: int
     prompt: str
-    #: Examples shown before what is asked (input, what it should write); 備考を整える and 依頼文から下書き only.
+    #: Examples shown before what is asked (input, what it should write); 備考を整える, 申し送りの下書き and 依頼文から下書き only.
     examples: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -169,7 +177,7 @@ def task_of(name: str, model: str, max_tokens: Optional[int] = None, prompt: Opt
     """A task with its defaults where nothing else is given."""
     tokens, text = TASK_DEFAULTS[name]
     if examples is None:
-        examples = NOTE_EXAMPLES if name == "tidyNote" else ()
+        examples = NOTE_EXAMPLES if name == "tidyNote" else HANDOVER_EXAMPLES if name == "handoverDraft" else ()
     return TextTask(name, model, max_tokens or tokens, prompt or text, examples)
 
 
@@ -408,12 +416,42 @@ def handover_source(memo: str, limit: int = HANDOVER_LIMIT) -> str:
     return text
 
 
+#: The memo's lists a 申し送り tells of: its heading, the count that says it has something, what to write of it, the words that name it.
+HANDOVER_TOPICS = (
+    ("■ 未処理の撮像依頼", r"■ 未処理の撮像依頼: (\d+) 件", "期限が近い撮像依頼", ("撮像依頼",)),
+    ("■ 分担", r"担当中 (\d+) 件", "担当中で終わっていない画像と残っている作業", ("担当中", "作業中", "保留中")),
+    ("■ 通報", r"■ 通報: (\d+) 件", "通報したもの", ("通報",)),
+)
+
+
+def handover_topics(memo: str) -> list[str]:
+    """What the memo has for a 申し送り (期限が近い撮像依頼, 担当中の画像, 通報), in that order; lists of none left out."""
+    text = handover_source(memo, len(memo) + 1)
+    out = []
+    for head, count, what, _words in HANDOVER_TOPICS:
+        m = re.search(count, text)
+        if head in text and (m is None or int(m[1]) > 0):
+            out.append(what)
+    return out
+
+
 def handover_messages(task: TextTask, memo: str, written: str = "") -> list[Message]:
-    """The conversation that asks for a 申し送り from the memo `memo` (and what the person wrote so far)."""
+    """
+    The conversation that asks for a 申し送り from the memo `memo` (and what
+    the person wrote so far): what to write is what the memo has (a model
+    asked for all three writes of those it does not have).
+    """
     content = "引き継ぎメモ:\n" + handover_source(memo)
     if written.strip():
         content += "\n\n書きかけの申し送り（生かして書く）:\n" + written.strip()
-    return [{"role": "system", "content": task.prompt}, {"role": "user", "content": content}]
+    topics = handover_topics(memo)
+    if written.strip():
+        topics.append("書きかけの申し送り" if topics else "書きかけの申し送り（言い直すだけ。メモの一覧のことは書かない）")
+    content += "\n\n書くこと: " + ("、".join(topics) if topics else "観測記録で目立つこと（件数の一覧は繰り返さない）")
+    messages: list[Message] = [{"role": "system", "content": task.prompt}]
+    for given, wanted in task.examples:
+        messages += [{"role": "user", "content": given}, {"role": "assistant", "content": wanted}]
+    return messages + [{"role": "user", "content": content}]
 
 
 def plain_prompt(messages: Sequence[Message]) -> str:
@@ -539,6 +577,18 @@ def sentences_done(most: Optional[int]) -> Optional[Callable[[str], bool]]:
 _KANJI_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _KANJI_UNITS = {"十": 10, "百": 100, "千": 1000}
 _KANJI_NUMBER = re.compile(r"[〇零一二三四五六七八九十百千]+")
+#: What follows a number that counts (「一隻」「三基」), so that one kanji before it is a number and not part of a word (「同一」「千葉」).
+_COUNTERS = frozenset("隻艘機台両輌基棟名人個本発回度日月年時分秒件枚列番階層週つヶか箇カ割%mメキセ")
+
+
+def _kanji(c: str) -> bool:
+    return "\u4e00" <= c <= "\u9fff" or c == "々"
+
+
+def _counted(text: str, start: int, end: int) -> bool:
+    """Whether the one kanji number at `start` is a number (「三基」「第一」「、三」) rather than part of a word (「同一船」「一部」)."""
+    before, after = text[start - 1:start], text[end:end + 1]
+    return before == "第" or after in _COUNTERS and after != "" or not (_kanji(before) or _kanji(after))
 
 
 def _kanji_value(text: str) -> Optional[int]:
@@ -565,6 +615,8 @@ def numbers_in(text: str) -> list[str]:
     t = unicodedata.normalize("NFKC", text)
     out = [m[0].replace(",", "") for m in _NUMBER.finditer(t)]
     for m in _KANJI_NUMBER.finditer(t):
+        if len(m[0]) == 1 and not _counted(t, m.start(), m.end()):
+            continue
         v = _kanji_value(m[0])
         if v is not None:
             out.append(str(v))
@@ -586,6 +638,32 @@ def foreign_numbers(given: str, written: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(n for n in numbers_in(written) if not any(_same_number(n, h) for h in have)))
 
 
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'\-]+")
+
+
+def foreign_letters(given: str, written: str) -> tuple[str, ...]:
+    """English words in `written` that `given` does not have (a model that writes Japanese slips into English: 「格納庫の doors 開放」)."""
+    have = unicodedata.normalize("NFKC", given).lower()
+    words = _LATIN_WORD.findall(unicodedata.normalize("NFKC", written))
+    return tuple(dict.fromkeys(w for w in words if w.lower() not in have))
+
+
+#: Words that say a 備考 is not sure (「たぶん」「〜かも」「？」), and those a tidied one says it with.
+UNSURE_WORDS = ("たぶん", "多分", "おそらく", "恐らく", "っぽ", "らしい", "らしき", "模様", "もよう", "思われ", "可能性", "かも", "みたい",
+                "ようだ", "気がする", "気がします", "推定", "推測", "見込", "疑い", "？", "?")
+_UNSURE_KEPT = UNSURE_WORDS + ("ような", "ように見え", "様子", "程度", "とみられ", "と見られ", "未確認", "不明")
+
+
+def unsure_lost(given: str, written: str) -> Optional[str]:
+    """The word of `given` that says it is not sure, when `written` says it is sure (「色かわってる？」 → 「色が変化」)."""
+    have = unicodedata.normalize("NFKC", given)
+    said = next((w for w in UNSURE_WORDS if unicodedata.normalize("NFKC", w) in have), None)
+    if said is None:
+        return None
+    t = unicodedata.normalize("NFKC", written)
+    return None if any(unicodedata.normalize("NFKC", w) in t for w in _UNSURE_KEPT) else said
+
+
 def _key(text: str) -> str:
     return re.sub(r"[\s　、。，．,.]", "", unicodedata.normalize("NFKC", text))
 
@@ -600,13 +678,86 @@ def note_draft(raw: str, note: str, glossary=None, root: str = "") -> Draft:
     if glossary:
         text = glossary.fixed(text, root)
     longer = len(text) > max(2 * len(note.strip()), len(note.strip()) + 40)
-    return Draft(text, foreign_numbers(note, text), longer, _key(text) == _key(note))
+    notes = []
+    english = foreign_letters(note, text)
+    if english:
+        notes.append(f"英語が混じる: {'・'.join(english)}")
+    lost = unsure_lost(note, text)
+    if lost:
+        notes.append(f"元の「{lost}」（確かでない）が案では言い切りに")
+    return Draft(text, foreign_numbers(note, text), longer, _key(text) == _key(note), tuple(notes))
+
+
+#: Advice and guesses a 申し送り is not to have (「〜を確認してください」「〜の可能性があります」「〜予定です」).
+_ADVICE = re.compile(r"(?:て|で)(?:ください|下さい)|お願い(?:します|いたします)|必要(?:が|は)?(?:あります|です|がある)|が必要|推奨|べき|"
+                     r"しましょう|可能性が(?:あります|ある)|と思われ|と思います|予定(?:です|である|となって)|見込みです|(?:行う|する|確かめる|調べる)こと[。！]?$")
+_SENTENCE = re.compile(r"[^。！？\n]*(?:[。！？]|$)")
+
+
+#: Where a sentence turns from what is to what to do (「…未確認のため、」「…間近ですので、」).
+_BECAUSE = re.compile(r"(?:である|です|であり)?(?:ため|ので|から)[、,]?")
+
+
+def _fact_before(sentence: str, at: int) -> Optional[str]:
+    """The sentence up to 「ため」「ので」 before `at` (where its advice starts), as a sentence; None when that says little."""
+    ends = list(_BECAUSE.finditer(sentence, 0, at))
+    if not ends:
+        return None
+    head = re.sub(r"(?:の|が)$", "", sentence[:ends[-1].start()].rstrip("、, "))
+    if len(_key(head)) < 8 or _ADVICE.search(head):
+        return None
+    return head + "。"
+
+
+def _cut(text: str, n: int = 30) -> str:
+    return text if len(text) <= n else text[:n] + "…"
 
 
 def handover_draft(raw: str, memo: str, written: str = "") -> Draft:
-    """The model's 申し送り, and the numbers in it that the memo (or what was written) does not have."""
-    text = clean_paragraph(raw)
-    return Draft(text, foreign_numbers(handover_source(memo) + "\n" + written, text), False, False)
+    """
+    The model's 申し送り without the sentences the memo gives no footing
+    for (advice, guesses, or a list the memo does not have: 「通報したものは
+    ありません」 with no 通報 in it), and the numbers in it that the memo (or
+    what was written) does not have.
+    """
+    source = handover_source(memo)
+    given = source + "\n" + written
+    present = set(handover_topics(memo))
+    absent = [w for _h, _c, what, words in HANDOVER_TOPICS if what not in present for w in words]
+    dropped: list[str] = []
+    # The person's own sentences: one the model made into advice is kept as they wrote it.
+    mine = [m[0].strip() for m in _SENTENCE.finditer(written) if len(_key(m[0])) >= 4]
+    lines = []
+    for line in clean_paragraph(raw).split("\n"):
+        kept = []
+        for sentence in (m[0] for m in _SENTENCE.finditer(line) if m[0].strip()):
+            advice = _ADVICE.search(sentence)
+            topic = next((w for w in absent if w in sentence and w not in written), None)
+            if advice and advice[0] not in given and not topic:
+                # 「…未確認であるため、確認が必要。」: what it says before the advice, when that says something.
+                head = _fact_before(sentence, advice.start())
+                if head:
+                    kept.append(head)
+                    dropped.append("…" + sentence.strip()[len(head) - 1:].lstrip("のがでありためので、, "))
+                    continue
+            if advice and advice[0] not in given or topic:
+                dropped.append(sentence.strip())
+                own = next((w for w in mine if _key(sentence).startswith(_key(w)[:12])), None)
+                if own is not None:
+                    mine.remove(own)
+                    kept.append(own if own.endswith(("。", "！", "？")) else own + "。")
+            else:
+                kept.append(sentence)
+        if kept or not line.strip():
+            lines.append("".join(kept).strip())
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    notes = []
+    if dropped:
+        notes.append("メモにない内容の文を除いた: " + "".join(f"「{_cut(d)}」" for d in dropped))
+    english = foreign_letters(given, text)
+    if english:
+        notes.append(f"英語が混じる: {'・'.join(english)}")
+    return Draft(text, foreign_numbers(given, text), False, False, tuple(notes))
 
 
 # ---- the model -----------------------------------------------------------------------------------

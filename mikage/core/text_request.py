@@ -325,6 +325,11 @@ _DAILY = re.compile(r"毎日|連日|日々|毎朝|毎夕|毎晩")
 _ONCE = re.compile(r"(?:期間中|期間内|期限まで|いずれか|どこか|どれか)[^。\n]{0,10}(?:1|一)\s*(?:回|度)"
                    r"|(?<![日]に)(?<!1日)(?<!一日)(?:1|一)\s*(?:回|度)\s*(?:だけ|のみ|で(?:よい|良い|いい|十分|結構)|撮れれば|撮れたら)"
                    r"|一度(?:だけ|で)")
+#: 「週1回」「週に一度」「2週に1回」「毎週1回」: every 7 (14 …) days.
+_WEEKS_ONCE = re.compile(r"(?:(?P<n>\d+|[二三四五六七八九十]+)\s*週(?:間)?\s*(?:に|ごとに|毎に)|(?:毎週|1週間に|一週間に|週に?))\s*(?:1|一)\s*(?:回|度)"
+                         r"|週一(?:回|度)?")
+#: 「月1回」「1日2回」「週2回」: how many times in a span (no 「期間中に1回」).
+_RATE = re.compile(r"(?:[日週月年]|日間|週間|か月|ヶ月|カ月)\s*(?:に|で)?\s*(?:\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
 _STEADY = re.compile(r"定点|定期|継続|監視を続|ずっと")
 _ONE_OFF = re.compile(r"臨時|スポット|単発|今回のみ")
 
@@ -364,6 +369,11 @@ def often_of(text: str) -> Optional[Often]:
             return Often("間隔", every=every, words=m[0])
         if every == 1:
             return Often("毎日", words=m[0])
+    m = _WEEKS_ONCE.search(t)
+    if m:
+        n = _count(m["n"]) if m["n"] else 1
+        if n and 1 <= n <= 52:
+            return Often("間隔", every=7 * n, words=m[0])
     if re.search(r"毎週(?!\s*[月火水木金土日])", t):
         return Often("間隔", every=7, words="毎週")
     m = _DAILY.search(t)
@@ -379,7 +389,7 @@ def _often_of_model(value: str, text: str) -> Optional[Often]:
     """The model's 頻度, kept when the text gives it a footing."""
     v = _nfkc(bare(value))
     t = _nfkc(text)
-    if re.search(r"1\s*回|一回|一度|1度", v) and re.search(r"(?:1|一)\s*(?:回|度)|までに|いずれか|どこか", t):
+    if re.search(r"1\s*回|一回|一度|1度", v) and re.search(r"(?:1|一)\s*(?:回|度)|までに|いずれか|どこか", _RATE.sub("", t)):
         return Often("1回", words=bare(value))
     if "毎日" in v and _DAILY.search(t):
         return Often("毎日", words=bare(value))
@@ -568,6 +578,8 @@ def number_of(label: str, text: str) -> Optional[tuple[str, str]]:
     return (m[1].rstrip("."), m[0]) if m else None
 
 
+#: The end of a sentence after a requester's name (「第2分析班の佐藤です」).
+_WHO_END = re.compile(r"\s*(?:です|でした|でございます|になります|より|から|まで)[。.]?$")
 _REQUESTER = re.compile(r"(?:依頼者|依頼元|担当者?|連絡先)\s*(?:は|:)?\s*([^\s、。,(（\n]{1,20}(?:[ 　][^\s、。,(（\n]{1,10})?)")
 #: Edit: the text says to change these (not only names them to say which request).
 _CHANGE_NAME = re.compile(r"(?:名称|件名|名前|タイトル)\s*(?:を|は|:)")
@@ -694,6 +706,10 @@ def points_of(text: str) -> list[tuple[float, float]]:
                 out.append((m.start(), (p[0], p[1])))
                 taken.append((m.start(), m.end()))
     return [p for _, p in sorted(out)]
+
+
+#: What a model adds to a place's name (「呉」 → 「呉港」「横須賀市」).
+_PLACE_END = re.compile(r"(?:港|市|町|村|湾|基地|空港|飛行場|沖|周辺|付近|地区|県|港湾)$")
 
 
 def _place_word(word: str) -> bool:
@@ -1121,13 +1137,13 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
 
     # 依頼者
     if not editing or _CHANGE_REQUESTER.search(t):
-        who = bare(got.get("依頼者", ""))
+        who = _WHO_END.sub("", bare(got.get("依頼者", "")))
         if who and _has_words(who, text) and len(who) <= 40:
             d.values["requester"] = who
         else:
             m = _REQUESTER.search(t)
-            if m:
-                d.values["requester"] = m[1].strip()
+            if m and _WHO_END.sub("", m[1].strip()):
+                d.values["requester"] = _WHO_END.sub("", m[1].strip())
             elif who:
                 d.checks.append(f"依頼者「{who}」は文にない（入れず）")
 
@@ -1138,6 +1154,11 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
         names = places_in(text, place_names)
         model = [bare(w) for w in re.split(r"[、,，・/]|および|と(?=[^\s]{2,})", got.get("地名", "")) if bare(w)]
         for w in model:
+            if fold(w) not in fold(text):
+                # 「呉港」 for the text's 「呉」: the name as the text writes it.
+                short = _PLACE_END.sub("", w)
+                if short != w and _place_word(short) and fold(short) in fold(text):
+                    w = short
             if fold(w) in fold(text) and _place_word(w):
                 if not any(fold(w) in fold(n) or fold(n) in fold(w) for n in names):
                     names.append(w)

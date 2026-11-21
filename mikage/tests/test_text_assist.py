@@ -152,12 +152,64 @@ def test_the_handover_is_asked_from_the_memo_without_its_own_handover_part():
     assert "■ 申し送り" not in source and "手書き" not in source and "【期限間近】横須賀" in source
     messages = ta.handover_messages(ta.task_of("handoverDraft", "m"), memo, "横須賀を優先")
     assert messages[0]["content"] == ta.HANDOVER_PROMPT
-    assert messages[1]["content"].startswith("引き継ぎメモ:\n引き継ぎメモ 11/19") and messages[1]["content"].endswith(
-        "書きかけの申し送り（生かして書く）:\n横須賀を優先")
+    assert messages[-1]["content"].startswith("引き継ぎメモ:\n引き継ぎメモ 11/19") and messages[-1]["content"].endswith(
+        "書きかけの申し送り（生かして書く）:\n横須賀を優先\n\n書くこと: 期限が近い撮像依頼、書きかけの申し送り")
     d = ta.handover_draft("申し送り: 期限間近の横須賀を優先。新規 3 件、残り 9 件。", memo)
     assert d.text == "期限間近の横須賀を優先。新規 3 件、残り 9 件。" and d.foreign == ("9",)
     # The memo is cut to its first part when very long.
     assert ta.handover_source("x\n" * 5000, 100).endswith("…（以下略）")
+
+
+def test_the_handover_is_asked_only_for_what_the_memo_has_and_the_rest_dropped():
+    """Real 3B 2026-11-21: asked for all three, it wrote of 撮像依頼・担当中の画像 the memo did not have, and advice."""
+    memo = "引き継ぎメモ 11/21 05:47〜11/21 17:47\n\n■ 観測記録: 新規 8 件・更新 0 件・削除 0 件\n  分類: 船舶 6・航空機 2\n\n■ 申し送り\n  なし\n"
+    assert ta.handover_topics(memo) == []
+    messages = ta.handover_messages(ta.task_of("handoverDraft", "m"), memo)
+    # An example first (the model writes as it does: facts, no 「〜してください」).
+    assert [m["role"] for m in messages] == ["system", "user", "assistant", "user"] and "書くこと: " in messages[1]["content"]
+    assert messages[-1]["content"].endswith("書くこと: 観測記録で目立つこと（件数の一覧は繰り返さない）")
+    raw = ("期限が近い撮像依頼は、新規の船舶画像6件と航空機画像2件です。\n\n"
+           "北側の岸壁は雲で未確認のため、別途確認が必要です。現在、担当中の画像は d1.tif です。船舶 6 件、航空機 2 件を記録。\n\n"
+           "また、通報したものは現時点ではありません。")
+    assert ta.handover_messages(ta.task_of("handoverDraft", "m"), memo, "北側未確認")[-1]["content"].endswith(
+        "書くこと: 書きかけの申し送り（言い直すだけ。メモの一覧のことは書かない）")
+    d = ta.handover_draft(raw, memo, "")
+    # The advice cut off where the sentence turns to it (「…未確認のため、」).
+    assert d.text == "北側の岸壁は雲で未確認。船舶 6 件、航空機 2 件を記録。"
+    assert d.notes == ("メモにない内容の文を除いた: 「期限が近い撮像依頼は、新規の船舶画像6件と航空機画像2件です…」"
+                       "「…別途確認が必要です。」「現在、担当中の画像は d1.tif です。」「また、通報したものは現時点ではありません。」",)
+    # The person's own sentence the model made into advice: kept as they wrote it.
+    d = ta.handover_draft("北側の岸壁は雲で未確認、別途確認が必要です。船舶 6 件を記録。", memo, "北側の岸壁は雲で未確認")
+    assert d.text == "北側の岸壁は雲で未確認。船舶 6 件を記録。" and d.notes[0].startswith("メモにない内容の文を除いた: 「北側の岸壁")
+    # All of it: no draft, said why.
+    assert ta.handover_draft("通報はありません。", memo).text == ""
+    # Lists of none are not asked for; those with some are, in order; what the person wrote may name them.
+    memo2 = ("引き継ぎメモ\n\n■ 観測記録: 新規 3 件\n\n■ 通報: 1 件（速報 1）\n\n■ 未処理の撮像依頼: 0 件\n\n"
+             "■ 分担: 担当中 2 件・期間内に完了 1 件\n  d1.tif（作業中）")
+    assert ta.handover_topics(memo2) == ["担当中で終わっていない画像と残っている作業", "通報したもの"]
+    d = ta.handover_draft("d1.tif は作業中。速報を 1 件通報。依頼は次の担当へ。", memo2, "依頼は次の担当へ")
+    assert d.text == "d1.tif は作業中。速報を 1 件通報。依頼は次の担当へ。" and not d.notes
+    d = ta.handover_draft("d1.tif は鈴木が保留中で、雲が多いため、再撮影の検討が必要。d1.tif を優先的に対応してください。", memo2)
+    assert d.text == "d1.tif は鈴木が保留中で、雲が多い。"
+    assert d.notes == ("メモにない内容の文を除いた: 「…再撮影の検討が必要。」「d1.tif を優先的に対応してください。」",)
+    assert ta.handover_draft("画像と照らし合わせ、詳細な分析を行うこと。", memo2).text == ""
+    # Advice the memo itself has is kept.
+    assert ta.handover_draft("横須賀を確認してください。", "■ 観測記録\n横須賀を確認してください").text == "横須賀を確認してください。"
+
+
+def test_english_slipped_into_a_note_and_a_sure_note_made_of_an_unsure_one_are_said():
+    """Real 3B 2026-11-21: 「格納庫の doors 開放」「北側は雲でobscured」; 「色かわってる？」 → 「変更が確認可能」."""
+    d = ta.note_draft("滑走路わきに戦闘機 4 機が並んでいる。格納庫の doors 開放。", "滑走路わきに戦闘機4機ならんでる。格納庫のとびらあいてる")
+    assert d.warnings == ["英語が混じる: doors"]
+    assert ta.note_draft("北側は雲でobscured、南側は正常。", "北側は雲で見えず").warnings == ["英語が混じる: obscured"]
+    assert ta.note_draft("SAR 画像で船 2 隻。", "SARで船2隻").warnings == []
+    assert ta.note_draft("ドックに船、船体色が変化。", "ドックの船、船体の色かわってる？").warnings == ["元の「？」（確かでない）が案では言い切りに"]
+    assert ta.note_draft("岸壁に船舶 2 隻程度と推定。", "たぶん2隻くらい").warnings == []
+    assert ta.unsure_lost("岸壁に停泊", "岸壁に停泊中。") is None
+    # 「同一」「一部」「千葉」 have no numbers; 「一隻」「第一」「、三」 do.
+    assert ta.numbers_in("同一船と推定、一部が千葉港へ") == []
+    assert ta.numbers_in("一隻、第一岸壁、三基、一つ、、三") == ["1", "1", "3", "1", "3"]
+    assert ta.note_draft("停泊中、昨日以来動いていない。同一船と推定。", "きのうから動いてない。たぶん同じ船").warnings == []
 
 
 def test_a_model_without_a_chat_template_gets_plain_text():

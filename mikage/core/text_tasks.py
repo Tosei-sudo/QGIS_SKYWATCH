@@ -36,7 +36,8 @@ from datetime import date, datetime, timedelta
 from typing import Callable, Iterable, Optional, Sequence
 
 from .obs.api import unseen_label
-from .text_assist import Draft, Message, TextTask, _kanji_value, _unquoted, clean_note, clean_paragraph, foreign_numbers, numbers_in
+from .text_assist import (Draft, Message, TextTask, _kanji_value, _unquoted, clean_note, clean_paragraph, foreign_letters,
+                          foreign_numbers, numbers_in)
 
 #: Written by the model for a value it does not have.
 NONE_WORDS = {"", "なし", "無し", "不明", "-", "－", "ー", "—", "空", "none", "null", "n/a", "na", "未記入", "該当なし"}
@@ -191,13 +192,32 @@ def fields_messages(task: TextTask, note: str, kind: str, kinds: Sequence[str], 
 
 #: Words of a 備考 that say how sure it is, for the usual 確度 levels (a level's own name counts too).
 CONFIDENCE_CUES: dict[str, tuple[str, ...]] = {
-    "確定": ("確定", "確実", "間違いな", "断定"),
-    "推定": ("推定", "たぶん", "多分", "おそらく", "恐らく", "っぽ", "らしい", "模様", "もよう", "思われ", "可能性", "見込",
-           "推測", "かも", "みたい", "ようだ"),
+    "確定": ("確定", "確実", "間違いな", "断定", "を確認", "確認済", "確認ずみ", "確認した"),
+    "推定": ("推定", "たぶん", "多分", "おそらく", "恐らく", "っぽ", "らしい", "らしき", "模様", "もよう", "思われ", "思しき", "可能性",
+           "見込", "推測", "かも", "みたい", "ようだ", "とみられ", "と見られ"),
     "不明": ("判別でき", "識別でき", "判読でき", "わからな", "分からな"),
 }
 #: Names of a kind of thing rather than of one thing (not a モノ).
 GENERIC_NAMES = {"機体", "船", "艦", "艦艇", "船舶", "車", "車両", "建物", "物体", "目標", "航空機", "不明"}
+#: A class's name rather than one thing's: kanji ending in 艦・船・機・艇・車 (「護衛艦」「貨物船」; 「おうみ」「能登丸」 are names).
+_CLASS_WORD = re.compile(r"^[\u4e00-\u9fff々]{1,6}[艦船機艇車]$")
+#: Directions in degrees (16 points), the longer first.
+COMPASS = {"北北東": 22.5, "東北東": 67.5, "東南東": 112.5, "南南東": 157.5, "南南西": 202.5, "西南西": 247.5, "西北西": 292.5,
+           "北北西": 337.5, "北東": 45.0, "南東": 135.0, "南西": 225.0, "北西": 315.0, "北": 0.0, "東": 90.0, "南": 180.0, "西": 270.0}
+_POINTS = "|".join(sorted(COMPASS, key=len, reverse=True))
+#: 「針路は南東」「方位: 北」「北上中」「南下」「北東へ」「西向き」: a heading (not 「北側」「東京湾」).
+_HEADING_WORDS = re.compile(rf"(?:針路|進路|方位|向き|艦首|機首|船首|方向|方角)\s*(?:は|が|:|：|を)?\s*(?:およそ|約|ほぼ)?\s*({_POINTS})(?![側部端岸]|京)"
+                            rf"|({_POINTS})(?:に向|へ|向き|方向に|進)|(北)(?=上)|(南)(?=下)")
+
+
+def compass_in(text: str) -> Optional[tuple[float, str]]:
+    """The heading `text` gives in words (「針路は南東」 → 135, 「北上中」 → 0), and those words; None when it gives none or two."""
+    found = {(COMPASS[next(g for g in m.groups() if g)], m[0]) for m in _HEADING_WORDS.finditer(unicodedata.normalize("NFKC", text))}
+    if len({d for d, _w in found}) != 1:
+        return None
+    return min(found, key=lambda f: len(f[1]))
+
+
 _AMOUNT = r"(\d+(?:\.\d+)?|[〇零一二三四五六七八九十百千]+)"
 _METRES = re.compile(_AMOUNT + r"\s*(?:m|メートル)(?![a-z])", re.IGNORECASE)
 _DEGREES = re.compile(_AMOUNT + r"\s*(?:度|°|゜)")
@@ -292,9 +312,9 @@ def fields_draft(raw: str, note: str, resolve_kind: Callable[[str], Optional[lis
     activity = None
     if "活動" in got:
         activity = next((w for w in words if _fold(w) == _fold(bare(got["活動"]))), None)
-        if activity is None:
-            dropped.append(f"{'この種別の' if kind else ''}活動にない「{bare(got['活動'])}」")
     said = sorted((w for w in words if _named(w, folded)), key=len, reverse=True)
+    if "活動" in got and activity is None and not said:
+        dropped.append(f"{'この種別の' if kind else ''}活動にない「{bare(got['活動'])}」")
     if said and (activity is None or not _named(activity, folded)):
         activity = said[0]
     if activity:
@@ -316,9 +336,10 @@ def fields_draft(raw: str, note: str, resolve_kind: Callable[[str], Optional[lis
     metres = [n for _, n in _amounts(_METRES, t)]
     degrees = [n for _, n in _amounts(_DEGREES, t)]
     have = numbers_in(note)
+    compass = compass_in(note) if not degrees else None
     for key, name, high, units, unit in (("長さ", "length", 2000.0, metres, "m"), ("幅", "width", 500.0, metres, "m"),
                                          ("向き", "heading", 360.0, degrees, "度")):
-        if key not in got:
+        if key not in got or name == "heading" and compass:
             continue
         n = _number(bare(got[key]))
         if n is None:
@@ -339,10 +360,13 @@ def fields_draft(raw: str, note: str, resolve_kind: Callable[[str], Optional[lis
             values[name] = float(n)
     if "heading" not in values and len(set(degrees)) == 1 and 0 <= float(degrees[0]) <= 360:
         values["heading"] = float(degrees[0])
+    if "heading" not in values and compass:
+        # 「針路は南東」「北上中」: the 備考's words as degrees.
+        values["heading"] = compass[0]
     if "モノ" in got:
         name = unicodedata.normalize("NFKC", bare(got["モノ"]))
         classes = {_fold(_leaf(k)) for k in kinds} | {_fold(_root(k)) for k in kinds} | {_fold(w) for w in GENERIC_NAMES}
-        if not name or "〇〇" in name or "○○" in name or _fold(name) in classes:
+        if not name or "〇〇" in name or "○○" in name or _fold(name) in classes or _CLASS_WORD.match(name):
             dropped.append(f"モノ「{name}」は種類の名前（固有の名前でない）")
         else:
             for c in sorted(classes, key=len, reverse=True):
@@ -659,7 +683,8 @@ def summary_messages(task: TextTask, source: str) -> list[Message]:
 def summary_draft(raw: str, source: str) -> Draft:
     """The model's まとめ, and the numbers in it that the records do not have."""
     text = clean_paragraph(raw)
-    return Draft(text, foreign_numbers(source, text))
+    english = foreign_letters(source, text)
+    return Draft(text, foreign_numbers(source, text), notes=(f"英語が混じる: {'・'.join(english)}",) if english else ())
 
 
 # ---- 英訳 ----------------------------------------------------------------------------------------
