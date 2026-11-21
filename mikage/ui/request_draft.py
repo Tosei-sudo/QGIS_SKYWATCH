@@ -4,10 +4,11 @@ row 「依頼文」 at the top of 撮像依頼の登録・編集 (not of a batch
 while the settings give the task a model (`textAssist.tasks`).
 
 A mail or chat text pasted there and 「欄の案を作る」: the named areas read
-first (`namedAreas` of the observation export or the 通報), the model asked
-for its lines, the words read by code (dates, numbers, satellites, the
-words of each choice) and the model's values kept only where the words give
-them a footing. The proposal shows under the text: one check box per item
+first (`namedAreas` of the observation export or the 通報), the words read
+by code (dates, numbers, satellites, the words of each choice), the model
+asked only for the lines the code cannot write (the name, the places, …;
+core/text_request.asked_keys: none for 「12月末まで延長」, then it is not
+asked) and its values kept only where the words give them a footing. The proposal shows under the text: one check box per item
 (all ticked), the places with the areas they can be (地名テーブル → 過去の
 依頼 → 座標 → 地名・住所検索; the model never makes a shape), what to check
 (確認), 「メモに依頼文を残す」. 「欄に入れる」 puts the ticked items in the
@@ -27,13 +28,13 @@ from typing import Callable, Optional, Sequence
 
 from qgis.PyQt.QtCore import QCoreApplication, QObject
 from qgis.PyQt.QtWidgets import (
-    QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ..core.obs.api import load_named_areas, settings_for
 from ..core.request.api import ImagingRequest, jst_day
 from ..core.text_request import (
-    ITEMS, REQUEST_KEYS, TEXT_LIMIT, WRITTEN, AreaChoice, RequestDraft, applied, area_choices, batch_names, found_choice, point_choice,
+    ITEMS, TEXT_LIMIT, WRITTEN, AreaChoice, RequestDraft, applied, area_choices, asked_keys, batch_names, found_choice, point_choice,
     request_draft, request_messages,
 )
 from ..core.text_tasks import lines_done
@@ -166,7 +167,7 @@ class DraftPanel(ProposalPanel):
                     editing: bool = False) -> None:
         self._clear()
         self.draft_value, self.editing = draft, editing
-        took = self.tr("（{s:.1f} 秒）").format(s=seconds) if seconds else ""
+        took = self.tr("（{s:.1f} 秒）").format(s=seconds) if seconds >= 0.05 else ""
         self.label.setText(self.tr("案{took}: 入れる項目を選んで「欄に入れる」").format(took=took))
         self.label.setStyleSheet(OFFER_STYLE)
         for key, _label in ITEMS:
@@ -268,6 +269,8 @@ class RequestDraftRow(QObject):
         h.setContentsMargins(0, 0, 0, 0)
         h.addWidget(self.button)
         h.addWidget(self.taken, 1)
+        h.addStretch(0)
+        self.button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         v.addLayout(h)
         v.addWidget(self.panel)
         self._asking = _Asking(assistant, self.panel, self)
@@ -339,18 +342,23 @@ class RequestDraftRow(QObject):
             notes = [self.tr("地名テーブルを読めず（{m}）").format(m=problem)] if problem else []
             if len(text.strip()) > TEXT_LIMIT:
                 notes.append(self.tr("依頼文は先頭 {n} 文字まで読む").format(n=TEXT_LIMIT))
-            messages = request_messages(t, text, today, request)
+            keys = asked_keys(text, today, request)
 
             def done(raw: str, seconds: float) -> None:
                 draft = request_draft(raw, text, today, self.form.satellites_known(), [a.name for a in areas], request)
-                self._areas(draft, areas, notes, seconds)
+                self._areas(draft, areas, notes, seconds, asked=bool(keys))
 
-            self._asking.start(self.task, self.tr("依頼文から下書き"), messages, done, until=lines_done(REQUEST_KEYS))
+            if not keys:
+                # The words say all (「12月末まで延長」): the model is not asked.
+                done("", 0.0)
+                return
+            messages = request_messages(t, text, today, request, keys)
+            self._asking.start(self.task, self.tr("依頼文から下書き"), messages, done, until=lines_done(keys))
 
         self.host.named_areas(ready)
         return True
 
-    def _areas(self, draft: RequestDraft, areas: list, notes: list, seconds: float) -> None:
+    def _areas(self, draft: RequestDraft, areas: list, notes: list, seconds: float, asked: bool = True) -> None:
         """The areas each place can be; the places no table knows looked up with the geocoders first."""
         km = self.form.size.value()
         before = [r for r in self.host.requests() if r.object_id != self.form.request.object_id or r.object_id is None]
@@ -364,7 +372,7 @@ class RequestDraftRow(QObject):
                 return
             final = [(w, choices or [found_choice(w, p, km) for p in found.get(w, [])]) for w, choices in rows]
             more = [*notes, *(self.tr("地名・住所検索: {e}").format(e=e) for e in dict.fromkeys(errors))]
-            self._offer(draft, final, more, seconds)
+            self._offer(draft, final, more, seconds, asked)
 
         if missing:
             self.waiting = True
@@ -380,9 +388,9 @@ class RequestDraftRow(QObject):
         else:
             show({}, [])
 
-    def _offer(self, draft: RequestDraft, rows: list, notes: list, seconds: float) -> None:
+    def _offer(self, draft: RequestDraft, rows: list, notes: list, seconds: float, asked: bool = True) -> None:
         checks = [*draft.checks, *notes]
-        caution = self.assistant.caution(self.task)
+        caution = self.assistant.caution(self.task) if asked else ""
         if caution:
             checks.append(caution)
         area_rows = [_AreaRow(w, choices) for w, choices in rows] if draft.area_asked else []

@@ -236,6 +236,11 @@ def test_the_conversation_and_the_settings():
     assert m[-1]["content"].endswith(MAIL[:100] + MAIL[100:]) or MAIL.strip() in m[-1]["content"]
     edit = tr.request_messages(task, "12月末まで延長", TODAY, request())
     assert "直す依頼: 横須賀港 光学 定点（期間 2026-11-10 〜 2026-11-30）" in edit[-1]["content"]
+    # Only the lines asked for, with what each is.
+    short = tr.request_messages(task, MAIL, TODAY, keys=("名称", "地名"))[-1]["content"].split("\n")
+    assert short[-5:] == ["- 名称: 地名と目的が分かる 20 文字ほどの短い件名", "- 地名: 文に書かれた地名（港・基地・空港・施設など）をそのまま。複数あれば「、」で区切る",
+                          "出力は次の 2 行だけ:", "名称: ", "地名: "]
+    assert not any(line.startswith("日付の目安") for line in short)
     problems: list = []
     s = ta.text_assist_settings_of({"models": {"large": "m3"}, "tasks": {"requestDraft": {
         "model": "large", "examples": [{"text": "明日横須賀を", "answer": "名称: 横須賀\n地名: 横須賀"}]}}}, problems)
@@ -245,6 +250,42 @@ def test_the_conversation_and_the_settings():
     ta.text_assist_settings_of({"models": {"large": "m3"}, "tasks": {"requestDraft": {"model": "large", "examples": [{"text": 1}]}}},
                                problems)
     assert problems and "requestDraft.examples[0]" in problems[0]
+
+
+def test_a_name_with_a_place_the_text_lacks_is_left_out():
+    # The real 3B made 「東京港」 of coordinates (2026-11-21).
+    d = tr.request_draft("名称: 東京港周辺SAR画像\n地名: 東京、港", "35.2800N 139.6700E 付近を明日から3日間、SAR", TODAY)
+    assert "name" not in d.values and "名称「東京港周辺SAR画像」の「東京港」は文にない（入れず）" in d.checks
+    # A place as the text has it, with の or without.
+    assert tr.request_draft("名称: 呉造船所衛星画像", "呉の造船所、11/25〜30に1回", TODAY).values["name"] == "呉造船所衛星画像"
+    assert tr.request_draft("名称: 那覇港と那覇空港", "那覇港と那覇空港を来週中に", TODAY).values["name"] == "那覇港と那覇空港"
+
+
+def test_only_what_the_words_do_not_say_is_asked():
+    ask = tr.asked_keys
+    # The words say the days, how often, the cloud, the priority: the model writes the name and the places.
+    assert ask("来週月曜から2週間、横須賀港を光学で毎日。雲は30%以下、至急", TODAY) == ("名称", "地名", "依頼者")
+    assert ask("舞鶴港を3日ごとに来月いっぱい。入射角30〜40度。依頼者: 第2班 佐藤", TODAY) == ("名称", "地名")
+    # Words the code cannot read: the model is asked for them too.
+    assert ask("来年の春ごろ、横須賀港を", TODAY) == ("名称", "地名", "期間", "依頼者")
+    assert ask("横須賀港を週に何度か", TODAY) == ("名称", "地名", "頻度", "依頼者")
+    assert ask("雲が少ない日に横須賀港", TODAY) == ("名称", "地名", "雲量", "依頼者")
+    # Not dates: weekdays, amounts, a day's shots.
+    assert ask("入射角30〜40度で毎週月曜、1日2回", TODAY) == ("名称", "地名", "依頼者")
+    # Editing: only what the text asks to change; none, and the model is not asked.
+    r = request()
+    assert ask("12月末まで延長してください", TODAY, r) == ()
+    assert ask("1週間延長、雲量は40%以下に緩めて", TODAY, r) == ()
+    assert ask("この依頼は中止で", TODAY, r) == ()
+    assert ask("範囲を佐世保港に変更", TODAY, r) == ("地名",)
+    assert ask("名称を横須賀港の監視に", TODAY, r)[0] == "名称"
+    assert ask("依頼者は第3班 田中に", TODAY, r) == ()
+    # A name in quotes: as written, the model not asked (its words are not the request's: 定点 is no 区分).
+    assert ask("名称を「横須賀港 SAR 定点」に変えてください", TODAY, r) == ()
+    named = tr.request_draft("", "名称を「横須賀港 SAR 定点」に変えてください", TODAY, request=r)
+    assert named.values == {"name": "横須賀港 SAR 定点"} and not named.area_asked
+    assert ask("佐世保港に変更してください", TODAY, r) == ("地名",)
+    assert ask("雲量を20%に変更", TODAY, r) == ()
 
 
 # ---- the areas ------------------------------------------------------------------------------------------

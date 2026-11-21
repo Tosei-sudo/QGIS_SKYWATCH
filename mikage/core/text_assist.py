@@ -110,17 +110,9 @@ TRANSLATE_PROMPT = (
 #: The instructions for 依頼文から下書き (core/text_request.py).
 REQUEST_PROMPT = (
     "あなたは衛星画像の撮像依頼を受け付ける係です。"
-    "依頼の文を読み、撮像依頼の項目を書き出してください。"
-    "名称は、地名と目的が分かる 20 文字ほどの短い件名にしてください。"
-    "地名は、文に書かれた地名（港・基地・空港・施設など）をそのまま写し、複数あれば「、」で区切ってください。"
-    "期間は「日付の目安」の日付を使い、「YYYY-MM-DD 〜 YYYY-MM-DD」の形で書いてください（片方だけなら空けてよい）。"
-    "頻度は「期間中に1回」「毎日」「曜日:月・木」「n日ごと」のどれかです。"
-    "優先度は 最優先・高・中・低・最低 のどれかです。"
-    "雲量・分解能・オフナディア角・入射角は、文の数字と「以下」「以上」などの言葉をそのまま写してください。"
-    "時間帯は 昼・夜 のどちらかです。1日の回数は数字だけです。依頼者は文に書かれた名前や部署を写してください。"
-    "文にない項目は「なし」と書いてください。推測で値を作らないでください。"
-    "値だけを書き、説明・理由・括弧書きは書かないでください。出力は次の 12 行だけにしてください。\n"
-    "名称: \n地名: \n期間: \n頻度: \n優先度: \n雲量: \n分解能: \nオフナディア角: \n入射角: \n時間帯: \n1日の回数: \n依頼者: "
+    "依頼の文を読み、頼まれた項目だけを「項目: 値」の形で 1 行ずつ書いてください。"
+    "文にない項目は「なし」とだけ書いてください。推測で値を作らないでください。"
+    "値だけを書き、説明・理由・括弧書きは書かないでください。"
 )
 #: The most a 備考 sent to the model may be (characters; longer ones are not tidied).
 NOTE_LIMIT = 400
@@ -351,7 +343,7 @@ def _examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tup
 
 
 def _request_examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tuple[str, str], ...]]:
-    """依頼文から下書き's examples: [{ "text": 依頼の文, "answer": 「名称: …」の 12 行 }]."""
+    """依頼文から下書き's examples: [{ "text": 依頼の文, "answer": 「名称: …」「地名: …」… の行 }]."""
     if not isinstance(value, list):
         problems.append(f"{at} は [{{ \"text\": 依頼の文, \"answer\": 答えの行（名称: … 依頼者: …） }}] の配列で指定")
         return None

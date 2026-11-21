@@ -98,7 +98,8 @@ def test_a_mail_made_into_the_fields_of_a_new_request(plugin):
     row.button.click()
     assert wait_for(lambda: row.panel.draft_value is not None and row.panel.replace_button.isVisible())
     asked = loaded[0].asked[0][0][-1]["content"].split("\n")
-    assert asked[0] == "今日: 2026-11-21（土）" and asked[-1] == f"依頼の文: {MAIL}"
+    # Only the name and the places: the words say the rest (the requester after 「依頼者:」).
+    assert asked[0] == "今日: 2026-11-21（土）" and f"依頼の文: {MAIL}" in asked and asked[-3:] == ["出力は次の 2 行だけ:", "名称: ", "地名: "]
     assert loaded[0].until is not None
     panel = row.panel
     items = {key: check.text() for key, check in panel.checks.items()}
@@ -164,7 +165,7 @@ def test_two_places_made_into_two_requests(plugin):
 
 def test_editing_changes_only_what_the_text_names(plugin):
     p, iface, fake, tmp_path = plugin
-    replies = [REPLY, "名称: なし\n地名: なし\n期間: 〜 2026-12-31\n頻度: なし\n優先度: なし"]
+    replies = [REPLY, "名称: 横須賀港 光学 定点"]
     dock, loaded = _setup(p, fake, tmp_path, replies)
     form = _new_form(dock)
     row = form.draft_row
@@ -182,11 +183,12 @@ def test_editing_changes_only_what_the_text_names(plugin):
     assert form.windowTitle() == "撮像依頼の編集"
     row = form.draft_row
     assert row.widget.isVisibleTo(form)
+    asked_before = sum(len(w.asked) for w in loaded)
     row.edit.setPlainText("例の横須賀港の件、12月末まで延長でお願いします")
     row.button.click()
     assert wait_for(lambda: row.panel.draft_value is not None and row.panel.replace_button.isVisible())
-    asked = loaded[-1].asked[-1][0][-1]["content"]
-    assert "直す依頼: 横須賀港 光学 監視（期間 2026-11-23 〜 2026-12-06）" in asked
+    # The words say it all: the model is not asked.
+    assert sum(len(w.asked) for w in loaded) == asked_before
     # Only the end of the period; the area stays (the text does not ask to change it).
     assert list(row.panel.checks) == ["period"] and row.panel.rows == []
     assert row.panel.checks["period"].text().startswith("期間: 〜 2026-12-31（木）")
@@ -197,11 +199,26 @@ def test_editing_changes_only_what_the_text_names(plugin):
     assert wait_for(lambda: dock.task is None and jst_day(dock.requests[0].end) == date(2026, 12, 31))
     assert len(dock.requests) == 1 and sorted(map(tuple, dock.requests[0].rings[0])) == sorted(map(tuple, YOKOSUKA[0]))
 
+    # A new name asked for: only that line asked of the model (and the request being changed said).
+    dock.chosen = dock.requests[0]
+    dock.edit()
+    form = dock.form
+    row = form.draft_row
+    row.edit.setPlainText("名称を横須賀港の定点観測に変えてください")
+    row.button.click()
+    assert wait_for(lambda: row.panel.draft_value is not None and row.panel.replace_button.isVisible())
+    asked = loaded[-1].asked[-1][0][-1]["content"]
+    assert "直す依頼: 横須賀港 光学 監視（期間 2026-11-23 〜 2026-12-31）" in asked and asked.endswith("出力は次の 2 行だけ:\n名称: \n頻度: ")
+    assert list(row.panel.checks) == ["name", "category"] and row.panel.checks["name"].text() == "名称: 横須賀港 光学 定点"
+    row.panel.checks["category"].setChecked(False)
+    row.panel.replace_button.click()
+    assert form.name.text() == "横須賀港 光学 定点" and form.marked() == [form.name, form.note]
+    form.close()
+
     # A text that names no change: said so.
     dock.chosen = dock.requests[0]
     dock.edit()
     row = dock.form.draft_row
-    replies.append("名称: なし")
     row.edit.setPlainText("よろしくお願いします")
     row.button.click()
     assert wait_for(lambda: row.panel.isVisible() and not row.panel.cancel_button.isVisible())

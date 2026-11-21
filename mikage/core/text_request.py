@@ -475,7 +475,7 @@ def time_of_day_of(text: str) -> Optional[str]:
 
 
 _NUM = r"(\d+(?:\.\d+)?)"
-_CLOUD = re.compile(r"雲(?:量|の量|被覆率?|の割合)?\s*(?:は|が|:)?\s*" + _NUM + r"\s*(%|パーセント|割)\s*"
+_CLOUD = re.compile(r"雲(?:量|の量|被覆率?|の割合)?\s*(?:は|が|を|:)?\s*" + _NUM + r"\s*(%|パーセント|割)\s*"
                     r"(以下|まで|以内|未満|より少な|を超え|超|以上|より多)?[^。\n]{0,12}?(中止|不要|不可|見送|実施しない|撮らない|やめ|NG)?",
                     re.IGNORECASE)
 
@@ -571,7 +571,21 @@ def number_of(label: str, text: str) -> Optional[tuple[str, str]]:
 _REQUESTER = re.compile(r"(?:依頼者|依頼元|担当者?|連絡先)\s*(?:は|:)?\s*([^\s、。,(（\n]{1,20}(?:[ 　][^\s、。,(（\n]{1,10})?)")
 #: Edit: the text says to change these (not only names them to say which request).
 _CHANGE_NAME = re.compile(r"(?:名称|件名|名前|タイトル)\s*(?:を|は|:)")
-_CHANGE_AREA = re.compile(r"(?:範囲|場所|地点|地名|対象地|エリア|撮像範囲)\s*(?:を|は|:)|に(?:変更|変えて|差し替え)")
+_CHANGE_AREA = re.compile(r"(?:範囲|場所|地点|地名|対象地|エリア|撮像範囲)\s*(?:を|は|:)")
+#: 「佐世保港に変更」: the area, when the sentence names nothing else to change.
+_CHANGE_TO = re.compile(r"に(?:変更|変えて|差し替え)")
+_OTHER_SUBJECT = re.compile(r"名称|件名|名前|タイトル|依頼者|依頼元|担当|期間|期限|開始|終了|終わり|優先|雲|分解能|角|回数|時間帯|頻度|状態|"
+                            r"光学|SAR|sar|衛星|昼|夜|昇交|降交|[右左]観測|\d")
+_QUOTED = re.compile(r"「[^」]*」|『[^』]*』|\"[^\"]*\"")
+#: 「名称を「横須賀港 SAR」に」: the name itself, in quotes (its words are not read as the request's).
+_NEW_NAME = re.compile(r"(?:名称|件名|名前|タイトル)\s*(?:を|は|:)?\s*[「『\"]([^」』\"]{1,60})[」』\"]")
+
+
+def _area_change(t: str) -> bool:
+    """Whether an edit's text (NFKC) asks to change the area."""
+    if _CHANGE_AREA.search(t):
+        return True
+    return any(_CHANGE_TO.search(s) and not _OTHER_SUBJECT.search(_QUOTED.sub("", s)) for s in re.split(r"[。\n]", t))
 _CHANGE_REQUESTER = re.compile(r"(?:依頼者|依頼元|担当)\s*(?:を|は|:)")
 
 
@@ -835,22 +849,106 @@ def value_text(key: str, v: Any) -> str:
     return str(v)
 
 
-def request_messages(task: TextTask, text: str, today: date, request: Optional[ImagingRequest] = None) -> list[Message]:
-    """The conversation that asks for a request's lines; `request`: the one being edited (only changes are asked for)."""
+#: What the model is told of each line it is asked for.
+KEY_HINTS = {
+    "名称": "地名と目的が分かる 20 文字ほどの短い件名",
+    "地名": "文に書かれた地名（港・基地・空港・施設など）をそのまま。複数あれば「、」で区切る",
+    "期間": "「日付の目安」の日付で「YYYY-MM-DD 〜 YYYY-MM-DD」（片方だけなら空けてよい）",
+    "頻度": "「期間中に1回」「毎日」「曜日:月・木」「n日ごと」のどれか",
+    "優先度": "最優先・高・中・低・最低 のどれか",
+    "雲量": "文の数字と「以下」「以上」などの言葉をそのまま",
+    "分解能": "文の数字と単位をそのまま",
+    "オフナディア角": "文の数字と「以下」などをそのまま",
+    "入射角": "文の数字と「以下」などをそのまま",
+    "時間帯": "昼・夜 のどちらか",
+    "1日の回数": "数字だけ",
+    "依頼者": "文に書かれた名前や部署",
+}
+_OFTEN_CUE = re.compile(r"毎|ごと|おき|置き|回|度|週|曜|定期|定点|継続|監視")
+#: Words with 日・週・月 or numbers that are no dates (how often, the weekdays, amounts).
+_NOT_DATES = re.compile(r"毎週|毎日|毎月|[月火水木金土日]曜日?|[月火水木金土日](?=[・、,と])|(?<=[・、,と])[月火水木金土日]|"
+                        r"(?:\d+|[一二三四五六七八九十]+)\s*日\s*(?:ごと|おき|置き|毎)|1日|一日|日に|"
+                        r"\d+(?:\.\d+)?\s*(?:(?:〜|~|-|から)\s*\d+(?:\.\d+)?\s*)?(?:%|％|m|cm|度|°|回|割)")
+#: Words of a time the code may not read (「来年の春ごろ」「年明け」): the model is asked for the period.
+_ASK_DATE = re.compile(r"\d{1,4}\s*[/月日年]|[今来再翌先]+[週月年]|年内|年末|年明け|月末|月初|上旬|中旬|下旬|明日|あす|明後日|あさって|"
+                       r"今日|本日|週末|週明け|期限|締め?切|春|夏|秋|冬|ごろ|頃|以降|連休|正月|お盆")
+#: A length of time (「2週間」「1か月延長」), not how often.
+_SPAN = re.compile(r"(?:1日|一日|日)\s*(?:に|あたり)?\s*\d+\s*(?:〜\s*\d+\s*)?回|"
+                   r"(?:\d+|[一二三四五六七八九十]+)\s*(?:日間|週間|か月|ヶ月|カ月|ケ月|ヵ月|日|週)|\d+(?:\.\d+)?\s*度")
+
+
+def asked_keys(text: str, today: date, request: Optional[ImagingRequest] = None) -> tuple[str, ...]:
+    """
+    The lines the model is asked for: what only it can write (the name, the
+    places, the requester when no 「依頼者:」 says it), and what the text
+    has words for that the code could not read (期間・頻度・雲量・1 日の回数).
+    What the code reads, and what the model would only be checked against,
+    is not asked (each line costs seconds). Editing: only what the text
+    asks to change. None asked: the model is not asked at all.
+    """
+    t = _nfkc(text)
+    quoted_name = _NEW_NAME.search(t)
+    text = t = _NEW_NAME.sub("（名称）", t)
+    bare_t = _QUOTED.sub("", t)
+    editing = request is not None
+    keys = []
+    if (not editing or _CHANGE_NAME.search(t)) and quoted_name is None:
+        keys.append("名称")
+    if not editing or _area_change(t):
+        keys.append("地名")
+    period = period_of(text, today)
+    extended = editing and _EXTEND.search(t) is not None
+    if not (period.start or period.end) and not extended and _ASK_DATE.search(_NOT_DATES.sub("", bare_t)):
+        keys.append("期間")
+    if often_of(text) is None and _OFTEN_CUE.search(_SPAN.sub("", bare_t)):
+        keys.append("頻度")
+    if cloud_of(text) is None and "雲" in t:
+        keys.append("雲量")
+    if times_of(text) is None and re.search(r"(?:1日|一日|日に)[^。\n]{0,6}回", t):
+        keys.append("1日の回数")
+    if (not editing or _CHANGE_REQUESTER.search(t)) and not _REQUESTER.search(t):
+        keys.append("依頼者")
+    return tuple(keys)
+
+
+def request_messages(task: TextTask, text: str, today: date, request: Optional[ImagingRequest] = None,
+                     keys: Sequence[str] = REQUEST_KEYS) -> list[Message]:
+    """
+    The conversation that asks for a request's lines `keys` (asked_keys);
+    `request`: the one being edited (only changes are asked for).
+    """
     hints = "、".join(f"{name} {a.isoformat()}" if a == b else f"{name} {a.isoformat()} 〜 {b.isoformat()}"
                      for name, a, b in future_hints(today))
-    lines = [f"今日: {_day_text(today)}", f"日付の目安: {hints}"]
+    lines = [f"今日: {_day_text(today)}"]
+    if "期間" in keys:
+        lines.append(f"日付の目安: {hints}")
     if request is not None:
         start = jst_day(request.start) if math.isfinite(request.start) else None
         end = jst_day(request.end) if math.isfinite(request.end) else None
         lines.append(f"直す依頼: {request.name}（期間 {start.isoformat() if start else ''} 〜 {end.isoformat() if end else ''}）")
         lines.append("直す項目だけを書き、ほかは「なし」と書いてください。")
     lines.append(f"依頼の文: {text.strip()[:TEXT_LIMIT]}")
+    lines.append("書く項目:")
+    lines += [f"- {k}: {KEY_HINTS[k]}" for k in keys]
+    lines.append(f"出力は次の {len(keys)} 行だけ:")
+    lines += [f"{k}: " for k in keys]
     out: list[Message] = [{"role": "system", "content": task.prompt}]
     for given, answer in task.examples:
         out += [{"role": "user", "content": f"今日: {_day_text(today)}\n依頼の文: {given}"}, {"role": "assistant", "content": answer}]
     out.append({"role": "user", "content": "\n".join(lines)})
     return out
+
+
+#: A place in a name (「東京港」「呉造船所」): the shortest run of letters before such an ending.
+_PLACE_LIKE = re.compile(r"[一-龥々ぁ-んァ-ヶー]{1,8}?(?:空港|飛行場|基地|駐屯地|演習場|造船所|半島|港|湾|島|岬|市|町|村|県)")
+
+
+def _foreign_places(name: str, text: str) -> list[str]:
+    """The places a name has that the text does not (the model made 「東京港」 of coordinates)."""
+    t = fold(text)
+    plain = t.replace("の", "")
+    return [p for p in dict.fromkeys(m[0] for m in _PLACE_LIKE.finditer(name))
+            if fold(p) not in t and fold(p).replace("の", "") not in plain]
 
 
 def _has_words(value: str, text: str) -> bool:
@@ -891,15 +989,24 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
     got = answer_lines(raw, REQUEST_KEYS) if raw else {}
     d = RequestDraft()
     t = _nfkc(text)
+    # A name in quotes is the name as written; its words are not read as the request's (「…定点」 is no 区分).
+    quoted_name = _NEW_NAME.search(t)
+    if quoted_name is not None:
+        text = t = _NEW_NAME.sub("（名称）", t)
     editing = request is not None
 
     # 名称
-    if not editing or _CHANGE_NAME.search(t):
+    if quoted_name is not None:
+        d.values["name"] = quoted_name[1].strip()[:NAME_LIMIT]
+    elif not editing or _CHANGE_NAME.search(t):
         name = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", bare(got.get("名称", "")))).strip(" 「」『』")
         if name:
             foreign = _foreign(name, text)
+            odd = _foreign_places(name, text)
             if foreign:
                 d.checks.append(f"名称「{name}」の数字 {'・'.join(foreign)} は文にない（入れず）")
+            elif odd:
+                d.checks.append(f"名称「{name}」の「{'・'.join(odd)}」は文にない（入れず）")
             elif len(name) > NAME_LIMIT:
                 d.values["name"] = name[:NAME_LIMIT].rstrip()
                 d.checks.append(f"名称は {NAME_LIMIT} 文字までに")
@@ -908,7 +1015,7 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
     for key, label in (("management_no", "管理番号"), ("identification_no", "識別番号")):
         found = number_of(label, text)
         if found:
-            d.values[key], d.why[key] = found
+            d.values[key] = found[0]
     if editing:
         if _RESTART.search(t):
             d.values["status"], d.why["status"] = "有効", "再開"
@@ -1020,12 +1127,12 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
         else:
             m = _REQUESTER.search(t)
             if m:
-                d.values["requester"], d.why["requester"] = m[1].strip(), m[0]
+                d.values["requester"] = m[1].strip()
             elif who:
                 d.checks.append(f"依頼者「{who}」は文にない（入れず）")
 
     # 地名
-    d.area_asked = not editing or bool(_CHANGE_AREA.search(t))
+    d.area_asked = not editing or _area_change(t)
     if d.area_asked:
         d.points = points_of(text)
         names = places_in(text, place_names)

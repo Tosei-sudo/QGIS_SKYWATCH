@@ -153,7 +153,7 @@
 
 - **モデルの一覧（`models`）とタスクごとの割り当て（`tasks`）**: `models` に名前と置き場所を書き、`tasks` でタスクごとにどのモデルを使うかを決める。割り当てのないタスクはボタンを出さない。使う人がモデルを選ぶ場面はない（設定ファイルを配る側が決める）
   - モデルの値は置き場所の文字列か `{ "path", "threads" }`（`threads` は既定 0 = コア数 − 1、最大 8）
-  - タスクの値はモデルの名前か `{ "model", "maxTokens", "prompt" }`（`maxTokens` は最大の長さ、`prompt` はモデルへの指示文の置き換え）。`tidyNote` は `examples`（`[{ "kind", "note", "tidy" }]`、指示の前に見せる例）も書ける。`requestDraft` も `examples`（`[{ "text", "answer" }]`。answer は 12 行の「項目: 値」）
+  - タスクの値はモデルの名前か `{ "model", "maxTokens", "prompt" }`（`maxTokens` は最大の長さ、`prompt` はモデルへの指示文の置き換え）。`tidyNote` は `examples`（`[{ "kind", "note", "tidy" }]`、指示の前に見せる例）も書ける。`requestDraft` も `examples`（`[{ "text", "answer" }]`。answer は「名称: …」「地名: …」のような「項目: 値」の行）
   - `keepMinutes`（既定 10）: 使い終えてからモデルを残す分数。過ぎるとメモリーを返し、0 ですぐ外す
   - 読んでおくモデルは一度に 1 つ（1B と 3B を両方読むとメモリーを 3.5 GB ほど使うため）。別のモデルのタスクを頼むと前のモデルを外して読み込むので、切り替えのたびに数秒かかる
   - 以前の書き方もそのまま読む: `"textAssist": "パス"` と `{ "model", "threads", "maxTokens", "handoverMaxTokens", "keepMinutes", "notePrompt", "noteExamples", "handoverPrompt" }` は、そのモデルを `tidyNote` と `handoverDraft` に割り当てたもの
