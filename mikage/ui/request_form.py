@@ -15,6 +15,11 @@ Under the area, one line says how often the satellites can take the request
 as written (「撮像機会: 今後 14 日で 9 回（最初 11/13 10:32 ISS）」, red when
 never; 改修案 7, chances.form_text), counted in the background a moment after
 the area, period or conditions change (not for a batch).
+
+Given `draft_host` (the dock's DraftHost) and while the settings give the
+task requestDraft a model, the row 「依頼文」 at the top (ui/request_draft.py):
+a pasted text made into the fields' proposal; the items taken are tinted
+until touched.
 """
 from __future__ import annotations
 
@@ -26,7 +31,7 @@ from typing import Callable, Optional
 
 from qgis.core import QgsGeometry, QgsPointXY, QgsRectangle, QgsVectorLayer
 from qgis.gui import QgsMapToolEmitPoint, QgsMapToolExtent
-from qgis.PyQt.QtCore import QDate, Qt, QTimer
+from qgis.PyQt.QtCore import QDate, QEvent, QObject, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QPlainTextEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -52,6 +57,8 @@ from .satellite_tree import SatelliteTree
 _WEEKDAYS = "月火水木金土日"
 #: How long after the last change the chances are counted again (ms).
 CHANCE_DELAY_MS = 700
+#: A field 依頼文から下書き filled, until it is touched.
+DRAFTED_STYLE = "background-color: #fef9c3;"
 
 
 def _optional(low: float, high: float, suffix: str, decimals: int = 1) -> QDoubleSpinBox:
@@ -77,12 +84,31 @@ def _words(text: str) -> list:
     return [w.strip() for w in text.replace("、", ",").split(",") if w.strip()]
 
 
+class _Unmark(QObject):
+    """Takes a field's tint off once it is touched (focused, clicked, typed in)."""
+
+    def __init__(self, marked: dict, unmark: Callable, parent):
+        super().__init__(parent)
+        self.marked = marked
+        self.unmark = unmark
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt)
+        if event.type() in (QEvent.Type.FocusIn, QEvent.Type.MouseButtonPress, QEvent.Type.KeyPress):
+            # A spin box's or a date's line edit is touched, not the box: the field it is in.
+            w = obj
+            while w is not None and w not in self.marked:
+                w = w.parent()
+            if w is not None:
+                self.unmark(w)
+        return False
+
+
 class RequestForm(QDialog):
     """Adds or changes one request; `save(request)` is called with it on 「保存」."""
 
     def __init__(self, iface, request: ImagingRequest, save: Callable[[ImagingRequest], None],
                  known: Optional[dict] = None, parent=None, satellites: Optional[Callable] = None,
-                 batch: Optional[dict] = None):
+                 batch: Optional[dict] = None, draft_host=None):
         super().__init__(parent or iface.mainWindow())
         fit_text(self)
         #: 「レイヤーから取り込み」: {"items": [(name, rings, 範囲 / 点)], "text": what they are}; None for one request.
@@ -100,8 +126,18 @@ class RequestForm(QDialog):
         else:
             self.setWindowTitle(self.tr("撮像依頼の編集") if request.object_id is not None else self.tr("撮像依頼の登録"))
         self.setModal(False)
+        #: The fields 依頼文から下書き filled (their style before), tinted until touched.
+        self._marked: dict = {}
+        self._unmarker = _Unmark(self._marked, self._unmark, self)
         self._build(known or {})
         self._fill(request)
+        #: 依頼文から下書き (ui/request_draft.py): the row 「依頼文」 at the top, not for a batch.
+        self.draft_row = None
+        if draft_host is not None and batch is None:
+            from .request_draft import RequestDraftRow
+
+            self.draft_row = RequestDraftRow(self, draft_host.context.text_assist, draft_host)
+            self._fields.insertRow(0, self.draft_row.label, self.draft_row.widget)
         self._fit()
         self.extent_tool = QgsMapToolExtent(self.canvas)
         self.extent_tool.extentChanged.connect(self._extent_drawn)
@@ -151,6 +187,7 @@ class RequestForm(QDialog):
         outer.addWidget(scroll, 1)
         self._body = body
         form = QFormLayout()
+        self._fields = form
         self.name = QLineEdit()
         form.addRow(self.tr("名称"), self.name)
         numbers = QHBoxLayout()
@@ -526,6 +563,7 @@ class RequestForm(QDialog):
 
     def _tree_changed(self) -> None:
         """The checks written as the request's series, satellites and modes."""
+        self._unmark(self.picked_label)
         p = picked(self.tree.items(), self._lists())
         for edit, names in ((self.series, p.series), (self.satellites, p.satellites), (self.modes, p.modes)):
             edit.blockSignals(True)
@@ -632,6 +670,7 @@ class RequestForm(QDialog):
         self.canvas.refresh()
 
     def _area_changed(self) -> None:
+        self._unmark(self.area_label)
         box = bbox_of(self.rings)
         if box is None:
             self.area_label.setText(self.tr("範囲なし（地図で矩形・多角形・点、または選択中の地物で指定）"))
@@ -644,6 +683,74 @@ class RequestForm(QDialog):
             self.overlay.paint([(self.rings, "#f59e0b", 2, self.name.text())])
         self.canvas.refresh()
         self._chances_changed()
+
+    # --- 依頼文から下書き ----------------------------------------------------------------------------
+
+    def take_draft(self, draft, keys, choice=None, text: str = "", note: bool = True) -> int:
+        """
+        The items `keys` of a draft (core/text_request.py) and the area chosen
+        (an AreaChoice) put in the fields, the rest as it is; the text added
+        to the メモ with `note`. Those fields tinted until touched. Nothing is
+        saved. The number of items put.
+        """
+        from ..core.text_request import applied
+
+        r = applied(self.value(), draft, keys, text, note)
+        if choice is not None:
+            r.rings, r.shape_kind = [list(x) for x in choice.rings], choice.kind
+        self.rings = [list(x) for x in r.rings]
+        self._fill(r)
+        for widget in self._marked_for(draft, keys, choice is not None, note and bool(text.strip())):
+            self._mark(widget)
+        return len([k for k in keys if k in draft.values]) + (1 if choice is not None else 0)
+
+    def _marked_for(self, draft, keys, area: bool, note: bool) -> list:
+        fields = {
+            "name": [self.name], "management_no": [self.management_no], "identification_no": [self.identification_no],
+            "status": [self.status], "category": [self.category], "achieve": [self.achieve],
+            "repeat": [self.repeat_kind, self.every], "times": [self.times_min, self.times_max], "priority": [self.level],
+            "kind": [self.kind], "look_side": [self.look], "orbit_dir": [self.orbit], "time_of_day": [self.time_of_day],
+            "satellites": [self.picked_label, self.series, self.satellites, self.modes], "resolution": [self.resolution],
+            "cloud_no_go": [self.cloud], "requester": [self.requester],
+        }
+        out = []
+        for key in keys:
+            value = draft.values.get(key)
+            if value is None:
+                continue
+            if key in ("period", "off_nadir", "incidence"):
+                low, high = {"period": (self.start, self.end), "off_nadir": (self.ona_min, self.ona_max),
+                             "incidence": (self.inc_min, self.inc_max)}[key]
+                out += [w for w, side in ((low, value[0]), (high, value[1])) if side is not None]
+            else:
+                out += fields.get(key, [])
+        if area:
+            out.append(self.area_label)
+        if note:
+            out.append(self.note)
+        return out
+
+    def _mark(self, widget) -> None:
+        if widget not in self._marked:
+            self._marked[widget] = widget.styleSheet()
+            for w in (widget, *widget.findChildren(QWidget)):
+                w.installEventFilter(self._unmarker)
+        widget.setStyleSheet(f"{self._marked[widget]} {DRAFTED_STYLE}".strip())
+
+    def _unmark(self, widget) -> None:
+        old = self._marked.pop(widget, None) if hasattr(self, "_marked") else None
+        if old is not None:
+            widget.setStyleSheet(old)
+            for w in (widget, *widget.findChildren(QWidget)):
+                w.removeEventFilter(self._unmarker)
+
+    def marked(self) -> list:
+        """The fields 依頼文から下書き filled and not touched since."""
+        return list(self._marked)
+
+    def satellites_known(self) -> list:
+        """The satellites of the catalog (empty until read, or without one)."""
+        return list(self._sats)
 
     # --- 撮像機会 (改修案 7) ------------------------------------------------------------------------
 
@@ -765,6 +872,8 @@ class RequestForm(QDialog):
     def _closed(self, _result=None) -> None:
         self._closing = True
         self._chance_timer.stop()
+        if self.draft_row is not None:
+            self.draft_row.stop()
         if self._chance_task is not None:
             self._chance_task.cancel()
         for tool in (self.extent_tool, self.point_tool, self.draw_tool):
