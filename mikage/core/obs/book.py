@@ -494,14 +494,18 @@ class ObservationBook:
         """
         self._say(f"{self.taxonomy_store.label} から分類を読み込み中…")
         try:
-            kept = self.taxonomy_store.load()
-            fields = self.taxonomy_store.load_fields()
+            self._read_taxonomy()
         except Exception as error:  # noqa: BLE001
             return self._say(f"{self.taxonomy_store.label} から分類の読み込み失敗: {_error_text(error)}")
+        return self._say(f"{self.taxonomy_store.label}: 分類 {len(self._taxonomy)} 件を読み込み")
+
+    def _read_taxonomy(self) -> None:
+        """Reads the classification and specification fields again; raises what the store raises (kept as they were)."""
+        kept = self.taxonomy_store.load()
+        fields = self.taxonomy_store.load_fields()
         with self.lock:
             self._taxonomy = kept if kept is not None else list(self.vocabulary.taxonomy)
             self.spec_fields = fields if fields is not None else list(self.vocabulary.spec_fields)
-        return self._say(f"{self.taxonomy_store.label}: 分類 {len(self._taxonomy)} 件を読み込み")
 
     def flows(self) -> list[ObjectFlow]:
         """Every thing's flow."""
@@ -1700,6 +1704,76 @@ class ObservationBook:
         except Exception as error:  # noqa: BLE001
             self._say(f"{self.store.label} から分類「{kind_of(list(path))}」の記録の読み込み失敗: {_error_text(error)}")
             return False
+
+    def plan_taxonomy_import(self, request: Any) -> Any:
+        """
+        「分類体系の取り込み」's dry run (a taxonomy_import.ImportRequest): the
+        classification read again (others may have changed it) and, for a
+        置き換え, the records of the classes it would remove (a shared store),
+        then what the import would do (an ImportPlan; nothing saved). Raises
+        what the stores raise, ValueError when the columns make no class.
+        """
+        from . import taxonomy_import as ti
+
+        if request.mode == ti.REPLACE and not self.scoped and not self.loaded:
+            self.reload()  # a local store's records (the classes they use are kept)
+        self._read_taxonomy()
+        if request.mode != ti.REPLACE:
+            return ti.plan_request(request, self.taxonomy(), self.spec_fields)
+        plan = ti.plan_request(request, self.taxonomy(), self.spec_fields, [o.kind for o in self.records])
+        if plan.removed() and self.scoped:
+            self.fetch(RecordQuery(kinds=tuple(plan.removed_tops())))
+            plan = ti.plan_request(request, self.taxonomy(), self.spec_fields, [o.kind for o in self.records])
+        return plan
+
+    def import_taxonomy(self, request: Any, tried: Optional[tuple] = None, backup: Optional[Callable[[str], str]] = None) -> Any:
+        """
+        Takes a table into the classification: planned again as the dry run
+        does; nothing saved when `tried` (the dry run's ImportPlan.signature())
+        differs (the classification changed in between), or when `backup`
+        (given the classification as it was, as JSON; returns where it kept
+        it) fails. The plan saved (or found with nothing to change), else None (the reason said).
+        """
+        from . import taxonomy_import as ti
+
+        try:
+            plan = self.plan_taxonomy_import(request)
+        except ValueError as error:
+            self._say(str(error))
+            return None
+        except Exception as error:  # noqa: BLE001
+            self._say(f"{self.taxonomy_store.label} から分類の読み込み失敗: {_error_text(error)}")
+            return None
+        if tried is not None and plan.signature() != tried:
+            self._say("試行のあとで分類体系が変わりました（ほかの人の編集など）。もう一度試行してください")
+            return None
+        if not plan.changed:
+            self._say(f"表から取り込む変更なし（{plan.summary()}）")
+            return plan
+        kept = ""
+        if backup is not None:
+            try:
+                kept = backup(ti.backup_text(self.taxonomy()))
+            except Exception as error:  # noqa: BLE001
+                self._say(f"取り込む前の分類体系の控えを保存できないため、取り込みません: {_error_text(error)}")
+                return None
+        if plan.spec_fields is not None and not self.set_spec_fields(plan.spec_fields):
+            return None
+        done = f"表から取り込みました: {plan.summary()}"
+        lacks = getattr(self.taxonomy_store, "lacks", None)
+        missing = lacks("activities") if lacks and ti.Use(ti.ACTIVITIES) in request.uses else None
+        if missing:
+            done += f"（分類のテーブルに属性 {missing} がなく、活動は未保存）"
+        if kept:
+            done += f"（取り込む前の分類体系の控え: {kept}）"
+        if not self._save_taxonomy(plan.taxa, [], done):
+            return None
+        from .. import audit
+
+        n = plan.counts()
+        audit.record("edit", "taxonomy-import", self.taxonomy_store.label, count=n[ti.NEW] + n[ti.CHANGED] + n[ti.REMOVED],
+                     detail={"source": request.source, "mode": request.mode, "summary": plan.summary(), "backup": kept})
+        return plan
 
     def set_spec_fields(self, fields: list[SpecField]) -> bool:
         """Changes the specification fields (the values of a field taken away stay in the classes)."""

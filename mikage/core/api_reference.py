@@ -55,6 +55,11 @@ ENTRIES: list[Entry] = [
     Entry("add_checked_area", "観測記録の関数", "確認範囲を追加", "矩形（bbox）か多角形で確認範囲を追加。", 'api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")'),
     Entry("delete_checked_areas", "観測記録の関数", "確認範囲を削除", "確認範囲 ID の一覧を削除。", 'api.delete_checked_areas(["a1"])'),
     Entry("observation_report", "観測記録の関数", "報告書", "期間・種別の記録を報告書（地図つき HTML）にする。", 'api.observation_report(title="週報", save="/tmp/週報.html")'),
+    Entry("import_taxonomy", "観測記録の関数", "分類体系の取り込み（表から）",
+          "CSV・Excel のファイル、またはレイヤーの表（大分類から階層ごとの列）を分類体系に取り込む。save=False（既定）は試行だけで、"
+          "各分類がどうなるか（summary・classes・errors）を返す。save=True で保存（取り込む前の分類体系は控えの JSON に残す）。"
+          "uses は列ごとの使い方（「階層 1」「既知の個体」「諸元: 全長」「使わない」など。省略で列名から推測）、mode は \"add\"（追加・更新）か \"replace\"（置き換え）。",
+          'r = api.import_taxonomy("C:/data/分類一覧.xlsx", sheet="分類一覧")\nprint(r["summary"])\napi.import_taxonomy("C:/data/分類一覧.xlsx", save=True)'),
 
     # ---- ドックと道具 ----
     Entry("observation_dock", "ドックと道具", "観測記録ドック",
