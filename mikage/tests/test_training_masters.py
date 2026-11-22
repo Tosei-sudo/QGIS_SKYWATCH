@@ -91,3 +91,18 @@ def test_from_production_in_the_settings_file():
     assert training_settings_of({"fromProduction": "all"}, problems).from_production == tuple(MASTERS)
     assert len(problems) == 2 and "fromProduction" in problems[0]
     assert masters.names_text(["satellites", "taxonomy"]) == "衛星・分類体系"
+
+
+def test_with_the_organisations_exercises_the_productions_path_mappings_too():
+    """判読の練習's organisation's exercises may open the production catalogs' images: their files found as the production finds them."""
+    mappings = [{"from": "\\\\nas\\images", "to": "Z:\\images"}]
+    p = {**production(), "pathMappings": mappings, "training": {"exercises": {"exercises": f"{PROD}/T/FeatureServer/0", "answers": "x"}}}
+    value, taken = masters.with_production(practice(), p, [], "/etc/mikage/config.json", OUT)
+    assert taken == [] and value["pathMappings"][-1:] == mappings
+    assert masters.exercise_images(p) and not masters.exercise_images(production())
+    # Without them, the practice's own only.
+    value, _ = masters.with_production(practice(), {**production(), "pathMappings": mappings}, [], "/etc/mikage/config.json", OUT)
+    assert mappings[0] not in (value.get("pathMappings") or [])
+    # The production's value with its relative paths made whole (the production catalogs read from there).
+    whole = masters.made_whole({"imageCatalogs": [{"url": "./catalog.json"}]}, "/etc/mikage/config.json")
+    assert whole["imageCatalogs"][0]["url"] != "./catalog.json"

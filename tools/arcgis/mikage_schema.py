@@ -428,6 +428,62 @@ TABLES = (
         F("DESCRIPTION", "説明", "TEXT", 1000, "description"),
         F("SORT_ORDER", "並び順", "LONG", None, "order"),
     )),
+    # 判読の練習（練習モード）。属性名は決まり（`fields` では変えない）なので役割は空。
+    Table("TBL_TRAINING_EXERCISE", "判読の練習の問題", "POLYGON", writable=True, setting="training.exercises.exercises", fields=(
+        F("EXERCISE_ID", "問題ID", "TEXT", 64),
+        F("TITLE", "題名", "TEXT", 255),
+        F("INSTRUCTION", "指示文", "TEXT", 4000),
+        F("EXERCISE_TYPE", "種類", "TEXT", 32),
+        F("IMAGE_ID", "画像ID", "TEXT", 255),
+        F("IMAGE_SOURCE", "画像のファイル", "TEXT", 1000),
+        F("BEFORE_IMAGE_ID", "前の画像ID", "TEXT", 255),
+        F("BEFORE_IMAGE_SOURCE", "前の画像のファイル", "TEXT", 1000),
+        F("TARGET_KINDS", "対象の種別", "TEXT", 1000),
+        F("DIFFICULTY", "難しさ", "TEXT", 32),
+        F("TIME_LIMIT_MIN", "制限時間", "DOUBLE"),
+        F("EXERCISE_MODE", "形式", "TEXT", 16),
+        F("SHOW_ANSWERS", "答えを見せる", "SHORT"),
+        F("PASS_SCORE", "合格点", "DOUBLE"),
+        F("SCORING", "採点の決まり", "TEXT", 4000),
+        F("COURSE_NAME", "コース", "TEXT", 255),
+        F("COURSE_ORDER", "コースの中の順番", "LONG"),
+        F("ROLES", "対象の担当", "TEXT", 1000),
+        F("ACTIVE", "出す", "SHORT"),
+    )),
+    Table("TBL_TRAINING_ANSWER", "判読の練習の正解", "POINT", writable=True, setting="training.exercises.answers", fields=(
+        F("EXERCISE_ID", "問題ID", "TEXT", 64),
+        F("ANSWER_NO", "番号", "LONG"),
+        F("KIND", "種別", "TEXT", 1000),
+        F("ACTIVITY", "活動", "TEXT", 255),
+        F("LENGTH_M", "長さ", "DOUBLE"),
+        F("WIDTH_M", "幅", "DOUBLE"),
+        F("HEADING", "向き", "DOUBLE"),
+        F("CHANGE_KIND", "変化", "TEXT", 16),
+        F("ANSWER_POINTS", "配点", "DOUBLE"),
+        F("TOLERANCE_M", "位置の許容", "DOUBLE"),
+        F("REQUIRED", "必ず見つける", "SHORT"),
+        F("EXPLANATION", "解説", "TEXT", 4000),
+        F("REFERENCE_IMAGE", "参考写真", "TEXT", 1000),
+    )),
+    Table("TBL_TRAINING_RESULT", "判読の練習の結果", None, writable=True, setting="training.exercises.results", fields=(
+        F("EXERCISE_ID", "問題ID", "TEXT", 64),
+        F("TITLE", "題名", "TEXT", 255),
+        F("COURSE_NAME", "コース", "TEXT", 255),
+        F("USER_NAME", "解いた人", "TEXT", 255),
+        F("EXERCISE_MODE", "形式", "TEXT", 16),
+        F("ATTEMPT", "何回目", "LONG"),
+        F("STARTED", "始めた日時", "DATE"),
+        F("FINISHED", "提出した日時", "DATE"),
+        F("SECONDS", "かかった秒数", "LONG"),
+        F("SCORE", "点", "DOUBLE"),
+        F("PASSED", "合格", "SHORT"),
+        F("FOUND", "見つけた数", "LONG"),
+        F("MISSED", "見落とした数", "LONG"),
+        F("EXTRA", "誤りの数", "LONG"),
+        F("KIND_SCORE", "種別の正しさ", "DOUBLE"),
+        F("HINTS", "ヒントを見た回数", "LONG"),
+        F("DETAIL", "答えごとの結果", "TEXT", 30000),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -455,6 +511,9 @@ INDEXES = {
     "TBL_USER_ROLE": ("USER_NAME",),
     "TBL_SATELLITE_OUTAGE": ("OUTAGE_ID", "SAT_NAME"),
     "TBL_GLOSSARY": ("TERM",),
+    "TBL_TRAINING_EXERCISE": ("EXERCISE_ID",),
+    "TBL_TRAINING_ANSWER": ("EXERCISE_ID",),
+    "TBL_TRAINING_RESULT": ("USER_NAME", "EXERCISE_ID"),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -554,6 +613,11 @@ def plugin_config(urls: dict) -> dict:
         config["satelliteOutages"] = urls["TBL_SATELLITE_OUTAGE"]
     if has("TBL_GLOSSARY"):
         config["glossary"] = urls["TBL_GLOSSARY"]
+    if has("TBL_TRAINING_EXERCISE", "TBL_TRAINING_ANSWER"):
+        exercises = {"exercises": urls["TBL_TRAINING_EXERCISE"], "answers": urls["TBL_TRAINING_ANSWER"]}
+        if has("TBL_TRAINING_RESULT"):
+            exercises["results"] = urls["TBL_TRAINING_RESULT"]
+        config["training"] = {"exercises": exercises}
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

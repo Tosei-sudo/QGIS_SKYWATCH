@@ -1907,6 +1907,13 @@ const SPEC = [
         T("config", "組織の練習用の設定ファイル", { ph: "\\\\fileserver\\mikage\\config.training.jsonc", help: "パスか URL。相対パスはこの設定ファイルのフォルダから。なしで内蔵の見本" }),
         J("fromProduction", "本番から読む台帳", { ph: "[\"satellites\", \"taxonomy\", \"places\", \"eventKinds\", \"glossary\"]", help: "内蔵の見本で練習するとき、この設定ファイルから読む読むだけの台帳（衛星 satellites・分類体系 taxonomy・地名 places・イベントの種類 eventKinds・備考の単語集 glossary）。既定 true（すべて）。false で見本だけ。書き込む表は練習用のまま" }),
         J("scoring", "判読の練習の採点", { ph: "{\"tolerance\": 50, \"weights\": {\"find\": 50, \"kind\": 30, \"activity\": 10, \"measure\": 10}, \"passScore\": 70}", help: "組織の採点の既定（問題ごとに上書きできる）。tolerance 位置の許容 m（既定 50。toleranceByLength 0.5 でモノの長さの半分のほうが大きければそちら）、weights 配点の割合（find 見つける・kind 種別・activity 活動・measure 測る・change 変化。問題の種類にない項目は除いて 100 点に換算）、kindCredit 種別の部分点（exact 1・parent 0.5・top 0.2）、extraPenalty 誤り 1 件の減点（5）、lengthTolerance 長さ・幅の許容 %（15）、headingTolerance 向きの許容 度（15）、headingEitherEnd 船首・船尾を問わない、passScore 合格点（70）" }),
+        O("exercises", "判読の練習の組織の問題", [
+          T("exercises", "問題の表（TBL_TRAINING_EXERCISE）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/29", help: "範囲のポリゴン 1 つで 1 問。判読の練習の指導者が ArcGIS Pro・Portal で入れる" }),
+          T("answers", "正解の表（TBL_TRAINING_ANSWER）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/30", help: "正解のモノ 1 つで 1 点（EXERCISE_ID で問題と結ぶ）" }),
+          T("results", "結果の表（TBL_TRAINING_RESULT）", { ph: "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/31", help: "提出 1 回で 1 行足す（練習モードで本番に書き込むのはこれだけ）。なしで結果はその PC だけ" }),
+          TOKEN,
+        ], { help: "練習モードで「判読の練習…」を開くたびに読む。問題と正解の表は両方要る",
+             check: (o, at, p) => { if ((o.exercises || o.results || o.token) && !(o.exercises && o.answers)) p.push(`${at}: 問題の表（exercises）と正解の表（answers）の URL が要ります`); } }),
       ]) },
   ] },
   { group: "一覧", keys: [

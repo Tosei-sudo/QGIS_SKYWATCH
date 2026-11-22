@@ -72,6 +72,9 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_USER_ROLE`](#tbl_user_role担当) | なし | 書き込み | 一人ひとりの担当（2026-11-15 に追加） | `userRoles` |
 | [`TBL_SATELLITE_OUTAGE`](#tbl_satellite_outage衛星の障害情報) | なし | 書き込み | 衛星の障害情報（理由・期間・影響。2026-11-16 に追加） | `satelliteOutages` |
 | [`TBL_GLOSSARY`](#tbl_glossary備考の単語集) | なし | 読み | 観測記録の備考の単語集（候補と表記ゆれ。2026-11-17 に追加） | `glossary` |
+| [`TBL_TRAINING_EXERCISE`](#tbl_training_exercise判読の練習の問題) | ポリゴン | 書き込み（判読の練習の指導者が ArcGIS Pro・Portal で入れる。プラグインは読むだけ） | 判読の練習の組織の問題（範囲。2026-11-22 に追加） | `training.exercises.exercises` |
+| [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が ArcGIS Pro・Portal で入れる。プラグインは読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
+| [`TBL_TRAINING_RESULT`](#tbl_training_result判読の練習の結果) | なし | 書き込み | 判読の練習の結果（提出 1 回で 1 行） | `training.exercises.results` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -124,6 +127,10 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_SATELLITE_OUTAGE` | `OUTAGE_ID` | 障害 ID で引く・更新する |
 | `TBL_SATELLITE_OUTAGE` | `SAT_NAME` | 衛星ごとの障害 |
 | `TBL_GLOSSARY` | `TERM` | 語で引く |
+| `TBL_TRAINING_EXERCISE` | `EXERCISE_ID` | 問題 ID で引く |
+| `TBL_TRAINING_ANSWER` | `EXERCISE_ID` | 問題ごとの正解 |
+| `TBL_TRAINING_RESULT` | `USER_NAME` | 本人の結果（判読の練習を開くたび。試験は 1 回だけ） |
+| `TBL_TRAINING_RESULT` | `EXERCISE_ID` | 問題ごとの結果（指導者の集計） |
 
 ほかに:
 
@@ -672,9 +679,79 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `DESCRIPTION` | 説明 | `String(1000)` | 候補の横に出す説明 | `description` |
 | `SORT_ORDER` | 並び順 | `Integer` | 候補の並び順（小さい順。空は後ろ） | `order` |
 
+### `TBL_TRAINING_EXERCISE`（判読の練習の問題）
+
+[判読の練習](../features/screen.md#練習モードtraining)の組織の問題 1 つで 1 行（2026-11-22 に追加）。形状は問題の範囲（解く人の地図に橙の点線で出し、地図をそこへ動かす。空は画像の全体）。判読の練習の指導者が ArcGIS Pro・Portal で入れ、プラグインは練習モードで「判読の練習…」を開くたびに読む（読むだけ）。正解は `TBL_TRAINING_ANSWER` に `EXERCISE_ID` で結ぶ。正解のない問題・使えない行は出さず、練習モードの間に理由を出す。属性名は下の名前で決まり（大文字・小文字は問わない。`fields` はない）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `EXERCISE_ID` | 問題ID | `String(64)` | 問題の ID（`HARBOR-01`）。正解・結果がこれで結ぶ。**必須** |  |
+| `TITLE` | 題名 | `String(255)` | 一覧に出す題名（空は ID） |  |
+| `INSTRUCTION` | 指示文 | `String(4000)` | 解く人への指示（何を・どこまで記録するか） |  |
+| `EXERCISE_TYPE` | 種類 | `String(32)` | `見つける`・`見分ける`・`測る`・`変化を見つける`（`find`・`identify`・`measure`・`change` も可）。**必須** |  |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像カタログの画像 ID。練習用のカタログになければ本番の画像カタログ（`imageCatalogs`、`fields.id` のあるもの）で引いて開く（読むだけ） |  |
+| `IMAGE_SOURCE` | 画像のファイル | `String(1000)` | 画像 ID がないときの画像のファイルか URL（その PC から開けるもの）。`IMAGE_ID` かこれが**必須** |  |
+| `BEFORE_IMAGE_ID` | 前の画像ID | `String(255)` | 変化を見つける問題の前の画像の ID |  |
+| `BEFORE_IMAGE_SOURCE` | 前の画像のファイル | `String(1000)` | 前の画像のファイルか URL。変化を見つける問題は前の画像が**必須** |  |
+| `TARGET_KINDS` | 対象の種別 | `String(1000)` | 記録する種別（`船舶`。`;` 区切りで複数。その下の種別も含む）。空はすべて |  |
+| `DIFFICULTY` | 難しさ | `String(32)` | 一覧に出す難しさ（`易`・`中`・`難` など） |  |
+| `TIME_LIMIT_MIN` | 制限時間 | `Double` | 制限時間（分）。空は制限なし。試験は時間が来たら自動で提出 |  |
+| `EXERCISE_MODE` | 形式 | `String(16)` | `練習` か `試験`（空は練習）。試験は 1 回だけ（この表の結果とこの PC の結果で数える）・ヒントなし |  |
+| `SHOW_ANSWERS` | 答えを見せる | `SmallInteger` | 0 で答え合わせに正解の場所と解説を出さない（点と合否だけ）。空は出す |  |
+| `PASS_SCORE` | 合格点 | `Double` | 合格点（0〜100）。空は採点の決まりの合格点 |  |
+| `SCORING` | 採点の決まり | `String(4000)` | この問題だけの採点の決まり（JSON。設定ファイルの `training.scoring` と同じ書き方で、変える所だけ） |  |
+| `COURSE_NAME` | コース | `String(255)` | コース（一覧はコースごと） |  |
+| `COURSE_ORDER` | コースの中の順番 | `Integer` | コースの中の順番（「次の問題へ」の順） |  |
+| `ROLES` | 対象の担当 | `String(1000)` | この問題を出す担当の符号（`OBSERVER,ANALYST`）。空はだれにでも |  |
+| `ACTIVE` | 出す | `SmallInteger` | 0 で出さない（作りかけ）。空は出す |  |
+
+### `TBL_TRAINING_ANSWER`（判読の練習の正解）
+
+判読の練習の正解のモノ 1 つで 1 点（2026-11-22 に追加）。経験者が確かめた答えを入れる。形状はモノの場所（中心）。変化を見つける問題で消えたモノ（`消失`）は前の画像での場所。属性名は下の名前で決まり。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `EXERCISE_ID` | 問題ID | `String(64)` | 問題の ID（`TBL_TRAINING_EXERCISE`）。**必須** |  |
+| `ANSWER_NO` | 番号 | `Integer` | 地図と答え合わせの番号（空は表の順に空いている番号） |  |
+| `KIND` | 種別 | `String(1000)` | 分類体系の種別（`船舶 > 貨物船 > コンテナ船`）。近い種別には部分点 |  |
+| `ACTIVITY` | 活動 | `String(255)` | 活動（`停泊`・`航行` など。空は採点しない） |  |
+| `LENGTH_M` | 長さ | `Double` | 長さ（m）。測る問題で採点する |  |
+| `WIDTH_M` | 幅 | `Double` | 幅（m） |  |
+| `HEADING` | 向き | `Double` | 向き（度。北から時計回り、後ろから前） |  |
+| `CHANGE_KIND` | 変化 | `String(16)` | 変化を見つける問題の `来た`・`継続`・`消失` |  |
+| `ANSWER_POINTS` | 配点 | `Double` | この答えの配点（空は 10） |  |
+| `TOLERANCE_M` | 位置の許容 | `Double` | この答えの位置の許容（m。空は採点の決まり） |  |
+| `REQUIRED` | 必ず見つける | `SmallInteger` | 0 で加点の答え（見つければ加点、見落としても減らない）。空は 1 |  |
+| `EXPLANATION` | 解説 | `String(4000)` | 答え合わせに出す解説（見分け方の手がかり） |  |
+| `REFERENCE_IMAGE` | 参考写真 | `String(1000)` | 参考写真のファイルか URL |  |
+
+### `TBL_TRAINING_RESULT`（判読の練習の結果）
+
+判読の練習の提出 1 回で 1 行（2026-11-22 に追加）。練習モードの中で本番に書き込むのはこの表だけ。表がなければ（`training.exercises.results` を書かなければ）結果はその PC だけに残す。送れなかった結果は、次に「判読の練習…」を開くときに送り直す。ない属性は書かない。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `EXERCISE_ID` | 問題ID | `String(64)` | 問題の ID（組織の問題。見本の問題は `sample-find` など） |  |
+| `TITLE` | 題名 | `String(255)` | 問題の題名（そのときの） |  |
+| `COURSE_NAME` | コース | `String(255)` | コース |  |
+| `USER_NAME` | 解いた人 | `String(255)` | 解いた人（作成者の 4 属性と同じ利用者名。`editTracking`） |  |
+| `EXERCISE_MODE` | 形式 | `String(16)` | `練習` か `試験` |  |
+| `ATTEMPT` | 何回目 | `Integer` | その問題の何回目か |  |
+| `STARTED` | 始めた日時 | `Date` | 始めた日時 |  |
+| `FINISHED` | 提出した日時 | `Date` | 提出した日時 |  |
+| `SECONDS` | かかった秒数 | `Integer` | かかった秒数 |  |
+| `SCORE` | 点 | `Double` | 点（0〜100） |  |
+| `PASSED` | 合格 | `SmallInteger` | 1 で合格 |  |
+| `FOUND` | 見つけた数 | `Integer` | 見つけた答えの数 |  |
+| `MISSED` | 見落とした数 | `Integer` | 見落とした答えの数 |  |
+| `EXTRA` | 誤りの数 | `Integer` | 答えにない記録の数 |  |
+| `KIND_SCORE` | 種別の正しさ | `Double` | 見つけた答えの種別の正しさ（%） |  |
+| `HINTS` | ヒントを見た回数 | `Integer` | ヒントを見た回数 |  |
+| `DETAIL` | 答えごとの結果 | `String(30000)` | 答えごとの結果と項目ごとの点（JSON。取り違えた種別の集計に使う） |  |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -733,6 +810,13 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
   "userRoles": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/26",                     // TBL_USER_ROLE
   "satelliteOutages": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/27",              // TBL_SATELLITE_OUTAGE
   "glossary": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/28",                      // TBL_GLOSSARY
+  "training": {
+    "exercises": {
+      "exercises": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/29",                  // TBL_TRAINING_EXERCISE
+      "answers": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/30",                    // TBL_TRAINING_ANSWER
+      "results": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/31"                     // TBL_TRAINING_RESULT
+    }
+  },
   "aiResultSources": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/17",                        // TBL_AI_RESULT
       "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",

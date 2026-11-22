@@ -170,14 +170,17 @@
   - 「返ってきた採否を取り込む」の手順では、調整システムの返事のファイルを練習用に作る（`出力/返ってきた採否/`。撮像予定で開いた日に書き出した依頼の、最後の 1 件を除いて採用。その衛星システムの `resultFile` の形で。CSV と `columns` の JSON。JSON Schema だけの形は作らず、その手順は手入力で練習する。`mikage/core/request/practice_answer.py`）
   - 進み具合: 練習用のフォルダーの `progress.json`（コースごとの手順と済み）。案内の窓の × で中断し、次は続きから。練習データを最初に戻しても残る。練習モードを終えると・練習データを最初に戻すと・QGIS を閉じると、案内も中断する
   - テスト: `mikage/tests/test_qgis_tutorial.py` が、どのコースも「やって見せる」だけで最後まで進むことを確かめる（手順書の手順を変えたら、コースも同じに直す）
-- **判読の練習**（段階 3 の 1、`mikage/core/training/exercises.py`・`results.py`・`sample_exercises.py`、`mikage/ui/exercise_run.py`・`exercise_screens.py`・`exercise_map.py`）: 画像の判読の問題を解いて、経験者が確かめた答えと照らし合わせる。メニューの「判読の練習…」・帯の「判読の練習」から（練習モードでないときは先に始める）。答えるのは観測記録ドックのいつもの操作（クリック記録・種別と活動・入力点数で測る・前の画像の記録を継続・消失）
+- **判読の練習**（段階 3 の 1・2、`mikage/core/training/exercises.py`・`results.py`・`sample_exercises.py`・`tables.py`、`mikage/ui/exercise_run.py`・`exercise_screens.py`・`exercise_map.py`）: 画像の判読の問題を解いて、経験者が確かめた答えと照らし合わせる。メニューの「判読の練習…」・帯の「判読の練習」から（練習モードでないときは先に始める）。答えるのは観測記録ドックのいつもの操作（クリック記録・種別と活動・入力点数で測る・前の画像の記録を継続・消失）
   - 問題の種類と採点する項目: 「見つける」（範囲の中の対象をすべて記録。見つけたか・種別・活動、範囲の中で対象の種別の、答えにない記録は「誤り」）、「見分ける」（印のものの種別・活動）、「測る」（印のものの長さ・幅・向き。始めると入力点数を 3 点にし、終えると戻す）、「変化を見つける」（前の画像の記録を出しておき、来た・継続・消失）。形式は「練習」と「試験」（1 回だけ。ヒントなし。制限時間で自動提出）
-  - いまは内蔵の見本の 6 問（横須賀の画像。コース「船の判読（入門・横須賀の見本）」、担当 OBSERVER）。組織の問題（Esri の表）・結果の送信・問題を作る画面・結果の一覧は段階 3 の 2・3 で
+  - 問題: 組織の問題（下の Esri の表。設定ファイルの `training.exercises`）と、内蔵の見本の 6 問（横須賀の画像。コース「船の判読（入門・横須賀の見本）」、担当 OBSERVER。内蔵の見本で練習するときだけ）。一覧はコースごと（組織のコースが先）。問題を作る画面・結果の一覧（指導者用）は段階 3 の 3 で
+  - **組織の問題**（段階 3 の 2、`tables.py`）: 判読の練習の指導者が、組織の実際の画像で問題を作る。問題は [`TBL_TRAINING_EXERCISE`](../admin/esri-tables.md#tbl_training_exercise判読の練習の問題)（範囲のポリゴン 1 つで 1 問。種類・指示文・画像・対象の種別・難しさ・制限時間・練習か試験・合格点・この問題だけの採点の決まり・コースと順番・対象の担当・出すか）、正解は [`TBL_TRAINING_ANSWER`](../admin/esri-tables.md#tbl_training_answer判読の練習の正解)（モノ 1 つで 1 点。種別・活動・長さ・幅・向き・変化・配点・位置の許容・必須か加点か・解説・参考写真）。いまは ArcGIS Pro・Portal で入れる。「判読の練習…」を開くたびに読み直す（指導者が足した問題がすぐ出る）。正解のない問題・使えない行は出さず、メッセージバーに理由を出す（`ACTIVE` が 0 の作りかけは黙って出さない）
+  - 組織の問題の画像: `IMAGE_ID` は練習用の画像カタログで探し、なければ本番の画像カタログ（`imageCatalogs` の `fields.id` のあるもの）で引いて開く（読むだけ。本番の `pathMappings` も使う）。`IMAGE_SOURCE` はファイルか URL をそのまま開く
+  - 結果の送信: `training.exercises.results` があれば、提出 1 回で [`TBL_TRAINING_RESULT`](../admin/esri-tables.md#tbl_training_result判読の練習の結果) に 1 行足す（練習モードの中で本番に書き込むのはこれだけ。答え合わせの画面に「結果を組織の表に送りました。」）。送れなかったら、その PC の結果に「まだ送っていない」と残し、次に「判読の練習…」を開くときに送り直す。解いた人（`USER_NAME`）は作成者の 4 属性と同じ利用者名（本番の `editTracking`）。試験の 1 回だけと何回目は、この表の本人の行とその PC の結果を合わせて数える（ほかの PC で受けた試験も済み）
   - 練習中の記録: 観測記録ドックを練習用の別のローカルの記録「判読の練習」（`mikage/training/exercise_records.gpkg`。問題を始めるたびに空にする）に切り替える（`ObservationDock.use_store`）。種別の選択肢は練習用の観測記録の分類体系（本番から読んでいれば本番のもの）。答えの種別がその分類体系にないときは、ある所まで上の分類で採点する（`fitted`）。解いている間は「AI結果」ドックに結果を出さない（`AiResultsDock.withhold`。答えが分かるため）。画像は画像カタログから開く（開いた画像の履歴の「前回と同じファイルで開きます」は聞かない）
   - 窓: 問題の窓は地図の右上（練習モードの帯の下）、答え合わせの窓は QGIS の右（ドックの上）。範囲と答えの場所は、窓に隠れない地図の部分に合わせて出す（`exercise_map.free_part`・`fit_into`）
   - 採点（`score`）: 答え 1 つの点（既定 10）を、その答えに当てはまる項目で `weights` の割合に分ける。記録と答えは近い順に 1 対 1 で結ぶ（許容: 答えの `tolerance`、なければ `tolerance` と 長さ × `toleranceByLength` の大きい方）。種別は同じ（か細かい）1・1 つ上 0.5・いちばん上 0.2。測るは許容の中で満点、その 3 倍で 0。点数 = 100 × 得た点 ÷ 必須の答えの点 − 誤り × `extraPenalty`（0〜100）。必須でない答え（加点）は見落としても引かない。`passScore` 以上で合格
   - 結果: `mikage/training/exercise_results.json`（この PC だけ。1 回の提出で 1 件。練習データを最初に戻しても残す）。答え合わせの画面（点数・項目ごとの点・答え 1 つずつの結果と解説、地図の輪と ×）、「これまでの結果…」（解いた問題と、取り違えやすい種別の組み合わせ）
-  - テスト: `mikage/tests/test_exercise_scoring.py`（採点）、`mikage/tests/test_qgis_exercises.py`（見本の問題を人と同じ操作で解いて満点・見落としと誤り・試験）
+  - テスト: `mikage/tests/test_exercise_scoring.py`（採点）、`mikage/tests/test_qgis_exercises.py`（見本の問題を人と同じ操作で解いて満点・見落としと誤り・試験）、`mikage/tests/test_training_tables.py`（組織の表の読み取り・結果の行）、`mikage/tests/test_qgis_org_exercises.py`（組織の問題を解いて結果を送る・送り直す・ほかの PC で受けた試験・本番のカタログやファイルの画像）
 
 設定ファイル（`training`）:
 
@@ -187,6 +190,7 @@
 | `false`（`{ "enabled": false }` も） | 練習モードを出さない |
 | `{ "fromProduction": false }` | 衛星・分類体系なども含めて見本だけで練習する。`["satellites", "taxonomy"]` のように名前を並べると、それだけ本番から読む（既定 `true` = すべて） |
 | `{ "config": "練習用の設定ファイル" }` | 内蔵の見本の代わりに、組織の練習用サービス（SDE 上の練習用の表・実際の画像など）を指す設定ファイルで練習する（パスか URL。相対パスはこの設定ファイルのフォルダから）。練習用サーバーは動かさない。ローカルのファイル・担当・監査ログ・メールの扱いは内蔵の見本と同じ。その設定ファイルには本番の表を書かないこと |
+| `{ "exercises": { "exercises": "URL", "answers": "URL", "results": "URL", "token": "…" } }` | 判読の練習の組織の問題（[`TBL_TRAINING_EXERCISE`](../admin/esri-tables.md#tbl_training_exercise判読の練習の問題)）・正解（`TBL_TRAINING_ANSWER`）・結果（`TBL_TRAINING_RESULT`）の表。問題と正解の表は必須、`results` を書かなければ結果はその PC だけ。`token` は 3 つの表のトークン（QGIS の認証設定があればそちら） |
 | `{ "scoring": { … } }` | 判読の練習の採点のしかた（組織の基準。書かないキーは既定のまま）。キーは `tolerance`（位置の許容 m、既定 50）・`toleranceByLength`（大きなものは長さ × これ、0.5）・`weights`（項目の割合 `find` 50・`kind` 30・`activity` 10・`measure` 10・`change` 50）・`kindCredit`（種別の部分点 `exact` 1・`parent` 0.5・`top` 0.2）・`extraPenalty`（誤り 1 件の減点、5）・`lengthTolerance`（長さ・幅の許容 %、15）・`headingTolerance`（向きの許容 度、15）・`headingEitherEnd`（向きを前後どちら向きでも可に、false）・`passScore`（合格点、70）。まちがった書き方は読み込みの問題に出して、その値は既定のまま |
 
 ```jsonc
@@ -200,6 +204,11 @@
     "weights": { "kind": 40, "activity": 0 },  // 種別を重く、活動は採点しない
     "kindCredit": { "parent": 0.3 },
     "passScore": 80
+  },
+  "exercises": {                          // 組織の問題・正解・結果の表（tools/arcgis/create_tables.py で作れる）
+    "exercises": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/29",
+    "answers": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/30",
+    "results": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/31"
   }
 }
 ```
