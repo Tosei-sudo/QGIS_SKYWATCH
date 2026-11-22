@@ -171,10 +171,10 @@ def _bullets(lines: Sequence[str]) -> QLabel:
 
 
 class StartDialog(QDialog):
-    """「練習モードを始める」: what happens, and whether to make the sample again with today's dates."""
+    """「練習モードを始める」: what happens, whether to make the sample again with today's dates, and to open チュートリアル after."""
 
     def __init__(self, parent=None, builtin: bool = True, created: Optional[int] = None, now: Optional[datetime] = None,
-                 from_production: str = ""):
+                 from_production: str = "", tutorial: bool = False):
         super().__init__(parent)
         fit_text(self)
         self.setWindowTitle(self.tr("練習モードを始める"))
@@ -211,6 +211,10 @@ class StartDialog(QDialog):
         self.first = QLabel(self.tr("初めてなので、練習用の画像と背景地図を作ります（数秒〜十数秒）。")) if builtin and created is None else None
         if self.first is not None:
             box.addWidget(self.first)
+        #: The courses offered once it has started (ticked by 「チュートリアル…」, and the first time).
+        self.tutorial = QCheckBox(self.tr("始めたら、チュートリアル（操作を 1 つずつ案内するコース）を選ぶ"))
+        self.tutorial.setChecked(tutorial or (builtin and created is None))
+        box.addWidget(self.tutorial)
         buttons = QDialogButtonBox()
         self.ok = buttons.addButton(self.tr("始める"), QDialogButtonBox.ButtonRole.AcceptRole)
         self.ok.setDefault(True)

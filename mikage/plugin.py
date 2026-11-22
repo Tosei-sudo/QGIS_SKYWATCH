@@ -47,7 +47,7 @@ MENU = "MIKAGE"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
-    ("練習モード", ["練習モードを始める", "練習データを最初に戻す…", "練習モードを終える"]),
+    ("練習モード", ["練習モードを始める", "チュートリアル…", "練習データを最初に戻す…", "練習モードを終える"]),
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…", "衛星の障害情報…"]),
     ("観測記録", ["観測記録", "自分の記録…", "分類体系の編集", "分類体系の取り込み…", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
@@ -466,6 +466,10 @@ class MikagePlugin:
         if self.role_keeper is not None and not self.allows(self._dock_features.get(name, "")):
             dock = self.docks.get(name)
             QTimer.singleShot(0, lambda: dock.hide() if dock is not None and name in self.docks else None)
+
+    def entry_action(self, text: str) -> Optional[QAction]:
+        """The menu entry of this text (its button on the toolbar is the same action); None when there is none."""
+        return self._entries_in_menu_order().get(tr(text))
 
     def run_menu_entry(self, text: str) -> bool:
         """The help's 「…を開く」 links: the menu entry of that text (a dock comes to the front, never closes)."""

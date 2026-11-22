@@ -42,7 +42,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         add_history, add_shots, ADOPTION_ROLES, AWAITING, count_history, day_counts, DECLINED, DEFAULT_REQUEST_FIELDS,
         delete_history_rows, delete_request, delete_shots, followed_where, handed_where, HELD_BACK, history_has, history_where,
         HistoryRow, IMAGE_ARRIVED, load_day, load_days, load_history, load_requests, load_shots, load_shots_where,
-        load_system_rows, new_request_id, PLANNED, replaced_where, RequestStoreConfig, save_request, save_requests, Saved,
+        load_system_rows, MANUAL, new_request_id, PLANNED, replaced_where, RequestStoreConfig, save_request, save_requests, Saved,
         shot_days_where, shots_replaced_where, state_of, STATES, UNREQUESTED, update_history, update_requests, update_shots,
         upload_requests, waiting_ids,
     )
@@ -69,23 +69,24 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         sort_by_next, span_of, taken_text, tally_text,
     )
     from .quota import MISSED, NO_ROWS, PACE_AHEAD, PENDING, REJECTED as QUOTA_REJECTED, UNCOUNTED_REASONS, USED, Usage
-    from .result_file import ADOPTED, REJECTED as RESULT_REJECTED, WAITING, read_answers
+    from .practice_answer import answer_bytes, handed_out
+    from .result_file import ADOPTED, REJECTED as RESULT_REJECTED, ResultColumn, ResultFile, WAITING, read_answers
 
 __getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
     "RequestRepository", "ScheduleRepository",
-    "_time", "add_history", "add_shots", "ADOPTION_ROLES", "ahead_span", "answer_changes", "apply_change", "AWAITING",
+    "_time", "add_history", "add_shots", "ADOPTION_ROLES", "ahead_span", "answer_bytes", "answer_changes", "apply_change", "AWAITING",
     "bbox_of", "BOOST", "boost_changes", "CandidateFilter", "CATEGORIES", "chances_of", "change_of", "changed_systems",
     "checks_of", "clouds_of", "code_text", "companions", "convert_priority", "count_history", "day_bounds", "day_counts",
     "day_passes", "DayPlan", "deadline_text", "DECLINED", "DEFAULT_REQUEST_FIELDS", "delete_history_rows", "delete_request",
     "delete_shots", "encoded", "field_roles", "files_of", "find_passes", "first_group", "follow_and_save", "followed_where",
-    "forecast_places", "FORM_DAYS", "form_span", "form_text", "found_text", "handed_where", "HEAD", "HELD_BACK", "history_has",
+    "forecast_places", "FORM_DAYS", "form_span", "form_text", "found_text", "handed_out", "handed_where", "HEAD", "HELD_BACK", "history_has",
     "history_of", "history_where", "HistoryRow", "horizon_days", "IMAGE_ARRIVED", "ImagingRequest", "in_days", "JST",
     "jst_day", "keep_answers", "LABEL", "Lane", "lane_at", "Layout", "layout", "leftover_files", "level_of", "listed",
     "load_day", "load_days", "load_history", "load_requests", "load_shots", "load_shots_where", "load_system_rows",
     "look_text", "main", "manual_changes", "manual_unrequested", "Mark", "mark_tip", "marked", "marks_at", "match_answers",
-    "matches", "MINE", "mine", "missed_done", "missed_ids", "MOST_DAYS", "new_request_id", "new_run_id", "next_step",
+    "MANUAL", "matches", "MINE", "mine", "missed_done", "missed_ids", "MOST_DAYS", "new_request_id", "new_run_id", "next_step",
     "NO_GROUP", "NO_SYSTEM", "NOT_IN_FILE", "not_written", "NUMBERS", "offered", "old_tle_text", "orbiting", "Picked",
     "picked", "plan_day", "PLANNED", "PRIORITY_LEVELS", "PRIORITY_MAX", "PRIORITY_MIN", "priority_text", "QuotaData",
     "radar_of", "read_covered", "read_groups", "read_last_looks", "read_other_uses", "read_quota_data", "read_window",
@@ -98,7 +99,7 @@ __all__ = [
     "with_settled_times", "write", "WRITTEN", "written_summary",
     "ACHIEVES", "ADOPTED", "DAYS", "DAY_CHOICES", "HELD", "LOOK_SIDES", "MAX_IMAGES", "MISSED", "MOST_PLACES",
     "NOT_HELD_BACK", "NO_ROWS", "ORBIT_DIRS", "PACE_AHEAD", "PENDING", "PLACE_KINDS", "Place", "QUOTA_REJECTED",
-    "REQUEST_KINDS", "RESULT_REJECTED", "Repeat", "SHOWN", "STATUSES", "TAKEN", "TIMES_OF_DAY", "UNCOUNTED_REASONS",
+    "REQUEST_KINDS", "RESULT_REJECTED", "Repeat", "ResultColumn", "ResultFile", "SHOWN", "STATUSES", "TAKEN", "TIMES_OF_DAY", "UNCOUNTED_REASONS",
     "USED", "Usage", "WAITING", "chance_text", "cloud_tip", "cover_text", "daily_time_text", "find_images", "gap_text",
     "kind_text", "lanes_of", "link_findings", "link_text", "linking_time_text", "mark_name", "merge_text", "next_of",
     "occurrence_text", "pace_text", "part_text", "pass_text", "read_answers", "repeat_of", "repeat_text", "room_text",
