@@ -101,7 +101,10 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     p, iface = plugin
     training = _feature(p)
     # The menu's first group.
-    assert iface.menu_tree()[0] == ("練習モード", ["練習モードを始める", "チュートリアル…", "判読の練習…", "練習データを最初に戻す…", "練習モードを終える"])
+    assert iface.menu_tree()[0] == ("練習モード", ["練習モードを始める", "チュートリアル…", "判読の練習…", "練習データを最初に戻す…", "練習モードを終える", "-",
+                                               "判読の練習の問題を作る…", "判読の練習の成績…"])
+    # The instructors' entries: only with the organisation's tables (training.exercises).
+    assert not training._actions["判読の練習の問題を作る…"].isVisible() and not training._actions["判読の練習の成績…"].isVisible()
     assert settings.local_gpkg_path() == str(tmp_path / "production.gpkg")
     p.role_keeper.choose(["OBSERVER"])
     roles_before = QgsSettings().value(roles_io.KEY)

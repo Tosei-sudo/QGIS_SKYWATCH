@@ -19,14 +19,16 @@ and its try sent to the organisation's results table (`send`).
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-from qgis.core import QgsProject, QgsRasterLayer
+from qgis.core import QgsProject
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QPixmap
 
 from ..core.gpkg import open_local
+from ..qgis_io.obs_images import image_layer
 from ..qgis_io.tasks import run_task
 from ..core.obs.api import kind_of, LocalAreaStore, LocalObservationStore, StoreSet
 from ..core.training.api import (
@@ -109,9 +111,13 @@ class ExerciseRun(QObject):
                  next_of: Callable[[Exercise], Optional[Exercise]] = lambda _e: None,
                  elsewhere: Optional[Callable[[str, Callable, Callable], None]] = None,
                  send: Optional[Callable[[dict, Callable[[str], None]], None]] = None, others: Optional[list] = None,
-                 user: Optional[Callable[[], str]] = None):
+                 user: Optional[Callable[[], str]] = None, path_of: Optional[Callable[[str], str]] = None, trial: bool = False):
         super().__init__()
         self.exercise = exercise
+        #: Where an image's file (IMAGE_SOURCE) is on this computer (the settings file's pathMappings); None: as written.
+        self.path_of = path_of
+        #: An instructor trying an exercise not written yet (「練習モードで試す」): the try neither kept nor sent.
+        self.trial = trial
         #: Who solves it (the tries' user; None: the observation dock's recorder)
         self.user = user
         #: An image not in the practice's catalogs looked for (its id, then(layers), missing()).
@@ -246,9 +252,11 @@ class ExerciseRun(QObject):
         if QgsProject.instance().mapLayer(self._file_layers.get(source, "")) is not None:
             self._open(rest, then)
             return
-        layer = QgsRasterLayer(source, os.path.splitext(os.path.basename(source))[0] or source)
+        path = self.path_of(source) if self.path_of is not None else source
+        name = os.path.splitext(os.path.basename(re.split(r"[?#]", source)[0].rstrip("/")))[0] or source
+        layer = image_layer(path, name)
         if not layer.isValid():
-            self._fail(f"画像を開けません: {source}")
+            self._fail(f"画像を開けません: {source}" + (f"（{path}）" if path != source else ""))
             return
         QgsProject.instance().addMapLayer(layer)
         self.layers.append(layer.id())
@@ -428,14 +436,17 @@ class ExerciseRun(QObject):
         self.outcome = score(exercise, self.current_marks())
         attempt = len(tries_of(merged_results(read_results(self.results_path), self.others), self.exercise.key)) + 1
         record = result_record(self.outcome, self.started, self.finished_at, attempt, self.user() if self.user else obs.observer(), self.hints)
-        if self.send is not None:
+        if self.send is not None and not self.trial:
             # (sent next time when it cannot be now)
             record["sent"] = False
         note = ""
-        try:
-            add_result(self.results_path, record)
-        except OSError as error:
-            note = f"結果をこの PC に残せませんでした: {error}"
+        if self.trial:
+            note = "試しに解いた結果です（残さず、組織の表にも送りません）。"
+        else:
+            try:
+                add_result(self.results_path, record)
+            except OSError as error:
+                note = f"結果をこの PC に残せませんでした: {error}"
         if forced:
             note = ("時間になったので提出しました。" + note).strip()
         if obs.active:
@@ -445,7 +456,7 @@ class ExerciseRun(QObject):
             bar.closed.disconnect(self._bar_closed)
             bar.close()
         self.show_review(note)
-        if self.send is not None:
+        if self.send is not None and not self.trial:
             self.send(record, self.report)
         return self.outcome
 

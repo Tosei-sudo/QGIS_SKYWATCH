@@ -11,9 +11,16 @@ from ..door import lazy
 
 if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
     from . import masters, sample
+    from .authoring import (
+        answers_from_records, check, copied, delete_draft, Draft, DraftAnswer, drafts_of, exercise_of_draft, new_exercise_id, read_drafts,
+        save_draft, set_active,
+    )
+    from .grades import (
+        advice, Cell, Column, confusion, courses_of, Grades, grades, grades_csv, in_period, PERIODS, read_all_results, taken_for_others,
+    )
     from .exercises import (
         Answer, CAME, CHANGE, CHANGES, DEFAULT_SCORING, EXAM, Exercise, EXTRA, fitted, FIND, GONE, hint, IDENTIFY, ITEM_NAMES, ITEMS,
-        kind_text, Mark, MEASURE, MISSED, MISSED_BONUS, Outcome, PRACTICE, RIGHT, score, Scoring, scoring_of, STAYED, TYPES,
+        kind_text, Mark, MEASURE, metres, MISSED, MISSED_BONUS, Outcome, PRACTICE, RIGHT, score, Scoring, scoring_of, STAYED, TYPES,
     )
     from .progress import kept, read_progress, write_progress
     from .results import (
@@ -31,11 +38,13 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
 __getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
-    "add_result", "Answer", "ANSWER_FIELDS", "AREA", "best_of", "CAME", "CHANGE", "CHANGES", "confusions", "DEFAULT_SCORING", "DEFAULT_TRAINING",
-    "EXAM", "exam_taken", "Exercise", "EXERCISE_FIELDS", "ExerciseTables", "EXTRA", "FIND", "fitted", "GONE", "hint", "IDENTIFY", "image_plans", "ITEM_NAMES", "ITEMS",
-    "kept", "kind_text", "Mark", "mark_sent", "masters", "MASTERS", "MEASURE", "merged_results", "MISSED", "MISSED_BONUS", "mistaken",
-    "open_data", "org_exercises", "Outcome", "PRACTICE", "read_exercises", "read_progress", "read_results", "read_results_of", "rebase",
-    "resolve_config", "RESULT_FIELDS", "result_attributes", "result_record", "RIGHT", "sample", "sample_exercises", "score", "Scoring",
-    "scoring_of", "send_results", "STAYED", "Store", "training_config", "training_settings_of", "TrainingServer", "TrainingSettings",
-    "tries_of", "TYPES", "unsent", "write_progress",
+    "add_result", "advice", "Answer", "ANSWER_FIELDS", "answers_from_records", "AREA", "best_of", "CAME", "Cell", "CHANGE", "CHANGES", "check",
+    "Column", "confusion", "confusions", "copied", "courses_of", "DEFAULT_SCORING", "DEFAULT_TRAINING", "delete_draft", "Draft", "DraftAnswer", "drafts_of",
+    "EXAM", "exam_taken", "Exercise", "EXERCISE_FIELDS", "exercise_of_draft", "ExerciseTables", "EXTRA", "FIND", "fitted", "GONE", "Grades",
+    "grades", "grades_csv", "hint", "IDENTIFY", "image_plans", "in_period", "ITEM_NAMES", "ITEMS", "kept", "kind_text", "Mark", "mark_sent",
+    "masters", "MASTERS", "MEASURE", "merged_results", "metres", "MISSED", "MISSED_BONUS", "mistaken", "new_exercise_id", "open_data", "org_exercises",
+    "Outcome", "PERIODS", "PRACTICE", "read_all_results", "read_drafts", "read_exercises", "read_progress", "read_results", "read_results_of",
+    "rebase", "resolve_config", "RESULT_FIELDS", "result_attributes", "result_record", "RIGHT", "sample", "sample_exercises", "save_draft",
+    "score", "Scoring", "scoring_of", "send_results", "set_active", "STAYED", "Store", "taken_for_others", "training_config",
+    "training_settings_of", "TrainingServer", "TrainingSettings", "tries_of", "TYPES", "unsent", "write_progress",
 ]

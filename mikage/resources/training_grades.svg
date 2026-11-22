@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 判読の練習の成績…: a grid of people by exercises, passed green and not red -->
+  <rect x="2.5" y="4.5" width="27" height="23" rx="2" fill="#ffffff" stroke="#475569" stroke-width="1.2"/>
+  <path d="M2.5 10.5h27M10.5 4.5v23" stroke="#94a3b8" stroke-width="1"/>
+  <rect x="12" y="12" width="5" height="4" fill="#22c55e"/>
+  <rect x="18.5" y="12" width="5" height="4" fill="#22c55e"/>
+  <rect x="25" y="12" width="3.5" height="4" fill="#ef4444"/>
+  <rect x="12" y="17.5" width="5" height="4" fill="#22c55e"/>
+  <rect x="18.5" y="17.5" width="5" height="4" fill="#ef4444"/>
+  <rect x="25" y="17.5" width="3.5" height="4" fill="#cbd5e1"/>
+  <rect x="12" y="23" width="5" height="3.5" fill="#ef4444"/>
+  <rect x="18.5" y="23" width="5" height="3.5" fill="#cbd5e1"/>
+  <path d="M4.5 14h4M4.5 19.5h4M4.5 25h4" stroke="#64748b" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

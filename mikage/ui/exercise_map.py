@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
 from qgis.core import QgsPointXY, QgsRectangle
-from qgis.gui import QgsMapCanvas, QgsMapCanvasItem
+from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsMapTool
 from qgis.PyQt.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QFont, QPainterPath, QPen, QPolygonF
 from qgis.PyQt.QtWidgets import QWidget
 
-from ..qgis_io.geometry import from_wgs84
+from ..qgis_io.geometry import from_wgs84, to_wgs84
 
 AREA_COLOR = QColor("#d97706")
 COLORS = {"target": QColor("#dc2626"), "right": QColor("#16a34a"), "wrong": QColor("#ea580c"), "missed": QColor("#dc2626"),
@@ -172,3 +172,29 @@ class ExerciseMarks(QgsMapCanvasItem):
                 painter.drawPath(outline)
                 painter.setPen(QPen(color))
                 painter.drawText(at, spot.label)
+
+
+class ClickTool(QgsMapTool):
+    """
+    判読の練習の問題を作る's 「地図で足す」: each click on the map is a place (`clicked(lon, lat)`, WGS 84); Esc or the
+    right button ends it (`ended()`).
+    """
+
+    def __init__(self, canvas: QgsMapCanvas, clicked, ended=None):
+        super().__init__(canvas)
+        self._clicked, self._ended = clicked, ended
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def canvasReleaseEvent(self, event) -> None:  # noqa: N802 (Qt's name)
+        if event.button() == Qt.MouseButton.RightButton:
+            if self._ended is not None:
+                self._ended()
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        p = to_wgs84(self.canvas().mapSettings().destinationCrs()).transform(event.mapPoint())
+        self._clicked(p.x(), p.y())
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self._ended is not None:
+            self._ended()

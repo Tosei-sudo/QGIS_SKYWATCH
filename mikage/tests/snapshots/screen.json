@@ -35,6 +35,19 @@
      "name": "SatObsTrainingEnd",
      "checkable": false,
      "icon": "training_end.svg:4ec669582aee"
+    },
+    "-",
+    {
+     "text": "判読の練習の問題を作る…",
+     "name": "SatObsTrainingAuthor",
+     "checkable": false,
+     "icon": "training_author.svg:28c5130dcc94"
+    },
+    {
+     "text": "判読の練習の成績…",
+     "name": "SatObsTrainingGrades",
+     "checkable": false,
+     "icon": "training_grades.svg:aae4e4dee046"
     }
    ]
   },
@@ -526,6 +539,8 @@
   "分類体系の取り込み…",
   "分類体系の編集",
   "判読の練習…",
+  "判読の練習の問題を作る…",
+  "判読の練習の成績…",
   "土地被覆分類…",
   "地点ごとの撮像予定",
   "変化抽出（# 時期）…",

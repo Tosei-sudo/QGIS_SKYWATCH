@@ -52,9 +52,10 @@ def entries(menu):
 def test_a_layout_is_saved_and_brought_back(plugin):
     w, d, menu = plugin.iface.window, plugin.docks, plugin.dock_layouts
     # The examples are offered at first; nothing of one's own to delete yet.
-    assert entries(menu) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "-", "現在の配置を保存…", "削除", "-",
+    assert entries(menu) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "判読練習の指導者", "-",
+                             "現在の配置を保存…", "削除", "-",
                              "ファイルへ書き出し…", "ファイルから読み込み…"]
-    assert not menu.actions()[7].menu().isEnabled()
+    assert not menu.actions()[8].menu().isEnabled()
     # Arranged by hand: observations and taxonomy as tabs at the bottom, the AI results floating, the catalog left.
     for name in d:
         d[name].hide()
@@ -104,7 +105,7 @@ def test_saving_under_an_example_s_name_replaces_it(plugin):
     d["SatObsObservations"].show()
     APP.processEvents()
     menu.save_current("撮像計画の担当")
-    assert entries(menu)[:5] == ["撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "撮像計画の担当"]
+    assert entries(menu)[:6] == ["撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "判読練習の指導者", "撮像計画の担当"]
     plugin.place_docks()
     d["SatObsImagingPlan"].show()
     menu.use("撮像計画の担当")
@@ -131,11 +132,12 @@ def test_layouts_go_to_a_file_and_come_back_from_it(plugin, tmp_path):
     plugin.place_docks()
     menu.save_current("撮像の担当 A")
     path = tmp_path / "layouts.json"
-    assert menu.store.export(str(path)) == 6
+    assert menu.store.export(str(path)) == 7
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["kind"] == "mikage.dockLayouts" and "撮像の担当 A" in data["layouts"]
     QgsSettings().remove("mikage/dockLayouts")
-    assert menu.store.import_file(str(path)) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "撮像の担当 A"]
+    assert menu.store.import_file(str(path)) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "判読練習の指導者",
+                                                 "撮像の担当 A"]
     assert "撮像の担当 A" in menu.store.saved()
     other = tmp_path / "other.json"
     other.write_text('{"layouts": {}}', encoding="utf-8")

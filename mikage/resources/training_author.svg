@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 判読の練習の問題を作る…: a dark sea image with an amber dashed area and a numbered answer, and a pencil -->
+  <rect x="2.5" y="4.5" width="22" height="20" rx="1.5" fill="#1e3a52" stroke="#0f2233" stroke-width="1"/>
+  <rect x="5.5" y="7.5" width="15" height="13" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-dasharray="2.4 1.6"/>
+  <circle cx="11.5" cy="13.5" r="3.4" fill="none" stroke="#ef4444" stroke-width="1.6"/>
+  <path d="M9.2 14.2l4.4 -1.6" stroke="#e5e7eb" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M19.5 28.5l1.2 -4.4 8.2 -8.2 3.2 3.2 -8.2 8.2z" fill="#fde68a" stroke="#92400e" stroke-width="1.2" stroke-linejoin="round"/>
+  <path d="M26.7 18.1l3.2 3.2" stroke="#92400e" stroke-width="1.2"/>
+</svg>

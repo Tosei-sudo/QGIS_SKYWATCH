@@ -20,7 +20,7 @@ def setup(value=URL):
 
 
 def test_the_roles_and_their_codes():
-    assert [r.code for r in roles.ROLES] == ["PLANNER", "REQUESTER", "OBSERVER", "INTERPRETER", "TRAINER", "ADMIN"]
+    assert [r.code for r in roles.ROLES] == ["PLANNER", "REQUESTER", "OBSERVER", "INTERPRETER", "TRAINER", "INSTRUCTOR", "ADMIN"]
     assert roles.clean_codes(["admin", " observer ", "NOPE", 3, "OBSERVER"]) == ["OBSERVER", "ADMIN"]
     assert roles.codes_of(["管理者", "画像判読", "夜間当番"]) == ["INTERPRETER", "ADMIN"]
     assert roles.names_of(["ADMIN", "PLANNER"]) == ["撮像計画の担当", "管理者"]
@@ -50,6 +50,11 @@ def test_what_each_role_sees():
     assert roles.allows("撮像計画ファイル出力", both) and roles.allows("監査ログ…", both) and not roles.allows("観測記録", both)
     # Unknown codes count as none.
     assert roles.allows("観測記録", ["NIGHT"]) and not roles.allows("監査ログ…", ["NIGHT"])
+    # 判読練習の指導者: makes the exercises from the records (the observation dock too) and reads everyone's results.
+    instructor = ["INSTRUCTOR"]
+    assert roles.allows("判読の練習の問題を作る…", instructor) and roles.allows("判読の練習の成績…", instructor)
+    assert roles.allows("観測記録", instructor) and not roles.allows("撮像計画ファイル出力", instructor)
+    assert not roles.allows("判読の練習の問題を作る…", observer) and not roles.allows("判読の練習の成績…", ["INTERPRETER"])
     # Every Processing tool that is a feature is listed.
     assert set(roles.ALGORITHM_FEATURES.values()) <= set(roles.FEATURES)
 

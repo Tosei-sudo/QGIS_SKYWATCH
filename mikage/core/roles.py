@@ -30,6 +30,8 @@ from .sources import EsriSource, esri_source_of
 
 #: What a role may do (a feature needs one of them).
 REQUEST, PLAN, OBSERVE, TRAIN, ADMIN = "request", "plan", "observe", "train", "admin"
+#: 判読の練習's exercises made and the people's results read (練習モードの段階 3 の 3).
+INSTRUCT = "instruct"
 
 
 @dataclass(frozen=True)
@@ -50,13 +52,16 @@ ROLES: tuple[Role, ...] = (
     Role("OBSERVER", "観測記録の担当", frozenset({OBSERVE}), "観測記録の記録・通報・分担・引き継ぎ・分類体系の編集・AI結果の取り込み"),
     Role("INTERPRETER", "画像判読", frozenset({OBSERVE}), "画像補正・影から高さ・スペクトルで判読して観測記録へ"),
     Role("TRAINER", "AI 学習の担当", frozenset({TRAIN}), "教師データセットの作成・アノテーション変換・AI 学習"),
+    #: (the records of the images are the answers taken: the observation dock too)
+    Role("INSTRUCTOR", "判読練習の指導者", frozenset({INSTRUCT, OBSERVE}),
+         "判読の練習の問題づくり（組織の画像と正解）と、みんなの成績・取り違えやすい種別の確認"),
     Role("ADMIN", "管理者", frozenset({ADMIN}), "接続と表の点検・監査ログ・設定ファイルの切り替え・ローカル記録の消去など"),
 )
 BY_CODE = {r.code: r for r in ROLES}
 BY_NAME = {r.name: r for r in ROLES}
 
 #: What each permission is called (in the messages: 「…の機能」).
-PERMISSION_LABELS = {REQUEST: "撮像依頼", PLAN: "撮像計画", OBSERVE: "観測記録", TRAIN: "AI 学習", ADMIN: "管理"}
+PERMISSION_LABELS = {REQUEST: "撮像依頼", PLAN: "撮像計画", OBSERVE: "観測記録", TRAIN: "AI 学習", INSTRUCT: "判読練習の指導", ADMIN: "管理"}
 
 #: Features some roles only use: menu entry text or a dock's key → the permissions, any of which allows it.
 FEATURES: dict[str, frozenset] = {
@@ -96,6 +101,9 @@ FEATURES: dict[str, frozenset] = {
     "AI 学習（物体検出）…": frozenset({TRAIN}),
     #: AI結果: 「確認結果で追加学習…」.
     "ai_results.train": frozenset({TRAIN}),
+    # 判読練習の指導
+    "判読の練習の問題を作る…": frozenset({INSTRUCT}),
+    "判読の練習の成績…": frozenset({INSTRUCT}),
     # 管理
     #: 観測記録: 「ローカル記録の消去…」 (cannot be undone).
     "observations.clear": frozenset({ADMIN}),

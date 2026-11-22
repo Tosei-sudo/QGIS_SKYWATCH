@@ -72,8 +72,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_USER_ROLE`](#tbl_user_role担当) | なし | 書き込み | 一人ひとりの担当（2026-11-15 に追加） | `userRoles` |
 | [`TBL_SATELLITE_OUTAGE`](#tbl_satellite_outage衛星の障害情報) | なし | 書き込み | 衛星の障害情報（理由・期間・影響。2026-11-16 に追加） | `satelliteOutages` |
 | [`TBL_GLOSSARY`](#tbl_glossary備考の単語集) | なし | 読み | 観測記録の備考の単語集（候補と表記ゆれ。2026-11-17 に追加） | `glossary` |
-| [`TBL_TRAINING_EXERCISE`](#tbl_training_exercise判読の練習の問題) | ポリゴン | 書き込み（判読の練習の指導者が ArcGIS Pro・Portal で入れる。プラグインは読むだけ） | 判読の練習の組織の問題（範囲。2026-11-22 に追加） | `training.exercises.exercises` |
-| [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が ArcGIS Pro・Portal で入れる。プラグインは読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
+| [`TBL_TRAINING_EXERCISE`](#tbl_training_exercise判読の練習の問題) | ポリゴン | 書き込み（判読の練習の指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の組織の問題（範囲。2026-11-22 に追加） | `training.exercises.exercises` |
+| [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
 | [`TBL_TRAINING_RESULT`](#tbl_training_result判読の練習の結果) | なし | 書き込み | 判読の練習の結果（提出 1 回で 1 行） | `training.exercises.results` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
@@ -637,7 +637,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
 | `USER_NAME` | 利用者名 | `String(255)` | ユーザー名（[`editTracking`](operations.md#作成者更新者の記録edittracking) と同じ。既定は環境変数 `USERNAME`。大文字・小文字は区別しない）。**必須** | `user` |
-| `ROLE_NAME` | 担当 | `String(32)` | `PLANNER`（撮像計画の担当）・`REQUESTER`（撮像を依頼する人）・`OBSERVER`（観測記録の担当）・`INTERPRETER`（画像判読）・`TRAINER`（AI 学習の担当）・`ADMIN`（管理者）。**必須** | `role` |
+| `ROLE_NAME` | 担当 | `String(32)` | `PLANNER`（撮像計画の担当）・`REQUESTER`（撮像を依頼する人）・`OBSERVER`（観測記録の担当）・`INTERPRETER`（画像判読）・`TRAINER`（AI 学習の担当）・`INSTRUCTOR`（判読練習の指導者）・`ADMIN`（管理者）。**必須** | `role` |
 
 ### `TBL_SATELLITE_OUTAGE`（衛星の障害情報）
 
@@ -681,7 +681,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 
 ### `TBL_TRAINING_EXERCISE`（判読の練習の問題）
 
-[判読の練習](../features/screen.md#練習モードtraining)の組織の問題 1 つで 1 行（2026-11-22 に追加）。形状は問題の範囲（解く人の地図に橙の点線で出し、地図をそこへ動かす。空は画像の全体）。判読の練習の指導者が ArcGIS Pro・Portal で入れ、プラグインは練習モードで「判読の練習…」を開くたびに読む（読むだけ）。正解は `TBL_TRAINING_ANSWER` に `EXERCISE_ID` で結ぶ。正解のない問題・使えない行は出さず、練習モードの間に理由を出す。属性名は下の名前で決まり（大文字・小文字は問わない。`fields` はない）。
+[判読の練習](../features/screen.md#練習モードtraining)の組織の問題 1 つで 1 行（2026-11-22 に追加）。形状は問題の範囲（解く人の地図に橙の点線で出し、地図をそこへ動かす。空は画像の全体）。判読の練習の指導者が本番の MIKAGE の「判読の練習の問題を作る…」で書き（ArcGIS Pro・Portal で入れてもよい）、練習モードでは「判読の練習…」を開くたびに読む（読むだけ）。この表と `TBL_TRAINING_ANSWER` の書き込みの権限は指導者だけに、ほかの人は読むだけにするとよい。正解は `TBL_TRAINING_ANSWER` に `EXERCISE_ID` で結ぶ。正解のない問題・使えない行は出さず、練習モードの間に理由を出す。属性名は下の名前で決まり（大文字・小文字は問わない。`fields` はない）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
@@ -727,11 +727,11 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 
 ### `TBL_TRAINING_RESULT`（判読の練習の結果）
 
-判読の練習の提出 1 回で 1 行（2026-11-22 に追加）。練習モードの中で本番に書き込むのはこの表だけ。表がなければ（`training.exercises.results` を書かなければ）結果はその PC だけに残す。送れなかった結果は、次に「判読の練習…」を開くときに送り直す。ない属性は書かない。
+判読の練習の提出 1 回で 1 行（2026-11-22 に追加）。練習モードの中で本番に書き込むのはこの表だけ。表がなければ（`training.exercises.results` を書かなければ）結果はその PC だけに残す。送れなかった結果は、次に「判読の練習…」を開くときに送り直す。ない属性は書かない。判読練習の指導者の「判読の練習の成績…」は、この表のすべての行（`DETAIL` も）を読む。判読する人には書き込み（足すだけ）、指導者には読む権限を与える。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
-| `EXERCISE_ID` | 問題ID | `String(64)` | 問題の ID（組織の問題。見本の問題は `sample-find` など） |  |
+| `EXERCISE_ID` | 問題ID | `String(64)` | 問題の ID（組織の問題。見本の問題は `見本:sample-find` のように頭に `見本:`） |  |
 | `TITLE` | 題名 | `String(255)` | 問題の題名（そのときの） |  |
 | `COURSE_NAME` | コース | `String(255)` | コース |  |
 | `USER_NAME` | 解いた人 | `String(255)` | 解いた人（作成者の 4 属性と同じ利用者名。`editTracking`） |  |

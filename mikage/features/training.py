@@ -14,7 +14,10 @@ ui/tutorial_courses.py; 練習モード started first when not practising).
 「判読の練習…」 (段階 3) offers exercises in reading images — find, tell apart,
 measure, find what changed — answered with the observation dock's usual
 operations, scored against an interpreter's answers and reviewed
-(ui/exercise_run.py; the sample's exercises on the built-in sample).
+(ui/exercise_run.py; the sample's exercises on the built-in sample). The
+instructors (担当「判読練習の指導者」) make the organisation's in the production
+MIKAGE — 「判読の練習の問題を作る…」 writes their tables (ui/exercise_authoring.py)
+— and read everyone's results in 「判読の練習の成績…」 (ui/exercise_grades.py).
 """
 from __future__ import annotations
 
@@ -31,11 +34,15 @@ from ..core import edit_stamp, roles
 from ..core.catalog.api import records_by_ids
 from ..core.config import load_jsonc, parse_config
 from ..core.training.api import (
-    AREA, DEFAULT_TRAINING, exam_taken, kept, mark_sent, masters, merged_results, read_exercises, read_progress, read_results, read_results_of,
-    resolve_config, sample_exercises, send_results, unsent, write_progress,
+    AREA, Column, DEFAULT_TRAINING, delete_draft, drafts_of, exam_taken, kept, mark_sent, masters, merged_results, read_all_results, read_drafts,
+    read_exercises, read_progress, read_results, read_results_of, resolve_config, sample_exercises, save_draft, send_results, set_active,
+    unsent, write_progress,
 )
 from ..qgis_io import settings, training_io
+from ..qgis_io.catalog_io import local_path
 from ..qgis_io.tasks import run_task
+from ..ui.exercise_authoring import ExerciseAuthoring
+from ..ui.exercise_grades import GradesDialog
 from ..ui.exercise_run import ExerciseRun, result_line
 from ..ui.exercise_screens import ExerciseList, MyResults
 from ..ui.training_mode import StartDialog, TitleMarks, TrainingBand, status_mark
@@ -46,7 +53,9 @@ from .base import Feature, disconnect, tr
 #: The menu entries (MENU_GROUPS 「練習モード」), hidden when the settings file's `training` is false.
 START, TUTORIAL, EXERCISES, RESET, END = ("練習モードを始める", "チュートリアル…", "判読の練習…", "練習データを最初に戻す…",
                                           "練習モードを終える")
-ENTRIES = (START, TUTORIAL, EXERCISES, RESET, END)
+#: The instructors' (担当「判読練習の指導者」), shown when the settings file has the organisation's tables.
+AUTHOR, GRADES = "判読の練習の問題を作る…", "判読の練習の成績…"
+ENTRIES = (START, TUTORIAL, EXERCISES, RESET, END, AUTHOR, GRADES)
 #: The band's buttons for the courses and the exercises.
 TUTORIAL_BUTTON, EXERCISES_BUTTON = "チュートリアル", "判読の練習"
 #: The role the exercises are solved in (its observation dock).
@@ -121,8 +130,38 @@ class TutorialPlace:
         self.feature.show_area()
 
 
+class ExerciseTablesIO:
+    """問題づくり's tables (the settings file's training.exercises) for ui/exercise_authoring.py: each read and write in a task."""
+
+    def __init__(self, feature: "Training"):
+        self.feature = feature
+        self.tables = feature.settings.exercises
+        self.scoring = feature.settings.scoring
+        self.roles = {r.code: r.name for r in roles.ROLES}
+
+    def _run(self, title: str, work, then, failed) -> None:
+        client, token = self.feature.context.esri(), self.feature.table_token(self.tables.exercises)
+        run_task(tr(title), lambda _task: work(client, token), then, failed)
+
+    def read_drafts(self, then, failed) -> None:
+        self._run("判読の練習: 問題の読み込み", lambda c, t: read_drafts(c, self.tables, t), then, failed)
+
+    def save_draft(self, draft, then, failed) -> None:
+        self._run("判読の練習: 問題の保存", lambda c, t: save_draft(c, self.tables, draft, t), then, failed)
+
+    def set_active(self, draft, active: bool, then, failed) -> None:
+        self._run("判読の練習: 問題の保存", lambda c, t: set_active(c, self.tables, draft, active, t), then, failed)
+
+    def delete_draft(self, draft, then, failed) -> None:
+        self._run("判読の練習: 問題の削除", lambda c, t: delete_draft(c, self.tables, draft, t), then, failed)
+
+    def try_out(self, exercise) -> None:
+        self.feature.try_exercise(exercise)
+
+
 class Training(Feature):
-    COMMANDS = ("start_training", "end_training", "reset_training", "open_tutorial", "open_exercises")
+    COMMANDS = ("start_training", "end_training", "reset_training", "open_tutorial", "open_exercises", "open_exercise_authoring",
+                "open_exercise_grades")
 
     def __init__(self, host):
         super().__init__(host)
@@ -149,6 +188,10 @@ class Training(Feature):
         self.org_results: list = []
         self.org_problem = ""
         self._reading = False
+        #: 判読の練習の問題を作る (None when not open), and an exercise an instructor tries once 練習モード has started.
+        self.authoring: Optional[ExerciseAuthoring] = None
+        self._trial = None
+        self.grades: Optional[GradesDialog] = None
 
     @property
     def practising(self) -> bool:
@@ -171,6 +214,8 @@ class Training(Feature):
             EXERCISES: self.entry("training_exercises", EXERCISES, "open_exercises", name="SatObsTrainingExercises"),
             RESET: self.entry("training_reset", RESET, "reset_training", name="SatObsTrainingReset"),
             END: self.entry("training_end", END, "end_training", name="SatObsTrainingEnd"),
+            AUTHOR: self.entry("training_author", AUTHOR, "open_exercise_authoring", name="SatObsTrainingAuthor"),
+            GRADES: self.entry("training_grades", GRADES, "open_exercise_grades", name="SatObsTrainingGrades"),
         }
         self._entries_state()
 
@@ -179,6 +224,7 @@ class Training(Feature):
         disconnect(self.context.configChanged, self._config_read)
         self._stop_tutorial()
         self._stop_exercise()
+        self._stop_authoring()
         if self.practising:
             training_io.end()
             if self.host.audit is not None:
@@ -195,6 +241,11 @@ class Training(Feature):
             return
         self.settings = self.context.config.training
         hidden = set() if self.settings.enabled else {tr(t) for t in ENTRIES}
+        tables = self.settings.exercises
+        if tables is None:
+            hidden |= {tr(AUTHOR), tr(GRADES)}
+        elif not tables.results:
+            hidden.add(tr(GRADES))
         others = self.host.hidden_entries - {tr(t) for t in ENTRIES}
         if others | hidden != self.host.hidden_entries:
             self.host.hidden_entries = others | hidden
@@ -203,7 +254,7 @@ class Training(Feature):
     def _entries_state(self) -> None:
         on = self.practising
         for text, action in self._actions.items():
-            action.setEnabled(not self._busy and (True if text in (TUTORIAL, EXERCISES) else on if text == END else not on))
+            action.setEnabled(not self._busy and (True if text in (TUTORIAL, EXERCISES, GRADES) else on if text == END else not on))
         reset = self._actions.get(RESET)
         if reset is not None:
             reset.setEnabled(not self._busy and self.settings.builtin)
@@ -222,12 +273,16 @@ class Training(Feature):
         files = training_io.files()
         ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None,
                           from_production=masters.names_text(self.settings.from_production) if builtin else "", tutorial=tutorial,
-                          exercises=self._exercises_after_start)
+                          exercises=self._exercises_after_start or self._trial is not None)
         if ask.exec() != StartDialog.DialogCode.Accepted:
+            self._trial = None
             return False
         self._tutorial_after_start = ask.tutorial.isChecked()
         if not self._project_saved():
+            self._trial = None
             return False
+        # (the instructor's windows: the production's tables are not written while practising)
+        self._stop_authoring()
         self.project_before = QgsProject.instance().fileName()
         if builtin and (not files.ready() or ask.renew.isChecked()):
             self._prepare(files, reset=files.ready(), then=lambda: self._switch_on(files, builtin))
@@ -328,10 +383,13 @@ class Training(Feature):
         read = tr("{m}は本番から読んでいます（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
         self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
-        tutorial, exercises = self._tutorial_after_start, self._exercises_after_start
+        tutorial, exercises, trial = self._tutorial_after_start, self._exercises_after_start, self._trial
         self._tutorial_after_start = self._exercises_after_start = False
+        self._trial = None
         # (once the settings file is read and the docks have it; 「判読の練習…」 asked for first)
-        if exercises:
+        if trial is not None:
+            QTimer.singleShot(300, lambda: self.run_exercise(trial, [trial], trial=True))
+        elif exercises:
             QTimer.singleShot(300, self.open_exercises)
         elif tutorial:
             QTimer.singleShot(300, self.open_tutorial)
@@ -458,7 +516,7 @@ class Training(Feature):
                 window.statusBar().addPermanentWidget(self.mark)
             if self.marks is None:
                 self.marks = TitleMarks(window, list(self.docks.values()))
-            notes = {tr(t): tr(NOTE) for t in NOT_IN_PRACTICE}
+            notes = {tr(t): tr(NOTE) for t in (*NOT_IN_PRACTICE, AUTHOR)}
             session = training_io.active()
             if session is not None and "taxonomy" in session.from_production:
                 notes[tr(TAXONOMY_EDIT)] = tr(TAXONOMY_NOTE)
@@ -597,7 +655,7 @@ class Training(Feature):
         except (AttributeError, KeyError, RuntimeError):
             return ""
 
-    def _token(self, url: str) -> Optional[str]:
+    def table_token(self, url: str) -> Optional[str]:
         tables = self.settings.exercises
         return self.context.token_for(url, (tables.token if tables is not None else "") or None)
 
@@ -615,7 +673,7 @@ class Training(Feature):
         path = session.files.exercise_results
         pending = unsent(read_results(path)) if tables.results else []
         user, base = self._user(), self.settings.scoring
-        tokens = {u: self._token(u) for u in (tables.exercises, tables.answers, tables.results) if u}
+        tokens = {u: self.table_token(u) for u in (tables.exercises, tables.answers, tables.results) if u}
 
         def work(task):
             sent = []
@@ -720,12 +778,15 @@ class Training(Feature):
         chosen = next((e for e in found if e.key == dialog.choice), None)
         return chosen is not None and self.run_exercise(chosen, found) is not None
 
-    def run_exercise(self, exercise, among: Optional[list] = None) -> Optional[ExerciseRun]:
-        """An exercise started (in the role that records, used while practising); None when it could not start."""
+    def run_exercise(self, exercise, among: Optional[list] = None, trial: bool = False) -> Optional[ExerciseRun]:
+        """
+        An exercise started (in the role that records, used while practising); None when it could not start. `trial`:
+        an instructor's (「練習モードで試す」): the try neither kept nor sent, an exam as often as wanted.
+        """
         session = training_io.active()
         if session is None:
             return None
-        if exercise.exam and exam_taken(self.all_results(), exercise.key):
+        if exercise.exam and not trial and exam_taken(self.all_results(), exercise.key):
             # (an exam once: this computer's tries and the results table's, another computer's too)
             self.iface.messageBar().pushInfo(tr("判読の練習"), tr("「{t}」は試験で、もう受けました（1 回だけ）").format(t=exercise.title))
             return None
@@ -733,16 +794,24 @@ class Training(Feature):
         self._stop_exercise()
         self._use_role(EXERCISE_ROLE)
         among = among if among is not None else self.exercises()
+        keeper = self.host.role_keeper
+        mine = {*(keeper.codes if keeper is not None else []), EXERCISE_ROLE}
 
         def next_of(e):
-            same = sorted((x for x in among if x.course == e.course), key=lambda x: (x.order, x.title))
+            # (as the list offers them: those of the person's roles, not an exam taken already)
+            if trial:
+                return None
+            taken = self.all_results()
+            same = sorted((x for x in among if x.course == e.course and (not x.roles or mine & set(x.roles))
+                           and not (x.exam and exam_taken(taken, x.key))), key=lambda x: (x.order, x.title))
             later = [x for x in same if (x.order, x.title) > (e.order, e.title)]
             return later[0] if later else None
 
         tables = self.settings.exercises
         run = ExerciseRun(exercise, TutorialPlace(self), session.files.exercise_results, session.files.exercise_records,
                           self.window(), next_of, elsewhere=self._production_image, user=self._user,
-                          send=self._send_result if tables is not None and tables.results else None, others=self.org_results)
+                          send=self._send_result if tables is not None and tables.results and not trial else None, others=self.org_results,
+                          path_of=self._image_path, trial=trial)
         self.exercise_run = run
         run.ended.connect(lambda: self._exercise_ended(run))
         run.wants.connect(lambda what: self._exercise_next(run, what, next_of))
@@ -751,6 +820,10 @@ class Training(Feature):
             self.iface.messageBar().pushWarning(tr("判読の練習"), run.problem)
             return None
         return run
+
+    def _image_path(self, source: str) -> str:
+        """An exercise's image file (IMAGE_SOURCE) on this computer: the settings file's pathMappings (the production's too)."""
+        return local_path(source, self.context.config.path_mappings)
 
     def _production_image(self, image_id: str, then, missing) -> None:
         """
@@ -796,7 +869,7 @@ class Training(Feature):
         tables, session = self.settings.exercises, training_io.active()
         if tables is None or not tables.results or session is None:
             return
-        client, token, path = self.context.esri(), self._token(tables.results), session.files.exercise_results
+        client, token, path = self.context.esri(), self.table_token(tables.results), session.files.exercise_results
 
         def work(_task):
             return send_results(client, tables, [record], token)
@@ -836,3 +909,91 @@ class Training(Feature):
         if self.exercise_run is not None:
             run, self.exercise_run = self.exercise_run, None
             run.stop()
+
+    # ---- 判読の練習の問題を作る・成績 (the instructors') -----------------------------------------------------
+
+    def open_exercise_authoring(self) -> bool:
+        """「判読の練習の問題を作る…」: the organisation's exercises to change and make (the production's tables; not while practising)."""
+        if self._busy:
+            return False
+        if self.practising:
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題は本番の MIKAGE で作ります（練習モードを終えてから）"))
+            return False
+        if self.settings.exercises is None:
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("設定ファイルの training.exercises に問題の表と正解の表を書くと、問題を作れます"))
+            return False
+        if self.authoring is not None:
+            self.authoring.manager.show()
+            self.authoring.manager.raise_()
+            if self.authoring.editor is not None:
+                self.authoring.editor.raise_()
+            return True
+        self.authoring = authoring = ExerciseAuthoring(TutorialPlace(self), ExerciseTablesIO(self), self.window())
+        authoring.ended.connect(lambda: self._authoring_ended(authoring))
+        authoring.open()
+        return True
+
+    def _authoring_ended(self, authoring: ExerciseAuthoring) -> None:
+        if self.authoring is authoring:
+            self.authoring = None
+
+    def _stop_authoring(self) -> None:
+        if self.authoring is not None:
+            authoring, self.authoring = self.authoring, None
+            authoring.stop()
+
+    def try_exercise(self, exercise) -> bool:
+        """「練習モードで試す」: an exercise solved as the people will, in 練習モード (started first: asked as usual)."""
+        if self.practising:
+            return self.run_exercise(exercise, [exercise], trial=True) is not None
+        self._trial = exercise
+        if not self.start_training():
+            self._trial = None
+            return False
+        return True
+
+    def open_exercise_grades(self, then=None) -> bool:
+        """
+        「判読の練習の成績…」: everyone's results of the organisation's results table, by course (read in a task, then
+        shown; `then(dialog)` instead of showing it, for the tests). False: no table, or reading already.
+        """
+        tables = self.settings.exercises
+        if tables is None or not tables.results:
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("設定ファイルの training.exercises に結果の表（results）を書くと、成績を見られます"))
+            return False
+        if self._reading:
+            return False
+        self._reading = True
+        client = self.context.esri()
+        tokens = {u: self.table_token(u) for u in (tables.exercises, tables.answers, tables.results)}
+        self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表を読んでいます…"))
+
+        def work(task):
+            cancelled = task.isCanceled if task is not None else None
+            results = read_all_results(client, tables.results, tokens[tables.results], cancelled=cancelled)
+            note = ""
+            try:
+                exercises = client.query_all(tables.exercises, "1=1", tokens[tables.exercises], geometry=False, cancelled=cancelled,
+                                             limit=20_000)
+            except Exception as error:  # noqa: BLE001 (the results still shown, their exercises by their titles)
+                exercises, note = [], tr("問題の表を読めませんでした（結果にある問題だけ出します）: {e}").format(e=error)
+            return results, exercises, note
+
+        def done(result) -> None:
+            self._reading = False
+            results, rows, note = result
+            columns = [Column(d.key, d.title or d.id, d.course, d.order, d.mode, d.pass_score) for d in drafts_of(rows, [])]
+            dialog = GradesDialog(results, columns, note, self.window())
+            self.grades = dialog
+            if then is not None:
+                then(dialog)
+            else:
+                dialog.exec()
+                self.grades = None
+
+        def failed(message: str) -> None:
+            self._reading = False
+            self.iface.messageBar().pushWarning(tr("判読の練習"), tr("結果の表を読めませんでした: {m}").format(m=message))
+
+        run_task(tr("判読の練習: 成績の読み込み"), work, done, failed)
+        return True

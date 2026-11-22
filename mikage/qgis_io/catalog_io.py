@@ -331,6 +331,24 @@ def _resolved(path: str, mappings: Sequence[PathMapping | PathRewrite], choose_f
     return resolved
 
 
+def local_path(path: str, mappings: Sequence[PathMapping | PathRewrite]) -> str:
+    """
+    Where a file's path written in a table (判読の練習's IMAGE_SOURCE) leads on this computer, as a catalog's
+    paths do: the first rewrite of `pathMappings` that is there, else its prefix's URL or the folder chosen for it
+    here (not asked for), else the path as written (a URL as it is).
+    """
+    if not path or re.match(r"^https?://", path, re.IGNORECASE):
+        return path
+    for _, target in rewrites_of(mappings, path):
+        if os.path.exists(target):
+            return target
+    try:
+        resolved = resolve_path(path, mappings, settings.path_folder)
+    except PathError:
+        return path
+    return resolved.value if resolved.kind in ("file", "url") and resolved.value else path
+
+
 @dataclass(frozen=True)
 class RecordFolder:
     """
