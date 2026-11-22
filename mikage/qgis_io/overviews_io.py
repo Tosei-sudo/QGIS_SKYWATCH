@@ -17,6 +17,14 @@ own PamAllocateProxy, which GDAL then reads instead of the one beside the
 image (whose content is copied into it). The cache is cleared at the next start
 when asked (clear_cache_next_start), as its files may be open now.
 
+With `location` "temp" every image's .ovr goes to a temporary folder on
+this PC instead, named in the cache folder's .aux.xml the same way: one
+folder per QGIS (temp_folder, under `tempFolder` or the system's temporary
+folder), deleted when the plugin is unloaded as QGIS closes (end_session).
+What could not be deleted then (still open) goes when QGIS starts next
+(sweep_temp), with the folders of a QGIS that ended without unloading;
+those of a QGIS still running are kept.
+
 One image is built at a time; an image asked for again while waiting or
 building is not queued twice. When one is done, the project's layers of
 that image are read again so the overviews are used at once.
@@ -51,7 +59,7 @@ from typing import Callable, Optional, Sequence
 from osgeo import gdal
 from qgis.core import Qgis, QgsApplication, QgsMapLayer, QgsMessageLog, QgsProject, QgsProviderRegistry, QgsRasterLayer
 
-from ..core.overviews import OverviewOptions, build_threads, overview_factors
+from ..core.overviews import OverviewOptions, build_threads, expand_folder, overview_factors, temp_root
 from . import settings
 from .tasks import LOG_TAG, Cancelled, FunctionTask, run_task
 
@@ -59,6 +67,8 @@ TITLE = "ピラミッド"
 
 #: Outcomes of a build.
 BUILT, CACHED, HAS_OVERVIEWS, SMALL, READ_ONLY = "built", "cached", "has", "small", "read-only"
+#: Built into the temporary folder (location "temp").
+TEMPORARY = "temp"
 #: location "cache" without a cache folder, or without GDAL's functions for it.
 NO_CACHE, UNSUPPORTED = "no-cache", "unsupported"
 
@@ -93,7 +103,10 @@ def start_cache() -> Optional[str]:
     if pending:
         clear_folder(pending)
         settings.set_overview_cache_to_clear("")
-    chosen = settings.overview_cache_setting()
+    # The temporary .ovr a QGIS closed before could not delete (still open then), before any image is opened.
+    for root in dict.fromkeys([temp_root(OverviewOptions()), temp_root(OverviewOptions(temp_folder=settings.overview_temp_setting()))]):
+        sweep_temp(root)
+    chosen = expand_folder(settings.overview_cache_setting())
     now = gdal.GetConfigOption(PROXY_DIR)
     if now and not chosen:
         # QGIS's own (the profile's gdal_pam), or one set in its options or the environment.
@@ -120,6 +133,10 @@ def configure_cache(options: OverviewOptions) -> Optional[str]:
     wanted = options.cache_folder
     if wanted != settings.overview_cache_setting():
         settings.set_overview_cache_setting(wanted)
+    # Where the next start looks for a temporary folder left over (sweep_temp).
+    if options.temp_folder != settings.overview_temp_setting():
+        settings.set_overview_temp_setting(options.temp_folder)
+    wanted = expand_folder(wanted)
     now = cache_folder()
     if not wanted or not now:
         return None
@@ -163,13 +180,143 @@ def clear_cache_next_start() -> Optional[str]:
     return folder
 
 
+# ---- location "temp": a folder per QGIS, deleted when it closes ----------------------------------------
+
+#: This QGIS's folder name under the temporary folder, kept in its environment (a reloaded plugin keeps it).
+SESSION_ENV = "MIKAGE_OVERVIEW_SESSION"
+SESSION_NAME = re.compile(r"^mikage-(\d+)-[0-9a-f]{8}$")
+#: The temporary folders this QGIS put .ovr in (a changed `tempFolder` leaves the earlier one), deleted by end_session.
+_temp_roots: set = set()
+
+
+def session_name() -> str:
+    """`mikage-<process id>-<8 letters>`: the process id tells another QGIS whether this one is still running."""
+    pid = os.getpid()
+    known = os.environ.get(SESSION_ENV, "")
+    found = SESSION_NAME.match(known)
+    if found and int(found.group(1)) == pid:
+        return known
+    name = f"mikage-{pid}-{uuid.uuid4().hex[:8]}"
+    os.environ[SESSION_ENV] = name
+    return name
+
+
+def temp_folder(options: Optional[OverviewOptions] = None, make: bool = True) -> str:
+    """This QGIS's folder of temporary .ovr (location "temp"), made when `make` (OSError when it cannot be)."""
+    root = temp_root(options or current)
+    folder = os.path.join(root, session_name())
+    if make:
+        os.makedirs(folder, exist_ok=True)
+        _temp_roots.add(root)
+    return folder
+
+
+def temp_size(options: Optional[OverviewOptions] = None) -> tuple[int, int]:
+    """The .ovr in this QGIS's temporary folder: how many and their bytes."""
+    folder = temp_folder(options, make=False)
+    n = size = 0
+    if os.path.isdir(folder):
+        for entry in os.scandir(folder):
+            if entry.is_file() and entry.name.endswith(".ovr"):
+                n += 1
+                size += entry.stat().st_size
+    return n, size
+
+
+def process_running(pid: int) -> bool:
+    """Whether a process of this id is running (on Windows asked of the system; elsewhere a signal 0)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            from ctypes import wintypes
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return ctypes.get_last_error() == 5  # access denied: it is there
+            try:
+                code = wintypes.DWORD()
+                return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+            finally:
+                kernel.CloseHandle(handle)
+        except (OSError, AttributeError):
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def sweep_temp(root: str) -> int:
+    """
+    Deletes the temporary folders under `root` of a QGIS no longer running
+    (only the plugin's `mikage-<id>-…`: the folder may hold others); this
+    QGIS's own and those of another QGIS still running are kept. How many.
+    """
+    if not root or not os.path.isdir(root):
+        return 0
+    mine = session_name()
+    n = 0
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for entry in entries:
+        found = SESSION_NAME.match(entry.name)
+        if not found or entry.name == mine or not entry.is_dir(follow_symlinks=False):
+            continue
+        pid = int(found.group(1))
+        if pid != os.getpid() and process_running(pid):
+            continue
+        shutil.rmtree(entry.path, ignore_errors=True)
+        if not os.path.exists(entry.path):
+            n += 1
+    return n
+
+
+def end_session() -> int:
+    """
+    Deletes this QGIS's temporary .ovr (the plugin is unloaded: QGIS is
+    closed, or the plugin turned off or updated). What is still open stays
+    until the next start (sweep_temp). How many files are left.
+    """
+    left = 0
+    roots = set(_temp_roots)
+    try:
+        roots.add(temp_root(current))
+    except Exception:  # noqa: BLE001 (never keeps the plugin from unloading)
+        pass
+    name = session_name()
+    for root in roots:
+        folder = os.path.join(root, name)
+        if not os.path.isdir(folder):
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        if os.path.isdir(folder):
+            left += sum(1 for _ in os.scandir(folder))
+            QgsMessageLog.logMessage(f"一時フォルダのピラミッドのうち使用中の {left} 件は次の起動時に消去（{folder}）", LOG_TAG, Qgis.MessageLevel.Info)
+    _temp_roots.clear()
+    return left
+
+
 @dataclass(frozen=True)
 class Outcome:
     kind: str
     path: str
     #: The levels built (BUILT).
     factors: tuple[int, ...] = ()
-    #: The .ovr the plugin put in the cache folder (location "cache", or a read-only folder's built by gdaladdo).
+    #: The .ovr the plugin put in the cache folder (location "cache", or a read-only folder's built by gdaladdo), or in
+    #: the temporary folder (TEMPORARY).
     ovr: str = ""
     #: `ovr` is named through GDAL itself (attach_native: a read-only folder), not through PamAllocateProxy.
     native: bool = False
@@ -232,8 +379,9 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     """
     Builds the .ovr of an image without overviews that is not small: beside
     it (`path + ".ovr"`) when its folder can be written and `location` is
-    "auto", else in the cache folder. The image is only read. Raises
-    Cancelled when `cancelled()` turns true, RuntimeError when GDAL fails.
+    "auto", in the temporary folder when it is "temp", else in the cache
+    folder. The image is only read. Raises Cancelled when `cancelled()`
+    turns true, RuntimeError when GDAL fails.
     """
     target = path + ".ovr"
     src = gdal.Open(path, gdal.GA_ReadOnly)
@@ -247,11 +395,18 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     if not factors:
         return Outcome(SMALL, path)
     config = _config(src, options)
-    if options.location == "cache":
+    if options.location in ("cache", "temp"):
+        # "temp" too: the .ovr is named in the image's .aux.xml in the cache folder.
         if not cache_folder():
             return Outcome(NO_CACHE, path)
         if pam_proxy() is None:
             return Outcome(UNSUPPORTED, path)
+        if options.location == "temp":
+            try:
+                folder = temp_folder(options)
+            except OSError as error:
+                raise RuntimeError(f"一時フォルダを作れず（{error}）") from None
+            return _build_into_cache(src, path, options, factors, config, progress, cancelled, folder, TEMPORARY)
         return _build_into_cache(src, path, options, factors, config, progress, cancelled)
     folder = os.path.dirname(os.path.abspath(path))
     if not writable_folder(folder):
@@ -530,21 +685,26 @@ def cached_ovr_name(path: str) -> str:
 
 
 def _build_into_cache(src, path: str, options: OverviewOptions, factors: list[int], config: dict[str, str],
-                      progress: Callable[[float], None], cancelled: Callable[[], bool]) -> Outcome:
+                      progress: Callable[[float], None], cancelled: Callable[[], bool], folder: Optional[str] = None,
+                      kind: str = CACHED) -> Outcome:
     """
-    The .ovr of an image (whatever its folder) in the cache folder: built in
-    a temporary folder, moved there, and named in the image's .aux.xml kept
-    in the cache folder (GDAL's proxy, OVERVIEW_FILE), which GDAL reads
-    instead of one beside the image. What that one says is copied into it.
+    The .ovr of an image (whatever its folder) in the cache folder, or in
+    `folder` (the temporary folder): built in a work folder, moved there,
+    and named in the image's .aux.xml kept in the cache folder (GDAL's
+    proxy, OVERVIEW_FILE), which GDAL reads instead of one beside the image.
+    What that one says is copied into it.
     """
-    cache = cache_folder()
-    target = os.path.join(cache, cached_ovr_name(path))
+    target = os.path.join(folder or cache_folder(), cached_ovr_name(path))
     part = target + f".{uuid.uuid4().hex[:8]}.part"
     work = tempfile.mkdtemp(prefix="satobs-ovr-")
     try:
         built = _build_in_temp(src, work, options, factors, config, progress, cancelled)
         src = None
-        shutil.copyfile(built, part)
+        try:
+            # Moved when on the same disk (the temporary folder usually is), else copied.
+            os.replace(built, part)
+        except OSError:
+            shutil.copyfile(built, part)
         os.replace(part, target)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -558,7 +718,7 @@ def _build_into_cache(src, path: str, options: OverviewOptions, factors: list[in
     again = gdal.Open(path, gdal.GA_ReadOnly)
     if again is None or not has_overviews(again):
         raise RuntimeError("キャッシュのピラミッドを GDAL が読めず")
-    return Outcome(CACHED, path, tuple(factors), target)
+    return Outcome(kind, path, tuple(factors), target)
 
 
 def _spellings(path: str) -> list[str]:
@@ -621,13 +781,13 @@ current = OverviewOptions()
 
 def before_open(path: str) -> bool:
     """
-    With `location` "cache", before an image of the catalog is opened: its
-    .aux.xml moves to the cache folder (proxy_pams), so what QGIS writes
-    there (statistics, histograms) never goes beside the image either.
-    Whether it was moved now (not before).
+    With `location` "cache" (or "temp"), before an image of the catalog is
+    opened: its .aux.xml moves to the cache folder (proxy_pams), so what
+    QGIS writes there (statistics, histograms) never goes beside the image
+    either. Whether it was moved now (not before).
     """
     options = current
-    if not options.enabled or options.location != "cache" or not path or path.startswith("/vsi") or "://" in path:
+    if not options.enabled or options.location not in ("cache", "temp") or not path or path.startswith("/vsi") or "://" in path:
         return False
     if not cache_folder() or not os.path.isfile(path) or pam_proxy() is None:
         return False
@@ -643,7 +803,7 @@ def layers_added(layers: Sequence[QgsMapLayer], message_bar=None) -> list[str]:
     """
     With `scope` "all": the local GDAL images added to the project in any
     way (Add Layer, drag and drop, a project read) get overviews like the
-    catalog's. With `location` "cache" the image's .aux.xml moves to the
+    catalog's. With `location` "cache" (or "temp") the image's .aux.xml moves to the
     cache folder too, but the layer already open keeps the one beside the
     image (QGIS reuses its GDAL handle), so QGIS may still write its
     statistics there until the image is opened again. The paths queued.
@@ -883,7 +1043,7 @@ class OverviewQueue:
                 reload_layers(outcome.path)
                 if bar is not None:
                     bar.pushMessage(TITLE, f"{name}.ovr を作成（画像の隣。画像本体はそのまま）", Qgis.MessageLevel.Info, 5)
-            elif outcome is not None and outcome.kind == CACHED:
+            elif outcome is not None and outcome.kind in (CACHED, TEMPORARY):
                 reload_layers(outcome.path)
                 if outcome.ovr:
                     # The layers opened before kept the .aux.xml as it was, and wrote it back
@@ -893,7 +1053,9 @@ class OverviewQueue:
                     except (RuntimeError, OSError) as e:
                         QgsMessageLog.logMessage(f"{name}: {e}", LOG_TAG, Qgis.MessageLevel.Warning)
                     reload_layers(outcome.path)
-                if bar is not None:
+                if bar is not None and outcome.kind == TEMPORARY:
+                    bar.pushMessage(TITLE, f"{name} のピラミッドを一時フォルダに作成（QGIS を閉じると消去）", Qgis.MessageLevel.Info, 5)
+                elif bar is not None:
                     bar.pushMessage(TITLE, f"{name} のピラミッドをキャッシュに作成（{cache_folder() or ''}）", Qgis.MessageLevel.Info, 5)
             elif outcome is not None and outcome.kind in (NO_CACHE, UNSUPPORTED):
                 if bar is not None:

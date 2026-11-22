@@ -602,6 +602,11 @@ class MikagePlugin:
             self.shortcuts.unload()
             self.shortcuts = None
         overviews_io.queue.cancel_all()
+        # overviews.location "temp": its .ovr go as QGIS closes (what is still open, at the next start).
+        try:
+            overviews_io.end_session()
+        except Exception:  # noqa: BLE001 (never keeps the plugin from unloading)
+            pass
         # Before the docks and the local store go: a task ending later would write into them (#88).
         tasks.cancel_all()
         from .qgis_io import obs_images, pixel_place

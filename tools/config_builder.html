@@ -1125,7 +1125,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
  ],
  "overviewLocations": [
   "auto",
-  "cache"
+  "cache",
+  "temp"
  ],
  "overviewScopes": [
   "all",
@@ -1559,9 +1560,10 @@ const SPEC = [
     { key: "overviews", label: "ピラミッド（.ovr）の自動作成", doc: "ピラミッドovrの自動作成overviews", help: "ピラミッドのない画像を開いたとき裏で .ovr を作る（既定は作る・auto・all）。",
       field: O("overviews", "ピラミッド", [
         B("enabled", "作る"), S("resampling", "リサンプリング", K.resamplings), N("minSize", "作る最小の大きさ（px）"),
-        S("compress", "圧縮", K.compressions), S("location", "置き場所", [["auto", "auto（書ければ画像の隣）"], ["cache", "cache（キャッシュのフォルダ）"]]),
+        S("compress", "圧縮", K.compressions), S("location", "置き場所", [["auto", "auto（書ければ画像の隣）"], ["cache", "cache（キャッシュのフォルダ）"], ["temp", "temp（一時フォルダ。QGIS を閉じたら消す）"]]),
         S("scope", "対象", [["all", "all（追加したローカル画像すべて）"], ["catalog", "catalog（カタログなどから開いたものだけ）"]]),
-        T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中" }),
+        T("cacheFolder", "キャッシュのフォルダ", { help: "空ならプロファイルの中。%LOCALAPPDATA% などの環境変数も書ける" }),
+        T("tempFolder", "一時フォルダ（temp）", { ph: "%TEMP%\\MIKAGE\\overviews", help: "置き場所が temp のとき .ovr を作るフォルダ。空なら PC の一時フォルダ（%TEMP%\\MIKAGE\\overviews）。QGIS ごとにフォルダを分け、閉じたら消す（使用中で消せなかった分は次の起動時）" }),
         N("threads", "作成に使うコア数", { min: 0, ph: "0", help: "0 で PC のコアの半分（残りは QGIS の地図の描画用）" }),
       ], { allowFalse: "作らない（false）" }) },
     { key: "rasterSpeed", label: "地図の描画を速くする設定", doc: "地図の描画を速くする設定rasterspeed", help: "大きな画像の地図の描画が速くなるように、GDAL の読み込みのスレッドとブロックキャッシュをこの QGIS の中だけで設定し（起動のたび。環境変数で決めてあればそのまま）、QGIS のオプションのうち既定より遅い値のもの（並列描画・コア数・描画キャッシュ・早期リサンプリング）をプロファイルで 1 回だけ直す（各自が「設定…」の「地図の描画」で元に戻せる）。書かなければ使う。",

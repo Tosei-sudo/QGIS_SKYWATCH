@@ -17,7 +17,8 @@ from .qsettings import PREFIX, pref, set_pref  # noqa: F401 (PREFIX, pref and se
 
 # Each feature's own (qgis_io/prefs): read through here as before.
 from .prefs.images import (  # noqa: F401
-    overview_cache_setting, set_overview_cache_setting, overview_cache_to_clear, set_overview_cache_to_clear, central_views,
+    overview_cache_setting, set_overview_cache_setting, overview_temp_setting, set_overview_temp_setting, overview_cache_to_clear,
+    set_overview_cache_to_clear, central_views,
     set_central_views, feed_close_previous, set_feed_close_previous, feed_unread_only, set_feed_unread_only, FOOTPRINT_STYLES,
     footprint_style, set_footprint_style, close_previous, set_close_previous, zoom_to_opened, set_zoom_to_opened, saved_areas,
     set_saved_areas, path_folders, path_folder, set_path_folder, clear_path_folders, similar_tolerance, set_similar_tolerance,
