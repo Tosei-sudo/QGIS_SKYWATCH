@@ -16,19 +16,26 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         kind_text, Mark, MEASURE, MISSED, MISSED_BONUS, Outcome, PRACTICE, RIGHT, score, Scoring, scoring_of, STAYED, TYPES,
     )
     from .progress import kept, read_progress, write_progress
-    from .results import add_result, best_of, confusions, exam_taken, mistaken, read_results, result_record, tries_of
+    from .results import (
+        add_result, best_of, confusions, exam_taken, mark_sent, merged_results, mistaken, read_results, result_record, tries_of, unsent,
+    )
     from .sample import AREA, image_plans, training_config
     from .sample_exercises import sample_exercises
     from .server import open_data, rebase, Store, TrainingServer
     from .settings import DEFAULT_TRAINING, MASTERS, resolve_config, training_settings_of, TrainingSettings
+    from .tables import (
+        ANSWER_FIELDS, EXERCISE_FIELDS, ExerciseTables, org_exercises, read_exercises, read_results_of, RESULT_FIELDS, result_attributes,
+        send_results,
+    )
 
 __getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
-    "add_result", "Answer", "AREA", "best_of", "CAME", "CHANGE", "CHANGES", "confusions", "DEFAULT_SCORING", "DEFAULT_TRAINING",
-    "EXAM", "exam_taken", "Exercise", "EXTRA", "FIND", "fitted", "GONE", "hint", "IDENTIFY", "image_plans", "ITEM_NAMES", "ITEMS",
-    "kept", "kind_text", "Mark", "masters", "MASTERS", "MEASURE", "MISSED", "MISSED_BONUS", "mistaken", "open_data", "Outcome",
-    "PRACTICE", "read_progress", "read_results", "rebase", "resolve_config", "result_record", "RIGHT", "sample", "sample_exercises",
-    "score", "Scoring", "scoring_of", "STAYED", "Store", "training_config", "training_settings_of", "TrainingServer",
-    "TrainingSettings", "tries_of", "TYPES", "write_progress",
+    "add_result", "Answer", "ANSWER_FIELDS", "AREA", "best_of", "CAME", "CHANGE", "CHANGES", "confusions", "DEFAULT_SCORING", "DEFAULT_TRAINING",
+    "EXAM", "exam_taken", "Exercise", "EXERCISE_FIELDS", "ExerciseTables", "EXTRA", "FIND", "fitted", "GONE", "hint", "IDENTIFY", "image_plans", "ITEM_NAMES", "ITEMS",
+    "kept", "kind_text", "Mark", "mark_sent", "masters", "MASTERS", "MEASURE", "merged_results", "MISSED", "MISSED_BONUS", "mistaken",
+    "open_data", "org_exercises", "Outcome", "PRACTICE", "read_exercises", "read_progress", "read_results", "read_results_of", "rebase",
+    "resolve_config", "RESULT_FIELDS", "result_attributes", "result_record", "RIGHT", "sample", "sample_exercises", "score", "Scoring",
+    "scoring_of", "send_results", "STAYED", "Store", "training_config", "training_settings_of", "TrainingServer", "TrainingSettings",
+    "tries_of", "TYPES", "unsent", "write_progress",
 ]

@@ -14,6 +14,10 @@ stays on the practice server (settings.py's `fromProduction`).
 * eventKinds: events.kinds;
 * glossary: glossary.
 
+With 判読の練習's organisation's exercises (training.exercises), also the
+production's pathMappings: the exercises' images may be the production
+catalogs' (read only while practising).
+
 A master the main settings file does not have stays the sample's. A path
 written relative to the main settings file is made whole (the practice's
 settings file is in another folder).
@@ -109,7 +113,22 @@ def with_production(practice: dict, production: Any, names: Sequence[str], sourc
         elif name == "glossary" and "glossary" in prod:
             value["glossary"] = prod["glossary"]
             taken.append(name)
+    if exercise_images(prod) and isinstance(prod.get("pathMappings"), list):
+        # 判読の練習's organisation's exercises: their images may be the production catalogs' (read only),
+        # their files where the production finds them.
+        value["pathMappings"] = [*(value.get("pathMappings") or []), *prod["pathMappings"]]
     return value, taken
+
+
+def made_whole(value: Any, source: str) -> Any:
+    """A copy of the main settings file's value with its relative paths (./ ../) made whole (read from `source`)."""
+    return _whole(copy.deepcopy(value), source)
+
+
+def exercise_images(production: Any) -> bool:
+    """Whether the production has 判読の練習's organisation's exercises (training.exercises)."""
+    training = production.get("training") if isinstance(production, dict) else None
+    return isinstance(training, dict) and bool(training.get("exercises"))
 
 
 def without_tokens(value: Any) -> Any:

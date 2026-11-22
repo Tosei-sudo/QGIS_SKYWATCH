@@ -226,12 +226,14 @@ def write_config(f: TrainingFiles, base: str, files: str, production: Optional[P
     text = training_config(base, files, f.outputs)
     taken: list = []
     whole: Optional[str] = None
-    if production is not None and production.names:
-        value, taken = masters.with_production(load_jsonc(text), production.value, production.names,
+    if production is not None and (production.names or masters.exercise_images(production.value)):
+        own = load_jsonc(text)
+        value, taken = masters.with_production(own, production.value, production.names,
                                                production.source, os.path.join(f.outputs, "撮像計画ファイル"))
-        if taken:
+        if value != own:
+            read = f"{masters.names_text(taken)}は本番の設定ファイルから（読むだけ）" if taken else "パスの置き換えは本番の設定ファイルから"
             head = ("練習モードの設定ファイル（MIKAGE が練習を始めるたびに書き出す。手で直しても次に上書きされる）\n"
-                    f"書き込む表はすべてこの PC の中の練習用サーバー。{masters.names_text(taken)}は本番の設定ファイルから（読むだけ）\n"
+                    f"書き込む表はすべてこの PC の中の練習用サーバー。{read}\n"
                     "本番のトークンはここには書かない（練習中は MIKAGE が覚えている）")
             whole = masters.config_text(value, head)
             text = masters.config_text(masters.without_tokens(value), head)

@@ -130,7 +130,7 @@ class ExerciseList(QDialog):
         self.mine.setVisible(any(e.roles for e in self.exercises))
         top.addWidget(self.mine)
         top.addStretch(1)
-        where = QLabel(source_text)
+        self.source = where = QLabel(source_text)
         where.setStyleSheet("color: #555;")
         top.addWidget(where)
         box.addLayout(top)
@@ -172,7 +172,8 @@ class ExerciseList(QDialog):
         out = [e for e in self.exercises if course == self.tr(ALL_COURSES) or e.course == course]
         if self.mine.isChecked():
             out = [e for e in out if not e.roles or self.roles & set(e.roles)]
-        return sorted(out, key=lambda e: (e.course, e.order, e.title))
+        courses = {c: i for i, c in enumerate(dict.fromkeys(e.course for e in self.exercises))}
+        return sorted(out, key=lambda e: (courses[e.course], e.order, e.title))
 
     def state_of(self, e: Exercise) -> str:
         tries = tries_of(self.results, e.key)
@@ -555,7 +556,10 @@ class ReviewWindow(QWidget):
 # ---- これまでの結果 ------------------------------------------------------------------------------------
 
 class MyResults(QDialog):
-    """The person's tries (this computer's), and the classes they most often take for others."""
+    """
+    The person's tries (this computer's, and the organisation's results table's: another computer's too), and the
+    classes they most often take for others (of the tries kept here: the table's rows have no detail).
+    """
 
     def __init__(self, results: Sequence[dict], parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -580,7 +584,9 @@ class MyResults(QDialog):
                      _item(minutes_text(t.get("seconds") or 0)), _item(f"{t.get('found', 0)}・{t.get('missed', 0)}・{t.get('extra', 0)}")]
             for c, cell in enumerate(cells):
                 self.table.setItem(r, c, cell)
-        box.addWidget(QLabel(self.tr("この PC で解いた問題（新しい順）")))
+        elsewhere = any(t.get("fromTable") for t in tries)
+        box.addWidget(QLabel(self.tr("解いた問題（新しい順。組織の結果の表から、ほかの PC で解いたものも）") if elsewhere
+                             else self.tr("この PC で解いた問題（新しい順）")))
         box.addWidget(self.table, 1)
         box.addWidget(QLabel(self.tr("<b>取り違えやすい組み合わせ</b>（正しい種別 → 答えた種別、回数）")))
         pairs = mistaken(results)

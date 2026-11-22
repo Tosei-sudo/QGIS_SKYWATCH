@@ -65,9 +65,37 @@ def read_results(path: str) -> list:
     return [r for r in value if isinstance(r, dict) and isinstance(r.get("exercise"), str)] if isinstance(value, list) else []
 
 
+def merged_results(here: Iterable[dict], table: Iterable[dict]) -> list:
+    """The tries kept on this computer and those of the results table (another computer's too), each once."""
+    here = list(here)
+    seen = {(r.get("exercise"), r.get("finished")) for r in here}
+    return [*here, *(r for r in table if (r.get("exercise"), r.get("finished")) not in seen)]
+
+
+def unsent(results: Iterable[dict]) -> list:
+    """The tries kept to be sent to the results table that are not yet."""
+    return [r for r in results if r.get("sent") is False]
+
+
+def mark_sent(path: str, sent: Iterable[dict]) -> list:
+    """The tries `sent` marked so in the file (by their exercise and when they were submitted); all of them."""
+    keys = {(r.get("exercise"), r.get("finished")) for r in sent}
+    results = read_results(path)
+    for r in results:
+        if (r.get("exercise"), r.get("finished")) in keys:
+            r["sent"] = True
+    _write(path, results)
+    return results
+
+
 def add_result(path: str, record: dict) -> list:
     """A try kept (after those before); all of them."""
     results = [*read_results(path), record]
+    _write(path, results)
+    return results
+
+
+def _write(path: str, results: list) -> None:
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
@@ -75,7 +103,6 @@ def add_result(path: str, record: dict) -> list:
     with open(temporary, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=1)
     os.replace(temporary, path)
-    return results
 
 
 def tries_of(results: Iterable[dict], key: str) -> list:

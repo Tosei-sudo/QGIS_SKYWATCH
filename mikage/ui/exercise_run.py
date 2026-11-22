@@ -12,7 +12,9 @@ map moved to its area, its area and the things to look at marked
 (core/training/exercises.py), keeps the try (results.py) and shows the review
 over the map, the answers marked where they are. When it ends the dock's
 stores are the settings file's again and the images opened for it are taken
-off the map.
+off the map. An organisation's exercise's image not in the practice's catalogs
+is looked for elsewhere (`elsewhere`: the production's catalogs, read only),
+and its try sent to the organisation's results table (`send`).
 """
 from __future__ import annotations
 
@@ -28,8 +30,8 @@ from ..core.gpkg import open_local
 from ..qgis_io.tasks import run_task
 from ..core.obs.api import kind_of, LocalAreaStore, LocalObservationStore, StoreSet
 from ..core.training.api import (
-    add_result, CAME, CHANGE, Exercise, fitted, GONE, hint, IDENTIFY, Mark, MEASURE, MISSED, MISSED_BONUS, Outcome, read_results,
-    result_record, RIGHT, score, STAYED, tries_of,
+    add_result, CAME, CHANGE, Exercise, fitted, GONE, hint, IDENTIFY, Mark, MEASURE, merged_results, MISSED, MISSED_BONUS, Outcome,
+    read_results, result_record, RIGHT, score, STAYED, tries_of,
 )
 from .exercise_map import ExerciseMarks, fit_into, free_part, pixel_of, Spot
 from .exercise_screens import BAD, ExerciseBar, ReviewWindow
@@ -72,14 +74,16 @@ class FixedClasses:
         raise ValueError("判読の練習の間は分類を変えられません")
 
 
-def marks_of(records: list, exercise: Exercise, before_things: set) -> list[Mark]:
+def marks_of(records: list, exercise: Exercise, before_things: set, image_id: Optional[str] = None) -> list[Mark]:
     """
-    The records made for the exercise as scored: those of its image, not deleted and not 「不可」; for
-    変化を見つける, a thing of the image before carried on (継続), gone (消失) or new (来た).
+    The records made for the exercise as scored: those of its image (`image_id`: its id in the observation
+    dock, the exercise's by default), not deleted and not 「不可」; for 変化を見つける, a thing of the image
+    before carried on (継続), gone (消失) or new (来た).
     """
+    image_id = exercise.image_id if image_id is None else image_id
     out = []
     for o in records:
-        if o.deleted_at is not None or o.image_id != exercise.image_id or o.unseen:
+        if o.deleted_at is not None or o.image_id != image_id or o.unseen:
             continue
         change = ""
         if exercise.type == CHANGE:
@@ -102,9 +106,20 @@ class ExerciseRun(QObject):
     wants = pyqtSignal(str)
 
     def __init__(self, exercise: Exercise, place: Any, results_path: str, records_path: str, main=None,
-                 next_of: Callable[[Exercise], Optional[Exercise]] = lambda _e: None):
+                 next_of: Callable[[Exercise], Optional[Exercise]] = lambda _e: None,
+                 elsewhere: Optional[Callable[[str, Callable, Callable], None]] = None,
+                 send: Optional[Callable[[dict, Callable[[str], None]], None]] = None, others: Optional[list] = None,
+                 user: Optional[Callable[[], str]] = None):
         super().__init__()
         self.exercise = exercise
+        #: Who solves it (the tries' user; None: the observation dock's recorder)
+        self.user = user
+        #: An image not in the practice's catalogs looked for (its id, then(layers), missing()).
+        self.elsewhere = elsewhere
+        #: A try sent to the organisation's results table (the record, said(how it went)); None: kept here only.
+        self.send = send
+        #: The person's tries kept elsewhere (the results table's): the tries counted with them.
+        self.others = list(others or [])
         self.place = place
         self.results_path = results_path
         self.records_path = records_path
@@ -123,6 +138,8 @@ class ExerciseRun(QObject):
         #: The things recorded on the image before by the exercise (変化を見つける: what 継続 and 消失 are of).
         self.before_things: set = set()
         self.layers: list[str] = []
+        #: The layers of the images opened from their files (IMAGE_SOURCE), by file.
+        self._file_layers: dict[str, str] = {}
         self.db = None
         self.store: Optional[ExerciseRecords] = None
         #: The practice store's classes and words (the exercise's store uses them).
@@ -214,7 +231,20 @@ class ExerciseRun(QObject):
 
             # (from the catalogs, not asked whether to open the files of last time: the exercise's image as it is)
             open_id = getattr(self.catalog, "open_from_catalogs", None) or self.catalog.open_image_id
-            open_id(image_id, then=opened, missing=lambda: self._fail(f"画像 {image_id} が画像カタログにありません"))
+
+            def missing() -> None:
+                if self._ended:
+                    return
+                fail = lambda: self._fail(f"画像 {image_id} が画像カタログにありません")  # noqa: E731
+                if self.elsewhere is not None:
+                    self.elsewhere(image_id, opened, fail)
+                else:
+                    fail()
+
+            open_id(image_id, then=opened, missing=missing)
+            return
+        if QgsProject.instance().mapLayer(self._file_layers.get(source, "")) is not None:
+            self._open(rest, then)
             return
         layer = QgsRasterLayer(source, os.path.splitext(os.path.basename(source))[0] or source)
         if not layer.isValid():
@@ -222,7 +252,16 @@ class ExerciseRun(QObject):
             return
         QgsProject.instance().addMapLayer(layer)
         self.layers.append(layer.id())
+        self._file_layers[source] = layer.id()
         self._open(rest, then)
+
+    def _image_id_of(self, image_id: str, source: str) -> str:
+        """The observation dock's id of an exercise's image (opened from its file: the id the dock gave its layer)."""
+        if image_id:
+            return image_id
+        book, lid = self.obs.book, self._file_layers.get(source, "")
+        image = next((i for i in book.images if lid in i.layer_ids), None) if book is not None and lid else None
+        return image.id if image is not None else ""
 
     def _layer_of(self, image_id: str) -> Optional[str]:
         """The layer of an image opened already for this exercise (another try)."""
@@ -247,7 +286,7 @@ class ExerciseRun(QObject):
         obs, e = self.obs, self.exercise
         if e.type == CHANGE:
             self._make_before()
-        obs.go_to(e.image_id)
+        obs.go_to(self._image_id_of(e.image_id, e.image_source))
         self.marks.show_marks(e.area, self.targets())
         if e.type == MEASURE and obs.points != MEASURE_POINTS:
             self._points_before = obs.points
@@ -273,7 +312,7 @@ class ExerciseRun(QObject):
     def _make_before(self) -> None:
         """変化を見つける: the records of the image before (what was there), as someone recorded them before."""
         book, e = self.obs.book, self.exercise
-        before = e.before_image_id
+        before = self._image_id_of(e.before_image_id, e.before_image_source)
         if book is None or not before:
             return
         image = next((i for i in book.images if i.id == before), None)
@@ -343,7 +382,8 @@ class ExerciseRun(QObject):
             return []
 
     def current_marks(self) -> list[Mark]:
-        return marks_of(self.records(), self.exercise, self.before_things)
+        e = self.exercise
+        return marks_of(self.records(), e, self.before_things, self._image_id_of(e.image_id, e.image_source))
 
     def show_hint(self) -> None:
         if self.bar is None or self.exercise.exam:
@@ -386,8 +426,11 @@ class ExerciseRun(QObject):
         kinds = self._kinds()
         exercise = fitted(self.exercise, kinds, self._activities(kinds)) if kinds else self.exercise
         self.outcome = score(exercise, self.current_marks())
-        attempt = len(tries_of(read_results(self.results_path), self.exercise.key)) + 1
-        record = result_record(self.outcome, self.started, self.finished_at, attempt, obs.observer(), self.hints)
+        attempt = len(tries_of(merged_results(read_results(self.results_path), self.others), self.exercise.key)) + 1
+        record = result_record(self.outcome, self.started, self.finished_at, attempt, self.user() if self.user else obs.observer(), self.hints)
+        if self.send is not None:
+            # (sent next time when it cannot be now)
+            record["sent"] = False
         note = ""
         try:
             add_result(self.results_path, record)
@@ -402,7 +445,20 @@ class ExerciseRun(QObject):
             bar.closed.disconnect(self._bar_closed)
             bar.close()
         self.show_review(note)
+        if self.send is not None:
+            self.send(record, self.report)
         return self.outcome
+
+    def report(self, text: str) -> None:
+        """Said under the review (how the try's sending went)."""
+        review = self.review
+        if review is None:
+            return
+        try:
+            review.note.setText((review.note.text() + " " + text).strip())
+            review.note.setVisible(True)
+        except RuntimeError:
+            pass
 
     def review_spots(self) -> list[Spot]:
         o = self.outcome
@@ -528,6 +584,7 @@ class ExerciseRun(QObject):
         if gone:
             project.removeMapLayers(gone)
         self.layers = []
+        self._file_layers = {}
         self.ended.emit()
 
 

@@ -27,10 +27,12 @@ from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform
 from qgis.PyQt.QtCore import Qt, QTimer
 from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog, QToolBar
 
-from ..core import roles
-from ..core.config import load_jsonc
+from ..core import edit_stamp, roles
+from ..core.catalog.api import records_by_ids
+from ..core.config import load_jsonc, parse_config
 from ..core.training.api import (
-    AREA, DEFAULT_TRAINING, kept, masters, read_progress, read_results, resolve_config, sample_exercises, write_progress,
+    AREA, DEFAULT_TRAINING, exam_taken, kept, mark_sent, masters, merged_results, read_exercises, read_progress, read_results, read_results_of,
+    resolve_config, sample_exercises, send_results, unsent, write_progress,
 )
 from ..qgis_io import settings, training_io
 from ..qgis_io.tasks import run_task
@@ -141,6 +143,12 @@ class Training(Feature):
         #: 判読の練習: the exercise being solved (None when none), and whether the list is offered once 練習モード has started.
         self.exercise_run: Optional[ExerciseRun] = None
         self._exercises_after_start = False
+        #: The organisation's exercises (training.exercises) as last read, the person's tries in its results table,
+        #: and why they could not be read ("" : they could); whether they are being read now.
+        self.org_exercises: list = []
+        self.org_results: list = []
+        self.org_problem = ""
+        self._reading = False
 
     @property
     def practising(self) -> bool:
@@ -277,7 +285,8 @@ class Training(Feature):
         """The production's settings file as read now, with the masters to take from it (None: none to take, or not readable)."""
         names = self.settings.from_production
         source = settings.production_config_source()[0]
-        if not names or not source:
+        # (判読の練習's organisation's exercises: their images may be the production catalogs')
+        if (not names and self.settings.exercises is None) or not source:
             return None
         value = None
         try:
@@ -294,7 +303,7 @@ class Training(Feature):
         return training_io.Production(value, source, tuple(names)) if isinstance(value, dict) else None
 
     def _switch_on(self, files, builtin: bool) -> None:
-        production = self._production() if builtin else None
+        production = self._production()
         try:
             server, text, taken = training_io.start_server(files, production) if builtin else (None, None, ())
         except OSError as error:
@@ -552,16 +561,111 @@ class Training(Feature):
     # ---- 判読の練習 ---------------------------------------------------------------------------------------
 
     def exercises(self) -> list:
-        """The exercises offered: the sample's (on the built-in sample), with the organisation's scoring."""
+        """
+        The exercises offered: the organisation's (as last read) and the sample's (on the built-in sample, with the
+        organisation's scoring).
+        """
         session = training_io.active()
-        if session is None or not session.builtin:
+        if session is None:
             return []
+        sample = []
+        if session.builtin:
+            try:
+                with open(session.files.sample_images, encoding="utf-8") as f:
+                    plans = json.load(f)
+            except (OSError, ValueError):
+                plans = []
+            sample = sample_exercises(plans if isinstance(plans, list) else [], self.settings.scoring)
+        return [*self.org_exercises, *sample]
+
+    def _user(self) -> str:
+        """
+        Who practises, as the results table names them: the user name MIKAGE writes in the tables it edits
+        (editTracking: the same on every computer), else the name the observation records are made by.
+        """
+        session = training_io.active()
+        production = session.production.value if session is not None and session.production is not None else None
+        tracking = None
+        if isinstance(production, dict) and isinstance(production.get("editTracking"), dict):
+            # (the production's: the practice's settings file has its own)
+            tracking = edit_stamp.edit_tracking_of(production["editTracking"], [])
+        name = edit_stamp.user_name(tracking)
+        if name:
+            return name
         try:
-            with open(session.files.sample_images, encoding="utf-8") as f:
-                plans = json.load(f)
-        except (OSError, ValueError):
-            return []
-        return sample_exercises(plans if isinstance(plans, list) else [], self.settings.scoring)
+            return self.host.api.observation_dock.observer()
+        except (AttributeError, KeyError, RuntimeError):
+            return ""
+
+    def _token(self, url: str) -> Optional[str]:
+        tables = self.settings.exercises
+        return self.context.token_for(url, (tables.token if tables is not None else "") or None)
+
+    def read_org_exercises(self, then=None) -> bool:
+        """
+        The organisation's exercises and answers read from its tables (training.exercises), with the person's tries
+        in its results table; the tries not sent yet sent first. In a task; `then` once done (read or not). False:
+        none to read, or reading already.
+        """
+        tables, session = self.settings.exercises, training_io.active()
+        if tables is None or session is None or self._reading:
+            return False
+        self._reading = True
+        client = self.context.esri()
+        path = session.files.exercise_results
+        pending = unsent(read_results(path)) if tables.results else []
+        user, base = self._user(), self.settings.scoring
+        tokens = {u: self._token(u) for u in (tables.exercises, tables.answers, tables.results) if u}
+
+        def work(task):
+            sent = []
+            if pending:
+                try:
+                    ok, _why = send_results(client, tables, pending, tokens[tables.results])
+                    sent = [r for r, went in zip(pending, ok) if went]
+                except Exception:  # noqa: BLE001 (sent again next time)
+                    sent = []
+            problems: list[str] = []
+            found = read_exercises(client, tables, tokens[tables.exercises], base, problems,
+                                   cancelled=task.isCanceled if task is not None else None)
+            mine = []
+            if tables.results:
+                try:
+                    mine = read_results_of(client, tables, user, tokens[tables.results])
+                except Exception as error:  # noqa: BLE001 (the exercises still offered; the tries of this computer only)
+                    problems.append(tr("結果の表を読めませんでした（この PC の結果だけで数えます）: {e}").format(e=error))
+            return found, mine, problems, sent
+
+        def done(result) -> None:
+            self._reading = False
+            found, mine, problems, sent = result
+            if sent:
+                try:
+                    mark_sent(path, sent)
+                except OSError:
+                    pass
+            self.org_exercises, self.org_results = found, mine
+            self.org_problem = ""
+            if problems:
+                more = tr("ほか {n} 件").format(n=len(problems) - 3) if len(problems) > 3 else ""
+                self.iface.messageBar().pushWarning(tr("判読の練習"), tr("組織の問題で気になること: ") + " / ".join(problems[:3]) + more)
+            if then is not None:
+                then()
+
+        def failed(message: str) -> None:
+            self._reading = False
+            self.org_problem = tr("組織の問題を読めませんでした: {m}").format(m=message)
+            if then is not None:
+                then()
+
+        run_task(tr("判読の練習: 組織の問題の読み込み"), work, done, failed)
+        return True
+
+    def all_results(self) -> list:
+        """The person's tries: this computer's and the organisation's results table's (another computer's too)."""
+        session = training_io.active()
+        here = read_results(session.files.exercise_results) if session is not None else []
+        return merged_results(here, self.org_results)
 
     def open_exercises(self) -> bool:
         """
@@ -584,16 +688,33 @@ class Training(Feature):
                     window.raise_()
             return True
         self._stop_tutorial()
+        if self.settings.exercises is not None:
+            # (the organisation's, read afresh each time: an instructor may have added some)
+            if self._reading:
+                return True
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("組織の問題を読み込み中…"))
+            return self.read_org_exercises(then=self._offer_exercises)
+        return self._offer_exercises()
+
+    def _offer_exercises(self) -> bool:
+        """The list of the exercises, and the one chosen started (False: none)."""
+        if not self.practising or self.exercise_run is not None:
+            return False
         found = self.exercises()
         if not found:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("練習できる問題がありません（組織の問題がなく、内蔵の見本でもありません）"))
+            text = self.org_problem or tr("練習できる問題がありません（組織の問題がなく、内蔵の見本でもありません）")
+            self.iface.messageBar().pushInfo(tr("判読の練習"), text)
             return False
-        session = training_io.active()
         keeper = self.host.role_keeper
-        results_path = session.files.exercise_results
-        source = tr("見本の問題（横須賀）。組織の問題は管理者が登録します")
-        dialog = ExerciseList(found, read_results(results_path), [*(keeper.codes if keeper is not None else []), EXERCISE_ROLE],
-                              source, lambda: MyResults(read_results(results_path), self.window()).exec(), self.window())
+        org, sample = len(self.org_exercises), len(found) - len(self.org_exercises)
+        parts = ([tr("組織の問題 {n} 問").format(n=org)] if org else []) + ([tr("見本の問題（横須賀）{n} 問").format(n=sample)] if sample else [])
+        source = "・".join(parts)
+        if self.org_problem:
+            source += "（" + self.org_problem + "）"
+        elif self.settings.exercises is None:
+            source += tr("。組織の問題は管理者が登録します")
+        dialog = ExerciseList(found, self.all_results(), [*(keeper.codes if keeper is not None else []), EXERCISE_ROLE],
+                              source, lambda: MyResults(self.all_results(), self.window()).exec(), self.window())
         if dialog.exec() != ExerciseList.DialogCode.Accepted or dialog.choice is None:
             return False
         chosen = next((e for e in found if e.key == dialog.choice), None)
@@ -603,6 +724,10 @@ class Training(Feature):
         """An exercise started (in the role that records, used while practising); None when it could not start."""
         session = training_io.active()
         if session is None:
+            return None
+        if exercise.exam and exam_taken(self.all_results(), exercise.key):
+            # (an exam once: this computer's tries and the results table's, another computer's too)
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("「{t}」は試験で、もう受けました（1 回だけ）").format(t=exercise.title))
             return None
         self._stop_tutorial()
         self._stop_exercise()
@@ -614,8 +739,10 @@ class Training(Feature):
             later = [x for x in same if (x.order, x.title) > (e.order, e.title)]
             return later[0] if later else None
 
+        tables = self.settings.exercises
         run = ExerciseRun(exercise, TutorialPlace(self), session.files.exercise_results, session.files.exercise_records,
-                          self.window(), next_of)
+                          self.window(), next_of, elsewhere=self._production_image, user=self._user,
+                          send=self._send_result if tables is not None and tables.results else None, others=self.org_results)
         self.exercise_run = run
         run.ended.connect(lambda: self._exercise_ended(run))
         run.wants.connect(lambda what: self._exercise_next(run, what, next_of))
@@ -624,6 +751,72 @@ class Training(Feature):
             self.iface.messageBar().pushWarning(tr("判読の練習"), run.problem)
             return None
         return run
+
+    def _production_image(self, image_id: str, then, missing) -> None:
+        """
+        An exercise's image not in the practice's catalogs: looked up in the production's (read only; in a task)
+        and opened from there; `missing` when none has it.
+        """
+        session = training_io.active()
+        production = session.production if session is not None else None
+        catalog_dock = getattr(self.host.api, "image_catalog", None)
+        if production is None or catalog_dock is None:
+            missing()
+            return
+        config, _problems = parse_config(masters.made_whole(production.value, production.source))
+        catalogs = [c for c in config.image_catalogs if c.fields.get("id")]
+        if not catalogs:
+            missing()
+            return
+        client = self.context.esri()
+        asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
+
+        def work(_task):
+            for c, token in asks:
+                found = records_by_ids(client, c, [image_id], token)
+                if found:
+                    return c, found[0]
+            return None
+
+        def done(result) -> None:
+            if result is None:
+                missing()
+                return
+            catalog, record = result
+            layers = catalog_dock.open_catalog_records(catalog, [record])
+            if layers:
+                then(layers)
+            else:
+                missing()
+
+        run_task(tr("判読の練習: 本番の画像カタログで検索"), work, done, lambda _message: missing())
+
+    def _send_result(self, record: dict, said) -> None:
+        """A try sent to the organisation's results table (in a task); `said` gets how it went."""
+        tables, session = self.settings.exercises, training_io.active()
+        if tables is None or not tables.results or session is None:
+            return
+        client, token, path = self.context.esri(), self._token(tables.results), session.files.exercise_results
+
+        def work(_task):
+            return send_results(client, tables, [record], token)
+
+        def done(result) -> None:
+            ok, why = result
+            if ok and ok[0]:
+                try:
+                    mark_sent(path, [record])
+                except OSError:
+                    pass
+                self.org_results = [*self.org_results, {**record, "fromTable": True}]
+                said(tr("結果を組織の表に送りました。"))
+            else:
+                failed(" / ".join(why) or tr("追加できませんでした"))
+
+        def failed(message: str) -> None:
+            said(tr("結果を組織の表に送れませんでした（次に「判読の練習…」を開くときに送り直します）: {m}").format(m=message))
+
+        run_task(tr("判読の練習: 結果の送信"), work, done, failed)
 
     def _exercise_ended(self, run: ExerciseRun) -> None:
         if self.exercise_run is run:

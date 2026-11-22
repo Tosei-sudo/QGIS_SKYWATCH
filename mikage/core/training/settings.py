@@ -18,17 +18,23 @@ practice server.
 `"scoring"`: 判読の練習's scoring as the organisation wants it (each exercise
 may change some of it; exercises.py's Scoring): `{"tolerance": 50,
 "weights": {"find": 50, "kind": 30, "activity": 10, "measure": 10}, …}`.
+
+`"exercises"`: 判読の練習's organisation's exercises, their answers and the
+results' table (tables.py): `{"exercises": "<url>", "answers": "<url>",
+"results": "<url>", "token": "…"}`. Read (and the results written) on the
+production while practising.
 """
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from .exercises import DEFAULT_SCORING, Scoring, scoring_of
+from .tables import exercise_tables_of, ExerciseTables
 
-KEYS = ("enabled", "config", "fromProduction", "scoring")
+KEYS = ("enabled", "config", "fromProduction", "scoring", "exercises")
 #: The masters read from the main settings file while practising (masters.py), with their names in Japanese.
 MASTERS = {"satellites": "衛星", "taxonomy": "分類体系", "places": "地名", "eventKinds": "イベントの種類", "glossary": "備考の単語集"}
 
@@ -42,6 +48,8 @@ class TrainingSettings:
     from_production: tuple[str, ...] = tuple(MASTERS)
     #: 判読の練習's scoring (the organisation's).
     scoring: Scoring = DEFAULT_SCORING
+    #: 判読の練習's organisation's exercises (None: the sample's only).
+    exercises: Optional[ExerciseTables] = None
 
     @property
     def builtin(self) -> bool:
@@ -82,7 +90,7 @@ def training_settings_of(value: Any, problems: list[str]) -> TrainingSettings:
         problems.append(f"training.fromProduction に不明な名前「{'・'.join(unknown)}」（{'・'.join(MASTERS)}）")
     scoring = scoring_of(value.get("scoring"), problems)
     return TrainingSettings(enabled=enabled, config=config.strip(), from_production=tuple(n for n in MASTERS if n in names),
-                            scoring=scoring)
+                            scoring=scoring, exercises=exercise_tables_of(value.get("exercises"), problems))
 
 
 def resolve_config(config: str, main_source: str) -> str:
