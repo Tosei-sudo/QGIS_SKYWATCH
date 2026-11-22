@@ -1905,6 +1905,7 @@ const SPEC = [
       field: O("training", "練習モード", [
         B("enabled", "練習モードを出す", { help: "既定 true（false で出さない。training: false と同じ）" }),
         T("config", "組織の練習用の設定ファイル", { ph: "\\\\fileserver\\mikage\\config.training.jsonc", help: "パスか URL。相対パスはこの設定ファイルのフォルダから。なしで内蔵の見本" }),
+        J("fromProduction", "本番から読む台帳", { ph: "[\"satellites\", \"taxonomy\", \"places\", \"eventKinds\", \"glossary\"]", help: "内蔵の見本で練習するとき、この設定ファイルから読む読むだけの台帳（衛星 satellites・分類体系 taxonomy・地名 places・イベントの種類 eventKinds・備考の単語集 glossary）。既定 true（すべて）。false で見本だけ。書き込む表は練習用のまま" }),
       ]) },
   ] },
   { group: "一覧", keys: [

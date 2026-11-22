@@ -12,13 +12,15 @@ the project of before again. 「練習データを最初に戻す…」 makes th
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional
 
 from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog
 
-from ..core.training.api import AREA, DEFAULT_TRAINING, resolve_config
+from ..core.config import load_jsonc
+from ..core.training.api import AREA, DEFAULT_TRAINING, masters, resolve_config
 from ..qgis_io import settings, training_io
 from ..qgis_io.tasks import run_task
 from ..ui.training_mode import StartDialog, TitleMarks, TrainingBand, status_mark
@@ -30,6 +32,8 @@ ENTRIES = (START, RESET, END)
 #: What cannot be used while practising (it would reach outside the practice): disabled, with why.
 NOT_IN_PRACTICE = ("設定…", "サーバ処理…", "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…", "移動体（AIS・ADS-B）")
 NOTE = "（練習モードでは使えません）"
+#: While the taxonomy is the production's (read only: its table is not edited while practising).
+TAXONOMY_EDIT, TAXONOMY_NOTE = "分類体系の編集", "（練習モードでは本番の分類体系を読むだけ）"
 #: The practice's background map (a layer of the practice's project).
 BASEMAP_NAME = "練習用の背景地図"
 BAND_TEXT = "練習用のデータで動いています。本番のサーバーには書き込みません。"
@@ -116,7 +120,8 @@ class Training(Feature):
             return False
         builtin = self.settings.builtin
         files = training_io.files()
-        ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None)
+        ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None,
+                          from_production=masters.names_text(self.settings.from_production) if builtin else "")
         if ask.exec() != StartDialog.DialogCode.Accepted:
             return False
         if not self._project_saved():
@@ -174,9 +179,30 @@ class Training(Feature):
 
         run_task(tr("練習データの作成"), work, lambda _ok: finished(True), lambda message: finished(False, message))
 
-    def _switch_on(self, files, builtin: bool) -> None:
+    def _production(self) -> Optional[training_io.Production]:
+        """The production's settings file as read now, with the masters to take from it (None: none to take, or not readable)."""
+        names = self.settings.from_production
+        source = settings.production_config_source()[0]
+        if not names or not source:
+            return None
+        value = None
         try:
-            server = training_io.start_server(files) if builtin else None
+            if self.context.source == source and self.context.config_text is not None:
+                value = load_jsonc(self.context.config_text)  # (read from a URL, with its tokens)
+            elif re.match(r"^https?://", source, re.IGNORECASE):
+                cached = settings.cached_config(source)
+                value = cached[0] if cached is not None else None
+            else:
+                with open(source, encoding="utf-8-sig") as f:
+                    value = load_jsonc(f.read())
+        except (OSError, ValueError):
+            value = None
+        return training_io.Production(value, source, tuple(names)) if isinstance(value, dict) else None
+
+    def _switch_on(self, files, builtin: bool) -> None:
+        production = self._production() if builtin else None
+        try:
+            server, text, taken = training_io.start_server(files, production) if builtin else (None, None, ())
         except OSError as error:
             self.iface.messageBar().pushWarning(tr("練習モード"), str(error))
             return
@@ -184,7 +210,8 @@ class Training(Feature):
         # In the production's audit log, then nothing more until it ends.
         if self.host.audit is not None:
             self.host.audit.practise(True, {"builtin": builtin, "config": "" if builtin else source})
-        training_io.begin(training_io.TrainingSession(files, source, builtin, server))
+        training_io.begin(training_io.TrainingSession(files, source, builtin, server, config_text=text, production=production,
+                                                      from_production=taken))
         self.context.switch_files()
         self.context.reload()
         self._forget_lists()
@@ -195,7 +222,8 @@ class Training(Feature):
             self._add_basemap(files)
         self._screens(True)
         self._entries_state()
-        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。終えるときは地図の上の「練習モードを終える」"),
+        read = tr("{m}は本番から読んでいます（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
+        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
 
     def _add_basemap(self, files) -> None:
@@ -277,7 +305,7 @@ class Training(Feature):
 
         def again() -> None:
             try:
-                session.server = training_io.start_server(files)
+                session.server, session.config_text, session.from_production = training_io.start_server(files, session.production)
             except OSError as error:
                 self.iface.messageBar().pushWarning(tr("練習モード"), str(error))
                 return
@@ -311,9 +339,13 @@ class Training(Feature):
                 window.statusBar().addPermanentWidget(self.mark)
             if self.marks is None:
                 self.marks = TitleMarks(window, list(self.docks.values()))
-            self.host.block_entries({tr(t): tr(NOTE) for t in NOT_IN_PRACTICE})
+            notes = {tr(t): tr(NOTE) for t in NOT_IN_PRACTICE}
+            session = training_io.active()
+            if session is not None and "taxonomy" in session.from_production:
+                notes[tr(TAXONOMY_EDIT)] = tr(TAXONOMY_NOTE)
+            self.host.block_entries(notes)
             for name, dock in self.docks.items():
-                if self.host.dock_entry_text(name) in {tr(t) for t in NOT_IN_PRACTICE}:
+                if self.host.dock_entry_text(name) in notes:
                     dock.hide()
             QgsProject.instance().isDirtyChanged.connect(self._keep_clean)
             return
