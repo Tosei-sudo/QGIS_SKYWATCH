@@ -67,7 +67,8 @@ def plugin(tmp_path, monkeypatch, made, request):
                                                                           if training_io.active() is not None else mine()))
     # The real network (the practice server answers over HTTP on 127.0.0.1).
     monkeypatch.setattr(PluginContext, "esri", lambda self: EsriClient(qgis_transport(settings.auth_for)))
-    monkeypatch.setattr(training_mode.StartDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    # (The courses are not offered after it here: tests/test_qgis_tutorial.py runs them.)
+    monkeypatch.setattr(training_mode.StartDialog, "exec", lambda self: self.tutorial.setChecked(False) or QDialog.DialogCode.Accepted)
     # (An earlier test's project changes would be asked about: 「保存しますか」 waits for an answer.)
     QgsProject.instance().removeAllMapLayers()
     QgsProject.instance().setDirty(False)
@@ -100,7 +101,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     p, iface = plugin
     training = _feature(p)
     # The menu's first group.
-    assert iface.menu_tree()[0] == ("練習モード", ["練習モードを始める", "練習データを最初に戻す…", "練習モードを終える"])
+    assert iface.menu_tree()[0] == ("練習モード", ["練習モードを始める", "チュートリアル…", "練習データを最初に戻す…", "練習モードを終える"])
     assert settings.local_gpkg_path() == str(tmp_path / "production.gpkg")
     p.role_keeper.choose(["OBSERVER"])
     roles_before = QgsSettings().value(roles_io.KEY)

@@ -13,6 +13,12 @@
      "icon": "training.svg:1602ff4708d4"
     },
     {
+     "text": "チュートリアル…",
+     "name": "SatObsTrainingTutorial",
+     "checkable": false,
+     "icon": "training_tutorial.svg:a935be19e4d4"
+    },
+    {
      "text": "練習データを最初に戻す…",
      "name": "SatObsTrainingReset",
      "checkable": false,
@@ -495,6 +501,7 @@
   "スペクトル",
   "スワイプ比較",
   "ダッシュボード",
+  "チュートリアル…",
   "ツールバーのボタン…",
   "データ分析",
   "ドックのレイアウト",

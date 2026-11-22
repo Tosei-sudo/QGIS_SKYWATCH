@@ -608,7 +608,10 @@ class RequestForm(QDialog):
         g = QgsGeometry.fromRect(extent)
         g.transform(self._to_wgs())
         box = g.boundingBox()
-        w, s, e, n = box.xMinimum(), box.yMinimum(), box.xMaximum(), box.yMaximum()
+        self.set_box(box.xMinimum(), box.yMinimum(), box.xMaximum(), box.yMaximum())
+
+    def set_box(self, w: float, s: float, e: float, n: float) -> None:
+        """The area a box (west, south, east, north in longitude / latitude), as when dragged with 「地図で矩形」."""
         self.rings = [[[w, s], [e, s], [e, n], [w, n], [w, s]]]
         self.shape_kind = "範囲"
         self.box_button.setChecked(False)
