@@ -1,6 +1,32 @@
 {
  "menu": [
   {
+   "text": "練習モード",
+   "name": "",
+   "checkable": false,
+   "icon": "",
+   "entries": [
+    {
+     "text": "練習モードを始める",
+     "name": "SatObsTrainingStart",
+     "checkable": false,
+     "icon": "training.svg:1602ff4708d4"
+    },
+    {
+     "text": "練習データを最初に戻す…",
+     "name": "SatObsTrainingReset",
+     "checkable": false,
+     "icon": "training_reset.svg:448461795e0d"
+    },
+    {
+     "text": "練習モードを終える",
+     "name": "SatObsTrainingEnd",
+     "checkable": false,
+     "icon": "training_end.svg:4ec669582aee"
+    }
+   ]
+  },
+  {
    "text": "撮像計画",
    "name": "",
    "checkable": false,
@@ -505,6 +531,9 @@
   "移動体（AIS・ADS-B）",
   "移動目標撮像計画…",
   "簡易オルソ補正…",
+  "練習データを最初に戻す…",
+  "練習モードを始める",
+  "練習モードを終える",
   "背景地図",
   "自分の記録…",
   "自動位置合わせ…",
@@ -3091,6 +3120,7 @@
   "shapeReceiver",
   "textAssist",
   "timeZones",
+  "training",
   "userRoles",
   "watchInterval"
  ],
@@ -3238,6 +3268,7 @@
   "'startup_layers'",
   "'text_assist/on'",
   "'trained_models'",
+  "ACTIVE_KEY='mikage/training/active'",
   "CHANGED_KEY='rasterSpeed/qgisChanged'",
   "DONE_KEY='rasterSpeed/qgisDone'",
   "KEY='last_inputs'",
@@ -3254,12 +3285,14 @@
   "OPTIONS_KEY='rasterSpeed/options'",
   "PENDING_KEY='mikage/rolesPending'",
   "PORTAL_KEY='mikage/webmap_portal'",
+  "PORT_KEY='mikage/training/port'",
   "PREFIX='SatObsKey'",
   "PREFIX='analysis_'",
   "PREFIX='mikage-audit'",
   "PREFIX='mikage/'",
   "RECENT_KEY='mikage/gp_recent'",
   "ROOT='mikage/listViews'",
+  "SAVED_KEY='mikage/training/saved'",
   "f'request_groups/{where}'"
  ]
 }

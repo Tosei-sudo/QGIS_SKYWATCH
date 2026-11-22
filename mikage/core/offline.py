@@ -229,6 +229,21 @@ class OfflineWork:
                 self._db.close()
                 self._db = None
 
+    def use_file(self, path: str) -> None:
+        """
+        Another file from now on (練習モード switched on or off): this one
+        closed, the servers' state and the choice to work offline forgotten
+        (they were the other file's servers); the listeners told.
+        """
+        self.close()
+        with self.lock:
+            self.path = path
+            self.down_hosts = {}
+            self.forced = False
+            self._strikes = {}
+            self._puts = 0
+        self._changed()
+
     def _changed(self) -> None:
         for listener in list(self.listeners):
             try:

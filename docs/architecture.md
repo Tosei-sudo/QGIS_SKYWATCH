@@ -12,7 +12,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 | 層 | 中身 | import してよいもの |
 | --- | --- | --- |
-| `core/` | 純 Python（QGIS・Qt なし）。機能ごとのパッケージ（`core/ai`・`catalog`・`enhance`・`obs`・`plan`・`request`）と共通基盤 | core だけ |
+| `core/` | 純 Python（QGIS・Qt なし）。機能ごとのパッケージ（`core/ai`・`catalog`・`enhance`・`obs`・`plan`・`request`・`training`）と共通基盤 | core だけ |
 | `qgis_io/` | QGIS との出入り（通信・QgsTask・個人設定・レイヤー） | core |
 | `ui/` | ドック・ダイアログ | qgis_io・core |
 | `features/` | 機能の登録票（ドック・メニュー・右クリック・先読み・つなぎ） | ui・qgis_io・core（ほかの機能の登録票は不可） |

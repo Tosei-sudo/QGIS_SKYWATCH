@@ -69,7 +69,8 @@ def test_every_role_has_its_buttons_and_they_are_menu_entries_it_uses(plugin):
     admin = {t for t in texts if not roles.allows(t, [])}
     assert admin >= {"接続と表の点検…", "監査ログ…", "Python API リファレンス…"}
     assert sorted(plugin.toolbar_buttons.entries) == sorted(texts - admin)
-    assert list(plugin.toolbar_buttons.entries)[:3] == ["撮像計画", "衛星パス", "移動目標撮像計画…"]
+    assert list(plugin.toolbar_buttons.entries)[:6] == ["練習モードを始める", "練習データを最初に戻す…", "練習モードを終える",
+                                                        "撮像計画", "衛星パス", "移動目標撮像計画…"]
 
 
 def test_choosing_a_role_changes_the_buttons(plugin):

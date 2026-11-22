@@ -558,10 +558,51 @@ def add_new_image(store, files: str, base: str) -> str:
 
 
 def write_config(path: str, base: str, files: str, token: Optional[str] = None) -> None:
-    """A settings file (JSONC) whose services are the mock's."""
+    """A settings file (JSONC) whose services are the mock's (scripts/mock_esri/mock_esri.py)."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(config_text(base, files, token))
+
+
+#: The optical system's 採否 file as the practice's system would answer (for 「結果ファイルの取り込み」).
+RESULT_FILE = """
+      "resultFile": { "format": "csv", "encoding": "cp932",
+        "columns": [ { "key": "依頼ID", "target": "id" },
+                     { "key": "判定", "target": "result", "map": { "○": "採用", "×": "不採用" } },
+                     { "key": "理由", "target": "reason" },
+                     { "key": "撮像予定", "target": "plannedAt", "format": "%Y/%m/%d %H:%M" } ] },"""
+#: The place search on the internet (地理院), left out of the practice's settings.
+GSI_GEOCODER = ',\n    { "type": "gsi", "label": "地理院", "url": "https://msearch.gsi.go.jp/address-search/AddressSearch" }'
+TRAINING_HEAD = ("// 練習モードの設定ファイル（MIKAGE が練習を始めるたびに書き出す。手で直しても次に上書きされる）\n"
+                 "// サービスはすべてこの PC の中の練習用サーバー。本番の URL・フォルダーは入っていない\n")
+
+
+def training_config(base: str, files: str, folder: str) -> str:
+    """
+    練習モード's settings file (JSONC): every service the practice server's
+    (`base`), every file in the practice folder `folder` (the day's request
+    files, the systems' result files, the 通報 file). No production URL, no
+    folder outside it, no service on the internet (the 地理院 place search
+    left out), no `userRoles` (担当 switched only on this computer while
+    practising) and no `auditLog` (the practice is not audited: the plugin
+    pauses the log while practising).
+    """
+    text = config_text(base, files, label="練習用", alerts=os.path.join(folder, "通報", "alert_{now:%Y%m%d}.txt"))
+    text = TRAINING_HEAD + text.split("\n", 2)[2]
+    exports = json.dumps(os.path.join(folder, "撮像計画ファイル").replace("\\", "/"), ensure_ascii=False)
+    text = text.replace('"system": "MOCK-OPT",', f'"system": "MOCK-OPT", "folder": {exports},' + RESULT_FILE, 1)
+    text = text.replace('"system": "MOCK-SAR",', f'"system": "MOCK-SAR", "folder": {exports},', 1)
+    text = text.replace(GSI_GEOCODER, "", 1)
+    lines = text.split("\n")
+    at = next(i for i, line in enumerate(lines) if line.startswith('  "userRoles":'))
+    del lines[at - 1:at + 1]  # its comment and itself
+    return "\n".join(lines)
+
+
+def config_text(base: str, files: str, token: Optional[str] = None, label: str = "モック", alerts: Optional[str] = None) -> str:
+    """The settings file's text whose services are the server's (`label` begins their names)."""
     rest = f"{base}/arcgis/rest/services"
     tk = f', "token": "{token}"' if token else ""
-    alert_file = json.dumps(os.path.join(files, "alerts", "alert_{now:%Y%m%d}.txt"), ensure_ascii=False)
+    alert_file = json.dumps(alerts or os.path.join(files, "alerts", "alert_{now:%Y%m%d}.txt"), ensure_ascii=False)
     text = f"""// mock_esri.py が書き出した設定ファイル（起動のたびに上書き）。プラグインの「設定…」でこのファイルを選ぶ
 // サービスはすべて {rest} のモック。手で直すならコピーしてから
 {{
@@ -673,5 +714,4 @@ def write_config(path: str, base: str, files: str, token: Optional[str] = None) 
   "editTracking": {{ "userVariable": "USERNAME" }}
 }}
 """
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    return text if label == "モック" else text.replace("モック", label)

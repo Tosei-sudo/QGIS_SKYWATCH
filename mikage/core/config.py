@@ -18,6 +18,7 @@ from .ai.transfer import DetectionOutput, detection_output_of
 from .ai_results import AiResultSource, ai_result_source_of
 from .auth import ArcgisPortalConfig, arcgis_portal_of
 from .audit import DEFAULT_AUDIT, AuditSettings, audit_log_of
+from .training.api import DEFAULT_TRAINING, TrainingSettings, training_settings_of
 from .edit_stamp import DEFAULT_EDIT_TRACKING, EditTracking, edit_tracking_of
 from .basemaps import DEFAULT_BASE_MAPS, BaseMapConfig, base_maps_of, default_base_map_of
 from .catalog import CatalogConfig, catalog_of
@@ -140,6 +141,8 @@ class PluginConfig:
     column_drag: bool = True
     #: `shapeReceiver`: shapes taken from AutoMap, links and programs on this computer (127.0.0.1) and shown on the map.
     shape_receiver: ReceiverSettings = DEFAULT_RECEIVER
+    #: `training`: 練習モード (false hides it; `config`: the organisation's own practice settings file).
+    training: TrainingSettings = DEFAULT_TRAINING
     #: `analysisCacheMinutes`: how long 「データ分析」 answers the same Esri query from memory (core/analysis_cache.py; 0: never).
     analysis_cache_minutes: float = ANALYSIS_CACHE_MINUTES
 
@@ -360,6 +363,7 @@ SECTIONS = (
     Section("events", "events", events_settings_of),
     Section("interests", "interests", interests_settings_of),
     Section("userRoles", "user_roles", user_roles_settings_of),
+    Section("training", "training", training_settings_of),
 )
 #: The keys this plugin reads.
 KEYS = tuple(s.key for s in SECTIONS)

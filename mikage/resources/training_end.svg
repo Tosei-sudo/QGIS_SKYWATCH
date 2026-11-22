@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 練習モードを終える: an amber mortarboard with a stop square -->
+  <path d="M2 11 16 5l14 6-14 6z" fill="#fef3c7" stroke="#d97706" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M8 14v5c0 2 3.6 3.6 8 3.6s8-1.6 8-3.6v-5" fill="none" stroke="#d97706" stroke-width="2"/>
+  <rect x="19" y="21" width="9" height="9" rx="1.5" fill="#475569"/>
+</svg>

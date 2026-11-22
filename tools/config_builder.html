@@ -194,7 +194,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "handover",
   "events",
   "interests",
-  "userRoles"
+  "userRoles",
+  "training"
  ],
  "roles": {
   "imageCatalogs": [
@@ -1899,6 +1900,13 @@ const SPEC = [
     { key: "timeZones", label: "タイムゾーンの規則", doc: "日時のタイムゾーンtimezonetimezones", help: "URL に合うサービスの日時の本当のタイムゾーン。各項目の timeZone が優先。",
       field: I("timeZones", "規則", [LABEL, T("match", "URL（正規表現）", { req: true }), T("timeZone", "タイムゾーン", { req: true, ph: "Asia/Tokyo" }), T("serviceTimeZone", "サービスの申告")], { title: (it) => it.label || it.match }) },
   ] },
+  { group: "練習モード", keys: [
+    { key: "training", label: "練習モード", doc: "練習モードtraining", help: "本番のサーバーから切り離して練習用のデータで動く MIKAGE（メニュー「練習モード」）。書かなければ内蔵の見本（東京湾・横須賀。この PC の中の練習用サーバー）で練習できる。false で練習モードを出さない。config で、組織の練習用サービス（SDE 上の練習用の表・実際の画像など）を指す設定ファイルを使う。",
+      field: O("training", "練習モード", [
+        B("enabled", "練習モードを出す", { help: "既定 true（false で出さない。training: false と同じ）" }),
+        T("config", "組織の練習用の設定ファイル", { ph: "\\\\fileserver\\mikage\\config.training.jsonc", help: "パスか URL。相対パスはこの設定ファイルのフォルダから。なしで内蔵の見本" }),
+      ]) },
+  ] },
   { group: "一覧", keys: [
     { key: "columnDrag", label: "列の見出しのドラッグ", doc: "一覧のビュー列並べ替え絞り込みの保存", help: "ドックの一覧の列を見出しのドラッグで並べ替えられるか。false でドラッグでは動かず、見出しの右クリックのメニュー（この列を左へ・右へ・先頭へ・末尾へ、列の表示と順番…）だけで並べ替える。",
       field: B("columnDrag", "ドラッグで並べ替える", { help: "既定 true" }) },
@@ -1943,6 +1951,7 @@ const DOC_FILES = {
   "衛星名の対応表satellitealiases": "docs/features/plan.md",
   "複素-sar-画像sicdの表示compleximages": "docs/features/images.md",
   "観測記録": "docs/features/observations.md",
+  "練習モードtraining": "docs/features/screen.md",
   "観測記録のエクスポートobservationexports": "docs/features/observations.md",
   "起動時のレイヤー": "docs/features/map.md",
   "通報注目の記録alertreports": "docs/features/observations.md",

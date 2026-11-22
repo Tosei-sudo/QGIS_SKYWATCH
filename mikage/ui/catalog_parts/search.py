@@ -194,6 +194,17 @@ class SearchPart:
         self._redraw()
         self.load_work()
 
+    def forget_list(self) -> None:
+        """The list emptied, its footprints off the map (練習モード started or ended: its images are of the other server)."""
+        self.reference = None
+        self.similar.hide()
+        self._shown_catalog = None
+        self._listed = None
+        self._show_more()
+        self.model.set_records(None, [])
+        self._redraw()
+        self.status.setText("")
+
     @property
     def records(self) -> list[CatalogRecord]:
         return list(self.model.records)

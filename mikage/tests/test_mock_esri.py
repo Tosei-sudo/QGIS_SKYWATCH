@@ -1,14 +1,13 @@
 """
-scripts/mock_esri: the Esri stand-in for development, driven over HTTP by the
+The Esri stand-in (練習モード's server, mikage/core/training/server.py; its
+command line scripts/mock_esri/mock_esri.py), driven over HTTP by the
 plugin's own Esri code (EsriClient, catalog search, stores) with the settings
 file it writes.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 import threading
 import time
 import urllib.request
@@ -26,21 +25,8 @@ from mikage.core.obs.model import Observation
 from mikage.core.obs.stores import EsriAreaStore, EsriObservationStore, EsriTaxonomyStore
 from mikage.core.plan.satellites import satellite_of
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-MOCK = os.path.join(ROOT, "scripts", "mock_esri")
-
-
-def _load(name: str):
-    if MOCK not in sys.path:
-        sys.path.insert(0, MOCK)
-    spec = importlib.util.spec_from_file_location(name, os.path.join(MOCK, f"{name}.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-mock_esri = _load("mock_esri")
-sample = _load("sample")
+from mikage.core.training import sample
+from mikage.core.training import server as mock_esri  # (scripts/mock_esri/mock_esri.py is its command line)
 
 
 def transport(url: str, form: dict[str, str]) -> bytes:

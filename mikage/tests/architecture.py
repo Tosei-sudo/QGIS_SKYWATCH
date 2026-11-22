@@ -13,7 +13,7 @@ Rules (docs/architecture.md):
   module of `features` no other feature's (only `features.base`).
 - R2 a feature's door: a module outside a feature package of `core`
   (`core/plan`, `core/request`, `core/obs`, `core/catalog`, `core/enhance`,
-  `core/ai`) imports it only through its `api` module.
+  `core/ai`, `core/training`) imports it only through its `api` module.
 - R3 no reaching in: no `other._name` (another object's private member) in
   `ui`, `features` and plugin.py.
 - R4 the shared base knows no feature: the kernel modules (KERNEL) import
@@ -39,7 +39,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "architecture_baseline.json")
 
 #: The feature packages of `core`: imported from outside only through `<package>.api`.
-FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core.plan", "core.request")
+FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core.plan", "core.request", "core.training")
 
 #: The shared base (共通基盤): imports no feature and nothing above it.
 KERNEL = (

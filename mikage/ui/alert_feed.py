@@ -27,6 +27,7 @@ from ..core.obs.api import build_mail
 from ..core.obs.api import AlertLogRepository, AlertSettings, LogRow, Moment
 from ..core.time_zone import format_time
 from ..core.time_zone import UTC
+from ..qgis_io import training_io
 from ..qgis_io.tasks import run_task
 from .docks import plain_label, plain_tip
 from .flow_layout import FlowLayout
@@ -311,10 +312,17 @@ class AlertFeed(QWidget):
             self.status.setText(self.tr("メールにする通報がない"))
             return
         draft = build_mail(s, rows, Moment(now=_now(), user=edit_stamp.user_name()))
+        m = s.mail
+        if training_io.active() is not None:
+            # 練習モード: shown, the mail program not opened (nothing practised leaves the computer); not audited.
+            from .training_mode import PracticeMail
+
+            PracticeMail(self.window(), m.to, m.cc, m.bcc, draft.subject, draft.text).exec()
+            self.status.setText(self.tr("練習モードなので、メールの中身を画面に出した（{n} 件）").format(n=draft.total))
+            return
         opened = bool(QDesktopServices.openUrl(QUrl.fromEncoded(draft.url.encode("ascii"))))
         if draft.cut or not opened:
             QApplication.clipboard().setText(draft.text)
-        m = s.mail
         audit.record("mail", "alert-feed", ", ".join(m.to), result="ok" if opened else "error", count=len(rows),
                      detail={"cc": ", ".join(m.cc), "bcc": ", ".join(m.bcc), "subject": draft.subject, "inBody": draft.shown,
                              "linkLength": len(draft.url)},

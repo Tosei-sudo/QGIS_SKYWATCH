@@ -24,7 +24,7 @@ except ImportError:  # Qt5
 from .core import win64
 from .core.preload import StartupClock
 from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
-from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests
+from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests, training
 from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
 from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm
@@ -47,6 +47,7 @@ MENU = "MIKAGE"
 #: The plugin's menu by area (tsudo, 2026-11-07): each group a submenu, its entries by their text in this order
 #: (None: a separator). The entries after the groups stay in the menu itself, 「設定…」 last.
 MENU_GROUPS = [
+    ("練習モード", ["練習モードを始める", "練習データを最初に戻す…", "練習モードを終える"]),
     ("撮像計画", ["撮像計画", "衛星パス", "移動目標撮像計画…", None, "雲量マップ", "雲量を属性に付与…"]),
     ("撮像依頼", ["撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "年間撮像上限…", "衛星の障害情報…"]),
     ("観測記録", ["観測記録", "自分の記録…", "分類体系の編集", "通報文の作成…", "通報記録の確認…", "観測記録のエクスポート…", "観測記録の一括取込み…", "分担…", "引き継ぎメモ…", "移動体（AIS・ADS-B）", "ダッシュボード"]),
@@ -86,7 +87,7 @@ MAP_MENU = ("ここを撮像計画", "この地点の新着画像を監視…", 
 PRELOAD_ORDER = ("satellites", "requests", "events", "offlineCache")
 #: The features (mikage/features): each phase (start, docks, wiring, entries, unload) goes through them in this order.
 FEATURES: tuple[type[Feature], ...] = (
-    rendering.Rendering, platform.Platform, images.Images, plan.Plan, observations.Observations, requests.Requests,
+    rendering.Rendering, platform.Platform, training.Training, images.Images, plan.Plan, observations.Observations, requests.Requests,
     events.Events, analysis.Analysis, ai.Ai, maps.Maps, enhance.Enhance, layers.Layers,
     # 文で操作 last: its operations open the others' docks and entries.
     command.Command,
@@ -140,6 +141,10 @@ class MikagePlugin:
         self.role_keeper: Optional[RoleKeeper] = None
         #: Each dock's feature: its menu entry's text (core/roles.FEATURES).
         self._dock_features: dict[str, str] = {}
+        #: Entries (by their text) hidden whatever the roles: 練習モード's when the settings file's `training` is false.
+        self.hidden_entries: set[str] = set()
+        #: Entries that cannot be used now (block_entries: 練習モード): their text before, and whether it was a dock's title.
+        self._blocked: dict = {}
         self._algorithms_allowed: Optional[tuple] = None
         self._qgis_started = False
         self._startup_told = False
@@ -394,7 +399,33 @@ class MikagePlugin:
 
     def allows(self, feature: str) -> bool:
         """Whether the roles in use (担当) have `feature` (a menu entry's text or a dock's key, core/roles.FEATURES)."""
+        if feature in self.hidden_entries:
+            return False
         return self.role_keeper is None or self.role_keeper.allows(feature)
+
+    def block_entries(self, notes: dict) -> None:
+        """
+        The menu entries (by their text) that cannot be used now, disabled with why after their text
+        ({text: note}; {}: all of them usable again). Their buttons are the same actions: disabled too.
+        """
+        for action, (text, titled) in list(self._blocked.items()):
+            if self._entry_text(action) not in notes:
+                action.setText(text)
+                action.setEnabled(True)
+                if not titled:
+                    self._entry_titles.pop(action, None)
+                del self._blocked[action]
+        for action in self._menu_entries:
+            text = self._entry_text(action)
+            if text in notes and action not in self._blocked:
+                self._blocked[action] = (action.text(), action in self._entry_titles)
+                self._entry_titles.setdefault(action, text)
+                action.setText(text + notes[text])
+                action.setEnabled(False)
+
+    def dock_entry_text(self, name: str) -> str:
+        """A dock's menu entry's text (its title, its 担当 feature), "" for none of that name."""
+        return self._dock_features.get(name, "")
 
     def allowed_docks(self) -> dict:
         """The docks the roles in use have (the layouts and 「担当と個人設定」 open only these)."""
