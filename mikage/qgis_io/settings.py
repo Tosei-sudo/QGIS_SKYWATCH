@@ -13,6 +13,7 @@ from typing import Optional
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig
 
+from . import training_io
 from .qsettings import PREFIX, pref, set_pref  # noqa: F401 (PREFIX, pref and set_pref: read from here too)
 
 # Each feature's own (qgis_io/prefs): read through here as before.
@@ -63,8 +64,8 @@ def config_locked() -> bool:
     return bool(bundled_config()) and os.path.isfile(os.path.join(PLUGIN_DIR, LOCK_NAME))
 
 
-def effective_config_source() -> tuple[str, bool]:
-    """The settings file to read: the one chosen, else the shipped one; always the shipped one when locked. (source, shipped)"""
+def production_config_source() -> tuple[str, bool]:
+    """The settings file of the production (練習モード or not): the one chosen, else the shipped one; the shipped one when locked."""
     if config_locked():
         return bundled_config(), True
     chosen = config_source()
@@ -72,6 +73,17 @@ def effective_config_source() -> tuple[str, bool]:
         return chosen, False
     shipped = bundled_config()
     return shipped, bool(shipped)
+
+
+def effective_config_source() -> tuple[str, bool]:
+    """
+    The settings file to read: 練習モード's while practising (qgis_io/training_io.py), else the production's
+    (`production_config_source`). (source, shipped)
+    """
+    session = training_io.active()
+    if session is not None:
+        return session.config_source, False
+    return production_config_source()
 
 
 def set_config_source(source: str) -> None:
@@ -170,26 +182,41 @@ def profile_folder() -> str:
     return folder
 
 
+def _practice():
+    """練習モード's files while practising (each local file below is the practice's own then), else None."""
+    session = training_io.active()
+    return session.files if session is not None else None
+
+
 def local_gpkg_path() -> str:
     """The local GeoPackage of observations, checked areas and the classification."""
+    practice = _practice()
+    if practice is not None:
+        return practice.gpkg
     return _get("local_gpkg") or os.path.join(profile_folder(), "observations.gpkg")
 
 
 def offline_path() -> str:
     """The file of offline work (the cache of reads and the changes waiting to be sent): never the local GeoPackage."""
+    practice = _practice()
+    if practice is not None:
+        return practice.offline
     return _get("offline_file") or os.path.join(profile_folder(), "offline_work.sqlite")
 
 
 def place_cache_path() -> str:
     """The file of the named areas and countries looked up (地名・国の控え, core/obs/place_cache.py)."""
-    return os.path.join(profile_folder(), "place_cache.sqlite")
+    practice = _practice()
+    return practice.place_cache if practice is not None else os.path.join(profile_folder(), "place_cache.sqlite")
 
 
 def opened_images_path() -> str:
     """The file of the images opened from a catalog (開いた画像の履歴, core/catalog/opened.py): this computer's paths."""
-    return os.path.join(profile_folder(), "opened_images.json")
+    practice = _practice()
+    return practice.opened_images if practice is not None else os.path.join(profile_folder(), "opened_images.json")
 
 
 def thumbnail_folder() -> str:
     """Where the 新着画像 cards keep the thumbnails they fetched (qgis_io/thumbnails.py)."""
-    return os.path.join(profile_folder(), "thumbnails")
+    practice = _practice()
+    return practice.thumbnails if practice is not None else os.path.join(profile_folder(), "thumbnails")

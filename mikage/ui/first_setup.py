@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from qgis.core import QgsSettings
-from qgis.PyQt.QtCore import QCoreApplication, Qt
+from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget, QFormLayout, QGridLayout, QGroupBox, QLabel, QLineEdit,
     QMainWindow, QPushButton, QRadioButton, QVBoxLayout, QWidget,
@@ -129,7 +129,7 @@ class FirstSetupDialog(QDialog):
                  coordinates: Callable[[], Optional[object]] = lambda: None,
                  open_settings: Optional[Callable[[], None]] = None, keeper: Optional[roles_io.RoleKeeper] = None,
                  all_docks: Optional[Callable[[], dict]] = None, text_assist: Optional[object] = None,
-                 parent: QWidget | None = None):
+                 practise: Optional[Callable[[], None]] = None, parent: QWidget | None = None):
         super().__init__(parent or window)
         fit_text(self)
         self.setObjectName("SatObsFirstSetup")
@@ -246,6 +246,11 @@ class FirstSetupDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("あとで") if first else tr("キャンセル"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        if first and practise is not None:
+            # 練習モード (features/training.py): the roles chosen, then the practice data before the production's.
+            self.practise = buttons.addButton(tr("この設定で、まず練習してみる"), QDialogButtonBox.ButtonRole.ActionRole)
+            self.practise.setToolTip(tr("練習用のデータ（本番のサーバーには書き込まない）で、MIKAGE を試します"))
+            self.practise.clicked.connect(lambda: (self.accept(), QTimer.singleShot(0, practise)))
         layout.addWidget(buttons)
         self.finished.connect(lambda _r: mark_done())
 

@@ -25,7 +25,7 @@
 
 | ファイル | 内容 |
 | --- | --- |
-| [画面・メニュー・担当](docs/features/screen.md) | メニュー、使い方、ツールバーのボタン、ドックの配置、最初の設定、担当と使える機能、一覧のビュー、キーボードショートカット、入力の初期値の記憶 |
+| [画面・メニュー・担当](docs/features/screen.md) | メニュー、使い方、ツールバーのボタン、ドックの配置、最初の設定、担当と使える機能、練習モード、一覧のビュー、キーボードショートカット、入力の初期値の記憶 |
 | [画像カタログ・通知](docs/features/images.md) | 画像カタログ、通知 |
 | [撮像計画](docs/features/plan.md) | 撮像計画、移動目標撮像計画、衛星パス、雲量マップ・雲量を属性に付与 |
 | [撮像依頼](docs/features/requests.md) | 撮像依頼と日次出力 |
@@ -123,7 +123,7 @@ python3.12 scripts/help_shots/check_layout.py --out /tmp/layout --font 12  # 文
 python3 scripts/mock_esri/mock_esri.py      # http://127.0.0.1:8765 に ArcGIS フィーチャーサービスのモック（サンプルデータ入り）
 ```
 
-書き出される `scripts/mock_esri/data/config.mock.jsonc` を「設定…」で選ぶと、画像カタログ・衛星とセンサーモード・観測記録（分類体系・確認範囲）・外部AI結果・転記先・地名・撮像依頼台帳と出力履歴・通報（条件・ジオフェンス・地名・国・通報記録）・分担と引き継ぎメモ・イベントがすべてモックにつながる。詳しくは [scripts/mock_esri/README.md](scripts/mock_esri/README.md)。
+モックの中身はプラグインの練習モードのサーバー（`mikage/core/training/`）と同じ。プラグインの中で試すだけなら、メニュー「練習モード ▸ 練習モードを始める」でも同じデータで動く（[練習モード](docs/features/screen.md#練習モードtraining)）。書き出される `scripts/mock_esri/data/config.mock.jsonc` を「設定…」で選ぶと、画像カタログ・衛星とセンサーモード・観測記録（分類体系・確認範囲）・外部AI結果・転記先・地名・撮像依頼台帳と出力履歴・通報（条件・ジオフェンス・地名・国・通報記録）・分担と引き継ぎメモ・イベントがすべてモックにつながる。詳しくは [scripts/mock_esri/README.md](scripts/mock_esri/README.md)。
 
 ## ビューアとの数値比較
 

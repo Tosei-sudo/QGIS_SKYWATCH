@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 練習モードを始める: an amber mortarboard over a play triangle -->
+  <path d="M2 11 16 5l14 6-14 6z" fill="#fef3c7" stroke="#d97706" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M8 14v5c0 2 3.6 3.6 8 3.6s8-1.6 8-3.6v-5" fill="none" stroke="#d97706" stroke-width="2"/>
+  <path d="M28 12v7" stroke="#d97706" stroke-width="2" stroke-linecap="round"/>
+  <path d="M19 22.5v7.5l6.5-3.75z" fill="#d97706"/>
+</svg>

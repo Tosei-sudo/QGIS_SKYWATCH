@@ -7,7 +7,9 @@ folder that whoever audits reads).
 
 What is recorded (KINDS):
 
-- session: the plugin started / stopped (its version, QGIS's)
+- session: the plugin started / stopped (its version, QGIS's); 練習モード
+  started / ended (2026-11-22: what is done while practising is not
+  recorded, its practice server and files being apart from the production)
 - config: the settings file read (where from, its SHA-256, how many problems)
 - edit: every change sent to an Esri layer or table (applyEdits,
   addFeatures, updateFeatures, deleteFeatures…): the layer, add / update /
@@ -562,6 +564,8 @@ class AuditLog:
         self._tidied = ""
         #: (action, target, message) of an error written → [when, how many alike since, the last's time, its fields].
         self._recent_errors: dict[tuple, list] = {}
+        #: 練習モード (2026-11-22): nothing recorded while practising (its start and end are, before and after).
+        self.paused = False
         if settings is not None:
             self._configured.set()
 
@@ -578,6 +582,8 @@ class AuditLog:
         return self.settings.local_folder or self.default_folder
 
     def wants(self, kind: str) -> bool:
+        if self.paused:
+            return False
         s = self.settings
         return not self._configured.is_set() or (s.enabled and kind in s.events)
 

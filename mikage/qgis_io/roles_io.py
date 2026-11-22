@@ -130,6 +130,10 @@ class RoleKeeper(QObject):
         if not same:
             self.changed.emit()
 
+    def use_stored(self) -> None:
+        """The roles kept in the profile in use again (練習モード ended: those chosen while practising are gone)."""
+        self._use(stored_codes())
+
     # ---- choosing --------------------------------------------------------------------------------------
 
     def choose(self, codes: Sequence[str]) -> None:

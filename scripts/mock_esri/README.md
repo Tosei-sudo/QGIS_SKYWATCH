@@ -1,6 +1,8 @@
 # Esri モックサーバー（開発・試験用）
 
-ArcGIS Server / Enterprise がない環境で、プラグインを開発・確認するための **ArcGIS フィーチャーサービスのモック**。Python の標準ライブラリだけで動き、データは SQLite（`data/mock.sqlite`）に保存する（再起動しても残る）。プラグインの zip には入らない。
+ArcGIS Server / Enterprise がない環境で、プラグインを開発・確認するための **ArcGIS フィーチャーサービスのモック**。Python の標準ライブラリだけで動き、データは SQLite（`data/mock.sqlite`）に保存する（再起動しても残る）。
+
+サーバーとサンプルデータの本体は `mikage/core/training/`（`server.py`・`sample.py`）にあり、プラグインの練習モードも同じものを QGIS の中で動かす（docs/features/screen.md の「練習モード」）。このフォルダーの `mock_esri.py` はそれをコマンドで起動するだけ。
 
 プラグイン側は何も変えず、設定ファイルのサービスの URL をモックに向けるだけで切り替わる。
 

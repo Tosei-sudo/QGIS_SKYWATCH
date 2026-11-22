@@ -93,6 +93,28 @@ class FakeIface(QObject):
     def newLayerMenu(self):  # noqa: N802
         return self.new_layer_menu
 
+    def newProject(self, promptToSaveFlag=False):  # noqa: N802,N803 (QGIS's names)
+        """As QGIS: the project cleared (no question asked here), then newProjectCreated."""
+        from qgis.core import QgsProject
+
+        QgsProject.instance().clear()
+        self.newProjectCreated.emit()
+        return True
+
+    def addProject(self, path):  # noqa: N802
+        from qgis.core import QgsProject
+
+        return QgsProject.instance().read(path)
+
+    def actionSaveProject(self):  # noqa: N802
+        """Saves the project to its file (a project without one stays unsaved, as when QGIS's file dialog is cancelled)."""
+        if not hasattr(self, "_save_project"):
+            from qgis.core import QgsProject
+
+            self._save_project = QAction("プロジェクトを保存", self.window)
+            self._save_project.triggered.connect(lambda: QgsProject.instance().write() if QgsProject.instance().fileName() else None)
+        return self._save_project
+
     def actionAddFeature(self):  # noqa: N802
         return self.add_feature
 

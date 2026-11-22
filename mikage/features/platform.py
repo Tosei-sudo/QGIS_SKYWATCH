@@ -171,7 +171,9 @@ class Platform(Feature):
             self.window(), lambda: host.allowed_docks(), first=first,
             observation_dock=host.ports.observations, coordinates=lambda: host.coordinates,
             open_settings=self.open_settings, keeper=host.role_keeper, all_docks=lambda: host.docks,
-            text_assist=getattr(self.context, "text_assist", None))
+            text_assist=getattr(self.context, "text_assist", None),
+            # 「まず練習してみる」: 練習モード (features/training.py), when it is there and the settings file does not hide it.
+            practise=(lambda: host.start_training()) if hasattr(host, "start_training") and host.allows(tr("練習モードを始める")) else None)
         # The roles' toolbar buttons (the same roles again: the person's own buttons of them).
         host.setup_dialog.accepted.connect(lambda: host.toolbar_buttons.apply() if host.context is not None else None)
         host.setup_dialog.open()

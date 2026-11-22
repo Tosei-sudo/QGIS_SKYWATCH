@@ -100,9 +100,21 @@ class AuditKeeper(QObject):
         self.timer.start()
         self.dialog: Optional[AuditDialog] = None
 
+    def practise(self, on: bool, detail: Optional[dict] = None) -> None:
+        """
+        練習モード started (`on`) or ended: recorded in the production's log, and nothing recorded meanwhile
+        (the practice's settings file not applied to the log either).
+        """
+        if on:
+            audit.record("session", "training-start", detail=detail)
+            self.log.paused = True
+        else:
+            self.log.paused = False
+            audit.record("session", "training-end", detail=detail)
+
     def _config_read(self) -> None:
         c = self.context
-        if c.loading:
+        if c.loading or self.log.paused:
             return
         self.log.configure(c.config.audit_log)
         source = c.source or ""

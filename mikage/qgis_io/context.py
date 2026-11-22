@@ -301,6 +301,25 @@ class PluginContext(QObject):
             self._gpkg = open_local(settings.local_gpkg_path())
         return self._gpkg
 
+    def switch_files(self) -> None:
+        """
+        The local files again from the settings (練習モード switched on or off: qgis_io/training_io.py): the
+        offline work, the place cache and the local GeoPackage (opened again when next asked for).
+        """
+        self.offline.use_file(settings.offline_path())
+        place_cache.PLACES.use_file(settings.place_cache_path())
+        if self._gpkg is not None:
+            self._gpkg.close()
+            self._gpkg = None
+
+    def release_files(self) -> None:
+        """The local files closed (練習データを最初に戻す: the practice's are thrown away); switch_files opens them again."""
+        self.offline.close()
+        place_cache.PLACES.close()
+        if self._gpkg is not None:
+            self._gpkg.close()
+            self._gpkg = None
+
     def close(self) -> None:
         self.offline.close()
         place_cache.PLACES.close()

@@ -152,8 +152,9 @@ class NoticesDock(PluginDock):
     # --- Store ------------------------------------------------------------------------------------
 
     def store(self) -> WatchStore:
-        if self._store is None:
-            self._store = WatchStore(self.context.gpkg())
+        gpkg = self.context.gpkg()
+        if self._store is None or self._store.gpkg is not gpkg:  # (another one: 練習モード switched on or off)
+            self._store = WatchStore(gpkg)
         return self._store
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt's name)
