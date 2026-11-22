@@ -19,6 +19,15 @@ def set_overview_cache_setting(folder: str) -> None:
     set_pref("overview_cache_folder", folder)
 
 
+def overview_temp_setting() -> str:
+    """The settings file's `overviews.tempFolder` as last read ("" for the system's), swept when QGIS starts."""
+    return pref("overview_temp_folder")
+
+
+def set_overview_temp_setting(folder: str) -> None:
+    set_pref("overview_temp_folder", folder)
+
+
 def overview_cache_to_clear() -> str:
     """The overview cache folder to clear when QGIS starts next ("" for none)."""
     return pref("overview_cache_clear")

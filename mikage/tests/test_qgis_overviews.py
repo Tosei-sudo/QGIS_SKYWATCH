@@ -461,3 +461,203 @@ def test_cancel_stops_gdaladdo(tmp_path, no_cache, monkeypatch):
     assert time.monotonic() - t0 < 10 and started[0].poll() is not None
     assert seen and seen[-1] == 10 * 0.95
     assert sorted(os.listdir(tmp_path)) == ["bin", "c.tif"]
+
+
+# ---- location "temp": a temporary folder per QGIS, deleted when it closes (tsudo, 2026-11-22) ----
+
+def test_temp_location_even_when_writable(tmp_path):
+    folder = tmp_path / "w"
+    folder.mkdir()
+    path = image(folder / "img.tif")
+    before = digest(path)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    temp = tmp_path / "temp"
+    out = in_fresh_gdal(cache, f"options = OverviewOptions(location='temp', temp_folder={str(temp)!r})\n"
+                               "r = o.build_external(" + repr(path) + ", options)\n"
+                               "session = o.temp_folder(options, make=False)\n"
+                               f"n = count({path!r})\n"
+                               "again = o.build_external(" + repr(path) + ", options).kind\n"
+                               "size = o.temp_size(options)\n"
+                               "o.current = options\n"
+                               "left = o.end_session()\n"
+                               "gone = not os.path.exists(session)\n"
+                               # Next time (the .ovr gone), quietly none: built again into this QGIS's folder.
+                               f"m = count({path!r})\n"
+                               "r2 = o.build_external(" + repr(path) + ", options)\n"
+                               f"print(json.dumps([r.kind, os.path.dirname(r.ovr) == session, n, again, size[0], left, gone, m, r2.kind, count({path!r})]))")
+    assert out == [overviews_io.TEMPORARY, True, 4, HAS_OVERVIEWS, 1, 0, True, 0, overviews_io.TEMPORARY, 4]
+    # Nothing beside the image; the cache keeps only GDAL's index and the .aux.xml naming the .ovr.
+    assert sorted(os.listdir(folder)) == ["img.tif"] and digest(path) == before
+    names = os.listdir(cache)
+    assert "gdal_pam_proxy.dat" in names and not any(n.endswith(".ovr") for n in names)
+    sessions = os.listdir(temp)
+    assert len(sessions) == 1 and re.match(r"^mikage-\d+-[0-9a-f]{8}$", sessions[0])
+    assert [n for n in os.listdir(temp / sessions[0]) if n.endswith(".ovr")] == [overviews_io.cached_ovr_name(path)]
+
+
+def test_temp_location_without_cache(tmp_path, no_cache):
+    path = image(tmp_path / "n.tif")
+    options = OverviewOptions(location="temp", temp_folder=str(tmp_path / "t"))
+    assert build_external(path, options).kind == overviews_io.NO_CACHE
+    assert sorted(os.listdir(tmp_path)) == ["n.tif"]
+
+
+def test_temp_session_name_and_running(monkeypatch):
+    name = overviews_io.session_name()
+    assert re.match(rf"^mikage-{os.getpid()}-[0-9a-f]{{8}}$", name)
+    # Kept in the environment: a reloaded plugin (module read again) keeps the same folder; another process does not.
+    assert overviews_io.session_name() == name and os.environ[overviews_io.SESSION_ENV] == name
+    monkeypatch.setenv(overviews_io.SESSION_ENV, "mikage-1-0123abcd")
+    assert overviews_io.session_name() not in (name, "mikage-1-0123abcd")
+    monkeypatch.setenv(overviews_io.SESSION_ENV, name)
+    assert overviews_io.process_running(os.getpid())
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    assert not overviews_io.process_running(ended.pid) and not overviews_io.process_running(0)
+
+
+def test_sweep_temp_keeps_running_ones(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    running = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        mine = overviews_io.session_name()
+        names = {
+            "dead": f"mikage-{ended.pid}-0123abcd",
+            "running": f"mikage-{running.pid}-0123abcd",
+            "mine": mine,
+            # An earlier QGIS that had this one's process id.
+            "same id": f"mikage-{os.getpid()}-ffffffff",
+        }
+        for name in names.values():
+            (root / name).mkdir()
+            (root / name / "x.tif.ovr").write_bytes(b"x")
+        # Others in the folder are never touched.
+        (root / "mikage-notes").mkdir()
+        (root / "mikage-123-0123abcd.txt").write_text("x")
+        assert overviews_io.sweep_temp(str(root)) == 2
+        assert sorted(os.listdir(root)) == sorted([names["running"], mine, "mikage-notes", "mikage-123-0123abcd.txt"])
+        assert overviews_io.sweep_temp(str(tmp_path / "none")) == 0
+    finally:
+        running.kill()
+        running.wait()
+
+
+def test_temp_swept_at_start_and_remembered(tmp_path, monkeypatch):
+    import tempfile
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "system"))
+    monkeypatch.setattr(overviews_io, "default_cache_folder", lambda: str(tmp_path / "default"))
+    ended = subprocess.Popen([sys.executable, "-c", "pass"])
+    ended.wait()
+    left = f"mikage-{ended.pid}-0123abcd"
+    system = tmp_path / "system" / "MIKAGE" / "overviews" / left
+    custom = tmp_path / "custom" / left
+    for folder in (system, custom):
+        folder.mkdir(parents=True)
+        (folder / "a.tif.ovr").write_bytes(b"x")
+    gdal.SetConfigOption("GDAL_PAM_PROXY_DIR", None)
+    try:
+        # The settings file's tempFolder is remembered for the next start (its variables filled in then).
+        monkeypatch.setenv("MIKAGE_TEST_ROOT", str(tmp_path))
+        overviews_io.configure_cache(OverviewOptions(location="temp", temp_folder="%MIKAGE_TEST_ROOT%/custom"))
+        assert settings.overview_temp_setting() == "%MIKAGE_TEST_ROOT%/custom"
+        overviews_io.start_cache()
+        assert not system.exists() and not custom.exists()
+    finally:
+        gdal.SetConfigOption("GDAL_PAM_PROXY_DIR", None)
+        settings.set_overview_temp_setting("")
+        settings.set_overview_cache_setting("")
+        overviews_io.current = OverviewOptions()
+
+
+def test_cache_folder_with_variables(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIKAGE_TEST_ROOT", str(tmp_path))
+    gdal.SetConfigOption("GDAL_PAM_PROXY_DIR", None)
+    try:
+        assert overviews_io.configure_cache(OverviewOptions(cache_folder="%MIKAGE_TEST_ROOT%/c")) is None  # none in use yet
+        assert overviews_io.start_cache() == str(tmp_path / "c") and (tmp_path / "c").is_dir()
+        # The same folder written another way: no restart asked.
+        assert overviews_io.configure_cache(OverviewOptions(cache_folder="%MIKAGE_TEST_ROOT%/c")) is None
+    finally:
+        gdal.SetConfigOption("GDAL_PAM_PROXY_DIR", None)
+        settings.set_overview_cache_setting("")
+        overviews_io.current = OverviewOptions()
+
+
+def test_end_session_deletes_this_qgis_folders_only(tmp_path):
+    options = OverviewOptions(location="temp", temp_folder=str(tmp_path / "a"))
+    first = overviews_io.temp_folder(options)
+    # tempFolder changed while QGIS runs: both go.
+    second = overviews_io.temp_folder(OverviewOptions(location="temp", temp_folder=str(tmp_path / "b")))
+    other = tmp_path / "a" / "mikage-1-0123abcd"
+    for folder in (first, second, str(other)):
+        os.makedirs(folder, exist_ok=True)
+        open(os.path.join(folder, "x.tif.ovr"), "wb").close()
+    overviews_io.current = options
+    try:
+        assert overviews_io.temp_size(options) == (1, 0)
+        assert overviews_io.end_session() == 0
+        assert not os.path.exists(first) and not os.path.exists(second) and other.is_dir()
+        assert overviews_io.temp_size(options) == (0, 0)
+    finally:
+        overviews_io.current = OverviewOptions()
+
+
+def test_temp_message(tmp_path, monkeypatch):
+    shown = []
+
+    class Bar:
+        def pushMessage(self, title, text, level, duration):  # noqa: N802 (QGIS's name)
+            shown.append(text)
+
+    monkeypatch.setattr(overviews_io, "reload_layers", lambda path: 0)
+    monkeypatch.setattr(overviews_io, "point_to_overviews", lambda path, ovr: None)
+    q = OverviewQueue()
+    q.message_bar = Bar()
+    q._current = str(tmp_path / "t.tif")
+    q._ended(overviews_io.Outcome(overviews_io.TEMPORARY, q._current, (2,), str(tmp_path / "x.ovr")), None)
+    assert shown == ["t.tif のピラミッドを一時フォルダに作成（QGIS を閉じると消去）"]
+
+
+def test_settings_dialog_shows_the_temp_folder(tmp_path, monkeypatch):
+    from mikage.qgis_io.context import PluginContext
+    from mikage.ui.settings_dialog import SettingsDialog
+
+    options = OverviewOptions(location="temp", temp_folder=str(tmp_path / "t"))
+    folder = overviews_io.temp_folder(options)
+    with open(os.path.join(folder, "x.tif.ovr"), "wb") as f:
+        f.write(b"x" * 1048576)
+    monkeypatch.setattr(overviews_io, "cache_folder", lambda: str(tmp_path / "cache"))
+    overviews_io.current = options
+    try:
+        dialog = SettingsDialog(PluginContext())
+        text = dialog.cache.text()
+        assert text.startswith(f"一時フォルダ {folder}（1 件、1.0 MB。QGIS を閉じると消去）\nキャッシュ {tmp_path / 'cache'}（0 件")
+        dialog.reject()
+        overviews_io.current = OverviewOptions()
+        dialog = SettingsDialog(PluginContext())
+        assert dialog.cache.text().startswith(str(tmp_path / "cache"))
+        dialog.reject()
+    finally:
+        overviews_io.end_session()
+        overviews_io.current = OverviewOptions()
+
+
+@pytest.mark.parametrize("location", ["cache", "temp"])
+def test_before_open_moves_aux_for(location, tmp_path, monkeypatch):
+    path = image(tmp_path / "img.tif")
+    moved = []
+    monkeypatch.setattr(overviews_io, "cache_folder", lambda: str(tmp_path))
+    monkeypatch.setattr(overviews_io, "pam_proxy", lambda: (None, None))
+    monkeypatch.setattr(overviews_io, "proxy_pams", lambda p, made=None: moved.append(p) or made.append(p + ".aux.xml"))
+    overviews_io.current = OverviewOptions(location=location)
+    try:
+        assert overviews_io.before_open(path) and moved == [path]
+        overviews_io.current = OverviewOptions()
+        assert not overviews_io.before_open(path) and moved == [path]
+    finally:
+        overviews_io.current = OverviewOptions()

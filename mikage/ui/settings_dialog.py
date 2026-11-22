@@ -181,15 +181,23 @@ class SettingsDialog(QDialog):
 
     def _show_cache(self) -> None:
         folder = overviews_io.cache_folder()
+        # overviews.location "temp": the .ovr are in this QGIS's temporary folder (the cache keeps only their .aux.xml).
+        temp = ""
+        options = overviews_io.current
+        if options.enabled and options.location == "temp":
+            n, size = overviews_io.temp_size(options)
+            temp = self.tr("一時フォルダ {folder}（{n} 件、{mb:.1f} MB。QGIS を閉じると消去）").format(
+                folder=overviews_io.temp_folder(options, make=False), n=n, mb=size / 1048576)
         if not folder:
-            self.cache.setText(self.tr("なし（書き込めないフォルダの画像にはピラミッドを作らない）"))
+            text = self.tr("なし（書き込めないフォルダの画像にはピラミッドを作らない）")
+            self.cache.setText(temp + "\n" + text if temp else text)
             self.clear_cache.setEnabled(False)
             return
         n, size = overviews_io.cache_size(folder)
         text = self.tr("{folder}（{n} 件、{mb:.1f} MB）").format(folder=folder, n=n, mb=size / 1048576)
         if settings.overview_cache_to_clear():
             text += self.tr("。次回起動時に消去")
-        self.cache.setText(text)
+        self.cache.setText(temp + "\n" + self.tr("キャッシュ ") + text if temp else text)
         self.clear_cache.setEnabled(n > 0 and not settings.overview_cache_to_clear())
 
     def _clear_cache(self) -> None:
