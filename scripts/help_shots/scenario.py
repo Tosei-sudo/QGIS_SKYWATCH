@@ -37,12 +37,16 @@ from qgis.PyQt.QtWidgets import (
 from qgis.utils import iface, plugins
 from shots_lib import (
     Runner,
+    fit_left,
     fit_right,
+    global_rect,
     later,
     map_rect,
+    save_button,
     moved,
     settle,
     shoot,
+    shoot_screen,
     table_rows,
 )
 
@@ -59,7 +63,7 @@ OBS_MAP = 300
 #: The part of the map shown beside the docks of the imaging plan.
 PLAN_MAP = 260
 #: The main window for each flow (the plan's docks shorter: less empty list below their rows).
-WINDOW = {"obs": (1600, 1000), "request": (1600, 800), "plan": (1600, 800), "check": (1600, 820), "layer": (1600, 800)}
+WINDOW = {"sample": (1600, 1000), "obs": (1600, 1000), "request": (1600, 800), "plan": (1600, 800), "check": (1600, 820), "layer": (1600, 800)}
 #: The name of the background map added for the pictures.
 BASEMAP_NAME = "背景（見本）"
 
@@ -640,7 +644,86 @@ def flow_layer():
     log(f"imported: {requests.status.text()}")
 
 
-SCENARIOS = {"obs": flow_obs, "request": flow_request, "plan": flow_plan, "check": flow_check, "layer": flow_layer}
+def flow_sample():
+    """The first two big steps of the observation flow, in finer steps (a sample for the proposal)."""
+    catalog = dock("SatObsImageCatalog")
+    obs = dock("SatObsObservations")
+    layout(right=[obs], widths=(OBS_WIDTH,))
+    catalog.hide()
+    canvas.setExtent(QgsRectangle(139.70, 35.25, 139.80, 35.35))
+    canvas.refresh()
+    yield 800
+    quiet_bar()
+    # 始める前に: the buttons of this flow, each as it is on the toolbar (shown in the text).
+    cat_button, obs_button = toolbar_button("画像カタログ"), toolbar_button("観測記録")
+    save_button(path("s-btn-catalog"), cat_button)
+    save_button(path("s-btn-obs"), obs_button)
+    # 1-1 the dock.
+    layout(left=[catalog], right=[obs], widths=(430, OBS_WIDTH))
+    obs.hide()
+    yield 800
+    quiet_bar()
+    top = moved(catalog.rect(), catalog, win)
+    shoot(path("s-obs-01-dock"), win, marks=[(cat_button, "1", "bottom"), (QRect(top.left(), top.top(), top.width(), 22), "2", "right")],
+          crop=window_part(0, 760, 0, top.top() + 300))
+    # 1-2 範囲: the list open.
+    catalog.area_box.setCurrentIndex(catalog.area_box.findData("extent"))
+    catalog.area_box.showPopup()
+    yield 600
+    popup = catalog.area_box.view().window()
+    form_top = global_rect(catalog.catalog_box)
+    area = global_rect(catalog).adjusted(0, 0, 0, 0)
+    area = QRect(area.left(), form_top.top() - 8, area.width(), max(global_rect(popup).bottom(), global_rect(catalog.acquired_from).bottom()) - form_top.top() + 16)
+    shoot_screen(path("s-obs-02-area"), area, marks=[(catalog.area_box, "1"), (global_rect(popup), "")])
+    catalog.area_box.hidePopup()
+    yield 300
+    # 1-3 撮像日時.
+    today = QDate.currentDate()
+    catalog.acquired_from.setText(today.addDays(-7).toString("yyyy-MM-dd"))
+    catalog.acquired_to.setText(today.toString("yyyy-MM-dd"))
+    yield 300
+    shoot(path("s-obs-03-date"), catalog, marks=[(catalog.acquired_from, "1"), (catalog.acquired_to, "2", "top")],
+          crop=QRect(0, catalog.area_box.mapTo(catalog, catalog.area_box.rect().topLeft()).y() - 6, catalog.width(),
+                     catalog.keyword.mapTo(catalog, catalog.keyword.rect().bottomLeft()).y() - catalog.area_box.mapTo(catalog, catalog.area_box.rect().topLeft()).y() + 12))
+    # 1-4 検索.
+    catalog.search()
+    yield lambda: catalog.search_button.isEnabled() and catalog.model.rowCount() > 0
+    catalog.table.resizeColumnsToContents()
+    yield 500
+    quiet_bar()
+    shoot(path("s-obs-04-search"), catalog, marks=[(catalog.search_button, "1"), (catalog.status, "2", "top"), (table_rows(catalog.table, catalog), "3")],
+          crop=[catalog.search_button, table_rows(catalog.table, catalog)], margin=6)
+    # 2-1 選ぶ: the row and its footprint on the map.
+    newest = max(catalog.model.records, key=lambda r: r.attributes["ACQ_TIME"])
+    row = catalog.model.records.index(newest)
+    from mikage.qgis_io.catalog_io import footprint
+    shape = footprint(newest.geometry)
+    ext = shape.boundingBox() if shape is not None else None
+    if ext is not None:
+        fit_left(canvas, ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(), strip=440, border=40)
+    catalog.table.selectRow(row)
+    yield 1500
+    quiet_bar()
+    left = moved(catalog.rect(), catalog, win)
+    marks = [(table_row(catalog.table, row, win), "1")]
+    if ext is not None:
+        marks.append((map_rect(canvas, ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum()).translated(canvas.mapTo(win, canvas.rect().topLeft())).adjusted(-6, -6, 6, 6), "2", "top"))
+    shoot(path("s-obs-05-select"), win, marks=marks, crop=window_part(0, left.right() + 440, left.top(), left.bottom()), width=WIDE)
+    # 2-2 開く.
+    shoot(path("s-obs-06-open"), catalog, marks=[(catalog.buttons["open"], "1"), (catalog.close_previous, ""), (catalog.zoom_opened, "")],
+          crop=[catalog.buttons["open"], catalog.zoom_opened], margin=6)
+    catalog.open_records([newest])
+    yield lambda: any(isinstance(l, QgsRasterLayer) for l in QgsProject.instance().mapLayers().values())
+    yield 2500
+    if ext is not None:
+        fit_left(canvas, ext.xMinimum(), ext.yMinimum(), ext.xMaximum(), ext.yMaximum(), strip=440, border=40)
+    yield 2000
+    quiet_bar()
+    shoot(path("s-obs-07-opened"), win, crop=window_part(0, left.right() + 440, left.top(), left.bottom()), width=WIDE)
+    log(f"sample: newest {newest.id} geometry {getattr(newest, 'geometry', None)}")
+
+
+SCENARIOS = {"sample": flow_sample, "obs": flow_obs, "request": flow_request, "plan": flow_plan, "check": flow_check, "layer": flow_layer}
 
 
 def set_role(name: str) -> None:
@@ -651,7 +734,7 @@ def set_role(name: str) -> None:
     settle(5)
 
 
-ROLES = {"obs": "観測記録の担当", "request": "撮像を依頼する人", "plan": "撮像計画の担当", "check": "撮像を依頼する人", "layer": "撮像を依頼する人"}
+ROLES = {"sample": "観測記録の担当", "obs": "観測記録の担当", "request": "撮像を依頼する人", "plan": "撮像計画の担当", "check": "撮像を依頼する人", "layer": "撮像を依頼する人"}
 
 
 def add_basemap() -> None:

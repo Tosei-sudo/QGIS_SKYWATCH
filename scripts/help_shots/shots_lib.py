@@ -210,3 +210,55 @@ def table_rows(table, owner: QWidget) -> QRect:
 def moved(rect: QRect, source: QWidget, target: QWidget) -> QRect:
     """A rectangle in the source widget's pixels, in the target's."""
     return QRect(target.mapFromGlobal(source.mapToGlobal(rect.topLeft())), rect.size())
+
+
+def shoot_screen(path: str, area: QRect, marks: Iterable[tuple] = (), width: int | None = None) -> QImage:
+    """
+    A part of the (virtual) screen, in screen pixels, with red frames on the
+    marks ((widget or screen rectangle, label, where)). For what is on top of
+    a window (an open drop-down list, a menu), which a widget's grab leaves out.
+    """
+    settle()
+    screen = QApplication.primaryScreen()
+    img = screen.grabWindow(0).toImage().convertToFormat(QImage.Format.Format_RGB32)
+    area = QRect(area).intersected(img.rect())
+    rects = []
+    for mark, label, *where in marks:
+        if isinstance(mark, QWidget):
+            if not mark.isVisible():
+                continue
+            mark = QRect(mark.mapToGlobal(QPoint(0, 0)), mark.size())
+        rects.append((QRect(mark).translated(-area.topLeft()), label, *where))
+    img = img.copy(area)
+    width = min(width or MAX_WIDTH, MAX_WIDTH)
+    scale = 1.0
+    if img.width() > width:
+        scale = width / img.width()
+        img = img.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation)
+    frame(img, rects, scale)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    img.save(path)
+    return img
+
+
+def global_rect(widget: QWidget) -> QRect:
+    """A widget's rectangle on the screen."""
+    return QRect(widget.mapToGlobal(QPoint(0, 0)), widget.size())
+
+
+def fit_left(canvas, west: float, south: float, east: float, north: float, strip: int, border: int = 30) -> None:
+    """The map moved and zoomed so that this area is in the canvas's left `strip` pixels (a picture of a dock on the left and the map beside it)."""
+    from qgis.core import QgsRectangle
+
+    w, h = canvas.width(), canvas.height()
+    unit = max((east - west) / max(1, strip - 2 * border), (north - south) / max(1, h - 2 * border))
+    left = west - border * unit
+    middle = (south + north) / 2
+    canvas.setExtent(QgsRectangle(left, middle - h * unit / 2, left + w * unit, middle + h * unit / 2))
+    canvas.refresh()
+
+
+def save_button(path: str, button: QWidget) -> None:
+    """A toolbar button's picture as it is (no frame), to stand in a line of text."""
+    settle()
+    button.grab().toImage().save(path)
