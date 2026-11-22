@@ -134,6 +134,12 @@
      "icon": "taxonomy.svg:0a56390990cb"
     },
     {
+     "text": "分類体系の取り込み…",
+     "name": "SatObsTaxonomyImport",
+     "checkable": false,
+     "icon": "taxonomy_import.svg:4a4489540e37"
+    },
+    {
      "text": "通報文の作成…",
      "name": "SatObsAlert",
      "checkable": false,
@@ -504,6 +510,7 @@
   "位置ずらしの解除",
   "使い方（ヘルプ）…",
   "分担…",
+  "分類体系の取り込み…",
   "分類体系の編集",
   "土地被覆分類…",
   "地点ごとの撮像予定",
@@ -2057,8 +2064,8 @@
     "        QPushButton 「項目の保存」 (hidden)",
     "        QPushButton 「取消」 (hidden)",
     "      QLabel",
-    "      QPushButton 「JSON 保存」",
-    "      QPushButton 「JSON 読み込み」",
+    "      QToolButton 「取り込み」",
+    "      QToolButton 「書き出し」",
     "  QWidget (hidden)",
     "    QScrollBar",
     "  QWidget (hidden)",
@@ -3045,6 +3052,7 @@
   "image_catalog",
   "image_enhance",
   "imaging_plan",
+  "import_taxonomy",
   "interests",
   "moving",
   "moving_targets",

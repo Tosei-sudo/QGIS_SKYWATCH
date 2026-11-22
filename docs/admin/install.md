@@ -110,6 +110,7 @@ QGIS の設定（`QgsSettings`）の `app/plugin_repositories/<名前>/url` に�
 | 送信待ち（オフライン作業の変更・保存できなかった観測記録）とサーバーの控え | ユーザープロファイルの `mikage/offline_work.sqlite` |
 | 地名・国のポリゴンの控え（通報・エクスポート・式の関数で使った場所の分） | ユーザープロファイルの `mikage/place_cache.sqlite` |
 | 監査ログ（日ごとのファイルと、送り先に送った位置 `sent.json`） | ユーザープロファイルの `mikage/audit/`（`auditLog.localFolder` で変更） |
+| 分類体系の取り込み（表から）の前の分類体系の控え（JSON、新しい 20 個） | ユーザープロファイルの `mikage/taxonomy-backups/` |
 
 設定ファイルはビューアの `config.json` をそのまま読む（コメント付き JSON も可、ほかの項目は無視）。読む項目と書き方は[設定ファイルの書き方](config-file.md#設定ファイルの書き方)。
 
