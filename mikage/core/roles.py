@@ -82,6 +82,8 @@ FEATURES: dict[str, frozenset] = {
     "検出結果を DB へ転記…": frozenset({OBSERVE}),
     #: The classes of the records: changed by those who record (also from 観測記録's 「詳細」), not the administrators' only.
     "分類体系の編集": frozenset({OBSERVE}),
+    #: The classification from a table (as its editor's 「取り込み ▾」).
+    "分類体系の取り込み…": frozenset({OBSERVE}),
     "AI結果": frozenset({OBSERVE, TRAIN}),
     #: AI結果: 観測記録へ取り込み・正・誤検出.
     "ai_results.import": frozenset({OBSERVE}),

@@ -72,6 +72,20 @@ class PluginApi:
         """The observations dock (its `book`, `save_csv(path)`, `to_layers()`, `set_observer(name)`…)."""
         return self._plugin.docks["SatObsObservations"]
 
+    def import_taxonomy(self, source, sheet: Optional[str] = None, uses=None, mode: str = "add", save: bool = False,
+                        fill_down: bool = True, level_names: bool = True, selected_only: bool = False) -> dict:
+        """
+        「分類体系の取り込み」 for scripts: a table (a CSV or Excel file's path,
+        a layer, or a layer's id or name) into the classification of the
+        observations dock's store. Tried only unless `save` (the classification
+        as it was kept first in the profile's mikage/taxonomy-backups).
+        """
+        from .qgis_io import taxonomy_import_io as tio
+
+        columns, rows, name = tio.read_source(source, sheet, selected_only)
+        return self._plugin.docks["SatObsObservations"].api().import_taxonomy(
+            columns, rows, uses, mode, save, fill_down, level_names, name, tio.write_backup if save else None)
+
     @property
     def imaging_plan(self) -> "ImagingPlanDock":
         """The imaging plan dock (its `plan`, `shown`, `run()`, `set_point()`, `csv_text()`, `add_layer()`)."""

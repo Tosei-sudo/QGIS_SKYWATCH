@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 from .areas import CheckedArea, box_ring
 from .book import ObservationBook
@@ -34,7 +34,7 @@ from ..door import lazy
 
 # What the rest of the plugin imports of 観測記録 (its door, docs/architecture.md R2).
 if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
-    from . import place_cache, record_import
+    from . import place_cache, record_import, taxonomy_import
     from .alert_mail import build_mail
     from .alerts import AlertSettings, load_geofences, load_named_areas, LogRow, Moment, poll_log
     from .areas import area_label
@@ -392,6 +392,62 @@ class ObservationApi:
         self._said(b, self._run("確認範囲の削除", lambda bk: bk.remove_areas(rows)), "削除")
         return len(rows)
 
+    def import_taxonomy(self, columns: Sequence[str], rows: Sequence[Any], uses: Any = None, mode: str = "add", save: bool = False,
+                        fill_down: bool = True, level_names: bool = True, source: str = "",
+                        backup: Optional[Callable[[str], str]] = None) -> dict[str, Any]:
+        """
+        「分類体系の取り込み」: a table (its column names, its rows as lists or
+        dicts) into the classification. `uses`: each column's use (a list, or
+        {column: use}; 階層 1・既知の個体・諸元: 全長・使わない…), else guessed
+        from the names; `mode` "add" (追加・更新) or "replace" (置き換え).
+        Tried only (nothing saved) unless `save`. What it does (or did).
+        """
+        from . import taxonomy_import as ti
+
+        if mode not in (ti.ADD, ti.REPLACE):
+            raise ValueError('mode は "add"（追加・更新）か "replace"（置き換え）')
+        b = self._b()
+        columns = [str(c) for c in columns]
+        table: list[ti.TableRow] = []
+        for n, r in enumerate(rows, start=2):
+            if isinstance(r, ti.TableRow):
+                table.append(r)
+            elif isinstance(r, dict):
+                table.append(ti.TableRow(n, {c: r.get(c) for c in columns}))
+            else:
+                table.append(ti.TableRow(n, dict(zip(columns, list(r)))))
+        if uses is None:
+            chosen = ti.guess_uses(columns, b.taxonomy(), b.spec_fields)
+        elif isinstance(uses, dict):
+            unknown = set(uses) - set(columns)
+            if unknown:
+                raise ValueError(f"表にない列: {', '.join(sorted(map(str, unknown)))}")
+            chosen = [ti.parse_use(uses.get(c), b.spec_fields) for c in columns]
+        else:
+            uses = list(uses)
+            if len(uses) != len(columns):
+                raise ValueError(f"uses は列の数（{len(columns)}）だけ")
+            chosen = [ti.parse_use(u, b.spec_fields) for u in uses]
+        problem = ti.check_uses(chosen)
+        if problem:
+            raise ValueError(problem)
+        request = ti.ImportRequest(columns, table, chosen, mode, fill_down, level_names, source)
+        if save:
+            plan = self._run("分類体系の取り込み", lambda x: x.import_taxonomy(request, None, backup))
+            if plan is None:
+                raise RuntimeError(b.status or "分類体系の取り込みの失敗")
+        else:
+            plan = self._run("分類体系の取り込みの試行", lambda x: x.plan_taxonomy_import(request))
+        return {
+            "saved": bool(save and plan.changed),
+            "summary": plan.summary(),
+            "counts": plan.counts(),
+            "uses": [u.label for u in chosen],
+            "classes": [{"kind": c.kind, "status": c.status, "text": c.text()} for c in plan.classes],
+            "errors": [{"row": n, "reason": e} for n, e in plan.errors],
+            "message": b.status if save else "",
+        }
+
     def observation_report(self, title: Optional[str] = None, start: Any = None, end: Any = None, kind: Optional[str] = None,
                            confidence: Optional[str] = None, map: bool = True, flows: bool = True, areas: bool = True,
                            records: bool = False, save: Optional[str] = None) -> dict[str, Any]:
@@ -425,7 +481,7 @@ __all__ = [
     "NO_GLOSSARY", "now_ms", "ObjectFlow", "Observation", "observation_layers", "ObservationApi", "ObservationBook",
     "ObservationLayer", "observations_csv", "ObservedImage", "OfflineAreaStore", "OfflineObservationStore", "OutboxDrafts",
     "outline_of", "parse_time", "path_of", "photo_url", "photos_at", "place_cache", "PLACE_SOURCES", "points_of", "poll_log",
-    "progress_of", "progress_text", "record_import", "record_out", "RecordQuery", "render", "report_file_name",
+    "progress_of", "progress_text", "record_import", "record_out", "taxonomy_import", "RecordQuery", "render", "report_file_name",
     "ReportOptions", "ReportSelection", "ring_of", "same_person", "Sample", "sample_of", "sample_text",
     "satellite_in_metadata", "SatelliteChoices", "select_records", "settings_for", "side_points", "SourceRow", "spec_text",
     "SpecField", "specs_at", "StampEntry", "state_text", "STATUSES", "store_sets", "StoreSet", "Suggestion", "Taxon",

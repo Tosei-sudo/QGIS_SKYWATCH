@@ -54,6 +54,8 @@ NOT_IN_PRACTICE = ("設定…", "サーバ処理…", "ArcGIS Web マップを�
 NOTE = "（練習モードでは使えません）"
 #: While the taxonomy is the production's (read only: its table is not edited while practising).
 TAXONOMY_EDIT, TAXONOMY_NOTE = "分類体系の編集", "（練習モードでは本番の分類体系を読むだけ）"
+#: 「分類体系の取り込み…」 (the table import) is changing it too.
+TAXONOMY_IMPORT = "分類体系の取り込み…"
 #: The practice's background map (a layer of the practice's project).
 BASEMAP_NAME = "練習用の背景地図"
 BAND_TEXT = "練習用のデータで動いています。本番のサーバーには書き込みません。"
@@ -451,6 +453,7 @@ class Training(Feature):
             session = training_io.active()
             if session is not None and "taxonomy" in session.from_production:
                 notes[tr(TAXONOMY_EDIT)] = tr(TAXONOMY_NOTE)
+                notes[tr(TAXONOMY_IMPORT)] = tr(TAXONOMY_NOTE)
             self.host.block_entries(notes)
             for name, dock in self.docks.items():
                 if self.host.dock_entry_text(name) in notes:

@@ -25,8 +25,8 @@ from typing import Callable, Optional
 from qgis.PyQt.QtCore import QByteArray, QTimer, Qt, QUrl
 from qgis.PyQt.QtGui import QDesktopServices, QPixmap
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QScrollArea, QSplitter, QTableWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
+    QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu,
+    QPlainTextEdit, QPushButton, QScrollArea, QSizePolicy, QSplitter, QTableWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -235,11 +235,41 @@ class TaxonomyDock(PluginDock):
 
         foot = QHBoxLayout()
         self.note = QLabel()
+        self.note.setWordWrap(True)
+        # The note gives way (wraps) before the buttons are squeezed.
+        self.note.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         foot.addWidget(self.note, 1)
-        foot.addWidget(self._button(tr("JSON 保存"), tr("分類体系の JSON 保存（config.json の observationVocabulary.taxonomy に記載可）"),
-                                    lambda: self.obs.save_taxonomy_file()))
-        foot.addWidget(self._button(tr("JSON 読み込み"), tr("分類体系の JSON 読み込み（現在の分類と置き換え）"), lambda: self.obs.load_taxonomy_file()))
+        # 「取り込み ▾」「書き出し ▾」 (tsudo 2026-11-22: the table import and export beside the JSON ones).
+        self.import_button = self._menu_button(tr("取り込み"), tr("分類体系の取り込み（表・JSON）"), [
+            (tr("表から取り込み（CSV・Excel・レイヤー）…"), tr("大分類から階層ごとの列がある表を取り込む（試行してから保存）"),
+             lambda: self.obs.open_taxonomy_import()),
+            (tr("JSON から読み込み（今の分類体系と置き換え）…"), tr("分類体系の JSON 読み込み（現在の分類と置き換え）"), lambda: self.obs.load_taxonomy_file()),
+        ])
+        self.export_button = self._menu_button(tr("書き出し"), tr("分類体系の書き出し（表・JSON）"), [
+            (tr("表に書き出し（CSV。取り込みのひな形にも）…"), tr("1 行 1 分類、階層ごとの列の CSV（Excel で直して取り込める）"),
+             lambda: self.obs.save_taxonomy_table_file()),
+            (tr("JSON に保存（設定ファイルに書ける形）…"), tr("分類体系の JSON 保存（config.json の observationVocabulary.taxonomy に記載可）"),
+             lambda: self.obs.save_taxonomy_file()),
+        ])
+        foot.addWidget(self.import_button)
+        foot.addWidget(self.export_button)
         self.body.addLayout(foot)
+
+    def _menu_button(self, text: str, tip: str, entries: list) -> QToolButton:
+        """A button whose menu has the entries (text, tip, slot)."""
+        b = QToolButton()
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        menu = QMenu(b)
+        menu.setToolTipsVisible(True)
+        for label, hint, slot in entries:
+            action = menu.addAction(label)
+            action.setToolTip(hint)
+            action.triggered.connect(lambda _on=False, slot=slot: slot())
+        b.setMenu(menu)
+        return b
 
     # ---- what changes ----------------------------------------------------
 

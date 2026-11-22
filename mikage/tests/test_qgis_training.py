@@ -264,7 +264,7 @@ def test_the_masters_only_read_are_the_productions(plugin):
         assert f"{PRODUCTION}/Satellites" in text and "PRODTOKEN" not in text and "OBSTOKEN" not in text
         # The production's classes are not edited while practising.
         blocked = [a for a in p.actions if a.text().endswith("（練習モードでは本番の分類体系を読むだけ）")]
-        assert [a.text().split("（")[0] for a in blocked] == ["分類体系の編集"] and not blocked[0].isEnabled()
+        assert [a.text().split("（")[0] for a in blocked] == ["分類体系の編集", "分類体系の取り込み…"] and not any(a.isEnabled() for a in blocked)
     finally:
         p.end_training()
     assert not [a for a in p.actions if a.text().endswith("（練習モードでは本番の分類体系を読むだけ）")]

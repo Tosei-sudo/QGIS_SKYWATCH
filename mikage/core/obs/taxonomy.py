@@ -102,6 +102,11 @@ def _segment(name: str) -> str:
     return _SPLIT.sub(" ", name).strip()
 
 
+def segment_name(name: str) -> str:
+    """A class's name as kept: the separators between levels (> › ＞) made spaces, the spaces around taken off."""
+    return _segment(name or "")
+
+
 def _words(value: Any) -> Optional[list[str]]:
     if not isinstance(value, list):
         return None

@@ -32,6 +32,37 @@ class OutputsPart:
             return
         self.say(self.tr("分類体系を保存: {p}").format(p=path))
 
+    def save_taxonomy_table_file(self, path: Optional[str] = None) -> Optional[str]:
+        """The classification as a table (CSV, one row per class; 「分類体系の取り込み」 reads it back). Where it was saved."""
+        if self.book is None:
+            return None
+        from ...core.obs.api import taxonomy_import
+
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系の表に書き出し"), taxonomy_import.taxonomy_csv_name(now_ms()), "CSV (*.csv)")
+        if not path:
+            return None
+        taxa = self.book.taxonomy()
+        failed = save_text(path, taxonomy_import.taxonomy_csv(taxa, self.book.spec_fields), newline="", what="taxonomy-csv", count=len(taxa))
+        if failed:
+            self.say(self.tr("分類体系を書き出せない: {m}").format(m=failed))
+            return None
+        self.say(self.tr("分類体系を表に書き出し（{n} 分類）: {p}").format(n=len(taxa), p=path))
+        return path
+
+    def open_taxonomy_import(self):
+        """Opens 「分類体系の取り込み」 (a table into the chosen store's classification; one kept while the dock lives)."""
+        from ..taxonomy_import_dialog import TaxonomyImportDialog
+
+        if getattr(self, "_taxonomy_import", None) is None:
+            self._taxonomy_import = TaxonomyImportDialog(self, self)
+        else:
+            self._taxonomy_import.reset()
+        self._taxonomy_import.show()
+        self._taxonomy_import.raise_()
+        self._taxonomy_import.activateWindow()
+        return self._taxonomy_import
+
     def load_taxonomy_file(self, path: Optional[str] = None) -> None:
         if self.book is None:
             return

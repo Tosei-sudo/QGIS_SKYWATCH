@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 分類体系の取り込み: a tree of classes with an arrow in -->
+  <path d="M13 9v16M13 16h6M13 25h6" fill="none" stroke="#0f766e" stroke-width="2"/>
+  <rect x="9" y="3" width="11" height="7" rx="1.5" fill="#14b8a6"/>
+  <rect x="19" y="12.5" width="11" height="7" rx="1.5" fill="#5eead4" stroke="#0f766e" stroke-width="1.2"/>
+  <rect x="19" y="21.5" width="11" height="7" rx="1.5" fill="#5eead4" stroke="#0f766e" stroke-width="1.2"/>
+  <circle cx="8" cy="22" r="7" fill="#059669" stroke="#fff" stroke-width="1.5"/>
+  <path d="M4.5 22h6.5M8.5 19l3 3-3 3" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
