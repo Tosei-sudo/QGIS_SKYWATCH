@@ -158,6 +158,9 @@ class AiResultsDock(PluginDock):
         self._sent: dict[str, list[tuple[AiResultSource, dict[str, str]]]] = {}
         self._task = None
         self._syncing = False
+        #: Why no results are shown now (判読の練習: they would tell the answers); "" when they are.
+        self.withheld = ""
+        self._image_before: Optional[str] = None
         self._again = QTimer(self)
         self._again.setSingleShot(True)
         self._again.setInterval(200)
@@ -356,6 +359,9 @@ class AiResultsDock(PluginDock):
             return
         self.image_id = image_id
         self._render_head()
+        if self.withheld:
+            self.show_results()
+            return
         if image_id in self.cache and not again:
             self.show_results(reveal=reveal)
             return
@@ -396,6 +402,33 @@ class AiResultsDock(PluginDock):
                 self.status.setText(_tr("読み込み失敗: {m}").format(m=message))
 
         self._task = run_task(_tr("AI結果の読み込み"), work, done, failed)
+
+    def withhold(self, why: str) -> None:
+        """
+        No results listed or drawn while `why` is said (判読の練習: they would tell the answers); when it is "", those
+        of the image shown before (the exercise's images are closed by then).
+        """
+        if why == self.withheld:
+            return
+        if why and not self.withheld:
+            self._image_before = self.image_id
+        self.withheld = why
+        if why:
+            if self._task is not None:
+                try:
+                    self._task.cancel()
+                except RuntimeError:
+                    pass
+                self._task = None
+            self.show_results()
+            return
+        before, self._image_before = self._image_before, None
+        if before:
+            self.load(before)
+        else:
+            self.image_id = None
+            self._render_head()
+            self.status.setText("")
 
     # ---- the list and the layers ----------------------------------------------
 
@@ -514,6 +547,16 @@ class AiResultsDock(PluginDock):
 
     def show_results(self, reveal: bool = False) -> None:
         """The cached results of the image, those at or above the lowest score, listed and drawn."""
+        if self.withheld:
+            self.rows, self.local_rows = [], {}
+            self._syncing = True
+            try:
+                self.list.clear()
+            finally:
+                self._syncing = False
+            self._replace_layers([])
+            self.status.setText(self.withheld)
+            return
         found = self.cache.get(self.image_id or "", [])
         least = self.min_score.value()
         self._refresh_imported(expand=False)

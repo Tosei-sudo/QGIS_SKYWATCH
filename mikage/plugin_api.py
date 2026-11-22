@@ -169,7 +169,7 @@ class PluginApi:
 
     @property
     def ai_results(self) -> "AiResultsDock":
-        """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`)."""
+        """The dock 「AI結果」 (its `load(image_id)`, `rows`, `selected_rows()`, `import_rows(rows)`, `zoom_to(rows)`, `withhold(why)`)."""
         return self._plugin.docks["SatObsAiResults"]
 
     @property

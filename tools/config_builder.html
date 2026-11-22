@@ -1906,6 +1906,7 @@ const SPEC = [
         B("enabled", "練習モードを出す", { help: "既定 true（false で出さない。training: false と同じ）" }),
         T("config", "組織の練習用の設定ファイル", { ph: "\\\\fileserver\\mikage\\config.training.jsonc", help: "パスか URL。相対パスはこの設定ファイルのフォルダから。なしで内蔵の見本" }),
         J("fromProduction", "本番から読む台帳", { ph: "[\"satellites\", \"taxonomy\", \"places\", \"eventKinds\", \"glossary\"]", help: "内蔵の見本で練習するとき、この設定ファイルから読む読むだけの台帳（衛星 satellites・分類体系 taxonomy・地名 places・イベントの種類 eventKinds・備考の単語集 glossary）。既定 true（すべて）。false で見本だけ。書き込む表は練習用のまま" }),
+        J("scoring", "判読の練習の採点", { ph: "{\"tolerance\": 50, \"weights\": {\"find\": 50, \"kind\": 30, \"activity\": 10, \"measure\": 10}, \"passScore\": 70}", help: "組織の採点の既定（問題ごとに上書きできる）。tolerance 位置の許容 m（既定 50。toleranceByLength 0.5 でモノの長さの半分のほうが大きければそちら）、weights 配点の割合（find 見つける・kind 種別・activity 活動・measure 測る・change 変化。問題の種類にない項目は除いて 100 点に換算）、kindCredit 種別の部分点（exact 1・parent 0.5・top 0.2）、extraPenalty 誤り 1 件の減点（5）、lengthTolerance 長さ・幅の許容 %（15）、headingTolerance 向きの許容 度（15）、headingEitherEnd 船首・船尾を問わない、passScore 合格点（70）" }),
       ]) },
   ] },
   { group: "一覧", keys: [

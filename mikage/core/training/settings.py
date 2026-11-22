@@ -14,6 +14,10 @@ main settings file's while practising (`"fromProduction"`, all of them by
 default; `false` for none, or a list of their names): the practice is on the
 organisation's own classes and satellites. What is written stays on the
 practice server.
+
+`"scoring"`: 判読の練習's scoring as the organisation wants it (each exercise
+may change some of it; exercises.py's Scoring): `{"tolerance": 50,
+"weights": {"find": 50, "kind": 30, "activity": 10, "measure": 10}, …}`.
 """
 from __future__ import annotations
 
@@ -22,7 +26,9 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-KEYS = ("enabled", "config", "fromProduction")
+from .exercises import DEFAULT_SCORING, Scoring, scoring_of
+
+KEYS = ("enabled", "config", "fromProduction", "scoring")
 #: The masters read from the main settings file while practising (masters.py), with their names in Japanese.
 MASTERS = {"satellites": "衛星", "taxonomy": "分類体系", "places": "地名", "eventKinds": "イベントの種類", "glossary": "備考の単語集"}
 
@@ -34,6 +40,8 @@ class TrainingSettings:
     config: str = ""
     #: The masters taken from the main settings file while practising on the built-in sample (MASTERS' keys).
     from_production: tuple[str, ...] = tuple(MASTERS)
+    #: 判読の練習's scoring (the organisation's).
+    scoring: Scoring = DEFAULT_SCORING
 
     @property
     def builtin(self) -> bool:
@@ -72,7 +80,9 @@ def training_settings_of(value: Any, problems: list[str]) -> TrainingSettings:
     unknown = [n for n in names if n not in MASTERS]
     if unknown:
         problems.append(f"training.fromProduction に不明な名前「{'・'.join(unknown)}」（{'・'.join(MASTERS)}）")
-    return TrainingSettings(enabled=enabled, config=config.strip(), from_production=tuple(n for n in MASTERS if n in names))
+    scoring = scoring_of(value.get("scoring"), problems)
+    return TrainingSettings(enabled=enabled, config=config.strip(), from_production=tuple(n for n in MASTERS if n in names),
+                            scoring=scoring)
 
 
 def resolve_config(config: str, main_source: str) -> str:

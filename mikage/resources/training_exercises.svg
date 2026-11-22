@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 判読の練習…: a dark sea image with a ship in a green ring (found) and a red dashed ring (missed), an amber check -->
+  <rect x="2.5" y="4.5" width="22" height="20" rx="1.5" fill="#1e3a52" stroke="#0f2233" stroke-width="1"/>
+  <path d="M7 11.5l6 -2.2 1.2 1.4 -6 2.2z" fill="#e5e7eb"/>
+  <circle cx="10.4" cy="10.9" r="4.2" fill="none" stroke="#22c55e" stroke-width="1.8"/>
+  <circle cx="17.5" cy="18.5" r="3.6" fill="none" stroke="#ef4444" stroke-width="1.6" stroke-dasharray="2 1.4"/>
+  <circle cx="23.5" cy="23.5" r="7" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
+  <path d="M20.3 23.6l2.3 2.3 4.2-4.8" fill="none" stroke="#b45309" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

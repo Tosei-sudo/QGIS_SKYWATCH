@@ -63,7 +63,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .setup import LOCAL_LABEL, store_sets, StoreSet
     from .similar import ANGLES_ALL, ANGLES_NEAR, Cancelled, find_similar
     from .stamps import default_count, entry_of, Layout, MOST, Sample, sample_of, sample_text, StampEntry
-    from .stores import is_local_photo, LocalObservationStore, LocalPhotoStore, photo_url
+    from .stores import is_local_photo, LocalAreaStore, LocalObservationStore, LocalPhotoStore, photo_url
     from .taxonomy import (
         activities_at, children_of, class_by_name, find, level_name, member_index, name_label_of, nest, photos_at, spec_text,
         SpecField, specs_at, Taxon,
@@ -420,7 +420,7 @@ __all__ = [
     "FENCE_SOURCES", "find", "find_similar", "flow_of", "flow_out", "flows", "FormValues", "get_distance", "Glossary",
     "heading_text", "image_time", "is_local_photo", "is_mine", "items_of", "joined_image", "js_round", "KIND", "kind_of",
     "km_text", "Layout", "level_name", "ListedImage", "living", "load_geofences", "load_glossary", "load_named_areas",
-    "load_satellite_choices", "LOCAL_LABEL", "local_time", "LocalObservationStore", "LocalPhotoStore", "LogRow",
+    "load_satellite_choices", "LOCAL_LABEL", "local_time", "LocalAreaStore", "LocalObservationStore", "LocalPhotoStore", "LogRow",
     "MatchCandidate", "member_index", "merged", "Moment", "MOST", "my_names", "name_label_of", "nest", "NO_CHOICES",
     "NO_GLOSSARY", "now_ms", "ObjectFlow", "Observation", "observation_layers", "ObservationApi", "ObservationBook",
     "ObservationLayer", "observations_csv", "ObservedImage", "OfflineAreaStore", "OfflineObservationStore", "OutboxDrafts",
