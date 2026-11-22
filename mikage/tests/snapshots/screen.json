@@ -19,6 +19,12 @@
      "icon": "training_tutorial.svg:a935be19e4d4"
     },
     {
+     "text": "判読の練習…",
+     "name": "SatObsTrainingExercises",
+     "checkable": false,
+     "icon": "training_exercises.svg:411250bd312d"
+    },
+    {
      "text": "練習データを最初に戻す…",
      "name": "SatObsTrainingReset",
      "checkable": false,
@@ -519,6 +525,7 @@
   "分担…",
   "分類体系の取り込み…",
   "分類体系の編集",
+  "判読の練習…",
   "土地被覆分類…",
   "地点ごとの撮像予定",
   "変化抽出（# 時期）…",

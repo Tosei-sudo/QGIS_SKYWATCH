@@ -97,6 +97,10 @@ class ObservationDock(
         self._alert_widget = None
         self._alert_items: list = []
         self.store_set: Optional[StoreSet] = None
+        #: 判読の練習 (ui/exercise_run.py): the one store while an exercise runs (its answers apart from the practice's
+        #: records), None: the settings file's; and the store chosen before it, chosen again after.
+        self.exercise_store: Optional[StoreSet] = None
+        self._store_before = ""
         #: The thing whose flow is shown under the list (「流れ」 of a row), None for none.
         self.chosen: Optional[str] = None
         self.class_filter: Optional[list[str]] = None
@@ -744,8 +748,8 @@ class ObservationDock(
         """
         c = self.context
         try:
-            self.sets = store_sets(c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for,
-                                   local=c.config.local_observations)
+            self.sets = [self.exercise_store] if self.exercise_store is not None else store_sets(
+                c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for, local=c.config.local_observations)
         except Exception as error:  # noqa: BLE001 (the local GeoPackage could not be opened)
             self.sets = []
             self._show_status(self.tr("保存先の準備失敗: {e}").format(e=error))
@@ -764,6 +768,23 @@ class ObservationDock(
         self.store_select.setVisible(len(self.sets) > 1)
         self._store_chosen(self.store_select.currentIndex())
         self._fill_satellite_input()
+
+    def use_store(self, store: Optional[StoreSet]) -> None:
+        """
+        判読の練習: records go to `store` alone while an exercise runs (a store of their own, read afresh); None: the
+        settings file's stores again, the one chosen before the exercise chosen again.
+        """
+        if store is not None and self.exercise_store is None:
+            self._store_before = self.store_select.currentText()
+        self.close_form()
+        self._clear_points()
+        self.exercise_store = store
+        self.reset_stores()
+        if store is None and self._store_before:
+            i = self.store_select.findText(self._store_before)
+            self._store_before = ""
+            if i >= 0 and i != self.store_select.currentIndex():
+                self.store_select.setCurrentIndex(i)
 
     def _book_of(self, s: StoreSet) -> ObservationBook:
         book = self.books.get(s.label)

@@ -11,6 +11,10 @@ the project of before again. 「練習データを最初に戻す…」 makes th
 「チュートリアル…」 (練習モードの段階 2) walks through the help's 画面つきの手順書
 one operation at a time on the practice data (ui/tutorial_guide.py and
 ui/tutorial_courses.py; 練習モード started first when not practising).
+「判読の練習…」 (段階 3) offers exercises in reading images — find, tell apart,
+measure, find what changed — answered with the observation dock's usual
+operations, scored against an interpreter's answers and reviewed
+(ui/exercise_run.py; the sample's exercises on the built-in sample).
 """
 from __future__ import annotations
 
@@ -25,19 +29,26 @@ from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog, QToolBar
 
 from ..core import roles
 from ..core.config import load_jsonc
-from ..core.training.api import AREA, DEFAULT_TRAINING, kept, masters, read_progress, resolve_config, write_progress
+from ..core.training.api import (
+    AREA, DEFAULT_TRAINING, kept, masters, read_progress, read_results, resolve_config, sample_exercises, write_progress,
+)
 from ..qgis_io import settings, training_io
 from ..qgis_io.tasks import run_task
+from ..ui.exercise_run import ExerciseRun, result_line
+from ..ui.exercise_screens import ExerciseList, MyResults
 from ..ui.training_mode import StartDialog, TitleMarks, TrainingBand, status_mark
 from ..ui.tutorial_courses import courses
 from ..ui.tutorial_guide import CourseList, Tutorial
 from .base import Feature, disconnect, tr
 
 #: The menu entries (MENU_GROUPS 「練習モード」), hidden when the settings file's `training` is false.
-START, TUTORIAL, RESET, END = "練習モードを始める", "チュートリアル…", "練習データを最初に戻す…", "練習モードを終える"
-ENTRIES = (START, TUTORIAL, RESET, END)
-#: The band's button for the courses.
-TUTORIAL_BUTTON = "チュートリアル"
+START, TUTORIAL, EXERCISES, RESET, END = ("練習モードを始める", "チュートリアル…", "判読の練習…", "練習データを最初に戻す…",
+                                          "練習モードを終える")
+ENTRIES = (START, TUTORIAL, EXERCISES, RESET, END)
+#: The band's buttons for the courses and the exercises.
+TUTORIAL_BUTTON, EXERCISES_BUTTON = "チュートリアル", "判読の練習"
+#: The role the exercises are solved in (its observation dock).
+EXERCISE_ROLE = "OBSERVER"
 #: What cannot be used while practising (it would reach outside the practice): disabled, with why.
 NOT_IN_PRACTICE = ("設定…", "サーバ処理…", "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…", "移動体（AIS・ADS-B）")
 NOTE = "（練習モードでは使えません）"
@@ -109,7 +120,7 @@ class TutorialPlace:
 
 
 class Training(Feature):
-    COMMANDS = ("start_training", "end_training", "reset_training", "open_tutorial")
+    COMMANDS = ("start_training", "end_training", "reset_training", "open_tutorial", "open_exercises")
 
     def __init__(self, host):
         super().__init__(host)
@@ -127,6 +138,9 @@ class Training(Feature):
         self.tutorial: Optional[Tutorial] = None
         #: Whether the courses are offered once 練習モード has started (asked for by 「チュートリアル…」 or the question).
         self._tutorial_after_start = False
+        #: 判読の練習: the exercise being solved (None when none), and whether the list is offered once 練習モード has started.
+        self.exercise_run: Optional[ExerciseRun] = None
+        self._exercises_after_start = False
 
     @property
     def practising(self) -> bool:
@@ -146,6 +160,7 @@ class Training(Feature):
         self._actions = {
             START: self.entry("training", START, "start_training", name="SatObsTrainingStart"),
             TUTORIAL: self.entry("training_tutorial", TUTORIAL, "open_tutorial", name="SatObsTrainingTutorial"),
+            EXERCISES: self.entry("training_exercises", EXERCISES, "open_exercises", name="SatObsTrainingExercises"),
             RESET: self.entry("training_reset", RESET, "reset_training", name="SatObsTrainingReset"),
             END: self.entry("training_end", END, "end_training", name="SatObsTrainingEnd"),
         }
@@ -155,6 +170,7 @@ class Training(Feature):
         # QGIS closing (or the plugin turned off) while practising: back to the production quietly (the map left as it is).
         disconnect(self.context.configChanged, self._config_read)
         self._stop_tutorial()
+        self._stop_exercise()
         if self.practising:
             training_io.end()
             if self.host.audit is not None:
@@ -179,7 +195,7 @@ class Training(Feature):
     def _entries_state(self) -> None:
         on = self.practising
         for text, action in self._actions.items():
-            action.setEnabled(not self._busy and (True if text == TUTORIAL else on if text == END else not on))
+            action.setEnabled(not self._busy and (True if text in (TUTORIAL, EXERCISES) else on if text == END else not on))
         reset = self._actions.get(RESET)
         if reset is not None:
             reset.setEnabled(not self._busy and self.settings.builtin)
@@ -188,7 +204,7 @@ class Training(Feature):
 
     def start_training(self, tutorial: bool = False) -> bool:
         """「練習モードを始める」: asked first; False when it did not start (asked to stop, or already on).
-        `tutorial`: the question offers the courses after it (ticked)."""
+        `tutorial`: the question offers the courses after it (ticked); by 「判読の練習…」, its exercises instead."""
         if self.practising or self._busy:
             return False
         if not self.settings.enabled:
@@ -197,7 +213,8 @@ class Training(Feature):
         builtin = self.settings.builtin
         files = training_io.files()
         ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None,
-                          from_production=masters.names_text(self.settings.from_production) if builtin else "", tutorial=tutorial)
+                          from_production=masters.names_text(self.settings.from_production) if builtin else "", tutorial=tutorial,
+                          exercises=self._exercises_after_start)
         if ask.exec() != StartDialog.DialogCode.Accepted:
             return False
         self._tutorial_after_start = ask.tutorial.isChecked()
@@ -302,9 +319,12 @@ class Training(Feature):
         read = tr("{m}は本番から読んでいます（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
         self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
-        if self._tutorial_after_start:
-            self._tutorial_after_start = False
-            # (once the settings file is read and the docks have it)
+        tutorial, exercises = self._tutorial_after_start, self._exercises_after_start
+        self._tutorial_after_start = self._exercises_after_start = False
+        # (once the settings file is read and the docks have it; 「判読の練習…」 asked for first)
+        if exercises:
+            QTimer.singleShot(300, self.open_exercises)
+        elif tutorial:
             QTimer.singleShot(300, self.open_tutorial)
 
     def _add_basemap(self, files) -> None:
@@ -336,6 +356,7 @@ class Training(Feature):
         if not self.practising or self._busy:
             return False
         self._stop_tutorial()
+        self._stop_exercise()
         training_io.end()
         self._screens(False)
         if self.host.role_keeper is not None:
@@ -378,6 +399,7 @@ class Training(Feature):
         if answer != QMessageBox.StandardButton.Ok:
             return False
         self._stop_tutorial()
+        self._stop_exercise()
         session = training_io.active()
         files = training_io.files()
         if session is None:
@@ -419,8 +441,9 @@ class Training(Feature):
         if on:
             canvas = self.iface.mapCanvas()
             if self.band is None:
-                self.band = TrainingBand(canvas, [(tr(TUTORIAL_BUTTON), self.open_tutorial), (tr(RESET), self.reset_training),
-                                                  (tr(END), self.end_training)], tr(BAND_TEXT), cover=self.iface.messageBar())
+                self.band = TrainingBand(canvas, [(tr(TUTORIAL_BUTTON), self.open_tutorial), (tr(EXERCISES_BUTTON), self.open_exercises),
+                                                  (tr(RESET), self.reset_training), (tr(END), self.end_training)], tr(BAND_TEXT),
+                                         cover=self.iface.messageBar())
             if self.mark is None:
                 self.mark = status_mark()
                 window.statusBar().addPermanentWidget(self.mark)
@@ -473,6 +496,7 @@ class Training(Feature):
             self.tutorial.guide.show()
             self.tutorial.guide.raise_()
             return True
+        self._stop_exercise()
         found = courses(TutorialPlace(self))
         session = training_io.active()
         keeper = self.host.role_keeper
@@ -490,9 +514,8 @@ class Training(Feature):
         if session is None:
             return None
         self._stop_tutorial()
-        keeper = self.host.role_keeper
-        if course.role and keeper is not None and course.role not in keeper.codes:
-            keeper.choose([*keeper.codes, course.role])
+        self._stop_exercise()
+        self._use_role(course.role)
         path = session.files.progress
 
         def keep(key: str, step: int, finished: bool) -> None:
@@ -519,3 +542,104 @@ class Training(Feature):
         if self.tutorial is not None:
             tutorial, self.tutorial = self.tutorial, None
             tutorial.stop()
+
+    def _use_role(self, role: str) -> None:
+        """A role used while practising too (the roles of before come back when it ends)."""
+        keeper = self.host.role_keeper
+        if role and keeper is not None and role not in keeper.codes:
+            keeper.choose([*keeper.codes, role])
+
+    # ---- 判読の練習 ---------------------------------------------------------------------------------------
+
+    def exercises(self) -> list:
+        """The exercises offered: the sample's (on the built-in sample), with the organisation's scoring."""
+        session = training_io.active()
+        if session is None or not session.builtin:
+            return []
+        try:
+            with open(session.files.sample_images, encoding="utf-8") as f:
+                plans = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return sample_exercises(plans if isinstance(plans, list) else [], self.settings.scoring)
+
+    def open_exercises(self) -> bool:
+        """
+        「判読の練習…」: the exercises, and the one chosen started (False: none). Not practising: 練習モード is
+        started first (asked as usual), the list offered once it is on.
+        """
+        if self._busy:
+            return False
+        if not self.practising:
+            self._exercises_after_start = True
+            if not self.start_training():
+                self._exercises_after_start = False
+                return False
+            return True
+        run = self.exercise_run
+        if run is not None:
+            for window in (run.bar, run.review):
+                if window is not None:
+                    window.show()
+                    window.raise_()
+            return True
+        self._stop_tutorial()
+        found = self.exercises()
+        if not found:
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("練習できる問題がありません（組織の問題がなく、内蔵の見本でもありません）"))
+            return False
+        session = training_io.active()
+        keeper = self.host.role_keeper
+        results_path = session.files.exercise_results
+        source = tr("見本の問題（横須賀）。組織の問題は管理者が登録します")
+        dialog = ExerciseList(found, read_results(results_path), [*(keeper.codes if keeper is not None else []), EXERCISE_ROLE],
+                              source, lambda: MyResults(read_results(results_path), self.window()).exec(), self.window())
+        if dialog.exec() != ExerciseList.DialogCode.Accepted or dialog.choice is None:
+            return False
+        chosen = next((e for e in found if e.key == dialog.choice), None)
+        return chosen is not None and self.run_exercise(chosen, found) is not None
+
+    def run_exercise(self, exercise, among: Optional[list] = None) -> Optional[ExerciseRun]:
+        """An exercise started (in the role that records, used while practising); None when it could not start."""
+        session = training_io.active()
+        if session is None:
+            return None
+        self._stop_tutorial()
+        self._stop_exercise()
+        self._use_role(EXERCISE_ROLE)
+        among = among if among is not None else self.exercises()
+
+        def next_of(e):
+            same = sorted((x for x in among if x.course == e.course), key=lambda x: (x.order, x.title))
+            later = [x for x in same if (x.order, x.title) > (e.order, e.title)]
+            return later[0] if later else None
+
+        run = ExerciseRun(exercise, TutorialPlace(self), session.files.exercise_results, session.files.exercise_records,
+                          self.window(), next_of)
+        self.exercise_run = run
+        run.ended.connect(lambda: self._exercise_ended(run))
+        run.wants.connect(lambda what: self._exercise_next(run, what, next_of))
+        if not run.start():
+            self.exercise_run = None
+            self.iface.messageBar().pushWarning(tr("判読の練習"), run.problem)
+            return None
+        return run
+
+    def _exercise_ended(self, run: ExerciseRun) -> None:
+        if self.exercise_run is run:
+            self.exercise_run = None
+        if run.outcome is not None:
+            self.iface.messageBar().pushInfo(tr("判読の練習"), result_line(run.outcome))
+
+    def _exercise_next(self, run: ExerciseRun, what: str, next_of) -> None:
+        after = next_of(run.exercise) if what == "next" else None
+        if after is not None:
+            QTimer.singleShot(0, lambda: self.run_exercise(after))
+        else:
+            QTimer.singleShot(0, self.open_exercises)
+
+    def _stop_exercise(self) -> None:
+        """The exercise put aside (another started, 練習モード ending, QGIS closing): not submitted, nothing kept."""
+        if self.exercise_run is not None:
+            run, self.exercise_run = self.exercise_run, None
+            run.stop()

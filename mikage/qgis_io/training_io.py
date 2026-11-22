@@ -98,6 +98,16 @@ class TrainingFiles:
         return os.path.join(self.root, "progress.json")
 
     @property
+    def exercise_results(self) -> str:
+        """判読の練習's tries on this computer (kept when the practice data is made again)."""
+        return os.path.join(self.root, "exercise_results.json")
+
+    @property
+    def exercise_records(self) -> str:
+        """判読の練習's answers being made (one exercise's at a time: emptied when an exercise starts)."""
+        return os.path.join(self.root, "exercise_records.gpkg")
+
+    @property
     def sample_images(self) -> str:
         """The sample's images as made (ids, times, ships: what チュートリアル points at)."""
         return os.path.join(self.server, "files", "catalog", "images.json")
@@ -182,8 +192,8 @@ def prepare(f: TrainingFiles, reset: bool = False, cancelled: Callable[[], bool]
 
 
 def clear(f: TrainingFiles) -> None:
-    """Everything of the practice thrown away (its data, its local records, its outputs); not its tutorial's progress."""
-    keep = {os.path.basename(f.progress)}
+    """Everything of the practice thrown away (its data, its local records, its outputs); not its tutorial's progress nor its results."""
+    keep = {os.path.basename(f.progress), os.path.basename(f.exercise_results)}
     if not os.path.isdir(f.root):
         return
     for name in os.listdir(f.root):
