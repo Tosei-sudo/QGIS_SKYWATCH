@@ -44,7 +44,7 @@ def test_the_page_comes_on_the_first_start_only():
     page = plugin.setup_dialog
     assert page.windowTitle() == "最初の設定" and page.first
     # The roles to tick, as many as the person likes; none ticked at first.
-    assert list(page.role_checks) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "管理者"]
+    assert list(page.role_checks) == ["撮像計画の担当", "撮像を依頼する人", "観測記録の担当", "画像判読", "AI 学習の担当", "判読練習の指導者", "管理者"]
     assert page.chosen_roles() == []
     assert "観測記録" in page.role_checks["観測記録の担当"].toolTip()  # the docks it opens
     assert page.where.text().startswith("この PC だけに保存")  # no table of roles in the settings file

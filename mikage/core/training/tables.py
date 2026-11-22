@@ -29,6 +29,8 @@ from .exercises import (
 
 #: An organisation's exercises' source (their keys: 組織:<EXERCISE_ID>).
 SOURCE = "組織"
+#: The other sources whose tries the results table keeps (their EXERCISE_ID: the key, 見本:S1).
+OTHER_SOURCES = ("見本",)
 TABLE_KEYS = ("exercises", "answers", "results", "token")
 #: The columns, with what each holds (tools/arcgis/mikage_schema.py makes the tables).
 EXERCISE_FIELDS = {
@@ -315,8 +317,11 @@ def result_attributes(record: dict) -> dict:
         detail = json.dumps({"parts": record.get("parts") or {}, "penalty": record.get("penalty") or 0, "cut": True},
                             ensure_ascii=False, separators=(",", ":"))
     kind = record.get("kindScore")
+    # (an exercise not the organisation's, the sample's: its key, 見本:S1, so it is not taken for an organisation's)
+    source = record.get("source") or SOURCE
+    eid = (record.get("exerciseId") or "") if source == SOURCE else (record.get("exercise") or "")
     return {
-        "EXERCISE_ID": record.get("exerciseId") or "", "TITLE": (record.get("title") or "")[:255], "COURSE_NAME": (record.get("course") or "")[:255],
+        "EXERCISE_ID": eid, "TITLE": (record.get("title") or "")[:255], "COURSE_NAME": (record.get("course") or "")[:255],
         "USER_NAME": record.get("user") or "", "EXERCISE_MODE": record.get("mode") or PRACTICE, "ATTEMPT": int(record.get("attempt") or 1),
         "STARTED": _ms(record.get("started") or ""), "FINISHED": _ms(record.get("finished") or ""), "SECONDS": int(record.get("seconds") or 0),
         "SCORE": float(record.get("score") or 0), "PASSED": 1 if record.get("passed") else 0, "FOUND": int(record.get("found") or 0),
@@ -338,8 +343,12 @@ def record_of(feature: dict) -> Optional[dict]:
         return datetime.fromtimestamp(ms / 1000).isoformat(timespec="seconds") if ms is not None else ""
 
     score = _number(a, "SCORE", problems, "")
-    return {
-        "exercise": f"{SOURCE}:{eid}", "exerciseId": eid, "source": SOURCE, "title": _text(a, "TITLE"), "course": _text(a, "COURSE_NAME"),
+    source, key = SOURCE, f"{SOURCE}:{eid}"
+    other, _colon, rest = eid.partition(":")
+    if other in OTHER_SOURCES and rest:
+        source, key, eid = other, eid, rest
+    out = {
+        "exercise": key, "exerciseId": eid, "source": source, "title": _text(a, "TITLE"), "course": _text(a, "COURSE_NAME"),
         "mode": _text(a, "EXERCISE_MODE") or PRACTICE, "attempt": int(_number(a, "ATTEMPT", problems, "") or 1), "user": _text(a, "USER_NAME"),
         "started": iso("STARTED"), "finished": iso("FINISHED"), "seconds": int(_number(a, "SECONDS", problems, "") or 0),
         "score": score if score is not None else 0, "passed": _flag(a, "PASSED", False, problems, ""),
@@ -347,6 +356,16 @@ def record_of(feature: dict) -> Optional[dict]:
         "extra": int(_number(a, "EXTRA", problems, "") or 0), "kindScore": _number(a, "KIND_SCORE", problems, ""),
         "hints": int(_number(a, "HINTS", problems, "") or 0), "fromTable": True,
     }
+    detail = _text(a, "DETAIL")
+    if detail:
+        # (read for the instructors' 取り違え: the person's own tries are read without it)
+        try:
+            value = json.loads(detail)
+        except ValueError:
+            value = None
+        if isinstance(value, dict):
+            out.update(parts=value.get("parts") or {}, penalty=value.get("penalty") or 0, detail=value.get("detail") or [])
+    return out
 
 
 def quoted(text: str) -> str:

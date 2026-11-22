@@ -60,6 +60,11 @@ PRESETS = [
         ("left", ["SatObsImageCatalog"]),
         ("right", ["SatObsAiResults"]),
     ]),
+    # 判読の練習の問題づくり: the images and the records taken as answers.
+    ("判読練習の指導者", [
+        ("left", ["SatObsImageCatalog", "SatObsEnhance"]),
+        ("right", ["SatObsObservations", "SatObsTaxonomy"]),
+    ]),
 ]
 
 
