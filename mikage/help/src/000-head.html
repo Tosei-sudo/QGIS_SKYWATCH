@@ -10,6 +10,8 @@
   表示するので、HTML と CSS は簡単なものだけ（h2・h3 の id が目次、表・箇条書き・code・b）。
   リンク「mikage:open/<メニューの文字>」はヘルプ画面の中でだけ、その項目を開く（ブラウザでは何もしない）。
   「画面つきの手順書」の写真は images/ にあり、scripts/help_shots/make_shots.py で撮り直せる（画面が変わったら撮り直す）。
+  写真だけの段落は p.pic にする（QTextBrowser は body の行の高さ 160% を写真の行にもかけ、写真の下に大きな空白ができるため）。
+  QTextBrowser は @media のあとの規則を読まないので、新しい規則は @media より前に書く。
   設定ファイルの書き方・テーブル定義など管理者向けの内容は README に書き、ここには書かない。
 -->
 <style>
@@ -28,6 +30,10 @@ code { font-family: "Consolas", "Menlo", monospace; background-color: #f1f5f9; }
 .note { background-color: #fff8e1; border-left: 4px solid #f5b400; padding: 6px 10px; margin: 6px 0; }
 .tip { background-color: #eaf6ee; border-left: 4px solid #2e9d5b; padding: 6px 10px; margin: 6px 0; }
 .lead { color: #475569; }
+h4 { font-size: 11pt; color: #0f3d73; background-color: #e8eff7; margin-top: 20px; margin-bottom: 4px; padding: 3px 6px; }
+.step { font-weight: bold; color: #1e4f8a; margin-top: 14px; margin-bottom: 2px; }
+.ok { background-color: #e7f0fb; padding: 6px 10px; margin: 6px 0; }
+p.pic { line-height: 100%; margin-top: 4px; margin-bottom: 10px; }
 a { color: #1d5fbf; }
 a.open { color: #0b7a3e; font-weight: bold; }
 img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
@@ -41,6 +47,9 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
   .ui { color: #f9fafb; }
   .note { background-color: #2b2410; }
   .tip { background-color: #10261a; }
+  .ok { background-color: #0f2236; }
+  h4 { background-color: #1f2937; color: #93c5fd; }
+  .step { color: #bfdbfe; }
   .lead { color: #9ca3af; }
   a { color: #93c5fd; }
   a.open { color: #6ee7b7; }

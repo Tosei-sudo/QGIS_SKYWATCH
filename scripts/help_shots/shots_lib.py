@@ -17,7 +17,7 @@ import traceback
 from collections.abc import Callable, Iterable
 from typing import Union
 
-from qgis.PyQt.QtCore import QPoint, QRect, QRectF, Qt, QTimer
+from qgis.PyQt.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer
 from qgis.PyQt.QtGui import QColor, QFont, QImage, QPainter, QPen
 from qgis.PyQt.QtWidgets import QApplication, QWidget
 
@@ -227,7 +227,7 @@ def shoot_screen(path: str, area: QRect, marks: Iterable[tuple] = (), width: int
         if isinstance(mark, QWidget):
             if not mark.isVisible():
                 continue
-            mark = QRect(mark.mapToGlobal(QPoint(0, 0)), mark.size())
+            mark = global_rect(mark)
         rects.append((QRect(mark).translated(-area.topLeft()), label, *where))
     img = img.copy(area)
     width = min(width or MAX_WIDTH, MAX_WIDTH)
@@ -242,8 +242,8 @@ def shoot_screen(path: str, area: QRect, marks: Iterable[tuple] = (), width: int
 
 
 def global_rect(widget: QWidget) -> QRect:
-    """A widget's rectangle on the screen."""
-    return QRect(widget.mapToGlobal(QPoint(0, 0)), widget.size())
+    """A widget's rectangle on the screen (by width and height: the 撮像依頼 form has a field named size)."""
+    return QRect(widget.mapToGlobal(QPoint(0, 0)), QSize(widget.width(), widget.height()))
 
 
 def fit_left(canvas, west: float, south: float, east: float, north: float, strip: int, border: int = 30) -> None:
