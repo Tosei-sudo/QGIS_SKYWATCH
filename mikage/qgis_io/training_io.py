@@ -93,6 +93,16 @@ class TrainingFiles:
         return os.path.join(self.server, "basemap.tif")
 
     @property
+    def progress(self) -> str:
+        """チュートリアル's progress (kept when the practice data is made again)."""
+        return os.path.join(self.root, "progress.json")
+
+    @property
+    def sample_images(self) -> str:
+        """The sample's images as made (ids, times, ships: what チュートリアル points at)."""
+        return os.path.join(self.server, "files", "catalog", "images.json")
+
+    @property
     def images_drawn(self) -> str:
         """Written once the sample images are drawn as images (not the server's cartoons)."""
         return os.path.join(self.server, "images.drawn")
@@ -103,7 +113,7 @@ class TrainingFiles:
 
     def created(self) -> Optional[int]:
         """When the sample was made (ms), None when it is not there."""
-        path = os.path.join(self.server, "files", "catalog", "images.json")
+        path = self.sample_images
         try:
             return int(os.path.getmtime(path) * 1000)
         except OSError:
@@ -173,7 +183,7 @@ def prepare(f: TrainingFiles, reset: bool = False, cancelled: Callable[[], bool]
 
 def clear(f: TrainingFiles) -> None:
     """Everything of the practice thrown away (its data, its local records, its outputs); not its tutorial's progress."""
-    keep = {"progress.json"}
+    keep = {os.path.basename(f.progress)}
     if not os.path.isdir(f.root):
         return
     for name in os.listdir(f.root):

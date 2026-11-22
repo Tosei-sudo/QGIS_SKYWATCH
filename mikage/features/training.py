@@ -8,27 +8,36 @@ practice's (qgis_io/training_io.py), opens a new project with the practice's
 background map, marks the screens (ui/training_mode.py) and pauses the audit
 log; 「練習モードを終える」 (or QGIS closing) puts everything back and opens
 the project of before again. 「練習データを最初に戻す…」 makes the sample again.
+「チュートリアル…」 (練習モードの段階 2) walks through the help's 画面つきの手順書
+one operation at a time on the practice data (ui/tutorial_guide.py and
+ui/tutorial_courses.py; 練習モード started first when not practising).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Optional
 
 from qgis.core import Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsProject, QgsRasterLayer, QgsRectangle
-from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog
+from qgis.PyQt.QtCore import Qt, QTimer
+from qgis.PyQt.QtWidgets import QMessageBox, QProgressDialog, QToolBar
 
+from ..core import roles
 from ..core.config import load_jsonc
-from ..core.training.api import AREA, DEFAULT_TRAINING, masters, resolve_config
+from ..core.training.api import AREA, DEFAULT_TRAINING, kept, masters, read_progress, resolve_config, write_progress
 from ..qgis_io import settings, training_io
 from ..qgis_io.tasks import run_task
 from ..ui.training_mode import StartDialog, TitleMarks, TrainingBand, status_mark
+from ..ui.tutorial_courses import courses
+from ..ui.tutorial_guide import CourseList, Tutorial
 from .base import Feature, disconnect, tr
 
 #: The menu entries (MENU_GROUPS 「練習モード」), hidden when the settings file's `training` is false.
-START, RESET, END = "練習モードを始める", "練習データを最初に戻す…", "練習モードを終える"
-ENTRIES = (START, RESET, END)
+START, TUTORIAL, RESET, END = "練習モードを始める", "チュートリアル…", "練習データを最初に戻す…", "練習モードを終える"
+ENTRIES = (START, TUTORIAL, RESET, END)
+#: The band's button for the courses.
+TUTORIAL_BUTTON = "チュートリアル"
 #: What cannot be used while practising (it would reach outside the practice): disabled, with why.
 NOT_IN_PRACTICE = ("設定…", "サーバ処理…", "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…", "移動体（AIS・ADS-B）")
 NOTE = "（練習モードでは使えません）"
@@ -39,8 +48,66 @@ BASEMAP_NAME = "練習用の背景地図"
 BAND_TEXT = "練習用のデータで動いています。本番のサーバーには書き込みません。"
 
 
+class TutorialPlace:
+    """What チュートリアル's courses reach of the plugin (ui/tutorial_courses.py): its API, buttons, help and the sample."""
+
+    def __init__(self, feature: "Training"):
+        self.feature = feature
+        self.host = feature.host
+        self.api = feature.host.api
+        self.iface = feature.iface
+        self.canvas = feature.iface.mapCanvas()
+        session = training_io.active()
+        self.builtin = session is not None and session.builtin
+        files = session.files if session is not None else training_io.files()
+        #: The practice's folder of the files it writes.
+        self.outputs = files.outputs
+        self._images = files.sample_images
+        self._ships: Optional[dict] = None
+
+    @property
+    def band(self):
+        return self.feature.band
+
+    @property
+    def toolbar(self):
+        return self.host.toolbar
+
+    def button(self, text: str):
+        """The button of a menu entry on a toolbar shown (MIKAGE's, or one of the person's own); None when none shows."""
+        action = self.host.entry_action(text)
+        if action is None:
+            return None
+        bars = [self.host.toolbar, *self.feature.window().findChildren(QToolBar)]
+        for bar in bars:
+            widget = bar.widgetForAction(action) if bar is not None and bar.isVisible() else None
+            if widget is not None and widget.isVisible():
+                return widget
+        return None
+
+    def trigger(self, text: str) -> bool:
+        return self.host.run_menu_entry(text)
+
+    def help_window(self):
+        return getattr(self.host, "help_dialog", None)
+
+    def ships(self, image_id: str) -> list:
+        """The things the sample drew in an image (longitude, latitude…); [] for another image."""
+        if self._ships is None:
+            try:
+                with open(self._images, encoding="utf-8") as f:
+                    self._ships = {p["id"]: p.get("ships") or [] for p in json.load(f) if isinstance(p, dict) and "id" in p}
+            except (OSError, ValueError, TypeError):
+                self._ships = {}
+        return list(self._ships.get(image_id, []))
+
+    def to_sample(self) -> None:
+        """The map on the sample's area (Yokosuka)."""
+        self.feature.show_area()
+
+
 class Training(Feature):
-    COMMANDS = ("start_training", "end_training", "reset_training")
+    COMMANDS = ("start_training", "end_training", "reset_training", "open_tutorial")
 
     def __init__(self, host):
         super().__init__(host)
@@ -54,6 +121,10 @@ class Training(Feature):
         self.progress: Optional[QProgressDialog] = None
         self._busy = False
         self._actions: dict = {}
+        #: The course running (チュートリアル), None when none.
+        self.tutorial: Optional[Tutorial] = None
+        #: Whether the courses are offered once 練習モード has started (asked for by 「チュートリアル…」 or the question).
+        self._tutorial_after_start = False
 
     @property
     def practising(self) -> bool:
@@ -72,6 +143,7 @@ class Training(Feature):
     def add_actions(self) -> None:
         self._actions = {
             START: self.entry("training", START, "start_training", name="SatObsTrainingStart"),
+            TUTORIAL: self.entry("training_tutorial", TUTORIAL, "open_tutorial", name="SatObsTrainingTutorial"),
             RESET: self.entry("training_reset", RESET, "reset_training", name="SatObsTrainingReset"),
             END: self.entry("training_end", END, "end_training", name="SatObsTrainingEnd"),
         }
@@ -80,6 +152,7 @@ class Training(Feature):
     def unload(self) -> None:
         # QGIS closing (or the plugin turned off) while practising: back to the production quietly (the map left as it is).
         disconnect(self.context.configChanged, self._config_read)
+        self._stop_tutorial()
         if self.practising:
             training_io.end()
             if self.host.audit is not None:
@@ -104,15 +177,16 @@ class Training(Feature):
     def _entries_state(self) -> None:
         on = self.practising
         for text, action in self._actions.items():
-            action.setEnabled(not self._busy and (on if text == END else not on))
+            action.setEnabled(not self._busy and (True if text == TUTORIAL else on if text == END else not on))
         reset = self._actions.get(RESET)
         if reset is not None:
             reset.setEnabled(not self._busy and self.settings.builtin)
 
     # ---- starting ----------------------------------------------------------------------------------------
 
-    def start_training(self) -> bool:
-        """「練習モードを始める」: asked first; False when it did not start (asked to stop, or already on)."""
+    def start_training(self, tutorial: bool = False) -> bool:
+        """「練習モードを始める」: asked first; False when it did not start (asked to stop, or already on).
+        `tutorial`: the question offers the courses after it (ticked)."""
         if self.practising or self._busy:
             return False
         if not self.settings.enabled:
@@ -121,9 +195,10 @@ class Training(Feature):
         builtin = self.settings.builtin
         files = training_io.files()
         ask = StartDialog(self.window(), builtin, files.created() if files.ready() else None,
-                          from_production=masters.names_text(self.settings.from_production) if builtin else "")
+                          from_production=masters.names_text(self.settings.from_production) if builtin else "", tutorial=tutorial)
         if ask.exec() != StartDialog.DialogCode.Accepted:
             return False
+        self._tutorial_after_start = ask.tutorial.isChecked()
         if not self._project_saved():
             return False
         self.project_before = QgsProject.instance().fileName()
@@ -225,6 +300,10 @@ class Training(Feature):
         read = tr("{m}は本番から読んでいます（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
         self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
+        if self._tutorial_after_start:
+            self._tutorial_after_start = False
+            # (once the settings file is read and the docks have it)
+            QTimer.singleShot(300, self.open_tutorial)
 
     def _add_basemap(self, files) -> None:
         if os.path.exists(files.basemap):
@@ -233,6 +312,11 @@ class Training(Feature):
                 project = QgsProject.instance()
                 project.addMapLayer(layer, False)
                 project.layerTreeRoot().addLayer(layer)  # (at the bottom)
+        self.show_area()
+        QgsProject.instance().setDirty(False)
+
+    def show_area(self) -> None:
+        """The map on the sample's area."""
         canvas = self.iface.mapCanvas()
         west, south, east, north = AREA
         box = QgsRectangle(west - 0.03, south - 0.02, east + 0.03, north + 0.02)
@@ -242,7 +326,6 @@ class Training(Feature):
             box = QgsCoordinateTransform(wgs84, crs, QgsProject.instance()).transformBoundingBox(box)
         canvas.setExtent(box)
         canvas.refresh()
-        QgsProject.instance().setDirty(False)
 
     # ---- ending ------------------------------------------------------------------------------------------
 
@@ -250,6 +333,7 @@ class Training(Feature):
         """「練習モードを終える」: back to the production and its project; False when not practising."""
         if not self.practising or self._busy:
             return False
+        self._stop_tutorial()
         training_io.end()
         self._screens(False)
         if self.host.role_keeper is not None:
@@ -291,6 +375,7 @@ class Training(Feature):
             QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
         if answer != QMessageBox.StandardButton.Ok:
             return False
+        self._stop_tutorial()
         session = training_io.active()
         files = training_io.files()
         if session is None:
@@ -332,8 +417,8 @@ class Training(Feature):
         if on:
             canvas = self.iface.mapCanvas()
             if self.band is None:
-                self.band = TrainingBand(canvas, [(tr(RESET), self.reset_training), (tr(END), self.end_training)], tr(BAND_TEXT),
-                                         cover=self.iface.messageBar())
+                self.band = TrainingBand(canvas, [(tr(TUTORIAL_BUTTON), self.open_tutorial), (tr(RESET), self.reset_training),
+                                                  (tr(END), self.end_training)], tr(BAND_TEXT), cover=self.iface.messageBar())
             if self.mark is None:
                 self.mark = status_mark()
                 window.statusBar().addPermanentWidget(self.mark)
@@ -369,3 +454,65 @@ class Training(Feature):
         """The practice's project never asks to be saved (when it ends, or QGIS closes while practising)."""
         if dirty and self.practising:
             QgsProject.instance().setDirty(False)
+
+    # ---- チュートリアル -----------------------------------------------------------------------------------
+
+    def open_tutorial(self) -> bool:
+        """
+        「チュートリアル…」: the courses, and the one chosen started (False: none). Not practising: 練習モード is
+        started first (asked as usual), the courses offered once it is on.
+        """
+        if self._busy:
+            return False
+        if not self.practising:
+            return self.start_training(tutorial=True)
+        if self.tutorial is not None:
+            self.tutorial.guide.show()
+            self.tutorial.guide.raise_()
+            return True
+        found = courses(TutorialPlace(self))
+        session = training_io.active()
+        keeper = self.host.role_keeper
+        dialog = CourseList(found, read_progress(session.files.progress), keeper.codes if keeper is not None else [],
+                            {r.code: r.name for r in roles.ROLES}, self.window())
+        if dialog.exec() != CourseList.DialogCode.Accepted or dialog.choice is None:
+            return False
+        key, at = dialog.choice
+        self.run_course(next(c for c in found if c.key == key), at)
+        return True
+
+    def run_course(self, course, at: int = 0) -> Optional[Tutorial]:
+        """A course started at step `at` (its role used too while practising: the roles of before come back after)."""
+        session = training_io.active()
+        if session is None:
+            return None
+        self._stop_tutorial()
+        keeper = self.host.role_keeper
+        if course.role and keeper is not None and course.role not in keeper.codes:
+            keeper.choose([*keeper.codes, course.role])
+        path = session.files.progress
+
+        def keep(key: str, step: int, finished: bool) -> None:
+            try:
+                write_progress(path, kept(read_progress(path), key, step, finished))
+            except OSError:
+                pass
+
+        self.tutorial = Tutorial(course, self.window(), keep, self._open_help, more=lambda: QTimer.singleShot(0, self.open_tutorial))
+        self.tutorial.ended.connect(self._tutorial_ended)
+        self.tutorial.start(at)
+        return self.tutorial
+
+    def _open_help(self, section: str) -> None:
+        opener = getattr(self.host, "open_help", None)
+        if opener is not None:
+            opener(section)
+
+    def _tutorial_ended(self, _key: str, _finished: bool) -> None:
+        self.tutorial = None
+
+    def _stop_tutorial(self) -> None:
+        """The course put aside (練習モード ending, its data made again, QGIS closing): where it was is kept."""
+        if self.tutorial is not None:
+            tutorial, self.tutorial = self.tutorial, None
+            tutorial.stop()

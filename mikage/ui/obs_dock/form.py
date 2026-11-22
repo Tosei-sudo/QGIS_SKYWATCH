@@ -209,6 +209,14 @@ class FormPart:
         self.activity_input.setText(word)
         self._render_chips()
 
+    def activity_words(self) -> list[str]:
+        """The activities offered for the form's kind (its buttons 1–9)."""
+        return self._activity_words()
+
+    def pick_activity(self, word: str) -> None:
+        """An activity chosen, as when its button is pressed."""
+        self._pick_activity(word)
+
     def _chip(self, n: int) -> None:
         words = self._activity_words()
         if self.form.isVisible() and 0 < n <= len(words):

@@ -76,6 +76,7 @@ class RequestDock(PluginDock):
         self.chosen: Optional[ImagingRequest] = None
         self.task = None
         self.form = None
+        self.import_dialog = None
         self._loaded = False
         #: The 依頼グループ of the store's table (core/request/groups.py), and whether the table was read.
         self.groups: list = []
@@ -583,8 +584,15 @@ class RequestDock(PluginDock):
                 fields = dialog.fields()
                 self.take_layer(layer, fields["name"], selected, fields["management_no"], fields["identification_no"])
 
+        def gone(_result) -> None:
+            if self.import_dialog is dialog:
+                self.import_dialog = None
+            dialog.deleteLater()
+
         dialog.accepted.connect(chosen)
-        dialog.finished.connect(lambda _r: dialog.deleteLater())
+        dialog.finished.connect(gone)
+        #: The question of 「レイヤーから取り込み…」 while it is open (チュートリアル points at it).
+        self.import_dialog = dialog
         dialog.open()
         return dialog
 
