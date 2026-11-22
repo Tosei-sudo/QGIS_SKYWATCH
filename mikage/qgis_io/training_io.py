@@ -12,6 +12,11 @@ reminders of shots, the request files' folder) are kept aside when it
 starts and put back when it ends, and at the next start of the plugin after
 QGIS stopped while practising (`recover`): nothing chosen while practising
 reaches the production tables.
+
+The masters only read (satellites, the taxonomy, places, …:
+core/training/masters.py) may be the production's (`Production`): their
+tokens are kept in memory (`TrainingSession.config_text`), the file written
+has none.
 """
 from __future__ import annotations
 
@@ -24,7 +29,8 @@ from typing import Callable, Optional
 
 from qgis.core import QgsApplication, QgsSettings
 
-from ..core.training.api import TrainingServer, open_data, training_config
+from ..core.config import load_jsonc
+from ..core.training.api import TrainingServer, masters, open_data, training_config
 
 #: Whether practising (set when it starts, taken away when it ends: still there at a start, QGIS stopped while practising).
 ACTIVE_KEY = "mikage/training/active"
@@ -118,6 +124,12 @@ class TrainingSession:
     builtin: bool = True
     server: Optional[TrainingServer] = None
     started: float = field(default_factory=time.time)
+    #: The practice's settings file as read while practising (with the production's tokens; None: the file's own text).
+    config_text: Optional[str] = None
+    #: The production's settings file, as it was when practising started (its masters read meanwhile).
+    production: Optional["Production"] = None
+    #: The masters taken from it (core/training/settings.py's MASTERS' keys).
+    from_production: tuple = ()
 
     @property
     def base(self) -> str:
@@ -177,8 +189,43 @@ def clear(f: TrainingFiles) -> None:
 # ---- starting and ending ---------------------------------------------------------------------------------
 
 
-def start_server(f: TrainingFiles) -> TrainingServer:
-    """The practice server started (on its last port when it is free) and the practice's settings file written for it."""
+@dataclass(frozen=True)
+class Production:
+    """The production's settings file (its value, where it was read from) and the masters to take from it."""
+    value: dict
+    source: str
+    names: tuple
+
+
+def write_config(f: TrainingFiles, base: str, files: str, production: Optional[Production] = None) -> tuple[Optional[str], tuple]:
+    """
+    The practice's settings file written for the server at `base`: its text
+    with the production's tokens (None when it is the file's own) and the
+    masters taken from the production.
+    """
+    text = training_config(base, files, f.outputs)
+    taken: list = []
+    whole: Optional[str] = None
+    if production is not None and production.names:
+        value, taken = masters.with_production(load_jsonc(text), production.value, production.names,
+                                               production.source, os.path.join(f.outputs, "撮像計画ファイル"))
+        if taken:
+            head = ("練習モードの設定ファイル（MIKAGE が練習を始めるたびに書き出す。手で直しても次に上書きされる）\n"
+                    f"書き込む表はすべてこの PC の中の練習用サーバー。{masters.names_text(taken)}は本番の設定ファイルから（読むだけ）\n"
+                    "本番のトークンはここには書かない（練習中は MIKAGE が覚えている）")
+            whole = masters.config_text(value, head)
+            text = masters.config_text(masters.without_tokens(value), head)
+    with open(f.config, "w", encoding="utf-8") as out:
+        out.write(text)
+    return (whole if whole != text else None), tuple(taken)
+
+
+def start_server(f: TrainingFiles, production: Optional[Production] = None) -> tuple[TrainingServer, Optional[str], tuple]:
+    """
+    The practice server started (on its last port when it is free) and the
+    practice's settings file written for it (write_config: also its text with
+    the production's tokens, and the masters taken from the production).
+    """
     s = QgsSettings()
     try:
         port = int(s.value(PORT_KEY, 0) or 0)
@@ -188,9 +235,8 @@ def start_server(f: TrainingFiles) -> TrainingServer:
     base = server.start(port)
     s.setValue(PORT_KEY, server.port)
     os.makedirs(f.outputs, exist_ok=True)
-    with open(f.config, "w", encoding="utf-8") as out:
-        out.write(training_config(base, server.files, f.outputs))
-    return server
+    text, taken = write_config(f, base, server.files, production)
+    return server, text, taken
 
 
 def begin(session: TrainingSession) -> None:

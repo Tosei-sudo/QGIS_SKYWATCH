@@ -173,7 +173,8 @@ def _bullets(lines: Sequence[str]) -> QLabel:
 class StartDialog(QDialog):
     """「練習モードを始める」: what happens, and whether to make the sample again with today's dates."""
 
-    def __init__(self, parent=None, builtin: bool = True, created: Optional[int] = None, now: Optional[datetime] = None):
+    def __init__(self, parent=None, builtin: bool = True, created: Optional[int] = None, now: Optional[datetime] = None,
+                 from_production: str = ""):
         super().__init__(parent)
         fit_text(self)
         self.setWindowTitle(self.tr("練習モードを始める"))
@@ -186,8 +187,11 @@ class StartDialog(QDialog):
         box.addWidget(title)
         data = (self.tr("練習用のデータ（東京湾・横須賀の見本）に切り替えます。本番のサーバーには書き込みません。") if builtin else
                 self.tr("組織の練習用の設定ファイル（設定ファイルの training.config）に切り替えます。"))
+        read = ([self.tr("{m}は、本番の設定ファイルのもの（組織の実際の分類や衛星）を読みます。読むだけで書き換えません。").format(m=from_production)]
+                if from_production else [])
         box.addWidget(_bullets([
             data,
+            *read,
             self.tr("地図は新しいプロジェクトになります。いまのプロジェクトに保存していない変更があれば、先に保存するか聞きます。"),
             self.tr("通報のメールはメールソフトを開かずに画面に出し、ファイルは練習用のフォルダーに出します。"),
             self.tr("担当は練習中だけ切り替えられます（終えると元に戻ります）。"),

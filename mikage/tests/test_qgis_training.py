@@ -231,3 +231,52 @@ def test_the_mail_is_shown_not_sent_while_practising(plugin, monkeypatch):
         assert "練習モード" in feed.status.text()
     finally:
         p.end_training()
+
+
+MASTERS = {
+    "satelliteCatalogs": [{"label": "本番衛星", "url": f"{PRODUCTION}/Satellites/FeatureServer/0", "token": "PRODTOKEN",
+                           "fields": {"name": "SAT_NAME", "tle1": "TLE_LINE1", "tle2": "TLE_LINE2"}}],
+    "observationStores": [{"label": "本番観測記録", "url": f"{PRODUCTION}/Obs/FeatureServer/0", "token": "OBSTOKEN",
+                           "taxonomyTable": f"{PRODUCTION}/Obs/FeatureServer/1"}],
+    "glossary": f"{PRODUCTION}/Glossary/FeatureServer/0",
+}
+
+
+@pytest.mark.parametrize("plugin", [MASTERS], indirect=True)
+def test_the_masters_only_read_are_the_productions(plugin):
+    p, iface = plugin
+    assert p.start_training()
+    try:
+        session = training_io.active()
+        assert session.from_production == ("satellites", "taxonomy", "glossary")
+        config = p.context.config
+        # The production's satellites, classes and glossary, with their tokens (kept in memory) ...
+        assert [c.label for c in config.satellite_catalogs] == ["本番衛星"] and config.satellite_catalogs[0].token == "PRODTOKEN"
+        store = config.observation_stores[0]
+        assert store.taxonomy_table.url == f"{PRODUCTION}/Obs/FeatureServer/1" and store.taxonomy_table.token == "OBSTOKEN"
+        assert config.glossary.url == f"{PRODUCTION}/Glossary/FeatureServer/0"
+        # ... what is written on the practice server ...
+        assert store.url.startswith(session.base) and config.request_stores[0].url.startswith(session.base)
+        assert [c.label for c in config.image_catalogs] == ["練習用画像カタログ"]
+        # ... and the file written without the tokens.
+        text = open(session.files.config, encoding="utf-8").read()
+        assert f"{PRODUCTION}/Satellites" in text and "PRODTOKEN" not in text and "OBSTOKEN" not in text
+        # The production's classes are not edited while practising.
+        blocked = [a for a in p.actions if a.text().endswith("（練習モードでは本番の分類体系を読むだけ）")]
+        assert [a.text().split("（")[0] for a in blocked] == ["分類体系の編集"] and not blocked[0].isEnabled()
+    finally:
+        p.end_training()
+    assert not [a for a in p.actions if a.text().endswith("（練習モードでは本番の分類体系を読むだけ）")]
+
+
+@pytest.mark.parametrize("plugin", [dict(MASTERS, training={"fromProduction": False})], indirect=True)
+def test_from_production_false_practises_on_the_sample_alone(plugin):
+    p, iface = plugin
+    assert p.start_training()
+    try:
+        assert training_io.active().from_production == () and training_io.active().config_text is None
+        config = p.context.config
+        assert [c.label for c in config.satellite_catalogs] == ["練習用衛星"]
+        assert config.observation_stores[0].taxonomy_table.url.startswith(training_io.active().base)
+    finally:
+        p.end_training()

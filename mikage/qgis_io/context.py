@@ -24,7 +24,7 @@ from ..core.plan.api import NO_NAMES, SatelliteNames, load_satellite_names
 from ..core.plan.api import Outage, load_outages
 from ..core.edit_stamp import set_tracking
 from ..core.time_zone import set_rules
-from . import settings
+from . import settings, training_io
 from .network import get_bytes, qgis_transport
 from .tasks import run_task
 
@@ -113,6 +113,13 @@ class PluginContext(QObject):
             return
         self._generation += 1
         generation = self._generation
+        session = training_io.active()
+        if session is not None and session.config_text is not None and source == session.config_source:
+            # 練習モード with the production's masters: as written, with their tokens (kept in memory only).
+            self.config_text = session.config_text
+            self.config, self.problems = parse_config_text(session.config_text)
+            self.configChanged.emit()
+            return
         if re.match(r"^https?://", source, re.IGNORECASE):
             self.loading = True
 
