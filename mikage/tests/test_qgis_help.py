@@ -59,6 +59,25 @@ def test_the_pictures_of_the_steps_are_there_and_show_in_the_help_window():
     dialog.close()
 
 
+def test_the_pictures_stand_without_a_gap_and_the_styles_are_read():
+    # A paragraph of a picture alone is p.pic: QTextBrowser puts the body's line height (160 %) on a line holding only
+    # a picture too, which left about 60 % of each picture's height blank under it in the help window.
+    assert not re.search(r"<p>\s*<img", PAGE)
+    assert all(re.fullmatch(r'\s*<img [^>]+>\s*', inner) for inner in re.findall(r'<p class="pic">(.*?)</p>', PAGE, re.S))
+    # QTextBrowser stops reading the style sheet at @media: every rule before it, the dark colours last.
+    style = PAGE.split("<style>", 1)[1].split("</style>", 1)[0]
+    rules, media = style.split("@media", 1)
+    assert "p.pic" in rules and ".ok" in rules and ".step" in rules
+    depth, end = 0, None
+    for i, c in enumerate(media):
+        depth += c == "{"
+        depth -= c == "}"
+        if c == "}" and depth == 0:
+            end = i
+            break
+    assert end is not None and media[end + 1:].strip() == ""
+
+
 def test_every_key_that_works_everywhere_is_in_the_help():
     keys = {key.replace("PgDown", "PageDown").replace("PgUp", "PageUp") for _name, _label, key in shortcuts.GLOBAL}
     text = sections(PAGE)["keys-global"]

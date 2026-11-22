@@ -5,10 +5,14 @@ mock (scripts/mock_esri), and writes them to mikage/help/images/.
 
     python3.12 scripts/help_shots/make_shots.py [--flows obs,request,plan,check,layer] [--raw フォルダ] [--keep]
 
+About 5 minutes for all of them (about 70 pictures).
+
 Run it with the Python QGIS uses (it needs qgis.PyQt and GDAL's osgeo).
 
 Needs (Ubuntu): qgis, python3-qgis, qgis-providers, xvfb, fonts-noto-cjk,
-fonts-open-sans, pngquant (optional: smaller files). The plugin is used from
+fonts-open-sans, qttranslations5-l10n (はい・いいえ on the message boxes, not
+Yes・No), pngquant (optional: smaller files). Old pictures are not removed:
+empty mikage/help/images first when taking all of them again. The plugin is used from
 this repository (a link in a throwaway QGIS profile); nothing is installed.
 The pictures show the mock's sample data and the dates of the day they are
 taken. Not part of the plugin's zip.
