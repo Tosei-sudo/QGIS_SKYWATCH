@@ -18,6 +18,7 @@ from typing import Callable, Optional
 import numpy as np
 from osgeo import gdal, osr
 
+from ..core.errors import Coded
 from ..core.simple_ortho import SensorView, displacement, is_imd_name, sample, sensor_view_from_text
 from .change_io import _srs
 
@@ -25,7 +26,7 @@ from .change_io import _srs
 STRIP = 256
 
 
-class OrthoError(Exception):
+class OrthoError(Coded):
     """A reason the image cannot be corrected (shown as it is)."""
 
 
@@ -64,7 +65,7 @@ def sensor_view_of(path: str) -> Optional[SensorView]:
 def _dem_on_grid(ds, dem_path: str):
     dem = gdal.Open(dem_path)
     if dem is None:
-        raise OrthoError("標高データを開けない")
+        raise OrthoError("標高データを開けない", code="E509")
     gt = ds.GetGeoTransform()
     bounds = (gt[0], gt[3] + ds.RasterYSize * gt[5], gt[0] + ds.RasterXSize * gt[1], gt[3])
     options = dict(format="VRT", outputBounds=bounds, width=ds.RasterXSize, height=ds.RasterYSize, resampleAlg="bilinear",
@@ -77,7 +78,7 @@ def _dem_on_grid(ds, dem_path: str):
     one = gdal.Translate("", dem, format="VRT", bandList=[1])
     out = gdal.Warp("", one, **options)
     if out is None:
-        raise OrthoError("標高データを画像の格子に載せられず")
+        raise OrthoError("標高データを画像の格子に載せられず", code="E509")
     out.keep = (dem, one)
     return out
 
@@ -126,7 +127,7 @@ def simple_orthorectify(path: str, dem_path: str, out_path: str, view: SensorVie
     if reference is None:
         reference = mean_height(ds, dem_path)
         if reference is None:
-            raise OrthoError("画像の範囲に標高データなし")
+            raise OrthoError("画像の範囲に標高データなし", code="E509")
     dem_ds = _dem_on_grid(ds, dem_path)
     dem = dem_ds.GetRasterBand(1)
     width, height, count = ds.RasterXSize, ds.RasterYSize, ds.RasterCount

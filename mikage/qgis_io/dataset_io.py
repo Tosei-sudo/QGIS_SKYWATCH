@@ -83,11 +83,11 @@ def class_field_of(layer: QgsVectorLayer, wanted: str = "") -> str:
     names = [f.name() for f in layer.fields()]
     if wanted:
         if wanted not in names:
-            raise DatasetError(f"クラスのフィールド「{wanted}」なし: {os.path.basename(layer.source().split('|')[0])}")
+            raise DatasetError(f"クラスのフィールド「{wanted}」なし: {os.path.basename(layer.source().split('|')[0])}", code="")
         return wanted
     found = next((n for n in CLASS_FIELDS if n in names), "")
     if not found:
-        raise DatasetError(f"クラスのフィールドが分からない（{', '.join(names) or 'フィールドなし'}）: {os.path.basename(layer.source())}")
+        raise DatasetError(f"クラスのフィールドが分からない（{', '.join(names) or 'フィールドなし'}）: {os.path.basename(layer.source())}", code="")
     return found
 
 
@@ -133,7 +133,7 @@ def dataset_labels(datasets: Sequence[tuple[str, Dataset]], taxonomy: Sequence[T
 def open_image(path: str) -> QgsRasterLayer:
     layer = QgsRasterLayer(path, os.path.basename(path))
     if not layer.isValid():
-        raise DatasetError(f"画像を開けない: {path}")
+        raise DatasetError(f"画像を開けない: {os.path.basename(path)}", code="E503", detail=path)
     return layer
 
 

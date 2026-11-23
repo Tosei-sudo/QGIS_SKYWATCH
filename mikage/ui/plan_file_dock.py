@@ -46,7 +46,7 @@ from qgis.PyQt.QtWidgets import (
     QTableView,
 )
 
-from ..core import audit
+from ..core import audit, errors
 from ..core.catalog.api import CatalogConfig
 from ..core.esri import EsriError
 from ..core.plan.api import attach, on_day, summary_text
@@ -76,7 +76,7 @@ from ..qgis_io import settings
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.network import get_bytes
 from ..qgis_io.request_io import load_schema
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import column_menus
@@ -308,7 +308,7 @@ class PlanFileDock(PluginDock):
             self.quota_window.close()
             self.quota_window = None
         self.render()
-        self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）") if self.store is None else "")
+        self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］") if self.store is None else "")
 
     def _store_chosen(self, index: int) -> None:
         stores = self.context.config.request_stores
@@ -481,7 +481,7 @@ class PlanFileDock(PluginDock):
                                                       self.context.satellite_names(repo.client, task.isCanceled), task.isCanceled)
                     notes += more
                 except Exception as error:  # noqa: BLE001 (the day goes on with the whole areas, said so)
-                    notes.append(f"撮像済み・撮像待ちの範囲を読めず、範囲全体で計算（{error}）")
+                    notes.append(f"撮像済み・撮像待ちの範囲を読めず、範囲全体で計算（{error_text(error)}）")
             task.progress(60)
             forecasts = {}
             # Also for the requests missed and carried over to this day (they are candidates too).
@@ -490,7 +490,7 @@ class PlanFileDock(PluginDock):
                 try:
                     forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without the weather)
-                    notes.append(f"雲量予報の取得失敗（{error}）")
+                    notes.append(f"雲量予報の取得に失敗（{error_text(error)}）")
             elif places:
                 notes.append("雲量予報なし（cloudForecast: false）")
             task.progress(70)
@@ -512,14 +512,14 @@ class PlanFileDock(PluginDock):
                 try:
                     last_looks = repo.read_last_looks(requests, day, task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without it, said so)
-                    notes.append(f"前回の撮り方を読めず、それなしで計算（{error}）")
+                    notes.append(f"前回の撮り方を読めず、それなしで計算（{error_text(error)}）")
             quotas = QuotaData()
             if store.quotas:
                 # What the yearly quotas have left (年間撮像上限): the shots of their years, as 照合 left them.
                 try:
                     quotas = repo.read_quota_data([day], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on without the quotas, said so)
-                    notes.append(f"年間撮像上限を読めず、上限なしで計算（{error}）")
+                    notes.append(f"年間撮像上限を読めず、上限なしで計算（{error_text(error)}）")
                 notes += quotas.problems[:3]
             others = []
             if store.shots and any(s.use_time.limited for s in systems):
@@ -527,7 +527,7 @@ class PlanFileDock(PluginDock):
                 try:
                     others = repo.read_other_uses(day, task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the day goes on with its own shots only, said so)
-                    notes.append(f"前後の日の撮像の使用時間を読めず、この日の撮像だけで計算（{error}）")
+                    notes.append(f"前後の日の撮像の使用時間を読めず、この日の撮像だけで計算（{error_text(error)}）")
             outage_line = summary_text(day_sats, *day_bounds(day), now)
             if outage_line:
                 notes.insert(0, outage_line)
@@ -570,7 +570,7 @@ class PlanFileDock(PluginDock):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("計算失敗: {m}").format(m=message))
+            self.status.setText(self.tr("計算に失敗: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("本日分の計算"), work, done, failed)
@@ -962,9 +962,10 @@ class PlanFileDock(PluginDock):
                 done_files.append(w)
                 audit.record("export", "plan-file", path, count=w.count, detail={"system": w.system.system, "day": plan.day.isoformat()}, file=path)
             except OSError as error:
-                reason = error.strerror or str(error)
+                reason, said = errors.describe(error)
                 problems.append(f"{self._label(w)}: {reason}")
-                audit.error("file-save", getattr(error, "filename", None) or folder, reason, detail={"what": "plan-file", "system": w.system.system})
+                audit.error("file-save", getattr(error, "filename", None) or folder, reason,
+                            detail={"what": "plan-file", "system": w.system.system, "said": said})
                 failures.setdefault(w.system.system, reason)
                 continue
             _, notes = encoded(w)
@@ -980,7 +981,7 @@ class PlanFileDock(PluginDock):
                 cleared += 1
                 audit.record("export", "plan-file-removed", os.path.join(folder, name), detail={"system": system})
             except OSError as error:
-                problems.append(self.tr("{name} の削除に失敗: {m}").format(name=name, m=error.strerror or str(error)))
+                problems.append(self.tr("{name} の削除に失敗: {m}").format(name=name, m=errors.describe(error)[0]))
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
@@ -1003,7 +1004,7 @@ class PlanFileDock(PluginDock):
                 # A file naming its rows by 外部連携ID, and a table that cannot keep them: the answers cannot be matched by them.
                 lacking = repo.history_has(("linkId",))
                 if lacking:
-                    notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDの保存に失敗（管理者に連絡）")
+                    notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDの保存に失敗（管理者に連絡）［E704］")
             removed = 0
             rewrite = Rewrite(rows=list(rows))
             if replace and earlier and repo.store.history:

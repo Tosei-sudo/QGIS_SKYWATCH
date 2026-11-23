@@ -22,6 +22,7 @@ from typing import Callable, Optional, Sequence
 import numpy as np
 from osgeo import gdal, ogr, osr
 
+from ..core.errors import Coded
 from ..core.classify import MAX_CLASSES, MAX_SAMPLES, ClassModel, ClassStats, accumulate, class_color, classify, k_means, random, sample_pixels, train_model
 from .change_io import MAX_POLYGONS, MAX_TRACE_PIXELS, outline_mask
 
@@ -29,7 +30,7 @@ from .change_io import MAX_POLYGONS, MAX_TRACE_PIXELS, outline_mask
 STRIP = 512
 
 
-class ClassifyError(Exception):
+class ClassifyError(Coded):
     """A reason the image cannot be classified (shown as it is)."""
 
 
@@ -130,7 +131,7 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
         raise ClassifyError("バンドを 1 つ以上選択")
     for b in bands:
         if not 1 <= b <= ds.RasterCount:
-            raise ClassifyError(f"画像にバンド {b} なし")
+            raise ClassifyError(f"画像にバンド {b} なし", code="E504")
     width, height = ds.RasterXSize, ds.RasterYSize
     total = width * height
     dims = len(bands)
@@ -152,7 +153,7 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
             say(40 * (i + 1) / len(strips), "画素を抽出中…")
         everything = np.vstack(samples) if samples else np.zeros((0, dims))
         if not len(everything):
-            raise ClassifyError("値のある画素なし")
+            raise ClassifyError("値のある画素なし", code="E609")
         say(40, "クラスタリング中…")
         try:
             means = k_means(everything, classes, iterations, seed)
@@ -218,7 +219,7 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
     out = None
     if not any(s.pixels for s in summaries):
         gdal.Unlink(out_path)
-        raise ClassifyError("値のある画素なし")
+        raise ClassifyError("値のある画素なし", code="E609")
     return ClassifyResult(width, height, model, summaries)
 
 

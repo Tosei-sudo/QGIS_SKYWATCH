@@ -12,6 +12,10 @@ and links:
   or dialog it opens), through the `run` given by the plugin;
 * anything else (http, file): the system's browser.
 
+An エラーコード typed in the search (「E101」, 「e-101」, 「Ｅ１０１」) goes to its
+row of 「エラーコード一覧」 (marked whole), with the code's text beside the box;
+`go("E101")` does the same (the message bar's 「対処法」, a status line's click).
+
 Admin matters (the settings file, the Esri tables) stay in the README.
 """
 from __future__ import annotations
@@ -27,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSplitter, QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
 )
 
+from ..core import errors
 from .fit import fit_text
 
 PAGE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "help", "index.html")
@@ -80,7 +85,7 @@ class HelpDialog(QDialog):
         main = QVBoxLayout(self)
         top = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText(self.tr("ヘルプを検索（Enter で次）"))
+        self.search.setPlaceholderText(self.tr("ヘルプを検索（エラーコードも可。Enter で次）"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(self.find)
         self.search.returnPressed.connect(self.find_next)
@@ -117,11 +122,20 @@ class HelpDialog(QDialog):
         main.addWidget(split, 1)
         self.hits: list[QTextCursor] = []
         self.current = -1
+        #: The エラーコード searched for (its row shown, its text beside the box), or "".
+        self.code = ""
 
     # Links and sections.
 
     def go(self, anchor: str) -> None:
-        """Shows the section with that id."""
+        """Shows the section with that id, or the row of an エラーコード (「E101」)."""
+        code = errors.normalized(anchor)
+        if code is not None:
+            if self.search.text() == code:
+                self.find(code)
+            else:
+                self.search.setText(code)  # (found by `find`, as typed)
+            return
         self.page.scrollToAnchor(anchor)
 
     def follow(self, url: QUrl) -> bool:
@@ -138,8 +152,15 @@ class HelpDialog(QDialog):
     # Search.
 
     def find(self, text: str) -> int:
-        """Marks every hit of the text, shows the first, hides the headings without one; the number of hits."""
+        """
+        Marks every hit of the text, shows the first, hides the headings
+        without one; the number of hits. An エラーコード (however typed) is
+        searched as the code, its row in 「エラーコード一覧」 first and marked whole.
+        """
         text = text.strip()
+        self.code = errors.normalized(text) or ""
+        if self.code:
+            text = self.code
         self.hits, self.current = [], -1
         doc = self.page.document()
         if text:
@@ -150,6 +171,16 @@ class HelpDialog(QDialog):
         marked = QTextCharFormat()
         marked.setBackground(QColor("#fde68a"))
         selections = []
+        row = self._code_row() if self.code else None
+        if row is not None:
+            # The row first (Enter goes on to the other mentions), each of its cells marked.
+            self.hits.insert(0, self.hits.pop(row))
+            whole = QTextCharFormat()
+            whole.setBackground(QColor("#fef3c7"))
+            for cell in self._row_cells(self.hits[0]):
+                sel = QTextEdit.ExtraSelection()
+                sel.cursor, sel.format = cell, whole
+                selections.append(sel)
         for cursor in self.hits:
             sel = QTextEdit.ExtraSelection()
             sel.cursor, sel.format = cursor, marked
@@ -167,7 +198,7 @@ class HelpDialog(QDialog):
             own = not needle or needle in self.texts.get(top.data(0, Qt.ItemDataRole.UserRole), "").lower()
             top.setHidden(not (own or shown_children))
             top.setExpanded(bool(needle) and shown_children > 0)
-        self.hits_label.setText(self.tr("{n} 件").format(n=len(self.hits)) if text else "")
+        self.hits_label.setText(self._code_text() if self.code else self.tr("{n} 件").format(n=len(self.hits)) if text else "")
         if self.hits:
             self.find_next()
         return len(self.hits)
@@ -179,7 +210,43 @@ class HelpDialog(QDialog):
         cursor = QTextCursor(self.hits[self.current])
         self.page.setTextCursor(cursor)
         self.page.ensureCursorVisible()
-        self.hits_label.setText(self.tr("{i} / {n} 件").format(i=self.current + 1, n=len(self.hits)))
+        if self.code and self.current == 0:
+            # The code's row near the top, with its kind's heading above it in sight.
+            bar = self.page.verticalScrollBar()
+            bar.setValue(bar.value() + self.page.cursorRect(cursor).top() - 80)
+        count = self.tr("{i} / {n} 件").format(i=self.current + 1, n=len(self.hits))
+        self.hits_label.setText(f"{self._code_text()}（{count}）" if self.code else count)
+
+    def _code_text(self) -> str:
+        """Beside the box for a code: its text, or that the list has no such code."""
+        known = errors.CODES.get(self.code)
+        if known is not None:
+            return f"{self.code} {known.text}"
+        if self.code in errors.RETIRED:
+            return self.tr("{c} は使われなくなったコード（{t}）").format(c=self.code, t=errors.RETIRED[self.code])
+        return self.tr("{c} は一覧にない").format(c=self.code)
+
+    def _code_row(self) -> Optional[int]:
+        """Which hit is the code's own cell in 「エラーコード一覧」 (the cell holds the code alone), if any."""
+        for i, cursor in enumerate(self.hits):
+            if cursor.block().text().strip() == self.code and cursor.currentTable() is not None:
+                return i
+        return None
+
+    @staticmethod
+    def _row_cells(cursor: QTextCursor) -> list[QTextCursor]:
+        """The cells of the table row the cursor is in, each selected."""
+        table = cursor.currentTable()
+        if table is None:
+            return []
+        row = table.cellAt(cursor).row()
+        cells = []
+        for column in range(table.columns()):
+            cell = table.cellAt(row, column)
+            selected = cell.firstCursorPosition()
+            selected.setPosition(cell.lastCursorPosition().position(), QTextCursor.MoveMode.KeepAnchor)
+            cells.append(selected)
+        return cells
 
     def plain_text(self) -> str:
         return self.page.document().toPlainText()

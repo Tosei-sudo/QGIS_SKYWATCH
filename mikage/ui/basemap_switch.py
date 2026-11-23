@@ -64,7 +64,7 @@ class BaseMapSwitch(QObject):
         """Shows the base map of that id ("" for none); `unchanged`: the plugin's own choice (the project stays not changed)."""
         base = next((b for b in self.context.config.base_maps if b.id == base_id), None)
         if base_id and base is None:
-            self.iface.messageBar().pushWarning(TITLE, self.tr("背景地図「{id}」が未設定（管理者に連絡: baseMaps）").format(id=base_id))
+            self.iface.messageBar().pushWarning(TITLE, self.tr("背景地図「{id}」が未設定（管理者に連絡: baseMaps）［E703］").format(id=base_id))
             return
         if self.task is not None:
             self.task.cancel()

@@ -43,6 +43,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.api import (
     NOT_IN_FILE, Reading, answer_changes, manual_changes, manual_unrequested, match_answers, read_window, unrequested_rows,
 )
+from ..core import errors
 from ..core.esri import EsriError
 from ..core.plan.api import plain
 from ..core.plan.api import handed_hit
@@ -305,9 +306,9 @@ class ScheduleDock(PluginDock):
         self._fill_systems()
         self._forget()
         if self.store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
         elif not self.store.history:
-            self.status.setText(self.tr("出力履歴が未設定のため、撮像予定を記録できない（管理者に連絡: history）"))
+            self.status.setText(self.tr("出力履歴が未設定のため、撮像予定を記録できない（管理者に連絡: history）［E703］"))
         elif self.isVisible():
             self.reload(refresh=True)
 
@@ -602,7 +603,7 @@ class ScheduleDock(PluginDock):
             if len(self.shown) != len(self.rows):
                 text += self.tr("（表示 {n} 件）").format(n=len(self.shown))
             if self.missing_fields:
-                text += self.tr("。採否は記録できない（管理者に連絡: 出力履歴の {f}）").format(
+                text += self.tr("。採否は記録できない（管理者に連絡: 出力履歴の {f}）［E704］").format(
                     f="・".join(self.missing_fields))
             if self.shot_problem:
                 text += self.tr("。撮像の範囲を読めない（{m}）").format(m=self.shot_problem)
@@ -728,11 +729,11 @@ class ScheduleDock(PluginDock):
         if chosen:
             system = next((s for s in self.context.config.request_exports if s.system == chosen), None)
             if system is not None and system.result_file is None:
-                self.status.setText(self.tr("{s} は結果ファイルが未設定（管理者に連絡: resultFile）").format(s=system.label))
+                self.status.setText(self.tr("{s} は結果ファイルが未設定（管理者に連絡: resultFile）［E703］").format(s=system.label))
                 return None
             return system
         if not systems:
-            self.status.setText(self.tr("結果ファイルを設定したシステムがない。採否は手入力（管理者に連絡: resultFile）"))
+            self.status.setText(self.tr("結果ファイルを設定したシステムがない。採否は手入力（管理者に連絡: resultFile）［E703］"))
             return None
         if len(systems) == 1:
             return systems[0]
@@ -762,7 +763,7 @@ class ScheduleDock(PluginDock):
             with open(path, "rb") as f:
                 data = f.read()
         except OSError as error:
-            self.status.setText(self.tr("読めない: {m}").format(m=error.strerror or error))
+            self.status.setText(self.tr("読み込みに失敗: {m}").format(m=errors.describe(error)[0]))
             return
         spec = system.result_file
         repo = self.repository()
@@ -1079,7 +1080,7 @@ class UnrequestedDialog(QDialog):
             self.message.setText(self.tr("名称を入力"))
             return
         if self.system.currentData() is None:
-            self.message.setText(self.tr("システムが未設定（管理者に連絡: requestExports）"))
+            self.message.setText(self.tr("システムが未設定（管理者に連絡: requestExports）［E703］"))
             return
         planned = None
         if self.timed.isChecked():

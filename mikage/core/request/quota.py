@@ -230,7 +230,7 @@ def load_quotas(client: EsriClient, store: RequestStoreConfig, token: Optional[s
     f = store.quota_fields
     info = client.layer(store.quotas, token, refresh=True)
     if f["sensor"] not in set(info.field_types):
-        raise EsriError(f"年間撮像上限のテーブルに属性 {f['sensor']} なし")
+        raise EsriError(f"年間撮像上限の表に必要な項目がない（管理者に連絡: {f['sensor']}）", code="E704")
     rows = client.query_all(store.quotas, "1=1", token, geometry=False, limit=10000, cancelled=cancelled)
     return quotas_of((r.get("attributes") or {} for r in rows), f, problems, info.object_id_field)
 

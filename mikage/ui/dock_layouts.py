@@ -21,6 +21,8 @@ from qgis.PyQt.QtCore import QCoreApplication, QRect, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QInputDialog, QMainWindow, QMenu, QMessageBox, QWidget
 
+from ..core import errors
+from ..qgis_io.tasks import error_text
 from .docks import ask_no
 
 KEY = "mikage/dockLayouts"
@@ -421,7 +423,7 @@ class DockLayoutMenu(QMenu):
             try:
                 n = self.store.export(path)
             except OSError as e:
-                QMessageBox.warning(self.window_, tr("ドックのレイアウトを書き出す"), tr("書き出しに失敗: {e}").format(e=e.strerror or e))
+                QMessageBox.warning(self.window_, tr("ドックのレイアウトを書き出す"), tr("書き出しに失敗: {e}").format(e=errors.describe(e)[0]))
                 return
             self.message(tr("ドックのレイアウト {n} 件を書き出し").format(n=n))
 
@@ -432,6 +434,6 @@ class DockLayoutMenu(QMenu):
         try:
             names = self.store.import_file(path)
         except (OSError, ValueError, UnicodeDecodeError) as e:
-            QMessageBox.warning(self.window_, tr("ドックのレイアウトを読み込む"), str(e))
+            QMessageBox.warning(self.window_, tr("ドックのレイアウトを読み込む"), tr("読み込みに失敗: {e}").format(e=error_text(e)))
             return
         self.message(tr("ドックのレイアウト {n} 件を読み込み: {names}").format(n=len(names), names="、".join(names)))

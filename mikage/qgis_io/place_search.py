@@ -12,6 +12,7 @@ import re
 from typing import Optional
 from urllib.parse import unquote, urljoin, urlparse
 
+from ..core.errors import FileFailed, os_code
 from ..core.geocode import PlaceSearch
 from . import settings
 from .network import get_bytes
@@ -40,7 +41,7 @@ def read_bytes(url: str) -> bytes:
         with open(path, "rb") as f:
             return f.read()
     except OSError as error:
-        raise OSError(f"{path} を読み込めない（{error.strerror or error}）") from error
+        raise FileFailed(f"地名の一覧「{os.path.basename(path)}」を読めない", code=os_code(error), detail=f"{path}: {error.strerror or error}") from error
 
 
 def place_search_of(context) -> PlaceSearch:

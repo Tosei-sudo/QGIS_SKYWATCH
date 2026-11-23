@@ -25,7 +25,14 @@ from qgis.core import QgsNetworkAccessManager
 from qgis.PyQt.QtCore import QObject, QTimer, QUrl, pyqtSignal
 from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest, QSslSocket, QTcpSocket
 
+from ..core import errors
 from ..core.moving import FeedConfig, feed_url
+
+
+def _status_code(status: int) -> str:
+    """The エラーコード of an HTTP status that is not a success (as qgis_io/network.py gives them)."""
+    return {401: "E203", 403: "E202"}.get(status, "E103" if status >= 500 else "E104")
+
 
 try:  # Not every PyQt build has it.
     from qgis.PyQt.QtWebSockets import QWebSocket
@@ -359,16 +366,16 @@ class FeedConnection(QObject):
             try:
                 status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
                 if reply.error() != QNetworkReply.NetworkError.NoError and status is None:
-                    raise ValueError(f"接続失敗（{reply.errorString()}）")
+                    raise errors.Failed(code="E101", detail=reply.errorString())
                 if status is not None and int(status) >= 400:
-                    raise ValueError(f"サーバーからエラー応答（HTTP {int(status)}）")
+                    raise errors.Failed(code=_status_code(int(status)), detail=f"HTTP {int(status)}")
                 body = bytes(reply.readAll())
                 if len(body) > MAX_POLL:
-                    raise ValueError(f"応答が大きすぎ（{round(len(body) / 1e6)} MB）")
+                    raise errors.Failed(f"サーバーの応答が大きすぎる（{round(len(body) / 1e6)} MB）", code="E106")
                 try:
                     data = json.loads(body.decode("utf-8-sig"))
                 except (UnicodeDecodeError, ValueError):
-                    raise ValueError("応答が JSON 以外")
+                    raise errors.Failed(code="E105", detail="JSON 以外の応答")
                 self._say("open")
                 self.message.emit(data, time.time() * 1000)
             except ValueError as e:
@@ -434,19 +441,19 @@ class FeedConnection(QObject):
 def stream_socket(body: bytes, status, url: str) -> tuple[str, dict]:
     """The WebSocket of an ArcGIS Stream Service, and its track id and time fields, from its description."""
     if status is not None and int(status) >= 400:
-        raise ValueError(f"Stream Service からエラー応答（HTTP {int(status)}）")
+        raise errors.Failed(code=_status_code(int(status)), detail=f"Stream Service: HTTP {int(status)}")
     try:
         info = json.loads(body.decode("utf-8-sig"))
     except (UnicodeDecodeError, ValueError):
-        raise ValueError("Stream Service の説明が JSON 以外")
+        raise errors.Failed(code="E105", detail="Stream Service の説明が JSON 以外")
     if not isinstance(info, dict):
-        raise ValueError("Stream Service の説明が JSON 以外")
+        raise errors.Failed(code="E105", detail="Stream Service の説明が JSON 以外")
     if isinstance(info.get("error"), dict):
-        raise ValueError(f"Stream Service からエラー応答: {str(info['error'].get('message', ''))[:200]}")
+        raise errors.Failed(code="E104", detail=f"Stream Service: {str(info['error'].get('message', ''))[:200]}")
     entry = next((s for s in info.get("streamUrls") or [] if isinstance(s, dict) and s.get("transport") == "ws" and s.get("urls")), None)
     base = next((u for u in (entry or {}).get("urls", []) if isinstance(u, str)), None)
     if not base:
-        raise ValueError("Stream Service に WebSocket の URL（streamUrls）なし")
+        raise errors.Failed(code="E105", detail="Stream Service に WebSocket の URL（streamUrls）なし")
     ws = base if base.rstrip("/").lower().endswith("/subscribe") else f"{base.rstrip('/')}/subscribe"
     parts, typed = urlsplit(ws), urlsplit(url)
     token = entry.get("token") or (dict(parse_qsl(typed.query)).get("token") if parts.hostname == typed.hostname else None)

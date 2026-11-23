@@ -42,7 +42,7 @@ try:
 except ImportError:  # Qt 5
     from qgis.PyQt.QtWidgets import QShortcut
 
-from ..core import analysis_cache, audit
+from ..core import analysis_cache, audit, errors
 from ..core.analysis import (
     AGGREGATES, DEFAULT_TABLE_LIMIT, JOIN_TYPES, PROJECT_KEY, PROJECT_SCOPE, AnalysisError, Analysis, Builder, Column, Figure, Join,
     Result, Table, aliases, analyses_of, analyses_text, build_sql, cell_text, csv_text, esri_columns, esri_tables, examples, parameters,
@@ -997,8 +997,9 @@ class AnalysisDock(PluginDock):
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(self.csv_text())
         except OSError as error:
-            self.say(self.tr("保存できない: {m}").format(m=error))
-            audit.error("file-save", path, error.strerror or str(error), detail={"what": "analysis-csv"})
+            reason, said = errors.describe(error)
+            self.say(self.tr("保存に失敗: {m}").format(m=reason))
+            audit.error("file-save", path, reason, detail={"what": "analysis-csv", "said": said})
             return None
         audit.record("export", "analysis-csv", path, count=len(self.result.rows), detail={"analysis": self.current or ""}, file=path)
         self.say(self.tr("{n:,} 行を保存: {p}").format(n=len(self.result.rows), p=path))

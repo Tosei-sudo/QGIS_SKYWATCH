@@ -70,7 +70,7 @@ from ..qgis_io.detection_results import detection_layers, detection_results, ima
 from ..qgis_io.obs_images import IMAGE_ID, image_layers, observed_image
 from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
-from ..qgis_io.tasks import current_feedback, run_task
+from ..qgis_io.tasks import current_feedback, error_text, run_task
 from .docks import PluginDock, ask_no, plain_label
 from .last_inputs import InputMemory
 from .list_views import column_menus
@@ -387,7 +387,7 @@ class AiResultsDock(PluginDock):
                 try:
                     out.append((s, fetch(client, s, image_id, tokens[s.url], cancelled=feedback.isCanceled if feedback else None), None))
                 except Exception as error:  # noqa: BLE001 (said per source)
-                    out.append((s, [], str(error)))
+                    out.append((s, [], error_text(error)))
             return out
 
         def done(found) -> None:

@@ -189,7 +189,7 @@ class ModesPart:
             self.say(NO_IMAGE)
             on = False
         if on and unseen and not self.book.keeps_unseen_areas():
-            self.say(self.tr("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）"))
+            self.say(self.tr("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）［E704］"))
             on = False
         unseen = on and unseen
         for button, want in ((self.area_button, on and not unseen), (self.unseen_area_button, unseen)):

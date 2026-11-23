@@ -124,7 +124,7 @@ def load_groups(client: EsriClient, url: Optional[str], fields: dict, token: Opt
         return []
     info = client.layer(url, token, refresh=True)
     if fields["name"] not in set(info.field_types):
-        raise EsriError(f"依頼グループのテーブルに属性 {fields['name']} なし")
+        raise EsriError(f"依頼グループの表に必要な項目がない（管理者に連絡: {fields['name']}）", code="E704")
     rows = client.query_all(url, "1=1", token, geometry=False, limit=10000, cancelled=cancelled)
     return groups_of((r.get("attributes") or {} for r in rows), fields)
 
@@ -138,7 +138,7 @@ def read_groups(client: EsriClient, url: Optional[str], fields: dict, token: Opt
     try:
         return load_groups(client, url, fields, token, cancelled), ""
     except Exception as error:  # noqa: BLE001 (never stops the requests being read)
-        return None, f"依頼グループのテーブルを読めない（{error}）"
+        return None, f"依頼グループのテーブルの読み込みに失敗: {error}"
 
 
 # --- Choosing -------------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import quote, unquote
 
+from ..errors import Coded
 from ..util import is_record
 
 
@@ -235,8 +236,10 @@ def find_file(root: str, rest: Sequence[str], listdir: Callable[[str], list[str]
     return here
 
 
-class PathError(Exception):
-    """A local path that cannot be opened, and why."""
+class PathError(Coded):
+    """A local path that cannot be opened, and why (エラーコード E5xx, core/errors.py)."""
+
+    code = "E502"
 
 
 @dataclass(frozen=True)
@@ -261,12 +264,13 @@ def resolve_path(path: str, mappings: Sequence[PathMapping | PathRewrite], folde
     if exists(here):
         return Resolved("file", here)
     if not found:
-        raise PathError(f"「{path}」なし（管理者に連絡: pathMappings）")
+        raise PathError("画像のフォルダが見つからない（管理者に連絡: pathMappings）", detail=f"「{path}」なし")
     mapping, rest = found
     folder = folder_for(mapping.prefix)
     if not folder:
         return Resolved("folder", mapping=mapping)
     hit = find_file(folder, rest)
     if not hit:
-        raise PathError(f"「{mapping.label}」に選んだフォルダ「{folder}」の中に {'/'.join(rest)} なし（選び直すにはメニュー「設定…」の「画像のフォルダの対応」で消去）")
+        raise PathError(f"選んだフォルダ「{folder}」に {'/'.join(rest)} なし。メニュー「設定…」の「画像のフォルダの対応」で消去して選び直す",
+                        detail=mapping.label)
     return Resolved("file", hit)

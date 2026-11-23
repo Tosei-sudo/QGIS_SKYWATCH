@@ -257,7 +257,7 @@ class FirstSetupDialog(QDialog):
         configured = self.text_assist is not None and self.text_assist.configured
         self.ai.setEnabled(configured)
         self.ai.setToolTip(tr("使うと、備考を整える・依頼文から下書き・文で操作などのボタンが出る（モデルは使うときに読み込む）")
-                           if configured else tr("生成 AI のモデルが未設定（管理者に連絡: textAssist）"))
+                           if configured else tr("生成 AI のモデルが未設定（管理者に連絡: textAssist）［E703］"))
 
     def _current_names(self) -> list[str]:
         return self.keeper.names if self.keeper is not None else roles()

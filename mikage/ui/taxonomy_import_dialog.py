@@ -23,6 +23,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.obs.api import kind_of
 from ..core.obs.api import taxonomy_import as ti
 from ..qgis_io import taxonomy_import_io as tio
+from ..qgis_io.tasks import error_text
 from .docks import ask_no, plain_label
 from .fit import fit_text
 from .record_import_dialog import VECTOR_LAYERS
@@ -242,7 +243,7 @@ class TaxonomyImportDialog(QDialog):
                     note = self.tr("レイヤーを選ぶ（Esri や Oracle の表、CSV を読み込んだレイヤーも）")
         except (OSError, ValueError, RuntimeError) as error:
             self.columns, self.rows = [], []
-            note = self.tr("読めない: {m}").format(m=error)
+            note = self.tr("読み込みに失敗: {m}").format(m=error_text(error))
         self.source_note.setText(note)
         book = self.dock.book
         taxonomy, fields = (book.taxonomy(), book.spec_fields) if book is not None else ([], [])
@@ -357,7 +358,7 @@ class TaxonomyImportDialog(QDialog):
             try:
                 return b.plan_taxonomy_import(request)
             except ValueError as error:
-                return str(error)
+                return error_text(error)
 
         def after(plan) -> None:
             self._running = False

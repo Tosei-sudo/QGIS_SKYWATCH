@@ -30,6 +30,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.training.api import advice, Column, confusion, courses_of, grades, grades_csv, in_period, PERIODS
+from ..qgis_io.tasks import error_text
 from .exercise_screens import BAD, GOOD, GREY, minutes_text
 from .fit import fit_text
 
@@ -250,7 +251,7 @@ class GradesDialog(QDialog):
         try:
             self.save_csv(path)
         except OSError as error:
-            self.note.setText(self.tr("書き出しに失敗: {e}").format(e=error))
+            self.note.setText(self.tr("書き出しに失敗: {e}").format(e=error_text(error)))
             self.note.setVisible(True)
             return None
         self.note.setText(self.tr("書き出し済み: {p}").format(p=path))

@@ -10,7 +10,8 @@ from typing import Optional
 from qgis.core import Qgis
 from qgis.PyQt.QtWidgets import QPushButton
 
-from ..ui import first_setup
+from ..core import errors
+from ..ui import error_help, first_setup
 from ..ui.dock_layouts import DockLayoutMenu
 from ..ui.list_views import set_column_drag
 from ..ui.settings_dialog import SettingsDialog
@@ -37,12 +38,16 @@ class Platform(Feature):
         host.health_dialog = None
         self._help_menu = None
         self._problems_shown: Optional[tuple] = None
+        self._bar_help: Optional[error_help.BarHelp] = None
 
     def start(self) -> None:
         # `columnDrag`: the lists' columns dragged by their header or only moved from its menu.
         self.context.configChanged.connect(self._column_drag_changed)
         # The docks no longer show the settings file's state: problems go to the message bar, once per file and list.
         self.context.configChanged.connect(self._config_problems)
+        # エラーコード: 「対処法」 on the message bar's items with one, and a click on a dock's status line (ui/error_help.py).
+        error_help.set_opener(self.open_help)
+        self._bar_help = error_help.BarHelp(self.iface.messageBar(), self.window())
 
     def add_actions(self) -> None:
         host, window = self.host, self.window()
@@ -105,7 +110,9 @@ class Platform(Feature):
             return
         self._problems_shown = key
         bar = self.iface.messageBar()
-        item = bar.createMessage(tr("設定ファイル"), tr("問題 {n} 件（一覧はメニュー「設定…」）").format(n=len(c.problems)))
+        # The エラーコード: the first problem's own (a file that cannot be read, E702; one not fetched, E1xx), else E701.
+        code = errors.code_of(c.problems[0]) or "E701"
+        item = bar.createMessage(tr("設定ファイル"), errors.tagged(tr("問題 {n} 件（一覧はメニュー「設定…」）").format(n=len(c.problems)), code))
         button = QPushButton(tr("設定…"), item)
         button.clicked.connect(self.open_settings)
         item.layout().addWidget(button)
@@ -192,6 +199,11 @@ class Platform(Feature):
 
     def unload(self) -> None:
         host = self.host
+        error_help.set_opener(None)
+        if self._bar_help is not None:
+            self._bar_help.unload()
+            self._bar_help.deleteLater()
+            self._bar_help = None
         close(host.help_dialog)
         host.help_dialog = None
         if self._help_menu is not None:

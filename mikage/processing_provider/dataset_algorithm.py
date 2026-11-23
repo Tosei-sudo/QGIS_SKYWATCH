@@ -22,6 +22,7 @@ from ..core.ai.api import (
     Dataset, DatasetError, add_group, load_dataset, make_group, missing_files, parse_class_map, save_dataset,
 )
 from ..qgis_io.dataset_io import class_counts, class_field_of, vector_layer
+from ..qgis_io.tasks import error_text
 
 HERE = os.path.dirname(os.path.dirname(__file__))
 #: The formats offered (自動 first).
@@ -145,6 +146,6 @@ class DatasetAlgorithm(QgsProcessingAlgorithm):
         try:
             save_dataset(dataset, path)
         except OSError as e:
-            raise QgsProcessingException(tr("保存に失敗: {e}").format(e=e))
+            raise QgsProcessingException(tr("保存に失敗: {e}").format(e=error_text(e)))
         feedback.pushInfo(tr("保存: {path}（画像 {n}・物体 {o}）").format(path=path, n=len(dataset.items), o=dataset.stats["objects"]))
         return {self.OUTPUT: path, self.COUNT: added}

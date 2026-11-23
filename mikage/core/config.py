@@ -13,6 +13,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from . import errors
 from .ai.model_config import AiModelConfig, ai_model_of
 from .ai.transfer import DetectionOutput, detection_output_of
 from .ai_results import AiResultSource, ai_result_source_of
@@ -398,7 +399,7 @@ def parse_config_text(text: str) -> tuple[PluginConfig, list[str]]:
     try:
         value = load_jsonc(text)
     except JsoncError as error:
-        return PluginConfig(), [f"設定ファイルを {error}"]
+        return PluginConfig(), [errors.tagged(f"設定ファイルを {error}", "E702")]
     return parse_config(value)
 
 
@@ -408,7 +409,7 @@ def read_config_file(path: str) -> tuple[PluginConfig, list[str]]:
         with open(path, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError as error:
-        return PluginConfig(), [f"設定ファイルを読み込めない（{error.strerror or error}）"]
+        return PluginConfig(), [errors.tagged(f"設定ファイルを読めない（{error.strerror or error}）", errors.os_code(error))]
     except UnicodeDecodeError:
-        return PluginConfig(), ["設定ファイルは UTF-8 で保存"]
+        return PluginConfig(), [errors.tagged("設定ファイルの文字コードを読めない（UTF-8 で保存）", "E702")]
     return parse_config_text(text)

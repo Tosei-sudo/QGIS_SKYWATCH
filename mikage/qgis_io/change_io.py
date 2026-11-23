@@ -19,6 +19,7 @@ from typing import Callable, Optional
 import numpy as np
 from osgeo import gdal, ogr, osr
 
+from ..core.errors import Coded
 from ..core.change import ChangeMethod, Thresholds, change_mask, compare, spread_of, thresholds_of
 
 #: Output rows made at once.
@@ -29,7 +30,7 @@ MAX_POLYGONS = 20_000
 RESAMPLING = {"bilinear": "bilinear", "nearest": "near"}
 
 
-class ChangeError(Exception):
+class ChangeError(Coded):
     """A reason the two images cannot be compared (shown as it is)."""
 
 
@@ -73,7 +74,7 @@ def _bounds(ds, to: Optional[osr.SpatialReference]) -> tuple:
     xs = [p[0] for p in pts if math.isfinite(p[0])]
     ys = [p[1] for p in pts if math.isfinite(p[1])]
     if not xs or not ys:
-        raise ChangeError("画像の範囲の座標変換に失敗")
+        raise ChangeError("画像の範囲の座標変換に失敗", code="E508")
     return min(xs), min(ys), max(xs), max(ys)
 
 
@@ -95,7 +96,7 @@ def plan(before, after) -> tuple:
     ref, other = (after, before) if pixel_size(after) < pixel_size(before) else (before, after)
     gt = ref.GetGeoTransform()
     if gt[2] != 0 or gt[4] != 0 or gt[1] <= 0 or gt[5] >= 0:
-        raise ChangeError("北が上でない（回転のある）画像は未対応")
+        raise ChangeError("北が上でない（回転のある）画像は未対応", code="E505")
     xmin, ymin, xmax, ymax = _bounds(other, _srs(ref))
     x0 = max(0, math.floor((xmin - gt[0]) / gt[1] + 1e-6))
     x1 = min(ref.RasterXSize, math.ceil((xmax - gt[0]) / gt[1] - 1e-6))
@@ -127,7 +128,7 @@ def _on_grid(ds, band: int, bounds: tuple, width: int, height: int, wkt: str, re
         options["srcNodata"] = no_data
     warped = gdal.Warp("", one, **options)
     if warped is None:
-        raise ChangeError("画像の再サンプリングに失敗")
+        raise ChangeError("画像の再サンプリングに失敗", code="E508")
     warped.keep = one
     return warped
 
@@ -143,7 +144,7 @@ def change_files(before_path: str, before_band: int, after_path: str, after_band
         raise ChangeError("画像を開けない")
     for ds, band, what in ((before, before_band, "前"), (after, after_band, "後")):
         if not 1 <= band <= ds.RasterCount:
-            raise ChangeError(f"{what}の画像にバンド {band} なし")
+            raise ChangeError(f"{what}の画像にバンド {band} なし", code="E504")
     ref, x0, y0, x1, y1 = plan(before, after)
     gt = ref.GetGeoTransform()
     width, height = x1 - x0, y1 - y0

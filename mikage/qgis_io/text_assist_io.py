@@ -84,18 +84,18 @@ def load_genai(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         og = None
     if og is None and os.path.isdir(os.path.join(vendored, "onnxruntime_genai")):
         if sys.version_info[:2] != VENDORED_PYTHON:
-            raise RuntimeMissing(f"同梱の onnxruntime-genai は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
+            raise RuntimeMissing(code="E602", message=f"同梱の onnxruntime-genai は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
                                  f"（この QGIS は {sys.version_info[0]}.{sys.version_info[1]}）。{install_hint(system)}")
         try:
             add_package("onnxruntime_genai", vendored, first=True)  # From a copy outside the plugin's folder (core/win64).
         except NotCopied as error:
-            raise RuntimeMissing(f"{error}。{NOT_COPIED}") from error
+            raise RuntimeMissing(f"{error}。{NOT_COPIED}", code="E602") from error
         try:
             import onnxruntime_genai as og  # noqa: PLC0415
         except ImportError as error:
-            raise RuntimeMissing(f"同梱の onnxruntime-genai の読み込みに失敗（{error}）。{install_hint(system)}") from error
+            raise RuntimeMissing(f"同梱の onnxruntime-genai を読み込めない。{install_hint(system)}", code="E602", detail=str(error)) from error
     if og is None:
-        raise RuntimeMissing(f"文章の手伝いに必要な onnxruntime-genai なし。{install_hint(system)}")
+        raise RuntimeMissing(f"文章の手伝いに必要な onnxruntime-genai なし。{install_hint(system)}", code="E602")
     try:
         og.disable_telemetry_events()
     except Exception:  # noqa: BLE001 (a version without it)
@@ -187,17 +187,17 @@ def unpacked(zip_path: str, root: str, source: str = "") -> str:
             for info in z.infolist():
                 parts = info.filename.replace("\\", "/").split("/")
                 if info.filename.startswith(("/", "\\")) or ".." in parts or re.match(r"^[A-Za-z]:", info.filename):
-                    raise AiError(f"モデルの zip に不正なパス（{info.filename}）")
+                    raise AiError("モデルの zip を読めない", code="E604", detail=f"不正なパス {info.filename}")
             z.extractall(work)
 
     try:
         target = _made(root, name, fill)
     except zipfile.BadZipFile as error:
-        raise AiError(f"モデルの zip を開けない（{os.path.basename(zip_path)}: {error}）") from error
+        raise AiError(f"モデルの zip を開けない（{os.path.basename(zip_path)}）", code="E604", detail=str(error)) from error
     _forget_older(root, tag, target)
     found = config_folder(target)
     if found is None:
-        raise AiError(f"モデルの zip に {CONFIG_FILE} なし（{os.path.basename(zip_path)}）")
+        raise AiError(f"モデルの zip に {CONFIG_FILE} なし（{os.path.basename(zip_path)}）", code="E604")
     return found
 
 
@@ -229,9 +229,9 @@ def model_folder_of(source: str, base: str = "", progress: Optional[Callable[[fl
     if os.path.isdir(whole):
         folder = config_folder(whole)
         if folder is None:
-            raise AiError(f"モデルのフォルダに {CONFIG_FILE} なし（{whole}）")
+            raise AiError(f"モデルのフォルダに {CONFIG_FILE} なし", code="E603", detail=whole)
         return copied(folder, root or models_folder()) if is_network_path(folder) else folder
-    raise AiError(f"モデルなし（{whole}）")
+    raise AiError("モデルなし", code="E603", detail=whole)
 
 
 def urlsplit_path(url: str) -> str:
@@ -270,7 +270,7 @@ class GenAiWriter:
             self.model = og.Model(config)
             self.tokenizer = og.Tokenizer(self.model)
         except Exception as error:  # noqa: BLE001
-            raise AiError(f"モデルの読み込みに失敗（{os.path.basename(folder)}: {str(error).splitlines()[0] if str(error) else error}）") from error
+            raise AiError(f"モデルを読めない（{os.path.basename(folder)}）", code="E604", detail=str(error).splitlines()[0] if str(error) else repr(error)) from error
         self.context_length = 4096
         #: Its size (billions of parameters, from its settings; None when they do not say).
         self.params: Optional[float] = None
@@ -319,7 +319,7 @@ class GenAiWriter:
         with self._lock:
             ids = list(self.tokenizer.encode(self.prompt(messages)))
             if len(ids) + max_tokens > self.context_length:
-                raise AiError(f"入力が長すぎる（{len(ids)} トークン、モデルは {self.context_length} まで）")
+                raise AiError(f"入力が長すぎる（{len(ids)} トークン、モデルは {self.context_length} まで）", code="E608")
             generator = self._read(ids, max_tokens, keep)
             stream = self.tokenizer.create_stream()
             text = ""
@@ -588,7 +588,7 @@ class TextAssistant(QObject):
         t = s.task(task) if s is not None else None
         model = s.model_for(task) if s is not None else None
         if t is None or model is None:
-            failed(self.tr("{t} のモデルが未設定（管理者に連絡: textAssist.tasks）").format(t=task))
+            failed(self.tr("{t} のモデルが未設定（管理者に連絡: textAssist.tasks）［E703］").format(t=task))
             return None
         if not self.enabled:
             failed(self.tr("生成 AI の機能を使わない設定（「担当と個人設定…」の「個人の設定」）"))

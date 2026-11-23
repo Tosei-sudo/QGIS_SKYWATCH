@@ -222,4 +222,4 @@ def test_a_style_with_pmtiles_says_why(plugin, server):
     finally:
         STYLE["sources"]["v"]["tiles"] = ["./tiles/{z}/{x}/{y}.pbf"]
     assert current_base_map() == "local"
-    assert any("PMTiles" in w.text() and "a.pmtiles" in w.text() for w in iface.bar.items())
+    assert any("PMTiles" in w.text() and "（管理者に連絡: basemaps）" in w.text() for w in iface.bar.items())

@@ -290,7 +290,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
         result, reason = c.result, c.reason or "・".join(c.warnings)
         file = file_of(files, name, c.key)
         if result == TAKEN and file is None:
-            result, reason = HELD, f"書き出し失敗（{failures.get(name) or 'ファイルなし'}）"
+            result, reason = HELD, f"書き出しに失敗: {failures.get(name) or 'ファイルなし'}"
         taken = result == TAKEN
         if taken and name not in links:
             links[name] = link_ids(plan.candidates, day, c.system)

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable, Iterable, Optional, Sequence
 
+from .errors import Coded
 from .util import formula_safe
 
 #: The most rows read from one table (more is an error: narrow it with its condition).
@@ -113,7 +114,7 @@ JOIN_TYPES = {"inner": ("ある行だけ（内部結合）", "JOIN"), "left": ("
 _ID_COLUMNS = {"objectid", "fid", "gid", "oid", "globalid", "shape", "shape_length", "shape_area", "shape__length", "shape__area"}
 
 
-class AnalysisError(Exception):
+class AnalysisError(Coded):
     """A query that cannot run, or a table that cannot be read (the reason in Japanese)."""
 
 
@@ -547,9 +548,9 @@ def read_esri(client: Any, table: Table, where: str = "", shape: bool = False, l
             features = _esri_features(client, table, info, clauses, None, token, drawn, limit, cancelled, None, cache_minutes, notes)
             notes.append("fallback")
     except TooManyError as error:
-        raise AnalysisError(f"{table.name}: {error}") from None
+        raise AnalysisError(f"{table.name}: {error.message}", code=error.code) from None
     except EsriError as error:
-        raise AnalysisError(f"{table.name} の読み込みに失敗: {error}") from None
+        raise AnalysisError(f"{table.name} の取得に失敗: {error.message}", code=error.code, detail=error.detail) from None
     table.spatial = bool(info.geometry_type)
     dates = {f["name"] for f in layer_fields if str(f.get("type", "")).lower() == "esrifieldtypedate"}
     rows = []

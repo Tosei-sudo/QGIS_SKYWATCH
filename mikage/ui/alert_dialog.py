@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ..core import audit, edit_stamp
+from ..core import audit, edit_stamp, errors
 from ..core.esri import EsriError
 from ..core.obs.api import (
     OBJECT_LAYERS, AlertItem, AlertSettings, LogRow, Moment, build_lines, history_query, layer_key_problems, load_geofences,
@@ -556,9 +556,9 @@ class AlertDialog(QDialog):
                     if replaced:
                         said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=fmt.file.encoding))
                 except (OSError, ValueError) as error:
-                    said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
-                    audit.error("file-save", getattr(error, "filename", None) or "", str(getattr(error, "strerror", None) or error),
-                                detail={"what": "alert-text"})
+                    reason, detail = errors.describe(error)
+                    said.append(self.tr("ファイルの書き込みに失敗: {e}").format(e=reason))
+                    audit.error("file-save", getattr(error, "filename", None) or "", reason, detail={"what": "alert-text", "said": detail})
             sent = {i.record.id for i in items}
             if s.table and logged:
                 self.dock.mark_reported(sent)

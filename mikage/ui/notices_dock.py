@@ -33,7 +33,7 @@ from ..core.catalog.api import Checked, WatchStore, check_due, check_one
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .alert_feed import AlertFeed
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .list_views import column_menus
@@ -225,7 +225,7 @@ class NoticesDock(PluginDock):
         try:
             store = self.store()
         except Exception as error:  # noqa: BLE001 (no GeoPackage: nothing to check)
-            self.status.setText(str(error))
+            self.status.setText(error_text(error))
             return
         if not any(w.enabled for w in store.watches()):
             return
@@ -298,7 +298,7 @@ class NoticesDock(PluginDock):
             store = self.store()
             notices, watches = store.notices(), store.watches()
         except Exception as error:  # noqa: BLE001
-            self.status.setText(str(error))
+            self.status.setText(error_text(error))
             return
         self.notices.clear()
         bold = QFont()

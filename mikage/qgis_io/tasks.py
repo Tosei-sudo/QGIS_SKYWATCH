@@ -22,7 +22,7 @@ from typing import Any, Callable, Optional
 
 from qgis.core import Qgis, QgsApplication, QgsFeedback, QgsMessageLog, QgsTask
 
-from ..core import audit
+from ..core import audit, errors
 from ..core.esri import EsriError
 
 LOG_TAG = "MIKAGE"
@@ -30,6 +30,24 @@ LOG_TAG = "MIKAGE"
 
 class Cancelled(Exception):
     """The person cancelled the task."""
+
+
+def _coded(shown: str, detail: str = "") -> Optional[dict]:
+    """The audit log's detail of a failure: its code (エラーコード, core/errors.py) and what the screen left out."""
+    out = {k: v for k, v in (("code", errors.code_of(shown)), ("detail", detail)) if v}
+    return out or None
+
+
+def error_text(error: BaseException) -> str:
+    """
+    What a screen shows for an error it caught itself (not in a task): its
+    text with its エラーコード (core/errors.py). What only the log needs (a
+    server's or Python's own words, a path) is written to QGIS's log.
+    """
+    shown, detail = errors.describe(error)
+    if detail:
+        QgsMessageLog.logMessage(f"{shown}（{detail}）", LOG_TAG, Qgis.MessageLevel.Info, notifyUser=False)
+    return shown
 
 
 #: The task whose work runs in this thread (its requests stop when it is cancelled).
@@ -105,15 +123,19 @@ class FunctionTask(QgsTask):
             self.error = "取消"
             return False
         except EsriError as error:
-            # A service that cannot be reached or refuses: shown where it was asked, logged as a line (not a warning).
+            # A service that cannot be reached or refuses: shown where it was asked (its text and code, core/errors.py),
+            # logged as a line with the detail the screen leaves out (the address, the server's own words), not a warning.
             self.error = str(error) or type(error).__name__
-            QgsMessageLog.logMessage(f"{self.description()}: {self.error}", LOG_TAG, Qgis.MessageLevel.Info)
-            audit.error("task", self.description(), self.error)
+            QgsMessageLog.logMessage(f"{self.description()}: {errors.detailed(error)}", LOG_TAG, Qgis.MessageLevel.Info)
+            audit.error("task", self.description(), self.error, detail=_coded(self.error, error.detail))
             return False
         except Exception as error:  # noqa: BLE001 (any failure is shown, not raised)
-            self.error = str(error) or type(error).__name__
-            # (A warning of the plugin's: in the audit log too, with its traceback.)
-            QgsMessageLog.logMessage(f"{self.description()}: {self.error}\n{traceback.format_exc()}", LOG_TAG, Qgis.MessageLevel.Warning)
+            # The screen: the plugin's own words, or the code of a file error or of an unexpected one (E901) without
+            # Python's English; the log: all of it with its traceback (a warning of the plugin's: in the audit log too).
+            self.error, detail = errors.describe(error)
+            self.error = self.error or type(error).__name__
+            QgsMessageLog.logMessage(f"{self.description()}: {self.error}{'（' + detail + '）' if detail else ''}\n{traceback.format_exc()}",
+                                     LOG_TAG, Qgis.MessageLevel.Warning)
             return False
         finally:
             _current.task = None

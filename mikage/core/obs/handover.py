@@ -261,7 +261,7 @@ class KeptMemo:
 def _types(client: EsriClient, table: EsriSource, token: Optional[str]) -> dict[str, str]:
     types = client.layer(table.url, token, refresh=True).field_types
     if table.fields["text"] not in types:
-        raise EsriError(f"引き継ぎメモのテーブルに属性 {table.fields['text']} なし")
+        raise EsriError(f"引き継ぎメモの表に必要な項目がない（管理者に連絡: {table.fields['text']}）", code="E704")
     return types
 
 
@@ -305,7 +305,7 @@ def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData,
     r = (client.apply_edits(table.url, adds=[{"attributes": {k: fit_value(v, types[k]) for k, v in values.items() if k in types}}],
                             token=token).add_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError(f"引き継ぎメモの保存に失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
+        raise EsriError(code="E305", detail="引き継ぎメモの保存: " + ((r.get("error") or {}).get("description") or ""))
     return cut
 
 

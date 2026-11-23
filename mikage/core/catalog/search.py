@@ -297,7 +297,7 @@ def _pages(client: EsriClient, url: str, base: dict[str, str], order: Optional[s
             raise
         except EsriError as error:
             if offset == 0 and not out:
-                raise _Refused(str(error)) from None
+                raise _Refused(error.message, code=error.code, detail=error.detail) from None
             raise
         oid = answer.get("objectIdFieldName") or oid
         page = [f for f in answer.get("features") or [] if isinstance(f, dict)]

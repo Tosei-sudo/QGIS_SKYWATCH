@@ -172,7 +172,7 @@ def find_images(client: EsriClient, catalog: CatalogConfig, token: Optional[str]
     """
     acquired = catalog.fields.get("acquired")
     if not acquired:
-        raise EsriError(f"{catalog.label} に撮像日時の属性（fields.acquired）なし")
+        raise EsriError(f"{catalog.label}に撮像日時の項目がない（管理者に連絡: fields.acquired）", code="E704")
     if not unit.rings:
         raise EsriError("このショットには範囲がないため、画像を探せない")
     types = client.layer(catalog.url, token).field_types

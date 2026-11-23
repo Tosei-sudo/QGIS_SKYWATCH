@@ -1189,7 +1189,7 @@ def _log_types(client: EsriClient, settings: AlertSettings, token: Optional[str]
     table = settings.table
     types = client.layer(table.url, token or table.token, refresh=True).field_types
     if table.fields["obsId"] not in types:
-        raise EsriError(f"通報テーブルに属性 {table.fields['obsId']} なし")
+        raise EsriError(f"通報の表に必要な項目がない（管理者に連絡: {table.fields['obsId']}）", code="E704")
     return types
 
 
@@ -1266,7 +1266,7 @@ def poll_log(client: EsriClient, settings: AlertSettings, known: Iterable[int], 
     types = info.field_types
     f = table.fields
     if f["obsId"] not in types:
-        raise EsriError(f"通報テーブルに属性 {f['obsId']} なし")
+        raise EsriError(f"通報の表に必要な項目がない（管理者に連絡: {f['obsId']}）", code="E704")
     clauses = [table.where] if table.where else []
     if since is not None and f["reportedAt"] in types:
         clauses.append(f"{f['reportedAt']} >= {sql.timestamp(since)}")
@@ -1319,7 +1319,7 @@ def remove_log(client: EsriClient, settings: AlertSettings, rows: Sequence[LogRo
     results = client.delete_features(table.url, ids, token or table.token)
     failed = [r for r in results if not r.get("success")]
     if failed:
-        raise EsriError(f"通報記録の削除: {len(failed)} 件失敗（{(failed[0].get('error') or {}).get('description') or ''}）")
+        raise EsriError(f"通報記録 {len(failed)} 件の削除をサーバーが受け付けない", code="E305", detail=(failed[0].get("error") or {}).get("description") or "")
     return len(ids)
 
 
@@ -1766,7 +1766,7 @@ def write_log(client: EsriClient, settings: AlertSettings, report: AlertFormat, 
             else:
                 failures.append((r.get("error") or {}).get("description") or "追加失敗")
     if failures:
-        raise EsriError(f"通報テーブルへの追加: {added} 件成功・{len(failures)} 件失敗（{failures[0]}）")
+        raise EsriError(f"{len(failures)} 件をサーバーが受け付けない（{added} 件は追加済み）", code="E305", detail=failures[0])
     return added
 
 

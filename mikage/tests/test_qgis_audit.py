@@ -116,7 +116,9 @@ def test_exports_opened_images_and_qgis_edits_are_recorded(tmp_path):
     export, failed, opened, saved = records(tmp_path / "here")
     assert (export["kind"], export["action"], export["count"], export["detail"]["bytes"]) == ("export", "observations-csv", 1, 4)
     assert (failed["kind"], failed["action"], failed["target"], failed["detail"]) == (
-        "error", "file-save", str(tmp_path / "missing" / "x.csv"), {"what": "file"}) and failed["error"]
+        "error", "file-save", str(tmp_path / "missing" / "x.csv"),
+        {"code": "E401", "what": "file", "said": f"{tmp_path / 'missing' / 'x.csv'}: No such file or directory"})
+    assert failed["error"] == "ファイル・フォルダがない［E401］"
     assert (opened["kind"], opened["target"], opened["detail"]["files"]) == ("open", "IMG-1", [str(tmp_path / "img.tif")])
     assert (saved["kind"], saved["action"], saved["detail"]["added"], saved["detail"]["by"]) == ("edit", "save", 1, "qgis")
     QgsProject.instance().removeAllMapLayers()

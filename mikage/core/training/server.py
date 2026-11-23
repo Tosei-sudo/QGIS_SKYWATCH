@@ -1169,7 +1169,7 @@ class TrainingServer:
             except OSError:
                 continue
         if httpd is None:
-            raise OSError("練習用のサーバーを始められません（ポートを開けません）")
+            raise OSError("練習用のサーバーを始められない（この PC の中の通信の口を開けない）［E110］")
         httpd.daemon_threads = True
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:

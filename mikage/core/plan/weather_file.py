@@ -16,6 +16,7 @@ import struct
 from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
+from .. import errors
 from ..util import time_of
 from .weather import CloudForecastConfig, CloudForecasts, CloudSeries, key_of
 
@@ -136,13 +137,13 @@ def forecast_file(config: CloudForecastConfig) -> str:
     """The file to read for the setting; raises with the reason when there is none."""
     if config.file:
         if not os.path.isfile(config.file):
-            raise ValueError(f"雲量予報のファイルがない: {config.file}")
+            raise errors.Failed(f"雲量予報のファイルがない: {config.file}", code="E401")
         return config.file
     if not os.path.isdir(config.folder):
-        raise ValueError(f"雲量予報のフォルダがない: {config.folder}")
+        raise errors.Failed(f"雲量予報のフォルダがない: {config.folder}", code="E401")
     path = newest_file(config.folder)
     if not path:
-        raise ValueError(f"雲量予報のフォルダに .tif がない: {config.folder}")
+        raise errors.Failed(f"雲量予報のフォルダに .tif がない: {config.folder}", code="E401")
     return path
 
 
@@ -160,18 +161,18 @@ def _open(path: str):
     except RuntimeError:  # GDAL raising (gdal.UseExceptions)
         ds = None
     if ds is None:
-        raise ValueError(f"雲量予報のファイルを開けない: {os.path.basename(path)}")
+        raise errors.Failed(f"雲量予報のファイルを開けない: {os.path.basename(path)}", code="E404")
     return ds
 
 
 def _grid_of(ds, path: str) -> CloudGrid:
     transform = tuple(ds.GetGeoTransform(can_return_null=True) or ())
     if len(transform) != 6 or transform[2] or transform[4]:
-        raise ValueError(f"雲量予報のファイルが北が上の経緯度の格子でない: {os.path.basename(path)}")
+        raise errors.Failed(f"雲量予報のファイルが北が上の経緯度の格子でない: {os.path.basename(path)}", code="E404")
     bands = [ds.GetRasterBand(i + 1) for i in range(ds.RasterCount)]
     times = [band_time(b.GetMetadata() or {}, b.GetDescription()) for b in bands]
     if not any(math.isfinite(t) for t in times):
-        raise ValueError(f"雲量予報のファイルのバンドに時刻（VALID_TIME）がない: {os.path.basename(path)}")
+        raise errors.Failed(f"雲量予報のファイルのバンドに時刻（VALID_TIME）がない: {os.path.basename(path)}", code="E404")
     first = bands[0]
     meta = ds.GetMetadata() or {}
     issued = time_of(meta.get("INIT_TIME", ""))
@@ -252,12 +253,12 @@ def read_folder_clouds(folder: str, places: Sequence[Sequence[float]],
     joined (`join_forecasts`); the newest `.tif` alone when none is so named.
     """
     if not os.path.isdir(folder):
-        raise ValueError(f"雲量予報のフォルダがない: {folder}")
+        raise errors.Failed(f"雲量予報のフォルダがない: {folder}", code="E401")
     files = folder_files(folder)
     if not files:
         path = newest_file(folder)
         if not path:
-            raise ValueError(f"雲量予報のフォルダに .tif がない: {folder}")
+            raise errors.Failed(f"雲量予報のフォルダに .tif がない: {folder}", code="E401")
         return read_file_clouds(path, places, cancelled)
     out = []
     for _, path in files:

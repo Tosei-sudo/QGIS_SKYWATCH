@@ -405,7 +405,8 @@ class OfflineWork:
                 kept = self.cached(url, form) if read else None
                 if kept is not None:
                     return kept[0]
-                raise UnreachableError(f"オフライン中（{host_of(url)} に接続できず、{'控えなし' if read else '変更は送信待ちに'}）")
+                raise (UnreachableError(code="E107", detail=f"{host_of(url)}：オフライン中、控えなし") if read else
+                       UnreachableError("サーバーに接続できない。変更は送信待ちに保管", detail=f"{host_of(url)}：オフライン中"))
             try:
                 body = send(url, form)
             except UnreachableError as error:

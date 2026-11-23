@@ -156,14 +156,14 @@ def owner_where(source: EsriSource, user: str) -> str:
 def _need(types: dict[str, str], source: EsriSource, what: str) -> None:
     missing = [source.fields[r] for r in NEEDED if source.fields[r] not in types]
     if missing:
-        raise EsriError(f"{what}に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"{what}に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
 
 
 def _layer(client: EsriClient, source: EsriSource, kind: str, token: Optional[str]):
     info = client.layer(source.url, token or source.token, refresh=True)
     what = f"関心{KIND_LABELS[kind]}のレイヤー"
     if info.geometry_type != GEOMETRY[kind]:
-        raise EsriError(f"{what}は{'ポイント' if kind == POINT else 'ポリゴン'}のレイヤーで（{info.geometry_type or '形状なし'}）")
+        raise EsriError(f"{what}が{'ポイント' if kind == POINT else 'ポリゴン'}のレイヤーでない（管理者に連絡: {info.geometry_type or '形状なし'}）", code="E705")
     _need(info.field_types, source, what)
     return info
 
@@ -195,7 +195,7 @@ def load_interests(client: EsriClient, settings: InterestSettings, user: str,
                    tokens: Optional[dict[str, Optional[str]]] = None) -> list[Interest]:
     """`user`'s points and areas, by name (areas and points mixed)."""
     if not user.strip():
-        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）", code="E205")
     out: list[Interest] = []
     for kind in settings.kinds:
         source = settings.source(kind)
@@ -235,10 +235,10 @@ def save_interest(client: EsriClient, settings: InterestSettings, item: Interest
     if not item.has_shape:
         raise ValueError("形が必要（地図でクリックか描画）")
     if not user.strip():
-        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）", code="E205")
     source = settings.source(item.kind)
     if source is None:
-        raise EsriError(f"関心地域・地点の設定 interests に{KIND_LABELS[item.kind]}のレイヤー（{'points' if item.kind == POINT else 'areas'}）なし")
+        raise EsriError(f"{KIND_LABELS[item.kind]}の保存先が未設定（管理者に連絡: interests.{'points' if item.kind == POINT else 'areas'}）", code="E703")
     token = token or source.token
     info = _layer(client, source, item.kind, token)
     attributes = _attributes(item, source, user, info.field_types, info.field_lengths)
@@ -252,13 +252,13 @@ def save_interest(client: EsriClient, settings: InterestSettings, item: Interest
         result = client.apply_edits(source.url, adds=[feature], token=token)
         r = (result.add_results or [{}])[0]
         if not r.get("success"):
-            raise EsriError("追加失敗（" + ((r.get("error") or {}).get("description") or "理由不明") + "）")
+            raise EsriError(code="E305", detail="追加: " + ((r.get("error") or {}).get("description") or ""))
         return replace(saved, oid=int(r["objectId"]) if is_number(r.get("objectId")) else None, updated_at=edit_stamp.now_ms())
     attributes[info.object_id_field] = item.oid
     result = client.apply_edits(source.url, updates=[feature], token=token)
     r = (result.update_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError("更新失敗（" + ((r.get("error") or {}).get("description") or "別の PC で削除済みか") + "）")
+        raise EsriError(code="E305", detail="更新: " + ((r.get("error") or {}).get("description") or "" or "別の PC で削除済みか"))
     return replace(saved, updated_at=edit_stamp.now_ms())
 
 

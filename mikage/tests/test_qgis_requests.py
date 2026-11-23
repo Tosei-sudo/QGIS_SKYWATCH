@@ -336,7 +336,7 @@ def test_requests_dock_form_layers_and_the_day(plugin):
     rows = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[HISTORY].rows}
     osaka = next(x.id for x in dock.requests if x.name == "大阪湾")
     assert (rows[osaka]["RESULT"], rows[osaka]["CAPTURED"]) == ("見送り", "")
-    assert rows[osaka]["REASON"].startswith("書き出し失敗")
+    assert rows[osaka]["REASON"].startswith("書き出しに失敗: ")
 
     # Each system by its own person (2026-11-09): with a system chosen, only its file, history rows and raises.
     (tmp_path / "sys-b.schema.json").write_text(json.dumps(SCHEMA), encoding="utf-8")

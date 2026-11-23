@@ -27,7 +27,7 @@ from ..core.webmap import (
     DEFAULT_PORTAL, MAX_WEBMAP_READ, SaveResult, WebMapItemRef, item_extent, item_page, parse_item_input, plan_web_map, portal_root,
 )
 from ..qgis_io import settings
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from ..qgis_io.webmap_io import (
     add_opened, auth_with_portal, fetch_web_map, open_plan, project_web_map, save_to_portal, view_in_degrees,
 )
@@ -320,7 +320,7 @@ class WebMapSaveDialog(QDialog):
 
     def failed(self, message: str) -> None:
         self.portal_button.setEnabled(True)
-        self.status.setText(_tr("保存失敗: {e}").format(e=message))
+        self.status.setText(_tr("保存に失敗: {e}").format(e=message))
 
 
 class WebMapDialogs(QObject):
@@ -377,7 +377,7 @@ class WebMapDialogs(QObject):
                     raise ValueError(_tr("JSON として読めない")) from None
             plan = plan_web_map(data)
         except (OSError, ValueError) as error:
-            self.open_dialog.show_result(_tr("読み込みに失敗: {e}").format(e=error), [])
+            self.open_dialog.show_result(_tr("読み込みに失敗: {e}").format(e=error_text(error)), [])
             return
         auth = auth_with_portal(portal, authcfg)
         base_maps = list(self.context.config.base_maps)

@@ -17,6 +17,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.obs.api import record_import as ri
 from ..qgis_io import record_import_io
+from ..qgis_io.tasks import error_text
 from .docks import ask_no, plain_label
 from .fit import fit_text
 
@@ -179,7 +180,7 @@ class RecordImportDialog(QDialog):
                 else:
                     note = self.tr("レイヤーを選ぶ")
         except (OSError, ValueError) as error:
-            note = self.tr("読めない: {m}").format(m=error)
+            note = self.tr("読み込みに失敗: {m}").format(m=error_text(error))
         self.source_note.setText(note)
         guessed = ri.guess_mapping(self.columns)
         for key, box in self.boxes.items():

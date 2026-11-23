@@ -43,7 +43,7 @@ FEATURE_PACKAGES = ("core.ai", "core.catalog", "core.enhance", "core.obs", "core
 
 #: The shared base (共通基盤): imports no feature and nothing above it.
 KERNEL = (
-    "core.esri", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
+    "core.esri", "core.errors", "core.util", "core.time_zone", "core.time_text", "core.audit", "core.edit_stamp", "core.gpkg", "core.offline",
     "core.auth", "core.json_pieces", "core.coords", "core.shapes", "core.sql", "core.sources", "core.win64",
     # The features' doors read when asked (core/<機能>/api.py).
     "core.door",

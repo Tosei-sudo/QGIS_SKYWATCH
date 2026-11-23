@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
     QLabel, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ..core import audit, edit_stamp
+from ..core import audit, edit_stamp, errors
 from ..core.obs.api import (
     STATUSES, AlertLogRepository, Assignment, AssignmentRepository, progress_of, progress_text, same_person, with_status,
 )
@@ -33,7 +33,7 @@ from ..core.obs.api import (
 )
 from ..core.obs.api import RecordQuery, merged
 from ..core.time_zone import format_time
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .list_views import column_menus
 from .docks import ask_no
 from .fit import fit_text
@@ -325,7 +325,7 @@ class HandoverDialog(QDialog):
         """The last memo kept (its end becomes this one's start)."""
         table = self.settings.table
         if table is None:
-            self.last_label.setText(self.tr("前回の引き継ぎメモ: 保存先が未設定（管理者に連絡: handover.table）"))
+            self.last_label.setText(self.tr("前回の引き継ぎメモ: 保存先が未設定（管理者に連絡: handover.table）［E703］"))
             self.last_text.setVisible(False)
             return
         self.last_text.setVisible(True)
@@ -388,19 +388,19 @@ class HandoverDialog(QDialog):
                     found = book.fetch(RecordQuery(basis="created", start=start, end=end))
                     data.records = merged(found, book.fetch(RecordQuery(basis="updated", start=start, end=end)))
                 except Exception as error:  # noqa: BLE001 (the other parts still go in)
-                    problems.append(f"観測記録: {error}")
+                    problems.append(f"観測記録: {error_text(error)}")
             if alerts:
                 try:
                     data.alerts = alert_log.load_log(start, end)
                 except Exception as error:  # noqa: BLE001 (the other parts still go in)
-                    problems.append(f"通報記録: {error}")
+                    problems.append(f"通報記録: {error_text(error)}")
             if stores:
                 data.requests = []
                 for repo in stores:
                     try:
                         data.requests += open_requests(repo.load_requests(task.isCanceled), now, repo.store.label)
                     except Exception as error:  # noqa: BLE001
-                        problems.append(f"撮像依頼（{repo.store.label}）: {error}")
+                        problems.append(f"撮像依頼（{repo.store.label}）: {error_text(error)}")
             if source:
                 try:
                     data.assignments = assignments.load_assignments(done_since=start)
@@ -409,7 +409,7 @@ class HandoverDialog(QDialog):
                         ids = tuple(dict.fromkeys(x.image_id for x in data.assignments if x.image_id))
                         data.records = merged(data.records, book.fetch(RecordQuery(image_ids=ids))) if ids else data.records
                 except Exception as error:  # noqa: BLE001
-                    problems.append(f"分担: {error}")
+                    problems.append(f"分担: {error_text(error)}")
             data.problems = problems
             return handover_text(data, settings)
 
@@ -491,9 +491,9 @@ class HandoverDialog(QDialog):
                 if replaced:
                     said.append(self.tr("{enc} で書けない文字を ? に置き換え").format(enc=s.file.encoding))
             except (OSError, ValueError) as error:
-                said.append(self.tr("ファイルの書き込み失敗: {e}").format(e=getattr(error, "strerror", None) or error))
-                audit.error("file-save", getattr(error, "filename", None) or "", str(getattr(error, "strerror", None) or error),
-                            detail={"what": "handover-memo"})
+                reason, detail = errors.describe(error)
+                said.append(self.tr("ファイルの書き込みに失敗: {e}").format(e=reason))
+                audit.error("file-save", getattr(error, "filename", None) or "", reason, detail={"what": "handover-memo", "said": detail})
         if s.table is None:
             self._say("・".join(said))
             return

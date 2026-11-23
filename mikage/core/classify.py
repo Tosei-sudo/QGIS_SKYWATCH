@@ -17,6 +17,8 @@ from typing import Optional, Sequence
 
 import numpy as np
 
+from . import errors
+
 #: Pixels k-means is trained on, over the whole image; most classes (8-bit class numbers).
 MAX_SAMPLES = 60_000
 MAX_CLASSES = 50
@@ -111,7 +113,7 @@ def train_model(stats: ClassStats, kind: str, names: Sequence[str]) -> ClassMode
         cov = cov + np.eye(dims) * max(1e-9, 1e-4 * float(np.trace(cov)) / dims)
         inv = invert_spd(cov)
         if inv is None:
-            raise ValueError(f"クラス「{names[c]}」の分散の算出に失敗（学習用の画素の値がそろいすぎ）")
+            raise errors.Failed(f"クラス「{names[c]}」の分散の算出に失敗（学習用の画素の値がそろいすぎ）", code="E609")
         inverses[c], constants[c] = inv[0], -0.5 * inv[1]
     return ClassModel(kind, means, inverses, constants)
 
@@ -172,7 +174,7 @@ def k_means(samples: np.ndarray, k: int, iterations: int = 30, seed: int = 1) ->
     samples = np.asarray(samples, dtype=np.float64)
     n, dims = samples.shape
     if n < k:
-        raise ValueError(f"値のある画素が {n} のみのため、{k} クラスに分類できない")
+        raise errors.Failed(f"値のある画素が {n} のみのため、{k} クラスに分類できない", code="E609")
     rand = random(seed)
     means = np.zeros((k, dims))
     nearest = np.full(n, np.inf)

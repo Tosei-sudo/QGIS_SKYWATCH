@@ -328,7 +328,7 @@ class TestEsriObservationStore:
         store = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(refusing))
         a = obs(id="r3")
         store.save([a])
-        with pytest.raises(EsriError, match="1 件の削除に失敗: 権限なし"):
+        with pytest.raises(EsriError, match="1 件の削除をサーバーが受け付けない［E305］"):
             store.remove([a])
         # Still known by its object id: saved again, it is updated, not added twice.
         store.save([replace(a, note="再保存")])
@@ -337,7 +337,7 @@ class TestEsriObservationStore:
     def test_says_which_required_field_is_missing(self):
         fake, _ = esri_layer(["OBS_ID"])
         store = EsriObservationStore(observation_store_of({"label": "観測", "url": URL}, [], 0), EsriClient(fake))
-        with pytest.raises(EsriError, match="観測 に属性 OBJECT_ID なし"):
+        with pytest.raises(EsriError, match=r"観測に必要な項目がない（管理者に連絡: OBJECT_ID）［E704］"):
             store.load()
 
     def test_writes_and_reads_length_and_heading(self):
@@ -636,7 +636,7 @@ def test_an_area_the_server_keeps_stays_known():
     store.save([a])
     oid = store.oids["KEEP"]
     fake.fail_next = {"deleteResults": [{"objectId": oid, "success": False, "error": {"description": "ロック中"}}]}
-    with pytest.raises(EsriError, match="ロック中"):
+    with pytest.raises(EsriError, match="確認範囲 1 件の削除をサーバーが受け付けない［E305］") as said:
         store.remove([a])
-    assert store.oids["KEEP"] == oid
+    assert "ロック中" in said.value.detail and store.oids["KEEP"] == oid
     assert store.remove([a]) == [] and "KEEP" not in store.oids

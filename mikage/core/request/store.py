@@ -304,7 +304,7 @@ def _layer(client: EsriClient, url: str, token: Optional[str], label: str, neede
         use_legacy_names(history, names, DEFAULT_HISTORY_FIELDS, LEGACY_HISTORY_FIELDS)
     missing = [n for n in needed if n not in names]
     if missing:
-        raise EsriError(f"{label} に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"{label}に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
     return names, info.object_id_field
 
 
@@ -443,7 +443,7 @@ def _send_removal(client: EsriClient, store: RequestStoreConfig, token: Optional
         return  # already gone
     stamp = _number(found.get(f["updated"])) if f["updated"] in names else None
     if p.base is not None and stamp is not None and not _same_stamp(stamp, p.base):
-        raise ConflictError(f"「{req.name}」はオフライン中にほかの人が更新したため削除せず")
+        raise ConflictError(f"「{req.name}」はオフライン中にほかの人が先に変更。削除は中止")
     _online_delete(client, store, token, req)
 
 
@@ -509,9 +509,9 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
             req.object_id = server_oid
         if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
                 and not any(_same_stamp(server_stamp, s) for s in (req.pending_update, *tried))):
-            raise ConflictError(f"「{req.name}」はほかの人が先に変更。保存は中止（「最新を取得」を押してから変更）")
+            raise ConflictError(f"「{req.name}」はほかの人が先に変更。「最新を取得」を押してから変更")
     elif req.object_id is not None:
-        raise ConflictError(f"「{req.name}」はほかの人が削除済み（「最新を取得」で確認）")
+        raise ConflictError(f"「{req.name}」はほかの人が削除済み。「最新を取得」を押して確認", code="E302")
     baseline = req.updated
     if req.created is None:
         req.created = now
@@ -523,14 +523,14 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
             result = client.apply_edits(store.url, adds=[feature], token=token)
             r = (result.add_results or [{}])[0]
             if not r.get("success"):
-                raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
+                raise EsriError(code="E305", detail=(r.get("error") or {}).get("description") or "")
             req.object_id = int(r.get("objectId"))
         else:
             feature["attributes"][oid] = req.object_id
             result = client.apply_edits(store.url, updates=[feature], token=token)
             r = (result.update_results or [{}])[0]
             if not r.get("success"):
-                raise EsriError((r.get("error") or {}).get("description") or "保存失敗")
+                raise EsriError(code="E305", detail=(r.get("error") or {}).get("description") or "")
     except EsriError:
         # Kept as read: saving again checks the ledger, which may or may not hold this attempt.
         req.updated, req.pending_update = baseline, now
@@ -686,7 +686,7 @@ def _send_requests(client: EsriClient, store: RequestStoreConfig, token: Optiona
                         sent.saved.append(req)
                     else:
                         unsure([item])
-                        sent.failed.append((req, EsriError((r.get("error") or {}).get("description") or ("保存失敗" if r else "保存の結果なし"))))
+                        sent.failed.append((req, EsriError(code="E305", detail=(r.get("error") or {}).get("description") or ("" if r else "保存の結果なし"))))
         done += len(chunk)
         progress(100 * done / len(reqs))
     return sent
@@ -1351,7 +1351,7 @@ def update_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[
     names, oid = _shot_layer(client, store, token)
     missing = sorted({sf[k] for _, values in changes for k in values if sf[k] not in names})
     if missing:
-        raise EsriError(f"{store.label} の撮像の範囲に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"{store.label}の撮像の範囲に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
     updates = [{"attributes": {oid: o, **{sf[k]: v for k, v in values.items()}}} for o, values in changes]
     return _batches(lambda batch: client.apply_edits(store.shots, updates=batch, token=token), updates,
                     lambda r: r.update_results, "撮像の範囲の更新")

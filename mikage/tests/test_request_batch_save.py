@@ -106,7 +106,7 @@ def test_a_request_the_server_refuses_fails_alone_and_saving_it_again_is_no_conf
     out = save_requests(refusing, store, None, [replace(r, priority=10) for r in mine], FIRST + H)
     assert sorted(r.id for r in out.saved) == ["R-000", "R-001", "R-003"]
     [(failed, error)] = out.failed
-    assert failed.id == "R-002" and "ロック中" in str(error) and out.conflicts == 0
+    assert failed.id == "R-002" and "［E305］" in str(error) and "ロック中" in error.detail and out.conflicts == 0
     # Kept as read, with the try remembered: the server may hold it (here the fake did save it), so saving again is no conflict.
     assert failed.pending_update == FIRST + H and failed.updated == mine[2].updated
     again = save_requests(client, store, None, [replace(failed, priority=20)], FIRST + 2 * H)

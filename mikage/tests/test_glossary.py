@@ -126,7 +126,7 @@ def test_reads_the_table_with_the_attributes_it_has():
     assert problems == [] and [t.text for t in load_glossary(EsriClient(fake), config.glossary).terms] == ["停泊中"]
     assert "outFields" in fake.asked[-1][1] and fake.asked[-1][1]["outFields"] == "WORD"
     fake, _ = _table([], fields=["OTHER"])
-    with pytest.raises(EsriError, match="単語集の表に属性 TERM なし"):
+    with pytest.raises(EsriError, match=r"単語集の表に必要な項目がない（管理者に連絡: TERM）［E704］"):
         load_glossary(EsriClient(fake), parse_config({"glossary": URL})[0].glossary)
 
 

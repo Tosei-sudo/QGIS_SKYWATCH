@@ -27,6 +27,8 @@ from typing import Optional
 
 from osgeo import gdal
 
+from ..core.errors import FileFailed
+
 SOURCE = "satobs/shift_source"
 SHIFT = "satobs/shift"
 
@@ -100,9 +102,9 @@ def moved_vrt(source: str, dx: float, dy: float, folder: Optional[str] = None) -
     try:
         ds = gdal.Translate(path, source.split("|")[0], format="VRT")
     except RuntimeError as e:  # GDAL with exceptions on
-        raise OSError(f"{source} を開けない（{e}）") from e
+        raise FileFailed(code="E503", detail=f"{source}：{e}") from e
     if ds is None:
-        raise OSError(f"{source} を開けない")
+        raise FileFailed(code="E503", detail=source)
     try:
         move_dataset(ds, dx, dy)
     except (RuntimeError, TypeError, ValueError) as e:
@@ -111,7 +113,7 @@ def moved_vrt(source: str, dx: float, dy: float, folder: Optional[str] = None) -
             os.remove(path)
         except OSError:
             pass
-        raise OSError(f"{source} の位置を動かせず（{e}）") from e
+        raise FileFailed("画像の位置を動かせない", code="E508", detail=f"{source}：{e}") from e
     ds = None
     return path
 

@@ -36,7 +36,7 @@ from ..qgis_io import settings
 from ..qgis_io.context import PluginContext
 from ..qgis_io.listed_layers import ListedLayers
 from ..qgis_io.pixel_place import locator as pixel_locator
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
@@ -749,7 +749,7 @@ class ObservationDock(
                 c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for, local=c.config.local_observations)
         except Exception as error:  # noqa: BLE001 (the local GeoPackage could not be opened)
             self.sets = []
-            self._show_status(self.tr("保存先の準備に失敗: {e}").format(e=error))
+            self._show_status(self.tr("保存先の準備に失敗: {e}").format(e=error_text(error)))
         self.books = {}
         self._after_read = {}
         read = (c.source, tuple((s.label, s.config.url if s.config else None) for s in self.sets))

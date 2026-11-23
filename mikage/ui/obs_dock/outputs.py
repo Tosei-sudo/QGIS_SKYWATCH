@@ -13,6 +13,7 @@ from qgis.PyQt.QtWidgets import QFileDialog
 
 from ...core.obs.api import csv_file_name, observations_csv, now_ms, Observation, observation_layers, nest
 from ...qgis_io.obs_layers import observation_memory_layer
+from ...qgis_io.tasks import error_text
 from ..docks import save_text
 
 
@@ -77,7 +78,7 @@ class OutputsPart:
             if not isinstance(items, list):
                 raise ValueError("分類の配列なし")
         except (OSError, ValueError) as error:
-            self.say(self.tr("分類の読み込みに失敗: {e}").format(e=error))
+            self.say(self.tr("分類の読み込みに失敗: {e}").format(e=error_text(error)))
             return
         self.do(self.tr("分類の読み込み"), lambda b: b.set_taxonomy(items))
 

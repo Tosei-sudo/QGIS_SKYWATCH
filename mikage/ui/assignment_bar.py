@@ -222,7 +222,7 @@ class AssignmentBar(QWidget):
         if self.claiming is not None:
             return
         if not user:
-            failed(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）"))
+            failed(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）［E205］"))
             return
         repo = self.repository()
         now = int(time.time() * 1000)
@@ -352,7 +352,7 @@ class AssignmentBar(QWidget):
         if source is None or image is None:
             return
         if not user:
-            self.dock.status.setText(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）"))
+            self.dock.status.setText(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）［E205］"))
             return
         repo = self.repository()
         now = int(time.time() * 1000)

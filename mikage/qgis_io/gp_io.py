@@ -50,7 +50,7 @@ def http(method: str, url: str, body: Optional[bytes], headers: dict, feedback=N
     if error != QgsBlockingNetworkRequest.ErrorCode.NoError and not isinstance(status, int):
         # No answer at all; the message may repeat the address with a token in its query.
         detail = re.sub(r"\?\S*", "", blocking.errorMessage())
-        raise GpError(f"接続できない（{url.split('?', 1)[0]}{'：' + detail if detail else ''}）")
+        raise GpError(code="E101", detail=f"{url.split('?', 1)[0]}{'：' + detail if detail else ''}")
     names = {bytes(h).decode("latin-1").lower(): bytes(reply.rawHeader(h)).decode("latin-1") for h in reply.rawHeaderList()}
     return int(status or 0), names, bytes(reply.content())
 

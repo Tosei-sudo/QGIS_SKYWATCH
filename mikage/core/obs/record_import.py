@@ -23,6 +23,7 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Optional, Sequence
 
+from .. import errors
 from .flows import flows, living, now_ms
 from .geo import get_distance
 from .image_time import parse_time
@@ -409,7 +410,7 @@ def read_csv(path: str) -> tuple[list[str], list[SourceRow]]:
         except UnicodeDecodeError:
             continue
     else:
-        raise ValueError("文字コードが読めない（UTF-8 か Shift_JIS で保存）")
+        raise errors.Failed("文字コードを読めない（UTF-8 か Shift_JIS で保存）", code="E405")
     head = text[:4096]
     try:
         dialect = csv.Sniffer().sniff(head, delimiters=",\t;")

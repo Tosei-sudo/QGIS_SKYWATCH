@@ -310,7 +310,7 @@ class PlaceScheduleDock(PluginDock):
         self.store = stores[0] if stores else None
         self._forget()
         if self.store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
         elif self.isVisible():
             self.reload()
 
@@ -566,7 +566,7 @@ class PlaceScheduleDock(PluginDock):
 
     def _empty_text(self) -> str:
         if self.store is None:
-            return self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）")
+            return self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］")
         if not self.clicked and self.layer_choice.currentLayer() is None:
             return self.tr("上でレイヤーを選ぶか、「地図で地点を追加」で地図をクリックすると、その地点のこの先の撮像計画が並ぶ")
         if not self._loaded:

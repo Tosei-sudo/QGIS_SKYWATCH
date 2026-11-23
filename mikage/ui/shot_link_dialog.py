@@ -220,7 +220,7 @@ class ShotLinkDialog(QDialog):
         if self.task is not None:
             return  # read once the task is over (_finished)
         if store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
             return
         if not store.history:
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
@@ -335,7 +335,7 @@ class ShotLinkDialog(QDialog):
             return
         catalog = dock.catalog()
         if catalog is None:
-            self.status.setText(self.tr("画像カタログが未設定（管理者に連絡: imageCatalogs）"))
+            self.status.setText(self.tr("画像カタログが未設定（管理者に連絡: imageCatalogs）［E703］"))
             return
         if not unit.rings:
             self.status.setText(self.tr("このショットには範囲がないため、画像を探せない"))

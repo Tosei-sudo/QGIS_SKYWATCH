@@ -1446,7 +1446,7 @@ class ObservationBook:
         """
         unseen = unseen.strip()
         if unseen and not self.keeps_unseen_areas():
-            self._say("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）")
+            self._say("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）［E704］")
             return None
         info = self._image(image)
         if info is None:

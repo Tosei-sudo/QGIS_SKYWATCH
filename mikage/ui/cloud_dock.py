@@ -27,7 +27,7 @@ from ..qgis_io import settings
 from ..qgis_io.cloud_layer import PROPERTY, STYLE_LABELS, CloudFile, cloud_file, open_layer, service_file_path, show_band, write_service_file
 from ..qgis_io.context import PluginContext
 from ..qgis_io.network import get_bytes
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .docks import PluginDock, plain_label
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
@@ -169,7 +169,7 @@ class CloudDock(PluginDock):
             try:
                 path = forecast_file(config)
             except ValueError as error:
-                self.status.setText(str(error))
+                self.status.setText(error_text(error))
                 return
             self.open_file(path, config.label)
             return
@@ -218,7 +218,7 @@ class CloudDock(PluginDock):
         try:
             file = cloud_file(path)
         except ValueError as error:
-            self.status.setText(str(error))
+            self.status.setText(error_text(error))
             return
         self.show_file(file, self.tr("雲量 {label}").format(label=label))
         issued = file.issued
@@ -242,7 +242,7 @@ class CloudDock(PluginDock):
         try:
             layer = open_layer(file, name, self.style.currentData(), index)
         except ValueError as error:
-            self.status.setText(str(error))
+            self.status.setText(error_text(error))
             return
         self.layer_id = ""
         if old is not None:

@@ -17,6 +17,7 @@ from typing import Any, Callable, Optional, Sequence
 
 import numpy as np
 
+from ..errors import tagged
 from .orbit import (
     DEG, POLAR_RADIUS, R, Orbit, azimuth_of, dot, ecef_of, frame_of, ground_range,
     lon_lat_of, norm, off_nadir_for, sub, sun_elevation, track_angles, unit, up_of,
@@ -271,7 +272,7 @@ def plan_access(sats: Sequence[SatelliteSpec], targets: Sequence[PlanTarget], op
             vxl, vyl, vzl = vxs.tolist(), vys.tolist(), vzs.tolist()
             valid = ~np.isnan(xs)
             if not valid.any():
-                problems.append(f"{sat.name}: 軌道を計算できない（TLE が古すぎるか、落下済みの可能性あり）")
+                problems.append(tagged(f"{sat.name}: 軌道を計算できない（TLE が古すぎるか、落下済みの可能性あり）", "E610"))
                 spans = None
             else:
                 above = rs > POLAR_RADIUS

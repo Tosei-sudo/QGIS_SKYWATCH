@@ -21,6 +21,7 @@ from typing import Callable, Optional
 import numpy as np
 from osgeo import gdal
 
+from ..core.errors import Coded
 from ..core.align import Affine, TiePoint, invert_affine, phase_correlate, robust_fit
 from .change_io import _bounds, _srs
 
@@ -31,7 +32,7 @@ MIN_STRENGTH = 1.3
 RESAMPLING = {"bilinear": "bilinear", "nearest": "near"}
 
 
-class AlignError(Exception):
+class AlignError(Coded):
     """A reason the images cannot be aligned (shown as it is)."""
 
 
@@ -63,7 +64,7 @@ def _in_crs(ds, wkt: str):
         return ds
     out = gdal.Warp("", ds, format="VRT", dstSRS=wkt, resampleAlg="bilinear")
     if out is None:
-        raise AlignError("基準の座標系への再投影に失敗")
+        raise AlignError("基準の座標系への再投影に失敗", code="E508")
     return out
 
 
@@ -71,21 +72,21 @@ def overlap(reference, target) -> tuple:
     """The reference's pixels the target covers (x0, y0, x1, y1)."""
     gt = reference.GetGeoTransform()
     if gt[2] != 0 or gt[4] != 0 or gt[1] <= 0 or gt[5] >= 0:
-        raise AlignError("北が上でない（回転のある）基準の画像は未対応")
+        raise AlignError("北が上でない（回転のある）基準の画像は未対応", code="E505")
     xmin, ymin, xmax, ymax = _bounds(target, _srs(reference))
     x0 = max(0, math.floor((xmin - gt[0]) / gt[1] + 1e-6))
     x1 = min(reference.RasterXSize, math.ceil((xmax - gt[0]) / gt[1] - 1e-6))
     y0 = max(0, math.floor((ymax - gt[3]) / gt[5] + 1e-6))
     y1 = min(reference.RasterYSize, math.ceil((ymin - gt[3]) / gt[5] - 1e-6))
     if x1 <= x0 or y1 <= y0:
-        raise AlignError("2 つの画像の重なりなし")
+        raise AlignError("2 つの画像の重なりなし", code="E506")
     return x0, y0, x1, y1
 
 
 def describe(reference_path: str, target_path: str) -> str:
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けない")
+        raise AlignError("画像を開けない", code="E503")
     x0, y0, x1, y1 = overlap(reference, target)
     return f"重なる範囲 {x1 - x0:,} × {y1 - y0:,} px で照合。"
 
@@ -109,10 +110,10 @@ def find_alignment(reference_path: str, reference_band: int, target_path: str, t
     say = progress or (lambda _p: None)
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けない")
+        raise AlignError("画像を開けない", code="E503")
     for ds, band, what in ((reference, reference_band, "基準"), (target, target_band, "合わせる")):
         if not 1 <= band <= ds.RasterCount:
-            raise AlignError(f"{what}画像にバンド {band} なし")
+            raise AlignError(f"{what}画像にバンド {band} なし", code="E504")
     wkt = reference.GetProjection()
     tgt = _in_crs(target, wkt)
     x0, y0, x1, y1 = overlap(reference, tgt)
@@ -123,7 +124,7 @@ def find_alignment(reference_path: str, reference_band: int, target_path: str, t
     side = min(width, height)
     n = min(COARSE, _largest_power_of_two(side))
     if n < 16:
-        raise AlignError("重なる範囲が小さすぎ")
+        raise AlignError("重なる範囲が小さすぎ", code="E506")
     f = side / n
     cx0, cy0 = ox + (width - side) / 2 * rx, oy + (height - side) / 2 * ry
     a = sample(reference, reference_band, cx0, cy0, rx * f, ry * f, n, n)
@@ -159,7 +160,7 @@ def find_alignment(reference_path: str, reference_band: int, target_path: str, t
     fit = robust_fit(ties, "affine" if how == "affine" and len(ties) >= 6 else "shift", pixel / 2) if ties else None
     if fit is None:
         if first is None or first.strength < MIN_STRENGTH:
-            raise AlignError("一致する模様なし（重なりが少ないか、模様の少ない画像）")
+            raise AlignError("一致する模様なし（重なりが少ないか、模様の少ない画像）", code="E507")
         return Alignment((coarse[0], 1, 0, coarse[1], 0, 1), [], len(centers), math.nan, pixel, wkt)
     transform, kept, residual = fit
     return Alignment(transform, kept, len(centers), residual / pixel, pixel, wkt)
@@ -169,10 +170,10 @@ def aligned_copy(reference_path: str, target_path: str, alignment: Alignment, ou
     """Writes the target, every band, corrected by the alignment, on the reference's grid lattice over where it lands; (width, height)."""
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けない")
+        raise AlignError("画像を開けない", code="E503")
     back = invert_affine(alignment.transform)
     if back is None:
-        raise AlignError("算出した変換が不正")
+        raise AlignError("算出した変換が不正", code="E507")
     tgt = _in_crs(target, alignment.wkt)
     corrected = gdal.Translate("", tgt, format="VRT")
     g = corrected.GetGeoTransform()
@@ -198,7 +199,7 @@ def aligned_copy(reference_path: str, target_path: str, alignment: Alignment, ou
         options["dstAlpha"] = True
     out = gdal.Warp(out_path, corrected, **options)
     if out is None:
-        raise AlignError(f"{out_path} の作成に失敗")
+        raise AlignError(f"{out_path} の作成に失敗", code="E407")
     for i in range(1, target.RasterCount + 1):
         src = target.GetRasterBand(i)
         if src.GetDescription():

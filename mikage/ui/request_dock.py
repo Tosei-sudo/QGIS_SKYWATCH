@@ -188,7 +188,7 @@ class RequestDock(PluginDock):
         self.groups, self.groups_read = [], False
         self.render()
         if self.store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
         elif self.isVisible():
             self.reload()
 
@@ -449,7 +449,7 @@ class RequestDock(PluginDock):
             self.reload()
 
         if not self._start(self.tr("撮像依頼の保存"), lambda task: repo.save_request(request, _now_ms()), done,
-                           lambda m: form.message.setText(self.tr("保存失敗: {m}").format(m=m)) if form else self.status.setText(m)):
+                           lambda m: form.message.setText(self.tr("保存に失敗: {m}").format(m=m)) if form else self.status.setText(m)):
             if form is not None:
                 form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
 
@@ -653,7 +653,7 @@ class RequestDock(PluginDock):
             return None
 
         if self.store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
             return None
         base = self.new_request()
         made = requests_of_plan(ops, sats, targets, new_request_id, self.point_km, base)
@@ -721,7 +721,7 @@ class RequestDock(PluginDock):
                 + (self.tr("（失敗 {m} 件: {list}）").format(m=len(failed), list="、".join(failed[:3])) if failed else "")))
 
         if not self._start(self.tr("撮像依頼の取り込み"), work, done,
-                           lambda m: form.message.setText(self.tr("取り込み失敗: {m}").format(m=m)) if form else self.status.setText(m)):
+                           lambda m: form.message.setText(self.tr("取り込みに失敗: {m}").format(m=m)) if form else self.status.setText(m)):
             if form is not None:
                 form.message.setText(self.tr("ほかの処理の実行中。少し待ってから保存"))
 

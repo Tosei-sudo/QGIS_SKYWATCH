@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from typing import Any, Iterable, Optional, Sequence
 
-from ..esri import EsriClient, EsriError, fit_value, quote
+from ..esri import ConflictError, EsriClient, EsriError, fit_value, quote
 from .. import sql
 from ..util import is_number, js_string, ms_of
 from .alerts import EsriSource, esri_source_of
@@ -69,6 +69,8 @@ class Assignment:
 
 class TakenError(EsriError):
     """The image is held by someone else."""
+
+    code = "E303"
 
     def __init__(self, holder: Assignment):
         super().__init__(f"{holder.label} は {holder.assignee or '（名前なし）'} さんが担当中（{holder.status}）")
@@ -143,7 +145,7 @@ def _types(client: EsriClient, source: EsriSource, token: Optional[str]) -> dict
     types = client.layer(source.url, token, refresh=True).field_types
     for role in ("imageId", "assignee"):
         if source.fields[role] not in types:
-            raise EsriError(f"分担のテーブルに属性 {source.fields[role]} なし")
+            raise EsriError(f"分担の表に必要な項目がない（管理者に連絡: {source.fields[role]}）", code="E704")
     return types
 
 
@@ -215,7 +217,7 @@ def take(client: EsriClient, source: EsriSource, image_id: str, user: str, now: 
     values = {k: fit_value(v, types[k]) for k, v in attributes_of(mine, source.fields).items() if k in types}
     r = (client.apply_edits(source.url, adds=[{"attributes": values}], token=token).add_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError(f"分担の取得に失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
+        raise EsriError(code="E305", detail="担当の開始: " + ((r.get("error") or {}).get("description") or ""))
     mine = replace(mine, oid=int(r["objectId"]) if is_number(r.get("objectId")) else None)
     if shared:
         # Taken twice at the same moment (two PCs of the same person): the first row is kept.
@@ -251,11 +253,11 @@ def update(client: EsriClient, source: EsriSource, x: Assignment, before: Assign
     if f["assignee"] in values:
         now = [r for r in load_assignments(client, source, token, f"{client.layer(source.url, token).object_id_field} = {int(x.oid)}")]
         if not now or not same_person(now[0].assignee, before.assignee) or now[0].done != before.done:
-            raise EsriError(f"{x.label} の分担はほかの人が変更済み（「最新を取得」で確認）")
+            raise ConflictError(f"{x.label} の分担はほかの人が先に変更。「最新を取得」を押して確認")
     oid = client.layer(source.url, token).object_id_field
     r = (client.apply_edits(source.url, updates=[{"attributes": {**values, oid: x.oid}}], token=token).update_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError(f"分担の保存に失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
+        raise EsriError(code="E305", detail="分担の保存: " + ((r.get("error") or {}).get("description") or ""))
     return x
 
 
@@ -265,7 +267,7 @@ def release(client: EsriClient, source: EsriSource, x: Assignment, token: Option
         return
     results = client.delete_features(source.url, [x.oid], token or source.token)
     if not results or not all(r.get("success") for r in results):
-        raise EsriError(f"分担の解除に失敗: {((results or [{}])[0].get('error') or {}).get('description') or '理由不明'}")
+        raise EsriError(code="E305", detail="分担の解除: " + (((results or [{}])[0].get("error") or {}).get("description") or ""))
 
 
 def with_status(x: Assignment, status: str, now: int) -> Assignment:
