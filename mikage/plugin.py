@@ -27,7 +27,7 @@ from .core.roles import ALGORITHM_FEATURES, refusal as role_refusal
 from .features import ai, analysis, command, enhance, events, images, layers, maps, observations, plan, platform, rendering, requests, training
 from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
-from .processing_provider import analysis_algorithm, cloud_algorithm, detect_algorithm
+from .processing_provider import analysis_algorithm, append_algorithm, cloud_algorithm, detect_algorithm
 from .processing_provider.provider import SatObsProvider
 from .qgis_io import network, overviews_io, tasks
 from .qgis_io.context import PluginContext
@@ -57,7 +57,7 @@ MENU_GROUPS = [
                 "測地線バッファ…", "正距方位での重心…", "移動体と検出の照合…", None, "サーバ処理…"]),
     ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", None, "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…",
             "AI 学習（物体検出）…"]),
-    ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", None,
+    ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", "アペンド（既存レイヤーへ追加）…", None,
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
@@ -194,6 +194,8 @@ class MikagePlugin:
         cloud_algorithm.set_forecast(lambda: context.config.cloud_forecast)
         # 保存した分析 (the project's analyses of 「データ分析」) as algorithms, following the project.
         analysis_algorithm.set_context(lambda: context)
+        # アペンド: an Esri target's client and token, and which tables are the plugin's own.
+        append_algorithm.set_context(lambda: context)
         self.provider = SatObsProvider()
         QgsApplication.processingRegistry().addProvider(self.provider)
         for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
@@ -608,6 +610,7 @@ class MikagePlugin:
         for signal in (QgsProject.instance().readProject, QgsProject.instance().cleared):
             disconnect(signal, self._analyses_changed)
         analysis_algorithm.set_context(lambda: None)
+        append_algorithm.set_context(lambda: None)
         if self.provider is not None:
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None

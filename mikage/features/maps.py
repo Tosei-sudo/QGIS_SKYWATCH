@@ -12,6 +12,7 @@ except ImportError:  # Qt5
     from qgis.PyQt.QtWidgets import QAction
 
 from ..ui import command_runs as runs
+from ..ui.append_dialog import AppendDialog
 from ..ui.basemap_switch import BaseMapSwitch
 from ..ui.coordinate_box import CoordinateBox
 from ..ui.new_layer_dialog import NewLayerDialog, ScratchDialogHook, offered_templates
@@ -22,7 +23,7 @@ from .base import Feature, close
 
 
 class Maps(Feature):
-    COMMANDS = ("open_new_layer",)
+    COMMANDS = ("open_new_layer", "open_append")
 
     def __init__(self, host):
         super().__init__(host)
@@ -35,6 +36,8 @@ class Maps(Feature):
         host.new_layer = None
         host.new_layer_action = None
         host.scratch_hook = None
+        #: 「アペンド（既存レイヤーへ追加）…」, once opened.
+        host.append_dialog = None
 
     def start(self) -> None:
         host = self.host
@@ -46,6 +49,8 @@ class Maps(Feature):
     def add_actions(self) -> None:
         host = self.host
         self._add_new_layer()
+        # 「アペンド（既存レイヤーへ追加）…」: ArcGIS's Append (also mikage:append in the Processing toolbox).
+        self.entry("append", "アペンド（既存レイヤーへ追加）…", "open_append")
         # The settings file's `layers`: added to an empty project at start, or from the menu.
         host.startup_layers = StartupLayers(self.iface, self.context, self.window())
         self.entry("startup_layers", "設定ファイルのレイヤーを追加", lambda: host.startup_layers.add())
@@ -87,8 +92,22 @@ class Maps(Feature):
             host.new_layer = NewLayerDialog(self.iface, lambda: self.context.config.layer_templates, self.window())
         return host.new_layer.open_with(source, template)
 
+    def open_append(self) -> AppendDialog:
+        """Opens 「アペンド（既存レイヤーへ追加）」 (once; kept while the plugin is loaded), the active layer offered as an input."""
+        host = self.host
+        if host.append_dialog is None:
+            host.append_dialog = AppendDialog(self.context, host.allows, self.window())
+        host.append_dialog.prepare(self.iface.activeLayer())
+        host.append_dialog.show()
+        host.append_dialog.raise_()
+        return host.append_dialog
+
     def unload(self) -> None:
         host = self.host
+        if host.append_dialog is not None:
+            host.append_dialog.close_all()
+            close(host.append_dialog)
+            host.append_dialog = None
         if host.webmaps is not None:
             host.webmaps.close()
             host.webmaps.deleteLater()
