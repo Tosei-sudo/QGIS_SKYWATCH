@@ -357,7 +357,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 76
+    assert len(set(drawn)) == len(plugin.actions) == 77
     plugin.unload()
 
 
