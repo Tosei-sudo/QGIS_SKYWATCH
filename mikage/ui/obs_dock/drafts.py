@@ -61,7 +61,8 @@ class DraftsPart:
             return False
         if entry is not book.current:
             book.current = entry
-            self._went()
+            if not self._went():
+                return False
         editing = book.record(d.editing_id) if d.editing else None
         if d.editing and editing is None:
             self.say(self.tr("{n}: 元の記録が見つからない（削除済みか、まだ取得していない）").format(n=d.record.object_name))

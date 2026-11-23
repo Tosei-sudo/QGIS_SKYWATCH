@@ -36,11 +36,16 @@ class MapInputPart:
             if mark.role == "obs":
                 record = self.book.record(mark.key)
                 if record is not None:
-                    return self.open_form(record.lon, record.lat, editing=record)
+                    self.open_form(record.lon, record.lat, editing=record)
+                    # Its row chosen in the list too (操作性点検 4, tsudo 2026-11-23).
+                    self.show_row(f"o:{record.id}")
+                    return None
             if mark.role == "ghost":
                 c = next((x for x in self.book.carried() if x.source.id == mark.key), None)
                 if c is not None:
-                    return self.open_form(c.source.lon, c.source.lat, source=c.source)
+                    self.open_form(c.source.lon, c.source.lat, source=c.source)
+                    self.show_row(f"c:{c.source.object_id}")
+                    return None
         if self.points < 2:
             return self.open_form(lon, lat)
         # The rear, then the front (tsudo, 2026-11-02), then a side or both (tsudo, 2026-11-03).

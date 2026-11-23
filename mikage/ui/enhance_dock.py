@@ -508,10 +508,25 @@ class EnhanceDock(PluginDock):
         er.set_view(layer, self.view_of(layer))
 
     def follow_layer(self, layer) -> None:
-        """Shows the active raster layer's correction; with no active layer, that of the group chosen in the layer panel."""
+        """
+        Shows the active raster layer's correction; with no active layer, that
+        of the group chosen in the layer panel. Another layer chosen (a vector
+        one: 作業メモ, 関心地域, a request's area) leaves the image worked on as
+        it is (操作性点検 5, tsudo 2026-11-23: the dock went empty while the
+        image was still on the map and in 観測記録).
+        """
         if layer is not None and getattr(layer, "type", lambda: None)() != QgsMapLayerType.RasterLayer:
+            if self._target_there():
+                return
             layer = None
         self.show_target(layer, self.chosen_group() if layer is None else None)
+
+    def _target_there(self) -> bool:
+        """Whether what the dock works on (a layer, a group) is still in the project."""
+        if self.group is not None:
+            return not sip.isdeleted(self.group)
+        layer = self.layer
+        return layer is not None and not sip.isdeleted(layer) and QgsProject.instance().mapLayer(layer.id()) is layer
 
     def follow_group(self, group: QgsLayerTreeGroup) -> None:
         """Works on every raster under `group` (as when it is chosen in the layer panel)."""

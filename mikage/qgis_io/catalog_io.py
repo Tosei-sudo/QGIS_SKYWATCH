@@ -44,7 +44,7 @@ from ..core.catalog.api import CatalogRecord, catalog_info, record_of, sensor_vi
 from ..core.catalog.api import areas_of, areas_of_shape, layer_origin
 from ..core.util import is_number, ms_of
 from . import settings
-from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer
+from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer, image_path
 from .overviews_io import before_open
 from .pinned_layers import top_index
 from .plan_layer import make_field, qdatetime
@@ -560,6 +560,34 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
             project.addMapLayer(layer, False)
             group.addLayer(layer)
     if layers and project is QgsProject.instance():
+        _choose(layers[0])
+
+
+def already_open(layers: Sequence[QgsMapLayer], project: Optional[QgsProject] = None) -> tuple[list, list]:
+    """
+    The layers just made for a catalog image split into (new, open): a file
+    of that image already open is chosen again instead of being added twice
+    (操作性点検 3, tsudo 2026-11-23: the same image opened again became one
+    image of 「2 ファイル」 in 観測記録). `open` holds the project's layers of
+    those files (moved by 位置ずらし, a complex SAR image converted: the same
+    file); a folder record opened again with other files adds those.
+    """
+    project = project or QgsProject.instance()
+
+    def key(layer: QgsMapLayer) -> tuple[str, str]:
+        return str(layer.customProperty(IMAGE_ID) or ""), image_path(layer)
+
+    there = {key(layer): layer for layer in project.mapLayers().values() if layer.customProperty(IMAGE_ID)}
+    new, found = [], []
+    for layer in layers:
+        same = there.get(key(layer)) if layer.customProperty(IMAGE_ID) else None
+        (found if same is not None else new).append(same if same is not None else layer)
+    return new, found
+
+
+def choose_open(layers: Sequence[QgsMapLayer]) -> None:
+    """An image already open chosen again (its first layer, as add_record_layers chooses one just added)."""
+    if layers:
         _choose(layers[0])
 
 

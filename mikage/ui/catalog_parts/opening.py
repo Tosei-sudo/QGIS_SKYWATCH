@@ -15,7 +15,8 @@ from ...core.catalog.api import (
 from ...core.obs.api import local_time
 from ...qgis_io.overviews_io import queue as overview_queue
 from ...qgis_io.catalog_io import (
-    Cancelled, add_record_layers, close_layers, located_again, open_located, open_record, opened_images,
+    Cancelled, add_record_layers, already_open, choose_open, close_layers, located_again, open_located, open_record,
+    opened_images,
 )
 from ..docks import plain_tip
 from ..image_files_dialog import choose_image_files
@@ -88,6 +89,7 @@ class OpeningPart:
         layers = []
         problems = []
         unopened = []
+        already = []
         for record in records:
             try:
                 opened = open_record(record, catalog, self.context.config.path_mappings, self.choose_folder,
@@ -99,10 +101,17 @@ class OpeningPart:
                 problems.append(str(error))
                 unopened.append(record)
                 continue
+            opened, there = already_open(opened)
+            if there and not opened:
+                # Open already: chosen (and gone to) rather than added twice.
+                choose_open(there)
+                already.append(record.id)
             add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
-            layers += opened
+            layers += opened + there
         self._opened(layers)
+        if already:
+            self.status.setText(self.tr("{id} は開いている画像。そのレイヤーを選択").format(id="、".join(already)))
         if problems:
             self._say_unopened(problems, [r for r in unopened if r.id])
             self.status.setText(problems[-1])
@@ -197,10 +206,17 @@ class OpeningPart:
             self.status.setText(str(error))
             self.iface.messageBar().pushWarning(TITLE, plain_tip(str(error)))
             return
+        layers, there = already_open(layers)
+        if there and not layers:
+            choose_open(there)
         add_record_layers(layers, record)
         overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
+        layers += there
         self._opened(layers)
-        self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで表示（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
+        if there and len(there) == len(layers):
+            self.status.setText(self.tr("{id} は開いている画像。そのレイヤーを選択").format(id=entry.image_id))
+        else:
+            self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで表示（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
         if then is not None:
             then(layers)
 

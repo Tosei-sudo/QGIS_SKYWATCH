@@ -240,6 +240,31 @@ class SearchPart:
 
         self._start(self.tr("分担の取得"), work, done, failed)
 
+    def work_changed(self, image_id: str) -> None:
+        """
+        An image's 分担 written in 観測記録 (taken, 完了, given back): its row's
+        分担 read again at once, not at the next search or every 3 minutes
+        (操作性点検 7, tsudo 2026-11-23). Nothing when it is not listed.
+        """
+        source = self.context.config.assignments
+        if source is None or self.model.work is None or not any(r.id == image_id for r in self.model.records):
+            return
+        from ...core.obs.api import work_state
+
+        asked = self._work_asked
+        repo = AssignmentRepository(self.context.esri(), source, self.context.token_for(source.url, source.token))
+
+        def work(_task):
+            return work_state(repo.assignments_of_images([image_id]).get(image_id, []))
+
+        def done(state) -> None:
+            if asked != self._work_asked or self.model.work is None:
+                return  # listed again since (read with the others)
+            self.model.set_work({**self.model.work, image_id: state})
+            self._apply_work_filter()
+
+        self._start(self.tr("分担の取得"), work, done, lambda _message: None)
+
     def _apply_work_filter(self) -> None:
         """「未着手のみ」: the rows of images someone took (or not read yet) hidden."""
         from ...core.obs.api import UNWORKED

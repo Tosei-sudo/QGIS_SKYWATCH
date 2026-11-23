@@ -108,6 +108,8 @@ class ObservationDock(
         self.pending: Optional[tuple] = None
         #: What the form said when opened (to tell whether anything was typed since).
         self._filled: Optional[FormValues] = None
+        #: The image the form is about (FormPart.open_form), None when it is closed.
+        self._form_image = None
         #: The kept record (保存できなかった記録) the form is open on again, '' for none.
         self._draft_id = ""
         #: Opens 「送信待ち」 (the status bar's list, ui/outbox_dialog.py); set by the plugin.
@@ -164,6 +166,7 @@ class ObservationDock(
         project.layersAdded.connect(self._layers_changed)
         project.layersRemoved.connect(self._layers_changed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
+        self._offer_record_on_action()
         context.configChanged.connect(self.reset_stores)
         context.configChanged.connect(self.assignment_bar.reset)
         self.visibilityChanged.connect(self._visibility)
@@ -1192,6 +1195,7 @@ class ObservationDock(
         self._visibility(False)
         self._use_tool(False)
         project = QgsProject.instance()
+        self._withdraw_record_on_action()
         for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
                              (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset)):

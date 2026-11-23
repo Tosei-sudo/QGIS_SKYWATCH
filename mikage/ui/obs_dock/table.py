@@ -99,6 +99,20 @@ class TablePart:
         if current and current in self._row_keys:
             sel.setCurrentIndex(model.index(self._row_keys.index(current), 0), QItemSelectionModel.SelectionFlag.NoUpdate)
 
+    def show_row(self, key: str) -> None:
+        """
+        The row standing for `key` chosen alone and scrolled into view: a
+        record opened from its mark on the map is the one chosen in the list
+        too (操作性点検 4, tsudo 2026-11-23: the form opened, no row chosen).
+        """
+        if not key or key not in self._row_keys:
+            return
+        r = self._row_keys.index(key)
+        index = self.table.model().index(r, 0)
+        flags = QItemSelectionModel.SelectionFlag
+        self.table.selectionModel().setCurrentIndex(index, flags.ClearAndSelect | flags.Rows)
+        self.table.scrollTo(index)
+
     def _row_clicked(self, row: int, _col: int) -> None:
         if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
             return  # choosing several, not opening one

@@ -793,7 +793,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 
 <h3 id="obs-flow">1 枚の画像の流れ</h3>
 <ol>
-<li><a href="#images">画像カタログ</a> で画像を開く（ファイルのない画像は <span class="ui">ファイルなしで記録</span>）。観測記録ドックの ◀ ▶（<span class="key">PageUp</span>・<span class="key">PageDown</span>）で撮像日時の順に画像をたどれます。<span class="ui">この画像のみ</span> でほかの画像を隠します。画像を選ぶまで、ドックには案内だけが出ます（記録の一覧や入力は画像を選んでから）</li>
+<li><a href="#images">画像カタログ</a> で画像を開く（ファイルのない画像は <span class="ui">ファイルなしで記録</span>）。観測記録ドックの ◀ ▶（<span class="key">PageUp</span>・<span class="key">PageDown</span>）で撮像日時の順に画像をたどれます。選んだ画像は、ほかの画像に隠れていれば地図でいちばん上に出ます。<span class="ui">この画像のみ</span> でほかの画像を隠します（背景の地図は隠しません）。画像を選ぶまで、ドックには案内だけが出ます（記録の一覧や入力は画像を選んでから）</li>
 <li>分担を使っている職場では、画像の下の行で <span class="ui">この画像を担当</span>（記録を始めると自動で担当になります）</li>
 <li><span class="ui">クリック記録</span>（<span class="key">R</span>）を押し、地図でモノをクリック</li>
 <li>フォームで種別（ボタンで階層をたどる）・活動（<span class="key">1</span>〜<span class="key">9</span>）・確度・備考を入れて <span class="key">Enter</span></li>
@@ -804,6 +804,8 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <li>終わったら、分担の行の <span class="ui">完了</span></li>
 </ol>
 <p>画面の写真つきの手順は <a href="#howto-obs">画像を探して記録し、担当を完了する</a> にあります。</p>
+<div class="tip" id="obs-background">画像カタログから開いた画像と、撮像日時が分かる画像が記録先になります。撮像日時の分からない GeoTIFF（背景の地図など）は背景として扱い、記録先になりません。そうした画像に記録するときは、レイヤーパネルでそのレイヤーを右クリックして <span class="ui">観測記録の画像にする</span> を選び、ドックで撮像日時を入れます。もう一度選ぶと背景に戻ります。</div>
+<div class="tip" id="obs-unsaved">フォームに入力したまま別の画像に移ろうとすると、<span class="ui">保存</span>（元の画像に記録してから移る）・<span class="ui">破棄</span>・<span class="ui">元の画像に戻る</span>（移らずに入力を続ける。<span class="key">Esc</span> も）を聞きます。</div>
 <div class="tip">新しく記録したモノの近くに前からいるモノがあると「同一候補」が出ます。<span class="key">Alt+1</span>〜<span class="key">Alt+5</span> で選ぶと、そのモノの続きとして記録されます。</div>
 <div class="tip" id="obs-glossary">職場で単語集を用意しているときは、備考を打っている間、打っている語の候補が欄の下に出ます（「岸壁に入」で「入港」など。よみや別の書き方でも出ます）。<span class="key">Tab</span> で先頭の候補、<span class="key">↓</span> で選んで <span class="key">Enter</span>。何も選ばずに <span class="key">Enter</span> を押せばそのまま記録します。単語集と違う書き方（「入航」など）は欄の下に「表記ゆれ: 入航 → 入港」と出て、<span class="ui">単語集の表記に直す</span> で直せます（直さなくても保存できます）。</div>
 <div class="tip" id="obs-tidy">職場で「文章の手伝い」（この PC で動く小さな生成 AI）を用意しているときは、備考の右に（用意されている分だけ） <span class="ui">整える</span> が出ます。押すと数秒で、備考を記録の書き方（短く、体言止め）に直し単語集の語に寄せた案が欄の下に出ます。<span class="ui">置き換え</span> で備考が案になり（<span class="key">Ctrl</span>+<span class="key">Z</span> で戻せます）、<span class="ui">閉じる</span> でそのままです。小さな AI なので言い直しは得意でも、事実を間違えることがあります。元にない数字が出たときは「確認」と出るので、読んでから使ってください。</div>

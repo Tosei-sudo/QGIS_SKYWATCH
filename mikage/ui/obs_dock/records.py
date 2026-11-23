@@ -237,7 +237,8 @@ class RecordsPart:
         entry = next((e for e in self.book.images if e.id == o.image_id), None)
         if entry is not None and entry is not self.book.current:
             self.book.current = entry
-            self._went()
+            if not self._went():
+                return False  # (went back to the form's image)
         self._center(o)
         if entry is None:
             if not quiet:
@@ -297,9 +298,8 @@ class RecordsPart:
             if self.book is None:
                 return
             entry = self.book.list_image(image_id, name, image_time)
-            if entry is None:
+            if entry is None or not self._went():
                 return
-            self._went()
             if then is not None:
                 then()
             self.say(self.tr("{n} は画像カタログにないので、ファイルのない画像として一覧に追加").format(n=name or image_id))

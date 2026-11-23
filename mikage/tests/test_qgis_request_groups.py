@@ -140,6 +140,13 @@ def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
     dock.status_filter.choose([])
     box.choose(None)
     assert len(dock.shown) == 4 and settings.group_filter("requests") == ""
+    # The request chosen filtered out: no longer chosen, so 「編集…」「削除」 do not act on it unseen (操作性点検 9, 2026-11-23).
+    dock._row(next(i for i, r in enumerate(dock.shown) if r.name == "大阪湾"))
+    assert dock.chosen.name == "大阪湾" and dock.edit_button.isEnabled() and dock.delete_button.isEnabled()
+    box.choose("第1班")
+    assert dock.chosen is None and not dock.edit_button.isEnabled() and not dock.delete_button.isEnabled()
+    box.choose(None)
+    assert dock.chosen is None and len(dock.shown) == 4
 
     # A new request starts in the user's own group; only the groups in use are offered.
     dock.edit(new=True)
