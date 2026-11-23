@@ -11,10 +11,10 @@ from ..door import lazy
 
 if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
     from . import saved_areas
-    from .config import CatalogConfig
+    from .config import catalog_of, CatalogConfig, MODES
     from .images import find_images, FolderImages, patterns_for
     from .opened import OpenedImage, OpenedImages
-    from .paths import folder_key, PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
+    from .paths import folder_key, path_mappings_of, PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
     from .query import CatalogSearch, time_text
     from .saved_areas import read_areas, write_areas
     from .search import (
@@ -35,11 +35,11 @@ __getattr__, __dir__ = lazy(__name__)
 
 __all__ = [
     "folder_key", "read_areas", "write_areas",
-    "add_areas", "areas_of", "areas_of_shape", "catalog_info", "CatalogConfig", "CatalogLayerInfo", "CatalogRecord",
+    "add_areas", "areas_of", "areas_of_shape", "catalog_info", "catalog_of", "CatalogConfig", "CatalogLayerInfo", "CatalogRecord",
     "CatalogSearch", "CatalogWatch", "cell_text", "check_due", "check_one", "Checked", "Column", "conditions_text", "Contents",
     "contents_lines", "contents_of", "DEFAULT_HEIGHT", "DEFAULT_WIDTH", "find_images", "FolderImages", "footprint_of",
-    "is_address", "layer_origin", "list_columns", "listed_image", "MAX_SEEN", "new_watch", "OpenedImage", "OpenedImages",
-    "PathError", "PathMapping", "PathRewrite", "patterns_for", "place_text", "rank_similar", "read_catalog_layer", "record_of",
+    "is_address", "layer_origin", "list_columns", "listed_image", "MAX_SEEN", "MODES", "new_watch", "OpenedImage", "OpenedImages",
+    "path_mappings_of", "PathError", "PathMapping", "PathRewrite", "patterns_for", "place_text", "rank_similar", "read_catalog_layer", "record_of",
     "records_by_ids", "replace_areas", "resolve_path", "rewrites_of", "saved_areas", "search_catalog", "sensor_view_of",
     "sensors_of", "similar_search", "SimilarTolerance", "sort_records", "thumbnail_address", "time_text", "WatchNotice",
     "WatchStore",

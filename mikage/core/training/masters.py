@@ -21,6 +21,14 @@ catalogs' (read only while practising).
 A master the main settings file does not have stays the sample's. A path
 written relative to the main settings file is made whole (the practice's
 settings file is in another folder).
+
+The image catalogs (tsudo 2026-11-23): the production's `imageCatalogs`
+whose `mode` is "training" (練習モードだけ) or "both" (両方) are shown while
+practising after the practice's own (with_practice_catalogs), on the built-in
+sample and on the organisation's practice settings file alike, whatever
+`fromProduction` says (the administrator chose them one by one); their
+tokens kept in memory only, their files found with the production's
+pathMappings. MIKAGE only reads image catalogs.
 """
 from __future__ import annotations
 
@@ -31,6 +39,8 @@ from typing import Any, Optional, Sequence
 
 from .settings import MASTERS, resolve_config
 
+#: The production's image catalogs shown while practising (imageCatalogs[].mode).
+PRACTICE_MODES = ("training", "both")
 SATELLITE_KEYS = ("satelliteCatalogs", "sensorCatalogs", "satelliteAliases", "groundStations", "requestExports")
 #: An observation store's own classes (core/obs/model.py's observation_store_of).
 STORE_VOCABULARY = ("taxonomy", "taxonomyTable", "kinds", "activities", "confidences")
@@ -129,6 +139,57 @@ def exercise_images(production: Any) -> bool:
     """Whether the production has 判読の練習's organisation's exercises (training.exercises)."""
     training = production.get("training") if isinstance(production, dict) else None
     return isinstance(training, dict) and bool(training.get("exercises"))
+
+
+def practice_catalog_entries(production: Any) -> list[dict]:
+    """The production's `imageCatalogs` entries shown while practising (`mode` training or both), in its order."""
+    entries = production.get("imageCatalogs") if isinstance(production, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict) and e.get("mode") in PRACTICE_MODES]
+
+
+def with_practice_catalogs(config: Any, production: Any, source: str) -> list[str]:
+    """
+    The practice's settings as read (`config`, a PluginConfig, changed in
+    place): every catalog of its own shown (a practice's settings file's
+    `mode` is not looked at), then the production's shown while practising
+    (practice_catalog_entries of the main settings file's value `production`,
+    read from `source`; one with the same URL and conditions as one of the
+    practice's left out) with the production's pathMappings after the
+    practice's (where their files are). The labels of the production's taken.
+    """
+    from ..catalog.api import catalog_of, path_mappings_of
+
+    own = [*config.image_catalogs, *config.practice_catalogs]
+    config.image_catalogs, config.practice_catalogs = own, []
+    entries = practice_catalog_entries(production)
+    if not entries:
+        return []
+    whole = _whole(copy.deepcopy({"imageCatalogs": entries, "pathMappings": production.get("pathMappings")}), source)
+    seen = {(c.url, c.where) for c in own}
+    taken = []
+    for i, entry in enumerate(whole["imageCatalogs"]):
+        catalog = catalog_of(entry, [], i)  # (its problems are told in production)
+        if catalog is None or (catalog.url, catalog.where) in seen:
+            continue
+        seen.add((catalog.url, catalog.where))
+        taken.append(catalog)
+    if not taken:
+        return []
+    config.image_catalogs = [*own, *taken]
+    if isinstance(whole["pathMappings"], list):
+        extra = [m for m in path_mappings_of(whole["pathMappings"], []) if m not in config.path_mappings]
+        config.path_mappings = [*config.path_mappings, *extra]
+    return [c.label for c in taken]
+
+
+def read_text(taken: Sequence[str], production: Any) -> str:
+    """「衛星・分類体系・画像カタログ 2 件」: what is read from the production while practising (the masters `taken`, its catalogs)."""
+    names = names_text(taken)
+    count = len(practice_catalog_entries(production))
+    catalogs = f"画像カタログ {count} 件" if count else ""
+    return "・".join(t for t in (names, catalogs) if t)
 
 
 def without_tokens(value: Any) -> Any:

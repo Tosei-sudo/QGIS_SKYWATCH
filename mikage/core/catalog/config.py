@@ -17,6 +17,8 @@ ROLE_LABELS = {"id": "画像ID", "acquired": "撮像日時", "registered": "登�
 #: Every role of `fields` (`source` and `keywords` may be several names).
 FIELD_ROLES = ("id", "acquired", "registered", "systemRegistered", "sensor", "angle", "azimuth", "source", "keywords")
 ANGLE_KINDS = ("offNadir", "incidence", "elevation")
+#: `mode` (tsudo 2026-11-23): where a catalog is shown: 本番だけ (the default, as before), 練習モードだけ, or both.
+MODES = ("production", "training", "both")
 _LAYER = re.compile(r"/(FeatureServer|MapServer)/\d+/?$", re.IGNORECASE)
 
 
@@ -44,6 +46,9 @@ class CatalogConfig:
     thumbnail: Optional["ThumbnailPattern"] = None
     #: The layers whose features over an image its card names (「写っている地物」).
     footprint_layers: list["FootprintLayer"] = field(default_factory=list)
+    #: `mode`: shown in production only ("production", the default), while practising only ("training"), or in both
+    #: (MODES). A practice-only one is shown in production to 判読練習の指導者 only (their exercises' images).
+    mode: str = "production"
 
     def label_of(self, role: str) -> str:
         """The heading of a role: the settings file's `labels`, else the viewer's default."""
@@ -160,6 +165,10 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         problems.append(f"{at} の angleKind は {' / '.join(ANGLE_KINDS)} のいずれかで指定")
     if "orbitHeight" in value and not (is_number(height) and height > 0):
         problems.append(f"{at} の orbitHeight は衛星の高度（km）で指定")
+    mode = value.get("mode", "production")
+    if mode not in MODES:
+        problems.append(f"{at} の mode は production（本番だけ）・training（練習モードだけ）・both（両方）のいずれかで指定")
+        mode = "production"
     patterns = image_patterns_of(value["imagePatterns"], problems, f"{at}.imagePatterns") if "imagePatterns" in value else {}
     thumbnail = thumbnail_of(value.get("thumbnail"), problems, f"{at}.thumbnail")
     footprint_layers = footprint_layers_of(value.get("footprintLayers"), problems, f"{at}.footprintLayers")
@@ -179,6 +188,7 @@ def catalog_of(value: Any, problems: list[str], index: int) -> Optional[CatalogC
         image_files=files,
         thumbnail=thumbnail,
         footprint_layers=footprint_layers,
+        mode=mode,
     )
 
 

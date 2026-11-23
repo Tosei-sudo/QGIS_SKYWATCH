@@ -116,3 +116,13 @@ def test_the_table_without_its_attributes_or_without_a_user_name():
         roles.load_user_roles(client, config.user_roles, "tsudo")
     with pytest.raises(EsriError, match="editTracking"):
         roles.save_user_roles(client, config.user_roles, " ", ["ADMIN"])
+
+
+def test_practice_catalogs_in_production_are_for_instructors_who_chose_it_only():
+    """imageCatalogs[].mode "training" in production: 判読練習の指導者's (their exercises' images), not someone without any role."""
+    assert roles.allows(roles.PRACTICE_CATALOGS, ["INSTRUCTOR"])
+    assert roles.allows(roles.PRACTICE_CATALOGS, ["OBSERVER", "INSTRUCTOR"])
+    assert not roles.allows(roles.PRACTICE_CATALOGS, ["OBSERVER"])
+    assert not roles.allows(roles.PRACTICE_CATALOGS, [])
+    # (Without any role, the others still all but the administrators')
+    assert roles.allows("判読の練習の問題を作る…", []) and not roles.allows("監査ログ…", [])

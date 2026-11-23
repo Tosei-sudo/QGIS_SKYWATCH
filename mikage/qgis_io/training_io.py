@@ -16,7 +16,8 @@ reaches the production tables.
 The masters only read (satellites, the taxonomy, places, …:
 core/training/masters.py) may be the production's (`Production`): their
 tokens are kept in memory (`TrainingSession.config_text`), the file written
-has none.
+has none. So are the production's image catalogs shown while practising
+(`imageCatalogs[].mode`, `shown`): added to the settings as read, never written.
 """
 from __future__ import annotations
 
@@ -162,6 +163,22 @@ _session: Optional[TrainingSession] = None
 def active() -> Optional[TrainingSession]:
     """練習モード, while it is on (None in production)."""
     return _session
+
+
+def shown(config, source: str):
+    """
+    The settings read from `source` (a PluginConfig) as they are used now:
+    while practising on that file, every catalog of its own and, after them,
+    the production's shown while practising (`mode` training or both, with
+    the production's tokens; core/training/masters.with_practice_catalogs).
+    """
+    session = _session
+    if session is None or source != session.config_source:
+        return config
+    production = session.production
+    masters.with_practice_catalogs(config, production.value if production is not None else None,
+                                   production.source if production is not None else "")
+    return config
 
 
 # ---- the sample ------------------------------------------------------------------------------------------

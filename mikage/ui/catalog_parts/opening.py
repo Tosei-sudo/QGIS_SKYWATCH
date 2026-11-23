@@ -131,7 +131,7 @@ class OpeningPart:
         self._opened_model.setStringList(ids)
 
     def _catalog_of_url(self, url: str) -> Optional[CatalogConfig]:
-        return next((c for c in self.context.config.image_catalogs if c.url == url), None)
+        return next((c for c in self.catalogs() if c.url == url), None)
 
     def _fill_recent(self) -> None:
         """「最近開いた画像」: the last images opened here (of the catalogs of the settings file)."""
@@ -208,7 +208,7 @@ class OpeningPart:
                            missing: Optional[Callable[[], None]] = None) -> None:
         """The catalogs (the one chosen first) asked for an image id in a task, the image opened as from the list."""
         chosen = self.catalog()
-        catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
+        catalogs = sorted((c for c in self.catalogs() if c.fields.get("id")), key=lambda c: c is not chosen)
         if not catalogs:
             self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）［E703］"))
             if missing is not None:
@@ -252,7 +252,7 @@ class OpeningPart:
         """「画像カタログで表示」: the images of these ids listed (from the first catalog that has any of them; in a task)."""
         ids = [i for i in dict.fromkeys(ids) if i]
         chosen = self.catalog()
-        catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
+        catalogs = sorted((c for c in self.catalogs() if c.fields.get("id")), key=lambda c: c is not chosen)
         if not ids or not catalogs:
             self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）［E703］") if ids else "")
             return

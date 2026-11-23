@@ -149,7 +149,7 @@
 
 - **練習用のサーバー**: Esri のモック（`mikage/core/training/server.py`。開発用の `scripts/mock_esri` の中身をプラグインに移したもの。Python の標準ライブラリだけ）を QGIS の中のスレッドとして 127.0.0.1 だけで動かす。外の PC からは届かない。閉じたネットワークでも、ArcGIS Enterprise が止まっていても練習できる。ポートは前回と同じもの（使われていれば空いているもの。データの URL はそのポートに書き直す）
 - **見本**: 東京湾・横須賀（`mikage/core/training/sample.py`。使い方（ヘルプ）の手順書の写真と同じデータ）。画像 6 枚（光学 4・SAR 2）、衛星 4 機、観測記録と分類体系、撮像依頼と依頼グループ、地名、通報の条件・ジオフェンス・地名・国、イベント、備考の単語集。画像（1600 px）と背景地図（`basemap.tif`）は初めて始めたときに作る（`mikage/qgis_io/training_images.py`。数秒〜十数秒）。日付は作った日に合わせる。始めるときの画面の「練習データを今日の日付で作り直す」（作ってから 7 日以上で最初から入る）か「練習データを最初に戻す…」で作り直す
-- **本番から読む台帳**（`training.fromProduction`、既定ですべて）: 読むだけの台帳は、本番の設定ファイルにあれば本番のものを使う（`mikage/core/training/masters.py`。組織の実際の分類や衛星で練習できる）。書き込む表（観測記録・撮像依頼・撮像予定・分担・通報・イベントなど）と画像カタログは練習用サーバーのまま。本番の設定ファイルにない台帳は見本のもの
+- **本番から読む台帳**（`training.fromProduction`、既定ですべて）: 読むだけの台帳は、本番の設定ファイルにあれば本番のものを使う（`mikage/core/training/masters.py`。組織の実際の分類や衛星で練習できる）。書き込む表（観測記録・撮像依頼・撮像予定・分担・通報・イベントなど）と画像カタログは練習用サーバーのまま。本番の設定ファイルにない台帳は見本のもの。本番の画像カタログのうち `mode` が `training`（練習モードだけ）・`both`（両方）のものは、`fromProduction` にかかわらず見本のカタログの後ろに出す（組織の練習用設定ファイルのときも。[画像カタログの mode](images.md#練習モードだけ本番だけ両方mode)）
   - `satellites`（衛星）: `satelliteCatalogs`・`sensorCatalogs`・`satelliteAliases`・`groundStations` と、その衛星を発注する `requestExports`（撮像計画ファイルの `folder` は練習用のフォルダーに書き換える）
   - `taxonomy`（分類体系）: `observationVocabulary` と、本番の 1 番目の `observationStores` の `taxonomy`・`taxonomyTable`・`kinds`・`activities`・`confidences`（練習用の観測記録の表に付ける）。練習中は「分類体系の編集」が使えない（「（練習モードでは本番の分類体系を読むだけ）」）
   - `places`（地名）: `geocoders`

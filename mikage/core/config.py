@@ -60,7 +60,12 @@ from .util import is_number
 
 @dataclass
 class PluginConfig:
+    #: `imageCatalogs` shown in production (`mode` production or both; every one of a practice's settings file
+    #: while practising, core/training/masters.with_practice_catalogs).
     image_catalogs: list[CatalogConfig] = field(default_factory=list)
+    #: `imageCatalogs` shown while practising only (`mode: "training"`): not in production, but to 判読練習の指導者 in
+    #: the image catalog (their exercises' images; core/roles.PRACTICE_CATALOGS).
+    practice_catalogs: list[CatalogConfig] = field(default_factory=list)
     #: Minutes between checks for new images.
     watch_interval: float = DEFAULT_WATCH_INTERVAL
     #: `pathMappings`: prefixes and what they stand for, and rewrites (`pattern` / `to`) tried first.
@@ -368,6 +373,8 @@ SECTIONS = (
 )
 #: The keys this plugin reads.
 KEYS = tuple(s.key for s in SECTIONS)
+#: PluginConfig's attributes made from another's (not filled by a key of their own): imageCatalogs' practice-only ones.
+DERIVED = ("practice_catalogs",)
 
 
 def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
@@ -387,6 +394,9 @@ def parse_config(value: Any) -> tuple[PluginConfig, list[str]]:
             setattr(config, s.attr, s.read(value[s.key], problems, config))
         else:
             setattr(config, s.attr, s.read(value[s.key], problems))
+    # 練習モードだけのカタログ: aside (tsudo 2026-11-23).
+    config.practice_catalogs = [c for c in config.image_catalogs if c.mode == "training"]
+    config.image_catalogs = [c for c in config.image_catalogs if c.mode != "training"]
     if config.alert_reports is not None:
         # confidence.<key>: a key some 確度 level has (the vocabulary's or a store's own).
         levels = [*config.observation_vocabulary.confidences, *(c for st in config.observation_stores for c in st.confidences or [])]

@@ -36,6 +36,7 @@ from qgis.PyQt.QtWidgets import (
     QLineEdit, QMenu, QPushButton, QSpinBox, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
+from ..core import roles
 from ..core.catalog.api import CatalogConfig, CatalogLayerInfo, CatalogRecord
 from ..qgis_io import settings
 from ..qgis_io.file_manager import show_folder
@@ -385,7 +386,19 @@ class CatalogDock(
     # --- Form -------------------------------------------------------------------------------------
 
     def catalogs(self) -> list[CatalogConfig]:
-        return list(self.context.config.image_catalogs)
+        """
+        The settings file's catalogs shown now; for 判読練習の指導者 also those shown while practising only
+        (imageCatalogs[].mode "training"), after them (the exercises' images: their exercises are made in production).
+        """
+        config = self.context.config
+        practice = config.practice_catalogs if self.allows(roles.PRACTICE_CATALOGS) else []
+        return [*config.image_catalogs, *practice]
+
+    def catalog_label(self, catalog: CatalogConfig) -> str:
+        """A catalog's name in the list: 「（練習用）」 after a practice-only one's (shown in production to 判読練習の指導者)."""
+        if any(catalog is c for c in self.context.config.practice_catalogs):
+            return self.tr("{label}（練習用）").format(label=catalog.label)
+        return catalog.label
 
     def catalog(self) -> Optional[CatalogConfig]:
         i = self.catalog_box.currentIndex()
@@ -397,7 +410,7 @@ class CatalogDock(
         self.catalog_box.blockSignals(True)
         self.catalog_box.clear()
         for c in self.catalogs():
-            self.catalog_box.addItem(c.label)
+            self.catalog_box.addItem(self.catalog_label(c))
         i = self.catalog_box.findText(current)
         self.catalog_box.setCurrentIndex(i if i >= 0 else 0)
         self.catalog_box.blockSignals(False)
@@ -428,8 +441,13 @@ class CatalogDock(
         self._catalog_changed()
 
     def roles_changed(self) -> None:
-        """「ファイルなしで記録」: for those who record observations (core/roles.py)."""
+        """
+        「ファイルなしで記録」: for those who record observations; the catalogs shown while practising only:
+        for 判読練習の指導者 (core/roles.py).
+        """
         self._show_file_buttons()
+        if [self.catalog_box.itemText(i) for i in range(self.catalog_box.count())] != [self.catalog_label(c) for c in self.catalogs()]:
+            self._config_changed()
 
 
     # --- Tasks ------------------------------------------------------------------------------------

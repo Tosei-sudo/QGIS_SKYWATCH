@@ -337,11 +337,14 @@ class Training(Feature):
         run_task(tr("練習データの作成"), work, lambda _ok: finished(True), lambda message: finished(False, message))
 
     def _production(self) -> Optional[training_io.Production]:
-        """The production's settings file as read now, with the masters to take from it (None: none to take, or not readable)."""
+        """
+        The production's settings file as read now, with the masters to take from it (None: nothing to take
+        from it, or not readable): also for 判読の練習's organisation's exercises (their images may be the
+        production catalogs') and its image catalogs shown while practising (imageCatalogs[].mode).
+        """
         names = self.settings.from_production
         source = settings.production_config_source()[0]
-        # (判読の練習's organisation's exercises: their images may be the production catalogs')
-        if (not names and self.settings.exercises is None) or not source:
+        if not source:
             return None
         value = None
         try:
@@ -355,7 +358,9 @@ class Training(Feature):
                     value = load_jsonc(f.read())
         except (OSError, ValueError):
             value = None
-        return training_io.Production(value, source, tuple(names)) if isinstance(value, dict) else None
+        if not isinstance(value, dict) or not (names or self.settings.exercises is not None or masters.practice_catalog_entries(value)):
+            return None
+        return training_io.Production(value, source, tuple(names))
 
     def _switch_on(self, files, builtin: bool) -> None:
         production = self._production()
@@ -380,7 +385,8 @@ class Training(Feature):
             self._add_basemap(files)
         self._screens(True)
         self._entries_state()
-        read = tr("{m}は本番から読み込み（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
+        read_names = masters.read_text(taken, production.value if production is not None else None)
+        read = tr("{m}は本番から読み込み（読むだけ）。").format(m=read_names) if read_names else ""
         self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを開始。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
         tutorial, exercises, trial = self._tutorial_after_start, self._exercises_after_start, self._trial
@@ -837,7 +843,7 @@ class Training(Feature):
             missing()
             return
         config, _problems = parse_config(masters.made_whole(production.value, production.source))
-        catalogs = [c for c in config.image_catalogs if c.fields.get("id")]
+        catalogs = [c for c in (*config.image_catalogs, *config.practice_catalogs) if c.fields.get("id")]
         if not catalogs:
             missing()
             return
