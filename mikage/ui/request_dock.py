@@ -111,6 +111,11 @@ class RequestDock(PluginDock):
         self.category_filter.currentIndexChanged.connect(lambda _: self.render())
         for c in (self.category_filter, self.status_filter, self.group_filter):
             top.addWidget(c)
+        # 「依頼グループ…」: the groups of the table listed, added and changed (2026-11-23); shown while there is a table.
+        self.groups_button = QPushButton(self.tr("依頼グループ…"))
+        self.groups_button.setToolTip(self.tr("依頼グループの一覧を表示。依頼する人と撮像計画の担当は、グループの作成・名前やメンバーの変更もできる"))
+        self.groups_button.clicked.connect(lambda: self.group_editor() if self.group_editor else None)
+        top.addWidget(self.groups_button)
         for c in (self.status_filter, self.group_filter):
             c.changed.connect(self.render)
         self.body.addLayout(top)
@@ -373,6 +378,7 @@ class RequestDock(PluginDock):
         self.bulk_button.setEnabled(ready and bool(self.selected()))
         self.event_button.setVisible(self.context.config.events is not None)
         self.event_button.setEnabled(bool(self.selected()))
+        self.groups_button.setVisible(self.store is not None and bool(self.store.groups))
         self.export_button.setEnabled(bool(self.shown))
 
     def roles_changed(self) -> None:
@@ -488,6 +494,8 @@ class RequestDock(PluginDock):
 
     #: The 「イベント」 dock (plugin.py sets it).
     event_linker: Optional[Callable[[], object]] = None
+    #: Opens 「依頼グループ」 (features/requests.py sets it).
+    group_editor: Optional[Callable[[], object]] = None
 
     def event_items(self) -> list:
         """The chosen requests as items of an event."""

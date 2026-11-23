@@ -76,6 +76,10 @@ class GroupFilter(CheckFilter):
         self._filled = True
         self.setVisible(bool(names) or not self.is_all())
 
+    def use_groups(self, groups: Sequence[RequestGroup]) -> None:
+        """The table's groups changed (「依頼グループ…」): listed at once with the names seen before, the choices kept."""
+        self.set_groups(groups, self._seen or ())
+
     def choose(self, values) -> None:
         """Ticks these groups only (one, a list, or None / [] for all); a group not listed is added."""
         super().choose(values)

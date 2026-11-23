@@ -21,7 +21,8 @@ REPOSITORIES = [
     (obs_repository, obs_repository.AlertLogRepository, "settings"),
 ]
 #: The store's own parameter where the function names it otherwise.
-HELD = {"read_groups": None, "waiting_ids": None}
+HELD = {"read_groups": None, "waiting_ids": None, "load_groups": None, "group_table_fields": None, "save_group": None,
+        "save_group_orders": None, "delete_groups": None}
 
 
 def _methods(cls):
@@ -57,6 +58,23 @@ def test_the_ledgers_groups_and_waiting_ids(monkeypatch):
     repo.read_groups("cancelled")
     repo.waiting_ids()
     assert calls == [("groups", ("client", "G", {"name": "N"}, "token", "cancelled")), ("waiting", ("client", store))]
+
+
+def test_the_groups_table_is_the_stores(monkeypatch):
+    """「依頼グループ…」 (2026-11-23): the groups table's functions get the store's groups URL and attribute names."""
+    calls = []
+    for name in ("load_groups", "save_group", "save_orders", "delete_groups"):
+        monkeypatch.setattr(request_repository, name, lambda *a, _n=name: calls.append((_n, a)))
+    store = type("S", (), {"groups": "G", "group_fields": {"name": "N"}})()
+    repo = request_repository.RequestRepository("client", store, "token")
+    repo.load_groups("cancelled")
+    repo.save_group("g")
+    repo.save_group_orders(["g"])
+    repo.delete_groups(["g"])
+    assert calls == [("load_groups", ("client", "G", {"name": "N"}, "token", "cancelled")),
+                     ("save_group", ("client", "G", {"name": "N"}, "g", "token")),
+                     ("save_orders", ("client", "G", {"name": "N"}, ["g"], "token")),
+                     ("delete_groups", ("client", "G", ["g"], "token"))]
 
 
 def test_the_sql_times_are_written_as_before():

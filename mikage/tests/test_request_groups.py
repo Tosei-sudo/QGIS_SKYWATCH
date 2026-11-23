@@ -91,7 +91,7 @@ class Client:
         if self.fail:
             raise self.fail
         from types import SimpleNamespace
-        return SimpleNamespace(field_types=self.fields)
+        return SimpleNamespace(field_types=self.fields, object_id_field="OBJECTID")
 
     def query_all(self, url, where="1=1", token=None, geometry=True, limit=0, cancelled=None, **_):
         self.asked.append((url, where, geometry))

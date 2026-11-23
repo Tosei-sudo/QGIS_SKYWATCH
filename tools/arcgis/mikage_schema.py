@@ -332,7 +332,7 @@ TABLES = (
         F("ACTIVE", "有効", "SHORT", None, "active"),
     )),
     # 一覧の最後に足した（既に公開したサービスのレイヤー番号を変えないため）。
-    Table("TBL_REQUEST_GROUP", "依頼グループ", None, writable=False, setting="requestStores[].groups", fields=(
+    Table("TBL_REQUEST_GROUP", "依頼グループ", None, writable=True, setting="requestStores[].groups", fields=(
         F("GROUP_NAME", "グループ名", "TEXT", 255, "name"),
         F("MEMBERS", "メンバー", "TEXT", 4000, "users"),
         F("SORT_ORDER", "表示順", "LONG", None, "order"),
