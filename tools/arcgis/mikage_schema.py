@@ -484,6 +484,17 @@ TABLES = (
         F("HINTS", "ヒントを見た回数", "LONG"),
         F("DETAIL", "答えごとの結果", "TEXT", 30000),
     )),
+    Table("TBL_IMAGE_CORRECTION", "画像の幾何補正", None, writable=True, setting="imageCorrections", fields=(
+        F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
+        F("IMAGE_FILE", "画像のファイル", "TEXT", 1000, "imageFile"),
+        F("TIE_POINTS", "目印の点", "TEXT", 4000, "points"),
+        F("USE_DEM", "地形の補正", "SHORT", None, "terrain"),
+        F("LOOK_AZIMUTH", "衛星の方角", "DOUBLE", None, "toward"),
+        F("INCIDENCE_ANGLE", "入射角", "DOUBLE", None, "incidence"),
+        F("RESIDUAL_M", "残差", "DOUBLE", None, "residual"),
+        F("CORRECTED_BY", "補正した人", "TEXT", 255, "by"),
+        F("CORRECTED_AT", "補正した日時", "DATE", None, "at"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -514,6 +525,7 @@ INDEXES = {
     "TBL_TRAINING_EXERCISE": ("EXERCISE_ID",),
     "TBL_TRAINING_ANSWER": ("EXERCISE_ID",),
     "TBL_TRAINING_RESULT": ("USER_NAME", "EXERCISE_ID"),
+    "TBL_IMAGE_CORRECTION": ("IMAGE_ID",),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -618,6 +630,8 @@ def plugin_config(urls: dict) -> dict:
         if has("TBL_TRAINING_RESULT"):
             exercises["results"] = urls["TBL_TRAINING_RESULT"]
         config["training"] = {"exercises": exercises}
+    if has("TBL_IMAGE_CORRECTION"):
+        config["imageCorrections"] = urls["TBL_IMAGE_CORRECTION"]
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

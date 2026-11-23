@@ -286,6 +286,12 @@
      "name": "",
      "checkable": false,
      "icon": "unshift.svg:641024d9765c"
+    },
+    {
+     "text": "クイック幾何補正",
+     "name": "SatObsGeoFix",
+     "checkable": true,
+     "icon": "geo_fix.svg:8f357ea54c5b"
     }
    ]
   },
@@ -541,6 +547,7 @@
   "アペンド（既存レイヤーへ追加）…",
   "イベント",
   "クイックパンシャープン",
+  "クイック幾何補正",
   "クリック抽出（AI）",
   "サーバ処理…",
   "スペクトル",
@@ -3118,6 +3125,7 @@
   "delete_checked_areas",
   "delete_observations",
   "events",
+  "geo_fix",
   "image_catalog",
   "image_enhance",
   "imaging_plan",
@@ -3165,6 +3173,7 @@
   "columnDrag",
   "complexImages",
   "defaultBaseMap",
+  "dem",
   "detectionOutputs",
   "editTracking",
   "events",
@@ -3174,6 +3183,7 @@
   "groundStations",
   "handover",
   "imageCatalogs",
+  "imageCorrections",
   "imageRules",
   "interests",
   "layerTemplates",

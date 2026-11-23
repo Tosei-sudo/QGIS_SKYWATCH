@@ -120,16 +120,58 @@ def moved_vrt(source: str, dx: float, dy: float, folder: Optional[str] = None) -
 
 def set_shift(layer, dx: float, dy: float, folder: Optional[str] = None) -> None:
     """Moves the layer to dx, dy (its CRS's units) from where its own file puts it; (0, 0) gives the file back."""
-    from qgis.core import QgsDataProvider
+    from . import geo_fix_io
 
-    from . import enhance_renderer as er
-
+    if geo_fix_io.is_fixed(layer):
+        # Corrected by クイック幾何補正: the shift is part of its warp.
+        geo_fix_io.reshift(layer, dx, dy)
+        return
     source = original_source(layer)
-    old = layer.source() if layer.customProperty(SOURCE) else ""
     if not dx and not dy:
         target = source
     else:
         target = moved_vrt(source, dx, dy, folder)
+    point_at(layer, target, source, (dx, dy), folder=folder)
+
+
+#: Qgis.RasterColorInterpretation.AlphaBand.
+ALPHA_BAND = 6
+
+
+def _alpha_as_source(layer) -> None:
+    """
+    The renderer's alpha band as the new source has one: QGIS shows an image
+    placed by GCPs warped with an alpha band (its last), a corrected image's
+    VRT (クイック幾何補正) has none (outside it: no data).
+    """
+    renderer = layer.renderer()
+    provider = layer.dataProvider()
+    if renderer is None or provider is None or not hasattr(renderer, "alphaBand"):
+        return
+    n = provider.bandCount()
+    try:
+        alpha = n if n > 1 and int(provider.colorInterpretation(n)) == ALPHA_BAND else -1
+    except (TypeError, ValueError):
+        return
+    now = renderer.alphaBand()
+    if now != alpha and (now > n or (now < 1 and alpha > 0)):
+        renderer.setAlphaBand(alpha)
+
+
+def point_at(layer, target: str, source: str, shift: tuple, properties: Optional[dict] = None, folder: Optional[str] = None) -> None:
+    """
+    Points the layer at `target` (a VRT of `source`, its own file; or the
+    file itself), with its shift and other custom properties (None removes
+    one), keeping its CRS and its correction's state; the VRT shown before,
+    when one of ours, is deleted.
+    """
+    from qgis.core import QgsDataProvider
+
+    from . import enhance_renderer as er
+    from . import geo_fix_io
+
+    dx, dy = shift
+    old = layer.source() if layer.customProperty(SOURCE) else ""
     crs = layer.crs()
     corrected = er.enhance_renderer(layer)
     state = corrected.state if corrected is not None else None
@@ -138,18 +180,31 @@ def set_shift(layer, dx: float, dy: float, folder: Optional[str] = None) -> None
     if crs.isValid() and layer.crs() != crs:
         # A CRS set by hand (the file has none, or another) is the layer's, not the file's.
         layer.setCrs(crs)
-    if not dx and not dy:
+    _alpha_as_source(layer)
+    for key, value in (properties or {}).items():
+        if value is None:
+            layer.removeCustomProperty(key)
+        else:
+            layer.setCustomProperty(key, value)
+    if target == source:
         layer.removeCustomProperty(SOURCE)
         layer.removeCustomProperty(SHIFT)
     else:
         layer.setCustomProperty(SOURCE, source)
-        layer.setCustomProperty(SHIFT, f"{dx!r},{dy!r}")
+        if dx or dy:
+            layer.setCustomProperty(SHIFT, f"{dx!r},{dy!r}")
+        else:
+            layer.removeCustomProperty(SHIFT)
     if layer.customProperty(er.PROPERTY):
         er.restore_layer(layer, state)
     layer.triggerRepaint()
     # The VRT moved from is no longer needed.
-    if old and old != target and old.startswith(shifts_folder() if folder is None else folder):
-        try:
-            os.remove(old)
-        except OSError:
-            pass
+    if old and old != target:
+        if geo_fix_io.ours(old):
+            # A corrected image's VRTs (it and its model's).
+            geo_fix_io.forget_files(old)
+        elif old.startswith(shifts_folder() if folder is None else folder):
+            try:
+                os.remove(old)
+            except OSError:
+                pass

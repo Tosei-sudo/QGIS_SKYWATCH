@@ -196,3 +196,20 @@ def test_records_are_removed_for_good_where_the_layer_has_no_soft_delete(tmp_pat
     assert [o.id for o in book.records] == ["b"]
     assert fake.layers[URL].rows == []
     db.close()
+
+
+def test_records_are_moved_together_to_a_corrected_image(tmp_path):
+    """クイック幾何補正: an image's records put where its corrected image shows them, in one save."""
+    said = []
+    db = open_local(str(tmp_path / "local.gpkg"))
+    store = LocalObservationStore(db)
+    store.save([obs(id="a"), obs(id="b"), obs(id="d", deleted_at=day(21))])
+    book, other = _book(store, tmp_path, said)
+    out = book.move_many({"a": (139.701, 35.6005), "b": (139.7, 35.6), "d": (139.8, 35.7), "gone": (1.0, 2.0)})
+    assert [o.id for o in out.saved] == ["a"] and out.unchanged == 1 and out.missing == 2
+    rec = {o.id: o for o in store.load()}
+    assert (rec["a"].lon, rec["a"].lat) == (139.701, 35.6005) and rec["a"].updated_by == "田中"
+    assert (rec["b"].lon, rec["b"].lat) == (139.7, 35.6) and (rec["d"].lon, rec["d"].lat) == (139.7, 35.6)
+    assert book.move_many({}).saved == []
+    db.close()
+    other.close()

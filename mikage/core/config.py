@@ -34,6 +34,7 @@ from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
 from .obs.glossary import glossary_source_of
+from .geo_fix import DemSettings, dem_settings_of, fix_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
 from .plan.names import AliasTableConfig, alias_tables_of
@@ -93,6 +94,10 @@ class PluginConfig:
     observation_vocabulary: ObservationVocabulary = field(default_factory=ObservationVocabulary)
     #: `glossary`: the Esri table of the words the 備考 should use (備考の単語集, core/obs/glossary.py); None for none.
     glossary: Optional[EsriSource] = None
+    #: `dem`: the heights クイック幾何補正 corrects the terrain with (an ArcGIS image service or a file, core/geo_fix.py); None for none.
+    dem: Optional[DemSettings] = None
+    #: `imageCorrections`: the Esri table the images' クイック幾何補正 are shared in; None: kept on this PC.
+    image_corrections: Optional[EsriSource] = None
     #: `textAssist`: the small generative model of 文章の手伝い (備考を整える・申し送りの下書き, core/text_assist.py); None hides it.
     text_assist: Optional[TextAssistSettings] = None
     arcgis_portals: list[ArcgisPortalConfig] = field(default_factory=list)
@@ -344,6 +349,8 @@ SECTIONS = (
     Section("shapeReceiver", "shape_receiver", receiver_settings_of),
     Section("observationVocabulary", "observation_vocabulary", vocabulary_of),
     Section("glossary", "glossary", glossary_source_of),
+    Section("dem", "dem", dem_settings_of),
+    Section("imageCorrections", "image_corrections", fix_source_of),
     Section("textAssist", "text_assist", text_assist_settings_of),
     Section("arcgisPortals", "arcgis_portals", _arcgis_portals),
     Section("baseMaps", "base_maps", base_maps_of),
