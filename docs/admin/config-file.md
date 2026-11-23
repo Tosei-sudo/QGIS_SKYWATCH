@@ -98,6 +98,8 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | `rasterSpeed` | `false` かオブジェクト | `gdalThreads`（`"auto"` = コア数 − 1・数・`false`）、`gdalCacheMB`（`"auto"` = RAM の 10 %・最大 2048・数・`false`）、`qgisSettings`（QGIS のオプションの遅い値を 1 回だけ直す） | 使う（`auto`・`auto`・`true`） | [地図の描画を速くする設定](../features/images.md#地図の描画を速くする設定rasterspeed) |
 | `complexImages` | `"dB"`・`"amplitude"`・`false` | SICD（I・Q のバンド）や複素数の画素の画像を振幅で表示。`"dB"` は 20·log10(振幅)、`false` で QGIS のまま | `"dB"` | [複素 SAR 画像の表示](../features/images.md#複素-sar-画像sicdの表示compleximages) |
 | `imageRules` | 配列 | `match`（ファイル名の正規表現、必須）、`caseSensitive`、`preset`・`enhance`（補正）、`bands`、`noData`、`complexImages`（複素 SAR の表示。`"dB"`・`"amplitude"`・`false`） | なし | [画像補正](../features/enhance.md#画像補正) |
+| `dem` | URL・パスかオブジェクト | クイック幾何補正の標高。ArcGIS のイメージサーバー（`…/ImageServer`）の URL か標高ファイルのパス、または `{ "url" か "file", "geoidHeight"（ジオイド高 m、−150〜150）, "renderingRule"（既定 `{ "rasterFunction": "None" }`）, "mosaicRule", "maxSize"（一辺の画素数、256〜16384）, "token" }` | なし（地形は補正しない。目印の点だけ） | [クイック幾何補正](../features/enhance.md#クイック幾何補正) |
+| `imageCorrections` | URL かオブジェクト | クイック幾何補正を共有する Esri のテーブル（編集可、画像のファイル 1 つで 1 行）。`{ "url", "fields", "where", "token" }`（既定の属性名は [`TBL_IMAGE_CORRECTION`](esri-tables.md#tbl_image_correction画像の幾何補正)） | なし（その PC だけに残す） | [クイック幾何補正](../features/enhance.md#クイック幾何補正) |
 
 #### 撮像計画・撮像依頼
 

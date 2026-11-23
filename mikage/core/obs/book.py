@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 from .areas import CheckedArea, area_contains, area_label, box_ring, covering_areas, new_area_id
 from .drafts import Draft, PrefsDrafts
@@ -1227,6 +1227,45 @@ class ObservationBook:
             self.records = [by_id.get(o.id, o) for o in self.records]
         outcome.saved = saved
         self._say(outcome.text())
+        return outcome
+
+    def move_many(self, moves: Mapping[str, tuple]) -> "BulkOutcome":
+        """
+        Places several records at once (クイック幾何補正: an image's records put
+        where its corrected image shows them), in one save: {record id: (lon, lat)}.
+        Their pixels are found again from the image as it lies now (the same
+        pixels, the image's correction having moved them). The store's checks
+        hold, as 一括編集's.
+        """
+        outcome = BulkOutcome()
+        targets = [o for o in self.records if o.id in moves and o.deleted_at is None]
+        outcome.missing = len(moves) - len(targets)
+        now = now_ms()
+        rows = []
+        for o in targets:
+            lon, lat = moves[o.id]
+            if (o.lon, o.lat) == (lon, lat):
+                outcome.unchanged += 1
+            else:
+                rows.append(replace(o, lon=float(lon), lat=float(lat), updated_at=now))
+        if not rows:
+            return outcome
+        by = self.observer()
+        rows = self._named(self._placed([replace(o, updated_by=by) for o in rows]))
+        try:
+            self.store.save(rows)
+            saved = rows
+        except Exception as error:  # noqa: BLE001 (told; the part that went through is kept)
+            done = getattr(self.store, "last_saved", set())
+            saved = [o for o in rows if o.id in done]
+            outcome.conflicts = len(getattr(self.store, "last_conflicts", set()) & {o.id for o in rows})
+            outcome.failed = len(rows) - len(saved)
+            outcome.error = _error_text(error)
+        saved = self._kept(saved)
+        with self.lock:
+            by_id = {o.id: o for o in saved}
+            self.records = [by_id.get(o.id, o) for o in self.records]
+        outcome.saved = saved
         return outcome
 
     def move(self, record_id: str, lon: float, lat: float) -> Optional[Observation]:

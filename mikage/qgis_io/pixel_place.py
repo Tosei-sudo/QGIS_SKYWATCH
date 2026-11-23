@@ -53,6 +53,10 @@ class Placement:
     rpc: tuple = ()
     #: GDAL's GCP transformation to use (GCP_TPS for one sampled from QGIS's own, when the file could not be read).
     method: str = ""
+    #: GDAL's transformer options in place of those made here (クイック幾何補正: its RPC model with the DEM, qgis_io/geo_fix_io).
+    options: tuple = ()
+    #: The CRS the georeferencing's coordinates are in, when not the layer's (WGS 84 for a corrected layer's RPC model).
+    model_crs: Optional[QgsCoordinateReferenceSystem] = None
 
     def __post_init__(self):
         self._local = threading.local()
@@ -72,18 +76,18 @@ class Placement:
             if self.rpc:
                 ds.SetMetadata(dict(self.rpc), "RPC")
                 height = dict(self.rpc).get("HEIGHT_OFF")
-                if height:
+                if height and not self.options:
                     # As QGIS asks (QgsGdalUtils::rpcAwareCreateTransformer).
                     options.append(f"RPC_HEIGHT={str(height).split()[0]}")
             if self.method:
                 options.append(f"METHOD={self.method}")
-            t = gdal.Transformer(ds, None, options)
+            t = gdal.Transformer(ds, None, list(self.options) or options)
             self._local.ds, self._local.transformer = ds, t
         return t
 
     def _to_layer(self) -> QgsCoordinateTransform:
         # Made each time (QGIS keeps the PROJ pipelines per thread): none outlives QGIS in a placement kept.
-        return QgsCoordinateTransform(WGS84, self.crs, self.context)
+        return QgsCoordinateTransform(WGS84, self.model_crs if self.model_crs is not None else self.crs, self.context)
 
     def pixel(self, lon: float, lat: float) -> Optional[tuple[float, float]]:
         """The file's pixel (x, y) at a place (WGS 84); None when it cannot be found (never raises)."""
@@ -160,6 +164,18 @@ def placement_of(layer: QgsRasterLayer, project: Optional[QgsProject] = None) ->
     project = project or QgsProject.instance()
     box = _box(layer)
     common = dict(file=layer_file(layer), crs=layer.crs(), context=project.transformContext(), box=tuple(box) if box else None)
+    from . import geo_fix_io
+
+    fixed = geo_fix_io.placement(layer)
+    if fixed is not None:
+        # クイック幾何補正: the file's pixels through the correction's RPC model and DEM, as GDAL warps it for the map.
+        try:
+            model = gdal.Open(fixed[0])
+        except RuntimeError:
+            model = None
+        if model is not None:
+            return Placement(width=model.RasterXSize, height=model.RasterYSize, rpc=tuple(sorted((model.GetMetadata("RPC") or {}).items())),
+                             options=fixed[1], model_crs=WGS84, **common)
     path = gdal_path(layer)
     ds = None
     if not path.startswith("/vsicurl") and "://" not in path:

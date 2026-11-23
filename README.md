@@ -6,7 +6,7 @@
 
 - 撮像計画: 衛星カタログ（TLE と諸元）から撮像機会・組み合わせ・優先度、衛星パス、移動目標撮像計画、ステレオ・干渉ペア、再訪間隔マップ、撮像機会から臨時依頼の登録、雲量予報・雲量マップ（閉域では GFS のファイル）
 - 撮像依頼: 定点・臨時の依頼台帳と日次の撮像計画ファイル出力、日ごとの撮像予定（システムの採否・要求外）
-- 画像: 画像カタログ（検索・フットプリント・新着通知・類似画像・フォルダのレコード）、ピラミッド（.ovr）の自動作成、複素 SAR（SICD）の振幅表示、画像補正（色調補正）、スワイプ比較・位置ずらし、影から高さ・スペクトル
+- 画像: 画像カタログ（検索・フットプリント・新着通知・類似画像・フォルダのレコード）、ピラミッド（.ovr）の自動作成、複素 SAR（SICD）の振幅表示、画像補正（色調補正）、スワイプ比較・位置ずらし・クイック幾何補正（地形（DEM）と目印の点で SAR 画像を正しい位置へ）、影から高さ・スペクトル
 - 解析・処理: データ分析（Esri の表とプロジェクトのレイヤーを SQL で結合・集計）、パンシャープン・変化抽出・自動位置合わせ・簡易オルソ補正・土地被覆分類・測地線バッファ、サーバ処理、雲量を属性に付与（Processing にも同じものがある）
 - 観測記録: モノの位置・種別・活動を画像ごとに記録して画像をまたいで追う（2〜4 点入力・確認範囲・一括編集）、分類体系の編集（表・Excel からの取り込みと表への書き出しも）、分担と引き継ぎメモ、イベント（地震対応など）、通報（条件・ジオフェンス・地名・通報記録）、観測記録のエクスポート（CSV・JSON）、作成者・更新者の記録、ダッシュボード
 - AI: 物体検出・クリック抽出・教師データセット・アノテーション変換（点→矩形）・AI 学習（物体検出）、外部 AI とプラグイン内の検出結果の取り込み
@@ -30,7 +30,7 @@
 | [撮像計画](docs/features/plan.md) | 撮像計画、移動目標撮像計画、衛星パス、雲量マップ・雲量を属性に付与 |
 | [撮像依頼](docs/features/requests.md) | 撮像依頼と日次出力 |
 | [観測記録](docs/features/observations.md) | 観測記録、イベント、分類体系の編集、ダッシュボード、移動体 |
-| [画像補正と画像の道具](docs/features/enhance.md) | 画像補正、影から高さ、スペクトル、スワイプ比較、位置ずらし |
+| [画像補正と画像の道具](docs/features/enhance.md) | 画像補正、影から高さ、スペクトル、スワイプ比較、位置ずらし、クイック幾何補正 |
 | [解析・処理](docs/features/analysis.md) | データ分析、QGIS の式の MIKAGE 関数、測地線バッファ・正距方位での重心、サーバ処理 |
 | [AI](docs/features/ai.md) | AI、AI 学習、AI結果 |
 | [地図・レイヤー](docs/features/map.md) | 背景地図、新規スクラッチレイヤー、ArcGIS Web マップ、座標・地名へ移動、外部から図形を受け取る、起動時のレイヤー |
@@ -58,7 +58,7 @@ api.add_checked_area(bbox=[139.69, 35.59, 139.72, 35.62], kind="船舶")
 api.observation_report(title="週報", save="/tmp/週報.html") # 報告書（地図つき）
 ```
 
-ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`read_more()`（続きを読む）・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
+ほかに `rename_observed_thing`・`delete_observations`・`clear_observations(deleted_only=False)`（ローカルのみ、完全に消去）・`confidences`・`checked_areas`・`delete_checked_areas`。ドックそのものは `api.observation_dock`（`save_csv(path)`・`to_layers()`・`set_observer(name)`）。画像カタログは `api.image_catalog`（`search()`・`read_more()`（続きを読む）・`records`・`choose()`・`open_records()`・`find_similar()`・`add_layer()`）、通知は `api.notices`（`check()`・`watch_point(lon, lat)`・`store()`）、座標・地名へ移動は `api.coordinates`（`jump(text)`・`search.search(text)`・`go_to_place(place)`・`set_notation("mgrs")`）、スペクトルは `api.spectral`（`add_point(point)`・`add_box(rect)`・`series`・`save_csv(path)`）、ダッシュボードは `api.dashboard`（`figures`・`categories`・`click_value(value)`・`click_bin(i)`・`click_step(i)`・`set_heatmap(True)`・`clear_filter()`・`set_trend("grid" | "group" | レイヤー ID, "day" | "week" | "month")`・`trends`・`surge_regions()`）、スワイプ比較は `api.swipe`（`set_active(True)`・`set_target(layer)`・`set_position(0.3)`・`set_orientation("horizontal")`）、位置ずらしは `api.shift`（`set_shift_metres(layer, 12, -3)`・`shift_metres(layer)`・`reset()`）、クイック幾何補正は `api.geo_fix`（`set_active(True)`・`take(layer)`・`set_look(270, 35)`・`add_point(start, end)`・`undo()`・`save()`・`take_off()`）、影から高さは `api.shadow_height`（`set_sun(45, 180)`・`set_time(ms)`・`measurements`・`add_layer()`）、イベントは `api.events`（`events`・`links`・`reload()`・`link_items(event_ids, items)`・`choose(id)`・`export(path)`）、AI結果は `api.ai_results`（`load(image_id)`・`rows`・`selected_rows()`・`import_rows(rows)`・`zoom_to(rows)`・`review_queue()`・`next_to_review()`・`accept_rows(rows)`・`reject_rows(rows)`・`open_training()`）、新規スクラッチレイヤーは `api.new_scratch_layer("目標・物体")`（組織のものは `api.new_scratch_layer("巡回記録", "config")`。`create()` で作成）。
 
 ## 構成
 

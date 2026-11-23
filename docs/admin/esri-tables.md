@@ -75,6 +75,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_TRAINING_EXERCISE`](#tbl_training_exercise判読の練習の問題) | ポリゴン | 書き込み（判読の練習の指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の組織の問題（範囲。2026-11-22 に追加） | `training.exercises.exercises` |
 | [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
 | [`TBL_TRAINING_RESULT`](#tbl_training_result判読の練習の結果) | なし | 書き込み | 判読の練習の結果（提出 1 回で 1 行） | `training.exercises.results` |
+| [`TBL_IMAGE_CORRECTION`](#tbl_image_correction画像の幾何補正) | なし | 書き込み | 画像ごとのクイック幾何補正（目印の点・地形の補正。2026-11-23 に追加） | `imageCorrections` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -131,6 +132,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_TRAINING_ANSWER` | `EXERCISE_ID` | 問題ごとの正解 |
 | `TBL_TRAINING_RESULT` | `USER_NAME` | 本人の結果（判読の練習を開くたび。試験は 1 回だけ） |
 | `TBL_TRAINING_RESULT` | `EXERCISE_ID` | 問題ごとの結果（指導者の集計） |
+| `TBL_IMAGE_CORRECTION` | `IMAGE_ID` | 画像ごとの幾何補正（画像を開くたび） |
 
 ほかに:
 
@@ -749,9 +751,25 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `HINTS` | ヒントを見た回数 | `Integer` | ヒントを見た回数 |  |
 | `DETAIL` | 答えごとの結果 | `String(30000)` | 答えごとの結果と項目ごとの点（JSON。取り違えた種別の集計に使う） |  |
 
+### `TBL_IMAGE_CORRECTION`（画像の幾何補正）
+
+[クイック幾何補正](../features/enhance.md#クイック幾何補正)で直した画像のファイル 1 つで 1 行（2026-11-23 に追加）。プラグインの「クイック幾何補正」の「保存」で書き（同じ画像のファイルの行があれば上書き）、画像を開くたびに画像 ID で読んで、だれが開いても補正した位置で表示する。「保存した補正を削除」で行を消すと、補正なしに戻る。補正した画像はファイルを変えない（この表の値から、開いた PC で作り直す）。`imageCorrections.fields`（既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像カタログの画像 ID（カタログ外の画像はファイル名。観測記録の `IMAGE_ID` と同じ）。**必須** | `imageId` |
+| `IMAGE_FILE` | 画像のファイル | `String(1000)` | 画像のファイル（フォルダのレコードはフォルダからのパス、ほかはファイル名。観測記録の `IMAGE_FILE` と同じ）。空はその画像のどのファイルにも | `imageFile` |
+| `TIE_POINTS` | 目印の点 | `String(4000)` | 目印の点（JSON: `[[画素X, 画素Y, 経度, 緯度], …]`。画素は元のファイルの左上から右・下、経緯度は本当の位置（WGS 84）。40 点まで）。**必須**（目印なしは `[]`） | `points` |
+| `USE_DEM` | 地形の補正 | `SmallInteger` | 1 で地形（DEM）でも補正する | `terrain` |
+| `LOOK_AZIMUTH` | 衛星の方角 | `Double` | 入力した衛星の方角（度。画像の場所から見た衛星の方位、北から時計回り）。空はファイルから読む | `toward` |
+| `INCIDENCE_ANGLE` | 入射角 | `Double` | 入力した入射角（度）。空はファイルから読む | `incidence` |
+| `RESIDUAL_M` | 残差 | `Double` | 保存したときの目印の点の残差（m、二乗平均。3 点以上のとき） | `residual` |
+| `CORRECTED_BY` | 補正した人 | `String(255)` | 保存した人（作成者の 4 属性と同じ利用者名） | `by` |
+| `CORRECTED_AT` | 補正した日時 | `Date` | 保存した日時 | `at` |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -817,6 +835,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
       "results": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/31"                     // TBL_TRAINING_RESULT
     }
   },
+  "imageCorrections": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/32",              // TBL_IMAGE_CORRECTION
   "aiResultSources": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/17",                        // TBL_AI_RESULT
       "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",

@@ -171,6 +171,8 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "shapeReceiver",
   "observationVocabulary",
   "glossary",
+  "dem",
+  "imageCorrections",
   "textAssist",
   "arcgisPortals",
   "baseMaps",
@@ -571,6 +573,17 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "kinds": "ROOT_KIND",
    "description": "DESCRIPTION",
    "order": "SORT_ORDER"
+  },
+  "imageCorrections": {
+   "imageId": "IMAGE_ID",
+   "imageFile": "IMAGE_FILE",
+   "points": "TIE_POINTS",
+   "terrain": "USE_DEM",
+   "toward": "LOOK_AZIMUTH",
+   "incidence": "INCIDENCE_ANGLE",
+   "residual": "RESIDUAL_M",
+   "by": "CORRECTED_BY",
+   "at": "CORRECTED_AT"
   }
  },
  "roleCodes": [
@@ -1589,6 +1602,18 @@ const SPEC = [
         J("bands", "バンド（bands）", { ph: "[3, 2, 1]" }), J("noData", "no data", { ph: "0" }),
         S("complexImages", "複素 SAR の表示", [["dB", "dB"], ["amplitude", "amplitude"]], { ph: "設定ファイルの complexImages", falseLabel: "false（QGIS のまま I・Q）" }),
       ], { title: (it) => it.label || it.match }) },
+    { key: "dem", label: "クイック幾何補正の標高（DEM）", doc: "クイック幾何補正", help: "クイック幾何補正で SAR 画像の地形の倒れ込み（高い所ほど衛星の側に写る）を直す標高。ArcGIS のイメージサーバー（…/ImageServer）なら画像の範囲だけを exportImage で読み、この PC（QGIS のプロファイル）に残す（同じ範囲は読み直さない）。標高ファイル（GeoTIFF など）でもよい。標高が海面からの高さならジオイド高を書く（画像の高さは楕円体から）。",
+      field: O("dem", "標高", [
+        T("url", "イメージサーバー", { ph: "https://gis.example/arcgis/rest/services/DEM/ImageServer", help: "…/ImageServer。トークンは QGIS の認証設定か token" }),
+        T("file", "標高ファイル", { ph: "\\\\server\\dem\\japan_dem.tif", help: "イメージサーバーの代わりに（url があれば url）" }),
+        N("geoidHeight", "ジオイド高（m）", { min: -150, max: 150, ph: "0", help: "標高（海面から）に足して楕円体高にする値。日本ならおよそ 30〜40 m。0 なら足さない" }),
+        J("renderingRule", "ラスター関数（renderingRule）", { ph: '{ "rasterFunction": "None" }', help: "既定は None（サービスの値のまま。表示用の陰影などではなく標高の値）" }),
+        J("mosaicRule", "モザイクの決まり（mosaicRule）", { ph: '{ "mosaicMethod": "esriMosaicNone" }' }),
+        N("maxSize", "最大の画素数（一辺）", { min: 256, max: 16384, ph: "4096", help: "画像の範囲を読む DEM の一辺の画素数の上限（細かすぎるサービスは粗くして読む）" }),
+        T("token", "トークン", { help: "QGIS の認証設定があればそちら" }),
+      ]) },
+    { key: "imageCorrections", label: "クイック幾何補正の共有", doc: "クイック幾何補正", help: "クイック幾何補正で直した画像ごとの補正（目印の点・地形の補正・撮像方向）を残す Esri のテーブル（編集可、画像のファイル 1 つで 1 行）。書けば補正をみんなで共有し、だれが開いても補正した位置で表示する。書かなければ補正はその PC だけに残す。",
+      field: TJ("imageCorrections", "補正のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_IMAGE_CORRECTION。役割: " + Object.entries(K.roles.imageCorrections).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は imageId（画像 ID）と points（目印の点）" }) },
   ] },
   { group: "撮像計画・撮像依頼", keys: [
     { key: "satelliteCatalogs", label: "衛星カタログ（TLE）", doc: "撮像計画", help: "衛星の TLE と諸元。fields に tle か tle1＋tle2 が必須。",
@@ -1960,6 +1985,7 @@ const DOC_FILES = {
   "活動大分類ごとの切り替え": "docs/features/observations.md",
   "画像カタログ": "docs/features/images.md",
   "画像補正": "docs/features/enhance.md",
+  "クイック幾何補正": "docs/features/enhance.md",
   "監査ログauditlog": "docs/admin/operations.md",
   "移動体aisads-b": "docs/features/observations.md",
   "背景地図": "docs/features/map.md",

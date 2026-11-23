@@ -32,6 +32,7 @@ if TYPE_CHECKING:  # the docks and tools it hands out (named in its annotations 
     from .ui.segment_tool import SegmentTool
     from .ui.shadow_dock import ShadowHeightDock
     from .ui.shape_receiver import ShapeReceiver
+    from .ui.geo_fix import LayerFix
     from .ui.shift import LayerShift
     from .ui.spectral_dock import SpectralDock
     from .ui.swipe import SwipeCompare
@@ -195,6 +196,11 @@ class PluginApi:
     def shift(self) -> "LayerShift":
         """「位置ずらし」 (its `set_active()`, `set_shift_metres(layer, east, north)`, `shift_metres(layer)`, `reset()`)."""
         return self._plugin.shift
+
+    @property
+    def geo_fix(self) -> "LayerFix":
+        """「クイック幾何補正」 (its `set_active()`, `take(layer)`, `add_point(shown, true)` in map coordinates, `undo()`, `save()`, `take_off()`)."""
+        return self._plugin.geo_fix
 
     @property
     def segment(self) -> "SegmentTool":

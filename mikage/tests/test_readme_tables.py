@@ -6,6 +6,7 @@ import re
 import unicodedata
 
 from mikage.core import edit_stamp, events, interests, roles
+from mikage.core.geo_fix import DEFAULT_FIX_FIELDS
 from mikage.core.obs import alerts
 from mikage.core.obs.areas import DEFAULT_AREA_FIELDS
 from mikage.core.obs.assignments import DEFAULT_ASSIGNMENT_FIELDS
@@ -41,6 +42,7 @@ DEFAULTS = {
     "TBL_INTEREST_AREA": interests.DEFAULT_INTEREST_FIELDS,
     "TBL_USER_ROLE": roles.DEFAULT_USER_ROLE_FIELDS,
     "TBL_SATELLITE_OUTAGE": DEFAULT_OUTAGE_FIELDS,
+    "TBL_IMAGE_CORRECTION": DEFAULT_FIX_FIELDS,
 }
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,29}$")
 
