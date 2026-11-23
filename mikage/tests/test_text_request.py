@@ -181,6 +181,23 @@ def test_the_models_reading_kept_where_the_words_give_it_a_footing():
     assert d.values["cloud_no_go"] == 21
 
 
+def test_a_number_of_times_is_not_once():
+    """「今月末までに2回」: the model's 「今月末までに1回」 is not 期間内1回 (real 3B 2026-11-23); no 頻度 holds 2 times."""
+    m = tr.many_times
+    assert m("今月末までに呉を光学で2回撮ってほしい") == "2回" and m("期間中に三度") == "三度" and m("12回") == "12回"
+    for text in ("1日2回", "1日に2回", "週2回", "月1回で", "2回目の依頼", "第二回", "オフナディア角は20度以内", "期間中に1回"):
+        assert m(text) is None, text
+    text = "今月末までに呉を光学で2回撮ってほしい。雲量10%以下、分解能50cm以下。"
+    assert "頻度" not in tr.asked_keys(text, TODAY)
+    d = tr.request_draft(answer(often="今月末までに1回"), text, TODAY)
+    assert "achieve" not in d.values and "category" not in d.values
+    assert any("「2回」" in c and "達成条件" in c for c in d.checks)
+    assert not any("頻度「" in c for c in d.checks)
+    # 1 回 is still read.
+    d = tr.request_draft(answer(often="今月末までに1回"), "今月末までに呉を光学で1回", TODAY)
+    assert d.values["achieve"] == "期間内1回"
+
+
 def test_what_the_model_got_wrong_on_real_mails():
     """sarashina2.2 3B on the request form (2026-11-21)."""
     # 「週1回」: the model's 「期間中に1回」 is not taken (the 1回 is per week).

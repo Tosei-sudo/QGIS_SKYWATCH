@@ -330,6 +330,8 @@ _WEEKS_ONCE = re.compile(r"(?:(?P<n>\d+|[二三四五六七八九十]+)\s*週(?:
                          r"|週一(?:回|度)?")
 #: 「月1回」「1日2回」「週2回」: how many times in a span (no 「期間中に1回」).
 _RATE = re.compile(r"(?:[日週月年]|日間|週間|か月|ヶ月|カ月)\s*(?:に|で)?\s*(?:\d+|[一二三四五六七八九十]+)\s*(?:回|度)")
+#: 「2回」「三度」: a number of times in the period (not a rate like 「週2回」, not 「2回目」 or an angle 「20度」).
+_MANY_TIMES = re.compile(r"(?<![\d.])(?:[2-9]|[1-9]\d+)\s*回(?!目)|(?<![一-鿿々])[二三四五六七八九]\s*(?:回|度)(?!目)")
 _STEADY = re.compile(r"定点|定期|継続|監視を続|ずっと")
 _ONE_OFF = re.compile(r"臨時|スポット|単発|今回のみ")
 
@@ -385,11 +387,21 @@ def often_of(text: str) -> Optional[Often]:
     return None
 
 
+def many_times(text: str) -> Optional[str]:
+    """
+    The words of a number of times above one (「今月末までに2回」 → 「2回」),
+    which no 頻度 holds (達成条件 is 毎回 or 期間内1回); None when the text says none.
+    """
+    m = _MANY_TIMES.search(_RATE.sub("", _nfkc(text)))
+    return m[0] if m else None
+
+
 def _often_of_model(value: str, text: str) -> Optional[Often]:
     """The model's 頻度, kept when the text gives it a footing."""
     v = _nfkc(bare(value))
     t = _nfkc(text)
-    if re.search(r"1\s*回|一回|一度|1度", v) and re.search(r"(?:1|一)\s*(?:回|度)|までに|いずれか|どこか", _RATE.sub("", t)):
+    if re.search(r"1\s*回|一回|一度|1度", v) and many_times(t) is None and \
+            re.search(r"(?:1|一)\s*(?:回|度)|までに|いずれか|どこか", _RATE.sub("", t)):
         return Often("1回", words=bare(value))
     if "毎日" in v and _DAILY.search(t):
         return Often("毎日", words=bare(value))
@@ -916,7 +928,7 @@ def asked_keys(text: str, today: date, request: Optional[ImagingRequest] = None)
     extended = editing and _EXTEND.search(t) is not None
     if not (period.start or period.end) and not extended and _ASK_DATE.search(_NOT_DATES.sub("", bare_t)):
         keys.append("期間")
-    if often_of(text) is None and _OFTEN_CUE.search(_SPAN.sub("", bare_t)):
+    if often_of(text) is None and many_times(bare_t) is None and _OFTEN_CUE.search(_SPAN.sub("", bare_t)):
         keys.append("頻度")
     if cloud_of(text) is None and "雲" in t:
         keys.append("雲量")
@@ -1055,7 +1067,11 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
 
     # 頻度 → 区分・達成条件・繰り返し
     often = often_of(text) or (_often_of_model(got["頻度"], text) if "頻度" in got else None)
-    if "頻度" in got and often is None and bare(got["頻度"]) not in ("", "なし"):
+    many = many_times(text) if often is None else None
+    if many:
+        # 「今月末までに2回」: not 期間内1回 (the model's 「1回」 is not taken); the form's 達成条件 is the person's.
+        d.checks.append(f"回数「{many}」は入れられる頻度にない（達成条件は毎回か期間内1回。欄で選ぶ）")
+    elif "頻度" in got and often is None and bare(got["頻度"]) not in ("", "なし"):
         d.checks.append(f"頻度「{bare(got['頻度'])}」は文に手がかりなし（入れず）")
     steady, one_off = _STEADY.search(t), _ONE_OFF.search(t)
     if often is not None:
