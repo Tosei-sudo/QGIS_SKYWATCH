@@ -80,12 +80,12 @@ def test_a_folder_that_cannot_be_written_is_told_once(plugin, monkeypatch):
     keeper.log.status.send_error = "アクセスが拒否されました"
     keeper.check()
     keeper.check()
-    assert len([m for m in told if "送信先フォルダに送れません" in str(m)]) == 1
+    assert len([m for m in told if "送信先フォルダへの送信に失敗" in str(m)]) == 1
     keeper.log.status.send_error = ""
     keeper.check()
     keeper.log.status.send_error = "ネットワーク パスが見つかりません"
     keeper.check()
-    assert len([m for m in told if "送信先フォルダに送れません" in str(m)]) == 2
+    assert len([m for m in told if "送信先フォルダへの送信に失敗" in str(m)]) == 2
 
 
 def test_exports_opened_images_and_qgis_edits_are_recorded(tmp_path):

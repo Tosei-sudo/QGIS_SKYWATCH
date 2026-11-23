@@ -495,7 +495,7 @@ class SpectralDock(PluginDock):
             self.note.setText("")
         else:
             self.note.setText(_tr("地図上をドラッグすると、その範囲の各バンドの平均（と最小〜最大の幅）を表示") if self.mode.currentData() == "box"
-                              else _tr("地図をクリックすると、その点の各バンドの値を表示。複数を重ねて比較可能"))
+                              else _tr("地図をクリックすると、その点の各バンドの値を表示。複数を重ねて比較できる"))
 
     def say(self, text: str) -> None:
         self.note.setText(text)

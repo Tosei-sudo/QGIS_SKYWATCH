@@ -1032,9 +1032,9 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
             foreign = _foreign(name, text)
             odd = _foreign_places(name, text)
             if foreign:
-                d.checks.append(f"名称「{name}」の数字 {'・'.join(foreign)} は文にない（入れず）")
+                d.checks.append(f"名称「{name}」の数字 {'・'.join(foreign)} は文にない（未入力）")
             elif odd:
-                d.checks.append(f"名称「{name}」の「{'・'.join(odd)}」は文にない（入れず）")
+                d.checks.append(f"名称「{name}」の「{'・'.join(odd)}」は文にない（未入力）")
             elif len(name) > NAME_LIMIT:
                 d.values["name"] = name[:NAME_LIMIT].rstrip()
                 d.checks.append(f"名称は {NAME_LIMIT} 文字までに")
@@ -1061,9 +1061,9 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
         said = _model_dates(got["期間"])
         if (said.start or said.end) and DATE_CUE.search(t):
             d.values["period"] = (said.start, said.end)
-            d.checks.append("期間は文から読み取れず、モデルの読み（日付を確かめて）")
+            d.checks.append("期間は文から読み取れず、モデルの読みを入力（日付を要確認）")
         elif said.start or said.end:
-            d.checks.append(f"期間「{said.words}」は文に手がかりなし（入れず）")
+            d.checks.append(f"期間「{said.words}」は文に手がかりなし（未入力）")
 
     # 頻度 → 区分・達成条件・繰り返し
     often = often_of(text) or (_often_of_model(got["頻度"], text) if "頻度" in got else None)
@@ -1072,7 +1072,7 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
         # 「今月末までに2回」: not 期間内1回 (the model's 「1回」 is not taken); the form's 達成条件 is the person's.
         d.checks.append(f"回数「{many}」は入れられる頻度にない（達成条件は毎回か期間内1回。欄で選ぶ）")
     elif "頻度" in got and often is None and bare(got["頻度"]) not in ("", "なし"):
-        d.checks.append(f"頻度「{bare(got['頻度'])}」は文に手がかりなし（入れず）")
+        d.checks.append(f"頻度「{bare(got['頻度'])}」は文に手がかりなし（未入力）")
     steady, one_off = _STEADY.search(t), _ONE_OFF.search(t)
     if often is not None:
         if often.kind in ("曜日", "間隔"):
@@ -1099,7 +1099,7 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
             if re.search(r"(?:1日|一日|日に)[^。]{0,6}" + n[0] + r"\s*回", t):
                 times = (int(n[0]), None, got["1日の回数"])
             else:
-                d.checks.append(f"1 日の回数「{bare(got['1日の回数'])}」は文に手がかりなし（入れず）")
+                d.checks.append(f"1 日の回数「{bare(got['1日の回数'])}」は文に手がかりなし（未入力）")
     if times is not None:
         d.values["times"], d.why["times"] = (times[0], times[1]), times[2]
 
@@ -1108,7 +1108,7 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
     if p is not None:
         d.values["priority"], d.why["priority"] = p
     elif "優先度" in got and bare(got["優先度"]) not in ("", "なし"):
-        d.checks.append(f"優先度「{bare(got['優先度'])}」は文に手がかりなし（入れず）")
+        d.checks.append(f"優先度「{bare(got['優先度'])}」は文に手がかりなし（未入力）")
 
     # 条件
     kind = kind_of(text)
@@ -1132,20 +1132,20 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
         if found:
             d.values[key], d.why[key] = (found[0], found[1]), found[2]
         elif label in got and bare(got[label]) not in ("", "なし"):
-            d.checks.append(f"{label}「{bare(got[label])}」は文で読み取れず（入れず）")
+            d.checks.append(f"{label}「{bare(got[label])}」は文から読み取れないので未入力")
     res = resolution_of(text)
     if res:
         d.values["resolution"], d.why["resolution"] = res
     elif "分解能" in got and bare(got["分解能"]) not in ("", "なし"):
-        d.checks.append(f"分解能「{bare(got['分解能'])}」は文で読み取れず（入れず）")
+        d.checks.append(f"分解能「{bare(got['分解能'])}」は文から読み取れないので未入力")
     cloud = cloud_of(text)
     if cloud is None and "雲量" in got and bare(got["雲量"]) not in ("", "なし"):
         said = cloud_of("雲量" + bare(got["雲量"]).removeprefix("雲量"))
         if said and not _foreign(bare(got["雲量"]), text) and re.search(r"雲", t):
             cloud = said
-            d.checks.append("実施しない雲量はモデルの読み（確かめて）")
+            d.checks.append("実施しない雲量はモデルの読み（要確認）")
         else:
-            d.checks.append(f"雲量「{bare(got['雲量'])}」は文で読み取れず（入れず）")
+            d.checks.append(f"雲量「{bare(got['雲量'])}」は文から読み取れないので未入力")
     if cloud:
         d.values["cloud_no_go"], d.why["cloud_no_go"] = cloud
         if kind == "SAR":
@@ -1161,7 +1161,7 @@ def request_draft(raw: str, text: str, today: date, sats: Sequence[Any] = (), pl
             if m and _WHO_END.sub("", m[1].strip()):
                 d.values["requester"] = _WHO_END.sub("", m[1].strip())
             elif who:
-                d.checks.append(f"依頼者「{who}」は文にない（入れず）")
+                d.checks.append(f"依頼者「{who}」は文にない（未入力）")
 
     # 地名
     d.area_asked = not editing or _area_change(t)

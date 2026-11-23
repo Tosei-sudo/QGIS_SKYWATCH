@@ -58,7 +58,7 @@ def test_others_records_are_merged_and_told(tmp_path):
     b = next(o for o in theirs.load() if o.id == "b")
     theirs.save([replace(b, note="ほかの人", updated_by="鈴木", updated_at=now_ms()), obs(id="c", updated_at=now_ms())])
     text = book.refresh()
-    assert text and "2 件を反映" in text
+    assert text and "2 件を取得" in text
     here = {o.id: o for o in book.records}
     assert set(here) == {"a", "b", "c"} and here["b"].note == "ほかの人"
     assert book.changed_by_others == {"b", "c"}
@@ -72,7 +72,7 @@ def test_a_store_that_cannot_tell_is_read_whole(tmp_path):
     mine.save([obs(id="a")])
     book, db = book_of(mine, tmp_path)
     theirs.save([obs(id="b")])
-    assert "1 件を反映" in book.refresh()
+    assert "1 件を取得" in book.refresh()
     assert {o.id for o in book.records} == {"a", "b"}
     db.close()
 
@@ -124,7 +124,7 @@ def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_pat
     real = mine.save
 
     def down(_records):
-        raise EsriError("接続不可")
+        raise EsriError("接続できない")
 
     mine.save = down
     values = FormValues(object=editing.object_name, kind=editing.kind, activity="航行", note="私の変更")
@@ -134,7 +134,7 @@ def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_pat
     assert not d.needs_check and d.record.updated_by == "田中"
     # One outbox: the draft waits beside the work kept offline, with why.
     [p] = work.pending("draft")
-    assert (p.store, p.op, p.note) == (mine.label, "retry", d.reason) and "接続不可" in p.note
+    assert (p.store, p.op, p.note) == (mine.label, "retry", d.reason) and "接続できない" in p.note
     mine.save = real
     # Someone else changes it meanwhile.
     a = next(o for o in theirs.load() if o.id == "a")
@@ -142,7 +142,7 @@ def test_a_draft_of_a_change_is_not_sent_over_someone_elses_later_change(tmp_pat
     report = UploadReport()
     upload_drafts(stores(fake)[0], work, report)
     [d] = book.drafts()
-    assert report.drafts == 1 and d.needs_check and "ほかの人が更新したため送らず" in d.reason
+    assert report.drafts == 1 and d.needs_check and "ほかの人が変更したので未送信" in d.reason
     assert next(o for o in theirs.load() if o.id == "a").note == "鈴木の変更"
     # Not sent again by itself (要確認): only when chosen.
     assert work.sendable() == 0

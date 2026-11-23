@@ -151,8 +151,8 @@ class UploadReport:
         parts = [f"{KINDS.get(k, k)} {n} 件" for k, n in self.sent.items() if n]
         out = ("送信: " + "・".join(parts)) if parts else "送信したものなし"
         if self.drafts:
-            out += (f"。ほかの人が先に更新していた観測記録 {self.drafts} 件は送らず送信待ちに残しました"
-                    "（一覧の「フォームで開く」で確かめてから送信）")
+            out += (f"。ほかの人が先に変更した観測記録 {self.drafts} 件は送らずに送信待ちに保管"
+                    "（一覧の「フォームで開く」で確認してから送信）")
         if self.kept:
             out += f"。送れず残したもの {len(self.kept)} 件（{self.kept[0]}{' ほか' if len(self.kept) > 1 else ''}）"
         return out

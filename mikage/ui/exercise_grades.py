@@ -88,7 +88,7 @@ class GradesDialog(QDialog):
         self.period.addItems([self.tr(p) for p, _d in PERIODS])
         top.addWidget(self.period)
         self.best = QCheckBox(self.tr("一人一問の最高点"))
-        self.best.setToolTip(self.tr("外すと、いちばん新しい点です"))
+        self.best.setToolTip(self.tr("外すと、いちばん新しい点"))
         self.best.setChecked(True)
         top.addWidget(self.best)
         top.addStretch(1)
@@ -169,7 +169,7 @@ class GradesDialog(QDialog):
             for i, c in enumerate(table.columns):
                 cell = table.cell(person, c.key)
                 if cell is None:
-                    item = _cell("—", GREY, NONE_BG, tip=self.tr("まだ解いていません"))
+                    item = _cell("—", GREY, NONE_BG, tip=self.tr("まだ解いていない"))
                 else:
                     when = (cell.finished or "")[:16].replace("T", " ")
                     tip = self.tr("{s} 点・{p}（{n} 回・{t}・{w}）").format(
@@ -189,7 +189,7 @@ class GradesDialog(QDialog):
         self._fill_matrix(kinds, counts)
         lines = advice(tries, table, counts, people)
         self.advice.setText("<br><br>".join(f"・{line}" for line in lines) if lines else
-                            self.tr("まだ目立つ取り違えはありません（提出が増えると、ここに出ます）。"))
+                            self.tr("目立つ取り違えはまだない（提出が増えると、ここに表示）"))
         self.csv_button.setEnabled(bool(table.people))
 
     def _fill_matrix(self, kinds: list, counts) -> None:
@@ -250,9 +250,9 @@ class GradesDialog(QDialog):
         try:
             self.save_csv(path)
         except OSError as error:
-            self.note.setText(self.tr("書き出せませんでした: {e}").format(e=error))
+            self.note.setText(self.tr("書き出しに失敗: {e}").format(e=error))
             self.note.setVisible(True)
             return None
-        self.note.setText(self.tr("書き出しました: {p}").format(p=path))
+        self.note.setText(self.tr("書き出し済み: {p}").format(p=path))
         self.note.setVisible(True)
         return path

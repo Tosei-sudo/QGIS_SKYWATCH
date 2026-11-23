@@ -79,7 +79,7 @@ class Rendering(Feature):
     def _tell_qgis_changes(self, changes) -> None:
         """The message bar: which of QGIS's options were changed, 「詳しく…」 and 「元に戻す」."""
         bar = self.iface.messageBar()
-        item = bar.createMessage(tr("地図の描画"), tr("速く描くよう QGIS のオプションを {n} 件変えました（{names}）").format(
+        item = bar.createMessage(tr("地図の描画"), tr("速く描くため QGIS のオプション {n} 件を変更（{names}）").format(
             n=len(changes), names="・".join(c.short for c in changes)))
         item.setToolTip("\n".join(f"{c.label}: {shown_option(c.key, c.before)} → {shown_option(c.key, c.after)}（{c.why}）"
                                    for c in changes))
@@ -94,7 +94,7 @@ class Rendering(Feature):
                 bar.popWidget(item)
             except RuntimeError:
                 pass
-            bar.pushInfo(tr("地図の描画"), tr("QGIS のオプション {n} 件を元に戻しました").format(n=len(back)))
+            bar.pushInfo(tr("地図の描画"), tr("QGIS のオプション {n} 件を復元").format(n=len(back)))
 
         undo.clicked.connect(put_back)
         item.layout().addWidget(undo)

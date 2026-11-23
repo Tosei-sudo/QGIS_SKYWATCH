@@ -123,7 +123,7 @@ class TaxonomyDock(PluginDock):
         bar.addWidget(self._button(tr("＋ 大分類"), tr("大分類の追加（「船舶 > 支援船」で階層ごと）"), lambda: self.start_add("")))
         bar.addWidget(self._button(tr("展開"), tr("すべて展開"), self._expand_all))
         bar.addWidget(self._button(tr("折りたたみ"), tr("すべて折りたたみ"), self._fold_all))
-        bar.addWidget(self._button(tr("更新"), tr("保存先から分類体系を読み直し（他の人の編集を反映）"), lambda: self.obs.reload_taxonomy()))
+        bar.addWidget(self._button(tr("更新"), tr("最新の分類体系を取得（ほかの人の編集も）"), lambda: self.obs.reload_taxonomy()))
         self.body.addLayout(bar)
 
         split = QSplitter(Qt.Orientation.Vertical)
@@ -243,7 +243,7 @@ class TaxonomyDock(PluginDock):
         self.import_button = self._menu_button(tr("取り込み"), tr("分類体系の取り込み（表・JSON）"), [
             (tr("表から取り込み（CSV・Excel・レイヤー）…"), tr("大分類から階層ごとの列がある表を取り込む（試行してから保存）"),
              lambda: self.obs.open_taxonomy_import()),
-            (tr("JSON から読み込み（今の分類体系と置き換え）…"), tr("分類体系の JSON 読み込み（現在の分類と置き換え）"), lambda: self.obs.load_taxonomy_file()),
+            (tr("JSON から読み込み（今の分類体系と置き換え）…"), tr("分類体系を JSON から読み込み（今の分類と置き換え）"), lambda: self.obs.load_taxonomy_file()),
         ])
         self.export_button = self._menu_button(tr("書き出し"), tr("分類体系の書き出し（表・JSON）"), [
             (tr("表に書き出し（CSV。取り込みのひな形にも）…"), tr("1 行 1 分類、階層ごとの列の CSV（Excel で直して取り込める）"),
@@ -292,7 +292,7 @@ class TaxonomyDock(PluginDock):
     def move(self, path: list[str], parent: list[str], before: Optional[list[str]]) -> None:
         """Moves a class below `parent` ([] the top), before a sibling (None: last); the records under it follow."""
         if parent and within(kind_of(parent), path):
-            self._say(self.tr("自身の下位への移動は不可"))
+            self._say(self.tr("自分の下位には移動できない"))
             return
         self.selected = kind_of([*parent, path[-1]])
         self.obs.do(self.tr("分類の移動"), lambda b: b.update_class(path, parent=parent, before=before))
@@ -306,7 +306,7 @@ class TaxonomyDock(PluginDock):
             return
         to = path_of(target or "")
         if within(target or "", path):
-            self._say(self.tr("自身の下位への移動は不可"))
+            self._say(self.tr("自分の下位には移動できない"))
             return
         if zone == "inside":
             self.folded.discard(kind_of(to))
@@ -692,13 +692,13 @@ class TaxonomyDock(PluginDock):
                 self.note.setText(self.tr("保存先なし"))
                 return
             if waiting:
-                self.note.setText(self.tr("観測記録を読み込み中…"))
+                self.note.setText(self.tr("観測記録を取得中…"))
                 return
             taxa = book.taxonomy()
             if self.selected and find(taxa, path_of(self.selected)) is None:
                 self.selected = None
             self.note.setText(self.tr("保存先: {s}・{n} 分類").format(s=book.taxonomy_store.label, n=len(taxa))
-                              + (self.tr("（モノ・記録の数は読み込んだ分: 開いた画像とそのまわり）") if book.scoped else ""))
+                              + (self.tr("（モノと記録の数は取得した分だけ: 開いた画像とそのまわり）") if book.scoped else ""))
             flows = book.flows()
             records = book.living()
             q = self.query.text().strip().lower()

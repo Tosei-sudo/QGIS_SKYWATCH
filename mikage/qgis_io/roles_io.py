@@ -173,7 +173,7 @@ class RoleKeeper(QObject):
         def not_done(message: str) -> None:
             self.busy = False
             self.failure = message
-            self.said.emit(f"担当を Esri の担当の表に保存できませんでした（この PC では選んだ担当で動きます。次の起動でもう一度送ります）: {message}")
+            self.said.emit(f"担当の保存に失敗（この PC では選んだ担当で動作。次の起動で送り直し）: {message}")
             if failed is not None:
                 failed(message)
 
@@ -217,5 +217,5 @@ class RoleKeeper(QObject):
             if failed is not None:
                 failed(message)
 
-        self._start("担当の読み込み", work, done, not_done)
+        self._start("担当の取得", work, done, not_done)
         return True

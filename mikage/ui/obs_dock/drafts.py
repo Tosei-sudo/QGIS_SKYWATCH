@@ -48,7 +48,7 @@ class DraftsPart:
         if store and (self.book is None or self.book.store.label != store):
             i = self.store_select.findText(store)
             if i < 0:
-                self.say(self.tr("保存先「{s}」が設定ファイルにありません").format(s=store))
+                self.say(self.tr("保存先「{s}」が見つからない（設定を確認）").format(s=store))
                 return False
             self.store_select.setCurrentIndex(i)
         book = self.book
@@ -57,14 +57,14 @@ class DraftsPart:
             return False
         entry = next((e for e in book.images if e.id == d.record.image_id), None)
         if entry is None:
-            self.say(self.tr("画像（{n}）を開いてからフォームで開いてください").format(n=d.record.image_name or d.record.image_id))
+            self.say(self.tr("先に画像 {n} を開いてから、フォームで表示").format(n=d.record.image_name or d.record.image_id))
             return False
         if entry is not book.current:
             book.current = entry
             self._went()
         editing = book.record(d.editing_id) if d.editing else None
         if d.editing and editing is None:
-            self.say(self.tr("{n}: 元の記録が見つかりません（削除されたか、読み込み前）").format(n=d.record.object_name))
+            self.say(self.tr("{n}: 元の記録が見つからない（削除済みか、まだ取得していない）").format(n=d.record.object_name))
             return False
         source = book.record(d.source_id) if d.source_id else None
         r = d.record

@@ -316,7 +316,7 @@ def test_a_shot_layer_that_fails_does_not_stop_the_follow_up():
     problems = []
     save_marked(client, store, None, [Finding(row, "未撮像")], {}, [row], T, problems)
     assert fake.layers[HISTORY].rows[0]["attributes"]["CAPTURED"] == "未撮像"
-    assert len(problems) == 1 and problems[0].startswith("撮像の範囲の撮像結果を更新できず")
+    assert len(problems) == 1 and problems[0].startswith("撮像の範囲の撮像結果の更新に失敗")
 
 
 def test_uncounted_scenes_are_kept_on_the_shot():

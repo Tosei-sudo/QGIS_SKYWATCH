@@ -261,7 +261,7 @@ def resolve_path(path: str, mappings: Sequence[PathMapping | PathRewrite], folde
     if exists(here):
         return Resolved("file", here)
     if not found:
-        raise PathError(f"「{path}」なし（設定ファイルの pathMappings にも先頭の合う prefix なし）")
+        raise PathError(f"「{path}」なし（管理者に連絡: pathMappings）")
     mapping, rest = found
     folder = folder_for(mapping.prefix)
     if not folder:

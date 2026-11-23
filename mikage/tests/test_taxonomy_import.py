@@ -313,7 +313,7 @@ def test_scripts_try_and_take_a_table_in_with_uses_written_as_shown(book):
     kept = []
     done = api.import_taxonomy(COLUMNS, TABLE, uses={"大分類": "level1", "種別": "階層 2", "級・型式": "階層 3"}, save=True,
                                backup=lambda text: kept.append(text) or "控え.json")
-    assert done["saved"] and kept and "表から取り込みました" in done["message"]
+    assert done["saved"] and kept and "表から取り込み: " in done["message"]
     assert "船舶 > 支援船 > 補給艦" in [kind_of(t.path) for t in book.kept_taxonomy()]
     with pytest.raises(ValueError):
         api.import_taxonomy(COLUMNS, TABLE, uses=["階層 1"])

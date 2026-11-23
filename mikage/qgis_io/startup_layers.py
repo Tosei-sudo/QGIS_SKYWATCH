@@ -46,7 +46,7 @@ def open_layers(entries: Sequence[StartupLayer], config_source: str, check: Opti
         layer = make_layer(source)
         if not layer.isValid():
             error = layer.error().summary() if layer.error() and not layer.error().isEmpty() else ""
-            problems.append(f"{source.name}（{entry.type}）を開けず" + (f": {error}" if error else ""))
+            problems.append(f"{source.name}（{entry.type}）を開けない" + (f": {error}" if error else ""))
             continue
         if source.notes:
             problems.append(f"{source.name}: " + "・".join(source.notes))

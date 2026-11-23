@@ -36,7 +36,7 @@ COLUMNS = [
     ("name", "属性名", ""),
     ("alias", "エイリアス", "属性テーブル・フォームでの表示名（空欄は属性名のまま）"),
     ("type", "型", ""),
-    ("required", "必須", "値の空欄を不可に"),
+    ("required", "必須", "値の空欄を禁止"),
     ("defaultValue", "既定値", "新しい地物に最初から入る値（日付は 2026-10-17 や 2026-10-17 09:30）"),
     ("length", "文字数の上限", "文字列のみ"),
     ("min", "最小", "数値のみ"),
@@ -103,7 +103,7 @@ class NewLayerDialog(QDialog):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table, 1)
-        self.empty = QLabel(self.tr("属性なし（属性なしでも作成可能）"))
+        self.empty = QLabel(self.tr("属性なし（属性なしでも作成できる）"))
         layout.addWidget(self.empty)
         row = QHBoxLayout()
         add = QPushButton(self.tr("＋ 属性を追加"))

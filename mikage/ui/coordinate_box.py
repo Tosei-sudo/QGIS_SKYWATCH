@@ -177,7 +177,7 @@ class CoordinateBox(QObject):
         """Goes to the coordinate in `text`; None (with a message) when it cannot be read."""
         lon_lat = parse_coordinate(text)
         if lon_lat is None:
-            self.warn(self.tr("座標として読み込み失敗: {text}（緯度経度・MGRS・UTM に対応）").format(text=text))
+            self.warn(self.tr("座標として読めない: {text}（緯度経度・MGRS・UTM に対応）").format(text=text))
             return None
         self._go_to(lon_lat)
         self.say(self.tr("移動: {at}").format(at=format_lat_lon(lon_lat)))

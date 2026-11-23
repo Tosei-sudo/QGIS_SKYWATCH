@@ -166,9 +166,9 @@ class RequestForm(QDialog):
         if satellites is None:
             self._no_catalog(self.tr("衛星カタログなし。名前で入力"))
         else:
-            self._note = self.tr("衛星カタログを読み込み中…")
+            self._note = self.tr("衛星カタログを取得中…")
             self._names_changed()
-            satellites(self._satellites_read, lambda m: self._no_catalog(self.tr("衛星カタログを読めず（{m}）。名前で入力").format(m=m)))
+            satellites(self._satellites_read, lambda m: self._no_catalog(self.tr("衛星カタログを読めない（{m}）。名前で入力").format(m=m)))
         if batch is not None:
             self._as_batch(batch)
 
@@ -192,9 +192,9 @@ class RequestForm(QDialog):
         form.addRow(self.tr("名称"), self.name)
         numbers = QHBoxLayout()
         self.management_no = QLineEdit()
-        self.management_no.setToolTip(self.tr("管理番号（任意の文字。システム向けファイルの項目 managementNo で出せる）"))
+        self.management_no.setToolTip(self.tr("管理番号（任意の文字。システム向けのファイルにも出せる）"))
         self.identification_no = QLineEdit()
-        self.identification_no.setToolTip(self.tr("識別番号（任意の文字。管理番号とは別。システム向けファイルの項目 identificationNo で出せる）"))
+        self.identification_no.setToolTip(self.tr("識別番号（管理番号とは別の任意の文字。システム向けのファイルにも出せる）"))
         numbers.addWidget(self.management_no, 1)
         numbers.addWidget(QLabel(self.tr("識別番号")))
         numbers.addWidget(self.identification_no, 1)
@@ -494,7 +494,7 @@ class RequestForm(QDialog):
             return
         index = next((i for i in range(self.group.count()) if str(self.group.itemData(i) or "").casefold() == group.casefold()), -1)
         if index < 0:
-            self.group.addItem(self.tr("{g}（使用停止・テーブルにない）").format(g=group), group)
+            self.group.addItem(self.tr("{g}（使用停止か、一覧にない）").format(g=group), group)
             index = self.group.count() - 1
         self.group.setCurrentIndex(index)
 

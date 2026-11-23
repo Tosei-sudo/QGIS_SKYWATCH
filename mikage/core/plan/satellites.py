@@ -49,7 +49,7 @@ def compile_pattern(value: Any, problems: list[str], at: str, fallback: re.Patte
         try:
             return re.compile(value, re.IGNORECASE)
         except re.error:
-            problems.append(f"{at} の sarPattern は正規表現として読み込み不可")
+            problems.append(f"{at} の sarPattern は正規表現として読めない")
     return fallback
 
 

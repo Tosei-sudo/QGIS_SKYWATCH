@@ -163,7 +163,7 @@ def test_kept_squares_when_the_server_cannot_be_asked(tmp_path):
     t[0] += KEEP_SECONDS * 3
 
     def down(url, form):
-        raise EsriError("接続不可")
+        raise EsriError("接続できない")
 
     assert names(cache.areas_at(EsriClient(down), source, [(139.7, 35.3)], fresh=True), 139.7, 35.3) == ["横須賀港", "東京湾"]
     with pytest.raises(EsriError):

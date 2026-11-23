@@ -98,9 +98,9 @@ def receiver_settings_of(value: Any, problems: list[str]) -> ReceiverSettings:
             for o in v:
                 pattern = origin_pattern(o)
                 if pattern is None:
-                    problems.append(f"shapeReceiver.origins の「{o}」は送信元（https://host、chrome-extension://ID など）として読み込み不可")
+                    problems.append(f"shapeReceiver.origins の「{o}」は送信元（https://host、chrome-extension://ID など）として読めない")
                 elif pattern in ("*", "http://*", "https://*"):
-                    problems.append(f"shapeReceiver.origins に「{o}」は指定不可（どのサイトからでも図形を受け取ることになる）")
+                    problems.append(f"shapeReceiver.origins に「{o}」は指定できない（どのサイトからでも図形を受け取ることになる）")
                 else:
                     kept.append(pattern)
             origins = tuple(kept)
@@ -171,16 +171,16 @@ def parse_request(data: bytes) -> Optional[Request]:
     lines = head.split("\r\n")
     m = re.fullmatch(r"([A-Z]{1,10}) (\S{1,8000}) HTTP/1\.[01]", lines[0])
     if not m:
-        raise HttpError(400, "要求行として読み込み不可")
+        raise HttpError(400, "要求行として読めない")
     method, target = m.groups()
     headers: dict[str, str] = {}
     for line in lines[1:]:
         if not line or line[0] in " \t" or ":" not in line:
-            raise HttpError(400, "ヘッダーとして読み込み不可")
+            raise HttpError(400, "ヘッダーとして読めない")
         name, value = line.split(":", 1)
         name = name.strip().lower()
         if not re.fullmatch(r"[a-z0-9!#$%&'*+.^_`|~-]+", name):
-            raise HttpError(400, "ヘッダー名として読み込み不可")
+            raise HttpError(400, "ヘッダー名として読めない")
         if name in headers and name in ("host", "content-length", "origin", "content-type", "transfer-encoding"):
             raise HttpError(400, f"{name} が重複")
         headers[name] = value.strip()
@@ -363,7 +363,7 @@ def params_of_body(request: Request) -> list:
         try:
             value = json.loads(text)
         except (ValueError, RecursionError) as error:
-            raise HttpError(400, "JSON として読み込み不可") from error
+            raise HttpError(400, "JSON として読めない") from error
         return params_of_json(value)
     if kind in ("", "application/x-www-form-urlencoded", "text/plain"):
         return params_of_query(text.strip())

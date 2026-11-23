@@ -126,7 +126,7 @@ def test_a_records_image_not_open_is_opened_before_its_record(plugin, monkeypatc
     dock.open_record(gone_image)
     assert book.current.id == "IMG9" and not book.current.file and book.current.time == ms(4)
     assert dock.form.isVisible() and dock.pending[2].id == gone_image.id
-    assert dock.status.text() == "IMG9 は画像カタログにないため、ファイルなしで一覧へ追加"
+    assert dock.status.text() == "IMG9 は画像カタログにないので、ファイルのない画像として一覧に追加"
     dock.close_form()
     dock.set_active(False)
     dock._unlist()
@@ -151,7 +151,7 @@ def test_a_records_image_not_open_is_opened_before_its_record(plugin, monkeypatc
     from dataclasses import replace
 
     assert not dock.go_to_record(replace(gone_image, image_id="IMG10", image_name="IMG10"))
-    assert dock.status.text() == "画像（IMG10）は開かれていません（ダブルクリックで画像を開いて記録を編集）"
+    assert dock.status.text() == "画像 IMG10 はまだ開いていない。ダブルクリックで開いて記録を編集"
 
 
 def test_this_images_list_shows_who_recorded_and_only_ones_own(plugin):
@@ -173,7 +173,7 @@ def test_this_images_list_shows_who_recorded_and_only_ones_own(plugin):
     assert _texts(table, 0) == ["自分のモノ"] and dock.carry_label.text() == "前後の画像のモノ 1 件"
     dock.set_observer("佐藤")
     dock.render()
-    assert _texts(table, 0) == ["自分の記録なし（「自分の記録のみ」を外すと全員の記録）"]
+    assert _texts(table, 0) == ["自分の記録なし。「自分の記録のみ」を外すと全員の記録を表示"]
     dock.set_observer("田中")
     dock.mine_only.setChecked(False)
     assert len(_texts(table, 0)) == 2

@@ -115,7 +115,7 @@ def start_cache() -> Optional[str]:
     try:
         os.makedirs(folder, exist_ok=True)
     except OSError as error:
-        QgsMessageLog.logMessage(f"ピラミッドのキャッシュフォルダを作れず（{folder}: {error}）", LOG_TAG, Qgis.MessageLevel.Warning)
+        QgsMessageLog.logMessage(f"ピラミッドのキャッシュフォルダを作れない（{folder}: {error}）", LOG_TAG, Qgis.MessageLevel.Warning)
         return None
     gdal.SetConfigOption(PROXY_DIR, folder)
     _ours = folder
@@ -386,7 +386,7 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
     target = path + ".ovr"
     src = gdal.Open(path, gdal.GA_ReadOnly)
     if src is None:
-        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けない")
     if has_overviews(src) or os.path.exists(target):
         return Outcome(HAS_OVERVIEWS, path)
     if max(src.RasterXSize, src.RasterYSize) <= options.min_size:
@@ -405,7 +405,7 @@ def build_external(path: str, options: OverviewOptions, progress: Callable[[floa
             try:
                 folder = temp_folder(options)
             except OSError as error:
-                raise RuntimeError(f"一時フォルダを作れず（{error}）") from None
+                raise RuntimeError(f"一時フォルダを作れない（{error}）") from None
             return _build_into_cache(src, path, options, factors, config, progress, cancelled, folder, TEMPORARY)
         return _build_into_cache(src, path, options, factors, config, progress, cancelled)
     folder = os.path.dirname(os.path.abspath(path))
@@ -444,13 +444,13 @@ def _build_in_temp(src, work: str, options: OverviewOptions, factors: list[int],
     """The .ovr of an image built for a VRT of it in the folder `work` (the image is only read); its path."""
     vrt = os.path.join(work, "image.vrt")
     if gdal.Translate(vrt, src, format="VRT") is None:
-        raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を作れず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を作れない")
     exe = gdaladdo()
     if exe is not None and run_gdaladdo(exe, vrt, options, factors, config, progress, cancelled):
         return vrt + ".ovr"
     ds = gdal.Open(vrt, gdal.GA_ReadOnly)
     if ds is None:
-        raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を開けず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or "VRT を開けない")
 
     def callback(complete, message, data):
         progress(complete * 95.0)
@@ -468,7 +468,7 @@ def _build_in_temp(src, work: str, options: OverviewOptions, factors: list[int],
         raise Cancelled()
     built = vrt + ".ovr"
     if error != 0 or not os.path.exists(built):
-        raise RuntimeError(gdal.GetLastErrorMsg() or "ピラミッドを作れず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or "ピラミッドを作れない")
     return built
 
 
@@ -570,7 +570,7 @@ def run_gdaladdo(exe: str, vrt: str, options: OverviewOptions, factors: Sequence
             process = subprocess.Popen(args, cwd=folder, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, creationflags=_hidden())
         except OSError as error:
-            QgsMessageLog.logMessage(f"gdaladdo を起動できず（{error}）: QGIS の中で作成", LOG_TAG, Qgis.MessageLevel.Info)
+            QgsMessageLog.logMessage(f"gdaladdo の起動に失敗（{error}）: QGIS の中で作成", LOG_TAG, Qgis.MessageLevel.Info)
             return False
         if sys.platform != "win32":
             try:
@@ -616,7 +616,7 @@ def run_gdaladdo(exe: str, vrt: str, options: OverviewOptions, factors: Sequence
     except OSError:
         lines = []
     why = lines[-1] if lines else f"終了コード {process.returncode}"
-    QgsMessageLog.logMessage(f"gdaladdo でピラミッドを作れず（{why}）: QGIS の中で作り直し", LOG_TAG, Qgis.MessageLevel.Info)
+    QgsMessageLog.logMessage(f"gdaladdo でピラミッドを作れない（{why}）: QGIS の中で作り直し", LOG_TAG, Qgis.MessageLevel.Info)
     for leftover in (built, vrt + ".aux.xml"):
         try:
             os.remove(leftover)
@@ -673,7 +673,7 @@ def attach_native(path: str, ovr: str) -> None:
     """
     ds = gdal.Open(path, gdal.GA_ReadOnly)
     if ds is None:
-        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けない")
     ds.SetMetadataItem("OVERVIEW_FILE", ovr, "OVERVIEWS")
     ds = None
 
@@ -717,7 +717,7 @@ def _build_into_cache(src, path: str, options: OverviewOptions, factors: list[in
     point_to_overviews(path, target)
     again = gdal.Open(path, gdal.GA_ReadOnly)
     if again is None or not has_overviews(again):
-        raise RuntimeError("キャッシュのピラミッドを GDAL が読めず")
+        raise RuntimeError("キャッシュのピラミッドを GDAL が読めない")
     return Outcome(kind, path, tuple(factors), target)
 
 
@@ -755,7 +755,7 @@ def proxy_pams(path: str, made: Optional[list] = None) -> list[str]:
         else:
             proxied = alloc(raw)
             if not proxied:
-                raise RuntimeError("GDAL のキャッシュフォルダ（GDAL_PAM_PROXY_DIR）に登録できず")
+                raise RuntimeError("GDAL のキャッシュフォルダ（GDAL_PAM_PROXY_DIR）への登録に失敗")
             aux = proxied.decode("utf-8")
             ElementTree.ElementTree(_read_pam(key + ".aux.xml")).write(aux, encoding="utf-8", xml_declaration=False)
             if made is not None:
@@ -941,7 +941,7 @@ def _build_cached(path: str, options: OverviewOptions, factors: list[int], confi
     """
     src = gdal.Open(path, gdal.GA_ReadOnly)
     if src is None:
-        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けず")
+        raise RuntimeError(gdal.GetLastErrorMsg() or f"{path} を開けない")
     def callback(complete, message, data):
         progress(complete * 99.0)
         return 0 if cancelled() else 1
@@ -960,7 +960,7 @@ def _build_cached(path: str, options: OverviewOptions, factors: list[int], confi
         raise Cancelled()
     again = gdal.Open(path, gdal.GA_ReadOnly)
     if error != 0 or again is None or not has_overviews(again):
-        raise RuntimeError(message or "ピラミッドを作れず")
+        raise RuntimeError(message or "ピラミッドを作れない")
     return Outcome(CACHED, path, tuple(factors))
 
 
@@ -1065,7 +1065,7 @@ class OverviewQueue:
                 if bar is not None:
                     bar.pushMessage(TITLE, f"{name} のピラミッドは未作成（フォルダに書き込めず、キャッシュフォルダもなし）", Qgis.MessageLevel.Info, 8)
             elif error is not None and error != "取消" and bar is not None:
-                bar.pushMessage(TITLE, f"{name} のピラミッドを作成できず（{error}）", Qgis.MessageLevel.Warning, 10)
+                bar.pushMessage(TITLE, f"{name} のピラミッドの作成に失敗（{error}）", Qgis.MessageLevel.Warning, 10)
             if self.finished is not None:
                 self.finished(outcome, error)
         finally:

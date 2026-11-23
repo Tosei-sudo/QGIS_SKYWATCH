@@ -37,7 +37,7 @@ class HealthDialog(QDialog):
         self.setWindowTitle(tr("接続と表の点検"))
         self.resize(760, 520)
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("設定ファイルにある ArcGIS のサービスに 1 回ずつ問い合わせ、応答・サインイン・属性・編集の可否を確かめます（書き込みはしません）。"))
+        intro = QLabel(tr("設定にある ArcGIS のサービスに 1 回ずつ問い合わせ、応答・サインイン・属性・編集できるかを確認（書き込みはしない）"))
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.summary = plain_label(QLabel())
@@ -89,7 +89,7 @@ class HealthDialog(QDialog):
         def failed(message: str) -> None:
             self._task = None
             self.again_button.setEnabled(True)
-            self.summary.setText(tr("点検できませんでした: {m}").format(m=message))
+            self.summary.setText(tr("点検に失敗: {m}").format(m=message))
 
         self._task = run_task(tr("接続と表の点検"), lambda task: check_all(client, config, lambda url, _t: tokens.get(url), task.isCanceled),
                               finished, failed)
@@ -100,7 +100,7 @@ class HealthDialog(QDialog):
         problems = sum(1 for r in results if r.level == PROBLEM)
         notes = sum(1 for r in results if r.level == NOTE)
         if not results:
-            self.summary.setText(tr("設定ファイルに ArcGIS のサービスがありません"))
+            self.summary.setText(tr("ArcGIS のサービスが未設定"))
         else:
             self.summary.setText(tr("{n} 件: 問題 {p}・注意 {w}・OK {ok}（{at}）").format(
                 n=len(results), p=problems, w=notes, ok=len(results) - problems - notes, at=self.checked_at))
@@ -134,5 +134,5 @@ class HealthDialog(QDialog):
             return None
         text = self.text()
         QApplication.clipboard().setText(text)
-        self.summary.setText(self.summary.text().split("（コピー")[0] + tr("（コピーしました）"))
+        self.summary.setText(self.summary.text().split("（コピー")[0] + tr("（コピー済み）"))
         return text

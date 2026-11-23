@@ -191,7 +191,7 @@ def _column_of(v: Any, at: str, problems: list[str]) -> Optional[ExportColumn]:
         return None
     source = v.get("source")
     if source is not None and source not in SOURCES:
-        problems.append(f"{at} の source「{js_string(source)}」は使用不可（{'・'.join(SOURCES)}、または value）")
+        problems.append(f"{at} の source「{js_string(source)}」は使えない（{'・'.join(SOURCES)}、または value）")
         return None
     if source is None and "value" not in v:
         problems.append(f"{at} に source か value なし")
@@ -661,9 +661,9 @@ def render(items: Sequence[ExportItem], ctx: ExportContext, load_schema: Optiona
             try:
                 schema = load_schema(schema) if load_schema else None
             except (OSError, ValueError) as error:
-                return Exported(name, "", b"", len(items), [f"スキーマ {fmt.schema} の読み込み不可（{error}）"])
+                return Exported(name, "", b"", len(items), [f"スキーマ {fmt.schema} を読み込めない（{error}）"])
             if not isinstance(schema, dict):
-                return Exported(name, "", b"", len(items), [f"スキーマ {fmt.schema} の読み込み不可"])
+                return Exported(name, "", b"", len(items), [f"スキーマ {fmt.schema} を読み込めない"])
         text, errors = json_text(items, ctx, schema)
     else:
         text = csv_text(items, ctx)

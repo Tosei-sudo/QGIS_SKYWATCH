@@ -161,7 +161,7 @@ def test_requests_through_qgis_answer_even_on_errors(server):
     assert status == 404 and headers["content-type"] == "application/json" and json.loads(body) == {"title": "なし"}
     status, _, body = gp_io.http("POST", f"{server.root}{TOOLS}", b"f=json", {"content-type": "application/x-www-form-urlencoded"})
     assert status == 200 and json.loads(body)["tasks"] == ["Buffer"] and server.asked[-1][2] == {"f": "json"}
-    with pytest.raises(GpError, match="接続不可"):
+    with pytest.raises(GpError, match="接続できない"):
         gp_io.http("GET", "http://127.0.0.1:9/x?token=secret", None, {})
 
 
@@ -282,7 +282,7 @@ def test_the_dialog_reads_a_service_and_opens_a_task(server, provider):
     assert wait_for(lambda: len(opened) == 2, 10000)
     dialog.url.setEditText(f"{server.root}/ogc/processes/none")
     dialog.load()
-    assert wait_for(lambda: "読み込み失敗" in dialog.status.text(), 10000)
+    assert wait_for(lambda: "取得に失敗" in dialog.status.text(), 10000)
     dialog.url.setEditText("ftp://x")
     dialog.load()
     assert dialog.status.text() == "http(s) の URL を入力"

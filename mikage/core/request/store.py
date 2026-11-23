@@ -509,9 +509,9 @@ def _save_online(client: EsriClient, store: RequestStoreConfig, token: Optional[
             req.object_id = server_oid
         if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
                 and not any(_same_stamp(server_stamp, s) for s in (req.pending_update, *tried))):
-            raise ConflictError(f"「{req.name}」はほかの人が読み込み後に更新したため保存を中止（読み込み直してから変更）")
+            raise ConflictError(f"「{req.name}」はほかの人が先に変更。保存は中止（「最新を取得」を押してから変更）")
     elif req.object_id is not None:
-        raise ConflictError(f"「{req.name}」はほかの人が台帳から削除済み（読み込み直して確認）")
+        raise ConflictError(f"「{req.name}」はほかの人が削除済み（「最新を取得」で確認）")
     baseline = req.updated
     if req.created is None:
         req.created = now
@@ -641,10 +641,10 @@ def _send_requests(client: EsriClient, store: RequestStoreConfig, token: Optiona
                     req.object_id = server_oid
                 if (tracked and req.updated is not None and server_stamp is not None and not _same_stamp(server_stamp, req.updated)
                         and not any(_same_stamp(server_stamp, s) for s in (req.pending_update, *tried.get(req.id, ())))):
-                    sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が読み込み後に更新したため保存を中止（読み込み直してから変更）")))
+                    sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が先に変更。保存は中止（「最新を取得」を押してから変更）")))
                     continue
             elif req.object_id is not None:
-                sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が台帳から削除済み（読み込み直して確認）")))
+                sent.failed.append((req, ConflictError(f"「{req.name}」はほかの人が削除済み（「最新を取得」で確認）")))
                 continue
             baseline = req.updated
             if req.created is None:
@@ -767,7 +767,7 @@ def _batches(send: Callable[[list], Any], items: Sequence, results: Callable[[An
         try:
             answer = send(batch)
         except EsriError as error:
-            problems.append(f"{label} {len(items) - i} 件を保存できず（{error}）")
+            problems.append(f"{label} {len(items) - i} 件の保存に失敗（{error}）")
             break
         got = results(answer)
         for r in got:

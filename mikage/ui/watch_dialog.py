@@ -196,8 +196,7 @@ class _AreaDialog(QDialog):
         if chosen is not None and _vertices(chosen[0]) > MANY_VERTICES and not getattr(self, "_warned", False):
             # Sent with every check: said once, accepted when OK is pressed again.
             self._warned = True
-            self.choice.note.setText(self.tr("頂点が {n} 個と多い形。確認のたびにこの形をサーバーへ送る（受け付けられないときは「失敗の理由」に表示）。"
-                                             "よければもう一度 OK").format(n=_vertices(chosen[0])))
+            self.choice.note.setText(self.tr("頂点が {n} 個と多い形（確認に失敗することがある。理由は「失敗の理由」に表示）。よければもう一度 OK").format(n=_vertices(chosen[0])))
             return
         self._chosen = chosen
         super().accept()

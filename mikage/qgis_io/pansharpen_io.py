@@ -74,7 +74,7 @@ def _bounds(ds, to: Optional[osr.SpatialReference]) -> tuple:
     xs = [p[0] for p in pts if math.isfinite(p[0])]
     ys = [p[1] for p in pts if math.isfinite(p[1])]
     if not xs or not ys:
-        raise PanSharpenError("マルチスペクトル画像の範囲を座標変換できず")
+        raise PanSharpenError("マルチスペクトル画像の範囲の座標変換に失敗")
     return min(xs), min(ys), max(xs), max(ys)
 
 
@@ -130,7 +130,7 @@ def pan_sharpen_files(pan_path: str, ms_path: str, out_path: str, pan_band: int 
     pan = gdal.Open(pan_path)
     ms = gdal.Open(ms_path)
     if pan is None or ms is None:
-        raise PanSharpenError("画像を開けず")
+        raise PanSharpenError("画像を開けない")
     if not 1 <= pan_band <= pan.RasterCount:
         raise PanSharpenError(f"パンクロ画像にバンド {pan_band} なし")
     o = overlap_of(pan, ms)
@@ -180,7 +180,7 @@ def pan_sharpen_files(pan_path: str, ms_path: str, out_path: str, pan_band: int 
         options.append("ALPHA=YES")
     out = gdal.GetDriverByName("GTiff").Create(out_path, o.width, o.height, count, dtype, options=options)
     if out is None:
-        raise PanSharpenError(f"{out_path} を作成できず")
+        raise PanSharpenError(f"{out_path} の作成に失敗")
     out.SetGeoTransform((bounds[0], gt[1], 0, bounds[3], 0, gt[5]))
     if pan.GetProjection():
         out.SetProjection(pan.GetProjection())

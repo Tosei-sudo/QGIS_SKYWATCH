@@ -255,10 +255,10 @@ def coordinates(text: str) -> list[list[float]]:
     out = []
     for p in parts:
         if len(p) > 100:
-            raise LinkError(f"座標として読み込み不可: {p[:40]}…")
+            raise LinkError(f"座標として読めない: {p[:40]}…")
         lon_lat = parse_coordinate(p)
         if lon_lat is None:
-            raise LinkError(f"座標として読み込み不可: {p}")
+            raise LinkError(f"座標として読めない: {p}")
         out.append([float(lon_lat[0]), float(lon_lat[1])])
     return out
 
@@ -287,7 +287,7 @@ def read_wkt(text: str) -> list[dict]:
     (`SRID=3857;`), as GeoJSON geometries (a collection's members one by one).
     """
     if not _WKT_CHARS.match(text):
-        raise LinkError("WKT に使用不可の文字あり")
+        raise LinkError("WKT に使えない文字あり")
     m = re.match(r"^\s*SRID\s*=\s*(\d+)\s*;\s*", text, re.IGNORECASE)
     srid = int(m.group(1)) if m else 4326
     if srid not in (4326, 3857, 900913):
@@ -296,7 +296,7 @@ def read_wkt(text: str) -> list[dict]:
     tokens = _TOKEN.findall(body)
     # Anything the tokens do not cover (`1..2`, a lone `;`) is not WKT.
     if "".join(tokens) != re.sub(r"\s+", "", body):
-        raise LinkError("WKT として読み込み不可")
+        raise LinkError("WKT として読めない")
     mercator = srid != 4326
     reader = _WktReader(tokens, mercator)
     try:
@@ -304,9 +304,9 @@ def read_wkt(text: str) -> list[dict]:
     except (IndexError, ValueError) as error:
         if isinstance(error, LinkError):
             raise
-        raise LinkError("WKT として読み込み不可") from error
+        raise LinkError("WKT として読めない") from error
     if reader.i != len(tokens):
-        raise LinkError("WKT として読み込み不可")
+        raise LinkError("WKT として読めない")
     return members(geometry)
 
 
@@ -425,7 +425,7 @@ def read_geojson(raw: Union[str, dict], fields: dict[str, str]) -> list[LinkShap
         try:
             value = json.loads(raw)
         except (ValueError, RecursionError) as error:
-            raise LinkError("GeoJSON（JSON）として読み込み不可") from error
+            raise LinkError("GeoJSON（JSON）として読めない") from error
     else:
         value = raw
     kind = value.get("type") if isinstance(value, dict) else None
@@ -442,7 +442,7 @@ def read_geojson(raw: Union[str, dict], fields: dict[str, str]) -> list[LinkShap
     out: list[LinkShape] = []
     for f in features:
         if not isinstance(f, dict) or f.get("type") != "Feature":
-            raise LinkError("GeoJSON の Feature として読み込み不可")
+            raise LinkError("GeoJSON の Feature として読めない")
         g = f.get("geometry")
         if g is None:
             continue
@@ -459,7 +459,7 @@ def read_geojson(raw: Union[str, dict], fields: dict[str, str]) -> list[LinkShap
 def geometry_of(g: Any, depth: int) -> dict:
     """A GeoJSON geometry checked and made plain ([lon, lat] floats, third values dropped)."""
     if not isinstance(g, dict) or g.get("type") not in _GEOMETRY_TYPES:
-        raise LinkError("GeoJSON の図形として読み込み不可")
+        raise LinkError("GeoJSON の図形として読めない")
     kind = g["type"]
     if kind == "GeometryCollection":
         if depth >= MAX_DEPTH:
@@ -484,7 +484,7 @@ def geometry_of(g: Any, depth: int) -> dict:
             return {"type": kind, "coordinates": _rings(c)}
         return {"type": kind, "coordinates": [_rings(p) for p in c]}
     except TypeError as error:
-        raise LinkError("GeoJSON の座標として読み込み不可") from error
+        raise LinkError("GeoJSON の座標として読めない") from error
 
 
 def _position(p: Any) -> list[float]:

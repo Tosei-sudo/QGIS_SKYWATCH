@@ -19,7 +19,7 @@ one none:
   are both one outage;
 * オフナディア角の上限 (degrees), 1 日の撮像回数の上限, 1 パスのシーン数の上限,
   撮像間隔の下限 (minutes): the satellite's own values, made stricter;
-* 夜間の撮像不可: the sun below the horizon at the place (as a request's 夜);
+* 夜間は撮像できない: the sun below the horizon at the place (as a request's 夜);
 * その他の影響 (text): not used by the calculation, told as a warning.
 
 When it holds: from its start to its recovery (復旧日時); without one, to the
@@ -133,7 +133,7 @@ class Outage:
     scenes_per_pass: Optional[int] = None
     #: Minutes.
     min_interval: Optional[float] = None
-    #: 夜間の撮像不可.
+    #: 夜間は撮像できない.
     no_night: bool = False
     #: その他の影響 (not used by the calculation).
     other: str = ""
@@ -203,7 +203,7 @@ class Outage:
         if self.min_interval is not None:
             out.append(f"撮像間隔 {_num(self.min_interval)} 分以上")
         if self.no_night:
-            out.append("夜間不可")
+            out.append("夜間は撮像できない")
         if self.other:
             out.append(self.other)
         return out
@@ -234,7 +234,7 @@ class Outage:
         if self.max_off_nadir is not None and off_nadir is not None and off_nadir > self.max_off_nadir + 1e-9:
             return "オフナディア角の上限"
         if self.no_night and sun is not None and sun < 0:
-            return "夜間不可"
+            return "夜間は撮像できない"
         return None
 
 
@@ -377,7 +377,7 @@ def warning_of(sat, first: float, last: float, now: float) -> str:
 
 
 def summary_text(sats: Iterable, first: float, last: float, now: float, most: int = 3) -> str:
-    """「障害中の衛星: ICEYE-X27（撮像停止）、WV110（夜間不可） ほか 1」 for the satellites with outages then ("" when none)."""
+    """「障害中の衛星: ICEYE-X27（撮像停止）、WV110（夜間は撮像できない） ほか 1」 for the satellites with outages then ("" when none)."""
     seen: dict = {}
     for sat in sats:
         for o in touching(sat, first, last, now):

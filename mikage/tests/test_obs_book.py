@@ -207,7 +207,7 @@ def test_a_store_without_clear_is_not_cleared(book):
     book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
     book.store = Remote(book.store)
     assert not book.can_clear() and book.clear() is None and len(book.records) == 1
-    assert book.said[-1] == "共有 の記録は消去不可"
+    assert book.said[-1] == "共有 の記録は消去できない"
 
 
 def test_renames_moves_and_removes_classes_with_the_records_under_them(book):
@@ -239,7 +239,7 @@ def test_reads_the_classification_again_as_changed_by_someone_else(book):
     assert other.set_taxonomy([{"name": "X", "children": ["Y"]}])
     assert "X" not in [kind_of(t.path) for t in book.taxonomy()]
     a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
-    assert book.reload_taxonomy() == f"{book.taxonomy_store.label}: 分類 2 件を読み込み"
+    assert book.reload_taxonomy() == f"{book.taxonomy_store.label}: 分類 2 件を取得"
     assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
     # The records are as they were; their kinds still offered.
     assert book.record(a.id).kind == "船舶" and "船舶" in [kind_of(t.path) for t in book.taxonomy()]
@@ -251,7 +251,7 @@ def test_reads_the_classification_again_as_changed_by_someone_else(book):
             raise OSError("つながらない")
 
     book.taxonomy_store = Failing()
-    assert "分類の読み込み失敗: つながらない" in book.reload_taxonomy()
+    assert "分類の取得に失敗: つながらない" in book.reload_taxonomy()
     assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
 
 
@@ -277,7 +277,7 @@ def test_lists_the_catalog_images_without_their_files_at_once(book):
     assert entry.id == "EXT-2" and not entry.file and entry.time == day(4) and entry.box == [1, 2, 3, 4]
     assert [i.id for i in book.images] == ["EXT-3", "d1", "d3", "EXT-2", "dx"]
     assert next(i for i in book.images if i.id == "EXT-3").name == "EXT-3"
-    assert book.status == "2 件を追加（ファイルなし）"
+    assert book.status == "ファイルのない画像 2 件を追加"
     rec = book.submit(1, 2, FormValues(object="Z", kind="車両"))
     assert rec.image_id == "EXT-2" and rec.image_time == day(4) and rec.image_name == "EXT-2"
     assert "EXT-3" in book.prefs.get("listed_images/ローカル")

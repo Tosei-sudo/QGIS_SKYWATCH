@@ -165,4 +165,4 @@ def test_without_outputs_or_ai_layers_the_dialog_says_what_to_do(plugin):
     assert not p.transfer_dialog.run_button.isEnabled()
     p.context.config.detection_outputs = []
     p.open_transfer()
-    assert p.transfer_dialog.plan_label.text().startswith("転記先なし。設定ファイルの detectionOutputs に")
+    assert p.transfer_dialog.plan_label.text().startswith("転記先が未設定")

@@ -342,7 +342,7 @@ def move_taxon(items: list[Taxon], src: list[str], dst: list[str]) -> list[Taxon
     if not src or not dst:
         return list(items)
     if len(dst) > len(src) and all(dst[i] == s for i, s in enumerate(src)):
-        raise ValueError("自身の下位への移動は不可")
+        raise ValueError("自分の下位には移動できない")
     return normalize(_copy(t, [*dst, *t.path[len(src):]]) if _under(t, src) else t for t in items)
 
 
@@ -516,7 +516,7 @@ def taxonomy_table_of(value: Any, problems: list[str], at: str) -> Optional[Taxo
     if is_record(v.get("fields")):
         for k, name in v["fields"].items():
             if k not in DEFAULT_TAXONOMY_FIELDS:
-                problems.append(f"{at}.fields.{k} は使用不可の役割")
+                problems.append(f"{at}.fields.{k} は使えない役割")
             elif isinstance(name, str) and _NAME.match(name):
                 fields[k] = name
             else:

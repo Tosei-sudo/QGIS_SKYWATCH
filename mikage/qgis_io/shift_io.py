@@ -100,9 +100,9 @@ def moved_vrt(source: str, dx: float, dy: float, folder: Optional[str] = None) -
     try:
         ds = gdal.Translate(path, source.split("|")[0], format="VRT")
     except RuntimeError as e:  # GDAL with exceptions on
-        raise OSError(f"{source} を開けず（{e}）") from e
+        raise OSError(f"{source} を開けない（{e}）") from e
     if ds is None:
-        raise OSError(f"{source} を開けず")
+        raise OSError(f"{source} を開けない")
     try:
         move_dataset(ds, dx, dy)
     except (RuntimeError, TypeError, ValueError) as e:

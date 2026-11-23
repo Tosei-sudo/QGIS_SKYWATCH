@@ -5,18 +5,18 @@ a model (`textAssist.tasks`), and each only proposes: nothing changes until
 the person takes the proposal, and nothing is saved by it.
 
 - NoteTidy (tidyNote): 「整える」 beside a 備考 field (観測記録・確認範囲); the
-  備考 written again shows under the field with 「置き換える」 and 「閉じる」, and
-  what to check in it (numbers it does not have, much longer). 「置き換える」
+  備考 written again shows under the field with 「置き換え」 and 「閉じる」, and
+  what to check in it (numbers it does not have, much longer). 「置き換え」
   changes the field as typing does (Ctrl+Z takes it back).
 - NoteFields (noteFields): 「項目を拾う」 beside the record's 備考: the 種別・活動・
   確度・寸法・モノ read from it, for the fields still empty (and a 種別 made
-  finer: 船舶 → 船舶 > 補給艦), 「欄に入れる」; a value differing from one
+  finer: 船舶 → 船舶 > 補給艦), 「欄に入力」; a value differing from one
   written is only shown.
 - HandoverDraft (handoverDraft): 「申し送りの下書き」 under the 申し送り of the
   handover memo, made from the memo's lists (made first when there are
-  none), with 「置き換える」・「末尾に足す」・「閉じる」.
+  none), with 「置き換え」・「末尾に追加」・「閉じる」.
 - SearchWords (searchWords): 「言葉で探す」 on the observation export: a sentence
-  made into its conditions, 「条件に入れる」.
+  made into its conditions, 「条件に入力」.
 - SummaryDialog (summary): a few sentences on the records chosen (or found),
   to copy.
 - NoteTranslator (translate): the 備考 of the 通報 in English (`note.en`).
@@ -65,8 +65,8 @@ class ProposalPanel(QWidget):
         box.addWidget(self.warning)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        self.replace_button = QPushButton(take or self.tr("置き換える"))
-        self.append_button = QPushButton(self.tr("末尾に足す"))
+        self.replace_button = QPushButton(take or self.tr("置き換え"))
+        self.append_button = QPushButton(self.tr("末尾に追加"))
         self.cancel_button = QPushButton(self.tr("取消"))
         self.close_button = QPushButton(self.tr("閉じる"))
         for b in (self.replace_button, self.append_button, self.cancel_button, self.close_button):
@@ -144,7 +144,7 @@ class _Asking(QObject):
             if message == "取消":
                 self.panel.hide()
             else:
-                self.panel.say(self.tr("作成できず: {m}").format(m=message))
+                self.panel.say(self.tr("作成に失敗: {m}").format(m=message))
 
         self.asked = self.assistant.ask(task, title, messages, finished, failed, one_line, until)
         if self.asked is None:
@@ -206,14 +206,14 @@ class NoteTidy(_TaskButton):
         super().__init__(assistant, QToolButton(), ProposalPanel(), parent or edit)
         button = self.button
         button.setText(self.tr("整える"))
-        button.setToolTip(self.tr("備考を判読記録の文体と単語集の語に整えた案を、欄の下に出す（文章の手伝い。この PC の小さな生成 AI。"
-                                  "「置き換える」を押すまで備考は変わらない）"))
+        button.setToolTip(self.tr("備考を判読記録の文体と単語集の語に整えた案を、欄の下に表示（この PC の小さな生成 AI）。"
+                                  "「置き換え」を押すまで備考は変わらない"))
         self.edit = edit
         self.keeper = glossary_keeper
         self.kind = kind
         self.root = root
         button.clicked.connect(lambda _on=False: self.tidy())
-        self.panel.replace_button.setToolTip(self.tr("備考を案に置き換える（Ctrl+Z で戻せる）"))
+        self.panel.replace_button.setToolTip(self.tr("備考を案で置き換え（Ctrl+Z で戻せる）"))
         self.panel.replace_button.clicked.connect(lambda _on=False: self.take())
         #: The 備考 the proposal is for.
         self.given = ""
@@ -259,7 +259,7 @@ class NoteTidy(_TaskButton):
         def done(text: str, seconds: float) -> None:
             draft = note_draft(text, note, glossary, root)
             if not draft.text:
-                self.panel.say(self.tr("案を作れず（モデルの答えが空）"))
+                self.panel.say(self.tr("案の作成に失敗（モデルの答えが空）"))
             elif draft.same:
                 self.panel.say(self.tr("直すところなし"))
             else:
@@ -293,15 +293,14 @@ class NoteFields(_TaskButton):
         super().__init__(assistant, QToolButton(), ProposalPanel(), parent or edit)
         button = self.button
         button.setText(self.tr("項目を拾う"))
-        button.setToolTip(self.tr("備考から種別・活動・確度・長さ・幅・向き・モノを拾い、空いている欄（種別はより細かい分類）に入れる案を出す"
-                                  "（文章の手伝い。「欄に入れる」を押すまで変わらない）"))
-        self.panel.replace_button.setText(self.tr("欄に入れる"))
+        button.setToolTip(self.tr("備考から種別・活動・確度・長さ・幅・向き・モノを拾い、空いている欄に入れる案を表示。「欄に入力」を押すまで欄は変わらない"))
+        self.panel.replace_button.setText(self.tr("欄に入力"))
         self.edit = edit
         self.form = form
         self.values: dict = {}
         self.given = ""
         button.clicked.connect(lambda _on=False: self.pick())
-        self.panel.replace_button.setToolTip(self.tr("空いている欄に案の値を入れる（記録はまだ保存しない）"))
+        self.panel.replace_button.setToolTip(self.tr("空いている欄に案の値を入力（記録の保存はまだ）"))
         self.panel.replace_button.clicked.connect(lambda _on=False: self.take())
         edit.textChanged.connect(self._text_changed)
         self._settings_changed()
@@ -387,8 +386,8 @@ class HandoverDraft(_TaskButton):
         super().__init__(assistant, QPushButton(), ProposalPanel(append=True), parent or memo_edit)
         button = self.button
         button.setText(self.tr("申し送りの下書き"))
-        button.setToolTip(self.tr("引き継ぎメモの一覧から、次の担当者への申し送りを数文で下書き（文章の手伝い。この PC の小さな生成 AI。"
-                                  "「置き換える」「末尾に足す」を押すまで申し送りは変わらない）"))
+        button.setToolTip(self.tr("引き継ぎメモの一覧から、次の担当者への申し送りを数文で下書き（この PC の小さな生成 AI）。"
+                                  "「置き換え」「末尾に追加」を押すまで申し送りは変わらない"))
         self.memo_edit = memo_edit
         self.memo = memo
         self.make = make
@@ -441,9 +440,9 @@ class HandoverDraft(_TaskButton):
             if draft.text:
                 self.panel.offer(draft, seconds)
             elif draft.notes:
-                self.panel.say(self.tr("案を作れず（メモにない内容の文だけだった）"), draft.notes)
+                self.panel.say(self.tr("案の作成に失敗（メモにない内容の文だけ）"), draft.notes)
             else:
-                self.panel.say(self.tr("案を作れず（モデルの答えが空）"))
+                self.panel.say(self.tr("案の作成に失敗（モデルの答えが空）"))
 
         return self._asking.start(self.task, self.tr("申し送りの下書き"), handover_messages(t, memo, written), done,
                                   until=sentences_done(sentence_limit(t.prompt)))
@@ -478,10 +477,9 @@ class SearchWords(_TaskButton):
     def __init__(self, assistant, form, parent: Optional[QObject] = None):
         super().__init__(assistant, QPushButton(), ProposalPanel(), parent)
         button = self.button
-        button.setText(self.tr("条件にする"))
-        button.setToolTip(self.tr("書いた文から期間・地名・大分類・確度・有無の条件を作り、下に案を出す"
-                                  "（文章の手伝い。「条件に入れる」を押すまで条件は変わらない）"))
-        self.panel.replace_button.setText(self.tr("条件に入れる"))
+        button.setText(self.tr("条件を作成"))
+        button.setToolTip(self.tr("書いた文から期間・地名・大分類・確度・有無の条件の案を作成。「条件に入力」を押すまで条件は変わらない"))
+        self.panel.replace_button.setText(self.tr("条件に入力"))
         self.form = form
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(self.tr("例: 先週の横須賀の船舶、確度は推定以上"))
@@ -517,7 +515,7 @@ class SearchWords(_TaskButton):
         if t is None or not words.strip() or self._asking.running or self.waiting:
             return False
         self.waiting = True
-        self.panel.writing(self.tr("地名を読み込み中…"))
+        self.panel.writing(self.tr("地名を取得中…"))
 
         def ready() -> None:
             if not self.waiting:
@@ -532,7 +530,7 @@ class SearchWords(_TaskButton):
                 found = search_draft(text, places, roots, confidences, words, today, kinds)
                 self.found = found
                 if found.empty:
-                    self.panel.say(self.tr("条件を読み取れず"), list(found.dropped))
+                    self.panel.say(self.tr("条件を読み取れない"), list(found.dropped))
                 else:
                     self.panel.offer(_with_caution(self.assistant, self.task, Draft(found.text, notes=found.dropped)), seconds)
 
@@ -604,7 +602,7 @@ class SummaryDialog(QDialog):
             self.copy_button.setEnabled(bool(draft.text))
             warnings = draft.warnings
             took = self.tr("{s:.1f} 秒で作成").format(s=seconds)
-            self.panel.say(took if draft.text else self.tr("案を作れず（モデルの答えが空）"), [self.tr("確認: ") + "。".join(warnings)] if warnings else [])
+            self.panel.say(took if draft.text else self.tr("案の作成に失敗（モデルの答えが空）"), [self.tr("確認: ") + "。".join(warnings)] if warnings else [])
             self.panel.close_button.hide()
 
         started = self._asking.start(self.task, self.tr("まとめ"), summary_messages(t, self.source), done,
@@ -615,7 +613,7 @@ class SummaryDialog(QDialog):
 
     def copy(self) -> None:
         QApplication.clipboard().setText(self.text_edit.toPlainText())
-        self.panel.say(self.tr("コピーしました"))
+        self.panel.say(self.tr("クリップボードにコピー"))
         self.panel.close_button.hide()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt)

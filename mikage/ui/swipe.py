@@ -240,8 +240,8 @@ class SwipeCompare(QObject):
             self.draw()
             self.overlay.changed()
             side = self.tr("左側") if self.overlay.orientation == VERTICAL else self.tr("上側")
-            self.say(self.tr("{name} を線の{side}のみに表示中。下のレイヤーと比較可能").format(name=self.target_name(), side=side)
-                     if self.swiped_layers() else self.tr("レイヤーを選ぶと、線の片側のみに表示して比較可能"))
+            self.say(self.tr("{name} を線の{side}だけに表示中。下のレイヤーと比較できる").format(name=self.target_name(), side=side)
+                     if self.swiped_layers() else self.tr("レイヤーを選ぶと、線の片側だけに表示して比較できる"))
         else:
             self._cancel_job()
             self.overlay.hide()

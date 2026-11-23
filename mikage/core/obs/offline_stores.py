@@ -291,7 +291,7 @@ class OfflineObservationStore(_Waiting):
                     original = record_of(p) or o
                     keep_draft(Draft(original, _form_values(original), original.present, editing_id=o.id,
                                      base_updated=int(p.base) if p.base is not None else None, kept_at=at,
-                                     reason="オフライン中の変更: ほかの人が先に更新したため送らず（フォームで開いて直す）",
+                                     reason="オフライン中の変更。ほかの人が先に更新したため送信せず。フォームで開いて修正",
                                      needs_check=True))
                     self.work.drop(self.kind, self.label, [o.id])
                     report.drafts += 1
@@ -463,9 +463,9 @@ def upload_drafts(store: Any, work: OfflineWork, report: UploadReport, prefs: An
         if record_id in saved:
             continue
         if record_id in conflicts:
-            wait(d, f"{d.record.object_name}: 後でほかの人が更新したため送らず（フォームで開いて直す）", check=True)
+            wait(d, f"{d.record.object_name}: あとでほかの人が変更したので未送信（フォームで開いて修正）", check=True)
             report.drafts += 1
         else:
-            wait(d, error_text or "送れず")
+            wait(d, error_text or "送信に失敗")
     if failed:
         report.kept.append(f"保存できなかった観測記録（{label}）: {error_text}")

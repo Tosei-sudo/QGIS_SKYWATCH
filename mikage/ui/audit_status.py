@@ -153,8 +153,8 @@ class AuditKeeper(QObject):
         """A message when sending or writing starts to fail (once per run of failures; the details in the log panel)."""
         s = self.log.status
         for key, error, title, text in (
-            ("send", s.send_error, tr("監査ログ"), tr("送信先フォルダに送れません（{e}）。この PC に残し、送れるようになったら送ります。")),
-            ("write", s.write_error, tr("監査ログ"), tr("この PC のログに書けません（{e}）。書けるようになるまでメモリに残します。")),
+            ("send", s.send_error, tr("監査ログ"), tr("送信先フォルダへの送信に失敗（{e}）。この PC に残し、送れるようになったら送信")),
+            ("write", s.write_error, tr("監査ログ"), tr("この PC のログへの書き込みに失敗（{e}）。書けるようになるまでメモリに保持")),
         ):
             if not error:
                 if self._told.pop(key, None) is not None:
@@ -207,8 +207,7 @@ class AuditDialog(QDialog):
         self.setWindowTitle(tr("監査ログ"))
         self.resize(640, 460)
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("MIKAGE での操作（Esri への書き込み・画像を開く・ファイル出力・コピーなど）とエラーを 1 行ずつ記録し、"
-                          "設定ファイルの送信先フォルダに一定の間隔で送ります。"))
+        intro = QLabel(tr("MIKAGE での操作（保存・画像を開く・ファイル出力・コピーなど）とエラーを 1 行ずつ記録し、送信先フォルダに一定の間隔で送信"))
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.summary = plain_label(QLabel())
@@ -216,14 +215,14 @@ class AuditDialog(QDialog):
         layout.addWidget(self.summary)
         self.report = QPlainTextEdit()
         self.report.setReadOnly(True)
-        self.report.setPlaceholderText(tr("「送信先を点検」で、送信先フォルダのログが欠けたり書き換えられたりしていないかを確かめます。"))
+        self.report.setPlaceholderText(tr("「送信先を点検」で、送信先フォルダのログに欠けや書き換えがないかを確認"))
         layout.addWidget(self.report, 1)
         row = QHBoxLayout()
         self.send_button = QPushButton(tr("今すぐ送信"))
         self.send_button.clicked.connect(lambda _on=False: self.send())
         row.addWidget(self.send_button)
         self.check_button = QPushButton(tr("送信先を点検"))
-        self.check_button.setToolTip(tr("送信先フォルダのログの行の番号と前の行のハッシュの連なりを確かめる（読むだけ）"))
+        self.check_button.setToolTip(tr("送信先フォルダのログの行の番号と、前の行のハッシュの連なりを確認（読むだけ）"))
         self.check_button.clicked.connect(lambda _on=False: self.check_folder())
         row.addWidget(self.check_button)
         self.local_button = QPushButton(tr("この PC のフォルダ"))
@@ -247,9 +246,9 @@ class AuditDialog(QDialog):
         s, st = log.settings, log.status
         lines = []
         if not s.enabled:
-            lines.append(tr("記録: しない（設定ファイルの auditLog が false）"))
+            lines.append(tr("記録: なし（管理者の設定: auditLog）"))
         else:
-            lines.append(tr("記録: する（{k}）").format(k="・".join(audit.KINDS[k] for k in s.events)))
+            lines.append(tr("記録: あり（{k}）").format(k="・".join(audit.KINDS[k] for k in s.events)))
         lines.append(tr("この PC の保存先: {f}").format(f=log.folder))
         target = self.target()
         if target:
@@ -289,7 +288,7 @@ class AuditDialog(QDialog):
 
         def failed(message: str) -> None:
             self._task = None
-            self.report.setPlainText(tr("点検できず: {m}").format(m=message))
+            self.report.setPlainText(tr("点検に失敗: {m}").format(m=message))
             self.render()
 
         self._task = run_task(tr("監査ログの点検"), lambda task: audit.check_text(target), done, failed)

@@ -147,10 +147,10 @@ class PluginContext(QObject):
                     # The last file read, rather than nothing (the stores would all be gone, #85); its tokens are not kept.
                     value, when = cached
                     self.config, problems = parse_config(value)
-                    self.problems = [f"設定ファイルの取得不可（{message}）。前回{f'（{when}）' if when else ''}読めた設定で動作中"
+                    self.problems = [f"設定ファイルの取得に失敗（{message}）。前回{f'（{when}）' if when else ''}読めた設定で動作中"
                                      "（トークンは控えていないため、認証設定を選んでいないサービスは使えない場合あり）", *problems]
                 else:
-                    self.config, self.problems = PluginConfig(), [f"設定ファイルの取得不可（{message}）"]
+                    self.config, self.problems = PluginConfig(), [f"設定ファイルの取得に失敗（{message}）"]
                 self.configChanged.emit()
 
             run_task("設定ファイルの読み込み", work, done, failed)

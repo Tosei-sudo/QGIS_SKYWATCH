@@ -249,7 +249,7 @@ def test_the_project_written_as_a_web_map(server, clean, tmp_path):
     result = project_web_map([], iface.mapCanvas())
     out = json.loads(json.dumps(result.json))
     assert result.included == ["公園", "地図", "画像", "タイル", "注記", "範囲"]
-    assert result.skipped == [("scene", "画像（ファイル）は Web マップへの書き込み不可")]
+    assert result.skipped == [("scene", "画像（ファイル）は Web マップに書き込めない")]
     parks, map_layer, image, tiles, collection, area = out["operationalLayers"]
     assert (parks["visibility"], parks["opacity"], parks["minScale"]) == (False, 0.8, 500000)
     assert parks["layerDefinition"]["definitionExpression"] == "KIND = 1"
@@ -373,9 +373,9 @@ def test_the_dialogs_open_an_item_and_save_over_it(server, plugin, monkeypatch, 
     dialogs.open_dialog.open_typed()
     assert wait_for(lambda: dialogs.task is None and dialogs.opened is not None, 15000)
     assert dialogs.opened == (WebMapItemRef(f"{base}/portal", ID), "テスト地図")
-    assert dialogs.open_dialog.status.text() == "Web マップ「テスト地図」の 5 レイヤーを表示（1 レイヤーは読み込み失敗）"
+    assert dialogs.open_dialog.status.text() == "Web マップ「テスト地図」の 5 レイヤーを表示（1 レイヤーは読み込みに失敗）"
     texts = [dialogs.open_dialog.result.item(i).text() for i in range(dialogs.open_dialog.result.count())]
-    assert "読み込み失敗: KML — KML レイヤーには非対応" in texts and "背景地図は「地理院 標準」に設定" in texts
+    assert "読み込みに失敗: KML — KML レイヤーには非対応" in texts and "背景地図は「地理院 標準」に設定" in texts
     assert QgsSettings().value("mikage/webmap_portal") == f"{base}/portal"
 
     dialogs.show_save()
@@ -411,7 +411,7 @@ def test_a_file_that_is_not_a_web_map_says_so(plugin, tmp_path):
     path = tmp_path / "x.json"
     path.write_text('{"hello": 1}')
     p.webmaps.open_file(str(path))
-    assert p.webmaps.open_dialog.status.text() == "読み込み失敗: Web マップの JSON 以外（operationalLayers・baseMap なし）"
+    assert p.webmaps.open_dialog.status.text() == "読み込みに失敗: Web マップの JSON 以外（operationalLayers・baseMap なし）"
     path.write_text("not json")
     p.webmaps.open_file(str(path))
-    assert p.webmaps.open_dialog.status.text() == "読み込み失敗: JSON として読み込み不可"
+    assert p.webmaps.open_dialog.status.text() == "読み込みに失敗: JSON として読めない"

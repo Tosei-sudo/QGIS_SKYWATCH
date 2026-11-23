@@ -125,7 +125,7 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
     say = progress or (lambda _p, _t: None)
     ds = gdal.Open(path)
     if ds is None:
-        raise ClassifyError("画像を開けず")
+        raise ClassifyError("画像を開けない")
     if not bands:
         raise ClassifyError("バンドを 1 つ以上選択")
     for b in bands:
@@ -187,7 +187,7 @@ def classify_file(path: str, bands: Sequence[int], out_path: str, method: str, c
     out = gdal.GetDriverByName("GTiff").Create(out_path, width, height, 1, gdal.GDT_Byte,
                                                options=["TILED=YES", "COMPRESS=DEFLATE", "BIGTIFF=IF_SAFER"])
     if out is None:
-        raise ClassifyError(f"{out_path} を作成できず")
+        raise ClassifyError(f"{out_path} の作成に失敗")
     out.SetGeoTransform(ds.GetGeoTransform())
     if ds.GetProjection():
         out.SetProjection(ds.GetProjection())

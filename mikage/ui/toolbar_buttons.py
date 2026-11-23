@@ -174,8 +174,8 @@ class ToolbarButtonsDialog(QDialog):
         self.setMinimumSize(420, 560)
         layout = QVBoxLayout(self)
         who = tr("担当「{0}」").format(self.role_name) if self.role_name else tr("担当なし")
-        intro = QLabel(tr("{0}のツールバーに出すボタンを選びます（チェックしたものを上から順に）。"
-                          "担当はメニュー「担当と個人設定…」で変えられ、担当ごとに覚えます。").format(who))
+        intro = QLabel(tr("{0}のツールバーに出すボタンを選択（チェックしたものを上から順に）。"
+                          "担当はメニュー「担当と個人設定…」で変更でき、担当ごとに記憶").format(who))
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.list = QListWidget()

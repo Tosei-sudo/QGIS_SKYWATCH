@@ -341,7 +341,7 @@ def _zone_of(value: Any, at: str, problems: list[str]) -> Optional[TimeZone]:
         return None
     zone = parse_time_zone(value)
     if not zone:
-        problems.append(f"{at} の「{value}」はタイムゾーンとして読み込み不可（Asia/Tokyo・UTC・+09:00 の形で指定）")
+        problems.append(f"{at} の「{value}」はタイムゾーンとして読めない（Asia/Tokyo・UTC・+09:00 の形で指定）")
     return zone
 
 
@@ -386,7 +386,7 @@ def time_zones_of(value: dict, problems: list[str]) -> list[TimeZoneRule]:
             try:
                 match = re.compile(entry["match"], re.IGNORECASE)
             except re.error as error:
-                problems.append(f"{at} の match は正規表現として読み込み不可（{error}）")
+                problems.append(f"{at} の match は正規表現として読めない（{error}）")
                 continue
             zone = _zone_of(entry.get("timeZone"), f"{at}.timeZone", problems)
             service = _zone_of(entry.get("serviceTimeZone"), f"{at}.serviceTimeZone", problems)

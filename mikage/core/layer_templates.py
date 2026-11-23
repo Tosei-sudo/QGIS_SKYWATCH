@@ -354,7 +354,7 @@ def design_fields(title: str, fields: list[FieldDesign]) -> Union[list[FieldSpec
             errors.append(f"{label}の名前を入力")
             continue
         if any(ord(c) < 0x20 or c == '"' for c in name):
-            errors.append(f"{label}の名前に使用不可の文字あり")
+            errors.append(f"{label}の名前に使えない文字あり")
         if name.lower() in RESERVED:
             errors.append(f"{label}は書き出しで使う名前なので、別の名前で指定")
         if name.lower() in seen:

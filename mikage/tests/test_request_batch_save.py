@@ -67,7 +67,7 @@ def test_each_request_keeps_its_checks_and_result_in_a_batch():
     out = save_requests(client, store, None, todo, FIRST + 2 * H)
     assert sorted(r.id for r in out.saved) == ["R-000", "R-003", "R-004", "R-NEW"]
     assert out.conflicts == 2 and sorted(r.id for r, _e in out.failed) == ["R-001", "R-002"]
-    assert any("削除済み" in str(e) for _r, e in out.failed) and any("読み込み後に更新" in str(e) for _r, e in out.failed)
+    assert any("削除済み" in str(e) for _r, e in out.failed) and any("ほかの人が先に変更" in str(e) for _r, e in out.failed)
     rows = {r["attributes"]["REQ_ID"]: r["attributes"] for r in fake.layers[LEDGER].rows}
     assert "R-002" not in rows and rows["R-001"]["PRIORITY"] == 500 and rows["R-NEW"]["PRIORITY"] == 50
     assert next(r for r in out.saved if r.id == "R-NEW").object_id is not None

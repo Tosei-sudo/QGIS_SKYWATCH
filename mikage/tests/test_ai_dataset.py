@@ -163,7 +163,7 @@ def test_written_read_back_and_added_to(tmp_path):
 def test_not_a_dataset(tmp_path):
     with pytest.raises(DatasetError, match="教師データセットのファイルではない"):
         load_dataset(write(tmp_path / "x.json", '{"type": "FeatureCollection"}'))
-    with pytest.raises(DatasetError, match="読めず"):
+    with pytest.raises(DatasetError, match="読めない"):
         load_dataset(str(tmp_path / "none.json"))
     with pytest.raises(DatasetError, match="知らない注釈"):
         load_dataset(write(tmp_path / "y.json", json.dumps({"format": "satobs-dataset", "groups": [{"format": "kitti", "items": []}]})))

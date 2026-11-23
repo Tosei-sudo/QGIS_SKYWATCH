@@ -58,7 +58,7 @@ class ApiReferenceDialog(QDialog):
         self.setWindowTitle(self.tr("Python API リファレンス"))
         self.resize(900, 620)
         main = QVBoxLayout(self)
-        intro = QLabel(self.tr("Python コンソールやプロセシングのスクリプトから使う。例はコピーしてコンソールに貼る。"))
+        intro = QLabel(self.tr("Python コンソールやプロセシングのスクリプトから使用。例はコピーしてコンソールに貼り付け"))
         intro.setWordWrap(True)
         main.addWidget(intro)
         self.filter = QLineEdit()

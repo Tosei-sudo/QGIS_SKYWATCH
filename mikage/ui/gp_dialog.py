@@ -63,7 +63,7 @@ class RemoteProcessingDialog(QDialog):
         form.addRow(_tr("認証設定"), self.auth)
         layout.addLayout(form)
         row = QHBoxLayout()
-        self.load_button = QPushButton(_tr("読み込み"))
+        self.load_button = QPushButton(_tr("取得"))
         self.load_button.clicked.connect(self.load)
         row.addWidget(self.load_button)
         row.addStretch(1)
@@ -149,13 +149,13 @@ class RemoteProcessingDialog(QDialog):
             if ok:
                 done(value)
             else:
-                self.busy(False, _tr("読み込み失敗: {e}").format(e=_tr(value)))
+                self.busy(False, _tr("取得に失敗: {e}").format(e=_tr(value)))
 
         def failed(message: str) -> None:
             self.task = None
-            self.busy(False, _tr("読み込み失敗: {e}").format(e=_tr(message)))
+            self.busy(False, _tr("取得に失敗: {e}").format(e=_tr(message)))
 
-        self.busy(True, _tr("読み込み中…"))
+        self.busy(True, _tr("取得中…"))
         self.task = run_task(description, work, finished, failed)
 
     def load(self) -> None:
@@ -167,11 +167,11 @@ class RemoteProcessingDialog(QDialog):
         token = self._token_for(url)
         self.tasks.clear()
         self.service = None
-        self._run(_tr("サーバ処理の読み込み"), lambda client: client.read(url), lambda value: self._loaded(value, token), token)
+        self._run(_tr("サーバ処理の取得"), lambda client: client.read(url), lambda value: self._loaded(value, token), token)
 
     def _loaded(self, value, token: str) -> None:
         if isinstance(value, GpTask):
-            self.busy(False, _tr("「{title}」を開きます").format(title=value.title))
+            self.busy(False, _tr("「{title}」を表示").format(title=value.title))
             self._open(value, token)
             return
         self.service, self.token = value, token
@@ -191,10 +191,10 @@ class RemoteProcessingDialog(QDialog):
         if item is None or self.service is None:
             return
         url, kind, token = item.data(Qt.ItemDataRole.UserRole), self.service.kind, self.token
-        self._run(_tr("サーバ処理の読み込み"), lambda client: client.read_task(kind, url), lambda task: self._opened(task, token), token)
+        self._run(_tr("サーバ処理の取得"), lambda client: client.read_task(kind, url), lambda task: self._opened(task, token), token)
 
     def _opened(self, task: GpTask, token: str) -> None:
-        self.busy(False, _tr("「{title}」を開きます").format(title=task.title))
+        self.busy(False, _tr("「{title}」を表示").format(title=task.title))
         self._open(task, token)
 
     def _open(self, task: GpTask, token: str) -> None:

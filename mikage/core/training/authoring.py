@@ -216,7 +216,7 @@ def exercise_of_draft(d: Draft, base: Scoring = DEFAULT_SCORING, problems: Optio
         if got is not None:
             answers.append(got[1])
     if not answers:
-        problems.append("正解がありません")
+        problems.append("正解なし")
         return None
     e.answers = answers
     return e.numbered()
@@ -229,35 +229,35 @@ def check(d: Draft, base: Scoring = DEFAULT_SCORING) -> tuple[list[str], list[st
     """
     problems, notes = [], []
     if not d.title.strip():
-        problems.append("題名がありません")
+        problems.append("題名なし")
     if not d.image_id.strip() and not d.image_source.strip():
-        problems.append("画像がありません（画像 ID か画像のファイル）")
+        problems.append("画像なし（画像 ID か画像のファイルを指定）")
     if d.type == CHANGE and not d.before_image_id.strip() and not d.before_image_source.strip():
-        problems.append("変化を見つける問題に前の画像がありません")
+        problems.append("変化を見つける問題に前の画像なし")
     if not d.answers:
-        problems.append("正解がありません（観測記録から取り込むか、地図で足してください）")
+        problems.append("正解なし（観測記録から取り込むか、地図で追加）")
     if d.pass_score is not None and not 0 <= d.pass_score <= 100:
-        problems.append("合格点は 0〜100 です")
+        problems.append("合格点は 0〜100")
     # (numbered as they are listed: as they are written)
     for n, a in enumerate(d.answers, 1):
         if d.type == MEASURE and not a.measured():
-            problems.append(f"正解 {n}: 測る問題の正解に長さ・幅・向きがありません")
+            problems.append(f"正解 {n}: 測る問題の正解に長さ・幅・向きなし")
         if d.type == CHANGE and a.change not in CHANGES:
-            problems.append(f"正解 {n}: 変化（{'・'.join(CHANGES)}）がありません")
+            problems.append(f"正解 {n}: 変化（{'・'.join(CHANGES)}）なし")
         if d.type == IDENTIFY and not a.kind and not a.activity:
-            problems.append(f"正解 {n}: 見分ける問題の正解に種別も活動もありません")
+            problems.append(f"正解 {n}: 見分ける問題の正解に種別も活動もない")
     if d.area and d.type in (FIND, CHANGE):
         out = [n for n, a in enumerate(d.answers, 1) if not inside(a.lon, a.lat, d.area)]
         if out:
-            notes.append(f"範囲の外の正解があります（{'・'.join(str(n) for n in out)} 番）")
+            notes.append(f"範囲の外の正解あり（{'・'.join(str(n) for n in out)} 番）")
     if not d.area and d.type in (FIND, CHANGE):
-        notes.append("範囲がありません（画像の全体を探す問題になります）")
+        notes.append("範囲なし（画像の全体を探す問題になる）")
     if d.target_kinds and d.type == FIND:
         odd = [n for n, a in enumerate(d.answers, 1) if a.kind and not any(within(a.kind, t) for t in d.target_kinds)]
         if odd:
-            notes.append(f"対象の種別に入らない正解があります（{'・'.join(str(n) for n in odd)} 番）")
+            notes.append(f"対象の種別に入らない正解あり（{'・'.join(str(n) for n in odd)} 番）")
     if not d.active:
-        notes.append("「出す」に印がないため、作りかけとして書きます（練習の一覧には出ません）")
+        notes.append("「出す」に印がないため、作りかけとして保存（練習の一覧には出ない）")
     tried: list[str] = []
     if not problems:
         exercise_of_draft(d, base, tried)
@@ -315,14 +315,14 @@ def save_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[st
         result = client.apply_edits(tables.exercises, adds=[row], token=token)
         adds = result.add_results
         if not adds or not adds[0].get("success"):
-            raise EsriError("問題の表に追加できませんでした（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+            raise EsriError("問題の表への追加に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
         object_id = adds[0].get("objectId")
     else:
         row["attributes"][ex_info.object_id_field] = d.object_id
         result = client.apply_edits(tables.exercises, updates=[row], token=token)
         ups = result.update_results
         if not ups or not ups[0].get("success"):
-            raise EsriError("問題の表を更新できませんでした（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+            raise EsriError("問題の表の更新に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
         object_id = d.object_id
     an_info = client.layer(tables.answers, token, refresh=True)
     oid = an_info.object_id_field
@@ -346,7 +346,7 @@ def save_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[st
                 a.object_id = r.get("objectId")
         failures = result.failures()
         if failures:
-            raise EsriError("正解の表に書けなかった行があります（" + "、".join(failures[:3]) + "）。もう一度保存してください")
+            raise EsriError("正解の表に書けなかった行あり（" + "、".join(failures[:3]) + "）。もう一度保存")
         answers = d.answers
     return replace(d, object_id=int(object_id) if object_id is not None else None, answers=answers,
                    answer_ids_read=tuple(a.object_id for a in answers if a.object_id is not None))
@@ -361,7 +361,7 @@ def set_active(client: Any, tables: ExerciseTables, d: Draft, active: bool, toke
     attributes[info.object_id_field] = d.object_id
     result = client.apply_edits(tables.exercises, updates=[{"attributes": attributes}], token=token)
     if result.failures() or not result.update_results:
-        raise EsriError("問題の表を更新できませんでした（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+        raise EsriError("問題の表の更新に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
     return replace(d, active=active)
 
 
@@ -370,11 +370,11 @@ def delete_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[
     if d.answer_ids_read:
         result = client.apply_edits(tables.answers, deletes=list(d.answer_ids_read), token=token)
         if result.failures():
-            raise EsriError("正解の行を削除できませんでした（" + "、".join(result.failures()[:3]) + "）")
+            raise EsriError("正解の行の削除に失敗（" + "、".join(result.failures()[:3]) + "）")
     if d.object_id is not None:
         result = client.apply_edits(tables.exercises, deletes=[d.object_id], token=token)
         if result.failures():
-            raise EsriError("問題の行を削除できませんでした（" + "、".join(result.failures()[:3]) + "）")
+            raise EsriError("問題の行の削除に失敗（" + "、".join(result.failures()[:3]) + "）")
 
 
 # ---- answers from observation records ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ maps): it shows the top one's correction and any change writes the whole
 correction to all of them. The band assignment is shared only when their
 bands are alike (`enhance_group.alike`), else each keeps its own; a colour
 scale goes to the layers shown as the top one is (one band or three); two
-dates stay a one-layer tool. 「グループで範囲を共通にする」 (on by default for
+dates stay a one-layer tool. 「グループで範囲を共通化」 (on by default for
 alike rasters) has DRA and the 16-bit stretch taken over all of them
 together, so tiles meet without seams.
 
@@ -204,7 +204,7 @@ class EnhanceDock(PluginDock):
         self.preset.activated.connect(lambda _i: self.use_preset(self.preset.currentData()))
         top.addWidget(self.preset, 1)
         v.addLayout(top)
-        self.share = QCheckBox(self.tr("グループで範囲を共通にする"))
+        self.share = QCheckBox(self.tr("グループで範囲を共通化"))
         self.share.setToolTip(self.tr("グループ内の画像を合わせて明るさの範囲（DRA・16 bit 画像の引き伸ばし）を決め、"
                                       "タイルの境目などで明るさが変わらないように表示"))
         self.share.toggled.connect(self._share_toggled)
@@ -572,7 +572,7 @@ class EnhanceDock(PluginDock):
         if len({self._look(t) for t in self.targets}) > 1:
             lines.append(self.tr("補正の違うレイヤーあり。変更すると全部この補正にそろう"))
         if not self._same:
-            lines.append(self.tr("バンド構成の違う画像あり。バンド割当と範囲の共通化は使用不可（バンド割当は各レイヤーのまま）"))
+            lines.append(self.tr("バンド構成の違う画像あり。バンド割当と範囲の共通化は使えない（バンド割当は各レイヤーのまま）"))
         return "\n".join(lines)
 
     def _look(self, layer) -> tuple:
@@ -776,7 +776,7 @@ class EnhanceDock(PluginDock):
             self.show_histogram()
             self.histogram_note.setText(self.tr("レイヤーを選ぶと、表示範囲のヒストグラムを表示") if self.layer is None
                                         else self.tr("表示範囲に表示中の画像なし") if self.group is not None
-                                        else self.tr("表示範囲の取得不可"))
+                                        else self.tr("表示範囲の取得に失敗"))
             return None
         layers = len(items) if self.group is not None else 0
 

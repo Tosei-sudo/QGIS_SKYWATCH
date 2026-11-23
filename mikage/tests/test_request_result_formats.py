@@ -165,7 +165,7 @@ def test_a_schema_in_a_file_is_read_with_the_file():
     def gone(path):
         raise OSError("ない")
 
-    assert read_answers(body, spec, gone) == ([], ["スキーマ schemas/sys-a.result.schema.json の読み込み不可（ない）"])
+    assert read_answers(body, spec, gone) == ([], ["スキーマ schemas/sys-a.result.schema.json を読み込めない（ない）"])
     assert read_answers(body, spec, lambda p: {"type": "object", "properties": {"r": {"x-target": "records"}}})[1] == [
         "スキーマ schemas/sys-a.result.schema.json に依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）なし"]
 

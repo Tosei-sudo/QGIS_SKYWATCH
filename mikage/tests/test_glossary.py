@@ -132,5 +132,5 @@ def test_reads_the_table_with_the_attributes_it_has():
 
 def test_settings_problems():
     assert parse_config({"glossary": "nope"})[1] == ["glossary は …/FeatureServer/0 のようなレイヤー・テーブルの URL で指定"]
-    assert parse_config({"glossary": {"url": URL, "fields": {"word": "X"}}})[1][0].startswith("glossary.fields.word は使用不可の役割")
+    assert parse_config({"glossary": {"url": URL, "fields": {"word": "X"}}})[1][0].startswith("glossary.fields.word は使えない役割")
     assert parse_config({})[0].glossary is None

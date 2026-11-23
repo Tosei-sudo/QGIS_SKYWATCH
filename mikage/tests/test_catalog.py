@@ -720,7 +720,7 @@ def test_the_past_not_read_is_read_next_time():
         return ask(url, params)
 
     result = check_watch(watch(past={"areas": None, "before": None}, last_checked=CREATED), refusing, CREATED + 1)
-    assert result.earlier == [] and result.watch.past is not None and "前からある画像を読めず" in result.watch.last_error
+    assert result.earlier == [] and result.watch.past is not None and "前からある画像を読めない" in result.watch.last_error
     assert check_watch(result.watch, ask, CREATED + 2).watch.past is None
     # A service that refuses ids: asked plainly (what one answer holds).
 

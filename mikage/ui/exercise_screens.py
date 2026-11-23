@@ -152,7 +152,7 @@ class ExerciseList(QDialog):
         past.clicked.connect(show_results)
         row.addWidget(past)
         row.addStretch(1)
-        self.start = QPushButton(self.tr("始める"))
+        self.start = QPushButton(self.tr("開始"))
         self.start.setDefault(True)
         self.start.clicked.connect(self._go)
         close = QPushButton(self.tr("閉じる"))
@@ -209,17 +209,17 @@ class ExerciseList(QDialog):
     def _chosen(self) -> None:
         e = self.current()
         if e is None:
-            self.detail.setText(self.tr("問題がありません。"))
+            self.detail.setText(self.tr("練習の問題がない"))
             self.start.setEnabled(False)
             return
         taken = e.exam and exam_taken(self.results, e.key)
         self.start.setEnabled(not taken)
-        self.start.setText(self.tr("始める") if not tries_of(self.results, e.key) or e.exam else self.tr("もう一度"))
+        self.start.setText(self.tr("開始") if not tries_of(self.results, e.key) or e.exam else self.tr("もう一度"))
         image = e.image_id or os.path.basename(e.image_source)
         before = f"（前の画像: {e.before_image_id or os.path.basename(e.before_image_source)}）" if e.type == CHANGE else ""
         limit = f"制限時間 {e.time_limit:g} 分・" if e.time_limit else ""
-        note = ("<br><span style='color:#b91c1c'>この試験はもう受けました（1 回だけ）。</span>" if taken else
-                "<br><span style='color:#c2410c'>試験: ヒントなし・1 回だけ・時間が来たら自動で提出します。</span>" if e.exam else "")
+        note = ("<br><span style='color:#b91c1c'>この試験は受験済み（1 回だけ）</span>" if taken else
+                "<br><span style='color:#c2410c'>試験: ヒントなし・1 回だけ・時間が来たら自動で提出</span>" if e.exam else "")
         self.detail.setText(
             f"<b>{e.order or ''}{'. ' if e.order else ''}{e.title}</b>（{e.type}・{e.difficulty or '—'}）<br>"
             f"指示: {e.instruction}<br>"
@@ -285,12 +285,12 @@ class ExerciseBar(QWidget):
         box.addWidget(self.state)
         row = QHBoxLayout()
         self.hint = QPushButton(self.tr("ヒント"))
-        self.hint.setToolTip(self.tr("あと何件あるかを出します（練習だけ）"))
+        self.hint.setToolTip(self.tr("あと何件あるかを表示（練習だけ）"))
         self.hint.setVisible(not exercise.exam)
         self.hint.clicked.connect(self.hint_pressed)
         self.area = QPushButton(self.tr("範囲へ移動"))
         self.area.clicked.connect(self.area_pressed)
-        self.quit = QPushButton(self.tr("やめる"))
+        self.quit = QPushButton(self.tr("取消"))
         self.quit.clicked.connect(self.quit_pressed)
         self.submit = QPushButton(self.tr("提出して答え合わせ"))
         self.submit.setDefault(True)
@@ -479,7 +479,7 @@ class ReviewWindow(QWidget):
         if not show:
             self.table.hide()
             explain.hide()
-            hidden = QLabel(self.tr("この試験は、正解と解説を見せない設定です（点と合否だけ）。"))
+            hidden = QLabel(self.tr("この試験は、正解と解説を表示しない設定（点と合否だけ）"))
             hidden.setWordWrap(True)
             box.addWidget(hidden)
         row = QHBoxLayout()
@@ -536,15 +536,14 @@ class ReviewWindow(QWidget):
         if hasattr(row, "answer"):
             a = row.answer
             title = f"解説（{a.number}. {kind_text(a.kind) or '—'}）"
-            text = a.explanation or self.tr("（解説はありません）")
+            text = a.explanation or self.tr("（解説なし）")
             ref = f"<br><span style='color:#555'>参考写真: {os.path.basename(a.reference)}</span>" if a.reference else ""
             self.explanation.setText(f"<b>{title}</b><br>{text}{ref}")
             pixmap = self.reference(a.reference) if (self.reference and a.reference) else None
             self.picture.setPixmap(pixmap if pixmap is not None else QPixmap())
             self.picture.setVisible(pixmap is not None)
         else:
-            self.explanation.setText(self.tr("<b>誤り</b><br>正解のどれにも当たらない記録です（範囲の中で、対象の種別のもの）。"
-                                             "地図で × の所を見直してください。"))
+            self.explanation.setText(self.tr("<b>誤り</b><br>正解のどれにも当たらない記録（範囲の中で、対象の種別のもの）。地図で × の所を見直し"))
             self.picture.setVisible(False)
         self.chosen.emit(index)
 
@@ -590,7 +589,7 @@ class MyResults(QDialog):
         box.addWidget(self.table, 1)
         box.addWidget(QLabel(self.tr("<b>取り違えやすい組み合わせ</b>（正しい種別 → 答えた種別、回数）")))
         pairs = mistaken(results)
-        text = "<br>".join(f"{t} → {g}　{n} 回" for t, g, n in pairs) if pairs else self.tr("まだありません。")
+        text = "<br>".join(f"{t} → {g}　{n} 回" for t, g, n in pairs) if pairs else self.tr("まだなし")
         self.pairs = QLabel(text)
         self.pairs.setWordWrap(True)
         self.pairs.setTextFormat(Qt.TextFormat.RichText)

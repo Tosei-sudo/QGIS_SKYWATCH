@@ -185,7 +185,7 @@ class QuotaDialog(QDialog):
             self.render()
             return
         repo, day = self.repository(), self.chosen_day()
-        self.status.setText(self.tr("年間撮像上限と撮像の範囲を読み込み中…"))
+        self.status.setText(self.tr("年間撮像上限と撮像の範囲を取得中…"))
         self.reload_button.setEnabled(False)
 
         def work(task):
@@ -204,9 +204,9 @@ class QuotaDialog(QDialog):
         def failed(message):
             self.task = None
             self.reload_button.setEnabled(True)
-            self.status.setText(self.tr("読み込み失敗: {m}").format(m=message))
+            self.status.setText(self.tr("取得に失敗: {m}").format(m=message))
 
-        self.task = run_task(self.tr("年間撮像上限の読み込み"), work, done, failed)
+        self.task = run_task(self.tr("年間撮像上限の取得"), work, done, failed)
 
     # --- Showing ----------------------------------------------------------------------------------
 
@@ -293,7 +293,7 @@ class QuotaDialog(QDialog):
         chosen = [u for u in self.selected() if u.shot.uncounted]
         if chosen:
             self._save([(u.shot.object_id, {"uncounted": None, "uncountedReason": None}) for u in chosen],
-                       self.tr("{n} 件の撮像を数えるに戻した").format(n=len(chosen)))
+                       self.tr("{n} 件の撮像を「数える」に変更").format(n=len(chosen)))
 
     def _save(self, changes: list, what: str) -> None:
         if self.task is not None:
@@ -313,7 +313,7 @@ class QuotaDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("保存できず: {m}").format(m=message))
+            self.status.setText(self.tr("保存に失敗: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("撮像の範囲の更新"), work, done, failed)

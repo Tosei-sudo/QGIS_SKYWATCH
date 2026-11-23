@@ -196,7 +196,7 @@ class ObservationStoreConfig:
     taxonomy: Optional[list[Taxon]] = None
     taxonomy_table: Optional[TaxonomyTableConfig] = None
     authcfg: Optional[str] = None
-    #: Minutes between quiet reads of others' records (`refreshMinutes`); None: only on another image, after a conflict and 「再読み込み」.
+    #: Minutes between quiet reads of others' records (`refreshMinutes`); None: only on another image, after a conflict and 「最新を取得」.
     refresh_minutes: Optional[float] = None
 
 
@@ -266,7 +266,7 @@ def observation_store_of(value: Any, problems: list[str], index: int) -> Optiona
     if is_record(fields):
         for key, v in fields.items():
             if key not in DEFAULT_OBSERVATION_FIELDS:
-                problems.append(f"{at} の fields.{key} は使用不可の役割")
+                problems.append(f"{at} の fields.{key} は使えない役割")
             elif isinstance(v, str) and _NAME.match(v):
                 mapped[key] = v
             else:

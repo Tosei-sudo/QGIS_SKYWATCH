@@ -206,7 +206,7 @@ class ObservationDock(
         self.store_select.currentIndexChanged.connect(self._store_chosen)
         top.addWidget(self.store_select, 1)
         # 「自分の記録」 (tsudo 2026-11-18: 過去の自分がどの画像のどの観測結果を作ったのかがわかりにくい).
-        self.my_records_button = self._button(tr("自分の記録…"), tr("自分が作った記録を、画像をまたいで一覧（記録ごと・画像ごと）。ダブルクリックで画像を開いて記録を編集"),
+        self.my_records_button = self._button(tr("自分の記録…"), tr("自分の記録を、画像をまたいで一覧で表示。ダブルクリックで画像を開いて記録を編集"),
                                               lambda: self.open_my_records())
         top.addStretch(0)
         top.addWidget(self.my_records_button)
@@ -220,13 +220,13 @@ class ObservationDock(
         self.image_select.setToolTip(tr("画像"))
         self.image_select.activated.connect(self._image_chosen)
         self.next_button = self._button("▶", tr("次の画像（撮像日時の順、PageDown）"), lambda: self.step(1))
-        self.list_button = self._button("＋", tr("ファイルなしの画像の追加（カタログ外・未オープンの画像を ID・撮像日時で指定）"),
+        self.list_button = self._button("＋", tr("ファイルのない画像を一覧に追加（画像 ID と撮像日時で指定）"),
                                         self._toggle_list_form, checkable=True)
-        self.image_event_button = self._button("⚑", tr("この画像を対応中のイベント（地震対応など）に入れる（カタログ外・ファイルなしの画像も。設定ファイルの events）"),
+        self.image_event_button = self._button("⚑", tr("この画像を対応中のイベント（地震対応など）に追加"),
                                                 lambda: self.add_image_to_event())
         self.image_event_button.hide()
         self.only = QCheckBox(tr("この画像のみ"))
-        self.only.setToolTip(tr("この画像のみ地図に表示（他の画像は非表示）"))
+        self.only.setToolTip(tr("この画像だけを地図に表示"))
         self.only.toggled.connect(self._apply_only)
         for w in (self.prev_button, self.image_select, self.next_button, self.list_button, self.image_event_button, self.only):
             row.addWidget(w)
@@ -258,13 +258,12 @@ class ObservationDock(
         times.addWidget(self.list_time, 1)
         f.addRow(tr("撮像日時"), times)
         f.addRow(self.list_box)
-        note = QLabel(tr("ファイルなしで記録（背景地図・他の画像の上をクリック）。保存先ごとにこの QGIS で保持。"
-                         "地図にはグループ「ファイルなしの画像」に範囲の枠のレイヤーが入り、そのレイヤーを削除すると一覧から除外（記録は残る）"))
+        note = QLabel(tr("ファイルなしで、背景地図やほかの画像の上に記録。地図の枠のレイヤーを削除すると、一覧から除外（記録は残る）"))
         note.setWordWrap(True)
         f.addRow(note)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("追加"), "", self._list_from_form))
-        self.unlist_button = self._button(tr("一覧から除外"), tr("この画像の一覧からの除外（記録は残る）。地図の枠のレイヤーを削除しても同じ"),
+        self.unlist_button = self._button(tr("一覧から除外"), tr("この画像を一覧から除外（記録は残る）"),
                                           self._unlist)
         actions.addWidget(self.unlist_button)
         actions.addWidget(self._button(tr("取消"), "", lambda: self.list_button.setChecked(False)))
@@ -277,7 +276,7 @@ class ObservationDock(
         self.time_row = QWidget()
         t = QHBoxLayout(self.time_row)
         t.setContentsMargins(0, 0, 0, 0)
-        t.addWidget(QLabel(tr("撮像日時不明（入力）")))
+        t.addWidget(QLabel(tr("撮像日時なし")))
         self.time_input = QDateTimeEdit()
         self.time_input.setCalendarPopup(True)
         self.time_input.setDisplayFormat("yyyy-MM-dd HH:mm")
@@ -290,13 +289,13 @@ class ObservationDock(
         self.satellite_row = QWidget()
         t = QHBoxLayout(self.satellite_row)
         t.setContentsMargins(0, 0, 0, 0)
-        t.addWidget(QLabel(tr("衛星不明（入力）")))
+        t.addWidget(QLabel(tr("衛星名なし")))
         self.satellite_input = QComboBox()
         self.satellite_input.setEditable(True)
         self.satellite_input.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.satellite_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.satellite_input.setToolTip(tr("この画像を撮った衛星（センサー）。候補は画像カタログのセンサーと衛星カタログの名前。直接入力も可。"
-                                           "この画像の記録・確認範囲のうち衛星名が空のものにも入る"))
+        self.satellite_input.setToolTip(tr("この画像を撮った衛星（センサー）を選択か入力。"
+                                           "衛星名が空の、この画像の記録と確認範囲にも入力"))
         self.satellite_input.lineEdit().setPlaceholderText(tr("例: WV03"))
         self.satellite_input.lineEdit().returnPressed.connect(self._set_image_satellite)
         t.addWidget(self.satellite_input, 1)
@@ -326,15 +325,14 @@ class ObservationDock(
         self.points_select.setToolTip(tr("記録のクリック数（L で切り替え）\n"
                                          "1 点: 位置\n"
                                          "2 点: 後端 → 前端（船首・機首）で中心・長さ・向き\n"
-                                         "3 点: さらに片側の側面（舷側）で幅（中心線から左右同じ幅）\n"
-                                         "4 点: さらに両側の側面で幅（中心は両側面の中間）"))
+                                         "3 点: さらに片側の側面（舷側）で幅。左右は同じ幅\n"
+                                         "4 点: さらに両側の側面で幅"))
         self.points_select.setCurrentIndex(max(0, self.points - 1))
         self.points_select.currentIndexChanged.connect(lambda _i: self.set_points(self.points_select.currentData()))
-        self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲の記録（範囲内の対象は記録がすべて、記録のないものは消失）（A）"),
+        self.area_button = self._button(tr("確認範囲"), tr("確認済みの範囲を記録（A）。範囲内で記録のないモノは消失"),
                                         self.set_area_mode, checkable=True)
         # 不可範囲 (tsudo 2026-11-19): a part of the image under cloud, haze…; the things there are 「不可」, not 消失.
-        self.unseen_area_button = self._button(tr("不可範囲"), tr("不可範囲（雲などで判読できない範囲）の記録（K）\n"
-                                                                    "中の前後の画像のモノは「不可」として記録（消失にはしない。次の画像では最後に見えた記録から続く）"),
+        self.unseen_area_button = self._button(tr("不可範囲"), tr("雲などで判読できない範囲を記録（K）\n中の前後の画像のモノは「不可」として記録。消失にはしない"),
                                                lambda on: self.set_area_mode(on, unseen=True), checkable=True)
         # Many alike things (ui/obs_many.py): put down as the 見本.
         self.stamp_button = self._button(tr("連続"), tr("見本と同じものを続けて記録（S）\n"
@@ -353,10 +351,10 @@ class ObservationDock(
         for text, style in ((tr("通常"), "normal"), (tr("枠だけ"), "outline"), (tr("非表示"), "hidden")):
             self.mark_style_select.addItem(text, style)
         self.mark_style_select.setCurrentIndex(max(0, self.mark_style_select.findData(settings.mark_style())))
-        self.mark_style_select.setToolTip(tr("地図上の記録の印の表示（H で表示・非表示、どこからでも Ctrl+Alt+D）\n"
+        self.mark_style_select.setToolTip(tr("地図の記録の印を表示・非表示（H、どこからでも Ctrl+Alt+D）\n"
                                              "通常: 塗りつぶした印\n"
-                                             "枠だけ: 塗らずに輪と枠線だけ（画像が透けて見える）\n"
-                                             "非表示: 入力中の点とフォームで開いている記録だけ"))
+                                             "枠だけ: 輪と枠線だけ（画像が透けて見える）\n"
+                                             "非表示: 入力中の点とフォームの記録だけを表示"))
         self.mark_style_select.currentIndexChanged.connect(lambda _i: self.set_mark_style(self.mark_style_select.currentData()))
         #: The style 「H」 comes back to from 「非表示」.
         self._shown_style = settings.mark_style() if settings.mark_style() != "hidden" else "normal"
@@ -365,9 +363,9 @@ class ObservationDock(
         b.addLayout(row)
         row = QHBoxLayout()
         self.carry_label = QLabel()
-        self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録（確認範囲内・不可範囲内のものを除く）"),
+        self.carry_all_button = self._button(tr("すべて継続"), tr("前後の画像のモノ（白抜きの印）を、この画像でも継続として一括記録。確認範囲内と不可範囲内のものは除く"),
                                              self.carry_all)
-        self.absent_all_button = self._button(tr("すべて消失"), tr("前後の画像のモノ（白抜きの印）を、この画像での消失（見当たらず）として一括記録（確認範囲内のものも。不可範囲内のものは除く）"),
+        self.absent_all_button = self._button(tr("すべて消失"), tr("前後の画像のモノ（白抜きの印）を、この画像での消失として一括記録。不可範囲内のものは除く"),
                                               self.absent_all)
         self.absent_inside_button = self._button("", tr("確認範囲内で記録のない前後の画像のモノを、この画像での消失として一括記録"), self.absent_inside)
         self.unseen_inside_button = self._button("", tr("不可範囲内で記録のない前後の画像のモノを、この画像で「不可」として一括記録"),
@@ -419,7 +417,7 @@ class ObservationDock(
         f.addRow(self.area_note_assist.notice)
         f.addRow(self.area_note_tidy.panel)
         actions = QHBoxLayout()
-        self.area_submit_button = self._button(tr("確認範囲の記録（Enter）"), "", self._submit_area)
+        self.area_submit_button = self._button(tr("確認範囲を記録（Enter）"), "", self._submit_area)
         actions.addWidget(self.area_submit_button)
         actions.addWidget(self._button(tr("取消（Esc）"), "", lambda: self.set_area_mode(False)))
         f.addRow(actions)
@@ -498,13 +496,12 @@ class ObservationDock(
         # 「不可」 (tsudo 2026-11-19): could not be seen in this image (a cloud, a shadow…); ▼ picks why.
         self.unseen_button = QToolButton()
         self.unseen_button.setText(tr("不可"))
-        self.unseen_button.setToolTip(tr("雲・影などで、この画像では判読できないこと（不可）を記録（消失にはしない。次の画像では最後に見えた記録から続く）\n"
-                                         "▼ で理由を選ぶ"))
+        self.unseen_button.setToolTip(tr("雲や影で、この画像では判読できないこと（不可）を記録。消失にはしない\n▼ で理由を選択"))
         self.unseen_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.unseen_menu = QMenu(self.unseen_button)
         self.unseen_button.setMenu(self.unseen_menu)
         self.unseen_button.clicked.connect(lambda _on=False: self.submit(False, unseen=self._unseen_reason()))
-        self.delete_button = self._button(tr("削除"), tr("この記録の削除（「詳細」の「削除済みも表示」から復元可）"), self._delete_pending)
+        self.delete_button = self._button(tr("削除"), tr("この記録を削除（「詳細 ▸ 削除済みも表示」で復元できる）"), self._delete_pending)
         self.alert_button = self._button(tr("通報"), tr("この記録を通報文に追加（通報の条件に合わなくても）"),
                                          lambda: self.add_to_alerts([self.pending[2]]) if self.pending and self.pending[2] else None)
         for w in (self.submit_button, self.absent_button, self.unseen_button, self.delete_button, self.alert_button,
@@ -534,7 +531,7 @@ class ObservationDock(
         # offline, in the one list of the status bar: sent, opened in the form, or thrown away.
         self.drafts_button = QPushButton()
         self.drafts_button.setStyleSheet("QPushButton { color: #b45309; font-weight: bold; }")
-        self.drafts_button.setToolTip(tr("この保存先の、サーバーにまだ送られていない記録（この PC に保管中）。一覧で送信・フォームで開く・捨てる"))
+        self.drafts_button.setToolTip(tr("まだ送っていない記録を一覧で表示（送信・修正・破棄）"))
         self.drafts_button.clicked.connect(lambda _on=False: self.open_drafts())
         self.drafts_button.hide()
         b.addWidget(self.drafts_button)
@@ -560,13 +557,13 @@ class ObservationDock(
         row.addWidget(self.class_filter_label, 1)
         unfilter = QToolButton()
         unfilter.setText("×")
-        unfilter.setToolTip(tr("分類の絞り込み解除"))
+        unfilter.setToolTip(tr("分類の絞り込みを解除"))
         unfilter.clicked.connect(lambda: self.filter_root(None))
         row.addWidget(unfilter)
         self.unfilter_button = unfilter
         # 「この画像」: only one's own records (記録者 is oneself: the 「記録者」 name or the user name).
         self.mine_only = QCheckBox(tr("自分の記録のみ"))
-        self.mine_only.setToolTip(tr("記録者が自分（「記録者」の名前かユーザー名）の記録だけを表示"))
+        self.mine_only.setToolTip(tr("自分の記録だけを表示"))
         self.mine_only.toggled.connect(lambda _on: self.render())
         row.addWidget(self.mine_only)
         b.addWidget(self.class_filter_row)
@@ -592,20 +589,20 @@ class ObservationDock(
         self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）の種別・活動・確度をまとめて変更"),
                                         lambda: self.bulk_edit())
         self.bulk_button.hide()
-        self.remove_chosen_button = self._button(tr("選んだ記録を削除…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）をまとめて削除（Delete キーでも。確認あり）"),
+        self.remove_chosen_button = self._button(tr("選んだ記録を削除…"), tr("選んだ記録（Ctrl・Shift + クリックで複数）をまとめて削除。Delete キーでも削除"),
                                                  lambda: self.remove_selected())
         self.remove_chosen_button.hide()
         delete_key = QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.table)
         delete_key.setContext(Qt.ShortcutContext.WidgetShortcut)
         delete_key.activated.connect(lambda: self.remove_selected())
-        self.alert_add_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加（通報の条件に合わなくても。設定ファイルの alertReports）"),
+        self.alert_add_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加（通報の条件に合わなくても）"),
                                              lambda: self.add_to_alerts())
         self.alert_add_button.hide()
-        self.event_add_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベント（地震対応など）に入れる（設定ファイルの events）"),
+        self.event_add_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベント（地震対応など）に追加"),
                                              lambda: self.add_to_event())
         self.event_add_button.hide()
         # まとめ (`textAssist.tasks.summary`): a few sentences on the records chosen (tsudo 2026-11-19).
-        self.summary_button = self._button(tr("まとめ…"), tr("選んだ記録を数文にまとめた下書き（文章の手伝い。この PC の生成 AI）"),
+        self.summary_button = self._button(tr("まとめ…"), tr("選んだ記録を数文にまとめて下書きを作成（この PC の生成 AI）"),
                                            lambda: self.summarize())
         self.summary_button.hide()
         self.table.itemSelectionChanged.connect(self._selection_changed)
@@ -644,7 +641,7 @@ class ObservationDock(
         self.steps_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.steps_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.steps_table.horizontalHeader().setStretchLastSection(True)
-        self.steps_table.setToolTip(tr("クリックでその画像へ移動し記録の場所を表示、ダブルクリックで記録を編集（クリック記録）"))
+        self.steps_table.setToolTip(tr("クリックでその画像へ移動して記録の場所を表示。ダブルクリックで記録を編集"))
         self.steps_table.cellClicked.connect(self._step_clicked)
         self.steps_table.cellDoubleClicked.connect(self._step_double_clicked)
         self.steps_columns = column_menus("observation-steps", self.steps_table, self)
@@ -685,24 +682,24 @@ class ObservationDock(
         self.deleted_check = QCheckBox(tr("削除済みも表示"))
         self.deleted_check.toggled.connect(lambda _on: self.render())
         self.observer_input = QLineEdit(settings.recorder_setting())
-        self.observer_input.setToolTip(tr("記録・更新に付く名前（空欄で認証設定のユーザー名）"))
+        self.observer_input.setToolTip(tr("記録に付ける名前（空欄ならログインのユーザー名）"))
         self.observer_input.editingFinished.connect(self._observer_typed)
         mf.addRow(self.deleted_check)
         mf.addRow(tr("記録者"), self.observer_input)
         actions = QHBoxLayout()
-        actions.addWidget(self._button(tr("報告書…"), tr("期間・分類・確度を指定した報告書（HTML 保存・印刷）"), self.open_report))
-        actions.addWidget(self._button(tr("通報…"), tr("注目の記録を区切り文字の 1 行ずつの通報文に（設定ファイルの alertReports）"),
+        actions.addWidget(self._button(tr("報告書…"), tr("期間・分類・確度で絞って報告書を作成（保存・印刷）"), self.open_report))
+        actions.addWidget(self._button(tr("通報…"), tr("通報の条件に合う記録から通報文を作成"),
                                        lambda: self.open_alerts()))
-        actions.addWidget(self._button(tr("再読み込み"), tr("保存先から記録を再読み込み"), self.reload))
-        self.taxonomy_button = self._button(tr("分類体系の編集…"), tr("分類体系の編集ツール（ツリーのドラッグで移動・並べ替え、名前の直接編集、JSON の保存・読み込み）"),
+        actions.addWidget(self._button(tr("最新を取得"), tr("最新の記録を取得（ほかの人の記録も）"), self.reload))
+        self.taxonomy_button = self._button(tr("分類体系の編集…"), tr("分類体系を編集"),
                                             lambda: self.edit_taxonomy and self.edit_taxonomy(self.class_filter))
         actions.addWidget(self.taxonomy_button)
-        actions.addWidget(self._button(tr("エクスポート…"), tr("期間・場所・大分類を指定して CSV・JSON に保存（地名なども付加、フォーマットは設定ファイルの observationExports）"),
+        actions.addWidget(self._button(tr("エクスポート…"), tr("期間・場所・大分類で絞って、CSV か JSON に保存"),
                                        lambda: self.open_export()))
-        actions.addWidget(self._button(tr("レイヤー化"), tr("記録をポイント、モノの流れをラインとして一時レイヤー化（属性テーブル・タイムライン・書き出しで利用可）"),
+        actions.addWidget(self._button(tr("レイヤーとして追加"), tr("記録とモノの流れを、レイヤーとして地図に追加"),
                                        self.to_layers))
         mf.addRow(actions)
-        self.clear_button = self._button(tr("ローカル記録の消去…"), tr("ローカル GeoPackage の記録・確認範囲の完全な消去（削除済みのみも可。復元不可）"),
+        self.clear_button = self._button(tr("この PC の記録を消去…"), tr("この PC の記録と確認範囲を消去（復元できない）"),
                                          lambda: self.clear_local())
         mf.addRow(self.clear_button)
         self.more.toggled.connect(self._more_toggled)
@@ -752,7 +749,7 @@ class ObservationDock(
                 c.config.observation_stores, c.config.observation_vocabulary, c.gpkg, c.esri, c.token_for, local=c.config.local_observations)
         except Exception as error:  # noqa: BLE001 (the local GeoPackage could not be opened)
             self.sets = []
-            self._show_status(self.tr("保存先の準備失敗: {e}").format(e=error))
+            self._show_status(self.tr("保存先の準備に失敗: {e}").format(e=error))
         self.books = {}
         self._after_read = {}
         read = (c.source, tuple((s.label, s.config.url if s.config else None) for s in self.sets))
@@ -856,12 +853,10 @@ class ObservationDock(
         down = bool(getattr(store, "offline", False))
         n = len(self.waiting_ids())
         if down:
-            self.offline_note.setText(tr("オフライン作業中: サーバーに接続できないため、最後に読めた記録で作業しています。"
-                                         "保存した記録は「送信待ち」（青）として残し、接続が戻ったら送信するか確認します。")
+            self.offline_note.setText(tr("オフラインで作業中（最後に取得した記録を表示）。保存した記録は「送信待ち」（青）に保管し、つながったときに送信")
                                       + (tr("（送信待ち {n} 件）").format(n=n) if n else ""))
         elif n:
-            self.offline_note.setText(tr("送信待ちの記録 {n} 件（青）: オフライン中に保存し、まだサーバーにありません。"
-                                         "ステータスバーの「送信待ち」から送信できます。").format(n=n))
+            self.offline_note.setText(tr("送信待ちの記録 {n} 件（青）。ステータスバーの「送信待ち」から送信").format(n=n))
         self.offline_note.setVisible(down or bool(n))
 
     def say(self, message: str) -> None:
@@ -912,7 +907,7 @@ class ObservationDock(
         def finish(result=None, message: Optional[str] = None) -> None:
             self._running = False
             if message is not None:
-                self.say(self.tr("{d}の失敗: {m}").format(d=description, m=message))
+                self.say(self.tr("{d}に失敗: {m}").format(d=description, m=message))
                 if failed is not None and book is self.book:
                     failed(message)
             elif book is self.book and after is not None:
@@ -930,7 +925,7 @@ class ObservationDock(
         """
         book, s = self.book, self.store_set
         if book is None or s is None:
-            raise RuntimeError("観測記録は使用不可")
+            raise RuntimeError("観測記録は使えない")
         self._place_records(book)
         if not s.remote:
             try:
@@ -953,7 +948,7 @@ class ObservationDock(
             loop.exec()
         self.render()
         if "error" in got:
-            raise RuntimeError(f"{description}の失敗: {got['error']}")
+            raise RuntimeError(f"{description}に失敗: {got['error']}")
         return got.get("result")
 
     def report_html(self, options) -> str:
@@ -962,7 +957,7 @@ class ObservationDock(
 
         book = self.book
         # What the report holds (a shared store: asked of it for the period and class).
-        self.run_now(self.tr("報告書の記録の読み込み"), lambda b: b.read_for_report(options))
+        self.run_now(self.tr("報告書の記録の取得"), lambda b: b.read_for_report(options))
         selection = book.report_selection(options)
         url: dict[str, Optional[str]] = {}
         if options.map and (selection.records or selection.areas):
@@ -1025,7 +1020,7 @@ class ObservationDock(
             reading.discard(key)
             self._after_read.pop(key, None)
 
-        self.do(self.tr("観測記録の読み込み"), work, after=after, failed=failed)
+        self.do(self.tr("観測記録の取得"), work, after=after, failed=failed)
 
     def _read_around(self) -> None:
         """The records around the image recorded now (a shared store), read in a task when not read yet."""
@@ -1042,7 +1037,7 @@ class ObservationDock(
             finally:
                 reading.discard(key)
 
-        self.do(self.tr("まわりの記録の読み込み"), work, failed=lambda _m: reading.discard(key))
+        self.do(self.tr("まわりの記録の取得"), work, failed=lambda _m: reading.discard(key))
 
     def fetch(self, description: str, work: Callable[[ObservationBook], Any], then: Callable[[Any], None],
               failed: Optional[Callable[[str], None]] = None) -> None:
@@ -1068,7 +1063,7 @@ class ObservationDock(
             return True
         if not book.scoped:
             return self.records_ready(then)
-        self.fetch(self.tr("観測記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=ids)), lambda _r: then(), lambda _m: None)
+        self.fetch(self.tr("観測記録の取得"), lambda b: b.fetch(RecordQuery(ids=ids)), lambda _r: then(), lambda _m: None)
         return False
 
     def records_ready(self, again: Optional[Callable[[], Any]] = None) -> bool:
@@ -1092,7 +1087,7 @@ class ObservationDock(
         """The book with its records read, waiting for them when not read yet (scripts, 「CSV 保存」, 「レイヤー化」)."""
         book = self.book
         if book is not None and not book.loaded:
-            self.run_now(self.tr("観測記録の読み込み"), lambda b: b.reload())
+            self.run_now(self.tr("観測記録の取得"), lambda b: b.reload())
             self.refresh_reported()
         return self.book
 
@@ -1139,7 +1134,7 @@ class ObservationDock(
         def failed(_message: str) -> None:
             finished()  # (a later refresh tries again)
 
-        self.do(self.tr("ほかの人の記録の読み込み"), lambda b: b.refresh(), after=done, failed=failed)
+        self.do(self.tr("ほかの人の記録の取得"), lambda b: b.refresh(), after=done, failed=failed)
 
     def _editing_changed(self) -> None:
         """The record open in the form, if someone else changed it: filled again (nothing typed yet) or told."""
@@ -1152,14 +1147,14 @@ class ObservationDock(
         who = now.updated_by or now.recorded_by or self.tr("ほかの人")
         if self._filled is not None and self.form_values() == self._filled:
             self.open_form(now.lon, now.lat, editing=now)
-            self.iface.messageBar().pushInfo(self.tr("観測記録"), plain_tip(self.tr("開いている記録を {who} さんが更新したので、最新の内容にしました").format(who=who)))
+            self.iface.messageBar().pushInfo(self.tr("観測記録"), plain_tip(self.tr("開いている記録を {who} さんが更新。最新の内容を表示").format(who=who)))
         else:
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
-                "開いている記録を {who} さんが更新しました。このまま「更新」しても上書きはしません（Esc で閉じて開き直すと最新の内容）").format(who=who)))
+                "開いている記録を {who} さんが更新。このまま「更新」しても上書きしない（Esc で閉じて開き直すと最新の内容）").format(who=who)))
 
     def reload_taxonomy(self) -> None:
         """Reads the classification again from the store (others may have changed it), and the 備考's glossary."""
-        self.do(self.tr("分類の読み込み"), lambda b: b.reload_taxonomy())
+        self.do(self.tr("分類の取得"), lambda b: b.reload_taxonomy())
         self.context.glossary.read(force=True)
 
     def _merge_chosen(self) -> None:
@@ -1167,19 +1162,19 @@ class ObservationDock(
         into = self.merge_select.currentData()
         if flow is None or not into:
             return
-        if not ask_no(self, self.tr("統合"), self.tr("「{a}」の記録 {n} 件を「{b}」の記録にしますか？元に戻すには記録を 1 件ずつ直す必要があります。").format(
-                a=flow.name, n=len(flow.observations), b=self.merge_select.currentText())):
+        if not ask_no(self, self.tr("統合"), self.tr("「{a}」の記録 {n} 件を「{b}」に統合。元に戻すには 1 件ずつ修正が必要").format(
+                a=flow.name, n=len(flow.observations), b=self.merge_select.currentText()), yes=self.tr("統合")):
             return
         self.chosen = into
         self.do(self.tr("統合"), lambda b: b.merge(flow.object_id, into))
 
     def ask_remove(self, records: list[Observation]) -> bool:
-        """Asks before deleting the chosen records (いいえ by default)."""
+        """Asks before deleting the chosen records (取消 by default)."""
         things = len({o.object_id for o in records})
-        what = self.tr("選んだ記録 {n} 件（モノ {m} 件）を削除しますか？").format(n=len(records), m=things)
-        how = (self.tr("この保存先では記録が完全に消え、元に戻せません。") if self.book.removes_for_good()
-               else self.tr("「詳細」の「削除済みも表示」から復元できます。"))
-        return ask_no(self, self.tr("選んだ記録の削除"), what + "\n\n" + how)
+        what = self.tr("選んだ記録 {n} 件（モノ {m} 件）を削除").format(n=len(records), m=things)
+        how = (self.tr("この保存先では完全に消え、復元できない") if self.book.removes_for_good()
+               else self.tr("「詳細 ▸ 削除済みも表示」で復元できる"))
+        return ask_no(self, self.tr("選んだ記録の削除"), what + "\n\n" + how, yes=self.tr("削除"))
 
     def remove_selected(self, records: Optional[list[Observation]] = None, ask: bool = True) -> Any:
         """Deletes the chosen records (a thing's row: all its records) after asking; what went through and what not is told."""

@@ -238,7 +238,7 @@ def handover_text(d: HandoverData, s: HandoverSettings) -> str:
     if d.assignments is not None:
         lines += assignments_section(d, s) + [""]
     if d.problems:
-        lines += ["■ 読み込めなかったもの"] + [f"  {p}" for p in d.problems] + [""]
+        lines += ["■ 取得できなかったもの"] + [f"  {p}" for p in d.problems] + [""]
     memo = d.memo.strip()
     lines += ["■ 申し送り"] + ([f"  {line}" for line in memo.splitlines()] if memo else ["  なし"])
     return "".join(line + s.newline for line in lines)
@@ -305,7 +305,7 @@ def keep_memo(client: EsriClient, table: EsriSource, text: str, d: HandoverData,
     r = (client.apply_edits(table.url, adds=[{"attributes": {k: fit_value(v, types[k]) for k, v in values.items() if k in types}}],
                             token=token).add_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError(f"引き継ぎメモの保存の失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
+        raise EsriError(f"引き継ぎメモの保存に失敗: {(r.get('error') or {}).get('description') or '理由不明'}")
     return cut
 
 

@@ -358,7 +358,7 @@ def summary_cover(plans, targets, problems_text: str) -> str:
         scenes = f"全 {len(shots)} シーン" + (f"（うち {len(shared)} シーンで {sum(shared)} 地点をまとめて撮像）" if shared else "") + "。"
     ranked = "優先度の高い対象から撮像を割り当て。" if len({t.priority for t in targets}) > 1 else ""
     busy = f"撮像間隔・1 日の上限のため見送ったパス {blocked} 回。" if blocked else ""
-    return f"{summary}。{scenes}{ranked}{busy}行を選ぶと、その回と同じ対象の他の回（番号つき）を地図に表示{problems_text}"
+    return f"{summary}。{scenes}{ranked}{busy}行を選ぶと、その回と同じ対象のほかの回（番号つき）を地図に表示{problems_text}"
 
 
 NO_OPPORTUNITY = "期間内に撮像できる機会なし。期間の延長、またはオフナディア角・入射角・軌道・向きの制限や日照条件の見直しが必要"

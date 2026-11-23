@@ -370,13 +370,13 @@ def test_a_service_out_of_reach_is_logged_as_a_line_not_a_warning():
     QgsApplication.messageLog().messageReceived.connect(lambda m, tag, level: logs.append((tag, level, m)))
 
     def work(task):
-        raise EsriError("接続不可（https://x.example/FeatureServer/0）")
+        raise EsriError("接続できない（https://x.example/FeatureServer/0）")
 
-    run_task("衛星カタログの読み込み", work, failed=failed.append)
+    run_task("衛星カタログの取得", work, failed=failed.append)
     assert wait_for(lambda: failed)
-    assert failed == ["接続不可（https://x.example/FeatureServer/0）"]
+    assert failed == ["接続できない（https://x.example/FeatureServer/0）"]
     mine = [(level, m) for tag, level, m in logs if tag == "MIKAGE"]
-    assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの読み込み: 接続不可（https://x.example/FeatureServer/0）")]
+    assert mine == [(Qgis.MessageLevel.Info, "衛星カタログの取得: 接続できない（https://x.example/FeatureServer/0）")]
 
 
 def test_every_service_of_the_settings_can_be_given_a_sign_in():
@@ -425,11 +425,11 @@ def test_a_settings_url_that_cannot_be_read_falls_back_to_the_last_one_read(monk
         assert wait_for(lambda: not context.loading)
         assert context.config.request_stores[0].token == "SECRET"
         assert "SECRET" not in QgsSettings().value("mikage/config_cache", "")
-        answers["next"] = EsriError("接続不可")
+        answers["next"] = EsriError("接続できない")
         context.reload()
         assert wait_for(lambda: not context.loading)
         assert context.config.request_stores[0].label == "台帳" and context.config.request_stores[0].token is None
-        assert context.problems[0].startswith("設定ファイルの取得不可（接続不可）。前回")
+        assert context.problems[0].startswith("設定ファイルの取得に失敗（接続できない）。前回")
     finally:
         settings.set_config_source("")
         QgsSettings().remove("mikage/config_cache")

@@ -37,7 +37,7 @@ def load_sensor_modes(client: EsriClient, catalogs: Sequence[SensorCatalogConfig
         try:
             rows = client.query_all(catalog.url, catalog.where or "1=1", token_for(catalog.url, catalog.token), geometry=False, cancelled=cancelled)
         except Exception as error:  # noqa: BLE001 (reported, the others still read)
-            problems.append(f"{catalog.label} の読み込みに失敗（{error}）")
+            problems.append(f"{catalog.label} の取得に失敗（{error}）")
             continue
         for row in rows:
             mode = sensor_mode_of(row.get("attributes") or {}, catalog)

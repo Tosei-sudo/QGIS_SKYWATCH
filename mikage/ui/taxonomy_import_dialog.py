@@ -129,7 +129,7 @@ class TaxonomyImportDialog(QDialog):
         hl = QVBoxLayout(how)
         self.add_mode = QRadioButton(self.tr("追加・更新: 表の分類を加え、値のある欄だけ書き換える。表にない分類はそのまま残す"))
         self.add_mode.setChecked(True)
-        self.replace_mode = QRadioButton(self.tr("置き換え: 表のとおりにする。表にない分類は削除する（記録のある分類は残す）"))
+        self.replace_mode = QRadioButton(self.tr("置き換え: 表のとおりに変更。表にない分類は削除（記録のある分類は残す）"))
         self.add_mode.toggled.connect(lambda _on: self._invalidate())
         hl.addWidget(self.add_mode)
         hl.addWidget(self.replace_mode)
@@ -229,7 +229,7 @@ class TaxonomyImportDialog(QDialog):
                 if self.file_path:
                     self.columns, self.rows = tio.read_file(self.file_path, self.sheet.currentText() if sheets else None)
                     self.source_name = os.path.basename(self.file_path) + (f"（{self.sheet.currentText()}）" if sheets else "")
-                    note = self.tr("{r:,} 行・{c} 列を読みました（1 行目を列名とみなす）").format(r=len(self.rows), c=len(self.columns))
+                    note = self.tr("{r:,} 行・{c} 列を読み込み（1 行目を列名とみなす）").format(r=len(self.rows), c=len(self.columns))
                 else:
                     note = self.tr("ファイルを選ぶ（CSV は UTF-8 か Shift_JIS、Excel は 1 行目が列名）")
             else:
@@ -237,7 +237,7 @@ class TaxonomyImportDialog(QDialog):
                 if isinstance(layer, QgsVectorLayer) and layer.isValid():
                     self.columns, self.rows = tio.layer_table(layer, self.selected_only.isChecked())
                     self.source_name = layer.name()
-                    note = self.tr("{r:,} 件・{c} 列を読みました").format(r=len(self.rows), c=len(self.columns))
+                    note = self.tr("{r:,} 件・{c} 列を読み込み").format(r=len(self.rows), c=len(self.columns))
                 else:
                     note = self.tr("レイヤーを選ぶ（Esri や Oracle の表、CSV を読み込んだレイヤーも）")
         except (OSError, ValueError, RuntimeError) as error:
@@ -300,14 +300,14 @@ class TaxonomyImportDialog(QDialog):
         self.uses_note.setVisible(bool(problem))
         names = ti.level_names_of(self.columns, self.uses)
         if ti.Use(ti.LEVEL_NAMES) in self.uses:
-            self.level_names.setText(self.tr("列名を大分類の階層名にする（「階層名」の列があるので、その列の値を使う）"))
+            self.level_names.setText(self.tr("列名を大分類の階層名に設定（「階層名」の列があるので、その列の値を使う）"))
             self.level_names.setEnabled(False)
         elif names and any(ti.generic_level_name(n) for n in names):
-            self.level_names.setText(self.tr("列名を大分類の階層名にする（列名が「分類1」などの番号だけなので使わない）"))
+            self.level_names.setText(self.tr("列名を大分類の階層名に設定（列名が「分類1」などの番号だけなので使わない）"))
             self.level_names.setEnabled(False)
         else:
             shown = " › ".join(names) if names else self.tr("階層の列の名前")
-            self.level_names.setText(self.tr("列名を、階層名がまだない大分類の階層名にする（{n}）").format(n=shown))
+            self.level_names.setText(self.tr("列名を、階層名がまだない大分類の階層名に設定（{n}）").format(n=shown))
             self.level_names.setEnabled(bool(names))
         self._invalidate()
 
@@ -346,7 +346,7 @@ class TaxonomyImportDialog(QDialog):
             return False
         if not self.dock.records_ready(self.try_run):
             # Not read yet (no image chosen in 「観測記録」): tried once they are (the classes records use are kept).
-            self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試行）"))
+            self.status.setText(self.tr("観測記録を取得中…（取得後に試行）"))
             return True
         self._running = True
         self.try_button.setEnabled(False)
@@ -382,7 +382,7 @@ class TaxonomyImportDialog(QDialog):
         self.try_button.setEnabled(True)
         self.import_button.setEnabled(plan.changed)
         if plan.changed:
-            self.status.setText(self.tr("試行では保存していない。「取り込む」で保存する（取り込む前の分類体系は、自動で控えの JSON に残す）"))
+            self.status.setText(self.tr("試行では未保存。「取り込む」で保存（取り込む前の分類体系は、自動で控えの JSON に保存）"))
         else:
             self.status.setText(self.tr("取り込む変更なし（分類体系は表のとおり）"))
         self._render()
@@ -439,9 +439,9 @@ class TaxonomyImportDialog(QDialog):
         removed = plan.removed()
         if confirm and removed:
             names = "・".join(c.kind for c in removed[:5]) + (self.tr(" ほか {n} 件").format(n=len(removed) - 5) if len(removed) > 5 else "")
-            question = self.tr("表にない分類 {n} 件（{k}）を削除します。記録のある分類は残します。取り込む前の分類体系は控えの JSON に残します。"
-                               "取り込みますか？").format(n=len(removed), k=names)
-            if not ask_no(self, self.tr("分類体系の取り込み（置き換え）"), question):
+            question = self.tr("表にない分類 {n} 件（{k}）を削除して取り込み。"
+                               "記録のある分類は残り、取り込む前の分類体系は控えの JSON に保存").format(n=len(removed), k=names)
+            if not ask_no(self, self.tr("分類体系の取り込み（置き換え）"), question, yes=self.tr("取り込み")):
                 return False
         tried = plan.signature()
         self._running = True

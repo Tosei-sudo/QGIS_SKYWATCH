@@ -93,7 +93,7 @@ def load_genai(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         try:
             import onnxruntime_genai as og  # noqa: PLC0415
         except ImportError as error:
-            raise RuntimeMissing(f"同梱の onnxruntime-genai を読み込めず（{error}）。{install_hint(system)}") from error
+            raise RuntimeMissing(f"同梱の onnxruntime-genai の読み込みに失敗（{error}）。{install_hint(system)}") from error
     if og is None:
         raise RuntimeMissing(f"文章の手伝いに必要な onnxruntime-genai なし。{install_hint(system)}")
     try:
@@ -193,7 +193,7 @@ def unpacked(zip_path: str, root: str, source: str = "") -> str:
     try:
         target = _made(root, name, fill)
     except zipfile.BadZipFile as error:
-        raise AiError(f"モデルの zip を開けず（{os.path.basename(zip_path)}: {error}）") from error
+        raise AiError(f"モデルの zip を開けない（{os.path.basename(zip_path)}: {error}）") from error
     _forget_older(root, tag, target)
     found = config_folder(target)
     if found is None:
@@ -270,7 +270,7 @@ class GenAiWriter:
             self.model = og.Model(config)
             self.tokenizer = og.Tokenizer(self.model)
         except Exception as error:  # noqa: BLE001
-            raise AiError(f"モデルを読み込めず（{os.path.basename(folder)}: {str(error).splitlines()[0] if str(error) else error}）") from error
+            raise AiError(f"モデルの読み込みに失敗（{os.path.basename(folder)}: {str(error).splitlines()[0] if str(error) else error}）") from error
         self.context_length = 4096
         #: Its size (billions of parameters, from its settings; None when they do not say).
         self.params: Optional[float] = None
@@ -588,7 +588,7 @@ class TextAssistant(QObject):
         t = s.task(task) if s is not None else None
         model = s.model_for(task) if s is not None else None
         if t is None or model is None:
-            failed(self.tr("設定ファイルの textAssist.tasks に {t} のモデルなし").format(t=task))
+            failed(self.tr("{t} のモデルが未設定（管理者に連絡: textAssist.tasks）").format(t=task))
             return None
         if not self.enabled:
             failed(self.tr("生成 AI の機能を使わない設定（「担当と個人設定…」の「個人の設定」）"))

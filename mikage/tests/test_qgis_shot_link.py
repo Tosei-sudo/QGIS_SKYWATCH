@@ -111,12 +111,12 @@ def test_link_an_image_to_a_shot_by_hand(plugin, monkeypatch):
 
     # IMG-B instead: asked first (another shot's image, and this shot's image replaced); いいえ keeps things as they were.
     asked = []
-    monkeypatch.setattr(shot_link_dialog, "ask_no", lambda parent, title, text: asked.append(text) or False)
+    monkeypatch.setattr(shot_link_dialog, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     linking.image_table.selectRow(1)
     linking.link()
     assert len(asked) == 1 and "IMG-A" in asked[0] and "呉" in asked[0]
     assert linking.task is None and _attrs(history, "REQ_ID", "R-1")["IMAGE_ID"] == "IMG-A"
-    monkeypatch.setattr(shot_link_dialog, "ask_no", lambda parent, title, text: True)
+    monkeypatch.setattr(shot_link_dialog, "ask_no", lambda parent, title, text, **_k: True)
     linking.link()
     assert wait_for(lambda: linking.task is None and linking.status.text().startswith("画像 IMG-B を")), linking.status.text()
     assert _attrs(history, "REQ_ID", "R-1")["IMAGE_ID"] == "IMG-B" and _attrs(shots, "SHOT_ID", "X-1")["IMAGE_ID"] == "IMG-B"

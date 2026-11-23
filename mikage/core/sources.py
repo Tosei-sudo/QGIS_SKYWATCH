@@ -39,7 +39,7 @@ def esri_source_of(v: Any, at: str, defaults: dict[str, str], problems: list[str
     if is_record(v.get("fields")):
         for k, name in v["fields"].items():
             if k not in defaults:
-                problems.append(f"{at}.fields.{k} は使用不可の役割（{'・'.join(defaults)}）")
+                problems.append(f"{at}.fields.{k} は使えない役割（{'・'.join(defaults)}）")
             elif is_name(name):
                 fields[k] = name
             else:

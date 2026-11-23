@@ -577,7 +577,7 @@ def test_notices_tab_makes_a_mail_of_the_rows(plugin, monkeypatch):
     QApplication.clipboard().clear()
     feed.mail_button.click()
     body = parse_qs(urlsplit(opened[-1]).query)["body"][0]
-    assert len(opened[-1]) <= 700 and body == "船A|停泊\r\n船B|航行\r\n（ほか 1 件省略。全文はクリップボードから貼り付けてください）\r\n以上"
+    assert len(opened[-1]) <= 700 and body == "船A|停泊\r\n船B|航行\r\n（ほか 1 件省略。全文はクリップボードから貼り付け）\r\n以上"
     assert QApplication.clipboard().text() == f"船A|停泊\r\n船B|航行\r\n{long_text}\r\n以上"
     assert "3 件のうち 2 件だけ" in iface.bar.currentItem().text()
     # The mail program not opened: the text on the clipboard, a warning.
@@ -586,5 +586,5 @@ def test_notices_tab_makes_a_mail_of_the_rows(plugin, monkeypatch):
     QApplication.clipboard().clear()
     feed.mail_button.click()
     assert QApplication.clipboard().text().startswith("船A|停泊")
-    assert "開けなかった" in feed.status.text() and recorded[-1][3]["result"] == "error"
-    assert "開けなかった" in iface.bar.currentItem().text()
+    assert "起動に失敗" in feed.status.text() and recorded[-1][3]["result"] == "error"
+    assert "起動に失敗" in iface.bar.currentItem().text()

@@ -132,9 +132,9 @@ def satrec_of(sat: SatelliteSpec):
     try:
         orbit = Orbit(sat.tle1, sat.tle2)
     except Exception:  # noqa: BLE001 (any unreadable TLE)
-        return f"{sat.name}: TLE の読み込み不可"
+        return f"{sat.name}: TLE を読み込めない"
     if not orbit.ok:
-        return f"{sat.name}: TLE の読み込み不可"
+        return f"{sat.name}: TLE を読み込めない"
     return orbit
 
 
@@ -271,7 +271,7 @@ def plan_access(sats: Sequence[SatelliteSpec], targets: Sequence[PlanTarget], op
             vxl, vyl, vzl = vxs.tolist(), vys.tolist(), vzs.tolist()
             valid = ~np.isnan(xs)
             if not valid.any():
-                problems.append(f"{sat.name}: 軌道の計算不可（TLE が古すぎるか、落下済みの可能性あり）")
+                problems.append(f"{sat.name}: 軌道を計算できない（TLE が古すぎるか、落下済みの可能性あり）")
                 spans = None
             else:
                 above = rs > POLAR_RADIUS

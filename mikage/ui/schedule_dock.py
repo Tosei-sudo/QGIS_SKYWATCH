@@ -37,7 +37,7 @@ from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, Qt, QTime, QTim
 from qgis.PyQt.QtGui import QBrush, QColor, QFont, QStandardItem, QStandardItemModel, QTextCharFormat
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCalendarWidget, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QTableView,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QPushButton, QTableView,
 )
 
 from ..core.request.api import (
@@ -56,7 +56,7 @@ from ..core.request.api import companions, shot_text, shot_tip
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, plain_label, plain_tip
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
@@ -259,15 +259,13 @@ class ScheduleDock(PluginDock):
         layout.addLayout(answer)
         more = FlowLayout()
         self.import_button = QPushButton(self.tr("結果ファイルの取り込み…"))
-        self.import_button.setToolTip(self.tr("システムから返ってきた採否のファイル（requestExports の resultFile）を読み、"
-                                              "採用・不採用と要求外の計画を記録。表示中の日でなく、ファイルの行の日"
-                                              "（対象日、なければ撮像予定の日）に記録する"))
+        self.import_button.setToolTip(self.tr("システムから返ってきた採否のファイルを読み込み、採用・不採用と要求外の計画を記録（表示中の日でなく、ファイルの行の日に記録）"))
         self.import_button.clicked.connect(lambda: self.import_file())
         self.add_button = QPushButton(self.tr("要求外を追加…"))
         self.add_button.setToolTip(self.tr("依頼していない計画（システム側の定常の撮像など）を手で追加"))
         self.add_button.clicked.connect(lambda: self.open_unrequested())
         self.delete_button = QPushButton(self.tr("削除"))
-        self.delete_button.setToolTip(self.tr("選んだ要求外の計画を消す（依頼の行は消さない）"))
+        self.delete_button.setToolTip(self.tr("選んだ要求外の計画を削除（依頼の行は残る）"))
         self.delete_button.clicked.connect(lambda: self.delete_unrequested())
         for w in (self.import_button, self.add_button, self.delete_button):
             more.addWidget(w)
@@ -282,10 +280,9 @@ class ScheduleDock(PluginDock):
                                              "依頼の範囲はそれぞれの依頼のまま"))
         self.shots_on_map.toggled.connect(lambda _on: self.draw())
         self.layer_button = QPushButton(self.tr("レイヤーに出す"))
-        self.layer_button.setToolTip(self.tr("表示中の計画を一時レイヤー（依頼の範囲を状態で色分け）にする。"
-                                             "撮像の範囲があれば、もう 1 つのレイヤー（破線）にする"))
+        self.layer_button.setToolTip(self.tr("表示中の計画をレイヤーとして追加（依頼の範囲を状態で色分け。撮像の範囲は破線の別レイヤー）"))
         self.layer_button.clicked.connect(lambda: self.to_layer())
-        self.reload_button = QPushButton(self.tr("再読み込み"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
         self.reload_button.clicked.connect(lambda: self.reload(refresh=True))
         bottom.addWidget(self.on_map)
         bottom.addWidget(self.shots_on_map)
@@ -308,9 +305,9 @@ class ScheduleDock(PluginDock):
         self._fill_systems()
         self._forget()
         if self.store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
         elif not self.store.history:
-            self.status.setText(self.tr("撮像依頼の保存先に出力履歴（history）なし。撮像予定は出力履歴に記録する"))
+            self.status.setText(self.tr("出力履歴が未設定のため、撮像予定を記録できない（管理者に連絡: history）"))
         elif self.isVisible():
             self.reload(refresh=True)
 
@@ -408,7 +405,7 @@ class ScheduleDock(PluginDock):
         areas = None if refresh or not self._areas else self._areas
         ledger_groups = dict(self._ledger_groups) if areas is not None else {}
         read_table = refresh or not self.groups_read
-        self.status.setText(self.tr("{d} の計画を読み込み中…").format(d=day))
+        self.status.setText(self.tr("{d} の計画を取得中…").format(d=day))
 
         def work(task):
             rows = repo.load_day(day, task.isCanceled)
@@ -452,7 +449,7 @@ class ScheduleDock(PluginDock):
             if then:
                 then()
 
-        self._start(self.tr("撮像予定の読み込み"), work, done)
+        self._start(self.tr("撮像予定の取得"), work, done)
 
     def _mark_month(self, force: bool = False) -> None:
         """Marks the days of the month shown that have a plan (bold; green when something is in it)."""
@@ -605,10 +602,10 @@ class ScheduleDock(PluginDock):
             if len(self.shown) != len(self.rows):
                 text += self.tr("（表示 {n} 件）").format(n=len(self.shown))
             if self.missing_fields:
-                text += self.tr("。出力履歴に属性 {f} がないため採否は記録できない（tools/arcgis/create_tables.py で足す）").format(
+                text += self.tr("。採否は記録できない（管理者に連絡: 出力履歴の {f}）").format(
                     f="・".join(self.missing_fields))
             if self.shot_problem:
-                text += self.tr("。撮像の範囲を読めず（{m}）").format(m=self.shot_problem)
+                text += self.tr("。撮像の範囲を読めない（{m}）").format(m=self.shot_problem)
             if hit_count:
                 text += self.tr("。衛星の障害の影響あり {n} 件（予定は変えない。出し直すかは担当が判断）").format(n=hit_count)
             self.status.setText(text)
@@ -731,11 +728,11 @@ class ScheduleDock(PluginDock):
         if chosen:
             system = next((s for s in self.context.config.request_exports if s.system == chosen), None)
             if system is not None and system.result_file is None:
-                self.status.setText(self.tr("{s} に結果ファイルの設定（requestExports の resultFile）なし").format(s=system.label))
+                self.status.setText(self.tr("{s} は結果ファイルが未設定（管理者に連絡: resultFile）").format(s=system.label))
                 return None
             return system
         if not systems:
-            self.status.setText(self.tr("結果ファイルの設定（requestExports の resultFile）のあるシステムなし。採否は手入力で"))
+            self.status.setText(self.tr("結果ファイルを設定したシステムがない。採否は手入力（管理者に連絡: resultFile）"))
             return None
         if len(systems) == 1:
             return systems[0]
@@ -807,7 +804,7 @@ class ScheduleDock(PluginDock):
         else:
             lines = [self.tr("{s}・{d}・{f}").format(s=label, d=days[0], f=reading.source), self._tally_line(t)]
         if reading.shown and reading.shown not in reading.touched():
-            lines.append(self.tr("表示中の {s} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録する").format(s=reading.shown))
+            lines.append(self.tr("表示中の {s} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録").format(s=reading.shown))
         if t[NOT_IN_FILE]:
             lines.append(self.tr("出力したがファイルにない依頼 {n} 件: {what}").format(
                 n=t[NOT_IN_FILE], what=REJECTED if reading.missing_as == REJECTED else self.tr("不明のまま")))
@@ -816,7 +813,7 @@ class ScheduleDock(PluginDock):
                 n=len(reading.replaced), d=days_text(reading.days or days)))
         if reading.problems:
             lines += ["", self.tr("読めなかった行など:")] + reading.problems[:8] + (["…"] if len(reading.problems) > 8 else [])
-        return QMessageBox.question(self, self.tr("結果ファイルの取り込み"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
+        return ask_no(self, self.tr("結果ファイルの取り込み"), "\n".join(lines), yes=self.tr("取り込み"))
 
     def _save_reading(self, reading: Reading) -> None:
         repo = self.repository()
@@ -889,8 +886,7 @@ class ScheduleDock(PluginDock):
         rows = [r for r in (self.selected() if rows is None else rows) if r.result == UNREQUESTED and r.object_id is not None]
         if not rows or self.denied("schedule.answer"):
             return
-        if ask and QMessageBox.question(self, self.tr("削除"), self.tr("要求外の計画 {n} 件を消しますか").format(n=len(rows))) \
-                != QMessageBox.StandardButton.Yes:
+        if ask and not ask_no(self, self.tr("削除"), self.tr("要求外の計画 {n} 件を削除").format(n=len(rows)), yes=self.tr("削除")):
             return
         repo = self.repository()
         ids = [r.object_id for r in rows]
@@ -1083,7 +1079,7 @@ class UnrequestedDialog(QDialog):
             self.message.setText(self.tr("名称を入力"))
             return
         if self.system.currentData() is None:
-            self.message.setText(self.tr("設定ファイルにシステム（requestExports）なし"))
+            self.message.setText(self.tr("システムが未設定（管理者に連絡: requestExports）"))
             return
         planned = None
         if self.timed.isChecked():

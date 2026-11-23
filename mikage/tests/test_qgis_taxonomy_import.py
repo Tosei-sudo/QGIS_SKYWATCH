@@ -95,7 +95,7 @@ def test_a_csv_is_tried_then_taken_in_with_a_backup_kept(plugin, backups):  # no
     assert dialog.run_import(confirm=False)
     assert "船舶 > 支援船 > 補給艦" in kinds(book) and "その他" in kinds(book)
     assert dialog.summary.text().startswith("取り込み済み: ") and not dialog.import_button.isEnabled()
-    assert "表から取り込みました" in dialog.status.text() and "取り込む前の分類体系の控え" in dialog.status.text()
+    assert "表から取り込み: " in dialog.status.text() and "取り込む前の分類体系の控え" in dialog.status.text()
     [backup] = list(backups.glob("*.json"))
     assert json.loads(backup.read_text(encoding="utf-8"))[0]["name"] == "船舶"
     # The editor shows it.
@@ -120,10 +120,10 @@ def test_replacing_removes_classes_not_in_the_table_after_asking(plugin, backups
     removed = [c.kind for c in dialog.plan.removed()]
     assert "その他" in removed and "船舶 > 貨物船 > コンテナ船" not in removed
     asked = []
-    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, text: asked.append(text) or False)
+    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, text, **_k: asked.append(text) or False)
     assert not dialog.run_import()
     assert asked and "表にない分類" in asked[0] and "その他" in kinds(book)
-    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, _text: True)
+    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, _text, **_k: True)
     assert dialog.run_import()
     assert "その他" not in kinds(book) and "建物 > 格納庫" in kinds(book)
     # A change of mode throws the dry run away.

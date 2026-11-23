@@ -83,7 +83,7 @@ class ReportMap:
         try:
             extent = from_wgs84(crs).transformBoundingBox(box)
         except Exception as error:  # noqa: BLE001
-            self.say(f"報告書の地図の作成不可: {error}")
+            self.say(f"報告書の地図の作成に失敗: {error}")
             self.done(None, None)
             return
         # As the viewer: a margin of 8 % (at least 200 m).
@@ -106,7 +106,7 @@ class ReportMap:
             return
         image = job.renderedImage()
         if image.isNull():
-            self.say("報告書の地図の作成不可: 描画失敗")
+            self.say("報告書の地図の描画に失敗")
             self.done(None, None)
             return
         settings = self.settings
@@ -233,10 +233,10 @@ class ReportDialog(QDialog):
         if not self.book.scoped:
             return None
         if self.book.report_query(o).everything():
-            return self.tr("期間か分類を指定（共有の保存先の全件は読み込まない）")
+            return self.tr("期間か分類を指定（共有の保存先の全件は取得しない）")
         if self._read_for != self._key(o):
             self._ask_timer.start()
-            return self.tr("観測記録を読み込み中…")
+            return self.tr("観測記録を取得中…")
         return None
 
     def _ask(self) -> None:
@@ -260,9 +260,9 @@ class ReportDialog(QDialog):
         def failed(message: str) -> None:
             self._asking = None
             self._then = None
-            self.count_label.setText(self.tr("読み込みの失敗: {m}").format(m=message))
+            self.count_label.setText(self.tr("取得に失敗: {m}").format(m=message))
 
-        self.dock.fetch(self.tr("報告書の記録の読み込み"), lambda b: b.read_for_report(o), done, failed)
+        self.dock.fetch(self.tr("報告書の記録の取得"), lambda b: b.read_for_report(o), done, failed)
 
     def options(self) -> ReportOptions:
         """What the form says."""

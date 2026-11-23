@@ -197,16 +197,16 @@ class ObservationApi:
     def _b(self) -> ObservationBook:
         b = self._book()
         if b is None:
-            raise RuntimeError("観測記録は使用不可")
+            raise RuntimeError("観測記録は使えない")
         if not b.loaded:
-            self._run("観測記録の読み込み", lambda x: x.reload())
+            self._run("観測記録の取得", lambda x: x.reload())
         if b.needs_around():
-            self._run("観測記録の読み込み", lambda x: x.read_around())
+            self._run("観測記録の取得", lambda x: x.read_around())
         return b
 
     def _fetch(self, b: ObservationBook, query: RecordQuery) -> list[Observation]:
         """The records of a query: asked of a shared store (raising what it raised), among those read for a local one."""
-        return self._run("観測記録の読み込み", lambda x: x.fetch(query))
+        return self._run("観測記録の取得", lambda x: x.fetch(query))
 
     def _record(self, b: ObservationBook, record_id: Any) -> Observation:
         if b.scoped and not any(o.id == record_id for o in b.records):
@@ -260,7 +260,7 @@ class ObservationApi:
         path = path_of(kind) if kind is not None else None
         if b.scoped and path:
             of_kind = self._fetch(b, RecordQuery(kinds=(kind_of(path),), living=True))
-            self._run("観測記録の読み込み", lambda x: x.fetch_things(o.object_id for o in of_kind))
+            self._run("観測記録の取得", lambda x: x.fetch_things(o.object_id for o in of_kind))
         return [flow_out(f) for f in b.flows() if not path or within(f.kind, path)]
 
     def observation_images(self) -> list[dict[str, Any]]:
@@ -270,7 +270,7 @@ class ObservationApi:
     def observe_image(self, image_id: str) -> bool:
         """Records on this image from now on."""
         if not self._b().go_to(str(image_id)):
-            raise LookupError(f"画像「{image_id}」なし（observation_images() で一覧可能）")
+            raise LookupError(f"画像「{image_id}」なし（observation_images() で一覧できる）")
         return True
 
     def confidences(self) -> list[dict[str, Any]]:
@@ -284,7 +284,7 @@ class ObservationApi:
         if image is not None:
             self._image(b, image)
             if b.needs_around(image):
-                self._run("観測記録の読み込み", lambda x: x.read_around(image))
+                self._run("観測記録の取得", lambda x: x.read_around(image))
         found = b.candidates(x, y, _str(kind, "kind") or "", _maybe_num(length, "length", 0), _maybe_num(heading, "heading", -360, 360), image)
         return [{"objectId": c.object_id, "name": c.name, "kind": c.kind, "distance": js_round(c.distance),
                  "score": js_round(c.score * 1000) / 1000, "reasons": list(c.reasons), "record": record_out(c.source)} for c in found]
@@ -293,7 +293,7 @@ class ObservationApi:
         """The checked areas (of an image; a shared store without one: those read, of the images opened)."""
         b = self._b()
         if b.scoped and image is not None:
-            self._run("確認範囲の読み込み", lambda x: x.fetch_areas(image_ids=[str(image)]))
+            self._run("確認範囲の取得", lambda x: x.fetch_areas(image_ids=[str(image)]))
         return [area_out(a) for a in b.areas if (deleted or a.deleted_at is None) and (image is None or a.image_id == image)]
 
     # ---- writing -------------------------------------------------------
@@ -350,7 +350,7 @@ class ObservationApi:
         if not n:
             raise TypeError("name を指定")
         if b.scoped and not any(o.object_id == object_id for o in b.records):
-            self._run("観測記録の読み込み", lambda x: x.fetch_things([str(object_id)]))
+            self._run("観測記録の取得", lambda x: x.fetch_things([str(object_id)]))
         if not any(o.object_id == object_id for o in b.records):
             raise LookupError(f"モノ「{object_id}」なし")
         return self._said(b, self._run("モノの名前の変更", lambda bk: bk.rename(object_id, n)), "名前")
@@ -369,7 +369,7 @@ class ObservationApi:
         """Removes the local store's records and checked areas for good (only the deleted ones when asked)."""
         b = self._b()
         if not b.can_clear():
-            raise RuntimeError(f"{b.label} の記録は消去不可（ローカルのみ）")
+            raise RuntimeError(f"{b.label} の記録は消去できない（この PC の記録だけ）")
         records, areas = self._said(b, self._run("観測記録の消去", lambda bk: bk.clear(bool(deleted_only))), "消去")
         return {"observations": records, "areas": areas}
 
@@ -435,7 +435,7 @@ class ObservationApi:
         if save:
             plan = self._run("分類体系の取り込み", lambda x: x.import_taxonomy(request, None, backup))
             if plan is None:
-                raise RuntimeError(b.status or "分類体系の取り込みの失敗")
+                raise RuntimeError(b.status or "分類体系の取り込みに失敗")
         else:
             plan = self._run("分類体系の取り込みの試行", lambda x: x.plan_taxonomy_import(request))
         return {
@@ -458,7 +458,7 @@ class ObservationApi:
             start=_time(start, "start") if start is not None else None, end=_time(end, "end") if end is not None else None,
             kind=str(kind or ""), confidence=str(confidence or ""), map=bool(map), flows=bool(flows), areas=bool(areas), records=bool(records),
         )
-        self._run("報告書の記録の読み込み", lambda x: x.read_for_report(options))
+        self._run("報告書の記録の取得", lambda x: x.read_for_report(options))
         selection = b.report_selection(options)
         # The QGIS side draws the map; without it, none.
         html = self._report(options) if self._report is not None else b.report(options)

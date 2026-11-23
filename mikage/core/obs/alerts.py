@@ -485,7 +485,7 @@ def _field_of(v: Any, at: str, problems: list[str]) -> Optional[AlertField]:
         return _parts_of(v, at, problems)
     keyed = _OBJECT_KEY.match(source) if isinstance(source, str) and source not in SOURCES else None
     if source not in SOURCES and keyed is None:
-        problems.append(f"{at} の source「{js_string(source)}」は使用不可（{'・'.join(SOURCES)}、"
+        problems.append(f"{at} の source「{js_string(source)}」は使えない（{'・'.join(SOURCES)}、"
                         f"{'・'.join(o + '.属性名' for o in OBJECT_SOURCES)}、または text）")
         return None
     digits, level = v.get("digits"), v.get("level")
@@ -726,7 +726,7 @@ def score_settings_of(value: Any, at: str, problems: list[str]) -> Optional[Scor
         problems.append(f"{at}.weights は {{ {'・'.join(DEFAULT_WEIGHTS)}: 重み }} で指定")
     for k, w in (weights if is_record(weights) else {}).items():
         if k not in DEFAULT_WEIGHTS:
-            problems.append(f"{at}.weights.{k} は使用不可（{'・'.join(DEFAULT_WEIGHTS)}）")
+            problems.append(f"{at}.weights.{k} は使えない（{'・'.join(DEFAULT_WEIGHTS)}）")
         elif is_number(w) and math.isfinite(w) and w >= 0:
             score.weights[k] = float(w)
         else:

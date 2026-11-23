@@ -195,7 +195,7 @@ def load_satellite_names(client: EsriClient, tables: Sequence[AliasTableConfig],
             rows = client.query_all(table.url, table.where or "1=1", token_for(table.url, table.token),
                                     out_fields=f"{f['satellite']},{f['alias']}", geometry=False, cancelled=cancelled)
         except Exception as error:  # noqa: BLE001 (reported, the others still read)
-            problems.append(f"{table.label} の読み込みに失敗（{error}）")
+            problems.append(f"{table.label} の取得に失敗（{error}）")
             continue
         for row in rows:
             a = row.get("attributes") or {}

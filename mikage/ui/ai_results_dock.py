@@ -13,7 +13,7 @@ recorded.
 
 It follows the image: when an image is opened from the catalog, or a layer
 opened from it becomes the active one, its results are read (once per
-image; 「再読み込み」 reads them again) and the layers of the image before
+image; 「最新を取得」 reads them again) and the layers of the image before
 are replaced. A result already recorded (its tag in a record's note) is
 marked 取込済 and is not recorded again.
 
@@ -52,7 +52,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QCoreApplication, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
+    QAbstractItemView, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QWidget,
 )
 
 from ..core.ai.api import DetectModelConfig
@@ -71,7 +71,7 @@ from ..qgis_io.obs_images import IMAGE_ID, image_layers, observed_image
 from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, run_task
-from .docks import PluginDock, plain_label
+from .docks import PluginDock, ask_no, plain_label
 from .last_inputs import InputMemory
 from .list_views import column_menus
 
@@ -79,7 +79,7 @@ TITLE = "AI結果"
 #: The edits of a detection layer that read its results again.
 EDITS = ("featureAdded", "featuresDeleted", "attributeValueChanged", "geometryChanged", "editingStopped")
 #: The list's orders: for review (要確認 first, least sure first), as read.
-ORDERS = ("確認優先（確信度の低い順）", "読み込み順")
+ORDERS = ("確認優先（確信度の低い順）", "取得順")
 #: 「未取込をすべて取り込み」 asks first above this many.
 ASK_OVER = 20
 #: The list's column of the review state.
@@ -169,8 +169,8 @@ class AiResultsDock(PluginDock):
         head = QHBoxLayout()
         self.image_label = plain_label(QLabel())
         self.image_label.setWordWrap(True)
-        self.reload_button = QPushButton(_tr("再読み込み"))
-        self.reload_button.setToolTip(_tr("この画像の結果を読み直し"))
+        self.reload_button = QPushButton(_tr("最新を取得"))
+        self.reload_button.setToolTip(_tr("この画像の最新の結果を取得"))
         self.reload_button.clicked.connect(lambda: self.load(self.image_id, again=True))
         head.addWidget(self.image_label, 1)
         head.addWidget(self.reload_button)
@@ -350,7 +350,7 @@ class AiResultsDock(PluginDock):
         elif self.sources():
             self.image_label.setText(_tr("画像を開くか「物体検出（AI）」を実行すると、その画像の結果を表示（カタログ外の画像はファイル名で検索）"))
         else:
-            self.image_label.setText(_tr("「物体検出（AI）」を実行すると、その画像の結果を表示（外部AIの結果は設定ファイルの aiResultSources）"))
+            self.image_label.setText(_tr("「物体検出（AI）」を実行すると、その画像の結果を表示"))
         self.reload_button.setEnabled(bool(self.image_id))
 
     def load(self, image_id: Optional[str], again: bool = False, reveal: bool = False) -> None:
@@ -378,7 +378,7 @@ class AiResultsDock(PluginDock):
                 pass
         client = self.context.esri()
         tokens = {s.url: self.context.token_for(s.url, s.token) for s in sources}
-        self.status.setText(_tr("{id} の結果を読み込み中").format(id=image_id))
+        self.status.setText(_tr("{id} の結果を取得中").format(id=image_id))
 
         def work(task):
             feedback = current_feedback()
@@ -399,9 +399,9 @@ class AiResultsDock(PluginDock):
         def failed(message: str) -> None:
             self._task = None
             if image_id == self.image_id:
-                self.status.setText(_tr("読み込み失敗: {m}").format(m=message))
+                self.status.setText(_tr("取得に失敗: {m}").format(m=message))
 
-        self._task = run_task(_tr("AI結果の読み込み"), work, done, failed)
+        self._task = run_task(_tr("AI結果の取得"), work, done, failed)
 
     def withhold(self, why: str) -> None:
         """
@@ -456,7 +456,7 @@ class AiResultsDock(PluginDock):
         def failed(_message: str) -> None:
             self._reading_around = None
 
-        dock.fetch(_tr("まわりの記録の読み込み"), lambda b: b.read_around(image_id), done, failed)
+        dock.fetch(_tr("まわりの記録の取得"), lambda b: b.read_around(image_id), done, failed)
 
     def _refresh_imported(self, expand: bool = True) -> None:
         """What is recorded (and recorded as wrong) on the image; `expand`: and which rows that makes 取込済 (誤) too."""
@@ -610,7 +610,7 @@ class AiResultsDock(PluginDock):
             for row, (source, r) in enumerate(self.rows):
                 item = QTreeWidgetItem(["", source.label, r.cls, score_text(r.score), kind_for(r, source), r.name, "", ""])
                 if r.geometry is None:
-                    item.setToolTip(1, _tr("位置なし（取り込み不可）"))
+                    item.setToolTip(1, _tr("位置なし（取り込めない）"))
                 self.list.addTopLevelItem(item)
                 self._render_state(row)
             self._match()
@@ -800,11 +800,8 @@ class AiResultsDock(PluginDock):
         self._refresh_imported()
         todo = [i for i, (_s, r) in enumerate(self.rows) if r.tag not in self.imported and r.tag not in self.rejected]
         if confirm and len(todo) > ASK_OVER:
-            box = QMessageBox(QMessageBox.Icon.Question, _tr("未取込をすべて取り込み"),
-                              _tr("未取込 {n} 件を観測記録に取り込みますか？（誤検出は除外）").format(n=len(todo)),
-                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
-            box.setDefaultButton(QMessageBox.StandardButton.No)
-            if box.exec() != QMessageBox.StandardButton.Yes:
+            if not ask_no(self, _tr("未取込をすべて取り込み"), _tr("未取込 {n} 件を観測記録に取り込み（誤検出は除外）").format(n=len(todo)),
+                          yes=_tr("取り込み")):
                 return []
         return self.import_rows(todo)
 
@@ -824,10 +821,10 @@ class AiResultsDock(PluginDock):
         dock = self.observations()
         book = self._book()
         if dock is None or book is None:
-            self.status.setText(_tr("観測記録は使用不可"))
+            self.status.setText(_tr("観測記録は使えない"))
             return []
         if not book.loaded:
-            self.status.setText(_tr("観測記録の読み込み待ち"))
+            self.status.setText(_tr("観測記録の取得待ち"))
             return []
         image_id = self.image_id
         if not image_id or not any(i.id == image_id for i in book.images):
@@ -958,10 +955,10 @@ class AiResultsDock(PluginDock):
         dock = self.observations()
         book = self._book()
         if dock is None or book is None:
-            self.status.setText(_tr("観測記録は使用不可"))
+            self.status.setText(_tr("観測記録は使えない"))
             return []
         if not book.loaded:
-            self.status.setText(_tr("観測記録の読み込み待ち"))
+            self.status.setText(_tr("観測記録の取得待ち"))
             return []
         image_id = self.image_id
         if not image_id or not any(i.id == image_id for i in book.images):

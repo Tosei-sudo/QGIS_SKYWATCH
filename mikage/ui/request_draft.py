@@ -3,7 +3,7 @@
 row 「依頼文」 at the top of 撮像依頼の登録・編集 (not of a batch), shown only
 while the settings give the task a model (`textAssist.tasks`).
 
-A mail or chat text pasted there and 「欄の案を作る」: the named areas read
+A mail or chat text pasted there and 「欄の案を作成」: the named areas read
 first (`namedAreas` of the observation export or the 通報), the words read
 by code (dates, numbers, satellites, the words of each choice), the model
 asked only for the lines the code cannot write (the name, the places, …;
@@ -11,9 +11,9 @@ core/text_request.asked_keys: none for 「12月末まで延長」, then it is no
 asked) and its values kept only where the words give them a footing. The proposal shows under the text: one check box per item
 (all ticked), the places with the areas they can be (地名テーブル → 過去の
 依頼 → 座標 → 地名・住所検索; the model never makes a shape), what to check
-(確認), 「メモに依頼文を残す」. 「欄に入れる」 puts the ticked items in the
+(確認), 「メモに依頼文を残す」. 「欄に入力」 puts the ticked items in the
 fields (tinted until touched); with two places or more ticked (a new
-request) it reads 「n 件の依頼にする」 and opens the batch form (one request
+request) it reads 「n 件の依頼を作成」 and opens the batch form (one request
 per place, the rest as here). Nothing is saved until 「保存」.
 
 Editing a request: only what the text names is proposed (「12月末まで延長」:
@@ -74,7 +74,7 @@ class DraftHost:
             then([], "")
             return
         client, token = self.context.esri(), self.context.token_for(source.url, source.token)
-        run_task(_tr("地名の読み込み"), lambda _t: load_named_areas(client, source, token, max_age=600),
+        run_task(_tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=600),
                  lambda areas: then(list(areas), ""), lambda m: then([], m), hidden=True)
 
     def find_places(self, words: Sequence[str], then: Callable[[dict, list], None]) -> None:
@@ -121,7 +121,7 @@ class DraftPanel(ProposalPanel):
     """Under the text: the items proposed (each with a check box), the places and their areas, what to check."""
 
     def __init__(self, parent: Optional[QWidget] = None):
-        super().__init__(take=_tr("欄に入れる"), parent=parent)
+        super().__init__(take=_tr("欄に入力"), parent=parent)
         box: QVBoxLayout = self.layout()
         self.items = QWidget()
         self.items_box = QVBoxLayout(self.items)
@@ -134,9 +134,9 @@ class DraftPanel(ProposalPanel):
         box.insertWidget(2, self.areas)
         self.note_check = QCheckBox(self.tr("メモに依頼文を残す"))
         self.note_check.setChecked(True)
-        self.note_check.setToolTip(self.tr("依頼文を日付と一緒にメモの末尾に足す（どの文から作ったかが残る）"))
+        self.note_check.setToolTip(self.tr("依頼文を日付と一緒にメモの末尾に追加（どの文から作ったかが残る）"))
         box.insertWidget(4, self.note_check)
-        self.replace_button.setToolTip(self.tr("チェックした項目と範囲を欄に入れる（まだ保存しない）"))
+        self.replace_button.setToolTip(self.tr("チェックした項目と範囲を欄に入力（保存はまだ）"))
         self.checks: dict[str, QCheckBox] = {}
         self.rows: list[_AreaRow] = []
         self.editing = False
@@ -168,7 +168,7 @@ class DraftPanel(ProposalPanel):
         self._clear()
         self.draft_value, self.editing = draft, editing
         took = self.tr("（{s:.1f} 秒）").format(s=seconds) if seconds >= 0.05 else ""
-        self.label.setText(self.tr("案{took}: 入れる項目を選んで「欄に入れる」").format(took=took))
+        self.label.setText(self.tr("案{took}: 入れる項目を選んで「欄に入力」").format(took=took))
         self.label.setStyleSheet(OFFER_STYLE)
         for key, _label in ITEMS:
             if key in draft.values:
@@ -223,11 +223,11 @@ class DraftPanel(ProposalPanel):
     def _update(self) -> None:
         n = len(self.chosen())
         if n >= 2 and not self.editing:
-            self.replace_button.setText(self.tr("{n} 件の依頼にする").format(n=n))
-            self.replace_button.setToolTip(self.tr("地名ごとに 1 件の依頼を、まとめて登録する画面で開く（チェックした項目は全件に。まだ保存しない）"))
+            self.replace_button.setText(self.tr("{n} 件の依頼を作成").format(n=n))
+            self.replace_button.setToolTip(self.tr("地名ごとに 1 件ずつ、まとめて登録の画面で依頼を作成（チェックした項目は全件に入力。保存はまだ）"))
         else:
-            self.replace_button.setText(self.tr("欄に入れる"))
-            self.replace_button.setToolTip(self.tr("チェックした項目と範囲を欄に入れる（まだ保存しない）"))
+            self.replace_button.setText(self.tr("欄に入力"))
+            self.replace_button.setToolTip(self.tr("チェックした項目と範囲を欄に入力（保存はまだ）"))
         self.replace_button.setEnabled(bool(self.keys() or n))
 
 
@@ -249,11 +249,10 @@ class RequestDraftRow(QObject):
         self.edit = QPlainTextEdit()
         self.edit.setPlaceholderText(self.tr("メールやチャットの依頼文を貼り付け（例: 来週月曜から2週間、横須賀港を光学で毎日。雲30%以下、至急）"))
         self.edit.setFixedHeight(64)
-        self.button = QPushButton(self.tr("欄の案を作る"))
+        self.button = QPushButton(self.tr("欄の案を作成"))
         self.button.setAutoDefault(False)
-        self.button.setToolTip(self.tr("依頼文から名称・期間・頻度・優先度・条件・範囲の案を作り、下に出す（文章の手伝い。この PC の小さな生成 AI。"
-                                       "日付・数値・衛星名・選択肢の語は文から読み、モデルの値は文に手がかりのあるものだけ。"
-                                       "「欄に入れる」を押すまで欄は変わらない）"))
+        self.button.setToolTip(self.tr("依頼文から名称・期間・頻度・優先度・条件・範囲の案を作成（この PC の小さな生成 AI）。"
+                                       "「欄に入力」を押すまで欄は変わらない"))
         self.button.setEnabled(False)
         self.taken = QLabel()
         self.taken.setWordWrap(True)
@@ -331,7 +330,7 @@ class RequestDraftRow(QObject):
         self.waiting = True
         self.given = text
         self.taken.hide()
-        self.panel.writing(self.tr("地名を読み込み中…"))
+        self.panel.writing(self.tr("地名を取得中…"))
         today = self.host.today()
         request = self.form.request if self.editing else None
 
@@ -339,7 +338,7 @@ class RequestDraftRow(QObject):
             if not self.waiting or self.edit.toPlainText() != text:
                 return
             self.waiting = False
-            notes = [self.tr("地名テーブルを読めず（{m}）").format(m=problem)] if problem else []
+            notes = [self.tr("地名テーブルを読めない（{m}）").format(m=problem)] if problem else []
             if len(text.strip()) > TEXT_LIMIT:
                 notes.append(self.tr("依頼文は先頭 {n} 文字まで読む").format(n=TEXT_LIMIT))
             keys = asked_keys(text, today, request)
@@ -395,7 +394,7 @@ class RequestDraftRow(QObject):
             checks.append(caution)
         area_rows = [_AreaRow(w, choices) for w, choices in rows] if draft.area_asked else []
         if draft.empty and not any(r.choices for r in area_rows):
-            self.panel.say(self.tr("直すところなし（文に変更の手がかりなし）") if self.editing else self.tr("案を作れず（文から項目を読み取れず）"),
+            self.panel.say(self.tr("直すところなし（文に変更の手がかりなし）") if self.editing else self.tr("案の作成に失敗（文から項目を読み取れない）"),
                            checks)
             return
         self.panel.offer_draft(draft, area_rows, checks, seconds, self.editing)
@@ -418,6 +417,6 @@ class RequestDraftRow(QObject):
             self.host.open_batch(template, items, "、".join(names[:3]) + ("…" if len(names) > 3 else ""))
             return
         n = self.form.take_draft(draft, keys, chosen[0] if chosen else None, text, note)
-        self.taken.setText(self.tr("依頼文から {n} 項目を入れた（色の付いた欄。保存はまだ）").format(n=n))
+        self.taken.setText(self.tr("依頼文から {n} 項目を入力（色の付いた欄。保存はまだ）").format(n=n))
         self.taken.show()
 

@@ -21,7 +21,7 @@ from typing import Callable, Optional
 from qgis.PyQt.QtCore import QDateTime, Qt
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
-    QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..core import audit, edit_stamp
@@ -36,7 +36,7 @@ from ..core.obs.api import areas_at, points_of
 from ..core.obs.api import AlertLogRepository, RecordQuery
 from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
-from .docks import plain_label, plain_tip
+from .docks import ask_no, plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
 from .text_assist_ui import NoteTranslator
@@ -121,14 +121,12 @@ class AlertDialog(QDialog):
         # 英訳 (`textAssist.tasks.translate`): the 備考 in English for a format that writes `note.en` (tsudo 2026-11-19).
         self.translator = NoteTranslator(dock.context.text_assist, self._say, self)
         self.translate_button = QPushButton(self.tr("備考を英訳"))
-        self.translate_button.setToolTip(self.tr("一覧の記録の備考を英語に訳し、フォーマットの note.en に入れる（文章の手伝い。この PC の生成 AI。"
-                                                 "訳は行で確かめてから送る。記録には書き込まない）"))
+        self.translate_button.setToolTip(self.tr("一覧の記録の備考を英語に翻訳（この PC の生成 AI）。訳は行で確認してから送信"))
         self.translate_button.clicked.connect(lambda _on=False: self.translate_notes())
         row.addWidget(self.translate_button)
         row.addStretch(1)
         self.drop_button = QPushButton(self.tr("選択を一覧から削除"))
-        self.drop_button.setToolTip(self.tr("選んだ行を送らずに一覧から外す（通報テーブルには何もしない。"
-                                            "条件に合う記録は次の「抽出」でまた出る）"))
+        self.drop_button.setToolTip(self.tr("選んだ行を送らずに一覧から除外（条件に合う記録は次の「抽出」でまた表示）"))
         self.drop_button.clicked.connect(lambda _on=False: self.drop_rows())
         row.addWidget(self.drop_button)
         m.addLayout(row)
@@ -172,7 +170,7 @@ class AlertDialog(QDialog):
         form.addRow(self.tr("フォーマット"), self.log_format)
         g.addLayout(form)
         row = QHBoxLayout()
-        self.log_button = QPushButton(self.tr("読み込み"))
+        self.log_button = QPushButton(self.tr("取得"))
         self.log_button.clicked.connect(self.read_log)
         row.addWidget(self.log_button)
         row.addStretch(1)
@@ -191,7 +189,7 @@ class AlertDialog(QDialog):
         row = QHBoxLayout()
         self.log_copy = QPushButton(self.tr("選択をコピー"))
         self.log_copy.clicked.connect(self.copy_log)
-        self.log_remove = QPushButton(self.tr("選択を削除（再通報可にする）"))
+        self.log_remove = QPushButton(self.tr("選択を削除（再通報できる）"))
         self.log_remove.clicked.connect(lambda _on=False: self.remove_log())
         row.addStretch(1)
         row.addWidget(self.log_copy)
@@ -262,12 +260,12 @@ class AlertDialog(QDialog):
         book = self.dock.book
         if book is not None and book.scoped and not read:
             # As it is on the server now.
-            self._say(self.tr("観測記録を読み込み中…"))
-            self.dock.fetch(self.tr("観測記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=(record_id,))),
+            self._say(self.tr("観測記録を取得中…"))
+            self.dock.fetch(self.tr("観測記録の取得"), lambda b: b.fetch(RecordQuery(ids=(record_id,))),
                             lambda _r: self._go(record_id, True), lambda m: self._say(m))
             return
         if book is not None and not book.scoped and not self.dock.records_ready(lambda: self._go(record_id)):
-            self._say(self.tr("観測記録を読み込み中…"))
+            self._say(self.tr("観測記録を取得中…"))
             return
         o = book.record(record_id) if book else None
         if o is None:
@@ -285,7 +283,7 @@ class AlertDialog(QDialog):
             return
         if not book.scoped and not self.dock.records_ready(self.pick):
             # Not read yet (no image chosen in 「観測記録」): picked once they are.
-            self._say(self.tr("観測記録を読み込み中…（読み終えたら抽出）"))
+            self._say(self.tr("観測記録を取得中…（取得後に抽出）"))
             return
         client = self.dock.context.esri()
         records, levels = list(book.records), book.confidences()
@@ -330,7 +328,7 @@ class AlertDialog(QDialog):
 
         def failed(message: str) -> None:
             self.pick_button.setEnabled(True)
-            self._say(self.tr("抽出の失敗: {m}").format(m=message))
+            self._say(self.tr("抽出に失敗: {m}").format(m=message))
 
         self.pick_button.setEnabled(False)
         self._say(self.tr("抽出中…"))
@@ -435,7 +433,7 @@ class AlertDialog(QDialog):
         return fmt is not None and uses_source(fmt, "note.en")
 
     def translate_notes(self) -> bool:
-        """「備考を英訳」: the 備考 of the records listed in English (`note.en`), then the lines again; 「英訳を止める」 while it runs."""
+        """「備考を英訳」: the 備考 of the records listed in English (`note.en`), then the lines again; 「英訳を中止」 while it runs."""
         t = self.translator
         if t.running:
             t.cancel()
@@ -447,11 +445,11 @@ class AlertDialog(QDialog):
 
         def failed(message: str) -> None:
             self.translate_button.setText(self.tr("備考を英訳"))
-            self._say(self.tr("英訳を中止") if message == "取消" else self.tr("英訳できず: {m}").format(m=message))
+            self._say(self.tr("英訳を中止") if message == "取消" else self.tr("英訳に失敗: {m}").format(m=message))
 
         started = t.translate([i.record.note for i in self.items], done, failed)
         if started and t.running:
-            self.translate_button.setText(self.tr("英訳を止める"))
+            self.translate_button.setText(self.tr("英訳を中止"))
         return started
 
     def _render_lines(self) -> None:
@@ -461,7 +459,7 @@ class AlertDialog(QDialog):
         for item in self.items:
             item.note_en = self.translator.known.get(item.record.note.strip(), "") if item.record.note else ""
         missing = bool(self.translator.missing(i.record.note for i in self.items))
-        # 「英訳を止める」 while it runs; else only while some 備考 has no English yet.
+        # 「英訳を中止」 while it runs; else only while some 備考 has no English yet.
         self.translate_button.setEnabled(self.translator.running or missing)
         if english and missing and not self.translator.running:
             self._say(self.tr("このフォーマットは備考の英訳（note.en）を使う: 「備考を英訳」で作成（未作成の行は空）"))
@@ -578,7 +576,7 @@ class AlertDialog(QDialog):
 
         def failed(message: str) -> None:
             self.send_button.setEnabled(True)
-            self._say(self.tr("通報テーブルへの記録の失敗（コピー・ファイル出力もせず）: {m}").format(m=message))
+            self._say(self.tr("通報の記録に失敗（コピーもファイル出力もなし）: {m}").format(m=message))
             self.dock.refresh_reported()  # some rows may have gone in
 
         self.send_button.setEnabled(False)
@@ -601,10 +599,10 @@ class AlertDialog(QDialog):
 
         def failed(message: str) -> None:
             self.log_button.setEnabled(True)
-            self._say(self.tr("通報記録の読み込みの失敗: {m}").format(m=message))
+            self._say(self.tr("通報記録の取得に失敗: {m}").format(m=message))
 
         self.log_button.setEnabled(False)
-        run_task(self.tr("通報記録の読み込み"), lambda _t: repo.load_log(start, end), finished, failed)
+        run_task(self.tr("通報記録の取得"), lambda _t: repo.load_log(start, end), finished, failed)
 
     def _shown_log(self) -> list[LogRow]:
         name = self.log_format.currentData() or ""
@@ -637,9 +635,8 @@ class AlertDialog(QDialog):
         if s is None or not rows:
             self._say(self.tr("削除する行を選択"))
             return
-        if confirm and QMessageBox.question(
-                self, self.tr("通報記録の削除"),
-                self.tr("選択した {n} 行を通報テーブルから削除します（その記録は再び抽出されます）。").format(n=len(rows))) != QMessageBox.StandardButton.Yes:
+        if confirm and not ask_no(self, self.tr("通報記録の削除"),
+                                  self.tr("選んだ {n} 行を通報済みから削除（その記録は次の抽出でまた表示）").format(n=len(rows)), yes=self.tr("削除")):
             return
         repo = self.log_repository()
 
@@ -651,4 +648,4 @@ class AlertDialog(QDialog):
             self._say(self.tr("通報記録 {n} 行を削除").format(n=n))
 
         run_task(self.tr("通報記録の削除"), lambda _t: repo.remove_log(rows), finished,
-                 lambda m: self._say(self.tr("通報記録の削除の失敗: {m}").format(m=m)))
+                 lambda m: self._say(self.tr("通報記録の削除に失敗: {m}").format(m=m)))

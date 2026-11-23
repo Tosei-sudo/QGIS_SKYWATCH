@@ -27,16 +27,15 @@ class OutputsPart:
     """撮像計画ドックの書き出し."""
 
     def _later_actions(self) -> QHBoxLayout:
-        """「予定・通知…」 and 「臨時依頼にする」, and the row the first opens."""
+        """「予定・通知…」 and 「臨時依頼を作成」, and the row the first opens."""
         actions = QHBoxLayout()
         self.remind_button = QPushButton(self.tr("予定・通知…"))
         self.remind_button.setCheckable(True)
-        self.remind_button.setToolTip(self.tr("撮像前の通知・予定表（.ics）への保存"))
+        self.remind_button.setToolTip(self.tr("撮像前の通知を設定、予定表（.ics）に保存"))
         # What is to be taken goes to the ledger as a 臨時 request (tsudo, 2026-11-09: 撮像計画と撮像依頼は同じ業務):
         # from there the day's files, the systems' answers and whether it was taken, as every request.
-        self.request_button = QPushButton(self.tr("臨時依頼にする"))
-        self.request_button.setToolTip(self.tr("撮像機会の対象を、撮像依頼の台帳に臨時の依頼として登録する（範囲・その日・衛星を引き継ぎ、"
-                                               "依頼のフォームで確かめて保存）。出力・採否・撮れたかは撮像依頼の流れで"))
+        self.request_button = QPushButton(self.tr("臨時依頼を作成"))
+        self.request_button.setToolTip(self.tr("撮像機会の対象から臨時の撮像依頼を作成（範囲・日・衛星を引き継ぎ、依頼のフォームで確認して保存）"))
         menu = QMenu(self.request_button)
         self.request_chosen = menu.addAction(self.tr("選んだ撮像機会から"))
         self.request_chosen.triggered.connect(lambda: self.to_requests(all_shown=False))
@@ -59,7 +58,7 @@ class OutputsPart:
         notify.setToolTip(self.tr("一覧の撮像の前に、QGIS のメッセージバーで通知（QGIS の起動中のみ）"))
         notify.clicked.connect(self.set_reminders)
         ics = QPushButton(self.tr("予定表 (.ics)"))
-        ics.setToolTip(self.tr("一覧の撮像を予定表（iCalendar .ics）で保存。Outlook などに取り込み可能（設定した分前のアラーム付き）"))
+        ics.setToolTip(self.tr("一覧の撮像を予定表（.ics）に保存。Outlook などに取り込める（設定した分前のアラーム付き）"))
         ics.clicked.connect(lambda: self.save_ics())
         clear = QPushButton(self.tr("通知をすべて解除"))
         clear.setToolTip(self.tr("設定した撮像の通知をすべて取り消す（ほかの計画で設定したものも）"))

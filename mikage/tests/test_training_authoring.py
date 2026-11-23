@@ -122,23 +122,23 @@ def test_a_write_that_fails_says_why():
 
 def test_what_keeps_a_draft_from_being_written_and_what_is_worth_a_look():
     problems, notes = authoring.check(a_draft())
-    assert problems == [] and notes == ["「出す」に印がないため、作りかけとして書きます（練習の一覧には出ません）"]
+    assert problems == [] and notes == ["「出す」に印がないため、作りかけとして保存（練習の一覧には出ない）"]
     problems, _notes = authoring.check(a_draft(title=" ", image_id="", answers=[]))
-    assert problems[:3] == ["題名がありません", "画像がありません（画像 ID か画像のファイル）", "正解がありません（観測記録から取り込むか、地図で足してください）"]
+    assert problems[:3] == ["題名なし", "画像なし（画像 ID か画像のファイルを指定）", "正解なし（観測記録から取り込むか、地図で追加）"]
     # 測る: answers measured; 変化を見つける: the image before and what changed; 見分ける: a kind or an activity.
     problems, _ = authoring.check(a_draft(type=MEASURE))
-    assert problems == ["正解 2: 測る問題の正解に長さ・幅・向きがありません"]
+    assert problems == ["正解 2: 測る問題の正解に長さ・幅・向きなし"]
     problems, _ = authoring.check(a_draft(type=CHANGE))
-    assert problems[0] == "変化を見つける問題に前の画像がありません" and "正解 1: 変化（来た・継続・消失）がありません" in problems
+    assert problems[0] == "変化を見つける問題に前の画像なし" and "正解 1: 変化（来た・継続・消失）なし" in problems
     problems, _ = authoring.check(a_draft(type=IDENTIFY, answers=[DraftAnswer(139.71, 35.31)]))
-    assert problems == ["正解 1: 見分ける問題の正解に種別も活動もありません"]
+    assert problems == ["正解 1: 見分ける問題の正解に種別も活動もない"]
     # An answer outside the area, of a class the exercise does not ask for, no area: written all the same.
     d = a_draft(active=True)
     d.answers.append(DraftAnswer(139.80, 35.31, kind="航空機"))
     problems, notes = authoring.check(d)
-    assert problems == [] and notes == ["範囲の外の正解があります（3 番）", "対象の種別に入らない正解があります（3 番）"]
-    assert authoring.check(a_draft(area=[], active=True))[1] == ["範囲がありません（画像の全体を探す問題になります）"]
-    assert authoring.check(a_draft(pass_score=120))[0] == ["合格点は 0〜100 です"]
+    assert problems == [] and notes == ["範囲の外の正解あり（3 番）", "対象の種別に入らない正解あり（3 番）"]
+    assert authoring.check(a_draft(area=[], active=True))[1] == ["範囲なし（画像の全体を探す問題になる）"]
+    assert authoring.check(a_draft(pass_score=120))[0] == ["合格点は 0〜100"]
 
 
 def test_new_ids_and_copies():

@@ -159,7 +159,7 @@ def test_a_menu_entry_run_another_way_says_whose_it_is(plugin, monkeypatch):
     monkeypatch.setattr(p.iface.messageBar(), "pushInfo", lambda title, text: told.append((title, text)))
     choose(p, "OBSERVER")
     assert not p.run_menu_entry("撮像計画ファイル出力")
-    assert told == [("撮像計画ファイル出力", "担当「撮像計画の担当」の機能です（メニュー「担当と個人設定…」で担当を選ぶと使えます）")]
+    assert told == [("撮像計画ファイル出力", "担当「撮像計画の担当」の機能（メニュー「担当と個人設定…」で担当を選ぶと使える）")]
 
 
 def test_the_roles_are_kept_in_the_table_under_the_user_name(with_table):
@@ -202,7 +202,7 @@ def test_a_choice_the_table_did_not_take_is_sent_on_the_next_start(with_table, m
     try:
         choose(p, "PLANNER")
         assert wait_for(lambda: said)
-        assert "保存できませんでした" in said[0] and roles_io.pending()
+        assert "担当の保存に失敗" in said[0] and roles_io.pending()
         # Still in use here.
         assert p.role_keeper.codes == ["PLANNER"] and visible(p, "撮像計画ファイル出力")
         assert "未送信" in p.open_first_setup().where.text()

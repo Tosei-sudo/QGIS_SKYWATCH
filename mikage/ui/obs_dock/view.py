@@ -159,11 +159,10 @@ class ViewPart:
         tr = self.tr
         if self.book is None:
             text = tr("保存先なし") if self.context.config.local_observations else \
-                tr("保存先なし（ローカルは使用不可。設定ファイルの observationStores で指定）")
+                tr("保存先なし（管理者に連絡: observationStores）")
         else:
-            text = tr("画像が選ばれていません。\n"
-                      "画像を開くか、画像カタログの「ファイルなしで記録」（または ＋ で画像 ID を指定）で画像を選ぶと、"
-                      "その画像の観測記録の一覧と入力が表示されます。")
+            text = tr("画像が未選択\n"
+                      "画像カタログで画像を開くか、「ファイルなしで記録」を押すと、ここに記録の一覧と入力欄を表示")
         said = self.status.text()
         self.idle_note.setText(text + (f"\n\n{said}" if said and said != NO_IMAGE else ""))
 
@@ -183,7 +182,7 @@ class ViewPart:
         waiting = self.waiting_ids()
         for o in here:
             gone = o.deleted_at is not None
-            widget = self._small((tr("復元"), tr("削除した記録の復元"), lambda o=o: self.restore([o]))) if gone else \
+            widget = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
             self._row([o.object_name, o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
@@ -211,14 +210,14 @@ class ViewPart:
                 continue
             gone = a.deleted_at is not None
             what = tr("不可範囲") if a.unseen else tr("確認範囲")
-            widget = self._small((tr("復元"), tr("削除した{what}の復元").format(what=what), lambda a=a: self.restore_areas([a]))) if gone else \
-                self._small((tr("削除"), tr("この不可範囲の削除（中の「不可」の記録も削除）") if a.unseen else tr("この確認範囲の削除"),
+            widget = self._small((tr("復元"), tr("削除した{what}を復元").format(what=what), lambda a=a: self.restore_areas([a]))) if gone else \
+                self._small((tr("削除"), tr("この不可範囲を削除（中の「不可」の記録も削除）") if a.unseen else tr("この確認範囲を削除"),
                              lambda a=a: self.remove_areas([a])))
             self._row([area_label(a), a.kind, "", "", a.note, a.recorded_by, local_time(a.updated_at), ""], lambda a=a: self._fit_area(a),
                       style="deleted" if gone else "unseen" if a.unseen else "area", widget=widget, key=f"a:{a.id}")
         if self.table.rowCount() == 0:
-            self._row([tr("自分の記録なし（「自分の記録のみ」を外すと全員の記録）") if mine else
-                       tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし（「クリック記録」で地図をクリック）")])
+            self._row([tr("自分の記録なし。「自分の記録のみ」を外すと全員の記録を表示") if mine else
+                       tr("該当する記録なし（大分類の絞り込み中）") if self.class_filter else tr("記録なし。「クリック記録」を押して地図をクリック")])
 
     def _made_by(self, o: Observation) -> str:
         """「記録者」 of a row: who made the record, and who changed it last when someone else did."""
@@ -293,7 +292,7 @@ class ViewPart:
             if 0 <= row < self.steps_table.rowCount():
                 self.steps_table.selectRow(row)  # the flow was shown anew for the other image
             self._flash(o)
-            self.say(self.tr("{when} の画像へ移動（ダブルクリックでこの記録を編集）").format(when=local_time(time_key(o))))
+            self.say(self.tr("{when} の画像へ移動。ダブルクリックでこの記録を編集").format(when=local_time(time_key(o))))
 
     def _step_double_clicked(self, row: int, _col: int) -> None:
         steps = getattr(self, "_steps", [])

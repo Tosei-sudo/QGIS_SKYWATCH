@@ -28,7 +28,7 @@ from qgis.PyQt import sip
 from qgis.PyQt.QtCore import QDateTime, QPoint, Qt
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton, QTableWidget,
     QTableWidgetItem, QTabWidget, QWidget,
 )
 
@@ -45,7 +45,7 @@ from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
-from .docks import PluginDock, plain_tip
+from .docks import PluginDock, ask_no, plain_tip
 from .ports import Ports
 from .fit import fit_text
 from .list_views import column_menus
@@ -119,8 +119,8 @@ class EventForm(QDialog):
         self.area_text = QLabel()
         area.addWidget(self.area_text, 1)
         for text, tip, slot in [
-            (self.tr("地図の表示範囲"), self.tr("いまの地図の表示範囲を範囲にする"), self.use_extent),
-            (self.tr("選択地物"), self.tr("アクティブなレイヤーの選択地物（ポリゴンはそのまま、ほかは外接矩形）を範囲にする"), self.use_selection),
+            (self.tr("地図の表示範囲"), self.tr("いまの地図の表示範囲を範囲に設定"), self.use_extent),
+            (self.tr("選択地物"), self.tr("アクティブなレイヤーの選択地物（ポリゴンはそのまま、ほかは外接矩形）を範囲に設定"), self.use_selection),
             (self.tr("消去"), self.tr("範囲なし"), lambda: self.set_rings(None)),
         ]:
             b = QPushButton(text)
@@ -202,7 +202,7 @@ class EventForm(QDialog):
             if sip.isdeleted(self):
                 return
             self.button_box.setEnabled(True)
-            self.problem.setText(self.tr("保存できませんでした: {m}").format(m=message))
+            self.problem.setText(self.tr("保存に失敗: {m}").format(m=message))
 
         # Closed meanwhile (Esc): the answer has no form to close.
         self.saver(v, lambda: None if sip.isdeleted(self) else self.accept(), failed)
@@ -243,7 +243,7 @@ class EventsDock(PluginDock):
         self.search.setPlaceholderText(self.tr("名前・種別・メモで絞り込み"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda _t: self.render())
-        self.reload_button = QPushButton(self.tr("再読み込み"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
         self.reload_button.clicked.connect(lambda: self.reload())
         top.addWidget(self.status_filter)
         top.addWidget(self.search, 1)
@@ -270,7 +270,7 @@ class EventsDock(PluginDock):
         for key, text, tip, slot in [
             ("new", self.tr("新規…"), self.tr("イベントを作成（いまの地図の表示範囲が範囲の初期値）"), self.create),
             ("edit", self.tr("編集…"), self.tr("名前・種別・状態・期間・範囲・メモを変更"), self.edit),
-            ("close", self.tr("終了"), self.tr("終了にする（終了日時が空なら現在）。終了したイベントは追加先に出ない"), self.toggle_status),
+            ("close", self.tr("終了"), self.tr("終了に変更（終了日時が空なら現在）。終了したイベントは追加先に出ない"), self.toggle_status),
             ("delete", self.tr("削除"), self.tr("イベントと紐付けを削除（画像・記録・依頼そのものは残る）"), self.delete),
             ("zoom", self.tr("範囲へ移動"), self.tr("イベントの範囲へ地図を移動"), self.zoom),
             ("map", self.tr("地図に表示"), self.tr("範囲・画像の範囲・観測記録の位置をレイヤーとして追加"), self.show_on_map),
@@ -347,7 +347,7 @@ class EventsDock(PluginDock):
         if self.task is None:
             self._then, self._failed = [], []
         s = self.settings
-        self.note.setText("" if s else self.tr("設定ファイルに events（イベントのレイヤーと紐付けテーブル）がないため使用不可"))
+        self.note.setText("" if s else self.tr("イベントは使えない（管理者に連絡: events）"))
         self.note.setVisible(s is None)
         self.render()
         if s is not None and self.isVisible():
@@ -450,13 +450,13 @@ class EventsDock(PluginDock):
                 self.reload()
                 return
             told, self._then, self._failed = self._failed, [], []
-            self.say(self.tr("イベントの読み込みに失敗: {m}").format(m=message))
+            self.say(self.tr("イベントの取得に失敗: {m}").format(m=message))
             self._update_buttons()
             for f in told:
                 f(message)
 
         self.task = True
-        self._start(self.tr("イベントの読み込み"), work, done, not_read)
+        self._start(self.tr("イベントの取得"), work, done, not_read)
 
     # ---- showing -------------------------------------------------------------------------------
 
@@ -586,10 +586,8 @@ class EventsDock(PluginDock):
         if e is None:
             return
         n = len(self.links_of(e))
-        if confirm and QMessageBox.question(
-                self, TITLE, plain_tip(self.tr("「{name}」を削除しますか？\n紐付け {n} 件も消えます（画像・記録・依頼そのものは残ります）。元に戻せません。")
-                .format(name=e.name, n=n)), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        if confirm and not ask_no(self, TITLE, self.tr("「{name}」を削除（復元できない）\n紐付け {n} 件も消え、画像・記録・依頼そのものは残る")
+                                  .format(name=e.name, n=n), yes=self.tr("削除")):
             return
         s = self.settings
         client, token = self.context.esri(), self.context.token_for(s.layer.url, s.layer.token)
@@ -661,14 +659,13 @@ class EventsDock(PluginDock):
         links = self.chosen_links()
         if not links:
             return
-        if confirm and QMessageBox.question(
-                self, TITLE, self.tr("選んだ {n} 件をこのイベントから外しますか？（項目そのものは残ります）").format(n=len(links)),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        if confirm and not ask_no(self, TITLE, self.tr("選んだ {n} 件をこのイベントから除外（項目そのものは残る）").format(n=len(links)),
+                                  yes=self.tr("除外")):
             return
         s = self.settings
         client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
         self._start(self.tr("イベントから外す"), lambda _t: remove_links(client, s, links, token),
-                    lambda n: self.reload(lambda: self.say(self.tr("{n} 件を外した").format(n=n))))
+                    lambda n: self.reload(lambda: self.say(self.tr("{n} 件を除外").format(n=n))))
 
     def edit_item_note(self, note: Optional[str] = None) -> None:
         links = self.chosen_links()
@@ -854,10 +851,10 @@ class EventsDock(PluginDock):
             if images and dock is not None and dock.list_catalog_images(images) is not None:
                 listed = len(images)
             else:
-                problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
+                problems.append(self.tr("ファイルのない画像 {n} 件の観測記録への追加に失敗（画像 ID か記録の保存先なし）").format(n=len(without)))
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))
-        said = [self.tr("画像 {n} 枚を開いた").format(n=opened) if opened else "",
+        said = [self.tr("画像 {n} 枚を表示").format(n=opened) if opened else "",
                 self.tr("ファイルなしの画像 {n} 件を観測記録へ").format(n=listed) if listed else ""]
         self.say("、".join(x for x in said if x) or self.status.text())
 
@@ -886,7 +883,7 @@ class EventsDock(PluginDock):
             return
         if not dock.with_records([x.item_id for x in links], lambda: self._open_read(links)):
             # Not read yet (asked of a shared store, or no image chosen in 「観測記録」): opened once they are.
-            self.say(self.tr("観測記録を読み込み中…"))
+            self.say(self.tr("観測記録を取得中…"))
             return
         self._open_read(links)
 
@@ -947,7 +944,7 @@ class EventsDock(PluginDock):
         observations = self.links_of(e, "observation")
         if dock is not None and observations and not dock.with_records([x.item_id for x in observations], lambda: self._show_read(e)):
             # The records' points come from 「観測記録」 (asked of a shared store, or no image chosen there yet): shown once read.
-            self.say(self.tr("観測記録を読み込み中…"))
+            self.say(self.tr("観測記録を取得中…"))
             return
         self._show_read(e)
 

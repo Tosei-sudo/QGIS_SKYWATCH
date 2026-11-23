@@ -143,13 +143,13 @@ def test_the_model_chooses_from_the_list_read_ahead(plugin, records):
     today = p.feature(Command).today()
     monday = today + timedelta(days=7 - today.weekday())
     assert r.operation.key == "planFiles" and r.systems == ["SYS-B"] and r.period == (monday, monday)
-    assert card.how.text().startswith("生成 AI が選んだ")
+    assert card.how.text().startswith("生成 AI が選択")
     # 「なし」: no operation; one chosen by hand is read from the sentence.
     box.submit("今日の東京の天気は？")
     assert wait_for(lambda: box.asked is None and card.operation_row.isVisible())
     assert card.reading is None and not card.run_button.isVisible() and "合う操作が見つからず" in card.state.text()
     card.operation.setCurrentIndex(card.operation.findData("jump"))
-    assert card.chosen().operation.key == "jump" and card.place.text() == "東京" and card.how.text() == "選び直した"
+    assert card.chosen().operation.key == "jump" and card.place.text() == "東京" and card.how.text() == "選び直し"
     card.reject()
     assert records == []
 
@@ -277,5 +277,5 @@ def test_the_switch_waits_for_a_model_in_the_settings(plugin, monkeypatch):
     p, iface, fake, tmp_path = plugin
     dialog = p.open_first_setup()
     # No textAssist: it can not be turned on.
-    assert not dialog.ai.isEnabled() and "割り当てなし" in dialog.ai.toolTip()
+    assert not dialog.ai.isEnabled() and "未設定（管理者に連絡: textAssist）" in dialog.ai.toolTip()
     dialog.reject()

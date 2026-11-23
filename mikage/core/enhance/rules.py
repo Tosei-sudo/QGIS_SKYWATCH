@@ -41,7 +41,7 @@ def image_rule_of(value: Any, problems: list, index: int) -> Optional[ImageRule]
         # File names on Windows and most servers ignore case, so the patterns do too unless told.
         pattern = re.compile(match, 0 if value.get("caseSensitive") is True else re.IGNORECASE)
     except re.error as error:
-        problems.append(f"{at} の match は正規表現として読み込み不可（{error}）")
+        problems.append(f"{at} の match は正規表現として読めない（{error}）")
         return None
 
     pipeline: Optional[Pipeline] = None

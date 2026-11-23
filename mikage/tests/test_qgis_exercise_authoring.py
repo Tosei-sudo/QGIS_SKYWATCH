@@ -114,7 +114,7 @@ def test_an_instructor_makes_an_exercise_of_the_records_writes_it_and_tries_it(i
     assert editor.area_label.text().startswith("描いた範囲 ")
     # Not written without its answers.
     assert not authoring.save()
-    assert "正解がありません" in editor.status.text()
+    assert "正解なし" in editor.status.text()
     # The answers taken from the records in the area (the one outside left out), each as the record says.
     pickers = []
 
@@ -141,7 +141,7 @@ def test_an_instructor_makes_an_exercise_of_the_records_writes_it_and_tries_it(i
     # 保存: the exercise's row and its answers' rows, with the token.
     assert authoring.save()
     assert wait_for(lambda: not editor.dirty, 10000), editor.status.text()
-    assert "保存しました" in editor.status.text() and "作りかけ" in editor.status.text()
+    assert "問題を保存" in editor.status.text() and "作りかけ" in editor.status.text()
     row = next(r for r in layers["exercises"].rows if r["attributes"]["EXERCISE_ID"] != "EX-OLD")
     a = row["attributes"]
     assert a["EXERCISE_ID"].startswith("EX-") and (a["TITLE"], a["EXERCISE_TYPE"], a["IMAGE_ID"], a["ACTIVE"], a["PASS_SCORE"]) == (
@@ -180,7 +180,7 @@ def test_an_instructor_makes_an_exercise_of_the_records_writes_it_and_tries_it(i
         answer(p, run, x)
     outcome = run.submit()
     assert outcome is not None and outcome.score == 100, [(i.answer.number, i.state) for i in outcome.items]
-    assert "試しに解いた結果です" in run.review.note.text()
+    assert "試しに解いた結果（" in run.review.note.text()
     assert read_results(path) == before and layers["results"].rows == []
     run.review.close()
     # While practising, not made (the production's tables are not written then).
@@ -201,7 +201,7 @@ def test_an_exercise_is_offered_or_put_aside_and_deleted_from_the_list(instructo
     assert manager.active_button.text() == "練習の一覧に出す"
     manager.active_button.click()
     assert wait_for(lambda: layers["exercises"].rows[0]["attributes"]["ACTIVE"] == 1, 10000)
-    assert manager.table.item(0, 6).text() == "出す" and manager.active_button.text() == "作りかけにする"
+    assert manager.table.item(0, 6).text() == "出す" and manager.active_button.text() == "作りかけに変更"
     # A copy to make another from: a new id, not written until saved, 作りかけ.
     editor = authoring.copy("組織:EX-1")
     assert editor.title_edit.text() == "港の船（コピー）" and not editor.active.isChecked() and len(editor.answers) == 1
@@ -216,7 +216,7 @@ def test_an_exercise_is_offered_or_put_aside_and_deleted_from_the_list(instructo
     editor.close()
     assert authoring.editor is None and len(layers["exercises"].rows) == 1 and manager.isVisible()
     # Deleted with its answers (asked first).
-    monkeypatch.setattr(exercise_authoring.QMessageBox, "question", lambda *a, **k: exercise_authoring.QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(exercise_authoring, "ask_no", lambda *a, **k: True)
     manager.delete_button.click()
     assert wait_for(lambda: layers["exercises"].rows == [] and layers["answers"].rows == [], 10000)
     assert manager.table.rowCount() == 0

@@ -93,10 +93,10 @@ def test_rows_that_can_not_be_used_are_said_and_left_out():
     assert odd.mode == PRACTICE and odd.pass_score == DEFAULT_SCORING.pass_score and odd.time_limit is None
     assert odd.answers[0].points == 10
     said = "\n".join(problems)
-    for words in ("問題 NO-IMAGE: 画像がありません", "問題 BAD-TYPE: EXERCISE_TYPE", "問題 NO-BEFORE: 変化を見つける問題に前の画像",
-                  "問題 NO-ANSWERS: 答えの表に答えがありません", "問題 OK: EXERCISE_ID が重なっています", "EXERCISE_ID が空の行",
-                  "問題 ODD: EXERCISE_MODE は 練習 か 試験", "問題 ODD: PASS_SCORE は 0〜100", "問題 ODD: TIME_LIMIT_MIN が数ではありません",
-                  "問題 ODD: SCORING が JSON ではありません", "問題 ODD の答え: ANSWER_POINTS が数ではありません", "答えの表: EXERCISE_ID か位置のない行"):
+    for words in ("問題 NO-IMAGE: 画像なし", "問題 BAD-TYPE: EXERCISE_TYPE", "問題 NO-BEFORE: 変化を見つける問題に前の画像",
+                  "問題 NO-ANSWERS: 答えの表に答えなし", "問題 OK: EXERCISE_ID が重複", "EXERCISE_ID が空の行",
+                  "問題 ODD: EXERCISE_MODE は 練習 か 試験", "問題 ODD: PASS_SCORE は 0〜100", "問題 ODD: TIME_LIMIT_MIN が数ではない",
+                  "問題 ODD: SCORING が JSON ではない", "問題 ODD の答え: ANSWER_POINTS が数ではない", "答えの表: EXERCISE_ID か位置のない行"):
         assert words in said, (words, said)
     # A draft (ACTIVE 0) is not said: it is not to be shown yet.
     assert "DRAFT" not in said

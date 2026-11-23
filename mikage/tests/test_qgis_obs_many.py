@@ -454,7 +454,7 @@ def test_finds_cars_like_the_sample_and_records_them_from_ai_results(plugin, tmp
     dock.many.threshold_input.setValue(0.9)
     dock.many.find_similar()
     assert wait_for(lambda: not dock.many.searching, 60000)
-    assert "（見本 9 件・誤検出 1 件から" in dock.status.text() or dock.status.text().startswith("見本に似たものは見つかりませんでした")
+    assert "（見本 9 件・誤検出 1 件から" in dock.status.text() or dock.status.text().startswith("見本に似たものなし")
     for lay in QgsProject.instance().mapLayers().values():
         if isinstance(lay, QgsVectorLayer):
             assert lay.featureCount() <= 2
@@ -472,5 +472,5 @@ def test_the_search_says_what_it_needs(plugin, tmp_path):
     # A 見本 far too small for the image's pixels (25 m here).
     dock.book.add(139.7, 35.6, kind="車両", length=4.5, width=1.8, heading=0)
     dock.many.find_similar()
-    assert dock.status.text().startswith("見本が小さすぎます")
+    assert dock.status.text().startswith("見本が小さすぎる")
     assert bearing((0, 0), (1, 0)) == pytest.approx(90)

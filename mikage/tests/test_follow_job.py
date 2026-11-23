@@ -242,7 +242,7 @@ def test_urllib_transport_says_what_went_wrong(site):
         send(f"{site.base}/moved", {"f": "json", "token": "secret"})
     with pytest.raises(UnreachableError, match="タイムアウト"):
         url_transport(timeout=0.3)(f"{site.base}/slow", {"f": "json"})
-    with pytest.raises(UnreachableError, match="接続不可"):
+    with pytest.raises(UnreachableError, match="接続できない"):
         send("http://127.0.0.1:9/nothing", {"f": "json"})
     # The form as the plugin sends it; the token never in an error.
     client = EsriClient(send)

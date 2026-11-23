@@ -40,7 +40,7 @@ class OpenAgainDialog(QDialog):
         self.setWindowTitle(self.tr("前回のファイルで開く"))
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
-        lead = plain_label(QLabel(self.tr("{id} を前回と同じファイルで開きます。").format(id=entry.image_id)))
+        lead = plain_label(QLabel(self.tr("{id} を前回と同じファイルで表示").format(id=entry.image_id)))
         font = lead.font()
         font.setBold(True)
         lead.setFont(font)
@@ -67,7 +67,7 @@ class OpenAgainDialog(QDialog):
             item.setCheckState(Qt.CheckState.Checked if rel in opened and not gone else Qt.CheckState.Unchecked)
             if gone:
                 item.setForeground(QColor("#b91c1c"))
-                item.setToolTip(self.tr("前回の場所に見つかりません"))
+                item.setToolTip(self.tr("前回の場所になし"))
             self.files.addItem(item)
         self.files.setVisible(bool(entry.files))
         self.files.itemChanged.connect(lambda _i: self._update())
@@ -78,9 +78,9 @@ class OpenAgainDialog(QDialog):
         buttons = QDialogButtonBox()
         self.open_button = buttons.addButton(self.tr("開く"), QDialogButtonBox.ButtonRole.AcceptRole)
         self.catalog_button = QPushButton(self.tr("カタログで探し直す"))
-        self.catalog_button.setToolTip(self.tr("前回のファイルを使わず、画像カタログを画像 ID で検索して開きます"))
+        self.catalog_button.setToolTip(self.tr("前回のファイルを使わず、画像カタログを画像 ID で検索"))
         buttons.addButton(self.catalog_button, QDialogButtonBox.ButtonRole.ActionRole)
-        buttons.addButton(self.tr("やめる"), QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.addButton(self.tr("取消"), QDialogButtonBox.ButtonRole.RejectRole)
         self.open_button.setDefault(True)
         self.open_button.setAutoDefault(True)
         self.open_button.clicked.connect(self._open)
@@ -103,14 +103,14 @@ class OpenAgainDialog(QDialog):
         if e.files:
             gone = e.missing(self.chosen())
             ok = bool(self.chosen()) and not gone
-            self.note.setText(self.tr("チェックは前回開いたファイルです。Enter で開きます。") if ok else
-                              self.tr("開くファイルにチェックを付けてください。") if not self.chosen() else
-                              self.tr("チェックしたファイルが見つかりません。「カタログで探し直す」で探せます。"))
+            self.note.setText(self.tr("チェックは前回開いたファイル。Enter で表示") if ok else
+                              self.tr("開くファイルをチェックで選択") if not self.chosen() else
+                              self.tr("チェックしたファイルが見つからない。「カタログで探し直す」で検索"))
         else:
             gone = e.missing()
             ok = not gone
-            self.note.setText(self.tr("Enter で開きます。") if ok else
-                              self.tr("前回の場所に画像が見つかりません。「カタログで探し直す」で探せます。"))
+            self.note.setText(self.tr("Enter で表示") if ok else
+                              self.tr("前回の場所に画像が見つからない。「カタログで探し直す」で検索"))
         self.open_button.setEnabled(ok)
         if not ok:
             self.catalog_button.setDefault(True)

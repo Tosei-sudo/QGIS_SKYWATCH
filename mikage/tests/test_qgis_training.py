@@ -130,7 +130,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     assert catalog.windowTitle() == "画像カタログ" + training_mode.DOCK_MARK
     # What reaches outside the practice cannot be used meanwhile.
     menu = _menu(iface)
-    blocked = [a for a in p.actions if a.text().endswith("（練習モードでは使えません）")]
+    blocked = [a for a in p.actions if a.text().endswith("（練習モードでは使えない）")]
     assert {a.text().split("（練習")[0] for a in blocked} >= {"設定…", "サーバ処理…", "ArcGIS Web マップを開く…"}
     assert all(not a.isEnabled() for a in blocked)
     assert not training._actions["練習モードを始める"].isEnabled() and training._actions["練習モードを終える"].isEnabled()
@@ -156,7 +156,7 @@ def test_practice_starts_on_its_own_server_and_files_and_ends_as_before(plugin, 
     # The practice's images listed no more (their server is gone).
     assert catalog.model.rowCount() == 0
     assert not iface.window.windowTitle().startswith(training_mode.WINDOW_MARK)
-    assert not [a for a in p.actions if a.text().endswith("（練習モードでは使えません）")]
+    assert not [a for a in p.actions if a.text().endswith("（練習モードでは使えない）")]
     assert not audit.current().paused
     assert QgsSettings().value(training_io.ACTIVE_KEY, "") == ""
     assert training._actions["練習モードを始める"].isEnabled() and not training._actions["練習モードを終える"].isEnabled()
@@ -172,7 +172,7 @@ def test_unsaved_changes_are_asked_about_first(plugin, monkeypatch):
     QgsProject.instance().setDirty(True)
     monkeypatch.setattr(feature.QMessageBox, "question", lambda *a: asked.append(a[2]) or QMessageBox.StandardButton.Cancel)
     assert not p.start_training() and training_io.active() is None
-    assert asked and "保存していない変更" in asked[0]
+    assert asked and "未保存の変更" in asked[0]
     monkeypatch.setattr(feature.QMessageBox, "question", lambda *a: QMessageBox.StandardButton.Discard)
     assert p.start_training()
     try:

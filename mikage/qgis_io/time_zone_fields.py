@@ -148,7 +148,7 @@ class TimeZoneFields:
 
             if isinstance(info, dict) and _ERROR in info:
                 # Not silently: the corrected times are then off by the service's offset, if it has one (#86).
-                self.warn(f"「{name}」のサービス側のタイムゾーンを読めず（{info[_ERROR]}）。UTC として補正"
+                self.warn(f"「{name}」のサービス側のタイムゾーンを読めない（{info[_ERROR]}）。UTC として補正"
                           "（違うなら設定ファイルの timeZones に serviceTimeZone を指定）")
                 info = {}
             target = QgsProject.instance().mapLayer(layer_id)

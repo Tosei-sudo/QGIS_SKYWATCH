@@ -99,7 +99,7 @@ def ai_result_source_of(value: Any, problems: list[str], index: int) -> Optional
     mapped: dict[str, str] = {}
     for role, name in fields.items():
         if role not in RESULT_ROLES:
-            problems.append(f"{at} の fields.{role} は使用不可の役割（{' / '.join(RESULT_ROLES)}）")
+            problems.append(f"{at} の fields.{role} は使えない役割（{' / '.join(RESULT_ROLES)}）")
         elif is_name(name):
             mapped[role] = name
         elif name not in (None, ""):

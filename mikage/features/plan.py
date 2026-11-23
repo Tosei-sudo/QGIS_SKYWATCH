@@ -57,7 +57,7 @@ class Plan(Feature):
         notices = self.ports.notices()
         if notices is not None:
             plan.on_reminder = notices.add_plan_notice
-        # 「臨時依頼にする」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
+        # 「臨時依頼を作成」: what the plan finds goes to the ledger, through the 「撮像依頼」 form (tsudo, 2026-11-09).
         plan.make_requests = self._requests_from_plan
 
     def _requests_from_plan(self, ops: list, sats: list, targets: list):

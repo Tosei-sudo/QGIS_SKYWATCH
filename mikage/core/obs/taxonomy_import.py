@@ -193,12 +193,12 @@ def check_uses(uses: Sequence[Use]) -> Optional[str]:
     """Why the uses cannot be taken (None when they can): the levels from 1 on, each once; an item once."""
     levels = sorted(u.arg for u in uses if u.kind == LEVEL)
     if not levels:
-        return "階層の列がありません。大分類の列に「階層 1」を選んでください。"
+        return "階層の列なし。大分類の列に「階層 1」を選択"
     if levels != list(range(1, len(levels) + 1)):
-        return "階層の列は 1 から順に、重ならないように選んでください。"
+        return "階層の列は 1 から順に、重ならないように選択"
     others = [u for u in uses if u.kind not in (LEVEL, SKIP, NEW_SPEC)]
     if len(others) != len(set(others)):
-        return "同じ項目を 2 つの列に選んでいます。1 つの列にしてください。"
+        return "同じ項目を 2 つの列で選択中。1 つの列だけを選択"
     return None
 
 

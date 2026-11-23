@@ -332,4 +332,4 @@ class PlaceReader(QObject):
             if self.pending:
                 self.timer.start()
 
-        self.task = run_task("地名の読み込み（式の関数）", work, finished, failed, hidden=True)
+        self.task = run_task("地名の取得（式の関数）", work, finished, failed, hidden=True)

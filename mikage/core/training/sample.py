@@ -36,8 +36,28 @@ SATELLITES = [
 #: Other names of the sample satellites (satellite, alias as written in the table: one, or several with commas).
 SATELLITE_ALIASES = [("OPT-X1", "OX1, OPTX-01"), ("OPT-X2", "OX2"), ("SAR-Y1", "SY1")]
 
+#: The sample satellites' elements are for this time (UTC, ms after midnight) of the day before the data is made (the
+#: day of the PC's calendar), their nodes turned with the Earth from those at TLE_REFERENCE (UTC ms): the passes over the
+#: sample area on the next days (JST, as the plan's days) come at the same hours whenever and wherever the data is made.
+#: (Elements of the very moment the data was made, before 2026-11-23, moved the passes with the hour: made before about
+#: 11:30 JST, tomorrow had no shot to plan and the plan course stopped at 3-2.)
+TLE_TIME_OF_DAY = int(2.5 * HOUR)
+TLE_REFERENCE = 1_795_314_600_000  # 2026-11-22 02:30 UTC
+
 
 # --- TLEs -------------------------------------------------------------------------------------------------
+
+
+def sidereal_degrees(ms: int) -> float:
+    """Greenwich mean sidereal time at `ms` (UTC), in degrees."""
+    return (280.46061837 + 360.98564736629 * (ms / DAY + 2440587.5 - 2451545.0)) % 360
+
+
+def tle_epoch(now: int) -> tuple[int, float]:
+    """The sample TLEs' epoch for data made at `now`, and how far their nodes turn from the reference (degrees)."""
+    today = datetime.fromtimestamp(now / 1000).date()
+    epoch = int(datetime(today.year, today.month, today.day, tzinfo=timezone.utc).timestamp() * 1000) - DAY + TLE_TIME_OF_DAY
+    return epoch, sidereal_degrees(epoch) - sidereal_degrees(TLE_REFERENCE)
 
 
 def _checksum(line: str) -> str:
@@ -409,8 +429,9 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
     feats = (lambda items: items) if with_features else (lambda items: [])
 
     sats, sensors = [], []
+    epoch, turn = tle_epoch(now)
     for name, number, series, kind, side, max_ona, swath, raan in SATELLITES:
-        l1, l2 = tle(number, now - DAY, 97.8, 300 + raan, number * 37.0, 14.9)
+        l1, l2 = tle(number, epoch, 97.8, 300 + raan + turn, number * 37.0, 14.9)
         sats.append({"attributes": {"SAT_NAME": name, "NORAD_ID": str(number), "TLE_LINE1": l1, "TLE_LINE2": l2, "MAX_OFF_NADIR": max_ona,
                                     "MIN_OFF_NADIR": 15 if kind == "SAR" else 0, "SWATH": swath, "SCENE_LENGTH": swath, "LOOK_SIDE": side,
                                     "SENSOR_TYPE": kind, "SERIES": series, "SCENES_PER_PASS": 3 if kind == "光学" else 1,

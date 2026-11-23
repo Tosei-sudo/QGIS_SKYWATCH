@@ -97,7 +97,7 @@ class NoticesDock(PluginDock):
                 (self.tr("移動"), self.tr("選んだ新着画像の範囲へ地図を移動"), self.zoom_to_chosen),
                 (self.tr("既読"), self.tr("選んだ新着画像を既読に"), self.mark_chosen_read),
                 (self.tr("すべて既読"), self.tr("一覧の新着画像をすべて既読に"), lambda: self.mark(None)),
-                (self.tr("削除"), self.tr("選んだ新着画像を一覧から消す（画像そのものは消えない）"), self.delete_chosen_notices)]:
+                (self.tr("削除"), self.tr("選んだ新着画像を一覧から除外（画像そのものは残る）"), self.delete_chosen_notices)]:
             button = QPushButton(text)
             button.setToolTip(tip)
             button.clicked.connect(slot)
@@ -116,8 +116,7 @@ class NoticesDock(PluginDock):
         row = QHBoxLayout()
         for text, tip, slot in [
                 (self.tr("名前の変更"), "", self.rename_chosen),
-                (self.tr("範囲の変更…"), self.tr("選んだ監視の範囲を、レイヤーの今の形（取り直し）・表示範囲などで置き換える。"
-                                                "新しい範囲にすでにある画像も一覧とカードに（既読で。新着としては知らせない）"),
+                (self.tr("範囲の変更…"), self.tr("選んだ監視の範囲を、レイヤーの今の形や表示範囲で置き換え（新しい範囲にすでにある画像は既読で表示）"),
                  self.change_chosen_area),
                 (self.tr("削除"), "", self.delete_chosen_watch),
                 (self.tr("今すぐ確認"), "", lambda: self.check(force=True))]:
@@ -264,7 +263,7 @@ class NoticesDock(PluginDock):
         if checked.earlier:
             parts.append(self.tr("監視の設定前からある画像 {n} 件を一覧に（既読）").format(n=checked.earlier))
         if checked.left:
-            parts.append(self.tr("設定前からある画像のうち古い {n} 件は、多すぎるため一覧に入れず（範囲や条件で絞ると入る）").format(n=checked.left))
+            parts.append(self.tr("設定前からある画像のうち古い {n} 件は、多すぎるため一覧に未表示（範囲や条件で絞ると表示）").format(n=checked.left))
         if not parts:
             return
         bar = self.iface.messageBar()
@@ -322,7 +321,7 @@ class NoticesDock(PluginDock):
             if w.past is not None and w.last_checked is not None:
                 last += self.tr("（設定前からある画像はまだ）")
             elif w.past_left:
-                last += self.tr("（設定前からある古い {n} 件は多すぎて入れず）").format(n=f"{w.past_left:,}")
+                last += self.tr("（設定前からある古い {n} 件は多すぎて未表示）").format(n=f"{w.past_left:,}")
             item = QTreeWidgetItem([w.name, conditions_text(w.catalog, w.conditions, w.areas, area_layer=w.area_layer), last, w.last_error or ""])
             item.setData(0, Qt.ItemDataRole.UserRole, w.id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -423,7 +422,7 @@ class NoticesDock(PluginDock):
             listed = [i for i in (listed_image(r) for r in without) if i is not None]
             dock = self.observations() if self.observations else None
             if not listed or dock is None or dock.list_catalog_images(listed) is None:
-                problems.append(self.tr("画像ファイルなしのカタログの画像 {n} 件を観測記録へ追加できず（画像 ID か記録の保存先なし）").format(n=len(without)))
+                problems.append(self.tr("ファイルのない画像 {n} 件の観測記録への追加に失敗（画像 ID か記録の保存先なし）").format(n=len(without)))
         if any(n.kind == PLAN for n in notices):
             self.zoom_to_notices([n for n in notices if n.kind == PLAN])
         self.mark([n.id for n in notices])
@@ -526,7 +525,7 @@ class NoticesDock(PluginDock):
         if watch is None:
             return
         if ask_no(self, self.tr("監視の削除"),
-                  self.tr("監視「{name}」を削除しますか？条件とこの監視の新着画像の一覧も消え、元に戻せません（画像そのものは消えません）。").format(name=watch.name)):
+                  self.tr("監視「{name}」を削除。条件と新着画像の一覧も消え、復元できない（画像そのものは残る）").format(name=watch.name), yes=self.tr("削除")):
             self.store().delete_watch(watch_id)
             self.refresh()
 

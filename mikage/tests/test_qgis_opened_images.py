@@ -65,7 +65,7 @@ def test_an_image_opened_once_opens_again_with_its_files_after_one_look(plugin, 
     [[layer]] = opened
     assert layer.name() == "D" and layer.customProperty(IMAGE_ID) == "D" and layer.source().endswith("a_P.tif")
     assert layer in QgsProject.instance().mapLayers().values()
-    assert "前回のファイルで開きました" in dock.status.text()
+    assert "前回のファイルで表示" in dock.status.text()
     # The choice is kept for the next time; 「最近開いた画像」 lists it.
     assert opened_images().find("D").opened == ["PAN/a_P.tif"]
     dock._fill_recent()
@@ -95,7 +95,7 @@ def test_an_id_not_opened_before_is_looked_up_in_the_catalog(plugin, monkeypatch
     dock.open_image_id("Z'9", then=opened.append, missing=lambda: missing.append("Z"))
     assert wait_for(lambda: missing == ["Z"])
     assert _queries(fake)[-1]["where"] == "IMG_ID IN ('Z''9')"
-    assert dock.status.text() == "画像カタログに画像 ID「Z'9」の画像がありません"
+    assert dock.status.text() == "画像カタログに画像 ID「Z'9」の画像なし"
     # Opened before, but the file has gone since: looked up in the catalog again.
     (folder / "2026" / "A.TIF").rename(folder / "2026" / "moved.tif")
     monkeypatch.setattr(open_again_dialog, "ask_open_again", lambda parent, entry: [])
@@ -192,7 +192,7 @@ def test_the_dialog_ticks_the_files_of_last_time_and_says_what_is_gone(tmp_path)
     assert d.chosen() == ["PAN/a.tif"]
     # A file gone ticked: not opened from here.
     items[1].setCheckState(Qt.CheckState.Checked)
-    assert not d.open_button.isEnabled() and "見つかりません" in d.note.text()
+    assert not d.open_button.isEnabled() and "見つからない" in d.note.text()
     items[1].setCheckState(Qt.CheckState.Unchecked)
     d.open_button.click()
     assert d.answer == ["PAN/a.tif"]

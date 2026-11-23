@@ -137,10 +137,10 @@ class AlertsPart:
                 self.render()
 
         def failed(message: str) -> None:
-            QgsMessageLog.logMessage(self.tr("通報済みの記録の読み込みに失敗: {m}").format(m=message), self.tr("観測記録"),
+            QgsMessageLog.logMessage(self.tr("通報済みの記録の取得に失敗: {m}").format(m=message), self.tr("観測記録"),
                                      Qgis.MessageLevel.Warning)
 
-        run_task(self.tr("通報済みの記録の読み込み"), lambda _t: repo.reported_ids(), finished, failed)
+        run_task(self.tr("通報済みの記録の取得"), lambda _t: repo.reported_ids(), finished, failed)
 
     def mark_reported(self, ids) -> None:
         """Records just put in the 通報 log table: highlighted at once (without reading the table again)."""

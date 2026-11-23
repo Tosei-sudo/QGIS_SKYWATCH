@@ -293,7 +293,7 @@ def test_the_conversation_and_the_settings():
 def test_a_name_with_a_place_the_text_lacks_is_left_out():
     # The real 3B made 「東京港」 of coordinates (2026-11-21).
     d = tr.request_draft("名称: 東京港周辺SAR画像\n地名: 東京、港", "35.2800N 139.6700E 付近を明日から3日間、SAR", TODAY)
-    assert "name" not in d.values and "名称「東京港周辺SAR画像」の「東京港」は文にない（入れず）" in d.checks
+    assert "name" not in d.values and "名称「東京港周辺SAR画像」の「東京港」は文にない（未入力）" in d.checks
     # A place as the text has it, with の or without.
     assert tr.request_draft("名称: 呉造船所衛星画像", "呉の造船所、11/25〜30に1回", TODAY).values["name"] == "呉造船所衛星画像"
     assert tr.request_draft("名称: 那覇港と那覇空港", "那覇港と那覇空港を来週中に", TODAY).values["name"] == "那覇港と那覇空港"

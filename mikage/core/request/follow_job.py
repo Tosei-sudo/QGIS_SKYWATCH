@@ -116,18 +116,18 @@ def _open(opener: urllib.request.OpenerDirector, request: urllib.request.Request
                 hint = "。統合 Windows 認証のサービスはこのツールからは使えない（トークンを使う）"
             else:
                 hint = "。サインインが要る（設定ファイルの token か --user・--credential）"
-        raise EsriError(f"接続不可（{address}：HTTP {status}{hint}）") from None
+        raise EsriError(f"接続できない（{address}：HTTP {status}{hint}）") from None
     except urllib.error.URLError as error:
         reason = error.reason
         if isinstance(reason, (socket.timeout, TimeoutError)):
             raise UnreachableError(f"応答なし（タイムアウト）（{address}）") from None
         if isinstance(reason, ssl.SSLCertVerificationError):
-            raise EsriError(f"接続不可（{address}：サーバーの証明書を確かめられない。社内の認証局なら --ca-file で指定）") from None
-        raise UnreachableError(f"接続不可（{address}：{reason}）") from None
+            raise EsriError(f"接続できない（{address}：サーバーの証明書を確かめられない。社内の認証局なら --ca-file で指定）") from None
+        raise UnreachableError(f"接続できない（{address}：{reason}）") from None
     except (socket.timeout, TimeoutError):
         raise UnreachableError(f"応答なし（タイムアウト）（{address}）") from None
     except (OSError, http.client.HTTPException) as error:
-        raise UnreachableError(f"接続不可（{address}：{error or type(error).__name__}）") from None
+        raise UnreachableError(f"接続できない（{address}：{error or type(error).__name__}）") from None
 
 
 def url_transport(context: Optional[ssl.SSLContext] = None, timeout: float = READ_TIMEOUT,

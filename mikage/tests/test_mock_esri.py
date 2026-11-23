@@ -7,6 +7,7 @@ file it writes.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 import time
@@ -133,6 +134,41 @@ def test_satellites_have_tles_the_plugin_reads(server):
     sats = [satellite_of(f["attributes"], catalog) for f in rows]
     assert [s.name for s in sats] == ["OPT-X1", "OPT-X2", "SAR-Y1", "SAR-Y2"]
     assert all(s.tle1.startswith("1 ") and s.tle2.startswith("2 ") for s in sats)
+
+
+@pytest.mark.parametrize("zone", ["UTC", "Asia/Tokyo"])
+def test_the_sample_satellites_pass_at_the_same_hours_whenever_the_data_is_made(tmp_path, monkeypatch, zone):
+    # (Elements of the moment the data was made moved the passes with the hour: made before about 11:30 JST,
+    # the plan course's tomorrow had no shot and it stopped at 3-2, 2026-11-23.)
+    from datetime import date, datetime, timedelta, timezone
+
+    from mikage.core.plan.orbit import Orbit, eci_to_geodetic
+    from mikage.core.request.model import day_bounds
+
+    if not hasattr(time, "tzset"):
+        pytest.skip("time zones are set with tzset")
+    monkeypatch.setenv("TZ", zone)
+    time.tzset()
+    try:
+        def places(made: str) -> list:
+            """Each sample satellite's longitude and latitude 10 h after the start of the plan's tomorrow (JST)."""
+            now = int(datetime.fromisoformat(made).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            tomorrow = datetime.fromtimestamp(now / 1000).date() + timedelta(days=1)
+            at = day_bounds(date(tomorrow.year, tomorrow.month, tomorrow.day))[0] + 10 * sample.HOUR
+            sats = next(s for s in sample.services(str(tmp_path / made[:13]), "http://x", now=now)["services"] if s["name"] == "Satellites")
+            out = []
+            for f in sats["layers"][0]["features"]:
+                state = Orbit(f["attributes"]["TLE_LINE1"], f["attributes"]["TLE_LINE2"]).state(at)
+                lon, lat, _ = eci_to_geodetic(state.eci, state.gmst)
+                out.append((round(math.degrees(lon), 1), round(math.degrees(lat), 1)))
+            return out
+
+        first = places("2026-11-23T01:07:00")
+        for made in ("2026-11-23T04:00:00", "2026-11-23T20:00:00", "2027-03-01T13:00:00", "2027-06-21T23:30:00"):
+            assert places(made) == first, made
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_observations_areas_and_taxonomy_are_stored_and_read_back(server):

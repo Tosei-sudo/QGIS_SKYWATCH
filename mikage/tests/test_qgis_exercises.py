@@ -144,7 +144,7 @@ def test_misses_wrong_kinds_and_records_of_nothing_are_reviewed(practising):
     assert "あと 1 隻" in run.bar.state.text()
     # A form open is not submitted over.
     obs.map_clicked(a[3].lon, a[3].lat, None)
-    assert run.submit() is None and "フォームが開いています" in run.bar.state.text()
+    assert run.submit() is None and "フォームが開いている" in run.bar.state.text()
     obs.close_form()
     outcome = run.submit()
     assert [i.state for i in outcome.items] == ["正しい", "種別ちがい", "正しい", "見落とし"] and len(outcome.extras) == 1, [(i.answer.kind, i.mark and i.mark.kind, i.credits) for i in outcome.items]
@@ -199,7 +199,7 @@ def test_the_exam_has_no_hint_one_try_and_its_time(practising, monkeypatch):
     monkeypatch.setattr(exercise_screens.ExerciseList, "exec", look)
     assert not training.open_exercises()
     d = dialogs[0]
-    assert d.table.rowCount() == 6 and not d.start.isEnabled() and "もう受けました" in d.detail.text()
+    assert d.table.rowCount() == 6 and not d.start.isEnabled() and "受験済み" in d.detail.text()
     assert d.table.item(5, 7).text() == "済（1 回だけ）"
 
 

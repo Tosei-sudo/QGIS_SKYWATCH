@@ -633,7 +633,7 @@ def ogc_output(name: str, value: Any, label: Optional[str] = None, base: Optiona
     if is_record(value) and isinstance(value.get("href"), str):
         url = safe_url(value["href"], base)
         if not url:
-            return GpOutput("value", **head, text="（http(s) 以外のリンクは表示不可）")
+            return GpOutput("value", **head, text="（http(s) 以外のリンクは表示できない）")
         kind = value.get("type") if isinstance(value.get("type"), str) else ""
         return GpOutput("image" if re.match(r"^image/", kind, re.IGNORECASE) or _IMAGE_LIKE.search(url) else "link", **head, url=url)
     if is_record(value) and "value" in value and all(k in ("value", "mediaType", "encoding", "schema", "format") for k in value):
@@ -724,7 +724,7 @@ class GpClient:
         """An ArcGIS REST call (always `f=json`, a POST), the token only to the service's origin."""
         safe = safe_url(url)
         if not safe:
-            raise GpError("http(s) 以外の URL には接続不可")
+            raise GpError("http(s) 以外の URL には接続できない")
         own = self.token if self.token and same_origin(safe, service_url) else None
         form = {**(params or {}), "f": "json", **({"token": own} if own else {})}
         status, _, body = self.http("POST", safe, urlencode(form).encode(), {"content-type": "application/x-www-form-urlencoded"})
@@ -745,7 +745,7 @@ class GpClient:
         """An OGC API call: JSON in and out, the token as a bearer header to the service's origin only; (json, status, headers)."""
         safe = safe_url(url)
         if not safe:
-            raise GpError("http(s) 以外の URL には接続不可")
+            raise GpError("http(s) 以外の URL には接続できない")
         headers = {"accept": "application/json"}
         if self.token and same_origin(safe, service_url):
             headers["authorization"] = f"Bearer {self.token}"
@@ -785,7 +785,7 @@ class GpClient:
             return parse_ogc_process(kind["url"], value)
         processes = ogc_processes_url(kind["url"], value)
         if not processes:
-            raise GpError("GPServer・GP タスク・OGC API – Processes のどれとしても読み込み失敗")
+            raise GpError("GPServer・GP タスク・OGC API – Processes のどれとしても読み込めない")
         listed, _, _ = self.ogc(processes, kind["url"])
         return parse_ogc_process_list(processes, listed)
 
@@ -863,7 +863,7 @@ class GpClient:
         outputs = []
         results = job.get("results") if is_record(job.get("results")) else {}
         for name, ref in list(results.items())[:200]:
-            status(f"結果「{name}」を読み込み中…", None)
+            status(f"結果「{name}」を取得中…", None)
             param_url = ref.get("paramUrl") if is_record(ref) and isinstance(ref.get("paramUrl"), str) else f"results/{name}"
             # Results live under the job; anything else is not followed.
             url = safe_url(param_url, f"{job_url}/")
@@ -925,7 +925,7 @@ class GpClient:
                        or f"{job_url.rstrip('/')}/results")
         if not same_origin(results_url, task.url):
             raise GpError("結果の URL がサービスと別のホスト")
-        status("結果を読み込み中…", None)
+        status("結果を取得中…", None)
         results, _, _ = self.ogc(results_url, task.url)
         return RunResult(ogc_outputs(task, results, results_url), [job["message"][:500]] if isinstance(job.get("message"), str) else [])
 

@@ -63,7 +63,7 @@ def _in_crs(ds, wkt: str):
         return ds
     out = gdal.Warp("", ds, format="VRT", dstSRS=wkt, resampleAlg="bilinear")
     if out is None:
-        raise AlignError("合わせる画像を基準の座標系に再投影できず")
+        raise AlignError("基準の座標系への再投影に失敗")
     return out
 
 
@@ -85,7 +85,7 @@ def overlap(reference, target) -> tuple:
 def describe(reference_path: str, target_path: str) -> str:
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けず")
+        raise AlignError("画像を開けない")
     x0, y0, x1, y1 = overlap(reference, target)
     return f"重なる範囲 {x1 - x0:,} × {y1 - y0:,} px で照合。"
 
@@ -109,7 +109,7 @@ def find_alignment(reference_path: str, reference_band: int, target_path: str, t
     say = progress or (lambda _p: None)
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けず")
+        raise AlignError("画像を開けない")
     for ds, band, what in ((reference, reference_band, "基準"), (target, target_band, "合わせる")):
         if not 1 <= band <= ds.RasterCount:
             raise AlignError(f"{what}画像にバンド {band} なし")
@@ -169,7 +169,7 @@ def aligned_copy(reference_path: str, target_path: str, alignment: Alignment, ou
     """Writes the target, every band, corrected by the alignment, on the reference's grid lattice over where it lands; (width, height)."""
     reference, target = gdal.Open(reference_path), gdal.Open(target_path)
     if reference is None or target is None:
-        raise AlignError("画像を開けず")
+        raise AlignError("画像を開けない")
     back = invert_affine(alignment.transform)
     if back is None:
         raise AlignError("算出した変換が不正")
@@ -198,7 +198,7 @@ def aligned_copy(reference_path: str, target_path: str, alignment: Alignment, ou
         options["dstAlpha"] = True
     out = gdal.Warp(out_path, corrected, **options)
     if out is None:
-        raise AlignError(f"{out_path} を作成できず")
+        raise AlignError(f"{out_path} の作成に失敗")
     for i in range(1, target.RasterCount + 1):
         src = target.GetRasterBand(i)
         if src.GetDescription():

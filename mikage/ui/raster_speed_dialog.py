@@ -46,9 +46,8 @@ class RasterSpeedDialog(QDialog):
         self.resize(820, 640)
         layout = QVBoxLayout(self)
         intro = QLabel(tr(
-            "大きな画像の地図の描画が速くなるように、MIKAGE は次の設定を使います。GDAL の 2 つはこの QGIS の中だけ"
-            "（起動のたびに設定し、どこにも書かない。プラグインを止めると元に戻る）。QGIS のオプションは、QGIS の既定より"
-            "遅い値になっているものだけを、このプロファイルで 1 回だけ変えます（QGIS の 設定 > オプション > レンダリング でも変えられる）。"))
+            "大きな画像を速く描くための設定を使用。GDAL の 2 つはこの QGIS の中だけで、プラグインを止めると元に戻る。"
+            "QGIS のオプションは、既定より遅い値のものだけをこのプロファイルで 1 回だけ変更（設定 > オプション > レンダリング でも変更できる）"))
         intro.setWordWrap(True)
         layout.addWidget(intro)
         self.use = QCheckBox(tr("描画を速くする設定を使う"))
@@ -98,7 +97,7 @@ class RasterSpeedDialog(QDialog):
         self.use.blockSignals(False)
         self.use.setEnabled(options.enabled)
         if not options.enabled:
-            self.use.setToolTip(tr("設定ファイルの rasterSpeed で止めている（管理者の設定）"))
+            self.use.setToolTip(tr("管理者の設定で停止中（rasterSpeed）"))
         rows = raster_speed.rows(options)
         self.table.setRowCount(len(rows))
         for i, row in enumerate(rows):
@@ -118,22 +117,23 @@ class RasterSpeedDialog(QDialog):
 
     def _fast_text(self) -> str:
         text = tr(
-            "QGIS の色付け（引き伸ばし・no data・不透明度）を MIKAGE が表の引き当てで行います。色は QGIS と画素単位で同じで、"
-            "大きな 16 ビット画像の 1 画面が約 0.12 秒から約 0.05 秒になります。QGIS のシンボロジの設定はそのまま使え、"
-            "プロジェクトには QGIS の設定として保存されます（MIKAGE のない QGIS でも開ける）。このプロファイルだけの設定です。")
+            "QGIS の色付け（引き伸ばし・no data・不透明度）を MIKAGE が代わりに描画。"
+            "色は QGIS と画素単位で同じで、大きな 16 ビット画像の 1 画面が約 0.12 秒から約 0.05 秒に短縮。"
+            "QGIS のシンボロジの設定はそのまま使え、プロジェクトには QGIS の設定として保存（MIKAGE のない QGIS でも開ける）。"
+            "このプロファイルだけの設定")
         if self._fast is not None and fast_draw.on():
-            text += tr("今 MIKAGE が描いている画像: {n} 件。").format(n=self._fast.count())
+            text += "。" + tr("今 MIKAGE が描いている画像: {n} 件").format(n=self._fast.count())
         return text
 
     def _toggled(self, on: bool) -> None:
         canvases = list(self._canvases())
         if on:
             changed = raster_speed.turn_on(self._options(), canvases)
-            self.status.setText(tr("使います。QGIS のオプションを {n} 件変えました。").format(n=len(changed)) if changed
-                                else tr("使います（QGIS のオプションは変える必要なし）。"))
+            self.status.setText(tr("使用を開始。QGIS のオプション {n} 件を変更").format(n=len(changed)) if changed
+                                else tr("使用を開始（QGIS のオプションの変更は不要）"))
         else:
             back = raster_speed.turn_off(canvases)
-            self.status.setText(tr("使いません。GDAL の設定と QGIS のオプション {n} 件を元に戻しました。").format(n=len(back)))
+            self.status.setText(tr("使用を停止。GDAL の設定と QGIS のオプション {n} 件を復元").format(n=len(back)))
         self.refresh()
 
     def _fast_toggled(self, on: bool) -> None:
@@ -142,10 +142,10 @@ class RasterSpeedDialog(QDialog):
             return
         if on:
             n = self._fast.start()
-            self.status.setText(tr("画像の色付けを MIKAGE が描きます（今の画像 {n} 件。これから開く画像も）。").format(n=n))
+            self.status.setText(tr("画像の色付けを MIKAGE で描画（今の画像 {n} 件と、これから開く画像）").format(n=n))
         else:
             self._fast.stop()
-            self.status.setText(tr("画像の色付けを QGIS の描画に戻しました。"))
+            self.status.setText(tr("画像の色付けを QGIS の描画に変更"))
         self.fast_note.setText(self._fast_text())
 
     def set_fast(self, on: bool) -> str:

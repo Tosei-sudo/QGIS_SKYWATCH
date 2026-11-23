@@ -57,7 +57,7 @@ class OpeningPart:
         dock = self.observations() if self.observations else None
         entry = dock.list_catalog_images(images) if dock is not None else None
         if entry is None:
-            self.status.setText(self.tr("観測記録は使用不可（記録の保存先なし）"))
+            self.status.setText(self.tr("観測記録は使えない（記録の保存先が未設定）"))
             return None
         if len(images) == 1:
             self.status.setText(self.tr("{id} を観測記録へ（ファイルなし）").format(id=entry.name))
@@ -138,7 +138,7 @@ class OpeningPart:
         self.recent_menu.clear()
         entries = [e for e in opened_images().recent(30) if self._catalog_of_url(e.catalog_url) is not None][:20]
         if not entries:
-            action = self.recent_menu.addAction(self.tr("まだありません（画像を開くとここに並びます）"))
+            action = self.recent_menu.addAction(self.tr("まだなし（画像を開くとここに表示）"))
             action.setEnabled(False)
             return
         for e in entries:
@@ -162,7 +162,7 @@ class OpeningPart:
             return
         image_id = words[0]
         if len(words) > 1:
-            self.status.setText(self.tr("画像 ID は 1 つずつ開きます（{id} を開きます）").format(id=image_id))
+            self.status.setText(self.tr("画像 ID は 1 つずつ（{id} を表示）").format(id=image_id))
         entry = next((e for e in opened_images().items() if e.image_id == image_id and self._catalog_of_url(e.catalog_url)), None)
         if entry is not None:
             self.open_again(entry, then, missing)
@@ -184,7 +184,7 @@ class OpeningPart:
             return
         files = list(answer)
         if entry.missing(files if entry.files else None):
-            self.status.setText(self.tr("{id} の前回のファイルが見つからないため、画像カタログで探します").format(id=entry.image_id))
+            self.status.setText(self.tr("{id} の前回のファイルが見つからないので、画像カタログで検索").format(id=entry.image_id))
             self.open_from_catalogs(entry.image_id, then, missing)
             return
         record = record_of(entry.feature, catalog.fields)
@@ -200,7 +200,7 @@ class OpeningPart:
         add_record_layers(layers, record)
         overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
         self._opened(layers)
-        self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで開きました（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
+        self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで表示（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
         if then is not None:
             then(layers)
 
@@ -210,7 +210,7 @@ class OpeningPart:
         chosen = self.catalog()
         catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
         if not catalogs:
-            self.status.setText(self.tr("画像 ID の属性（fields.id）がある画像カタログがありません"))
+            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）"))
             if missing is not None:
                 missing()
             return
@@ -227,7 +227,7 @@ class OpeningPart:
 
         def done(result) -> None:
             if result is None:
-                self.status.setText(self.tr("画像カタログに画像 ID「{id}」の画像がありません").format(id=image_id))
+                self.status.setText(self.tr("画像カタログに画像 ID「{id}」の画像なし").format(id=image_id))
                 if missing is not None:
                     missing()
                 return
@@ -239,7 +239,7 @@ class OpeningPart:
                 return
             layers = self.open_catalog_records(catalog, [record])
             if layers:
-                self.status.setText(self.tr("{id} を開きました（{n} ファイル）").format(id=image_id, n=len(layers)))
+                self.status.setText(self.tr("{id} を表示（{n} ファイル）").format(id=image_id, n=len(layers)))
                 if then is not None:
                     then(layers)
 
@@ -254,7 +254,7 @@ class OpeningPart:
         chosen = self.catalog()
         catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
         if not ids or not catalogs:
-            self.status.setText(self.tr("画像 ID の属性（fields.id）がある画像カタログがありません") if ids else "")
+            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）") if ids else "")
             return
         client = self.context.esri()
         asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]
@@ -271,7 +271,7 @@ class OpeningPart:
 
         def done(result) -> None:
             if result is None:
-                self.status.setText(self.tr("画像カタログに該当する画像がありません（{n} 件の画像 ID）").format(n=len(ids)))
+                self.status.setText(self.tr("画像カタログに該当する画像なし（{n} 件の画像 ID）").format(n=len(ids)))
                 return
             catalog, records = result
             self.show_records(catalog, records)

@@ -78,7 +78,7 @@ class OutputsPart:
                 more = True
                 break
             if not self.show_folder(where.folder, where.file):
-                problems.append(self.tr("フォルダ「{f}」を開けず").format(f=where.folder))
+                problems.append(self.tr("フォルダ「{f}」を開けない").format(f=where.folder))
                 continue
             shown.append(where)
             ids.append(record.id)
@@ -92,7 +92,7 @@ class OutputsPart:
             text = ""
         if problems:
             text = "　".join(t for t in (text, problems[-1] if len(problems) == 1 else
-                                          self.tr("{n} 件は開けず（{p}）").format(n=len(problems), p=problems[-1])) if t)
+                                          self.tr("{n} 件は開けない（{p}）").format(n=len(problems), p=problems[-1])) if t)
         if text:
             self.status.setText(text)
         return shown

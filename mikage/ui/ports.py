@@ -75,7 +75,7 @@ class RequestsPort(Protocol):
     def selected(self) -> list: ...
 
     def from_plan(self, ops: list, sats: list, targets: list) -> Any:
-        """Its form opened with 臨時 requests of the imaging plan's opportunities (「臨時依頼にする」)."""
+        """Its form opened with 臨時 requests of the imaging plan's opportunities (「臨時依頼を作成」)."""
 
     def show(self) -> None: ...
 

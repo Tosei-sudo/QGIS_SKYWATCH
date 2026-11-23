@@ -446,7 +446,7 @@ class DashboardDock(PluginDock):
         self.clear_button.setVisible(False)
         self.clear_button.clicked.connect(self.clear_filter)
         self.select_button = QPushButton(_tr("地物を選択"))
-        self.select_button.setToolTip(_tr("絞り込んだ地物を選択（属性テーブル・書き出し・プロセッシングで利用可能）"))
+        self.select_button.setToolTip(_tr("絞り込んだ地物を選択（属性テーブル・書き出し・プロセッシングで使える）"))
         self.select_button.clicked.connect(self.select_shown)
         tools.addWidget(self.in_view_box, 0, 0)
         tools.addWidget(self.heat_box, 0, 1)
@@ -517,7 +517,7 @@ class DashboardDock(PluginDock):
         self.surge_box.toggled.connect(self.schedule)
         detail.addWidget(self.surge_box)
         box.addWidget(self.detail)
-        self.empty = QLabel(_tr("ベクターレイヤーを開くと、件数・属性別の集計・時間の推移・ヒートマップを表示。"))
+        self.empty = QLabel(_tr("ベクターレイヤーを開くと、件数・属性別の集計・時間の推移・ヒートマップを表示"))
         self.empty.setWordWrap(True)
         box.addWidget(self.empty)
         box.addStretch(1)
@@ -743,7 +743,7 @@ class DashboardDock(PluginDock):
         wanted = self._filter_subset()
         if layer.subsetString() != wanted:
             if not self._set_subset(wanted):
-                self.edit_note.setText(_tr("このレイヤーは絞り込み不可（集計のみ）"))
+                self.edit_note.setText(_tr("このレイヤーは絞り込めない（集計のみ）"))
                 self.edit_note.setVisible(True)
                 self._filtered = None
                 return

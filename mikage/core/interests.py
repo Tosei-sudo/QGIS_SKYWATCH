@@ -121,7 +121,7 @@ def interests_settings_of(value: Any, problems: list[str]) -> Optional[InterestS
         return None
     for k in value:
         if k not in ("points", "areas", "label", "color"):
-            problems.append(f"{at}.{k} は使用不可のキー（points・areas・label・color）")
+            problems.append(f"{at}.{k} は使えないキー（points・areas・label・color）")
     sources = {}
     for key in ("points", "areas"):
         if value.get(key) is not None:
@@ -195,7 +195,7 @@ def load_interests(client: EsriClient, settings: InterestSettings, user: str,
                    tokens: Optional[dict[str, Optional[str]]] = None) -> list[Interest]:
     """`user`'s points and areas, by name (areas and points mixed)."""
     if not user.strip():
-        raise EsriError("利用者名が分からない（環境変数 USERNAME がない。設定ファイルの editTracking.user で指定）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
     out: list[Interest] = []
     for kind in settings.kinds:
         source = settings.source(kind)
@@ -235,10 +235,10 @@ def save_interest(client: EsriClient, settings: InterestSettings, item: Interest
     if not item.has_shape:
         raise ValueError("形が必要（地図でクリックか描画）")
     if not user.strip():
-        raise EsriError("利用者名が分からない（設定ファイルの editTracking.user で指定）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
     source = settings.source(item.kind)
     if source is None:
-        raise EsriError(f"設定ファイルの interests に{KIND_LABELS[item.kind]}のレイヤー（{'points' if item.kind == POINT else 'areas'}）なし")
+        raise EsriError(f"関心地域・地点の設定 interests に{KIND_LABELS[item.kind]}のレイヤー（{'points' if item.kind == POINT else 'areas'}）なし")
     token = token or source.token
     info = _layer(client, source, item.kind, token)
     attributes = _attributes(item, source, user, info.field_types, info.field_lengths)

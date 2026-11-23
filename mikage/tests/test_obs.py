@@ -142,7 +142,7 @@ class TestNamesCsvAndConfig:
         assert store.fields["kind"] == "TYPE" and store.fields["id"] == "OBS_ID"
         assert store.soft_delete is False
         assert store.activities == ["入港"]
-        assert problems == ["observationStores[0] の fields.bogus は使用不可の役割"]
+        assert problems == ["observationStores[0] の fields.bogus は使えない役割"]
         assert observation_store_of({"url": "https://x/MapServer/2"}, problems, 1) is None
         assert vocabulary_of({"kinds": ["艦艇"]}, problems).kinds == ["艦艇"]
 
@@ -231,7 +231,7 @@ class TestCheckedAreas:
         a = area_store_of({"url": "https://x/FeatureServer/3", "fields": {"kind": "TARGET", "bad": "X"}, "softDelete": False}, problems, "a")
         assert (a.url, a.soft_delete, a.fields["kind"], a.fields["id"]) == ("https://x/FeatureServer/3", False, "TARGET", "AREA_ID")
         assert area_store_of("https://x/MapServer/3", problems, "b") is None
-        assert problems == ["a の fields.bad は使用不可の役割", "b は編集できる …/FeatureServer/1 のようなポリゴンレイヤーの URL で指定"]
+        assert problems == ["a の fields.bad は使えない役割", "b は編集できる …/FeatureServer/1 のようなポリゴンレイヤーの URL で指定"]
 
     def test_is_kept_in_an_esri_polygon_layer(self):
         fake = FakeEsri()

@@ -1,5 +1,5 @@
 """
-The ground track and what a satellite can image (撮像可能範囲) over a moment
+The ground track and what a satellite can image (撮像できる範囲) over a moment
 or a period, for the 「衛星パス」 dock, as the viewer (satellite-track.ts and
 satellite-track-panel.ts): the sub-satellite points, and on each side it can
 look to the band between its smallest and largest off-nadir angle.
@@ -286,5 +286,5 @@ def track_layers(tracks: Sequence[SatelliteTrack]) -> tuple:
         if line_parts:
             lines.append((line_parts, {**base, "kind": "地上軌跡"}))
         if rings:
-            areas.append((rings, {**base, "kind": "撮像可能範囲"}))
+            areas.append((rings, {**base, "kind": "撮像できる範囲"}))
     return fields, lines, areas

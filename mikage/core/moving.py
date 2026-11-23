@@ -600,11 +600,11 @@ def feed_url(text: str, kind: str, base: Optional[str] = None) -> str:
     url = urljoin(base, text) if base else text
     parts = urlsplit(url)
     if not parts.scheme or not parts.netloc:
-        raise ValueError("URL として読み込み不可")
+        raise ValueError("URL として読めない")
     if parts.scheme.lower() not in PROTOCOLS[kind]:
         raise ValueError(f"{FEED_TYPES[kind]} の URL は {'・'.join(PROTOCOLS[kind])} で指定")
     if parts.username or parts.password:
-        raise ValueError("URL にユーザー名・パスワードは書き込み不可")
+        raise ValueError("URL にユーザー名・パスワードは書き込めない")
     return url
 
 
@@ -642,7 +642,7 @@ def moving_feed_of(value: Any, problems: list[str], index: int) -> Optional[Feed
         else:
             for role, name in fields.items():
                 if role not in ROLES:
-                    problems.append(f"{at} の fields.{role} は使用不可の役割（{'・'.join(ROLES)}）")
+                    problems.append(f"{at} の fields.{role} は使えない役割（{'・'.join(ROLES)}）")
                 elif isinstance(name, str) and name.strip():
                     feed.fields[role] = name.strip()
                 else:
@@ -693,5 +693,5 @@ def history_rows(data: bytes, name: str) -> list[dict]:
     try:
         value = json.loads(data.decode("utf-8-sig"))
     except (UnicodeDecodeError, ValueError):
-        raise ValueError("CSV か GeoJSON・JSON として読み込み不可")
+        raise ValueError("CSV か GeoJSON・JSON として読めない")
     return records_of(value, MAX_HISTORY_ROWS)

@@ -114,7 +114,7 @@ class SegmentPanel(QFrame):
         self.model_combo.setMinimumWidth(180)
         top.addWidget(self.model_combo, 1)
         layout.addLayout(top)
-        hint = QLabel(self.tr("画像の物体のクリックで輪郭を抽出。Shift+クリックで範囲を拡張、Alt+クリックで除外。"))
+        hint = QLabel(self.tr("画像の物体のクリックで輪郭を抽出。Shift+クリックで範囲を拡張、Alt+クリックで除外"))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.note = QLabel()

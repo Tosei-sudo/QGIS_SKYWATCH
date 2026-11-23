@@ -21,10 +21,12 @@ from qgis.PyQt.QtCore import QCoreApplication, QRect, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFileDialog, QInputDialog, QMainWindow, QMenu, QMessageBox, QWidget
 
+from .docks import ask_no
+
 KEY = "mikage/dockLayouts"
 LAST_KEY = "mikage/dockLayoutLast"
 FILE_KIND = "mikage.dockLayouts"
-#: A dock's size in a window of its own (「別ウィンドウで開く」), and how far each next one is moved (cascaded).
+#: A dock's size in a window of its own (「別ウィンドウで表示」), and how far each next one is moved (cascaded).
 FLOAT_SIZE = (440, 620)
 FLOAT_STEP = 32
 
@@ -328,11 +330,11 @@ class DockLayoutStore:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict) or data.get("kind") != FILE_KIND or not isinstance(data.get("layouts"), dict):
-            raise ValueError(tr("ドックのレイアウトのファイルではありません"))
+            raise ValueError(tr("ドックのレイアウトのファイルではない"))
         layouts = self.saved()
         names = [k for k, v in data["layouts"].items() if isinstance(k, str) and k.strip() and valid(v)]
         if not names:
-            raise ValueError(tr("ドックのレイアウトのファイルに使えるレイアウトがありません"))
+            raise ValueError(tr("ドックのレイアウトのファイルに使えるレイアウトがない"))
         for name in names:
             layouts[name.strip()] = clean(data["layouts"][name])
         self._write(layouts)
@@ -348,7 +350,7 @@ class DockLayoutMenu(QMenu):
     def __init__(self, window: QMainWindow, docks: Callable[[], dict], message: Callable[[str], None], parent: QWidget | None = None,
                  floating: Callable[[], bool] = lambda: False):
         super().__init__(tr("ドックのレイアウト"), parent)
-        #: 「別ウィンドウで開く」 (「担当と個人設定」): a layout without windows of its own opens each dock in one.
+        #: 「別ウィンドウで表示」 (「担当と個人設定」): a layout without windows of its own opens each dock in one.
         self.floating = floating
         self.setObjectName("SatObsDockLayouts")
         self.window_ = window
@@ -398,22 +400,19 @@ class DockLayoutMenu(QMenu):
     def ask_save(self) -> None:
         names = list(self.store.all())
         name, ok = QInputDialog.getItem(self.window_, tr("ドックのレイアウトを保存"),
-                                        tr("名前（例: 観測記録の担当）。同じ名前のものは置き換えます。"),
+                                        tr("名前（例: 観測記録の担当）。同じ名前のものは置き換え"),
                                         names, names.index(self.store.last) if self.store.last in names else -1, True)
         name = (name or "").strip()
         if not ok or not name:
             return
-        if name in self.store.saved() and QMessageBox.question(
-                self.window_, tr("ドックのレイアウトを保存"), tr("「{name}」を今の配置で置き換えますか。").format(name=name),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        if name in self.store.saved() and not ask_no(
+                self.window_, tr("ドックのレイアウトを保存"), tr("「{name}」を今の配置で置き換え").format(name=name), yes=tr("置き換え")):
             return
         self.save_current(name)
-        self.message(tr("ドックのレイアウト「{name}」を保存しました").format(name=name))
+        self.message(tr("ドックのレイアウト「{name}」を保存").format(name=name))
 
     def ask_delete(self, name: str) -> None:
-        if QMessageBox.question(self.window_, tr("ドックのレイアウトの削除"), tr("「{name}」を削除しますか。").format(name=name),
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+        if ask_no(self.window_, tr("ドックのレイアウトの削除"), tr("「{name}」を削除").format(name=name), yes=tr("削除")):
             self.store.delete(name)
 
     def ask_export(self) -> None:
@@ -422,9 +421,9 @@ class DockLayoutMenu(QMenu):
             try:
                 n = self.store.export(path)
             except OSError as e:
-                QMessageBox.warning(self.window_, tr("ドックのレイアウトを書き出す"), tr("書き出せません: {e}").format(e=e.strerror or e))
+                QMessageBox.warning(self.window_, tr("ドックのレイアウトを書き出す"), tr("書き出しに失敗: {e}").format(e=e.strerror or e))
                 return
-            self.message(tr("ドックのレイアウト {n} 件を書き出しました").format(n=n))
+            self.message(tr("ドックのレイアウト {n} 件を書き出し").format(n=n))
 
     def ask_import(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self.window_, tr("ドックのレイアウトを読み込む"), "", tr("JSON (*.json)"))
@@ -435,4 +434,4 @@ class DockLayoutMenu(QMenu):
         except (OSError, ValueError, UnicodeDecodeError) as e:
             QMessageBox.warning(self.window_, tr("ドックのレイアウトを読み込む"), str(e))
             return
-        self.message(tr("ドックのレイアウト {n} 件を読み込みました: {names}").format(n=len(names), names="、".join(names)))
+        self.message(tr("ドックのレイアウト {n} 件を読み込み: {names}").format(n=len(names), names="、".join(names)))

@@ -2,7 +2,7 @@
 依頼文から下書き on the request form (ui/request_draft.py) with a model of
 the test's own: the row only while the task has a model, the proposal from
 a pasted text (the named area as the area, a place looked up in the
-gazetteer), 「欄に入れる」 tinting the fields, two places made into the
+gazetteer), 「欄に入力」 tinting the fields, two places made into the
 batch form, and editing a request changing only what the text names.
 """
 import json
@@ -112,12 +112,12 @@ def test_a_mail_made_into_the_fields_of_a_new_request(plugin):
     # The places: the named area, and the gazetteer's place for the one the table lacks.
     assert [(r.place, r.combo.currentText(), r.check.isChecked()) for r in panel.rows] == [
         ("横須賀港", "横須賀港（地名テーブル・港）", True), ("呉", "呉市（地名・住所検索・地名表・一辺 10 km）", True)]
-    assert panel.replace_button.text() == "2 件の依頼にする"
+    assert panel.replace_button.text() == "2 件の依頼を作成"
     # One place: into the fields.
     panel.rows[1].check.setChecked(False)
-    assert panel.replace_button.text() == "欄に入れる"
+    assert panel.replace_button.text() == "欄に入力"
     panel.checks["requester"].setChecked(False)
-    # Nothing changed until 「欄に入れる」.
+    # Nothing changed until 「欄に入力」.
     assert form.name.text() == "" and form.rings == []
     panel.replace_button.click()
     assert not panel.isVisible() and row.taken.isVisible() and "8 項目" in row.taken.text()
@@ -147,7 +147,7 @@ def test_two_places_made_into_two_requests(plugin):
     row.edit.setPlainText(MAIL)
     row.button.click()
     assert wait_for(lambda: row.panel.draft_value is not None and row.panel.replace_button.isVisible())
-    assert row.panel.replace_button.text() == "2 件の依頼にする"
+    assert row.panel.replace_button.text() == "2 件の依頼を作成"
     row.panel.replace_button.click()
     batch = dock.form
     assert batch is not form and batch.batch is not None and batch.windowTitle() == "依頼文から 2 件"

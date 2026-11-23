@@ -643,7 +643,7 @@ class EsriObservationStore:
                 else:
                     failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if conflicts or failed:
-            parts = [f"{len(conflicts)} 件はほかの人が読み込み後に更新したため保存せず（読み込み直してから変更）"] if conflicts else []
+            parts = [f"{len(conflicts)} 件はほかの人が先に変更したため保存せず。「最新を取得」を押してから変更"] if conflicts else []
             if failed:
                 parts.append(f"{len(failed)} 件の保存に失敗: {failed[0]}")
             raise (EsriError if failed else ConflictError)("・".join(parts))

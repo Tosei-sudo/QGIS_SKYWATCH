@@ -272,7 +272,7 @@ def shortfall(client: EsriClient, store: RequestStoreConfig, token: Optional[str
             outlines = taken_outlines(client, catalog, catalog_token, req, list(rows.get(rid, {}).values()), names, cancelled)
         except EsriError as error:
             if problems is not None:
-                problems.append(f"「{req.name or rid}」の撮像済みの範囲を読めず完了とした（{error}）")
+                problems.append(f"「{req.name or rid}」の撮像済みの範囲を読めないので完了扱い（{error}）")
             continue
         share = share_of(samples_of(req), outlines)
         for f in findings:
@@ -289,7 +289,7 @@ def missed_ids(rows: Sequence[HistoryRow]) -> set:
 
 
 def marked(rows: Sequence[HistoryRow], captured: str, image_id: str = "") -> list[Finding]:
-    """Findings set by hand (「撮像済みにする」・「未撮像にする」) for 採用 rows whose outcome differs."""
+    """Findings set by hand (「撮像済みに変更」・「未撮像に変更」) for 採用 rows whose outcome differs."""
     return [Finding(r, captured, image_id if captured == "撮像済み" else "") for r in rows
             if r.result == "採用" and r.captured != captured]
 
@@ -442,7 +442,7 @@ def save_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[st
     try:
         problems += sync_shots(client, store, token, ids).problems
     except EsriError as error:
-        problems.append(f"撮像の範囲の撮像結果を更新できず（{error}）")
+        problems.append(f"撮像の範囲の撮像結果の更新に失敗（{error}）")
 
 
 def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Optional[str], catalog: CatalogConfig, catalog_token: Optional[str],

@@ -152,7 +152,7 @@ class ResultsPart:
                 cols.append(Column(
                     "shot", tr("シーン"),
                     lambda op: f"#{'' if op.shot is None else op.shot}" + (tr("（{n} 地点）").format(n=op.shotTargets) if (op.shotTargets or 1) > 1 else ""),
-                    lambda op: tr("この {n} 地点は 1 回の撮像（1 シーン）でまとめて撮像可能").format(n=op.shotTargets) if (op.shotTargets or 1) > 1 else ""))
+                    lambda op: tr("この {n} 地点は 1 回の撮像（1 シーン）でまとめて撮像できる").format(n=op.shotTargets) if (op.shotTargets or 1) > 1 else ""))
         else:
             cols.append(Column("cover", tr("被覆"), cover_text, lambda op: cover_title(op, sats[op.satellite])))
         return cols

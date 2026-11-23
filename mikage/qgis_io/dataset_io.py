@@ -75,7 +75,7 @@ def read_datasets(paths: Sequence[str]) -> list[tuple[str, Dataset]]:
 def vector_layer(path: str) -> QgsVectorLayer:
     layer = QgsVectorLayer(path, os.path.basename(path), "ogr")
     if not layer.isValid():
-        raise DatasetError(f"ベクタの注釈を開けず: {path}")
+        raise DatasetError(f"ベクタの注釈を開けない: {path}")
     return layer
 
 
@@ -133,7 +133,7 @@ def dataset_labels(datasets: Sequence[tuple[str, Dataset]], taxonomy: Sequence[T
 def open_image(path: str) -> QgsRasterLayer:
     layer = QgsRasterLayer(path, os.path.basename(path))
     if not layer.isValid():
-        raise DatasetError(f"画像を開けず: {path}")
+        raise DatasetError(f"画像を開けない: {path}")
     return layer
 
 

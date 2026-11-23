@@ -23,7 +23,7 @@ HINT_POINTS = {
 POINT_CHOICES = [(1, "1 点"), (2, "2 点（長さ・向き）"), (3, "3 点（＋片側面）"), (4, "4 点（＋両側面）")]
 HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」"
 HINT_UNSEEN = "不可範囲（雲など）: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」。中の前後の画像のモノは「不可」として記録"
-NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
+NO_IMAGE = "画像なし。画像を開くか、＋ でファイルのない画像を追加"
 #: The background of the rows of records already reported (通報済み).
 REPORTED_ROW = "#fde68a"
 #: Records saved while their server could not be reached, waiting to be sent (core/offline.py).

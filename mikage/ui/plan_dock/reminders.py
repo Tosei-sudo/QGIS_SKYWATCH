@@ -45,7 +45,7 @@ class RemindersPart:
 
     def clear_reminders(self) -> None:
         n = len(self.reminders())
-        if n and not ask_no(self, self.tr("通知をすべて解除"), self.tr("撮像の通知 {n} 件をすべて解除しますか？").format(n=n)):
+        if n and not ask_no(self, self.tr("通知をすべて解除"), self.tr("撮像の通知 {n} 件をすべて解除").format(n=n), yes=self.tr("解除")):
             return
         settings.set_plan_reminders([])
         self.count_reminders()

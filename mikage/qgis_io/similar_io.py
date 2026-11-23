@@ -116,10 +116,10 @@ def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, s
         area = QgsCoordinateTransform(view_crs, crs, context).transformBoundingBox(view)
         image = QgsCoordinateTransform(layer.crs(), crs, context).transformBoundingBox(layer.extent())
     except Exception as error:  # noqa: BLE001
-        raise SimilarError(f"表示範囲を画像の座標に変換できません: {error}") from error
+        raise SimilarError(f"表示範囲を画像の座標に変換できない: {error}") from error
     area = area.intersect(image)
     if area.isEmpty() or area.width() <= 0 or area.height() <= 0:
-        raise SimilarError("地図の表示範囲に画像がありません")
+        raise SimilarError("地図の表示範囲に画像なし")
     length = float(sample.length)
     width = float(sample.width) if sample.width and sample.width > 0 else None
     mpp = max(length / TARGET_PIXELS, native_mpp(layer, crs, context))
@@ -128,8 +128,8 @@ def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, s
         mpp *= math.sqrt(pixels / MOST_PIXELS)
     if length / mpp < FEWEST_PIXELS:
         if pixels > MOST_PIXELS:
-            raise SimilarError(f"表示範囲が広すぎます（見本が {length / mpp:.0f} 画素）。地図を拡大してから")
-        raise SimilarError(f"見本が小さすぎます（画像の画素で {length / mpp:.0f} 画素）。もっと細かい画像で")
+            raise SimilarError(f"表示範囲が広すぎる（見本が {length / mpp:.0f} 画素）。地図を拡大してから検索")
+        raise SimilarError(f"見本が小さすぎる（画像の画素で {length / mpp:.0f} 画素）。もっと細かい画像で検索")
     w = max(1, int(math.ceil(area.width() / mpp)))
     h = max(1, int(math.ceil(area.height() / mpp)))
     grid = Grid(area.xMinimum(), area.yMaximum(), mpp, mpp, w, h)
@@ -142,7 +142,7 @@ def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, s
     patch = Grid(-(r + 0.5) * mpp, (r + 0.5) * mpp, mpp, mpp, 2 * r + 1, 2 * r + 1)
     sample_gray, sample_valid = gray_of(render_rgba(layer, patch.extent_of(0, 0, 2 * r + 1, 2 * r + 1), 2 * r + 1, 2 * r + 1, crs, context))
     if not sample_valid[r, r]:
-        raise SimilarError("見本の場所に画像がありません（この画像の上の記録を見本に）")
+        raise SimilarError("見本の場所に画像なし（この画像の上の記録を見本に）")
     to_local = QgsCoordinateTransform(WGS84, crs, context)
 
     def place(lon: float, lat: float, reach: float) -> Optional[tuple[float, float]]:

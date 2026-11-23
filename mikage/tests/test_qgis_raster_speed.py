@@ -105,8 +105,8 @@ def test_qgis_options_slower_than_its_defaults_are_changed_once_and_can_be_put_b
     s.setValue(ZOOMED_OUT, "bilinear")
     plugin, iface = start()
     canvas = iface.mapCanvas()
-    wait_for(lambda: any("QGIS のオプションを" in w.text() for w in messages(iface)), ms=5000)
-    item = next(w for w in messages(iface) if "QGIS のオプションを" in w.text())
+    wait_for(lambda: any("速く描くため QGIS のオプション" in w.text() for w in messages(iface)), ms=5000)
+    item = next(w for w in messages(iface) if "速く描くため QGIS のオプション" in w.text())
     assert "3 件" in item.text() and "並列描画・描画キャッシュ・早期リサンプリング" in item.text()
     assert "複数の CPU コアで並列にレイヤーを描画: オフ → オン" in item.toolTip()
     # In QGIS's options and on the map canvas right away; early resampling for the layers added from now on.
@@ -120,12 +120,12 @@ def test_qgis_options_slower_than_its_defaults_are_changed_once_and_can_be_put_b
     assert not raster_speed.as_bool(s.value(PARALLEL), True) and not raster_speed.as_bool(s.value(RENDER_CACHE), True)
     assert s.value(EARLY_RESAMPLING) is None
     assert not canvas.isParallelRenderingEnabled() and not canvas.isCachingEnabled()
-    assert any("元に戻しました" in w.text() for w in messages(iface))
+    assert any("QGIS のオプション 3 件を復元" in w.text() for w in messages(iface))
     plugin.unload()
     # Not again at the next start: the person chose them so.
     plugin, iface = start()
     APP.processEvents()
-    assert not any("QGIS のオプションを" in w.text() for w in messages(iface))
+    assert not any("速く描くため QGIS のオプション" in w.text() for w in messages(iface))
     assert not raster_speed.as_bool(s.value(PARALLEL), True)
     plugin.unload()
 
@@ -158,7 +158,7 @@ def test_the_dialog_turns_it_off_and_on(monkeypatch):
     assert "ウイルス対策" in dialog.manual.toPlainText() and "COG" in dialog.manual.toPlainText()
     before_cache = raster_speed.gdal_set().get("before_" + CACHE)
     status = dialog.set_use(False)
-    assert "元に戻しました" in status and raster_speed.personal_off()
+    assert "を復元" in status and raster_speed.personal_off()
     assert not raster_speed.as_bool(s.value(PARALLEL), True) and not iface.mapCanvas().isParallelRenderingEnabled()
     assert raster_speed.gdal_set() == {} and gdal.GetConfigOption(THREADS) is None
     if before_cache is not None:

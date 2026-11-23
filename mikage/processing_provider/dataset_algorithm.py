@@ -145,6 +145,6 @@ class DatasetAlgorithm(QgsProcessingAlgorithm):
         try:
             save_dataset(dataset, path)
         except OSError as e:
-            raise QgsProcessingException(tr("保存できず: {e}").format(e=e))
+            raise QgsProcessingException(tr("保存に失敗: {e}").format(e=e))
         feedback.pushInfo(tr("保存: {path}（画像 {n}・物体 {o}）").format(path=path, n=len(dataset.items), o=dataset.stats["objects"]))
         return {self.OUTPUT: path, self.COUNT: added}

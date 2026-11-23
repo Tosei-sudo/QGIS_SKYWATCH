@@ -73,7 +73,7 @@ FEATURES: dict[str, frozenset] = {
     "outages.edit": frozenset({PLAN}),
     #: 撮像予定: 採用・不採用・不明に戻す・結果ファイルの取り込み・要求外を追加・削除.
     "schedule.answer": frozenset({PLAN}),
-    #: 撮像依頼: 新規・編集・削除・一括編集・レイヤーから取り込み, and 「臨時依頼にする」 of the plans.
+    #: 撮像依頼: 新規・編集・削除・一括編集・レイヤーから取り込み, and 「臨時依頼を作成」 of the plans.
     "requests.edit": frozenset({REQUEST, PLAN}),
     # 観測記録
     "観測記録": frozenset({OBSERVE}),
@@ -105,7 +105,7 @@ FEATURES: dict[str, frozenset] = {
     "判読の練習の問題を作る…": frozenset({INSTRUCT}),
     "判読の練習の成績…": frozenset({INSTRUCT}),
     # 管理
-    #: 観測記録: 「ローカル記録の消去…」 (cannot be undone).
+    #: 観測記録: 「この PC の記録を消去…」 (cannot be undone).
     "observations.clear": frozenset({ADMIN}),
     "接続と表の点検…": frozenset({ADMIN}),
     "監査ログ…": frozenset({ADMIN}),
@@ -176,7 +176,7 @@ def needed_roles(feature: str) -> list[str]:
 def refusal(feature: str) -> str:
     """Why a feature is not offered: the roles to tick for it."""
     names = needed_roles(feature)
-    return (f"担当「{'」「'.join(names)}」の機能です（メニュー「担当と個人設定…」で担当を選ぶと使えます）" if names else "")
+    return (f"担当「{'」「'.join(names)}」の機能（メニュー「担当と個人設定…」で担当を選ぶと使える）" if names else "")
 
 
 # ---- the settings file and the table --------------------------------------------------------
@@ -194,7 +194,7 @@ def user_where(source: EsriSource, user: str) -> str:
 
 def _rows(client: EsriClient, source: EsriSource, user: str, token: Optional[str]) -> tuple[list[tuple[Optional[int], str]], Any]:
     if not user.strip():
-        raise EsriError("利用者名が分からない（環境変数 USERNAME がない。設定ファイルの editTracking で指定）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
     info = client.layer(source.url, token or source.token, refresh=True)
     missing = [source.fields[k] for k in ("user", "role") if source.fields[k] not in info.field_types]
     if missing:

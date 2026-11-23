@@ -89,7 +89,7 @@ def detection_output_of(value: Any, problems: list[str], index: int) -> Optional
     mapped: dict[str, str] = {}
     for role, name in fields.items():
         if role not in TRANSFER_ROLES:
-            problems.append(f"{at} の fields.{role} は使用不可の役割")
+            problems.append(f"{at} の fields.{role} は使えない役割")
         elif _is_name(name):
             mapped[role] = name
         else:

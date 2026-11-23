@@ -78,7 +78,7 @@ def test_what_keeps_a_pass_from_being_used():
     angle = outage(max_off_nadir=20)
     assert angle.blocks(True, "left", 20, 30) is None and angle.blocks(True, "left", 25, 30) == "オフナディア角の上限"
     night = outage(no_night=True)
-    assert night.blocks(True, "left", 10, 5) is None and night.blocks(True, "left", 10, -1) == "夜間不可"
+    assert night.blocks(True, "left", 10, 5) is None and night.blocks(True, "left", 10, -1) == "夜間は撮像できない"
     # Only その他の影響: the calculation is as it was.
     other = outage(other="画質の低下")
     assert other.blocks(True, "left", 89, -90) is None and not other.limits and "画質の低下" in other.impact_text()
@@ -228,7 +228,7 @@ def test_shots_handed_out_are_only_told():
     night = outage(no_night=True)
     from mikage.core.plan.orbit import sun_elevation
 
-    expected = "夜間不可" if sun_elevation(BELOW, T) < 0 else None
+    expected = "夜間は撮像できない" if sun_elevation(BELOW, T) < 0 else None
     found = handed_hit([night], "ISS", "", "", [], T, "昇交", "右", 10, BELOW)
     assert (found[1] if found else None) == expected
     # The series or another name of the satellite.

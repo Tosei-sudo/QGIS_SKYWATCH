@@ -246,9 +246,9 @@ def _answer(reply, url: str, authcfg: Optional[str]) -> bytes:
         # Nothing was sent: QGIS could not apply the authentication (it says so in its log), or the answer was lost.
         if authcfg:
             raise EsriError(f"認証設定（{authcfg}）を使えず（{_address(url)}）")
-        raise UnreachableError(f"接続不可（{_address(url)}：応答が途中で切れた）")
+        raise UnreachableError(f"接続できない（{_address(url)}：応答が途中で切れた）")
     if error != QNetworkReply.NetworkError.NoError:
-        reason = "サーバーのエラー" if isinstance(status, int) and status >= 500 else "接続不可"
+        reason = "サーバーのエラー" if isinstance(status, int) and status >= 500 else "接続できない"
         # Qt's message repeats the address with its query: a token may be in it.
         detail = re.sub(r"\?\S*", "", reply.errorString())
         # Not reached (or the server is down): the plugin works offline until it answers (core/offline.py).

@@ -206,7 +206,7 @@ def test_scenes_side_by_side():
 
 def test_bad_tle():
     bad = iss(name="BAD", tle1="1 garbage", tle2="2 garbage")
-    assert plan_access([bad], [point("a", BELOW)], around(T)).problems == ["BAD: TLE の読み込み不可"]
+    assert plan_access([bad], [point("a", BELOW)], around(T)).problems == ["BAD: TLE を読み込めない"]
 
 
 def test_ground_range():

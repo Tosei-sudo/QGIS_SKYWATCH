@@ -168,7 +168,7 @@ def test_service_layers_feature_collections_the_view_the_base_map_and_bookmarks_
             SaveLayer("一時", True, 1, "features", fields=[{"name": "NAME", "alias": "名前", "type": "esriFieldTypeString"}],
                       features=[("point", {"x": 15557000.123, "y": 4257000.0}, {"NAME": "東京"}),
                                 ("polygon", {"rings": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 0.0]]]}, {"NAME": "面"})]),
-            SaveLayer("画像.tif", True, 1, "none", reason="画像は書き込み不可"),
+            SaveLayer("画像.tif", True, 1, "none", reason="画像は書き込めない"),
         ],
         extent=(0, 0, 100, 100),
         basemap=BaseMapConfig("gsi", "地理院", "xyz", "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", '<a href="x">国土地理院</a>'),
@@ -177,7 +177,7 @@ def test_service_layers_feature_collections_the_view_the_base_map_and_bookmarks_
     out = json.loads(json.dumps(result.json))
     assert out["version"].startswith("2.")
     assert result.included == ["公園", "地図", "WMS", "一時"]
-    assert result.skipped == [("画像.tif", "画像は書き込み不可")]
+    assert result.skipped == [("画像.tif", "画像は書き込めない")]
     parks, map_layer, wms, temp = out["operationalLayers"]
     assert {k: parks[k] for k in ("layerType", "url", "visibility", "opacity", "minScale", "showLabels")} == {
         "layerType": "ArcGISFeatureLayer", "url": "https://e.com/FeatureServer/0", "visibility": True, "opacity": 0.7, "minScale": 100000, "showLabels": True}
