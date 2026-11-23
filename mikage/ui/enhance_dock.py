@@ -49,11 +49,13 @@ from ..core.enhance.api import image_rule_for, resolve_bands
 from ..qgis_io import enhance_group as eg
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io import complex_sar
+from ..qgis_io import quick_pan
 from ..qgis_io.tasks import run_task
 from .colorize_box import ColorizeBox, paired_with, set_blend
 from .curve_editor import CurveEditor
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
+from .quick_pan import QuickPanBox
 from .wheel_guard import guard_wheel
 
 TITLE = "画像補正"
@@ -210,6 +212,9 @@ class EnhanceDock(PluginDock):
         self.share.toggled.connect(self._share_toggled)
         self.share.hide()
         v.addWidget(self.share)
+        # クイックパンシャープン: shown only while the layer is in it (started from the layer panel or the menu).
+        self.quick_box = QuickPanBox()
+        v.addWidget(self.quick_box)
 
 
         dra = QGroupBox(self.tr("DRA（表示範囲で自動レンジ）"))
@@ -357,11 +362,13 @@ class EnhanceDock(PluginDock):
         project.layersWillBeRemoved.connect(self.layers_removed)
         project.loadingLayer.connect(self._start_reading)
         project.readProject.connect(self._project_read)
+        quick_pan.signals().changed.connect(self._quick_pan_changed)
         self.restore_layers(project.mapLayers().values())
         self.follow_layer(iface.activeLayer())
 
     def close_down(self) -> None:
         self._timer.stop()
+        self.quick_box.close_down()
         self._histogram_timer.stop()
         self._tree_timer.stop()
         self._histogram_request += 1
@@ -375,6 +382,7 @@ class EnhanceDock(PluginDock):
                              (QgsProject.instance().layersAdded, self.layers_added),
                              (QgsProject.instance().layersWillBeRemoved, self.layers_removed),
                              (QgsProject.instance().loadingLayer, self._start_reading),
+                             (quick_pan.signals().changed, self._quick_pan_changed),
                              (QgsProject.instance().readProject, self._project_read)]:
             try:
                 signal.disconnect(slot)
@@ -382,6 +390,14 @@ class EnhanceDock(PluginDock):
                 pass
 
     # ---- layers ----
+
+    def _quick_pan_changed(self, ms_id: str) -> None:
+        """クイックパンシャープン started, changed or ended: shown again when it is the layer shown (or its pan)."""
+        if self.group is not None or self.layer is None or sip.isdeleted(self.layer):
+            return
+        link = quick_pan.link_of(self.layer) or quick_pan.used_as_pan(self.layer)
+        if self.layer.id() == ms_id or link is not None or not self.quick_box.isHidden():
+            self.refresh()
 
     def _start_reading(self, *_args) -> None:
         self._reading = True
@@ -572,6 +588,7 @@ class EnhanceDock(PluginDock):
             self.share.setChecked(eg.share_wanted(group, self.targets) if group is not None else False)
             self.colorize_box.set_targets(self.targets, group is not None)
             self.colorize_box.show_layer(layer, settings.color if r else None)
+            self.quick_box.show_layer(layer if group is None else None)
         finally:
             self._loading = False
         self._show_color_rows()

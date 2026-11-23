@@ -121,6 +121,14 @@ class OverlayPart:
         if visible:
             self.refresh_images()
             return
+        if not self.isHidden():
+            # Only behind another tab of the right side (画像補正…): the form, 「クリック記録」 and the marks stay
+            # (操作性点検の再検証 R1, tsudo 2026-11-23); they end when the dock is closed.
+            return
+        self._dock_closed()
+
+    def _dock_closed(self) -> None:
+        """The dock closed (or the plugin unloading): what was being done on the map ends."""
         if self.area_mode:
             self.set_area_mode(False)
         self.set_active(False)

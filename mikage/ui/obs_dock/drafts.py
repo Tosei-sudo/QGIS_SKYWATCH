@@ -44,7 +44,10 @@ class DraftsPart:
         A kept record opened in the form again, on its image (which must be
         open): a change on the record as it is now, with what was typed.
         `store`: its store, chosen in the dock first when another one is.
+        Something typed in the form is asked about first (操作性点検の再検証 R2).
         """
+        if not self._let_form_go(self.tr("保管した記録を開く")):
+            return False
         if store and (self.book is None or self.book.store.label != store):
             i = self.store_select.findText(store)
             if i < 0:

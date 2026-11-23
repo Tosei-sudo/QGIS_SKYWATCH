@@ -306,6 +306,12 @@ class TestImageTime:
         assert time_from_name("S2A_20240501T012345_x.tif") == int(datetime(2024, 5, 1, 1, 23, 45).timestamp() * 1000)
         assert time_from_name("img_2024-05-01.tif") == int(datetime(2024, 5, 1).timestamp() * 1000)
         assert time_from_name("x123456789.tif") is None
+        # The hour and minute without seconds after a separator (操作性点検の再検証 R10): 09:30, not 00:00.
+        assert time_from_name("港湾_20261120_0930.tif") == int(datetime(2026, 11, 20, 9, 30).timestamp() * 1000)
+        assert time_from_name("S1_20261120T0930_x.tif") == int(datetime(2026, 11, 20, 9, 30).timestamp() * 1000)
+        # Four digits that are no time (a number of a series): the day alone, as before.
+        assert time_from_name("tile_20261120_0075.tif") == int(datetime(2026, 11, 20).timestamp() * 1000)
+        assert time_from_name("tile_20261120_09301.tif") == int(datetime(2026, 11, 20).timestamp() * 1000)
         xml = '<GDALMetadata><Item name="PRODUCT">L1</Item><Item name="ACQUISITION_START_TIME">2024-05-01T10:00:00Z</Item></GDALMetadata>'
         assert time_from_metadata(metadata_items_of_xml(xml)) == 1714557600000
         # As the viewer: IMAGING_DATE alone reads first (a local day).

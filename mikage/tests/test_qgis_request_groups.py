@@ -147,6 +147,16 @@ def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
     assert dock.chosen is None and not dock.edit_button.isEnabled() and not dock.delete_button.isEnabled()
     box.choose(None)
     assert dock.chosen is None and len(dock.shown) == 4
+    # Two chosen (Ctrl), one filtered out: the other stays chosen, the one 「編集…」 acts on (操作性点検の再検証, 2026-11-23).
+    dock.select([r.id for r in dock.shown if r.name in ("東京湾", "大阪湾")])
+    dock._row(next(i for i, r in enumerate(dock.shown) if r.name == "大阪湾"))
+    assert sorted(r.name for r in dock.selected()) == ["大阪湾", "東京湾"]
+    box.choose("第1班")
+    assert [r.name for r in dock.selected()] == ["東京湾"] and dock.chosen.name == "東京湾" and dock.edit_button.isEnabled()
+    box.choose(None)
+    assert [r.name for r in dock.selected()] == ["東京湾"] and dock.chosen.name == "東京湾"
+    dock.table.clearSelection()
+    dock.chosen = None
 
     # A new request starts in the user's own group; only the groups in use are offered.
     dock.edit(new=True)

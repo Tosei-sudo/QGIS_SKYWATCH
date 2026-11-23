@@ -284,11 +284,15 @@ class RequestDock(PluginDock):
         # Requests put in from elsewhere (the 「撮像計画ファイル出力」 dock's read): their groups listed too.
         self.group_filter.set_groups(self.groups, (r.group for r in self.requests), force=False)
         cat = self.category_filter.currentText()
+        # Those chosen in the list (several with Ctrl / Shift) and still shown stay chosen (操作性点検の再検証, tsudo
+        # 2026-11-23: one filtered out let go of the others too).
+        was_selected = {r.id for r in self.selected()} if self.shown else set()
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
                       and self.status_filter.passes(r.status) and self.group_filter.passes(r.group)]
         if self.chosen is not None and not any(r is self.chosen for r in self.shown):
-            # Filtered out: no longer the one 「編集…」「削除」 act on, unseen (操作性点検 9, tsudo 2026-11-23).
-            self.chosen = None
+            # Filtered out: no longer the one 「編集…」「削除」 act on, unseen (操作性点検 9, tsudo 2026-11-23);
+            # another one chosen with it and still shown is.
+            self.chosen = next((r for r in self.shown if r.id in was_selected), None)
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間",
                                                                    "優先度", "種別", "状態")])
@@ -314,10 +318,14 @@ class RequestDock(PluginDock):
             self.model.appendRow(items)
             if r is self.chosen:
                 chosen_row = i
+        sel = self.table.selectionModel()
+        sel.blockSignals(True)
         if chosen_row >= 0:
-            self.table.selectionModel().blockSignals(True)
             self.table.selectRow(chosen_row)
-            self.table.selectionModel().blockSignals(False)
+        for i, r in enumerate(self.shown):
+            if r.id in was_selected and i != chosen_row:
+                sel.select(self.model.index(i, 0), sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
+        sel.blockSignals(False)
         self.draw()
         self._update_buttons()
 

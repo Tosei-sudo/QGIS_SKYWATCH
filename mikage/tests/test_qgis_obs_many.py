@@ -286,9 +286,12 @@ def test_the_last_corner_is_put_down_by_a_click_on_the_map(plugin):
     assert L.ready and len(L.corners) == 3 and L.skipped == frozenset()
 
 
-def test_turning_a_mode_on_lets_a_new_record_being_made_go(plugin):
-    # tsudo 2026-11-11: 「元が作成中だとどの状態がわからなくなるので、連続ボタン押したら、作成中は外してほしい」.
+def test_turning_a_mode_on_lets_a_new_record_being_made_go(plugin, monkeypatch):
+    # tsudo 2026-11-11: 「元が作成中だとどの状態がわからなくなるので、連続ボタン押したら、作成中は外してほしい」;
+    # something typed in it is asked about first (操作性点検の再検証 R7, tsudo 2026-11-23).
     p, iface, dock, layers, _ = plugin
+    asked = []
+    monkeypatch.setattr(dock, "ask_leave", lambda title, doing: asked.append(doing) or "discard")
     car = measured_sample(dock)
     dock.set_points(1)
     for button in (dock.stamp_button, dock.row_button):
@@ -298,6 +301,12 @@ def test_turning_a_mode_on_lets_a_new_record_being_made_go(plugin):
         button.setChecked(True)
         assert not dock.form.isVisible() and dock.pending is None and dock.many.mode
         dock.set_many_mode("")
+    assert asked == ["「連続」に移る", "「並べる」に移る"]
+    # Nothing typed: let go without a question.
+    dock.map_clicked(139.65, 35.63, None)
+    dock.stamp_button.setChecked(True)
+    assert not dock.form.isVisible() and dock.many.mode == "stamp" and len(asked) == 2
+    dock.set_many_mode("")
     # Points clicked for a measured one are let go too.
     dock.set_points(2)
     dock.map_clicked(139.65, 35.63, None)

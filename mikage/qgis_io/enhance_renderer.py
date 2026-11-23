@@ -25,6 +25,9 @@ what the screen costs (QGIS reads the overview that fits).
 - A drawing QGIS calls off (the view or the correction changed again before
   it was done) stops between its steps and parts, so the next one does not
   wait behind it — with a group, behind every one of its layers.
+- クイックパンシャープン (qgis_io/quick_pan.py): the picture bands drawn come
+  pan-sharpened from the state's link; the statistics (DRA, the whole
+  stretch, the histogram) stay those of the multispectral image itself.
 
 The renderer keeps its settings in the layer's custom property
 `satobs/enhance` (JSON) and writes itself into the project as QGIS's own
@@ -109,6 +112,11 @@ _NUMPY = {
 }
 if hasattr(Qgis.DataType, "Int8"):
     _NUMPY[Qgis.DataType.Int8] = np.int8
+
+
+def numpy_type(data_type):
+    """The NumPy type of a QGIS data type of values (None for colours, complex and unknown types)."""
+    return _NUMPY.get(data_type)
 
 
 @dataclass(frozen=True)
@@ -197,6 +205,9 @@ class EnhanceState:
         #: The last DRA result, kept while locked.
         self.kept: Optional[tuple] = None
         self.generation = 0
+        #: クイックパンシャープン (qgis_io.quick_pan.PanLink): its `sharpened()` reads the picture bands in place of
+        #: `read_bands`, with a panchromatic image's detail put in; None for none.
+        self.pan = None
 
     def clear(self) -> None:
         with self.lock:
@@ -449,7 +460,9 @@ class EnhanceRenderer(QgsRasterRenderer):
             read_extent = QgsRectangle(extent.xMinimum() - m * px, extent.yMinimum() - m * py,
                                        extent.xMaximum() + m * px, extent.yMaximum() + m * py)
             rw, rh = width + 2 * m, height + 2 * m
-        bands, valid = read_bands(self.input(), s.bands, read_extent, rw, rh, s.no_data, feedback)
+        link = self.state.pan
+        read = link.sharpened(s.bands, read_extent, rw, rh, s.no_data, feedback) if link is not None else None
+        bands, valid = read if read is not None else read_bands(self.input(), s.bands, read_extent, rw, rh, s.no_data, feedback)
         if canceled(feedback):
             return None
         black, white, ops = self.ranges(extent, correction)
@@ -792,6 +805,11 @@ class EnhanceRenderer(QgsRasterRenderer):
             r.setBlueContrastEnhancement(enhancement(2, s.bands[2]))
         r.copyCommonProperties(self, True)
         return r
+
+
+def in_strips(height: int, strip, feedback=None) -> None:
+    """Runs `strip(y0, y1)` over `height` rows in parts, in the drawing's threads (as the renderer's own steps)."""
+    EnhanceRenderer._strips(height, strip, feedback)
 
 
 def rgba_of(color) -> tuple:
