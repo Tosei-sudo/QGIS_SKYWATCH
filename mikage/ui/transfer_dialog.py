@@ -146,7 +146,7 @@ class TransferDialog(QDialog):
         self.run_button.setEnabled(False)
         self.mapping.clear()
         if output is None:
-            self.plan_label.setText(_tr("転記先が未設定（管理者に連絡: detectionOutputs）"))
+            self.plan_label.setText(_tr("転記先が未設定（管理者に連絡: detectionOutputs）［E703］"))
             return
         if layer is None:
             self.plan_label.setText(_tr("転記できるレイヤーなし（先に「物体検出（AI）」か「クリック抽出（AI）」で結果を作成）"))
@@ -166,7 +166,7 @@ class TransferDialog(QDialog):
             self.mapping.addTopLevelItem(item)
         self.mapping.resizeColumnToContents(0)
         if not target.can_create:
-            self.plan_label.setText(_tr("{name} には追加できない（管理者に連絡: サービスで作成を許可）").format(name=target.name))
+            self.plan_label.setText(_tr("{name} には追加できない（管理者に連絡: サービスで作成を許可）［E202］").format(name=target.name))
             return
         if target.geometry_type not in ("esriGeometryPolygon", "esriGeometryPoint"):
             self.plan_label.setText(_tr("{name} はポリゴンかポイントのレイヤーで指定").format(name=target.name))

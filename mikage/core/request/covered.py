@@ -214,7 +214,7 @@ def taken_outlines(client, catalog, token: Optional[str], req: ImagingRequest, r
         return []
     acquired = catalog.fields.get("acquired")
     if not acquired:
-        raise EsriError(f"{catalog.label} に撮像日時の属性（fields.acquired）なし")
+        raise EsriError(f"{catalog.label}に撮像日時の項目がない（管理者に連絡: fields.acquired）", code="E704")
     types = client.layer(catalog.url, token).field_types
     zone = time_zone.zone_for(catalog.url)
     sensor = catalog.fields.get("sensor")

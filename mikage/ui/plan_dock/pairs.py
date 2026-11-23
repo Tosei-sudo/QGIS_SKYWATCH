@@ -161,7 +161,7 @@ class PairsPart:
             if self.revisit_task is not task:
                 return
             self.revisit_task = None
-            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算失敗: {m}").format(m=message))
+            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算に失敗: {m}").format(m=message))
 
         task = run_task(what, work, done, failed)
         self.revisit_task = task

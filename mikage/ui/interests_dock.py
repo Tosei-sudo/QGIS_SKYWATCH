@@ -212,9 +212,9 @@ class InterestsDock(PluginDock):
         s = self.settings
         user = self.book.user()
         if s is None:
-            self.note.setText(self.tr("関心地域・地点は使えない（管理者に連絡: interests）"))
+            self.note.setText(self.tr("関心地域・地点は使えない（管理者に連絡: interests）［E703］"))
         elif not user:
-            self.note.setText(self.tr("利用者名が分からないので使えない（管理者に連絡: editTracking.user）"))
+            self.note.setText(self.tr("利用者名が分からないので使えない（管理者に連絡: editTracking.user）［E205］"))
         else:
             self.note.setText(self.tr("{user} さんの関心地域・地点（Esri に保存。どの PC でも同じ）").format(user=user))
         self.note.setVisible(True)

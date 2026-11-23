@@ -68,7 +68,7 @@ def check_bands(layer: QgsMapLayer, bands) -> None:
     """Refuses bands the image does not have (a model trained on band values needs an image with them)."""
     count = layer.bandCount() if hasattr(layer, "bandCount") else 0
     if layer.providerType() in ("wms", "arcgismapserver", "xyz") or count < max(bands):
-        raise AiError(f"このモデルはバンド {', '.join(map(str, bands))} の値で学習。画像のバンドが不足（{count} バンド）")
+        raise AiError(f"このモデルはバンド {', '.join(map(str, bands))} の値で学習。画像のバンドが不足（{count} バンド）", code="E605")
 
 
 def band_values(layer: QgsMapLayer, bands, extent: QgsRectangle, width: int, height: int) -> np.ndarray:
@@ -139,7 +139,7 @@ def detect_layer(model: LoadedModel, spec: DetectorSpec, render: Callable[[QgsRe
     tw, th = spec.input_size
     names = model.input_names
     if not names:
-        raise AiError("モデルに入力なし")
+        raise AiError("モデルに入力なし", code="E604")
     feed_name = names[0]
     types = model.output_types()
 

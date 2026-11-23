@@ -33,6 +33,7 @@ from urllib.parse import urljoin, urlsplit
 import numpy as np
 
 from ..core.ai.api import OnnxSignature, OnnxValue
+from ..core.errors import Coded
 from ..core.win64 import NotCopied, add_package
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,12 +43,14 @@ VENDORED = os.path.join(HERE, "ext", "win64")
 VENDORED_PYTHON = (3, 12)
 
 
-class AiError(Exception):
-    """An AI tool that cannot run, in the person's words."""
+class AiError(Coded):
+    """An AI tool that cannot run, in the person's words (its エラーコード, core/errors.py, given by the raise)."""
 
 
 class RuntimeMissing(AiError):
     """ONNX Runtime is not there."""
+
+    code = "E601"
 
 
 #: Said when the Windows zip's runtime could not be copied out of the plugin's folder (core/win64.NotCopied).
@@ -101,7 +104,7 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         try:
             import onnxruntime as ort  # noqa: PLC0415
         except ImportError as error:
-            raise RuntimeMissing(f"同梱の onnxruntime の読み込みに失敗（{error}）。{install_hint(system)}") from error
+            raise RuntimeMissing(f"同梱の onnxruntime を読み込めない。{install_hint(system)}", detail=str(error)) from error
     if ort is None:
         raise RuntimeMissing(f"AI の実行に必要な onnxruntime なし。{install_hint(system)}")
     quiet_telemetry(ort)
@@ -178,7 +181,7 @@ def download(url: str, target: str, authcfg: Optional[str] = None, progress: Opt
         request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
         # Python gets (ok, request) back: the tuple itself is always true.
         if authcfg and not QgsApplication.authManager().updateNetworkRequest(request, authcfg)[0]:
-            raise AiError(f"認証設定（{authcfg}）を使えず（{url.split('?', 1)[0]}）")
+            raise AiError(code="E204", detail=f"認証設定 {authcfg}（{url.split('?', 1)[0]}）")
         reply = QgsNetworkAccessManager.instance().get(request)
         if authcfg:
             QgsApplication.authManager().updateNetworkReply(reply, authcfg)
@@ -217,10 +220,11 @@ def download(url: str, target: str, authcfg: Optional[str] = None, progress: Opt
             if cancelled():
                 raise AiError("中止")
             if last["timed_out"]:
-                raise AiError(f"モデルの取得が途中で停止（{url.split('?', 1)[0]}）")
+                raise AiError("モデルの取得が途中で停止", code="E101", detail=url.split('?', 1)[0])
             status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
             if reply.error() != QNetworkReply.NetworkError.NoError or (isinstance(status, int) and status >= 400):
-                raise AiError(f"{url.split('?', 1)[0]} の読み込みに失敗（{'HTTP ' + str(status) if isinstance(status, int) else '接続できない'}）")
+                raise AiError("モデルを取得できない", code=("E103" if status >= 500 else "E104") if isinstance(status, int) else "E101",
+                              detail=f"{url.split('?', 1)[0]}：{'HTTP ' + str(status) if isinstance(status, int) else '接続できない'}")
         finally:
             reply.deleteLater()
 
@@ -242,7 +246,7 @@ def local_model(source: str, base: str = "", progress: Optional[Callable[[float]
     whole = resolve_source(source, base)
     if not is_remote(whole):
         if not os.path.isfile(whole):
-            raise AiError(f"モデルのファイルなし（{whole}）")
+            raise AiError(f"モデルのファイルなし（{os.path.basename(whole) or whole}）", code="E603", detail=whole)
         return whole
     from . import settings
 
@@ -312,7 +316,7 @@ def create_model(path: str, name: str = "", use_gpu: bool = True) -> LoadedModel
         except Exception as e:  # noqa: BLE001 (some models use operators a GPU provider does not have)
             error = e
     if session is None:
-        raise AiError(f"モデルの読み込みに失敗（{os.path.basename(path)}: {str(error).splitlines()[0] if error else '不明'}）")
+        raise AiError(f"モデルを読めない（{os.path.basename(path)}）", code="E604", detail=str(error).splitlines()[0] if error else "")
     meta = session.get_modelmeta()
     signature = OnnxSignature(
         [OnnxValue(v.name, v.type, _dims(v.shape)) for v in session.get_inputs()],

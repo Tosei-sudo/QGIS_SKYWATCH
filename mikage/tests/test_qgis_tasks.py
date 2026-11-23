@@ -106,9 +106,9 @@ def test_answers_and_errors(http):
     assert in_task(lambda: get_bytes(http + "/moved")) == ("ok", b"got /ok")
     assert in_task(lambda: qgis_transport()(http + "/ok", {"f": "json"})) == ("ok", b"posted f=json")
     kind, message = in_task(lambda: get_bytes(http + "/broken?token=secret"))
-    assert kind == "failed" and message.startswith("サーバーのエラー（" + http + "/broken") and "secret" not in message
+    assert kind == "failed" and message == "サーバーの中でエラー［E103］"
     kind, message = in_task(lambda: get_bytes(http + "/missing"))
-    assert kind == "failed" and message.startswith("接続できない（")
+    assert kind == "failed" and message == "サーバーが要求を受け付けない［E104］"
     with pytest.raises(RuntimeError):
         get_bytes(http + "/ok")
 
@@ -259,7 +259,7 @@ def test_a_request_that_takes_too_long_gives_up(silent_server, monkeypatch):
     monkeypatch.setattr(network, "_time_limit_ms", lambda url: 300)
     begun = time.monotonic()
     kind, message = in_task(lambda: get_bytes(url + "?token=secret"))
-    assert kind == "failed" and message == f"応答なし（タイムアウト）（{url}）"
+    assert kind == "failed" and message == "サーバーの応答がない（時間切れ）［E102］"
     assert time.monotonic() - begun < 5
     # Its thread ends at once (the event loop QGIS waited in was quit), and is let go.
     assert wait_for(lambda: all(e.wait(0) for e in network._ending), 5000)
@@ -267,7 +267,7 @@ def test_a_request_that_takes_too_long_gives_up(silent_server, monkeypatch):
 
 def test_an_authentication_that_cannot_be_used_is_told(http):
     kind, message = in_task(lambda: get_bytes(http + "/ok", "nosuchcfg"))
-    assert (kind, message) == ("failed", f"認証設定（nosuchcfg）を使えず（{http}/ok）")
+    assert (kind, message) == ("failed", "サインインの設定を使えない［E204］")
 
 
 def test_tasks_wait_while_qgis_starts():

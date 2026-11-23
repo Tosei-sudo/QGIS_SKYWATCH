@@ -106,7 +106,7 @@ def test_the_history_names_the_file_of_each_request():
     assert file_of(partial, "SYS-T", "R-5") is None and file_of(partial, "SYS-T", "R-1") == "SYS-T_20261108_1.csv"
     assert not_written(plan, partial) == {"R-5"}
     rows = {r.request_id: r for r in history_of(plan, FIRST + H, partial, "RUN", failures={"SYS-T": "アクセス拒否"})}
-    assert (rows["R-5"].result, rows["R-5"].reason, rows["R-5"].file) == (HELD, "書き出し失敗（アクセス拒否）", "")
+    assert (rows["R-5"].result, rows["R-5"].reason, rows["R-5"].file) == (HELD, "書き出しに失敗: アクセス拒否", "")
     assert (rows["R-4"].result, rows["R-4"].file) == (TAKEN, "SYS-T_20261108_2.csv")
     # One file: the system's name as before.
     one = _system(columns=COLUMNS, limit={"count": 10})

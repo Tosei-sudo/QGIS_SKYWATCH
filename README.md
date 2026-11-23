@@ -38,6 +38,7 @@
 | [導入と設定](docs/admin/install.md) | 導入、設定、接続と表の点検 |
 | [設定ファイルの書き方](docs/admin/config-file.md) | 設定ファイルの書き方 |
 | [Esri 側のテーブル定義](docs/admin/esri-tables.md) | Esri 側のテーブル定義 |
+| [エラーコード一覧（管理者向け）](docs/admin/error-codes.md) | 画面のエラーコードごとの原因・対処と、管理者が確かめること（ログ・監査ログの `detail.code`） |
 | [構成と依存のきまり](docs/architecture.md) | 改修する人向け: 層、機能の登録票、窓口と通知、機能の api、データ窓口（リポジトリ）、設定の一覧表、大きなドックの部分、機能ごとの小さな組み立てのテスト、構成テストの台帳 |
 
 ## Python API

@@ -29,7 +29,7 @@ from ..core.plan.api import (
     DIRECTIONS, ONGOING, OVERDUE, PLANNED, RECOVERED, Outage, check_outage, delete_outages, load_outages, new_id, save_outage,
     when_text,
 )
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .docks import ask_no, plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
@@ -342,7 +342,7 @@ class OutageDialog(QDialog):
         if self.task is not None:
             return
         if self.source is None:
-            self.status.setText(self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）"))
+            self.status.setText(self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）［E703］"))
             return
         source, client, token = self.source, self.context.esri(), self.token()
         self.status.setText(self.tr("衛星の障害情報を取得中…"))
@@ -392,7 +392,7 @@ class OutageDialog(QDialog):
         opened = sum(1 for o in self.outages if o.open(now))
         text = self.tr("復旧していない障害 {n} 件（全 {m} 件）").format(n=opened, m=len(self.outages))
         if self.source is None:
-            text = self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）")
+            text = self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）［E703］")
         self.status.setText("。".join(t for t in (self.note, text) if t))
         self.note = ""
         self._update_buttons()
@@ -481,7 +481,7 @@ class OutageDialog(QDialog):
                 try:
                     saved.append(save_outage(client, source, o, token))
                 except Exception as error:  # noqa: BLE001 (each outage on its own; told)
-                    problems.append(f"{o.target}: {error}")
+                    problems.append(f"{o.target}: {error_text(error)}")
             return saved, problems
 
         def done(result):

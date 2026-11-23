@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional, Protocol
 from urllib.parse import quote, unquote, urlencode, urljoin, urlsplit
 
 from . import json_pieces
+from .errors import Coded
 from .time_zone import UTC, ZULU, TimeShift, TimeZone, write_instant, write_text, zone_for
 from .util import is_record
 
@@ -43,8 +44,8 @@ LINEAR_UNIT_NAMES = {"esriMeters": "m", "esriKilometers": "km", "esriFeet": "フ
 JOB_STATE_NAMES = {"waiting": "待機中", "running": "実行中", "succeeded": "完了", "failed": "失敗", "cancelled": "取り消し"}
 
 
-class GpError(Exception):
-    """A request or a run that failed, in the person's words."""
+class GpError(Coded):
+    """A request or a run that failed, in the person's words (its エラーコード given by the raise; none for guidance)."""
 
 
 class GpCancelled(GpError):
@@ -162,7 +163,7 @@ class GpService:
 def parse_esri_service(root: str, value: Any) -> GpService:
     """The tasks of a GPServer (`{tasks: ['Buffer', …]}`)."""
     if not is_record(value) or not isinstance(value.get("tasks"), list):
-        raise GpError("GPServer の応答に tasks なし")
+        raise GpError(code="E109", detail="GPServer の応答に tasks なし")
     names = []
     for t in value["tasks"]:
         name = t if isinstance(t, str) else _text(t.get("name"), 200) if is_record(t) else None
@@ -232,7 +233,7 @@ def esri_field(p: Any) -> Optional[GpField]:
 def parse_esri_task(url: str, value: Any, service: Any = None) -> GpTask:
     """A GP task's description (`…/GPServer/Buffer?f=json`)."""
     if not is_record(value) or not isinstance(value.get("parameters"), list):
-        raise GpError("GP タスクの応答に parameters なし")
+        raise GpError(code="E109", detail="GP タスクの応答に parameters なし")
     params = value["parameters"][:200]
     inputs = [f for f in (esri_field(p) for p in params) if f is not None]
     outputs = [GpOutputSpec(p["name"], _text(p.get("displayName"), 200) or p["name"], p.get("dataType") if isinstance(p.get("dataType"), str) else "")
@@ -268,7 +269,7 @@ def ogc_processes_url(url: str, value: Any) -> Optional[str]:
 def parse_ogc_process_list(url: str, value: Any) -> GpService:
     """The processes of an OGC API – Processes list (`/processes`)."""
     if not is_record(value) or not isinstance(value.get("processes"), list):
-        raise GpError("processes の一覧なし")
+        raise GpError(code="E109", detail="processes の一覧なし")
     base = url if url.endswith("/") else url + "/"
     tasks = []
     for p in value["processes"]:
@@ -339,7 +340,7 @@ def ogc_field(name: str, value: Any) -> GpField:
 def parse_ogc_process(url: str, value: Any) -> GpTask:
     """An OGC process description (`/processes/{id}`)."""
     if not is_record(value) or not isinstance(value.get("id"), str):
-        raise GpError("プロセスの説明に id なし")
+        raise GpError(code="E109", detail="プロセスの説明に id なし")
 
     # 1.0 has inputs as a map; drafts had a list of {id, …}.
     def entries(v: Any) -> list:
@@ -713,12 +714,12 @@ class GpClient:
     @staticmethod
     def _json(body: bytes) -> Any:
         if len(body) > MAX_RESPONSE_BYTES:
-            raise GpError("応答が大きすぎ")
+            raise GpError(code="E106")
         try:
             # In pieces: a large result read off the main thread does not hold QGIS's screen (core/json_pieces.py).
             return json_pieces.loads(body.decode("utf-8-sig"))
         except (ValueError, UnicodeDecodeError):
-            raise GpError("応答が JSON 以外") from None
+            raise GpError(code="E105", detail="JSON 以外の応答") from None
 
     def esri(self, url: str, params: Optional[dict], service_url: str) -> dict:
         """An ArcGIS REST call (always `f=json`, a POST), the token only to the service's origin."""
@@ -730,15 +731,15 @@ class GpClient:
         status, _, body = self.http("POST", safe, urlencode(form).encode(), {"content-type": "application/x-www-form-urlencoded"})
         value = self._json(body)
         if not is_record(value):
-            raise GpError("応答の形式が不正")
+            raise GpError(code="E105", detail="JSON のオブジェクト以外の応答")
         error = value.get("error")
         if is_record(error):
             if error.get("code") in (498, 499, 403):
-                raise GpError(f"トークンが無効か、権限なし（{error.get('message') or ''}）" if own else "このサービスには認証が必要（認証設定を選択）")
+                raise GpError(code="E202" if own else "E203", detail=f"{error.get('code')} {error.get('message') or ''}")
             details = [d for d in error.get("details") or [] if isinstance(d, str)]
-            raise GpError(("サービスからエラー応答: " + " ".join([str(error.get("message") or ""), *details]))[:500])
+            raise GpError(code="E104", detail=" ".join([str(error.get("message") or ""), *details])[:500])
         if status >= 400:
-            raise GpError(f"サーバーからエラー応答（HTTP {status}）")
+            raise GpError(code="E103" if status >= 500 else "E104", detail=f"HTTP {status}")
         return value
 
     def ogc(self, url: str, service_url: str, method: str = "GET", payload: Optional[dict] = None, prefer_async: bool = False) -> tuple:
@@ -757,14 +758,14 @@ class GpClient:
             headers["prefer"] = "respond-async"
         status, answer_headers, raw = self.http(method, safe, body, headers)
         if status in (401, 403):
-            raise GpError("トークンが無効か、権限なし" if self.token else "このサービスには認証が必要（認証設定を選択）")
+            raise GpError(code="E202" if self.token else "E203", detail=f"HTTP {status}")
         if status >= 400:
             try:
                 problem = json.loads(raw.decode("utf-8-sig"))
             except (ValueError, UnicodeDecodeError):
                 problem = None
             detail = ": ".join(str(problem[k]) for k in ("title", "detail", "description") if is_record(problem) and isinstance(problem.get(k), str))
-            raise GpError(f"サーバーからエラー応答（HTTP {status}）" + (f": {detail[:500]}" if detail else ""))
+            raise GpError(code="E103" if status >= 500 else "E104", detail=f"HTTP {status}" + (f": {detail[:500]}" if detail else ""))
         if status == 204 or not raw:
             return None, status, answer_headers
         return self._json(raw), status, answer_headers
@@ -785,7 +786,7 @@ class GpClient:
             return parse_ogc_process(kind["url"], value)
         processes = ogc_processes_url(kind["url"], value)
         if not processes:
-            raise GpError("GPServer・GP タスク・OGC API – Processes のどれとしても読み込めない")
+            raise GpError(code="E109")
         listed, _, _ = self.ogc(processes, kind["url"])
         return parse_ogc_process_list(processes, listed)
 
@@ -832,7 +833,7 @@ class GpClient:
         job = self.esri(f"{task.url}/submitJob", params, task.url)
         job_id = job.get("jobId")
         if not isinstance(job_id, str) or not re.fullmatch(r"[\w.-]{1,200}", job_id):
-            raise GpError("ジョブ ID の返却なし")
+            raise GpError(code="E108", detail="ジョブ ID の返却なし")
         job_url = f"{task.url}/jobs/{quote(job_id, safe='')}"
         delay = self.poll_seconds
         try:
@@ -847,7 +848,9 @@ class GpClient:
                     break
                 if state == "failed":
                     errors = [m for m in messages if m.startswith("エラー")][-3:]
-                    raise GpError("ジョブが失敗" + (f": {' / '.join(errors) or messages[-1]}" if messages else ""))
+                    said = (' / '.join(errors) or messages[-1]) if messages else ""
+                    # The job's own messages are the tool's words for the person (a GP tool's 「エラー: …」): kept on screen.
+                    raise GpError(f"処理サービスで失敗（{said[:200]}）" if said else "", code="E108", detail=said)
                 if state == "cancelled":
                     raise GpCancelled()
                 self._wait(delay)
@@ -895,7 +898,7 @@ class GpClient:
                    or link_of((job or {}).get("links"), ["monitor", "status", "self", "http://www.opengis.net/def/rel/ogc/1.0/job"], task.url)
                    or (f"{root}/jobs/{quote(job_id, safe='')}" if job_id else None))
         if not job_url or not same_origin(job_url, task.url):
-            raise GpError("ジョブの URL が不明")
+            raise GpError(code="E108", detail="ジョブの URL が不明")
         job = job or {}
         delay = self.poll_seconds
         try:
@@ -907,7 +910,7 @@ class GpClient:
                 if state == "succeeded":
                     break
                 if state == "failed":
-                    raise GpError("ジョブが失敗" + (f": {message}" if message else ""))
+                    raise GpError(f"処理サービスで失敗（{message}）" if message else "", code="E108", detail=message)
                 if state == "cancelled":
                     raise GpCancelled()
                 self._wait(delay)
@@ -924,7 +927,7 @@ class GpClient:
         results_url = (link_of(job.get("links"), ["http://www.opengis.net/def/rel/ogc/1.0/results", "results"], job_url)
                        or f"{job_url.rstrip('/')}/results")
         if not same_origin(results_url, task.url):
-            raise GpError("結果の URL がサービスと別のホスト")
+            raise GpError(code="E108", detail="結果の URL がサービスと別のホスト")
         status("結果を取得中…", None)
         results, _, _ = self.ogc(results_url, task.url)
         return RunResult(ogc_outputs(task, results, results_url), [job["message"][:500]] if isinstance(job.get("message"), str) else [])

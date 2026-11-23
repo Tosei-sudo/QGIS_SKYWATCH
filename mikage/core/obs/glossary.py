@@ -349,7 +349,7 @@ def load_glossary(client: EsriClient, source, token: Optional[str] = None,
     info = client.layer(source.url, token, refresh=True)
     missing = [source.fields[r] for r in NEEDED if source.fields[r] not in info.field_types]
     if missing:
-        raise EsriError(f"単語集の表に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"単語集の表に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
     fields = {role: name for role, name in source.fields.items() if name in info.field_types}
     rows = client.query_all(source.url, source.where or "1=1", token, out_fields=",".join(dict.fromkeys(fields.values())),
                             geometry=False, limit=LIMIT, cancelled=cancelled)

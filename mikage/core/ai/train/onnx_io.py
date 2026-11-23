@@ -18,6 +18,7 @@ from typing import Any, Iterator, Optional
 
 import numpy as np
 
+from ...errors import Failed
 from .net import BN_EPS, STRIDE, Add, Conv, Up, grid_centres
 
 #: ONNX's element types.
@@ -193,7 +194,7 @@ def fields(data: bytes) -> Iterator[tuple[int, int, Any]]:
         elif wire == 1:
             v, i = data[i:i + 8], i + 8
         else:
-            raise ValueError("ONNX の読み込みに失敗（未対応の形式）")
+            raise Failed("モデルの形式に未対応", code="E604")
         yield field, wire, v
 
 

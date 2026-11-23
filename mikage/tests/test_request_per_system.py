@@ -50,7 +50,7 @@ def test_one_systems_rows_and_raises():
     # SYS-C's file failing: only its own requests are not handed out.
     assert not_written(plan, {}, "SYS-C") == {"R-2", "R-4"} and not_written(plan, {}) == {"R-1", "R-2", "R-3", "R-4"}
     failed = history_of(plan, FIRST + H, {}, "RUN-C", failures={"SYS-C": "スキーマ不一致"}, system="SYS-C")
-    assert (failed[0].result, failed[0].system, failed[0].reason) == (HELD, "SYS-C", "書き出し失敗（スキーマ不一致）")
+    assert (failed[0].result, failed[0].system, failed[0].reason) == (HELD, "SYS-C", "書き出しに失敗: スキーマ不一致")
     # All systems at once: every candidate, held ones without a system (as before).
     every = history_of(plan, FIRST + H, {"SYS-A": "a.csv", "SYS-C": "c.json"}, "RUN")
     assert {r.request_id: r.system for r in every} == {"R-1": "SYS-A", "R-3": "SYS-A", "R-2": "SYS-C", "R-4": "SYS-C", "R-5": ""}

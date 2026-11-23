@@ -140,7 +140,7 @@ def test_polling_and_server_sent_events(http_server):
     bad = FeedConnection(FeedConfig("b", "poll", f"{base}/bad"))
     bad.status.connect(lambda state, detail: states.append((state, detail)))
     assert wait_for(lambda: any(s == "error" for s, _ in states), 10000)
-    assert "HTTP 500" in next(d for s, d in states if s == "error")
+    assert "［E103］" in next(d for s, d in states if s == "error")
     bad.close()
 
 
@@ -159,10 +159,11 @@ def test_stream_service_description():
     ws, fields = stream_socket(body, 200, "https://geo.example/arcgis/rest/services/Ships/StreamServer?token=typed")
     assert ws == "wss://geo.example/arcgis/ws/services/Ships/StreamServer/subscribe?token=abc"
     assert fields == {"id": "TRACKID", "time": "TIME"}
-    with pytest.raises(ValueError, match="streamUrls"):
+    with pytest.raises(ValueError, match="［E105］"):
         stream_socket(b"{}", 200, "https://a/StreamServer")
-    with pytest.raises(ValueError, match="HTTP 403"):
+    with pytest.raises(ValueError, match="使う権限がない［E202］") as said:
         stream_socket(b"", 403, "https://a/StreamServer")
+    assert "HTTP 403" in said.value.detail
 
 
 def history(minutes_lon_lat, ident="a"):

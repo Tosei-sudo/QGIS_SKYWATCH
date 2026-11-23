@@ -105,7 +105,7 @@ def test_too_many_or_too_long_words_and_non_text_fields_are_refused():
     numbers = {**TYPES, "IMG_ID": "esriFieldTypeInteger"}
     assert "IMG_ID" not in keyword_condition(CATALOG, numbers, "臨時")[0]
     assert "UPPER(AREA)" in keyword_condition(CATALOG, {"NOTE": "esriFieldTypeString"}, "臨時")[0]
-    with pytest.raises(EsriError, match="文字列の属性なし"):
+    with pytest.raises(EsriError, match="フリーワードで探す項目が文字列でない"):
         keyword_condition(CATALOG, {"NOTE": "esriFieldTypeDouble", "IMG_ID": "esriFieldTypeOID", "AREA": "esriFieldTypeDate"}, "臨時")
 
 

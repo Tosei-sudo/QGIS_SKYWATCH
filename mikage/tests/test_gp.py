@@ -1,5 +1,6 @@
 """The viewer's gp.test.ts, for core/gp.py, and runs of the client against a scripted server."""
 import json
+import re
 from urllib.parse import parse_qs
 
 import pytest
@@ -310,7 +311,8 @@ def test_an_ogc_job_with_a_location_and_a_bearer_token():
 def test_server_errors_in_the_persons_words():
     server = Server({("POST", "https://h/GPServer"): (200, {}, {"error": {"code": 499, "message": "Token Required"}}),
                      ("GET", "https://h/ogc/processes/x"): (500, {}, {"title": "壊れた", "detail": "原因"})})
-    with pytest.raises(GpError, match="このサービスには認証が必要"):
+    with pytest.raises(GpError, match="サインインが必要［E203］"):
         GpClient(server).read("https://h/GPServer")
-    with pytest.raises(GpError, match=r"HTTP 500.*壊れた: 原因"):
+    with pytest.raises(GpError, match="サーバーの中でエラー［E103］") as said:
         GpClient(server).read_task("ogc", "https://h/ogc/processes/x")
+    assert re.search(r"HTTP 500.*壊れた: 原因", said.value.detail)

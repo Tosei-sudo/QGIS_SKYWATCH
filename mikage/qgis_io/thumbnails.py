@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 from qgis.PyQt.QtCore import QObject, QUrl, Qt
 from qgis.PyQt.QtGui import QImage
 
+from ..core import errors
 from ..core.catalog.api import is_address
 from ..core.esri import EsriError
 from .tasks import Cancelled, run_task
@@ -57,10 +58,10 @@ def _read(address: str, authcfg: Optional[str]) -> bytes:
         return get_bytes(address, authcfg)
     path = QUrl(address).toLocalFile() if address.lower().startswith("file:") else address
     if not os.path.isfile(path):
-        raise ValueError(f"ファイルなし（{path}）")
+        raise errors.Failed(code="E401", detail=path)
     size = os.path.getsize(path)
     if size > MAX_BYTES:
-        raise ValueError(f"ファイルが大きすぎる（{size // (1024 * 1024)} MB。サムネイルは {MAX_BYTES // (1024 * 1024)} MB まで）")
+        raise errors.Failed(f"ファイルが大きすぎる（{size // (1024 * 1024)} MB。サムネイルは {MAX_BYTES // (1024 * 1024)} MB まで）", code="E406")
     with open(path, "rb") as f:
         return f.read()
 
@@ -71,15 +72,15 @@ def fetch(folder: str, address: str, authcfg: Optional[str] = None) -> str:
     image = QImage()
     if not image.loadFromData(data):
         head = data[:200].decode("utf-8", "replace").strip()
-        hint = "（サーバーの答え: " + head[:80] + "）" if head.startswith(("{", "<")) else ""
-        raise ValueError("画像として読めない" + hint)
+        said = "サーバーの答え: " + head[:80] if head.startswith(("{", "<")) else ""
+        raise errors.Failed("画像として読めない", code="E503", detail=said)
     if max(image.width(), image.height()) > MAX_SIDE:
         image = image.scaled(MAX_SIDE, MAX_SIDE, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
     os.makedirs(folder, exist_ok=True)
     path = cache_path(folder, address)
     temporary = path + ".part"
     if not image.save(temporary, "PNG"):
-        raise OSError("サムネイルを保存できない（" + folder + "）")
+        raise errors.FileFailed("サムネイルを保存できない", code="E402", detail=folder)
     os.replace(temporary, path)
     return path
 

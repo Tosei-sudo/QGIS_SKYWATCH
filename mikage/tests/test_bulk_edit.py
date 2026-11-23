@@ -192,7 +192,7 @@ def test_records_are_removed_for_good_where_the_layer_has_no_soft_delete(tmp_pat
     fake.layers[URL].rows = [r for r in fake.layers[URL].rows if r["attributes"]["OBS_ID"] != "b"]
     out = book.remove_many(["a", "b", "c"])
     assert sorted(o.id for o in out.removed) == ["a", "c"] and out.failed == 1
-    assert "削除できず 1 件（1 件の削除に失敗" in said[-1]
+    assert "削除できず 1 件（1 件の削除をサーバーが受け付けない［E305］）" in said[-1]
     assert [o.id for o in book.records] == ["b"]
     assert fake.layers[URL].rows == []
     db.close()

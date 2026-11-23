@@ -19,8 +19,9 @@ from qgis.PyQt.QtCore import QTimer, Qt
 from qgis.PyQt.QtGui import QGuiApplication
 from qgis.PyQt.QtWidgets import QDockWidget, QFrame, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
-from ..core import audit, roles
+from ..core import audit, errors, roles
 from ..qgis_io.context import PluginContext
+from . import error_help
 
 
 def plain_tip(text: str) -> str:
@@ -41,9 +42,12 @@ def plain_label(label: QLabel) -> QLabel:
     text (names, notes) or a server's message. Security re-check 2026-11-09:
     markup there could load an image from a share (\\\\host\\…), which makes
     Windows sign in to that host.
+
+    A line whose text has an エラーコード (「［E101］」) opens the help at it on a
+    click (ui/error_help.py): no link in the text, which stays plain.
     """
     label.setTextFormat(Qt.TextFormat.PlainText)
-    return label
+    return error_help.watch(label)
 
 
 def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[str] = None, what: str = "file",
@@ -58,8 +62,8 @@ def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[s
         with open(path, "w", encoding=encoding, newline=newline) as f:
             f.write(text)
     except OSError as error:
-        reason = error.strerror or str(error)
-        audit.error("file-save", path, reason, detail={"what": what})
+        reason, said = errors.describe(error)
+        audit.error("file-save", path, reason, detail={"what": what, "said": said})
         return reason
     audit.record("export", what, path, count=count, file=path)
     return None

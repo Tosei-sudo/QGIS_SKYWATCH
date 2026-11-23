@@ -19,19 +19,28 @@ from typing import Any, Callable, Iterable, Optional, Protocol
 from urllib.parse import urlencode
 
 from . import analysis_cache, audit, edit_stamp, json_pieces, time_zone
+from .errors import Coded
 from .util import iso_text, is_number
 
 
-class EsriError(Exception):
-    """The service could not be asked, or answered with an error."""
+class EsriError(Coded):
+    """
+    The service could not be asked, or answered with an error. Its code
+    (core/errors.py) says why: given by the raise, or by the subclass; none
+    for 「取消」 and guidance.
+    """
 
 
 class TooManyError(EsriError):
     """A query matched more features than the caller's limit (read nothing rather than a part)."""
 
+    code = "E304"
+
 
 class ConflictError(EsriError):
     """Someone else changed (or deleted) the feature since it was read: it is not overwritten (#74)."""
+
+    code = "E301"
 
 
 class UnreachableError(EsriError):
@@ -39,6 +48,8 @@ class UnreachableError(EsriError):
     The server could not be reached (no connection, no answer in time, or a
     5xx error): the plugin then works offline (core/offline.py) until it answers again.
     """
+
+    code = "E101"
 
 
 class BusyError(UnreachableError):
@@ -48,9 +59,13 @@ class BusyError(UnreachableError):
     meets one is not enough to work offline (core/offline.py).
     """
 
+    code = "E102"
+
 
 class InvalidTokenError(EsriError):
     """The server called the token invalid or expired (498, 499)."""
+
+    code = "E201"
 
 
 class Transport(Protocol):
@@ -74,6 +89,11 @@ Renew = Callable[[str], Optional[str]]
 def form_body(form: dict[str, str]) -> bytes:
     """The body of a form POST."""
     return urlencode(form).encode("utf-8")
+
+
+def _address(url: str) -> str:
+    """The address without its query (a token may be in it): for the log, never the screen."""
+    return url.split("?", 1)[0]
 
 
 def _redact(text: str, token: Optional[str]) -> str:
@@ -193,24 +213,27 @@ class EsriClient:
         try:
             body = self.transport(url, form)
         except EsriError as error:
-            raise (UnreachableError if isinstance(error, UnreachableError) else EsriError)(_redact(str(error), token)) from None
+            # (A token never stays in the text: QGIS's messages repeat the address with its query.)
+            kind = type(error) if isinstance(error, UnreachableError) else EsriError
+            raise kind(_redact(error.message, token), code=error.code, detail=_redact(error.detail, token)) from None
         try:
             # In pieces: a page of features read off the main thread does not hold QGIS's screen (core/json_pieces.py).
             value = json_pieces.loads(body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body)
         except (ValueError, UnicodeDecodeError):
-            raise EsriError("応答が JSON 以外") from None
+            raise EsriError(code="E105", detail=f"{_address(url)}：JSON 以外の応答") from None
         if not isinstance(value, dict):
-            raise EsriError("応答が JSON 以外")
+            raise EsriError(code="E105", detail=f"{_address(url)}：JSON のオブジェクト以外の応答")
         error = value.get("error")
         if isinstance(error, dict):
             code = error.get("code")
             message = _redact(str(error.get("message") or ""), token)
             details = [_redact(str(d), token) for d in error.get("details") or [] if d]
+            said = f"{_address(url)}：{code} " + " ".join([message, *details]).strip()
             if token and code in (498, 499):
-                raise InvalidTokenError(f"トークンが無効か、期限切れ（{message}）")
+                raise InvalidTokenError(detail=said)
             if code in (498, 499, 403):
-                raise EsriError(f"トークンが無効か、権限なし（{message}）" if token else "このサービスにはトークンが必要")
-            raise EsriError("サービスからエラー応答: " + " ".join([message, *details]).strip())
+                raise EsriError(code="E202" if token else "E203", detail=said)
+            raise EsriError(code="E104", detail=said)
         return value
 
     def layer(self, url: str, token: Optional[str] = None, refresh: bool = False) -> "LayerInfo":
@@ -252,7 +275,7 @@ class EsriClient:
         out: list[dict[str, Any]] = []
 
         def too_many() -> "TooManyError":
-            return TooManyError(f"件数が上限（{limit:,} 件）を超えたため取得を中止（条件で絞るか、古い行を整理）")
+            return TooManyError(f"件数が上限（{limit:,} 件）を超えた。条件で絞って取得")
 
         if info.supports_pagination:
             oid = info.object_id_field
@@ -453,12 +476,12 @@ def deleted_count(value: dict[str, Any], what: str = "削除") -> int:
     results = value.get("deleteResults")
     if results is None:
         if value.get("success") is False:
-            raise EsriError(f"{what}失敗")
+            raise EsriError(code="E104", detail=f"{what}: success false")
         return 0
     failed = [r for r in results if not r.get("success")]
     if failed:
         reason = (failed[0].get("error") or {}).get("description") or ""
-        raise EsriError(f"{len(failed)} 件の{what}に失敗{'（' + reason + '）' if reason else ''}")
+        raise EsriError(f"{len(failed)} 件をサーバーが受け付けない", code="E305", detail=reason)
     return len(results)
 
 

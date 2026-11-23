@@ -40,6 +40,7 @@ from ..qgis_io.ai_io import Grid
 from ..qgis_io.ai_runtime import AiError
 from ..qgis_io.annotation_io import WGS84, Outliner, SamOutliner, ThresholdOutliner, load_sam, metres_per_pixel
 from ..qgis_io.dataset_io import CLASS_FIELDS, image_grid, open_image, vector_layer
+from ..qgis_io.tasks import error_text
 from . import detect_algorithm
 
 HERE = os.path.dirname(os.path.dirname(__file__))
@@ -133,7 +134,7 @@ class Converter:
             except AiError:
                 raise
             except Exception as e:  # noqa: BLE001 (a window that cannot be drawn)
-                self.skip(f"輪郭を取れず（{e}）")
+                self.skip(f"輪郭を取れず（{error_text(e)}）")
             if shape is None:
                 self.count("輪郭なし")
         method = self.outliner.method if self.outliner is not None else ""

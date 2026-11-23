@@ -16,6 +16,7 @@ import time
 from datetime import date
 from typing import Any, Callable, Optional
 
+from ..core import errors
 from ..core.obs.api import load_named_areas, settings_for
 from ..core.request.api import jst_day
 from ..core.text_command import OPERATIONS, Operation, Reading
@@ -164,5 +165,5 @@ class Command(Feature):
             return tr("{s} を開いた").format(s=reading.screen)
         run = self.host.text_operations().get(key)
         if run is None:
-            raise RuntimeError(tr("{o} はいまは使えない（設定ファイル・担当）").format(o=reading.operation.title))
+            raise RuntimeError(errors.tagged(tr("{o} はいまは使えない（設定ファイル・担当）").format(o=reading.operation.title), "E206"))
         return run(reading, place)

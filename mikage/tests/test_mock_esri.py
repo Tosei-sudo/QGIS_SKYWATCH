@@ -232,8 +232,9 @@ def test_errors_look_like_arcgis_errors(server):
     base, _, _, _ = server
     client = EsriClient(transport)
     url = f"{base}/arcgis/rest/services/Catalog/FeatureServer/0"
-    with pytest.raises(EsriError, match="where に存在しない属性"):
+    with pytest.raises(EsriError, match="サーバーが要求を受け付けない［E104］") as said:
         client.ask(f"{url}/query", {"where": "NOPE = 1"})
+    assert "where に存在しない属性" in said.value.detail
     # A text too long for its field fails that feature only.
     result = client.apply_edits(f"{base}/arcgis/rest/services/AI/FeatureServer/0", adds=[{"attributes": {"DET_ID": "x" * 200}}])
     assert result.failures() == ["DET_ID が長すぎる（200 文字、上限 128）"]
@@ -260,7 +261,7 @@ def test_tokens_are_asked_for_when_set(server, tmp_path):
     threading.Thread(target=secured.serve_forever, daemon=True).start()
     try:
         url = f"http://127.0.0.1:{secured.server_address[1]}/arcgis/rest/services/Places/FeatureServer/0"
-        with pytest.raises(EsriError, match="トークンが必要"):
+        with pytest.raises(EsriError, match="サインインが必要［E203］"):
             EsriClient(transport).layer(url)
         assert EsriClient(transport).layer(url, "secret").geometry_type == "esriGeometryPoint"
     finally:

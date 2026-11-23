@@ -473,5 +473,5 @@ def test_a_model_by_url_is_downloaded_once(tmp_path):
         server.shutdown()
     assert got["a"] == got["b"] and open(got["a"], "rb").read() == body
     assert hits.count("/models/detect.onnx") == 1
-    assert got["missing"].startswith("error: ") and "HTTP 404" in got["missing"]
+    assert got["missing"] == "error: モデルを取得できない［E104］"
     assert not [n for n in os.listdir(tmp_path) if n.endswith(".part")]

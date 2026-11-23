@@ -107,7 +107,7 @@ class LayerReader:
             if cancelled and len(rows) % 1000 == 0 and cancelled():
                 raise AnalysisError("取消")
             if len(rows) >= self.limit:
-                raise AnalysisError(f"{self.table.name}: 件数が上限（{self.limit:,} 件）を超えたため読み込みを中止（条件で絞る）")
+                raise AnalysisError(f"{self.table.name}: 件数が上限（{self.limit:,} 件）を超えた。条件で絞って取得", code="E304")
             row = [qt_value(v) for v in f.attributes()]
             if self.shape:
                 g = f.geometry()

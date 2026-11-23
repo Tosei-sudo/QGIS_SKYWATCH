@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
+from ...errors import Coded
+
 FORMAT = "satobs-dataset"
 VERSION = 1
 #: Annotation formats: in the image's pixels, and in map coordinates (vector files).
@@ -41,8 +43,10 @@ VECTOR_EXTENSIONS = (".geojson", ".json", ".gpkg", ".shp", ".kml", ".gml", ".fgb
 YOLO_NAME_FILES = ("classes.txt", "obj.names", "classes.names", "data.yaml", "dataset.yaml", "data.yml")
 
 
-class DatasetError(Exception):
-    pass
+class DatasetError(Coded):
+    """A training dataset that cannot be read (E607, core/errors.py; none for guidance)."""
+
+    code = "E607"
 
 
 @dataclass
@@ -119,11 +123,11 @@ def load_dataset(path: str) -> Dataset:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as e:
-        raise DatasetError(f"データセットを読めない: {os.path.basename(path)}（{e}）")
+        raise DatasetError(f"データセットを読めない: {os.path.basename(path)}", detail=str(e))
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise DatasetError(f"教師データセットのファイルではない: {os.path.basename(path)}")
     if int(data.get("version", 1)) > VERSION:
-        raise DatasetError(f"新しい版のデータセット（版 {data.get('version')}）: プラグインを更新")
+        raise DatasetError(f"新しい版のデータセット（版 {data.get('version')}）。プラグインを更新")
     groups = []
     for g in data.get("groups") or []:
         fmt = str(g.get("format", ""))
@@ -345,7 +349,7 @@ def read_voc(text: str) -> list[PixelBox]:
     try:
         root = ET.fromstring(text)
     except ET.ParseError as e:
-        raise DatasetError(f"XML を読めない（{e}）")
+        raise DatasetError("注釈の XML を読めない", detail=str(e))
     out = []
     for o in root.iter("object"):
         name = (o.findtext("name") or "").strip()
@@ -383,7 +387,7 @@ def read_coco(text: str) -> Coco:
     try:
         data = json.loads(text)
     except ValueError as e:
-        raise DatasetError(f"COCO の JSON を読めない（{e}）")
+        raise DatasetError("COCO の JSON を読めない", detail=str(e))
     names = {c["id"]: str(c.get("name", c["id"])) for c in data.get("categories") or []}
     files = {im["id"]: str(im.get("file_name", "")) for im in data.get("images") or []}
     by_id: dict = {i: [] for i in files}
@@ -416,7 +420,7 @@ class Reader:
     def boxes(self, group: Group, item: Item) -> list[PixelBox]:
         """The objects of an image (fractions for YOLO); an image without an annotation file has none (background)."""
         if group.format == "vector":
-            raise DatasetError("ベクタの注釈は QGIS で読む")
+            raise DatasetError("ベクタの注釈は QGIS で読む", code="")
         if not item.labels:
             return []
         try:
@@ -429,7 +433,7 @@ class Reader:
             with open(item.labels, encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError as e:
-            raise DatasetError(f"注釈を読めない: {item.labels}（{e.strerror or e}）")
+            raise DatasetError(f"注釈を読めない: {os.path.basename(str(item.labels))}", detail=f"{item.labels}: {e.strerror or e}")
         if group.format == "yolo":
             return read_yolo(text, group.names)
         if group.format == "dota":
@@ -451,7 +455,7 @@ def parse_class_map(text: str) -> dict[str, str]:
         if m:
             out[m.group(1)] = m.group(2)
         elif part.strip():
-            raise DatasetError(f"クラスの対応は「名前=種別」で指定: {part.strip()}")
+            raise DatasetError(f"クラスの対応は「名前=種別」で指定: {part.strip()}", code="")
     return out
 
 
@@ -476,7 +480,7 @@ def make_group(image_folder: str, labels: str, fmt: str = "", names: Sequence[st
     images with nothing on them.
     """
     if not os.path.isdir(image_folder):
-        raise DatasetError(f"画像のフォルダーがない: {image_folder}")
+        raise DatasetError(f"画像のフォルダーがない: {image_folder}", code="E401")
     images = files_in(image_folder, IMAGE_EXTENSIONS, recursive)
     if not images:
         raise DatasetError(f"画像なし（{', '.join(IMAGE_EXTENSIONS[:5])} など）: {image_folder}")
@@ -492,7 +496,7 @@ def make_group(image_folder: str, labels: str, fmt: str = "", names: Sequence[st
         elif fmt == "vector":
             items, alone, unused = [Item(i, labels) for i in images], [], 0
         else:
-            raise DatasetError("注釈が 1 ファイルなら COCO の JSON かベクタ（GeoJSON・GeoPackage など）。画像ごとの注釈ならフォルダーを指定")
+            raise DatasetError("注釈が 1 ファイルなら COCO の JSON かベクタ（GeoJSON・GeoPackage など）。画像ごとの注釈ならフォルダーを指定", code="")
     elif os.path.isdir(labels):
         exts = {"yolo": (".txt",), "dota": (".txt",), "voc": (".xml",), "vector": VECTOR_EXTENSIONS}.get(fmt, (".txt", ".xml") + VECTOR_EXTENSIONS)
         files = [f for f in files_in(labels, exts, recursive) if os.path.basename(f).lower() not in YOLO_NAME_FILES]
@@ -500,7 +504,7 @@ def make_group(image_folder: str, labels: str, fmt: str = "", names: Sequence[st
             guesses = [g for g in (guess_format(f) for f in files[:50]) if g]
             fmt = max(set(guesses), key=guesses.count) if guesses else ""
             if fmt == "coco":
-                raise DatasetError("COCO の注釈は JSON ファイルを指定")
+                raise DatasetError("COCO の注釈は JSON ファイルを指定", code="")
         if not fmt:
             raise DatasetError(f"注釈ファイルなし（YOLO .txt・DOTA .txt・VOC .xml・ベクタ）: {labels}")
         files = [f for f in files if guess_format(f) in (fmt, None) or fmt in ("yolo", "dota") and f.lower().endswith(".txt")]
@@ -509,7 +513,7 @@ def make_group(image_folder: str, labels: str, fmt: str = "", names: Sequence[st
         items, alone = pair(images, image_folder, files, labels)
         unused = len(files) - len({i.labels for i in items})
     else:
-        raise DatasetError(f"注釈のフォルダー・ファイルがない: {labels}")
+        raise DatasetError(f"注釈のフォルダー・ファイルがない: {labels}", code="E401")
     if fmt not in FORMATS:
         raise DatasetError(f"知らない注釈の形式「{fmt}」")
     if background:

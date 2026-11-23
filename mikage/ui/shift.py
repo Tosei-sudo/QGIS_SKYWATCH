@@ -29,6 +29,7 @@ from qgis.PyQt.QtGui import QColor, QImage, QPen
 
 from ..qgis_io.enhance_group import group_rasters
 from ..qgis_io.shift_io import can_shift, get_shift, set_shift
+from ..qgis_io.tasks import error_text
 
 
 def format_shift(east: float, north: float) -> str:
@@ -287,7 +288,7 @@ class LayerShift(QObject):
         try:
             set_shift(layer, dx, dy)
         except OSError as e:
-            self.iface.messageBar().pushWarning(self.tr("位置ずらし"), str(e))
+            self.iface.messageBar().pushWarning(self.tr("位置ずらし"), self.tr("位置ずらしに失敗: {e}").format(e=error_text(e)))
             return False
         return True
 

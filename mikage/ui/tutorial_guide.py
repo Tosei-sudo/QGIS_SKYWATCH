@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
+from ..qgis_io.tasks import error_text
 from .fit import fit_text
 
 #: The help pictures' red (the frames and numbers of 画面つきの手順書).
@@ -324,7 +325,7 @@ class Tutorial(QObject):
             try:
                 note = self.course.setup() or ""
             except Exception as error:  # noqa: BLE001 (a course's own step: said in the window, the course goes on)
-                note = self.tr("準備できませんでした: {m}").format(m=error)
+                note = self.tr("準備できませんでした: {m}").format(m=error_text(error))
         self.guide.course.setText(self.course.title)
         self.guide.show()
         self.guide.place()
@@ -390,7 +391,7 @@ class Tutorial(QObject):
         try:
             return fn(*args)
         except Exception as error:  # noqa: BLE001 (a course's own step: said in the window, the course goes on)
-            self.problem = str(error) or type(error).__name__
+            self.problem = error_text(error)
             return None
 
     def _check(self) -> bool:

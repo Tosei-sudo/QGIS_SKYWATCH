@@ -229,7 +229,7 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
             _retire(line, quit_request=True)
             if cancelled:
                 raise Cancelled()
-            raise BusyError(f"応答なし（タイムアウト）（{_address(url)}）")
+            raise BusyError(detail=f"{_address(url)}：{limit / 1000:g} 秒たっても応答なし")
     _give_back(line)
     if feedback is not None and feedback.isCanceled():
         raise Cancelled()
@@ -245,18 +245,20 @@ def _answer(reply, url: str, authcfg: Optional[str]) -> bytes:
     if error == QNetworkReply.NetworkError.NoError and not isinstance(status, int):
         # Nothing was sent: QGIS could not apply the authentication (it says so in its log), or the answer was lost.
         if authcfg:
-            raise EsriError(f"認証設定（{authcfg}）を使えず（{_address(url)}）")
-        raise UnreachableError(f"接続できない（{_address(url)}：応答が途中で切れた）")
+            raise EsriError(code="E204", detail=f"認証設定 {authcfg}（{_address(url)}）")
+        raise UnreachableError(detail=f"{_address(url)}：応答が途中で切れた")
     if error != QNetworkReply.NetworkError.NoError:
-        reason = "サーバーのエラー" if isinstance(status, int) and status >= 500 else "接続できない"
         # Qt's message repeats the address with its query: a token may be in it.
-        detail = re.sub(r"\?\S*", "", reply.errorString())
+        said = re.sub(r"\?\S*", "", reply.errorString())
+        detail = f"{_address(url)}：{'HTTP ' + str(status) + ' ' if isinstance(status, int) and status > 0 else ''}{said}".rstrip()
         # Not reached (or the server is down): the plugin works offline until it answers (core/offline.py).
         # A 4xx answer is the server's refusal, not an outage.
-        unreachable = not isinstance(status, int) or status <= 0 or status >= 500
-        # A 5xx (and a timeout, above) may be a server only busy: BusyError (core/offline.py waits for a second one).
-        kind = BusyError if isinstance(status, int) and status >= 500 else UnreachableError if unreachable else EsriError
-        raise kind(f"{reason}（{_address(url)}{'：' + detail if detail else ''}）")
+        if not isinstance(status, int) or status <= 0:
+            raise UnreachableError(detail=detail)
+        if status >= 500:
+            # A 5xx (and a timeout, above) may be a server only busy: BusyError (core/offline.py waits for a second one).
+            raise BusyError(code="E103", detail=detail)
+        raise EsriError(code={401: "E203", 403: "E202"}.get(status, "E104"), detail=detail)
     return bytes(reply.content())
 
 

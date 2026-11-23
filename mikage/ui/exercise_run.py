@@ -29,7 +29,7 @@ from qgis.PyQt.QtGui import QPixmap
 
 from ..core.gpkg import open_local
 from ..qgis_io.obs_images import image_layer
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from ..core.obs.api import kind_of, LocalAreaStore, LocalObservationStore, StoreSet
 from ..core.training.api import (
     add_result, CAME, CHANGE, Exercise, fitted, GONE, hint, IDENTIFY, Mark, MEASURE, merged_results, MISSED, MISSED_BONUS, Outcome,
@@ -446,7 +446,7 @@ class ExerciseRun(QObject):
             try:
                 add_result(self.results_path, record)
             except OSError as error:
-                note = f"この PC への結果の保存に失敗: {error}"
+                note = f"この PC への結果の保存に失敗: {error_text(error)}"
         if forced:
             note = ("時間になったので提出" + note).strip()
         if obs.active:

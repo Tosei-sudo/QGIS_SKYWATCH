@@ -20,6 +20,7 @@ from typing import Callable, Optional, Sequence
 
 import numpy as np
 
+from ...errors import Coded
 from ..detect import PAD, Detection, decode_yolo, nms
 from ..model_config import detector_spec
 from .loss import batch_box_targets, batch_targets, box_loss, detection_loss
@@ -39,8 +40,8 @@ MIN_STEPS = 20
 SCORE, IOU = 0.25, 0.45
 
 
-class TrainError(Exception):
-    """Training that cannot go on, in the person's words."""
+class TrainError(Coded):
+    """Training that cannot go on, in the person's words (its エラーコード given by the raise; none for guidance)."""
 
 
 @dataclass
@@ -147,21 +148,21 @@ def load_model(data: bytes) -> Model:
     try:
         meta, inits = read_model(data)
     except (ValueError, IndexError) as e:
-        raise TrainError(f"モデルを読めない（{e}）")
+        raise TrainError("モデルを読めない", code="E604", detail=str(e))
     state = training_state(meta)
     if state is None:
         raise TrainError("このプラグインで学習したモデルのみ追加学習できる（他の ONNX は物体検出（AI）で利用）")
     arch = state.get("arch", {}).get("name", "fpn4")
     size = state.get("arch", {}).get("size")
     if arch not in ARCHS or size not in WIDTHS:
-        raise TrainError("モデルの形式が不明（新しい版のプラグインで学習したモデルの可能性）")
+        raise TrainError("モデルの形式が不明（新しい版のプラグインで学習したモデルの可能性）", code="E604")
     classes = [str(c) for c in state.get("classes", [])]
     layers = layers_of(arch, size, len(classes))
     wanted = init_params(layers, 1, np.random.default_rng(0))
     params, buffers = {}, {}
     for key in list(wanted) + list(init_buffers(layers)):
         if key not in inits:
-            raise TrainError(f"モデルの重み {key} なし")
+            raise TrainError(f"モデルの重み {key} なし", code="E604")
         (buffers if key.endswith((".bn_m", ".bn_v")) else params)[key] = inits[key].astype(np.float32)
     i = state.get("input", {})
     spec = InputSpec(i.get("mode", "rgb"), [int(b) for b in i.get("bands", [])], [float(v) for v in i.get("mean", [])],
@@ -197,7 +198,7 @@ def band_statistics(windows: Sequence[Window]) -> tuple[list[float], list[float]
         square += (values * values).sum(axis=0)
         count += len(values)
     if not count:
-        raise TrainError("学習に使える画素なし（すべて値なし）")
+        raise TrainError("学習に使える画素なし（すべて値なし）", code="E606")
     mean = total / count
     std = np.sqrt(np.maximum(square / count - mean * mean, 0))
     return [float(v) for v in mean], [float(max(s, 1e-6)) for s in std]
@@ -381,7 +382,7 @@ def train(model: Model, train_windows: Sequence[Window], check_windows: Sequence
     (cancelled) early, it keeps what it had learnt.
     """
     if not train_windows:
-        raise TrainError("学習する画像の範囲なし")
+        raise TrainError("学習する画像の範囲なし", code="E606")
     rng = np.random.default_rng(options.seed)
     net = model.network
     tile = model.tile

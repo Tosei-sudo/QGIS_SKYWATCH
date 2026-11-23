@@ -34,6 +34,8 @@ from qgis.PyQt.QtGui import (
     QTransform,
 )
 
+from ..core.errors import FileFailed
+
 #: Pixels of a side (the mock's images are 512).
 SIZE = 1600
 #: The mock's sample area (sample.AREA): west, south, east, north.
@@ -259,7 +261,7 @@ def write(path: str, rgb: np.ndarray, f: Frame) -> None:
     tmp = path + ".new.tif"
     ds = gdal.GetDriverByName("GTiff").Create(tmp, SIZE, SIZE, 3, gdal.GDT_Byte, ["COMPRESS=DEFLATE", "TILED=YES", "PHOTOMETRIC=RGB"])
     if ds is None:  # (GDAL's exceptions are left as QGIS has them: not turned on for the whole of QGIS)
-        raise OSError(f"画像を書けません: {tmp}")
+        raise FileFailed("研修用の画像を書き込めない", code="E402", detail=tmp)
     ds.SetGeoTransform((f.west, f.dx, 0, f.north, 0, -f.dy))
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
@@ -311,7 +313,7 @@ def write_basemap(path: str) -> None:
     tmp = path + ".new.tif"
     ds = gdal.GetDriverByName("GTiff").Create(tmp, w, h, 3, gdal.GDT_Byte, ["COMPRESS=DEFLATE", "TILED=YES", "PHOTOMETRIC=RGB"])
     if ds is None:
-        raise OSError(f"背景地図を書けません: {tmp}")
+        raise FileFailed("研修用の背景地図を書き込めない", code="E402", detail=tmp)
     ds.SetGeoTransform((west, (east - west) / w, 0, north, 0, -(north - south) / h))
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)

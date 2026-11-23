@@ -131,7 +131,7 @@ def test_without_the_table_the_menu_says_so(plugin):
     pushed = []
     p.iface.messageBar().pushInfo = lambda title, text: pushed.append(text)
     next(a for a in p.actions if a.objectName() == "SatObsOutages").trigger()
-    assert p.outage_dialog is None and pushed == ["衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）"]
+    assert p.outage_dialog is None and pushed == ["衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）［E703］"]
 
 
 def test_shots_handed_out_are_marked_in_the_schedule_and_not_changed(plugin):

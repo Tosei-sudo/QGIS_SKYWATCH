@@ -23,6 +23,7 @@ from ..core.spectral import (
 )
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name
+from ..qgis_io.tasks import error_text
 from .docks import PluginDock, save_text
 
 try:  # Qt5 / Qt6
@@ -437,7 +438,7 @@ class SpectralDock(PluginDock):
         try:
             image = self._image()
         except ValueError as e:
-            self.say(str(e))
+            self.say(error_text(e))
             return None
         if image is None:
             self.say(_tr("画像のレイヤーを選択"))

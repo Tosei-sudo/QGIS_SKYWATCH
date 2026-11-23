@@ -518,7 +518,7 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
 
         def failed(message: str):
             if message != "取消":
-                self.hint.setText(self.tr("画像の値の読み込みに失敗（{why}）").format(why=message))
+                self.hint.setText(self.tr("画像の値の読み込みに失敗: {why}").format(why=message))
 
         return run_task(self.tr("画像の値の読み込み"), lambda _task: er.value_histogram(provider, settings), done, failed)
 

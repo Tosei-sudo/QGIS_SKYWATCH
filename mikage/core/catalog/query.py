@@ -189,7 +189,7 @@ def keyword_condition(catalog: CatalogConfig, types: FieldTypes, text: str) -> l
         raise EsriError(f"フリーワードの 1 語は {MAX_WORD_LENGTH} 文字まで（{long[:20]}…）")
     text_names = [n for n in names if types.get(n) is None or types.get(n) in TEXT_TYPES]
     if not text_names:
-        raise EsriError(f"フリーワードの属性（{'・'.join(names)}）に文字列の属性なし")
+        raise EsriError(f"フリーワードで探す項目が文字列でない（管理者に連絡: {'・'.join(names)}）", code="E704")
     parts = []
     for word in words:
         either = [contains(n, v, any_case=True) for n in text_names for v in word_variants(word)]

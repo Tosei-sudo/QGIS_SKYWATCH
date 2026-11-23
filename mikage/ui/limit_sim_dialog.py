@@ -34,7 +34,7 @@ from ..core.request.api import history_where
 from ..core.request.api import clouds_of, forecast_places, orbiting, radar_of
 from ..qgis_io import settings
 from ..qgis_io.network import get_bytes
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from .fit import fit_text
 
 #: The columns of the systems' table.
@@ -240,7 +240,7 @@ class LimitSimDialog(QDialog):
                 try:
                     quotas = repo.read_quota_data([run[0], run[-1]], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the run goes on without the quotas)
-                    notes.append(f"年間撮像上限を読めない（{error}）")
+                    notes.append(f"年間撮像上限を読めない（{error_text(error)}）")
                 notes += quotas.problems[:3]
             forecasts = {}
             if forecast is not None:
@@ -252,7 +252,7 @@ class LimitSimDialog(QDialog):
                     try:
                         forecasts = fetch_clouds(forecast, places, lambda url: get_bytes(url, authcfg), task.isCanceled)
                     except Exception as error:  # noqa: BLE001 (the run goes on without the weather)
-                        notes.append(f"雲量予報の取得失敗（{error}）")
+                        notes.append(f"雲量予報の取得に失敗（{error_text(error)}）")
             return requests, history, forecasts, notes, quotas
 
         def done(result):

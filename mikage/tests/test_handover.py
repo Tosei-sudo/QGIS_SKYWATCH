@@ -115,7 +115,7 @@ def test_update_writes_only_what_changed_and_checks_hand_overs():
     work.rows[0]["attributes"]["ASSIGNEE"] = "tanaka"
     from dataclasses import replace
 
-    with pytest.raises(Exception, match="ほかの人が変更済み"):
+    with pytest.raises(Exception, match="ほかの人が先に変更"):
         update(client, src, replace(x, assignee="suzuki"), x)
     assert work.rows[0]["attributes"]["ASSIGNEE"] == "tanaka"
 

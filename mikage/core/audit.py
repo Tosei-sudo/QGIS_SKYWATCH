@@ -71,7 +71,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
-from . import edit_stamp
+from . import edit_stamp, errors
 from .util import encodable
 
 #: What can be recorded, with its name on screen.
@@ -263,6 +263,11 @@ def error(action: str, target: str = "", message: str = "", *, detail: Optional[
     """
     log = _log
     if log is not None:
+        # The エラーコード (core/errors.py) in the detail, so the administrator can count the failures by cause
+        # (in `detail`, not a column of its own: the files' columns stay as they are, and so their chains).
+        code = errors.code_of(message)
+        if code and not (detail or {}).get("code"):
+            detail = {"code": code, **(detail or {})}
         log.put("error", action, {"target": target, "result": "error", "error": message, "detail": detail, "trace": trace,
                                   "html": markup})
 

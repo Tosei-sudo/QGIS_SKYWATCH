@@ -37,7 +37,7 @@ from ..qgis_io.ai_io import image_rgba
 from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, LoadedModel, local_model, model_from, name_of
 from ..qgis_io.pinned_layers import top_index
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 
 PICK = "pick"
 OUTLINE = QColor(0, 229, 255)
@@ -352,7 +352,7 @@ class SegmentTool(QObject):
             try:
                 picture, to_pixel, key = self.draw(layer)
             except Exception as e:  # noqa: BLE001
-                self.note(self.tr("抽出失敗: {e}").format(e=e))
+                self.note(self.tr("抽出に失敗: {e}").format(e=error_text(e)))
                 self._next()
                 return
             key = key + (chosen[1], chosen[2])
@@ -398,7 +398,7 @@ class SegmentTool(QObject):
                 self._next()
 
             def failed(message: str) -> None:
-                self.note(self.tr("抽出失敗: {e}").format(e=message))
+                self.note(self.tr("抽出に失敗: {e}").format(e=message))
                 self._update()
                 self._next()
 

@@ -79,11 +79,13 @@ def test_adds_updates_and_deletes():
 
 def test_tokens_are_sent_renewed_once_and_never_in_messages():
     fake, layer = server(1, token="good")
-    with pytest.raises(EsriError, match="このサービスにはトークンが必要"):
+    with pytest.raises(EsriError, match=r"サインインが必要［E203］"):
         EsriClient(fake).query_all(URL)
     with pytest.raises(InvalidTokenError) as caught:
         EsriClient(fake).ask(URL, {}, token="secret-old")
-    assert "secret-old" not in str(caught.value)
+    # The screen's words and the code; the token neither there nor in the log's detail.
+    assert str(caught.value) == "サインインの期限切れ［E201］" and caught.value.code == "E201"
+    assert "secret-old" not in str(caught.value) and "secret-old" not in caught.value.detail
     renewed = []
     client = EsriClient(fake, renew=lambda url: renewed.append(url) or "good")
     assert client.ask(URL, {}, token="old")["objectIdField"] == "OBJECTID"
@@ -95,9 +97,12 @@ def test_errors_and_answers_that_are_not_json():
     fake, _ = server()
     client = EsriClient(fake)
     fake.fail_next = {"error": {"code": 400, "message": "Invalid query", "details": ["'X' is not a field"]}}
-    with pytest.raises(EsriError, match="サービスからエラー応答: Invalid query 'X' is not a field"):
+    with pytest.raises(EsriError) as caught:
         client.ask(URL)
-    with pytest.raises(EsriError, match="応答が JSON 以外"):
+    # The server's own (English) words go to the log only, with the address.
+    assert str(caught.value) == "サーバーが要求を受け付けない［E104］"
+    assert caught.value.detail == f"{URL}：400 Invalid query 'X' is not a field"
+    with pytest.raises(EsriError, match=r"サーバーの応答を読めない［E105］"):
         EsriClient(lambda url, form: b"<html>").ask(URL)
     with pytest.raises(EsriError, match="接続不可"):
         client.ask("https://elsewhere/FeatureServer/0")

@@ -20,7 +20,7 @@ from qgis.PyQt.QtCore import QObject, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
 from qgis.PyQt.QtWidgets import QApplication
 
-from ..core import audit
+from ..core import audit, errors
 from ..core.link_shapes import read_link_shapes
 from ..core.shape_receiver import (
     MAX_CONNECTIONS, READ_TIMEOUT_MS, HttpError, ReceiverSettings, Response, Sender, handle, json_response, parse_request,
@@ -84,9 +84,10 @@ class ShapeReceiver(QObject):
         server = QTcpServer(self)
         server.setMaxPendingConnections(MAX_CONNECTIONS)
         if not server.listen(QHostAddress(QHostAddress.SpecialAddress.LocalHost), settings.port):
-            self.problem = self.tr("ポート {p} で待ち受けられない（{e}）。別の QGIS が受け取っているか、ほかのプログラムが使用中").format(
-                p=settings.port, e=server.errorString())
-            QgsMessageLog.logMessage(self.tr("外部から図形を受け取る: ") + self.problem, LOG_TAG, Qgis.MessageLevel.Info, notifyUser=False)
+            self.problem = errors.tagged(self.tr("ポート {p} で待ち受けられない。別の QGIS が受け取っているか、ほかのプログラムが使用中").format(
+                p=settings.port), "E110")
+            QgsMessageLog.logMessage(self.tr("外部から図形を受け取る: ") + f"{self.problem}（{server.errorString()}）", LOG_TAG,
+                                     Qgis.MessageLevel.Info, notifyUser=False)
             server.deleteLater()
             return False
         server.newConnection.connect(self._new_connection)

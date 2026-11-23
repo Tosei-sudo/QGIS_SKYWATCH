@@ -210,7 +210,7 @@ class OpeningPart:
         chosen = self.catalog()
         catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
         if not catalogs:
-            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）"))
+            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）［E703］"))
             if missing is not None:
                 missing()
             return
@@ -254,7 +254,7 @@ class OpeningPart:
         chosen = self.catalog()
         catalogs = sorted((c for c in self.context.config.image_catalogs if c.fields.get("id")), key=lambda c: c is not chosen)
         if not ids or not catalogs:
-            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）") if ids else "")
+            self.status.setText(self.tr("画像 ID で探せる画像カタログがない（管理者に連絡: fields.id）［E703］") if ids else "")
             return
         client = self.context.esri()
         asks = [(c, self.context.token_for(c.url, c.token)) for c in catalogs]

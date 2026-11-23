@@ -20,6 +20,7 @@ from typing import Callable, Optional
 import numpy as np
 from osgeo import gdal, osr
 
+from ..core.errors import Coded
 from ..core.enhance.api import PanSharpenModel, fit_model, pan_sharpen, valid_pixels
 
 #: Output pixels made at once, and the fit on the whole overlap up to this many pixels.
@@ -29,7 +30,7 @@ TILE = 256
 RESAMPLING = {"bilinear": "bilinear", "bicubic": "cubic"}
 
 
-class PanSharpenError(Exception):
+class PanSharpenError(Coded):
     """A reason the two images cannot be pan-sharpened (shown as it is)."""
 
 
@@ -74,7 +75,7 @@ def _bounds(ds, to: Optional[osr.SpatialReference]) -> tuple:
     xs = [p[0] for p in pts if math.isfinite(p[0])]
     ys = [p[1] for p in pts if math.isfinite(p[1])]
     if not xs or not ys:
-        raise PanSharpenError("マルチスペクトル画像の範囲の座標変換に失敗")
+        raise PanSharpenError("マルチスペクトル画像の範囲の座標変換に失敗", code="E508")
     return min(xs), min(ys), max(xs), max(ys)
 
 
@@ -82,7 +83,7 @@ def overlap_of(pan, ms) -> Overlap:
     """The overlap on the panchromatic grid (as the viewer's planPanSharpen)."""
     gt = pan.GetGeoTransform()
     if gt[2] != 0 or gt[4] != 0 or gt[1] <= 0 or gt[5] >= 0:
-        raise PanSharpenError("パンクロ画像が北が上の画像でない（回転あり）")
+        raise PanSharpenError("パンクロ画像が北が上の画像でない（回転あり）", code="E505")
     xmin, ymin, xmax, ymax = _bounds(ms, _srs(pan))
     x0 = max(0, math.floor((xmin - gt[0]) / gt[1] + 1e-6))
     x1 = min(pan.RasterXSize, math.ceil((xmax - gt[0]) / gt[1] - 1e-6))
@@ -132,13 +133,13 @@ def pan_sharpen_files(pan_path: str, ms_path: str, out_path: str, pan_band: int 
     if pan is None or ms is None:
         raise PanSharpenError("画像を開けない")
     if not 1 <= pan_band <= pan.RasterCount:
-        raise PanSharpenError(f"パンクロ画像にバンド {pan_band} なし")
+        raise PanSharpenError(f"パンクロ画像にバンド {pan_band} なし", code="E504")
     o = overlap_of(pan, ms)
     gt = pan.GetGeoTransform()
     alpha = has_alpha(ms)
     count = ms.RasterCount
     if count - alpha < 1:
-        raise PanSharpenError("マルチスペクトル画像に値のバンドなし")
+        raise PanSharpenError("マルチスペクトル画像に値のバンドなし", code="E504")
     pan_b = pan.GetRasterBand(pan_band)
     pan_no = _no_data(pan_b)
     ms_no = _no_data(ms.GetRasterBand(1))
@@ -154,7 +155,7 @@ def pan_sharpen_files(pan_path: str, ms_path: str, out_path: str, pan_band: int 
         warp["dstNodata"] = float("nan")
     warped = gdal.Warp("", ms, **warp)
     if warped is None:
-        raise PanSharpenError("マルチスペクトル画像の再サンプリングに失敗")
+        raise PanSharpenError("マルチスペクトル画像の再サンプリングに失敗", code="E508")
 
     def read(window) -> tuple:
         x0, y0, x1, y1 = window
@@ -171,7 +172,7 @@ def pan_sharpen_files(pan_path: str, ms_path: str, out_path: str, pan_band: int 
     bands = [b for b in range(count) if not (alpha and b == count - 1)]
     valid = valid_pixels(fit_pan, fit_ms, bands, pan_no, ms_no, count - 1 if alpha else None)
     if not valid.any():
-        raise PanSharpenError("両方に値のある画素なし")
+        raise PanSharpenError("両方に値のある画素なし", code="E506")
     model: PanSharpenModel = fit_model(fit_pan, fit_ms, bands, valid, method, weights)
     del pieces, fit_pan, fit_ms
 

@@ -194,11 +194,11 @@ def user_where(source: EsriSource, user: str) -> str:
 
 def _rows(client: EsriClient, source: EsriSource, user: str, token: Optional[str]) -> tuple[list[tuple[Optional[int], str]], Any]:
     if not user.strip():
-        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）")
+        raise EsriError("利用者名が分からない（管理者に連絡: editTracking.user）", code="E205")
     info = client.layer(source.url, token or source.token, refresh=True)
     missing = [source.fields[k] for k in ("user", "role") if source.fields[k] not in info.field_types]
     if missing:
-        raise EsriError(f"担当の表に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"担当の表に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
     oid_field = info.object_id_field
     features = client.query_all(source.url, user_where(source, user), token or source.token,
                                 out_fields=f"{oid_field},{source.fields['role']}", geometry=False, limit=LIMIT)
@@ -251,5 +251,5 @@ def save_user_roles(client: EsriClient, source: EsriSource, user: str, codes: Se
     result = client.apply_edits(source.url, adds=adds, deletes=deletes, token=token)
     failures = result.failures()
     if failures:
-        raise EsriError("担当の表への保存失敗（" + "、".join(failures[:3]) + "）")
+        raise EsriError(code="E305", detail="担当の表: " + "、".join(failures[:3]))
     return codes

@@ -549,7 +549,7 @@ def test_a_system_not_written_is_not_handed_out():
     rows = history_of(plan, FIRST, {"SYS-A": "SYS-A_20261108.csv"}, "RUN1", failures={"SYS-B": "必須項目 tasks なし"})
     got = {r.request_id: (r.result, r.captured, r.file, r.reason) for r in rows}
     assert got["R-0001"] == ("採用", "未判定", "SYS-A_20261108.csv", "")
-    assert got["R-0002"] == ("見送り", "", "", "書き出し失敗（必須項目 tasks なし）")
+    assert got["R-0002"] == ("見送り", "", "", "書き出しに失敗: 必須項目 tasks なし")
     assert not_written(plan, {"SYS-A": "x"}) == {"R-0002"}
     # Its raise and its 未撮像 row are left for the next day.
     plan.candidates[[c.request.id for c in plan.candidates].index("R-0002")].boost_offer = 100
@@ -746,14 +746,16 @@ def test_deletes_are_checked():
 
     assert deleted_count({"deleteResults": [{"objectId": 1, "success": True}]}) == 1
     assert deleted_count({"deleteResults": []}) == 0
-    with pytest.raises(EsriError, match="1 件の削除に失敗（ロック中）"):
+    with pytest.raises(EsriError, match="1 件をサーバーが受け付けない［E305］") as said:
         deleted_count({"deleteResults": [{"objectId": 1, "success": True}, {"objectId": 2, "success": False, "error": {"description": "ロック中"}}]})
+    assert "ロック中" in said.value.detail
     store = request_store_of({"label": "依頼", "url": LEDGER, "history": HISTORY}, [], 0)
     fake = server()
     client = EsriClient(fake)
     r = save_request(client, store, None, request("R-DEL"), FIRST)
     fake.fail_next = {"deleteResults": [{"objectId": r.object_id, "success": False, "error": {"description": "権限なし"}}]}
-    with pytest.raises(EsriError, match="権限なし"):
+    with pytest.raises(EsriError, match="［E305］") as said:
         delete_request(client, store, None, r)
+    assert "権限なし" in said.value.detail
     assert delete_request(client, store, None, r) == 1
     assert delete_request(client, store, None, r) == 0

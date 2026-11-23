@@ -262,7 +262,7 @@ def test_a_local_image_opens_through_the_folder_chosen_and_finds_similar_images(
     assert asked == ["\\\\nas\\images"]
     # An image without a place says why.
     assert dock.open_records([r for r in dock.records if r.id == "C"]) == []
-    assert "C に画像の場所なし" in dock.status.text()
+    assert "C の画像の場所が分からない［E501］" in dock.status.text()
     # The layer's right-click menu has 「類似画像の検索…」.
     assert layer in iface.layer_action_layers[id(p.similar_action)]
     iface.setActiveLayer(layer)
@@ -1153,7 +1153,7 @@ def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_fi
     shown.clear()
     assert len(dock.open_folders(dock.records)) == 1
     assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))]
-    assert "2 件は開けない" in dock.status.text() and "C に画像の場所なし" in dock.status.text()
+    assert "2 件は開けない" in dock.status.text() and "C の画像の場所が分からない［E501］" in dock.status.text()
     shown.clear()
     dock.open_folders([next(r for r in dock.records if r.id == "B")])
     assert shown == [] and dock.status.text() == "B の画像は URL（https://x.example/b.tif）。開けるフォルダなし"
@@ -1419,7 +1419,7 @@ def test_images_without_their_files_are_recorded_on_from_the_catalog(plugin):
     iface.canvas.setExtent(iface.canvas.fullExtent())
     assert dock.open_records([c]) == []
     widget = dock.unopened_message
-    assert "C に画像の場所なし" in dock.status.text() and any(w is widget for w in iface.bar.items())
+    assert "C の画像の場所が分からない［E501］" in dock.status.text() and any(w is widget for w in iface.bar.items())
     [button] = [b for b in widget.findChildren(QPushButton) if b.text() == "ファイルなしで記録"]
     button.click()
     image = obs.book.current

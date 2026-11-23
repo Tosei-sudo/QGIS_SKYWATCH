@@ -338,7 +338,7 @@ class RequestDraftRow(QObject):
             if not self.waiting or self.edit.toPlainText() != text:
                 return
             self.waiting = False
-            notes = [self.tr("地名テーブルを読めない（{m}）").format(m=problem)] if problem else []
+            notes = [self.tr("地名テーブルの読み込みに失敗: {m}").format(m=problem)] if problem else []
             if len(text.strip()) > TEXT_LIMIT:
                 notes.append(self.tr("依頼文は先頭 {n} 文字まで読む").format(n=TEXT_LIMIT))
             keys = asked_keys(text, today, request)

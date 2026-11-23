@@ -32,7 +32,7 @@ from qgis.PyQt.QtWidgets import (
     QTableWidgetItem, QTabWidget, QWidget,
 )
 
-from ..core import audit
+from ..core import audit, errors
 from ..core.catalog.api import record_of
 from ..core.esri import quote
 from ..core.events import (
@@ -347,7 +347,7 @@ class EventsDock(PluginDock):
         if self.task is None:
             self._then, self._failed = [], []
         s = self.settings
-        self.note.setText("" if s else self.tr("イベントは使えない（管理者に連絡: events）"))
+        self.note.setText("" if s else self.tr("イベントは使えない（管理者に連絡: events）［E703］"))
         self.note.setVisible(s is None)
         self.render()
         if s is not None and self.isVisible():
@@ -1077,8 +1077,9 @@ class EventsDock(PluginDock):
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(export_csv(e, self.links))
         except OSError as error:
-            self.say(self.tr("保存に失敗: {m}").format(m=error.strerror or error))
-            audit.error("file-save", path, error.strerror or str(error), detail={"what": "event-csv"})
+            reason, said = errors.describe(error)
+            self.say(self.tr("保存に失敗: {m}").format(m=reason))
+            audit.error("file-save", path, reason, detail={"what": "event-csv", "said": said})
             return None
         audit.record("export", "event-csv", path, count=len(self.links_of(e)), detail={"event": e.name}, file=path)
         self.say(self.tr("{n} 件を保存: {p}").format(n=len(self.links_of(e)), p=path))

@@ -263,7 +263,7 @@ def test_requests_go_through_qgis_in_a_task_with_the_services_authcfg(server, tm
     run_task("test", lambda task: (client.ask(f"{server}/0", {"where": "1=1"}, token=None), client.ask(f"{server}/1")),
              done=lambda r: results.setdefault("ok", r), failed=lambda m: results.setdefault("error", m))
     assert wait_for(lambda: results)
-    assert results == {"error": "応答が JSON 以外"}
+    assert results == {"error": "サーバーの応答を読めない［E105］"}
     path, body, authorization = Handler.seen[0]
     assert path.endswith("/FeatureServer/0") and "where=1%3D1" in body and "f=json" in body
     assert authorization and authorization.startswith("Basic ")
@@ -429,7 +429,7 @@ def test_a_settings_url_that_cannot_be_read_falls_back_to_the_last_one_read(monk
         context.reload()
         assert wait_for(lambda: not context.loading)
         assert context.config.request_stores[0].label == "台帳" and context.config.request_stores[0].token is None
-        assert context.problems[0].startswith("設定ファイルの取得に失敗（接続できない）。前回")
+        assert context.problems[0].startswith("設定ファイルの取得に失敗: 接続できない。前回")
     finally:
         settings.set_config_source("")
         QgsSettings().remove("mikage/config_cache")

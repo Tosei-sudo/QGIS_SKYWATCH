@@ -40,7 +40,7 @@ from ..core.training.api import (
 )
 from ..qgis_io import settings, training_io
 from ..qgis_io.catalog_io import local_path
-from ..qgis_io.tasks import run_task
+from ..qgis_io.tasks import error_text, run_task
 from ..ui.exercise_authoring import ExerciseAuthoring
 from ..ui.exercise_grades import GradesDialog
 from ..ui.exercise_run import ExerciseRun, result_line
@@ -362,7 +362,7 @@ class Training(Feature):
         try:
             server, text, taken = training_io.start_server(files, production) if builtin else (None, None, ())
         except OSError as error:
-            self.iface.messageBar().pushWarning(tr("練習モード"), str(error))
+            self.iface.messageBar().pushWarning(tr("練習モード"), error_text(error))
             return
         source = files.config if builtin else resolve_config(self.settings.config, settings.production_config_source()[0])
         # In the production's audit log, then nothing more until it ends.
@@ -483,7 +483,7 @@ class Training(Feature):
             try:
                 session.server, session.config_text, session.from_production = training_io.start_server(files, session.production)
             except OSError as error:
-                self.iface.messageBar().pushWarning(tr("練習モード"), str(error))
+                self.iface.messageBar().pushWarning(tr("練習モード"), error_text(error))
                 return
             self.context.switch_files()
             self.context.reload()
@@ -691,7 +691,7 @@ class Training(Feature):
                 try:
                     mine = read_results_of(client, tables, user, tokens[tables.results])
                 except Exception as error:  # noqa: BLE001 (the exercises still offered; the tries of this computer only)
-                    problems.append(tr("結果の表の取得に失敗（この PC の結果だけで集計）: {e}").format(e=error))
+                    problems.append(tr("結果の表の取得に失敗（この PC の結果だけで集計）: {e}").format(e=error_text(error)))
             return found, mine, problems, sent
 
         def done(result) -> None:
@@ -920,7 +920,7 @@ class Training(Feature):
             self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題は本番の MIKAGE で作成（練習モードを終えてから）"))
             return False
         if self.settings.exercises is None:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題の表と正解の表が未設定（管理者に連絡: training.exercises）"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題の表と正解の表が未設定（管理者に連絡: training.exercises）［E703］"))
             return False
         if self.authoring is not None:
             self.authoring.manager.show()
@@ -959,7 +959,7 @@ class Training(Feature):
         """
         tables = self.settings.exercises
         if tables is None or not tables.results:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表が未設定（管理者に連絡: training.exercises.results）"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表が未設定（管理者に連絡: training.exercises.results）［E703］"))
             return False
         if self._reading:
             return False
@@ -976,7 +976,7 @@ class Training(Feature):
                 exercises = client.query_all(tables.exercises, "1=1", tokens[tables.exercises], geometry=False, cancelled=cancelled,
                                              limit=20_000)
             except Exception as error:  # noqa: BLE001 (the results still shown, their exercises by their titles)
-                exercises, note = [], tr("問題の表の取得に失敗（結果にある問題だけ表示）: {e}").format(e=error)
+                exercises, note = [], tr("問題の表の取得に失敗（結果にある問題だけ表示）: {e}").format(e=error_text(error))
             return results, exercises, note
 
         def done(result) -> None:

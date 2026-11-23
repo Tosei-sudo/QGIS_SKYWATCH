@@ -143,7 +143,7 @@ class AlertFeed(QWidget):
         s = self.settings()
         self.mail_button.setVisible(self._mail_settings() is not None)
         if s is None:
-            self.status.setText(self.tr("通報の表が未設定のため使えない（管理者に連絡: alertReports.table）"))
+            self.status.setText(self.tr("通報の表が未設定のため使えない（管理者に連絡: alertReports.table）［E703］"))
         elif s.live.seconds <= 0:
             self.status.setText(self.tr("自動更新なし（alertReports.live）。「今すぐ更新」で読む"))
         else:
@@ -334,7 +334,7 @@ class AlertFeed(QWidget):
         elif draft.cut:
             notes.append(self.tr("本文が長いので {n} 件のうち {k} 件だけ入力。全文をクリップボードにコピー。メールの本文に貼り付けて送信").format(n=draft.total, k=draft.shown))
         if draft.too_long:
-            notes.append(self.tr("件名と宛先だけで長さの上限（{n} 文字）を超過（管理者に連絡: alertReports.mail.maxLength）").format(n=m.max_length))
+            notes.append(self.tr("件名と宛先だけで長さの上限（{n} 文字）を超過（管理者に連絡: alertReports.mail.maxLength）［E701］").format(n=m.max_length))
         if draft.replaced:
             notes.append(self.tr("{e} で書けない文字は ? に置き換え").format(e=m.encoding))
         if not notes:

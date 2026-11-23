@@ -459,7 +459,7 @@ class ImagingPlanDock(
             self.list_sats()
             self.status.setText(self.tr(
                 "衛星カタログが未設定のため、架空のサンプル衛星 2 機（光学と SAR）で計算。"
-                "「詳細条件」で TLE を貼り付けると追加できる（管理者に連絡: satelliteCatalogs）"))
+                "「詳細条件」で TLE を貼り付けると追加できる（管理者に連絡: satelliteCatalogs）［E703］"))
         else:
             self.list_sats()
             self.status.setText("")
@@ -618,7 +618,7 @@ class ImagingPlanDock(
                 return
             self.plan_task = None
             self._running(False)
-            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算失敗: {m}").format(m=message))
+            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算に失敗: {m}").format(m=message))
 
         task = run_task(what, work, done, failed)
         self.plan_task = task
@@ -685,7 +685,7 @@ class ImagingPlanDock(
                 return
             self.plan_task = None
             self._running(False)
-            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算失敗: {m}").format(m=message))
+            self.status.setText(self.tr("計算の取消") if message == "取消" else self.tr("計算に失敗: {m}").format(m=message))
 
         task = run_task(what, work, done, failed)
         self.plan_task = task

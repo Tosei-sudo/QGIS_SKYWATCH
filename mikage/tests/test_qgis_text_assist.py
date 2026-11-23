@@ -83,7 +83,7 @@ def test_a_zipped_model_is_unpacked_once_and_a_bad_one_refused(tmp_path):
     with zipfile.ZipFile(evil, "w") as z:
         z.writestr("m/genai_config.json", "{}")
         z.writestr("../outside.txt", "x")
-    with pytest.raises(AiError, match="不正なパス"):
+    with pytest.raises(AiError, match="モデルの zip を読めない［E604］"):
         text_assist_io.model_folder_of(str(evil), root=str(root))
     assert not (tmp_path / "outside.txt").exists()
     broken = tmp_path / "broken.zip"
@@ -177,7 +177,7 @@ def test_a_folder_that_is_no_model_is_said(genai, tmp_path):
     folder = tmp_path / "m"
     write_model(str(folder))
     (folder / "model.onnx").write_bytes(b"broken")
-    with pytest.raises(AiError, match="モデルの読み込みに失敗"):
+    with pytest.raises(AiError, match="モデルを読めない"):
         text_assist_io.GenAiWriter(str(folder))
 
 

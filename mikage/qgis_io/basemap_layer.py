@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from qgis.core import QgsMapLayer, QgsProject, QgsRasterLayer, QgsVectorTileLayer
 from qgis.PyQt.QtCore import QCoreApplication
 
+from ..core import errors
 from ..core.basemaps import BaseMapConfig, attribution_text, raster_source, resolve_url, style_tiles, vector_tile_source
 from . import settings
 from .network import get_bytes
@@ -26,9 +27,9 @@ def _json(url: str, authcfg: Optional[str]) -> dict:
     try:
         value = json.loads(get_bytes(url, authcfg).decode("utf-8-sig"))
     except ValueError as error:
-        raise ValueError(f"JSON として読めない（{url.split('?', 1)[0]}）") from error
+        raise errors.Failed(code="E105", detail=f"{url.split('?', 1)[0]}：JSON として読めない") from error
     if not isinstance(value, dict):
-        raise ValueError(f"JSON のオブジェクトでなし（{url.split('?', 1)[0]}）")
+        raise errors.Failed(code="E105", detail=f"{url.split('?', 1)[0]}：JSON のオブジェクトでなし")
     return value
 
 
@@ -45,14 +46,15 @@ def open_base_map(base: BaseMapConfig, config_source: str) -> tuple[QgsMapLayer,
         style = _json(url, authcfg)
         tiles = style_tiles(style, url)
         if tiles is None:
-            raise ValueError("スタイルにベクタータイルのソースなし")
+            raise errors.Failed(code="E105", detail=f"{url.split('?', 1)[0]}：スタイルにベクタータイルのソースなし")
         if "pmtiles" in tiles:
-            raise ValueError(f"PMTiles（{tiles['pmtiles'].split('?', 1)[0]}）は QGIS 3.34 で読み込み不可")
+            raise errors.Failed("PMTiles の背景地図はこの QGIS では読めない（管理者に連絡: basemaps）", code="",
+                                detail=tiles['pmtiles'].split('?', 1)[0])
         if "tilejson" in tiles:
             info = _json(tiles["tilejson"], authcfg)
             found = info.get("tiles")
             if not isinstance(found, list) or not found or not isinstance(found[0], str):
-                raise ValueError("TileJSON にタイルの URL なし")
+                raise errors.Failed(code="E105", detail="TileJSON にタイルの URL なし")
             tiles = {"tiles": found[0], "minzoom": int(info.get("minzoom", 0)), "maxzoom": int(info.get("maxzoom", 14))}
         layer = QgsVectorTileLayer(vector_tile_source(base, tiles["tiles"], authcfg, url, tiles["minzoom"], tiles["maxzoom"]), base.label)
     else:
@@ -62,7 +64,7 @@ def open_base_map(base: BaseMapConfig, config_source: str) -> tuple[QgsMapLayer,
             notes.append("設定ファイルの token は使わず（「設定…」でこのサービスの認証設定を選択）")
     if not layer.isValid():
         error = layer.error().summary() if not layer.error().isEmpty() else ""
-        raise ValueError(f"開けない{'：' + error if error else ''}")
+        raise errors.Failed("開けない", code="E104", detail=error)
     if base.type in ("style", "esri"):
         # The style (and its icons) read here, in the task: the server's own, or the one given.
         message, ok = layer.loadDefaultStyle()
@@ -127,4 +129,4 @@ def switch_base_map(base: Optional[BaseMapConfig], config_source: str, finished:
         finished(base.id, [f"{base.label}: {n}" for n in notes])
 
     return run_task(f"背景地図「{base.label}」の読み込み", lambda task: open_base_map(base, config_source), done,
-                    lambda message: finished(current_base_map(), [f"背景地図「{base.label}」: {message}"]))
+                    lambda message: finished(current_base_map(), [f"背景地図「{base.label}」の読み込みに失敗: {message}"]))

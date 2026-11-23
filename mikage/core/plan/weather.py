@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 from urllib.parse import urlencode
 
+from .. import errors
 from ..util import is_number, is_record, is_url, time_of
 
 
@@ -172,7 +173,7 @@ def fetch_clouds(config: CloudForecastConfig, places: Sequence[Sequence[float]],
         try:
             value = json.loads(fetch(url).decode("utf-8-sig"))
         except ValueError:
-            raise ValueError(f"{config.label} の応答が JSON 以外") from None
+            raise errors.Failed(code="E105", detail=f"{config.label}：JSON 以外の応答") from None
         entries = value if isinstance(value, list) else [value]
         for k, key in enumerate(batch):
             series = _series_of(entries[k]) if k < len(entries) else None

@@ -27,6 +27,7 @@ from ..core.obs.api import Observation
 from ..core.obs.api import ReportOptions, ReportSelection, report_file_name
 from ..core.obs.api import kind_of, path_of
 from ..qgis_io.geometry import from_wgs84
+from ..qgis_io.tasks import error_text
 from .docks import save_text
 from .fit import fit_text
 from .last_inputs import InputMemory
@@ -83,7 +84,7 @@ class ReportMap:
         try:
             extent = from_wgs84(crs).transformBoundingBox(box)
         except Exception as error:  # noqa: BLE001
-            self.say(f"報告書の地図の作成に失敗: {error}")
+            self.say(f"報告書の地図の作成に失敗: {error_text(error)}")
             self.done(None, None)
             return
         # As the viewer: a margin of 8 % (at least 200 m).
@@ -317,7 +318,7 @@ class ReportDialog(QDialog):
             try:
                 html = self.book.report(o, url)
             except Exception as error:  # noqa: BLE001
-                self._say(self.tr("報告書の作成失敗: {e}").format(e=error))
+                self._say(self.tr("報告書の作成に失敗: {e}").format(e=error_text(error)))
                 return
             then(html, o, image)
 

@@ -136,7 +136,7 @@ class PlanResultsDialog(QDialog):
         if self.task is not None:
             return
         if store is None:
-            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
             return
         if not store.history:
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
@@ -184,7 +184,7 @@ class PlanResultsDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("照合失敗: {m}").format(m=message))
+            self.status.setText(self.tr("照合に失敗: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("計画と実績の照合"), work, done, failed)

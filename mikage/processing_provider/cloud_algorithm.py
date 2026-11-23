@@ -34,6 +34,7 @@ from qgis.PyQt.QtGui import QIcon
 from ..core.cloud_cover import INTERPOLATE, NEAREST, cells_in, has_zone, mean_cover
 from ..core.obs.api import parse_time
 from ..core.plan.api import FORECAST_DAYS, PAST_DAYS, CloudForecastConfig, fetch_clouds
+from ..qgis_io.tasks import error_text
 
 HERE = os.path.dirname(os.path.dirname(__file__))
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
@@ -288,7 +289,7 @@ class CloudCoverAlgorithm(QgsProcessingAlgorithm):
             except QgsProcessingException:
                 raise
             except Exception as error:  # noqa: BLE001 (a file or service that cannot be read is told)
-                raise QgsProcessingException(tr("雲量予報を読めない: {error}").format(error=str(error) or type(error).__name__)) from error
+                raise QgsProcessingException(tr("雲量予報の取得に失敗: {error}").format(error=error_text(error))) from error
             issued = getattr(forecasts, "issued", math.nan)
             if math.isfinite(issued):
                 feedback.pushInfo(tr("予報の作成時刻 {t} UTC").format(t=datetime.fromtimestamp(issued / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M")))

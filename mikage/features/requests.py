@@ -144,7 +144,7 @@ class Requests(Feature):
         """Opens 「年間撮像上限」 (from the 「撮像計画ファイル出力」 dock's store, today's year)."""
         dock = self.docks["SatObsPlanFiles"]
         if dock.store is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
+            self.iface.messageBar().pushInfo("MIKAGE", tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
             return None
         return dock.show_quotas()
 
@@ -152,7 +152,7 @@ class Requests(Feature):
         """Opens 「衛星の障害情報」 (once; read again each time it is opened)."""
         host = self.host
         if self.context.config.satellite_outages is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）"))
+            self.iface.messageBar().pushInfo("MIKAGE", tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）［E703］"))
             return None
         if host.outage_dialog is None:
             from ..ui.outage_dialog import OutageDialog

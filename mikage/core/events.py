@@ -165,7 +165,7 @@ def _where(source: EsriSource, *clauses: str) -> str:
 def _need(types: dict[str, str], fields: dict[str, str], roles: Iterable[str], what: str) -> None:
     missing = [fields[r] for r in roles if fields[r] not in types]
     if missing:
-        raise EsriError(f"{what}に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"{what}に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
 
 
 # ---- events --------------------------------------------------------------------------------------
@@ -236,13 +236,13 @@ def save_event(client: EsriClient, settings: EventSettings, event: Event, token:
         result = client.apply_edits(s.url, adds=[feature], token=token)
         r = (result.add_results or [{}])[0]
         if not r.get("success"):
-            raise EsriError("イベントの追加失敗（" + ((r.get("error") or {}).get("description") or "理由不明") + "）")
+            raise EsriError(code="E305", detail="イベントの追加: " + ((r.get("error") or {}).get("description") or ""))
         return replace(event, oid=int(r["objectId"]) if is_number(r.get("objectId")) else None)
     attributes[info.object_id_field] = event.oid
     result = client.apply_edits(s.url, updates=[feature], token=token)
     r = (result.update_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError("イベントの更新失敗（" + ((r.get("error") or {}).get("description") or "ほかの人が削除済みか") + "）")
+        raise EsriError(code="E305", detail="イベントの更新: " + ((r.get("error") or {}).get("description") or "" or "ほかの人が削除済みか"))
     return event
 
 
@@ -268,7 +268,7 @@ def delete_event(client: EsriClient, settings: EventSettings, event: Event, toke
     if event.oid is not None:
         results = client.delete_features(settings.layer.url, [event.oid], _token(settings.layer, token))
         if results and not all(r.get("success") for r in results):
-            raise EsriError("イベントの削除失敗（" + ((results[0].get("error") or {}).get("description") or "理由不明") + "）")
+            raise EsriError(code="E305", detail="イベントの削除: " + ((results[0].get("error") or {}).get("description") or ""))
     return remove_links(client, settings, links, links_token)
 
 
@@ -344,7 +344,7 @@ def add_links(client: EsriClient, settings: EventSettings, event_ids: Sequence[s
             else:
                 failures.append((r.get("error") or {}).get("description") or "追加失敗")
     if failures:
-        raise EsriError(f"イベントへの追加: {added} 件成功・{len(failures)} 件失敗（{failures[0]}）")
+        raise EsriError(f"{len(failures)} 件をサーバーが受け付けない（{added} 件は追加済み）", code="E305", detail=failures[0])
     return added, skipped
 
 
@@ -355,7 +355,7 @@ def set_link_note(client: EsriClient, settings: EventSettings, links: Sequence[E
     token = _token(s, token)
     types = _link_types(client, settings, token)
     if s.fields["note"] not in types:
-        raise EsriError(f"イベントの紐付けテーブルに属性 {s.fields['note']} なし")
+        raise EsriError(f"イベントの紐付けの表に必要な項目がない（管理者に連絡: {s.fields['note']}）", code="E704")
     oid = client.layer(s.url, token).object_id_field
     updates = [{"attributes": {oid: x.oid, s.fields["note"]: fit_value(note, types[s.fields["note"]])}} for x in links if x.oid is not None]
     if not updates:
@@ -363,7 +363,7 @@ def set_link_note(client: EsriClient, settings: EventSettings, links: Sequence[E
     results = client.apply_edits(s.url, updates=updates, token=token).update_results
     failed = [r for r in results if not r.get("success")]
     if failed:
-        raise EsriError(f"メモの保存: {len(failed)} 件失敗")
+        raise EsriError(f"メモ {len(failed)} 件をサーバーが受け付けない", code="E305")
     return len(updates)
 
 
@@ -377,7 +377,7 @@ def remove_links(client: EsriClient, settings: EventSettings, links: Sequence[Ev
         results = client.delete_features(settings.links.url, ids[start:start + 500], _token(settings.links, token))
         failed = [r for r in results if not r.get("success")]
         if failed:
-            raise EsriError(f"紐付けの解除: {len(failed)} 件失敗（{(failed[0].get('error') or {}).get('description') or ''}）")
+            raise EsriError(f"紐付け {len(failed)} 件の解除をサーバーが受け付けない", code="E305", detail=(failed[0].get("error") or {}).get("description") or "")
         removed += len(results) or len(ids[start:start + 500])
     return removed
 

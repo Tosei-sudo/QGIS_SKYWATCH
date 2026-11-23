@@ -26,6 +26,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QDateTime, QVariant
 
+from ..core.errors import Coded
 from ..core.obs.api import outline_of
 from ..core.obs.api import SimilarFound as Found, gray_of, half_sizes
 from ..core.obs.api import Sample
@@ -43,7 +44,7 @@ FEWEST_PIXELS = 8
 MOST_PIXELS = 2_600_000
 
 
-class SimilarError(Exception):
+class SimilarError(Coded):
     """Why the search cannot be made (said as it is)."""
 
 
@@ -116,7 +117,7 @@ def prepare(layer, view: QgsRectangle, view_crs: QgsCoordinateReferenceSystem, s
         area = QgsCoordinateTransform(view_crs, crs, context).transformBoundingBox(view)
         image = QgsCoordinateTransform(layer.crs(), crs, context).transformBoundingBox(layer.extent())
     except Exception as error:  # noqa: BLE001
-        raise SimilarError(f"表示範囲を画像の座標に変換できない: {error}") from error
+        raise SimilarError("表示範囲を画像の座標に変換できない", code="E508", detail=str(error)) from error
     area = area.intersect(image)
     if area.isEmpty() or area.width() <= 0 or area.height() <= 0:
         raise SimilarError("地図の表示範囲に画像なし")

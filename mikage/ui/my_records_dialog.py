@@ -321,7 +321,7 @@ class MyRecordsDialog(QDialog):
             self._made_key = None
         self._book = book
         if book is None:
-            self._take([], "", self.tr("保存先が未設定（管理者に連絡: observationStores）"))
+            self._take([], "", self.tr("保存先が未設定（管理者に連絡: observationStores）［E703］"))
             return
         if not book.scoped:
             if dock.records_ready(lambda: self.reload()):

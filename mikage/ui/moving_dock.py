@@ -24,6 +24,7 @@ from qgis.PyQt.QtWidgets import (
 
 from ..core.moving import FEED_TYPES, KINDS, ROLES, FeedConfig, feed_type_of, feed_url, history_rows
 from ..qgis_io.moving_layer import MovingLayer
+from ..qgis_io.tasks import error_text
 from .docks import PluginDock
 from .list_views import column_menus
 
@@ -215,7 +216,7 @@ class MovingDock(PluginDock):
             with open(path, "rb") as f:
                 rows = history_rows(f.read(), path)
         except (OSError, ValueError) as e:
-            self.note.setText(_tr("{name} を開けない: {e}").format(name=os.path.basename(path), e=e))
+            self.note.setText(_tr("{name} を開けない: {e}").format(name=os.path.basename(path), e=error_text(e)))
             return None
         name = os.path.splitext(os.path.basename(path))[0]
         feed = self._with_details(FeedConfig(name, "poll", path))

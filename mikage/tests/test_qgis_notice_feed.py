@@ -247,7 +247,7 @@ def test_cards_newest_at_the_bottom_with_everything_on_them(plugin):
     assert a.picture.pixmap().toImage().pixelColor(100, 75) == QColor("#ff0000")
     assert len([f for f in os.listdir(iface.thumbs) if f.endswith(".png")]) == 2
     # C has no file: the footprint drawn, why in its tip.
-    assert "ファイルなし" in c.picture.toolTip()
+    assert "ファイル・フォルダがない［E401］" in c.picture.toolTip()
     asked = len(fake.asked)
     feed._config_changed()  # the cards made again (the settings file read again)
     assert loaded(feed)

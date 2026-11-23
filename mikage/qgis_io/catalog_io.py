@@ -286,7 +286,7 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     """
     source = record.source
     if source is None:
-        raise PathError(f"{record.id or '画像'} に画像の場所なし")
+        raise PathError(f"{record.id or '画像'} の画像の場所が分からない", code="E501")
     tried: list[str] = []
     for _, target in rewrites_of(mappings, source.value):
         if not os.path.exists(target):
@@ -301,7 +301,12 @@ def locate_record(record: CatalogRecord, catalog: CatalogConfig, mappings: Seque
     except PathError as e:
         if not tried:
             raise
-        raise PathError(f"{e}（読み替え先も: {'、'.join(tried)}）") from None
+        raise _also_tried(e, tried) from None
+
+
+def _also_tried(error: PathError, tried: list[str]) -> PathError:
+    """The error with where the rewrites of `pathMappings` were looked for too (the person's own folders: on the screen)."""
+    return PathError(f"{error.message}（読み替え先も: {'、'.join(tried)}）", code=error.code, detail=error.detail)
 
 
 def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequence[PathMapping | PathRewrite],
@@ -315,7 +320,7 @@ def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     is_url = url.lower().startswith(("http://", "https://"))
     if is_url:
         if re.split(r"[?#]", url)[0].endswith("/"):
-            raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できない。フォルダはローカルパスか pathMappings の url なしで指定）")
+            raise PathError(f"{record.id or '画像'} の場所がフォルダの URL で、一覧できない（管理者に連絡: pathMappings）", detail=url)
         return RecordImages(url, True, given=source.value)
     return _local_images(record, catalog, url, source.value, names, scan)
 
@@ -377,7 +382,7 @@ def record_folder(record: CatalogRecord, mappings: Sequence[PathMapping | PathRe
     """
     source = record.source
     if source is None:
-        raise PathError(f"{record.id or '画像'} に画像の場所なし")
+        raise PathError(f"{record.id or '画像'} の画像の場所が分からない", code="E501")
     tried: list[str] = []
     for _, target in rewrites_of(mappings, source.value):
         if os.path.exists(target):
@@ -387,15 +392,15 @@ def record_folder(record: CatalogRecord, mappings: Sequence[PathMapping | PathRe
         if source.kind == "url":
             if source.value.startswith("//") and os.path.exists(source.value):
                 return _folder_of(source.value, False)
-            raise PathError(f"{record.id or source.value} の画像は URL（{source.value}）。開けるフォルダなし")
+            raise PathError(f"{record.id or '画像'} の画像は URL（{source.value}）。開けるフォルダなし", code="")
         resolved = _resolved(source.value, mappings, choose_folder)
         if resolved.kind == "url":
-            raise PathError(f"{record.id or source.value} の画像は URL（{resolved.value}、pathMappings の url）。開けるフォルダなし")
+            raise PathError(f"{record.id or '画像'} の画像は URL（{resolved.value}）。開けるフォルダなし", code="", detail="pathMappings の url")
         return _folder_of(resolved.value, False)
     except PathError as e:
         if not tried:
             raise
-        raise PathError(f"{e}（読み替え先も: {'、'.join(tried)}）") from None
+        raise _also_tried(e, tried) from None
 
 
 def _folder_of(path: str, rewritten: bool) -> RecordFolder:
@@ -416,7 +421,7 @@ def _local_images(record: CatalogRecord, catalog: CatalogConfig, path: str, give
             why.append(found.stopped)
         if found.unreadable:
             why.append(f"読めないフォルダ {found.unreadable} 件")
-        raise PathError(f"{record.id or given} のフォルダ「{path}」に画像なし（{'・'.join(why)}）")
+        raise PathError(f"{record.id or '画像'} のフォルダに画像なし（管理者に連絡: imagePatterns）", detail=f"{path}：{'・'.join(why)}")
     return RecordImages(path, False, found.files, found.more, given=given)
 
 
@@ -450,7 +455,7 @@ def record_files(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequen
     no window, a folder not chosen yet for its path's prefix is a PathError.
     """
     def no_folder(mapping: PathMapping) -> Optional[str]:
-        raise PathError(f"{mapping.prefix} の読み替え先のフォルダが未設定（「開く」で選ぶ）")
+        raise PathError(f"{mapping.prefix} の画像のフォルダが未選択。「開く」で選ぶ")
 
     return locate_record(record, catalog, mappings, no_folder, names,
                          scan=lambda folder, patterns: find_images(folder, patterns, cancelled=cancelled))
@@ -471,7 +476,7 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         layer = image_layer(url, name, image_id=record.id or None, time=time,
                             authcfg=settings.auth_for(url) if where.is_url else None)
         if not layer.isValid():
-            raise PathError(f"{record.id or url} の画像を開けない（{url if where.is_url else where.given}）")
+            raise PathError(f"{record.id or name} の画像を開けない", code="E503", detail=url if where.is_url else where.given)
         remember(layer, record, catalog)
         keep_opened(record, catalog, where, [])
         return [layer]
@@ -491,11 +496,12 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
     if layers:
         keep_opened(record, catalog, where, [f for f in files if f not in failed])
     if failed:
-        message = f"{record.id or where.given} の画像を開けない（{where.place}: {'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）"
+        error = PathError(f"{record.id or '画像'} の画像を開けない（{'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）",
+                          code="E503", detail=where.place)
         if not layers:
-            raise PathError(message)
+            raise error
         if problems is not None:
-            problems.append(message)
+            problems.append(str(error))
     return layers
 
 

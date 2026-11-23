@@ -270,6 +270,6 @@ def test_a_groups_table_that_cannot_be_read_leaves_the_requests(plugin):
     dock = p.api.requests
     dock.show()
     assert wait_for(lambda: dock._loaded and dock.task is None and dock.requests), dock.status.text()
-    assert len(dock.requests) == 4 and "依頼グループのテーブルを読めない" in dock.status.text()
+    assert len(dock.requests) == 4 and "依頼グループのテーブルの読み込みに失敗" in dock.status.text()
     assert not dock.groups_read and not dock.known()["groupTable"]
     assert [d for _t, d in choices(dock.group_filter)] == [None, "旧体制", "第1班", "第2班", NO_GROUP]

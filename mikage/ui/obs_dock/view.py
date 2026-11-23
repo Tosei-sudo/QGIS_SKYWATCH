@@ -159,7 +159,7 @@ class ViewPart:
         tr = self.tr
         if self.book is None:
             text = tr("保存先なし") if self.context.config.local_observations else \
-                tr("保存先なし（管理者に連絡: observationStores）")
+                tr("保存先なし（管理者に連絡: observationStores）［E703］")
         else:
             text = tr("画像が未選択\n"
                       "画像カタログで画像を開くか、「ファイルなしで記録」を押すと、ここに記録の一覧と入力欄を表示")

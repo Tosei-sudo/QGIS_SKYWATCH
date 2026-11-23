@@ -315,14 +315,14 @@ def save_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[st
         result = client.apply_edits(tables.exercises, adds=[row], token=token)
         adds = result.add_results
         if not adds or not adds[0].get("success"):
-            raise EsriError("問題の表への追加に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+            raise EsriError(code="E305", detail="問題の表への追加: " + "、".join(result.failures()[:3]))
         object_id = adds[0].get("objectId")
     else:
         row["attributes"][ex_info.object_id_field] = d.object_id
         result = client.apply_edits(tables.exercises, updates=[row], token=token)
         ups = result.update_results
         if not ups or not ups[0].get("success"):
-            raise EsriError("問題の表の更新に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+            raise EsriError(code="E305", detail="問題の表の更新: " + "、".join(result.failures()[:3]))
         object_id = d.object_id
     an_info = client.layer(tables.answers, token, refresh=True)
     oid = an_info.object_id_field
@@ -346,7 +346,7 @@ def save_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[st
                 a.object_id = r.get("objectId")
         failures = result.failures()
         if failures:
-            raise EsriError("正解の表に書けなかった行あり（" + "、".join(failures[:3]) + "）。もう一度保存")
+            raise EsriError("正解の表に保存できない行あり。もう一度保存", code="E305", detail="、".join(failures[:3]))
         answers = d.answers
     return replace(d, object_id=int(object_id) if object_id is not None else None, answers=answers,
                    answer_ids_read=tuple(a.object_id for a in answers if a.object_id is not None))
@@ -361,7 +361,7 @@ def set_active(client: Any, tables: ExerciseTables, d: Draft, active: bool, toke
     attributes[info.object_id_field] = d.object_id
     result = client.apply_edits(tables.exercises, updates=[{"attributes": attributes}], token=token)
     if result.failures() or not result.update_results:
-        raise EsriError("問題の表の更新に失敗（" + "、".join(result.failures()[:3] or ["理由不明"]) + "）")
+        raise EsriError(code="E305", detail="問題の表の更新: " + "、".join(result.failures()[:3]))
     return replace(d, active=active)
 
 
@@ -370,11 +370,11 @@ def delete_draft(client: Any, tables: ExerciseTables, d: Draft, token: Optional[
     if d.answer_ids_read:
         result = client.apply_edits(tables.answers, deletes=list(d.answer_ids_read), token=token)
         if result.failures():
-            raise EsriError("正解の行の削除に失敗（" + "、".join(result.failures()[:3]) + "）")
+            raise EsriError(code="E305", detail="正解の行の削除: " + "、".join(result.failures()[:3]))
     if d.object_id is not None:
         result = client.apply_edits(tables.exercises, deletes=[d.object_id], token=token)
         if result.failures():
-            raise EsriError("問題の行の削除に失敗（" + "、".join(result.failures()[:3]) + "）")
+            raise EsriError(code="E305", detail="問題の行の削除: " + "、".join(result.failures()[:3]))
 
 
 # ---- answers from observation records ---------------------------------------------------------------------------

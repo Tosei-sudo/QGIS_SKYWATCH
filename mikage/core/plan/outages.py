@@ -434,7 +434,7 @@ def _float(v: Optional[int]) -> Optional[float]:
 def _check(info, source) -> None:
     missing = [source.fields[r] for r in NEEDED if source.fields[r] not in info.field_types]
     if missing:
-        raise EsriError(f"衛星の障害情報の表に属性 {'・'.join(missing)} なし")
+        raise EsriError(f"衛星の障害情報の表に必要な項目がない（管理者に連絡: {'・'.join(missing)}）", code="E704")
 
 
 def load_outages(client: EsriClient, source, token: Optional[str] = None,
@@ -511,14 +511,14 @@ def save_outage(client: EsriClient, source, o: Outage, token: Optional[str] = No
         result = client.apply_edits(source.url, adds=[{"attributes": attributes}], token=token)
         r = (result.add_results or [{}])[0]
         if not r.get("success"):
-            raise EsriError("追加失敗（" + ((r.get("error") or {}).get("description") or "理由不明") + "）")
+            raise EsriError(code="E305", detail="追加: " + ((r.get("error") or {}).get("description") or ""))
         return dataclasses.replace(o, object_id=int(r["objectId"]) if is_number(r.get("objectId")) else None,
                                    updated_at=float(edit_stamp.now_ms()))
     attributes[info.object_id_field] = o.object_id
     result = client.apply_edits(source.url, updates=[{"attributes": attributes}], token=token)
     r = (result.update_results or [{}])[0]
     if not r.get("success"):
-        raise EsriError("更新失敗（" + ((r.get("error") or {}).get("description") or "別の PC で削除済みか") + "）")
+        raise EsriError(code="E305", detail="更新: " + ((r.get("error") or {}).get("description") or "" or "別の PC で削除済みか"))
     return dataclasses.replace(o, updated_at=float(edit_stamp.now_ms()))
 
 

@@ -34,6 +34,7 @@ from ..core.text_command import (
     ALL, BY_KEY, Operation, Reading, by_words, command_messages, lat_lon_in, operation_of, read, reply_done, word_matches,
 )
 from ..qgis_io.text_assist_io import SHOW_MS, Asked
+from ..qgis_io.tasks import error_text
 from .docks import plain_tip
 from .fit import fit_text
 from .text_assist_ui import PLAIN_STYLE, WARN_STYLE, WRITING_STYLE
@@ -586,7 +587,7 @@ class CommandBox(QObject):
             said = self.host.run(reading, self.card.place_found)
         except Exception as error:  # noqa: BLE001 (a screen that could not be opened: said, recorded, the card stays)
             audit.record("command", op.name, op.title, result="error", detail=detail, error=str(error))
-            self.card.state.setText(self.tr("失敗: {m}").format(m=error))
+            self.card.state.setText(self.tr("実行に失敗: {m}").format(m=error_text(error)))
             self.card.state.setStyleSheet(WARN_STYLE)
             self.card.state.show()
             return
