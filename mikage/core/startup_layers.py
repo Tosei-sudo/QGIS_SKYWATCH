@@ -2,7 +2,8 @@
 The settings file's `layers`: the layers opened at start, as the viewer
 reads them (config.ts `layerOf`), and what each is in QGIS (its provider and
 data source). The first entry is the bottom layer. `visible: false` (the
-plugin's own; the viewer does not read it) adds the layer unchecked.
+plugin's own; the viewer does not read it) adds the layer unchecked,
+`pinned: true` (the plugin's own too) adds it 「一番上に固定」.
 """
 from __future__ import annotations
 
@@ -33,6 +34,8 @@ class StartupLayer:
     settings: dict[str, Any] = field(default_factory=dict)
     #: False: added unchecked in the layer tree (hidden until checked).
     visible: bool = True
+    #: True: added 「一番上に固定」 (always at the top of the layer tree, qgis_io/pinned_layers.py).
+    pinned: bool = False
 
 
 def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[StartupLayer]:
@@ -48,10 +51,14 @@ def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[St
     if not isinstance(shown, bool):
         problems.append(f"layers[{index}].visible は true か false で指定")
         shown = True
+    pinned = value.get("pinned", False)
+    if not isinstance(pinned, bool):
+        problems.append(f"layers[{index}].pinned は true か false で指定")
+        pinned = False
     if kind in ("cog", "file"):
-        return StartupLayer(kind, url, visible=shown)
+        return StartupLayer(kind, url, visible=shown, pinned=pinned)
     if kind == "xyz":
-        return StartupLayer(kind, url, "tiles", visible=shown)
+        return StartupLayer(kind, url, "tiles", visible=shown, pinned=pinned)
     if isinstance(kind, str) and kind in _SERVICES:
         bbox = value.get("bbox")
         box = None
@@ -72,6 +79,7 @@ def startup_layer_of(value: Any, problems: list[str], index: int) -> Optional[St
             filter=value["filter"].strip() if isinstance(value.get("filter"), str) else "",
             settings=settings if kind == "esri" and isinstance(settings, dict) else {},
             visible=shown,
+            pinned=pinned,
         )
     problems.append(f"layers[{index}] の type「{kind}」は cog・file・wms・wmts・wfs・esri・ogc-features・ogc-tiles・wcs・ogc-coverage・xyz のいずれかで指定")
     return None

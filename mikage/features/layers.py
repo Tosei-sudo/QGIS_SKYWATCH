@@ -1,13 +1,15 @@
 """
 レイヤーに付け足すもの: QGIS の式の関数 「MIKAGE」 (the records the observation dock read and the
-named areas), the date fields corrected for the settings file's timeZone, and who and when in the
-tracking fields of Esri layers QGIS edits itself (editTracking).
+named areas), the date fields corrected for the settings file's timeZone, who and when in the
+tracking fields of Esri layers QGIS edits itself (editTracking), and the layer panel's
+「一番上に固定」 (ui/layer_pins.py).
 """
 from __future__ import annotations
 
 from qgis.core import QgsProject
 
 from ..qgis_io import edit_stamp_layers, expression_functions, time_zone_fields
+from ..ui.layer_pins import LayerPins
 from .base import Feature, disconnect, tr
 
 
@@ -17,6 +19,14 @@ class Layers(Feature):
         host.place_reader = None
         host.time_zone_fields = None
         host.edit_stamp_layers = None
+        host.layer_pins = None
+
+    def start(self) -> None:
+        # 「一番上に固定」: before the docks and the startup layers, so what they add goes below the pinned ones.
+        iface = self.iface
+        view = iface.layerTreeView() if hasattr(iface, "layerTreeView") else None
+        point = getattr(iface, "layerTreeInsertionPoint", None)
+        self.host.layer_pins = LayerPins(QgsProject.instance(), view, point if callable(point) else None)
 
     def connect(self) -> None:
         host, project = self.host, QgsProject.instance()
@@ -45,6 +55,9 @@ class Layers(Feature):
 
     def unload(self) -> None:
         host, project = self.host, QgsProject.instance()
+        if host.layer_pins is not None:
+            host.layer_pins.unload()
+            host.layer_pins = None
         if host.edit_stamp_layers is not None:
             disconnect(project.layersAdded, host.edit_stamp_layers.layers_added)
             disconnect(project.layersRemoved, host.edit_stamp_layers.layers_removed)

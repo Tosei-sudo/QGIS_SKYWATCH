@@ -17,6 +17,7 @@ from qgis.core import (
 from qgis.PyQt.QtGui import QColor
 
 from ..core.link_shapes import POINT_ZOOM, LinkShape, LinkShapes, bbox_of, family_of, to_wkt, zoom_scale
+from .pinned_layers import top_index
 from .plan_layer import make_field
 
 #: The group the layers go in (at the top of the layer list).
@@ -109,7 +110,7 @@ def add_layers(layers: Sequence[QgsVectorLayer], project: Optional[QgsProject] =
     root = project.layerTreeRoot()
     group = root.findGroup(GROUP)
     if group is None:
-        group = root.insertGroup(0, GROUP)
+        group = root.insertGroup(top_index(root), GROUP)
     group.setExpanded(True)
     group.setItemVisibilityChecked(True)
     for layer in layers:

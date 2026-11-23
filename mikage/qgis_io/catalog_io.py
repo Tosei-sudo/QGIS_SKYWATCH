@@ -46,6 +46,7 @@ from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer
 from .overviews_io import before_open
+from .pinned_layers import top_index
 from .plan_layer import make_field, qdatetime
 
 CATALOG = "satobs/catalog"
@@ -537,7 +538,8 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
         for layer in layers:
             project.addMapLayer(layer)
         return
-    group = project.layerTreeRoot().insertGroup(0, record.id or layers[0].name())
+    root = project.layerTreeRoot()
+    group = root.insertGroup(top_index(root), record.id or layers[0].name())
     group.setCustomProperty(RECORD_GROUP, record.id or "")
     for layer in layers:
         project.addMapLayer(layer, False)
