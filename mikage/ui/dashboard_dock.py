@@ -44,6 +44,7 @@ from ..core.dashboard import (
     format_time, grid_cell, grid_key, grid_label, grid_size, histogram, in_values, number_value, pick_group, pick_measure, short,
     time_bins, trend_step, trends,
 )
+from ..qgis_io.pinned_layers import top_index
 from .docks import PluginDock
 from .list_views import column_menus
 
@@ -901,7 +902,7 @@ class DashboardDock(PluginDock):
             heat.setRenderer(renderer)
             heat.setOpacity(0.75)
             self.project.addMapLayer(heat, False)
-            self.project.layerTreeRoot().insertLayer(0, heat)
+            self.project.layerTreeRoot().insertLayer(top_index(self.project.layerTreeRoot()), heat)
             self.heat_layer = heat
         heat.setName(_tr("ヒートマップ（{name}）").format(name=layer.name()))
         ok_time = self._time_test()
@@ -1412,7 +1413,7 @@ class DashboardDock(PluginDock):
             symbol = QgsFillSymbol.createSimple({"color": "220,38,38,70", "outline_color": "220,38,38,255", "outline_width": "0.6"})
             layer.setRenderer(QgsSingleSymbolRenderer(symbol))
             self.project.addMapLayer(layer, False)
-            self.project.layerTreeRoot().insertLayer(0, layer)
+            self.project.layerTreeRoot().insertLayer(top_index(self.project.layerTreeRoot()), layer)
             self.surge_layer = layer
         layer.setName(_tr("急増した地域（{name}）").format(name=self.layer.name()))
         out = []

@@ -23,6 +23,7 @@ from ..core.plan.api import (
 )
 from ..core.plan.api import local_text
 from ..qgis_io.geometry import to_wgs84
+from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import memory_layer
 from .last_inputs import InputMemory
 from .fit import fit_text
@@ -248,7 +249,7 @@ class MovingTargetDialog(QDialog):
         layer = self.chosen_layer()
         title = self.tr("存在予測 {layer}（{h} 時間先まで）").format(layer=layer.name() if layer else "", h=f"{s['horizon']:g}")
         project = QgsProject.instance()
-        group = project.layerTreeRoot().insertGroup(0, title)
+        group = project.layerTreeRoot().insertGroup(top_index(project.layerTreeRoot()), title)
         made = []
         for plan, geometry in ((circles, "MultiPolygon"), (tracks, "MultiLineString")):
             out = memory_layer(plan, self.tr(plan.title), geometry)

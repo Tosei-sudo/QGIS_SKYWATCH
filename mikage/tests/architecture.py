@@ -53,6 +53,8 @@ KERNEL = (
     # The query results kept a few minutes (データ分析 reads them; core.esri forgets a layer's on an edit).
     "core.analysis_cache",
     "qgis_io.tasks", "qgis_io.network", "qgis_io.geometry",
+    # 「一番上に固定」: where whatever adds at the top of the layer tree puts it (below the pinned nodes).
+    "qgis_io.pinned_layers",
     "ui.fit", "ui.flow_layout", "ui.wheel_guard",
 )
 

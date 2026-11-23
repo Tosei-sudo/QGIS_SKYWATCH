@@ -2,8 +2,9 @@
 The settings file's `layers` in QGIS: each entry opened as a layer in a
 task (WMS capabilities, WFS and Esri service information are read without
 holding up the map), then added to the project in order, the first entry
-at the bottom; those with `visible: false` unchecked. Entries that cannot
-be opened say why; the rest are added.
+at the bottom; those with `visible: false` unchecked, those with
+`pinned: true` 「一番上に固定」. Entries that cannot be opened say why; the
+rest are added.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from qgis.core import QgsMapLayer, QgsProject, QgsRasterLayer, QgsVectorLayer, Q
 from qgis.PyQt.QtCore import QCoreApplication, QTimer
 
 from ..core.startup_layers import LayerSource, StartupLayer, layer_source, resolve_url
-from . import settings
+from . import pinned_layers, settings
 from .tasks import run_task
 
 
@@ -111,12 +112,19 @@ def add_startup_layers(entries: Sequence[StartupLayer], config_source: str,
         project = QgsProject.instance()
         clean = unchanged and was_unchanged(project)
         root = project.layerTreeRoot()
+        pinned = False
         for layer, entry in opened:
             # Each added on top of the ones before: the first entry ends at the bottom, as in the viewer.
             project.addMapLayer(layer)
-            node = root.findLayer(layer.id()) if not entry.visible else None
-            if node is not None:
+            node = root.findLayer(layer.id()) if not entry.visible or entry.pinned else None
+            if node is not None and not entry.visible:
                 node.setItemVisibilityChecked(False)
+            if node is not None and entry.pinned:
+                pinned_layers.set_pinned(node, True)
+                pinned = True
+        if pinned:
+            # At the top now (in their order, the later entry higher), not a moment later.
+            pinned_layers.arrange(root)
         if clean and opened:
             leave_unchanged()
         finished([layer for layer, _ in opened], problems)
