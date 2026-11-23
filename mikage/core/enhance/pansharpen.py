@@ -27,6 +27,8 @@ from typing import Optional, Sequence, Union
 import numpy as np
 
 METHODS = ("gram-schmidt", "ihs", "brovey")
+#: Pixel sizes closer than this (as a share) count as the same (クイックパンシャープン's choice of the pan).
+SAME_PIXEL = 0.02
 #: Pixels whose statistics are taken: about this many, evenly spread.
 SAMPLES = 1 << 20
 
@@ -206,3 +208,29 @@ def pan_sharpen(pan: np.ndarray, ms: np.ndarray, method: str = "gram-schmidt", w
             v = np.where(v == no_data, no_data + 1 if no_data < rng[1] else no_data - 1, v)
         out[b] = np.where(valid, v, no_data).astype(ms.dtype)
     return out, no_data, model
+
+
+def pick_pan(first: tuple, second: tuple) -> Union[int, str]:
+    """
+    Which of two images is the panchromatic one (クイックパンシャープン; tsudo,
+    2026-11-23: some pans carry an alpha band, so the bands are counted, not
+    taken as one): each is (value bands, alpha not counted; ground pixel size,
+    both in one unit). The one with fewer bands, else the finer pixel. Returns
+    0 or 1, or the reason it cannot be told (or the pair cannot be sharpened).
+    """
+    (bands_a, pixel_a), (bands_b, pixel_b) = first, second
+    if min(bands_a, bands_b) < 1:
+        return "値のバンドのない画像あり"
+    if not (pixel_a > 0 and pixel_b > 0):
+        return "画素の大きさが不明な画像あり"
+    same = abs(pixel_a - pixel_b) <= SAME_PIXEL * max(pixel_a, pixel_b)
+    if bands_a != bands_b:
+        pan = 0 if bands_a < bands_b else 1
+    elif same:
+        return "どちらがパンクロか判定できない（バンド数も画素の大きさも同じ）"
+    else:
+        pan = 0 if pixel_a < pixel_b else 1
+    pan_pixel, ms_pixel = (pixel_a, pixel_b) if pan == 0 else (pixel_b, pixel_a)
+    if same or pan_pixel > ms_pixel:
+        return "パンクロ（バンドの少ない方）の画素がマルチスペクトルより細かくない"
+    return pan
