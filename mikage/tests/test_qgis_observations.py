@@ -1723,12 +1723,16 @@ def test_something_typed_is_asked_about_before_the_image_changes(plugin, monkeyp
     dock.image_select.setCurrentIndex(2)
     dock.image_select.activated.emit(2)
     assert len(asked) == 2 and book.current.name == "d1.tif" and dock.image_select.currentIndex() == 0
+    # (the layer panel: asked once QGIS is done with the change)
     iface.setActiveLayer(layers[1])
-    assert len(asked) == 3 and book.current.name == "d1.tif" and iface.activeLayer() is layers[0] and dock.form.isVisible()
+    assert len(asked) == 2
+    assert wait_for(lambda: len(asked) == 3)
+    assert book.current.name == "d1.tif" and iface.activeLayer() is layers[0] and dock.form.isVisible()
     # 保存: recorded on the form's image, then on to the other.
     dock.kind_input.setText("船舶 > 護衛艦")
     answer[0] = "save"
     iface.setActiveLayer(layers[2])
+    assert wait_for(lambda: len(asked) == 4)
     [a] = book.living()
     assert (a.object_name, a.image_name) == ("あおば", "d1.tif")
     assert book.current.name == "d3.tif" and not dock.form.isVisible()
@@ -1761,15 +1765,18 @@ def test_the_form_image_being_removed_is_not_offered_to_go_back_to(plugin, monke
     dock.kind_input.setText("船舶 > 護衛艦")
     project = QgsProject.instance()
 
-    def choose_another(_ids):
-        # As QGIS's layer panel does: another layer chosen before the removed one goes.
+    root = project.layerTreeRoot()
+
+    def choose_another(*_args):
+        # As QGIS's layer panel does: another layer chosen while the node is still there (Qt moves the current row first).
         iface.setActiveLayer(layers[1])
 
-    project.layersWillBeRemoved.connect(choose_another)
+    root.willRemoveChildren.connect(choose_another)
     try:
         project.removeMapLayer(layers[0].id())
     finally:
-        project.layersWillBeRemoved.disconnect(choose_another)
+        root.willRemoveChildren.disconnect(choose_another)
+    assert wait_for(lambda: asked)
     assert asked == [("d1.tif", False)]
     [a] = book.living()
     assert (a.object_name, a.image_name) == ("あおば", "d1.tif") and book.current.name == "d2.tif" and not dock.form.isVisible()

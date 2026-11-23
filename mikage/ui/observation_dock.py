@@ -163,9 +163,6 @@ class ObservationDock(
         self.tool.deactivated.connect(self._tool_gone)
         self.canvas.extentsChanged.connect(self._extent_changed)
         project = QgsProject.instance()
-        #: The layers being removed (QGIS chooses another layer before they go): not offered to go back to (_keep_typing).
-        self._leaving: set = set()
-        project.layersWillBeRemoved.connect(self._layers_leaving)
         project.layersAdded.connect(self._layers_changed)
         project.layersRemoved.connect(self._layers_changed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
@@ -1199,8 +1196,7 @@ class ObservationDock(
         self._use_tool(False)
         project = QgsProject.instance()
         self._withdraw_record_on_action()
-        for signal, slot in ((project.layersWillBeRemoved, self._layers_leaving),
-                             (project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
+        for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
                              (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset)):
             try:

@@ -93,11 +93,7 @@ class ImagesPart:
         origin = SATELLITE_ORIGINS.get(image.satellite_origin, "")
         return self.tr("画像: {n}\n衛星名: {s}").format(n=image.name, s=image.satellite) + (f"（{origin}）" if origin else "")
 
-    def _layers_leaving(self, layers) -> None:
-        self._leaving = {x if isinstance(x, str) else x.id() for x in layers}
-
     def _layers_changed(self, *_args) -> None:
-        self._leaving = set()
         self.refresh_images()
 
     # ---- 「観測記録の画像にする」 (the layer panel's right-click; 操作性点検 1, tsudo 2026-11-23) ----
@@ -146,6 +142,30 @@ class ImagesPart:
             self.record_on_action.setChecked(isinstance(layer, QgsRasterLayer) and is_image_layer(layer))
         if self._following or self.book is None:
             return
+        typing_on = self._form_image if self._typed() else None
+        if typing_on is not None and layer is not None and layer.id() not in typing_on.layer_ids:
+            # Something typed for another image: asked once QGIS is done (a layer removed in the layer panel makes
+            # another one chosen while it is still there: 操作性点検の再検証 F10, 「元の画像に戻る」 offered to it).
+            layer_id = layer.id()
+            QTimer.singleShot(0, lambda: self._layer_chosen_later(layer_id))
+            return
+        self._follow_layer(layer)
+
+    def _layer_chosen_later(self, layer_id: str) -> None:
+        """_layer_chosen with something typed, after QGIS's change: the layer still the one chosen."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        active = self.iface.activeLayer()
+        if self.book is None or layer is None or active is None or active.id() != layer_id:
+            return
+        current, typing_on = self.book.current, self._form_image
+        if typing_on is not None and current is not None and current.id != typing_on.id and layer_id in current.layer_ids:
+            # There already: the form's image was removed, the images read again went to the layer chosen.
+            self._went()
+            return
+        self._follow_layer(layer)
+
+    def _follow_layer(self, layer) -> None:
+        """The image of the layer chosen in the layer panel recorded on (a footprint's: the image without its file)."""
         listed = listed_image_of(layer)
         if listed is not None and layer.id() in self.footprints.layer_ids():
             # An image without its file chosen by its footprint's layer.
@@ -234,9 +254,7 @@ class ImagesPart:
         image = book.current if book else None
         if book is None or was is None or (image is not None and image.id == was.id) or not self._typed():
             return False
-        # Not to an image whose layers are being removed (the layer panel's 「削除」 chose another one first).
-        leaving = getattr(self, "_leaving", set())
-        can_return = any(i.id == was.id and not (i.layer_ids and set(i.layer_ids) <= leaving) for i in book.images)
+        can_return = any(i.id == was.id and self._still_there(i) for i in book.images)
         answer = self.ask_unsaved(self.form.title(), was.name, can_return)
         if answer == "save":
             self.submit(image=next((i for i in book.images if i.id == was.id), was))
@@ -256,6 +274,14 @@ class ImagesPart:
                 self._following = False
         self.render()
         return True
+
+    def _still_there(self, image) -> bool:
+        """Whether an image can be gone back to: one listed without its file, or with a layer in the layer panel."""
+        ids = list(image.layer_ids)
+        if not ids:
+            return True
+        root = QgsProject.instance().layerTreeRoot()
+        return any(root.findLayer(x) is not None for x in ids)
 
     def ask_unsaved(self, title: str, image_name: str, can_return: bool) -> str:
         """「保存」「破棄」「元の画像に戻る」 for what is typed in the form: 'save', 'discard' or 'back' (also Esc)."""
