@@ -530,15 +530,22 @@ def located_again(entry: OpenedImage) -> RecordImages:
 
 
 def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> None:
-    """Adds a record's layers to the project: one as it is, several in a group of the record's id at the top of the layer tree."""
+    """
+    Adds a record's layers to the project at the top of the layer tree (just
+    below the pinned ones): one as it is, several in a group of the record's
+    id. Always at the top level, not in the group chosen in the layer list
+    (tsudo 2026-11-23: an image opened from 観測記録 while a group was chosen
+    went into that group).
+    """
     project = project or QgsProject.instance()
     if layers:
         audit.record("open", "image", record.id or layers[0].name(), count=len(layers), detail={"files": [layer.source() for layer in layers]})
+    root = project.layerTreeRoot()
     if len(layers) <= 1:
         for layer in layers:
-            project.addMapLayer(layer)
+            project.addMapLayer(layer, False)
+            root.insertLayer(top_index(root), layer)
         return
-    root = project.layerTreeRoot()
     group = root.insertGroup(top_index(root), record.id or layers[0].name())
     group.setCustomProperty(RECORD_GROUP, record.id or "")
     for layer in layers:
