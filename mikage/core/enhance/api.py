@@ -17,7 +17,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .color_scale import apply_palette, color_scale_palette, COLOR_SCALES
     from .histogram import bar_heights, channel_bins, channel_stats
     from .ops import curve_function, is_identity_curve, normalize_curve, OP_INFO
-    from .pansharpen import fit_model, METHODS, pan_sharpen, PanSharpenModel, valid_pixels
+    from .pansharpen import fit_model, METHODS, pan_sharpen, PanSharpenModel, pick_pan, valid_pixels
     from .pipeline import Pipeline, PRESET_NAMES, PRESETS
     from .process import channel_tables, process
     from .raster import (
@@ -33,7 +33,7 @@ __all__ = [
     "apply_palette", "auto_label", "bar_heights", "channel_bins", "channel_stats", "channel_tables", "class_palette",
     "class_range", "class_shares", "code_table", "color_classes", "color_scale_palette", "COLOR_SCALES",
     "compute_raster_stretch", "count_pixels", "curve_function", "fit_model", "format_class_value", "image_rule_for",
-    "is_identity_curve", "look_up", "METHODS", "normalize_curve", "OP_INFO", "pan_sharpen", "PanSharpenModel", "Pipeline",
-    "PRESET_NAMES", "PRESETS", "process", "RasterHistogram", "recolor", "resize_classes", "resolve_bands", "resolve_ops",
-    "sample_raster_histogram", "set_bound", "stretch_to_rgba", "to_codes", "valid_mask", "valid_pixels",
+    "is_identity_curve", "look_up", "METHODS", "normalize_curve", "OP_INFO", "pan_sharpen", "PanSharpenModel", "pick_pan",
+    "Pipeline", "PRESET_NAMES", "PRESETS", "process", "RasterHistogram", "recolor", "resize_classes", "resolve_bands",
+    "resolve_ops", "sample_raster_histogram", "set_bound", "stretch_to_rgba", "to_codes", "valid_mask", "valid_pixels",
 ]

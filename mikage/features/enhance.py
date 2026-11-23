@@ -1,9 +1,12 @@
 """
-画像補正: 画像補正, 影から高さ, スペクトル, 「スワイプ比較」, 「位置ずらし」 and its 「解除」.
+画像補正: 画像補正, 影から高さ, スペクトル, 「スワイプ比較」, 「位置ずらし」 and its 「解除」,
+「クイックパンシャープン」 (placed in 解析・処理, by the Processing algorithm's 「パンシャープン…」).
 """
 from __future__ import annotations
 
+from ..qgis_io.quick_pan import QuickPanKeeper
 from ..ui.enhance_dock import EnhanceDock
+from ..ui.quick_pan import QuickPanSwitch
 from ..ui.shadow_dock import ShadowHeightDock
 from ..ui.shift import LayerShift
 from ..ui.spectral_dock import SpectralDock
@@ -17,6 +20,13 @@ class Enhance(Feature):
         #: 「スワイプ比較」 and 「位置ずらし」's map tools (plugin.api.swipe, plugin.api.shift).
         host.swipe = None
         host.shift = None
+        #: クイックパンシャープン: its links kept as layers come and go, and the entry's switch.
+        host.quick_pan_keeper = None
+        host.quick_pan = None
+
+    def start(self) -> None:
+        # Before the docks: 画像補正 shows a layer's link from the start.
+        self.host.quick_pan_keeper = QuickPanKeeper()
 
     def dock_specs(self) -> dict:
         iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
@@ -35,8 +45,16 @@ class Enhance(Feature):
         shift = self.entry("shift", "位置ずらし", name="SatObsShift")
         host.shift = LayerShift(self.iface, shift, self.window())
         self.entry("unshift", "位置ずらしの解除", lambda: host.shift.reset())
+        # 「クイックパンシャープン」: the two images chosen in the layer panel, the multispectral one drawn sharpened where it shows.
+        quick = self.entry("quick_pansharpen", "クイックパンシャープン", name="SatObsQuickPan")
+        host.quick_pan = QuickPanSwitch(self.iface, quick, self.window())
 
     def unload(self) -> None:
+        close(self.host.quick_pan)
+        self.host.quick_pan = None
+        if self.host.quick_pan_keeper is not None:
+            self.host.quick_pan_keeper.unload()
+            self.host.quick_pan_keeper = None
         close(self.host.swipe)
         self.host.swipe = None
         close(self.host.shift)
