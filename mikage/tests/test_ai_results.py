@@ -74,7 +74,7 @@ def test_several_results_recorded_at_once_are_things_of_their_class(book):  # no
     assert [(o.object_name, o.kind, o.image_id) for o in saved] == [("支援船", "船舶 > 支援船", "d1"), ("支援船", "船舶 > 支援船", "d1"), ("car", "car", "d1")]
     assert len({o.object_id for o in saved}) == 3
     assert book.said[-1] == "3 件を記録"
-    assert book.add_many([], image="nope") is None and book.said[-1] == "画像なし（取り込む画像を開いて）"
+    assert book.add_many([], image="nope") is None and book.said[-1] == "画像なし。取り込む画像を開いてから取り込み"
 
 
 def test_a_result_near_a_thing_of_the_image_before_continues_it(book):  # noqa: F811

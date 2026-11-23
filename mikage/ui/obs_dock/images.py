@@ -61,7 +61,7 @@ class ImagesPart:
             if choices:
                 self.refresh_images()
 
-        run_task(self.tr("衛星名の候補の読み込み"), lambda task: self.context.satellite_choices(cancelled=task.isCanceled), done,
+        run_task(self.tr("衛星名の候補の取得"), lambda task: self.context.satellite_choices(cancelled=task.isCanceled), done,
                  lambda _message: None)
 
     def _fill_satellite_input(self) -> None:

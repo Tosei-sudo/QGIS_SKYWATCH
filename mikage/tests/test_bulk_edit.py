@@ -126,7 +126,7 @@ def test_records_someone_else_changed_are_left_and_the_rest_saved(tmp_path):
     out = book.update_many(["a", "b", "c"], confidence="確定")
     assert sorted(o.id for o in out.saved) == ["a", "c"]
     assert (out.failed, out.conflicts) == (1, 1)
-    assert "保存できず 1 件（うち 1 件はほかの人が読み込み後に更新" in said[-1]
+    assert "保存できず 1 件（うち 1 件はほかの人が先に変更。" in said[-1]
     here = {o.id: o for o in book.records}
     assert (here["a"].confidence, here["b"].confidence) == ("確定", "")
     server = {o.id: o for o in theirs.load()}
@@ -171,7 +171,7 @@ def test_records_someone_else_changed_are_not_deleted_and_the_rest_are(tmp_path)
     out = book.remove_many(["a", "b", "c"])
     assert sorted(o.id for o in out.removed) == ["a", "c"]
     assert (out.failed, out.conflicts) == (1, 1)
-    assert said[-1].startswith("2 件の記録を削除・削除できず 1 件（うち 1 件はほかの人が読み込み後に更新")
+    assert said[-1].startswith("2 件の記録を削除・削除できず 1 件（うち 1 件はほかの人が先に変更。")
     here = {o.id: o for o in book.records}
     assert here["a"].deleted_at is not None and here["c"].deleted_at is not None and here["b"].deleted_at is None
     server = {o.id: o for o in theirs.load()}

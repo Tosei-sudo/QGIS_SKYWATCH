@@ -352,14 +352,14 @@ def test_a_length_typed_full_width_or_with_a_unit_is_kept_and_an_unreadable_one_
     dock.length_input.setText("120m くらい")
     dock.submit()
     assert dock.form.isVisible() and dock.pending is not None
-    assert dock.measure_note.text() == "長さ（m）の「120m くらい」を読めません（数で）"
+    assert dock.measure_note.text() == "長さ（m）は数字で入力（「120m くらい」は読めない）"
     assert dock.book.living()[0].length == 120.5
     dock.length_input.setText("130 m")
     dock.submit()
     assert not dock.form.isVisible() and dock.book.living()[0].length == 130
     # A file that can't be written (open in Excel, a folder gone): said in the dock, not a Python error.
     assert dock.save_csv(str(tmp_path / "gone" / "records.csv")) is None
-    assert dock.status.text().startswith("CSV を保存できない: ")
+    assert dock.status.text().startswith("CSV の保存に失敗: ")
     assert dock.save_csv(str(tmp_path / "records.csv")) == str(tmp_path / "records.csv")
 
 
@@ -404,7 +404,7 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     dock.set_two_point(True)
     dock.map_clicked(139.7, 35.6, None)
     dock.escape()
-    assert dock.rear is None and dock.status.text() == "後端の取消"
+    assert dock.rear is None and dock.status.text() == "後端を取り消し"
     # Esc with the map focused (the dock's key is not active then) does the same.
     from qgis.PyQt.QtCore import QEvent, Qt
     from qgis.PyQt.QtGui import QKeyEvent
@@ -417,7 +417,7 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     assert dock.canvas.mapTool() is dock.tool
     dock.map_clicked(139.7, 35.6, None)
     assert dock.rear is not None
-    assert esc_on_map() and dock.rear is None and dock.status.text() == "後端の取消"
+    assert esc_on_map() and dock.rear is None and dock.status.text() == "後端を取り消し"
     dock.set_area_mode(True)
     dock.map_clicked(139.7, 35.6, None)
     assert dock.area_corner is not None
@@ -485,7 +485,7 @@ def test_measures_the_width_by_three_or_four_points(plugin):
     assert dock.status.text() == "反対側の側面をクリック（Esc で取消）" and len(dock.placed) == 2
     # Esc takes back the last point only.
     dock.escape()
-    assert dock.placed == [(139.71, 35.6)] and dock.status.text() == "側面の取消"
+    assert dock.placed == [(139.71, 35.6)] and dock.status.text() == "側面を取り消し"
     dock.map_clicked(139.7102, 35.5992, None)
     dock.map_clicked(139.7099, 35.5992, None)
     assert float(dock.width_input.text()) == pytest.approx(27.15, abs=0.3)
@@ -658,7 +658,7 @@ def test_a_cloud_and_one_thing_not_seen_are_recorded_neither_there_nor_gone(plug
     dock.step(1)
     assert dock.unseen_area_button.isVisible() and not dock.unseen_inside_button.isVisible()
     dock.set_area_mode(True, unseen=True)
-    assert dock.area_form.title() == "不可範囲（雲など）" and dock.area_submit_button.text() == "不可範囲の記録（Enter）"
+    assert dock.area_form.title() == "不可範囲（雲など）" and dock.area_submit_button.text() == "不可範囲を記録（Enter）"
     assert dock.area_reason.isVisible() and not dock.area_kind.isVisible() and dock.area_reason.currentText() == "雲"
     assert dock.status.text().startswith("不可範囲（雲など）:") and not dock.area_button.isChecked()
     dock.map_clicked(139.69, 35.59, None)
@@ -704,7 +704,7 @@ def test_lists_an_image_without_its_file_and_types_a_time(plugin):
     dock._list_from_form()
     book = dock.book
     assert book.current.id == "EXT-1" and not book.current.file and dock.time_row.isVisible()
-    assert dock.status.text() == "外部 を追加（ファイルなし）"
+    assert dock.status.text() == "ファイルのない画像 外部 を追加"
     from qgis.PyQt.QtCore import QDateTime
 
     dock.time_input.setDateTime(QDateTime.fromMSecsSinceEpoch(ms(2, 12)))
@@ -766,7 +766,7 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     assert layer.rows[0]["attributes"]["OBSERVER"] == "田中"
     # The classification read again in a task too.
     dock.reload_taxonomy()
-    assert wait_for(lambda: dock.status.text().endswith("件を読み込み"))
+    assert wait_for(lambda: dock.status.text().endswith("件を取得"))
     # The local store is the other choice, with its own records.
     dock.store_select.setCurrentIndex(1)
     assert dock.book.label == "ローカル" and dock.book.living() == []
@@ -891,7 +891,7 @@ def test_a_things_flow_opens_below_the_list_and_a_row_of_it_clicked_only_goes_to
     assert not dock.active and not dock.form.isVisible() and not dock.record_button.isChecked()
     assert dock.flow_box.isVisible() and dock.chosen == first.object_id
     assert {i.row() for i in steps.selectionModel().selectedRows()} == {0}
-    assert "の画像へ移動（ダブルクリックでこの記録を編集）" in dock.status.text()
+    assert "の画像へ移動。ダブルクリックでこの記録を編集" in dock.status.text()
     # A double click opens the record in the form (and recording, to move it), as before.
     steps.cellDoubleClicked.emit(0, 0)
     assert dock.active and dock.form.isVisible() and dock.pending[2] is not None and dock.pending[2].id == first.id
@@ -1068,7 +1068,7 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     [refresh] = [b for b in editor.findChildren(QPushButton) if b.text() == "更新"]
     refresh.click()
     assert editor._item_of("船舶 > 新型") is not None and editor.selected is None
-    assert dock.status.text().endswith("分類 2 件を読み込み")
+    assert dock.status.text().endswith("分類 2 件を取得")
 
 
 def test_gives_scripts_the_observations_through_plugin_api(plugin, tmp_path):
@@ -1130,7 +1130,7 @@ def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeyp
     monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
     dock.submit()
     assert dock.form.isVisible() and dock.object_input.text() == "あおば" and dock.note_input.text() == "入港直後"
-    assert any("送信待ちに保管しました" in w.text() for w in iface.bar.items())
+    assert any("送信待ちに保管" in w.text() for w in iface.bar.items())
     monkeypatch.undo()
     dock.submit()
     assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]
@@ -1456,7 +1456,7 @@ def test_with_no_image_chosen_only_a_note_is_shown_and_the_records_are_not_read(
     p, iface, dock, tmp_path = bare
     book = dock.book
     assert book.current is None and not book.loaded
-    assert _idle(dock) and "画像が選ばれていません" in dock.idle_note.text() and not dock.only.isEnabled()
+    assert _idle(dock) and "ここに記録の一覧と入力欄を表示" in dock.idle_note.text() and not dock.only.isEnabled()
     # Nothing to record on: R and A say so (in the note).
     dock.set_active(True)
     dock.set_area_mode(True)

@@ -117,7 +117,7 @@ def test_removing_a_footprints_layer_takes_its_image_off_the_list_and_keeps_its_
     APP.processEvents()
     assert [i.id for i in book.listed] == ["IMG1", "IMG3"] and [i.id for i in book.images] == ["IMG1", "IMG3"]
     assert book.current.id == "IMG1" and dock.form.isVisible() and _names() == ["IMG1", "IMG3"]
-    assert dock.status.text() == "IMG2 を一覧から除外（記録は保持）"
+    assert dock.status.text() == "IMG2 を一覧から除外（記録は残る）"
     # The current image's layer removed: the next one recorded on, the form closed; the records stay.
     dock.close_form()
     project.removeMapLayer(_layers()[0].id())

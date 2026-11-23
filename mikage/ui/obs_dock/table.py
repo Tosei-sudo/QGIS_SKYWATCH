@@ -59,12 +59,12 @@ class TablePart:
             if reported and style != "deleted":
                 item.setBackground(QColor(REPORTED_ROW))
                 item.setForeground(QColor("#1f2937"))
-                item.setToolTip(self.tr("通報済み（通報テーブルに記録あり）"))
+                item.setToolTip(self.tr("通報済み"))
             if waiting:
                 # Not the local store: saved offline, on its way to this store's server.
                 item.setBackground(QColor(WAITING_ROW))
                 item.setForeground(QColor("#1e3a8a"))
-                item.setToolTip(self.tr("送信待ち（オフライン中に保存。サーバーにはまだない）"))
+                item.setToolTip(self.tr("送信待ち（まだ送っていない）"))
             self.table.setItem(r, i, item)
         if widget is not None:
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)

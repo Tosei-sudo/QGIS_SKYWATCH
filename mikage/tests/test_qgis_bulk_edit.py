@@ -121,9 +121,9 @@ def test_the_question_says_whether_deleted_records_can_be_restored(obs_plugin, m
     book = dock.book
     o = book.add(139.65, 35.6, object="あおば", kind="船舶", activity="停泊")
     seen = []
-    monkeypatch.setattr("mikage.ui.observation_dock.ask_no", lambda parent, title, text: seen.append(text) or False)
+    monkeypatch.setattr("mikage.ui.observation_dock.ask_no", lambda parent, title, text, **_k: seen.append(text) or False)
     assert dock.ask_remove([o]) is False
-    assert "1 件（モノ 1 件）" in seen[0] and "復元できます" in seen[0]
+    assert "1 件（モノ 1 件）" in seen[0] and "復元できる" in seen[0]
     monkeypatch.setattr(book, "removes_for_good", lambda: True)
     dock.ask_remove([o])
-    assert "元に戻せません" in seen[1]
+    assert "復元できない" in seen[1]

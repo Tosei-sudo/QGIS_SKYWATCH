@@ -84,7 +84,7 @@ class ModesPart:
             if current is not None and current.id == image.id and self.isVisible():
                 self.set_active(True, quiet=True)
                 if not quiet:
-                    self.say(self.tr("{name} を担当に。").format(name=image.name or image.id) + HINT_POINTS.get(self.points, HINT))
+                    self.say(self.tr("{name} の担当を開始。").format(name=image.name or image.id) + HINT_POINTS.get(self.points, HINT))
 
         def failed(message: str) -> None:
             end()
@@ -92,11 +92,11 @@ class ModesPart:
             if bar.shared and current is not None and current.id == image.id and self.isVisible():
                 # 協業: nobody is kept out, so the work goes on; only the 分担 row is missing.
                 self.set_active(True, quiet=True, claimed=True)
-                text = self.tr("分担を記録できませんでした（クリック記録は続けられます）: {m}").format(m=message)
+                text = self.tr("分担の記録に失敗（クリック記録は続行）: {m}").format(m=message)
                 self.say(text)
                 self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
                 return
-            text = self.tr("クリック記録できません: {m}").format(m=message)
+            text = self.tr("クリック記録の開始に失敗: {m}").format(m=message)
             self.say(text)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(text))
 
@@ -189,7 +189,7 @@ class ModesPart:
             self.say(NO_IMAGE)
             on = False
         if on and unseen and not self.book.keeps_unseen_areas():
-            self.say(self.tr("保存先に不可の理由の属性（UNSEEN_REASON）がないため、不可範囲は記録できません"))
+            self.say(self.tr("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）"))
             on = False
         unseen = on and unseen
         for button, want in ((self.area_button, on and not unseen), (self.unseen_area_button, unseen)):
@@ -207,7 +207,7 @@ class ModesPart:
             w.setVisible(not unseen)
         for w in (self.area_reason_label, self.area_reason):
             w.setVisible(unseen)
-        self.area_submit_button.setText(tr("不可範囲の記録（Enter）") if unseen else tr("確認範囲の記録（Enter）"))
+        self.area_submit_button.setText(tr("不可範囲を記録（Enter）") if unseen else tr("確認範囲を記録（Enter）"))
         self.area_form.setVisible(on)
         self._use_tool(on or self.active)
         if on:
@@ -245,10 +245,10 @@ class ModesPart:
         elif self.rear is not None:
             if self.placed:
                 self.placed.pop()
-                self.say(self.tr("側面の取消") if self.placed else self.tr("前端の取消"))
+                self.say(self.tr("側面を取り消し") if self.placed else self.tr("前端を取り消し"))
             else:
                 self._clear_points()
-                self.say(self.tr("後端の取消"))
+                self.say(self.tr("後端を取り消し"))
             self.draw()
         elif self.form.isVisible():
             self.close_form()

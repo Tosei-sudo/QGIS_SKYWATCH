@@ -95,7 +95,7 @@ def test_a_csv_is_tried_then_taken_in_with_a_backup_kept(plugin, backups):  # no
     assert dialog.run_import(confirm=False)
     assert "船舶 > 支援船 > 補給艦" in kinds(book) and "その他" in kinds(book)
     assert dialog.summary.text().startswith("取り込み済み: ") and not dialog.import_button.isEnabled()
-    assert "表から取り込みました" in dialog.status.text() and "取り込む前の分類体系の控え" in dialog.status.text()
+    assert "表から取り込み: " in dialog.status.text() and "取り込む前の分類体系の控え" in dialog.status.text()
     [backup] = list(backups.glob("*.json"))
     assert json.loads(backup.read_text(encoding="utf-8"))[0]["name"] == "船舶"
     # The editor shows it.

@@ -28,7 +28,7 @@ class OutputsPart:
             return
         failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n", what="taxonomy-json")
         if failed:
-            self.say(self.tr("分類体系を保存できない: {m}").format(m=failed))
+            self.say(self.tr("分類体系の保存に失敗: {m}").format(m=failed))
             return
         self.say(self.tr("分類体系を保存: {p}").format(p=path))
 
@@ -45,7 +45,7 @@ class OutputsPart:
         taxa = self.book.taxonomy()
         failed = save_text(path, taxonomy_import.taxonomy_csv(taxa, self.book.spec_fields), newline="", what="taxonomy-csv", count=len(taxa))
         if failed:
-            self.say(self.tr("分類体系を書き出せない: {m}").format(m=failed))
+            self.say(self.tr("分類体系の書き出しに失敗: {m}").format(m=failed))
             return None
         self.say(self.tr("分類体系を表に書き出し（{n} 分類）: {p}").format(n=len(taxa), p=path))
         return path
@@ -77,7 +77,7 @@ class OutputsPart:
             if not isinstance(items, list):
                 raise ValueError("分類の配列なし")
         except (OSError, ValueError) as error:
-            self.say(self.tr("分類の読み込み失敗: {e}").format(e=error))
+            self.say(self.tr("分類の読み込みに失敗: {e}").format(e=error))
             return
         self.do(self.tr("分類の読み込み"), lambda b: b.set_taxonomy(items))
 
@@ -95,7 +95,7 @@ class OutputsPart:
             return None
         failed = save_text(path, observations_csv(rows), newline="", what="observations-csv", count=len(rows))
         if failed:
-            self.say(self.tr("CSV を保存できない: {m}").format(m=failed))
+            self.say(self.tr("CSV の保存に失敗: {m}").format(m=failed))
             return None
         self.say(self.tr("CSV を保存: {p}").format(p=path))
         return path

@@ -58,7 +58,7 @@ def test_others_records_are_merged_and_told(tmp_path):
     b = next(o for o in theirs.load() if o.id == "b")
     theirs.save([replace(b, note="ほかの人", updated_by="鈴木", updated_at=now_ms()), obs(id="c", updated_at=now_ms())])
     text = book.refresh()
-    assert text and "2 件を反映" in text
+    assert text and "2 件を取得" in text
     here = {o.id: o for o in book.records}
     assert set(here) == {"a", "b", "c"} and here["b"].note == "ほかの人"
     assert book.changed_by_others == {"b", "c"}
@@ -72,7 +72,7 @@ def test_a_store_that_cannot_tell_is_read_whole(tmp_path):
     mine.save([obs(id="a")])
     book, db = book_of(mine, tmp_path)
     theirs.save([obs(id="b")])
-    assert "1 件を反映" in book.refresh()
+    assert "1 件を取得" in book.refresh()
     assert {o.id for o in book.records} == {"a", "b"}
     db.close()
 

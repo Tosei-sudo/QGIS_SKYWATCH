@@ -116,7 +116,7 @@ class FormPart:
             self.restore_form(lon, lat, editing, source, values)
             self.refresh(force=True)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
-                "記録を保存できませんでした（送信待ちに保管しました）: {m}").format(m=message)))
+                "記録の保存に失敗。送信待ちに保管: {m}").format(m=message)))
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen),
                 lambda saved: lost(self.status.text()) if saved is None else self.many.use_record(saved), watch=True, failed=lost)
@@ -132,7 +132,7 @@ class FormPart:
             try:
                 read_number(edit.text())
             except ValueError:
-                self.measure_note.setText(self.tr("{label}の「{text}」を読めません（数で）").format(label=label.text(), text=edit.text().strip()))
+                self.measure_note.setText(self.tr("{label}は数字で入力（「{text}」は読めない）").format(label=label.text(), text=edit.text().strip()))
                 self.measure_note.setVisible(True)
                 edit.setVisible(True)
                 edit.setFocus()
