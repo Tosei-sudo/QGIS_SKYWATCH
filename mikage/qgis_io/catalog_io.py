@@ -46,6 +46,7 @@ from ..core.util import is_number, ms_of
 from . import settings
 from .obs_images import IMAGE_FILE, IMAGE_ID, SATELLITE, image_layer
 from .overviews_io import before_open
+from .pinned_layers import top_index
 from .plan_layer import make_field, qdatetime
 
 CATALOG = "satobs/catalog"
@@ -530,10 +531,11 @@ def located_again(entry: OpenedImage) -> RecordImages:
 
 def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> None:
     """
-    Adds a record's layers to the project at the top of the layer tree: one
-    as it is, several in a group of the record's id. Always at the top level,
-    not in the group chosen in the layer list (tsudo 2026-11-23: an image
-    opened from 観測記録 while a group was chosen went into that group).
+    Adds a record's layers to the project at the top of the layer tree (just
+    below the pinned ones): one as it is, several in a group of the record's
+    id. Always at the top level, not in the group chosen in the layer list
+    (tsudo 2026-11-23: an image opened from 観測記録 while a group was chosen
+    went into that group).
     """
     project = project or QgsProject.instance()
     if layers:
@@ -542,9 +544,9 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
     if len(layers) <= 1:
         for layer in layers:
             project.addMapLayer(layer, False)
-            root.insertLayer(0, layer)
+            root.insertLayer(top_index(root), layer)
         return
-    group = root.insertGroup(0, record.id or layers[0].name())
+    group = root.insertGroup(top_index(root), record.id or layers[0].name())
     group.setCustomProperty(RECORD_GROUP, record.id or "")
     for layer in layers:
         project.addMapLayer(layer, False)

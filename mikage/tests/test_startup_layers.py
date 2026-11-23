@@ -50,6 +50,21 @@ def test_visible_false_adds_the_layer_hidden():
     assert problems == ["layers[5].visible は true か false で指定"]
 
 
+def test_pinned_true_adds_the_layer_pinned_on_top():
+    problems = []
+    layers = startup_layers_of([
+        {"type": "cog", "url": "./a.tif", "pinned": True},
+        {"type": "xyz", "url": "https://t/{z}/{x}/{y}.png", "pinned": True},
+        {"type": "wms", "url": "https://x/wms", "layer": "roads", "pinned": True, "visible": False},
+        {"type": "file", "url": "./b.geojson"},
+        {"type": "file", "url": "./c.geojson", "pinned": "yes"},
+    ], problems)
+    # Not written (or written wrong): not pinned, as before.
+    assert [l.pinned for l in layers] == [True, True, True, False, False]
+    assert [l.visible for l in layers] == [True, True, False, True, True]
+    assert problems == ["layers[4].pinned は true か false で指定"]
+
+
 def test_relative_urls_follow_the_settings_file():
     assert resolve_url("./data/a.geojson", "https://web/viewer/config.json") == "https://web/viewer/data/a.geojson"
     assert resolve_url("../a.tif", "/srv/viewer/conf/config.json") == "/srv/viewer/a.tif"

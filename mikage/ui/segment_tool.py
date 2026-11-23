@@ -36,6 +36,7 @@ from ..processing_provider.detect_algorithm import image_info, outline_symbol, s
 from ..qgis_io.ai_io import image_rgba
 from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, LoadedModel, local_model, model_from, name_of
+from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.tasks import run_task
 
 PICK = "pick"
@@ -512,7 +513,8 @@ class SegmentTool(QObject):
         mark_origin(layer)
         layer.setRenderer(QgsSingleSymbolRenderer(outline_symbol()))
         QgsProject.instance().addMapLayer(layer, False)
-        QgsProject.instance().layerTreeRoot().insertChildNode(0, QgsLayerTreeLayer(layer))
+        root = QgsProject.instance().layerTreeRoot()
+        root.insertChildNode(top_index(root), QgsLayerTreeLayer(layer))
         self.layer = layer
         self.say(self.tr("AI 抽出 を作成（{n} 件、一時レイヤー）").format(n=len(features)))
         self.clear()

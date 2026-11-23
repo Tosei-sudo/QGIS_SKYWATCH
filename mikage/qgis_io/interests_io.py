@@ -26,6 +26,7 @@ from ..core.interests import (
     AREA, KINDS, POINT, Interest, InterestSettings, delete_interests, load_interests, save_interest,
 )
 from .catalog_io import footprint
+from .pinned_layers import top_index
 from .tasks import run_task
 
 #: The custom property that marks the plugin's two layers (its value: the kind).
@@ -280,7 +281,7 @@ def show_layers(items: Sequence[Interest], settings: InterestSettings, project: 
                 continue
             layer = _new_layer(kind, settings.color)
             project.addMapLayer(layer, False)
-            project.layerTreeRoot().insertLayer(0, layer)
+            project.layerTreeRoot().insertLayer(top_index(project.layerTreeRoot()), layer)
             layers[kind] = layer
         fill(layer, [i for i in items if i.kind == kind])
     return layers

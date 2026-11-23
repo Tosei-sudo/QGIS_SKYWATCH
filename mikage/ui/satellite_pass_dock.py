@@ -29,6 +29,7 @@ from ..core.plan.api import (
     MAX_DAYS, TRACK_COLORS, sample_at, satellite_track, track_layers, track_rows, track_shapes, track_ticks,
 )
 from ..qgis_io.geometry import WGS84, from_wgs84, line_of, polygon_of
+from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import memory_layer
 from ..qgis_io.tasks import run_task
 from .docks import PluginDock
@@ -535,7 +536,7 @@ class SatellitePassDock(PluginDock):
         first = self.tracks[0][0]
         title = self.tr("衛星パス {a} 〜 {b}（{n} 機）").format(a=local_text(first.start), b=local_text(first.end), n=len(self.tracks))
         project = QgsProject.instance()
-        group = project.layerTreeRoot().insertGroup(0, title)
+        group = project.layerTreeRoot().insertGroup(top_index(project.layerTreeRoot()), title)
         made = []
         for name, features, geometry in ((self.tr("撮像可能範囲"), areas, "MultiPolygon"), (self.tr("地上軌跡"), lines, "MultiLineString")):
             layer = memory_layer(PlanLayer(name, fields, features), name, geometry)
