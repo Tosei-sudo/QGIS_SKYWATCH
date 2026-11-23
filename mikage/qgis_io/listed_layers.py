@@ -26,6 +26,7 @@ from qgis.PyQt.QtGui import QColor
 
 from ..core.obs.api import ListedImage
 from .geometry import rings_geometry
+from .pinned_layers import top_index
 from .plan_layer import make_field, qdatetime
 
 #: The group the layers go in (at the top of the layer list).
@@ -209,7 +210,7 @@ class ListedLayers(QObject):
         group = root.findGroup(GROUP)
         if new:
             if group is None:
-                group = root.insertGroup(0, GROUP)
+                group = root.insertGroup(top_index(root), GROUP)
                 group.setExpanded(True)
             for layer in new:
                 self.project.addMapLayer(layer, False)

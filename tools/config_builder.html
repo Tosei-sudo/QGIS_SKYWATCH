@@ -1833,7 +1833,8 @@ const SPEC = [
       field: I("layers", "レイヤー", [S("type", "種類", K.layerTypes, { req: true }), T("url", "URL・パス", { req: true }), T("layer", "レイヤー名", { help: "サービスのとき必須" }),
         T("matrixSet", "タイル行列（WMTS）"), T("format", "形式"), L("bbox", "範囲（西, 南, 東, 北）", { numbers: true }), T("filter", "絞り込み"),
         J("settings", "設定（esri）"), N("zmin", "最小ズーム"), N("zmax", "最大ズーム"),
-        B("visible", "最初から表示（visible）", { help: "既定 true。false: 追加はするがレイヤーパネルのチェックを外しておく（チェックを入れるまで描かない）" }), TZ, STZ],
+        B("visible", "最初から表示（visible）", { help: "既定 true。false: 追加はするがレイヤーパネルのチェックを外しておく（チェックを入れるまで描かない）" }),
+        B("pinned", "一番上に固定（pinned）", { help: "既定 false。true: レイヤーパネルの一番上に固定して追加する（右クリックの「一番上に固定」と同じ。新しいレイヤーはこの下に入る）" }), TZ, STZ],
         { title: (it) => `${it.type || "?"} ${it.layer || it.url || ""}`, check: (it, at, p) => { if (it.type && it.type !== "cog" && it.type !== "file" && it.type !== "xyz" && !it.layer) p.push(`${at}: ${it.type} は layer が必要`); } }) },
     { key: "shapeReceiver", label: "外部から図形を受け取る（AutoMap など）", doc: "外部から図形を受け取るautomap-などshapereceiver", help: "AutoMap の「MIKAGE に送る」・リンク・この PC のプログラムから送られた図形を、レイヤーグループ「受け取った図形」に追加して地図を移動する。この PC の中（127.0.0.1）だけで待ち受ける。書かなければ有効（ポート 47631、ブラウザ拡張機能から受け取る）。",
       field: O("shapeReceiver", "受け取り", [

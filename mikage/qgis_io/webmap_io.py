@@ -40,6 +40,7 @@ from ..core.webmap import (
 from . import settings
 from .basemap_layer import PROPERTY as BASE_MAP_PROPERTY, current_base_map, open_base_map
 from .network import qgis_transport
+from .pinned_layers import top_index
 from .startup_layers import make_layer
 from .webmap_style import esri_labeling, esri_renderer
 
@@ -346,7 +347,7 @@ def add_opened(opened: OpenedWebMap, canvas, project: Optional[QgsProject] = Non
         # An empty project takes the web map's spatial reference, so its scales are the web map's.
         project.setCrs(crs_of_wkid(opened.extent.wkid))
     root = project.layerTreeRoot()
-    group = root.insertGroup(0, opened.title)
+    group = root.insertGroup(top_index(root), opened.title)
     for item in opened.layers:
         project.addMapLayer(item.layer, False)
         node = group.insertLayer(0, item.layer)

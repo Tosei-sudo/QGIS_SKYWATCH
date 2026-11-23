@@ -139,7 +139,7 @@ Esri のサービスにつなぐ項目（画像カタログ・衛星・観測記
 | --- | --- | --- | --- | --- |
 | `baseMaps` | 配列 | `id`・`label`・`url`・`type`（`xyz`・`mvt`・`style`・`esri`。省略時は URL から判断）・`style`・`maxZoom`・`attributions`・`token`。書くと一覧をこれで置き換え | 地理院・OSM | [背景地図](../features/map.md#背景地図) |
 | `defaultBaseMap` | 文字列 | 起動時の背景地図の `id` | なし | [背景地図](../features/map.md#背景地図) |
-| `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`）、`visible`（`false` で最初は非表示。既定 `true`） | なし | [起動時のレイヤー](../features/map.md#起動時のレイヤー) |
+| `layers` | 配列 | 空のプロジェクトで起動したときに追加。`type`（`cog`・`file`・`wms`・`wmts`・`wfs`・`esri`・`ogc-features`・`ogc-tiles`・`wcs`・`ogc-coverage`・`xyz`）、`url`、`layer`（サービスのとき必須）、`matrixSet`・`format`・`bbox`・`filter`・`settings`（`esri`）、`visible`（`false` で最初は非表示。既定 `true`）、`pinned`（`true` で一番上に固定。既定 `false`） | なし | [起動時のレイヤー](../features/map.md#起動時のレイヤー) |
 | `geocoders` | 配列 | `type`（`gsi`・`nominatim`・`arcgis`・`features`・`csv`）、`url`、`label`、`field`（`features` のとき必須。`features` は属性名の配列で複数可、先頭が地名）、`token` | なし（地名は検索しない） | [座標・地名へ移動](../features/map.md#座標地名へ移動) |
 | `shapeReceiver` | `true`・`false`・オブジェクト | AutoMap・リンク・この PC のプログラムから図形を受け取って地図に表示（`127.0.0.1` だけで待ち受け）。`enabled`、`port`（既定 `47631`）、`origins`（受け取る送信元。既定 `["chrome-extension://*"]`） | 有効 | [外部から図形を受け取る](../features/map.md#外部から図形を受け取るautomap-などshapereceiver) |
 | `layerTemplates` | 配列 | `name`（必須）・`geometryType`・`fields`（`[{ "name", "type", "alias", "required", "length", "min", "max", "defaultValue", "codes" }]`）・`title`・`description` | 組み込みのテンプレートだけ | [新規スクラッチレイヤー](../features/map.md#新規スクラッチレイヤーテンプレート) |

@@ -41,6 +41,7 @@ from ..core.events import (
 )
 from ..qgis_io.catalog_io import Cancelled, PathError, add_record_layers, footprint, layer_area, open_record
 from ..qgis_io.geometry import from_wgs84, to_wgs84
+from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import make_field
 from ..qgis_io.overviews_io import queue as overview_queue
 from ..qgis_io.tasks import run_task
@@ -966,7 +967,7 @@ class EventsDock(PluginDock):
             for layer_id in old.findLayerIds():
                 project.removeMapLayer(layer_id)
             root.removeChildNode(old)
-        group = root.insertGroup(0, name)
+        group = root.insertGroup(top_index(root), name)
         layers = []
         box: Optional[QgsRectangle] = None
 
