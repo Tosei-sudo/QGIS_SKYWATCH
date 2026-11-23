@@ -109,6 +109,66 @@ def test_an_id_not_opened_before_is_looked_up_in_the_catalog(plugin, monkeypatch
     assert wait_for(lambda: len(_queries(fake)) > asked)
 
 
+def test_images_open_at_the_top_of_the_layer_tree_even_with_a_group_chosen(plugin, monkeypatch):
+    """
+    tsudo 2026-11-23: an image opened from 観測記録 while a group was chosen in
+    the layer list went into that group. Now an image opens at the top level
+    (QGIS puts a layer added the usual way where the layer list's choice is).
+    """
+    from qgis.core import QgsLayerTreeRegistryBridge, QgsVectorLayer
+
+    p, iface, folder, fake, _ = plugin
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    mine = QgsVectorLayer("Point?crs=EPSG:4326", "自分のレイヤー", "memory")
+    project.addMapLayer(mine, False)
+    group = root.insertGroup(0, "作業")
+    group.addLayer(mine)
+    # The group chosen in the layer list (QGIS sets where new layers go so).
+    bridge = project.layerTreeRegistryBridge()
+    bridge.setLayerInsertionPoint(QgsLayerTreeRegistryBridge.InsertionPoint(group, 0))
+    try:
+        _open_with_a_group_chosen(p, folder, monkeypatch, root, group)
+    finally:
+        # (the project lives on to the next tests: a group gone there would be where their layers go)
+        bridge.setLayerInsertionPoint(QgsLayerTreeRegistryBridge.InsertionPoint(root, 0))
+        root.removeChildNode(group)
+
+
+def _open_with_a_group_chosen(p, folder, monkeypatch, root, group):
+    from qgis.core import QgsVectorLayer
+
+    project = QgsProject.instance()
+    monkeypatch.setattr(open_again_dialog, "ask_open_again", lambda *a: pytest.fail("not opened before"))
+    monkeypatch.setattr(p.api.image_catalog, "choose_folder", lambda mapping: str(folder))
+    obs = p.api.observation_dock
+    went = []
+    # From 観測記録: a record's image not open is opened from the catalog by its id.
+    obs.open_image("A", "A", then=lambda: went.append(1))
+    assert wait_for(lambda: went)
+    [layer] = [l for l in project.mapLayers().values() if l.customProperty(IMAGE_ID) == "A"]
+    node = root.findLayer(layer.id())
+    assert node.parent() is root and root.children().index(node) == 0
+    assert [c.name() for c in group.children()] == ["自分のレイヤー"]
+    # A folder record's images: their group at the top level too.
+    dock = p.api.image_catalog
+    searched(dock)
+    scene = folder / "2026" / "Scene_D"
+    for rel in ("PAN/a_P.tif", "PAN/b_P.tif"):
+        (scene / rel).parent.mkdir(parents=True, exist_ok=True)
+        geotiff(scene / rel)
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files)
+    record = record_of({"attributes": {"IMG_ID": "D", "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\scene_d"}}, dock._shown_catalog.fields)
+    assert len(dock.open_records([record])) == 2
+    d = root.findGroup("D")
+    assert d.parent() is root and root.children().index(d) == 0
+    assert [c.name() for c in group.children()] == ["自分のレイヤー"]
+    # Added the usual way, a layer still goes where the layer list's choice is.
+    other = QgsVectorLayer("Point?crs=EPSG:4326", "ほかのレイヤー", "memory")
+    project.addMapLayer(other)
+    assert root.findLayer(other.id()).parent() is group
+
+
 def test_the_images_of_ids_are_listed_in_the_catalog(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
