@@ -120,6 +120,8 @@ FEATURES: dict[str, frozenset] = {
     "webmap.portal": frozenset({ADMIN}),
     #: 設定…: the settings file's field (once one is set: choosing the first one is for everyone).
     "settings.config": frozenset({ADMIN}),
+    #: アペンド: the plugin's own tables (観測記録・撮像依頼…) as the target (written past their screens' checks).
+    "append.own_tables": frozenset({ADMIN}),
 }
 
 #: 画像カタログ's practice-only catalogs in production (FEATURES).
