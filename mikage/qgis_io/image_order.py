@@ -6,16 +6,20 @@ drawn over it, so marks went on an image not seen.
 
 `bring_up` moves the image's layers just over the highest other image that
 is drawn over it where it lies (shown, its footprint overlapping); the other
-images are not hidden, nothing moves when none covers it. A node moves as
-QGIS moves one in the layer panel (a copy put in place, then the node taken
-away: pinned_layers.arrange); with a custom layer order (「レイヤ順序」 panel)
-that order is changed instead. A pinned image (「一番上に固定」) is left above.
+images are not hidden, nothing moves when none covers it. What moves is the
+branch of the layer tree that holds the image, under the group the two
+share: a layer, a record's group of files, or a group of one's own with the
+image in it (the image stays in its groups; 操作性点検の再検証 I4: it was
+taken out of them). A node moves as QGIS moves one in the layer panel (a
+copy put in place, then the node taken away: pinned_layers.arrange); with a
+custom layer order (「レイヤ順序」 panel) that order is changed instead. A
+pinned image (「一番上に固定」) is left above.
 """
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from qgis.core import QgsLayerTreeLayer, QgsMapLayer, QgsProject
+from qgis.core import QgsLayerTreeGroup, QgsLayerTreeLayer, QgsLayerTreeNode, QgsMapLayer, QgsProject
 
 from .obs_images import _box
 from .pinned_layers import in_pinned
@@ -65,16 +69,46 @@ def bring_up(layer_ids: Sequence[str], others: Sequence[str], project: Optional[
         root.setCustomLayerOrderByIds(rest[:at] + mine + rest[at:])
         return True
     target = root.findLayer(over.id())
-    parent = target.parent() if target is not None else None
-    if parent is None:
+    nodes = [node for node in (root.findLayer(x) for x in mine) if isinstance(node, QgsLayerTreeLayer)]
+    if target is None or not nodes:
         return False
-    for layer_id in mine:
-        node = root.findLayer(layer_id)
-        if node is None or not isinstance(node, QgsLayerTreeLayer):
-            continue
-        copy = node.clone()
-        parent.insertChildNode(parent.children().index(target), copy)
-        old_parent = node.parent()
-        if old_parent is not None:
-            old_parent.removeChildNode(node)
+    common = _common_group([*nodes, target])
+    above = _branch(target, common)
+    if common is None or above is None:
+        return False
+    branches: list[QgsLayerTreeNode] = []
+    for node in nodes:
+        branch = _branch(node, common)
+        if branch is not None and branch is not above and all(branch is not b for b in branches):
+            branches.append(branch)
+    if not branches:
+        return False
+    for branch in branches:
+        copy = branch.clone()
+        common.insertChildNode(common.children().index(above), copy)
+        common.removeChildNode(branch)
     return True
+
+
+def _common_group(nodes: Sequence[QgsLayerTreeNode]) -> Optional[QgsLayerTreeGroup]:
+    """The deepest group holding all the nodes."""
+    paths = []
+    for node in nodes:
+        path = []
+        while node is not None:
+            path.append(node)
+            node = node.parent()
+        paths.append(path[::-1])
+    common = None
+    for level in zip(*paths):
+        if not all(x is level[0] for x in level) or not isinstance(level[0], QgsLayerTreeGroup):
+            break
+        common = level[0]
+    return common
+
+
+def _branch(node: Optional[QgsLayerTreeNode], group: Optional[QgsLayerTreeGroup]) -> Optional[QgsLayerTreeNode]:
+    """The child of `group` that holds the node (the node itself when it is one)."""
+    while node is not None and node.parent() is not group:
+        node = node.parent()
+    return node

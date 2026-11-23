@@ -93,7 +93,11 @@ class ImagesPart:
         origin = SATELLITE_ORIGINS.get(image.satellite_origin, "")
         return self.tr("画像: {n}\n衛星名: {s}").format(n=image.name, s=image.satellite) + (f"（{origin}）" if origin else "")
 
+    def _layers_leaving(self, layers) -> None:
+        self._leaving = {x if isinstance(x, str) else x.id() for x in layers}
+
     def _layers_changed(self, *_args) -> None:
+        self._leaving = set()
         self.refresh_images()
 
     # ---- 「観測記録の画像にする」 (the layer panel's right-click; 操作性点検 1, tsudo 2026-11-23) ----
@@ -230,7 +234,9 @@ class ImagesPart:
         image = book.current if book else None
         if book is None or was is None or (image is not None and image.id == was.id) or not self._typed():
             return False
-        can_return = any(i.id == was.id for i in book.images)
+        # Not to an image whose layers are being removed (the layer panel's 「削除」 chose another one first).
+        leaving = getattr(self, "_leaving", set())
+        can_return = any(i.id == was.id and not (i.layer_ids and set(i.layer_ids) <= leaving) for i in book.images)
         answer = self.ask_unsaved(self.form.title(), was.name, can_return)
         if answer == "save":
             self.submit(image=next((i for i in book.images if i.id == was.id), was))
@@ -276,7 +282,11 @@ class ImagesPart:
         """The next (or previous) image in time (one without its file: the map moves to it when it is out of view)."""
         if self.book is None:
             return None
+        before = self.book.current
         image = self.book.step(by)
+        if image is not None and before is not None and image.id == before.id:
+            # ▶ on the last image (◀ on the first): nothing changes, a form being typed stays.
+            return image
         if self._went():
             self.show_image_area(image)
         return self.book.current
@@ -327,6 +337,8 @@ class ImagesPart:
 
     def _image_chosen(self, index: int) -> None:
         if self.book and 0 <= index < len(self.book.images):
+            if self.book.current is not None and self.book.images[index].id == self.book.current.id:
+                return  # the image recorded on chosen again: nothing changes
             self.book.current = self.book.images[index]
             if self._went():
                 self.show_image_area(self.book.current)

@@ -585,6 +585,19 @@ def already_open(layers: Sequence[QgsMapLayer], project: Optional[QgsProject] = 
     return new, found
 
 
+def add_or_choose(layers: Sequence[QgsMapLayer], record: CatalogRecord, project: Optional[QgsProject] = None) -> tuple[list, list]:
+    """
+    add_record_layers for the files not open yet; an image whose files are all
+    open already is chosen instead (操作性点検 3: the catalog's 開く, 最近開いた
+    画像, 新着・通知 and イベント open an image this way). (added, open).
+    """
+    new, there = already_open(layers, project)
+    if there and not new:
+        choose_open(there)
+    add_record_layers(new, record, project)
+    return new, there
+
+
 def choose_open(layers: Sequence[QgsMapLayer]) -> None:
     """An image already open chosen again (its first layer, as add_record_layers chooses one just added)."""
     if layers:

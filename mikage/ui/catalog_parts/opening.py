@@ -15,7 +15,7 @@ from ...core.catalog.api import (
 from ...core.obs.api import local_time
 from ...qgis_io.overviews_io import queue as overview_queue
 from ...qgis_io.catalog_io import (
-    Cancelled, add_record_layers, already_open, choose_open, close_layers, located_again, open_located, open_record,
+    Cancelled, add_or_choose, close_layers, located_again, open_located, open_record,
     opened_images,
 )
 from ..docks import plain_tip
@@ -101,12 +101,10 @@ class OpeningPart:
                 problems.append(str(error))
                 unopened.append(record)
                 continue
-            opened, there = already_open(opened)
+            # Open already: chosen (and gone to) rather than added twice.
+            opened, there = add_or_choose(opened, record)
             if there and not opened:
-                # Open already: chosen (and gone to) rather than added twice.
-                choose_open(there)
                 already.append(record.id)
-            add_record_layers(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened + there
         self._opened(layers)
@@ -206,10 +204,7 @@ class OpeningPart:
             self.status.setText(str(error))
             self.iface.messageBar().pushWarning(TITLE, plain_tip(str(error)))
             return
-        layers, there = already_open(layers)
-        if there and not layers:
-            choose_open(there)
-        add_record_layers(layers, record)
+        layers, there = add_or_choose(layers, record)
         overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
         layers += there
         self._opened(layers)

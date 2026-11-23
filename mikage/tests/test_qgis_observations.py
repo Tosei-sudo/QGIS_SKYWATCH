@@ -1683,6 +1683,18 @@ def test_the_image_recorded_on_is_drawn_over_the_others(plugin, tmp_path):
     dock.go_to("d1.tif")
     assert root.findLayerIds() == tree and all(above(layers[0], other) for other in layers[1:])
     root.setHasCustomLayerOrder(False)
+    # Images in groups of one's own (操作性点検の再検証 I4): the image's group comes up, the image stays in it.
+    a, b = root.insertGroup(0, "作業 A"), root.insertGroup(1, "作業 B")
+    for layer, group in ((layers[0], a), (layers[1], b)):
+        node = root.findLayer(layer.id())
+        group.insertChildNode(0, node.clone())
+        node.parent().removeChildNode(node)
+    dock.go_to("d1.tif")
+    assert above(layers[0], layers[1])
+    dock.go_to("d2.tif")
+    assert root.findLayer(layers[1].id()).parent().name() == "作業 B" and root.findLayer(layers[0].id()).parent().name() == "作業 A"
+    assert above(layers[1], layers[0]) and [n.name() for n in root.children()][:2] == ["作業 B", "作業 A"]
+    assert set(project.mapLayers()) >= {x.id() for x in layers}
 
 
 def test_something_typed_is_asked_about_before_the_image_changes(plugin, monkeypatch):
@@ -1726,6 +1738,41 @@ def test_something_typed_is_asked_about_before_the_image_changes(plugin, monkeyp
     answer[0] = "discard"
     dock.step(-1)
     assert [o.object_name for o in book.living()] == ["あおば"] and book.current.name == "d2.tif" and not dock.form.isVisible()
+    # ◀ on the first image, ▶ on the last, the image chosen again: nothing changes, the form being typed stays.
+    dock.step(-1)
+    dock.map_clicked(139.72, 35.62, None)
+    dock.object_input.setText("こんごう")
+    asked.clear()
+    dock.step(-1)
+    dock.image_select.activated.emit(dock.image_select.currentIndex())
+    assert asked == [] and book.current.name == "d1.tif" and dock.form.isVisible() and dock.object_input.text() == "こんごう"
+
+
+def test_the_form_image_being_removed_is_not_offered_to_go_back_to(plugin, monkeypatch):
+    """操作性点検の再検証 F10: the image's layer removed with something typed: 保存 or 破棄, not 元の画像に戻る."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    monkeypatch.setattr(dock, "ask_unsaved", lambda title, name, back: asked.append((name, back)) or "save")
+    dock.set_active(True)
+    assert book.current.name == "d1.tif"
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶 > 護衛艦")
+    project = QgsProject.instance()
+
+    def choose_another(_ids):
+        # As QGIS's layer panel does: another layer chosen before the removed one goes.
+        iface.setActiveLayer(layers[1])
+
+    project.layersWillBeRemoved.connect(choose_another)
+    try:
+        project.removeMapLayer(layers[0].id())
+    finally:
+        project.layersWillBeRemoved.disconnect(choose_another)
+    assert asked == [("d1.tif", False)]
+    [a] = book.living()
+    assert (a.object_name, a.image_name) == ("あおば", "d1.tif") and book.current.name == "d2.tif" and not dock.form.isVisible()
 
 
 def test_a_record_opened_from_its_mark_is_chosen_in_the_list(plugin):
