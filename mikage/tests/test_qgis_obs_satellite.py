@@ -138,7 +138,8 @@ def test_typed_in_the_dock_for_an_image_that_does_not_say(plugin):
     dock = p.api.observation_dock
     dock.show()
     book = dock.book
-    assert {i.name: i.satellite for i in book.images} == {"scene.ntf": "WV03", "ortho_0001.tif": ""}
+    # (named by the layer's name where one was given: 操作性点検の再検証 R12)
+    assert {i.name: i.satellite for i in book.images} == {"scene.ntf": "WV03", "ortho": ""}
     assert book.go_to("scene.ntf")
     dock.render()
     assert "（WV03）" in dock.image_select.currentText() and not dock.satellite_row.isVisibleTo(dock)

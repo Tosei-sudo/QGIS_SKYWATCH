@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from qgis.core import QgsMapLayerType, QgsProject, QgsRasterLayer, QgsRectangle
+from qgis.core import QgsLayerTree, QgsMapLayerType, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QTimer
 from qgis.PyQt.QtWidgets import QMessageBox
 
@@ -95,6 +95,11 @@ class ImagesPart:
 
     def _layers_changed(self, *_args) -> None:
         self.refresh_images()
+
+    def _layer_renamed(self, node, _name: str) -> None:
+        """A layer renamed in the layer panel: an image's (not from the catalog: its name shown, obs_images.shown_name)."""
+        if self.book is not None and QgsLayerTree.isLayer(node) and any(node.layerId() in i.layer_ids for i in self.book.images):
+            self.refresh_images()
 
     # ---- 「観測記録の画像にする」 (the layer panel's right-click; 操作性点検 1, tsudo 2026-11-23) ----
 
@@ -290,10 +295,53 @@ class ImagesPart:
                  self.tr("破棄: 入力を捨てて移る")]
         if can_return:
             lines.append(self.tr("元の画像に戻る: 移らずに入力を続ける"))
+        return self._ask_about_typed(lines, self.tr("元の画像に戻る") if can_return else "")
+
+    def _form_holds(self, editing=None, source=None) -> bool:
+        """Whether the form open is that record's (`editing`) or that thing's carried over (`source`) already."""
+        if self.pending is None:
+            return False
+        _lon, _lat, open_editing, open_source = self.pending
+        return (editing is not None and open_editing is not None and open_editing.id == editing.id) or (
+            source is not None and open_source is not None and open_source.id == source.id)
+
+    def _named(self, o) -> str:
+        """A record as asked about (_let_form_go): its thing's name, else its kind."""
+        return o.object_name or o.kind or self.tr("記録")
+
+    def _let_form_go(self, doing: str) -> bool:
+        """
+        Something else about to take the form's place or end it, `doing` (操作性点検の再検証 R2〜R7, tsudo
+        2026-11-23: a map click elsewhere, a mark, 「クリック記録」 off, 確認・不可範囲, the store, 連続 closed it
+        without a word): with something typed, 保存 (on the form's image), 破棄 or 入力に戻る asked first.
+        False: the form stays as it is and nothing else is done (入力に戻る, or a number that cannot be read).
+        """
+        if self.pending is None or not self._typed():
+            return True
+        answer = self.ask_leave(self.form.title(), doing)
+        if answer == "save":
+            self.submit(image=self._form_image)
+            return self.pending is None
+        if answer == "back":
+            self.raise_()
+            self.reveal(self.form)
+            return False
+        return True
+
+    def ask_leave(self, title: str, doing: str) -> str:
+        """「保存」「破棄」「入力に戻る」 before `doing` (「クリック記録を止める」…): 'save', 'discard' or 'back' (also Esc)."""
+        lines = [self.tr("入力中の「{t}」は未保存").format(t=title),
+                 self.tr("保存: 記録してから{d}").format(d=doing),
+                 self.tr("破棄: 入力を捨てて{d}").format(d=doing),
+                 self.tr("入力に戻る: {d}のをやめ、入力を続ける").format(d=doing)]
+        return self._ask_about_typed(lines, self.tr("入力に戻る"))
+
+    def _ask_about_typed(self, lines: list, back_label: str) -> str:
+        """The question of ask_unsaved and ask_leave: 保存, 破棄 and `back_label` (none: not offered; Esc saves)."""
         box = QMessageBox(QMessageBox.Icon.Question, self.tr("観測記録"), plain_tip("\n".join(lines)), parent=self)
         save = box.addButton(self.tr("保存"), QMessageBox.ButtonRole.AcceptRole)
         box.addButton(self.tr("破棄"), QMessageBox.ButtonRole.DestructiveRole)
-        back = box.addButton(self.tr("元の画像に戻る"), QMessageBox.ButtonRole.RejectRole) if can_return else None
+        back = box.addButton(back_label, QMessageBox.ButtonRole.RejectRole) if back_label else None
         box.setDefaultButton(back or save)
         box.setEscapeButton(back or save)
         box.exec()

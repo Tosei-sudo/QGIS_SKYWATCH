@@ -82,10 +82,11 @@ def joined_image(parts: Sequence[ObservedImage], name: str = "") -> ObservedImag
     One image to record on of several layers of the same image id (a catalog
     record whose folder has several images): `name` (else the first's), the
     earliest time known, a footprint around them all, every layer (the first
-    one's first).
+    one's first). The catalog's time (origin "layer") goes first: a duplicate
+    of the layer read from its file name did not change it (操作性点検の再検証 R11).
     """
     first = parts[0]
-    timed = [p for p in parts if p.time is not None]
+    timed = [p for p in parts if p.time is not None and p.origin == "layer"] or [p for p in parts if p.time is not None]
     earliest = min(timed, key=lambda p: p.time) if timed else None
     boxes = [p.box for p in parts if p.box]
     box = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)] if boxes else None

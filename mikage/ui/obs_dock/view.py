@@ -191,7 +191,7 @@ class ViewPart:
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
             self._row([o.object_name, o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
                        local_time(o.updated_at), ""],
-                      None if gone else (lambda o=o: (self._ensure_active(), self.open_form(o.lon, o.lat, editing=o), self._center(o))),
+                      None if gone else (lambda o=o: self._open_row(o, editing=o)),
                       style="deleted" if gone else "unseen" if o.unseen else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
                       waiting=o.id in waiting, key=f"o:{o.id}")
         inside_ids = {id(c) for c in inside}
@@ -204,7 +204,7 @@ class ViewPart:
             self._row([s.object_name, s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("不可範囲内（記録なし）") if id(c) in hidden_ids else tr("確認範囲内（記録なし）") if id(c) in inside_ids else "",
                        s.recorded_by, "", ""],
-                      lambda s=s: (self._ensure_active(), self.open_form(s.lon, s.lat, source=s), self._center(s)),
+                      lambda s=s: self._open_row(s, source=s),
                       style="unseen" if id(c) in hidden_ids else "inside" if id(c) in inside_ids else "ghost", widget=widget, key=f"c:{s.object_id}")
         taxa = book.taxonomy() if self.class_filter else []
         for a in book.image_areas(deleted=self.deleted_check.isChecked()):
@@ -238,6 +238,19 @@ class ViewPart:
     def _ensure_active(self) -> None:
         if not self.active:
             self.set_active(True, quiet=True)
+
+    def _open_row(self, o, editing=None, source=None) -> None:
+        """
+        A row of the list chosen: its record (or the thing carried over) in the
+        form, the map on it; something typed in another form asked about first
+        (操作性点検の再検証 R3), the same one kept as typed.
+        """
+        if not self._form_holds(editing=editing, source=source):
+            if not self._let_form_go(self.tr("「{n}」を開く").format(n=self._named(o))):
+                return
+            self._ensure_active()
+            self.open_form(o.lon, o.lat, editing=editing, source=source)
+        self._center(o)
 
     def _render_flow(self) -> None:
         book = self.book

@@ -64,6 +64,9 @@ SATELLITE = "satobs/satellite"
 SATELLITE_TYPED = "satobs/satelliteTyped"
 #: Set from the layer panel's 「観測記録の画像にする」: "1" an image to record on, "0" a background (unset: by its time).
 RECORD_ON = "satobs/recordOn"
+#: The catalog's time (ms) as on the layer's 時系列 too: a duplicate of the layer keeps it (QGIS copies the custom
+#: properties, not the 時系列; 操作性点検の再検証 R11, tsudo 2026-11-23).
+LAYER_TIME = "satobs/layerTime"
 
 
 def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Optional[int] = None,
@@ -91,6 +94,7 @@ def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Op
         temporal = layer.temporalProperties()
         temporal.setIsActive(True)
         temporal.setFixedTemporalRange(QgsDateTimeRange(qdatetime(time), qdatetime(time)))
+        layer.setCustomProperty(LAYER_TIME, str(int(time)))
     return layer
 
 
@@ -165,14 +169,20 @@ def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
 
 
 def _layer_time(layer: QgsRasterLayer) -> Optional[int]:
+    """The layer's 時系列 (the catalog's time), else the catalog's time kept on it (LAYER_TIME: a duplicate of it)."""
     temporal = layer.temporalProperties()
-    if not temporal or not temporal.isActive():
-        return None
+    if temporal and temporal.isActive():
+        try:
+            begin = temporal.fixedTemporalRange().begin()
+        except AttributeError:
+            begin = None
+        if begin is not None and begin.isValid():
+            return begin.toMSecsSinceEpoch()
+    kept = layer.customProperty(LAYER_TIME)
     try:
-        begin = temporal.fixedTemporalRange().begin()
-    except AttributeError:
+        return int(kept) if kept not in (None, "") else None
+    except (TypeError, ValueError):
         return None
-    return begin.toMSecsSinceEpoch() if begin.isValid() else None
 
 
 def manual_time(layer: QgsMapLayer) -> Optional[int]:
@@ -301,14 +311,27 @@ def set_typed_satellite(layer: QgsMapLayer, name: str) -> None:
     layer.setCustomProperty(SATELLITE_TYPED, clean_satellite(name))
 
 
+def shown_name(layer: QgsMapLayer, file: str) -> str:
+    """
+    The name of an image not from the catalog: the layer's own name when one
+    was given to it (港湾図（背景）, 操作性点検の再検証 R12, tsudo 2026-11-23),
+    else its file's (the layer named as QGIS names it: the file's without its extension).
+    """
+    name = (layer.name() or "").strip()
+    stem = os.path.splitext(file)[0]
+    return file if not name or name in (file, stem) else name
+
+
 def observed_image(layer: QgsRasterLayer, satellites: Optional[SatelliteLookup] = None) -> ObservedImage:
     """
-    A layer's image: the catalog's id (else the file name) as its id and its
-    name; its time from the layer, else its file (name, metadata), else the
-    one typed for it; with `satellites`, its 衛星名 (image_satellite).
+    A layer's image: the catalog's id (else the file name) as its id; that
+    id as its name (one not from the catalog: shown_name); its time from the
+    layer, else its file (name, metadata), else the one typed for it; with
+    `satellites`, its 衛星名 (image_satellite).
     """
     file = file_name(layer)
-    image_id = str(layer.customProperty(IMAGE_ID) or "") or file
+    catalog_id = str(layer.customProperty(IMAGE_ID) or "")
+    image_id = catalog_id or file
     t = _layer_time(layer)
     origin = "layer" if t is not None else ""
     if t is None:
@@ -319,8 +342,8 @@ def observed_image(layer: QgsRasterLayer, satellites: Optional[SatelliteLookup] 
         t = manual_time(layer)
         origin = "manual" if t is not None else ""
     satellite, satellite_origin = image_satellite(layer, satellites) if satellites is not None else ("", "")
-    return ObservedImage(id=image_id, name=image_id, time=t, box=_box(layer), layer_id=layer.id(), origin=origin,
-                         satellite=satellite, satellite_origin=satellite_origin)
+    return ObservedImage(id=image_id, name=image_id if catalog_id else shown_name(layer, file), time=t, box=_box(layer),
+                         layer_id=layer.id(), origin=origin, satellite=satellite, satellite_origin=satellite_origin)
 
 
 #: Providers of maps a server draws (background maps: XYZ tiles, WMS・WMTS, ArcGIS map services): not images.

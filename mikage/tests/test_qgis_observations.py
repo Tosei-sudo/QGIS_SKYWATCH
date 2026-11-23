@@ -17,9 +17,10 @@ APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsMapLayerType, QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
+from qgis.gui import QgsMapToolPan  # noqa: E402
 from qgis.PyQt.QtCore import QDateTime, QItemSelectionModel, QPoint, Qt  # noqa: E402
 from qgis.PyQt.QtTest import QTest  # noqa: E402
-from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
+from qgis.PyQt.QtWidgets import QApplication, QDockWidget, QLabel, QPushButton, QToolButton  # noqa: E402
 
 from mikage.core.esri import EsriClient  # noqa: E402
 from mikage.core.obs.flows import living  # noqa: E402
@@ -1614,7 +1615,7 @@ def test_a_background_geotiff_is_not_an_image_unless_made_one(bare):
     dock.only.setChecked(False)
     # Made an image: listed without a time (to type one), and recorded on.
     dock.record_on_action.trigger()
-    assert dock.record_on_action.isChecked() and [i.name for i in book.images] == ["d1.tif", "basemap.tif"]
+    assert dock.record_on_action.isChecked() and [i.name for i in book.images] == ["d1.tif", "背景地図"]  # (its layer's name: R12)
     assert book.current.layer_id == base.id() and book.current.time is None and dock.time_row.isVisible()
     # And a background again.
     dock.record_on_action.trigger()
@@ -1627,14 +1628,14 @@ def test_a_background_geotiff_is_not_an_image_unless_made_one(bare):
 
 
 def test_files_of_the_same_name_are_told_apart_by_their_layers(bare):
-    """Two files of one name in different folders: the image chooser adds each layer's name."""
+    """Two files of one name in different folders: told apart by their layers' names (shown for them: 操作性点検の再検証 R12)."""
     p, iface, dock, tmp_path = bare
     project = QgsProject.instance()
     for folder, name in (("x", "東京湾 A"), ("y", "東京湾 B")):
         (tmp_path / folder).mkdir()
         project.addMapLayer(QgsRasterLayer(geotiff(tmp_path / folder / "scene.tif", "2026-10-01T01:00:00Z"), name))
     texts = sorted(dock.image_select.itemText(i) for i in range(dock.image_select.count()))
-    assert len(texts) == 2 and texts[0].endswith("scene.tif（東京湾 A）") and texts[1].endswith("scene.tif（東京湾 B）")
+    assert len(texts) == 2 and texts[0].endswith("  東京湾 A") and texts[1].endswith("  東京湾 B")
 
 
 def test_the_image_recorded_on_is_drawn_over_the_others(plugin, tmp_path):
@@ -1750,6 +1751,189 @@ def test_something_typed_is_asked_about_before_the_image_changes(plugin, monkeyp
     dock.step(-1)
     dock.image_select.activated.emit(dock.image_select.currentIndex())
     assert asked == [] and book.current.name == "d1.tif" and dock.form.isVisible() and dock.object_input.text() == "こんごう"
+
+
+def test_something_typed_is_asked_about_before_the_form_goes_otherwise(plugin, monkeypatch):
+    """
+    操作性点検の再検証 R2〜R7 (tsudo 2026-11-23): a click elsewhere on the map, a
+    record's mark, a row of the list, 「クリック記録」 off, 確認・不可範囲 and
+    連続 let the form go without a word. Now 保存・破棄・入力に戻る is asked,
+    only when something was typed; another map tool keeps the form.
+    """
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    answer = ["back"]
+    monkeypatch.setattr(dock, "ask_leave", lambda title, doing: asked.append(doing) or answer[0])
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶 > 護衛艦")
+    dock.submit()
+    [a] = book.living()
+    mark = next(m for m in dock.scene().marks if m.key == a.id)
+    # Nothing typed: as before, nothing asked.
+    dock.map_clicked(139.72, 35.62, None)
+    dock.map_clicked(139.74, 35.64, None)
+    assert asked == [] and dock.pending[:2] == (139.74, 35.64)
+    dock.object_input.setText("はるな")
+
+    def kept() -> bool:
+        return dock.form.isVisible() and dock.object_input.text() == "はるな" and dock.pending[:2] == (139.74, 35.64)
+
+    # 入力に戻る: nothing else done, the form as typed.
+    dock.map_clicked(139.76, 35.66, None)
+    assert asked[-1] == "別の場所に記録する" and kept()
+    dock.map_clicked(mark.lon, mark.lat, mark)
+    assert asked[-1] == "「あおば」を開く" and kept()
+    dock._open_row(a, editing=a)
+    assert asked[-1] == "「あおば」を開く" and kept()
+    dock.record_button.click()
+    assert asked[-1] == "クリック記録を止める" and kept() and dock.active and dock.record_button.isChecked()
+    dock.area_button.click()
+    assert asked[-1] == "確認範囲の記録に移る" and kept() and not dock.area_mode and not dock.area_button.isChecked()
+    dock.unseen_area_button.click()
+    assert asked[-1] == "不可範囲の記録に移る" and kept() and not dock.area_mode and not dock.unseen_area_button.isChecked()
+    dock.stamp_button.click()
+    assert asked[-1] == "「連続」に移る" and kept() and not dock.many.mode and not dock.stamp_button.isChecked()
+    assert len(asked) == 7 and len(book.living()) == 1
+    # 保存: recorded, then what was asked for (the mark's record in the form).
+    dock.kind_input.setText("船舶 > 護衛艦")
+    answer[0] = "save"
+    dock.map_clicked(mark.lon, mark.lat, mark)
+    assert sorted(o.object_name for o in book.living()) == ["あおば", "はるな"] and dock.pending[2].id == a.id
+    # The same record's mark (or row) again: the form stays as typed, nothing asked.
+    dock.note_input.setText("入港")
+    dock.map_clicked(mark.lon, mark.lat, mark)
+    dock._open_row(a, editing=a)
+    assert len(asked) == 8 and dock.note_input.text() == "入港" and dock.pending[2].id == a.id
+    # 破棄: nothing recorded, 「クリック記録」 stops.
+    answer[0] = "discard"
+    dock.record_button.click()
+    assert asked[-1] == "クリック記録を止める" and not dock.active and not dock.form.isVisible()
+    assert book.record(a.id).note == ""
+    # Another map tool chosen: recording stops, the form typed stays (Enter saves it).
+    dock.set_active(True)
+    dock.map_clicked(139.78, 35.68, None)
+    dock.object_input.setText("こんごう")
+    iface.canvas.setMapTool(QgsMapToolPan(iface.canvas))
+    assert not dock.active and dock.form.isVisible() and dock.object_input.text() == "こんごう" and len(asked) == 9
+    dock.submit()
+    assert "こんごう" in [o.object_name for o in book.living()]
+    # Nothing typed: another map tool closes the form as before.
+    dock.set_active(True)
+    dock.map_clicked(139.79, 35.69, None)
+    iface.canvas.setMapTool(QgsMapToolPan(iface.canvas))
+    assert not dock.active and not dock.form.isVisible() and len(asked) == 9
+
+
+def test_another_store_chosen_asks_about_something_typed_first(plugin, tmp_path, monkeypatch):
+    """操作性点検の再検証 R6: the store switched in the dock let the form go without a word."""
+    p, iface, dock, layers, _ = plugin
+    fake = FakeEsri()
+    fake.add_layer(URL, FakeLayer({n: TYPES.get(n, "esriFieldTypeString") for n in FIELDS}))
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"observationStores": [{"label": "共有", "url": URL}]}), encoding="utf-8")
+    settings.set_config_source(str(config))
+    p.context.esri = lambda: EsriClient(fake)
+    p.context.reload()
+    assert dock.store_select.currentText() == "共有" and wait_for(lambda: dock.book.loaded)
+    asked = []
+    answer = ["back"]
+    monkeypatch.setattr(dock, "ask_leave", lambda title, doing: asked.append(doing) or answer[0])
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.store_select.setCurrentIndex(1)
+    assert asked == ["保存先を「ローカル」に切り替える"]
+    assert dock.store_select.currentText() == "共有" and dock.book.label == "共有" and dock.object_input.text() == "あおば"
+    answer[0] = "discard"
+    dock.store_select.setCurrentIndex(1)
+    assert len(asked) == 2 and dock.book.label == "ローカル" and not dock.form.isVisible()
+    # Nothing typed: switched as before.
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.store_select.setCurrentIndex(0)
+    assert len(asked) == 2 and dock.book.label == "共有"
+
+
+def test_a_tab_over_the_dock_keeps_the_form_and_recording(plugin):
+    """
+    操作性点検の再検証 R1 (tsudo 2026-11-23): another tab of the right side
+    (画像補正…) opened over the dock closed the form and stopped 「クリック記録」.
+    Now they stay; closing the dock ends them.
+    """
+    p, iface, dock, layers, _ = plugin
+    window = iface.window
+    window.show()
+    other = QDockWidget("画像補正", window)
+    other.setObjectName("other")
+    other.setWidget(QLabel("画像補正"))
+    window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+    window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, other)
+    window.tabifyDockWidget(dock, other)
+    dock.show()
+    dock.raise_()
+    QApplication.processEvents()
+    try:
+        dock.set_active(True)
+        dock.map_clicked(139.7, 35.6, None)
+        dock.object_input.setText("あおば")
+        hidden = []
+        dock.visibilityChanged.connect(lambda shown: hidden.append(not shown))
+        other.raise_()
+        QApplication.processEvents()
+        assert wait_for(lambda: hidden == [True])
+        assert not dock.isHidden() and dock.active and dock.pending is not None and dock.object_input.text() == "あおば"
+        # A click on the map: the form's tab comes forward.
+        dock.object_input.clear()
+        dock.map_clicked(139.71, 35.61, None)
+        QApplication.processEvents()
+        assert wait_for(lambda: hidden[-1] is False) and dock.pending[:2] == (139.71, 35.61)
+        # Closed: recording and the form end.
+        dock.close()
+        QApplication.processEvents()
+        assert not dock.active and dock.pending is None
+    finally:
+        window.removeDockWidget(other)
+        other.deleteLater()
+        window.hide()
+
+
+def test_a_duplicate_of_a_catalog_layer_keeps_its_time(plugin, tmp_path):
+    """操作性点検の再検証 R11: a duplicate of the catalog's layer had no time (00:00 from its file name), the image's too."""
+    p, iface, dock, layers, _ = plugin
+    project = QgsProject.instance()
+    project.removeMapLayers([x.id() for x in layers])
+    when = int(datetime(2026, 11, 20, 0, 30, tzinfo=timezone.utc).timestamp() * 1000)
+    layer = image_layer(geotiff(tmp_path / "OPTX2_20261120_0930.tif", name_only=True), "OPTX2_20261120_0930", image_id="REC-1", time=when)
+    project.addMapLayer(layer)
+    copy = layer.clone()
+    copy.temporalProperties().setIsActive(False)  # as QGIS's 「レイヤーの複製」 makes it
+    project.addMapLayer(copy)
+    [image] = dock.book.images
+    assert image.id == "REC-1" and image.time == when and image.origin == "layer" and len(image.layer_ids) == 2
+    project.removeMapLayer(layer.id())
+    [image] = dock.book.images
+    assert image.time == when and image.layer_ids == (copy.id(),)
+
+
+def test_an_image_of_ones_own_is_shown_by_its_layer_name(plugin, tmp_path):
+    """操作性点検の再検証 R12: a GeoTIFF of one's own was shown by its file name, not the name given to its layer."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    assert [i.name for i in book.images] == ["d1.tif", "d2.tif", "d3.tif"]  # (named as QGIS names them: the file's)
+    root = QgsProject.instance().layerTreeRoot()
+    root.findLayer(layers[1].id()).setName("港湾図（10月2日）")
+    assert [(i.id, i.name) for i in book.images] == [("d1.tif", "d1.tif"), ("d2.tif", "港湾図（10月2日）"), ("d3.tif", "d3.tif")]
+    assert dock.image_select.itemText(1).endswith("港湾図（10月2日）") or "港湾図（10月2日）" in dock.image_select.itemText(1)
+    dock.step(1)
+    dock.set_active(True)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.submit()
+    [a] = book.living()
+    assert (a.image_id, a.image_name) == ("d2.tif", "港湾図（10月2日）")
 
 
 def test_the_form_image_being_removed_is_not_offered_to_go_back_to(plugin, monkeypatch):

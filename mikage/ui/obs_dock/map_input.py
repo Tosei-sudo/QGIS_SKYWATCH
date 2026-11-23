@@ -33,19 +33,27 @@ class MapInputPart:
         if self.many.mode and self.many.clicked(lon, lat, mark):
             return
         if self.rear is None and mark is not None and mark.key:
+            # A record's mark (or a thing carried over): its form, its row chosen in the list too (操作性点検 4,
+            # tsudo 2026-11-23); something typed in another form asked about first (再検証 R3), the same one kept.
             if mark.role == "obs":
                 record = self.book.record(mark.key)
                 if record is not None:
-                    self.open_form(record.lon, record.lat, editing=record)
-                    # Its row chosen in the list too (操作性点検 4, tsudo 2026-11-23).
-                    self.show_row(f"o:{record.id}")
+                    if self._form_holds(editing=record) or self._let_form_go(self.tr("「{n}」を開く").format(n=self._named(record))):
+                        if not self._form_holds(editing=record):
+                            self.open_form(record.lon, record.lat, editing=record)
+                        self.show_row(f"o:{record.id}")
                     return None
             if mark.role == "ghost":
                 c = next((x for x in self.book.carried() if x.source.id == mark.key), None)
                 if c is not None:
-                    self.open_form(c.source.lon, c.source.lat, source=c.source)
-                    self.show_row(f"c:{c.source.object_id}")
+                    if self._form_holds(source=c.source) or self._let_form_go(self.tr("「{n}」を開く").format(n=self._named(c.source))):
+                        if not self._form_holds(source=c.source):
+                            self.open_form(c.source.lon, c.source.lat, source=c.source)
+                        self.show_row(f"c:{c.source.object_id}")
                     return None
+        # Elsewhere: a new record there; something typed asked about first (再検証 R2).
+        if self.rear is None and not self._let_form_go(self.tr("別の場所に記録する")):
+            return None
         if self.points < 2:
             return self.open_form(lon, lat)
         # The rear, then the front (tsudo, 2026-11-02), then a side or both (tsudo, 2026-11-03).

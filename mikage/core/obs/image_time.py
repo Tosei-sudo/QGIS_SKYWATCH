@@ -26,13 +26,15 @@ ORIGINS = {
 
 _NAME_PATTERNS = [
     re.compile(r"(?<!\d)((?:19|20)\d{2})(\d{2})(\d{2})[T_-]?(\d{2})(\d{2})(\d{2})(?!\d)"),
+    # The hour and minute without seconds after a separator (港湾_20261120_0930.tif: 操作性点検の再検証 R10, tsudo 2026-11-23).
+    re.compile(r"(?<!\d)((?:19|20)\d{2})(\d{2})(\d{2})[T_-](\d{2})(\d{2})(?!\d)"),
     re.compile(r"(?<!\d)((?:19|20)\d{2})[-_.](\d{2})[-_.](\d{2})(?:[T_ -](\d{2})[-_:.]?(\d{2})(?:[-_:.]?(\d{2}))?)?(?!\d)"),
     re.compile(r"(?<!\d)((?:19|20)\d{2})(\d{2})(\d{2})(?!\d)"),
 ]
 
 
 def time_from_name(name: str) -> Optional[int]:
-    """The time in a file name (`S2A_20240501T012345_…`, `img_2024-05-01.tif`), or None."""
+    """The time in a file name (`S2A_20240501T012345_…`, `港湾_20261120_0930.tif`, `img_2024-05-01.tif`), or None."""
     base = re.sub(r"^.*[/\\]", "", name)
     for pattern in _NAME_PATTERNS:
         m = pattern.search(base)

@@ -97,6 +97,8 @@ class ObservationDock(
         self._alert_widget = None
         self._alert_items: list = []
         self.store_set: Optional[StoreSet] = None
+        #: The store chosen (its row in store_select): chosen again when 入力に戻る is answered (_store_picked).
+        self._store_index = -1
         #: 判読の練習 (ui/exercise_run.py): the one store while an exercise runs (its answers apart from the practice's
         #: records), None: the settings file's; and the store chosen before it, chosen again after.
         self.exercise_store: Optional[StoreSet] = None
@@ -165,6 +167,8 @@ class ObservationDock(
         project = QgsProject.instance()
         project.layersAdded.connect(self._layers_changed)
         project.layersRemoved.connect(self._layers_changed)
+        # A layer renamed: an image not from the catalog is shown by its name (操作性点検の再検証 R12).
+        project.layerTreeRoot().nameChanged.connect(self._layer_renamed)
         self.iface.currentLayerChanged.connect(self._layer_chosen)
         self._offer_record_on_action()
         context.configChanged.connect(self.reset_stores)
@@ -206,7 +210,7 @@ class ObservationDock(
         self.store_select = QComboBox()
         self.store_select.setToolTip(tr("記録の保存先"))
         self.store_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.store_select.currentIndexChanged.connect(self._store_chosen)
+        self.store_select.currentIndexChanged.connect(self._store_picked)
         top.addWidget(self.store_select, 1)
         # 「自分の記録」 (tsudo 2026-11-18: 過去の自分がどの画像のどの観測結果を作ったのかがわかりにくい).
         self.my_records_button = self._button(tr("自分の記録…"), tr("自分の記録を、画像をまたいで一覧で表示。ダブルクリックで画像を開いて記録を編集"),
@@ -321,7 +325,7 @@ class ObservationDock(
 
         # Recording.
         row = QHBoxLayout()
-        self.record_button = self._button(tr("クリック記録"), tr("クリック地点にこの画像の観測を記録（R）"), self.set_active, checkable=True)
+        self.record_button = self._button(tr("クリック記録"), tr("クリック地点にこの画像の観測を記録（R）"), self._record_pressed, checkable=True)
         self.points_select = QComboBox()
         for n, label in POINT_CHOICES:
             self.points_select.addItem(tr(label), n)
@@ -797,7 +801,22 @@ class ObservationDock(
             self.books[s.label] = book
         return book
 
+    def _store_picked(self, index: int) -> None:
+        """
+        Another store chosen in the dock: something typed in the form is asked
+        about first (操作性点検の再検証 R6, tsudo 2026-11-23); 入力に戻る: the
+        store stays as it was.
+        """
+        if index != self._store_index and 0 <= index < len(self.sets) and not self._let_form_go(
+                self.tr("保存先を「{s}」に切り替える").format(s=self.sets[index].label)):
+            self.store_select.blockSignals(True)
+            self.store_select.setCurrentIndex(self._store_index)
+            self.store_select.blockSignals(False)
+            return
+        self._store_chosen(index)
+
     def _store_chosen(self, index: int) -> None:
+        self._store_index = index
         if not (0 <= index < len(self.sets)):
             self.book = self.store_set = None
             self.render()
@@ -1192,11 +1211,12 @@ class ObservationDock(
 
     def close_down(self) -> None:
         """Called when the plugin unloads."""
-        self._visibility(False)
+        self._dock_closed()
         self._use_tool(False)
         project = QgsProject.instance()
         self._withdraw_record_on_action()
         for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
+                             (project.layerTreeRoot().nameChanged, self._layer_renamed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
                              (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset)):
             try:
