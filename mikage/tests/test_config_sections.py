@@ -1,6 +1,7 @@
 """
 The settings file's sections (core/config.py SECTIONS, docs/architecture.md 設定セクション): each
-key once, each filling one PluginConfig attribute, every attribute filled by one.
+key once, each filling one PluginConfig attribute, every attribute filled by one (but DERIVED,
+made from another's).
 """
 import dataclasses
 
@@ -12,7 +13,7 @@ def test_each_key_fills_one_attribute():
     attrs = [s.attr for s in config.SECTIONS]
     assert len(set(keys)) == len(keys) and len(set(attrs)) == len(attrs)
     fields = {f.name for f in dataclasses.fields(config.PluginConfig)}
-    assert set(attrs) == fields
+    assert set(attrs) | set(config.DERIVED) == fields and not set(attrs) & set(config.DERIVED)
     assert config.KEYS == tuple(keys)
 
 

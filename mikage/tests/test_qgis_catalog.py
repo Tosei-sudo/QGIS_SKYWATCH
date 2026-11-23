@@ -1502,3 +1502,38 @@ def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_pa
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     p.context.reload()
     assert dock.buttons["open"].isVisibleTo(dock) and not dock.buttons["record"].isVisibleTo(dock)
+
+
+def test_a_practice_only_catalog_is_shown_in_production_to_instructors_only(plugin, tmp_path):
+    """
+    imageCatalogs[].mode "training" (tsudo 2026-11-23): not in production, but 判読練習の指導者 open
+    its images there (their exercises are made in production), as 「〇〇（練習用）」, not watched.
+    """
+    p, iface, *_ = plugin
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    practice = IMAGES.replace("/Images/", "/TrainingImages/")
+    config["imageCatalogs"] += [{"label": "練習用の画像", "url": practice, "mode": "training", "fields": {"id": "IMG_ID", "source": "PATH"}},
+                                {"label": "共通の画像", "url": IMAGES.replace("/Images/", "/Both/"), "mode": "both",
+                                 "fields": {"id": "IMG_ID", "source": "PATH"}}]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    dock = p.docks["SatObsImageCatalog"]
+
+    def listed():
+        return [dock.catalog_box.itemText(i) for i in range(dock.catalog_box.count())]
+
+    # No role chosen yet: not shown (the other features are, but the administrators').
+    assert listed() == ["衛星画像", "共通の画像"]
+    assert [c.label for c in p.api.config.practice_catalogs] == ["練習用の画像"]
+    p.role_keeper.choose(["INSTRUCTOR"])
+    assert listed() == ["衛星画像", "共通の画像", "練習用の画像（練習用）"]
+    dock.catalog_box.setCurrentIndex(2)
+    assert dock.catalog().url == practice and dock.buttons["watch"].isHidden()
+    assert any(c.url == practice for c in dock.catalogs())  # (opened by image id too)
+    dock.catalog_box.setCurrentIndex(0)
+    assert not dock.buttons["watch"].isHidden()
+    # Their sign-in chosen as the others'.
+    assert [s.label for s in p.context.services() if s.role == "画像カタログ"] == ["衛星画像", "共通の画像", "練習用の画像（練習用）"]
+    p.role_keeper.choose(["OBSERVER"])
+    assert listed() == ["衛星画像", "共通の画像"]

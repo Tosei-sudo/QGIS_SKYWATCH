@@ -104,6 +104,9 @@ FEATURES: dict[str, frozenset] = {
     # 判読練習の指導
     "判読の練習の問題を作る…": frozenset({INSTRUCT}),
     "判読の練習の成績…": frozenset({INSTRUCT}),
+    #: 画像カタログ: the catalogs shown while practising only (imageCatalogs[].mode "training"), in production too
+    #: (the exercises' images).
+    "catalog.practice": frozenset({INSTRUCT}),
     # 管理
     #: 観測記録: 「この PC の記録を消去…」 (cannot be undone).
     "observations.clear": frozenset({ADMIN}),
@@ -116,6 +119,11 @@ FEATURES: dict[str, frozenset] = {
     #: 設定…: the settings file's field (once one is set: choosing the first one is for everyone).
     "settings.config": frozenset({ADMIN}),
 }
+
+#: 画像カタログ's practice-only catalogs in production (FEATURES).
+PRACTICE_CATALOGS = "catalog.practice"
+#: Features only for the roles that have them: not for someone without any role (who sees all but the administrators').
+CHOSEN_ONLY = frozenset({PRACTICE_CATALOGS})
 
 #: The Processing tools that are features too: algorithm name → feature.
 ALGORITHM_FEATURES = {
@@ -156,14 +164,15 @@ def permissions_of(codes: Iterable[str]) -> frozenset:
 def allows(feature: str, codes: Iterable[str]) -> bool:
     """
     Whether the person with roles `codes` sees `feature`: a feature not listed
-    always; without any role, everything but the administrators' features.
+    always; without any role, everything but the administrators' features
+    and CHOSEN_ONLY.
     """
     needed = FEATURES.get(feature)
     if needed is None:
         return True
     codes = clean_codes(codes)
     if not codes:
-        return bool(needed - {ADMIN})
+        return bool(needed - {ADMIN}) and feature not in CHOSEN_ONLY
     return bool(needed & permissions_of(codes))
 
 

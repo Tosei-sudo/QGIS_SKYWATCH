@@ -93,7 +93,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 ## 設定
 
-- 設定ファイル: `core/config.py` の `SECTIONS` が、キー・`PluginConfig` の項目・読み方の一覧表（読む順 = 問題を知らせる順）。`KEYS` はそこから作る。新しいキーは `PluginConfig` の項目と `SECTIONS` の 1 行、設定ビルダー（`tools/config_builder.html`）の画面を足し、`python3 -m mikage.tests.test_config_builder` で定数を書き直す
+- 設定ファイル: `core/config.py` の `SECTIONS` が、キー・`PluginConfig` の項目・読み方の一覧表（読む順 = 問題を知らせる順）。`KEYS` はそこから作る。ほかの項目から作る項目（`imageCatalogs` の練習モードだけのカタログ `practice_catalogs`）は `DERIVED` に並べる。新しいキーは `PluginConfig` の項目と `SECTIONS` の 1 行、設定ビルダー（`tools/config_builder.html`）の画面を足し、`python3 -m mikage.tests.test_config_builder` で定数を書き直す
 - 個人設定（QgsSettings）: 機能ごとのモジュール `qgis_io/prefs/<機能>.py`（画像・観測記録・撮像計画・地図・AI・撮像依頼）。読み書きは `qgis_io/qsettings.py` の `pref` / `set_pref`（キーは `mikage/<キー>`）。`qgis_io/settings.py` から従来どおり `settings.<名前>` で読める
 
 ## 大きなドックの部分

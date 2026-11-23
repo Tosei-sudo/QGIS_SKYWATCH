@@ -106,3 +106,68 @@ def test_with_the_organisations_exercises_the_productions_path_mappings_too():
     # The production's value with its relative paths made whole (the production catalogs read from there).
     whole = masters.made_whole({"imageCatalogs": [{"url": "./catalog.json"}]}, "/etc/mikage/config.json")
     assert whole["imageCatalogs"][0]["url"] != "./catalog.json"
+
+
+FIELDS = {"id": "IMG_ID", "acquired": "ACQ", "source": "PATH"}
+
+
+def catalogs_production() -> dict:
+    return {
+        "imageCatalogs": [
+            {"label": "本番だけ", "url": f"{PROD}/A/FeatureServer/0", "fields": FIELDS},
+            {"label": "練習用", "url": f"{PROD}/T/FeatureServer/0", "fields": FIELDS, "mode": "training", "token": "TT",
+             "thumbnail": "./ql/{id}.jpg"},
+            {"label": "両方", "url": f"{PROD}/B/FeatureServer/0", "fields": FIELDS, "mode": "both"},
+        ],
+        "pathMappings": [{"prefix": "\\\\nas\\images", "label": "NAS"}],
+    }
+
+
+def test_a_catalogs_mode_says_where_it_is_shown():
+    """imageCatalogs[].mode (tsudo 2026-11-23): production (the default), training, both."""
+    config, problems = parse_config(catalogs_production())
+    assert problems == []
+    # In production: the production's and both; the practice-only ones aside (判読練習の指導者's).
+    assert [c.label for c in config.image_catalogs] == ["本番だけ", "両方"]
+    assert [c.label for c in config.practice_catalogs] == ["練習用"]
+    assert [c.mode for c in config.image_catalogs] == ["production", "both"]
+    value = catalogs_production()
+    value["imageCatalogs"][0]["mode"] = "practice"
+    config, problems = parse_config(value)
+    assert len(problems) == 1 and "mode" in problems[0] and "training" in problems[0]
+    assert [c.label for c in config.image_catalogs] == ["本番だけ", "両方"]  # (an unknown mode: production)
+
+
+def test_the_productions_catalogs_shown_while_practising_come_after_the_practices():
+    config, _ = parse_config(practice())
+    sample = [c.label for c in config.image_catalogs]
+    taken = masters.with_practice_catalogs(config, catalogs_production(), "/etc/mikage/config.json")
+    assert taken == ["練習用", "両方"]
+    assert [c.label for c in config.image_catalogs] == [*sample, "練習用", "両方"] and config.practice_catalogs == []
+    shown = {c.label: c for c in config.image_catalogs}
+    # With the production's token (kept in memory: the practice's file is not written with them) ...
+    assert shown["練習用"].token == "TT" and shown["練習用"].url == f"{PROD}/T/FeatureServer/0"
+    # ... a path relative to the production's settings file made whole ...
+    assert shown["練習用"].thumbnail is not None
+    # ... and their files where the production finds them (after the practice's own mappings).
+    assert config.path_mappings[-1].prefix == "\\\\nas\\images"
+    assert masters.read_text(["satellites"], catalogs_production()) == "衛星・画像カタログ 2 件"
+    assert masters.read_text([], {"imageCatalogs": []}) == ""
+
+
+def test_a_practice_settings_files_catalogs_are_all_shown_and_the_same_catalog_only_once():
+    """The organisation's practice settings file: its `mode` is not looked at; a production catalog it has too, once."""
+    own = {"imageCatalogs": [
+        {"label": "組織の練習", "url": f"{PROD}/T/FeatureServer/0", "fields": FIELDS},
+        {"label": "書いてある mode", "url": f"{PROD}/X/FeatureServer/0", "fields": FIELDS, "mode": "training"},
+    ]}
+    config, _ = parse_config(own)
+    taken = masters.with_practice_catalogs(config, catalogs_production(), "/etc/mikage/config.json")
+    assert taken == ["両方"]
+    assert [c.label for c in config.image_catalogs] == ["組織の練習", "書いてある mode", "両方"]
+    # A production without any for practising: the practice's own, all shown.
+    config, _ = parse_config(own)
+    assert masters.with_practice_catalogs(config, {"imageCatalogs": catalogs_production()["imageCatalogs"][:1]}, "") == []
+    assert [c.label for c in config.image_catalogs] == ["組織の練習", "書いてある mode"] and config.path_mappings == []
+    config, _ = parse_config(own)
+    assert masters.with_practice_catalogs(config, None, "") == [] and len(config.image_catalogs) == 2

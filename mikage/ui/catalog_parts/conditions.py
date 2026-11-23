@@ -62,6 +62,9 @@ class ConditionsPart:
         self.close_previous.setVisible(files)
         self.zoom_opened.setVisible(files)
         self.buttons["record"].setVisible(not files and self.allows("catalog.record"))
+        # A practice-only catalog in production (判読練習の指導者's): not watched (no new-image notices of it in production).
+        chosen = self.catalog()
+        self.buttons["watch"].setVisible(chosen is None or not any(chosen is c for c in self.context.config.practice_catalogs))
 
     def _show_keyword(self, catalog: Optional[CatalogConfig]) -> None:
         """「フリーワード」 only for a catalog with an image id or `fields.keywords`, its hint naming them."""

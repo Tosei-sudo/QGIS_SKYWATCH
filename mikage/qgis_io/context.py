@@ -118,7 +118,8 @@ class PluginContext(QObject):
         if session is not None and session.config_text is not None and source == session.config_source:
             # 練習モード with the production's masters: as written, with their tokens (kept in memory only).
             self.config_text = session.config_text
-            self.config, self.problems = parse_config_text(session.config_text)
+            config, self.problems = parse_config_text(session.config_text)
+            self.config = training_io.shown(config, source)
             self.configChanged.emit()
             return
         if re.match(r"^https?://", source, re.IGNORECASE):
@@ -132,7 +133,8 @@ class PluginContext(QObject):
                     return  # An older answer: a later reload is the one that counts (#85).
                 self.loading = False
                 self.config_text = text
-                self.config, self.problems = parse_config_text(text)
+                config, self.problems = parse_config_text(text)
+                self.config = training_io.shown(config, source)
                 try:
                     settings.set_cached_config(source, load_jsonc(text), time.strftime("%Y-%m-%d %H:%M"))
                 except ValueError:
@@ -147,7 +149,8 @@ class PluginContext(QObject):
                 if cached is not None:
                     # The last file read, rather than nothing (the stores would all be gone, #85); its tokens are not kept.
                     value, when = cached
-                    self.config, problems = parse_config(value)
+                    config, problems = parse_config(value)
+                    self.config = training_io.shown(config, source)
                     # (The reason's エラーコード at the end, core/errors.py.)
                     self.problems = [errors.tagged(f"設定ファイルの取得に失敗: {errors.untagged(message)}。前回{f'（{when}）' if when else ''}"
                                                    "読めた設定で動作中（トークンは控えていないため、認証設定を選んでいないサービスは使えない場合あり）",
@@ -158,7 +161,8 @@ class PluginContext(QObject):
 
             run_task("設定ファイルの読み込み", work, done, failed)
             return
-        self.config, self.problems = read_config_file(source)
+        config, self.problems = read_config_file(source)
+        self.config = training_io.shown(config, source)
         self.configChanged.emit()
 
     def esri(self) -> EsriClient:
@@ -342,6 +346,8 @@ class PluginContext(QObject):
         c = self.config
         out: list[Service] = []
         out += [Service("画像カタログ", x.label, x.url, bool(x.token)) for x in c.image_catalogs]
+        # (練習モードだけのカタログ: 判読練習の指導者 open them in production too)
+        out += [Service("画像カタログ", f"{x.label}（練習用）", x.url, bool(x.token)) for x in c.practice_catalogs]
         out += [Service("衛星カタログ", x.label, x.url, bool(x.token)) for x in c.satellite_catalogs]
         out += [Service("センサーカタログ", x.label, x.url, bool(x.token)) for x in c.sensor_catalogs if x.url]
         out += [Service("衛星名の対応表", x.label, x.url, bool(x.token)) for x in c.satellite_aliases]

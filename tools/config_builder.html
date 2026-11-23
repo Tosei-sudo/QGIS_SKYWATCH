@@ -1530,6 +1530,8 @@ const SPEC = [
       field: I("imageCatalogs", "画像カタログ", [
         LABEL, URL_(), R("fields", "属性名", K.roles.imageCatalogs, { required: ["source"], requiredUnless: (it) => it.imageFiles === false, multi: ["source", "keywords"] }),
         B("imageFiles", "画像ファイル（imageFiles）", { help: "false: 画像ファイルのないカタログ（生データは別システムだけ）。「開く」の代わりに「ファイルなしで記録」（観測記録へ ID・撮像日時・範囲ごと）。fields.source は不要。既定 true" }),
+        S("mode", "出すモード（mode）", [["production", "本番だけ"], ["training", "練習モードだけ"], ["both", "両方"]],
+          { help: "練習モードだけ: 本番では出さない（判読練習の指導者の担当には「（練習用）」付きで出す。問題の画像を開くため）。練習モードだけ・両方は、練習データのカタログの後ろに出す（読むだけ）。既定は本番だけ" }),
         M("labels", "列見出し（labels）", { keyHelp: "役割（id・acquired …）", valueHelp: "見出し" }),
         J("columns", "追加の列（columns）", { ph: '[{ "field": "CLOUD", "label": "雲量" }]', help: "属性名か { \"field\", \"label\" } の配列" }),
         WHERE, N("maxResults", "1 回に読む件数", { min: 1, max: 5000, ph: "500", help: "検索と「続きを読む」で 1 回に読む画像の数（新しい順）。サービスの maxRecordCount より多くても分けて読む" }),

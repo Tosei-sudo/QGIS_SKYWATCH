@@ -284,3 +284,42 @@ def test_from_production_false_practises_on_the_sample_alone(plugin):
         assert config.observation_stores[0].taxonomy_table.url.startswith(training_io.active().base)
     finally:
         p.end_training()
+
+
+CATALOG_FIELDS = {"id": "IMG_ID", "acquired": "ACQ", "source": "PATH"}
+CATALOGS = {
+    "imageCatalogs": [
+        {"label": "本番カタログ", "url": f"{PRODUCTION}/Catalog/FeatureServer/0", "fields": CATALOG_FIELDS},
+        {"label": "練習用の画像", "url": f"{PRODUCTION}/TrainingImages/FeatureServer/0", "fields": CATALOG_FIELDS,
+         "mode": "training", "token": "CATTOKEN"},
+        {"label": "共通の画像", "url": f"{PRODUCTION}/Both/FeatureServer/0", "fields": CATALOG_FIELDS, "mode": "both"},
+    ],
+    "training": {"fromProduction": False},
+}
+
+
+@pytest.mark.parametrize("plugin", [CATALOGS], indirect=True)
+def test_the_production_catalogs_chosen_for_practising_come_after_the_samples(plugin, monkeypatch):
+    """imageCatalogs[].mode (tsudo 2026-11-23): 練習モードだけ・両方 shown while practising (read only), whatever fromProduction says."""
+    p, iface = plugin
+    assert [c.label for c in p.context.config.image_catalogs] == ["本番カタログ", "共通の画像"]
+    said = []
+    bar = iface.messageBar()
+    monkeypatch.setattr(bar, "pushMessage", lambda *args, **kwargs: said.append(" ".join(str(a) for a in args)))
+    assert p.start_training()
+    try:
+        session = training_io.active()
+        config = p.context.config
+        assert [c.label for c in config.image_catalogs] == ["練習用画像カタログ", "練習用の画像", "共通の画像"]
+        assert config.image_catalogs[0].url.startswith(session.base) and config.image_catalogs[1].token == "CATTOKEN"
+        assert config.practice_catalogs == []
+        # Never written to the practice's settings file (nor their token).
+        text = open(session.files.config, encoding="utf-8").read()
+        assert "TrainingImages" not in text and "CATTOKEN" not in text and "production.invalid" not in text
+        dock = p.docks["SatObsImageCatalog"]
+        assert [dock.catalog_box.itemText(i) for i in range(dock.catalog_box.count())] == ["練習用画像カタログ", "練習用の画像", "共通の画像"]
+        assert dock.catalog_box.currentIndex() == 0
+        assert any("画像カタログ 2 件は本番から読み込み（読むだけ）" in s for s in said), said
+    finally:
+        p.end_training()
+    assert [c.label for c in p.context.config.image_catalogs] == ["本番カタログ", "共通の画像"]
