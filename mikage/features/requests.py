@@ -1,5 +1,5 @@
 """
-撮像依頼: 撮像依頼, 撮像計画ファイル出力, 撮像予定, 地点ごとの撮像予定, 「年間撮像上限…」,
+撮像依頼: 撮像依頼, 撮像計画ファイル出力, 撮像予定, 地点ごとの撮像予定, 「依頼グループ…」, 「年間撮像上限…」,
 「衛星の障害情報…」, 「この地点の撮像予定」 on the map, the plan's 「臨時依頼を作成」 and the ledger read ahead.
 """
 from __future__ import annotations
@@ -14,15 +14,20 @@ from .base import DockSpec, Feature, close, tr
 
 #: The docks whose windows and tasks close with the plugin (`close_all`).
 CLOSING = ("SatObsRequests", "SatObsPlanFiles", "SatObsSchedule", "SatObsPlaceSchedule")
+#: The docks that filter by 依頼グループ, and how each shows its list again (no reading) once the groups changed.
+GROUP_DOCKS = (("SatObsRequests", "render"), ("SatObsPlanFiles", "render"), ("SatObsSchedule", "render"),
+               ("SatObsPlaceSchedule", "refit"))
 
 
 class Requests(Feature):
-    COMMANDS = ("open_quotas", "open_outages")
+    COMMANDS = ("open_quotas", "open_outages", "open_request_groups")
 
     def __init__(self, host):
         super().__init__(host)
         #: 「衛星の障害情報」 (ui/outage_dialog.py), once opened.
         host.outage_dialog = None
+        #: 「依頼グループ」 (ui/request_group_dialog.py), once opened.
+        host.request_group_dialog = None
         # Its port: 撮像依頼 (イベント chooses requests there, 撮像計画 makes 臨時 ones).
         host.ports.requests = lambda: host.docks.get("SatObsRequests")
 
@@ -85,8 +90,12 @@ class Requests(Feature):
         self.host.signals.requests_changed.connect(self._requests_changed)
         # 「イベントに追加」 of the requests goes to 「イベント」.
         self.docks["SatObsRequests"].event_linker = self.ports.events
+        # Its 「依頼グループ…」 opens the groups' list.
+        self.docks["SatObsRequests"].group_editor = self.open_request_groups
 
     def add_actions(self) -> None:
+        # 「依頼グループ」: the groups of the requests added and changed from the plugin (tsudo, 2026-11-23).
+        self.entry("request_groups", "依頼グループ…", "open_request_groups", name="SatObsRequestGroups")
         # 「年間撮像上限」: what each sensor's (mode's) yearly quota has used and left, and shots not counted (tsudo, 2026-11-11).
         self.entry("quotas", "年間撮像上限…", "open_quotas", name="SatObsQuotas")
         # 「衛星の障害情報」: the satellites' outages (reason, when, impacts) that the calculations leave passes out for (tsudo, 2026-11-16).
@@ -163,6 +172,48 @@ class Requests(Feature):
         host.outage_dialog.run()
         return host.outage_dialog
 
+    def open_request_groups(self):
+        """Opens 「依頼グループ」 for the 「撮像依頼」 dock's store (once; got again each time it is opened)."""
+        host = self.host
+        dock = self.docks["SatObsRequests"]
+        if dock.store is None:
+            self.iface.messageBar().pushInfo("MIKAGE", tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
+            return None
+        if not dock.store.groups:
+            self.iface.messageBar().pushInfo("MIKAGE", tr("依頼グループの表が未設定（管理者に連絡: requestStores[].groups）［E703］"))
+            return None
+        if host.request_group_dialog is None:
+            from ..ui.request_group_dialog import RequestGroupDialog
+
+            host.request_group_dialog = RequestGroupDialog(self.context, lambda: self.docks["SatObsRequests"].store,
+                                                           self._groups_changed, host.allows, self.window())
+        dialog = host.request_group_dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.run()
+        return dialog
+
+    def _groups_changed(self, store, groups, requests_moved: bool = False) -> None:
+        """
+        The groups of a store's table as got (or just changed) in 「依頼グループ」: the docks of that
+        store list them in their filters (and the request form offers them) at once; requests put
+        in a renamed group are got again by the 「撮像依頼」 and 「撮像予定」 docks.
+        """
+        for name, redraw in GROUP_DOCKS:
+            dock = self.docks.get(name)
+            if dock is None or dock.store is None or dock.store.groups != store.groups:
+                continue
+            dock.groups = list(groups)
+            if hasattr(dock, "groups_read"):
+                dock.groups_read = True
+            dock.group_filter.use_groups(dock.groups)
+            try:
+                getattr(dock, redraw)()
+            except RuntimeError:  # closed and deleted already
+                pass
+        if requests_moved:
+            self.host.signals.requests_changed.emit(None)
+
     def unload(self) -> None:
         for name in CLOSING:
             if name in self.docks:
@@ -171,3 +222,10 @@ class Requests(Feature):
     def unload_after_docks(self) -> None:
         close(self.host.outage_dialog)
         self.host.outage_dialog = None
+        if self.host.request_group_dialog is not None:
+            try:
+                self.host.request_group_dialog.close_all()
+            except RuntimeError:
+                pass
+        close(self.host.request_group_dialog)
+        self.host.request_group_dialog = None

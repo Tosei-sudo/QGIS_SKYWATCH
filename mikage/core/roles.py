@@ -75,6 +75,8 @@ FEATURES: dict[str, frozenset] = {
     "schedule.answer": frozenset({PLAN}),
     #: 撮像依頼: 新規・編集・削除・一括編集・レイヤーから取り込み, and 「臨時依頼を作成」 of the plans.
     "requests.edit": frozenset({REQUEST, PLAN}),
+    #: 依頼グループ: 新規・編集・上へ・下へ・削除 (the list for everyone; tsudo 2026-11-23: as adding requests).
+    "request_groups.edit": frozenset({REQUEST, PLAN}),
     # 観測記録
     "観測記録": frozenset({OBSERVE}),
     "自分の記録…": frozenset({OBSERVE}),
@@ -218,6 +220,25 @@ def _rows(client: EsriClient, source: EsriSource, user: str, token: Optional[str
         rows.append((int(oid) if isinstance(oid, (int, float)) and not isinstance(oid, bool) else None,
                      str(a.get(source.fields["role"]) or "").strip().upper()))
     return rows, info
+
+
+def known_users(client: EsriClient, source: EsriSource, token: Optional[str] = None, limit: int = 10000) -> list[str]:
+    """
+    The user names the table has (each once, as first written, by name): the
+    people who chose their roles, offered as members of a 依頼グループ.
+    """
+    info = client.layer(source.url, token or source.token)
+    name = source.fields["user"]
+    if name not in info.field_types:
+        return []
+    features = client.query_all(source.url, source.where or "1=1", token or source.token,
+                                out_fields=f"{info.object_id_field},{name}", geometry=False, limit=limit, cut=True)
+    out: dict[str, str] = {}
+    for f in features:
+        user = str((f.get("attributes") or {}).get(name) or "").strip()
+        if user:
+            out.setdefault(user.casefold(), user)
+    return sorted(out.values(), key=str.casefold)
 
 
 def load_user_roles(client: EsriClient, source: EsriSource, user: str, token: Optional[str] = None) -> list[str]:

@@ -18,7 +18,7 @@ from .bulk import apply_change
 from .covered import read_covered
 from .follow import follow_and_save, save_marked, with_settled_times
 from .geometry import read_last_looks
-from .groups import read_groups
+from .groups import delete_groups, group_counts, load_groups, read_groups, rename_requests, save_group, save_orders
 from .linking import links_of
 from .quota import read_quota_data
 from .store import (
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from ..catalog.api import CatalogConfig
     from .bulk import BulkResult, RequestChange
     from .follow import Finding
+    from .groups import RequestGroup
     from .model import ImagingRequest
     from .quota import QuotaData
     from .store import HistoryRow, Saved, SavedRequests, ShotRow
@@ -56,6 +57,30 @@ class RequestRepository:
 
     def read_groups(self, cancelled=None) -> tuple[Optional[list], str]:
         return read_groups(self.client, self.store.groups, self.store.group_fields, self.token, cancelled)
+
+    # 「依頼グループ…」 (ui/request_group_dialog.py): the groups table's rows added, changed, ordered and deleted.
+
+    def load_groups(self, cancelled=None) -> list[RequestGroup]:
+        return load_groups(self.client, self.store.groups, self.store.group_fields, self.token, cancelled)
+
+    def group_table_fields(self) -> set[str]:
+        """The attributes the groups table has (read again)."""
+        return set(self.client.layer(self.store.groups, self.token, refresh=True).field_types)
+
+    def save_group(self, group: RequestGroup) -> RequestGroup:
+        return save_group(self.client, self.store.groups, self.store.group_fields, group, self.token)
+
+    def save_group_orders(self, groups: Sequence[RequestGroup]) -> tuple[int, list[str]]:
+        return save_orders(self.client, self.store.groups, self.store.group_fields, groups, self.token)
+
+    def delete_groups(self, groups: Sequence[RequestGroup]) -> tuple[list[str], list[str]]:
+        return delete_groups(self.client, self.store.groups, groups, self.token)
+
+    def group_counts(self, cancelled=None) -> dict[str, int]:
+        return group_counts(self.client, self.store, self.token, cancelled)
+
+    def rename_requests(self, old: str, new: str, now: Callable[[], float], canceled: Callable[[], bool] = lambda: False) -> BulkResult:
+        return rename_requests(self.client, self.store, self.token, old, new, now, canceled)
 
     def waiting_ids(self) -> set[str]:
         return waiting_ids(self.client, self.store)

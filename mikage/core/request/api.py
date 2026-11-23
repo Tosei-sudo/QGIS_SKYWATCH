@@ -21,7 +21,10 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .follow_job import main, requests_of
     from .from_plan import requests_of_plan
     from .geometry import look_text, read_last_looks
-    from .groups import first_group, listed, matches, MINE, mine, NO_GROUP, offered, read_groups, RequestGroup, same
+    from .groups import (
+        check_group, first_group, listed, matches, MEMBERS_MAX, members_text, MINE, mine, NAME_MAX as GROUP_NAME_MAX, NO_GROUP,
+        NOTE_MAX as GROUP_NOTE_MAX, offered, order_changes, read_groups, RequestGroup, same, users_of,
+    )
     from .last import remembered, with_remembered
     from .linking import unit_key
     from .model import (
@@ -78,16 +81,16 @@ __all__ = [
     "RequestRepository", "ScheduleRepository",
     "_time", "add_history", "add_shots", "ADOPTION_ROLES", "ahead_span", "answer_bytes", "answer_changes", "apply_change", "AWAITING",
     "bbox_of", "BOOST", "boost_changes", "CandidateFilter", "CATEGORIES", "chances_of", "change_of", "changed_systems",
-    "checks_of", "clouds_of", "code_text", "companions", "convert_priority", "count_history", "day_bounds", "day_counts",
+    "check_group", "checks_of", "clouds_of", "code_text", "companions", "convert_priority", "count_history", "day_bounds", "day_counts",
     "day_passes", "DayPlan", "deadline_text", "DECLINED", "DEFAULT_REQUEST_FIELDS", "delete_history_rows", "delete_request",
     "delete_shots", "encoded", "field_roles", "files_of", "find_passes", "first_group", "follow_and_save", "followed_where",
-    "forecast_places", "FORM_DAYS", "form_span", "form_text", "found_text", "handed_out", "handed_where", "HEAD", "HELD_BACK", "history_has",
+    "forecast_places", "FORM_DAYS", "GROUP_NAME_MAX", "GROUP_NOTE_MAX", "form_span", "form_text", "found_text", "handed_out", "handed_where", "HEAD", "HELD_BACK", "history_has",
     "history_of", "history_where", "HistoryRow", "horizon_days", "IMAGE_ARRIVED", "ImagingRequest", "in_days", "JST",
     "jst_day", "keep_answers", "LABEL", "Lane", "lane_at", "Layout", "layout", "leftover_files", "level_of", "listed",
     "load_day", "load_days", "load_history", "load_requests", "load_shots", "load_shots_where", "load_system_rows",
     "look_text", "main", "manual_changes", "manual_unrequested", "Mark", "mark_tip", "marked", "marks_at", "match_answers",
-    "MANUAL", "matches", "MINE", "mine", "missed_done", "missed_ids", "MOST_DAYS", "new_request_id", "new_run_id", "next_step",
-    "NO_GROUP", "NO_SYSTEM", "NOT_IN_FILE", "not_written", "NUMBERS", "offered", "old_tle_text", "orbiting", "Picked",
+    "MANUAL", "matches", "MEMBERS_MAX", "members_text", "MINE", "mine", "missed_done", "missed_ids", "MOST_DAYS", "new_request_id", "new_run_id", "next_step",
+    "NO_GROUP", "NO_SYSTEM", "NOT_IN_FILE", "not_written", "NUMBERS", "offered", "old_tle_text", "orbiting", "order_changes", "Picked",
     "picked", "plan_day", "PLANNED", "PRIORITY_LEVELS", "PRIORITY_MAX", "PRIORITY_MIN", "priority_text", "QuotaData",
     "radar_of", "read_covered", "read_groups", "read_last_looks", "read_other_uses", "read_quota_data", "read_window",
     "Reading", "remembered", "render", "replaced_where", "REQUEST", "request_of_row", "RequestChange", "RequestGroup",
@@ -95,7 +98,7 @@ __all__ = [
     "run_passes", "same", "save_marked", "save_request", "save_requests", "Saved", "series_choices", "shot_days_where",
     "shot_text", "shot_tip", "shots_of", "shots_replaced_where", "shown", "simulate", "square_rings", "state_of", "STATES",
     "SUMMARY", "summary", "SystemChange", "tally", "unit_key", "unknown", "UNREQUESTED", "unrequested_rows", "update_history",
-    "update_requests", "update_shots", "upload_requests", "UseBook", "waiting_ids", "wanted", "with_remembered",
+    "update_requests", "update_shots", "upload_requests", "UseBook", "users_of", "waiting_ids", "wanted", "with_remembered",
     "with_settled_times", "write", "WRITTEN", "written_summary",
     "ACHIEVES", "ADOPTED", "DAYS", "DAY_CHOICES", "HELD", "LOOK_SIDES", "MAX_IMAGES", "MISSED", "MOST_PLACES",
     "NOT_HELD_BACK", "NO_ROWS", "ORBIT_DIRS", "PACE_AHEAD", "PENDING", "PLACE_KINDS", "Place", "QUOTA_REJECTED",

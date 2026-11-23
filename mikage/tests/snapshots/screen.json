@@ -121,6 +121,12 @@
      "icon": "place_schedule.svg:d16eb38a8f6a"
     },
     {
+     "text": "依頼グループ…",
+     "name": "SatObsRequestGroups",
+     "checkable": false,
+     "icon": "request_groups.svg:b652988a531b"
+    },
+    {
      "text": "年間撮像上限…",
      "name": "SatObsQuotas",
      "checkable": false,
@@ -535,6 +541,7 @@
   "位置ずらし",
   "位置ずらしの解除",
   "使い方（ヘルプ）…",
+  "依頼グループ…",
   "分担…",
   "分類体系の取り込み…",
   "分類体系の編集",
@@ -1215,6 +1222,7 @@
     "              QScrollBar",
     "          QWidget (hidden)",
     "          QWidget (hidden)",
+    "      QPushButton 「依頼グループ…」 (hidden)",
     "      QLabel 「撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E#］」",
     "      QTableView",
     "        QWidget",
