@@ -59,7 +59,9 @@ class Runner:
             ok = False
         if ok or time.time() > deadline:
             if not ok:
-                self.log(f"timeout: {getattr(condition, '__name__', condition)}")
+                code = getattr(condition, "__code__", None)
+                where = f" (line {code.co_firstlineno})" if code is not None else ""
+                self.log(f"timeout: {getattr(condition, '__name__', condition)}{where}")
             # Some time to paint what changed.
             QTimer.singleShot(300, self.step)
         else:

@@ -336,7 +336,8 @@ def flow_obs():
     if obs.store_select.findText("モック観測記録") >= 0:
         obs.store_select.setCurrentIndex(obs.store_select.findText("モック観測記録"))
     yield lambda: obs.book is not None and obs.book.loaded and obs.book.current is not None
-    yield lambda: obs.assignment_bar.read_at > 0
+    # 分担 read: everyone's, or only this image's rows (since 2026-11-19).
+    yield lambda: obs.assignment_bar.read_at > 0 or bool(obs.assignment_bar._image_read_at)
     ships = next(p for p in sample_images() if p["id"] == image_id)["ships"]
     lons, lats = [s["lon"] for s in ships], [s["lat"] for s in ships]
     ship_area = (min(lons) - 0.004, min(lats) - 0.004, max(lons) + 0.004, max(lats) + 0.004)
@@ -707,7 +708,7 @@ def flow_plan():
     box.setText(box.text().replace(EXPORTS.replace("\\", "/"), SHOWN_FOLDER).replace(EXPORTS, SHOWN_FOLDER))
     box.adjustSize()
     settle(5)
-    yes = box.button(QMessageBox.StandardButton.Yes)
+    yes = go_button(box)
     shoot(path("plan-07-confirm"), box, marks=[(yes, "1")])
     yes.click()
     yield lambda: modal() is None
@@ -736,7 +737,7 @@ def flow_plan():
     yield lambda: isinstance(modal(), QMessageBox)
     yield 500
     box = modal()
-    yes = box.button(QMessageBox.StandardButton.Yes)
+    yes = go_button(box)
     shoot(path("plan-10-import"), box, marks=[(yes, "1")])
     yes.click()
     yield lambda: modal() is None
@@ -774,6 +775,14 @@ def flow_plan():
     shoot(path("plan-13-answered"), schedule, marks=([(table_row(schedule.table, rejected[0], schedule), "1")] if rejected else []) +
           [(schedule.wait_button, "2", "top")],
           crop=[schedule.status, table_rows(schedule.table, schedule), schedule.adopt_button, schedule.reason], margin=4)
+
+
+def go_button(box: QMessageBox):
+    """The button that goes on: はい, or the action's own button (「取り込み」 and the like, ui/docks.ask_no with `yes`)."""
+    yes = box.button(QMessageBox.StandardButton.Yes)
+    if yes is not None:
+        return yes
+    return next(b for b in box.buttons() if box.buttonRole(b) == QMessageBox.ButtonRole.AcceptRole)
 
 
 #: 「撮像予定」 wide enough for its calendar and the columns shown.

@@ -541,7 +541,9 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
     below the pinned ones): one as it is, several in a group of the record's
     id. Always at the top level, not in the group chosen in the layer list
     (tsudo 2026-11-23: an image opened from 観測記録 while a group was chosen
-    went into that group).
+    went into that group). The (first) layer is then the one chosen in the
+    layer list, as QGIS does for a layer it adds itself: the 観測記録 dock
+    follows it to the image just opened.
     """
     project = project or QgsProject.instance()
     if layers:
@@ -551,12 +553,29 @@ def add_record_layers(layers: Sequence[QgsMapLayer], record: CatalogRecord, proj
         for layer in layers:
             project.addMapLayer(layer, False)
             root.insertLayer(top_index(root), layer)
+    else:
+        group = root.insertGroup(top_index(root), record.id or layers[0].name())
+        group.setCustomProperty(RECORD_GROUP, record.id or "")
+        for layer in layers:
+            project.addMapLayer(layer, False)
+            group.addLayer(layer)
+    if layers and project is QgsProject.instance():
+        _choose(layers[0])
+
+
+def _choose(layer: QgsMapLayer) -> None:
+    """
+    The layer chosen in QGIS's layer list. QGIS chooses a layer it adds to
+    the list itself; one added with addMapLayer(layer, False) and put in the
+    tree by hand is not (since 2026-11-23 the image opened stayed unchosen,
+    and the 観測記録 dock stayed on the image before).
+    """
+    try:
+        from qgis.utils import iface
+    except ImportError:
         return
-    group = root.insertGroup(top_index(root), record.id or layers[0].name())
-    group.setCustomProperty(RECORD_GROUP, record.id or "")
-    for layer in layers:
-        project.addMapLayer(layer, False)
-        group.addLayer(layer)
+    if iface is not None and hasattr(iface, "setActiveLayer"):
+        iface.setActiveLayer(layer)
 
 
 def layers_extent(layers: Sequence[QgsMapLayer], crs: QgsCoordinateReferenceSystem,

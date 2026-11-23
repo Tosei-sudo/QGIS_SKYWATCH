@@ -107,9 +107,18 @@ def save_button(form):
 
 
 def question_yes():
-    """The はい of the question open now (a QMessageBox), None when none."""
+    """
+    The button that goes on in the question open now (a QMessageBox): はい, or
+    the action's own button such as 「取り込み」 (ui/docks.ask_no with `yes`).
+    None when no question is open.
+    """
     box = QApplication.activeModalWidget()
-    return box.button(QMessageBox.StandardButton.Yes) if isinstance(box, QMessageBox) else None
+    if not isinstance(box, QMessageBox):
+        return None
+    yes = box.button(QMessageBox.StandardButton.Yes)
+    if yes is not None:
+        return yes
+    return next((b for b in box.buttons() if box.buttonRole(b) == QMessageBox.ButtonRole.AcceptRole), None)
 
 
 def raster_ids() -> set:
@@ -750,7 +759,7 @@ def plan_course(p) -> Course:
         where = "、".join(path for _s, path in kept["answers"]) or "（作れませんでした）"
         return ("システムから採否のファイルが返ってきたら、<b>結果ファイルの取り込み…</b> を押してそのファイルを選びます。"
                 f"練習用に、システムから返ってきたファイルを作りました: <b>{where}</b><br>"
-                "読み取った採用・不採用の件数が出たら、確かめて <b>はい</b> を押します。")
+                "読み取った採用・不採用の件数が出たら、確かめて <b>取り込み</b> を押します。")
 
     def import_answer() -> None:
         if not kept["answers"]:

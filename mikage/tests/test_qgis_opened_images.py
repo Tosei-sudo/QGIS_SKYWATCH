@@ -169,6 +169,31 @@ def _open_with_a_group_chosen(p, folder, monkeypatch, root, group):
     assert root.findLayer(other.id()).parent() is group
 
 
+def test_the_image_opened_is_chosen_and_the_obs_dock_goes_to_it(plugin, monkeypatch):
+    """
+    Found retaking the help's pictures (2026-11-23): an image put at the top of
+    the layer tree by hand is not chosen in the layer list the way QGIS chooses
+    a layer it adds itself, so 観測記録 stayed on the image open before.
+    """
+    import qgis.utils
+
+    p, iface, folder, fake, _ = plugin
+    monkeypatch.setattr(qgis.utils, "iface", iface)
+    dock, obs = p.api.image_catalog, p.api.observation_dock
+    searched(dock)
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: str(folder))
+    monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files)
+    # One image, then another: each chosen, and 観測記録 goes to it.
+    for image_id, scene in (("D", "Scene_D"), ("E", "Scene_E")):
+        (folder / "2026" / scene / "PAN").mkdir(parents=True, exist_ok=True)
+        geotiff(folder / "2026" / scene / "PAN" / "a_P.tif")
+        record = record_of({"attributes": {"IMG_ID": image_id, "SENSOR": "S1", "PATH": f"\\\\nas\\images\\2026\\{scene.lower()}"}},
+                           dock._shown_catalog.fields)
+        [layer] = dock.open_records([record])
+        assert iface.activeLayer() is layer
+        assert wait_for(lambda: obs.book is not None and obs.book.current is not None and layer.id() in obs.book.current.layer_ids)
+
+
 def test_the_images_of_ids_are_listed_in_the_catalog(plugin):
     p, iface, folder, fake, _ = plugin
     dock = p.api.image_catalog
