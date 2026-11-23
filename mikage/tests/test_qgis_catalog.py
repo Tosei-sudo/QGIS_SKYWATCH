@@ -933,13 +933,20 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
         geotiff(scene / rel)
     a = next(r for r in dock.records if r.id == "A")
     g = record_of({"attributes": {"IMG_ID": "G", "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\scene_g"}}, catalog.fields)
+
+    def a_as(image_id: str):
+        """Another catalog image of the same file (an image open is chosen, not added twice: each opening here is another id)."""
+        return record_of({"attributes": {"IMG_ID": image_id, "SENSOR": "S1", "PATH": "\\\\nas\\images\\2026\\a.tif"}}, catalog.fields)
+
     monkeypatch.setattr(dock, "choose_images", lambda r, files, more: files)
     # A record of one file: its layer and its image in 観測記録 are named by its id (tsudo 2026-11-10: not by the file).
     assert not dock.close_previous.isChecked() and not dock.close_previous.isHidden()
     [first] = dock.open_records([a])
     assert first.name() == "A" and [(i.id, i.name) for i in open_images()] == [("A", "A")]
+    # The same image again: its layer, not a second one (操作性点検 3, tsudo 2026-11-23).
+    assert dock.open_records([a]) == [first] and len(project.mapLayers()) == 1 and "開いている画像" in dock.status.text()
     # Off (as it starts): the images stay.
-    [second] = dock.open_records([a])
+    [second] = dock.open_records([a_as("A2")])
     assert {first.id(), second.id()} <= set(project.mapLayers())
     # On: the next opens, then those opened since it was on close (the one opened before it was turned on stays).
     dock.close_previous.setChecked(True)
@@ -949,7 +956,7 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     tile_ids = [t.id() for t in tiles]
     group = root.findGroup("G")
     assert group is not None and group.customProperty(RECORD_GROUP) == "G"
-    [third] = dock.open_records([a])
+    [third] = dock.open_records([a_as("A3")])
     # The folder record's layers went, and its group with them; the new image is there.
     third_id = third.id()
     assert all(project.mapLayer(i) is None for i in tile_ids) and root.findGroup("G") is None
@@ -964,14 +971,14 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     # Off again: nothing closes, and turning it on later does not close what was opened while it was off.
     dock.close_previous.setChecked(False)
     assert not settings.close_previous()
-    [fourth] = dock.open_records([a])
+    [fourth] = dock.open_records([a_as("A4")])
     dock.close_previous.setChecked(True)
-    [fifth] = dock.open_records([a])
+    [fifth] = dock.open_records([a_as("A5")])
     assert {one.id(), fourth.id(), fifth.id()} <= set(project.mapLayers())
     # A layer taken out by hand meanwhile: nothing to close, nothing breaks.
     one_id = one.id()
     project.removeMapLayer(fifth.id())
-    [sixth] = dock.open_records([a])
+    [sixth] = dock.open_records([a_as("A6")])
     assert {sixth.id(), fourth.id(), one_id} <= set(project.mapLayers())
     # A catalog without image files has no 開く, so no such option either.
     catalog.image_files = False
@@ -1320,6 +1327,11 @@ def test_the_list_says_who_works_each_image_and_shows_the_unworked_only(plugin, 
     assert wait_for(lambda: {r.id for i, r in enumerate(dock.records) if dock.table.isRowHidden(i)} == {"A", "B"})
     dock.unworked_only.setChecked(False)
     assert not any(dock.table.isRowHidden(i) for i in range(len(dock.records)))
+    # Taken (or 完了) in 観測記録: that row read again at once (操作性点検 7, tsudo 2026-11-23), not at the next search.
+    take(EsriClient(fake), assignment_source_of(work_url, []), "C", "田中", 3000)
+    dock.work_changed("C")
+    assert wait_for(lambda: {r.id: dock.model.index(i, column).data() for i, r in enumerate(dock.records)}["C"] == "作業中（田中）")
+    dock.work_changed("not listed")  # (nothing asked)
 
 
 def test_the_free_word_box_of_a_catalog_with_keyword_fields(plugin, tmp_path):

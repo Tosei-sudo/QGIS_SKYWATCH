@@ -18,7 +18,7 @@ from typing import Optional
 from qgis.core import QgsLayerTreeGroup, QgsProject, QgsRasterLayer
 
 from . import enhance_renderer as er
-from .obs_images import is_image_layer
+from .obs_images import is_map_layer
 
 #: The group's choice: a share key, or "off".
 SHARE_PROPERTY = "satobs/enhanceShare"
@@ -26,11 +26,15 @@ OFF = "off"
 
 
 def group_rasters(group: QgsLayerTreeGroup) -> list:
-    """The image rasters under `group` (nested groups too, hidden ones too), top of the layer tree first."""
+    """
+    The image rasters under `group` (nested groups too, hidden ones too), top
+    of the layer tree first: every raster but a map a server draws (a GeoTIFF
+    without a time is corrected and moved with its group, recorded on or not).
+    """
     out = []
     for node in group.findLayers():
         layer = node.layer()
-        if isinstance(layer, QgsRasterLayer) and layer.isValid() and is_image_layer(layer):
+        if isinstance(layer, QgsRasterLayer) and layer.isValid() and not is_map_layer(layer):
             out.append(layer)
     return out
 

@@ -28,6 +28,8 @@ class FormPart:
         if self.book is None:
             return
         self.pending = (lon, lat, editing, source)
+        #: The image the form is about (its record goes there, asked about when the image changes: _keep_typing).
+        self._form_image = self.book.current
         self._draft_id = ""
         known = editing or source
         length = measured[0] if measured else (known.length if known else None)
@@ -78,6 +80,7 @@ class FormPart:
         if self.pending is None and not self.form.isVisible():
             return
         self.pending = None
+        self._form_image = None
         self.form.hide()
         self.many.render()
         self.offered = []
@@ -98,10 +101,18 @@ class FormPart:
         reasons = self.book.vocabulary.unseen_reasons
         return self.book.unseen_reason_at(lon, lat) or (reasons[0] if reasons else UNSEEN)
 
-    def submit(self, present: bool = True, unseen: str = "") -> None:
-        """Records what the form says (a new record, a change, or a thing carried over; `unseen`: 「不可」, why)."""
+    def submit(self, present: bool = True, unseen: str = "", image=None) -> None:
+        """
+        Records what the form says (a new record, a change, or a thing carried
+        over; `unseen`: 「不可」, why) on the image it was opened on (`image`:
+        that one, the image recorded on now otherwise), whatever image is
+        recorded on when a shared store gets to it.
+        """
         if self.book is None or self.pending is None:
             return
+        current, opened_on = self.book.current, self._form_image
+        target = image if image is not None else (
+            current if opened_on is None or (current is not None and current.id == opened_on.id) else opened_on)
         lon, lat, editing, source = self.pending
         if not self._numbers_readable():
             return
@@ -118,7 +129,7 @@ class FormPart:
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
                 "記録の保存に失敗。送信待ちに保管: {m}").format(m=message)))
 
-        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen),
+        self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen, image=target),
                 lambda saved: lost(self.status.text()) if saved is None else self.many.use_record(saved), watch=True, failed=lost)
 
     def _numbers_readable(self) -> bool:

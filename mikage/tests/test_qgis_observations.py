@@ -16,7 +16,7 @@ from qgis.testing import start_app  # noqa: E402
 APP = start_app()
 
 from osgeo import gdal, osr  # noqa: E402
-from qgis.core import QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
+from qgis.core import QgsMapLayerType, QgsProject, QgsRasterLayer, QgsSettings, QgsVectorLayerTemporalProperties  # noqa: E402
 from qgis.PyQt.QtCore import QDateTime, QItemSelectionModel, QPoint, Qt  # noqa: E402
 from qgis.PyQt.QtTest import QTest  # noqa: E402
 from qgis.PyQt.QtWidgets import QPushButton, QToolButton  # noqa: E402
@@ -1579,3 +1579,223 @@ def test_a_background_map_is_not_an_image(bare):
     served.setCustomProperty(IMAGE_ID, "S1")
     project.addMapLayer(served)
     assert sorted(i.id for i in dock.book.images) == ["S1", "d1.tif"]
+
+
+# ---- 操作性点検 (tsudo 2026-11-23): which raster is the image, the image seen, the form and the list ----------------
+
+
+def test_a_background_geotiff_is_not_an_image_unless_made_one(bare):
+    """
+    操作性点検 1: a GeoTIFF without a time (a background map) was the image
+    recorded on (「日時不明 basemap.tif」), reached by ▶ and hidden by
+    「この画像のみ」. Now an image is one from the catalog, one whose time can
+    be read, or one made so in the layer panel (「観測記録の画像にする」).
+    """
+    p, iface, dock, tmp_path = bare
+    book = dock.book
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+    base = QgsRasterLayer(geotiff(tmp_path / "basemap.tif"), "背景地図")
+    project.addMapLayer(base)
+    assert book.images == [] and book.current is None and _idle(dock)
+    iface.setActiveLayer(base)
+    assert book.current is None and not dock.record_on_action.isChecked()
+    # The right-click entry is on the rasters it applies to.
+    assert (dock.record_on_action, QgsMapLayerType.RasterLayer) in iface.layer_actions
+    assert base in iface.layer_action_layers[id(dock.record_on_action)]
+    # An image over it: that one only; 「この画像のみ」 leaves the background as it is.
+    image = QgsRasterLayer(geotiff(tmp_path / "d1.tif", "2026-10-01T01:00:00Z"), "d1")
+    project.addMapLayer(image)
+    assert [i.name for i in book.images] == ["d1.tif"] and book.current.layer_id == image.id()
+    iface.setActiveLayer(base)
+    assert book.current.layer_id == image.id()
+    dock.only.setChecked(True)
+    assert root.findLayer(base.id()).itemVisibilityChecked() and root.findLayer(image.id()).itemVisibilityChecked()
+    dock.only.setChecked(False)
+    # Made an image: listed without a time (to type one), and recorded on.
+    dock.record_on_action.trigger()
+    assert dock.record_on_action.isChecked() and [i.name for i in book.images] == ["d1.tif", "basemap.tif"]
+    assert book.current.layer_id == base.id() and book.current.time is None and dock.time_row.isVisible()
+    # And a background again.
+    dock.record_on_action.trigger()
+    assert [i.name for i in book.images] == ["d1.tif"] and book.current.layer_id == image.id()
+    # An image with a time made a background.
+    iface.setActiveLayer(image)
+    assert dock.record_on_action.isChecked()
+    dock.record_on_action.trigger()
+    assert book.images == [] and book.current is None
+
+
+def test_files_of_the_same_name_are_told_apart_by_their_layers(bare):
+    """Two files of one name in different folders: the image chooser adds each layer's name."""
+    p, iface, dock, tmp_path = bare
+    project = QgsProject.instance()
+    for folder, name in (("x", "東京湾 A"), ("y", "東京湾 B")):
+        (tmp_path / folder).mkdir()
+        project.addMapLayer(QgsRasterLayer(geotiff(tmp_path / folder / "scene.tif", "2026-10-01T01:00:00Z"), name))
+    texts = sorted(dock.image_select.itemText(i) for i in range(dock.image_select.count()))
+    assert len(texts) == 2 and texts[0].endswith("scene.tif（東京湾 A）") and texts[1].endswith("scene.tif（東京湾 B）")
+
+
+def test_the_image_recorded_on_is_drawn_over_the_others(plugin, tmp_path):
+    """
+    操作性点検 10: ◀ ▶ (or the layer panel) changed the image recorded on while
+    another image was drawn over it. Now it comes over those that cover it.
+    """
+    from qgis.PyQt.QtCore import QCoreApplication
+
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    project = QgsProject.instance()
+    root = project.layerTreeRoot()
+
+    def order() -> list:
+        QCoreApplication.processEvents()
+        return [layer.id() for layer in root.layerOrder()]
+
+    def above(a, b) -> bool:
+        now = order()
+        return now.index(a.id()) < now.index(b.id())
+
+    for step, layer in ((1, layers[1]), (1, layers[2]), (-2, layers[0])):
+        dock.step(step)
+        assert book.current.layer_id == layer.id() and iface.activeLayer() is layer
+        assert all(above(layer, other) for other in layers if other is not layer)
+    # Chosen in the layers panel: the same.
+    iface.setActiveLayer(layers[2])
+    assert all(above(layers[2], other) for other in layers[:2])
+    # 「この画像のみ」 (the others hidden): nothing moves.
+    dock.only.setChecked(True)
+    before = order()
+    dock.step(-1)
+    assert order() == before
+    dock.only.setChecked(False)
+    # An image elsewhere (not under another): nothing moves.
+    far = QgsRasterLayer(geotiff(tmp_path / "far.tif", "2026-10-04T01:00:00Z", west=141.0), "far")
+    project.addMapLayer(far, False)
+    root.addLayer(far)  # (at the bottom)
+    before = order()
+    dock.go_to("far.tif")
+    assert book.current.layer_id == far.id() and order() == before
+    # A custom layer order (「レイヤ順序」): that order changes, not the tree.
+    root.setHasCustomLayerOrder(True)
+    tree = root.findLayerIds()
+    dock.go_to("d1.tif")
+    assert root.findLayerIds() == tree and all(above(layers[0], other) for other in layers[1:])
+    root.setHasCustomLayerOrder(False)
+    # Images in groups of one's own (操作性点検の再検証 I4): the image's group comes up, the image stays in it.
+    a, b = root.insertGroup(0, "作業 A"), root.insertGroup(1, "作業 B")
+    for layer, group in ((layers[0], a), (layers[1], b)):
+        node = root.findLayer(layer.id())
+        group.insertChildNode(0, node.clone())
+        node.parent().removeChildNode(node)
+    dock.go_to("d1.tif")
+    assert above(layers[0], layers[1])
+    dock.go_to("d2.tif")
+    assert root.findLayer(layers[1].id()).parent().name() == "作業 B" and root.findLayer(layers[0].id()).parent().name() == "作業 A"
+    assert above(layers[1], layers[0]) and [n.name() for n in root.children()][:2] == ["作業 B", "作業 A"]
+    assert set(project.mapLayers()) >= {x.id() for x in layers}
+
+
+def test_something_typed_is_asked_about_before_the_image_changes(plugin, monkeypatch):
+    """
+    操作性点検 2: the form closed without a word when another image was chosen.
+    Now 保存 (on the form's image), 破棄 or 元の画像に戻る is asked, only when
+    something was typed.
+    """
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    answer = ["back"]
+    monkeypatch.setattr(dock, "ask_unsaved", lambda title, name, back: asked.append((title, name, back)) or answer[0])
+    dock.set_active(True)
+    # Opened, nothing typed: the image changes as before.
+    dock.map_clicked(139.7, 35.6, None)
+    dock.step(1)
+    assert asked == [] and not dock.form.isVisible() and book.current.name == "d2.tif"
+    dock.step(-1)
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    # 元の画像に戻る: by ◀ ▶, the image chooser and the layers panel alike.
+    dock.step(1)
+    assert asked == [("新規の記録", "d1.tif", True)]
+    assert book.current.name == "d1.tif" and iface.activeLayer() is layers[0] and dock.form.isVisible() and dock.object_input.text() == "あおば"
+    dock.image_select.setCurrentIndex(2)
+    dock.image_select.activated.emit(2)
+    assert len(asked) == 2 and book.current.name == "d1.tif" and dock.image_select.currentIndex() == 0
+    # (the layer panel: asked once QGIS is done with the change)
+    iface.setActiveLayer(layers[1])
+    assert len(asked) == 2
+    assert wait_for(lambda: len(asked) == 3)
+    assert book.current.name == "d1.tif" and iface.activeLayer() is layers[0] and dock.form.isVisible()
+    # 保存: recorded on the form's image, then on to the other.
+    dock.kind_input.setText("船舶 > 護衛艦")
+    answer[0] = "save"
+    iface.setActiveLayer(layers[2])
+    assert wait_for(lambda: len(asked) == 4)
+    [a] = book.living()
+    assert (a.object_name, a.image_name) == ("あおば", "d1.tif")
+    assert book.current.name == "d3.tif" and not dock.form.isVisible()
+    # 破棄: nothing recorded, on to the other.
+    dock.map_clicked(139.72, 35.62, None)
+    dock.object_input.setText("はるな")
+    answer[0] = "discard"
+    dock.step(-1)
+    assert [o.object_name for o in book.living()] == ["あおば"] and book.current.name == "d2.tif" and not dock.form.isVisible()
+    # ◀ on the first image, ▶ on the last, the image chosen again: nothing changes, the form being typed stays.
+    dock.step(-1)
+    dock.map_clicked(139.72, 35.62, None)
+    dock.object_input.setText("こんごう")
+    asked.clear()
+    dock.step(-1)
+    dock.image_select.activated.emit(dock.image_select.currentIndex())
+    assert asked == [] and book.current.name == "d1.tif" and dock.form.isVisible() and dock.object_input.text() == "こんごう"
+
+
+def test_the_form_image_being_removed_is_not_offered_to_go_back_to(plugin, monkeypatch):
+    """操作性点検の再検証 F10: the image's layer removed with something typed: 保存 or 破棄, not 元の画像に戻る."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    asked = []
+    monkeypatch.setattr(dock, "ask_unsaved", lambda title, name, back: asked.append((name, back)) or "save")
+    dock.set_active(True)
+    assert book.current.name == "d1.tif"
+    dock.map_clicked(139.7, 35.6, None)
+    dock.object_input.setText("あおば")
+    dock.kind_input.setText("船舶 > 護衛艦")
+    project = QgsProject.instance()
+
+    root = project.layerTreeRoot()
+
+    def choose_another(*_args):
+        # As QGIS's layer panel does: another layer chosen while the node is still there (Qt moves the current row first).
+        iface.setActiveLayer(layers[1])
+
+    root.willRemoveChildren.connect(choose_another)
+    try:
+        project.removeMapLayer(layers[0].id())
+    finally:
+        root.willRemoveChildren.disconnect(choose_another)
+    assert wait_for(lambda: asked)
+    assert asked == [("d1.tif", False)]
+    [a] = book.living()
+    assert (a.object_name, a.image_name) == ("あおば", "d1.tif") and book.current.name == "d2.tif" and not dock.form.isVisible()
+
+
+def test_a_record_opened_from_its_mark_is_chosen_in_the_list(plugin):
+    """操作性点検 4: a mark clicked opened its form, but its row was not chosen in the list."""
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    dock.set_active(True)
+    for name, lat in (("あおば", 35.6), ("はるな", 35.65)):
+        dock.map_clicked(139.7, lat, None)
+        dock.object_input.setText(name)
+        dock.kind_input.setText("船舶 > 護衛艦")
+        dock.submit()
+    second = next(o for o in book.living() if o.object_name == "はるな")
+    dock.table.clearSelection()
+    mark = next(m for m in dock.scene().marks if m.key == second.id)
+    dock.map_clicked(mark.lon, mark.lat, mark)
+    rows = {i.row() for i in dock.table.selectionModel().selectedRows()}
+    assert dock.form.isVisible() and dock.object_input.text() == "はるな"
+    assert [dock._row_keys[r] for r in rows] == [f"o:{second.id}"]

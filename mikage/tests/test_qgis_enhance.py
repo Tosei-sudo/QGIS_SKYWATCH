@@ -16,7 +16,7 @@ APP = start_app()
 
 from osgeo import gdal  # noqa: E402
 from qgis.core import (  # noqa: E402
-    QgsMapRendererParallelJob, QgsMapSettings, QgsMultiBandColorRenderer, QgsSingleBandGrayRenderer, QgsProject, QgsRasterLayer, QgsRectangle,
+    QgsMapRendererParallelJob, QgsMapSettings, QgsVectorLayer, QgsMultiBandColorRenderer, QgsSingleBandGrayRenderer, QgsProject, QgsRasterLayer, QgsRectangle,
 )
 from qgis.PyQt.QtCore import QSize  # noqa: E402
 from qgis.PyQt.QtGui import QColor  # noqa: E402
@@ -183,6 +183,13 @@ def test_the_dock_corrects_the_active_layer_and_follows_the_view(tmp_path):
         assert dock.layer is layer and not dock.enabled.isChecked()
         assert [dock.band_combos[i].currentData() for i in range(3)] == [1, 2, 3]
         assert dock.band_combos[0].count() == 4
+        # A vector layer chosen (作業メモ, 関心地域): the image stays the one worked on (操作性点検 5, tsudo 2026-11-23).
+        notes = QgsVectorLayer("Point?crs=EPSG:4326", "作業メモ", "memory")
+        project.addMapLayer(notes)
+        iface.setActiveLayer(notes)
+        assert dock.layer is layer and dock.enabled.isEnabled() and dock.layer_label.text() == dock._target_text()
+        project.removeMapLayer(notes.id())
+        iface.setActiveLayer(layer)
 
         # A preset turns the correction on; its steps land on the sliders and DRA.
         dock.use_preset("vivid")

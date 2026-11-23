@@ -7,15 +7,25 @@ from __future__ import annotations
 
 from typing import Optional
 
-from qgis.core import QgsProject, QgsRasterLayer, QgsRectangle
+from qgis.core import QgsMapLayerType, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QTimer
+from qgis.PyQt.QtWidgets import QMessageBox
+
+try:  # Qt6
+    from qgis.PyQt.QtGui import QAction
+except ImportError:  # Qt5
+    from qgis.PyQt.QtWidgets import QAction
 
 from ...core.obs.api import ObservationBook, ObservedImage
 from ...core.obs.api import SATELLITE_ORIGINS
 from ...qgis_io.geometry import from_wgs84, to_wgs84
+from ...qgis_io.image_order import bring_up
 from ...qgis_io.listed_layers import listed_image_of
-from ...qgis_io.obs_images import SatelliteLookup, image_layers, open_images, set_manual_time, set_typed_satellite
+from ...qgis_io.obs_images import (
+    SatelliteLookup, can_mark, image_layers, is_image_layer, open_images, set_manual_time, set_record_on, set_typed_satellite,
+)
 from ...qgis_io.tasks import run_task
+from ..docks import plain_tip
 from .common import _ms_of
 
 
@@ -86,9 +96,76 @@ class ImagesPart:
     def _layers_changed(self, *_args) -> None:
         self.refresh_images()
 
+    # ---- 「観測記録の画像にする」 (the layer panel's right-click; 操作性点検 1, tsudo 2026-11-23) ----
+
+    def _offer_record_on_action(self) -> None:
+        """
+        The right-click entry of the rasters that are neither from the catalog
+        nor a map a server draws: a background GeoTIFF made an image to record
+        on, or a raster with a time made a background (obs_images.is_image_layer).
+        """
+        self.record_on_action = QAction(self.tr("観測記録の画像にする"), self)
+        self.record_on_action.setObjectName("mikageRecordOn")
+        self.record_on_action.setCheckable(True)
+        self.record_on_action.setToolTip(self.tr(
+            "オン: このレイヤーを観測記録の画像にする（撮像日時が読めない画像も）。オフ: 背景として扱い、記録先にしない"))
+        self.record_on_action.triggered.connect(self._mark_record_on)
+        self.iface.addCustomActionForLayerType(self.record_on_action, "", QgsMapLayerType.RasterLayer, False)
+        project = QgsProject.instance()
+        project.layersAdded.connect(self._offer_record_on)
+        self._offer_record_on(project.mapLayers().values())
+
+    def _withdraw_record_on_action(self) -> None:
+        try:
+            QgsProject.instance().layersAdded.disconnect(self._offer_record_on)
+        except (TypeError, RuntimeError):
+            pass
+        self.iface.removeCustomActionForLayerType(self.record_on_action)
+
+    def _offer_record_on(self, layers) -> None:
+        for layer in layers:
+            if can_mark(layer):
+                self.iface.addCustomActionForLayer(self.record_on_action, layer)
+
+    def _mark_record_on(self, on: bool) -> None:
+        """「観測記録の画像にする」 on the layer chosen: it becomes the image recorded on (on), or a background (off)."""
+        layer = self.iface.activeLayer()
+        if not can_mark(layer):
+            return
+        set_record_on(layer, on)
+        self.refresh_images()
+        if on and self.book is not None and self.book.go_to_layer(layer.id()):
+            self._went()
+
     def _layer_chosen(self, layer) -> None:
+        if hasattr(self, "record_on_action"):
+            self.record_on_action.setChecked(isinstance(layer, QgsRasterLayer) and is_image_layer(layer))
         if self._following or self.book is None:
             return
+        typing_on = self._form_image if self._typed() else None
+        if typing_on is not None and layer is not None and layer.id() not in typing_on.layer_ids:
+            # Something typed for another image: asked once QGIS is done (a layer removed in the layer panel makes
+            # another one chosen while it is still there: 操作性点検の再検証 F10, 「元の画像に戻る」 offered to it).
+            layer_id = layer.id()
+            QTimer.singleShot(0, lambda: self._layer_chosen_later(layer_id))
+            return
+        self._follow_layer(layer)
+
+    def _layer_chosen_later(self, layer_id: str) -> None:
+        """_layer_chosen with something typed, after QGIS's change: the layer still the one chosen."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        active = self.iface.activeLayer()
+        if self.book is None or layer is None or active is None or active.id() != layer_id:
+            return
+        current, typing_on = self.book.current, self._form_image
+        if typing_on is not None and current is not None and current.id != typing_on.id and layer_id in current.layer_ids:
+            # There already: the form's image was removed, the images read again went to the layer chosen.
+            self._went()
+            return
+        self._follow_layer(layer)
+
+    def _follow_layer(self, layer) -> None:
+        """The image of the layer chosen in the layer panel recorded on (a footprint's: the image without its file)."""
         listed = listed_image_of(layer)
         if listed is not None and layer.id() in self.footprints.layer_ids():
             # An image without its file chosen by its footprint's layer.
@@ -105,11 +182,16 @@ class ImagesPart:
         if self.book.go_to_layer(layer.id()):
             self._went()
 
-    def _went(self) -> None:
+    def _went(self) -> bool:
         """
-        Another image: the form closes, the layer is chosen, 「この画像のみ」
-        follows; 「クリック記録」 goes on once the image is taken (分担).
+        Another image: the form closes, the layer is chosen and drawn over the
+        other images, 「この画像のみ」 follows; 「クリック記録」 goes on once the
+        image is taken (分担). Something typed in the form not saved yet is
+        asked about first (keep_typing): False when the user went back to
+        the form's image (nothing else done).
         """
+        if self._keep_typing():
+            return False
         self.close_form()
         self._clear_points()
         self.many.went()
@@ -130,9 +212,93 @@ class ImagesPart:
                     self.iface.setActiveLayer(layer)
                 finally:
                     self._following = False
+            if image is not None and image.file and self.isVisible():
+                # Once what chose it is done (a click in the layer panel moves no node under it).
+                QTimer.singleShot(0, lambda image_id=image.id: self._bring_up(image_id))
         self._apply_only()
         self.render()
         self.refresh()
+        return True
+
+    def _bring_up(self, image_id: str) -> None:
+        """
+        The image recorded on drawn over the other images that cover it
+        (image_order.bring_up; 操作性点検 10, tsudo 2026-11-23): the map shows
+        the image the marks go on. The layer chosen stays chosen.
+        """
+        book = self.book
+        image = book.current if book else None
+        if image is None or image.id != image_id or not image.file or not self.isVisible():
+            return
+        others = [layer_id for i in book.images if i.id != image.id for layer_id in i.layer_ids]
+        active = self.iface.activeLayer()
+        self._following = True
+        try:
+            if bring_up(image.layer_ids, others) and active is not None and self.iface.activeLayer() is not active:
+                self.iface.setActiveLayer(active)
+        finally:
+            self._following = False
+
+    def _typed(self) -> bool:
+        """Whether the form open has something typed since it opened (a record kept unsaved and opened again: always)."""
+        return self.pending is not None and (self._filled is None or self.form_values() != self._filled)
+
+    def _keep_typing(self) -> bool:
+        """
+        The image changed with something typed in the form for another one
+        (操作性点検 2, tsudo 2026-11-23: it closed without a word): asked 保存
+        (on the form's image, then on), 破棄 (then on) or 元の画像に戻る (the
+        form's image chosen again, the form open as it was: True).
+        """
+        book, was = self.book, self._form_image
+        image = book.current if book else None
+        if book is None or was is None or (image is not None and image.id == was.id) or not self._typed():
+            return False
+        can_return = any(i.id == was.id and self._still_there(i) for i in book.images)
+        answer = self.ask_unsaved(self.form.title(), was.name, can_return)
+        if answer == "save":
+            self.submit(image=next((i for i in book.images if i.id == was.id), was))
+            if self.pending is None:
+                return False
+            answer = "back"  # (a number that cannot be read: the form stays open, on its image)
+        if answer != "back" or not can_return:
+            return False
+        book.go_to(was.id)
+        layers = image_layers(book.current)
+        active = self.iface.activeLayer()
+        if layers and (active is None or active.id() not in book.current.layer_ids):
+            self._following = True
+            try:
+                self.iface.setActiveLayer(layers[0])
+            finally:
+                self._following = False
+        self.render()
+        return True
+
+    def _still_there(self, image) -> bool:
+        """Whether an image can be gone back to: one listed without its file, or with a layer in the layer panel."""
+        ids = list(image.layer_ids)
+        if not ids:
+            return True
+        root = QgsProject.instance().layerTreeRoot()
+        return any(root.findLayer(x) is not None for x in ids)
+
+    def ask_unsaved(self, title: str, image_name: str, can_return: bool) -> str:
+        """「保存」「破棄」「元の画像に戻る」 for what is typed in the form: 'save', 'discard' or 'back' (also Esc)."""
+        lines = [self.tr("入力中の「{t}」は未保存").format(t=title),
+                 self.tr("保存: 元の画像（{n}）に記録してから移る").format(n=image_name),
+                 self.tr("破棄: 入力を捨てて移る")]
+        if can_return:
+            lines.append(self.tr("元の画像に戻る: 移らずに入力を続ける"))
+        box = QMessageBox(QMessageBox.Icon.Question, self.tr("観測記録"), plain_tip("\n".join(lines)), parent=self)
+        save = box.addButton(self.tr("保存"), QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(self.tr("破棄"), QMessageBox.ButtonRole.DestructiveRole)
+        back = box.addButton(self.tr("元の画像に戻る"), QMessageBox.ButtonRole.RejectRole) if can_return else None
+        box.setDefaultButton(back or save)
+        box.setEscapeButton(back or save)
+        box.exec()
+        clicked = box.clickedButton()
+        return "save" if clicked is save else "back" if back is not None and clicked is back else "discard" if clicked is not None else "back"
 
     def toggle_recording(self) -> None:
         """Starts recording, or ends it (「記録」 pressed)."""
@@ -142,10 +308,14 @@ class ImagesPart:
         """The next (or previous) image in time (one without its file: the map moves to it when it is out of view)."""
         if self.book is None:
             return None
+        before = self.book.current
         image = self.book.step(by)
-        self._went()
-        self.show_image_area(image)
-        return image
+        if image is not None and before is not None and image.id == before.id:
+            # ▶ on the last image (◀ on the first): nothing changes, a form being typed stays.
+            return image
+        if self._went():
+            self.show_image_area(image)
+        return self.book.current
 
     def list_catalog_images(self, images: list) -> Optional[ObservedImage]:
         """
@@ -163,8 +333,8 @@ class ImagesPart:
         if not self.isVisible():
             self.show()
         self.raise_()
-        self._went()
-        self.show_image_area(entry, always=True)
+        if self._went():
+            self.show_image_area(entry, always=True)
         return entry
 
     def show_image_area(self, image: Optional[ObservedImage], always: bool = False) -> None:
@@ -189,14 +359,15 @@ class ImagesPart:
     def go_to(self, image_id: str) -> bool:
         if self.book is None or not self.book.go_to(image_id):
             return False
-        self._went()
-        return True
+        return self._went()
 
     def _image_chosen(self, index: int) -> None:
         if self.book and 0 <= index < len(self.book.images):
+            if self.book.current is not None and self.book.images[index].id == self.book.current.id:
+                return  # the image recorded on chosen again: nothing changes
             self.book.current = self.book.images[index]
-            self._went()
-            self.show_image_area(self.book.current)
+            if self._went():
+                self.show_image_area(self.book.current)
 
     def _toggle_list_form(self, on: bool) -> None:
         self.list_form.setVisible(on)
@@ -291,26 +462,32 @@ class ImagesPart:
 
     def _apply_only(self, *_args) -> None:
         """
-        「この画像のみ」: only the current image's layers show (a record's
-        images in its folder all; an image without its file: its footprint's
+        「この画像のみ」: only the current image's layers show among the images
+        (a record's images in its folder all; backgrounds stay; an image without its file: its footprint's
         layer, the other footprints hidden too); the others come back as they were.
         """
         root = QgsProject.instance().layerTreeRoot()
         footprints = self.footprints.layer_ids()
-        rasters = [layer for layer in QgsProject.instance().mapLayers().values()
-                   if isinstance(layer, QgsRasterLayer) or layer.id() in footprints]
+        # The images' layers only: a background (a GeoTIFF, tiles) stays as it is (操作性点検 1, 2026-11-23).
+        images = {layer_id for i in (self.book.images if self.book else ()) for layer_id in i.layer_ids} | set(footprints)
         image = self.book.current if self.book else None
         if self.only.isChecked() and image is not None and self.isVisible():
             if self._shown is None:
                 self._shown = {}
             footprint = self.footprints.layer_of(image.id)
             keep = {*image.layer_ids, *((footprint.id(),) if footprint is not None else ())}
-            for layer in rasters:
-                node = root.findLayer(layer.id())
+            for layer_id in [x for x in self._shown if x not in images]:
+                # Made a background meanwhile: as it was.
+                node = root.findLayer(layer_id)
+                visible = self._shown.pop(layer_id)
+                if node is not None:
+                    node.setItemVisibilityChecked(visible)
+            for layer_id in images:
+                node = root.findLayer(layer_id)
                 if node is None:
                     continue
-                self._shown.setdefault(layer.id(), node.itemVisibilityChecked())
-                node.setItemVisibilityChecked(layer.id() in keep)
+                self._shown.setdefault(layer_id, node.itemVisibilityChecked())
+                node.setItemVisibilityChecked(layer_id in keep)
         elif self._shown is not None:
             for layer_id, visible in self._shown.items():
                 node = root.findLayer(layer_id)

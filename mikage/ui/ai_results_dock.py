@@ -67,7 +67,7 @@ from ..qgis_io.ai_results_io import RESULTS_OF, ROW, fetch, geometry_of, mark_im
 from ..qgis_io.ai_transfer_io import sent_ids
 from ..qgis_io.catalog_io import CATALOG_URL
 from ..qgis_io.detection_results import detection_layers, detection_results, image_ids_of, is_detection_layer, local_source
-from ..qgis_io.obs_images import IMAGE_ID, image_layers, observed_image
+from ..qgis_io.obs_images import IMAGE_ID, background_layer, image_layers, observed_image
 from ..qgis_io.pixel_place import original_placement, pixel_in
 from ..qgis_io.review_io import rejection_ring
 from ..qgis_io.tasks import current_feedback, error_text, run_task
@@ -634,7 +634,21 @@ class AiResultsDock(PluginDock):
         self.status.setText(text)
         if reveal and self.rows and not self.isVisible():
             self.show()
-            self.raise_()
+            if not self._behind_another():
+                self.raise_()
+
+    def _behind_another(self) -> bool:
+        """
+        Whether a dock of the same tabs is in front (観測記録 being worked in):
+        results come in as a tab then, not over it (2026-11-23: they came over
+        観測記録 just opened, once its records were read after them).
+        """
+        main = self.parentWidget()
+        try:
+            siblings = main.tabifiedDockWidgets(self) if main is not None else []
+        except (AttributeError, RuntimeError):
+            return False
+        return any(d.isVisible() for d in siblings)
 
     def _match(self) -> None:
         """What the rows not recorded yet continue (the things of the images before and after), shown in the 継続 column."""
@@ -828,7 +842,12 @@ class AiResultsDock(PluginDock):
             return []
         image_id = self.image_id
         if not image_id or not any(i.id == image_id for i in book.images):
-            self.status.setText(_tr("画像 {id} が観測記録の画像一覧になし（画像を開いて）").format(id=image_id or ""))
+            if background_layer(image_id or "") is not None:
+                # Open, but without a time it is taken as a background (操作性点検 1, 2026-11-23).
+                self.status.setText(_tr("画像 {id} は撮像日時が読めないため背景として扱い中（レイヤーを右クリック ▸ 「観測記録の画像にする」）").format(
+                    id=image_id))
+            else:
+                self.status.setText(_tr("画像 {id} が観測記録の画像一覧になし（画像を開いて）").format(id=image_id or ""))
             return []
         self._refresh_imported()
         levels = {c.label for c in book.confidences()}

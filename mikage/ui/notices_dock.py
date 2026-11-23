@@ -31,7 +31,7 @@ from ..core.catalog.api import (
 )
 from ..core.catalog.api import Checked, WatchStore, check_due, check_one
 from ..qgis_io.overviews_io import queue as overview_queue
-from ..qgis_io.catalog_io import Cancelled, RecordImages, add_record_layers, footprint, open_located, open_record
+from ..qgis_io.catalog_io import Cancelled, RecordImages, add_or_choose, footprint, open_located, open_record
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.tasks import error_text, run_task
 from .alert_feed import AlertFeed
@@ -415,9 +415,10 @@ class NoticesDock(PluginDock):
             except PathError as error:
                 problems.append(str(error))
                 continue
-            add_record_layers(opened, record)
+            # An image open already: chosen rather than added twice (操作性点検 3).
+            opened, there = add_or_choose(opened, record)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
-            layers += opened
+            layers += opened + there
         if without:
             listed = [i for i in (listed_image(r) for r in without) if i is not None]
             dock = self.observations() if self.observations else None
@@ -454,8 +455,9 @@ class NoticesDock(PluginDock):
             except PathError as error:
                 problems.append(str(error))
             if opened:
-                add_record_layers(opened, record)
-                overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
+                added, there = add_or_choose(opened, record)
+                overview_queue.request(added, self.context.config.overviews, self.iface.messageBar())
+                opened = added + there
         self.mark([notice.id])
         if problems:
             self.iface.messageBar().pushWarning(TITLE, plain_tip(" / ".join(problems)))

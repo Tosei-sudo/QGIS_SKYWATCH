@@ -281,6 +281,9 @@ class RequestDock(PluginDock):
         cat = self.category_filter.currentText()
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
                       and self.status_filter.passes(r.status) and self.group_filter.passes(r.group)]
+        if self.chosen is not None and not any(r is self.chosen for r in self.shown):
+            # Filtered out: no longer the one 「編集…」「削除」 act on, unseen (操作性点検 9, tsudo 2026-11-23).
+            self.chosen = None
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間",
                                                                    "優先度", "種別", "状態")])

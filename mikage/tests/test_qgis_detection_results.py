@@ -177,11 +177,14 @@ def test_a_real_detection_run_is_recorded(plugin):
     pytest.importorskip("onnxruntime")
     from qgis.core import QgsApplication, QgsProcessingContext, QgsProcessingFeedback
 
+    from mikage.qgis_io.obs_images import set_record_on
     from mikage.tests.test_qgis_ai import DATA, square_tiff
 
     p, iface, tmp_path = plugin
     dock = p.api.ai_results
     image = QgsRasterLayer(square_tiff(tmp_path), "square")
+    # Without a time: an image to record on once marked so (else a background, 操作性点検 1, 2026-11-23).
+    set_record_on(image, True)
     QgsProject.instance().addMapLayer(image)
     algorithm = QgsApplication.processingRegistry().algorithmById("mikage:detect")
     context = QgsProcessingContext()

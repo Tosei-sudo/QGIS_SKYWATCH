@@ -37,6 +37,8 @@ class AssignmentBar(QWidget):
 
     #: The assignments were read again or changed.
     changed = pyqtSignal()
+    #: An image's assignment written here (taken, 完了, given back): its id (the catalog's 分担 column reads it again).
+    written = pyqtSignal(str)
 
     def __init__(self, dock, parent=None):
         super().__init__(parent)
@@ -240,6 +242,7 @@ class AssignmentBar(QWidget):
             self.items = [x, *(i for i in self.items if i.oid is None or i.oid != x.oid)]
             self.render()
             self.changed.emit()
+            self.written.emit(image.id)
             self.read_at = 0.0
             self.reload()
             done(x)
@@ -326,7 +329,7 @@ class AssignmentBar(QWidget):
 
     # ---- changing ------------------------------------------------------------
 
-    def _run(self, what: str, work, done_text: str) -> None:
+    def _run(self, what: str, work, done_text: str, image_id: str = "") -> None:
         if self._writing is not None:
             return
 
@@ -335,6 +338,8 @@ class AssignmentBar(QWidget):
             self.dock.status.setText(done_text)
             self.read_at = 0.0
             self.reload()
+            if image_id:
+                self.written.emit(image_id)
 
         def failed(message: str) -> None:
             self._writing = None
@@ -360,7 +365,7 @@ class AssignmentBar(QWidget):
         def work(_task):
             return repo.take(image.id, user, now, image.name, image.time)
 
-        self._run(self.tr("分担の取得"), work, self.tr("{name} を担当に").format(name=image.name or image.id))
+        self._run(self.tr("分担の取得"), work, self.tr("{name} を担当に").format(name=image.name or image.id), image.id)
 
     def set_status(self, status: str, x: Optional[Assignment] = None) -> None:
         x = x or self.holder()
@@ -370,7 +375,7 @@ class AssignmentBar(QWidget):
         repo = self.repository()
         new = with_status(x, status, int(time.time() * 1000))
         self._run(self.tr("分担の更新"), lambda _t: repo.update(new, x),
-                  self.tr("{name}: {s}").format(name=x.label, s=status))
+                  self.tr("{name}: {s}").format(name=x.label, s=status), x.image_id)
 
     def give_back(self, x: Optional[Assignment] = None, confirm: bool = True) -> None:
         x = x or self.holder()
@@ -380,4 +385,4 @@ class AssignmentBar(QWidget):
         if confirm and not ask_no(self, self.tr("分担を手放す"), self.tr("{name} の担当を解除（記録は残る）").format(name=x.label), yes=self.tr("解除")):
             return
         repo = self.repository()
-        self._run(self.tr("分担の解除"), lambda _t: repo.release(x), self.tr("{name} の担当を解除").format(name=x.label))
+        self._run(self.tr("分担の解除"), lambda _t: repo.release(x), self.tr("{name} の担当を解除").format(name=x.label), x.image_id)

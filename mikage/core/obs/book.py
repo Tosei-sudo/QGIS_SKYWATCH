@@ -1007,14 +1007,16 @@ class ObservationBook:
         )
 
     def submit(self, lon: float, lat: float, values: FormValues, present: bool = True, editing: Optional[Observation] = None,
-               source: Optional[Observation] = None, draft: Optional[str] = None, unseen: str = "") -> Optional[Observation]:
+               source: Optional[Observation] = None, draft: Optional[str] = None, unseen: str = "",
+               image: Optional[ObservedImage] = None) -> Optional[Observation]:
         """
-        Records what the form says on the image recorded now (a new record, a
-        change, or a thing carried over). Not saved: kept as a draft (送信待ち,
+        Records what the form says on the image recorded now, or `image` (the
+        one the form was opened on): a new record, a change, or a thing
+        carried over. Not saved: kept as a draft (送信待ち,
         「保存できなかった観測記録」); `draft`: the form was opened again from that one
         (its record id is kept, and it goes when saved).
         """
-        image = self.current
+        image = image if image is not None else self.current
         if image is None:
             self._say("画像なし。画像を開くか、＋ でファイルのない画像を追加")
             return None

@@ -8,6 +8,13 @@ temporal properties), the GDAL metadata items, the NITF date, the file name,
 the TIFF DateTime; else the time typed for it (kept on the layer, so in the
 project).
 
+Which rasters are images (tsudo 2026-11-23, 操作性点検 1): one opened from
+the catalog, one whose time can be read (the layer's, its file's, one typed),
+or one marked 「観測記録の画像にする」 in the layer panel's right-click menu;
+another raster (a background GeoTIFF) is a background, never chosen as the
+image recorded on, nor hidden by 「この画像のみ」. Background maps a server
+draws (tiles, WMS, map services) never are, unless opened from the catalog.
+
 An image opened from the catalog is named by its id (tsudo, 2026-11-10: the
 records' image names were file names for some images, folder names for
 others and ids for those without files): the records' 画像名 is then the
@@ -55,6 +62,8 @@ IMAGE_FILE = "satobs/imageFile"
 #: 衛星名: the catalog's 「センサー」 (catalog_io), and the one typed for an image that does not say (「衛星不明（入力）」).
 SATELLITE = "satobs/satellite"
 SATELLITE_TYPED = "satobs/satelliteTyped"
+#: Set from the layer panel's 「観測記録の画像にする」: "1" an image to record on, "0" a background (unset: by its time).
+RECORD_ON = "satobs/recordOn"
 
 
 def image_layer(source: str, name: str, image_id: Optional[str] = None, time: Optional[int] = None,
@@ -139,7 +148,8 @@ def gdal_metadata(layer: QgsRasterLayer, domain: str = "") -> dict[str, str]:
         from osgeo import gdal
     except ImportError:
         return {}
-    parts = QgsProviderRegistry.instance().decodeUri("gdal", layer.source())
+    # The image's own file (not the VRT of an image moved by 位置ずらし).
+    parts = QgsProviderRegistry.instance().decodeUri("gdal", _own_source(layer))
     path = source_of(layer) or parts.get("path")
     if not path or re.match(r"^/vsicurl/", path):
         # Not opened again over the network: the provider's own metadata then.
@@ -317,31 +327,89 @@ def observed_image(layer: QgsRasterLayer, satellites: Optional[SatelliteLookup] 
 MAP_PROVIDERS = ("wms", "arcgismapserver", "xyz")
 
 
+def is_map_layer(layer: QgsMapLayer) -> bool:
+    """A map a server draws (tiles, WMS, a map service) not opened from the catalog: a background, never an image."""
+    return not layer.customProperty(IMAGE_ID) and layer.providerType() in MAP_PROVIDERS
+
+
+def marked_record_on(layer: QgsMapLayer) -> Optional[bool]:
+    """「観測記録の画像にする」 as set in the layer panel: True on, False off, None never set (decided by the image's time)."""
+    value = str(layer.customProperty(RECORD_ON) or "")
+    return True if value == "1" else False if value == "0" else None
+
+
+def set_record_on(layer: QgsMapLayer, on: bool) -> None:
+    """Marks a raster as an image to record on (or as a background), kept on the layer (so in the project)."""
+    layer.setCustomProperty(RECORD_ON, "1" if on else "0")
+
+
+def can_mark(layer: QgsMapLayer) -> bool:
+    """Whether 「観測記録の画像にする」 applies: a raster not opened from the catalog (always one) nor a map a server draws."""
+    return (isinstance(layer, QgsRasterLayer) and not layer.customProperty(IMAGE_ID)
+            and layer.providerType() not in MAP_PROVIDERS)
+
+
+def _counts(layer: QgsMapLayer, time: Optional[int]) -> bool:
+    """Whether a raster (its time read, None when none) is an image to record on (is_image_layer)."""
+    if layer.customProperty(IMAGE_ID):
+        return True
+    if layer.providerType() in MAP_PROVIDERS:
+        return False
+    marked = marked_record_on(layer)
+    return marked if marked is not None else time is not None
+
+
 def is_image_layer(layer: QgsMapLayer) -> bool:
     """
     Whether a raster layer is an image to record on: one opened from the
-    catalog, or any other but a background map (tiles, WMS, a map service).
-    A background map was listed as 「日時不明  {y}.png」 (tsudo 2026-11-11),
-    chosen as the image when nothing else was open.
+    catalog; one marked 「観測記録の画像にする」; else one whose time can be
+    read (the layer's, its file's name or metadata, one typed). A background
+    map (tiles, WMS, a map service: 「日時不明  {y}.png」, tsudo 2026-11-11) and
+    a background GeoTIFF without a time (「日時不明 basemap.tif」, 2026-11-23)
+    are not.
     """
-    return bool(layer.customProperty(IMAGE_ID)) or layer.providerType() not in MAP_PROVIDERS
+    if layer.customProperty(IMAGE_ID) or layer.providerType() in MAP_PROVIDERS or marked_record_on(layer) is not None:
+        return _counts(layer, None)
+    return _counts(layer, _time_of(layer))
+
+
+def _time_of(layer: QgsMapLayer) -> Optional[int]:
+    """The raster's time as observed_image reads it, None when none says."""
+    t = _layer_time(layer)
+    if t is None:
+        found = image_time(file_name(layer), _metadata(layer))
+        t = found[0] if found else None
+    return t if t is not None else manual_time(layer)
+
+
+def background_layer(image_id: str, project: Optional[QgsProject] = None) -> Optional[QgsRasterLayer]:
+    """An open raster of that image id (its file name) taken as a background (is_image_layer), None when none is."""
+    project = project or QgsProject.instance()
+    for layer in project.mapLayers().values():
+        if (isinstance(layer, QgsRasterLayer) and can_mark(layer) and image_id
+                and file_name(layer) == image_id and not is_image_layer(layer)):
+            return layer
+    return None
 
 
 def open_images(project: Optional[QgsProject] = None, satellites: Optional[SatelliteLookup] = None) -> list[ObservedImage]:
     """
-    The project's raster layers as images to record on (not the background
-    maps): the layers of one catalog image id (a record's images in its
+    The project's raster layers as images to record on (is_image_layer: not
+    the background maps and GeoTIFFs): the layers of one catalog image id (a record's images in its
     folder) as one image (top of the layer tree first); with `satellites`, their 衛星名.
     """
     project = project or QgsProject.instance()
     order = {layer_id: i for i, layer_id in enumerate(project.layerTreeRoot().findLayerIds())}
     rasters = [layer for layer in project.mapLayers().values()
-               if isinstance(layer, QgsRasterLayer) and layer.isValid() and is_image_layer(layer)]
+               if isinstance(layer, QgsRasterLayer) and layer.isValid()
+               and (layer.customProperty(IMAGE_ID) or layer.providerType() not in MAP_PROVIDERS)]
     rasters.sort(key=lambda layer: order.get(layer.id(), len(order)))
     out: list = []
     by_id: dict[str, list] = {}
     for layer in rasters:
         image = observed_image(layer, satellites)
+        if not _counts(layer, image.time):
+            continue  # a background (is_image_layer): its time read once here
         if not layer.customProperty(IMAGE_ID):
             out.append(image)
             continue

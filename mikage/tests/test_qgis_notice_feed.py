@@ -406,17 +406,20 @@ def test_open_goes_to_the_image_on_the_map(plugin):
     extent = iface.canvas.extent()
     assert extent.contains(opened[0].extent()) and extent.width() < 0.5
     assert {n.id: n.read for n in p.api.notices.store().notices()}["w|B"]
+    b_id = opened[0].id()
     # 「前の画像を閉じる」: the one opened here before closes.
     feed.close_previous.setChecked(True)
     before = set(QgsProject.instance().mapLayers())
-    feed.cards["w|B"].buttons["open"].click()
+    feed.cards["w|A"].buttons["open"].click()
     second = set(QgsProject.instance().mapLayers()) - before
     assert len(second) == 1
-    feed.cards["w|A"].buttons["open"].click()
-    left = set(QgsProject.instance().mapLayers())
     # The one opened before 「前の画像を閉じる」 was on stays.
-    assert not second & left and before <= left
-    assert any(layer.source().endswith("A.tif") for layer in QgsProject.instance().mapLayers().values())
+    assert before <= set(QgsProject.instance().mapLayers())
+    # B again (open already): its layer chosen, not a second one (操作性点検 3, tsudo 2026-11-23); A closes.
+    feed.cards["w|B"].buttons["open"].click()
+    left = set(QgsProject.instance().mapLayers())
+    assert not second & left and left == before and b_id in left
+    assert sum(layer.source().endswith("B.tif") for layer in QgsProject.instance().mapLayers().values()) == 1
     assert settings.feed_close_previous()
 
 

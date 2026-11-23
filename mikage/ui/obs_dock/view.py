@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from qgis.core import QgsCoordinateReferenceSystem, QgsGeometry, QgsPointXY
+from qgis.core import QgsCoordinateReferenceSystem, QgsGeometry, QgsPointXY, QgsProject
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import QHeaderView, QTableWidgetItem
@@ -33,9 +33,13 @@ class ViewPart:
         # The images.
         self.image_select.blockSignals(True)
         self.image_select.clear()
+        names = [e.name for e in book.images] if book else []
         for e in book.images if book else []:
             files = len(e.layer_ids)
             notes = [x for x in (e.satellite, "ファイルなし" if not e.file else f"{files} ファイル" if files > 1 else "") if x]
+            twin = QgsProject.instance().mapLayer(e.layer_id) if names.count(e.name) > 1 and e.layer_id else None
+            if twin is not None:
+                notes.append(twin.name())  # files of the same name in other folders: told apart by their layers
             note = f"（{'・'.join(notes)}）" if notes else ""
             self.image_select.addItem(f"{local_time(e.time) if e.time is not None else '日時不明'}  {e.name}{note}")
             self.image_select.setItemData(self.image_select.count() - 1, self._image_tip(e), Qt.ItemDataRole.ToolTipRole)

@@ -39,7 +39,7 @@ from ..core.events import (
     CLOSED, LISTED, OPEN, STATUSES, TYPE_LABELS, TYPES, Event, EventLink, LinkItem, add_links, counts, delete_event,
     export_csv, is_url, load_events, load_links, matches, new_event, remove_links, save_event, set_link_note, set_status, summary_text,
 )
-from ..qgis_io.catalog_io import Cancelled, PathError, add_record_layers, footprint, layer_area, open_record
+from ..qgis_io.catalog_io import Cancelled, PathError, add_or_choose, footprint, layer_area, open_record
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.pinned_layers import top_index
 from ..qgis_io.plan_layer import make_field
@@ -839,9 +839,10 @@ class EventsDock(PluginDock):
                 except PathError as error:
                     problems.append(str(error))
                     continue
-                add_record_layers(layers, record)
+                # An image open already: chosen rather than added twice (操作性点検 3).
+                layers, there = add_or_choose(layers, record)
                 overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
-                opened += len(layers)
+                opened += len(layers) + len(there)
         listed = 0
         if without:
             from ..core.catalog.api import listed_image
