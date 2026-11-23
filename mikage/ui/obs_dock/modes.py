@@ -24,20 +24,34 @@ class ModesPart:
                 self.canvas.setMapTool(self._previous_tool)
 
     def _tool_gone(self) -> None:
-        # Another map tool chosen: recording stops.
+        # Another map tool chosen (the pan…): recording stops; a form with something typed stays, to be saved
+        # with Enter or let go with Esc (操作性点検の再検証 R4, tsudo 2026-11-23: it closed without a word).
         if self.area_mode:
             self.set_area_mode(False)
         if self.active:
-            self.record_button.setChecked(False)
+            self.set_active(False, keep_form=self._typed())
 
-    def set_active(self, on: bool, quiet: bool = False, claimed: bool = False) -> None:
+    def _record_pressed(self, on: bool) -> None:
+        """
+        「クリック記録」 pressed (R): turned off with something typed in the form, 保存・破棄・入力に戻る is
+        asked first (再検証 R4); 入力に戻る: recording goes on, the form as it was.
+        """
+        if not on and self.active and not self._let_form_go(self.tr("クリック記録を止める")):
+            self.record_button.blockSignals(True)
+            self.record_button.setChecked(True)
+            self.record_button.blockSignals(False)
+            return
+        self.set_active(on)
+
+    def set_active(self, on: bool, quiet: bool = False, claimed: bool = False, keep_form: bool = False) -> None:
         """
         Turns 「クリック記録」 on or off. With `assignments`, turning it on takes
         the image first (in a task; recording starts once it is one's own). In
         協業 (the default) others holding it do not matter, and a table that
         cannot be reached only warns; with `mode: "exclusive"` it is refused
         when someone else holds it or the table cannot be reached.
-        `claimed`: the taking was tried already (no second try).
+        `claimed`: the taking was tried already (no second try). `keep_form`:
+        turned off, the form stays open (another map tool chosen).
         """
         if on and (self.book is None or self.book.current is None):
             self.say(NO_IMAGE)
@@ -56,7 +70,8 @@ class ModesPart:
         self._use_tool(on or self.area_mode)
         if not on:
             self._clear_points()
-            self.close_form()
+            if not keep_form:
+                self.close_form()
             if self.many.mode:
                 self.set_many_mode("")
         elif not quiet:
@@ -145,11 +160,18 @@ class ModesPart:
         if mode and (self.book is None or self.book.current is None):
             self.say(NO_IMAGE)
             mode = ""
+        stays = bool(mode) and mode != self.many.mode and self.pending is not None and self.pending[2] is None and self.pending[3] is None \
+            and not self._let_form_go(self.tr("「{m}」に移る").format(m=self.tr("連続") if mode == "stamp" else self.tr("並べる")))
+        if stays:
+            # A new record with something typed (再検証 R7): asked first; 入力に戻る: the mode stays as it was.
+            mode = self.many.mode
         for button, m in ((self.stamp_button, "stamp"), (self.row_button, "row")):
             if button.isChecked() != (mode == m):
                 button.blockSignals(True)
                 button.setChecked(mode == m)
                 button.blockSignals(False)
+        if stays:
+            return
         if mode:
             if self.area_mode:
                 self.set_area_mode(False)
@@ -190,6 +212,10 @@ class ModesPart:
             on = False
         if on and unseen and not self.book.keeps_unseen_areas():
             self.say(self.tr("この保存先では不可範囲を記録できない（管理者に連絡: UNSEEN_REASON）［E704］"))
+            on = False
+        if on and not self.area_mode and not self._let_form_go(
+                self.tr("不可範囲の記録に移る") if unseen else self.tr("確認範囲の記録に移る")):
+            # Something typed in the form (再検証 R5): asked first; 入力に戻る: no area, the form as it was.
             on = False
         unseen = on and unseen
         for button, want in ((self.area_button, on and not unseen), (self.unseen_area_button, unseen)):

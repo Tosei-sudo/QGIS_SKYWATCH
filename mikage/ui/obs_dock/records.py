@@ -260,7 +260,8 @@ class RecordsPart:
                 self.set_active(True)
             # The record as the book has it now (one read elsewhere, 「自分の記録」, may be older).
             now = next((r for r in self.book.records if r.id == o.id), o)
-            self.open_form(now.lon, now.lat, editing=now)
+            if not self._form_holds(editing=now) and self._let_form_go(self.tr("「{n}」を開く").format(n=self._named(now))):
+                self.open_form(now.lon, now.lat, editing=now)
 
         if self.go_to_record(o, quiet=True):
             form()
