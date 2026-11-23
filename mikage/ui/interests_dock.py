@@ -68,8 +68,8 @@ class InterestsDock(PluginDock):
         self.search.setPlaceholderText(self.tr("名前・メモで絞り込み"))
         self.search.setClearButtonEnabled(True)
         self.search.textChanged.connect(lambda _t: self.render())
-        self.reload_button = QPushButton(self.tr("再読み込み"))
-        self.reload_button.setToolTip(self.tr("Esri から読み直す（別の PC で変えたもの）"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
+        self.reload_button.setToolTip(self.tr("最新の関心地域と地点を取得（ほかの PC での変更も）"))
         self.reload_button.clicked.connect(lambda: self.book.load())
         top.addWidget(self.search, 1)
         top.addWidget(self.reload_button)
@@ -94,8 +94,8 @@ class InterestsDock(PluginDock):
             ("point", self.tr("地点を追加"), self.tr("地図をクリックした所に新しい地点（名前を入れて保存）"), self._point_mode, True),
             ("area", self.tr("地域を追加"), self.tr("地図に多角形を描いて新しい地域。クリックで頂点、ダブルクリックか右クリックで確定、Esc でやり直し"),
              self._area_mode, True),
-            ("selection", self.tr("選んだ地物から"), self.tr("作業中のレイヤーで選んだ地物の形で新しく（点は地点、面は地域）"), self.from_selection, False),
-            ("delete", self.tr("削除"), self.tr("選んだものを削除（Esri から消える）"), self.delete, False),
+            ("selection", self.tr("選んだ地物から"), self.tr("作業中のレイヤーで選んだ地物の形から新しく作成（点は地点、面は地域）"), self.from_selection, False),
+            ("delete", self.tr("削除"), self.tr("選んだものを削除"), self.delete, False),
             ("zoom", self.tr("移動"), self.tr("選んだものへ地図を移動（ダブルクリックでも）"), self.zoom, False),
             ("map", self.tr("地図に表示"), self.tr("「関心地点」「関心地域」のレイヤーとして地図に出す（次に QGIS を開いたときも）"), self._map_toggled, True),
         ]:
@@ -212,9 +212,9 @@ class InterestsDock(PluginDock):
         s = self.settings
         user = self.book.user()
         if s is None:
-            self.note.setText(self.tr("設定ファイルに interests（関心地点・関心地域のレイヤー）がないため使用不可"))
+            self.note.setText(self.tr("関心地域・地点は使えない（管理者に連絡: interests）"))
         elif not user:
-            self.note.setText(self.tr("利用者名が分からないため使用不可（環境変数 USERNAME がない。設定ファイルの editTracking.user で指定）"))
+            self.note.setText(self.tr("利用者名が分からないので使えない（管理者に連絡: editTracking.user）"))
         else:
             self.note.setText(self.tr("{user} さんの関心地域・地点（Esri に保存。どの PC でも同じ）").format(user=user))
         self.note.setVisible(True)
@@ -263,9 +263,9 @@ class InterestsDock(PluginDock):
         if book.settings is None:
             self.say("")
         elif book.loading:
-            self.say(self.tr("読み込み中…"))
+            self.say(self.tr("取得中…"))
         elif book.items is None and book.failure:
-            self.say(self.tr("読み込めず: {m}").format(m=book.failure))
+            self.say(self.tr("取得に失敗: {m}").format(m=book.failure))
         elif book.items is not None and not self._saving:
             points = sum(1 for i in book.items if i.kind == POINT)
             self.say(self.tr("地点 {p} 件・地域 {a} 件").format(p=points, a=len(book.items) - points))
@@ -386,7 +386,7 @@ class InterestsDock(PluginDock):
         def failed(message: str) -> None:
             self._saving = False
             self._update_buttons()
-            self.say(self.tr("保存できず: {m}").format(m=message))
+            self.say(self.tr("保存に失敗: {m}").format(m=message))
 
         self.book.save(d, done, failed)
 
@@ -496,7 +496,7 @@ class InterestsDock(PluginDock):
         if not chosen:
             return
         names = "、".join(i.name for i in chosen[:5]) + (self.tr(" ほか {n} 件").format(n=len(chosen) - 5) if len(chosen) > 5 else "")
-        if confirm and not ask_no(self, self.tr("関心地域・地点の削除"), self.tr("{names} を削除しますか？（Esri から消え、元に戻せない）").format(names=names)):
+        if confirm and not ask_no(self, self.tr("関心地域・地点の削除"), self.tr("{names} を削除（復元できない）").format(names=names), yes=self.tr("削除")):
             return
         self._saving = True
         self.say(self.tr("削除中…"))
@@ -505,12 +505,12 @@ class InterestsDock(PluginDock):
         def done(gone: list, not_gone: list) -> None:
             self._saving = False
             self.render()
-            self.say(self.tr("{n} 件を削除").format(n=len(gone)) + ("。" + self.tr("削除できず: ") + " / ".join(not_gone) if not_gone else ""))
+            self.say(self.tr("{n} 件を削除").format(n=len(gone)) + ("。" + self.tr("削除に失敗: ") + " / ".join(not_gone) if not_gone else ""))
 
         def failed(message: str) -> None:
             self._saving = False
             self._update_buttons()
-            self.say(self.tr("削除できず: {m}").format(m=message))
+            self.say(self.tr("削除に失敗: {m}").format(m=message))
 
         self.book.delete(chosen, done, failed)
 

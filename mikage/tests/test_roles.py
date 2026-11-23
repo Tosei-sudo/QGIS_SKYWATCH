@@ -60,7 +60,7 @@ def test_what_each_role_sees():
 
 
 def test_a_feature_not_offered_says_which_roles_have_it():
-    assert roles.refusal("撮像計画ファイル出力") == "担当「撮像計画の担当」の機能です（メニュー「担当と個人設定…」で担当を選ぶと使えます）"
+    assert roles.refusal("撮像計画ファイル出力") == "担当「撮像計画の担当」の機能（メニュー「担当と個人設定…」で担当を選ぶと使える）"
     assert "「撮像計画の担当」「撮像を依頼する人」" in roles.refusal("requests.edit")
     assert roles.refusal("画像カタログ") == ""
 
@@ -114,5 +114,5 @@ def test_the_table_without_its_attributes_or_without_a_user_name():
     client = EsriClient(fake)
     with pytest.raises(EsriError, match="USER_NAME・ROLE_NAME"):
         roles.load_user_roles(client, config.user_roles, "tsudo")
-    with pytest.raises(EsriError, match="USERNAME"):
+    with pytest.raises(EsriError, match="editTracking"):
         roles.save_user_roles(client, config.user_roles, " ", ["ADMIN"])

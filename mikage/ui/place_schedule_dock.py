@@ -261,8 +261,8 @@ class PlaceScheduleDock(PluginDock):
         self.by_next.setChecked(settings.pref("placeSchedule/byNext") == "1")
         self.by_next.toggled.connect(lambda on: (settings.set_pref("placeSchedule/byNext", "1" if on else "0"), self.refit()))
         options.addWidget(self.by_next)
-        self.reload_button = QPushButton(self.tr("再読み込み"))
-        self.reload_button.setToolTip(self.tr("出力履歴・撮像の範囲・依頼台帳を読み直す"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
+        self.reload_button.setToolTip(self.tr("最新の撮像予定と依頼を取得"))
         self.reload_button.clicked.connect(lambda: self.reload())
         options.addWidget(self.reload_button)
         layout.addLayout(places)
@@ -310,7 +310,7 @@ class PlaceScheduleDock(PluginDock):
         self.store = stores[0] if stores else None
         self._forget()
         if self.store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
         elif self.isVisible():
             self.reload()
 
@@ -385,7 +385,7 @@ class PlaceScheduleDock(PluginDock):
         first = jst_day(_now_ms())
         n = self.days()
         last = (first + timedelta(days=n - 1)).isoformat()
-        self.status.setText(self.tr("{a}〜{b} の計画と依頼を読み込み中…").format(a=first.isoformat(), b=last))
+        self.status.setText(self.tr("{a}〜{b} の計画と依頼を取得中…").format(a=first.isoformat(), b=last))
 
         def work(task):
             rows = repo.load_days(first.isoformat(), last, task.isCanceled)
@@ -427,7 +427,7 @@ class PlaceScheduleDock(PluginDock):
                 self._again = False
                 self.reload(then)
 
-        self.task = run_task(self.tr("地点ごとの撮像予定の読み込み"), work, done, failed)
+        self.task = run_task(self.tr("地点ごとの撮像予定の取得"), work, done, failed)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -566,11 +566,11 @@ class PlaceScheduleDock(PluginDock):
 
     def _empty_text(self) -> str:
         if self.store is None:
-            return self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし")
+            return self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）")
         if not self.clicked and self.layer_choice.currentLayer() is None:
             return self.tr("上でレイヤーを選ぶか、「地図で地点を追加」で地図をクリックすると、その地点のこの先の撮像計画が並ぶ")
         if not self._loaded:
-            return self.tr("読み込み中…")
+            return self.tr("取得中…")
         return self.tr("地点なし（選択中の地物がない、または形のない地物だけ）")
 
     def _status(self) -> None:
@@ -584,7 +584,7 @@ class PlaceScheduleDock(PluginDock):
         if not self.store.history:
             text += self.tr("。出力履歴（history）がないため依頼の日だけ")
         if self.shot_problem:
-            text += self.tr("。撮像の範囲を読めず（{m}）").format(m=self.shot_problem)
+            text += self.tr("。撮像の範囲を読めない（{m}）").format(m=self.shot_problem)
         self.status.setText(text)
 
     def _moved_on(self) -> None:

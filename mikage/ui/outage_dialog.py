@@ -120,7 +120,7 @@ class OutageForm(QDialog):
         form.addRow(self.tr("発生日時（日本時間）"), self.start)
         self.expected, self.no_expected = self._optional_time(outage.expected if outage else None, self.tr("未定"), now, True)
         form.addRow(self.tr("復旧見込み"), self._row(self.expected, self.no_expected))
-        self.recovered, self.has_recovered = self._optional_time(outage.recovered if outage else None, self.tr("復旧した"), now, False)
+        self.recovered, self.has_recovered = self._optional_time(outage.recovered if outage else None, self.tr("復旧済み"), now, False)
         form.addRow(self.tr("復旧日時"), self._row(self.recovered, self.has_recovered))
         layout.addWidget(self._impacts(outage))
         notes = QFormLayout()
@@ -198,7 +198,7 @@ class OutageForm(QDialog):
             self.limits[key] = (box, spin)
             grid.addWidget(box, 3 + k, 0)
             grid.addWidget(spin, 3 + k, 1)
-        self.no_night = QCheckBox(self.tr("夜間の撮像不可"))
+        self.no_night = QCheckBox(self.tr("夜間は撮像できない"))
         self.no_night.setToolTip(self.tr("撮像の場所で太陽が地平線より下の撮像機会を使わない"))
         self.no_night.setChecked(bool(o and o.no_night))
         grid.addWidget(self.no_night, 3 + len(rows), 0, 1, 3)
@@ -309,12 +309,12 @@ class OutageDialog(QDialog):
         self.columns = column_menus("outages", self.table, self)
         row = QHBoxLayout()
         self.add_button = QPushButton(self.tr("新規…"))
-        self.add_button.setToolTip(self.tr("衛星の障害を登録する"))
+        self.add_button.setToolTip(self.tr("衛星の障害を登録"))
         self.add_button.clicked.connect(lambda: self.add())
         self.edit_button = QPushButton(self.tr("編集…"))
         self.edit_button.clicked.connect(lambda: self.edit())
         self.recover_button = QPushButton(self.tr("復旧"))
-        self.recover_button.setToolTip(self.tr("選んだ障害の復旧日時を今にする（あとで「編集…」で直せる）"))
+        self.recover_button.setToolTip(self.tr("選んだ障害の復旧日時を今に変更（あとで「編集…」で修正できる）"))
         self.recover_button.clicked.connect(lambda: self.recover())
         self.delete_button = QPushButton(self.tr("削除…"))
         self.delete_button.setToolTip(self.tr("間違えて入れた障害を消す（復旧した障害は消さずに「復旧」）"))
@@ -342,10 +342,10 @@ class OutageDialog(QDialog):
         if self.task is not None:
             return
         if self.source is None:
-            self.status.setText(self.tr("設定ファイルに衛星の障害情報の表（satelliteOutages）なし"))
+            self.status.setText(self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）"))
             return
         source, client, token = self.source, self.context.esri(), self.token()
-        self.status.setText(self.tr("衛星の障害情報を読み込み中…"))
+        self.status.setText(self.tr("衛星の障害情報を取得中…"))
 
         def work(task):
             return load_outages(client, source, token, task.isCanceled)
@@ -359,10 +359,10 @@ class OutageDialog(QDialog):
         def failed(message):
             self.task = None
             self.note = ""
-            self.status.setText(self.tr("読み込み失敗: {m}").format(m=message))
+            self.status.setText(self.tr("取得に失敗: {m}").format(m=message))
             self._update_buttons()
 
-        self.task = run_task(self.tr("衛星の障害情報の読み込み"), work, done, failed)
+        self.task = run_task(self.tr("衛星の障害情報の取得"), work, done, failed)
         self._update_buttons()
 
     # --- Showing ----------------------------------------------------------------------------------
@@ -392,7 +392,7 @@ class OutageDialog(QDialog):
         opened = sum(1 for o in self.outages if o.open(now))
         text = self.tr("復旧していない障害 {n} 件（全 {m} 件）").format(n=opened, m=len(self.outages))
         if self.source is None:
-            text = self.tr("設定ファイルに衛星の障害情報の表（satelliteOutages）なし")
+            text = self.tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）")
         self.status.setText("。".join(t for t in (self.note, text) if t))
         self.note = ""
         self._update_buttons()
@@ -448,8 +448,8 @@ class OutageDialog(QDialog):
             return
         names = "、".join(o.target for o in chosen[:5]) + (self.tr(" ほか {n} 件").format(n=len(chosen) - 5) if len(chosen) > 5 else "")
         if ask and not ask_no(self, self.tr("障害の削除"), self.tr(
-                "選んだ {n} 件の障害（{names}）を表から消しますか？ 元に戻せません。復旧した障害は消さずに「復旧」にすると履歴に残ります。").format(
-                n=len(chosen), names=names)):
+                "選んだ {n} 件の障害（{names}）を削除（復元できない）。復旧した障害は、削除せず「復旧」にすると履歴に残る").format(
+                n=len(chosen), names=names), yes=self.tr("削除")):
             return
         source, client, token = self.source, self.context.esri(), self.token()
 
@@ -464,7 +464,7 @@ class OutageDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("削除できず: {m}").format(m=message))
+            self.status.setText(self.tr("削除に失敗: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("衛星の障害情報の削除"), work, done, failed)
@@ -493,7 +493,7 @@ class OutageDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("保存できず: {m}").format(m=message))
+            self.status.setText(self.tr("保存に失敗: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("衛星の障害情報の保存"), work, done, failed)

@@ -155,14 +155,14 @@ def advice(results: Sequence[dict], table: Grades, counts: Counter, people: dict
         right = counts.get((t, t), 0)
         share = n / (n + right) * 100 if n + right else 0
         lines.append(f"「{t}」を「{g}」と答えたのが {n} 回（{len(people.get((t, g), ()))} 人、{share:.0f} %）。"
-                     f"見分け方を解説に書くか、この 2 つを見分ける問題を足すとよいでしょう。")
+                     f"見分け方を解説に書くか、この 2 つを見分ける問題を追加")
     hard = []
     for c in table.columns:
         passed, tried = table.passed_by(c.key)
         if tried >= 2 and passed / tried <= 0.5:
             hard.append((passed / tried, c, passed, tried))
     for _share, c, passed, tried in sorted(hard, key=lambda h: (h[0], h[1].title))[:2]:
-        lines.append(f"「{c.title}」は合格が {passed} / {tried} 人です。指示文や合格点、正解の解説を見直すとよいかもしれません。")
+        lines.append(f"「{c.title}」は合格が {passed} / {tried} 人。指示文や合格点、正解の解説を見直し")
     missed = Counter()
     for r in results:
         for row in r.get("detail") or []:
@@ -171,7 +171,7 @@ def advice(results: Sequence[dict], table: Grades, counts: Counter, people: dict
     if missed:
         kind, n = missed.most_common(1)[0]
         if n >= 3:
-            lines.append(f"見落としが多いのは「{kind}」です（{n} 回）。探し方の問題（見つける）を足すとよいでしょう。")
+            lines.append(f"見落としが多いのは「{kind}」（{n} 回）。探し方の問題（見つける）を追加")
     return lines
 
 

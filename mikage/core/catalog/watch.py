@@ -337,7 +337,7 @@ def check_watch(watch: CatalogWatch, ask: EsriAsk, now: Optional[float] = None,
     except Cancelled:
         return CheckResult(after, notices)  # read next time
     except Exception as error:  # noqa: BLE001 (read again next time)
-        return CheckResult(replace(after, last_error=f"前からある画像を読めず: {str(error) or type(error).__name__}"), notices)
+        return CheckResult(replace(after, last_error=f"前からある画像を読めない: {str(error) or type(error).__name__}"), notices)
     new = {n.id for n in notices}
     earlier = [n for n in earlier if n.id not in new]
     # The keys of the images already there before those noted lately (kept the longest, see check_watch).

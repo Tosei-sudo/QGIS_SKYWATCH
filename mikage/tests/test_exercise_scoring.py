@@ -136,8 +136,8 @@ def test_fitted_to_the_classes_in_use_and_the_hint():
     assert [a.kind for a in f.answers] == ["船舶 > 貨物船", "船舶 > 支援船", "船舶 > 貨物船", "船舶 > 支援船"]
     assert [a.activity for a in f.answers] == ["停泊", "", "停泊", ""]
     assert fitted(e, ["航空機"]).answers[0].kind == ""
-    assert hint(e, [mark(e.answers[0])]) == "あと 2 隻あります。"
-    assert "すべて見つかっています" in hint(e, [mark(a, i) for i, a in enumerate(e.answers[:3])])
+    assert hint(e, [mark(e.answers[0])]) == "あと 2 隻"
+    assert "すべて見つかっている" in hint(e, [mark(a, i) for i, a in enumerate(e.answers[:3])])
 
 
 def test_results_are_kept_and_the_classes_taken_for_others(tmp_path):

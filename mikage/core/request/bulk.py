@@ -117,5 +117,5 @@ def apply_change(client: EsriClient, store: RequestStoreConfig, token: Optional[
     result.conflicts = saved.conflicts
     result.canceled = saved.canceled
     for r, error in saved.failed:
-        result.failed.append((r.name or r.id, "ほかの人が読み込み後に更新・削除" if isinstance(error, ConflictError) else str(error)))
+        result.failed.append((r.name or r.id, "ほかの人が先に変更・削除" if isinstance(error, ConflictError) else str(error)))
     return result

@@ -258,7 +258,7 @@ def test_an_old_history_table_says_what_it_lacks(plugin, monkeypatch):
     dock = p.api.schedule
     dock.show()
     assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
-    assert "属性 ADOPTION・ADOPTION_REASON・PLANNED_AT・EXTERNAL_ID・ADOPTION_SOURCE がない" in dock.status.text()
+    assert "（管理者に連絡: 出力履歴の ADOPTION・ADOPTION_REASON・PLANNED_AT・EXTERNAL_ID・ADOPTION_SOURCE）" in dock.status.text()
     assert not dock.import_button.isEnabled() and not dock.add_button.isEnabled()
     dock.state_filter.choose([])
     dock.table.selectRow(0)
@@ -279,7 +279,7 @@ def test_no_history_no_plan(tmp_path):
     p.initGui()
     try:
         dock = p.api.schedule
-        assert "出力履歴（history）なし" in dock.status.text()
+        assert "（管理者に連絡: history）" in dock.status.text()
         assert not dock.import_button.isEnabled() and not dock.layer_button.isEnabled()
     finally:
         p.unload()
@@ -406,14 +406,13 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
                     f"X-1,OK,{later.isoformat()} 10:30,定常 東京,139.0,35.0,139.2,35.2\n", encoding="utf-8")
     # What is asked first: the days it goes on, not the day shown.
     asked = []
-    monkeypatch.setattr(schedule_dock.QMessageBox, "question",
-                        lambda parent, title, text: asked.append(text) or schedule_dock.QMessageBox.StandardButton.No)
+    monkeypatch.setattr(schedule_dock, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     dock.import_file(str(path))
     assert wait_for(lambda: dock.task is None and asked), dock.status.text()
     assert asked[0].splitlines() == [
         "A・a_tomorrow.csv",
         f"{tomorrow.isoformat()}: 採用 1・不採用 0・要求外 0", f"{later.isoformat()}: 採用 0・不採用 0・要求外 1",
-        f"表示中の {today.isoformat()} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録する",
+        f"表示中の {today.isoformat()} ではなく、ファイルの行の日（対象日、なければ撮像予定の日）に記録",
         f"前に結果ファイルから入れたこのシステムの要求外 1 件（{tomorrow.isoformat()}・{later.isoformat()} の分と、ほかの日の同じ計画）は置き換える"]
     assert dock.status.text() == "取り込みを取りやめ"
 

@@ -142,7 +142,7 @@ def test_one_list_of_what_waits_sends_the_chosen_opens_and_drops(setup, monkeypa
     dialog = controller.open_list()
     rows = {dialog.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)[2]: dialog.tree.topLevelItem(i)
             for i in range(dialog.tree.topLevelItemCount())}
-    assert rows["n3"].text(4) == "オフライン中の変更" and rows["d1"].text(4) == "保存できず: ネットワークに接続できません"
+    assert rows["n3"].text(4) == "オフライン中の変更" and rows["d1"].text(4) == "保存に失敗: ネットワークに接続できません"
     assert rows["d2"].text(4).startswith("要確認") and rows["d2"].foreground(0).color().name() == CHECK_COLOR
     assert all(r.text(1) == "観測記録" for r in rows.values()) and rows["d1"].text(3).startswith("通信失敗")
     # Only one draft can be opened in the form; the offline change cannot.
@@ -162,9 +162,9 @@ def test_one_list_of_what_waits_sends_the_chosen_opens_and_drops(setup, monkeypa
     assert "送信" in dialog.status.text() and [p.item_id for p in work.pending()] == ["d2"]
     # Thrown away when chosen (asked first).
     dialog.tree.topLevelItem(0).setSelected(True)
-    monkeypatch.setattr("mikage.ui.outbox_dialog.ask_no", lambda *a: False)
+    monkeypatch.setattr("mikage.ui.outbox_dialog.ask_no", lambda *a, **k: False)
     assert dialog.drop() == 0 and work.total() == 1
-    monkeypatch.setattr("mikage.ui.outbox_dialog.ask_no", lambda *a: True)
+    monkeypatch.setattr("mikage.ui.outbox_dialog.ask_no", lambda *a, **k: True)
     assert dialog.drop() == 1 and work.total() == 0 and dialog.tree.topLevelItemCount() == 0
     APP.processEvents()
     assert not controller.button.isVisibleTo(iface.window)

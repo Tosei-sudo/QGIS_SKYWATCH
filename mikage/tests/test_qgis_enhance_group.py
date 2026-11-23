@@ -1,6 +1,6 @@
 """
 画像補正 on a layer-tree group: the dock works on every raster under the
-group chosen in the layer panel, and 「グループで範囲を共通にする」 has the
+group chosen in the layer panel, and 「グループで範囲を共通化」 has the
 rasters take one range from all of them (no seams between tiles).
 """
 import os

@@ -23,10 +23,10 @@ def test_settings():
     assert problems == [
         "shapeReceiver.enabled は true か false で指定",
         "shapeReceiver.port は 1024〜65535 の整数で指定（既定 47631）",
-        "shapeReceiver.origins に「*」は指定不可（どのサイトからでも図形を受け取ることになる）",
-        "shapeReceiver.origins に「https://*」は指定不可（どのサイトからでも図形を受け取ることになる）",
-        "shapeReceiver.origins の「ftp:/x」は送信元（https://host、chrome-extension://ID など）として読み込み不可",
-        "shapeReceiver.origins の「3」は送信元（https://host、chrome-extension://ID など）として読み込み不可",
+        "shapeReceiver.origins に「*」は指定できない（どのサイトからでも図形を受け取ることになる）",
+        "shapeReceiver.origins に「https://*」は指定できない（どのサイトからでも図形を受け取ることになる）",
+        "shapeReceiver.origins の「ftp:/x」は送信元（https://host、chrome-extension://ID など）として読めない",
+        "shapeReceiver.origins の「3」は送信元（https://host、chrome-extension://ID など）として読めない",
     ]
     assert receiver_settings_of("on", problems := []) == ReceiverSettings() and problems
 
@@ -146,10 +146,10 @@ def test_status_errors_and_nothing_to_show():
     assert answer(raw("POST", "/show", {"Content-Type": "application/json"}, b'{"geom": 1}'))[0].status == 400
 
     def nothing(params, max_value, sender):
-        return 0, "x", ["geom=abc: 座標として読み込み不可: abc"]
+        return 0, "x", ["geom=abc: 座標として読めない: abc"]
 
     response, _, text, _ = answer(raw("GET", "/show?geom=abc"), show=nothing)
-    assert response.status == 422 and json.loads(text)["error"] == "読める図形なし（geom=abc: 座標として読み込み不可: abc）"
+    assert response.status == 422 and json.loads(text)["error"] == "読める図形なし（geom=abc: 座標として読めない: abc）"
 
     def broken(params, max_value, sender):
         raise RuntimeError("壊れた")

@@ -316,7 +316,7 @@ class ManyPanel(QGroupBox):
         pending = self.dock.pending
         self.pick_button.setVisible(bool(pending and (pending[2] or pending[3])))
         self.find_button.setEnabled(not self.searching)
-        self.find_button.setText(tr("探しています…") if self.searching else tr("似たものを探す"))
+        self.find_button.setText(tr("検索中…") if self.searching else tr("似たものを探す"))
         grid = self.layout_.shape == "grid"
         self.rows_label.setVisible(grid)
         self.rows_input.setVisible(grid)
@@ -487,7 +487,7 @@ class ManyPanel(QGroupBox):
         heading = L.heading(sample)
         places = L.kept()
         if not places:
-            self.dock.say(tr("すべて外しています"))
+            self.dock.say(tr("すべて除外済み"))
             return
         self.restart_row(quiet=True)
         self.put([(lon, lat, heading) for lon, lat in places])
@@ -542,7 +542,7 @@ class ManyPanel(QGroupBox):
                     self._made(taken["image"], by_group[g])
             elif saved is None and taken.get("count"):
                 self.dock.iface.messageBar().pushWarning(tr("観測記録"), tr(
-                    "見本で記録した {n} 件を保存できませんでした（送信待ちに保管しました）").format(n=taken["count"]))
+                    "見本で記録した {n} 件の保存に失敗（送信待ちに保管）").format(n=taken["count"]))
             self.render()
             self._send()
 
@@ -656,7 +656,7 @@ class ManyPanel(QGroupBox):
         book = self._book()
         image = book.current if book else None
         if not image_layers(image):
-            self.dock.say(tr("この画像のファイル（レイヤー）が開いていません"))
+            self.dock.say(tr("この画像のファイルが開いていない"))
             return
         sample = self._search_sample()
         if sample is None:
@@ -700,7 +700,7 @@ class ManyPanel(QGroupBox):
                 self.dock.say(tr("似たものを探すのを中止"))
                 return
             if not found:
-                self.dock.say(tr("見本に似たものは見つかりませんでした（しきい値を下げる・向きを「すべて」に・地図を見本の周りへ）"))
+                self.dock.say(tr("見本に似たものなし（しきい値を下げる、向きを「すべて」に、地図を見本の周りへ）"))
                 return
             places = found_places(found, pictures)
             out = found_layer(places, sample, image_id, image_name, image_time)
@@ -716,12 +716,12 @@ class ManyPanel(QGroupBox):
         def failed(message: str) -> None:
             self.searching = False
             self.render()
-            self.dock.say(tr("似たものを探せませんでした: {m}").format(m=message))
+            self.dock.say(tr("似たものの検索に失敗: {m}").format(m=message))
 
         self.searching = True
         self.render()
         kind = (path_of(sample.kind) or [""])[-1]
-        self.dock.say(tr("{kind}に似たものを探しています…").format(kind=kind))
+        self.dock.say(tr("{kind}に似たものを検索中…").format(kind=kind))
         run_task(tr("似たものを探す"), work, done, failed)
 
 

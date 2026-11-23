@@ -95,7 +95,7 @@ def exercise_tables_of(value: Any, problems: list[str]) -> Optional[ExerciseTabl
         problems.append("training.exercises.token は文字列で指定")
         token = ""
     if not urls["exercises"] or not urls["answers"]:
-        problems.append("training.exercises には問題の表（exercises）と答えの表（answers）の URL が要ります")
+        problems.append("training.exercises には問題の表（exercises）と答えの表（answers）の URL が必要")
         return None
     return ExerciseTables(urls["exercises"], urls["answers"], urls["results"], token)
 
@@ -131,10 +131,10 @@ def _number(attributes: dict, name: str, problems: list[str], where: str) -> Opt
     try:
         n = float(v)
     except (TypeError, ValueError):
-        problems.append(f"{where}: {name} が数ではありません（{v}）")
+        problems.append(f"{where}: {name} が数ではない（{v}）")
         return None
     if not math.isfinite(n):
-        problems.append(f"{where}: {name} が数ではありません（{v}）")
+        problems.append(f"{where}: {name} が数ではない（{v}）")
         return None
     return n
 
@@ -195,7 +195,7 @@ def exercise_of(feature: dict, base: Scoring, problems: list[str]) -> Optional[E
     a = feature.get("attributes") or {}
     eid = _text(a, "EXERCISE_ID")
     if not eid:
-        problems.append("問題の表: EXERCISE_ID が空の行があります（読みません）")
+        problems.append("問題の表: EXERCISE_ID が空の行あり（読まない）")
         return None
     where = f"問題 {eid}"
     if not _flag(a, "ACTIVE", True, problems, where):
@@ -207,16 +207,16 @@ def exercise_of(feature: dict, base: Scoring, problems: list[str]) -> Optional[E
         return None
     image_id, source = _text(a, "IMAGE_ID"), _text(a, "IMAGE_SOURCE")
     if not image_id and not source:
-        problems.append(f"{where}: 画像がありません（IMAGE_ID か IMAGE_SOURCE）")
+        problems.append(f"{where}: 画像なし（IMAGE_ID か IMAGE_SOURCE）")
         return None
     before_id, before_source = _text(a, "BEFORE_IMAGE_ID"), _text(a, "BEFORE_IMAGE_SOURCE")
     if kind == CHANGE and not before_id and not before_source:
-        problems.append(f"{where}: 変化を見つける問題に前の画像がありません（BEFORE_IMAGE_ID か BEFORE_IMAGE_SOURCE）")
+        problems.append(f"{where}: 変化を見つける問題に前の画像なし（BEFORE_IMAGE_ID か BEFORE_IMAGE_SOURCE）")
         return None
     mode_words = _text(a, "EXERCISE_MODE")
     mode = mode_words if mode_words in (PRACTICE, EXAM) else MODE_WORDS.get(mode_words.lower(), PRACTICE if not mode_words else "")
     if not mode:
-        problems.append(f"{where}: EXERCISE_MODE は 練習 か 試験（{mode_words}）。練習として出します")
+        problems.append(f"{where}: EXERCISE_MODE は 練習 か 試験（{mode_words}）。練習として出題")
         mode = PRACTICE
     scoring = base
     text = _text(a, "SCORING")
@@ -224,7 +224,7 @@ def exercise_of(feature: dict, base: Scoring, problems: list[str]) -> Optional[E
         try:
             value = json.loads(text)
         except ValueError:
-            problems.append(f"{where}: SCORING が JSON ではありません")
+            problems.append(f"{where}: SCORING が JSON ではない")
             value = None
         scoring = scoring_of(value, problems, at=f"{where} の SCORING", base=base)
     pass_score = _number(a, "PASS_SCORE", problems, where)
@@ -250,7 +250,7 @@ def answer_of(feature: dict, problems: list[str]) -> Optional[tuple[str, Answer]
     eid = _text(a, "EXERCISE_ID")
     at = _point(feature.get("geometry"))
     if not eid or at is None:
-        problems.append("答えの表: EXERCISE_ID か位置のない行があります（読みません）")
+        problems.append("答えの表: EXERCISE_ID か位置のない行あり（読まない）")
         return None
     where = f"問題 {eid} の答え"
     change_words = _text(a, "CHANGE_KIND")
@@ -286,12 +286,12 @@ def org_exercises(exercise_rows: Iterable[dict], answer_rows: Iterable[dict], ba
         if e is None:
             continue
         if e.id in seen:
-            problems.append(f"問題 {e.id}: EXERCISE_ID が重なっています（初めの行だけ読みます）")
+            problems.append(f"問題 {e.id}: EXERCISE_ID が重複（初めの行だけ読む）")
             continue
         seen.add(e.id)
         mine = sorted(answers.get(e.id, []), key=lambda x: (x.number <= 0, x.number))
         if not mine:
-            problems.append(f"問題 {e.id}: 答えの表に答えがありません（出しません）")
+            problems.append(f"問題 {e.id}: 答えの表に答えなし（出題しない）")
             continue
         e.answers = mine
         out.append(e.numbered())

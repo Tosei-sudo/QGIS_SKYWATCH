@@ -236,7 +236,7 @@ def test_a_failed_save_keeps_the_form_and_a_reload_asked_meanwhile_is_not_lost(p
     form.name.setText("地震")
     form.has_start.setChecked(False)
     form._accept()
-    assert wait_for(lambda: "保存できませんでした" in form.problem.text())
+    assert wait_for(lambda: "保存に失敗" in form.problem.text())
     assert form.isVisible() and form.name.text() == "地震" and form.values()["start"] is None
     monkeypatch.setattr(module, "save_event", real)
     form._accept()

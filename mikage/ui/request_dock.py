@@ -17,7 +17,7 @@ from qgis.core import QgsProject, QgsRectangle, QgsVectorLayer
 from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QHeaderView, QLabel, QMessageBox, QPushButton, QTableView,
+    QAbstractItemView, QComboBox, QHeaderView, QLabel, QPushButton, QTableView,
 )
 
 from ..core import edit_stamp
@@ -32,7 +32,7 @@ from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
-from .docks import PluginDock, plain_label, plain_tip
+from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .check_filter import CheckFilter
 from .list_views import ListViews
@@ -148,10 +148,10 @@ class RequestDock(PluginDock):
         self.bulk_button = QPushButton(self.tr("一括編集…"))
         self.bulk_button.setToolTip(self.tr("選んだ依頼（Ctrl・Shift + クリックで複数）の優先度・状態・種別をまとめて変更"))
         self.bulk_button.clicked.connect(lambda: self.bulk_edit())
-        self.reload_button = QPushButton(self.tr("再読み込み"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
         self.reload_button.clicked.connect(lambda: self.reload())
         self.event_button = QPushButton(self.tr("イベントに追加"))
-        self.event_button.setToolTip(self.tr("選んだ依頼を対応中のイベント（地震対応など）に入れる"))
+        self.event_button.setToolTip(self.tr("選んだ依頼を対応中のイベント（地震対応など）に追加"))
         self.event_button.clicked.connect(lambda: self.add_to_event())
         for b in (self.new_button, self.edit_button, self.bulk_button, self.delete_button, self.event_button, self.reload_button):
             edit.addWidget(b)
@@ -188,7 +188,7 @@ class RequestDock(PluginDock):
         self.groups, self.groups_read = [], False
         self.render()
         if self.store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
         elif self.isVisible():
             self.reload()
 
@@ -239,7 +239,7 @@ class RequestDock(PluginDock):
         store = self.store
         if store is None:
             return
-        self.status.setText(self.tr("{label} を読み込み中…").format(label=store.label))
+        self.status.setText(self.tr("{label} から依頼を取得中…").format(label=store.label))
         repo = self.repository()
 
         def work(task):
@@ -266,11 +266,11 @@ class RequestDock(PluginDock):
                 then()
 
         def not_read(m):
-            self.status.setText(self.tr("読み込み失敗: {m}").format(m=m))
+            self.status.setText(self.tr("取得に失敗: {m}").format(m=m))
             if failed:
                 failed(m)
 
-        if not self._start(self.tr("撮像依頼の読み込み"), work, done, not_read):
+        if not self._start(self.tr("撮像依頼の取得"), work, done, not_read):
             QTimer.singleShot(300, lambda: self.reload(then, failed))
 
     # --- The list -------------------------------------------------------------------------------
@@ -302,7 +302,7 @@ class RequestDock(PluginDock):
             if r.id in waiting:
                 for item in items:
                     item.setBackground(QBrush(QColor("#dbeafe")))
-                items[0].setToolTip(self.tr("送信待ち（オフライン中に保存。台帳にはまだない）"))
+                items[0].setToolTip(self.tr("送信待ち（まだ送っていない）"))
             self.model.appendRow(items)
             if r is self.chosen:
                 chosen_row = i
@@ -457,9 +457,8 @@ class RequestDock(PluginDock):
         r = self.chosen
         if r is None or self.denied("requests.edit"):
             return
-        answer = QMessageBox.question(self, self.tr("撮像依頼の削除"), plain_tip(self.tr("「{name}」を保存先から削除しますか？ほかの人の一覧からも消え、元に戻せません。").format(name=r.name)),
-                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
-        if answer != QMessageBox.StandardButton.Yes:
+        if not ask_no(self, self.tr("撮像依頼の削除"), self.tr("「{name}」を削除。ほかの人の一覧からも消え、復元できない").format(name=r.name),
+                      yes=self.tr("削除")):
             return
         repo = self.repository()
 
@@ -469,7 +468,7 @@ class RequestDock(PluginDock):
             self.reload(lambda: self.status.setText(gone))
 
         self._start(self.tr("撮像依頼の削除"), lambda task: repo.delete_request(r), done,
-                    lambda m: self.status.setText(self.tr("削除失敗: {m}").format(m=m)))
+                    lambda m: self.status.setText(self.tr("削除に失敗: {m}").format(m=m)))
 
     def selected(self) -> list[ImagingRequest]:
         """The requests chosen in the list (several with Ctrl / Shift)."""
@@ -543,7 +542,7 @@ class RequestDock(PluginDock):
 
         started = self._start(self.tr("撮像依頼の一括編集"),
                               lambda task: repo.apply_change(chosen, change, _now_ms, task.isCanceled, task.progress),
-                              done, lambda m: self.status.setText(self.tr("一括編集の失敗: {m}").format(m=m)))
+                              done, lambda m: self.status.setText(self.tr("一括編集に失敗: {m}").format(m=m)))
         if not started:
             self.status.setText(self.tr("ほかの処理の実行中。少し待ってから変更"))
         return started
@@ -567,7 +566,7 @@ class RequestDock(PluginDock):
         if self.denied("requests.edit"):
             return None
         if not self._loaded or self.store is None:
-            self.status.setText(self.tr("台帳を読み込んでから取り込み"))
+            self.status.setText(self.tr("先に依頼の一覧を取得してから取り込み"))
             return None
         active = layer or self.iface.activeLayer()
         dialog = LayerImportDialog(active if isinstance(active, QgsVectorLayer) and active.isSpatial() else None, self.point_km, self)
@@ -654,7 +653,7 @@ class RequestDock(PluginDock):
             return None
 
         if self.store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
             return None
         base = self.new_request()
         made = requests_of_plan(ops, sats, targets, new_request_id, self.point_km, base)
@@ -736,7 +735,7 @@ class RequestDock(PluginDock):
             self.status.setText(self.tr("取り込むレイヤー（ポリゴンか点）を作業中のレイヤーに選択"))
             return
         if not self._loaded or self.store is None:
-            self.status.setText(self.tr("台帳を読み込んでから取り込み"))
+            self.status.setText(self.tr("先に依頼の一覧を取得してから取り込み"))
             return
         selected = layer.selectedFeatureCount() > 0 if selected is None else selected and layer.selectedFeatureCount() > 0
         rows = layer_rows(layer, selected, self.point_km)
@@ -771,7 +770,7 @@ class RequestDock(PluginDock):
                 new=len(requests) - changed, old=changed)
             if skipped:
                 text += "\n" + self.tr("取り込まないもの: {list}").format(list="、".join(skipped[:5]))
-            if QMessageBox.question(self, self.tr("レイヤーから取り込み"), text) != QMessageBox.StandardButton.Yes:
+            if not ask_no(self, self.tr("レイヤーから取り込み"), text, yes=self.tr("取り込み")):
                 return
         repo = self.repository()
 

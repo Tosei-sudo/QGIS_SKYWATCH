@@ -223,7 +223,7 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
         self.blend.currentIndexChanged.connect(self._blend_changed)
         form.addRow(self.tr("下のレイヤーとの重ね方"), self.blend)
         v.addLayout(form)
-        self.scale_hint = QLabel(self.tr("選ぶとすぐ地図に反映。明るさ・コントラストなどの補正は着色前に適用。"))
+        self.scale_hint = QLabel(self.tr("選ぶとすぐ地図に反映。明るさ・コントラストなどの補正は着色前に適用"))
         self.scale_hint.setWordWrap(True)
         v.addWidget(self.scale_hint)
 
@@ -567,8 +567,8 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
             item = QTableWidgetItem(share)
             item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
             self.legend.setItem(k, 3, item)
-        self.hint.setText(self.tr("選ぶとすぐ地図に反映。画像の値ごとに着色、名前の入力で凡例に表示。") if classes["kind"] == "exact"
-                          else self.tr("色分けは画像の値で決定、明るさ・コントラストなどの補正は適用外。上限の書き換えで手動に切り替え。"))
+        self.hint.setText(self.tr("選ぶとすぐ地図に反映。画像の値ごとに着色し、名前を入力すると凡例に表示") if classes["kind"] == "exact"
+                          else self.tr("色分けは画像の値で決定（明るさ・コントラストなどの補正は適用外）。上限を書き換えると手動に切り替え"))
         if hist is None and self.layer is not None:
             request = self._request
 

@@ -60,7 +60,7 @@ class MovingTargetDialog(QDialog):
         self.setWindowTitle(self.tr("移動目標撮像計画"))
         self.setObjectName("SatObsMovingTargets")
         layout = QVBoxLayout(self)
-        hint = QLabel(self.tr("航跡・位置報告のポイントレイヤーから、目標ごとに最後の報告の位置・針路・速力で将来位置を推測し、誤差の円（存在予測）とその撮像計画を作成。"))
+        hint = QLabel(self.tr("航跡・位置報告のポイントレイヤーから、目標ごとに最後の報告の位置・針路・速力で将来位置を推測し、誤差の円（存在予測）とその撮像計画を作成"))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         form = QFormLayout()
@@ -103,7 +103,7 @@ class MovingTargetDialog(QDialog):
         spread_form.addRow(self.tr("1 時間あたりの増加"), self.per_hour)
         self.share = self._spin(0, 100, DEFAULT_UNCERTAINTY.share * 100, 1, " %")
         spread_form.addRow(self.tr("航行距離に対する割合"), self.share)
-        formula = QLabel(self.tr("誤差の円の半径 = 報告時の誤差 + 経過時間 ×（1 時間あたりの増加 + 速力 × 割合）。変針・増減速の多い目標ほど大きく設定。"))
+        formula = QLabel(self.tr("誤差の円の半径 = 報告時の誤差 + 経過時間 ×（1 時間あたりの増加 + 速力 × 割合）。変針・増減速の多い目標ほど大きく設定"))
         formula.setWordWrap(True)
         spread_form.addRow(formula)
         layout.addWidget(spread)
@@ -256,7 +256,7 @@ class MovingTargetDialog(QDialog):
             project.addMapLayer(out, False)
             group.addLayer(out)
             made.append(out)
-        self.note.setText(self.tr("存在予測 {n} 個の円と予測航跡をレイヤーに追加（時刻つき。時系列コントローラーで時刻を合わせると、その時の存在予測だけを表示可能）").format(n=f"{len(circles.features):,}"))
+        self.note.setText(self.tr("存在予測 {n} 個の円と予測航跡をレイヤーに追加（時刻つき。時系列コントローラーで時刻を合わせると、その時刻の存在予測だけを表示）").format(n=f"{len(circles.features):,}"))
         return tuple(made)
 
     def plan(self) -> None:

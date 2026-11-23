@@ -54,7 +54,7 @@ def _open(path: str):
     try:
         return gdal.OpenEx(path, gdal.OF_VECTOR | gdal.OF_READONLY)
     except RuntimeError as error:
-        raise ValueError(f"表として開けません: {str(error).strip() or path}") from None
+        raise ValueError(f"表として開けない: {str(error).strip() or path}") from None
 
 
 def sheets(path: str) -> list[str]:
@@ -62,7 +62,7 @@ def sheets(path: str) -> list[str]:
     with _sheet_options():
         ds = _open(path)
         if ds is None:
-            raise ValueError("表として開けません")
+            raise ValueError("表として開けない")
         return [ds.GetLayer(i).GetName() for i in range(ds.GetLayerCount())]
 
 
@@ -71,10 +71,10 @@ def read_sheet(path: str, sheet: Optional[str] = None) -> tuple[list[str], list[
     with _sheet_options():
         ds = _open(path)
         if ds is None or ds.GetLayerCount() == 0:
-            raise ValueError("表として開けません")
+            raise ValueError("表として開けない")
         layer = ds.GetLayerByName(sheet) if sheet else ds.GetLayer(0)
         if layer is None:
-            raise ValueError(f"シート「{sheet}」がありません")
+            raise ValueError(f"シート「{sheet}」なし")
         defn = layer.GetLayerDefn()
         columns = [defn.GetFieldDefn(i).GetName() for i in range(defn.GetFieldCount())]
         rows = []

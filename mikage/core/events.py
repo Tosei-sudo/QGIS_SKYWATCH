@@ -134,7 +134,7 @@ def events_settings_of(value: Any, problems: list[str]) -> Optional[EventSetting
         return None
     for k in value:
         if k not in ("layer", "links", "kinds"):
-            problems.append(f"{at}.{k} は使用不可のキー（layer・links・kinds）")
+            problems.append(f"{at}.{k} は使えないキー（layer・links・kinds）")
     kinds: Optional[tuple[str, ...]] = None
     if "kinds" in value:
         raw = value["kinds"]

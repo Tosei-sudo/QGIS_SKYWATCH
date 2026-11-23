@@ -504,7 +504,7 @@ class ShadowHeightDock(PluginDock):
 
     def clear(self) -> None:
         """Removes every height measured."""
-        if len(self.measurements) > 1 and not ask_no(self, self.tr("消去"), self.tr("測った高さ {n} 件をすべて消しますか？").format(n=len(self.measurements))):
+        if len(self.measurements) > 1 and not ask_no(self, self.tr("消去"), self.tr("測った高さ {n} 件をすべて消去").format(n=len(self.measurements)), yes=self.tr("消去")):
             return
         self.measurements.clear()
         self.drop_foot()

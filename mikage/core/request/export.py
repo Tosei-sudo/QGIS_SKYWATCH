@@ -587,7 +587,7 @@ def render(cands: Sequence[Candidate], systems: Sequence[ExportSystem], day: dat
                 try:
                     schema = load_schema(schema) if load_schema else None
                 except (OSError, ValueError) as error:
-                    problem = f"スキーマ {system.schema} の読み込み不可（{error}）"
+                    problem = f"スキーマ {system.schema} を読み込めない（{error}）"
             if problem is None and not isinstance(schema, dict):
                 problem = "JSON Schema なし"
             if problem:

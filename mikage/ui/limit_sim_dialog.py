@@ -83,8 +83,8 @@ class LimitSimDialog(QDialog):
 
     def _build(self, day: date) -> None:
         layout = QVBoxLayout(self)
-        hint = QLabel(self.tr("日ごとの上限や使うシステムを変えた場合に、今後の日数で何件が枠超過・次のシステムへ回送・期限切れになるかを試算。"
-                              "台帳・出力履歴には書き込まない。採用した依頼は撮像できたものとして計算。"))
+        hint = QLabel(self.tr("日ごとの上限や使うシステムを変えたとき、今後何件が枠超過・次のシステムへ回送・期限切れになるかを試算。"
+                              "採用した依頼は撮像できたものとして計算"))
         hint.setWordWrap(True)
         layout.addWidget(hint)
         top = QHBoxLayout()
@@ -197,7 +197,7 @@ class LimitSimDialog(QDialog):
             self._simulate()
             return
         self.run_button.setEnabled(False)
-        self.status.setText(self.tr("衛星カタログを読み込み中…"))
+        self.status.setText(self.tr("衛星カタログを取得中…"))
         self.satellites(lambda sats: self._load(sats, start, days, key, reload or self.data is None), self._satellites_failed)
 
     def _quotas_cover(self, start: date, days: int) -> bool:
@@ -209,7 +209,7 @@ class LimitSimDialog(QDialog):
 
     def _satellites_failed(self, message: str) -> None:
         """The satellite catalog could not be read: says why and gives 「試算」 back (#70)."""
-        self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=message))
+        self.status.setText(self.tr("衛星カタログの取得に失敗: {m}").format(m=message))
         self.run_button.setEnabled(True)
 
     def token(self) -> Optional[str]:
@@ -224,7 +224,7 @@ class LimitSimDialog(QDialog):
         forecast = self.context.config.cloud_forecast if key is not None else None
         authcfg = settings.auth_for(forecast.url) if forecast else None
         old = self.data
-        self.status.setText(self.tr("依頼・出力履歴・雲量予報を読み込み中…"))
+        self.status.setText(self.tr("依頼・出力履歴・雲量予報を取得中…"))
 
         def work(task):
             notes = []
@@ -240,7 +240,7 @@ class LimitSimDialog(QDialog):
                 try:
                     quotas = repo.read_quota_data([run[0], run[-1]], task.isCanceled)
                 except Exception as error:  # noqa: BLE001 (the run goes on without the quotas)
-                    notes.append(f"年間撮像上限を読めず（{error}）")
+                    notes.append(f"年間撮像上限を読めない（{error}）")
                 notes += quotas.problems[:3]
             forecasts = {}
             if forecast is not None:
@@ -267,10 +267,10 @@ class LimitSimDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("読み込み失敗: {m}").format(m=message))
+            self.status.setText(self.tr("取得に失敗: {m}").format(m=message))
             self.run_button.setEnabled(True)
 
-        self.task = run_task(self.tr("上限シミュレーションの読み込み"), work, done, failed)
+        self.task = run_task(self.tr("試算のデータの取得"), work, done, failed)
 
     def _simulate(self, notes=()) -> None:
         """Runs the settings' limits and those tried in a task (a large ledger takes seconds, #83); draws the result."""
@@ -341,7 +341,7 @@ class LimitSimDialog(QDialog):
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("試算できず: {m}").format(m=message))
+            self.status.setText(self.tr("試算に失敗: {m}").format(m=message))
             self.run_button.setEnabled(True)
 
         self.task = run_task(self.tr("上限シミュレーションの試算"), work, done, failed)

@@ -68,7 +68,7 @@ def test_the_field_reads_coordinates_and_goes_there_with_a_mark(plugin):
     assert canvas.scale() == pytest.approx(1000, rel=0.01)
     assert lon_lat_of(canvas, canvas.center()) == pytest.approx((139, 35), abs=1e-6)
     assert box.jump("35.6, 200") is None
-    assert box.message == "座標として読み込み失敗: 35.6, 200（緯度経度・MGRS・UTM に対応）"
+    assert box.message == "座標として読めない: 35.6, 200（緯度経度・MGRS・UTM に対応）"
 
 
 def test_places_from_a_csv_next_to_the_settings_file(plugin):
@@ -111,7 +111,7 @@ def test_without_geocoders_only_coordinates(plugin):
     assert box.field.placeholderText() == "緯度経度・MGRS・UTM"
     box.field.setText("横浜")
     box.submit()
-    assert box.message == "座標として読み込み失敗: 横浜（緯度経度・MGRS・UTM に対応）"
+    assert box.message == "座標として読めない: 横浜（緯度経度・MGRS・UTM に対応）"
 
 
 def test_the_cursor_position_in_the_chosen_notation_and_the_right_click_menu(plugin):

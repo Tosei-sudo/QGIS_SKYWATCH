@@ -57,7 +57,7 @@ def mail_order(rows: Sequence[LogRow]) -> list[LogRow]:
 
 def left_out_note(left: int) -> str:
     """The line ending a body cut short."""
-    return f"（ほか {left} 件省略。全文はクリップボードから貼り付けてください）"
+    return f"（ほか {left} 件省略。全文はクリップボードから貼り付け）"
 
 
 def _encoded(text: str, encoding: str) -> str:

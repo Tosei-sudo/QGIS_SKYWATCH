@@ -119,7 +119,7 @@ def load_dataset(path: str) -> Dataset:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as e:
-        raise DatasetError(f"データセットを読めず: {os.path.basename(path)}（{e}）")
+        raise DatasetError(f"データセットを読めない: {os.path.basename(path)}（{e}）")
     if not isinstance(data, dict) or data.get("format") != FORMAT:
         raise DatasetError(f"教師データセットのファイルではない: {os.path.basename(path)}")
     if int(data.get("version", 1)) > VERSION:
@@ -345,7 +345,7 @@ def read_voc(text: str) -> list[PixelBox]:
     try:
         root = ET.fromstring(text)
     except ET.ParseError as e:
-        raise DatasetError(f"XML を読めず（{e}）")
+        raise DatasetError(f"XML を読めない（{e}）")
     out = []
     for o in root.iter("object"):
         name = (o.findtext("name") or "").strip()
@@ -383,7 +383,7 @@ def read_coco(text: str) -> Coco:
     try:
         data = json.loads(text)
     except ValueError as e:
-        raise DatasetError(f"COCO の JSON を読めず（{e}）")
+        raise DatasetError(f"COCO の JSON を読めない（{e}）")
     names = {c["id"]: str(c.get("name", c["id"])) for c in data.get("categories") or []}
     files = {im["id"]: str(im.get("file_name", "")) for im in data.get("images") or []}
     by_id: dict = {i: [] for i in files}
@@ -429,7 +429,7 @@ class Reader:
             with open(item.labels, encoding="utf-8", errors="replace") as f:
                 text = f.read()
         except OSError as e:
-            raise DatasetError(f"注釈を読めず: {item.labels}（{e.strerror or e}）")
+            raise DatasetError(f"注釈を読めない: {item.labels}（{e.strerror or e}）")
         if group.format == "yolo":
             return read_yolo(text, group.names)
         if group.format == "dota":

@@ -1402,7 +1402,7 @@ def test_records_not_saved_are_kept_sent_again_and_never_twice(plugin, monkeypat
     monkeypatch.setattr(book.store, "save", real_save)
     dialog = dock.open_drafts()
     assert dialog is p.offline.dialog and dialog.tree.topLevelItemCount() == 2
-    assert all(dialog.tree.topLevelItem(i).text(4).startswith("保存できず") for i in range(2))
+    assert all(dialog.tree.topLevelItem(i).text(4).startswith("保存に失敗") for i in range(2))
     assert dock.open_draft(first.id) and dock.note_input.text() == "一つ目"
     dock.submit()
     assert [o.id for o in book.living()] == [first.id]
@@ -1536,18 +1536,18 @@ def test_an_esri_store_is_not_asked_until_an_image_is_chosen(bare):
     # エクスポート: read in a task, counted once read (a shared store: from today by default, so this image's period here).
     export = dock.open_export()
     export.start_edit.setDateTime(QDateTime.fromMSecsSinceEpoch(ms(1) - 3_600_000))
-    assert export.count_label.text() in ("観測記録を読み込み中…", "該当する記録 1 件")
+    assert export.count_label.text() in ("観測記録を取得中…", "該当する記録 1 件")
     assert wait_for(lambda: export.count_label.text() == "該当する記録 1 件")
     export.close()
     # The classification editor: its tree once read (a class's records are renamed with it).
     dock.reset_stores()
     taxonomy = p.docks["SatObsTaxonomy"]
     dock.edit_taxonomy(None)
-    # (Read in a task: 「観測記録を読み込み中…」 with an empty tree until then.)
-    assert taxonomy.isVisible() and (taxonomy.note.text() == "観測記録を読み込み中…") == (taxonomy.tree.topLevelItemCount() == 0)
+    # (Read in a task: 「観測記録を取得中…」 with an empty tree until then.)
+    assert taxonomy.isVisible() and (taxonomy.note.text() == "観測記録を取得中…") == (taxonomy.tree.topLevelItemCount() == 0)
     assert wait_for(lambda: dock.book.loaded) and wait_for(lambda: taxonomy.tree.topLevelItemCount() > 0)
     # (A shared store: the counts are of the records read, around the images opened.)
-    assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類（モノ・記録の数は読み込んだ分: 開いた画像とそのまわり）")
+    assert taxonomy.note.text().startswith("保存先: ") and taxonomy.note.text().endswith("分類（モノと記録の数は取得した分だけ: 開いた画像とそのまわり）")
 
 
 def test_a_background_map_is_not_an_image(bare):

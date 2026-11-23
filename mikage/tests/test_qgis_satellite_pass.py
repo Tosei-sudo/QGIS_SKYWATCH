@@ -35,7 +35,7 @@ def test_the_samples_at_a_moment_and_over_a_period(plugin):
     assert len(dock.colors) == 2 and len(set(dock.colors.values())) == 2
     dock.set_time(at=EPOCH + 3600000)
     assert wait_for(lambda: dock.task is None and dock.tracks), dock.status.text()
-    assert "2 機の軌跡と撮像可能範囲" in dock.status.text() and "前後 15 分" in dock.status.text()
+    assert "2 機の軌跡と撮像できる範囲" in dock.status.text() and "前後 15 分" in dock.status.text()
     assert dock.model.rowCount() == 2
     row = [dock.model.item(0, c).text() for c in range(5)]
     assert row[0] == "サンプル光学衛星" and row[2].endswith(" km") and row[3] in ("北行", "南行") and row[4] == "20° 以下・左右"

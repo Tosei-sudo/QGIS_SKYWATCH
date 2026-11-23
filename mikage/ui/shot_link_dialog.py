@@ -5,7 +5,7 @@ a target day's shots on the left, the image catalog's records over the
 chosen shot on the right (the satellite asked for first, then the nearest
 in time), both on the map; one record is linked to the shot by hand, or the
 link taken off again. The rows, the ledger and the shot layer follow as
-「撮像済みにする」 makes them (core/request/linking.py).
+「撮像済みに変更」 makes them (core/request/linking.py).
 """
 from __future__ import annotations
 
@@ -100,8 +100,8 @@ class ShotLinkDialog(QDialog):
         self.shown.setMinimumContentsLength(10)
         self.shown.changed.connect(lambda: self.render_shots())
         top.addWidget(self.shown)
-        self.load_button = QPushButton(self.tr("読み込み"))
-        self.load_button.setToolTip(self.tr("その日のショット（出力履歴・撮像の範囲）を読み込み直す"))
+        self.load_button = QPushButton(self.tr("取得"))
+        self.load_button.setToolTip(self.tr("その日のショットを取得"))
         self.load_button.clicked.connect(lambda: self.load())
         top.addWidget(self.load_button)
         top.addStretch(1)
@@ -165,7 +165,7 @@ class ShotLinkDialog(QDialog):
         self.unlink_button = QPushButton(self.tr("関連付けを外す（未判定に戻す）"))
         self.unlink_button.setToolTip(self.tr("ショットの依頼を未判定に戻す（次の照合でまた画像を探す。完了にした依頼は有効に戻す）"))
         self.unlink_button.clicked.connect(lambda: self.unlink("未判定"))
-        self.missed_button = QPushButton(self.tr("未撮像にする"))
+        self.missed_button = QPushButton(self.tr("未撮像に変更"))
         self.missed_button.setToolTip(self.tr("ショットの依頼を未撮像に（次回の計算で持ち越し・繰り上げ候補）"))
         self.missed_button.clicked.connect(lambda: self.unlink("未撮像"))
         for b in (self.link_button, self.unlink_button, self.missed_button):
@@ -220,14 +220,14 @@ class ShotLinkDialog(QDialog):
         if self.task is not None:
             return  # read once the task is over (_finished)
         if store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
             return
         if not store.history:
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
             return
         day = self.chosen_day().isoformat()
         repo = dock.repository()
-        self.status.setText(self.tr("{d} のショットを読み込み中…").format(d=day))
+        self.status.setText(self.tr("{d} のショットを取得中…").format(d=day))
 
         def work(task):
             notes = []
@@ -255,10 +255,10 @@ class ShotLinkDialog(QDialog):
             self.render_shots()
 
         def failed(message):
-            self.status.setText(self.tr("読み込み失敗: {m}").format(m=message))
+            self.status.setText(self.tr("取得に失敗: {m}").format(m=message))
             self._finished()
 
-        self.task = run_task(self.tr("ショットの読み込み"), work, done, failed)
+        self.task = run_task(self.tr("ショットの取得"), work, done, failed)
         self._update_buttons()
 
     def _finished(self) -> None:
@@ -335,7 +335,7 @@ class ShotLinkDialog(QDialog):
             return
         catalog = dock.catalog()
         if catalog is None:
-            self.status.setText(self.tr("画像カタログ（imageCatalogs）なし"))
+            self.status.setText(self.tr("画像カタログが未設定（管理者に連絡: imageCatalogs）"))
             return
         if not unit.rings:
             self.status.setText(self.tr("このショットには範囲がないため、画像を探せない"))
@@ -358,7 +358,7 @@ class ShotLinkDialog(QDialog):
             text = (self.tr("画像 {n} 件（依頼の衛星 {f} 件）").format(n=len(found), f=fitting) if found
                     else self.tr("このショットの範囲に重なる画像なし（前後 {d} 日）").format(d=n))
             if len(found) >= MAX_IMAGES:
-                text += self.tr("。多すぎるため {m} 件だけ読んだ（ほかにもある。前後の日数を減らして絞る）").format(m=MAX_IMAGES)
+                text += self.tr("。多すぎるため {m} 件だけ表示（前後の日数を減らすと絞れる）").format(m=MAX_IMAGES)
             self.status.setText(text)
             self._finished()
             chosen = self.chosen_unit()
@@ -469,7 +469,7 @@ class ShotLinkDialog(QDialog):
         if not image.matches:
             notes.append(self.tr("この画像の衛星（{s}）は依頼の衛星ではない").format(s=image.sensor or "?"))
         if notes and not ask_no(self, self.tr("画像とショットの関連付け"),
-                                "\n".join(notes) + "\n\n" + self.tr("画像 {i} をこのショットに関連付けますか？").format(i=image.image_id)):
+                                "\n".join(notes) + "\n\n" + self.tr("画像 {i} をこのショットに関連付け").format(i=image.image_id), yes=self.tr("関連付け")):
             return
         self._save(findings, self.tr("画像 {i} をショット（{n}）に関連付け").format(i=image.image_id, n="・".join(unit.names)))
 
@@ -506,7 +506,7 @@ class ShotLinkDialog(QDialog):
                 self.requests.update(fresh)
             if unit is not None:
                 self.candidates = with_links(self.candidates, links, unit)
-            self.status.setText(text if not problems else self.tr("一部を保存できず: {m}").format(m="、".join(problems[:3])))
+            self.status.setText(text if not problems else self.tr("一部の保存に失敗: {m}").format(m="、".join(problems[:3])))
             self._finished()
             self.render_shots()
             if changed:

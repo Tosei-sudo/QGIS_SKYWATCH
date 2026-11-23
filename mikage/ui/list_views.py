@@ -290,7 +290,7 @@ class ListViews(QObject):
     def save(self, name: str) -> str:
         name = name.strip()
         if not name:
-            raise ValueError("名前を入れる")
+            raise ValueError("名前を入力")
         data = self._read()
         data["views"][name] = self.state()
         self._write(data)

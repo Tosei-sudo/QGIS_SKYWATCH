@@ -10,7 +10,7 @@ written before it) are a request's and those put into it (MERGED_INTO). Its
 area is the shot's outline, else the rows' areas, else the ledger's.
 
 Linking puts 撮像済み and the image's id on every 採用 row of the shot,
-through follow.save_marked as 「撮像済みにする」 does: the ledger follows
+through follow.save_marked as 「撮像済みに変更」 does: the ledger follows
 (raise undone, 期間内1回 完了) and the shot layer too (sync_shots).
 Unlinking puts the rows back to 未判定 (照合 may find an image again) or
 未撮像 (carried over and offered a raise at the next 「計算」); a request

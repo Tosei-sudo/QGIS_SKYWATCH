@@ -120,7 +120,7 @@ def status_mark() -> QLabel:
     """The mark at the right of the status bar."""
     mark = QLabel(" 練習モード ")
     mark.setObjectName(STATUS_NAME)
-    mark.setToolTip("練習用のデータで動いています。本番のサーバーには書き込みません")
+    mark.setToolTip("練習用のデータで動作中。本番には書き込まない")
     mark.setStyleSheet(f"background: {AMBER}; color: white; font-weight: bold; padding: 1px 6px; border-radius: 3px;")
     return mark
 
@@ -180,35 +180,35 @@ class StartDialog(QDialog):
         self.setWindowTitle(self.tr("練習モードを始める"))
         box = QVBoxLayout(self)
         box.setContentsMargins(18, 16, 18, 14)
-        title = QLabel(self.tr("<b>練習モードを始めます</b>"))
+        title = QLabel(self.tr("<b>練習モードを開始</b>"))
         font = title.font()
         font.setPointSizeF(font.pointSizeF() * 1.2)
         title.setFont(font)
         box.addWidget(title)
-        data = (self.tr("練習用のデータ（東京湾・横須賀の見本）に切り替えます。本番のサーバーには書き込みません。") if builtin else
-                self.tr("組織の練習用の設定ファイル（設定ファイルの training.config）に切り替えます。"))
-        read = ([self.tr("{m}は、本番の設定ファイルのもの（組織の実際の分類や衛星）を読みます。読むだけで書き換えません。").format(m=from_production)]
+        data = (self.tr("練習用のデータ（東京湾・横須賀の見本）に切り替え。本番には書き込まない") if builtin else
+                self.tr("組織の練習用の設定ファイルに切り替え"))
+        read = ([self.tr("{m}は、本番の設定のもの（組織の実際の分類や衛星）を使用（読むだけで、書き換えない）").format(m=from_production)]
                 if from_production else [])
         box.addWidget(_bullets([
             data,
             *read,
-            self.tr("地図は新しいプロジェクトになります。いまのプロジェクトに保存していない変更があれば、先に保存するか聞きます。"),
-            self.tr("通報のメールはメールソフトを開かずに画面に出し、ファイルは練習用のフォルダーに出します。"),
-            self.tr("担当は練習中だけ切り替えられます（終えると元に戻ります）。"),
-            self.tr("「練習モードを終える」を押すか QGIS を閉じると、本番に戻ります。練習データは次の練習まで残ります。"),
+            self.tr("地図は新しいプロジェクトに変更。いまのプロジェクトに未保存の変更があれば、先に保存を確認"),
+            self.tr("通報のメールはメールソフトを開かずに画面に表示し、ファイルは練習用のフォルダーに出力"),
+            self.tr("担当は練習中だけ切り替え（終えると元に戻る）"),
+            self.tr("「練習モードを終える」を押すか QGIS を閉じると本番に戻る。練習データは次の練習まで残る"),
         ]))
         #: Made again with today's dates (the sample's images are of the days before it was made).
         self.renew = QCheckBox()
         if builtin and created is not None:
             made = datetime.fromtimestamp(created / 1000)
             days = ((now or datetime.now()).date() - made.date()).days
-            self.renew.setText(self.tr("練習データを今日の日付で作り直す（{d} に作ったもの。練習で記録したものは消えます）")
+            self.renew.setText(self.tr("練習データを今日の日付で作り直し（{d} に作ったもの。練習で記録したものは消える）")
                                .format(d=made.strftime("%Y-%m-%d")))
             self.renew.setChecked(days >= 7)
             box.addWidget(self.renew)
         else:
             self.renew.hide()
-        self.first = QLabel(self.tr("初めてなので、練習用の画像と背景地図を作ります（数秒〜十数秒）。")) if builtin and created is None else None
+        self.first = QLabel(self.tr("初めてなので、練習用の画像と背景地図を作成（数秒〜十数秒）")) if builtin and created is None else None
         if self.first is not None:
             box.addWidget(self.first)
         #: The courses offered once it has started (ticked by 「チュートリアル…」, and the first time); by 「判読の練習…」
@@ -218,11 +218,11 @@ class StartDialog(QDialog):
         box.addWidget(self.tutorial)
         if exercises:
             self.tutorial.hide()
-            box.addWidget(QLabel(self.tr("始めたら、判読の練習の問題を選びます。")))
+            box.addWidget(QLabel(self.tr("開始後に、判読の練習の問題を選択")))
         buttons = QDialogButtonBox()
-        self.ok = buttons.addButton(self.tr("始める"), QDialogButtonBox.ButtonRole.AcceptRole)
+        self.ok = buttons.addButton(self.tr("開始"), QDialogButtonBox.ButtonRole.AcceptRole)
         self.ok.setDefault(True)
-        buttons.addButton(self.tr("やめる"), QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.addButton(self.tr("取消"), QDialogButtonBox.ButtonRole.RejectRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         box.addWidget(buttons)
@@ -237,7 +237,7 @@ class PracticeMail(QDialog):
         fit_text(self)
         self.setWindowTitle(self.tr("通報のメール（練習モード）"))
         box = QVBoxLayout(self)
-        note = QLabel(self.tr("練習モードなのでメールソフトは開きません。本番では、この内容のメールをメールソフトで作ります。"))
+        note = QLabel(self.tr("練習モードなのでメールソフトは開かない。本番では、この内容のメールをメールソフトで作成"))
         note.setWordWrap(True)
         note.setStyleSheet(f"background: {AMBER_BG}; color: {AMBER_TEXT}; padding: 6px; border-radius: 3px;")
         box.addWidget(note)

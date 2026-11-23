@@ -171,8 +171,8 @@ def test_the_memo_has_every_part():
     assert "  担当者なしの画像（観測記録で開いている画像）: 1 件" in lines and "    img3.tif" in lines
     assert lines[-4:] == ["■ 申し送り", "  港の北側は雲で未確認", "  次は IMG3 から", ""]
     # Parts not set up are left out; problems are said.
-    text = handover_text(HandoverData(start=T0, end=T0 + H, now=T0 + H, problems=["分担: 接続不可"]), s)
-    assert "通報" not in text and "撮像依頼" not in text and "■ 分担" not in text and "  分担: 接続不可" in text and "  なし" in text
+    text = handover_text(HandoverData(start=T0, end=T0 + H, now=T0 + H, problems=["分担: 接続できない"]), s)
+    assert "通報" not in text and "撮像依頼" not in text and "■ 分担" not in text and "  分担: 接続できない" in text and "  なし" in text
 
 
 def test_lists_are_cut_at_the_limit():

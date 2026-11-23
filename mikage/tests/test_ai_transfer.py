@@ -26,7 +26,7 @@ def test_settings_entries_are_checked():
     assert detection_output_of({"url": "https://x/rest/services/D/FeatureServer/1", "fields": {"colour": "C", "class": "C-1"}}, problems, 1) is None
     assert problems == [
         "detectionOutputs[0] の url は …/FeatureServer/0 のようなレイヤーの URL で指定",
-        "detectionOutputs[1] の fields.colour は使用不可の役割",
+        "detectionOutputs[1] の fields.colour は使えない役割",
         "detectionOutputs[1] の fields.class は属性名（英数字と _）で指定",
         "detectionOutputs[1] の fields に書き込む属性なし",
     ]

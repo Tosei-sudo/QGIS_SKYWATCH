@@ -252,7 +252,7 @@ class EsriClient:
         out: list[dict[str, Any]] = []
 
         def too_many() -> "TooManyError":
-            return TooManyError(f"件数が上限（{limit:,} 件）を超えたため読み込みを中止（条件で絞るか、古い行を整理）")
+            return TooManyError(f"件数が上限（{limit:,} 件）を超えたため取得を中止（条件で絞るか、古い行を整理）")
 
         if info.supports_pagination:
             oid = info.object_id_field

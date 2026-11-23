@@ -33,7 +33,7 @@ class Switch:
 
     def __call__(self, url, form):
         if self.down:
-            raise UnreachableError(f"接続不可（{url}）")
+            raise UnreachableError(f"接続できない（{url}）")
         self.asked += 1
         return self.fake(url, form)
 
@@ -156,7 +156,7 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     drafts = OutboxDrafts(work).all("共有")
     assert [d.id for d in drafts] == ["b"] and drafts[0].editing and "ほかの人が先に更新" in drafts[0].reason
     assert drafts[0].needs_check and work.sendable() == 0 and work.pending("draft")[0].op == "check"
-    assert "送信待ちに残しました" in report.text()
+    assert "送信待ちに保管" in report.text()
     again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(27))
     assert again.sent == {} and work.counts() == {"draft": 1}
     # Chosen in the list: tried, and still not saved over the other's change.

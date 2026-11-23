@@ -273,7 +273,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
                 records = book.fetch(RecordQuery(image_ids=ids)) if ids else []
                 areas = book.fetch_areas(image_ids=ids) if ids else []
             except Exception as error:  # noqa: BLE001
-                raise QgsProcessingException(tr("観測記録の読み込みに失敗: {e}").format(e=error))
+                raise QgsProcessingException(tr("観測記録の取得に失敗: {e}").format(e=error))
             self._gathered = labels_from_book(records, areas, *self._label_options)
         gathered: Gathered = self._gathered
         bands = parse_bands(self.parameterAsString(parameters, self.BANDS, context))
@@ -311,7 +311,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
                 with open(self._base_path, "rb") as f:
                     model = load_model(f.read())
             except OSError as e:
-                raise QgsProcessingException(tr("元のモデルを読めず: {e}").format(e=e))
+                raise QgsProcessingException(tr("元のモデルを読めない: {e}").format(e=e))
             except TrainError as e:
                 raise QgsProcessingException(tr(str(e)))
             if bands and (model.input.mode != "bands" or model.input.bands != bands):
@@ -421,7 +421,7 @@ class TrainAlgorithm(QgsProcessingAlgorithm):
             with open(path, "wb") as f:
                 f.write(model.onnx())
         except OSError as e:
-            raise QgsProcessingException(tr("モデルを保存できず: {e}").format(e=e))
+            raise QgsProcessingException(tr("モデルの保存に失敗: {e}").format(e=e))
         self._remember = self.parameterAsBool(parameters, self.REMEMBER, context)
         self._path = path
         if run.best is not None:

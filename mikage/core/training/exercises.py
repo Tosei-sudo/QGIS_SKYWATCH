@@ -545,9 +545,9 @@ def hint(exercise: Exercise, marks: Sequence[Mark]) -> str:
     left = sum(1 for i, a in enumerate(exercise.answers) if a.required and i not in pairs)
     unit = exercise.unit()
     if exercise.type == IDENTIFY:
-        return f"印のあるモノは {len(exercise.answers)} {unit}。まだ記録していないのは {left} {unit}です。" if left else "印のあるモノはすべて記録しました。"
+        return f"印のあるモノは {len(exercise.answers)} {unit}。まだ記録していないのは {left} {unit}" if left else "印のあるモノはすべて記録済み"
     if exercise.type == MEASURE:
-        return f"印のあるモノは {len(exercise.answers)} {unit}。まだ測っていないのは {left} {unit}です。" if left else "印のあるモノはすべて記録しました。"
+        return f"印のあるモノは {len(exercise.answers)} {unit}。まだ測っていないのは {left} {unit}" if left else "印のあるモノはすべて記録済み"
     if not left:
-        return "記録するものは、すべて見つかっています。種別・活動を見直して提出しましょう。"
-    return f"あと {left} {unit}あります。"
+        return "記録するものは、すべて見つかっている。種別・活動を見直して提出"
+    return f"あと {left} {unit}"

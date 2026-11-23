@@ -737,7 +737,7 @@ def _ref_layer(layer: SaveLayer, common: dict) -> "dict | str":
         return {**common, "layerType": "WMTS", "url": service_root(ref.url), **({"format": ref.format} if ref.format else {}), "wmtsInfo": info}
     if ref.kind == "wfs":
         return {**common, "layerType": "WFS", "url": service_root(ref.url), "wfsInfo": {"name": ref.layer}}
-    return "書き出し不可の種類"
+    return "書き出せない種類"
 
 
 def _collection_layer(layer: SaveLayer, common: dict) -> "dict | str":
@@ -804,7 +804,7 @@ def _basemap_json(config: Optional[BaseMapConfig], kept: Optional[dict]) -> tupl
         if config.type == "style":
             return {"title": title, "baseMapLayers": [{**layer, "layerType": "VectorTileLayer", "styleUrl": config.url}]}, None
         # Plain {z}/{x}/{y}.pbf tiles have no style a web map could name.
-        return {"title": "背景なし", "baseMapLayers": []}, (f"背景地図: {title}", "スタイルのないベクタータイルは Web マップへの書き込み不可")
+        return {"title": "背景なし", "baseMapLayers": []}, (f"背景地図: {title}", "スタイルのないベクタータイルは Web マップに書き込めない")
     if kept and isinstance(kept.get("baseMapLayers"), list):
         return kept, None
     return {"title": "背景なし", "baseMapLayers": []}, None

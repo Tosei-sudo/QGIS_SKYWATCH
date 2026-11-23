@@ -73,7 +73,7 @@ def _bounds(ds, to: Optional[osr.SpatialReference]) -> tuple:
     xs = [p[0] for p in pts if math.isfinite(p[0])]
     ys = [p[1] for p in pts if math.isfinite(p[1])]
     if not xs or not ys:
-        raise ChangeError("画像の範囲を座標変換できず")
+        raise ChangeError("画像の範囲の座標変換に失敗")
     return min(xs), min(ys), max(xs), max(ys)
 
 
@@ -110,7 +110,7 @@ def describe(before_path: str, after_path: str) -> str:
     """What will be compared: `重なる範囲 1,200 × 800 px を比較。`"""
     before, after = gdal.Open(before_path), gdal.Open(after_path)
     if before is None or after is None:
-        raise ChangeError("画像を開けず")
+        raise ChangeError("画像を開けない")
     _, x0, y0, x1, y1 = plan(before, after)
     return f"重なる範囲 {x1 - x0:,} × {y1 - y0:,} px を比較。"
 
@@ -140,7 +140,7 @@ def change_files(before_path: str, before_band: int, after_path: str, after_band
     say = progress or (lambda _p, _t: None)
     before, after = gdal.Open(before_path), gdal.Open(after_path)
     if before is None or after is None:
-        raise ChangeError("画像を開けず")
+        raise ChangeError("画像を開けない")
     for ds, band, what in ((before, before_band, "前"), (after, after_band, "後")):
         if not 1 <= band <= ds.RasterCount:
             raise ChangeError(f"{what}の画像にバンド {band} なし")
@@ -154,7 +154,7 @@ def change_files(before_path: str, before_band: int, after_path: str, after_band
     out = gdal.GetDriverByName("GTiff").Create(out_path, width, height, 1, gdal.GDT_Float32,
                                                options=["TILED=YES", "COMPRESS=DEFLATE", "PREDICTOR=3", "BIGTIFF=IF_SAFER"])
     if out is None:
-        raise ChangeError(f"{out_path} を作成できず")
+        raise ChangeError(f"{out_path} の作成に失敗")
     transform = (bounds[0], gt[1], 0, bounds[3], 0, gt[5])
     out.SetGeoTransform(transform)
     if wkt:

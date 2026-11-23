@@ -59,14 +59,14 @@ class SettingsDialog(QDialog):
         if self.locked:
             self.source.setText(shipped)
             self.source.setReadOnly(True)
-            self.source.setToolTip(self.tr("同梱の設定ファイルに固定（ほかの設定ファイルは指定不可）: {path}").format(path=shipped))
+            self.source.setToolTip(self.tr("同梱の設定ファイルに固定（ほかの設定ファイルは指定できない）: {path}").format(path=shipped))
             browse.setEnabled(False)
             load.setToolTip(self.tr("同梱の設定ファイルを読み直す"))
         elif not may_change_source and (settings.config_source() or shipped):
             self.locked = True
             self.source.setText(settings.config_source() or shipped)
             self.source.setReadOnly(True)
-            self.source.setToolTip(self.tr("設定ファイルの切り替えは担当「管理者」の機能です（メニュー「担当と個人設定…」）"))
+            self.source.setToolTip(self.tr("設定ファイルの切り替えは担当「管理者」の機能（メニュー「担当と個人設定…」）"))
             browse.setEnabled(False)
             load.setToolTip(self.tr("今の設定ファイルを読み直す"))
         buttons_row = QHBoxLayout()
@@ -100,7 +100,7 @@ class SettingsDialog(QDialog):
         self.places = QLabel()
         self.places.setWordWrap(True)
         self.clear_places = QPushButton(self.tr("控えを消去"))
-        self.clear_places.setToolTip(self.tr("通報・エクスポート・式の関数で読んだ地名・国のポリゴンの控えを消す（次に使うときサーバーから読み直す）"))
+        self.clear_places.setToolTip(self.tr("通報・エクスポート・式の関数で使った地名と国の形の控えを消去（次に使うとき取得し直す）"))
         self.clear_places.clicked.connect(self._clear_places)
         form.addWidget(QLabel(self.tr("地名・国の控え")), 4, 0)
         form.addWidget(self.places, 4, 1)
@@ -118,7 +118,7 @@ class SettingsDialog(QDialog):
         self.raster = QLabel()
         self.raster.setWordWrap(True)
         self.raster_more = QPushButton(self.tr("詳しく…"))
-        self.raster_more.setToolTip(self.tr("描画を速くするために MIKAGE が使う設定、使わないようにする、手動で見直す設定"))
+        self.raster_more.setToolTip(self.tr("描画を速くする設定の確認と切り替え"))
         self._open_raster = raster_speed
         self.raster_more.clicked.connect(self._raster_details)
         self.raster_more.setEnabled(raster_speed is not None)
@@ -130,8 +130,7 @@ class SettingsDialog(QDialog):
         self.folders = QLabel()
         self.folders.setWordWrap(True)
         self.clear_folders = QPushButton(self.tr("対応を消去"))
-        self.clear_folders.setToolTip(self.tr("画像のパスの読み替え（pathMappings の prefix）にこの PC で選んだフォルダを忘れる"
-                                              "（次に画像を開くとき、フォルダをまた選ぶ）"))
+        self.clear_folders.setToolTip(self.tr("画像のフォルダの読み替えで、この PC で選んだフォルダを消去（次に画像を開くとき、フォルダを選び直す）"))
         self.clear_folders.clicked.connect(self._clear_folders)
         form.addWidget(QLabel(self.tr("画像のフォルダの対応")), 7, 0)
         form.addWidget(self.folders, 7, 1)

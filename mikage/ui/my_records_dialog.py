@@ -96,7 +96,7 @@ class MyRecordsDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel(tr("記録者")))
         self.who = QComboBox()
-        self.who.setToolTip(tr("自分: 「記録者」の名前かユーザー名で記録したもの。名前を変えたことがあれば、前の名前も一覧から選べます"))
+        self.who.setToolTip(tr("自分: 「記録者」の名前かユーザー名で記録したもの。名前を変えたことがあれば、前の名前も一覧から選べる"))
         self.who.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.who.activated.connect(lambda _i: self.reload())
         row.addWidget(self.who)
@@ -193,12 +193,12 @@ class MyRecordsDialog(QDialog):
                                         lambda: self.open_row(self.table.currentRow()))
         self.image_button = self._button(tr("画像を開く"), tr("選んだ画像を開く（開いていなければ前回のファイルか画像カタログから）"),
                                          lambda: self.open_row(self.table.currentRow()))
-        self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録の種別・活動・確度をまとめて変更（画像は開きません）"), lambda: self.bulk_edit())
+        self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録の種別・活動・確度をまとめて変更（画像は開かない）"), lambda: self.bulk_edit())
         self.remove_button = self._button(tr("選んだ記録を削除…"), tr("選んだ記録をまとめて削除（確認あり）"), lambda: self.remove())
         self.restore_button = self._button(tr("復元"), tr("選んだ削除済みの記録を元に戻す"), lambda: self.restore())
         self.alert_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加"), lambda: self.add_to_alerts())
-        self.event_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベントに入れる"), lambda: self.add_to_event())
-        self.catalog_button = self._button(tr("画像カタログで表示"), tr("選んだ記録の画像だけを画像カタログの一覧に表示（フットプリントを地図で見比べてから開けます）"),
+        self.event_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベントに追加"), lambda: self.add_to_event())
+        self.catalog_button = self._button(tr("画像カタログで表示"), tr("選んだ記録の画像だけを画像カタログの一覧に表示（地図で範囲を見比べてから開ける）"),
                                            lambda: self.show_in_catalog())
         for b in (self.open_button, self.image_button, self.bulk_button, self.remove_button, self.restore_button, self.alert_button,
                   self.event_button, self.catalog_button):
@@ -321,20 +321,20 @@ class MyRecordsDialog(QDialog):
             self._made_key = None
         self._book = book
         if book is None:
-            self._take([], "", self.tr("保存先なし（設定ファイルの observationStores）"))
+            self._take([], "", self.tr("保存先が未設定（管理者に連絡: observationStores）"))
             return
         if not book.scoped:
             if dock.records_ready(lambda: self.reload()):
                 self._take(list(book.records) if book.loaded else [], "book")
             else:
-                self._say(self.tr("記録を読み込み中…"))
+                self._say(self.tr("記録を取得中…"))
             return
         names = self.names()
         since, _until = self.period_range()
         query = RecordQuery(observers=tuple(names), start=since, basis="created")
         if query.everything():
             self._made_key = None
-            self._take([], "made", self.tr("全員の全期間は読み込まない（期間を選ぶ）"))
+            self._take([], "made", self.tr("全員の全期間は取得しない（期間を選択）"))
             return
         key = (tuple(n.casefold() for n in names), since)
         if not force and self.source == "made" and self._made_key == key:
@@ -347,7 +347,7 @@ class MyRecordsDialog(QDialog):
             dock.refresh(force=True)
         self._asked += 1
         asked = self._asked
-        self._say(self.tr("記録を読み込み中…"))
+        self._say(self.tr("記録を取得中…"))
 
         def done(made) -> None:
             if asked != self._asked or self.dock.book is not book:
@@ -357,9 +357,9 @@ class MyRecordsDialog(QDialog):
 
         def failed(message: str) -> None:
             if asked == self._asked:
-                self._say(self.tr("記録の読み込みに失敗: {m}").format(m=message))
+                self._say(self.tr("記録の取得に失敗: {m}").format(m=message))
 
-        dock.fetch(self.tr("自分の記録の読み込み"), lambda b: b.fetch(query), done, failed)
+        dock.fetch(self.tr("自分の記録の取得"), lambda b: b.fetch(query), done, failed)
 
     def _take(self, records: list[Observation], source: str, note: str = "") -> None:
         self.records = records
@@ -437,7 +437,7 @@ class MyRecordsDialog(QDialog):
                 self._row_records.append(list(i.records))
         if not self._row_keys:
             self.table.setRowCount(1)
-            empty = tr("該当する記録なし（期間・記録者・絞り込みを変えてください）") if self.records or self.source else tr("記録なし")
+            empty = tr("該当する記録なし。期間・記録者・絞り込みを変更") if self.records or self.source else tr("記録なし")
             item = QTableWidgetItem(empty)
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.table.setItem(0, 0, item)
@@ -453,7 +453,7 @@ class MyRecordsDialog(QDialog):
 
     def _put(self, r: int, cells: list, gone: bool, waiting: bool, reported: bool, others: bool, tip: str) -> None:
         color = WAITING_ROW if waiting else REPORTED_ROW if reported else OTHERS_ROW if others else None
-        why = self.tr("送信待ち（サーバーにはまだない）") if waiting else self.tr("通報済み") if reported else \
+        why = self.tr("送信待ち（まだ送っていない）") if waiting else self.tr("通報済み") if reported else \
             self.tr("ほかの人が記録のあとで変更") if others else ""
         for c, text in enumerate(cells):
             item = QTableWidgetItem("" if text is None else str(text))
@@ -527,20 +527,20 @@ class MyRecordsDialog(QDialog):
             wanted = set(ids)
             found = [o for o in book.records if o.id in wanted]
             if not found:
-                self._say(self.tr("記録が見つかりません（削除されたか、保存先が変わりました）"))
+                self._say(self.tr("記録が見つからない（削除済みか、保存先が変更済み）"))
                 return
             act(found)
 
         book = dock.book
         if book is not None and book.scoped:
             # As they are on the server now (the list may hold an older copy).
-            self._say(self.tr("記録を読み込み中…（読み込み後に{what}）").format(what=what))
-            dock.fetch(self.tr("記録の読み込み"), lambda b: b.fetch(RecordQuery(ids=tuple(ids))), go,
-                       lambda m: self._say(self.tr("記録の読み込みに失敗: {m}").format(m=m)))
+            self._say(self.tr("記録を取得中…（取得後に{what}）").format(what=what))
+            dock.fetch(self.tr("記録の取得"), lambda b: b.fetch(RecordQuery(ids=tuple(ids))), go,
+                       lambda m: self._say(self.tr("記録の取得に失敗: {m}").format(m=m)))
         elif dock.records_ready(go):
             go()
         else:
-            self._say(self.tr("記録を読み込み中…（読み込み後に{what}）").format(what=what))
+            self._say(self.tr("記録を取得中…（取得後に{what}）").format(what=what))
 
     def open_row(self, row: int) -> None:
         """A row's record opened in the form on its image, or (「画像ごと」) its image opened."""
@@ -554,16 +554,16 @@ class MyRecordsDialog(QDialog):
             return
         o = self._row_records[row][0]
         if o.deleted_at is not None:
-            self._say(self.tr("削除済みの記録です（「復元」で元に戻せます）"))
+            self._say(self.tr("削除済みの記録（「復元」で復元できる）"))
             return
-        self._with_book([o.id], lambda found: self._open_record(found[0]), self.tr("開きます"))
+        self._with_book([o.id], lambda found: self._open_record(found[0]), self.tr("表示"))
 
     def _open_record(self, o: Observation) -> None:
         dock = self.dock
         dock.show()
         dock.raise_()
         dock.open_record(o)
-        self._say(self.tr("{image} の {thing} を開きました（開いていない画像は開いてから）").format(
+        self._say(self.tr("{image} の {thing} を表示").format(
             image=o.image_name or o.image_id, thing=o.object_name or o.object_id))
 
     def open_image(self, image: ImageRow) -> None:
@@ -571,29 +571,29 @@ class MyRecordsDialog(QDialog):
         dock.show()
         dock.raise_()
         if dock.open_image(image.image_id, image.image_name, image.image_time):
-            self._say(self.tr("{image} へ移動しました").format(image=image.image_name))
+            self._say(self.tr("{image} へ移動").format(image=image.image_name))
         else:
-            self._say(self.tr("{image} を開いています（前回のファイルか画像カタログから）").format(image=image.image_name))
+            self._say(self.tr("{image} を表示中（前回のファイルか画像カタログから）").format(image=image.image_name))
 
     def bulk_edit(self) -> None:
         ids = [o.id for o in self.chosen_records()]
         if ids:
-            self._with_book(ids, self.dock.bulk_edit, self.tr("一括編集します"))
+            self._with_book(ids, self.dock.bulk_edit, self.tr("一括編集"))
 
     def remove(self) -> None:
         ids = [o.id for o in self.chosen_records()]
         if ids:
-            self._with_book(ids, lambda found: self.dock.remove_selected(found, ask=True), self.tr("削除します"))
+            self._with_book(ids, lambda found: self.dock.remove_selected(found, ask=True), self.tr("削除"))
 
     def restore(self) -> None:
         ids = [o.id for o in self.chosen_records(living=False)]
         if ids:
-            self._with_book(ids, self.dock.restore, self.tr("復元します"))
+            self._with_book(ids, self.dock.restore, self.tr("復元"))
 
     def add_to_alerts(self) -> None:
         ids = [o.id for o in self.chosen_records()]
         if ids:
-            self._with_book(ids, self.dock.add_to_alerts, self.tr("通報に追加します"))
+            self._with_book(ids, self.dock.add_to_alerts, self.tr("通報に追加"))
 
     def add_to_event(self):
         records = self.chosen_records()
@@ -608,7 +608,7 @@ class MyRecordsDialog(QDialog):
         ids = list(dict.fromkeys(o.image_id for o in records if o.image_id))
         catalog = self.dock.catalog() if self.dock.catalog is not None else None
         if not ids or catalog is None:
-            self._say(self.tr("画像カタログが使えません") if ids else "")
+            self._say(self.tr("画像カタログは使えない") if ids else "")
             return
         catalog.show()
         catalog.raise_()

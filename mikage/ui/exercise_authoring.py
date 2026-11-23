@@ -57,16 +57,17 @@ from ..qgis_io.obs_images import IMAGE_ID, image_path
 from .catalog_overlay import DrawTool
 from .exercise_map import ClickTool, ExerciseMarks, fit_into, free_part, Spot
 from .exercise_screens import BAD, GOOD, GREY, ORANGE
+from .docks import ask_no
 from .fit import fit_text
 
 #: The names the tests and the help's pictures find the windows by.
 MANAGER_NAME, EDITOR_NAME = "MikageExerciseManager", "MikageExerciseEditor"
 #: What each kind of exercise asks for (under the editor's 種類).
 TYPE_HINTS = {
-    FIND: "範囲の中の対象の種別を、すべて見つけて記録する（見落とし・誤りも採点）",
-    IDENTIFY: "印を付けたモノの種別と活動を答える（探さない）",
+    FIND: "範囲の中の対象の種別を、すべて見つけて記録（見落とし・誤りも採点）",
+    IDENTIFY: "印を付けたモノの種別と活動を回答（探さない）",
     MEASURE: "印を付けたモノの長さ・幅・向きを 2〜4 点で測る",
-    CHANGE: "前の画像と比べて、来た・継続・消失を記録する",
+    CHANGE: "前の画像と比べて、来た・継続・消失を記録",
 }
 #: The answers' columns.
 COLUMNS = ("#", "種別", "活動", "長さ m", "幅 m", "向き °", "変化", "配点", "扱い", "許容 m", "解説", "参考写真")
@@ -131,8 +132,7 @@ class ExerciseManager(QDialog):
         self.setModal(False)
         self.drafts: list[Draft] = []
         box = QVBoxLayout(self)
-        lead = QLabel(self.tr("組織の問題です（設定ファイルの問題の表と正解の表）。作りかけは練習の一覧に出ません。"
-                              "「練習モードで試す」で、みんなと同じように解いてみられます。"))
+        lead = QLabel(self.tr("組織の問題（問題の表と正解の表）。作りかけは練習の一覧に出ない。「練習モードで試す」で、みんなと同じように解ける"))
         lead.setWordWrap(True)
         box.addWidget(lead)
         self.table = QTableWidget(0, 7)
@@ -225,7 +225,7 @@ class ExerciseManager(QDialog):
         d = self.current()
         for b in (self.edit_button, self.copy_button, self.active_button, self.delete_button):
             b.setEnabled(d is not None)
-        self.active_button.setText(self.tr("作りかけにする") if d is not None and d.active else self.tr("練習の一覧に出す"))
+        self.active_button.setText(self.tr("作りかけに変更") if d is not None and d.active else self.tr("練習の一覧に出す"))
 
 
 # ---- 問題の編集 ------------------------------------------------------------------------------------------
@@ -295,7 +295,7 @@ class ExerciseEditor(QDialog):
         self.area_label = QLabel()
         area_row.addWidget(self.area_label, 1)
         self.draw_button = QPushButton(self.tr("範囲を描く"))
-        self.draw_button.setToolTip(self.tr("地図で角をクリック。ダブルクリックか右クリックで閉じます"))
+        self.draw_button.setToolTip(self.tr("地図で角をクリック。ダブルクリックか右クリックで閉じる"))
         self.view_button = QPushButton(self.tr("いまの地図の範囲"))
         self.clear_area_button = QPushButton(self.tr("消す"))
         for b in (self.draw_button, self.view_button, self.clear_area_button):
@@ -353,7 +353,7 @@ class ExerciseEditor(QDialog):
             self.role_actions[code] = action
         self.roles_button.setMenu(self.roles_menu)
         right.addRow(self.tr("対象の担当"), self.roles_button)
-        self.show_answers = QCheckBox(self.tr("答え合わせのあと、正解と解説を見せる"))
+        self.show_answers = QCheckBox(self.tr("答え合わせのあと、正解と解説を表示"))
         right.addRow("", self.show_answers)
         self.active = QCheckBox(self.tr("練習の一覧に出す（外すと作りかけ）"))
         right.addRow("", self.active)
@@ -378,10 +378,10 @@ class ExerciseEditor(QDialog):
         self.table.setMinimumHeight(150)
         ab.addWidget(self.table, 1)
         self.import_button = QPushButton(self.tr("観測記録から取り込む…"))
-        self.import_button.setToolTip(self.tr("この画像の観測記録（範囲の中）を、正解として取り込みます"))
+        self.import_button.setToolTip(self.tr("この画像の観測記録（範囲の中）を、正解として取り込み"))
         self.add_button = QPushButton(self.tr("地図で足す"))
         self.add_button.setCheckable(True)
-        self.add_button.setToolTip(self.tr("地図をクリックした所に正解を足します（Esc か右クリックで終わり）"))
+        self.add_button.setToolTip(self.tr("地図をクリックした所に正解を追加（Esc か右クリックで終了）"))
         self.remove_button = QPushButton(self.tr("選んだ正解を消す"))
         self.reference_button = QPushButton(self.tr("参考写真…"))
         self.show_button = QPushButton(self.tr("地図で見る"))
@@ -396,7 +396,7 @@ class ExerciseEditor(QDialog):
         form = QFormLayout()
         rules_box.addLayout(form)
         rules_box.addStretch(1)
-        note = QLabel(self.tr("この問題だけ変えるときに書きます。空欄は組織の決まり（薄い字）で採点します。"))
+        note = QLabel(self.tr("この問題だけ変えるときに入力。空欄は組織の決まり（薄い字）で採点"))
         note.setWordWrap(True)
         note.setStyleSheet("color: #555;")
         form.addRow(note)
@@ -450,7 +450,7 @@ class ExerciseEditor(QDialog):
         row.addWidget(self.saved_label)
         row.addStretch(1)
         self.try_button = QPushButton(self.tr("練習モードで試す"))
-        self.try_button.setToolTip(self.tr("保存してから、練習モードでみんなと同じように解きます（試した結果は残しません）"))
+        self.try_button.setToolTip(self.tr("保存してから、練習モードでみんなと同じように解く（試した結果は残らない）"))
         self.save_button = QPushButton(self.tr("保存"))
         self.save_button.setDefault(True)
         self.save_button.setStyleSheet("QPushButton { background: #2563eb; color: white; border-radius: 3px; padding: 4px 14px; }"
@@ -499,7 +499,7 @@ class ExerciseEditor(QDialog):
         source = QLineEdit()
         source.setPlaceholderText(self.tr("カタログにない画像はファイルか URL"))
         take = QPushButton(self.tr("観測記録ドックの画像"))
-        take.setToolTip(self.tr("観測記録ドックでいま選んでいる画像を使います（画像カタログで開いた画像は ID で）"))
+        take.setToolTip(self.tr("観測記録ドックでいま選んでいる画像を使用（画像カタログで開いた画像は ID で）"))
         r.addWidget(image_id, 2)
         r.addWidget(source, 3)
         r.addWidget(take)
@@ -557,7 +557,7 @@ class ExerciseEditor(QDialog):
         finally:
             self._filling = False
         self.dirty = False
-        self.saved_label.setText(self.tr("まだ保存していません") if d.object_id is None else "")
+        self.saved_label.setText(self.tr("未保存") if d.object_id is None else "")
         self.marks_changed.emit()
 
     def draft(self) -> Draft:
@@ -579,7 +579,7 @@ class ExerciseEditor(QDialog):
             v = self._typed(edit, dict(CREDIT_ROWS)[key])
             if v is not None:
                 if not 0 <= v <= 1:
-                    self.typed_problems.append(self.tr("種別の部分点は 0〜1 です"))
+                    self.typed_problems.append(self.tr("種別の部分点は 0〜1"))
                 credits[key] = v
         if credits:
             scoring["kindCredit"] = credits
@@ -615,7 +615,7 @@ class ExerciseEditor(QDialog):
             a.object_id = written.object_id
         self.dirty = False
         self.setWindowTitle(self.tr("判読の練習の問題を作る — {t}").format(t=d.title or d.id))
-        self.saved_label.setText(self.tr("保存しました（{t}）").format(t=datetime.now().strftime("%H:%M")))
+        self.saved_label.setText(self.tr("保存済み（{t}）").format(t=datetime.now().strftime("%H:%M")))
 
     def say(self, text: str, color: str = "#333") -> None:
         self.status.setText(f"<span style='color:{color}'>{text}</span>" if text else "")
@@ -721,7 +721,7 @@ class ExerciseEditor(QDialog):
         elif c in (C_LENGTH, C_WIDTH, C_HEADING, C_POINTS, C_TOLERANCE):
             v = _number(text)
             if text and (v is None or v < 0):
-                self.say(self.tr("正解 {n}: 「{t}」は数ではありません").format(n=r + 1, t=text), BAD)
+                self.say(self.tr("正解 {n}: 「{t}」は数ではない").format(n=r + 1, t=text), BAD)
                 return
             name = {C_LENGTH: "length", C_WIDTH: "width", C_HEADING: "heading", C_POINTS: "points", C_TOLERANCE: "tolerance"}[c]
             if name == "points":
@@ -761,7 +761,7 @@ class ExerciseEditor(QDialog):
     # ---- closing ------------------------------------------------------------------------------------------
 
     def _ask_close(self) -> bool:
-        answer = QMessageBox.question(self, self.tr("判読の練習の問題を作る"), self.tr("保存していない変更があります。閉じますか？"),
+        answer = QMessageBox.question(self, self.tr("判読の練習の問題を作る"), self.tr("未保存の変更あり。閉じると変更は消える"),
                                       QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
                                       QMessageBox.StandardButton.Cancel)
         return answer == QMessageBox.StandardButton.Discard
@@ -790,8 +790,8 @@ class RecordPicker(QDialog):
         self.setWindowTitle(self.tr("観測記録から正解を取り込む"))
         self.found = list(found)
         box = QVBoxLayout(self)
-        lead = QLabel(self.tr("この画像の観測記録（範囲の中）です。正解にするものに印を付けてください。"
-                              "経験のある判読者の記録を選び、種別・活動・長さを確かめてから取り込みます。"))
+        lead = QLabel(self.tr("この画像の観測記録（範囲の中）。"
+                              "経験のある判読者の記録を選び、種別・活動・長さを確認してから、正解にするものに印を付けて取り込み"))
         lead.setWordWrap(True)
         box.addWidget(lead)
         columns = ["", "種別", "活動", "長さ・幅・向き", *(["変化"] if kind_of_exercise == CHANGE else []), "確度", "記録者", "メモ"]
@@ -829,7 +829,7 @@ class RecordPicker(QDialog):
         self.ok = QPushButton(self.tr("取り込む"))
         self.ok.setDefault(True)
         self.ok.clicked.connect(self.accept)
-        cancel = QPushButton(self.tr("やめる"))
+        cancel = QPushButton(self.tr("取消"))
         cancel.clicked.connect(self.reject)
         row.addWidget(self.ok)
         row.addWidget(cancel)
@@ -886,7 +886,7 @@ class ExerciseAuthoring(QObject):
         self.read()
 
     def read(self) -> None:
-        self.manager.say(self.tr("問題の表を読んでいます…"))
+        self.manager.say(self.tr("問題の表を取得中…"))
         self.manager.reload_button.setEnabled(False)
 
         def done(drafts) -> None:
@@ -897,7 +897,7 @@ class ExerciseAuthoring(QObject):
 
         def failed(message: str) -> None:
             self.manager.reload_button.setEnabled(True)
-            self.manager.say(self.tr("問題の表を読めませんでした: {m}").format(m=message), BAD)
+            self.manager.say(self.tr("問題の表の取得に失敗: {m}").format(m=message), BAD)
 
         self.io.read_drafts(done, failed)
 
@@ -917,7 +917,7 @@ class ExerciseAuthoring(QObject):
         if self.editor is not None:
             self.editor.show()
             self.editor.raise_()
-            self.manager.say(self.tr("いま編集中の問題を閉じてから選んでください。"), ORANGE)
+            self.manager.say(self.tr("先に編集中の問題を閉じてから選択"), ORANGE)
             return True
         return False
 
@@ -952,33 +952,31 @@ class ExerciseAuthoring(QObject):
         if active:
             problems, _notes = check(d, self.io.scoring)
             if problems:
-                self.manager.say(self.tr("練習の一覧に出せません: ") + " / ".join(problems[:3]), BAD)
+                self.manager.say(self.tr("練習の一覧に出せない: ") + " / ".join(problems[:3]), BAD)
                 return
 
         def done(written) -> None:
             self._replace(written)
-            self.manager.say(self.tr("「{t}」を{s}にしました。").format(t=d.title or d.id, s=self.tr("出す") if active else self.tr("作りかけ"))
+            self.manager.say((self.tr("「{t}」を練習の一覧に追加") if active else self.tr("「{t}」を作りかけに変更")).format(t=d.title or d.id)
                              + self._count(), GOOD)
 
-        self.io.set_active(d, active, done, lambda m: self.manager.say(self.tr("変えられませんでした: {m}").format(m=m), BAD))
+        self.io.set_active(d, active, done, lambda m: self.manager.say(self.tr("変更に失敗: {m}").format(m=m), BAD))
 
     def delete(self, key: str) -> None:
         d = self._draft(key)
         if d is None:
             return
-        answer = QMessageBox.question(self.manager, self.tr("判読の練習の問題を作る"),
-                                      self.tr("「{t}」とその正解 {n} 件を表から削除します。解いた人の結果は残ります。よろしいですか？").format(
-                                          t=d.title or d.id, n=len(d.answers)),
-                                      QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
-        if answer != QMessageBox.StandardButton.Ok:
+        if not ask_no(self.manager, self.tr("判読の練習の問題を作る"),
+                      self.tr("「{t}」とその正解 {n} 件を削除（解いた人の結果は残る）").format(t=d.title or d.id, n=len(d.answers)),
+                      yes=self.tr("削除")):
             return
 
         def done(_result) -> None:
             self.drafts = [x for x in self.drafts if x.id != d.id]
             self.manager.show_drafts(self.drafts)
-            self.manager.say(self.tr("「{t}」を削除しました。").format(t=d.title or d.id) + self._count(), GOOD)
+            self.manager.say(self.tr("「{t}」を削除").format(t=d.title or d.id) + self._count(), GOOD)
 
-        self.io.delete_draft(d, done, lambda m: self.manager.say(self.tr("削除できませんでした: {m}").format(m=m), BAD))
+        self.io.delete_draft(d, done, lambda m: self.manager.say(self.tr("削除に失敗: {m}").format(m=m), BAD))
 
     def _manager_closed(self, *_args) -> None:
         if self.editor is None:
@@ -1013,7 +1011,7 @@ class ExerciseAuthoring(QObject):
         if d.area or d.answers:
             self.show_on_map()
         if d.object_id is None and not d.image_id and not d.image_source:
-            editor.say(self.tr("画像カタログで問題の画像を開き、「観測記録ドックの画像」で選んでください。"), "#1d4ed8")
+            editor.say(self.tr("画像カタログで問題の画像を開き、「観測記録ドックの画像」で選択"), "#1d4ed8")
         return editor
 
     def _place(self, editor: QWidget) -> None:
@@ -1042,13 +1040,13 @@ class ExerciseAuthoring(QObject):
         problems, notes = check(d, self.io.scoring)
         problems = [*editor.typed_problems, *problems]
         if problems:
-            editor.say(self.tr("保存できません: ") + " / ".join(problems), BAD)
+            editor.say(self.tr("保存できない: ") + " / ".join(problems), BAD)
             return False
         exercise = exercise_of_draft(d, self.io.scoring) if then_try else None
         self._busy = True
         editor.save_button.setEnabled(False)
         editor.try_button.setEnabled(False)
-        editor.say(self.tr("保存しています…"), GREY)
+        editor.say(self.tr("保存中…"), GREY)
 
         def done(written: Draft) -> None:
             self._busy = False
@@ -1058,7 +1056,7 @@ class ExerciseAuthoring(QObject):
             editor.try_button.setEnabled(True)
             editor.saved(written)
             self._replace(written)
-            text = self.tr("保存しました。") + (" " + " / ".join(notes) if notes else "")
+            text = self.tr("問題を保存") + (" " + " / ".join(notes) if notes else "")
             editor.say(text, ORANGE if notes else GOOD)
             if then_try and exercise is not None:
                 editor.close_now()
@@ -1070,7 +1068,7 @@ class ExerciseAuthoring(QObject):
                 return
             editor.save_button.setEnabled(True)
             editor.try_button.setEnabled(True)
-            editor.say(self.tr("保存できませんでした: {m}").format(m=message), BAD)
+            editor.say(self.tr("保存に失敗: {m}").format(m=message), BAD)
 
         self.io.save_draft(d, done, failed)
         return True
@@ -1146,10 +1144,10 @@ class ExerciseAuthoring(QObject):
             self._end_tool()
             if self.editor is not None:
                 self.editor.set_area([[*corners, corners[0]]])
-                self.editor.say(self.tr("範囲を描きました。"), GOOD)
+                self.editor.say(self.tr("範囲を描画"), GOOD)
 
         self._use_tool(DrawTool(self.canvas, drawn))
-        self.editor.say(self.tr("地図で範囲の角をクリックしてください。ダブルクリックか右クリックで閉じます（Esc でやり直し）。"), "#1d4ed8")
+        self.editor.say(self.tr("地図で範囲の角をクリック。ダブルクリックか右クリックで閉じる（Esc でやり直し）"), "#1d4ed8")
 
     def view_area(self) -> None:
         if self.editor is None:
@@ -1172,13 +1170,13 @@ class ExerciseAuthoring(QObject):
             d = editor.draft()
             kind = (editor.answers[-1].kind if editor.answers else "") or (d.target_kinds[0] if d.target_kinds else "")
             editor.add_answers([DraftAnswer(lon, lat, kind=kind, change="" if d.type != CHANGE else "来た")])
-            editor.say(self.tr("正解 {n} を足しました。種別・活動・解説を表で直してください。").format(n=len(editor.answers)), GOOD)
+            editor.say(self.tr("正解 {n} を追加。種別・活動・解説を表で修正").format(n=len(editor.answers)), GOOD)
 
         self._use_tool(ClickTool(self.canvas, clicked, self._end_tool))
         self.editor.add_button.blockSignals(True)
         self.editor.add_button.setChecked(True)
         self.editor.add_button.blockSignals(False)
-        self.editor.say(self.tr("地図で正解の所をクリックしてください（Esc か右クリックで終わり）。"), "#1d4ed8")
+        self.editor.say(self.tr("地図で正解の所をクリック（Esc か右クリックで終了）"), "#1d4ed8")
 
     # ---- the images and the records ------------------------------------------------------------------------
 
@@ -1200,10 +1198,10 @@ class ExerciseAuthoring(QObject):
             return
         image = self._current_image()
         if image is None:
-            editor.say(self.tr("観測記録ドックに画像がありません。画像カタログで画像を開いてください。"), BAD)
+            editor.say(self.tr("観測記録ドックに画像なし。先に画像カタログで画像を表示"), BAD)
             return
         editor.set_image(which, image[0], image[1])
-        editor.say(self.tr("観測記録ドックの画像「{i}」にしました。").format(i=image[2]), GOOD)
+        editor.say(self.tr("観測記録ドックの画像「{i}」に変更").format(i=image[2]), GOOD)
 
     def _dock_id(self, image_id: str, source: str) -> str:
         """An exercise's image's id in the observation dock (an image opened from its file: the dock's id for its layer)."""
@@ -1224,16 +1222,16 @@ class ExerciseAuthoring(QObject):
         if editor is None:
             return
         if obs is None or getattr(obs, "book", None) is None:
-            editor.say(self.tr("観測記録ドックが使えません（担当に「観測記録」が要ります）"), BAD)
+            editor.say(self.tr("観測記録ドックは使えない（担当に「観測記録」が必要）"), BAD)
             return
         d = editor.draft()
         if not d.image_id and not d.image_source:
-            editor.say(self.tr("先に画像を選んでください。"), BAD)
+            editor.say(self.tr("先に画像を選択"), BAD)
             return
         image = self._dock_id(d.image_id, d.image_source)
         before = self._dock_id(d.before_image_id, d.before_image_source) if d.type == CHANGE else ""
         ids = tuple(i for i in (image, before) if i)
-        editor.say(self.tr("観測記録を読んでいます…"), GREY)
+        editor.say(self.tr("観測記録を取得中…"), GREY)
 
         def found(records) -> None:
             if self.editor is not editor:
@@ -1241,7 +1239,7 @@ class ExerciseAuthoring(QObject):
             pairs = answers_from_records(records or [], d.type, image, before, d.area)
             if not pairs:
                 where = self.tr("範囲の中に") if d.area else ""
-                editor.say(self.tr("画像「{i}」の{w}観測記録がありません。").format(i=image, w=where), ORANGE)
+                editor.say(self.tr("画像「{i}」の{w}観測記録なし").format(i=image, w=where), ORANGE)
                 return
             picker = RecordPicker(pairs, d.type, editor.answers, editor)
             if picker.exec() != QDialog.DialogCode.Accepted:
@@ -1249,17 +1247,17 @@ class ExerciseAuthoring(QObject):
                 return
             chosen = picker.chosen()
             editor.add_answers(chosen)
-            editor.say(self.tr("正解を {n} 件取り込みました。配点・扱い・解説を確かめてください。").format(n=len(chosen)), GOOD)
+            editor.say(self.tr("正解を {n} 件取り込み。配点・扱い・解説を確認").format(n=len(chosen)), GOOD)
 
-        obs.fetch(self.tr("判読の練習: 正解にする観測記録の読み込み"), lambda b: b.fetch(RecordQuery(image_ids=ids, living=True)), found,
-                  lambda m: editor.say(self.tr("観測記録を読めませんでした: {m}").format(m=m), BAD))
+        obs.fetch(self.tr("判読の練習: 正解にする観測記録の取得"), lambda b: b.fetch(RecordQuery(image_ids=ids, living=True)), found,
+                  lambda m: editor.say(self.tr("観測記録の取得に失敗: {m}").format(m=m), BAD))
 
     def choose_reference(self) -> None:
         editor = self.editor
         if editor is None:
             return
         if editor.chosen_row() < 0:
-            editor.say(self.tr("参考写真を付ける正解を、表で選んでください。"), ORANGE)
+            editor.say(self.tr("参考写真を付ける正解を表で選択"), ORANGE)
             return
         path, _f = QFileDialog.getOpenFileName(editor, self.tr("参考写真"), "", self.tr("画像 (*.png *.jpg *.jpeg *.gif *.bmp)"))
         if path:

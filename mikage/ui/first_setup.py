@@ -146,9 +146,8 @@ class FirstSetupDialog(QDialog):
         self.keeper = keeper
         self.setWindowTitle(tr("最初の設定") if first else tr("担当と個人設定"))
         layout = QVBoxLayout(self)
-        intro = QLabel(tr("MIKAGE へようこそ。担当と使い方を選んでください。\n"
-                          "あとでメニュー「担当と個人設定…」から変えられます。") if first else
-                       tr("担当を変えると、メニュー・ツールバー・ドックに出る機能が変わります。"))
+        intro = QLabel(tr("MIKAGE へようこそ。担当と使い方を選択\nあとでメニュー「担当と個人設定…」から変更できる") if first else
+                       tr("担当を変えると、メニュー・ツールバー・ドックに出る機能が変わる"))
         # (Its lines broken by hand: see the roles below.)
         layout.addWidget(intro)
 
@@ -179,8 +178,7 @@ class FirstSetupDialog(QDialog):
             self.role_checks[role.name] = check
         self._show_roles(self._current_names())
         self.touched = False
-        rule = QLabel(tr("チェックした担当で使う機能だけを、メニュー・ツールバー・ドックのボタンに出します。\n"
-                         "どれも選ばないときは、管理者の機能のほかはすべて出します。"))
+        rule = QLabel(tr("チェックした担当で使う機能だけを、メニュー・ツールバー・ドックのボタンに表示\nどれも選ばないときは、管理者の機能のほかはすべて表示"))
         box.addSpacing(6)
         box.addWidget(rule)
         self.where = QLabel()
@@ -197,8 +195,8 @@ class FirstSetupDialog(QDialog):
         # How the docks open.
         docks_box = QGroupBox(tr("ドックの開き方"))
         docks_layout = QVBoxLayout(docks_box)
-        self.joined = QRadioButton(tr("メイン画面に連結する（タブでまとめる）"))
-        self.floating = QRadioButton(tr("別ウィンドウで開く（ドックごとに独立したウィンドウ。別の画面にも置ける）"))
+        self.joined = QRadioButton(tr("メイン画面に連結（タブでまとめる）"))
+        self.floating = QRadioButton(tr("別ウィンドウで表示（ドックごとに独立したウィンドウ。別の画面にも置ける）"))
         group = QButtonGroup(self)
         group.addButton(self.joined)
         group.addButton(self.floating)
@@ -242,14 +240,14 @@ class FirstSetupDialog(QDialog):
             layout.addWidget(source, 0, Qt.AlignmentFlag.AlignLeft)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("この設定で始める") if first else tr("適用"))
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(tr("この設定で開始") if first else tr("適用"))
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(tr("あとで") if first else tr("キャンセル"))
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         if first and practise is not None:
             # 練習モード (features/training.py): the roles chosen, then the practice data before the production's.
-            self.practise = buttons.addButton(tr("この設定で、まず練習してみる"), QDialogButtonBox.ButtonRole.ActionRole)
-            self.practise.setToolTip(tr("練習用のデータ（本番のサーバーには書き込まない）で、MIKAGE を試します"))
+            self.practise = buttons.addButton(tr("この設定で、まず練習"), QDialogButtonBox.ButtonRole.ActionRole)
+            self.practise.setToolTip(tr("練習用のデータで MIKAGE を試用（本番には書き込まない）"))
             self.practise.clicked.connect(lambda: (self.accept(), QTimer.singleShot(0, practise)))
         layout.addWidget(buttons)
         self.finished.connect(lambda _r: mark_done())
@@ -259,7 +257,7 @@ class FirstSetupDialog(QDialog):
         configured = self.text_assist is not None and self.text_assist.configured
         self.ai.setEnabled(configured)
         self.ai.setToolTip(tr("使うと、備考を整える・依頼文から下書き・文で操作などのボタンが出る（モデルは使うときに読み込む）")
-                           if configured else tr("設定ファイルに生成 AI のモデルの割り当てなし（textAssist）"))
+                           if configured else tr("生成 AI のモデルが未設定（管理者に連絡: textAssist）"))
 
     def _current_names(self) -> list[str]:
         return self.keeper.names if self.keeper is not None else roles()

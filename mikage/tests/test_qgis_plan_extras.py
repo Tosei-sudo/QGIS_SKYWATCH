@@ -183,11 +183,10 @@ def test_reminders_and_calendar_file(plugin, monkeypatch):
     text = open(path, encoding="utf-8", newline="").read()
     assert text.startswith("BEGIN:VCALENDAR\r\n") and "TRIGGER:-PT15M" in text
     assert text.count("BEGIN:VEVENT") == len(dock.shown)
-    from mikage.ui.docks import QMessageBox as Box
-    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.No)
+    monkeypatch.setattr("mikage.ui.plan_dock.reminders.ask_no", lambda *a, **k: False)
     dock.clear_reminders()
     assert settings.plan_reminders() != []
-    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
+    monkeypatch.setattr("mikage.ui.plan_dock.reminders.ask_no", lambda *a, **k: True)
     dock.clear_reminders()
     assert settings.plan_reminders() == []
 

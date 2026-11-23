@@ -112,11 +112,11 @@ class SearchPart:
 
         def failed(message: str) -> None:
             self._reading(False)
-            what = self.tr("続きの読み込み") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索")
+            what = self.tr("続きの取得") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索")
             self.status.setText(self.tr("{what}に失敗: {m}").format(what=what, m=message))
 
         self._reading(True)
-        self.status.setText(self.tr("続きを読み込み中") if more else self.tr("類似画像の検索中") if similar else self.tr("検索中"))
+        self.status.setText(self.tr("続きを取得中") if more else self.tr("類似画像の検索中") if similar else self.tr("検索中"))
         self._start(self.tr("画像カタログの続き") if more else self.tr("類似画像の検索") if similar else self.tr("画像カタログの検索"),
                     work, done, failed)
 
@@ -236,9 +236,9 @@ class SearchPart:
 
         def failed(message: str) -> None:
             if asked == self._work_asked:
-                self.status.setText(self.tr("分担の読み込みに失敗: {m}").format(m=message))
+                self.status.setText(self.tr("分担の取得に失敗: {m}").format(m=message))
 
-        self._start(self.tr("分担の読み込み"), work, done, failed)
+        self._start(self.tr("分担の取得"), work, done, failed)
 
     def _apply_work_filter(self) -> None:
         """「未着手のみ」: the rows of images someone took (or not read yet) hidden."""

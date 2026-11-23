@@ -1,6 +1,6 @@
 """
 The 「衛星パス」 dock, as the viewer's satellite-track-panel.ts: the ground
-track of the chosen satellites and what each can image (撮像可能範囲: the
+track of the chosen satellites and what each can image (撮像できる範囲: the
 band its off-nadir angles reach, on the sides it can look to), at a moment
 (the pass around it, with the satellite where it is then) or over a period.
 Several satellites show at once, each in its own colour. The satellites are
@@ -226,7 +226,7 @@ class SatellitePassDock(PluginDock):
         self.daylight.addItem(self.tr("考慮なし"), None)
         self.daylight.addItem(self.tr("光学衛星は日中のみ（太陽高度 10° 以上）"), 10.0)
         self.daylight.addItem(self.tr("光学衛星は日中のみ（太陽高度 0° 以上）"), 0.0)
-        self.daylight.setToolTip(self.tr("光学衛星の撮像可能範囲を、衛星直下の太陽高度がこの値以上の所のみに限定（SAR は常に表示）"))
+        self.daylight.setToolTip(self.tr("光学衛星の撮像できる範囲を、衛星直下の太陽高度がこの値以上の所だけに限定（SAR は常に表示）"))
         self.daylight.currentIndexChanged.connect(self.schedule)
         more_form.addRow(self.tr("日照条件"), self.daylight)
         self.ticks = QCheckBox(self.tr("軌跡に時刻を表示"))
@@ -259,7 +259,7 @@ class SatellitePassDock(PluginDock):
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
         self.model = QStandardItemModel(0, 5)
-        self.model.setHorizontalHeaderLabels([self.tr("衛星"), self.tr("位置"), self.tr("高度"), self.tr("軌道"), self.tr("撮像可能範囲")])
+        self.model.setHorizontalHeaderLabels([self.tr("衛星"), self.tr("位置"), self.tr("高度"), self.tr("軌道"), self.tr("撮像できる範囲")])
         self.table = QTableView()
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -274,7 +274,7 @@ class SatellitePassDock(PluginDock):
         self.table_columns = column_menus("satellite-passes", self.table, self)
         buttons = QHBoxLayout()
         self.layer_button = QPushButton(self.tr("レイヤーとして追加"))
-        self.layer_button.setToolTip(self.tr("軌跡と撮像可能範囲をレイヤーとして追加"))
+        self.layer_button.setToolTip(self.tr("軌跡と撮像できる範囲をレイヤーとして追加"))
         self.layer_button.clicked.connect(self.add_layer)
         self.zoom_button = QPushButton(self.tr("範囲へ移動"))
         self.zoom_button.clicked.connect(lambda: self.zoom_to())
@@ -327,8 +327,8 @@ class SatellitePassDock(PluginDock):
 
     def load(self) -> None:
         """Lists the imaging plan's satellites (reading its catalog first when needed) and draws."""
-        self.status.setText(self.tr("衛星を読み込み中…"))
-        self.imaging_plan.load_catalog(self._loaded, lambda m: self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=m)))
+        self.status.setText(self.tr("衛星を取得中…"))
+        self.imaging_plan.load_catalog(self._loaded, lambda m: self.status.setText(self.tr("衛星カタログの取得に失敗: {m}").format(m=m)))
 
     def _loaded(self) -> None:
         self.list_sats()
@@ -453,7 +453,7 @@ class SatellitePassDock(PluginDock):
         chosen = [(l.key, l.sat) for l in self.tree.items() if l.checked]
         period = self.period()
         if not self.tree.items():
-            return self._show([], self.tr("衛星なし。「詳細」で TLE を貼り付けて追加可能"), None)
+            return self._show([], self.tr("衛星なし。「詳細」で TLE を貼り付けると追加できる"), None)
         if not chosen:
             return self._show([], self.tr("表示する衛星を選択（複数可）"), None)
         if isinstance(period, str):
@@ -485,7 +485,7 @@ class SatellitePassDock(PluginDock):
                 when = self.tr("{t} 前後 {m} 分").format(t=local_text(period["at"]), m=round((period["end"] - period["at"]) / 60000))
             else:
                 when = f"{local_text(period['start'])} 〜 {local_text(period['end'])}"
-            text = self.tr("{n} 機の軌跡と撮像可能範囲（{when}）").format(n=len(tracks), when=when) + period["note"]
+            text = self.tr("{n} 機の軌跡と撮像できる範囲（{when}）").format(n=len(tracks), when=when) + period["note"]
             if failed:
                 text += self.tr("。軌道を計算できなかった衛星: {list}").format(list="、".join(failed))
             self._show(tracks, text, period["at"])
@@ -528,7 +528,7 @@ class SatellitePassDock(PluginDock):
         self.canvas.refresh()
 
     def add_layer(self) -> Optional[tuple]:
-        """The tracks and reach drawn now as two layers in a group: 地上軌跡 (lines) and 撮像可能範囲 (areas), coloured per satellite."""
+        """The tracks and reach drawn now as two layers in a group: 地上軌跡 (lines) and 撮像できる範囲 (areas), coloured per satellite."""
         if not self.tracks:
             return None
         fields, lines, areas = track_layers([t for t, _ in self.tracks])
@@ -538,7 +538,7 @@ class SatellitePassDock(PluginDock):
         project = QgsProject.instance()
         group = project.layerTreeRoot().insertGroup(top_index(project.layerTreeRoot()), title)
         made = []
-        for name, features, geometry in ((self.tr("撮像可能範囲"), areas, "MultiPolygon"), (self.tr("地上軌跡"), lines, "MultiLineString")):
+        for name, features, geometry in ((self.tr("撮像できる範囲"), areas, "MultiPolygon"), (self.tr("地上軌跡"), lines, "MultiLineString")):
             layer = memory_layer(PlanLayer(name, fields, features), name, geometry)
             categories = []
             for label, color in colors.items():

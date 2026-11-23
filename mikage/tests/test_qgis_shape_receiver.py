@@ -125,7 +125,7 @@ def test_pages_are_refused_and_nothing_is_added(plugin):
     status, _, _ = send(port, "GET", "/show?geom=35,139", headers={"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors"})
     assert status == 403
     status, answer, _ = send(port, "GET", "/show?geom=abc")
-    assert status == 422 and answer["errors"] == ["geom=abc: 座標として読み込み不可: abc"]
+    assert status == 422 and answer["errors"] == ["geom=abc: 座標として読めない: abc"]
     assert QgsProject.instance().layerTreeRoot().findGroup(GROUP) is None
     # Python's own way in.
     assert p.api.shape_receiver.show_link(f"http://127.0.0.1:{port}/show?line=35,139;36,140&name=線") == (1, "線", [])

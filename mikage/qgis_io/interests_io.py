@@ -136,7 +136,7 @@ class InterestBook(QObject):
             self.changed.emit()
 
         self.changed.emit()  # 「読み込み中…」
-        self._start("関心地域・地点の読み込み", work, done, failed)
+        self._start("関心地域・地点の取得", work, done, failed)
 
     # ---- writing -------------------------------------------------------------------------------
 

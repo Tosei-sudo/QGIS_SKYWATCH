@@ -58,7 +58,7 @@ def test_added_to_an_empty_project_the_first_at_the_bottom(config):
     plugin.startup_layers._finished = lambda layers, problems: seen.append(problems)
     plugin.startup_layers.add()
     assert wait_for(lambda: seen)
-    assert any(p.startswith("missing.geojson（file）を開けず") for p in seen[0])
+    assert any(p.startswith("missing.geojson（file）を開けない") for p in seen[0])
     plugin.unload()
 
 

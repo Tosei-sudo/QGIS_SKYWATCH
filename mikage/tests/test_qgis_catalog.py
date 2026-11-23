@@ -411,7 +411,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.ask_save_area()
     assert [dock.saved_box.itemText(i) for i in range(dock.saved_box.count())] == ["大阪湾", "東京湾"]
     asked = []
-    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: asked.append(text) or False)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     dock.set_drawn([[135.0, 34.0], [135.1, 34.0], [135.1, 34.1]])
     dock.ask_save_area()
     assert asked and "大阪湾" in asked[0] and settings.saved_areas()[0].ring[0] == (135.1, 34.6)
@@ -443,7 +443,7 @@ def test_an_area_drawn_is_saved_and_chosen_again_later(plugin, monkeypatch):
     dock.views.choose("北")
     assert dock.area_box.currentData() == "saved" and dock.saved_box.currentText() == "東京湾（北）"
     # Deleted (asked first).
-    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text: True)
+    monkeypatch.setattr(saved_part, "ask_no", lambda parent, title, text, **_k: True)
     dock.ask_delete_saved_area()
     assert [a.name for a in settings.saved_areas()] == ["大阪湾"] and dock.saved_box.currentText() == "大阪湾"
     dock.delete_saved_area()
@@ -497,11 +497,10 @@ def test_watches_notify_new_images_only(plugin, monkeypatch):
     assert not notices.store().watch(watch.id).enabled
     notices.watches.setCurrentItem(item)
     notices.notices.clearSelection()
-    from mikage.ui.docks import QMessageBox as Box
-    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.No)
+    monkeypatch.setattr("mikage.ui.notices_dock.ask_no", lambda *a, **k: False)
     notices.delete_chosen_watch()
     assert len(notices.store().watches()) == 1
-    monkeypatch.setattr(Box, "question", lambda *a: Box.StandardButton.Yes)
+    monkeypatch.setattr("mikage.ui.notices_dock.ask_no", lambda *a, **k: True)
     notices.delete_chosen_watch()
     assert notices.store().watches() == [] and notices.store().notices() == []
 
@@ -804,8 +803,8 @@ def test_days_and_angles_typed_in_other_ways_are_read_or_stop_the_search(plugin)
     asked = where()
     assert "ACQ >= TIMESTAMP" in asked and "ACQ < TIMESTAMP" in asked and "OFF_NADIR <= 30" in asked
     # What can't be read stops the search and says which box: nothing is asked.
-    for box, text, said in ((dock.acquired_to, "2026-02-30", "撮像日時の「2026-02-30」を読めません（日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で）"),
-                            (dock.max_angle, "三十", "角度の「三十」を読めません（数で）")):
+    for box, text, said in ((dock.acquired_to, "2026-02-30", "撮像日時の「2026-02-30」は読めない。日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で入力"),
+                            (dock.max_angle, "三十", "角度の「三十」は読めない。数字で入力")):
         before = box.text()
         box.setText(text)
         fake.asked.clear()
@@ -853,8 +852,8 @@ def test_the_period_takes_times_to_the_minute(plugin):
     c = dock.conditions()
     assert (c.registered_from, c.system_registered_to) == ("2026-11-01 09:00", "2026-11-08 23:30")
     # A time alone needs a day on the left; a time that is not one stops the search.
-    for start, end, said in (("", "12:00", "撮像日時の「12:00」を読めません（時刻だけなら左に日付を）"),
-                             ("2026-11-09 25:00", "", "撮像日時の「2026-11-09 25:00」を読めません（日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で）")):
+    for start, end, said in (("", "12:00", "撮像日時の「12:00」は読めない。時刻だけなら左に日付を入力"),
+                             ("2026-11-09 25:00", "", "撮像日時の「2026-11-09 25:00」は読めない。日付は 2026-11-09、時刻もなら 2026-11-09 10:30 の形で入力")):
         dock.acquired_from.setText(start)
         dock.acquired_to.setText(end)
         fake.asked.clear()
@@ -1154,7 +1153,7 @@ def test_open_folders_shows_the_folder_of_the_chosen_images_the_rewritten_one_fi
     shown.clear()
     assert len(dock.open_folders(dock.records)) == 1
     assert shown == [(str(folder / "2026"), str(folder / "2026" / "A.TIF"))]
-    assert "2 件は開けず" in dock.status.text() and "C に画像の場所なし" in dock.status.text()
+    assert "2 件は開けない" in dock.status.text() and "C に画像の場所なし" in dock.status.text()
     shown.clear()
     dock.open_folders([next(r for r in dock.records if r.id == "B")])
     assert shown == [] and dock.status.text() == "B の画像は URL（https://x.example/b.tif）。開けるフォルダなし"

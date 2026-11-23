@@ -78,8 +78,8 @@ def test_the_classes_taken_for_others_and_the_advice():
     lines = g.advice(TRIES, table, counts, people)
     assert lines[0].startswith("「船舶 > 貨物船」を「船舶 > タンカー」と答えたのが 3 回（2 人、75 %）")
     # Few passed it (港の船: 1 of 2), and what is most often missed.
-    assert any(line.startswith("「港の船」は合格が 1 / 2 人です") for line in lines)
-    assert lines[-1] == "見落としが多いのは「船舶 > 支援船」です（3 回）。探し方の問題（見つける）を足すとよいでしょう。"
+    assert any(line.startswith("「港の船」は合格が 1 / 2 人。") for line in lines)
+    assert lines[-1] == "見落としが多いのは「船舶 > 支援船」（3 回）。探し方の問題（見つける）を追加"
 
 
 def test_the_grid_as_csv():

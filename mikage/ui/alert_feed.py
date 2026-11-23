@@ -97,8 +97,8 @@ class AlertFeed(QWidget):
                 ("go", self.tr("記録へ移動"), self.tr("選んだ行の観測記録を開く（ダブルクリックでも）"), lambda: self.go(self.table.currentRow())),
                 ("copy", self.tr("選択をコピー"), self.tr("選んだ行の通報文をクリップボードへ（選んでいなければ一覧すべて）"), self.copy),
                 ("mail", self.tr("メールを作成"),
-                 self.tr("選んだ行の通報文（選んでいなければ一覧すべて）で、既定のメールソフトに新しいメールを作る。"
-                         "宛先・件名は設定ファイルの alertReports.mail。送信はメールソフトで（添付はできない）"), lambda: self.mail()),
+                 self.tr("選んだ行の通報文（選んでいなければ一覧すべて）から、既定のメールソフトでメールを作成。"
+                         "送信はメールソフトで（添付はできない）"), lambda: self.mail()),
                 ("log", self.tr("通報記録の確認…"), self.tr("期間・フォーマットで絞って一覧、削除（再通報可に）"), lambda: self.open_log and self.open_log())]:
             button = QPushButton(text)
             button.setToolTip(tip)
@@ -143,7 +143,7 @@ class AlertFeed(QWidget):
         s = self.settings()
         self.mail_button.setVisible(self._mail_settings() is not None)
         if s is None:
-            self.status.setText(self.tr("設定ファイルの alertReports.table（通報テーブル）がないため使用不可"))
+            self.status.setText(self.tr("通報の表が未設定のため使えない（管理者に連絡: alertReports.table）"))
         elif s.live.seconds <= 0:
             self.status.setText(self.tr("自動更新なし（alertReports.live）。「今すぐ更新」で読む"))
         else:
@@ -236,7 +236,7 @@ class AlertFeed(QWidget):
         def failed(message: str) -> None:
             self._polling = False
             self._failures += 1
-            self.status.setText(self.tr("通報テーブルの読み込みに失敗: {m}").format(m=message))
+            self.status.setText(self.tr("通報の取得に失敗: {m}").format(m=message))
             self._after()
 
         self._task = run_task(self.tr("通報の確認"), lambda _t: repo.poll_log(known, since), done, failed, hidden=True)
@@ -318,7 +318,7 @@ class AlertFeed(QWidget):
             from .training_mode import PracticeMail
 
             PracticeMail(self.window(), m.to, m.cc, m.bcc, draft.subject, draft.text).exec()
-            self.status.setText(self.tr("練習モードなので、メールの中身を画面に出した（{n} 件）").format(n=draft.total))
+            self.status.setText(self.tr("練習モードなので、メールの中身を画面に表示（{n} 件）").format(n=draft.total))
             return
         opened = bool(QDesktopServices.openUrl(QUrl.fromEncoded(draft.url.encode("ascii"))))
         if draft.cut or not opened:
@@ -326,18 +326,17 @@ class AlertFeed(QWidget):
         audit.record("mail", "alert-feed", ", ".join(m.to), result="ok" if opened else "error", count=len(rows),
                      detail={"cc": ", ".join(m.cc), "bcc": ", ".join(m.bcc), "subject": draft.subject, "inBody": draft.shown,
                              "linkLength": len(draft.url)},
-                     error="" if opened else "メールソフトを開けなかった", text=draft.text)
+                     error="" if opened else "メールソフトの起動に失敗", text=draft.text)
         notes = []
         if not opened:
-            notes.append(self.tr("メールソフトを開けなかった（既定のメールソフトが未設定か、リンクが長すぎる）。"
-                                 "本文 {n} 件をクリップボードへコピーしたので、メールに貼り付けて").format(n=draft.total))
+            notes.append(self.tr("メールソフトの起動に失敗（既定のメールソフトが未設定か、リンクが長すぎる）。本文 {n} 件をクリップボードにコピー。"
+                                 "メールに貼り付けて送信").format(n=draft.total))
         elif draft.cut:
-            notes.append(self.tr("本文が長いため {n} 件のうち {k} 件だけ入れた。全文をクリップボードへコピーしたので、"
-                                 "メールの本文に貼り付けて（長さの上限は alertReports.mail.maxLength）").format(n=draft.total, k=draft.shown))
+            notes.append(self.tr("本文が長いので {n} 件のうち {k} 件だけ入力。全文をクリップボードにコピー。メールの本文に貼り付けて送信").format(n=draft.total, k=draft.shown))
         if draft.too_long:
-            notes.append(self.tr("件名・宛先だけで alertReports.mail.maxLength（{n} 文字）を超えている").format(n=m.max_length))
+            notes.append(self.tr("件名と宛先だけで長さの上限（{n} 文字）を超過（管理者に連絡: alertReports.mail.maxLength）").format(n=m.max_length))
         if draft.replaced:
-            notes.append(self.tr("{e} で書けない文字は ? にした").format(e=m.encoding))
+            notes.append(self.tr("{e} で書けない文字は ? に置き換え").format(e=m.encoding))
         if not notes:
             self.status.setText(self.tr("メールソフトに {n} 件のメールを作成（送信はメールソフトで）").format(n=draft.total))
             return

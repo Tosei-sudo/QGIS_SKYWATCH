@@ -617,7 +617,7 @@ def test_saves_tell_what_failed():
 
     fake.answer = flaky
     saved = add_history(client, store, None, rows)
-    assert saved == 200 and saved.failed and "50 件を保存できず（タイムアウト）" in saved.problems[0]
+    assert saved == 200 and saved.failed and "50 件の保存に失敗（タイムアウト）" in saved.problems[0]
     # An update of a row that is gone: refused, so not settled.
     fake.answer = real
     oids = [r["attributes"]["OBJECTID"] for r in fake.layers[HISTORY].rows[:2]]

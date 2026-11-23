@@ -21,7 +21,7 @@ class FakeClient:
     def query_all(self, url, where="1=1", token=None, out_fields="*", geometry=True, cancelled=None, **_):
         self.asked.append((url, where, out_fields, geometry))
         if self.fail:
-            raise RuntimeError("接続不可")
+            raise RuntimeError("接続できない")
         return [{"attributes": r} for r in self.rows]
 
 
@@ -72,7 +72,7 @@ def test_a_table_that_fails_is_reported():
     tables = alias_tables_of({"url": TABLE, "fields": {"satellite": "SAT", "alias": "ALIAS"}}, [])
     names, problems = load_satellite_names(FakeClient([], fail=True), tables, lambda url, token: token)
     assert not names
-    assert problems == ["衛星名の対応表 1 の読み込みに失敗（接続不可）"]
+    assert problems == ["衛星名の対応表 1 の取得に失敗（接続できない）"]
 
 
 def test_the_image_naming_the_satellite_best_is_taken():

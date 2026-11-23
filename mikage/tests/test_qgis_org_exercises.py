@@ -145,7 +145,7 @@ def test_an_organisations_exercise_is_offered_solved_and_its_try_sent(org, monke
     row = layers["results"].rows[-1]["attributes"]
     assert (row["EXERCISE_ID"], row["USER_NAME"], row["EXERCISE_MODE"], row["ATTEMPT"], row["SCORE"], row["PASSED"]) == ("ORG-FIND", user, PRACTICE, 1, 100, 1)
     assert row["COURSE_NAME"] == "組織の入門" and row["FOUND"] == len(e.answers)
-    assert wait_for(lambda: "組織の表に送りました" in run.review.note.text(), 10000)
+    assert wait_for(lambda: "結果を組織の表に送信" in run.review.note.text(), 10000)
     kept = read_results(training_io.active().files.exercise_results)
     assert kept[-1]["exercise"] == "組織:ORG-FIND" and kept[-1]["sent"] is True
     run.review.close()
@@ -170,7 +170,7 @@ def test_a_try_that_could_not_be_sent_is_sent_next_time(org, monkeypatch):
     # The results table not reachable now.
     results = fake.layers.pop(f"{ORG}/2")
     assert run.submit() is not None
-    assert wait_for(lambda: "送れませんでした" in run.review.note.text(), 10000)
+    assert wait_for(lambda: "組織の表への送信に失敗" in run.review.note.text(), 10000)
     path = training_io.active().files.exercise_results
     assert read_results(path)[-1]["sent"] is False
     run.review.close()

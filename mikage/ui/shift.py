@@ -262,7 +262,7 @@ class LayerShift(QObject):
             if crs not in deltas:
                 deltas[crs] = self._delta(map_crs, layer.crs(), centre, dx, dy)
             if deltas[crs] is None:
-                self.iface.messageBar().pushWarning(self.tr("位置ずらし"), self.tr("{name} は地図の座標系に変換できず、動かさない").format(
+                self.iface.messageBar().pushWarning(self.tr("位置ずらし"), self.tr("{name} は地図の座標系に変換できないので、動かさない").format(
                     name=layer.name()))
                 continue
             x, y = get_shift(layer)

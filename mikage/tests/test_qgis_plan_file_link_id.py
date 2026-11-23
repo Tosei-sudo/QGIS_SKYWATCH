@@ -58,4 +58,4 @@ def test_the_file_and_the_history_hold_the_same_id(plugin):
     fake.layers[base.HISTORY].types.pop("LINK_ID")
     daily.write()
     assert wait_for(lambda: daily.task is None and "LINK_ID" in daily.status.text()), daily.status.text()
-    assert "出力履歴に属性 LINK_ID がないため外部連携IDを保存できず（tools/arcgis/create_tables.py で足す）" in daily.status.text()
+    assert "出力履歴に属性 LINK_ID がないため外部連携IDの保存に失敗（管理者に連絡）" in daily.status.text()

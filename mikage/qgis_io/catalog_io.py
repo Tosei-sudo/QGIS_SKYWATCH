@@ -246,7 +246,7 @@ def scan_folder(folder: str, patterns: Sequence[str], find: Callable[..., Folder
     try:
         while worker.is_alive():
             if dialog is None:
-                dialog = QProgressDialog(f"フォルダ「{folder}」の画像を探しています…", "取消", 0, 0)
+                dialog = QProgressDialog(f"フォルダ「{folder}」の画像を検索中…", "取消", 0, 0)
                 dialog.setWindowTitle("画像の場所")
                 dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
                 dialog.setMinimumDuration(0)
@@ -315,7 +315,7 @@ def _as_written(record: CatalogRecord, catalog: CatalogConfig, mappings: Sequenc
     is_url = url.lower().startswith(("http://", "https://"))
     if is_url:
         if re.split(r"[?#]", url)[0].endswith("/"):
-            raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できず。フォルダはローカルパスか pathMappings の url なしで指定）")
+            raise PathError(f"{record.id or url} の場所はフォルダの URL（一覧できない。フォルダはローカルパスか pathMappings の url なしで指定）")
         return RecordImages(url, True, given=source.value)
     return _local_images(record, catalog, url, source.value, names, scan)
 
@@ -471,7 +471,7 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
         layer = image_layer(url, name, image_id=record.id or None, time=time,
                             authcfg=settings.auth_for(url) if where.is_url else None)
         if not layer.isValid():
-            raise PathError(f"{record.id or url} の画像を開けず（{url if where.is_url else where.given}）")
+            raise PathError(f"{record.id or url} の画像を開けない（{url if where.is_url else where.given}）")
         remember(layer, record, catalog)
         keep_opened(record, catalog, where, [])
         return [layer]
@@ -491,7 +491,7 @@ def open_located(record: CatalogRecord, catalog: CatalogConfig, where: RecordIma
     if layers:
         keep_opened(record, catalog, where, [f for f in files if f not in failed])
     if failed:
-        message = f"{record.id or where.given} の画像を開けず（{where.place}: {'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）"
+        message = f"{record.id or where.given} の画像を開けない（{where.place}: {'、'.join(failed[:5])}{' ほか' if len(failed) > 5 else ''}）"
         if not layers:
             raise PathError(message)
         if problems is not None:

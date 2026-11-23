@@ -43,11 +43,11 @@ def test_values_that_cannot_be_read_say_why_and_the_rest_is_shown():
              "&geom=POINT EMPTY&geom=35,139&label=a")
     assert s.errors == [
         "geom=POINT(200 10): 緯度経度の範囲外の座標あり（WKT・GeoJSON は経度・緯度の順）",
-        "geom=abc: 座標として読み込み不可: abc",
+        "geom=abc: 座標として読めない: abc",
         "polygon=1,2;3,4: ポリゴンには 3 点以上が必要",
         "line=35,139: ラインには 2 点以上が必要",
         "geom=SRID=2451;POINT(1 2): SRID=2451 には非対応（4326・3857）",
-        "geom=POINT(1 2)<script>: WKT に使用不可の文字あり",
+        "geom=POINT(1 2)<script>: WKT に使えない文字あり",
         "geom=POINT EMPTY: 空の図形",
     ]
     # The label goes with the first parameter it was written for (which could not be read): none on the point.
@@ -79,10 +79,10 @@ def test_geojson_features_with_plain_properties_as_fields():
     # As text in a link too, and a geometry alone.
     s = read("geojson=" + json.dumps({"type": "LineString", "coordinates": [[1, 2], [3, 4]]}))
     assert s.shapes[0].geometry == {"type": "LineString", "coordinates": [[1, 2], [3, 4]]}
-    for bad, why in (('{"type": "Point", "coordinates": [1]}', "GeoJSON の座標として読み込み不可"), ("[1, 2]", "GeoJSON の type なし"),
-                     ("{", "GeoJSON（JSON）として読み込み不可"), ('{"type": "Point", "coordinates": [1, 95]}', "緯度経度の範囲外"),
+    for bad, why in (('{"type": "Point", "coordinates": [1]}', "GeoJSON の座標として読めない"), ("[1, 2]", "GeoJSON の type なし"),
+                     ("{", "GeoJSON（JSON）として読めない"), ('{"type": "Point", "coordinates": [1, 95]}', "緯度経度の範囲外"),
                      ('{"type": "FeatureCollection", "features": []}', "図形なし"),
-                     ('{"type": "Point", "coordinates": [true, 1]}', "GeoJSON の座標として読み込み不可")):
+                     ('{"type": "Point", "coordinates": [true, 1]}', "GeoJSON の座標として読めない")):
         assert why in read_link_shapes([("geojson", bad)]).errors[0], bad
     deep = {"type": "Point", "coordinates": [1, 2]}
     for _ in range(12):

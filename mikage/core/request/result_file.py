@@ -917,9 +917,9 @@ def read_answers(data: bytes, spec: ResultFile, load_schema: Optional[SchemaLoad
         try:
             schema = load_schema(schema) if load_schema else None
         except (OSError, ValueError) as error:
-            return [], [f"スキーマ {spec.schema} の読み込み不可（{error}）"]
+            return [], [f"スキーマ {spec.schema} を読み込めない（{error}）"]
         if not isinstance(schema, dict):
-            return [], [f"スキーマ {spec.schema} の読み込み不可"]
+            return [], [f"スキーマ {spec.schema} を読み込めない"]
         if not _has_key(schema_columns(schema)):
             return [], [f"スキーマ {spec.schema} に依頼を表すプロパティ（x-target が id・managementNo・identificationNo・linkId）なし"]
     rows = _json_rows(text, spec, schema, problems) if spec.format == "json" else _csv_rows(text, spec, problems)

@@ -152,7 +152,7 @@ def test_catalogs_from_esri():
                 sensor_catalog_of({"sensors": [{"sensor": "B", "modes": [{"mode": "Wide"}]}]}, [], 2)]
     modes, problems = load_sensor_modes(EsriClient(fake), catalogs, lambda u, t: t)
     assert [(m.sensor, m.mode) for m in modes] == [("ISS", "Spot"), ("B", "Wide")]
-    assert len(problems) == 1 and problems[0].startswith("壊れた表 の読み込みに失敗")
+    assert len(problems) == 1 and problems[0].startswith("壊れた表 の取得に失敗")
 
 
 def test_timeline_rows_and_layout():

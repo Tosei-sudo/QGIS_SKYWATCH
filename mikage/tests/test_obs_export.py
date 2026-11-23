@@ -63,7 +63,7 @@ class TestSettings:
         ]})
         assert [f.name for f in s.formats] == ["b"]
         text = "\n".join(problems)
-        for part in ("組み込みのフォーマット名", "source「nope」は使用不可", "csv か json", "schema は format が json のときのみ", "name（フォーマットの名前）なし",
+        for part in ("組み込みのフォーマット名", "source「nope」は使えない", "csv か json", "schema は format が json のときのみ", "name（フォーマットの名前）なし",
                      "default は formats の name"):
             assert part in text, part
 

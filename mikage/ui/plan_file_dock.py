@@ -157,11 +157,11 @@ class PlanFileDock(PluginDock):
         self.day.setDate(QDate(today.year, today.month, today.day))
         top.addWidget(self.day)
         self.run_button = QPushButton(self.tr("計算"))
-        self.run_button.setToolTip(self.tr("撮像済みの確認・依頼の再読み込み・雲量予報のあと、その日の依頼を枠に詰める"))
+        self.run_button.setToolTip(self.tr("撮像済みの確認、最新の依頼の取得、雲量予報のあと、その日の依頼を枠に詰める"))
         self.run_button.clicked.connect(lambda: self.run())
         top.addWidget(self.run_button)
         self.sim_button = QPushButton(self.tr("上限シミュレーション…"))
-        self.sim_button.setToolTip(self.tr("日ごとの上限や使うシステムを変えた場合の枠超過・期限切れを今後の日数で試算（台帳には書き込まない）"))
+        self.sim_button.setToolTip(self.tr("日ごとの上限や使うシステムを変えたときの枠超過・期限切れを、今後の日数で試算（依頼は変わらない）"))
         self.sim_button.clicked.connect(self.open_simulation)
         top.addWidget(self.sim_button)
         self.results_button = QPushButton(self.tr("照合…"))
@@ -232,8 +232,8 @@ class PlanFileDock(PluginDock):
             moves.addWidget(b)
         self.on_map = QCheckBox(self.tr("地図に表示"))
         self.on_map.setChecked(True)
-        self.on_map.setToolTip(self.tr("表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と、書き出す撮像の範囲（破線）を地図に重ねる。"
-                                       "行を選ぶとその依頼へ移動し、同じ撮像の依頼も太く出す"))
+        self.on_map.setToolTip(self.tr("表示中の依頼の範囲（採用は緑、まとめは青、見送りは灰）と、書き出す撮像の範囲（破線）を地図に表示。"
+                                       "行を選ぶとその依頼へ移動し、同じ撮像の依頼も太線で表示"))
         self.on_map.toggled.connect(lambda _on: self.draw())
         moves.addWidget(self.on_map)
         layout.addLayout(moves)
@@ -308,7 +308,7 @@ class PlanFileDock(PluginDock):
             self.quota_window.close()
             self.quota_window = None
         self.render()
-        self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし") if self.store is None else "")
+        self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）") if self.store is None else "")
 
     def _store_chosen(self, index: int) -> None:
         stores = self.context.config.request_stores
@@ -431,13 +431,13 @@ class PlanFileDock(PluginDock):
         """Works the day out (satellites first, then the services in a task)."""
         if self.task is not None or self.store is None:
             return
-        self.status.setText(self.tr("衛星カタログを読み込み中…"))
+        self.status.setText(self.tr("衛星カタログを取得中…"))
         self.run_button.setEnabled(False)
         self.satellites(self._run_with, self._satellites_failed)
 
     def _satellites_failed(self, message: str) -> None:
         """The satellite catalog could not be read: says why and gives 「計算」 back (#70)."""
-        self.status.setText(self.tr("衛星カタログの読み込みに失敗: {m}").format(m=message))
+        self.status.setText(self.tr("衛星カタログの取得に失敗: {m}").format(m=message))
         self._update_buttons()
 
     def _run_with(self, sats) -> None:
@@ -451,7 +451,7 @@ class PlanFileDock(PluginDock):
         now = _now_ms()
         catalog = self.catalog()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
-        self.status.setText(self.tr("依頼の読み込み・雲量予報を問い合わせ中…"))
+        self.status.setText(self.tr("依頼と雲量予報を取得中…"))
 
         def work(task):
             notes = []
@@ -874,10 +874,8 @@ class PlanFileDock(PluginDock):
             ok = QMessageBox.question(self, self.tr("書き出し"), plain_tip("\n".join(lines))) == QMessageBox.StandardButton.Yes
             return False if ok else None
         whose = self.tr("{system} の").format(system=label) if label else ""
-        lines = [*lines, "", self.tr("この日の{whose}出力履歴（未判定）が既に {n} 件あります。"
-                                      "置き換えると前回の行を消してから今回の行を保存します。"
-                                      "システムの採否（結果ファイル・手入力）は、今回も同じシステムに出す依頼の行へ引き継ぎ、"
-                                      "今回は出さない依頼の行は採否ごと残します。").format(whose=whose, n=earlier)]
+        lines = [*lines, "", self.tr("この日の{whose}出力履歴（未判定）がすでに {n} 件ある。置き換えると前回の行を消して今回の行を保存。"
+                                      "採否は、今回も同じシステムに出す依頼には引き継ぎ、今回出さない依頼の行は採否ごと残る").format(whose=whose, n=earlier)]
         box = QMessageBox(QMessageBox.Icon.Question, self.tr("書き出し"), plain_tip("\n".join(lines)), parent=self)
         replace = box.addButton(self.tr("置き換えて書き出し"), QMessageBox.ButtonRole.AcceptRole)
         keep = box.addButton(self.tr("追加して書き出し"), QMessageBox.ButtonRole.AcceptRole)
@@ -937,11 +935,11 @@ class PlanFileDock(PluginDock):
         if ask:
             lines = [f"{self._label(w)}: {os.path.join(f, w.file_name)}（{w.count} 件）" for w, f in targets]
             if target:
-                lines.append(self.tr("{system} の分だけ書き出します（ほかのシステムのファイル・出力履歴はそのまま）").format(system=label))
+                lines.append(self.tr("{system} の分だけ書き出し（ほかのシステムのファイルと出力履歴はそのまま）").format(system=label))
             if broken:
                 lines += [self.tr("書き出さないもの（スキーマに不一致など）:")] + [f"{self._label(w)}: {'、'.join(w.errors[:3])}" for w in broken]
                 if any(w.parts > 1 for w in broken):
-                    lines.append(self.tr("（分けたファイルのどれかが合わないシステムは、全部のファイルを書き出しません）"))
+                    lines.append(self.tr("（分けたファイルのどれかが合わないシステムは、全部のファイルを書き出さない）"))
             if existing:
                 lines.append(self.tr("上書きするファイル {n} 件").format(n=len(existing)))
             if leftovers:
@@ -982,7 +980,7 @@ class PlanFileDock(PluginDock):
                 cleared += 1
                 audit.record("export", "plan-file-removed", os.path.join(folder, name), detail={"system": system})
             except OSError as error:
-                problems.append(self.tr("{name} を削除できず: {m}").format(name=name, m=error.strerror or str(error)))
+                problems.append(self.tr("{name} の削除に失敗: {m}").format(name=name, m=error.strerror or str(error)))
         self.paths = paths
         if fallback:
             settings.set_request_export_folder(fallback)
@@ -1005,7 +1003,7 @@ class PlanFileDock(PluginDock):
                 # A file naming its rows by 外部連携ID, and a table that cannot keep them: the answers cannot be matched by them.
                 lacking = repo.history_has(("linkId",))
                 if lacking:
-                    notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDを保存できず（tools/arcgis/create_tables.py で足す）")
+                    notes.append(f"出力履歴に属性 {lacking[0]} がないため外部連携IDの保存に失敗（管理者に連絡）")
             removed = 0
             rewrite = Rewrite(rows=list(rows))
             if replace and earlier and repo.store.history:
@@ -1028,7 +1026,7 @@ class PlanFileDock(PluginDock):
                 kept_shots = repo.add_shots(shots)
             except EsriError as error:
                 # The history (what each request was) matters more: kept even when the shots cannot be.
-                kept_shots = Saved(0, [f"撮像の範囲を保存できず（{error}）"])
+                kept_shots = Saved(0, [f"撮像の範囲の保存に失敗: {error}"])
             notes += kept_shots.problems
             raised = repo.update_requests(boosts, run)
             marked = repo.update_history(done_rows)
@@ -1059,14 +1057,14 @@ class PlanFileDock(PluginDock):
             if problems:
                 text += "・" + "、".join(problems)
             if failed_saves:
-                text += self.tr("。保存できなかったもの（もう一度「書き出し」で置き換えてやり直せます）: {m}").format(m="、".join(failed_saves[:5]))
+                text += self.tr("。保存に失敗したもの（もう一度「書き出し」で置き換えるとやり直せる）: {m}").format(m="、".join(failed_saves[:5]))
             self.status.setText(text)
             self._update_buttons()
             self.requests_changed()
 
         def failed(message):
             self.task = None
-            self.status.setText(self.tr("ファイルは書き出し済み。出力履歴・繰り上げの保存に失敗（もう一度「書き出し」で置き換えてやり直せます）: {m}").format(m=message))
+            self.status.setText(self.tr("ファイルは書き出し済み。出力履歴と繰り上げの保存に失敗（もう一度「書き出し」で置き換えるとやり直せる）: {m}").format(m=message))
             self._update_buttons()
 
         self.task = run_task(self.tr("出力履歴の保存"), work, done, failed)

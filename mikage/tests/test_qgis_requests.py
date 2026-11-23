@@ -478,7 +478,7 @@ def test_a_satellite_catalog_that_cannot_be_read_gives_the_buttons_back(plugin, 
     p, iface, fake, tmp_path = plugin
 
     def down(*args, **kwargs):
-        raise EsriError("接続不可（テスト）")
+        raise EsriError("接続できない（テスト）")
 
     plan_dock = p.docks["SatObsImagingPlan"]
     assert wait_for(lambda: plan_dock.loading_task is None)
@@ -487,11 +487,11 @@ def test_a_satellite_catalog_that_cannot_be_read_gives_the_buttons_back(plugin, 
     daily = p.api.plan_files
     daily.show()
     daily.run()
-    assert wait_for(lambda: daily.run_button.isEnabled() and "衛星カタログの読み込みに失敗" in daily.status.text()), daily.status.text()
+    assert wait_for(lambda: daily.run_button.isEnabled() and "衛星カタログの取得に失敗" in daily.status.text()), daily.status.text()
     daily.open_simulation()
     sim = daily.simulation
     sim.run()
-    assert wait_for(lambda: sim.run_button.isEnabled() and "衛星カタログの読み込みに失敗" in sim.status.text()), sim.status.text()
+    assert wait_for(lambda: sim.run_button.isEnabled() and "衛星カタログの取得に失敗" in sim.status.text()), sim.status.text()
     sim.close()
 
 

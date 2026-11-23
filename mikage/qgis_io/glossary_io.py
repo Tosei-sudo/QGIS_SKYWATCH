@@ -96,5 +96,5 @@ class GlossaryKeeper(QObject):
             if then is not None:
                 then()
 
-        run_task(self.tr("単語集の読み込み"), work, done, failed, hidden=True)
+        run_task(self.tr("単語集の取得"), work, done, failed, hidden=True)
         return True

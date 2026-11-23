@@ -276,6 +276,6 @@ def test_the_switch_in_the_dialog_stays_in_the_profile(tmp_path):
     assert type(layer.renderer()) is FastMultiBand
     dialog = plugin.open_raster_speed()
     assert dialog.fast.isChecked()
-    assert "QGIS の描画に戻しました" in dialog.set_fast(False)
+    assert "QGIS の描画に変更" in dialog.set_fast(False)
     assert not fast_draw.on() and type(layer.renderer()) is QgsMultiBandColorRenderer
     plugin.unload()

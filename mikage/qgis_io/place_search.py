@@ -40,7 +40,7 @@ def read_bytes(url: str) -> bytes:
         with open(path, "rb") as f:
             return f.read()
     except OSError as error:
-        raise OSError(f"{path} の読み込み不可（{error.strerror or error}）") from error
+        raise OSError(f"{path} を読み込めない（{error.strerror or error}）") from error
 
 
 def place_search_of(context) -> PlaceSearch:

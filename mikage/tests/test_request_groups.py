@@ -107,7 +107,7 @@ def test_loading_the_table():
     assert groups is None and "GROUP_NAME" in note
     from mikage.core.esri import UnreachableError
     groups, note = read_groups(Client(fail=UnreachableError("つながらない")), GROUPS, F, None)
-    assert groups is None and note == "依頼グループのテーブルを読めず（つながらない）"
+    assert groups is None and note == "依頼グループのテーブルを読めない（つながらない）"
 
 
 def test_the_settings_name_the_table_and_its_attributes():

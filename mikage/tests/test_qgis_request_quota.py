@@ -81,7 +81,7 @@ def test_the_day_kept_within_the_quota_and_scenes_marked_not_counted(plugin, mon
     assert (cell("見込み"), cell("残り")) == ("", "1")
     window.shot_table.selectRow(0)
     window.count_again()
-    assert wait_for(lambda: window.task is None and "数えるに戻した" in window.status.text()), window.status.text()
+    assert wait_for(lambda: window.task is None and "を「数える」に変更" in window.status.text()), window.status.text()
     shot = fake.layers[shots_test.SHOTS].rows[0]["attributes"]
     assert shot["UNCOUNTED_SCENES"] is None and shot["UNCOUNTED_REASON"] is None
     window.close()

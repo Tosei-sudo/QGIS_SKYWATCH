@@ -713,7 +713,7 @@ class Service:
             features.append(feature)
         offset = int(float(form.get("resultOffset") or 0))
         if "resultOffset" in form and not layer.pagination:
-            raise ServiceError("ページングは使用不可（supportsPagination: false）")
+            raise ServiceError("ページングは使えない（supportsPagination: false）")
         size = layer.max_record_count
         if form.get("resultRecordCount", "").strip():
             size = max(1, min(size, int(float(form["resultRecordCount"]))))

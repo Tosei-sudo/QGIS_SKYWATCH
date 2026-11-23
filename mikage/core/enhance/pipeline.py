@@ -117,7 +117,7 @@ def enhance_of(enhance: Any, base: Optional[Pipeline], problems: list, at: str) 
         try:
             return Pipeline.from_json(enhance)
         except ValueError as error:
-            problems.append(f"{at} の enhance は補正として読み込み不可（{error}）")
+            problems.append(f"{at} の enhance は補正として読めない（{error}）")
             return base
     if not isinstance(enhance, dict):
         problems.append(f"{at} の enhance はオブジェクトで指定")

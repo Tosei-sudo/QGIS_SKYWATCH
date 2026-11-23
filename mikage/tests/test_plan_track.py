@@ -121,7 +121,7 @@ def test_rows_ticks_and_layers():
     assert ticks and all(abs(t - (T0 + 15 * 60000)) >= 30000 for _, t in ticks)
     fields, lines, areas = track_layers([track])
     assert [f.name for f in fields][:2] == ["kind", "satellite"]
-    assert lines[0][1]["kind"] == "地上軌跡" and areas[0][1]["kind"] == "撮像可能範囲"
+    assert lines[0][1]["kind"] == "地上軌跡" and areas[0][1]["kind"] == "撮像できる範囲"
     assert areas[0][1]["max_off_nadir"] == 45
 
 

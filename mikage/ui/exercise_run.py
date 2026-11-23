@@ -44,7 +44,7 @@ LABEL = "判読の練習"
 #: The clicks a record takes in 測る (rear, front, a side: length, heading and width).
 MEASURE_POINTS = 3
 #: Said in the AI結果 dock while an exercise is solved (its results would tell the answers).
-AI_WITHHELD = "判読の練習の間は、AI の結果を出しません（答えが分かってしまうため）"
+AI_WITHHELD = "判読の練習の間は、AI の結果を表示しない（答えが分かってしまうため）"
 #: The map's margin round the area (a share of its size).
 MARGIN = 0.08
 
@@ -70,10 +70,10 @@ class FixedClasses:
         return list(self.fields) if self.fields is not None else None
 
     def save(self, taxa) -> None:
-        raise ValueError("判読の練習の間は分類を変えられません")
+        raise ValueError("判読の練習の間は分類を変更できない")
 
     def save_fields(self, fields) -> None:
-        raise ValueError("判読の練習の間は分類を変えられません")
+        raise ValueError("判読の練習の間は分類を変更できない")
 
 
 def marks_of(records: list, exercise: Exercise, before_things: set, image_id: Optional[str] = None) -> list[Mark]:
@@ -166,14 +166,14 @@ class ExerciseRun(QObject):
         """
         obs = self.obs
         if obs is None or self.catalog is None:
-            self.problem = "観測記録・画像カタログのドックが使えません（担当に「観測記録」が要ります）"
+            self.problem = "観測記録と画像カタログのドックは使えない（担当に「観測記録」が必要）"
             return False
         if self._base is not None:
             self._begin()
             return True
         current = obs.store_set
         if current is None:
-            self.problem = "観測記録の保存先がありません"
+            self.problem = "観測記録の保存先なし"
             return False
         classes = current.taxonomy
 
@@ -193,7 +193,7 @@ class ExerciseRun(QObject):
                 self._base = (FixedClasses(None, None), current.vocabulary)
                 self._begin()
 
-        run_task("判読の練習: 分類の読み込み", read, done, failed)
+        run_task("判読の練習: 分類の取得", read, done, failed)
         return True
 
     def _ai(self, why: str) -> None:
@@ -241,7 +241,7 @@ class ExerciseRun(QObject):
             def missing() -> None:
                 if self._ended:
                     return
-                fail = lambda: self._fail(f"画像 {image_id} が画像カタログにありません")  # noqa: E731
+                fail = lambda: self._fail(f"画像 {image_id} が画像カタログにない")  # noqa: E731
                 if self.elsewhere is not None:
                     self.elsewhere(image_id, opened, fail)
                 else:
@@ -256,7 +256,7 @@ class ExerciseRun(QObject):
         name = os.path.splitext(os.path.basename(re.split(r"[?#]", source)[0].rstrip("/")))[0] or source
         layer = image_layer(path, name)
         if not layer.isValid():
-            self._fail(f"画像を開けません: {source}" + (f"（{path}）" if path != source else ""))
+            self._fail(f"画像を開けない: {source}" + (f"（{path}）" if path != source else ""))
             return
         QgsProject.instance().addMapLayer(layer)
         self.layers.append(layer.id())
@@ -426,7 +426,7 @@ class ExerciseRun(QObject):
         if obs.form.isVisible():
             if not forced:
                 if self.bar is not None:
-                    self.bar.say("記録のフォームが開いています。「記録」か「取消」をしてから提出してください。", BAD)
+                    self.bar.say("記録のフォームが開いている。「記録」か「取消」を押してから提出", BAD)
                 return None
             obs.close_form()
         self.finished_at = datetime.now()
@@ -441,14 +441,14 @@ class ExerciseRun(QObject):
             record["sent"] = False
         note = ""
         if self.trial:
-            note = "試しに解いた結果です（残さず、組織の表にも送りません）。"
+            note = "試しに解いた結果（残さず、組織の表にも送らない）"
         else:
             try:
                 add_result(self.results_path, record)
             except OSError as error:
-                note = f"結果をこの PC に残せませんでした: {error}"
+                note = f"この PC への結果の保存に失敗: {error}"
         if forced:
-            note = ("時間になったので提出しました。" + note).strip()
+            note = ("時間になったので提出" + note).strip()
         if obs.active:
             obs.record_button.setChecked(False)
         if self.bar is not None:

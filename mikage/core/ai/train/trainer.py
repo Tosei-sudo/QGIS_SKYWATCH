@@ -147,10 +147,10 @@ def load_model(data: bytes) -> Model:
     try:
         meta, inits = read_model(data)
     except (ValueError, IndexError) as e:
-        raise TrainError(f"モデルを読めず（{e}）")
+        raise TrainError(f"モデルを読めない（{e}）")
     state = training_state(meta)
     if state is None:
-        raise TrainError("このプラグインで学習したモデルのみ追加学習可能（他の ONNX は物体検出（AI）で利用）")
+        raise TrainError("このプラグインで学習したモデルのみ追加学習できる（他の ONNX は物体検出（AI）で利用）")
     arch = state.get("arch", {}).get("name", "fpn4")
     size = state.get("arch", {}).get("size")
     if arch not in ARCHS or size not in WIDTHS:

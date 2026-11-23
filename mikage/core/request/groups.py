@@ -138,7 +138,7 @@ def read_groups(client: EsriClient, url: Optional[str], fields: dict, token: Opt
     try:
         return load_groups(client, url, fields, token, cancelled), ""
     except Exception as error:  # noqa: BLE001 (never stops the requests being read)
-        return None, f"依頼グループのテーブルを読めず（{error}）"
+        return None, f"依頼グループのテーブルを読めない（{error}）"
 
 
 # --- Choosing -------------------------------------------------------------------------------

@@ -122,7 +122,7 @@ class Command(Feature):
             for w in waiting:
                 w()
 
-        run_task(tr("地名の読み込み"), lambda _t: load_named_areas(client, source, token, max_age=AREAS_SECONDS),
+        run_task(tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=AREAS_SECONDS),
                  over, lambda _m: over(None), hidden=True)
 
     def find_place(self, text: str, point, then: Callable[[Any, str], None]) -> None:
@@ -160,7 +160,7 @@ class Command(Feature):
         key = reading.operation.key
         if key == "openScreen":
             if not self.host.run_menu_entry(reading.screen):
-                raise RuntimeError(tr("「{s}」を開けず").format(s=reading.screen))
+                raise RuntimeError(tr("「{s}」を開けない").format(s=reading.screen))
             return tr("{s} を開いた").format(s=reading.screen)
         run = self.host.text_operations().get(key)
         if run is None:

@@ -445,7 +445,7 @@ class ObservationBook:
         the store cannot tell what changed (a local store, a layer without
         更新日時 or that deletes for good). What changed is said; None when
         nothing did (or it could not be read: then the records stay as they
-        were and a later refresh or 「再読み込み」 tries again).
+        were and a later refresh or 「最新を取得」 tries again).
         """
         started = now_ms()
         since = self._read_at

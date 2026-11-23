@@ -108,7 +108,7 @@ def test_answers_and_errors(http):
     kind, message = in_task(lambda: get_bytes(http + "/broken?token=secret"))
     assert kind == "failed" and message.startswith("サーバーのエラー（" + http + "/broken") and "secret" not in message
     kind, message = in_task(lambda: get_bytes(http + "/missing"))
-    assert kind == "failed" and message.startswith("接続不可（")
+    assert kind == "failed" and message.startswith("接続できない（")
     with pytest.raises(RuntimeError):
         get_bytes(http + "/ok")
 

@@ -80,7 +80,7 @@ def area_store_of(value: Any, problems: list[str], at: str) -> Optional[AreaStor
     if is_record(v.get("fields")):
         for key, name in v["fields"].items():
             if key not in DEFAULT_AREA_FIELDS:
-                problems.append(f"{at} の fields.{key} は使用不可の役割")
+                problems.append(f"{at} の fields.{key} は使えない役割")
             elif isinstance(name, str) and _NAME.match(name):
                 fields[key] = name
             else:

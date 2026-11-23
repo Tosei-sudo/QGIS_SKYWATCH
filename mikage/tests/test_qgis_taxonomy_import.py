@@ -120,10 +120,10 @@ def test_replacing_removes_classes_not_in_the_table_after_asking(plugin, backups
     removed = [c.kind for c in dialog.plan.removed()]
     assert "その他" in removed and "船舶 > 貨物船 > コンテナ船" not in removed
     asked = []
-    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, text: asked.append(text) or False)
+    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, text, **_k: asked.append(text) or False)
     assert not dialog.run_import()
     assert asked and "表にない分類" in asked[0] and "その他" in kinds(book)
-    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, _text: True)
+    monkeypatch.setattr("mikage.ui.taxonomy_import_dialog.ask_no", lambda _w, _t, _text, **_k: True)
     assert dialog.run_import()
     assert "その他" not in kinds(book) and "建物 > 格納庫" in kinds(book)
     # A change of mode throws the dry run away.

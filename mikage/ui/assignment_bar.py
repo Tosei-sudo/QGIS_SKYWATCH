@@ -15,7 +15,7 @@ import time
 from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import pyqtSignal
-from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QToolButton, QWidget
+from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QToolButton, QWidget
 
 from ..core import edit_stamp
 from ..core.obs.api import AssignmentRepository
@@ -24,7 +24,7 @@ from ..core.obs.api import (
     same_person, with_status,
 )
 from ..qgis_io.tasks import run_task
-from .docks import plain_label, plain_tip
+from .docks import ask_no, plain_label
 
 #: Seconds the assignments read stay fresh.
 FRESH_S = 60
@@ -61,9 +61,9 @@ class AssignmentBar(QWidget):
         self.label.setWordWrap(True)
         self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         row.addWidget(self.label, 1)
-        self.take_button = self._button(self.tr("この画像を担当"), self.tr("この画像を自分の担当に（設定が排他 exclusive なら、ほかの人が担当中のときは不可）"), self.take)
+        self.take_button = self._button(self.tr("この画像を担当"), self.tr("この画像を自分の担当に（設定によっては、ほかの人が担当中のときは担当できない）"), self.take)
         self.done_button = self._button(self.tr("完了"), self.tr("この画像の担当を完了に"), lambda: self.set_status(DONE))
-        self.release_button = self._button(self.tr("手放す"), self.tr("この画像の担当をやめる（ほかの人が担当できる）"), self.give_back)
+        self.release_button = self._button(self.tr("手放す"), self.tr("この画像の担当を解除（ほかの人が担当できる）"), self.give_back)
         self.list_button = self._button(self.tr("分担…"), self.tr("全員の分担と引き継ぎメモ"), lambda: self.dock.open_handover(0))
         self.setVisible(False)
 
@@ -141,7 +141,7 @@ class AssignmentBar(QWidget):
 
         # The rows done long ago are left: they only grow (a week back, as the dialog's 「完了も表示」 shows).
         since = time.time() * 1000 - DONE_DAYS * 86_400_000
-        self._task = run_task(self.tr("分担の読み込み"), lambda _t: repo.load_assignments(done_since=since), done, failed)
+        self._task = run_task(self.tr("分担の取得"), lambda _t: repo.load_assignments(done_since=since), done, failed)
 
     def show_image(self, image) -> None:
         """
@@ -187,7 +187,7 @@ class AssignmentBar(QWidget):
             self.error = message
             self.render()
 
-        self._image_task = run_task(self.tr("分担の読み込み"),
+        self._image_task = run_task(self.tr("分担の取得"),
                                     lambda _t: repo.load_assignments(where, done_since=since), done, failed)
 
     def needs_claim(self, image) -> bool:
@@ -222,7 +222,7 @@ class AssignmentBar(QWidget):
         if self.claiming is not None:
             return
         if not user:
-            failed(self.tr("ユーザー名なし（環境変数 USERNAME か editTracking.user）: 分担を取得できない"))
+            failed(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）"))
             return
         repo = self.repository()
         now = int(time.time() * 1000)
@@ -290,7 +290,7 @@ class AssignmentBar(QWidget):
             return self.tr("分担: {who}が担当中").format(who=names), "color: #2e7d32;"
         if mine:
             return self.tr("分担: {who}で担当中（協業）").format(who=names), "color: #2e7d32;"
-        return self.tr("分担: {who}が担当中。一緒に担当できます").format(who=names), "color: #1565c0;"
+        return self.tr("分担: {who}が担当中。一緒に担当できる").format(who=names), "color: #1565c0;"
 
     def render(self) -> None:
         # No image chosen: hidden with the rest of the dock (tsudo 2026-11-10; everyone's 分担 is in the menu).
@@ -302,7 +302,7 @@ class AssignmentBar(QWidget):
         mine = x is not None and same_person(x.assignee, self.user())
         style = ""
         if self.error and not self.read_at:
-            text = self.tr("分担: 読み込みの失敗（{m}）").format(m=self.error)
+            text = self.tr("分担: 取得に失敗（{m}）").format(m=self.error)
         elif self.shared:
             text, style = self._shared_text(image)
         elif x is None:
@@ -352,7 +352,7 @@ class AssignmentBar(QWidget):
         if source is None or image is None:
             return
         if not user:
-            self.dock.status.setText(self.tr("ユーザー名なし（環境変数 USERNAME か editTracking.user）: 分担は取得不可"))
+            self.dock.status.setText(self.tr("ユーザー名がないので分担を取得できない（管理者に連絡: editTracking.user）"))
             return
         repo = self.repository()
         now = int(time.time() * 1000)
@@ -377,8 +377,7 @@ class AssignmentBar(QWidget):
         source = self.source
         if source is None or x is None:
             return
-        if confirm and QMessageBox.question(self, self.tr("分担を手放す"), plain_tip(self.tr("{name} の担当をやめます（記録は残る）。").format(name=x.label))) \
-                != QMessageBox.StandardButton.Yes:
+        if confirm and not ask_no(self, self.tr("分担を手放す"), self.tr("{name} の担当を解除（記録は残る）").format(name=x.label), yes=self.tr("解除")):
             return
         repo = self.repository()
         self._run(self.tr("分担の解除"), lambda _t: repo.release(x), self.tr("{name} の担当を解除").format(name=x.label))

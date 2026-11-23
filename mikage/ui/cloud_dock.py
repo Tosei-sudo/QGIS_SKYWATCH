@@ -68,7 +68,7 @@ class CloudDock(PluginDock):
         self.body.addWidget(self.source)
         load_row = QHBoxLayout()
         self.load_button = QPushButton(self.tr("読み込み"))
-        self.load_button.setToolTip(self.tr("設定ファイルの雲量予報を表示（サービスなら地図の表示範囲を取得）"))
+        self.load_button.setToolTip(self.tr("設定した雲量予報を表示（地図の表示範囲の分を取得）"))
         self.load_button.clicked.connect(self.load)
         self.open_button = QPushButton(self.tr("ファイルを開く…"))
         self.open_button.setToolTip(self.tr("雲量の GeoTIFF（1 バンド＝1 予報時刻、docs/cloud-forecast-file.md）"))
@@ -205,7 +205,7 @@ class CloudDock(PluginDock):
         def failed(message):
             self.task = None
             self.load_button.setEnabled(True)
-            self.status.setText(self.tr("雲量予報を取得できず: {message}").format(message=message))
+            self.status.setText(self.tr("雲量予報の取得に失敗: {message}").format(message=message))
 
         self.task = run_task(self.tr("雲量マップの取得"), work, done, failed)
 

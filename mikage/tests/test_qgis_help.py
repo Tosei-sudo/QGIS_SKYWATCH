@@ -114,7 +114,7 @@ def test_from_the_menu_with_search_and_links(plugin, monkeypatch):  # noqa: F811
     told = []
     monkeypatch.setattr(p.iface.messageBar(), "pushInfo", lambda title, text: told.append(text))
     assert not dialog.follow(QUrl(OPEN + "接続と表の点検…")) and opened == []
-    assert told and "担当「管理者」の機能です" in told[0]
+    assert told and "担当「管理者」の機能（" in told[0]
     p.role_keeper.choose(["ADMIN"])
     assert dialog.follow(QUrl(OPEN + "接続と表の点検…")) and opened == ["health"]
     # Outside links go to the system's browser; the page's own anchors stay here.

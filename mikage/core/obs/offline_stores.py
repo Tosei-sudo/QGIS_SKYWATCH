@@ -463,9 +463,9 @@ def upload_drafts(store: Any, work: OfflineWork, report: UploadReport, prefs: An
         if record_id in saved:
             continue
         if record_id in conflicts:
-            wait(d, f"{d.record.object_name}: 後でほかの人が更新したため送らず（フォームで開いて直す）", check=True)
+            wait(d, f"{d.record.object_name}: あとでほかの人が変更したので未送信（フォームで開いて修正）", check=True)
             report.drafts += 1
         else:
-            wait(d, error_text or "送れず")
+            wait(d, error_text or "送信に失敗")
     if failed:
         report.kept.append(f"保存できなかった観測記録（{label}）: {error_text}")

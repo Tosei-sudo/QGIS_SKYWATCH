@@ -140,8 +140,8 @@ class ExportDialog(QDialog):
         self.named_select.setEditable(True)
         self.named_select.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.named_select.currentIndexChanged.connect(lambda _i: self.count())
-        self.named_button = QPushButton(self.tr("読み込み"))
-        self.named_button.setToolTip(self.tr("地名レイヤー（設定ファイルの namedAreas）の再読み込み"))
+        self.named_button = QPushButton(self.tr("最新を取得"))
+        self.named_button.setToolTip(self.tr("最新の地名の一覧を取得"))
         self.named_button.clicked.connect(lambda: self.read_named(again=True))
         nl.addWidget(self.named_select, 1)
         nl.addWidget(self.named_button)
@@ -395,12 +395,12 @@ class ExportDialog(QDialog):
 
         def failed(message: str) -> None:
             self.named_button.setEnabled(True)
-            self._say(self.tr("地名の読み込み失敗: {m}").format(m=message))
+            self._say(self.tr("地名の取得に失敗: {m}").format(m=message))
             then, self._after_named = self._after_named, None
             if then is not None:
                 then()  # 言葉で探す goes on without the place names
 
-        run_task(self.tr("地名の読み込み"), lambda _t: load_named_areas(client, source, token, max_age=0 if again else 600), finished, failed)
+        run_task(self.tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=0 if again else 600), finished, failed)
 
     def area(self) -> tuple[Optional[list], str]:
         """The place's polygons (WGS 84; None anywhere) and its name; ([], why) when it cannot be told."""
@@ -476,15 +476,15 @@ class ExportDialog(QDialog):
         if book.scoped:
             query = self.query_of(flt)
             if query.everything():
-                return [], self.tr("期間か場所を指定（共有の保存先の全件は読み込まない）")
+                return [], self.tr("期間か場所を指定（共有の保存先の全件は取得しない）")
             if self._read[0] != query:
                 self._wanted = query
                 self._ask_timer.start()
-                return [], self.tr("観測記録を読み込み中…")
+                return [], self.tr("観測記録を取得中…")
             rows = self._read[1]
         elif not self.dock.records_ready(self._records_read):
             # Not read yet (no image chosen in 「観測記録」): counted again once they are.
-            return [], self.tr("観測記録を読み込み中…")
+            return [], self.tr("観測記録を取得中…")
         else:
             rows = book.records
         taxa = book.taxonomy()
@@ -508,11 +508,11 @@ class ExportDialog(QDialog):
         def failed(message: str) -> None:
             self._asking = None
             if self._wanted == query:
-                self.count_label.setText(self.tr("読み込みの失敗: {m}").format(m=message))
+                self.count_label.setText(self.tr("取得に失敗: {m}").format(m=message))
             else:
                 self._ask()
 
-        self.dock.fetch(self.tr("エクスポートする記録の読み込み"), lambda b: b.fetch(query), done, failed)
+        self.dock.fetch(self.tr("エクスポートする記録の取得"), lambda b: b.fetch(query), done, failed)
 
     def _records_read(self) -> None:
         """The records just read: the 大分類 they use listed, and those that match counted."""
@@ -642,7 +642,7 @@ class ExportDialog(QDialog):
         def finished(out) -> None:
             self.save_button.setEnabled(True)
             if not out.data:
-                self._say(self.tr("保存できず: {e}").format(e="；".join(out.errors)))
+                self._say(self.tr("保存に失敗: {e}").format(e="；".join(out.errors)))
                 audit.error("file-save", path, "；".join(out.errors[:5]), detail={"what": "observations"})
                 return
             note = self.tr("（注意: {e}）").format(e="；".join(out.errors[:5]) + ("…" if len(out.errors) > 5 else "")) if out.errors else ""
@@ -652,7 +652,7 @@ class ExportDialog(QDialog):
 
         def failed(message: str) -> None:
             self.save_button.setEnabled(True)
-            self._say(self.tr("保存の失敗: {m}").format(m=message))
+            self._say(self.tr("保存に失敗: {m}").format(m=message))
 
         self.save_button.setEnabled(False)
         self._say(self.tr("保存中…"))

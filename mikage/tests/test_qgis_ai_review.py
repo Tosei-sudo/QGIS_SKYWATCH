@@ -87,9 +87,9 @@ def test_the_least_sure_first_and_the_judgements_kept(plugin, monkeypatch):
 
     assert dock.reject_rows([1])
     asked = []
-    monkeypatch.setattr(ai_results_dock.QMessageBox, "exec", lambda self: asked.append(self.text()) or ai_results_dock.QMessageBox.StandardButton.No)
+    monkeypatch.setattr(ai_results_dock, "ask_no", lambda parent, title, text, **_k: asked.append(text) or False)
     monkeypatch.setattr(ai_results_dock, "ASK_OVER", 1)
-    assert dock.import_all() == [] and asked == ["未取込 2 件を観測記録に取り込みますか？（誤検出は除外）"]
+    assert dock.import_all() == [] and asked == ["未取込 2 件を観測記録に取り込み（誤検出は除外）"]
     assert dock.import_rows([1]) == [] and "誤検出" in dock.status.text()
     saved = dock.import_all(confirm=False)
     assert len(saved) == 2 and len(living(book.records)) == 3

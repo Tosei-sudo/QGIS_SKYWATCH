@@ -184,7 +184,7 @@ def open_plan(plan: WebMapPlan, title: str, base_maps: list, auth: Callable[[str
 
 def _invalid(layer: QgsMapLayer) -> str:
     error = layer.error().summary() if layer.error() and not layer.error().isEmpty() else ""
-    return "開けず" + (f"：{error}" if error else "")
+    return "開けない" + (f"：{error}" if error else "")
 
 
 def _make(spec: WebMapLayer, name: str, auth: Callable[[str], Optional[str]], notes: list) -> list:
@@ -242,13 +242,13 @@ def _esri_layer(spec: WebMapLayer, name: str, authcfg: Optional[str], notes: lis
     if not layer.isValid():
         raise ValueError(_invalid(layer))
     if s.get("where") and not layer.setSubsetString(s["where"]):
-        notes.append((name, f"定義式を適用できず（{s['where']}）"))
+        notes.append((name, f"定義式の適用に失敗（{s['where']}）"))
     if spec.renderer:
         renderer = QgsArcGisRestUtils.convertRenderer(spec.renderer)
         if renderer is not None:
             layer.setRenderer(renderer)
         else:
-            notes.append((name, "Web マップのシンボルは QGIS で再現できず、サービスの既定で表示"))
+            notes.append((name, "Web マップのシンボルは QGIS で再現できないので、サービスの既定で表示"))
         layer.setCustomProperty(RENDERER, json.dumps(spec.renderer, ensure_ascii=False))
     if spec.labeling:
         _labels(layer, spec.labeling)
@@ -438,14 +438,14 @@ def save_layer(layer: QgsMapLayer, visible: bool, project: QgsProject) -> SaveLa
             return SaveLayer(type="json", json={"layerType": "VectorTileLayer", "styleUrl": style}, **common)
         if params.get("styleUrl"):
             return SaveLayer(type="json", json={"layerType": "VectorTileLayer", "styleUrl": params["styleUrl"]}, **common)
-        return SaveLayer(type="none", reason="スタイルのないベクタータイルは Web マップへの書き込み不可", **common)
+        return SaveLayer(type="none", reason="スタイルのないベクタータイルは Web マップに書き込めない", **common)
     if isinstance(layer, QgsVectorLayer):
         if not layer.isSpatial():
-            return SaveLayer(type="none", reason="表（ジオメトリなし）は書き込み不可", **common)
+            return SaveLayer(type="none", reason="表（ジオメトリなし）は書き込めない", **common)
         return _features_layer(layer, project, common)
     if isinstance(layer, QgsRasterLayer):
-        return SaveLayer(type="none", reason="画像（ファイル）は Web マップへの書き込み不可", **common)
-    return SaveLayer(type="none", reason="Web マップへの書き込み不可の種類", **common)
+        return SaveLayer(type="none", reason="画像（ファイル）は Web マップに書き込めない", **common)
+    return SaveLayer(type="none", reason="Web マップに書き込めないの種類", **common)
 
 
 def _kept_renderer(layer: QgsMapLayer) -> Optional[dict]:

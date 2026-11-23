@@ -110,14 +110,14 @@ class PlanResultsDialog(QDialog):
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
         self.table_columns = column_menus("plan-results", self.table, self)
         hand = QHBoxLayout()
-        self.taken_button = QPushButton(self.tr("撮像済みにする"))
+        self.taken_button = QPushButton(self.tr("撮像済みに変更"))
         self.taken_button.setToolTip(self.tr("選んだ依頼を撮像済みに（繰り上げを戻し、期間内1回は完了）"))
         self.taken_button.clicked.connect(lambda: self.mark("撮像済み"))
-        self.missed_button = QPushButton(self.tr("未撮像にする"))
+        self.missed_button = QPushButton(self.tr("未撮像に変更"))
         self.missed_button.setToolTip(self.tr("選んだ依頼を未撮像に（次回の計算で持ち越し・繰り上げ候補）"))
         self.missed_button.clicked.connect(lambda: self.mark("未撮像"))
         self.link_button = QPushButton(self.tr("画像と関連付け…"))
-        self.link_button.setToolTip(self.tr("画像カタログのレコードを選んで、ショットに手で関連付ける（選んだ行のショットを開く）"))
+        self.link_button.setToolTip(self.tr("画像カタログの画像を選んで、ショットに手で関連付け（選んだ行のショットを表示）"))
         self.link_button.clicked.connect(lambda: self.link_images())
         for b in (self.taken_button, self.missed_button, self.link_button):
             hand.addWidget(b)
@@ -136,7 +136,7 @@ class PlanResultsDialog(QDialog):
         if self.task is not None:
             return
         if store is None:
-            self.status.setText(self.tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
             return
         if not store.history:
             self.status.setText(self.tr("{s} に出力履歴（history）なし").format(s=store.label))
@@ -149,7 +149,7 @@ class PlanResultsDialog(QDialog):
         # The span's rows and those still open (followed up as 「計算」 does), not the whole table.
         where = (f"({history_where(store, first=first.isoformat(), last=last.isoformat())}) OR "
                  f"({history_where(store, open_rows=True)})")
-        self.status.setText(self.tr("出力履歴を読み込み、画像カタログと照合中…") if follow else self.tr("出力履歴を読み込み中…"))
+        self.status.setText(self.tr("出力履歴を取得し、画像カタログと照合中…") if follow else self.tr("出力履歴を取得中…"))
 
         def work(task):
             notes = []
@@ -277,7 +277,7 @@ class PlanResultsDialog(QDialog):
         if not findings or self.task is not None:
             return
         if captured == "撮像済み" and image_id is None:
-            image_id, ok = QInputDialog.getText(self, self.tr("撮像済みにする"), self.tr("画像ID（分かれば）"))
+            image_id, ok = QInputDialog.getText(self, self.tr("撮像済みに変更"), self.tr("画像ID（分かれば）"))
             if not ok:
                 return
         if image_id:
@@ -301,7 +301,7 @@ class PlanResultsDialog(QDialog):
                 self.requests = {r.id: r for r in result}
                 dock.requests_changed(result)
             text = (self.tr("{n} 件を{c}に変更").format(n=len(findings), c=captured) if not problems
-                    else self.tr("変更の一部を保存できず: {m}").format(m="、".join(problems[:3])))
+                    else self.tr("変更の一部の保存に失敗: {m}").format(m="、".join(problems[:3])))
             self.status.setText(text)
             self.render()
 

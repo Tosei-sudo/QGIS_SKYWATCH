@@ -107,7 +107,7 @@ class ConditionsPart:
             numbers += [(self.tr("方位角"), e) for e in (self.azimuth_from, self.azimuth_to)]
 
         def unread(label: str, edit: QLineEdit, kind: str) -> str:
-            return self.tr("{label}の「{text}」を読めません（{kind}）").format(label=label, text=edit.text().strip(), kind=kind)
+            return self.tr("{label}の「{text}」は読めない。{kind}入力").format(label=label, text=edit.text().strip(), kind=kind)
 
         for label, start, end in periods:
             try:
@@ -125,7 +125,7 @@ class ConditionsPart:
             try:
                 read_number(edit.text())
             except ValueError:
-                return unread(label, edit, self.tr("数で"))
+                return unread(label, edit, self.tr("数字で"))
         return None
 
     def extent(self) -> Optional[list[float]]:

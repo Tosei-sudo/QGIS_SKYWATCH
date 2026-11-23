@@ -530,7 +530,7 @@ def _decode(text: str) -> tuple[int, str, float, float, float]:
     s = text.replace(" ", "")
     m = re.match(r"^([0-9]{1,2})([A-Z])([A-Z]{2})([0-9]*)$", s)
     if not m:
-        raise ValueError(f"MGRS として読み込み不可: {text}")
+        raise ValueError(f"MGRS として読めない: {text}")
     zone, letter, hun_k, digits = int(m[1]), m[2], m[3], m[4]
     if letter <= "A" or letter in "BYIO" or letter >= "Z":
         raise ValueError(f"MGRS の帯の文字 {letter} は対象外")

@@ -43,7 +43,7 @@ class RecordsPart:
         self.roles_changed()
 
     def roles_changed(self) -> None:
-        """「ローカル記録の消去…」 (cannot be undone): the administrators' (core/roles.py); 「分類体系の編集…」 as its dock."""
+        """「この PC の記録を消去…」 (cannot be undone): the administrators' (core/roles.py); 「分類体系の編集…」 as its dock."""
         self.clear_button.setVisible(self.more.isChecked() and self.allows("observations.clear"))
         self.taxonomy_button.setVisible(self.more.isChecked() and self.edit_taxonomy is not None and self.allows("分類体系の編集"))
 

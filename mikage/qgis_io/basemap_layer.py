@@ -26,7 +26,7 @@ def _json(url: str, authcfg: Optional[str]) -> dict:
     try:
         value = json.loads(get_bytes(url, authcfg).decode("utf-8-sig"))
     except ValueError as error:
-        raise ValueError(f"JSON として読み込み不可（{url.split('?', 1)[0]}）") from error
+        raise ValueError(f"JSON として読めない（{url.split('?', 1)[0]}）") from error
     if not isinstance(value, dict):
         raise ValueError(f"JSON のオブジェクトでなし（{url.split('?', 1)[0]}）")
     return value
@@ -62,7 +62,7 @@ def open_base_map(base: BaseMapConfig, config_source: str) -> tuple[QgsMapLayer,
             notes.append("設定ファイルの token は使わず（「設定…」でこのサービスの認証設定を選択）")
     if not layer.isValid():
         error = layer.error().summary() if not layer.error().isEmpty() else ""
-        raise ValueError(f"開けず{'：' + error if error else ''}")
+        raise ValueError(f"開けない{'：' + error if error else ''}")
     if base.type in ("style", "esri"):
         # The style (and its icons) read here, in the task: the server's own, or the one given.
         message, ok = layer.loadDefaultStyle()

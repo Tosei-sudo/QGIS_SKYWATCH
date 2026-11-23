@@ -231,7 +231,7 @@ class CommandCard(QDialog):
         else:
             self.state.hide()
             self.how.setText(self.tr("言葉から") if reading.by == "words" else
-                             self.tr("生成 AI が選んだ（{s:.1f} 秒）").format(s=seconds) if seconds >= 0.1 else self.tr("生成 AI が選んだ"))
+                             self.tr("生成 AI が選択（{s:.1f} 秒）").format(s=seconds) if seconds >= 0.1 else self.tr("生成 AI が選択"))
         self.caution.setText(caution)
         self.caution.setVisible(bool(caution))
         self.timing.setText("")
@@ -244,7 +244,7 @@ class CommandCard(QDialog):
             return
         op = BY_KEY[key]
         h = self.host
-        self.how.setText(self.tr("選び直した"))
+        self.how.setText(self.tr("選び直し"))
         self.state.hide()
         self._show_values(read(op, self._text, h.today(), h.systems(), h.place_names(), h.satellites(), h.screens(), by="chosen"))
 
@@ -334,7 +334,7 @@ class CommandCard(QDialog):
             self._update_button()
             return
         point = lat_lon_in(text)
-        self.place_note.setText(self.tr("探しています…"))
+        self.place_note.setText(self.tr("検索中…"))
         self._update_button()
 
         def found(choice, problem: str) -> None:
@@ -526,7 +526,7 @@ class CommandBox(QObject):
             self._stop()
             if message == "取消":
                 return
-            self.card.show_reading(None, text, ops, problem=self.tr("生成 AI で読めず: {m}（下で選べば、文から値を読む）").format(m=message))
+            self.card.show_reading(None, text, ops, problem=self.tr("生成 AI で読めない: {m}（下で選べば、文から値を読む）").format(m=message))
 
         messages = command_messages(t, ops, text)
         self.asked = self.assistant.ask(TASK, self.tr("文で操作"), messages, done, failed, one_line=True,
@@ -586,13 +586,13 @@ class CommandBox(QObject):
             said = self.host.run(reading, self.card.place_found)
         except Exception as error:  # noqa: BLE001 (a screen that could not be opened: said, recorded, the card stays)
             audit.record("command", op.name, op.title, result="error", detail=detail, error=str(error))
-            self.card.state.setText(self.tr("できず: {m}").format(m=error))
+            self.card.state.setText(self.tr("失敗: {m}").format(m=error))
             self.card.state.setStyleSheet(WARN_STYLE)
             self.card.state.show()
             return
         audit.record("command", op.name, op.title, detail=detail)
         self.card.hide()
-        self.message = said or self.tr("{t} を開いた").format(t=op.title or op.name)
+        self.message = said or self.tr("{t} を表示").format(t=op.title or op.name)
         self.card.message = self.message
         self.iface.statusBarIface().showMessage(self.tr("文で操作: {m}").format(m=self.message), 8000)
         self.field.selectAll()

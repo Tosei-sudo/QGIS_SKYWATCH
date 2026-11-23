@@ -124,7 +124,7 @@ def test_image_rules_by_file_name():
         {"match": "x", "bands": [1, 2]},
     ], problems)
     assert [r.label for r in rules] == ["Landsat", r"_MS\.tif$", r"_warp\.tif$", r"_PAN\.tif$"]
-    assert len(problems) == 4 and problems[0].startswith("imageRules[4] の match は正規表現として読み込み不可")
+    assert len(problems) == 4 and problems[0].startswith("imageRules[4] の match は正規表現として読めない")
     landsat = rules[0]
     assert landsat.bands == [4, 3, 2]
     assert landsat.pipeline.get("contrast")["amount"] == 0.1

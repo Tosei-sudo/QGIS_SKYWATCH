@@ -136,8 +136,8 @@ class AnalysisDock(PluginDock):
         flow = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
         for key, text, tip, slot in [
-            ("new", self.tr("新規"), self.tr("空の分析から始める"), self.new),
-            ("save", self.tr("保存"), self.tr("この分析をプロジェクトに保存（名前がなければ尋ねる）"), lambda: self.save()),
+            ("new", self.tr("新規"), self.tr("空の分析から開始"), self.new),
+            ("save", self.tr("保存"), self.tr("この分析をプロジェクトに保存（名前がなければ入力）"), lambda: self.save()),
             ("save_as", self.tr("名前を付けて保存…"), self.tr("別の名前でプロジェクトに保存"), lambda: self.save(ask=True)),
             ("delete", self.tr("削除"), self.tr("この分析をプロジェクトから削除"), lambda: self.delete()),
             ("processing", self.tr("処理ツールで開く…"), self.tr("保存した分析をプロセシングのツールとして開く（結果をファイルに出力、"
@@ -162,7 +162,7 @@ class AnalysisDock(PluginDock):
         tl.setContentsMargins(0, 0, 0, 0)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels([self.tr("表・列"), self.tr("内容"), self.tr("読み込み条件")])
-        self.tree.setToolTip(self.tr("ダブルクリックで名前を SQL に入れる"))
+        self.tree.setToolTip(self.tr("ダブルクリックで名前を SQL に入力"))
         self.tree.itemDoubleClicked.connect(self._insert_name)
         self.tree.itemExpanded.connect(lambda _item: self.read_columns())
         self.tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -176,7 +176,7 @@ class AnalysisDock(PluginDock):
                                                  "大きな表はここで絞ると速い"))
         self.condition_button.clicked.connect(lambda: self.edit_condition())
         self.refresh_button = QPushButton(self.tr("一覧を更新"))
-        self.refresh_button.setToolTip(self.tr("プロジェクトのレイヤーと Esri の表の列を読み直す（覚えている読み込み結果も捨てる）"))
+        self.refresh_button.setToolTip(self.tr("プロジェクトのレイヤーと Esri の表の列を最新に更新（覚えている読み込み結果も破棄）"))
         self.refresh_button.clicked.connect(self.refresh_all)
         self.limit = QSpinBox()
         self.limit.setRange(1000, 5_000_000)
@@ -203,7 +203,7 @@ class AnalysisDock(PluginDock):
         self.sql.textChanged.connect(self._sql_changed)
         sl.addWidget(self.sql, 1)
         hint = QLabel(self.tr("SQLite の SELECT 文（WITH・JOIN・GROUP BY・ウィンドウ関数も可）。:名前 は実行時に入力する値。"
-                              "日時は「YYYY-MM-DD HH:MM:SS」（この PC の時刻）の文字。SHAPE で形状（WKT）。"))
+                              "日時は「YYYY-MM-DD HH:MM:SS」（この PC の時刻）の文字。SHAPE で形状（WKT）"))
         hint.setWordWrap(True)
         sl.addWidget(hint)
         self.tabs.addTab(sql_page, self.tr("SQL"))
@@ -220,13 +220,13 @@ class AnalysisDock(PluginDock):
         rl.addWidget(self.params_box)
         run_row = QHBoxLayout()
         self.run_button = QPushButton(self.tr("実行"))
-        self.run_button.setToolTip(self.tr("SQL に出てくる表を読み、集計する（Ctrl+Enter）"))
+        self.run_button.setToolTip(self.tr("SQL に出てくる表を読み込んで集計（Ctrl+Enter）"))
         self.run_button.clicked.connect(lambda: self.run())
         self.cancel_button = QPushButton(self.tr("取消"))
         self.cancel_button.clicked.connect(self.cancel)
         self.cancel_button.setEnabled(False)
         self.plan_button = QPushButton(self.tr("読み込み計画"))
-        self.plan_button.setToolTip(self.tr("実行する前に、各表をサーバーからどう読むかを見る（送る条件・読む列・件数・結合キー・キャッシュ）"))
+        self.plan_button.setToolTip(self.tr("実行の前に、各表をどう読み込むかを確認（条件・列・件数・結合キー・キャッシュ）"))
         self.plan_button.clicked.connect(lambda: self.explain())
         run_row.addWidget(self.run_button)
         run_row.addWidget(self.cancel_button)
@@ -289,7 +289,7 @@ class AnalysisDock(PluginDock):
         self.joins_layout.setContentsMargins(0, 0, 0, 0)
         self.join_rows: list[dict] = []
         add_join = QPushButton(self.tr("結合を追加"))
-        add_join.setToolTip(self.tr("別の表をつなぐ（キーは属性の役割から候補を出す）"))
+        add_join.setToolTip(self.tr("別の表を結合（キーは属性の役割から候補を表示）"))
         add_join.clicked.connect(lambda: self.add_join())
         jl = QVBoxLayout()
         jl.addWidget(self.joins_box)
@@ -335,7 +335,7 @@ class AnalysisDock(PluginDock):
         order.addWidget(self.row_limit)
         form.addRow(self.tr("並び"), order)
         to_sql = QPushButton(self.tr("SQL を開く"))
-        to_sql.setToolTip(self.tr("この集計の SQL を「SQL」で編集する（以後は SQL のほうで実行）"))
+        to_sql.setToolTip(self.tr("この集計の SQL を「SQL」で編集（以後は SQL のほうで実行）"))
         to_sql.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
         form.addRow("", to_sql)
         return page
@@ -682,7 +682,7 @@ class AnalysisDock(PluginDock):
                 item.setData(0, Qt.ItemDataRole.UserRole, t.name)
                 item.setToolTip(1, plain_tip(t.url or t.title))
                 if t.where:
-                    item.setToolTip(2, plain_tip(self.tr("設定ファイルの where: {w}").format(w=t.where)))
+                    item.setToolTip(2, plain_tip(self.tr("設定の条件: {w}").format(w=t.where)))
                 g.addChild(item)
                 for c in t.columns or [Column(n, "", r) for r, n in t.roles.items()]:
                     about = " · ".join(x for x in (c.type, c.role and f"役割 {c.role}", c.alias if c.alias and c.alias != c.name else "") if x)
@@ -738,9 +738,9 @@ class AnalysisDock(PluginDock):
         def failed(message: str) -> None:
             self._columns_task = None
             if not sip.isdeleted(self):
-                self.say(self.tr("列の読み込みに失敗: {m}").format(m=message))
+                self.say(self.tr("列の取得に失敗: {m}").format(m=message))
 
-        self._columns_task = run_task(self.tr("データ分析: 表の列の読み込み"), work, done, failed, hidden=True)
+        self._columns_task = run_task(self.tr("データ分析: 表の列の取得"), work, done, failed, hidden=True)
 
     def selected_table(self) -> Optional[Table]:
         item = self.tree.currentItem()
@@ -931,7 +931,7 @@ class AnalysisDock(PluginDock):
             self.task = None
             if sip.isdeleted(self):
                 return
-            self.say(self.tr("読み込み計画を表示した"))
+            self.say(self.tr("読み込み計画を表示"))
             self._update_buttons()
             self.show_plan(text)
             if then:
@@ -941,7 +941,7 @@ class AnalysisDock(PluginDock):
             self.task = None
             if sip.isdeleted(self):
                 return
-            self.say(self.tr("読み込み計画を作れない: {m}").format(m=message))
+            self.say(self.tr("読み込み計画の作成に失敗: {m}").format(m=message))
             self._update_buttons()
             if then:
                 then(None)
@@ -1112,10 +1112,10 @@ class AnalysisDock(PluginDock):
                 return None
         name = (name if name is not None else self.current).strip()
         if not name:
-            self.say(self.tr("名前を入れる"))
+            self.say(self.tr("名前を入力"))
             return None
         if name != self.current and any(a.name == name for a in self.analyses):
-            if not ask_no(self, self.tr("分析の保存"), self.tr("「{n}」はすでにある。上書きする？").format(n=name)):
+            if not ask_no(self, self.tr("分析の保存"), self.tr("「{n}」はすでにある。上書き").format(n=name), yes=self.tr("上書き")):
                 return None
         a = self.analysis()
         a.name = name
@@ -1134,7 +1134,7 @@ class AnalysisDock(PluginDock):
         """Opens the saved analysis as a Processing tool (its dialog); False when it is not saved."""
         name = name or self.current
         if not name or not any(a.name == name for a in self.analyses):
-            self.say(self.tr("先に分析を保存する"))
+            self.say(self.tr("先に分析を保存"))
             return False
         import processing  # QGIS's Processing plugin (loaded with QGIS)
 
@@ -1144,13 +1144,13 @@ class AnalysisDock(PluginDock):
     def delete(self, confirm: bool = True) -> bool:
         if not self.current:
             return False
-        if confirm and not ask_no(self, self.tr("分析の削除"), self.tr("「{n}」をプロジェクトから削除する？").format(n=self.current)):
+        if confirm and not ask_no(self, self.tr("分析の削除"), self.tr("「{n}」をプロジェクトから削除").format(n=self.current), yes=self.tr("削除")):
             return False
         self.analyses = [x for x in self.analyses if x.name != self.current]
         self._write()
         self.current = ""
         self._fill_chooser()
-        self.say(self.tr("削除した"))
+        self.say(self.tr("分析を削除"))
         return True
 
     def _update_buttons(self) -> None:

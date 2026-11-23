@@ -108,8 +108,8 @@ class MovingDock(PluginDock):
         self.trail.setValue(-1)
         self.stale.setValue(-1)
         form.addRow(_tr("航跡（分）"), self.trail)
-        form.addRow(_tr("薄くする（分）"), self.stale)
-        form.addRow(_tr("消す（分）"), self.remove)
+        form.addRow(_tr("薄く表示（分）"), self.stale)
+        form.addRow(_tr("消去（分）"), self.remove)
         form.addRow(QLabel(_tr("属性名（空欄は自動。入れ子は MetaData.MMSI のように . で連結）")))
         self.roles: dict[str, QLineEdit] = {}
         for role, label in ROLES.items():
@@ -215,7 +215,7 @@ class MovingDock(PluginDock):
             with open(path, "rb") as f:
                 rows = history_rows(f.read(), path)
         except (OSError, ValueError) as e:
-            self.note.setText(_tr("{name} を開けず: {e}").format(name=os.path.basename(path), e=e))
+            self.note.setText(_tr("{name} を開けない: {e}").format(name=os.path.basename(path), e=e))
             return None
         name = os.path.splitext(os.path.basename(path))[0]
         feed = self._with_details(FeedConfig(name, "poll", path))
@@ -290,7 +290,7 @@ class MovingDock(PluginDock):
             return False
         t = observed_image(layer).time
         if t is None:
-            self.note.setText(_tr("この画像の撮影時刻が不明（観測記録ドックで入力可能）"))
+            self.note.setText(_tr("この画像の撮影時刻が不明（観測記録ドックで入力できる）"))
             return False
         controller = self.iface.mapCanvas().temporalController()
         span = QgsDateTimeRange(_qdt(t - ALIGN_WINDOW), _qdt(t))

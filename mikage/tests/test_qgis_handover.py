@@ -137,8 +137,7 @@ def test_the_buttons_ask_as_when_clicked(plugin, monkeypatch):
     dialog.table.selectRow(0)
     monkeypatch.setattr(handover_dialog.QInputDialog, "getMultiLineText", staticmethod(lambda *a: ("北側から", True)))
     asked = []
-    monkeypatch.setattr(handover_dialog.QMessageBox, "question",
-                        staticmethod(lambda *a: asked.append(a[1]) or handover_dialog.QMessageBox.StandardButton.No))
+    monkeypatch.setattr(handover_dialog, "ask_no", lambda *a, **k: asked.append(a[1]) or False)
     dialog.note_button.click()
     assert wait_for(lambda: work.rows[0]["attributes"]["NOTE"] == "北側から")
     # Someone else's row: asked first, and left as it is on いいえ.
@@ -242,7 +241,7 @@ def test_shared_recording_starts_beside_someone_else(plugin):
     wheres = [form.get("where", "") for url, form in fake.asked[asked:] if url.endswith("/query")]
     assert wheres and all(f"IMAGE_ID = '{image.id}'" in w for w in wheres)
     dock.render()
-    assert bar.label.text() == "分担: 鈴木 さん（航空機 1）が担当中。一緒に担当できます"
+    assert bar.label.text() == "分担: 鈴木 さん（航空機 1）が担当中。一緒に担当できる"
     assert bar.take_button.isVisible() and bar.take_button.text() == "一緒に担当" and not bar.done_button.isVisible()
     dock.set_active(True)
     assert wait_for(lambda: dock.active)

@@ -47,11 +47,10 @@ def ask_upload(parent: Optional[QWidget], work: OfflineWork, back: bool) -> str:
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle(tr("オフライン中の作業"))
-    head = (tr("サーバーとの接続が戻りました。") if back else tr("オフライン中に作業した内容が送信されずに残っています。"))
-    box.setText(head + tr("送信待ちの変更をサーバーに送信しますか？"))
+    head = (tr("接続が回復。") if back else tr("オフライン中の作業がまだ送信待ち。"))
+    box.setText(head + tr("送信待ちの変更を送信"))
     box.setInformativeText(counts_text(work) + "\n\n" + tr(
-        "送信: サーバーに保存します（ほかの人が先に更新していた観測記録は保存せず、送信待ちに「要確認」として残します）。\n"
-        "破棄: 送信せずに消します（元に戻せません）。\n後で: 残したまま、ステータスバーの「送信待ち」の一覧からいつでも送信できます。"))
+        "送信: 送信待ちの変更を保存（ほかの人が先に変更した観測記録は「要確認」として残る）\n破棄: 送らずに消去（復元できない）\n後で: このまま残し、ステータスバーの「送信待ち」からいつでも送信できる"))
     upload = box.addButton(tr("送信"), QMessageBox.ButtonRole.AcceptRole)
     discard = box.addButton(tr("破棄…"), QMessageBox.ButtonRole.DestructiveRole)
     box.addButton(tr("後で"), QMessageBox.ButtonRole.RejectRole)
@@ -64,7 +63,7 @@ def ask_upload(parent: Optional[QWidget], work: OfflineWork, back: bool) -> str:
 def ask_discard(parent: Optional[QWidget], work: OfflineWork) -> bool:
     return QMessageBox.warning(
         parent, tr("送信待ちの破棄"),
-        tr("次の送信待ちをすべて送信せずに破棄します。元に戻せません。よろしいですか？") + "\n\n" + counts_text(work),
+        tr("次の送信待ちをすべて送らずに破棄（復元できない）") + "\n\n" + counts_text(work),
         QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
         QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Discard
 
@@ -114,7 +113,7 @@ class OfflineController(QObject):
         self.act_upload = self.menu.addAction(tr("送信待ちを送信…"), lambda: self.ask(back=False))
         self.act_discard = self.menu.addAction(tr("送信待ちをすべて破棄…"), self.discard)
         self.menu.addSeparator()
-        self.act_forced = QAction(tr("オフラインで作業する（手動）"), self.menu)
+        self.act_forced = QAction(tr("オフラインで作業（手動）"), self.menu)
         self.act_forced.setCheckable(True)
         self.act_forced.toggled.connect(self._forced)
         self.menu.addAction(self.act_forced)
@@ -184,14 +183,13 @@ class OfflineController(QObject):
             self.button.setText(tr("⚠ オフライン作業中") + (tr("（送信待ち {n} 件）").format(n=total) if total else ""))
             self.button.setStyleSheet("QToolButton { color: #b45309; font-weight: bold; }")
             since = _when(work.since())
-            self.button.setToolTip(tr("サーバーに接続できないため、最後に読めた内容で作業中{since}。\n変更は送信待ちとして保存し、"
-                                      "接続が戻ったら送信するか確認します。\n{why}").format(
+            self.button.setToolTip(tr("つながらないため、最後に取得した内容で作業中{since}。"
+                                      "\n変更は送信待ちとして保管し、つながったら送信を確認\n{why}").format(
                 since=tr("（{t} から）").format(t=since) if since else "", why="\n".join(work.reasons())))
         elif total:
             self.button.setText(tr("送信待ち {n} 件").format(n=total))
             self.button.setStyleSheet("QToolButton { color: #b45309; }")
-            self.button.setToolTip(tr("サーバーに送られていない変更（オフライン中の作業・保存できなかった観測記録）が残っています"
-                                      "（クリックで一覧・送信・破棄）"))
+            self.button.setToolTip(tr("まだ送っていない変更あり。クリックで一覧・送信・破棄"))
         else:
             self.button.setText("")
         self.button.setVisible(bool(down or total))
@@ -204,15 +202,15 @@ class OfflineController(QObject):
         if down and not self._was_down:
             self.iface.messageBar().pushWarning(
                 tr("オフライン作業"),
-                tr("サーバーに接続できません。最後に読めた内容で作業を続けます（変更は送信待ちとして保存し、接続が戻ったら確認します）。")
-                if not work.forced else tr("手動でオフラインに切り替えました。変更は送信待ちとして保存します。"))
+                tr("つながらないので、最後に取得した内容で作業を続行（変更は送信待ちとして保管）")
+                if not work.forced else tr("手動でオフラインに切り替え。変更は送信待ちとして保管"))
         back = self._was_down and not down
         self._was_down = down
         if back:
             if work.sendable():
                 self.ask(back=True)
             else:
-                self.iface.messageBar().pushSuccess(tr("オフライン作業"), tr("サーバーとの接続が戻りました。"))
+                self.iface.messageBar().pushSuccess(tr("オフライン作業"), tr("接続が回復"))
                 self.back_timer.start(random.randint(0, BACK_SPREAD_MS))
 
     def _menu_shown(self) -> None:
@@ -254,7 +252,7 @@ class OfflineController(QObject):
         def failed(_message: str) -> None:
             self._probing = False
 
-        run_task(tr("サーバーへの接続の確認"), lambda task: self.work.probe(send), done, failed, hidden=True)
+        run_task(tr("接続の確認"), lambda task: self.work.probe(send), done, failed, hidden=True)
 
     # ---- sending or throwing away ---------------------------------------
 
@@ -308,7 +306,7 @@ class OfflineController(QObject):
             return
         n = self.work.discard()
         audit.record("offline", "discard", count=n, detail={"kind": "all"})
-        self.iface.messageBar().pushInfo(tr("オフライン作業"), tr("送信待ち {n} 件を破棄しました。").format(n=n))
+        self.iface.messageBar().pushInfo(tr("オフライン作業"), tr("送信待ち {n} 件を破棄").format(n=n))
         self.finished.emit()
 
     def upload(self, then: Optional[Callable[[UploadReport], None]] = None, only: Optional[set] = None) -> None:
@@ -333,7 +331,7 @@ class OfflineController(QObject):
 
         def failed(message: str) -> None:
             self._uploading = False
-            self.iface.messageBar().pushWarning(tr("送信待ちの送信"), plain_tip(tr("送信できず（{m}）。送信待ちのまま残しています。").format(m=message)))
+            self.iface.messageBar().pushWarning(tr("送信待ちの送信"), plain_tip(tr("送信に失敗: {m}（送信待ちのまま）").format(m=message)))
             self._update()
 
         run_task(tr("送信待ちの送信"), work, done, failed)

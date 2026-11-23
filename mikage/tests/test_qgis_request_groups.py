@@ -162,7 +162,7 @@ def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
     dock.chosen = next(r for r in dock.requests if r.name == "呉")
     dock.edit()
     form = dock.form
-    assert form.group.currentText() == "旧体制（使用停止・テーブルにない）" and form.group_value() == "旧体制"
+    assert form.group.currentText() == "旧体制（使用停止か、一覧にない）" and form.group_value() == "旧体制"
     assert form.value().group == "旧体制"
     form.close()
 
@@ -270,6 +270,6 @@ def test_a_groups_table_that_cannot_be_read_leaves_the_requests(plugin):
     dock = p.api.requests
     dock.show()
     assert wait_for(lambda: dock._loaded and dock.task is None and dock.requests), dock.status.text()
-    assert len(dock.requests) == 4 and "依頼グループのテーブルを読めず" in dock.status.text()
+    assert len(dock.requests) == 4 and "依頼グループのテーブルを読めない" in dock.status.text()
     assert not dock.groups_read and not dock.known()["groupTable"]
     assert [d for _t, d in choices(dock.group_filter)] == [None, "旧体制", "第1班", "第2班", NO_GROUP]

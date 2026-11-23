@@ -64,7 +64,7 @@ def sensor_view_of(path: str) -> Optional[SensorView]:
 def _dem_on_grid(ds, dem_path: str):
     dem = gdal.Open(dem_path)
     if dem is None:
-        raise OrthoError("標高データを開けず")
+        raise OrthoError("標高データを開けない")
     gt = ds.GetGeoTransform()
     bounds = (gt[0], gt[3] + ds.RasterYSize * gt[5], gt[0] + ds.RasterXSize * gt[1], gt[3])
     options = dict(format="VRT", outputBounds=bounds, width=ds.RasterXSize, height=ds.RasterYSize, resampleAlg="bilinear",
@@ -119,7 +119,7 @@ def simple_orthorectify(path: str, dem_path: str, out_path: str, view: SensorVie
     say = progress or (lambda _p: None)
     ds = gdal.Open(path)
     if ds is None:
-        raise OrthoError("画像を開けず")
+        raise OrthoError("画像を開けない")
     gt = ds.GetGeoTransform()
     if gt[2] != 0 or gt[4] != 0:
         raise OrthoError("北が上でない（回転のある）画像は未対応")
@@ -135,7 +135,7 @@ def simple_orthorectify(path: str, dem_path: str, out_path: str, view: SensorVie
     out = gdal.GetDriverByName("GTiff").Create(out_path, width, height, count + (1 if alpha else 0), ds.GetRasterBand(1).DataType,
                                                options=["TILED=YES", "COMPRESS=DEFLATE", "BIGTIFF=IF_SAFER"] + (["ALPHA=YES"] if alpha else []))
     if out is None:
-        raise OrthoError(f"{out_path} を作成できず")
+        raise OrthoError(f"{out_path} の作成に失敗")
     out.SetGeoTransform(gt)
     if ds.GetProjection():
         out.SetProjection(ds.GetProjection())

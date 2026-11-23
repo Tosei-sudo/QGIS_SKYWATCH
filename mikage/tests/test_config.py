@@ -35,7 +35,7 @@ class TestJsonc:
         with pytest.raises(JsoncError, match="3 行"):
             load_jsonc('{\n "a": 1\n "b": 2}')
         config, problems = parse_config_text("{")
-        assert problems and problems[0].startswith("設定ファイルを JSON として読み込み不可")
+        assert problems and problems[0].startswith("設定ファイルを JSON として読めない")
         assert config.satellite_catalogs == []
 
     def test_reads_the_viewer_example_and_ignores_keys_it_does_not_use(self):
@@ -96,7 +96,7 @@ class TestSatelliteCatalogs:
         assert problems == [
             "satelliteCatalogs[2] の fields.name は属性名（英数字と _）で指定",
             "satelliteCatalogs[2] の defaults.swath は 0 以上の数で指定",
-            "satelliteCatalogs[2] の sarPattern は正規表現として読み込み不可",
+            "satelliteCatalogs[2] の sarPattern は正規表現として読めない",
         ]
 
     def test_reads_the_look_side_in_english_letters_and_japanese(self):
@@ -220,7 +220,7 @@ class TestObservationSettings:
         assert store.fields["id"] == "OBS_ID"
         assert store.soft_delete is False
         assert store.activities == ["入港"]
-        assert problems == ["observationStores[0] の fields.bogus は使用不可の役割"]
+        assert problems == ["observationStores[0] の fields.bogus は使えない役割"]
         assert observation_store_of({"url": "https://x/MapServer/2"}, problems, 1) is None
         assert vocabulary_of({"kinds": ["艦艇"]}, problems).kinds == ["艦艇"]
 
@@ -264,7 +264,7 @@ class TestObservationSettings:
         a = area_store_of({"url": "https://x/FeatureServer/3", "fields": {"kind": "TARGET", "bad": "X"}, "softDelete": False}, problems, "a")
         assert (a.url, a.soft_delete, a.fields["kind"], a.fields["id"]) == ("https://x/FeatureServer/3", False, "TARGET", "AREA_ID")
         assert area_store_of("https://x/MapServer/3", problems, "b") is None
-        assert problems == ["a の fields.bad は使用不可の役割", "b は編集できる …/FeatureServer/1 のようなポリゴンレイヤーの URL で指定"]
+        assert problems == ["a の fields.bad は使えない役割", "b は編集できる …/FeatureServer/1 のようなポリゴンレイヤーの URL で指定"]
 
     def test_reads_the_taxonomy_plain_names_too(self):
         problems = []

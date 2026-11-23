@@ -249,7 +249,7 @@ class WebMapSaveDialog(QDialog):
             self.summary.setText(_tr("書き込めるレイヤーなし（表示範囲と背景地図のみ書き込み）"))
         self.skipped.clear()
         for title, reason in result.skipped:
-            self.skipped.addItem(_list_item(_tr("書き込み不可: {title} — {reason}").format(title=title, reason=reason), True))
+            self.skipped.addItem(_list_item(_tr("書き込めない: {title} — {reason}").format(title=title, reason=reason), True))
         self.skipped.setVisible(bool(result.skipped))
 
     def name(self) -> str:
@@ -299,11 +299,11 @@ class WebMapSaveDialog(QDialog):
         self.show_summary(result)
         title, user, folder = self.name(), self.user.text().strip(), self.folder.text().strip()
         if update:
-            text = _tr("{portal} の Web マップ（{id}）を「{title}」で上書き（{n} レイヤー）。よろしいですか？").format(
+            text = _tr("{portal} の Web マップ（{id}）を「{title}」で上書き（{n} レイヤー）").format(
                 portal=portal, id=update, title=title, n=len(result.included))
         else:
             where = (_tr("ユーザー {user}").format(user=user) if user else _tr("サインインのユーザー")) + (_tr(" のフォルダー「{f}」").format(f=folder) if folder else "")
-            text = _tr("{portal} の{where}に、Web マップ「{title}」を新規作成（{n} レイヤー）。よろしいですか？").format(
+            text = _tr("{portal} の{where}に、Web マップ「{title}」を新規作成（{n} レイヤー）").format(
                 portal=portal, where=where, title=title, n=len(result.included))
         if not self.confirm(text, _tr("上書き") if update else _tr("作成")):
             self.status.setText(_tr("保存取消"))
@@ -374,10 +374,10 @@ class WebMapDialogs(QObject):
                 try:
                     data = json.loads(f.read().decode("utf-8-sig"))
                 except (ValueError, UnicodeDecodeError):
-                    raise ValueError(_tr("JSON として読み込み不可")) from None
+                    raise ValueError(_tr("JSON として読めない")) from None
             plan = plan_web_map(data)
         except (OSError, ValueError) as error:
-            self.open_dialog.show_result(_tr("読み込み失敗: {e}").format(e=error), [])
+            self.open_dialog.show_result(_tr("読み込みに失敗: {e}").format(e=error), [])
             return
         auth = auth_with_portal(portal, authcfg)
         base_maps = list(self.context.config.base_maps)
@@ -393,7 +393,7 @@ class WebMapDialogs(QObject):
     def _failed(self, message: str) -> None:
         self.task = None
         self.open_dialog.busy(False)
-        self.open_dialog.show_result(_tr("読み込み失敗: {e}").format(e=message), [])
+        self.open_dialog.show_result(_tr("読み込みに失敗: {e}").format(e=message), [])
 
     def _opened(self, result) -> None:
         self.task = None
@@ -410,12 +410,12 @@ class WebMapDialogs(QObject):
         if opened.bookmarks:
             lines.append((_tr("ブックマーク {n} 件を追加（グループ「{title}」）").format(n=len(opened.bookmarks), title=opened.title), False))
         lines += [(f"{title}: {note}", False) for title, note in opened.notes]
-        lines += [(_tr("読み込み失敗: {title} — {reason}").format(title=title, reason=reason), True) for title, reason in opened.problems]
+        lines += [(_tr("読み込みに失敗: {title} — {reason}").format(title=title, reason=reason), True) for title, reason in opened.problems]
         self.opened = (ref, opened.title)
         count = len(opened.layers)
         summary = _tr("Web マップ「{title}」の {n} レイヤーを表示").format(title=opened.title, n=count)
         if opened.problems:
-            summary += _tr("（{n} レイヤーは読み込み失敗）").format(n=len(opened.problems))
+            summary += _tr("（{n} レイヤーは読み込みに失敗）").format(n=len(opened.problems))
         self.open_dialog.show_result(summary, lines)
         self.iface.messageBar().pushInfo(TITLE, summary)
 

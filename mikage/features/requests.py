@@ -1,6 +1,6 @@
 """
 撮像依頼: 撮像依頼, 撮像計画ファイル出力, 撮像予定, 地点ごとの撮像予定, 「年間撮像上限…」,
-「衛星の障害情報…」, 「この地点の撮像予定」 on the map, the plan's 「臨時依頼にする」 and the ledger read ahead.
+「衛星の障害情報…」, 「この地点の撮像予定」 on the map, the plan's 「臨時依頼を作成」 and the ledger read ahead.
 """
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ class Requests(Feature):
         """Opens 「年間撮像上限」 (from the 「撮像計画ファイル出力」 dock's store, today's year)."""
         dock = self.docks["SatObsPlanFiles"]
         if dock.store is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("設定ファイルに撮像依頼の保存先（requestStores）なし"))
+            self.iface.messageBar().pushInfo("MIKAGE", tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）"))
             return None
         return dock.show_quotas()
 
@@ -152,7 +152,7 @@ class Requests(Feature):
         """Opens 「衛星の障害情報」 (once; read again each time it is opened)."""
         host = self.host
         if self.context.config.satellite_outages is None:
-            self.iface.messageBar().pushInfo("MIKAGE", tr("設定ファイルに衛星の障害情報の表（satelliteOutages）なし"))
+            self.iface.messageBar().pushInfo("MIKAGE", tr("衛星の障害情報の表が未設定（管理者に連絡: satelliteOutages）"))
             return None
         if host.outage_dialog is None:
             from ..ui.outage_dialog import OutageDialog

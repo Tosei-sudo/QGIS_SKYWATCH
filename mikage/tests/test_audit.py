@@ -434,8 +434,8 @@ def test_esri_failures_in_tasks_are_errors(tmp_path):
     def work(_task):
         raise EsriError("サーバーに接続できません")
 
-    task = FunctionTask("撮像依頼の読み込み", work)
+    task = FunctionTask("撮像依頼の取得", work)
     assert task.run() is False
     log.write_queued()
     [rec] = [json.loads(x) for x in lines_of(day_file(log))]
-    assert (rec["kind"], rec["action"], rec["target"], rec["error"]) == ("error", "task", "撮像依頼の読み込み", "サーバーに接続できません")
+    assert (rec["kind"], rec["action"], rec["target"], rec["error"]) == ("error", "task", "撮像依頼の取得", "サーバーに接続できません")

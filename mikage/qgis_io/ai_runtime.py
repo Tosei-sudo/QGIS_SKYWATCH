@@ -101,7 +101,7 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
         try:
             import onnxruntime as ort  # noqa: PLC0415
         except ImportError as error:
-            raise RuntimeMissing(f"同梱の onnxruntime を読み込めず（{error}）。{install_hint(system)}") from error
+            raise RuntimeMissing(f"同梱の onnxruntime の読み込みに失敗（{error}）。{install_hint(system)}") from error
     if ort is None:
         raise RuntimeMissing(f"AI の実行に必要な onnxruntime なし。{install_hint(system)}")
     quiet_telemetry(ort)
@@ -220,7 +220,7 @@ def download(url: str, target: str, authcfg: Optional[str] = None, progress: Opt
                 raise AiError(f"モデルの取得が途中で停止（{url.split('?', 1)[0]}）")
             status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
             if reply.error() != QNetworkReply.NetworkError.NoError or (isinstance(status, int) and status >= 400):
-                raise AiError(f"{url.split('?', 1)[0]} の読み込みに失敗（{'HTTP ' + str(status) if isinstance(status, int) else '接続不可'}）")
+                raise AiError(f"{url.split('?', 1)[0]} の読み込みに失敗（{'HTTP ' + str(status) if isinstance(status, int) else '接続できない'}）")
         finally:
             reply.deleteLater()
 
@@ -312,7 +312,7 @@ def create_model(path: str, name: str = "", use_gpu: bool = True) -> LoadedModel
         except Exception as e:  # noqa: BLE001 (some models use operators a GPU provider does not have)
             error = e
     if session is None:
-        raise AiError(f"モデルを読み込めず（{os.path.basename(path)}: {str(error).splitlines()[0] if error else '不明'}）")
+        raise AiError(f"モデルの読み込みに失敗（{os.path.basename(path)}: {str(error).splitlines()[0] if error else '不明'}）")
     meta = session.get_modelmeta()
     signature = OnnxSignature(
         [OnnxValue(v.name, v.type, _dims(v.shape)) for v in session.get_inputs()],

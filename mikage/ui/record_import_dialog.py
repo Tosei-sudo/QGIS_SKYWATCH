@@ -99,7 +99,7 @@ class RecordImportDialog(QDialog):
         scroll.setWidget(holder)
         scroll.setMinimumHeight(180)
         ml.addWidget(scroll)
-        self.update_existing = QCheckBox(self.tr("観測ID が同じ既存の記録を更新する（列の値で上書き。ほかの人が先に変えた記録は上書きしない）"))
+        self.update_existing = QCheckBox(self.tr("観測ID が同じ既存の記録を更新（列の値で上書き。ほかの人が先に変更した記録は上書きしない）"))
         self.update_existing.toggled.connect(lambda _on: self._invalidate())
         ml.addWidget(self.update_existing)
         main.addWidget(mapping, 1)
@@ -232,15 +232,15 @@ class RecordImportDialog(QDialog):
 
                     def failed(message: str) -> None:
                         self._asking = None
-                        self.status.setText(self.tr("観測記録の読み込みの失敗: {m}").format(m=message))
+                        self.status.setText(self.tr("観測記録の取得に失敗: {m}").format(m=message))
 
-                    self.dock.fetch(self.tr("取り込む記録の読み込み"), lambda b: b.fetch(query) if not query.everything() else [], done, failed)
-                self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試し読み）"))
+                    self.dock.fetch(self.tr("取り込み先の記録の取得"), lambda b: b.fetch(query) if not query.everything() else [], done, failed)
+                self.status.setText(self.tr("観測記録を取得中…（取得後に試行）"))
                 return []
             records = list(self._read_rows)
         elif not self.dock.records_ready(self.try_run):
             # Not read yet (no image chosen in 「観測記録」): tried once they are (what is there already matters).
-            self.status.setText(self.tr("観測記録を読み込み中…（読み終えたら試し読み）"))
+            self.status.setText(self.tr("観測記録を取得中…（取得後に試行）"))
             return []
         else:
             records = list(book.records)
@@ -289,9 +289,9 @@ class RecordImportDialog(QDialog):
         if not (n_new or n_update):
             return False
         book = self.dock.book
-        question = self.tr("{s} に新規 {a} 件・更新 {u} 件を保存する？（重複・エラー {x} 件は飛ばす）").format(
+        question = self.tr("{s} に新規 {a} 件・更新 {u} 件を保存（重複・エラー {x} 件は飛ばす）").format(
             s=book.label if book is not None else "", a=n_new, u=n_update, x=counts[ri.DUPLICATE] + counts[ri.ERROR] + counts[ri.EXISTING])
-        if confirm and not ask_no(self, self.tr("観測記録の一括取込み"), question):
+        if confirm and not ask_no(self, self.tr("観測記録の一括取込み"), question, yes=self.tr("保存")):
             return False
         planned = list(self.planned)
         self._running = True

@@ -320,7 +320,7 @@ class NoticeCard(QFrame):
                                                  "画像ファイルの一覧があればチェックしたものを。カードのダブルクリックでも")),
                 ("record", self.tr("ファイルなしで記録"), self.tr("画像ファイルなしのカタログの画像を観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから）")),
                 ("map", self.tr("地図で見る"), self.tr("地図に切り替えて画像の範囲へ移動（既読に）")),
-                ("read", self.tr("既読"), self.tr("既読にする"))]:
+                ("read", self.tr("既読"), self.tr("既読に変更"))]:
             # No 「削除」 on the card (tsudo, 2026-11-14: 用語が混乱する); the 通知 dock still has it.
             button = QPushButton(text)
             button.setToolTip(tip)
@@ -445,14 +445,14 @@ class NoticeCard(QFrame):
                 sections.append((heading, lines))
                 continue
             failed = self.feed.work.failure(self.feed.contents_key(self.notice))
-            sections.append((layer.label, [self.tr("照合できず: {m}").format(m=failed) if failed else self.tr("照合中…")]))
+            sections.append((layer.label, [self.tr("照合に失敗: {m}").format(m=failed) if failed else self.tr("照合中…")]))
         self.contents.setText(_sections_html(sections))
 
     def _interest_section(self, book) -> tuple:
         """The heading and lines of the person's items over the image (each in its colour), or why not yet."""
         label = book.settings.label
         if book.items is None:
-            return label, [self.tr("読み込めず: {m}").format(m=book.failure) if book.failure and not book.loading else self.tr("読み込み中…")]
+            return label, [self.tr("取得に失敗: {m}").format(m=book.failure) if book.failure and not book.loading else self.tr("取得中…")]
         found = book.over(self.notice.feature.get("geometry"))
         lines: list = section_lines(found) or [self.tr("なし")]
         return self.tr("{label}（{n} 件）").format(label=label, n=len(found)), lines
@@ -484,7 +484,7 @@ class NoticeCard(QFrame):
         self.files_title.setText(self.tr("画像ファイル（{n}）").format(n=len(names)) if len(names) > 1 else self.tr("画像ファイル"))
         if where is None:
             failed = feed.work.failure(feed.files_key(self.notice))
-            self.files.setText(self.tr("見つからず: {m}").format(m=failed) if failed else self.tr("探しています…"))
+            self.files.setText(self.tr("見つからず: {m}").format(m=failed) if failed else self.tr("検索中…"))
         else:
             self.files.setText(self.tr("（ほかにもあり。すべては通知ドックの「開く」で選ぶ）") if where.more else "")
         self.files.setVisible(bool(self.files.text()))
@@ -517,9 +517,9 @@ class NoticeCard(QFrame):
                 return
         failed = feed.work.failure("thumb|" + address)
         self._set_source(shape_picture(geometry, width, height,
-                                       self.tr("サムネイルを取得できず") if failed else self.tr("サムネイルを読み込み中…")))
+                                       self.tr("サムネイルの取得に失敗") if failed else self.tr("サムネイルを取得中…")))
         if failed:
-            self.picture.setToolTip(self.tr("サムネイルを取得できず: {m}").format(m=failed))
+            self.picture.setToolTip(self.tr("サムネイルの取得に失敗: {m}").format(m=failed))
 
     def fit(self, room: int) -> None:
         """The card as wide as the page has room for: the thumbnail smaller when it is narrow."""
@@ -685,7 +685,7 @@ class NoticeFeed(QWidget):
         self.scroll.setWidget(holder)
         layout.addWidget(self.scroll, 1)
         self.arrived_button = QPushButton()
-        self.arrived_button.setToolTip(self.tr("来たばかりの新着画像へ（新着が来ても画面は動かさない）"))
+        self.arrived_button.setToolTip(self.tr("最新の新着画像へ移動（新着が来ても自動では動かない）"))
         self.arrived_button.clicked.connect(self.go_to_arrived)
         self.arrived_button.hide()
         layout.addWidget(self.arrived_button, 0, Qt.AlignmentFlag.AlignHCenter)

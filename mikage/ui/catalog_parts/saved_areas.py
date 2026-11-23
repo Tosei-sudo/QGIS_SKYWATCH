@@ -93,7 +93,7 @@ class SavedAreasPart:
         settings.set_saved_areas(areas)
         self._fill_saved_areas(area.id)
         self.area_box.setCurrentIndex(self.area_box.findData("saved"))
-        self.status.setText(self.tr("範囲「{name}」を保存。「保存した範囲」から選べます").format(name=area.name))
+        self.status.setText(self.tr("範囲「{name}」を保存。「保存した範囲」から選べる").format(name=area.name))
         return None
 
     def ask_save_area(self) -> None:
@@ -105,7 +105,7 @@ class SavedAreasPart:
         if not ok or not name.strip():
             return
         if saved_area_list.by_name(self.saved_areas(), name) is not None and not ask_no(
-                self, self.tr("範囲の保存"), self.tr("「{name}」はすでにあります。今描いた範囲で置き換えますか。").format(name=name.strip())):
+                self, self.tr("範囲の保存"), self.tr("「{name}」はすでにある。今描いた範囲で置き換え").format(name=name.strip()), yes=self.tr("置き換え")):
             return
         problem = self.save_area(name)
         if problem:
@@ -144,5 +144,5 @@ class SavedAreasPart:
 
     def ask_delete_saved_area(self) -> None:
         area = self.saved_area()
-        if area is not None and ask_no(self, self.tr("保存した範囲の削除"), self.tr("「{name}」を削除しますか。").format(name=area.name)):
+        if area is not None and ask_no(self, self.tr("保存した範囲の削除"), self.tr("「{name}」を削除").format(name=area.name), yes=self.tr("削除")):
             self.delete_saved_area()

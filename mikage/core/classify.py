@@ -172,7 +172,7 @@ def k_means(samples: np.ndarray, k: int, iterations: int = 30, seed: int = 1) ->
     samples = np.asarray(samples, dtype=np.float64)
     n, dims = samples.shape
     if n < k:
-        raise ValueError(f"値のある画素が {n} のみのため、{k} クラスへの分類不可")
+        raise ValueError(f"値のある画素が {n} のみのため、{k} クラスに分類できない")
     rand = random(seed)
     means = np.zeros((k, dims))
     nearest = np.full(n, np.inf)

@@ -46,10 +46,10 @@ def kind_text(p: Pending) -> str:
 def state_text(p: Pending) -> str:
     """Why an item waits, as the list says it."""
     if p.kind == DRAFT:
-        head = tr("要確認") if p.op == CHECK else tr("保存できず")
+        head = tr("要確認") if p.op == CHECK else tr("保存に失敗")
         return f"{head}: {p.note}" if p.note else head
     head = tr("オフライン中の削除") if p.op == "remove" else tr("オフライン中の変更")
-    return f"{head}（{tr('前回送れず')}: {p.note}）" if p.note else head
+    return f"{head}（{tr('前回の送信に失敗')}: {p.note}）" if p.note else head
 
 
 class OutboxDialog(QDialog):
@@ -60,9 +60,9 @@ class OutboxDialog(QDialog):
         self.setWindowTitle(tr("送信待ち"))
         self.resize(820, 400)
         layout = QVBoxLayout(self)
-        note = QLabel(tr("サーバーにまだ送られていない変更です（この PC に保管）。オフライン中に作業したものと、通信やサインインの失敗・"
-                         "ほかの人の変更で保存できなかった観測記録が並びます。「送信」は選んだもの（選んでいなければ、要確認以外のすべて）を送ります。"
-                         "「要確認」はほかの人が後で変えた記録なので、「フォームで開く」で確かめて保存してください。"))
+        note = QLabel(tr("まだ送っていない変更の一覧（この PC に保管）。オフライン中の作業と、保存に失敗した観測記録を表示。"
+                         "「送信」は選んだもの（選んでいなければ、要確認以外のすべて）を送信。"
+                         "「要確認」はほかの人が先に変更した記録なので、「フォームで開く」で確認してから保存"))
         note.setWordWrap(True)
         layout.addWidget(note)
         self.tree = QTreeWidget()
@@ -79,13 +79,13 @@ class OutboxDialog(QDialog):
         layout.addWidget(self.status)
         row = QHBoxLayout()
         self.send_button = QPushButton(tr("送信"))
-        self.send_button.setToolTip(tr("選んだもの（選んでいなければ要確認以外のすべて）をサーバーへ送る"))
+        self.send_button.setToolTip(tr("選んだもの（選んでいなければ要確認以外のすべて）を送信"))
         self.send_button.clicked.connect(lambda _on=False: self.send())
         self.open_button = QPushButton(tr("フォームで開く"))
-        self.open_button.setToolTip(tr("選んだ観測記録（保存できなかったもの）を「観測記録」ドックのフォームで開いて直す（画像を開いておく）"))
+        self.open_button.setToolTip(tr("選んだ観測記録を「観測記録」ドックのフォームで開いて修正（先に画像を開く）"))
         self.open_button.clicked.connect(lambda _on=False: self.open_chosen())
         self.drop_button = QPushButton(tr("捨てる…"))
-        self.drop_button.setToolTip(tr("選んだものを送らずに消す（元に戻せない）"))
+        self.drop_button.setToolTip(tr("選んだものを送らずに破棄（復元できない）"))
         self.drop_button.clicked.connect(lambda _on=False: self.drop())
         for b in (self.send_button, self.open_button, self.drop_button):
             row.addWidget(b)
@@ -159,7 +159,7 @@ class OutboxDialog(QDialog):
         keys = self.chosen_keys()
         if not keys:
             return 0
-        if ask and not ask_no(self, tr("送信待ちを捨てる"), tr("選んだ {n} 件を送らずに捨てますか？元に戻せません。").format(n=len(keys))):
+        if ask and not ask_no(self, tr("送信待ちの破棄"), tr("選んだ {n} 件を送らずに破棄（復元できない）").format(n=len(keys)), yes=tr("破棄")):
             return 0
         n = self.controller.drop(keys)
         self.render()

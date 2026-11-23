@@ -264,7 +264,7 @@ class ImagingPlanDock(
         self.paste_per_day.setRange(0, 1000)
         self.paste_per_day.setToolTip(self.tr("24 時間に撮像できる回数。0 は制約なし"))
         self.paste_lead = self._number(0, 10000, 0, self.tr(" 時間"))
-        self.paste_lead.setToolTip(self.tr("オーダー可能な撮像の最短時間（何時間先から）。それより近い機会は除外。0 は制約なし"))
+        self.paste_lead.setToolTip(self.tr("オーダーできる撮像の最短時間（何時間先から）。それより近い機会は除外。0 は制約なし"))
         self.paste_sar = QCheckBox(self.tr("SAR（夜間も撮像）"))
         for i, (text, widget) in enumerate([
             (self.tr("最大オフナディア角"), self.paste_max), (self.tr("観測幅"), self.paste_swath),
@@ -383,7 +383,7 @@ class ImagingPlanDock(
         self.csv_button.setToolTip(self.tr("一覧を CSV で保存"))
         self.csv_button.clicked.connect(self.save_csv)
         self.layer_button = QPushButton(self.tr("レイヤーとして追加"))
-        self.layer_button.setToolTip(self.tr("撮像範囲をレイヤーとして追加（撮像時刻付き。時系列コントローラーで絞り込み可能）"))
+        self.layer_button.setToolTip(self.tr("撮像範囲をレイヤーとして追加（撮像時刻付き。時系列コントローラーで絞り込める）"))
         self.layer_button.clicked.connect(self.add_layer)
         self.zoom_button = QPushButton(self.tr("範囲へ移動"))
         self.zoom_button.clicked.connect(self.zoom_to_chosen)
@@ -449,8 +449,7 @@ class ImagingPlanDock(
         self._hide_rows()
         if forecast is not None:
             self.cloud.setText(self.tr("雲量予報（{label}）").format(label=forecast.label))
-            self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。"
-                                          "取り込んだ予報ファイルから読む（どこにも送信しない）") if forecast.local else
+            self.cloud.setToolTip(self.tr("光学衛星の撮像機会ごとに、その時刻と地点の雲量予報（16 日先まで）を表示。取り込んだ予報ファイルを使用（どこにも送信しない）") if forecast.local else
                                   self.tr("光学衛星の撮像機会ごとに、その時刻・地点の雲量予報（16 日先まで）を表示。対象の位置を予報サービスへ送信"))
         self.request_button.setVisible(bool(config.request_stores) and self.allows("requests.edit"))
         if not config.satellite_catalogs:
@@ -459,8 +458,8 @@ class ImagingPlanDock(
             self._loaded = True
             self.list_sats()
             self.status.setText(self.tr(
-                "設定ファイルに衛星カタログ（satelliteCatalogs）がないため、サンプル衛星 2 機（光学・SAR。SAR はストリップマップ・"
-                "スポットライト・スキャンSAR の 3 モード。架空の衛星）で計算。「詳細条件」で TLE を貼り付けて追加可能"))
+                "衛星カタログが未設定のため、架空のサンプル衛星 2 機（光学と SAR）で計算。"
+                "「詳細条件」で TLE を貼り付けると追加できる（管理者に連絡: satelliteCatalogs）"))
         else:
             self.list_sats()
             self.status.setText("")
@@ -491,7 +490,7 @@ class ImagingPlanDock(
         token_for = self.context.token_for
         client = self.context.esri()
         read = self._settings_read
-        self.status.setText(self.tr("衛星カタログを読み込み中…"))
+        self.status.setText(self.tr("衛星カタログを取得中…"))
 
         def work(task):
             sats, problems = load_satellites(client, catalog, token_for, task.isCanceled)
@@ -529,11 +528,11 @@ class ImagingPlanDock(
         def not_read(message):
             self.loading_task = None
             told, self._waiting, self._waiting_failed = self._waiting_failed, [], []
-            self.status.setText(self.tr("衛星カタログの読み込みに失敗: {message}").format(message=message))
+            self.status.setText(self.tr("衛星カタログの取得に失敗: {message}").format(message=message))
             for f in ([failed] if failed else []) + told:
                 f(message)
 
-        self.loading_task = run_task(self.tr("衛星カタログの読み込み"), work, done, not_read)
+        self.loading_task = run_task(self.tr("衛星カタログの取得"), work, done, not_read)
 
 
     # --- Targets ----------------------------------------------------------------------------
@@ -754,7 +753,7 @@ class ImagingPlanDock(
     # --- Saving to a plan store -------------------------------------------------------------
 
     def roles_changed(self) -> None:
-        """「臨時依頼にする」: for those who ask for images or plan (core/roles.py)."""
+        """「臨時依頼を作成」: for those who ask for images or plan (core/roles.py)."""
         self.request_button.setVisible(bool(self.context.config.request_stores) and self.allows("requests.edit"))
 
 

@@ -94,8 +94,7 @@ class CatalogDock(
         self.open_id.setClearButtonEnabled(True)
         self.open_id.setPlaceholderText(self.tr("画像 ID で開く"))
         self.open_id.setToolTip(self.tr(
-            "画像 ID を入れて Enter で開きます。前に開いた画像は前回のファイルで（確認画面あり）、"
-            "それ以外は画像カタログを画像 ID で検索して開きます"))
+            "画像 ID を入力し Enter で画像を表示（前に開いた画像は前回のファイル、それ以外は画像カタログで検索）"))
         self.open_id.returnPressed.connect(lambda: self.open_image_id(self.open_id.text()))
         self._opened_model = QStringListModel()
         completer = QCompleter(self._opened_model, self.open_id)
@@ -105,7 +104,7 @@ class CatalogDock(
         self.open_id.textEdited.connect(lambda text: self._refresh_opened() if len(text) <= 1 else None)
         self.recent_button = QToolButton()
         self.recent_button.setText(self.tr("最近開いた画像"))
-        self.recent_button.setToolTip(self.tr("この PC で最近開いた画像を、前回と同じファイルで開きます（確認画面あり）"))
+        self.recent_button.setToolTip(self.tr("この PC で最近開いた画像を、前回と同じファイルで表示（確認あり）"))
         self.recent_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.recent_menu = QMenu(self.recent_button)
         self.recent_menu.aboutToShow.connect(self._fill_recent)
@@ -274,8 +273,7 @@ class CatalogDock(
         self.body.addWidget(self.table, 1)
         # 「続きを読む」: the next `maxResults` (older) images of the search listed, under the list.
         self.more_button = QPushButton()
-        self.more_button.setToolTip(self.tr("この検索の続き（さらに古い画像）を一覧に足す。"
-                                            "範囲と条件は検索したときのまま（地図を動かしても変わらない）"))
+        self.more_button.setToolTip(self.tr("この検索の続き（さらに古い画像）を一覧に追加。範囲と条件は検索したときのまま"))
         self.more_button.clicked.connect(self.read_more)
         self.more_button.hide()
         self.body.addWidget(self.more_button)
@@ -296,16 +294,14 @@ class CatalogDock(
 
         # 「前の画像を閉じる」 (tsudo, 2026-11-10): looking through images one after another, the one opened before closes.
         self.close_previous = QCheckBox(self.tr("前の画像を閉じる"))
-        self.close_previous.setToolTip(self.tr("「開く」・ダブルクリックで画像を開いたら、その前にここから開いた画像のレイヤーを"
-                                               "プロジェクトから外す（連続して画像を見るときに。開けなかったときは外さない。PC ごとに記憶）"))
+        self.close_previous.setToolTip(self.tr("画像を開くとき、前にここから開いた画像を地図から外す（PC ごとに記憶）"))
         self.close_previous.setChecked(settings.close_previous())
         self.close_previous.toggled.connect(settings.set_close_previous)
         #: The layers opened last with 「前の画像を閉じる」 on (their ids), which close when the next images open.
         self.last_opened: list[str] = []
         # 「開いた画像へ移動」 (tsudo, 2026-11-10): the map goes to the images opened (all of a record's files, or of several records).
         self.zoom_opened = QCheckBox(self.tr("開いた画像へ移動"))
-        self.zoom_opened.setToolTip(self.tr("「開く」・ダブルクリックで画像を開いたら、その画像ファイルの範囲へ地図を移動・ズーム"
-                                            "（複数枚のときはすべてを囲む範囲。開けなかったときは動かさない。PC ごとに記憶）"))
+        self.zoom_opened.setToolTip(self.tr("画像を開くとき、その画像の範囲へ地図を移動（PC ごとに記憶）"))
         self.zoom_opened.setChecked(settings.zoom_to_opened())
         self.zoom_opened.toggled.connect(settings.set_zoom_to_opened)
 
@@ -321,7 +317,7 @@ class CatalogDock(
             "pick": self.tr("地図上の範囲をクリックして一覧の画像を選ぶ"),
             "folder": self.tr("選んだ画像のフォルダをエクスプローラーで開く（パスの読み替えがあれば、読み替えた先にあるときはそちら。"
                               "画像ファイルはそのファイルを選んだ状態で）"),
-            "event": self.tr("選んだ画像をイベントに紐付ける"),
+            "event": self.tr("選んだ画像をイベントに追加"),
             "record": self.tr("選んだ画像を、画像ファイルを開かずに観測記録の画像一覧へ（ID・撮像日時・範囲はカタログから。"
                               "生データが別システムにしかない画像に。ダブルクリックでも）。背景地図の上をクリックして記録"),
         }

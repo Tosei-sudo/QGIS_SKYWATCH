@@ -257,7 +257,7 @@ def load_jsonc(text: str) -> Any:
     try:
         return json.loads(strip_jsonc(text))
     except json.JSONDecodeError as error:
-        raise JsoncError(f"JSON として読み込み不可（{error.lineno} 行 {error.colno} 列: {error.msg}）") from error
+        raise JsoncError(f"JSON として読めない（{error.lineno} 行 {error.colno} 列: {error.msg}）") from error
 
 
 def _flag(key: str, default: bool) -> Callable[[Any, list[str]], bool]:
@@ -408,7 +408,7 @@ def read_config_file(path: str) -> tuple[PluginConfig, list[str]]:
         with open(path, encoding="utf-8-sig") as f:
             text = f.read()
     except OSError as error:
-        return PluginConfig(), [f"設定ファイルの読み込み不可（{error.strerror or error}）"]
+        return PluginConfig(), [f"設定ファイルを読み込めない（{error.strerror or error}）"]
     except UnicodeDecodeError:
         return PluginConfig(), ["設定ファイルは UTF-8 で保存"]
     return parse_config_text(text)

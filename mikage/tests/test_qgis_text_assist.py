@@ -88,7 +88,7 @@ def test_a_zipped_model_is_unpacked_once_and_a_bad_one_refused(tmp_path):
     assert not (tmp_path / "outside.txt").exists()
     broken = tmp_path / "broken.zip"
     broken.write_bytes(b"not a zip")
-    with pytest.raises(AiError, match="開けず"):
+    with pytest.raises(AiError, match="開けない"):
         text_assist_io.model_folder_of(str(broken), root=str(root))
     empty = tmp_path / "empty.zip"
     with zipfile.ZipFile(empty, "w") as z:
@@ -177,7 +177,7 @@ def test_a_folder_that_is_no_model_is_said(genai, tmp_path):
     folder = tmp_path / "m"
     write_model(str(folder))
     (folder / "model.onnx").write_bytes(b"broken")
-    with pytest.raises(AiError, match="モデルを読み込めず"):
+    with pytest.raises(AiError, match="モデルの読み込みに失敗"):
         text_assist_io.GenAiWriter(str(folder))
 
 
@@ -364,13 +364,13 @@ def test_a_model_that_fails_is_said_under_the_field(plugin, tmp_path):
     a, loaded, _gate = _assist(p, tmp_path, [])
 
     def broken(folder, threads):
-        raise AiError("モデルを読み込めず（sarashina: 壊れている）")
+        raise AiError("モデルの読み込みに失敗（sarashina: 壊れている）")
 
     a._writer_of = broken
     tidy = _record_form(dock)
     dock.note_input.setText("とまってる")
     tidy.tidy()
-    assert wait_for(lambda: tidy.panel.label.text().startswith("作成できず"))
+    assert wait_for(lambda: tidy.panel.label.text().startswith("作成に失敗"))
     assert "壊れている" in tidy.panel.label.text() and tidy.panel.close_button.isVisible() and not a.busy
     tidy.panel.close_button.click()
     assert not tidy.panel.isVisible()
@@ -420,8 +420,8 @@ def test_a_handover_draft_of_only_what_the_memo_lacks_is_no_draft(plugin, tmp_pa
     assert not loaded and draft.panel.draft is None
     dialog.memo_edit.setPlainText("北側は未確認")
     draft.button.click()
-    assert wait_for(lambda: draft.panel.label.text().startswith("案を作れず"))
-    assert draft.panel.label.text() == "案を作れず（メモにない内容の文だけだった）" and draft.panel.draft is None
+    assert wait_for(lambda: draft.panel.label.text().startswith("案の作成に失敗"))
+    assert draft.panel.label.text() == "案の作成に失敗（メモにない内容の文だけ）" and draft.panel.draft is None
     assert draft.panel.warning.text().startswith("メモにない内容の文を除いた: 「通報したものは現時点ではありません。」")
     dialog.close()
 
@@ -452,7 +452,7 @@ def test_the_real_runtime_from_the_settings_to_the_proposal(genai, plugin, tmp_p
     tidy = _record_form(dock)
     dock.note_input.setText("とまってる")
     tidy.tidy()
-    assert wait_for(lambda: tidy.panel.draft is not None or tidy.panel.label.text().startswith("作成できず"), 60000)
+    assert wait_for(lambda: tidy.panel.draft is not None or tidy.panel.label.text().startswith("作成に失敗"), 60000)
     assert tidy.panel.draft is not None, tidy.panel.label.text()
     assert tidy.panel.draft.text == "Tidy note." and isinstance(a.writer, text_assist_io.GenAiWriter)
     assert a.writer.folder == str(tmp_path / "models" / "tiny")
@@ -531,7 +531,7 @@ def test_the_fields_read_from_the_note_fill_only_the_empty_ones(plugin, tmp_path
     assert fields.panel.label.text().endswith("種別 船舶 > 補給艦・長さ 120 m・モノ おうみ")
     assert fields.panel.warning.text() == ("確認: 幅 30 は備考にない数字。活動は入力済みのため変えない（案: 停泊）。"
                                            "確度は入力済みのため変えない（案: 推定）")
-    assert fields.panel.replace_button.text() == "欄に入れる"
+    assert fields.panel.replace_button.text() == "欄に入力"
     fields.panel.replace_button.click()
     assert dock.kind_input.text() == "船舶 > 補給艦" and dock.length_input.text() == "120" and dock.object_input.text() == "おうみ"
     assert dock.activity_input.text() == "航行" and dock.confidence_select.currentData() == "確定" and dock.width_input.text() == ""
@@ -588,9 +588,9 @@ def test_words_made_into_the_export_conditions(plugin, tmp_path):
                          "依頼: 11月9日から15日の横須賀港の船舶、確度は推定以上でいたもの"]
     # The model's dates (the words name a date); the 大分類 the words name (not the model's 潜水艦).
     assert words.panel.label.text().endswith("期間 2026-11-09〜2026-11-15・地名 横須賀港・大分類 船舶・確度 推定・有無 ありのみ")
-    assert words.panel.warning.isHidden() and words.panel.replace_button.text() == "条件に入れる"
+    assert words.panel.warning.isHidden() and words.panel.replace_button.text() == "条件に入力"
     assert loaded[0].until is not None
-    # Nothing changed until 「条件に入れる」.
+    # Nothing changed until 「条件に入力」.
     assert not dialog.start_check.isChecked() and dialog.place_select.currentData() != "named"
     words.panel.replace_button.click()
     assert dialog.start_check.isChecked() and dialog.end_check.isChecked()

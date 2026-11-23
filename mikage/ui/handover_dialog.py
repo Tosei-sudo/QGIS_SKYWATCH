@@ -21,7 +21,7 @@ from typing import Optional
 from qgis.PyQt.QtCore import QDateTime
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QFormLayout, QHBoxLayout, QHeaderView, QInputDialog,
-    QLabel, QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QLabel, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..core import audit, edit_stamp
@@ -35,6 +35,7 @@ from ..core.obs.api import RecordQuery, merged
 from ..core.time_zone import format_time
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
+from .docks import ask_no
 from .fit import fit_text
 from .text_assist_ui import HandoverDraft
 
@@ -71,7 +72,7 @@ class HandoverDialog(QDialog):
             c.toggled.connect(lambda _on: self.render_assignments())
             row.addWidget(c)
         row.addStretch(1)
-        self.reload_button = QPushButton(self.tr("読み込み直し"))
+        self.reload_button = QPushButton(self.tr("最新を取得"))
         self.reload_button.clicked.connect(lambda: self.bar.reload())
         row.addWidget(self.reload_button)
         g.addLayout(row)
@@ -187,7 +188,7 @@ class HandoverDialog(QDialog):
         self.tabs.setTabEnabled(0, has)
         if not has and self.tabs.currentIndex() == 0:
             self.tabs.setCurrentIndex(1)
-        self.save_button.setToolTip(self.tr("引き継ぎメモのテーブル・ファイル（設定ファイルの handover）へ保存し、コピー"))
+        self.save_button.setToolTip(self.tr("引き継ぎメモを保存し、コピー"))
         self.last = None
         self.render_assignments()
         self._read_last()
@@ -228,7 +229,7 @@ class HandoverDialog(QDialog):
         if self.bar.source is None:
             self._say(self.tr("設定ファイルに assignments（分担のテーブル）なし"))
         elif self.bar.error:
-            self._say(self.tr("分担の読み込みの失敗: {m}").format(m=self.bar.error))
+            self._say(self.tr("分担の取得に失敗: {m}").format(m=self.bar.error))
         self._update_buttons()
 
     def selected(self) -> Optional[Assignment]:
@@ -249,16 +250,15 @@ class HandoverDialog(QDialog):
         if self.dock.go_to(x.image_id):
             return
         # Not open: opened (開いた画像の履歴, else the image catalog, else listed without its file), tsudo 2026-11-18.
-        self._say(self.tr("{name} を開きます（前回のファイルか画像カタログから）").format(name=x.label))
+        self._say(self.tr("{name} を表示（前回のファイルか画像カタログから）").format(name=x.label))
         self.dock.open_image(x.image_id, x.image_name, x.image_time)
 
     def _mine_or_ask(self, x: Assignment, what: str) -> bool:
         """Whether one may change a row: one's own, or someone else's after asking."""
         if same_person(x.assignee, edit_stamp.user_name()):
             return True
-        return QMessageBox.question(
-            self, what, self.tr("{name} は {who} さんの担当です。変更しますか。").format(name=x.label, who=x.assignee or self.tr("（名前なし）")),
-        ) == QMessageBox.StandardButton.Yes
+        return ask_no(self, what, self.tr("{name} は {who} さんの担当。担当を変更").format(name=x.label, who=x.assignee or self.tr("（名前なし）")),
+                      yes=self.tr("変更"))
 
     def _write(self, x: Assignment, new: Assignment, done: str) -> None:
         repo = self.bar.repository()
@@ -325,7 +325,7 @@ class HandoverDialog(QDialog):
         """The last memo kept (its end becomes this one's start)."""
         table = self.settings.table
         if table is None:
-            self.last_label.setText(self.tr("前回の引き継ぎメモ: 保存先なし（設定ファイルの handover.table）"))
+            self.last_label.setText(self.tr("前回の引き継ぎメモ: 保存先が未設定（管理者に連絡: handover.table）"))
             self.last_text.setVisible(False)
             return
         self.last_text.setVisible(True)
@@ -346,7 +346,7 @@ class HandoverDialog(QDialog):
                 self.start_edit.setDateTime(QDateTime.fromMSecsSinceEpoch(int(memo.end)))
 
         run_task(self.tr("前回の引き継ぎメモ"), lambda _t: last_memo(client, table, token, since), finished,
-                 lambda m: self.last_label.setText(self.tr("前回の引き継ぎメモの読み込みの失敗: {m}").format(m=m)))
+                 lambda m: self.last_label.setText(self.tr("前回の引き継ぎメモの取得に失敗: {m}").format(m=m)))
 
     def make(self) -> None:
         """Reads what goes in (in a task) and writes the memo."""
@@ -365,7 +365,7 @@ class HandoverDialog(QDialog):
         scoped = book is not None and book.scoped
         if not scoped and not self.dock.records_ready(self.make):
             # Not read yet (no image chosen in 「観測記録」): made once they are.
-            self._say(self.tr("観測記録を読み込み中…（読み終えたら作成）"))
+            self._say(self.tr("観測記録を取得中…（取得後に作成）"))
             return
         config, client = self.dock.context.config, self.dock.context.esri()
         records = list(book.records) if book else []
@@ -425,11 +425,11 @@ class HandoverDialog(QDialog):
 
         def failed(message: str) -> None:
             self.make_button.setEnabled(True)
-            self._say(self.tr("引き継ぎメモの作成の失敗: {m}").format(m=message))
+            self._say(self.tr("引き継ぎメモの作成に失敗: {m}").format(m=message))
             if self._after_make is not None:
                 self._after_make = None
                 self.memo_draft.waiting = False
-                self.memo_draft.panel.say(self.tr("引き継ぎメモを作成できず、下書きなし"))
+                self.memo_draft.panel.say(self.tr("引き継ぎメモの作成に失敗（下書きなし）"))
 
         if not records and book is None:
             self._say(self.tr("観測記録の保存先なし（記録の欄は 0 件）"))
@@ -456,7 +456,7 @@ class HandoverDialog(QDialog):
         if not ids:
             return
         asked[1].update(ids)
-        self.dock.fetch(self.tr("分担の画像の記録の読み込み"), lambda b: b.fetch(RecordQuery(image_ids=ids)),
+        self.dock.fetch(self.tr("分担の画像の記録の取得"), lambda b: b.fetch(RecordQuery(image_ids=ids)),
                         lambda _r: self.render_assignments(), lambda _m: asked[1].difference_update(ids))
 
     def _text(self) -> str:
@@ -509,7 +509,7 @@ class HandoverDialog(QDialog):
 
         def failed(message: str) -> None:
             self.save_button.setEnabled(True)
-            self._say(self.tr("テーブルへの保存の失敗: {m}").format(m=message) + "（" + "・".join(said) + "）")
+            self._say(self.tr("保存に失敗: {m}").format(m=message) + "（" + "・".join(said) + "）")
 
         self.save_button.setEnabled(False)
         run_task(self.tr("引き継ぎメモの保存"), lambda _t: keep_memo(client, s.table, text, data, token), finished, failed)

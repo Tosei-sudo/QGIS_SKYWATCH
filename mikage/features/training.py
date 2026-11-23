@@ -62,14 +62,14 @@ TUTORIAL_BUTTON, EXERCISES_BUTTON = "チュートリアル", "判読の練習"
 EXERCISE_ROLE = "OBSERVER"
 #: What cannot be used while practising (it would reach outside the practice): disabled, with why.
 NOT_IN_PRACTICE = ("設定…", "サーバ処理…", "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…", "移動体（AIS・ADS-B）")
-NOTE = "（練習モードでは使えません）"
+NOTE = "（練習モードでは使えない）"
 #: While the taxonomy is the production's (read only: its table is not edited while practising).
 TAXONOMY_EDIT, TAXONOMY_NOTE = "分類体系の編集", "（練習モードでは本番の分類体系を読むだけ）"
 #: 「分類体系の取り込み…」 (the table import) is changing it too.
 TAXONOMY_IMPORT = "分類体系の取り込み…"
 #: The practice's background map (a layer of the practice's project).
 BASEMAP_NAME = "練習用の背景地図"
-BAND_TEXT = "練習用のデータで動いています。本番のサーバーには書き込みません。"
+BAND_TEXT = "練習用のデータで動作中。本番には書き込まない"
 
 
 class TutorialPlace:
@@ -144,7 +144,7 @@ class ExerciseTablesIO:
         run_task(tr(title), lambda _task: work(client, token), then, failed)
 
     def read_drafts(self, then, failed) -> None:
-        self._run("判読の練習: 問題の読み込み", lambda c, t: read_drafts(c, self.tables, t), then, failed)
+        self._run("判読の練習: 問題の取得", lambda c, t: read_drafts(c, self.tables, t), then, failed)
 
     def save_draft(self, draft, then, failed) -> None:
         self._run("判読の練習: 問題の保存", lambda c, t: save_draft(c, self.tables, draft, t), then, failed)
@@ -204,7 +204,7 @@ class Training(Feature):
         if training_io.recover():
             if self.host.role_keeper is not None:
                 self.host.role_keeper.use_stored()
-            self.iface.messageBar().pushInfo(tr("練習モード"), tr("前回は練習モードのまま QGIS が終わったため、担当などを練習の前に戻しました"))
+            self.iface.messageBar().pushInfo(tr("練習モード"), tr("前回は練習モードのまま QGIS が終わったため、担当などを練習の前に復元"))
         self.context.configChanged.connect(self._config_read)
 
     def add_actions(self) -> None:
@@ -267,7 +267,7 @@ class Training(Feature):
         if self.practising or self._busy:
             return False
         if not self.settings.enabled:
-            self.iface.messageBar().pushInfo(tr("練習モード"), tr("設定ファイルの training が false のため、練習モードは使えません"))
+            self.iface.messageBar().pushInfo(tr("練習モード"), tr("練習モードは使えない（管理者の設定: training）"))
             return False
         builtin = self.settings.builtin
         files = training_io.files()
@@ -297,7 +297,7 @@ class Training(Feature):
             return True
         answer = QMessageBox.question(
             self.window(), tr("練習モードを始める"),
-            tr("いまのプロジェクトに保存していない変更があります。練習の前に保存しますか？"),
+            tr("いまのプロジェクトに未保存の変更あり。練習の前に保存"),
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save)
         if answer == QMessageBox.StandardButton.Cancel:
@@ -312,7 +312,7 @@ class Training(Feature):
         """The sample made in a task (its images drawn: a few seconds), with a window saying so; `then` once made."""
         self._busy = True
         self._entries_state()
-        self.progress = QProgressDialog(tr("練習用の画像と背景地図を作っています…"), "", 0, 0, self.window())
+        self.progress = QProgressDialog(tr("練習用の画像と背景地図を作成中…"), "", 0, 0, self.window())
         self.progress.setWindowTitle(tr("練習モード"))
         self.progress.setCancelButton(None)
         self.progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -332,7 +332,7 @@ class Training(Feature):
             if ok:
                 then()
             else:
-                self.iface.messageBar().pushWarning(tr("練習モード"), tr("練習データを作れませんでした: {m}").format(m=message))
+                self.iface.messageBar().pushWarning(tr("練習モード"), tr("練習データの作成に失敗: {m}").format(m=message))
 
         run_task(tr("練習データの作成"), work, lambda _ok: finished(True), lambda message: finished(False, message))
 
@@ -380,8 +380,8 @@ class Training(Feature):
             self._add_basemap(files)
         self._screens(True)
         self._entries_state()
-        read = tr("{m}は本番から読んでいます（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
-        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを始めました。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
+        read = tr("{m}は本番から読み込み（読むだけ）。").format(m=masters.names_text(taken)) if taken else ""
+        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを開始。") + read + tr("終えるときは地図の上の「練習モードを終える」"),
                                             Qgis.MessageLevel.Success, 8)
         tutorial, exercises, trial = self._tutorial_after_start, self._exercises_after_start, self._trial
         self._tutorial_after_start = self._exercises_after_start = False
@@ -440,7 +440,7 @@ class Training(Feature):
             self.context.configChanged.connect(self._open_project_before)
         else:
             self._open_project_before()
-        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを終えました（練習データは次の練習まで残ります）"),
+        self.iface.messageBar().pushMessage(tr("練習モード"), tr("練習モードを終了（練習データは次の練習まで残る）"),
                                             Qgis.MessageLevel.Info, 6)
         return True
 
@@ -461,7 +461,7 @@ class Training(Feature):
             return False
         answer = QMessageBox.question(
             self.window(), tr("練習データを最初に戻す"),
-            tr("練習データを最初の見本に戻します。練習で記録したもの・依頼・計画ファイルなどは消えます。よろしいですか？"),
+            tr("練習データを最初の見本に戻す。練習で記録したもの・依頼・計画ファイルなどは消える"),
             QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
         if answer != QMessageBox.StandardButton.Ok:
             return False
@@ -470,7 +470,7 @@ class Training(Feature):
         session = training_io.active()
         files = training_io.files()
         if session is None:
-            self._prepare(files, reset=True, then=lambda: self.iface.messageBar().pushSuccess(tr("練習モード"), tr("練習データを最初に戻しました")))
+            self._prepare(files, reset=True, then=lambda: self.iface.messageBar().pushSuccess(tr("練習モード"), tr("練習データを最初に復元")))
             return True
         # Practising: the map and the files let go, the data made again, the server started again on it.
         QgsProject.instance().setDirty(False)
@@ -489,7 +489,7 @@ class Training(Feature):
             self.context.reload()
             self._forget_lists()
             self._add_basemap(files)
-            self.iface.messageBar().pushSuccess(tr("練習モード"), tr("練習データを最初に戻しました"))
+            self.iface.messageBar().pushSuccess(tr("練習モード"), tr("練習データを最初に復元"))
 
         self._prepare(files, reset=True, then=again)
         return True
@@ -691,7 +691,7 @@ class Training(Feature):
                 try:
                     mine = read_results_of(client, tables, user, tokens[tables.results])
                 except Exception as error:  # noqa: BLE001 (the exercises still offered; the tries of this computer only)
-                    problems.append(tr("結果の表を読めませんでした（この PC の結果だけで数えます）: {e}").format(e=error))
+                    problems.append(tr("結果の表の取得に失敗（この PC の結果だけで集計）: {e}").format(e=error))
             return found, mine, problems, sent
 
         def done(result) -> None:
@@ -712,11 +712,11 @@ class Training(Feature):
 
         def failed(message: str) -> None:
             self._reading = False
-            self.org_problem = tr("組織の問題を読めませんでした: {m}").format(m=message)
+            self.org_problem = tr("組織の問題の取得に失敗: {m}").format(m=message)
             if then is not None:
                 then()
 
-        run_task(tr("判読の練習: 組織の問題の読み込み"), work, done, failed)
+        run_task(tr("判読の練習: 組織の問題の取得"), work, done, failed)
         return True
 
     def all_results(self) -> list:
@@ -750,7 +750,7 @@ class Training(Feature):
             # (the organisation's, read afresh each time: an instructor may have added some)
             if self._reading:
                 return True
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("組織の問題を読み込み中…"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("組織の問題を取得中…"))
             return self.read_org_exercises(then=self._offer_exercises)
         return self._offer_exercises()
 
@@ -760,7 +760,7 @@ class Training(Feature):
             return False
         found = self.exercises()
         if not found:
-            text = self.org_problem or tr("練習できる問題がありません（組織の問題がなく、内蔵の見本でもありません）")
+            text = self.org_problem or tr("練習できる問題がない（組織の問題も内蔵の見本もない）")
             self.iface.messageBar().pushInfo(tr("判読の練習"), text)
             return False
         keeper = self.host.role_keeper
@@ -770,7 +770,7 @@ class Training(Feature):
         if self.org_problem:
             source += "（" + self.org_problem + "）"
         elif self.settings.exercises is None:
-            source += tr("。組織の問題は管理者が登録します")
+            source += tr("。組織の問題は管理者が登録")
         dialog = ExerciseList(found, self.all_results(), [*(keeper.codes if keeper is not None else []), EXERCISE_ROLE],
                               source, lambda: MyResults(self.all_results(), self.window()).exec(), self.window())
         if dialog.exec() != ExerciseList.DialogCode.Accepted or dialog.choice is None:
@@ -788,7 +788,7 @@ class Training(Feature):
             return None
         if exercise.exam and not trial and exam_taken(self.all_results(), exercise.key):
             # (an exam once: this computer's tries and the results table's, another computer's too)
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("「{t}」は試験で、もう受けました（1 回だけ）").format(t=exercise.title))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("「{t}」は試験で、受験済み（1 回だけ）").format(t=exercise.title))
             return None
         self._stop_tutorial()
         self._stop_exercise()
@@ -882,12 +882,12 @@ class Training(Feature):
                 except OSError:
                     pass
                 self.org_results = [*self.org_results, {**record, "fromTable": True}]
-                said(tr("結果を組織の表に送りました。"))
+                said(tr("結果を組織の表に送信"))
             else:
-                failed(" / ".join(why) or tr("追加できませんでした"))
+                failed(" / ".join(why) or tr("追加に失敗"))
 
         def failed(message: str) -> None:
-            said(tr("結果を組織の表に送れませんでした（次に「判読の練習…」を開くときに送り直します）: {m}").format(m=message))
+            said(tr("組織の表への送信に失敗（次に「判読の練習…」を開くときに送り直し）: {m}").format(m=message))
 
         run_task(tr("判読の練習: 結果の送信"), work, done, failed)
 
@@ -917,10 +917,10 @@ class Training(Feature):
         if self._busy:
             return False
         if self.practising:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題は本番の MIKAGE で作ります（練習モードを終えてから）"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題は本番の MIKAGE で作成（練習モードを終えてから）"))
             return False
         if self.settings.exercises is None:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("設定ファイルの training.exercises に問題の表と正解の表を書くと、問題を作れます"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("問題の表と正解の表が未設定（管理者に連絡: training.exercises）"))
             return False
         if self.authoring is not None:
             self.authoring.manager.show()
@@ -959,14 +959,14 @@ class Training(Feature):
         """
         tables = self.settings.exercises
         if tables is None or not tables.results:
-            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("設定ファイルの training.exercises に結果の表（results）を書くと、成績を見られます"))
+            self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表が未設定（管理者に連絡: training.exercises.results）"))
             return False
         if self._reading:
             return False
         self._reading = True
         client = self.context.esri()
         tokens = {u: self.table_token(u) for u in (tables.exercises, tables.answers, tables.results)}
-        self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表を読んでいます…"))
+        self.iface.messageBar().pushInfo(tr("判読の練習"), tr("結果の表を取得中…"))
 
         def work(task):
             cancelled = task.isCanceled if task is not None else None
@@ -976,7 +976,7 @@ class Training(Feature):
                 exercises = client.query_all(tables.exercises, "1=1", tokens[tables.exercises], geometry=False, cancelled=cancelled,
                                              limit=20_000)
             except Exception as error:  # noqa: BLE001 (the results still shown, their exercises by their titles)
-                exercises, note = [], tr("問題の表を読めませんでした（結果にある問題だけ出します）: {e}").format(e=error)
+                exercises, note = [], tr("問題の表の取得に失敗（結果にある問題だけ表示）: {e}").format(e=error)
             return results, exercises, note
 
         def done(result) -> None:
@@ -993,7 +993,7 @@ class Training(Feature):
 
         def failed(message: str) -> None:
             self._reading = False
-            self.iface.messageBar().pushWarning(tr("判読の練習"), tr("結果の表を読めませんでした: {m}").format(m=message))
+            self.iface.messageBar().pushWarning(tr("判読の練習"), tr("結果の表の取得に失敗: {m}").format(m=message))
 
-        run_task(tr("判読の練習: 成績の読み込み"), work, done, failed)
+        run_task(tr("判読の練習: 成績の取得"), work, done, failed)
         return True

@@ -223,7 +223,7 @@ class CurveEditor(QWidget):
         self.plot = CurvePlot()
         self.plot.changed.connect(self.changed)
         v.addWidget(self.plot)
-        hint = QLabel(self.tr("ドラッグで移動、クリックで点の追加、ダブルクリックか枠の外へのドラッグで削除。"))
+        hint = QLabel(self.tr("ドラッグで移動、クリックで点の追加、ダブルクリックか枠の外へのドラッグで削除"))
         hint.setWordWrap(True)
         v.addWidget(hint)
 
