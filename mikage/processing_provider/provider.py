@@ -9,6 +9,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 
 from .align_algorithm import AlignAlgorithm
+from .append_algorithm import AppendAlgorithm
 from .annotation_algorithm import DatasetPointsToBoxesAlgorithm, PointsToBoxesAlgorithm
 from .change_algorithm import ChangeAlgorithm
 from .classify_algorithm import ClassifyAlgorithm
@@ -45,7 +46,7 @@ class SatObsProvider(QgsProcessingProvider):
         for algorithm in (PanSharpenAlgorithm(), ChangeAlgorithm(), AlignAlgorithm(), ClassifyAlgorithm(), SimpleOrthoAlgorithm(),
                           GeodesicBufferAlgorithm(), GeodesicCentroidAlgorithm(), MovingMatchAlgorithm(), CloudCoverAlgorithm(),
                           DetectAlgorithm(), TrainAlgorithm(), DatasetAlgorithm(), PointsToBoxesAlgorithm(),
-                          DatasetPointsToBoxesAlgorithm()):
+                          DatasetPointsToBoxesAlgorithm(), AppendAlgorithm()):
             feature = ALGORITHM_FEATURES.get(algorithm.name())
             if feature is None or allowed(feature):
                 self.addAlgorithm(algorithm)
