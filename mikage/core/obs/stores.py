@@ -643,10 +643,10 @@ class EsriObservationStore:
                 else:
                     failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if conflicts or failed:
-            parts = [f"{len(conflicts)} 件はほかの人が読み込み後に更新したため保存せず（読み込み直してから変更）"] if conflicts else []
+            parts = [f"{len(conflicts)} 件はほかの人が先に変えていた。「最新にする」を押してから直す。"] if conflicts else []
             if failed:
-                parts.append(f"{len(failed)} 件の保存に失敗: {failed[0]}")
-            raise (EsriError if failed else ConflictError)("・".join(parts))
+                parts.append(f"{len(failed)} 件は保存できなかった。{failed[0]}")
+            raise (EsriError if failed else ConflictError)("".join(parts))
 
     def know(self, record_ids: list[str]) -> None:
         """Asks the layer for the object ids of records not known here (before deleting them for good)."""
@@ -714,7 +714,7 @@ class EsriObservationStore:
                     self.last_removed.add(o.id)
             failed |= kept
         if failed:
-            raise EsriError(f"{len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
+            raise EsriError(f"{len(failed)} 件を削除できなかった。{reason}")
         return []
 
 
@@ -831,7 +831,7 @@ class EsriAreaStore:
             if not r.get("success"):
                 failed.append((r.get("error") or {}).get("description") or "更新失敗")
         if failed:
-            raise EsriError(f"{len(failed)} 件の保存に失敗: {failed[0]}")
+            raise EsriError(f"{len(failed)} 件を保存できなかった。{failed[0]}")
 
     def know(self, area_ids: list[str]) -> None:
         """Asks the layer for the object ids of areas not known here (before deleting them for good)."""
@@ -867,7 +867,7 @@ class EsriAreaStore:
             if self.oids.get(a.id, -1) not in failed:
                 self.oids.pop(a.id, None)
         if failed:
-            raise EsriError(f"確認範囲 {len(failed)} 件の削除に失敗{': ' + reason if reason else ''}")
+            raise EsriError(f"確認範囲 {len(failed)} 件を削除できなかった。{reason}")
         return []
 
 
@@ -1024,7 +1024,7 @@ class EsriTaxonomyStore:
                 del self.oids[k]
                 self.rows.pop(k, None)
         if failed:
-            raise EsriError(f"分類 {len(failed)} 件の保存に失敗: {failed[0]}")
+            raise EsriError(f"分類 {len(failed)} 件を保存できなかった。{failed[0]}")
 
     def lacks(self, role: str) -> Optional[str]:
         """The attribute of a role the table does not have (its classes' values for it are not saved), else None."""
@@ -1053,7 +1053,7 @@ class EsriTaxonomyStore:
             result = self.client.apply_edits(self.config.url, adds=[row], token=self.token)
             first = (result.add_results or [None])[0]
         if not first or not first.get("success"):
-            raise EsriError(f"諸元の項目の保存に失敗: {((first or {}).get('error') or {}).get('description') or '応答なし'}")
+            raise EsriError(f"諸元の項目を保存できなかった。{((first or {}).get('error') or {}).get('description') or ''}")
         new_oid = row_oid if row_oid is not None else (int(first["objectId"]) if is_number(first.get("objectId")) else None)
         self._fields_row = (new_oid, list(fields))
 

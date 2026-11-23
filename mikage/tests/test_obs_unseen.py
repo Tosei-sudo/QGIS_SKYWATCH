@@ -98,7 +98,7 @@ class TestBook:
         assert book.keeps_unseen() and book.keeps_unseen_areas()
         area = book.add_area(CLOUD, kind="船舶", note="港の上に雲", unseen=" 雲 ")
         assert (area.unseen, area.kind, area.note) == ("雲", "", "港の上に雲") and area_label(area) == "不可範囲（雲）"
-        assert book.status == "不可範囲（雲）を記録（中の前後の画像のモノ 1 件を不可として記録）"
+        assert book.status == "不可範囲（雲）を記録した。中にある前後の画像のモノ 1 件は「不可」にした。"
         [hidden] = [o for o in book.here() if o.object_id == a.object_id]
         assert (hidden.present, hidden.unseen, hidden.activity, hidden.lon) == (False, "雲", "", a.lon)
         # Only B waits; 「すべて消失」 cannot reach A (not 消失: not seen).
@@ -123,11 +123,11 @@ class TestBook:
         assert {x.source.object_id for x in book.unseen_carried()} == {a.object_id, c.object_id}
         assert book.inside_carried() == []
         made = book.carry_all()
-        assert [o.object_id for o in made] == [b.object_id] and "不可範囲内の 2 件を除く" in book.status
+        assert [o.object_id for o in made] == [b.object_id] and "不可範囲内の 2 件は除く" in book.status
         assert book.absent_all() == []
         marked = book.mark_unseen()
         assert sorted(o.object_id for o in marked) == sorted([a.object_id, c.object_id]) and all(o.unseen == "雲" for o in marked)
-        assert book.status == "2 のモノを不可として記録（不可範囲内）"
+        assert book.status == "不可範囲内の 2 のモノを不可として記録した。"
 
     def test_one_thing_unseen_by_the_form_and_back_to_seen(self, book):
         a = book.submit(139.70, 35.60, FormValues(object="A", kind="船舶", activity="停泊"))
@@ -135,7 +135,7 @@ class TestBook:
         [c] = book.carried()
         hidden = book.submit(c.source.lon, c.source.lat, FormValues(object="A", kind="船舶", activity="停泊"), False, source=c.source, unseen="影")
         assert (hidden.object_id, hidden.present, hidden.unseen, hidden.activity) == (a.object_id, False, "影", "")
-        assert book.status == "A（不可（影））を記録"
+        assert book.status == "A（不可（影））を記録した。"
         # Opened again and saved as there: 継続.
         seen = book.submit(hidden.lon, hidden.lat, FormValues(object="A", kind="船舶", activity="停泊"), True, editing=hidden)
         assert (seen.present, seen.unseen, seen.activity) == (True, "", "停泊")
@@ -144,7 +144,7 @@ class TestBook:
         assert book.update(seen.id, present=True).unseen == ""
         # A carried thing straight away (the dock's carry).
         book.step(1)
-        assert book.carry(a.object_id, unseen="雲").unseen == "雲" and book.status == "A を不可（雲）として記録"
+        assert book.carry(a.object_id, unseen="雲").unseen == "雲" and book.status == "A を不可（雲）として記録した。"
 
     def test_deleting_a_cloud_takes_its_unseen_records_and_restoring_brings_them_back(self, book):
         a = book.submit(139.70, 35.60, FormValues(object="A", kind="船舶"))
@@ -153,10 +153,10 @@ class TestBook:
         other = book.add_area(box_ring([139.75, 35.65, 139.76, 35.66]), unseen="霞")
         assert other is not None and len([o for o in book.here() if o.unseen]) == 1
         assert book.remove_areas([area])
-        assert book.status == "不可範囲 1 件を削除（中の不可の記録 1 件も削除）"
+        assert book.status == "不可範囲 1 件を削除した。中の「不可」の記録 1 件も削除した。"
         assert [c.source.object_id for c in book.carried()] == [a.object_id]
         assert book.restore_areas([x for x in book.image_areas(deleted=True) if x.id == area.id])
-        assert "中の前後の画像のモノ 1 件を不可として記録" in book.status and book.carried() == []
+        assert "中にある前後の画像のモノ 1 件は「不可」にした。" in book.status and book.carried() == []
 
     def test_no_cloud_where_the_store_cannot_keep_it(self, book, monkeypatch):
         monkeypatch.setattr(type(book.area_store), "keeps_unseen", lambda self: False)

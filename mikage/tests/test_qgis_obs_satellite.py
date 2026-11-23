@@ -169,4 +169,4 @@ def test_typed_in_the_dock_for_an_image_that_does_not_say(plugin):
     # Nothing typed: said, nothing saved.
     dock.satellite_input.setEditText("  ")
     dock._set_image_satellite()
-    assert "衛星名を入力" in dock.status.text()
+    assert "衛星名を入れる" in dock.status.text()

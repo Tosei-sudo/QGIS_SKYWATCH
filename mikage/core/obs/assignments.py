@@ -251,7 +251,7 @@ def update(client: EsriClient, source: EsriSource, x: Assignment, before: Assign
     if f["assignee"] in values:
         now = [r for r in load_assignments(client, source, token, f"{client.layer(source.url, token).object_id_field} = {int(x.oid)}")]
         if not now or not same_person(now[0].assignee, before.assignee) or now[0].done != before.done:
-            raise EsriError(f"{x.label} の分担はほかの人が変更済み（読み込み直して確認）")
+            raise EsriError(f"{x.label} の分担はほかの人が先に変えていた。「最新にする」を押してから確かめる。")
     oid = client.layer(source.url, token).object_id_field
     r = (client.apply_edits(source.url, updates=[{"attributes": {**values, oid: x.oid}}], token=token).update_results or [{}])[0]
     if not r.get("success"):

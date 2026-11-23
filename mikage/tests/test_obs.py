@@ -328,7 +328,7 @@ class TestEsriObservationStore:
         store = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(refusing))
         a = obs(id="r3")
         store.save([a])
-        with pytest.raises(EsriError, match="1 件の削除に失敗: 権限なし"):
+        with pytest.raises(EsriError, match="1 件を削除できなかった。権限なし"):
             store.remove([a])
         # Still known by its object id: saved again, it is updated, not added twice.
         store.save([replace(a, note="再保存")])

@@ -146,7 +146,7 @@ class TestTheBook:
         assert {o.satellite for o in book.here()} == {"GE01"} and book.image_areas()[0].satellite == "GE01"
         assert {o.satellite for o in LocalObservationStore(book.db).load()} == {"GE01"}
         assert LocalAreaStore(book.db, "ローカル").load()[0].satellite == "GE01"
-        assert book.said[-1] == "2 件の記録に衛星名「GE01」を入力"
+        assert book.said[-1] == "2 件の記録に衛星名「GE01」を入れた。"
         # The next one takes it; one that has a name keeps it (typed again: only those without).
         c = book.submit(139.72, 35.62, FormValues(object="", kind="船舶"))
         assert c.satellite == "GE01"

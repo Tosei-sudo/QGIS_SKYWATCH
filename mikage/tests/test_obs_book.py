@@ -112,11 +112,11 @@ def test_carries_all_but_those_in_a_checked_area_which_are_gone(book):
     book.step(1)
     area = book.add_area(box_ring([139.69, 35.59, 139.72, 35.62]), kind="船舶", note="港内")
     assert area.recorded_by == "田中" and area.kind == "船舶"
-    assert "確認範囲（船舶）を記録（範囲内で記録のない前後の画像のモノ 1 件）" in book.said[-1]
+    assert "確認範囲（船舶）を記録した。範囲の中に、まだ記録のない前後の画像のモノが 1 件ある。" in book.said[-1]
     assert [x.source.object_id for x in book.inside_carried()] == [a.object_id]
     made = book.carry_all()
     assert sorted(o.object_id for o in made) == sorted([b.object_id, c.object_id])
-    assert "（確認範囲内の 1 件を除く）" in book.status
+    assert "（確認範囲内の 1 件は除く）" in book.status
     gone = book.absent_inside()
     assert [(o.object_id, o.present) for o in gone] == [(a.object_id, False)]
     assert book.carried() == []
@@ -134,7 +134,7 @@ def test_records_every_thing_carried_over_as_gone_those_in_a_checked_area_too(bo
     # Only the ones kept (as the list shows them).
     made = book.absent_all(lambda x: x.source.kind == "船舶")
     assert sorted((o.object_id, o.present, o.activity) for o in made) == sorted([(a.object_id, False, ""), (b.object_id, False, "")])
-    assert book.status == "2 のモノを消失として記録"
+    assert book.status == "2 のモノを消失として記録した。"
     assert [x.source.object_id for x in book.carried()] == [c.object_id]
     assert [(o.object_id, o.present) for o in book.absent_all()] == [(c.object_id, False)]
     assert book.carried() == [] and book.absent_all() == []
@@ -184,7 +184,7 @@ def test_clears_the_deleted_records_then_everything_for_good(book):
     assert book.can_clear()
     # Only the deleted ones: the rest stay, and nothing comes back on reading again.
     assert book.clear(deleted_only=True) == (1, 1)
-    assert book.said[-1] == "ローカル の削除済みの記録 1 件・確認範囲 1 件を消去"
+    assert book.said[-1] == "ローカル の削除済みの記録 1 件と確認範囲 1 件を消去した。"
     assert [o.id for o in book.records] == [b.id] and [x.id for x in book.areas] == [kept_area.id]
     book.reload()
     assert [o.id for o in book.records] == [b.id] and [x.id for x in book.areas] == [kept_area.id]
@@ -207,7 +207,7 @@ def test_a_store_without_clear_is_not_cleared(book):
     book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
     book.store = Remote(book.store)
     assert not book.can_clear() and book.clear() is None and len(book.records) == 1
-    assert book.said[-1] == "共有 の記録は消去不可"
+    assert book.said[-1] == "共有 の記録は消去できない。"
 
 
 def test_renames_moves_and_removes_classes_with_the_records_under_them(book):
@@ -219,7 +219,7 @@ def test_renames_moves_and_removes_classes_with_the_records_under_them(book):
     assert "（記録 1 件）" in book.status
     assert book.update_class(["船舶", "補助艦"], parent=["航空機"]) == ["航空機", "補助艦"]
     assert book.record(a.id).kind == "航空機 > 補助艦 > 〇〇級"
-    assert book.update_class(["航空機"], name="船舶") is None and "既存" in book.status
+    assert book.update_class(["航空機"], name="船舶") is None and "もうある" in book.status
     assert book.update_class(["車両"], before=["船舶"]) == ["車両"]
     assert [t.path[0] for t in book.taxonomy() if len(t.path) == 1][:2] == ["車両", "船舶"]
     assert book.remove_class(["航空機", "補助艦"])
@@ -239,7 +239,7 @@ def test_reads_the_classification_again_as_changed_by_someone_else(book):
     assert other.set_taxonomy([{"name": "X", "children": ["Y"]}])
     assert "X" not in [kind_of(t.path) for t in book.taxonomy()]
     a = book.submit(139.7, 35.6, FormValues(object="A", kind="船舶"))
-    assert book.reload_taxonomy() == f"{book.taxonomy_store.label}: 分類 2 件を読み込み"
+    assert book.reload_taxonomy() == f"{book.taxonomy_store.label}: 分類 2 件を取得した。"
     assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
     # The records are as they were; their kinds still offered.
     assert book.record(a.id).kind == "船舶" and "船舶" in [kind_of(t.path) for t in book.taxonomy()]
@@ -251,7 +251,7 @@ def test_reads_the_classification_again_as_changed_by_someone_else(book):
             raise OSError("つながらない")
 
     book.taxonomy_store = Failing()
-    assert "分類の読み込み失敗: つながらない" in book.reload_taxonomy()
+    assert "分類を取得できなかった。つながらない" in book.reload_taxonomy()
     assert [kind_of(t.path) for t in book.kept_taxonomy()] == ["X", "X > Y"]
 
 
@@ -277,14 +277,14 @@ def test_lists_the_catalog_images_without_their_files_at_once(book):
     assert entry.id == "EXT-2" and not entry.file and entry.time == day(4) and entry.box == [1, 2, 3, 4]
     assert [i.id for i in book.images] == ["EXT-3", "d1", "d3", "EXT-2", "dx"]
     assert next(i for i in book.images if i.id == "EXT-3").name == "EXT-3"
-    assert book.status == "2 件を追加（ファイルなし）"
+    assert book.status == "2 件をファイルなしで足した。"
     rec = book.submit(1, 2, FormValues(object="Z", kind="車両"))
     assert rec.image_id == "EXT-2" and rec.image_time == day(4) and rec.image_name == "EXT-2"
     assert "EXT-3" in book.prefs.get("listed_images/ローカル")
     # An image open with the same id: recorded on that one.
     assert book.list_images([ListedImage("d3", "d3", day(3), None)]).file
-    assert book.status == "d3 は開いている画像と同じ ID（その画像で記録）"
-    assert book.list_images([ListedImage(" ", "", None, None)]) is None and book.status == "画像 ID のある画像を選択"
+    assert book.status == "d3 は開いている画像と同じなので、その画像で記録する。"
+    assert book.list_images([ListedImage(" ", "", None, None)]) is None and book.status == "画像 ID のある画像を選ぶ。"
 
 
 def test_makes_a_report(book):

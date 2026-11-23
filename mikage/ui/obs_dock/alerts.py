@@ -83,7 +83,7 @@ class AlertsPart:
                 self._alert_notice(items)
 
         def failed(message: str) -> None:
-            QgsMessageLog.logMessage(self.tr("通報の条件の確認に失敗: {m}").format(m=message), self.tr("観測記録"), Qgis.MessageLevel.Warning)
+            QgsMessageLog.logMessage(self.tr("通報の条件を確かめられなかった。{m}").format(m=message), self.tr("観測記録"), Qgis.MessageLevel.Warning)
 
         run_task(self.tr("通報の条件の確認"), work, finished, failed)
 
@@ -100,8 +100,8 @@ class AlertsPart:
             items = [i for i in self._alert_items if i.record.id not in ids] + list(items)
         names = "・".join(f"{i.record.object_name}（{i.record.activity}）" if i.record.activity else i.record.object_name for i in items[:3])
         more = self.tr(" ほか {n} 件").format(n=len(items) - 3) if len(items) > 3 else ""
-        widget = bar.createMessage(self.tr("注目の記録"), self.tr("通報の条件に合う記録: {r}{m}").format(r=names, m=more))
-        button = QPushButton(self.tr("通報文を作成"))
+        widget = bar.createMessage(self.tr("注目の記録"), self.tr("通報の条件に合う記録がある: {r}{m}").format(r=names, m=more))
+        button = QPushButton(self.tr("通報文を作る"))
 
         def open_() -> None:
             self.open_alerts(0).add_items(items)
@@ -137,10 +137,10 @@ class AlertsPart:
                 self.render()
 
         def failed(message: str) -> None:
-            QgsMessageLog.logMessage(self.tr("通報済みの記録の読み込みに失敗: {m}").format(m=message), self.tr("観測記録"),
+            QgsMessageLog.logMessage(self.tr("通報済みの記録を取得できなかった。{m}").format(m=message), self.tr("観測記録"),
                                      Qgis.MessageLevel.Warning)
 
-        run_task(self.tr("通報済みの記録の読み込み"), lambda _t: repo.reported_ids(), finished, failed)
+        run_task(self.tr("通報済みの記録の取得"), lambda _t: repo.reported_ids(), finished, failed)
 
     def mark_reported(self, ids) -> None:
         """Records just put in the 通報 log table: highlighted at once (without reading the table again)."""

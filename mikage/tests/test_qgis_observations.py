@@ -165,7 +165,7 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     book = dock.book
     assert book.current.name == "d1.tif"
     dock.set_active(True)
-    assert dock.canvas.mapTool() is dock.tool and dock.status.text() == "地図クリックで記録（白抜きの印は継続）"
+    assert dock.canvas.mapTool() is dock.tool and dock.status.text() == "地図をクリックして記録する。白抜きの印をクリックすると継続になる。"
     dock.map_clicked(139.7, 35.6, None)
     assert dock.form.isVisible() and dock.submit_button.text() == "記録（Enter）"
     dock.object_input.setText("あおば")
@@ -175,7 +175,7 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     dock.submit()
     [a] = book.living()
     assert (a.object_name, a.kind, a.activity, a.confidence, a.recorded_by, a.image_name) == ("あおば", "船舶 > 護衛艦", "停泊", "推定", "田中", "d1.tif")
-    assert not dock.form.isVisible() and dock.status.text() == "あおば（停泊）を記録"
+    assert not dock.form.isVisible() and dock.status.text() == "あおば（停泊）を記録した。"
     marks = dock.scene().marks
     assert [(m.role, m.label, m.ring) for m in marks] == [("obs", "あおば・停泊（推定）", "#d97706")]
     # The next image: carried over (a hollow mark), then still there.
@@ -199,12 +199,12 @@ def test_records_by_a_click_carries_over_marks_gone_drags_deletes_and_restores(p
     dock.map_dragged(mark, 139.71, 35.61, False)
     assert dock.scene().marks[0].lon == 139.71 and book.record(here.id).lon == here.lon
     dock.map_dragged(mark, 139.71, 35.61, True)
-    assert book.record(here.id).lon == 139.71 and dock.status.text() == "あおば の位置を修正"
+    assert book.record(here.id).lon == 139.71 and dock.status.text() == "あおば の位置を直した。"
     # Deleted, then brought back from 「削除済みも表示」.
     dock.map_clicked(139.71, 35.61, dock.scene().marks[0])
     assert dock.delete_button.isVisible() and dock.submit_button.text() == "更新（Enter）"
     dock._delete_pending()
-    assert book.here() == [] and dock.status.text() == "1 件の記録を削除"
+    assert book.here() == [] and dock.status.text() == "1 件の記録を削除した。"
     dock.deleted_check.setChecked(True)
     assert dock.table.item(0, 0).font().strikeOut()
     dock.restore(book.here(deleted=True))
@@ -239,7 +239,7 @@ def test_clears_the_local_records_after_asking(plugin, monkeypatch):
     assert dock.clear_local() is None and len(book.records) == 2
     # Only the deleted one.
     assert dock.clear_local() == (1, 0)
-    assert [o.object_name for o in book.records] == ["あおば"] and dock.status.text() == "ローカル の削除済みの記録 1 件・確認範囲 0 件を消去"
+    assert [o.object_name for o in book.records] == ["あおば"] and dock.status.text() == "ローカル の削除済みの記録 1 件と確認範囲 0 件を消去した。"
     # Everything, for good: a new book reads nothing back.
     assert dock.clear_local() == (1, 0)
     assert asked == [2, 2, 1] and book.records == [] and dock.scene().marks == []
@@ -352,14 +352,14 @@ def test_a_length_typed_full_width_or_with_a_unit_is_kept_and_an_unreadable_one_
     dock.length_input.setText("120m くらい")
     dock.submit()
     assert dock.form.isVisible() and dock.pending is not None
-    assert dock.measure_note.text() == "長さ（m）の「120m くらい」を読めません（数で）"
+    assert dock.measure_note.text() == "長さ（m）の「120m くらい」は数として読めない。数字で入れ直す。"
     assert dock.book.living()[0].length == 120.5
     dock.length_input.setText("130 m")
     dock.submit()
     assert not dock.form.isVisible() and dock.book.living()[0].length == 130
     # A file that can't be written (open in Excel, a folder gone): said in the dock, not a Python error.
     assert dock.save_csv(str(tmp_path / "gone" / "records.csv")) is None
-    assert dock.status.text().startswith("CSV を保存できない: ")
+    assert dock.status.text().startswith("CSV を保存できなかった。")
     assert dock.save_csv(str(tmp_path / "records.csv")) == str(tmp_path / "records.csv")
 
 
@@ -369,7 +369,7 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     assert dock.active and dock.status.text().startswith("後端 →")
     # The rear first, then the front.
     dock.map_clicked(139.7, 35.5985, None)
-    assert dock.rear == (139.7, 35.5985) and dock.status.text() == "前端をクリック（Esc で取消）"
+    assert dock.rear == (139.7, 35.5985) and dock.status.text() == "前端をクリックする（Esc で取り消し）"
     dock.map_hovered(139.7, 35.5995)
     assert dock.scene().rubber_label == "111 m・000°"
     dock.map_clicked(139.7, 35.6, None)
@@ -404,7 +404,7 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     dock.set_two_point(True)
     dock.map_clicked(139.7, 35.6, None)
     dock.escape()
-    assert dock.rear is None and dock.status.text() == "後端の取消"
+    assert dock.rear is None and dock.status.text() == "後端を取り消した。"
     # Esc with the map focused (the dock's key is not active then) does the same.
     from qgis.PyQt.QtCore import QEvent, Qt
     from qgis.PyQt.QtGui import QKeyEvent
@@ -417,7 +417,7 @@ def test_measures_by_two_points_and_offers_the_same_thing(plugin):
     assert dock.canvas.mapTool() is dock.tool
     dock.map_clicked(139.7, 35.6, None)
     assert dock.rear is not None
-    assert esc_on_map() and dock.rear is None and dock.status.text() == "後端の取消"
+    assert esc_on_map() and dock.rear is None and dock.status.text() == "後端を取り消した。"
     dock.set_area_mode(True)
     dock.map_clicked(139.7, 35.6, None)
     assert dock.area_corner is not None
@@ -463,7 +463,7 @@ def test_measures_the_width_by_three_or_four_points(plugin):
     dock.map_clicked(139.7, 35.5985, None)
     dock.map_clicked(139.7, 35.6, None)
     assert dock.placed == [(139.7, 35.6)] and not dock.form.isVisible()
-    assert dock.status.text() == "側面（舷側）をクリック（Esc で取消）"
+    assert dock.status.text() == "側面（舷側）をクリックする（Esc で取り消し）"
     # The outline follows the pointer.
     dock.map_hovered(139.7002, 35.5992)
     scene = dock.scene()
@@ -482,10 +482,10 @@ def test_measures_the_width_by_three_or_four_points(plugin):
     dock.set_points(4)
     for lon, lat in ((139.71, 35.5985), (139.71, 35.6), (139.7102, 35.5992)):
         dock.map_clicked(lon, lat, None)
-    assert dock.status.text() == "反対側の側面をクリック（Esc で取消）" and len(dock.placed) == 2
+    assert dock.status.text() == "反対側の側面をクリックする（Esc で取り消し）" and len(dock.placed) == 2
     # Esc takes back the last point only.
     dock.escape()
-    assert dock.placed == [(139.71, 35.6)] and dock.status.text() == "側面の取消"
+    assert dock.placed == [(139.71, 35.6)] and dock.status.text() == "側面を取り消した。"
     dock.map_clicked(139.7102, 35.5992, None)
     dock.map_clicked(139.7099, 35.5992, None)
     assert float(dock.width_input.text()) == pytest.approx(27.15, abs=0.3)
@@ -620,7 +620,7 @@ def test_checked_areas_carry_all_and_absent_inside(plugin):
         dock.submit()
     dock.step(1)
     dock.set_area_mode(True)
-    assert dock.area_form.isVisible() and dock.status.text().startswith("確認範囲:")
+    assert dock.area_form.isVisible() and dock.status.text().endswith("確認範囲を決める。")
     dock.map_clicked(139.69, 35.59, None)
     dock.map_hovered(139.72, 35.62)
     assert dock.scene().area_pending is not None
@@ -629,10 +629,10 @@ def test_checked_areas_carry_all_and_absent_inside(plugin):
     dock.area_kind.setText("船舶")
     dock.area_note.setText("港内")
     dock._submit_area()
-    assert not dock.area_mode and "確認範囲（船舶）を記録（範囲内で記録のない前後の画像のモノ 1 件）" == dock.status.text()
+    assert not dock.area_mode and "確認範囲（船舶）を記録した。範囲の中に、まだ記録のない前後の画像のモノが 1 件ある。" == dock.status.text()
     assert dock.absent_inside_button.text() == "確認範囲内 1 件を消失に"
     dock.carry_all()
-    assert dock.status.text() == "1 のモノを継続として記録（確認範囲内の 1 件を除く）"
+    assert dock.status.text() == "1 のモノを継続として記録した（確認範囲内の 1 件は除く）。"
     dock.absent_inside()
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("B", True)]
     assert len(dock.scene().areas) == 1
@@ -660,14 +660,14 @@ def test_a_cloud_and_one_thing_not_seen_are_recorded_neither_there_nor_gone(plug
     dock.set_area_mode(True, unseen=True)
     assert dock.area_form.title() == "不可範囲（雲など）" and dock.area_submit_button.text() == "不可範囲の記録（Enter）"
     assert dock.area_reason.isVisible() and not dock.area_kind.isVisible() and dock.area_reason.currentText() == "雲"
-    assert dock.status.text().startswith("不可範囲（雲など）:") and not dock.area_button.isChecked()
+    assert "不可範囲を決める。" in dock.status.text() and not dock.area_button.isChecked()
     dock.map_clicked(139.69, 35.59, None)
     dock.map_hovered(139.72, 35.62)
     assert dock.scene().area_pending is not None and dock.scene().area_pending_unseen
     dock.map_clicked(139.72, 35.62, None)
     dock.area_reason.setCurrentText("霞")
     dock._submit_area()
-    assert not dock.area_mode and dock.status.text() == "不可範囲（霞）を記録（中の前後の画像のモノ 1 件を不可として記録）"
+    assert not dock.area_mode and dock.status.text() == "不可範囲（霞）を記録した。中にある前後の画像のモノ 1 件は「不可」にした。"
     [a] = [o for o in book.here() if o.unseen]
     assert (a.object_name, a.unseen, a.present, a.activity) == ("A", "霞", False, "")
     scene = dock.scene()
@@ -678,7 +678,7 @@ def test_a_cloud_and_one_thing_not_seen_are_recorded_neither_there_nor_gone(plug
     dock.map_clicked(ghost.lon, ghost.lat, ghost)
     assert dock.unseen_button.isVisible() and [x.text() for x in dock.unseen_button.menu().actions()] == ["雲", "霞", "影", "画像の欠け", "その他"]
     dock.unseen_button.menu().actions()[2].trigger()
-    assert dock.status.text() == "B（不可（影））を記録"
+    assert dock.status.text() == "B（不可（影））を記録した。"
     dock.carry_all()
     assert sorted((o.object_name, o.present, o.unseen) for o in book.here()) == [("A", False, "霞"), ("B", False, "影"), ("C", True, "")]
     # The flow says so, and the next image carries A and B from where they were last seen.
@@ -704,7 +704,7 @@ def test_lists_an_image_without_its_file_and_types_a_time(plugin):
     dock._list_from_form()
     book = dock.book
     assert book.current.id == "EXT-1" and not book.current.file and dock.time_row.isVisible()
-    assert dock.status.text() == "外部 を追加（ファイルなし）"
+    assert dock.status.text() == "外部 をファイルなしで足した。"
     from qgis.PyQt.QtCore import QDateTime
 
     dock.time_input.setDateTime(QDateTime.fromMSecsSinceEpoch(ms(2, 12)))
@@ -762,11 +762,11 @@ def test_saves_and_reads_an_esri_store_in_tasks(plugin, tmp_path):
     dock.object_input.setText("共有のモノ")
     dock.submit()
     assert wait_for(lambda: len(layer.rows) == 1)
-    assert wait_for(lambda: dock.status.text() == "共有のモノを記録")
+    assert wait_for(lambda: dock.status.text() == "共有のモノを記録した。")
     assert layer.rows[0]["attributes"]["OBSERVER"] == "田中"
     # The classification read again in a task too.
     dock.reload_taxonomy()
-    assert wait_for(lambda: dock.status.text().endswith("件を読み込み"))
+    assert wait_for(lambda: dock.status.text().endswith("件を取得した。"))
     # The local store is the other choice, with its own records.
     dock.store_select.setCurrentIndex(1)
     assert dock.book.label == "ローカル" and dock.book.living() == []
@@ -891,7 +891,7 @@ def test_a_things_flow_opens_below_the_list_and_a_row_of_it_clicked_only_goes_to
     assert not dock.active and not dock.form.isVisible() and not dock.record_button.isChecked()
     assert dock.flow_box.isVisible() and dock.chosen == first.object_id
     assert {i.row() for i in steps.selectionModel().selectedRows()} == {0}
-    assert "の画像へ移動（ダブルクリックでこの記録を編集）" in dock.status.text()
+    assert "の画像に移った。ダブルクリックでこの記録を直せる。" in dock.status.text()
     # A double click opens the record in the form (and recording, to move it), as before.
     steps.cellDoubleClicked.emit(0, 0)
     assert dock.active and dock.form.isVisible() and dock.pending[2] is not None and dock.pending[2].id == first.id
@@ -1061,14 +1061,14 @@ def test_edits_the_classification_as_a_tree(plugin, tmp_path):
     editor.fields_box.setChecked(True)
     editor._add_field()
     editor.save_fields()
-    assert dock.book.spec_fields[-1].name == "項目12" and dock.status.text() == "諸元の項目 12 件を設定"
+    assert dock.book.spec_fields[-1].name == "項目12" and dock.status.text() == "諸元の項目 12 件を設定した。"
     # 「更新」: the classification as someone else saved it since.
     dock.book.taxonomy_store.save([Taxon(["船舶"]), Taxon(["船舶", "新型"])])
     editor.select(["車両"])
     [refresh] = [b for b in editor.findChildren(QPushButton) if b.text() == "更新"]
     refresh.click()
     assert editor._item_of("船舶 > 新型") is not None and editor.selected is None
-    assert dock.status.text().endswith("分類 2 件を読み込み")
+    assert dock.status.text().endswith("分類 2 件を取得した。")
 
 
 def test_gives_scripts_the_observations_through_plugin_api(plugin, tmp_path):
@@ -1130,7 +1130,7 @@ def test_a_record_that_could_not_be_saved_comes_back_in_the_form(plugin, monkeyp
     monkeypatch.setattr(type(book), "submit", lambda self, *a, **k: None)
     dock.submit()
     assert dock.form.isVisible() and dock.object_input.text() == "あおば" and dock.note_input.text() == "入港直後"
-    assert any("送信待ちに保管しました" in w.text() for w in iface.bar.items())
+    assert any("送信待ちに残した" in w.text() for w in iface.bar.items())
     monkeypatch.undo()
     dock.submit()
     assert not dock.form.isVisible() and [o.note for o in book.living()] == ["入港直後"]
@@ -1254,7 +1254,7 @@ def test_absent_all_records_every_thing_shown_as_gone(plugin):
     dock.filter_root("船舶")
     assert dock.carry_label.text() == "前後の画像のモノ 2 件" and dock.absent_all_button.isVisibleTo(dock)
     dock.absent_all()
-    assert dock.status.text() == "2 のモノを消失として記録"
+    assert dock.status.text() == "2 のモノを消失として記録した。"
     assert sorted((o.object_name, o.present) for o in book.here()) == [("A", False), ("C", False)]
     # Unfiltered again: the aircraft are still to be done; only B (in the area) left → only 「確認範囲内 1 件を消失に」.
     dock.filter_root(None)
@@ -1289,7 +1289,7 @@ def test_others_records_are_read_quietly(plugin, tmp_path):
     dock.map_clicked(139.7, 35.6, None)
     dock.object_input.setText("共有のモノ")
     dock.submit()
-    assert wait_for(lambda: dock.status.text() == "共有のモノを記録")
+    assert wait_for(lambda: dock.status.text() == "共有のモノを記録した。")
     theirs = EsriObservationStore(observation_store_of({"url": URL}, [], 0), EsriClient(fake))
     [mine] = theirs.load()
     theirs.save([replace(mine, note="鈴木の備考", updated_by="鈴木", updated_at=now_ms() + 1000)])
@@ -1456,7 +1456,7 @@ def test_with_no_image_chosen_only_a_note_is_shown_and_the_records_are_not_read(
     p, iface, dock, tmp_path = bare
     book = dock.book
     assert book.current is None and not book.loaded
-    assert _idle(dock) and "画像が選ばれていません" in dock.idle_note.text() and not dock.only.isEnabled()
+    assert _idle(dock) and "画像がまだ選ばれていない" in dock.idle_note.text() and not dock.only.isEnabled()
     # Nothing to record on: R and A say so (in the note).
     dock.set_active(True)
     dock.set_area_mode(True)

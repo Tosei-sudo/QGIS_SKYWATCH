@@ -59,12 +59,12 @@ class TablePart:
             if reported and style != "deleted":
                 item.setBackground(QColor(REPORTED_ROW))
                 item.setForeground(QColor("#1f2937"))
-                item.setToolTip(self.tr("通報済み（通報テーブルに記録あり）"))
+                item.setToolTip(self.tr("通報済みの記録"))
             if waiting:
                 # Not the local store: saved offline, on its way to this store's server.
                 item.setBackground(QColor(WAITING_ROW))
                 item.setForeground(QColor("#1e3a8a"))
-                item.setToolTip(self.tr("送信待ち（オフライン中に保存。サーバーにはまだない）"))
+                item.setToolTip(self.tr("送信待ち（まだ送っていない記録）"))
             self.table.setItem(r, i, item)
         if widget is not None:
             self.table.setCellWidget(r, self.table.columnCount() - 1, widget)
@@ -201,13 +201,13 @@ class TablePart:
         first = records[0]
         fields = [
             BulkField("kind", self.tr("種別"), words=self.kinds_model.stringList(), value=first.kind,
-                      tip=self.tr("「大分類 > 種別 > 級」の形")),
+                      tip=self.tr("「大分類 > 種別 > 級」の形で入れる")),
             BulkField("activity", self.tr("活動"), words=book.activity_words(first.kind), value=first.activity,
-                      tip=self.tr("消失の記録は活動なしのまま")),
+                      tip=self.tr("消失の記録は活動を空のままにする")),
             BulkField("confidence", self.tr("確度"), choices=["", *(c.label for c in book.confidences())], value=first.confidence),
         ]
         what = self.tr("選んだ記録 {n} 件（モノ {m} 件）").format(n=len(records), m=things)
-        dialog = BulkEditDialog(self.tr("観測記録の一括編集"), what, fields, self)
+        dialog = BulkEditDialog(self.tr("観測記録をまとめて編集"), what, fields, self)
         ids = [o.id for o in records]
         dialog.accepted.connect(lambda: self.apply_bulk(ids, dialog.values()))
         dialog.finished.connect(lambda _r: dialog.deleteLater())
@@ -219,7 +219,7 @@ class TablePart:
         values = {k: v for k, v in values.items() if k in ("kind", "activity", "confidence")}
         if not values:
             return None
-        return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values), watch=True)
+        return self.do(self.tr("観測記録をまとめて編集"), lambda book: book.update_many(ids, **values), watch=True)
 
     def _small(self, *buttons: tuple) -> QWidget:
         box = QWidget()

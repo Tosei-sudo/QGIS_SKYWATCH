@@ -65,13 +65,25 @@ def save_text(path: str, text: str, encoding: str = "utf-8", newline: Optional[s
     return None
 
 
-def ask_no(parent, title: str, text: str) -> bool:
+def ask_no(parent, title: str, text: str, yes: str = "") -> bool:
     """
     Asks before something that can't be undone; Enter (and Esc) answer いいえ,
     so a key pressed by habit never deletes anything. True for はい.
+
+    With `yes` (an action such as 「削除」, tsudo 2026-11-23): the text says what
+    will happen (常体, no question) and the buttons are that action and 「取消」
+    instead of はい・いいえ; Enter and Esc still answer 取消.
     """
-    yes, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
-    return QMessageBox.question(parent, title, plain_tip(text), yes | no, no) == yes
+    if not yes:
+        ok, no = QMessageBox.StandardButton.Yes, QMessageBox.StandardButton.No
+        return QMessageBox.question(parent, title, plain_tip(text), ok | no, no) == ok
+    box = QMessageBox(QMessageBox.Icon.Question, title, plain_tip(text), parent=parent)
+    go = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.setEscapeButton(cancel)
+    box.exec()
+    return box.clickedButton() is go
 
 
 class PluginDock(QDockWidget):

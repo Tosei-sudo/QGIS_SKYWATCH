@@ -291,7 +291,7 @@ class OfflineObservationStore(_Waiting):
                     original = record_of(p) or o
                     keep_draft(Draft(original, _form_values(original), original.present, editing_id=o.id,
                                      base_updated=int(p.base) if p.base is not None else None, kept_at=at,
-                                     reason="オフライン中の変更: ほかの人が先に更新したため送らず（フォームで開いて直す）",
+                                     reason="オフライン中の変更。ほかの人が先に変えていたので送らなかった。フォームで開いて直す。",
                                      needs_check=True))
                     self.work.drop(self.kind, self.label, [o.id])
                     report.drafts += 1

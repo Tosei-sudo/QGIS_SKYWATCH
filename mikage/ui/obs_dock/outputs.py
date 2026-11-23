@@ -23,14 +23,14 @@ class OutputsPart:
         """The classification as `config.json`'s `observationVocabulary.taxonomy` writes it."""
         if self.book is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系の JSON 保存"), "observation-taxonomy.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系をファイルに保存"), "observation-taxonomy.json", "JSON (*.json)")
         if not path:
             return
         failed = save_text(path, json.dumps(nest(self.book.taxonomy()), ensure_ascii=False, indent=2) + "\n", what="taxonomy-json")
         if failed:
-            self.say(self.tr("分類体系を保存できない: {m}").format(m=failed))
+            self.say(self.tr("分類体系を保存できなかった。{m}").format(m=failed))
             return
-        self.say(self.tr("分類体系を保存: {p}").format(p=path))
+        self.say(self.tr("分類体系を保存した: {p}").format(p=path))
 
     def save_taxonomy_table_file(self, path: Optional[str] = None) -> Optional[str]:
         """The classification as a table (CSV, one row per class; 「分類体系の取り込み」 reads it back). Where it was saved."""
@@ -39,15 +39,15 @@ class OutputsPart:
         from ...core.obs.api import taxonomy_import
 
         if not path:
-            path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系の表に書き出し"), taxonomy_import.taxonomy_csv_name(now_ms()), "CSV (*.csv)")
+            path, _ = QFileDialog.getSaveFileName(self, self.tr("分類体系を表に書き出す"), taxonomy_import.taxonomy_csv_name(now_ms()), "CSV (*.csv)")
         if not path:
             return None
         taxa = self.book.taxonomy()
         failed = save_text(path, taxonomy_import.taxonomy_csv(taxa, self.book.spec_fields), newline="", what="taxonomy-csv", count=len(taxa))
         if failed:
-            self.say(self.tr("分類体系を書き出せない: {m}").format(m=failed))
+            self.say(self.tr("分類体系を書き出せなかった。{m}").format(m=failed))
             return None
-        self.say(self.tr("分類体系を表に書き出し（{n} 分類）: {p}").format(n=len(taxa), p=path))
+        self.say(self.tr("分類体系を表に書き出した（{n} 分類）: {p}").format(n=len(taxa), p=path))
         return path
 
     def open_taxonomy_import(self):
@@ -67,7 +67,7 @@ class OutputsPart:
         if self.book is None:
             return
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, self.tr("分類体系の JSON 読み込み"), "", "JSON (*.json)")
+            path, _ = QFileDialog.getOpenFileName(self, self.tr("分類体系をファイルから読み込む"), "", "JSON (*.json)")
         if not path:
             return
         try:
@@ -75,9 +75,9 @@ class OutputsPart:
                 value = json.load(f)
             items = value if isinstance(value, list) else value.get("taxonomy") if isinstance(value, dict) else None
             if not isinstance(items, list):
-                raise ValueError("分類の配列なし")
+                raise ValueError("分類の一覧がない")
         except (OSError, ValueError) as error:
-            self.say(self.tr("分類の読み込み失敗: {e}").format(e=error))
+            self.say(self.tr("分類体系を読み込めなかった。{e}").format(e=error))
             return
         self.do(self.tr("分類の読み込み"), lambda b: b.set_taxonomy(items))
 
@@ -87,7 +87,7 @@ class OutputsPart:
             return None
         rows = self.book.records if self.deleted_check.isChecked() else self.book.living()
         if not rows:
-            self.say(self.tr("記録なし"))
+            self.say(self.tr("記録がない。"))
             return None
         if not path:
             path, _ = QFileDialog.getSaveFileName(self, self.tr("CSV 保存"), csv_file_name(now_ms()), "CSV (*.csv)")
@@ -95,9 +95,9 @@ class OutputsPart:
             return None
         failed = save_text(path, observations_csv(rows), newline="", what="observations-csv", count=len(rows))
         if failed:
-            self.say(self.tr("CSV を保存できない: {m}").format(m=failed))
+            self.say(self.tr("CSV を保存できなかった。{m}").format(m=failed))
             return None
-        self.say(self.tr("CSV を保存: {p}").format(p=path))
+        self.say(self.tr("CSV を保存した: {p}").format(p=path))
         return path
 
     def to_layers(self) -> list:
@@ -106,11 +106,11 @@ class OutputsPart:
             return []
         made = observation_layers(self.book.records, self.book.areas)
         if not made:
-            self.say(self.tr("記録なし"))
+            self.say(self.tr("記録がない。"))
             return []
         layers = [observation_memory_layer(m) for m in made]
         QgsProject.instance().addMapLayers(layers)
-        self.say(self.tr("{n} をレイヤーとして追加").format(n="・".join(m.title for m in made)))
+        self.say(self.tr("{n} をレイヤーとして地図に出した。").format(n="・".join(m.title for m in made)))
         return layers
 
     def open_alerts(self, tab: int = 0):

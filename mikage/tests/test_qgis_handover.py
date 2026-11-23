@@ -171,7 +171,7 @@ def test_recording_starts_by_taking_the_image(plugin):
     assert len(work.rows) == 1 and work.rows[0]["attributes"]["ASSIGNEE"] == "田中"
     assert work.rows[0]["attributes"]["IMAGE_ID"] == dock.book.current.id
     assert dock.record_button.isChecked() and dock.record_button.isEnabled() and dock.record_button.text() == "クリック記録中"
-    assert "を担当に" in dock.status.text()
+    assert "の担当になった" in dock.status.text()
     assert wait_for(lambda: dock.assignment_bar.label.text().startswith("分担: 自分が担当中"))
     # Again (one's own already): at once, nothing more written.
     dock.set_active(False)
@@ -184,12 +184,12 @@ def test_recording_is_refused_on_an_image_someone_else_holds(plugin):
     fake, work, _ = _setup(p, tmp_path, mode="exclusive")
     work.add({"IMAGE_ID": dock.book.current.id, "ASSIGNEE": "鈴木", "STATUS": "作業中", "TAKEN_AT": 0})
     dock.set_active(True)
-    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert wait_for(lambda: "クリック記録を始められなかった" in dock.status.text())
     assert "鈴木 さんが担当中" in dock.status.text()
     assert not dock.active and not dock.record_button.isChecked() and dock.record_button.isEnabled()
     assert dock.record_button.text() == "クリック記録"
     assert len(work.rows) == 1
-    assert any("クリック記録できません" in w.text() for w in iface.bar.items())
+    assert any("クリック記録を始められなかった" in w.text() for w in iface.bar.items())
 
 
 def test_recording_is_refused_when_the_table_cannot_be_reached(plugin):
@@ -202,7 +202,7 @@ def test_recording_is_refused_when_the_table_cannot_be_reached(plugin):
 
     p.context.esri = lambda: EsriClient(offline)
     dock.set_active(True)
-    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert wait_for(lambda: "クリック記録を始められなかった" in dock.status.text())
     assert not dock.active and not work.rows
 
 
@@ -219,7 +219,7 @@ def test_recording_takes_each_image_it_goes_to(plugin):
     assert {r["attributes"]["IMAGE_ID"] for r in work.rows} == {first.id, "A", "B"}
     dock.book.list_image("B", "b.tif", None, None)
     dock._went()
-    assert wait_for(lambda: "クリック記録できません" in dock.status.text())
+    assert wait_for(lambda: "クリック記録を始められなかった" in dock.status.text())
     assert not dock.active and len(work.rows) == 3
 
 
@@ -271,8 +271,8 @@ def test_shared_recording_goes_on_when_the_table_cannot_be_reached(plugin):
     p.context.esri = lambda: EsriClient(offline)
     dock.set_active(True)
     assert wait_for(lambda: dock.active)
-    assert "分担を記録できませんでした" in dock.status.text() and dock.record_button.isChecked()
-    assert any("分担を記録できませんでした" in w.text() for w in iface.bar.items())
+    assert "分担を残せなかった" in dock.status.text() and dock.record_button.isChecked()
+    assert any("分担を残せなかった" in w.text() for w in iface.bar.items())
     assert not work.rows
 
 

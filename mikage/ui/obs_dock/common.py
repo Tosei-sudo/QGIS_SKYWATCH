@@ -13,17 +13,17 @@ from qgis.PyQt.QtWidgets import QDateTimeEdit, QSizePolicy, QWidget
 from ...core.obs.api import local_time, ObjectFlow, time_key, unseen_label
 from ..obs_overlay import UNSEEN_COLOR
 
-HINT = "地図クリックで記録（白抜きの印は継続）"
+HINT = "地図をクリックして記録する。白抜きの印をクリックすると継続になる。"
 HINT_POINTS = {
-    2: "後端 → 前端（船首・機首）の 2 点クリックで記録（白抜きの印は継続）",
-    3: "後端 → 前端 → 側面の 3 点クリックで長さ・幅・向きを記録（白抜きの印は継続）",
-    4: "後端 → 前端 → 両側面の 4 点クリックで長さ・幅・向きを記録（白抜きの印は継続）",
+    2: "後端 → 前端（船首・機首）の順にクリックして記録する。白抜きの印をクリックすると継続になる。",
+    3: "後端 → 前端 → 側面の順にクリックして、長さ・幅・向きを記録する。白抜きの印をクリックすると継続になる。",
+    4: "後端 → 前端 → 両側面の順にクリックして、長さ・幅・向きを記録する。白抜きの印をクリックすると継続になる。",
 }
 #: The choices of 「点数」.
 POINT_CHOICES = [(1, "1 点"), (2, "2 点（長さ・向き）"), (3, "3 点（＋片側面）"), (4, "4 点（＋両側面）")]
-HINT_AREA = "確認範囲: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」"
-HINT_UNSEEN = "不可範囲（雲など）: 地図で 2 点クリック（対角）、または「表示範囲」「画像の範囲」。中の前後の画像のモノは「不可」として記録"
-NO_IMAGE = "画像なし（画像を開く、または ＋ でファイルなしの画像を追加）"
+HINT_AREA = "地図で対角の 2 点をクリックするか、「表示範囲」「画像の範囲」を押して、確認範囲を決める。"
+HINT_UNSEEN = "地図で対角の 2 点をクリックするか、「表示範囲」「画像の範囲」を押して、不可範囲を決める。中にある前後の画像のモノは「不可」になる。"
+NO_IMAGE = "画像がない。画像を開くか、＋ でファイルのない画像を足す。"
 #: The background of the rows of records already reported (通報済み).
 REPORTED_ROW = "#fde68a"
 #: Records saved while their server could not be reached, waiting to be sent (core/offline.py).

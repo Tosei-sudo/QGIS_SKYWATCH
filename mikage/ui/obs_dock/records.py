@@ -24,9 +24,9 @@ class RecordsPart:
         living_records = len(book.living())
         gone = len(book.records) - living_records
         areas = len(book.areas)
-        text = self.tr("{store} の記録を完全に消去（元に戻せません）。\n\n記録 {n} 件（うち削除済み {d} 件）、確認範囲 {a} 件。"
-                       "\n分類体系・参考写真は残ります。").format(store=book.label, n=len(book.records), d=gone, a=areas)
-        box = QMessageBox(QMessageBox.Icon.Warning, self.tr("ローカル記録の消去"), text, parent=self)
+        text = self.tr("{store} の記録を完全に消す。消したものは戻せない。\n\n記録 {n} 件（うち削除済み {d} 件）、確認範囲 {a} 件"
+                       "\n分類体系と参考写真は残る。").format(store=book.label, n=len(book.records), d=gone, a=areas)
+        box = QMessageBox(QMessageBox.Icon.Warning, self.tr("この PC の記録の消去"), text, parent=self)
         everything = box.addButton(self.tr("すべて消去"), QMessageBox.ButtonRole.DestructiveRole)
         deleted = box.addButton(self.tr("削除済みのみ消去"), QMessageBox.ButtonRole.AcceptRole)
         deleted.setEnabled(gone > 0 or any(a.deleted_at is not None for a in book.areas))
@@ -60,7 +60,7 @@ class RecordsPart:
                 return None
         self.close_form()
         self.chosen = None
-        result = self.do(self.tr("ローカル記録の消去"), lambda b: b.clear(deleted_only))
+        result = self.do(self.tr("この PC の記録の消去"), lambda b: b.clear(deleted_only))
         self.refresh_images()
         return result
 
@@ -91,7 +91,7 @@ class RecordsPart:
     def mark_unseen(self) -> None:
         """「不可範囲内 n 件を不可に」: the things carried over into a 不可範囲, recorded 不可 (those the list shows)."""
         only = self._carry_shown()
-        self.do(self.tr("不可範囲内の不可"), lambda b: b.mark_unseen(only))
+        self.do(self.tr("不可範囲内の記録"), lambda b: b.mark_unseen(only))
 
     def remove(self, rows: list[Observation]) -> None:
         self.do(self.tr("記録の削除"), lambda b: b.remove(rows))
@@ -118,7 +118,7 @@ class RecordsPart:
         if book is not None and book.scoped and self.chosen and (id(book), self.chosen) not in self._whole_flows:
             self._whole_flows.add((id(book), self.chosen))
             chosen = self.chosen
-            self.do(self.tr("モノの記録の読み込み"), lambda b: b.fetch_things([chosen]),
+            self.do(self.tr("モノの記録の取得"), lambda b: b.fetch_things([chosen]),
                     failed=lambda _m: self._whole_flows.discard((id(book), chosen)))
         self.render()
 
@@ -184,7 +184,7 @@ class RecordsPart:
         # Two steps, so one click never deletes a thing's records.
         if not self.remove_all_button.property("armed"):
             self.remove_all_button.setProperty("armed", True)
-            self.remove_all_button.setText(self.tr("再度押すと削除"))
+            self.remove_all_button.setText(self.tr("もう一度押すと削除する"))
             return
         object_id = flow.object_id
 
@@ -241,7 +241,7 @@ class RecordsPart:
         self._center(o)
         if entry is None:
             if not quiet:
-                self.say(self.tr("画像（{n}）は開かれていません（ダブルクリックで画像を開いて記録を編集）").format(n=o.image_name or o.image_id))
+                self.say(self.tr("画像 {n} はまだ開いていない。ダブルクリックすると開いて、記録を直せる。").format(n=o.image_name or o.image_id))
             return False
         return True
 
@@ -302,12 +302,12 @@ class RecordsPart:
             self._went()
             if then is not None:
                 then()
-            self.say(self.tr("{n} は画像カタログにないため、ファイルなしで一覧へ追加").format(n=name or image_id))
+            self.say(self.tr("{n} は画像カタログにないので、ファイルのない画像として一覧に足した。").format(n=name or image_id))
 
         if dock is None or not hasattr(dock, "open_image_id"):
             listed()
             return False
-        self.say(self.tr("{n} を開いています…").format(n=name or image_id))
+        self.say(self.tr("{n} を開いている…").format(n=name or image_id))
         dock.open_image_id(image_id, then=opened, missing=listed)
         return False
 

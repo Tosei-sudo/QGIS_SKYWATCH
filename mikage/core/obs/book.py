@@ -162,15 +162,16 @@ class BulkOutcome:
     error: str = ""
 
     def text(self) -> str:
-        parts = [f"{len(self.saved)} 件の記録を一括変更"]
+        parts = [f"{len(self.saved)} 件の記録をまとめて変えた。"]
         if self.unchanged:
-            parts.append(f"変更不要 {self.unchanged} 件")
+            parts.append(f"{self.unchanged} 件はもとから同じだった。")
         if self.absent:
-            parts.append(f"消失の {self.absent} 件は活動なしのまま")
+            parts.append(f"消失の {self.absent} 件は活動なしのまま。")
         if self.failed:
-            why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから変更）" if self.conflicts else self.error)
-            parts.append(f"保存できず {self.failed} 件（{why}）")
-        return "・".join(parts)
+            why = (f"うち {self.conflicts} 件はほかの人が先に変えていた。「最新にする」を押してから直す。" if self.conflicts else self.error)
+            said = f"{self.failed} 件を"  # the store's own message already says how many
+            parts.append(why if not self.conflicts and why.startswith(said) else f"{self.failed} 件は保存できなかった。{why}")
+        return "".join(parts)
 
 
 @dataclass
@@ -185,13 +186,14 @@ class RemoveOutcome:
     error: str = ""
 
     def text(self) -> str:
-        parts = [f"{len(self.removed)} 件の記録を削除"]
+        parts = [f"{len(self.removed)} 件の記録を削除した。"]
         if self.missing:
-            parts.append(f"削除済み {self.missing} 件")
+            parts.append(f"{self.missing} 件はもう削除されていた。")
         if self.failed:
-            why = (f"うち {self.conflicts} 件はほかの人が読み込み後に更新（読み込み直してから削除）" if self.conflicts else self.error)
-            parts.append(f"削除できず {self.failed} 件（{why}）")
-        return "・".join(parts)
+            why = (f"うち {self.conflicts} 件はほかの人が先に変えていた。「最新にする」を押してから削除する。" if self.conflicts else self.error)
+            said = f"{self.failed} 件を"  # the store's own message already says how many
+            parts.append(why if not self.conflicts and why.startswith(said) else f"{self.failed} 件は削除できなかった。{why}")
+        return "".join(parts)
 
 
 class ObservationBook:
@@ -269,7 +271,7 @@ class ObservationBook:
         a local store's every record.
         """
         started = now_ms()
-        self._say(f"{self.store.label} から読み込み中…")
+        self._say(f"{self.store.label} から記録を取得中…")
         if self.scoped:
             return self._reload_scoped(started)
         try:
@@ -285,16 +287,16 @@ class ObservationBook:
             areas = self.area_store.load()
         except Exception as error:  # noqa: BLE001
             areas = []
-            message = f"{self.area_store.label} から確認範囲の読み込み失敗: {_error_text(error)}"
+            message = f"{self.area_store.label} から確認範囲を取得できなかった。{_error_text(error)}"
         try:
             records = self.store.load()
             text = f"{self.store.label}: {len(living(records))} 件の記録、{len(flows(records))} のモノ"
         except Exception as error:  # noqa: BLE001
             records = []
-            text = f"{self.store.label} から読み込み失敗: {_error_text(error)}"
+            text = f"{self.store.label} から記録を取得できなかった。{_error_text(error)}"
         with self.lock:
             self.records = records
-            if not text.startswith(f"{self.store.label} から読み込み失敗"):
+            if not text.startswith(f"{self.store.label} から記録を取得できなかった"):
                 self._read_at = started
             self.areas = areas
             self._taxonomy = kept if kept is not None else list(self.vocabulary.taxonomy)
@@ -326,13 +328,13 @@ class ObservationBook:
                 self.records, self._around = [], {}
                 self._around_failed = {i.id: (self._around_key(i), now_ms()) for i in wanted}
                 self.loaded = True
-            return self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+            return self._say(f"{self.store.label} から記録を取得できなかった。{_error_text(error)}")
         message = ""
         try:
             areas = self._find_areas(image_ids=[i.id for i in wanted]) if wanted else []
         except Exception as error:  # noqa: BLE001
             areas = []
-            message = f"{self.area_store.label} から確認範囲の読み込み失敗: {_error_text(error)}"
+            message = f"{self.area_store.label} から確認範囲を取得できなかった。{_error_text(error)}"
         with self.lock:
             self.records = records
             self.areas = areas
@@ -342,7 +344,7 @@ class ObservationBook:
         if message:
             return self._say(message)
         if image is None:
-            return self._say(f"{self.store.label}: 画像を選ぶと、その画像とまわりの記録を読み込む")
+            return self._say(f"{self.store.label}: 画像を選ぶと、その画像とまわりの記録を取得する。")
         here = sum(1 for o in records if o.image_id == image.id and o.deleted_at is None)
         return self._say(f"{self.store.label}: この画像 {here} 件、まわりの記録 {len(living(records)) - here} 件")
 
@@ -384,7 +386,7 @@ class ObservationBook:
             areas = self._find_areas(image_ids=[image.id])
         except Exception as error:  # noqa: BLE001
             self._around_failed[image.id] = (self._around_key(image), now_ms())
-            return self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+            return self._say(f"{self.store.label} から記録を取得できなかった。{_error_text(error)}")
         self._around_failed.pop(image.id, None)
         with self.lock:
             self.records = merged(self.records, records)
@@ -485,19 +487,19 @@ class ObservationBook:
             self.changed_by_others |= {o.id for o in news}
         if not news and not gone:
             return None
-        return self._say(f"{self.store.label}: ほかの人の記録 {len(news) + len(gone)} 件を反映")
+        return self._say(f"{self.store.label}: ほかの人の記録 {len(news) + len(gone)} 件を取得した。")
 
     def reload_taxonomy(self) -> str:
         """
         Reads the classification and specification fields again (as others may
         have changed them in a shared store); kept as they were when it fails.
         """
-        self._say(f"{self.taxonomy_store.label} から分類を読み込み中…")
+        self._say(f"{self.taxonomy_store.label} から分類を取得中…")
         try:
             self._read_taxonomy()
         except Exception as error:  # noqa: BLE001
-            return self._say(f"{self.taxonomy_store.label} から分類の読み込み失敗: {_error_text(error)}")
-        return self._say(f"{self.taxonomy_store.label}: 分類 {len(self._taxonomy)} 件を読み込み")
+            return self._say(f"{self.taxonomy_store.label} から分類を取得できなかった。{_error_text(error)}")
+        return self._say(f"{self.taxonomy_store.label}: 分類 {len(self._taxonomy)} 件を取得した。")
 
     def _read_taxonomy(self) -> None:
         """Reads the classification and specification fields again; raises what the store raises (kept as they were)."""
@@ -623,7 +625,7 @@ class ObservationBook:
         """Lists an image without its file (outside the catalog, or not opened here) and records on it."""
         image_id = image_id.strip()
         if not image_id:
-            self._say("画像 ID を入力")
+            self._say("画像 ID を入れる。")
             return None
         info = ListedImage(image_id, name.strip() or image_id, time, box)
         with self.lock:
@@ -632,7 +634,8 @@ class ObservationBook:
             self._order()
             self.go_to(image_id)
         entry = self.current
-        self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"{info.name} を追加（ファイルなし）")
+        self._say(f"{info.name} は開いている画像と同じなので、その画像で記録する。" if entry and entry.file
+                      else f"{info.name} をファイルなしで足した。")
         return entry
 
     def list_images(self, images: list[ListedImage]) -> Optional[ObservedImage]:
@@ -648,7 +651,7 @@ class ObservationBook:
             if image_id and image_id not in wanted:
                 wanted[image_id] = replace(i, id=image_id, name=i.name.strip() or image_id)
         if not wanted:
-            self._say("画像 ID のある画像を選択")
+            self._say("画像 ID のある画像を選ぶ。")
             return None
         first = next(iter(wanted))
         with self.lock:
@@ -659,10 +662,11 @@ class ObservationBook:
         entry = self.current
         if len(wanted) == 1:
             info = wanted[first]
-            self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"{info.name} を追加（ファイルなし）")
+            self._say(f"{info.name} は開いている画像と同じなので、その画像で記録する。" if entry and entry.file
+                      else f"{info.name} をファイルなしで足した。")
         else:
             opened = sum(1 for e in self.images if e.file and e.id in wanted)
-            self._say(f"{len(wanted)} 件を追加（ファイルなし）" + (f"、うち {opened} 件は開いている画像で記録" if opened else ""))
+            self._say(f"{len(wanted)} 件をファイルなしで足した。" + (f"うち {opened} 件は開いている画像で記録する。" if opened else ""))
         return entry
 
     def unlist_image(self, image_id: str) -> bool:
@@ -685,7 +689,7 @@ class ObservationBook:
             if self.current is not None and not self.current.file and self.current.id in wanted:
                 self.current = None
             self._order()
-        self._say(f"{gone[0].name} を一覧から除外（記録は保持）" if len(gone) == 1 else f"{len(gone)} 件を一覧から除外（記録は保持）")
+        self._say(f"{gone[0].name} を一覧から外した。記録は残る。" if len(gone) == 1 else f"{len(gone)} 件を一覧から外した。記録は残る。")
         return len(gone)
 
     def _save_listed(self) -> None:
@@ -710,7 +714,7 @@ class ObservationBook:
         now = now_ms()
         timeless = [replace(o, image_time=t, updated_at=now) for o in self.records if o.image_id == entry.id and o.image_time is None]
         if timeless:
-            self._save_records(timeless, f"{len(timeless)} 件の記録に撮像日時を入力")
+            self._save_records(timeless, f"{len(timeless)} 件の記録に撮像日時を入れた。")
         return timeless
 
     def keeps_satellite(self) -> bool:
@@ -741,15 +745,15 @@ class ObservationBook:
             try:
                 self.area_store.save(areas)
             except Exception as error:  # noqa: BLE001 (said; the records still get it)
-                self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
+                self._say(f"確認範囲を {self.area_store.label} に保存できなかった。{_error_text(error)}")
             else:
                 kept = {a.id: a for a in self._kept_areas(areas)}
                 with self.lock:
                     self.areas = [kept.get(a.id, a) for a in self.areas]
         if unnamed:
-            self._save_records(unnamed, f"{len(unnamed)} 件の記録に衛星名「{name}」を入力")
+            self._save_records(unnamed, f"{len(unnamed)} 件の記録に衛星名「{name}」を入れた。")
         else:
-            self._say(f"衛星名「{name}」を入力" + (f"（確認範囲 {len(areas)} 件）" if areas else ""))
+            self._say(f"衛星名「{name}」を入れた" + (f"（確認範囲 {len(areas)} 件にも）" if areas else "") + "。")
         return unnamed
 
     def inside(self) -> Optional[Callable[[float, float], bool]]:
@@ -901,7 +905,7 @@ class ObservationBook:
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
-            self._say(f"{self.store.label} への保存失敗: {_error_text(error)}")
+            self._say(f"{self.store.label} に保存できなかった。{_error_text(error)}")
             return None
         rows = self._kept(rows)
         with self.lock:
@@ -1016,14 +1020,15 @@ class ObservationBook:
         """
         image = self.current
         if image is None:
-            self._say("画像なし（画像を開く、または ＋ でファイルなしの画像を追加）")
+            self._say("画像がない。画像を開くか、＋ でファイルのない画像を足す。")
             return None
         if editing is not None:
             now = self.record(editing.id)
             if now is not None and now != editing and editing.id in self.changed_by_others:
                 # Read again since the form opened (refresh): someone else's change is not overwritten (#74).
                 who = now.updated_by or now.recorded_by
-                self._say(f"{editing.object_name} は開いた後に{who + ' さんが' if who else 'ほかの人が'}更新したため保存せず（閉じて開き直してから変更）")
+                self._say(f"{editing.object_name} は開いたあとに{who + ' さんが' if who else 'ほかの人が'}変えたので、保存しなかった。"
+                          "閉じて開き直してから直す。")
                 kept = self.draft(draft) if draft else None
                 self.keep_draft(Draft(self._by(self.record_from(image, lon, lat, editing, source, values, present, unseen)),
                                       {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, present, editing.id,
@@ -1038,7 +1043,7 @@ class ObservationBook:
             record = replace(record, id=kept.record.id, created_at=kept.record.created_at)
         self.last = FormValues(kind=record.kind, activity=record.activity if present else self.last.activity, confidence=record.confidence)
         what = (f"（{record.activity}）" if record.activity else "") if present else f"（{state_text(record)}）"
-        saved = self._save_records([record], f"{record.object_name}{what}を{'更新' if editing else '記録'}")
+        saved = self._save_records([record], f"{record.object_name}{what}を{'更新' if editing else '記録'}した。")
         if saved:
             if kept is not None:
                 self.drop_draft(kept.id)
@@ -1090,7 +1095,7 @@ class ObservationBook:
                             length="" if length is None else str(length), heading="" if heading is None else str(heading),
                             width="" if width is None else str(width))
         record = self.record_from(info, lon, lat, None, None, values, present)
-        saved = self._save_records([record], f"{record.object_name} を記録")
+        saved = self._save_records([record], f"{record.object_name} を記録した。")
         return saved[0] if saved else None
 
     def add_many(self, entries: Sequence[Any], image: Optional[str] = None, keep: bool = False,
@@ -1105,7 +1110,7 @@ class ObservationBook:
         """
         info = self._image(image)
         if info is None:
-            self._say("画像なし（取り込む画像を開いて）")
+            self._say("画像がない。取り込む画像を開く。")
             return None
         made: dict[str, tuple[str, str]] = {}
         rows: list[Observation] = []
@@ -1142,7 +1147,7 @@ class ObservationBook:
                     record = replace(record, object_id=made[name][0], object_name=made[name][1])
                 made.setdefault(name, (record.object_id, record.object_name))
             rows.append(record)
-        saved = self._save_records(rows, done or (f"{len(rows)} 件を記録" + (f"（継続 {carried} 件）" if carried else "")))
+        saved = self._save_records(rows, done or (f"{len(rows)} 件を記録した" + (f"（継続 {carried} 件）" if carried else "") + "。"))
         if saved is None and keep:
             # Not lost: sent again from 送信待ち (or opened in the form from there).
             for record in rows:
@@ -1174,7 +1179,7 @@ class ObservationBook:
         if changes.get("present") is False:
             changes["activity"] = ""
         record = replace(was, **changes, updated_at=now_ms())
-        saved = self._save_records([record], f"{record.object_name} を更新")
+        saved = self._save_records([record], f"{record.object_name} を更新した。")
         return saved[0] if saved else None
 
     def update_many(self, record_ids: Sequence[str], kind: Optional[str] = None, activity: Optional[str] = None,
@@ -1232,7 +1237,7 @@ class ObservationBook:
         if was is None:
             return None
         record = replace(was, lon=lon, lat=lat, updated_at=now_ms())
-        saved = self._save_records([record], f"{record.object_name} の位置を修正")
+        saved = self._save_records([record], f"{record.object_name} の位置を直した。")
         return saved[0] if saved else None
 
     def remove(self, rows: Iterable[Observation]) -> bool:
@@ -1243,13 +1248,13 @@ class ObservationBook:
         try:
             marked = self.store.remove(rows)
         except Exception as error:  # noqa: BLE001
-            self._say(f"削除失敗: {_error_text(error)}")
+            self._say(f"削除できなかった。{_error_text(error)}")
             return False
         with self.lock:
             ids = {o.id for o in rows}
             kept = {o.id: o for o in marked}
             self.records = [kept.get(o.id, o) for o in self.records if o.id not in ids or o.id in kept]
-        self._say(f"{len(rows)} 件の記録を削除")
+        self._say(f"{len(rows)} 件の記録を削除した。")
         return True
 
     def removes_for_good(self) -> bool:
@@ -1290,7 +1295,7 @@ class ObservationBook:
         """Brings deleted records back."""
         now = now_ms()
         back = [replace(o, deleted_at=None, updated_at=now) for o in rows]
-        return self._save_records(back, f"{len(back)} 件の記録を復元") is not None
+        return self._save_records(back, f"{len(back)} 件の記録を戻した。") is not None
 
     def can_clear(self) -> bool:
         """Whether the store can remove its records for good (the local GeoPackage)."""
@@ -1303,13 +1308,13 @@ class ObservationBook:
         how many records and areas, None when the store cannot.
         """
         if not self.can_clear():
-            self._say(f"{self.store.label} の記録は消去不可")
+            self._say(f"{self.store.label} の記録は消去できない。")
             return None
         try:
             records = self.store.clear(deleted_only)
             areas = self.area_store.clear(deleted_only)
         except Exception as error:  # noqa: BLE001
-            self._say(f"消去失敗: {_error_text(error)}")
+            self._say(f"消去できなかった。{_error_text(error)}")
             return None
         with self.lock:
             if deleted_only:
@@ -1322,7 +1327,7 @@ class ObservationBook:
                 self._save_listed()
                 self._order()
         what = "削除済みの" if deleted_only else ""
-        self._say(f"{self.store.label} の{what}記録 {records} 件・確認範囲 {areas} 件を消去")
+        self._say(f"{self.store.label} の{what}記録 {records} 件と確認範囲 {areas} 件を消去した。")
         return records, areas
 
     def read_whole(self, object_ids: Iterable[str]) -> bool:
@@ -1333,7 +1338,7 @@ class ObservationBook:
             self.fetch_things(object_ids)
             return True
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.store.label} から読み込み失敗: {_error_text(error)}")
+            self._say(f"{self.store.label} から記録を取得できなかった。{_error_text(error)}")
             return False
 
     def rename(self, object_id: str, name: str, kind: Optional[str] = None) -> bool:
@@ -1343,7 +1348,7 @@ class ObservationBook:
         now = now_ms()
         rows = [replace(o, object_name=name, **({"kind": kind} if kind is not None else {}), updated_at=now)
                 for o in self.records if o.object_id == object_id]
-        return self._save_records(rows, f"モノの名前を「{name}」に変更") is not None
+        return self._save_records(rows, f"モノの名前を「{name}」に変えた。") is not None
 
     def merge(self, source: str, into: str) -> bool:
         """Makes `source`'s records `into`'s (the same thing recorded as two)."""
@@ -1358,7 +1363,7 @@ class ObservationBook:
         now = now_ms()
         rows = [replace(o, object_id=into, object_name=target.name, kind=target.kind or o.kind, updated_at=now)
                 for o in self.records if o.object_id == source]
-        return self._save_records(rows, f"{len(rows)} 件の記録を「{target.name}」に統合") is not None
+        return self._save_records(rows, f"{len(rows)} 件の記録を「{target.name}」に統合した。") is not None
 
     def carry(self, object_id: str, present: bool = True, unseen: str = "", **changes: Any) -> Optional[Observation]:
         """Records a carried-over thing in this image: still there (with changes), gone, or 不可 (`unseen`: why)."""
@@ -1372,7 +1377,7 @@ class ObservationBook:
         record = carried_into(c.source, image.ref, now_ms(), **{"present": present, **({} if present else {"activity": ""}),
                                                                  "unseen": unseen, **changes})
         what = unseen_label(unseen) if unseen else "継続" if present else "消失"
-        saved = self._save_records([record], f"{record.object_name} を{what}として記録")
+        saved = self._save_records([record], f"{record.object_name} を{what}として記録した。")
         return saved[0] if saved else None
 
     def carry_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
@@ -1390,8 +1395,8 @@ class ObservationBook:
         now = now_ms()
         made = [carried_into(c.source, image.ref, now) for c in rows]
         left = [f"確認範囲内の {len(inside)} 件"] * bool(inside) + [f"不可範囲内の {len(hidden)} 件"] * bool(hidden)
-        note = f"（{'・'.join(left)}を除く）" if left else ""
-        return self._save_records(made, f"{len(made)} のモノを継続として記録{note}") or []
+        note = f"（{'・'.join(left)}は除く）" if left else ""
+        return self._save_records(made, f"{len(made)} のモノを継続として記録した{note}。") or []
 
     def absent_all(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """
@@ -1407,8 +1412,8 @@ class ObservationBook:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        note = f"（不可範囲内の {len(hidden)} 件を除く）" if hidden else ""
-        return self._save_records(made, f"{len(made)} のモノを消失として記録{note}") or []
+        note = f"（不可範囲内の {len(hidden)} 件は除く）" if hidden else ""
+        return self._save_records(made, f"{len(made)} のモノを消失として記録した{note}。") or []
 
     def absent_inside(self, only: Optional[Callable[[CarryOver], bool]] = None) -> list[Observation]:
         """Records the things carried over into a checked area as gone in this image (with `only`, just the ones it keeps)."""
@@ -1418,7 +1423,7 @@ class ObservationBook:
             return []
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="") for c in rows]
-        return self._save_records(made, f"{len(made)} のモノを消失として記録（確認範囲内）") or []
+        return self._save_records(made, f"確認範囲内の {len(made)} のモノを消失として記録した。") or []
 
     def mark_unseen(self, only: Optional[Callable[[CarryOver], bool]] = None, quiet: bool = False) -> list[Observation]:
         """
@@ -1432,7 +1437,7 @@ class ObservationBook:
         now = now_ms()
         made = [carried_into(c.source, image.ref, now, present=False, activity="",
                              unseen=self.unseen_reason_at(c.source.lon, c.source.lat) or UNSEEN) for c in rows]
-        saved = self._save_records(made, "" if quiet else f"{len(made)} のモノを不可として記録（不可範囲内）")
+        saved = self._save_records(made, "" if quiet else f"不可範囲内の {len(made)} のモノを不可として記録した。")
         return saved or []
 
     # ---- checked areas -------------------------------------------------
@@ -1446,7 +1451,7 @@ class ObservationBook:
         """
         unseen = unseen.strip()
         if unseen and not self.keeps_unseen_areas():
-            self._say("保存先に不可の理由の属性（UNSEEN_REASON）がないため、不可範囲は記録できません")
+            self._say("この保存先では不可範囲を記録できない。管理者に連絡する（属性 UNSEEN_REASON）。")
             return None
         info = self._image(image)
         if info is None:
@@ -1464,7 +1469,7 @@ class ObservationBook:
         try:
             self.area_store.save([area])
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.area_store.label} への{what}の保存失敗: {_error_text(error)}")
+            self._say(f"{what}を {self.area_store.label} に保存できなかった。{_error_text(error)}")
             return None
         area = self._kept_areas([area])[0]
         with self.lock:
@@ -1474,10 +1479,10 @@ class ObservationBook:
             # The things that may be there: 不可 in this image (not left waiting as 前後の画像のモノ).
             marked = self.mark_unseen(lambda c: bool(covering_areas([area], info.id, c.source.lon, c.source.lat, "", unseen=True)),
                                       quiet=True) if here else []
-            self._say(f"{area_label(area)}を記録{f'（中の前後の画像のモノ {len(marked)} 件を不可として記録）' if marked else ''}")
+            self._say(f"{area_label(area)}を記録した。{f'中にある前後の画像のモノ {len(marked)} 件は「不可」にした。' if marked else ''}")
             return area
         missing = len(self.inside_carried()) if here else 0
-        self._say(f"{area_label(area)}を記録{f'（範囲内で記録のない前後の画像のモノ {missing} 件）' if missing else ''}")
+        self._say(f"{area_label(area)}を記録した。{f'範囲の中に、まだ記録のない前後の画像のモノが {missing} 件ある。' if missing else ''}")
         return area
 
     def add_areas(self, rings: Sequence[tuple[Sequence[Sequence[float]], str, str]], image: Optional[str] = None) -> Optional[list[CheckedArea]]:
@@ -1501,12 +1506,12 @@ class ObservationBook:
         try:
             self.area_store.save(made)
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.area_store.label} への確認範囲の保存失敗: {_error_text(error)}")
+            self._say(f"確認範囲を {self.area_store.label} に保存できなかった。{_error_text(error)}")
             return None
         made = self._kept_areas(made)
         with self.lock:
             self.areas = [*self.areas, *made]
-        self._say(f"確認範囲 {len(made)} 件を記録")
+        self._say(f"確認範囲 {len(made)} 件を記録した。")
         return made
 
     def add_box_area(self, box: Sequence[float], kind: str = "", note: str = "") -> Optional[CheckedArea]:
@@ -1524,7 +1529,7 @@ class ObservationBook:
         try:
             marked = self.area_store.remove(rows)
         except Exception as error:  # noqa: BLE001
-            self._say(f"{what}の削除失敗: {_error_text(error)}")
+            self._say(f"{what}を削除できなかった。{_error_text(error)}")
             return False
         with self.lock:
             ids = {a.id for a in rows}
@@ -1532,9 +1537,9 @@ class ObservationBook:
             self.areas = [kept.get(a.id, a) for a in self.areas if a.id not in ids or a.id in kept]
         gone = self._unseen_records_of(rows)
         if gone and self.remove(gone):
-            self._say(f"{what} {len(rows)} 件を削除（中の不可の記録 {len(gone)} 件も削除）")
+            self._say(f"{what} {len(rows)} 件を削除した。中の「不可」の記録 {len(gone)} 件も削除した。")
         else:
-            self._say(f"{what} {len(rows)} 件を削除")
+            self._say(f"{what} {len(rows)} 件を削除した。")
         return True
 
     def _unseen_records_of(self, areas: list[CheckedArea]) -> list[Observation]:
@@ -1555,7 +1560,7 @@ class ObservationBook:
         try:
             self.area_store.save(back)
         except Exception as error:  # noqa: BLE001
-            self._say(f"確認範囲の復元失敗: {_error_text(error)}")
+            self._say(f"確認範囲を戻せなかった。{_error_text(error)}")
             return False
         with self.lock:
             by_id = {a.id: a for a in back}
@@ -1565,7 +1570,7 @@ class ObservationBook:
         marked = self.mark_unseen(lambda c: bool(covering_areas(hidden, image.id, c.source.lon, c.source.lat, "", unseen=True)),
                                   quiet=True) if hidden else []
         what = "不可範囲" if all(a.unseen for a in back) else "確認範囲"
-        self._say(f"{what} {len(back)} 件を復元" + (f"（中の前後の画像のモノ {len(marked)} 件を不可として記録）" if marked else ""))
+        self._say(f"{what} {len(back)} 件を戻した。" + (f"中にある前後の画像のモノ {len(marked)} 件は「不可」にした。" if marked else ""))
         return True
 
     def image_areas(self, deleted: bool = False) -> list[CheckedArea]:
@@ -1601,7 +1606,7 @@ class ObservationBook:
         try:
             self.taxonomy_store.save(taxa)
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.taxonomy_store.label} への分類の保存失敗: {_error_text(error)}")
+            self._say(f"分類を {self.taxonomy_store.label} に保存できなかった。{_error_text(error)}")
             return False
         with self.lock:
             self._taxonomy = normalize(taxa)
@@ -1622,16 +1627,16 @@ class ObservationBook:
         else:
             taxa = taxonomy_of(value, problems)
         if not taxa:
-            self._say(problems[0] if problems else "分類の形式不正")
+            self._say(problems[0] if problems else "分類の形式が正しくない。")
             return False
-        return self._save_taxonomy(taxa, [], f"分類 {len(taxa)} 件を設定")
+        return self._save_taxonomy(taxa, [], f"分類 {len(taxa)} 件を設定した。")
 
     def add_class(self, path: Sequence[str]) -> bool:
         """Adds a class (its parents too)."""
         path = list(path)
         if not path:
             return False
-        return self._save_taxonomy(with_kinds(self.taxonomy(), [kind_of(path)]), [], f"分類「{kind_of(path)}」を追加")
+        return self._save_taxonomy(with_kinds(self.taxonomy(), [kind_of(path)]), [], f"分類「{kind_of(path)}」を足した。")
 
     def update_class(self, path: Sequence[str], name: Optional[str] = None, parent: Optional[Sequence[str]] = None,
                      before: Any = _UNSET, **own: Any) -> Optional[list[str]]:
@@ -1644,7 +1649,7 @@ class ObservationBook:
         path = list(path)
         taxa = self.taxonomy()
         if find(taxa, path) is None:
-            self._say(f"分類「{kind_of(path)}」なし")
+            self._say(f"分類「{kind_of(path)}」がない。")
             return None
         import re
 
@@ -1657,7 +1662,7 @@ class ObservationBook:
         moved = kind_of(to) != kind_of(path)
         if moved:
             if find(taxa, to) is not None:
-                self._say(f"分類「{kind_of(to)}」は既存（統合は不可、別の名前で）")
+                self._say(f"分類「{kind_of(to)}」はもうある。統合はできないので、別の名前にする。")
                 return None
             try:
                 taxa = move_taxon(taxa, path, to)
@@ -1672,11 +1677,11 @@ class ObservationBook:
         now = now_ms()
         records = [replace(o, kind=rewrite(o.kind, path, to), updated_at=now) for o in self.records if within(o.kind, path)] if moved else []
         if moved:
-            done = f"分類「{kind_of(path)}」を「{kind_of(to)}」に変更（記録 {len(records)} 件）"
+            done = f"分類「{kind_of(path)}」を「{kind_of(to)}」に変えた（記録 {len(records)} 件）。"
         elif reordered:
-            done = f"分類「{kind_of(path)}」の順序を変更"
+            done = f"分類「{kind_of(path)}」の順番を変えた。"
         else:
-            done = f"分類「{kind_of(path)}」を変更"
+            done = f"分類「{kind_of(path)}」を変えた。"
         lacks = getattr(self.taxonomy_store, "lacks", None)
         missing = lacks("activities") if own.get("activities") and lacks else None
         if missing:
@@ -1691,8 +1696,8 @@ class ObservationBook:
         now = now_ms()
         up = path[:-1]
         records = [replace(o, kind=kind_of(up), updated_at=now) for o in self.records if within(o.kind, path)]
-        note = f"（記録 {len(records)} 件は「{kind_of(up) or '種別なし'}」に）" if records else ""
-        return self._save_taxonomy(remove_taxon(self.taxonomy(), path), records, f"分類「{kind_of(path)}」を削除{note}")
+        note = f"（記録 {len(records)} 件は「{kind_of(up) or '種別なし'}」にした）" if records else ""
+        return self._save_taxonomy(remove_taxon(self.taxonomy(), path), records, f"分類「{kind_of(path)}」を削除した{note}。")
 
     def _under(self, path: Sequence[str]) -> bool:
         """Every record of a class (and below) read, before they follow it to another (a shared store); False when they could not be."""
@@ -1702,7 +1707,7 @@ class ObservationBook:
             self.fetch(RecordQuery(kinds=(kind_of(list(path)),)))
             return True
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.store.label} から分類「{kind_of(list(path))}」の記録の読み込み失敗: {_error_text(error)}")
+            self._say(f"{self.store.label} から分類「{kind_of(list(path))}」の記録を取得できなかった。{_error_text(error)}")
             return False
 
     def plan_taxonomy_import(self, request: Any) -> Any:
@@ -1742,20 +1747,20 @@ class ObservationBook:
             self._say(str(error))
             return None
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.taxonomy_store.label} から分類の読み込み失敗: {_error_text(error)}")
+            self._say(f"{self.taxonomy_store.label} から分類を取得できなかった。{_error_text(error)}")
             return None
         if tried is not None and plan.signature() != tried:
-            self._say("試行のあとで分類体系が変わりました（ほかの人の編集など）。もう一度試行してください")
+            self._say("試行のあとで分類体系が変わった（ほかの人の編集など）。もう一度試行する。")
             return None
         if not plan.changed:
-            self._say(f"表から取り込む変更なし（{plan.summary()}）")
+            self._say(f"表から取り込む変更はない（{plan.summary()}）。")
             return plan
         kept = ""
         if backup is not None:
             try:
                 kept = backup(ti.backup_text(self.taxonomy()))
             except Exception as error:  # noqa: BLE001
-                self._say(f"取り込む前の分類体系の控えを保存できないため、取り込みません: {_error_text(error)}")
+                self._say(f"取り込む前の分類体系の控えを保存できなかったので、取り込まなかった。{_error_text(error)}")
                 return None
         if plan.spec_fields is not None and not self.set_spec_fields(plan.spec_fields):
             return None
@@ -1780,10 +1785,10 @@ class ObservationBook:
         try:
             self.taxonomy_store.save_fields(fields)
         except Exception as error:  # noqa: BLE001
-            self._say(f"{self.taxonomy_store.label} への諸元の項目の保存失敗: {_error_text(error)}")
+            self._say(f"諸元の項目を {self.taxonomy_store.label} に保存できなかった。{_error_text(error)}")
             return False
         self.spec_fields = list(fields)
-        self._say(f"諸元の項目 {len(fields)} 件を設定")
+        self._say(f"諸元の項目 {len(fields)} 件を設定した。")
         return True
 
     # ---- the report ----------------------------------------------------

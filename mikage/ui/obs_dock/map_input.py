@@ -22,7 +22,7 @@ class MapInputPart:
             if self.area_corner is None or self.area_ring is not None:
                 self.area_corner = (lon, lat)
                 self.area_ring = None
-                self.say(self.tr("対角をクリック（Esc で取消）"))
+                self.say(self.tr("対角をクリックする（Esc で取り消し）"))
             else:
                 (x1, y1), (x2, y2) = self.area_corner, (lon, lat)
                 self._set_area_ring(box_ring([min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]))
@@ -48,7 +48,7 @@ class MapInputPart:
             self.close_form()
             self.rear = (lon, lat)
             self.cursor = None
-            self.say(self.tr("前端をクリック（Esc で取消）"))
+            self.say(self.tr("前端をクリックする（Esc で取り消し）"))
             self.draw()
             return
         clicked = [*self.placed, (lon, lat)]
@@ -56,9 +56,9 @@ class MapInputPart:
             self.placed = clicked
             self.cursor = None
             if len(clicked) == 1:
-                self.say(self.tr("側面（舷側）をクリック（Esc で取消）") if self.points == 3 else self.tr("片側の側面をクリック（Esc で取消）"))
+                self.say(self.tr("側面（舷側）をクリックする（Esc で取り消し）") if self.points == 3 else self.tr("片側の側面をクリックする（Esc で取り消し）"))
             else:
-                self.say(self.tr("反対側の側面をクリック（Esc で取消）"))
+                self.say(self.tr("反対側の側面をクリックする（Esc で取り消し）"))
             self.draw()
             return
         m = side_points(clicked[0], self.rear, clicked[1:])
@@ -107,7 +107,7 @@ class MapInputPart:
     def _render_area_range(self) -> None:
         ring = self.area_ring
         if not ring:
-            self.area_range.setText(self.tr("範囲: 未指定（地図で 2 点クリック）"))
+            self.area_range.setText(self.tr("範囲はまだない。地図で対角の 2 点をクリックする。"))
             return
         lons = [p[0] for p in ring]
         lats = [p[1] for p in ring]
@@ -117,7 +117,7 @@ class MapInputPart:
 
     def _submit_area(self) -> None:
         if not self.area_ring:
-            self.say(self.tr("範囲を指定（地図で 2 点クリック、または「表示範囲」「画像の範囲」）"))
+            self.say(self.tr("地図で対角の 2 点をクリックするか、「表示範囲」「画像の範囲」を押して範囲を決める。"))
             return
         ring, kind, note = self.area_ring, self.area_kind.text(), self.area_note.text()
 

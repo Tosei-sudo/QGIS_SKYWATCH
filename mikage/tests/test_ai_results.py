@@ -73,8 +73,8 @@ def test_several_results_recorded_at_once_are_things_of_their_class(book):  # no
     # Named after their class, each a thing of its own (only individuals are told apart by name, 2026-11-18).
     assert [(o.object_name, o.kind, o.image_id) for o in saved] == [("支援船", "船舶 > 支援船", "d1"), ("支援船", "船舶 > 支援船", "d1"), ("car", "car", "d1")]
     assert len({o.object_id for o in saved}) == 3
-    assert book.said[-1] == "3 件を記録"
-    assert book.add_many([], image="nope") is None and book.said[-1] == "画像なし（取り込む画像を開いて）"
+    assert book.said[-1] == "3 件を記録した。"
+    assert book.add_many([], image="nope") is None and book.said[-1] == "画像がない。取り込む画像を開く。"
 
 
 def test_a_result_near_a_thing_of_the_image_before_continues_it(book):  # noqa: F811
@@ -90,7 +90,7 @@ def test_a_result_near_a_thing_of_the_image_before_continues_it(book):  # noqa: 
     first, second = saved
     assert (first.object_id, first.object_name, first.kind, first.activity, first.length) == (a.object_id, "あおば", "船舶 > 支援船", "停泊", 100)
     assert second.object_id != a.object_id
-    assert book.said[-1] == "2 件を記録（継続 1 件）"
+    assert book.said[-1] == "2 件を記録した（継続 1 件）。"
     _, problems = source(continueRadius=-1)
     assert problems == ["aiResultSources[0] の continueRadius は 0〜100000（m）で指定"]
 

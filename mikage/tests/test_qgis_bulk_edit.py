@@ -89,7 +89,7 @@ def test_records_chosen_together(obs_plugin):
     got = {o.object_name: o for o in book.living()}
     assert [(got[n].kind, got[n].confidence) for n in ("あおば", "いぶき", "うらが")] == [
         ("船舶 > 護衛艦", "推定"), ("船舶", ""), ("船舶 > 護衛艦", "推定")]
-    assert dock.status.text().startswith("2 件の記録を一括変更")
+    assert dock.status.text().startswith("2 件の記録をまとめて変えた。")
 
 
 def test_records_chosen_together_are_deleted_after_asking(obs_plugin, monkeypatch):
@@ -108,7 +108,7 @@ def test_records_chosen_together_are_deleted_after_asking(obs_plugin, monkeypatc
     monkeypatch.setattr(dock, "ask_remove", lambda records: asked.append(len(records)) or True)
     dock.remove_selected()
     assert sorted(o.object_name for o in book.living()) == ["いぶき"]
-    assert dock.status.text() == "2 件の記録を削除"
+    assert dock.status.text() == "2 件の記録を削除した。"
     assert dock.table.rowCount() == 1 and not dock.remove_chosen_button.isVisible()
     # Restorable from 「削除済みも表示」.
     dock.deleted_check.setChecked(True)
@@ -121,9 +121,9 @@ def test_the_question_says_whether_deleted_records_can_be_restored(obs_plugin, m
     book = dock.book
     o = book.add(139.65, 35.6, object="あおば", kind="船舶", activity="停泊")
     seen = []
-    monkeypatch.setattr("mikage.ui.observation_dock.ask_no", lambda parent, title, text: seen.append(text) or False)
+    monkeypatch.setattr("mikage.ui.observation_dock.ask_no", lambda parent, title, text, **_k: seen.append(text) or False)
     assert dock.ask_remove([o]) is False
-    assert "1 件（モノ 1 件）" in seen[0] and "復元できます" in seen[0]
+    assert "1 件（モノ 1 件）" in seen[0] and "戻せる" in seen[0]
     monkeypatch.setattr(book, "removes_for_good", lambda: True)
     dock.ask_remove([o])
-    assert "元に戻せません" in seen[1]
+    assert "戻せない" in seen[1]

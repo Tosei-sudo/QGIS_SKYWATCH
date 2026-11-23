@@ -193,7 +193,7 @@ class MyRecordsDialog(QDialog):
                                         lambda: self.open_row(self.table.currentRow()))
         self.image_button = self._button(tr("画像を開く"), tr("選んだ画像を開く（開いていなければ前回のファイルか画像カタログから）"),
                                          lambda: self.open_row(self.table.currentRow()))
-        self.bulk_button = self._button(tr("一括編集…"), tr("選んだ記録の種別・活動・確度をまとめて変更（画像は開きません）"), lambda: self.bulk_edit())
+        self.bulk_button = self._button(tr("まとめて編集…"), tr("選んだ記録の種別・活動・確度をまとめて変更（画像は開きません）"), lambda: self.bulk_edit())
         self.remove_button = self._button(tr("選んだ記録を削除…"), tr("選んだ記録をまとめて削除（確認あり）"), lambda: self.remove())
         self.restore_button = self._button(tr("復元"), tr("選んだ削除済みの記録を元に戻す"), lambda: self.restore())
         self.alert_button = self._button(tr("通報に追加"), tr("選んだ記録を通報文に追加"), lambda: self.add_to_alerts())

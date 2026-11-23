@@ -258,7 +258,7 @@ def test_a_saved_record_meeting_the_conditions_is_said_in_the_message_bar(plugin
     assert "船D（航行）・船E（航行）" in dock._alert_widget.text()
     assert [w for w in iface.messageBar().items() if w.title() == "注目の記録"] == [dock._alert_widget]
     from qgis.PyQt.QtWidgets import QPushButton
-    button = next(b for b in dock._alert_widget.findChildren(QPushButton) if b.text() == "通報文を作成")
+    button = next(b for b in dock._alert_widget.findChildren(QPushButton) if b.text() == "通報文を作る")
     button.click()
     dialog = dock._alerts
     assert dialog.isVisible() and dialog.lines_table.rowCount() == 2

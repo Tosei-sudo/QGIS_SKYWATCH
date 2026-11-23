@@ -154,7 +154,7 @@ def test_records_made_offline_wait_and_are_sent_without_overwriting_others(tmp_p
     # b waits in the same outbox, to be looked at (要確認): not sent again by itself.
     assert report.sent == {"observation": 2} and report.drafts == 1 and work.counts() == {"draft": 1}
     drafts = OutboxDrafts(work).all("共有")
-    assert [d.id for d in drafts] == ["b"] and drafts[0].editing and "ほかの人が先に更新" in drafts[0].reason
+    assert [d.id for d in drafts] == ["b"] and drafts[0].editing and "ほかの人が先に変えていた" in drafts[0].reason
     assert drafts[0].needs_check and work.sendable() == 0 and work.pending("draft")[0].op == "check"
     assert "送信待ちに残しました" in report.text()
     again = upload_all(cfg, lambda: client_of(work, switch), lambda url, token: token, prefs, lambda: db, now=lambda: day(27))

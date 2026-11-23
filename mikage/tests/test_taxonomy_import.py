@@ -272,7 +272,7 @@ def test_the_book_tries_then_takes_the_table_in_keeping_a_backup(book):
     assert book.spec_fields == saved.spec_fields or saved.spec_fields is None
     # Again: nothing left to change, nothing saved (no backup made).
     again = book.import_taxonomy(request(), None, lambda text: pytest.fail("no backup when nothing changes"))
-    assert again is not None and not again.changed and "変更なし" in book.said[-1]
+    assert again is not None and not again.changed and "変更はない" in book.said[-1]
 
 
 def test_the_book_takes_nothing_when_the_classification_changed_since_the_dry_run_or_the_backup_fails(book):
@@ -284,7 +284,7 @@ def test_the_book_takes_nothing_when_the_classification_changed_since_the_dry_ru
         raise OSError("書き込めない")
 
     before = book.kept_taxonomy()
-    assert book.import_taxonomy(request(), None, broken) is None and "控えを保存できない" in book.said[-1]
+    assert book.import_taxonomy(request(), None, broken) is None and "控えを保存できなかった" in book.said[-1]
     assert book.kept_taxonomy() == before
 
 

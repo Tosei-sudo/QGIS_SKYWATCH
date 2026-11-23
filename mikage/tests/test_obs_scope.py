@@ -136,7 +136,7 @@ def test_a_shared_book_reads_around_the_image_and_asks_for_the_rest(tmp_path):
     said = []
     # No image yet: nothing read but the classification.
     book = book_of(store, tmp_path, said)
-    assert book.scoped and book.reload().endswith("画像を選ぶと、その画像とまわりの記録を読み込む") and book.records == []
+    assert book.scoped and book.reload().endswith("画像を選ぶと、その画像とまわりの記録を取得する。") and book.records == []
     book.set_open_images(IMAGES, "L5")
     assert book.current.id == "d5" and book.needs_around()
     book.reload()
@@ -153,7 +153,7 @@ def test_a_shared_book_reads_around_the_image_and_asks_for_the_rest(tmp_path):
     book.set_open_images([*IMAGES, ObservedImage("q", "q.tif", day(7), [130, 30, 130.1, 30.1], "LQ")])
     assert book.go_to("q")
     fake.layers.pop(URL)
-    assert book.read_around().startswith(f"{store.label} から読み込み失敗") and not book.needs_around()
+    assert book.read_around().startswith(f"{store.label} から記録を取得できなかった") and not book.needs_around()
 
 
 def test_a_refresh_keeps_only_what_belongs_with_the_records_read(tmp_path):

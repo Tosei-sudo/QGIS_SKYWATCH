@@ -268,7 +268,7 @@ def test_an_esri_store_keeps_the_pixel_where_it_has_the_attributes_and_is_quiet_
         assert wait_for(lambda: dock.book is not None and dock.book.label == "共有" and dock.book.loaded)
         _record(dock, 139.705, 35.605, "共有のモノ")
         assert wait_for(lambda: len(layer.rows) == 1)
-        assert wait_for(lambda: dock.status.text() == "共有のモノを記録")
+        assert wait_for(lambda: dock.status.text() == "共有のモノを記録した。")
         attributes = layer.rows[0]["attributes"]
         [mine] = dock.book.living()
         if kept:

@@ -58,7 +58,7 @@ class FormPart:
         for reason in self.book.vocabulary.unseen_reasons:
             self.unseen_menu.addAction(reason, lambda r=reason: self.submit(False, unseen=r))
         self.submit_button.setText(self.tr("更新（Enter）") if editing else self.tr("継続（Enter）") if source else self.tr("記録（Enter）"))
-        title = editing.object_name if editing else source.object_name if source else self.tr("新規の記録")
+        title = editing.object_name if editing else source.object_name if source else self.tr("新しい記録")
         self.form.setTitle(f"{title}（{unseen_label(editing.unseen)}）" if editing is not None and editing.unseen else title)
         self.form.show()
         self.reveal(self.form)
@@ -116,7 +116,7 @@ class FormPart:
             self.restore_form(lon, lat, editing, source, values)
             self.refresh(force=True)
             self.iface.messageBar().pushWarning(self.tr("観測記録"), plain_tip(self.tr(
-                "記録を保存できませんでした（送信待ちに保管しました）: {m}").format(m=message)))
+                "保存できなかったので、送信待ちに残した。ステータスバーの「送信待ち」から送れる。{m}").format(m=message)))
 
         self.do(self.tr("記録"), lambda b: b.submit(lon, lat, values, present, editing, source, draft=draft or None, unseen=unseen),
                 lambda saved: lost(self.status.text()) if saved is None else self.many.use_record(saved), watch=True, failed=lost)
@@ -132,7 +132,7 @@ class FormPart:
             try:
                 read_number(edit.text())
             except ValueError:
-                self.measure_note.setText(self.tr("{label}の「{text}」を読めません（数で）").format(label=label.text(), text=edit.text().strip()))
+                self.measure_note.setText(self.tr("{label}の「{text}」は数として読めない。数字で入れ直す。").format(label=label.text(), text=edit.text().strip()))
                 self.measure_note.setVisible(True)
                 edit.setVisible(True)
                 edit.setFocus()
@@ -201,7 +201,7 @@ class FormPart:
             _offered, at = self.book.activities_for(kind)
             self.activities_model.setStringList(self.book.activity_words(kind))
             self.activity_input.setPlaceholderText(self.tr("{c}の活動").format(c=at[-1]) if at else "")
-            self.chips_box.setToolTip(self.tr("分類「{c}」の活動（分類の編集で変更）").format(c=kind_of(at)) if at else self.tr("既定の活動"))
+            self.chips_box.setToolTip(self.tr("分類「{c}」の活動。分類体系の編集で変えられる。").format(c=kind_of(at)) if at else self.tr("既定の活動"))
         for i, w in enumerate(self._activity_words()):
             self.chips_layout.addWidget(self._chip_button(f"{i + 1} {w}", f"{w}（{i + 1}）", lambda w=w: self._pick_activity(w), value == w))
 
@@ -300,7 +300,7 @@ class FormPart:
             for c in choices:
                 pressed = c == chosen
                 outside = kind_of([*up, c]) not in known
-                tip = (f"{name}の選択の解除" if pressed else f"{kind_of([*up, c])} を選択") + ("（分類体系にない）" if outside else "")
+                tip = (f"{name}の選択を外す" if pressed else f"{kind_of([*up, c])} を選択") + ("（分類体系にない）" if outside else "")
                 flow.addWidget(self._chip_button(c, tip, lambda p=up + ([] if pressed else [c]): self.choose_kind(p), pressed))
             add_row(name, chips)
         label = name_label_of(taxa, path)
