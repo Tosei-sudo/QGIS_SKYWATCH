@@ -752,11 +752,20 @@ class AreaChoice:
     #: 範囲 or 点 (as a request's shape).
     kind: str
     source: str
+    #: A named area's 管理番号 (NAMED_AREA_ID): the request made of it is linked to it (組織の関心地域); "" otherwise.
+    area_id: str = ""
 
 
 NAMED, BEFORE, WRITTEN, FOUND = "地名テーブル", "過去の依頼", "座標", "地名・住所検索"
 #: The most choices for one place.
 CHOICES = 5
+
+
+def _area_id(a: Any) -> str:
+    """A named area's 管理番号 (its attribute of the role `id`), "" when it has none."""
+    attributes, roles = getattr(a, "attributes", None) or {}, getattr(a, "roles", None) or {}
+    value = attributes.get(roles.get("id", "")) if roles.get("id") else None
+    return str(value).strip() if value not in (None, "") else ""
 
 
 def area_choices(word: str, areas: Sequence[Any], requests: Sequence[ImagingRequest] = ()) -> list[AreaChoice]:
@@ -777,7 +786,8 @@ def area_choices(word: str, areas: Sequence[Any], requests: Sequence[ImagingRequ
                   key=lambda a: (getattr(a, "size", 0.0) or 0.0, len(a.name)))
     for a in [*same, *near]:
         kind = getattr(a, "kind", "")
-        out.append(AreaChoice(word, f"{a.name}（{NAMED}{'・' + kind if kind else ''}）", [list(r) for r in a.rings], "範囲", NAMED))
+        out.append(AreaChoice(word, f"{a.name}（{NAMED}{'・' + kind if kind else ''}）", [list(r) for r in a.rings], "範囲", NAMED,
+                              area_id=_area_id(a)))
     seen: list = []
     for r in sorted((r for r in requests if r.rings and w in fold(r.name)), key=lambda r: -(r.updated or r.created or 0)):
         if r.rings in seen:

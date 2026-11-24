@@ -339,6 +339,10 @@ def test_the_areas_a_place_can_be():
     # The same name first, then those holding it or held by it, the smaller first.
     assert [c.label for c in got] == ["横須賀港（地名テーブル・港湾）", "横須賀港北（地名テーブル・港湾）", "横須賀（地名テーブル・市）"]
     assert got[0].kind == "範囲" and got[0].rings == [ring] and got[0].source == tr.NAMED
+    # The area's 管理番号 (組織の関心地域, 2026-11-24): the request is linked to it.
+    assert got[0].area_id == ""
+    numbered = NamedArea("横須賀港", [ring], "港湾", attributes={"NAMED_AREA_ID": "NA-000101"}, roles={"id": "NAMED_AREA_ID"})
+    assert tr.area_choices("横須賀港", [numbered])[0].area_id == "NA-000101"
     assert [c.label for c in tr.area_choices("sasebo", areas)] == ["佐世保港（地名テーブル・港湾）"]
     assert tr.area_choices("", areas) == [] and tr.area_choices("呉", areas) == []
     # Requests before of that name, the latest first, one area once.

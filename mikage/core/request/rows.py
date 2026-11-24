@@ -20,6 +20,7 @@ from .model import (
     ACHIEVES, CATEGORIES, KINDS, LOOK_SIDES, ORBIT_DIRS, SHAPE_KINDS, STATUSES, TIMES_OF_DAY, ImagingRequest, clamp_priority,
     day_bounds, jst_day, level_value,
 )
+from .area_link import rings_moved
 from .store import DEFAULT_REQUEST_FIELDS, new_request_id
 
 #: Japanese headings a layer may use, by item.
@@ -29,12 +30,13 @@ HEADINGS = {
     "series": "衛星シリーズ", "satellites": "衛星", "modes": "センサーモード", "offNadirMin": "オフナディア角下限",
     "offNadirMax": "オフナディア角上限", "incidenceMin": "入射角下限", "incidenceMax": "入射角上限", "lookSide": "観測方向",
     "orbitDir": "軌道方向", "resolution": "分解能", "timeOfDay": "時間帯", "cloudNoGo": "実施しない雲量",
-    "timesMin": "1日の回数下限", "timesMax": "1日の回数上限", "timesGap": "回の間隔", "systems": "優先システム", "shapeKind": "範囲の種類", "requester": "依頼者", "note": "メモ",
+    "timesMin": "1日の回数下限", "timesMax": "1日の回数上限", "timesGap": "回の間隔", "systems": "優先システム", "shapeKind": "範囲の種類",
+    "namedAreaId": "地域の管理番号", "areaFollow": "地域の形に合わせる", "requester": "依頼者", "note": "メモ",
 }
 #: The items written out (the ledger's own times left out).
 WRITTEN = [k for k in DEFAULT_REQUEST_FIELDS if k not in ("created", "updated")]
 NUMBERS = ("priority", "boost", "offNadirMin", "offNadirMax", "incidenceMin", "incidenceMax", "resolution", "cloudNoGo",
-           "timesMin", "timesMax", "timesGap")
+           "timesMin", "timesMax", "timesGap", "areaFollow")
 
 
 def _key(s: str) -> str:
@@ -140,11 +142,18 @@ def request_of_row(values: dict, roles: dict, rings: list, shape_kind: str, exis
         times_min=_count(get("timesMin")) or 1, times_max=_count(get("timesMax")),
         times_gap=_number(get("timesGap")) if (_number(get("timesGap")) or 0) >= 0 else None,
         shape_kind=_choice(get("shapeKind"), SHAPE_KINDS, shape_kind),
+        # A layer without the items keeps the request's link to its area (組織の関心地域).
+        named_area_id=_text(get("namedAreaId")) if "namedAreaId" in roles else (existing.named_area_id if existing else ""),
+        area_follow=(bool(_number(get("areaFollow"))) if "areaFollow" in roles else bool(existing and existing.area_follow)),
         requester=_text(get("requester")), note=_text(get("note")),
         rings=rings,
     )
+    r.area_follow = r.area_follow and bool(r.named_area_id)
     if existing is not None:
         r.object_id, r.created = existing.object_id, existing.created
+        # Its area changed in the layer: no longer the area's shape (the link kept, for reference).
+        if r.area_follow and rings_moved(rings, existing.rings):
+            r.area_follow = False
     return r
 
 
@@ -175,6 +184,7 @@ def row_of(r: ImagingRequest) -> dict:
         "timeOfDay": r.time_of_day, "cloudNoGo": r.cloud_no_go,
         "timesMin": r.times_min if r.times_min > 1 else None, "timesMax": r.times_max, "timesGap": r.times_gap,
         "systems": ",".join(r.systems), "shapeKind": r.shape_kind,
+        "namedAreaId": r.named_area_id or None, "areaFollow": 1 if r.area_follow and r.named_area_id else 0,
         "requester": r.requester, "note": r.note,
     }
     return {f[k]: values[k] for k in WRITTEN}

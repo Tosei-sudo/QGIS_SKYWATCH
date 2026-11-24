@@ -31,6 +31,7 @@ from qgis.PyQt.QtWidgets import (
     QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from ..core.named_areas import settings_for as named_area_settings
 from ..core.obs.api import load_named_areas, settings_for
 from ..core.request.api import ImagingRequest, jst_day
 from ..core.text_request import (
@@ -69,12 +70,15 @@ class DraftHost:
     def named_areas(self, then: Callable[[list, str], None]) -> None:
         """The named areas (read in a task, kept 10 minutes), then `then(areas, why none)`."""
         config = self.context.config
-        source = settings_for(config.observation_exports, config.alert_reports).named_areas
+        # The named area layer of `namedAreas` (組織の関心地域, its areas of interest too: a request's area may be one),
+        # else that of the observation export or the 通報.
+        org = named_area_settings(config)
+        source = org.areas if org is not None else settings_for(config.observation_exports, config.alert_reports).named_areas
         if source is None:
             then([], "")
             return
         client, token = self.context.esri(), self.context.token_for(source.url, source.token)
-        run_task(_tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=600),
+        run_task(_tr("地名の取得"), lambda _t: load_named_areas(client, source, token, max_age=600, interest_too=True),
                  lambda areas: then(list(areas), ""), lambda m: then([], m), hidden=True)
 
     def find_places(self, words: Sequence[str], then: Callable[[dict, list], None]) -> None:
@@ -413,7 +417,10 @@ class RequestDraftRow(QObject):
             template = applied(self.form.value(), draft, keys, text, note)
             named = replace(draft, values={**draft.values, "name": template.name, "kind": template.kind})
             names = batch_names(named, [c.place for c in chosen])
-            items = [(name, [list(x) for x in c.rings], c.kind, {}) for name, c in zip(names, chosen)]
+            # A place of the named area layer: its request linked to it (組織の関心地域).
+            items = [(name, [list(x) for x in c.rings], c.kind,
+                      {"link": {"named_area_id": c.area_id, "area_follow": True}} if c.area_id else {})
+                     for name, c in zip(names, chosen)]
             self.host.open_batch(template, items, "、".join(names[:3]) + ("…" if len(names) > 3 else ""))
             return
         n = self.form.take_draft(draft, keys, chosen[0] if chosen else None, text, note)

@@ -94,10 +94,12 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_SATELLITE` | `SAT_NAME` | 衛星名で引く |
 | `TBL_SATELLITE_ALIAS` | `SAT_NAME` | 衛星名で引く |
 | `TBL_IMAGING_REQUEST` | `REQ_ID` | 依頼 ID で引く・更新する |
+| `TBL_IMAGING_REQUEST` | `NAMED_AREA_ID` | 地域から作った依頼（地域の形が直されたときに合わせる依頼） |
 | `TBL_REQUEST_HISTORY` | `REQ_ID` | 依頼ごとの出力履歴 |
 | `TBL_REQUEST_HISTORY` | `TARGET_DAY` | 対象日の範囲（出力履歴、年間上限の集計） |
 | `TBL_REQUEST_HISTORY` | `TARGET_DATE` | 対象日での絞り込み（ダッシュボード） |
 | `TBL_REQUEST_HISTORY` | `SHOT_ID` | 撮像の範囲との紐付け |
+| `TBL_REQUEST_HISTORY` | `NAMED_AREA_ID` | 地域ごとの出力履歴（ダッシュボード） |
 | `TBL_REQUEST_SHOT` | `SHOT_ID` | 撮像の範囲を ID で引く |
 | `TBL_REQUEST_SHOT` | `TARGET_DAY` | 対象日の範囲 |
 | `TBL_OBSERVATION` | `OBS_ID` | 保存前の確認、通報との照合 |
@@ -261,6 +263,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TIMES_GAP` | 回の間隔 | `Double` | 同じ日の回と回の最短の間隔（時間。空なら 1）。無くても動く | `timesGap` |
 | `SYSTEMS` | 優先システム | `String(1000)` | 優先するシステムの順（カンマ区切り） | `systems` |
 | `SHAPE_KIND` | 範囲の種類 | `String(16)` | `範囲`・`点` | `shapeKind` |
+| `NAMED_AREA_ID` | 地域の管理番号 | `String(255)` | 依頼を作った組織の地域（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) の `NAMED_AREA_ID`）。地域から作らなかった依頼は空。無くても動く（地域とのつながりが残らない） | `namedAreaId` |
+| `AREA_FOLLOW` | 地域の形に合わせる | `SmallInteger` | 1 なら地域の形が直されたとき依頼の範囲も合わせる（0・空は合わせない。範囲を手で変えると 0 になる）。無くても動く | `areaFollow` |
 | `REQUESTER` | 依頼者 | `String(255)` | 依頼者 | `requester` |
 | `NOTE` | メモ | `String(4000)` | メモ | `note` |
 | `CREATED_AT` | 登録日時 | `Date` | 登録した日時 | `created` |
@@ -302,6 +306,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `OCCURRENCE` | その日の回 | `Integer` | 1 日に何回も撮る依頼（`TIMES_MIN`・`TIMES_MAX`）の何回目か（1, 2 …。1 回の依頼は 1）。無くても動く（何回も撮る依頼は回の区別が残らない） | `occurrence` |
 | `LINK_ID` | 外部連携ID | `String(32)` | 出力した行の短い ID（既定 12 文字の英数字。システムごとに `linkIdLength`・`linkIdChars`）。ファイルの項目 `linkId` で渡し、結果ファイルの `linkId` の列でこの行と照合する。同じ依頼・同じ日・同じシステム・同じ回なら書き出し直しても同じ値。見送りは空。無くても動く（ID では照合できない） | `linkId` |
 | `PART_NO` | 分担の番号 | `Integer` | 1 ショットに収まらない広い範囲をその日の衛星で分けて撮るとき（分担）の何番目のショットか（1, 2 …）。行の範囲はそのショットが撮る部分。範囲をまるごと出した行は空。無くても動く（分担の行の区別が残らず、照合は依頼の範囲で見る） | `part` |
+| `NAMED_AREA_ID` | 地域の管理番号 | `String(255)` | 出力したときの依頼の地域（台帳の `NAMED_AREA_ID`。ダッシュボードで地域ごとに見る。要求外は空）。無くても動く | `namedAreaId` |
 
 ### `TBL_OBSERVATION`（観測記録）
 

@@ -29,6 +29,7 @@ from qgis.PyQt.QtWidgets import (
     QPlainTextEdit, QPushButton, QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..core.request.api import area_links, links_of
 from ..core.named_areas import (
     AREA_USES, ORG_ROLES, PRIORITY_DEFAULT, PRIORITY_MAX, USE_BOTH, USE_INTEREST, USE_PLACE, OrgArea, alias_text, aliases_of,
     blank_count, category_names, category_tree, children_of,
@@ -49,7 +50,8 @@ WAYS = ((BY_CATEGORY, "カテゴリー別"), (BY_PARENT, "上位の地域別"), 
 #: 用途 shown: the areas of interest (関心地域・両方), the place names (地名・両方) or all.
 SHOW_INTEREST, SHOW_PLACE, SHOW_ALL = "interest", "place", "all"
 SHOWS = ((SHOW_INTEREST, "関心地域"), (SHOW_PLACE, "地名"), (SHOW_ALL, "すべて"))
-COLUMNS = ("名前", "管理番号", "用途", "カテゴリー", "国", "種類", "担当グループ", "重要度", "更新日時")
+COLUMNS = ("名前", "管理番号", "用途", "カテゴリー", "国", "種類", "担当グループ", "重要度", "依頼", "更新日時")
+_REQUESTS = COLUMNS.index("依頼")
 USE_TIPS = {USE_PLACE: "地名だけ（通報・観測記録の場所の名前。関心地域の一覧やカードには出ない）",
             USE_INTEREST: "関心地域だけ（新着画像のカードと地図に出る。通報・観測記録の場所の名前には使わない）",
             USE_BOTH: "地名にも関心地域にも使う"}
@@ -86,6 +88,7 @@ class OrgAreasPanel(QWidget):
         self._edit_layer: Optional[QgsVectorLayer] = None
         self.group_names: list[str] = []
         self._groups_asked = False
+        self._ledger_asked = False
         self._items: dict[str, QTreeWidgetItem] = {}
         self._picked_name = ""
         self.dialog = None
@@ -142,6 +145,8 @@ class OrgAreasPanel(QWidget):
             ("new", self.tr("新しい地域"), self.tr("地図に多角形を描いて新しい組織の関心地域。クリックで頂点、ダブルクリックか右クリックで確定、Esc でやり直し"),
              self._new_mode, True),
             ("selection", self.tr("選んだ地物から"), self.tr("作業中のレイヤーで選んだ面の地物の形から新しく作成"), self.from_selection, False),
+            ("request", self.tr("撮像依頼…"), self.tr("選んだ地域（Ctrl・Shift + クリックで複数）の撮像依頼を作成。名称・範囲・依頼グループ・"
+                                                     "優先度は地域のもの。地域の形が直されたら依頼の範囲も合わせる"), self.make_requests, False),
             ("zoom", self.tr("移動"), self.tr("選んだ地域へ地図を移動（ダブルクリックでも）"), self.zoom, False),
             ("map", self.tr("地図に表示"), self.tr("関心地域を「組織の関心地域」のレイヤーとして地図に出す（次に QGIS を開いたときも）"),
              self._map_toggled, True),
@@ -508,6 +513,7 @@ class OrgAreasPanel(QWidget):
 
     def shown_now(self) -> None:
         """The tab came into view: read when not read yet."""
+        self._ledger_asked = False
         self.book.want()
         self._want_groups()
         self.render()
@@ -573,14 +579,21 @@ class OrgAreasPanel(QWidget):
         names = category_names(book.categories)
         countries = dict(book.list.countries) if book.list is not None else {}
         self._items = {}
+        links = self.links()
+        self.tree.setColumnHidden(_REQUESTS, links is None)
         self.tree.blockSignals(True)
         self.tree.clear()
         grey = QBrush(QColor("#6b7280"))
 
         def area_item(a: OrgArea) -> QTreeWidgetItem:
+            count = links_of(links, a.id) if links is not None and a.id else None
             cells = [a.name, a.id or self.tr("（未付番）"), a.use, names.get(a.category.casefold(), a.category), a.country, a.kind,
-                     a.owner_group, str(a.priority) if a.priority else "", _local(a.updated_at)]
+                     a.owner_group, str(a.priority) if a.priority else "", count.text() if count is not None and count.total else "",
+                     _local(a.updated_at)]
             it = QTreeWidgetItem(cells)
+            if count is not None and count.total:
+                it.setToolTip(_REQUESTS, self.tr("有効な依頼 {a} 件・全部で {t} 件（うち地域の形に合わせる {f} 件）").format(
+                    a=count.active, t=count.total, f=count.following))
             it.setData(0, Qt.ItemDataRole.UserRole, a.key)
             colour = QColor(book.color(a))
             if colour.isValid():
@@ -688,6 +701,14 @@ class OrgAreasPanel(QWidget):
             self.buttons[key].setVisible(editing or not ready)
             self.buttons[key].setEnabled(editing and idle)
         self.buttons["zoom"].setEnabled(bool(chosen) or (self.draft is not None and self.draft.has_shape))
+        port = self.requests()
+        self.buttons["request"].setVisible(port is not None and port.store is not None)
+        self.buttons["request"].setEnabled(bool(chosen) and idle)
+        # 管理番号: not changed while requests are linked to the area (they find it by it).
+        linked = self._linked(self.draft)
+        self.area_id.setEnabled(not linked)
+        self.area_id.setToolTip(self.tr("撮像依頼 {n} 件がつながっているので変えられない").format(n=linked) if linked
+                                else self.tr("組織の管理番号（依頼・記録との紐付けに使う。全体で重ならない）。空なら保存時に自動で付番"))
         self.buttons["map"].setEnabled(s is not None)
         self.buttons["map"].blockSignals(True)
         self.buttons["map"].setChecked(layer_of() is not None)
@@ -722,6 +743,60 @@ class OrgAreasPanel(QWidget):
             self._clear_form()
         self._update_buttons()
 
+    # ---- 撮像依頼 (the requests made from the areas) ------------------------------------------------
+
+    #: The 「撮像依頼」 dock (ui/ports.RequestsPort, None without it): features/images.py sets it.
+    requests: Callable[[], Optional[object]] = staticmethod(lambda: None)
+
+    def links(self) -> Optional[dict]:
+        """Each area's requests (core/request/area_link.AreaLinks by 管理番号), None while the ledger is not read or there is none."""
+        port = self.requests()
+        if port is None or port.store is None:
+            return None
+        if not port.loaded:
+            if self.isVisible() and not self._ledger_asked:
+                self._ledger_asked = True
+                port.reload()
+            return None
+        return area_links(port.requests)
+
+    def _linked(self, area: Optional[OrgArea]) -> int:
+        """How many requests are linked to a saved area (by its 管理番号 as saved)."""
+        saved = self._saved(area)
+        if saved is None:
+            return 0
+        area_id = saved.id
+        links = self.links() if area_id else None
+        return links_of(links, area_id).total if links is not None else 0
+
+    def _saved(self, area: Optional[OrgArea]) -> Optional[OrgArea]:
+        """The area as read (by its object id: its 管理番号 may be the one being changed)."""
+        if area is None or area.oid is None:
+            return None
+        return next((a for a in self.book.areas or [] if a.oid == area.oid), None)
+
+    def requests_read(self) -> None:
+        """The ledger was read in 撮像依頼: each area's requests counted again."""
+        try:
+            if self.book.list is not None:
+                self.render()
+        except RuntimeError:  # the panel is gone
+            pass
+
+    def make_requests(self):
+        """「撮像依頼…」: the chosen areas' requests in the 「撮像依頼」 form (one each)."""
+        port = self.requests()
+        chosen = [a for a in self.chosen() if a.active]
+        if port is None or not chosen:
+            if self.chosen() and not chosen:
+                self.say(self.tr("停止中の地域からは依頼を作らない"))
+            return None
+        unnumbered = [a.name for a in chosen if not a.id]
+        if unnumbered:
+            self.say(self.tr("管理番号のない地域は先に付番（{names}）").format(names="、".join(unnumbered[:3])))
+            return None
+        return port.requests_from_areas(chosen)
+
     # ---- saving --------------------------------------------------------------------------------
 
     def save(self) -> None:
@@ -734,6 +809,10 @@ class OrgAreasPanel(QWidget):
         from ..core.named_areas import check_area
 
         problems = check_area(d, self.book.areas or [], self.settings)
+        saved = self._saved(d)
+        linked = self._linked(d)
+        if saved is not None and linked and d.id.strip().upper() != saved.id.strip().upper():
+            problems.append(self.tr("撮像依頼 {n} 件がつながっているので管理番号は変えられない").format(n=linked))
         if problems:
             self.problem.setText("、".join(problems))
             return
