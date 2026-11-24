@@ -14,6 +14,9 @@ colour, note, 「形を描き直す」. 「削除」 deletes the chosen ones (as
 「移動」 (or a double click) shows them on the map. 「地図に表示」 keeps them as
 two layers 「関心地点」「関心地域」, each item in its colour (remembered: shown
 again when QGIS starts or another project opens, once the person has items).
+
+The tab 「組織」 (2026-11-24) is the organisation's areas of interest
+(ui/org_areas_panel.py); 「組織の地域にする…」 hands a person's own area to it.
 """
 from __future__ import annotations
 
@@ -26,20 +29,24 @@ from qgis.PyQt.QtCore import QDateTime, Qt, QTimer
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QTableWidget, QTableWidgetItem, QWidget,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..core.interests import AREA, KIND_LABELS, POINT, Interest, matches, new_interest
 from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, shape_of, shape_rings, to_wgs84
 from ..qgis_io.interests_io import InterestBook, box_of, geometry_of, layers_of, remove_layers, select_on_map, show_layers
+from ..qgis_io.org_areas_io import OrgAreaBook
 from .catalog_overlay import DrawTool
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import column_menus
+from .org_areas_panel import OrgAreasPanel
 
 #: Whether the items are kept on the map (the person's choice; on until turned off).
 ON_MAP_KEY = "mikage/interestsOnMap"
+#: The tab shown last (0 「自分」, 1 「組織」).
+TAB_KEY = "mikage/interestsTab"
 
 
 def _local(ms: Optional[int]) -> str:
@@ -49,7 +56,8 @@ def _local(ms: Optional[int]) -> str:
 class InterestsDock(PluginDock):
     """「関心地域・地点」."""
 
-    def __init__(self, iface, context, open_settings: Callable[[], None], book: InterestBook, parent=None):
+    def __init__(self, iface, context, open_settings: Callable[[], None], book: InterestBook, parent=None,
+                 org_book: Optional[OrgAreaBook] = None):
         super().__init__("SatObsInterests", "関心地域・地点", context, open_settings, parent)
         self.iface = iface
         self.canvas = iface.mapCanvas()
@@ -61,6 +69,12 @@ class InterestsDock(PluginDock):
         #: The layers are being taken away by the plugin itself (not the person turning them off).
         self._removing = False
 
+        # 「自分」 (the person's own items) and 「組織」 (the organisation's areas of interest, ui/org_areas_panel.py) as tabs.
+        outer = self.body
+        self.tabs = QTabWidget()
+        mine = QWidget()
+        self.body = QVBoxLayout(mine)
+        self.body.setContentsMargins(0, 4, 0, 0)
         self.note = plain_label(QLabel())
         self.note.setWordWrap(True)
         self.body.addWidget(self.note)
@@ -99,6 +113,8 @@ class InterestsDock(PluginDock):
             ("delete", self.tr("削除"), self.tr("選んだものを削除"), self.delete, False),
             ("zoom", self.tr("移動"), self.tr("選んだものへ地図を移動（ダブルクリックでも）"), self.zoom, False),
             ("map", self.tr("地図に表示"), self.tr("「関心地点」「関心地域」のレイヤーとして地図に出す（次に QGIS を開いたときも）"), self._map_toggled, True),
+            ("org", self.tr("組織の地域にする…"), self.tr("選んだ地域を組織の関心地域として登録（「組織」のタブで名前・カテゴリーなどを入れて保存。自分の地域は残る）"),
+             self.to_org, False),
         ]:
             b = QPushButton(text)
             b.setToolTip(tip)
@@ -154,6 +170,16 @@ class InterestsDock(PluginDock):
         self.status = plain_label(QLabel())
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
+        self.body = outer
+        self.tabs.addTab(mine, self.tr("自分"))
+        self.org: Optional[OrgAreasPanel] = None
+        if org_book is not None:
+            self.org = OrgAreasPanel(iface, context, org_book, self.reveal)
+            self.tabs.addTab(self.org, self.tr("組織"))
+            self.tabs.setCurrentIndex(1 if QgsSettings().value(TAB_KEY, 0, type=int) == 1 else 0)
+            org_book.changed.connect(self._update_buttons)
+        self.tabs.currentChanged.connect(self._tab_changed)
+        self.body.addWidget(self.tabs, 1)
 
         # Map tools: a click for a point, a polygon for an area; the item in the form drawn meanwhile.
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
@@ -227,6 +253,22 @@ class InterestsDock(PluginDock):
     def _shown(self) -> None:
         self.book.want()
         self.render()
+        if self.org is not None and self.tabs.currentWidget() is self.org:
+            self.org.shown_now()
+
+    def _tab_changed(self, index: int) -> None:
+        QgsSettings().setValue(TAB_KEY, index)
+        if self.org is not None and self.tabs.widget(index) is self.org:
+            self.org.shown_now()
+
+    def to_org(self) -> None:
+        """The chosen area as a new organisation's area of interest, in the 「組織」 tab's form (the person's own kept)."""
+        chosen = self.chosen()
+        if self.org is None or len(chosen) != 1 or chosen[0].kind != AREA or not chosen[0].has_shape:
+            return
+        item = chosen[0]
+        self.tabs.setCurrentWidget(self.org)
+        self.org.start_new(name=item.name, rings=[list(r) for r in item.rings or []], color=item.color, note=item.note)
 
     def _book_changed(self) -> None:
         if self.draft is not None and self.draft.oid is not None and self.book.items is not None and self.book.find(self.draft.id) is None:
@@ -286,6 +328,9 @@ class InterestsDock(PluginDock):
         self.buttons["map"].setChecked(bool(layers_of()))
         self.buttons["map"].blockSignals(False)
         self.reload_button.setEnabled(s is not None and not self.book.loading)
+        org = self.org
+        self.buttons["org"].setVisible(org is not None and org.settings is not None and (org.book.list is None or org.editable()))
+        self.buttons["org"].setEnabled(org is not None and len(chosen) == 1 and chosen[0].kind == AREA and chosen[0].has_shape)
         self.form.setVisible(self.draft is not None)
         self.save_button.setEnabled(self.draft is not None and not self._saving and self._changed())
         self.reshape_button.setEnabled(self.draft is not None and not self._saving)
@@ -581,6 +626,8 @@ class InterestsDock(PluginDock):
         QTimer.singleShot(0, self._update_buttons)
 
     def close_down(self) -> None:
+        if self.org is not None:
+            self.org.close_down()
         for signal, slot in self._hooks:
             try:
                 signal.disconnect(slot)

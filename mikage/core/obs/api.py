@@ -36,7 +36,10 @@ from ..door import lazy
 if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its module when first taken
     from . import place_cache, record_import, taxonomy_import
     from .alert_mail import build_mail
-    from .alerts import AlertSettings, load_geofences, load_named_areas, LogRow, Moment, poll_log
+    from .alerts import (
+        AlertSettings, AREA_USES, area_use_of, DEFAULT_COUNTRY_FIELDS, DEFAULT_PLACE_FIELDS, load_geofences, load_named_areas, LogRow,
+        Moment, poll_log, USE_BOTH, USE_INTEREST, USE_PLACE,
+    )
     from .areas import area_label
     from .assignments import Assignment, progress_of, progress_text, same_person, STATUSES, update, with_status, work_text
     from .book import FormValues, joined_image, ObservedImage
@@ -469,7 +472,8 @@ class ObservationApi:
 
 
 __all__ = [
-    "AlertLogRepository", "AssignmentRepository",
+    "AlertLogRepository", "AssignmentRepository", "AREA_USES", "area_use_of", "DEFAULT_COUNTRY_FIELDS", "DEFAULT_PLACE_FIELDS",
+    "USE_BOTH", "USE_INTEREST", "USE_PLACE",
     "activities_at", "AlertSettings", "ANGLES_ALL", "ANGLES_NEAR", "area_label", "area_out", "areas_at", "Assignment", "BASES",
     "bearing", "box_ring", "build_mail", "Cancelled", "CarryOver", "CheckedArea", "children_of", "class_by_name", "clean",
     "csv_file_name", "default_count", "ends_of", "entry_of", "ExportContext", "ExportFilter", "ExportSettings",

@@ -233,13 +233,23 @@ TABLES = (
         F("WEIGHT", "重み", "DOUBLE", None, "weight"),
         F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
     )),
-    Table("TBL_NAMED_AREA", "地名のポリゴン", "POLYGON", writable=False, setting="alertReports.namedAreas", fields=(
+    Table("TBL_NAMED_AREA", "地名のポリゴン", "POLYGON", writable=True, setting="namedAreas・alertReports.namedAreas", fields=(
         F("NAME", "地名", "TEXT", 255, "name"),
         F("KIND", "種類", "TEXT", 64, "kind"),
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("NAME_EN", "英語名", "TEXT", 255, "nameEn"),
         F("KIND_EN", "種類（英語）", "TEXT", 64, "kindEn"),
         F("NAMED_AREA_ID", "管理番号", "TEXT", 255, "id"),
+        F("AREA_USE", "用途", "TEXT", 16, "use"),
+        F("NAME_KANA", "よみがな", "TEXT", 255, "kana"),
+        F("NAME_ALIAS", "別名", "TEXT", 1000, "alias"),
+        F("COUNTRY_CODE", "国", "TEXT", 8, "country"),
+        F("CATEGORY_ID", "カテゴリー", "TEXT", 64, "category"),
+        F("PARENT_ID", "上位の管理番号", "TEXT", 255, "parent"),
+        F("OWNER_GROUP", "担当グループ", "TEXT", 255, "ownerGroup"),
+        F("PRIORITY", "重要度", "LONG", None, "priority"),
+        F("COLOR", "色", "TEXT", 32, "color"),
+        F("NOTE", "メモ", "TEXT", 4000, "note"),
     )),
     Table("TBL_ALERT_LOG", "通報記録", None, writable=True, setting="alertReports.table", fields=(
         F("OBS_ID", "記録ID", "TEXT", 64, "obsId"),
@@ -495,6 +505,16 @@ TABLES = (
         F("CORRECTED_BY", "補正した人", "TEXT", 255, "by"),
         F("CORRECTED_AT", "補正した日時", "DATE", None, "at"),
     )),
+    Table("TBL_AREA_CATEGORY", "地域のカテゴリー", None, writable=True, setting="namedAreas.categories", fields=(
+        F("CATEGORY_ID", "カテゴリーID", "TEXT", 64, "id"),
+        F("CATEGORY_NAME", "カテゴリー名", "TEXT", 255, "name"),
+        F("CATEGORY_NAME_EN", "カテゴリー名（英語）", "TEXT", 255, "nameEn"),
+        F("PARENT_ID", "上位のカテゴリー", "TEXT", 64, "parent"),
+        F("SORT_ORDER", "表示順", "LONG", None, "order"),
+        F("COLOR", "色", "TEXT", 32, "color"),
+        F("ACTIVE", "有効", "SHORT", None, "active"),
+        F("NOTE", "メモ", "TEXT", 1000, "note"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -509,7 +529,7 @@ INDEXES = {
     "TBL_OBSERVATION": ("OBS_ID", "OBJECT_ID", "IMAGE_ID", "NAMED_AREA_OBJECTID", "UPDATED_AT", "CREATED_AT", "IMAGE_TIME", "OBJECT_NAME",
                         "KIND"),
     "TBL_OBSERVATION_AREA": ("AREA_ID", "IMAGE_ID", "UPDATED_AT", "IMAGE_TIME"),
-    "TBL_NAMED_AREA": ("NAMED_AREA_ID",),
+    "TBL_NAMED_AREA": ("NAMED_AREA_ID", "CATEGORY_ID"),
     "TBL_ALERT_LOG": ("OBS_ID", "REPORTED_AT"),
     "TBL_ASSIGNMENT": ("IMAGE_ID",),
     "TBL_EVENT": ("EVENT_ID",),
@@ -526,6 +546,7 @@ INDEXES = {
     "TBL_TRAINING_ANSWER": ("EXERCISE_ID",),
     "TBL_TRAINING_RESULT": ("USER_NAME", "EXERCISE_ID"),
     "TBL_IMAGE_CORRECTION": ("IMAGE_ID",),
+    "TBL_AREA_CATEGORY": ("CATEGORY_ID",),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -632,6 +653,9 @@ def plugin_config(urls: dict) -> dict:
         config["training"] = {"exercises": exercises}
     if has("TBL_IMAGE_CORRECTION"):
         config["imageCorrections"] = urls["TBL_IMAGE_CORRECTION"]
+    if has("TBL_NAMED_AREA"):
+        # 組織の関心地域 (2026-11-24): the same layer, edited in 「関心地域・地点」 ▸ 「組織」 (countries: alertReports').
+        config["namedAreas"] = {"url": urls["TBL_NAMED_AREA"], **({"categories": urls["TBL_AREA_CATEGORY"]} if has("TBL_AREA_CATEGORY") else {})}
     if has("TBL_AI_RESULT"):
         config["aiResultSources"] = [{"url": urls["TBL_AI_RESULT"], "fields": _fields_of("TBL_AI_RESULT")}]
     if has("TBL_DETECTION"):

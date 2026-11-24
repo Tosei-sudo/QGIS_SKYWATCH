@@ -15,6 +15,7 @@ except ImportError:  # Qt5
 
 from ..qgis_io.catalog_io import FEATURE
 from ..qgis_io.interests_io import InterestBook
+from ..qgis_io.org_areas_io import OrgAreaBook
 from ..ui import command_runs as runs
 from ..ui.catalog_dock import CatalogDock
 from ..ui.central_views import CentralViews
@@ -58,6 +59,8 @@ class Images(Feature):
         host.central = None
         host.notice_feed = None
         host.interests = None
+        #: 組織の関心地域 (qgis_io/org_areas_io.OrgAreaBook): the 「組織」 tab of 関心地域・地点 and the cards.
+        host.org_areas = None
         host.similar_action = None
         # Its ports: 画像カタログ (to open and list images) and 通知 (the imaging plan's reminders).
         host.ports.catalog = lambda: host.docks.get("SatObsImageCatalog")
@@ -66,6 +69,8 @@ class Images(Feature):
     def start(self) -> None:
         # 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
         self.host.interests = InterestBook(self.context, self.window())
+        # 組織の関心地域: the named area layer's areas of interest, for the same dock's 「組織」 and the cards (qgis_io/org_areas_io.py).
+        self.host.org_areas = OrgAreaBook(self.context, self.window())
 
     def dock_specs(self) -> dict:
         iface, context, settings, window = self.iface, self.context, self.host.open_settings, self.window()
@@ -73,7 +78,8 @@ class Images(Feature):
             "SatObsImageCatalog": DockSpec("画像カタログ", "catalog", lambda: CatalogDock(iface, context, settings, window)),
             "SatObsNotices": DockSpec("通知", "notices", lambda: NoticesDock(iface, context, settings, window)),
             "SatObsInterests": DockSpec("関心地域・地点", "interests",
-                                        lambda: InterestsDock(iface, context, settings, self.host.interests, window)),
+                                        lambda: InterestsDock(iface, context, settings, self.host.interests, window,
+                                                              org_book=self.host.org_areas)),
         }
 
     def connect(self) -> None:
@@ -103,6 +109,7 @@ class Images(Feature):
         host.notice_feed = NoticeFeed(self.iface, self.context, notices)
         host.notice_feed.show_map = host.central.show_map
         host.notice_feed.set_interests(host.interests)
+        host.notice_feed.set_org_areas(host.org_areas)
         host.central.add_view(NOTICE_FEED, tr("新着画像"), icon("notice_feed"), host.notice_feed)
         notices.show_feed = self.show_notice_feed
         notices.unread_changed = unread
@@ -204,4 +211,7 @@ class Images(Feature):
         if self.host.interests is not None:
             self.host.interests.deleteLater()
             self.host.interests = None
+        if self.host.org_areas is not None:
+            self.host.org_areas.deleteLater()
+            self.host.org_areas = None
 
