@@ -22,8 +22,8 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .from_plan import requests_of_plan
     from .geometry import look_text, read_last_looks
     from .groups import (
-        check_group, first_group, listed, matches, MEMBERS_MAX, members_text, MINE, mine, NAME_MAX as GROUP_NAME_MAX, NO_GROUP,
-        NOTE_MAX as GROUP_NOTE_MAX, offered, order_changes, read_groups, RequestGroup, same, users_of,
+        check_group, first_group, listed, load_groups, matches, MEMBERS_MAX, members_text, MINE, mine, NAME_MAX as GROUP_NAME_MAX,
+        NO_GROUP, NOTE_MAX as GROUP_NOTE_MAX, offered, order_changes, read_groups, RequestGroup, same, users_of,
     )
     from .last import remembered, with_remembered
     from .linking import unit_key
@@ -94,7 +94,7 @@ __all__ = [
     "NO_GROUP", "NO_SYSTEM", "NOT_IN_FILE", "not_written", "NUMBERS", "offered", "old_tle_text", "orbiting", "order_changes", "Picked",
     "picked", "plan_day", "PLANNED", "PRIORITY_LEVELS", "PRIORITY_MAX", "PRIORITY_MIN", "priority_text", "QuotaData",
     "radar_of", "read_covered", "read_groups", "read_last_looks", "read_other_uses", "read_quota_data", "read_window",
-    "Reading", "remembered", "render", "replaced_where", "REQUEST", "request_of_row", "RequestChange", "RequestGroup",
+    "Reading", "remembered", "render", "replaced_where", "REQUEST", "request_of_row", "RequestChange", "RequestGroup", "load_groups",
     "requests_of", "requests_of_plan", "RequestStoreConfig", "Rewrite", "ROW", "row_of", "row_problems", "row_rings",
     "run_passes", "same", "save_marked", "save_request", "save_requests", "Saved", "series_choices", "shot_days_where",
     "shot_text", "shot_tip", "shots_of", "shots_replaced_where", "shown", "simulate", "square_rings", "state_of", "STATES",

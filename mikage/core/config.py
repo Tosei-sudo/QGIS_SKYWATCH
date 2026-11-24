@@ -49,6 +49,7 @@ from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .events import EventSettings, events_settings_of
 from .interests import InterestSettings, interests_settings_of
+from .named_areas import NamedAreaSettings, named_area_settings_of
 from .roles import user_roles_settings_of
 from .startup_layers import StartupLayer, startup_layers_of
 from .time_zone import TimeZoneRule, time_zones_of
@@ -144,6 +145,9 @@ class PluginConfig:
     events: Optional[EventSettings] = None
     #: `interests`: each person's own points and areas of interest (関心地域・地点), on the cards and in their dock.
     interests: Optional[InterestSettings] = None
+    #: `namedAreas`: the named area layer (TBL_NAMED_AREA) as the organisation's areas of interest (組織の関心地域,
+    #: core/named_areas.py), its categories (TBL_AREA_CATEGORY) and countries; without it alertReports' layer.
+    named_areas: Optional[NamedAreaSettings] = None
     #: `userRoles`: the table of each person's roles (担当), which the menus and buttons shown follow (core/roles.py).
     user_roles: Optional[EsriSource] = None
     #: `offlineWork`: working on through a server outage (cache of reads, changes kept to send later).
@@ -375,6 +379,7 @@ SECTIONS = (
     Section("handover", "handover", handover_settings_of),
     Section("events", "events", events_settings_of),
     Section("interests", "interests", interests_settings_of),
+    Section("namedAreas", "named_areas", named_area_settings_of),
     Section("userRoles", "user_roles", user_roles_settings_of),
     Section("training", "training", training_settings_of),
 )

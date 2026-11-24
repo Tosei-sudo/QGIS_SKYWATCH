@@ -196,6 +196,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "handover",
   "events",
   "interests",
+  "namedAreas",
   "userRoles",
   "training"
  ],
@@ -480,7 +481,17 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "active": "ACTIVE",
    "nameEn": "NAME_EN",
    "kindEn": "KIND_EN",
-   "id": "NAMED_AREA_ID"
+   "id": "NAMED_AREA_ID",
+   "use": "AREA_USE",
+   "kana": "NAME_KANA",
+   "alias": "NAME_ALIAS",
+   "country": "COUNTRY_CODE",
+   "category": "CATEGORY_ID",
+   "parent": "PARENT_ID",
+   "ownerGroup": "OWNER_GROUP",
+   "priority": "PRIORITY",
+   "color": "COLOR",
+   "note": "NOTE"
   },
   "alertCountries": {
    "code": "COUNTRY_CODE",
@@ -538,6 +549,16 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "name": "INTEREST_NAME",
    "owner": "OWNER_USER",
    "color": "COLOR",
+   "note": "NOTE"
+  },
+  "areaCategories": {
+   "id": "CATEGORY_ID",
+   "name": "CATEGORY_NAME",
+   "nameEn": "CATEGORY_NAME_EN",
+   "parent": "PARENT_ID",
+   "order": "SORT_ORDER",
+   "color": "COLOR",
+   "active": "ACTIVE",
    "note": "NOTE"
   },
   "userRoles": {
@@ -1851,6 +1872,15 @@ const SPEC = [
       ], { check: (it, at, p) => {
         if (!it.points && !it.areas) p.push(`${at}: points か areas のどちらかが必要`);
       } }) },
+    { key: "namedAreas", label: "組織の関心地域", doc: "組織の関心地域namedareas", help: "地名のレイヤー（TBL_NAMED_AREA）を組織の関心地域としても使う。行ごとの用途（AREA_USE: 地名・関心地域・両方）で、関心地域は新着画像のカードの「写っている地物」（自分の関心地域・地点の次）とドック「関心地域・地点」の「組織」に出し、全員が編集できる。関心地域だけの行は通報・観測記録の場所の名前に使わない。書かなければ alertReports の namedAreas を使う。",
+      field: O("namedAreas", "組織の関心地域", [
+        T("url", "地名のレイヤー（ポリゴン、編集可）", { req: true, ph: "https://…/FeatureServer/11", help: "TBL_NAMED_AREA。役割: " + Object.entries(K.roles.alertPlaces).map(([k, v]) => `${k}（${v}）`).join("・") + "。名前が違うときだけ fields で合わせる" }),
+        TJ("categories", "カテゴリーの表（編集可）", { ph: "URL か { \"url\", \"fields\" }", help: "TBL_AREA_CATEGORY。役割: " + Object.entries(K.roles.areaCategories).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("countries", "国のレイヤー", { ph: "URL か { \"url\", \"fields\" }", help: "TBL_COUNTRY（国の選択肢と「形から」）。なければ alertReports の countries" }),
+        T("idPrefix", "管理番号の頭", { ph: "NA-", help: "空の管理番号に付ける番号の頭（英数字と - _）。ジオデータベースの属性ルールで付けるならその式と同じに" }),
+        N("idDigits", "管理番号の桁数", { help: "既定 6（NA-000123）" }),
+        T("label", "カードの見出し", { ph: "組織の関心地域" }),
+      ]) },
     { key: "userRoles", label: "担当と使える機能", doc: "担当と使える機能userroles", help: "一人ひとりが「最初の設定」「担当と個人設定…」でチェックした担当（いくつでも）を、利用者名ごとに置く Esri の編集できるテーブル（1 行 1 人 × 1 担当）。担当で使わない機能はメニュー・ツールバー・ドックのボタンに出さない（サーバー側の権限の代わりではない）。書かなければ担当はこの PC にだけ保存。",
       field: TJ("userRoles", "担当のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_USER_ROLE。役割: " + Object.entries(K.roles.userRoles).map(([k, v]) => `${k}（${v}）`).join("・") + "。利用者名は editTracking のユーザー名（既定は環境変数 USERNAME）。担当の値: " + K.roleCodes.map(([c, n]) => `${c}（${n}）`).join("・") }) },
   ] },
@@ -1976,6 +2006,7 @@ const DOC_FILES = {
   "一覧のビュー列並べ替え絞り込みの保存": "docs/features/screen.md",
   "作成者更新者の記録edittracking": "docs/admin/operations.md",
   "個人の関心地域地点interests": "docs/features/images.md",
+  "組織の関心地域namedareas": "docs/features/images.md",
   "備考の単語集glossary": "docs/features/observations.md",
   "先読み": "docs/admin/operations.md",
   "分担と引き継ぎメモassignmentshandover": "docs/features/observations.md",

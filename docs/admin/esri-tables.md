@@ -54,7 +54,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_TAXONOMY`](#tbl_taxonomy分類体系) | なし | 書き込み | 共有の分類体系 | `observationStores[].taxonomyTable` |
 | [`TBL_ALERT_RULE`](#tbl_alert_rule通報の条件) | なし | 読み | 通報の条件 | `alertReports.rules` |
 | [`TBL_ALERT_GEOFENCE`](#tbl_alert_geofenceジオフェンス) | ポリゴン | 読み | ジオフェンス | `alertReports.geofences` |
-| [`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) | ポリゴン | 読み | 地名・施設名の範囲 | `alertReports.namedAreas` |
+| [`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) | ポリゴン | 書き込み（「関心地域・地点」の「組織」。2026-11-24 から。それまでは読みだけ） | 地名・施設名の範囲と組織の関心地域 | `namedAreas`・`alertReports.namedAreas` |
 | [`TBL_ALERT_LOG`](#tbl_alert_log通報記録) | なし | 書き込み | 通報した記録 | `alertReports.table` |
 | [`TBL_ASSIGNMENT`](#tbl_assignment分担) | なし | 書き込み | 画像ごとの分担 | `assignments` |
 | [`TBL_HANDOVER_MEMO`](#tbl_handover_memo引き継ぎメモ) | なし | 書き込み | 引き継ぎメモ | `handover.table` |
@@ -76,6 +76,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
 | [`TBL_TRAINING_RESULT`](#tbl_training_result判読の練習の結果) | なし | 書き込み | 判読の練習の結果（提出 1 回で 1 行） | `training.exercises.results` |
 | [`TBL_IMAGE_CORRECTION`](#tbl_image_correction画像の幾何補正) | なし | 書き込み | 画像ごとのクイック幾何補正（目印の点・地形の補正。2026-11-23 に追加） | `imageCorrections` |
+| [`TBL_AREA_CATEGORY`](#tbl_area_category地域のカテゴリー) | なし | 書き込み（「関心地域・地点」の「組織」の「カテゴリー…」） | 組織の関心地域のカテゴリー（木の形。2026-11-24 に追加） | `namedAreas.categories` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -113,6 +114,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_OBSERVATION_AREA` | `UPDATED_AT` | ほかの人の変更（追加） |
 | `TBL_OBSERVATION_AREA` | `IMAGE_TIME` | 期間での確認範囲（報告書。作り直し） |
 | `TBL_NAMED_AREA` | `NAMED_AREA_ID` | 地名 ID で引く |
+| `TBL_NAMED_AREA` | `CATEGORY_ID` | カテゴリーごとの地域（カテゴリーの ID を変えたとき） |
 | `TBL_ALERT_LOG` | `OBS_ID` | 記録ごとの通報済み |
 | `TBL_ALERT_LOG` | `REPORTED_AT` | 通報の新着（30 秒ごと）、期間での通報記録（追加） |
 | `TBL_ASSIGNMENT` | `IMAGE_ID` | 画像ごとの分担（画像を開くたび） |
@@ -134,6 +136,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_TRAINING_RESULT` | `USER_NAME` | 本人の結果（判読の練習を開くたび。試験は 1 回だけ） |
 | `TBL_TRAINING_RESULT` | `EXERCISE_ID` | 問題ごとの結果（指導者の集計） |
 | `TBL_IMAGE_CORRECTION` | `IMAGE_ID` | 画像ごとの幾何補正（画像を開くたび） |
+| `TBL_AREA_CATEGORY` | `CATEGORY_ID` | カテゴリーを ID で引く・更新する |
 
 ほかに:
 
@@ -394,16 +397,28 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 
 ### `TBL_NAMED_AREA`（地名のポリゴン）
 
-地名・施設名の範囲のポリゴン（記録を含むいちばん小さいものが通報の `place`）。`alertReports.namedAreas.fields`（既定は下の名前）。
+地名・施設名の範囲のポリゴン（記録を含むいちばん小さいものが通報の `place`）。2026-11-24 から**組織の関心地域**も同じ表に置く（[組織の関心地域](../features/images.md#組織の関心地域namedareas)。新しい表は作らず、属性を横に足した）。どの行を何に使うかは `AREA_USE`（用途）で決める: 空・`地名` は今までどおりの地名だけ、`関心地域` は組織の関心地域だけ（新着画像のカード・「関心地域・地点」の「組織」に出て、通報・観測記録の場所の名前には**使わない**）、`両方` はどちらにも。行の追加・変更は「関心地域・地点」の「組織」で全員ができる（ArcGIS Pro で直してもよい。プラグインが書くので作成者・更新者の 4 属性も置き、サービスで編集を許可する: `tools/arcgis/create_tables.py --grant-edit` をもう一度）。設定ファイルは `namedAreas`（なければ `alertReports.namedAreas`）、属性名が違えば `namedAreas.fields`（既定は下の名前）。
+
+`NAMED_AREA_ID`（管理番号）はすべての行に付け、重ならないようにする（依頼・記録との紐付けに使う。`OBJECTID` は地名のデータを入れ直すと変わる）。空の行は保存したときに `NA-000123` の形で付く。付けるのはジオデータベースの属性ルール（Oracle のシーケンス `SEQ_NAMED_AREA_ID`。作り方は [docs/arcgis-setup.md](../arcgis-setup.md#属性ルール地名の管理番号の自動付番)）で、ルールがなければプラグインが「いちばん大きい番号の次」を付け、保存の後にもう一度重なりを確かめる（2 台が同時に付けたら、`OBJECTID` の大きい行が次の番号に）。前からある空の行は `tools/arcgis/named_area_ids.py` か、「組織」の「管理番号のない n 件に付番…」でまとめて付ける。番号を付けると、通報フォーマットの `place.id` に今まで空だった地名の番号も出るようになる。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
-| `NAME` | 地名 | `String(255)` | 地名・施設名 | `name` |
-| `KIND` | 種類 | `String(64)` | 港・施設など | `kind` |
-| `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない | `active` |
+| `NAME` | 地名 | `String(255)` | 地名・施設名・関心地域の名前 | `name` |
+| `KIND` | 種類 | `String(64)` | 階層の管理（都道府県・市町村・港・施設など。通報の `placeKinds` にも使う） | `kind` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 で使わない（地名にも関心地域にも） | `active` |
 | `NAME_EN` | 英語名 | `String(255)` | 英語の地名（通報の `place.en`・`places.en`。なくてもよい） | `nameEn` |
 | `KIND_EN` | 種類（英語） | `String(64)` | 英語の種類（通報の `placeKind.en`。なくてもよい） | `kindEn` |
-| `NAMED_AREA_ID` | 管理番号 | `String(255)` | 組織内の管理番号（通報の項目 `place.id`・`places.id`。観測記録の `NAMED_AREA_OBJECTID` はこれではなく `OBJECTID`）。なくてもよい | `id` |
+| `NAMED_AREA_ID` | 管理番号 | `String(255)` | 組織内の管理番号（全体で重ならない。空なら保存時に付番。通報の項目 `place.id`・`places.id`。観測記録の `NAMED_AREA_OBJECTID` はこれではなく `OBJECTID`） | `id` |
+| `AREA_USE` | 用途 | `String(16)` | `地名`・`関心地域`・`両方`（空は `地名`）。`関心地域` だけの行は通報・観測記録の場所の名前に使わない | `use` |
+| `NAME_KANA` | よみがな | `String(255)` | ひらがなの読み（一覧の並べ替えと検索） | `kana` |
+| `NAME_ALIAS` | 別名 | `String(1000)` | 略称・旧名・通称（カンマか読点で区切っていくつでも。検索に使う） | `alias` |
+| `COUNTRY_CODE` | 国 | `String(8)` | 国コード（[`TBL_COUNTRY`](#tbl_country国) の `COUNTRY_CODE`。1 地域に 1 つ。「形から」で国のレイヤーから入る） | `country` |
+| `CATEGORY_ID` | カテゴリー | `String(64)` | カテゴリーの ID（[`TBL_AREA_CATEGORY`](#tbl_area_category地域のカテゴリー) の `CATEGORY_ID`。名前ではなく ID でつなぐ） | `category` |
+| `PARENT_ID` | 上位の管理番号 | `String(255)` | この地域を含む地域の `NAMED_AREA_ID`（「組織」の一覧の「上位の地域別」の木） | `parent` |
+| `OWNER_GROUP` | 担当グループ | `String(255)` | 受け持つ依頼グループ（[`TBL_REQUEST_GROUP`](#tbl_request_group依頼グループ) の `GROUP_NAME`） | `ownerGroup` |
+| `PRIORITY` | 重要度 | `Integer` | 1（最も高い）〜1000。空は依頼の既定と同じ 500 | `priority` |
+| `COLOR` | 色 | `String(32)` | 地図とカードの色（`#rrggbb`）。空はカテゴリーの色 | `color` |
+| `NOTE` | メモ | `String(4000)` | メモ | `note` |
 
 ### `TBL_ALERT_LOG`（通報記録）
 
@@ -771,6 +786,21 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `CORRECTED_BY` | 補正した人 | `String(255)` | 保存した人（作成者の 4 属性と同じ利用者名） | `by` |
 | `CORRECTED_AT` | 補正した日時 | `Date` | 保存した日時 | `at` |
 
+### `TBL_AREA_CATEGORY`（地域のカテゴリー）
+
+組織の関心地域のカテゴリー（2026-11-24 に追加。tsudo「新しいテーブルとして、カテゴリーを整理しよう」）。1 行 1 カテゴリー、`PARENT_ID` で木にする（港湾 ▸ 軍港 など）。地域（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン)）の `CATEGORY_ID` がこの表の `CATEGORY_ID` を持つ（名前を変えても地域とのつながりは変わらない）。追加・変更・並べ替え・削除は「関心地域・地点」の「組織」の「カテゴリー…」で全員ができる。ID を変えると、そのカテゴリーの地域の `CATEGORY_ID` も直す。地域が 1 件でもあるカテゴリーは削除できない（使わなくなったら `ACTIVE` を 0 に）。`namedAreas.categories`（URL か `{ "url", "fields" }`、既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `CATEGORY_ID` | カテゴリーID | `String(64)` | ID（英数字と `-` `_`。`PORT-NAVAL` など）。**必須** | `id` |
+| `CATEGORY_NAME` | カテゴリー名 | `String(255)` | 名前（一覧・カードに出る） | `name` |
+| `CATEGORY_NAME_EN` | カテゴリー名（英語） | `String(255)` | 英語の名前 | `nameEn` |
+| `PARENT_ID` | 上位のカテゴリー | `String(64)` | 上位のカテゴリーの `CATEGORY_ID`（空はいちばん上） | `parent` |
+| `SORT_ORDER` | 表示順 | `Integer` | 同じ上位の中での順（小さいほど先） | `order` |
+| `COLOR` | 色 | `String(32)` | 色（`#rrggbb`）。色のない地域はこの色（空なら上位のカテゴリーの色） | `color` |
+| `ACTIVE` | 有効 | `SmallInteger` | 0 なら地域の入力で選べない（そのカテゴリーの地域はそのまま） | `active` |
+| `NOTE` | メモ | `String(1000)` | 説明 | `note` |
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -840,6 +870,10 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
     }
   },
   "imageCorrections": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/32",              // TBL_IMAGE_CORRECTION
+  "namedAreas": {
+    "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/11",                          // TBL_NAMED_AREA（組織の関心地域）
+    "categories": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/33"                    // TBL_AREA_CATEGORY
+  },
   "aiResultSources": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/17",                        // TBL_AI_RESULT
       "fields": { "id": "RESULT_ID", "imageId": "IMAGE_ID", "class": "CLASS", "score": "SCORE", "model": "MODEL", "detectedAt": "DETECTED_AT",

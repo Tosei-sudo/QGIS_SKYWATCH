@@ -17,8 +17,8 @@ BLOCK = re.compile(r'(<script type="application/json" id="plugin-constants">\n)(
 def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from mikage.core import (
-        ai_results, audit, basemaps, config, coords, edit_stamp, events, geo_fix, geocode, interests, layer_templates, moving, overviews, roles,
-        startup_layers,
+        ai_results, audit, basemaps, config, coords, edit_stamp, events, geo_fix, geocode, interests, layer_templates, moving, named_areas,
+        overviews, roles, startup_layers,
     )
     from mikage.core.ai import model_config, transfer
     from mikage.core.catalog import config as catalog_config
@@ -56,6 +56,7 @@ def plugin_constants() -> dict:
             "eventLayer": dict(events.DEFAULT_EVENT_FIELDS),
             "eventLinks": dict(events.DEFAULT_LINK_FIELDS),
             "interests": dict(interests.DEFAULT_INTEREST_FIELDS),
+            "areaCategories": dict(named_areas.DEFAULT_CATEGORY_FIELDS),
             "userRoles": dict(roles.DEFAULT_USER_ROLE_FIELDS),
             "satelliteOutages": dict(outages.DEFAULT_OUTAGE_FIELDS),
             "glossary": dict(glossary.DEFAULT_GLOSSARY_FIELDS),

@@ -11,7 +11,8 @@ work of looking at what came in, one after another.
   thumbnail (`imageCatalogs[].thumbnail`; the footprint's shape without
   one), the catalog's columns, the watch, when it was found, and 「写っている地物」:
   the person's own points and areas of interest it covers (`interests`,
-  worked out here: an edit in their dock shows at once), then the features
+  worked out here: an edit in their dock shows at once), the organisation's
+  areas of interest (`namedAreas`, 2026-11-24: 組織の関心地域), then the features
   of the catalog's `footprintLayers` over the image, all of them, kept with
   the notice once read.
 * 「開く」 opens the image, goes to the map and zooms to it (read);
@@ -51,6 +52,7 @@ from ..core.catalog.api import (
 )
 from ..core.catalog.api import WatchNotice
 from ..core.interests import section_lines
+from ..core.named_areas import section_lines as org_section_lines
 from ..qgis_io import settings
 from ..core.catalog.api import PathError
 from ..qgis_io.catalog_io import RecordImages, close_layers, footprint, layers_extent, record_files
@@ -426,13 +428,18 @@ class NoticeCard(QFrame):
         """
         catalog = self.feed.catalog_of(self.notice)
         layers = catalog.footprint_layers if catalog is not None and self.notice.kind != PLAN else []
-        book = self.feed.interests
+        book, org = self.feed.interests, self.feed.org_areas
         personal = book is not None and book.settings is not None and self.notice.kind != PLAN
-        self._set_shown(self.contents_box, bool(layers) or personal)
-        if not layers and not personal:
+        organisation = org is not None and org.settings is not None and self.notice.kind != PLAN
+        self._set_shown(self.contents_box, bool(layers) or personal or organisation)
+        if not layers and not personal and not organisation:
             return
         kept = self.notice.extra.get("contents") if isinstance(self.notice.extra.get("contents"), dict) else {}
         sections = [self._interest_section(book)] if personal else []
+        if organisation:
+            section = self._org_section(org)
+            if section is not None:
+                sections.append(section)
         for layer in layers:
             found = Contents.from_json(kept.get(layer.key()))
             if found is not None:
@@ -455,6 +462,17 @@ class NoticeCard(QFrame):
             return label, [self.tr("取得に失敗: {m}").format(m=book.failure) if book.failure and not book.loading else self.tr("取得中…")]
         found = book.over(self.notice.feature.get("geometry"))
         lines: list = section_lines(found) or [self.tr("なし")]
+        return self.tr("{label}（{n} 件）").format(label=label, n=len(found)), lines
+
+    def _org_section(self, org) -> Optional[tuple]:
+        """The heading and lines of the organisation's areas of interest over the image; None when there are none at all."""
+        label = org.settings.label
+        if org.list is None:
+            return label, [self.tr("取得に失敗: {m}").format(m=org.failure) if org.failure and not org.loading else self.tr("取得中…")]
+        if not org.interest_areas():
+            return None
+        found = org.over(self.notice.feature.get("geometry"))
+        lines: list = org_section_lines(found, org.categories) or [self.tr("なし")]
         return self.tr("{label}（{n} 件）").format(label=label, n=len(found)), lines
 
     def show_files(self) -> None:
@@ -620,6 +638,8 @@ class NoticeFeed(QWidget):
         self.unchecked: dict[str, set[str]] = {}
         #: 個人の関心地域・地点 (qgis_io/interests_io.InterestBook, set by the plugin): named first in 「写っている地物」.
         self.interests = None
+        #: 組織の関心地域 (qgis_io/org_areas_io.OrgAreaBook, set by the plugin): named after the person's own.
+        self.org_areas = None
         self._written = 0
 
         layout = QVBoxLayout(self)
@@ -991,6 +1011,8 @@ class NoticeFeed(QWidget):
             return
         if self.interests is not None and self.cards:
             self.interests.want()
+        if self.org_areas is not None and self.cards:
+            self.org_areas.want()
         jobs = []
         for card in self._visible_cards():
             n = card.notice
@@ -1181,14 +1203,20 @@ class NoticeFeed(QWidget):
         for card in self.cards.values():
             card.show_contents()
 
+    def set_org_areas(self, book) -> None:
+        """The organisation's areas of interest, named on every card they are in (after the person's own)."""
+        self.org_areas = book
+        book.changed.connect(self._interests_changed)
+
     def close_down(self) -> None:
         self.work.close_down()
         self._work_timer.stop()
-        if self.interests is not None:
-            try:
-                self.interests.changed.disconnect(self._interests_changed)
-            except (TypeError, RuntimeError):
-                pass
+        for book in (self.interests, self.org_areas):
+            if book is not None:
+                try:
+                    book.changed.disconnect(self._interests_changed)
+                except (TypeError, RuntimeError):
+                    pass
         try:
             self.dock.refreshed.remove(self.set_notices)
         except ValueError:
