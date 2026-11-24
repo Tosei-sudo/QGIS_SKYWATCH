@@ -297,7 +297,7 @@ def history_of(plan: DayPlan, run: float, files: dict, run_id: Optional[str] = N
         rows.append(HistoryRow(
             run_id=run_id, run_date=run, day=day, request_id=c.request.id,
             name=c.request.name, management_no=c.request.management_no, requester=c.request.requester, group=c.request.group,
-            system=name,
+            named_area_id=c.request.named_area_id, system=name,
             satellite=c.satellite.name if c.satellite else "",
             priority=str(convert_priority(c.priority, c.system.priority)) if c.system else str(c.priority),
             cloud=None if c.forecast is None else round(c.forecast, 1), scenes=c.scenes if taken else None,

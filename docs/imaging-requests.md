@@ -116,6 +116,7 @@ Esri のポリゴンレイヤー（1 依頼 = 1 フィーチャ）。範囲は�
 | timesMin / timesMax / timesGap | `TIMES_MIN` / `TIMES_MAX` / `TIMES_GAP` | 1 日の回数: n 回以上・m 回以下、回と回の間隔（時間）。空なら 1 回・下限と同じ・1 時間（§25） |
 | systems | `SYSTEMS` | 優先するシステムの順番（任意） |
 | shapeKind | `SHAPE_KIND` | 点 / 範囲 |
+| namedAreaId / areaFollow | `NAMED_AREA_ID` / `AREA_FOLLOW` | 依頼を作った組織の地域の管理番号、地域の形に合わせるか（1・0）（§40。無くても動く） |
 | requester / note | `REQUESTER` / `NOTE` | 依頼者・メモ |
 | created / updated | `CREATED_AT` / `UPDATED_AT` | 登録・更新日時 |
 
@@ -520,7 +521,7 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 
 ## 16. 実装メモ
 
-- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`TARGET_DATE`・`REQ_ID`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`OUTPUT_FILE`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`・`LINK_ID`（外部連携ID、§29）・`PART_NO`（分担の番号、§30）（名前は `historyFields` で変えられる）。ポリゴン（依頼の範囲。分担の行はそのショットの部分）か形状なし。
+- 出力履歴テーブルの属性: `RUN_ID`・`RUN_DATE`・`TARGET_DAY`・`TARGET_DATE`・`REQ_ID`・`REQ_NAME`・`MANAGEMENT_NO`・`REQUESTER`・`SYSTEM`・`SATELLITE`・`PRIORITY_OUT`・`CLOUD`・`SCENES`・`RESULT`・`REASON`・`OUTPUT_FILE`・`CAPTURED`・`IMAGE_ID`・`BOOST_DONE`・`ADOPTION`・`ADOPTION_REASON`・`PLANNED_AT`・`EXTERNAL_ID`・`ADOPTION_SOURCE`・`LINK_ID`（外部連携ID、§29）・`PART_NO`（分担の番号、§30）・`NAMED_AREA_ID`（依頼の地域、§40）（名前は `historyFields` で変えられる）。ポリゴン（依頼の範囲。分担の行はそのショットの部分）か形状なし。
 - 出力履歴は全件を読まず、用途の条件で読む（#69）: 「計算」と上限シミュレーションは判定待ち（採用・未判定）と繰り上げ待ち（未撮像・`BOOST_DONE` 0）の行だけ、「照合…」はそれに加えて表示する対象日の範囲。Esri から読む件数が上限を超えたら、一部だけを使わずに読み込みを止めて理由を出す（ページは OBJECTID 順）。
 - 撮像済みの判定（照合）は「撮像計画ファイル出力」ドックの「照合…」と定期照合（§26）で行う。「計算」は照合しない（tsudo、2026-11-11「その照合、計算時の照合なくして」。それまでは「計算」のたびに照合していた）。「計算」は出力履歴の撮像済み・未撮像をそのまま使う（未撮像の繰り上げ・持ち越し、期間内1回の撮像済みを外す）。対象日の範囲（日本時間の 1 日）に、依頼の範囲と重なる画像がカタログにあれば撮像済み。`missAfterDays`（既定 3 日）を過ぎても無ければ未撮像。
   - 台帳に依頼が無い（削除された）行や範囲の無い依頼の行は問い合わせず、未判定のまま「台帳に依頼なし」と出す（その日のどこかの画像で撮像済みにしない、#77）。
@@ -1262,3 +1263,22 @@ tsudo「撮像依頼系のテーブル画面に、メモ列を表示できるよ
 - **撮像予定の「理由」**: 前の「理由・メモ」。中身（システムの不採用の理由、見送りの理由、手で足した要求外の「メモ」、衛星の障害）は変えない。前の名前で並びを覚えていた人は、この列が標準の位置に出る。
 
 実装: `ui/memo_column.py`（`MEMO`・`memo_text`・`memo_item`）、`ui/list_views.py`（`hidden`・`standard_hidden`）、`ui/request_dock.py`・`ui/schedule_dock.py`（`note_of`）・`ui/plan_file_dock.py`・`ui/plan_results_dialog.py`。
+
+## 40. 地域から撮像依頼（2026-11-24 追加）
+
+tsudo「組織のAOIを整理したいので、ネームドエリアを拡張する感じで、属性を横展開したい / また、撮像依頼をネームドエリアから簡単に出せるようにしたいのと、ネームドエリアの形状が更新されたら、撮像依頼も連動して更新されるようなパイプラインが欲しい」。設計（Claude Docs「組織の関心地域と地域からの撮像依頼 設計」）を確認してから 3 段で作成。1 段目は組織の関心地域（[docs/features/images.md](features/images.md) の「組織の関心地域」）、ここは 2 段目（地域から依頼を作る）。3 段目（地域の形が直されたら依頼の範囲も合わせる）は次の段。
+
+- **入口は 3 つ**:
+  - 依頼フォームの範囲の「地域から…」: 地名の表（`namedAreas`）の有効な行を名前・よみがな・別名・管理番号で検索して 1 つ選ぶ（組織の関心地域が先、地名も選べる。300 件まで表示）
+  - 地図の右クリック「この地域で撮像依頼…」: その地点を含む有効な地域を小さい順に。1 つならそのままフォーム、重なっていればメニューで選ぶ（地名だけの行は「・地名」付き）
+  - ドック「関心地域・地点」の「組織」タブの「撮像依頼…」: 選んだ地域ごとに 1 件。複数ならまとめて登録する画面（`take_layer` と同じ `batch`）。停止中・管理番号のない地域からは作らない
+- **入る値**: 名称 = 地域の名前、範囲 = 地域の形（`範囲`）、依頼グループ = 地域の担当グループ、優先度 = 地域の重要度（担当グループ・重要度がなければいつもの新しい依頼の値）。ほかの条件は新しい依頼のいつもの値（前回保存した条件）。まとめて登録する画面では、依頼グループ・優先度を画面で変えなければ地域ごとの値、変えれば全件その値。「地域から…」は、すでに名称を入れていればそのまま、保存済みの依頼の編集なら依頼グループ・優先度もそのまま
+- **つながり**: 依頼は地域の管理番号（台帳の `NAMED_AREA_ID`）と「地域の形に合わせる」（`AREA_FOLLOW`、1・0）を持つ。出力履歴にも書き出したときの `NAMED_AREA_ID`（ダッシュボードで地域ごとに見る）。フォームの範囲の下に「地域: 横須賀港（NA-000101）」と「地域の形に合わせる」のチェック、「つながりを外す」
+- **手で変えたら**: 範囲を地図で描き直す・点にする・選んだ地物から取り直すと「地域の形に合わせる」は自動で外れる（つながりは残る）。レイヤーから取り込み直した依頼も、範囲が 1 m 以上動いていれば外れる（`rings_moved`。頂点の順・向き・閉じ方・サーバーの丸めは変化に数えない）
+- **前回と同じ条件**: その地域の依頼で最後に保存したもの（編集中の依頼を除く）の、入力の初期値の記憶と同じ項目（区分・達成条件・繰り返し・種別・衛星・角度・雲量・1 日の回数など）。依頼グループ・優先度は地域のまま、名称・期間・範囲は変えない
+- **一覧**: 撮像依頼ドックの 2 列目「地域」（地域の名前。↻ は地域の形に合わせる依頼。地名の表をまだ読んでいなければ管理番号）。地域のある依頼があれば上に地域の絞り込み（すべての地域・地域なし・各地域）。組織タブの「依頼」の列はその地域の有効な依頼の数（停止・完了もあれば「1（全 3）」）
+- **管理番号の固定**: 依頼がつながっている地域の管理番号は組織タブで変えられない（欄が灰色。保存でも止める）。依頼は管理番号で地域を見つけるため
+- **ほかの入口でもつながる**: 「レイヤーから取り込み…」でプラグインの「組織の関心地域」レイヤーを選ぶと、地物ごとに地域につながる。依頼文から下書き（§37）で地名の表の地域を選んだときも、その地域につながる（`namedAreas` を設定しているとき。古い `observationExports.namedAreas` だけのときはつながらない）
+- **Esri**: 台帳 `TBL_IMAGING_REQUEST` に `NAMED_AREA_ID`（`String(255)`）・`AREA_FOLLOW`（`SmallInteger`）、出力履歴 `TBL_REQUEST_HISTORY` に `NAMED_AREA_ID`。どれも無くても動く（つながりが残らない）。インデックスは台帳と出力履歴の `NAMED_AREA_ID`（`create_tables.py` をもう一度実行すれば足りないものだけ足す）
+
+実装: `core/request/area_link.py`（`from_area`・`rings_moved`・`area_links`・`previous_for`・`conditions_of`）、`core/request/store.py`・`rows.py`（`namedAreaId`・`areaFollow`）、`core/named_areas.py`（`areas_at`・`size_of`）、`qgis_io/org_areas_io.py`（`OrgAreaBook.shapes`・`at_point`）、`ui/area_pick_dialog.py`、`ui/request_form.py`（`choose_area`・`take_area`・`same_as_before`・`_by_hand`）、`ui/request_dock.py`（`requests_from_areas`・`request_at`・「地域」の列と絞り込み）、`ui/org_areas_panel.py`（「撮像依頼…」・「依頼」の列・管理番号の固定）。テスト: `tests/test_request_area_link.py`・`tests/test_qgis_area_requests.py`。

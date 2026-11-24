@@ -38,6 +38,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.api import FORM_DAYS, form_span, form_text
+from ..core.request.api import conditions_of, from_area
 from ..core.request.api import find_passes
 from ..core.request.api import Picked, checks_of, picked, summary, unknown
 from ..core.request.api import (
@@ -50,6 +51,7 @@ from ..qgis_io.tasks import run_task
 from .catalog_overlay import DrawTool
 from .docks import plain_label
 from .fit import VerticalScroll, fit_text
+from .flow_layout import FlowLayout
 from .last_inputs import InputMemory
 from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT
@@ -411,6 +413,32 @@ class RequestForm(QDialog):
         # The names of the layer's features (or the plan's targets) in a batch: shown as written, never as HTML.
         self.area_label = plain_label(QLabel())
         al.addWidget(self.area_label)
+        # 組織の関心地域 (2026-11-24): an area of the named area layer as the request's area, the request linked to it.
+        #: The areas (qgis_io/org_areas_io.OrgAreaBook; None without the layer), the area's request saved last.
+        self.areas = known.get("areas")
+        self.previous: Optional[Callable] = known.get("previous")
+        #: The 管理番号 of the area the request is linked to ("" for none).
+        self.area_id = ""
+        link = FlowLayout()
+        self.area_button = QPushButton(self.tr("地域から…"))
+        self.area_button.setToolTip(self.tr("地名・組織の関心地域から選んで、その形を範囲に（名称・依頼グループ・優先度も地域のものに。"
+                                            "地域とつながり、地域の形が直されたら範囲も合わせる）"))
+        self.area_button.clicked.connect(lambda _on=False: self.choose_area())
+        self.link_label = plain_label(QLabel())
+        self.follow_check = QCheckBox(self.tr("地域の形に合わせる"))
+        self.follow_check.setToolTip(self.tr("地域の形が直されたら、この依頼の範囲も合わせる（範囲を手で変えると外れる）"))
+        self.previous_button = QPushButton(self.tr("前回と同じ条件"))
+        self.previous_button.clicked.connect(lambda _on=False: self.same_as_before())
+        self.unlink_button = QPushButton(self.tr("つながりを外す"))
+        self.unlink_button.setToolTip(self.tr("地域とのつながりを外す（範囲はそのまま）"))
+        self.unlink_button.clicked.connect(lambda _on=False: self.set_link("", False))
+        for w in (self.area_button, self.link_label, self.follow_check, self.previous_button, self.unlink_button):
+            link.addWidget(w)
+        self.link_row = QWidget()
+        self.link_row.setLayout(link)
+        self.area_button.setVisible(self.areas is not None)
+        self.link_row.setVisible(self.areas is not None)
+        al.addWidget(self.link_row)
         # 撮像機会 (改修案 7): how often the satellites can take it as written, counted in the background; red when never.
         self.chances_label = plain_label(QLabel())
         self.chances_label.setWordWrap(True)
@@ -481,6 +509,7 @@ class RequestForm(QDialog):
         self.requester.setText(r.requester)
         self.note.setPlainText(r.note)
         self.shape_kind = r.shape_kind
+        self.set_link(r.named_area_id, r.area_follow)
         self._names_typed()
         self._category_changed(r.category)
         self._repeat_changed(rep.kind)
@@ -619,6 +648,7 @@ class RequestForm(QDialog):
         self.rings = [[[w, s], [e, s], [e, n], [w, n], [w, s]]]
         self.shape_kind = "範囲"
         self.box_button.setChecked(False)
+        self._by_hand()
         self._area_changed()
 
     def _polygon_drawn(self, corners: list) -> None:
@@ -626,6 +656,7 @@ class RequestForm(QDialog):
         self.rings = [[list(p) for p in corners] + [list(corners[0])]]
         self.shape_kind = "範囲"
         self.polygon_button.setChecked(False)
+        self._by_hand()
         self._area_changed()
 
     def _point_clicked(self, point: QgsPointXY, _button=None) -> None:
@@ -633,6 +664,7 @@ class RequestForm(QDialog):
         self.rings = square_rings(p.x(), p.y(), self.size.value())
         self.shape_kind = "点"
         self.point_button.setChecked(False)
+        self._by_hand()
         self._area_changed()
 
     def _from_selection(self) -> None:
@@ -658,13 +690,14 @@ class RequestForm(QDialog):
                 self.rings = [[[w, s], [e, s], [e, n], [w, n], [w, s]]]
                 self.shape_kind = "範囲"
         self.message.setText("")
+        self._by_hand()
         self._area_changed()
 
     def _as_batch(self, batch: dict) -> None:
         """Names and areas from the layer's features: shown, not asked."""
         self.name.setEnabled(False)
         self.name.setText(batch.get("names", ""))
-        for w in (self.box_button, self.polygon_button, self.point_button, self.size, self.selected_button):
+        for w in (self.box_button, self.polygon_button, self.point_button, self.size, self.selected_button, self.link_row):
             w.hide()
         self.area_label.setText(batch.get("text", ""))
         self.overlay.paint([(rings, "#f59e0b", 2, name) for name, rings, *_rest in batch["items"]])
@@ -691,6 +724,85 @@ class RequestForm(QDialog):
         self.canvas.refresh()
         self._chances_changed()
 
+    # --- 組織の関心地域 ------------------------------------------------------------------------------
+
+    def _area_name(self, area_id: str) -> str:
+        area = self.areas.find_id(area_id) if self.areas is not None and area_id and self.areas.areas is not None else None
+        return area.name if area is not None else ""
+
+    def set_link(self, area_id: str, follow: bool) -> None:
+        """The area the request is linked to ("" for none) and whether its area follows the area's shape."""
+        self.area_id = (area_id or "").strip()
+        linked = bool(self.area_id)
+        self.follow_check.setChecked(linked and follow)
+        name = self._area_name(self.area_id)
+        self.link_label.setText(self.tr("地域: {name}（{id}）").format(name=name, id=self.area_id) if name and linked
+                                else self.tr("地域: {id}").format(id=self.area_id) if linked else "")
+        before = self.previous(self.area_id, self.request.id) if linked and self.previous is not None else None
+        self.previous_button.setToolTip(self.tr("この地域の前回の依頼「{name}」の条件（区分・達成条件・繰り返し・衛星・角度・雲量など）を入力。"
+                                                "名称・範囲・期間・依頼グループ・優先度はそのまま").format(name=before.name) if before else "")
+        for w in (self.link_label, self.follow_check, self.unlink_button):
+            w.setVisible(linked)
+        self.previous_button.setVisible(before is not None)
+        if self.areas is not None or linked:
+            self.link_row.setVisible(self.batch is None)
+
+    def _by_hand(self) -> None:
+        """The area drawn or chosen by hand: no longer the area's shape (the link kept, for reference)."""
+        if self.area_id and self.follow_check.isChecked():
+            self.follow_check.setChecked(False)
+            self.message.setText(self.tr("範囲を手で変えたので「地域の形に合わせる」を外した（地域とのつながりは残る）"))
+
+    def choose_area(self):
+        """「地域から…」: an area chosen, then its shape (read when not yet) and name in the form."""
+        from .area_pick_dialog import AreaPickDialog
+
+        if self.areas is None:
+            return None
+        dialog = AreaPickDialog(self.areas, self, self.tr("地域から範囲を選択"))
+
+        def chosen() -> None:
+            area = dialog.chosen()
+            if area is not None:
+                self.message.setText(self.tr("地域の形を取得中…"))
+                self.areas.shapes([area], lambda areas: self.take_area(areas[0]),
+                                  lambda m: self.message.setText(self.tr("地域の形を取得できない: {m}").format(m=m)))
+
+        dialog.accepted.connect(chosen)
+        dialog.finished.connect(lambda _r: dialog.deleteLater())
+        self.area_dialog = dialog
+        dialog.open()
+        return dialog
+
+    def take_area(self, area) -> None:
+        """An organisation's area as the request's: its shape, linked to it; its name (unless one was typed), and for a
+        new request its 担当グループ and 重要度 where it has them."""
+        if self._closing:
+            return
+        if not area.rings:
+            self.message.setText(self.tr("地域「{name}」に形がない").format(name=area.name))
+            return
+        r = self.value()
+        before = self._area_name(r.named_area_id) if r.named_area_id else ""
+        new = from_area(r, area)
+        if r.name and r.name != before and r.name != r.id:
+            new.name = r.name
+        if self.request.object_id is not None:
+            new.group, new.priority = r.group, r.priority
+        self.rings = [list(x) for x in new.rings]
+        self._fill(new)
+        self.message.setText("")
+
+    def same_as_before(self) -> None:
+        """「前回と同じ条件」: the conditions of the area's request saved last."""
+        before = self.previous(self.area_id, self.request.id) if self.area_id and self.previous is not None else None
+        if before is None:
+            return
+        r = conditions_of(self.value(), before)
+        self.rings = [list(x) for x in r.rings]
+        self._fill(r)
+        self.message.setText(self.tr("前回の依頼「{name}」の条件を入力（保存はまだ）").format(name=before.name))
+
     # --- 依頼文から下書き ----------------------------------------------------------------------------
 
     def take_draft(self, draft, keys, choice=None, text: str = "", note: bool = True) -> int:
@@ -705,6 +817,9 @@ class RequestForm(QDialog):
         r = applied(self.value(), draft, keys, text, note)
         if choice is not None:
             r.rings, r.shape_kind = [list(x) for x in choice.rings], choice.kind
+            # A place of the named area layer: the request linked to it (following its shape); else no longer linked.
+            area_id = getattr(choice, "area_id", "")
+            r.named_area_id, r.area_follow = area_id, bool(area_id)
         self.rings = [list(x) for x in r.rings]
         self._fill(r)
         for widget in self._marked_for(draft, keys, choice is not None, note and bool(text.strip())):
@@ -849,6 +964,8 @@ class RequestForm(QDialog):
         out.group = self.group_value()
         out.requester, out.note = self.requester.text().strip(), self.note.toPlainText().strip()
         out.rings, out.shape_kind = [list(r) for r in self.rings], self.shape_kind
+        out.named_area_id = self.area_id
+        out.area_follow = bool(self.area_id) and self.follow_check.isChecked()
         return out
 
     def problems(self, r: ImagingRequest) -> list:

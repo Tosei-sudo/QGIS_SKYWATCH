@@ -13,6 +13,9 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .adoption import (
         answer_changes, manual_changes, manual_unrequested, match_answers, NOT_IN_FILE, read_window, Reading, unrequested_rows,
     )
+    from .area_link import (
+        AreaLinks, area_links, conditions_of, from_area, links_of, previous_for, rings_moved, unlinked,
+    )
     from .bulk import apply_change, RequestChange
     from .chances import ahead_span, chances_of, FORM_DAYS, form_span, form_text, wanted
     from .covered import read_covered
@@ -108,4 +111,5 @@ __all__ = [
     "occurrence_text", "pace_text", "part_text", "pass_text", "read_answers", "repeat_of", "repeat_text", "room_text",
     "satellite_name", "shape_text", "sort_by_next", "span_of", "taken_text", "tally_text", "units_of",
     "unlink_findings", "with_links",
+    "AreaLinks", "area_links", "conditions_of", "from_area", "links_of", "previous_for", "rings_moved", "unlinked",
 ]

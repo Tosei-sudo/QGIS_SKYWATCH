@@ -32,7 +32,8 @@ DEFAULT_REQUEST_FIELDS: dict[str, str] = {
     "incidenceMin": "INCIDENCE_MIN", "incidenceMax": "INCIDENCE_MAX", "lookSide": "LOOK_SIDE", "orbitDir": "ORBIT_DIR",
     "resolution": "RESOLUTION_MAX", "timeOfDay": "TIME_OF_DAY", "cloudNoGo": "CLOUD_NO_GO",
     "timesMin": "TIMES_MIN", "timesMax": "TIMES_MAX", "timesGap": "TIMES_GAP", "systems": "SYSTEMS",
-    "shapeKind": "SHAPE_KIND", "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
+    "shapeKind": "SHAPE_KIND", "namedAreaId": "NAMED_AREA_ID", "areaFollow": "AREA_FOLLOW",
+    "requester": "REQUESTER", "note": "NOTE", "created": "CREATED_AT", "updated": "UPDATED_AT",
 }
 DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "runId": "RUN_ID", "runDate": "RUN_DATE", "day": "TARGET_DAY", "targetDate": "TARGET_DATE", "requestId": "REQ_ID",
@@ -41,7 +42,7 @@ DEFAULT_HISTORY_FIELDS: dict[str, str] = {
     "reason": "REASON", "file": "OUTPUT_FILE", "captured": "CAPTURED", "imageId": "IMAGE_ID", "boostDone": "BOOST_DONE",
     "adoption": "ADOPTION", "adoptionReason": "ADOPTION_REASON", "plannedAt": "PLANNED_AT", "externalId": "EXTERNAL_ID",
     "adoptionSource": "ADOPTION_SOURCE", "mergedInto": "MERGED_INTO", "shotId": "SHOT_ID", "occurrence": "OCCURRENCE",
-    "linkId": "LINK_ID", "part": "PART_NO",
+    "linkId": "LINK_ID", "part": "PART_NO", "namedAreaId": "NAMED_AREA_ID",
 }
 #: The shot layer's names (TBL_REQUEST_SHOT: one row a row of a file, its polygon the outline of the scenes taken).
 DEFAULT_SHOT_FIELDS: dict[str, str] = {
@@ -241,7 +242,9 @@ def attributes_of(req: ImagingRequest, f: dict) -> dict[str, Any]:
         f["timeOfDay"]: req.time_of_day, f["cloudNoGo"]: req.cloud_no_go,
         f["timesMin"]: req.times_min if req.times_min and req.times_min > 1 else None, f["timesMax"]: req.times_max,
         f["timesGap"]: req.times_gap, f["systems"]: join(req.systems),
-        f["shapeKind"]: req.shape_kind, f["requester"]: req.requester[:250], f["note"]: req.note[:1000],
+        f["shapeKind"]: req.shape_kind, f["namedAreaId"]: req.named_area_id[:255] or None,
+        f["areaFollow"]: 1 if req.area_follow and req.named_area_id else 0,
+        f["requester"]: req.requester[:250], f["note"]: req.note[:1000],
         f["created"]: req.created, f["updated"]: req.updated,
     }
 
@@ -287,6 +290,7 @@ def request_of(a: dict, geometry: Any, f: dict, oid: str) -> Optional[ImagingReq
         times_min=_times(a.get(f["timesMin"])) or 1, times_max=_times(a.get(f["timesMax"])),
         times_gap=_hours(a.get(f["timesGap"])),
         shape_kind=_choice(a.get(f["shapeKind"]), SHAPE_KINDS, "範囲"),
+        named_area_id=_text(a.get(f["namedAreaId"])), area_follow=bool(_number(a.get(f["areaFollow"]))) and bool(_text(a.get(f["namedAreaId"]))),
         requester=_text(a.get(f["requester"])), note=_text(a.get(f["note"])),
         created=_number(a.get(f["created"])), updated=_number(a.get(f["updated"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [],
@@ -888,6 +892,9 @@ class HistoryRow:
     #: For an area too big for one shot (分担): which of the time's shots this row hands out (1 …), its area that
     #: shot's part (`rings`); 0 for a row handing out the request's whole area.
     part: int = 0
+    #: The organisation's area the request was made from when handed out (NAMED_AREA_ID; "" for none): where its area came
+    #: from, for dashboards by area, category and country.
+    named_area_id: str = ""
 
     @property
     def key(self) -> tuple:
@@ -906,7 +913,7 @@ def history_attributes(row: HistoryRow, f: dict) -> dict:
         f["plannedAt"]: row.planned_at, f["externalId"]: row.external_id[:250] or None,
         f["adoptionSource"]: row.adoption_source[:1000] or None, f["mergedInto"]: row.merged_into[:250] or None,
         f["shotId"]: row.shot_id[:64] or None, f["occurrence"]: row.occurrence, f["linkId"]: row.link_id[:32] or None,
-        f["part"]: row.part or None,
+        f["part"]: row.part or None, f["namedAreaId"]: row.named_area_id[:255] or None,
     }
 
 
@@ -1024,7 +1031,7 @@ def history_row_of(a: dict, geometry: Any, hf: dict, oid: str) -> HistoryRow:
         planned_at=_number(a.get(hf["plannedAt"])), external_id=_code(a.get(hf["externalId"])),
         adoption_source=_text(a.get(hf["adoptionSource"])), merged_into=_text(a.get(hf["mergedInto"])),
         shot_id=_text(a.get(hf["shotId"])), occurrence=_times(a.get(hf["occurrence"])) or 1, link_id=_code(a.get(hf["linkId"])),
-        part=_times(a.get(hf["part"])) or 0,
+        part=_times(a.get(hf["part"])) or 0, named_area_id=_text(a.get(hf["namedAreaId"])),
         rings=[[list(p[:2]) for p in r] for r in rings] if isinstance(rings, list) else [])
 
 

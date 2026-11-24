@@ -106,9 +106,9 @@ def test_the_requests_dock_filters_and_the_form_chooses_a_group(plugin):
                             ("旧体制（使用停止）", "旧体制"), ("グループなし", NO_GROUP)]
     assert len(dock.shown) == 4
     heads = [dock.model.horizontalHeaderItem(c).text() for c in range(dock.model.columnCount())]
-    assert heads[:2] == ["名称", "依頼グループ"]
+    assert heads[:3] == ["名称", "地域", "依頼グループ"]
     row = next(i for i, r in enumerate(dock.shown) if r.name == "大阪湾")
-    assert dock.model.item(row, 1).text() == "第2班"
+    assert dock.model.item(row, 2).text() == "第2班"
 
     box.choose(MINE)
     assert names(dock) == ["東京湾"] and settings.group_filter("requests") == MINE
