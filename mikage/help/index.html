@@ -74,6 +74,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <tr><td>キーで速く操作したい</td><td><a href="#keys">キーボードショートカット</a></td></tr>
 <tr><td>うまく動かない</td><td><a href="#trouble">困ったとき</a>・<a href="#offline">サーバーにつながらないとき</a></td></tr>
 <tr><td>言葉の意味</td><td><a href="#words">用語</a></td></tr>
+<tr><td>このヘルプで言葉を探す</td><td><a href="#help-search">このヘルプの探し方</a></td></tr>
 </table>
 
 <h2 id="start">はじめに</h2>
@@ -90,6 +91,17 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 </table>
 <p>担当は自分の作業に合うものを<b>いくつでも</b>チェックできます。チェックした担当で使う機能だけがメニュー・ツールバー・ドックのボタンに出て、その作業に使うドック（画面の横に出る作業用のパネル）がそろいます。どれもチェックしなければ、管理者の機能のほかはすべて出ます。担当はいつでも変えられます。</p>
 
+<h3 id="help-search">このヘルプの探し方</h3>
+<p>左の目次から節を選ぶほか、上の検索欄で言葉を探せます。</p>
+<ul>
+<li>言葉を入れると、見つかった所がすべて黄色になり、今の 1 か所だけが橙でページの中ほどに出ます。検索欄の横に「3 / 46 件」のように何件目かが出ます</li>
+<li><span class="ui">▼ 次</span>・<span class="key">Enter</span>・<span class="key">F3</span> で次へ、<span class="ui">▲ 前</span>・<span class="key">Shift+Enter</span>・<span class="key">Shift+F3</span> で前へ進みます。最後の次は最初に戻ります（「最初に戻りました」と出ます）。<span class="key">F3</span> はページや目次を触ったあとでも効き、<span class="key">Ctrl+F</span> で検索欄に戻ります</li>
+<li>目次には見つかった節だけが残り、右に件数が出ます。今の 1 か所がある節が選ばれた状態になります。件数の多い言葉は、目次の節を押すとその節の最初の 1 か所へ飛び、次へはそこから続きます</li>
+<li>ページの中をクリックしてから次・前へ進むと、クリックした所から探します</li>
+<li>空白で区切って語を並べると（「依頼 削除」）、すべての語がある節だけを探します。全角・半角、大文字・小文字、ひらがな・カタカナは区別しません</li>
+<li>エラーコード（「E101」）を入れると、<a href="#errors">エラーコード一覧</a> のその行に飛びます</li>
+<li><span class="ui">ブラウザで開く</span> で、同じページを PC のブラウザで開けます（印刷・拡大に）</li>
+</ul>
 <h2 id="first">最初にすること</h2>
 <h3 id="first-setup">1. 担当と個人設定を選ぶ</h3>
 <p>プラグインを初めて入れたときだけ「最初の設定」の画面が出ます。あとで変えるときは、メニュー <a class="open" href="mikage:open/担当と個人設定…">担当と個人設定…</a> から開きます。</p>
@@ -1142,6 +1154,14 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <tr><td>分類体系の編集</td><td><span class="key">Alt+↑↓</span> ／ <span class="key">Insert</span> ／ <span class="key">Delete</span></td><td>並べ替え ／ 下に追加 ／ 削除</td></tr>
 </table>
 
+<h3 id="keys-help">このヘルプの画面で効くキー</h3>
+<p>このヘルプの画面の中だけで効くキーです（QGIS のキーボードショートカットには並ばず、変えられません）。使い方は <a href="#help-search">このヘルプの探し方</a> にあります。</p>
+<table>
+<tr><th>キー</th><th>操作</th></tr>
+<tr><td><span class="key">Enter</span> ／ <span class="key">Shift+Enter</span></td><td>検索欄で: 次の一致 ／ 前の一致</td></tr>
+<tr><td><span class="key">F3</span> ／ <span class="key">Shift+F3</span></td><td>次の一致 ／ 前の一致（ページや目次を触っていても効く）</td></tr>
+<tr><td><span class="key">Ctrl+F</span></td><td>検索欄に戻る（入っている語を選んだ状態で）</td></tr>
+</table>
 <h2 id="trouble">困ったとき</h2>
 <table>
 <tr><th>こんなとき</th><th>まず試すこと</th></tr>
