@@ -98,6 +98,10 @@ class Command(Feature):
     def screens(self) -> list[str]:
         return self.host.menu_texts()
 
+    def ask_data(self, text: str) -> bool:
+        """A question on the data typed in the field: asked in 「データに質問」 (False when it is not offered)."""
+        return self.host.open_data_chat(text) is not None
+
     def _named_source(self):
         c = self.context.config
         return settings_for(c.observation_exports, c.alert_reports).named_areas

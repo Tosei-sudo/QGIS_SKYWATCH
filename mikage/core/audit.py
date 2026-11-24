@@ -26,6 +26,10 @@ What is recorded (KINDS):
 - command (2026-11-21): an operation of 文で操作 done from its card
   (ui/text_command.py): the sentence, the operation, how it was chosen
   (words, the model, the person) and the values it was done with
+- chat (2026-11-24): a question of データに質問 (ui/data_chat_dock.py): the
+  question, the SQL run, the tables read and how many rows each gave, the
+  model, whether the sentence shown is the model's or the program's (never
+  what the rows hold)
 - error (2026-11-11, tsudo 「エラーログって取れる？」): what went wrong — the
   plugin's warnings and errors in QGIS's log (with their traceback), tasks
   that failed, Python errors raised in the plugin's code, warnings and errors
@@ -86,6 +90,7 @@ KINDS: dict[str, str] = {
     "mail": "メールの作成",
     "receive": "外部からの図形",
     "command": "文で操作",
+    "chat": "データに質問",
     "error": "エラー",
 }
 FORMATS = ("jsonl", "csv")

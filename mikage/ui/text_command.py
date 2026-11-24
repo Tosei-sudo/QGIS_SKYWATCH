@@ -30,6 +30,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit
+from ..core.data_chat import TASK as DATA_TASK, is_question
 from ..core.text_command import (
     ALL, BY_KEY, Operation, Reading, by_words, command_messages, lat_lon_in, operation_of, read, reply_done, word_matches,
 )
@@ -448,12 +449,24 @@ class CommandBox(QObject):
 
     @property
     def offered(self) -> bool:
-        """Whether 文で操作 shows: the settings give it a model and the roles in use have an operation."""
-        return self.assistant.has(TASK) and bool(self.host.operations())
+        """
+        Whether 文で操作 shows: the settings give it a model and the roles in use have an operation, or データに質問
+        has one (a question typed here goes there).
+        """
+        return (self.assistant.has(TASK) and bool(self.host.operations())) or self.asks_data
+
+    @property
+    def asks_data(self) -> bool:
+        """Whether a question on the data typed here goes to 「データに質問」 (its model given, the host taking it)."""
+        return self.assistant.has(DATA_TASK) and hasattr(self.host, "ask_data")
 
     def apply(self) -> None:
         """Shown while offered (the settings, the roles in use); the card closed when not."""
         on = self.offered
+        if self.asks_data:
+            self.field.setPlaceholderText(self.tr("例: Aシステムの明日のオーダーファイルを出力 / 先月の舞鶴の記録は何件？"))
+        else:
+            self.field.setPlaceholderText(self.tr("例: Aシステムの明日のオーダーファイルを出力"))
         self.toolbar.setVisible(on)
         self.toolbar.toggleViewAction().setVisible(on)
         if not on:
@@ -494,6 +507,12 @@ class CommandBox(QObject):
         ops = h.operations()
         today = h.today()
         op = by_words(text, ops, self._more_words(), h.screens())
+        if op is None and self.asks_data and (is_question(text) or not self.assistant.has(TASK) or not ops):
+            # A question on the data (「先月の舞鶴の記録は何件？」): answered by 「データに質問」.
+            if h.ask_data(text):
+                self.message = self.tr("「データに質問」で答える")
+                self.field.clear()
+                return
         self._place_card()
         if op is not None:
             reading = read(op, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="words")

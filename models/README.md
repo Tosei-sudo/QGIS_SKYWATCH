@@ -44,3 +44,20 @@ git lfs pull -I "models/sarashina-3b-int4/**" -X ""
 ## 作り直すとき
 
 README の手順で変換したあと、`python scripts/split_model_data.py <変換したフォルダー> <出力フォルダー> 280` で重みを 280 MB 以下のファイルに分けてからここに置く（GitHub LFS は 1 ファイル 2 GB まで、共有ファイルも大きいファイルは送れないため）。古いモデルを消しても LFS の容量は戻らない（無料枠は 10 GB）。
+
+## 「データに質問」のモデル（9B 級）
+
+「データに質問」（`textAssist.tasks.dataChat`）は表の質問を SQL にするので、上の 3B では足りない（検討の 30 問で 3B は 2 問、Qwen3.5-9B は 24〜26 問が正しい SQL。[データに質問](../docs/features/analysis.md#データに質問datachat)）。9B は 5.7 GB と大きく、LFS の枠に入らないのでここには置かない。どちらかで用意する:
+
+- **PC で動かす**: [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B)（Apache 2.0）を上の手順と同じく ONNX Runtime GenAI（0.20 以降。builder が `Qwen3_5` を読める）で int4 に変換し、共有フォルダーに置いて `"chat": "\\\\fileserver\\gis\\models\\qwen3.5-9b-int4"`。メモリ 8 GB 程度、初めの 1 問は 1〜2 分、あとは 1 問 10〜20 秒
+- **社内の GPU サーバー**: vLLM・llama.cpp の server など OpenAI 互換のサーバーで Qwen3.8-27B などを動かし、`"chat": { "url": "https://llm.example.local/v1", "model": "qwen3.8-27b", "timeoutSeconds": 300 }`（QGIS の認証設定とプロキシを使う）
+
+```jsonc
+"textAssist": {
+  "models": { "large": "\\\\fileserver\\gis\\models\\sarashina-3b-int4",
+              "chat": "\\\\fileserver\\gis\\models\\qwen3.5-9b-int4" },
+  "tasks": { "command": "large", "dataChat": "chat" }
+}
+```
+
+サーバーができたら `models.chat` を URL に変えるだけで切り替わる。

@@ -21,6 +21,10 @@ tokenizer's files), a .zip of one, or the URL of such a .zip:
 - a .zip (a path or a URL) is unpacked once into the profile (a URL is
   downloaded first, through QGIS's network).
 
+A model on a server (`url`, データに質問 on an internal GPU server: an
+OpenAI-compatible chat API such as vLLM's or llama.cpp's) is asked through
+QGIS's network (ServerWriter): nothing is loaded on this computer.
+
 Each task is given one of the settings' models (`textAssist.tasks`). One
 model is loaded at a time: a task given another model lets the loaded one
 go first (a few seconds to load the other). The model stays loaded
@@ -47,7 +51,8 @@ from urllib.parse import urlsplit
 
 from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 
-from ..core.text_assist import LARGE_MODEL, LARGE_TASKS, Message, TextAssistSettings, TextModel, plain_prompt
+from ..core.text_assist import (CHAT_MODEL, CHAT_TASKS, LARGE_MODEL, LARGE_TASKS, Message, TextAssistSettings, TextModel,
+                                 plain_prompt)
 from ..core.win64 import NotCopied, add_package
 from .ai_runtime import (NOT_COPIED, VENDORED, VENDORED_PYTHON, AiError, RuntimeMissing, cache_path, download, is_remote,
                          load_ort, resolve_source, threads as default_threads)
@@ -281,6 +286,8 @@ class GenAiWriter:
             self.params = params_of(model)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
+        #: Whether its chat template can think first (Qwen3's 「<think>」): it is told not to (a short reply, and quick).
+        self.thinks = _template_thinks(folder)
         self._lock = threading.Lock()
         self._og = og
         #: The generator kept with what it has read (文で操作: the list of operations read once), and those tokens.
@@ -291,7 +298,8 @@ class GenAiWriter:
     def prompt(self, messages: Sequence[Message]) -> str:
         """The conversation in the model's own chat template (a model whose template has no system turn: the instructions in the first)."""
         def apply(ms) -> str:
-            return self.tokenizer.apply_chat_template(messages=json.dumps(list(ms), ensure_ascii=False), add_generation_prompt=True)
+            text = self.tokenizer.apply_chat_template(messages=json.dumps(list(ms), ensure_ascii=False), add_generation_prompt=True)
+            return no_thinking(text) if self.thinks else text
 
         try:
             return apply(messages)
@@ -395,6 +403,139 @@ class GenAiWriter:
         return generator
 
 
+def _template_thinks(folder: str) -> bool:
+    """Whether the model's chat template has the switch for thinking first (enable_thinking: Qwen3, Qwen3.5 …)."""
+    for name in ("chat_template.jinja", "tokenizer_config.json"):
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                if "enable_thinking" in f.read():
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+#: What a template that thinks first ends with, and what it writes instead when told not to (enable_thinking false).
+_THINK_OPEN = "<think>\n"
+_NO_THINKING = "<think>\n\n</think>\n\n"
+
+
+def no_thinking(prompt: str) -> str:
+    """The prompt as a template told not to think first makes it (GenAI's apply_chat_template cannot be told)."""
+    if prompt.endswith(_NO_THINKING):
+        return prompt
+    if prompt.endswith(_THINK_OPEN):
+        return prompt[:-len(_THINK_OPEN)] + _NO_THINKING
+    if prompt.endswith("assistant\n"):
+        return prompt + _NO_THINKING
+    return prompt
+
+
+def without_thinking(text: str) -> str:
+    """A reply without what the model thought first (<think>…</think>, or an unclosed <think> to the end)."""
+    text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    return re.sub(r"<think>.*", "", text, flags=re.DOTALL) if "<think>" in text else text
+
+
+class ServerWriter:
+    """
+    A model on a server (core/text_assist.Writer): its OpenAI-compatible
+    chat API asked through QGIS's network (its proxy and the authcfg chosen
+    for the URL), off the main thread. The reply comes as a stream (the
+    server sends as it writes, so QGIS's network timeout does not end a long
+    one); the server keeps what it has read itself (vLLM's and llama.cpp's
+    prefix caching), so `keep` and `prime` ask nothing more.
+    """
+
+    def __init__(self, model: TextModel, send: Optional[Callable[[str, dict, Optional[str], int], bytes]] = None,
+                 auth_for: Optional[Callable[[str], Optional[str]]] = None):
+        self.model = model
+        self.url = model.chat_url
+        self._send = send or _post
+        self._auth_for = auth_for or _auth_for
+        #: A server's model: its size is not known here (nothing said of it).
+        self.params: Optional[float] = None
+        self.context_length = 1 << 20
+
+    def body(self, messages: Sequence[Message], max_tokens: int) -> dict:
+        body = {"messages": [dict(m) for m in messages], "max_tokens": int(max_tokens), "temperature": 0, "stream": True,
+                # Qwen3 and its kind: no thinking first (vLLM's and llama.cpp's servers pass it to the template).
+                "chat_template_kwargs": {"enable_thinking": False}}
+        if self.model.remote:
+            body["model"] = self.model.remote
+        return body
+
+    def write(self, messages: Sequence[Message], max_tokens: int, cancelled: Callable[[], bool] = lambda: False,
+              wrote: Callable[[str], None] = lambda _t: None, one_line: bool = False,
+              until: Optional[Callable[[str], bool]] = None, keep: bool = False) -> str:
+        from ..core.esri import EsriError
+
+        if cancelled():
+            raise Cancelled()
+        try:
+            raw = self._send(self.url, self.body(messages, max_tokens), self._auth_for(self.url), int(self.model.timeout * 1000))
+        except Cancelled:
+            raise
+        except (EsriError, OSError, RuntimeError) as error:
+            raise AiError(code="E611", detail=f"{self.url.split('?', 1)[0]}: {error}") from error
+        text = without_thinking(reply_text(raw))
+        if cancelled():
+            raise Cancelled()
+        if one_line and "\n" in text.lstrip():
+            text = text.lstrip().split("\n", 1)[0] + "\n"
+        wrote(text)
+        return text
+
+    def prime(self, messages: Sequence[Message], room: int = 64) -> None:
+        """Nothing: the server keeps what it has read (its prefix cache)."""
+
+
+def reply_text(raw: bytes) -> str:
+    """The text of a chat API's answer: a stream of `data: {…}` lines (choices[0].delta.content), or one JSON object."""
+    text = raw.decode("utf-8", errors="replace")
+    out = []
+    streamed = False
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        streamed = True
+        data = line[5:].strip()
+        if data == "[DONE]":
+            break
+        try:
+            choice = (json.loads(data).get("choices") or [{}])[0]
+        except (ValueError, AttributeError, IndexError):
+            continue
+        part = (choice.get("delta") or {}).get("content") or (choice.get("message") or {}).get("content") or choice.get("text") or ""
+        out.append(part if isinstance(part, str) else "")
+    if streamed:
+        return "".join(out)
+    try:
+        value = json.loads(text)
+    except ValueError as error:
+        raise AiError(code="E611", detail=f"答えが JSON ではない: {text[:200]}") from error
+    if isinstance(value, dict) and value.get("error"):
+        raise AiError(code="E611", detail=str(value.get("error"))[:300])
+    try:
+        choice = value["choices"][0]
+        return (choice.get("message") or {}).get("content") or choice.get("text") or ""
+    except (KeyError, IndexError, TypeError) as error:
+        raise AiError(code="E611", detail=f"答えに choices がない: {text[:200]}") from error
+
+
+def _post(url: str, body: dict, authcfg: Optional[str], limit_ms: int) -> bytes:
+    from .network import post_json
+
+    return post_json(url, body, authcfg, limit_ms)
+
+
+def _auth_for(url: str) -> Optional[str]:
+    from . import settings
+
+    return settings.auth_for(url)
+
+
 # ---- for the screens ----------------------------------------------------------------------------------
 
 class _Waiting:
@@ -429,12 +570,13 @@ class TextAssistant(QObject):
     changed = pyqtSignal()
 
     def __init__(self, context, writer_of: Optional[Callable[[str, int], Any]] = None,
-                 folder_of: Optional[Callable[..., str]] = None):
+                 folder_of: Optional[Callable[..., str]] = None, server_of: Optional[Callable[[TextModel], Any]] = None):
         super().__init__(context)
         self.context = context
-        #: How a model is loaded and found (tests give their own).
+        #: How a model is loaded and found, and how a server's is asked (tests give their own).
         self._writer_of = writer_of or GenAiWriter
         self._folder_of = folder_of or model_folder_of
+        self._server_of = server_of or ServerWriter
         self.writer: Any = None
         self._writer_key: Optional[tuple] = None
         self.asked: Optional[Asked] = None
@@ -490,7 +632,21 @@ class TextAssistant(QObject):
         return self.asked is not None
 
     def _key(self, m: TextModel) -> tuple:
-        return (m.path, self.context.source, m.threads)
+        return (m.path, self.context.source, m.threads, m.url, m.remote, m.timeout)
+
+    def _make(self, model: TextModel, base: str, job) -> Any:
+        """The writer of `model` (in the task): a server's, or the model loaded from its folder."""
+        if model.on_server:
+            return self._server_of(model)
+        folder = self._folder_of(model.path, base, cancelled=job.isCanceled)
+        job.check()
+        return self._writer_of(folder, model.threads)
+
+    def on_server(self, task: str) -> bool:
+        """Whether `task`'s model is a server's."""
+        s = self.settings
+        m = s.model_for(task) if s is not None else None
+        return m is not None and m.on_server
 
     def _config_changed(self) -> None:
         s = self.settings
@@ -509,19 +665,22 @@ class TextAssistant(QObject):
         params = getattr(self.writer, "params", None)
         if task in LARGE_TASKS and params is not None and params < LARGE_MODEL:
             return self.tr("このモデル（約 {p:.1f}B）では精度が低いことがある（3B 級を推奨）").format(p=params)
+        if task in CHAT_TASKS and params is not None and params < CHAT_MODEL:
+            return self.tr("このモデル（約 {p:.1f}B）では精度が低いことがある（9B 級を推奨）").format(p=params)
         return ""
 
     def ask(self, task: str, title: str, messages: Sequence[Message], done: Callable[[str, float], None],
             failed: Callable[[str], None], one_line: bool = False,
-            until: Optional[Callable[[str], bool]] = None, keep: bool = False) -> Optional[Asked]:
+            until: Optional[Callable[[str], bool]] = None, keep: bool = False,
+            max_tokens: Optional[int] = None) -> Optional[Asked]:
         """
         Starts writing for `task` (in a task; `until`: when it has written
         enough; `keep`: what is read is kept for the next ask that begins
-        the same, GenAiWriter.write); None (and `failed` told) when it
-        cannot start.
+        the same, GenAiWriter.write; `max_tokens`: other than the task's);
+        None (and `failed` told) when it cannot start.
         """
         return self._start(task, title, [messages], lambda texts, seconds: done(texts[0], seconds), failed, one_line, False,
-                           until, keep)
+                           until, keep, max_tokens=max_tokens)
 
     @property
     def priming(self) -> bool:
@@ -543,17 +702,19 @@ class TextAssistant(QObject):
         writer = self.writer if self._writer_key == key else None
         if writer is not None and getattr(writer, "primed", None) == list(messages):
             return False
+        if model.on_server:
+            # Nothing to load: the server keeps what it has read.
+            return False
         if writer is None and self.writer is not None:
             self.unload()
-        writer_of, folder_of = self._writer_of, self._folder_of
         asked = Asked(stage=self.tr("モデルを読み込み中…（初回は数秒〜）") if writer is None else self.tr("準備中…"), extra={"prime": True})
+
+        make = self._make
 
         def work(job):
             w = writer
             if w is None:
-                folder = folder_of(model.path, base, cancelled=job.isCanceled)
-                job.check()
-                w = writer_of(folder, model.threads)
+                w = make(model, base, job)
             asked.stage = self.tr("準備中…")
             if hasattr(w, "prime"):
                 w.prime(messages)
@@ -583,7 +744,7 @@ class TextAssistant(QObject):
     def _start(self, task: str, title: str, conversations: list, done: Callable[[list[str], float], None],
                failed: Callable[[str], None], one_line: bool, counted: bool,
                until: Optional[Callable[[str], bool]] = None, keep: bool = False,
-               asked: Optional[Asked] = None) -> Optional[Asked]:
+               asked: Optional[Asked] = None, max_tokens: Optional[int] = None) -> Optional[Asked]:
         s = self.settings
         t = s.task(task) if s is not None else None
         model = s.model_for(task) if s is not None else None
@@ -601,7 +762,7 @@ class TextAssistant(QObject):
                 if waiting.extra.get("cancelled"):
                     failed("取消")
                     return
-                self._start(task, title, conversations, done, failed, one_line, counted, until, keep, waiting)
+                self._start(task, title, conversations, done, failed, one_line, counted, until, keep, waiting, max_tokens)
 
             waiting.task = _Waiting(waiting)
             self._waiting = start
@@ -614,19 +775,17 @@ class TextAssistant(QObject):
         if writer is None and self.writer is not None:
             # Another model is loaded: let it go first (one at a time, for the memory).
             self.unload()
-        writing = self.tr("作成中…")
+        writing = self.tr("作成中…") if not model.on_server else self.tr("サーバーの生成 AI が作成中…")
         loading = self.tr("モデルを読み込み中…（初回は数秒〜）")
         if asked is None:
             asked = Asked()
-        asked.stage = writing if writer is not None else loading
-        writer_of, folder_of, max_tokens = self._writer_of, self._folder_of, t.max_tokens
+        asked.stage = writing if writer is not None or model.on_server else loading
+        make, max_tokens = self._make, max_tokens or t.max_tokens
 
         def work(job):
             w = writer
             if w is None:
-                folder = folder_of(model.path, base, cancelled=job.isCanceled)
-                job.check()
-                w = writer_of(folder, model.threads)
+                w = make(model, base, job)
             started = time.monotonic()
             texts = []
             for i, messages in enumerate(conversations):
