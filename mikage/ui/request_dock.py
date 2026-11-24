@@ -14,10 +14,11 @@ from dataclasses import replace
 from typing import Callable, Optional
 
 from qgis.core import QgsProject, QgsRectangle, QgsVectorLayer
-from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer
+from qgis.PyQt.QtCore import QCoreApplication, Qt, QTimer, pyqtSignal
 from qgis.PyQt.QtGui import QBrush, QColor, QStandardItem, QStandardItemModel
+from qgis.PyQt.QtGui import QCursor
 from qgis.PyQt.QtWidgets import (
-    QAbstractItemView, QComboBox, QHeaderView, QLabel, QPushButton, QTableView,
+    QAbstractItemView, QComboBox, QHeaderView, QLabel, QMenu, QPushButton, QTableView,
 )
 
 from ..core import edit_stamp
@@ -28,7 +29,9 @@ from ..core.request.api import remembered, with_remembered
 from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest, jst_day, priority_text
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
 from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
+from ..core.request.api import from_area, previous_for
 from ..qgis_io.geometry import from_wgs84
+from ..qgis_io.org_areas_io import LAYER_PROPERTY as ORG_LAYER_PROPERTY
 from ..qgis_io.request_layers import layer_rows, requests_layer
 from ..qgis_io.tasks import run_task
 from . import last_inputs
@@ -41,9 +44,14 @@ from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT, GroupFilter
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
-#: The list's columns; 「メモ」 (the request's note) hidden until shown from the header's menu.
-COLUMNS = ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態", MEMO)
+#: The list's columns; 「メモ」 (the request's note) hidden until shown from the header's menu. 「地域」: the organisation's
+#: area it was made from (組織の関心地域), ↻ when its area follows the area's shape.
+COLUMNS = ("名称", "地域", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態", MEMO)
 _STATUS = COLUMNS.index("状態")
+#: The 「地域」 filter's first entries: every request, and those not made from an area.
+ALL_AREAS, NO_AREA = "", "<地域なし>"
+#: The mark of a request whose area follows its area's shape (地域の形に合わせる).
+FOLLOW_MARK = "↻ "
 
 
 def _now_ms() -> float:
@@ -66,6 +74,9 @@ def group_value(values: dict) -> dict:
 
 class RequestDock(PluginDock):
     """The imaging requests of the ledger."""
+
+    #: The ledger was read (組織の関心地域 counts each area's requests again).
+    read_done = pyqtSignal()
 
     def __init__(self, iface, context, open_settings, satellites: Callable, parent=None):
         super().__init__("SatObsRequests", QCoreApplication.translate("RequestDock", "撮像依頼"), context, open_settings, parent)
@@ -112,8 +123,14 @@ class RequestDock(PluginDock):
         self.status_filter = CheckFilter(self.tr("すべての状態"), [(s, s) for s in STATUSES], key="requests/status",
                                          tip=self.tr("この状態の依頼だけを表示（チェックしたもののどれか）。次回も同じ選択"))
         self.group_filter = GroupFilter("requests")
+        # 地域: the requests of one organisation's area (組織の関心地域), or those of none; shown once a request has one.
+        self.area_filter = QComboBox()
+        self.area_filter.setToolTip(self.tr("この地域（組織の関心地域）から作った依頼だけを表示"))
+        self.area_filter.addItem(self.tr("すべての地域"), ALL_AREAS)
+        self.area_filter.setVisible(False)
+        self.area_filter.currentIndexChanged.connect(lambda _: self.render())
         self.category_filter.currentIndexChanged.connect(lambda _: self.render())
-        for c in (self.category_filter, self.status_filter, self.group_filter):
+        for c in (self.category_filter, self.status_filter, self.group_filter, self.area_filter):
             top.addWidget(c)
         # 「依頼グループ…」: the groups of the table listed, added and changed (2026-11-23); shown while there is a table.
         self.groups_button = QPushButton(self.tr("依頼グループ…"))
@@ -143,7 +160,8 @@ class RequestDock(PluginDock):
         self.body.addWidget(self.table, 1)
         # 「ビュー」: the columns and the filters kept under a name (per user). 「メモ」 hidden until shown (tsudo 2026-11-24).
         self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter,
-                                                        "group": self.group_filter}, None, self, hidden=(self.tr(MEMO),))
+                                                        "group": self.group_filter, "area": self.area_filter}, None, self,
+                               hidden=(self.tr(MEMO),))
         top.addWidget(self.views.button)
 
         edit = FlowLayout()
@@ -271,6 +289,7 @@ class RequestDock(PluginDock):
             active = sum(1 for r in requests if r.status == "有効")
             text = self.tr("{label}: {n} 件（有効 {a} 件）").format(label=store.label, n=len(requests), a=active)
             self.status.setText(text + (f"。{note}" if note else ""))
+            self.read_done.emit()
             if then:
                 then()
 
@@ -291,8 +310,11 @@ class RequestDock(PluginDock):
         # Those chosen in the list (several with Ctrl / Shift) and still shown stay chosen (操作性点検の再検証, tsudo
         # 2026-11-23: one filtered out let go of the others too).
         was_selected = {r.id for r in self.selected()} if self.shown else set()
+        self._fill_areas()
+        area = self.area_filter.currentData() or ALL_AREAS
         self.shown = [r for r in self.requests if (self.category_filter.currentIndex() == 0 or r.category == cat)
-                      and self.status_filter.passes(r.status) and self.group_filter.passes(r.group)]
+                      and self.status_filter.passes(r.status) and self.group_filter.passes(r.group)
+                      and (area == ALL_AREAS or (r.named_area_id.strip().upper() or NO_AREA) == area)]
         if self.chosen is not None and not any(r is self.chosen for r in self.shown):
             # Filtered out: no longer the one 「編集…」「削除」 act on, unseen (操作性点検 9, tsudo 2026-11-23);
             # another one chosen with it and still shown is.
@@ -307,13 +329,16 @@ class RequestDock(PluginDock):
             waiting = set()
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
-            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
+            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""), self.area_text(r),
                                                 r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
                                                 r.achieve, _period(r), prio, r.kind, r.status)] + [memo_item(r.note)]
             items[_STATUS].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
+            if r.named_area_id:
+                items[1].setToolTip(self.tr("地域の管理番号 {id}（{how}）").format(
+                    id=r.named_area_id, how=self.tr("範囲は地域の形に合わせる") if r.area_follow else self.tr("範囲は依頼のもの")))
             if r.id in waiting:
                 for item in items:
                     item.setBackground(QBrush(QColor("#dbeafe")))
@@ -331,6 +356,147 @@ class RequestDock(PluginDock):
         sel.blockSignals(False)
         self.draw()
         self._update_buttons()
+
+    # --- 組織の関心地域 (the organisation's areas) ---------------------------------------------------
+
+    #: The organisation's areas (qgis_io/org_areas_io.OrgAreaBook, ports.OrgAreasPort): features/requests.py sets it.
+    org_areas: Callable[[], object] = staticmethod(lambda: None)
+
+    def area_book(self):
+        """The organisation's areas (None without the named area layer); its changes shown in the list."""
+        book = self.org_areas()
+        if book is None or getattr(book, "settings", None) is None:
+            return None
+        if getattr(self, "_watched_book", None) is not book:
+            self._watched_book = book
+            book.changed.connect(self._areas_changed)
+        return book
+
+    def _areas_changed(self) -> None:
+        try:
+            if self.isVisible() and any(r.named_area_id for r in self.requests):
+                self.render()
+        except RuntimeError:  # the dock is gone
+            pass
+
+    def area_name(self, area_id: str) -> str:
+        """An area's name as read (its 管理番号 while the areas are not read, or when it is not there)."""
+        book = self.area_book()
+        if not area_id:
+            return ""
+        area = book.find_id(area_id) if book is not None and book.areas is not None else None
+        return area.name if area is not None and area.name else area_id
+
+    def area_text(self, r: ImagingRequest) -> str:
+        """The 「地域」 column: the area's name, ↻ when the request's area follows its shape."""
+        if not r.named_area_id:
+            return ""
+        return (FOLLOW_MARK if r.area_follow else "") + self.area_name(r.named_area_id)
+
+    def _fill_areas(self) -> None:
+        """The 「地域」 filter's entries: the areas of the requests read (shown once one has an area)."""
+        ids = sorted({r.named_area_id.strip().upper() for r in self.requests if r.named_area_id.strip()})
+        if ids:
+            book = self.area_book()
+            if book is not None and book.areas is None:
+                book.want()
+        wanted = [(ALL_AREAS, self.tr("すべての地域"))]
+        if ids:
+            wanted.append((NO_AREA, self.tr("（地域なし）")))
+            wanted += sorted(((i, self.area_name(i)) for i in ids), key=lambda x: (x[1].casefold(), x[0]))
+        have = [(self.area_filter.itemData(i), self.area_filter.itemText(i)) for i in range(self.area_filter.count())]
+        if have != wanted:
+            current = self.area_filter.currentData() or ALL_AREAS
+            self.area_filter.blockSignals(True)
+            self.area_filter.clear()
+            for data, text in wanted:
+                self.area_filter.addItem(text, data)
+            index = self.area_filter.findData(current)
+            self.area_filter.setCurrentIndex(index if index >= 0 else 0)
+            self.area_filter.blockSignals(False)
+        self.area_filter.setVisible(bool(ids))
+
+    def previous_of(self, area_id: str, leave: str = "") -> Optional[ImagingRequest]:
+        """The area's request saved last (「前回と同じ条件」), but `leave`."""
+        return previous_for(self.requests, area_id, leave)
+
+    def requests_from_areas(self, areas: list):
+        """
+        「撮像依頼…」 of 組織の関心地域: the form with a request of each area
+        (its name, shape, 担当グループ and 重要度, linked to it and following its
+        shape); several in one form, saved one each. The dock in front.
+        """
+        if self.store is None or self.denied("requests.edit") or not areas:
+            if self.store is None:
+                self.status.setText(self.tr("撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E703］"))
+            return None
+        self.show()
+        self.raise_()
+        book = self.area_book()
+        if book is not None and any(a.rings is None for a in areas):
+            self.status.setText(self.tr("地域の形を取得中…"))
+            book.shapes(list(areas), self._open_area_form,
+                        lambda m: self.status.setText(self.tr("地域の形を取得できない: {m}").format(m=m)))
+            return None
+        return self._open_area_form(list(areas))
+
+    def _open_area_form(self, areas: list):
+        from .request_form import RequestForm
+
+        areas = [a for a in areas if a.rings]
+        if not areas:
+            self.status.setText(self.tr("地域に形がない（地名のレイヤーで形を入れてから）"))
+            return None
+        self.status.setText("")
+        if len(areas) == 1:
+            self.edit(new=True, request=from_area(self.new_request(), areas[0]))
+            return self.form
+        if self.form is not None:
+            self.form.close()
+        template = self.new_request()
+        items = []
+        for a in areas:
+            own = from_area(template, a)
+            items.append((own.name, own.rings, "範囲", {"own": {"group": own.group, "priority": own.priority},
+                                                         "link": {"named_area_id": own.named_area_id, "area_follow": True}}))
+        names = "、".join(a.name for a in areas[:3]) + ("…" if len(areas) > 3 else "")
+        batch = {"items": items, "names": names, "title": self.tr("地域から撮像依頼（{n} 件）").format(n=len(areas)),
+                 "text": self.tr("組織の関心地域 {n} 件（地域ごとに 1 件。名称と範囲は地域のもので、地域の形に合わせる。"
+                                 "依頼グループ・優先度は、ここで変えなければ地域の担当グループ・重要度）").format(n=len(areas))}
+        self.form = RequestForm(self.iface, template, lambda t: self._save_batch(t, items, template), self.known(), self,
+                                satellites=self.satellites, batch=batch)
+        self.form.show()
+        return self.form
+
+    def request_at(self, lon: float, lat: float) -> bool:
+        """「この地域で撮像依頼…」 on the map: the areas there (the smallest first), one chosen when they overlap."""
+        book = self.area_book()
+        if book is None or self.store is None:
+            missing = [x for x, ok in ((self.tr("地名のレイヤー（namedAreas）"), book is not None),
+                                       (self.tr("撮像依頼の保存先（requestStores）"), self.store is not None)) if not ok]
+            self.iface.messageBar().pushInfo(self.tr("撮像依頼"), self.tr("地域から撮像依頼を作れない: {m} が未設定（管理者に連絡）").format(
+                m="・".join(missing)))
+            return False
+        if self.denied("requests.edit"):
+            return False
+
+        def found(areas: list) -> None:
+            if not areas:
+                self.iface.messageBar().pushInfo(self.tr("撮像依頼"), self.tr("この地点に地名・組織の関心地域なし"))
+                return
+            if len(areas) == 1:
+                self.requests_from_areas(areas)
+                return
+            menu = QMenu(self)
+            for a in areas[:15]:
+                label = a.name + (f"（{a.kind}）" if a.kind else "") + ("" if a.is_interest else self.tr("・地名"))
+                action = menu.addAction(label)
+                action.triggered.connect(lambda _on=False, a=a: self.requests_from_areas([a]))
+            self.area_menu = menu
+            menu.popup(QCursor.pos())
+
+        return book.at_point(lon, lat, found, lambda m: self.iface.messageBar().pushWarning(
+            self.tr("撮像依頼"), self.tr("地点の地域を取得できない: {m}").format(m=m)))
 
     def _row(self, row: int) -> None:
         if 0 <= row < len(self.shown):
@@ -410,6 +576,8 @@ class RequestDock(PluginDock):
             "modes": sorted({m for r in self.requests for m in r.modes}),
             "groups": offered(self.groups) if table else sorted({r.group for r in self.requests if r.group}, key=str.casefold),
             "groupTable": table,
+            # 組織の関心地域: 「地域から…」 and 「前回と同じ条件」.
+            "areas": self.area_book(), "previous": self.previous_of,
         }
 
     def new_request(self) -> ImagingRequest:
@@ -629,6 +797,8 @@ class RequestDock(PluginDock):
         if self.store is None:
             return None
         rows = layer_rows(layer, selected and layer.selectedFeatureCount() > 0, self.point_km)
+        # The plugin's 「組織の関心地域」 layer: each request linked to its area (and following its shape).
+        org_layer = bool(layer.customProperty(ORG_LAYER_PROPERTY))
         items, skipped = [], 0
         for i, (values, rings, kind) in enumerate(rows):
             if not rings:
@@ -638,6 +808,9 @@ class RequestDock(PluginDock):
             name = str(name).strip() if name not in (None, "") else ""
             numbers = {"management_no": code_text(values.get(management_field)) if management_field else "",
                        "identification_no": code_text(values.get(identification_field)) if identification_field else ""}
+            area_id = code_text(values.get("id")) if org_layer else ""
+            if area_id:
+                numbers["link"] = {"named_area_id": area_id, "area_follow": True}
             items.append((name or f"{layer.name()} {i + 1}", rings, kind, numbers))
         if not items:
             self.status.setText(self.tr("取り込める地物なし（範囲のない地物のみ）"))
@@ -725,6 +898,9 @@ class RequestDock(PluginDock):
             for key, value in (numbers.get("own") or {}).items():
                 if first is not None and getattr(template, key) == getattr(first, key):
                     setattr(r, key, value)
+            # Made from an organisation's area: linked to it (地域の管理番号, 地域の形に合わせる).
+            for key, value in (numbers.get("link") or {}).items():
+                setattr(r, key, value)
             r.note = "\n".join(x for x in (template.note, numbers.get("note") or "") if x)
             todo.append(r)
 

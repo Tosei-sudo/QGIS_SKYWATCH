@@ -27,6 +27,7 @@ after saving (two PCs saving at once: the later one is numbered again).
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
@@ -36,6 +37,7 @@ from .esri import EsriClient, EsriError, fit_value, quote
 from .obs.api import (
     AREA_USES, DEFAULT_COUNTRY_FIELDS, DEFAULT_PLACE_FIELDS, USE_BOTH, USE_INTEREST, USE_PLACE, area_use_of,
 )
+from .shapes import in_rings, ring_area
 from .sources import EsriSource, esri_source_of
 from .util import is_color, is_number, is_record, js_string, ms_of
 
@@ -345,6 +347,41 @@ def read_shapes(client: EsriClient, source: EsriSource, oids: Sequence[int], tok
             if is_number(oid) and isinstance(rings, list):
                 out[int(oid)] = rings
     return out
+
+
+def size_of(rings: Optional[list]) -> float:
+    """An area's size to put areas in order by (degrees², the holes taken off; 0 without a shape)."""
+    rings = [r for r in (rings or []) if len(r) >= 3]
+    total = 0.0
+    for r in rings:
+        a = abs(ring_area(r))
+        x, y = r[0][0], r[0][1]
+        # A ring inside an odd number of others is a hole.
+        holes = sum(1 for other in rings if other is not r and in_rings([other], x, y))
+        total += -a if holes % 2 else a
+    return max(total, 0.0)
+
+
+def areas_at(client: EsriClient, settings: NamedAreaSettings, lon: float, lat: float, token: Optional[str] = None) -> list[OrgArea]:
+    """
+    The active rows (any 用途) whose shape holds a point, with their shapes,
+    the smallest first (「この地域で撮像依頼…」 on the map).
+    """
+    source = settings.areas
+    token = token or source.token
+    info = _layer(client, source, token)
+    extra = {"geometry": json.dumps({"x": lon, "y": lat, "spatialReference": {"wkid": 4326}}), "geometryType": "esriGeometryPoint", "inSR": "4326",
+             "spatialRel": "esriSpatialRelIntersects"}
+    rows = client.query_all(source.url, source.where or "1=1", token, extra=extra, limit=1000, cut=True)
+    out = []
+    for r in rows:
+        rings = (r.get("geometry") or {}).get("rings")
+        if not isinstance(rings, list) or not in_rings(rings, lon, lat):
+            continue
+        area = area_of(r.get("attributes") or {}, source.fields, info.object_id_field, rings)
+        if area.active:
+            out.append(area)
+    return sorted(out, key=lambda a: (size_of(a.rings), area_sort_key(a)))
 
 
 def load_areas(client: EsriClient, settings: NamedAreaSettings, tokens: Optional[dict[str, Optional[str]]] = None,

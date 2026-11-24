@@ -24,7 +24,7 @@ from qgis.PyQt.QtGui import QColor
 
 from ..core.named_areas import (
     DEFAULT_COLOR, AreaCategory, AreaList, NamedAreaSettings, OrgArea, area_color, area_sort_key, category_counts,
-    category_sort_key, delete_categories, load_areas, number_blanks, read_shapes, rename_category_in_areas, save_area,
+    areas_at, category_sort_key, delete_categories, load_areas, number_blanks, read_shapes, rename_category_in_areas, save_area,
     save_category, settings_for,
 )
 from .catalog_io import footprint
@@ -165,6 +165,38 @@ class OrgAreaBook(QObject):
             done(replace(area, rings=rings))
 
         self._start("地域の形の取得", work, finished, failed)
+
+    def shapes(self, areas: Sequence[OrgArea], done: Callable[[list], None], failed: Callable[[str], None] = lambda _m: None) -> None:
+        """The areas with their shapes (those not read yet read together in one task), in their order."""
+        missing = [a for a in areas if a.rings is None and a.oid is not None]
+        if not missing:
+            done(list(areas))
+            return
+        s, lst = self.settings, self.list
+        if s is None or lst is None:
+            failed("地名のレイヤーが未設定")
+            return
+        client, token, oid_field = self.context.esri(), self._token(s.areas), lst.oid_field
+
+        def work(task):
+            return read_shapes(client, s.areas, [a.oid for a in missing], token, oid_field, task.isCanceled)
+
+        def finished(found: dict) -> None:
+            for a in self.areas or []:
+                if a.oid in found and a.rings is None:
+                    a.rings = found[a.oid]
+            done([a if a.rings is not None or a.oid is None else replace(a, rings=found.get(a.oid, [])) for a in areas])
+
+        self._start("地域の形の取得", work, finished, failed)
+
+    def at_point(self, lon: float, lat: float, done: Callable[[list], None], failed: Callable[[str], None]) -> bool:
+        """The active areas (any 用途) holding a point, with their shapes, the smallest first; False without the layer."""
+        s = self.settings
+        if s is None:
+            return False
+        client, token = self.context.esri(), self._token(s.areas)
+        self._start("地点の地域の取得", lambda _task: areas_at(client, s, lon, lat, token), done, failed)
+        return True
 
     # ---- writing -------------------------------------------------------------------------------
 

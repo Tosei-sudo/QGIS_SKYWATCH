@@ -83,7 +83,7 @@ DOCK_ORDER = (
     "SatObsEvents", "SatObsAnalysis", "SatObsDataChat",
 )
 #: The map's right-click menu, at the point clicked (the features' entries by their text).
-MAP_MENU = ("ここを撮像計画", "この地点の新着画像を監視…", "この地点の撮像予定")
+MAP_MENU = ("ここを撮像計画", "この地点の新着画像を監視…", "この地点の撮像予定", "この地域で撮像依頼…")
 #: The reads ahead after 担当, in this order (core/preload.ITEMS, then the features' own).
 PRELOAD_ORDER = ("satellites", "requests", "events", "offlineCache")
 #: The features (mikage/features): each phase (start, docks, wiring, entries, unload) goes through them in this order.

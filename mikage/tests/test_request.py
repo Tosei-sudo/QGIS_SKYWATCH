@@ -365,7 +365,8 @@ def test_ledger_round_trip_history_and_follow_up():
     assert parse_config({"requestStores": [{"url": "https://x/MapServer/0"}]})[1][0].startswith("requestStores[0] の url")
     fake = server()
     client = EsriClient(fake)
-    r1 = request("R-0001", priority=742, series=["OPT-X"], satellites=["OPT-X 1"], systems=["SYS-A"], cloud_no_go=70, note="港")
+    r1 = request("R-0001", priority=742, series=["OPT-X"], satellites=["OPT-X 1"], systems=["SYS-A"], cloud_no_go=70, note="港",
+                 named_area_id="NA-000101", area_follow=True)
     r2 = request("R-0002", kind="SAR", priority=100, look_side="右", rings=[[[135.4, 34.6], [135.5, 34.6], [135.5, 34.7], [135.4, 34.7], [135.4, 34.6]]])
     save_request(client, store, None, r1, FIRST - D)
     save_request(client, store, None, r2, FIRST - D)
@@ -386,6 +387,9 @@ def test_ledger_round_trip_history_and_follow_up():
     history = load_history(client, store, None)
     assert {(h.request_id, h.system, h.result, h.file, h.captured) for h in history} == {
         ("R-0001", "SYS-A", "採用", "SYS-A_20261108.csv", "未判定"), ("R-0002", "SYS-B", "採用", "SYS-B_20261108.json", "未判定")}
+    # The request's area (組織の関心地域) on its rows.
+    assert (got.named_area_id, got.area_follow) == ("NA-000101", True)
+    assert {h.request_id: h.named_area_id for h in history} == {"R-0001": "NA-000101", "R-0002": ""}
 
     catalog = catalog_of({"label": "画像", "url": CATALOG, "fields": {"id": "IMAGE_ID", "acquired": "ACQ", "sensor": "SENSOR", "source": "URL"}}, [], 0)
     by_id = {r.id: r for r in load_requests(client, store, None)}

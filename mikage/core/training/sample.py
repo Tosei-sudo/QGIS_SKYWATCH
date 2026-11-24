@@ -334,6 +334,7 @@ REQUEST_FIELDS = {
     "PRIORITY": I, "BOOST": I, "KIND": S, "SERIES": S, "SATELLITES": S, "SENSOR_MODES": S, "OFF_NADIR_MIN": D, "OFF_NADIR_MAX": D,
     "INCIDENCE_MIN": D, "INCIDENCE_MAX": D, "LOOK_SIDE": S, "ORBIT_DIR": S, "RESOLUTION_MAX": D, "TIME_OF_DAY": S, "CLOUD_NO_GO": I,
     "TIMES_MIN": I, "TIMES_MAX": I, "TIMES_GAP": D, "SYSTEMS": S, "SHAPE_KIND": S, "REQUESTER": S, "NOTE": {"type": S, "length": 4000}, "CREATED_AT": T, "UPDATED_AT": T,
+    "NAMED_AREA_ID": S, "AREA_FOLLOW": F,
 }
 HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T, "REQ_ID": {"type": S, "length": 64},
                   "REQ_NAME": S, "MANAGEMENT_NO": S, "REQUESTER": S, "REQUEST_GROUP": S, "SYSTEM": S,
@@ -341,7 +342,7 @@ HISTORY_FIELDS = {"RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DA
                   "OUTPUT_FILE": {"type": S, "length": 1000}, "CAPTURED": S, "IMAGE_ID": S, "BOOST_DONE": I,
                   "ADOPTION": S, "ADOPTION_REASON": {"type": S, "length": 1000}, "PLANNED_AT": T, "EXTERNAL_ID": S,
                   "ADOPTION_SOURCE": {"type": S, "length": 1000}, "MERGED_INTO": S, "SHOT_ID": {"type": S, "length": 64},
-                  "OCCURRENCE": I, "LINK_ID": {"type": S, "length": 32}, "PART_NO": I}
+                  "OCCURRENCE": I, "LINK_ID": {"type": S, "length": 32}, "PART_NO": I, "NAMED_AREA_ID": S}
 SHOT_FIELDS = {"SHOT_ID": {"type": S, "length": 64}, "RUN_ID": {"type": S, "length": 64}, "RUN_DATE": T, "TARGET_DAY": S, "TARGET_DATE": T,
                "SYSTEM": S, "SATELLITE": S, "PASS_TIME": T, "OFF_NADIR": D, "INCIDENCE": D, "ORBIT_DIR": S, "LOOK_SIDE": S, "SCENES": I,
                "SHOT_COUNT": I, "COVERAGE": D, "REQ_ID": {"type": S, "length": 64}, "REQ_IDS": {"type": S, "length": 4000},

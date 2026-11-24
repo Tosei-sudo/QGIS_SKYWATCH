@@ -34,13 +34,15 @@ REPLY = "\n".join([
     "分解能: なし", "オフナディア角: なし", "入射角: なし", "時間帯: なし", "1日の回数: なし", "依頼者: 情報課 山田"])
 
 
-def _setup(p, fake, tmp_path, replies, task=True):
-    """The settings with a textAssist (requestDraft given the model when `task`), the named areas and a gazetteer."""
+def _setup(p, fake, tmp_path, replies, task=True, org=False):
+    """The settings with a textAssist (requestDraft given the model when `task`), the named areas (as the organisation's
+    areas, numbered, when `org`) and a gazetteer."""
     import threading
 
     forget_named_areas()
-    places = fake.add_layer(PLACES, FakeLayer({"NAME": "esriFieldTypeString", "KIND": "esriFieldTypeString"}, "esriGeometryPolygon"))
-    places.add({"NAME": "横須賀港", "KIND": "港"}, {"rings": YOKOSUKA})
+    places = fake.add_layer(PLACES, FakeLayer({"NAME": "esriFieldTypeString", "KIND": "esriFieldTypeString",
+                                               "NAMED_AREA_ID": "esriFieldTypeString"}, "esriGeometryPolygon"))
+    places.add({"NAME": "横須賀港", "KIND": "港", "NAMED_AREA_ID": "NA-000101" if org else None}, {"rings": YOKOSUKA})
     places.add({"NAME": "東京湾", "KIND": "海域"}, {"rings": [[[139.5, 35.0], [140.1, 35.0], [140.1, 35.7], [139.5, 35.0]]]})
     (tmp_path / "places.csv").write_text("名称,緯度,経度\n呉市,34.249,132.566\n", encoding="utf-8")
     gate = threading.Event()
@@ -56,8 +58,11 @@ def _setup(p, fake, tmp_path, replies, task=True):
     a._writer_of = writer_of
     a._folder_of = lambda source, base, cancelled=lambda: False: os.path.join(os.path.dirname(base), source)
     text_assist = {"models": {"large": "models/sarashina-3b"}, "tasks": {"requestDraft": "large"} if task else {"tidyNote": "large"}}
-    config = {**CONFIG, "textAssist": text_assist, "observationExports": {"namedAreas": PLACES},
-              "geocoders": [{"type": "csv", "url": "./places.csv", "label": "地名表"}]}
+    config = {**CONFIG, "textAssist": text_assist, "geocoders": [{"type": "csv", "url": "./places.csv", "label": "地名表"}]}
+    if org:
+        config["namedAreas"] = {"url": PLACES}
+    else:
+        config["observationExports"] = {"namedAreas": PLACES}
     (tmp_path / "config.json").write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     settings.set_config_source(str(tmp_path / "config.json"))
     p.context.reload()
@@ -161,6 +166,26 @@ def test_two_places_made_into_two_requests(plugin):
     assert all(r.requester == "情報課 山田" and r.cloud_no_go == 31 for r in dock.requests)
     xs = [x for x, _y in by_name["呉 光学 監視"].rings[0]]
     assert min(xs) < 132.566 < max(xs)
+    assert all(not r.named_area_id for r in dock.requests)
+
+
+def test_a_place_of_the_organisations_areas_links_the_request(plugin):
+    """組織の関心地域 (2026-11-24): a place of the named area layer (`namedAreas`) links the request to its area."""
+    p, iface, fake, tmp_path = plugin
+    dock, loaded = _setup(p, fake, tmp_path, [REPLY], org=True)
+    form = _new_form(dock)
+    row = form.draft_row
+    row.edit.setPlainText(MAIL)
+    row.button.click()
+    assert wait_for(lambda: row.panel.draft_value is not None and row.panel.replace_button.isVisible())
+    row.panel.replace_button.click()
+    batch = dock.form
+    assert batch.batch is not None
+    batch._save_clicked()
+    assert wait_for(lambda: dock.task is None and len(dock.requests) == 2)
+    by_name = {r.name: r for r in dock.requests}
+    assert (by_name["横須賀港 光学 監視"].named_area_id, by_name["横須賀港 光学 監視"].area_follow) == ("NA-000101", True)
+    assert (by_name["呉 光学 監視"].named_area_id, by_name["呉 光学 監視"].area_follow) == ("", False)
 
 
 def test_editing_changes_only_what_the_text_names(plugin):

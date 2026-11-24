@@ -151,6 +151,10 @@ class ImagingRequest:
     #: Systems to try first, in order.
     systems: list = field(default_factory=list)
     shape_kind: str = "範囲"
+    #: The organisation's area it was made from (組織の関心地域: the named area's NAMED_AREA_ID; "" for none), and
+    #: whether its area follows that area's shape (地域の形に合わせる; off once the area is changed by hand).
+    named_area_id: str = ""
+    area_follow: bool = False
     requester: str = ""
     note: str = ""
     created: Optional[float] = None

@@ -1135,14 +1135,15 @@ def named_area_of(a: dict, rings: Sequence, fields: dict[str, str], interest_too
                      kind_en=text("kindEn"), code=code, attributes=a, roles=fields)
 
 
-def named_areas_of_features(features: Iterable[dict], fields: dict[str, str]) -> list[NamedArea]:
+def named_areas_of_features(features: Iterable[dict], fields: dict[str, str], interest_too: bool = False) -> list[NamedArea]:
     """
     The active named areas (or countries) of the layer's features (polygons,
-    WGS 84); those without rings, or without a name (nor a code), left out.
+    WGS 84); those without rings, or without a name (nor a code), left out,
+    and the organisation's areas of interest only unless `interest_too`.
     """
     out = []
     for feature in features:
-        area = named_area_of(feature.get("attributes") or {}, (feature.get("geometry") or {}).get("rings") or [], fields)
+        area = named_area_of(feature.get("attributes") or {}, (feature.get("geometry") or {}).get("rings") or [], fields, interest_too)
         if area is not None:
             out.append(area)
     return out
@@ -1153,24 +1154,27 @@ _place_lock = threading.Lock()
 
 
 def load_named_areas(client: EsriClient, source: Optional[EsriSource], token: Optional[str] = None,
-                     max_age: float = PLACE_CACHE_SECONDS, clock: Callable[[], float] = time.monotonic) -> list[NamedArea]:
+                     max_age: float = PLACE_CACHE_SECONDS, clock: Callable[[], float] = time.monotonic,
+                     interest_too: bool = False) -> list[NamedArea]:
     """
     All the active named areas of the layer (polygons, WGS 84); read once and
     kept `max_age` seconds. Only for what needs every one of them (the names
-    to choose from in the export's place filter): the places of records are
-    looked up in the cache of the squares they are in (place_cache.areas_at),
-    without reading the whole layer.
+    to choose from in the export's place filter, a request's area): the
+    places of records are looked up in the cache of the squares they are in
+    (place_cache.areas_at), without reading the whole layer. The
+    organisation's areas of interest only (用途 関心地域) with `interest_too`
+    (a request's area may be one; a record's place is not).
     """
     if source is None:
         return []
-    key = (source.url, source.where, tuple(sorted(source.fields.items())))
+    key = (source.url, source.where, tuple(sorted(source.fields.items())), interest_too)
     now = clock()
     with _place_lock:
         hit = _place_cache.get(key)
     if hit is not None and now - hit[0] < max_age:
         return hit[1]
     rows = client.query_all(source.url, source.where or "1=1", token or source.token, limit=100_000)
-    areas = named_areas_of_features(rows, source.fields)
+    areas = named_areas_of_features(rows, source.fields, interest_too)
     with _place_lock:
         _place_cache[key] = (now, areas)
     return areas

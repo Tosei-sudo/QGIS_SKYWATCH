@@ -65,6 +65,8 @@ class Images(Feature):
         # Its ports: 画像カタログ (to open and list images) and 通知 (the imaging plan's reminders).
         host.ports.catalog = lambda: host.docks.get("SatObsImageCatalog")
         host.ports.notices = lambda: host.docks.get("SatObsNotices")
+        # 組織の関心地域: the rows of the named area layer (撮像依頼 makes requests of them).
+        host.ports.org_areas = lambda: host.org_areas
 
     def start(self) -> None:
         # 個人の関心地域・地点: the person's own items, for their dock and the 新着画像 cards (qgis_io/interests_io.py).
@@ -113,6 +115,11 @@ class Images(Feature):
         host.central.add_view(NOTICE_FEED, tr("新着画像"), icon("notice_feed"), host.notice_feed)
         notices.show_feed = self.show_notice_feed
         notices.unread_changed = unread
+        # 組織の関心地域's 「撮像依頼…」 and each area's requests: those of 撮像依頼 (read again there: counted again).
+        interests = docks.get("SatObsInterests")
+        if interests is not None and interests.org is not None:
+            interests.org.requests = self.ports.requests
+            host.signals.requests_read.connect(interests.org.requests_read)
         # 通知 ▸ 通報: reports polled from the log table are highlighted in 観測記録 and open there.
         observations = self.ports.observations()
         if observations is not None:  # (not there in a test's small assembly without 観測記録, tests/feature_harness.py)

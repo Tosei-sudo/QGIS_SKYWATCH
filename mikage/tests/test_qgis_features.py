@@ -91,4 +91,5 @@ def test_the_ports_are_kept(port, dock):
             have = list(inspect.signature(getattr(cls, member)).parameters)
             assert have[:len(wanted)] == wanted, f"{name}.{member}{have} ≠ {port}{wanted}"
     for member in getattr(protocol, "__annotations__", {}):
-        assert member in ("book",) or hasattr(cls, member), f"{name} に {member} がない"
+        # Set in __init__ (the instance's): `book`, RequestDock's `requests` and `store`.
+        assert member in ("book", "requests", "store") or hasattr(cls, member), f"{name} に {member} がない"

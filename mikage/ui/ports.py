@@ -67,6 +67,13 @@ class RequestsPort(Protocol):
 
     #: Whether the ledger was read.
     loaded: bool
+    #: The requests read (none before).
+    requests: list
+    #: Whether there is a ledger to save to (`requestStores`).
+    store: Any
+
+    def requests_from_areas(self, areas: list) -> Any:
+        """Its form opened with a request of each organisation's area (組織の関心地域's 「撮像依頼…」), the dock in front."""
 
     def reload(self, then=None, failed=None) -> None: ...
 
@@ -90,6 +97,27 @@ class SatellitesPort(Protocol):
 
     def known(self) -> list:
         """The satellites as read so far (none before)."""
+
+
+class OrgAreasPort(Protocol):
+    """組織の関心地域 (qgis_io/org_areas_io.OrgAreaBook): the named area layer's rows."""
+
+    #: The settings (core/named_areas.NamedAreaSettings), None without the layer; the rows read (None before).
+    settings: Any
+    areas: Optional[list]
+    loading: bool
+
+    def load(self, then: Optional[Callable[[], Any]] = None) -> None: ...
+
+    def want(self) -> None: ...
+
+    def shapes(self, areas: list, done: Callable[[list], Any], failed: Callable[[str], Any] = ...) -> None:
+        """The areas with their shapes (a place name's read when asked)."""
+
+    def at_point(self, lon: float, lat: float, done: Callable[[list], Any], failed: Callable[[str], Any]) -> bool:
+        """The areas holding a point, with their shapes, the smallest first."""
+
+    def find_id(self, area_id: str) -> Any: ...
 
 
 class EventsPort(Protocol):
@@ -119,6 +147,7 @@ class Ports:
         self.events: Callable[[], Optional[EventsPort]] = _none
         self.notices: Callable[[], Optional[NoticesPort]] = _none
         self.satellites: Callable[[], Optional[SatellitesPort]] = _none
+        self.org_areas: Callable[[], Optional[OrgAreasPort]] = _none
 
 
 class PluginEvents(QObject):
@@ -126,3 +155,5 @@ class PluginEvents(QObject):
 
     #: 撮像依頼 written or changed by another dock (撮像計画ファイル出力): the requests as read there, or None (read again).
     requests_changed = pyqtSignal(object)
+    #: The 「撮像依頼」 dock read the ledger (組織の関心地域 counts each area's requests again).
+    requests_read = pyqtSignal()

@@ -92,6 +92,9 @@ class Requests(Feature):
         self.docks["SatObsRequests"].event_linker = self.ports.events
         # Its 「依頼グループ…」 opens the groups' list.
         self.docks["SatObsRequests"].group_editor = self.open_request_groups
+        # 組織の関心地域: 「地域から…」 in its form, 「この地域で撮像依頼…」 on the map; the ledger read is told (each area's requests).
+        self.docks["SatObsRequests"].org_areas = self.ports.org_areas
+        self.docks["SatObsRequests"].read_done.connect(self.host.signals.requests_read)
 
     def add_actions(self) -> None:
         # 「依頼グループ」: the groups of the requests added and changed from the plugin (tsudo, 2026-11-23).
@@ -108,7 +111,10 @@ class Requests(Feature):
             dock.raise_()
             dock.add_point(x, y)
 
-        return {"この地点の撮像予定": plans_here}
+        # 組織の関心地域 (2026-11-24): a request of the area clicked (the smallest first when areas overlap; without the
+        # named area layer or the ledger, it says what is missing).
+        return {"この地点の撮像予定": plans_here,
+                "この地域で撮像依頼…": lambda x, y: self.docks["SatObsRequests"].request_at(x, y)}
 
     def text_operations(self) -> dict:
         c, docks = self.context.config, self.docks

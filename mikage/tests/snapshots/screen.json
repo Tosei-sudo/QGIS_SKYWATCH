@@ -1252,6 +1252,7 @@
     "              QScrollBar",
     "          QWidget (hidden)",
     "          QWidget (hidden)",
+    "      QComboBox 「# items」 (hidden)",
     "      QPushButton 「依頼グループ…」 (hidden)",
     "      QLabel 「撮像依頼の保存先が未設定（管理者に連絡: requestStores）［E#］」",
     "      QTableView",
@@ -2272,6 +2273,7 @@
     "            QWidget",
     "              QPushButton 「新しい地域」",
     "              QPushButton 「選んだ地物から」",
+    "              QPushButton 「撮像依頼…」 (hidden)",
     "              QPushButton 「移動」",
     "              QPushButton 「地図に表示」",
     "              QPushButton 「カテゴリー…」",
@@ -3267,7 +3269,8 @@
  "map_menu": [
   "ここを撮像計画",
   "この地点の新着画像を監視…",
-  "この地点の撮像予定"
+  "この地点の撮像予定",
+  "この地域で撮像依頼…"
  ],
  "layer_actions": [
   "観測記録の画像にする",
