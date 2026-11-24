@@ -28,10 +28,12 @@ from ..core.request.api import jst_day
 from ..core.request.api import history_where
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
+from .memo_column import MEMO, memo_item
 from .check_filter import CheckFilter
 from .fit import fit_text
 
-COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先")
+#: 「メモ」: the request's note, hidden until shown from the header's menu (tsudo 2026-11-24).
+COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先", MEMO)
 SHOWN = ("すべて", "未撮像", "撮像済み", "未判定")
 COLORS = {"撮像済み": "#16a34a", "未撮像": "#dc2626", "未判定": "#6b7280"}
 
@@ -108,7 +110,7 @@ class PlanResultsDialog(QDialog):
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
-        self.table_columns = column_menus("plan-results", self.table, self)
+        self.table_columns = column_menus("plan-results", self.table, self, hidden=(self.tr(MEMO),))
         hand = QHBoxLayout()
         self.taken_button = QPushButton(self.tr("撮像済みに変更"))
         self.taken_button.setToolTip(self.tr("選んだ依頼を撮像済みに（繰り上げを戻し、期間内1回は完了）"))
@@ -224,7 +226,7 @@ class PlanResultsDialog(QDialog):
             if n > 1:
                 name += self.tr("（分担 {k}/{n}）").format(k=r.part, n=n)
             items = [QStandardItem(t) for t in (r.day, r.system, r.satellite, r.request_id, name,
-                                                 r.captured, r.image_id, next_step(r, req, today))]
+                                                 r.captured, r.image_id, next_step(r, req, today))] + [memo_item(req.note if req else "")]
             items[5].setForeground(QBrush(QColor(COLORS.get(r.captured, "#6b7280"))))
             self.model.appendRow(items)
         tallies = tally(handed)

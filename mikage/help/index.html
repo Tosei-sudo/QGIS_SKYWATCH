@@ -514,7 +514,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <tr><th>状態</th><th>意味</th><th>次にすること</th></tr>
 <tr><td>採用</td><td>システムの計画に入った</td><td>画像が届くのを待つ。届くと画像カタログで探せる</td></tr>
 <tr><td>不明</td><td>システムの返事がまだない</td><td>あとでもう一度見る</td></tr>
-<tr><td>不採用</td><td>システムの計画に入らなかった</td><td>理由を <span class="ui">理由・メモ</span> で見る。期間内 1 回の依頼なら、次の日以降の計算でまた候補になる</td></tr>
+<tr><td>不採用</td><td>システムの計画に入らなかった</td><td>理由を <span class="ui">理由</span> の列で見る。期間内 1 回の依頼なら、次の日以降の計算でまた候補になる</td></tr>
 <tr><td>見送り</td><td>その日はシステムに出さなかった</td><td>不採用と同じ。期間内 1 回の依頼なら、次の日以降の計算でまた候補になる</td></tr>
 </table>
 <p>ほかの列は次のとおりです。</p>
@@ -522,7 +522,8 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <tr><th>列</th><th>見方</th></tr>
 <tr><td>まとめ</td><td>撮り方。「10:09 まとめ 2 件（… と）」は近くの依頼と 1 回の撮像でまとめて撮ること、「同乗」はほかの依頼の撮像で一緒に撮ること、「単独」はこの依頼だけの撮像</td></tr>
 <tr><td>撮像予定</td><td>システムが返してきた撮像の日時</td></tr>
-<tr><td>理由・メモ</td><td>見送り・不採用の理由など</td></tr>
+<tr><td>理由</td><td>見送り・不採用の理由など</td></tr>
+<tr><td>メモ</td><td>依頼の入力画面で書いたメモ。最初は隠れています。見出しを右クリックして <span class="ui">メモ</span> にチェックを入れると出ます（<a href="#lists">一覧の列</a>）</td></tr>
 </table>
 
 <p class="step">6-2. 見送りも表示する</p>
@@ -598,7 +599,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <p class="step">5-1. 行を選んで採否を押す</p>
 <p>「不明」のままの行（①）を選びます。必要なら <span class="ui">理由</span>（②）を書き、<span class="ui">不採用</span>（③）か <span class="ui">採用</span> を押します。</p>
 <p class="pic"><img src="images/plan-12-by-hand.png" alt="行を選んで採否を手で入れる"></p>
-<p class="ok"><b>こうなれば OK:</b> 行の状態（①）が変わり、理由が <span class="ui">理由・メモ</span> に入ります。間違えたときは、行を選んで <span class="ui">不明に戻す</span>（②）を押します。</p>
+<p class="ok"><b>こうなれば OK:</b> 行の状態（①）が変わり、理由が <span class="ui">理由</span> の列に入ります。間違えたときは、行を選んで <span class="ui">不明に戻す</span>（②）を押します。</p>
 <p class="pic"><img src="images/plan-13-answered.png" alt="採否を入れたあとの撮像予定と不明に戻すボタン"></p>
 <p>これで、その日の計画が採用・不採用・見送りに分かれました。依頼した人は同じ <span class="ui">撮像予定</span> で確かめます（<a href="#howto-request">撮像を依頼して、計画に入ったか確かめる</a>）。画像が届いたら、撮像計画ファイル出力の <span class="ui">照合…</span> で、撮れたかを画像カタログと突き合わせます。</p>
 
@@ -612,7 +613,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 </ul>
 
 <h3 id="lists">一覧を見やすくする</h3>
-<p>ドックの一覧は、見出しを右クリックすると列を出したり隠したり、順番を変えたりできます。右クリックした列は <span class="ui">この列を左へ</span>・<span class="ui">この列を右へ</span>・<span class="ui">この列を先頭へ</span>・<span class="ui">この列を末尾へ</span> で動かし、まとめて変えるときは <span class="ui">列の表示と順番…</span> でチェックと <span class="ui">上へ</span>・<span class="ui">下へ</span> を使います（見出しのドラッグでも動かせますが、設定ファイルでドラッグを止めている場合はメニューだけです）。並びは一覧ごとに覚えます。画像カタログ・観測記録・撮像依頼の一覧の横の <span class="ui">ビュー</span> では、今の見え方（列・並べ替え・絞り込み）に名前を付けて保存し、あとで 1 回で戻せます。どれもあなたの PC だけの設定で、ほかの人には影響しません。</p>
+<p>ドックの一覧は、見出しを右クリックすると列を出したり隠したり、順番を変えたりできます。右クリックした列は <span class="ui">この列を左へ</span>・<span class="ui">この列を右へ</span>・<span class="ui">この列を先頭へ</span>・<span class="ui">この列を末尾へ</span> で動かし、まとめて変えるときは <span class="ui">列の表示と順番…</span> でチェックと <span class="ui">上へ</span>・<span class="ui">下へ</span> を使います（見出しのドラッグでも動かせますが、設定ファイルでドラッグを止めている場合はメニューだけです）。並びは一覧ごとに覚えます。最初は隠れている列もあります（撮像依頼・撮像予定・撮像計画ファイル出力・計画と実績の照合の <span class="ui">メモ</span> は、依頼のメモを 1 行で出す列です。長いメモはセルにマウスを置くと全文が出ます）。チェックを入れると出て、次からもそのままです。<span class="ui">標準の表示に戻す</span> で、列はプラグインの順番に戻り、最初は隠れている列はまた隠れます。画像カタログ・観測記録・撮像依頼の一覧の横の <span class="ui">ビュー</span> では、今の見え方（列・並べ替え・絞り込み）に名前を付けて保存し、あとで 1 回で戻せます。どれもあなたの PC だけの設定で、ほかの人には影響しません。</p>
 
 <h3 id="images">画像を探して開く（画像カタログ）</h3>
 <p><a class="open" href="mikage:open/画像カタログ">画像カタログ</a> ドック（<span class="key">Ctrl+Alt+I</span>）で、届いた衛星画像を探します。</p>
@@ -805,6 +806,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <li>カレンダーの下の <span class="ui">すべての状態</span>・<span class="ui">すべてのグループ</span> の欄を開くと、状態・依頼グループのチェックボックスが並びます。<span class="ui">採用</span> と <span class="ui">不採用</span> のように複数チェックすると、そのどれかに当たる計画を出します。最初は <span class="ui">見送り以外</span> です。<span class="ui">計画に入ったもの（採用・要求外）</span> で 2 つをまとめてチェック、<span class="ui">すべての状態</span> でチェックを全部外します。一覧は開いたままなので続けてチェックでき、外をクリックすると閉じます</li>
 <li>一覧の <span class="ui">まとめ</span> に、依頼ごとの撮り方（「22:00 単独」「22:00 まとめ 3 件（… と）」「22:00 同乗（「…」の撮像）」）が出ます。地図には依頼の範囲を状態の色で、撮像の範囲（まとめた依頼はまとめた範囲）を紫の破線で重ねます（<span class="ui">撮像の範囲</span> で出し入れ）</li>
 <li>撮像済みになった計画は、一覧の <span class="ui">画像ID</span> に撮像に使われた画像の ID が出ます（文字の絞り込みでも探せます）</li>
+<li>一覧の <span class="ui">理由</span> に、見送り・不採用の理由や、手で入れた採否の理由が出ます。依頼のメモは <span class="ui">メモ</span> の列（最初は隠れています。見出しの右クリックでチェック）</li>
 <li><span class="ui">レイヤーに出す</span> で、表示中の計画を状態ごとに色分けしたレイヤーにできます（撮像の範囲も別のレイヤーに）</li>
 </ul>
 

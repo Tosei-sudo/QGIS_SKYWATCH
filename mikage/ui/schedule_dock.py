@@ -61,12 +61,15 @@ from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .fit import fit_text
 from .flow_layout import FlowLayout
 from .list_views import column_menus
+from .memo_column import MEMO, memo_item
 from .plan_overlay import PlanOverlay
 from .check_filter import CheckFilter
 from .request_groups import GroupFilter
 
-COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由・メモ")
-_TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由・メモ"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
+#: 「理由」 (the systems' and the plugin's reasons; 「理由・メモ」 until 2026-11-24) and 「メモ」 (the request's note,
+#: from the ledger; hidden until shown from the header's menu, tsudo 2026-11-24).
+COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由", MEMO)
+_TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
 _SATELLITE = COLUMNS.index("衛星")
 #: A row a satellite outage hits (衛星の障害情報).
 OUTAGE_COLOR = "#c2410c"
@@ -145,6 +148,8 @@ class ScheduleDock(PluginDock):
         self._areas: dict = {}
         #: The ledger's 依頼グループ by request id, for rows written without one (before groups, or put in a group since).
         self._ledger_groups: dict = {}
+        #: The ledger's メモ by request id (the 「メモ」 column; the history rows do not keep it).
+        self._ledger_notes: dict = {}
         #: The groups of the store's table (core/request/groups.py), and whether it was read.
         self.groups: list = []
         self.groups_read = False
@@ -239,7 +244,7 @@ class ScheduleDock(PluginDock):
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
-        self.table_columns = column_menus("schedule", self.table, self)
+        self.table_columns = column_menus("schedule", self.table, self, hidden=(self.tr(MEMO),))
         answer = FlowLayout()
         self.answer_label = QLabel(self.tr("採否"))
         answer.addWidget(self.answer_label)
@@ -320,7 +325,7 @@ class ScheduleDock(PluginDock):
 
     def _forget(self) -> None:
         self.rows, self.shown, self.chosen, self.day, self._areas, self._month = [], [], None, "", {}, ()
-        self._ledger_groups, self.groups, self.groups_read = {}, [], False
+        self._ledger_groups, self._ledger_notes, self.groups, self.groups_read = {}, {}, [], False
         self.shots, self.shot_problem = {}, ""
         self.group_filter.set_groups([], ())
         self.shots_on_map.setVisible(bool(self.store and self.store.shots))
@@ -405,6 +410,7 @@ class ScheduleDock(PluginDock):
         day = self.chosen_day().isoformat()
         areas = None if refresh or not self._areas else self._areas
         ledger_groups = dict(self._ledger_groups) if areas is not None else {}
+        ledger_notes = dict(self._ledger_notes) if areas is not None else {}
         read_table = refresh or not self.groups_read
         self.status.setText(self.tr("{d} の計画を取得中…").format(d=day))
 
@@ -418,24 +424,28 @@ class ScheduleDock(PluginDock):
                     # The requests' rows matter most: shown without the shots.
                     problem = str(error)
             missing = repo.history_has(ADOPTION_ROLES) if refresh or areas is None else None
-            found, groups_of = areas, ledger_groups
+            found, groups_of, notes_of = areas, ledger_groups, ledger_notes
             if (found is None or any(r.request_id and not r.rings and r.request_id not in found for r in rows)
-                    or any(r.request_id and not r.group and r.request_id not in groups_of for r in rows)):
+                    or any(r.request_id and not r.group and r.request_id not in groups_of for r in rows)
+                    or any(r.request_id and r.request_id not in notes_of for r in rows)):
                 # A table without shapes (or rows written before it had them): the ledger's areas. Rows written
                 # without a group: the ledger's group (a request gone from the ledger: none, not asked again).
+                # The requests' メモ (not kept in the history) with them: read again only for requests not read yet.
                 requests = repo.load_requests(task.isCanceled)
                 found = {q.id: q.rings for q in requests}
                 groups_of = {q.id: q.group for q in requests}
                 groups_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in groups_of})
+                notes_of = {q.id: q.note for q in requests}
+                notes_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in notes_of})
             groups = repo.read_groups(task.isCanceled) if read_table else None
             outages, _problem = self.context.read_outages(repo.client, task.isCanceled)
-            return rows, missing, found, groups_of, groups, shots, problem, outages
+            return rows, missing, found, groups_of, notes_of, groups, shots, problem, outages
 
         def done(result):
-            rows, missing, found, groups_of, groups, shots, problem, outages = result
+            rows, missing, found, groups_of, notes_of, groups, shots, problem, outages = result
             self.outages = outages
             self.context.set_outages(outages)
-            self.rows, self._areas, self._ledger_groups, self.day = rows, found, groups_of, day
+            self.rows, self._areas, self._ledger_groups, self._ledger_notes, self.day = rows, found, groups_of, notes_of, day
             self.shots, self.shot_problem = {s.shot_id: s for s in shots if s.shot_id}, problem
             if groups is not None and groups[0] is not None:
                 self.groups, self.groups_read = groups[0], True
@@ -496,6 +506,10 @@ class ScheduleDock(PluginDock):
     def group_of(self, row: HistoryRow) -> str:
         """A row's 依頼グループ: the one it was written with, else the request's in the ledger."""
         return row.group or self._ledger_groups.get(row.request_id, "")
+
+    def note_of(self, row: HistoryRow) -> str:
+        """The メモ of a row's request (the ledger's; "" for a 要求外 row or a request gone from the ledger)."""
+        return self._ledger_notes.get(row.request_id, "") if row.request_id else ""
 
     def _passes(self, row: HistoryRow) -> bool:
         system = self.system_filter.currentData()
@@ -569,7 +583,7 @@ class ScheduleDock(PluginDock):
                 note = self.tr("衛星の障害の影響あり（{w}）").format(w=hit[1]) + (f"。{note}" if note else "")
             items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
-                                                captured_text(r), image_text(r), r.requester, note)]
+                                                captured_text(r), image_text(r), r.requester, note)] + [memo_item(self.note_of(r))]
             if hit is not None:
                 tip = self.tr("衛星の障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）").format(
                     s=hit[0].status(_now_ms()), t=hit[0].short_text(_now_ms()))
@@ -1015,6 +1029,8 @@ class UnrequestedDialog(QDialog):
         timed.addWidget(self.when, 1)
         form.addRow(self.tr("日時（日本時間）"), timed)
         self.note = QLineEdit()
+        # Kept as the row's reason: the list shows it in 「理由」 (its own 「メモ」 column is the requests' note).
+        self.note.setToolTip(self.tr("一覧の「理由」の列に出る"))
         form.addRow(self.tr("メモ"), self.note)
         area = QHBoxLayout()
         self.box_button = QPushButton(self.tr("地図で範囲"))

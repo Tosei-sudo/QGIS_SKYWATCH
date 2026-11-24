@@ -12,12 +12,17 @@ the sort (lists that sort by a header click) and the list's filters.
   file says `"columnDrag": false` (`set_column_drag`).
 - 「ビュー ▸ 今の表示を保存…」 keeps it under a name, with the filters; a
   saved view is chosen from the same menu. 「標準の表示に戻す」 shows every
-  column in the plugin's order.
+  column in the plugin's order, but those the list hides until shown.
+- A list may hide some columns until they are shown (`hidden`: the request
+  lists' 「メモ」, tsudo 2026-11-24 「通常は非表示で」): hidden in the
+  plugin's standard view, and also where a kept arrangement or a saved view
+  does not name them (made before the column was there).
 - Kept per user (QgsSettings `mikage/listViews/<list>`), not in the settings
   file or the project: each person has their own.
 
 Columns are told by their titles, so a view still fits when a list gains or
-loses a column (a column it does not name is shown where it falls).
+loses a column (a column it does not name is shown where it falls, hidden
+when the list hides it until shown).
 
 The other lists of the docks (and of a few dialogs) only have the header's
 menu and the arrangement kept (`column_menus`), no 「ビュー」 button.
@@ -25,7 +30,7 @@ menu and the arrangement kept (`column_menus`), no 「ビュー」 button.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Iterable, Optional, Union
 
 from qgis.core import QgsSettings
 from qgis.PyQt.QtCore import QObject, QSize, Qt, QTimer
@@ -122,10 +127,13 @@ class ListViews(QObject):
     """The views of one list (a table view or widget): its 「ビュー」 button, the header's menu, the arrangement kept."""
 
     def __init__(self, key: Union[str, Callable[[], str]], view: QAbstractItemView, filters: Optional[dict[str, Union[QWidget, Filter]]] = None,
-                 applied: Optional[Callable[[], None]] = None, parent: Optional[QObject] = None, button: bool = True):
+                 applied: Optional[Callable[[], None]] = None, parent: Optional[QObject] = None, button: bool = True,
+                 hidden: Iterable[str] = ()):
         super().__init__(parent or view)
         self._key = key
         self.view = view
+        #: The titles of the columns hidden until shown (the plugin's standard view hides them).
+        self.hidden_at_first: frozenset = frozenset(hidden)
         self.filters: dict[str, Filter] = {k: (v if isinstance(v, tuple) else widget_filter(v)) for k, v in (filters or {}).items()}
         self.applied = applied
         #: The view chosen last (its name), per list key.
@@ -219,15 +227,23 @@ class ListViews(QObject):
             out["filters"] = {k: get() for k, (get, _set) in self.filters.items()}
         return out
 
+    def standard_hidden(self, title: str) -> bool:
+        """Whether the plugin's standard view hides a column (one the list hides until shown)."""
+        return title in self.hidden_at_first
+
     def apply_columns(self, columns: list) -> None:
-        """Shows the columns named in their order (hidden as said); the others after them in the plugin's order."""
+        """
+        Shows the columns named in their order (hidden as said); the others
+        after them in the plugin's order (those the list hides until shown
+        hidden).
+        """
         titles = self.titles()
         h = self.header
         self._applying = True
         try:
             for i in range(len(titles)):
                 h.moveSection(h.visualIndex(i), i)
-                h.setSectionHidden(i, False)
+                h.setSectionHidden(i, self.standard_hidden(titles[i]))
             target = 0
             for c in columns or []:
                 if not isinstance(c, dict) or c.get("title") not in titles:
@@ -315,13 +331,19 @@ class ListViews(QObject):
         return True
 
     def reset(self) -> None:
-        """Every column shown in the plugin's order (the sort and the filters left as they are)."""
+        """
+        The columns in the plugin's order, each shown but those the list hides
+        until shown (the sort and the filters left as they are).
+        """
         h = self.header
+        titles = self.titles()
         self._applying = True
         try:
-            for i in range(len(self.titles())):
+            for i in range(len(titles)):
                 h.moveSection(h.visualIndex(i), i)
-                h.setSectionHidden(i, False)
+                h.setSectionHidden(i, self.standard_hidden(titles[i]))
+            if titles and all(h.isSectionHidden(i) for i in range(len(titles))):
+                h.setSectionHidden(0, False)
         finally:
             self._applying = False
         self.current.pop(self.key, None)
@@ -450,9 +472,14 @@ class ListViews(QObject):
         menu.addAction(self.tr("標準の表示に戻す"), self.reset)
 
 
-def column_menus(key: Union[str, Callable[[], str]], view: QAbstractItemView, parent: Optional[QObject] = None) -> ListViews:
-    """A list's columns shown, hidden and put in order from its header's right-click menu, kept per user (no 「ビュー」 button)."""
-    return ListViews(key, view, parent=parent, button=False)
+def column_menus(key: Union[str, Callable[[], str]], view: QAbstractItemView, parent: Optional[QObject] = None,
+                 hidden: Iterable[str] = ()) -> ListViews:
+    """
+    A list's columns shown, hidden and put in order from its header's
+    right-click menu, kept per user (no 「ビュー」 button); `hidden`: the
+    titles of the columns hidden until shown.
+    """
+    return ListViews(key, view, parent=parent, button=False, hidden=hidden)
 
 
 class ColumnsDialog(QDialog):
@@ -479,7 +506,7 @@ class ColumnsDialog(QDialog):
             self.move_buttons[where] = b
         side.addSpacing(12)
         standard = QPushButton(self.tr("標準に戻す"))
-        standard.setToolTip(self.tr("すべての列をプラグインの順番で表示（OK で反映）"))
+        standard.setToolTip(self.tr("列をプラグインの標準の順番と表示に戻す（OK で反映）"))
         standard.clicked.connect(self.standard)
         side.addWidget(standard)
         side.addStretch(1)
@@ -528,7 +555,11 @@ class ColumnsDialog(QDialog):
         self.list.setCurrentRow(to)
 
     def standard(self) -> None:
-        self._fill([(i, True) for i in range(len(self.views.titles()))])
+        titles = self.views.titles()
+        shown = [not self.views.standard_hidden(t) for t in titles]
+        if titles and not any(shown):
+            shown[0] = True
+        self._fill(list(enumerate(shown)))
         self.list.setCurrentRow(0)
 
     def _update(self) -> None:
