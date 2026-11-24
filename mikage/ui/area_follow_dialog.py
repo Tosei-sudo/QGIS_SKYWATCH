@@ -24,7 +24,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core.request.api import (
     AreaChange, FOLLOW_CHANGED, FOLLOW_HOLD, FOLLOW_SKIP, FOLLOW_UNDO, FOLLOW_UPDATE, FollowResult, load_changes, undo_change,
 )
-from ..core.request.model import JST
+from ..core.request.api import JST
 from ..qgis_io.tasks import run_task
 from .docks import ask_no, plain_label, plain_tip
 from .fit import fit_text
