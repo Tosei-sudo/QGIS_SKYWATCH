@@ -126,6 +126,8 @@ class Images(Feature):
             self._alerts_to_observations(notices.alerts, observations)
             # 分担 written in 観測記録: the catalog's 分担 column of that image read again.
             observations.assignment_bar.written.connect(catalog.work_changed)
+            # 画像の評価 saved there: its 評価 column read again.
+            observations.review_bar.written.connect(catalog.rating_changed)
         # 「類似画像の検索…」 in the right-click menu of layers opened from the catalog.
         host.similar_action = QAction(icon("catalog"), tr("類似画像の検索…"), self.window())
         host.similar_action.triggered.connect(lambda: catalog.find_similar_of_layer(self.iface.activeLayer()))

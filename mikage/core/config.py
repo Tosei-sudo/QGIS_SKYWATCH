@@ -34,6 +34,7 @@ from .complex_images import DEFAULT_MODE as DEFAULT_COMPLEX_MODE, complex_images
 from .obs.alerts import AlertSettings, EsriSource, alert_settings_of, level_key_problems
 from .obs.assignments import assignment_source_of
 from .obs.glossary import glossary_source_of
+from .image_reviews import review_source_of
 from .geo_fix import DemSettings, dem_settings_of, fix_source_of
 from .obs.handover import HandoverSettings, handover_settings_of
 from .obs.model import ObservationStoreConfig, ObservationVocabulary, observation_store_of, vocabulary_of
@@ -139,6 +140,8 @@ class PluginConfig:
     observation_exports: Optional[ExportSettings] = None
     #: `assignments`: the Esri table of who holds which image (分担); None hides it.
     assignments: Optional[EsriSource] = None
+    #: `imageReviews`: the Esri polygon layer of the images' ratings by named area (画像の評価, core/image_reviews.py); None for none.
+    image_reviews: Optional[EsriSource] = None
     #: `handover`: how the shift handover memo (引き継ぎメモ) is written and kept.
     handover: HandoverSettings = field(default_factory=HandoverSettings)
     #: `events`: the event layer and its link table (イベント); None hides the dock's work.
@@ -376,6 +379,7 @@ SECTIONS = (
     Section("alertReports", "alert_reports", alert_settings_of),
     Section("observationExports", "observation_exports", export_settings_of),
     Section("assignments", "assignments", assignment_source_of),
+    Section("imageReviews", "image_reviews", review_source_of),
     Section("handover", "handover", handover_settings_of),
     Section("events", "events", events_settings_of),
     Section("interests", "interests", interests_settings_of),

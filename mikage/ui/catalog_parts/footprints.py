@@ -108,6 +108,8 @@ class FootprintsPart:
             self._work_timer.stop()
         elif self.model.work is not None and self.model.records:
             self.load_work()
+        if visible and self.model.reviews is not None and self.model.records:
+            self.load_ratings()
         if visible and self.overlay is None:
             self.overlay = FootprintOverlay(self.canvas, self.footprint_box.currentData())
             self.overlay.show_area(self.drawn_shape())

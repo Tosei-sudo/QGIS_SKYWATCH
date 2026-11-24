@@ -19,6 +19,10 @@ A shot handed out that a satellite outage entered since hits (衛星の障害情
 撮像停止, its direction, angle or the night at its moment) is told in the
 list (「衛星の障害の影響あり」, the satellite in orange); nothing is changed:
 whether to hand it out again is the planner's (tsudo 2026-11-16, decision 4).
+
+A row 撮像済み whose image is rated 使えない all over the request's area
+(画像の評価, `imageReviews`) is marked too: 「撮像済み（要確認）」 in orange,
+「画像の評価: 使えない（雲）」 in 理由; it stays 撮像済み (設計 2).
 """
 from __future__ import annotations
 
@@ -35,6 +39,7 @@ from qgis.core import (
 from qgis.gui import QgsMapToolExtent
 from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, Qt, QTime, QTimer, QVariant
 from qgis.PyQt.QtGui import QBrush, QColor, QFont, QStandardItem, QStandardItemModel, QTextCharFormat
+from ..core.image_reviews import UnusableImages
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView, QCalendarWidget, QCheckBox, QComboBox, QDateTimeEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QPushButton, QTableView,
@@ -113,6 +118,24 @@ def image_text(row: HistoryRow) -> str:
     return row.image_id if row.captured == "撮像済み" else ""
 
 
+def unusable_marks(unusable: Optional[UnusableImages], rows, areas: dict) -> dict:
+    """
+    Of a day's rows 撮像済み, those whose image is rated 使えない over the row's
+    area (else the request's): object id → 「画像の評価: 使えない（雲）」 (in the task).
+    """
+    if unusable is None:
+        return {}
+    taken = [r for r in rows if r.captured == "撮像済み" and r.image_id and r.object_id is not None]
+    unusable.read(r.image_id for r in taken)
+    out = {}
+    for r in taken:
+        rings = r.rings or areas.get(r.request_id)
+        text = unusable.text(r.image_id, rings) if rings else ""
+        if text:
+            out[r.object_id] = text
+    return out
+
+
 def row_note(row: HistoryRow) -> str:
     """What the list says of why: the system's reason, else the plugin's (held back, warnings)."""
     return row.adoption_reason or row.reason
@@ -178,6 +201,8 @@ class ScheduleDock(PluginDock):
         #: 衛星の障害情報 as read with the day (and kept up to date), and the satellites known (the imaging plan's catalog,
         #: set by the plugin) for their other names and series.
         self.outages: list = []
+        #: Rows 撮像済み whose image is rated 使えない over the area: their object id → 「画像の評価: 使えない（雲）」.
+        self.review_marks: dict = {}
         self.satellites_known = lambda: []
         context.outagesChanged.connect(self._outages_changed)
         self.visibilityChanged.connect(self._visibility)
@@ -416,6 +441,8 @@ class ScheduleDock(PluginDock):
         ledger_groups = dict(self._ledger_groups) if areas is not None else {}
         ledger_notes = dict(self._ledger_notes) if areas is not None else {}
         read_table = refresh or not self.groups_read
+        reviews = self.context.config.image_reviews
+        unusable = UnusableImages(self.context.esri(), reviews, self.context.token_for(reviews.url, reviews.token)) if reviews else None
         self.status.setText(self.tr("{d} の計画を取得中…").format(d=day))
 
         def work(task):
@@ -443,10 +470,10 @@ class ScheduleDock(PluginDock):
                 notes_of.update({r.request_id: "" for r in rows if r.request_id and r.request_id not in notes_of})
             groups = repo.read_groups(task.isCanceled) if read_table else None
             outages, _problem = self.context.read_outages(repo.client, task.isCanceled)
-            return rows, missing, found, groups_of, notes_of, groups, shots, problem, outages
+            return rows, missing, found, groups_of, notes_of, groups, shots, problem, outages, unusable_marks(unusable, rows, found or {})
 
         def done(result):
-            rows, missing, found, groups_of, notes_of, groups, shots, problem, outages = result
+            rows, missing, found, groups_of, notes_of, groups, shots, problem, outages, self.review_marks = result
             self.outages = outages
             self.context.set_outages(outages)
             self.rows, self._areas, self._ledger_groups, self._ledger_notes, self.day = rows, found, groups_of, notes_of, day
@@ -585,6 +612,9 @@ class ScheduleDock(PluginDock):
             redo = self.redo_of(r)
             if redo:
                 note = redo_text(redo) + (f"。{note}" if note else "")
+            mark = self.review_marks.get(r.object_id) if r.captured == "撮像済み" else None
+            if mark:
+                note = mark + (f"。{note}" if note else "")
             if hit is not None:
                 hit_count += 1
                 hit_kinds.add(hit[0].for_system)
@@ -613,7 +643,14 @@ class ScheduleDock(PluginDock):
                 items[0].setToolTip(self.tr("システムの採否が分からない（画像が入れば採用になる）"))
             if image_text(r):
                 items[_TAKEN].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
-            if row_note(r) and hit is None:
+            if mark:
+                # Taken, but the image is rated unusable there: marked, left as it is (設計 2).
+                items[_TAKEN].setText(self.tr("撮像済み（要確認）"))
+                tip = self.tr("{m}。撮像済みのまま（出し直すか、「計画と実績の照合」で未撮像にするかは担当が決める）").format(m=mark)
+                for col in (_TAKEN, _NOTE):
+                    items[col].setForeground(QBrush(QColor(OUTAGE_COLOR)))
+                    items[col].setToolTip(plain_tip(tip))
+            if row_note(r) and hit is None and not mark:
                 items[_NOTE].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
             if redo and hit is None:
                 items[_NOTE].setForeground(QBrush(QColor(REDO_COLOR)))

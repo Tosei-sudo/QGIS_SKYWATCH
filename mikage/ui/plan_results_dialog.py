@@ -8,6 +8,11 @@ hand when the catalog is late or wrong; the ledger follows (raise undone,
 期間内1回 完了, or back to 有効). 「画像と関連付け…」 opens the shots of a
 day with the catalog's images over each, to link one by hand
 (shot_link_dialog.py).
+
+With 画像の評価 (`imageReviews`, core/image_reviews.py): an image rated
+使えない all over a request's area does not count at 「照合」, and a row
+already 撮像済み whose image is rated so is marked in orange (「画像の評価:
+使えない（雲）」), left as it is to be set by hand.
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ from ..core.request.api import found_text, in_days, marked, next_step, tally
 from ..core.request.api import unit_key
 from ..core.request.api import jst_day
 from ..core.request.api import history_where
+from ..core.image_reviews import UnusableImages
 from ..qgis_io.tasks import run_task
 from .list_views import column_menus
 from .memo_column import MEMO, memo_item
@@ -36,6 +42,13 @@ from .fit import fit_text
 COLUMNS = ("対象日", "システム", "衛星", "依頼ID", "依頼", "撮像", "画像ID", "この先", MEMO)
 SHOWN = ("すべて", "未撮像", "撮像済み", "未判定")
 COLORS = {"撮像済み": "#16a34a", "未撮像": "#dc2626", "未判定": "#6b7280"}
+#: A row 撮像済み whose image is rated 使えない over the request's area.
+UNUSABLE_COLOR = "#e65100"
+
+
+def mark_key(r) -> tuple:
+    """A history row as the marks of 画像の評価 know it (the rows are read again at each 「照合」)."""
+    return r.request_id, r.day, r.occurrence, r.part, r.image_id
 
 
 def _now_ms() -> float:
@@ -64,6 +77,8 @@ class PlanResultsDialog(QDialog):
         self.linking = None
         #: The target days whose history was read (first, last), once read.
         self.loaded: Optional[tuple] = None
+        #: The rows 撮像済み whose image is rated 使えない over the area (mark_key → 「画像の評価: 使えない（雲）」).
+        self.marks: dict = {}
         self._build()
 
     def _build(self) -> None:
@@ -146,6 +161,8 @@ class PlanResultsDialog(QDialog):
         catalog = dock.catalog() if follow else None
         repo = dock.repository()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
+        reviews = self.context.config.image_reviews
+        unusable = UnusableImages(self.context.esri(), reviews, self.context.token_for(reviews.url, reviews.token)) if reviews else None
         now = _now_ms()
         first, last = self.span()
         # The span's rows and those still open (followed up as 「計算」 does), not the whole table.
@@ -164,19 +181,22 @@ class PlanResultsDialog(QDialog):
                 # With the times of the day already taken of a request taken several times a day.
                 rows = repo.with_settled_times(history, by_id, task.isCanceled)
                 found, changed = repo.follow_and_save(catalog, catalog_token, rows, by_id, now, names, task.isCanceled,
-                                                      problems)
+                                                      problems, unusable)
                 notes.append(found_text(found) if found else "新たに判定できた依頼なし")
+                if unusable is not None and unusable.left:
+                    notes.append(f"画像の評価が「使えない」の画像 {len(unusable.left)} 枚は撮像済みに数えず")
                 if problems:
                     notes.append("照合結果の保存に一部失敗（" + "、".join(problems[:3]) + "）")
                 if changed:
                     requests = repo.load_requests(task.isCanceled)
+                    by_id = {r.id: r for r in requests}
             elif follow:
                 notes.append("画像カタログがないため照合なし")
-            return requests, history, notes
+            return requests, history, notes, self._marks_of(unusable, history, by_id)
 
         def done(result):
             self.task = None
-            requests, history, notes = result
+            requests, history, notes, self.marks = result
             self.requests = {r.id: r for r in requests}
             self.history = history
             self.loaded = (first, last)
@@ -191,6 +211,22 @@ class PlanResultsDialog(QDialog):
 
         self.task = run_task(self.tr("計画と実績の照合"), work, done, failed)
         self._update_buttons()
+
+    @staticmethod
+    def _marks_of(unusable: Optional[UnusableImages], history, requests: dict) -> dict:
+        """The rows 撮像済み whose image is rated 使えない over the row's (or the request's) area (in the task)."""
+        if unusable is None:
+            return {}
+        taken = [r for r in history if r.captured == "撮像済み" and r.image_id]
+        unusable.read(r.image_id for r in taken)
+        out = {}
+        for r in taken:
+            req = requests.get(r.request_id)
+            rings = getattr(r, "rings", None) or (req.rings if req else None)
+            text = unusable.text(r.image_id, rings) if rings else ""
+            if text:
+                out[mark_key(r)] = text
+        return out
 
     def _span_changed(self) -> None:
         """Shows the new span: from what was read when it is inside it, else read again (without following up)."""
@@ -228,6 +264,13 @@ class PlanResultsDialog(QDialog):
             items = [QStandardItem(t) for t in (r.day, r.system, r.satellite, r.request_id, name,
                                                  r.captured, r.image_id, next_step(r, req, today))] + [memo_item(req.note if req else "")]
             items[5].setForeground(QBrush(QColor(COLORS.get(r.captured, "#6b7280"))))
+            mark = self.marks.get(mark_key(r)) if r.captured == "撮像済み" else None
+            if mark:
+                # Taken, but the image is rated unusable there: marked, left to be set by hand (設計 2).
+                items[5].setText(self.tr("撮像済み（要確認）"))
+                items[5].setForeground(QBrush(QColor(UNUSABLE_COLOR)))
+                for item in (items[5], items[6]):
+                    item.setToolTip(mark)
             self.model.appendRow(items)
         tallies = tally(handed)
         self.summary.setText("\n".join(f"{t.system}: {t.text}" for t in tallies) if tallies

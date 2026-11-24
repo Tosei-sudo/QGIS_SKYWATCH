@@ -292,6 +292,8 @@ class CatalogDock(
         # Every 3 minutes (2026-11-19: every minute, with 200 people, was 2 requests a second for this column alone).
         self._work_timer.setInterval(180_000)
         self._work_timer.timeout.connect(self.load_work)
+        #: The 画像の評価 of the listed images asked (a newer list drops the answers of an older one).
+        self._ratings_asked = 0
 
         # 「前の画像を閉じる」 (tsudo, 2026-11-10): looking through images one after another, the one opened before closes.
         self.close_previous = QCheckBox(self.tr("前の画像を閉じる"))

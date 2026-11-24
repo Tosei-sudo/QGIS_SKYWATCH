@@ -180,8 +180,9 @@ class ScheduleRepository(RequestRepository):
 
     def follow_and_save(self, catalog: CatalogConfig, catalog_token: Optional[str], history: Sequence[HistoryRow],
             requests: dict, now: float, names: SatelliteNames = NO_NAMES, cancelled: Optional[Callable[[], bool]] = None,
-            problems: Optional[list] = None) -> tuple[list[Finding], bool]:
-        return follow_and_save(self.client, self.store, self.token, catalog, catalog_token, history, requests, now, names, cancelled, problems)
+            problems: Optional[list] = None, unusable: Optional[Callable[[str, Sequence], bool]] = None) -> tuple[list[Finding], bool]:
+        return follow_and_save(self.client, self.store, self.token, catalog, catalog_token, history, requests, now, names, cancelled, problems,
+                               unusable)
 
     def links_of(self, image_ids: Sequence[str], cancelled: Optional[Callable[[], bool]] = None) -> dict[str, list[HistoryRow]]:
         return links_of(self.client, self.store, self.token, image_ids, cancelled)

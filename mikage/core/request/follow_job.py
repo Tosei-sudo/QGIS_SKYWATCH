@@ -47,6 +47,7 @@ from .. import audit, edit_stamp, time_zone
 from ..catalog.api import CatalogConfig
 from ..config import PluginConfig, parse_config_text, read_config_file
 from ..esri import EsriClient, EsriError, UnreachableError, form_body, quote
+from ..image_reviews import UnusableImages
 from ..plan.api import NO_NAMES, SatelliteNames, load_satellite_names
 from .follow import follow_and_save, found_text, with_settled_times
 from .model import ImagingRequest, day_bounds
@@ -495,11 +496,17 @@ def follow_store(client: EsriClient, config: PluginConfig, store: RequestStoreCo
     rows = with_settled_times(client, store, token, history, requests, cancelled)
     catalog_token = token_for(catalog.url, catalog.token)
     problems: list[str] = []
-    found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, requests, now, names_of(), cancelled, problems)
+    # 画像の評価: an image rated 使えない all over a request's area is not counted as taken.
+    reviews = config.image_reviews
+    unusable = UnusableImages(client, reviews, token_for(reviews.url, reviews.token)) if reviews else None
+    found, changed = follow_and_save(client, store, token, catalog, catalog_token, rows, requests, now, names_of(), cancelled, problems,
+                                     unusable)
     if not found:
         text = f"{len(due)} 行を照合、新たに判定できた行なし"
     else:
         text = f"{len(due)} 行を照合、{found_text(found)}" + ("（台帳を更新）" if changed else "")
+    if unusable is not None and unusable.left:
+        text += f"（画像の評価が「使えない」の画像 {len(unusable.left)} 枚は数えず）"
     return text, problems
 
 

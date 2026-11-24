@@ -53,6 +53,7 @@ class ViewPart:
         self.satellite_row.setVisible(image is not None and not image.satellite and book.keeps_satellite())
         self.image_select.setToolTip(self._image_tip(image))
         self.assignment_bar.show_image(image)
+        self.review_bar.show_image(image)
         self.image_event_button.setVisible(image is not None and self.context.config.events is not None)
         self.clear_button.setEnabled(bool(book and self.store_set and not self.store_set.remote and book.can_clear()))
         self.only.setEnabled(image is not None)

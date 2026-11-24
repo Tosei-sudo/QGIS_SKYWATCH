@@ -176,6 +176,7 @@ class SearchPart:
             self._apply_work_filter()
         bar.setValue(scrolled)
         self.load_work()
+        self.load_ratings(new_only=True)
 
     def show_records(self, catalog: CatalogConfig, records, overlaps=None, listed: Optional[_Listed] = None) -> None:
         """Lists `records` of `catalog`; `listed`: the search they are of (「続きを読む」), None for other lists (an event's images)."""
@@ -183,7 +184,8 @@ class SearchPart:
         self._listed = listed
         self._show_more()
         self._show_file_buttons()
-        self.model.set_records(catalog, records, overlaps, work=self.context.config.assignments is not None)
+        self.model.set_records(catalog, records, overlaps, work=self.context.config.assignments is not None,
+                               reviews=self.context.config.image_reviews is not None)
         # The list comes newest first (類似画像: the most alike first): the heading says so without sorting again.
         header = self.table.horizontalHeader()
         header.blockSignals(True)
@@ -193,6 +195,7 @@ class SearchPart:
         self.table.resizeColumnsToContents()
         self._redraw()
         self.load_work()
+        self.load_ratings()
 
     def forget_list(self) -> None:
         """The list emptied, its footprints off the map (練習モード started or ended: its images are of the other server)."""
@@ -264,6 +267,57 @@ class SearchPart:
             self._apply_work_filter()
 
         self._start(self.tr("分担の取得"), work, done, lambda _message: None)
+
+    def load_ratings(self, new_only: bool = False) -> None:
+        """
+        Reads the 画像の評価 of the listed images (`imageReviews`; in a task):
+        the 評価 column. `new_only`: those not read yet (「続きを読む」).
+        """
+        source = self.context.config.image_reviews
+        if source is None or self.model.reviews is None or not self.model.records:
+            return
+        from ...core.image_reviews import load_reviews
+
+        known = self.model.reviews if new_only else {}
+        ids = [r.id for r in self.model.records if r.id and r.id not in known]
+        if not ids:
+            return
+        self._ratings_asked += 1
+        asked = self._ratings_asked
+        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+
+        def work(_task):
+            found = load_reviews(client, source, ids, token)
+            return {i: found.get(i, []) for i in ids}
+
+        def done(found) -> None:
+            if asked != self._ratings_asked or self.model.reviews is None:
+                return  # listed again since
+            self.model.set_reviews({**known, **found})
+
+        def failed(message: str) -> None:
+            if asked == self._ratings_asked:
+                self.status.setText(self.tr("画像の評価の取得に失敗: {m}").format(m=message))
+
+        self._start(self.tr("画像の評価の取得"), work, done, failed)
+
+    def rating_changed(self, image_id: str) -> None:
+        """An image's 画像の評価 saved in 観測記録: its row's 評価 read again at once (nothing when it is not listed)."""
+        source = self.context.config.image_reviews
+        if source is None or self.model.reviews is None or not any(r.id == image_id for r in self.model.records):
+            return
+        from ...core.image_reviews import load_reviews
+
+        asked = self._ratings_asked
+        client, token = self.context.esri(), self.context.token_for(source.url, source.token)
+
+        def done(rows) -> None:
+            if asked != self._ratings_asked or self.model.reviews is None:
+                return
+            self.model.set_reviews({**self.model.reviews, image_id: rows})
+
+        self._start(self.tr("画像の評価の取得"), lambda _t: load_reviews(client, source, [image_id], token).get(image_id, []),
+                    done, lambda _message: None)
 
     def _apply_work_filter(self) -> None:
         """「未着手のみ」: the rows of images someone took (or not read yet) hidden."""
