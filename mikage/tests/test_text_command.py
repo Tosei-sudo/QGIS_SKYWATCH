@@ -50,6 +50,7 @@ CASES = [
     ("選んだ記録で通報文を作成", "alert", {}),
     ("来週から2週間、那覇を毎日撮る依頼を作って", "newRequest", {}),
     ("ASNARO-1 が12月1日まで観測停止になったので登録して", "outage", {"satellites": ["ASNARO-1"]}),
+    ("Bシステムが年末年始は受付停止になるので登録", "outage", {"systems": ["SYS-B"], "satellites": []}),
     ("嘉手納へ移動", "jump", {"place": "嘉手納"}),
     ("35.3, 139.6 を表示して", "jump", {"point": (139.6, 35.3), "place": None}),
     ("画像補正の画面を開いて", "openScreen", {"screen": "画像補正"}),

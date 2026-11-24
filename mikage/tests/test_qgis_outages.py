@@ -58,7 +58,7 @@ def test_entered_held_back_and_recovered(plugin, monkeypatch):
     assert form.satellite.findText("OPT 1") >= 0
     form.satellite.setCurrentText("")
     form._accept()
-    assert form.problem.text() == "衛星を選ぶ" and form.isVisible()
+    assert form.problem.text() == "衛星かシステムを選ぶ" and form.isVisible()
     form.satellite.setCurrentText("OPT 1")
     form.reason.setText("姿勢制御の不具合")
     form.stop.setChecked(True)
@@ -167,3 +167,73 @@ def test_shots_handed_out_are_marked_in_the_schedule_and_not_changed(plugin):
     # Read again without it (deleted as entered by mistake): no longer marked.
     p.context.set_outages([])
     assert wait_for(lambda: not dock.model.item(0, SCHEDULE_COLUMNS.index("理由")).text().startswith("衛星の障害"))
+
+
+def test_a_systems_stop_entered_and_held_back(plugin, monkeypatch):
+    """システムの障害 (2026-11-24): 対象 「システム」 with 受付停止 holds back every satellite of SYS-A."""
+    from mikage.core.plan.outages import SYSTEM_STOP
+
+    monkeypatch.setenv("USERNAME", "tsudo")
+    p, fake, tmp_path = _with_outages(plugin)
+    fake.layers[OUTAGES].types.update(SYSTEM_NAME="esriFieldTypeString", LIMIT_ORDERS_PER_DAY="esriFieldTypeInteger",
+                                            LIMIT_SCENES_PER_DAY="esriFieldTypeInteger")
+    dialog = _open(p)
+    form = dialog.add()
+    assert form.kind.isEnabled() and form.system.findText("SYS-A") >= 0
+    orders, orders_spin = form.limits["orders_per_day"]
+    assert not orders.isVisible()
+    form.kind.setCurrentText("システム")
+    assert form.system.isVisible() and not form.satellite.isVisible() and orders.isVisible()
+    assert form.stop.text() == "受付停止" and form.no_night.isVisible() and form.limits["max_off_nadir"][0].isVisible()
+    form.system.setCurrentText("SYS-A")
+    form.reason.setText("年末年始")
+    form.stop.setChecked(True)
+    orders.setChecked(True)
+    orders_spin.setValue(3)
+    form.start.setDateTime(form.start.dateTime().addDays(-60))
+    form._accept()
+    assert wait_for(lambda: dialog.task is None and len(fake.layers[OUTAGES].rows) == 1), dialog.status.text()
+    row = fake.layers[OUTAGES].rows[0]["attributes"]
+    assert (row["SYSTEM_NAME"], row["SAT_NAME"], row["STOP_IMAGING"], row["LIMIT_ORDERS_PER_DAY"]) == ("SYS-A", None, 1, 3)
+    assert wait_for(lambda: dialog.model.rowCount() == 1)
+    assert dialog.model.item(0, COLUMNS.index("対象")).text() == "システム: SYS-A"
+    assert dialog.model.item(0, COLUMNS.index("影響")).text() == "受付停止、1 日 3 件まで"
+    daily = shots_test._calculate(p, tmp_path)
+    got = [(c.result, c.reason) for c in daily.plan.candidates]
+    assert got and all(r != TAKEN and why.startswith(SYSTEM_STOP + "（SYS-A: 年末年始") for r, why in got), got
+    assert "障害中の衛星・システム: システム SYS-A（受付停止、1 日 3 件まで）" in daily.status.text(), daily.status.text()
+    dialog.close()
+
+
+def test_a_table_without_the_system_attribute_offers_only_satellites(plugin):
+    p, _fake, _tmp_path = _with_outages(plugin)
+    dialog = _open(p)
+    form = dialog.add()
+    assert not form.kind.isEnabled() and form.kind.currentText() == "衛星" and "SYSTEM_NAME" in form.kind.toolTip()
+    form.reject()
+    dialog.close()
+
+
+def test_shots_handed_to_a_stopped_system_are_marked(plugin):
+    from qgis.PyQt.QtCore import QDate
+
+    from mikage.core.request.model import jst_day
+    from mikage.ui.schedule_dock import COLUMNS as SCHEDULE_COLUMNS
+
+    p, fake, tmp_path = _with_outages(plugin)
+    fake.layers[OUTAGES].types.update(SYSTEM_NAME="esriFieldTypeString")
+    daily = shots_test._calculate(p, tmp_path)
+    daily.write(ask=False)
+    assert wait_for(lambda: daily.task is None and len(fake.layers[shots_test.SHOTS].rows) == 1), daily.status.text()
+    fake.layers[OUTAGES].add({"OUTAGE_ID": "OUT-S", "SYSTEM_NAME": "SYS-A", "START_TIME": int(T) - 86_400_000, "STOP_IMAGING": 1,
+                              "OUTAGE_REASON": "年末年始"})
+    dock = p.api.schedule
+    day = jst_day(T)
+    dock.calendar.setSelectedDate(QDate(day.year, day.month, day.day))
+    dock.show()
+    dock.reload(refresh=True)
+    assert wait_for(lambda: dock._loaded and dock.task is None and dock.day == day.isoformat() and dock.outages), dock.status.text()
+    notes = [dock.model.item(i, SCHEDULE_COLUMNS.index("理由")).text() for i in range(dock.model.rowCount())]
+    assert notes and all(n.startswith("システムの障害の影響あり（受付停止）") for n in notes), notes
+    assert "システムの障害の影響あり 2 件（予定は変えない" in dock.status.text(), dock.status.text()
+    assert "年末年始" in dock.model.item(0, SCHEDULE_COLUMNS.index("システム")).toolTip()

@@ -53,7 +53,10 @@ request with no pass left but for them is held back as 「衛星の障害（衛�
 an outage stops it (撮像停止) at some moment. One taken on a satellite with
 an outage on the day carries 「衛星の障害あり（…）」. Taken by hand, it goes
 all the same. The day's stricter values (回数・シーン数・間隔・角度) come in
-with the satellites (outages.on_day).
+with the satellites (outages.on_day). An outage naming a system (システムの障害,
+2026-11-24) is on each of its satellites: its 受付停止 stops them, and its
+daily limits (件数・枚数) make the system's `limit` stricter on a day it
+touches (day_limit).
 
 A request taken several times a day (1 日の回数: n 回以上・m 回以下, tsudo
 2026-11-11) is one candidate per time (`occurrence` 1 … m, each a row of
@@ -117,7 +120,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Optional, Sequence
 
-from ..plan.api import OUTAGE, OUTAGE_WARNING, outage_reason, stopped, warning_of
+from ..plan.api import OUTAGE, OUTAGE_WARNING, SYSTEM_WARNING, outage_reason, stopped, system_limits, warning_of
 from ..plan.api import SatelliteSpec, platform_key, satellite_label
 from .chances import Chances, clearer_text, scarce_text
 from .covered import Covered, Shares, percent, shares_of, short_day, subtracts
@@ -582,6 +585,23 @@ class Room:
     count: int = 0
     scenes: int = 0
     by_category: dict = field(default_factory=dict)
+    #: The day's limits ({"count": n, "scenes": n}; None: the system's own `limit`).
+    limit: Optional[dict] = None
+
+
+def day_limit(system: ExportSystem, sats: Sequence[SatelliteSpec], day: Optional[date], now: float) -> dict:
+    """
+    A system's limits on a day: its own (`limit`), made stricter by the
+    outages naming it that touch the day (システムの障害: 1 日の件数・枚数の上限),
+    never looser.
+    """
+    out = dict(system.limit)
+    if day is None:
+        return out
+    for key, value in system_limits(sats, system.system, day, now).items():
+        if key not in out or value < out[key]:
+            out[key] = value
+    return out
 
 
 def placement_rows(p: Placement) -> int:
@@ -594,7 +614,8 @@ def placement_rows(p: Placement) -> int:
 def _manual_warning(w: str) -> bool:
     """A warning the fitting itself adds (made again by each fitting)."""
     return (w.startswith(OVER) or w.endswith("（手動で採用）") or w.startswith(PART) or w.startswith(SHOT_CLOUD)
-            or w.startswith(FEW) or w.startswith(QUOTA_OVER) or w.startswith(USE_OVER) or w.startswith(OUTAGE_WARNING))
+            or w.startswith(FEW) or w.startswith(QUOTA_OVER) or w.startswith(USE_OVER) or w.startswith(OUTAGE_WARNING)
+            or w.startswith(SYSTEM_WARNING))
 
 
 def times_of(c: Candidate) -> list[float]:
@@ -613,8 +634,9 @@ def occurrence_text(c: Candidate) -> str:
 
 
 def _room_fits(system: ExportSystem, room: Room, category: str, rows: int, scenes: int) -> bool:
-    return (("count" not in system.limit or room.count + rows <= system.limit["count"])
-            and ("scenes" not in system.limit or room.scenes + scenes <= system.limit["scenes"])
+    limit = room.limit if room.limit is not None else system.limit
+    return (("count" not in limit or room.count + rows <= limit["count"])
+            and ("scenes" not in limit or room.scenes + scenes <= limit["scenes"])
             and (not rows or category not in system.quota or room.by_category.get(category, 0) + rows <= system.quota[category]))
 
 
@@ -650,7 +672,9 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     """
     book_quota = quotas if quotas is not None else QuotaBook()
     book_quota.reset()
-    rooms = {s.system: Room() for s in systems}
+    clock = passes.now if passes is not None and passes.now is not None else time.time() * 1000
+    # The systems' limits of the day (システムの障害 may make them stricter).
+    rooms = {s.system: Room(limit=day_limit(s, sats, day, clock)) for s in systems}
     #: Requests a day of the satellites fitted by counting (platform → n).
     per_sat: dict[str, int] = {}
     members = {s.system: [] for s in systems}
@@ -673,7 +697,6 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     #: 衛星の障害: the day's span (for the satellites' outages), the moment they are judged at, and the outages that
     #: left a candidate without a pass (by id of the candidate).
     day_span = day_bounds(day) if day is not None else None
-    clock = passes.now if passes is not None and passes.now is not None else time.time() * 1000
     hits: dict = {}
     for c in out:
         times.setdefault(c.request.id, []).append(c)
@@ -1115,14 +1138,17 @@ def allocate(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: 
     return result
 
 
-def room_text(cands: Sequence[Candidate], systems: Sequence[ExportSystem]) -> dict[str, str]:
-    """What each system has left: 「12/20 件・30/50 枚」."""
+def room_text(cands: Sequence[Candidate], systems: Sequence[ExportSystem], sats: Sequence[SatelliteSpec] = (),
+              day: Optional[date] = None, now: Optional[float] = None) -> dict[str, str]:
+    """What each system has left: 「12/20 件・30/50 枚」 (with `sats` and `day`, the day's limits: システムの障害)."""
     out = {}
+    clock = now if now is not None else time.time() * 1000
     for s in systems:
         # A request put into another's shot is in that one's row.
         taken = [c for c in cands if c.result == TAKEN and c.system is s and not c.member]
-        parts = [f"{len(taken)}{'/' + str(s.limit['count']) if 'count' in s.limit else ''} 件",
-                 f"{sum(c.scenes for c in taken)}{'/' + str(s.limit['scenes']) if 'scenes' in s.limit else ''} 枚"]
+        limit = day_limit(s, sats, day, clock) if sats and day is not None else s.limit
+        parts = [f"{len(taken)}{'/' + str(limit['count']) if 'count' in limit else ''} 件",
+                 f"{sum(c.scenes for c in taken)}{'/' + str(limit['scenes']) if 'scenes' in limit else ''} 枚"]
         out[s.system] = "・".join(parts)
     return out
 

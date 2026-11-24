@@ -71,7 +71,7 @@ from .request_groups import GroupFilter
 #: from the ledger; hidden until shown from the header's menu, tsudo 2026-11-24).
 COLUMNS = ("状態", "名称", "依頼グループ", "管理番号", "システム", "衛星", "まとめ", "撮像予定", "撮像", "画像ID", "依頼者", "理由", MEMO)
 _TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由"), COLUMNS.index("まとめ"), COLUMNS.index("名称")
-_SATELLITE = COLUMNS.index("衛星")
+_SATELLITE, _SYSTEM = COLUMNS.index("衛星"), COLUMNS.index("システム")
 #: A row a satellite outage hits (衛星の障害情報).
 OUTAGE_COLOR = "#c2410c"
 #: The shots' outlines on the map (dashed over the requests' areas).
@@ -554,11 +554,11 @@ class ScheduleDock(PluginDock):
         return handed_hit(self.outages, r.satellite, sensor, mode, others,
                           (shot.pass_time if shot is not None and shot.pass_time is not None else r.planned_at),
                           shot.orbit_dir if shot else "", shot.look_side if shot else "", shot.off_nadir if shot else None,
-                          center, _now_ms())
+                          center, _now_ms(), r.system)
 
     def render(self) -> None:
         self.shown = [r for r in self.rows if self._passes(r)]
-        hit_count = 0
+        hit_count, hit_kinds = 0, set()
         self.model.clear()
         self.model.setHorizontalHeaderLabels([self.tr(h) for h in COLUMNS])
         chosen_row = -1
@@ -581,14 +581,17 @@ class ScheduleDock(PluginDock):
             note = row_note(r)
             if hit is not None:
                 hit_count += 1
-                note = self.tr("衛星の障害の影響あり（{w}）").format(w=hit[1]) + (f"。{note}" if note else "")
+                hit_kinds.add(hit[0].for_system)
+                head = self.tr("システムの障害の影響あり（{w}）") if hit[0].for_system else self.tr("衛星の障害の影響あり（{w}）")
+                note = head.format(w=hit[1]) + (f"。{note}" if note else "")
             items = [QStandardItem(t) for t in (state, name, self.group_of(r), r.management_no,
                                                 r.system, r.satellite, shot_text(r, self.rows, self.shots), _when(r.planned_at),
                                                 captured_text(r), image_text(r), r.requester, note)] + [memo_item(self.note_of(r))]
             if hit is not None:
-                tip = self.tr("衛星の障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）").format(
+                tip = (self.tr("システムの障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）") if hit[0].for_system
+                       else self.tr("衛星の障害（{s}）: {t}。出し直すかは担当が決める（予定は変えない）")).format(
                     s=hit[0].status(_now_ms()), t=hit[0].short_text(_now_ms()))
-                for col in (_SATELLITE, _NOTE):
+                for col in ((_SYSTEM, _NOTE) if hit[0].for_system else (_SATELLITE, _NOTE)):
                     items[col].setForeground(QBrush(QColor(OUTAGE_COLOR)))
                     items[col].setToolTip(plain_tip(tip))
             tip = shot_tip(self.shots.get(r.shot_id)) if r.shot_id else ""
@@ -623,7 +626,9 @@ class ScheduleDock(PluginDock):
             if self.shot_problem:
                 text += self.tr("。撮像の範囲を読めない（{m}）").format(m=self.shot_problem)
             if hit_count:
-                text += self.tr("。衛星の障害の影響あり {n} 件（予定は変えない。出し直すかは担当が判断）").format(n=hit_count)
+                what = (self.tr("衛星・システムの障害") if len(hit_kinds) > 1 else self.tr("システムの障害") if True in hit_kinds
+                        else self.tr("衛星の障害"))
+                text += self.tr("。{what}の影響あり {n} 件（予定は変えない。出し直すかは担当が判断）").format(what=what, n=hit_count)
             self.status.setText(text)
         self.draw()
         self._update_buttons()

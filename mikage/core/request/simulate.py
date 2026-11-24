@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Callable, Optional, Sequence
 
-from ..plan.api import OUTAGE, on_day
+from ..plan.api import OUTAGE_REASONS, on_day
 from ..plan.api import SatelliteSpec
 from .covered import GOAL, Covered, subtracts
 from .daily import BUSY, CLOUDY, GAP, NO_PASS, NO_SYSTEM, OVER, TAKEN, Candidate, _systems_for, allocate, gather
@@ -268,7 +268,7 @@ def simulate(requests: Sequence[ImagingRequest], start: date, days: int, systems
                 result.no_system += 1
             elif c.reason in (NO_PASS, GAP):
                 result.no_pass += 1
-            elif c.reason.startswith(OUTAGE):
+            elif c.reason.startswith(OUTAGE_REASONS):
                 result.outage += 1
             elif c.held and c.reason == c.held or c.reason == CLOUDY:
                 result.cloud += 1

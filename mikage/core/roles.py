@@ -69,7 +69,7 @@ FEATURES: dict[str, frozenset] = {
     "撮像計画ファイル出力": frozenset({PLAN}),
     "年間撮像上限…": frozenset({PLAN}),
     #: 衛星の障害情報: the list for those who ask for pictures too (why theirs wait); 新規・編集・復旧・削除 for those who plan.
-    "衛星の障害情報…": frozenset({REQUEST, PLAN}),
+    "衛星・システムの障害情報…": frozenset({REQUEST, PLAN}),
     "outages.edit": frozenset({PLAN}),
     #: 撮像予定: 採用・不採用・不明に戻す・結果ファイルの取り込み・要求外を追加・削除.
     "schedule.answer": frozenset({PLAN}),

@@ -70,7 +70,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_INTEREST_POINT`](#tbl_interest_point関心地点) | ポイント | 書き込み | 個人の関心地点（2026-11-14 に追加） | `interests.points` |
 | [`TBL_INTEREST_AREA`](#tbl_interest_area関心地域) | ポリゴン | 書き込み | 個人の関心地域（2026-11-14 に追加） | `interests.areas` |
 | [`TBL_USER_ROLE`](#tbl_user_role担当) | なし | 書き込み | 一人ひとりの担当（2026-11-15 に追加） | `userRoles` |
-| [`TBL_SATELLITE_OUTAGE`](#tbl_satellite_outage衛星の障害情報) | なし | 書き込み | 衛星の障害情報（理由・期間・影響。2026-11-16 に追加） | `satelliteOutages` |
+| [`TBL_SATELLITE_OUTAGE`](#tbl_satellite_outage衛星の障害情報) | なし | 書き込み | 衛星・システムの障害情報（理由・期間・影響。2026-11-16 に追加、システムの受付停止・臨時の上限は 2026-11-24） | `satelliteOutages` |
 | [`TBL_GLOSSARY`](#tbl_glossary備考の単語集) | なし | 読み | 観測記録の備考の単語集（候補と表記ゆれ。2026-11-17 に追加） | `glossary` |
 | [`TBL_TRAINING_EXERCISE`](#tbl_training_exercise判読の練習の問題) | ポリゴン | 書き込み（判読の練習の指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の組織の問題（範囲。2026-11-22 に追加） | `training.exercises.exercises` |
 | [`TBL_TRAINING_ANSWER`](#tbl_training_answer判読の練習の正解) | ポイント | 書き込み（指導者が「判読の練習の問題を作る…」で書く。ほかの人は読むだけ） | 判読の練習の正解（1 つのモノで 1 点） | `training.exercises.answers` |
@@ -131,6 +131,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_USER_ROLE` | `USER_NAME` | 本人の担当 |
 | `TBL_SATELLITE_OUTAGE` | `OUTAGE_ID` | 障害 ID で引く・更新する |
 | `TBL_SATELLITE_OUTAGE` | `SAT_NAME` | 衛星ごとの障害 |
+| `TBL_SATELLITE_OUTAGE` | `SYSTEM_NAME` | システムごとの障害 |
 | `TBL_GLOSSARY` | `TERM` | 語で引く |
 | `TBL_TRAINING_EXERCISE` | `EXERCISE_ID` | 問題 ID で引く |
 | `TBL_TRAINING_ANSWER` | `EXERCISE_ID` | 問題ごとの正解 |
@@ -663,19 +664,20 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 
 ### `TBL_SATELLITE_OUTAGE`（衛星の障害情報）
 
-衛星の障害 1 件で 1 行（2026-11-16 に追加。[衛星の障害情報](../features/plan.md#衛星の障害情報satelliteoutages)）。プラグインの「衛星の障害情報…」で書く（ArcGIS Pro・Portal で直してもよい）。復旧しても行は消さない（履歴）。影響のチェックの属性は 1（`はい`・`true` などの文字も可）でその影響あり、空か 0 でなし。上限の属性は空でその影響なし。`satelliteOutages.fields`（既定は下の名前）。
+衛星かシステム（発注先）の障害 1 件で 1 行（2026-11-16 に追加。システムの行は 2026-11-24。[衛星の障害情報](../features/plan.md#衛星の障害情報satelliteoutages)）。プラグインの「衛星・システムの障害情報…」で書く（ArcGIS Pro・Portal で直してもよい）。`SAT_NAME` か `SYSTEM_NAME` のどちらかを入れる（両方あれば衛星の行。`SYSTEM_NAME` の列がない表には衛星の行だけ書ける）。システムの行の影響はそのシステムの衛星すべてにかかり（`STOP_IMAGING` は受付停止）、1 日の件数・枚数の上限はシステムの行だけ。センサー・モードはシステムの行では見ない。復旧しても行は消さない（履歴）。影響のチェックの属性は 1（`はい`・`true` などの文字も可）でその影響あり、空か 0 でなし。上限の属性は空でその影響なし。`satelliteOutages.fields`（既定は下の名前）。
 
 | 属性名 | エイリアス | 型 | 中身 | 役割 |
 | --- | --- | --- | --- | --- |
 | `OUTAGE_ID` | 障害ID | `String(64)` | ID（`OUT-20261116-181530-1a2b`）。**必須** | `id` |
-| `SAT_NAME` | 衛星名 | `String(255)` | 衛星カタログの名前・ID・別名か、シリーズ名（そのシリーズの全機）。**必須** | `satellite` |
+| `SAT_NAME` | 衛星名 | `String(255)` | 衛星カタログの名前・ID・別名か、シリーズ名（そのシリーズの全機）。**これか `SYSTEM_NAME` が必須** | `satellite` |
+| `SYSTEM_NAME` | システム名 | `String(255)` | システム（設定ファイルの `requestExports` の `system`）。そのシステムの衛星すべてにかかる。2026-11-24 に追加 | `system` |
 | `SENSOR` | センサー | `String(255)` | このセンサーだけ（空は全センサー） | `sensor` |
 | `SENSOR_MODE` | センサーモード | `String(255)` | このモードだけ（空は全モード） | `mode` |
 | `OUTAGE_REASON` | 理由 | `String(1000)` | 障害の理由 | `reason` |
 | `START_TIME` | 発生日時 | `Date` | 発生日時（計画停止なら始まる日時）。**必須** | `start` |
 | `EXPECTED_END` | 復旧見込み | `Date` | 復旧の見込み。空は未定 | `expected` |
 | `RECOVERED_AT` | 復旧日時 | `Date` | 復旧した日時。空はまだ | `recovered` |
-| `STOP_IMAGING` | 撮像停止 | `SmallInteger` | 1 で撮像停止 | `stop` |
+| `STOP_IMAGING` | 撮像停止 | `SmallInteger` | 1 で撮像停止（システムの行は受付停止: 期間中の撮像機会をそのシステムに出さない） | `stop` |
 | `NO_ASC_RIGHT` | 昇交右不可 | `SmallInteger` | 1 で昇交・右向きを使わない | `noAscRight` |
 | `NO_ASC_LEFT` | 昇交左不可 | `SmallInteger` | 1 で昇交・左向きを使わない | `noAscLeft` |
 | `NO_DESC_RIGHT` | 降交右不可 | `SmallInteger` | 1 で降交・右向きを使わない | `noDescRight` |
@@ -685,6 +687,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `LIMIT_SCENES_PER_PASS` | 1パスのシーン数の上限 | `Integer` | 障害中の 1 パスのシーン数の上限 | `scenesPerPass` |
 | `LIMIT_INTERVAL_MIN` | 撮像間隔の下限 | `Double` | 障害中の撮像間隔の下限（分） | `minInterval` |
 | `NO_NIGHT` | 夜間不可 | `SmallInteger` | 1 で夜間（撮像の場所で太陽が地平線より下）を使わない | `noNight` |
+| `LIMIT_ORDERS_PER_DAY` | 1日の件数の上限 | `Integer` | システムの行だけ: 期間にかかる日の、システムへ出す件数の上限（設定ファイルの `limit.count` との小さいほう）。2026-11-24 に追加 | `ordersPerDay` |
+| `LIMIT_SCENES_PER_DAY` | 1日の枚数の上限 | `Integer` | システムの行だけ: 期間にかかる日の、システムへ出す枚数の上限（`limit.scenes` との小さいほう）。2026-11-24 に追加 | `scenesPerDay` |
 | `OTHER_IMPACT` | その他の影響 | `String(1000)` | 計算に使わない影響（注意として出す） | `other` |
 | `NOTE` | メモ | `String(4000)` | メモ | `note` |
 

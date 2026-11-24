@@ -7,6 +7,7 @@ from __future__ import annotations
 
 
 from ...core.plan.api import attach
+from ...core.request.api import system_names
 from ...core.plan.api import BUILT_IN_DEFAULTS, SatelliteSpec, satellites_from_text
 
 
@@ -24,7 +25,7 @@ class SatellitesPart:
         """The outages known changed (entered, read again): the satellites carry them and the list shows them."""
         if not self.catalog_sats:
             return
-        attached = attach(self.catalog_sats, self.context.known_outages())
+        attached = attach(self.catalog_sats, self.context.known_outages(), system_names(self.context.config.request_exports))
         if any(a is not b for a, b in zip(attached, self.catalog_sats)):
             self.catalog_sats = attached
             self.list_sats()
