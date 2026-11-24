@@ -130,6 +130,28 @@ class EventsPort(Protocol):
         """「イベントに追加」's menu under `anchor` for the items (images, records, requests)."""
 
 
+class ReferencesPort(Protocol):
+    """参考情報 (ui/reference_dock.py)."""
+
+    def can_link(self) -> bool:
+        """Whether infos can be linked (`referenceInfo.links`)."""
+
+    def offer_link(self, targets: Sequence, parent=None, then: Optional[Callable[[], Any]] = None) -> Any:
+        """「参考情報に紐付け…」: infos chosen (or a new one) linked to the items (core/reference_info.LinkTarget)."""
+
+    def show_infos(self, infos: Sequence, what: str) -> None:
+        """The infos listed on their own (an image's), the dock in front."""
+
+    def show_for_items(self, items: Sequence[tuple[str, str]], what: str) -> None:
+        """The infos linked to these items ((type, id)) listed, the dock in front."""
+
+    def infos_for_items(self, items: Sequence[tuple[str, str]], then: Callable[[list], Any],
+                        failed: Optional[Callable[[str], Any]] = None) -> bool:
+        """The links of these items with their infos ([(link, info)]); False without the link table."""
+
+    def unlink(self, links: Sequence, then: Optional[Callable[[], Any]] = None) -> None: ...
+
+
 class NoticesPort(Protocol):
     """通知 (ui/notices_dock.py)."""
 
@@ -148,6 +170,7 @@ class Ports:
         self.catalog: Callable[[], Optional[CatalogPort]] = _none
         self.requests: Callable[[], Optional[RequestsPort]] = _none
         self.events: Callable[[], Optional[EventsPort]] = _none
+        self.references: Callable[[], Optional[ReferencesPort]] = _none
         self.notices: Callable[[], Optional[NoticesPort]] = _none
         self.satellites: Callable[[], Optional[SatellitesPort]] = _none
         self.org_areas: Callable[[], Optional[OrgAreasPort]] = _none

@@ -17,6 +17,11 @@ area, its images' footprints and its records' points as layers;
 Items come in from the other docks (「イベントに追加」 in 画像カタログ,
 観測記録 and 撮像依頼): a menu of the open events, the one chosen here first.
 An item can be in several events.
+
+The tab 「参考情報」 (the settings file's `referenceInfo.links`) lists the
+infos linked to the event (ui/reference_dock.py, through its port):
+「紐付け…」 links more, 「参考情報で表示」 lists them in 「参考情報」,
+「外す」 takes a link away.
 """
 from __future__ import annotations
 
@@ -219,6 +224,10 @@ class EventsDock(PluginDock):
         self.catalog = ports.catalog
         self.observation_port = ports.observations
         self.requests = ports.requests
+        #: 参考情報 (ui/reference_dock.py): the infos linked to the events (the tab 「参考情報」).
+        self.references = ports.references
+        #: The infos linked to each event read, [(link, info)] by event id.
+        self.reference_rows: dict[str, list] = {}
         #: Every event and every link, as read last (None: not read yet).
         self.events: Optional[list[Event]] = None
         self.links: list[EventLink] = []
@@ -310,6 +319,19 @@ class EventsDock(PluginDock):
             self.item_tables[t] = table
             self.item_columns[t] = column_menus(f"event-items-{t}", table, self)
             self.tabs.addTab(table, TYPE_LABELS[t])
+        # 参考情報 (referenceInfo.links): its own tab after the items' (not an item of the event's link table).
+        self.reference_table = QTableWidget(0, 5)
+        self.reference_table.setHorizontalHeaderLabels([self.tr("出来事の日時"), self.tr("題名"), self.tr("出典"), self.tr("確からしさ"),
+                                                        self.tr("紐付けた人")])
+        self.reference_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.reference_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.reference_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.reference_table.verticalHeader().hide()
+        self.reference_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.reference_table.horizontalHeader().setStretchLastSection(True)
+        self.reference_table.itemSelectionChanged.connect(self._update_buttons)
+        self.reference_table.cellDoubleClicked.connect(lambda _r, _c: self.show_references())
+        self.reference_tab = self.tabs.addTab(self.reference_table, self.tr("参考情報"))
         self.body.addWidget(self.tabs, 1)
         items = QHBoxLayout()
         for key, text, tip, slot in [
@@ -318,6 +340,16 @@ class EventsDock(PluginDock):
             ("catalog", self.tr("カタログで表示"), self.tr("このイベントの画像を画像カタログの一覧に出す"), self.show_in_catalog),
             ("item_note", self.tr("メモ…"), self.tr("選んだ項目のメモ（このイベントでの扱い）"), self.edit_item_note),
             ("unlink", self.tr("イベントから外す"), self.tr("選んだ項目をこのイベントから外す（項目そのものは残る）"), self.unlink),
+        ]:
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _on=False, slot=slot: slot())
+            items.addWidget(b)
+            self.buttons[key] = b
+        for key, text, tip, slot in [
+            ("ref_link", self.tr("紐付け…"), self.tr("参考情報を選んでこのイベントに紐付ける（新しく登録しても）"), self.link_references),
+            ("ref_show", self.tr("参考情報で表示"), self.tr("このイベントの参考情報を「参考情報」ドックに出す"), self.show_references),
+            ("ref_unlink", self.tr("外す"), self.tr("選んだ参考情報とこのイベントの紐付けを外す（参考情報そのものは残る）"), self.unlink_references),
         ]:
             b = QPushButton(text)
             b.setToolTip(tip)
@@ -344,6 +376,9 @@ class EventsDock(PluginDock):
 
     def _config_changed(self) -> None:
         self.events, self.links = None, []
+        self.reference_rows = {}
+        refs = self.context.config.reference_info
+        self.tabs.setTabVisible(self.reference_tab, refs is not None and refs.links is not None)
         if self.task is None:
             self._then, self._failed = [], []
         s = self.settings
@@ -368,7 +403,9 @@ class EventsDock(PluginDock):
                 return
 
     def current_type(self) -> str:
-        return TYPES[self.tabs.currentIndex()]
+        """The type of the items' tab in front ('' for 「参考情報」)."""
+        i = self.tabs.currentIndex()
+        return TYPES[i] if 0 <= i < len(TYPES) else ""
 
     def links_of(self, event: Optional[Event], type_: Optional[str] = None) -> list[EventLink]:
         if event is None:
@@ -377,7 +414,9 @@ class EventsDock(PluginDock):
 
     def chosen_links(self, type_: Optional[str] = None) -> list[EventLink]:
         type_ = type_ or self.current_type()
-        table = self.item_tables[type_]
+        table = self.item_tables.get(type_)
+        if table is None:
+            return []
         shown = self.links_of(self.chosen(), type_)
         rows = sorted({i.row() for i in table.selectionModel().selectedRows()})
         return [shown[r] for r in rows if 0 <= r < len(shown)]
@@ -435,6 +474,7 @@ class EventsDock(PluginDock):
                 self.reload(keep=again if isinstance(again, str) else chosen)
                 return
             self.events, self.links = result
+            self.reference_rows = {}
             self.render()
             if chosen:
                 self.choose(chosen)
@@ -500,6 +540,9 @@ class EventsDock(PluginDock):
                     table.setItem(i, j, item)
             table.blockSignals(False)
             self.tabs.setTabText(TYPES.index(t), f"{TYPE_LABELS[t]}（{len(links)}）" if e else TYPE_LABELS[t])
+        self._render_references()
+        if e is not None and e.id not in self.reference_rows:
+            self.read_references(e)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -514,8 +557,16 @@ class EventsDock(PluginDock):
         self.buttons["map"].setEnabled(e is not None)
         self.buttons["search"].setEnabled(e is not None)
         chosen = bool(self.chosen_links()) if e is not None else False
+        on_references = self.tabs.currentIndex() == self.reference_tab
         for key in ("open", "item_note", "unlink"):
             self.buttons[key].setEnabled(ready and chosen if key != "open" else chosen)
+            self.buttons[key].setVisible(not on_references)
+        port = self.references() if self.references else None
+        for key in ("ref_link", "ref_show", "ref_unlink"):
+            self.buttons[key].setVisible(on_references)
+        self.buttons["ref_link"].setEnabled(e is not None and port is not None and port.can_link())
+        self.buttons["ref_show"].setEnabled(e is not None and bool(self.reference_rows.get(e.id)))
+        self.buttons["ref_unlink"].setEnabled(e is not None and bool(self.chosen_references()))
         self.buttons["catalog"].setVisible(self.current_type() == "image")
         self.buttons["catalog"].setEnabled(bool(self.links_of(e, "image")))
         self.reload_button.setEnabled(self.settings is not None and self.task is None)
@@ -679,6 +730,75 @@ class EventsDock(PluginDock):
         client, token = self.context.esri(), self.context.token_for(s.links.url, s.links.token)
         self._start(self.tr("メモの保存"), lambda _t: set_link_note(client, s, links, note.strip(), token),
                     lambda n: self.reload(lambda: self.say(self.tr("{n} 件のメモを保存").format(n=n))))
+
+    # ---- 参考情報 ------------------------------------------------------------------------------
+
+    def read_references(self, event: Event, then: Optional[Callable[[], None]] = None) -> bool:
+        """The infos linked to the event (in a task, through 「参考情報」), shown in the tab."""
+        port = self.references() if self.references else None
+        if port is None:
+            return False
+
+        def done(rows) -> None:
+            self.reference_rows[event.id] = rows
+            self._render_references()
+            self._update_buttons()
+            if then:
+                then()
+
+        return port.infos_for_items([("event", event.id)], done,
+                                    lambda m: self.say(self.tr("参考情報の取得に失敗: {m}").format(m=m)))
+
+    def _render_references(self) -> None:
+        from ..core.reference_info import local_text, source_text
+
+        e = self.chosen()
+        rows = self.reference_rows.get(e.id, []) if e is not None else []
+        table = self.reference_table
+        table.blockSignals(True)
+        table.setRowCount(len(rows))
+        for i, (link, info) in enumerate(rows):
+            for j, v in enumerate((local_text(info.time), info.title, source_text(info), info.reliability, link.linked_by)):
+                item = QTableWidgetItem(v)
+                if j == 1 and info.summary:
+                    item.setToolTip(plain_tip(info.summary))
+                table.setItem(i, j, item)
+        table.blockSignals(False)
+        known = e is not None and e.id in self.reference_rows
+        self.tabs.setTabText(self.reference_tab, self.tr("参考情報（{n}）").format(n=len(rows)) if known else self.tr("参考情報"))
+
+    def chosen_references(self) -> list:
+        e = self.chosen()
+        rows = self.reference_rows.get(e.id, []) if e is not None else []
+        picked = sorted({i.row() for i in self.reference_table.selectionModel().selectedRows()})
+        return [rows[r] for r in picked if 0 <= r < len(rows)]
+
+    def link_references(self):
+        """「紐付け…」: infos chosen in 「参考情報」's window (or a new one) linked to the event."""
+        from ..core.reference_info import EVENT, LinkTarget
+
+        e = self.chosen()
+        port = self.references() if self.references else None
+        if e is None or port is None:
+            return None
+        return port.offer_link([LinkTarget(EVENT, e.id, e.name)], self, lambda: self.read_references(e))
+
+    def show_references(self) -> None:
+        e = self.chosen()
+        port = self.references() if self.references else None
+        if e is not None and port is not None:
+            port.show_for_items([("event", e.id)], self.tr("イベント「{n}」").format(n=e.name))
+
+    def unlink_references(self, confirm: bool = True) -> None:
+        e = self.chosen()
+        rows = self.chosen_references()
+        port = self.references() if self.references else None
+        if e is None or not rows or port is None:
+            return
+        if confirm and not ask_no(self, TITLE, self.tr("選んだ参考情報 {n} 件とこのイベントの紐付けを外す（参考情報そのものは残る）").format(n=len(rows)),
+                                  yes=self.tr("外す")):
+            return
+        port.unlink([link for link, _info in rows], lambda: self.read_references(e))
 
     # ---- opening the items ---------------------------------------------------------------------
 

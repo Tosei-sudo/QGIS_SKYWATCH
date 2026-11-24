@@ -45,6 +45,9 @@ class Observations(Feature):
         dock = self.docks["SatObsObservations"]
         # 「イベントに追加」 of the records goes to 「イベント」.
         dock.event_linker = self.ports.events
+        # 「参考情報 ▾」 of the records and 「参考情報 n 件」 of the image go to 「参考情報」.
+        dock.references = self.ports.references
+        dock.reference_line.references = self.ports.references
         # A record's image not open opens through 「画像カタログ」 (開いた画像の履歴, else the catalog by its id).
         dock.catalog = self.ports.catalog
 

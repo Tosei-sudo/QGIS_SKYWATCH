@@ -70,7 +70,7 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
     iface = FakeIface()
     plugin = classFactory(iface)
     plugin.initGui()
-    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "衛星パス", "雲量マップ", "観測記録", "分類体系の編集", "通知", "関心地域・地点", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果", "イベント", "データ分析", "データに質問"]
+    assert [d.windowTitle() for d in iface.docks] == ["画像カタログ", "撮像計画", "撮像依頼", "撮像計画ファイル出力", "撮像予定", "地点ごとの撮像予定", "衛星パス", "雲量マップ", "観測記録", "分類体系の編集", "通知", "関心地域・地点", "画像補正", "影から高さ", "スペクトル", "移動体（AIS・ADS-B）", "ダッシュボード", "AI結果", "イベント", "参考情報", "データ分析", "データに質問"]
     # By area (tsudo, 2026-11-07): a submenu each, then the dock layout and 「設定…」 in the menu itself.
     # (「通知」 shows its unread count, 「通知（1）」, when an earlier test left a notice.)
     tree = [(e[0], [re.sub(r"^通知（\d+）$", "通知", t) for t in e[1]]) if isinstance(e, tuple) else e for e in iface.menu_tree()]
@@ -86,10 +86,10 @@ def test_the_plugin_registers_its_docks_menu_and_reads_the_settings_file():
         ("AI", ["物体検出（AI）…", "クリック抽出（AI）", "AI結果", "検出結果を DB へ転記…", "-", "教師データセットの作成…", "アノテーション変換（点→矩形）…", "アノテーション変換（教師データセット）…", "AI 学習（物体検出）…"]),
         ("地図・レイヤー", ["背景地図", "設定ファイルのレイヤーを追加", "新規スクラッチレイヤー（テンプレート）…", "アペンド（既存レイヤーへ追加）…", "-",
                        "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
-        "-", "イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…",
+        "-", "イベント", "参考情報", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…",
     ]
     # Every entry of the plugin is in the menu once.
-    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
+    shown = [t for e in iface.menu_tree() if isinstance(e, tuple) for t in e[1] if t != "-"] + ["イベント", "参考情報", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
     assert sorted(shown) == sorted(a.text() for a in plugin.actions)
     # Only the image catalog and the imaging plan are open at first (QGIS shows every dock it adds).
     assert [d.windowTitle() for d in iface.docks if d.isVisible()] == ["画像カタログ", "撮像計画"]
@@ -184,7 +184,8 @@ def test_the_docks_start_in_three_groups_of_tabs_and_come_back_on_screen():
 
     assert tabs("SatObsImagingPlan") == ["SatObsCloud", "SatObsImagingPlan", "SatObsPlanFiles", "SatObsRequests", "SatObsSatellitePass", "SatObsSchedule"]
     assert tabs("SatObsImageCatalog") == ["SatObsAnalysis", "SatObsDashboard", "SatObsDataChat", "SatObsEnhance", "SatObsImageCatalog", "SatObsInterests", "SatObsNotices", "SatObsShadowHeight", "SatObsSpectral"]
-    assert tabs("SatObsObservations") == ["SatObsAiResults", "SatObsEvents", "SatObsMoving", "SatObsObservations", "SatObsTaxonomy"]
+    assert tabs("SatObsObservations") == ["SatObsAiResults", "SatObsEvents", "SatObsMoving", "SatObsObservations", "SatObsReferences",
+                                           "SatObsTaxonomy"]
     assert [w.dockWidgetArea(d[n]) for n in ("SatObsImagingPlan", "SatObsImageCatalog", "SatObsObservations")] == [right, left, right]
     # A floating dock off every screen is docked again when shown.
     d["SatObsSatellitePass"].setFloating(True)
@@ -357,7 +358,7 @@ def test_each_feature_has_its_own_icon():
     drawn = [png(a) for a in plugin.actions]
     assert all(not a.icon().isNull() for a in plugin.actions)
     # No two menu entries look the same.
-    assert len(set(drawn)) == len(plugin.actions) == 78
+    assert len(set(drawn)) == len(plugin.actions) == 79
     plugin.unload()
 
 

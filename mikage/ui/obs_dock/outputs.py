@@ -215,6 +215,51 @@ class OutputsPart:
         events = self.event_linker() if self.event_linker else None
         return events.offer(self.event_add_button, self.event_items) if events and self.selected_records() else None
 
+    #: The 「参考情報」 dock (plugin.py sets it): records and things linked to infos, and their infos listed.
+    references: Optional[Callable[[], Any]] = None
+
+    def reference_targets(self, type_: str, records: Optional[list[Observation]] = None) -> list:
+        """The chosen records (`observation`), or their things each once (`thing`), as items to link infos to."""
+        from ...core.reference_info import OBSERVATION, LinkTarget
+
+        out: dict[str, Any] = {}
+        for o in records if records is not None else self.selected_records():
+            kind = o.kind.split(">")[-1].strip() if o.kind else ""
+            if type_ == OBSERVATION:
+                label = " / ".join(x for x in (o.object_name or o.object_id, kind, o.activity, o.image_name or o.image_id) if x)
+                out.setdefault(o.id, LinkTarget(OBSERVATION, o.id, label))
+            elif o.object_id:
+                out.setdefault(o.object_id, LinkTarget(type_, o.object_id, " / ".join(x for x in (o.object_name or o.object_id, kind) if x)))
+        return list(out.values())
+
+    def reference_menu(self, at=None):
+        """「参考情報 ▾」 (and the list's right-click): link the records or their things to infos, or list theirs."""
+        from qgis.PyQt.QtCore import QPoint
+        from qgis.PyQt.QtWidgets import QMenu
+
+        from ...core.reference_info import OBSERVATION, THING
+
+        dock = self.references() if self.references else None
+        records = self.selected_records()
+        if dock is None or not records or not dock.can_link():
+            return None
+        menu = QMenu(self)
+        notes = self.reference_targets(OBSERVATION, records)
+        things = self.reference_targets(THING, records)
+        menu.addAction(self.tr("記録を参考情報に紐付け…（{n} 件）").format(n=len(notes))).triggered.connect(
+            lambda: dock.offer_link(notes, self))
+        thing = menu.addAction(self.tr("モノを参考情報に紐付け…（{n} 件）").format(n=len(things)))
+        thing.triggered.connect(lambda: dock.offer_link(things, self))
+        thing.setEnabled(bool(things))
+        menu.addSeparator()
+        items = [(OBSERVATION, t.item_id) for t in notes] + [(THING, t.item_id) for t in things]
+        what = self.tr("記録「{n}」・そのモノ").format(n=notes[0].label) if len(notes) == 1 else self.tr("記録 {n} 件・そのモノ").format(n=len(notes))
+        menu.addAction(self.tr("この記録・モノの参考情報")).triggered.connect(lambda: dock.show_for_items(items, what))
+        anchor = self.reference_button
+        menu.popup(at if at is not None else anchor.mapToGlobal(QPoint(0, anchor.height())))
+        self._reference_menu = menu
+        return menu
+
     def add_to_alerts(self, records: Optional[list[Observation]] = None):
         """「通報に追加」: the chosen records (or `records`) into 「通報」, whatever the conditions say."""
         records = records if records is not None else self.selected_records()

@@ -35,7 +35,8 @@ WRITTEN = {
 }
 #: Entries written to by where they are in the settings (their path ends so).
 WRITTEN_PATHS = ("assignments", "handover.table", "alertReports.table", "events.layer", "events.links", "history", "interests.points",
-                 "interests.areas", "userRoles", "satelliteOutages", "imageReviews")
+                 "interests.areas", "userRoles", "satelliteOutages", "imageReviews",
+                 "referenceInfo.layer", "referenceInfo.links")
 #: Roles without which the entry cannot be used at all (the others: only the feature that uses them).
 NEEDED_ROLES = {"id", "imageId", "objectId", "assignee", "text", "itemId", "eventId", "term"}
 

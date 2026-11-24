@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- 参考情報: a clipping with its source, pinned to a place -->
+  <rect x="3" y="4" width="18" height="23" rx="2" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+  <path d="M7 10h10M7 14h10M7 18h6" stroke="#64748b" stroke-width="2" stroke-linecap="round"/>
+  <path d="M7 23h5" stroke="#1565c0" stroke-width="2" stroke-linecap="round"/>
+  <path d="M24 29s-6-6.2-6-10.5a6 6 0 0 1 12 0C30 22.8 24 29 24 29z" fill="#1565c0" stroke="#0d47a1" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="24" cy="18.5" r="2.3" fill="#fff"/>
+</svg>

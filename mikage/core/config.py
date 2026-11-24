@@ -49,6 +49,7 @@ from .obs.export import ExportSettings, export_settings_of
 from .gp import GpServiceConfig, gp_service_of
 from .moving import FeedConfig, moving_feeds_of
 from .events import EventSettings, events_settings_of
+from .reference_info import ReferenceSettings, reference_settings_of
 from .interests import InterestSettings, interests_settings_of
 from .named_areas import NamedAreaSettings, named_area_settings_of
 from .roles import user_roles_settings_of
@@ -146,6 +147,8 @@ class PluginConfig:
     handover: HandoverSettings = field(default_factory=HandoverSettings)
     #: `events`: the event layer and its link table (イベント); None hides the dock's work.
     events: Optional[EventSettings] = None
+    #: `referenceInfo`: the info point layer and its link table (出典つきの参考情報, core/reference_info.py); None hides the dock's work.
+    reference_info: Optional[ReferenceSettings] = None
     #: `interests`: each person's own points and areas of interest (関心地域・地点), on the cards and in their dock.
     interests: Optional[InterestSettings] = None
     #: `namedAreas`: the named area layer (TBL_NAMED_AREA) as the organisation's areas of interest (組織の関心地域,
@@ -382,6 +385,7 @@ SECTIONS = (
     Section("imageReviews", "image_reviews", review_source_of),
     Section("handover", "handover", handover_settings_of),
     Section("events", "events", events_settings_of),
+    Section("referenceInfo", "reference_info", reference_settings_of),
     Section("interests", "interests", interests_settings_of),
     Section("namedAreas", "named_areas", named_area_settings_of),
     Section("userRoles", "user_roles", user_roles_settings_of),

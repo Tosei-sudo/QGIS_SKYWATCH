@@ -18,7 +18,7 @@ def plugin_constants() -> dict:
     """What the tool needs from the plugin, from the plugin's own definitions."""
     from mikage.core import (
         ai_results, audit, basemaps, config, coords, edit_stamp, events, geo_fix, geocode, image_reviews, interests, layer_templates, moving,
-        named_areas, overviews, roles, startup_layers,
+        named_areas, overviews, reference_info, roles, startup_layers,
     )
     from mikage.core.ai import model_config, transfer
     from mikage.core.catalog import config as catalog_config
@@ -57,6 +57,8 @@ def plugin_constants() -> dict:
             "handoverMemos": dict(handover.DEFAULT_HANDOVER_FIELDS),
             "eventLayer": dict(events.DEFAULT_EVENT_FIELDS),
             "eventLinks": dict(events.DEFAULT_LINK_FIELDS),
+            "referenceInfo": dict(reference_info.DEFAULT_INFO_FIELDS),
+            "referenceLinks": dict(reference_info.DEFAULT_LINK_FIELDS),
             "interests": dict(interests.DEFAULT_INTEREST_FIELDS),
             "areaCategories": dict(named_areas.DEFAULT_CATEGORY_FIELDS),
             "userRoles": dict(roles.DEFAULT_USER_ROLE_FIELDS),

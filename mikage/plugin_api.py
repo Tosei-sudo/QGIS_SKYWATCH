@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # the docks and tools it hands out (named in its annotations 
     from .ui.dashboard_dock import DashboardDock
     from .ui.enhance_dock import EnhanceDock
     from .ui.events_dock import EventsDock
+    from .ui.reference_dock import ReferenceDock
     from .ui.imaging_plan_dock import ImagingPlanDock
     from .ui.interests_dock import InterestsDock
     from .ui.moving_dock import MovingDock
@@ -171,6 +172,11 @@ class PluginApi:
     def events(self) -> "EventsDock":
         """The dock 「イベント」 (its `events`, `links`, `reload()`, `link_items(event_ids, items)`, `choose(id)`)."""
         return self._plugin.docks["SatObsEvents"]
+
+    @property
+    def references(self) -> "ReferenceDock":
+        """The dock 「参考情報」 (its `infos`, `reload()`, `choose(id)`, `save(info)`, `link(info_ids, targets)`, `show_for_items(items, what)`)."""
+        return self._plugin.docks["SatObsReferences"]
 
     @property
     def interests(self) -> "InterestsDock":

@@ -196,6 +196,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "imageReviews",
   "handover",
   "events",
+  "referenceInfo",
   "interests",
   "namedAreas",
   "userRoles",
@@ -570,6 +571,25 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "time": "ITEM_TIME",
    "source": "SOURCE",
    "note": "NOTE"
+  },
+  "referenceInfo": {
+   "id": "INFO_ID",
+   "title": "TITLE",
+   "time": "INFO_TIME",
+   "published": "PUBLISHED_AT",
+   "source": "SOURCE",
+   "sourceRef": "SOURCE_REF",
+   "reliability": "RELIABILITY",
+   "summary": "SUMMARY",
+   "kind": "KIND",
+   "areaId": "NAMED_AREA_ID",
+   "note": "NOTE"
+  },
+  "referenceLinks": {
+   "info": "INFO_ID",
+   "type": "ITEM_TYPE",
+   "item": "ITEM_ID",
+   "label": "LABEL"
   },
   "interests": {
    "id": "INTEREST_ID",
@@ -1894,6 +1914,14 @@ const SPEC = [
         if (!it.layer) p.push(`${at}.layer: イベントのレイヤーが必要`);
         if (!it.links) p.push(`${at}.links: 紐付けテーブルが必要`);
       } }) },
+    { key: "referenceInfo", label: "参考情報（出典つき）", doc: "出典つきの参考情報referenceinfo", help: "画像の外から知った情報（発表・航行警報・報道・ほかの部署からの通報など）を、出典と確からしさをつけて場所と日時で置く。ドック「参考情報」で登録し、観測記録で画像を選ぶと撮像日時の前後 days 日の、画像の範囲か写っている地名の参考情報の件数が出る。イベント・モノ・観測記録に紐付けられる。Esri に置き、ここには URL と属性名だけ。",
+      field: O("referenceInfo", "参考情報", [
+        TJ("layer", "参考情報のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_REFERENCE_INFO。役割: " + Object.entries(K.roles.referenceInfo).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        TJ("links", "紐付けテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_REFERENCE_LINK。なければ紐付けは使わない。役割: " + Object.entries(K.roles.referenceLinks).map(([k, v]) => `${k}（${v}）`).join("・") }),
+        N("days", "画像の前後の日数", { min: 1, max: 366, ph: "7", help: "観測記録で画像を選んだとき、撮像日時の前後この日数の参考情報を数える" }),
+      ], { check: (it, at, p) => {
+        if (!it.layer) p.push(`${at}.layer: 参考情報のレイヤーが必要`);
+      } }) },
     { key: "interests", label: "個人の関心地域・地点", doc: "個人の関心地域地点interests", help: "一人ひとりが自分の関心地点・関心地域を決め、新着画像のカードの「写っている地物」のいちばん上に出す（ドック「関心地域・地点」で編集）。footprintLayers とは別にここに 1 回だけ書き、すべてのカタログのカードに出る。属性はプラグインが知っているので fields・format は不要（名前を変えたときだけ）。",
       field: O("interests", "関心地域・地点", [
         TJ("points", "関心地点のレイヤー（ポイント、編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_INTEREST_POINT。役割: " + Object.entries(K.roles.interests).map(([k, v]) => `${k}（${v}）`).join("・") + "。持ち主（owner）は editTracking のユーザー名（既定は環境変数 USERNAME）で、自分の行だけ読み書きする" }),
@@ -2042,6 +2070,7 @@ const DOC_FILES = {
   "先読み": "docs/admin/operations.md",
   "分担と引き継ぎメモassignmentshandover": "docs/features/observations.md",
   "画像の評価imagereviews": "docs/features/observations.md",
+  "出典つきの参考情報referenceinfo": "docs/features/observations.md",
   "地図の描画を速くする設定rasterspeed": "docs/features/images.md",
   "外部から図形を受け取るautomap-などshapereceiver": "docs/features/map.md",
   "座標地名へ移動": "docs/features/map.md",

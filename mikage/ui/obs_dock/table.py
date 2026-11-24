@@ -139,6 +139,8 @@ class TablePart:
         self.remove_chosen_button.setVisible(len(rows) > 1 and bool(self.selected_records()))
         self.alert_add_button.setVisible(bool(rows) and self.context.config.alert_reports is not None and bool(self.selected_records()))
         self.event_add_button.setVisible(bool(rows) and self.context.config.events is not None and bool(self.selected_records()))
+        refs = self.context.config.reference_info
+        self.reference_button.setVisible(bool(rows) and refs is not None and refs.links is not None and bool(self.selected_records()))
         self.summary_button.setVisible(bool(rows) and self.context.text_assist.has("summary") and bool(self.selected_records()))
 
     def summarize(self, records: Optional[list[Observation]] = None) -> Optional[SummaryDialog]:
