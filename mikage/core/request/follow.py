@@ -19,6 +19,7 @@ from ..plan.api import NO_NAMES, SatelliteNames, best_named, names_satellite
 from .. import time_zone
 from ..time_query import between_condition, text_sample
 from ..time_zone import read_text_instant
+from .area_link import rings_moved
 from .model import ImagingRequest
 from .model import day_bounds, jst_day
 from .store import (
@@ -110,7 +111,9 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
         moments = [(time_of_image[image_id_of(f, catalog)], t) for f in found if image_id_of(f, catalog) in used
                    for t in [_moment(f, acquired, zone)] if t is not None]
         for row in sorted(group, key=lambda r: (r.occurrence, r.part)):
-            own = images(row.rings) if row.part and row.rings else found
+            # Each row asks about the area it was handed out with (its own: a shot's part, 分担; or the request's area
+            # then, which may have changed since, 地域の形に合わせる 2026-11-24); a row without one, the request's now.
+            own = images(row.rings) if row.rings and (row.part or rings_moved(row.rings, req.rings)) else found
             mine = fitting_images(own, sensor, row, req, names) if own and sensor else list(own)
             if several or shared:
                 gap = req.gap_ms if several else 0

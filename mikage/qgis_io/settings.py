@@ -32,6 +32,7 @@ from .prefs.maps import startup_layers_on, set_startup_layers_on  # noqa: F401
 from .prefs.ai import TRAINED_MAX, trained_models, remember_trained_model, text_assist_on, set_text_assist_on  # noqa: F401
 from .prefs.requests import (  # noqa: F401
     request_export_folder, set_request_export_folder, plan_file_filter, set_plan_file_filter, group_filter, set_group_filter,
+    area_follow_stamp, set_area_follow_stamp,
 )
 
 _get, _set = pref, set_pref

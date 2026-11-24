@@ -54,6 +54,7 @@ from ..core.request.api import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, state_of,
 )
 from ..core.request.api import companions, shot_text, shot_tip
+from ..core.request.api import FOLLOW_REDO, redo_mark, redo_text
 from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
@@ -74,6 +75,8 @@ _TAKEN, _NOTE, _SHOT, _NAME = COLUMNS.index("撮像"), COLUMNS.index("理由"), 
 _SATELLITE = COLUMNS.index("衛星")
 #: A row a satellite outage hits (衛星の障害情報).
 OUTAGE_COLOR = "#c2410c"
+#: 地域の形が変わった rows (出し直し候補・前の形で採用済み) in 「理由」.
+REDO_COLOR = "#b45309"
 #: The shots' outlines on the map (dashed over the requests' areas).
 SHOT_COLOR = "#7c3aed"
 #: Each state's colour, on the list and the map.
@@ -579,6 +582,9 @@ class ScheduleDock(PluginDock):
                 name += self.tr("（分担 {k}/{n}）").format(k=r.part, n=shares[(r.request_id, r.day, r.occurrence)])
             hit = self.outage_of(r)
             note = row_note(r)
+            redo = self.redo_of(r)
+            if redo:
+                note = redo_text(redo) + (f"。{note}" if note else "")
             if hit is not None:
                 hit_count += 1
                 note = self.tr("衛星の障害の影響あり（{w}）").format(w=hit[1]) + (f"。{note}" if note else "")
@@ -606,6 +612,10 @@ class ScheduleDock(PluginDock):
                 items[_TAKEN].setToolTip(plain_tip(self.tr("画像 {i}").format(i=r.image_id)))
             if row_note(r) and hit is None:
                 items[_NOTE].setToolTip(plain_tip(row_note(r)))  # reasons from the systems' files
+            if redo and hit is None:
+                items[_NOTE].setForeground(QBrush(QColor(REDO_COLOR)))
+                items[_NOTE].setToolTip(plain_tip(note + (self.tr("。「撮像計画ファイル出力」でこの日を書き出し直すと新しい範囲で出る")
+                                                          if redo == FOLLOW_REDO else "")))
             self.model.appendRow(items)
             if self.chosen is not None and r.object_id == self.chosen.object_id:
                 chosen_row = i
@@ -640,6 +650,25 @@ class ScheduleDock(PluginDock):
 
     def rings_of(self, row: HistoryRow) -> list:
         return row.rings or self._areas.get(row.request_id) or []
+
+    def redo_of(self, row: HistoryRow) -> str:
+        """
+        A row of today or later handed out with its request's area before the
+        area's shape changed (地域の形に合わせる): 出し直し候補, or 前の形で採用済み.
+        """
+        return redo_mark(row, self._areas.get(row.request_id), jst_day(_now_ms())) if row.named_area_id else ""
+
+    def requests_known(self, requests) -> None:
+        """The requests as 「計算」 read them (their areas taken from their areas' shapes): the rows' marks with them."""
+        if not self._areas:
+            return
+        changed = False
+        for q in requests:
+            if q.id in self._areas and self._areas[q.id] != q.rings:
+                self._areas[q.id] = q.rings
+                changed = True
+        if changed and self._loaded:
+            self.render()
 
     def draw(self) -> None:
         if not self.on_map.isChecked() or not self.isVisible():

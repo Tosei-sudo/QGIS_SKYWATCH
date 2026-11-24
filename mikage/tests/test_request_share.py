@@ -368,6 +368,24 @@ def test_each_shot_row_is_followed_up_on_its_own_part():
     assert sorted((f.row.part, f.image_id) for f in found) == [(1, "IMG-W"), (2, "IMG-ALL")]
 
 
+def test_a_row_handed_out_with_the_area_before_is_followed_up_on_that_area():
+    """地域の形に合わせる (2026-11-24): the request's area changed after the row was handed out; 照合 asks about the row's."""
+    fake, store = _server(polygons=True), _store()
+    client = EsriClient(fake)
+    req = replace(wide("W", size=20), start=T - 6 * H, end=T + 5 * 86400000)
+    west = _half(req, east=False)
+    away = [[[x + 1.0, y] for x, y in west[0]]]
+    saved = save_request(client, store, None, replace(req, rings=west), T - 86400000)
+    assert add_history(client, store, None, [HistoryRow("RUN", T, DAY.isoformat(), "W", "SYS", "SAT-A", rings=west)]) == 1
+    # The area moved afterwards (the request follows its area).
+    save_request(client, store, None, replace(saved, rings=away), T - 86400000 + 1)
+    _image(fake, "IMG-W", [[[p[0], p[1]] for p in west[0]]])
+    history = load_history(client, store, None, shapes=True)
+    by_id = {r.id: r for r in load_requests(client, store, None)}
+    found = follow_up(client, _catalog(), None, history, by_id, T + 86400000, 3)
+    assert [(f.captured, f.image_id) for f in found] == [("撮像済み", "IMG-W")]
+
+
 def test_a_shots_link_id_answers_that_shot_only():
     spec = result_file_of({"format": "csv", "columns": [{"key": "REF", "target": "linkId"}, {"key": "STATUS", "target": "result"},
                                                          {"key": "REQ", "target": "id"}]}, "r", [])

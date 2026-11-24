@@ -75,6 +75,9 @@ class RequestsPort(Protocol):
     def requests_from_areas(self, areas: list) -> Any:
         """Its form opened with a request of each organisation's area (組織の関心地域's 「撮像依頼…」), the dock in front."""
 
+    def follow_area(self, area_id: str, then: Optional[Callable[[Any], Any]] = None, show: bool = True) -> bool:
+        """An area saved with a new shape: its requests take it at once, what was done shown (地域の形に合わせる)."""
+
     def reload(self, then=None, failed=None) -> None: ...
 
     def select(self, ids) -> None: ...

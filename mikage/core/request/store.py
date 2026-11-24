@@ -59,6 +59,11 @@ DEFAULT_QUOTA_FIELDS: dict[str, str] = {
     "sensor": "SENSOR", "mode": "SENSOR_MODE", "limit": "ANNUAL_LIMIT", "startMonth": "YEAR_START_MONTH",
     "initialUsed": "INITIAL_USED", "countFrom": "COUNT_FROM", "note": "NOTE",
 }
+#: The changes of the requests' areas made to follow their areas (TBL_REQUEST_AREA_CHANGE, core/request/area_follow.py;
+#: the row's shape is the request's area before the change).
+DEFAULT_AREA_CHANGE_FIELDS: dict[str, str] = {
+    "id": "CHANGE_ID", "areaId": "NAMED_AREA_ID", "requestId": "REQ_ID", "name": "REQ_NAME", "action": "CHANGE_ACTION", "reason": "REASON",
+}
 #: The history's 採否 (the system's own answer to what was handed out; core/request/adoption.py).
 ADOPTION_ROLES = ("adoption", "adoptionReason", "plannedAt", "externalId", "adoptionSource")
 #: The RESULT of a row the system planned without being asked (要求外, e.g. its routine tasks; no REQ_ID).
@@ -102,6 +107,10 @@ class RequestStoreConfig:
     #: The yearly quotas table (年間撮像上限, core/request/quota.py; None: no quota is kept).
     quotas: Optional[str] = None
     quota_fields: dict = field(default_factory=lambda: dict(DEFAULT_QUOTA_FIELDS))
+    #: The log of the requests' areas changed to follow their areas (地域の形に合わせる, area_follow.py; None: not kept,
+    #: the changes still made but not undone later).
+    area_changes: Optional[str] = None
+    area_change_fields: dict = field(default_factory=lambda: dict(DEFAULT_AREA_CHANGE_FIELDS))
     #: Days after the day planned whose passes tell a 期間内1回 request's chances left (chances.py; 0: not looked at).
     look_ahead_days: int = 7
     #: Whether a 定点 request prefers the way its last image was taken (satellite, direction, side, incidence; geometry.py).
@@ -148,6 +157,10 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         quotas = None
     if quotas and not shots:
         problems.append(f"{at} の quotas（年間撮像上限）は撮像ごとに数えるので shots（撮像の範囲）も指定")
+    changes = value.get("areaChanges")
+    if changes is not None and (not isinstance(changes, str) or not _FEATURE_LAYER.search(changes.split("?", 1)[0])):
+        problems.append(f"{at} の areaChanges は依頼の範囲の変更記録のポリゴンレイヤーの URL（…/FeatureServer/34 など）で指定")
+        changes = None
     label, token, catalog = value.get("label"), value.get("token"), value.get("catalog")
     miss = value.get("missAfterDays")
     from .chances import MOST_DAYS, look_ahead_days
@@ -173,6 +186,8 @@ def request_store_of(value: Any, problems: list[str], index: int) -> Optional[Re
         shot_fields=_fields(value.get("shotFields"), DEFAULT_SHOT_FIELDS, f"{at}.shotFields", problems),
         quotas=layer_url(quotas) if quotas else None,
         quota_fields=_fields(value.get("quotaFields"), DEFAULT_QUOTA_FIELDS, f"{at}.quotaFields", problems),
+        area_changes=layer_url(changes) if changes else None,
+        area_change_fields=_fields(value.get("areaChangeFields"), DEFAULT_AREA_CHANGE_FIELDS, f"{at}.areaChangeFields", problems),
         look_ahead_days=look_ahead_days(ahead),
         same_geometry=same if isinstance(same, bool) else True,
     )

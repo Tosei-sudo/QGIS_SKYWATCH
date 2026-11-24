@@ -1283,6 +1283,7 @@
     "      QPushButton 「最新を取得」",
     "      QPushButton 「レイヤーから取り込み…」",
     "      QPushButton 「レイヤーへ書き出し」",
+    "      QPushButton 「範囲の変更記録…」 (hidden)",
     "  QWidget (hidden)",
     "    QScrollBar",
     "  QWidget (hidden)",
@@ -3494,6 +3495,7 @@
   ]
  ],
  "settings_keys": [
+  "'area_follow/stamps'",
   "'auth'",
   "'catalog/closePrevious'",
   "'catalog/footprints'",

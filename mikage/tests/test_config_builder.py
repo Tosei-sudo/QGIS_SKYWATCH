@@ -40,6 +40,7 @@ def plugin_constants() -> dict:
             "requestGroups": dict(request_groups.DEFAULT_GROUP_FIELDS),
             "requestShots": dict(request_store.DEFAULT_SHOT_FIELDS),
             "requestQuotas": dict(request_store.DEFAULT_QUOTA_FIELDS),
+            "requestAreaChanges": dict(request_store.DEFAULT_AREA_CHANGE_FIELDS),
             "observationStores": dict(obs_model.DEFAULT_OBSERVATION_FIELDS),
             "taxonomyTable": dict(obs_stores.DEFAULT_LOCAL_FIELDS),
             "movingFeeds": list(moving.ROLES),

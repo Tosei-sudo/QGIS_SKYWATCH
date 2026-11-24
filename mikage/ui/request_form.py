@@ -38,7 +38,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.request.api import FORM_DAYS, form_span, form_text
-from ..core.request.api import conditions_of, from_area
+from ..core.request.api import conditions_of, from_area, rings_moved
 from ..core.request.api import find_passes
 from ..core.request.api import Picked, checks_of, picked, summary, unknown
 from ..core.request.api import (
@@ -426,7 +426,9 @@ class RequestForm(QDialog):
         self.area_button.clicked.connect(lambda _on=False: self.choose_area())
         self.link_label = plain_label(QLabel())
         self.follow_check = QCheckBox(self.tr("地域の形に合わせる"))
-        self.follow_check.setToolTip(self.tr("地域の形が直されたら、この依頼の範囲も合わせる（範囲を手で変えると外れる）"))
+        self.follow_check.setToolTip(self.tr("地域の形が直されたら、この依頼の範囲も合わせる（範囲を手で変えると外れる。"
+                                             "入れ直すと範囲を地域の今の形にする）"))
+        self.follow_check.clicked.connect(self._follow_clicked)
         self.previous_button = QPushButton(self.tr("前回と同じ条件"))
         self.previous_button.clicked.connect(lambda _on=False: self.same_as_before())
         self.unlink_button = QPushButton(self.tr("つながりを外す"))
@@ -752,6 +754,30 @@ class RequestForm(QDialog):
         if self.area_id and self.follow_check.isChecked():
             self.follow_check.setChecked(False)
             self.message.setText(self.tr("範囲を手で変えたので「地域の形に合わせる」を外した（地域とのつながりは残る）"))
+
+    def _follow_clicked(self, on: bool) -> None:
+        """「地域の形に合わせる」 ticked again: the request's area the area's shape as it is now."""
+        if not on or not self.area_id or self.areas is None:
+            return
+        area = self.areas.find_id(self.area_id) if self.areas.areas is not None else None
+        if area is None:
+            self.message.setText(self.tr("地域 {id} が見つからない（範囲はそのまま。地域があれば次の「計算」で合わせる）").format(id=self.area_id))
+            return
+        self.message.setText(self.tr("地域の形を取得中…"))
+        self.areas.shapes([area], lambda areas: self._take_shape(areas[0]),
+                          lambda m: self.message.setText(self.tr("地域の形を取得できない: {m}").format(m=m)))
+
+    def _take_shape(self, area) -> None:
+        if self._closing or not self.follow_check.isChecked():
+            return
+        if not area.rings:
+            self.message.setText(self.tr("地域「{name}」に形がない").format(name=area.name))
+            return
+        moved = rings_moved(self.rings, area.rings)
+        self.rings = [[list(p[:2]) for p in ring] for ring in area.rings]
+        self.shape_kind = "範囲"
+        self._area_changed()
+        self.message.setText(self.tr("範囲を地域「{name}」の今の形にした（保存はまだ）").format(name=area.name) if moved else "")
 
     def choose_area(self):
         """「地域から…」: an area chosen, then its shape (read when not yet) and name in the form."""

@@ -384,6 +384,44 @@ def areas_at(client: EsriClient, settings: NamedAreaSettings, lon: float, lat: f
     return sorted(out, key=lambda a: (size_of(a.rings), area_sort_key(a)))
 
 
+def areas_by_id(client: EsriClient, settings: NamedAreaSettings, ids: Iterable[str], token: Optional[str] = None,
+                cancelled: Optional[Callable[[], bool]] = None) -> dict[str, list[OrgArea]]:
+    """
+    The rows of each 管理番号 (upper case → the rows, with their shapes; an id
+    with no row is left out, one with two rows has both): the areas the
+    requests linked to them follow (地域の形に合わせる, core/request/area_follow.py).
+    """
+    source = settings.areas
+    token = token or source.token
+    wanted = sorted({i.strip().upper() for i in ids if i and i.strip()})
+    out: dict[str, list[OrgArea]] = {}
+    if not wanted:
+        return out
+    info = _layer(client, source, token)
+    f = source.fields
+    for k in range(0, len(wanted), SHAPE_BATCH):
+        if cancelled and cancelled():
+            break
+        chunk = wanted[k:k + SHAPE_BATCH]
+        where = f"UPPER({f['id']}) IN ({','.join(quote(i) for i in chunk)})"
+        if source.where:
+            where = f"({source.where}) AND {where}"
+        for r in client.query_all(source.url, where, token, geometry=True, limit=len(chunk) * 4 + 10, cancelled=cancelled):
+            rings = (r.get("geometry") or {}).get("rings")
+            area = area_of(r.get("attributes") or {}, f, info.object_id_field, rings if isinstance(rings, list) else [])
+            if area.id:
+                out.setdefault(area.id.strip().upper(), []).append(area)
+    return out
+
+
+def layer_stamp(client: EsriClient, settings: NamedAreaSettings, token: Optional[str] = None) -> Optional[float]:
+    """When the named area layer says its data last changed (ms; None when it does not say)."""
+    from .analysis_cache import stamp_of
+
+    info = client.layer(settings.areas.url, token or settings.areas.token, refresh=True)
+    return stamp_of(info.raw)
+
+
 def load_areas(client: EsriClient, settings: NamedAreaSettings, tokens: Optional[dict[str, Optional[str]]] = None,
                cancelled: Optional[Callable[[], bool]] = None) -> AreaList:
     """

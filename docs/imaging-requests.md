@@ -1266,7 +1266,7 @@ tsudo「撮像依頼系のテーブル画面に、メモ列を表示できるよ
 
 ## 40. 地域から撮像依頼（2026-11-24 追加）
 
-tsudo「組織のAOIを整理したいので、ネームドエリアを拡張する感じで、属性を横展開したい / また、撮像依頼をネームドエリアから簡単に出せるようにしたいのと、ネームドエリアの形状が更新されたら、撮像依頼も連動して更新されるようなパイプラインが欲しい」。設計（Claude Docs「組織の関心地域と地域からの撮像依頼 設計」）を確認してから 3 段で作成。1 段目は組織の関心地域（[docs/features/images.md](features/images.md) の「組織の関心地域」）、ここは 2 段目（地域から依頼を作る）。3 段目（地域の形が直されたら依頼の範囲も合わせる）は次の段。
+tsudo「組織のAOIを整理したいので、ネームドエリアを拡張する感じで、属性を横展開したい / また、撮像依頼をネームドエリアから簡単に出せるようにしたいのと、ネームドエリアの形状が更新されたら、撮像依頼も連動して更新されるようなパイプラインが欲しい」。設計（Claude Docs「組織の関心地域と地域からの撮像依頼 設計」）を確認してから 3 段で作成。1 段目は組織の関心地域（[docs/features/images.md](features/images.md) の「組織の関心地域」）、ここは 2 段目（地域から依頼を作る）。3 段目（地域の形が直されたら依頼の範囲も合わせる）は §41。
 
 - **入口は 3 つ**:
   - 依頼フォームの範囲の「地域から…」: 地名の表（`namedAreas`）の有効な行を名前・よみがな・別名・管理番号で検索して 1 つ選ぶ（組織の関心地域が先、地名も選べる。300 件まで表示）
@@ -1282,3 +1282,24 @@ tsudo「組織のAOIを整理したいので、ネームドエリアを拡張す
 - **Esri**: 台帳 `TBL_IMAGING_REQUEST` に `NAMED_AREA_ID`（`String(255)`）・`AREA_FOLLOW`（`SmallInteger`）、出力履歴 `TBL_REQUEST_HISTORY` に `NAMED_AREA_ID`。どれも無くても動く（つながりが残らない）。インデックスは台帳と出力履歴の `NAMED_AREA_ID`（`create_tables.py` をもう一度実行すれば足りないものだけ足す）
 
 実装: `core/request/area_link.py`（`from_area`・`rings_moved`・`area_links`・`previous_for`・`conditions_of`）、`core/request/store.py`・`rows.py`（`namedAreaId`・`areaFollow`）、`core/named_areas.py`（`areas_at`・`size_of`）、`qgis_io/org_areas_io.py`（`OrgAreaBook.shapes`・`at_point`）、`ui/area_pick_dialog.py`、`ui/request_form.py`（`choose_area`・`take_area`・`same_as_before`・`_by_hand`）、`ui/request_dock.py`（`requests_from_areas`・`request_at`・「地域」の列と絞り込み）、`ui/org_areas_panel.py`（「撮像依頼…」・「依頼」の列・管理番号の固定）。テスト: `tests/test_request_area_link.py`・`tests/test_qgis_area_requests.py`。
+
+## 41. 地域の形に合わせる（2026-11-24 追加）
+
+§40 の 3 段目。地域（組織の関心地域）の形が直されたら、その地域から作った依頼の範囲も MIKAGE が合わせる（tsudo「ネームドエリアの形状が更新されたら、撮像依頼も連動して更新されるようなパイプラインが欲しい」。設計 §3 のとおり: 連動は MIKAGE が自動で入れる、システムに渡した分は前の形のまま）。
+
+- **合わせる依頼**: 台帳の状態が有効・停止で、「地域の形に合わせる」（`AREA_FOLLOW` = 1）の依頼。地域の形と 1 m 以上違えば、範囲を地域の今の形にする（`rings_moved`）。完了の依頼は変えない。地域の形に合わせるがオフの依頼も変えず、一覧の「地域」の列に ⚠（「地域の形が変わった（範囲はそのまま）」）
+- **いつ**:
+  - 「関心地域・地点」の「組織」で地域の形を直して保存したとき: その場で、つながる依頼（撮像依頼ドックで選んでいる保存先の）を合わせ、結果の画面（「地域の形に合わせた依頼」）を出す。組織タブの下にも「「横須賀港」を保存。地域の形に合わせた依頼 n 件」
+  - 撮像計画ファイル出力の「計算」の前: ArcGIS Pro などほかで直した分。地名のレイヤーの最終編集日時（`editingInfo.lastEditDate`）が前回から動いたときだけ地域を読み直す（動いていなければ、前回から変わった依頼だけ見る）。合わせた件数は計算の結果の行に出る。前回の時刻は PC ごと（QGIS の設定）
+  - 撮像依頼ドックは印だけ: 地域の形がまだ合っていない依頼（次の計算で合わせる）、地域が使用停止・地名の表にない・同じ管理番号が 2 行以上 の依頼に ⚠ と理由（ツールチップ）
+- **合わせない地域**: 使用停止の地域（依頼を止めるかは担当が決める）・地名の表にない（削除か管理番号の変更）・同じ管理番号が 2 行以上・形がない地域は合わせない（「対象外」。組織タブで保存したときは記録にも残す）
+- **保留**: ほかの人が先に依頼を変えていた（`ConflictError`）など保存できなかった依頼は「保留」と記録し、次の「計算」でまた試す（そのときは前回の時刻を進めない）。台帳につながらないときは、いつもの送信待ちに入る
+- **記録と元に戻す**: 合わせるたびに `requestStores[].areaChanges`（`TBL_REQUEST_AREA_CHANGE`、ポリゴン = 合わせる前の範囲）に 1 行。撮像依頼ドックの「範囲の変更記録…」で新しい順に見て、「更新」の行（その依頼の最後の変更）を「元に戻す…」で戻せる（範囲を前に戻し、その依頼は地域の形に合わせるをオフにする。戻したことも「元に戻す」の行で残る）。テーブルがなくても合わせる（記録が残らず、あとで戻せない）
+- **出力履歴は書き換えない**: 今日以降の行で範囲が今の依頼の範囲と違うもの（地域の形に合わせたあと）は、撮像予定ドックの「理由」に
+  - システムの採否が不明・未入力: 「出し直し候補」（撮像計画ファイル出力でその日を書き出し直すと新しい範囲で出る）
+  - システムが採用済み: 「システムには前の形で採用済み」（書き出し直しても、採否は新しい範囲の行に引き継がない。`keep_answers`）
+  - 計算の結果の行にも「地域の形が変わって出し直し候補の行 n 件」
+- **照合**: 出力履歴の行の範囲が依頼の今の範囲と違えば、その行の範囲で画像を探す（前の形で渡した撮像を前の形で照合する。`follow.py`）
+- **地域の形に合わせるを入れ直したら**: 依頼フォームでチェックを入れ直すと、範囲を地域の今の形にする（保存はまだ）
+
+実装: `core/request/area_follow.py`（`follows`・`apply_follows`・`follow_areas`・`follow_area`・`load_changes`・`undo_change`・`redo_mark`）、`core/named_areas.py`（`areas_by_id`・`layer_stamp`）、`core/request/workflow.py`（`keep_answers`）・`follow.py`、`ui/plan_file_dock.py`（「計算」の前）、`ui/org_areas_panel.py`（保存したとき）、`ui/request_dock.py`（`follow_area`・⚠・「範囲の変更記録…」）、`ui/area_follow_dialog.py`、`ui/schedule_dock.py`（出し直し候補）、`ui/request_form.py`（入れ直し）、`qgis_io/prefs/requests.py`（前回の時刻）。テスト: `tests/test_request_area_follow.py`・`tests/test_qgis_area_follow.py`。

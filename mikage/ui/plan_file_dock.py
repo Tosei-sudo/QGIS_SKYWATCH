@@ -49,6 +49,7 @@ from qgis.PyQt.QtWidgets import (
 from ..core import audit, errors
 from ..core.catalog.api import CatalogConfig
 from ..core.esri import EsriError
+from ..core.named_areas import settings_for as named_area_settings
 from ..core.plan.api import attach, on_day, summary_text
 from ..core.plan.api import fetch_clouds
 from ..core.request.api import ahead_span, chances_of, ScheduleRepository, wanted
@@ -58,6 +59,7 @@ from ..core.request.api import (
 )
 from ..core.request.api import convert_priority, encoded, files_of, leftover_files, render, row_rings, write
 from ..core.request.api import missed_ids
+from ..core.request.api import follow_areas, redo_count
 from ..core.request.api import look_text
 from ..core.request.api import day_bounds, jst_day, priority_text
 from ..core.request.api import day_passes, find_passes
@@ -393,6 +395,18 @@ class PlanFileDock(PluginDock):
     def token(self) -> Optional[str]:
         return self.context.token_for(self.store.url, self.store.token) if self.store else None
 
+    def _area_follow(self) -> Optional[tuple]:
+        """
+        For 地域の形に合わせる before 「計算」: the key its last look is kept
+        under, the named area settings, their token, and the layer's last edit
+        time and when it was looked at (None without the named area layer).
+        """
+        areas = named_area_settings(self.context.config)
+        if areas is None or self.store is None:
+            return None
+        key = f"{self.store.url}|{areas.areas.url}"
+        return key, areas, self.context.token_for(areas.areas.url, areas.areas.token), settings.area_follow_stamp(key)
+
     def repository(self) -> ScheduleRepository:
         """The store's reads and writes (データ窓口), its token as it is now."""
         return ScheduleRepository(self.context.esri(), self.store, self.token())
@@ -455,6 +469,7 @@ class PlanFileDock(PluginDock):
         now = _now_ms()
         catalog = self.catalog()
         catalog_token = self.context.token_for(catalog.url, catalog.token) if catalog else None
+        follow = self._area_follow()
         self.status.setText(self.tr("依頼と雲量予報を取得中…"))
 
         def work(task):
@@ -467,6 +482,19 @@ class PlanFileDock(PluginDock):
             hit = attach(sats, outages)
             day_sats = on_day(hit, day, now)
             requests = repo.load_requests(task.isCanceled)
+            # 地域の形に合わせる (tsudo 2026-11-24): the requests following an area whose shape was changed (in ArcGIS Pro too)
+            # take it before the day is worked out (only when the named area layer was edited since the last time).
+            followed = None
+            if follow is not None and any(r.named_area_id and r.area_follow for r in requests):
+                areas, area_token, (since, checked) = follow[1:]
+                try:
+                    followed = follow_areas(repo.client, store, repo.token, areas, requests, now, since, area_token, task.isCanceled,
+                                            checked)
+                    requests = followed.requests
+                    if followed.result is not None:
+                        notes += [t for t in (followed.result.text(),) if t] + followed.result.problems
+                except Exception as error:  # noqa: BLE001 (the day goes on with the requests' areas as they are, said so)
+                    notes.append(f"地域の形に合わせられず、依頼の今の範囲で計算（{error_text(error)}）")
             groups, note = repo.read_groups(task.isCanceled)
             if note:
                 notes.append(note)
@@ -535,14 +563,21 @@ class PlanFileDock(PluginDock):
             outage_line = summary_text(day_sats, *day_bounds(day), now)
             if outage_line:
                 notes.insert(0, outage_line)
+            redo = redo_count(history, requests, jst_day(now))
+            if redo:
+                notes.append(f"地域の形が変わって出し直し候補の行 {redo} 件（撮像予定の理由欄）")
             return (requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others,
-                    (day_sats, outages))
+                    (day_sats, outages), followed)
 
         def done(result):
             self.task = None
             (requests, history, forecasts, passes, notes, groups, quotas, covered, (looked, ahead), last_looks, others,
-             (sats, outages)) = result
+             (sats, outages), followed) = result
             self.context.set_outages(outages)
+            if followed is not None and follow is not None:
+                # Kept when nothing was held back (those are tried again at the next 「計算」).
+                if followed.stamp is not None and not (followed.result and followed.result.held):
+                    settings.set_area_follow_stamp(follow[0], followed.stamp, now)
             if groups is not None:
                 self.groups = groups
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
@@ -1013,7 +1048,8 @@ class PlanFileDock(PluginDock):
             rewrite = Rewrite(rows=list(rows))
             if replace and earlier and repo.store.history:
                 # The systems' answers already read in are carried to the new rows, or kept (tsudo, 2026-11-09).
-                before = repo.load_history(replaced_where(repo.store, day, target))
+                # With their areas: an answer for an area changed since (地域の形に合わせる) is not carried.
+                before = repo.load_history(replaced_where(repo.store, day, target), shapes=True)
                 rewrite = keep_answers(before, rows)
                 gone = repo.delete_history_rows(rewrite.gone)
                 removed, notes = int(gone), notes + gone.problems
