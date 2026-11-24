@@ -683,7 +683,7 @@ unix / unixms はタイムゾーンに関係なく同じ値になる。
 | `linkId` | 外部連携ID（オーダーの項目 `linkId` で渡した出力の行の ID、§29）。あればまずこれで出力の行を探す（その行と、まとめた依頼）。名前などに埋め込まれて返ってくるなら `pattern` で抜き出す（`"pattern": "SW-(\\w+)"`）。これだけでもよい |
 | `id` / `managementNo` / `identificationNo` | 依頼を表すキー（依頼ID・管理番号・識別番号）。これか `linkId` の 1 つ以上は必須。複数あれば `id` → `managementNo` → `identificationNo` の順に台帳を引く。前後の空白・大文字小文字・`{}` は問わず、数だけの番号は先頭の 0 を問わない（`000123` = `123`。オーダーで `%08d` にした識別番号がそのまま返ってきても合う） |
 | `result` | 採否。`採用`・`不採用`・`不明` に読み替える（下の「採否の読み方」）。列がなければ、載っている行はすべて採用 |
-| `reason` | 理由・メモ（不採用の理由、要求外のメモ） |
+| `reason` | 理由（不採用の理由、要求外のメモ。撮像予定の「理由」の列） |
 | `plannedAt` | 撮像予定日時（下の「日時」） |
 | `satellite` | 衛星（システムの `values.satellite` の読み替えも逆向きにかかる: `{"OPT-X 1": "X1"}` なら `X1` → `OPT-X 1`） |
 | `name` | 名称（要求外の行の名前） |
@@ -1195,7 +1195,7 @@ tsudo「衛星の障害情報を登録できるようにしてほしい 理由�
 - **その日の値**（`on_day`）: 回数・シーン数・間隔・角度の上限は、障害がその日（JST）に少しでもかかれば 1 日中、衛星の値より厳しいときだけ。衛星の並びは変えない（撮像機会の番号のため）。
 - **TLE のない衛星**（件数で詰める）: その日に撮像停止がかかれば使わない。1 日の回数は `on_day` で効く。方向・角度・夜間は分からないので注意だけ。
 - **注意**: 障害のある衛星に割り振った依頼に「衛星の障害あり（…）」（詰め直しで重ねない、`_manual_warning`）。日の注意の先頭に「障害中の衛星: …」（`summary_text`）。手動の採用はそのまま通す。
-- **出した予定**（決定 4）: 変えない。撮像予定で、出力した撮像（不採用・撮像済みを除く）に障害がかかれば衛星と理由・メモを橙色にし「衛星の障害の影響あり（…）」（`handed_hit`。撮像の向き・角度・中心が分かればそれで判定、分からなければ撮像停止だけを確かめ、ほかは「障害中（撮り方が分からず確かめられない）」）。
+- **出した予定**（決定 4）: 変えない。撮像予定で、出力した撮像（不採用・撮像済みを除く）に障害がかかれば衛星と理由を橙色にし「衛星の障害の影響あり（…）」（`handed_hit`。撮像の向き・角度・中心が分かればそれで判定、分からなければ撮像停止だけを確かめ、ほかは「障害中（撮り方が分からず確かめられない）」）。
 - **登録**（決定 3）: メニュー「撮像依頼 ▸ 衛星の障害情報…」。一覧（状態・衛星・センサー・モード・発生・復旧見込み・復旧・影響・理由・メモ、既定は復旧していないものだけ）と 新規・編集・復旧・削除。編集は撮像計画の担当（`outages.edit`）、見るのは撮像を依頼する人も。保存のあと読み直して `PluginContext.set_outages` → `outagesChanged` で撮像計画の衛星の木と撮像予定がすぐ変わる。計算はそのたびに表を読む（読めなければ前に読んだ障害で計算し、理由を出す）。
 
 実装: `core/plan/outages.py`（`Outage`・`attach`・`blocking`・`leave_out`・`on_day`・`stopped`・`handed_hit`・`load_outages`・`save_outage`・`delete_outages`）、`core/plan/satellites.py`（`SatelliteSpec.outages`）、`core/request/passes.py`（`Passes.blocked`・`blocked_on`）、`core/request/daily.py`、`core/request/simulate.py`（`DayResult.outage`）、`qgis_io/context.py`（`read_outages`・`set_outages`・`outagesChanged`）、`ui/outage_dialog.py`、`ui/imaging_plan_dock.py`・`ui/satellite_tree.py`・`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`・`ui/schedule_dock.py`。テスト: `tests/test_satellite_outages.py`・`tests/test_qgis_outages.py`。
@@ -1251,3 +1251,14 @@ tsudo「撮像依頼のグループをミカゲから追加、編集できる機
 - **Esri**: `TBL_REQUEST_GROUP` を書き込みのテーブルに（`tools/arcgis/mikage_schema.py` の `writable`）。作成者・更新者の 4 属性も入る。前からの環境は `create_tables.py --grant-edit` をもう一度実行し、サービスで編集を許可する。
 
 実装: `core/request/groups.py`（`check_group`・`save_group`・`order_changes`・`save_orders`・`delete_groups`・`group_counts`・`rename_requests`）、`core/roles.py`（`known_users`）、`ui/request_group_dialog.py`（一覧と入力画面）、`features/requests.py`（メニュー・ドックへの反映）。
+
+## 39. 依頼のメモの列（2026-11-24 追加）
+
+tsudo「撮像依頼系のテーブル画面に、メモ列を表示できるようにしてほしい。通常は非表示で」。設計を確認してから作成（撮像予定の「理由・メモ」を「理由」に改名することも tsudo が選択）。
+
+- **どの一覧**: 撮像依頼・撮像予定・撮像計画ファイル出力の 3 つのドックと「計画と実績の照合」の一覧の末尾に「メモ」。中身は依頼の入力画面の「メモ」（台帳の `NOTE`）。撮像予定は出力履歴にメモを持たないので台帳から読む（グループ・範囲を読むときに一緒に。まだ読んでいない依頼の行が出たときだけ読み直す）。要求外の行は空。
+- **非表示から**: 標準では隠れていて、見出しの右クリックか「列の表示と順番…」でチェックすると出る。出した状態は一覧ごとに覚える。前から並びを覚えている一覧・保存済みのビューもメモの列の名前を持たないので隠れたまま始まり、「標準の表示に戻す」「標準に戻す」も隠す（`ListViews(hidden=…)`・`column_menus(hidden=…)`）。
+- **見え方**: 改行は空白にして 1 行、先頭 40 文字で切って「…」。全文はセルのツールチップ（HTML としては読まない）。撮像依頼ドックの名称のツールチップのメモはそのまま。
+- **撮像予定の「理由」**: 前の「理由・メモ」。中身（システムの不採用の理由、見送りの理由、手で足した要求外の「メモ」、衛星の障害）は変えない。前の名前で並びを覚えていた人は、この列が標準の位置に出る。
+
+実装: `ui/memo_column.py`（`MEMO`・`memo_text`・`memo_item`）、`ui/list_views.py`（`hidden`・`standard_hidden`）、`ui/request_dock.py`・`ui/schedule_dock.py`（`note_of`）・`ui/plan_file_dock.py`・`ui/plan_results_dialog.py`。
