@@ -193,6 +193,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "alertReports",
   "observationExports",
   "assignments",
+  "imageReviews",
   "handover",
   "events",
   "interests",
@@ -528,6 +529,21 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "note": "NOTE",
    "takenAt": "TAKEN_AT",
    "doneAt": "DONE_AT"
+  },
+  "imageReviews": {
+   "id": "REVIEW_ID",
+   "imageId": "IMAGE_ID",
+   "imageName": "IMAGE_NAME",
+   "imageTime": "IMAGE_TIME",
+   "satellite": "SATELLITE",
+   "areaId": "NAMED_AREA_ID",
+   "areaName": "NAMED_AREA_NAME",
+   "rating": "RATING",
+   "cloud": "CLOUD_PCT",
+   "reasons": "REASONS",
+   "note": "NOTE",
+   "reviewedBy": "REVIEWED_BY",
+   "reviewedAt": "REVIEWED_AT"
   },
   "handoverMemos": {
    "text": "TEXT",
@@ -1856,6 +1872,8 @@ const SPEC = [
       ]) },
     { key: "assignments", label: "分担（画像ごとの担当）", doc: "分担と引き継ぎメモassignmentshandover", help: "誰がどの画像を担当中かを置く Esri の編集できるテーブル（1 行 1 人 × 1 画像）。各自が「この画像を担当」で取る。協業（既定）は同じ画像を何人でも、排他（mode: exclusive）はほかの人が担当中の画像は取れない。",
       field: TJ("assignments", "分担のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\", \"claimOnRecord\", \"mode\" }", help: "役割: " + Object.entries(K.roles.assignments).map(([k, v]) => `${k}（${v}）`).join("・") + "。担当者は editTracking のユーザー名（既定は環境変数 USERNAME）。「クリック記録」の開始で画像を自動で担当にする（\"claimOnRecord\": false で止める）。\"mode\": \"shared\"（協業、既定）は同じ画像を何人でも担当でき、\"exclusive\"（排他）はほかの人が担当中なら記録できない" }) },
+    { key: "imageReviews", label: "画像の評価", doc: "画像の評価imagereviews", help: "画像が判読に使えるか（使える・一部・使えない）を地名ごとに置く Esri の編集できるポリゴンのレイヤー（1 行 1 画像 × 1 地名。形状は地名のうち画像に写っている部分）。観測記録の分担の行の下の「評価…」で付け、分担の「完了」でまだ評価のない画像なら窓が開く。画像カタログの「評価」の列に出て、撮像依頼の照合ではすべて「使えない」の画像を撮像済みに数えない。地名は namedAreas から読む。",
+      field: TJ("imageReviews", "画像の評価のレイヤー（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_IMAGE_REVIEW。役割: " + Object.entries(K.roles.imageReviews).map(([k, v]) => `${k}（${v}）`).join("・") }) },
     { key: "handover", label: "引き継ぎメモ", doc: "分担と引き継ぎメモassignmentshandover", help: "交代時の引き継ぎメモ（期間の観測記録・通報・未処理の撮像依頼・分担・申し送り）。すべて任意。",
       field: O("handover", "引き継ぎメモ", [
         TJ("table", "保存先のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "次の担当者が前回のメモを読み、期間がその終わりから始まる。役割: " + Object.entries(K.roles.handoverMemos).map(([k, v]) => `${k}（${v}）`).join("・") }),
@@ -2023,6 +2041,7 @@ const DOC_FILES = {
   "備考の単語集glossary": "docs/features/observations.md",
   "先読み": "docs/admin/operations.md",
   "分担と引き継ぎメモassignmentshandover": "docs/features/observations.md",
+  "画像の評価imagereviews": "docs/features/observations.md",
   "地図の描画を速くする設定rasterspeed": "docs/features/images.md",
   "外部から図形を受け取るautomap-などshapereceiver": "docs/features/map.md",
   "座標地名へ移動": "docs/features/map.md",

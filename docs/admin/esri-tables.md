@@ -78,6 +78,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_IMAGE_CORRECTION`](#tbl_image_correction画像の幾何補正) | なし | 書き込み | 画像ごとのクイック幾何補正（目印の点・地形の補正。2026-11-23 に追加） | `imageCorrections` |
 | [`TBL_AREA_CATEGORY`](#tbl_area_category地域のカテゴリー) | なし | 書き込み（「関心地域・地点」の「組織」の「カテゴリー…」） | 組織の関心地域のカテゴリー（木の形。2026-11-24 に追加） | `namedAreas.categories` |
 | [`TBL_REQUEST_AREA_CHANGE`](#tbl_request_area_change依頼の範囲の変更記録) | ポリゴン | 書き込み（行を足すだけ） | 地域の形が変わって依頼の範囲を合わせた記録と、合わせる前の範囲（2026-11-24 に追加） | `requestStores[].areaChanges` |
+| [`TBL_IMAGE_REVIEW`](#tbl_image_review画像の評価) | ポリゴン | 書き込み | 画像の評価（画像 × 地名ごとに 1 行。判読に使えるか・雲量・理由。2026-11-24 に追加） | `imageReviews` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -142,6 +143,9 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_AREA_CATEGORY` | `CATEGORY_ID` | カテゴリーを ID で引く・更新する |
 | `TBL_REQUEST_AREA_CHANGE` | `REQ_ID` | 依頼ごとの範囲の変更記録 |
 | `TBL_REQUEST_AREA_CHANGE` | `NAMED_AREA_ID` | 地域ごとの範囲の変更記録 |
+| `TBL_IMAGE_REVIEW` | `REVIEW_ID` | 評価を ID で引く・書き直す |
+| `TBL_IMAGE_REVIEW` | `IMAGE_ID` | 画像の評価（画像を開くたび、カタログの一覧、依頼の照合） |
+| `TBL_IMAGE_REVIEW` | `NAMED_AREA_ID` | 地名ごとの評価（ダッシュボード） |
 
 ほかに:
 
@@ -830,9 +834,31 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 
 いつ・誰がは作成者の 4 属性（[`editTracking`](operations.md#作成者更新者の記録edittracking)）で残る。
 
+### `TBL_IMAGE_REVIEW`（画像の評価）
+
+画像が判読に使えるかを、地名ごとに付ける表（2026-11-24 に追加。tsudo「4は、形状ありで、ネームドエリアごと1行にしようか」）。1 行が画像 1 枚 × 地名 1 つ。形状は地名のポリゴンのうち画像に写っている部分（地名のポリゴンを画像の範囲で切ったもの）で、地図やダッシュボードでそのまま色分けできる。`NAMED_AREA_ID` と `NAMED_AREA_NAME` が空の行は画像全体（地名から離れた海など）。同じ画像と地名をもう一度付けると（だれが付けても）同じ行を書き直し、評価者は最後に付けた人になる。空に戻すとその行を消す。地名に管理番号がなければ地名で見分ける。
+
+「観測記録」の分担の行の下の「評価…」で付ける（分担の「完了」で、まだ評価のない画像なら窓が開く）。画像カタログの一覧の「評価」の列に出る。撮像依頼の照合では、依頼の範囲にかかる地名の評価がすべて「使えない」の画像（かかる地名がなければ画像全体が「使えない」の画像）を撮像済みに数えない。もう撮像済みの行は「撮像予定」と「計画と実績の照合」で印を付けるだけで、変えない。`imageReviews`（URL か `{ "url", "fields", "where", "token" }`、既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `REVIEW_ID` | 評価ID | `String(64)` | ID（`REV-20261124-101500-a1b2`。書き直しても変えない）。**必須** | `id` |
+| `IMAGE_ID` | 画像ID | `String(255)` | 画像の ID（観測記録・分担と同じ）。**必須** | `imageId` |
+| `IMAGE_NAME` | 画像名 | `String(255)` | 画像の名前 | `imageName` |
+| `IMAGE_TIME` | 撮像日時 | `Date` | 画像の撮像日時 | `imageTime` |
+| `SATELLITE` | 衛星 | `String(255)` | 画像の衛星 | `satellite` |
+| `NAMED_AREA_ID` | 地名の管理番号 | `String(255)` | 地名の管理番号（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) の `NAMED_AREA_ID`。空は画像全体） | `areaId` |
+| `NAMED_AREA_NAME` | 地名 | `String(255)` | 地名（付けたときの名前） | `areaName` |
+| `RATING` | 評価 | `String(16)` | `使える`・`一部`・`使えない`。**必須** | `rating` |
+| `CLOUD_PCT` | 雲量（%） | `Double` | 見た雲量（0〜100。分からなければ空） | `cloud` |
+| `REASONS` | 理由 | `String(1000)` | 理由（不可の理由の言葉を `,` 区切り。`雲,霞`） | `reasons` |
+| `NOTE` | メモ | `String(2000)` | メモ | `note` |
+| `REVIEWED_BY` | 評価者 | `String(255)` | 最後に付けた人（作成者の 4 属性と同じ利用者名） | `reviewedBy` |
+| `REVIEWED_AT` | 評価日時 | `Date` | 最後に付けた日時 | `reviewedAt` |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -880,6 +906,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
     "formats": [{ "name": "既定" }]
   },
   "assignments": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/13",                    // TBL_ASSIGNMENT
+  "imageReviews": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/35",                   // TBL_IMAGE_REVIEW
   "handover": { "table": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/14" },          // TBL_HANDOVER_MEMO
   "events": {
     "layer": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/15",                        // TBL_EVENT

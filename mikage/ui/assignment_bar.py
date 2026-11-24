@@ -329,7 +329,7 @@ class AssignmentBar(QWidget):
 
     # ---- changing ------------------------------------------------------------
 
-    def _run(self, what: str, work, done_text: str, image_id: str = "") -> None:
+    def _run(self, what: str, work, done_text: str, image_id: str = "", then: Optional[Callable[[], None]] = None) -> None:
         if self._writing is not None:
             return
 
@@ -340,6 +340,8 @@ class AssignmentBar(QWidget):
             self.reload()
             if image_id:
                 self.written.emit(image_id)
+            if then:
+                then()
 
         def failed(message: str) -> None:
             self._writing = None
@@ -374,8 +376,16 @@ class AssignmentBar(QWidget):
             return
         repo = self.repository()
         new = with_status(x, status, int(time.time() * 1000))
+        image = self.image if self.image is not None and self.image.id == x.image_id else None
+
+        def then() -> None:
+            # 完了 of an image not rated yet: the window of 画像の評価 (ui/review_bar.py; 「あとで」 closes it).
+            bar = getattr(self.dock, "review_bar", None)
+            if status == DONE and bar is not None and image is not None:
+                bar.after_done(image)
+
         self._run(self.tr("分担の更新"), lambda _t: repo.update(new, x),
-                  self.tr("{name}: {s}").format(name=x.label, s=status), x.image_id)
+                  self.tr("{name}: {s}").format(name=x.label, s=status), x.image_id, then)
 
     def give_back(self, x: Optional[Assignment] = None, confirm: bool = True) -> None:
         x = x or self.holder()

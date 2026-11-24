@@ -531,6 +531,21 @@ TABLES = (
         F("CHANGE_ACTION", "結果", "TEXT", 16, "action"),
         F("REASON", "理由", "TEXT", 1000, "reason"),
     )),
+    Table("TBL_IMAGE_REVIEW", "画像の評価", "POLYGON", writable=True, setting="imageReviews", fields=(
+        F("REVIEW_ID", "評価ID", "TEXT", 64, "id"),
+        F("IMAGE_ID", "画像ID", "TEXT", 255, "imageId"),
+        F("IMAGE_NAME", "画像名", "TEXT", 255, "imageName"),
+        F("IMAGE_TIME", "撮像日時", "DATE", None, "imageTime"),
+        F("SATELLITE", "衛星", "TEXT", 255, "satellite"),
+        F("NAMED_AREA_ID", "地名の管理番号", "TEXT", 255, "areaId"),
+        F("NAMED_AREA_NAME", "地名", "TEXT", 255, "areaName"),
+        F("RATING", "評価", "TEXT", 16, "rating"),
+        F("CLOUD_PCT", "雲量（%）", "DOUBLE", None, "cloud"),
+        F("REASONS", "理由", "TEXT", 1000, "reasons"),
+        F("NOTE", "メモ", "TEXT", 2000, "note"),
+        F("REVIEWED_BY", "評価者", "TEXT", 255, "reviewedBy"),
+        F("REVIEWED_AT", "評価日時", "DATE", None, "reviewedAt"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -548,6 +563,7 @@ INDEXES = {
     "TBL_NAMED_AREA": ("NAMED_AREA_ID", "CATEGORY_ID"),
     "TBL_ALERT_LOG": ("OBS_ID", "REPORTED_AT"),
     "TBL_ASSIGNMENT": ("IMAGE_ID",),
+    "TBL_IMAGE_REVIEW": ("REVIEW_ID", "IMAGE_ID", "NAMED_AREA_ID"),
     "TBL_EVENT": ("EVENT_ID",),
     "TBL_EVENT_LINK": ("EVENT_ID", "ITEM_ID"),
     "TBL_AI_RESULT": ("IMAGE_ID",),
@@ -649,6 +665,8 @@ def plugin_config(urls: dict) -> dict:
         config["alertReports"] = alerts
     if has("TBL_ASSIGNMENT"):
         config["assignments"] = urls["TBL_ASSIGNMENT"]
+    if has("TBL_IMAGE_REVIEW"):
+        config["imageReviews"] = urls["TBL_IMAGE_REVIEW"]
     if has("TBL_HANDOVER_MEMO"):
         config["handover"] = {"table": urls["TBL_HANDOVER_MEMO"]}
     if has("TBL_EVENT"):

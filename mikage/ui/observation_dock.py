@@ -172,6 +172,7 @@ class ObservationDock(
         self._offer_record_on_action()
         context.configChanged.connect(self.reset_stores)
         context.configChanged.connect(self.assignment_bar.reset)
+        context.configChanged.connect(self.review_bar.reset)
         self.visibilityChanged.connect(self._visibility)
         # Others' records read quietly (another image, after a conflict, and every `refreshMinutes`).
         self._refreshing = False
@@ -242,6 +243,12 @@ class ObservationDock(
 
         self.assignment_bar = AssignmentBar(self)
         b.addWidget(self.assignment_bar)
+        # 画像の評価 under it (the settings file's imageReviews): whether the image can be used, per named area. A line
+        # of its own: beside 分担 in a narrow dock, the names of those holding the image were cut.
+        from .review_bar import ReviewBar
+
+        self.review_bar = ReviewBar(self)
+        b.addWidget(self.review_bar)
 
         # An image without its file.
         self.list_form = QGroupBox(tr("ファイルなしの画像"))
@@ -1217,7 +1224,8 @@ class ObservationDock(
         for signal, slot in ((project.layersAdded, self._layers_changed), (project.layersRemoved, self._layers_changed),
                              (project.layerTreeRoot().nameChanged, self._layer_renamed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
-                             (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset)):
+                             (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset),
+                             (self.context.configChanged, self.review_bar.reset)):
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):

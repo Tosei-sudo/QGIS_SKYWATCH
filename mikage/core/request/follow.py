@@ -39,7 +39,8 @@ class Finding:
 
 def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], rows: Sequence[HistoryRow],
               requests: dict, now: float, miss_after_days: float,
-              cancelled: Optional[Callable[[], bool]] = None, names: SatelliteNames = NO_NAMES) -> list[Finding]:
+              cancelled: Optional[Callable[[], bool]] = None, names: SatelliteNames = NO_NAMES,
+              unusable: Optional[Callable[[str, Sequence], bool]] = None) -> list[Finding]:
     """
     The rows (採用, 未判定, their day begun) whose outcome is now known. Of the
     images found, one whose sensor names the row's satellite (or an alias of
@@ -51,6 +52,11 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
     (1) or more from the others' (images of one pass are one time), in the
     order of the times; an image already taken by one of its rows (in
     `rows`, 撮像済み) is not counted again.
+
+    `unusable(image id, rings)` (画像の評価, core/image_reviews.py
+    UnusableImages): an image rated 使えない all over the row's area does not
+    count as taken (the row stays 未判定, and is 未撮像 when no other image
+    comes). When it has `read`, the images of an area are given to it at once.
     """
     acquired = catalog.fields.get("acquired")
     if not acquired:
@@ -96,6 +102,8 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
                           "geometry": json.dumps({"rings": esri_rings(rings), "spatialReference": {"wkid": 4326}}),
                           "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
                 asked[key] = client.ask(f"{catalog.url}/query", params, token).get("features") or []
+                if unusable is not None and hasattr(unusable, "read"):
+                    unusable.read([image_id_of(f, catalog) for f in asked[key]])
             return asked[key]
 
         found = images(req.rings)
@@ -115,6 +123,9 @@ def follow_up(client: EsriClient, catalog: CatalogConfig, token: Optional[str], 
             # then, which may have changed since, 地域の形に合わせる 2026-11-24); a row without one, the request's now.
             own = images(row.rings) if row.rings and (row.part or rings_moved(row.rings, req.rings)) else found
             mine = fitting_images(own, sensor, row, req, names) if own and sensor else list(own)
+            if unusable is not None:
+                area = row.rings if row.part and row.rings else req.rings
+                mine = [f for f in mine if not unusable(image_id_of(f, catalog), area)]
             if several or shared:
                 gap = req.gap_ms if several else 0
                 # The shots of one time shared out are not kept apart (they are that time).
@@ -450,16 +461,19 @@ def save_shots(client: EsriClient, store: RequestStoreConfig, token: Optional[st
 
 def follow_and_save(client: EsriClient, store: RequestStoreConfig, token: Optional[str], catalog: CatalogConfig, catalog_token: Optional[str],
                     history: Sequence[HistoryRow], requests: dict, now: float, names: SatelliteNames = NO_NAMES,
-                    cancelled: Optional[Callable[[], bool]] = None, problems: Optional[list] = None) -> tuple[list[Finding], bool]:
+                    cancelled: Optional[Callable[[], bool]] = None, problems: Optional[list] = None,
+                    unusable: Optional[Callable[[str, Sequence], bool]] = None) -> tuple[list[Finding], bool]:
     """
     Follows the history up against the catalog and saves what was found:
     the rows' outcome, their shots' (save_shots), and on the ledger the
     raises undone and 完了. The findings saved, and whether the ledger was
     changed. Rows that could not be saved keep their outcome (they are
     followed up again next time) and the reasons go to `problems`.
+    `unusable`: follow_up's (画像の評価).
     """
     problems = problems if problems is not None else []
-    found = follow_up(client, catalog, catalog_token, history, requests, now, store.miss_after_days, cancelled, names)
+    found = follow_up(client, catalog, catalog_token, history, requests, now, store.miss_after_days, cancelled, names, unusable)
+    problems += list(getattr(unusable, "problems", ()) or ())
     if not found:
         return [], False
     saved = update_history(client, store, token, history_changes(found))

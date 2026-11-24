@@ -47,9 +47,9 @@ class Role:
 
 #: The roles, in the order they are offered.
 ROLES: tuple[Role, ...] = (
-    Role("PLANNER", "撮像計画の担当", frozenset({REQUEST, PLAN}), "撮像計画・撮像依頼・計画ファイルの出力と採否の入力・年間撮像上限・衛星の障害情報"),
+    Role("PLANNER", "撮像計画の担当", frozenset({REQUEST, PLAN}), "撮像計画・撮像依頼・計画ファイルの出力と採否の入力・年間撮像上限・衛星・システムの障害情報"),
     Role("REQUESTER", "撮像を依頼する人", frozenset({REQUEST}), "撮像依頼の登録と、撮像予定（採否）の確認"),
-    Role("OBSERVER", "観測記録の担当", frozenset({OBSERVE}), "観測記録の記録・通報・分担・引き継ぎ・分類体系の編集・AI結果の取り込み"),
+    Role("OBSERVER", "観測記録の担当", frozenset({OBSERVE}), "観測記録の記録・通報・分担・画像の評価・引き継ぎ・分類体系の編集・AI結果の取り込み"),
     Role("INTERPRETER", "画像判読", frozenset({OBSERVE}), "画像補正・影から高さ・スペクトルで判読して観測記録へ"),
     Role("TRAINER", "AI 学習の担当", frozenset({TRAIN}), "教師データセットの作成・アノテーション変換・AI 学習"),
     #: (the records of the images are the answers taken: the observation dock too)

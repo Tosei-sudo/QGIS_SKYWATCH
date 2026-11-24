@@ -436,3 +436,34 @@ def test_a_result_file_of_another_day_goes_on_its_days(plugin, monkeypatch):
     # A file of a week, told short (the status line, the confirmation).
     week = [(today + timedelta(days=i)).isoformat() for i in range(7)]
     assert days_text(week[:3]) == "・".join(week[:3]) and days_text(week) == f"{week[0]}〜{week[-1]}（7 日）"
+
+
+def test_a_plan_taken_in_an_image_rated_unusable_is_marked(plugin):
+    """画像の評価 (2026-11-24, 設計 2): a row 撮像済み whose image is 使えない over the request is marked, not changed."""
+    from mikage.core.image_reviews import DEFAULT_REVIEW_FIELDS
+    from mikage.ui.schedule_dock import COLUMNS
+
+    p, iface, fake, history, tmp_path = plugin
+    reviews_url = "https://example.com/arcgis/rest/services/Work/FeatureServer/2"
+    reviews = fake.add_layer(reviews_url, FakeLayer({n: "esriFieldTypeString" for n in DEFAULT_REVIEW_FIELDS.values()}, "esriGeometryPolygon"))
+    reviews.add({"REVIEW_ID": "REV-1", "IMAGE_ID": "IMG-42", "RATING": "使えない", "NAMED_AREA_ID": "NA-1", "NAMED_AREA_NAME": "東京湾",
+                 "REASONS": "雲"}, {"rings": TOKYO})
+    (tmp_path / "config.json").write_text(json.dumps({**CONFIG, "imageReviews": reviews_url}, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    today = jst_day(time.time() * 1000)
+    written(history, today.isoformat())
+    for r in history.rows:
+        if r["attributes"]["REQ_ID"] == "R-1":
+            r["attributes"].update(CAPTURED="撮像済み", IMAGE_ID="IMG-42", ADOPTION="採用")
+    dock = p.api.schedule
+    dock.show()
+    assert wait_for(lambda: dock._loaded and dock.task is None), dock.status.text()
+    dock.state_filter.choose([])
+    tokyo = next(i for i, r in enumerate(dock.shown) if r.name == "東京湾")
+    taken = dock.model.item(tokyo, COLUMNS.index("撮像"))
+    assert taken.text() == "撮像済み（要確認）" and "画像の評価: 使えない（雲）" in taken.toolTip()
+    assert dock.model.item(tokyo, COLUMNS.index("理由")).text().startswith("画像の評価: 使えない（雲）")
+    assert dock.shown[tokyo].captured == "撮像済み"  # not changed
+    osaka = next(i for i, r in enumerate(dock.shown) if r.name == "大阪湾")
+    assert dock.model.item(osaka, COLUMNS.index("撮像")).text() == "未判定"
+    dock.close_all()

@@ -48,6 +48,7 @@ flowchart LR
 | `ui/schedule_dock.py` | 「撮像予定」ドック（日ごとの計画: カレンダー・一覧・地図・採否・要求外、§20） |
 | `core/request/quota.py` / `ui/quota_dialog.py` | 年間撮像上限（消費・見込み・残り、日次の計算での残りの確認、数えない撮像、§27） |
 | `core/plan/outages.py` / `ui/outage_dialog.py` | 衛星・システムの障害情報（撮像機会から外す・その日の値を厳しく・注意、登録画面、§35・§41） |
+| `core/image_reviews.py` | 画像の評価（照合で「使えない」の画像を撮像済みに数えない・撮像済みの行の印、§43） |
 
 ## 3. 設定（config.json）
 
@@ -1317,3 +1318,14 @@ tsudo「既存の他に管理できそうなデータ、情報がないか検討
 - **地域の形に合わせるを入れ直したら**: 依頼フォームでチェックを入れ直すと、範囲を地域の今の形にする（保存はまだ）
 
 実装: `core/request/area_follow.py`（`follows`・`apply_follows`・`follow_areas`・`follow_area`・`load_changes`・`undo_change`・`redo_mark`）、`core/named_areas.py`（`areas_by_id`・`layer_stamp`）、`core/request/workflow.py`（`keep_answers`）・`follow.py`、`ui/plan_file_dock.py`（「計算」の前）、`ui/org_areas_panel.py`（保存したとき）、`ui/request_dock.py`（`follow_area`・⚠・「範囲の変更記録…」）、`ui/area_follow_dialog.py`、`ui/schedule_dock.py`（出し直し候補）、`ui/request_form.py`（入れ直し）、`qgis_io/prefs/requests.py`（前回の時刻）。テスト: `tests/test_request_area_follow.py`・`tests/test_qgis_area_follow.py`。
+
+## 43. 画像の評価で撮像済みに数えない（2026-11-24 追加）
+
+「4,5,7を実装して / 4は、形状ありで、ネームドエリアごと1行にしようか」の 4（画像の評価、`TBL_IMAGE_REVIEW`・`imageReviews`）のうち、撮像依頼にかかる部分。設計方針案の推奨 2「すべて使えない画像は照合で数えない。もう撮像済みの行は印だけ」のとおり。
+
+- **数えない画像**: 依頼の範囲（分担の行はその行の範囲）にかかる地名の評価（形状が範囲と重なる行）がすべて「使えない」の画像。かかる地名がなければ画像全体の評価が「使えない」の画像。「一部」が 1 つでもあれば数える（`image_reviews.unusable_over`）。評価のない画像は今までどおり。
+- **道**: `follow_up(unusable=)` に「その画像がその範囲で使えないか」を返す関数を渡す（core/request は観測記録を読めない）。`UnusableImages` は照合 1 回の間、画像ごとの評価を形状つきで覚え、範囲の画像を問い合わせた直後にまとめて読む（`read`）。外した画像は `left` に（状態の文「画像の評価が「使えない」の画像 n 枚は撮像済みに数えず」）。評価の表を読めないときは評価を見ずに照合して、その旨を `problems` に 1 回だけ。
+- **撮像済みの行**: 変えない（撮像済みにした画像が、その後に「使えない」と付けられたとき）。「撮像予定」（`schedule_dock.unusable_marks`）と「計画と実績の照合」（`_marks_of`）で「撮像済み（要確認）」を橙色に、理由・ツールチップに「画像の評価: 使えない（雲）」。直すかは担当（「未撮像に変更」）。
+- **定期照合**: `follow_job.follow_store` も同じ（設定ファイルに `imageReviews` があれば）。
+
+実装: `core/image_reviews.py`（`UnusableImages`・`unusable_over`・`unusable_text`）、`core/request/follow.py`（`follow_up`・`follow_and_save` の `unusable`）、`core/request/follow_job.py`、`ui/plan_results_dialog.py`、`ui/schedule_dock.py`。テスト: `tests/test_image_reviews.py`（`test_the_follow_up_does_not_count_an_image_unusable_over_the_area`）。

@@ -408,6 +408,10 @@ COUNTRIES = [("JP", "日本", "Japan", (122.9, 24.0, 146.0, 45.6))]
 
 ASSIGNMENT_FIELDS = {"IMAGE_ID": {"type": S, "length": 255}, "IMAGE_NAME": S, "IMAGE_TIME": T, "ASSIGNEE": S, "STATUS": S,
                      "NOTE": {"type": S, "length": 2000}, "TAKEN_AT": T, "DONE_AT": T}
+#: 画像の評価 (TBL_IMAGE_REVIEW, 2026-11-24): one row per image × named area, its shape the named area's part the image shows.
+REVIEW_FIELDS = {"REVIEW_ID": {"type": S, "length": 64}, "IMAGE_ID": {"type": S, "length": 255}, "IMAGE_NAME": S, "IMAGE_TIME": T,
+                 "SATELLITE": S, "NAMED_AREA_ID": S, "NAMED_AREA_NAME": S, "RATING": {"type": S, "length": 16}, "CLOUD_PCT": D,
+                 "REASONS": {"type": S, "length": 1000}, "NOTE": {"type": S, "length": 2000}, "REVIEWED_BY": S, "REVIEWED_AT": T}
 HANDOVER_FIELDS = {"TEXT": {"type": S, "length": 100000}, "MEMO": {"type": S, "length": 4000}, "PERIOD_START": T, "PERIOD_END": T,
                    "WRITTEN_AT": T, "WRITTEN_BY": S}
 EVENT_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "EVENT_NAME": S, "EVENT_KIND": S, "STATUS": S, "START_AT": T, "END_AT": T,
@@ -578,7 +582,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                                                 "SORT_ORDER": o, "COLOR": c, "ACTIVE": 1}} for i, n, ne, p, o, c in AREA_CATEGORIES])}]},
         {"name": "Work", "layers": [
             {"id": 0, "name": "分担", "fields": ASSIGNMENT_FIELDS, "features": []},
-            {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []}]},
+            {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []},
+            {"id": 2, "name": "画像の評価", "geometryType": "polygon", "fields": REVIEW_FIELDS, "features": []}]},
         {"name": "Events", "layers": [
             {"id": 0, "name": "イベント", "geometryType": "polygon", "fields": EVENT_FIELDS,
              "features": feats([{"attributes": {"EVENT_ID": str(uuid.UUID(int=9000)), "EVENT_NAME": "東京湾 船舶事故（サンプル）", "EVENT_KIND": "事故",
@@ -766,6 +771,7 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
   }},
   // 分担（画像ごとに誰が担当中か。各自が「この画像を担当」で取る）と引き継ぎメモ（保存先のテーブル）
   "assignments": "{rest}/Work/FeatureServer/0",
+  "imageReviews": "{rest}/Work/FeatureServer/2",
   "handover": {{ "table": "{rest}/Work/FeatureServer/1", "hours": 12, "timeZone": "Asia/Tokyo" }},
   // イベント（地震対応など）: イベントのレイヤーと紐付けテーブル
   "events": {{ "layer": "{rest}/Events/FeatureServer/0", "links": "{rest}/Events/FeatureServer/1" }},

@@ -88,3 +88,38 @@ def esri_rings(rings: Sequence) -> list:
             clockwise = _signed_area(r) < 0
             out.append([list(p) for p in r] if clockwise == (i == 0) else list(reversed(r)))
     return out
+
+
+def _box(rings: Sequence) -> tuple[float, float, float, float]:
+    xs = [p[0] for r in rings for p in r]
+    ys = [p[1] for r in rings for p in r]
+    return (min(xs), min(ys), max(xs), max(ys)) if xs else (0.0, 0.0, -1.0, -1.0)
+
+
+def _cross(a, b, c, d) -> bool:
+    """Whether segments ab and cd cross (touching counts)."""
+    def side(p, q, r) -> float:
+        return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+    d1, d2, d3, d4 = side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d)
+    if ((d1 > 0) != (d2 > 0) or d1 == 0 or d2 == 0) and ((d3 > 0) != (d4 > 0) or d3 == 0 or d4 == 0):
+        return (min(a[0], b[0]) <= max(c[0], d[0]) and min(c[0], d[0]) <= max(a[0], b[0])
+                and min(a[1], b[1]) <= max(c[1], d[1]) and min(c[1], d[1]) <= max(a[1], b[1]))
+    return False
+
+
+def rings_overlap(a: Sequence, b: Sequence) -> bool:
+    """
+    Whether two shapes (rings, even-odd) share some area or an edge: their
+    edges cross, or a vertex of one is inside the other.
+    """
+    a = [r for r in a if len(r) >= 3]
+    b = [r for r in b if len(r) >= 3]
+    if not a or not b:
+        return False
+    ba, bb = _box(a), _box(b)
+    if ba[0] > bb[2] or bb[0] > ba[2] or ba[1] > bb[3] or bb[1] > ba[3]:
+        return False
+    if any(in_rings(b, p[0], p[1]) for r in a for p in r) or any(in_rings(a, p[0], p[1]) for r in b for p in r):
+        return True
+    return any(_cross(r[i - 1], r[i], s[j - 1], s[j]) for r in a for i in range(len(r)) for s in b for j in range(len(s)))
