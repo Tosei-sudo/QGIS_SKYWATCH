@@ -57,6 +57,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
         shot_days_where, shots_replaced_where, state_of, STATES, UNREQUESTED, update_history, update_requests, update_shots,
         upload_requests, waiting_ids,
     )
+    from .route import system_names
     from .use_time import read_other_uses, UseBook
     from .view import BOOST, CandidateFilter, NO_SYSTEM, series_choices, shown
     from .workflow import (
@@ -105,7 +106,7 @@ __all__ = [
     "requests_of", "requests_of_plan", "RequestStoreConfig", "Rewrite", "ROW", "row_of", "row_problems", "row_rings",
     "run_passes", "same", "save_marked", "save_request", "save_requests", "Saved", "series_choices", "shot_days_where",
     "shot_text", "shot_tip", "shots_of", "shots_replaced_where", "shown", "simulate", "square_rings", "state_of", "STATES",
-    "SUMMARY", "summary", "SystemChange", "tally", "unit_key", "unknown", "UNREQUESTED", "unrequested_rows", "update_history",
+    "SUMMARY", "summary", "system_names", "SystemChange", "tally", "unit_key", "unknown", "UNREQUESTED", "unrequested_rows", "update_history",
     "update_requests", "update_shots", "upload_requests", "UseBook", "users_of", "waiting_ids", "wanted", "with_remembered",
     "with_settled_times", "write", "WRITTEN", "written_summary",
     "ACHIEVES", "ADOPTED", "DAYS", "DAY_CHOICES", "HELD", "LOOK_SIDES", "MAX_IMAGES", "MISSED", "MOST_PLACES",

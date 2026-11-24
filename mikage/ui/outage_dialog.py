@@ -1,6 +1,9 @@
 """
-「衛星の障害情報」 (tsudo, 2026-11-16): the outages of the satellites
-(`satelliteOutages`, core/plan/outages.py) in a list, and their form.
+「衛星・システムの障害情報」 (tsudo, 2026-11-16; systems 2026-11-24): the
+outages of the satellites and of the systems requests are handed to
+(`satelliteOutages`, core/plan/outages.py) in a list, and their form. A row
+names a satellite (its sensor, mode) or a system: then 撮像停止 is
+受付停止, and the system's daily limits (件数・枚数) are offered.
 
 The list shows those not recovered (予定・発生中・見込み超過) first, the
 recovered ones too on 「復旧済みも表示」 (they are never deleted: the
@@ -27,14 +30,16 @@ from qgis.PyQt.QtWidgets import (
 from ..core.plan.api import plain
 from ..core.plan.api import (
     DIRECTIONS, ONGOING, OVERDUE, PLANNED, RECOVERED, Outage, check_outage, delete_outages, load_outages, new_id, save_outage,
-    when_text,
+    takes_systems, when_text,
 )
 from ..qgis_io.tasks import error_text, run_task
 from .docks import ask_no, plain_label, plain_tip
 from .fit import fit_text
 from .list_views import column_menus
 
-COLUMNS = ("状態", "衛星", "センサー・モード", "発生", "復旧見込み", "復旧", "影響", "理由", "メモ")
+COLUMNS = ("状態", "対象", "センサー・モード", "発生", "復旧見込み", "復旧", "影響", "理由", "メモ")
+#: What a row names (the form's 「対象」).
+SATELLITE, SYSTEM = "衛星", "システム"
 STATUS_COLORS = {ONGOING: "#c2410c", OVERDUE: "#b91c1c", PLANNED: "#b45309", RECOVERED: "#6b7280"}
 #: The feature of 新規・編集・復旧・削除 (core/roles.FEATURES).
 EDIT = "outages.edit"
@@ -78,19 +83,40 @@ def _choices(sats: Sequence) -> dict:
     return out
 
 
+#: The limits only a system's outage has (it has a satellite's impacts too, on each of its satellites).
+SYSTEM_LIMITS = ("orders_per_day", "scenes_per_day")
+
+
 class OutageForm(QDialog):
     """One outage: what it hits, why, when, and its impacts."""
 
-    def __init__(self, sats: Sequence, outage: Optional[Outage] = None, parent=None):
+    def __init__(self, sats: Sequence, outage: Optional[Outage] = None, parent=None, systems: Sequence[str] = (),
+                 takes_systems: bool = True):
         super().__init__(parent)
         fit_text(self)
         self.original = outage
         self.choices = _choices(sats)
         self.series = {s.series for s in sats if s.series} - {s.name for s in sats}
-        self.setWindowTitle(self.tr("衛星の障害の登録") if outage is None else self.tr("衛星の障害の編集"))
+        self.setWindowTitle(self.tr("衛星・システムの障害の登録") if outage is None else self.tr("衛星・システムの障害の編集"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        self.form_layout = form
         layout.addLayout(form)
+        # 対象: a satellite, or (with systems in the settings and the table's SYSTEM_NAME) a system.
+        self.kind = QComboBox()
+        self.kind.addItems([self.tr(SATELLITE), self.tr(SYSTEM)])
+        self.kind.setToolTip(self.tr("衛星の障害か、システム（発注先）の受付停止・臨時の上限か"))
+        offered = bool(systems) and takes_systems
+        self.kind.setEnabled(offered or bool(outage and outage.for_system))
+        if not takes_systems:
+            self.kind.setToolTip(self.tr("障害情報の表にシステムの項目がない（管理者に連絡: SYSTEM_NAME）"))
+        form.addRow(self.tr("対象"), self.kind)
+        self.system = QComboBox()
+        self.system.setEditable(True)
+        self.system.addItems(list(systems))
+        self.system.setToolTip(self.tr("撮像計画ファイルを出すシステム（設定ファイルの requestExports の system）。その衛星すべてにかかる"))
+        self.system.setCurrentText(outage.system if outage else "")
+        form.addRow(self.tr("システム"), self.system)
         self.satellite = QComboBox()
         self.satellite.setEditable(True)
         for name in self.choices:
@@ -123,6 +149,9 @@ class OutageForm(QDialog):
         self.recovered, self.has_recovered = self._optional_time(outage.recovered if outage else None, self.tr("復旧済み"), now, False)
         form.addRow(self.tr("復旧日時"), self._row(self.recovered, self.has_recovered))
         layout.addWidget(self._impacts(outage))
+        self.kind.setCurrentIndex(1 if outage is not None and outage.for_system else 0)
+        self.kind.currentIndexChanged.connect(lambda _i: self._kind_changed())
+        self._kind_changed()
         notes = QFormLayout()
         self.other = QLineEdit(outage.other if outage else "")
         self.other.setMaxLength(OTHER_MAX)
@@ -151,6 +180,31 @@ class OutageForm(QDialog):
         edit.setEnabled(box.isChecked() != inverted)
         return edit, box
 
+    @property
+    def for_system(self) -> bool:
+        return self.kind.currentIndex() == 1
+
+    def _show_row(self, field: QWidget, on: bool) -> None:
+        field.setVisible(on)
+        label = self.form_layout.labelForField(field)
+        if label is not None:
+            label.setVisible(on)
+
+    def _kind_changed(self) -> None:
+        """衛星: its sensor and mode; システム: the system, 受付停止 and its daily limits."""
+        system = self.for_system
+        self._show_row(self.system, system)
+        for w in (self.satellite, self.sensor, self.mode):
+            self._show_row(w, not system)
+        self.stop.setText(self.tr("受付停止") if system else self.tr("撮像停止"))
+        self.stop.setToolTip(self.tr("このシステムに出さない（その衛星すべての、期間中の撮像機会を使わない）") if system
+                             else self.tr("この衛星（センサー・モード）の撮像機会を使わない"))
+        # A system's outage has the daily limits of the system besides a satellite's impacts (on each of its satellites).
+        for key in SYSTEM_LIMITS:
+            box, spin = self.limits[key]
+            box.setVisible(system)
+            spin.setVisible(system)
+
     @staticmethod
     def _row(*widgets) -> QWidget:
         w = QWidget()
@@ -178,6 +232,8 @@ class OutageForm(QDialog):
             grid.addWidget(box, 1 + k // 2, 1 + k % 2)
         self.limits: dict = {}
         rows = (
+            ("orders_per_day", self.tr("1 日の件数の上限"), QSpinBox, (1, 9999, 1), self.tr(" 件")),
+            ("scenes_per_day", self.tr("1 日の枚数の上限"), QSpinBox, (1, 9999, 1), self.tr(" 枚")),
             ("max_off_nadir", self.tr("オフナディア角の上限"), QDoubleSpinBox, (0.1, 90.0, 20.0), " °"),
             ("max_per_day", self.tr("1 日の撮像回数の上限"), QSpinBox, (1, 999, 1), self.tr(" 回")),
             ("scenes_per_pass", self.tr("1 パスのシーン数の上限"), QSpinBox, (1, 999, 1), self.tr(" シーン")),
@@ -185,6 +241,8 @@ class OutageForm(QDialog):
         )
         for k, (key, label, kind, (low, high, default), suffix) in enumerate(rows):
             box = QCheckBox(label)
+            if key in ("orders_per_day", "scenes_per_day"):
+                box.setToolTip(self.tr("期間にかかる日（日本時間）は、設定ファイルの上限とこの値の小さいほう"))
             spin = kind()
             spin.setRange(low, high)
             if isinstance(spin, QDoubleSpinBox):
@@ -235,11 +293,18 @@ class OutageForm(QDialog):
         """The outage as the form says (with the id and object id of the one edited)."""
         o = self.original
         limits = {key: (spin.value() if box.isChecked() else None) for key, (box, spin) in self.limits.items()}
-        for key in ("max_per_day", "scenes_per_pass"):
+        for key in ("max_per_day", "scenes_per_pass", "orders_per_day", "scenes_per_day"):
             if limits[key] is not None:
                 limits[key] = int(limits[key])
+        system = self.for_system
+        if not system:
+            for key in SYSTEM_LIMITS:
+                limits[key] = None
         values = dict(
-            satellite=self.satellite.currentText().strip(), sensor=self.sensor.currentText().strip(), mode=self.mode.currentText().strip(),
+            satellite="" if system else self.satellite.currentText().strip(),
+            sensor="" if system else self.sensor.currentText().strip(),
+            mode="" if system else self.mode.currentText().strip(),
+            system=self.system.currentText().strip() if system else "",
             reason=self.reason.text().strip(), start=_ms(self.start),
             expected=None if self.no_expected.isChecked() else _ms(self.expected),
             recovered=_ms(self.recovered) if self.has_recovered.isChecked() else None,
@@ -269,11 +334,13 @@ class OutageDialog(QDialog):
         self.allows = allows
         self.task = None
         self.outages: list[Outage] = list(context.known_outages())
+        #: Whether the table has SYSTEM_NAME (read with the outages; until then assumed).
+        self.takes_systems = True
         #: The outages the table shows (row → Outage).
         self.shown: list[Outage] = []
         #: What was just saved, said again once read again.
         self.note = ""
-        self.setWindowTitle(self.tr("衛星の障害情報"))
+        self.setWindowTitle(self.tr("衛星・システムの障害情報"))
         self.resize(1000, 520)
         self._build()
         self.render()
@@ -309,7 +376,7 @@ class OutageDialog(QDialog):
         self.columns = column_menus("outages", self.table, self)
         row = QHBoxLayout()
         self.add_button = QPushButton(self.tr("新規…"))
-        self.add_button.setToolTip(self.tr("衛星の障害を登録"))
+        self.add_button.setToolTip(self.tr("衛星の障害か、システムの受付停止・臨時の上限を登録"))
         self.add_button.clicked.connect(lambda: self.add())
         self.edit_button = QPushButton(self.tr("編集…"))
         self.edit_button.clicked.connect(lambda: self.edit())
@@ -348,10 +415,12 @@ class OutageDialog(QDialog):
         self.status.setText(self.tr("衛星の障害情報を取得中…"))
 
         def work(task):
-            return load_outages(client, source, token, task.isCanceled)
+            outages = load_outages(client, source, token, task.isCanceled)
+            return outages, takes_systems(client.layer(source.url, token), source)
 
-        def done(outages):
+        def done(result):
             self.task = None
+            outages, self.takes_systems = result
             self.outages = list(outages)
             self.context.set_outages(self.outages)
             self.render()
@@ -377,8 +446,9 @@ class OutageDialog(QDialog):
         self.shown = [o for o in everything if self.show_recovered.isChecked() or o.open(now)]
         for o in self.shown:
             status = o.status(now)
-            part = " ".join(x for x in (o.sensor, o.mode) if x) or self.tr("（全部）")
-            cells = [status, o.satellite, part, when_text(o.start), when_text(o.expected), when_text(o.recovered, ""),
+            part = "" if o.for_system else (" ".join(x for x in (o.sensor, o.mode) if x) or self.tr("（全部）"))
+            target = self.tr("システム: {s}").format(s=o.system) if o.for_system else o.target
+            cells = [status, target, part, when_text(o.start), when_text(o.expected), when_text(o.recovered, ""),
                      o.impact_text(), o.reason, o.note]
             items = [QStandardItem(c) for c in cells]
             items[0].setForeground(QBrush(QColor(STATUS_COLORS[status])))
@@ -417,7 +487,8 @@ class OutageDialog(QDialog):
     # --- 新規・編集・復旧・削除 --------------------------------------------------------------------
 
     def form(self, outage: Optional[Outage] = None) -> OutageForm:
-        return OutageForm(self.satellites(), outage, self)
+        systems = [s.system for s in self.context.config.request_exports]
+        return OutageForm(self.satellites(), outage, self, systems, self.takes_systems)
 
     def add(self) -> Optional[OutageForm]:
         if not self.allows(EDIT) or self.task is not None or self.source is None:

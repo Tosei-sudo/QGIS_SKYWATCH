@@ -38,6 +38,18 @@ def system_of_satellite(sat: SatelliteSpec, systems: Sequence[ExportSystem]) -> 
     return None
 
 
+def system_names(systems: Sequence[ExportSystem]):
+    """
+    The system each satellite is ordered through, by name ("" when none): for
+    the outages naming a system (システムの障害, outages.attach's `system_of`).
+    """
+    def of(sat: SatelliteSpec) -> str:
+        found = system_of_satellite(sat, systems)
+        return found.system if found is not None else ""
+
+    return of
+
+
 def why_not(req: ImagingRequest, sat: SatelliteSpec) -> Optional[str]:
     """Why a satellite (mode) cannot take a request; None when it can."""
     if req.kind == "光学" and sat.sar:

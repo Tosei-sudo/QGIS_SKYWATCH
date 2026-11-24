@@ -32,6 +32,7 @@ from ..core.plan.api import load_satellites, load_sensor_modes
 from ..core.plan.api import sample_sensor_modes, with_modes
 from ..core.plan.api import MAX_HORIZON, MAX_SHIPS, ShipState, plan_ships
 from ..core.plan.api import attach, leave_out
+from ..core.request.api import system_names
 from ..core.plan.api import BUILT_IN_DEFAULTS, SatelliteSpec, sample_satellites
 from ..qgis_io import settings
 from ..qgis_io.tasks import run_task
@@ -509,7 +510,7 @@ class ImagingPlanDock(
                 return
             sats, modes, problems, outages = result
             # Each mode with the outages that hit it (衛星の障害情報): marked in the list, its passes left out.
-            self.catalog_sats = attach(with_modes(sats, modes), outages)
+            self.catalog_sats = attach(with_modes(sats, modes), outages, system_names(self.context.config.request_exports))
             self._loaded = True
             self.context.set_outages(outages)
             self.list_sats()
@@ -594,7 +595,7 @@ class ImagingPlanDock(
 
             # The outages as they are now (one just entered counts): their passes left out (衛星の障害情報).
             outages, _problem = self.context.read_outages(client, task.isCanceled)
-            planned = attach(sats, outages)
+            planned = attach(sats, outages, system_names(self.context.config.request_exports))
             result = plan_access(planned, targets, options, progress)
             leave_out(result, planned, time.time() * 1000)
             return result

@@ -64,6 +64,8 @@ ROLE_SETS = {
     ],
     "管理者": ["接続と表の点検…", "監査ログ…", "設定…", "使い方（ヘルプ）…", "ツールバーのボタン…"],
 }
+#: Menu entries renamed since a person may have kept their buttons: old text → new (2026-11-24: システムの障害 too).
+RENAMED = {"衛星の障害情報…": "衛星・システムの障害情報…"}
 #: Several roles: these stay at the end.
 LAST = ("使い方（ヘルプ）…", "ツールバーのボタン…")
 #: Between the roles' names in the key of several (as RoleKeeper.key writes it).
@@ -88,7 +90,7 @@ def _own_all() -> dict:
 def own(role: str) -> Optional[list[str]]:
     """The person's own buttons for `role` (None: the role's standard)."""
     value = _own_all().get(role)
-    return [t for t in value if isinstance(t, str)] if isinstance(value, list) else None
+    return [RENAMED.get(t, t) for t in value if isinstance(t, str)] if isinstance(value, list) else None
 
 
 def set_own(role: str, texts: Optional[list[str]]) -> None:

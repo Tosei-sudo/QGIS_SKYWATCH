@@ -596,7 +596,10 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "minInterval": "LIMIT_INTERVAL_MIN",
    "noNight": "NO_NIGHT",
    "other": "OTHER_IMPACT",
-   "note": "NOTE"
+   "note": "NOTE",
+   "system": "SYSTEM_NAME",
+   "ordersPerDay": "LIMIT_ORDERS_PER_DAY",
+   "scenesPerDay": "LIMIT_SCENES_PER_DAY"
   },
   "glossary": {
    "term": "TERM",
@@ -1662,7 +1665,7 @@ const SPEC = [
       ], { check: (it, at, p) => { if (!it.url && !it.sensors) p.push(`${at}: url か sensors が必要`); if (it.url && !(it.fields && it.fields.sensor)) p.push(`${at}: fields.sensor が必要`); } }) },
     { key: "satelliteAliases", label: "衛星名の対応表", doc: "衛星名の対応表satellitealiases", help: "衛星カタログの名前と画像カタログでの名前（WV03 など）の対応。対応表のデータは Esri のテーブルに置き、ここにはテーブルと属性名だけを書く。",
       field: I("satelliteAliases", "対応表", [LABEL, URL_("対応表のテーブル", "https://…/FeatureServer/2"), R("fields", "属性名", K.roles.satelliteAliases, { required: ["satellite", "alias"] }), WHERE, TOKEN]) },
-    { key: "satelliteOutages", label: "衛星の障害情報", doc: "衛星の障害情報satelliteoutages", help: "衛星の障害（理由・発生日時・復旧見込み・影響）を 1 件 1 行で置く Esri の編集できるテーブル。メニュー「撮像依頼」→「衛星の障害情報…」で撮像計画の担当が登録し、撮像計画・撮像計画ファイル出力・上限シミュレーションの計算が影響を守る。障害そのものはテーブルに置き、ここにはテーブルと属性名だけを書く。",
+    { key: "satelliteOutages", label: "衛星・システムの障害情報", doc: "衛星の障害情報satelliteoutages", help: "衛星の障害（理由・発生日時・復旧見込み・影響）と、システム（発注先）の受付停止・臨時の 1 日の上限を 1 件 1 行で置く Esri の編集できるテーブル。メニュー「撮像依頼」→「衛星・システムの障害情報…」で撮像計画の担当が登録し、撮像計画・撮像計画ファイル出力・上限シミュレーションの計算が影響を守る。障害そのものはテーブルに置き、ここにはテーブルと属性名だけを書く。",
       field: TJ("satelliteOutages", "障害情報のテーブル（編集可）", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_SATELLITE_OUTAGE。役割: " + Object.entries(K.roles.satelliteOutages).map(([k, v]) => `${k}（${v}）`).join("・") }) },
     { key: "groundStations", label: "地上局", doc: "撮像計画", help: "受信可能を判定する地上局。",
       field: I("groundStations", "地上局", [T("name", "名前", { req: true }), N("lon", "経度", { req: true }), N("lat", "緯度", { req: true }), N("minElevation", "最低仰角（°）", { ph: "5" })], { title: (it) => it.name }) },

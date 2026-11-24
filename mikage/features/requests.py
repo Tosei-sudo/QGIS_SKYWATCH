@@ -1,6 +1,6 @@
 """
 撮像依頼: 撮像依頼, 撮像計画ファイル出力, 撮像予定, 地点ごとの撮像予定, 「依頼グループ…」, 「年間撮像上限…」,
-「衛星の障害情報…」, 「この地点の撮像予定」 on the map, the plan's 「臨時依頼を作成」 and the ledger read ahead.
+「衛星・システムの障害情報…」, 「この地点の撮像予定」 on the map, the plan's 「臨時依頼を作成」 and the ledger read ahead.
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ class Requests(Feature):
         # 「年間撮像上限」: what each sensor's (mode's) yearly quota has used and left, and shots not counted (tsudo, 2026-11-11).
         self.entry("quotas", "年間撮像上限…", "open_quotas", name="SatObsQuotas")
         # 「衛星の障害情報」: the satellites' outages (reason, when, impacts) that the calculations leave passes out for (tsudo, 2026-11-16).
-        self.entry("outages", "衛星の障害情報…", "open_outages", name="SatObsOutages")
+        self.entry("outages", "衛星・システムの障害情報…", "open_outages", name="SatObsOutages")
 
     def map_menu(self) -> dict:
         def plans_here(x: float, y: float) -> None:

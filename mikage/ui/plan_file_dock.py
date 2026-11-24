@@ -65,6 +65,7 @@ from ..core.request.api import day_bounds, jst_day, priority_text
 from ..core.request.api import day_passes, find_passes
 from ..core.request.api import QuotaData
 from ..core.request.api import UseBook
+from ..core.request.api import system_names
 from ..core.request.api import BOOST, NO_SYSTEM, CandidateFilter, series_choices, shown
 from ..core.request.api import (
     RequestStoreConfig, Saved, followed_where, handed_where,
@@ -479,7 +480,7 @@ class PlanFileDock(PluginDock):
             outages, problem = self.context.read_outages(repo.client, task.isCanceled)
             if problem:
                 notes.append(problem)
-            hit = attach(sats, outages)
+            hit = attach(sats, outages, system_names(systems))
             day_sats = on_day(hit, day, now)
             requests = repo.load_requests(task.isCanceled)
             # 地域の形に合わせる (tsudo 2026-11-24): the requests following an area whose shape was changed (in ArcGIS Pro too)
@@ -698,7 +699,9 @@ class PlanFileDock(PluginDock):
                 items[COLUMNS.index("雲量")].setToolTip(plain_tip(cloud_tip(c)))
             self.model.appendRow(items)
         self._rendering = False
-        rooms = room_text(plan.candidates, plan.systems) if plan else {}
+        # The day's limits of each system (システムの障害 may make them stricter).
+        rooms = (room_text(plan.candidates, plan.systems, plan.sats, plan.day, plan.passes.now if plan.passes is not None else None)
+                 if plan else {})
         listed = [s for s in (plan.systems if plan else []) if not chosen.system or s.system == chosen.system]
         total = len(plan.candidates) if plan else 0
         parts = [self.tr("表示 {n}/{m} 件").format(n=len(self.shown), m=total)] if len(self.shown) != total else []

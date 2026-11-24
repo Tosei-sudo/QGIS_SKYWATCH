@@ -136,13 +136,16 @@ def new_request(dock, r: Reading) -> str:
 
 
 def outage(dialog, r: Reading) -> str:
-    """衛星の障害情報: the form to add one, with the satellite and the sentence (saved from the form)."""
+    """衛星・システムの障害情報: the form to add one, with the satellite (else the system) and the sentence (saved from the form)."""
     form = dialog.add() if dialog is not None else None
     if form is not None:
         if r.satellites:
             form.satellite.setCurrentText(r.satellites[0])
+        elif r.systems and r.systems[0] != ALL and form.kind.isEnabled():
+            form.kind.setCurrentIndex(1)
+            form.system.setCurrentText(r.systems[0])
         form.note.setPlainText(r.text)
-    return tr("衛星の障害情報: 登録の画面（保存は画面で）")
+    return tr("衛星・システムの障害情報: 登録の画面（保存は画面で）")
 
 
 # ---- 画像 (features/images.py) --------------------------------------------------------------------------

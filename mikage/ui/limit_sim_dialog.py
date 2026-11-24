@@ -22,6 +22,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.plan.api import attach
+from ..core.request.api import system_names
 from ..core.plan.api import fetch_clouds
 from ..core.request.api import chances_of, wanted
 from ..core.request.api import missed_ids
@@ -313,7 +314,7 @@ class LimitSimDialog(QDialog):
         def work(task):
             # 衛星の障害情報 as they are now: their passes left out, the days their stricter values (simulate).
             outages, problem = self.context.read_outages(client, task.isCanceled)
-            hit = attach(sats, outages)
+            hit = attach(sats, outages, system_names(systems))
             # The satellites' passes over the days, once for both runs.
             passes = run_passes(requests, start, days, hit, time.time() * 1000, task.isCanceled)
             task.check()
