@@ -158,7 +158,7 @@ def test_shots_handed_out_are_marked_in_the_schedule_and_not_changed(plugin):
     dock.show()
     dock.reload(refresh=True)
     assert wait_for(lambda: dock._loaded and dock.task is None and dock.day == day.isoformat() and dock.outages), dock.status.text()
-    notes = [dock.model.item(i, SCHEDULE_COLUMNS.index("理由・メモ")).text() for i in range(dock.model.rowCount())]
+    notes = [dock.model.item(i, SCHEDULE_COLUMNS.index("理由")).text() for i in range(dock.model.rowCount())]
     assert notes and all(n.startswith("衛星の障害の影響あり（使えない方向）") for n in notes), notes
     assert "衛星の障害の影響あり 2 件（予定は変えない" in dock.status.text()
     assert "片側のみ" in dock.model.item(0, SCHEDULE_COLUMNS.index("衛星")).toolTip()
@@ -166,4 +166,4 @@ def test_shots_handed_out_are_marked_in_the_schedule_and_not_changed(plugin):
     assert [dict(r["attributes"]) for r in fake.layers[base.HISTORY].rows] == before
     # Read again without it (deleted as entered by mistake): no longer marked.
     p.context.set_outages([])
-    assert wait_for(lambda: not dock.model.item(0, SCHEDULE_COLUMNS.index("理由・メモ")).text().startswith("衛星の障害"))
+    assert wait_for(lambda: not dock.model.item(0, SCHEDULE_COLUMNS.index("理由")).text().startswith("衛星の障害"))

@@ -80,13 +80,17 @@ from ..qgis_io.tasks import error_text, run_task
 from .docks import PluginDock, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .list_views import column_menus
+from .memo_column import MEMO, memo_item
 from .plan_overlay import PlanOverlay
 from .check_filter import CheckFilter
 from .request_groups import GroupFilter
 
-COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ")
+#: 「メモ」: the request's note, hidden until shown from the header's menu (tsudo 2026-11-24).
+COLUMNS = ("採用", "システム", "衛星", "撮像時刻", "依頼", "依頼グループ", "区分", "優先度", "雲量", "枚数", "結果・理由", "繰り上げ", MEMO)
 #: The column of 結果・理由.
 RESULT_COLUMN = COLUMNS.index("結果・理由")
+#: The column of 繰り上げ (checked to take the raise).
+BOOST_COLUMN = COLUMNS.index("繰り上げ")
 #: How 「該当システムなし」 is kept in the settings (an empty value is 「すべてのシステム」).
 _NO_SYSTEM_KEPT = "*none*"
 
@@ -220,7 +224,7 @@ class PlanFileDock(PluginDock):
         self.table.selectionModel().currentRowChanged.connect(lambda current, _: self._row(current.row()))
         layout.addWidget(self.table, 1)
         # The columns shown, hidden and in order from the header's right-click menu, kept per user.
-        self.table_columns = column_menus("plan-files", self.table, self)
+        self.table_columns = column_menus("plan-files", self.table, self, hidden=(self.tr(MEMO),))
         moves = FlowLayout()
         self.up_button = QPushButton(self.tr("上へ"))
         self.up_button.clicked.connect(lambda: self.move(-1))
@@ -640,7 +644,7 @@ class PlanFileDock(PluginDock):
             items = [take, *(QStandardItem(t) for t in (
                 c.system.label if c.system else "", satellite_name(c), time_text(c.planned) if taken else "",
                 f"{r.name}（{times}）" if times else r.name, r.group,
-                r.category, prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost]
+                r.category, prio, cloud, scenes, (c.result + ("：" + note if note else "")))), boost, memo_item(r.note)]
             result = items[RESULT_COLUMN]
             color = QColor("#16a34a" if taken else "#6b7280")
             if taken and merged:
@@ -762,7 +766,7 @@ class PlanFileDock(PluginDock):
             return
         if item.column() == 0:
             c.manual = TAKEN if checked else HELD
-        elif item.column() == len(COLUMNS) - 1:
+        elif item.column() == BOOST_COLUMN:
             c.boost_taken = checked
         else:
             return

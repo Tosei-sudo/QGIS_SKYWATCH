@@ -562,7 +562,7 @@ def request_course(p) -> Course:
           done=lambda _b: MINE in schedule.group_filter.chosen(), demo=lambda: schedule.group_filter.choose(MINE)),
         S("6-1", "自分の依頼の行を読む",
           "自分の依頼の行の <b>状態</b> を見ます。<b>採用</b>: システムの計画に入った。<b>不明</b>: システムの返事がまだない。"
-          "<b>不採用</b>: 計画に入らなかった（理由は 理由・メモ に）。<b>見送り</b>: その日はシステムに出さなかった。"
+          "<b>不採用</b>: 計画に入らなかった（理由は 理由 の列に）。<b>見送り</b>: その日はシステムに出さなかった。"
           "<b>まとめ</b> の列は、近くの依頼と 1 回の撮像でまとめて撮ることを表します。",
           target=lambda: schedule.table, reveal=reveal(schedule, "撮像予定")),
         S("6-2", "見送りも表示する",
@@ -832,7 +832,7 @@ def plan_course(p) -> Course:
           "「不明」のままの行を選びます。必要なら <b>理由</b> を書き、<b>不採用</b> か <b>採用</b> を押します。"
           "間違えたときは、行を選んで <b>不明に戻す</b> を押します。",
           target=lambda: [schedule.table, schedule.reason, schedule.reject_button], reveal=reveal(schedule, "撮像予定"),
-          begin=snapshot, done=answered_by_hand, demo=by_hand, ok="行の状態が変わり、理由が 理由・メモ に入ります"),
+          begin=snapshot, done=answered_by_hand, demo=by_hand, ok="行の状態が変わり、理由が 理由 の列に入ります"),
     ], setup=setup)
 
 

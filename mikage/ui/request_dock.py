@@ -36,10 +36,14 @@ from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
 from .check_filter import CheckFilter
 from .list_views import ListViews
+from .memo_column import MEMO, memo_item
 from .plan_overlay import PlanOverlay
 from .request_groups import NO_GROUP_TEXT, GroupFilter
 
 STATUS_COLORS = {"有効": "#2563eb", "停止": "#6b7280", "完了": "#16a34a"}
+#: The list's columns; 「メモ」 (the request's note) hidden until shown from the header's menu.
+COLUMNS = ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間", "優先度", "種別", "状態", MEMO)
+_STATUS = COLUMNS.index("状態")
 
 
 def _now_ms() -> float:
@@ -137,9 +141,9 @@ class RequestDock(PluginDock):
         self.table.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
         self.table.doubleClicked.connect(lambda _: self.edit())
         self.body.addWidget(self.table, 1)
-        # 「ビュー」: the columns and the filters kept under a name (per user).
+        # 「ビュー」: the columns and the filters kept under a name (per user). 「メモ」 hidden until shown (tsudo 2026-11-24).
         self.views = ListViews("requests", self.table, {"category": self.category_filter, "status": self.status_filter,
-                                                        "group": self.group_filter}, None, self)
+                                                        "group": self.group_filter}, None, self, hidden=(self.tr(MEMO),))
         top.addWidget(self.views.button)
 
         edit = FlowLayout()
@@ -294,8 +298,7 @@ class RequestDock(PluginDock):
             # another one chosen with it and still shown is.
             self.chosen = next((r for r in self.shown if r.id in was_selected), None)
         self.model.clear()
-        self.model.setHorizontalHeaderLabels([self.tr(h) for h in ("名称", "依頼グループ", "管理番号", "識別番号", "区分", "達成条件", "期間",
-                                                                   "優先度", "種別", "状態")])
+        self.model.setHorizontalHeaderLabels([self.tr(h) for h in COLUMNS])
         chosen_row = -1
         try:
             # Saved while the ledger could not be reached, waiting to be sent (core/offline.py): marked blue.
@@ -307,8 +310,8 @@ class RequestDock(PluginDock):
             items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
                                                 r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
-                                                r.achieve, _period(r), prio, r.kind, r.status)]
-            items[-1].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
+                                                r.achieve, _period(r), prio, r.kind, r.status)] + [memo_item(r.note)]
+            items[_STATUS].setForeground(QBrush(QColor(STATUS_COLORS.get(r.status, "#2563eb"))))
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
             if r.id in waiting:
