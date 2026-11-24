@@ -34,7 +34,7 @@ import numpy as np
 
 from ..core.ai.api import OnnxSignature, OnnxValue
 from ..core.errors import Coded
-from ..core.win64 import NotCopied, add_package
+from ..core.win64 import NotCopied, add_package, keep_off_path, warn_in_place
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Where the Windows zip keeps its ONNX Runtime.
@@ -89,10 +89,14 @@ def load_ort(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
     if _ort is not None:
         return _ort
     quiet_telemetry()
+    # QGIS's own is looked for with the Windows zip's folder off the path: found there, it would be loaded in place (core/win64).
+    keep_off_path(vendored)
     try:
         import onnxruntime as ort  # noqa: PLC0415 (large, and most sessions never need it)
     except ImportError:
         ort = None
+    if ort is not None:
+        warn_in_place(ort, vendored)
     if ort is None and os.path.isdir(os.path.join(vendored, "onnxruntime")):
         if sys.version_info[:2] != VENDORED_PYTHON:
             raise RuntimeMissing(f"同梱の onnxruntime は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"

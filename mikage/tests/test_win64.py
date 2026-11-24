@@ -1,4 +1,4 @@
-"""The Windows zip's libraries on Python's path: native ones from a copy outside the plugin's folder (core/win64)."""
+"""The Windows zip's libraries: native ones from a copy outside the plugin's folder, pure ones on their own, the zip's folder never on the path (core/win64)."""
 import os
 import sys
 
@@ -14,6 +14,9 @@ def clean(monkeypatch):
     monkeypatch.setattr(win64, "_reporter", None)
     monkeypatch.setattr(win64, "RENAME_WAITS", (0, 0, 0))
     monkeypatch.setattr(sys, "path", list(sys.path))
+    yield
+    for name in [n for n in sys.modules if n.split(".")[0].endswith("_for_test")]:
+        del sys.modules[name]
 
 
 def package(folder, name, files):
@@ -23,11 +26,62 @@ def package(folder, name, files):
         path.write_bytes(data)
 
 
-def test_a_pure_python_package_is_read_in_place(tmp_path):
-    package(tmp_path / "win64", "tzdata", {"__init__.py": b"", "zoneinfo/Asia/Tokyo": b"TZif"})
-    assert win64.add_package("tzdata", str(tmp_path / "win64"), str(tmp_path / "cache")) == str(tmp_path / "win64")
-    assert sys.path[-1] == str(tmp_path / "win64")
-    assert not (tmp_path / "cache").exists()
+def test_a_pure_python_package_is_imported_on_its_own_without_the_folder_on_the_path(tmp_path):
+    """
+    2026-11-24: ext/win64 put on the path for tzdata (the settings' timeZone)
+    let the generative AI used afterwards import onnxruntime and genai from
+    there, so their DLLs locked the plugin's folder (update and uninstall
+    failed until QGIS closed). Read in place, but alone.
+    """
+    import importlib.resources
+    import importlib.util
+
+    folder = tmp_path / "win64"
+    package(folder, "tzdata_for_test", {"__init__.py": b"", "zoneinfo/__init__.py": b"", "zoneinfo/Asia/Tokyo": b"TZif"})
+    package(folder, "nativepkg_beside_for_test", {"__init__.py": b"", "_core.pyd": b"MZ"})
+    assert win64.add_package("tzdata_for_test", str(folder), str(tmp_path / "cache")) == str(folder)
+    assert str(folder) not in sys.path and not (tmp_path / "cache").exists()
+    import tzdata_for_test  # noqa: PLC0415
+
+    assert tzdata_for_test.__file__ == str(folder / "tzdata_for_test" / "__init__.py")
+    # Its own subpackages from there (zoneinfo reads the zones so).
+    assert importlib.resources.files("tzdata_for_test.zoneinfo").joinpath("Asia/Tokyo").read_bytes() == b"TZif"
+    # The packages beside it are not found there.
+    assert importlib.util.find_spec("nativepkg_beside_for_test") is None
+
+
+def test_python_s_own_pure_package_comes_first(tmp_path):
+    folder = tmp_path / "win64"
+    package(folder, "colorsys", {"__init__.py": b"raise RuntimeError('the zip one')\n"})
+    sys.modules.pop("colorsys", None)
+    assert win64.add_package("colorsys", str(folder)) == str(folder)
+    import colorsys  # noqa: PLC0415 (the standard library's)
+
+    assert not colorsys.__file__.startswith(str(folder))
+
+
+def test_the_folder_left_on_the_path_by_an_older_version_is_taken_off(tmp_path):
+    """The path outlives an update of the plugin: an older version's ext/win64 entry would still expose the DLLs."""
+    folder = tmp_path / "win64"
+    package(folder, "nativepkg_left_for_test", {"__init__.py": b"", "_core.pyd": b"MZ"})
+    sys.path.append(str(folder))
+    sys.path.append(str(folder) + os.sep)
+    win64.add_package("sgp4", str(folder), str(tmp_path / "cache"))  # Any package of the zip, even one it lacks.
+    assert not any(os.path.abspath(p) == str(folder) for p in sys.path if p)
+
+
+def test_a_module_an_older_version_loaded_in_place_is_told(tmp_path):
+    import types
+
+    folder = tmp_path / "win64"
+    told = []
+    win64.set_reporter(lambda text, problem: told.append((text, problem)))
+    module = types.ModuleType("onnxruntime")
+    module.__file__ = str(folder / "onnxruntime" / "__init__.py")
+    assert win64.warn_in_place(module, str(folder))
+    assert told and told[0][1] and "QGIS を閉じて開き直すまで" in told[0][0]
+    module.__file__ = str(tmp_path / "cache" / "onnxruntime-1" / "onnxruntime" / "__init__.py")
+    assert not win64.warn_in_place(module, str(folder))
 
 
 def test_a_package_with_a_dll_is_loaded_from_a_copy_so_qgis_can_replace_the_plugin(tmp_path):
@@ -146,9 +200,9 @@ def test_a_rename_refused_for_good_uses_the_finished_temporary_copy(tmp_path, mo
 def test_where_each_package_was_loaded_from_is_told_to_the_log(tmp_path):
     folder, cache = tmp_path / "win64", tmp_path / "cache"
     package(folder, "sgp4", {"__init__.py": b"", "vallado_cpp.pyd": b"MZ"})
-    package(folder, "tzdata", {"__init__.py": b""})
+    package(folder, "tzdata_told_for_test", {"__init__.py": b""})
     path = win64.add_package("sgp4", str(folder), str(cache))
-    win64.add_package("tzdata", str(folder), str(cache))  # Pure Python, in place: nothing to tell.
+    win64.add_package("tzdata_told_for_test", str(folder), str(cache))  # Pure Python, in place: nothing to tell.
     told = []
     win64.set_reporter(lambda text, problem: told.append((text, problem)))  # The plugin's log, set after sgp4 was imported.
     assert told == [(f"sgp4 を {path} から読み込み（プラグインのフォルダーの外の写し）", False)]

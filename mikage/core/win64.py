@@ -22,13 +22,20 @@ plugin's folder (2026-11-21).
 
 The copy is named after its contents, so a new zip with other libraries
 gets a new copy, and older copies are removed when nothing holds them.
-Pure-Python packages (tzdata) are read from the plugin's folder as they are.
+Pure-Python packages (tzdata) are read from the plugin's folder as they are,
+each imported on its own: ext/win64 itself is never put on Python's path,
+because every package in it could then be imported from there, the native
+ones too. That happened (2026-11-24): the settings' timeZone put ext/win64 on
+the path for tzdata, and the generative AI used afterwards loaded
+onnxruntime and onnxruntime-genai from the plugin's folder (QGIS then failed
+to update or uninstall the plugin until it was closed).
 Where each package was loaded from is told to the reporter (the plugin's
 log) so a failed update can be traced.
 """
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import shutil
 import sys
@@ -175,12 +182,66 @@ def set_reporter(reporter: Optional[Callable[[str, bool], None]]) -> None:
                 pass
 
 
+def keep_off_path(folder: str = FOLDER) -> None:
+    """
+    Takes the Windows zip's folder (ext/win64) off Python's path: its
+    packages would be imported from there, DLLs and all (an older version
+    of the plugin, before 2026-11-24, put it there for tzdata, and the path
+    outlives an update of the plugin).
+    """
+    own = os.path.normcase(os.path.abspath(folder))
+    sys.path[:] = [p for p in sys.path if not (isinstance(p, str) and p and os.path.normcase(os.path.abspath(p)) == own)]
+
+
+def loaded_in_place(module, folder: str = FOLDER) -> bool:
+    """Whether `module` was imported from the Windows zip's folder itself (its DLLs then lock the plugin's folder)."""
+    f = getattr(module, "__file__", None)
+    own = os.path.normcase(os.path.abspath(folder)) + os.sep
+    return isinstance(f, str) and os.path.normcase(os.path.abspath(f)).startswith(own)
+
+
+def warn_in_place(module, folder: str = FOLDER) -> bool:
+    """
+    Tells the log when `module` was already imported from the Windows zip's
+    folder itself in this QGIS (by an older version of the plugin): QGIS
+    cannot update or uninstall the plugin until it is closed. Whether so.
+    """
+    if not loaded_in_place(module, folder):
+        return False
+    name = getattr(module, "__name__", "?")
+    _tell(name, f"{name} はこの QGIS でプラグインのフォルダーから読み込み済み（以前の版）。QGIS を閉じて開き直すまで、"
+                "プラグインの更新・アンインストールは失敗する", True)
+    return True
+
+
+def _import_alone(package: str, package_dir: str) -> None:
+    """Imports the pure-Python `package` from `package_dir` without putting its folder on the path (its subpackages from there too)."""
+    if package in sys.modules:
+        return
+    spec = importlib.util.spec_from_file_location(package, os.path.join(package_dir, "__init__.py"),
+                                                  submodule_search_locations=[package_dir])
+    if spec is None or spec.loader is None:
+        raise ImportError(f"{package} を読み込めない（{package_dir}）")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[package] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(package, None)
+        raise
+
+
 def add_package(package: str, folder: str = FOLDER, root: Optional[str] = None, first: bool = False) -> Optional[str]:
     """
-    Put the Windows zip's `package` on sys.path (at the front when `first`):
-    the folder used, or None when the zip has none. NotCopied when it has
-    native code and no copy outside the plugin's folder could be made.
+    Makes the Windows zip's `package` importable: a package with native
+    code from a copy outside the plugin's folder put on sys.path (at the
+    front when `first`), a pure-Python one imported from the zip's folder on
+    its own (when Python has none of its own); the folder used, or None
+    when the zip has none. NotCopied when it has native code and no copy
+    outside the plugin's folder could be made. The zip's folder itself is
+    never on sys.path.
     """
+    keep_off_path(folder)
     key = os.path.join(folder, package)
     if key in _added:
         return _added[key]
@@ -188,23 +249,26 @@ def add_package(package: str, folder: str = FOLDER, root: Optional[str] = None, 
     if not os.path.isdir(package_dir):
         _added[key] = None
         return None
-    path = folder
     files = _files(package_dir)
-    if any(f.lower().endswith(NATIVE) for f in files):
-        name = f"{package}-{_digest(package_dir, files)}"
-        reasons = []
-        for place in _roots(root):
-            try:
-                path = _copy(package, package_dir, name, place)
-                break
-            except OSError as error:  # No rights, no space: the next place.
-                reasons.append(f"{place}: {error.strerror or error}")
-        else:
-            why = "; ".join(reasons)
-            _tell(package, f"{package} をプラグインのフォルダーの外に写せず、読み込まない（{why}）。"
-                           "プラグインのフォルダーから直接読むと、QGIS を閉じるまで更新・アンインストールが失敗するため", True)
-            raise NotCopied(f"{package} をプラグインのフォルダーの外に写せず（{why}）")
-        _tell(package, f"{package} を {path} から読み込み（プラグインのフォルダーの外の写し）")
+    if not any(f.lower().endswith(NATIVE) for f in files):
+        if package not in sys.modules and importlib.util.find_spec(package) is None:
+            _import_alone(package, package_dir)
+        _added[key] = folder
+        return folder
+    name = f"{package}-{_digest(package_dir, files)}"
+    reasons = []
+    for place in _roots(root):
+        try:
+            path = _copy(package, package_dir, name, place)
+            break
+        except OSError as error:  # No rights, no space: the next place.
+            reasons.append(f"{place}: {error.strerror or error}")
+    else:
+        why = "; ".join(reasons)
+        _tell(package, f"{package} をプラグインのフォルダーの外に写せず、読み込まない（{why}）。"
+                       "プラグインのフォルダーから直接読むと、QGIS を閉じるまで更新・アンインストールが失敗するため", True)
+        raise NotCopied(f"{package} をプラグインのフォルダーの外に写せず（{why}）")
+    _tell(package, f"{package} を {path} から読み込み（プラグインのフォルダーの外の写し）")
     if path not in sys.path:
         if first:
             sys.path.insert(0, path)
