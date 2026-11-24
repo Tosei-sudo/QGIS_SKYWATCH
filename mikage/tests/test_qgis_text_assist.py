@@ -193,6 +193,8 @@ class FakeWriter:
         self.asked = []
         #: What it was given to read ahead (prime).
         self.primed_with = []
+        #: Whether each write kept what it read (keep).
+        self.keeps = []
         #: Its size (billions of parameters), as GenAiWriter reads it from genai_config.json.
         self.params = params
 
@@ -203,6 +205,7 @@ class FakeWriter:
         self.asked.append((list(messages), max_tokens, one_line))
         #: Whether what was read was to be kept (文で操作: GenAiWriter reads only what follows the list next time).
         self.kept = keep
+        self.keeps.append(keep)
         #: When the screen said the answer was enough (GenAiWriter stops there).
         self.until = until
         reply = self.replies.pop(0) if self.replies else ""

@@ -1055,6 +1055,7 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
   "mail": "メールの作成",
   "receive": "外部からの図形",
   "command": "文で操作",
+  "chat": "データに質問",
   "error": "エラー"
  },
  "auditFormats": [
@@ -1715,14 +1716,15 @@ const SPEC = [
       field: TJ("glossary", "単語集のテーブル", { ph: "URL か { \"url\", \"fields\", \"where\", \"token\" }", help: "TBL_GLOSSARY。役割: " + Object.entries(K.roles.glossary).map(([k, v]) => `${k}（${v}）`).join("・") + "。必須は term（語）。variants（表記ゆれ）・reading（よみ）・kinds（大分類）はカンマ区切り" }) },
     { key: "textAssist", label: "文章の手伝い（この PC の生成 AI）", doc: "文章の手伝い小さな生成-aitextassist", help: "この PC で動く小さな生成 AI（ONNX Runtime GenAI のモデル。sarashina2.2 の 1B・3B の int4 など）で、文章の案を出す。モデルの一覧（models）に名前と置き場所を書き、タスクごとにどのモデルを使うかを選ぶ（tasks）。モデルを割り当てないタスクはボタンを出さない（使う人がモデルを選ぶ場面はない）。どのタスクも案を出すだけで、押すまで欄は変わらない。モデルは zip に入れず、置き場所を書く。読んでおくモデルは一度に 1 つ（別のモデルのタスクでは読み込み直しで数秒）。以前の書き方（\"textAssist\": \"パス\"、model・maxTokens など）も読め、そのモデルを「備考を整える」と「申し送りの下書き」に割り当てたものになる。",
       field: O("textAssist", "文章の手伝い", [
-        M("models", "モデルの一覧", { value: "auto", keyHelp: "名前（small・large など）", valueHelp: "置き場所か { \"path\", \"threads\" }", help: "置き場所は genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）。threads はスレッド数（0 でコア数 − 1、最大 8）" }),
+        M("models", "モデルの一覧", { value: "auto", keyHelp: "名前（small・large など）", valueHelp: "置き場所か { \"path\", \"threads\" }、サーバーなら { \"url\", \"model\" }", help: "置き場所は genai_config.json のあるフォルダ、その .zip、または .zip の URL。相対パスは設定ファイルのフォルダから。共有フォルダ・zip・URL は初回に QGIS のプロファイルへコピー（展開）。threads はスレッド数（0 でコア数 − 1、最大 8）。社内サーバーの生成 AI は { \"url\": \"https://…/v1\", \"model\": \"サーバーでのモデル名\", \"timeoutSeconds\": 300 }（OpenAI 互換の chat/completions。vLLM・llama.cpp の server など。QGIS の認証設定とプロキシを使う）" }),
         TM("tasks", "タスクごとのモデル", [
           ["tidyNote", "備考を整える", "1B で可"], ["handoverDraft", "申し送りの下書き", "1B で可"],
           ["noteFields", "項目の提案（備考から種別・活動などを拾う）", "3B 級向け"], ["searchWords", "言葉で探す（エクスポートの条件）", "3B 級向け"],
           ["summary", "まとめ（選んだ記録を数文に）", "3B 級向け"], ["translate", "英訳（通報の note.en）", "3B 級向け"],
           ["requestDraft", "依頼文から下書き（撮像依頼のフォーム）", "3B 級向け"],
           ["command", "文で操作（ツールバーの文から操作を選ぶ）", "3B 級向け"],
-        ], { help: "選べるのは上のモデルの一覧の名前。3B 級向けのタスクに小さいモデル（2B 未満）を割り当てると、案に「精度が低いことがある」と添える。タスクの値は { \"model\": \"large\", \"maxTokens\": 200, \"prompt\": \"…\" } とも書け（最大の長さ・指示文の置き換え。tidyNote と requestDraft は examples も、command は words（{ \"計画ファイル出力\": [\"発注ファイル\"] }: その操作だけを指す言葉の追加）も）、ここで選び直してもほかの指定は残す" }),
+          ["dataChat", "データに質問（表に文で質問。生成 AI は SQL と答えの文だけ）", "9B 級以上（社内 GPU なら 27B）"],
+        ], { help: "選べるのは上のモデルの一覧の名前。3B 級向けのタスクに小さいモデル（2B 未満）、dataChat に 6B 未満を割り当てると、案に「精度が低いことがある」と添える。タスクの値は { \"model\": \"large\", \"maxTokens\": 200, \"prompt\": \"…\" } とも書け（最大の長さ・指示文の置き換え。tidyNote と requestDraft は examples も、command は words（{ \"計画ファイル出力\": [\"発注ファイル\"] }: その操作だけを指す言葉の追加）も、dataChat は tables（見せる表: [\"TBL_OBSERVATION\", …]）・rules（決まりの文の追加）・examples（[{ \"question\", \"sql\" }]）も）、ここで選び直してもほかの指定は残す" }),
         N("keepMinutes", "使い終えてからモデルを残す分数", { min: 0, ph: "10", help: "過ぎるとメモリーを返す（次は読み込み直しで数秒）。0 ですぐ外す" }),
       ]) },
     { key: "alertReports", label: "通報（注目の記録）", doc: "通報注目の記録alertreports", help: "注目の記録を区切り文字の 1 件 1 行の通報文に。条件（分類・活動・確度・ジオフェンス）と通報した記録は Esri に置き、ここには URL・属性名と、名前付きのフォーマット（複数）を書く。抽出した記録は重要度スコアの高い順。",

@@ -28,6 +28,12 @@ takes or leaves:
   typed in the toolbar made into one of a fixed list of operations (which
   screen to open and what to put in it), the model only choosing the
   operation and every value read by code.
+- データに質問 (dataChat; core/data_chat.py, tsudo 2026-11-24): a question
+  on the data (「先月の舞鶴の記録は何件？」) made into one SELECT of the
+  「データ分析」 engine, which reads the tables; the model then says the
+  result in 1–3 sentences, checked against the table by code. A model of
+  about 9B (a computer's), or one on an internal server (`url`: an
+  OpenAI-compatible API, e.g. a 27B on a GPU).
 
 A small model writes well-formed sentences but can get facts wrong, so what
 it writes is checked here: numbers that are not in what it was given are
@@ -36,7 +42,8 @@ choices are dropped, and nothing is saved without the person choosing it.
 
 The settings file's `textAssist` lists the models by name (a folder or .zip
 of an ONNX Runtime GenAI model: genai_config.json, model.onnx,
-tokenizer.json …) and gives each task one of them; a task given none does
+tokenizer.json …, or the URL of a server's OpenAI-compatible chat API) and
+gives each task one of them; a task given none does
 not show. The person using the plugin never chooses a model. The
 instructions given to the model may be changed per task.
 
@@ -126,6 +133,9 @@ REQUEST_PROMPT = (
     "文にない項目は「なし」とだけ書いてください。推測で値を作らないでください。"
     "値だけを書き、説明・理由・括弧書きは書かないでください。"
 )
+#: The instructions for データに質問 (core/data_chat.py; the tables, rules and dates follow them).
+DATA_PROMPT = ("あなたは衛星画像の判読システム「ミカゲ」のデータを調べる係です。"
+               "質問を、下の表を読む SQLite の SELECT 文 1 つにします。")
 #: The instructions for 文で操作 (core/text_command.py; the list of operations follows them).
 COMMAND_PROMPT = (
     "あなたは地図ソフト MIKAGE の操作を選ぶ係です。利用者の依頼に合う操作を、下の一覧から 1 つだけ選んでください。"
@@ -146,31 +156,54 @@ HANDOVER_LIMIT = 3000
 TERMS_LIMIT = 30
 
 #: What the model can be asked to do (`textAssist.tasks`), in the order they are listed.
-TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft", "command")
+TASKS = ("tidyNote", "handoverDraft", "noteFields", "searchWords", "summary", "translate", "requestDraft", "command", "dataChat")
 TASK_LABELS = {"tidyNote": "備考を整える", "handoverDraft": "申し送りの下書き", "noteFields": "項目の提案", "searchWords": "言葉で探す",
-               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き", "command": "文で操作"}
+               "summary": "まとめ", "translate": "英訳", "requestDraft": "依頼文から下書き", "command": "文で操作",
+               "dataChat": "データに質問"}
 #: The tasks a model of about 3B is meant for: a smaller one is said to be (not refused).
 LARGE_TASKS = frozenset({"noteFields", "searchWords", "summary", "translate", "requestDraft", "command"})
 #: Smaller than this (billions of parameters) is a small model for LARGE_TASKS.
 LARGE_MODEL = 2.0
+#: The tasks a model of about 9B is meant for (2026-11-24, 30 questions: 4B 22, 9B 26, 27B 28 of 30 SQL right).
+CHAT_TASKS = frozenset({"dataChat"})
+#: Smaller than this (billions) is a small model for CHAT_TASKS.
+CHAT_MODEL = 6.0
 #: Each task's own: how long it may write (tokens) and its instructions.
 TASK_DEFAULTS: dict[str, tuple[int, str]] = {
     "tidyNote": (160, NOTE_PROMPT), "handoverDraft": (320, HANDOVER_PROMPT), "noteFields": (160, FIELDS_PROMPT),
     "searchWords": (160, SEARCH_PROMPT), "summary": (480, SUMMARY_PROMPT), "translate": (240, TRANSLATE_PROMPT),
-    "requestDraft": (240, REQUEST_PROMPT), "command": (24, COMMAND_PROMPT),
+    "requestDraft": (240, REQUEST_PROMPT), "command": (24, COMMAND_PROMPT), "dataChat": (400, DATA_PROMPT),
 }
+#: How long a server's model may take for one reply (s; `timeoutSeconds`).
+SERVER_TIMEOUT = 300.0
 #: The name of the one model of the shorter settings (`"textAssist": "…"`, or `{ "model": … }`).
 ONE_MODEL = "model"
 
 
 @dataclass(frozen=True)
 class TextModel:
-    """One of `textAssist.models`."""
+    """One of `textAssist.models`: on this computer (`path`) or on a server (`url`)."""
     name: str
     #: A folder (or .zip of one) holding genai_config.json, as written (relative to the settings file), or a .zip's URL.
     path: str
     #: Threads it uses (0: all cores but one).
     threads: int = 0
+    #: A server's chat API (OpenAI-compatible: …/v1 or …/v1/chat/completions; vLLM, llama.cpp's server, Ollama …).
+    url: str = ""
+    #: The model's name on that server (`model` of the request; "" when the server has one).
+    remote: str = ""
+    #: How long one reply may take (s).
+    timeout: float = SERVER_TIMEOUT
+
+    @property
+    def on_server(self) -> bool:
+        return bool(self.url)
+
+    @property
+    def chat_url(self) -> str:
+        """The address replies are asked of (…/chat/completions)."""
+        u = self.url.strip().rstrip("/")
+        return u if u.endswith("/chat/completions") else u + "/chat/completions"
 
 
 @dataclass(frozen=True)
@@ -184,6 +217,10 @@ class TextTask:
     examples: tuple[tuple[str, str], ...] = ()
     #: 文で操作 only: more words naming an operation on their own ((operation key, words), core/text_command.py).
     words: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    #: データに質問 only: the tables offered (SQL names or kinds; empty: those of core/data_chat.KINDS the settings have).
+    tables: tuple[str, ...] = ()
+    #: データに質問 only: more rules said to the model (one line each: the organisation's words).
+    rules: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -192,12 +229,13 @@ class TextTask:
 
 def task_of(name: str, model: str, max_tokens: Optional[int] = None, prompt: Optional[str] = None,
             examples: Optional[tuple[tuple[str, str], ...]] = None,
-            words: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> TextTask:
+            words: tuple[tuple[str, tuple[str, ...]], ...] = (), tables: tuple[str, ...] = (),
+            rules: tuple[str, ...] = ()) -> TextTask:
     """A task with its defaults where nothing else is given."""
     tokens, text = TASK_DEFAULTS[name]
     if examples is None:
         examples = NOTE_EXAMPLES if name == "tidyNote" else HANDOVER_EXAMPLES if name == "handoverDraft" else ()
-    return TextTask(name, model, max_tokens or tokens, prompt or text, examples, words)
+    return TextTask(name, model, max_tokens or tokens, prompt or text, examples, words, tables, rules)
 
 
 @dataclass(frozen=True)
@@ -256,8 +294,8 @@ def _unknown(value: dict, known: Sequence[str], at: str, problems: list[str]) ->
 
 def text_assist_settings_of(value: Any, problems: list[str]) -> Optional[TextAssistSettings]:
     """
-    `textAssist`: `{ models: { 名前: 場所 | { path, threads } }, tasks: { タスク: 名前 | { model, maxTokens, prompt,
-    examples } }, keepMinutes }`. The shorter one model (a string, or `{ model, threads, maxTokens, handoverMaxTokens,
+    `textAssist`: `{ models: { 名前: 場所 | { path, threads } | { url, model, timeoutSeconds } }, tasks: { タスク: 名前 |
+    { model, maxTokens, prompt, examples } }, keepMinutes }`. The shorter one model (a string, or `{ model, threads, maxTokens, handoverMaxTokens,
     keepMinutes, notePrompt, noteExamples, handoverPrompt }`) is that model given 備考を整える and 申し送りの下書き.
     """
     at = "textAssist"
@@ -308,8 +346,14 @@ def _settings_of(value: dict, at: str, problems: list[str]) -> Optional[TextAssi
             continue
         if isinstance(m, str):
             m = {"path": m}
+        if is_record(m) and "url" in m:
+            server = _server_model_of(str(name).strip(), m, where, problems)
+            if server is not None:
+                models.append(server)
+            continue
         if not is_record(m) or not isinstance(m.get("path"), str) or not m["path"].strip():
-            problems.append(f"{where} はモデルの場所（genai_config.json のあるフォルダ・.zip・.zip の URL）か {{ path, threads }} で指定")
+            problems.append(f"{where} はモデルの場所（genai_config.json のあるフォルダ・.zip・.zip の URL）か {{ path, threads }}、"
+                            "サーバーのモデルなら {{ url, model }} で指定")
             continue
         threads = _int_of(m["threads"], f"{where}.threads", 0, 64, problems) if "threads" in m else None
         _unknown(m, ("path", "threads"), where, problems)
@@ -349,14 +393,65 @@ def _settings_of(value: dict, at: str, problems: list[str]) -> Optional[TextAssi
         elif name == "requestDraft":
             known.append("examples")
             examples = _request_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
+        elif name == "dataChat":
+            known += ["examples", "tables", "rules"]
+            examples = _chat_examples_of(t["examples"], f"{where}.examples", problems) if "examples" in t else None
         words: tuple = ()
         if name == "command":
             known.append("words")
             words = _command_words_of(t["words"], f"{where}.words", problems) if "words" in t else ()
+        tables = _lines_of(t["tables"], f"{where}.tables", "表の名前（TBL_OBSERVATION など）", problems) if name == "dataChat" and "tables" in t else ()
+        rules = _lines_of(t["rules"], f"{where}.rules", "決まりの文", problems) if name == "dataChat" and "rules" in t else ()
         _unknown(t, known, where, problems)
-        tasks.append(task_of(name, model, tokens, prompt, examples, words))
+        tasks.append(task_of(name, model, tokens, prompt, examples, words, tables, rules))
     _unknown(value, ("models", "tasks", "keepMinutes", "model"), at, problems)
     return TextAssistSettings(tuple(models), tuple(tasks), _keep_minutes(value, at, problems))
+
+
+def _server_model_of(name: str, m: dict, where: str, problems: list[str]) -> Optional[TextModel]:
+    """A model on a server: `{ url: …/v1, model: サーバーでの名前, timeoutSeconds }`."""
+    url = m.get("url")
+    if not isinstance(url, str) or not url.strip().lower().startswith(("http://", "https://")):
+        problems.append(f"{where}.url はサーバーの API の URL（http(s)://…/v1。OpenAI 互換の chat/completions）で指定")
+        return None
+    remote = m.get("model", "")
+    if not isinstance(remote, str):
+        problems.append(f"{where}.model はサーバーでのモデルの名前（文字列）で指定")
+        remote = ""
+    timeout = SERVER_TIMEOUT
+    if "timeoutSeconds" in m:
+        v = m["timeoutSeconds"]
+        if is_number(v) and not isinstance(v, bool) and 5 <= v <= 3600:
+            timeout = float(v)
+        else:
+            problems.append(f"{where}.timeoutSeconds は 1 回の答えを待つ秒数（5〜3600）で指定")
+    if "path" in m:
+        problems.append(f"{where} の path と url は一緒に使わない（url のサーバーを使う）")
+    _unknown(m, ("url", "model", "timeoutSeconds", "path"), where, problems)
+    return TextModel(name, "", 0, url.strip(), remote.strip(), timeout)
+
+
+def _lines_of(value: Any, at: str, what: str, problems: list[str]) -> tuple[str, ...]:
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        problems.append(f"{at} は{what}の配列で指定")
+        return ()
+    return tuple(v.strip() for v in value)
+
+
+def _chat_examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tuple[str, str], ...]]:
+    """データに質問's examples: [{ "question": 質問, "sql": その SELECT（答えられない質問は「NG: 理由」） }]."""
+    if not isinstance(value, list):
+        problems.append(f"{at} は [{{ \"question\": 質問, \"sql\": SELECT 文か「NG: 理由」 }}] の配列で指定")
+        return None
+    out = []
+    for i, e in enumerate(value):
+        if not is_record(e) or not isinstance(e.get("question"), str) or not isinstance(e.get("sql"), str):
+            problems.append(f"{at}[{i}] は {{ \"question\", \"sql\" }} で指定")
+            return None
+        out.append((e["question"].strip(), e["sql"].strip()))
+    return tuple(out)
 
 
 def _examples_of(value: Any, at: str, problems: list[str]) -> Optional[tuple[tuple[str, str], ...]]:

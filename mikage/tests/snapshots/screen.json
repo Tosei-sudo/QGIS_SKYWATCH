@@ -307,6 +307,12 @@
      "checkable": true,
      "icon": "analysis.svg:97058532d31d"
     },
+    {
+     "text": "データに質問",
+     "name": "",
+     "checkable": true,
+     "icon": "data_chat.svg:b9ac26fde048"
+    },
     "-",
     {
      "text": "パンシャープン…",
@@ -555,6 +561,7 @@
   "ダッシュボード",
   "チュートリアル…",
   "ツールバーのボタン…",
+  "データに質問",
   "データ分析",
   "ドックのレイアウト",
   "ドックを初期位置に戻す",
@@ -783,7 +790,8 @@
   "SatObsDashboard",
   "SatObsAiResults",
   "SatObsEvents",
-  "SatObsAnalysis"
+  "SatObsAnalysis",
+  "SatObsDataChat"
  ],
  "docks": {
   "SatObsImageCatalog": {
@@ -793,6 +801,7 @@
    "tabs": [
     "SatObsAnalysis",
     "SatObsDashboard",
+    "SatObsDataChat",
     "SatObsEnhance",
     "SatObsInterests",
     "SatObsNotices",
@@ -3089,6 +3098,39 @@
     "        QSplitterHandle (hidden)",
     "        QSplitterHandle",
     "        QSplitterHandle",
+    "  QWidget (hidden)",
+    "    QScrollBar",
+    "  QWidget (hidden)",
+    "    QScrollBar"
+   ]
+  },
+  "SatObsDataChat": {
+   "title": "データに質問",
+   "area": 1,
+   "visible": false,
+   "tabs": [],
+   "toggle": {
+    "text": "データに質問",
+    "name": "",
+    "checkable": true,
+    "icon": "data_chat.svg:b9ac26fde048"
+   },
+   "widgets": [
+    "QAbstractButton",
+    "QAbstractButton",
+    "QScrollArea#SatObsDataChatScroll",
+    "  QWidget",
+    "    QWidget",
+    "      QLabel 「ミカゲにつながっている表（観測記録・撮像依頼・撮像予定・通報など）に、文で質問できます。読むだけで、表を変えることはしません。」",
+    "      QLineEdit#SatObsDataChatField 「例: 先月の舞鶴の記録は何件？」",
+    "        QToolButton (hidden)",
+    "      QPushButton 「聞く」",
+    "      QWidget",
+    "        QPushButton 「取消」",
+    "        QPushButton 「新しい話」",
+    "        QPushButton 「カードを消す」",
+    "      QLabel 「使えない: 設定ファイルの textAssist.tasks.dataChat にモデルがないか、個人の設定で生成 AI の機能を使わない」",
+    "      QLabel 「文は生成 AI が書き、表と照合してから出す。表と数はプログラムが読んで数えたもの（生成 AI は表の中身を作らない）。」",
     "  QWidget (hidden)",
     "    QScrollBar",
     "  QWidget (hidden)",

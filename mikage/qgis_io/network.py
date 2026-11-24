@@ -204,7 +204,7 @@ def _time_limit_ms(url: str) -> int:
     return timeout
 
 
-def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes] = None) -> bytes:
+def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes] = None, limit_ms: Optional[int] = None) -> bytes:
     """
     Makes a request (on a line kept for requests) and waits for its answer;
     it stops as soon as the task running it is cancelled or it takes too
@@ -218,7 +218,7 @@ def _send(request: QNetworkRequest, authcfg: Optional[str], body: Optional[bytes
         raise Cancelled()
     url = request.url().toString()
     request.setAttribute(QNetworkRequest.Attribute.RedirectPolicyAttribute, QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy)
-    limit = _time_limit_ms(url)
+    limit = _time_limit_ms(url) if limit_ms is None else limit_ms
     job = _Job(request, authcfg, body)
     line = _take()
     started = time.monotonic()
@@ -278,6 +278,21 @@ def qgis_transport(auth_for: Optional[AuthFor] = None) -> Callable[[str, dict], 
         return _send(request, auth_for(url) if auth_for else None, form_body(form))
 
     return send
+
+
+def post_json(url: str, body: dict, authcfg: Optional[str] = None, limit_ms: Optional[int] = None) -> bytes:
+    """
+    POSTs `body` as JSON (off the main thread) and gives the answer's bytes;
+    `limit_ms`: how long it may take (a generative model's reply takes longer
+    than a read: データに質問's server). Raises EsriError when it cannot.
+    """
+    import json
+
+    if on_main_thread():
+        raise RuntimeError("通信は QgsTask の中で実行")
+    request = _request(url)
+    request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+    return _send(request, authcfg, json.dumps(body, ensure_ascii=False).encode("utf-8"), limit_ms)
 
 
 def get_bytes(url: str, authcfg: Optional[str] = None) -> bytes:
