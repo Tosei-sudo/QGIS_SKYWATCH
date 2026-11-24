@@ -375,6 +375,14 @@ legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
    "countFrom": "COUNT_FROM",
    "note": "NOTE"
   },
+  "requestAreaChanges": {
+   "id": "CHANGE_ID",
+   "areaId": "NAMED_AREA_ID",
+   "requestId": "REQ_ID",
+   "name": "REQ_NAME",
+   "action": "CHANGE_ACTION",
+   "reason": "REASON"
+  },
   "observationStores": {
    "id": "OBS_ID",
    "imageId": "IMAGE_ID",
@@ -1672,7 +1680,9 @@ const SPEC = [
         T("shots", "撮像の範囲のレイヤー", { ph: "https://…/FeatureServer/22", help: "TBL_REQUEST_SHOT（ポリゴン）。書き出したファイルの 1 行ごとの撮像の範囲（まとめた依頼は書き出す四角）。撮像予定ドックで依頼の範囲に重ねて表示。なくても動く" }),
         R("shotFields", "撮像の範囲の属性名", K.roles.requestShots),
         T("quotas", "年間撮像上限のテーブル", { ph: "https://…/FeatureServer/23", help: "TBL_IMAGING_QUOTA。センサー・モードごとの年間撮像枚数の上限（年の始まりの月・当初の消費枚数）。行のないセンサー・モードは上限なし。撮像ごとに数えるので撮像の範囲のレイヤーも要る。値は衛星・センサー編集ツールで" }),
-        R("quotaFields", "年間撮像上限の属性名", K.roles.requestQuotas), CATALOG,
+        R("quotaFields", "年間撮像上限の属性名", K.roles.requestQuotas),
+        T("areaChanges", "依頼の範囲の変更記録のレイヤー", { ph: "https://…/FeatureServer/34", help: "TBL_REQUEST_AREA_CHANGE（ポリゴン）。地域（組織の関心地域）の形が変わって MIKAGE が依頼の範囲を合わせた記録と、合わせる前の範囲。撮像依頼ドックの「範囲の変更記録…」で見て、元に戻せる。なくても合わせる（元に戻せない）" }),
+        R("areaChangeFields", "範囲の変更記録の属性名", K.roles.requestAreaChanges), CATALOG,
         N("missAfterDays", "未撮像とする日数"),
         N("lookAheadDays", "残りの撮像機会を見る日数", { ph: "7", help: "期間内1回の依頼の締め切りまでの撮像機会を、計算の日のあと何日分のパスと雲量予報で数えるか（0〜16、0 で見ない）。残り 1 回なら先に、あとのほうが晴れるなら後に置く" }),
         B("sameGeometry", "定点は前回と同じ撮り方を優先", { help: "既定 true: 定点の依頼は前回の撮像と同じ衛星・軌道方向・観測方向・入射角のパスを先に試す（順番だけ。撮像の範囲のレイヤーが要る）" }),

@@ -82,6 +82,8 @@ class OrgAreasPanel(QWidget):
         self.shown: list[OrgArea] = []
         self.draft: Optional[OrgArea] = None
         self.shape_changed = False
+        #: What the last save did (with its requests made to follow the area), said with the counts until another area is chosen.
+        self.saved_text = ""
         self._saving = False
         self._removing = False
         self._tool_for: Optional[str] = None
@@ -360,6 +362,8 @@ class OrgAreasPanel(QWidget):
             combo.setEditText(value)
 
     def _fill(self, area: OrgArea, shape_changed: bool = False) -> None:
+        if self.draft is None or area.key != self.draft.key:
+            self.saved_text = ""
         self.draft = area
         self.shape_changed = shape_changed
         saved = area.oid is not None
@@ -422,6 +426,7 @@ class OrgAreasPanel(QWidget):
     def _clear_form(self) -> None:
         self._end_vertex_edit(keep=False)
         self.draft = None
+        self.saved_text = ""
         self.shape_changed = False
         self.redraw_button.setChecked(False)
         self._show_shape()
@@ -688,7 +693,8 @@ class OrgAreasPanel(QWidget):
             self.say(self.tr("取得に失敗: {m}").format(m=book.failure))
         elif book.list is not None and not self._saving:
             interest = sum(1 for a in book.areas if a.is_interest)
-            self.say(self.tr("表示 {n} 件（関心地域 {i} 件・地名のレイヤー全体 {all} 件）").format(n=len(self.shown), i=interest, all=len(book.areas)))
+            counts = self.tr("表示 {n} 件（関心地域 {i} 件・地名のレイヤー全体 {all} 件）").format(n=len(self.shown), i=interest, all=len(book.areas))
+            self.say("。".join(t for t in (self.saved_text, counts) if t))
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -819,6 +825,8 @@ class OrgAreasPanel(QWidget):
         self._saving = True
         self.say(self.tr("保存中…"))
         self._update_buttons()
+        # 地域の形に合わせる: the shape of an area with requests changed: they follow it at once.
+        moved = d.oid is not None and self.shape_changed
 
         def done(saved: OrgArea) -> None:
             self._saving = False
@@ -831,8 +839,13 @@ class OrgAreasPanel(QWidget):
                 self._fill(replace(kept))
             self._show_shape()
             numbered = not d.id and saved.id
-            self.say(self.tr("「{name}」を保存").format(name=saved.name)
-                     + (self.tr("（管理番号 {id}）").format(id=saved.id) if numbered else ""))
+            text = self.tr("「{name}」を保存").format(name=saved.name) + (
+                self.tr("（管理番号 {id}）").format(id=saved.id) if numbered else "")
+            self.saved_text = text
+            self.say(text)
+            port = self.requests()
+            if moved and saved.id and port is not None and getattr(port, "store", None) is not None:
+                port.follow_area(saved.id, lambda result: self._followed(text, result))
 
         def failed(message: str) -> None:
             self._saving = False
@@ -841,6 +854,13 @@ class OrgAreasPanel(QWidget):
             self.say("")
 
         self.book.save(d, self.shape_changed or d.oid is None, done, failed)
+
+    def _followed(self, text: str, result) -> None:
+        """The area's requests made to follow its new shape (地域の形に合わせる): said after the save."""
+        more = result.text() if result is not None else self.tr("依頼を地域の形に合わせられなかった（撮像依頼ドックに理由）")
+        if self.saved_text == text:
+            self.saved_text = "。".join(t for t in (text, more) if t)
+            self.say(self.saved_text)
 
     def cancel(self) -> None:
         self._end_vertex_edit(keep=False)

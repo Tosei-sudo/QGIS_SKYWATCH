@@ -22,6 +22,7 @@ from typing import Optional, Sequence
 
 from ..plan.api import SatelliteSpec
 from ..plan.api import CloudSeries
+from .area_link import rings_moved
 from .daily import HELD, TAKEN, Candidate, allocate, asks_weather, carries_over, gather, occurrence_key
 from .export import Written, convert_priority, row_rings
 from .follow import missed_ids
@@ -351,6 +352,9 @@ def keep_answers(earlier: Sequence[HistoryRow], rows: Sequence[HistoryRow]) -> R
     taken: set = set()
     for row in rows:
         old = answers.get((row.request_id, row.occurrence, row.part, row.system)) if row.result == TAKEN else None
+        if old is not None and not row.part and old.rings and row.rings and rings_moved(old.rings, row.rings):
+            # Answered for the area before (地域の形に合わせる changed it, 2026-11-24): kept as it was, not carried.
+            old = None
         if old is not None:
             row = dataclasses.replace(row, adoption=old.adoption, adoption_reason=old.adoption_reason, planned_at=old.planned_at,
                                       external_id=old.external_id, adoption_source=old.adoption_source)

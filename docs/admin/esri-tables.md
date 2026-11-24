@@ -77,6 +77,7 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_TRAINING_RESULT`](#tbl_training_result判読の練習の結果) | なし | 書き込み | 判読の練習の結果（提出 1 回で 1 行） | `training.exercises.results` |
 | [`TBL_IMAGE_CORRECTION`](#tbl_image_correction画像の幾何補正) | なし | 書き込み | 画像ごとのクイック幾何補正（目印の点・地形の補正。2026-11-23 に追加） | `imageCorrections` |
 | [`TBL_AREA_CATEGORY`](#tbl_area_category地域のカテゴリー) | なし | 書き込み（「関心地域・地点」の「組織」の「カテゴリー…」） | 組織の関心地域のカテゴリー（木の形。2026-11-24 に追加） | `namedAreas.categories` |
+| [`TBL_REQUEST_AREA_CHANGE`](#tbl_request_area_change依頼の範囲の変更記録) | ポリゴン | 書き込み（行を足すだけ） | 地域の形が変わって依頼の範囲を合わせた記録と、合わせる前の範囲（2026-11-24 に追加） | `requestStores[].areaChanges` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -139,6 +140,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_TRAINING_RESULT` | `EXERCISE_ID` | 問題ごとの結果（指導者の集計） |
 | `TBL_IMAGE_CORRECTION` | `IMAGE_ID` | 画像ごとの幾何補正（画像を開くたび） |
 | `TBL_AREA_CATEGORY` | `CATEGORY_ID` | カテゴリーを ID で引く・更新する |
+| `TBL_REQUEST_AREA_CHANGE` | `REQ_ID` | 依頼ごとの範囲の変更記録 |
+| `TBL_REQUEST_AREA_CHANGE` | `NAMED_AREA_ID` | 地域ごとの範囲の変更記録 |
 
 ほかに:
 
@@ -806,6 +809,27 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `ACTIVE` | 有効 | `SmallInteger` | 0 なら地域の入力で選べない（そのカテゴリーの地域はそのまま） | `active` |
 | `NOTE` | メモ | `String(1000)` | 説明 | `note` |
 
+### `TBL_REQUEST_AREA_CHANGE`（依頼の範囲の変更記録）
+
+地域（組織の関心地域、[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン)）の形が変わって、MIKAGE がその地域から作った依頼（[`TBL_IMAGING_REQUEST`](#tbl_imaging_request撮像依頼台帳) の `NAMED_AREA_ID`・`AREA_FOLLOW`）の範囲を合わせた記録（2026-11-24 に追加。tsudo「ネームドエリアの形状が更新されたら、撮像依頼も連動して更新されるようなパイプラインが欲しい」）。1 行 1 依頼 1 回。ポリゴンは**合わせる前の依頼の範囲**（「元に戻す」の行は、元に戻す前の範囲）。プラグインは行を足すだけで、変えも消しもしない。撮像依頼ドックの「範囲の変更記録…」で新しい順に見て、「更新」の行（その依頼の最後の変更）を元に戻せる（範囲を合わせる前に戻し、その依頼は地域の形に合わせるをオフ）。テーブルがなくても範囲は合わせる（記録が残らず、あとで元に戻せない）。`requestStores[].areaChanges`（属性名が違えば `requestStores[].areaChangeFields`、既定は下の名前）。
+
+- **いつ合わせるか**: 「関心地域・地点」の「組織」で地域の形を直して保存したとき（すぐ。結果を画面で出す）と、撮像計画ファイル出力の「計算」の前（ArcGIS Pro などほかで直した分。地名のレイヤーの最終編集日時が前回から動いたときだけ見る）
+- **合わせる依頼**: 状態が有効・停止で、地域の形に合わせる（`AREA_FOLLOW` = 1）の依頼。完了の依頼と、地域の形に合わせるがオフの依頼は変えない（オフの依頼は撮像依頼ドックの「地域」の列に ⚠ が付く）
+- **合わせない地域**: 使用停止・地名の表にない（削除か管理番号の変更）・同じ管理番号が 2 行以上 の地域は合わせず、理由を残す（「対象外」）
+- **保留**: ほかの人が先に依頼を変えていたときは保存せず「保留」と残し、次の「計算」でまた試す
+- 出力履歴（[`TBL_REQUEST_HISTORY`](#tbl_request_history撮像依頼の出力履歴)）の行は書き換えない。今日以降の行でシステムの採否が不明のものは撮像予定ドックの「理由」に「出し直し候補」（その日を書き出し直すと新しい範囲で出る）、採用済みのものは「システムには前の形で採用済み」（書き出し直しても採否は新しい範囲の行に引き継がない）と出る
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `CHANGE_ID` | 変更ID | `String(64)` | ID（UUID） | `id` |
+| `NAMED_AREA_ID` | 地域の管理番号 | `String(255)` | 依頼の地域の管理番号（`TBL_NAMED_AREA` の `NAMED_AREA_ID`） | `areaId` |
+| `REQ_ID` | 依頼ID | `String(64)` | 依頼の ID（`TBL_IMAGING_REQUEST` の `REQ_ID`）。**必須** | `requestId` |
+| `REQ_NAME` | 依頼の名称 | `String(255)` | そのときの依頼の名称 | `name` |
+| `CHANGE_ACTION` | 結果 | `String(16)` | 更新（範囲を地域の形にした）・保留（保存できず、次の計算でまた試す）・対象外（地域が使用停止など）・元に戻す | `action` |
+| `REASON` | 理由 | `String(1000)` | 理由（「地域「横須賀港」の形に合わせた」「ほかの人が先に依頼を変更」など） | `reason` |
+
+いつ・誰がは作成者の 4 属性（[`editTracking`](operations.md#作成者更新者の記録edittracking)）で残る。
+
 ### 上の表の名前で作ったときの設定
 
 既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
@@ -839,7 +863,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
       "history": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/5",                     // TBL_REQUEST_HISTORY
       "groups": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/21",                     // TBL_REQUEST_GROUP
       "shots": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/22",                      // TBL_REQUEST_SHOT
-      "quotas": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/23" }                    // TBL_IMAGING_QUOTA
+      "quotas": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/23",                     // TBL_IMAGING_QUOTA
+      "areaChanges": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/34" }               // TBL_REQUEST_AREA_CHANGE
   ],
   "observationStores": [
     { "url": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/6",                         // TBL_OBSERVATION

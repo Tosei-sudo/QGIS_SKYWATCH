@@ -78,6 +78,8 @@ class Requests(Feature):
         schedule = self.docks.get("SatObsSchedule")
         if requests is None and schedule is not None and schedule.loaded and schedule.isVisible():
             schedule.reload()
+        elif requests is not None and schedule is not None:
+            schedule.requests_known(requests)
         if request_dock is None or request_dock.store is None or request_dock.task is not None:
             return
         if requests is not None:

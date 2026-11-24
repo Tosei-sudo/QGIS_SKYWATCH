@@ -521,6 +521,16 @@ TABLES = (
         F("ACTIVE", "有効", "SHORT", None, "active"),
         F("NOTE", "メモ", "TEXT", 1000, "note"),
     )),
+    # 地域の形に合わせる (2026-11-24): what MIKAGE did to a request made from an area when the area's shape changed, with
+    # the request's area before (the polygon; 元に戻す: before it was undone). Rows are only added (a log).
+    Table("TBL_REQUEST_AREA_CHANGE", "依頼の範囲の変更記録", "POLYGON", writable=True, setting="requestStores[].areaChanges", fields=(
+        F("CHANGE_ID", "変更ID", "TEXT", 64, "id"),
+        F("NAMED_AREA_ID", "地域の管理番号", "TEXT", 255, "areaId"),
+        F("REQ_ID", "依頼ID", "TEXT", 64, "requestId"),
+        F("REQ_NAME", "依頼の名称", "TEXT", 255, "name"),
+        F("CHANGE_ACTION", "結果", "TEXT", 16, "action"),
+        F("REASON", "理由", "TEXT", 1000, "reason"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -553,6 +563,7 @@ INDEXES = {
     "TBL_TRAINING_RESULT": ("USER_NAME", "EXERCISE_ID"),
     "TBL_IMAGE_CORRECTION": ("IMAGE_ID",),
     "TBL_AREA_CATEGORY": ("CATEGORY_ID",),
+    "TBL_REQUEST_AREA_CHANGE": ("REQ_ID", "NAMED_AREA_ID"),
 }
 
 TABLES = tuple(t._replace(indexes=INDEXES.get(t.name, ())) for t in TABLES)
@@ -620,6 +631,8 @@ def plugin_config(urls: dict) -> dict:
             store["shots"] = urls["TBL_REQUEST_SHOT"]
         if has("TBL_IMAGING_QUOTA"):
             store["quotas"] = urls["TBL_IMAGING_QUOTA"]
+        if has("TBL_REQUEST_AREA_CHANGE"):
+            store["areaChanges"] = urls["TBL_REQUEST_AREA_CHANGE"]
         config["requestStores"] = [store]
     if has("TBL_OBSERVATION"):
         store = {"url": urls["TBL_OBSERVATION"]}

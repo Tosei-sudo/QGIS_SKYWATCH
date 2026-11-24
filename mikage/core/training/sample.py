@@ -348,6 +348,10 @@ SHOT_FIELDS = {"SHOT_ID": {"type": S, "length": 64}, "RUN_ID": {"type": S, "leng
                "SHOT_COUNT": I, "COVERAGE": D, "REQ_ID": {"type": S, "length": 64}, "REQ_IDS": {"type": S, "length": 4000},
                "REQ_NAMES": {"type": S, "length": 4000}, "REQ_COUNT": I, "OUTPUT_FILE": {"type": S, "length": 1000},
                "USE_START": T, "USE_END": T, "PASS_ID": {"type": S, "length": 20}}
+#: 依頼の範囲の変更記録 (TBL_REQUEST_AREA_CHANGE, 地域の形に合わせる): with the edit tracking attributes (who and when).
+AREA_CHANGE_FIELDS = {"CHANGE_ID": {"type": S, "length": 64}, "NAMED_AREA_ID": S, "REQ_ID": {"type": S, "length": 64}, "REQ_NAME": S,
+                      "CHANGE_ACTION": {"type": S, "length": 16}, "REASON": {"type": S, "length": 1000},
+                      "CREATED_DATE": T, "CREATED_USER": S, "UPDATED_DATE": T, "UPDATED_USER": S}
 GROUP_FIELDS = {"GROUP_NAME": S, "MEMBERS": {"type": S, "length": 4000}, "SORT_ORDER": I, "ACTIVE": F, "NOTE": {"type": S, "length": 1000}}
 
 
@@ -551,7 +555,8 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
                 {"GROUP_NAME": "第1班", "MEMBERS": f"{_user()}, yamada", "SORT_ORDER": 1, "ACTIVE": 1, "NOTE": "港湾の定点"},
                 {"GROUP_NAME": "第2班", "MEMBERS": "sato", "SORT_ORDER": 2, "ACTIVE": 1, "NOTE": "臨時の依頼"},
                 {"GROUP_NAME": "旧体制", "MEMBERS": "", "SORT_ORDER": 9, "ACTIVE": 0, "NOTE": "使用停止（古い依頼のため残す）"})])},
-            {"id": 3, "name": "撮像の範囲", "geometryType": "polygon", "fields": SHOT_FIELDS, "features": []}]},
+            {"id": 3, "name": "撮像の範囲", "geometryType": "polygon", "fields": SHOT_FIELDS, "features": []},
+            {"id": 4, "name": "依頼の範囲の変更記録", "geometryType": "polygon", "fields": AREA_CHANGE_FIELDS, "features": []}]},
         {"name": "Alerts", "layers": [
             {"id": 0, "name": "通報条件", "fields": ALERT_RULE_FIELDS, "features": feats([{"attributes": r} for r in ALERT_RULES])},
             {"id": 1, "name": "ジオフェンス", "geometryType": "polygon", "fields": {"NAME": S, "ACTIVE": F, "WEIGHT": D, "NAME_EN": S},
@@ -718,7 +723,8 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
   // 撮像依頼台帳（docs/imaging-requests.md の既定の属性名）と日次出力のシステム（出力先は確認画面で選ぶ）
   "requestStores": [
     {{ "label": "モック撮像依頼", "url": "{rest}/Requests/FeatureServer/0", "history": "{rest}/Requests/FeatureServer/1",
-      "groups": "{rest}/Requests/FeatureServer/2", "shots": "{rest}/Requests/FeatureServer/3", "catalog": "モック画像カタログ",
+      "groups": "{rest}/Requests/FeatureServer/2", "shots": "{rest}/Requests/FeatureServer/3",
+      "areaChanges": "{rest}/Requests/FeatureServer/4", "catalog": "モック画像カタログ",
       "fields": {{}}{tk} }}
   ],
   "requestExports": [

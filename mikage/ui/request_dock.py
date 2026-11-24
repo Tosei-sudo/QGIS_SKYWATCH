@@ -30,6 +30,7 @@ from ..core.request.api import REQUEST_KINDS as KINDS, STATUSES, ImagingRequest,
 from ..core.request.api import code_text, field_roles, request_of_row, row_problems
 from ..core.request.api import (RequestStoreConfig, new_request_id, waiting_ids)
 from ..core.request.api import from_area, previous_for
+from ..core.request.api import FOLLOW_CHANGED, FOLLOW_SKIP, FOLLOW_UPDATE, follow_area, follows
 from ..qgis_io.geometry import from_wgs84
 from ..qgis_io.org_areas_io import LAYER_PROPERTY as ORG_LAYER_PROPERTY
 from ..qgis_io.request_layers import layer_rows, requests_layer
@@ -52,6 +53,8 @@ _STATUS = COLUMNS.index("状態")
 ALL_AREAS, NO_AREA = "", "<地域なし>"
 #: The mark of a request whose area follows its area's shape (地域の形に合わせる).
 FOLLOW_MARK = "↻ "
+#: The mark of a request whose area is not its area's (its area's shape changed, or the area is stopped or gone).
+CHANGED_MARK = "⚠ "
 
 
 def _now_ms() -> float:
@@ -194,8 +197,13 @@ class RequestDock(PluginDock):
         self.export_button = QPushButton(self.tr("レイヤーへ書き出し"))
         self.export_button.setToolTip(self.tr("一覧に出ている依頼を一時レイヤーとして追加（区分で「定点」を選ぶと定点のみ）"))
         self.export_button.clicked.connect(lambda: self.export_layer())
+        # 地域の形に合わせる: what MIKAGE did to the requests' areas when their areas' shapes changed (shown with the table).
+        self.changes_button = QPushButton(self.tr("範囲の変更記録…"))
+        self.changes_button.setToolTip(self.tr("地域の形が変わって依頼の範囲を合わせた記録。合わせた変更を元に戻せる"))
+        self.changes_button.clicked.connect(lambda: self.area_changes())
         layers.addWidget(self.import_button)
         layers.addWidget(self.export_button)
+        layers.addWidget(self.changes_button)
         self.body.addLayout(layers)
 
         self._update_buttons()
@@ -279,6 +287,7 @@ class RequestDock(PluginDock):
                 return
             requests, groups, note = result
             self.requests, self._loaded = requests, True
+            self._shapes_asked = False
             if groups is not None:
                 self.groups, self.groups_read = groups, True
             self.group_filter.set_groups(self.groups, (r.group for r in requests))
@@ -327,9 +336,12 @@ class RequestDock(PluginDock):
             waiting = waiting_ids(self.context.esri(), self.store) if self.store is not None else set()
         except Exception:  # noqa: BLE001
             waiting = set()
+        marks = self.area_marks()
         for i, r in enumerate(self.shown):
             prio = priority_text(r.effective) + (f"・繰上 {r.boost}" if r.boost else "")
-            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""), self.area_text(r),
+            mark = marks.get(r.id)
+            items = [QStandardItem(t) for t in (r.name + (self.tr("（送信待ち）") if r.id in waiting else ""),
+                                                (CHANGED_MARK if mark else "") + self.area_text(r),
                                                 r.group, r.management_no, r.identification_no,
                                                 r.category + (f"（{r.repeat}）" if r.category == "定点" else ""),
                                                 r.achieve, _period(r), prio, r.kind, r.status)] + [memo_item(r.note)]
@@ -337,8 +349,12 @@ class RequestDock(PluginDock):
             if r.note:
                 items[0].setToolTip(plain_tip(r.note))
             if r.named_area_id:
-                items[1].setToolTip(self.tr("地域の管理番号 {id}（{how}）").format(
-                    id=r.named_area_id, how=self.tr("範囲は地域の形に合わせる") if r.area_follow else self.tr("範囲は依頼のもの")))
+                tip = self.tr("地域の管理番号 {id}（{how}）").format(
+                    id=r.named_area_id, how=self.tr("範囲は地域の形に合わせる") if r.area_follow else self.tr("範囲は依頼のもの"))
+                if mark is not None:
+                    tip += "\n" + self.mark_text(mark)
+                    items[1].setForeground(QBrush(QColor("#b45309")))
+                items[1].setToolTip(tip)
             if r.id in waiting:
                 for item in items:
                     item.setBackground(QBrush(QColor("#dbeafe")))
@@ -373,6 +389,7 @@ class RequestDock(PluginDock):
         return book
 
     def _areas_changed(self) -> None:
+        self._shapes_asked = False
         try:
             if self.isVisible() and any(r.named_area_id for r in self.requests):
                 self.render()
@@ -392,6 +409,99 @@ class RequestDock(PluginDock):
         if not r.named_area_id:
             return ""
         return (FOLLOW_MARK if r.area_follow else "") + self.area_name(r.named_area_id)
+
+    def area_marks(self) -> dict:
+        """
+        The requests whose area is not their area's (地域の形に合わせる), by id
+        (core/request/area_follow.Follow): its shape changed (and it was not
+        followed yet, or the request does not follow it), or the area is
+        stopped, gone, or its 管理番号 on two rows. The areas' shapes are read
+        once when they are not (the list shown again then).
+        """
+        linked = [r for r in self.requests if r.named_area_id and r.status in ("有効", "停止")]
+        book = self.area_book() if linked else None
+        if book is None or book.areas is None:
+            return {}
+        ids = {r.named_area_id.strip().upper() for r in linked}
+        rows: dict[str, list] = {}
+        for a in book.areas:
+            key = (a.id or "").strip().upper()
+            if key in ids:
+                rows.setdefault(key, []).append(a)
+        missing = [a for found in rows.values() for a in found if a.rings is None]
+        if missing and not self._shapes_asked:
+            self._shapes_asked = True
+            book.shapes(missing, lambda _areas: self.render(), lambda _m: None)
+            return {}
+        return {f.request.id: f for f in follows(linked, rows, ids)}
+
+    #: Whether the shapes of the requests' areas were asked for (once per read of the ledger).
+    _shapes_asked = False
+
+    def mark_text(self, f) -> str:
+        if f.action == FOLLOW_UPDATE:
+            return self.tr("地域「{name}」の形が変わった（次の「計算」か、組織の関心地域で地域を保存した時に合わせる）").format(name=f.area_name)
+        return f.reason if f.action in (FOLLOW_SKIP, FOLLOW_CHANGED) else ""
+
+    def follow_area(self, area_id: str, then: Optional[Callable[[object], None]] = None, show: bool = True) -> bool:
+        """
+        An area saved in 組織の関心地域 with a new shape: its requests (of the
+        store chosen) take it at once (有効・停止 ones following it; logged),
+        the list read again and what was done shown (`show`); `then(result)`
+        once done (core/request/area_follow.FollowResult). False when there is
+        nothing to do it with.
+        """
+        from ..core.named_areas import settings_for
+
+        store, areas = self.store, settings_for(self.context.config)
+        if store is None or areas is None or not area_id:
+            return False
+        repo = self.repository()
+        area_token = self.context.token_for(areas.areas.url, areas.areas.token)
+
+        def work(task):
+            return follow_area(repo.client, store, repo.token, areas, area_id, _now_ms(), area_token, task.isCanceled)
+
+        def done(result):
+            if then:
+                then(result)
+            if not (result.saved or result.held or result.skipped or result.changed):
+                return
+            self.reload(lambda: self.status.setText("。".join(t for t in (result.text(), *result.problems) if t)))
+            if show:
+                self.show_follow(result)
+
+        def failed(message):
+            self.status.setText(self.tr("地域の形に合わせられない: {m}").format(m=message))
+            if then:
+                then(None)
+
+        if not self._start(self.tr("地域の形に合わせる"), work, done, failed):
+            QTimer.singleShot(300, lambda: self.follow_area(area_id, then, show))
+        return True
+
+    def show_follow(self, result):
+        """What `follow_area` did, in 「範囲の変更記録」's window (a 更新 can be undone there)."""
+        from .area_follow_dialog import AreaChangeDialog, result_changes
+
+        rows = result_changes(result, _now_ms(), edit_stamp.user_name())
+        if not rows:
+            return None
+        self.follow_dialog = AreaChangeDialog(self, rows, self.tr("地域の形に合わせた依頼"), self.tr(
+            "地域の形が変わったので、つながる依頼の範囲を合わせた（有効・停止で、地域の形に合わせるの依頼）。"
+            "保留は次の「計算」でまた試す。「更新」は元に戻せる"))
+        self.follow_dialog.show()
+        return self.follow_dialog
+
+    def area_changes(self):
+        """「範囲の変更記録…」: the change table's rows, the newest first."""
+        from .area_follow_dialog import AreaChangeDialog
+
+        if self.store is None or not self.store.area_changes:
+            return None
+        self.changes_dialog = AreaChangeDialog(self)
+        self.changes_dialog.show()
+        return self.changes_dialog
 
     def _fill_areas(self) -> None:
         """The 「地域」 filter's entries: the areas of the requests read (shown once one has an area)."""
@@ -549,6 +659,7 @@ class RequestDock(PluginDock):
         self.event_button.setEnabled(bool(self.selected()))
         self.groups_button.setVisible(self.store is not None and bool(self.store.groups))
         self.export_button.setEnabled(bool(self.shown))
+        self.changes_button.setVisible(self.store is not None and bool(self.store.area_changes))
 
     def roles_changed(self) -> None:
         """Adding, changing and deleting requests: for those who ask for images or plan (core/roles.py)."""

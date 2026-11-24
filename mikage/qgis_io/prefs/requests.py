@@ -35,3 +35,35 @@ def group_filter(where: str) -> str:
 
 def set_group_filter(where: str, value: str) -> None:
     set_pref(f"request_groups/{where}", value or "")
+
+
+
+def area_follow_stamp(key: str) -> tuple:
+    """
+    The named area layer's last edit time when 「計算」 last made the
+    requests take their areas' shapes, and when that was (地域の形に合わせる,
+    core/request/area_follow.py; `key`: the request store's and the layer's
+    URLs): the next 「計算」 looks at all the areas again only when the layer
+    was edited since. (None, None) before the first time.
+    """
+    import json
+
+    try:
+        value = json.loads(pref("area_follow/stamps", "{}")).get(key)
+    except (ValueError, AttributeError):
+        return None, None
+    if not (isinstance(value, list) and len(value) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)):
+        return None, None
+    return float(value[0]), float(value[1])
+
+
+def set_area_follow_stamp(key: str, stamp: float, checked: float) -> None:
+    import json
+
+    try:
+        stamps = json.loads(pref("area_follow/stamps", "{}"))
+    except ValueError:
+        stamps = {}
+    stamps = stamps if isinstance(stamps, dict) else {}
+    stamps[key] = [stamp, checked]
+    set_pref("area_follow/stamps", json.dumps(stamps))

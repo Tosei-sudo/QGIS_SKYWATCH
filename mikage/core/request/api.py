@@ -16,6 +16,11 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .area_link import (
         AreaLinks, area_links, conditions_of, from_area, links_of, previous_for, rings_moved, unlinked,
     )
+    from .area_follow import (
+        AreaChange, apply_follows, CHANGED as FOLLOW_CHANGED, Follow, follow_area, follow_areas, FollowResult, FollowRun, follows,
+        HOLD as FOLLOW_HOLD, KEPT as FOLLOW_KEPT, load_changes, redo_count, redo_mark, redo_text, REDO as FOLLOW_REDO, SKIP as FOLLOW_SKIP,
+        undo_change, UNDO as FOLLOW_UNDO, UPDATE as FOLLOW_UPDATE,
+    )
     from .bulk import apply_change, RequestChange
     from .chances import ahead_span, chances_of, FORM_DAYS, form_span, form_text, wanted
     from .covered import read_covered
@@ -113,4 +118,7 @@ __all__ = [
     "satellite_name", "shape_text", "sort_by_next", "span_of", "taken_text", "tally_text", "units_of",
     "unlink_findings", "with_links",
     "AreaLinks", "area_links", "conditions_of", "from_area", "links_of", "previous_for", "rings_moved", "unlinked",
+    "AreaChange", "apply_follows", "FOLLOW_CHANGED", "Follow", "follow_area", "follow_areas", "FollowResult", "FollowRun", "follows",
+    "FOLLOW_HOLD", "FOLLOW_KEPT", "load_changes", "redo_count", "redo_mark", "redo_text", "FOLLOW_REDO", "FOLLOW_SKIP", "undo_change", "FOLLOW_UNDO",
+    "FOLLOW_UPDATE",
 ]
