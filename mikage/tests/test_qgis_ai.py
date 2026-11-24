@@ -324,29 +324,20 @@ def external_data_model(folder: str, n: int = 1024) -> str:
     return path
 
 
-@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc (Linux) to see what the process holds")
-def test_after_the_ai_tools_ran_nothing_in_the_plugin_folder_is_held(tmp_path):
+def windows_zip_layout(plugin) -> None:
     """
-    2026-11-21 (onnxruntime を使うと更新・アンインストールできなくなる?):
-    the Windows zip's layout (ext/win64 with the real onnxruntime,
-    onnxruntime-genai and C++ sgp4) and models inside the plugin's folder.
-    After detection and the generative model ran, no file of the plugin's
-    folder is held (Linux stand-in for Windows' locks, tests/held_files.py:
-    a mapped .so is a loaded DLL), so QGIS can overwrite or remove it. Only a
-    model with its weights beside it stays mapped while loaded, and is no
-    longer once let go (as when the plugin unloads).
+    `plugin`/ext/win64 as scripts/build_zip.py --win64 lays it out: the
+    installed onnxruntime (its core), onnxruntime-genai (without its model
+    converter) and sgp4, and a stand-in tzdata (pure Python) with one zone.
     """
-    genai = pytest.importorskip("onnxruntime_genai")
-    sgp4 = pytest.importorskip("sgp4")
-    import json
     import shutil
 
     import onnxruntime
+    import onnxruntime_genai as genai
+    import sgp4
 
-    from mikage.tests.genai_tiny import write_model
     from scripts.build_zip import GENAI_DROP, ONNXRUNTIME_KEEP
 
-    plugin = tmp_path / "plugins" / "mikage"
     for module, keep, drop in ((onnxruntime, ONNXRUNTIME_KEEP, set()), (genai, None, GENAI_DROP), (sgp4, None, set())):
         source = os.path.dirname(module.__file__)
 
@@ -355,6 +346,36 @@ def test_after_the_ai_tools_ran_nothing_in_the_plugin_folder_is_held(tmp_path):
             return [n for n in names if n == "__pycache__" or (top and (n in drop or (keep is not None and n not in keep)))]
 
         shutil.copytree(source, plugin / "ext" / "win64" / module.__name__, ignore=left_out)
+    zones = plugin / "ext" / "win64" / "tzdata" / "zoneinfo"
+    (zones / "Asia").mkdir(parents=True)
+    (zones.parent / "__init__.py").write_text("", encoding="utf-8")
+    (zones / "__init__.py").write_text("", encoding="utf-8")
+    (zones / "Asia" / "Tokyo").write_bytes(b"TZif2")
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc (Linux) to see what the process holds")
+def test_after_the_ai_tools_ran_nothing_in_the_plugin_folder_is_held(tmp_path):
+    """
+    2026-11-21 (onnxruntime を使うと更新・アンインストールできなくなる?) and
+    2026-11-24 (生成 AI を使うとアンインストールにも失敗する): the Windows
+    zip's layout (ext/win64 with the real onnxruntime, onnxruntime-genai and
+    C++ sgp4, and tzdata, read first as for the settings' timeZone) and
+    models inside the plugin's folder.
+    After detection and the generative model ran, no file of the plugin's
+    folder is held (Linux stand-in for Windows' locks, tests/held_files.py:
+    a mapped .so is a loaded DLL), so QGIS can overwrite or remove it. Only a
+    model with its weights beside it stays mapped while loaded, and is no
+    longer once let go (as when the plugin unloads).
+    """
+    pytest.importorskip("onnxruntime_genai")
+    pytest.importorskip("sgp4")
+    import json
+    import shutil
+
+    from mikage.tests.genai_tiny import write_model
+
+    plugin = tmp_path / "plugins" / "mikage"
+    windows_zip_layout(plugin)
     models = plugin / "models"
     models.mkdir()
     shutil.copy2(os.path.join(DATA, "detect.onnx"), models / "detect.onnx")
@@ -367,13 +388,60 @@ def test_after_the_ai_tools_ran_nothing_in_the_plugin_folder_is_held(tmp_path):
                             env=dict(os.environ, PYTHONPATH=root, LOCALAPPDATA=str(cache)))
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout.strip().splitlines()[-1])
-    # Each loaded from its copy outside the plugin's folder (core/win64), and working.
-    assert all(path.startswith(str(cache)) for path in out["from"].values()), out["from"]
+    # Each with DLLs loaded from its copy outside the plugin's folder (core/win64), and working; tzdata read in place,
+    # on its own: the zip's folder never on the path (2026-11-24: with it there, the AI was loaded from the plugin's folder).
+    native = {k: v for k, v in out["from"].items() if k != "tzdata"}
+    assert all(path.startswith(str(cache)) for path in native.values()), out["from"]
+    assert out["from"]["tzdata"] == str(plugin / "ext" / "win64" / "tzdata" / "__init__.py") and out["zone"] == "TZif"
+    assert not out["on path"]
     assert out["accelerated"] and out["reply"] == "Tidy note." and out["y"] == [1, 2, 3]
     assert any(h.endswith((".so", ".pyd", ".dll")) or ".so." in h for h in out["copies"])
     # The plugin's folder: only the loaded model's weights, then nothing.
     assert out["loaded"] == ["models/big/big.onnx.data"]
     assert out["let go"] == []
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc (Linux) to see what the process holds")
+def test_after_a_session_with_the_generative_ai_nothing_in_the_plugin_folder_is_held(tmp_path):
+    """
+    tsudo 2026-11-24: 「テストに、これを検証できるようなものは無かったの？」.
+    Not the libraries loaded by hand in the test's own order (that missed
+    tzdata putting ext/win64 on the path): a copy of the plugin laid out like
+    the Windows zip, started by QGIS with settings giving 文章の手伝い a model,
+    times read in a zone, a note tidied by the real GenAI, then unloaded as
+    QGIS does before an update or an uninstall (tests/plugin_session_held.py).
+    No file of the plugin's folder is held then, and ext/win64 was never on
+    Python's path.
+    """
+    pytest.importorskip("onnxruntime_genai")
+    pytest.importorskip("sgp4")
+    import json
+    import shutil
+
+    from mikage.tests.genai_tiny import write_model
+
+    plugins = tmp_path / "plugins"
+    repo_plugin = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    shutil.copytree(repo_plugin, plugins / "mikage", ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "ext"))
+    shutil.copytree(os.path.join(repo_plugin, "ext"), plugins / "mikage" / "ext", ignore=shutil.ignore_patterns("__pycache__", "win64"))
+    windows_zip_layout(plugins / "mikage")
+    model = write_model(str(tmp_path / "models" / "small"), "Tidy note.")
+    cache, home = tmp_path / "cache", tmp_path / "home"
+    home.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTEST_XDIST_WORKER")}
+    env.update(PYTHONPATH=str(plugins), LOCALAPPDATA=str(cache), HOME=str(home), QT_QPA_PLATFORM="offscreen")
+    result = subprocess.run([sys.executable, "-m", "mikage.tests.plugin_session_held", model], cwd=str(plugins),
+                            capture_output=True, text=True, timeout=180, env=env)
+    lines = [line for line in result.stdout.splitlines() if line.startswith("RESULT ")]
+    assert lines, result.stdout[-2000:] + result.stderr[-3000:]
+    out = json.loads(lines[-1][len("RESULT "):])
+    assert out["failed"] is None and out["reply"] == "Tidy note." and out["zone"] == "Asia/Tokyo"
+    # The AI's libraries from their copies outside the plugin's folder; tzdata read in place, on its own.
+    for name in ("onnxruntime", "onnxruntime_genai", "sgp4"):
+        assert out["modules"][name].startswith(str(cache)), out["modules"]
+    assert out["modules"]["tzdata"] == str(plugins / "mikage" / "ext" / "win64" / "tzdata" / "__init__.py")
+    assert not out["on path"]
+    assert out["after ai"] == [] and out["after unload"] == []
 
 
 def test_a_carried_runtime_that_cannot_be_copied_is_not_used_and_the_person_is_told_why(monkeypatch, tmp_path):

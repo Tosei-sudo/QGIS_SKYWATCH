@@ -53,7 +53,7 @@ from qgis.PyQt.QtCore import QObject, QTimer, pyqtSignal
 
 from ..core.text_assist import (CHAT_MODEL, CHAT_TASKS, LARGE_MODEL, LARGE_TASKS, Message, TextAssistSettings, TextModel,
                                  plain_prompt)
-from ..core.win64 import NotCopied, add_package
+from ..core.win64 import NotCopied, add_package, keep_off_path, warn_in_place
 from .ai_runtime import (NOT_COPIED, VENDORED, VENDORED_PYTHON, AiError, RuntimeMissing, cache_path, download, is_remote,
                          load_ort, resolve_source, threads as default_threads)
 from .tasks import Cancelled, run_task
@@ -83,10 +83,13 @@ def load_genai(vendored: str = VENDORED, system: Optional[str] = None) -> Any:
     if _og is not None:
         return _og
     load_ort(vendored, system)
+    keep_off_path(vendored)  # As load_ort: QGIS's own looked for without the Windows zip's folder (core/win64).
     try:
         import onnxruntime_genai as og  # noqa: PLC0415 (large, and most sessions never need it)
     except ImportError:
         og = None
+    if og is not None:
+        warn_in_place(og, vendored)
     if og is None and os.path.isdir(os.path.join(vendored, "onnxruntime_genai")):
         if sys.version_info[:2] != VENDORED_PYTHON:
             raise RuntimeMissing(code="E602", message=f"同梱の onnxruntime-genai は Python {VENDORED_PYTHON[0]}.{VENDORED_PYTHON[1]} 用"
