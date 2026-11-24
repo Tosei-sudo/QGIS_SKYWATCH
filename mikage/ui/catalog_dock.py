@@ -372,7 +372,6 @@ class CatalogDock(
         # Another map tool chosen: the buttons pop up.
         self.tool.deactivated.connect(lambda: self.buttons["pick"].setChecked(False))
         self.draw_tool.deactivated.connect(lambda: self.draw_button.setChecked(False))
-        self._previous_tool = None
         self.visibilityChanged.connect(self._visibility)
         context.configChanged.connect(self._config_changed)
         self._load_tolerance()

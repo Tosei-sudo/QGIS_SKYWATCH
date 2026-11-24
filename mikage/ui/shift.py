@@ -27,6 +27,7 @@ from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsMapTool
 from qgis.PyQt.QtCore import QObject, QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QColor, QImage, QPen
 
+from ..qgis_io import map_tools
 from ..qgis_io.enhance_group import group_rasters
 from ..qgis_io.shift_io import can_shift, get_shift, set_shift
 from ..qgis_io.tasks import error_text
@@ -135,7 +136,6 @@ class LayerShift(QObject):
         self.overlay = ShiftOverlay(self.canvas)
         self.overlay.hide()
         self.tool = ShiftTool(self.canvas, self)
-        self._previous_tool = None
         self.canvas.mapToolSet.connect(self._tool_set)
         self.iface.currentLayerChanged.connect(self._current_changed)
         #: The layer panel, for a group chosen there (QGIS's; tests may have none).
@@ -179,9 +179,7 @@ class LayerShift(QObject):
             self.action.setChecked(active)
             self.action.blockSignals(False)
         if active:
-            if self.canvas.mapTool() is not self.tool:
-                self._previous_tool = self.canvas.mapTool()
-                self.canvas.setMapTool(self.tool)
+            map_tools.take(self.canvas, self.tool)
             targets = self.targets()
             if not targets:
                 self.say(self.tr("ファイルの画像（またはそれを含むグループ）を選ぶと、ドラッグで位置をずらせる"))
@@ -191,11 +189,7 @@ class LayerShift(QObject):
         else:
             self._start_reset()
             self.end_drag()
-            if self.canvas.mapTool() is self.tool:
-                try:
-                    self.canvas.setMapTool(self._previous_tool) if self._previous_tool is not None else self.canvas.unsetMapTool(self.tool)
-                except RuntimeError:  # the tool went with its plugin
-                    self.canvas.unsetMapTool(self.tool)
+            map_tools.give_back(self.canvas, self.tool)
 
     def _tool_set(self, new, old=None) -> None:
         if self.active and new is not self.tool:

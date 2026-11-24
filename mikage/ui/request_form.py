@@ -44,6 +44,7 @@ from ..core.request.api import (
     ACHIEVES, CATEGORIES, REQUEST_KINDS as KINDS, LOOK_SIDES, ORBIT_DIRS, PRIORITY_LEVELS, STATUSES, TIMES_OF_DAY,
     ImagingRequest, bbox_of, day_bounds, jst_day, level_of, priority_text, repeat_of, repeat_text, shape_text, square_rings,
 )
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import shape_of, shape_rings, to_wgs84
 from ..qgis_io.tasks import run_task
 from .catalog_overlay import DrawTool
@@ -595,9 +596,12 @@ class RequestForm(QDialog):
             for b, t in ((self.box_button, self.extent_tool), (self.polygon_button, self.draw_tool), (self.point_button, self.point_tool)):
                 if t is not tool:
                     b.setChecked(False)
-            self.canvas.setMapTool(tool)
-        elif self.canvas.mapTool() is tool:
-            self.canvas.unsetMapTool(tool)
+            # (Its button stays pressed while another tool takes the map: it may be given the map back.)
+            map_tools.take(self.canvas, tool, turns_off=False)
+        else:
+            map_tools.forget(self.canvas, tool)
+            if self.canvas.mapTool() is tool:
+                self.canvas.unsetMapTool(tool)
 
     def _to_wgs(self):
         return to_wgs84(self.canvas.mapSettings().destinationCrs())
@@ -880,6 +884,7 @@ class RequestForm(QDialog):
         if self._chance_task is not None:
             self._chance_task.cancel()
         for tool in (self.extent_tool, self.point_tool, self.draw_tool):
+            map_tools.forget(self.canvas, tool)
             if self.canvas.mapTool() is tool:
                 self.canvas.unsetMapTool(tool)
         self.draw_tool.remove()

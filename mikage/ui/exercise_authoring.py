@@ -52,6 +52,7 @@ from ..core.training.api import (
     answers_from_records, CHANGE, CHANGES, check, copied, DEFAULT_SCORING, Draft, DraftAnswer, EXAM, exercise_of_draft, FIND, IDENTIFY,
     kind_text, MEASURE, metres, new_exercise_id, PRACTICE, Scoring, TYPES,
 )
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import to_wgs84
 from ..qgis_io.obs_images import IMAGE_ID, image_path
 from .catalog_overlay import DrawTool
@@ -868,7 +869,6 @@ class ExerciseAuthoring(QObject):
         self.drafts: list[Draft] = []
         self.marks: Optional[ExerciseMarks] = None
         self._tool = None
-        self._tool_before = None
         self._busy = False
         self.manager.new_pressed.connect(self.new)
         self.manager.edit_pressed.connect(self.edit)
@@ -1112,24 +1112,21 @@ class ExerciseAuthoring(QObject):
 
     def _use_tool(self, tool) -> None:
         self._end_tool()
-        self._tool_before = self.canvas.mapTool()
         self._tool = tool
-        self.canvas.setMapTool(tool)
+        # (Its button stays pressed while another tool takes the map: it may be given the map back.)
+        map_tools.take(self.canvas, tool, turns_off=False)
 
     def _end_tool(self) -> None:
         tool, self._tool = self._tool, None
         if tool is None:
             return
         try:
-            if self.canvas.mapTool() is tool:
-                self.canvas.unsetMapTool(tool)
-                if self._tool_before is not None:
-                    self.canvas.setMapTool(self._tool_before)
+            map_tools.give_back(self.canvas, tool)
+            map_tools.forget(self.canvas, tool)
             if hasattr(tool, "remove"):
                 tool.remove()
         except RuntimeError:
             pass
-        self._tool_before = None
         editor = self.editor
         if editor is not None and editor.add_button.isChecked():
             editor.add_button.blockSignals(True)

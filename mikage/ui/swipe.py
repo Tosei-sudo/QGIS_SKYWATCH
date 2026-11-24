@@ -20,6 +20,8 @@ from qgis.gui import QgsMapCanvas, QgsMapCanvasItem, QgsMapTool
 from qgis.PyQt.QtCore import QObject, QPointF, QRectF, Qt
 from qgis.PyQt.QtGui import QBrush, QColor, QImage, QPen
 
+from ..qgis_io import map_tools
+
 VERTICAL, HORIZONTAL = "vertical", "horizontal"
 #: Pixels from the line where a press grabs it.
 GRAB = 8
@@ -176,7 +178,6 @@ class SwipeCompare(QObject):
         self.overlay = SwipeOverlay(self.canvas)
         self.overlay.hide()
         self.tool = SwipeTool(self.canvas, self)
-        self._previous_tool = None
         #: What is swiped: a layer, or a group of the layer tree.
         self.target = None
         self.job: Optional[QgsMapRendererParallelJob] = None
@@ -234,9 +235,7 @@ class SwipeCompare(QObject):
         if active:
             self.target = self.chosen()
             self.overlay.show()
-            if self.canvas.mapTool() is not self.tool:
-                self._previous_tool = self.canvas.mapTool()
-                self.canvas.setMapTool(self.tool)
+            map_tools.take(self.canvas, self.tool)
             self.draw()
             self.overlay.changed()
             side = self.tr("左側") if self.overlay.orientation == VERTICAL else self.tr("上側")
@@ -246,11 +245,7 @@ class SwipeCompare(QObject):
             self._cancel_job()
             self.overlay.hide()
             self.overlay.image = None
-            if self.canvas.mapTool() is self.tool:
-                try:
-                    self.canvas.setMapTool(self._previous_tool) if self._previous_tool is not None else self.canvas.unsetMapTool(self.tool)
-                except RuntimeError:  # the tool went with its plugin
-                    self.canvas.unsetMapTool(self.tool)
+            map_tools.give_back(self.canvas, self.tool)
 
     def _tool_set(self, new, old=None) -> None:
         if self.active and new is not self.tool:

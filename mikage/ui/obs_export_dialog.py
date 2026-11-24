@@ -29,6 +29,7 @@ from ..core.obs.api import (
 from ..core.obs.api import now_ms
 from ..core.obs.api import areas_at, points_of
 from ..core.obs.api import RecordQuery
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, shape_of, to_wgs84
 from ..qgis_io.tasks import run_task
 from .docks import plain_label
@@ -61,7 +62,6 @@ class ExportDialog(QDialog):
         self.drawn: Optional[list] = None
         self.named: Optional[list] = None
         self._tool = None
-        self._was_tool = None
         #: The drawn polygon on the map (made when drawn, taken off when closed).
         self.band: Optional[QgsRubberBand] = None
         layout = QVBoxLayout(self)
@@ -317,9 +317,8 @@ class ExportDialog(QDialog):
 
         if self._tool is None:
             self._tool = DrawTool(self.canvas, self.set_drawn)
-        if self.canvas.mapTool() is not self._tool:
-            self._was_tool = self.canvas.mapTool()
-        self.canvas.setMapTool(self._tool)
+        # (Another tool taking the map leaves the drawing on: it may be given the map back.)
+        map_tools.take(self.canvas, self._tool, turns_off=False)
         self._say(self.tr("地図上でクリックして頂点、ダブルクリックか右クリックで閉じる"))
 
     def set_drawn(self, corners: list) -> None:
@@ -362,12 +361,9 @@ class ExportDialog(QDialog):
         self._show_band()
 
     def _stop_drawing(self) -> None:
-        if self._tool is not None and self.canvas.mapTool() is self._tool:
-            if self._was_tool is not None:
-                self.canvas.setMapTool(self._was_tool)
-            else:
-                self.canvas.unsetMapTool(self._tool)
-        self._was_tool = None
+        if self._tool is not None:
+            map_tools.give_back(self.canvas, self._tool)
+            map_tools.forget(self.canvas, self._tool)
 
     def read_named(self, again: bool = False) -> None:
         """Reads the named areas (in a task) into the choice."""

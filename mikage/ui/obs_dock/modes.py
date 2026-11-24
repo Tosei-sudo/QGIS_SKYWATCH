@@ -5,7 +5,7 @@ methods as they were, on the dock's widgets and state.
 """
 from __future__ import annotations
 
-from ...qgis_io import settings
+from ...qgis_io import map_tools, settings
 from ..docks import plain_tip
 from .common import HINT, HINT_POINTS, HINT_AREA, HINT_UNSEEN, NO_IMAGE
 
@@ -15,13 +15,9 @@ class ModesPart:
 
     def _use_tool(self, on: bool) -> None:
         if on:
-            if self.canvas.mapTool() is not self.tool:
-                self._previous_tool = self.canvas.mapTool()
-                self.canvas.setMapTool(self.tool)
-        elif self.canvas.mapTool() is self.tool:
-            self.canvas.unsetMapTool(self.tool)
-            if self._previous_tool is not None:
-                self.canvas.setMapTool(self._previous_tool)
+            map_tools.take(self.canvas, self.tool)
+        else:
+            map_tools.give_back(self.canvas, self.tool)
 
     def _tool_gone(self) -> None:
         # Another map tool chosen (the pan…): recording stops; a form with something typed stays, to be saved

@@ -29,7 +29,7 @@ from .features.base import Feature, disconnect, icon
 from .plugin_api import OBSERVATION_FUNCTIONS, PluginApi  # noqa: F401 (scripts and tests import them from here)
 from .processing_provider import analysis_algorithm, append_algorithm, cloud_algorithm, detect_algorithm
 from .processing_provider.provider import SatObsProvider
-from .qgis_io import network, overviews_io, tasks
+from .qgis_io import map_tools, network, overviews_io, tasks
 from .qgis_io.context import PluginContext
 from .qgis_io.geometry import to_wgs84
 from .qgis_io.preload import LOG_TAG, Preloader
@@ -687,6 +687,9 @@ class MikagePlugin:
         self.docks = {}
         for feature in features:
             feature.unload_after_docks()
+        # None of the plugin's map tools stays the map's (the person's own back): a tool of an unloaded plugin
+        # would still answer the map's clicks (qgis_io/map_tools.py).
+        map_tools.leave(self.iface.mapCanvas())
         if self.role_keeper is not None:
             self.role_keeper.deleteLater()
             self.role_keeper = None

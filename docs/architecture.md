@@ -74,7 +74,7 @@ plugin.py ── features/<機能>.py（登録票） ── ui/ ── qgis_io/ 
 
 ## 共通基盤（`KERNEL`）
 
-`core.esri`（EsriClient・Transport）、`core.util`、`core.time_zone`・`core.time_text`（日時）、`core.sql`（SQL の日時の書き方・`since_condition`）、`core.sources`（Esri の表の指定）、`core.shapes`（図形・`esri_rings`）、`core.listed_image`（一覧の画像）、`core.json_schema`（JSON Schema の確かめ）、`core.file_values`（ファイルに書く値の形）、`core.audit`・`core.edit_stamp`・`core.offline`・`core.auth`・`core.gpkg` ほか、`qgis_io.tasks`・`qgis_io.network`・`qgis_io.geometry`・`qgis_io.pinned_layers`（「一番上に固定」の下に置く位置）、`ui.fit` など。一覧は `architecture.py` の `KERNEL`。
+`core.esri`（EsriClient・Transport）、`core.util`、`core.time_zone`・`core.time_text`（日時）、`core.sql`（SQL の日時の書き方・`since_condition`）、`core.sources`（Esri の表の指定）、`core.shapes`（図形・`esri_rings`）、`core.listed_image`（一覧の画像）、`core.json_schema`（JSON Schema の確かめ）、`core.file_values`（ファイルに書く値の形）、`core.audit`・`core.edit_stamp`・`core.offline`・`core.auth`・`core.gpkg` ほか、`qgis_io.tasks`・`qgis_io.network`・`qgis_io.geometry`・`qgis_io.pinned_layers`（「一番上に固定」の下に置く位置）、`qgis_io.map_tools`（地図のツールの受け渡し: ツールを終えると利用者の元のツールに戻し、プラグインのほかのツールには戻さない）、`ui.fit` など。一覧は `architecture.py` の `KERNEL`。
 
 二つの機能が使う小さな部品は、どちらかの機能に置かずに基盤へ移す（機能どうしの依存を一方向に保つため）。いまの向きは ai → obs → (request, catalog, plan)、request → (catalog, plan)、catalog → plan。
 

@@ -54,6 +54,7 @@ from ..core.request.api import (
     ADOPTION_ROLES, AWAITING, DECLINED, HELD_BACK, IMAGE_ARRIVED, PLANNED, STATES, UNREQUESTED, HistoryRow, RequestStoreConfig, state_of,
 )
 from ..core.request.api import companions, shot_text, shot_tip
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, multipolygon_of, polygon_of, shape_of, to_wgs84
 from ..qgis_io.request_io import load_schema
 from ..qgis_io.tasks import run_task
@@ -1055,9 +1056,12 @@ class UnrequestedDialog(QDialog):
 
     def _tool(self, on: bool) -> None:
         if on:
-            self.canvas.setMapTool(self.extent_tool)
-        elif self.canvas.mapTool() is self.extent_tool:
-            self.canvas.unsetMapTool(self.extent_tool)
+            # (Its button stays pressed while another tool takes the map: it may be given the map back.)
+            map_tools.take(self.canvas, self.extent_tool, turns_off=False)
+        else:
+            map_tools.forget(self.canvas, self.extent_tool)
+            if self.canvas.mapTool() is self.extent_tool:
+                self.canvas.unsetMapTool(self.extent_tool)
 
     def _extent_drawn(self, extent: QgsRectangle) -> None:
         if extent.isEmpty():

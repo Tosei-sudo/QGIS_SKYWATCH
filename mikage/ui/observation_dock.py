@@ -138,7 +138,6 @@ class ObservationDock(
         self._queue: list[tuple] = []
         self._running = False
         self._following = False
-        self._previous_tool = None
         self._observer_cache = ""
         #: The books whose records are being read, and what waits for them (by id(book)). The records are read only
         #: once needed (tsudo 2026-11-10): an image chosen here, or something that uses them all (通報, エクスポート…).

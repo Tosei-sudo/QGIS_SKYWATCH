@@ -30,6 +30,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.interests import AREA, KIND_LABELS, POINT, Interest, matches, new_interest
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, shape_of, shape_rings, to_wgs84
 from ..qgis_io.interests_io import InterestBook, box_of, geometry_of, layers_of, remove_layers, select_on_map, show_layers
 from .catalog_overlay import DrawTool
@@ -416,7 +417,7 @@ class InterestsDock(PluginDock):
                     self.canvas.unsetMapTool(tool)
             return
         kind = self.draft.kind if which == "reshape" and self.draft is not None else (POINT if which == "point" else AREA)
-        self.canvas.setMapTool(self.point_tool if kind == POINT else self.draw_tool)
+        map_tools.take(self.canvas, self.point_tool if kind == POINT else self.draw_tool)
         self.say(self.tr("地図をクリック（Esc かボタンでやめる）") if kind == POINT
                  else self.tr("地図で頂点をクリック、ダブルクリックか右クリックで確定（Esc でやり直し）"))
 

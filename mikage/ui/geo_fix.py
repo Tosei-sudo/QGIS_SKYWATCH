@@ -32,7 +32,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core.geo_fix import MAX_POINTS, GeoFix, TiePoint, compass, kind_name
-from ..qgis_io import geo_fix_io
+from ..qgis_io import geo_fix_io, map_tools
 from ..qgis_io.geo_fix_keeper import FixKeeper, image_key
 from ..qgis_io.pixel_place import cached_placement, original_placement
 from ..qgis_io.shift_io import can_shift, original_source
@@ -273,7 +273,6 @@ class LayerFix(QObject):
         self.dirty = False
         self._opacity: Optional[float] = None
         self._markers: list = []
-        self._previous_tool = None
         self.tool = FixPointTool(self.canvas, self)
         self.panel: Optional[GeoFixPanel] = None
         if action is not None:
@@ -299,9 +298,7 @@ class LayerFix(QObject):
             self.action.setChecked(active)
             self.action.blockSignals(False)
         if active:
-            if self.canvas.mapTool() is not self.tool:
-                self._previous_tool = self.canvas.mapTool()
-                self.canvas.setMapTool(self.tool)
+            map_tools.take(self.canvas, self.tool)
             if self.panel is None:
                 self.panel = GeoFixPanel(self, self.iface.mainWindow())
             self.take(self.iface.activeLayer())
@@ -310,11 +307,7 @@ class LayerFix(QObject):
         else:
             self.faint(False)
             self._clear_markers()
-            if self.canvas.mapTool() is self.tool:
-                try:
-                    self.canvas.setMapTool(self._previous_tool) if self._previous_tool is not None else self.canvas.unsetMapTool(self.tool)
-                except RuntimeError:
-                    self.canvas.unsetMapTool(self.tool)
+            map_tools.give_back(self.canvas, self.tool)
             if self.panel is not None and self.panel.isVisible():
                 self.panel.blockSignals(True)
                 self.panel.hide()
