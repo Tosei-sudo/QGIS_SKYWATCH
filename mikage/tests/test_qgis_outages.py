@@ -184,7 +184,7 @@ def test_a_systems_stop_entered_and_held_back(plugin, monkeypatch):
     assert not orders.isVisible()
     form.kind.setCurrentText("システム")
     assert form.system.isVisible() and not form.satellite.isVisible() and orders.isVisible()
-    assert form.stop.text() == "受付停止" and not form.no_night.isVisible() and not form.limits["max_off_nadir"][0].isVisible()
+    assert form.stop.text() == "受付停止" and form.no_night.isVisible() and form.limits["max_off_nadir"][0].isVisible()
     form.system.setCurrentText("SYS-A")
     form.reason.setText("年末年始")
     form.stop.setChecked(True)
@@ -196,7 +196,7 @@ def test_a_systems_stop_entered_and_held_back(plugin, monkeypatch):
     row = fake.layers[OUTAGES].rows[0]["attributes"]
     assert (row["SYSTEM_NAME"], row["SAT_NAME"], row["STOP_IMAGING"], row["LIMIT_ORDERS_PER_DAY"]) == ("SYS-A", None, 1, 3)
     assert wait_for(lambda: dialog.model.rowCount() == 1)
-    assert dialog.model.item(0, COLUMNS.index("対象")).text() == "システム SYS-A"
+    assert dialog.model.item(0, COLUMNS.index("対象")).text() == "システム: SYS-A"
     assert dialog.model.item(0, COLUMNS.index("影響")).text() == "受付停止、1 日 3 件まで"
     daily = shots_test._calculate(p, tmp_path)
     got = [(c.result, c.reason) for c in daily.plan.candidates]

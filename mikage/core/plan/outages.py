@@ -251,8 +251,11 @@ class Outage:
     def impact_text(self) -> str:
         return "、".join(self.impacts()) or "影響の指定なし"
 
-    def short_text(self, now: float) -> str:
-        """「ICEYE-X27: 姿勢制御の不具合、撮像停止、復旧見込み 11/20 18:00」 (the reason and warnings of the calculation)."""
+    def short_text(self, now: float, bare: bool = False) -> str:
+        """
+        「ICEYE-X27: 姿勢制御の不具合、撮像停止、復旧見込み 11/20 18:00」 (the reason and warnings of the
+        calculation); `bare`: a system's by its name alone (under a heading that says システム).
+        """
         parts = [p for p in (self.reason, self.impact_text()) if p]
         status = self.status(now)
         if status == RECOVERED:
@@ -263,7 +266,7 @@ class Outage:
             if status == PLANNED:
                 parts.append(f"{when_text(self.start)} から")
             parts.append(f"復旧見込み {when_text(self.expected)}")
-        return f"{self.target}: " + "、".join(parts)
+        return f"{self.system if bare and self.for_system else self.target}: " + "、".join(parts)
 
     def blocks(self, ascending: bool, side: str, off_nadir: Optional[float], sun: Optional[float]) -> Optional[str]:
         """What of it keeps a pass from being used (撮像停止, the direction …); None when the pass may be used."""
@@ -453,8 +456,8 @@ def warning_of(sat, first: float, last: float, now: float) -> str:
     found = touching(sat, first, last, now)
     if not found:
         return ""
-    head = SYSTEM_WARNING if all(o.for_system for o in found) else OUTAGE_WARNING
-    return head + "；".join(o.short_text(now) for o in found) + "）"
+    systems = all(o.for_system for o in found)
+    return (SYSTEM_WARNING if systems else OUTAGE_WARNING) + "；".join(o.short_text(now, systems) for o in found) + "）"
 
 
 def summary_text(sats: Iterable, first: float, last: float, now: float, most: int = 3) -> str:
@@ -497,7 +500,7 @@ def outage_reason(found: Sequence[Outage], now: float) -> str:
     if seen and all(o.for_system for o in seen):
         if all(o.stop for o in seen):
             return f"{SYSTEM_STOP}（" + "；".join(stop_text(o, now) for o in seen[:2]) + more + "）"
-        return f"{SYSTEM_OUTAGE}（" + "；".join(o.short_text(now) for o in seen[:2]) + more + "）"
+        return f"{SYSTEM_OUTAGE}（" + "；".join(o.short_text(now, True) for o in seen[:2]) + more + "）"
     return f"{OUTAGE}（" + "；".join(o.short_text(now) for o in seen[:2]) + more + "）"
 
 
@@ -516,11 +519,12 @@ def outage_of(attributes: dict, fields: dict, oid_field: str = "OBJECTID", updat
     outage_id, satellite, system = _text(get("id")), _text(get("satellite")), _text(get("system"))
     if not outage_id or not (satellite or system) or start is None:
         return None
-    # A row naming both a satellite and a system is the satellite's (the system left aside); a system's row
-    # has only 受付停止 and its daily limits (a satellite's impacts entered on it in ArcGIS are left aside).
+    # A row naming both a satellite and a system is the satellite's (the system and its daily limits left
+    # aside). A system's row has every impact of a satellite's too (on each of its satellites), and its daily
+    # limits (件数・枚数).
     sat_row = bool(satellite)
-    per_day = _positive(get("maxPerDay")) if sat_row else None
-    scenes = _positive(get("scenesPerPass")) if sat_row else None
+    per_day = _positive(get("maxPerDay"))
+    scenes = _positive(get("scenesPerPass"))
     orders_day = None if sat_row else _positive(get("ordersPerDay"))
     scenes_day = None if sat_row else _positive(get("scenesPerDay"))
     return Outage(
@@ -528,11 +532,11 @@ def outage_of(attributes: dict, fields: dict, oid_field: str = "OBJECTID", updat
         mode=_text(get("mode")) if sat_row else "",
         reason=_text(get("reason")), expected=_float(ms_of(get("expected"))), recovered=_float(ms_of(get("recovered"))),
         stop=_yes(get("stop")),
-        closed=frozenset((asc, side) for role, asc, side, _l in DIRECTIONS if sat_row and _yes(get(role))),
-        max_off_nadir=_positive(get("maxOffNadir")) if sat_row else None,
+        closed=frozenset((asc, side) for role, asc, side, _l in DIRECTIONS if _yes(get(role))),
+        max_off_nadir=_positive(get("maxOffNadir")),
         max_per_day=max(1, round(per_day)) if per_day is not None else None,
         scenes_per_pass=max(1, round(scenes)) if scenes is not None else None,
-        min_interval=_positive(get("minInterval")) if sat_row else None, no_night=sat_row and _yes(get("noNight")),
+        min_interval=_positive(get("minInterval")), no_night=_yes(get("noNight")),
         other=_text(get("other")), note=_text(get("note")),
         system="" if sat_row else system,
         orders_per_day=max(1, round(orders_day)) if orders_day is not None else None,

@@ -83,7 +83,7 @@ def _choices(sats: Sequence) -> dict:
     return out
 
 
-#: The limits a system's outage has (the others are a satellite's).
+#: The limits only a system's outage has (it has a satellite's impacts too, on each of its satellites).
 SYSTEM_LIMITS = ("orders_per_day", "scenes_per_day")
 
 
@@ -199,12 +199,11 @@ class OutageForm(QDialog):
         self.stop.setText(self.tr("受付停止") if system else self.tr("撮像停止"))
         self.stop.setToolTip(self.tr("このシステムに出さない（その衛星すべての、期間中の撮像機会を使わない）") if system
                              else self.tr("この衛星（センサー・モード）の撮像機会を使わない"))
-        # A system's outage is only 受付停止 and its daily limits (the rest are a satellite's).
-        for key, (box, spin) in self.limits.items():
-            box.setVisible(system == (key in SYSTEM_LIMITS))
-            spin.setVisible(system == (key in SYSTEM_LIMITS))
-        for w in (self.directions_label, *self.directions.values(), self.no_night):
-            w.setVisible(not system)
+        # A system's outage has the daily limits of the system besides a satellite's impacts (on each of its satellites).
+        for key in SYSTEM_LIMITS:
+            box, spin = self.limits[key]
+            box.setVisible(system)
+            spin.setVisible(system)
 
     @staticmethod
     def _row(*widgets) -> QWidget:
@@ -223,8 +222,7 @@ class OutageForm(QDialog):
         self.stop.setToolTip(self.tr("この衛星（センサー・モード）の撮像機会を使わない"))
         self.stop.setChecked(bool(o and o.stop))
         grid.addWidget(self.stop, 0, 0, 1, 3)
-        self.directions_label = QLabel(self.tr("使えない方向"))
-        grid.addWidget(self.directions_label, 1, 0)
+        grid.addWidget(QLabel(self.tr("使えない方向")), 1, 0)
         self.directions: dict = {}
         for k, (role, asc, side, label) in enumerate(DIRECTIONS):
             box = QCheckBox(self.tr(label))
@@ -299,8 +297,8 @@ class OutageForm(QDialog):
             if limits[key] is not None:
                 limits[key] = int(limits[key])
         system = self.for_system
-        for key in limits:
-            if system != (key in SYSTEM_LIMITS):
+        if not system:
+            for key in SYSTEM_LIMITS:
                 limits[key] = None
         values = dict(
             satellite="" if system else self.satellite.currentText().strip(),
@@ -310,9 +308,8 @@ class OutageForm(QDialog):
             reason=self.reason.text().strip(), start=_ms(self.start),
             expected=None if self.no_expected.isChecked() else _ms(self.expected),
             recovered=_ms(self.recovered) if self.has_recovered.isChecked() else None,
-            stop=self.stop.isChecked(),
-            closed=frozenset() if system else frozenset(k for k, box in self.directions.items() if box.isChecked()),
-            no_night=self.no_night.isChecked() and not system, other=self.other.text().strip(), note=self.note.toPlainText().strip(), **limits,
+            stop=self.stop.isChecked(), closed=frozenset(k for k, box in self.directions.items() if box.isChecked()),
+            no_night=self.no_night.isChecked(), other=self.other.text().strip(), note=self.note.toPlainText().strip(), **limits,
         )
         if o is None:
             return Outage(id=new_id(), **values)
@@ -450,7 +447,8 @@ class OutageDialog(QDialog):
         for o in self.shown:
             status = o.status(now)
             part = "" if o.for_system else (" ".join(x for x in (o.sensor, o.mode) if x) or self.tr("（全部）"))
-            cells = [status, o.target, part, when_text(o.start), when_text(o.expected), when_text(o.recovered, ""),
+            target = self.tr("システム: {s}").format(s=o.system) if o.for_system else o.target
+            cells = [status, target, part, when_text(o.start), when_text(o.expected), when_text(o.recovered, ""),
                      o.impact_text(), o.reason, o.note]
             items = [QStandardItem(c) for c in cells]
             items[0].setForeground(QBrush(QColor(STATUS_COLORS[status])))

@@ -1271,8 +1271,8 @@ tsudo「既存の他に管理できそうなデータ、情報がないか検討
 - **どの衛星にかかるか**: そのシステムに割り振られる衛星（`requestExports[].series` か衛星カタログの `system`、`route.system_of_satellite`）。core/plan は core/request を読めないので、`attach(sats, outages, system_of)` にシステム名を返す関数（`route.system_names`）を渡す。名前は英数字だけを大文字・小文字の区別なく比べる。
 - **受付停止**（`STOP_IMAGING`）: その衛星すべてに、撮像機会の時刻で撮像停止として効く（`blocking` のいつもの道）。ほかのシステムで撮れる依頼はそちらへ、どこでも撮れない依頼は「システムの受付停止（SYS-A: 年末年始、1/4 0:00 まで）」で見送り（`outage_reason`。衛星とシステムの両方の障害で外れたときは「衛星の障害（…）」）。撮像計画・上限シミュレーション（「衛星の障害で見送り」に数える）・撮像計画の衛星の木（橙色）も同じ道で効く。
 - **臨時の上限**: 期間がその日（JST）に少しでもかかれば、その日の `limit.count`・`limit.scenes` を設定の値との小さいほうに（緩めない、`system_limits`・`daily.day_limit`）。`ExportSystem` は差し替えず（`c.system is s` で比べている）、その日の上限は `Room.limit` に持つ。撮像計画ファイル出力のシステムの空き（「1/3 件」）もその日の上限で出す（`room_text`）。割り振った依頼には注意「システムの障害あり（…）」。
-- **ほかの影響**: システムの行は受付停止と 1 日の件数・枚数だけを見る（方向・角度などは衛星の行で）。入力画面で対象を「システム」にすると、衛星・センサー・モードの欄が隠れ、システム（`requestExports` の `system` から選ぶ）と 1 日の件数・枚数の上限が出て、「撮像停止」は「受付停止」になる。
+- **ほかの影響**: 使えない方向・オフナディア角・回数・シーン数・間隔・夜間も、システムの行ならその衛星すべてにかかる（衛星の行と同じ道）。センサー・モードはシステムの行にはない（全部）。入力画面で対象を「システム」にすると、衛星・センサー・モードの欄が隠れ、システム（`requestExports` の `system` から選ぶ）と 1 日の件数・枚数の上限が出て、「撮像停止」は「受付停止」になる。
 - **出した予定**: 衛星の障害と同じく変えない。撮像予定で、出した撮像のシステムに受付停止がかかれば「システムの障害の影響あり（受付停止）」とシステムの列を橙色に（`handed_hit(system=)`）。臨時の上限は出したあとの行には印を付けない（どれを減らすかは担当が決める）。ステータスは「衛星の障害の影響あり」「システムの障害の影響あり」「衛星・システムの障害の影響あり」。
-- **名前**: メニュー・画面の題名を「衛星・システムの障害情報」に。一覧の最初の列は「対象」（衛星名か「システム SYS-A」）。
+- **名前**: メニュー・画面の題名を「衛星・システムの障害情報」に。一覧の「対象」は衛星名か「システム: SYS-A」。理由・注意は見出しが「システムの…」のとき名前だけ（「システムの障害あり（SYS-A: …）」）。
 
 実装: `core/plan/outages.py`（`Outage.system`・`orders_per_day`・`scenes_per_day`・`for_system`・`system_limits`・`stop_text`・`takes_systems`）、`core/request/route.py`（`system_names`）、`core/request/daily.py`（`day_limit`・`Room.limit`）、`ui/outage_dialog.py`、`ui/schedule_dock.py`、`ui/toolbar_buttons.py`（`RENAMED`）。テスト: `tests/test_system_outages.py`・`tests/test_qgis_outages.py`。

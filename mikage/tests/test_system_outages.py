@@ -133,8 +133,8 @@ def test_the_row():
            "LIMIT_ORDERS_PER_DAY": 4.2, "LIMIT_SCENES_PER_DAY": "12", "NO_ASC_LEFT": 1, "LIMIT_PER_DAY": 2, "NO_NIGHT": 1}
     o = outage_of(row, DEFAULT_OUTAGE_FIELDS)
     assert (o.system, o.satellite, o.stop, o.orders_per_day, o.scenes_per_day) == ("SYS-A", "", True, 4, 12)
-    # A satellite's impacts entered on a system's row (in ArcGIS): left aside.
-    assert not o.closed and o.max_per_day is None and not o.no_night
+    # A satellite's impacts on a system's row: on each of its satellites.
+    assert o.closed == {(True, "left")} and o.max_per_day == 2 and o.no_night
     # Neither a satellite nor a system: not an outage. Both: the satellite's (the system's limits left aside).
     assert outage_of({**row, "SYSTEM_NAME": ""}, DEFAULT_OUTAGE_FIELDS) is None
     both = outage_of({**row, "SAT_NAME": "ISS"}, DEFAULT_OUTAGE_FIELDS)
@@ -154,3 +154,15 @@ def test_a_table_without_the_system_attribute_refuses_a_systems_outage():
     client2, source2, layer2 = setup({**TYPES, "SYSTEM_NAME": "esriFieldTypeString", "LIMIT_ORDERS_PER_DAY": "esriFieldTypeInteger"})
     saved = save_outage(client2, source2, stop_of(orders_per_day=2))
     assert saved.object_id == 1 and layer2.rows[0]["attributes"]["SYSTEM_NAME"] == "SYS"
+
+
+def test_a_satellites_impacts_on_a_systems_row_hit_each_of_its_satellites():
+    """Design: 使えない方向・角度・夜間… of a system's row are on every satellite of the system."""
+    from mikage.core.plan.outages import blocking
+
+    o = stop_of(stop=False, closed=frozenset({(True, "left"), (True, "right"), (False, "left"), (False, "right")}))
+    [s] = attach([SAT], [o], lambda _s: "SYS")
+    assert s.outages == (o,) and blocking(s, T, True, "left", 10, 0, T) is not None
+    req = point(1, BELOW)
+    [c], _ = fit([req], [s], [system()])
+    assert c.result != TAKEN and c.reason.startswith("システムの障害（SYS: "), c.reason
