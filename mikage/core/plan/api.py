@@ -24,8 +24,8 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .orbit import ecef_of, Frame, frame_of, lon_lat_of, norm, Orbit, point_at, R, sun_angles, track_angles, track_rate, unit
     from .outages import (
         attach, blocking, check_outage, delete_outages, DIRECTIONS, handed_hit, leave_out, load_outages, new_id, on_day, ONGOING,
-        OUTAGE, Outage, outage_reason, OUTAGE_WARNING, OVERDUE, PLANNED, RECOVERED, save_outage, stopped, summary_text, warning_of,
-        when_text,
+        OUTAGE, Outage, outage_reason, OUTAGE_REASONS, OUTAGE_WARNING, OVERDUE, PLANNED, RECOVERED, save_outage, stopped,
+        summary_text, SYSTEM_OUTAGE, SYSTEM_STOP, SYSTEM_WARNING, system_limits, takes_systems, warning_of, when_text,
     )
     from .output import (
         cover_text, cover_title, describe_problems, first_only, is_old_tle, js_round, LayerField, local_text, mode_facts,
@@ -61,7 +61,7 @@ __all__ = [
     "leave_out", "Listed", "load_outages", "load_satellite_names", "load_satellites", "load_sensor_modes", "local_text",
     "lon_lat_of", "look_at", "MAX_DAYS", "MAX_HORIZON", "MAX_POINTS", "MAX_SHIPS", "MAX_TARGETS", "merge_reminders",
     "mode_facts", "name_of", "names_satellite", "natural_key", "new_id", "new_reminders", "NO_NAMES", "NO_OPPORTUNITY", "norm",
-    "on_day", "ONGOING", "Opportunity", "Orbit", "OUTAGE", "Outage", "outage_reason", "OUTAGE_WARNING", "OVERDUE",
+    "on_day", "ONGOING", "Opportunity", "Orbit", "OUTAGE", "Outage", "outage_reason", "OUTAGE_REASONS", "OUTAGE_WARNING", "OVERDUE",
     "pass_shapes", "PAST_DAYS", "percent", "places_for", "places_layers", "plain", "plan_access", "plan_csv", "plan_features",
     "plan_ics", "plan_ships", "PlanLayer", "PLANNED", "PlanOptions", "PlanResult", "PlanTarget", "platform_key", "point_at",
     "priority_of", "R", "reach_of", "read_grid", "RECOVERED", "reminder_of", "reminder_text", "repeat_pairs", "RepeatOptions",
@@ -69,7 +69,8 @@ __all__ = [
     "sample_sensor_modes", "satellite_label", "satellite_track", "SatelliteChoice", "SatelliteNames", "satellites_from_text",
     "SatelliteSpec", "satrec_of", "save_outage", "shift_scene", "ShipState", "side_text", "sorted_ops", "source_text",
     "SPEED_UNITS", "split_antimeridian", "spread_out", "stereo_pairs", "StereoOptions", "stopped", "summary_all",
-    "summary_cover", "summary_text", "sun_angles", "target_of", "targets_of", "tle_age_days", "track_angles", "TRACK_COLORS",
+    "summary_cover", "summary_text", "sun_angles", "SYSTEM_OUTAGE", "SYSTEM_STOP", "SYSTEM_WARNING", "system_limits",
+    "takes_systems", "target_of", "targets_of", "tle_age_days", "track_angles", "TRACK_COLORS",
     "track_layers", "track_place", "track_rate", "track_rows", "track_shapes", "track_ticks", "UncertaintyModel", "unit",
     "warning_of", "when_text", "with_modes",
     "OLD_TLE", "SAMPLE_SOURCE",

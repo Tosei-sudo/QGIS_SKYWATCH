@@ -300,7 +300,7 @@ def test_saved_read_recovered_and_deleted(monkeypatch):
 
 
 def test_what_cannot_be_saved_or_read():
-    assert check_outage(outage(satellite=" ")) == ["衛星を選ぶ"]
+    assert check_outage(outage(satellite=" ")) == ["衛星かシステムを選ぶ"]
     assert check_outage(outage(expected=T - 48 * H)) == ["復旧見込みは発生日時より後に"]
     assert check_outage(outage(recovered=T - 48 * H)) == ["復旧日時は発生日時より後に"]
     client, source, _layer = setup()

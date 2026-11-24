@@ -22,6 +22,18 @@ one none:
 * 夜間は撮像できない: the sun below the horizon at the place (as a request's 夜);
 * その他の影響 (text): not used by the calculation, told as a warning.
 
+システムの障害 (tsudo, 2026-11-24: 「4,5,7を実装して」, design doc 「画像の評価・
+システムの障害・参考情報 設計方針案」, all its recommendations chosen): a row may
+name a system of `requestExports` (SYSTEM_NAME) instead of a satellite: its
+impacts then hit every satellite of the system, 撮像停止 being called 受付停止
+(the system takes no order for a picture in the period: the period is the
+pictures' moment, as a satellite's), and two more of the system's own: the most
+requests (件数) and scenes (枚数) a day handed to it, made stricter than its
+`limit` on a day the row touches (never looser: the contract's values stay in
+the settings file). Which system a satellite belongs to is the caller's
+(`attach(…, system_of=…)`, core/request's route.system_of_satellite), else the
+satellite catalog's own `system`.
+
 When it holds: from its start to its recovery (復旧日時); without one, to the
 expected end; without that either, on and on. An expected end gone by without
 a recovery keeps it on (「見込み超過」, said in the lists) so that nothing is
@@ -54,6 +66,7 @@ DEFAULT_OUTAGE_FIELDS = {
     "noDescLeft": "NO_DESC_LEFT", "maxOffNadir": "LIMIT_OFF_NADIR", "maxPerDay": "LIMIT_PER_DAY",
     "scenesPerPass": "LIMIT_SCENES_PER_PASS", "minInterval": "LIMIT_INTERVAL_MIN", "noNight": "NO_NIGHT",
     "other": "OTHER_IMPACT", "note": "NOTE",
+    "system": "SYSTEM_NAME", "ordersPerDay": "LIMIT_ORDERS_PER_DAY", "scenesPerDay": "LIMIT_SCENES_PER_DAY",
 }
 #: Roles without which the table is not used.
 NEEDED = ("id", "satellite", "start")
@@ -69,8 +82,13 @@ PLANNED, ONGOING, OVERDUE, RECOVERED = "予定", "発生中", "見込み超過",
 STATUSES = (ONGOING, OVERDUE, PLANNED, RECOVERED)
 #: Why a request is held back: every satellite that could take it is hit by an outage then.
 OUTAGE = "衛星の障害"
-#: The start of the warning of a request taken on a satellite with an outage on the day.
+#: The same when every outage that held it back names a system: stopped (受付停止), else another of its impacts.
+SYSTEM_STOP, SYSTEM_OUTAGE = "システムの受付停止", "システムの障害"
+#: The beginnings of the reasons of a request held back by outages (as the limit simulation counts them).
+OUTAGE_REASONS = (OUTAGE, SYSTEM_STOP, SYSTEM_OUTAGE)
+#: The start of the warning of a request taken on a satellite with an outage on the day (of its system's only: the second).
 OUTAGE_WARNING = "衛星の障害あり（"
+SYSTEM_WARNING = "システムの障害あり（"
 #: More rows than this is an error (never cut silently).
 LIMIT = 10_000
 
@@ -111,9 +129,9 @@ def when_text(ms: Optional[float], empty: str = "未定") -> str:
 
 @dataclass(frozen=True)
 class Outage:
-    """One satellite outage (a row of TBL_SATELLITE_OUTAGE). Moments in ms."""
+    """One satellite (or system) outage (a row of TBL_SATELLITE_OUTAGE). Moments in ms."""
     id: str
-    #: The satellite's name, NORAD id, another name or series (then every satellite of it).
+    #: The satellite's name, NORAD id, another name or series (then every satellite of it); "" when it names a system.
     satellite: str
     start: float
     #: One sensor / mode only ("" for all of them).
@@ -138,12 +156,24 @@ class Outage:
     #: その他の影響 (not used by the calculation).
     other: str = ""
     note: str = ""
+    #: The system (`requestExports[].system`) it names instead of a satellite ("" for a satellite's).
+    system: str = ""
+    #: A system's stricter daily limits while it holds: requests (件数) and scenes (枚数) handed to it a day.
+    orders_per_day: Optional[int] = None
+    scenes_per_day: Optional[int] = None
     object_id: Optional[int] = field(default=None, compare=False)
     updated_at: Optional[float] = field(default=None, compare=False)
 
     @property
+    def for_system(self) -> bool:
+        """Whether it names a system (then never a satellite)."""
+        return bool(self.system) and not self.satellite
+
+    @property
     def target(self) -> str:
-        """「ICEYE-X27」, 「WV110（パンクロ）」, 「SAR-Y（スポットライト）」."""
+        """「ICEYE-X27」, 「WV110（パンクロ）」, 「SAR-Y（スポットライト）」, 「システム SYS-A」."""
+        if self.for_system:
+            return f"システム {self.system}"
         part = " ".join(x for x in (self.sensor, self.mode) if x)
         return f"{self.satellite}（{part}）" if part else self.satellite
 
@@ -180,7 +210,13 @@ class Outage:
     def limits(self) -> bool:
         """Whether the calculation is changed by it (not only その他の影響)."""
         return bool(self.stop or self.closed or self.no_night or self.max_off_nadir is not None or self.max_per_day is not None
-                    or self.scenes_per_pass is not None or self.min_interval is not None)
+                    or self.scenes_per_pass is not None or self.min_interval is not None
+                    or self.orders_per_day is not None or self.scenes_per_day is not None)
+
+    @property
+    def stop_text(self) -> str:
+        """What its 撮像停止 is called: 受付停止 for a system's."""
+        return "受付停止" if self.for_system else "撮像停止"
 
     @property
     def needs_pass(self) -> bool:
@@ -191,7 +227,11 @@ class Outage:
         """「撮像停止」, 「使えない方向: 昇交・右」, 「オフナディア角 20° まで」 … in the order of the table."""
         out = []
         if self.stop:
-            out.append("撮像停止")
+            out.append(self.stop_text)
+        if self.orders_per_day is not None:
+            out.append(f"1 日 {self.orders_per_day} 件まで")
+        if self.scenes_per_day is not None:
+            out.append(f"1 日 {self.scenes_per_day} 枚まで")
         if self.closed:
             out.append("使えない方向: " + "・".join(label.replace("・", "") for _r, a, s, label in DIRECTIONS if (a, s) in self.closed))
         if self.max_off_nadir is not None:
@@ -228,7 +268,7 @@ class Outage:
     def blocks(self, ascending: bool, side: str, off_nadir: Optional[float], sun: Optional[float]) -> Optional[str]:
         """What of it keeps a pass from being used (撮像停止, the direction …); None when the pass may be used."""
         if self.stop:
-            return "撮像停止"
+            return self.stop_text
         if (bool(ascending), side) in self.closed:
             return "使えない方向"
         if self.max_off_nadir is not None and off_nadir is not None and off_nadir > self.max_off_nadir + 1e-9:
@@ -257,16 +297,28 @@ def matches_names(o: Outage, satellite: Any, sensor: Any = "", mode: Any = "", *
     return not o.mode or plain(o.mode) == plain(mode)
 
 
-def matches(o: Outage, sat) -> bool:
-    """Whether an outage hits a satellite (one mode of it, SatelliteSpec)."""
+def matches(o: Outage, sat, system: Optional[str] = None) -> bool:
+    """
+    Whether an outage hits a satellite (one mode of it, SatelliteSpec); a
+    system's outage, when the satellite is of that system (`system`, else the
+    satellite catalog's own `system`).
+    """
+    if o.for_system:
+        own = system if system is not None else (getattr(sat, "system", None) or "")
+        return bool(own) and plain(own) == plain(o.system)
     return matches_names(o, sat.name, sat.sensor or "", sat.mode or "", sat.id, sat.series, *(sat.aliases or ()))
 
 
-def attach(sats: Sequence, outages: Sequence[Outage]) -> list:
-    """The satellites, each with the outages that hit it (`SatelliteSpec.outages`); those unchanged as they are."""
+def attach(sats: Sequence, outages: Sequence[Outage], system_of: Optional[Callable[[Any], Optional[str]]] = None) -> list:
+    """
+    The satellites, each with the outages that hit it (`SatelliteSpec.outages`);
+    those unchanged as they are. `system_of`: the system a satellite is ordered
+    through (by the settings' `requestExports`; without it, the catalog's own).
+    """
     out = []
     for sat in sats:
-        own = tuple(o for o in outages if matches(o, sat))
+        system = (system_of(sat) or "") if system_of is not None else None
+        own = tuple(o for o in outages if matches(o, sat, system))
         out.append(sat if own == tuple(getattr(sat, "outages", ()) or ()) else dataclasses.replace(sat, outages=own))
     return out
 
@@ -298,23 +350,29 @@ def leave_out(result, sats: Sequence, now: float) -> None:
 
 def handed_hit(outages: Sequence[Outage], satellite: str, sensor: str, mode: str, others: Sequence[str], at: Optional[float],
                orbit_dir: str = "", look_side: str = "", off_nadir: Optional[float] = None, center: Optional[Sequence[float]] = None,
-               now: Optional[float] = None) -> Optional[tuple[Outage, str]]:
+               now: Optional[float] = None, system: str = "") -> Optional[tuple[Outage, str]]:
     """
     For a shot already handed out (撮像予定; decision 4: told, never changed):
     the outage that hits it at its moment, and what of it. Its direction
     (昇交 / 降交, 右 / 左), angle and place (`center`, for the night) when
     known; without them only 撮像停止 is sure, an outage judging passes is
-    told as such.
+    told as such. A system's outage hits the rows handed to that system
+    (`system`).
     """
     if at is None or not math.isfinite(at):
         return None
     now = now if now is not None else datetime.now(timezone.utc).timestamp() * 1000
     for o in outages:
-        if not o.at(at, now) or not matches_names(o, satellite, sensor, mode, *others):
+        if not o.at(at, now):
+            continue
+        if o.for_system:
+            if not system or plain(system) != plain(o.system):
+                continue
+        elif not matches_names(o, satellite, sensor, mode, *others):
             continue
         if orbit_dir not in ("昇交", "降交") or look_side not in ("右", "左"):
             if o.stop:
-                return o, "撮像停止"
+                return o, o.stop_text
             if o.needs_pass:
                 return o, "障害中（撮り方が分からず確かめられない）"
             continue
@@ -365,6 +423,26 @@ def on_day(sats: Sequence, day: date, now: float) -> list:
     return out
 
 
+def system_limits(sats: Iterable, system: str, day: date, now: float) -> dict:
+    """
+    A system's stricter daily limits on a day, from the outages naming it that
+    touch the day (on its satellites): {"count": n, "scenes": n}, each only
+    when some outage says; the smallest of them.
+    """
+    first, last = day_range(day)
+    out: dict = {}
+    seen: set = set()
+    for sat in sats:
+        for o in touching(sat, first, last, now):
+            if not o.for_system or o.id in seen or plain(o.system) != plain(system):
+                continue
+            seen.add(o.id)
+            for key, value in (("count", o.orders_per_day), ("scenes", o.scenes_per_day)):
+                if value is not None and (key not in out or value < out[key]):
+                    out[key] = value
+    return out
+
+
 def stopped(sat, first: float, last: float, now: float) -> Optional[Outage]:
     """An outage stopping the satellite's pictures at some moment between `first` and `last` (for satellites counted)."""
     return next((o for o in touching(sat, first, last, now) if o.stop), None)
@@ -373,7 +451,10 @@ def stopped(sat, first: float, last: float, now: float) -> Optional[Outage]:
 def warning_of(sat, first: float, last: float, now: float) -> str:
     """The warning of a request taken on a satellite with outages that day ("" when none)."""
     found = touching(sat, first, last, now)
-    return OUTAGE_WARNING + "；".join(o.short_text(now) for o in found) + "）" if found else ""
+    if not found:
+        return ""
+    head = SYSTEM_WARNING if all(o.for_system for o in found) else OUTAGE_WARNING
+    return head + "；".join(o.short_text(now) for o in found) + "）"
 
 
 def summary_text(sats: Iterable, first: float, last: float, now: float, most: int = 3) -> str:
@@ -387,13 +468,37 @@ def summary_text(sats: Iterable, first: float, last: float, now: float, most: in
     items = sorted(seen.values(), key=lambda o: (o.start, o.target))
     shown = [f"{o.target}（{o.impact_text()}）" for o in items[:most]]
     more = f" ほか {len(items) - most}" if len(items) > most else ""
-    return "障害中の衛星: " + "、".join(shown) + more
+    head = "障害中の衛星・システム: " if any(o.for_system for o in items) else "障害中の衛星: "
+    return head + "、".join(shown) + more
+
+
+def stop_text(o: Outage, now: float) -> str:
+    """「SYS-A: 年末年始、1/4 0:00 まで」: a system's 受付停止 told in the reason of the requests it held back."""
+    parts = [o.reason] if o.reason else []
+    status = o.status(now)
+    if status == OVERDUE:
+        parts.append(f"{when_text(o.expected)} までの見込みを超過")
+    elif o.recovered is not None or o.expected is not None:
+        parts.append(f"{when_text(o.recovered if o.recovered is not None else o.expected)} まで")
+    else:
+        parts.append("終わり未定")
+    rest = [i for i in o.impacts() if i != o.stop_text]
+    return f"{o.system}: " + "、".join(parts + rest)
 
 
 def outage_reason(found: Sequence[Outage], now: float) -> str:
-    """「衛星の障害（ICEYE-X27: 姿勢制御の不具合、撮像停止、復旧見込み 11/20 18:00）」."""
+    """
+    「衛星の障害（ICEYE-X27: 姿勢制御の不具合、撮像停止、復旧見込み 11/20 18:00）」;
+    held back by systems' outages only, 「システムの受付停止（SYS-A: 年末年始、1/4 0:00 まで）」
+    (受付停止 all of them) or 「システムの障害（…）」.
+    """
     seen = list(dict.fromkeys(found))
-    return f"{OUTAGE}（" + "；".join(o.short_text(now) for o in seen[:2]) + (f" ほか {len(seen) - 2}" if len(seen) > 2 else "") + "）"
+    more = f" ほか {len(seen) - 2}" if len(seen) > 2 else ""
+    if seen and all(o.for_system for o in seen):
+        if all(o.stop for o in seen):
+            return f"{SYSTEM_STOP}（" + "；".join(stop_text(o, now) for o in seen[:2]) + more + "）"
+        return f"{SYSTEM_OUTAGE}（" + "；".join(o.short_text(now) for o in seen[:2]) + more + "）"
+    return f"{OUTAGE}（" + "；".join(o.short_text(now) for o in seen[:2]) + more + "）"
 
 
 # ---- the table --------------------------------------------------------------------------------
@@ -408,21 +513,31 @@ def outage_of(attributes: dict, fields: dict, oid_field: str = "OBJECTID", updat
 
     oid = a.get(oid_field)
     start = ms_of(get("start"))
-    outage_id, satellite = _text(get("id")), _text(get("satellite"))
-    if not outage_id or not satellite or start is None:
+    outage_id, satellite, system = _text(get("id")), _text(get("satellite")), _text(get("system"))
+    if not outage_id or not (satellite or system) or start is None:
         return None
-    per_day = _positive(get("maxPerDay"))
-    scenes = _positive(get("scenesPerPass"))
+    # A row naming both a satellite and a system is the satellite's (the system left aside); a system's row
+    # has only 受付停止 and its daily limits (a satellite's impacts entered on it in ArcGIS are left aside).
+    sat_row = bool(satellite)
+    per_day = _positive(get("maxPerDay")) if sat_row else None
+    scenes = _positive(get("scenesPerPass")) if sat_row else None
+    orders_day = None if sat_row else _positive(get("ordersPerDay"))
+    scenes_day = None if sat_row else _positive(get("scenesPerDay"))
     return Outage(
-        id=outage_id, satellite=satellite, start=float(start), sensor=_text(get("sensor")), mode=_text(get("mode")),
+        id=outage_id, satellite=satellite, start=float(start), sensor=_text(get("sensor")) if sat_row else "",
+        mode=_text(get("mode")) if sat_row else "",
         reason=_text(get("reason")), expected=_float(ms_of(get("expected"))), recovered=_float(ms_of(get("recovered"))),
         stop=_yes(get("stop")),
-        closed=frozenset((asc, side) for role, asc, side, _l in DIRECTIONS if _yes(get(role))),
-        max_off_nadir=_positive(get("maxOffNadir")),
+        closed=frozenset((asc, side) for role, asc, side, _l in DIRECTIONS if sat_row and _yes(get(role))),
+        max_off_nadir=_positive(get("maxOffNadir")) if sat_row else None,
         max_per_day=max(1, round(per_day)) if per_day is not None else None,
         scenes_per_pass=max(1, round(scenes)) if scenes is not None else None,
-        min_interval=_positive(get("minInterval")), no_night=_yes(get("noNight")), other=_text(get("other")),
-        note=_text(get("note")), object_id=int(oid) if is_number(oid) else None,
+        min_interval=_positive(get("minInterval")) if sat_row else None, no_night=sat_row and _yes(get("noNight")),
+        other=_text(get("other")), note=_text(get("note")),
+        system="" if sat_row else system,
+        orders_per_day=max(1, round(orders_day)) if orders_day is not None else None,
+        scenes_per_day=max(1, round(scenes_day)) if scenes_day is not None else None,
+        object_id=int(oid) if is_number(oid) else None,
         updated_at=_float(ms_of(a.get(updated))) if updated else None,
     )
 
@@ -460,12 +575,13 @@ def new_id(now: Optional[float] = None) -> str:
 def attributes_of(o: Outage, fields: dict, types: dict, lengths: dict) -> dict:
     """The row of an outage as the table takes it (only the attributes the table has)."""
     values = {
-        "id": o.id, "satellite": o.satellite, "sensor": o.sensor or None, "mode": o.mode or None, "reason": o.reason or None,
+        "id": o.id, "satellite": o.satellite or None, "sensor": o.sensor or None, "mode": o.mode or None, "reason": o.reason or None,
         "start": int(o.start), "expected": int(o.expected) if o.expected is not None else None,
         "recovered": int(o.recovered) if o.recovered is not None else None,
         "stop": 1 if o.stop else None, "maxOffNadir": o.max_off_nadir, "maxPerDay": o.max_per_day,
         "scenesPerPass": o.scenes_per_pass, "minInterval": o.min_interval, "noNight": 1 if o.no_night else None,
         "other": o.other or None, "note": o.note or None,
+        "system": o.system or None, "ordersPerDay": o.orders_per_day, "scenesPerDay": o.scenes_per_day,
     }
     for role, asc, side, _l in DIRECTIONS:
         values[role] = 1 if (asc, side) in o.closed else None
@@ -483,13 +599,19 @@ def attributes_of(o: Outage, fields: dict, types: dict, lengths: dict) -> dict:
 def check_outage(o: Outage) -> list[str]:
     """What keeps an outage from being saved (empty when it can be)."""
     problems = []
-    if not o.satellite.strip():
-        problems.append("衛星を選ぶ")
+    if not o.satellite.strip() and not o.system.strip():
+        problems.append("衛星かシステムを選ぶ")
     if o.expected is not None and o.expected <= o.start:
         problems.append("復旧見込みは発生日時より後に")
     if o.recovered is not None and o.recovered < o.start:
         problems.append("復旧日時は発生日時より後に")
     return problems
+
+
+def takes_systems(info, source) -> bool:
+    """Whether the table has the attribute of a system's outages (SYSTEM_NAME; tables made before 2026-11-24 do not)."""
+    name = source.fields.get("system")
+    return bool(name) and name in info.field_types
 
 
 def save_outage(client: EsriClient, source, o: Outage, token: Optional[str] = None) -> Outage:
@@ -500,6 +622,9 @@ def save_outage(client: EsriClient, source, o: Outage, token: Optional[str] = No
     token = token or source.token
     info = client.layer(source.url, token, refresh=True)
     _check(info, source)
+    if o.for_system and not takes_systems(info, source):
+        raise EsriError(f"衛星の障害情報の表にシステムの項目がない（管理者に連絡: {source.fields.get('system') or 'SYSTEM_NAME'}）",
+                        code="E704")
     attributes = attributes_of(o, source.fields, info.field_types, info.field_lengths)
     from .. import edit_stamp
 

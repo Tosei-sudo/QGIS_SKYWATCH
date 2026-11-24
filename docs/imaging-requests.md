@@ -47,7 +47,7 @@ flowchart LR
 | `core/request/result_file.py` / `core/request/adoption.py` | システムの結果ファイルの読み方（列・JSON Schema の `x-target`）・依頼との突き合わせ、採否の手入力・要求外（§20） |
 | `ui/schedule_dock.py` | 「撮像予定」ドック（日ごとの計画: カレンダー・一覧・地図・採否・要求外、§20） |
 | `core/request/quota.py` / `ui/quota_dialog.py` | 年間撮像上限（消費・見込み・残り、日次の計算での残りの確認、数えない撮像、§27） |
-| `core/plan/outages.py` / `ui/outage_dialog.py` | 衛星の障害情報（撮像機会から外す・その日の値を厳しく・注意、登録画面、§35） |
+| `core/plan/outages.py` / `ui/outage_dialog.py` | 衛星・システムの障害情報（撮像機会から外す・その日の値を厳しく・注意、登録画面、§35・§40） |
 
 ## 3. 設定（config.json）
 
@@ -1196,7 +1196,7 @@ tsudo「衛星の障害情報を登録できるようにしてほしい 理由�
 - **TLE のない衛星**（件数で詰める）: その日に撮像停止がかかれば使わない。1 日の回数は `on_day` で効く。方向・角度・夜間は分からないので注意だけ。
 - **注意**: 障害のある衛星に割り振った依頼に「衛星の障害あり（…）」（詰め直しで重ねない、`_manual_warning`）。日の注意の先頭に「障害中の衛星: …」（`summary_text`）。手動の採用はそのまま通す。
 - **出した予定**（決定 4）: 変えない。撮像予定で、出力した撮像（不採用・撮像済みを除く）に障害がかかれば衛星と理由を橙色にし「衛星の障害の影響あり（…）」（`handed_hit`。撮像の向き・角度・中心が分かればそれで判定、分からなければ撮像停止だけを確かめ、ほかは「障害中（撮り方が分からず確かめられない）」）。
-- **登録**（決定 3）: メニュー「撮像依頼 ▸ 衛星の障害情報…」。一覧（状態・衛星・センサー・モード・発生・復旧見込み・復旧・影響・理由・メモ、既定は復旧していないものだけ）と 新規・編集・復旧・削除。編集は撮像計画の担当（`outages.edit`）、見るのは撮像を依頼する人も。保存のあと読み直して `PluginContext.set_outages` → `outagesChanged` で撮像計画の衛星の木と撮像予定がすぐ変わる。計算はそのたびに表を読む（読めなければ前に読んだ障害で計算し、理由を出す）。
+- **登録**（決定 3）: メニュー「撮像依頼 ▸ 衛星・システムの障害情報…」（2026-11-24 に「衛星の障害情報…」から改名。ツールバーに置いた前の名前のボタンはそのまま使える、`toolbar_buttons.RENAMED`）。一覧（状態・衛星・センサー・モード・発生・復旧見込み・復旧・影響・理由・メモ、既定は復旧していないものだけ）と 新規・編集・復旧・削除。編集は撮像計画の担当（`outages.edit`）、見るのは撮像を依頼する人も。保存のあと読み直して `PluginContext.set_outages` → `outagesChanged` で撮像計画の衛星の木と撮像予定がすぐ変わる。計算はそのたびに表を読む（読めなければ前に読んだ障害で計算し、理由を出す）。
 
 実装: `core/plan/outages.py`（`Outage`・`attach`・`blocking`・`leave_out`・`on_day`・`stopped`・`handed_hit`・`load_outages`・`save_outage`・`delete_outages`）、`core/plan/satellites.py`（`SatelliteSpec.outages`）、`core/request/passes.py`（`Passes.blocked`・`blocked_on`）、`core/request/daily.py`、`core/request/simulate.py`（`DayResult.outage`）、`qgis_io/context.py`（`read_outages`・`set_outages`・`outagesChanged`）、`ui/outage_dialog.py`、`ui/imaging_plan_dock.py`・`ui/satellite_tree.py`・`ui/plan_file_dock.py`・`ui/limit_sim_dialog.py`・`ui/schedule_dock.py`。テスト: `tests/test_satellite_outages.py`・`tests/test_qgis_outages.py`。
 
@@ -1262,3 +1262,17 @@ tsudo「撮像依頼系のテーブル画面に、メモ列を表示できるよ
 - **撮像予定の「理由」**: 前の「理由・メモ」。中身（システムの不採用の理由、見送りの理由、手で足した要求外の「メモ」、衛星の障害）は変えない。前の名前で並びを覚えていた人は、この列が標準の位置に出る。
 
 実装: `ui/memo_column.py`（`MEMO`・`memo_text`・`memo_item`）、`ui/list_views.py`（`hidden`・`standard_hidden`）、`ui/request_dock.py`・`ui/schedule_dock.py`（`note_of`）・`ui/plan_file_dock.py`・`ui/plan_results_dialog.py`。
+
+## 40. システムの受付停止・臨時の上限（2026-11-24 追加）
+
+tsudo「既存の他に管理できそうなデータ、情報がないか検討して。衛星障害とかはいい例だったね」→ 候補 8 つのうち「4,5,7を実装して」。設計方針案（Claude Docs「画像の評価・システムの障害・参考情報 設計方針案」）を確認してから作成（推奨 3「受付停止は撮像の時刻で判断」のとおり）。契約の上限は設定ファイル（`requestExports[].limit`）のまま、臨時の変更だけを表に置く。
+
+- **表**: 新しい表は作らず、`TBL_SATELLITE_OUTAGE` に `SYSTEM_NAME`（システム名）・`LIMIT_ORDERS_PER_DAY`（1 日の件数の上限）・`LIMIT_SCENES_PER_DAY`（1 日の枚数の上限）を足す。`SAT_NAME` か `SYSTEM_NAME` のどちらかで 1 行（両方あれば衛星の行、`outage_of`）。`SYSTEM_NAME` のない表にシステムの行を書こうとすると E704（`save_outage`）、入力画面は「対象」を衛星に固定（`takes_systems`）。
+- **どの衛星にかかるか**: そのシステムに割り振られる衛星（`requestExports[].series` か衛星カタログの `system`、`route.system_of_satellite`）。core/plan は core/request を読めないので、`attach(sats, outages, system_of)` にシステム名を返す関数（`route.system_names`）を渡す。名前は英数字だけを大文字・小文字の区別なく比べる。
+- **受付停止**（`STOP_IMAGING`）: その衛星すべてに、撮像機会の時刻で撮像停止として効く（`blocking` のいつもの道）。ほかのシステムで撮れる依頼はそちらへ、どこでも撮れない依頼は「システムの受付停止（SYS-A: 年末年始、1/4 0:00 まで）」で見送り（`outage_reason`。衛星とシステムの両方の障害で外れたときは「衛星の障害（…）」）。撮像計画・上限シミュレーション（「衛星の障害で見送り」に数える）・撮像計画の衛星の木（橙色）も同じ道で効く。
+- **臨時の上限**: 期間がその日（JST）に少しでもかかれば、その日の `limit.count`・`limit.scenes` を設定の値との小さいほうに（緩めない、`system_limits`・`daily.day_limit`）。`ExportSystem` は差し替えず（`c.system is s` で比べている）、その日の上限は `Room.limit` に持つ。撮像計画ファイル出力のシステムの空き（「1/3 件」）もその日の上限で出す（`room_text`）。割り振った依頼には注意「システムの障害あり（…）」。
+- **ほかの影響**: システムの行は受付停止と 1 日の件数・枚数だけを見る（方向・角度などは衛星の行で）。入力画面で対象を「システム」にすると、衛星・センサー・モードの欄が隠れ、システム（`requestExports` の `system` から選ぶ）と 1 日の件数・枚数の上限が出て、「撮像停止」は「受付停止」になる。
+- **出した予定**: 衛星の障害と同じく変えない。撮像予定で、出した撮像のシステムに受付停止がかかれば「システムの障害の影響あり（受付停止）」とシステムの列を橙色に（`handed_hit(system=)`）。臨時の上限は出したあとの行には印を付けない（どれを減らすかは担当が決める）。ステータスは「衛星の障害の影響あり」「システムの障害の影響あり」「衛星・システムの障害の影響あり」。
+- **名前**: メニュー・画面の題名を「衛星・システムの障害情報」に。一覧の最初の列は「対象」（衛星名か「システム SYS-A」）。
+
+実装: `core/plan/outages.py`（`Outage.system`・`orders_per_day`・`scenes_per_day`・`for_system`・`system_limits`・`stop_text`・`takes_systems`）、`core/request/route.py`（`system_names`）、`core/request/daily.py`（`day_limit`・`Room.limit`）、`ui/outage_dialog.py`、`ui/schedule_dock.py`、`ui/toolbar_buttons.py`（`RENAMED`）。テスト: `tests/test_system_outages.py`・`tests/test_qgis_outages.py`。
