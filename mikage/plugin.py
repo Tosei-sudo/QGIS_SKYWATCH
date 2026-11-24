@@ -61,14 +61,15 @@ MENU_GROUPS = [
                    "ArcGIS Web マップを開く…", "ArcGIS Web マップとして保存…"]),
 ]
 #: In the menu itself, after the groups (behind a separator).
-MENU_TOP = ["イベント", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
+MENU_TOP = ["イベント", "参考情報", "担当と個人設定…", "ツールバーのボタン…", "ドックのレイアウト", "ドックを初期位置に戻す", "接続と表の点検…", "監査ログ…", "使い方（ヘルプ）…", "Python API リファレンス…", "設定…"]
 #: Where the docks start: each group docked on one side, as tabs (the first in front).
 DOCK_GROUPS = [
     (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsImagingPlan", "SatObsSatellitePass", "SatObsRequests", "SatObsPlanFiles",
                                              "SatObsSchedule", "SatObsCloud"]),
     (Qt.DockWidgetArea.LeftDockWidgetArea, ["SatObsImageCatalog", "SatObsNotices", "SatObsInterests", "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral",
                                             "SatObsDashboard", "SatObsAnalysis", "SatObsDataChat"]),
-    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents"]),
+    (Qt.DockWidgetArea.RightDockWidgetArea, ["SatObsObservations", "SatObsTaxonomy", "SatObsMoving", "SatObsAiResults", "SatObsEvents",
+                                             "SatObsReferences"]),
     # A timeline: under the map, as wide as it (tsudo, 2026-11-14: 「複数地点は縦に並べ、横に時間が伸びる」).
     (Qt.DockWidgetArea.BottomDockWidgetArea, ["SatObsPlaceSchedule"]),
 ]
@@ -80,7 +81,7 @@ DOCK_ORDER = (
     "SatObsImageCatalog", "SatObsImagingPlan", "SatObsRequests", "SatObsPlanFiles", "SatObsSchedule", "SatObsPlaceSchedule",
     "SatObsSatellitePass", "SatObsCloud", "SatObsObservations", "SatObsTaxonomy", "SatObsNotices", "SatObsInterests",
     "SatObsEnhance", "SatObsShadowHeight", "SatObsSpectral", "SatObsMoving", "SatObsDashboard", "SatObsAiResults",
-    "SatObsEvents", "SatObsAnalysis", "SatObsDataChat",
+    "SatObsEvents", "SatObsReferences", "SatObsAnalysis", "SatObsDataChat",
 )
 #: The map's right-click menu, at the point clicked (the features' entries by their text).
 MAP_MENU = ("ここを撮像計画", "この地点の新着画像を監視…", "この地点の撮像予定", "この地域で撮像依頼…")

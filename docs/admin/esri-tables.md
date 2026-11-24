@@ -79,6 +79,8 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | [`TBL_AREA_CATEGORY`](#tbl_area_category地域のカテゴリー) | なし | 書き込み（「関心地域・地点」の「組織」の「カテゴリー…」） | 組織の関心地域のカテゴリー（木の形。2026-11-24 に追加） | `namedAreas.categories` |
 | [`TBL_REQUEST_AREA_CHANGE`](#tbl_request_area_change依頼の範囲の変更記録) | ポリゴン | 書き込み（行を足すだけ） | 地域の形が変わって依頼の範囲を合わせた記録と、合わせる前の範囲（2026-11-24 に追加） | `requestStores[].areaChanges` |
 | [`TBL_IMAGE_REVIEW`](#tbl_image_review画像の評価) | ポリゴン | 書き込み | 画像の評価（画像 × 地名ごとに 1 行。判読に使えるか・雲量・理由。2026-11-24 に追加） | `imageReviews` |
+| [`TBL_REFERENCE_INFO`](#tbl_reference_info参考情報) | ポイント | 書き込み（削除は作成者か管理者） | 出典つきの参考情報（発表・報道・通報など。場所と日時と出典・確からしさ。2026-11-24 に追加） | `referenceInfo.layer` |
+| [`TBL_REFERENCE_LINK`](#tbl_reference_link参考情報の紐付け) | なし | 書き込み | 参考情報とイベント・モノ・観測記録の紐付け（同じ組は 1 行） | `referenceInfo.links` |
 
 使う機能のテーブルだけあればよい（例えば観測記録だけなら `TBL_OBSERVATION`）。「読み」のテーブルはほかのシステムが作るものでもよく、属性名が違えば `fields` で合わせる。表の「必須」は、その属性がないとプラグインがそのテーブルを使わない（理由を出す）もの。ほかの属性は、なければその値を読み書きしない。
 
@@ -146,6 +148,11 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `TBL_IMAGE_REVIEW` | `REVIEW_ID` | 評価を ID で引く・書き直す |
 | `TBL_IMAGE_REVIEW` | `IMAGE_ID` | 画像の評価（画像を開くたび、カタログの一覧、依頼の照合） |
 | `TBL_IMAGE_REVIEW` | `NAMED_AREA_ID` | 地名ごとの評価（ダッシュボード） |
+| `TBL_REFERENCE_INFO` | `INFO_ID` | 参考情報を ID で引く・更新する |
+| `TBL_REFERENCE_INFO` | `INFO_TIME` | 期間の参考情報（ドックの一覧、画像の前後の日数） |
+| `TBL_REFERENCE_INFO` | `NAMED_AREA_ID` | 地名ごとの参考情報（画像に写る地名の参考情報） |
+| `TBL_REFERENCE_LINK` | `INFO_ID` | 参考情報の紐付け |
+| `TBL_REFERENCE_LINK` | `ITEM_ID` | イベント・モノ・記録の参考情報 |
 
 ほかに:
 
@@ -856,9 +863,38 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
 | `REVIEWED_BY` | 評価者 | `String(255)` | 最後に付けた人（作成者の 4 属性と同じ利用者名） | `reviewedBy` |
 | `REVIEWED_AT` | 評価日時 | `Date` | 最後に付けた日時 | `reviewedAt` |
 
+### `TBL_REFERENCE_INFO`（参考情報）
+
+画像の外から知った情報（発表・航行警報・報道・ほかの部署からの通報など）を、出典と確からしさをつけて場所と日時で残すレイヤー（2026-11-24 に追加。設計方針案「画像の評価・システムの障害・参考情報」の 7）。1 行が情報 1 件、形状はその場所の点（分からなければ空）。ドック「参考情報」で登録・編集し、地図に点で出る。「観測記録」で画像を選ぶと、その撮像日時の前後 `days` 日（既定 7 日）のうち、画像の範囲にある情報と、画像に写る地名（`NAMED_AREA_ID`）の情報の件数が「参考情報 n 件」に出る。だれでも見て登録・編集でき、削除は作成者（作成者の 4 属性の `CREATED_USER`）か管理者だけ（作成者の分からない行はだれでも）。`referenceInfo.layer`（URL か `{ "url", "fields", "where", "token" }`、既定は下の名前）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `INFO_ID` | 情報ID | `String(64)` | ID（`REF-20261124-103000-1a2b`。編集しても変えない）。**必須** | `id` |
+| `TITLE` | 題名 | `String(255)` | 題名。**必須** | `title` |
+| `INFO_TIME` | 出来事の日時 | `Date` | 出来事の日時（発表の日時ではなく、起きた・見られた日時）。**必須** | `time` |
+| `PUBLISHED_AT` | 発表日時 | `Date` | 発表・入手の日時 | `published` |
+| `SOURCE` | 出典 | `String(255)` | 出典（発表した組織・媒体。入力欄は過去の出典を候補に出す） | `source` |
+| `SOURCE_REF` | 文書番号・URL | `String(1000)` | 文書番号か URL（URL ならドックから開ける） | `sourceRef` |
+| `RELIABILITY` | 確からしさ | `String(64)` | 確からしさ（観測記録の確度と同じ言葉。既定は `確定`・`推定`・`不明`） | `reliability` |
+| `SUMMARY` | 要旨 | `String(4000)` | 要旨 | `summary` |
+| `KIND` | 分類 | `String(1000)` | 分類体系の種別（`船舶 > 支援船`） | `kind` |
+| `NAMED_AREA_ID` | 地名の管理番号 | `String(255)` | 何についての情報か（[`TBL_NAMED_AREA`](#tbl_named_area地名のポリゴン) の `NAMED_AREA_ID`） | `areaId` |
+| `NOTE` | メモ | `String(2000)` | メモ | `note` |
+
+### `TBL_REFERENCE_LINK`（参考情報の紐付け）
+
+参考情報とイベント・モノ・観測記録の紐付け（1 行が 1 組。同じ参考情報と項目をもう一度紐付けても 1 行のまま）。「観測記録」の記録の「参考情報 ▾」と、「イベント」の「参考情報」の欄で紐付ける。紐付けを外しても参考情報と項目はそのまま。`referenceInfo.links`（URL か `{ "url", "fields", "where", "token" }`、既定は下の名前。なければ紐付けは使わない）。
+
+| 属性名 | エイリアス | 型 | 中身 | 役割 |
+| --- | --- | --- | --- | --- |
+| `INFO_ID` | 情報ID | `String(64)` | 参考情報の ID（`TBL_REFERENCE_INFO` の `INFO_ID`）。**必須** | `info` |
+| `ITEM_TYPE` | 項目の種類 | `String(16)` | `event`（イベント）・`thing`（モノ）・`observation`（観測記録）。**必須** | `type` |
+| `ITEM_ID` | 項目ID | `String(255)` | イベント ID・モノ ID（観測記録の `OBJECT_ID`）・記録 ID。**必須** | `item` |
+| `LABEL` | 項目名 | `String(255)` | 一覧に出す名前（紐付けたときの名前） | `label` |
+
 ### 上の表の名前で作ったときの設定
 
-既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
+既定の属性名のある項目（撮像計画・撮像依頼・観測記録・通報・分担・画像の評価・引き継ぎ・イベント・参考情報・関心地域・地点・担当・衛星の障害情報・備考の単語集・判読の練習・画像の幾何補正）は URL だけ書けばよい。既定のない項目は `fields` に属性名を書く。URL はサービスに合わせる。
 
 ```jsonc
 {
@@ -911,6 +947,10 @@ ArcGIS Enterprise のダッシュボード（撮像計画・観測結果・地�
   "events": {
     "layer": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/15",                        // TBL_EVENT
     "links": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/16"                         // TBL_EVENT_LINK
+  },
+  "referenceInfo": {
+    "layer": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/36",                        // TBL_REFERENCE_INFO
+    "links": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/37"                         // TBL_REFERENCE_LINK
   },
   "interests": {
     "points": "https://gis.example/arcgis/rest/services/MIKAGE/FeatureServer/24",                       // TBL_INTEREST_POINT

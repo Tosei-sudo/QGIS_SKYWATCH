@@ -546,6 +546,26 @@ TABLES = (
         F("REVIEWED_BY", "評価者", "TEXT", 255, "reviewedBy"),
         F("REVIEWED_AT", "評価日時", "DATE", None, "reviewedAt"),
     )),
+    # 出典つきの参考情報 (2026-11-24): what was learnt from outside the images, at a place (the point) and a time.
+    Table("TBL_REFERENCE_INFO", "参考情報", "POINT", writable=True, setting="referenceInfo.layer", fields=(
+        F("INFO_ID", "情報ID", "TEXT", 64, "id"),
+        F("TITLE", "題名", "TEXT", 255, "title"),
+        F("INFO_TIME", "出来事の日時", "DATE", None, "time"),
+        F("PUBLISHED_AT", "発表日時", "DATE", None, "published"),
+        F("SOURCE", "出典", "TEXT", 255, "source"),
+        F("SOURCE_REF", "文書番号・URL", "TEXT", 1000, "sourceRef"),
+        F("RELIABILITY", "確からしさ", "TEXT", 64, "reliability"),
+        F("SUMMARY", "要旨", "TEXT", 4000, "summary"),
+        F("KIND", "分類", "TEXT", 1000, "kind"),
+        F("NAMED_AREA_ID", "地名の管理番号", "TEXT", 255, "areaId"),
+        F("NOTE", "メモ", "TEXT", 2000, "note"),
+    )),
+    Table("TBL_REFERENCE_LINK", "参考情報の紐付け", None, writable=True, setting="referenceInfo.links", fields=(
+        F("INFO_ID", "情報ID", "TEXT", 64, "info"),
+        F("ITEM_TYPE", "項目の種類", "TEXT", 16, "type"),
+        F("ITEM_ID", "項目ID", "TEXT", 255, "item"),
+        F("LABEL", "項目名", "TEXT", 255, "label"),
+    )),
 )
 
 #: 属性インデックス（テーブル → 属性）。ID で引く・紐付ける属性と、日時の範囲で引く属性（2026-11-18: 200 人規模の点検で
@@ -564,6 +584,8 @@ INDEXES = {
     "TBL_ALERT_LOG": ("OBS_ID", "REPORTED_AT"),
     "TBL_ASSIGNMENT": ("IMAGE_ID",),
     "TBL_IMAGE_REVIEW": ("REVIEW_ID", "IMAGE_ID", "NAMED_AREA_ID"),
+    "TBL_REFERENCE_INFO": ("INFO_ID", "INFO_TIME", "NAMED_AREA_ID"),
+    "TBL_REFERENCE_LINK": ("INFO_ID", "ITEM_ID"),
     "TBL_EVENT": ("EVENT_ID",),
     "TBL_EVENT_LINK": ("EVENT_ID", "ITEM_ID"),
     "TBL_AI_RESULT": ("IMAGE_ID",),
@@ -667,6 +689,9 @@ def plugin_config(urls: dict) -> dict:
         config["assignments"] = urls["TBL_ASSIGNMENT"]
     if has("TBL_IMAGE_REVIEW"):
         config["imageReviews"] = urls["TBL_IMAGE_REVIEW"]
+    if has("TBL_REFERENCE_INFO"):
+        config["referenceInfo"] = {"layer": urls["TBL_REFERENCE_INFO"],
+                                   **({"links": urls["TBL_REFERENCE_LINK"]} if has("TBL_REFERENCE_LINK") else {})}
     if has("TBL_HANDOVER_MEMO"):
         config["handover"] = {"table": urls["TBL_HANDOVER_MEMO"]}
     if has("TBL_EVENT"):

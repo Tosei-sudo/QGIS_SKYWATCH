@@ -270,7 +270,8 @@ class FakeEsri:
             found = [r for r in found if r["attributes"][layer.oid] in ids]
         if form.get("geometry"):
             area = _box(json.loads(form["geometry"]))
-            found = [r for r in found if r["geometry"] and _overlaps(area, _box(r["geometry"]))]
+            # An empty point ({"x": null}) is in no area.
+            found = [r for r in found if r["geometry"] and r["geometry"].get("x", 0) is not None and _overlaps(area, _box(r["geometry"]))]
         if form.get("returnCountOnly") == "true":
             return {"count": len(found)}
         # orderByFields is followed only by an `ordered` layer: the rows stay in object id order otherwise

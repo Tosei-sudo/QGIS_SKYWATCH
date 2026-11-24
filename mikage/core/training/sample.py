@@ -419,6 +419,12 @@ EVENT_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "EVENT_NAME": S, "EVENT_K
 EVENT_LINK_FIELDS = {"EVENT_ID": {"type": S, "length": 64}, "ITEM_TYPE": S, "ITEM_ID": {"type": S, "length": 128},
                      "ITEM_LABEL": {"type": S, "length": 1000}, "ITEM_TIME": T, "SOURCE": {"type": S, "length": 1000},
                      "NOTE": {"type": S, "length": 4000}}
+#: 出典つきの参考情報 (TBL_REFERENCE_INFO, 2026-11-24): one point per info, and its links (TBL_REFERENCE_LINK).
+REFERENCE_FIELDS = {"INFO_ID": {"type": S, "length": 64}, "TITLE": S, "INFO_TIME": T, "PUBLISHED_AT": T, "SOURCE": S,
+                    "SOURCE_REF": {"type": S, "length": 1000}, "RELIABILITY": {"type": S, "length": 64},
+                    "SUMMARY": {"type": S, "length": 4000}, "KIND": {"type": S, "length": 1000}, "NAMED_AREA_ID": S,
+                    "NOTE": {"type": S, "length": 2000}}
+REFERENCE_LINK_FIELDS = {"INFO_ID": {"type": S, "length": 64}, "ITEM_TYPE": {"type": S, "length": 16}, "ITEM_ID": S, "LABEL": S}
 #: 関心地域・地点 (both layers alike; the owner is the plugin's user name).
 INTEREST_FIELDS = {"INTEREST_ID": {"type": S, "length": 64}, "INTEREST_NAME": S, "OWNER_USER": S, "COLOR": {"type": S, "length": 32},
                    "NOTE": {"type": S, "length": 4000}}
@@ -589,7 +595,15 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
              "features": feats([{"attributes": {"EVENT_ID": str(uuid.UUID(int=9000)), "EVENT_NAME": "東京湾 船舶事故（サンプル）", "EVENT_KIND": "事故",
                                                 "STATUS": "対応中", "START_AT": now - 2 * DAY, "NOTE": "モックのイベント。画像・記録は「イベントに追加」で"},
                                  "geometry": {"rings": [_box_ring(AREA)]}}])},
-            {"id": 1, "name": "イベントの紐付け", "fields": EVENT_LINK_FIELDS, "features": []}]},
+            {"id": 1, "name": "イベントの紐付け", "fields": EVENT_LINK_FIELDS, "features": []},
+            {"id": 2, "name": "参考情報", "geometryType": "point", "fields": REFERENCE_FIELDS,
+             "features": feats([{"attributes": {"INFO_ID": "REF-SAMPLE-0001", "TITLE": "東京湾で船舶の座礁（サンプル）", "INFO_TIME": now - 2 * DAY,
+                                                "PUBLISHED_AT": now - 2 * DAY + 3_600_000, "SOURCE": "サンプル海上保安部",
+                                                "SOURCE_REF": "航行警報 第1号（モック）", "RELIABILITY": "推定",
+                                                "SUMMARY": "モックの参考情報。湾の中ほどで貨物船が座礁、付近を航行する船に注意を呼びかけ",
+                                                "KIND": "船舶", "NOTE": "練習用"},
+                                 "geometry": {"x": (AREA[0] + AREA[2]) / 2, "y": (AREA[1] + AREA[3]) / 2}}])},
+            {"id": 3, "name": "参考情報の紐付け", "fields": REFERENCE_LINK_FIELDS, "features": []}]},
         {"name": "Interests", "layers": [
             {"id": 0, "name": "関心地点", "geometryType": "point", "fields": INTEREST_FIELDS,
              "features": feats([{"attributes": {"INTEREST_ID": str(uuid.UUID(int=9100)), "INTEREST_NAME": "サンプルの岸壁", "OWNER_USER": _user(),
@@ -775,6 +789,7 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
   "handover": {{ "table": "{rest}/Work/FeatureServer/1", "hours": 12, "timeZone": "Asia/Tokyo" }},
   // イベント（地震対応など）: イベントのレイヤーと紐付けテーブル
   "events": {{ "layer": "{rest}/Events/FeatureServer/0", "links": "{rest}/Events/FeatureServer/1" }},
+  "referenceInfo": {{ "layer": "{rest}/Events/FeatureServer/2", "links": "{rest}/Events/FeatureServer/3" }},
   // 組織の関心地域（地名のレイヤーに用途・よみがな・別名・国・カテゴリーなど。ドック「関心地域・地点」の「組織」で全員が編集）
   "namedAreas": {{ "url": "{rest}/Alerts/FeatureServer/3", "categories": "{rest}/Alerts/FeatureServer/5",
                   "countries": "{rest}/Alerts/FeatureServer/4" }},

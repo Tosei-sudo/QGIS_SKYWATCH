@@ -55,7 +55,7 @@ ROLES: tuple[Role, ...] = (
     #: (the records of the images are the answers taken: the observation dock too)
     Role("INSTRUCTOR", "判読練習の指導者", frozenset({INSTRUCT, OBSERVE}),
          "判読の練習の問題づくり（組織の画像と正解）と、みんなの成績・取り違えやすい種別の確認"),
-    Role("ADMIN", "管理者", frozenset({ADMIN}), "接続と表の点検・監査ログ・設定ファイルの切り替え・ローカル記録の消去など"),
+    Role("ADMIN", "管理者", frozenset({ADMIN}), "接続と表の点検・監査ログ・設定ファイルの切り替え・ローカル記録の消去・ほかの人の参考情報の削除など"),
 )
 BY_CODE = {r.code: r for r in ROLES}
 BY_NAME = {r.name: r for r in ROLES}

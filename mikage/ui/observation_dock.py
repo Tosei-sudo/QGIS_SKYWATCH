@@ -173,6 +173,7 @@ class ObservationDock(
         context.configChanged.connect(self.reset_stores)
         context.configChanged.connect(self.assignment_bar.reset)
         context.configChanged.connect(self.review_bar.reset)
+        context.configChanged.connect(self.reference_line.reset)
         self.visibilityChanged.connect(self._visibility)
         # Others' records read quietly (another image, after a conflict, and every `refreshMinutes`).
         self._refreshing = False
@@ -248,7 +249,16 @@ class ObservationDock(
         from .review_bar import ReviewBar
 
         self.review_bar = ReviewBar(self)
-        b.addWidget(self.review_bar)
+        # 参考情報 beside it (the settings file's referenceInfo): the infos around the image's time and place.
+        from .reference_line import ReferenceLine
+
+        self.reference_line = ReferenceLine(self)
+        image_lines = QHBoxLayout()
+        image_lines.setContentsMargins(0, 0, 0, 0)
+        image_lines.addWidget(self.review_bar)
+        image_lines.addWidget(self.reference_line)
+        image_lines.addStretch(1)
+        b.addLayout(image_lines)
 
         # An image without its file.
         self.list_form = QGroupBox(tr("ファイルなしの画像"))
@@ -614,6 +624,12 @@ class ObservationDock(
         self.event_add_button = self._button(tr("イベントに追加"), tr("選んだ記録を対応中のイベント（地震対応など）に追加"),
                                              lambda: self.add_to_event())
         self.event_add_button.hide()
+        # 参考情報 (referenceInfo.links): the records and their things linked to infos, and their infos listed.
+        self.reference_button = self._button(tr("参考情報 ▾"), tr("選んだ記録・そのモノを参考情報に紐付ける、紐付けた参考情報を見る"),
+                                             lambda: self.reference_menu())
+        self.reference_button.hide()
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(lambda at: self.reference_menu(self.table.viewport().mapToGlobal(at)))
         # まとめ (`textAssist.tasks.summary`): a few sentences on the records chosen (tsudo 2026-11-19).
         self.summary_button = self._button(tr("まとめ…"), tr("選んだ記録を数文にまとめて下書きを作成（この PC の生成 AI）"),
                                            lambda: self.summarize())
@@ -624,6 +640,7 @@ class ObservationDock(
         chosen.addWidget(self.remove_chosen_button)
         chosen.addWidget(self.alert_add_button)
         chosen.addWidget(self.event_add_button)
+        chosen.addWidget(self.reference_button)
         chosen.addWidget(self.summary_button)
         chosen.addStretch(1)
         # 「ビュー」: the list's columns and the 大分類 shown, kept under a name (per user). The key is the one
@@ -1225,7 +1242,8 @@ class ObservationDock(
                              (project.layerTreeRoot().nameChanged, self._layer_renamed),
                              (self.iface.currentLayerChanged, self._layer_chosen), (self.canvas.extentsChanged, self._extent_changed),
                              (self.context.configChanged, self.reset_stores), (self.context.configChanged, self.assignment_bar.reset),
-                             (self.context.configChanged, self.review_bar.reset)):
+                             (self.context.configChanged, self.review_bar.reset),
+                             (self.context.configChanged, self.reference_line.reset)):
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
