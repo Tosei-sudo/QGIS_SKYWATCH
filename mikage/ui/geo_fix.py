@@ -284,7 +284,9 @@ class LayerFix(QObject):
         self.canvas.mapToolSet.connect(self._tool_set)
         iface.currentLayerChanged.connect(self._current_changed)
         keeper.changed.connect(self._layer_changed)
-        keeper.read.connect(lambda _ids: self.show_state())
+        keeper.read.connect(self._kept_changed)
+        # The image worked on removed (closed, or the catalog opening the next in its place): forgotten.
+        QgsProject.instance().layersWillBeRemoved.connect(self._removing)
 
     # ---- on and off ----
 
@@ -332,6 +334,28 @@ class LayerFix(QObject):
         if self.layer is not None and not sip.isdeleted(self.layer) and self.layer.id() == layer_id:
             self.show_state()
 
+    def _kept_changed(self, _ids) -> None:
+        self.show_state()
+
+    def _removing(self, layer_ids) -> None:
+        layer = self.layer
+        if layer is not None and (sip.isdeleted(layer) or layer.id() in set(layer_ids)):
+            self._forget_layer()
+            self.show_state()
+
+    def _forget_layer(self) -> None:
+        self._clear_markers()
+        self.layer, self.fix, self.dirty = None, None, False
+        self._opacity = None
+
+    def _alive(self) -> Optional[QgsRasterLayer]:
+        """The layer worked on; None once it is gone (removed from the project), which is then forgotten."""
+        layer = self.layer
+        if layer is not None and sip.isdeleted(layer):
+            self._forget_layer()
+            return None
+        return layer
+
     # ---- the layer and its correction ----
 
     def take(self, layer) -> None:
@@ -372,7 +396,8 @@ class LayerFix(QObject):
         self.show_state()
 
     def saved(self) -> Optional[GeoFix]:
-        return self.keeper.known(*image_key(self.layer)) if self.layer is not None else None
+        layer = self._alive()
+        return self.keeper.known(*image_key(layer)) if layer is not None else None
 
     def _changed(self, fix: GeoFix) -> None:
         self.fix = fix
@@ -381,7 +406,7 @@ class LayerFix(QObject):
 
     def _show(self) -> None:
         """The layer shown with the correction being made (the DEM read first when needed)."""
-        layer, fix = self.layer, self.fix
+        layer, fix = self._alive(), self.fix
         if layer is None or fix is None:
             return
         if fix.is_empty():
@@ -420,7 +445,7 @@ class LayerFix(QObject):
 
     def add_point(self, start: QgsPointXY, end: QgsPointXY) -> None:
         """A landmark shown at `start` (map CRS) is really at `end`."""
-        layer, fix = self.layer, self.fix
+        layer, fix = self._alive(), self.fix
         if layer is None or fix is None:
             return
         if len(fix.points) >= MAX_POINTS:
@@ -453,44 +478,50 @@ class LayerFix(QObject):
 
     def take_off(self) -> None:
         """This screen only: the image where its file places it (the kept correction stays)."""
-        if self.layer is None:
+        layer = self._alive()
+        if layer is None:
             return
-        self.keeper.take_off(self.layer)
-        image_id, image_file = image_key(self.layer)
+        self.keeper.take_off(layer)
+        image_id, image_file = image_key(layer)
         self.fix = GeoFix(image_id=image_id, image_file=image_file, terrain=False)
         self.dirty = False
         self._markers_for()
         self.show_state()
 
     def save(self) -> None:
-        layer, fix = self.layer, self.fix
+        layer, fix = self._alive(), self.fix
         if layer is None or fix is None:
             return
+        name = layer.name()
         report = geo_fix_io.report_of(layer)
         fix = replace(fix, residual=report.get("residual"))
 
         def done(saved: GeoFix) -> None:
+            if self._alive() is not layer:
+                # The image closed while it was saved: kept, nothing more to show.
+                self.say(tr("{name} の幾何補正を保存（{where}）").format(name=name, where=self.keeper.where()))
+                return
             self.fix, self.dirty = saved, False
-            if self.layer is layer and geo_fix_io.is_fixed(layer):
+            if geo_fix_io.is_fixed(layer):
                 # The layer's record with who and when.
                 record = geo_fix_io.record_of(layer) or {}
                 import json
 
                 record["fix"] = json.loads(saved.to_json())
                 layer.setCustomProperty(geo_fix_io.FIX, json.dumps(record, ensure_ascii=False))
-            self.say(tr("{name} の幾何補正を保存（{where}）").format(name=layer.name(), where=self.keeper.where()))
+            self.say(tr("{name} の幾何補正を保存（{where}）").format(name=name, where=self.keeper.where()))
             self.show_state()
             self.offer_records()
 
         self.keeper.save(fix, done, self.warn)
 
     def delete_saved(self) -> None:
-        saved = self.saved()
-        if saved is None or self.layer is None:
+        saved, layer = self.saved(), self._alive()
+        if saved is None or layer is None:
             return
         where = self.keeper.where()
         if QMessageBox.question(self.panel, tr(ENTRY), tr("{name} の保存した補正を削除する？（{where}。この画面の表示はそのまま）").format(
-                name=self.layer.name(), where=where)) != QMessageBox.StandardButton.Yes:
+                name=layer.name(), where=where)) != QMessageBox.StandardButton.Yes:
             return
         self.keeper.delete(saved, lambda _n: (self.say(tr("保存した補正を削除")), self._deleted()), self.warn)
 
@@ -504,7 +535,7 @@ class LayerFix(QObject):
         """({record id: (lon, lat)} of the image's records not where the corrected image shows them, own count, others' count)."""
         dock = self.observations()
         book = getattr(dock, "book", None)
-        layer = self.layer
+        layer = self._alive()
         if book is None or layer is None:
             return {}, 0, 0
         from ..core import edit_stamp
@@ -628,9 +659,10 @@ class LayerFix(QObject):
     # ---- the panel ----
 
     def show_state(self) -> None:
-        if self.panel is None:
+        # (Closed: nothing shown; opened again, take() shows the active image.)
+        if self.panel is None or not self.active:
             return
-        layer = self.layer if self.layer is not None and not sip.isdeleted(self.layer) else None
+        layer = self._alive()
         dem = self.keeper.dem
         if dem is None or not dem.configured:
             dem_text = tr("DEM の設定（dem）なし: 地形は補正しない")
@@ -684,7 +716,8 @@ class LayerFix(QObject):
     def close(self) -> None:
         self.set_active(False)
         for signal, slot in ((self.canvas.mapToolSet, self._tool_set), (self.iface.currentLayerChanged, self._current_changed),
-                             (self.keeper.changed, self._layer_changed)):
+                             (self.keeper.changed, self._layer_changed), (self.keeper.read, self._kept_changed),
+                             (QgsProject.instance().layersWillBeRemoved, self._removing)):
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
