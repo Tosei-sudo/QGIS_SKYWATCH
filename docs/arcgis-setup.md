@@ -158,14 +158,17 @@ datetime.datetime.strptime(!TARGET_DAY![:10], "%Y-%m-%d") - datetime.timedelta(h
 2. `TBL_OBSERVATION` の「属性ルール」で計算ルールを足す: フィールド `NAMED_AREA_OBJECTID`、トリガー「挿入」「更新」、式は下の例
 3. サービスを上書き公開する（`publish_service.py publish`。式が読む `TBL_NAMED_AREA` も同じサービスに入れておく）
 
-式の例（Arcade。記録を含む地名のうち、いちばん小さいもの。プラグインの通報の `place` と同じ選び方で、`ACTIVE` が 0 のものは使わない）:
+式の例（Arcade。記録を含む地名のうち、いちばん小さいもの。プラグインの通報の `place` と同じ選び方で、`ACTIVE` が 0 のものと、用途 `AREA_USE` が `関心地域` だけのもの（組織の関心地域。2026-11-24 から）は使わない）:
 
 ```js
-var areas = FeatureSetByName($datastore, "MIKAGE.TBL_NAMED_AREA", ["OBJECTID", "ACTIVE"], true);
+var areas = FeatureSetByName($datastore, "MIKAGE.TBL_NAMED_AREA", ["OBJECTID", "ACTIVE", "AREA_USE"], true);
 var best = null;
 var smallest = -1;
 for (var a in Intersects(areas, Geometry($feature))) {
     if (!IsEmpty(a.ACTIVE) && a.ACTIVE == 0) {
+        continue;
+    }
+    if (a.AREA_USE == "関心地域") {
         continue;
     }
     var size = Area(a);
@@ -183,6 +186,30 @@ return best;
 - `OBJECTID` は地名のデータを入れ直す（消して追加し直す）と変わる。そのときも上のフィールド演算で入れ直す
 - プラグインの「データ分析」で観測記録と地名のポリゴンを結合すると、キーの候補に `NAMED_AREA_OBJECTID` = `OBJECTID` が出る（地名ごとの記録の件数などを `NAMED_AREA_ID` つきで数えられる）
 - ArcGIS のダッシュボードで地名ごとに見るなら（いつもと違う地名・管理番号で開く地名カルテ・地名の付け方の点検）、[arcgis-dashboards.md](arcgis-dashboards.md#地名系)
+
+- 2026-11-24 より前にこのルールを作った環境は、式を上のものに替える（`AREA_USE` の 2 行。属性がなければ `create_tables.py` をもう一度実行して足す）。替えないと、記録が組織の関心地域の中にあるとき、その関心地域が記録の地名になる
+
+## 属性ルール（地名の管理番号の自動付番）
+
+地名（`TBL_NAMED_AREA`）の管理番号 `NAMED_AREA_ID` は、すべての行に付け、重ならないようにする（2026-11-24 tsudo「自動採番が欲しい」「全てに付番すること」。組織の関心地域と依頼・記録の紐付けに使う）。形は `NA-000123`（設定ファイルの `namedAreas.idPrefix`・`idDigits` で変えられる。変えたら下のスクリプトにも同じ値を渡す）。
+
+`tools/arcgis/named_area_ids.py`（ArcGIS Pro の Python、データ所有者の .sde）が、まとめて作る。何度実行してもよい:
+
+```bat
+"C:\Program Files\ArcGIS\Pro\bin\Python\scripts\propy.bat" named_area_ids.py --workspace C:\gis\connections\mikage_owner.sde
+```
+
+1. 管理番号が空の行に、`OBJECTID` の順で、今ある `NA-` の番号のいちばん大きいものの次から番号を付ける（地名だけの行も。重なっている番号があれば一覧で出すので、直してからもう一度）
+2. Oracle のシーケンス `SEQ_NAMED_AREA_ID` を、その次の番号から作る（`CreateDatabaseSequence`）
+3. `TBL_NAMED_AREA` にグローバル ID を足し、属性ルールを 2 つ足す:
+   - 計算ルール `MIKAGE_NAMED_AREA_ID`（トリガー「挿入」「更新」、フィールド `NAMED_AREA_ID`）: 空なら `'NA-' + Text(NextSequenceValue('MIKAGE.SEQ_NAMED_AREA_ID'), '000000')`。手で入れた番号はそのまま
+   - 制約ルール `MIKAGE_NAMED_AREA_ID_UNIQUE`（「挿入」「更新」）: ほかの行と同じ番号（大文字・小文字は区別しない）なら保存させない
+4. サービスを上書き公開する（`publish_service.py publish`）。プラグインの「関心地域・地点」の「組織」で保存した行にも、ArcGIS Pro・Portal で足した行にも番号が付く
+
+- `--dry-run` で何をするかだけ、`--fill-only` で空の行に番号を付けるだけ（シーケンス・ルールなし。ファイル ジオデータベースで試すときも番号だけ）
+- ルールがなくてもプラグインは番号を付ける（保存の後に、いちばん大きい番号の次を書き、もう一度重なりを確かめる。2 台が同時に付けたら `OBJECTID` の大きい行が次の番号に）。ルールがあれば ArcGIS Pro で足した行にも付き、同時の保存でも重ならない
+- 手で `NA-` の番号を先の値まで入れると、シーケンスがその番号に追いついたとき制約ルールで保存が止まる。そのときは管理番号を空にして保存し直す（次の番号が付く）か、シーケンスを進める
+- 番号を付けた地名は、通報フォーマットの `place.id`・`places.id` に今まで空だった番号も出るようになる
 
 ## 前からある記録に衛星名を入れる（任意）
 

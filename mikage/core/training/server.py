@@ -24,9 +24,10 @@ What it answers (as ArcGIS Server 11 does, for what the plugin and QGIS ask):
 Not a full server: geometry filters compare bounding boxes, there are no
 attachments, statistics, versions or relationships. The layers are defined
 in JSON (see sample.py and scripts/mock_esri/README.md). A layer can have
-the one kind of attribute rule the plugin's tables use (`attributeRules`: a
+the two kinds of attribute rule the plugin's tables use (`attributeRules`: a
 field set to the OBJECTID of the smallest polygon of another layer holding
-the point, on every add and update).
+the point, on every add and update; an empty field numbered from a sequence,
+as 管理番号 NA-000123 of the named areas).
 """
 from __future__ import annotations
 
@@ -277,9 +278,12 @@ class Layer:
         self.types = {f["name"]: f["type"] for f in self.fields}
         self.description = definition.get("description", "")
         self.table = q(f"t_{service}_{self.id}")
-        #: Calculation rules, as an enterprise geodatabase's attribute rules: [{"field", "smallestContaining": "<service>/<id>"}].
+        #: Calculation rules, as an enterprise geodatabase's attribute rules: [{"field", "smallestContaining": "<service>/<id>"}]
+        #: (the OBJECTID of the smallest polygon holding the point) or [{"field", "sequence": {"prefix", "digits"}}] (an empty
+        #: field numbered from a sequence: NA-000123, as SEQ_NAMED_AREA_ID's rule).
         self.rules = [r for r in definition.get("attributeRules") or []
-                      if isinstance(r, dict) and r.get("field") in self.types and isinstance(r.get("smallestContaining"), str)]
+                      if isinstance(r, dict) and r.get("field") in self.types
+                      and (isinstance(r.get("smallestContaining"), str) or isinstance(r.get("sequence"), dict))]
 
     @property
     def is_table(self) -> bool:
@@ -490,7 +494,11 @@ class Store:
         polygon of its layer holding the feature's point (NULL in none, or
         for a feature that is not a point), whatever the edit sent.
         """
-        if not layer.rules or layer.is_table:
+        if not layer.rules:
+            return
+        self._number(layer, oid)
+        places = [r for r in layer.rules if isinstance(r.get("smallestContaining"), str)]
+        if not places or layer.is_table:
             return
         with self.lock:
             rows = self.db.execute(f"SELECT oid, _geom FROM {layer.table}" + (" WHERE oid = ?" if oid is not None else ""),
@@ -498,9 +506,37 @@ class Store:
             for row_oid, text in rows:
                 g = json.loads(text) if text else None
                 point = (g["x"], g["y"]) if isinstance(g, dict) and isinstance(g.get("x"), (int, float)) and isinstance(g.get("y"), (int, float)) else None
-                values = {r["field"]: self._smallest_containing(r["smallestContaining"], point) for r in layer.rules}
+                values = {r["field"]: self._smallest_containing(r["smallestContaining"], point) for r in places}
                 self.db.execute(f"UPDATE {layer.table} SET {', '.join(q(c) + ' = ?' for c in values)} WHERE oid = ?",
                                 [*values.values(), row_oid])
+
+    def _number(self, layer: Layer, oid: Optional[int] = None) -> None:
+        """
+        The sequence rules: an empty field of the row `oid` (of every row
+        when None, in object id order) given the prefix and one past the
+        largest number of that form in the layer, as the geodatabase's rule
+        on an Oracle sequence (NextSequenceValue) would.
+        """
+        for r in layer.rules:
+            seq = r.get("sequence")
+            if not isinstance(seq, dict):
+                continue
+            prefix, digits = str(seq.get("prefix", "")), int(seq.get("digits", 6) or 6)
+            col = q(r["field"])
+            with self.lock:
+                empty = [row[0] for row in self.db.execute(
+                    f"SELECT oid FROM {layer.table} WHERE ({col} IS NULL OR TRIM({col}) = '')"
+                    + (" AND oid = ?" if oid is not None else "") + " ORDER BY oid", (oid,) if oid is not None else ()).fetchall()]
+                if not empty:
+                    continue
+                largest = 0
+                for (value,) in self.db.execute(f"SELECT {col} FROM {layer.table} WHERE {col} IS NOT NULL").fetchall():
+                    text = str(value).strip()
+                    if text.upper().startswith(prefix.upper()) and text[len(prefix):].isdigit():
+                        largest = max(largest, int(text[len(prefix):]))
+                for row_oid in empty:
+                    largest += 1
+                    self.db.execute(f"UPDATE {layer.table} SET {col} = ? WHERE oid = ?", (f"{prefix}{largest:0{digits}d}", row_oid))
 
     def calculate_all(self) -> None:
         for layer in list(self.layers.values()):
@@ -513,11 +549,15 @@ class Store:
             return None
         x, y = point
         active = next((f["name"] for f in polygons.fields if f["name"].upper() == "ACTIVE"), None)
-        rows = self.db.execute(f"SELECT oid, _geom{', ' + q(active) if active else ''} FROM {polygons.table} "
+        # 用途 関心地域 (an organisation's area of interest only) is not a place: `AREA_USE <> '関心地域'` of the rule.
+        use = next((f["name"] for f in polygons.fields if f["name"].upper() == "AREA_USE"), None)
+        rows = self.db.execute(f"SELECT oid, _geom, {q(active) if active else 'NULL'}, {q(use) if use else 'NULL'} FROM {polygons.table} "
                                "WHERE _xmin <= ? AND _xmax >= ? AND _ymin <= ? AND _ymax >= ?", (x, x, y, y)).fetchall()
         best, smallest = None, None
         for row in rows:
             if active and row[2] is not None and row[2] == 0:
+                continue
+            if use and row[3] is not None and str(row[3]).strip() == "関心地域":
                 continue
             rings = (json.loads(row[1]) or {}).get("rings") or [] if row[1] else []
             if not _inside(x, y, rings):

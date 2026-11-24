@@ -202,7 +202,7 @@ def test_the_attribute_rule_gives_each_record_its_named_area(server):
     client = EsriClient(transport)
     oid = {a["attributes"]["NAME"]: (a["attributes"]["OBJECTID"], a["attributes"]["NAMED_AREA_ID"])
            for a in client.query_all(places.url, "1=1", None, geometry=False)}
-    assert oid["横須賀本港"][1] == "NA-0102"
+    assert oid["横須賀本港"][1] == "NA-000102"
 
     def area_of(record_id):
         [f] = client.query_all(c.url, f"OBS_ID = '{record_id}'", None, geometry=False)

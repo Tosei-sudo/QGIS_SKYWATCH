@@ -419,3 +419,19 @@ def test_the_readme_lists_the_indexes_the_script_makes():
     rows = re.findall(r"^\| `(TBL_[A-Z_]+)` \| `([A-Z_]+)` \|", part, re.MULTILINE)
     assert len(rows) == len(set(rows))
     assert set(rows) == {(t.name, f) for t in schema.TABLES for f in t.indexes}
+
+
+def test_named_area_ids_number_the_blanks_after_the_largest():
+    import named_area_ids
+    from mikage.core.named_areas import DEFAULT_ID_DIGITS, DEFAULT_ID_PREFIX
+
+    # The plugin's form and the script's are the same (NA-000123).
+    assert (named_area_ids.PREFIX, named_area_ids.DIGITS) == (DEFAULT_ID_PREFIX, DEFAULT_ID_DIGITS)
+    plan, largest = named_area_ids.plan_numbers([(3, None), (1, "NA-000101"), (2, " "), (4, "PORT-9"), (5, "na-7")])
+    assert plan == {2: "NA-000102", 3: "NA-000103"} and largest == 103
+    assert named_area_ids.plan_numbers([]) == ({}, 0)
+    calc = named_area_ids.calculation_rule("MIKAGE")
+    assert "NextSequenceValue('MIKAGE.SEQ_NAMED_AREA_ID')" in calc and "'000000'" in calc and "return $feature.NAMED_AREA_ID" in calc
+    unique = named_area_ids.unique_rule("MIKAGE")
+    assert "'MIKAGE.TBL_NAMED_AREA'" in unique and "UPPER(NAMED_AREA_ID) = UPPER(@id)" in unique
+    assert NAME.match(named_area_ids.SEQUENCE) and NAME.match(named_area_ids.UNIQUE_RULE)

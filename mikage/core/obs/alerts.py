@@ -129,8 +129,25 @@ LEGACY_RULE_FIELDS: dict[str, str] = {"area": "AREA"}
 #: The geofence layer's attributes by role.
 DEFAULT_FENCE_FIELDS = {"name": "NAME", "active": "ACTIVE", "weight": "WEIGHT", "nameEn": "NAME_EN"}
 #: The named area layer's attributes by role (place and facility names; `id` the organisation's own management
-#: number, 2026-11-17: a field's `place.id`).
-DEFAULT_PLACE_FIELDS = {"name": "NAME", "kind": "KIND", "active": "ACTIVE", "nameEn": "NAME_EN", "kindEn": "KIND_EN", "id": "NAMED_AREA_ID"}
+#: number, 2026-11-17: a field's `place.id`). Since 2026-11-24 the layer also holds the organisation's areas of
+#: interest (組織の関心地域, core/named_areas.py): `use` 用途, `kana` よみがな, `alias` 別名, `country` 国,
+#: `category` カテゴリー, `parent` 上位の地域, `ownerGroup` 担当グループ, `priority` 重要度, `color` 色, `note` メモ.
+DEFAULT_PLACE_FIELDS = {
+    "name": "NAME", "kind": "KIND", "active": "ACTIVE", "nameEn": "NAME_EN", "kindEn": "KIND_EN", "id": "NAMED_AREA_ID",
+    "use": "AREA_USE", "kana": "NAME_KANA", "alias": "NAME_ALIAS", "country": "COUNTRY_CODE", "category": "CATEGORY_ID",
+    "parent": "PARENT_ID", "ownerGroup": "OWNER_GROUP", "priority": "PRIORITY", "color": "COLOR", "note": "NOTE",
+}
+#: 用途 (AREA_USE): a place name (地名, also when empty: the rows from before 2026-11-24), an area of interest only
+#: (関心地域: never the place of a record or a report), or both (両方).
+USE_PLACE, USE_INTEREST, USE_BOTH = "地名", "関心地域", "両方"
+AREA_USES = (USE_PLACE, USE_INTEREST, USE_BOTH)
+_USE_WORDS = {"地名": USE_PLACE, "place": USE_PLACE, "関心地域": USE_INTEREST, "関心": USE_INTEREST, "aoi": USE_INTEREST,
+              "interest": USE_INTEREST, "両方": USE_BOTH, "both": USE_BOTH}
+
+
+def area_use_of(value: Any) -> str:
+    """A row's 用途 (one of AREA_USES): empty or unknown is a place name, as the rows written before there was one."""
+    return _USE_WORDS.get(_text(value).casefold(), USE_PLACE)
 #: The country layer's attributes by role (`country`, `countryName`).
 DEFAULT_COUNTRY_FIELDS = {"code": "COUNTRY_CODE", "name": "COUNTRY_NAME", "nameEn": "COUNTRY_NAME_EN", "active": "ACTIVE"}
 #: How long the named areas read are kept (seconds).
@@ -1099,16 +1116,20 @@ def inside_fast(lon: float, lat: float, rings: Sequence[tuple]) -> bool:
     return inside
 
 
-def named_area_of(a: dict, rings: Sequence, fields: dict[str, str]) -> Optional[NamedArea]:
+def named_area_of(a: dict, rings: Sequence, fields: dict[str, str], interest_too: bool = False) -> Optional[NamedArea]:
     """
     A named area (or country) of a feature's attributes and rings (WGS 84);
-    None without rings, without a name (nor a code), or not active.
+    None without rings, without a name (nor a code), or not active, and an
+    organisation's area of interest only (用途 関心地域: not a place name)
+    unless `interest_too`.
     """
     def text(role: str) -> str:
         return _text(a.get(fields[role])) if role in fields else ""
 
     name, code = text("name"), text("code")
     if not len(rings) or not (name or code) or ("active" in fields and fields["active"] in a and not _active(a.get(fields["active"]))):
+        return None
+    if not interest_too and "use" in fields and area_use_of(a.get(fields["use"])) == USE_INTEREST:
         return None
     return NamedArea(name=name, rings=rings, kind=text("kind"), size=ring_size(rings), box=rings_box(rings), name_en=text("nameEn"),
                      kind_en=text("kindEn"), code=code, attributes=a, roles=fields)

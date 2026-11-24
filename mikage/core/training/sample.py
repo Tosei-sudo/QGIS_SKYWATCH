@@ -313,6 +313,16 @@ OBSERVATION_FIELDS = {
 }
 #: As the enterprise geodatabase's attribute rule does (docs/arcgis-setup.md): the OBJECTID of the smallest named area holding the record.
 OBSERVATION_RULES = [{"field": "NAMED_AREA_OBJECTID", "smallestContaining": "Alerts/3"}]
+#: The named area layer (TBL_NAMED_AREA) with the attributes of the organisation's areas of interest (2026-11-24).
+NAMED_AREA_FIELDS = {"NAME": S, "KIND": S, "ACTIVE": F, "NAME_EN": S, "KIND_EN": S, "NAMED_AREA_ID": S,
+                     "AREA_USE": {"type": S, "length": 16}, "NAME_KANA": S, "NAME_ALIAS": {"type": S, "length": 1000},
+                     "COUNTRY_CODE": {"type": S, "length": 8}, "CATEGORY_ID": {"type": S, "length": 64}, "PARENT_ID": S, "OWNER_GROUP": S,
+                     "PRIORITY": I, "COLOR": {"type": S, "length": 32}, "NOTE": {"type": S, "length": 4000}}
+#: 管理番号: the stand-in of the attribute rule on the Oracle sequence SEQ_NAMED_AREA_ID (docs/arcgis-setup.md).
+NAMED_AREA_RULES = [{"field": "NAMED_AREA_ID", "sequence": {"prefix": "NA-", "digits": 6}}]
+AREA_CATEGORY_FIELDS = {"CATEGORY_ID": {"type": S, "length": 64}, "CATEGORY_NAME": S, "CATEGORY_NAME_EN": S,
+                        "PARENT_ID": {"type": S, "length": 64}, "SORT_ORDER": I, "COLOR": {"type": S, "length": 32}, "ACTIVE": F,
+                        "NOTE": {"type": S, "length": 1000}}
 AREA_FIELDS = {"AREA_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "KIND": S,
                "NOTE": {"type": S, "length": 4000}, "OBSERVER": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T,
                "UNSEEN_REASON": {"type": S, "length": 40}, "SATELLITE": S}
@@ -362,9 +372,31 @@ ALERT_RULES = [
 #: 地名 (alertReports.namedAreas): nested areas around the sample (the smallest one holding a record is its place),
 #: with the organisation's management number (NAMED_AREA_ID).
 NAMED_AREAS = [
-    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70), "Tokyo Bay", "bay", "NA-0001"),
-    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34), "Port of Yokosuka", "port", "NA-0101"),
-    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315), "Yokosuka Main Port", "facility", "NA-0102"),
+    ("東京湾", "海域", (139.60, 35.00, 140.10, 35.70), "Tokyo Bay", "bay", "NA-000001"),
+    ("横須賀港", "港", (139.70, 35.26, 139.80, 35.34), "Port of Yokosuka", "port", "NA-000101"),
+    ("横須賀本港", "施設", (139.735, 35.285, 139.765, 35.315), "Yokosuka Main Port", "facility", "NA-000102"),
+]
+#: The same rows' attributes of the organisation's areas of interest (組織の関心地域, 2026-11-24), by name, and one more
+#: area of interest only (用途 関心地域: not a place of records), with no 管理番号 (the server's stand-in of the rule on
+#: SEQ_NAMED_AREA_ID numbers it as it starts: NA-000103).
+NAMED_AREA_EXTRA = {
+    "東京湾": {"AREA_USE": "地名", "NAME_KANA": "とうきょうわん", "COUNTRY_CODE": "JP"},
+    "横須賀港": {"AREA_USE": "両方", "NAME_KANA": "よこすかこう", "NAME_ALIAS": "Yokosuka, 横須賀", "COUNTRY_CODE": "JP",
+                 "CATEGORY_ID": "PORT", "PARENT_ID": "NA-000001", "OWNER_GROUP": "第1班", "PRIORITY": 300},
+    "横須賀本港": {"AREA_USE": "両方", "NAME_KANA": "よこすかほんこう", "COUNTRY_CODE": "JP", "CATEGORY_ID": "PORT-NAVAL",
+                   "PARENT_ID": "NA-000101", "OWNER_GROUP": "第1班", "PRIORITY": 100, "NOTE": "定点（毎日）"},
+}
+ORG_AREAS = [
+    ("長浦港", (139.735, 35.300, 139.750, 35.312), {"AREA_USE": "関心地域", "NAME_KANA": "ながうらこう", "COUNTRY_CODE": "JP",
+                                                    "CATEGORY_ID": "PORT-NAVAL", "PARENT_ID": "NA-000101", "OWNER_GROUP": "第2班",
+                                                    "PRIORITY": 200, "NOTE": "モックの組織の関心地域（管理番号は保存時に付番）"}),
+]
+#: 地域のカテゴリー (TBL_AREA_CATEGORY): id, name, English name, parent, order, colour.
+AREA_CATEGORIES = [
+    ("PORT", "港湾", "Port", "", 1, "#0ea5e9"),
+    ("PORT-NAVAL", "軍港", "Naval port", "PORT", 1, "#1d4ed8"),
+    ("AIRPORT", "空港・飛行場", "Airfield", "", 2, "#a855f7"),
+    ("INDUSTRY", "工業地帯", "Industrial area", "", 3, "#f59e0b"),
 ]
 #: The countries (a rough box around Japan's islands and seas): code, name, English name, box.
 COUNTRIES = [("JP", "日本", "Japan", (122.9, 24.0, 146.0, 45.6))]
@@ -525,14 +557,19 @@ def services(files: str, base: str, with_features: bool = True, now: Optional[in
              "features": feats([{"attributes": {"NAME": "横須賀", "ACTIVE": 1, "WEIGHT": 1.0, "NAME_EN": "Yokosuka"},
                                  "geometry": {"rings": [_box_ring(AREA)]}}])},
             {"id": 2, "name": "通報記録", "fields": ALERT_LOG_FIELDS, "features": []},
-            {"id": 3, "name": "地名", "geometryType": "polygon",
-             "fields": {"NAME": S, "KIND": S, "ACTIVE": F, "NAME_EN": S, "KIND_EN": S, "NAMED_AREA_ID": S},
-             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1, "NAME_EN": ne, "KIND_EN": ke, "NAMED_AREA_ID": i},
-                                 "geometry": {"rings": [_box_ring(b)]}} for n, k, b, ne, ke, i in NAMED_AREAS])},
+            {"id": 3, "name": "地名", "geometryType": "polygon", "fields": NAMED_AREA_FIELDS, "attributeRules": NAMED_AREA_RULES,
+             "features": feats([{"attributes": {"NAME": n, "KIND": k, "ACTIVE": 1, "NAME_EN": ne, "KIND_EN": ke, "NAMED_AREA_ID": i,
+                                                **NAMED_AREA_EXTRA.get(n, {})},
+                                 "geometry": {"rings": [_box_ring(b)]}} for n, k, b, ne, ke, i in NAMED_AREAS]
+                               + [{"attributes": {"NAME": n, "ACTIVE": 1, **extra}, "geometry": {"rings": [_box_ring(b)]}}
+                                  for n, b, extra in ORG_AREAS])},
             {"id": 4, "name": "国", "geometryType": "polygon",
              "fields": {"COUNTRY_CODE": S, "COUNTRY_NAME": S, "COUNTRY_NAME_EN": S, "ACTIVE": F},
              "features": feats([{"attributes": {"COUNTRY_CODE": c, "COUNTRY_NAME": n, "COUNTRY_NAME_EN": ne, "ACTIVE": 1},
-                                 "geometry": {"rings": [_box_ring(b)]}} for c, n, ne, b in COUNTRIES])}]},
+                                 "geometry": {"rings": [_box_ring(b)]}} for c, n, ne, b in COUNTRIES])},
+            {"id": 5, "name": "地域のカテゴリー", "fields": AREA_CATEGORY_FIELDS,
+             "features": feats([{"attributes": {"CATEGORY_ID": i, "CATEGORY_NAME": n, "CATEGORY_NAME_EN": ne, "PARENT_ID": p or None,
+                                                "SORT_ORDER": o, "COLOR": c, "ACTIVE": 1}} for i, n, ne, p, o, c in AREA_CATEGORIES])}]},
         {"name": "Work", "layers": [
             {"id": 0, "name": "分担", "fields": ASSIGNMENT_FIELDS, "features": []},
             {"id": 1, "name": "引き継ぎメモ", "fields": HANDOVER_FIELDS, "features": []}]},
@@ -725,6 +762,9 @@ def config_text(base: str, files: str, token: Optional[str] = None, label: str =
   "handover": {{ "table": "{rest}/Work/FeatureServer/1", "hours": 12, "timeZone": "Asia/Tokyo" }},
   // イベント（地震対応など）: イベントのレイヤーと紐付けテーブル
   "events": {{ "layer": "{rest}/Events/FeatureServer/0", "links": "{rest}/Events/FeatureServer/1" }},
+  // 組織の関心地域（地名のレイヤーに用途・よみがな・別名・国・カテゴリーなど。ドック「関心地域・地点」の「組織」で全員が編集）
+  "namedAreas": {{ "url": "{rest}/Alerts/FeatureServer/3", "categories": "{rest}/Alerts/FeatureServer/5",
+                  "countries": "{rest}/Alerts/FeatureServer/4" }},
   // 個人の関心地域・地点（持ち主の列で一人ずつ。新着画像のカードの「写っている地物」のいちばん上に）
   "interests": {{ "points": "{rest}/Interests/FeatureServer/0", "areas": "{rest}/Interests/FeatureServer/1" }},
   // 担当（「担当と個人設定…」でチェックしたものを利用者名ごとに。別の PC でも同じ担当）
