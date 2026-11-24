@@ -432,3 +432,37 @@ def test_an_image_with_rpc_is_corrected_with_its_own_model_and_the_dem(files):
         got = after.pixel(*p)
         assert abs(got[0] - float(np.ravel(want[0])[0])) < 0.05 and abs(got[1] - float(np.ravel(want[1])[0])) < 0.05
     assert placement_of(layer).place(*after.pixel(*files.centre)) == pytest.approx(files.centre, abs=1e-6)
+
+
+def test_after_the_panel_is_closed_and_its_image_closed_opening_images_raises_nothing(plugin, files, monkeypatch):
+    """tsudo 2026-11-24: 「ウィンドウを閉じたら、それ以降画像を開くたびにPythonエラーが起きる」 (the closed image read by each open's refresh)."""
+    import sys
+
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errors.append(a))
+    p, iface, layer = plugin
+    tool = p.geo_fix
+    tool.set_active(True)
+    assert tool.layer is layer
+    tool.panel.close()
+    assert not tool.active and not tool.panel.isVisible()
+    # As the catalog opening the next image in the place of the one before.
+    QgsProject.instance().removeMapLayer(layer.id())
+    assert tool.layer is None and tool.saved() is None
+    for i in range(3):
+        again = QgsRasterLayer(files.sar, f"next{i}")
+        QgsProject.instance().addMapLayers([again])
+        iface.setActiveLayer(again)
+        wait_for(lambda: False, 150)
+    assert errors == [], errors
+    # Opened again: on the active image.
+    tool.set_active(True)
+    assert tool.layer is again and tool.panel.isVisible() and tool.panel.image.text() == "画像: next2"
+    # The image closed while the panel is open: the panel says to choose one, nothing raises.
+    QgsProject.instance().removeMapLayer(again.id())
+    wait_for(lambda: False, 150)
+    assert tool.layer is None and errors == [] and tool.panel.image.text() == "ファイルの画像を選ぶと補正できる"
+    tool.save()
+    tool.take_off()
+    assert tool.records_to_move() == ({}, 0, 0) and errors == []
+    tool.set_active(False)
