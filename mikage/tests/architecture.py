@@ -55,6 +55,8 @@ KERNEL = (
     "qgis_io.tasks", "qgis_io.network", "qgis_io.geometry",
     # 「一番上に固定」: where whatever adds at the top of the layer tree puts it (below the pinned nodes).
     "qgis_io.pinned_layers",
+    # The plugin's map tools taking the map and giving it back (never to another of the plugin's turned off).
+    "qgis_io.map_tools",
     "ui.fit", "ui.flow_layout", "ui.wheel_guard",
 )
 

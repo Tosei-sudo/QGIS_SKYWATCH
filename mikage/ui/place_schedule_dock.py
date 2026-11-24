@@ -35,7 +35,7 @@ from ..core.request.api import (
 )
 from ..qgis_io.geometry import from_wgs84, rings_geometry, to_wgs84
 from ..qgis_io.tasks import run_task
-from ..qgis_io import settings
+from ..qgis_io import map_tools, settings
 from .check_filter import CheckFilter
 from .docks import PluginDock, plain_label
 from .flow_layout import FlowLayout
@@ -177,7 +177,6 @@ class PlaceScheduleDock(PluginDock):
         self._loaded = False
         self._again = False
         self._watched: Optional[QgsVectorLayer] = None
-        self._previous_tool = None
         self.point_tool = QgsMapToolEmitPoint(self.canvas)
         self.point_tool.canvasClicked.connect(self._map_clicked)
         self.point_tool.deactivated.connect(lambda: self.pick.setChecked(False))
@@ -527,12 +526,9 @@ class PlaceScheduleDock(PluginDock):
 
     def _pick_toggled(self, on: bool) -> None:
         if on:
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.point_tool)
-        elif self.canvas.mapTool() is self.point_tool:
-            self.canvas.unsetMapTool(self.point_tool)
-            if self._previous_tool is not None:
-                self.canvas.setMapTool(self._previous_tool)
+            map_tools.take(self.canvas, self.point_tool)
+        else:
+            map_tools.give_back(self.canvas, self.point_tool)
 
     def _map_clicked(self, point: QgsPointXY, _button=None) -> None:
         p = to_wgs84(self.canvas.mapSettings().destinationCrs()).transform(point)

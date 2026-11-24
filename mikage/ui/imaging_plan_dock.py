@@ -84,7 +84,6 @@ class ImagingPlanDock(
         self.shown: list[Opportunity] = []
         self.chosen: Optional[Opportunity] = None
         self.sort = ("time", False)
-        self._previous_tool = None
         self._scenes: list = []
         self._drag: Optional[tuple] = None
         self.cloud_task = None

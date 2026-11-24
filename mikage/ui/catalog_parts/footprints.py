@@ -6,7 +6,7 @@ state.
 from __future__ import annotations
 
 from ...core.catalog.api import CatalogRecord
-from ...qgis_io import settings
+from ...qgis_io import map_tools, settings
 from ...qgis_io.catalog_io import footprint, layers_extent
 from ...qgis_io.geometry import from_wgs84
 from ..catalog_overlay import FootprintOverlay
@@ -78,17 +78,9 @@ class FootprintsPart:
 
     def _use_tool(self, tool, on: bool) -> None:
         if on:
-            current = self.canvas.mapTool()
-            if current not in (self.tool, self.draw_tool):
-                self._previous_tool = current
-            self.canvas.setMapTool(tool)
-        elif self.canvas.mapTool() is tool:
-            self.canvas.unsetMapTool(tool)
-            if self._previous_tool is not None:
-                try:
-                    self.canvas.setMapTool(self._previous_tool)
-                except RuntimeError:
-                    pass
+            map_tools.take(self.canvas, tool)
+        else:
+            map_tools.give_back(self.canvas, tool)
 
     def zoom_to_chosen(self) -> None:
         rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})

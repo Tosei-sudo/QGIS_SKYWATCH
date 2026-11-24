@@ -21,6 +21,7 @@ from qgis.PyQt.QtWidgets import QComboBox, QFileDialog, QHBoxLayout, QLabel, QPu
 from ..core.spectral import (
     COLORS, MAX_SERIES, Spectrum, axis_range, band_labels, band_stats, box_label, format_value, pixel_window, read_size, spectral_csv,
 )
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name
 from ..qgis_io.tasks import error_text
@@ -313,7 +314,6 @@ class SpectralDock(PluginDock):
         self.next_number = 1
         self.image: Optional[Image] = None
         self.marks: Optional[SpectralMarks] = None
-        self._previous_tool = None
         self.tool = SpectralTool(self.canvas, self.add_point, self.add_box, lambda: self.mode.currentData() == "box")
 
         top = QHBoxLayout()
@@ -368,14 +368,10 @@ class SpectralDock(PluginDock):
                 self.marks = None
 
     def _toggle_tool(self, on: bool) -> None:
-        if on and self.canvas.mapTool() is not self.tool:
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.tool)
-        elif not on and self.canvas.mapTool() is self.tool:
-            try:
-                self.canvas.setMapTool(self._previous_tool) if self._previous_tool is not None else self.canvas.unsetMapTool(self.tool)
-            except RuntimeError:
-                self.canvas.unsetMapTool(self.tool)
+        if on:
+            map_tools.take(self.canvas, self.tool)
+        else:
+            map_tools.give_back(self.canvas, self.tool)
 
     def _tool_set(self, new, old=None) -> None:
         if new is not self.tool and self.measure_button.isChecked():

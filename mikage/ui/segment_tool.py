@@ -33,6 +33,7 @@ from ..core.ai.api import mask_outline, ring_area
 from ..core.ai.api import SamModelConfig
 from ..core.ai.api import SAM_MEAN, SAM_STD, SamPoint, part_at, sam_hwc, sam_mask, sam_prompt, sam_scale, sam_tensor
 from ..processing_provider.detect_algorithm import image_info, outline_symbol, source_fields
+from ..qgis_io import map_tools
 from ..qgis_io.ai_io import image_rgba
 from ..qgis_io.ai_transfer_io import mark_origin
 from ..qgis_io.ai_runtime import AiError, LoadedModel, local_model, model_from, name_of
@@ -153,7 +154,6 @@ class SegmentTool(QObject):
         self.files: list[tuple[str, str, str]] = []
         self.image: Optional[SamImage] = None
         self.objects: list[SamObject] = []
-        self._previous_tool = None
         self._queue: list[Callable[[], None]] = []
         self._busy = False
         #: The last layer made (for scripts and tests).
@@ -260,9 +260,7 @@ class SegmentTool(QObject):
             self.action.setChecked(active)
             self.action.blockSignals(False)
         if active:
-            if self.canvas.mapTool() is not self.tool:
-                self._previous_tool = self.canvas.mapTool()
-                self.canvas.setMapTool(self.tool)
+            map_tools.take(self.canvas, self.tool)
             self.panel.move(10, 10)
             self.panel.adjustSize()
             self.panel.show()
@@ -272,11 +270,7 @@ class SegmentTool(QObject):
             self.panel.hide()
             self.clear()
             self.image = None
-            if self.canvas.mapTool() is self.tool:
-                try:
-                    self.canvas.setMapTool(self._previous_tool) if self._previous_tool is not None else self.canvas.unsetMapTool(self.tool)
-                except RuntimeError:  # the tool went with its plugin
-                    self.canvas.unsetMapTool(self.tool)
+            map_tools.give_back(self.canvas, self.tool)
         self._update()
 
     def _tool_set(self, new, old=None) -> None:

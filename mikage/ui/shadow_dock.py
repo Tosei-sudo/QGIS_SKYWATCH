@@ -34,6 +34,7 @@ from ..core.shadow import (
     ShadowMeasurement, Sun, format_metres, height_from_shadow, shadow_azimuth, snap_to_ray, step_toward, sun_from_metadata,
 )
 from ..qgis_io.context import PluginContext
+from ..qgis_io import map_tools
 from ..qgis_io.geometry import from_wgs84, to_wgs84
 from ..qgis_io.obs_images import file_name, gdal_metadata, observed_image
 from .docks import PluginDock, ask_no
@@ -172,7 +173,6 @@ class ShadowHeightDock(PluginDock):
         self.measurements: list[ShadowMeasurement] = []
         self.overlay: Optional[ShadowOverlay] = None
         self.tool = ShadowTool(self.canvas, self.click, self.move, self.cancel)
-        self._previous_tool = None
         self._setting = False
         self.distance = QgsDistanceArea()
         self.distance.setSourceCrs(WGS84, QgsProject.instance().transformContext())
@@ -263,18 +263,11 @@ class ShadowHeightDock(PluginDock):
 
     def _toggle_tool(self, on: bool) -> None:
         if on and self.canvas.mapTool() is not self.tool:
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.tool)
+            map_tools.take(self.canvas, self.tool)
             self.prepare()
         elif not on and self.canvas.mapTool() is self.tool:
             self.drop_foot()
-            if self._previous_tool is not None:
-                try:
-                    self.canvas.setMapTool(self._previous_tool)
-                except RuntimeError:  # the tool went with its plugin
-                    self.canvas.unsetMapTool(self.tool)
-            else:
-                self.canvas.unsetMapTool(self.tool)
+            map_tools.give_back(self.canvas, self.tool)
 
     def _tool_set(self, new, old=None) -> None:
         if new is not self.tool and self.measure_button.isChecked():

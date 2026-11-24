@@ -16,6 +16,7 @@ from ...core.plan.api import (
 )
 from ...core.plan.api import shift_scene, track_place
 from ...core.plan.api import MAX_TARGETS, name_of, priority_of, target_of
+from ...qgis_io import map_tools
 from ...qgis_io.geometry import WGS84, shape_of, to_wgs84
 from .common import _plain
 
@@ -205,12 +206,9 @@ class TargetsPart:
         if on:
             if self.pick.isChecked():
                 self.pick.setChecked(False)
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.drag_tool)
-        elif self.canvas.mapTool() is self.drag_tool:
-            self.canvas.unsetMapTool(self.drag_tool)
-            if self._previous_tool is not None:
-                self.canvas.setMapTool(self._previous_tool)
+            map_tools.take(self.canvas, self.drag_tool)
+        else:
+            map_tools.give_back(self.canvas, self.drag_tool)
 
     def drag_begin(self, lon: float, lat: float) -> bool:
         """Starts moving the chosen pass's scenes from a place on them."""
@@ -255,12 +253,9 @@ class TargetsPart:
         if on:
             if self.move_button.isChecked():
                 self.move_button.setChecked(False)
-            self._previous_tool = self.canvas.mapTool()
-            self.canvas.setMapTool(self.map_tool)
-        elif self.canvas.mapTool() is self.map_tool:
-            self.canvas.unsetMapTool(self.map_tool)
-            if self._previous_tool is not None:
-                self.canvas.setMapTool(self._previous_tool)
+            map_tools.take(self.canvas, self.map_tool)
+        else:
+            map_tools.give_back(self.canvas, self.map_tool)
 
     def _map_clicked(self, point: QgsPointXY, _button=None) -> None:
         p = to_wgs84(self.canvas.mapSettings().destinationCrs()).transform(point)
