@@ -907,7 +907,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 
 <h3 id="obs-flow">1 枚の画像の流れ</h3>
 <ol>
-<li><a href="#images">画像カタログ</a> で画像を開く（ファイルのない画像は <span class="ui">ファイルなしで記録</span>）。観測記録ドックの ◀ ▶（<span class="key">PageUp</span>・<span class="key">PageDown</span>）で撮像日時の順に画像をたどれます。選んだ画像は、ほかの画像に隠れていれば地図でいちばん上に出ます。<span class="ui">この画像のみ</span> でほかの画像を隠します（背景の地図は隠しません）。画像を選ぶまで、ドックには案内だけが出ます（記録の一覧や入力は画像を選んでから）</li>
+<li><a href="#images">画像カタログ</a> で画像を開く（ファイルのない画像は <span class="ui">ファイルなしで記録</span>）。観測記録ドックの ◀ ▶（<span class="key">PageUp</span>・<span class="key">PageDown</span>）で撮像日時の順に画像をたどれます。ドックの幅に収まらない長い画像 ID は、真ん中を「…」で省略して出ます（撮像日時と ID の頭・末尾は残ります）。リストを開くと全文が出て、ツールチップにも全文が出ます。選んだ画像は、ほかの画像に隠れていれば地図でいちばん上に出ます。<span class="ui">この画像のみ</span> でほかの画像を隠します（背景の地図は隠しません）。画像を選ぶまで、ドックには案内だけが出ます（記録の一覧や入力は画像を選んでから）</li>
 <li>分担を使っている職場では、画像の下の行で <span class="ui">この画像を担当</span>（記録を始めると自動で担当になります）</li>
 <li><span class="ui">クリック記録</span>（<span class="key">R</span>）を押し、地図でモノをクリック</li>
 <li>フォームで種別（ボタンで階層をたどる）・活動（<span class="key">1</span>〜<span class="key">9</span>）・確度・備考を入れて <span class="key">Enter</span></li>
@@ -1098,7 +1098,7 @@ img { max-width: 100%; height: auto; border: 1px solid #c9d4e0; }
 <h3 id="compare">2 時期を比べる</h3>
 <ul>
 <li><a class="open" href="mikage:open/スワイプ比較">スワイプ比較</a>: 選んでいるレイヤーを線の片側だけに出し、反対側に下のレイヤーを見せます。線をドラッグ、ダブルクリックで縦・横の切り替え、<span class="key">Esc</span> で終了</li>
-<li>色分け重ね合わせ: 画像補正の DRA のすぐ下の <span class="ui">2 時期の色分け重ね合わせ（赤・シアン）</span> で、比べる画像を選んで <span class="ui">赤とシアンで重ね合わせ</span>。前の画像を赤・後の画像をシアンにして重ね、増えた所（シアン）・消えた所（赤）が色で浮かびます。戻すには <span class="ui">重ね合わせの解除</span></li>
+<li>色分け重ね合わせ: 画像補正の DRA のすぐ下の <span class="ui">2 時期の色分け重ね合わせ（赤・シアン）</span> で、比べる画像を選んで <span class="ui">赤とシアンで重ね合わせ</span>（長い画像 ID は真ん中を「…」で省略。リストを開くと全文）。前の画像を赤・後の画像をシアンにして重ね、増えた所（シアン）・消えた所（赤）が色で浮かびます。戻すには <span class="ui">重ね合わせの解除</span></li>
 <li><a class="open" href="mikage:open/変化抽出（2 時期）…">変化抽出（2 時期）…</a>: 2 枚の画像の違う所を自動で取り出します</li>
 <li>2 枚の位置が少しずれているときは <a class="open" href="mikage:open/位置ずらし">位置ずらし</a>（地図のドラッグで手で合わせる。ファイルは変えません。戻すには「位置ずらしの解除」）か <a class="open" href="mikage:open/自動位置合わせ…">自動位置合わせ…</a>。SAR 画像が地形で歪んでいるときは <a href="#geo-fix">クイック幾何補正</a></li>
 <li>地図のツール（スワイプ比較・位置ずらし・クイック幾何補正・スペクトル・影から高さなど）は、別のツールを選ぶと終わります。<span class="key">Esc</span> やボタンで終えると、使う前の QGIS のツール（パンなど）に戻ります。途中で使った MIKAGE のツールには戻りません</li>

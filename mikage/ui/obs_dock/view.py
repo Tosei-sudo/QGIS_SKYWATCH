@@ -41,7 +41,8 @@ class ViewPart:
             if twin is not None:
                 notes.append(twin.name())  # files of the same name in other folders: told apart by their layers
             note = f"（{'・'.join(notes)}）" if notes else ""
-            self.image_select.addItem(f"{local_time(e.time) if e.time is not None else '日時不明'}  {e.name}{note}")
+            # The time and the notes kept whole, the name (a long image ID) cut in its middle when the box is narrow.
+            self.image_select.add_parts(f"{local_time(e.time) if e.time is not None else '日時不明'}  ", e.name, note)
             self.image_select.setItemData(self.image_select.count() - 1, self._image_tip(e), Qt.ItemDataRole.ToolTipRole)
         if book and image in book.images:
             self.image_select.setCurrentIndex(book.images.index(image))

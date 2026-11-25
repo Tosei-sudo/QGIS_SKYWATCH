@@ -39,6 +39,7 @@ from ..qgis_io.pixel_place import locator as pixel_locator
 from ..qgis_io.tasks import error_text, run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip
+from .elided_combo import ElidedCombo
 from .flow_layout import FlowLayout
 from .kind_levels import KindLevels
 from .note_assist import NoteAssist
@@ -224,8 +225,8 @@ class ObservationDock(
         # The image.
         row = QHBoxLayout()
         self.prev_button = self._button("◀", tr("前の画像（撮像日時の順、PageUp）"), lambda: self.step(-1))
-        self.image_select = QComboBox()
-        self.image_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # As wide as the dock lets it be, a long image ID shortened in the middle (tsudo 2026-11-25), whole in the list.
+        self.image_select = ElidedCombo(24)
         self.image_select.setToolTip(tr("画像"))
         self.image_select.activated.connect(self._image_chosen)
         self.next_button = self._button("▶", tr("次の画像（撮像日時の順、PageDown）"), lambda: self.step(1))
@@ -237,6 +238,9 @@ class ObservationDock(
         self.only = QCheckBox(tr("この画像のみ"))
         self.only.setToolTip(tr("この画像だけを地図に表示"))
         self.only.toggled.connect(self._apply_only)
+        # ◀ ▶ ＋ as narrow as their marks: the room is the image's (Qt's buttons are at least 80 pixels wide).
+        for w in (self.prev_button, self.next_button, self.list_button):
+            w.setFixedWidth(max(32, w.fontMetrics().horizontalAdvance(w.text()) + 20))
         for w in (self.prev_button, self.image_select, self.next_button, self.list_button, self.image_event_button, self.only):
             row.addWidget(w)
         b.addLayout(row)
