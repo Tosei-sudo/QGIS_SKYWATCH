@@ -26,6 +26,9 @@ the red and cyan comparison is used often): the preset, DRA, then two dates
 (open; under DRA, tsudo the same day); then bands, the sliders and the tone curve; the colour
 scale folded near the bottom, by the histogram. The wheel scrolls the dock
 and changes a choice or slider only once it was clicked (wheel_guard).
+
+「地図の向き」 under 対象 (tsudo, 2026-11-25/26; ui/orient_row.py): icon
+buttons N 撮 衛 進 turn the map so that way of the image worked on is up.
 """
 from __future__ import annotations
 
@@ -50,11 +53,13 @@ from ..qgis_io import enhance_group as eg
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io import complex_sar
 from ..qgis_io import quick_pan
+from ..qgis_io.catalog_io import record_of_layer
 from ..qgis_io.tasks import run_task
 from .colorize_box import ColorizeBox, paired_with, set_blend
 from .curve_editor import CurveEditor
 from .docks import PluginDock
 from .histogram_widget import HistogramPlot, StatsTable
+from .orient_row import OrientRow
 from .quick_pan import QuickPanBox
 from .wheel_guard import guard_wheel
 
@@ -185,6 +190,9 @@ class EnhanceDock(PluginDock):
         self.layer_label = QLabel()
         self.layer_label.setWordWrap(True)
         self.body.addWidget(self.layer_label)
+        # 「地図の向き」: out of the scroll, so it is there however far the dock is scrolled.
+        self.orient_row = OrientRow(self.canvas, lambda: self.layer, found_of=self.catalog_record)
+        self.body.addWidget(self.orient_row)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -366,9 +374,15 @@ class EnhanceDock(PluginDock):
         self.restore_layers(project.mapLayers().values())
         self.follow_layer(iface.activeLayer())
 
+    def catalog_record(self, layer):
+        """The catalog record `layer` was opened from, with its catalog (its 方位角 for 「地図の向き」), or None."""
+        config = self.context.config
+        return record_of_layer(layer, [*config.image_catalogs, *getattr(config, "practice_catalogs", [])])
+
     def close_down(self) -> None:
         self._timer.stop()
         self.quick_box.close_down()
+        self.orient_row.close_down()
         self._histogram_timer.stop()
         self._tree_timer.stop()
         self._histogram_request += 1
@@ -576,6 +590,8 @@ class EnhanceDock(PluginDock):
             has = layer is not None
             self.layer_label.setText(self._target_text())
             self.enabled.setEnabled(has)
+            # (After 補正's state: the toolbar's copy reads it.)
+            self.orient_row.set_layer(layer)
             r = er.enhance_renderer(layer) if has else None
             settings = r.settings if r else (er.default_settings(layer) if has else er.EnhanceSettings())
             self.enabled.setChecked(r is not None)

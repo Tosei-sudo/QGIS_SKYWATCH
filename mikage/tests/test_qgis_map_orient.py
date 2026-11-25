@@ -3,7 +3,9 @@
 qgis_io/map_view_io.py): opening an image puts the map in its CRS and turns
 it so the way it was taken is up; closing the images puts it back; the
 north arrow; a turned map's 「開いた画像へ移動」 and 「表示範囲」; the options
-one to a row under the buttons.
+one to a row under the buttons. 画像補正ドック「地図の向き」 (tsudo,
+2026-11-25/26; ui/orient_row.py): its icon buttons turn the map for the
+image worked on, with the catalog's orienter.
 """
 import math
 
@@ -17,12 +19,17 @@ APP = start_app()
 from osgeo import gdal, osr  # noqa: E402
 from qgis.core import QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPointXY, QgsProject  # noqa: E402
 
+from mikage.features.enhance import Enhance  # noqa: E402
+from mikage.features.images import Images  # noqa: E402
+from mikage.features.observations import Observations  # noqa: E402
 from mikage.qgis_io import settings  # noqa: E402
 from mikage.qgis_io.map_view_io import directions_of, file_directions  # noqa: E402
 from mikage.tests.test_qgis_catalog import plugin, ring, searched  # noqa: E402,F401 (the fixture)
 from mikage.tests.test_qgis_observations import geotiff  # noqa: E402
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
+#: The catalog's plugin with 画像補正 (its 「地図の向き」).
+PLUGIN_FEATURES = (Images, Observations, Enhance)
 
 
 def screen_way(canvas, lon, lat, bearing):
@@ -244,3 +251,164 @@ def test_the_options_are_one_to_a_row_under_the_buttons(opened):
     assert dock.match_crs.isHidden() and dock.orientation_row.isHidden()
     catalog.image_files = True
     dock._show_file_buttons()
+
+
+def test_the_enhance_docks_buttons_turn_the_map_for_its_image(opened, plugin):  # noqa: F811
+    dock, canvas, records = opened
+    p, iface, *_ = plugin
+    enhance = p.api.image_enhance
+    row = enhance.orient_row
+    # One orienter for the map: one north arrow, one map to put back.
+    from mikage.ui.map_orient import NorthArrow
+
+    assert row.orienter is dock.orienter and len(canvas.findChildren(NorthArrow)) == 1
+    # No image worked on: only 北が上.
+    enhance.follow_layer(None)
+    assert [b.isEnabled() for b in row.buttons.values()] == [True, False, False, False]
+    assert row.buttons["north"].isChecked()
+    [a] = dock.open_records([records["A"]])
+    assert canvas.rotation() == 0
+    iface.setActiveLayer(a)
+    assert enhance.layer is a and all(b.isEnabled() for b in row.buttons.values())
+    # 撮: the catalog's 方位角 100° → west up, the map in degrees put in UTM.
+    row.buttons["look"].click()
+    assert canvas.mapSettings().destinationCrs().authid() == "EPSG:32654"
+    assert abs(screen_way(canvas, 139.7, 35.6, 280)) < 0.2
+    assert row.note.text() == "回転 79°（撮像方向が上、カタログの方位角から）。地図を WGS 84 / UTM zone 54N に", row.note.text()
+    assert [w for w, b in row.buttons.items() if b.isChecked()] == ["look"]
+    # 衛: the satellite up; the map already in UTM.
+    row.buttons["satellite"].click()
+    assert abs(screen_way(canvas, 139.7, 35.6, 100)) < 0.2
+    assert row.note.text() == "回転 −101°（衛星が上、カタログの方位角から）", row.note.text()
+    assert [w for w, b in row.buttons.items() if b.isChecked()] == ["satellite"]
+    # 進: not known for this image: the map left as it is, said why.
+    row.buttons["flight"].click()
+    assert abs(screen_way(canvas, 139.7, 35.6, 100)) < 0.2
+    assert row.note.text().startswith("回さなかった: 進行方向がわからない")
+    assert [w for w, b in row.buttons.items() if b.isChecked()] == ["satellite"]
+    # Turned by hand: no button down, nothing said.
+    canvas.setRotation(33)
+    assert not any(b.isChecked() for b in row.buttons.values()) and row.note.isHidden()
+    # N: north up, the CRS as it is.
+    row.buttons["north"].click()
+    assert canvas.rotation() == 0 and canvas.mapSettings().destinationCrs().authid() == "EPSG:32654"
+    assert [w for w, b in row.buttons.items() if b.isChecked()] == ["north"]
+    # Turned again, then the image closed: the map as it was before (degrees, north up), said in both docks.
+    row.buttons["look"].click()
+    QgsProject.instance().removeMapLayer(a.id())
+    assert canvas.mapSettings().destinationCrs() == WGS84 and canvas.rotation() == 0
+    assert row.note.text() == dock.status.text() == "開いた画像を閉じたので、地図の投影法と向きを元に戻した"
+    assert row.buttons["north"].isChecked()
+
+
+def test_the_enhance_row_sits_under_the_target_and_the_icons(opened, plugin):  # noqa: F811
+    from qgis.PyQt.QtGui import QColor
+
+    from mikage.ui.orient_icons import LOOKS, orient_pixmap
+
+    p, *_ = plugin
+    enhance = p.api.image_enhance
+    enhance.resize(360, 700)
+    enhance.show()
+    APP.processEvents()
+    label, row = enhance.layer_label, enhance.orient_row
+    # Under 対象, out of the scrolling part: there however far the dock is scrolled.
+    assert row.mapTo(enhance, row.rect().topLeft()).y() > label.mapTo(enhance, label.rect().topLeft()).y()
+    from qgis.PyQt.QtWidgets import QScrollArea
+
+    inner = next(w for w in _ancestors(enhance.enabled) if isinstance(w, QScrollArea))
+    assert inner not in list(_ancestors(row))
+    # Icons in a row (the dock wide enough), each with its full name in the tooltip.
+    tops = {b.mapTo(enhance, b.rect().topLeft()).y() for b in row.buttons.values()}
+    assert len(tops) == 1
+    assert row.buttons["look"].toolTip().startswith("撮像方向が上（衛星が下）")
+    # A thick arrow of its colour, a white letter in it.
+    for way, (_letter, colour) in LOOKS.items():
+        image = orient_pixmap(way, 32).toImage()
+        assert image.pixelColor(16, 6) == QColor(colour), way
+        assert image.pixelColor(2, 28).alpha() == 0
+        assert any(image.pixelColor(x, y).lightness() > 240 for x in range(8, 24) for y in range(14, 30)), way
+
+
+def _ancestors(widget):
+    w = widget.parentWidget()
+    while w is not None:
+        yield w
+        w = w.parentWidget()
+
+
+def test_one_orienter_for_a_map_until_the_last_dock_lets_go():
+    from qgis.gui import QgsMapCanvas
+
+    from mikage.ui.map_orient import NorthArrow, release_orienter, shared_orienter
+
+    canvas = QgsMapCanvas()
+    catalog, enhance = object(), object()
+    o = shared_orienter(canvas, catalog)
+    assert shared_orienter(canvas, enhance) is o and len(canvas.findChildren(NorthArrow)) == 1
+    release_orienter(o, catalog)
+    assert shared_orienter(canvas, catalog) is o
+    release_orienter(o, catalog)
+    release_orienter(o, enhance)
+    APP.processEvents()
+    from qgis.PyQt.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not canvas.findChildren(NorthArrow)
+    assert shared_orienter(canvas, catalog) is not o
+
+
+def test_the_toolbar_of_its_own_turns_the_map_and_switches_the_correction_and_dra(opened, plugin):  # noqa: F811
+    from qgis.PyQt.QtWidgets import QToolBar
+
+    from mikage.qgis_io import enhance_renderer as er
+
+    dock, canvas, records = opened
+    p, iface, *_ = plugin
+    enhance = p.api.image_enhance
+    bars = {b.objectName(): b for b in iface.mainWindow().findChildren(QToolBar)}
+    # A toolbar of its own (not MIKAGE's): N 撮 衛 進, then 補正 and DRA.
+    assert "MikageOrientToolbar" in bars and "MikageToolbar" in bars
+    bar = p.orient_toolbar
+    assert bar.toolbar is bars["MikageOrientToolbar"] and bar.toolbar.windowTitle() == "地図の向き・補正"
+    assert [a.objectName() for a in bar.toolbar.actions() if a.objectName()] == [
+        "MikageOrientAction_north", "MikageOrientAction_look", "MikageOrientAction_satellite", "MikageOrientAction_flight"]
+    assert not any(a.objectName().startswith("MikageOrientAction") for a in bars["MikageToolbar"].actions())
+    # No image worked on: only 北が上; the boxes off and greyed.
+    enhance.follow_layer(None)
+    assert [a.isEnabled() for a in bar.actions.values()] == [True, False, False, False]
+    assert not bar.enhance_box.isEnabled() and not bar.dra_box.isEnabled()
+    [a] = dock.open_records([records["A"]])
+    iface.setActiveLayer(a)
+    assert all(x.isEnabled() for x in bar.actions.values()) and bar.enhance_box.isEnabled()
+    # 撮 on the toolbar: turned as by the dock's button, both shown down.
+    bar.actions["look"].trigger()
+    assert abs(screen_way(canvas, 139.7, 35.6, 280)) < 0.2
+    assert [w for w, x in bar.actions.items() if x.isChecked()] == ["look"]
+    assert enhance.orient_row.buttons["look"].isChecked()
+    # The dock's 衛: the toolbar follows.
+    enhance.orient_row.buttons["satellite"].click()
+    assert [w for w, x in bar.actions.items() if x.isChecked()] == ["satellite"]
+    # Not known: the map as it is, said in the message bar (the dock may be closed).
+    bar.actions["flight"].trigger()
+    assert [w for w, x in bar.actions.items() if x.isChecked()] == ["satellite"]
+    assert "進行方向がわからない" in iface.messageBar().currentItem().text()
+    # DRA on: the correction too (DRA is a step of it), drawn on the image.
+    assert not bar.enhance_box.isChecked() and not bar.dra_box.isChecked()
+    bar.dra_box.click()
+    assert enhance.dra_on.isChecked() and enhance.enabled.isChecked() and bar.enhance_box.isChecked()
+    enhance.apply()
+    r = er.enhance_renderer(a)
+    assert r is not None and r.settings.pipeline["ops"][0]["op"] == "autoStretch"
+    # 補正 off on the toolbar: QGIS's own drawing again; the dock's box follows, and the toolbar the dock's.
+    bar.enhance_box.click()
+    enhance.apply()
+    assert not enhance.enabled.isChecked() and er.enhance_renderer(a) is None
+    enhance.enabled.setChecked(True)
+    assert bar.enhance_box.isChecked()
+    # Roles without 画像補正: put away.
+    bar.set_allowed(False)
+    assert bar.toolbar.isHidden() and not bar.toolbar.toggleViewAction().isVisible()
+    bar.set_allowed(True)
+    assert bar.toolbar.toggleViewAction().isVisible()
+
