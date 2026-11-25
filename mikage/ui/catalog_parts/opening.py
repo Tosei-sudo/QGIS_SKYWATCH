@@ -16,7 +16,7 @@ from ...core.obs.api import local_time
 from ...qgis_io.overviews_io import queue as overview_queue
 from ...qgis_io.catalog_io import (
     Cancelled, add_or_choose, close_layers, located_again, open_located, open_record,
-    opened_images,
+    opened_images, record_of_layer,
 )
 from ..docks import plain_tip
 from ..image_files_dialog import choose_image_files
@@ -116,8 +116,14 @@ class OpeningPart:
         return layers
 
     def _opened(self, layers: list) -> None:
-        """After images opened: 「前の画像を閉じる」, 「開いた画像へ移動」, and the ids offered by 「画像 ID で開く」."""
+        """
+        After images opened: 「投影法を画像に合わせる」・「向き」 (before the
+        previous ones close: the map is put back only when none is left),
+        「前の画像を閉じる」, 「開いた画像へ移動」, and the ids offered by
+        「画像 ID で開く」.
+        """
         if layers:
+            self.orient_map(layers)
             # Only those opened with it on close (an image opened before it was turned on stays).
             opened_ids = [layer.id() for layer in layers]
             if self.close_previous.isChecked():
@@ -128,6 +134,19 @@ class OpeningPart:
             if self.zoom_opened.isChecked():
                 self.zoom_to_layers(layers)
         self._refresh_opened()
+
+    def orient_map(self, layers: list) -> str:
+        """「投影法を画像に合わせる」・「向き」 for the images opened (the first of them); what was done."""
+        catalogs = self.catalogs()
+        typed = self.typed_toward
+        return self.orienter.orient(
+            layers, self.match_crs.isChecked(), self.orientation_box.currentData() or "north",
+            found_of=lambda layer: record_of_layer(layer, catalogs),
+            typed_of=(lambda layer: typed(layer)) if typed is not None else (lambda layer: None))
+
+    def _orienter_said(self, text: str) -> None:
+        if text:
+            self.status.setText(text)
 
     def _refresh_opened(self) -> None:
         """The ids 「画像 ID で開く」 offers: the images opened on this computer."""

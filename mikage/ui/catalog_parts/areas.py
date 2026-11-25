@@ -11,6 +11,7 @@ from qgis.core import QgsMapLayer
 
 from ...core.catalog.api import CatalogConfig, areas_of
 from ...qgis_io.catalog_io import layer_area
+from ...qgis_io.map_view_io import visible_ring
 
 
 class AreasPart:
@@ -104,6 +105,11 @@ class AreasPart:
         """
         kind = self.area_box.currentData()
         if kind == "extent":
+            if abs(self.canvas.rotation()) > 1e-9:
+                # A turned map (「向き」): the view as it is, not the box around it.
+                ring = visible_ring(self.canvas)
+                if ring is not None:
+                    return areas_of([], [[ring]])[0]
             return self.extent()
         if kind == "drawn" and self.drawn:
             return areas_of([], [[self.drawn]])[0]
