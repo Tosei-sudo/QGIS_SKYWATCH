@@ -127,3 +127,35 @@
 <li>観測記録の記録・モノと、イベントに紐付けられます。同じ組をもう一度紐付けても 1 つのままです</li>
 </ul>
 
+<h3 id="references-import">参考情報を JSON から取り込む</h3>
+<p>航行警報の一覧やほかのシステムの出力など、たくさんの参考情報は JSON ファイルにしてまとめて登録・更新できます。ドック <a class="open" href="mikage:open/参考情報">参考情報</a> の <span class="ui">JSON 取り込み…</span>。</p>
+<p class="pic"><img src="images/ref-import-01-dialog.png" alt="参考情報の取り込み（JSON）の画面（試行のあと）"></p>
+<ol>
+<li><span class="ui">ファイルを選ぶ…</span> で JSON ファイルを選ぶと、すぐ試行します（いまの参考情報と照らし合わせるだけで、保存はしません）。行ごとに <span class="ui">新規</span>・<span class="ui">更新</span>・<span class="ui">変更なし</span>・<span class="ui">重複（飛ばす）</span>・<span class="ui">エラー</span> と、変わる項目かエラーの理由が出ます。<span class="ui">エラーと注意の行だけ</span> で絞れます</li>
+<li><span class="ui">取り込む（n 件）</span> で保存します。エラーの行は取り込まず、残りを取り込みます。終わるとドックには取り込んだ参考情報だけが出ます（<span class="ui">すべてに戻す</span> で期間の一覧に戻ります）</li>
+<li>保存できなかった行があれば理由が出ます。同じファイルをもう一度取り込めば続きから入ります（id のある行は更新、id のない行は重複として飛ぶため）</li>
+</ol>
+<p>ファイルは <code>{ "defaults": { … }, "infos": [ { … }, { … } ] }</code> の形で、<code>infos</code> の 1 つが参考情報 1 件です（10,000 件まで、UTF-8）。形を定めた JSON Schema はリポジトリの <code>mikage/resources/schemas/reference-info.schema.json</code>、見本は <code>docs/reference-info/sample.json</code> です。</p>
+<table>
+<tr><th>キー</th><th>中身</th></tr>
+<tr><td><code>title</code></td><td>題名（必須）</td></tr>
+<tr><td><code>time</code></td><td>出来事の日時（必須）。<code>2026-11-24</code>・<code>2026-11-24T10:30</code>・<code>2026-11-24T10:30:00+09:00</code>・<code>…Z</code>。タイムゾーンのないものは PC の時刻</td></tr>
+<tr><td><code>id</code></td><td>情報ID。同じ ID があれば更新、なければこの ID で追加。省くと新しい ID を付けて追加</td></tr>
+<tr><td><code>published</code></td><td>発表日時（形は time と同じ）</td></tr>
+<tr><td><code>source</code>・<code>sourceRef</code></td><td>出典、文書番号か URL</td></tr>
+<tr><td><code>reliability</code></td><td>確からしさ（確定・推定・不明など、確度と同じ言葉）</td></tr>
+<tr><td><code>summary</code>・<code>note</code></td><td>要旨、メモ</td></tr>
+<tr><td><code>kind</code></td><td>分類（<code>船舶 &gt; 支援船</code>）</td></tr>
+<tr><td><code>area</code></td><td>地名の管理番号か、地名の名前・別名</td></tr>
+<tr><td><code>lon</code>・<code>lat</code></td><td>地点の経度・緯度（両方）</td></tr>
+<tr><td><code>links</code></td><td>紐付け。<code>[ { "type": "event", "id": "…", "label": "…" } ]</code>。type は <code>event</code>（イベント）・<code>thing</code>（モノ）・<code>observation</code>（観測記録）</td></tr>
+</table>
+<ul>
+<li>更新で変わるのはファイルに書いたキーだけです。<code>""</code> か <code>null</code> で消せます（題名と出来事の日時は消せません）。紐付けは足すだけで、外しません</li>
+<li>id のない行は、題名・出来事の日時（分まで）・出典が同じ参考情報が既にあれば重複として飛ばします。同じファイルを 2 回取り込んでも増えません</li>
+<li>場所は、<code>lon</code>・<code>lat</code> があればその点、なくて <code>area</code> があればその地名の中の点です（<span class="ui">地名から…</span> と同じ）</li>
+<li><code>defaults</code> の値は、各行に書いていないキーに入ります（同じ出典の情報をまとめて入れるとき。id・title・time・lon・lat・links は書けません）</li>
+<li>エラーになるもの: 日時が読めない、経度・緯度の片方だけ、地名が見つからない・同じ名前の地名が 2 つ、文字が長すぎる（切りません）、同じ id が 2 回、知らないキー。確からしさ・分類が候補にないときは注意だけ出して取り込みます</li>
+<li>取り込んだ参考情報の登録者は取り込んだ人です（削除できるのはその人と管理者）</li>
+</ul>
+

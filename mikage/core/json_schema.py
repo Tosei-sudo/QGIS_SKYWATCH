@@ -3,8 +3,9 @@ Checking a JSON value against a JSON Schema, for the parts schemas of
 ordering systems use (no library needed in a closed network): type,
 required, properties, additionalProperties, items, enum, const, pattern,
 minimum / maximum (and exclusive ones), minLength / maxLength, minItems /
-maxItems, format (date, date-time), anyOf / oneOf / allOf, and `$ref` to
-`#/$defs/…` or `#/definitions/…`. Keywords starting `x-` are ignored.
+maxItems, format (date, date-time), dependentRequired, anyOf / oneOf /
+allOf, and `$ref` to `#/$defs/…` or `#/definitions/…`. Keywords starting
+`x-` are ignored.
 """
 from __future__ import annotations
 
@@ -102,6 +103,10 @@ def validate(value: Any, schema: Any, root: Any = None, path: str = "$") -> list
         for name in schema.get("required") or []:
             if name not in value:
                 errors.append(f"{path}: 必須の {name} なし")
+        dependent = schema.get("dependentRequired")
+        for name, needs in (dependent.items() if isinstance(dependent, dict) else ()):
+            if name in value and isinstance(needs, list):
+                errors += [f"{path}: {name} があるのに {n} なし" for n in needs if n not in value]
         props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
         for name, v in value.items():
             if name in props:

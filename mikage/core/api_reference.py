@@ -61,6 +61,12 @@ ENTRIES: list[Entry] = [
           "uses は列ごとの使い方（「階層 1」「既知の個体」「諸元: 全長」「使わない」など。省略で列名から推測）、mode は \"add\"（追加・更新）か \"replace\"（置き換え）。",
           'r = api.import_taxonomy("C:/data/分類一覧.xlsx", sheet="分類一覧")\nprint(r["summary"])\napi.import_taxonomy("C:/data/分類一覧.xlsx", save=True)'),
 
+    Entry("import_reference_infos", "観測記録の関数", "参考情報の取り込み（JSON から）",
+          "JSON ファイル（形は mikage/resources/schemas/reference-info.schema.json）の参考情報をまとめて登録・更新する。"
+          "save=False（既定）は試行だけで、各行がどうなるか（summary・rows・notes。ファイルごと使えなければ problems）を返す。"
+          "save=True で保存し、added・updated・links・failures も返す。",
+          'r = api.import_reference_infos("C:/data/航行警報.json")\nprint(r["summary"])\napi.import_reference_infos("C:/data/航行警報.json", save=True)'),
+
     # ---- ドックと道具 ----
     Entry("observation_dock", "ドックと道具", "観測記録ドック",
           "ドックそのもの。記録の本体は book（記録・画像・分類体系）。画像を選ぶまで記録は読まないので、book.records は read_now() で読んでから。"
@@ -100,9 +106,10 @@ ENTRIES: list[Entry] = [
           ["figures", "categories", "click_value", "click_bin", "click_step", "set_heatmap", "clear_filter", "set_trend", "trends", "surge_regions"]),
     Entry("moving", "ドックと道具", "移動体（AIS・ADS-B）", "移動体のフィードと履歴。", "api.moving.go_live()", ["connect_feed", "open_history", "layers", "align_to_image", "go_live"]),
     Entry("events", "ドックと道具", "イベント", "イベントと画像・記録・依頼の紐付け。", "api.events.reload()", ["events", "links", "reload", "link_items", "choose", "export"]),
-    Entry("references", "ドックと道具", "参考情報", "出典つきの参考情報（Esri。設定ファイルの referenceInfo）と、イベント・モノ・記録との紐付け。",
+    Entry("references", "ドックと道具", "参考情報", "出典つきの参考情報（Esri。設定ファイルの referenceInfo）と、イベント・モノ・記録との紐付け。"
+          "JSON からの取り込みは open_import(path)。",
           "for info in api.references.infos or []:\n    print(info.title, info.source, info.reliability)",
-          ["infos", "reload", "choose", "save", "link", "show_for_items"]),
+          ["infos", "reload", "choose", "save", "link", "show_for_items", "open_import"]),
     Entry("interests", "ドックと道具", "関心地域・地点", "自分の関心地点・関心地域（Esri。設定ファイルの interests）。book.items が一覧、book.over(フットプリント) が画像に入るもの。",
           "for item in api.interests.book.items or []:\n    print(item.name, item.kind, item.color)", ["book", "chosen", "choose", "save", "delete", "zoom"]),
     Entry("analysis", "ドックと道具", "データ分析", "Esri の表とプロジェクトのレイヤーを SQL で集計。保存した分析はプロセシングのツールにもなる（algorithm_id）。",

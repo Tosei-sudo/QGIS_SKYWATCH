@@ -251,11 +251,12 @@ def _info_layer(client: EsriClient, settings: ReferenceSettings, token: Optional
 
 def load_infos(client: EsriClient, settings: ReferenceSettings, token: Optional[str] = None, since: Optional[float] = None,
                until: Optional[float] = None, ids: Optional[Sequence[str]] = None, area_ids: Optional[Sequence[str]] = None,
-               footprint: Optional[Sequence] = None, most: int = MOST) -> list[ReferenceInfo]:
+               footprint: Optional[Sequence] = None, most: int = MOST, titles: Optional[Sequence[str]] = None) -> list[ReferenceInfo]:
     """
     The infos of a period (INFO_TIME from `since` to `until`, ms; None open),
-    of these ids or named areas, placed in a footprint (WGS 84 rings),
-    newest first. More than `most` is an error (TooManyError: a shorter period).
+    of these ids, named areas or titles (one of them), placed in a footprint
+    (WGS 84 rings), newest first. More than `most` is an error (TooManyError:
+    a shorter period).
     """
     s = settings.layer
     token = _token(s, token)
@@ -272,14 +273,17 @@ def load_infos(client: EsriClient, settings: ReferenceSettings, token: Optional[
                  "geometryType": "esriGeometryPolygon", "inSR": "4326", "spatialRel": "esriSpatialRelIntersects"}
     chunks: list[Optional[list[str]]] = [None]
     key = None
-    if ids is not None or area_ids is not None:
-        key = f["id"] if ids is not None else f["areaId"]
+    wanted = next(((role, v) for role, v in (("id", ids), ("areaId", area_ids), ("title", titles)) if v is not None), None)
+    if wanted is not None:
+        key = f[wanted[0]]
         if key not in info.field_types:
             return []
-        values = list(dict.fromkeys(v for v in (ids if ids is not None else area_ids) or [] if v))
+        values = list(dict.fromkeys(v for v in wanted[1] or [] if v))
         if not values:
             return []
-        chunks = [values[i:i + CHUNK] for i in range(0, len(values), CHUNK)]
+        # Titles are long: fewer to a question.
+        size = CHUNK // 2 if wanted[0] == "title" else CHUNK
+        chunks = [values[i:i + size] for i in range(0, len(values), size)]
     out: dict[str, ReferenceInfo] = {}
     for chunk in chunks:
         where = _where(s, *clauses, f"{key} IN ({','.join(quote(v) for v in chunk)})" if chunk else "")
@@ -309,6 +313,23 @@ def near_image(client: EsriClient, settings: ReferenceSettings, image_time: Opti
     return sorted(found.values(), key=lambda x: (x.time is None, -(x.time or 0), x.title))
 
 
+def feature_of(info: ReferenceInfo, fields: dict[str, str], layer) -> dict[str, Any]:
+    """
+    The info as a feature of the layer (its layer information: the attributes
+    it has, their lengths and its shape); with its object id when it has one.
+    """
+    feature: dict[str, Any] = {"attributes": attributes_of(info, fields, layer.field_types, layer.field_lengths)}
+    if layer.geometry_type == "esriGeometryPoint":
+        # No place on an update: an empty point, so the place is taken away.
+        if info.has_place:
+            feature["geometry"] = {"x": info.lon, "y": info.lat, "spatialReference": {"wkid": 4326}}
+        elif info.oid is not None:
+            feature["geometry"] = {"x": None, "y": None, "spatialReference": {"wkid": 4326}}
+    if info.oid is not None:
+        feature["attributes"][layer.object_id_field] = info.oid
+    return feature
+
+
 def save_info(client: EsriClient, settings: ReferenceSettings, info: ReferenceInfo, token: Optional[str] = None) -> ReferenceInfo:
     """Adds the info (no oid yet) or updates it; the info as saved (with its oid)."""
     s = settings.layer
@@ -316,13 +337,7 @@ def save_info(client: EsriClient, settings: ReferenceSettings, info: ReferenceIn
     layer = _info_layer(client, settings, token, refresh=True)
     if not info.title.strip():
         raise ValueError("題名がない")
-    feature: dict[str, Any] = {"attributes": attributes_of(info, s.fields, layer.field_types, layer.field_lengths)}
-    if layer.geometry_type == "esriGeometryPoint":
-        # No place on an update: an empty point, so the place is taken away.
-        feature["geometry"] = ({"x": info.lon, "y": info.lat, "spatialReference": {"wkid": 4326}} if info.has_place
-                               else {"x": None, "y": None, "spatialReference": {"wkid": 4326}} if info.oid is not None else None)
-        if feature["geometry"] is None:
-            del feature["geometry"]
+    feature = feature_of(info, s.fields, layer)
     if info.oid is None:
         # Saved already (an answer lost on the way, then 保存 again): updated, not added twice.
         there = client.find(s.url, s.fields["id"], [info.id], token, out_fields=layer.object_id_field + "," + s.fields["id"])
@@ -333,7 +348,6 @@ def save_info(client: EsriClient, settings: ReferenceSettings, info: ReferenceIn
         if not r.get("success"):
             raise EsriError(code="E305", detail="参考情報の追加: " + ((r.get("error") or {}).get("description") or ""))
         return replace(info, oid=int(r["objectId"]) if is_number(r.get("objectId")) else None)
-    feature["attributes"][layer.object_id_field] = info.oid
     result = client.apply_edits(s.url, updates=[feature], token=token)
     r = (result.update_results or [{}])[0]
     if not r.get("success"):
@@ -418,29 +432,34 @@ def load_links(client: EsriClient, settings: ReferenceSettings, info_ids: Option
 def add_links(client: EsriClient, settings: ReferenceSettings, info_ids: Sequence[str], items: Sequence[LinkTarget],
               token: Optional[str] = None) -> tuple[int, int]:
     """Links the infos to the items; (added, already there). The same info and item twice stays one row."""
+    return add_link_pairs(client, settings, [(i, item) for i in info_ids for item in items], token)
+
+
+def add_link_pairs(client: EsriClient, settings: ReferenceSettings, pairs: Sequence[tuple[str, LinkTarget]],
+                   token: Optional[str] = None) -> tuple[int, int]:
+    """Links each info (by id) to its item; (added, already there). The same info and item twice stays one row."""
     s = settings.links
     if s is None:
         raise EsriError("参考情報の紐付けは使えない（管理者に連絡: referenceInfo.links）", code="E703")
     token = _token(s, token)
     layer = _link_layer(client, settings, token)
     types, lengths, f = layer.field_types, layer.field_lengths, s.fields
-    have = {x.key for x in load_links(client, settings, info_ids, token=token)}
+    have = {x.key for x in load_links(client, settings, list(dict.fromkeys(i for i, _item in pairs)), token=token)}
     adds, seen, skipped = [], set(), 0
-    for info_id in info_ids:
-        for item in items:
-            if item.type not in ITEM_TYPES:
-                raise ValueError(item.type)
-            key = (info_id, item.type, item.item_id)
-            if key in have or key in seen:
-                skipped += 1
-                continue
-            seen.add(key)
-            values = {f["info"]: info_id, f["type"]: item.type, f["item"]: item.item_id, f.get("label", ""): item.label or None}
-            attributes = {}
-            for k, v in values.items():
-                if k in types:
-                    attributes[k] = fit_value(v[:lengths[k]] if isinstance(v, str) and lengths.get(k) else v, types[k])
-            adds.append({"attributes": attributes})
+    for info_id, item in pairs:
+        if item.type not in ITEM_TYPES:
+            raise ValueError(item.type)
+        key = (info_id, item.type, item.item_id)
+        if key in have or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        values = {f["info"]: info_id, f["type"]: item.type, f["item"]: item.item_id, f.get("label", ""): item.label or None}
+        attributes = {}
+        for k, v in values.items():
+            if k in types:
+                attributes[k] = fit_value(v[:lengths[k]] if isinstance(v, str) and lengths.get(k) else v, types[k])
+        adds.append({"attributes": attributes})
     added, failures = 0, []
     for start in range(0, len(adds), 200):
         for r in client.apply_edits(s.url, adds[start:start + 200], token=token).add_results:

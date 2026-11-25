@@ -11,7 +11,8 @@ happened and of the announcement, the source and its number or URL, how
 sure it is, the summary, the class, the place (a click on the map, a named
 area, the map's centre) and a note. 「削除」 is for the creator and the
 administrators. 「地図へ」 goes to the info's place, 「URL を開く」 opens its
-document.
+document. 「JSON 取り込み…」 adds and updates infos from a JSON file
+(core/reference_import.py, ui/reference_import_dialog.py).
 
 The other docks link their items here: 観測記録's records and things
 (「参考情報 ▾」), イベント's events (its tab 「参考情報」), and an image's
@@ -35,6 +36,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit, edit_stamp
+from ..core import reference_import as ri
 from ..core.reference_info import (
     DELETE_ANY, ITEM_LABELS, LinkTarget, ReferenceInfo, ReferenceLink, add_links, can_delete, delete_info, detail_lines,
     is_url, load_infos, load_links, local_text, matches, new_id, remove_links, save_info, source_text,
@@ -452,6 +454,7 @@ class ReferenceDock(PluginDock):
         self._then: list[Callable[[], None]] = []
         self._again = False
         self._form: Optional[ReferenceForm] = None
+        self._import_dialog = None
 
         self.note = plain_label(QLabel())
         self.note.setWordWrap(True)
@@ -513,6 +516,8 @@ class ReferenceDock(PluginDock):
             ("zoom", self.tr("地図へ"), self.tr("参考情報の地点へ地図を移動"), self.zoom),
             ("url", self.tr("URL を開く"), self.tr("文書番号・URL の URL をブラウザーで開く"), self.open_url),
             ("copy", self.tr("概要をコピー"), self.tr("題名・日時・出典・要旨などの数行をクリップボードへ"), self.copy_text),
+            ("import", self.tr("JSON 取り込み…"), self.tr("JSON ファイルの参考情報をまとめて登録・更新（試行してから取り込む）"),
+             self.open_import),
         ]:
             b = QPushButton(text)
             b.setToolTip(tip)
@@ -776,6 +781,7 @@ class ReferenceDock(PluginDock):
         ready = self.settings is not None and self.task is None
         x = self.chosen()
         self.buttons["new"].setEnabled(ready)
+        self.buttons["import"].setEnabled(self.settings is not None)
         self.buttons["edit"].setEnabled(ready and x is not None)
         self.buttons["delete"].setEnabled(ready and x is not None)
         self.buttons["zoom"].setEnabled(x is not None and x.has_place)
@@ -1051,11 +1057,86 @@ class ReferenceDock(PluginDock):
         self.say(self.tr("概要をコピー"))
         return text
 
+    # ---- 「JSON 取り込み…」 -------------------------------------------------------------------
+
+    def open_import(self, path: Optional[str] = None):
+        """「参考情報の取り込み（JSON）」 (one window; the file tried at once when given)."""
+        from .reference_import_dialog import ReferenceImportDialog
+
+        if self.settings is None:
+            return None
+        if self._import_dialog is None or sip.isdeleted(self._import_dialog):
+            self._import_dialog = ReferenceImportDialog(self, self.window())
+        self._import_dialog.show()
+        self._import_dialog.raise_()
+        if path:
+            self._import_dialog.choose_file(path)
+        return self._import_dialog
+
+    def import_work(self, data: "ri.ImportFile", save: bool) -> Callable:
+        """
+        The work of a dry run (`save` False: the plan) or of the import (the
+        result) of a file, to run in a task or at once (the Python API): the
+        named areas read when the file names some and they are not read yet.
+        """
+        s = self.settings
+        if s is None:
+            raise ValueError("参考情報は使えない（管理者に連絡: referenceInfo）［E703］")
+        client = self.context.esri()
+        token, links_token = self._tokens()
+        reliabilities, kinds = self.reliabilities(), self.kinds()
+        book = self.area_book()
+        named = book.settings if book is not None else None
+        listed = book.list if book is not None and named is not None else None
+        area_tokens = {k: self.context.token_for(x.url, x.token) for k, x in
+                       (("areas", named.areas), ("categories", named.categories), ("countries", named.countries)) if x is not None} \
+            if named is not None else {}
+        needs = any(isinstance(r, dict) and r.get("area") for r in data.rows)
+
+        def work(_task=None):
+            from ..core.named_areas import load_areas, read_shapes
+
+            known = ri.Known(reliabilities=reliabilities, kinds=kinds)
+            areas = listed if listed is not None or not needs or named is None else load_areas(client, named, area_tokens)
+            if areas is not None:
+                known.areas = areas.areas
+                known.shapes = lambda wanted: read_shapes(client, named.areas, [a.oid for a in wanted], area_tokens.get("areas"),
+                                                          areas.oid_field)
+            if not save:
+                return ri.plan_import(client, s, data, known, token, links_token)
+            result = ri.apply_import(client, s, data, known, token, links_token)
+            audit.record("edit", "reference-import", data.name, count=result.added + result.updated,
+                         ids=[x.id for x in result.saved][:1000],
+                         detail={"summary": result.summary(), "links": result.links, "failures": len(result.failures)},
+                         result="ok" if not result.failures else "partial")
+            return result
+
+        return work
+
+    def run_import(self, data: "ri.ImportFile", save: bool, done: Callable, failed: Callable[[str], None]) -> None:
+        """A dry run or the import of a file in a task; after an import, the infos imported listed on their own."""
+        try:
+            work = self.import_work(data, save)
+        except ValueError as error:
+            failed(str(error))
+            return
+
+        def finished(value) -> None:
+            if save:
+                saved = list(value.saved)
+                self.reload(then=lambda: self.show_infos(saved, self.tr("取り込んだ参考情報")) if saved else None)
+            done(value)
+
+        self._start(self.tr("参考情報の取り込み") if save else self.tr("参考情報の取り込みの試行"), work, finished,
+                    lambda m: (self.say(self.tr("参考情報の取り込みに失敗: {m}").format(m=m)), failed(m)))
+
     def close_down(self) -> None:
         for task in list(self._tasks):
             task.cancel()
         if self._form is not None and not sip.isdeleted(self._form):
             self._form.close()
+        if self._import_dialog is not None and not sip.isdeleted(self._import_dialog):
+            self._import_dialog.close()
         for band in (self.points, self.chosen_point):
             try:
                 scene = band.scene()
