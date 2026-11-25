@@ -13,6 +13,7 @@ from typing import Optional
 
 from qgis.core import QgsApplication, QgsAuthMethodConfig
 
+from ..core import edit_stamp
 from . import training_io
 from .qsettings import PREFIX, pref, set_pref  # noqa: F401 (PREFIX, pref and set_pref: read from here too)
 
@@ -150,11 +151,33 @@ def auth_for(url: str) -> Optional[str]:
 
 
 def recorder_setting() -> str:
+    """The 「記録者」 name typed ('' when none is: the user name is used)."""
     return _get("recorder")
 
 
+def default_recorder() -> str:
+    """
+    The 「記録者」 when none is typed (tsudo 2026-11-25: 記録者のデフォルト値を
+    USERNAME に): the user name the edits are stamped with (editTracking's
+    `user`, else its environment variable, USERNAME by default), so the
+    records' 記録者 is the name of 作成者・更新者, 分担 and 「自分の記録」.
+    """
+    return edit_stamp.user_name()
+
+
+def recorder_shown() -> str:
+    """What a 「記録者」 box shows: the name typed, else the user name."""
+    return recorder_setting() or default_recorder()
+
+
 def set_recorder(name: str) -> None:
-    _set("recorder", name.strip())
+    """
+    Keeps the name typed; the user name itself (or nothing) is kept as none
+    typed, so the 記録者 follows the user name (and the settings file's
+    editTracking) until another name is typed.
+    """
+    name = name.strip()
+    _set("recorder", "" if name == default_recorder().strip() else name)
 
 
 def auth_user_name(authcfg: Optional[str]) -> str:
@@ -172,8 +195,13 @@ def auth_user_name(authcfg: Optional[str]) -> str:
 
 
 def recorder_name(store_url: Optional[str] = None) -> str:
-    """Who records: the name set in the plugin, else the user name of the store's authentication configuration."""
-    return recorder_setting() or auth_user_name(auth_for(store_url) if store_url else None)
+    """
+    Who records: the name typed in the plugin, else the user name
+    (default_recorder), else (no user name known) the user name of the
+    store's authentication configuration. The Esri sign-in comes last: on
+    some networks everyone signs in with one shared account.
+    """
+    return recorder_shown() or auth_user_name(auth_for(store_url) if store_url else None)
 
 
 def profile_folder() -> str:

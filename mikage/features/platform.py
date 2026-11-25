@@ -11,6 +11,7 @@ from qgis.core import Qgis
 from qgis.PyQt.QtWidgets import QPushButton
 
 from ..core import errors
+from ..qgis_io import settings
 from ..ui import error_help, first_setup
 from ..ui.dock_layouts import DockLayoutMenu
 from ..ui.list_views import set_column_drag
@@ -92,7 +93,11 @@ class Platform(Feature):
         dialog = SettingsDialog(self.context, self.window(), may_change_source=self.host.allows("settings.config"),
                                 raster_speed=self.host.open_raster_speed)
         try:
-            dialog.exec()
+            if dialog.exec() and self.context is not None:
+                # The 記録者 also in an open 「観測記録」 (its box and the name written on the records).
+                obs = self.host.ports.observations()
+                if obs is not None and hasattr(obs, "set_observer"):
+                    obs.set_observer(settings.recorder_shown())
         finally:
             # Made anew each time: the closed one goes, with its auth lists (#87).
             dialog.deleteLater()
