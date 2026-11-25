@@ -65,7 +65,7 @@
 - 作成者・更新者は ArcGIS の認証（サインインしたユーザー）ではなく、PC の環境変数 `USERNAME`（Windows のログオン名）。`userVariable` で別の環境変数に、`user` で固定の名前にできる。環境変数がないときは OS のログイン名
 - 書くのはレイヤーにその属性があるときだけ（属性名の大文字小文字は区別しない）。ないレイヤーはこれまでどおり。属性はサービス側で足す（日時は日付型、作成者・更新者は文字列型。日時を文字列型にすると ISO 8601 の UTC で書く）
 - 既定の属性名 `CREATED_DATE`・`CREATED_USER`・`UPDATED_DATE`・`UPDATED_USER` は、Esri の編集者トラッキングの属性（`CreationDate`・`Creator`・`EditDate`・`Editor`、`created_user`・`last_edited_user` など）とは別。編集者トラッキングを有効にした属性はサーバが認証のユーザーで上書きするので、ここには使わない
-- 観測記録の `recordedBy`（記録者、`OBSERVER`）・`updatedBy`・`created`・`updated`、撮像依頼台帳の `created`・`updated` は記録の中身としてこれまでどおり別に書く
+- 観測記録の `recordedBy`（記録者、`OBSERVER`）・`updatedBy`・`created`・`updated`、撮像依頼台帳の `created`・`updated` は記録の中身としてこれまでどおり別に書く。記録者の既定はここと同じユーザー名（各自が記録者名を入れればその名前。2026-11-25）
 - 日時の書き方は他の属性と同じ（`timeZone` を書いたサービスはそのタイムゾーンで書く）
 
 ```jsonc
