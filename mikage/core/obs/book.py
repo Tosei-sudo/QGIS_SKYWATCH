@@ -651,12 +651,14 @@ class ObservationBook:
         self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"ファイルのない画像 {info.name} を追加")
         return entry
 
-    def list_images(self, images: list[ListedImage]) -> Optional[ObservedImage]:
+    def list_images(self, images: list[ListedImage], replacing: Sequence[str] = ()) -> Optional[ObservedImage]:
         """
         Lists several images without their files at once (the catalog's
         「ファイルなしで記録」: their ids, times and footprints as the catalog
         says), the first one recorded on from now on; one listed before is
-        replaced (the catalog's values win).
+        replaced (the catalog's values win). The images of `replacing` listed
+        before go off the list with it, in the same save (the catalog's
+        「前の画像を閉じる」; their records stay); nothing goes when none is listed.
         """
         wanted: dict[str, ListedImage] = {}
         for i in images:
@@ -667,18 +669,23 @@ class ObservationBook:
             self._say("画像 ID のある画像を選択")
             return None
         first = next(iter(wanted))
+        going = set(replacing) - set(wanted)
         with self.lock:
-            self.listed = [i for i in self.listed if i.id not in wanted] + list(wanted.values())
+            gone = [i for i in self.listed if i.id in going]
+            self.listed = [i for i in self.listed if i.id not in wanted and i.id not in going] + list(wanted.values())
             self._save_listed()
             self._order()
             self.go_to(first)
         entry = self.current
         if len(wanted) == 1:
             info = wanted[first]
-            self._say(f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"ファイルのない画像 {info.name} を追加")
+            said = f"{info.name} は開いている画像と同じ ID（その画像で記録）" if entry and entry.file else f"ファイルのない画像 {info.name} を追加"
         else:
             opened = sum(1 for e in self.images if e.file and e.id in wanted)
-            self._say(f"ファイルのない画像 {len(wanted)} 件を追加" + (f"。うち {opened} 件は開いている画像で記録" if opened else ""))
+            said = f"ファイルのない画像 {len(wanted)} 件を追加" + (f"。うち {opened} 件は開いている画像で記録" if opened else "")
+        if gone:
+            said += f"。前の {gone[0].name} は一覧から除外（記録は残る）" if len(gone) == 1 else f"。前の {len(gone)} 件は一覧から除外（記録は残る）"
+        self._say(said)
         return entry
 
     def unlist_image(self, image_id: str) -> bool:

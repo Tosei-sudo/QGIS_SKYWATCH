@@ -6,13 +6,14 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from qgis.core import Qgis
+from qgis.core import Qgis, QgsProject
 from qgis.PyQt.QtWidgets import QFileDialog, QPushButton
 
 from ...core.catalog.api import (
     CatalogConfig, PathError, PathMapping, OpenedImage, CatalogRecord, listed_image, record_of, records_by_ids,
 )
 from ...core.obs.api import local_time
+from ...qgis_io.obs_images import IMAGE_ID
 from ...qgis_io.overviews_io import queue as overview_queue
 from ...qgis_io.catalog_io import (
     Cancelled, add_or_choose, close_layers, located_again, open_located, open_record,
@@ -56,10 +57,23 @@ class OpeningPart:
             self.status.setText(self.tr("画像 ID のある画像を一覧で選択（Ctrl・Shift + クリックで複数）"))
             return None
         dock = self.observations() if self.observations else None
-        entry = dock.list_catalog_images(images) if dock is not None else None
+        # 「前の画像を閉じる」 (tsudo 2026-11-25: ファイルなしの画像も): those listed here before go off the list once these are on it.
+        closing = self.close_previous.isChecked()
+        entry = dock.list_catalog_images(images, self.last_listed if closing else []) if dock is not None else None
         if entry is None:
             self.status.setText(self.tr("観測記録は使えない（記録の保存先が未設定）"))
             return None
+        if closing:
+            # The images opened here before with their files close too: the one looked at now is this one
+            # (one of the same id stays: 観測記録 records on it).
+            listed_ids = [i.id.strip() for i in images]
+            project = QgsProject.instance()
+            close_layers([i for i in self.last_opened
+                          if project.mapLayer(i) is None or str(project.mapLayer(i).customProperty(IMAGE_ID) or "") not in listed_ids])
+            self.last_opened = []
+            self.last_listed = listed_ids
+        else:
+            self.last_listed = []
         if len(images) == 1:
             self.status.setText(self.tr("{id} を観測記録へ（ファイルなし）").format(id=entry.name))
         else:
@@ -72,9 +86,10 @@ class OpeningPart:
         folder: the images chosen among its files, in a group); the reason is
         shown for those that cannot be opened, with 「ファイルなしで記録」 for
         them. With 「前の画像を閉じる」, the images opened here before close
-        once these are open (not when none could be); with 「開いた画像へ移動」
+        once these are open (not when none could be), and those recorded here
+        without their files go off 観測記録's list; with 「開いた画像へ移動」
         the map goes to those opened. In a catalog without image files, they
-        are recorded without their files instead.
+        are recorded without their files instead (「前の画像を閉じる」 too).
         """
         catalog = self._shown_catalog
         if catalog is None:
@@ -123,11 +138,20 @@ class OpeningPart:
             if self.close_previous.isChecked():
                 close_layers([i for i in self.last_opened if i not in opened_ids])
                 self.last_opened = opened_ids
+                self._unlist_previous()
             else:
                 self.last_opened = []
+                self.last_listed = []
             if self.zoom_opened.isChecked():
                 self.zoom_to_layers(layers)
         self._refresh_opened()
+
+    def _unlist_previous(self) -> None:
+        """「前の画像を閉じる」 as images open: those recorded here without their files before go off 観測記録's list (their records stay)."""
+        ids, self.last_listed = self.last_listed, []
+        dock = self.observations() if self.observations else None
+        if ids and dock is not None:
+            dock.unlist_catalog_images(ids)
 
     def _refresh_opened(self) -> None:
         """The ids 「画像 ID で開く」 offers: the images opened on this computer."""

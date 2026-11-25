@@ -5,7 +5,7 @@ its methods as they were, on the dock's widgets and state.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from qgis.core import QgsLayerTree, QgsMapLayerType, QgsProject, QgsRasterLayer, QgsRectangle
 from qgis.PyQt.QtCore import QDateTime, QTimer
@@ -365,16 +365,18 @@ class ImagesPart:
             self.show_image_area(image)
         return self.book.current
 
-    def list_catalog_images(self, images: list) -> Optional[ObservedImage]:
+    def list_catalog_images(self, images: list, replacing: Sequence[str] = ()) -> Optional[ObservedImage]:
         """
         The catalog's 「ファイルなしで記録」: its images (core.obs.model.ListedImage,
         their ids, times and footprints as the catalog says) listed without
         their files, the first one recorded on; the dock comes forward and
-        the map moves to it.
+        the map moves to it. The images of `replacing` (those the catalog
+        listed before, with 「前の画像を閉じる」) go off the list then, their
+        footprints' layers with them; their records stay.
         """
         if self.book is None:
             return None
-        entry = self.book.list_images(images)
+        entry = self.book.list_images(images, replacing)
         if entry is None:
             return None
         self.list_button.setChecked(False)
@@ -475,6 +477,22 @@ class ImagesPart:
         now = book.current
         moved = was is None or now is None or now.id != was.id or now.layer_ids != was.layer_ids
         QTimer.singleShot(0, lambda: self._unlisted(book, moved))
+
+    def unlist_catalog_images(self, image_ids: Sequence[str]) -> int:
+        """
+        Images the catalog listed without their files taken off the list (its
+        「前の画像を閉じる」, the next image opened with its files), their
+        footprints' layers with them: how many were on it. Their records stay.
+        """
+        book = self.book
+        if book is None:
+            return 0
+        was = book.current
+        count = book.unlist_images(image_ids)
+        if count:
+            now = book.current
+            self._unlisted(book, was is None or now is None or now.id != was.id or now.layer_ids != was.layer_ids)
+        return count
 
     def _unlisted(self, book: ObservationBook, moved: bool) -> None:
         if self.book is not book:

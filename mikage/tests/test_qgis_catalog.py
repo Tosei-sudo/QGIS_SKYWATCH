@@ -980,12 +980,17 @@ def test_close_previous_closes_the_images_opened_before_once_the_next_are_open(p
     project.removeMapLayer(fifth.id())
     [sixth] = dock.open_records([a_as("A6")])
     assert {sixth.id(), fourth.id(), one_id} <= set(project.mapLayers())
-    # A catalog without image files has no 開く, so no such option either.
+    # A catalog without image files: the option for 「ファイルなしで記録」 (tsudo 2026-11-25), unless the role may not record.
     catalog.image_files = False
     dock._show_file_buttons()
+    assert not dock.close_previous.isHidden()
+    monkeypatch.setattr(dock, "allows", lambda key: key != "catalog.record")
+    dock._show_file_buttons()
     assert dock.close_previous.isHidden()
+    monkeypatch.undo()
     catalog.image_files = True
     dock._show_file_buttons()
+    assert not dock.close_previous.isHidden()
 
 
 def test_the_map_goes_to_the_images_opened_all_of_them_when_several(plugin, monkeypatch):
@@ -1514,6 +1519,108 @@ def test_a_catalog_without_image_files_records_instead_of_opening(plugin, tmp_pa
     path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
     p.context.reload()
     assert dock.buttons["open"].isVisibleTo(dock) and not dock.buttons["record"].isVisibleTo(dock)
+
+
+def _footprints(obs) -> list[str]:
+    """The images of the layers 「ファイルなしの画像」 on the map (one each), as the list is now."""
+    from mikage.qgis_io.listed_layers import listed_image_of
+
+    project = QgsProject.instance()
+    return sorted(listed_image_of(project.mapLayer(i)) for i in obs.footprints.layer_ids() if project.mapLayer(i) is not None)
+
+
+def test_close_previous_takes_the_images_recorded_without_files_off_the_list(plugin, tmp_path):
+    """
+    tsudo 2026-11-25 (画像ファイルなしの画像カタログの画像も、前の画像を消すを利かしてほしい): in a
+    catalog without image files, 「前の画像を閉じる」 takes the images recorded here without their
+    files before off 観測記録's list once the next are on it, their footprints' layers with them; their records stay.
+    """
+    from mikage.core.obs.book import FormValues
+
+    p, iface, folder, fake, images = plugin
+    path = tmp_path / "config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["imageCatalogs"][0]["imageFiles"] = False
+    del config["imageCatalogs"][0]["fields"]["source"]
+    path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+    p.context.reload()
+    dock, obs = p.api.image_catalog, p.api.observation_dock
+    searched(dock)
+    assert dock.close_previous.isVisibleTo(dock) and not dock.close_previous.isChecked()
+    a, b, c = (next(r for r in dock.records if r.id == i) for i in "ABC")
+
+    def listed():
+        return sorted(i.id for i in obs.book.listed)
+
+    # Off (as it starts): they add up, as before.
+    dock.record_without_files([a])
+    dock.record_without_files([b])
+    assert listed() == ["A", "B"] and _footprints(obs) == ["A", "B"]
+    # On: those listed before it was turned on stay.
+    dock.close_previous.setChecked(True)
+    assert settings.close_previous()
+    dock.record_without_files([c])
+    assert listed() == ["A", "B", "C"] and obs.book.current.id == "C"
+    rec = obs.book.submit(139.72, 35.62, FormValues(object="船 1", kind="船舶"))
+    assert rec.image_id == "C"
+    # The next one (a double click too): C goes off the list and off the map; its record stays.
+    dock._activated(a)
+    assert listed() == ["A", "B"] and obs.book.current.id == "A" and _footprints(obs) == ["A", "B"]
+    assert "前の C は一覧から除外（記録は残る）" in obs.status.text()
+    assert any(o.id == rec.id for o in obs.book.records)
+    assert "C" in [i.id for i in obs.book.recorded_images()]
+    # Several at once: the one before goes, these stay together (◀ ▶ through them).
+    dock.record_without_files([b, c])
+    assert listed() == ["B", "C"] and obs.book.current.id == "B" and _footprints(obs) == ["B", "C"]
+    # One of them again: it stays (listed anew), the other goes.
+    dock.record_without_files([b])
+    assert listed() == ["B"] and obs.book.current.id == "B"
+    dock.record_without_files([a])
+    assert listed() == ["A"] and _footprints(obs) == ["A"]
+    # Taken off by hand meanwhile: nothing breaks.
+    obs.book.unlist_images(["A"])
+    dock.record_without_files([b])
+    assert listed() == ["B"]
+    # Off again: nothing goes, and turning it on later does not take off what was listed while it was off.
+    dock.close_previous.setChecked(False)
+    dock.record_without_files([c])
+    dock.close_previous.setChecked(True)
+    dock.record_without_files([a])
+    assert listed() == ["A", "B", "C"]
+    # Nothing listed (no image chosen): nothing goes.
+    assert dock.record_without_files([]) is None and listed() == ["A", "B", "C"]
+
+
+def test_close_previous_closes_both_the_images_opened_and_those_recorded_without_files(plugin, monkeypatch):
+    """
+    A usual catalog: an image recorded without its files from the message (it could not be opened)
+    is 「前の画像」 too: the image opened before closes then, and it goes off the list once the next opens.
+    """
+    from qgis.PyQt.QtWidgets import QPushButton
+
+    p, iface, folder, fake, _ = plugin
+    dock, obs = p.api.image_catalog, p.api.observation_dock
+    searched(dock)
+    monkeypatch.setattr(dock, "choose_folder", lambda mapping: str(folder))
+    project = QgsProject.instance()
+    a, c = (next(r for r in dock.records if r.id == i) for i in "AC")
+    dock.close_previous.setChecked(True)
+    [first] = dock.open_records([a])
+    first_id = first.id()
+    # C has no place: recorded without its file from the message; A closes.
+    assert dock.open_records([c]) == [] and first_id in project.mapLayers()
+    [button] = [b for b in dock.unopened_message.findChildren(QPushButton) if b.text() == "ファイルなしで記録"]
+    button.click()
+    assert obs.book.current.id == "C" and project.mapLayer(first_id) is None
+    assert [i.id for i in obs.book.listed] == ["C"] and _footprints(obs) == ["C"]
+    # The next opened with its file: C goes off the list (its footprint too).
+    [second] = dock.open_records([a])
+    assert second.id() in project.mapLayers() and obs.book.listed == [] and _footprints(obs) == []
+    # Off: an image recorded without its file stays when the next opens.
+    dock.close_previous.setChecked(False)
+    dock.record_without_files([c])
+    [third] = dock.open_records([next(r for r in dock.records if r.id == "A")])
+    assert [i.id for i in obs.book.listed] == ["C"] and third.id() in project.mapLayers()
 
 
 def test_a_practice_only_catalog_is_shown_in_production_to_instructors_only(plugin, tmp_path):
