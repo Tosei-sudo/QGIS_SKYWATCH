@@ -46,6 +46,7 @@ from ..core.enhance.api import (
 from ..qgis_io import enhance_renderer as er
 from ..qgis_io.obs_images import observed_image
 from ..qgis_io.tasks import run_task
+from .elided_combo import ElidedCombo
 
 #: The scales offered, in order: one colour from black, then ramps.
 SCALES = [
@@ -252,7 +253,8 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
         pv = QVBoxLayout(box)
         pf = QFormLayout()
         self.other_label = QLabel(self.tr("比べる画像"))
-        self.other = QComboBox()
+        # As wide as the dock lets it be: a long image ID (the layer's name) cut in its middle, whole in the list (2026-11-25).
+        self.other = ElidedCombo(16, full_tip=True)
         self.other.setToolTip(self.tr("対象の画像と重ねる別の時期の画像"))
         self.other.currentIndexChanged.connect(self._show_order)
         pf.addRow(self.other_label, self.other)
@@ -613,7 +615,7 @@ class ColorizeBox(QgsCollapsibleGroupBoxBasic):
         self.other.blockSignals(True)
         self.other.clear()
         for layer in layers:
-            self.other.addItem(layer.name(), layer.id())
+            self.other.add_parts("", layer.name(), "", layer.id())
         index = self.other.findData(chosen) if chosen else -1
         if index < 0 and layers:
             other = nearest_image(target, layers)
