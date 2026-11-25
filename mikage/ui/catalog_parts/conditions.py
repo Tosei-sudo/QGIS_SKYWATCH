@@ -72,8 +72,10 @@ class ConditionsPart:
         files = self.has_files()
         for key in ("open", "copy", "folder"):
             self.buttons[key].setVisible(files)
-        for option in (self.close_previous, self.zoom_opened, self.match_crs, self.orientation_row):
+        for option in (self.zoom_opened, self.match_crs, self.orientation_row):
             option.setVisible(files)
+        # 「前の画像を閉じる」 for images recorded without their files too (tsudo 2026-11-25).
+        self.close_previous.setVisible(files or self.allows("catalog.record"))
         self.buttons["record"].setVisible(not files and self.allows("catalog.record"))
         # A practice-only catalog in production (判読練習の指導者's): not watched (no new-image notices of it in production).
         chosen = self.catalog()

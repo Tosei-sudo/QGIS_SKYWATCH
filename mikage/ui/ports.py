@@ -20,8 +20,14 @@ class ObservationsPort(Protocol):
     #: The records read (core/obs/model.ObservationBook), None before a store is chosen.
     book: Any
 
-    def list_catalog_images(self, images: list) -> Any:
-        """Images of a catalog without their files, listed to record on (None: no store or no image id)."""
+    def list_catalog_images(self, images: list, replacing: Sequence[str] = ()) -> Any:
+        """
+        Images of a catalog without their files, listed to record on (None: no store or no image id);
+        those of `replacing` listed before go off the list (「前の画像を閉じる」).
+        """
+
+    def unlist_catalog_images(self, image_ids: Sequence[str]) -> int:
+        """Images listed without their files taken off the list, their records kept (「前の画像を閉じる」): how many were on it."""
 
     def with_records(self, ids: Sequence[str], then: Callable[[], Any]) -> bool:
         """True when those records are read; else read first, `then` once they are."""

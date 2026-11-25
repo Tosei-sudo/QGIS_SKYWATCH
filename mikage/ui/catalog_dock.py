@@ -304,11 +304,14 @@ class CatalogDock(
 
         # 「前の画像を閉じる」 (tsudo, 2026-11-10): looking through images one after another, the one opened before closes.
         self.close_previous = QCheckBox(self.tr("前の画像を閉じる"))
-        self.close_previous.setToolTip(self.tr("画像を開くとき、前にここから開いた画像を地図から外す（PC ごとに記憶）"))
+        self.close_previous.setToolTip(self.tr("画像を開く・ファイルなしで記録するとき、前にここから開いた画像を地図から外す"
+                                               "（ファイルなしの画像は観測記録の一覧から外す。記録は残る。PC ごとに記憶）"))
         self.close_previous.setChecked(settings.close_previous())
         self.close_previous.toggled.connect(settings.set_close_previous)
         #: The layers opened last with 「前の画像を閉じる」 on (their ids), which close when the next images open.
         self.last_opened: list[str] = []
+        #: The images recorded here last without their files with it on (their ids), which go off 観測記録's list then.
+        self.last_listed: list[str] = []
         # 「開いた画像へ移動」 (tsudo, 2026-11-10): the map goes to the images opened (all of a record's files, or of several records).
         self.zoom_opened = QCheckBox(self.tr("開いた画像へ移動"))
         self.zoom_opened.setToolTip(self.tr("画像を開くとき、その画像の範囲へ地図を移動（PC ごとに記憶）"))

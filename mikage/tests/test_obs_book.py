@@ -287,6 +287,26 @@ def test_lists_the_catalog_images_without_their_files_at_once(book):
     assert book.list_images([ListedImage(" ", "", None, None)]) is None and book.status == "画像 ID のある画像を選択"
 
 
+def test_listing_catalog_images_can_take_those_listed_before_off(book):
+    """The catalog's 「前の画像を閉じる」 for images without their files (tsudo 2026-11-25): in the same save, their records kept."""
+    from mikage.core.obs.model import ListedImage
+
+    book.list_images([ListedImage("EXT-1", "EXT-1", day(2), None)])
+    rec = book.submit(1, 2, FormValues(object="Z", kind="車両"))
+    book.list_image("EXT-9", "手入力", None)
+    entry = book.list_images([ListedImage("EXT-2", "EXT-2", day(4), None)], replacing=["EXT-1", "EXT-2", "なし"])
+    assert entry.id == "EXT-2" and [i.id for i in book.listed] == ["EXT-9", "EXT-2"]
+    assert book.status == "ファイルのない画像 EXT-2 を追加。前の EXT-1 は一覧から除外（記録は残る）"
+    assert "EXT-1" not in book.prefs.get("listed_images/ローカル")
+    assert rec.id in [o.id for o in book.records] and [i.id for i in book.recorded_images()] == ["EXT-1"]
+    # Several before; none listed of those: nothing said of them.
+    book.list_images([ListedImage("EXT-3", "EXT-3", day(5), None)])
+    book.list_images([ListedImage("EXT-4", "EXT-4", day(6), None)], replacing=["EXT-2", "EXT-3"])
+    assert [i.id for i in book.listed] == ["EXT-9", "EXT-4"] and book.status.endswith("。前の 2 件は一覧から除外（記録は残る）")
+    book.list_images([ListedImage("EXT-5", "EXT-5", day(7), None)], replacing=["EXT-2"])
+    assert book.status == "ファイルのない画像 EXT-5 を追加"
+
+
 def test_makes_a_report(book):
     book.submit(139.7, 35.6, FormValues(object="A", kind="船舶", confidence="確定"))
     page = book.report(ReportOptions(title="週報"))
