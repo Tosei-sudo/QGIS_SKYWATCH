@@ -12,7 +12,7 @@ from qgis.PyQt.QtWidgets import QLabel, QLineEdit, QToolButton, QWidget
 
 from ...core.obs.api import (
     FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, find, kind_of,
-    member_index, name_label_of, path_of, spec_text, specs_at,
+    member_index, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
 )
 from ...core.util import read_number
 from ..docks import plain_tip
@@ -52,6 +52,11 @@ class FormPart:
             self._fit_activity()
         self.note_input.setText(editing.note if editing else "")
         self._fill_confidence((known.confidence or "") if known else last.confidence)
+        # 数量: a group's (継続 too, from the record carried over); a new record is of one thing until typed.
+        many = quantity_of(known) if known else 1
+        self.quantity_input.setText(str(many) if many >= 2 else "")
+        for w in (self.quantity_label, self.quantity_row):
+            w.setVisible(self.book.keeps_quantity())
         self.delete_button.setVisible(editing is not None)
         self.alert_button.setVisible(editing is not None and self.context.config.alert_reports is not None)
         self.absent_button.setVisible(known is not None)
@@ -92,7 +97,8 @@ class FormPart:
     def form_values(self) -> FormValues:
         return FormValues(object=self.object_input.text(), kind=self.kind_input.text(), activity=self.activity_input.text(),
                           note=self.note_input.text(), confidence=self.confidence_select.currentData() or "",
-                          length=self.length_input.text(), heading=self.heading_input.text(), width=self.width_input.text())
+                          length=self.length_input.text(), heading=self.heading_input.text(), width=self.width_input.text(),
+                          quantity=self.quantity_input.text() if self.quantity_input.isVisibleTo(self.form) else "")
 
     def _unseen_reason(self) -> str:
         """Why the thing in the form could not be seen: the 不可範囲's reason where it is, else the first offered."""
@@ -135,11 +141,21 @@ class FormPart:
 
     def _numbers_readable(self) -> bool:
         """
-        The typed length, width and heading can be read (full-width digits and
-        a unit such as 120 m or 30° can): otherwise the form stays open and
-        says which, rather than saving the record without it (or, editing,
-        dropping the value it had).
+        The typed length, width, heading and 数量 can be read (full-width
+        digits and a unit such as 120 m, 30° or 30 台 can; a 数量 is a whole
+        number of 1 or more): otherwise the form stays open and says which,
+        rather than saving the record without it (or, editing, dropping the
+        value it had).
         """
+        if self.quantity_input.isVisibleTo(self.form):
+            try:
+                read_quantity(self.quantity_input.text())
+            except ValueError:
+                self.measure_note.setText(self.tr("数量は 1 以上の整数で入力（「{text}」は読めない）").format(text=self.quantity_input.text().strip()))
+                self.measure_note.setVisible(True)
+                self.quantity_input.setFocus()
+                self.quantity_input.selectAll()
+                return False
         for edit, label in ((self.length_input, self.length_label), (self.width_input, self.width_label), (self.heading_input, self.heading_label)):
             try:
                 read_number(edit.text())
@@ -163,6 +179,7 @@ class FormPart:
         self.activity_input.setText(values.activity)
         self.note_input.setText(values.note)
         self._fill_confidence(values.confidence)
+        self.quantity_input.setText(values.quantity)
         for edit, text in ((self.length_input, values.length), (self.heading_input, values.heading), (self.width_input, values.width)):
             edit.setText(text)
             if text:

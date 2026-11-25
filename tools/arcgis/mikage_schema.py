@@ -188,6 +188,7 @@ TABLES = (
         F("PIXEL_Y", "画素Y", "DOUBLE", None, "pixelY"),
         F("IMAGE_FILE", "画像ファイル", "TEXT", 255, "imageFile"),
         F("SATELLITE", "衛星名", "TEXT", 255, "satellite"),
+        F("QUANTITY", "数量", "LONG", None, "quantity"),
         F("CONFIDENCE", "確度", "TEXT", 64, "confidence"),
         F("OBSERVER", "記録者", "TEXT", 255, "recordedBy"),
         F("UPDATED_BY", "更新者名", "TEXT", 255, "updatedBy"),

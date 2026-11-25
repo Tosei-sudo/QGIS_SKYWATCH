@@ -542,6 +542,9 @@ FROM g;
 --    「不可」、LOOKED は 0（見て在・消失を記録したものは 1）。TBL_OBSERVATION に UNSEEN_REASON を足してから作る。
 --    衛星名（2026-11-20）: SATELLITE は画像を撮った衛星（画像カタログのセンサーの書き方。カタログ外の画像も）。
 --    SATELLITE_LABEL は空なら「（衛星不明）」（足す前の記録。docs/arcgis-setup.md「前からある記録に衛星名を入れる」）。
+--    数量（2026-11-24）: QUANTITY はその記録が表す見えたモノの数。在の記録は TBL_OBSERVATION の QUANTITY（空は 1:
+--    1 つずつの記録と、足す前の記録）、消失・不可の記録は 0。台数・隻数などは COUNT(*) でなく SUM(QUANTITY) で数える。
+--    TBL_OBSERVATION に QUANTITY を足してから作る（docs/arcgis-setup.md「観測記録に数量の列を足す」）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_RECORD AS
 WITH clock AS (
@@ -566,6 +569,8 @@ SELECT
     END                                                                AS PRESENT_LABEL,
     o.UNSEEN_REASON,
     CASE WHEN o.UNSEEN_REASON IS NULL THEN 1 ELSE 0 END               AS LOOKED,
+    CASE WHEN o.UNSEEN_REASON IS NULL AND NVL(o.PRESENT, 1) <> 0
+         THEN NVL(o.QUANTITY, 1) ELSE 0 END                            AS QUANTITY,
     o.CONFIDENCE,
     o.NOTE,
     o.LENGTH_M,
@@ -617,6 +622,8 @@ LEFT JOIN TBL_NAMED_AREA a ON a.OBJECTID = o.NAMED_AREA_OBJECTID;
 --    不可の記録（雲など、LOOKED = 0）は「最後の記録」にしない（見て記録した最後のもの。プラグインの流れの「最新」と同じ）。
 --    LAST_UNSEEN_AT・LAST_UNSEEN_REASON: それより後に見えなかった画像があれば、その最後の日時と理由（なければ空）。
 --    UNSEEN_COUNT: 不可の記録の数。
+--    LAST_QUANTITY（2026-11-24）: 最後の記録の数量（まとめて記録したモノの数。1 つずつの記録は 1、最後が消失なら 0）。
+--    MAX_QUANTITY: これまでの記録でいちばん多かった数量。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_OBS_THING AS
 WITH clock AS (
@@ -636,6 +643,7 @@ r AS (
         v.ACTIVITY,
         v.PRESENT,
         v.PRESENT_LABEL,
+        v.QUANTITY,
         v.PLACE_NAME,
         v.PLACE_LABEL,
         v.NAMED_AREA_OBJECTID,
@@ -645,6 +653,7 @@ r AS (
         v.OBSERVER,
         ROW_NUMBER() OVER (PARTITION BY v.OBJECT_ID
                            ORDER BY v.LOOKED DESC, v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC) AS RN,
+        MAX(v.QUANTITY) OVER (PARTITION BY v.OBJECT_ID)                                       AS MAX_QUANTITY,
         MAX(CASE WHEN v.LOOKED = 0 THEN v.SEEN_AT END) OVER (PARTITION BY v.OBJECT_ID)         AS UNSEEN_AT,
         FIRST_VALUE(CASE WHEN v.LOOKED = 0 THEN v.UNSEEN_REASON END IGNORE NULLS) OVER (
             PARTITION BY v.OBJECT_ID ORDER BY v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC
@@ -674,6 +683,8 @@ SELECT
     r.ACTIVITY                                                         AS LAST_ACTIVITY,
     r.PRESENT                                                          AS LAST_PRESENT,
     r.PRESENT_LABEL                                                    AS LAST_PRESENT_LABEL,
+    r.QUANTITY                                                         AS LAST_QUANTITY,
+    r.MAX_QUANTITY,
     r.SEEN_AT                                                          AS LAST_SEEN_AT,
     r.SEEN_DATE                                                        AS LAST_SEEN_DATE,
     r.FIRST_SEEN_AT,
@@ -825,6 +836,8 @@ LEFT JOIN VW_OBS_RECORD v ON v.OBS_ID = l.OBS_ID;
 --     USUAL_RECORDS・SURGE_RECORDS: RECORDS を「急に増えた」区間とそれ以外に分けたもの（積み上げると、
 --     急に増えた区間の棒だけ別の色になる）。
 --     OBJECTID = 地名の OBJECTID × 100 + WEEKS_AGO。
+--     QUANTITY_TOTAL（2026-11-24）: その区間に見えたモノの数量の合計（まとめて記録したモノは数量、1 つずつの記録は 1。
+--     同じモノを区間内に何度か見たときは、いちばん多かった数量）。急に増えた・減ったの判定は今まで通り RECORDS で決める。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_NAMED_AREA_WEEK AS
 WITH clock AS (
@@ -833,18 +846,29 @@ WITH clock AS (
 weeks AS (
     SELECT LEVEL - 1 AS WEEKS_AGO FROM DUAL CONNECT BY LEVEL <= 26 + 8
 ),
-n AS (
+one AS (
     SELECT
         v.NAMED_AREA_OBJECTID,
         FLOOR(v.DAYS_AGO / 7)                                          AS WEEKS_AGO,
+        v.OBJECT_ID,
         COUNT(*)                                                       AS RECORDS,
-        COUNT(DISTINCT v.OBJECT_ID)                                    AS THINGS
+        MAX(v.QUANTITY)                                                AS MOST
     FROM VW_OBS_RECORD v
     WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
       AND NVL(v.PRESENT, 1) <> 0
       AND v.LOOKED = 1
       AND v.DAYS_AGO BETWEEN 0 AND (26 + 8) * 7 - 1
-    GROUP BY v.NAMED_AREA_OBJECTID, FLOOR(v.DAYS_AGO / 7)
+    GROUP BY v.NAMED_AREA_OBJECTID, FLOOR(v.DAYS_AGO / 7), v.OBJECT_ID
+),
+n AS (
+    SELECT
+        one.NAMED_AREA_OBJECTID,
+        one.WEEKS_AGO,
+        SUM(one.RECORDS)                                               AS RECORDS,
+        COUNT(one.OBJECT_ID)                                           AS THINGS,
+        SUM(one.MOST)                                                  AS QUANTITY_TOTAL
+    FROM one
+    GROUP BY one.NAMED_AREA_OBJECTID, one.WEEKS_AGO
 ),
 g AS (
     SELECT
@@ -857,6 +881,7 @@ g AS (
         c.TODAY - 7 * w.WEEKS_AGO                                      AS LAST_DAY,
         NVL(n.RECORDS, 0)                                              AS RECORDS,
         NVL(n.THINGS, 0)                                               AS THINGS,
+        NVL(n.QUANTITY_TOTAL, 0)                                       AS QUANTITY_TOTAL,
         AVG(NVL(n.RECORDS, 0)) OVER (
             PARTITION BY a.OBJECTID ORDER BY w.WEEKS_AGO DESC ROWS BETWEEN 8 PRECEDING AND 1 PRECEDING) AS NORMAL,
         VARIANCE(NVL(n.RECORDS, 0)) OVER (
@@ -877,6 +902,7 @@ s AS (
         g.LAST_DAY,
         g.RECORDS,
         g.THINGS,
+        g.QUANTITY_TOTAL,
         g.NORMAL,
         SQRT(GREATEST(NVL(g.VAR, 0), g.NORMAL, 1))                     AS SPREAD
     FROM g
@@ -903,6 +929,7 @@ SELECT
     TO_CHAR(t.LAST_DAY - 6, 'MM/DD') || '〜' || TO_CHAR(t.LAST_DAY, 'MM/DD') AS WEEK_TEXT,
     t.RECORDS,
     t.THINGS,
+    t.QUANTITY_TOTAL,
     CASE WHEN t.IS_SURGE = 1 THEN 0 ELSE t.RECORDS END                 AS USUAL_RECORDS,
     CASE WHEN t.IS_SURGE = 1 THEN t.RECORDS ELSE 0 END                 AS SURGE_RECORDS,
     ROUND(t.NORMAL, 1)                                                 AS NORMAL,
@@ -924,6 +951,7 @@ FROM t;
 --     （最後に書かれたもの）。WHERE_NOW: モノの最後の記録（どの地名でも）がこの地名か。
 --       ここ（1 か月以内）・ここ（1 か月より前）・消失を確認（最後の記録がここの「消失」）・その後ほかで見た
 --     （「ほか」には地名の外も入る）。
+--     LAST_QUANTITY（2026-11-24）: その地名での最後の記録の数量（1 つずつの記録は 1、消失は 0）。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_NAMED_AREA_THING AS
 WITH clock AS (
@@ -939,6 +967,7 @@ r AS (
         v.SEEN_DATE,
         v.ACTIVITY,
         v.PRESENT_LABEL,
+        v.QUANTITY,
         ROW_NUMBER() OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID
                            ORDER BY v.LOOKED DESC, v.SEEN_AT DESC, v.CREATED_AT DESC, v.OBJECTID DESC) AS RN,
         MIN(v.SEEN_AT) OVER (PARTITION BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID)                 AS FIRST_SEEN_AT,
@@ -972,6 +1001,7 @@ SELECT
     r.SEEN_DAYS,
     r.ACTIVITY                                                         AS LAST_ACTIVITY,
     r.PRESENT_LABEL                                                    AS LAST_PRESENT_LABEL,
+    r.QUANTITY                                                         AS LAST_QUANTITY,
     t.LAST_SEEN_AT                                                     AS THING_LAST_SEEN_AT,
     t.LAST_PLACE_LABEL                                                 AS THING_LAST_PLACE,
     CASE WHEN t.LAST_NAMED_AREA_OBJECTID = r.NAMED_AREA_OBJECTID THEN 1 ELSE 0 END AS IS_LAST_PLACE,
@@ -994,6 +1024,8 @@ WHERE r.RN = 1;
 --     最後に見た日、いまいそうなモノの数（THINGS_LAST_HERE: 最後に見たのがここで 1 か月以内・消失でない）、
 --     30 日の通報（通報した記録の数）。無効の地名（ACTIVE = 0）も出す（ACTIVE_LABEL で絞る）。
 --     PLACE_LABEL は「地名（管理番号）」: 同じ名前の地名があっても選び分けられるように。
+--     数量の合計（2026-11-24）: QUANTITY_7D・QUANTITY_30D は直近 7 日・30 日に見えたモノの数量の合計（同じモノは期間内で
+--     いちばん多かった数量）、QUANTITY_LAST_HERE はいまいそうなモノの最後の数量の合計。件数・モノの数は今まで通り。
 -- ---------------------------------------------------------------------------------------------
 CREATE OR REPLACE VIEW VW_NAMED_AREA_STATUS AS
 WITH clock AS (
@@ -1012,8 +1044,20 @@ rec AS (
     WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
     GROUP BY v.NAMED_AREA_OBJECTID
 ),
+q30 AS (
+    SELECT x.NAMED_AREA_OBJECTID, SUM(x.MOST) AS QUANTITY_30D
+    FROM (
+        SELECT v.NAMED_AREA_OBJECTID, v.OBJECT_ID, MAX(v.QUANTITY) AS MOST
+        FROM VW_OBS_RECORD v
+        WHERE v.NAMED_AREA_OBJECTID IS NOT NULL
+          AND v.DAYS_AGO BETWEEN 0 AND 29 AND NVL(v.PRESENT, 1) <> 0 AND v.LOOKED = 1
+        GROUP BY v.NAMED_AREA_OBJECTID, v.OBJECT_ID
+    ) x
+    GROUP BY x.NAMED_AREA_OBJECTID
+),
 here AS (
-    SELECT t.LAST_NAMED_AREA_OBJECTID AS NAMED_AREA_OBJECTID, COUNT(*) AS THINGS_LAST_HERE
+    SELECT t.LAST_NAMED_AREA_OBJECTID AS NAMED_AREA_OBJECTID, COUNT(*) AS THINGS_LAST_HERE,
+           SUM(t.LAST_QUANTITY) AS QUANTITY_LAST_HERE
     FROM VW_OBS_THING t
     WHERE t.LAST_NAMED_AREA_OBJECTID IS NOT NULL
       AND t.IN_LAST_MONTH = 1
@@ -1030,7 +1074,7 @@ alert AS (
     GROUP BY l.NAMED_AREA_OBJECTID
 ),
 wk AS (
-    SELECT w.NAMED_AREA_OBJECTID, w.RECORDS, w.THINGS, w.NORMAL, w.UPPER_LINE, w.CHANGE, w.SCORE, w.TREND_CLASS
+    SELECT w.NAMED_AREA_OBJECTID, w.RECORDS, w.THINGS, w.QUANTITY_TOTAL, w.NORMAL, w.UPPER_LINE, w.CHANGE, w.SCORE, w.TREND_CLASS
     FROM VW_NAMED_AREA_WEEK w
     WHERE w.WEEKS_AGO = 0
 )
@@ -1047,6 +1091,7 @@ SELECT
     CASE WHEN a.ACTIVE = 0 THEN '無効' ELSE '有効' END                 AS ACTIVE_LABEL,
     NVL(wk.RECORDS, 0)                                                 AS LAST_7D,
     NVL(wk.THINGS, 0)                                                  AS THINGS_7D,
+    NVL(wk.QUANTITY_TOTAL, 0)                                          AS QUANTITY_7D,
     NVL(wk.NORMAL, 0)                                                  AS NORMAL_7D,
     wk.UPPER_LINE                                                      AS UPPER_7D,
     NVL(wk.CHANGE, 0)                                                  AS CHANGE_7D,
@@ -1055,8 +1100,10 @@ SELECT
     NVL(rec.RECORDS_TOTAL, 0)                                          AS RECORDS_TOTAL,
     NVL(rec.RECORDS_30D, 0)                                            AS RECORDS_30D,
     NVL(rec.THINGS_30D, 0)                                             AS THINGS_30D,
+    NVL(q30.QUANTITY_30D, 0)                                           AS QUANTITY_30D,
     rec.TOP_KIND_30D,
     NVL(here.THINGS_LAST_HERE, 0)                                      AS THINGS_LAST_HERE,
+    NVL(here.QUANTITY_LAST_HERE, 0)                                    AS QUANTITY_LAST_HERE,
     rec.FIRST_SEEN_AT,
     rec.LAST_SEEN_AT,
     TRUNC(rec.LAST_SEEN_AT + 9 / 24) - 9 / 24                          AS LAST_SEEN_DATE,
@@ -1067,5 +1114,6 @@ FROM TBL_NAMED_AREA a
 CROSS JOIN clock c
 LEFT JOIN wk    ON wk.NAMED_AREA_OBJECTID = a.OBJECTID
 LEFT JOIN rec   ON rec.NAMED_AREA_OBJECTID = a.OBJECTID
+LEFT JOIN q30   ON q30.NAMED_AREA_OBJECTID = a.OBJECTID
 LEFT JOIN here  ON here.NAMED_AREA_OBJECTID = a.OBJECTID
 LEFT JOIN alert ON alert.NAMED_AREA_OBJECTID = a.OBJECTID;

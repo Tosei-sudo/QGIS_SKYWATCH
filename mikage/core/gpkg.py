@@ -378,6 +378,7 @@ OBSERVATIONS = TableSpec(
         Column("PIXEL_Y", "DOUBLE"),
         Column("IMAGE_FILE", "TEXT(255)"),
         Column("SATELLITE", "TEXT(255)"),
+        Column("QUANTITY", "INTEGER"),
         Column("NOTE", "TEXT(1000)"),
         Column("OBSERVER", "TEXT(50)"),
         Column("UPDATED_BY", "TEXT(50)"),

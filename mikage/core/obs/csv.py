@@ -9,7 +9,7 @@ from typing import Iterable, Optional
 from ..util import formula_safe, iso_text
 from .flows import time_key
 from .geo import to_fixed
-from .model import Observation, unseen_label
+from .model import Observation, quantity_of, unseen_label
 from .taxonomy import kind_of, path_of
 
 
@@ -41,12 +41,12 @@ def observations_csv(records: list[Observation], places: Optional[dict] = None, 
     The CSV of observations (with a BOM, for spreadsheets), by thing and in
     flow order; with `places` (record id → its named areas, smallest first)
     the columns 地名・地名の種別・含まれる地名, with `fences` (record id →
-    geofence names) ジオフェンス.
+    geofence names) ジオフェンス; 数量 last (2026-11-24: the things a record stands for, empty for 消失・不可).
     """
     levels = depth_columns(records)
     head = ["観測ID", "モノID", "モノ", "種別", *levels, "活動", "有無", "確度", "撮像日時", "画像ID", "画像", "経度", "緯度", "長さ（m）", "向き（度）",
             "幅（m）", "備考", "記録者", "更新者", "登録日時", "更新日時", "削除日時",
-            *(("地名", "地名の種別", "含まれる地名") if places is not None else ()), *(("ジオフェンス",) if fences is not None else ())]
+            *(("地名", "地名の種別", "含まれる地名") if places is not None else ()), *(("ジオフェンス",) if fences is not None else ()), "数量"]
     rows = []
     for o in sorted(records, key=lambda o: (o.object_id, time_key(o), o.created_at)):
         path = path_of(o.kind)
@@ -61,6 +61,7 @@ def observations_csv(records: list[Observation], places: Optional[dict] = None, 
             rows[-1] += [mine[0].name if mine else "", mine[0].kind if mine else "", "・".join(dict.fromkeys(a.name for a in mine))]
         if fences is not None:
             rows[-1].append("・".join(fences.get(o.id) or []))
+        rows[-1].append(quantity_of(o) or "")
     return "\ufeff" + "\r\n".join(",".join(_cell(c) for c in r) for r in [head, *rows]) + "\r\n"
 
 

@@ -14,7 +14,7 @@ from qgis.PyQt.QtWidgets import QHeaderView, QTableWidgetItem
 
 from ...core.obs.api import (
     area_label, local_time, CarryOver, flow_of, heading_text, time_key, km_text, is_mine, my_names, Observation, state_text,
-    unseen_label, kind_of,
+    unseen_label, kind_of, quantity_mark, quantity_of,
 )
 from ...core import edit_stamp
 from ..obs_overlay import UNSEEN_COLOR
@@ -112,9 +112,13 @@ class ViewPart:
             mine = self.my_names()
             here = [o for o in here if is_mine(o.recorded_by, mine)]
         listed = len([o for o in here if o.deleted_at is None])
-        self.count_label.setText(self.tr("この画像 {n} 件").format(n=every) if listed == every else
-                                 self.tr("この画像 {n} / {all} 件").format(n=listed, all=every))
-        self.count_label.setToolTip(self.tr("この画像の記録の件数（大分類・「自分の記録のみ」で絞り込み中は 表示 / 全体）"))
+        counted = [quantity_of(o) for o in here if o.deleted_at is None]
+        text = (self.tr("この画像 {n} 件").format(n=every) if listed == every else
+                self.tr("この画像 {n} / {all} 件").format(n=listed, all=every))
+        # 数量 (2026-11-24): the things the records listed stand for, when one stands for several.
+        self.count_label.setText(text + (self.tr("（数量 計 {n}）").format(n=f"{sum(counted):,}") if any(n >= 2 for n in counted) else ""))
+        self.count_label.setToolTip(self.tr("この画像の記録の件数（大分類・「自分の記録のみ」で絞り込み中は 表示 / 全体）\n"
+                                            "数量 計: 表示中の記録が表すモノの数の合計（数量のない記録は 1、消失・不可は 0）"))
         shown_as = ("image", image.id if image is not None else None)
         kept = self._chosen_rows() if shown_as == self._shown_as else None
         scrolled = self.table.verticalScrollBar().value()
@@ -191,7 +195,7 @@ class ViewPart:
             widget = self._small((tr("復元"), tr("削除した記録を復元"), lambda o=o: self.restore([o]))) if gone else \
                 self._small((tr("流れ"), tr("このモノの流れ（帯グラフ・表・地図の軌跡）を一覧の下に表示。もう一度押すと閉じる"),
                              lambda o=o: self.toggle_flow(o.object_id), o.object_id == self.chosen))
-            self._row([o.object_name, o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
+            self._row([o.object_name + quantity_mark(o), o.kind, o.activity if o.present else tr(state_text(o)), measure(o), o.note, self._made_by(o),
                        local_time(o.updated_at), ""],
                       None if gone else (lambda o=o: self._open_row(o, editing=o)),
                       style="deleted" if gone else "unseen" if o.unseen else "", widget=widget, records=[] if gone else [o], reported=o.id in self.reported,
@@ -203,7 +207,7 @@ class ViewPart:
             widget = self._small((tr("継続"), tr("この画像でも継続として記録"), lambda s=s: self.carry(s.object_id, True)),
                                  (tr("消失"), tr("この画像での消失を記録"), lambda s=s: self.carry(s.object_id, False)))
             side = tr("前") if c.side == "before" else tr("後")
-            self._row([s.object_name, s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
+            self._row([s.object_name + quantity_mark(s), s.kind, f"{s.activity}（{side}の画像 {local_time(s.image_time)}）", measure(s),
                        tr("不可範囲内（記録なし）") if id(c) in hidden_ids else tr("確認範囲内（記録なし）") if id(c) in inside_ids else "",
                        s.recorded_by, "", ""],
                       lambda s=s: self._open_row(s, source=s),
@@ -267,7 +271,11 @@ class ViewPart:
         latest = (flow.activity or tr("活動の記録なし")) if flow.present else tr("消失")
         if flow.unseen:
             latest += tr("（最新の画像では{u}）").format(u=unseen_label(flow.unseen))
-        self.flow_summary.setText(f"{local_time(flow.first)} 〜 {local_time(flow.last)}・{flow.seen} 画像で確認・移動 {km_text(flow.distance)}・最新: {latest}")
+        counts = flow.quantities()
+        # 数量 as it went (30 → 22 → 31), for a group; the middle left out when it changed many times.
+        shown = counts if len(counts) <= 6 else [*counts[:2], "…", *counts[-2:]]
+        many = tr("・数量 {q}").format(q=" → ".join(str(n) for n in shown)) if counts else ""
+        self.flow_summary.setText(f"{local_time(flow.first)} 〜 {local_time(flow.last)}・{flow.seen} 画像で確認・移動 {km_text(flow.distance)}{many}・最新: {latest}")
         self.flow_strip.set_flow(flow)
         self.steps_table.setRowCount(0)
         self._steps = flow.steps
@@ -275,7 +283,8 @@ class ViewPart:
             r = self.steps_table.rowCount()
             self.steps_table.insertRow(r)
             cells = [local_time(s.start) if s.start == s.end else f"{local_time(s.start)} 〜 {local_time(s.end)}",
-                     tr(unseen_label(s.unseen)) if s.unseen else (s.activity or "—") if s.present else tr("消失"), str(s.count),
+                     tr(unseen_label(s.unseen)) if s.unseen else ((s.activity or "—") + (f" ×{s.quantity}" if s.quantity >= 2 else "")) if s.present else tr("消失"),
+                     str(s.count),
                      km_text(s.moved) if s.moved is not None and s.moved > 0 else ""]
             for i, c in enumerate(cells):
                 item = QTableWidgetItem(c)

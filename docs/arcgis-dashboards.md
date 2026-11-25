@@ -104,11 +104,12 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | カテゴリ セレクター「大分類」「最後に見た時期」 | `VW_OBS_THING` の `ROOT_KIND`・`AGE_CLASS` | 時期は 1 か月以内・1〜3 か月前・3〜12 か月前・1 年以上前 |
 | カテゴリ セレクター「モノの名前」 | `VW_OBS_THING` の `THING_NAME` | ドロップダウンにして検索を有効に（船名・機番を打って探す） |
 | インジケーター「モノの数」「うち 1 か月より前」 | `VW_OBS_THING` | 2 つ目は `IN_LAST_MONTH` = 0（1 か月以上見ていないもの） |
-| リスト「モノ」 | `VW_OBS_THING` | 並べ替え `LAST_SEEN_AT` の新しい順。行に `THING_NAME`・`LEAF_KIND`・最後に見た日と場所・`SEEN_COUNT` 回。選ぶと下の記録を `OBJECT_ID` で絞り、地図をその位置へ |
+| リスト「モノ」 | `VW_OBS_THING` | 並べ替え `LAST_SEEN_AT` の新しい順。行に `THING_NAME`・`LEAF_KIND`・最後に見た日と場所・`SEEN_COUNT` 回、`LAST_QUANTITY` が 2 以上なら「×n」（まとめて記録したモノの最後の数量）。選ぶと下の記録を `OBJECT_ID` で絞り、地図をその位置へ |
 | マップ | Web マップ（`VW_OBS_THING` を `AGE_CLASS` で色分け、`VW_OBS_RECORD` を小さな点で） | モノを選ぶと、その記録の点だけが残り、動いた跡が見える |
 | 系列グラフ「見た日」 | `VW_OBS_RECORD` | カテゴリ `SEEN_DATE`（週）、分割 `ACTIVITY`。モノの選択で絞られる |
-| テーブル「記録」 | `VW_OBS_RECORD` | 列 `SEEN_AT`・`IMAGE_NAME`・`ACTIVITY`・`PRESENT_LABEL`・`PLACE_LABEL`・`NOTE`・`OBSERVER` |
+| テーブル「記録」 | `VW_OBS_RECORD` | 列 `SEEN_AT`・`IMAGE_NAME`・`ACTIVITY`・`PRESENT_LABEL`・`QUANTITY`・`PLACE_LABEL`・`NOTE`・`OBSERVER` |
 
+- 数量（2026-11-24）: 1 件で「車両 ×30」のようにまとめて記録したモノは、1 行のまま `LAST_QUANTITY`（最後の数量）・`MAX_QUANTITY`（いちばん多かった数量）を持つ。インジケーター「モノの数」は行の数（まとめたものも 1）なので、台数を出したいときは `LAST_QUANTITY` の合計のインジケーターを並べる
 - モノの名前・分類は最後に書かれたもの。プラグインは「同じ系統でより細かい分類」があればそちらを使うので、分類が「船舶」だけの画像が最後だと、ここでは粗い分類になる
 
 ### O2 場所ごとの動き
@@ -119,7 +120,7 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | --- | --- | --- |
 | 日付セレクター「期間」 | — | 範囲、既定は過去 6 か月。`SEEN_DATE` で絞る |
 | カテゴリ セレクター「大分類」「活動」「地名の種類」 | `VW_OBS_RECORD` の `ROOT_KIND`・`ACTIVITY`・`PLACE_KIND` | 複数選択 |
-| 系列グラフ「月ごとの件数」 | `VW_OBS_RECORD` | カテゴリ `SEEN_MONTH`、分割 `ROOT_KIND`、積み上げ |
+| 系列グラフ「月ごとの件数」 | `VW_OBS_RECORD` | カテゴリ `SEEN_MONTH`、分割 `ROOT_KIND`、積み上げ。台数で見るときは統計を「合計」・フィールド `QUANTITY` に（まとめて記録した 30 台は 30、消失・不可は 0） |
 | 棒グラフ「地名ごと」 | `VW_OBS_RECORD` | カテゴリ `PLACE_LABEL`、件数の多い順に 15 件。棒を選ぶと地図とグラフをその地名で絞る |
 | マップ | Web マップ（`VW_OBS_RECORD` をヒートマップ、拡大すると `ROOT_KIND` で色分けした点。`TBL_NAMED_AREA` を塗りなしで） | 表示範囲でほかの要素を絞る |
 | テーブル「最新の記録」 | `VW_OBS_RECORD` | 並べ替え `SEEN_AT` の新しい順。列 `SEEN_AT`・`PLACE_LABEL`・`LEAF_KIND`・`OBJECT_NAME`・`ACTIVITY`・`NOTE` |
@@ -175,11 +176,11 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | カテゴリ セレクター「地名」（ヘッダー） | `VW_NAMED_AREA_STATUS` の `PLACE_LABEL` | ドロップダウン・検索あり・1 つだけ選ぶ（URL なしで開いたとき用）。ほかの要素を `NAMED_AREA_ID` で絞る |
 | 詳細「地名」 | `VW_NAMED_AREA_STATUS` | `PLACE_NAME`・`NAME_EN`・`PLACE_KIND`・`ACTIVE_LABEL`・`NAMED_AREA_ID`・`FIRST_SEEN_AT`〜`LAST_SEEN_AT`・`RECORDS_TOTAL` 件 |
 | インジケーター「直近 7 日の記録」 | `VW_NAMED_AREA_STATUS` | 値 `LAST_7D`、参照値 `NORMAL_7D`（「平常 n より +n」）。`TREND_CLASS` = 急に増えた なら赤（条件付き書式） |
-| インジケーター「いまいそうなモノ」「30 日の通報」 | `VW_NAMED_AREA_STATUS` | `THINGS_LAST_HERE`（最後に見たのがここで 1 か月以内のモノ）・`ALERTS_30D`（下に `LAST_ALERT_AT`） |
+| インジケーター「いまいそうなモノ」「30 日の通報」 | `VW_NAMED_AREA_STATUS` | `THINGS_LAST_HERE`（最後に見たのがここで 1 か月以内のモノ。下に `QUANTITY_LAST_HERE`「数量 計 n」: まとめて記録したモノの数量を足した数）・`ALERTS_30D`（下に `LAST_ALERT_AT`） |
 | マップ | Web マップ（`VW_NAMED_AREA_STATUS` を枠だけ、`VW_OBS_RECORD` を `ROOT_KIND` で色分けした小さな点、`VW_NAMED_AREA_THING` を `WHERE_NOW` で色分けした大きな点） | 地名を選ぶとその範囲へ |
 | 系列グラフ「7 日ごとの件数と平常」 | `VW_NAMED_AREA_WEEK` | フィーチャごと、カテゴリ `WEEK_START_DATE`、棒 `USUAL_RECORDS` と `SURGE_RECORDS`（赤）を積み上げ（急に増えた区間だけ赤くなる）、線 `NORMAL`、破線 `UPPER_LINE`（超えると急に増えた） |
 | 系列グラフ「何を見たか」 | `VW_OBS_RECORD` | 固定の絞り込み `DAYS_AGO` が 0〜90、カテゴリ `SEEN_DATE`（週）、分割 `ROOT_KIND`、積み上げ |
-| リスト「この地名のモノ」 | `VW_NAMED_AREA_THING` | 並べ替え `LAST_SEEN_AT` の新しい順。行に `THING_NAME`・`LEAF_KIND`・ここで最後に見た日・`SEEN_DAYS` 日・`WHERE_NOW`（その後ほかで見たなら `THING_LAST_PLACE`）。選ぶと地図をそのモノへ |
+| リスト「この地名のモノ」 | `VW_NAMED_AREA_THING` | 並べ替え `LAST_SEEN_AT` の新しい順。行に `THING_NAME`・`LEAF_KIND`・ここで最後に見た日・`SEEN_DAYS` 日・`WHERE_NOW`（その後ほかで見たなら `THING_LAST_PLACE`）、`LAST_QUANTITY` が 2 以上なら「×n」。選ぶと地図をそのモノへ |
 | テーブル「最近の記録」 | `VW_OBS_RECORD` | 並べ替え `SEEN_AT` の新しい順。列 `SEEN_AT`・`LEAF_KIND`・`OBJECT_NAME`・`ACTIVITY`・`PRESENT_LABEL`・`NOTE`・`OBSERVER` |
 | リスト「通報」 | `VW_ALERT_LOG` | 並べ替え `REPORTED_AT` の新しい順。行に `REPORT_NAME`・`OBJECT_NAME`・`LEAF_KIND`・`ACTIVITY`・`MANUAL_LABEL`（条件・手動）・`REPORTED_BY` |
 
@@ -214,13 +215,13 @@ ArcGIS Enterprise の Dashboards で、MIKAGE が書く Esri のテーブルを�
 | `VW_PLAN_QUOTA_USAGE` | 年間上限の行（今年度） | なし | `TBL_IMAGING_QUOTA`・`VW_PLAN_SHOT` | `CONSUMED`・`PENDING_SCENES`・`REMAINING`・`USED_PCT`・`YEAR_PCT`・`PACE`・`RUNS_OUT_DATE`・`QUOTA_STATE` | P3 |
 | `VW_PLAN_QUOTA_MONTH` | 年間上限 × 今年度の月 | なし | `VW_PLAN_QUOTA_USAGE`・`VW_PLAN_SHOT` | `USED_SCENES`・`CUM_CONSUMED`（累計）・`PACE_LINE` | P3 |
 | `VW_PLAN_FIXED_POINT` | 有効な定点の依頼 | ポリゴン | `TBL_IMAGING_REQUEST`・`VW_PLAN_HISTORY` | `LAST_CAPTURED_DATE`・`EVERY_DAYS`・`LATE_TURNS`・`GAP_CLASS`・直近 30 日の日数 | P4 |
-| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE`・`UNSEEN_REASON`・`LOOKED`・`SATELLITE`・`SATELLITE_LABEL`（空なら「（衛星不明）」） | O1・O2・O3・N1・N2・N3 |
-| `VW_OBS_THING` | モノ（`OBJECT_ID`） | ポイント（最後の記録） | `VW_OBS_RECORD` | `THING_NAME`・`LAST_SEEN_AT`・`FIRST_SEEN_AT`・`SEEN_COUNT`・`IMAGE_COUNT`・`IN_LAST_MONTH`・`AGE_CLASS`・`LAST_NAMED_AREA_OBJECTID`・`LAST_UNSEEN_AT`・`LAST_UNSEEN_REASON`・`UNSEEN_COUNT` | O1 |
+| `VW_OBS_RECORD` | 削除していない観測記録 | ポイント | `TBL_OBSERVATION`・`TBL_NAMED_AREA` | `ROOT_KIND`・`KIND_2`・`LEAF_KIND`・`SEEN_AT`・`SEEN_DATE`・`SEEN_MONTH`・`DAYS_AGO`・`PLACE_LABEL`・`PLACE_STATE`・`UNSEEN_REASON`・`LOOKED`・`SATELLITE`・`SATELLITE_LABEL`（空なら「（衛星不明）」）・`QUANTITY`（見えたモノの数。空は 1、消失・不可は 0） | O1・O2・O3・N1・N2・N3 |
+| `VW_OBS_THING` | モノ（`OBJECT_ID`） | ポイント（最後の記録） | `VW_OBS_RECORD` | `THING_NAME`・`LAST_SEEN_AT`・`FIRST_SEEN_AT`・`SEEN_COUNT`・`IMAGE_COUNT`・`IN_LAST_MONTH`・`AGE_CLASS`・`LAST_NAMED_AREA_OBJECTID`・`LAST_UNSEEN_AT`・`LAST_UNSEEN_REASON`・`UNSEEN_COUNT`・`LAST_QUANTITY`・`MAX_QUANTITY` | O1 |
 | `VW_OBS_IMAGE_WORK` | 分担の 1 行 | なし | `TBL_ASSIGNMENT`・`VW_OBS_RECORD`・`TBL_OBSERVATION_AREA` | `MY_RECORDS`・`IMAGE_RECORDS`・`IMAGE_AREAS`・`UNSEEN_AREAS`・`SATELLITE`（その画像の記録・範囲の衛星名）・`HOURS`・`DONE_EMPTY` | O3 |
 | `VW_ALERT_LOG` | 通報記録の 1 行 | なし | `TBL_ALERT_LOG`・`VW_OBS_RECORD` | 通報した記録の地名・モノ・分類、`REPORTED_DATE`・`DAYS_AGO`・`MANUAL_LABEL` | N2 |
-| `VW_NAMED_AREA_WEEK` | 地名 × 7 日の区間（直近 26） | なし | `TBL_NAMED_AREA`・`VW_OBS_RECORD` | `RECORDS`（`USUAL_RECORDS`・`SURGE_RECORDS` に分けたものも）・`THINGS`・`NORMAL`・`UPPER_LINE`・`CHANGE`・`SCORE`・`TREND_CLASS`・`WEEK_START_DATE` | N1・N2 |
-| `VW_NAMED_AREA_THING` | 地名 × モノ | ポイント（その地名での最後の記録） | `VW_OBS_RECORD`・`VW_OBS_THING`・`TBL_NAMED_AREA` | ここで `FIRST_SEEN_AT`・`LAST_SEEN_AT`・`SEEN_COUNT`・`SEEN_DAYS`、`WHERE_NOW`・`THING_LAST_PLACE` | N2 |
-| `VW_NAMED_AREA_STATUS` | 地名 | ポリゴン | `TBL_NAMED_AREA`・上の 3 本・`VW_OBS_THING` | `PLACE_LABEL`（地名（管理番号））・`LAST_7D`・`NORMAL_7D`・`CHANGE_7D`・`TREND_SCORE`・`TREND_CLASS`・`RECORDS_30D`・`THINGS_30D`・`TOP_KIND_30D`・`THINGS_LAST_HERE`・`ALERTS_30D` | N1・N2・N3 |
+| `VW_NAMED_AREA_WEEK` | 地名 × 7 日の区間（直近 26） | なし | `TBL_NAMED_AREA`・`VW_OBS_RECORD` | `RECORDS`（`USUAL_RECORDS`・`SURGE_RECORDS` に分けたものも）・`THINGS`・`QUANTITY_TOTAL`（数量の合計）・`NORMAL`・`UPPER_LINE`・`CHANGE`・`SCORE`・`TREND_CLASS`・`WEEK_START_DATE` | N1・N2 |
+| `VW_NAMED_AREA_THING` | 地名 × モノ | ポイント（その地名での最後の記録） | `VW_OBS_RECORD`・`VW_OBS_THING`・`TBL_NAMED_AREA` | ここで `FIRST_SEEN_AT`・`LAST_SEEN_AT`・`SEEN_COUNT`・`SEEN_DAYS`、`WHERE_NOW`・`THING_LAST_PLACE`・`LAST_QUANTITY` | N2 |
+| `VW_NAMED_AREA_STATUS` | 地名 | ポリゴン | `TBL_NAMED_AREA`・上の 3 本・`VW_OBS_THING` | `PLACE_LABEL`（地名（管理番号））・`LAST_7D`・`NORMAL_7D`・`CHANGE_7D`・`TREND_SCORE`・`TREND_CLASS`・`RECORDS_30D`・`THINGS_30D`・`TOP_KIND_30D`・`THINGS_LAST_HERE`・`ALERTS_30D`・`QUANTITY_7D`・`QUANTITY_30D`・`QUANTITY_LAST_HERE`（数量の合計） | N1・N2・N3 |
 
 作りの決まり:
 

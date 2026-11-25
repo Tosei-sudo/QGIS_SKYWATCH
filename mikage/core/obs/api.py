@@ -26,7 +26,7 @@ from .book import ObservationBook
 from .flows import ObjectFlow, living, time_key
 from .geo import js_round
 from .image_time import parse_time
-from .model import Observation
+from .model import Observation, quantity_of
 from .report import ReportOptions
 from .scope import RecordQuery
 from .taxonomy import kind_of, path_of, within
@@ -54,7 +54,7 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .glossary import Glossary, load_glossary, NO_GLOSSARY, Suggestion, Variant
     from .image_time import image_time
     from .mine import is_mine, my_names
-    from .model import ListedImage, state_text, UNSEEN, unseen_label
+    from .model import ListedImage, quantity_mark, quantity_of, read_quantity, state_text, UNSEEN, unseen_label
     from .offline_stores import OfflineAreaStore, OfflineObservationStore, upload_drafts
     from .output import observation_layers, ObservationLayer
     from .repository import AlertLogRepository, AssignmentRepository
@@ -118,6 +118,15 @@ def _maybe_num(v: Any, name: str, low: float = -math.inf, high: float = math.inf
     return None if v is None or v == "" else _num(v, name, low, high)
 
 
+def _quantity(v: Any) -> Optional[int]:
+    """数量 as a script gives it: a whole number of 1 or more, or None (one thing)."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v) or v < 1:
+        raise ValueError("quantity は 1 以上の整数で指定")
+    return int(v)
+
+
 def _str(v: Any, name: str) -> Optional[str]:
     if v is None:
         return None
@@ -144,6 +153,7 @@ def record_out(o: Observation) -> dict[str, Any]:
         "objectName": o.object_name, "kind": o.kind, "activity": o.activity, "present": o.present, "unseen": o.unseen,
         "confidence": o.confidence or "", "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width, "recordedBy": o.recorded_by or "",
         "pixelX": o.pixel_x, "pixelY": o.pixel_y, "imageFile": o.image_file or "", "satellite": o.satellite or "",
+        "quantity": quantity_of(o) or None,
         "updatedBy": o.updated_by or "", "createdAt": _iso(o.created_at), "updatedAt": _iso(o.updated_at), "deletedAt": _iso(o.deleted_at),
     }
 
@@ -304,8 +314,11 @@ class ObservationApi:
     def add_observation(self, lon: float, lat: float, image: Optional[str] = None, object: Optional[str] = None,
                         kind: Optional[str] = None, activity: Optional[str] = None, confidence: Optional[str] = None,
                         note: Optional[str] = None, present: bool = True, length: Optional[float] = None,
-                        heading: Optional[float] = None, width: Optional[float] = None) -> dict[str, Any]:
-        """Records a thing at a place on this image (or `image`); the kind, activity and 確度 not given are the last ones."""
+                        heading: Optional[float] = None, width: Optional[float] = None, quantity: Optional[int] = None) -> dict[str, Any]:
+        """
+        Records a thing at a place on this image (or `image`); the kind, activity and 確度 not given are the last ones;
+        `quantity`: 数量, how many things of the kind the record stands for (None: one).
+        """
         b = self._b()
         self._image(b, _str(image, "image"))
         levels = [c.label for c in b.confidences()]
@@ -313,17 +326,21 @@ class ObservationApi:
             raise ValueError(f"確度「{confidence}」なし（{'・'.join(levels)}）")
         x, y = _num(lon, "lon", -180, 180), _num(lat, "lat", -90, 90)
         size, turn, across = _maybe_num(length, "length", 0), _maybe_num(heading, "heading", -360, 360), _maybe_num(width, "width", 0)
+        many = _quantity(quantity)
         record = self._run("観測記録の追加", lambda bk: bk.add(
             x, y, image=image, object=_str(object, "object") or "", kind=_str(kind, "kind"), activity=_str(activity, "activity"),
             confidence=confidence, note=_str(note, "note") or "", present=bool(present), length=size, heading=turn,
-            width=across))
+            width=across, quantity=many))
         return record_out(self._said(b, record, "観測記録"))
 
     def update_observation(self, record_id: str, **changes: Any) -> dict[str, Any]:
-        """Changes a record: kind, activity, confidence, note, present, lon, lat, length, heading, width (a thing's name: rename_observed_thing)."""
+        """
+        Changes a record: kind, activity, confidence, note, present, lon, lat, length, heading, width, quantity (数量; None or 1:
+        one thing) (a thing's name: rename_observed_thing).
+        """
         b = self._b()
         self._record(b, record_id)
-        allowed = {"kind", "activity", "confidence", "note", "present", "lon", "lat", "length", "heading", "width"}
+        allowed = {"kind", "activity", "confidence", "note", "present", "lon", "lat", "length", "heading", "width", "quantity"}
         unknown = [k for k in changes if k not in allowed]
         if unknown:
             raise ValueError(f"変更できない項目: {', '.join(unknown)}（モノの名前は rename_observed_thing で）")
@@ -341,6 +358,8 @@ class ObservationApi:
             out["length"] = _maybe_num(changes["length"], "length", 0)
         if "width" in changes:
             out["width"] = _maybe_num(changes["width"], "width", 0)
+        if "quantity" in changes:
+            out["quantity"] = _quantity(changes["quantity"])
         if "heading" in changes:
             h = _maybe_num(changes["heading"], "heading", -360, 360)
             out["heading"] = None if h is None else (h % 360 + 360) % 360
@@ -485,7 +504,7 @@ __all__ = [
     "NO_GLOSSARY", "now_ms", "ObjectFlow", "Observation", "observation_layers", "ObservationApi", "ObservationBook",
     "ObservationLayer", "observations_csv", "ObservedImage", "OfflineAreaStore", "OfflineObservationStore", "OutboxDrafts",
     "outline_of", "parse_time", "path_of", "photo_url", "photos_at", "place_cache", "PLACE_SOURCES", "points_of", "poll_log",
-    "progress_of", "progress_text", "record_import", "record_out", "taxonomy_import", "RecordQuery", "render", "report_file_name",
+    "progress_of", "progress_text", "quantity_mark", "quantity_of", "read_quantity", "record_import", "record_out", "taxonomy_import", "RecordQuery", "render", "report_file_name",
     "ReportOptions", "ReportSelection", "ring_of", "same_person", "Sample", "sample_of", "sample_text",
     "satellite_in_metadata", "SatelliteChoices", "select_records", "settings_for", "side_points", "SourceRow", "spec_text",
     "SpecField", "specs_at", "StampEntry", "state_text", "STATUSES", "store_sets", "StoreSet", "Suggestion", "Taxon",

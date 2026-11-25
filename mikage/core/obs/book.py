@@ -26,12 +26,12 @@ from .flows import (
 )
 from .model import (
     UNSEEN, ConfidenceLevel, ListedImage, Observation, ObservationVocabulary, new_object_id, new_observation_id, parse_listed_images,
-    recorded_images, state_text, unseen_label,
+    kept_quantity, read_quantity, recorded_images, state_text, unseen_label,
 )
 from .report import ReportContext, ReportOptions, ReportSelection, report_html, select_for_report
 from .satellites import clean as clean_satellite
 from .scope import RecordQuery, grown, merged
-from .stores import AreaStore, ObservationStore, TaxonomyStore, satellite_supported, unseen_supported
+from .stores import AreaStore, ObservationStore, TaxonomyStore, quantity_supported, satellite_supported, unseen_supported
 from .taxonomy import (
     SpecField, Taxon, activities_at, find, kind_of, move_taxon, name_label_of, normalize, path_of, place_taxon, remove_taxon, rewrite,
     taxonomy_of, update_taxon, with_kinds, within,
@@ -134,6 +134,15 @@ def _error_text(error: Exception) -> str:
     return str(error) or type(error).__name__
 
 
+def _counted(rows: list[Observation]) -> list[Observation]:
+    """Records with their 数量 as kept: 2 or more, else none (one thing); none on a 消失 or 不可 record (すべて消失 too)."""
+    out = []
+    for o in rows:
+        n = kept_quantity(o.quantity, o.present and not o.unseen)
+        out.append(o if n == o.quantity else replace(o, quantity=n))
+    return out
+
+
 @dataclass
 class FormValues:
     """What the record form says."""
@@ -145,6 +154,8 @@ class FormValues:
     length: str = ""
     heading: str = ""
     width: str = ""
+    #: 数量 as typed ('' or 1: one thing).
+    quantity: str = ""
 
 
 @dataclass
@@ -155,6 +166,8 @@ class BulkOutcome:
     unchanged: int = 0
     #: 消失 records, whose activity was left empty.
     absent: int = 0
+    #: 消失 and 不可 records, left without a 数量.
+    uncounted: int = 0
     #: Chosen but no longer here (deleted).
     missing: int = 0
     #: Not saved: of them, changed by someone else since read.
@@ -168,6 +181,8 @@ class BulkOutcome:
             parts.append(f"変更不要 {self.unchanged} 件")
         if self.absent:
             parts.append(f"消失の {self.absent} 件は活動なしのまま")
+        if self.uncounted:
+            parts.append(f"消失・不可の {self.uncounted} 件は数量なしのまま")
         if self.failed:
             why = (f"うち {self.conflicts} 件はほかの人が先に変更。「最新を取得」を押してから変更" if self.conflicts else self.error)
             parts.append(f"保存できず {self.failed} 件（{why}）")
@@ -804,6 +819,10 @@ class ObservationBook:
         over = covering_areas(self.areas, info.id, lon, lat, "", unseen=True)
         return max(over, key=lambda a: a.created_at).unseen if over else ""
 
+    def keeps_quantity(self) -> bool:
+        """Whether the store keeps 数量 (its layer has QUANTITY: a local one does; an Esri one once read, 2026-11-24)."""
+        return quantity_supported(self.store)
+
     def keeps_unseen(self) -> bool:
         """Whether 「不可」 records can be kept (the store's layer has the 不可の理由 attribute)."""
         return unseen_supported(self.store)
@@ -898,7 +917,7 @@ class ObservationBook:
         known = {o.id for o in self.records}
         # Who made (a new record) and who changed it: the one recording now.
         rows = [replace(o, updated_by=by) if o.id in known else replace(o, recorded_by=by, updated_by=by) for o in rows]
-        rows = self._named(self._placed(rows))
+        rows = self._named(self._placed(_counted(rows)))
         try:
             self.store.save(rows)
         except Exception as error:  # noqa: BLE001 (said, as the viewer)
@@ -981,6 +1000,11 @@ class ObservationBook:
         width = number(values.width)
         measure = {"length": length if length is not None and length > 0 else None, "heading": None if heading is None else (heading % 360 + 360) % 360,
                    "width": width if width is not None and width > 0 else None}
+        try:
+            # 数量: the dock stops on what can't be read (0, 2.5); none for 消失 and 不可.
+            measure["quantity"] = kept_quantity(read_quantity(values.quantity), present)
+        except ValueError:
+            measure["quantity"] = editing.quantity if editing is not None else None
         name = values.object.strip()
         kind = kind_of(path_of(values.kind))
         activity = values.activity.strip() if present else ""
@@ -1082,8 +1106,9 @@ class ObservationBook:
 
     def add(self, lon: float, lat: float, image: Optional[str] = None, object: str = "", kind: Optional[str] = None,
             activity: Optional[str] = None, confidence: Optional[str] = None, note: str = "", present: bool = True,
-            length: Optional[float] = None, heading: Optional[float] = None, width: Optional[float] = None) -> Optional[Observation]:
-        """Records a new observation (as the form does) on this image or the one of `image` (its id)."""
+            length: Optional[float] = None, heading: Optional[float] = None, width: Optional[float] = None,
+            quantity: Optional[int] = None) -> Optional[Observation]:
+        """Records a new observation (as the form does) on this image or the one of `image` (its id); `quantity`: 数量 (None: one thing)."""
         info = self._image(image)
         if info is None:
             return None
@@ -1091,7 +1116,7 @@ class ObservationBook:
                             activity=self.last.activity if activity is None else activity,
                             confidence=self.last.confidence if confidence is None else confidence, note=note,
                             length="" if length is None else str(length), heading="" if heading is None else str(heading),
-                            width="" if width is None else str(width))
+                            width="" if width is None else str(width), quantity="" if quantity is None else str(quantity))
         record = self.record_from(info, lon, lat, None, None, values, present)
         saved = self._save_records([record], f"{record.object_name} を記録")
         return saved[0] if saved else None
@@ -1151,17 +1176,17 @@ class ObservationBook:
             for record in rows:
                 values = FormValues(object=record.object_name, kind=record.kind, activity=record.activity, note=record.note,
                                     confidence=record.confidence, length=_text(record.length), heading=_text(record.heading),
-                                    width=_text(record.width))
+                                    width=_text(record.width), quantity=_text(record.quantity))
                 self.keep_draft(Draft(self._by(record), {k: getattr(values, k) for k in FormValues.__dataclass_fields__}, True,
                                       "", None, "", now_ms(), self.status))
         return saved
 
     def update(self, record_id: str, **changes: Any) -> Optional[Observation]:
-        """Changes a record (its id): kind, activity, present, unseen (不可, why), confidence, note, lon, lat, length, heading, width."""
+        """Changes a record (its id): kind, activity, present, unseen (不可, why), confidence, note, lon, lat, length, heading, width, quantity (数量)."""
         was = next((o for o in self.records if o.id == record_id and o.deleted_at is None), None)
         if was is None:
             return None
-        allowed = {"kind", "activity", "present", "unseen", "confidence", "note", "lon", "lat", "length", "heading", "width", "object_name"}
+        allowed = {"kind", "activity", "present", "unseen", "confidence", "note", "lon", "lat", "length", "heading", "width", "quantity", "object_name"}
         bad = set(changes) - allowed
         if bad:
             raise ValueError(f"変更不可の項目: {', '.join(sorted(bad))}")
@@ -1181,10 +1206,10 @@ class ObservationBook:
         return saved[0] if saved else None
 
     def update_many(self, record_ids: Sequence[str], kind: Optional[str] = None, activity: Optional[str] = None,
-                    confidence: Optional[str] = None) -> "BulkOutcome":
+                    confidence: Optional[str] = None, quantity: Optional[int] = None) -> "BulkOutcome":
         """
-        Sets the kind, the activity or the 確度 of several records at once (一括編集), in one save.
-        A 消失 record keeps no activity. The store's checks hold: records someone else changed since
+        Sets the kind, the activity, the 確度 or the 数量 (1: one thing each) of several records at once (一括編集), in one save.
+        A 消失 record keeps no activity, and no 数量 (or a 不可 one). The store's checks hold: records someone else changed since
         they were read are not overwritten; those that went through are kept here, and the rest told.
         """
         outcome = BulkOutcome()
@@ -1204,6 +1229,10 @@ class ObservationBook:
                 outcome.absent += 1
             if confidence is not None and confidence.strip() != o.confidence:
                 values["confidence"] = confidence.strip()
+            if quantity is not None and o.present and not o.unseen and kept_quantity(quantity) != kept_quantity(o.quantity):
+                values["quantity"] = kept_quantity(quantity)
+            elif quantity is not None and (not o.present or o.unseen):
+                outcome.uncounted += 1
             if values:
                 rows.append(replace(o, **values, updated_at=now))
             else:

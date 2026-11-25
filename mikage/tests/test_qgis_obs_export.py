@@ -127,5 +127,5 @@ def test_the_built_in_csv_without_settings_and_the_dock_button(plugin, tmp_path)
     assert wait_for(lambda: dialog.status.text().startswith("1 件を保存"))
     data = path.read_bytes()
     assert data.startswith(b"\xef\xbb\xbf") and not data.startswith(b"\xef\xbb\xbf" * 2)
-    assert data.decode("utf-8-sig").splitlines()[0].endswith("削除日時")
+    assert data.decode("utf-8-sig").splitlines()[0].endswith("削除日時,数量")
     assert dock.open_export() is dialog

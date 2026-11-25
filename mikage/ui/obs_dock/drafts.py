@@ -85,6 +85,7 @@ class DraftsPart:
             edit.setText(v.get(key, ""))
             if v.get(key):
                 edit.setVisible(True)
+        self.quantity_input.setText(v.get("quantity", ""))
         self._draft_id = d.id
         self._filled = None  # typed (not what the record says): never filled again by a refresh
         self._center(r)

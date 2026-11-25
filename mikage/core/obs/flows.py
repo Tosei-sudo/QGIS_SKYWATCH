@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Optional, Sequence
 
 from .geo import bearing, get_distance, js_round, offset, to_fixed
-from .model import MATCH_METRES, Observation, new_observation_id
+from .model import MATCH_METRES, Observation, new_observation_id, quantity_of
 from .taxonomy import kind_of, path_of, within
 
 #: Farther than this (m) between two records counts as having moved.
@@ -50,6 +50,8 @@ class FlowStep:
     observations: list[Observation] = field(default_factory=list)
     #: 不可: why it could not be seen in these images ('' when it was looked at).
     unseen: str = ""
+    #: 数量 in these images (a change starts a new step; 1 for one thing, 0 for 消失 and 不可).
+    quantity: int = 1
 
 
 @dataclass
@@ -71,6 +73,17 @@ class ObjectFlow:
     steps: list[FlowStep]
     #: Why it could not be seen in the latest image, when its latest record is 不可 ('' otherwise).
     unseen: str = ""
+    #: 数量 of its latest record that looked (1 for one thing, 0 when it was gone then).
+    quantity: int = 1
+
+    def quantities(self) -> list[int]:
+        """数量 as it went, image by image where it was seen (a change at a time: 30, 22, 31); [] when always one thing."""
+        out: list[int] = []
+        for o in self.observations:
+            n = quantity_of(o)
+            if n and (not out or out[-1] != n):
+                out.append(n)
+        return out if any(n >= 2 for n in out) else []
 
 
 def flow_of(records: Iterable[Observation]) -> ObjectFlow:
@@ -86,14 +99,14 @@ def flow_of(records: Iterable[Observation]) -> ObjectFlow:
             path += moved
         step = steps[-1] if steps else None
         same = (step is not None and step.present == o.present and step.unseen == o.unseen and (not o.present or step.activity == o.activity)
-                and not (moved is not None and moved > MOVE_METRES))
+                and step.quantity == quantity_of(o) and not (moved is not None and moved > MOVE_METRES))
         if same:
             step.end = time_key(o)
             step.count += 1
             step.observations.append(o)
         else:
             steps.append(FlowStep(o.activity if o.present else "", o.present, time_key(o), time_key(o), 1, moved if steps else None, [o],
-                                  o.unseen))
+                                  o.unseen, quantity_of(o)))
         if o.present:
             previous = o
     # The name and kind as last written; the kind as deep as any record knows it below that (one image may tell only 「船舶」).
@@ -118,6 +131,7 @@ def flow_of(records: Iterable[Observation]) -> ObjectFlow:
         distance=path,
         steps=steps,
         unseen=last.unseen,
+        quantity=quantity_of(known) if known else 1,
     )
 
 

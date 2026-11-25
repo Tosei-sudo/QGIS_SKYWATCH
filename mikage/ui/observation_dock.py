@@ -490,6 +490,21 @@ class ObservationDock(
         self.confidence_select = QComboBox()
         self.confidence_select.currentIndexChanged.connect(lambda _i: self._render_confidence())
         f.addRow(tr("確度"), self.confidence_select)
+        # 数量 (tsudo 2026-11-24): how many things of the kind this one record stands for (a group not placed one by one).
+        self.quantity_input = QLineEdit()
+        self.quantity_input.setPlaceholderText("1")
+        self.quantity_input.setMaximumWidth(self.fontMetrics().horizontalAdvance("0") * 9)
+        self.quantity_input.setToolTip(tr("この記録 1 件が表すモノの数（空欄は 1）\n"
+                                          "同じ種別がまとまって並ぶとき（駐車場の車両 30 台など）に、1 つずつ置かずに 1 件で記録"))
+        self.quantity_label = QLabel(tr("数量"))
+        self.quantity_hint = QLabel(tr("空欄は 1。まとめて 1 件で記録するときの数"))
+        self.quantity_hint.setStyleSheet("color: #6b7280;")
+        self.quantity_row = QWidget()
+        quantity_line = QHBoxLayout(self.quantity_row)
+        quantity_line.setContentsMargins(0, 0, 0, 0)
+        quantity_line.addWidget(self.quantity_input)
+        quantity_line.addWidget(self.quantity_hint, 1)
+        f.addRow(self.quantity_label, self.quantity_row)
         self.length_input = QLineEdit()
         self.length_input.textEdited.connect(lambda _t: (self._render_measure(), self._render_candidates()))
         self.heading_input = QLineEdit()
@@ -534,8 +549,8 @@ class ObservationDock(
                   self._button(tr("取消（Esc）"), "", self.close_form)):
             actions.addWidget(w)
         f.addRow(actions)
-        for edit in (self.object_input, self.kind_input, self.activity_input, self.length_input, self.width_input, self.heading_input,
-                     self.note_input):
+        for edit in (self.object_input, self.kind_input, self.activity_input, self.quantity_input, self.length_input, self.width_input,
+                     self.heading_input, self.note_input):
             edit.returnPressed.connect(lambda: self.submit(True))
         # Below the list (added after it): the record chosen there opens under it.
         self.form.hide()

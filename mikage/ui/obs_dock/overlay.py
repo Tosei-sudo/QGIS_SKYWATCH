@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from ...core.obs.api import (
     area_label, box_ring, local_time, ends_of, flow_of, heading_text, outline_of, side_points, two_point, km_text,
-    unseen_label, path_of,
+    unseen_label, path_of, quantity_mark,
 )
 from ...qgis_io import settings
 from ..obs_overlay import Mark, Scene, color_of
@@ -52,7 +52,7 @@ class OverlayPart:
             s.unseen_areas = [(a.ring, area_label(a)) for a in book.image_areas() if a.unseen]
             for c in book.carried():
                 o = c.source
-                s.marks.append(Mark("ghost", o.lon, o.lat, color(o.kind), o.object_name, ends=ends_of(o.lon, o.lat, o.length, o.heading),
+                s.marks.append(Mark("ghost", o.lon, o.lat, color(o.kind), o.object_name + quantity_mark(o), ends=ends_of(o.lon, o.lat, o.length, o.heading),
                                     heading=o.heading, key=o.id, outline=outline_of(o.lon, o.lat, o.length, o.width, o.heading)))
             editing = self.pending[2].id if self.pending and self.pending[2] else None
             waiting = self.waiting_ids()
@@ -63,7 +63,7 @@ class OverlayPart:
                 what = (f"・{o.activity}" if o.activity else "") if o.present else f"（{unseen_label(o.unseen)}）" if o.unseen else "（消失）"
                 sure = f"（{o.confidence}）" if o.confidence and o.confidence != surest else ""
                 late = self.tr("（送信待ち）") if o.id in waiting else ""
-                s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{what}{sure}{late}", o.present, ring_of.get(o.confidence or ""),
+                s.marks.append(Mark("obs", lon, lat, color(o.kind), f"{o.object_name}{quantity_mark(o)}{what}{sure}{late}", o.present, ring_of.get(o.confidence or ""),
                                     ends=None if o.unseen else ends_of(lon, lat, o.length, o.heading), heading=o.heading, editing=o.id == editing,
                                     key=o.id, outline=outline_of(lon, lat, o.length, o.width, o.heading) if o.present else None,
                                     reported=o.id in self.reported, unseen=bool(o.unseen)))

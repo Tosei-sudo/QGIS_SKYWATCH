@@ -308,7 +308,7 @@ S, I, D, T, F = "string", "integer", "double", "date", "smallinteger"
 OBSERVATION_FIELDS = {
     "OBS_ID": {"type": S, "length": 64}, "IMAGE_ID": S, "IMAGE_NAME": S, "IMAGE_TIME": T, "OBJECT_ID": {"type": S, "length": 64},
     "OBJECT_NAME": S, "KIND": S, "ACTIVITY": S, "PRESENT": F, "NOTE": {"type": S, "length": 4000}, "LENGTH_M": D, "HEADING": D,
-    "WIDTH_M": D, "PIXEL_X": D, "PIXEL_Y": D, "IMAGE_FILE": S, "SATELLITE": S, "CONFIDENCE": S, "OBSERVER": S, "UPDATED_BY": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T, "PROJECT": S,
+    "WIDTH_M": D, "PIXEL_X": D, "PIXEL_Y": D, "IMAGE_FILE": S, "SATELLITE": S, "QUANTITY": I, "CONFIDENCE": S, "OBSERVER": S, "UPDATED_BY": S, "CREATED_AT": T, "UPDATED_AT": T, "DELETED_AT": T, "PROJECT": S,
     "NAMED_AREA_OBJECTID": I, "UNSEEN_REASON": {"type": S, "length": 40},
 }
 #: As the enterprise geodatabase's attribute rule does (docs/arcgis-setup.md): the OBJECTID of the smallest named area holding the record.

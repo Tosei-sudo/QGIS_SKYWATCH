@@ -65,13 +65,13 @@ from ..time_zone import UTC, TimeZone, format_time, parse_time_zone
 from .. import sql
 from ..util import encodable, is_name, is_number, is_record, js_string, ms_of, use_legacy_names
 from .geo import get_distance, to_fixed
-from .model import ConfidenceLevel, Observation
+from .model import ConfidenceLevel, Observation, quantity_of
 from .taxonomy import kind_of, path_of, within
 
 #: What a field can take (`source`).
 SOURCES = (
     "id", "imageId", "imageName", "imageTime", "objectId", "objectName", "kind", "activity", "present", "confidence", "note",
-    "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated", "satellite",
+    "lon", "lat", "length", "heading", "width", "recordedBy", "updatedBy", "created", "updated", "satellite", "quantity",
     "area", "rule", "manual", "report", "reportedAt", "reportedBy", "index", "count", "score", "similar",
     "place", "placeKind", "places", "country", "countryName",
     "confidence.en", "area.en", "place.en", "placeKind.en", "places.en", "countryName.en", "note.en",
@@ -1598,7 +1598,7 @@ def raw_value(f: AlertField, item: AlertItem, index: int, report: AlertFormat, a
         "objectName": o.object_name, "activity": o.activity, "present": o.present, "confidence": o.confidence,
         "note": o.note, "lon": o.lon, "lat": o.lat, "length": o.length, "heading": o.heading, "width": o.width,
         "recordedBy": o.recorded_by, "updatedBy": o.updated_by, "created": o.created_at, "updated": o.updated_at,
-        "satellite": o.satellite or "", "area": joined(item.areas), "rule": joined(item.rules), "report": report.name, "reportedAt": at.now,
+        "satellite": o.satellite or "", "quantity": quantity_of(o) or None, "area": joined(item.areas), "rule": joined(item.rules), "report": report.name, "reportedAt": at.now,
         "reportedBy": at.user, "index": index + 1, "count": at.count, "manual": item.manual, "score": item.score,
         "similar": item.similar if item.score is not None else None,
         "place": place.name if place else "", "placeKind": place.kind if place else "",
