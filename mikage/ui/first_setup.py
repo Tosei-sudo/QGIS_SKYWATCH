@@ -208,8 +208,9 @@ class FirstSetupDialog(QDialog):
         # The person's own settings.
         own_box = QGroupBox(tr("個人の設定"))
         form = QFormLayout(own_box)
-        self.recorder = QLineEdit(settings.recorder_setting())
-        self.recorder.setPlaceholderText(tr("空欄なら接続の認証設定のユーザー名"))
+        self.recorder = QLineEdit(settings.recorder_shown())
+        self.recorder.setPlaceholderText(tr("空欄ならユーザー名（環境変数 USERNAME）"))
+        self.recorder.setToolTip(tr("観測記録に付ける名前。既定はユーザー名（環境変数 USERNAME）"))
         form.addRow(tr("記録者名"), self.recorder)
         self.points = QComboBox()
         for n, label in POINT_CHOICES:

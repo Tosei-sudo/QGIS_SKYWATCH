@@ -73,8 +73,9 @@ class SettingsDialog(QDialog):
         buttons_row.addWidget(browse)
         buttons_row.addWidget(load)
 
-        self.recorder = QLineEdit(settings.recorder_setting())
-        self.recorder.setPlaceholderText(self.tr("空欄なら認証設定のユーザー名"))
+        self.recorder = QLineEdit(settings.recorder_shown())
+        self.recorder.setPlaceholderText(self.tr("空欄ならユーザー名（環境変数 USERNAME）"))
+        self.recorder.setToolTip(self.tr("観測記録に付ける名前。既定はユーザー名（環境変数 USERNAME）"))
 
         # A grid, not a form: a form row of a wrapped text and a button was given one line's height where the text
         # needed two (drawn over the next row; found 2026-11-15 in a real QGIS).

@@ -711,8 +711,9 @@ class ObservationDock(
         mf = QFormLayout(self.more)
         self.deleted_check = QCheckBox(tr("削除済みも表示"))
         self.deleted_check.toggled.connect(lambda _on: self.render())
-        self.observer_input = QLineEdit(settings.recorder_setting())
-        self.observer_input.setToolTip(tr("記録に付ける名前（空欄ならログインのユーザー名）"))
+        # The name typed, else the user name (USERNAME, tsudo 2026-11-25): shown as it is written on the records.
+        self.observer_input = QLineEdit(settings.recorder_shown())
+        self.observer_input.setToolTip(tr("記録に付ける名前。既定はユーザー名（環境変数 USERNAME）。空欄にするとユーザー名に戻る"))
         self.observer_input.editingFinished.connect(self._observer_typed)
         mf.addRow(self.deleted_check)
         mf.addRow(tr("記録者"), self.observer_input)
@@ -793,6 +794,7 @@ class ObservationDock(
         self.store_select.setCurrentIndex(i if i >= 0 else 0)
         self.store_select.blockSignals(False)
         self.store_select.setVisible(len(self.sets) > 1)
+        self._show_observer()
         self._store_chosen(self.store_select.currentIndex())
         self._fill_satellite_input()
 
@@ -860,8 +862,16 @@ class ObservationDock(
         # Shown (and the records read once an image is chosen: render).
         self.refresh_images()
 
+    def _show_observer(self) -> None:
+        """The 「記録者」 box: the name typed, else the user name (another settings file may name another), unless being typed in."""
+        if not self.observer_input.hasFocus() and self.observer_input.text().strip() != settings.recorder_shown():
+            self.observer_input.setText(settings.recorder_shown())
+
     def _observer_typed(self) -> None:
         settings.set_recorder(self.observer_input.text())
+        if not self.observer_input.text().strip():
+            # Left empty: the user name again.
+            self.observer_input.setText(settings.recorder_shown())
         self._observer_cache = self._observer()
 
     def set_observer(self, name: str) -> None:
