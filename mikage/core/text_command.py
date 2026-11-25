@@ -18,7 +18,10 @@ Measured on the real sarashina2.2 3B int4 (2026-11-21, 4 cores, the 33
 sentences of tests/test_text_command.py and two that are no operation):
 the operation right in 33 (27 by their words, 6 by the model in about a
 second each once the list was read, 10 s), the values read by code right
-in 33 (the model writing them got 21 of 32 right).
+in 33 (the model writing them got 21 of 32 right). With 画像検索's satellites
+and SAR・光学 (2026-11-25): the same, and 10 sentences naming them (8 by the
+model) all 画像検索 with 「SAR/レーダーか光学か」 in its line (「SAR か光学か」
+took 「昨日のレーダー画像を地図の範囲で」 for 衛星パス).
 
 This module is pure Python: the operations, the prompt and the readers.
 The card and the running are ui/text_command.py and features/command.py.
@@ -83,7 +86,7 @@ OPERATIONS: tuple[Operation, ...] = (
     Operation("quotas", "年間上限", "年間撮像上限の消費と残りを見る", "年間撮像上限…",
               ("年間上限", "年間撮像上限", "撮像上限", "上限の残り"), ("year",), True, "年間撮像上限", "開く",
               "「年間撮像上限」をその年で表示"),
-    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間・衛星・SAR か光学か）", "画像カタログ",
+    Operation("catalog", "画像検索", "画像カタログで撮像済みの画像を探す（場所・期間・衛星・SAR/レーダーか光学か）", "画像カタログ",
               ("画像を探", "画像検索", "画像カタログ", "撮った画像", "画像はある", "画像があるか"), ("place", "period", "sensors"), True,
               "画像カタログ", "検索",
               "「画像カタログ」で、その場所と期間、衛星・種別があればそのセンサーで検索"),
