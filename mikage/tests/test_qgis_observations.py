@@ -902,6 +902,59 @@ def test_a_things_flow_opens_below_the_list_and_a_row_of_it_clicked_only_goes_to
     assert not dock.flow_box.isVisible() and dock.chosen is None and not dock.scene().track
 
 
+def test_a_things_kind_is_chosen_in_its_flow_level_by_level_as_in_the_form(plugin):
+    # tsudo 2026-11-25: 「観測記録の流れの、種別を一気に直せる機能、あそこにツリー選択がほしい」: 「このモノの詳細 ▸ 種別」 has
+    # the form's level buttons (picked over a folding tree), a click puts the kind in the field, 「名前・種別の変更」 saves it.
+    p, iface, dock, layers, _ = plugin
+    book = dock.book
+    for path in (["船舶", "護衛艦"], ["船舶", "補給艦"], ["船舶", "護衛艦", "あきづき型"]):
+        assert book.add_class(path)
+    book.add(139.7, 35.6, object="船A", kind="船舶", activity="停泊")
+    dock.step(1)
+    book.add(139.72, 35.6, object="船A", kind="船舶", activity="航行")
+    book.add(139.75, 35.55, object="船B", kind="航空機", activity="駐機")
+    dock.render()
+    APP.processEvents()
+    table = dock.table
+    names = [table.item(r, 0).text() for r in range(table.rowCount())]
+    _flow_button(table, names.index("船A")).click()
+    levels = dock.rekind_levels
+    # Drawn once 「このモノの詳細」 is opened, the thing's kind pressed.
+    assert not levels.buttons()
+    dock.flow_more.setChecked(True)
+    APP.processEvents()
+    assert dock.rekind_input.isVisible() and levels.isVisible()
+    assert [(name, chosen) for name, _choices, chosen in levels.drawn] == [("大分類", "船舶"), ("種別", "")]
+    assert {"船舶", "航空機", "車両"} <= set(levels.drawn[0][1]) and set(levels.drawn[1][1]) == {"護衛艦", "補給艦"}
+    assert [b.isChecked() for b in levels.buttons() if b.text() == "船舶"] == [True]
+    levels.press("護衛艦")
+    assert dock.rekind_input.text() == "船舶 > 護衛艦"
+    assert [(name, chosen) for name, _choices, chosen in levels.drawn] == [("大分類", "船舶"), ("種別", "護衛艦"), ("級", "")]
+    levels.press("あきづき型")
+    assert dock.rekind_input.text() == "船舶 > 護衛艦 > あきづき型"
+    # The pressed one again clears that level and the ones below.
+    levels.press("護衛艦")
+    assert dock.rekind_input.text() == "船舶"
+    # Typed, the levels follow (a kind outside the classification still shows on its level).
+    dock.rekind_input.setText("船舶 > 未知の艦")
+    assert levels.drawn[1][2] == "未知の艦" and "未知の艦" in levels.drawn[1][1]
+    levels.press("補給艦")
+    # Nothing saved until 「名前・種別の変更」; then every record of the thing.
+    assert {o.kind for o in book.living() if o.object_name == "船A"} == {"船舶"}
+    [rename] = [b for b in dock.flow_more.findChildren(QPushButton) if b.text() == "名前・種別の変更"]
+    rename.click()
+    assert wait_for(lambda: {o.kind for o in book.living() if o.object_name == "船A"} == {"船舶 > 補給艦"})
+    assert {o.kind for o in book.living() if o.object_name == "船B"} == {"航空機"}
+    # Another thing's flow (「このモノの詳細」 folded again): its kind, pressed.
+    _flow_button(dock.table, [dock.table.item(r, 0).text() for r in range(dock.table.rowCount())].index("船B")).click()
+    assert not dock.flow_more.isChecked() and dock.rekind_input.text() == "航空機"
+    dock.flow_more.setChecked(True)
+    assert levels.drawn[0][2] == "航空機" and [b.isChecked() for b in levels.buttons() if b.text() == "航空機"] == [True]
+    # Folded, its rows hide again (only its own rows are shown or hidden: a level's drop-down is never opened by it).
+    dock.flow_more.setChecked(False)
+    assert not dock.rekind_input.isVisible() and not levels.isVisible()
+
+
 def test_records_saved_offline_are_told_and_the_dock_keeps_drawing(plugin, tmp_path):
     # Re-check 2026-11-09: the note on what waits once broke every render of the dock (and the map's marks) while offline.
     p, iface, dock, layers, _ = plugin

@@ -217,7 +217,7 @@ class TablePart:
         first = records[0]
         fields = [
             BulkField("kind", self.tr("種別"), words=self.kinds_model.stringList(), value=first.kind,
-                      tip=self.tr("「大分類 > 種別 > 級」の形")),
+                      tip=self.tr("「大分類 > 種別 > 級」の形（下のボタンで分類体系から選べる）"), taxonomy=book.taxonomy()),
             BulkField("activity", self.tr("活動"), words=book.activity_words(first.kind), value=first.activity,
                       tip=self.tr("消失の記録は活動なしのまま")),
             BulkField("confidence", self.tr("確度"), choices=["", *(c.label for c in book.confidences())], value=first.confidence),
