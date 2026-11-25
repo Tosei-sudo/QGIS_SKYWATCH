@@ -15,6 +15,7 @@ except ImportError:  # Qt5
 
 from ..qgis_io.catalog_io import FEATURE
 from ..qgis_io.interests_io import InterestBook
+from ..qgis_io.map_view_io import typed_toward
 from ..qgis_io.org_areas_io import OrgAreaBook
 from ..ui import command_runs as runs
 from ..ui.catalog_dock import CatalogDock
@@ -92,6 +93,8 @@ class Images(Feature):
         catalog.event_linker = self.ports.events
         catalog.observations = notices.observations = self.observations_if_allowed()
         catalog.watch_requested = notices.watch_conditions
+        # 「向き」: the satellite's direction typed in クイック幾何補正 (its corrections as read; the enhance feature's keeper).
+        catalog.typed_toward = lambda layer: typed_toward(layer, getattr(host, "geo_fix_keeper", None))
         notices.drawn_area = catalog.drawn_shape
         notices.choose_folder = catalog.choose_folder
         notices.choose_images = catalog.choose_images

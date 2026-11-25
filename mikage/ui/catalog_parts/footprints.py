@@ -8,7 +8,8 @@ from __future__ import annotations
 from ...core.catalog.api import CatalogRecord
 from ...qgis_io import map_tools, settings
 from ...qgis_io.catalog_io import footprint, layers_extent
-from ...qgis_io.geometry import from_wgs84
+from ...qgis_io.geometry import WGS84, from_wgs84
+from ...qgis_io.map_view_io import fitted_boxes, fitted_extent
 from ..catalog_overlay import FootprintOverlay
 
 
@@ -87,19 +88,32 @@ class FootprintsPart:
         box = self.overlay.extent(rows) if self.overlay else None
         if box is None:
             return
-        extent = from_wgs84(self.canvas.mapSettings().destinationCrs()).transformBoundingBox(box)
-        extent.scale(1.2)
+        crs = self.canvas.mapSettings().destinationCrs()
+        if abs(self.canvas.rotation()) > 1e-9:
+            # A turned map (「向き」): QGIS's extent is before the rotation, so the box is fitted to the turned view.
+            extent = fitted_boxes([(box, WGS84)], crs, self.canvas.rotation(), 1.2)
+        else:
+            extent = from_wgs84(crs).transformBoundingBox(box)
+            extent.scale(1.2)
+        if extent is None:
+            return
         self.canvas.setExtent(extent)
         self.canvas.refresh()
 
     def zoom_to_layers(self, layers) -> None:
         """The map moved to the extent of the layers (their image files'; the box around all of them), with a small margin."""
-        extent = layers_extent(layers, self.canvas.mapSettings().destinationCrs())
+        crs = self.canvas.mapSettings().destinationCrs()
+        extent = layers_extent(layers, crs)
         if extent is None:
             return
         if extent.isEmpty():
             extent = extent.buffered(max(self.canvas.mapUnitsPerPixel() * 200, 1e-6))
-        extent.scale(1.05)
+            extent.scale(1.05)
+        elif abs(self.canvas.rotation()) > 1e-9:
+            # A turned map (「向き」): the images' outlines fitted to the turned view (QGIS's extent is before the rotation).
+            extent = fitted_extent(layers, crs, self.canvas.rotation()) or extent
+        else:
+            extent.scale(1.05)
         self.canvas.setExtent(extent)
         self.canvas.refresh()
 

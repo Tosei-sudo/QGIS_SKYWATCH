@@ -103,6 +103,32 @@ def set_zoom_to_opened(on: bool) -> None:
     set_pref("catalog/zoomToOpened", "1" if on else "0")
 
 
+def match_crs() -> bool:
+    """
+    「投影法を画像に合わせる」 (tsudo, 2026-11-25): opening images from the
+    catalog puts the map in the image's CRS (core/map_view.py). Off unless turned on.
+    """
+    return pref("catalog/matchCrs") == "1"
+
+
+def set_match_crs(on: bool) -> None:
+    set_pref("catalog/matchCrs", "1" if on else "0")
+
+
+def map_orientation() -> str:
+    """「向き」 of the catalog (core/map_view.ORIENTATIONS): the map's way up when images open; north unless chosen."""
+    from ...core.map_view import ORIENTATIONS
+
+    v = pref("catalog/orientation")
+    return v if v in ORIENTATIONS else "north"
+
+
+def set_map_orientation(value: str) -> None:
+    from ...core.map_view import ORIENTATIONS
+
+    set_pref("catalog/orientation", value if value in ORIENTATIONS else "north")
+
+
 def saved_areas() -> list:
     """「保存した範囲」 of the image catalog (core/catalog/saved_areas.py), newest first; per user, like the list views."""
     from ...core.catalog.api import read_areas

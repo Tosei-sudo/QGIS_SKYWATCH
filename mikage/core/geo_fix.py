@@ -123,6 +123,28 @@ def heading_of_pass(direction: str, lat: float, inclination: float = SUN_SYNCHRO
     return (psi % 360) if direction == "A" else (180 - psi) % 360
 
 
+def look_side(text: str) -> Optional[str]:
+    """'R' or 'L': which side of its track the radar looked to, when the metadata text says (None: not said)."""
+    return _side(text or "")
+
+
+def heading_from_text(text: str, lat: Optional[float] = None) -> Optional[float]:
+    """
+    The satellite's way over the ground (degrees clockwise from north) as the
+    metadata text says: a heading or track angle, else the pass direction
+    (ascending, descending) at `lat`; None when it says neither.
+    """
+    if not text:
+        return None
+    for key, value in _angles(text, "heading") + _angles(text, "track_?angle"):
+        if -360 <= value <= 360 and "sun" not in key:
+            return value % 360
+    direction = _pass(text)
+    if direction is not None and lat is not None:
+        return heading_of_pass(direction, lat)
+    return None
+
+
 def look_from_text(text: str, lat: Optional[float] = None) -> Optional[LookGeometry]:
     """
     The incidence angle and the direction to the satellite from metadata text
