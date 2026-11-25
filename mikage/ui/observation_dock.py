@@ -40,6 +40,7 @@ from ..qgis_io.tasks import error_text, run_task
 from . import shortcuts
 from .docks import PluginDock, ask_no, plain_label, plain_tip
 from .flow_layout import FlowLayout
+from .kind_levels import KindLevels
 from .note_assist import NoteAssist
 from .text_assist_ui import NoteFields, NoteTidy
 from .list_views import ListViews, column_menus
@@ -472,7 +473,9 @@ class ObservationDock(
         self.kind_path_box = QWidget()
         self.kind_path_layout = QVBoxLayout(self.kind_path_box)
         self.kind_path_layout.setContentsMargins(0, 0, 0, 0)
-        self.kind_levels: Optional[QWidget] = None
+        self.kind_levels = KindLevels()
+        self.kind_levels.chosen.connect(self.choose_kind)
+        self.kind_path_layout.addWidget(self.kind_levels)
         f.addRow(self.kind_path_box)
         self.specs_label = plain_label(QLabel())
         self.specs_label.setWordWrap(True)
@@ -699,10 +702,16 @@ class ObservationDock(
         more = QFormLayout(self.flow_more)
         self.rename_input = QLineEdit()
         self.rekind_input = QLineEdit()
+        self.rekind_input.setPlaceholderText("船舶 > 支援船 > 〇〇級")
         self.rekind_input.setCompleter(QCompleter(self.kinds_model, self.rekind_input))
+        self.rekind_input.textChanged.connect(lambda _t: self._render_rekind())
+        # The kind's levels as in the form: a click puts the kind in the field (saved with 「名前・種別の変更」).
+        self.rekind_levels = KindLevels()
+        self.rekind_levels.chosen.connect(self._rekind_chosen)
         self.merge_select = QComboBox()
         more.addRow(tr("名前"), self.rename_input)
         more.addRow(tr("種別"), self.rekind_input)
+        more.addRow(self.rekind_levels)
         more.addRow(tr("同一のモノとして統合"), self.merge_select)
         actions = QHBoxLayout()
         actions.addWidget(self._button(tr("名前・種別の変更"), tr("このモノのすべての記録の名前・種別を上の値に変える"), self._rename_chosen))
@@ -712,8 +721,13 @@ class ObservationDock(
         self.remove_all_button = self._button(tr("このモノの記録を削除"), tr("このモノの記録をすべて削除（2 回押す）"), self._remove_chosen)
         actions.addWidget(self.remove_all_button)
         more.addRow(actions)
-        self.flow_more.toggled.connect(lambda on: [w.setVisible(on) for w in self.flow_more.findChildren(QWidget)])
-        for w in self.flow_more.findChildren(QWidget):
+        # Only its own rows: a level's drop-down or a completer's list inside them is not shown by opening it.
+        def rows() -> list:
+            return self.flow_more.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+
+        self.flow_more.toggled.connect(lambda on: [w.setVisible(on) for w in rows()])
+        self.flow_more.toggled.connect(lambda on: on and self._render_rekind())
+        for w in rows():
             w.setVisible(False)
         fl.addWidget(self.flow_more)
         self.flow_box.hide()
@@ -726,8 +740,9 @@ class ObservationDock(
         mf = QFormLayout(self.more)
         self.deleted_check = QCheckBox(tr("削除済みも表示"))
         self.deleted_check.toggled.connect(lambda _on: self.render())
-        self.observer_input = QLineEdit(settings.recorder_setting())
-        self.observer_input.setToolTip(tr("記録に付ける名前（空欄ならログインのユーザー名）"))
+        # The name typed, else the user name (USERNAME, tsudo 2026-11-25): shown as it is written on the records.
+        self.observer_input = QLineEdit(settings.recorder_shown())
+        self.observer_input.setToolTip(tr("記録に付ける名前。既定はユーザー名（環境変数 USERNAME）。空欄にするとユーザー名に戻る"))
         self.observer_input.editingFinished.connect(self._observer_typed)
         mf.addRow(self.deleted_check)
         mf.addRow(tr("記録者"), self.observer_input)
@@ -808,6 +823,7 @@ class ObservationDock(
         self.store_select.setCurrentIndex(i if i >= 0 else 0)
         self.store_select.blockSignals(False)
         self.store_select.setVisible(len(self.sets) > 1)
+        self._show_observer()
         self._store_chosen(self.store_select.currentIndex())
         self._fill_satellite_input()
 
@@ -875,8 +891,16 @@ class ObservationDock(
         # Shown (and the records read once an image is chosen: render).
         self.refresh_images()
 
+    def _show_observer(self) -> None:
+        """The 「記録者」 box: the name typed, else the user name (another settings file may name another), unless being typed in."""
+        if not self.observer_input.hasFocus() and self.observer_input.text().strip() != settings.recorder_shown():
+            self.observer_input.setText(settings.recorder_shown())
+
     def _observer_typed(self) -> None:
         settings.set_recorder(self.observer_input.text())
+        if not self.observer_input.text().strip():
+            # Left empty: the user name again.
+            self.observer_input.setText(settings.recorder_shown())
         self._observer_cache = self._observer()
 
     def set_observer(self, name: str) -> None:

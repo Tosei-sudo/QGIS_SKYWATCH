@@ -616,7 +616,7 @@ _CHANGE_REQUESTER = re.compile(r"(?:依頼者|依頼元|担当)\s*(?:を|は|:)"
 # ---- satellites -----------------------------------------------------------------------------------------
 
 
-def _name_pattern(name: str) -> Optional[re.Pattern]:
+def name_pattern(name: str) -> Optional[re.Pattern]:
     """A satellite's name as written in a text: 「ALOS-2」 also 「ALOS2」「alos 2」; letters not run on."""
     parts = [p for p in re.split(r"[\s\-_・./]+", unicodedata.normalize("NFKC", name).strip()) if p]
     if not parts:
@@ -668,7 +668,7 @@ def satellites_of(text: str, sats: Sequence[Any]) -> Satellites:
         if key in seen:
             return
         for n in names:
-            p = _name_pattern(n) if n else None
+            p = name_pattern(n) if n else None
             m = p.search(t) if p else None
             if m:
                 seen.add(key)

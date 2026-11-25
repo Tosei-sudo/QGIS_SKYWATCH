@@ -243,7 +243,7 @@ def server():
     httpd.shutdown()
 
 
-def test_requests_go_through_qgis_in_a_task_with_the_services_authcfg(server, tmp_path):
+def test_requests_go_through_qgis_in_a_task_with_the_services_authcfg(server, tmp_path, monkeypatch):
     auth = QgsApplication.authManager()
     if not auth.masterPasswordIsSet():
         auth.setMasterPassword("test", True)
@@ -253,6 +253,12 @@ def test_requests_go_through_qgis_in_a_task_with_the_services_authcfg(server, tm
     config.setConfig("password", "pw")
     assert auth.storeAuthenticationConfig(config)[0]
     settings.set_auth_map({f"{server}/0": config.id()})
+    # The 記録者: the user name (USERNAME) first; the sign-in only when no user name is known.
+    monkeypatch.setenv("USERNAME", "yamada")
+    assert settings.recorder_name(f"{server}/0") == "yamada"
+    from mikage.core import edit_stamp
+
+    monkeypatch.setattr(edit_stamp, "user_name", lambda *_a, **_k: "")
     assert settings.recorder_name(f"{server}/0") == "tanaka"
     settings.set_recorder("sato")
     assert settings.recorder_name(f"{server}/0") == "sato"

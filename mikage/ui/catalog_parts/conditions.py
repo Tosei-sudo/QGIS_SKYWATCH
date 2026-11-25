@@ -42,12 +42,25 @@ class ConditionsPart:
         catalog = self.catalog()
         self._show_keyword(catalog)
         self._show_file_buttons()
+        #: The sensors the catalog lists (文で操作's SAR・光学 and satellites); None without a sensor attribute.
+        self._sensor_values = None
         if catalog is None or not catalog.fields.get("sensor"):
             return
+        self._sensor_values = []
         client = self.context.esri()
         token = self.context.token_for(catalog.url, catalog.token)
-        self._start(self.tr("センサーの取得"), lambda task: sensors_of(client, catalog, token),
-                    lambda sensors: self.sensor_box.addItems(sensors) if self.catalog() is catalog else None, lambda m: None)
+
+        def listed(sensors: list) -> None:
+            if self.catalog() is catalog:
+                self._sensor_values = list(sensors)
+                self.sensor_box.addItems(sensors)
+
+        self._start(self.tr("センサーの取得"), lambda task: sensors_of(client, catalog, token), listed, lambda m: None)
+
+    def sensor_values(self) -> Optional[list]:
+        """The sensors the catalog chosen lists (none before they are read, or when it can not list them); None without a sensor attribute."""
+        values = getattr(self, "_sensor_values", None)
+        return None if values is None else list(values)
 
     def has_files(self) -> bool:
         """Whether the list's catalog (else the one chosen) has image files to open (not `imageFiles: false`)."""

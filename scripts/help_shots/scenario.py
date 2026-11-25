@@ -372,7 +372,7 @@ def flow_obs():
     # 6-1 種別: 大分類 → 種別 → 級.
     obs.choose_kind(["船舶", "貨物船"])
     yield 500
-    grid = obs.kind_levels.layout() if obs.kind_levels is not None else None
+    grid = obs.kind_levels.grid
     marks = [(grid_row(grid, r, obs.form), str(r + 1)) for r in range(min(3, grid.rowCount()))] if grid is not None else []
     shoot(path("obs-12-kind"), obs.form, marks=marks + [(obs.kind_input, "")],
           crop=[obs.object_input, obs.kind_input, obs.kind_path_box], margin=(8, 6))

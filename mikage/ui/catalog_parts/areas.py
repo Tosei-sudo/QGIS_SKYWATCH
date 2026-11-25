@@ -68,13 +68,19 @@ class AreasPart:
         self.draw_button.setChecked(False)
         self._show_layer_row()
 
-    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False) -> None:
+    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False,
+                           sensor: Optional[str] = None) -> None:
         """
         Searched over a period (its first and last days, "" open) and an area (its corners in WGS 84; `anywhere`:
         no area, not whatever area the dock had before), the dock in front (イベント's 「カタログで検索」).
+        `sensor` (文で操作's 画像検索): the センサー box's, 詳細条件 opened for it ("" every sensor; None: as it is).
         """
         self.acquired_from.setText(start)
         self.acquired_to.setText(end)
+        if sensor is not None:
+            self.sensor_box.setEditText(sensor)
+            if sensor:
+                self.more.setChecked(True)
         if anywhere:
             self.area_box.setCurrentIndex(self.area_box.findData("none"))
         else:

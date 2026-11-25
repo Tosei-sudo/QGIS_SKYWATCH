@@ -8,15 +8,16 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QComboBox, QGridLayout, QLabel, QLineEdit, QToolButton, QWidget
+from qgis.PyQt.QtWidgets import QLabel, QLineEdit, QToolButton, QWidget
 
 from ...core.obs.api import (
-    FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, children_of, find, kind_of,
-    level_name, member_index, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
+    FormValues, local_time, MatchCandidate, js_round, UNSEEN, Observation, unseen_label, find, kind_of,
+    member_index, name_label_of, path_of, quantity_of, read_quantity, spec_text, specs_at,
 )
 from ...core.util import read_number
 from ..docks import plain_tip
 from ..flow_layout import FlowLayout
+from ..kind_levels import chip_button, kind_level_rows
 
 
 class FormPart:
@@ -198,14 +199,7 @@ class FormPart:
         layout.clear()
 
     def _chip_button(self, text: str, tip: str, run: Callable, pressed: bool = False) -> QToolButton:
-        b = QToolButton()
-        b.setText(text)
-        b.setToolTip(tip)
-        b.setCheckable(True)
-        b.setChecked(pressed)
-        b.setAutoRaise(False)
-        b.clicked.connect(lambda _on=False: run())
-        return b
+        return chip_button(text, tip, run, pressed)
 
     def _activity_words(self) -> list[str]:
         if self.book is None:
@@ -250,9 +244,6 @@ class FormPart:
         if self.form.isVisible() and 0 < n <= len(words):
             self._pick_activity(words[n - 1])
 
-    # More choices than this at a level go in a drop-down instead of buttons.
-    KIND_CHIPS_MAX = 16
-
     def _kind_changed(self) -> None:
         """The kind typed or chosen; for a new record, also what the next new record starts with."""
         if self.book is not None and self.pending is not None and self.pending[2] is None and self.pending[3] is None:
@@ -266,71 +257,22 @@ class FormPart:
         """The kind selector's rows: (the level's name, its choices, the chosen one or "")."""
         if self.book is None:
             return []
-        taxa = self.book.taxonomy()
-        path = path_of(self.kind_input.text())
-        rows = []
-        for d in range(len(path) + 1):
-            choices = [t.path[-1] for t in children_of(taxa, path[:d])]
-            chosen = path[d] if d < len(path) else ""
-            if chosen and chosen not in choices:
-                choices.append(chosen)
-            if not choices:
-                break
-            name = level_name(taxa, path, d) or ("大分類" if d == 0 else f"第 {d + 1} 階層")
-            rows.append((name, choices, chosen))
-        return rows
+        return kind_level_rows(self.book.taxonomy(), self.kind_input.text())
 
     def choose_kind(self, path: list[str]) -> None:
         self.kind_input.setText(kind_of(path))
         self._kind_changed()
 
     def _render_kind_path(self) -> None:
-        """The kind's levels, one row each from 大分類 down: a click picks at that level, a click on the pressed one clears it;
-        then the class's known individuals."""
-        if self.kind_levels is not None:
-            self.kind_levels.setParent(None)
-            self.kind_levels.deleteLater()
-            self.kind_levels = None
+        """The kind's levels, one row each from 大分類 down (ui/kind_levels.py: a click picks at that level, a click on the
+        pressed one clears it); then the class's known individuals."""
         if self.book is None:
+            self.kind_levels.clear()
             self.kind_path_box.hide()
             return
         taxa = self.book.taxonomy()
         path = path_of(self.kind_input.text())
-        known = {kind_of(t.path) for t in taxa}
-        box = QWidget()
-        grid = QGridLayout(box)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setColumnStretch(1, 1)
-        row = 0
-
-        def add_row(label: str, widget: QWidget) -> None:
-            nonlocal row
-            caption = QLabel(f"{label}:")
-            caption.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-            grid.addWidget(caption, row, 0)
-            grid.addWidget(widget, row, 1)
-            row += 1
-
-        for d, (name, choices, chosen) in enumerate(self.kind_level_rows()):
-            up = path[:d]
-            if len(choices) > self.KIND_CHIPS_MAX:
-                combo = QComboBox()
-                combo.addItem(self.tr("（指定なし）"), "")
-                for c in choices:
-                    combo.addItem(c, c)
-                combo.setCurrentIndex(max(0, combo.findData(chosen)))
-                combo.setToolTip(f"{name}の選択")
-                combo.activated.connect(lambda i, combo=combo, up=up: self.choose_kind(up + ([combo.itemData(i)] if combo.itemData(i) else [])))
-                add_row(name, combo)
-                continue
-            chips = QWidget()
-            flow = FlowLayout(chips)
-            for c in choices:
-                pressed = c == chosen
-                outside = kind_of([*up, c]) not in known
-                tip = (f"{name}の選択の解除" if pressed else f"{kind_of([*up, c])} を選択") + ("（分類体系にない）" if outside else "")
-                flow.addWidget(self._chip_button(c, tip, lambda p=up + ([] if pressed else [c]): self.choose_kind(p), pressed))
-            add_row(name, chips)
+        self.kind_levels.render(taxa, self.kind_input.text())
         label = name_label_of(taxa, path)
         here = find(taxa, path)
         members = (here.members if here else None) or []
@@ -340,10 +282,8 @@ class FormPart:
             typed = self.object_input.text().strip()
             for m in members[:24]:
                 flow.addWidget(self._chip_button(m, f"{m} として記録", lambda m=m: (self.object_input.setText(m), self._object_typed()), typed == m))
-            add_row(label or "個体", chips)
-        self.kind_levels = box
-        self.kind_path_layout.addWidget(box)
-        self.kind_path_box.setVisible(row > 0)
+            self.kind_levels.add_row(label or "個体", chips)
+        self.kind_path_box.setVisible(self.kind_levels.rows > 0)
         self.object_label.setText(f"モノ（{label}）" if label else "モノ")
         self._render_specs(taxa, path)
         self._render_measure()

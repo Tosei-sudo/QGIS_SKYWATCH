@@ -58,8 +58,15 @@ class CatalogPort(Protocol):
     def show_event_records(self, catalog, records, text: str) -> None:
         """The records listed, with what they are in the status line, the dock in front."""
 
-    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False) -> None:
-        """Searched over a period (its days, "" open) and an area (its corners; `anywhere`: none), the dock in front."""
+    def search_area_period(self, start: str, end: str, corners: Optional[list] = None, anywhere: bool = False,
+                           sensor: Optional[str] = None) -> None:
+        """
+        Searched over a period (its days, "" open) and an area (its corners; `anywhere`: none), the dock in front;
+        `sensor`: the センサー box's (several separated by 「、」; "" every sensor; None as it is).
+        """
+
+    def sensor_values(self) -> Optional[list]:
+        """The sensors the catalog chosen lists (none before they are read); None when it has no sensor attribute."""
 
 
 class RequestsPort(Protocol):

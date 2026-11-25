@@ -10,7 +10,7 @@ sentence was read as before anything is done.
   (the sentence is then read in about a second).
 - The card: the sentence, the operation (another can be chosen), the values
   read from it by code (system, day or period, year, place, satellites,
-  screen: each can be changed; one not read is left empty, and a value the
+  画像検索's 衛星・種別 with the catalog's sensors they name, screen: each can be changed; one not read is left empty, and a value the
   operation needs empty keeps its button off), what will happen, and the
   button. Nothing is done before the button; nothing is saved, written or
   sent by it (the screens' own buttons do that, with their own questions).
@@ -30,6 +30,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import audit
+from ..core.catalog.api import kind_word, sensor_words_of
 from ..core.data_chat import TASK as DATA_TASK, is_question
 from ..core.text_command import (
     ALL, BY_KEY, Operation, Reading, by_words, command_messages, lat_lon_in, operation_of, read, reply_done, word_matches,
@@ -63,6 +64,12 @@ class CommandHost(Protocol):
     def screens(self) -> list[str]:
         """The menu's entries the roles in use have (画面を開く)."""
 
+    def sensors(self) -> list[str]:
+        """The sensors of the catalog chosen in 画像カタログ (画像検索's 衛星・種別; none before they are read)."""
+
+    def pick_sensors(self, words: list[str]) -> Any:
+        """The catalog's sensors the words name (core/catalog/sensors.SensorPick); None when it has no sensor attribute."""
+
     def find_place(self, text: str, point: Optional[tuple], then: Callable[[Any, str], None]) -> None:
         """Where `text` (or `point`) is: then(core/text_request.AreaChoice or None, why none)."""
 
@@ -91,12 +98,19 @@ class _DayEdit(QDateEdit):
         self.setDate(QDate(d.year, d.month, d.day) if d else UNSET)
 
 
+def catalog_sensors(host: CommandHost) -> list[str]:
+    """The sensors of the catalog chosen in 画像カタログ (none when the host can not say)."""
+    sensors = getattr(host, "sensors", None)
+    return list(sensors() or []) if sensors is not None else []
+
+
 def _row(label: str, *widgets: QWidget) -> tuple[QWidget, QLabel]:
     row = QWidget()
     box = QHBoxLayout(row)
     box.setContentsMargins(0, 0, 0, 0)
     name = QLabel(label)
     name.setMinimumWidth(72)
+    name.setProperty("rowName", True)
     box.addWidget(name)
     for w in widgets:
         box.addWidget(w)
@@ -160,17 +174,45 @@ class CommandCard(QDialog):
         self.satellites.setMinimumWidth(240)
         self.satellites.setPlaceholderText(self.tr("衛星の名前（、で区切る）"))
         self.satellites_row, _ = _row(self.tr("衛星"), self.satellites)
+        # 画像検索: SAR・光学, satellites, series or sensors, and the catalog's sensors they name.
+        self.sensors = QLineEdit()
+        self.sensors.setClearButtonEnabled(True)
+        self.sensors.setMinimumWidth(200)
+        self.sensors.setPlaceholderText(self.tr("SAR・光学・衛星の名前（、で区切る）"))
+        self.sensors.setToolTip(plain_tip(self.tr(
+            "SAR・光学、衛星・シリーズの名前（別名も）、カタログのセンサー名。画像カタログで選んでいるカタログの、"
+            "当たるセンサーで検索（SAR・光学は衛星の一覧の種別から）。空はすべてのセンサー")))
+        self.sensors_note = QLabel()
+        self.sensors_note.setWordWrap(True)
+        self.sensors_note.setStyleSheet("QLabel { font-size: 11px; color: #57534e; }")
+        # The sensors named on a line of their own, under the words.
+        self.sensors_row = QWidget()
+        lines = QVBoxLayout(self.sensors_row)
+        lines.setContentsMargins(0, 0, 0, 0)
+        lines.setSpacing(2)
+        words_row, _ = _row(self.tr("衛星・種別"), self.sensors)
+        note_row, _ = _row("", self.sensors_note)
+        # The note takes the row's width (not the stretch after it).
+        note_row.layout().takeAt(note_row.layout().count() - 1)
+        note_row.layout().setStretchFactor(self.sensors_note, 1)
+        lines.addWidget(words_row)
+        lines.addWidget(note_row)
         self.screen_choice = QComboBox()
         self.screen_row, _ = _row(self.tr("画面"), self.screen_choice)
         self.rows = {"system": self.system_row, "period": self.day_row, "year": self.year_row, "place": self.place_row,
-                     "satellites": self.satellites_row, "screen": self.screen_row}
+                     "satellites": self.satellites_row, "sensors": self.sensors_row, "screen": self.screen_row}
         for row in self.rows.values():
             layout.addWidget(row)
+        # The values' names as wide as the widest (「衛星・種別」).
+        names = [w for w in self.findChildren(QLabel) if w.property("rowName")]
+        for name in names:
+            name.setMinimumWidth(max(72, *(n.sizeHint().width() for n in names)))
         for w in (self.system, self.year, self.screen_choice):
             w.currentIndexChanged.connect(lambda _i: self._update_button())
         for w in (self.first, self.last):
             w.dateChanged.connect(lambda _d: self._update_button())
         self.satellites.textChanged.connect(lambda _t: self._update_button())
+        self.sensors.textChanged.connect(lambda _t: self._show_sensors())
 
         self.will = QLabel()
         self.will.setWordWrap(True)
@@ -248,7 +290,8 @@ class CommandCard(QDialog):
         h = self.host
         self.how.setText(self.tr("選び直し"))
         self.state.hide()
-        self._show_values(read(op, self._text, h.today(), h.systems(), h.place_names(), h.satellites(), h.screens(), by="chosen"))
+        self._show_values(read(op, self._text, h.today(), h.systems(), h.place_names(), h.satellites(), h.screens(), by="chosen",
+                               sensors=catalog_sensors(h)))
 
     def _show_values(self, reading: Optional[Reading]) -> None:
         self.reading = reading
@@ -301,6 +344,12 @@ class CommandCard(QDialog):
         if "satellites" in slots:
             self.satellites.setText("、".join(reading.satellites))
             self.satellites_row.show()
+        if "sensors" in slots:
+            self.sensors.blockSignals(True)
+            self.sensors.setText("、".join(reading.sensors))
+            self.sensors.blockSignals(False)
+            self.sensors_row.show()
+            self._show_sensors(update=False)
         if "screen" in slots:
             self.screen_choice.blockSignals(True)
             self.screen_choice.clear()
@@ -313,6 +362,47 @@ class CommandCard(QDialog):
         self.will.setText(self._will(op))
         self.run_button.setText(op.button)
         self._update_button()
+
+    # ---- 画像検索's sensors ------------------------------------------------------------------------------
+
+    def sensor_pick(self) -> Any:
+        """What 衛星・種別 names in the catalog (core/catalog/sensors.SensorPick); None when it can not say."""
+        words = sensor_words_of(self.sensors.text())
+        pick = getattr(self.host, "pick_sensors", None)
+        return pick(words) if words and pick is not None else None
+
+    def _show_sensors(self, update: bool = True) -> None:
+        """The catalog's sensors 衛星・種別 names, beside it (the button off when it names none)."""
+        words = sensor_words_of(self.sensors.text())
+        pick = self.sensor_pick()
+        warn = False
+        tip = ""
+        if not words:
+            text = self.tr("（なし: すべてのセンサー）")
+        elif pick is None:
+            text = self.tr("画像カタログにセンサーの項目がなく、衛星・種別では絞らない") if hasattr(self.host, "pick_sensors") else ""
+            warn = bool(text)
+        elif not pick.sensors:
+            warn = True
+            if not pick.listed and any(kind_word(w) for w in words):
+                text = self.tr("センサーの一覧が読めず、SAR・光学で探せない（衛星の名前なら探せる）")
+            else:
+                text = self.tr("当たるセンサーが画像カタログにない")
+        else:
+            n = len(pick.sensors)
+            shown = "・".join(pick.sensors[:4]) + (self.tr(" ほか {m}").format(m=n - 4) if n > 4 else "")
+            text = self.tr("→ {s}（{n} センサー）").format(s=shown, n=n) if pick.listed else self.tr("→ {s}（名前のまま）").format(s=shown)
+            tip = self.tr("このセンサーで検索: {s}").format(s="、".join(pick.sensors))
+            if pick.unknown:
+                text += self.tr("。種別のわからない {u} は含めない").format(u=len(pick.unknown))
+                tip += "\n" + self.tr("種別のわからないセンサー（衛星の一覧にない・種別なし）: {s}").format(s="、".join(pick.unknown))
+            if pick.missing:
+                text += self.tr("。「{m}」は当たるセンサーなし").format(m="、".join(pick.missing))
+        self.sensors_note.setText(text)
+        self.sensors_note.setToolTip(plain_tip(tip) if tip else "")
+        self.sensors_note.setStyleSheet("QLabel { font-size: 11px; color: %s; }" % ("#b45309" if warn else "#57534e"))
+        if update:
+            self._update_button()
 
     def _will(self, op: Operation) -> str:
         note = op.note
@@ -377,6 +467,8 @@ class CommandCard(QDialog):
             out.place = self.place.text().strip() or None
         if "satellites" in slots:
             out.satellites = [s.strip() for s in re.split(r"[、,，\s]+", self.satellites.text()) if s.strip()]
+        if "sensors" in slots:
+            out.sensors = sensor_words_of(self.sensors.text())
         if "screen" in slots:
             out.screen = self.screen_choice.currentData()
         return out
@@ -398,6 +490,10 @@ class CommandCard(QDialog):
             return False
         if op.key == "passes" and not r.satellites:
             return False
+        if r.sensors:
+            pick = self.sensor_pick()
+            if pick is not None and not pick.sensors:
+                return False
         return True
 
     def _update_button(self) -> None:
@@ -515,7 +611,8 @@ class CommandBox(QObject):
                 return
         self._place_card()
         if op is not None:
-            reading = read(op, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="words")
+            reading = read(op, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="words",
+                           sensors=catalog_sensors(h))
             self.card.show_reading(reading, text, ops)
             self._show_card()
             return
@@ -539,7 +636,8 @@ class CommandBox(QObject):
                     why = self.tr("候補: {c}。下で選べば、文から値を読む").format(c="・".join(o.name for o in found))
                 self.card.show_reading(None, text, ops, took, caution, why)
                 return
-            reading = read(chosen, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="model")
+            reading = read(chosen, text, today, h.systems(), h.place_names(), h.satellites(), h.screens(), by="model",
+                           sensors=catalog_sensors(h))
             self.card.show_reading(reading, text, ops, took, caution)
 
         def failed(message: str) -> None:
@@ -600,6 +698,8 @@ class CommandBox(QObject):
             detail["place"] = reading.place
         if reading.satellites:
             detail["satellites"] = reading.satellites
+        if reading.sensors:
+            detail["sensors"] = reading.sensors
         if reading.screen:
             detail["screen"] = reading.screen
         try:
