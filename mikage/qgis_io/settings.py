@@ -22,7 +22,8 @@ from .prefs.images import (  # noqa: F401
     overview_cache_setting, set_overview_cache_setting, overview_temp_setting, set_overview_temp_setting, overview_cache_to_clear,
     set_overview_cache_to_clear, central_views,
     set_central_views, feed_close_previous, set_feed_close_previous, feed_unread_only, set_feed_unread_only, FOOTPRINT_STYLES,
-    footprint_style, set_footprint_style, close_previous, set_close_previous, zoom_to_opened, set_zoom_to_opened, saved_areas,
+    footprint_style, set_footprint_style, close_previous, set_close_previous, zoom_to_opened, set_zoom_to_opened, match_crs,
+    set_match_crs, map_orientation, set_map_orientation, saved_areas,
     set_saved_areas, path_folders, path_folder, set_path_folder, clear_path_folders, similar_tolerance, set_similar_tolerance,
 )
 from .prefs.observations import (  # noqa: F401

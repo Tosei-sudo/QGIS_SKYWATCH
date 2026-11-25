@@ -21,6 +21,10 @@ catalog of such images only (`imageFiles: false`) has this button instead
 of 「開く」 (a double click too); elsewhere it is offered when an image
 cannot be opened.
 
+「投影法を画像に合わせる」・「向き」 (tsudo, 2026-11-25; ui/map_orient.py):
+opening images puts the map in the first one's CRS and turns it so that
+the way it was taken is up, and puts it back once they are all closed.
+
 「保存した範囲」 (tsudo, 2026-11-19): an area drawn is kept under a name
 (「保存…」 beside 「範囲を描く」) and chosen again later from 「範囲 ▸ 保存した
 範囲」, newest first (core/catalog/saved_areas.py; per user, as the views).
@@ -37,6 +41,7 @@ from qgis.PyQt.QtWidgets import (
 )
 
 from ..core import roles
+from ..core.map_view import ORIENTATION_LABELS, ORIENTATIONS
 from ..core.catalog.api import CatalogConfig, CatalogLayerInfo, CatalogRecord
 from ..qgis_io import settings
 from ..qgis_io.file_manager import show_folder
@@ -45,6 +50,7 @@ from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock, plain_label
 from .flow_layout import FlowLayout
 from .list_views import ListViews, MenuToolButton
+from .map_orient import MapOrienter
 from .catalog_parts.conditions import ConditionsPart
 from .catalog_parts.search import SearchPart
 from .catalog_parts.similar import SimilarPart
@@ -311,6 +317,29 @@ class CatalogDock(
         self.zoom_opened.setToolTip(self.tr("画像を開くとき、その画像の範囲へ地図を移動（PC ごとに記憶）"))
         self.zoom_opened.setChecked(settings.zoom_to_opened())
         self.zoom_opened.toggled.connect(settings.set_zoom_to_opened)
+        # 「投影法を画像に合わせる」・「向き」 (tsudo, 2026-11-25): the map in the image's CRS, turned as it was taken (ui/map_orient.py).
+        self.match_crs = QCheckBox(self.tr("投影法を画像に合わせる"))
+        self.match_crs.setToolTip(self.tr(
+            "画像を開くとき、地図の投影法をその画像の座標系に（経緯度の画像・GCP や RPC で置かれた画像は、画像の中心の UTM 帯）。"
+            "開いた画像をすべて閉じると元に戻す（PC ごとに記憶）"))
+        self.match_crs.setChecked(settings.match_crs())
+        self.match_crs.toggled.connect(settings.set_match_crs)
+        self.orientation_box = QComboBox()
+        for key in ORIENTATIONS:
+            self.orientation_box.addItem(self.tr(ORIENTATION_LABELS[key]), key)
+        self.orientation_box.setCurrentIndex(max(0, self.orientation_box.findData(settings.map_orientation())))
+        self.orientation_box.setToolTip(self.tr(
+            "画像を開くとき、地図を回してこの向きを上に（PC ごとに記憶）\n"
+            "北が上: 回さない\n"
+            "撮像方向が上: 衛星から地上を見る向きを上に（衛星が画面の下。光学の斜め撮りではビルが上へ倒れて見える）\n"
+            "衛星が上: 衛星を画面の上に（SAR の影が下へ伸びる）\n"
+            "進行方向が上: 衛星の進む向きを上に（SAR）\n"
+            "方位はカタログの方位角、クイック幾何補正で入力した方角、画像のメタデータの順に探す。"
+            "わからないとき・ほぼ真下から撮った光学画像は北が上のまま。開いた画像をすべて閉じると元に戻す"))
+        self.orientation_box.currentIndexChanged.connect(lambda _i: settings.set_map_orientation(self.orientation_box.currentData()))
+        #: Puts the map in the image's CRS and turns it, and back when those images close (ui/map_orient.py).
+        self.orienter = MapOrienter(self.canvas, parent=self)
+        self.orienter.said.connect(self._orienter_said)
 
         buttons = FlowLayout()
         self.buttons: dict[str, QPushButton] = {}
@@ -349,9 +378,6 @@ class CatalogDock(
                 button.clicked.connect(slot)
             buttons.addWidget(button)
             self.buttons[key] = button
-            if key == "open":
-                buttons.addWidget(self.close_previous)
-                buttons.addWidget(self.zoom_opened)
         # 「フットプリント」: how the listed images are drawn on the map (filled ones hid the images opened under them).
         self.footprint_box = QComboBox()
         for text, style in ((self.tr("塗りつぶし"), "fill"), (self.tr("枠だけ"), "outline"), (self.tr("非表示"), "hidden")):
@@ -362,15 +388,31 @@ class CatalogDock(
                                               "枠だけ: 塗らずに枠線だけ（画像 ID は範囲の上端に）\n"
                                               "非表示: 地図に出さない（「地図で選択」のクリックは効く）"))
         self.footprint_box.currentIndexChanged.connect(lambda _i: self.set_footprint_style(self.footprint_box.currentData()))
+        holder = QWidget()
+        holder.setLayout(buttons)
+        self.body.addWidget(holder)
+        # The options under the buttons, one to a row (tsudo, 2026-11-25: 「ボタンはまとめて幅に応じて並べて、
+        # チェックボックスは下段に1件1行」).
+        options = QVBoxLayout()
+        options.setSpacing(2)
+        options.addWidget(self.close_previous)
+        options.addWidget(self.zoom_opened)
+        options.addWidget(self.match_crs)
+        self.orientation_row = QWidget()
+        orientation_row = QHBoxLayout(self.orientation_row)
+        orientation_row.setContentsMargins(0, 0, 0, 0)
+        orientation_row.addWidget(QLabel(self.tr("向き")))
+        orientation_row.addWidget(self.orientation_box)
+        orientation_row.addStretch(1)
+        options.addWidget(self.orientation_row)
         footprints = QWidget()
         footprint_row = QHBoxLayout(footprints)
         footprint_row.setContentsMargins(0, 0, 0, 0)
         footprint_row.addWidget(QLabel(self.tr("フットプリント")))
         footprint_row.addWidget(self.footprint_box)
-        buttons.addWidget(footprints)
-        holder = QWidget()
-        holder.setLayout(buttons)
-        self.body.addWidget(holder)
+        footprint_row.addStretch(1)
+        options.addWidget(footprints)
+        self.body.addLayout(options)
 
         self.overlay: Optional[FootprintOverlay] = None
         self.tool = FootprintTool(self.canvas, self._picked)
@@ -485,6 +527,8 @@ class CatalogDock(
 
     #: The 「イベント」 dock (plugin.py sets it).
     event_linker: Optional[Callable[[], object]] = None
+    #: The satellite's direction typed in クイック幾何補正 for a layer's image (features/images.py sets it), for 「向き」.
+    typed_toward: Optional[Callable[[object], Optional[float]]] = None
 
 
     #: Shows a folder in Explorer (qgis_io/file_manager.py; tests replace it).
@@ -499,6 +543,7 @@ class CatalogDock(
         self.buttons["pick"].setChecked(False)
         self.draw_button.setChecked(False)
         self.draw_tool.remove()
+        self.orienter.unload()
         if self.overlay is not None:
             self.overlay.remove()
             self.overlay = None

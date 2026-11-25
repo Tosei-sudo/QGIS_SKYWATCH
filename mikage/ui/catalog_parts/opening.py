@@ -17,7 +17,7 @@ from ...qgis_io.obs_images import IMAGE_ID
 from ...qgis_io.overviews_io import queue as overview_queue
 from ...qgis_io.catalog_io import (
     Cancelled, add_or_choose, close_layers, located_again, open_located, open_record,
-    opened_images,
+    opened_images, record_of_layer,
 )
 from ..docks import plain_tip
 from ..image_files_dialog import choose_image_files
@@ -122,17 +122,25 @@ class OpeningPart:
                 already.append(record.id)
             overview_queue.request(opened, self.context.config.overviews, self.iface.messageBar())
             layers += opened + there
-        self._opened(layers)
+        note = self._opened(layers)
         if already:
-            self.status.setText(self.tr("{id} は開いている画像。そのレイヤーを選択").format(id="、".join(already)))
+            self.status.setText(self.tr("{id} は開いている画像。そのレイヤーを選択").format(id="、".join(already)) +
+                                ("\n" + note if note else ""))
         if problems:
             self._say_unopened(problems, [r for r in unopened if r.id])
             self.status.setText(problems[-1])
         return layers
 
-    def _opened(self, layers: list) -> None:
-        """After images opened: 「前の画像を閉じる」, 「開いた画像へ移動」, and the ids offered by 「画像 ID で開く」."""
+    def _opened(self, layers: list) -> str:
+        """
+        After images opened: 「投影法を画像に合わせる」・「向き」 (before the
+        previous ones close: the map is put back only when none is left),
+        「前の画像を閉じる」, 「開いた画像へ移動」, and the ids offered by
+        「画像 ID で開く」. What 「向き」 did ("" for nothing), for the status.
+        """
+        note = ""
         if layers:
+            note = self.orient_map(layers)
             # Only those opened with it on close (an image opened before it was turned on stays).
             opened_ids = [layer.id() for layer in layers]
             if self.close_previous.isChecked():
@@ -145,6 +153,22 @@ class OpeningPart:
             if self.zoom_opened.isChecked():
                 self.zoom_to_layers(layers)
         self._refresh_opened()
+        #: What 「向き」 did at the last opening (kept for the status lines set after).
+        self.orient_note = note
+        return note
+
+    def orient_map(self, layers: list) -> str:
+        """「投影法を画像に合わせる」・「向き」 for the images opened (the first of them); what was done."""
+        catalogs = self.catalogs()
+        typed = self.typed_toward
+        return self.orienter.orient(
+            layers, self.match_crs.isChecked(), self.orientation_box.currentData() or "north",
+            found_of=lambda layer: record_of_layer(layer, catalogs),
+            typed_of=(lambda layer: typed(layer)) if typed is not None else (lambda layer: None))
+
+    def _orienter_said(self, text: str) -> None:
+        if text:
+            self.status.setText(text)
 
     def _unlist_previous(self) -> None:
         """「前の画像を閉じる」 as images open: those recorded here without their files before go off 観測記録's list (their records stay)."""
@@ -231,11 +255,12 @@ class OpeningPart:
         layers, there = add_or_choose(layers, record)
         overview_queue.request(layers, self.context.config.overviews, self.iface.messageBar())
         layers += there
-        self._opened(layers)
+        note = self._opened(layers)
         if there and len(there) == len(layers):
-            self.status.setText(self.tr("{id} は開いている画像。そのレイヤーを選択").format(id=entry.image_id))
+            text = self.tr("{id} は開いている画像。そのレイヤーを選択").format(id=entry.image_id)
         else:
-            self.status.setText(problems[-1] if problems else self.tr("{id} を前回のファイルで表示（{n} ファイル）").format(id=entry.image_id, n=len(layers)))
+            text = problems[-1] if problems else self.tr("{id} を前回のファイルで表示（{n} ファイル）").format(id=entry.image_id, n=len(layers))
+        self.status.setText(text + ("\n" + note if note and not problems else ""))
         if then is not None:
             then(layers)
 
@@ -274,7 +299,8 @@ class OpeningPart:
                 return
             layers = self.open_catalog_records(catalog, [record])
             if layers:
-                self.status.setText(self.tr("{id} を表示（{n} ファイル）").format(id=image_id, n=len(layers)))
+                note = getattr(self, "orient_note", "")
+                self.status.setText(self.tr("{id} を表示（{n} ファイル）").format(id=image_id, n=len(layers)) + ("\n" + note if note else ""))
                 if then is not None:
                     then(layers)
 
