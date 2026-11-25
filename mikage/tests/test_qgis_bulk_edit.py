@@ -40,6 +40,8 @@ def test_requests_chosen_together_get_a_priority_and_status(request_plugin):
     _choose(dock.table, [names.index("横須賀"), names.index("佐世保")])
     assert dock.bulk_button.isEnabled() and {r.name for r in dock.selected()} == {"横須賀", "佐世保"}
     dialog = dock.bulk_edit()
+    # 分類 (光学・SAR) is a list: no classification's buttons.
+    assert dialog.levels == {}
     dialog.tick("priority", 120)
     dialog.extras["reset_boost"].setChecked(True)
     dialog.tick("status", "停止")
@@ -90,6 +92,33 @@ def test_records_chosen_together(obs_plugin):
     assert [(got[n].kind, got[n].confidence) for n in ("あおば", "いぶき", "うらが")] == [
         ("船舶 > 護衛艦", "推定"), ("船舶", ""), ("船舶 > 護衛艦", "推定")]
     assert dock.status.text().startswith("2 件の記録を一括変更")
+
+
+def test_the_kind_of_records_chosen_together_is_picked_level_by_level(obs_plugin):
+    # tsudo 2026-11-25: the kind from the classification as in the record form; a press also ticks 「種別」.
+    p, iface, dock, layers, tmp_path = obs_plugin
+    book = dock.book
+    for path in (["船舶", "護衛艦"], ["船舶", "補給艦"]):
+        assert book.add_class(path)
+    for name, lon in (("あおば", 139.65), ("いぶき", 139.7)):
+        book.add(lon, 35.6, object=name, kind="船舶", activity="停泊")
+    dock.render()
+    _choose(dock.table, [0, 1])
+    dialog = dock.bulk_edit()
+    levels = dialog.levels["kind"]
+    assert not dialog.ticks["kind"].isChecked()
+    assert [(name, chosen) for name, _choices, chosen in levels.drawn] == [("大分類", "船舶"), ("種別", "")]
+    levels.press("補給艦")
+    assert dialog.ticks["kind"].isChecked() and dialog.inputs["kind"].text() == "船舶 > 補給艦"
+    assert levels.drawn[1][2] == "補給艦"
+    # Typed, the buttons follow.
+    dialog.inputs["kind"].setText("航空機")
+    assert levels.drawn[0][2] == "航空機" and [b.isChecked() for b in levels.buttons() if b.text() == "航空機"] == [True]
+    levels.press("船舶")
+    levels.press("護衛艦")
+    assert dialog.values() == {"kind": "船舶 > 護衛艦"}
+    dialog._ok()
+    assert {o.kind for o in book.living()} == {"船舶 > 護衛艦"}
 
 
 def test_records_chosen_together_are_deleted_after_asking(obs_plugin, monkeypatch):

@@ -177,6 +177,17 @@ class RecordsPart:
         kind = self.rekind_input.text().strip()
         self.do(self.tr("名前の変更"), lambda b: b.rename(flow.object_id, name, kind_of(path_of(kind)) if kind else None))
 
+    def _render_rekind(self) -> None:
+        """「このモノの詳細 ▸ 種別」's levels, for the kind in its field (drawn while the box is open)."""
+        if self.book is None or not self.flow_more.isChecked():
+            self.rekind_levels.clear()
+            return
+        self.rekind_levels.render(self.book.taxonomy(), self.rekind_input.text(), keep=True)
+
+    def _rekind_chosen(self, path: list) -> None:
+        """A level's button pressed: the kind in the field (nothing saved until 「名前・種別の変更」)."""
+        self.rekind_input.setText(kind_of(path))
+
     def _remove_chosen(self) -> None:
         flow = self._chosen_flow()
         if flow is None:

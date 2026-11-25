@@ -290,6 +290,8 @@ class ViewPart:
             self.rekind_input.setText(flow.kind)
             self.remove_all_button.setProperty("armed", False)
             self.remove_all_button.setText(tr("このモノの記録を削除"))
+        # The classification may have changed (分類体系の編集); what is typed stays.
+        self._render_rekind()
         self.merge_select.clear()
         self.merge_select.addItem(tr("統合先のモノ…"), "")
         for f in book.flows():

@@ -14,8 +14,10 @@ from qgis.PyQt.QtWidgets import (
     QWidget,
 )
 
+from ..core.obs.api import kind_of
 from ..core.request.api import PRIORITY_LEVELS, PRIORITY_MAX, PRIORITY_MIN, level_of
 from .fit import fit_text
+from .kind_levels import KindLevels
 
 
 @dataclass
@@ -31,6 +33,8 @@ class BulkField:
     tip: str = ""
     #: A further tick shown under the item (key, label), set only when the item is.
     extra: Optional[tuple] = None
+    #: For a kind: the classification, its levels shown under the field as buttons (ui/kind_levels.py; a press ticks the item).
+    taxonomy: Optional[Sequence] = None
 
 
 class _Priority(QWidget):
@@ -74,6 +78,8 @@ class BulkEditDialog(QDialog):
         self.ticks: dict[str, QCheckBox] = {}
         self.inputs: dict[str, Any] = {}
         self.extras: dict[str, QCheckBox] = {}
+        #: The kinds' levels (KindLevels), by key.
+        self.levels: dict[str, KindLevels] = {}
         for f in self.fields:
             tick = QCheckBox(f.label)
             tick.setToolTip(f.tip)
@@ -97,6 +103,8 @@ class BulkEditDialog(QDialog):
                 widget.activated.connect(lambda _i, tick=tick: tick.setChecked(True))
             form.addRow(tick, widget)
             self.ticks[f.key], self.inputs[f.key] = tick, widget
+            if f.taxonomy is not None and isinstance(widget, QLineEdit):
+                self._add_levels(f.key, list(f.taxonomy), form)
             if f.extra:
                 extra = QCheckBox(f.extra[1])
                 extra.setEnabled(False)
@@ -104,6 +112,8 @@ class BulkEditDialog(QDialog):
                 form.addRow("", extra)
                 self.extras[f.extra[0]] = extra
         lay.addLayout(form)
+        # Room the dialog is given beyond its rows (a kind's buttons wrap on fewer lines when wider) goes below them.
+        lay.addStretch(1)
         self.message = QLabel()
         self.message.setWordWrap(True)
         lay.addWidget(self.message)
@@ -112,6 +122,28 @@ class BulkEditDialog(QDialog):
         self.buttons.accepted.connect(self._ok)
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
+        if self.levels:
+            # Wide enough for a level's buttons on a line or two.
+            width = max(self.sizeHint().width(), 440)
+            height = lay.totalHeightForWidth(width) if lay.hasHeightForWidth() else -1
+            self.resize(width, height if height > 0 else self.sizeHint().height())
+
+    def _add_levels(self, key: str, taxa: list, form: QFormLayout) -> None:
+        """The kind's levels under its field: a press puts the kind in the field and ticks the item."""
+        edit, tick = self.inputs[key], self.ticks[key]
+        levels = KindLevels()
+        levels.setToolTip(self.tr("押すと上の欄に入り、チェックも入る"))
+
+        def chosen(path: list) -> None:
+            tick.setChecked(True)
+            edit.setText(kind_of(path))
+
+        levels.chosen.connect(chosen)
+        edit.textChanged.connect(lambda text: levels.render(taxa, text, keep=True))
+        levels.render(taxa, edit.text())
+        # Across the whole row, as in the record form (in the field's column alone the rows got spread apart).
+        form.addRow(levels)
+        self.levels[key] = levels
 
     def tick(self, key: str, value: Any = None) -> None:
         """Ticks an item (and sets its value), as a person would (for tests and scripts)."""
