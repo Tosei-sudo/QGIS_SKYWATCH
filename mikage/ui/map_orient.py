@@ -10,6 +10,13 @@ once every image it was done for has left the project; a CRS or rotation
 the person changes meanwhile (QGIS's own boxes, the north arrow) is theirs
 and is not put back. A project opened or cleared forgets it all.
 
+`MapOrienter.turn` (画像補正ドック「地図の向き」, tsudo 2026-11-26): the map
+turned for one image as a button asks, its CRS changed only when it is in
+degrees; the map left as it is (and why) when the way is not known.
+
+One MapOrienter for a map (`shared_orienter`): the docks share it, so there
+is one north arrow and one map to put back.
+
 `NorthArrow`: while the map is turned (by anyone), an arrow in its top
 right corner shows where north is; a click turns the map back north up.
 """
@@ -29,6 +36,8 @@ from ..qgis_io.map_view_io import centre_of, crs_for, directions_of, fitted_exte
 
 #: Rotations closer to 0 than this are north up.
 _STILL = 0.05
+#: The maps' orienters (by the canvas), while a dock holds them (`shared_orienter`).
+_SHARED: dict = {}
 
 
 class NorthArrow(QToolButton):
@@ -109,6 +118,8 @@ class MapOrienter(QObject):
     """
 
     said = pyqtSignal(str)
+    #: The map was turned or put back by it (the docks show the way up).
+    turned = pyqtSignal()
 
     def __init__(self, canvas, project: Optional[QgsProject] = None, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -119,12 +130,30 @@ class MapOrienter(QObject):
         #: The layers it was done for (their ids): when the last of them goes, the map is put back.
         self.layer_ids: set[str] = set()
         self._busy = False
+        #: The way up it last put the map (ORIENTATIONS' key) and the rotation for it; None when not, or turned since.
+        self.way: Optional[tuple[str, float]] = None
+        #: The docks holding it (`shared_orienter`).
+        self.users: set[int] = set()
         self.arrow = NorthArrow(canvas)
         self.project.layersWillBeRemoved.connect(self._removed)
         self.project.removeAll.connect(self.forget)
         self.project.readProject.connect(self.forget)
         canvas.destinationCrsChanged.connect(self._crs_changed)
         canvas.rotationChanged.connect(self._rotation_changed)
+
+    @property
+    def busy(self) -> bool:
+        """Whether it is changing the map now (a CRS or rotation change seen meanwhile is its own)."""
+        return self._busy
+
+    def current_way(self) -> Optional[str]:
+        """The way up the map shows now: "north" for none turned, the one it put otherwise, None when turned otherwise."""
+        r = self.canvas.rotation()
+        if abs(r) <= _STILL:
+            return "north"
+        if self.way is not None and abs(self.way[1] - r) < 0.01:
+            return self.way[0]
+        return None
 
     def unload(self) -> None:
         for signal, slot in ((self.project.layersWillBeRemoved, self._removed), (self.project.removeAll, self.forget),
@@ -152,6 +181,8 @@ class MapOrienter(QObject):
             self._forget_if_nothing()
 
     def _rotation_changed(self, *_args) -> None:
+        if not self._busy:
+            self.way = None
         if not self._busy and self.before is not None:
             self.before["rotation"] = None
             self._forget_if_nothing()
@@ -174,7 +205,9 @@ class MapOrienter(QObject):
         if not before:
             return
         crs, rotation = before.get("crs"), before.get("rotation")
+        self.way = None
         self._set(crs if crs is not None and crs.isValid() else None, rotation)
+        self.turned.emit()
         if crs is not None or rotation is not None:
             self.said.emit(self.tr("開いた画像を閉じたので、地図の投影法と向きを元に戻した"))
 
@@ -193,6 +226,29 @@ class MapOrienter(QObject):
 
     # ---- an image opened ----
 
+    def _bearing(self, layer, orientation: str, found_of, typed_of) -> tuple[Optional[float], str]:
+        """The true bearing to put up for `layer` (core/map_view.bearing_up) and where it came from, or None and why."""
+        return bearing_up(orientation, directions_of(layer, found_of(layer), typed_of(layer), orientation))
+
+    def _keep_before(self) -> None:
+        """The map as it is kept to put back (what the person changed since it was kept: as it is now)."""
+        now = {"crs": QgsCoordinateReferenceSystem(self.canvas.mapSettings().destinationCrs()), "rotation": self.canvas.rotation()}
+        if self.before is None:
+            self.before = now
+        else:
+            for key, value in now.items():
+                if self.before.get(key) is None:
+                    self.before[key] = value
+
+    def _turn_to(self, centre, crs, bearing: float, orientation: str) -> None:
+        """The map in `crs` (None: as it is) turned so the true `bearing` is up at `centre`."""
+        shown_in = crs if crs is not None else self.canvas.mapSettings().destinationCrs()
+        grid = grid_bearing(shown_in, centre[0], centre[1], bearing, self.project)
+        rotation = rotation_for(grid if grid is not None else bearing)
+        self._keep_before()
+        self._set(crs, rotation)
+        self.way = (orientation, self.canvas.rotation())
+
     def orient(self, layers, match: bool, orientation: str,
                found_of: Callable[[object], Optional[tuple]] = lambda layer: None,
                typed_of: Callable[[object], Optional[float]] = lambda layer: None) -> str:
@@ -210,27 +266,23 @@ class MapOrienter(QObject):
             return ""
         centre = centre_of(layer, self.project)
         current = self.canvas.mapSettings().destinationCrs()
-        turning = orientation != "north"
-        why = ""
-        rotation = None
+        why = source = ""
         bearing = None
-        if turning:
-            d = directions_of(layer, found_of(layer), typed_of(layer), orientation)
-            bearing, source = bearing_up(orientation, d)
+        if orientation != "north":
+            bearing, source = self._bearing(layer, orientation, found_of, typed_of)
             if bearing is None:
-                why = source
+                why, source = source, ""
         crs = crs_for(layer, centre, match, bearing is not None, current)
-        shown_in = crs if crs is not None else current
         if bearing is not None:
-            grid = grid_bearing(shown_in, centre[0], centre[1], bearing, self.project)
-            rotation = rotation_for(grid if grid is not None else bearing)
-        elif self.before is not None and self.before.get("rotation") is not None:
+            self._turn_to(centre, crs, bearing, orientation)
+        else:
             # North up (asked, or the way not known): the rotation an image put on before taken off.
-            rotation = self.before["rotation"]
-        if self.before is None:
-            self.before = {"crs": QgsCoordinateReferenceSystem(current), "rotation": self.canvas.rotation()}
-        self._set(crs, rotation)
+            rotation = self.before.get("rotation") if self.before is not None else None
+            self._keep_before()
+            self.way = None
+            self._set(crs, rotation)
         self.layer_ids |= {x.id() for x in layers}
+        self.turned.emit()
         parts = []
         if crs is not None:
             parts.append(crs.description() or crs.authid())
@@ -244,7 +296,57 @@ class MapOrienter(QObject):
             self.said.emit(text)
         return text
 
+    def turn(self, layer, orientation: str,
+             found_of: Callable[[object], Optional[tuple]] = lambda layer: None,
+             typed_of: Callable[[object], Optional[float]] = lambda layer: None) -> tuple[bool, str]:
+        """
+        画像補正「地図の向き」: the map turned so `orientation`'s way of
+        `layer` is up (a map in degrees put in the image's UTM zone first), or
+        north up for "north" (the CRS as it is); whether it turned, and what
+        was done or why not (the map then left as it is).
+        """
+        if orientation == "north":
+            self.way = None
+            self.canvas.setRotation(0)
+            self.canvas.refresh()
+            self.turned.emit()
+            return True, self.tr("北が上")
+        centre = centre_of(layer, self.project) if layer is not None else None
+        if centre is None:
+            return False, self.tr("回さなかった: 画像の位置がわからない")
+        bearing, source = self._bearing(layer, orientation, found_of, typed_of)
+        if bearing is None:
+            return False, self.tr("回さなかった: {why}").format(why=source)
+        crs = crs_for(layer, centre, False, True, self.canvas.mapSettings().destinationCrs())
+        self._turn_to(centre, crs, bearing, orientation)
+        self.layer_ids.add(layer.id())
+        self.turned.emit()
+        text = self.tr("回転 {r}（{way}、{source}から）").format(
+            r=turned_text(self.canvas.rotation()), way=ORIENTATION_LABELS[orientation].split("（")[0], source=source)
+        if crs is not None:
+            text += self.tr("。地図を {crs} に").format(crs=crs.description() or crs.authid())
+        return True, text
+
     def fitted(self, layers) -> Optional[object]:
         """The extent that shows the layers whole on the map as it is turned now (None when it can not)."""
         s = self.canvas.mapSettings()
         return fitted_extent(layers, s.destinationCrs(), self.canvas.rotation(), project=self.project)
+
+
+def shared_orienter(canvas, user) -> MapOrienter:
+    """The map's MapOrienter, held by `user` (a dock) until `release_orienter`: one north arrow, one map to put back."""
+    o = _SHARED.get(id(canvas))
+    if o is None or o.canvas is not canvas or not o.users:
+        o = MapOrienter(canvas)
+        _SHARED[id(canvas)] = o
+    o.users.add(id(user))
+    return o
+
+
+def release_orienter(orienter: MapOrienter, user) -> None:
+    """`user` no longer needs the orienter: the last one unloads it."""
+    orienter.users.discard(id(user))
+    if not orienter.users:
+        if _SHARED.get(id(orienter.canvas)) is orienter:
+            del _SHARED[id(orienter.canvas)]
+        orienter.unload()

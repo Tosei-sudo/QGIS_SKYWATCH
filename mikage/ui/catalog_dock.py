@@ -50,7 +50,7 @@ from .catalog_overlay import DrawTool, FootprintOverlay, FootprintTool
 from .docks import PluginDock, plain_label
 from .flow_layout import FlowLayout
 from .list_views import ListViews, MenuToolButton
-from .map_orient import MapOrienter
+from .map_orient import release_orienter, shared_orienter
 from .catalog_parts.conditions import ConditionsPart
 from .catalog_parts.search import SearchPart
 from .catalog_parts.similar import SimilarPart
@@ -337,8 +337,8 @@ class CatalogDock(
             "方位はカタログの方位角、クイック幾何補正で入力した方角、画像のメタデータの順に探す。"
             "わからないとき・ほぼ真下から撮った光学画像は北が上のまま。開いた画像をすべて閉じると元に戻す"))
         self.orientation_box.currentIndexChanged.connect(lambda _i: settings.set_map_orientation(self.orientation_box.currentData()))
-        #: Puts the map in the image's CRS and turns it, and back when those images close (ui/map_orient.py).
-        self.orienter = MapOrienter(self.canvas, parent=self)
+        #: Puts the map in the image's CRS and turns it, and back when those images close (ui/map_orient.py; shared with 画像補正).
+        self.orienter = shared_orienter(self.canvas, self)
         self.orienter.said.connect(self._orienter_said)
 
         buttons = FlowLayout()
@@ -543,7 +543,11 @@ class CatalogDock(
         self.buttons["pick"].setChecked(False)
         self.draw_button.setChecked(False)
         self.draw_tool.remove()
-        self.orienter.unload()
+        try:
+            self.orienter.said.disconnect(self._orienter_said)
+        except (TypeError, RuntimeError):
+            pass
+        release_orienter(self.orienter, self)
         if self.overlay is not None:
             self.overlay.remove()
             self.overlay = None
