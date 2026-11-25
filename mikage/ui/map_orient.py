@@ -233,12 +233,12 @@ class MapOrienter(QObject):
         self.layer_ids |= {x.id() for x in layers}
         parts = []
         if crs is not None:
-            parts.append(self.tr("投影法を {name} に").format(name=crs.userFriendlyIdentifier() or crs.authid()))
+            parts.append(crs.description() or crs.authid())
         if bearing is not None:
-            parts.append(self.tr("{way}（地図の回転 {r}、{source}から）").format(
-                way=ORIENTATION_LABELS[orientation], r=turned_text(self.canvas.rotation()), source=source))
+            parts.append(self.tr("{way}（回転 {r}、{source}から）").format(
+                way=ORIENTATION_LABELS[orientation].split("（")[0], r=turned_text(self.canvas.rotation()), source=source))
         elif why:
-            parts.append(self.tr("北が上のまま: {why}").format(why=why))
+            parts.append(self.tr("北が上のまま（{why}）").format(why=why))
         text = self.tr("地図: ") + "、".join(parts) if parts else ""
         if text:
             self.said.emit(text)

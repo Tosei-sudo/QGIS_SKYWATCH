@@ -112,7 +112,7 @@ def test_the_map_in_the_images_crs_turned_to_the_look_and_put_back_when_closed(o
     # The look (from the satellite, 100° + 180°) points straight up; true north (not the grid's) shows 80° clockwise.
     assert abs(screen_way(canvas, 139.7, 35.6, 280)) < 0.2
     assert abs(screen_way(canvas, 139.7, 35.6, 0) - 80) < 0.2
-    assert "撮像方向が上" in dock.status.text() and "カタログの方位角" in dock.status.text()
+    assert dock.status.text() == "地図: WGS 84 / UTM zone 54N、撮像方向が上（回転 79°、カタログの方位角から）", dock.status.text()
     assert dock.orienter.arrow.isVisibleTo(canvas)
     assert abs(dock.orienter.arrow.north_angle() - 80) < 0.5
     # The whole image in the turned view (「開いた画像へ移動」).
@@ -123,6 +123,10 @@ def test_the_map_in_the_images_crs_turned_to_the_look_and_put_back_when_closed(o
     view = QgsGeometry.fromPolygonXY([[QgsPointXY(q.x(), q.y()) for q in [*polygon, polygon[0]]]])
     for lon, lat in ((139.6, 35.5), (139.8, 35.5), (139.8, 35.7), (139.6, 35.7)):
         assert view.contains(QgsGeometry.fromPointXY(to_map.transform(QgsPointXY(lon, lat)))), (lon, lat)
+    # Opened again (the layer chosen): said under that. (The map's grid north is 0.8° off true north there.)
+    dock.open_records([records["A"]])
+    assert dock.status.text().split("\n")[0] == "A は開いている画像。そのレイヤーを選択"
+    assert "撮像方向が上（回転 79°" in dock.status.text().split("\n")[1]
     # The image closed: the map as it was.
     QgsProject.instance().removeMapLayer(layer.id())
     assert canvas.mapSettings().destinationCrs() == WGS84 and canvas.rotation() == 0
@@ -161,7 +165,7 @@ def test_a_projected_image_keeps_its_crs_and_the_first_of_several_decides(opened
     layers = dock.open_records([records["U"], records["D"]])
     assert len(layers) == 2
     assert canvas.mapSettings().destinationCrs().authid() == "EPSG:32654" and canvas.rotation() == 0
-    assert "投影法を" in dock.status.text()
+    assert "WGS 84 / UTM zone 54N" in dock.status.text()
     # Put back only when both are closed.
     QgsProject.instance().removeMapLayer(layers[0].id())
     assert canvas.mapSettings().destinationCrs().authid() == "EPSG:32654"

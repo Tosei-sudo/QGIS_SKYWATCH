@@ -48,7 +48,7 @@ NEAR_NADIR = 3.0
 EARTH_RADIUS = 6371.0
 #: Where a direction was found, as the dock says it.
 SOURCES = {"catalog": "カタログの方位角", "typed": "幾何補正で入力した方角", "file": "画像のメタデータ",
-           "columns": "画像の列の向き", "rows": "画像の行の向き", "look": "観測の向きから"}
+           "columns": "画像の列の向き", "rows": "画像の行の向き", "look": "観測の向き"}
 
 
 @dataclass(frozen=True)
