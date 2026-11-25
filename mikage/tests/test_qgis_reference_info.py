@@ -292,6 +292,63 @@ def test_the_events_tab(plugin):
     assert wait_for(lambda: events.reference_table.rowCount() == 0 and not links.rows)
 
 
+def test_json_import_tries_then_imports_and_lists_what_came_in(plugin):
+    """「JSON 取り込み…」 (2026-11-25): the dry run in the window, then the import; the dock lists the infos imported."""
+    p, iface, infos, links, tmp_path = plugin
+    dock = p.docks["SatObsReferences"]
+    dock.show()
+    assert wait_for(lambda: dock.infos is not None and idle(dock))
+    path = tmp_path / "警報.json"
+    path.write_text(json.dumps({"defaults": {"source": "海上保安部", "reliability": "確定"}, "infos": [
+        # An update of REF-1 (its summary), a new one in a named area (by its name), a duplicate of REF-4, an error.
+        {"id": "REF-1", "title": "湾内で貨物船が座礁", "time": "2026-09-29T01:00:00Z", "sourceRef": "航行警報 第12号", "summary": "離礁作業中"},
+        {"title": "浦賀水道で工事", "time": "2026-11-20T09:00", "area": "東京湾", "links": [{"type": "event", "id": "EV-1", "label": "工事"}]},
+        {"title": "相模湾の新しい岸壁", "time": infos.rows[3]["attributes"]["INFO_TIME"] and _iso(infos.rows[3]["attributes"]["INFO_TIME"]),
+         "source": "〇〇新聞"},
+        {"title": "地名違い", "time": "2026-11-20", "area": "伊勢湾"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+    assert dock.buttons["import"].isEnabled()
+    dialog = dock.open_import(str(path))
+    assert wait_for(lambda: dialog.plan is not None and idle(dock))
+    assert dialog.summary.text() == "新規 1・更新 1・重複（飛ばす） 1・エラー 1"
+    assert [dialog.table.item(i, 1).text() for i in range(4)] == ["更新", "新規", "重複（飛ばす）", "エラー"]
+    assert dialog.table.item(0, 5).text() == "変わる: 要旨" and dialog.table.item(1, 4).text().startswith("東京湾")
+    assert dialog.table.item(3, 5).text() == "地名「伊勢湾」が見つからない"
+    assert dialog.import_button.text() == "取り込む（2 件）" and dialog.import_button.isEnabled() and len(infos.rows) == 4
+    dialog.problems_only.setChecked(True)
+    assert dialog.table.rowCount() == 1
+    dialog.problems_only.setChecked(False)
+    assert dialog.run_import()
+    assert wait_for(lambda: dialog.result is not None and idle(dock) and dock.focus is not None)
+    assert dialog.summary.text() == "取り込み済み: 追加 1・更新 1・紐付け 1・重複（飛ばす） 1・エラー 1"
+    assert len(infos.rows) == 5 and infos.rows[0]["attributes"]["SUMMARY"] == "離礁作業中"
+    new = infos.rows[4]["attributes"]
+    assert new["NAMED_AREA_ID"] == "NA-000001" and new["SOURCE"] == "海上保安部" and new["CREATED_USER"] == "田中"
+    assert [(r["attributes"]["ITEM_ID"], r["attributes"]["INFO_ID"]) for r in links.rows] == [("EV-1", new["INFO_ID"])]
+    assert dock.focus[0] == "取り込んだ参考情報" and {x.title for x in dock.shown} == {"湾内で貨物船が座礁", "浦賀水道で工事"}
+    # The same file again: nothing to import.
+    dialog.try_run()
+    assert wait_for(lambda: dialog.plan is not None and idle(dock))
+    assert dialog.summary.text() == "変更なし 1・重複（飛ばす） 2・エラー 1" and not dialog.import_button.isEnabled()
+    # A file that does not fit the schema is refused as a whole.
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"items": []}', encoding="utf-8")
+    assert not dialog.choose_file(str(bad))
+    assert dialog.summary.text() == "このファイルは取り込めない" and "知らないキー「items」" in dialog.notes.text()
+    # The Python API: tried, then saved.
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"infos": [{"title": "API から", "time": "2026-11-21"}]}, ensure_ascii=False), encoding="utf-8")
+    r = p.api.import_reference_infos(str(other))
+    assert r["summary"] == "新規 1" and r["rows"][0]["action"] == "new" and len(infos.rows) == 5
+    r = p.api.import_reference_infos(str(other), save=True)
+    assert (r["added"], r["failures"]) == (1, []) and len(infos.rows) == 6
+    assert p.api.import_reference_infos(str(bad))["problems"]
+
+
+def _iso(ms):
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def test_without_settings_the_dock_says_so(tmp_path, monkeypatch):
     QgsSettings().remove("mikage")
     path = tmp_path / "config.json"
@@ -303,7 +360,7 @@ def test_without_settings_the_dock_says_so(tmp_path, monkeypatch):
     try:
         dock = p.docks["SatObsReferences"]
         dock.show()
-        assert "referenceInfo" in dock.note.text() and not dock.buttons["new"].isEnabled()
+        assert "referenceInfo" in dock.note.text() and not dock.buttons["new"].isEnabled() and not dock.buttons["import"].isEnabled()
         assert not p.docks["SatObsEvents"].tabs.isTabVisible(p.docks["SatObsEvents"].reference_tab)
         assert p.api.observation_dock.reference_line.isHidden()
     finally:

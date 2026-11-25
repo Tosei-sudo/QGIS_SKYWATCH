@@ -178,6 +178,28 @@ class PluginApi:
         """The dock 「参考情報」 (its `infos`, `reload()`, `choose(id)`, `save(info)`, `link(info_ids, targets)`, `show_for_items(items, what)`)."""
         return self._plugin.docks["SatObsReferences"]
 
+    def import_reference_infos(self, path: str, save: bool = False) -> dict:
+        """
+        「参考情報の取り込み（JSON）」 for scripts: a JSON file
+        (resources/schemas/reference-info.schema.json) into the info layer.
+        Tried only unless `save`: what each row would become (`summary`,
+        `rows`, `notes`; `problems` when the file cannot be used at all).
+        """
+        from .core import reference_import as ri
+
+        dock = self.references
+        data = ri.read_file(path)
+        if not data.usable:
+            return {"summary": "このファイルは取り込めない", "problems": list(data.problems), "rows": [], "notes": []}
+        value = dock.import_work(data, save)()
+        plan = value.plan if save else value
+        out = {"summary": value.summary(), "problems": [], "rows": ri.plan_lines(plan), "notes": list(plan.notes)}
+        if save:
+            out.update(added=value.added, updated=value.updated, links=value.links,
+                       failures=[{"row": n, "message": m} for n, m in value.failures])
+            dock.reload()
+        return out
+
     @property
     def interests(self) -> "InterestsDock":
         """The dock 「関心地域・地点」 (its `book` (`items`, `load()`, `over(geometry)`), `chosen()`, `choose(id)`, `save()`, `delete()`, `zoom()`)."""

@@ -1,0 +1,34 @@
+{
+  "$schema": "../../mikage/resources/schemas/reference-info.schema.json",
+  "format": "mikage-reference-info",
+  "version": 1,
+  "defaults": { "source": "海上保安庁", "reliability": "確定" },
+  "infos": [
+    {
+      "id": "NAV-2026-0123",
+      "title": "〇〇沖で射撃訓練（航行警報）",
+      "time": "2026-11-28T09:00:00+09:00",
+      "published": "2026-11-24",
+      "sourceRef": "航行警報 第123号",
+      "summary": "11/28 09:00〜15:00、〇〇沖の区域で射撃訓練。",
+      "kind": "船舶",
+      "area": "NA-000001",
+      "links": [{ "type": "event", "id": "EV-20261120-0001", "label": "11 月の演習" }]
+    },
+    {
+      "title": "△△港に大型クレーン設置と報道",
+      "time": "2026-11-20",
+      "source": "〇〇新聞",
+      "sourceRef": "https://news.example/article/123",
+      "reliability": "推定",
+      "lon": 139.652,
+      "lat": 35.284
+    },
+    {
+      "title": "東京湾で浚渫工事の予告",
+      "time": "2026-12-01T08:00",
+      "area": "東京湾",
+      "note": "地点は書かず、地名の中の点にする例"
+    }
+  ]
+}

@@ -123,3 +123,33 @@ def rings_overlap(a: Sequence, b: Sequence) -> bool:
     if any(in_rings(b, p[0], p[1]) for r in a for p in r) or any(in_rings(a, p[0], p[1]) for r in b for p in r):
         return True
     return any(_cross(r[i - 1], r[i], s[j - 1], s[j]) for r in a for i in range(len(r)) for s in b for j in range(len(s)))
+
+
+def point_inside(rings: Sequence) -> Optional[tuple[float, float]]:
+    """
+    A point inside the shape (rings, even-odd; None without one), as QGIS's
+    point on surface finds it: in its largest polygon, the middle of the
+    widest piece of a level line through the polygon's middle (a line a
+    little off the middle when that one only touches it).
+    """
+    polygons = polygons_of(rings)
+    if not polygons:
+        return None
+    polygon = max(polygons, key=lambda p: abs(ring_area(p[0])) - sum(abs(ring_area(h)) for h in p[1:]))
+    w, s, e, n = _box(polygon)
+    for share in (0.5, 0.45, 0.55, 0.35, 0.65, 0.25, 0.75):
+        y = s + (n - s) * share
+        xs = []
+        for ring in polygon:
+            for i in range(len(ring)):
+                (x1, y1), (x2, y2) = ring[i - 1][:2], ring[i][:2]
+                if (y1 > y) != (y2 > y):
+                    xs.append(x1 + (y - y1) * (x2 - x1) / (y2 - y1))
+        xs.sort()
+        pieces = [(xs[i + 1] - xs[i], (xs[i] + xs[i + 1]) / 2) for i in range(0, len(xs) - 1, 2)]
+        if pieces:
+            width, x = max(pieces)
+            if width > 0:
+                return x, y
+    ring = polygon[0]
+    return (ring[0][0], ring[0][1]) if ring else None
