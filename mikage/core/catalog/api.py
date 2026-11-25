@@ -17,6 +17,10 @@ if TYPE_CHECKING:  # the door (core/door.py): each name is imported from its mod
     from .paths import folder_key, path_mappings_of, PathError, PathMapping, PathRewrite, resolve_path, rewrites_of
     from .query import CatalogSearch, time_text
     from .saved_areas import read_areas, write_areas
+    from .sensors import (
+        KINDS, kind_word, kinds_in, OPTICAL, pick_sensors, SAR, SensorPick, sensor_kind, sensor_list, sensors_named,
+        SEPARATOR as SENSOR_SEPARATOR, words_of as sensor_words_of,
+    )
     from .search import (
         catalog_info, CatalogLayerInfo, CatalogRecord, cell_text, Column, list_columns, listed_image, place_text,
         read_catalog_layer, record_of, records_by_ids, search_catalog, sensor_view_of, sensors_of, sort_records,
@@ -43,4 +47,6 @@ __all__ = [
     "records_by_ids", "replace_areas", "resolve_path", "rewrites_of", "saved_areas", "search_catalog", "sensor_view_of",
     "sensors_of", "similar_search", "SimilarTolerance", "sort_records", "thumbnail_address", "time_text", "WatchNotice",
     "WatchStore",
+    "KINDS", "kind_word", "kinds_in", "OPTICAL", "pick_sensors", "SAR", "SensorPick", "sensor_kind", "sensor_list", "sensors_named", "SENSOR_SEPARATOR",
+    "sensor_words_of",
 ]

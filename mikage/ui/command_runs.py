@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from qgis.PyQt.QtCore import QCoreApplication, QDate, QDateTime, QTime, QTimer
 
+from ..core.catalog.api import SENSOR_SEPARATOR
 from ..core.text_command import ALL, Reading, center_of, corners_of, extent_of, jst_bounds
 
 
@@ -151,15 +152,21 @@ def outage(dialog, r: Reading) -> str:
 # ---- 画像 (features/images.py) --------------------------------------------------------------------------
 
 def catalog(dock, r: Reading, place) -> str:
-    """画像カタログ: searched over the period and the place (its polygon; else the map's extent)."""
+    """
+    画像カタログ: searched over the period and the place (its polygon; else the map's extent), and the sensors 衛星・種別
+    names (features/command.py: the catalog's; none: every sensor, whatever the センサー box had).
+    """
     first, last = r.period or (None, None)
     start, end = (first.isoformat() if first else ""), (last.isoformat() if last else "")
     ring = None
     if place is not None and place.rings:
         ring = [list(p) for p in place.rings[0]] if place.kind == "範囲" else corners_of(place.rings)
-    dock.search_area_period(start, end, ring)
+    dock.search_area_period(start, end, ring, sensor=SENSOR_SEPARATOR.join(r.catalog_sensors))
     where = place.label if place is not None else tr("地図の表示範囲")
-    return tr("画像カタログ: {w}・{a}〜{b} を検索").format(w=where, a=start or tr("指定なし"), b=end or tr("指定なし"))
+    said = tr("画像カタログ: {w}・{a}〜{b}").format(w=where, a=start or tr("指定なし"), b=end or tr("指定なし"))
+    if r.catalog_sensors:
+        said += tr("・{s}（{n} センサー）").format(s="・".join(r.sensors), n=len(r.catalog_sensors))
+    return said + tr(" を検索")
 
 
 def watch(dock, place) -> str:

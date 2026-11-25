@@ -207,6 +207,7 @@ class CatalogDock(
         more.addRow(self.tr("システム登録日時"), self._period_row(self.system_from, self.system_to))
         self.sensor_box = QComboBox()
         self.sensor_box.setEditable(True)
+        self.sensor_box.setToolTip(self.tr("1 つ選ぶか入力（空はすべてのセンサー）。「、」で区切って複数（どれかのセンサーの画像）"))
         more.addRow(self.tr("センサー"), self.sensor_box)
         self.max_angle = QLineEdit()
         self.max_angle.setPlaceholderText(self.tr("上限（度）"))

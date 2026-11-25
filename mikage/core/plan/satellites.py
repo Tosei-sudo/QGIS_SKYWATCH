@@ -184,6 +184,9 @@ class SatelliteSpec:
     shotsPerPass: int = 0
     #: The outages that hit it (衛星の障害情報, core/plan/outages.py; set with outages.attach), whatever their time.
     outages: tuple = ()
+    #: Its kind as the catalog writes it (`fields.kind`: 「SAR」「光学」…; `sar` from it); None when not given
+    #: (画像カタログ's SAR・光学 then do not know it: core/catalog/sensors.py).
+    kind: Optional[str] = None
 
 
 def platform_key(sat: SatelliteSpec) -> str:
@@ -291,6 +294,7 @@ def satellite_of(attributes: dict, catalog: SatelliteCatalogConfig):
         mode=_text(get("mode")) or None,
         resolution=resolution,
         system=_text(get("system")) or None,
+        kind=_text(kind) or None,
         shotsPerPass=max(0, _js_round(num("shotsPerPass", defaults.get("shotsPerPass", 0)))),
     )
 
@@ -313,7 +317,7 @@ def satellites_from_text(text: str, maxOffNadir: float, minOffNadir: float, swat
             maxOffNadir=maxOffNadir, minOffNadir=minOffNadir, swath=swath, length=swath,
             scenesPerPass=max(1, _js_round(scenesPerPass)), minInterval=max(0, minInterval),
             maxPerDay=max(0, _js_round(maxPerDay)), leadTime=max(0, leadTime), series=series_of(name),
-            lookSide=lookSide, sar=sar, source="貼り付け",
+            lookSide=lookSide, sar=sar, source="貼り付け", kind="SAR" if sar else "光学",
         ))
         i += 2
     return found
@@ -330,11 +334,11 @@ def sample_satellites() -> list[SatelliteSpec]:
         SatelliteSpec(**{**base, "name": "サンプル光学衛星", "id": "SAMPLE-OPT",
                          "tle1": "1 90001U 26901A   26280.50000000  .00000100  00000-0  40000-4 0  9990",
                          "tle2": "2 90001  98.5700 350.5000 0001100  90.0000 270.0000 14.30820000    13",
-                         "maxOffNadir": 20, "swath": 30, "length": 30, "scenesPerPass": 1, "lookSide": "both", "sar": False}),
+                         "maxOffNadir": 20, "swath": 30, "length": 30, "scenesPerPass": 1, "lookSide": "both", "sar": False, "kind": "光学"}),
         SatelliteSpec(**{**base, "name": "サンプルSAR衛星", "id": "SAMPLE-SAR",
                          "tle1": "1 90002U 26902A   26280.50000000  .00000100  00000-0  40000-4 0  9992",
                          "tle2": "2 90002  98.1800 283.0000 0001300  90.0000 270.0000 14.59200000    16",
-                         "maxOffNadir": 45, "minOffNadir": 20, "swath": 50, "length": 50, "scenesPerPass": 1, "lookSide": "right", "sar": True}),
+                         "maxOffNadir": 45, "minOffNadir": 20, "swath": 50, "length": 50, "scenesPerPass": 1, "lookSide": "right", "sar": True, "kind": "SAR"}),
     ]
 
 
