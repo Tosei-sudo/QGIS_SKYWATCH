@@ -22,7 +22,7 @@ from qgis.core import (
 from ..core.ai.api import is_rejection
 from ..core.ai.api import class_of, footprint, kind_path, object_size
 from ..core.ai.api import Window
-from ..core.obs.api import Taxon, path_of, within
+from ..core.obs.api import Taxon, path_of, quantity_of, within
 from .ai_io import Grid
 
 WGS84 = QgsCoordinateReferenceSystem("EPSG:4326")
@@ -75,9 +75,14 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
     box from the record's length and heading, else the class' 全長・全幅, else
     `default_size` metres; and the checked areas that cover every class
     trained, less the parts of their image that could not be seen (不可範囲:
-    what is under a cloud is neither a label nor background).
+    what is under a cloud is neither a label nor background). A record of
+    several things (数量 2 or more: 車両 ×30, 2026-11-24) is no label (one box
+    cannot be 30 cars), and a checked area holding one is no background (the
+    29 others are there unrecorded).
     """
     out = Gathered()
+    #: Where the records of several things of a class trained are, by image.
+    groups: dict[str, list[QgsPointXY]] = {}
     for o in records:
         if o.deleted_at is not None:
             continue
@@ -90,6 +95,10 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         cls = class_of(o.kind, taxonomy, depth, within_kinds)
         if not cls:
             out.skip("種別なし" if not o.kind else "対象外の種別")
+            continue
+        if quantity_of(o) >= 2:
+            out.skip("数量 2 以上の記録（まとめて記録）")
+            groups.setdefault(o.image_id, []).append(QgsPointXY(o.lon, o.lat))
             continue
         size = object_size(kind_path(o.kind, taxonomy), taxonomy, o.length, o.heading, default_size, o.width)
         ring = [QgsPointXY(x, y) for x, y in footprint(o.lon, o.lat, size)]
@@ -114,10 +123,15 @@ def labels_from_book(records, areas, taxonomy: Sequence[Taxon], depth: int = 0, 
         if shape.isEmpty():
             out.skip("不可範囲の中の確認範囲")
             continue
+        if any(shape.contains(p) for p in groups.get(a.image_id, [])):
+            out.skip("数量 2 以上の記録がある確認範囲")
+            continue
         out.areas.append(Area(shape, WGS84, a.image_id or None, is_rejection(a.note)))
     return out
 
 
+#: Fields that may say how many things a feature stands for (観測記録's 数量, as its layer and the Esri table write it).
+QUANTITY_FIELDS = ("quantity", "QUANTITY", "数量")
 #: Fields that may say which image a feature belongs to (as AI layers and observation layers write it).
 IMAGE_FIELDS = ("image_id", "IMAGE_ID")
 
@@ -137,6 +151,7 @@ def labels_from_features(features, fields, crs: QgsCoordinateReferenceSystem, tr
     if index < 0:
         raise ValueError(f"クラスのフィールド「{class_field}」なし")
     image_index = next((fields.indexFromName(n) for n in IMAGE_FIELDS if fields.indexFromName(n) >= 0), -1)
+    many_index = next((fields.indexFromName(n) for n in QUANTITY_FIELDS if fields.indexFromName(n) >= 0), -1)
     to_wgs = QgsCoordinateTransform(crs, WGS84, transform_context)
     for f in features:
         g = f.geometry()
@@ -149,6 +164,11 @@ def labels_from_features(features, fields, crs: QgsCoordinateReferenceSystem, tr
         cls = class_of(str(value) if value is not None else "", taxonomy, depth, within_kinds)
         if not cls:
             out.skip("クラスなし" if value in (None, "") else "対象外のクラス")
+            continue
+        many = f.attribute(many_index) if many_index >= 0 else None
+        if isinstance(many, (int, float)) and not isinstance(many, bool) and many >= 2:
+            # 観測記録 as a layer: a record of several things is no label (labels_from_book).
+            out.skip("数量 2 以上の記録（まとめて記録）")
             continue
         image = f.attribute(image_index) if image_index >= 0 else None
         image = str(image) if image not in (None, "") and not (hasattr(image, "isNull") and image.isNull()) else None

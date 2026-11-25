@@ -6,7 +6,7 @@ request or record has them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence
 
 from qgis.PyQt.QtCore import QStringListModel, Qt
 from qgis.PyQt.QtWidgets import (
@@ -31,6 +31,8 @@ class BulkField:
     tip: str = ""
     #: A further tick shown under the item (key, label), set only when the item is.
     extra: Optional[tuple] = None
+    #: What is wrong with the text typed ('' when it can be set): the dialog stays open and says it (数量: a whole number).
+    check: Optional[Callable[[str], str]] = None
 
 
 class _Priority(QWidget):
@@ -143,4 +145,11 @@ class BulkEditDialog(QDialog):
         if not any(t.isChecked() for t in self.ticks.values()):
             self.message.setText(self.tr("変更する項目にチェック"))
             return
+        for f in self.fields:
+            w = self.inputs[f.key]
+            wrong = f.check(w.text()) if f.check and self.ticks[f.key].isChecked() and isinstance(w, QLineEdit) else ""
+            if wrong:
+                self.message.setText(wrong)
+                w.setFocus()
+                return
         self.accept()

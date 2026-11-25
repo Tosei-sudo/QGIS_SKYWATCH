@@ -316,7 +316,7 @@ def _form_values(o: Observation) -> dict[str, str]:
     def text(v) -> str:
         return "" if v is None else str(v)
     return {"object": o.object_name, "kind": o.kind, "activity": o.activity, "note": o.note, "confidence": o.confidence,
-            "length": text(o.length), "heading": text(o.heading), "width": text(o.width)}
+            "length": text(o.length), "heading": text(o.heading), "width": text(o.width), "quantity": text(o.quantity)}
 
 
 class OfflineAreaStore(_Waiting):

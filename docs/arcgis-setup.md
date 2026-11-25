@@ -235,6 +235,15 @@ COMMIT;
 - テーブルをバージョン対応にした・アーカイブを付けたときは SQL で直接更新しない。ArcGIS Pro で `TBL_OBSERVATION` に `TBL_IMAGE_CATALOG` を `IMAGE_ID` で「テーブル結合」し、`SATELLITE` が空の行を選んでから「フィールド演算」で `SATELLITE` = `!TBL_IMAGE_CATALOG.SENSOR!`（確認範囲も同じ）
 - 衛星名の書き方は画像カタログのセンサーのまま（プラグインもカタログの書き方にそろえる）
 
+## 観測記録に数量の列を足す
+
+観測記録の `QUANTITY`（数量、`Integer`、2026-11-24 に追加）は、プラグインを新しくして `create_tables.py` をもう一度実行すると `TBL_OBSERVATION` に足される（参照で公開しているなら続けて `publish_service.py publish` で上書き公開）。ArcGIS Pro で足すときは、`TBL_OBSERVATION` に「フィールドの追加」で名前 `QUANTITY`・エイリアス「数量」・型「Long（長整数）」・NULL を許可。
+
+- **前からある記録は空のままでよい**（空は 1 として扱う。埋める SQL は要らない）。プラグインが入れるのは、数量 2 以上の記録だけ（1 つずつの記録・消失・不可は空）
+- 列を足すまで、プラグインのフォームに「数量」は出ない（点検は「注意」）。足したら、開いている人は画像を替えるか「最新を取得」で出る
+- ダッシュボードのビュー（`tools/arcgis/dashboard_views_oracle.sql`）は `QUANTITY` を読むので、列を足してからビューを作り直す（[ダッシュボード](arcgis-dashboards.md)）
+- 台数・隻数を ArcGIS 側で数えるときは、件数（`COUNT(*)`）でなく `SUM(NVL(QUANTITY, 1))`（消失・不可の記録は除く）。ビュー `VW_OBS_RECORD.QUANTITY` は消失・不可を 0 にしてあるので、そのまま合計すればよい
+
 ## うまくいかないとき
 
 | 出たこと | すること |

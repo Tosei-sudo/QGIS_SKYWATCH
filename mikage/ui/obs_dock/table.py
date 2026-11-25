@@ -11,7 +11,7 @@ from qgis.PyQt.QtCore import QItemSelection, QItemSelectionModel, Qt
 from qgis.PyQt.QtGui import QColor
 from qgis.PyQt.QtWidgets import QApplication, QHBoxLayout, QTableWidgetItem, QToolButton, QWidget
 
-from ...core.obs.api import Observation, class_by_name, find, kind_of, path_of
+from ...core.obs.api import Observation, class_by_name, find, kind_of, path_of, quantity_of, read_quantity
 from ..text_assist_ui import SummaryDialog
 from ..obs_overlay import UNSEEN_COLOR
 from .common import REPORTED_ROW, WAITING_ROW
@@ -222,6 +222,11 @@ class TablePart:
                       tip=self.tr("消失の記録は活動なしのまま")),
             BulkField("confidence", self.tr("確度"), choices=["", *(c.label for c in book.confidences())], value=first.confidence),
         ]
+        if book.keeps_quantity():
+            many = quantity_of(first)
+            fields.append(BulkField("quantity", self.tr("数量"), value=str(many) if many >= 2 else "",
+                                    tip=self.tr("この記録 1 件が表すモノの数（空欄・1 で 1 つずつに戻す）。消失・不可の記録は数量なしのまま"),
+                                    check=self._quantity_problem))
         what = self.tr("選んだ記録 {n} 件（モノ {m} 件）").format(n=len(records), m=things)
         dialog = BulkEditDialog(self.tr("観測記録の一括編集"), what, fields, self)
         ids = [o.id for o in records]
@@ -232,10 +237,24 @@ class TablePart:
 
     def apply_bulk(self, ids: list[str], values: dict) -> Any:
         """Sets the values on the records (in a task for an Esri store); what went through and what not is told."""
-        values = {k: v for k, v in values.items() if k in ("kind", "activity", "confidence")}
+        values = {k: v for k, v in values.items() if k in ("kind", "activity", "confidence", "quantity")}
+        if "quantity" in values:
+            try:
+                values["quantity"] = read_quantity(values["quantity"]) or 1
+            except ValueError:
+                self.say(self._quantity_problem(values["quantity"]))
+                return None
         if not values:
             return None
         return self.do(self.tr("観測記録の一括編集"), lambda book: book.update_many(ids, **values), watch=True)
+
+    def _quantity_problem(self, text: str) -> str:
+        """What is wrong with a 数量 typed ('' when it reads)."""
+        try:
+            read_quantity(text)
+            return ""
+        except ValueError:
+            return self.tr("数量は 1 以上の整数で入力（「{text}」は読めない）").format(text=text.strip())
 
     def _small(self, *buttons: tuple) -> QWidget:
         box = QWidget()

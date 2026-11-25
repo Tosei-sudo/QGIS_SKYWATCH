@@ -21,7 +21,7 @@ from ..gpkg import AREAS, OBSERVATIONS, PHOTOS, TAXONOMY, GeoPackage, datetime_m
 from ..util import is_number, js_string, ms_of
 from .areas import AreaStoreConfig, CheckedArea
 from .flows import now_ms, time_key
-from .model import Observation, ObservationStoreConfig
+from .model import Observation, ObservationStoreConfig, kept_quantity
 from .scope import RecordQuery, envelope, merged, time_condition
 from .taxonomy import (
     FIELDS_ROW, SpecField, Taxon, TaxonomyTableConfig, kind_of, normalize, path_of, spec_fields_of, specs_of, taxa_from_json,
@@ -98,6 +98,21 @@ def satellite_supported(store: Any) -> bool:
     return bool(can()) if callable(can) else False
 
 
+def quantity_supported(store: Any) -> bool:
+    """
+    Whether a store keeps 数量 (its layer has QUANTITY, 2026-11-24): the
+    local ones do; an Esri one once its layer has been read with it (no
+    question is asked here), else not.
+    """
+    can = getattr(store, "keeps_quantity", None)
+    return bool(can()) if callable(can) else False
+
+
+def _quantity_of(v: Any) -> Optional[int]:
+    """QUANTITY as read: 2 or more, else None (empty, 1, or not a number: one thing)."""
+    return kept_quantity(_number_of(v))
+
+
 def _marked(items: list, now: Optional[int]) -> list:
     now = now_ms() if now is None else now
     return [replace(x, deleted_at=now, updated_at=now) for x in items]
@@ -132,7 +147,7 @@ class LocalObservationStore:
                 deleted_at=datetime_ms(r.get("DELETED_AT")), length=r.get("LENGTH_M"), heading=r.get("HEADING"), width=r.get("WIDTH_M"),
                 confidence=r.get("CONFIDENCE") or "", recorded_by=r.get("OBSERVER") or "", updated_by=r.get("UPDATED_BY") or "",
                 pixel_x=r.get("PIXEL_X"), pixel_y=r.get("PIXEL_Y"), image_file=r.get("IMAGE_FILE") or "",
-                satellite=r.get("SATELLITE") or "",
+                satellite=r.get("SATELLITE") or "", quantity=_quantity_of(r.get("QUANTITY")) if not unseen and r.get("PRESENT") != 0 else None,
             ))
         return out
 
@@ -142,7 +157,7 @@ class LocalObservationStore:
             "IMAGE_NAME": o.image_name, "IMAGE_TIME": datetime_text(o.image_time), "KIND": o.kind, "ACTIVITY": o.activity,
             "PRESENT": present_value(o), "UNSEEN_REASON": o.unseen or None, "CONFIDENCE": o.confidence, "LENGTH_M": o.length, "HEADING": o.heading, "WIDTH_M": o.width,
             "PIXEL_X": o.pixel_x, "PIXEL_Y": o.pixel_y, "IMAGE_FILE": o.image_file or None, "SATELLITE": o.satellite or None,
-            "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
+            "QUANTITY": o.quantity, "NOTE": o.note, "OBSERVER": o.recorded_by, "UPDATED_BY": o.updated_by, "CREATED_AT": datetime_text(o.created_at),
             "UPDATED_AT": datetime_text(o.updated_at), "DELETED_AT": datetime_text(o.deleted_at), "geom": encode_point(o.lon, o.lat),
         } for o in records])
 
@@ -155,6 +170,9 @@ class LocalObservationStore:
         return True
 
     def keeps_satellite(self) -> bool:
+        return True
+
+    def keeps_quantity(self) -> bool:
         return True
 
     def clear(self, deleted_only: bool = False) -> int:
@@ -393,7 +411,7 @@ class EsriObservationStore:
             f["objectId"]: o.object_id, f["objectName"]: o.object_name, f["kind"]: o.kind, f["activity"]: o.activity,
             f["present"]: None if o.unseen else o.present, f["note"]: o.note, f["length"]: o.length, f["heading"]: o.heading, f["width"]: o.width,
             f["pixelX"]: o.pixel_x, f["pixelY"]: o.pixel_y, f["imageFile"]: o.image_file or None, f["satellite"]: o.satellite or None,
-            f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
+            f["quantity"]: o.quantity, f["confidence"]: o.confidence or "", f["recordedBy"]: o.recorded_by or "", f["updatedBy"]: o.updated_by or "",
             f["created"]: o.created_at, f["updated"]: o.updated_at, f["deleted"]: o.deleted_at, f["unseen"]: o.unseen or None,
         }
         if o.unseen and f["unseen"] not in types:
@@ -411,6 +429,10 @@ class EsriObservationStore:
     def keeps_satellite(self) -> bool:
         """Whether the layer (as read) has the 衛星名 attribute."""
         return self._layer.has(self.config.fields["satellite"])
+
+    def keeps_quantity(self) -> bool:
+        """Whether the layer (as read) has the 数量 attribute."""
+        return self._layer.has(self.config.fields["quantity"])
 
     def _record_of(self, feature: dict[str, Any], oid: str) -> Optional[Observation]:
         f = self.config.fields
@@ -434,7 +456,7 @@ class EsriObservationStore:
             length=_number_of(a.get(f["length"])), heading=_number_of(a.get(f["heading"])),
             width=_number_of(a.get(f["width"])), confidence=_text(a.get(f["confidence"])),
             pixel_x=_number_of(a.get(f["pixelX"])), pixel_y=_number_of(a.get(f["pixelY"])), image_file=_text(a.get(f["imageFile"])),
-            satellite=_text(a.get(f["satellite"])),
+            satellite=_text(a.get(f["satellite"])), quantity=_quantity_of(a.get(f["quantity"])) if not unseen else None,
             recorded_by=_text(a.get(f["recordedBy"])), updated_by=_text(a.get(f["updatedBy"])), lon=float(x), lat=float(y),
             created_at=created, updated_at=ms_of(a.get(f["updated"])) or created, deleted_at=ms_of(a.get(f["deleted"])),
         )
@@ -442,7 +464,8 @@ class EsriObservationStore:
     def as_kept(self, records: list[Observation]) -> list[Observation]:
         """
         The records as the layer keeps them: the values of the optional
-        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19, or SATELLITE, 2026-11-20),
+        attributes it does not have left out (a layer made before PIXEL_X・PIXEL_Y・IMAGE_FILE, 2026-11-19, SATELLITE, 2026-11-20,
+        or QUANTITY, 2026-11-24),
         so a record read back is the one saved (not 「ほかの人の記録」 changed since).
         """
         types = self._layer.known_types()
@@ -451,7 +474,8 @@ class EsriObservationStore:
         f = self.config.fields
         blank = {name: value for role, name, value in (
             ("length", "length", None), ("heading", "heading", None), ("width", "width", None), ("pixelX", "pixel_x", None),
-            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("satellite", "satellite", ""), ("confidence", "confidence", ""),
+            ("pixelY", "pixel_y", None), ("imageFile", "image_file", ""), ("satellite", "satellite", ""), ("quantity", "quantity", None),
+            ("confidence", "confidence", ""),
         ) if f[role] not in types}
         return [replace(o, **blank) for o in records] if blank else records
 

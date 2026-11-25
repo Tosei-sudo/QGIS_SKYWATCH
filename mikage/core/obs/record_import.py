@@ -27,7 +27,7 @@ from .. import errors
 from .flows import flows, living, now_ms
 from .geo import get_distance
 from .image_time import parse_time
-from .model import Observation, new_object_id, new_observation_id
+from .model import Observation, kept_quantity, new_object_id, new_observation_id, read_quantity
 from .taxonomy import find, kind_of, name_label_of, path_of
 
 #: The items a column can be: key → (label, names a column is guessed by (any case)).
@@ -45,6 +45,7 @@ TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
     ("length", "長さ（m）", ("長さ（m）", "長さ", "LENGTH_M", "length", "length_m")),
     ("heading", "向き（度）", ("向き（度）", "向き", "HEADING_DEG", "HEADING", "heading")),
     ("width", "幅（m）", ("幅（m）", "幅", "WIDTH_M", "width", "width_m")),
+    ("quantity", "数量", ("数量", "QUANTITY", "quantity", "count", "台数", "個数", "数")),
     ("lon", "経度（点がないとき）", ("経度", "LON", "lon", "lng", "longitude", "x")),
     ("lat", "緯度（点がないとき）", ("緯度", "LAT", "lat", "latitude", "y")),
 ]
@@ -244,6 +245,12 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
         if present is None:
             problems.append(f"有無が読めない（{_text(_get(row, mapping, 'present'))}）")
             present = True
+        try:
+            # 数量: 2 or more is a group; none for 消失.
+            quantity = kept_quantity(read_quantity(_text(_get(row, mapping, "quantity"))), present)
+        except ValueError:
+            problems.append(f"数量が 1 以上の整数でない（{_text(_get(row, mapping, 'quantity'))}）")
+            quantity = None
         confidence = _text(_get(row, mapping, "confidence"))
         if confidence and levels and confidence not in levels:
             problems.append(f"確度「{confidence}」なし（{'・'.join(levels)}）")
@@ -283,6 +290,8 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
             for key in ("length", "heading", "width"):
                 if mapping.get(key) and not _same_number(numbers[key], getattr(was, key)):
                     wanted[key] = numbers[key]
+            if mapping.get("quantity") and quantity != kept_quantity(was.quantity, present):
+                wanted["quantity"] = quantity
             if lon is not None and lat is not None and get_distance([was.lon, was.lat], [lon, lat]) > 0.01:
                 wanted["lon"], wanted["lat"] = lon, lat
             if mapping.get("object") and name and name != was.object_name:
@@ -342,6 +351,7 @@ def plan(rows: Iterable[SourceRow], mapping: dict[str, str], records: Sequence[O
             id=new_observation_id(), image_id=image_id, image_name=image_name, image_time=image_time, object_id=object_id,
             object_name=object_name, kind=kind, activity=activity, present=present, note=note, lon=lon, lat=lat, created_at=now,
             updated_at=now, deleted_at=None, length=numbers["length"], heading=numbers["heading"], width=numbers["width"], confidence=confidence,
+            quantity=quantity,
         )
         planned_new.append(record)
         out.append(Planned(row.number, NEW, "", warnings, record))

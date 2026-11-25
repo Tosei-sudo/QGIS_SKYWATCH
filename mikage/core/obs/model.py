@@ -13,6 +13,7 @@ import json
 import math
 import re
 import secrets
+import unicodedata
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
@@ -72,6 +73,10 @@ class Observation:
     #: as the file's metadata or name says or as typed for the image (tsudo 2026-11-20: images outside the catalog have
     #: no catalog row to look it up by); '' when not known (an older record, an image that does not say).
     satellite: str = ""
+    #: 数量: how many things of its kind the one record stands for (車両 ×30: a group not placed one by one; tsudo
+    #: 2026-11-24). None stands for 1 (a record of one thing, an older record); never set below 2, nor on a 消失 or
+    #: 不可 record (quantity_of).
+    quantity: Optional[int] = None
 
 
 #: The record's attributes by role, the names used when the settings do not map them.
@@ -94,6 +99,8 @@ DEFAULT_OBSERVATION_FIELDS: dict[str, str] = {
     "imageFile": "IMAGE_FILE",
     #: 衛星名 (2026-11-20): optional, like PIXEL_X; empty for older records.
     "satellite": "SATELLITE",
+    #: 数量 (2026-11-24): optional, like SATELLITE; empty stands for 1 (older records too).
+    "quantity": "QUANTITY",
     "confidence": "CONFIDENCE",
     "recordedBy": "OBSERVER",
     "updatedBy": "UPDATED_BY",
@@ -134,6 +141,47 @@ DEFAULT_ACTIVITIES = ["停泊", "航行", "駐機", "移動", "工事", "集積"
 DEFAULT_UNSEEN_REASONS = ["雲", "霞", "影", "画像の欠け", "その他"]
 #: The reason written when none is given.
 UNSEEN = "不可"
+
+
+#: What may follow the number of a 数量 typed (30 台, ×30): a counter word or the times sign.
+_COUNTER = re.compile(r"^(?:[×xX*]\s*)?(\d+)\s*(?:台|隻|機|両|輌|個|基|棟|人|名|本|枚|匹|頭|羽|件|つ|ヶ|箇|か所|カ所)?$")
+
+
+def read_quantity(text: str) -> Optional[int]:
+    """
+    A 数量 typed in the form: a whole number of 1 or more (full-width digits,
+    a thousands comma, 「30 台」 and 「×30」 are read too). None when empty;
+    raises ValueError for anything else (0, 2.5, a word): 消失 says none is
+    left, and a group is counted in whole things.
+    """
+    t = unicodedata.normalize("NFKC", text or "").strip()
+    if not t:
+        return None
+    m = _COUNTER.match(re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", t))
+    if not m or int(m.group(1)) < 1:
+        raise ValueError(text)
+    return int(m.group(1))
+
+
+def kept_quantity(n: Any, present: bool = True) -> Optional[int]:
+    """A 数量 as a record keeps it: 2 or more (a whole number), else None (one thing; 消失・不可 keep none)."""
+    if not present or not is_number(n) or isinstance(n, bool):
+        return None
+    whole = int(round(float(n)))
+    return whole if whole >= 2 else None
+
+
+def quantity_of(o: Any) -> int:
+    """How many things a record stands for: its 数量, 1 when none is given; 0 for 消失 and 不可 (none seen)."""
+    if not getattr(o, "present", True) or getattr(o, "unseen", ""):
+        return 0
+    return kept_quantity(getattr(o, "quantity", None)) or 1
+
+
+def quantity_mark(o: Any) -> str:
+    """「×30」 after a record's name when it stands for several things, '' for one."""
+    n = quantity_of(o)
+    return f"×{n}" if n >= 2 else ""
 
 
 def unseen_label(reason: str) -> str:
